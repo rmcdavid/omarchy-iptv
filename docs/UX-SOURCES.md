@@ -208,7 +208,34 @@ record, the field's guide URL is not on it, and the waiting value is
 attached as before. Observed through the harness by key-scenario A1 (empty
 field) and A2 (a field with its own guide URL; red on `--baseline
 lane-key-w2`), lane A on lane-key-x1, with two saved sources and none
-active; the add into an empty list is node only.
+active; the add into an empty list is node only. [Round 9: the form-wins
+rule above is OVERTURNED, and the open case is ruled; the next paragraph.]
+
+**A guide URL held for the next source meets the `EPG` field (round 9,
+2026-10-12; D-SINK-19 R19b and R19c, overturning R18d).** A guide URL set
+from a terminal while no source was active no longer waits on the bar
+entry: it is held in `state.json` and taken off the entry (5.5). When this
+add makes a source active, the guide URL the user set LAST wins. The `EPG`
+field counts from the moment the form is SUBMITTED (`Enter`), not from the
+moment the probe finishes: so a terminal value set before the submit loses
+to a non-empty field, and one set while `Fetching` is on screen -- after
+the submit -- wins over it. With the field empty the held value is attached
+to the new record, as before. The held value is dropped either way, and the
+shell's journal says which happened, naming the setting and the source's
+short code and never a URL: `a pending guide URL (epgUrl) lands on source
+<key>` or `a pending guide URL (epgUrl) is superseded: source <key> keeps
+the one set later`. Nothing on screen changes in any case: the form never
+shows the held value and the transient is the usual `Added ...`.
+S5's duplicate branch is ruled the same way (lane A's OQ-X3): if the same
+playlist was added from the terminal while this add was probed, the commit
+keeps that record, and the field's guide URL lands on it if it was set
+later than the guide URL that record already holds. Round 8 let the field
+win whatever the order, so the later terminal value ended on no record and
+off the entry (the eighth review's P1-B, live). Observed through the
+harness by key-scenario Q1 (the terminal value set during the probe wins;
+red on `--baseline lane-key-y0`), Q2 (set before the submit, the field
+wins) and A1/A2 as re-read (lane A, lane-key-y1, two saved sources and none
+active); the duplicate branch and the add into an empty list are node only.
 
 ### 1.6 Editing (S4, S6)
 
@@ -228,6 +255,18 @@ when none). No Xtream link row when editing.
 - Xtream-built sources are edited through this same form: the built URLs
   show masked; there is no password field any more (S6). To change
   credentials, reveal and edit the URL, or add a new Xtream login.
+- A changed `EPG` field and a guide URL held for the next source (round 9,
+  R19c). Saving an edit that CHANGES the guide URL stamps it with that
+  moment; an edit that sends the same guide URL back (a label-only edit,
+  or re-typing the same URL) stamps nothing. If a guide URL set from a
+  terminal is held while no source is active, and the user then edits a
+  saved source's guide URL and switches to it, the edit is the later input
+  and stands; the held value is dropped. A terminal value set AFTER the edit
+  wins at the switch instead. Round 8 and earlier let any held value
+  replace the edited one at the switch (the eighth review's P2). Nothing on
+  this screen changes either way: the transient is `Saved`. Observed
+  through the harness by key-scenario V1 (red on `--baseline
+  lane-key-y0`); the other order is node only.
 
 ### 1.7 Removing (S7)
 
@@ -272,7 +311,12 @@ R18d): a guide URL waiting on the bar entry is superseded by it exactly as
 by a typed `EPG` field (1.5), because the user's login is the later
 explicit input. Pinned in node (`R18d (lag host) OQ-W3, the Xtream add`
 and its echo-host twin); no live segment drives the Xtream form with a
-value waiting.
+value waiting. [Round 9, R19c: the built URL is stamped at the login's
+SUBMIT, and it wins over a held terminal value only when that value was set
+before the submit, exactly as a typed field does (1.5). The node pins are
+renamed `R18d / R19c (... host) OQ-W3, the Xtream add: the xmltv.php URL
+the form derived, submitted after the CLI value, ...`; still no live
+segment.]
 
 ### 1.9 Modes and transitions
 
@@ -556,7 +600,14 @@ source becomes active. "Converted" is true eventually; "not kept" is false
 until then, and the README now says it waits on the entry. Whether the
 caption should say so (for example "kept on the entry until a source is
 active") is a copy decision for the lead and the Guide's owner
-(`Guide.qml` `unconfiguredEpg`); nothing here changes it.
+(`Guide.qml` `unconfiguredEpg`); nothing here changes it. [Round 9, R19b:
+the conflict is resolved by the code rather than the copy. A guide URL set
+in this state is now held in the plugin's own `state.json` and taken off
+the entry once that write lands, so `not kept in shell.json` is true after
+one write, not only once a source is active. It is still on the entry for
+that one write's span, and for longer only when the state write fails
+(the value is then left on the entry as its only copy, R13). No copy
+change is requested.]
 
 #### 3.1.2 After paste (both URLs masked)
 
@@ -1327,7 +1378,11 @@ makes a source active attaches the waiting guide URL to it in the same turn
 form, when they differ (the second is open as lane A's OQ-W3) [round 8,
 R18d: ruled the other way -- a guide URL the add form carries wins and the
 waiting value is superseded, 1.5 and 1.8; with the field empty the waiting
-value is attached as described here]. The only
+value is attached as described here] [round 9, R19b and R19c: the value no
+longer waits on the bar entry but in `state.json`, off the entry, and at
+the move the guide URL the user set LAST wins -- the held value, or the
+record's own as set by the add form at submit or by the edit form; 1.5 and
+1.6]. The only
 trace is the shell's journal: `the bar entry keeps an input no source has
 adopted yet (epgUrl)`, the key name and never the value. Observed through
 the harness by key-scenario U1-U7 (lane A, lane-key-w1, 2026-10-12; red on
@@ -1342,6 +1397,30 @@ repeats -- on the round-7 build the plugin handed the lagging host the same
 entry about 3,000 times a second in that state, with nothing on screen to
 say so
 (R18b; key-scenario K).
+
+**Setting the same value again (round 9, R19a).** `g` after an `omarchy
+bar set ... showLogos true` turns logos off, every time; a mistyped
+credentialed `playlistUrl` set again from a terminal is removed again; a
+guide URL set again is taken off the entry again. On the round-8 build,
+on today's Omarchy (the host that publishes one write behind), an `omarchy
+bar set` that put the entry back exactly as the plugin had last seen it
+made the plugin skip its next write: the footer said `Logos off` while
+logos stayed on and were fetched, also after a restart, and a re-set
+credential stayed in `shell.json` for the rest of the session (the eighth
+review, both lenses, live). Nothing new is on screen; the screen is now
+true. Observed through the harness by key-scenario Y1 (logos), Y2 (the
+refused credential) and Y3 (a guide URL set twice, then edited in the app,
+the edit standing after a restart), each red on `--baseline lane-key-y0`
+(lane A, lane-key-y1).
+
+**A guide URL whose save failed, then an edit (round 9, R19d; D-SRC-18).**
+When the state write that would adopt a terminal guide URL fails, the
+value is left on the bar entry (R13) and the shell's journal says
+`state.json could not be written`. If the user then changes that source's
+guide URL in the edit form and that save lands, the older terminal value is
+taken off the entry once it has, so the next shell start does not put it
+back over the edit; before round 9 it did. Nothing on screen changes. Observed through
+the harness by key-scenario H1 (red on `--baseline lane-key-y0`).
 
 ### 5.6 Default label and duplicates (S4, S5)
 

@@ -556,7 +556,37 @@ lane-key-x2), python 1057, qml 78, `qa-lib-test.sh` 443 / 0. The live half
 is key-scenario segments K (the loop window on both hosts), Z (whitespace)
 and A (the in-app add through `ipc addSource`): 79 / 0 forward on 78
 lettered checks, 73 / 6 over `--baseline lane-key-w2` (K1, K3, Z1, Z2, Z3,
-A2), lane A's transcripts under the scenario's own nested cage.
+A2), lane A's transcripts under the scenario's own nested cage. Round 9
+(lane-key-y1 690a888, 2026-10-12, on the chain as it landed on the split
+model; lead ruling R19 after the eighth review found R18's write skip
+coming back after a publish A -> B -> A on the lagging host, and R18d
+superseding a CLI `epgUrl` set after the add form was submitted -- neither
+visible to any check, because no check re-set an identical value and the
+oracle's supersede exemption compared the time of the supersede, not of
+the inputs) adds unit pins for the guide URL held in the state
+(`Model.pendingEpgOf`, `Model.parseState` and `Model.cloneState` carrying
+it), for the one by-time comparison (`Model.epgByTime`,
+`Model.applyPendingEpg`, the add and edit stamps), for the guide URL in
+force (`Model.activeEpgUrlOf`, the a12 read lifted out of `Service.qml`
+under rule 12) and for the owed mirror (`Model.owedMirrorAction`,
+D-SRC-18); service-order driver cases under both host shapes for A -> B ->
+A on the logo, refused and EPG routes, the probe race in both orders, the
+edit route in both orders, the S5 `known` branch three ways, a restart
+between the input and the move in both orders, the re-set not re-stamped,
+and D-SRC-18; two structural pins; an input audit that counts the state's
+held guide URL as held and a supersession only by a LATER time; and the
+`adopt` fixture 25 -> 32 -- 38 `ok   R19` lines, SRC-MIG-29 to SRC-MIG-32.
+Seen red by lane A: the same test files over lane-key-y0's code read `2266
+checks, 52 failure(s)`; sixteen one-decision mutations, fifteen red (1 to
+41 checks) and one argued equivalent (the held clause in
+`Model.retiredInputsToKeep`, 0); the 308258f fix's own pin 3 red before it.
+Counts on lane-key-y1: node 2268 / 0 (read again by lane C on
+lane-key-y2), python 1135, qml 78, `qa-lib-test.sh` 454 / 0. The live half
+is key-scenario segments Y (A -> B -> A), Q (the probe race), V (the edit
+route) and H (D-SRC-18 at the sink), with U, K and A re-read for the held
+guide URL: 86 / 0 forward on 85 lettered checks, 74 / 12 over `--baseline
+lane-key-y0` (U1, U2, U5, K1, K2, K3, Y1, Y2, Y3, Q1, V1, H1), lane A's
+transcripts under the scenario's own nested cage.
 
 ## 3. Security test cases (ARCHITECTURE.md section 8, PLAN gate G4)
 

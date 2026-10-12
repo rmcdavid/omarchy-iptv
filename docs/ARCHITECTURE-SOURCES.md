@@ -128,10 +128,12 @@ under ~/.config or /usr/share/omarchy was modified.
 | `favorites`, `recents`, `lastPlayed` | unchanged | Exactly the v1 shapes (ARCHITECTURE.md section 5). |
 | `hiddenGroups` | array of strings, max 200 | M3-01 (0.9.0). Group names, trimmed, de-duplicated, first occurrence wins; additive and optional like `savedSearches` and `session`, no version bump. Read by `Model.hiddenGroupList` and `normalize_hidden_groups` against one fixture. Taught to all three whitelists (`parseState`, `cloneState`, `normalize_state`) on the day it was added. |
 | `activeKey` | string | D-SINK-19 (2026-10-09; built 2026-10-11). The key of the active source, matching the `key` rule below; **this file is where the active source is NAMED** (SR35), and `Model.activeKeyOf` reads it instead of matching a URL against the records. Additive and optional at version 2 exactly as `hiddenGroups` was: a file without it reads as no active source, an older build drops it on its next save, `Model.STATE_VERSION` stays **2**, and it is taught to all three whitelists (`Model.parseState`, `Model.cloneState`, `normalize_state`) through a type test, not `str()` -- the shared fixture `tests/fixtures/active-key.json` (sections `parse`, 18 cases, and `remove`, 5, run by BOTH suites; `resolve` 6, `adopt` 23 and `order` 8 by node) found `str()` coercing the number `12345678` into a valid-looking key on one side only. A value naming no record in `sources[]` resolves to `""` on every read and is CLEARED in the file by `Model.removeSource` and by `Model.adoptActiveSource` step 4, never left as a stale pointer (R3). |
+| `pendingEpg` | object `{ url, seenAt }`, optional | D-SINK-19 round 9 (R19b, 2026-10-12; lane-key-y1 690a888). A guide URL input -- `omarchy bar set ... epgUrl` -- that arrived while NO source was active, HELD here, in this 0600 file, rather than on the bar entry in `shell.json`, where R12 had kept it for as long as no source existed. `url` is the normalized guide URL, validated as a CLI EPG value (a value that does not validate, or is empty, reads as nothing pending: `Model.pendingEpgRecord`); `seenAt` is when the service first saw the input, in MILLISECONDS (`Date.now()`), which R19c compares with a record's `epgSetAt`. ABSENT, not null, when nothing is pending, so a state with nothing pending serializes exactly as it did before R19; additive at version 2 on the `hiddenGroups` / `activeKey` precedent, no version bump. A later input replaces an earlier one, and the next active move clears it whichever value wins (`Model.applyPendingEpg`). Read through `Model.pendingEpgOf`, written through `Model.withPendingEpg`, and taught to `Model.parseState` and `Model.cloneState`. **NOT taught to the helper's `normalize_state`**, the third whitelist, which rebuilds the file from the keys it knows: any helper write of the file (`state favorite add|remove`, `state clear-recents`, the `state source` verbs, the one-time id remap) erases it, and the input then exists nowhere -- the `savedSearches` lesson again. Open, with no id yet (lane A's report, 2026-10-12; `bin/` is another lane's): the fix is the helper's whitelist plus a shared fixture run by both suites. |
 | `sources[]` | array, max 50 | Ordered by `addedAt`; the UI sorts by `lastUsed` desc [UX-ASSUMPTION]. **After D-SINK-19 this array is the ONLY copy of the source list** (SR39 cost 3): `shell.json` no longer holds the active URL, so there is nothing left to rebuild a lost record from. |
 | `key` | string | `^[0-9a-f]{8}(-[0-9]{1,3})?$`, unique in the array; the cache directory name. |
 | `url` | string, 1-2048 | Normalized playlist URL (section 3.1); unique in the array; **the identity**. Carries provider credentials; the file is 0600 (README note, same class as shell.json). |
 | `epgUrl` | string, 0-2048 | Normalized EPG URL or `""`. |
+| `epgSetAt` | epoch MILLISECONDS, optional | D-SINK-19 round 9 (R19c). When this record's guide URL was last SET: by the add form at SUBMIT time (`Service.addSource` hands `Date.now()` to `Model.addSource`, which stamps it only when the form carries a guide URL), by the edit form when the edit CHANGES the guide URL (`Model.updateSource`; the form re-sends every field, so a label-only edit is not a guide-URL input, and a playlist-URL edit carries the stamp to the replacement record), by the adoption of a CLI input beside an active source (`Model.adoptActiveSource` with the input's `seenAt`; an input equal to the guide URL the record already holds is not re-stamped, 308258f), or by a pending value that wins (`Model.epgByTime`). Absent when 0: a record written before R19 has none and reads as 0, older than any stamped input (`Model.epgSetAtOf`), and a record that never had one serializes exactly as before (`Model.normalizeSourceRecord`). Milliseconds from the wall clock on both sides, so a clock stepped backwards between two inputs inverts their order -- recorded, not handled (lane A's reading (e)). Not taught to the helper's `normalize_source` either: a helper write resets every record's stamp to 0, so a value held later wins over an in-app edit at the next active move (the open item in the `pendingEpg` row). |
 | `kind` | `"http"` or `"file"` | From validation. |
 | `label` | string, 1-64 | Sanitized (section 6); default from `Model.defaultSourceLabel`. |
 | `labelCustom` | bool | True once the user renamed it; reconcile never overwrites a custom label. |
@@ -459,11 +461,11 @@ by the helper for a syntactic reason; the helper keeps the runtime refusals
 | Function | Returns |
 |---|---|
 | `emptyState()` | `{version: 2, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, sources: []}` plus `session: null`, `savedSearches: []`, `hiddenGroups: []` |
-| `parseState(text)` | v1 or v2 text -> v2 object (section 2.2), records validated |
-| `cloneState(st, patch)` | new state with `patch` keys replacing; used by every existing reducer |
+| `parseState(text)` | v1 or v2 text -> v2 object (section 2.2), records validated **Amended 2026-10-12 (round 9, R19b/R19c): carries `pendingEpg` (normalized, absent when nothing valid is pending) and each record's `epgSetAt` (absent when 0), so a state with neither parses and serializes exactly as before.** |
+| `cloneState(st, patch)` | new state with `patch` keys replacing; used by every existing reducer **Amended 2026-10-12 (round 9, R19b): the sixth key this whitelist is taught, `pendingEpg`, on the day it was added, carried only when a valid one is pending.** |
 | `withCacheLayout(st, n)` | `cacheLayout` set |
-| `addSource(st, fields, nowSec)` | `{ ok, code, message, state, key }`; `fields = { playlistUrl, epgUrl, label, origin }`; codes `empty`, `too_long`, `bad_url`, `unsupported_scheme`, `unsafe_path`, `duplicate` (returns the existing `key`), `too_many` |
-| `updateSource(st, key, fields, nowSec)` | `{ ok, code, message, state, key, urlChanged, replacedKey }`; label -> `labelCustom: true`; a changed playlist URL yields a NEW record (`key` new, `replacedKey` old, `fetchedAt: 0`, label/addedAt copied) and leaves the old one in place until the service confirms the probe (section 4.6); `unknown_source` |
+| `addSource(st, fields, nowSec)` | `{ ok, code, message, state, key }`; `fields = { playlistUrl, epgUrl, label, origin }`; codes `empty`, `too_long`, `bad_url`, `unsupported_scheme`, `unsafe_path`, `duplicate` (returns the existing `key`), `too_many` **Amended 2026-10-12 (round 9, R19c, lane-key-y1): `fields.epgSetAt` (ms) is the moment the form was SUBMITTED, handed by `Service.addSource`; the new record carries it as `epgSetAt` only when the form carries a guide URL, so a blank field sets nothing and a pending input still lands on it (E4).** |
+| `updateSource(st, key, fields, nowSec)` | `{ ok, code, message, state, key, urlChanged, replacedKey }`; label -> `labelCustom: true`; a changed playlist URL yields a NEW record (`key` new, `replacedKey` old, `fetchedAt: 0`, label/addedAt copied) and leaves the old one in place until the service confirms the probe (section 4.6); `unknown_source` **Amended 2026-10-12 (round 9, R19c): `fields.epgSetAt` (ms) stamps the guide URL only when the edit CHANGES it; the service always hands `Date.now()` and never a caller's own value, and a playlist-URL change carries the stamp to the replacement record.** |
 | `removeSource(st, key)` | `{ state, removed }` (`removed` = record or null). **D-SINK-19 round 2 (R3): removing the ACTIVE record clears `activeKey` in the state it returns**, so the file never names a record it no longer holds; the helper's `remove_source_record` has done the same since the key existed, and the shared fixture's `remove` cases run both |
 | `touchSource(st, key, nowSec)` | `lastUsed` bumped |
 | `withSourceStats(st, key, status)` | `fetchedAt`, `channelCount`, `groupCount` from a parsed `ok` playlist status |
@@ -474,7 +476,7 @@ by the helper for a syntactic reason; the helper keeps the runtime refusals
 | `activeSourceRecord(st)` | that record, or null |
 | `withActiveKey(st, key)` | the state with `activeKey` set (or cleared); the SAME object when nothing moves, so `changed` stays honest |
 | `reconcileAction({ first, force, playlist, epg, lastPlaylist, lastEpg })` | `{ act, adoptUrl, adoptEpg, playlistChanged, epgChanged }`: `act` is `adopt` for a non-empty playlist input this service has not consumed (first reconcile, or different from the snapshot), `migrate` for a first or forced reconcile with no fresh URL, `ignore` otherwise; `adoptEpg` is the same rule for the EPG input, independently (R1, R4). **Amended 2026-10-12 (round 8, R18a, lane-key-x1 1f8bd1b): both sides are compared through `Model.entryInputForm` -- "changed" is "the forms differ", and "non-empty" is the form's text -- so a value that differs from the snapshot only in surrounding whitespace, scheme or host case, the default port or an embedded control character is NOT fresh, and a value of whitespace or control characters alone is no input. Until round 7 both sides were trimmed by `Model.settingsFrom` and agreed by accident; now they agree with `Model.retiredInputsToKeep` by construction (a 34-case property, round-8 rulings below).** |
-| `adoptActiveSource(st, entry, nowSec, origin, { adoptUrl, adoptEpg })` | `{ state, key, changed, moved, adoptedUrl, adoptedEpg, invalid, added, evicted, writeEntry }`: resolves the active source in the order fresh entry URL -> state key -> entry mirror -> nothing (R1), attaches a fresh EPG input to the active record on any path, reports an invalid input without touching the key, and says whether the entry must be rewritten (it still holds a URL, or its mirror disagrees). `moved` -- a DIFFERENT source than before -- is the only thing that resets the status line. **Amended 2026-10-12 (round 8, R18a): the playlist input is `Model.entryInputForm`'s text and the EPG input its whole form, so an EPG of control characters alone is no input and never replaces the active record's guide URL with the empty one it used to validate as (the sibling R18a's search found). `writeEntry` is still asked from the entry as published, stale copy included -- the same answer heals a value D-SINK-20's patch-only write re-carried -- and a write that would change nothing the host stores is declined in the funnel (`Model.entryWriteNeeded`, R18b).** |
+| `adoptActiveSource(st, entry, nowSec, origin, { adoptUrl, adoptEpg })` | `{ state, key, changed, moved, adoptedUrl, adoptedEpg, invalid, added, evicted, writeEntry }`: resolves the active source in the order fresh entry URL -> state key -> entry mirror -> nothing (R1), attaches a fresh EPG input to the active record on any path, reports an invalid input without touching the key, and says whether the entry must be rewritten (it still holds a URL, or its mirror disagrees). `moved` -- a DIFFERENT source than before -- is the only thing that resets the status line. **Amended 2026-10-12 (round 8, R18a): the playlist input is `Model.entryInputForm`'s text and the EPG input its whole form, so an EPG of control characters alone is no input and never replaces the active record's guide URL with the empty one it used to validate as (the sibling R18a's search found). `writeEntry` is still asked from the entry as published, stale copy included -- the same answer heals a value D-SINK-20's patch-only write re-carried -- and a write that would change nothing the host stores is declined in the funnel (`Model.entryWriteNeeded`, R18b).** **Amended 2026-10-12 (round 9, R19b/R19c, lane-key-y1 690a888): `opts.seenAt` (ms) is when the service saw the inputs. A held `pendingEpg` meets the record that is active after step 1-4 BEFORE R4 runs, so an input seen in this same reconcile lands on top of the result (`Model.applyPendingEpg`). R4's adoption stamps the record's `epgSetAt` with `seenAt` and does not re-stamp a guide URL the record already holds. With NO active source a valid EPG input is held as `pendingEpg` and CONSUMED (`epgConsumed` true, so the owned write that follows the save strips it), and a refused one is consumed as refused (lane A's reading (a)); R12's "not adopted and not stripped" is overturned. The result gains `pendedEpg`, `refusedEpg`, `pendingApplied` and `pendingSuperseded`, which the service logs by setting and key name.** |
 | `pointerWritePlan({ keyMoved, dirsReady, savePending, savesInFlight, saveFailed })` | `{ steps, entryWaits }` with `steps` drawn from `save-state`, `defer-state`, `write-entry`, `write-entry-after-saved`, `wait-entry`: the state is saved before the entry is written, and the entry WAITS for the state save to LAND on every route (R5, then R13 on 2026-10-12): `write-entry` is immediate only when nothing of ours is outstanding -- no save parked, none in flight, the last one not failed -- otherwise the key is held and `Model.entryFlushDisposition` settles it from the FileView's `saved` / `saveFailed`; `Service.persistActive` executes the steps, and `stateInitProc`'s exit, `saved` and `saveFailed` settle a held entry. `savesInFlight` and `saveFailed` are round-4 inputs (lane-key-t1; `Model.pointerWritePlan`); the shared fixture's `order` section has 13 cases since round 4 (8 before) |
 | `stateSaveLanded(viewText, askedText)` | R13 (lane-key-t1; `Model.stateSaveLanded`): whether the write the service last asked for is the one the FileView has just reported on -- the view's text IS the last text asked for, and that text is non-empty. "Landed" is read by CONTENT, not by counting `saved` signals, because a burst coalesces queued writes and a replaced one raises nothing (10 warm switches: 20 `setText`, 14 `saved` on lane-key-t1, 15 on lane-key-s2; lane A, 2026-10-12, `OMARCHY-PLUGIN-CONTRACT.md`) |
 | `countReload(counts, reason)` | R15 (lane-key-t1; `Model.countReload`): the reload counter by reason -- a NEW object (a `property var` mutated in place raises no change signal) with `reason`'s count incremented, keyed by the string `Model.reloadDisposition` answered, so the counter cannot name a reason the decision does not; the service's `stateReloadsByReason`, reported through the harness's `pointerState` |
@@ -485,11 +487,15 @@ by the helper for a syntactic reason; the helper keeps the runtime refusals
 | `sourceForEdit(st, key)` | `{ key, label, labelCustom, kind, host, playlistUrl, epgUrl, playlistMasked, epgMasked, origin }` or null -- the only function that hands a URL to the guide |
 | `sourcesSummary(st, activeKey)` | IPC list `{ key, label, host, active, channelCount, lastUsed }` |
 | `entryWith(entry, patch, opts)` | full bar entry for `updateEntryInline`: every own key of `entry` copied EXCEPT `Model.RETIRED_SETTINGS` (`playlistUrl`, `epgUrl`, D-SINK-19), `patch` applied, `id` forced. Since R16 (round 5) `opts.keepRetired` true carries the retired keys over UNCHANGED -- the patch-only logo write while a state write is outstanding, and since round 6 before the first state load; "unchanged" is as the host PUBLISHES them, which on the host that publishes one write behind can be a copy one write old (D-SINK-20); the default is still removal, which is what the mirror and the settled toggle use. The host stores `{id}` plus exactly what it is handed, so a dropped key is GONE from the file rather than emptied; any owned write heals an entry left by an older build. **Amended 2026-10-12 (round 7, R17a, lane-key-w1 2ccbb74): `opts.keep`, an array of retired key names, carries THOSE over on any write, heal included, and anything but an array keeps nothing extra; the funnel passes `Model.retiredInputsToKeep`'s answer on every owned write, so a retired key is dropped only when it is consumed. "Any owned write heals an entry left by an older build" still holds, because that build's URL is adopted -- a record then holds it -- before the write.** |
-| `retiredInputsToKeep(entry, state, consumed)` | R17a (lane-key-w1; `Model.retiredInputsToKeep`): the retired keys an owned write must leave on the entry, a NEW array on every call. `playlistUrl` is kept unless a record holds it -- compared the way adoption compares: sanitized, validated as a CLI value, normalized, then looked up over every record -- or it equals `consumed.playlistUrl`; `epgUrl` is kept unless the ACTIVE record holds it (validated as an EPG URL; with no active record nothing holds it) or it equals `consumed.epgUrl`; an empty value is never kept; a retired key the function does not know is kept whenever it is non-empty. `consumed` is the service's two snapshots (`reconciledPlaylistUrl`, `reconciledEpgUrl`), which move only for a value reconcile adopted or refused -- the snapshot clause, lane A's reading of the ruling (round-7 rulings below). Fixture section `retiredKeep`, 20 cases. **Amended 2026-10-12 (round 8, R18a, lane-key-x1 1f8bd1b): the ENTRY value goes through `Model.entryInputForm` before any comparison, the snapshot clause and the held clauses alike. Round 7 compared it raw against a snapshot `Model.settingsFrom` had trimmed, so a value with surrounding whitespace -- which `omarchy bar set` stores as typed -- never matched its own snapshot (the seventh review's P1-A). "An empty value" now means an empty form: whitespace or control characters alone. The snapshot clause is confirmed (OQ-W1, R18d). 28 fixture cases.** |
-| `adoptPendingEpg(state, key, epgInput, lastEpg, nowSec, opts)` | R17b (lane-key-w1; `Model.adoptPendingEpg`): `{ state, pending, consumed, adopted }` -- whether a FRESH EPG input (`Model.reconcileAction`'s `adoptEpg` against the snapshot) lands on record `key` as if it were already active, through `Model.adoptActiveSource`. The state returned differs from `state` only in that record's `epgUrl`, and no key moves. `consumed` has R4's meaning (adopted, already held, or refused by validation) and is what `Model.epgSnapshotAfter` moves the snapshot on; a key naming no record consumes nothing, so the input stays pending (R12). Called by `Service.adoptPendingEpgOnto` from `switchSource` and the probe commit. **Amended 2026-10-12 (round 8, R18d, lane-key-x1 1f8bd1b): `opts.formEpg` is the guide URL an in-app ADD's form carried, typed or derived by an Xtream add; a non-empty one (by its form) marks the pending input `superseded` -- also `consumed`, so the snapshot moves onto it and the commit's own mirror write strips it -- and adopts nothing, the record keeping the form's value. An empty `formEpg` supersedes nothing. The result gains `superseded`.** |
+| `retiredInputsToKeep(entry, state, consumed)` | R17a (lane-key-w1; `Model.retiredInputsToKeep`): the retired keys an owned write must leave on the entry, a NEW array on every call. `playlistUrl` is kept unless a record holds it -- compared the way adoption compares: sanitized, validated as a CLI value, normalized, then looked up over every record -- or it equals `consumed.playlistUrl`; `epgUrl` is kept unless the ACTIVE record holds it (validated as an EPG URL; with no active record nothing holds it) or it equals `consumed.epgUrl`; an empty value is never kept; a retired key the function does not know is kept whenever it is non-empty. `consumed` is the service's two snapshots (`reconciledPlaylistUrl`, `reconciledEpgUrl`), which move only for a value reconcile adopted or refused -- the snapshot clause, lane A's reading of the ruling (round-7 rulings below). Fixture section `retiredKeep`, 20 cases. **Amended 2026-10-12 (round 8, R18a, lane-key-x1 1f8bd1b): the ENTRY value goes through `Model.entryInputForm` before any comparison, the snapshot clause and the held clauses alike. Round 7 compared it raw against a snapshot `Model.settingsFrom` had trimmed, so a value with surrounding whitespace -- which `omarchy bar set` stores as typed -- never matched its own snapshot (the seventh review's P1-A). "An empty value" now means an empty form: whitespace or control characters alone. The snapshot clause is confirmed (OQ-W1, R18d). 28 fixture cases.** **Amended 2026-10-12 (round 9, R19b): a guide URL equal to the state's `pendingEpg` is HELD, as one on the active record is. Lane A's mutation removing that clause reddens nothing (m8), argued equivalent: every non-empty fresh input is consumed when reconcile sees it, so the snapshot clause already covers any value the state holds; kept because R19b names it.** |
+| `adoptPendingEpg(state, key, epgInput, lastEpg, nowSec, opts)` | R17b (lane-key-w1; `Model.adoptPendingEpg`): `{ state, pending, consumed, adopted }` -- whether a FRESH EPG input (`Model.reconcileAction`'s `adoptEpg` against the snapshot) lands on record `key` as if it were already active, through `Model.adoptActiveSource`. The state returned differs from `state` only in that record's `epgUrl`, and no key moves. `consumed` has R4's meaning (adopted, already held, or refused by validation) and is what `Model.epgSnapshotAfter` moves the snapshot on; a key naming no record consumes nothing, so the input stays pending (R12). Called by `Service.adoptPendingEpgOnto` from `switchSource` and the probe commit. **Amended 2026-10-12 (round 8, R18d, lane-key-x1 1f8bd1b): `opts.formEpg` is the guide URL an in-app ADD's form carried, typed or derived by an Xtream add; a non-empty one (by its form) marks the pending input `superseded` -- also `consumed`, so the snapshot moves onto it and the commit's own mirror write strips it -- and adopts nothing, the record keeping the form's value. An empty `formEpg` supersedes nothing. The result gains `superseded`.** **Overturned in part 2026-10-12 (round 9, R19c, lane-key-y1 690a888): the signature is now `adoptPendingEpg(state, key, epgInput, lastEpg, nowMs)` -- `opts.formEpg` and the form-wins rule are GONE. A fresh input still on the entry is first held as reconcile would hold it, seen at `nowMs`; then the held value meets record `key` through `Model.applyPendingEpg`: it lands iff its `seenAt` is LATER than the record's `epgSetAt` (absent = 0), otherwise the record keeps its own, and either way it is cleared. The result is `{ state, pending, consumed, refused, adopted, superseded, cleared }`; `superseded` now means the record's own, LATER, guide URL won.** |
+| `pendingEpgRecord(raw)`, `pendingEpgOf(st)`, `withPendingEpg(st, rec)` | R19b (round 9, lane-key-y1 690a888; `Model.pendingEpgRecord`, `Model.pendingEpgOf`, `Model.withPendingEpg`): the held guide URL (section 2.1). `Model.pendingEpgRecord` normalizes a raw value to `{ url, seenAt }` or null (the URL validated as a CLI EPG value; `seenAt` a non-negative integer of ms); `Model.pendingEpgOf` reads the state's; `Model.withPendingEpg` sets it, or clears it with `null`, and returns the SAME state object when nothing changes, so a caller's "did the state move" stays an identity test, as `Model.withActiveKey`'s does |
+| `epgSetAtOf(rec)`, `epgByTime(st, key, url, setAt)`, `applyPendingEpg(st, key)` | R19c (round 9; `Model.epgSetAtOf`, `Model.epgByTime`, `Model.applyPendingEpg`): THE ONE COMPARISON. `Model.epgSetAtOf` is a record's `epgSetAt` as a number, 0 for absent or junk. `Model.epgByTime` lands `url`, set at `setAt`, on record `key` iff `setAt` is LATER than the record's own -- an EQUAL time is not later -- answering `{ state, won }`, the same state when it loses or names no record; the S5 `known` branch of the probe commit uses it for the add form's guide URL (OQ-X3 ruled). `Model.applyPendingEpg` meets the held value with record `key` through it and clears the held value either way: `{ state, applied, superseded, cleared }`; nothing held, or no such record, moves nothing |
+| `activeEpgUrlOf(record, input, pending)` | R19 / a12 (round 9; `Model.activeEpgUrlOf`): `Service.activeEpgUrl`'s decision, lifted so node calls it (rule 12; the eighth review's a12 mutation reverted the inline read and nothing went red). Beside a record: the record's guide URL, unless the input is SOMETHING that does not validate, which is returned as it is so the helper reports it (D16); an input of whitespace or control characters alone is no input and the record's value stands (R18a; D-SRC-17). With no record: the input on the entry when there is one (it is about to be held), else the held `pendingEpg` URL, else `""` |
+| `owedMirrorAction({ owed, pendingKey, savePending, savesInFlight, saveFailed })` | R19d (round 9; `Model.owedMirrorAction`): `rewrite` or `none`. A held key mirror DROPPED because its state save failed (`Model.entryFlushDisposition`, `save-failed`) leaves a debt (`Service.entryMirrorOwed`); the first save to LAND with no key held, no save parked, none in flight and none failed pays it with one key mirror through the funnel, deferred by `Qt.callLater` from the FileView's `saved`, for the key active then. A heal clears the debt itself, because it strips everything consumed. D-SRC-18 is what this settles |
 | `entryInputText(value)`, `entryInputForm(name, value)`, `sameEntryInput(name, a, b)` | R18a (round 8, lane-key-x1; `Model.entryInputText`, `Model.entryInputForm`, `Model.sameEntryInput`): THE ONE NORMALISER for a value read from the bar entry's two input keys. `Model.entryInputText` is `Model.settingsFrom`'s own trim, named (every `\s` at either edge). `Model.entryInputForm` is that, then `sanitizeInput` (control characters out, the cap), then validation as a CLI value of kind `name` (`epgUrl` validates as an EPG URL), and answers `{ text, ok, url, form }`: `form` is the validated URL when it passes and the sanitized text when it does not, so a refused value is one value whatever its spacing; `text` "" means NO input. Two values are the same input exactly when their forms are equal. Every comparison of an entry value -- against a snapshot, a record or another entry value -- goes through it: `Model.settingsFrom`, `Model.reconcileAction`, `Model.adoptActiveSource`, `Model.retiredInputsToKeep`, `Model.adoptPendingEpg`'s `formEpg`, and `Service.activeEpgUrl`'s "the input does not validate" read. Nothing here is a URL the caller did not already hold |
-| `entryWriteNeeded(id, entry, published, lastWrite)`, `entryWriteRecord(id, entry, published)`, `hostEntryForm(id, entry)` | R18b (round 8, lane-key-x1; `Model.entryWriteNeeded`, `Model.entryWriteRecord`, `Model.hostEntryForm`): would handing `entry` to `updateEntryInline` change what the host STORES? `Model.hostEntryForm` is the object the host compares, `{ id }` then the entry's other keys in order; the host's answer is `JSON.stringify` of it against the stored entry (`shell.qml` `updateEntryInline`, 1094 for a layout entry, 1107 for a plugins entry). The stored entry is estimated: while the publish is still exactly the one that stood when this service last wrote (`lastWrite.published`), it is what that write handed over (`lastWrite.stored`); once the publish moves -- our own echo or anybody's write -- it is the publish. So a write this declines is one the host would have answered `false` to, and the estimate never waits for an echo (rule 9). `Model.entryWriteRecord` is what the funnel records after every write it makes (`Service.lastEntryWrite`); deliberately RAW JSON, not normalised, because it mirrors the host's own byte comparison and a write that strips a whitespace-only value changes bytes |
-| `sameOwnWrite(a, b)` | R18b (round 8, lane-key-x1; `Model.sameOwnWrite`): the own-write record the funnel would assign against the one in force -- equal when both are absent, or when `base` and `value` carry the same keys with strictly equal values (`undefined` is not `""`). That is exactly what `Model.ownWriteInForce` and `Model.settingsWithOwnWrite` read, so an equal record is one no binding can tell apart and reassigning it is the re-trigger and nothing else; the funnel reassigns `ownWrite` only when this answers false |
+| `entryWriteNeeded(id, entry, published, lastWrite)`, `entryWriteRecord(id, entry, published)`, `hostEntryForm(id, entry)` | R18b (round 8, lane-key-x1; `Model.entryWriteNeeded`, `Model.entryWriteRecord`, `Model.hostEntryForm`): would handing `entry` to `updateEntryInline` change what the host STORES? `Model.hostEntryForm` is the object the host compares, `{ id }` then the entry's other keys in order; the host's answer is `JSON.stringify` of it against the stored entry (`shell.qml` `updateEntryInline`, 1094 for a layout entry, 1107 for a plugins entry). The stored entry is estimated: while the publish is still exactly the one that stood when this service last wrote (`lastWrite.published`), it is what that write handed over (`lastWrite.stored`); once the publish moves -- our own echo or anybody's write -- it is the publish. So a write this declines is one the host would have answered `false` to, and the estimate never waits for an echo (rule 9). `Model.entryWriteRecord` is what the funnel records after every write it makes (`Service.lastEntryWrite`); deliberately RAW JSON, not normalised, because it mirrors the host's own byte comparison and a write that strips a whitespace-only value changes bytes **RETIRED 2026-10-12 (round 9, R19a): no shipped caller.** The funnel no longer skips a write on this estimate (the round-9 rulings below say why); `updateEntryInline`'s own answer is the dirty check. The three stay declared only because this table and three other documents cite them by name and the ledger resolves each citation against the model; the round-9 text cites them without the prefix for that reason, and deleting them is a code change that must reword these citations in the same commit. |
+| `sameOwnWrite(a, b)` | R18b (round 8, lane-key-x1; `Model.sameOwnWrite`): the own-write record the funnel would assign against the one in force -- equal when both are absent, or when `base` and `value` carry the same keys with strictly equal values (`undefined` is not `""`). That is exactly what `Model.ownWriteInForce` and `Model.settingsWithOwnWrite` read, so an equal record is one no binding can tell apart and reassigning it is the re-trigger and nothing else; the funnel reassigns `ownWrite` only when this answers false **Round 9 (R19a): now the ONE clause that settles the cycle -- with the skip gone, an owned write the host answers `false` to re-triggers nothing because the record is not reassigned. Lane A's mutation m2 shows it is no longer load-bearing for the loop (no LOOP with it removed, because R19b took away the loop's precondition, an EPG input that stayed fresh on the entry forever); it is kept and pinned (m2 reddens 4 checks).** |
 | `ownedEntryPatch(effective, overrides)` | every key in `OWNED_SETTINGS` (`sourceKey`, `showLogos` since D-SINK-19) at the value it should hold after this write (D-LOGO-2); the one place that decides what a write carries |
 | `entryShieldDecision(shieldState, patch)` | the D-SINK-18 gate asked of the ENTRY about to be written: `persist` when the patch carries no URL-bearing key (every shipping write), `refuse` / `defer` when it does |
 | `cacheStale(status, refreshMinutes, nowSec)` | true when `status.ok !== true`, `fetchedAt` missing/0, or `nowSec - fetchedAt >= refreshMinutes * 60` |
@@ -592,9 +598,9 @@ carries no credential (DQ-U5). Asynchronous outcomes
 
 | Action | Behaviour |
 |---|---|
-| `addSource({ playlistUrl, epgUrl, label, origin })` | sanitize -> validate both URLs -> duplicate check (`findSourceByUrl`) -> cap check -> `Model.addSource` -> `saveState()` -> probe (section 4.6). Returns `ok` with the new key as soon as the probe starts. `origin` defaults to `"guide"`. **[Round 7, 2026-10-12 (R17b): the probe commit that makes the new record active lands a pending EPG input on it before the save and before the mirror, so the first source added in the app takes a guide URL set while none was active -- REPLACING the form's own EPG field when the two differ (lane A's OQ-W3, open). Observed in node only (driver case E4 under both host shapes); no live segment adds a source in the app with an EPG pending.]** **[Round 8, 2026-10-12 (R18d, OQ-W3 ruled; lane-key-x1): the form's guide URL WINS. The probe commit of an ADD whose own record is kept hands the form's `epgUrl` -- typed, or the `xmltv.php` an Xtream add derived -- to `Service.adoptPendingEpgOnto`, and a non-empty one supersedes the pending CLI value: the record keeps the form's value, the pending value is stripped by the commit's own mirror write, and the service logs `the guide URL in the add form supersedes a pending input (epgUrl); the bar entry drops it`, the key name only. A blank form EPG adopts the pending value as R17b did. In S5's `known` branch (the CLI added the same playlist while the probe ran) the commit keeps the CLI's record, which does not carry the form's EPG, so nothing is handed and the pending value is adopted (lane A's OQ-X3, open). Observed live now: key-scenario A1 (no form EPG) and A2 (a form EPG), through the harness `addSource` verb with two saved sources and none active; red A2 on `--baseline lane-key-w2`.]** |
-| `updateSource(key, { label, playlistUrl, epgUrl })` | label only: state + save. `epgUrl`: validate, record update (since D-SINK-19 the record is the only store of a guide URL, so nothing is persisted to the entry for it). `playlistUrl` changed: `Model.updateSource` creates the replacement record, then a probe with `replaceKey`; on success the old record is removed, its cache removed, and the switch committed if the old one was active; on failure nothing else changes and the replacement record is dropped again. |
-| `removeSource(key)` | `busy` if that key is probing. Removes the record, saves, queues `cache remove`, and if it was active `persistActive("")` (S7: back to the first-run state; playback, if any, continues). Since D-SINK-19 the state write is what clears the active source (`Model.removeSource` clears the pointer, R3); the entry mirror can still fail and is reported, but a stale mirror naming a removed record resolves to no active source. **[Corrected 2026-10-12: "cannot be refused" was an absolute the code did not support -- `FileView` has a `saveFailed` signal and round 2 connected to nothing, so an unwritable state directory refused the write silently while the entry mirror still went out. Since R11 (lane-key-s1) the service reads `saved` / `saveFailed`, counts writes in flight, and an entry mirror that WAITED for a parked save is written only once that save has landed; a remove or switch made with the directories already ready still writes the entry straight after `setText` (DQ-A2, the ungated sibling, listed as open). The failure path -- an unwritable state directory -- is UNVERIFIED live: no scenario makes the directory unwritable.]** **[Round 4, 2026-10-12 (R13): the sibling is closed -- the entry waits for the state write to land on the dirsReady route too (`Model.pointerWritePlan`'s `write-entry-after-saved`), and a refused mirror is logged, never reported as the removal failing: the call reports `ok` on the state write being ISSUED (SR25 as amended), and that write's failure arrives later as `sourcesPersistFailed("state_write_failed")`. The failure path is OBSERVED under a running shell: key-scenario F1-F7 on lane-key-t2 (the state directory 0500 with the dirs ready, a CLI set and then a switch: URL still on the entry, file untouched, the failure signalled once, the next start re-adopting; F3-F7 red on `--baseline lane-key-s2`). Unwritable at START stays unobserved, and F drives no remove on the failed disk (lane B).]** **[Round 7, 2026-10-12 (R17): removing the ACTIVE record adopts nothing -- with no active record a pending `epgUrl` stays on the entry (R12), and since R17a the mirror's write that follows the remove keeps it there, because no active record holds it; the first source to become active afterwards takes it (driver case E2 under both host shapes, lane-key-w1).]** |
+| `addSource({ playlistUrl, epgUrl, label, origin })` | sanitize -> validate both URLs -> duplicate check (`findSourceByUrl`) -> cap check -> `Model.addSource` -> `saveState()` -> probe (section 4.6). Returns `ok` with the new key as soon as the probe starts. `origin` defaults to `"guide"`. **[Round 7, 2026-10-12 (R17b): the probe commit that makes the new record active lands a pending EPG input on it before the save and before the mirror, so the first source added in the app takes a guide URL set while none was active -- REPLACING the form's own EPG field when the two differ (lane A's OQ-W3, open). Observed in node only (driver case E4 under both host shapes); no live segment adds a source in the app with an EPG pending.]** **[Round 8, 2026-10-12 (R18d, OQ-W3 ruled; lane-key-x1): the form's guide URL WINS. The probe commit of an ADD whose own record is kept hands the form's `epgUrl` -- typed, or the `xmltv.php` an Xtream add derived -- to `Service.adoptPendingEpgOnto`, and a non-empty one supersedes the pending CLI value: the record keeps the form's value, the pending value is stripped by the commit's own mirror write, and the service logs `the guide URL in the add form supersedes a pending input (epgUrl); the bar entry drops it`, the key name only. A blank form EPG adopts the pending value as R17b did. In S5's `known` branch (the CLI added the same playlist while the probe ran) the commit keeps the CLI's record, which does not carry the form's EPG, so nothing is handed and the pending value is adopted (lane A's OQ-X3, open). Observed live now: key-scenario A1 (no form EPG) and A2 (a form EPG), through the harness `addSource` verb with two saved sources and none active; red A2 on `--baseline lane-key-w2`.]** **[Round 9, 2026-10-12 (R19c, lane-key-y1): R18d's form-wins rule is OVERTURNED. `addSource` stamps the form's guide URL with the SUBMIT time (`Date.now()`, handed to `Model.addSource`) and the probe commit hands `Service.adoptPendingEpgOnto` nothing but the key: at the commit the LATER of the held CLI value and the form's guide URL wins, so a CLI `epgUrl` set while the probe runs beats the form (live Q1) and one set before the submit loses to it (Q2, and A2 as re-read). The S5 `known` branch is ruled (OQ-X3): the form's guide URL lands on the kept CLI record through `Model.epgByTime` iff it was set later than what that record holds, and a held value is then judged against the result. Log lines name the setting and the source key, never a URL: `a pending guide URL (epgUrl) lands on source <key>` or `... is superseded: source <key> keeps the one set later`.]** |
+| `updateSource(key, { label, playlistUrl, epgUrl })` | label only: state + save. `epgUrl`: validate, record update (since D-SINK-19 the record is the only store of a guide URL, so nothing is persisted to the entry for it). `playlistUrl` changed: `Model.updateSource` creates the replacement record, then a probe with `replaceKey`; on success the old record is removed, its cache removed, and the switch committed if the old one was active; on failure nothing else changes and the replacement record is dropped again. **[Round 9, 2026-10-12 (R19c): the guide URL an edit CHANGES is stamped now (`Date.now()`; `Model.updateSource` stamps only a change), so a guide URL typed into the edit form while an older CLI value is held is the later input and stands at the switch (live V1; the eighth review's P2, which R18d's sibling search had cleared because there is no add form). The IPC `updateSource` routes through the same call.]** |
+| `removeSource(key)` | `busy` if that key is probing. Removes the record, saves, queues `cache remove`, and if it was active `persistActive("")` (S7: back to the first-run state; playback, if any, continues). Since D-SINK-19 the state write is what clears the active source (`Model.removeSource` clears the pointer, R3); the entry mirror can still fail and is reported, but a stale mirror naming a removed record resolves to no active source. **[Corrected 2026-10-12: "cannot be refused" was an absolute the code did not support -- `FileView` has a `saveFailed` signal and round 2 connected to nothing, so an unwritable state directory refused the write silently while the entry mirror still went out. Since R11 (lane-key-s1) the service reads `saved` / `saveFailed`, counts writes in flight, and an entry mirror that WAITED for a parked save is written only once that save has landed; a remove or switch made with the directories already ready still writes the entry straight after `setText` (DQ-A2, the ungated sibling, listed as open). The failure path -- an unwritable state directory -- is UNVERIFIED live: no scenario makes the directory unwritable.]** **[Round 4, 2026-10-12 (R13): the sibling is closed -- the entry waits for the state write to land on the dirsReady route too (`Model.pointerWritePlan`'s `write-entry-after-saved`), and a refused mirror is logged, never reported as the removal failing: the call reports `ok` on the state write being ISSUED (SR25 as amended), and that write's failure arrives later as `sourcesPersistFailed("state_write_failed")`. The failure path is OBSERVED under a running shell: key-scenario F1-F7 on lane-key-t2 (the state directory 0500 with the dirs ready, a CLI set and then a switch: URL still on the entry, file untouched, the failure signalled once, the next start re-adopting; F3-F7 red on `--baseline lane-key-s2`). Unwritable at START stays unobserved, and F drives no remove on the failed disk (lane B).]** **[Round 7, 2026-10-12 (R17): removing the ACTIVE record adopts nothing -- with no active record a pending `epgUrl` stays on the entry (R12), and since R17a the mirror's write that follows the remove keeps it there, because no active record holds it; the first source to become active afterwards takes it (driver case E2 under both host shapes, lane-key-w1).]** **[Round 9, 2026-10-12 (R19b): with no active record a CLI `epgUrl` set after the remove is HELD in the state as `pendingEpg` and taken off the entry by the R13-gated write that follows its save, no longer kept on the entry; the first source to become active afterwards meets it by time (R19c). E2 is re-read for `held` (`R17 (... host) E2 (R19b)`).]** |
 | `switchSource(key)` | no-op `ok` when already active; never-fetched (`fetchedAt === 0`) -> probe with commit; else section 4.5. **[2026-10-12, round 4 (R13): reports `ok` on the state write being issued -- the state write IS the switch; a later `saveFailed` arrives as `sourcesPersistFailed("state_write_failed")`; a refused mirror is logged (`no writable bar entry for the settings change`) and repaired on the next start, never `persist_failed`. `sources-scenario.sh`'s SR25 block moved to this contract on lane-key-t2: 66 / 0 under cage (lane B, 2026-10-12).]** **[Round 7, 2026-10-12 (R17b): a pending EPG input -- set while no source was active and still on the entry -- lands on the record becoming active in the same turn, after `Model.touchSource` and before `saveState` and `persistActive` (`Service.adoptPendingEpgOnto`); a never-fetched switch reaches the same through the probe commit. Observed live: key-scenario U3 on the lagging fake host and U6 on the echoing one (lane A's transcripts on lane-key-w1, 71 / 0; U3 and U6 red on `--baseline lane-key-v2`).]** |
 | `buildXtreamSource({ server, username, password, label })` | `Model.xtreamUrls` -> `addSource({..., origin: "xtream", label: label or host})`. The password is never stored outside the URL and never logged. |
 | `sourceForEdit(key)` | `Model.sourceForEdit(userState, key)`; the only way the guide obtains a URL; the guide binds it to the edit field only, never to a list delegate. |
@@ -823,6 +829,26 @@ turn (the seventh review's P1-B). And the keep decision compares the entry
 value through `Model.entryInputForm`, so a whitespace-wrapped value is
 consumed when its trimmed self is (P1-A). The fixed points, path by path,
 are under the round-8 rulings below.
+**Amended 2026-10-12 (round 9, R19, lane-key-y1 690a888, lane A; the eighth
+review, two lenses over lane-key-x2).** The skip in the paragraph above is
+OVERTURNED (R19a), not rewritten: `writeOwnedEntry` hands EVERY owned write
+to `updateEntryInline` and takes the host's answer as the dirty check,
+`false` from a writable entry being "already stored" and success (rule 9).
+The skip estimated the stored entry from `lastEntryWrite` while the publish
+equalled the one recorded at the last write, and on the lagging host a
+publish that goes A -> B -> A (an `omarchy bar set` that restores the
+earlier entry exactly) brought that record back, so writes the host would
+have stored were skipped: an in-app logo OFF, the strip of a re-set refused
+credential, the strip of a re-set guide URL. `lastEntryWrite` is gone. The
+own-write record is still reassigned only when `Model.sameOwnWrite` says it
+differs, and that alone settles the cycle. The keep warning moved back in
+front of the hand-over. When the host answers `false` the funnel returns
+before re-arming the D-SINK-18 shield, because nothing was written. A heal
+also clears `Service.entryMirrorOwed` (R19d, below). And the input the
+paragraph about R12 above describes no longer waits on the entry: with no
+active source a guide URL is held in `state.json` (R19b), so it is CONSUMED
+and the heal that follows its save strips it. Every pin and count is under
+the round-9 rulings below.
 Its four callers: `removeSource` (`""`), `switchSource`,
 the probe commit (`newKey`, which differs from `rec.key` when a colliding record
 appeared through the CLI during the probe) and `adoptActive`, deferred through
@@ -1414,7 +1440,7 @@ is amended where it stands.
    824ced4: live 18 / 0 at +0 MB, baseline 16 / 2 with L4 at +240 MB and L5
    at 746 ms, "clip preflight (7 checks)" in the gate).
 
-## Reconciliation rulings, round 4 (product owner, 2026-10-09, D-SINK-19; amended 2026-10-11 and six times on 2026-10-12, after seven adversarial reviews)
+## Reconciliation rulings, round 4 (product owner, 2026-10-09, D-SINK-19; amended 2026-10-11 and seven times on 2026-10-12, after eight adversarial reviews)
 
 D-SINK-19 moves where the active source is NAMED. The product owner approved
 it on 2026-10-09 as a release of its own, having been shown the three costs in
@@ -1438,7 +1464,10 @@ and R17 followed the sixth review (round 7), for the input R12 leaves on
 the entry on purpose, which any heal write stripped; and R18 followed the
 seventh (round 8), for two P1s on the round-7 build -- a value with
 surrounding whitespace that never counted as consumed, and a refused value
-beside a pending guide URL that looped the lagging host. The rows below now carry the 2026-10-09
+beside a pending guide URL that looped the lagging host; and R19 followed
+the eighth (round 8), for R18's own write skip coming back after a publish
+A -> B -> A and for a pending guide URL superseded by a form submitted
+BEFORE it. The rows below now carry the 2026-10-09
 ruling VERBATIM as lane-key-docs (55502af) recorded it -- the one copy that
 predates both reviews -- and, where a review overturned part of it, dated
 amendments beneath saying what the code on this tree does instead; nothing is
@@ -1462,7 +1491,7 @@ the lead rather than given an id this lane cannot put a board row behind.
 |---|---|---|
 | SR35 | D1, in part | **Where the active source is named.** The authority is `activeKey` in `state.json` (section 2.1), a file the plugin owns at 0600 inside a 0700 directory. `activeSourceKey` reads it; it no longer identifies the active source by matching a URL against the records. The bar entry carries the source's KEY, so the host's config still names what is playing and `omarchy bar set` still has a surface to write to, and once the plugin has settled that entry carries no playlist or EPG URL. The state is the authority and the entry is a mirror. What a hand-edited key on the entry does when the state names a different one is the code lane's to settle in this round and is **UNVERIFIED** from this document: read it off `Service.qml`. **Settled 2026-10-11 (R1, R3), after the adversarial review of the first build:** `activeSourceKey` is deleted rather than left with no caller (the comment above `Model.reconcileSources` says why); the state is read through `Model.activeKeyOf`, and the key the entry carries is named `sourceKey`. The state's key wins whenever it names a record; the entry's `sourceKey` is consulted only when the state names none (`Model.adoptActiveSource` step 3); a key naming no record is `""` on every read and is cleared in the file by `Model.removeSource` and by step 4, never a stale pointer. A hand-edited `omarchy bar set ... sourceKey <k>` is accepted by the host like any key -- READ off the host, not run: `setBarWidget` at `services/PluginRegistry.qml:342-380` ends `entry[String(key)] = value` with no schema lookup (`OMARCHY-PLUGIN-CONTRACT.md`, "read rather than run"; the half that WAS measured is `updateEntryInline` keeping an undeclared key through its own rewrite) -- and is ignored by the plugin unless it names a record and the state names none. |
 | SR36 | D4, in part | **Identity is preserved; the "only a directory name" clause is not.** Identity stays the normalized playlist URL and the key stays `Model.sourceKey` of that normalized URL, with the suffix rule (D4 as amended). Collisions are unaffected: lookups still compare URLs, and `Model.findSource` matches a key only inside the user's own records, so the 50-source analysis in D4 still holds. Disclosure is new and is stated with its size rather than waved at: the key cannot be turned into a URL, `fnv1a32` being one-way and the only direction this project computes, but it IS a 32-bit CONFIRMATION of a guessed URL -- someone who can read the entry and can guess a candidate can hash the guess and check it. That is far less than the credential and it is not nothing. The key was always printed and always user-visible (the cache directory names it, `cache remove --key K` takes it, the README tells the user to `ls` them), but inside containers the plugin owns at 0700; what D-SINK-19 adds is a key in a file whose packaged default is 0644. So nothing here says the exposure is CLOSED: it is reduced from the credential itself to a check on a guess. *Unchanged by the review, 2026-10-11.* |
-| SR37 | nothing; **extends SR8** | **CLI parity is preserved, and becomes input-only.** `omarchy bar set io.github.rmcdavid.iptv playlistUrl "<url>"` still adopts: the same `Model.validateSourceUrl` with `origin: "cli"`, reconciled into the history with a derived label and `origin: "cli"` (SR8, D3, SR11), an invalid value still synthesizing an error status and never running the helper (D16). `epgUrl` is treated the same way. SR8's sentence stands unchanged; this row only says what happens next. Once adopted, the plugin sets the active key and rewrites the entry with the key and without the URLs, so the value the user set is an INPUT and not a stored setting: set it, read the file back, and it is not there. That is SR39 cost 1, it is a documented behaviour rather than a bug, and the README says so at both places it shows the command. **Overturned in part 2026-10-11 (R1, R4), after the review found the first build DISCARDING the input on every first or forced reconcile:** "still adopts" holds for a URL this service has not consumed -- the first reconcile of a service (the shell start, which is where a value set while the shell was down arrives) and any value different from the one it last saw -- whether or not the reconcile was forced (`Model.reconcileAction`); a value equal to the last one adopted is the host's unechoed copy of the plugin's own strip (rule 9) and is not read again, else a state reload would resurrect a source the user had just removed. `epgUrl` likewise: a fresh non-empty value is attached to the ACTIVE record on any reconcile that sees it, an `ignore` plan included (D-SRC-02 stays closed), and stripped by the same owned write. The EMPTY value is a no-op for both keys: `omarchy bar set ... playlistUrl ""` and `... epgUrl ""` are WITHDRAWN as clear levers; the Sources screen and the helper's `state source` verbs clear. An invalid value is still D16 -- reported, never run -- but leaves a working source exactly as it was (`Model.invalidInputBlocks`), and is stripped from the entry too, because a refused value can still carry a credential. The README says all of this at both places it shows the command and in its settings table. **Amended 2026-10-12 (round 3, R12): an input is never stripped unadopted.** Round 2 stripped an `epgUrl` set while NO source was active in the same owned write that could not attach it, so the value was gone with no copy anywhere (review P2); it now stays on the entry until a source exists and a later reconcile attaches it to that source, and the service's EPG snapshot moves only for an input that reached a record (`Model.epgSnapshotAfter` on lane-key-s1; the fixture case `R4/R12: an EPG input with no active source to land on is not adopted AND NOT STRIPPED` flipped from `writeEntry` true to false). One sentence round 2 wrote under this row's name is WITHDRAWN: "re-setting the SAME URL in one session after removing that source waits for the next shell start". The review's data-loss lens walked the shipping functions in the service's order on both host shapes (the one-write-behind host and the echoing one, omacom/omarchy#15082): the owned write that follows the remove strips the stale echo from the entry and moves the service's snapshot, so the re-set value differs from it and is adopted at once. The "not consumed" rule above stands; the cost attributed to it did not exist. **Amended 2026-10-12 (round 7, R17), after the sixth review's data-loss lens found R12 kept only by the callers that happened to know about it.** "Never stripped unadopted" was enforced nowhere: nothing records that an EPG input is waiting, so with the state loaded and nothing outstanding `Model.ownedWriteMode` answers `heal` and `Model.entryWith` dropped every retired key -- through the logo toggle on the lagging host (observed live on lane-key-v2 by the lens: LOST with the toggle, KEPT without), and through a switch or an in-app first add on the echoing host with no toggle at all, because `reconcile()` never runs on an active-key move and the mirror's heal stripped the entry before anything had attached the value. R17a moves R12 to the sink: an owned write strips a retired input only when it is CONSUMED (`Model.retiredInputsToKeep`, asked by the funnel on every owned write, heal and patch alike, and handed to `Model.entryWith` as `keep`). R17b: `switchSource` and the probe commit land a pending EPG input on the record becoming active in the same turn (`Model.adoptPendingEpg`), before the save and before the mirror; `removeSource` of the active record leaves it pending. So "until a source exists and a later reconcile attaches it" now reads "until a source becomes active, by any route". Every pin and count is under the round-7 rulings below. **Amended 2026-10-12 (round 8, R18), after the seventh review found two P1s on the round-7 build.** Every value read from the entry is compared the way adoption compares it (`Model.entryInputForm`), so a URL pasted with a trailing space or newline -- which `omarchy bar set` stores as typed -- is consumed, refused or adopted exactly as its trimmed self, and a value of whitespace or control characters alone is no input; a write that changes nothing the host stores is not made, so a refused `playlistUrl` beside a pending guide URL settles instead of looping; and a guide URL the in-app add form carries wins over a pending CLI `epgUrl`, which is then superseded and stripped (R18d; with no guide URL in the form, the pending one is adopted as above). Every pin and count is under the round-8 rulings below. |
+| SR37 | nothing; **extends SR8** | **CLI parity is preserved, and becomes input-only.** `omarchy bar set io.github.rmcdavid.iptv playlistUrl "<url>"` still adopts: the same `Model.validateSourceUrl` with `origin: "cli"`, reconciled into the history with a derived label and `origin: "cli"` (SR8, D3, SR11), an invalid value still synthesizing an error status and never running the helper (D16). `epgUrl` is treated the same way. SR8's sentence stands unchanged; this row only says what happens next. Once adopted, the plugin sets the active key and rewrites the entry with the key and without the URLs, so the value the user set is an INPUT and not a stored setting: set it, read the file back, and it is not there. That is SR39 cost 1, it is a documented behaviour rather than a bug, and the README says so at both places it shows the command. **Overturned in part 2026-10-11 (R1, R4), after the review found the first build DISCARDING the input on every first or forced reconcile:** "still adopts" holds for a URL this service has not consumed -- the first reconcile of a service (the shell start, which is where a value set while the shell was down arrives) and any value different from the one it last saw -- whether or not the reconcile was forced (`Model.reconcileAction`); a value equal to the last one adopted is the host's unechoed copy of the plugin's own strip (rule 9) and is not read again, else a state reload would resurrect a source the user had just removed. `epgUrl` likewise: a fresh non-empty value is attached to the ACTIVE record on any reconcile that sees it, an `ignore` plan included (D-SRC-02 stays closed), and stripped by the same owned write. The EMPTY value is a no-op for both keys: `omarchy bar set ... playlistUrl ""` and `... epgUrl ""` are WITHDRAWN as clear levers; the Sources screen and the helper's `state source` verbs clear. An invalid value is still D16 -- reported, never run -- but leaves a working source exactly as it was (`Model.invalidInputBlocks`), and is stripped from the entry too, because a refused value can still carry a credential. The README says all of this at both places it shows the command and in its settings table. **Amended 2026-10-12 (round 3, R12): an input is never stripped unadopted.** Round 2 stripped an `epgUrl` set while NO source was active in the same owned write that could not attach it, so the value was gone with no copy anywhere (review P2); it now stays on the entry until a source exists and a later reconcile attaches it to that source, and the service's EPG snapshot moves only for an input that reached a record (`Model.epgSnapshotAfter` on lane-key-s1; the fixture case `R4/R12: an EPG input with no active source to land on is not adopted AND NOT STRIPPED` flipped from `writeEntry` true to false). One sentence round 2 wrote under this row's name is WITHDRAWN: "re-setting the SAME URL in one session after removing that source waits for the next shell start". The review's data-loss lens walked the shipping functions in the service's order on both host shapes (the one-write-behind host and the echoing one, omacom/omarchy#15082): the owned write that follows the remove strips the stale echo from the entry and moves the service's snapshot, so the re-set value differs from it and is adopted at once. The "not consumed" rule above stands; the cost attributed to it did not exist. **Amended 2026-10-12 (round 7, R17), after the sixth review's data-loss lens found R12 kept only by the callers that happened to know about it.** "Never stripped unadopted" was enforced nowhere: nothing records that an EPG input is waiting, so with the state loaded and nothing outstanding `Model.ownedWriteMode` answers `heal` and `Model.entryWith` dropped every retired key -- through the logo toggle on the lagging host (observed live on lane-key-v2 by the lens: LOST with the toggle, KEPT without), and through a switch or an in-app first add on the echoing host with no toggle at all, because `reconcile()` never runs on an active-key move and the mirror's heal stripped the entry before anything had attached the value. R17a moves R12 to the sink: an owned write strips a retired input only when it is CONSUMED (`Model.retiredInputsToKeep`, asked by the funnel on every owned write, heal and patch alike, and handed to `Model.entryWith` as `keep`). R17b: `switchSource` and the probe commit land a pending EPG input on the record becoming active in the same turn (`Model.adoptPendingEpg`), before the save and before the mirror; `removeSource` of the active record leaves it pending. So "until a source exists and a later reconcile attaches it" now reads "until a source becomes active, by any route". Every pin and count is under the round-7 rulings below. **Amended 2026-10-12 (round 8, R18), after the seventh review found two P1s on the round-7 build.** Every value read from the entry is compared the way adoption compares it (`Model.entryInputForm`), so a URL pasted with a trailing space or newline -- which `omarchy bar set` stores as typed -- is consumed, refused or adopted exactly as its trimmed self, and a value of whitespace or control characters alone is no input; a write that changes nothing the host stores is not made, so a refused `playlistUrl` beside a pending guide URL settles instead of looping; and a guide URL the in-app add form carries wins over a pending CLI `epgUrl`, which is then superseded and stripped (R18d; with no guide URL in the form, the pending one is adopted as above). Every pin and count is under the round-8 rulings below. **Amended 2026-10-12 (round 9, R19), after the eighth review found R18's write skip coming back after a publish A -> B -> A and R18d superseding a CLI `epgUrl` set after the form was submitted.** Three readings above are overturned. "It now stays on the entry until a source exists" (R12) is replaced by R19b: with no active source a valid `epgUrl` is held in `state.json` as `pendingEpg`, and stripped from the entry by the same R13-gated owned write that strips every consumed input, so it is never stripped unadopted and never kept in `shell.json` while it waits; a refused one is reported and stripped as beside an active source. "A write that changes nothing the host stores is not made" is replaced by R19a: every owned write is handed to the host, whose answer is the dirty check, and the cycle settles because the own-write record is reassigned only when it differs. "A guide URL the in-app add form carries wins" is replaced by R19c: every record carries `epgSetAt`, set by the add form at submit, by the edit form, or by adoption, and at an active move the LATER of the held input and the record's own guide URL wins. Every pin and count is under the round-9 rulings below. |
 | SR38 | nothing | **The migration.** Section 2.2's fourth step. A bar entry with a URL and a state with no `activeKey` is the old shape: derive the key with `Model.sourceKey`, write `activeKey`, rewrite the entry with the key and without the URLs. Idempotent, and it must not lose a source -- it names a record that already exists, creating none and deleting none. The rewrite goes through `updateEntryInline`, so rule 9 governs it: the plugin applies its own write locally in the same turn and never waits for an echo it will not receive, `false` means "already stored" and never surfaces as an error (SR33), and `Model.ownedEntryPatch` must name EVERY key the plugin owns. Adding a key and removing two is a change to exactly the machinery D-LOGO-2 was filed against, which named only some owned keys and wrote stale values back. The migration is silent and needs nothing from the user -- deliberately, and that same invisibility is the whole reason SR39 cost 2 LOOKS like data loss, which is why the two are documented together and not as separate warnings. **Overturned in part 2026-10-11 (R1, R5, R7):** "creating none and deleting none" was false against the code. The migration IS the adopt path (`Model.adoptActiveSource` step 1 -> `Model.reconcileSources`): a URL the history knows makes that record active; one it does not know is ADDED (`migrated` on the very first v2 run, `cli` after), and at the 50 cap the least-recently-used non-active record is evicted with its cache, as any CLI adoption. "Must not lose a source" is therefore graded as "keeps the count it went in with" over a TWO-source state, one active and one not (node: `R7: the migration keeps the source count it went in with`, seen red by mutation; the harness half is lane B's). The two writes are ordered by `Model.pointerWritePlan` (R5): state first, entry waits for a parked state save, so an INTERRUPTED migration leaves the old shape and never a pointer-less record -- R5's claim, about the shell dying between the two writes; see the next amendment for the uninterrupted start. **Amended 2026-10-12 (D-SRC-15, round 3, R9-R11).** R5 ordered the two writes, and the UNinterrupted first start still lost the pointer on the round-2 tree: the helper's start-up `state init` chmodded the existing `state.json`, the service's `stateFile` FileView reloaded on that `IN_ATTRIB` (mode changed or not -- measured on a FileView probe, a chmod 0600 -> 0600 delivers `fileChanged` and a `loaded` with the file's text), `applyUserState` was handed the pre-adoption text while the adoption's save was still parked behind `dirsReady`, `Model.stateOnLoad` kept only the session record, and the parked save then wrote the key-less state while the entry flush stripped the URL with `sourceKey ""`. Found live by the harness lane on 2026-10-11 (key-scenario 32 / 12 on lane-key-r2, sources-scenario 46 / 22; 66 / 0 on dev) and reproduced by two review lenses; the D-SRC-15 row in `STATUS.md` and the section of that name in `QA-RESULTS.md` carry the measurement. So the migration this row describes is what the tree does ONLY with R9-R11 in it, and it is observed rather than argued: on lane-key-s2 (3c5e473, lane-key-s1's code under lane B's harness) `key-scenario.sh live` reads 49 passed / 0 failed, and 36 / 13 over `--baseline lane-key-r2` with D2, D3, M1, M3, M5, C1-C5, E1, O5 and O6 red -- everything that rests on an adoption made at start-up; `sources-scenario.sh` under cage reads 63 / 3, the three pinning the pre-round-2 contract (DQ-A4 / DQ-B7), not this. R9: a reload never replaces in-memory state that is newer than the file -- `Model.reloadDisposition` (lane-key-s1) is asked FIRST in `applyUserState` and answers `ignore` for the service's own write echoed back, a save parked, a save in flight (one `saved` per `setText`, measured, so it is a counter and not a flag) or a failed save, and `apply` for the first load and for a file that is genuinely newer; an ignored reload runs neither the reconcile nor the cache layout, and the count is `stateReloadsIgnored`, which the harness reads (D3: the file seeded 0644 so the chmod fires, `ignored:yes`). R10: the helper stats first and chmods only when the mode differs -- belt, not fix, because a same-mode chmod reloads too, and a 0644 file still gets the chmod and the reload R9 absorbs. R11: the entry mirror that waited for the parked save is written only once that save has LANDED (the FileView's `saved`, not `setText` returning) and the helper's `state init` exited 0; on either failure the entry is left exactly as it is -- the URL on it is the only copy of a source whose state write did not land -- and a line with no URL in it is logged (`Model.entryFlushDisposition`; the order in `stateInitProc`'s exit is pinned by a structural check that reads `Service.qml`). Two bounds on the claim. The created-file shape (no `state.json` at all) was written by one round-2 lens as dropping the same way and is MEASURED not to: a FileView loaded over a missing path never sees the helper's create, N1-N4 are green on the dropping tree and `stateReloadsIgnored` reads 0 across a fresh start, so the fresh install was never exposed and the existing-file shape -- every upgrade -- was. And the sibling the data-loss lens found is covered by the same flag rather than by a second mechanism: `cacheReady` is set before `dirsReady`, so an IPC switch or remove in that window parks a save, and the reload that follows is ignored; a scenario that drives it is nobody's yet. **Amended 2026-10-12 (round 4, R13-R15).** Two corrections to the amendment above and one closure. "One `saved` per `setText`" was measured for two back-to-back writes and does NOT hold for a burst (10 warm switches: 20 `setText`, 14 `saved` on lane-key-t1, 15 on lane-key-s2; a 26-write FileView probe: 25 `saved` + 1 `saveFailed`, `text()` tracking the write that STARTED -- lane A, 2026-10-12, under cage), so "in flight" is decided by content (`Model.stateSaveLanded`) and `stateSavesInFlight` is 0 or 1; the signal-counting version stuck above zero after a burst and, on lane-key-s2, read every later foreign reload as "save in flight" (lane A's DQ-T4: D-SRC-16, P2, a sibling of D-SRC-15 fixed on lane-key-t1 by the content rule and unreleased; cited by id since round 6, once the board row existed). The ignore counter is BY REASON (`stateReloadsByReason`, R15), because the plain total was satisfied by the own-write echo that follows every start and could not go red for the chmod reload D3 names (the round-3 review's P2). And the sibling "nobody's yet" is observed: key-scenario W1-W6 on lane-key-t2 (an IPC switch and then a remove inside the slow start-up window over a 0644 file; W2 and W6 red on `--baseline lane-key-r2`, W3/W6 reading NOFIELD on lane-key-s2 for the counter it lacks). Counts on lane-key-t2 (lane B's transcripts, 2026-10-12): 62 / 0 forward, 54 / 8 on `--baseline lane-key-s2`, 38 / 24 on `--baseline lane-key-r2`. |
 | SR39 | nothing | **The three costs, accepted by the owner on 2026-10-09, each of which is documented in the README in plain language.** (1) `omarchy bar set ... playlistUrl` is input only: adopted, then replaced by the key, and the value is gone when the user looks again (SR37). (2) **Downgrading breaks the setup.** An older build looks for the URL on the bar entry, finds none, and reports the plugin as not configured. Nothing is lost -- the sources are still in `state.json`, and the recovery path already exists in the older build: an unconfigured guide opens the first-run form (`Model.openFirstRun`), which carries the `Saved sources (n)` link row into the Sources screen, which is scenario 3.1.6 in `UX-SOURCES.md` and the transition at its line 261. That it is the OLD build's own affordance is what makes the recovery possible at all, and it is read off the shipped code and the UX spec rather than exercised, because this lane holds no display -- but it LOOKS like data loss, and it looks like data loss precisely because the migration was invisible. The release notes and the README say so plainly; softening it is how a user with a working install comes to believe the update ate it. (3) **Losing `state.json` becomes fatal to the source list.** Today the URL in `shell.json` is an accidental backup: wipe the state file and `Model.reconcileSources` re-adopts the URL and rebuilds the record (D3). After this there is nothing to rebuild from and the key is one-way. This is the cost the owner was asked about by name and accepted; it is not softened anywhere, and the README does not tell the user to copy the file around without also saying that the copy carries their provider credentials. **Amended 2026-10-11:** the round trip back up is a MIXED shape (section 2.2 as amended): the older build leaves `sourceKey` on the entry and writes the newly picked `playlistUrl` beside it, and `Model.adoptActiveSource` step 1 resolves that to the URL, so the source picked while downgraded is the one that comes back -- the first build put the stale mirror first and silently reverted the user's choice. Derived from both builds' code; the live round trip is UNVERIFIED. Cost (3) stands exactly as written above: the only change round 2 made to it is tense -- the URL in `shell.json` WAS the accidental backup -- and that is not a second cost (trimmed 2026-10-12 after the round-3 review found it stated twice). |
 | SR40 | nothing | **The mode shield stays, and so does the gate in front of a persist.** After this change the plugin's own persists carry a key and no URL, so `Model.persistCarriesSecret` answers "no secret" on every ordinary path and the gate stops firing there. That is the change working, not the gate becoming dead code, and it is not a reason to delete either half. Four reasons, in order of how much they cost if ignored: (i) `omarchy bar set` is still a write of a URL into that file, made by the HOST on the user's instruction, which the plugin cannot gate at all -- the shield is the only thing that tightens the container around a write the plugin does not make; (ii) an install upgrading into this release still has a URL in `shell.json` until the migration's rewrite lands, and the shield runs on the startup path unconditionally, which is D-SINK-18 residual 3 and F-M3-16's lesson that the artifact needs the fix as much as the derivation does; (iii) the key is still a confirmation oracle (SR36), so a private container is still worth having; (iv) a predicate that answers correctly for a write nobody makes today is how the next feature that does write one gets gated by construction instead of by somebody remembering rule 5. The precise post-change behaviour of that predicate and of the deferred-persist slot is the code lane's and is **UNVERIFIED BY ME**: read it off `Model.js` and `Service.qml`. **Settled 2026-10-11:** the gate's question is asked of the ENTRY about to be written -- `Model.entryShieldDecision` over `Model.ownedEntryPatch` -- which answers `persist` for every shipping write (no URL-bearing key is owned) and `refuse` or `defer` the moment a URL-bearing key is written again, whoever writes it; the deferred slot holds `{ sourceKey }`. The guide's `config_unsafe` sentence (`Settings file could not be made private`, with the chmod) is therefore unreachable from any write this version makes, and the README says so rather than documenting a message nobody can see. The shield's re-arm after every owned write and its unconditional startup run are unchanged. |
@@ -1526,7 +1555,11 @@ backup it accidentally is -- and a warning with no URL is logged; the ORDER
 stripped unadopted -- an `epgUrl` set with no active source stays on the entry
 until a source exists and adopts it (`Model.epgSnapshotAfter`, fixture section
 `snapshot`, 5 cases; the adopt case `R4/R12` flipped from `writeEntry` true to
-false). Also ruled and landed: the two older empty-state strings in
+false) [round 9: the on-entry half is OVERTURNED by R19b -- with no active
+source a valid input is held in `state.json` as `pendingEpg` and taken off
+the entry by the same R13-gated write; "never stripped unadopted" stands,
+because the copy in the state is written before the strip; the round-9
+rulings below]. Also ruled and landed: the two older empty-state strings in
 `Guide.qml` (`unconfiguredEpg`, `unconfiguredWhere`) moved to the text in
 `UX.md` 6.3 and `UX-SOURCES.md` 3.1.1; the helper's `state source update`
 warning rewritten for the overturned D-SRC-11 design (the record is the only
@@ -2018,7 +2051,10 @@ mirror's write that follows the remove. A pending input REPLACES a guide URL
 the record already had, as reconcile's adoption always has (R4) -- including
 the EPG field of an in-app add's own form when the two differ, which is lane
 A's OQ-W3 and open [round 8: ruled the other way, R18d -- the form's guide
-URL wins and the pending value is superseded].
+URL wins and the pending value is superseded] [round 9: both readings are
+OVERTURNED -- the pending input waits in the state, not on the entry (R19b),
+and at the move the LATER of it and the record's own guide URL wins, by
+time (R19c); the round-9 rulings below].
 
 R17c. OQ-V1 is confirmed: an absent `stateLoaded` means "not loaded", so
 `Model.ownedWriteMode` answers `patch`. It fails safe: a caller that forgets
@@ -2126,7 +2162,9 @@ lead and UX) [round 8: ruled, R18d, the form's]; the unconfigured empty state's 
 of the unconfigured empty state), which is exactly the state in which R12 KEEPS
 the value in `shell.json` until a source becomes active (`UX.md` 4.4,
 `UX-SOURCES.md` 3.1.1; a copy decision for the Guide's owner, raised here
-rather than resolved); the second half of D-HOST-4, the other own-write
+rather than resolved) [round 9: resolved by the code, R19b -- the value is
+held in `state.json` and off the entry once that write lands, so the
+caption is true]; the second half of D-HOST-4, the other own-write
 scenarios (E6, the key-mirror segments, the L toggle) run both ways on the
 echo lever; the in-app add with a pending EPG, observed in node (E4) and
 not live [round 8: observed live, key-scenario A1 and A2, with two saved
@@ -2203,7 +2241,9 @@ characters alone is NO input everywhere, where round 7 kept it on the entry
 for good and the next heal now strips it.
 
 The search R18a asked for found a sibling (lane A's OQ-X1; it has no id,
-because the board is the lead's and the ledger refuses an id with no row):
+because the board is the lead's and the ledger refuses an id with no row)
+[round 9: the board now carries it as D-SRC-17, fixed on lane-key-x1 and
+never shipped]:
 an `epgUrl` of control characters alone (a BEL, `\u0007`) validated as the
 EMPTY guide URL, and `Model.adoptActiveSource` replaced the active record's
 guide URL with "" -- against R4, "an empty EPG input is a no-op". Lane A
@@ -2238,7 +2278,12 @@ raw `published` feeds only the keep decision (normalised), `Model.entryWith`
 clamps; `Model.sourceView` reads a record, not the entry; and `Guide.qml`
 and `BarWidget.qml` read no entry value.
 
-R18b, THE CYCLE SETTLES. A write that changes nothing changes nothing. Two
+R18b, THE CYCLE SETTLES. [Round 9: decision (1) below, the write skip, is
+OVERTURNED by R19a -- on the lagging host a publish A -> B -> A brought
+`Service.lastEntryWrite` back and the funnel skipped writes the host would
+have stored; decision (2), `Model.sameOwnWrite`, stands and alone settles
+the cycle; OQ-X2 is moot. The text is kept as the round-8 ruling read.] A
+write that changes nothing changes nothing. Two
 decisions in the funnel, both in `Model.js` so the node driver calls what
 `Service.qml` calls. (1) `Model.entryWriteNeeded(id, entry, published,
 lastWrite)` answers the host's own dirty check -- `JSON.stringify` of
@@ -2343,7 +2388,13 @@ added the same playlist URL while the add's probe ran -- the commit keeps
 the CLI's record, which does not carry the form's guide URL (pre-existing S5
 behaviour), so nothing is handed and the pending CLI value is adopted as
 before. Handing it would strip the pending value too, and the user's two
-EPG inputs would then both exist nowhere.
+EPG inputs would then both exist nowhere. [Round 9: R18d's form-wins rule is
+OVERTURNED by R19c. It asked nothing about WHEN either input was made, so a
+CLI `epgUrl` set while the add's probe ran -- after the submit -- was dropped
+although it was the later input (the eighth review's P1-B, live), and the
+oracle's supersede exemption covered exactly that case. OQ-X3 is ruled: the
+form's guide URL lands on the kept record in the `known` branch by time,
+through `Model.epgByTime`. The confirmations of OQ-W1 and OQ-W2 stand.]
 
 Pins on lane-key-x1 (1f8bd1b code and node, lane A; 7a429cd the live
 segments; 1565973 their counts), each calling the shipping code, 45
@@ -2451,4 +2502,326 @@ have not run both ways; D-SINK-20, unchanged; the documents of this round
 are lane-key-x2's and nothing was run live by that lane; and `Model.js` at
 589,114 bytes on lane-key-x1, further over the marketplace scanner's
 524,288-byte per-file limit (D-REL-5; the other workflow's split re-run over
-this file at integration).
+this file at integration). [Round 9: OQ-X2 is moot and OQ-X4 accepted
+(R19e); OQ-X3 is ruled (R19c); OQ-X6 is measured as PERF-02 defines the
+budget (R19e, below); OQ-X1 is D-SRC-17; the in-app add into an empty
+source list is still node only; and the chain landed on the split model as
+lane-key-y0 c017d24, so the model is `Model.mjs` and its parts.]
+
+### D-SINK-19 round 9 rulings (lead, 2026-10-12; R19, on top of R1-R18, which stand except where R19 replaces them)
+
+Issued after the eighth adversarial review (two lenses over lane-key-x2
+a4a3935, 2026-10-12). The chain then landed on `dev`'s split model as
+lane-key-y0 (c017d24: `Model.js` cut into `Model.mjs` and its parts, the
+chain's three `Model.js` comment citations reworded first), and round 9 was
+built on that as lane-key-y1 (690a888 the code, 19f3d0b to 7d9f519 the
+scenario, one fix and its pin). Both lenses closed round 7's P1s on
+lane-key-x2: the write loop (LOOP 0 in 571,000 runs of the data-loss lens's
+matrix, against 2,774 on lane-key-w2) and the whitespace hole (RZ 0; the
+refused-value cases 774 -> 4 per host, those four being the new defect).
+They found:
+
+P1-A, both lenses, live. R18b's write skip. `writeOwnedEntry` returned
+early when `entryWriteNeeded` said the host already stored the entry,
+judged from `Service.lastEntryWrite` while the publish equalled the publish
+recorded at the last write. On the lagging host the publish recorded right
+after a write is the PRE-write entry, and an `omarchy bar set` that restores
+exactly that entry (`PluginRegistry.setBarWidget` does `entry[key] = value`
+in place, so any entry the plugin has written once is reproduced exactly)
+publishes the write and then the restored entry: A -> B -> A. The record
+compared equal again although the host now stored A, and the next action
+whose entry equalled the last write was skipped. Three consequences, each
+observed live under a nested cage on the lagging fake host, and clean on
+lane-key-w2 and on the echoing host. An in-app logo OFF after `omarchy bar
+set ... showLogos true` did nothing: the guide said `logos off`, logos
+stayed on and were fetched, also after a restart (`in-app toggle OFF #2:
+guide showLogos=True entry writes +0`). A refused credentialed
+`playlistUrl` set again stayed in `shell.json` for the rest of the session:
+the live lens saw it survive 30 s, a guide open and close and a refresh
+(`after set #3: ... stored playlistUrl true ... hand-overs 2`), and only
+the next start removed it. And an `epgUrl` set twice for the active source
+stayed on the entry and replaced a later in-app guide URL edit at the next
+start (`after restart: ... record epg=E`). The node suite (2,236 / 0) and
+key-scenario (79 / 0) were green over all three: no check re-set an
+identical value, and the input audit ran only at writes that were made, so
+a skipped write was never audited. The code's own comment on
+`onHostSettingsChanged` stated the rule the record broke, for the override
+("a host value that later returns to what it was when we wrote must not
+resurrect a spent override"); `lastEntryWrite` was the sibling not given it
+(rule 15).
+
+P1-B, the data-loss lens, live. R18d superseded a pending CLI `epgUrl` set
+AFTER the add form was submitted, while the probe ran: the later input E
+ended on no record and off the entry (`E ... on record: no-record; F on
+record: <key>`; lane-key-w2 kept E and lost F, so neither tree kept the
+later value). R18d asked nothing about when either input was made, and the
+oracle's supersede exemption, keyed on the time of the supersede rather
+than of the form's submission, covered exactly this case. P2, the same
+principle on the EDIT form: a guide URL typed into the edit form while an
+older CLI `epgUrl` was pending was replaced by the older one at the switch
+(`switch to A: ... A.epg=E`); R18d's sibling search had cleared the edit
+route because "there is no add form", and the edit form has a guide URL
+field. P2 (a12): reverting `Service.activeEpgUrl` to its round-7 read
+reddened nothing, node or live, and is not equivalent -- the two reads
+differ on an input of control characters alone, which does sit on the
+entry until the next write. P3, already on the board as D-SRC-18: an input
+left on the entry because its state write failed is re-adopted at the next
+start over a later in-app edit that landed.
+
+R19a, NO SKIP ON AN ESTIMATE. The funnel never skips a write on an estimate
+of what the host stores. Every owned write is handed to `updateEntryInline`
+and the host's own answer is the dirty check -- `false` from a writable
+entry is "already stored", which is success (rule 9) -- and the own-write
+record is reassigned only when `Model.sameOwnWrite` says it differs, which
+alone settles the cycle. `Service.lastEntryWrite` is gone. `entryWriteNeeded`,
+`entryWriteRecord` and `hostEntryForm` have no shipped caller and are pinned
+as having none (`R19a (structural)`); they stay declared only because the
+round-8 text in this file and three other documents cite them, and they are
+cited here without the `Model.` prefix so that the commit that deletes them
+has only the round-8 citations to reword. The keep warning is back in
+front of the hand-over, and when the host answers `false` the funnel returns
+before re-arming the D-SINK-18 shield, because nothing was written. With
+the skip AND `Model.sameOwnWrite` both removed there is still no loop, in
+node (lane A's m2), in the lens's loop proof or in the matrix: R19b took
+away the loop's precondition, an EPG input that stayed fresh on the entry
+forever. `Model.sameOwnWrite` is kept and pinned anyway (m2 reddens 4).
+OQ-X2 is moot.
+
+Rule 15 for R19a, lane A's search for any other "last seen" estimate keyed
+on a value that can recur (`property .* (last|prev|recent|reconciled|seen|known)`
+over `Service.qml`, `Guide.qml` and `BarWidget.qml`, plus every comparison
+of a remembered value against a fresh one). `lastEntryWrite`: removed.
+`ownWrite`: cleared -- `onHostSettingsChanged` drops it on any publish other
+than its base, so it cannot come back. `reconciledPlaylistUrl` /
+`reconciledEpgUrl`: cleared -- they move on every reconcile and track the
+previous publish, so A -> B -> A re-adopts A, which is right because A is a
+later explicit input; the one way a value comes back without a user act is
+D-SINK-20's patch-only re-carry, already filed. `recentSaves`, own-write
+reload detection by text: OPEN, low severity -- a foreign write byte-identical
+to one of the last 8 pretty-printed saves is ignored, so memory overwrites a
+user's restore of an older `state.json`; the helper writes compact JSON and
+cannot match it, so only a hand edit can. `lastSaveText` /
+`Model.stateSaveLanded`: cleared -- a save sequence A, B, A' can read as
+landed early, but the content then equals memory, and a key mismatch
+resolves through R1 step 2. `preparedLru` (keyed by `channels.json` text)
+and `logoHave` (tagged by directory): cleared, correct by content.
+`lastEndFile`, `previousPlaying`, `lastFailedId`, `lastError`: per event,
+never compared against a recurring entry value.
+
+R19b, A PENDING GUIDE URL LIVES IN THE STATE. An `epgUrl` input that no
+record can take -- no source is active -- is adopted into `state.json` as
+`pendingEpg { url, seenAt }` (section 2.1), never into `shell.json`, and
+stripped from the entry by the same R13-gated owned write that strips every
+consumed input, so it counts as held (`Model.retiredInputsToKeep`). This
+REPLACES R12's on-entry pending state, which kept a possibly credentialed
+URL -- an Xtream `xmltv.php` carries the account -- in a file the plugin
+does not own for as long as no source existed; R12's principle, never
+stripped unadopted, stands, because the state copy is written before the
+strip. `Model.adoptActiveSource` holds a valid input and consumes a refused
+one as refused (reported and written out, as beside an active source;
+lane A's reading (a)). A later input replaces an earlier one. The service
+logs `no source is active; the guide URL input (epgUrl) is held in the state
+for the next one`, setting names only. `Service.activeEpgUrl` reads the held
+URL when there is no record (`Model.activeEpgUrlOf`, below), so the guide's
+fallback is unchanged. The whitelist trap, rule 15's other shape:
+`Model.parseState`, `Model.cloneState` and `Model.normalizeSourceRecord` are
+taught the two new keys, and `Model.copySourceRecord`, `Model.replaceSource`,
+`Model.withSourceStats`, `Model.touchSource` and `Model.updateSource`'s
+replacement record already carry `epgSetAt` by copying whole records. The
+helper's `normalize_state` / `normalize_source` are NOT taught them: every
+helper write of the file erases `pendingEpg` and every `epgSetAt`. Open, no
+id yet; `bin/` is not this round's.
+
+R19c, THE LATEST EXPLICIT INPUT WINS, BY TIME. Every record carries
+`epgSetAt` (ms, persisted; section 2.1), set when its guide URL is set: by
+the add form at SUBMIT time -- `Service.addSource` hands `Date.now()` to
+`Model.addSource` at the moment it is called, never at the probe's commit --
+by the edit form when it changes the guide URL (`Model.updateSource`), or by
+adoption with the input's `seenAt` (`Model.adoptActiveSource`). At an active
+move -- a switch, an add's commit, an edit-then-switch, the S5 `known`
+branch -- the held value lands on the newly active record iff its `seenAt`
+is LATER than the record's `epgSetAt` (absent = 0; an equal time is not
+later), and otherwise the record keeps its own (`Model.epgByTime`,
+`Model.applyPendingEpg`); either way the held value is cleared, with a log
+line naming the setting and the source key only (`a pending guide URL
+(epgUrl) lands on source <key>`, or `... is superseded: source <key> keeps
+the one set later`). `Service.adoptPendingEpgOnto(key)` takes the key and
+nothing else; the R18d form-wins argument is gone. OQ-X3 is ruled: in the
+`known` branch the form's guide URL lands on the kept CLI record with its
+submit time through `Model.epgByTime` iff it is later than what that record
+holds, and a held input is then judged against the result. A CLI `epgUrl`
+beside an ACTIVE source is adopted onto it as before (R4), stamped with its
+`seenAt`. Records written before R19 have no `epgSetAt` and read as 0.
+Lane A's readings, for the lead to confirm: (b) the `known`-branch landing
+also applies to a playlist-URL EDIT whose new URL the CLI added during the
+probe, through the same call; (c) the edit form stamps only a guide URL it
+CHANGES, because the form re-sends every field, so re-typing the same URL
+does not move its time; (d) a re-set equal to the guide URL the active
+record already holds is not re-stamped (308258f) -- no held value can be
+waiting while a source is active, and the state write a re-stamp costs
+deferred the strip behind R13 and hid a later re-set of the same value
+(found by the round-9 matrix; pinned, 3 red before the fix); (e) times are
+`Date.now()` on both sides, so a wall clock stepped backwards between two
+inputs inverts their order.
+
+Rule 15 for R19c, every place a guide URL is set. Stamped: the add form
+(`Service.addSource`; `buildXtreamSource` routes through it, so an Xtream
+login's `xmltv.php` is stamped at submit), the edit form
+(`Service.updateSource`; the IPC `updateSource` routes through it), CLI
+adoption beside an active source, a held value that wins, and the S5
+`known` branch. Not stamped: `Model.reconcileSources`' new CLI-added record,
+which never carries a guide URL (step 1 passes `adoptEpg` false); and the
+helper's `state source add|update --epg-url` (`bin/`, the open item above).
+
+R19d, D-SRC-18, SETTLED under R19c for the shape on the board. The order of
+the input and the later edit IS known, in memory; what was missing was the
+write that would have recorded it after the failure. So a held key mirror
+dropped because its save failed (`Model.entryFlushDisposition`,
+`save-failed`) now leaves a debt, `Service.entryMirrorOwed`, and the first
+later save to LAND with nothing held, parked, in flight or failed pays it
+with one key mirror through the funnel (`Model.owedMirrorAction`, deferred
+from the FileView's `saved` by `Qt.callLater`), which strips everything
+consumed; a heal clears the debt itself. Observed live (key-scenario H1:
+the failed adoption leaves the input on the entry, the later edit's save
+lands, the owed mirror takes the input off, and the restart stands on the
+edit; red on `--baseline lane-key-y0`), in node under both hosts
+(`R19d (... host) D-SRC-18`) and by the lens's `trace-lf` (`after restart:
+file A.epg=G`). Where the order cannot be known: the shell dying in the one
+`Qt.callLater` between that landing and the owed mirror -- the next start
+then re-adopts the input, seen "now", because the write that would have
+recorded its time is the one that failed. And the lens matrix still reads
+LF 6 (lag) and 4 (echo) at length 3, every one with state saves held and
+every other save failing (`cliE|cliE2 > editActiveEpg > editB_epg`); lane-key-y0
+reds on the same combinations, so they are R13's save-failure class rather
+than this shape, recorded rather than settled. The rest of R19d's search:
+`Model.entryFlushDisposition`'s `drop init-failed` is not made owed, because with
+the start-up `state init` failing no save can land anyway; and the logo
+toggle in patch mode keeps the retired keys by design (R16), and the next
+heal pays.
+
+R19e. OQ-X2 is moot under R19a. OQ-X4 is accepted: a value equal to another
+under the one normaliser is the same input, and a value of whitespace or
+control characters alone is no input -- the two behaviour changes R18a's
+text records stand as ruled. OQ-X6: the 150 ms budget is the OPEN WORK as
+PERF-02 in `QA-RESULTS.md` defines it, the `ipc toggle` round trip minus
+the IPC round trip. Measured that way by lane A on 10,000 generated
+channels under a nested cage at load about 1.6-1.8, three fresh shells per
+tree, the IPC round trip taken as the median of five `ipc widget` calls
+(59-60 ms): the cold first open is 164, 162 and 159 ms of open work on
+lane-key-y1 and 165, 156 and 161 ms on lane-key-y0; the warm medians are 88,
+93 and 90 ms (max 102) on lane-key-y1 and 87, 88 and 86 ms on lane-key-y0.
+So by the ruling's own definition the cold first open is OVER the budget on
+both trees, by 6 to 15 ms, the warm open is inside it, and round 9 moves
+neither. Whether the cold open needs a defect id is the board's.
+
+a12, rule 12. `Service.activeEpgUrl` is now one call,
+`Model.activeEpgUrlOf(record, input, pending)`, which node calls (`R19 /
+a12: activeEpgUrlOf ...`): beside a record an input of whitespace or
+control characters alone is no input and the record's guide URL stands
+(D-SRC-17's shape, R18a); an input that is something and does not validate
+is returned as it is, so the helper reports it (D16); with no record, the
+input on the entry, else the held URL. Lane A's m9, the inline read back,
+reddens 1. Its search found no other inline read: `Guide.qml` and
+`BarWidget.qml` read no entry input.
+
+Pins on lane-key-y1, each calling the shipping code, 38 `ok   R19` titles.
+Units: `R19b (R12 until round 9): an EPG input with NO active source is
+HELD in the state as pendingEpg and consumed ...`; `R19b: the EPG set
+before any source is held at the first reconcile ...`; `R19c:
+adoptPendingEpg over a value HELD in the state -- it lands iff its seenAt is
+LATER ...`; `R19c: epgByTime ...`; `R19b/R19c: parseState and cloneState
+carry pendingEpg ...`; `R19c: addSource stamps the form's guide URL with
+the submit time ...`; `R19 / a12: activeEpgUrlOf ...`; `R19d:
+owedMirrorAction ...`. Service-order driver cases under both host shapes
+(`R19a (lag host)` / `(echo host)` and the same for R19c and R19d): A -> B
+-> A on the logo, the refused and the EPG routes; the probe race, form
+first and CLI first; the edit route in both orders; the S5 `known` branch
+with no CLI EPG, with one set after the submit, and with one set before it;
+a restart between the input and the move, in both orders, the times read
+back from the file; the re-set not re-stamped with every state write in
+flight (308258f); and D-SRC-18. Two structural pins, `R19a (structural):
+the funnel hands EVERY owned write to the host ...` and `R19c (structural):
+the probe commit hands adoptPendingEpgOnto nothing but the key ...`. The
+input audit (`R17 / R18c / R19 / rule 15: the input audit -- ...`) now
+counts the state's held guide URL as held and a supersession only by a
+LATER time, and wants declined hand-overs and moves seen. The `adopt`
+fixture section grows from 25 to 32 cases, two R12 cases rewritten as R19b.
+Removed, with notes left in their place: the R18d form-wins unit and the
+`entryWriteNeeded` unit; and the two round-8 structural pins, `R18b
+(structural)` and `R18d (structural)`, are replaced by the R19a and R19c
+ones (the driver still binds the funnel's lines, now through `R19`). Live, key-scenario segments Y, Q, V and H (floor 78
+-> 85; `qa-lib-test.sh` 453 -> 454 with a pin that the slow listener is
+killed by its recorded pid): Y lifts the lens's `aba-child.sh` (Y1 the logo
+route, Y2 the refused route, Y3 the EPG route), starting, as that driver
+does, over an entry carrying A's URL -- written first over the harness
+seed, Y1 and Y3 were green on lane-key-y0, which has the defect (1a88ab2);
+Q lifts `race-child.sh`, the probe held open by a local listener that
+answers after 4 s, its pid read from `ss -ltnp` and killed by that pid (Q1
+form first, Q2 CLI first); V lifts `T=edit`; H is D-SRC-18 at the sink with
+F's lever (the state directory 0500 under the running shell). U, K and A
+now read `held:` from `state.json`.
+
+Counts, each with where it was measured. Lane A on lane-key-y1: node 2,268
+/ 0 (+32 over lane-key-y0's 2,236), python 1,135, qml spec 78,
+`qa-lib-test.sh` 454 / 0, the key preflight 11, 745 declarations in 18
+parts and 636 names exported from `Model.mjs`; the gate rc 0 on 19f3d0b,
+42850dc and 7d9f519. The same test files over lane-key-y0's code: 2,266 /
+52. One-decision mutations of the shipping code, each a full copy with the
+node suite run, on 19f3d0b's code (2,266 checks): the skip put back 6 red;
+`Model.sameOwnWrite` removed 4, with no loop; the held input not counted as
+held 37; an equal time winning 3; the held value always winning 17; no
+submit stamp 12; no owed mirror 2 (D-SRC-18 on both hosts); the held clause
+removed from `Model.retiredInputsToKeep` 0, argued equivalent above; the
+a12 inline read 1; no by-time landing in the `known` branch 5; the edit
+stamping an unchanged URL 1; no edit stamp 6; `seenAt` 0 28; the held value
+not cleared 41; `Model.parseState` dropping `pendingEpg` 7; reconcile not
+applying the held value 6. The 308258f pin was red against 19f3d0b's model
+part (2,268 / 3). Live, lane A's transcripts under the scenario's own
+nested headless cage: forward on 42850dc 86 / 0
+(`key-20261012-181012-2900687.out`, 205.2 s; every K window 0 writes and 0
+ticks; no credential token in the harness log); `--baseline lane-key-y0` 74
+/ 12 (`key-20261012-181343-2916616.out`): U1, U2, U5, K1, K2, K3 read the
+EPG still on the entry and not held, Y1 `off2:true/0`, Y2 `after:no no
+yes`, Y3 `twice:E/yes ... after:<A>/E`, Q1 `during:no/<key> ... on:F`, V1
+`on:E`, H1 `landed:false/yes ... after:<A>/E`, with A1, A2 and Q2 green as
+the controls; the two key-mutation patches through `--tree` 80 / 6
+(`-182219`: D2, D3, W2, W3, W4, W6) and 81 / 5 (`-182602`: D2, W2, W3, W4,
+W6), the letters their README names. `sources-scenario.sh` 66 / 0 (the 10k
+switch median 35 ms) and `logo-scenario.sh live` 33 / 0 under a nested
+cage on the same tree. The eighth review's instruments, adapted by lane A
+(the simulator loads `Model.mjs` and carries round 9's `Service.qml` hunks,
+gated on the tree having `Model.pendingEpgOf` and `Model.owedMirrorAction`;
+the matrix counts a guide URL held in the file as present, and an earlier
+input superseded at an active move by a later in-app edit as superseded):
+on lane-key-y0 they reproduce every round-8 finding and the length-2 matrix
+reads lag 24 and echo 16 (78,540 runs per host); on lane-key-y1 every
+proof reads ok on both hosts and the length-2 matrix reads 0 and 0. At
+length 3 (206,780 runs per host, a 14-operation subset chosen by lane A to
+match the lens's run count, the lens having recorded no list) lane-key-y0
+reads lag 623 and echo 420, lane-key-y1 lag 64 and echo 51, every one with
+state saves held; 56 (lag) and 43 (echo) are combinations lane-key-y0 also
+reds on -- the identical re-set while its strip is held, and R13's
+save-failure class -- and 8 per host are new, all one shape (below). LOOP 0
+everywhere; the logo route 0, against lane-key-y0's 10.
+
+What this round leaves open, with its owner. The helper's whitelists
+(`normalize_state`, `normalize_source`) erase `pendingEpg` and `epgSetAt`
+on every helper write of the file -- an input then exists nowhere, or a
+held value later beats an in-app edit; it needs an id, a shared fixture and
+a helper change (the lead's board, then the helper's lane). A new
+reachability of an R13 residual (lane A): RZ, saves held and every other
+one failing, `cliP_A > removeActive > cliE` -- R19b makes holding a guide
+URL a state write, and when that later write fails, R13 drops the remove's
+mirror, a CLI playlist URL stays on the entry and is re-adopted at the next
+start, so a removed source comes back. The user was told the write failed
+(`state_write_failed`); whether a failed hold should leave the remove's
+strip in place, deciding by landed content rather than by the last save, is
+the lead's. `recentSaves` matching a hand-restored older `state.json` (low,
+above). The cold first guide open over 150 ms of open work on both trees
+(R19e). Deleting the three retired functions, which needs the round-8
+citations reworded in the same commit. Lane A's readings (a) to (e), and
+whether to keep the held clause m8 shows equivalent. The in-app add into an
+EMPTY source list with a guide URL held, still node only (E4). D-SINK-20,
+unchanged. And the documents of this round are lane-key-y2's, a documents
+lane that ran nothing live; every live count above is lane A's, re-read
+from its transcripts.

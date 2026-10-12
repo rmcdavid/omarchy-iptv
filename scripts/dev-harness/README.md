@@ -1165,7 +1165,7 @@ handing the form's guide URL over, 78 / 1 (A2). `sources-scenario.sh`
 **66 / 0** (the 10k switch median 33 ms) and `logo-scenario.sh live`
 **33 / 0** under a nested headless cage on the same tree.
 
-**Round 9 (R19: Y, Q, V, H; U, K and A re-read).** Both round-8 lenses
+**Round 9 (2026-10-12, R19; Y1..Y3, Q1, Q2, V1, H1 added, 78 -> 85; U, K and A re-read).** Both round-8 lenses
 found the write skip R18b added coming back after a publish A -> B -> A on
 the lagging host, live, and the data-loss lens found the add form's guide
 URL superseding a CLI epgUrl set AFTER the form was submitted (and the
@@ -1186,7 +1186,15 @@ failed** -- U1, U2, U5, K1, K2, K3, Y1, Y2, Y3, Q1, V1, H1, with A1, A2 and
 Q2 green as its controls; the two key-mutation patches through `--tree`
 **80 / 6** and **81 / 5**, the same letters as before. `sources-scenario.sh`
 **66 / 0** (the 10k switch median 35 ms) and `logo-scenario.sh live`
-**33 / 0** under a nested headless cage on the same tree.
+**33 / 0** under a nested headless cage on the same tree. `qa-lib-test.sh`
+goes 453 -> 454: three existing wants move with the scenario (the key path
+6 -> 9, the restarts 5 -> 7, the U..P log marks 1 -> 3), and one new pin
+reads that `cleanup()` kills Q's slow listener by the pid read from the
+listener (`ss -ltnp`) rather than by a pattern (parallel rule 3). The
+documents of round 9 (lane-key-y2) re-read each count above from lane A's
+transcripts: `-181012` 86 PASS / 0 FAIL, `-181343` 74 / 12 with exactly the
+twelve letters named, `-182219` 80 / 6 (D2, D3, W2, W3, W4, W6) and
+`-182602` 81 / 5 (D3 green).
 
 **The weak already-stored check, fixed in round 4.** 'a switch the host
 already stores is not reported as a persist failure' means to make the

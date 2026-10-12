@@ -295,7 +295,26 @@ the publish once it has (`Model.entryWriteNeeded`, the host's own
 would answer `false` to, and re-records its own write only when the record
 differs (`Model.sameOwnWrite`). On the echoing host the estimate is the
 echo itself, so the same code settles there after one reconcile; the echo
-path stays idempotent. What is NOT yet true
+path stays idempotent. [Round 9 (R19a, 2026-10-12): the estimate is
+WITHDRAWN, and the reason belongs in this section. On THIS host the publish
+recorded right after a write is the PRE-write entry, and an `omarchy bar
+set` that restores that entry exactly (`setBarWidget` assigns in place)
+publishes the write and then the restored entry -- A -> B -> A. The
+plugin's record of its last write then compared equal to the publish again
+although the host now stored A, and the funnel skipped writes the host
+would have stored: a logo OFF, the strip of a re-set refused credential,
+the strip of a re-set guide URL (the eighth review, both lenses, live on
+the lagging fake host; clean on the echoing one). So a plugin cannot
+estimate what this host STORES from its own last write paired with a
+publish, because a publish can recur. The host's own answer is the only
+dirty check: every owned write is handed to `updateEntryInline`, `false`
+from a writable entry is "already stored" and success, and the cycle
+settles because the own-write record is not reassigned when it is equal
+(`Model.sameOwnWrite`) -- which needs no echo and is the same code under
+both hosts. A write the host answers `false` to costs one comparison on
+the host and re-triggers nothing (lane A, lane-key-y1: key-scenario K's 5 s
+windows read 0 entry writes and 0 CPU ticks on both host shapes, and Y1-Y3
+read the re-set taken each time).] What is NOT yet true
 [amended 2026-10-12, round 7]: `scripts/dev-harness/shell.qml` modelled the
 one-write-behind host only until round 7; it now has an echo lever --
 `run.sh --host echo` makes `syncPluginApis` publish `shellConfig.bar` at

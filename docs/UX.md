@@ -684,6 +684,12 @@ source becomes active, which R12 rules and R17a now enforces on every write
 the plugin makes. The caption's `(converted; not kept in shell.json)` is
 therefore true only once a source is active. The copy is the lead's and the
 Guide owner's to decide; `UX-SOURCES.md` 3.1.1 carries the request.
+[Round 9 (2026-10-12, D-SINK-19 R19b): resolved by the code, not the copy.
+A guide URL set in this state is now held in the plugin's own `state.json`
+and taken off the bar entry once that write lands, so the caption is true
+after one write rather than only once a source is active; the value stays
+on the entry longer only when the state write fails (R13). No copy change
+is requested; `UX-SOURCES.md` 3.1.1 says the same.]
 
 ### 4.5 Loading (first fetch, no cache yet)
 
