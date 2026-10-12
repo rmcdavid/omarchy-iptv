@@ -451,6 +451,41 @@ class ReleaseCase(unittest.TestCase):
         problems = release.check(self.dir, out=io.StringIO())
         self.assertTrue(any(p.startswith('the model is unreadable: ') for p in problems), problems)
 
+    # No shipped file names Model.js in the present tense (round 2, R5).
+    def model_js_problems(self, rel, text):
+        self.write(rel, text)
+        self.commit_all()
+        return [p for p in release.check(self.dir, out=io.StringIO()) if 'names Model.js' in p]
+
+    def test_a_shipped_comment_naming_model_js_is_red_in_every_kind_of_file(self):
+        for rel, text in (('Guide.qml', 'import "Model.mjs" as Model\n// the value lives in Model.js\n'),
+                          ('bin/omarchy-iptv', '#!/usr/bin/env python3\n# Must match Model.js.\n'),
+                          (PARTS[-1], '// see Model.js for why\n'),
+                          ('README.md', 'The model is Model.js.\n'),
+                          ('CHANGELOG.md', '# Changelog\n\n## 0.9.9 (%s)\n\n- Model.js got smaller\n' % TODAY),
+                          ('contrib/bindings.lua', '-- calls into Model.js\n')):
+            problems = [p for p in self.model_js_problems(rel, text) if p.startswith(rel + ':')]
+            self.assertEqual(1, len(problems), (rel, problems))
+
+    def test_an_import_of_model_js_by_path_is_red(self):
+        self.assertEqual(1, len(self.model_js_problems('Guide.qml', 'import "./Model.js" as Model\n')))
+
+    def test_history_that_names_its_commit_is_allowed(self):
+        self.assertEqual([], self.model_js_problems(
+            'Guide.qml', '// Model.js at 422c8e1 held this; Model.js at commit 0bd4515ab did too\n'))
+
+    def test_history_without_a_commit_is_still_red(self):
+        for line in ('// Model.js used to hold this\n', '// Model.js at some point\n',
+                     '// Model.js at 422c8e1 and then Model.js\n'):
+            self.assertEqual(1, len(self.model_js_problems('Guide.qml', line)), line)
+
+    def test_other_names_are_not_model_js(self):
+        self.assertEqual([], self.model_js_problems(
+            'Guide.qml', '// Model.mjs, Model.json, Model.test.js, xModel.js\n'))
+
+    def test_a_file_that_does_not_ship_may_name_model_js(self):
+        self.assertEqual([], self.model_js_problems('tests/test_x.py', '# Model.js\n'))
+
     def test_every_reached_module_is_scanned_for_dev_paths(self):
         self.write(PARTS[-1], '// pinned by tests/fixtures/x.json\n')
         self.commit_all()
