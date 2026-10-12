@@ -1248,16 +1248,26 @@ is "key-scenario's cleanup restores the state directory's mode on every exit" \
 # from its own (F5's `left:yes` used to be pre-satisfied by F2's drop line):
 # two bare `log_mark` lines between the F banner and the U banner (U, round
 # 7, sets its own before the toggle it counts: one more up to the P banner).
-is "F and L each set their own log mark before the call they count, and U before its toggle" \
-   "$(awk '/^  echo "== F:/,/^  echo "== U:/' "$KS" | grep -cE '^  log_mark$') $(awk '/^  echo "== U:/,/^  echo "== P:/' "$KS" | grep -cE '^  log_mark$')" "2 1"
+# Round 9: Y sets its own mark before EACH of its two in-app toggles (Y1
+# counts each toggle's write from its own mark): 1 + 2 = 3 up to P.
+is "F and L each set their own log mark before the call they count, and U and Y before each toggle" \
+   "$(awk '/^  echo "== F:/,/^  echo "== U:/' "$KS" | grep -cE '^  log_mark$') $(awk '/^  echo "== U:/,/^  echo "== P:/' "$KS" | grep -cE '^  log_mark$')" "2 3"
 # L drives the toggle through the guide's own key path (shell.qml's
 # sourcesKey calls the guide's handlers; no keystroke), and both restarts
 # that follow a failed or interrupted write (O and F) reseed the key the
 # entry was OBSERVED to carry, never a constant. Round 7: U drives the same
 # key path (3 more) and restarts twice over the observed entry (2 more).
 # Round 8: Z restarts once over the observed entry after its remove (1 more).
-is "L and U reach setShowLogos through the guide's Sources key path, and F, U and Z restart over the observed key as O does" \
-   "$(qa_count '^  ipc sourcesKey (enter|g|confirm) >/dev/null' "$KS") $(qa_count '^  start_shell "\$\{seed_args\[@\]\}" \|\| true$' "$KS")" "6 5"
+# Round 9: Y1 drives the key path three more times (enter, g, g), and Y3 and
+# H restart over the observed entry (2 more).
+is "L, U and Y reach setShowLogos through the guide's Sources key path, and F, U, Z, Y and H restart over the observed key as O does" \
+   "$(qa_count '^  ipc sourcesKey (enter|g|confirm) >/dev/null' "$KS") $(qa_count '^  start_shell "\$\{seed_args\[@\]\}" \|\| true$' "$KS")" "9 7"
+# Round 9 (Q): the slow listener holding the probe open is the scenario's
+# own, its pid read from the LISTENER (ss -ltnp on its port, never `$!`, the
+# rule the round-2 live pass learned), and cleanup() kills that pid on every
+# exit.
+is "key-scenario's Q reads its slow listener's pid from ss -ltnp and cleanup kills that pid" \
+   "$(qa_count '^  SLOW_PID=""; for \(\(i = 0; i < 50; i\+\+\)\); do SLOW_PID=\$\(ss -ltnp 2>/dev/null \| grep ":\$SLOW_PORT "' "$KS") $(awk '/^cleanup\(\) \{/,/^\}/' "$KS" | grep -cE 'kill -TERM "\$SLOW_PID"')" "1 1"
 # The two one-decision mutations the round-4 checks were seen red against
 # are PATCH FILES under spikes/key-mutations/ (the lead's ruling: never a
 # branch that can be merged by accident). Each must still APPLY to this
@@ -2254,7 +2264,10 @@ is "a umask-created file here would have been private, which is why the mode is 
 # split: the chain's 35 (408 -> 443, above) and the split's 10 (408 -> 418,
 # above) were counted from the same 408 on two branches, so the merge is
 # their sum.
-EXPECTED=453
+# 453 -> 454 on 2026-10-12, D-SINK-19 round 9: key-scenario's slow listener
+# is killed by the pid its listener names (1). Two existing wants moved with
+# Y and H (the key-path and restart counts, the U..P log marks).
+EXPECTED=454
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

@@ -171,11 +171,12 @@
 #       file, active, fetched, URL off the entry                  <- R1
 #   F7  the history holds the three records and nothing carries B's path
 #   U1  two saved sources, NONE active, an epgUrl set while the shell was
-#       down: loaded on the lagging host, the EPG on the stored entry and on
-#       no record (control: the R12 state)
-#   U2  the logo toggle HEALS (nothing outstanding) and KEEPS the EPG: one
-#       write, not written alone, epgUrl still stored, the kept key name
-#       logged                          <- R17a, the round-6 data-loss P1
+#       down: loaded on the lagging host, the EPG HELD in the state file and
+#       off the stored entry, on no record (R19b; R12's on-entry state
+#       until round 9)
+#   U2  the logo toggle HEALS (nothing outstanding) and the held EPG is
+#       untouched: one write, not written alone, nothing kept on the entry,
+#       still held                      <- R17a, the round-6 data-loss P1
 #   U3  a switch to A lands the EPG on A's record in the file, and only the
 #       mirror's write after it strips the entry   <- R17b
 #   U4  a restart over the entry as stored stands on A with the EPG on A
@@ -188,7 +189,8 @@
 #   K1  the lagging host, a REFUSED playlistUrl beside a pending EPG (no
 #       source active): the shell SETTLES -- at most 2 entry writes and 50
 #       CPU ticks in a 5 s window -- the refused value off the stored entry,
-#       the EPG on it                     <- R18b, the round-7 data-loss P1-B
+#       the EPG held in the state file (R19b)
+#                                         <- R18b, the round-7 data-loss P1-B
 #   K2  the same entry on the ECHOING host settles (control)
 #   K3  the echoing host with the refused value WRAPPED IN WHITESPACE
 #       settles and drops it                          <- R18a, P1-A's loop
@@ -200,9 +202,25 @@
 #   A1  an in-app add (harness addSource) with no form EPG while a CLI
 #       epgUrl is pending: the new record holds it, the entry drops it
 #                                          <- R17b's probe commit, live
-#   A2  the same add with the form's OWN guide URL: the form's value wins,
-#       the pending one is superseded, stripped and logged by name
-#                                                   <- R18d (OQ-W3 ruled)
+#   A2  the same add with the form's OWN guide URL, submitted after the CLI
+#       value was held: the form (later) wins, the held one is cleared and
+#       logged by setting and key                  <- R18d, R19c since round 9
+#   Y1  on the lagging host: in-app logo OFF, CLI showLogos true again (a
+#       publish A -> B -> A), in-app OFF again -- each OFF takes and is
+#       handed to the host               <- R19a, the round-8 lenses' P1-A
+#   Y2  the same refused credential set three times beside the active
+#       source is off the stored entry after EVERY set          <- R19a
+#   Y3  the same epgUrl set twice, then the guide URL edited in the app:
+#       off the entry each time, and the edit stands after a restart <- R19a
+#   Q1  the add form submitted, THEN a CLI epgUrl set while its probe runs
+#       (a slow local server): the CLI value (later) stands  <- R19c, P1-B
+#   Q2  the CLI value held, THEN the add form submitted: the form stands
+#       (control: the order R18d already got right)
+#   V1  the CLI value held, then A's guide URL edited in the app, then the
+#       switch to A: the edit (later) stands     <- R19c, the lens's P2
+#   H1  an EPG input whose adoption's state write FAILED stays on the entry;
+#       a later in-app edit's save LANDS and the owed mirror takes it off,
+#       so the restart stands on the edit             <- R19d, D-SRC-18
 #   P1  no labelled harness-log line carries a URL or a fixture path
 #   P2  no credential token anywhere in the harness log
 #   T1  the shell, the compositor and the nested socket are gone (by pid)
@@ -316,6 +334,21 @@
 # verb, which the round-7 live lens found no segment reaching. The input
 # values are never printed: key names from hostEntry, the record's EPG
 # compared inside python, the window's numbers on one stderr line.
+#
+# Y, Q, V AND H, ROUND 9 (R19). Both round-8 lenses found R18b's write
+# skip coming back after a publish A -> B -> A on the lagging host, live,
+# and the data-loss lens found R18d dropping a CLI epgUrl set AFTER the add
+# form was submitted, and the same principle on the edit form. Y lifts
+# aba-child.sh (T=logo, bad, epg), Q lifts race-child.sh (both orders, a
+# slow local listener holding the probe open), V lifts T=edit, and H is the
+# board's D-SRC-18 at the sink. R19a: no skip on an estimate -- every owned
+# write is handed to the host and updateEntryInline's own answer is the
+# dirty check. R19b: a guide URL no record can take is HELD in state.json
+# (pendingEpg { url, seenAt }) and taken off the entry, which is why U, K
+# and A read `held:` from the file where they read the entry before.
+# R19c: the latest explicit input wins, by time (seenAt against the
+# record's epgSetAt). R19d: a mirror a failed save withheld is paid by the
+# next save that lands.
 #
 # U, ROUND 7 (R17). The round-6 data-loss lens found an input no oracle
 # had covered for five rounds, because every matrix checked the PLAYLIST
@@ -606,7 +639,7 @@ elapsed() { python3 -c 'import sys; print("%.1f" % (float(sys.argv[1]) - float(s
 # Every process this scenario starts, by the pid bash handed it or the pid
 # the process wrote itself (cage's child, run.sh's qs.pid). Nothing here is
 # found by a pattern that could match this shell.
-CAGE_PID=""; CAGE_CHILD=""; SHELL_STARTED=0; SHELL_PID=""; NESTED=""; ORPHANS=""
+CAGE_PID=""; CAGE_CHILD=""; SHELL_STARTED=0; SHELL_PID=""; NESTED=""; ORPHANS=""; SLOW_PID=""
 kill_pid() { [[ -n ${1:-} ]] && kill -0 "$1" 2>/dev/null && { kill -TERM "$1" 2>/dev/null; wait "$1" 2>/dev/null; }; return 0; }
 cleanup() {
   # The shell's children, recorded by PARENT pid (never a pattern) while
@@ -624,6 +657,8 @@ cleanup() {
   # The slow helper's sleeping child survives its parent's SIGKILL (O4) and
   # the reap above alike: recorded by pid, and not ours to `wait` for.
   local p; for p in $ORPHANS; do kill -KILL "$p" 2>/dev/null; done
+  # Q's slow listener, by the pid its LISTENER names (never a pattern)
+  [[ -n ${SLOW_PID:-} ]] && kill -TERM "$SLOW_PID" 2>/dev/null
   [[ -n $CAGE_CHILD ]] && kill -TERM "$CAGE_CHILD" 2>/dev/null
   kill_pid "$CAGE_PID"
   # F takes `w` off the state directory under the running shell and gives
@@ -1215,7 +1250,7 @@ shell_arm() {
   ck "F7 the history holds the three records and nothing carries B's path (the switch that landed in memory only went with the shell)" \
      "records:$(sj "len(d['sources'])") leaks:$(qa_count "$B" "$LOG") $(printf '%s\n%s\n%s\n' "$(ipc state)" "$(ipc hostEntry)" "$(ipc sources)" | grep -ac "$B")" "records:3 leaks:0 0"
 
-  echo "== U: an EPG input with NO active source, kept on the entry by R12, through a heal write and the active move, on both hosts (R17, round-6 data-loss P1) ($(elapsed) s)"
+  echo "== U: an EPG input with NO active source, HELD in the state by R19b, through a heal write and the active move, on both hosts (R17, round-6 data-loss P1; R19b) ($(elapsed) s)"
   # The round-6 data-loss lens's P1, lifted from its live driver
   # (rev-key6-dataloss/epg-child.sh): two saved sources, NONE active, and an
   # epgUrl the user set while the shell was down. R12 leaves it on the entry
@@ -1235,13 +1270,21 @@ shell_arm() {
   # harness seed always carries an `epgUrl` NAME (empty when unset), so a
   # name read after a restart proves nothing (the lens's own correction);
   # the restart checks read the file and the service instead.
+  # R19b (round 9) moved where the input waits: it is HELD in state.json as
+  # pendingEpg and taken off the entry by the write after that save lands,
+  # so U1 now reads the file for it (held:yes) and the entry for its absence;
+  # R12 kept it on the entry, a possibly credentialed URL in shell.json for
+  # as long as no source existed. The rest of U is unchanged in what it
+  # proves: no write loses it, and the switch lands it.
   seed ""
   start_shell --playlist none --epg "$EPG" --source-key "" || true
+  wait_for no 10 stored_has epgUrl >/dev/null || true
   sleep 0.5
   epg_on() { sj "','.join(sorted(s['key'] for s in d['sources'] if s.get('epgUrl') == '$EPG')) or 'none'"; }
-  ck "U1 loaded on the lagging host with no active source, the EPG on the stored entry and on no record (control: the R12 state)" \
-     "host:$(qa_json_field "d['host']" "$(ipc hostEntry)") configured:$(svc "['configured']") memory:[$(pf "['memoryActiveKey']")] epgUrl:$(stored_has epgUrl) on:$(epg_on)" \
-     "host:lag configured:false memory:[] epgUrl:yes on:none"
+  held() { sj "'yes' if (d.get('pendingEpg') or {}).get('url') == '$EPG' else 'no'"; }
+  ck "U1 loaded on the lagging host with no active source: the EPG HELD in the state file, OFF the stored entry, on no record (R19b)" \
+     "host:$(qa_json_field "d['host']" "$(ipc hostEntry)") configured:$(svc "['configured']") memory:[$(pf "['memoryActiveKey']")] epgUrl:$(stored_has epgUrl) held:$(held) on:$(epg_on)" \
+     "host:lag configured:false memory:[] epgUrl:no held:yes on:none"
   log_mark
   ipc open '{}' >/dev/null; sleep 0.5
   ipc sourcesKey enter >/dev/null; sleep 0.3
@@ -1250,17 +1293,17 @@ shell_arm() {
   wait_for 1 10 log_since 'updateEntryInline io' >/dev/null || true
   wait_for yes 5 stored_has showLogos >/dev/null || true
   sleep 0.5
-  ck "U2 the logo toggle HEALS (nothing outstanding) and keeps the EPG: logos on, one write, not written alone, the stored entry still carries epgUrl, the service logged the key name it kept" \
-     "logos:$(qa_json_field "d['guide']['showLogos']" "$(ipc state)") writes:$(log_since 'updateEntryInline io') alone:$(log_since 'logo setting written alone') epgUrl:$(stored_has epgUrl) kept:$(log_since 'keeps an input no source has adopted yet \(epgUrl\)') on:$(epg_on)" \
-     "logos:true writes:1 alone:0 epgUrl:yes kept:1 on:none"
+  ck "U2 the logo toggle HEALS (nothing outstanding) and the held EPG is untouched: logos on, one write, not written alone, nothing kept on the entry, still held in the file" \
+     "logos:$(qa_json_field "d['guide']['showLogos']" "$(ipc state)") writes:$(log_since 'updateEntryInline io') alone:$(log_since 'logo setting written alone') epgUrl:$(stored_has epgUrl) kept:$(log_since 'keeps an input no source has adopted yet \(epgUrl\)') held:$(held) on:$(epg_on)" \
+     "logos:true writes:1 alone:0 epgUrl:no kept:0 held:yes on:none"
   ipc close >/dev/null
   res=$(ipc switchSource "$KA")
   wait_for "$KA" 10 hf "['stored']" >/dev/null || true
   wait_for no 10 stored_has epgUrl >/dev/null || true
   sleep 1.0
-  ck "U3 the switch lands the EPG on A's record in the file and the mirror's write then strips it: A holds it, the file and the mirror name A, no epgUrl on the stored entry, configured on A" \
-     "ok:$(qa_json_field "d['ok']" "$res") on:$(epg_on) file:$(sj "d.get('activeKey', 'absent')") stored:$(hf "['stored']") epgUrl:$(stored_has epgUrl) $(svc "['configured']") $(svc "['activeSourceKey']")" \
-     "ok:true on:$KA file:$KA stored:$KA epgUrl:no true $KA"
+  ck "U3 the switch lands the held EPG on A's record in the file and clears it: A holds it, nothing held, the file and the mirror name A, no epgUrl on the stored entry, configured on A" \
+     "ok:$(qa_json_field "d['ok']" "$res") on:$(epg_on) held:$(held) file:$(sj "d.get('activeKey', 'absent')") stored:$(hf "['stored']") epgUrl:$(stored_has epgUrl) $(svc "['configured']") $(svc "['activeSourceKey']")" \
+     "ok:true on:$KA held:no file:$KA stored:$KA epgUrl:no true $KA"
   seed_args=(--playlist none); seed_key="(none)"
   [[ $(stored_has sourceKey) == yes ]] && { seed_key=$(hf "['stored']"); seed_args+=(--source-key "$seed_key"); }
   [[ $(stored_has epgUrl) == yes ]] && seed_args+=(--epg "$EPG")
@@ -1272,17 +1315,18 @@ shell_arm() {
   # The echoing host: no toggle, the switch alone.
   seed ""
   start_shell --host echo --playlist none --epg "$EPG" --source-key "" || true
+  wait_for no 10 stored_has epgUrl >/dev/null || true
   sleep 0.5
-  ck "U5 the fake host ECHOES (the lever took) and the R12 state holds: no active source, the EPG on the stored and the published entry alike, on no record (control)" \
-     "host:$(qa_json_field "d['host']" "$(ipc hostEntry)") configured:$(svc "['configured']") epgUrl:$(stored_has epgUrl)/$(published_has epgUrl) on:$(epg_on)" \
-     "host:echo configured:false epgUrl:yes/yes on:none"
+  ck "U5 the fake host ECHOES (the lever took) and the R19b state holds: no active source, the EPG held in the file and off the stored and the published entry alike, on no record" \
+     "host:$(qa_json_field "d['host']" "$(ipc hostEntry)") configured:$(svc "['configured']") epgUrl:$(stored_has epgUrl)/$(published_has epgUrl) held:$(held) on:$(epg_on)" \
+     "host:echo configured:false epgUrl:no/no held:yes on:none"
   res=$(ipc switchSource "$KA")
   wait_for "$KA" 10 hf "['stored']" >/dev/null || true
   wait_for no 10 stored_has epgUrl >/dev/null || true
   sleep 1.0
-  ck "U6 the switch lands the EPG on A's record before the mirror strips the entry, and the echoing host publishes the stripped entry at once: A holds it, both sides name A, epgUrl on neither" \
-     "ok:$(qa_json_field "d['ok']" "$res") on:$(epg_on) stored:$(hf "['stored']") published:$(hf "['published']") epgUrl:$(stored_has epgUrl)/$(published_has epgUrl)" \
-     "ok:true on:$KA stored:$KA published:$KA epgUrl:no/no"
+  ck "U6 the switch lands the held EPG on A's record and clears it, and the echoing host publishes the mirror at once: A holds it, nothing held, both sides name A, epgUrl on neither" \
+     "ok:$(qa_json_field "d['ok']" "$res") on:$(epg_on) held:$(held) stored:$(hf "['stored']") published:$(hf "['published']") epgUrl:$(stored_has epgUrl)/$(published_has epgUrl)" \
+     "ok:true on:$KA held:no stored:$KA published:$KA epgUrl:no/no"
   seed_args=(--host echo --playlist none); seed_key="(none)"
   [[ $(stored_has sourceKey) == yes ]] && { seed_key=$(hf "['stored']"); seed_args+=(--source-key "$seed_key"); }
   [[ $(stored_has epgUrl) == yes ]] && seed_args+=(--epg "$EPG")
@@ -1323,21 +1367,21 @@ shell_arm() {
   seed ""
   start_shell --playlist "$BAD" --epg "$EPG" --source-key "" || true
   verdict=$(loop_window)
-  ck "K1 the lagging host with a refused playlistUrl beside a pending EPG SETTLES (at most 2 entry writes and 50 CPU ticks in 5 s), the refused value is off the stored entry and the EPG stays on it (R12)" \
-     "$verdict host:$(qa_json_field "d['host']" "$(ipc hostEntry)") playlistUrl:$(stored_has playlistUrl) epgUrl:$(stored_has epgUrl) on:$(epg_on)" \
-     "settled host:lag playlistUrl:no epgUrl:yes on:none"
+  ck "K1 the lagging host with a refused playlistUrl beside a pending EPG SETTLES (at most 2 entry writes and 50 CPU ticks in 5 s), the refused value is off the stored entry and the EPG is HELD in the state file, off it too (R19b)" \
+     "$verdict host:$(qa_json_field "d['host']" "$(ipc hostEntry)") playlistUrl:$(stored_has playlistUrl) epgUrl:$(stored_has epgUrl) held:$(held) on:$(epg_on)" \
+     "settled host:lag playlistUrl:no epgUrl:no held:yes on:none"
   seed ""
   start_shell --host echo --playlist "$BAD" --epg "$EPG" --source-key "" || true
   verdict=$(loop_window)
-  ck "K2 the echoing host with the same entry settles too (control: the echo host settled on a bare value on every tree), the refused value off the stored entry, the EPG on it" \
-     "$verdict host:$(qa_json_field "d['host']" "$(ipc hostEntry)") playlistUrl:$(stored_has playlistUrl) epgUrl:$(stored_has epgUrl)" \
-     "settled host:echo playlistUrl:no epgUrl:yes"
+  ck "K2 the echoing host with the same entry settles too (control: the echo host settled on a bare value on every tree), the refused value off the stored entry, the EPG held in the file" \
+     "$verdict host:$(qa_json_field "d['host']" "$(ipc hostEntry)") playlistUrl:$(stored_has playlistUrl) epgUrl:$(stored_has epgUrl) held:$(held)" \
+     "settled host:echo playlistUrl:no epgUrl:no held:yes"
   seed ""
   start_shell --host echo --playlist "  $BAD " --epg "$EPG" --source-key "" || true
   verdict=$(loop_window)
   ck "K3 the echoing host with the refused value WRAPPED IN WHITESPACE (as \`omarchy bar set\` stores it) settles, and the refused credential leaves the stored entry once reported" \
-     "$verdict host:$(qa_json_field "d['host']" "$(ipc hostEntry)") playlistUrl:$(stored_has playlistUrl) epgUrl:$(stored_has epgUrl)" \
-     "settled host:echo playlistUrl:no epgUrl:yes"
+     "$verdict host:$(qa_json_field "d['host']" "$(ipc hostEntry)") playlistUrl:$(stored_has playlistUrl) epgUrl:$(stored_has epgUrl) held:$(held)" \
+     "settled host:echo playlistUrl:no epgUrl:no held:yes"
 
   echo "== Z: whitespace-wrapped inputs are compared the way adoption compares (R18a, the round-7 data-loss lens's P1-A) ($(elapsed) s)"
   # Lifted from the lens's resurrect-child.sh and loop-child.sh MODE=badws.
@@ -1400,9 +1444,176 @@ shell_arm() {
   wait_for "$KD" 20 svc "['activeSourceKey']" >/dev/null || true
   wait_for no 10 stored_has epgUrl >/dev/null || true
   sleep 0.5
-  ck "A2 an in-app add whose FORM carries its own guide URL while a CLI epgUrl is pending: the form's value is on the new record, the pending value on no record and off the stored entry, superseded and logged by key name once" \
-     "ok:$(qa_json_field "d['ok']" "$res") active:$(svc "['activeSourceKey']") form:$(form_on) pending:$(epg_on) epgUrl:$(stored_has epgUrl) logged:$(log_since 'supersedes a pending input \(epgUrl\)')" \
-     "ok:true active:$KD form:$KD pending:none epgUrl:no logged:1"
+  ck "A2 an in-app add whose FORM carries its own guide URL, submitted AFTER a CLI epgUrl was held: the form (later) is on the new record, the held value on no record, cleared and off the stored entry, superseded and logged by setting and key once (R19c)" \
+     "ok:$(qa_json_field "d['ok']" "$res") active:$(svc "['activeSourceKey']") form:$(form_on) pending:$(epg_on) held:$(held) epgUrl:$(stored_has epgUrl) logged:$(log_since 'a pending guide URL \(epgUrl\) is superseded')" \
+     "ok:true active:$KD form:$KD pending:none held:no epgUrl:no logged:1"
+
+  echo "== Y: a publish that goes A -> B -> A on the lagging host, then the user's own act (R19a; the round-8 lenses' P1-A) ($(elapsed) s)"
+  # Lifted from the round-8 data-loss lens's aba-child.sh (T=logo, bad, epg).
+  # Round 8's funnel skipped an owned write when its record of its LAST
+  # write said the host already stored the entry, judged while the publish
+  # equalled the publish recorded then. `omarchy bar set` re-setting a value
+  # restores exactly the entry stored before the plugin's last write, the
+  # lagging host publishes it again, the record comes back, and the funnel
+  # skipped writes the host WOULD have stored: Y1 the in-app logo OFF (the
+  # guide's own `g`), Y2 the strip of a re-set refused credential, Y3 the
+  # strip of a re-set EPG input -- which the next start then re-adopted over
+  # an in-app guide URL edit. R19a hands every owned write to the host.
+  # Values are never printed: names from hostEntry, the guide's own
+  # showLogos, and the record's EPG compared inside python.
+  seed "$KA"
+  start_shell --playlist none --source-key "$KA" || true
+  wait_for 20 10 svc "['channels']" >/dev/null || true
+  logos() { qa_json_field "d['guide']['showLogos']" "$(ipc state)"; }
+  ipc set showLogos true >/dev/null; wait_for true 10 logos >/dev/null || true
+  ipc open '{}' >/dev/null; sleep 0.5
+  ipc sourcesKey enter >/dev/null; sleep 0.3
+  log_mark
+  ipc sourcesKey g >/dev/null
+  wait_for false 10 logos >/dev/null || true
+  sleep 0.5
+  off1="$(logos)/$(log_since 'updateEntryInline io')"
+  ipc set showLogos true >/dev/null; wait_for true 10 logos >/dev/null || true
+  log_mark
+  ipc sourcesKey g >/dev/null
+  wait_for false 10 logos >/dev/null || true
+  sleep 0.5
+  ck "Y1 in-app OFF, CLI showLogos true again, in-app OFF again: each OFF takes and is handed to the host (logos/entry writes)" \
+     "off1:$off1 off2:$(logos)/$(log_since 'updateEntryInline io')" "off1:false/1 off2:false/1"
+  ipc close >/dev/null
+  seed "$KA"
+  start_shell --playlist none --source-key "$KA" || true
+  wait_for 20 10 svc "['channels']" >/dev/null || true
+  after=""
+  for i in 1 2 3; do
+    ipc set playlistUrl "$BAD" >/dev/null
+    wait_for no 5 stored_has playlistUrl >/dev/null || true
+    sleep 1.0
+    after="$after$(stored_has playlistUrl) "
+  done
+  ck "Y2 the same refused (credentialed) playlistUrl set three times beside the active source: off the stored entry after EVERY set, the source still active" \
+     "after:${after% } active:$(svc "['activeSourceKey']")" "after:no no no active:$KA"
+  seed "$KA"
+  start_shell --playlist none --source-key "$KA" || true
+  wait_for 20 10 svc "['channels']" >/dev/null || true
+  rec_epg() { sj "','.join({'$EPG': 'E', '$FORM_EPG': 'F', '': 'none'}.get(s.get('epgUrl', ''), 'other') for s in d['sources'] if s['key'] == '$1') or 'norecord'"; }
+  ipc set epgUrl "$EPG" >/dev/null; wait_for E 10 rec_epg "$KA" >/dev/null || true; sleep 1.0
+  ipc set epgUrl "$EPG" >/dev/null; sleep 1.5
+  twice="$(rec_epg "$KA")/$(stored_has epgUrl)"
+  res=$(ipc updateSource "$KA" "{\"epgUrl\": \"$FORM_EPG\"}")
+  wait_for F 10 rec_epg "$KA" >/dev/null || true
+  sleep 1.0
+  seed_args=(--playlist none); seed_key="(none)"
+  [[ $(stored_has sourceKey) == yes ]] && { seed_key=$(hf "['stored']"); seed_args+=(--source-key "$seed_key"); }
+  [[ $(stored_has epgUrl) == yes ]] && seed_args+=(--epg "$EPG")
+  stop_shell
+  echo "   restarting over the entry as stored: epgUrl $([[ ${#seed_args[@]} -gt 4 ]] && echo '(the CLI value, as stored)' || echo none), sourceKey $seed_key"
+  start_shell "${seed_args[@]}" || true
+  wait_for 20 10 svc "['channels']" >/dev/null || true
+  sleep 0.5
+  ck "Y3 the same epgUrl set twice for the active source is off the stored entry each time, the guide URL is then edited in the app to F, and F stands after a restart over the entry as stored" \
+     "twice:$twice edit:$(qa_json_field "d['ok']" "$res") after:$(svc "['activeSourceKey']")/$(rec_epg "$KA")" "twice:E/no edit:true after:$KA/F"
+
+  echo "== Q: the add form submitted, a CLI epgUrl set while its probe runs -- the LATER input wins, by time (R19c; the round-8 data-loss lens's P1-B) ($(elapsed) s)"
+  # Lifted from the lens's race-child.sh. The probe is held open by a local
+  # server that answers after 4 s; the CLI value is set 1 s after the
+  # submit (Q1) or before it (Q2). Round 8 let the form's guide URL win
+  # whenever it carried one, so in Q1 the LATER CLI value existed nowhere.
+  # The server is this scenario's own: its pid is read from the LISTENER
+  # (never `$!`), recorded for cleanup(), and killed by that pid.
+  python3 - "$WORK/slow.port" "$D" >"$WORK/slow.log" 2>&1 <<'SLOW' &
+import http.server, sys, time
+body = open(sys.argv[2], "rb").read()
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        time.sleep(4)
+        self.send_response(200); self.send_header("Content-Type", "audio/x-mpegurl"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+    def log_message(self, *a): pass
+srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+open(sys.argv[1], "w").write(str(srv.server_address[1]))
+srv.serve_forever()
+SLOW
+  SLOW_PORT=""; for ((i = 0; i < 50; i++)); do [[ -s $WORK/slow.port ]] && { SLOW_PORT=$(cat "$WORK/slow.port"); break; }; sleep 0.1; done
+  SLOW_PID=""; for ((i = 0; i < 50; i++)); do SLOW_PID=$(ss -ltnp 2>/dev/null | grep ":$SLOW_PORT " | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); [[ -n $SLOW_PID ]] && break; sleep 0.1; done
+  SLOW="http://127.0.0.1:$SLOW_PORT/slow.m3u"; KS_SLOW=$(key_of "$SLOW")
+  echo "   slow listener on port ${SLOW_PORT:-none}, pid ${SLOW_PID:-none}"
+  seed ""
+  start_shell --playlist none --source-key "" || true
+  res=$(ipc addSource "$SLOW" "$FORM_EPG" "")
+  sleep 1.0
+  ipc set epgUrl "$EPG" >/dev/null
+  wait_for no 5 stored_has epgUrl >/dev/null || true
+  during="$(held)/$(svc "['activeSourceKey']")"
+  wait_for "$KS_SLOW" 20 svc "['activeSourceKey']" >/dev/null || true
+  sleep 1.0
+  ck "Q1 form first: the CLI epgUrl set while the probe runs is HELD; at the commit it (later) is on the new record over the form's, nothing held, nothing on the entry" \
+     "ok:$(qa_json_field "d['ok']" "$res") during:$during active:$(svc "['activeSourceKey']") on:$(rec_epg "$KS_SLOW") held:$(held) epgUrl:$(stored_has epgUrl)" \
+     "ok:true during:yes/ active:$KS_SLOW on:E held:no epgUrl:no"
+  seed ""
+  start_shell --playlist none --source-key "" || true
+  ipc set epgUrl "$EPG" >/dev/null
+  wait_for yes 10 held >/dev/null || true
+  res=$(ipc addSource "$SLOW" "$FORM_EPG" "")
+  wait_for "$KS_SLOW" 20 svc "['activeSourceKey']" >/dev/null || true
+  sleep 1.0
+  ck "Q2 CLI first (control): the held CLI value is EARLIER than the form submitted after it, so the form's guide URL stands, the held value is cleared and logged as superseded" \
+     "ok:$(qa_json_field "d['ok']" "$res") active:$(svc "['activeSourceKey']") on:$(rec_epg "$KS_SLOW") held:$(held) epgUrl:$(stored_has epgUrl) logged:$(log_since 'a pending guide URL \(epgUrl\) is superseded')" \
+     "ok:true active:$KS_SLOW on:F held:no epgUrl:no logged:1"
+  kill_pid "$SLOW_PID"; SLOW_PID=""
+
+  echo "== V: the EDIT form -- a guide URL typed in the app after a CLI value was held wins at the switch (R19c; the round-8 data-loss lens's P2) ($(elapsed) s)"
+  # Lifted from the lens's aba-child.sh T=edit. With no source active the
+  # CLI value is held; the user then edits A's guide URL to F in the app
+  # (an EPG-only edit commits at once); the switch to A meets the held value
+  # and the LATER one -- F -- stands. Round 8 replaced F with the earlier
+  # held value at the switch, and F existed nowhere.
+  seed ""
+  start_shell --playlist none --source-key "" || true
+  ipc set epgUrl "$EPG" >/dev/null
+  wait_for yes 10 held >/dev/null || true
+  wait_for no 5 stored_has epgUrl >/dev/null || true
+  res=$(ipc updateSource "$KA" "{\"epgUrl\": \"$FORM_EPG\"}")
+  wait_for F 10 rec_epg "$KA" >/dev/null || true
+  res2=$(ipc switchSource "$KA")
+  wait_for "$KA" 10 hf "['stored']" >/dev/null || true
+  sleep 1.0
+  ck "V1 E held, A's guide URL edited to F, then the switch to A: F (later) stands on A, nothing held, nothing on the entry" \
+     "edit:$(qa_json_field "d['ok']" "$res") switch:$(qa_json_field "d['ok']" "$res2") active:$(svc "['activeSourceKey']") on:$(rec_epg "$KA") held:$(held) epgUrl:$(stored_has epgUrl)" \
+     "edit:true switch:true active:$KA on:F held:no epgUrl:no"
+
+  echo "== H: an EPG input whose state write FAILED, then a later in-app edit whose save LANDS (R19d, D-SRC-18) ($(elapsed) s)"
+  # The board's D-SRC-18 at the sink. The adoption's save fails (the state
+  # directory loses `w`, F's lever), so R11's drop leaves the input on the
+  # entry; the directory comes back and the user edits the guide URL in the
+  # app, which LANDS. Before R19d nothing then took the older input off the
+  # entry, and the next start re-adopted it, seen "now", over the edit. The
+  # landed save pays the mirror the failed one owed.
+  seed "$KA"
+  start_shell --playlist none --source-key "$KA" || true
+  wait_for 20 10 svc "['channels']" >/dev/null || true
+  wait_for 0 10 pf "['stateSavesInFlight']" >/dev/null || true
+  sleep 0.5
+  chmod 0500 "$(dirname "$STATE")"
+  ipc set epgUrl "$EPG" >/dev/null
+  wait_for true 10 pf "['stateSaveFailed']" >/dev/null || true
+  sleep 1.0
+  failed="$(pf "['stateSaveFailed']")/$(stored_has epgUrl)"
+  chmod 0700 "$(dirname "$STATE")"
+  res=$(ipc updateSource "$KA" "{\"epgUrl\": \"$FORM_EPG\"}")
+  wait_for F 10 rec_epg "$KA" >/dev/null || true
+  wait_for no 10 stored_has epgUrl >/dev/null || true
+  sleep 1.0
+  landed="$(pf "['stateSaveFailed']")/$(stored_has epgUrl)"
+  seed_args=(--playlist none); seed_key="(none)"
+  [[ $(stored_has sourceKey) == yes ]] && { seed_key=$(hf "['stored']"); seed_args+=(--source-key "$seed_key"); }
+  [[ $(stored_has epgUrl) == yes ]] && seed_args+=(--epg "$EPG")
+  stop_shell
+  start_shell "${seed_args[@]}" || true
+  wait_for 20 10 svc "['channels']" >/dev/null || true
+  sleep 0.5
+  ck "H1 the failed adoption left the input on the entry; the later edit's save landed and the owed mirror took it off; the restart stands on the edit F" \
+     "failed:$failed edit:$(qa_json_field "d['ok']" "$res") landed:$landed after:$(svc "['activeSourceKey']")/$(rec_epg "$KA")" \
+     "failed:true/yes edit:true landed:false/no after:$KA/F"
 
   echo "== P: the console sink, then teardown ($(elapsed) s)"
   qa_leak_on_labelled 'sourceProbeFinished|sourceSwitched|sourceRemoved|updateEntryInline' "://|$WORK" "$LOG"
@@ -1438,10 +1649,11 @@ instrument
 # The floor. A check that stops executing must turn the run red rather than
 # quietly shorten the summary (D-PLY-9). Recount with
 #   grep -cE '^ *ck "[IS][0-9]' key-scenario.sh   -> 10, the instrument arm -> check-tree
-#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 78, both arms          -> live
+#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 85, both arms          -> live
 # (48 -> 61 on 2026-10-12, round 4: W1..W6 and F1..F7; 61 -> 63 the same
 # day, round 5: L1, L2; 63 -> 70 the same day, round 7: U1..U7; 70 -> 78
-# the same day, round 8: K1..K3, Z1..Z3, A1, A2.)
+# the same day, round 8: K1..K3, Z1..Z3, A1, A2; 78 -> 85 the same day,
+# round 9: Y1..Y3, Q1, Q2, V1, H1.)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -1451,7 +1663,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=10
 else
-  EXPECTED_CHECKS=78
+  EXPECTED_CHECKS=85
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then
