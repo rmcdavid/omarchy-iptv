@@ -125,16 +125,28 @@ DEV_ONLY_DIRS = ('docs', 'tests', 'scripts', '.claude', '.github', '.cursor',
 
 # The three QML entry points: the runtime surface starts here, and check()
 # follows what they load. A QML file names a local file with `import "<file>"`
-# or Qt.resolvedUrl; an ES module (the model, D-REL-5) with `import ... from`
-# and `export ... from`, which the generated lines of Model.mjs and model/
-# close on a line of their own (`} from "./x.mjs"`). Every reference resolves
-# against the directory of the file that makes it, as the engine resolves it.
+# or Qt.resolvedUrl; an ES module (the model, D-REL-5) with `import ... from`,
+# `export ... from` and a bare `import "<file>"`, a classic script with
+# `.import "<file>" as X`. Every reference resolves against the directory of
+# the file that makes it, as the engine resolves it.
+#
+# EVERY quoting the engine accepts, not the one the generator writes:
+# measured 2026-10-12 on Qt 6.11.2 (qmltestrunner), `import 'a.mjs' as A` in
+# QML, `import { b } from './b.mjs'` in a module and `.import 'c2.js' as C2`
+# in a classic script all load. The first version matched double quotes on
+# a `}`-led line only, and a hand-written single-quoted import of an
+# unlisted file passed this check (the round-1 lens); only split-model's
+# column-0 rule happened to catch it. A module statement may also span
+# lines, so a specifier is taken from any line that starts like one.
 RUNTIME_SOURCES = ('BarWidget.qml', 'Guide.qml', 'Service.qml')
 RUNTIME_REF = re.compile(
-    r'(?:^\s*import\s+"([^"]+)"|Qt\.resolvedUrl\("([^"]+)"\))', re.M)
-MODULE_REF = re.compile(
-    r'^(?:\}|import\b[^\n]*?|export\b[^\n]*?)\s*\bfrom\s*"([^"]+)"\s*;?\s*$'
-    r'|^import\s+"([^"]+)"\s*;?\s*$', re.M)
+    r"""^\s*import\s+(['"])([^'"\n]+)\1|Qt\.resolvedUrl\(\s*(['"])([^'"\n]+)\3\s*\)""", re.M)
+MODULE_STATEMENT = re.compile(r'^\s*(?:import\b|export\b|from\b|\}|\.import\b)')
+MODULE_SPECIFIER = re.compile(
+    r"""(?:(?<![\w$])from|(?<![\w$.])import|^\s*\.import)\s*(['"])([^'"\n]+)\1""")
+# A dynamic import cannot be followed by reading the text, so it is refused
+# rather than skipped: what the resolver cannot see, it cannot prove ships.
+DYNAMIC_IMPORT = re.compile(r'(?<![\w$.])import\s*\(')
 MODULE_SUFFIXES = ('.mjs', '.js')
 
 # A README on the artifact must not point at anything that is not there.
@@ -315,7 +327,12 @@ def check(root, out=sys.stdout):
             model = ''
             problems.append('the model is unreadable: %s' % error)
         m = re.search(r'var\s+PLUGIN_VERSION\s*=\s*[\'"]([^\'"]+)[\'"]', model)
-        if model and not m:
+        # An unreadable model is already a problem above; there is no
+        # version to compare, and reading m.group of None here used to turn
+        # that message into a traceback that never printed it.
+        if not model:
+            pass
+        elif not m:
             problems.append('the model declares no PLUGIN_VERSION; D-HOST-1\'s stale-build notice cannot work')
         elif m.group(1) != actual:
             problems.append(
@@ -398,6 +415,23 @@ def check(root, out=sys.stdout):
     return problems
 
 
+def module_refs(src, text, problems):
+    """Every file a module or classic script names in a static import, in
+    any quoting; a dynamic import is a problem, since nothing here can say
+    what it loads. Comment lines are not code."""
+    refs = []
+    for n, line in enumerate(text.splitlines(), 1):
+        stripped = line.lstrip()
+        if stripped.startswith(('//', '/*', '*')):
+            continue
+        if MODULE_STATEMENT.match(line):
+            refs += [m.group(2) for m in MODULE_SPECIFIER.finditer(line)]
+        if DYNAMIC_IMPORT.search(line):
+            problems.append('%s:%d imports dynamically; the allowlist cannot be proven whole '
+                            'over a load it cannot read -- import statically' % (src, n))
+    return refs
+
+
 def runtime_files(root, have, allow, problems):
     """Every tracked file the plugin loads, in the order it is reached: the
     QML entry points, then whatever they import, transitively. A reference to
@@ -410,9 +444,9 @@ def runtime_files(root, have, allow, problems):
             continue
         reached.append(src)
         text = read(root, src)
-        refs = [m.group(1) or m.group(2) for m in RUNTIME_REF.finditer(text)]
+        refs = [m.group(2) or m.group(4) for m in RUNTIME_REF.finditer(text)]
         if src.endswith(MODULE_SUFFIXES):
-            refs += [m.group(1) or m.group(2) for m in MODULE_REF.finditer(text)]
+            refs += module_refs(src, text, problems)
         for ref in refs:
             if ref.startswith('qs.') or '://' in ref:
                 continue  # a host module or an absolute URL, not a file

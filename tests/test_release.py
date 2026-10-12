@@ -370,6 +370,87 @@ class ReleaseCase(unittest.TestCase):
         self.assertTrue(any("loads '../../elsewhere.mjs', which is outside the plugin directory" in p
                             for p in problems), problems)
 
+    # Every static form the engine accepts (measured on Qt 6.11.2: single
+    # quotes load in QML, in a module and in a classic script's .import).
+    # The round-1 lens put a single-quoted orphan import in a part and this
+    # check passed it; only split-model's column-0 rule caught it.
+    def assert_orphan_found(self, rel, text, ref):
+        self.write('model/orphan.mjs', 'var ORPHAN = 1\nexport { ORPHAN }\n')
+        self.write(rel, text)
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any("%s loads '%s' at runtime and it is not on the allowlist" % (rel, ref) in p
+                            for p in problems), problems)
+
+    def test_a_single_quoted_import_from_is_followed(self):
+        self.assert_orphan_found(PARTS[-1], "import { ORPHAN } from './orphan.mjs'\n", './orphan.mjs')
+
+    def test_a_double_quoted_one_line_import_from_is_followed(self):
+        self.assert_orphan_found(PARTS[-1], 'import { ORPHAN } from "./orphan.mjs";\n', './orphan.mjs')
+
+    def test_a_namespace_and_default_import_are_followed(self):
+        self.assert_orphan_found(PARTS[-1], "import * as O from './orphan.mjs'\n", './orphan.mjs')
+        self.assert_orphan_found(PARTS[-1], 'import O, { ORPHAN } from "./orphan.mjs"\n', './orphan.mjs')
+
+    def test_a_single_quoted_export_from_is_followed(self):
+        self.assert_orphan_found(PARTS[-1], "export * from './orphan.mjs'\n", './orphan.mjs')
+        self.assert_orphan_found(PARTS[-1], "export { ORPHAN as O } from './orphan.mjs'\n", './orphan.mjs')
+
+    def test_a_bare_import_is_followed_in_either_quoting(self):
+        self.assert_orphan_found(PARTS[-1], "import './orphan.mjs'\n", './orphan.mjs')
+        self.assert_orphan_found(PARTS[-1], 'import "./orphan.mjs"\n', './orphan.mjs')
+
+    def test_a_from_on_its_own_line_is_followed(self):
+        self.assert_orphan_found(PARTS[-1], "import {\n  ORPHAN\n}\nfrom './orphan.mjs'\n", './orphan.mjs')
+
+    def test_a_single_quoted_qml_import_is_followed(self):
+        self.write('Extra.js', 'x\n')
+        self.write('Guide.qml', "import 'Extra.js' as Extra\nx: Qt.resolvedUrl('bin/elsewhere')\n")
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any("Guide.qml loads 'Extra.js'" in p for p in problems), problems)
+        self.assertTrue(any("Guide.qml loads 'bin/elsewhere'" in p for p in problems), problems)
+
+    def test_a_classic_script_dot_import_is_followed(self):
+        self.write('lib.js', ".import 'orphan.js' as O\nfunction f() {}\n")
+        self.write('orphan.js', 'function g() {}\n')
+        self.write('Guide.qml', 'import "lib.js" as Lib\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any("Guide.qml loads 'lib.js'" in p for p in problems), problems)
+        # lib.js is not allowlisted, so it is not followed; allowlist it in a
+        # fresh case to show the .import itself is read.
+        release_allow = release.ALLOWLIST
+        try:
+            release.ALLOWLIST = release_allow + ('lib.js',)
+            problems = release.check(self.dir, out=io.StringIO())
+        finally:
+            release.ALLOWLIST = release_allow
+        self.assertTrue(any("lib.js loads 'orphan.js' at runtime and it is not on the allowlist" in p
+                            for p in problems), problems)
+
+    def test_a_comment_that_reads_like_an_import_is_not_followed(self):
+        self.write(PARTS[-1], "// import { X } from './nowhere.mjs'\n"
+                              "// a dynamic import('./nowhere.mjs') would be refused\n"
+                              "/* the old form\n * export * from './nowhere.mjs'\n */\nvar LAST = 1\n")
+        self.commit_all()
+        self.assertEqual([], release.check(self.dir, out=io.StringIO()))
+
+    def test_a_dynamic_import_is_a_problem(self):
+        self.write(PARTS[-1], "function load() { return import('./orphan.mjs') }\n")
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any('%s:1 imports dynamically' % PARTS[-1] in p for p in problems), problems)
+
+    def test_an_unreadable_model_is_a_message_not_a_traceback(self):
+        """model_files raising used to leave `m` None and the next branch read
+        m.group: the gate went red on the traceback and the message that says
+        why was never printed (the round-1 lens, P3)."""
+        self.write('Model.mjs', '// an aggregator that names no part\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any(p.startswith('the model is unreadable: ') for p in problems), problems)
+
     def test_every_reached_module_is_scanned_for_dev_paths(self):
         self.write(PARTS[-1], '// pinned by tests/fixtures/x.json\n')
         self.commit_all()
