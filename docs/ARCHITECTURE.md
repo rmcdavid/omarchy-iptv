@@ -15,7 +15,7 @@ mpv 0.41.0, Python 3.14.7); line numbers refer to
 | UI + lifecycle | QML on Quickshell 0.3.1 / Qt 6.11 | The only way to be a native Omarchy plugin: the shell loads our QML into its own process and injects `bar`, `shell`, `manifest`, `settings`, `service`. Theme tokens (`Color.*`, `Style.*`) and the `qs.Ui` kit come for free. |
 | Data pipeline | Python 3.14 helper, stdlib only (`bin/omarchy-iptv`) | 10k-channel M3U and multi-MB XMLTV parsing must not run on the shell's UI thread. First-party precedent: `plugins/panels/dropbox/status.py`. No pip, no venv, nothing to install. |
 | Player | mpv 0.41 driven over its JSON IPC socket | PRODUCT.md decision 3. mpv is present on every Omarchy install, supports `--input-ipc-server`, `--wayland-app-id`, `--force-window=immediate`, `--title`, `--force-media-title` (verified with `mpv --list-options`). |
-| Pure logic | `Model.js` (ES5 style, guarded `module.exports`) | Loaded by both the QML engine and node, so search/grouping/state rules are unit-tested without a shell (precedent: dell-power, tailscale `Model.js`). |
+| Pure logic | `Model.mjs` and the parts under `model/` (ES modules since D-REL-5; ES5-style `var`/`function` declarations inside) | Loaded by both the QML engine (`import "Model.mjs" as Model`) and node (`require` or `import`), so search/grouping/state rules are unit-tested without a shell. It was the one-file `Model.js` (precedent: dell-power, tailscale) until that file outgrew the marketplace scanner's 512 KiB per-file limit; section 9 has the rules the split adds. |
 | Tests | node runner, `python3 -m unittest`, `qmltestrunner`, `qmllint`, `omarchy plugin validate` | All present on the machine; node is dev-only (mise) and never a runtime dependency. |
 
 ### Is python3 a safe runtime dependency?
@@ -127,11 +127,12 @@ library (`json`, `re`, `urllib`, `gzip`, `socket`, `xml.etree`).
 | `Service.qml` | Headless state owner: settings, caches, state file, helper runs, the mpv `Process`, IPC target. |
 | `BarWidget.qml` | Bar entry (per monitor): TV glyph + now-playing label on `WidgetButton`; click/scroll/middle actions call the service. |
 | `Guide.qml` | Fullscreen overlay: search, groups, favorites, EPG lines; `open/close/toggle`; dismisses via `shell.hide`. |
-| `Model.js` | Pure logic shared by QML and node: normalization, ids, filtering, groups, state, settings lookup, mpv argv, formatting. |
+| `Model.mjs` | The model's public surface: re-exports every public name from the part that declares it. Header comment and generated export lines only. |
+| `model/*.mjs` | Pure logic shared by QML and node, one part per domain: normalization, ids, filtering, groups, state, settings, logos, mpv argv, the player, picture in picture, privacy, EPG, contrast, the guide view, sources, form editing. Cut from the one-file `Model.js` by `scripts/split-model.mjs` (D-REL-5). |
 | `bin/omarchy-iptv` | Python 3 helper (executable, stdlib only): `playlist` (done), `epg`, `play`, `stop`, `status`, `state` (stubs). |
-| `tests/Model.test.js` | node runner for `Model.js`. |
-| `tests/Model.spec.qml` | QtTest spec proving `Model.js` loads in the QML engine. |
-| `tests/test_playlist.py` | Parser unit tests (attributes, EXTGRP, VLCOPT, KODIPROP, ids, normalization parity with Model.js). |
+| `tests/Model.test.js` | node runner for the model (`Model.mjs`). |
+| `tests/Model.spec.qml` | QtTest spec proving the model loads in the QML engine. |
+| `tests/test_playlist.py` | Parser unit tests (attributes, EXTGRP, VLCOPT, KODIPROP, ids, normalization parity with the model). |
 | `tests/test_helper.py` | CLI tests: cache writing, stale handling, scheme refusal, stub exit codes. |
 | `tests/helper_loader.py` | Imports the extension-less helper as a module. |
 | `tests/fixtures/*.m3u` | ASCII playlist fixtures. |
@@ -250,12 +251,12 @@ Declared in `manifest.json` (`barWidget.schema`), edited with
 `omarchy bar set io.github.rmcdavid.iptv <key> <value>`, stored inline on the
 bar entry, read by the service through `shell.barConfig`.
 
-| Key | Type | Default | Validation (service side, `Model.js`) |
+| Key | Type | Default | Validation (service side, the model) |
 |---|---|---|---|
 | `playlistUrl` | string | `""` | trimmed; the helper accepts `http(s)://`, `file://` or an absolute path and refuses everything else |
 | `epgUrl` | string | `""` | same rules; empty disables EPG |
 | `refreshMinutes` | integer | 60 | `clampInt(5..1440)` |
-| `mpvArgs` | string | `""` | whitespace-split; each token must match `^--[a-z0-9][a-z0-9-]*(=.*)?$`; reserved names (`--input-ipc-server`, `--wayland-app-id`, `--title`, `--force-media-title`, `--idle`, `--script(s)`, `--config-dir`, `--load-scripts`, `--tls-verify`, `--stream-lavf-o`, and their `--no-` forms) are dropped with a console warning. This list is the M1 set plus the three later entries worth naming here; `MPV_RESERVED` in `Model.js` and its python mirror are the current list and `ARCHITECTURE-PLAYER.md` 4.12 is the register of why each name is on it. The two TLS entries are opposites and 4.15 is where that is specified: `--tls-verify` is the one entry the reserved list does not make safe by itself (D-SINK-13), and `--stream-lavf-o` is the one the reserved list is the only way to close (D-SINK-15). A single string was chosen over a JSON array because `omarchy bar set` writes strings by default and users copy examples from the README. |
+| `mpvArgs` | string | `""` | whitespace-split; each token must match `^--[a-z0-9][a-z0-9-]*(=.*)?$`; reserved names (`--input-ipc-server`, `--wayland-app-id`, `--title`, `--force-media-title`, `--idle`, `--script(s)`, `--config-dir`, `--load-scripts`, `--tls-verify`, `--stream-lavf-o`, and their `--no-` forms) are dropped with a console warning. This list is the M1 set plus the three later entries worth naming here; `MPV_RESERVED` in the model and its python mirror are the current list and `ARCHITECTURE-PLAYER.md` 4.12 is the register of why each name is on it. The two TLS entries are opposites and 4.15 is where that is specified: `--tls-verify` is the one entry the reserved list does not make safe by itself (D-SINK-13), and `--stream-lavf-o` is the one the reserved list is the only way to close (D-SINK-15). A single string was chosen over a JSON array because `omarchy bar set` writes strings by default and users copy examples from the README. |
 | `showChannelName` | boolean | true | widget-only, `!== false` |
 | `maxRecents` | integer | 10 | `clampInt(1..50)` |
 
@@ -607,7 +608,7 @@ every persist that carries a URL on its verdict:
   not by a name (rule 13): one shared JSON fixture lists every verdict and
   which of them mean private, the python suite asserts it against the
   helper's own tuple and the node suite against the reader's.
-- The decision in front of a persist is a pure function in `Model.js`,
+- The decision in front of a persist is a pure function in the model,
   unit-tested from node rather than stranded in a QML component (rule 12),
   and it answers three ways: **persist** when the file is known private or
   the write carries no URL, **refuse** when it is known not private, **defer**
@@ -620,7 +621,7 @@ every persist that carries a URL on its verdict:
   code lane's commit in this round, and the gate's symbol check settles
   whether a `Model.*` name in a document resolves, so a document written in a
   worktree where it does not yet exist would be asserting something the check
-  cannot grade. Read them off `Model.js`.
+  cannot grade. Read them off the model (`Model.mjs` and its parts).
 - **A persist that carries no URL is never gated**, and that is deliberate
   rather than convenient: `removeSource` persists `("", "")`, and if an
   exposed file could block that, a user whose `shell.json` is 0644 could not
@@ -846,7 +847,7 @@ BELOW the cached-file branch and `continue`s rather than breaking: a cached
 file past the cap is validated and announced, a URL past it is not fetched
 this run and is counted in a new summary field, `deferred`, so a run that
 stopped short says so. The shell reads only `names` from the summary
-(`logoSummaryNames` in `Model.js`), so the field is inert there. Proved by
+(`logoSummaryNames` in the model), so the field is inert there. Proved by
 `LogoFetchCapTest` in `tests/test_logo_dimensions.py`, at the real cap with
 a double standing in for the network only: 5,000 new URLs, three files
 planted past the cap (two sound, one bomb) and two more URLs after them;
@@ -890,7 +891,7 @@ own sweep. `Guide.qml` needed no edit: it hands `have` to Model and never
 indexes it. (The five functions new in that commit -- `logoHaveIsSet`,
 `logoHaveMerge`, `logoHaveCount`, `logoFetchPlan`, `logoSummaryNames` --
 are cited here WITHOUT the `Model.` prefix on purpose: the defect ledger
-resolves every `Model.X` citation against this tree's `Model.js`,
+resolves every `Model.X` citation against this tree's model (every part `Model.mjs` names, since D-REL-5),
 and the docs lane's tree predates lane R1's. Once the lanes are merged the
 prefix belongs on them, so that check pins the join.) The eight "D-LOGO-11 blocker" checks in `tests/Model.test.js` call each decision (1,903 -> 1,911 node checks, the eighth being check (f) from the integration; with Model.js and Service.qml stashed back to 995c6be the same file prints 10 failures, the eight plus the two re-shaped D-LOGO-8 and M2-04 checks; the lane commit 1a05214 had seven and printed 9). Not observed by any
 test: the restart of the live Process on a switch (signal, exit, re-fetch),
@@ -927,7 +928,7 @@ Details and the mutation table are `docs/QA.md` section 3.2.
   because a Qt that learns to scale PNG during decode would reopen this in a
   dependency bump, silently.
 - A shell not restarted after the upgrade runs the old `Service.qml`,
-  `Guide.qml` and `Model.js` until it is. That service invokes the helper by
+  `Guide.qml` and model until it is. That service invokes the helper by
   path, so the sweep runs on its next fetch -- on cache load, which is shell
   start, a source switch, or a playlist refresh at `refreshMinutes` -- and
   the old service replaces `logoHave` from the summary too (159da94
@@ -1594,15 +1595,44 @@ QML (mirror first-party plugins; see clipboard/emojis, tailscale, dropbox):
   README's JSONC snippet). In `.js`/`.py` write `\uXXXX` escapes; `scripts/check.sh`
   enforces it.
 
-`Model.js`:
+The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
+2026-10-12; until then the one-file `Model.js`):
 
-- Pure functions, `var`/`function` declarations, no ES modules, no
+- `Model.mjs` is the public surface and nothing else: the header comment and
+  generated `export { ... } from "./model/<part>.mjs"` lines naming every
+  public function and constant. The code lives in the parts under `model/`,
+  one per domain. QML imports `Model.mjs` (`import "Model.mjs" as Model`), so
+  every `Model.X` call site and every `Model.X` citation is unchanged.
+- `scripts/split-model.mjs` cut the parts out of the one-file `Model.js` and
+  is the judge of them afterwards: `scripts/check.sh` runs its `--check`, and
+  `--relink` rewrites a part's generated import and export lines after an
+  edit adds a call across parts. A new part is a line in
+  `scripts/model-parts.json`, a line in `Model.mjs` (relink writes it) and an
+  entry in `ALLOWLIST` in `scripts/release.py`; the gate is red until all
+  three agree.
+- Pure functions, `var`/`function` declarations at the top level, no
   Quickshell or Qt globals (`Qt.md5` etc. are not available in node).
+- **Init locality.** A top-level initializer reads only declarations of its
+  own part, directly or through a same-part function it calls. Parts import
+  each other in cycles, and an initializer that reads another part's binding
+  across a cycle gets `undefined`, silently -- measured on 2026-10-12 under
+  node, qmltestrunner and Quickshell in a nested cage. References across
+  parts live in function bodies, which run after every part has evaluated.
+- **No shared mutable state.** No code assigns to or mutates a top-level
+  binding after evaluation. One module instance is shared by every component
+  that imports it, where a classic script was copied per component, so a
+  write would leak between components; an imported binding is read-only
+  anyway.
 - Never mutate inputs; return new arrays/objects.
 - Every function tolerates `null`/`undefined`.
-- Any text-normalization or id change is made in the helper and in
-  `Model.js` together, with the shared vectors in both test suites updated.
-- `module.exports` guard at the bottom lists every public function.
+- Any text-normalization or id change is made in the helper and in the model
+  together, with the shared vectors in both test suites updated.
+- Every shipped file stays at or under 448 KiB: `release.py check` enforces
+  it with 64 KiB of margin below the marketplace scanner's 512 KiB per-file
+  limit, which the one-file model crossed at 0.13.5 (D-REL-5).
+- Anything in Python or shell that needs the model's FILES reads the part
+  list from `Model.mjs`: `scripts/model_files.py` in Python, `qa_model_files`
+  in `scripts/qa-lib.sh` in shell. Never a second list.
 
 Python (`bin/omarchy-iptv`):
 
