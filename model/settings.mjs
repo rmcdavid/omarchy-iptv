@@ -9,7 +9,7 @@ import {
   channelOrderOf
 } from "./channels.mjs"
 import {
-  emptyState
+  emptyState, pendingEpgOf
 } from "./state.mjs"
 import {
   optInSetting
@@ -499,8 +499,10 @@ var OWNED_SETTINGS = ["sourceKey", "showLogos"]
 // R17a (D-SINK-19 round 7) narrows WHICH key a heal removes: only a CONSUMED
 // one -- a record holds it, or the service already adopted or refused that
 // value (retiredInputsToKeep, handed to entryWith by the funnel on every
-// owned write). An EPG input R12 leaves on the entry while no source is
-// active is the case it exists for; "removes on every write" stripped it.
+// owned write). An EPG input R12 left on the entry while no source was
+// active is the case it existed for; "removes on every write" stripped it.
+// Since R19b that input is held in the state (pendingEpg), which counts as
+// held, so the keep decision rarely has one left to keep.
 var RETIRED_SETTINGS = ["playlistUrl", "epgUrl"]
 
 // The patch for a settings write: every owned key, at the value it should
@@ -576,6 +578,29 @@ function entryFlushDisposition(ctx) {
   if (c.savePending === true || (Number(c.savesInFlight) || 0) > 0) return { act: "wait", reason: "save-in-flight" }
   if (c.saveFailed === true) return { act: "drop", reason: "save-failed" }
   return { act: "flush", reason: "saved" }
+}
+
+// D-SINK-19 round 9, R19d (D-SRC-18). THE MIRROR A FAILED SAVE OWES.
+//
+// A held key mirror whose state save FAILED is dropped (entryFlushDisposition
+// "drop", reason save-failed): the entry is left exactly as it is, because an
+// input on it may be the only copy of what the failed write carried. But the
+// in-memory state goes on, and a LATER save that lands writes all of it --
+// the adoption the failed write carried included, and anything the user did
+// since, such as an in-app guide URL edit made after the input. Nothing then
+// took the old input off the entry, so the next start re-adopted it, seen
+// "now", over the later edit (D-SRC-18). The order WAS known, in memory; the
+// write that recorded it simply never followed.
+//
+// So the drop leaves a debt, and the first save to LAND with nothing held,
+// parked, in flight or failed pays it: one key mirror, through the funnel,
+// which strips what is consumed. -> "rewrite" | "none".
+function owedMirrorAction(ctx) {
+  var c = ctx || {}
+  if (c.owed !== true) return "none"
+  if (c.pendingKey !== null && c.pendingKey !== undefined) return "none"
+  if (c.savePending === true || (Number(c.savesInFlight) || 0) > 0 || c.saveFailed === true) return "none"
+  return "rewrite"
 }
 
 // R16 (D-SINK-19 round 5). What an owned-entry write that is NOT the key
@@ -690,14 +715,35 @@ function retiredInputsToKeep(entry, state, consumed) {
     if (name === "playlistUrl") {
       held = f.ok && findSourceByUrl(st.sources, f.url) !== null
     } else if (name === "epgUrl") {
+      // R19b (round 9): a guide URL held in the state for want of an active
+      // source is HELD as surely as one on the active record.
       var active = activeSourceRecord(st)
-      held = f.ok && active !== null && f.url === str(active.epgUrl)
+      var pending = pendingEpgOf(st)
+      held = f.ok && ((active !== null && f.url === str(active.epgUrl)) || (pending !== null && f.url === pending.url))
     }
     if (!held) keep.push(name)
   }
   return keep
 }
 
+// D-SINK-19 round 9, R19a. RETIRED: NO SKIP ON AN ESTIMATE.
+//
+// hostEntryForm, entryWriteRecord and entryWriteNeeded below have NO shipped
+// caller since round 9 (pinned by the node suite on the dev branch, "R19a
+// (structural)").
+// The funnel used to skip a write when entryWriteNeeded said the host
+// already stored the entry, judged from the plugin's record of its last
+// write while the publish equalled the publish recorded then. On the lagging
+// host a publish that goes A -> B -> A (an `omarchy bar set` that restores
+// the earlier entry exactly) brought that record back, and the funnel
+// skipped writes the host WOULD have stored: an in-app logo OFF ignored, a
+// refused credential set twice left in shell.json, an EPG input set twice
+// later overwriting an in-app guide URL edit (both round-8 lenses, live).
+// updateEntryInline's own answer is the dirty check, and sameOwnWrite alone
+// settles the cycle. They stay declared ONLY because docs/ still cite them
+// by name and the ledger resolves a citation against the model; they go in
+// the same commit as the documents that stop citing them.
+//
 // D-SINK-19 round 8, R18b. THE CYCLE SETTLES: a write that changes nothing
 // changes nothing.
 //
@@ -776,6 +822,6 @@ export {
   settingsFrom, entryInputText, entryInputForm, sameEntryInput,
   ownWriteInForce, settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS,
   RETIRED_SETTINGS, ownedEntryPatch, barEntryWritable, entryFlushDisposition,
-  ownedWriteMode, retiredInputsToKeep, hostEntryForm, entryWriteRecord,
-  entryWriteNeeded, sameOwnWrite
+  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, hostEntryForm,
+  entryWriteRecord, entryWriteNeeded, sameOwnWrite
 }

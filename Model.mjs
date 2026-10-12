@@ -66,15 +66,16 @@ export {
   favoriteOrigin, favoriteRemovalNotice, hideNotice, scopeEntryAccessibleName,
   savedSearchArrivals, savedSearchDepartures, savedSearchFooter,
   withSavedSearch, withoutSavedSearch, savedSearchRecord, emptyState,
-  playedRecord, cloneState, withCacheLayout, parseState, pushPlayedRecord,
-  stateOnLoad, isFavorite, toggleFavorite, pushRecent, recordPlayed,
-  clearSession, stateSession, deadSessionVerdict, PLAYER_OUTCOMES,
-  sessionAfterOutcome, withFavorites, hiddenGroupList, hiddenGroupSet,
-  isGroupHidden, toggleHiddenGroup, browsableChannels, hideAction, hideVerb,
-  removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed,
-  normalizeFailed, prunedFailed, knownIdSet, failedIndex, failedDocument,
-  failedWhen, withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
-  countReload, reloadDisposition
+  pendingEpgRecord, pendingEpgOf, withPendingEpg, playedRecord, cloneState,
+  withCacheLayout, parseState, pushPlayedRecord, stateOnLoad, isFavorite,
+  toggleFavorite, pushRecent, recordPlayed, clearSession, stateSession,
+  deadSessionVerdict, PLAYER_OUTCOMES, sessionAfterOutcome, withFavorites,
+  hiddenGroupList, hiddenGroupSet, isGroupHidden, toggleHiddenGroup,
+  browsableChannels, hideAction, hideVerb, removeRecent, trimRecents,
+  MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed, prunedFailed,
+  knownIdSet, failedIndex, failedDocument, failedWhen, withFailed,
+  failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
+  reloadDisposition
 } from "./model/state.mjs"
 export {
   parseJsonObject, parseChannels, parseEpgNow, parseHelperStatus,
@@ -83,9 +84,9 @@ export {
   findBarEntry, settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
   entryInputText, entryInputForm, sameEntryInput, ownWriteInForce,
   settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
-  ownedEntryPatch, barEntryWritable, entryFlushDisposition, ownedWriteMode,
-  retiredInputsToKeep, hostEntryForm, entryWriteRecord, entryWriteNeeded,
-  sameOwnWrite
+  ownedEntryPatch, barEntryWritable, entryFlushDisposition, owedMirrorAction,
+  ownedWriteMode, retiredInputsToKeep, hostEntryForm, entryWriteRecord,
+  entryWriteNeeded, sameOwnWrite
 } from "./model/settings.mjs"
 export {
   optInSetting, logoSurvey, splitLogoUrl, logoConsentLines, logoFile,
@@ -184,16 +185,17 @@ export {
   CLIPBOARD_MAX_BYTES
 } from "./model/sources.mjs"
 export {
-  hasControlChars, normalizeSourceRecord, addSource, updateSource,
+  hasControlChars, normalizeSourceRecord, epgSetAtOf, addSource, updateSource,
   removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
   withSourceStats, activeKeyText, activeKeyOf, activeSourceRecord,
   withActiveKey, invalidInputBlocks, reconcileAction, adoptActiveSource,
-  adoptPendingEpg, pointerWritePlan, epgSnapshotAfter, reconcileSources,
-  sourceForEdit, sourcesSummary, entryWith, cacheStale, formFields,
-  isFormField, formLimit, formCapacity, copyForm, formState, formFocusOrder,
-  formHasText, openForm, openFirstRun, openAddForm, openEditForm,
-  openXtreamForm, closeForm, withFormValue, withFormFocus, moveFormFocus,
-  fieldMaskable, fieldRevealed, fieldMasked, toggleReveal, withFormReveal
+  adoptPendingEpg, epgByTime, applyPendingEpg, activeEpgUrlOf,
+  pointerWritePlan, epgSnapshotAfter, reconcileSources, sourceForEdit,
+  sourcesSummary, entryWith, cacheStale, formFields, isFormField, formLimit,
+  formCapacity, copyForm, formState, formFocusOrder, formHasText, openForm,
+  openFirstRun, openAddForm, openEditForm, openXtreamForm, closeForm,
+  withFormValue, withFormFocus, moveFormFocus, fieldMaskable, fieldRevealed,
+  fieldMasked, toggleReveal, withFormReveal
 } from "./model/source-records.mjs"
 export {
   clipboardArgv, clipboardCut, parseClipboardReply, editRange, fullRange,

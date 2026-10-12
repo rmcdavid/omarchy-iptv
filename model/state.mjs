@@ -31,11 +31,11 @@ import {
   guideSurface, footerStatus
 } from "./view.mjs"
 import {
-  CACHE_LAYOUT, MAX_SOURCES, MAX_LABEL, MONTHS, isSourceKey, deriveLabel,
-  uniqueLabel, sameDay, formatLastUsed
+  CACHE_LAYOUT, MAX_SOURCES, MAX_LABEL, MONTHS, validateSourceUrl,
+  isSourceKey, deriveLabel, uniqueLabel, sameDay, formatLastUsed
 } from "./sources.mjs"
 import {
-  warnState, normalizeSourceRecord, activeKeyText, activeKeyOf,
+  warnState, normalizeSourceRecord, activeKeyText, activeKeyOf, withActiveKey,
   adoptActiveSource
 } from "./source-records.mjs"
 
@@ -351,6 +351,51 @@ function emptyState() {
   return { version: STATE_VERSION, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [], activeKey: "" }
 }
 
+// D-SINK-19 round 9, R19b. A PENDING GUIDE URL LIVES IN THE STATE.
+//
+// An `omarchy bar set ... epgUrl` input that no record can take -- no source
+// is active -- used to stay on the bar entry (R12) for as long as no source
+// existed: a possibly credentialed URL in shell.json, a file the plugin does
+// not own, for an unbounded time. It is adopted into the plugin's own 0600
+// state.json instead, as `pendingEpg { url, seenAt }`, and taken off the
+// entry by the same R13-gated owned write that strips every consumed input.
+// `seenAt` is the moment this service first saw the input, in MILLISECONDS
+// (R19c compares it with a record's `epgSetAt`).
+//
+// Additive at STATE_VERSION 2, on the hiddenGroups / activeKey precedent, and
+// ABSENT rather than null when nothing is pending, so a state with nothing
+// pending serializes exactly as it did before R19. `url` is the normalized
+// guide URL (validated as a CLI EPG value); a value that does not validate,
+// or is empty, reads as nothing pending. The HELPER's writer
+// (bin/omarchy-iptv normalize_state) is a whitelist too and is not taught
+// this key yet, so a helper write erases it -- recorded as open, not fixed:
+// bin/ is another lane's.
+function pendingEpgRecord(raw) {
+  if (!raw || typeof raw !== "object") return null
+  var v = validateSourceUrl(str(raw.url), { kind: "epg", origin: "cli" })
+  if (!v.ok || str(v.url) === "") return null
+  return { url: str(v.url), seenAt: Math.max(0, Math.trunc(Number(raw.seenAt)) || 0) }
+}
+
+function pendingEpgOf(state) {
+  return pendingEpgRecord(state ? state.pendingEpg : null)
+}
+
+// Set (`rec` a record) or clear (`rec` null) the pending guide URL. The SAME
+// object back when nothing changes, so a caller's "did the state move"
+// stays an honest identity test, as withActiveKey's does.
+function withPendingEpg(state, rec) {
+  var st = state || emptyState()
+  var want = pendingEpgRecord(rec)
+  var have = pendingEpgOf(st)
+  if (want === null && have === null && !Object.prototype.hasOwnProperty.call(st, "pendingEpg")) return st
+  if (want !== null && have !== null && want.url === have.url && want.seenAt === have.seenAt) return st
+  var out = cloneState(st)
+  delete out.pendingEpg
+  if (want !== null) out.pendingEpg = want
+  return out
+}
+
 // One `{id, name, at}` record: the shape a `recents` entry, `lastPlayed`
 // and `session` all share (python mirror: `normalize_played`). A value
 // without an `id` is dropped, which is also how a state file written
@@ -399,6 +444,11 @@ function cloneState(state, patch) {
     // string). One reader, one rule, the same answer as parseState.
     activeKey: activeKeyText(st.activeKey)
   }
+  // D-SINK-19 round 9, R19b: the SIXTH key this whitelist is taught, on the
+  // day it is added. Carried only when a valid one is pending, so a state
+  // with nothing pending clones to exactly the shape it had before.
+  var pending = pendingEpgRecord(st.pendingEpg)
+  if (pending !== null) out.pendingEpg = pending
   var p = patch || {}
   for (var key in p) if (key !== "version") out[key] = p[key]
   return out
@@ -467,6 +517,10 @@ function parseState(text) {
   // and resolved to "" by activeKeyOf, because dropping it at parse time
   // would hide the case the migration has to decide about.
   state.activeKey = activeKeyText(parsed.activeKey)
+  // D-SINK-19 round 9, R19b: a guide URL input waiting for a source to be
+  // active. Absent when none is (pendingEpgRecord).
+  var pending = pendingEpgRecord(parsed.pendingEpg)
+  if (pending !== null) state.pendingEpg = pending
   var recs = asList(parsed.recents)
   for (var r = 0; r < recs.length; r++) {
     var entry = playedRecord(recs[r])
@@ -1100,14 +1154,14 @@ export {
   favoriteOrigin, favoriteRemovalNotice, hideNotice, scopeEntryAccessibleName,
   savedSearchRows, savedSearchArrivals, savedSearchDepartures,
   savedSearchFooter, withSavedSearch, withoutSavedSearch, savedSearchRecord,
-  emptyState, playedRecord, cloneState, withCacheLayout, parseState,
-  pushPlayedRecord, stateOnLoad, isFavorite, toggleFavorite, pushRecent,
-  recordPlayed, clearSession, stateSession, deadSessionVerdict,
-  PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES, sessionAfterOutcome,
-  withFavorites, hiddenGroupList, hiddenGroupSet, isGroupHidden,
-  toggleHiddenGroup, browsableChannels, hideAction, hideVerb, removeRecent,
-  trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed,
-  prunedFailed, knownIdSet, failedIndex, failedDocument, failedWhen,
-  withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
-  reloadDisposition
+  emptyState, pendingEpgRecord, pendingEpgOf, withPendingEpg, playedRecord,
+  cloneState, withCacheLayout, parseState, pushPlayedRecord, stateOnLoad,
+  isFavorite, toggleFavorite, pushRecent, recordPlayed, clearSession,
+  stateSession, deadSessionVerdict, PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES,
+  sessionAfterOutcome, withFavorites, hiddenGroupList, hiddenGroupSet,
+  isGroupHidden, toggleHiddenGroup, browsableChannels, hideAction, hideVerb,
+  removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed,
+  normalizeFailed, prunedFailed, knownIdSet, failedIndex, failedDocument,
+  failedWhen, withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
+  countReload, reloadDisposition
 }

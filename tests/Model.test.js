@@ -6849,9 +6849,15 @@ checkCall("R1: a forced reconcile over a fresh URL adopts; over the consumed ech
 }, ["adopt", true, true, "migrate", false, OLD_KEY])
 
 // R1's order, every step and every refusal, from the shared fixture.
-function fixtureState(keys, activeKey) {
-  const recs = keys.map(k => Object.assign({ key: k, kind: "http", label: k, labelCustom: false, origin: "cli", addedAt: 1, lastUsed: 1, fetchedAt: 1, channelCount: 1, groupCount: 1 }, activeKeyFixture.records[k]))
-  const st = Model.parseState(JSON.stringify({ version: 2, cacheLayout: 2, sources: recs }))
+function fixtureState(keys, activeKey, c) {
+  // R19 (round 9): a case may carry `epgSetAt` per key and a held `pending`
+  // guide URL; both go through parseState, so the case also proves the
+  // reader carries them.
+  const at = (c && c.epgSetAt) || {}
+  const recs = keys.map(k => Object.assign({ key: k, kind: "http", label: k, labelCustom: false, origin: "cli", addedAt: 1, lastUsed: 1, fetchedAt: 1, channelCount: 1, groupCount: 1 }, activeKeyFixture.records[k], at[k] ? { epgSetAt: at[k] } : {}))
+  const doc = { version: 2, cacheLayout: 2, sources: recs }
+  if (c && c.pending) doc.pendingEpg = c.pending
+  const st = Model.parseState(JSON.stringify(doc))
   return Model.cloneState(st, { activeKey: activeKey })
 }
 function fixtureUrl(value) {
@@ -6861,14 +6867,19 @@ function fixtureUrl(value) {
 }
 checkCall("R1/R4: adoptActiveSource over every `adopt` case of the shared fixture (URL first, then the state's key, then the entry's mirror, then nothing)", () => {
   return activeKeyFixture.adopt.map(c => {
-    const st = fixtureState(c.keys, c.activeKey)
+    const st = fixtureState(c.keys, c.activeKey, c)
     const entry = { playlistUrl: fixtureUrl(c.entry.playlistUrl), epgUrl: c.entry.epgUrl, sourceKey: c.entry.sourceKey }
     const out = Model.adoptActiveSource(st, entry, 1000, "", c.opts)
     const active = Model.findSource(out.state.sources, out.key)
+    // `pending` as url@seenAt, "" for none, read back through the file text
+    // the service would save (the state's own whitelist, R19b)
+    const held = typeof Model.pendingEpgOf === "function" ? Model.pendingEpgOf(Model.parseState(JSON.stringify(out.state))) : null
     const facts = { key: out.key, adoptedUrl: out.adoptedUrl, adoptedEpg: out.adoptedEpg, added: out.added,
                     invalid: out.invalid ? out.invalid.code : null, moved: out.moved, changed: out.changed,
                     writeEntry: out.writeEntry, sources: out.state.sources.length,
-                    epgOnActive: active ? String(active.epgUrl) : "", epgConsumed: out.epgConsumed }
+                    epgOnActive: active ? String(active.epgUrl) : "", epgConsumed: out.epgConsumed,
+                    epgSetAtOnActive: active ? Number(active.epgSetAt) || 0 : 0,
+                    pending: held ? held.url + "@" + held.seenAt : "" }
     // In the fixture's own key order, so the comparison is about values.
     const got = {}
     Object.keys(c.want).forEach(k => { got[k] = facts[k] })
@@ -6884,11 +6895,14 @@ check("R1: the fixture's adopt section covers every step, both refusals, the con
    activeKeyFixture.adopt.filter(c => c.want.adoptedEpg === true).length >= 2,
    activeKeyFixture.adopt.filter(c => c.entry.sourceKey !== "" && c.entry.playlistUrl === "" && c.activeKey === "" && c.want.key !== "").length >= 1,
    activeKeyFixture.adopt.filter(c => c.want.key === "" && c.activeKey !== "" && c.want.changed).length >= 1,
-   // R12: an EPG input with no record to land on is NOT stripped (writeEntry false, epgConsumed false)
-   activeKeyFixture.adopt.filter(c => c.entry.epgUrl !== "" && c.want.key === "" && c.want.writeEntry === false && c.want.epgConsumed === false).length >= 1,
+   // R19b (R12 until round 9): an EPG input with no record to land on is HELD in the state and so consumed
+   activeKeyFixture.adopt.filter(c => c.entry.epgUrl !== "" && c.want.key === "" && c.want.writeEntry === true && c.want.epgConsumed === true && String(c.want.pending || "") !== "").length >= 2,
+   // R19c: a held value meets the newly active record by time -- later lands, earlier or equal is cleared
+   activeKeyFixture.adopt.filter(c => c.pending && c.want.key !== "" && c.want.pending === "" && c.want.epgOnActive === c.pending.url).length >= 1,
+   activeKeyFixture.adopt.filter(c => c.pending && c.want.key !== "" && c.want.pending === "" && c.want.epgOnActive !== c.pending.url).length >= 2,
    // ... and is adopted, then stripped, by the reconcile that brings the first source
    activeKeyFixture.adopt.filter(c => c.keys.length === 0 && c.entry.epgUrl !== "" && c.want.adoptedEpg === true && c.want.writeEntry === true).length >= 1],
-  [true, true, true, true, true, true, true, true])
+  [true, true, true, true, true, true, true, true, true, true])
 
 // R3: removing the active record clears the pointer in the state returned,
 // from the shared fixture (the helper's remove_source_record runs the same
@@ -6976,36 +6990,42 @@ check("P3 sibling: every section the fixture's comment names exists in the fixtu
 // pinned as intended in round 2 ("R4: an EPG input with no active source to
 // land on") and graded as input loss by the review; the fixture case flips
 // to writeEntry false, and `epgConsumed` is what the entry write now asks.
-checkCall("R12: an EPG input with NO active source is neither adopted nor stripped, and the same input beside the first source is adopted and then stripped", () => {
+// R19b (round 9) replaces R12's on-entry pending state: an EPG input with no
+// record to land on is HELD in the state (pendingEpg) -- consumed, so the
+// write after the save takes it out of shell.json -- where R12 left it on the
+// entry for as long as no source existed.
+checkCall("R19b (R12 until round 9): an EPG input with NO active source is HELD in the state as pendingEpg and consumed (the write after the save strips it); beside the first source the same input is adopted onto it", () => {
   const empty = fixtureState([], "")
-  const alone = Model.adoptActiveSource(empty, { playlistUrl: "", epgUrl: "http://e.test/x.xml", sourceKey: "" }, 1000, "", { adoptUrl: false, adoptEpg: true })
-  const withUrl = Model.adoptActiveSource(empty, { playlistUrl: activeKeyFixture.new, epgUrl: "http://e.test/x.xml", sourceKey: "" }, 1000, "", {})
+  const alone = Model.adoptActiveSource(empty, { playlistUrl: "", epgUrl: "http://e.test/x.xml", sourceKey: "" }, 1000, "", { adoptUrl: false, adoptEpg: true, seenAt: 4242 })
+  const withUrl = Model.adoptActiveSource(empty, { playlistUrl: activeKeyFixture.new, epgUrl: "http://e.test/x.xml", sourceKey: "" }, 1000, "", { seenAt: 4242 })
   const rec = Model.findSource(withUrl.state.sources, withUrl.key)
-  return [alone.writeEntry, alone.epgConsumed, alone.adoptedEpg, alone.changed,
-          withUrl.writeEntry, withUrl.epgConsumed, withUrl.adoptedEpg, rec ? rec.epgUrl : null]
-}, [false, false, false, false, true, true, true, "http://e.test/x.xml"])
+  return [alone.writeEntry, alone.epgConsumed, alone.adoptedEpg, alone.changed, alone.pendedEpg, Model.pendingEpgOf(alone.state),
+          withUrl.writeEntry, withUrl.epgConsumed, withUrl.adoptedEpg, rec ? rec.epgUrl : null, rec ? rec.epgSetAt : null, Model.pendingEpgOf(withUrl.state)]
+}, [true, true, false, true, true, { url: "http://e.test/x.xml", seenAt: 4242 }, true, true, true, "http://e.test/x.xml", 4242, null])
 checkCall("R12: epgSnapshotAfter over every `snapshot` case of the shared fixture -- the snapshot moves only for a consumed input or one that went away", () => {
   return activeKeyFixture.snapshot.map(c => c.name + ": " + JSON.stringify(Model.epgSnapshotAfter(c.epg, c.lastEpg, c.consumed)))
 }, activeKeyFixture.snapshot.map(c => c.name + ": " + JSON.stringify(c.want)))
-// The two together, in the service's order: the reconcile that sees an EPG
-// with no source must leave the next reconcile seeing it as FRESH, else the
-// playlist write that follows strips it unadopted (the loss R12 names).
-checkCall("R12: the EPG set before any source is still fresh to the reconcile that brings the first source, and lands on it", () => {
+// The two together, in the service's order (R19b): the reconcile that sees
+// an EPG with no source HOLDS it and moves the snapshot (consumed), so the
+// host's stale publish of it is not fresh again; the reconcile that brings
+// the first source finds the held value in the state and lands it, with the
+// time it was SEEN, because the new record's own guide URL was never set.
+checkCall("R19b: the EPG set before any source is held at the first reconcile, and the reconcile that brings the first source lands it from the STATE with its seenAt -- the host's stale publish of it is not adopted a second time", () => {
   const E = "http://e.test/x.xml"
   let lastEpg = "", lastPlaylist = ""
   let st = fixtureState([], "")
   // reconcile 1: epg only, no source
   let plan = Model.reconcileAction({ first: true, force: false, playlist: "", epg: E, lastPlaylist: lastPlaylist, lastEpg: lastEpg })
-  let out = Model.adoptActiveSource(st, { playlistUrl: "", epgUrl: E, sourceKey: "" }, 1, "", { adoptUrl: plan.adoptUrl, adoptEpg: plan.adoptEpg })
+  let out = Model.adoptActiveSource(st, { playlistUrl: "", epgUrl: E, sourceKey: "" }, 1, "", { adoptUrl: plan.adoptUrl, adoptEpg: plan.adoptEpg, seenAt: 100 })
   lastPlaylist = ""; lastEpg = Model.epgSnapshotAfter(E, lastEpg, out.epgConsumed)
-  const r1 = [plan.adoptEpg, out.writeEntry, lastEpg]
-  // reconcile 2: the host still publishes the EPG (nothing stripped it) and now a playlist
+  const r1 = [plan.adoptEpg, out.writeEntry, lastEpg, (Model.pendingEpgOf(out.state) || {}).seenAt]
+  // reconcile 2: the lagging host still publishes the EPG, and now a playlist
   plan = Model.reconcileAction({ first: false, force: false, playlist: activeKeyFixture.new, epg: E, lastPlaylist: lastPlaylist, lastEpg: lastEpg })
-  out = Model.adoptActiveSource(out.state, { playlistUrl: activeKeyFixture.new, epgUrl: E, sourceKey: "" }, 2, "", { adoptUrl: plan.adoptUrl, adoptEpg: plan.adoptEpg })
+  out = Model.adoptActiveSource(out.state, { playlistUrl: activeKeyFixture.new, epgUrl: E, sourceKey: "" }, 2, "", { adoptUrl: plan.adoptUrl, adoptEpg: plan.adoptEpg, seenAt: 200 })
   lastEpg = Model.epgSnapshotAfter(E, lastEpg, out.epgConsumed)
   const rec = Model.findSource(out.state.sources, out.key)
-  return r1.concat([plan.adoptEpg, out.adoptedEpg, rec ? rec.epgUrl : null, out.writeEntry, lastEpg])
-}, [true, false, "", true, true, "http://e.test/x.xml", true, "http://e.test/x.xml"])
+  return r1.concat([plan.adoptEpg, out.pendingApplied, rec ? rec.epgUrl : null, rec ? rec.epgSetAt : null, Model.pendingEpgOf(out.state), out.writeEntry, lastEpg])
+}, [true, true, "http://e.test/x.xml", 100, false, true, "http://e.test/x.xml", 100, null, true, "http://e.test/x.xml"])
 // The `first ||` term that used to sit in reconcileAction's "changed" carried
 // no weight (round 2 review P3: dropping it reddened nothing). It is gone, and
 // this is the check that would have reddened: first + a value equal to the
@@ -7197,6 +7217,31 @@ const r13 = (() => {
         && /root\.adoptPendingEpgOnto\(newKey, formEpg\)/.test(probe)
     }
   })()
+  // R19 (round 9): the same binding for round 9's halves, each read off the
+  // line of Service.qml that makes it, so a tree without one (lane-key-y0) is
+  // modelled as that tree is and fails on the LOSS its absence causes.
+  // SEEN_AT: adoptActive hands the moment it saw the inputs (R19b/R19c).
+  // SUBMIT_STAMP / EDIT_STAMP: the add form's guide URL is set at submit, an
+  // edit's at the edit. BY_TIME: adoptPendingEpgOnto judges the pending value
+  // against the record by time (no form-wins argument). KNOWN_BY_TIME: the S5
+  // known branch lands the form's guide URL by time (OQ-X3). OWED_MIRROR: a
+  // mirror dropped for a failed save is paid by the next landed one (R19d).
+  // NO_SKIP: the funnel hands every owned write to the host (R19a).
+  const R19 = (() => {
+    const fn = name => (serviceSource.match(new RegExp("function " + name + "\\([^)]*\\) \\{[\\s\\S]*?\\n  \\}")) || [""])[0]
+    const funnel = fn("writeOwnedEntry")
+    const saved = (serviceSource.match(/    onSaved: \{[\s\S]*?\n    \}/) || [""])[0]
+    return {
+      seenAt: /\{ adoptUrl: plan\.adoptUrl === true, adoptEpg: plan\.adoptEpg === true, seenAt: Date\.now\(\) \}/.test(fn("adoptActive")),
+      submitStamp: /epgSetAt: Date\.now\(\) \}, Math\.floor\(Date\.now\(\) \/ 1000\)\)/.test(fn("addSource")),
+      editStamp: /Model\.updateSource\(root\.userState, key, root\.withKey\(fields \|\| \{\}, "epgSetAt", Date\.now\(\)\)/.test(fn("updateSource")),
+      byTime: /Model\.adoptPendingEpg\(root\.userState, key, epg, root\.reconciledEpgUrl, Date\.now\(\)\)/.test(fn("adoptPendingEpgOnto")),
+      knownByTime: /if \(formSetAt > 0\) st = Model\.epgByTime\(st, newKey, String\(pending\.epgUrl \|\| ""\), formSetAt\)\.state/.test(serviceSource),
+      owedMirror: /if \(d\.reason === "save-failed"\) root\.entryMirrorOwed = true/.test(fn("settleEntryFlush"))
+        && /Model\.owedMirrorAction\(/.test(saved) && /root\.persistActive\(root\.activeSourceKey\)/.test(saved),
+      noSkip: funnel.indexOf("var stored = root.shell.updateEntryInline(root.pluginId, entry)") !== -1 && funnel.indexOf("entryWriteNeeded") === -1
+    }
+  })()
   // R18c: a sequence that does not reach quiescence within this many deferred
   // calls, or this many owned entry writes, is a LOOP and fails its case.
   const SETTLE_BOUND = 400
@@ -7213,7 +7258,15 @@ const r13 = (() => {
   // apart, never silently. Accumulated over the whole suite and asserted
   // once at the end ("the input audit"), and per case where a case is about
   // an input.
-  const audit = { writes: 0, lost: [], refused: 0, superseded: 0, skipped: 0 }
+  const audit = { writes: 0, lost: [], refused: 0, superseded: 0, skipped: 0, moves: 0 }
+  // R19c's ORACLE CLOCK (round 9). The audit's own record of WHEN each
+  // explicit guide-URL input was made -- a CLI epgUrl put on the host, an add
+  // form submitted, an edit made -- ticked by the driver at the moment of the
+  // act, never read from the model's seenAt / epgSetAt. Supersession counts
+  // as legitimate only when the value that stands was input LATER than the
+  // one that is gone; anything else is a loss.
+  let oracleClock = 0
+  const tick = () => ++oracleClock
   // The oracle's OWN spelling of what adoption does to an entry value (round
   // 8: settingsFrom's \s trim, then sanitize, then validation) -- not a call
   // to Model.entryInputForm, because an oracle that asks the function under
@@ -7226,10 +7279,24 @@ const r13 = (() => {
     const v = text === "" ? { ok: false } : Model.validateSourceUrl(text, kind)
     return { text, ok: v.ok === true && String(v.url || "") !== "", url: v.ok ? String(v.url || "") : "" }
   }
-  const inputHeld = (records, name, value) => {
+  // HELD: a record of the FILE holds it, or (R19b) the file holds it as the
+  // pending guide URL -- read off the raw JSON, not through parseState.
+  const inputHeld = (records, name, value, text) => {
     const f = oracleForm(name, value)
     const field = name === "epgUrl" ? "epgUrl" : "url"
-    return records.some(r => String(r[field] || "") === value || (f.ok && String(r[field] || "") === f.url))
+    if (records.some(r => String(r[field] || "") === value || (f.ok && String(r[field] || "") === f.url))) return true
+    if (name !== "epgUrl") return false
+    let raw = {}
+    try { raw = JSON.parse(text || "{}") || {} } catch (e) { raw = {} }
+    const held = raw.pendingEpg && typeof raw.pendingEpg === "object" ? String(raw.pendingEpg.url || "") : ""
+    return held !== "" && (held === value || (f.ok && held === f.url))
+  }
+  // Was `url` (an EPG input that is gone) superseded by a LATER input that
+  // stands on the record it competed for? The oracle's times only.
+  const supersededLater = (svc, url, key) => {
+    const tGone = svc.host.inputAt[url] || 0
+    const tStands = svc.recordSetAt[key] || 0
+    return tStands > tGone
   }
   const auditWrite = (svc, before, label) => {
     audit.writes++
@@ -7248,27 +7315,38 @@ const r13 = (() => {
     for (const name of ["playlistUrl", "epgUrl"]) {
       const value = String((before || {})[name] || "")
       if (value === "") continue
-      if (String(after[name] || "") === value || inputHeld(records, name, value)) continue
+      if (String(after[name] || "") === value || inputHeld(records, name, value, svc.disk.text)) continue
       const f = oracleForm(name, value)
       // no input at all (whitespace / control characters alone): nothing to lose
       if (f.text === "") continue
       // REFUSED (D16) and stripped once reported, on purpose (rule 5, OQ-W2
       // confirmed in round 8): counted apart, never as lost
       if (!f.ok) { audit.refused++; svc.refusedStripped.push(name); continue }
-      // R18d: superseded by the user's LATER explicit input for the same
-      // slot (an add form's own guide URL over a pending CLI epgUrl): not lost
-      if (svc.supersededInputs.indexOf(name + " " + f.url) !== -1) { audit.superseded++; continue }
+      // Superseded by the user's LATER explicit input for the same slot --
+      // judged by the ORACLE's clock (R19c), never by the service's say-so:
+      // round 8's exemption took the service's word (R18d) and so could not
+      // see a later CLI input superseded by an EARLIER form
+      const sup = svc.supersededInputs.filter(x => x.name + " " + x.url === name + " " + f.url)
+      if (sup.length > 0 && sup.every(x => supersededLater(svc, f.url, x.key))) { audit.superseded++; continue }
+      // ... or it LANDED on a record whose guide URL a later input has since
+      // replaced (an in-app edit after a CLI value): superseded by time too
+      if (name === "epgUrl" && svc.landedOn[f.url] && supersededLater(svc, f.url, svc.landedOn[f.url])) { audit.superseded++; continue }
       const lost = { name, label, host: svc.host.mode }
       audit.lost.push(lost); svc.inputLost.push(lost)
     }
   }
   class Host {
-    constructor(entry, mode) {
+    constructor(entry, mode, inputAt) {
       this.mode = mode
       this.stored = { version: 1, bar: { layout: { left: [], center: [], right: [Object.assign({ id: PID }, entry)] } } }
       this.published = clone(this.stored.bar)
       this.listeners = []
       this.refuse = false
+      // the oracle's clock for every guide-URL input this host was given; a
+      // restart carries it over, an entry seeded with one was set NOW
+      this.inputAt = inputAt || {}
+      const seeded = oracleForm("epgUrl", (entry || {}).epgUrl)
+      if (!inputAt && seeded.ok) this.inputAt[seeded.url] = tick()
     }
     get barConfig() { return this.refuse ? { layout: { left: [], center: [], right: [] } } : this.published }
     storedEntry() { return this.stored.bar.layout.right[0] }
@@ -7289,6 +7367,7 @@ const r13 = (() => {
       return true
     }
     externalSet(key, value) {
+      if (key === "epgUrl") { const f = oracleForm("epgUrl", value); if (f.ok) this.inputAt[f.url] = tick() }
       const copy = clone(this.stored)
       if (value === null) delete copy.bar.layout.right[0][key]; else copy.bar.layout.right[0][key] = value
       this.assign(copy)
@@ -7329,6 +7408,9 @@ const r13 = (() => {
       this.pendingEntryKey = null; this.ownWrite = null; this.recentSaves = []; this.lastSaveText = ""
       this.later = []; this.warnings = []; this.signals = []; this.entryWrites = []; this.entryAudits = []; this.inputLost = []; this.now = 1000
       this.lastEntryWrite = null; this.refusedStripped = []; this.supersededInputs = []; this.turns = 0; this.ownWriteAssignments = 0; this.reconciles = 0
+      // R19: the oracle's record of when each record's guide URL was last SET
+      // by an explicit input (key -> oracle time), and R19d's owed mirror
+      this.recordSetAt = {}; this.landedOn = {}; this.entryMirrorOwed = false; this.moves = []; this.probe = null
       host.listeners.push(() => this.onHostChanged())
     }
     get hostSettings() { return Model.settingsFrom(Model.findBarEntry(this.host.barConfig, PID)) }
@@ -7365,6 +7447,12 @@ const r13 = (() => {
         if (landed && byContent) { this.stateSavesInFlight = 0; this.stateSaveFailed = false }
         if (!byContent) this.stateSaveFailed = false
         this.settleEntryFlush()
+        // R19d: a mirror dropped for a failed save is paid by this landed one (R19.owedMirror)
+        if (R19.owedMirror && Model.owedMirrorAction({ owed: this.entryMirrorOwed, pendingKey: this.pendingEntryKey, savePending: this.stateSavePending,
+                                                       savesInFlight: this.stateSavesInFlight, saveFailed: this.stateSaveFailed }) === "rewrite") {
+          this.entryMirrorOwed = false
+          this.later.push(() => this.persistActive(this.activeSourceKey))
+        }
         this.applyUserState(this.disk.text)       // the own-write reload that follows an atomic write
       } else if (ev.kind === "saveFailed") {
         if (landed && byContent) this.stateSavesInFlight = 0
@@ -7405,7 +7493,10 @@ const r13 = (() => {
       const d = Model.entryFlushDisposition({ pendingKey: this.pendingEntryKey, dirsReady: this.dirsReady, initOk: this.stateInitOk,
         saveFailed: this.stateSaveFailed, savePending: this.stateSavePending, savesInFlight: this.stateSavesInFlight })
       if (d.act === "flush") { const key = this.pendingEntryKey; this.pendingEntryKey = null; this.persistEntryKey(key) }
-      else if (d.act === "drop") { this.pendingEntryKey = null; this.warnings.push("entry left as it is (" + d.reason + ")") }
+      else if (d.act === "drop") {
+        this.pendingEntryKey = null; this.warnings.push("entry left as it is (" + d.reason + ")")
+        if (R19.owedMirror && d.reason === "save-failed") this.entryMirrorOwed = true
+      }
     }
     stateInitExit() {
       this.dirsReady = true; this.stateInitOk = true
@@ -7426,7 +7517,16 @@ const r13 = (() => {
     }
     adoptActive(playlist, epg, plan) {
       const entry = { playlistUrl: playlist, epgUrl: epg, sourceKey: String(this.settings.sourceKey || "") }
-      const out = Model.adoptActiveSource(this.userState, entry, this.now++, "", { adoptUrl: plan.adoptUrl === true, adoptEpg: plan.adoptEpg === true })
+      const before = this.userState
+      const opts = { adoptUrl: plan.adoptUrl === true, adoptEpg: plan.adoptEpg === true }
+      if (R19.seenAt) opts.seenAt = this.now++
+      const out = Model.adoptActiveSource(this.userState, entry, this.now++, "", opts)
+      // the oracle: a held value that met the newly active record (R19c), and
+      // a CLI input landed on the active record (set at the input's own time)
+      if (out.key !== "") this.auditMove(out.key, before, out.state, "reconcile")
+      const f = oracleForm("epgUrl", epg)
+      const landed = out.key !== "" ? Model.findSource(out.state.sources, out.key) : null
+      if (plan.adoptEpg === true && f.ok && landed && String(landed.epgUrl || "") === f.url) { this.recordSetAt[out.key] = this.host.inputAt[f.url] || 0; this.landedOn[f.url] = out.key }
       if (out.changed) { this.userState = out.state; this.saveState() }
       if (out.writeEntry) { const key = out.key; this.later.push(() => this.persistActive(key)) }
       return out.epgConsumed === true
@@ -7458,8 +7558,9 @@ const r13 = (() => {
       const keep = R17.funnelKeeps ? Model.retiredInputsToKeep(published, this.userState, { playlistUrl: this.reconciledPlaylistUrl, epgUrl: this.reconciledEpgUrl }) : []
       if (keep.length > 0 && keepRetired !== true) this.warnings.push("entry keeps an unadopted input (" + keep.join(", ") + ")")
       const entry = Model.entryWith(published, patch, { keepRetired: keepRetired === true, keep: keep })
-      // R18b: no write the host would answer `false` to (R18.funnelSkips)
-      if (R18.funnelSkips && !Model.entryWriteNeeded(PID, entry, published, this.lastEntryWrite)) { audit.skipped++; return true }
+      // R18b: no write the host would answer `false` to (R18.funnelSkips; a
+      // round-8 tree). R19a withdrew it: every owned write is handed over.
+      if (R18.funnelSkips && !R19.noSkip && !Model.entryWriteNeeded(PID, entry, published, this.lastEntryWrite)) { audit.skipped++; return true }
       if (this.entryWrites.length > SETTLE_BOUND) {
         const why = "LOOP: " + this.entryWrites.length + " entry writes (" + this.host.mode + " host)"
         loops.push(why); throw new Error(why)
@@ -7473,8 +7574,10 @@ const r13 = (() => {
       const key = String(entry.sourceKey || "")
       this.entryAudits.push({ entryKey: key, fileKey: Model.activeKeyOf(file), memKey: this.activeSourceKey,
                               fileHas: key === "" || file.sources.some(r => r.key === key), urlKept: Object.prototype.hasOwnProperty.call(entry, "playlistUrl") })
-      this.host.updateEntryInline(PID, entry)
-      if (R18.funnelSkips) this.lastEntryWrite = Model.entryWriteRecord(PID, entry, Model.findBarEntry(this.host.barConfig, PID))
+      const stored = this.host.updateEntryInline(PID, entry)
+      if (stored === false) audit.declined = (audit.declined || 0) + 1
+      if (R18.funnelSkips && !R19.noSkip) this.lastEntryWrite = Model.entryWriteRecord(PID, entry, Model.findBarEntry(this.host.barConfig, PID))
+      if (R19.owedMirror && keepRetired !== true) this.entryMirrorOwed = false
       auditWrite(this, storedBefore, keepRetired === true ? "patch" : "heal")
       // The own-write record. A reassignment re-evaluates Service's `settings`
       // binding and fires onSettingsChanged -> reconcile, whatever the CONTENT
@@ -7516,36 +7619,97 @@ const r13 = (() => {
       if (!this.persistActive(key)) this.warnings.push("switched but could not mirror")
       return { ok: true, code: "ok" }
     }
-    // Service.adoptPendingEpgOnto (R17b)
+    // The ORACLE at an active move (R19c), independent of the model's own
+    // times: a guide URL held in the state before the move met record `key`;
+    // whichever was input LATER by the oracle's clock must stand on the
+    // record afterwards, and the held value must be gone. Anything else is a
+    // loss, counted with the others.
+    auditMove(key, before, after, label) {
+      if (typeof Model.pendingEpgOf !== "function") return
+      const held = Model.pendingEpgOf(before)
+      const recBefore = Model.findSource(before.sources, key)
+      const recAfter = Model.findSource(after.sources, key)
+      if (!held || !recBefore || !recAfter) return
+      audit.moves++
+      const tHeld = this.host.inputAt[held.url] || 0
+      const tRec = this.recordSetAt[key] || 0
+      const want = tHeld > tRec ? held.url : String(recBefore.epgUrl || "")
+      const stillHeld = Model.pendingEpgOf(after) !== null
+      this.moves.push({ key, label, landed: String(recAfter.epgUrl || "") === held.url, later: tHeld > tRec })
+      if (String(recAfter.epgUrl || "") !== want || stillHeld) {
+        const lost = { name: "epgUrl", label: "move-" + label, host: this.host.mode }
+        audit.lost.push(lost); this.inputLost.push(lost)
+        return
+      }
+      if (want === held.url) { this.recordSetAt[key] = tHeld; this.landedOn[held.url] = key }
+      else audit.superseded++
+    }
+    // Service.adoptPendingEpgOnto (R17b; R19c by time, R18d form-wins on a
+    // round-8 tree)
     adoptPendingEpgOnto(key, formEpg) {
       const epg = String(this.settings.epgUrl || "")
+      const before = this.userState
+      if (R19.byTime) {
+        const out = Model.adoptPendingEpg(this.userState, key, epg, this.reconciledEpgUrl, this.now++)
+        if (out.state !== this.userState) this.userState = out.state
+        if (out.pending) this.reconciledEpgUrl = Model.epgSnapshotAfter(epg, this.reconciledEpgUrl, out.consumed)
+        if (out.adopted) this.warnings.push("a pending guide URL (epgUrl) lands on source " + key)
+        else if (out.superseded) this.warnings.push("a pending guide URL (epgUrl) is superseded: source " + key + " keeps the one set later")
+        this.auditMove(key, before, this.userState, "move")
+        return out.consumed
+      }
       const out = Model.adoptPendingEpg(this.userState, key, epg, this.reconciledEpgUrl, this.now++, { formEpg: String(formEpg || "") })
       if (!out.pending) return false
       if (out.state !== this.userState) this.userState = out.state
       this.reconciledEpgUrl = Model.epgSnapshotAfter(epg, this.reconciledEpgUrl, out.consumed)
+      const f = oracleForm("epgUrl", epg)
+      if (out.adopted && f.ok) this.recordSetAt[key] = this.host.inputAt[f.url] || 0
       if (out.superseded) {
         this.warnings.push("the add form's guide URL supersedes a pending input (epgUrl)")
-        this.supersededInputs.push("epgUrl " + oracleForm("epgUrl", epg).url)
+        this.supersededInputs.push({ name: "epgUrl", url: f.url, key: key })
       }
       return out.consumed
     }
-    // The probe commit of an in-app ADD (Service's sourceProbeProc exit, status
-    // ok, mode "add", commit true): Model.addSource built the pending record
-    // from the form; on success it joins the history (or the record the CLI
-    // added meanwhile wins), its stats and lastUsed land, the state is saved
-    // and the pointer moves (persistActive). R17b sits before the save.
-    commitAdd(fields) {
-      const added = Model.addSource(this.userState, fields, this.now++)
+    // The in-app ADD in its two halves, as Service.qml makes it. SUBMIT
+    // (Service.addSource): Model.addSource builds the pending record from the
+    // form -- its guide URL stamped with the submit time (R19.submitStamp) --
+    // and the probe starts; the oracle ticks the submit. COMMIT (the
+    // sourceProbeProc exit, status ok, mode "add", commit true): the record
+    // joins the history (or the one the CLI added meanwhile wins, S5, and the
+    // form's guide URL lands on it by time, R19.knownByTime), its stats and
+    // lastUsed land, the pending guide URL meets it (R17b / R19c), the state
+    // is saved and the pointer moves. Anything may happen between the two:
+    // the round-8 lens's race is a CLI epgUrl set there.
+    submitAdd(fields) {
+      const f = Object.assign({}, fields)
+      if (R19.submitStamp) f.epgSetAt = this.now++
+      const added = Model.addSource(this.userState, f, this.now++)
       if (!added.ok) return { ok: false, code: added.code }
-      const pending = Model.findSource(added.state.sources, added.key)
+      const form = oracleForm("epgUrl", f.epgUrl)
+      this.probe = { pending: Model.findSource(added.state.sources, added.key), formAt: form.ok ? tick() : 0, formUrl: form.ok ? form.url : "" }
+      return { ok: true, code: "ok", probing: true }
+    }
+    commitProbe() {
+      const probe = this.probe
+      this.probe = null
+      if (!probe) return { ok: false, code: "no_probe" }
+      const pending = probe.pending
       let st = this.userState
       const known = Model.findSourceByUrl(st.sources, pending.url)
       let newKey
       let formEpg = ""
-      if (known) newKey = String(known.key)
-      else {
+      if (known) {
+        newKey = String(known.key)
+        if (R19.knownByTime) {
+          const formSetAt = Model.epgSetAtOf(pending)
+          if (formSetAt > 0) st = Model.epgByTime(st, newKey, String(pending.epgUrl || ""), formSetAt).state
+          // the oracle's own judgement of the same landing
+          if (probe.formAt > (this.recordSetAt[newKey] || 0) && probe.formUrl !== "") this.recordSetAt[newKey] = probe.formAt
+        }
+      } else {
         newKey = Model.allocateSourceKey(st.sources, pending.url); st = Model.cloneState(st, { sources: st.sources.concat([Object.assign({}, pending, { key: newKey })]) })
         if (R18.formWins) formEpg = String(pending.epgUrl || "")
+        if (probe.formUrl !== "") this.recordSetAt[newKey] = probe.formAt
       }
       st = Model.withSourceStats(st, newKey, { ok: true, channelCount: 5, groupCount: 1, fetchedAt: this.now }, this.now)
       st = Model.touchSource(st, newKey, this.now++)
@@ -7554,6 +7718,25 @@ const r13 = (() => {
       this.saveState()
       if (newKey !== this.activeSourceKey && !this.persistActive(newKey)) this.warnings.push("adopted but could not mirror")
       return { ok: true, code: "ok", key: newKey }
+    }
+    commitAdd(fields) {
+      const res = this.submitAdd(fields)
+      if (!res.ok) return res
+      return this.commitProbe()
+    }
+    // Service.updateSource's EPG-only route (the edit form; no URL change, so
+    // it commits at once): the guide URL is stamped with the edit time when it
+    // CHANGES (R19.editStamp), the state is saved, nothing is mirrored.
+    editEpg(key, url) {
+      const fields = { epgUrl: url }
+      if (R19.editStamp) fields.epgSetAt = this.now++
+      const rec = Model.findSource(this.userState.sources, key)
+      const updated = Model.updateSource(this.userState, key, fields, this.now++)
+      if (!updated.ok) return { ok: false, code: updated.code }
+      const f = oracleForm("epgUrl", url)
+      if (rec && String(rec.epgUrl || "") !== (f.ok ? f.url : "")) this.recordSetAt[key] = tick()
+      this.userState = updated.state; this.saveState()
+      return { ok: true, code: "ok" }
     }
     // `beforeLoad(svc)` runs in the start-up window the round-5 data-loss
     // lens named: Service.Component.onCompleted has run (the first
@@ -7579,9 +7762,19 @@ const r13 = (() => {
   const stateText = (sources, activeKey) => JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources, activeKey }) + "\n"
   const fileOf = svc => Model.parseState(svc.disk.text)
   const has = (o, k) => Object.prototype.hasOwnProperty.call(o || {}, k)
-  const restart = (svc, mode, o) => new Svc(new Host(clone(svc.host.storedEntry()), mode), new Disk(svc.disk.text)).start(o)
+  // the oracle's clocks survive a restart: an input made before it was made
+  // then, and a record's guide URL set before it was set then
+  const restart = (svc, mode, o) => {
+    const next = new Svc(new Host(clone(svc.host.storedEntry()), mode, svc.host.inputAt), new Disk(svc.disk.text))
+    next.recordSetAt = Object.assign({}, svc.recordSetAt)
+    next.landedOn = Object.assign({}, svc.landedOn)
+    // the wall clock does not restart with the shell: the model's times
+    // (seenAt, epgSetAt) after a restart are later than every one before it
+    next.now = svc.now
+    return next.start(o)
+  }
   const boot = (entry, text, mode, o) => new Svc(new Host(entry, mode), new Disk(text)).start(o)
-  return { Host, Disk, Svc, A, B, NEW, KA, KB, KNEW, rec, stateText, fileOf, has, restart, boot, R17, R18, audit, loops, SETTLE_BOUND, oracleForm }
+  return { Host, Disk, Svc, A, B, NEW, KA, KB, KNEW, rec, stateText, fileOf, has, restart, boot, R17, R18, R19, audit, loops, SETTLE_BOUND, oracleForm, tick }
 })()
 for (const mode of ["lag", "echo"]) {
   // The P1 itself, on the mid-session route: a CLI playlistUrl set while the
@@ -8056,7 +8249,9 @@ checkCall("R16 (structural): setShowLogos asks Model.ownedWriteMode with the fou
     // rule 9: the own-write record is made for EVERY write through the funnel, the patch-only one included,
     // directly after the write and over the same patch -- not behind a condition on the mode. R18b (round 8):
     // the write's own record comes first, and the own-write record is assigned unless it EQUALS the one in force
-    overrideRecordedForEveryWrite: /root\.shell\.updateEntryInline\(root\.pluginId, entry\)\n\s*root\.lastEntryWrite = Model\.entryWriteRecord\(root\.pluginId, entry, Model\.findBarEntry\(root\.shell\.barConfig, root\.pluginId\)\)\n\s*var record = Model\.ownWriteOf\(root\.hostSettings, Model\.ownedEntryPatch\(root\.settings, overrides\)\)\n\s*if \(!Model\.sameOwnWrite\(root\.ownWrite, record\)\) root\.ownWrite = record\n/.test(funnel),
+    // R19a (round 9): every owned write is handed to the host, and the record
+    // is made right after the hand-over with nothing but comments between
+    overrideRecordedForEveryWrite: /var stored = root\.shell\.updateEntryInline\(root\.pluginId, entry\)\n(\s*\/\/[^\n]*\n)*\s*var record = Model\.ownWriteOf\(root\.hostSettings, Model\.ownedEntryPatch\(root\.settings, overrides\)\)\n\s*if \(!Model\.sameOwnWrite\(root\.ownWrite, record\)\) root\.ownWrite = record\n/.test(funnel),
     // three call sites: writeActive (no fourth argument), the patch branch (true), the heal branch (none)
     callers: callers.length,
     onlyThePatchPassesIt: callers.filter(c => /, true\)$/.test(c)).length === 1 && callers.filter(c => c.indexOf("{ showLogos: want }") !== -1 && /, true\)$/.test(c)).length === 1
@@ -8163,7 +8358,7 @@ checkCall("R17a: entryWith with `keep` carries THOSE retired keys over on a heal
           Model.entryWith(host, {}, { keep: ["epgUrl"] }).epgUrl]
 }, ["epgUrl,id,showLogos,sourceKey", "epgUrl,id,playlistUrl,showLogos,sourceKey", "id,showLogos,sourceKey", "epgUrl,id,playlistUrl,showLogos,sourceKey",
     "id,showLogos,sourceKey", "id,showLogos,sourceKey", "new", "http://p.test/a.xml"])
-checkCall("R17b: adoptPendingEpg lands a FRESH EPG input on the named record only and moves no key; a consumed input, a key naming no record, an empty input and the record's own value change nothing; a refused input is consumed and changes nothing", () => {
+checkCall("R17b / R19c: adoptPendingEpg on an active move -- a FRESH input on the entry is first held (seen now) and then meets the named record by time; it lands where the record's guide URL was never set, moves no key and touches no other record; a consumed input, a key naming no record and an empty input change nothing; a refused input is consumed and changes nothing", () => {
   const EPG = "http://epg.example.test/xmltv.php?username=e&password=f"
   const st = fixtureState(["d990c2e4", "42839dd5"], "")
   const fresh = Model.adoptPendingEpg(st, "42839dd5", EPG, "", 5)
@@ -8172,15 +8367,86 @@ checkCall("R17b: adoptPendingEpg lands a FRESH EPG input on the named record onl
   const consumed = Model.adoptPendingEpg(st, "42839dd5", EPG, EPG, 5)
   const noRecord = Model.adoptPendingEpg(st, "deadbeef", EPG, "", 5)
   const empty = Model.adoptPendingEpg(st, "42839dd5", "", "", 5)
-  const own = Model.adoptPendingEpg(st, "d990c2e4", activeKeyFixture.records.d990c2e4.epgUrl, "", 5)
   const refused = Model.adoptPendingEpg(st, "42839dd5", "ftp://h.test/x.xml", "", 5)
-  const facts = o => [o.pending, o.consumed, o.adopted, o.state === st]
-  return { fresh: facts(fresh), recEpg: rec.epgUrl === EPG, otherUntouched: other.epgUrl === activeKeyFixture.records.d990c2e4.epgUrl,
-           keyUnmoved: fresh.state.activeKey === st.activeKey && Model.activeKeyOf(fresh.state) === "",
-           consumed: facts(consumed), noRecord: facts(noRecord), empty: facts(empty), own: facts(own), refused: facts(refused) }
-}, { fresh: [true, true, true, false], recEpg: true, otherUntouched: true, keyUnmoved: true,
-     consumed: [false, false, false, true], noRecord: [true, false, false, true], empty: [false, false, false, true],
-     own: [true, true, false, true], refused: [true, true, false, true] })
+  const ctl = Model.adoptPendingEpg(st, "42839dd5", "\u0007", "", 5)
+  const facts = o => [o.pending, o.consumed, o.adopted, o.superseded, o.state === st]
+  return { fresh: facts(fresh), recEpg: [rec.epgUrl === EPG, rec.epgSetAt], otherUntouched: other.epgUrl === activeKeyFixture.records.d990c2e4.epgUrl && !("epgSetAt" in other),
+           keyUnmoved: fresh.state.activeKey === st.activeKey && Model.activeKeyOf(fresh.state) === "", nothingHeld: Model.pendingEpgOf(fresh.state),
+           consumed: facts(consumed), noRecord: facts(noRecord), empty: facts(empty), refused: facts(refused), controlOnly: facts(ctl) }
+}, { fresh: [true, true, true, false, false], recEpg: [true, 5], otherUntouched: true, keyUnmoved: true, nothingHeld: null,
+     consumed: [false, false, false, false, true], noRecord: [true, false, false, false, true], empty: [false, false, false, false, true],
+     refused: [true, true, false, false, true], controlOnly: [false, false, false, false, true] })
+// R19c, the comparison itself: a value HELD in the state (pendingEpg) meets
+// the record by time -- later lands with its seenAt, earlier or EQUAL leaves
+// the record's own, and the held value is cleared either way.
+checkCall("R19c: adoptPendingEpg over a value HELD in the state -- it lands iff its seenAt is LATER than the record's epgSetAt (absent = 0); an earlier or equal one leaves the record's own guide URL and time; the held value is cleared either way; a key naming no record clears nothing", () => {
+  const P = "http://held.example.test/guide.xml"
+  const at = (setAt, seenAt) => fixtureState(["d990c2e4"], "", { epgSetAt: setAt === null ? {} : { d990c2e4: setAt }, pending: { url: P, seenAt: seenAt } })
+  const run = (st, key) => {
+    const out = Model.adoptPendingEpg(st, key || "d990c2e4", "", "", 99)
+    const rec = Model.findSource(out.state.sources, "d990c2e4")
+    return [out.adopted, out.superseded, out.cleared, rec.epgUrl === P, Number(rec.epgSetAt) || 0, Model.pendingEpgOf(out.state)]
+  }
+  return { neverSet: run(at(null, 500)), earlier: run(at(400, 500)), later: run(at(600, 500)), equal: run(at(500, 500)),
+           noRecord: run(at(null, 500), "deadbeef") }
+}, { neverSet: [true, false, true, true, 500, null], earlier: [true, false, true, true, 500, null],
+     later: [false, true, true, false, 600, null], equal: [false, true, true, false, 500, null],
+     noRecord: [false, false, false, false, 0, { url: "http://held.example.test/guide.xml", seenAt: 500 }] })
+checkCall("R19c: epgByTime -- a guide URL set at a time lands on the record iff that time is later than the record's own (the S5 known branch uses it for the add form's value); the same state back when it loses; no record, no change", () => {
+  const F = "http://form.example.test/guide.xml"
+  const st = fixtureState(["d990c2e4", "42839dd5"], "", { epgSetAt: { d990c2e4: 700 } })
+  const win = Model.epgByTime(st, "42839dd5", F, 300)
+  const lose = Model.epgByTime(st, "d990c2e4", F, 600)
+  const tie = Model.epgByTime(st, "d990c2e4", F, 700)
+  const beat = Model.epgByTime(st, "d990c2e4", F, 701)
+  const none = Model.epgByTime(st, "deadbeef", F, 900)
+  const zero = Model.epgByTime(st, "42839dd5", F, 0)
+  const epg = (o, k) => Model.findSource(o.state.sources, k).epgUrl
+  return [win.won, epg(win, "42839dd5"), Model.findSource(win.state.sources, "42839dd5").epgSetAt, lose.won, lose.state === st, tie.won, beat.won, epg(beat, "d990c2e4"),
+          none.won, none.state === st, zero.won]
+}, [true, "http://form.example.test/guide.xml", 300, false, true, false, true, "http://form.example.test/guide.xml", false, true, false])
+// R19b: the state's whitelists carry the two new keys (the savedSearches
+// lesson: every writer is a whitelist, and a key a writer is not taught is
+// erased by it). parseState and cloneState here; the helper's is open.
+checkCall("R19b/R19c: parseState and cloneState carry pendingEpg (normalized; absent when nothing valid is pending) and a record's epgSetAt (absent when 0), and a state with neither serializes exactly as before", () => {
+  const P = "HTTP://Held.Example.Test/guide.xml"
+  const doc = { version: 2, cacheLayout: 2, sources: [Object.assign({ key: "42839dd5", kind: "http", label: "x", origin: "cli" }, activeKeyFixture.records["42839dd5"], { epgSetAt: 1234.9 })],
+                pendingEpg: { url: P, seenAt: "777" } }
+  const parsed = Model.parseState(JSON.stringify(doc))
+  const cloned = Model.cloneState(parsed, { favorites: ["t:x"] })
+  const junk = ["", "ftp://h.test/x", "\u0007", 5, null].map(u => Model.parseState(JSON.stringify({ version: 2, pendingEpg: { url: u, seenAt: 1 } })).pendingEpg)
+  const plain = Model.parseState(JSON.stringify({ version: 2, cacheLayout: 2, sources: [Object.assign({ key: "42839dd5", kind: "http", label: "x", origin: "cli" }, activeKeyFixture.records["42839dd5"])] }))
+  const cleared = Model.withPendingEpg(parsed, null)
+  return { pending: parsed.pendingEpg, setAt: parsed.sources[0].epgSetAt, clonedPending: cloned.pendingEpg, clonedSetAt: cloned.sources[0].epgSetAt,
+           junk, plainKeys: Object.keys(plain).indexOf("pendingEpg") === -1 && !("epgSetAt" in plain.sources[0]),
+           clearedAbsent: !("pendingEpg" in cleared), sameWhenUnchanged: Model.withPendingEpg(parsed, { url: "http://held.example.test/guide.xml", seenAt: 777 }) === parsed && Model.withPendingEpg(plain, null) === plain }
+}, { pending: { url: "http://held.example.test/guide.xml", seenAt: 777 }, setAt: 1234, clonedPending: { url: "http://held.example.test/guide.xml", seenAt: 777 }, clonedSetAt: 1234,
+     junk: [undefined, undefined, undefined, undefined, undefined], plainKeys: true, clearedAbsent: true, sameWhenUnchanged: true })
+checkCall("R19c: addSource stamps the form's guide URL with the submit time it is handed (none for a blank one); updateSource stamps it only when the edit CHANGES it, and an edit that changes the playlist URL carries the stamp to the replacement", () => {
+  const st = fixtureState(["42839dd5"], "")
+  const withEpg = Model.addSource(st, { playlistUrl: "http://n.example.test/a.m3u", epgUrl: "http://n.example.test/g.xml", label: "", origin: "guide", epgSetAt: 321 }, 5)
+  const blank = Model.addSource(st, { playlistUrl: "http://n.example.test/b.m3u", epgUrl: "", label: "", origin: "guide", epgSetAt: 321 }, 5)
+  const r = (o, k) => Model.findSource(o.state.sources, k)
+  const changed = Model.updateSource(st, "42839dd5", { label: "x", playlistUrl: activeKeyFixture.records["42839dd5"].url, epgUrl: "http://e.test/new.xml", epgSetAt: 900 }, 6)
+  const same = Model.updateSource(changed.state, "42839dd5", { label: "y", playlistUrl: activeKeyFixture.records["42839dd5"].url, epgUrl: "http://e.test/new.xml", epgSetAt: 950 }, 7)
+  const moved = Model.updateSource(st, "42839dd5", { playlistUrl: "http://moved.example.test/c.m3u", epgUrl: "http://e.test/m.xml", epgSetAt: 990 }, 8)
+  return [r(withEpg, withEpg.key).epgSetAt, "epgSetAt" in r(blank, blank.key), r(changed, "42839dd5").epgSetAt, r(same, "42839dd5").epgSetAt, moved.urlChanged, r(moved, moved.key).epgSetAt]
+}, [321, false, 900, 900, true, 990])
+// a12 (the round-8 lens's mutation that reddened nothing): Service.activeEpgUrl
+// is Model.activeEpgUrlOf now, and this is the observer R18a's claim lacked.
+checkCall("R19 / a12: activeEpgUrlOf -- beside a record, an input of whitespace or control characters alone is NO input and the record's guide URL stands; an input that is something and does not validate is returned as it is (D16); with no record, an input on the entry, else the value held in the state", () => {
+  const rec = { epgUrl: "http://rec.example.test/g.xml" }
+  const held = { url: "http://held.example.test/g.xml", seenAt: 3 }
+  return [Model.activeEpgUrlOf(rec, "\u0007", null), Model.activeEpgUrlOf(rec, "\u0007\u0001", held), Model.activeEpgUrlOf(rec, "   ", null),
+          Model.activeEpgUrlOf(rec, "ftp://h.test/x.xml", null), Model.activeEpgUrlOf(rec, "http://other.test/x.xml", null), Model.activeEpgUrlOf(rec, "", held),
+          Model.activeEpgUrlOf(null, "", held), Model.activeEpgUrlOf(null, "http://in.test/x.xml", held), Model.activeEpgUrlOf(null, "\u0007", held), Model.activeEpgUrlOf(null, "", null)]
+}, ["http://rec.example.test/g.xml", "http://rec.example.test/g.xml", "http://rec.example.test/g.xml", "ftp://h.test/x.xml", "http://rec.example.test/g.xml",
+    "http://rec.example.test/g.xml", "http://held.example.test/g.xml", "http://in.test/x.xml", "http://held.example.test/g.xml", ""])
+checkCall("R19d: owedMirrorAction -- a mirror a failed save left owing is rewritten by the first landed save with nothing held, parked, in flight or failed, and never otherwise", () => {
+  const base = { owed: true, pendingKey: null, savePending: false, savesInFlight: 0, saveFailed: false }
+  const w = patch => Model.owedMirrorAction(Object.assign({}, base, patch))
+  return [w({}), w({ owed: false }), w({ pendingKey: "42839dd5" }), w({ pendingKey: "" }), w({ savePending: true }), w({ savesInFlight: 1 }), w({ saveFailed: true }), Model.owedMirrorAction(null)]
+}, ["rewrite", "none", "none", "none", "none", "none", "none", "none"])
 {
   // The four routes the lead named (E1-E4), each under both host shapes rule
   // 9 names, through the service-order driver above (bound to Service.qml by
@@ -8194,31 +8460,33 @@ checkCall("R17b: adoptPendingEpg lands a FRESH EPG input on the named record onl
   const storedEpg = svc => r13.has(svc.host.storedEntry(), "epgUrl")
   const kept = svc => svc.warnings.filter(w => w.indexOf("entry keeps an unadopted input (epgUrl)") === 0).length
   const alone = svc => svc.warnings.filter(w => w.indexOf("logo setting written alone") === 0).length
+  // R19b: the guide URL HELD in the FILE (pendingEpg), read off the raw JSON
+  const heldIn = (svc, v) => { try { const d = JSON.parse(svc.disk.text || "{}"); return !!(d.pendingEpg && d.pendingEpg.url === (v || EPG)) } catch (e) { return false } }
   for (const mode of ["lag", "echo"]) {
-    checkCall("R17 (" + mode + " host) E1: no active source, an EPG set while the shell was down, the logo toggle, then a switch -- the toggle HEALS and keeps the EPG on the entry, the switch lands it on the switched-to record in the same turn, the entry is stripped only after, and it survives the restart; no write loses an input", () => {
+    checkCall("R17 (" + mode + " host) E1 (R19b): no active source, an EPG set while the shell was down -- HELD in the state file and off the entry; the logo toggle HEALS and leaves it held; a switch lands it on the switched-to record in the same turn, and it survives the restart; no write loses an input", () => {
       const svc = r13.boot({ epgUrl: EPG, sourceKey: "", showLogos: false, mpvArgs: "--volume=50", refreshMinutes: 120 }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)]), mode)
       const toggled = svc.setShowLogos(true); svc.drain()
-      const atToggle = { toggled, alone: alone(svc), kept: kept(svc), storedEpg: storedEpg(svc), showLogos: svc.host.storedEntry().showLogos, epgOn: epgOn(svc) }
+      const atToggle = { toggled, alone: alone(svc), kept: kept(svc), storedEpg: storedEpg(svc), held: heldIn(svc), showLogos: svc.host.storedEntry().showLogos, epgOn: epgOn(svc) }
       const sw = svc.switchSource(r13.KB)
       const sameTurn = Model.findSource(svc.userState.sources, r13.KB).epgUrl === EPG
       svc.drain()
       const afterSwitch = { ok: sw.ok, sameTurn, memKey: svc.activeSourceKey, mirror: svc.host.storedEntry().sourceKey, storedEpg: storedEpg(svc), epgOn: epgOn(svc) }
       const next = r13.restart(svc, mode)
       return { atToggle, afterSwitch, afterRestart: { memKey: next.activeSourceKey, storedEpg: storedEpg(next), epgOn: epgOn(next) }, lost: svc.inputLost.concat(next.inputLost) }
-    }, { atToggle: { toggled: true, alone: 0, kept: 1, storedEpg: true, showLogos: true, epgOn: [] },
+    }, { atToggle: { toggled: true, alone: 0, kept: 0, storedEpg: false, held: true, showLogos: true, epgOn: [] },
          afterSwitch: { ok: true, sameTurn: true, memKey: r13.KB, mirror: r13.KB, storedEpg: false, epgOn: [r13.KB] },
          afterRestart: { memKey: r13.KB, storedEpg: false, epgOn: [r13.KB] }, lost: [] })
-    checkCall("R17 (" + mode + " host) E2: remove the active source, a CLI epgUrl with nothing active, the logo toggle -- the EPG stays on the entry through the toggle and the restart (R12: nothing can consume it), and the first switch after the restart lands it", () => {
+    checkCall("R17 (" + mode + " host) E2 (R19b): remove the active source, a CLI epgUrl with nothing active, the logo toggle -- the EPG is HELD in the state file through the toggle and the restart, off the entry, and the first switch after the restart lands it", () => {
       const svc = r13.boot({ sourceKey: r13.KA, showLogos: false, mpvArgs: "--volume=50", refreshMinutes: 120 }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
       svc.removeSource(r13.KA); svc.drain()
       svc.host.externalSet("epgUrl", EPG); svc.runLater(); svc.drain()
       svc.setShowLogos(true); svc.drain()
-      const atToggle = { memKey: svc.activeSourceKey, alone: alone(svc), storedEpg: storedEpg(svc), epgOn: epgOn(svc) }
+      const atToggle = { memKey: svc.activeSourceKey, alone: alone(svc), storedEpg: storedEpg(svc), held: heldIn(svc), epgOn: epgOn(svc) }
       const next = r13.restart(svc, mode)
-      const afterRestart = { memKey: next.activeSourceKey, storedEpg: storedEpg(next), epgOn: epgOn(next) }
+      const afterRestart = { memKey: next.activeSourceKey, storedEpg: storedEpg(next), held: heldIn(next), epgOn: epgOn(next) }
       next.switchSource(r13.KB); next.drain()
       return { atToggle, afterRestart, afterSwitch: { memKey: next.activeSourceKey, storedEpg: storedEpg(next), epgOn: epgOn(next) }, lost: svc.inputLost.concat(next.inputLost) }
-    }, { atToggle: { memKey: "", alone: 0, storedEpg: true, epgOn: [] }, afterRestart: { memKey: "", storedEpg: true, epgOn: [] },
+    }, { atToggle: { memKey: "", alone: 0, storedEpg: false, held: true, epgOn: [] }, afterRestart: { memKey: "", storedEpg: false, held: true, epgOn: [] },
          afterSwitch: { memKey: r13.KB, storedEpg: false, epgOn: [r13.KB] }, lost: [] })
     checkCall("R17 (" + mode + " host) E3: no toggle -- a switch with an EPG pending lands it on the switched-to record before the mirror is written; the echoing host used to lose it here with nothing else involved", () => {
       const svc = r13.boot({ epgUrl: EPG, sourceKey: "", showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)]), mode)
@@ -8269,8 +8537,8 @@ checkCall("R17a (structural): the funnel asks Model.retiredInputsToKeep over the
 checkCall("R17b (structural): switchSource and the probe commit adopt a pending EPG before their saveState and before persistActive; removeSource does not; the helper asks Model.adoptPendingEpg with the settings' EPG and the snapshot, and moves the snapshot only through epgSnapshotAfter", () => {
   const sw = (serviceSource.match(/function switchSource\(id\) \{[\s\S]*?\n  \}/) || [""])[0]
   const remove = (serviceSource.match(/function removeSource\(id\) \{[\s\S]*?\n  \}/) || [""])[0]
-  const helper = (serviceSource.match(/function adoptPendingEpgOnto\(key, formEpg\) \{[\s\S]*?\n  \}/) || [""])[0]
-  const commit = serviceSource.indexOf("if (commit && newKey !== root.activeSourceKey) root.adoptPendingEpgOnto(newKey, formEpg)")
+  const helper = (serviceSource.match(/function adoptPendingEpgOnto\(key\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const commit = serviceSource.indexOf("if (commit && newKey !== root.activeSourceKey) root.adoptPendingEpgOnto(newKey)")
   const commitSave = serviceSource.indexOf("root.saveState()", commit)
   const commitPersist = serviceSource.indexOf("root.persistActive(newKey)", commit)
   return { driverBound: [r13.R17.switchAdopts, r13.R17.probeAdopts],
@@ -8278,8 +8546,8 @@ checkCall("R17b (structural): switchSource and the probe commit adopt a pending 
            commitBeforeSaveAndPersist: commit !== -1 && commit < commitSave && commitSave < commitPersist,
            removeDoesNot: remove !== "" && remove.indexOf("adoptPendingEpg") === -1,
            callers: (serviceSource.match(/root\.adoptPendingEpgOnto\(/g) || []).length,
-           asks: /Model\.adoptPendingEpg\(root\.userState, key, epg, root\.reconciledEpgUrl,[^\n]*\n\s*\{ formEpg: String\(formEpg \|\| ""\) \}\)/.test(helper) && /var epg = String\(root\.settings\.epgUrl \|\| ""\)/.test(helper),
-           snapshot: /root\.reconciledEpgUrl = Model\.epgSnapshotAfter\(epg, root\.reconciledEpgUrl, out\.consumed\)/.test(helper) && (helper.match(/root\.reconciledEpgUrl =/g) || []).length === 1 }
+           asks: /Model\.adoptPendingEpg\(root\.userState, key, epg, root\.reconciledEpgUrl, Date\.now\(\)\)/.test(helper) && /var epg = String\(root\.settings\.epgUrl \|\| ""\)/.test(helper),
+           snapshot: /if \(out\.pending\) root\.reconciledEpgUrl = Model\.epgSnapshotAfter\(epg, root\.reconciledEpgUrl, out\.consumed\)/.test(helper) && (helper.match(/root\.reconciledEpgUrl =/g) || []).length === 1 }
 }, { driverBound: [true, true], switchBeforeSaveAndPersist: true, commitBeforeSaveAndPersist: true, removeDoesNot: true, callers: 2, asks: true, snapshot: true })
 // ---- R18 (D-SINK-19 round 8): one normaliser, a cycle that settles, and
 // quiescence as a check ----
@@ -8367,19 +8635,9 @@ checkCall("R18a, the sibling its search found: an EPG input of control character
     return [plan.adoptEpg, forced.epgConsumed, forced.adoptedEpg, Model.findSource(forced.state.sources, "d990c2e4").epgUrl === own]
   })
 }, [[false, false, false, true], [false, false, false, true], [false, false, false, true]])
-checkCall("R18b: entryWriteNeeded answers the host's own dirty check against the STORED entry as this service can know it -- its own last write while the publish has not moved, the publish once it has -- key order included; no record means the publish", () => {
-  const ID = "io.github.rmcdavid.iptv"
-  const pub0 = { id: ID, playlistUrl: "ftp://u:p@h.test/x.m3u", epgUrl: "http://e.test/x.xml", sourceKey: "", showLogos: false }
-  const written = Model.entryWith(pub0, { id: ID, sourceKey: "", showLogos: false }, { keep: ["epgUrl"] })
-  const rec = Model.entryWriteRecord(ID, written, pub0)                      // the lagging host: the publish did not move
-  const same = Model.entryWith(pub0, { id: ID, sourceKey: "", showLogos: false }, { keep: ["epgUrl"] })
-  const moved = JSON.parse(JSON.stringify(written))                           // the host published our write (echo, or the next write)
-  const external = Object.assign({}, written, { playlistUrl: "ftp://u:p@h.test/x.m3u" })   // somebody wrote it back
-  const reordered = { showLogos: false, id: ID, epgUrl: "http://e.test/x.xml", sourceKey: "" }
-  return [Model.entryWriteNeeded(ID, same, pub0, rec), Model.entryWriteNeeded(ID, same, pub0, null), Model.entryWriteNeeded(ID, same, moved, rec),
-          Model.entryWriteNeeded(ID, same, external, rec), Model.entryWriteNeeded(ID, reordered, moved, null),
-          Model.entryWriteNeeded(ID, Object.assign({}, same, { showLogos: true }), pub0, rec), Model.hostEntryForm(ID, { b: 1, id: "other", a: 2 })]
-}, [false, true, false, true, true, true, { id: "io.github.rmcdavid.iptv", b: 1, a: 2 }])
+// `R18b: entryWriteNeeded answers the host's own dirty check ...` USED TO BE
+// HERE. R19a withdrew the skip it decided; the function has no shipped caller
+// (pinned below, "R19a (structural)") and is kept only while docs/ cite it.
 checkCall("R18b: sameOwnWrite is equality over exactly what ownWriteInForce and settingsWithOwnWrite read -- the same keys with strictly equal values in base and value; undefined is not \"\", and two absences are equal", () => {
   const host = { sourceKey: "d990c2e4", showLogos: false }
   const a = Model.ownWriteOf(host, { sourceKey: "d990c2e4", showLogos: true })
@@ -8389,19 +8647,10 @@ checkCall("R18b: sameOwnWrite is equality over exactly what ownWriteInForce and 
           Model.sameOwnWrite({ base: { sourceKey: undefined }, value: {} }, { base: { sourceKey: "" }, value: {} }),
           Model.sameOwnWrite(null, null), Model.sameOwnWrite(null, a), Model.sameOwnWrite(a, undefined), Model.sameOwnWrite(a, a)]
 }, [true, false, false, false, true, false, false, true])
-checkCall("R18d: adoptPendingEpg with the add form's own guide URL -- the pending input is SUPERSEDED (consumed, so the commit's mirror strips it; nothing adopted, the record keeps the form's value); a blank form EPG supersedes nothing and R17b adopts as before; no record still leaves it pending", () => {
-  const EPG = "http://epg.example.test/xmltv.php?username=e&password=f"
-  const FORM = "http://form.example.test/xmltv.php?username=x&password=y"
-  const st = fixtureState(["d990c2e4", "42839dd5"], "")
-  const facts = o => [o.pending, o.consumed, o.adopted, o.superseded, o.state === st]
-  return { form: facts(Model.adoptPendingEpg(st, "42839dd5", EPG, "", 5, { formEpg: FORM })),
-           formWrapped: facts(Model.adoptPendingEpg(st, "42839dd5", EPG, "", 5, { formEpg: "  " + FORM + "\t" })),
-           blank: facts(Model.adoptPendingEpg(st, "42839dd5", EPG, "", 5, { formEpg: "  " })),
-           none: facts(Model.adoptPendingEpg(st, "42839dd5", EPG, "", 5)),
-           noRecord: facts(Model.adoptPendingEpg(st, "deadbeef", EPG, "", 5, { formEpg: FORM })),
-           consumedAlready: facts(Model.adoptPendingEpg(st, "42839dd5", EPG, EPG, 5, { formEpg: FORM })) }
-}, { form: [true, true, false, true, true], formWrapped: [true, true, false, true, true], blank: [true, true, true, false, false], none: [true, true, true, false, false],
-     noRecord: [true, false, false, false, true], consumedAlready: [false, false, false, false, true] })
+// `R18d: adoptPendingEpg with the add form's own guide URL` USED TO BE HERE.
+// R19c withdrew the form-wins argument (`opts.formEpg`): it asked nothing
+// about WHEN either input was made. The comparison by time is pinned above
+// ("R19c: adoptPendingEpg over a value HELD in the state").
 {
   // THE SERVICE ORDER, R18c. Every case runs to quiescence under the
   // driver's bound (SETTLE_BOUND deferred calls / entry writes) and then
@@ -8416,6 +8665,7 @@ checkCall("R18d: adoptPendingEpg with the add form's own guide URL -- the pendin
   const KNEW2 = Model.sourceKey(Model.normalizeSourceUrl(NEW2, { origin: "cli" }))
   const epgOn = (svc, v) => r13.fileOf(svc).sources.filter(r => r.epgUrl === (v || EPG)).map(r => r.key).sort()
   const stored = svc => svc.host.storedEntry()
+  const heldIn = (svc, v) => { try { const d = JSON.parse(svc.disk.text || "{}"); return !!(d.pendingEpg && d.pendingEpg.url === (v || EPG)) } catch (e) { return false } }
   const fixedPoint = svc => {
     svc.drain()
     const writes = svc.entryWrites.length
@@ -8424,10 +8674,10 @@ checkCall("R18d: adoptPendingEpg with the add form's own guide URL -- the pendin
   }
   const WRAPS = [["  ", "  "], ["\t", "\n"], ["\u00a0", "\u2003"]]
   for (const mode of ["lag", "echo"]) {
-    checkCall("R18c (" + mode + " host) P1-B: no state file, a REFUSED playlistUrl beside a pending EPG -- the start settles (a bounded number of entry writes, a fixed point after), the refused value leaves the stored entry, the EPG stays on it (R12)", () => {
+    checkCall("R18c (" + mode + " host) P1-B: no state file, a REFUSED playlistUrl beside a pending EPG -- the start settles (a bounded number of entry writes, a fixed point after), the refused value leaves the stored entry, and the EPG leaves it too, HELD in the state file (R19b)", () => {
       const svc = r13.boot({ playlistUrl: BAD, epgUrl: EPG, sourceKey: "", showLogos: false }, r13.stateText([]), mode)
-      return [fixedPoint(svc), svc.entryWrites.length <= 2, r13.has(stored(svc), "playlistUrl"), stored(svc).epgUrl === EPG, svc.inputLost]
-    }, [true, true, false, true, []])
+      return [fixedPoint(svc), svc.entryWrites.length <= 2, r13.has(stored(svc), "playlistUrl"), r13.has(stored(svc), "epgUrl"), heldIn(svc), svc.inputLost]
+    }, [true, true, false, false, true, []])
     checkCall("R18c (" + mode + " host) P1-B with saved sources and none active: the start settles, and the first switch then lands the pending EPG on the switched-to record", () => {
       const svc = r13.boot({ playlistUrl: BAD, epgUrl: EPG, sourceKey: "", showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)]), mode)
       const settled = fixedPoint(svc)
@@ -8436,10 +8686,10 @@ checkCall("R18d: adoptPendingEpg with the add form's own guide URL -- the pendin
     }, [true, true, [r13.KA], false, false, []])
     for (const [a, b] of WRAPS) {
       const w = JSON.stringify(a) + "+" + JSON.stringify(b)
-      checkCall("R18c (" + mode + " host) P1-A " + w + ": a whitespace-wrapped REFUSED playlistUrl beside a pending EPG settles, and the refused credential leaves the stored entry once reported", () => {
+      checkCall("R18c (" + mode + " host) P1-A " + w + ": a whitespace-wrapped REFUSED playlistUrl beside a pending EPG settles, and the refused credential leaves the stored entry once reported; the EPG is held in the state file (R19b)", () => {
         const svc = r13.boot({ playlistUrl: a + BAD + b, epgUrl: EPG, sourceKey: "", showLogos: false }, r13.stateText([]), mode)
-        return [fixedPoint(svc), svc.entryWrites.length <= 2, r13.has(stored(svc), "playlistUrl"), stored(svc).epgUrl === EPG, svc.inputLost]
-      }, [true, true, false, true, []])
+        return [fixedPoint(svc), svc.entryWrites.length <= 2, r13.has(stored(svc), "playlistUrl"), r13.has(stored(svc), "epgUrl"), heldIn(svc), svc.inputLost]
+      }, [true, true, false, false, true, []])
       checkCall("R18c (" + mode + " host) P1-A " + w + ": a whitespace-wrapped REFUSED playlistUrl set mid-session beside an active source -- reported, stripped, the active source unchanged, settled", () => {
         const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
         svc.host.externalSet("playlistUrl", a + BAD + b); svc.runLater(); svc.drain()
@@ -8454,23 +8704,23 @@ checkCall("R18d: adoptPendingEpg with the add form's own guide URL -- the pendin
         const next = r13.restart(svc, mode)
         return [adopted, settled, r13.has(stored(svc), "playlistUrl"), next.activeSourceKey, r13.fileOf(next).sources.map(r => r.key).sort(), fixedPoint(next), svc.inputLost.concat(next.inputLost)]
       }, [r13.KNEW, true, false, "", [r13.KA, r13.KB].sort(), true, []])
-      checkCall("R18c (" + mode + " host) " + w + ": a whitespace-wrapped EPG beside the active source is adopted onto it and stripped; a whitespace-wrapped EPG pending with none active stays through a toggle and lands on the first switch", () => {
+      checkCall("R18c (" + mode + " host) " + w + ": a whitespace-wrapped EPG beside the active source is adopted onto it and stripped; a whitespace-wrapped EPG with none active is held in the state (R19b) through a toggle and lands on the first switch", () => {
         const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
         svc.host.externalSet("epgUrl", a + EPG + b); svc.runLater()
         const active = [fixedPoint(svc), epgOn(svc), r13.has(stored(svc), "epgUrl")]
         const p = r13.boot({ epgUrl: a + EPG + b, sourceKey: "", showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)]), mode)
         p.setShowLogos(true)
-        const toggled = [fixedPoint(p), r13.has(stored(p), "epgUrl"), epgOn(p)]
+        const toggled = [fixedPoint(p), r13.has(stored(p), "epgUrl"), heldIn(p), epgOn(p)]
         p.switchSource(r13.KB)
-        return { active, toggled, switched: [fixedPoint(p), epgOn(p), r13.has(stored(p), "epgUrl")], lost: svc.inputLost.concat(p.inputLost) }
-      }, { active: [true, [r13.KA], false], toggled: [true, true, []], switched: [true, [r13.KB], false], lost: [] })
+        return { active, toggled, switched: [fixedPoint(p), epgOn(p), r13.has(stored(p), "epgUrl"), heldIn(p)], lost: svc.inputLost.concat(p.inputLost) }
+      }, { active: [true, [r13.KA], false], toggled: [true, false, true, []], switched: [true, [r13.KB], false, false], lost: [] })
     }
-    checkCall("R18c (" + mode + " host): a REFUSED EPG beside the active source and a refused EPG with none active -- the first is reported and stripped, the second stays pending; both settle, neither is counted lost", () => {
+    checkCall("R18c (" + mode + " host): a REFUSED EPG beside the active source and a refused EPG with none active -- both are reported and stripped (R19b: refused with no source as beside one; nothing is held), both settle, neither is counted lost", () => {
       const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
       svc.host.externalSet("epgUrl", " ftp://u:p@h.test/x.xml "); svc.runLater()
       const p = r13.boot({ epgUrl: "ftp://u:p@h.test/x.xml", sourceKey: "", showLogos: false }, r13.stateText([r13.rec(r13.A)]), mode)
-      return [fixedPoint(svc), r13.has(stored(svc), "epgUrl"), epgOn(svc, "ftp://u:p@h.test/x.xml"), fixedPoint(p), r13.has(stored(p), "epgUrl"), svc.inputLost.concat(p.inputLost)]
-    }, [true, false, [], true, true, []])
+      return [fixedPoint(svc), r13.has(stored(svc), "epgUrl"), epgOn(svc, "ftp://u:p@h.test/x.xml"), fixedPoint(p), r13.has(stored(p), "epgUrl"), heldIn(p, "ftp://u:p@h.test/x.xml"), svc.inputLost.concat(p.inputLost)]
+    }, [true, false, [], true, false, false, []])
     checkCall("R18b (" + mode + " host): writes that change only the RETIRED keys (two refused CLI values, each reported and stripped beside the same active source) reassign no own-write record after the first, so they re-evaluate nothing and re-run no reconcile", () => {
       const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
       svc.host.externalSet("playlistUrl", "ftp://u:p@h.test/one.m3u"); svc.runLater(); svc.drain()
@@ -8479,16 +8729,16 @@ checkCall("R18d: adoptPendingEpg with the add form's own guide URL -- the pendin
       svc.host.externalSet("playlistUrl", "ftp://u:p@h.test/two.m3u"); svc.runLater(); svc.drain()
       return { first, second: [svc.entryWrites.length - before[0], svc.ownWriteAssignments - before[1], r13.has(stored(svc), "playlistUrl")], settled: fixedPoint(svc) }
     }, { first: [1, 1, false], second: [1, 0, false], settled: true })
-    checkCall("R18d (" + mode + " host) OQ-W3: the in-app first add whose FORM carries a guide URL while a CLI epgUrl is pending -- the form's value wins on the new record, the pending value is stripped by the same commit and logged by key name, it counts as superseded and not lost, and the restart stands on the form's value", () => {
+    checkCall("R18d / R19c (" + mode + " host) OQ-W3: the in-app first add whose FORM carries a guide URL, submitted AFTER a CLI epgUrl was set and held -- the form is the later input and wins on the new record, the held value is cleared and logged by setting and key name only, it counts as superseded (by the oracle's clock) and not lost, and the restart stands on the form's value", () => {
       const svc = r13.boot({ epgUrl: EPG, sourceKey: "", showLogos: false }, r13.stateText([]), mode)
       const res = svc.commitAdd({ playlistUrl: NEW2, epgUrl: FORM, label: "", origin: "guide" })
       const settled = fixedPoint(svc)
       const next = r13.restart(svc, mode)
-      const warn = svc.warnings.filter(x => x.indexOf("supersedes a pending input (epgUrl)") !== -1)
+      const warn = svc.warnings.filter(x => x.indexOf("(epgUrl)") !== -1 && x.indexOf("supersede") !== -1)
       return [res.ok, settled, svc.activeSourceKey, epgOn(svc, FORM), epgOn(svc), r13.has(stored(svc), "epgUrl"), warn.length, warn.join("").indexOf("://") === -1,
               next.activeSourceKey, epgOn(next, FORM), epgOn(next), svc.inputLost.concat(next.inputLost)]
     }, [true, true, KNEW2, [KNEW2], [], false, 1, true, KNEW2, [KNEW2], [], []])
-    checkCall("R18d (" + mode + " host) OQ-W3, the Xtream add: the xmltv.php URL the form derived wins over the pending CLI value in the same way", () => {
+    checkCall("R18d / R19c (" + mode + " host) OQ-W3, the Xtream add: the xmltv.php URL the form derived, submitted after the CLI value, wins over it in the same way", () => {
       const built = Model.xtreamUrls("http://xt.example.test:8080", "xu", "xp")
       const svc = r13.boot({ epgUrl: EPG, sourceKey: "", showLogos: false }, r13.stateText([]), mode)
       const res = svc.commitAdd({ playlistUrl: built.playlistUrl, epgUrl: built.epgUrl, label: "", origin: "xtream" })
@@ -8496,24 +8746,182 @@ checkCall("R18d: adoptPendingEpg with the add form's own guide URL -- the pendin
     }, [true, true, true, 1, [], false, []])
   }
 }
+{
+  // ---- R19 (D-SINK-19 round 9), THE PINS THE LEAD NAMED, through the
+  // service-order driver on both host shapes. Each reads the stored entry,
+  // the FILE (records, epgSetAt, the held pendingEpg) and a restart over the
+  // entry as stored; the suite-wide audit (oracle clock) sees every write and
+  // every move these make.
+  const E = "http://cli.example.test/xmltv.php?username=e&password=lenspass"
+  const F = "http://form.example.test/guide.xml"
+  const BAD = "ftp://u:lenspass@127.0.0.1:9/x.m3u"
+  const NEW2 = "http://added.example.test/list.m3u"
+  const KNEW2 = Model.sourceKey(Model.normalizeSourceUrl(NEW2, { origin: "cli" }))
+  const epgOf = (svc, key) => { const r = r13.fileOf(svc).sources.find(x => x.key === key); return r ? ({ [E]: "E", [F]: "F", "": "none" })[r.epgUrl] || "other" : "norecord" }
+  const heldIn = svc => { try { const d = JSON.parse(svc.disk.text || "{}"); return d.pendingEpg ? ({ [E]: "E", [F]: "F" })[d.pendingEpg.url] || "other" : "none" } catch (e) { return "nofile" } }
+  const has = (svc, k) => r13.has(svc.host.storedEntry(), k)
+  const settle = svc => { svc.runLater(); svc.drain() }
+  const twoNoneActive = () => r13.stateText([r13.rec(r13.A), r13.rec(r13.B)])
+  const twoActiveA = () => r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA)
+  for (const mode of ["lag", "echo"]) {
+    // P1-A, route (a): an in-app logo OFF after an external write restored
+    // the entry stored before the plugin's last write (publish A -> B -> A)
+    checkCall("R19a (" + mode + " host) A -> B -> A, the logo route: CLI showLogos true, in-app OFF, CLI true again, in-app OFF -- each OFF is handed to the host and STORED, and the restart keeps logos off", () => {
+      const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, twoActiveA(), mode)
+      svc.host.externalSet("showLogos", true); settle(svc)
+      const w0 = svc.entryWrites.length
+      svc.setShowLogos(false); settle(svc)
+      const off1 = [svc.host.storedEntry().showLogos, svc.entryWrites.length - w0]
+      svc.host.externalSet("showLogos", true); settle(svc)
+      const w1 = svc.entryWrites.length
+      svc.setShowLogos(false); settle(svc)
+      const off2 = [svc.host.storedEntry().showLogos, svc.entryWrites.length - w1, svc.settings.showLogos]
+      const next = r13.restart(svc, mode)
+      return { off1, off2, afterRestart: next.settings.showLogos, lost: svc.inputLost.concat(next.inputLost) }
+    }, { off1: [false, 1], off2: [false, 1, false], afterRestart: false, lost: [] })
+    // route (b): the same REFUSED credential set again and again beside an
+    // active source -- stripped every time, never left in shell.json
+    checkCall("R19a (" + mode + " host) A -> B -> A, the refused route: the same refused (credentialed) playlistUrl set three times beside the active source -- after EVERY set it is off the stored entry, the source stays active, and nothing loops", () => {
+      const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, twoActiveA(), mode)
+      const after = []
+      for (let i = 0; i < 3; i++) { svc.host.externalSet("playlistUrl", BAD); settle(svc); after.push(has(svc, "playlistUrl")) }
+      return [after, svc.activeSourceKey, r13.loops.length, svc.inputLost]
+    }, [[false, false, false], r13.KA, 0, []])
+    // route (c): the same EPG input set twice for the active source, then an
+    // in-app edit of that source's guide URL -- the edit stands, now and
+    // after a restart over the entry as stored
+    checkCall("R19a (" + mode + " host) A -> B -> A, the EPG route: the same epgUrl set twice for the active source, then the guide URL edited in the app to F -- the input is off the stored entry after each set, and F stands after the restart", () => {
+      const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, twoActiveA(), mode)
+      svc.host.externalSet("epgUrl", E); settle(svc)
+      const one = [epgOf(svc, r13.KA), has(svc, "epgUrl")]
+      svc.host.externalSet("epgUrl", E); settle(svc)
+      const two = [epgOf(svc, r13.KA), has(svc, "epgUrl")]
+      const res = svc.editEpg(r13.KA, F); settle(svc)
+      const next = r13.restart(svc, mode)
+      return { one, two, edit: [res.ok, epgOf(svc, r13.KA)], afterRestart: [next.activeSourceKey, epgOf(next, r13.KA), has(next, "epgUrl")], lost: svc.inputLost.concat(next.inputLost) }
+    }, { one: ["E", false], two: ["E", false], edit: [true, "F"], afterRestart: [r13.KA, "F", false], lost: [] })
+    // P1-B, the probe race: the add form is submitted, and a CLI epgUrl is
+    // set while its probe runs -- the CLI value is the LATER input
+    checkCall("R19c (" + mode + " host) the probe race, form first: the add form (guide URL F) is submitted, THEN a CLI epgUrl E is set while the probe runs -- E is held, and at the commit E (later) lands on the new record over F; nothing held, nothing on the entry, and the restart stands on E", () => {
+      const svc = r13.boot({ sourceKey: "", showLogos: false }, r13.stateText([]), mode)
+      const sub = svc.submitAdd({ playlistUrl: NEW2, epgUrl: F, label: "", origin: "guide" })
+      svc.host.externalSet("epgUrl", E); settle(svc)
+      const during = [heldIn(svc), has(svc, "epgUrl")]
+      const res = svc.commitProbe(); settle(svc)
+      const next = r13.restart(svc, mode)
+      return { sub: sub.ok, during, committed: [res.key, svc.activeSourceKey, epgOf(svc, KNEW2), heldIn(svc), has(svc, "epgUrl")],
+               afterRestart: [next.activeSourceKey, epgOf(next, KNEW2)], lost: svc.inputLost.concat(next.inputLost) }
+    }, { sub: true, during: ["E", false], committed: [KNEW2, KNEW2, "E", "none", false], afterRestart: [KNEW2, "E"], lost: [] })
+    checkCall("R19c (" + mode + " host) the probe race, CLI first: a CLI epgUrl E is set and held, THEN the add form (guide URL F) is submitted -- at the commit F (later) stands on the new record, E is cleared (superseded by a later input, not lost), and the restart stands on F", () => {
+      const svc = r13.boot({ sourceKey: "", showLogos: false }, r13.stateText([]), mode)
+      svc.host.externalSet("epgUrl", E); settle(svc)
+      const before = [heldIn(svc), has(svc, "epgUrl")]
+      svc.submitAdd({ playlistUrl: NEW2, epgUrl: F, label: "", origin: "guide" })
+      const res = svc.commitProbe(); settle(svc)
+      const next = r13.restart(svc, mode)
+      return { before, committed: [res.key, epgOf(svc, KNEW2), heldIn(svc), has(svc, "epgUrl")], afterRestart: [next.activeSourceKey, epgOf(next, KNEW2)], lost: svc.inputLost.concat(next.inputLost) }
+    }, { before: ["E", false], committed: [KNEW2, "F", "none", false], afterRestart: [KNEW2, "F"], lost: [] })
+    // The edit route (the round-8 lens's P2): no add form, the EDIT form
+    checkCall("R19c (" + mode + " host) the edit route: with nothing active a CLI epgUrl E is held, THEN source A's guide URL is edited to F in the app, then A is switched to -- F (later) stands, E is cleared; and the restart stands on F", () => {
+      const svc = r13.boot({ sourceKey: "", showLogos: false }, twoNoneActive(), mode)
+      svc.host.externalSet("epgUrl", E); settle(svc)
+      svc.editEpg(r13.KA, F); settle(svc)
+      svc.switchSource(r13.KA); settle(svc)
+      const next = r13.restart(svc, mode)
+      return [epgOf(svc, r13.KA), heldIn(svc), has(svc, "epgUrl"), next.activeSourceKey, epgOf(next, r13.KA), svc.inputLost.concat(next.inputLost)]
+    }, ["F", "none", false, r13.KA, "F", []])
+    checkCall("R19c (" + mode + " host) the edit route, the other order: A's guide URL is edited to F, THEN a CLI epgUrl E is set with nothing active -- at the switch E (later) lands on A", () => {
+      const svc = r13.boot({ sourceKey: "", showLogos: false }, twoNoneActive(), mode)
+      svc.editEpg(r13.KA, F); settle(svc)
+      svc.host.externalSet("epgUrl", E); settle(svc)
+      svc.switchSource(r13.KA); settle(svc)
+      return [epgOf(svc, r13.KA), heldIn(svc), has(svc, "epgUrl"), svc.inputLost]
+    }, ["E", "none", false, []])
+    // The S5 known branch (OQ-X3 ruled): the CLI adds the same playlist URL
+    // while the add's probe runs, and that record is the one kept
+    checkCall("R19c (" + mode + " host) the S5 known branch: the add form (guide URL F) is submitted, the CLI sets the SAME playlistUrl during the probe (that record is kept and active) -- F lands on it with its submit time", () => {
+      const svc = r13.boot({ sourceKey: "", showLogos: false }, r13.stateText([]), mode)
+      svc.submitAdd({ playlistUrl: NEW2, epgUrl: F, label: "", origin: "guide" })
+      svc.host.externalSet("playlistUrl", NEW2); settle(svc)
+      const during = [svc.activeSourceKey, epgOf(svc, KNEW2)]
+      const res = svc.commitProbe(); settle(svc)
+      return { during, committed: [res.key, epgOf(svc, KNEW2), r13.fileOf(svc).sources.length], lost: svc.inputLost }
+    }, { during: [KNEW2, "none"], committed: [KNEW2, "F", 1], lost: [] })
+    checkCall("R19c (" + mode + " host) the S5 known branch with a CLI epgUrl E set AFTER the submit (held, then landed on the CLI's record when its playlist arrived): E is later than the form's F, so E stays on the kept record", () => {
+      const svc = r13.boot({ sourceKey: "", showLogos: false }, r13.stateText([]), mode)
+      svc.submitAdd({ playlistUrl: NEW2, epgUrl: F, label: "", origin: "guide" })
+      svc.host.externalSet("epgUrl", E); settle(svc)
+      svc.host.externalSet("playlistUrl", NEW2); settle(svc)
+      const res = svc.commitProbe(); settle(svc)
+      return [res.key, epgOf(svc, KNEW2), heldIn(svc), has(svc, "epgUrl"), svc.inputLost]
+    }, [KNEW2, "E", "none", false, []])
+    checkCall("R19c (" + mode + " host) the S5 known branch with a CLI epgUrl E set BEFORE the submit: E lands on the CLI's record when its playlist arrives, and the form's F, set later, replaces it at the commit", () => {
+      const svc = r13.boot({ sourceKey: "", showLogos: false }, r13.stateText([]), mode)
+      svc.host.externalSet("epgUrl", E); settle(svc)
+      svc.submitAdd({ playlistUrl: NEW2, epgUrl: F, label: "", origin: "guide" })
+      svc.host.externalSet("playlistUrl", NEW2); settle(svc)
+      const mid = epgOf(svc, KNEW2)
+      const res = svc.commitProbe(); settle(svc)
+      return [mid, res.key, epgOf(svc, KNEW2), heldIn(svc), svc.inputLost]
+    }, ["E", KNEW2, "F", "none", []])
+    // A restart between the input and the active move: the times are in the
+    // file (pendingEpg.seenAt, the record's epgSetAt), so the order survives
+    checkCall("R19c (" + mode + " host) a restart between the input and the move: E held with nothing active, then A's guide URL edited to F, a RESTART, then the switch to A -- F (later, its time in the file) stands", () => {
+      const svc = r13.boot({ sourceKey: "", showLogos: false }, twoNoneActive(), mode)
+      svc.host.externalSet("epgUrl", E); settle(svc)
+      svc.editEpg(r13.KA, F); settle(svc)
+      const next = r13.restart(svc, mode)
+      const held = heldIn(next)
+      next.switchSource(r13.KA); settle(next)
+      return [held, epgOf(next, r13.KA), heldIn(next), has(next, "epgUrl"), svc.inputLost.concat(next.inputLost)]
+    }, ["E", "F", "none", false, []])
+    checkCall("R19c (" + mode + " host) a restart between the input and the move, the other order: A's guide URL edited to F, then E held, a RESTART, then the switch to A -- E (later, its seenAt in the file) lands", () => {
+      const svc = r13.boot({ sourceKey: "", showLogos: false }, twoNoneActive(), mode)
+      svc.editEpg(r13.KA, F); settle(svc)
+      svc.host.externalSet("epgUrl", E); settle(svc)
+      const next = r13.restart(svc, mode)
+      next.switchSource(r13.KA); settle(next)
+      return [epgOf(next, r13.KA), heldIn(next), has(next, "epgUrl"), svc.inputLost.concat(next.inputLost)]
+    }, ["E", "none", false, []])
+    // R19d, D-SRC-18: an input whose adoption's state write FAILED stays on
+    // the entry (R11's drop); the user then edits the guide URL in the app,
+    // and that save LANDS -- the owed mirror strips the older input then, so
+    // the next start does not re-adopt it over the edit
+    checkCall("R19d (" + mode + " host) D-SRC-18: an EPG input adopted onto A whose state write FAILED is left on the entry; A's guide URL is then edited to F and that save lands -- the owed mirror takes the older input off the entry, and the restart stands on F", () => {
+      const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, twoActiveA(), mode)
+      svc.disk.writeFails = true
+      svc.host.externalSet("epgUrl", E); settle(svc)
+      const failed = [has(svc, "epgUrl"), svc.stateSaveFailed]
+      svc.disk.writeFails = false
+      svc.editEpg(r13.KA, F); settle(svc)
+      const next = r13.restart(svc, mode)
+      return { failed, afterEdit: [has(svc, "epgUrl"), epgOf(svc, r13.KA), svc.stateSaveFailed], afterRestart: [next.activeSourceKey, epgOf(next, r13.KA), has(next, "epgUrl")] }
+    }, { failed: [true, true], afterEdit: [false, "F", false], afterRestart: [r13.KA, "F", false] })
+  }
+}
 // R18, THE WIRING. Structural pins; the driver above is bound to the same
 // lines (R18.*), so a Service.qml that drops one is red there too -- where
 // it matters most, as a LOOP.
-checkCall("R18b (structural): the funnel asks Model.entryWriteNeeded against its own last-write record BEFORE handing the entry to the host, records the write after it, and reassigns the own-write record only when Model.sameOwnWrite says it differs; the keep warning is logged only for a write that is made", () => {
+checkCall("R19a (structural): the funnel hands EVERY owned write to the host -- nothing between composing the entry and updateEntryInline returns -- makes the own-write record right after it and reassigns it only when Model.sameOwnWrite says it differs, re-arms the shield only for a write the host stored, and no shipped file names lastEntryWrite or calls the retired estimate (entryWriteNeeded / entryWriteRecord / hostEntryForm)", () => {
   const funnel = (serviceSource.match(/function writeOwnedEntry\(overrides, what, announce, keepRetired\) \{[\s\S]*?\n  \}/) || [""])[0]
-  const ask = funnel.indexOf("if (!Model.entryWriteNeeded(root.pluginId, entry, published, root.lastEntryWrite)) return true")
-  const warn = funnel.indexOf('console.warn("omarchy-iptv: the bar entry keeps')
-  const write = funnel.indexOf("root.shell.updateEntryInline(root.pluginId, entry)")
-  return { driverBound: [r13.R18.funnelSkips, r13.R18.ownWriteSettles], askBeforeWarnAndWrite: ask !== -1 && ask < warn && warn < write,
-           oneWrite: (funnel.match(/updateEntryInline\(/g) || []).length, lastWriteDeclared: /\n  property var lastEntryWrite: null\n/.test(serviceSource),
-           lastWriteAssignedOnlyHere: (serviceSource.match(/root\.lastEntryWrite =/g) || []).length }
-}, { driverBound: [true, true], askBeforeWarnAndWrite: true, oneWrite: 1, lastWriteDeclared: true, lastWriteAssignedOnlyHere: 1 })
-checkCall("R18d (structural): the probe commit hands adoptPendingEpgOnto the form's guide URL only for an ADD whose own record is kept (not the record the CLI added meanwhile), and the helper logs the supersede by key name only", () => {
-  const helper = (serviceSource.match(/function adoptPendingEpgOnto\(key, formEpg\) \{[\s\S]*?\n  \}/) || [""])[0]
-  const line = (helper.match(/if \(out\.superseded\) console\.warn\([^\n]*/) || [""])[0]
-  return { driverBound: r13.R18.formWins, logs: line !== "" && line.indexOf("(epgUrl)") !== -1 && !/\+ *(epg|formEpg|out)/.test(line),
-           switchPassesNone: /root\.adoptPendingEpgOnto\(key\)\n/.test(serviceSource) }
-}, { driverBound: true, logs: true, switchPassesNone: true })
+  const compose = funnel.indexOf("var entry = Model.entryWith(published, patch, { keepRetired: keepRetired === true, keep: keep })")
+  const hand = funnel.indexOf("var stored = root.shell.updateEntryInline(root.pluginId, entry)")
+  const between = compose !== -1 && hand !== -1 ? funnel.slice(compose, hand) : "x"
+  const declined = funnel.indexOf("if (stored === false) return true")
+  const shield = funnel.lastIndexOf("root.runConfigShield()")
+  const shipped = [serviceSource, guideSource, require("fs").readFileSync(require("path").join(__dirname, "../BarWidget.qml"), "utf8")].join("\n")
+  return { driverBound: [r13.R19.noSkip, r13.R18.ownWriteSettles], handsEveryWrite: hand > compose && !/\breturn\b/.test(between),
+           oneWrite: (funnel.match(/updateEntryInline\(/g) || []).length, declinedBeforeShield: declined > hand && declined < shield,
+           noEstimate: !/lastEntryWrite\s*[=:(]|root\.lastEntryWrite|entryWriteNeeded\(|entryWriteRecord\(|hostEntryForm\(/.test(shipped.replace(/\/\/[^\n]*/g, "")) }
+}, { driverBound: [true, true], handsEveryWrite: true, oneWrite: 1, declinedBeforeShield: true, noEstimate: true })
+checkCall("R19c (structural): the probe commit hands adoptPendingEpgOnto nothing but the key (no form-wins argument), the S5 known branch lands the form's guide URL through Model.epgByTime, addSource stamps the submit time and updateSource the edit time (never a caller's own), and both pending log lines name the setting and the key, never a URL", () => {
+  const helper = (serviceSource.match(/function adoptPendingEpgOnto\(key\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const adopt = (serviceSource.match(/function adoptActive\(playlist, epg, plan\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const lines = (helper + adopt).split("\n").filter(l => /console\.warn\("omarchy-iptv: (a pending guide URL|no source is active|ignoring an invalid epgUrl)/.test(l))
+  return { driverBound: [r13.R19.byTime, r13.R19.knownByTime, r13.R19.submitStamp, r13.R19.editStamp, r13.R19.seenAt],
+           noFormArg: !/adoptPendingEpgOnto\([^)]*,/.test(serviceSource) && serviceSource.indexOf("formEpg") === -1,
+           logLines: lines.length, logsNoValue: lines.every(l => l.indexOf("(epgUrl)") !== -1 || l.indexOf("epgUrl setting") !== -1) && !lines.some(l => /\+ *(epg|out\.state|pending\.url|root\.settings)/.test(l)) }
+}, { driverBound: [true, true, true, true, true], noFormArg: true, logLines: 6, logsNoValue: true })
 // QUIESCENCE, suite-wide: no service-order sequence anywhere in this file
 // looped. Seen red with R18b's two decisions removed from Service.qml (the
 // driver then models every write as made and every record as reassigned).
@@ -8531,9 +8939,18 @@ checkCall("R18c: every service-order sequence in this file reached quiescence un
 // Refused values are stripped once reported (OQ-W2, confirmed) and counted
 // apart; a value superseded by the user's later explicit input for the same
 // slot (R18d) is counted apart too; neither is ever counted lost.
-checkCall("R17 / R18c / rule 15: the input audit -- at every owned entry write the driver made, no input value the stored entry carried before the write is absent afterwards from both the entry and every record in the file, and no other user setting changes; refused and superseded values counted apart, and both kinds reached", () => {
-  return { writes: r13.audit.writes >= 60, lost: r13.audit.lost, refusedSeen: r13.audit.refused > 0, supersededSeen: r13.audit.superseded > 0, skippedSeen: r13.audit.skipped > 0 }
-}, { writes: true, lost: [], refusedSeen: true, supersededSeen: true, skippedSeen: true })
+// Round 9 (R19): HELD now includes the guide URL the FILE holds as
+// pendingEpg (R19b), and SUPERSEDED is the oracle's judgement by its own
+// clock -- a value counts as superseded only when the one that stands was
+// input LATER (R19c); round 8 took the service's word for it, which is how a
+// later CLI input dropped by an earlier form was green. Every active move
+// that meets a held value is audited the same way (`moves`). The
+// hand-overs the host answered `false` to are counted (`declined`): R19a
+// makes them instead of skipping them, so the suite must reach some.
+checkCall("R17 / R18c / R19 / rule 15: the input audit -- at every owned entry write the driver made, no input value the stored entry carried before the write is absent afterwards from the entry, every record of the file and the file's held guide URL; at every active move that meets a held guide URL the LATER input stands; no other user setting changes; refused and superseded values counted apart, and every kind reached", () => {
+  return { writes: r13.audit.writes >= 60, lost: r13.audit.lost, refusedSeen: r13.audit.refused > 0, supersededSeen: r13.audit.superseded > 0,
+           declinedSeen: (r13.audit.declined || 0) > 0, movesSeen: r13.audit.moves > 0 }
+}, { writes: true, lost: [], refusedSeen: true, supersededSeen: true, declinedSeen: true, movesSeen: true })
 
 // ---- SR8: `omarchy bar set ... playlistUrl <url>` still adopts ----
 //

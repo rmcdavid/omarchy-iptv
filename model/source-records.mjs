@@ -6,7 +6,7 @@ import {
   copyGuide, withQuery, withMode
 } from "./browse.mjs"
 import {
-  emptyState, cloneState
+  emptyState, pendingEpgRecord, pendingEpgOf, withPendingEpg, cloneState
 } from "./state.mjs"
 import {
   clampSetting, settingsFrom, entryInputForm, RETIRED_SETTINGS,
@@ -49,7 +49,7 @@ function normalizeSourceRecord(raw) {
   if (SOURCE_ORIGINS.indexOf(origin) === -1) origin = "guide"
   var label = capCodePoints(sanitizeInput(raw.label), MAX_LABEL)
   if (label === "") label = deriveLabel(url, kind)
-  return {
+  var out = {
     key: key,
     url: url,
     epgUrl: epg,
@@ -63,6 +63,19 @@ function normalizeSourceRecord(raw) {
     channelCount: Math.max(0, Math.floor(Number(raw.channelCount) || 0)),
     groupCount: Math.max(0, Math.floor(Number(raw.groupCount) || 0))
   }
+  // D-SINK-19 round 9, R19c: when this record's guide URL was last SET, in
+  // milliseconds -- by the add form at submit, by the edit form, or by the
+  // adoption of a CLI input (its seenAt). Carried only when known (> 0): a
+  // record written before R19 has none and reads as 0, and a record that
+  // never had one serializes exactly as it did.
+  var setAt = epgSetAtOf(raw)
+  if (setAt > 0) out.epgSetAt = setAt
+  return out
+}
+
+// A record's `epgSetAt` as a number, 0 for absent or junk (R19c).
+function epgSetAtOf(rec) {
+  return Math.max(0, Math.trunc(Number(rec && rec.epgSetAt)) || 0)
 }
 
 function copySourceRecord(rec, patch) {
@@ -117,6 +130,11 @@ function addSource(state, fields, nowSec) {
     key: key, url: pv.url, epgUrl: ev.url, kind: pv.kind, label: label, labelCustom: lv.label !== "",
     origin: origin, addedAt: now, lastUsed: now, fetchedAt: 0, channelCount: 0, groupCount: 0
   }
+  // R19c: a guide URL the form carries is SET at submit time -- the moment
+  // this is called (`fields.epgSetAt`, ms), never the probe's commit. A form
+  // left blank sets nothing, so a pending input still lands on it (E4).
+  var setAt = epgSetAtOf(f)
+  if (ev.url !== "" && setAt > 0) rec.epgSetAt = setAt
   return { ok: true, code: "ok", message: "", state: cloneState(st, { sources: st.sources.concat([rec]) }), key: key }
 }
 
@@ -144,6 +162,11 @@ function updateSource(state, key, fields, nowSec) {
     var ev = validateSourceUrl(f.epgUrl, { kind: "epg" })
     if (!ev.ok) return { ok: false, code: ev.code, message: ev.message, state: st, key: rec.key, urlChanged: false, replacedKey: "" }
     patch.epgUrl = ev.url
+    // R19c: the edit form SETS the guide URL only when it changes it. The
+    // form sends every field on every submit, so a label edit that carries
+    // the guide URL back unchanged is not a later explicit input for it.
+    var editAt = epgSetAtOf(f)
+    if (ev.url !== str(rec.epgUrl) && editAt > 0) patch.epgSetAt = editAt
   }
   var urlChanged = false
   var newKey = rec.key
@@ -406,13 +429,19 @@ function reconcileAction(input) {
 // (`epgConsumed`: adopted, already held, or refused -- there was an active
 // record for it to land on), or its mirrored key disagrees with the state.
 //
-// R12 (round 3): an input is never stripped unadopted. An EPG input with NO
-// active source to land on is left on the entry -- the guide reads it as its
-// fallback meanwhile -- until a source exists and a later reconcile adopts
-// it; the service keeps its EPG snapshot where it was for exactly that case
-// (epgSnapshotAfter), so the value stays fresh to reconcileAction. The first
-// build stripped it in the same write and the value was gone with no copy
-// anywhere (round 2 review, P2).
+// R12 (round 3): an input is never stripped unadopted. R19b (round 9) keeps
+// that and moves WHERE the unadopted EPG input waits: with NO active source
+// to land on, a valid one is held in the state as `pendingEpg { url, seenAt }`
+// (`pendedEpg`) and is then CONSUMED, so the owned write that follows the
+// state save takes it off the entry; R12 left it on the entry, a possibly
+// credentialed URL in shell.json for as long as no source existed. A refused
+// one is consumed as refused (`refusedEpg`), as it is beside an active
+// source. `opts.seenAt` (ms) is when the service saw the inputs: it becomes
+// the adopted record's `epgSetAt`, or the pending value's `seenAt` (R19c).
+// The first build stripped an unadopted input in the same write and the
+// value was gone with no copy anywhere (round 2 review, P2); a held one has
+// its copy in the state before the strip, because the strip waits for that
+// save to land (R13).
 function adoptActiveSource(state, entry, nowSec, origin, opts) {
   var st = state || emptyState()
   var e = entry || {}
@@ -420,8 +449,12 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   var adoptUrl = o.adoptUrl !== false
   var adoptEpg = o.adoptEpg !== false
   var before = activeKeyOf(st)
+  // R19c: when this service first saw the inputs, in ms; 0 when the caller
+  // has no clock (a record adopted then carries no epgSetAt and reads as 0).
+  var seenAt = Math.max(0, Math.trunc(Number(o.seenAt)) || 0)
   var out = { state: st, key: "", changed: false, moved: false, adoptedUrl: false, adoptedEpg: false,
-              epgConsumed: false, invalid: null, added: "", evicted: [], writeEntry: false }
+              epgConsumed: false, invalid: null, added: "", evicted: [], writeEntry: false,
+              pendedEpg: false, refusedEpg: false, pendingApplied: false, pendingSuperseded: false }
   // R18a: the one normaliser (entryInputForm). `url` is the sanitized text
   // reconcileSources validates; `epg` is the whole form, so an EPG of
   // whitespace or control characters alone is NO input (R4's no-op) and not
@@ -455,15 +488,45 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
     out.state = withActiveKey(st, want)
   }
   out.key = activeKeyOf(out.state)
+  // R19c: a guide URL held in the state for want of an active source
+  // (R19b) meets the record that is active now -- the record a fresh URL
+  // just named, or one a hand-edited file names beside it -- and the LATER
+  // of the two inputs wins, by time (applyPendingEpg). Either way it is
+  // cleared. Before the R4 block, so an input seen in this same reconcile,
+  // which is later than anything pending, lands on top of the result.
+  if (out.key !== "") {
+    var applied = applyPendingEpg(out.state, out.key)
+    out.state = applied.state
+    out.pendingApplied = applied.applied
+    out.pendingSuperseded = applied.superseded
+  }
   // R4: a fresh EPG input reaches the ACTIVE record on any path -- the record
   // a fresh URL just named, a state load with an EPG on the entry, an
-  // "ignore" plan that carries only an EPG change (D-SRC-02).
+  // "ignore" plan that carries only an EPG change (D-SRC-02). R19c: it is
+  // the latest explicit input there is, so it lands with its own seenAt as
+  // the record's epgSetAt.
   if (adoptEpg && epg.text !== "" && out.key !== "") {
     out.epgConsumed = true
     var active = findSource(out.state.sources, out.key)
-    if (epg.ok && active && epg.url !== str(active.epgUrl)) {
-      out.state = replaceSource(out.state, out.key, { epgUrl: epg.url })
-      out.adoptedEpg = true
+    if (epg.ok && active && (epg.url !== str(active.epgUrl) || (seenAt > 0 && seenAt !== epgSetAtOf(active)))) {
+      var patch = { epgUrl: epg.url }
+      if (seenAt > 0) patch.epgSetAt = seenAt
+      out.state = replaceSource(out.state, out.key, patch)
+      out.adoptedEpg = epg.url !== str(active.epgUrl)
+    }
+  } else if (adoptEpg && epg.text !== "") {
+    // R19b: NO record can take it. A valid one is held in the state as
+    // `pendingEpg` -- consumed, so the owned write that follows the save
+    // takes it off the entry -- and a later one replaces an earlier one. A
+    // refused one is consumed as refused, exactly as beside an active
+    // source: reported, and written out (rule 5: a value that failed
+    // validation can still carry a credential).
+    out.epgConsumed = true
+    if (epg.ok) {
+      out.state = withPendingEpg(out.state, { url: epg.url, seenAt: seenAt })
+      out.pendedEpg = true
+    } else {
+      out.refusedEpg = true
     }
   }
   out.changed = out.state !== st
@@ -479,66 +542,107 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   return out
 }
 
-// D-SINK-19 round 7, R17b. THE ACTIVE MOVE ADOPTS A PENDING EPG INPUT.
+// D-SINK-19 round 7, R17b; round 9, R19c. THE ACTIVE MOVE MEETS A PENDING
+// GUIDE URL.
 //
-// R12 leaves an EPG input on the bar entry while no source is active, because
-// nothing can consume it, and the README promises it is attached to the first
-// source that becomes active. Until round 7 only reconcile() attached it, and
-// reconcile runs on a state load, a settings change and the shell's arrival --
-// never on the active key moving. So a switch (Service.switchSource) or an
-// in-app add or edit (the probe commit) moved the key, the key mirror's heal
-// write then stripped the input before any reconcile had seen an active
-// record beside it, and on the echoing host (#15082) the value was gone from
-// the entry and from every record (the round-6 data-loss lens's P1; on the
-// lagging host the stale publish happened to rescue it, which rule 9 says
-// must never be what a write depends on).
+// A guide URL input that arrived while no source was active is held in the
+// state (R19b, `pendingEpg`; R12 kept it on the bar entry until round 9).
+// Until round 7 only reconcile() attached it, and reconcile runs on a state
+// load, a settings change and the shell's arrival -- never on the active key
+// moving. So the moves (Service.switchSource, and the probe commit of an
+// in-app add, an edit or a never-fetched switch) settle it themselves, in the
+// SAME turn, before the state is saved and before the mirror is written.
 //
-// So the move adopts it in the SAME turn, before the state is saved and
-// before the mirror is written, through the same two decisions reconcile
-// uses: reconcileAction says whether the input is fresh against the
-// service's EPG snapshot (a consumed value and the host's stale echo of one
-// are not), and adoptActiveSource validates it and lands it on the record --
-// asked as if `key` were already active, which it is about to be. The state
-// returned differs from `state` ONLY in that record's `epgUrl`: the key itself
-// is moved by the caller's own pointer write (persistActive), whose plan is
-// unchanged by this.
+// R19c: THE LATEST EXPLICIT INPUT WINS, BY TIME. Round 8 (R18d) let the add
+// form's guide URL supersede a pending CLI value whenever the form carried
+// one, without asking when either was made -- so a CLI epgUrl set while the
+// add's probe ran, AFTER the submit, was dropped although it was the later
+// input (round-8 data-loss lens, P1), and on the edit route the earlier
+// pending value replaced a guide URL typed into the edit form after it (P2).
+// Now every record carries `epgSetAt` (ms; set by the add form at SUBMIT, by
+// the edit form, or by adoption with the input's seenAt) and the pending
+// value lands on the newly active record iff its `seenAt` is LATER than the
+// record's `epgSetAt` (absent = 0); otherwise the record keeps its own.
+// Either way `pendingEpg` is cleared.
 //
-// -> { state, pending, consumed, adopted, superseded }. `pending`: there was
-// a fresh EPG input at all. `consumed`: it reached the record (adopted,
-// already held, refused by validation, or superseded -- R4's meaning, and
-// what Model.epgSnapshotAfter moves the snapshot on). `adopted`: the record's
-// epgUrl changed. A key that names no record consumes nothing, so the input
-// stays pending (R12).
+// `epgInput` / `lastEpg`: an input still FRESH on the entry (reconcile has
+// not seen it; it always has once the state is loaded, so this is the
+// defensive half) is first held exactly as reconcile would hold it, seen
+// now (`nowMs`). A key that names no record moves nothing, and whatever is
+// pending stays pending.
 //
-// R18d (round 8, OQ-W3 ruled): `opts.formEpg` is the guide URL the ADD FORM
-// carried -- typed, or derived by an Xtream add -- and it WINS over a pending
-// CLI epgUrl: the user's later explicit input for the same slot supersedes
-// the earlier one. The record keeps the form's value, the pending input is
-// `superseded` (consumed, so the snapshot moves onto it and the commit's own
-// mirror write strips it from the entry) and nothing is adopted. An empty
-// form EPG (the form left blank) supersedes nothing: R17b adopts as before.
-function adoptPendingEpg(state, key, epgInput, lastEpg, nowSec, opts) {
+// -> { state, pending, consumed, refused, adopted, superseded, cleared }.
+// `pending`: there was a fresh input on the entry. `consumed`: it was taken
+// into the state (held or refused), and is what Model.epgSnapshotAfter moves
+// the snapshot on. `adopted`: the pending value landed on the record.
+// `superseded`: the record's own, later, guide URL won. `cleared`: there was
+// a pending value and it is gone.
+function adoptPendingEpg(state, key, epgInput, lastEpg, nowMs) {
   var st = state || emptyState()
-  var out = { state: st, pending: false, consumed: false, adopted: false, superseded: false }
+  var out = { state: st, pending: false, consumed: false, refused: false, adopted: false, superseded: false, cleared: false }
   var plan = reconcileAction({ playlist: "", epg: epgInput, lastPlaylist: "", lastEpg: lastEpg })
   out.pending = plan.adoptEpg === true
-  if (!out.pending) return out
   var k = activeKeyText(key)
   if (k === "" || !findSource(st.sources, k)) return out
-  if (opts && entryInputForm("epgUrl", opts.formEpg).text !== "") {
+  if (out.pending) {
+    var f = entryInputForm("epgUrl", epgInput)
     out.consumed = true
-    out.superseded = true
-    return out
+    if (f.ok) st = withPendingEpg(st, { url: f.url, seenAt: Math.max(0, Math.trunc(Number(nowMs)) || 0) })
+    else out.refused = true
   }
-  var res = adoptActiveSource(withActiveKey(st, k), { playlistUrl: "", epgUrl: str(epgInput), sourceKey: "" }, nowSec, "",
-                              { adoptUrl: false, adoptEpg: true })
-  out.consumed = res.epgConsumed === true
-  out.adopted = res.adoptedEpg === true
-  if (out.adopted) {
-    var rec = findSource(res.state.sources, k)
-    out.state = replaceSource(st, k, { epgUrl: str(rec ? rec.epgUrl : "") })
-  }
+  var applied = applyPendingEpg(st, k)
+  out.state = applied.state
+  out.adopted = applied.applied
+  out.superseded = applied.superseded
+  out.cleared = applied.cleared
   return out
+}
+
+// R19c's one comparison. `url`, set at `setAt` (ms), lands on record `key`
+// iff `setAt` is LATER than the record's own epgSetAt (absent = 0); an equal
+// time is not later. -> { state, won }; the same state object when it loses
+// or there is no such record. The S5 `known` branch of the probe commit
+// lands the form's guide URL through this too (OQ-X3 ruled): the record the
+// commit keeps takes it only if it was set later than whatever that record
+// already holds.
+function epgByTime(state, key, url, setAt) {
+  var st = state || emptyState()
+  var k = activeKeyText(key)
+  var rec = k === "" ? null : findSource(st.sources, k)
+  var at = Math.max(0, Math.trunc(Number(setAt)) || 0)
+  if (!rec || !(at > epgSetAtOf(rec))) return { state: st, won: false }
+  return { state: replaceSource(st, k, { epgUrl: str(url), epgSetAt: at }), won: true }
+}
+
+// R19c: the pending guide URL meets record `key` (epgByTime) and is
+// cleared. Nothing pending, or no such record: nothing moves.
+// -> { state, applied, superseded, cleared }.
+function applyPendingEpg(state, key) {
+  var st = state || emptyState()
+  var pending = pendingEpgOf(st)
+  var k = activeKeyText(key)
+  if (pending === null || k === "" || !findSource(st.sources, k)) return { state: st, applied: false, superseded: false, cleared: false }
+  var r = epgByTime(st, k, pending.url, pending.seenAt)
+  return { state: withPendingEpg(r.state, null), applied: r.won, superseded: !r.won, cleared: true }
+}
+
+// Service.activeEpgUrl's decision, lifted so node can call it (rule 12; the
+// round-8 lens's a12 mutation reverted the inline read and nothing went red).
+// The guide URL the user set for the active source: the record's own once
+// there is a record. Before that, an input on the entry (it is about to be
+// held), else the one held in the state (R19b). Beside a record, an input
+// that is SOMETHING but does not validate is returned as it is, so the
+// helper reports it (D16's shape); an input of whitespace or control
+// characters alone is NO input (R18a) and the record's value stands.
+function activeEpgUrlOf(record, input, pending) {
+  var f = entryInputForm("epgUrl", input)
+  if (!record) {
+    if (f.text !== "") return str(input)
+    var p = pendingEpgRecord(pending)
+    return p ? p.url : ""
+  }
+  if (f.text !== "" && !f.ok) return str(input)
+  return str(record.epgUrl)
 }
 
 // D-SINK-19 repair, R5 and R13. THE ORDER OF THE TWO WRITES A POINTER
@@ -618,12 +722,12 @@ function pointerWritePlan(input) {
 // R12's other half. The service keeps a snapshot of the last EPG input it saw
 // (reconcileAction compares against it, so a value is adopted once and the
 // host's stale echo of it, rule 9, is not adopted twice). The snapshot moves
-// to the input only when the input was CONSUMED -- there was an active record
-// for it to reach (adoptActiveSource's `epgConsumed`) -- or when the input
-// went away. An EPG set with no source yet is left fresh, so the reconcile
-// that follows the first source adopts it; without this the snapshot would
-// mark it consumed on the reconcile that could not use it, and the next
-// playlist write would strip it unadopted.
+// to the input only when the input was CONSUMED (adoptActiveSource's
+// `epgConsumed`) or when the input went away. Since R19b every non-empty
+// fresh input is consumed when it is seen -- onto the active record, into
+// the state's `pendingEpg`, or refused -- so the "left fresh" branch is now
+// reached only by an input reconcile did not ask about; it is kept because
+// that is still the right answer for one.
 function epgSnapshotAfter(epg, lastEpg, consumed) {
   var now = str(epg)
   if (now === "" || consumed === true) return now
@@ -1040,12 +1144,13 @@ function withFormReveal(st, field, revealed) {
   return cur
 }
 export {
-  hasControlChars, warnState, normalizeSourceRecord, copySourceRecord,
-  replaceSource, nowInt, sourceLabels, reducerFail, addSource, updateSource,
-  removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
-  withSourceStats, activeKeyText, activeKeyOf, activeSourceRecord,
-  withActiveKey, invalidInputBlocks, reconcileAction, adoptActiveSource,
-  adoptPendingEpg, pointerWritePlan, epgSnapshotAfter, reconcileSources,
+  hasControlChars, warnState, normalizeSourceRecord, epgSetAtOf,
+  copySourceRecord, replaceSource, nowInt, sourceLabels, reducerFail,
+  addSource, updateSource, removeSource, touchSource, statusFetchedAt,
+  sourceStatsDiffer, withSourceStats, activeKeyText, activeKeyOf,
+  activeSourceRecord, withActiveKey, invalidInputBlocks, reconcileAction,
+  adoptActiveSource, adoptPendingEpg, epgByTime, applyPendingEpg,
+  activeEpgUrlOf, pointerWritePlan, epgSnapshotAfter, reconcileSources,
   sourceForEdit, sourcesSummary, entryWith, cacheStale, formFields,
   isFormField, formLimit, FORM_SLACK, formCapacity, emptyValues, copyValues,
   copyForm, formState, formFocusOrder, formHasText, firstFieldWithText,
