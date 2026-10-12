@@ -408,10 +408,22 @@ class ReleaseCase(unittest.TestCase):
                       out.getvalue())
 
     def test_the_executable_helper_is_held_to_the_ceiling_too(self):
-        """The scanner exempts executables; this does not, because a helper
-        that grows past 448 KiB is the next file to split either way."""
+        """The scanner exempts executables from its size limit, and that is a
+        hole rather than a pass: an oversized mode-100755 file is probed as a
+        binary instead of being scanned, so a helper past the limit would
+        ship UNREAD. This does not exempt it.
+
+        The fixture must BE executable, on disk and in git, or the test proves
+        nothing about executables: the first version wrote it 0644 and the
+        D-REL-5 lens's mutation C4 (`and not os.access(path, os.X_OK)` on the
+        ceiling) survived it. Seen red against that mutation since."""
+        path = os.path.join(self.dir, 'bin', 'omarchy-iptv')
         self.write('bin/omarchy-iptv', '#!/usr/bin/env python3\n#' + 'x' * release.FILE_CEILING + '\n')
+        os.chmod(path, 0o755)
         self.commit_all()
+        self.assertTrue(os.access(path, os.X_OK), 'the fixture helper is not executable')
+        self.assertTrue(self.git('ls-files', '-s', 'bin/omarchy-iptv').startswith('100755 '),
+                        'git does not record the fixture helper as executable')
         problems = release.check(self.dir, out=io.StringIO())
         self.assertTrue(any(p.startswith('bin/omarchy-iptv is ') and 'ceiling' in p for p in problems), problems)
 

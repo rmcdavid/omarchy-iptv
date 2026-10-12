@@ -99,6 +99,11 @@ ALLOWLIST = (
 # allowlist whole, never that the artifact was one the marketplace can read.
 # So every file on the allowlist, the executable helper included, is held to a
 # ceiling 64 KiB below the scanner's number, and the gate goes red first.
+# The executable is held on purpose, although the scanner's size refusal
+# skips mode 100755: an oversized executable is probed as a binary instead
+# of being scanned, so exempting it here would let the helper ship UNREAD by
+# the baseline, which is a hole and not a pass. Do not align this with the
+# scanner's exemption; tests/test_release.py goes red if it is.
 SCANNER_FILE_LIMIT = 512 * 1024
 FILE_CEILING = 448 * 1024
 
