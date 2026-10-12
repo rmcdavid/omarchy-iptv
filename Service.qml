@@ -1880,6 +1880,29 @@ Item {
     return root.sourceResult(true, "ok", "", key)
   }
 
+  // D-SINK-19 round 7, R17b. THE ACTIVE MOVE ADOPTS. An EPG input set while
+  // no source was active stays on the bar entry (R12) until a source becomes
+  // active, and reconcile() -- the only thing that attached it until now --
+  // runs on a state load, a settings change and the shell's arrival, never on
+  // the active key moving. So the two moves (switchSource, and the probe
+  // commit of an in-app add, an edit or a never-fetched switch) adopt it
+  // themselves, in the same turn, BEFORE the state is saved and before
+  // persistActive holds the mirror: through Model.adoptPendingEpg, which asks
+  // the same two decisions reconcile does (reconcileAction for "fresh against
+  // the snapshot", adoptActiveSource for validation and the record). Never by
+  // waiting for a host publish to trigger a reconcile (rule 9: the echoing
+  // host publishes the stripped entry and nothing is left to adopt). The EPG
+  // snapshot moves exactly as reconcile moves it. removeSource does not call
+  // this: with no active record the input stays pending (R12).
+  function adoptPendingEpgOnto(key) {
+    var epg = String(root.settings.epgUrl || "")
+    var out = Model.adoptPendingEpg(root.userState, key, epg, root.reconciledEpgUrl, Math.floor(Date.now() / 1000))
+    if (!out.pending) return false
+    if (out.state !== root.userState) root.userState = out.state
+    root.reconciledEpgUrl = Model.epgSnapshotAfter(epg, root.reconciledEpgUrl, out.consumed)
+    return out.consumed
+  }
+
   // Switch (S3, D7): a source with a cache commits at once (settings
   // write -> cache FileViews rebind -> redraw from its channels.json ->
   // background refresh when stale); a never-fetched source probes first.
@@ -1892,6 +1915,9 @@ Item {
     if (key === root.activeSourceKey) return root.sourceResult(true, "ok", "", key)
     if (!(rec.fetchedAt > 0)) return root.startProbe(key, key, "switch", true)
     root.userState = Model.touchSource(root.userState, key, Math.floor(Date.now() / 1000))
+    // R17b: a pending EPG input lands on the record becoming active in THIS
+    // turn, before the save and before the mirror (see adoptPendingEpgOnto).
+    root.adoptPendingEpgOnto(key)
     root.saveState()
     // beginSwitch BEFORE the active key moves: assigning it fans out through
     // activeSourceKey -> activeCacheDir -> onActiveCacheDirChanged in the same
@@ -3571,7 +3597,18 @@ Item {
     }
     var patch = Model.ownedEntryPatch(root.settings, overrides)
     patch.id = root.pluginId
-    var entry = Model.entryWith(Model.findBarEntry(root.shell.barConfig, root.pluginId), patch, { keepRetired: keepRetired === true })
+    // R17a (round 7): a retired input leaves the entry only when it is
+    // CONSUMED -- a record holds it, or this service already adopted or
+    // refused that value (the two snapshots reconcile keeps). Decided here,
+    // in the one funnel, for EVERY owned write, heal and patch alike, so no
+    // caller can strip an input nothing has adopted: R12's EPG with no active
+    // source was stripped by a heal through two callers before this. Key
+    // names only in the log line, never a value.
+    var published = Model.findBarEntry(root.shell.barConfig, root.pluginId)
+    var keep = Model.retiredInputsToKeep(published, root.userState,
+                                         { playlistUrl: root.reconciledPlaylistUrl, epgUrl: root.reconciledEpgUrl })
+    if (keep.length > 0 && keepRetired !== true) console.warn("omarchy-iptv: the bar entry keeps an input no source has adopted yet (" + keep.join(", ") + ")")
+    var entry = Model.entryWith(published, patch, { keepRetired: keepRetired === true, keep: keep })
     root.shell.updateEntryInline(root.pluginId, entry)
     root.ownWrite = Model.ownWriteOf(root.hostSettings, Model.ownedEntryPatch(root.settings, overrides))
     // D-SINK-18. Re-arm for the NEXT write. The file can be recreated 0644
@@ -4158,6 +4195,11 @@ Item {
       st = Model.withSourceStats(st, newKey, status, nowSec)
       st = Model.touchSource(st, newKey, nowSec)
       root.userState = st
+      // R17b: the record this commit is about to make active takes a pending
+      // EPG input now, before the save and before persistActive's mirror. A
+      // commit that activates nothing (an inactive edit, a retry of the
+      // active source) leaves a pending input where it is.
+      if (commit && newKey !== root.activeSourceKey) root.adoptPendingEpgOnto(newKey)
       root.saveState()
       if (commit) {
         if (newKey === root.activeSourceKey) {

@@ -51,6 +51,9 @@
 #                       plugin writes since D-SINK-19; absent, the entry carries no such key, which
 #                       is the 0.13.5 shape. With --playlist it presents the entry a host holds
 #                       after `omarchy bar set ... playlistUrl` while the shell was down
+#   --host MODE         lag (default): the fake host publishes barConfig one write behind, as
+#                       every Omarchy through 4.0.4 does. echo: it publishes what it stores at
+#                       once, as omacom/omarchy#15082 does (D-HOST-4's lever; rule 9 names both)
 #
 # Why `key` and `type` refuse (F-M3-1 half (a)). wtype types into whatever
 # surface holds the keyboard, which on a bad day is the terminal the scenario is
@@ -681,7 +684,7 @@ except Exception: print("<unreadable>")' | tr -d '\n')
   start|--*)
     [[ $cmd == start ]] && shift
     OPEN=0 TIMEOUT=15 PLAYLIST="" EPG="" SOURCE2="" SERVE=0 FAKE_EPG=0 VERTICAL=0 SHOW_NAME=true LABEL_MAX=180 KEEP=0 DETACH=0
-    ORDER=playlist ENTRY_MS=2000 BAR_NUMBER=true WINDOW=layer SOURCE_KEY="" SOURCE_KEY_SET=0
+    ORDER=playlist ENTRY_MS=2000 BAR_NUMBER=true WINDOW=layer SOURCE_KEY="" SOURCE_KEY_SET=0 HOST_MODE=lag
     while (($# > 0)); do
       case $1 in
         --open) OPEN=1 ;;
@@ -717,6 +720,10 @@ except Exception: print("<unreadable>")' | tr -d '\n')
         # on the way in, so the plugin would read "" and a scenario a pass).
         --source-key) SOURCE_KEY=$2; SOURCE_KEY_SET=1; shift
                  [[ $SOURCE_KEY == "" || $SOURCE_KEY =~ ^[0-9a-f]{8}(-[0-9]+)?$ ]] || die "--source-key takes an 8-hex source key or \"\", not '$SOURCE_KEY'" ;;
+        # Rejected here for the same reason as --order: shell.qml compares the
+        # string, so a typo would silently run the lagging host.
+        --host) HOST_MODE=$2; shift
+                 [[ $HOST_MODE == lag || $HOST_MODE == echo ]] || die "--host takes lag or echo, not '$HOST_MODE'" ;;
         --window) WINDOW=$2; shift
                  [[ $WINDOW == layer || $WINDOW == floating ]] || die "--window takes layer or floating, not '$WINDOW'" ;;
         *) echo "unknown option: $1" >&2; exit 2 ;;
@@ -759,8 +766,9 @@ except Exception: print("<unreadable>")' | tr -d '\n')
     export OMARCHY_IPTV_HARNESS_WINDOW="$WINDOW"
     export OMARCHY_IPTV_SOURCE_KEY="$SOURCE_KEY"
     export OMARCHY_IPTV_SOURCE_KEY_SET="$SOURCE_KEY_SET"
+    export OMARCHY_IPTV_HARNESS_HOST="$HOST_MODE"
     # scheme://host only: the URL may carry provider credentials (S-08).
-    echo "[run.sh] scratch=$SCRATCH timeout=${TIMEOUT}s window=$WINDOW playlist=$(source_label "$OMARCHY_IPTV_PLAYLIST") epg=$(source_label "$OMARCHY_IPTV_EPG")"
+    echo "[run.sh] scratch=$SCRATCH timeout=${TIMEOUT}s window=$WINDOW host=$HOST_MODE playlist=$(source_label "$OMARCHY_IPTV_PLAYLIST") epg=$(source_label "$OMARCHY_IPTV_EPG")"
     if (( DETACH )); then
       # Record the environment so `restart-shell` can bring the same shell
       # back without re-deriving anything (the fixture server, the cache and
@@ -789,6 +797,7 @@ except Exception: print("<unreadable>")' | tr -d '\n')
         qa_env_line OMARCHY_IPTV_HARNESS_WINDOW "$OMARCHY_IPTV_HARNESS_WINDOW"
         qa_env_line OMARCHY_IPTV_SOURCE_KEY     "$OMARCHY_IPTV_SOURCE_KEY"
         qa_env_line OMARCHY_IPTV_SOURCE_KEY_SET "$OMARCHY_IPTV_SOURCE_KEY_SET"
+        qa_env_line OMARCHY_IPTV_HARNESS_HOST   "$OMARCHY_IPTV_HARNESS_HOST"
         qa_env_line OMARCHY_IPTV_MPV_ARGS    "${OMARCHY_IPTV_MPV_ARGS:-}"
       } >"$SCRATCH/last-start.env"
       start_detached_shell

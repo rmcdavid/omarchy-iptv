@@ -517,7 +517,9 @@ step "scripts/qa-lib-test.sh (the harness predicates)"
 # live lens's P3): the suite pins the DEFAULT transcript directory, and a
 # gate started from a shell that exported the variable for a scenario run
 # went red on that pin over a green tree. The suite sets the variable
-# itself, per call, wherever it means to.
+# itself, per call, wherever it means to, and since round 7 the default pin
+# unsets it inside its own subshell too (a bare run of the suite was still
+# red, the round-6 live lens's P3); the `env -u` stays as belt and braces.
 if env -u OMARCHY_IPTV_HARNESS_DIR bash "$ROOT/scripts/qa-lib-test.sh" >"$CHECK_TMP/qalib.log" 2>&1; then
   ok "harness predicates ($(grep -c '^PASS' "$CHECK_TMP/qalib.log") checks)"
   if [[ ${CHECK_VERBOSE:-0} == 1 ]]; then cat "$CHECK_TMP/qalib.log"; fi

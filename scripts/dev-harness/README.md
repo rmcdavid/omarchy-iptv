@@ -208,6 +208,7 @@ scripts/dev-harness/run.sh --open --entry-ms 3000 --no-bar-number
 scripts/dev-harness/run.sh --open --window floating   # harness-only window mode (headless cage)
 scripts/dev-harness/run.sh --playlist /x.m3u --source-key d990c2e4 --keep   # the entry a host holds after
                                                      # `omarchy bar set playlistUrl` beside the mirror (D-SINK-19)
+scripts/dev-harness/run.sh --host echo --keep         # the host that echoes a plugin's own write at once (#15082, D-HOST-4)
 scripts/dev-harness/run.sh ipc state                 # the harness's own target
 scripts/dev-harness/run.sh plugin-ipc status         # the plugin's target: the verbs a user binds
 scripts/dev-harness/run.sh plugin-ipc back 10        # argv is passed through untouched
@@ -1101,9 +1102,10 @@ load-sensitive timing tests the gate runs (the 10,000-entry parse budget in
 --self-test`) say on failure that the number is load-dependent and how to
 re-run that one test alone, with the assertion and the budget unchanged.
 No lettered check observes the round-6 code change (a logo toggle before
-the first state load, which no harness reaches), so `--baseline
-lane-key-u3` was not run (it is expected to read 64 / 0, which nobody has
-measured).
+the first state load, which no harness reaches), so lane A did not run
+`--baseline lane-key-u3`; the round-6 live lens did, and it reads **64
+passed, 0 failed** (transcript key-20261012-122314-1907775.out, 72.7 s),
+as expected: no lettered check separates u3 from v1.
 
 **The weak already-stored check, fixed in round 4.** 'a switch the host
 already stores is not reported as a persist failure' means to make the
@@ -1135,7 +1137,24 @@ re-trigger its watcher, so its echo never arrives at all.
 The earlier fake fed the plugin's own write straight back into
 `fakeShell.barConfig`, which is exactly what the real host does not do: it
 masked both P1 defects through two QA passes. Keep the ordering above
-intact. `ipc hostEntry` shows the two sides, and the scenario's
+intact.
+
+**The echoing host, as a lever (`run.sh --host echo`; D-HOST-4, D-SINK-19
+round 7).** omacom/omarchy#15082 makes `publicBarConfig()` read
+`shellConfig` directly, so a host carrying it publishes a plugin's own
+write at once. The default stays the lagging host above, and every
+scenario written against it is unchanged. `--host echo` makes
+`syncPluginApis` read `shellConfig.bar` instead of the stale binding, from
+the same handler, with NO intermediate stale publish: a fake that handed
+the plugin the previous bar first and the current one after would give it
+the lagging host's accidental rescue on the echoing host too, more
+forgiving than either real host (rule 10) -- which is exactly the rescue
+that hid the round-6 data-loss lens's P1 on today's host. `ipc hostEntry`
+reports `host: "lag" | "echo"`, so a scenario can assert the lever took;
+`run.sh` refuses any other value at the parse and records the variable in
+`last-start.env`, and `qa-lib-test.sh` pins both. Only `key-scenario.sh`'s
+U5..U7 run on it so far; the other own-write scenarios (E6, the key
+mirror, the logo toggle) running both ways is the rest of D-HOST-4. `ipc hostEntry` shows the two sides, and the scenario's
 `== D-LIVE-20` block asserts that a switch takes effect **while** the
 published bar still names the previous source. Against a service that waits
 for the echo that block fails, along with H2, H6/H8 and H7.

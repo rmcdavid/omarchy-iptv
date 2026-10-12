@@ -901,7 +901,13 @@ is "and the same sweep over the same transcript DOES catch a real URL" "$?" "1"
 # ---- 7. nothing lands in the repository. The gate runs three scenarios in
 # check-tree mode on every commit; a transcript under $ROOT would show up as
 # untracked in the git status the next release depends on.
-D=$( . "$HERE/qa-lib.sh"; qa_transcript_dir )
+# The DEFAULT, so the suite owns its environment: the variable is unset
+# inside this subshell, not by whoever runs the suite. A bare run of this
+# file right after a scenario run with OMARCHY_IPTV_HARNESS_DIR exported
+# read the scenario's directory here and went red over a green tree (the
+# round-6 live lens: 440 / 1 standalone, green only through check.sh's
+# `env -u`, which stays as belt and braces).
+D=$( unset OMARCHY_IPTV_HARNESS_DIR; . "$HERE/qa-lib.sh"; qa_transcript_dir )
 ck "the default transcript directory is absolute" '[[ $D == /* ]]'
 ck "and is not inside the repository ($D)" '[[ $D != "$ROOT"/* ]]'
 ck "it is under the harness scratch, which run.sh clean does not remove" \
@@ -1130,6 +1136,17 @@ is "and shell.qml stages nothing of its own: entryKey is the lifted function" \
 # (alive at the TERM, gone 0.2 s after, with cage, work directory and
 # socket). The first account of that window said `reap` handled it; it
 # does not, and nothing needs it to.
+# D-HOST-4's lever (round 7): run.sh --host echo makes the fake host publish
+# what it stores at once (#15082), and key-scenario's U5..U7 run on it. A
+# typo must not silently run the lagging host, so the value is refused at
+# the parse, before anything is created; and the lever reaches the shell
+# through ONE exported variable that last-start.env records, so a
+# restart-shell keeps the host it was started with.
+hh=$(OMARCHY_IPTV_HARNESS_DIR="$TMP/host-lever" bash "$ROOT/scripts/dev-harness/run.sh" start --host lagging 2>&1 >/dev/null; echo "rc:$?")
+is "run.sh --host refuses anything but lag or echo, before it creates anything" \
+   "$(printf '%s' "$hh" | grep -c 'takes lag or echo') ${hh##*rc:} $([[ -e $TMP/host-lever ]] && echo made || echo none)" "1 2 none"
+is "run.sh exports the host lever once and records it in last-start.env; shell.qml reads that variable alone" \
+   "$(qa_count '^ *export OMARCHY_IPTV_HARNESS_HOST="\$HOST_MODE"$' "$ROOT/scripts/dev-harness/run.sh") $(qa_count '^ *qa_env_line OMARCHY_IPTV_HARNESS_HOST +"\$OMARCHY_IPTV_HARNESS_HOST"$' "$ROOT/scripts/dev-harness/run.sh") $(qa_count 'Quickshell\.env\("OMARCHY_IPTV_HARNESS_HOST"\) === "echo"' "$ROOT/scripts/dev-harness/shell.qml")" "1 1 1"
 for sc in clip player rewind tls key; do
   is "$sc-scenario.sh traps INT and TERM into an exit beside its EXIT trap" \
      "$(qa_count "^trap cleanup EXIT$" "$ROOT/scripts/dev-harness/$sc-scenario.sh") $(qa_count "^trap 'exit 130' INT$" "$ROOT/scripts/dev-harness/$sc-scenario.sh") $(qa_count "^trap 'exit 143' TERM$" "$ROOT/scripts/dev-harness/$sc-scenario.sh")" "1 1 1"
@@ -1198,15 +1215,17 @@ is "key-scenario's cleanup restores the state directory's mode on every exit" \
    "$(awk '/^cleanup\(\) \{/,/^\}/' "$KS" | grep -cE 'chmod 0700 "\$\(dirname "\$STATE"\)" 2>/dev/null$')" "1"
 # F counts the switch's lines from the switch's OWN mark and L the toggle's
 # from its own (F5's `left:yes` used to be pre-satisfied by F2's drop line):
-# two bare `log_mark` lines between the F banner and the P banner.
-is "F and L each set their own log mark before the call they count" \
-   "$(awk '/^  echo "== F:/,/^  echo "== P:/' "$KS" | grep -cE '^  log_mark$')" "2"
+# two bare `log_mark` lines between the F banner and the U banner (U, round
+# 7, sets its own before the toggle it counts: one more up to the P banner).
+is "F and L each set their own log mark before the call they count, and U before its toggle" \
+   "$(awk '/^  echo "== F:/,/^  echo "== U:/' "$KS" | grep -cE '^  log_mark$') $(awk '/^  echo "== U:/,/^  echo "== P:/' "$KS" | grep -cE '^  log_mark$')" "2 1"
 # L drives the toggle through the guide's own key path (shell.qml's
 # sourcesKey calls the guide's handlers; no keystroke), and both restarts
 # that follow a failed or interrupted write (O and F) reseed the key the
-# entry was OBSERVED to carry, never a constant.
-is "L reaches setShowLogos through the guide's Sources key path, and F restarts over the observed key as O does" \
-   "$(qa_count '^  ipc sourcesKey (enter|g|confirm) >/dev/null' "$KS") $(qa_count '^  start_shell "\$\{seed_args\[@\]\}" \|\| true$' "$KS")" "3 2"
+# entry was OBSERVED to carry, never a constant. Round 7: U drives the same
+# key path (3 more) and restarts twice over the observed entry (2 more).
+is "L and U reach setShowLogos through the guide's Sources key path, and F and U restart over the observed key as O does" \
+   "$(qa_count '^  ipc sourcesKey (enter|g|confirm) >/dev/null' "$KS") $(qa_count '^  start_shell "\$\{seed_args\[@\]\}" \|\| true$' "$KS")" "6 4"
 # The two one-decision mutations the round-4 checks were seen red against
 # are PATCH FILES under spikes/key-mutations/ (the lead's ruling: never a
 # branch that can be merged by accident). Each must still APPLY to this
@@ -2191,7 +2210,11 @@ is "a umask-created file here would have been private, which is why the mode is 
 # key, a bare service reports nothing, no_service, the per-reason object
 # and no lastSaveText, and shell.qml's one-line delegation): +5; run.sh
 # clean reports an rm it could not complete (1).
-EXPECTED=441
+# 441 -> 443 on 2026-10-12, round 7: run.sh --host refuses a typo before it
+# creates anything (1), and the lever's one variable is exported, recorded
+# and read (1). The transcript-directory pin now unsets the variable itself
+# (no count change).
+EXPECTED=443
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

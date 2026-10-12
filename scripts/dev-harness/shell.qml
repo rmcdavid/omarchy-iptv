@@ -55,6 +55,16 @@ ShellRoot {
   // longer merely returns `false`: a `false` return from a writable entry is
   // the host's `!dirty` branch, which means "already stored", i.e. success.
   property bool persistFails: false
+  // D-HOST-4, the echo lever (run.sh --host echo; D-SINK-19 round 7). The
+  // real host publishes `barConfig` one write behind through 4.0.4, and
+  // omacom/omarchy#15082 makes publicBarConfig() read shellConfig directly,
+  // so a plugin's own write is echoed at once. The default stays the lagging
+  // host every scenario was written against; `echo` models the fixed one by
+  // publishing what the host now STORES, from the same handler, with no
+  // intermediate stale publish (a fake that published the stale bar first
+  // and the current one after would hand the plugin the lagging host's
+  // rescue and be more forgiving than either host, rule 10).
+  readonly property bool hostEchoes: Quickshell.env("OMARCHY_IPTV_HARNESS_HOST") === "echo"
   // The last pipOutcome() payload, so a scenario can read what the service
   // decided AFTER it read the compositor back, not what it intended.
   property var lastPipOutcome: null
@@ -677,7 +687,11 @@ ShellRoot {
   // shell.qml syncPluginApis (861-881): every plugin api is handed a fresh
   // deep copy of whatever `shell.barConfig` currently reads as.
   function syncPluginApis() {
-    fakeShell.barConfig = JSON.parse(JSON.stringify(fakeHost.barConfig))
+    // The lagging host reads the `barConfig` binding, which inside
+    // onShellConfigChanged has not re-evaluated yet: the PREVIOUS bar. The
+    // echoing host (#15082) reads shellConfig itself: the bar just stored.
+    var bar = harness.hostEchoes && fakeHost.shellConfig && fakeHost.shellConfig.bar ? fakeHost.shellConfig.bar : fakeHost.barConfig
+    fakeShell.barConfig = JSON.parse(JSON.stringify(bar))
     if (barLoader.item) barLoader.item.settings = Model.findBarEntry(fakeShell.barConfig, harness.pluginId)
   }
 
@@ -1179,7 +1193,8 @@ ShellRoot {
     function hostEntry(): string {
       return JSON.stringify({ stored: harness.entryKey(fakeHost.barConfig), published: harness.entryKey(fakeShell.barConfig),
                               storedKeys: HarnessLib.entryKeyNames(Model.findBarEntry(fakeHost.barConfig, harness.pluginId)),
-                              publishedKeys: HarnessLib.entryKeyNames(Model.findBarEntry(fakeShell.barConfig, harness.pluginId)) })
+                              publishedKeys: HarnessLib.entryKeyNames(Model.findBarEntry(fakeShell.barConfig, harness.pluginId)),
+                              host: harness.hostEchoes ? "echo" : "lag" })
     }
     // D-SINK-19, R5: where the two writes of a pointer change stand. The
     // body is HarnessLib.pointerStateOf, so qa-lib-test.sh drives the very

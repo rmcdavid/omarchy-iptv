@@ -170,6 +170,21 @@
 #       over the entry as the host STORED it after L: its record in the
 #       file, active, fetched, URL off the entry                  <- R1
 #   F7  the history holds the three records and nothing carries B's path
+#   U1  two saved sources, NONE active, an epgUrl set while the shell was
+#       down: loaded on the lagging host, the EPG on the stored entry and on
+#       no record (control: the R12 state)
+#   U2  the logo toggle HEALS (nothing outstanding) and KEEPS the EPG: one
+#       write, not written alone, epgUrl still stored, the kept key name
+#       logged                          <- R17a, the round-6 data-loss P1
+#   U3  a switch to A lands the EPG on A's record in the file, and only the
+#       mirror's write after it strips the entry   <- R17b
+#   U4  a restart over the entry as stored stands on A with the EPG on A
+#   U5  the same rig on the ECHOING fake host (run.sh --host echo): the lever
+#       took, the R12 state holds on both sides (control)
+#   U6  a switch with NO toggle lands the EPG on A before the mirror strips
+#       it, and the echoing host publishes the stripped entry at once
+#                                       <- R17b, the echo half of the P1
+#   U7  a restart over that (echoing host) stands on A with the EPG on A
 #   P1  no labelled harness-log line carries a URL or a fixture path
 #   P2  no credential token anywhere in the harness log
 #   T1  the shell, the compositor and the nested socket are gone (by pid)
@@ -270,6 +285,30 @@
 # restarts over the entry as the host stored it AFTER the toggle (the key
 # observed stored, as O does it), so on a tree without R16 F6 and F7 go
 # red with L1 and L2.
+#
+# U, ROUND 7 (R17). The round-6 data-loss lens found an input no oracle
+# had covered for five rounds, because every matrix checked the PLAYLIST
+# input alone: an epgUrl R12 leaves on the entry on purpose while no
+# source is active. Nothing recorded that state, so with the state loaded
+# and nothing outstanding Model.ownedWriteMode answers `heal` and
+# Model.entryWith dropped every retired key -- through the logo toggle on
+# the lagging host (the lens observed it LOST with the toggle, KEPT
+# without, on lane-key-v2, with its own epg-child.sh, which U lifts), and
+# through the switch alone on the echoing host, where the mirror's heal
+# stripped the entry and the host published the stripped entry at once, so
+# no reconcile saw the input beside an active record (the lens measured
+# that half in its simulator only; U5..U7 observe it, on the echo lever
+# run.sh --host gives the fake host since this round, D-HOST-4). R17a: an
+# owned write strips a retired input only when it is CONSUMED -- a record
+# holds it, or the service already adopted or refused that value
+# (Model.retiredInputsToKeep, which the funnel hands entryWith on every
+# write). R17b: switchSource and the probe commit adopt a pending EPG onto
+# the newly active record in the same turn (Model.adoptPendingEpg), before
+# the save and before the mirror. The entry's values are never read here:
+# key names from hostEntry, the record's EPG compared inside python and
+# printed as the keys that hold it; and since the harness seed always
+# carries an `epgUrl` NAME (empty when unset), the restart checks read the
+# file and the service, never that name.
 #
 # N, THE CREATED-FILE SHAPE, IS A CONTROL, AND THAT IS A MEASUREMENT. The
 # round-2 live lens wrote that the drop is "present in the no-state.json
@@ -1102,6 +1141,83 @@ shell_arm() {
   ck "F7 the history holds the three records and nothing carries B's path (the switch that landed in memory only went with the shell)" \
      "records:$(sj "len(d['sources'])") leaks:$(qa_count "$B" "$LOG") $(printf '%s\n%s\n%s\n' "$(ipc state)" "$(ipc hostEntry)" "$(ipc sources)" | grep -ac "$B")" "records:3 leaks:0 0"
 
+  echo "== U: an EPG input with NO active source, kept on the entry by R12, through a heal write and the active move, on both hosts (R17, round-6 data-loss P1) ($(elapsed) s)"
+  # The round-6 data-loss lens's P1, lifted from its live driver
+  # (rev-key6-dataloss/epg-child.sh): two saved sources, NONE active, and an
+  # epgUrl the user set while the shell was down. R12 leaves it on the entry
+  # because nothing can consume it, and nothing recorded that state: with
+  # the state loaded and nothing outstanding the logo toggle HEALS, and
+  # before R17a a heal dropped every retired key -- the value was then on no
+  # record and off the entry (the lens read LOST with the toggle, KEPT
+  # without, on lane-key-v2). R17a: a retired input leaves the entry only
+  # when it is consumed. R17b: the switch lands it on the switched-to record
+  # in the same turn, before the mirror strips it. The second half runs the
+  # SAME rig on the echoing fake host (run.sh --host echo, D-HOST-4's lever):
+  # there the switch alone lost it, because the mirror's heal stripped the
+  # entry and the host published the stripped entry at once, so no reconcile
+  # ever saw the input beside an active record. The entry's VALUES are never
+  # read: key names from hostEntry, the record's EPG compared inside python
+  # against the fixture string and printed as the keys that hold it. The
+  # harness seed always carries an `epgUrl` NAME (empty when unset), so a
+  # name read after a restart proves nothing (the lens's own correction);
+  # the restart checks read the file and the service instead.
+  seed ""
+  start_shell --playlist none --epg "$EPG" --source-key "" || true
+  sleep 0.5
+  epg_on() { sj "','.join(sorted(s['key'] for s in d['sources'] if s.get('epgUrl') == '$EPG')) or 'none'"; }
+  ck "U1 loaded on the lagging host with no active source, the EPG on the stored entry and on no record (control: the R12 state)" \
+     "host:$(qa_json_field "d['host']" "$(ipc hostEntry)") configured:$(svc "['configured']") memory:[$(pf "['memoryActiveKey']")] epgUrl:$(stored_has epgUrl) on:$(epg_on)" \
+     "host:lag configured:false memory:[] epgUrl:yes on:none"
+  log_mark
+  ipc open '{}' >/dev/null; sleep 0.5
+  ipc sourcesKey enter >/dev/null; sleep 0.3
+  ipc sourcesKey g >/dev/null; sleep 0.3
+  ipc sourcesKey confirm >/dev/null
+  wait_for 1 10 log_since 'updateEntryInline io' >/dev/null || true
+  wait_for yes 5 stored_has showLogos >/dev/null || true
+  sleep 0.5
+  ck "U2 the logo toggle HEALS (nothing outstanding) and keeps the EPG: logos on, one write, not written alone, the stored entry still carries epgUrl, the service logged the key name it kept" \
+     "logos:$(qa_json_field "d['guide']['showLogos']" "$(ipc state)") writes:$(log_since 'updateEntryInline io') alone:$(log_since 'logo setting written alone') epgUrl:$(stored_has epgUrl) kept:$(log_since 'keeps an input no source has adopted yet \(epgUrl\)') on:$(epg_on)" \
+     "logos:true writes:1 alone:0 epgUrl:yes kept:1 on:none"
+  ipc close >/dev/null
+  res=$(ipc switchSource "$KA")
+  wait_for "$KA" 10 hf "['stored']" >/dev/null || true
+  wait_for no 10 stored_has epgUrl >/dev/null || true
+  sleep 1.0
+  ck "U3 the switch lands the EPG on A's record in the file and the mirror's write then strips it: A holds it, the file and the mirror name A, no epgUrl on the stored entry, configured on A" \
+     "ok:$(qa_json_field "d['ok']" "$res") on:$(epg_on) file:$(sj "d.get('activeKey', 'absent')") stored:$(hf "['stored']") epgUrl:$(stored_has epgUrl) $(svc "['configured']") $(svc "['activeSourceKey']")" \
+     "ok:true on:$KA file:$KA stored:$KA epgUrl:no true $KA"
+  seed_args=(--playlist none); seed_key="(none)"
+  [[ $(stored_has sourceKey) == yes ]] && { seed_key=$(hf "['stored']"); seed_args+=(--source-key "$seed_key"); }
+  [[ $(stored_has epgUrl) == yes ]] && seed_args+=(--epg "$EPG")
+  stop_shell
+  start_shell "${seed_args[@]}" || true
+  wait_for 20 10 svc "['channels']" >/dev/null || true
+  ck "U4 a restart over the entry as stored stands on A with the EPG on A's record" \
+     "$(svc "['activeSourceKey']") $(svc "['channels']") on:$(epg_on) records:$(sj "len(d['sources'])")" "$KA 20 on:$KA records:2"
+  # The echoing host: no toggle, the switch alone.
+  seed ""
+  start_shell --host echo --playlist none --epg "$EPG" --source-key "" || true
+  sleep 0.5
+  ck "U5 the fake host ECHOES (the lever took) and the R12 state holds: no active source, the EPG on the stored and the published entry alike, on no record (control)" \
+     "host:$(qa_json_field "d['host']" "$(ipc hostEntry)") configured:$(svc "['configured']") epgUrl:$(stored_has epgUrl)/$(published_has epgUrl) on:$(epg_on)" \
+     "host:echo configured:false epgUrl:yes/yes on:none"
+  res=$(ipc switchSource "$KA")
+  wait_for "$KA" 10 hf "['stored']" >/dev/null || true
+  wait_for no 10 stored_has epgUrl >/dev/null || true
+  sleep 1.0
+  ck "U6 the switch lands the EPG on A's record before the mirror strips the entry, and the echoing host publishes the stripped entry at once: A holds it, both sides name A, epgUrl on neither" \
+     "ok:$(qa_json_field "d['ok']" "$res") on:$(epg_on) stored:$(hf "['stored']") published:$(hf "['published']") epgUrl:$(stored_has epgUrl)/$(published_has epgUrl)" \
+     "ok:true on:$KA stored:$KA published:$KA epgUrl:no/no"
+  seed_args=(--host echo --playlist none); seed_key="(none)"
+  [[ $(stored_has sourceKey) == yes ]] && { seed_key=$(hf "['stored']"); seed_args+=(--source-key "$seed_key"); }
+  [[ $(stored_has epgUrl) == yes ]] && seed_args+=(--epg "$EPG")
+  stop_shell
+  start_shell "${seed_args[@]}" || true
+  wait_for 20 10 svc "['channels']" >/dev/null || true
+  ck "U7 a restart over that (echoing host) stands on A with the EPG on A's record" \
+     "$(svc "['activeSourceKey']") $(svc "['channels']") on:$(epg_on) records:$(sj "len(d['sources'])")" "$KA 20 on:$KA records:2"
+
   echo "== P: the console sink, then teardown ($(elapsed) s)"
   qa_leak_on_labelled 'sourceProbeFinished|sourceSwitched|sourceRemoved|updateEntryInline' "://|$WORK" "$LOG"
   case $? in 0) left=clean ;; 1) left=LEAK ;; *) left="nothing labelled to judge" ;; esac
@@ -1132,9 +1248,9 @@ instrument
 # The floor. A check that stops executing must turn the run red rather than
 # quietly shorten the summary (D-PLY-9). Recount with
 #   grep -cE '^ *ck "[IS][0-9]' key-scenario.sh   -> 10, the instrument arm -> check-tree
-#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 63, both arms          -> live
+#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 70, both arms          -> live
 # (48 -> 61 on 2026-10-12, round 4: W1..W6 and F1..F7; 61 -> 63 the same
-# day, round 5: L1, L2.)
+# day, round 5: L1, L2; 63 -> 70 the same day, round 7: U1..U7.)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -1144,7 +1260,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=10
 else
-  EXPECTED_CHECKS=63
+  EXPECTED_CHECKS=70
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then

@@ -4282,6 +4282,12 @@ var OWNED_SETTINGS = ["sourceKey", "showLogos"]
 // review measured the old rule losing the record: after a failed state write
 // the URL on the entry is the only copy, and "any owned write heals" meant one
 // `g` in Sources stripped it and mirrored a key the file did not have.
+//
+// R17a (D-SINK-19 round 7) narrows WHICH key a heal removes: only a CONSUMED
+// one -- a record holds it, or the service already adopted or refused that
+// value (retiredInputsToKeep, handed to entryWith by the funnel on every
+// owned write). An EPG input R12 leaves on the entry while no source is
+// active is the case it exists for; "removes on every write" stripped it.
 var RETIRED_SETTINGS = ["playlistUrl", "epgUrl"]
 
 // The patch for a settings write: every owned key, at the value it should
@@ -10264,6 +10270,54 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   return out
 }
 
+// D-SINK-19 round 7, R17b. THE ACTIVE MOVE ADOPTS A PENDING EPG INPUT.
+//
+// R12 leaves an EPG input on the bar entry while no source is active, because
+// nothing can consume it, and the README promises it is attached to the first
+// source that becomes active. Until round 7 only reconcile() attached it, and
+// reconcile runs on a state load, a settings change and the shell's arrival --
+// never on the active key moving. So a switch (Service.switchSource) or an
+// in-app add or edit (the probe commit) moved the key, the key mirror's heal
+// write then stripped the input before any reconcile had seen an active
+// record beside it, and on the echoing host (#15082) the value was gone from
+// the entry and from every record (the round-6 data-loss lens's P1; on the
+// lagging host the stale publish happened to rescue it, which rule 9 says
+// must never be what a write depends on).
+//
+// So the move adopts it in the SAME turn, before the state is saved and
+// before the mirror is written, through the same two decisions reconcile
+// uses: reconcileAction says whether the input is fresh against the
+// service's EPG snapshot (a consumed value and the host's stale echo of one
+// are not), and adoptActiveSource validates it and lands it on the record --
+// asked as if `key` were already active, which it is about to be. The state
+// returned differs from `state` ONLY in that record's `epgUrl`: the key itself
+// is moved by the caller's own pointer write (persistActive), whose plan is
+// unchanged by this.
+//
+// -> { state, pending, consumed, adopted }. `pending`: there was a fresh EPG
+// input at all. `consumed`: it reached the record (adopted, already held, or
+// refused by validation -- R4's meaning, and what Model.epgSnapshotAfter
+// moves the snapshot on). `adopted`: the record's epgUrl changed. A key that
+// names no record consumes nothing, so the input stays pending (R12).
+function adoptPendingEpg(state, key, epgInput, lastEpg, nowSec) {
+  var st = state || emptyState()
+  var out = { state: st, pending: false, consumed: false, adopted: false }
+  var plan = reconcileAction({ playlist: "", epg: epgInput, lastPlaylist: "", lastEpg: lastEpg })
+  out.pending = plan.adoptEpg === true
+  if (!out.pending) return out
+  var k = activeKeyText(key)
+  if (k === "" || !findSource(st.sources, k)) return out
+  var res = adoptActiveSource(withActiveKey(st, k), { playlistUrl: "", epgUrl: str(epgInput), sourceKey: "" }, nowSec, "",
+                              { adoptUrl: false, adoptEpg: true })
+  out.consumed = res.epgConsumed === true
+  out.adopted = res.adoptedEpg === true
+  if (out.adopted) {
+    var rec = findSource(res.state.sources, k)
+    out.state = replaceSource(st, k, { epgUrl: str(rec ? rec.epgUrl : "") })
+  }
+  return out
+}
+
 // D-SINK-19 repair, R5 and R13. THE ORDER OF THE TWO WRITES A POINTER
 // CHANGE MAKES.
 //
@@ -10609,6 +10663,75 @@ function sourcesSummary(state, activeKey) {
   return out
 }
 
+// D-SINK-19 round 7, R17a. WHICH RETIRED INPUTS AN OWNED WRITE MUST LEAVE ON
+// THE ENTRY. R12 ("an input is never stripped unadopted") moved from the
+// callers to the sink, the shape R13 and R16 each had to learn twice: every
+// owned write goes through Service.writeOwnedEntry, which hands this answer
+// to entryWith, so no writer -- the key mirror, the logo toggle, or one not
+// written yet -- can take off the entry an input nothing has consumed.
+//
+// The round-6 data-loss lens found the state the callers could not name: an
+// EPG input R12 leaves on the entry on purpose (no source is active, so
+// nothing can consume it) while the state is loaded and nothing is
+// outstanding. Model.ownedWriteMode answers `heal` there, entryWith dropped
+// every retired key, and the value existed nowhere afterwards -- through the
+// logo toggle on the lagging host (observed live), through a switch or an
+// in-app add on the echoing host. Five rounds of matrices missed it because
+// their oracle checked playlist inputs only.
+//
+// A retired value is STRIPPABLE only when it is consumed, and KEPT otherwise:
+//   playlistUrl  consumed when a record holds it -- compared the way adoption
+//                compares (sanitized, validated as a CLI value, then the
+//                normalized URL against every record: reconcileSources) --
+//                or when it is the value this service already consumed
+//   epgUrl       consumed when the ACTIVE record holds it (validated as an
+//                EPG URL, against that record's epgUrl; with no active record
+//                nothing holds it) or when it is the value already consumed
+//   anything else in RETIRED_SETTINGS that this function does not know: kept
+//                whenever it is non-empty, so a key retired later is safe
+//                until somebody says what consumes it
+//
+// "Already consumed" is `consumed.playlistUrl` / `consumed.epgUrl`: the
+// service's snapshots (reconciledPlaylistUrl, reconciledEpgUrl), which move
+// only for a value reconcile adopted or refused (Model.epgSnapshotAfter for
+// the EPG). The lead's ruling names "a record holds it" alone; the snapshot
+// clause is this lane's, and it is there because a record that USED to hold
+// a value is not a reason to put the value back. On the lagging host the
+// published entry still carries a URL our own heal stripped (rule 9), and a
+// write made after its record went away -- a remove, an edit that replaced
+// the URL, a switch away from the record that took a CLI EPG -- would carry
+// it back onto the stored entry under the bare rule: the next start then
+// re-adopts a source the user removed, or lands the old source's EPG on the
+// new one (D-SRC-10's shape). Measured by the service-order driver; the
+// cases are named after this ruling in the node suite. A REFUSED value is
+// consumed by the same clause: it was reported (D16) and is written out as
+// before (rule 5: a value that failed validation can still carry a
+// credential).
+//
+// -> an array of the retired key names to keep, a NEW array on every call.
+function retiredInputsToKeep(entry, state, consumed) {
+  var e = entry && typeof entry === "object" ? entry : {}
+  var st = state || emptyState()
+  var c = consumed || {}
+  var keep = []
+  for (var i = 0; i < RETIRED_SETTINGS.length; i++) {
+    var name = RETIRED_SETTINGS[i]
+    var raw = str(e[name])
+    if (raw === "" || raw === str(c[name])) continue
+    var held = false
+    if (name === "playlistUrl") {
+      var pv = validateSourceUrl(sanitizeInput(raw, MAX_SOURCE_URL + 1), { origin: "cli" })
+      held = pv.ok === true && findSourceByUrl(st.sources, pv.url) !== null
+    } else if (name === "epgUrl") {
+      var ev = validateSourceUrl(raw, { kind: "epg", origin: "cli" })
+      var active = activeSourceRecord(st)
+      held = ev.ok === true && active !== null && ev.url === str(active.epgUrl)
+    }
+    if (!held) keep.push(name)
+  }
+  return keep
+}
+
 // Full bar entry for `shell.updateEntryInline`: every own key of `entry`
 // copied (keys we do not own must survive the wholesale replace) EXCEPT the
 // retired URL keys, `patch` applied, `id` forced.
@@ -10631,11 +10754,20 @@ function sourcesSummary(state, activeKey) {
 // off is the key mirror's to make, after the save lands. The default is
 // still removal, because the default is what the mirror and the settled
 // toggle use.
+//
+// R17a (round 7): `opts.keep`, an array of retired key names, carries THOSE
+// over unchanged on any write, heal included. The service passes
+// Model.retiredInputsToKeep's answer on every owned write, so a retired key
+// is removed only when it is consumed: a record holds it, or the service
+// already consumed it. `keepRetired` still keeps all of them, which is what
+// the patch-only write needs (a record in memory whose state write has not
+// landed is not yet a reason to strip).
 function entryWith(entry, patch, opts) {
   var out = {}
   var src = entry && typeof entry === "object" ? entry : {}
-  var keep = !!(opts && opts.keepRetired === true)
-  for (var k in src) if (keep || RETIRED_SETTINGS.indexOf(k) === -1) out[k] = src[k]
+  var keepAll = !!(opts && opts.keepRetired === true)
+  var keep = opts && Object.prototype.toString.call(opts.keep) === "[object Array]" ? opts.keep : []
+  for (var k in src) if (keepAll || RETIRED_SETTINGS.indexOf(k) === -1 || keep.indexOf(k) !== -1) out[k] = src[k]
   var p = patch || {}
   for (var q in p) out[q] = p[q]
   if (str(out.id) === "" && str(src.id) !== "") out.id = str(src.id)
@@ -11892,6 +12024,7 @@ if (typeof module !== "undefined") {
     activeSourceRecord: activeSourceRecord,
     withActiveKey: withActiveKey,
     adoptActiveSource: adoptActiveSource,
+    adoptPendingEpg: adoptPendingEpg,
     reconcileAction: reconcileAction,
     pointerWritePlan: pointerWritePlan,
     epgSnapshotAfter: epgSnapshotAfter,
@@ -11904,6 +12037,7 @@ if (typeof module !== "undefined") {
     sourceForEdit: sourceForEdit,
     sourcesSummary: sourcesSummary,
     entryWith: entryWith,
+    retiredInputsToKeep: retiredInputsToKeep,
     cacheStale: cacheStale,
     formFields: formFields,
     isFormField: isFormField,

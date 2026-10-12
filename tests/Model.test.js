@@ -7148,7 +7148,57 @@ const r13 = (() => {
     if (!m || (m[1] !== "settings" && m[1] !== "hostSettings")) throw new Error("the service-order driver cannot read what Service.writeOwnedEntry composes its patch from")
     return m[1]
   })()
+  // R17 (round 7): the same binding for the two new halves, so a Service.qml
+  // that stops making them is a driver red and not only a structural one.
+  // FUNNEL_KEEPS: writeOwnedEntry asks Model.retiredInputsToKeep and hands
+  // the answer to entryWith. SWITCH_ADOPTS / PROBE_ADOPTS: switchSource and
+  // the probe commit call adoptPendingEpgOnto before their saveState. A tree
+  // without them (lane-key-v2) is modelled as that tree is, so a run over it
+  // fails on the LOSS, not on a symbol.
+  const R17 = (() => {
+    const funnel = (serviceSource.match(/function writeOwnedEntry\(overrides, what, announce, keepRetired\) \{[\s\S]*?\n  \}/) || [""])[0]
+    const sw = (serviceSource.match(/function switchSource\(id\) \{[\s\S]*?\n  \}/) || [""])[0]
+    const probe = (serviceSource.match(/      st = Model\.touchSource\(st, newKey, nowSec\)\n      root\.userState = st\n[\s\S]*?root\.saveState\(\)\n/) || [""])[0]
+    return {
+      funnelKeeps: /var keep = Model\.retiredInputsToKeep\(published, root\.userState,\s*\{ playlistUrl: root\.reconciledPlaylistUrl, epgUrl: root\.reconciledEpgUrl \}\)/.test(funnel)
+        && funnel.indexOf("Model.entryWith(published, patch, { keepRetired: keepRetired === true, keep: keep })") !== -1,
+      switchAdopts: /root\.adoptPendingEpgOnto\(key\)\n\s*root\.saveState\(\)/.test(sw),
+      probeAdopts: /if \(commit && newKey !== root\.activeSourceKey\) root\.adoptPendingEpgOnto\(newKey\)\n\s*root\.saveState\(\)/.test(probe)
+    }
+  })()
   const clone = x => JSON.parse(JSON.stringify(x))
+  // THE INPUT AUDIT (R17, the round-6 lesson). At EVERY owned entry write the
+  // driver makes, in every case: no input value the STORED entry carried
+  // before the write may be absent afterwards from both the stored entry and
+  // every record of the FILE (the durable copy: memory alone is not a copy a
+  // restart keeps). Both retired keys, not the one the last defect was about
+  // -- five rounds of oracles checked the playlist alone and an EPG input was
+  // lost in every one of them. A value that fails validation is REFUSED and
+  // reported (D16), and is written out on purpose (rule 5); it is counted
+  // apart, never silently. Accumulated over the whole suite and asserted
+  // once at the end ("the input audit"), and per case where a case is about
+  // an input.
+  const audit = { writes: 0, lost: [], refused: 0 }
+  const inputHeld = (records, name, value) => {
+    const kind = name === "epgUrl" ? { kind: "epg", origin: "cli" } : { origin: "cli" }
+    const v = Model.validateSourceUrl(name === "epgUrl" ? value : Model.sanitizeInput(value, 2049), kind)
+    const field = name === "epgUrl" ? "epgUrl" : "url"
+    return records.some(r => String(r[field] || "") === value || (v.ok && String(r[field] || "") === v.url))
+  }
+  const auditWrite = (svc, before, label) => {
+    audit.writes++
+    const after = svc.host.storedEntry() || {}
+    const records = Model.parseState(svc.disk.text).sources
+    for (const name of ["playlistUrl", "epgUrl"]) {
+      const value = String((before || {})[name] || "")
+      if (value === "") continue
+      if (String(after[name] || "") === value || inputHeld(records, name, value)) continue
+      const kind = name === "epgUrl" ? { kind: "epg", origin: "cli" } : { origin: "cli" }
+      if (!Model.validateSourceUrl(value, kind).ok) { audit.refused++; continue }
+      const lost = { name, label, host: svc.host.mode }
+      audit.lost.push(lost); svc.inputLost.push(lost)
+    }
+  }
   class Host {
     constructor(entry, mode) {
       this.mode = mode
@@ -7214,7 +7264,7 @@ const r13 = (() => {
       this.dirsReady = false; this.stateSavePending = false; this.stateSavesInFlight = 0
       this.stateSaveFailed = false; this.stateInitOk = false; this.stateReloadsByReason = {}
       this.pendingEntryKey = null; this.ownWrite = null; this.recentSaves = []; this.lastSaveText = ""
-      this.later = []; this.warnings = []; this.signals = []; this.entryWrites = []; this.entryAudits = []; this.now = 1000
+      this.later = []; this.warnings = []; this.signals = []; this.entryWrites = []; this.entryAudits = []; this.inputLost = []; this.now = 1000
       host.listeners.push(() => this.onHostChanged())
     }
     get hostSettings() { return Model.settingsFrom(Model.findBarEntry(this.host.barConfig, PID)) }
@@ -7324,8 +7374,13 @@ const r13 = (() => {
       if (!Model.barEntryWritable(this.host.barConfig, PID)) { this.warnings.push("no writable bar entry"); return false }
       const patch = Model.ownedEntryPatch(this[FUNNEL_COMPOSES_FROM], overrides)
       patch.id = PID
-      const entry = Model.entryWith(Model.findBarEntry(this.host.barConfig, PID), patch, { keepRetired: keepRetired === true })
+      // R17a: the keep decision, when Service.writeOwnedEntry makes it (R17.funnelKeeps)
+      const published = Model.findBarEntry(this.host.barConfig, PID)
+      const keep = R17.funnelKeeps ? Model.retiredInputsToKeep(published, this.userState, { playlistUrl: this.reconciledPlaylistUrl, epgUrl: this.reconciledEpgUrl }) : []
+      if (keep.length > 0 && keepRetired !== true) this.warnings.push("entry keeps an unadopted input (" + keep.join(", ") + ")")
+      const entry = Model.entryWith(published, patch, { keepRetired: keepRetired === true, keep: keep })
       this.entryWrites.push(clone(entry))
+      const storedBefore = clone(this.host.storedEntry() || {})
       // The round-4 lens's L12 audit, at the sink: at the moment the entry is
       // handed to the host, its sourceKey is the FILE's own pointer and the
       // file holds that record (or the key is the cleared one).
@@ -7335,6 +7390,7 @@ const r13 = (() => {
                               fileHas: key === "" || file.sources.some(r => r.key === key), urlKept: Object.prototype.hasOwnProperty.call(entry, "playlistUrl") })
       const before = JSON.stringify(this.settings)
       this.host.updateEntryInline(PID, entry)
+      auditWrite(this, storedBefore, keepRetired === true ? "patch" : "heal")
       this.ownWrite = Model.ownWriteOf(this.hostSettings, Model.ownedEntryPatch(this.settings, overrides))
       if (JSON.stringify(this.settings) !== before) this.reconcile(false)
       return true
@@ -7363,9 +7419,42 @@ const r13 = (() => {
     switchSource(key) {
       if (!Model.findSource(this.userState.sources, key)) return { ok: false, code: "unknown_source" }
       if (key === this.activeSourceKey) return { ok: true, code: "ok" }
-      this.userState = Model.touchSource(this.userState, key, this.now++); this.saveState()
+      this.userState = Model.touchSource(this.userState, key, this.now++)
+      if (R17.switchAdopts) this.adoptPendingEpgOnto(key)
+      this.saveState()
       if (!this.persistActive(key)) this.warnings.push("switched but could not mirror")
       return { ok: true, code: "ok" }
+    }
+    // Service.adoptPendingEpgOnto (R17b)
+    adoptPendingEpgOnto(key) {
+      const epg = String(this.settings.epgUrl || "")
+      const out = Model.adoptPendingEpg(this.userState, key, epg, this.reconciledEpgUrl, this.now++)
+      if (!out.pending) return false
+      if (out.state !== this.userState) this.userState = out.state
+      this.reconciledEpgUrl = Model.epgSnapshotAfter(epg, this.reconciledEpgUrl, out.consumed)
+      return out.consumed
+    }
+    // The probe commit of an in-app ADD (Service's sourceProbeProc exit, status
+    // ok, mode "add", commit true): Model.addSource built the pending record
+    // from the form; on success it joins the history (or the record the CLI
+    // added meanwhile wins), its stats and lastUsed land, the state is saved
+    // and the pointer moves (persistActive). R17b sits before the save.
+    commitAdd(fields) {
+      const added = Model.addSource(this.userState, fields, this.now++)
+      if (!added.ok) return { ok: false, code: added.code }
+      const pending = Model.findSource(added.state.sources, added.key)
+      let st = this.userState
+      const known = Model.findSourceByUrl(st.sources, pending.url)
+      let newKey
+      if (known) newKey = String(known.key)
+      else { newKey = Model.allocateSourceKey(st.sources, pending.url); st = Model.cloneState(st, { sources: st.sources.concat([Object.assign({}, pending, { key: newKey })]) }) }
+      st = Model.withSourceStats(st, newKey, { ok: true, channelCount: 5, groupCount: 1, fetchedAt: this.now }, this.now)
+      st = Model.touchSource(st, newKey, this.now++)
+      this.userState = st
+      if (R17.probeAdopts && newKey !== this.activeSourceKey) this.adoptPendingEpgOnto(newKey)
+      this.saveState()
+      if (newKey !== this.activeSourceKey && !this.persistActive(newKey)) this.warnings.push("adopted but could not mirror")
+      return { ok: true, code: "ok", key: newKey }
     }
     // `beforeLoad(svc)` runs in the start-up window the round-5 data-loss
     // lens named: Service.Component.onCompleted has run (the first
@@ -7393,7 +7482,7 @@ const r13 = (() => {
   const has = (o, k) => Object.prototype.hasOwnProperty.call(o || {}, k)
   const restart = (svc, mode, o) => new Svc(new Host(clone(svc.host.storedEntry()), mode), new Disk(svc.disk.text)).start(o)
   const boot = (entry, text, mode, o) => new Svc(new Host(entry, mode), new Disk(text)).start(o)
-  return { Host, Disk, Svc, A, B, NEW, KA, KB, KNEW, rec, stateText, fileOf, has, restart, boot }
+  return { Host, Disk, Svc, A, B, NEW, KA, KB, KNEW, rec, stateText, fileOf, has, restart, boot, R17, audit }
 })()
 for (const mode of ["lag", "echo"]) {
   // The P1 itself, on the mid-session route: a CLI playlistUrl set while the
@@ -7858,7 +7947,9 @@ checkCall("R16 (structural): setShowLogos asks Model.ownedWriteMode with the fou
     patchNamesNoKey: patchBranch !== "" && patchBranch.indexOf("sourceKey") === -1 && patchBranch.indexOf("activeSourceKey") === -1,
     patchLogsTheReason: /console\.warn\("omarchy-iptv: logo setting written alone[^\n]*mode\.reason/.test(patchBranch),
     healIsTheOldWrite: /\n    return root\.writeOwnedEntry\(\{ sourceKey: root\.activeSourceKey, showLogos: want \}, "logo setting", false\)\n  \}$/.test(fn),
-    funnelKeeps: funnel.indexOf("Model.entryWith(Model.findBarEntry(root.shell.barConfig, root.pluginId), patch, { keepRetired: keepRetired === true })") !== -1,
+    // R17a moved the published entry into a local and added the keep list; keepRetired still reaches entryWith as it did
+    funnelKeeps: funnel.indexOf("var published = Model.findBarEntry(root.shell.barConfig, root.pluginId)") !== -1
+      && funnel.indexOf("Model.entryWith(published, patch, { keepRetired: keepRetired === true, keep: keep })") !== -1,
     // rule 9: the own-write record is made for EVERY write through the funnel, the patch-only one included,
     // directly after the write and over the same patch -- not behind a condition on the mode
     overrideRecordedForEveryWrite: /root\.shell\.updateEntryInline\(root\.pluginId, entry\)\n\s*root\.ownWrite = Model\.ownWriteOf\(root\.hostSettings, Model\.ownedEntryPatch\(root\.settings, overrides\)\)/.test(funnel),
@@ -7913,6 +8004,187 @@ checkCall("R16 / round-4 P2 (structural): the guide hands the signal's reason th
     noOtherCaller: (guideSource.match(/root\.showPersistFailed\(/g) || []).length === 1
   }
 }, { found: true, routes: true, rendersTheReason: true, bothSurfaces: true, noSentenceByName: true, noOtherCaller: true })
+
+// ---- R17 (D-SINK-19 round 7): a retired input leaves the entry only when it
+// is CONSUMED, and the active move adopts a pending EPG input ----
+//
+// The round-6 data-loss lens's P1, older than round 6 and present on every
+// D-SINK-19 tree (t2, u3 and v2 all lose the same 6 of its probe): R12 keeps
+// an EPG input set while NO source is active on the bar entry, and nothing
+// recorded that state -- with the state loaded and nothing outstanding
+// ownedWriteMode answers `heal`, and entryWith dropped every retired key. The
+// logo toggle lost it on the lagging host (observed live); a switch or an
+// in-app first add lost it on the echoing host with no toggle at all, because
+// the key mirror's heal stripped it before any reconcile saw an active record
+// beside it. Every check below was seen red on lane-key-v2's code (the
+// fixture and entryWith pins on the missing shape, the driver cases on the
+// loss itself, the audit on every write that lost an input).
+checkCall("R17a: retiredInputsToKeep over every `retiredKeep` case of the shared fixture -- a retired input is kept unless a record holds it (the playlist: any record; the EPG: the ACTIVE record) or the service already consumed that value", () =>
+  activeKeyFixture.retiredKeep.map(c => c.name + ": " + JSON.stringify(Model.retiredInputsToKeep(c.entry, fixtureState(c.keys, c.activeKey), c.consumed))),
+  activeKeyFixture.retiredKeep.map(c => c.name + ": " + JSON.stringify(c.want)))
+checkCall("R17a: the fixture covers the lead's whole cube (playlist and EPG x held and unheld x an active record or none), every corner reads 'kept exactly when unheld', and the answer is a new array that names nothing for nothing", () => {
+  const cube = activeKeyFixture.retiredKeep.filter(c => c.name.indexOf("cube:") === 0)
+  const corner = c => {
+    const st = fixtureState(c.keys, c.activeKey)
+    const active = Model.activeSourceRecord(st)
+    // the corner names WHO holds the EPG: the active record, or (with none active) any record
+    const plHeld = st.sources.some(r => r.url === c.entry.playlistUrl)
+    const epgHeld = active ? active.epgUrl === c.entry.epgUrl : st.sources.some(r => r.epgUrl === c.entry.epgUrl)
+    return [plHeld, epgHeld, c.activeKey !== ""].join("/")
+  }
+  const corners = new Set(cube.map(corner))
+  const rule = cube.every(c => {
+    const st = fixtureState(c.keys, c.activeKey)
+    const active = Model.activeSourceRecord(st)
+    const want = []
+    if (!st.sources.some(r => r.url === c.entry.playlistUrl)) want.push("playlistUrl")
+    if (!(active && active.epgUrl === c.entry.epgUrl)) want.push("epgUrl")
+    return JSON.stringify(Model.retiredInputsToKeep(c.entry, st, c.consumed)) === JSON.stringify(want)
+  })
+  const a = Model.retiredInputsToKeep({ epgUrl: "http://e.test/x.xml" }, Model.emptyState(), {})
+  const b = Model.retiredInputsToKeep({ epgUrl: "http://e.test/x.xml" }, Model.emptyState(), {})
+  return [cube.length, corners.size, rule, a !== b, Model.retiredInputsToKeep(null, null, null), Model.retiredInputsToKeep({}, Model.emptyState(), {}),
+          Model.retiredInputsToKeep({ playlistUrl: "http://n.test/a.m3u", epgUrl: "http://e.test/x.xml", showLogos: true, sourceKey: "d990c2e4" }, null, undefined)]
+}, [8, 8, true, true, [], [], ["playlistUrl", "epgUrl"]])
+checkCall("R17a: entryWith with `keep` carries THOSE retired keys over on a heal and drops the others, the patch still wins, `keepRetired` still keeps both, and anything but an array keeps nothing", () => {
+  const host = { id: "x", playlistUrl: "http://p.test/a.m3u?password=s3cret", epgUrl: "http://p.test/a.xml", sourceKey: "d990c2e4", showLogos: false }
+  const strip = (e) => Object.keys(e).sort().join(",")
+  return [strip(Model.entryWith(host, { showLogos: true }, { keep: ["epgUrl"] })),
+          strip(Model.entryWith(host, { showLogos: true }, { keep: ["playlistUrl", "epgUrl"] })),
+          strip(Model.entryWith(host, { showLogos: true }, { keep: [] })),
+          strip(Model.entryWith(host, { showLogos: true }, { keepRetired: true, keep: [] })),
+          strip(Model.entryWith(host, { showLogos: true }, { keep: "epgUrl" })),
+          strip(Model.entryWith(host, { showLogos: true }, { keep: { epgUrl: true } })),
+          Model.entryWith(host, { epgUrl: "new" }, { keep: ["epgUrl"] }).epgUrl,
+          Model.entryWith(host, {}, { keep: ["epgUrl"] }).epgUrl]
+}, ["epgUrl,id,showLogos,sourceKey", "epgUrl,id,playlistUrl,showLogos,sourceKey", "id,showLogos,sourceKey", "epgUrl,id,playlistUrl,showLogos,sourceKey",
+    "id,showLogos,sourceKey", "id,showLogos,sourceKey", "new", "http://p.test/a.xml"])
+checkCall("R17b: adoptPendingEpg lands a FRESH EPG input on the named record only and moves no key; a consumed input, a key naming no record, an empty input and the record's own value change nothing; a refused input is consumed and changes nothing", () => {
+  const EPG = "http://epg.example.test/xmltv.php?username=e&password=f"
+  const st = fixtureState(["d990c2e4", "42839dd5"], "")
+  const fresh = Model.adoptPendingEpg(st, "42839dd5", EPG, "", 5)
+  const rec = Model.findSource(fresh.state.sources, "42839dd5")
+  const other = Model.findSource(fresh.state.sources, "d990c2e4")
+  const consumed = Model.adoptPendingEpg(st, "42839dd5", EPG, EPG, 5)
+  const noRecord = Model.adoptPendingEpg(st, "deadbeef", EPG, "", 5)
+  const empty = Model.adoptPendingEpg(st, "42839dd5", "", "", 5)
+  const own = Model.adoptPendingEpg(st, "d990c2e4", activeKeyFixture.records.d990c2e4.epgUrl, "", 5)
+  const refused = Model.adoptPendingEpg(st, "42839dd5", "ftp://h.test/x.xml", "", 5)
+  const facts = o => [o.pending, o.consumed, o.adopted, o.state === st]
+  return { fresh: facts(fresh), recEpg: rec.epgUrl === EPG, otherUntouched: other.epgUrl === activeKeyFixture.records.d990c2e4.epgUrl,
+           keyUnmoved: fresh.state.activeKey === st.activeKey && Model.activeKeyOf(fresh.state) === "",
+           consumed: facts(consumed), noRecord: facts(noRecord), empty: facts(empty), own: facts(own), refused: facts(refused) }
+}, { fresh: [true, true, true, false], recEpg: true, otherUntouched: true, keyUnmoved: true,
+     consumed: [false, false, false, true], noRecord: [true, false, false, true], empty: [false, false, false, true],
+     own: [true, true, false, true], refused: [true, true, false, true] })
+{
+  // The four routes the lead named (E1-E4), each under both host shapes rule
+  // 9 names, through the service-order driver above (bound to Service.qml by
+  // R17.funnelKeeps / switchAdopts / probeAdopts), and the two cases the
+  // snapshot clause of retiredInputsToKeep exists for (X1, X2: the bare
+  // "a record holds it" rule re-carries a stripped value on the lagging host).
+  const EPG = "http://epg.example.test/xmltv.php?username=e&password=f"
+  const NEW2 = "http://added.example.test/list.m3u"
+  const KNEW2 = Model.sourceKey(Model.normalizeSourceUrl(NEW2, { origin: "cli" }))
+  const epgOn = svc => r13.fileOf(svc).sources.filter(r => r.epgUrl === EPG).map(r => r.key).sort()
+  const storedEpg = svc => r13.has(svc.host.storedEntry(), "epgUrl")
+  const kept = svc => svc.warnings.filter(w => w.indexOf("entry keeps an unadopted input (epgUrl)") === 0).length
+  const alone = svc => svc.warnings.filter(w => w.indexOf("logo setting written alone") === 0).length
+  for (const mode of ["lag", "echo"]) {
+    checkCall("R17 (" + mode + " host) E1: no active source, an EPG set while the shell was down, the logo toggle, then a switch -- the toggle HEALS and keeps the EPG on the entry, the switch lands it on the switched-to record in the same turn, the entry is stripped only after, and it survives the restart; no write loses an input", () => {
+      const svc = r13.boot({ epgUrl: EPG, sourceKey: "", showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)]), mode)
+      const toggled = svc.setShowLogos(true); svc.drain()
+      const atToggle = { toggled, alone: alone(svc), kept: kept(svc), storedEpg: storedEpg(svc), showLogos: svc.host.storedEntry().showLogos, epgOn: epgOn(svc) }
+      const sw = svc.switchSource(r13.KB)
+      const sameTurn = Model.findSource(svc.userState.sources, r13.KB).epgUrl === EPG
+      svc.drain()
+      const afterSwitch = { ok: sw.ok, sameTurn, memKey: svc.activeSourceKey, mirror: svc.host.storedEntry().sourceKey, storedEpg: storedEpg(svc), epgOn: epgOn(svc) }
+      const next = r13.restart(svc, mode)
+      return { atToggle, afterSwitch, afterRestart: { memKey: next.activeSourceKey, storedEpg: storedEpg(next), epgOn: epgOn(next) }, lost: svc.inputLost.concat(next.inputLost) }
+    }, { atToggle: { toggled: true, alone: 0, kept: 1, storedEpg: true, showLogos: true, epgOn: [] },
+         afterSwitch: { ok: true, sameTurn: true, memKey: r13.KB, mirror: r13.KB, storedEpg: false, epgOn: [r13.KB] },
+         afterRestart: { memKey: r13.KB, storedEpg: false, epgOn: [r13.KB] }, lost: [] })
+    checkCall("R17 (" + mode + " host) E2: remove the active source, a CLI epgUrl with nothing active, the logo toggle -- the EPG stays on the entry through the toggle and the restart (R12: nothing can consume it), and the first switch after the restart lands it", () => {
+      const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+      svc.removeSource(r13.KA); svc.drain()
+      svc.host.externalSet("epgUrl", EPG); svc.runLater(); svc.drain()
+      svc.setShowLogos(true); svc.drain()
+      const atToggle = { memKey: svc.activeSourceKey, alone: alone(svc), storedEpg: storedEpg(svc), epgOn: epgOn(svc) }
+      const next = r13.restart(svc, mode)
+      const afterRestart = { memKey: next.activeSourceKey, storedEpg: storedEpg(next), epgOn: epgOn(next) }
+      next.switchSource(r13.KB); next.drain()
+      return { atToggle, afterRestart, afterSwitch: { memKey: next.activeSourceKey, storedEpg: storedEpg(next), epgOn: epgOn(next) }, lost: svc.inputLost.concat(next.inputLost) }
+    }, { atToggle: { memKey: "", alone: 0, storedEpg: true, epgOn: [] }, afterRestart: { memKey: "", storedEpg: true, epgOn: [] },
+         afterSwitch: { memKey: r13.KB, storedEpg: false, epgOn: [r13.KB] }, lost: [] })
+    checkCall("R17 (" + mode + " host) E3: no toggle -- a switch with an EPG pending lands it on the switched-to record before the mirror is written; the echoing host used to lose it here with nothing else involved", () => {
+      const svc = r13.boot({ epgUrl: EPG, sourceKey: "", showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)]), mode)
+      svc.switchSource(r13.KA)
+      const sameTurn = Model.findSource(svc.userState.sources, r13.KA).epgUrl === EPG
+      svc.drain()
+      const next = r13.restart(svc, mode)
+      return [sameTurn, svc.activeSourceKey, svc.host.storedEntry().sourceKey, storedEpg(svc), epgOn(svc), next.activeSourceKey, storedEpg(next), epgOn(next), svc.inputLost.concat(next.inputLost)]
+    }, [true, r13.KA, r13.KA, false, [r13.KA], r13.KA, false, [r13.KA], []])
+    checkCall("R17 (" + mode + " host) E4: the in-app FIRST add with an EPG pending -- the probe commit lands the EPG on the new record, the mirror names it, the entry is stripped, and the restart stands on it", () => {
+      const svc = r13.boot({ epgUrl: EPG, sourceKey: "", showLogos: false }, r13.stateText([]), mode)
+      const res = svc.commitAdd({ playlistUrl: NEW2, epgUrl: "", label: "", origin: "guide" })
+      const sameTurn = Model.findSource(svc.userState.sources, KNEW2).epgUrl === EPG
+      svc.drain()
+      const next = r13.restart(svc, mode)
+      return [res.ok, res.key, sameTurn, svc.activeSourceKey, svc.host.storedEntry().sourceKey, storedEpg(svc), epgOn(svc), next.activeSourceKey, epgOn(next), svc.inputLost.concat(next.inputLost)]
+    }, [true, KNEW2, true, KNEW2, KNEW2, false, [KNEW2], KNEW2, [KNEW2], []])
+    checkCall("R17 (" + mode + " host) X1, the snapshot clause: a CLI playlist adopted and healed, then its source REMOVED -- no later write carries the URL back, and the restart does not resurrect the removed source", () => {
+      const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+      svc.host.externalSet("playlistUrl", r13.NEW); svc.runLater(); svc.drain()
+      const adopted = svc.activeSourceKey
+      svc.removeSource(r13.KNEW); svc.drain()
+      const next = r13.restart(svc, mode)
+      return [adopted, r13.has(svc.host.storedEntry(), "playlistUrl"), next.activeSourceKey, r13.fileOf(next).sources.map(r => r.key).sort(), r13.has(next.host.storedEntry(), "playlistUrl")]
+    }, [r13.KNEW, false, "", [r13.KA, r13.KB].sort(), false])
+    checkCall("R17 (" + mode + " host) X2, the snapshot clause: a CLI epgUrl adopted onto the active source A and healed, then a switch to B -- the old EPG is not carried back onto the entry and never lands on B, at once or after a restart", () => {
+      const svc = r13.boot({ sourceKey: r13.KA, showLogos: false }, r13.stateText([r13.rec(r13.A), r13.rec(r13.B)], r13.KA), mode)
+      svc.host.externalSet("epgUrl", EPG); svc.runLater(); svc.drain()
+      const onA = epgOn(svc)
+      svc.switchSource(r13.KB); svc.drain()
+      const next = r13.restart(svc, mode)
+      return [onA, storedEpg(svc), epgOn(svc), next.activeSourceKey, storedEpg(next), epgOn(next)]
+    }, [[r13.KA], false, [r13.KA], r13.KB, false, [r13.KA]])
+  }
+}
+// R17, THE WIRING. Structural pins; the driver above is bound to the same
+// lines (R17.*), so a Service.qml that drops one is red there too.
+checkCall("R17a (structural): the funnel asks Model.retiredInputsToKeep over the published entry, the in-memory state and BOTH snapshots, and hands the answer to entryWith on every owned write -- heal and patch alike, not behind a condition -- logging key names only", () => {
+  const funnel = (serviceSource.match(/function writeOwnedEntry\(overrides, what, announce, keepRetired\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const ask = funnel.indexOf("Model.retiredInputsToKeep(")
+  const hand = funnel.indexOf("Model.entryWith(published, patch, { keepRetired: keepRetired === true, keep: keep })")
+  const write = funnel.indexOf("root.shell.updateEntryInline(root.pluginId, entry)")
+  const warn = (funnel.match(/console\.warn\("omarchy-iptv: the bar entry keeps[^\n]*/) || [""])[0]
+  return { driverBound: r13.R17.funnelKeeps, asksBeforeHanding: ask !== -1 && ask < hand && hand < write,
+           unconditional: !/if \([^)]*\) \{?\s*var keep = Model\.retiredInputsToKeep/.test(funnel) && /\n    var keep = Model\.retiredInputsToKeep\(/.test(funnel),
+           oneEntryWith: (funnel.match(/Model\.entryWith\(/g) || []).length, warnNamesKeysOnly: warn !== "" && warn.indexOf("keep.join") !== -1 && !/published\.|settings\.|Url\b/.test(warn.replace("keep.join", "")) }
+}, { driverBound: true, asksBeforeHanding: true, unconditional: true, oneEntryWith: 1, warnNamesKeysOnly: true })
+checkCall("R17b (structural): switchSource and the probe commit adopt a pending EPG before their saveState and before persistActive; removeSource does not; the helper asks Model.adoptPendingEpg with the settings' EPG and the snapshot, and moves the snapshot only through epgSnapshotAfter", () => {
+  const sw = (serviceSource.match(/function switchSource\(id\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const remove = (serviceSource.match(/function removeSource\(id\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const helper = (serviceSource.match(/function adoptPendingEpgOnto\(key\) \{[\s\S]*?\n  \}/) || [""])[0]
+  const commit = serviceSource.indexOf("if (commit && newKey !== root.activeSourceKey) root.adoptPendingEpgOnto(newKey)")
+  const commitSave = serviceSource.indexOf("root.saveState()", commit)
+  const commitPersist = serviceSource.indexOf("root.persistActive(newKey)", commit)
+  return { driverBound: [r13.R17.switchAdopts, r13.R17.probeAdopts],
+           switchBeforeSaveAndPersist: sw.indexOf("root.adoptPendingEpgOnto(key)") !== -1 && sw.indexOf("root.adoptPendingEpgOnto(key)") < sw.indexOf("root.saveState()") && sw.indexOf("root.saveState()") < sw.indexOf("root.persistActive(key)"),
+           commitBeforeSaveAndPersist: commit !== -1 && commit < commitSave && commitSave < commitPersist,
+           removeDoesNot: remove !== "" && remove.indexOf("adoptPendingEpg") === -1,
+           callers: (serviceSource.match(/root\.adoptPendingEpgOnto\(/g) || []).length,
+           asks: /Model\.adoptPendingEpg\(root\.userState, key, epg, root\.reconciledEpgUrl,/.test(helper) && /var epg = String\(root\.settings\.epgUrl \|\| ""\)/.test(helper),
+           snapshot: /root\.reconciledEpgUrl = Model\.epgSnapshotAfter\(epg, root\.reconciledEpgUrl, out\.consumed\)/.test(helper) && (helper.match(/root\.reconciledEpgUrl =/g) || []).length === 1 }
+}, { driverBound: [true, true], switchBeforeSaveAndPersist: true, commitBeforeSaveAndPersist: true, removeDoesNot: true, callers: 2, asks: true, snapshot: true })
+// THE INPUT AUDIT, over every owned entry write every service-order case in
+// this file made (R13, R16 and R17 alike). This is the pin that would have
+// caught the round-6 P1 in round 2: the oracle covers EVERY input the entry
+// can carry. Seen red on lane-key-v2's code (the E cases' writes lose the
+// EPG) and on the bare-rule mutation (X1 and X2 under the lagging host).
+checkCall("R17 / rule 15: the input audit -- at every owned entry write the driver made, no input value the stored entry carried before the write is absent afterwards from both the entry and every record in the file; refused values counted apart", () => {
+  return { writes: r13.audit.writes >= 60, lost: r13.audit.lost, refused: r13.audit.refused }
+}, { writes: true, lost: [], refused: 0 })
 
 // ---- SR8: `omarchy bar set ... playlistUrl <url>` still adopts ----
 //
