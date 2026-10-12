@@ -1204,7 +1204,16 @@ ShellRoot {
                               configured: s.configured === undefined ? null : s.configured,
                               activeSourceKey: s.activeSourceKey === undefined ? null : s.activeSourceKey,
                               memoryActiveKey: st && st.activeKey !== undefined ? String(st.activeKey) : null,
-                              sourceCount: st && st.sources ? st.sources.length : null })
+                              sourceCount: st && st.sources ? st.sources.length : null,
+                              // D-SRC-15 (R9 / R11): the save count in flight, the sticky
+                              // failure, the helper's start-up exit as read, and the
+                              // reloads the service IGNORED -- numbers and booleans, so a
+                              // scenario can see a reload absorbed rather than infer it
+                              // from the key surviving. null on a tree without them.
+                              stateSavesInFlight: s.stateSavesInFlight === undefined ? null : s.stateSavesInFlight,
+                              stateSaveFailed: s.stateSaveFailed === undefined ? null : s.stateSaveFailed,
+                              stateInitOk: s.stateInitOk === undefined ? null : s.stateInitOk,
+                              stateReloadsIgnored: s.stateReloadsIgnored === undefined ? null : s.stateReloadsIgnored })
     }
     function widget(): string {
       var w = barLoader.item

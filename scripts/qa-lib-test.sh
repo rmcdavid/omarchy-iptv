@@ -1090,13 +1090,22 @@ is "and shell.qml stages nothing of its own: entryKey is the lifted function" \
 # pip-, sources- and text-scenario.sh also detach and carry the EXIT trap
 # alone; they are not in this list because none has been signalled mid-run
 # and proven, and a list of the proven is what this asserts.
-# key: `timeout -s TERM 30` landing in its M segment, measured 2026-10-11
-# leaving no cage, shell, nested socket or work directory, with the
-# slow-helper orphans of its O segment reaped by recorded pid).
+# key: a TERM sent to the scenario's own pid inside its O window with the
+# slow helper asleep in `state init` (KEY_SLOW_MS=30000), inside its D
+# window with the real helper's children running, and inside its N
+# window, measured 2026-10-11 leaving no cage, shell, helper child, nested
+# socket or work directory. The first proof landed in M, where no slow
+# helper exists, and the round-2 live lens then landed one in O and found
+# the sleeping child stranded for the rest of its sleep: only the O
+# segment's own recording, taken just before its deliberate SIGKILL, fed
+# ORPHANS. cleanup() now records the shell's children by PARENT pid while
+# the shell is alive, before `reap`, and the pin below is that seam).
 for sc in clip player rewind tls key; do
   is "$sc-scenario.sh traps INT and TERM into an exit beside its EXIT trap" \
      "$(qa_count "^trap cleanup EXIT$" "$ROOT/scripts/dev-harness/$sc-scenario.sh") $(qa_count "^trap 'exit 130' INT$" "$ROOT/scripts/dev-harness/$sc-scenario.sh") $(qa_count "^trap 'exit 143' TERM$" "$ROOT/scripts/dev-harness/$sc-scenario.sh")" "1 1 1"
 done
+is "key-scenario.sh's cleanup records the live shell's children by parent pid (never a pattern) before it reaps" \
+   "$(qa_count '^ +if \(\( SHELL_STARTED \)\) && \[\[ -n \$SHELL_PID \]\] && kill -0 "\$SHELL_PID" 2>/dev/null; then$' "$KS") $(qa_count '^ +ORPHANS="\$ORPHANS \$\(pgrep -P "\$SHELL_PID" 2>/dev/null \| tr ' "$KS")" "1 1"
 # Its 77 path, DRIVEN rather than grepped: with the cage binary pointed at
 # nothing it must refuse with 77 from both modes, name the tool as its first
 # line out, start nothing, and leave no transcript -- the refusal sits above
@@ -2015,7 +2024,10 @@ is "a umask-created file here would have been private, which is why the mode is 
 # gate's named list (1), its two floors are joined to its recipe and to
 # check.sh (4), the instrument is driven from node over the ruling's three
 # clauses with the seam beside it (2), and it joins the proven-traps list (1).
-EXPECTED=416
+# 416 -> 417 on 2026-10-11, D-SINK-19 round three: key-scenario.sh's cleanup
+# records the live shell's children by parent pid before it reaps (1), the
+# seam behind the TERM-inside-O proof.
+EXPECTED=417
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

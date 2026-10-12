@@ -906,7 +906,8 @@ lane's running harness is never reaped by a clip run.
 ```
 scripts/dev-harness/key-scenario.sh check-tree            # the instrument arm, node only; run by check.sh
 scripts/dev-harness/key-scenario.sh                       # the instrument arm, then the real Service.qml under cage, with a transcript
-scripts/dev-harness/key-scenario.sh --baseline f275bde    # the red run: the first build of the change
+scripts/dev-harness/key-scenario.sh --baseline lane-key-r2  # the red run: the tree D-SRC-15 was found on (36 / 13)
+scripts/dev-harness/key-scenario.sh --baseline f275bde      # the earlier red run: the first build (O2 its one discriminator)
 ```
 
 D-SINK-19 takes the provider URL off the host's bar entry: the entry
@@ -936,36 +937,73 @@ this directory had to move with it.
   the 0.13.5 shape (rule 10: the seed never carries a key the plugin has
   not written). `ipc pointerState` reports where the two writes of a
   pointer change stand (`dirsReady`, `stateSavePending`, the held
-  `pendingEntryKey`, the in-memory `activeKey`), every field optional so
-  a pre-change tree answers null rather than throwing.
+  `pendingEntryKey`, the in-memory `activeKey`) and, since D-SRC-15, the
+  service's own accounting of the file against memory
+  (`stateSavesInFlight`, `stateSaveFailed`, `stateInitOk`,
+  `stateReloadsIgnored`: numbers and booleans, never a URL), every field
+  optional so a pre-change tree answers null rather than throwing.
 * **The scenarios (R7).** The live arm runs the real `Service.qml` under a
-  nested cage, IPC only, over six seeded starts, each from its own
+  nested cage, IPC only, over ten seeded starts, each from its own
   `state.json`, caches and entry so a red is attributable to one ruling:
-  the two-source migration asserting the count it went in with (M), the
-  idempotent second start (J), a `playlistUrl` and an `epgUrl` set while
-  the shell was down (C, E; the review's P1 and R4), removing the active
-  source (R; R3), and the interrupted order -- a NEW URL on the entry with
-  the service's `state init` held for seconds by `fixtures/slow-helper.py`
-  so the shell can be SIGKILLed between the parked state save and the
-  entry mirror, then restarted over the entry as the host held it (O; R5,
-  the review's P2). Plus a D segment that watches the start-up adoption
-  across `dirsReady` from inside, because of what the first run found.
+  the start-up adoption watched across `dirsReady` from inside with the
+  file seeded at 0644 so the helper's chmod fires the reload R9 has to
+  absorb, read off the counter (D), a fresh install with no state
+  directory, file or cache (N), the two-source migration asserting the
+  count it went in with (M), the idempotent second start (J), a
+  `playlistUrl` and an `epgUrl` set while the shell was down (C, E; the
+  review's P1 and R4), removing the active source (R; R3), and the
+  interrupted order -- a NEW URL on the entry with the service's `state
+  init` held for seconds by `fixtures/slow-helper.py` so the shell can be
+  SIGKILLed between the parked state save and the entry mirror, then
+  restarted over the entry as the host held it, `--source-key` passed only
+  when the entry observed stored carries that NAME (O; R5, the review's
+  P2). `cleanup()` records the live shell's children by parent pid before
+  it reaps, so a TERM inside the O window takes the sleeping slow helper
+  with it (proven inside O, D and N; `qa-lib-test.sh` pins the seam).
 
-**What the first run found (2026-10-11, lane-key-r1 at f84ee50).** The
-key adopted at the first start is dropped when the helper's start-up
-`state init` chmods the EXISTING `state.json`: the chmod is an inotify
-`IN_ATTRIB` on the file the service's `FileView` watches, the reload hands
-`applyUserState` the pre-adoption text, `Model.stateOnLoad` keeps only the
-session record, the parked save then writes the key-less state and the
-entry flush strips the URL with `sourceKey ""`. Measured by polling
-`pointerState` at 50 ms (+1489 ms adopted and parked, +1909 ms dropped) and
-attributed by repeating it with a helper whose `state init` does nothing
-(the key survives). D2, M1, M3, M5, C1-C5, E1, O5 and O6 are red on that
-tree for this reason -- and so is `sources-scenario.sh`'s H1 (46 passed,
-22 failed under cage, identical with and without this directory's changes;
-66 passed, 0 failed over the dev tree with them), because the v1 migration
-adopts at start-up too. The scenario's header carries the full account;
-the fix is Service.qml's and the helper's, not this directory's.
+**What the first run found (2026-10-11, lane-key-r1 at f84ee50), now
+D-SRC-15.** The key adopted at the first start was dropped when the
+helper's start-up `state init` chmodded the EXISTING `state.json`: the
+chmod is an inotify `IN_ATTRIB` on the file the service's `FileView`
+watches (mode changed or not), the reload handed `applyUserState` the
+pre-adoption text, `Model.stateOnLoad` kept only the session record, the
+parked save then wrote the key-less state and the entry flush stripped the
+URL with `sourceKey ""`. Measured by polling `pointerState` at 50 ms
+(+1489 ms adopted and parked, +1909 ms dropped) and attributed by repeating
+it with a helper whose `state init` does nothing (the key survives).
+lane-key-s1 (R9-R12) closes it: a reload never replaces memory that is
+newer than the file, the helper leaves a 0600 file alone, the entry waits
+for the save to land. Counts from the transcripts, 2026-10-11: the forward
+run on lane-key-s2 (lane-key-s1's code) **49 passed, 0 failed**;
+`--baseline lane-key-r2` **36 passed, 13 failed** (D2, D3, M1, M3, M5,
+C1-C5, E1, O5, O6). Two things the measurement corrected: E1 had been red
+on every tree because its own `want` was wrong (`kind=x` where
+`Model.maskUrl` masks every query value, by calling it on dev, lane-key-r2
+and lane-key-s1 alike), and the created-file shape (no `state.json` at
+all), which the round-2 live lens wrote down as dropping "the same way",
+does NOT drop: N2-N4 are green on `--baseline lane-key-r2` and
+`stateReloadsIgnored` reads 0 across the whole fresh start, because a
+`FileView` loaded over a missing path never sees the helper's create. N
+stays as the control for the one start every new user makes.
+`sources-scenario.sh` under cage reads 63 passed, 3 failed on this tree
+(46 / 22 on lane-key-r2; 66 / 0 on dev): the three pin behaviour round 2
+changed on purpose and are a ruling for the lead (below), not this round's.
+
+**A weak check in `sources-scenario.sh`, recorded rather than fixed.**
+'a switch the host already stores is not reported as a persist failure'
+means to make the fake's `updateEntryInline` take its `!dirty` branch
+(the host's "already stored", `false` as success) by pre-setting
+`playlistUrl` on the stored entry. That branch logs `updateEntryInline:
+nothing changed (already stored)` (shell.qml, the only place the string
+exists) and the line never appears on any tree -- not on dev, where the
+plugin still writes `playlistUrl` beside what was set, and not since
+D-SINK-19, where the plugin writes `sourceKey` and a `playlistUrl` seed
+cannot make the host hold its write at all. The check passes as "switch
+returned ok": rule 14's shape, a check that cannot go red for the thing it
+names. Found by the round-2 live lens; fixing it means seeding `sourceKey`
+on the stored side (`ipc setStored sourceKey <key>`) and asserting the
+logged line, which changes what the check observes and belongs with the
+SR25 ruling the three reds above wait on.
 
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 

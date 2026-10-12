@@ -47,13 +47,13 @@
 #   Service.qml and Model.js under cage (docs/SPIKE-CAGE-HEADLESS.md), IPC
 #   only -- no keystroke, no screenshot, the guide never opened -- over a
 #   state.json this scenario seeds and real cache directories the real
-#   helper writes. Six shells are started and stopped by their recorded pid,
+#   helper writes. Ten shells are started and stopped by their recorded pid,
 #   each presenting the bar entry a HOST would hold at that point
 #   (`run.sh --playlist` for a URL, `--source-key` for the mirror an earlier
-#   shell wrote); the fake host models the config in memory, so what
-#   survives a stop is what this scenario observed stored and re-seeds. The
-#   entry's content is read through `hostEntry` as keys and key NAMES, never
-#   values.
+#   shell wrote -- passed only when the entry observed stored CARRIES that
+#   name); the fake host models the config in memory, so what survives a
+#   stop is what this scenario observed stored and re-seeds. The entry's
+#   content is read through `hostEntry` as keys and key NAMES, never values.
 #
 #   I1  a key beside a differing URL answers the key (sourceKey first)
 #   I2  a URL alone answers its hash (the URL hash second)
@@ -70,7 +70,18 @@
 #       while the state save is parked behind the start-up dirs (control: the
 #       rig sees the adoption at all)
 #   D2  the adopted key SURVIVES the start-up dirs becoming ready: still in
-#       memory and now in the file           <- the drop this file found (see STATUS)
+#       memory and now in the file           <- D-SRC-15, the drop this file found
+#   D3  the file went in at 0644; the helper tightened it to 0600 and the
+#       reload that chmod fired was IGNORED, read off the service's own
+#       counter (stateReloadsIgnored >= 1)      <- R9 observed, not inferred
+#   N1  a FRESH install (no state directory, no state.json, no cache): the
+#       first start adopts the entry's URL in memory with no file to load
+#       (control)
+#   N2  the adopted key and its record survive the helper CREATING the file:
+#       in memory, in the file, one record, mode 0600
+#   N3  ... the stored entry carries sourceKey = that key and no playlistUrl
+#   N4  ... configured, the first fetch wrote its cache, 20 channels loaded
+#       (N2..N4 are CONTROLS on every tree measured: see STATUS)
 #   M1  two-source migration: state.json `activeKey` = the entry URL's key
 #   M2  ... and the file still holds the TWO records it went in with, as does
 #       `sources()`                                                  <- R7, SRC-MIG-09
@@ -121,65 +132,81 @@
 # segment before it (the first version chained them and one red cascaded
 # into seventeen).
 #
-# STATUS, MEASURED 2026-10-11 ON lane-key-r1 (f84ee50), THE TREE THIS WAS
-# WRITTEN AGAINST -- read before reading any red line. D2 is RED there, and
-# so is everything that rests on an adoption made at START-UP: M1, M3, M5,
-# C1..C5, E1, O5, O6 -- 12 of 43, "32 passed, 12 failed". The mechanism,
-# attributed by polling `pointerState` at 50 ms through a start and then
-# repeating it with a helper whose `state init` does nothing: the service
-# adopts the entry's URL at the state load and PARKS the save (dirsReady
-# false); the helper's start-up `state init` then runs `os.chmod(path,
-# 0o600)` on the EXISTING state.json (bin/omarchy-iptv init_state_file, "an
-# existing file is not rewritten; only its mode is tightened"); that chmod
-# is an inotify IN_ATTRIB on the file the service's FileView watches, so
-# `onFileChanged: reload()` fires and applyUserState is handed the
-# PRE-ADOPTION text; Model.stateOnLoad keeps only the session record of the
-# in-memory state, so the adopted key -- and a newly adopted RECORD, which
-# is the review's P1 shape again -- is dropped; stateInitProc's exit then
-# writes the parked save, which is now the key-less state, and flushes the
-# entry mirror, which strips the URL and writes `sourceKey ""`. Measured:
-# +1489 ms adopted, parked, key held; +1909 ms dirsReady, memory "", file
-# "", entry `sourceKey ""` with no URL; with `state init` skipped the key
-# survives in memory, in the file and on the entry. The shape pre-exists
-# D-SINK-19 (the review's P2 said the URL on the entry "was doing work here
-# too" as an accidental backup); D-SINK-19 turns a harmless re-adoption on
-# the next start into the loss of the user's active source on the first
-# start after the upgrade. NOT fixed here (Service.qml and the helper are
-# not this lane's); filed for the lead with this measurement. Until it is
-# fixed these checks have no green tree; the expectations below are what
-# the rulings say, not what the tree does.
+# STATUS. The drop this file found on 2026-10-11 against lane-key-r1
+# (f84ee50) is D-SRC-15 on the board, and lane-key-s1 (3d2d8e7, lead
+# rulings R9-R12) closes it: a reload never replaces in-memory state that
+# is newer than the file (Model.reloadDisposition, asked first in
+# applyUserState), the helper leaves a 0600 file alone (R10), and the entry
+# mirror waits for the parked save to LAND (R11). The mechanism as it was
+# found, attributed by polling `pointerState` at 50 ms through a start and
+# then repeating it with a helper whose `state init` does nothing: the
+# service adopts the entry's URL at the state load and PARKS the save
+# (dirsReady false); the helper's start-up `state init` then ran
+# `os.chmod(path, 0o600)` on the EXISTING state.json; that chmod is an
+# inotify IN_ATTRIB on the file the service's FileView watches, mode
+# changed or not (lane A's probe), so `onFileChanged: reload()` fired and
+# applyUserState was handed the PRE-ADOPTION text; Model.stateOnLoad keeps
+# only the session record of the in-memory state, so the adopted key --
+# and a newly adopted RECORD, the review's P1 shape again -- was dropped;
+# stateInitProc's exit then wrote the parked save, now the key-less state,
+# and flushed the entry mirror, which stripped the URL and wrote
+# `sourceKey ""`. Measured: +1489 ms adopted, parked, key held; +1909 ms
+# dirsReady, memory "", file "", entry `sourceKey ""` with no URL; with
+# `state init` skipped the key survived. The shape pre-exists D-SINK-19
+# (the review's P2 said the URL on the entry "was doing work here too" as
+# an accidental backup); D-SINK-19 turned a harmless re-adoption on the
+# next start into the loss of the user's active source on the first start
+# after the upgrade.
 #
-# RULE 11, THE RED RUN. `--baseline f275bde` exports the first build (the
-# side integration of e618fce, red by design) and runs its Model.js,
-# Service.qml and helper through the same rig, with this tree's harness.
-# Measured 2026-10-11, both trees, recipe in the footer the run prints:
-#   lane-key-r1:        32 passed, 12 failed  (the STATUS list above)
-#   --baseline f275bde: 35 passed,  9 failed  (C1..C5, E1, O2, O5, O6)
-# The one check red on the baseline and green on the repaired tree is O2:
-# the first build rewrote the entry while the state save was still parked
-# (the review's P2, R5), observed as the stored entry losing its URL inside
-# the window with nothing held for later. D2, M1, M3 and M5 are the other
-# way round -- GREEN on the baseline, RED on lane-key-r1: the first build
-# wrote the entry BEFORE the chmod reload and its own-write overlay then
-# handed the mirror back to adoptActiveSource step 3, which recovers a KNOWN
-# record by accident; the repaired tree waits for the parked save (R5) and
-# has nothing left to recover from. C1..C5, E1, O5 and O6 are red on both
-# (the review's P1 on the baseline, where a URL set while down is
-# discarded; the drop above on the repaired tree). R1 and R2 pass on BOTH
-# trees live, which the review's harness P1 did not predict: Service.
-# removeSource reaches persistActive(""), and withActiveKey clears the key
-# in the state the service saves on either tree; lane A's R3 (Model.
-# removeSource clearing it in what IT returns) is reached by the node and
-# python fixtures, not by this path. Every I and S check, D1, M2, M4, M6,
-# J1..J3, E2, E3, R1..R5, O1, O3, O4, P1, P2 and T1 pass on every tree:
-# controls, not discriminators. The instrument's own red is against the
-# two instruments before it, not a tree: f275bde's entryKey hashed the URL
-# alone (I1 reads the URL's key where the mirror names another source:
-# "I1 df479b3d want 15f4dbc4") and the first repair iterated every entry
-# value (I3 reads "cafebabe"). Both were driven through this arm's node
-# probe with their bodies in place of harness-lib.js's, one red of seven
-# each; scripts/qa-lib-test.sh drives the same three clauses on every
-# commit.
+# The forward run seeds D's file at 0644 ON PURPOSE: seeded 0600, R10 means
+# the helper never chmods, the reload never fires, and D2 is green with R9
+# never deciding anything (lane A proved R9 alone by reverting R10 in a
+# scratch copy; this file makes the ordinary run do it). D3 then reads the
+# decision off `stateReloadsIgnored`, which `pointerState` reports beside
+# the in-flight count, the sticky save failure and the helper's exit
+# (numbers and booleans; null on a tree without them).
+#
+# N, THE CREATED-FILE SHAPE, IS A CONTROL, AND THAT IS A MEASUREMENT. The
+# round-2 live lens wrote that the drop is "present in the no-state.json
+# shape too", from the mechanism and not from a run. It is not: over a
+# fresh install (no state directory, no file, no cache) the helper CREATES
+# state.json under the parked adoption and the service's FileView, loaded
+# over a missing path, never sees the creation -- `stateReloadsIgnored`
+# reads 0 across the whole fresh start on lane-key-s2, and N2..N4 are
+# GREEN on `--baseline lane-key-r2`, the tree that drops D2. So the fresh
+# install was never exposed, and N stays because the fresh install is the
+# one start every new user makes and nothing else observes it.
+#
+# RULE 11, THE RED RUN. `--baseline lane-key-r2` exports the round-2 tree
+# (lane-key-r1's code under this harness's predecessor, the tree D-SRC-15
+# was found on) and runs its Model.js, Service.qml and helper through the
+# same rig, with this tree's harness. Measured 2026-10-11, both trees,
+# recipe in the footer the run prints:
+#   lane-key-s2 (this tree, lane-key-s1's code):  49 passed,  0 failed
+#   --baseline lane-key-r2:                       36 passed, 13 failed
+#       D2, D3, M1, M3, M5, C1..C5, E1, O5, O6
+# D2 is the drop at the sink ("got [dirs:true memory: file:]"); D3 reads
+# NOFIELD there (no counter to read: an instrument absence, not the
+# mechanism, and D2 beside it is the mechanism); M1, M3, M5, C1..C5, E1,
+# O5 and O6 are everything that rests on an adoption made at START-UP, all
+# dropped the same way. E1 was red on EVERY tree until this round because
+# its own `want` was wrong (`kind=x` where Model.maskUrl masks every query
+# value); corrected, it is a discriminator (the baseline reads
+# "file:other"). D1, N1..N4, M2, M4, M6, J1..J3, E2, E3, R1..R5, O1..O4,
+# P1, P2, T1 and every I and S check pass on both trees: controls. R1 and
+# R2 are controls live because Service.removeSource reaches
+# persistActive("") on either tree; lane A's R3 (Model.removeSource
+# clearing the key in what IT returns) is reached by the node and python
+# fixtures. The earlier red run, `--baseline f275bde` (the first build),
+# read 35 passed / 9 failed with O2 its one discriminator (the entry
+# rewritten while the save was parked, the review's P2); it is still a
+# valid ref for that one. The instrument's own red is against the two
+# instruments before it, not a tree: f275bde's entryKey hashed the URL
+# alone (I1 reads the URL's key where the mirror names another source) and
+# the first repair iterated every entry value (I3 reads "cafebabe"). Both
+# were driven through this arm's node probe with their bodies in place of
+# harness-lib.js's, one red of seven each; scripts/qa-lib-test.sh drives
+# the same three clauses on every commit.
 #
 # MODES. `check-tree` (what scripts/check.sh runs on every commit: no
 # transcript, no display, node over the tree's Model.js, under 2 s) and
@@ -192,9 +219,19 @@
 #
 # INTERRUPTED. INT and TERM are trapped into an exit, so cleanup() runs
 # (bash runs no EXIT trap for a signal that kills it while it waits on a
-# foreground child): a `timeout -s TERM` landing mid-arm leaves no shell, no
-# slow-helper child, no cage, no nested socket and no work directory.
-# Measured 2026-10-11; the recipe is in scripts/qa-lib-test.sh's trap list.
+# foreground child), and cleanup() records the shell's children by PARENT
+# pid while the shell is alive before it reaps, because `reap` does not
+# take a Process child with the shell. Measured 2026-10-11 with a TERM sent
+# to the scenario's own pid inside THREE windows: the O window with the
+# slow helper asleep in `state init` (KEY_SLOW_MS=30000; the sleeping
+# child was listed under the shell before the TERM and gone 1 s after),
+# the D window with the real helper mid-start-up (`cache` and `config
+# shield` children listed, gone after), and the N window. Each left no
+# shell, no helper child, no cage, no nested socket and no work directory.
+# The round-2 live lens found the first version's O window stranding the
+# slow helper for the rest of its sleep: only the segment's own recording,
+# taken just before its deliberate SIGKILL, fed ORPHANS. The recipe is in
+# scripts/qa-lib-test.sh's trap list.
 #
 # Holds no display: everything this starts lives on the nested display cage
 # creates, read from cage's own child and refused if it names the caller's
@@ -289,12 +326,23 @@ elapsed() { python3 -c 'import sys; print("%.1f" % (float(sys.argv[1]) - float(s
 # Every process this scenario starts, by the pid bash handed it or the pid
 # the process wrote itself (cage's child, run.sh's qs.pid). Nothing here is
 # found by a pattern that could match this shell.
-CAGE_PID=""; CAGE_CHILD=""; SHELL_STARTED=0; NESTED=""; ORPHANS=""
+CAGE_PID=""; CAGE_CHILD=""; SHELL_STARTED=0; SHELL_PID=""; NESTED=""; ORPHANS=""
 kill_pid() { [[ -n ${1:-} ]] && kill -0 "$1" 2>/dev/null && { kill -TERM "$1" 2>/dev/null; wait "$1" 2>/dev/null; }; return 0; }
 cleanup() {
+  # The shell's children, recorded by PARENT pid (never a pattern) while
+  # the shell is still alive: `reap` TERMs then KILLs quickshell, which does
+  # not take its Process children with it, so a helper mid-verb -- the slow
+  # helper asleep in `state init` during the O window above all -- would be
+  # reparented and live out its sleep. The round-2 live lens landed a TERM
+  # inside that window and found the orphan; before this line only the O
+  # segment's own recording (just before its deliberate SIGKILL) fed
+  # ORPHANS, so a signal between the slow start and that line stranded it.
+  if (( SHELL_STARTED )) && [[ -n $SHELL_PID ]] && kill -0 "$SHELL_PID" 2>/dev/null; then
+    ORPHANS="$ORPHANS $(pgrep -P "$SHELL_PID" 2>/dev/null | tr '\n' ' ')"
+  fi
   (( SHELL_STARTED )) && env -u HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY="$NESTED" "$RUN" reap >/dev/null 2>&1
-  # The slow helper's sleeping child survives its parent's SIGKILL (O4): it
-  # was recorded by pid before the kill and is not ours to `wait` for.
+  # The slow helper's sleeping child survives its parent's SIGKILL (O4) and
+  # the reap above alike: recorded by pid, and not ours to `wait` for.
   local p; for p in $ORPHANS; do kill -KILL "$p" 2>/dev/null; done
   [[ -n $CAGE_CHILD ]] && kill -TERM "$CAGE_CHILD" 2>/dev/null
   kill_pid "$CAGE_PID"
@@ -374,6 +422,9 @@ ipc()  { h ipc "$@" 2>/dev/null; }
 svc()  { qa_field "d$1" "$(ipc state)"; }
 hf()   { qa_json_field "d$1" "$(ipc hostEntry)"; }
 pf()   { qa_json_field "d$1" "$(ipc pointerState)"; }
+# Did the service IGNORE at least one reload (R9's counter)? yes | no, and
+# the sentinel itself (null, NOFIELD) on a tree that has no counter.
+ignored_some() { local n; n=$(pf "['stateReloadsIgnored']"); case $n in 0) echo no ;; [1-9]*) echo yes ;; *) echo "$n" ;; esac; }
 # A field of state.json on disk, through the same sentinels as the IPC reads.
 sj() {
   python3 -c '
@@ -413,11 +464,13 @@ wait_gone() {
 }
 LOG="$SCRATCH/harness.log"
 LOG_MARK=0
-log_mark() { LOG_MARK=$(wc -l <"$LOG" 2>/dev/null || echo 0); LOG_MARK=${LOG_MARK:-0}; }
+# A missing log (the first start in a fresh harness directory) is mark 0:
+# bash applies `<"$LOG"` before `2>/dev/null`, so the redirection's own
+# error line reached the transcript on every fresh run (round-2 live lens).
+log_mark() { if [[ -f $LOG ]]; then LOG_MARK=$(wc -l <"$LOG"); else LOG_MARK=0; fi; LOG_MARK=${LOG_MARK:-0}; }
 # Lines the CURRENT shell added that match an ERE: the log is appended to by
 # every detached start, so a count is taken from the mark the last start set.
 log_since() { tail -n +"$((LOG_MARK + 1))" "$LOG" 2>/dev/null | grep -acE -- "$1"; }
-SHELL_PID=""
 # Start a detached shell on the nested display and wait until its service has
 # loaded the state and settled the cache layout. `--keep`: the seed below is
 # this scenario's, and every later start must find what the previous one
@@ -544,6 +597,13 @@ shell_arm() {
 
   echo "== D: the adoption made at start-up, watched across the start-up dirs becoming ready ($(elapsed) s)"
   seed ""
+  # The file goes in at 0644, not the seed's 0600: the helper's start-up
+  # `state init` leaves a 0600 file alone (R10) and still chmods any other
+  # mode, and that chmod is the reload the service has to survive (R9).
+  # Seeded 0600, the forward run never raises the reload at all and D2 is
+  # green without R9 ever deciding anything; seeded 0644 it decides on every
+  # run, and D3 reads the decision off the counter.
+  chmod 0644 "$STATE"
   log_mark
   h --detach --timeout 0 --keep --playlist "$A" >"$WORK/start.log" 2>&1
   SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
@@ -554,6 +614,31 @@ shell_arm() {
   sleep 1.0   # the parked save and the entry flush land in stateInitProc's exit; give the file its moment
   ck "D2 the adopted key survives the dirs becoming ready: in memory and in the file" \
      "dirs:$(pf "['dirsReady']") memory:$(pf "['memoryActiveKey']") file:$(sj "d.get('activeKey', 'absent')")" "dirs:true memory:$KA file:$KA"
+  ck "D3 the helper tightened the 0644 file to 0600, and the reload that chmod fired was IGNORED, not applied (R9 at the counter)" \
+     "mode:$(stat -c %a "$STATE" 2>/dev/null) ignored:$(ignored_some)" "mode:600 ignored:yes"
+
+  echo "== N: a FRESH install -- no state directory, no state.json, no cache -- the helper CREATES the file under the adoption ($(elapsed) s)"
+  # The created-file shape of D-SRC-15 (round-2 live lens): the helper's
+  # `state init` writes a new state.json (O_EXCL create, then its chmod)
+  # while the adoption's save is parked, so the reload hands the service
+  # the helper's EMPTY default state in place of the adopted record.
+  (( SHELL_STARTED )) && stop_shell
+  h clean >/dev/null 2>&1
+  [[ -e $STATE || -e $CACHE/sources ]] && echo "   the fresh shape was not clean: state $([[ -e $STATE ]] && echo present || echo absent), caches $([[ -e $CACHE/sources ]] && echo present || echo absent)"
+  log_mark
+  h --detach --timeout 0 --keep --playlist "$A" >"$WORK/start.log" 2>&1
+  SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
+  observe_window "$KA" 20 || true
+  ck "N1 the first start adopts the entry's URL in memory while the save is parked, with no file to load (control)" \
+     "$WINDOW memory:$W_MEMORY dirs:$W_DIRS parked:$W_PARKED" "observed memory:$KA dirs:false parked:true"
+  wait_for true 20 pf "['dirsReady']" >/dev/null || true
+  wait_for 20 20 svc "['channels']" >/dev/null || true
+  wait_for no 10 stored_has playlistUrl >/dev/null || true
+  ck "N2 the adopted key and its record survive the helper creating state.json: in memory and in the file" \
+     "memory:$(pf "['memoryActiveKey']") file:$(sj "d.get('activeKey', 'absent')") records:$(sj "len(d['sources'])") mode:$(stat -c %a "$STATE" 2>/dev/null)" "memory:$KA file:$KA records:1 mode:600"
+  ck "N3 the stored entry carries sourceKey = that key and no playlistUrl" "$(hf "['stored']") sourceKey:$(stored_has sourceKey) playlistUrl:$(stored_has playlistUrl)" "$KA sourceKey:yes playlistUrl:no"
+  ck "N4 configured on it, its first fetch wrote its cache and loaded, activeCache is its directory" "$(svc "['configured']") $(svc "['channels']") $(ipc activeCache) cache:$([[ -f $CACHE/sources/$KA/channels.json ]] && echo written || echo missing)" "true 20 $CACHE/sources/$KA cache:written"
+  echo "   reloads the service ignored across the fresh start: $(pf "['stateReloadsIgnored']") (a number; null on a pre-R9 tree)"
 
   echo "== M: the two-source migration (entry URL, no activeKey) ($(elapsed) s)"
   seed ""
@@ -595,9 +680,13 @@ shell_arm() {
   seed "$KA"
   start_shell --playlist none --epg "$EPG" --source-key "$KA" || true
   wait_for no 10 stored_has epgUrl >/dev/null || true
+  # Model.maskUrl masks EVERY query value (`kind=****`, not `kind=x`): on
+  # dev, lane-key-r2 and lane-key-s1 alike, by calling it. The first version
+  # of this line wanted `kind=x` and could be green on no tree (lane A's
+  # DQ-A3); the file half was always what the ruling claims.
   ck "E1 the EPG URL landed on the ACTIVE record, masked for the form" \
      "file:$(sj "'same' if [s['epgUrl'] for s in d['sources'] if s['key'] == '$KA'] == ['$EPG'] else 'other'") form:$(qa_json_field "d['epgMasked']" "$(ipc editMasked "$KA")")" \
-     "file:same form:http://****@127.0.0.1:9/epg.xml?token=****&kind=x"
+     "file:same form:http://****@127.0.0.1:9/epg.xml?token=****&kind=****"
   ck "E2 the same write took it off the stored entry" "epgUrl:$(stored_has epgUrl) $(hf "['stored']")" "epgUrl:no $KA"
   ck "E3 no IPC reply and no harness-log line carries its credential" "$(qa_count 'u:p@|token=abc' "$LOG") $(printf '%s\n%s\n%s\n' "$(ipc editMasked "$KA")" "$(ipc sources)" "$(ipc state)" | grep -acE 'u:p@|token=abc')" "0 0"
 
@@ -650,8 +739,13 @@ shell_arm() {
   # now, before the kill, because a killed shell cannot be asked. The fake
   # host lives in memory, so this observation is the only thing that
   # survives the kill; the real host's file would survive it by itself.
+  # Only what the stored entry CARRIES is re-seeded, by key NAME: `hf
+  # stored` answers the URL's hash when the entry holds no `sourceKey`, and
+  # the first version passed that back as `--source-key`, an entry no host
+  # could hold at that point (the write is parked; round-2 live lens P3).
   seed_playlist=none; [[ $(stored_has playlistUrl) == yes ]] && seed_playlist=$D
-  seed_key=$(hf "['stored']")
+  seed_args=(--playlist "$seed_playlist"); seed_key="(none)"
+  [[ $(stored_has sourceKey) == yes ]] && { seed_key=$(hf "['stored']"); seed_args+=(--source-key "$seed_key"); }
   # The crash: SIGKILL by the recorded pid, the slow helper's sleeping child
   # recorded first (it is orphaned by the kill and reaped by pid below).
   orphan=$(pgrep -P "$SHELL_PID" 2>/dev/null | tr '\n' ' '); ORPHANS="$ORPHANS $orphan"
@@ -662,8 +756,8 @@ shell_arm() {
   ck "O4 after the kill state.json is still the file the shell started from (control)" "$([[ $(sha "$STATE") == "$sha0" ]] && echo untouched || echo written) activeKey:$(sj "json.dumps(d.get('activeKey', 'absent'))")" 'untouched activeKey:"absent"'
   # The next start, on the real tree, over the entry as the host held it.
   export OMARCHY_IPTV_PLUGIN_ROOT=$PLUGIN_ROOT; unset OMARCHY_IPTV_SLOW_MS OMARCHY_IPTV_SLOW_VERBS
-  echo "   restarting over the entry as stored: playlist $([[ $seed_playlist == none ]] && echo none || echo '(set)'), sourceKey '$seed_key'"
-  start_shell --playlist "$seed_playlist" --source-key "$seed_key" || true
+  echo "   restarting over the entry as stored: playlist $([[ $seed_playlist == none ]] && echo none || echo '(set)'), sourceKey $seed_key"
+  start_shell "${seed_args[@]}" || true
   wait_for "$KD" 10 svc "['activeSourceKey']" >/dev/null || true
   wait_for 11 20 svc "['channels']" >/dev/null || true
   wait_for no 10 stored_has playlistUrl >/dev/null || true
@@ -702,7 +796,7 @@ instrument
 # The floor. A check that stops executing must turn the run red rather than
 # quietly shorten the summary (D-PLY-9). Recount with
 #   grep -cE '^ *ck "[IS][0-9]' key-scenario.sh   -> 10, the instrument arm -> check-tree
-#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 43, both arms          -> live
+#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 48, both arms          -> live
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -712,7 +806,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=10
 else
-  EXPECTED_CHECKS=43
+  EXPECTED_CHECKS=48
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then
@@ -722,7 +816,7 @@ else
 fi
 
 if [[ -n $BASELINE ]]; then
-  echo "baseline $BASELINE: on the first build (f275bde) the one discriminating red is O2 (the entry is rewritten while the state save is still parked); D2, M1, M3 and M5 pass THERE and fail on lane-key-r1 (the first build's immediate entry write plus its own-write overlay recover a known record from the start-up chmod reload by accident); C1..C5, E1, O5, O6 are red on both trees (the review's P1 on the baseline, the chmod reload drop on the repaired tree -- see STATUS in the header). Every I and S check, D1, M2, M4, M6, J1..J3, E2, E3, R1..R5, O1, O3, O4, P1, P2 and T1 pass on every tree: controls, not discriminators."
+  echo "baseline $BASELINE: on lane-key-r2 (the tree D-SRC-15 was found on) the reds are D2, D3, M1, M3, M5, C1..C5, E1, O5, O6 -- 36 passed, 13 failed: the start-up chmod reload replaces the adoption (D2 at the sink, D3 NOFIELD for want of a counter) and everything resting on a start-up adoption with it. On f275bde (the first build) the one discriminating red is O2 (the entry rewritten while the save is parked); D2, M1, M3, M5 pass there by the accident the header describes. N1..N4 are green on EVERY tree: the created-file shape never fires the reload. D1, M2, M4, M6, J1..J3, E2, E3, R1..R5, O1..O4, P1, P2, T1 and every I and S check are controls."
 fi
 echo "key-scenario: $PASS passed, $FAIL failed (mode $MODE, tree $PLUGIN_ROOT${BASELINE:+, baseline $BASELINE}, $(elapsed) s)"
 (( FAIL == 0 ))

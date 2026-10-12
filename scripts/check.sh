@@ -213,11 +213,14 @@ CLIP_PREFLIGHT_MIN=${CLIP_PREFLIGHT_MIN:-7}
 # repair would have reported a user's `mpvArgs` of "deadbeef" as the active
 # source) and three seams that keep shell.qml, hostEntry and run.sh reading
 # through it -- plus its own "ran every check" line. The shell arm (the real
-# Service.qml under cage over six seeded starts: the two-source migration,
-# the idempotent second start, a URL and an EPG set while the shell was
-# down, the remove of the active source, and a SIGKILL between the two
-# writes of a pointer change) is the live mode's, for a human; its STATUS
-# paragraph records the start-up reload drop it found on lane-key-r1.
+# Service.qml under cage over ten seeded starts: the start-up adoption
+# watched across the dirs becoming ready with the reload the helper's chmod
+# fires (D-SRC-15, R9 read off the service's own counter), a fresh install
+# with no state.json, the two-source migration, the idempotent second
+# start, a URL and an EPG set while the shell was down, the remove of the
+# active source, and a SIGKILL between the two writes of a pointer change)
+# is the live mode's, for a human; its STATUS paragraph records the drop it
+# found on lane-key-r1 and the counts on the tree that closes it.
 # scripts/qa-lib-test.sh asserts this number is the scenario's check-tree
 # EXPECTED_CHECKS plus one.
 KEY_PREFLIGHT_MIN=${KEY_PREFLIGHT_MIN:-11}
