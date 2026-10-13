@@ -4779,7 +4779,7 @@ Item {
     // for the same reason (a writer that keeps whatever mode it finds) over a
     // file this plugin does not own, which is why it refuses rather than
     // creates. Argv only, and no path argument exists to pass: the helper
-    // computes the one file it may touch from $XDG_CONFIG_HOME.
+    // computes the one file it may touch from $HOME, as the host does.
     id: configShieldProc
     command: Model.configShieldArgv(root.helperPath)
     stdout: StdioCollector { id: configShieldStdout; waitForEnd: true }
