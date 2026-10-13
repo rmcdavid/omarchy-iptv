@@ -164,8 +164,13 @@
 #       STILL carries the URL beside the mirror the FILE holds -- not the
 #       in-memory key -- with `showLogos` on it     <- R16, round-4 review P1
 #   L2  that was ONE entry write, patched alone: its key list keeps
-#       playlistUrl / epgUrl / sourceKey, the service logged it as written
-#       alone (save-failed), no new signal, state.json untouched
+#       playlistUrl (set: the only copy) and sourceKey beside showLogos, the
+#       service logged it as written alone (save-failed), no new signal,
+#       state.json untouched. Until round 10 it asked for epgUrl too: R16
+#       kept every retired key, the seed's EMPTY one included; R20c keeps
+#       only a valid input the landed state does not hold, and an empty
+#       value is no input (measured: `keys:0` on lane-key-z1's first live
+#       run with the old want, every other L and F check green)
 #   F6  the next start RE-ADOPTS the URL the failed write left on the entry,
 #       over the entry as the host STORED it after L: its record in the
 #       file, active, fetched, URL off the entry                  <- R1
@@ -1244,8 +1249,8 @@ shell_arm() {
   ck "L1 logos on, and the stored entry keeps the URL beside the mirror the FILE holds (not the in-memory key), with showLogos on it" \
      "logos:$(qa_json_field "d['guide']['showLogos']" "$(ipc state)") stored:$(hf "['stored']") file:$(sj "d.get('activeKey', 'absent')") memory:$(pf "['memoryActiveKey']") playlistUrl:$(stored_has playlistUrl) showLogos:$(stored_has showLogos)" \
      "logos:true stored:$KA file:$KA memory:$KC playlistUrl:yes showLogos:yes"
-  ck "L2 one entry write, patched alone: the write's key list keeps playlistUrl / epgUrl / sourceKey, logged as written alone (save-failed), no new signal, state.json untouched" \
-     "writes:$(log_since 'updateEntryInline') keys:$(tail -n +"$((LOG_MARK + 1))" "$LOG" 2>/dev/null | grep -a 'updateEntryInline' | grep -acE 'playlistUrl.*epgUrl.*sourceKey.*showLogos|showLogos.*playlistUrl.*epgUrl.*sourceKey') alone:$(log_since 'logo setting written alone.*\(save-failed\)') signalled:$(log_since 'sourcesPersistFailed .*state_write_failed') file:$([[ $(sha "$STATE") == "$sha0" ]] && echo untouched || echo written)" \
+  ck "L2 one entry write, patched alone: the write's key list keeps playlistUrl (set: the only copy) and sourceKey beside showLogos, logged as written alone (save-failed), no new signal, state.json untouched" \
+     "writes:$(log_since 'updateEntryInline') keys:$(tail -n +"$((LOG_MARK + 1))" "$LOG" 2>/dev/null | grep -a 'updateEntryInline' | grep -aE 'keys: ([^ ]*,)?playlistUrl(,| )' | grep -aE 'keys: ([^ ]*,)?sourceKey(,| )' | grep -aE 'keys: ([^ ]*,)?showLogos(,| )' | grep -ac 'playlist (set)') alone:$(log_since 'logo setting written alone.*\(save-failed\)') signalled:$(log_since 'sourcesPersistFailed .*state_write_failed') file:$([[ $(sha "$STATE") == "$sha0" ]] && echo untouched || echo written)" \
      "writes:1 keys:1 alone:1 signalled:0 file:untouched"
   ipc close >/dev/null
   # The next start, over the entry EXACTLY as the host stored it after L:
