@@ -314,7 +314,25 @@ settles because the own-write record is not reassigned when it is equal
 both hosts. A write the host answers `false` to costs one comparison on
 the host and re-triggers nothing (lane A, lane-key-y1: key-scenario K's 5 s
 windows read 0 entry writes and 0 CPU ticks on both host shapes, and Y1-Y3
-read the re-set taken each time).] What is NOT yet true
+read the re-set taken each time).] [Round 10 (R20c, 2026-10-12): the same
+lesson for what a patch-only write CARRIES. R16's logo write while a state
+write is outstanding kept every retired key the host PUBLISHES, and on
+THIS host the publish is one write behind, so it carried back a URL the
+plugin had just stripped -- a refused credential included, which then
+stayed in `shell.json` for the session (D-SINK-20, re-graded P2 by the
+ninth review). What the host publishes is evidence of what the host had a
+write ago, not of whether the value is stored anywhere else, and neither is
+whether an own-write override is in force -- the narrowing that strips the
+only copy of an input whose state write failed. The decision now consults
+the plugin's own disk instead: `Model.patchInputsToKeep` keeps a retired
+key only when it is a valid input the state the last LANDED save
+serialised does not hold. Under the echoing host the publish is current
+and the answer is the same, so the code still does not need to know which
+host it meets. And the funnel's decisions are now driven in node through
+`Service.qml`'s own functions (`tests/service-harness.js`) under both host
+shapes: two consecutive in-app toggles on this host each take, which a skip
+keyed on the stale publish broke without any check noticing in round 9
+(lane A, lane-key-z1; key-scenario Y4 live).] What is NOT yet true
 [amended 2026-10-12, round 7]: `scripts/dev-harness/shell.qml` modelled the
 one-write-behind host only until round 7; it now has an echo lever --
 `run.sh --host echo` makes `syncPluginApis` publish `shellConfig.bar` at

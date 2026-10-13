@@ -251,7 +251,22 @@ serializes exactly as before. They are taught to `Model.parseState` and
 `Model.epgSetAtOf`) and NOT to the helper's `normalize_state` /
 `normalize_source`, so any helper write of the file erases them -- the first
 state keys added to fewer than all three whitelists, recorded as open in
-`ARCHITECTURE-SOURCES.md` 2.1 rather than called fixed.
+`ARCHITECTURE-SOURCES.md` 2.1 rather than called fixed. [Round 10: that
+was D-SRC-20, a P1 on the chain -- a hand-run `state favorite add` and a
+restart left a CLI guide URL nowhere -- and it is closed.] Amended
+2026-10-12 (D-SINK-19 round 10, R20a/R20b; lane-key-z1): the helper's
+`normalize_state` and `normalize_source` now carry `pendingEpg` and
+`epgSetAt`, validated and never invented, on ONE shared fixture
+(`tests/fixtures/state-keys.json`) both suites run; and a node check holds
+every key the service can serialise, top level and per record, to that
+fixture's vocabulary, so a key added to one reader and not the other is a
+red gate on the day it is added. Version 2 also carries `entryInputs`, a
+DIGEST per bar-entry input of the value the service last consumed (never
+the value), with when and whether an owned write has since stripped it --
+so a restart no longer reads every value still on the entry as new --
+additive and absent when empty, and taught to all three whitelists on the
+day it was added. The helper's `state` verbs print the held guide URL as
+its host only.
 
 ### mpv status (helper `status` stdout, M1 target)
 
@@ -775,7 +790,11 @@ this plugin put into a container it does not own? Swept over the tree at
   true of the heal branch, and of the patch branch only as "nothing the
   host did not publish": on the host that publishes one write behind, a
   patch right after a heal puts back, for one write, a URL the heal had
-  just stripped (D-SINK-20, below; `ARCHITECTURE-SOURCES.md` 4.3).
+  just stripped (D-SINK-20, below; `ARCHITECTURE-SOURCES.md` 4.3) [round
+  10, R20c: no longer -- the patch keeps a retired key only when it is a
+  valid input the plugin's last LANDED state does not hold, and strips a
+  value that state holds and a refused value already reported, so it puts
+  back nothing the plugin's own file already has or refused].
 - **Every helper write.** Each is the existing `O_EXCL` temp + 0600 +
   `os.replace` into a directory the helper creates 0700 through
   `ensure_private_dir`, so no other borrowed container takes a URL. Cleared.
@@ -1258,8 +1277,44 @@ edit route) and H (D-SRC-18 at the sink) live under cage, 86 / 0 forward
 and 74 / 12 on `--baseline lane-key-y0`; the lens's length-2 matrix 0 on
 both hosts where lane-key-y0 reads 24 and 16. Open: the helper's state
 whitelists are not taught `pendingEpg` or `epgSetAt`, so a helper write of
-the file erases them. Detail in `ARCHITECTURE-SOURCES.md` 2.1, 3.5, 4.3 and
-its round-9 rulings.
+the file erases them [D-SRC-20; closed in round 10]. Detail in
+`ARCHITECTURE-SOURCES.md` 2.1, 3.5, 4.3 and its round-9 rulings.
+
+**Round 10 (2026-10-12, lead ruling R20; lane-key-z1, lane A, after the
+ninth review's two lenses over lane-key-y2).** D-SRC-20 (P1): the helper's
+state writer dropped the held guide URL and every set time, and a restart
+then left the user's CLI `epgUrl` nowhere (live under cage). D-SINK-20,
+re-graded P2: on the lagging host the patch-only logo write re-carried a
+refused credential that no record holds, it stayed in `shell.json` for the
+session, and at the next start the re-carried value, seen as new, replaced a
+later in-app edit that had landed (live). D-SRC-19 (P3, shipped): the
+service never reloads a helper `state` write. F-PERF-2 (P3): the cold first
+open over 150 ms with `dev` unmeasured. R20a: the helper keeps what the
+service writes, on one shared fixture, with a check over every key the
+service can serialise. R20b: what the service has consumed from the entry is
+persisted (`entryInputs`, digests), so a value the state proves consumed is
+not adopted again at a start, and an input equal to the held guide URL is
+judged at a start with the time it was first seen; this settles D-SRC-18's
+last window (the shell dying between the edit's save and the owed mirror)
+and D-SINK-20's restart half. R20c: the patch-only write strips what the
+last LANDED state holds and what was refused and reported, and keeps only a
+valid input that state does not hold -- deciding from the plugin's disk,
+where the narrowing D-SINK-20's record warned against decided from the
+host and stripped the only copy. R20d: `tests/service-harness.js` runs
+`Service.qml`'s own functions in node, and drives the funnel's decisions
+(two consecutive toggles, the add stamped at submit); key-scenario Y4 is
+the live double toggle. R20e: a `Model.` citation must name something
+`Model.mjs` exports. R20f: floors level (node 2319, python 1143). R20g:
+`dev` measured interleaved with the chain -- cold medians 165 and 169 ms,
+warm 92 and 92, over 11 runs each at load 1.8-4.5 -- so the chain moves
+neither and the cold reading is not the chain's. Observed on lane-key-z1
+(lane A): node 2,319 / 0, and 2,319 / 23 with the same test files over
+lane-key-y2's code (re-run by the documents lane); key-scenario 87 / 0
+forward with 86 lettered checks; the round-9 lens's own drivers under cage
+red on lane-key-y2 and clean on lane-key-z1 for D-SRC-20, D-SRC-18 and
+D-SINK-20. No shipped live scenario goes red on lane-key-y2 for those
+three; their gate-borne observers are the node and python tests. Detail in
+`ARCHITECTURE-SOURCES.md` 2.1, 3.5, 4.3 and its round-10 rulings.
 
 **What REMAINS, with its size rather than a claim of zero.** The exposure is
 NOT closed. Three things remain, and the first is the one to quote:
@@ -1271,7 +1326,11 @@ NOT closed. Three things remain, and the first is the one to quote:
    list -- hashes the candidate and compares. That is much less than handing
    over the credential and it is not nothing, and it is the reason the shield
    is kept rather than retired (SR40; `Model.entryShieldDecision` states the
-   trade in code).
+   trade in code). [Round 10: `state.json`, 0600, now also holds a 64-bit
+   DIGEST of each bar-entry input the service consumed (`entryInputs`,
+   R20b), a refused one included -- a confirmation oracle of the same
+   kind for that value, in the plugin's own private file rather than in
+   `shell.json`, and never a way back to it.]
 2. *The input path.* `omarchy bar set ... playlistUrl` is still supported and
    is still a write of a credential into that file, made by the host on the
    user's instruction, at a moment the plugin cannot gate. The plugin removes
@@ -1307,7 +1366,13 @@ NOT closed. Three things remain, and the first is the one to quote:
    round-8 build skipped that strip on the lagging host after a publish
    A -> B -> A and left a re-set credential in `shell.json` until the next
    start (R19a). Measured by lane A's key-scenario U, K, Y and H, under a
-   nested cage.]
+   nested cage.] [Round 10: and once stripped it stays stripped. On the
+   lagging host the patch-only logo write put a stripped URL -- a refused
+   credential included -- back for the rest of the session (D-SINK-20,
+   re-graded P2); R20c strips what the last landed state holds and what was
+   refused and reported. Observed by the round-9 lens's own driver under
+   lane A's cage: `stored epgUrl=no` after the toggle on lane-key-z1, `yes`
+   for the session on lane-key-y2.]
 3. *Installs upgrading into this release.* Their `shell.json` holds a URL
    until the first owned write on the new version, which the migration itself
    issues on the first reconcile (a URL on the entry makes `writeEntry` true).
@@ -1342,7 +1407,13 @@ obvious narrowing -- keep the retired keys only while no own-write override
 is in force -- strips the only copy of an input whose state write failed,
 the round-4 P1 back through the same writer, and is not the fix; the
 correct one needs to know whether the last LANDED state text holds a record
-for the published URL.
+for the published URL. [Round 10: re-graded P2 by the round-9 data-loss
+lens -- both bounds above failed live: a refused credential no record
+holds was re-carried, and no owned write followed, so it stayed for the
+session and replaced a later edit at the next start. R20c is that correct
+narrowing, deciding from the state the last landed save serialised, and
+R20b closes the restart half. D-SINK-20 is closed as filed, the board's
+state the lead's; `ARCHITECTURE-SOURCES.md` round-10 rulings.]
 
 **The costs, accepted by the product owner on 2026-10-09 before the work was
 briefed, restated after the review as what the code does.** (1) `omarchy bar

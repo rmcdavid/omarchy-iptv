@@ -910,7 +910,8 @@ lane's running harness is never reaped by a clip run.
 ```
 scripts/dev-harness/key-scenario.sh check-tree            # the instrument arm, node only; run by check.sh
 scripts/dev-harness/key-scenario.sh                       # the instrument arm, then the real Service.qml under cage, with a transcript
-scripts/dev-harness/key-scenario.sh --baseline lane-key-y0  # the round-9 red run: round 8's code (74 / 12: U1, U2, U5, K1-K3, Y1-Y3, Q1, V1, H1)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-y2  # round 10's baseline is NOT a red run: round 9's code reads 87 / 0, because no segment observes R20a-R20c at the sink (Y4 reds only the S1b export)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-y0  # the round-9 red run: round 8's code (74 / 12 before Y4 existed: U1, U2, U5, K1-K3, Y1-Y3, Q1, V1, H1)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-w2  # the round-8 red run: round 7's code (73 / 6 before Y, Q, V, H existed: K1, K3, Z1, Z2, Z3, A2)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-v2  # the round-7 red run: round 6's code (66 / 5 before K, Z, A existed: U2, U3, U4, U6, U7)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-t2  # the round-5 red run: round 4's code (60 / 4 before U existed: L1, L2, F6, F7)
@@ -1195,6 +1196,42 @@ documents of round 9 (lane-key-y2) re-read each count above from lane A's
 transcripts: `-181012` 86 PASS / 0 FAIL, `-181343` 74 / 12 with exactly the
 twelve letters named, `-182219` 80 / 6 (D2, D3, W2, W3, W4, W6) and
 `-182602` 81 / 5 (D3 green).
+
+**Round 10 (2026-10-12, R20; Y4 added, 85 -> 86; L2 re-wanted).** The
+ninth review's data-loss lens found a one-decision mutant of R19a, S1b (a
+write skipped when its patch equals the lagging host's publish, one line
+before the compose), green in node (2,268 / 0) and live (86 / 0) while the
+second of two consecutive in-app logo toggles was ignored; Y1 re-sets
+`showLogos` from the CLI between its two toggles and so never toggles twice
+in a row. Y4 does: ON (the guide's own `g` then `confirm`), then OFF with
+nothing between, and reads the stored entry's `showLogos` through a new
+`ipc hostEntry` field, `storedShowLogos` (`HarnessLib.storedOwnedValue`,
+which `qa-lib-test.sh` drives rather than greps). L2's want moved: R20c
+makes the patch-only logo write keep only a valid input the last landed
+state does not hold, and the harness seed's EMPTY `epgUrl` is no input, so
+L2 now asks for `playlistUrl` (the only copy) and `sourceKey` beside
+`showLogos`, read from the write's `keys:` list and its `playlist (set)`
+mark, and no longer for `epgUrl`. Counts from lane A's transcripts on
+lane-key-z1, under the scenario's own nested cage (harness directories
+`/run/user/1000/omarchy-iptv-za-<n>`, removed after), re-read by the
+documents lane: the first forward run, on 92395c4 under the old L2 want,
+**86 passed, 1 failed** -- L2 `keys:0` with every other L and F check
+green (`key-20261012-210503-3375256`); forward on 0d407e5, the tip's code,
+**87 passed, 0 failed** (`-211001-3410753`, 232.2 s; Y4
+`on1:true/1 off2:false/2 stored:false`); `--baseline lane-key-y2` **87 /
+0** (`-211409-3439299`) -- round 10's repairs have no red segment here, and
+were observed at the sink only by the round-9 lens's own driver
+(`r9-child.sh`, in the session scratch) under lane A's cage; the S1b export
+through `--tree` **86 / 1**, Y4 `got [on1:false/0 off2:false/0
+stored:false]` (`-211919-3462671`). `sources-scenario.sh` **66 / 0**,
+`logo-scenario.sh live` **33 / 0** and `tls-scenario.sh` **48 / 0** (in a
+cage rendered with `WLR_RENDERER=gles2`, which mpv needs there; a pixman
+cage asserts in `vo_x11_init`, measured in round 9). `qa-lib-test.sh` goes
+454 -> 455: two wants move with the scenario and one new pin drives
+`storedOwnedValue`. The two key-mutation patches were not re-run through
+`--tree` this round, and the counts the scenario's header quotes for them
+(58 / 6 and 59 / 5) and its baseline narrative, which describes
+lane-key-y0's reds whatever `--baseline` names, predate rounds 8 to 10.
 
 **The weak already-stored check, fixed in round 4.** 'a switch the host
 already stores is not reported as a persist failure' means to make the

@@ -689,7 +689,11 @@ A guide URL set in this state is now held in the plugin's own `state.json`
 and taken off the bar entry once that write lands, so the caption is true
 after one write rather than only once a source is active; the value stays
 on the entry longer only when the state write fails (R13). No copy change
-is requested; `UX-SOURCES.md` 3.1.1 says the same.]
+is requested; `UX-SOURCES.md` 3.1.1 says the same.] [Round 10 (2026-10-12,
+R20c): and it stays true. On today's Omarchy a logo toggle while a save was
+outstanding could copy the held guide URL back onto the bar entry from the
+host's one-write-behind publish (D-SINK-20); the toggle now carries back
+nothing the plugin's own file already holds. No copy change.]
 
 ### 4.5 Loading (first fetch, no cache yet)
 

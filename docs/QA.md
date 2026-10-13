@@ -586,7 +586,39 @@ is key-scenario segments Y (A -> B -> A), Q (the probe race), V (the edit
 route) and H (D-SRC-18 at the sink), with U, K and A re-read for the held
 guide URL: 86 / 0 forward on 85 lettered checks, 74 / 12 over `--baseline
 lane-key-y0` (U1, U2, U5, K1, K2, K3, Y1, Y2, Y3, Q1, V1, H1), lane A's
-transcripts under the scenario's own nested cage.
+transcripts under the scenario's own nested cage. Round 10 (lane-key-z1,
+2026-10-12; lead ruling R20 after the ninth review found the helper's own
+state writer erasing the held guide URL, D-SRC-20, the lagging host's
+patch-only logo write re-carrying a refused credential that then beat a
+later edit, D-SINK-20, and a funnel decision -- R19a's -- with no
+behavioural observer, a skip one line before the compose reading node 2268
+/ 0 and live 86 / 0) makes three joins checks. One fixture,
+`tests/fixtures/state-keys.json`, run by both the node suite and
+`tests/test_state.py`, and a node check that every key the service can
+serialise is in its vocabulary, which the helper is then tested to emit
+exactly (rule 12, and rule 15 as a check rather than a search). A harness,
+`tests/service-harness.js`, that compiles `Service.qml`'s own functions,
+bindings and FileView handlers and runs them against fakes, so the funnel's
+decisions are driven as they ship and not only mirrored by a regex-bound
+driver (rule 12 again, one level up: the mirror passed with the shipping
+path broken). And the defect ledger checks each `Model.` citation against
+what `Model.mjs` exports (rule 13), not merely that the name is declared in
+some part. 51 `ok   R20` lines; SRC-MIG-33 to SRC-MIG-36. Seen red: the same
+test files over lane-key-y2's code read `2319 checks, 23 failure(s)` and
+`test_state.py` 41 tests with 2 failures and 4 errors, all six new (re-run
+by lane C); lane A's one-decision mutants on the tip, R20a-R20c, 1 to 13
+node failures each, the helper's 1 to 4 python failures each, and the
+round-9 lens's S1b and S13 now 1 and 2 where they read 0; the ledger with
+its three waivers emptied, rc 1 with three problems on lane-key-z1 and rc
+0 on lane-key-z2, where the documents re-cite the three names bare. Counts
+on lane-key-z1: node 2319 / 0, python 1143, qml 78, `qa-lib-test.sh` 455 /
+0, and the floors level with them. The live half is key-scenario Y4 (two
+toggles in a row) and L2 re-wanted (the patched write keeps the only copy,
+not an empty retired key): 87 / 0 forward on 86 lettered checks, 86 / 1
+(Y4) over the S1b export, and 87 / 0 over `--baseline lane-key-y2`, because
+no key-scenario segment observes R20a, R20b or R20c at the sink; those were
+observed live only by the round-9 lens's own driver under lane A's cage,
+red on lane-key-y2 and clean on lane-key-z1.
 
 ## 3. Security test cases (ARCHITECTURE.md section 8, PLAN gate G4)
 

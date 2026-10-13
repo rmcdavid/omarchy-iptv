@@ -1420,7 +1420,32 @@ value is left on the bar entry (R13) and the shell's journal says
 guide URL in the edit form and that save lands, the older terminal value is
 taken off the entry once it has, so the next shell start does not put it
 back over the edit; before round 9 it did. Nothing on screen changes. Observed through
-the harness by key-scenario H1 (red on `--baseline lane-key-y0`).
+the harness by key-scenario H1 (red on `--baseline lane-key-y0`). [Round
+10, R20b: also when the shell stops in the instant between that save
+landing and the older value being taken off. The plugin's own file now
+records, as a fingerprint and never the URL, which values it has already
+read from the entry, so a value it has read is not read again as new at
+the next start; before round 10 it was, in that instant, and replaced the
+edit (D-SRC-18's last window). Nothing on screen changes. Observed in node
+through the service's own functions and by the round-9 lens's own driver
+under lane A's cage, not by a key-scenario segment.]
+
+**The logo toggle no longer puts a removed value back (round 10, R20c;
+D-SINK-20).** `g` behaves as it always has. Beneath the screen, on today's
+Omarchy (the host that publishes one write behind), the toggle's
+logo-only write while a save is outstanding used to copy back whatever the
+host still published, including a guide URL or a mistyped credential the
+plugin had just removed from `shell.json`; the credential then stayed there
+for the rest of the session, and a guide URL put back that way replaced a
+later edit at the next start. The write now carries back only a value the
+plugin's own file does not yet hold -- the one copy of an input whose save
+failed, which the round-4 review showed must never be dropped -- and
+nothing it has already stored or refused. Nothing on screen changes; the
+footer's `Logos on` / `Logos off` is the same. Observed in node and by the
+round-9 lens's driver under lane A's cage (`stored epgUrl=no` after the
+toggle on lane-key-z1, `yes` for the session on lane-key-y2); key-scenario
+Y4 observes the toggle itself twice in a row, and L1/L2 that the only copy
+is kept.
 
 ### 5.6 Default label and duplicates (S4, S5)
 

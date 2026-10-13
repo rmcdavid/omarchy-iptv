@@ -127,7 +127,7 @@ obvious when it happens to you:
   when it arrives and again at every shell start — including a value you set
   while the shell was not running (that case is exercised on every commit's
   test tree, and the whole scenario — `key-scenario.sh live` in the
-  development harness on the `dev` branch, 85 checks — passed under a
+  development harness on the `dev` branch, 86 checks — passed under a
   headless compositor on 2026-10-12; a build of this change that never
   shipped lost it, which is why it is tested). The value is removed from the entry only
   after the plugin's own file has been written and the write has been
@@ -141,7 +141,9 @@ obvious when it happens to you:
   does not take it away either: while a save is outstanding, and in the
   first moments after the shell starts, before the plugin has read its own
   file, that write changes the logo setting alone, which two builds that
-  never shipped got wrong), the source you set or switched to stays in
+  never shipped got wrong; and it never puts back a value the plugin has
+  already stored or refused, which later builds that never shipped did on
+  today's Omarchy, with a mistyped credential, for the rest of the session), the source you set or switched to stays in
   effect for this session only, the shell's journal says `state.json could
   not be written`, and the next shell start reads the entry again. A guide
   URL (`epgUrl`) set while no source is active -- before your first playlist,
@@ -164,7 +166,10 @@ obvious when it happens to you:
   playlist is. If the write that would keep it fails, it is left on the
   entry, as a playlist is, and the first later write of `state.json` that
   does land takes it off -- so a guide URL you change in the app after that
-  failure is not replaced by the older value at the next start. Builds of
+  failure is not replaced by the older value at the next start, even if the
+  shell stops before it is taken off: the plugin's own file records which
+  values it has already read from the entry (as a fingerprint, never the
+  URL), and a value it has already read is not read again as new. Builds of
   this change that never shipped kept the waiting value on the entry for as
   long as no source was active, let the add form's guide URL win whatever
   the order, let an older waiting value replace a guide URL just changed in
@@ -565,7 +570,9 @@ rewrites its entry in the shell's settings file with the source's short code in
 place of the URL. Set it and read the file back and your URL is not there —
 Settings above says what that costs. The value is read when it arrives and at
 every shell start; the same value left sitting on the entry is not read a
-second time, and setting it again after removing that source is read as new
+second time, across a shell restart too (`state.json` keeps a fingerprint
+of each value the plugin has read, never the value), and setting it again
+after removing that source is read as new
 (an earlier draft of this paragraph said that case waited for the next shell
 start; walked through the shipping code, it does not). `epgUrl` is treated the
 same way and is attached to whichever source is active; set while no source
