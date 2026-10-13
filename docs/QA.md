@@ -95,7 +95,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 
 | ID | Verifies | How | Expected |
 |---|---|---|---|
-| TC-CFG-01 | `omarchy bar set ... playlistUrl <url>` fetches without restart | M 5.3, 5.4 US1 | helper runs within ~1 s (journal shows one run, 300 ms debounce); bar tooltip `IPTV - click to open the guide`; guide footer `1,475 channels - updated HH:MM` (count from the live list, thousands separator) **[Amended 2026-10-11, D-SINK-19: and afterwards `jq` of the entry in shell.json shows `sourceKey` = the record's key and NO `playlistUrl`; `state.json` `activeKey` = that key; the file is 0600. The same holds when the value was set while the shell was down (SRC-MIG-14 in QA-SOURCES.md, observed live under cage on lane-key-s2: key-scenario C1-C5); at the first build it was discarded and erased instead, and on the round-2 tree it was lost to the start-up reload (D-SRC-15).]** |
+| TC-CFG-01 | `omarchy bar set ... playlistUrl <url>` fetches without restart | M 5.3, 5.4 US1 | helper runs within ~1 s (journal shows one run, 300 ms debounce); bar tooltip `IPTV - click to open the guide`; guide footer `1,475 channels - updated HH:MM` (count from the live list, thousands separator) **[Amended 2026-10-11, D-SINK-19: and afterwards `jq` of the entry in shell.json shows `sourceKey` = the record's key and NO `playlistUrl`; `state.json` `activeKey` = that key; the file is 0600. The same holds when the value was set while the shell was down (SRC-MIG-14 in QA-SOURCES.md, observed live under cage on lane-key-s2: key-scenario C1-C5); at the first build it was discarded and erased instead, and on the round-2 tree it was lost to the start-up reload (D-SRC-15).]** **[OVERTURNED 2026-10-13, D-SINK-19 round 11 (R21; the owner dropped the route): after the migration `omarchy bar set ... playlistUrl` is refused, so this row is now "adding a source in the guide fetches without restart": first-run form or Sources `a`, paste the URL, `Enter`; the same expectations, and the entry carries `sourceKey` and no URL. The command itself is TC-CFG-14; a URL an older version kept on the entry is TC-CFG-15.]** |
 | TC-CFG-02 | HTTP 404 with no cache | M 5.4 US1 step 4 | empty state `Playlist failed to load` / `HTTP 404 Not Found from iptv-org.github.io - check playlistUrl`; hint `r reload - Esc close`; bar glyph U+F0503, tooltip `IPTV - playlist error, open the guide`; notification `Playlist error` / `Could not fetch the playlist (HTTP 404 Not Found). Open the guide for details.` |
 | TC-CFG-03 | unresolvable host | M 5.4 US1 step 5 | reason `Could not resolve host` |
 | TC-CFG-04 | unsupported source scheme | A `python3 -m unittest discover -s tests` (`tests/test_helper.py::test_refuses_unsupported_scheme`); M optional | code `unsupported_scheme`, guide renders the message |
@@ -108,6 +108,8 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 | TC-CFG-11 | `maxRecents` 3 | M 5.4 US5 step 5 | Recent shows the 3 newest |
 | TC-CFG-12 | settings change while the guide is open | M 5.4 US1 step 6 | guide re-renders without restart |
 | TC-CFG-13 | credentials never rendered (R12) | see SEC-07 | no URL beyond scheme+host in guide, tooltip, notification, journal |
+| TC-CFG-14 | `omarchy bar set ... playlistUrl` / `epgUrl` after the migration is REFUSED (D-SINK-19 R21b, 2026-10-13) | A node `R21e (lag host)` / `(echo host) after the marker, a CLI ...`; H key-scenario X1-X6; M 5.4 US1 step 8 | nothing added, the active source and its guide URL unchanged, one notification `Bar setting ignored` / `<setting> is no longer read from the bar settings and was removed. Add or switch sources in the guide's Sources screen.` (replace id 74016; the same sentence once on the console); `jq` of the entry shows no `playlistUrl`/`epgUrl` after the plugin's next write; the same value set again is not reported again; `grep -c '://'` over the journal and the notification text 0 |
+| TC-CFG-15 | a 0.13.x command-line configuration is moved into Sources once (D-SINK-19 R21a, 2026-10-13) | A node `R21e (lag host)` / `(echo host) migration, ...` (one source, two, CLI-only, no-source `epgUrl`, failed write, TERM, downgrade); H key-scenario G1-G5, F, H; M 5.4 US1 step 7 | first start over an entry carrying `playlistUrl` (and `epgUrl`): that playlist is a source and active, the guide URL on it, `state.json` carries `"entryMigrated": true` and `activeKey`, and the entry carries `sourceKey` and no URL once that write has landed; nothing is reported. A guide URL with no source to attach it to: one `Bar setting removed` notification, nothing kept. State directory unwritable at that start: the URL stays on the entry, the next start migrates again |
 
 #### Browse (US2, R1, R3, R4, R5, R6, UX 2.x, 3.1, 3.2)
 
@@ -227,7 +229,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 
 | ID | Verifies | How | Expected |
 |---|---|---|---|
-| TC-UI-01 | not configured (UX 4.4, 6.3) | M 5.4 US1 step 1 | `No playlist configured`; `Set your M3U URL or path, then press r to load it:`; command box `omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>`; `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>  (converted; not kept in shell.json)`; `Both are inputs: the URL moves to ~/.local/state/omarchy-iptv/state.json; other settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)`; column hidden; hint `r reload - Esc close`; glyph U+F0502; click on the box copies (`wl-paste`) and footer `Copied` **[Amended 2026-10-12, D-SINK-19 round 3: the EPG line and the "where" line are the strings `Guide.qml` ships on lane-key-s1 (`unconfiguredEpg`, `unconfiguredWhere`; two spaces before the parenthesis, as shipped), ruled by the lead to the exact text the review's truth lens gave. Until that round they read `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>` and `Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)`, presenting the URL keys as stored settings. The command box is unchanged because a click COPIES it. Both Texts wrap (`wrapMode: Text.WordWrap` over `parent.width`); how the longer lines wrap at the shipped width is UNVERIFIED on a display.]** |
+| TC-UI-01 | not configured (UX 4.4, 6.3) | M 5.4 US1 step 1 | `No playlist configured`; `Set your M3U URL or path, then press r to load it:`; command box `omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>`; `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>  (converted; not kept in shell.json)`; `Both are inputs: the URL moves to ~/.local/state/omarchy-iptv/state.json; other settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)`; column hidden; hint `r reload - Esc close`; glyph U+F0502; click on the box copies (`wl-paste`) and footer `Copied` **[Amended 2026-10-12, D-SINK-19 round 3: the EPG line and the "where" line are the strings `Guide.qml` ships on lane-key-s1 (`unconfiguredEpg`, `unconfiguredWhere`; two spaces before the parenthesis, as shipped), ruled by the lead to the exact text the review's truth lens gave. Until that round they read `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>` and `Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)`, presenting the URL keys as stored settings. The command box is unchanged because a click COPIES it. Both Texts wrap (`wrapMode: Text.WordWrap` over `parent.width`); how the longer lines wrap at the shipped width is UNVERIFIED on a display.]** **[Amended 2026-10-13, D-SINK-19 round 11 (R21): the command box, its click-to-copy, the `Copied` transient and the `Optional EPG` line are DELETED (a URL set that way is refused after the migration). Expected now: `No playlist configured`; `Add your M3U URL or path in Sources, with its EPG URL if you have one`; `Sources and their URLs are kept in ~/.local/state/omarchy-iptv/state.json; other settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)`; column hidden; glyph U+F0502; nothing to click. UX.md 4.4.]** |
 | TC-UI-02 | loading, no cache (UX 4.5) | M 5.4 US1 step 2 | glyph U+F01D8, `Loading playlist...`, `Fetching from iptv-org.github.io` (host only), hint `Esc close`; never shown when a cache exists |
 | TC-UI-03 | error with cache (banner, UX 4.6) and without cache | M 5.4 US7 step 3, US1 step 4 | banner spec (height `Style.space(28)`, urgent tint, glyph U+F0026, 140 ms fade); empty error state with glyph U+F0503 |
 | TC-UI-04 | now-playing cues (UX 4.7) | M 5.4 US3 step 4 | bold name + U+F040A + footer, column unchanged |
@@ -524,7 +526,7 @@ any heal write, invisible to every earlier matrix because their oracle
 checked playlist inputs only) adds the fixture section `retiredKeep` (20
 cases, the lead's whole cube of playlist and EPG x held and unheld x an
 active record or none, run through `Model.retiredInputsToKeep`), unit pins
-for `Model.entryWith` with `keep` and for `Model.adoptPendingEpg`, six
+for `Model.entryWith` with `keep` and for `adoptPendingEpg`, six
 service-order driver cases under each host shape (`R17 (lag host)` / `R17
 (echo host)`: E1 no active source, the toggle, then a switch; E2 remove the
 active source, a CLI `epgUrl`, the toggle; E3 a switch alone; E4 the in-app
@@ -554,7 +556,7 @@ the one normaliser (`Model.entryInputForm`, a 34-case agreement property
 between reconcile's "fresh" and the sink's "consumed", and the
 control-character sibling its search found), for the settling funnel
 (`Model.entryWriteNeeded`, `Model.sameOwnWrite`) and for the add form's
-guide URL winning (`Model.adoptPendingEpg` with `formEpg`); the `retiredKeep`
+guide URL winning (`adoptPendingEpg` with `formEpg`); the `retiredKeep`
 fixture grows 20 -> 28 (whitespace beside a non-empty snapshot); the
 service-order driver gains refused and whitespace-wrapped cases under
 three wrappings and both host shapes, runs every sequence to quiescence
@@ -580,9 +582,9 @@ superseding a CLI `epgUrl` set after the add form was submitted -- neither
 visible to any check, because no check re-set an identical value and the
 oracle's supersede exemption compared the time of the supersede, not of
 the inputs) adds unit pins for the guide URL held in the state
-(`Model.pendingEpgOf`, `Model.parseState` and `Model.cloneState` carrying
-it), for the one by-time comparison (`Model.epgByTime`,
-`Model.applyPendingEpg`, the add and edit stamps), for the guide URL in
+(`pendingEpgOf`, `Model.parseState` and `Model.cloneState` carrying
+it), for the one by-time comparison (`epgByTime`,
+`applyPendingEpg`, the add and edit stamps), for the guide URL in
 force (`Model.activeEpgUrlOf`, the a12 read lifted out of `Service.qml`
 under rule 12) and for the owed mirror (`Model.owedMirrorAction`,
 D-SRC-18); service-order driver cases under both host shapes for A -> B ->
@@ -634,7 +636,55 @@ not an empty retired key): 87 / 0 forward on 86 lettered checks, 86 / 1
 (Y4) over the S1b export, and 87 / 0 over `--baseline lane-key-y2`, because
 no key-scenario segment observes R20a, R20b or R20c at the sink; those were
 observed live only by the round-9 lens's own driver under lane A's cage,
-red on lane-key-y2 and clean on lane-key-z1.
+red on lane-key-y2 and clean on lane-key-z1. Round 11 (lane-key-m1, 2026-10-13; the product owner's decision to drop
+the `omarchy bar set` URL route, and lead ruling R21, which OVERTURNS R12,
+R17b, R18d, R19b, R19c, R20b and R20c) DELETES rather than adds: the
+pending guide URL, the set times, the active-move adoption, the add-form
+supersede, the persisted consumed-input snapshot and the landed-state patch
+rule, with seventeen model exports, their fixture sections and cases, the
+regex-mirrored service-order driver and every R12/R17b/R18d/R19b/R19c/R20b/
+R20c pin above -- those sentences are the record, and the names in them that
+are no longer exports are cited without the prefix. In their place, 93
+`ok   R21` lines, each calling the shipping code: the migration marker
+(`Model.entryMigratedOf`, `Model.withEntryMigrated`, carried by every
+reducer and by the helper on the shared fixture), the two-phase keep
+(`Model.retiredInputsToKeep` over the landed marker, the rewritten
+`retiredKeep` section), the session record and the notice
+(`Model.entryInputsSeenAfter`, `Model.entryInputNotice`, the notification's
+own replace id), and R21e through `tests/service-harness.js` under both
+host shapes -- the migration on a 0.13.5-shaped install (one source, two,
+a CLI-only config with no state file, an `epgUrl` with no source, a failed
+write then a restart, a second URL inside the window, a TERM before the
+landing, the downgrade to 0.13.6 and back), every post-marker CLI value
+(valid known, valid unknown, refused, whitespace-wrapped; mid-session,
+while the shell was down, twice) refused, reported once and off the stored
+entry within one owned write, and the round-3-to-10 data-loss sequences
+reinterpreted (a post-migration CLI URL is a REFUSED input, counted apart,
+never a loss); plus a data-loss matrix at 2 operations over 11 (3 with
+`IPTV_MATRIX_LEN=3`, 2,662 runs). Python: 3 new `test_state.py` tests and
+the shared fixture's eight `entryMigrated` cases; `test_defect_ledger.py`
+one, for the printed withdrawn-symbol waiver. Seen red by lane A (one
+decision each, on a copy of the tip, of 2,261 node checks): always
+migrating 64, keep after the marker 86, `entryInputSeen` never true 49, no
+marker 30, the marker read off memory 2, no strip 31, no notification 48,
+the keep off memory's marker 3, `cloneState` dropping the marker 6, a
+truthy marker 5, the input fallback restored 1, a no-source guide URL not
+reported 4, any name through the notice 1, the strip writing memory's key 1,
+membership instead of the last value 3, no report loop 61; the helper
+dropping the marker 3 python failures, reading it truthily 1, stamping a
+set time 1; the harness section 81 of 94 red with the same test files over
+lane-key-z2's code. Counts on lane-key-m1's tip 7d52e16: node 2,261 / 0
+(the floor lowered from 2,319 with the reason in `scripts/check.sh`), python
+1,153, `qa-lib-test.sh` 472, the key preflight 11, the text format guard 58
+(61 before: three deleted copy `Text`s). The live half is key-scenario G1-G5
+(the migration, the real v0.13.6 helper dropping the marker, the
+re-upgrade) and X1-X6 (the refusal at the sink, the notification sink
+included), with F and H driven through a migration whose write fails and U,
+K, Z, A, Y2, Y3, Q and V moved to the new contract: 98 / 0 forward on 97
+lettered checks, 68 / 30 over `--baseline lane-key-z2`; sources-scenario
+66 / 0; logo-scenario 33 / 0 (lane A's transcripts, nested headless cages
+on a private D-Bus with no service directories). TC-CFG-14 and TC-CFG-15
+are the manual rows.
 
 ## 3. Security test cases (ARCHITECTURE.md section 8, PLAN gate G4)
 
@@ -650,7 +700,7 @@ output is empty unless stated.
 | SEC-05 | 8.3 stream scheme allow-list | A* `qa-schemes.m3u` | allowed: http https rtsp udp rtp rtmp rtmps mms mmsh srt, uppercase scheme, padded line, option-looking suffix inside the line; dropped and counted: file, bare path, `~`, relative, ftp, plugin, javascript, data, `--script=`, `--`, edl, mf, av, lavf, fd, memory, ytdl, smb, dvd, null, protocol-relative; `http://` with no host must be dropped too (D-QA-07) |
 | SEC-06 | 8.2 no URL on any command line; option-looking lines never reach mpv | A `tests/test_player.py` argv tests against `tests/fixtures/player-argv.json`; M `ps -o args= -p $(pgrep -f wayland-app-id=omarchy-iptv)` | every mpv argv token after index 0 begins with `--`, there is no trailing `--` and no URL anywhere on the command line (observed PLY-SEC-01; the pre-M2-02 expectation of `--` then the URL is inverted by S-03; corrected 2026-09-25, D-QA-19) |
 | SEC-07 | 8.7, R12 URL redaction at every sink | A: enumerate sinks with `grep -nE 'console\.(log|warn|error|info)|notify\(|showTooltip|tooltipText|statusLine|lastError|stderr|stdout|emit\(|sys\.stderr' Service.qml Guide.qml BarWidget.qml bin/omarchy-iptv` and check each argument cannot carry a URL (current sinks: `Service.qml` `notify()` body from `mpvStderrTail` [D-QA-01], `lastError` -> `Guide.statusLine` and IPC `status` [D-QA-01, D-QA-15], `console.warn("omarchy-iptv playlist:", stderr)` (helper stderr carries host only, but local paths [D-QA-12]), `BarWidget.tooltip` (`error.message`), channel `name` [D-QA-02]); M 5.9: `grep -nE '(https?|rtsp|rtmp)://[^ ]*[@?]|password=|username=' journal.txt qs-log.txt` and the notification history (`omarchy-shell notifications showHistory`) after TC-PLAY-05 with a credentialed dead URL from `qa-attrs.m3u` (`http://user:secret@stream.example.test/...`) | no match anywhere |
-| SEC-08 | 8.4 local source path rules | A* `tests/test_helper.py`: `/proc/self/environ` -> `unsafe_path`, `/dev/zero` -> `too_large` (reads at most 64 MB + 1), `/sys/...` -> `unsafe_path`; M `omarchy bar set ... playlistUrl /proc/self/environ` | error rendered, no traceback, no hang |
+| SEC-08 | 8.4 local source path rules | A* `tests/test_helper.py`: `/proc/self/environ` -> `unsafe_path`, `/dev/zero` -> `too_large` (reads at most 64 MB + 1), `/sys/...` -> `unsafe_path`; M `omarchy bar set ... playlistUrl /proc/self/environ` | error rendered, no traceback, no hang **[Amended 2026-10-13, D-SINK-19 round 11: the manual half goes through the Sources form (`a`, `/proc/self/environ` in `Playlist`), which refuses it with the `unsafe_path` sentence; `omarchy bar set` is refused before any validation after the migration (TC-CFG-14).]** |
 | SEC-09 | 8.4 symlink to a forbidden path | A* `ln -s /proc/self/environ $tmp/list.m3u` -> `unsafe_path` (realpath check) | as stated |
 | SEC-10 | 8.4 `file:///etc/passwd` as the *source* | A `qa-schemes.m3u` covers the *stream* case; as a source it is the user's own readable file: parses to 0 channels -> `empty_playlist` | not a defect; document |
 | SEC-11 | 8.4 size caps | A* sparse 65 MB file -> `too_large` in well under a second (`truncate -s 65M`); gzip bomb: `python3 -c "import gzip,sys; sys.stdout.buffer.write(gzip.compress(b'#EXTM3U\n'+b'\0'*(100<<20)))" > bomb.m3u.gz` (about 100 KB) as playlist and as EPG source -> `too_large`, RSS stays under 300 MB (D-QA-06 until fixed) | as stated |
@@ -1132,6 +1182,21 @@ omarchy bar set io.github.rmcdavid.iptv playlistUrl https://iptv-org.github.io/i
 omarchy bar set io.github.rmcdavid.iptv epgUrl https://i.mjh.nz/PlutoTV/us.xml.gz
 ```
 
+**[Round 11, 2026-10-13 (D-SINK-19 R21; the owner dropped the `omarchy bar
+set` URL route): the two by-hand lines above are WITHDRAWN.** On this version a
+fresh install migrates (with nothing to migrate) at its first start, and a URL
+set with `omarchy bar set` afterwards is refused, reported and removed
+(TC-CFG-14). Configure in the guide instead: open it, and in the first-run form
+paste `https://iptv-org.github.io/iptv/countries/us.m3u` into `Playlist` and
+`https://i.mjh.nz/PlutoTV/us.xml.gz` into `EPG`, then `Enter`;
+`scripts/qa-live.sh configure` now prints exactly that step and runs no
+`omarchy bar set`. Throughout 5.4, every step that sets `playlistUrl` or
+`epgUrl` with `omarchy bar set` is done the same way: "set `playlistUrl` X" is
+an edit of the active source's `Playlist` with `e` in Sources (or `a` for a
+new source), and "set `epgUrl` X" an edit of its `EPG`. The settings
+`refreshMinutes`, `mpvArgs`, `showChannelName`, `barLabelMaxWidth` and
+`maxRecents` are still set with `omarchy bar set` as written.]**
+
 Then add, by hand, the README one-liners (they are user-side files; revert
 them in 5.10):
 
@@ -1198,6 +1263,22 @@ codepoints for `...`, quotes and the middle dot).
    -> reason `Could not resolve host` [TC-CFG-03].
 6. Restore the US list (5.3); confirm the guide, still open, recovers without
    restart [TC-CFG-12].
+   **[Round 11, 2026-10-13: steps 1, 2, 4 and 5 go through the guide (5.3's
+   round-11 note): step 1's body is TC-UI-01 as amended, with no command box
+   to click; steps 4 and 5 edit the active source's `Playlist` with `e`.
+   Steps 7 and 8 are new.]**
+7. Migration (TC-CFG-15), only on a machine upgrading from 0.13.6 or earlier
+   with a URL on the entry: before the first restart onto this version,
+   `jq '.bar.layout[][] | select(.id=="io.github.rmcdavid.iptv")'
+   ~/.config/omarchy/shell.json | grep -c '"playlistUrl"'` reads 1; after
+   `omarchy-restart-shell` and a few seconds, 0, with `sourceKey` present,
+   the source in Sources and active, `jq .entryMigrated
+   ~/.local/state/omarchy-iptv/state.json` `true`, and no notification.
+8. Refusal (TC-CFG-14): `omarchy bar set io.github.rmcdavid.iptv playlistUrl
+   https://iptv-org.github.io/iptv/countries/fr.m3u`: one notification `Bar
+   setting ignored`, the guide still on the US list, no `fr` row in Sources,
+   the `grep -c '"playlistUrl"'` above back to 0 within a second; the same
+   command again raises no second notification.
 
 #### US2 Browse (TC-BRW-*, TC-UI-08..10)
 
@@ -1362,7 +1443,8 @@ codepoints for `...`, quotes and the middle dot).
    (ids do not match by design); inside a group with no EPG the rows are
    single-line [TC-EPG-03].
 4. `omarchy bar set io.github.rmcdavid.iptv epgUrl https://i.mjh.nz/PlutoTV/nope.xml.gz`
-   then `r`: banner `Guide data unavailable (HTTP 404 Not Found) - channels
+   [round 11: edit the active source's `EPG` to that URL with `e` in Sources
+   instead; `omarchy bar set` is refused, TC-CFG-14] then `r`: banner `Guide data unavailable (HTTP 404 Not Found) - channels
    still work - r retry`, notification `Guide data error` / `Could not fetch the
    EPG (HTTP 404 Not Found). Channels still work.` low; playing still works
    [TC-EPG-04]. Restore the EPG URL.
@@ -1388,7 +1470,8 @@ codepoints for `...`, quotes and the middle dot).
 3. Offline simulation without touching the network settings: `cd
    /tmp/omarchy-iptv-qa && python3 -m http.server 8765 --bind 127.0.0.1` (serving
    `gen-10k.m3u`), `omarchy bar set io.github.rmcdavid.iptv playlistUrl
-   http://127.0.0.1:8765/gen-10k.m3u`, wait for the load, stop the server
+   http://127.0.0.1:8765/gen-10k.m3u` [round 11: add it in Sources with `a`
+   instead], wait for the load, stop the server
    (Ctrl+C), press `r`: banner `U+F0026 Playlist refresh failed (Connection
    refused) - showing cached copy from HH:MM - r retry`, footer `10,000 channels
    - cached HH:MM - offline`, notification `Playlist error` / `Could not fetch
