@@ -957,7 +957,8 @@ lane's running harness is never reaped by a clip run.
 ```
 scripts/dev-harness/key-scenario.sh check-tree            # the instrument arm, node only; run by check.sh
 scripts/dev-harness/key-scenario.sh                       # the instrument arm, then the real Service.qml under cage, with a transcript
-scripts/dev-harness/key-scenario.sh --baseline lane-key-z2  # the round-11 red run: round 10's code (68 / 30: G1, G2, G5, F4, U1-U7, K1-K3, Z1-Z3, A1, Y2, Y3, Q1, Q2, V1, H1, X1-X6)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-m2  # the round-12 red run: round 11's code (97 / 9: B1-B8, and N1 for its new field only)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-z2  # the round-11 red run: round 10's code (68 / 30 under the 97-check harness: G1, G2, G5, F4, U1-U7, K1-K3, Z1-Z3, A1, Y2, Y3, Q1, Q2, V1, H1, X1-X6; eight of them NOFIELD-only)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-y2  # round 10's baseline is NOT a red run: round 9's code reads 87 / 0, because no segment observes R20a-R20c at the sink (Y4 reds only the S1b export)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-y0  # the round-9 red run: round 8's code (74 / 12 before Y4 existed: U1, U2, U5, K1-K3, Y1-Y3, Q1, V1, H1)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-w2  # the round-8 red run: round 7's code (73 / 6 before Y, Q, V, H existed: K1, K3, Z1, Z2, Z3, A2)
@@ -1319,6 +1320,34 @@ reports `entryInputReports` (names and reasons, never a value). Measured on
 lane-key-m1: 98 / 0 forward (97 lettered checks and the floor line), 68 / 30
 on `--baseline lane-key-z2`; sources-scenario 66 / 0 and logo-scenario 33 / 0
 under a nested cage on the same tree.
+
+#### Round 12 (R22): a state that did not load is never written
+
+The round-11 data-loss lens found a migrated install whose `state.json`
+could not be read at the start losing every record to an empty state
+written over it, and the same through a state directory that cannot be
+entered (the cache layout's save, on 0.13.6 too). What Quickshell's
+FileView reports was measured first, one FileView per case in a nested
+headless cage: FileNotFound for a missing file AND for a file inside a
+0000 or 0600 directory, PermissionDenied for a 0000 file, NotAFile for a
+directory or FIFO at the path, `loaded` for an empty or garbage file -- so
+the helper's `state init` now reports what it FOUND before it repairs any
+mode, and only its `absent` makes a FileNotFound a fresh install.
+key-scenario.sh's B segment lifts the lens's `lf-child.sh`: B1-B4 the two
+repairable faults at a migrated start (the records survive, and a second
+start stands on them), B5-B7 a file that does not parse (the no-write mode:
+nothing written, the entry left exactly as it is, one notification, lifted
+by putting the file back), B8 the guide's fetch-failure hint as drawn
+(`state`'s new `emptyTitle` / `emptyProse` / `errorCheck`). N1 now asserts
+the init's verdict (`found:absent`) where it observed the adoption parked.
+`pointerState` adds `stateWriteBlocked`, `stateLoadKind`, `stateInitFound`
+and `stateWritesRefused` (reasons and counts). The node harness
+(tests/service-harness.js) delivers loads through stateFile's own handlers
+with the measured error numbers, models the init's reply and repairs as
+tests/test_state.py pins the real helper doing them, and RUNS the cache
+layout. Measured on lane-key-n1: 106 / 0 forward (105 lettered checks and
+the floor line), 97 / 9 on `--baseline lane-key-m2`; sources-scenario
+66 / 0 and logo-scenario 33 / 0 under a nested cage.
 
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 
