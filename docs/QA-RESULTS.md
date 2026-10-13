@@ -13157,6 +13157,39 @@ minute is the logo scenario's `--baseline 159da94` 9 / 24 (cb08eb1), and
 `qml` image probe, never the harness shell -- so it cannot carry this
 error. Every other count against those trees predates 51d686b.
 
+### D-SRC-19, D-SRC-20, F-PERF-2 and a re-grade of D-SINK-20: the D-SINK-19 round-9 reviews
+
+**Filed 2026-10-12.** Round 9 landed the D-SINK-19 chain on the split model
+(`lane-key-y0`, by the D-REL-5 recipe; both lenses verified the cut byte for
+byte and a throwaway merge onto `dev` was clean) and then ruled R19: a guide
+URL set while no source is active lives in `state.json` as `pendingEpg` with
+the time it was seen, and the latest explicit input wins by time. Both
+lenses held everything R19 aimed at -- round 8's routes all red on y0 and
+clean on y2, no loop at any length -- and found:
+
+- **D-SRC-20 (P1, the chain only).** `normalize_state` and
+  `normalize_source` in the helper are whitelists that know neither
+  `pendingEpg` nor `epgSetAt`, so a helper `state favorite add` erases the
+  only copy of the user's guide URL and every set time. Live under a nested
+  cage on `lane-key-y2`: the URL "EXISTS NOWHERE" after a restart; y0, which
+  kept it on the bar entry, keeps it.
+- **D-SRC-19 (P3, shipped).** The reason D-SRC-20 needs a restart: the
+  service's FileView never reloads after the helper's atomic rename (its
+  reload counter did not move), so memory hides the helper's write and the
+  next service save overwrites it. Reached only by hand-run helper verbs.
+- **D-SINK-20, re-graded P2.** Its record bounded the lagging-host re-carry
+  to URLs already held by a record and stripped by the next owned write. The
+  round-9 data-loss lens measured both bounds failing, live on y0 and y2: a
+  refused credential that no record holds is re-carried and stays in
+  `shell.json` for the session, because no owned write follows once the
+  failure clears, and at the next start it is seen as new and replaces a
+  later in-app guide URL edit that landed. Round 10 repairs it.
+- **F-PERF-2 (P3).** By PERF-02's method the cold first open read
+  158-162 ms on both chain trees under a nested cage, warm 87-90 ms. PERF-02
+  itself recorded about 80 ms cold and 20 ms of open work warm on a real
+  display. Nothing is concluded until `dev` is measured the same way,
+  interleaved with the chain.
+
 ### D-SRC-17 and D-SRC-18: two guide-URL findings from the D-SINK-19 round-8 reviews
 
 **Filed 2026-10-12; both on the D-SINK-19 repair branch only, never
