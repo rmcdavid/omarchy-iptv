@@ -77,6 +77,13 @@ file whose pointer names no record, and -- the case worth knowing about --
 by an OLDER build run over a migrated install, which looks for a URL on the
 entry and finds none; the `Saved sources (n)` link is the recovery in all
 three.]**
+**[Amended 2026-10-13, D-SINK-19 round 11 (R21, the owner's decision to drop
+the `omarchy bar set` URL route): after the one migration a URL set on the
+bar entry is refused, so no command-line value can reach or leave this
+surface; and the caption line with the terminal command in step 1 is GONE --
+`firstRunTerminal` and `copyCommand` are deleted from `Guide.qml` on
+lane-key-m1, and the form offers nothing to type anywhere else. 3.1.1 carries
+the shipped wireframe.]**
 
 1. The guide opens straight into `sourceEdit` with `origin: "firstRun"`.
    The empty-state column keeps its glyph and title (`No playlist
@@ -84,7 +91,8 @@ three.]**
    by the `Playlist` field (focused, caret visible, `PanelKeyCatcher`
    blocked), the `EPG` field, the link row `Use Xtream login instead`, a
    `Load` button, and one caption line with the terminal command (S5 parity;
-   clicking it still copies, as shipped).
+   clicking it still copies, as shipped). [Round 11, R21: the caption line is
+   deleted; the form ends at `Load`.]
 2. The user pastes (`Ctrl+V`, `Shift+Insert`, middle click) or types. Every
    arrival is sanitized (2.3): trimmed, newlines and control characters
    removed, capped at `LIMITS.url`. A pasted value that has a query string or
@@ -163,7 +171,9 @@ scope, query survive) unless the active source changed (1.4).
    and the footer shows `Refreshing...` through the shipped
    `service.refreshing` path; success is silent (timer-refresh rules, R12),
    failure shows the shipped banner.
-5. No cache yet (added by CLI, never fetched; or cache deleted): the switch
+5. No cache yet (added by CLI, never fetched; or cache deleted) [round 11:
+   "added by CLI" now means moved in by the migration of a 0.13.x install,
+   R21a]: the switch
    still commits and the shipped `Loading playlist... / Fetching from <host>`
    state shows. On failure the shipped error state appears; its footer hint
    gains `o sources` so the previous source is two keystrokes away.
@@ -237,6 +247,23 @@ red on `--baseline lane-key-y0`), Q2 (set before the submit, the field
 wins) and A1/A2 as re-read (lane A, lane-key-y1, two saved sources and none
 active); the duplicate branch and the add into an empty list are node only.
 
+**The `EPG` field is the source's guide URL, and nothing else meets it
+(round 11, 2026-10-13; D-SINK-19 R21, OVERTURNING R18d, R19b and R19c).**
+The two paragraphs above are the record of the route the product owner
+withdrew. After the one migration of a 0.13.x install no guide URL waits
+anywhere for a source to become active: a guide URL on the bar entry with no
+source to attach it to is reported and removed at the migration (R21c), and
+one set on the entry after it is refused (R21b). So the add form's `EPG`
+field, typed or filled in by an Xtream login, is simply the new record's
+guide URL; an empty field leaves the record without one; there is no
+supersede, no set time and no journal line about a pending value. A terminal
+`epgUrl` set while `Fetching` is on screen changes nothing on the record and
+shows one `Bar setting ignored` notification (5.9); the field's guide
+URL lands with the record and survives a restart (node `R21e (lag host)` /
+`(echo host) the add form's race ...`; key-scenario Q moved to the new
+contract on lane-key-m1). S5's duplicate branch cannot arise from a terminal
+value after the migration, because none is adopted.
+
 ### 1.6 Editing (S4, S6)
 
 `e` / `E` in `sources`, or the pencil action button on the cursor row ->
@@ -255,7 +282,9 @@ when none). No Xtream link row when editing.
 - Xtream-built sources are edited through this same form: the built URLs
   show masked; there is no password field any more (S6). To change
   credentials, reveal and edit the URL, or add a new Xtream login.
-- A changed `EPG` field and a guide URL held for the next source (round 9,
+- [Round 11, 2026-10-13: OVERTURNED by R21 -- nothing is held, no edit is
+  stamped, and the edit form's guide URL is the record's; key-scenario V moved
+  to the new contract. The bullet stands as the round-9 record.] A changed `EPG` field and a guide URL held for the next source (round 9,
   R19c). Saving an edit that CHANGES the guide URL stamps it with that
   moment; an edit that sends the same guide URL back (a label-only edit,
   or re-typing the same URL) stamps nothing. If a guide URL set from a
@@ -316,7 +345,9 @@ SUBMIT, and it wins over a held terminal value only when that value was set
 before the submit, exactly as a typed field does (1.5). The node pins are
 renamed `R18d / R19c (... host) OQ-W3, the Xtream add: the xmltv.php URL
 the form derived, submitted after the CLI value, ...`; still no live
-segment.]
+segment.] [Round 11, R21: OVERTURNED with R18d and R19c. The built
+`xmltv.php` URL is the record's guide URL and nothing competes with it; the
+round-8/9 node pins are deleted (R21d).]
 
 ### 1.9 Modes and transitions
 
@@ -608,6 +639,46 @@ one write, not only once a source is active. It is still on the entry for
 that one write's span, and for longer only when the state write fails
 (the value is then left on the entry as its only copy, R13). No copy
 change is requested.]
+
+**Amended 2026-10-13 (D-SINK-19 round 11, R21; the owner dropped the
+`omarchy bar set` URL route).** The terminal caption is DELETED, in this
+wireframe and the next: a URL set that way is refused once the migration has
+landed, so the form must not offer it. `firstRunTerminal`, the older empty
+state's command box (`unconfiguredCommand`), its `Optional EPG` line
+(`unconfiguredEpg`), `copyCommand` and the `Copied` transient are gone from
+`Guide.qml` on lane-key-m1, which closes the round-7 conflict above by
+removing the line it was about. The first run as shipped:
+
+```
++------------------------------------------------------------------------------------------------+
+|                                                                                                |
+|  Search channels...                                                                            |
+|                                                                                                |
+|                                                                                                |
+|                                             󰔂                                                  |
+|                                                                                                |
+|                                    No playlist configured                                      |
+|                                                                                                |
+|                     Paste or type your M3U URL or path, then press Enter                       |
+|                                                                                                |
+|            Playlist   [ |https://host/playlist.m3u or /path/to/list.m3u                 ]      |
+|            EPG        [ optional - XMLTV URL, .xml or .xml.gz                           ]      |
+|                                                                                                |
+|                       Use Xtream login instead                                 [ Load ]        |
+|                                                                                                |
+|                                 Enter load - Tab next field - Ctrl+V paste - Esc close         |
++------------------------------------------------------------------------------------------------+
+```
+
+The older empty state (UX.md 4.4) keeps its title and reads, as shipped,
+`Add your M3U URL or path in Sources, with its EPG URL if you have one`
+(`unconfiguredProse`) and `Sources and their URLs are kept in
+~/.local/state/omarchy-iptv/state.json; other settings live in
+~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)`
+(`unconfiguredWhere`). The text-format guard went from 61 blocks to 58 with
+the three deleted `Text`s. The rendered layout without the caption is
+UNVERIFIED on a display (this lane holds none); the strings are read off
+`Guide.qml`.
 
 #### 3.1.2 After paste (both URLs masked)
 
@@ -1203,7 +1274,7 @@ no "please".
 | Header, forms | `Add source`, `Edit source`, `Add Xtream login` |
 | First-run title (shipped) | `No playlist configured` |
 | First-run prose | `Paste or type your M3U URL or path, then press Enter` |
-| First-run terminal caption | `Or from a terminal:  omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>  (converted; not kept in shell.json)` (D-SINK-19, 2026-10-11; two spaces before the parenthesis, as shipped; it was `Or from a terminal:  omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>` before) |
+| First-run terminal caption | `Or from a terminal:  omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>  (converted; not kept in shell.json)` (D-SINK-19, 2026-10-11; two spaces before the parenthesis, as shipped; it was `Or from a terminal:  omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>` before) **DELETED 2026-10-13 (D-SINK-19 round 11, R21): the caption, its click-to-copy and the `Copied` transient are gone from `Guide.qml` (lane-key-m1), because a URL set that way is refused after the migration. The bar-setting notifications are 5.9.** |
 | Field labels, URL form | `Label`, `Playlist`, `EPG` |
 | Field labels, Xtream form | `Label`, `Server`, `Username`, `Password` |
 | Placeholder, Label | the derived label (5.6) once a URL / server parses, otherwise `optional` |
@@ -1447,6 +1518,23 @@ toggle on lane-key-z1, `yes` for the session on lane-key-y2); key-scenario
 Y4 observes the toggle itself twice in a row, and L1/L2 that the only copy
 is kept.
 
+**After the migration, none of the four paragraphs above describes a
+terminal value any more (round 11, 2026-10-13; R21).** They are the record of
+rounds 7-10 and stand as written. What the screen does now: a `playlistUrl`
+or `epgUrl` set from a terminal once the migration has landed is refused --
+the active source, the list and the footer do not change -- and shows one
+desktop notification (5.9); the plugin's next write, usually at once, takes
+it off the bar entry. `g` meanwhile carries no retired key at all, so it can
+neither keep nor put back a terminal value (D-SINK-20 ends at the marker).
+Inside the migration window (a 0.13.x install's first start, until the state
+write carrying the marker lands) the old protections stand: a migration
+input whose save failed stays on the entry as its only copy, and `g` leaves
+it there (node `R21e (...) round 4's P1 at the migration`; key-scenario F
+and H through a state directory that loses its write bit after `state
+init`). Observed at the sink by key-scenario X1-X6 and by U, K, Z, A, Y2,
+Y3, Q and V moved to the new contract (lane A, lane-key-m1: 98 / 0 forward,
+68 / 30 on `--baseline lane-key-z2`).
+
 ### 5.6 Default label and duplicates (S4, S5)
 
 `Model.deriveLabel(url, kind)`:
@@ -1476,6 +1564,44 @@ The label is wrapped in the curly quotes UX.md uses (`"x"` -> U+201C/U+201D).
 ### 5.8 Accessible names
 
 See 7.1; they reuse the strings above.
+
+### 5.9 Bar-setting notifications (D-SINK-19 round 11, R21b and R21c; 2026-10-13)
+
+The product owner dropped the `omarchy bar set` URL route on 2026-10-13: the
+Sources screen is the only way to add or change a source. A value the plugin
+takes off the bar entry without adopting it is reported ONCE, as a desktop
+notification and the same sentence on the shell's console
+(`omarchy-iptv: <body>`), and the guide shows nothing -- the active source,
+the list and the footer are untouched, because nothing changed. The text is
+`Model.entryInputNotice(name, reason)` as shipped on lane-key-m1, composed from
+the setting's NAME and the reason and never from the value (rule 5: the value
+can be a credentialed URL); `<setting>` is `playlistUrl` or `epgUrl`, and any
+other name reads `A URL setting`. The notification is `omarchy-notification-send
+--app-name IPTV -u normal -g <alert glyph> -r 74016 <title> <body>`, one replace
+id for every such report, so a user who set both URLs sees one card, the
+last.
+
+| When | Title | Body |
+|---|---|---|
+| After the migration: a `playlistUrl` or `epgUrl` found on the entry (`retired`) | `Bar setting ignored` | `<setting> is no longer read from the bar settings and was removed. Add or switch sources in the guide's Sources screen.` |
+| At the migration: a guide URL with no source to attach it to (`no-source`, R21c) | `Bar setting removed` | `epgUrl was removed from the bar settings: no source was set up for it to guide. Add the source with its EPG URL in the guide's Sources screen.` |
+| At the migration: a value that does not validate (`invalid`) | `Bar setting removed` | `<setting> in the bar settings was not a usable URL and was removed. Add or edit sources in the guide's Sources screen.` |
+
+"Once" is per value per session: the same value set again is not reported
+again (the plugin keeps an in-memory list of what it has handled, nothing on
+disk), a different value is, and a value still on the entry at the next start
+is reported once more. An `invalid` migration value with no source to fall
+back on still reaches the guide's error state through D16, as before. The
+wording, the notification as the only channel, and the absence of anything in
+the guide are the code lane's reading of R21b and are raised to the lead as
+open (lane-key-m1's report); this section records what ships and changes
+nothing. Pinned in node (`R21b / rule 5: entryInputNotice -- one sentence per
+reason ...`, `R21b: the refusal notification is entryInputNotice's sentence,
+with its own replace id, and carries no value`) and observed at the sink by
+key-scenario X5 (one notification per report through a stand-in
+`omarchy-notification-send` in front of PATH, each naming the Sources screen,
+none carrying a URL or the credential). The rendered card is UNVERIFIED on a
+display.
 
 ---
 
