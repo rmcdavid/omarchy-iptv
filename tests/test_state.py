@@ -80,7 +80,7 @@ class StateCommandTest(unittest.TestCase):
         # S-02: the service's FileView would create the file 0644; init runs first.
         code, payload, _ = self.state("init")
         self.assertEqual(code, 0)
-        self.assertEqual(payload, {"ok": True, "kind": "state", "action": "init", "created": True, "state": EMPTY})
+        self.assertEqual(payload, {"ok": True, "kind": "state", "action": "init", "found": "absent", "created": True, "state": EMPTY})
         self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), EMPTY)
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(pathlib.Path(self.dir).stat().st_mode & 0o777, 0o700)
@@ -188,11 +188,16 @@ class StateCommandTest(unittest.TestCase):
         self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), payload["state"])
 
     def test_tolerates_malformed_and_foreign_content(self):
+        # R22a (D-SINK-19 round 12): a file that does not parse is no longer
+        # read as the empty state -- `show` says it could not be read, and the
+        # file is left exactly as it was. Foreign CONTENT inside a JSON object
+        # (an unknown version, junk entries, unknown keys) is still tolerated.
         self.path.parent.mkdir(parents=True)
         self.path.write_text("{not json", encoding="utf-8")
         code, payload, _ = self.state("show")
-        self.assertEqual(code, 0)
-        self.assertEqual(payload["state"], EMPTY)
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"]["code"], "state_unreadable")
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "{not json")
         self.path.write_text(json.dumps({
             "version": 99,
             "favorites": ["t:a", "", None, "t:a", 7],
@@ -653,3 +658,151 @@ class SessionKeyTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StateNeverWrittenUnreadTest(unittest.TestCase):
+    """D-SINK-19 round 12, R22a: A STATE THAT DID NOT LOAD IS NEVER WRITTEN.
+
+    The helper's half. `state init` reports what it FOUND at the path before
+    it touched anything -- the service's one witness that tells a missing
+    file from a file inside a directory it cannot search, which Quickshell's
+    FileView reports identically (FileNotFound, measured) -- and it never
+    rewrites a file it could not parse. Every other `state` verb refuses a
+    file that exists and cannot be read or parsed, instead of writing the
+    empty default over it (read_json + normalize_state used to do exactly
+    that: `state favorite add` over an unreadable file wrote one favourite
+    and nothing else, exit 0).
+
+    These are also the pins for the service harness's double of the init
+    (tests/service-harness.js helperInit, rule 10): each fault below is one
+    of its branches, run against the REAL helper as a subprocess, the way the
+    service runs it. The foreign-owner faults cannot be made without root and
+    are argued, not run: the chmod fails, so nothing changes."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = os.path.join(self.tmp.name, "state")
+        os.makedirs(self.dir, mode=0o700)
+        self.path = pathlib.Path(self.dir) / "state.json"
+        self.real = json.dumps(v2(favorites=["t:keep"], sources=[SRC_PROVIDER, SRC_SECOND], activeKey="d990c2e4", entryMigrated=True), indent=2) + "\n"
+        # a 0000 directory would defeat the TemporaryDirectory cleanup
+        self.addCleanup(lambda: os.chmod(self.dir, 0o700) if os.path.isdir(self.dir) else None)
+
+    def init(self):
+        import subprocess, sys
+        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        proc = subprocess.run([sys.executable, "-I", str(HELPER_PATH), "state", "--state-dir", self.dir, "init"],
+                              capture_output=True, text=True, env=env, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout.strip().splitlines()[-1])
+
+    def test_init_reports_absent_and_creates_the_file(self):
+        payload = self.init()
+        self.assertEqual((payload["found"], payload["created"]), ("absent", True))
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), EMPTY)
+
+    def test_init_over_a_0000_file_reports_file_restores_0600_and_never_rewrites_it(self):
+        self.path.write_text(self.real, encoding="utf-8")
+        os.chmod(self.path, 0)
+        before = self.path.stat()
+        payload = self.init()
+        self.assertEqual((payload["found"], payload["created"]), ("file", False))
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), self.real)
+        self.assertEqual(self.path.stat().st_mtime_ns, before.st_mtime_ns)
+
+    def test_init_inside_a_0000_directory_reports_unreadable_restores_0700_and_never_rewrites_the_file(self):
+        self.path.write_text(self.real, encoding="utf-8")
+        os.chmod(self.path, 0o600)
+        mtime = self.path.stat().st_mtime_ns
+        os.chmod(self.dir, 0)
+        payload = self.init()
+        self.assertEqual((payload["found"], payload["created"]), ("unreadable", False))
+        self.assertEqual(pathlib.Path(self.dir).stat().st_mode & 0o777, 0o700)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), self.real)
+        self.assertEqual(self.path.stat().st_mtime_ns, mtime)
+
+    def test_init_over_a_directory_at_the_path_reports_other_and_changes_nothing(self):
+        self.path.mkdir(mode=0o700)
+        payload = self.init()
+        self.assertEqual((payload["found"], payload["created"]), ("other", False))
+        self.assertTrue(self.path.is_dir())
+        self.assertEqual(os.listdir(self.path), [])
+
+    def test_init_over_a_dangling_symlink_reports_other_and_creates_nothing(self):
+        target = pathlib.Path(self.tmp.name) / "gone.json"
+        os.symlink(target, self.path)
+        payload = self.init()
+        self.assertEqual((payload["found"], payload["created"]), ("other", False))
+        self.assertTrue(self.path.is_symlink())
+        self.assertFalse(target.exists())
+
+    def test_init_never_rewrites_a_file_it_could_not_parse(self):
+        for text in ("{\"version\": 2, \"sources\": [", "", "[1, 2]", "\x00\x01 not text"):
+            with self.subTest(text=text[:12]):
+                self.path.write_text(text, encoding="utf-8")
+                os.chmod(self.path, 0o600)
+                before = self.path.stat()
+                payload = self.init()
+                self.assertEqual((payload["found"], payload["created"]), ("file", False))
+                self.assertEqual(self.path.read_bytes(), text.encode("utf-8"))
+                after = self.path.stat()
+                self.assertEqual((after.st_mtime_ns, after.st_ctime_ns, after.st_ino), (before.st_mtime_ns, before.st_ctime_ns, before.st_ino))
+
+    def verbs(self):
+        return [("show",), ("favorite", "add", "t:x"), ("favorite", "remove", "t:keep"), ("clear-recents",),
+                ("source", "list"), ("source", "add", "--url", "http://new.example.test/list.m3u"),
+                ("source", "update", "d990c2e4", "--label", "renamed"), ("source", "remove", "42839dd5")]
+
+    def assert_refused_and_untouched(self, restore=None):
+        before = self.path.read_bytes() if restore is None and self.path.is_file() else None
+        for verb in self.verbs():
+            with self.subTest(verb=" ".join(verb)):
+                code, payload, err = run("state", "--state-dir", self.dir, *verb)
+                self.assertEqual(code, 1)
+                self.assertEqual(payload["ok"], False)
+                self.assertEqual(payload["error"]["code"], "state_unreadable")
+                self.assertNotIn("password", json.dumps(payload) + err)
+        if restore is not None:
+            restore()
+        if before is not None:
+            self.assertEqual(self.path.read_bytes(), before)
+        elif self.path.is_file():
+            self.assertEqual(self.path.read_text(encoding="utf-8"), self.real)
+
+    def test_every_verb_refuses_a_file_that_does_not_parse_and_leaves_it_byte_for_byte(self):
+        for text in ("{\"version\": 2, \"sources\": [", "", "[]", "null", "\"a string\""):
+            with self.subTest(text=text[:12]):
+                self.path.write_text(text, encoding="utf-8")
+                self.assert_refused_and_untouched()
+
+    def test_every_verb_refuses_a_0000_file_and_leaves_it_as_it_was(self):
+        self.path.write_text(self.real, encoding="utf-8")
+        os.chmod(self.path, 0)
+        self.assert_refused_and_untouched(restore=lambda: os.chmod(self.path, 0o600))
+
+    def test_every_verb_refuses_a_0000_directory_and_leaves_the_file_as_it_was(self):
+        self.path.write_text(self.real, encoding="utf-8")
+        os.chmod(self.dir, 0)
+        self.assert_refused_and_untouched(restore=lambda: os.chmod(self.dir, 0o700))
+
+    def test_every_verb_refuses_a_directory_at_the_path(self):
+        self.path.mkdir(mode=0o700)
+        self.assert_refused_and_untouched()
+        self.assertTrue(self.path.is_dir())
+
+    def test_a_missing_file_is_still_a_fresh_state_for_every_writer(self):
+        code, payload, _ = run("state", "--state-dir", self.dir, "favorite", "add", "t:new")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["favorites"], ["t:new"])
+
+    def test_the_d_id_1_remap_writes_nothing_over_a_file_it_could_not_parse(self):
+        # R22b's list: the playlist fetch's state remap is the helper's other
+        # writer of state.json, and it already wrote only a dict it read.
+        for text in ("{not json", "", "[]"):
+            with self.subTest(text=text[:12]):
+                self.path.write_text(text, encoding="utf-8")
+                channels = [{"id": "t:a", "name": "A", "url": "http://x.example.test/a.ts", "tvgId": "a"}]
+                self.assertEqual(helper.remap_state_file(str(self.path), channels), 0)
+                self.assertEqual(self.path.read_text(encoding="utf-8"), text)

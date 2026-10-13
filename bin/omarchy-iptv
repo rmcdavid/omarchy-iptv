@@ -7743,12 +7743,12 @@ def add_source_record(state: dict[str, Any], url: Any, epg_url: Any, label: Any,
 # So this command's write is no longer undone by a reconcile, and a re-key
 # through `--url` moves `activeKey` with the record (update_source_record).
 # What the warning says now is the two things still worth a line:
-#  - the running shell picks the new value up when it re-reads state.json,
-#    which this write causes -- UNLESS it has a write of its own parked or in
-#    flight at that moment, in which case its write wins (D-SRC-15's R9: a
-#    reload never replaces in-memory state newer than the file) and the value
-#    in the file afterwards is the shell's. The Sources screen edits the same
-#    record inside the running shell, with no such race;
+#  - the running shell does NOT pick the new value up: its FileView raises no
+#    reload on this helper's atomic rename (D-SRC-19, measured by the round-9
+#    data-loss lens), so it keeps what it had in memory and its next save
+#    writes that over this value. (This line said the shell re-reads the
+#    file because of the write until round 12, R22f.) The Sources screen
+#    edits the same record inside the running shell, with no such race;
 #  - `--url` RE-KEYS the record: the cache directory of the old key is the
 #    caller's to move or remove (the shell does it for its own edits; this
 #    command does not), and the channels are fetched again.
@@ -7791,11 +7791,15 @@ def setting_owned_warnings(fields: Any) -> list[str]:
                    "(D-SINK-19; the D-SRC-11 warning that stood here said the shell would undo "
                    "this write, and that design is gone).%s"
                    % (flag, field, setting, rekey))
-    out.append("A running omarchy-shell reads the new %s when it re-reads state.json, which this "
-               "write causes -- unless it has a write of its own parked or in flight at that "
-               "moment, when its write wins and this value is lost (D-SRC-15, R9). The guide's "
-               "Sources screen edits the same record inside the shell with no such race."
-               % " and ".join(row[3] for row in asked))
+    # Round 12 (R22f, rule 15): this line used to say the shell re-reads
+    # state.json because of this write. It does not (D-SRC-19, measured: the
+    # service's FileView raises no reload on the helper's atomic rename), so a
+    # running shell keeps what it had and its next save writes over this value.
+    out.append("A running omarchy-shell does not re-read state.json after this write (D-SRC-19): "
+               "it keeps the %s it already has, and its next save of state.json writes that "
+               "over this one. Restart the shell (omarchy restart shell) before it saves, or make "
+               "the change in the guide's Sources screen, which edits the same record inside the "
+               "shell." % " and ".join(row[3] for row in asked))
     return out
 
 
@@ -7867,6 +7871,35 @@ def remove_source_record(state: dict[str, Any], key: str) -> dict[str, Any]:
     return record
 
 
+def state_path_found(path: str) -> str:
+    """What is at the state path, BEFORE anything is created or chmod-ed.
+
+    D-SINK-19 round 12, R22a: the service's FileView reports "file not found"
+    both for a path with nothing at it and for a file inside a directory it
+    cannot search (measured on Quickshell 0.3.1: a 0000 or 0600 directory
+    reads exactly like a fresh install), and a fresh install is the one load
+    failure that may be written over. This is the witness: an lstat, made
+    first, because init_state_file then restores the modes it finds and the
+    evidence would be gone. -> "absent" (nothing there: ENOENT, a missing
+    parent included), "file" (a regular file, or a symlink to one),
+    "other" (a directory, a FIFO, a dangling symlink, anything else), or
+    "unreadable" (lstat itself failed: the directory cannot be searched)."""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return "absent"
+    except OSError:
+        return "unreadable"
+    if stat.S_ISREG(st.st_mode):
+        return "file"
+    if stat.S_ISLNK(st.st_mode):
+        try:
+            return "file" if stat.S_ISREG(os.stat(path).st_mode) else "other"
+        except OSError:
+            return "other"
+    return "other"
+
+
 def init_state_file(path: str, state: dict[str, Any]) -> bool:
     """Create `path` with mode 0600 when missing (S-02). Quickshell's FileView,
     which the service uses to write state.json, creates a missing file 0644
@@ -7896,17 +7929,62 @@ def init_state_file(path: str, state: dict[str, Any]) -> bool:
     return True
 
 
+def read_state_strict(path: str) -> dict[str, Any]:
+    """state.json for a verb that reads it to WRITE it (or to report it).
+
+    D-SINK-19 round 12, R22a, the helper's half: a state that did not load is
+    never written. read_json answers None for a missing file, an unreadable
+    one and one that does not parse alike, and normalize_state turns None
+    into the empty default -- so `state favorite add` over a file it could
+    not read used to write an empty state plus one favourite over it, every
+    source and credential gone, exit 0. Only "the file does not exist" is a
+    fresh state now; anything else is refused before anything is written,
+    with the reason and never the file's contents."""
+    try:
+        with open(path, "r", encoding="utf-8") as handle:
+            text = handle.read()
+    except FileNotFoundError:
+        return default_state()
+    except OSError as error:
+        raise HelperError("state_unreadable", "state.json could not be read (%s); nothing was written"
+                          % (error.strerror or type(error).__name__))
+    except ValueError:
+        raise HelperError("state_unreadable", "state.json is not UTF-8 text; nothing was written")
+    try:
+        raw = json.loads(text)
+    except ValueError:
+        raw = None
+    if not isinstance(raw, dict):
+        raise HelperError("state_unreadable", "state.json is not a valid state file; nothing was written")
+    return normalize_state(raw)
+
+
 def cmd_state(args: argparse.Namespace) -> int:
     directory = state_dir(args.state_dir)
     path = os.path.join(directory, STATE_FILE)
-    state = normalize_state(read_json(path))
     action = args.action
     extra: dict[str, Any] = {}
+    if action == "source":
+        extra["op"] = args.op
     try:
         if action == "init":
+            # The init reads tolerantly: what it read is only ever written
+            # when nothing was there (O_EXCL), so tolerance costs nothing.
+            state = normalize_state(read_json(path))
+            # R22a: `found` first, then the init. The init NEVER rewrites a
+            # file that exists, whatever it holds -- O_EXCL refuses to create
+            # over it and the existing branch only chmods -- so a state it
+            # could not parse is left byte for byte as it was (pinned by
+            # test_state's R22a cases).
+            found = state_path_found(path)
             created = init_state_file(path, state)
-            emit({"ok": True, "kind": "state", "action": action, "created": created, "state": public_state(state)})
+            emit({"ok": True, "kind": "state", "action": action, "found": found, "created": created,
+                  "state": public_state(state)})
             return EXIT_OK
+        # R22a: every other verb, the read-only `show` and `source list`
+        # included -- an empty listing of a file that could not be read would
+        # be a false statement about it.
+        state = read_state_strict(path)
         if action == "favorite":
             key = str(args.id or "").strip()
             if not key:
@@ -7921,7 +7999,6 @@ def cmd_state(args: argparse.Namespace) -> int:
             state["recents"] = []
             write_json_atomic(path, state)
         elif action == "source":
-            extra["op"] = args.op
             now = int(args.now) if getattr(args, "now", 0) else int(time.time())
             if args.op == "add":
                 extra["key"] = add_source_record(state, args.url, args.epg_url, args.label, args.origin, now)
@@ -8449,12 +8526,13 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--now", type=int, default=0, help="clock override in epoch seconds (tests)")
     update = ops.add_parser("update", parents=[common], help="change the label, playlist URL or EPG URL of a source")
     update.add_argument("key", help="source key (8 hex digits)")
-    # D-SRC-11: both of these write a field the running shell owns for the
-    # active source, so both say so here and the command warns when they are
-    # used. The warning is the part a user will actually see; this is so the
-    # help text does not promise more than the command delivers.
-    update.add_argument("--url", default=None, help="new playlist URL (re-keys the record; move or remove its cache). The running shell's 'playlistUrl' setting owns this for the ACTIVE source and will overwrite it")
-    update.add_argument("--epg-url", default=None, help="new EPG URL; an empty string clears it. The running shell's 'epgUrl' setting owns this for the ACTIVE source and will overwrite it; change the setting (Sources screen) instead")
+    # D-SRC-11, as overturned by D-SINK-19 (round 11, R21; this help text
+    # caught up in round 12, R22f): the record is the only store for both
+    # URLs and no bar setting overwrites it. What is still worth saying is
+    # D-SRC-19: a running shell does not re-read the file after this write,
+    # so its next save wins (setting_owned_warnings says so at run time).
+    update.add_argument("--url", default=None, help="new playlist URL (re-keys the record; move or remove its cache). A running shell does not re-read state.json after this and its next save wins: restart it, or edit the source in the guide's Sources screen")
+    update.add_argument("--epg-url", default=None, help="new EPG URL; an empty string clears it. A running shell does not re-read state.json after this and its next save wins: restart it, or edit the source in the guide's Sources screen")
     update.add_argument("--label", default=None, help="new label; an empty string restores the derived one")
     update.add_argument("--now", type=int, default=0, help="clock override in epoch seconds (tests)")
     remove = ops.add_parser("remove", parents=[common], help="drop a source from the history (its cache dir: `cache remove`)")
