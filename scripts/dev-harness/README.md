@@ -410,7 +410,7 @@ $H ipc signals                 # the last 20 source signal payloads (sourceProbe
 $H ipc failPersist true        # takes updateEntryInline off the shell api (a host that cannot write
                                #   our entry) until `failPersist false`; a false RETURN is not a failure
 $H ipc activeCache             # cache/omarchy-iptv/sources/<key> of the active source
-$H ipc set playlistUrl /path   # CLI parity: reconciles into the history (origin cli)
+$H ipc set playlistUrl /path   # `omarchy bar set`: read once, by the migration; REFUSED after it (D-SINK-19 R21)
 $H ipc setStored playlistUrl /path  # `set` without the user-config re-read: the host stores the value
                                #   but has not published it, so the plugin still sees the previous one
 $H ipc hostEntry               # {"stored":"<key>","published":"<key>"}: what the host has stored for our
@@ -442,7 +442,7 @@ new `channels.json` being applied).
 source and saves nothing, SR23), H2 (add, probe, switch), H6/H8 (five
 switches each way against a generated 10k list, median must stay under
 150 ms), probe cancel (a silent loopback server), H9 (CLI parity through
-`set playlistUrl`), H11 (duplicate), H12 (label / EPG edits, `editMasked`),
+`set playlistUrl`, refused since R21, then the same playlist added in the app), H11 (duplicate), H12 (label / EPG edits, `editMasked`),
 H7 (remove the active source), a `failPersist` switch (SR25) and privacy
 greps over the log and IPC output. It prints one PASS/FAIL line per check and a summary; the
 harness log is `$SCRATCH/scenario.log`.
@@ -1291,6 +1291,27 @@ It now seeds `sourceKey` on the stored side (`ipc setStored sourceKey
 <key>`) and waits for one MORE of that line than the log held before, so
 an earlier line cannot satisfy it; `qa-lib-test.sh` pins the seed and the
 wait.
+
+#### Round 11 (R21): one migration, then nothing on the entry is an input
+
+The product owner dropped the `omarchy bar set` URL route on 2026-10-13. The
+bar entry's `playlistUrl` and `epgUrl` are read while the state the service
+last saw LAND does not carry `entryMigrated`, and refused after it: never
+adopted, reported once per value (a desktop notification and the console,
+the sentence Model.entryInputNotice composes from the setting's name), and
+stripped by the next owned write. key-scenario.sh follows: `seed <key>
+migrated` writes the marker; G observes it landing, the REAL 0.13.6 helper
+(the v0.13.6 tag) dropping it, and the re-upgrade migrating again; X observes
+the refusal at the sink -- the notification is the stand-in
+`omarchy-notification-send` shell_arm puts in front of PATH, whose log is the
+scenario's own scratch. F and H observe a migration whose write fails from
+the start through `fixtures/disk-gone-after-init.py` (the state directory
+loses `w` the moment `state init` has run; taking it away before the start
+does nothing, because init chmods the directory back to 0700). U, K, Z, A,
+Y2, Y3, Q and V observe the refusal where they observed round 9's held
+guide URL. `pointerState` derives `landedMigrated` and `memoryMigrated` and
+reports `entryInputReports` (names and reasons, never a value). Measured on
+lane-key-m1: 98 / 0 forward (97 lettered checks and the floor line).
 
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 

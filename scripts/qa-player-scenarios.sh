@@ -206,8 +206,12 @@ start_harness() {
   sh_step "start the harness detached on its own runtime dir" \
     "'$RUN' clean && '$RUN' --detach --serve --playlist '$FIX/qa-player.m3u' --timeout 0"
   prepare_fixture
-  sh_step "point the service at the rewritten playlist and wait for the channels" \
-    "'$RUN' ipc set playlistUrl 'http://127.0.0.1:$HPORT/qa-player.m3u' >/dev/null; sleep 4; '$RUN' ipc state | jq -r '.service.channels|length'"
+  # D-SINK-19 R21: a URL set on the bar entry after the migration is refused,
+  # so the served playlist is added the way a user adds one, in the app
+  # (the harness addSource verb calls Service.addSource; the probe commit
+  # makes it active).
+  sh_step "add the rewritten playlist as a source and wait for the channels" \
+    "'$RUN' ipc addSource 'http://127.0.0.1:$HPORT/qa-player.m3u' '' '' >/dev/null; sleep 4; '$RUN' ipc state | jq -r '.service.channels|length'"
   expect "9"
   (( APPLY )) || return 0
   local answer count i

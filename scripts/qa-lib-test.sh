@@ -1221,6 +1221,22 @@ is "a bare service answers ok and nothing else: none of the twelve fields, no me
 is "no service at all is no_service, as before" "$(qa_json_field "d['error']['code']" "$(ps_probe none)")" "no_service"
 is "pointerState reports stateReloadsByReason and never the service's lastSaveText or a URL in it" \
    "$(qa_json_field "d['stateReloadsByReason']['own-write']" "$(ps_probe held-null)") $(ps_probe held-null | grep -c 'lastSaveText\|p4ss\|://')" "1 0"
+# Round 11 (R21): pointerState DERIVES whether the migration marker is in the
+# state the service saw land (`landedMigrated`) and in memory
+# (`memoryMigrated`), and reports the session's refusals as names and
+# reasons -- never `landedState` itself, which carries every source URL.
+# Driven over a fake service whose landed state holds a credentialed URL.
+ps_mig() { node -e '
+const H = require(process.argv[1])
+const svc = { userState: { activeKey: "abcd1234", sources: [{}], entryMigrated: true },
+              landedState: { entryMigrated: true, sources: [{ url: "http://u:p4ss@h.test/x" }] },
+              entryInputReports: [{ setting: "playlistUrl", reason: "retired" }] }
+const which = process.argv[2]
+if (which === "unlanded") svc.landedState = null
+process.stdout.write(JSON.stringify(H.pointerStateOf(svc)))' "$ROOT/scripts/dev-harness/harness-lib.js" "$1" 2>/dev/null; }
+is "pointerState derives landedMigrated and memoryMigrated, reports the refusals by name and reason, and never publishes landedState or a URL in it (R21, driven)" \
+   "$(qa_json_field "d['landedMigrated']" "$(ps_mig landed)") $(qa_json_field "d['landedMigrated']" "$(ps_mig unlanded)") $(qa_json_field "d['memoryMigrated']" "$(ps_mig landed)") $(qa_json_field "d['entryInputReports'][0]['reason']" "$(ps_mig landed)") $(ps_mig landed | grep -c 'landedState\|p4ss\|://')" \
+   "true false true retired 0"
 is "shell.qml answers pointerState with the lifted function and reads no service field itself" \
    "$(qa_count '^      return JSON\.stringify\(HarnessLib\.pointerStateOf\(serviceLoader\.item\)\)$' "$ROOT/scripts/dev-harness/shell.qml") $(qa_count 's\.lastSaveText|s\.pendingEntryKey' "$ROOT/scripts/dev-harness/shell.qml")" "1 0"
 # sources-scenario.sh's already-stored check (round-2 live lens, fixed in
@@ -2355,7 +2371,9 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # 455 + 16 = 471 on 2026-10-13, lane-key-m1 merged dev 4740a50: the lane's
 # 455 and F-HARNESS-20's 16 (418 -> 434, above) were counted on two branches
 # from the same 418, so the merge is their sum.
-EXPECTED=471
+# 471 -> 472 on 2026-10-13, D-SINK-19 round 11 (R21): pointerState's derived
+# migration booleans and refusal reports, driven (1).
+EXPECTED=472
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

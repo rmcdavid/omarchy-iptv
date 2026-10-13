@@ -113,9 +113,18 @@ function storedOwnedValue(entry, name) {
 // `lastSaveText` lives beside these on the service and is NOT reported: it
 // is the state.json text, URLs included (rule 5). Numbers, booleans, keys
 // and the per-reason object only. Nothing here reads a URL.
+//
+// D-SINK-19 round 11 (R21): `entryInputReports`, the service's own record of
+// every value it refused or reported off the bar entry, as { setting, reason }
+// -- names and reasons, never the value -- so a scenario counts the reports.
+// And two booleans the instrument DERIVES and the service does not hold:
+// whether the migration marker is in the state the service last saw LAND
+// (`landedMigrated`, off `landedState`) and in memory (`memoryMigrated`).
+// Derived here rather than by publishing `landedState`, which carries every
+// source URL. Absent on a tree that has no such property (NOFIELD).
 var POINTER_FIELDS = ["stateLoaded", "reconciled", "dirsReady", "stateSavePending", "pendingEntryKey", "configured",
                       "activeSourceKey", "stateSavesInFlight", "stateSaveFailed", "stateInitOk", "stateReloadsIgnored",
-                      "stateReloadsByReason"]
+                      "stateReloadsByReason", "entryInputReports"]
 function pointerStateOf(s) {
   if (!s) return { ok: false, error: { code: "no_service" } }
   var out = { ok: true }
@@ -126,6 +135,8 @@ function pointerStateOf(s) {
   var st = s.userState
   if (st && st.activeKey !== undefined) out.memoryActiveKey = String(st.activeKey)
   if (st && st.sources) out.sourceCount = st.sources.length
+  if (s.landedState !== undefined) out.landedMigrated = !!(s.landedState && s.landedState.entryMigrated === true)
+  if (st && typeof st === "object") out.memoryMigrated = st.entryMigrated === true
   return out
 }
 

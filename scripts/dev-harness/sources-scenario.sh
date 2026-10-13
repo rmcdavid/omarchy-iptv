@@ -12,7 +12,8 @@
 #   D-LIVE-20          the plugin applies its own write; the host's echo lags or never
 #                      comes, an external write still wins, the echo is idempotent
 #   cancel             a probe against a silent server is cancelled; its dir is discarded
-#   H9  CLI parity     `set playlistUrl` (omarchy bar set) reconciles into the history
+#   H9  CLI refusal    `set playlistUrl` (omarchy bar set) after the migration is REFUSED,
+#                      reported once and stripped (D-SINK-19 R21; it reconciled until 0.13.6)
 #   H11 duplicate      the active URL again -> duplicate with the existing id
 #   H7  remove active  settings cleared, only that directory deleted, first-run state
 #
@@ -269,17 +270,23 @@ check "switching back after that is still ok" '[[ "$(py "d['\''ok'\'']" "$res")"
 check "no sourcesPersistFailed anywhere in the switch sequence" 'log_lacks "sourcesPersistFailed"'
 wait_for 20 10 svc "['channels']" || bad "the guide did not settle on K1 after the retry sequence"
 
-echo "== external writes still reconcile, and the echo of our own write is a no-op"
+echo "== external writes: after the migration a URL on the entry is REFUSED, and the echo of our own write is a no-op"
+# D-SINK-19 round 11 (R21, the product owner's decision of 2026-10-13): the
+# bar entry's URLs are read once, by the migration H1 above; after its write
+# has landed, `omarchy bar set ... playlistUrl` is refused -- never adopted,
+# reported once (the service's entryInputReports through pointerState),
+# stripped. Before round 11 this block asserted the opposite: the CLI value
+# won over a spent own-write override and switched the source.
+n_reports() { py "len(d['entryInputReports'])" "$(ipc pointerState)"; }
+r0=$(n_reports)
 ipc set playlistUrl "$FIX/gen-10k.m3u" >/dev/null
-wait_for "$K2" 10 svc "['activeSourceKey']" || bad "an external set playlistUrl did not reconcile"
-check "omarchy bar set still wins over a spent own-write override" \
-  '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K2" && "$(svc "['\''channels'\'']")" == "$CHANNELS_10K" ]]'
-ipc switchSource "$K1" >/dev/null
-sleep 0.5
+wait_for "$((r0 + 1))" 10 n_reports || bad "the refused playlistUrl was not reported"
+check "omarchy bar set no longer switches the source: K1 stays active, reported once, off the stored entry" \
+  '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K1" && "$(svc "['\''channels'\'']")" == 20 && "$(n_reports)" == "$((r0 + 1))" && "$(py "'\''playlistUrl'\'' in d['\''storedKeys'\'']" "$(ipc hostEntry)")" == false ]]'
 before=$(svc "['channels']")
 ipc set playlistUrl "$FIX/harness.m3u" >/dev/null   # the host catching up with our own value
 sleep 0.7
-check "the host echoing our own value back changes nothing (idempotent)" \
+check "the host echoing our own value back changes nothing (idempotent): still K1, the channels as they were" \
   '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K1" && "$(svc "['\''channels'\'']")" == "$before" && "$(svc "['\''switching'\'']")" == false ]]'
 # leave K2 active again for the sections below
 ipc switchSource "$K2" >/dev/null
@@ -298,26 +305,31 @@ check "probing false, record dropped" '[[ "$(svc "['\''probing'\'']")" == false 
 check "temp directory sources/$KSLOW gone" '[[ ! -e "$CACHE/sources/$KSLOW" ]]'
 check "active still K2" '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K2" ]]'
 
-echo "== H9 CLI parity (set playlistUrl)"
+echo "== H9 CLI refusal (set playlistUrl), then the same playlist added in the app"
+# R21b: the value is refused -- no record, the active source unchanged,
+# reported -- and the in-app add is the route a user is sent to (the report
+# names the Sources screen). The record the rest of this file uses (K3) is
+# made by that add, origin guide.
+r0=$(n_reports)
 ipc set playlistUrl "$FIX/basic.m3u" >/dev/null
-sleep 0.5
+wait_for "$((r0 + 1))" 10 n_reports || bad "the refused playlistUrl was not reported"
+check "the CLI value is REFUSED: no record for basic.m3u, K2 still active, reported once, and the report names the Sources screen" \
+  '[[ -z "$(key_of basic.m3u)" && "$(svc "['\''activeSourceKey'\'']")" == "$K2" && "$(n_reports)" == "$((r0 + 1))" ]] && wait_log "playlistUrl is no longer read from the bar settings.*Sources screen" 3'
+ipc addSource "$FIX/basic.m3u" "" "" >/dev/null
+wait_log 'sourceProbeFinished .*"ok":true' 20 || bad "the in-app add of basic.m3u did not finish"
 K3=$(key_of basic.m3u)
-check "new record origin cli, label basic.m3u, active" \
-  '[[ -n "$K3" && "$(python3 -c "import json;d=json.load(open(\"$STATE\"));s=[x for x in d[\"sources\"] if x[\"key\"]==\"$K3\"][0];print(s[\"origin\"])")" == cli && "$(svc "['\''activeSourceKey'\'']")" == "$K3" ]]'
-wait_for 3 20 svc "['channels']" || bad "first fetch of the CLI source did not load"
+wait_for "$K3" 10 svc "['activeSourceKey']" || bad "the added source did not become active"
+wait_for 3 20 svc "['channels']" || bad "first fetch of the added source did not load"
 check "first fetch ran (no cache yet) and loaded 3 channels" '[[ "$(svc "['\''channels'\'']")" == 3 && -f "$CACHE/sources/$K3/channels.json" ]]'
 check "H11 duplicate of the active URL -> duplicate with its id" '[[ "$(py "(d['\''code'\''], d['\''id'\''])" "$(ipc addSource "$FIX/basic.m3u" "" "")")" == "('\''duplicate'\'', '\''$K3'\'')" ]]'
-# D16 as narrowed by D-SINK-19 (lead ruling, 2026-10-12): an invalid CLI
-# value is consumed and reported (`settingsInvalid`) but it does NOT replace
-# a working source -- the active source stays, the guide keeps its channels,
-# the service logs that it ignored the value, and the synthesized error
-# becomes the guide's body only when there is nothing else to show. The
-# first version of this check wanted `channels 0`, the pre-round-2 contract
-# in which a typo blanked the guide; it was red on every tree since round 2
-# and nobody had amended it (round-3 review P2).
-check "invalid CLI value is reported, ignored for the guide (active source and channels kept), and runs no helper (D16 as narrowed)" \
-  'ipc set playlistUrl "ftp://h.test/x" >/dev/null; sleep 0.5; [[ "$(svc "['\''settingsInvalid'\'']['\''code'\'']")" == scheme && "$(svc "['\''configured'\'']")" == true && "$(svc "['\''activeSourceKey'\'']")" == "$K3" && "$(svc "['\''channels'\'']")" == 3 ]] && wait_log "ignoring an invalid playlistUrl setting; the active source is unchanged" 3 && ! grep -q "h.test" "$LOG"'
-ipc set playlistUrl "$FIX/basic.m3u" >/dev/null; wait_for 3 10 svc "['channels']" || true
+# D16 as narrowed by D-SINK-19 (lead ruling, 2026-10-12), and R21 after it:
+# an invalid value on the entry after the migration is refused like any
+# other -- never validated into `settingsInvalid` (D16 is the migration's),
+# reported, the working source left alone, the guide keeping its channels,
+# no helper run, and nothing of the value in the log.
+check "invalid CLI value is refused and reported like any other after the migration, the active source and channels kept, no settingsInvalid, nothing of it logged" \
+  'r0=$(n_reports); ipc set playlistUrl "ftp://h.test/x" >/dev/null; wait_for "$((r0 + 1))" 5 n_reports; [[ "$(svc "['\''settingsInvalid'\'']")" == None && "$(svc "['\''configured'\'']")" == true && "$(svc "['\''activeSourceKey'\'']")" == "$K3" && "$(svc "['\''channels'\'']")" == 3 ]] && ! grep -q "h.test" "$LOG"'
+wait_for 3 10 svc "['channels']" || true
 
 echo "== H12 edit: label and EPG commit at once, editMasked masks (SR4, SR22)"
 res=$(ipc updateSource "$K2" '{"label":"Ten Thousand"}')

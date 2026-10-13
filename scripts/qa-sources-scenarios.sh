@@ -498,7 +498,8 @@ scenario_SRC_H06() {
   pause 3
   ipc_step "add C as a path source" addSource "$SCRATCH/fixtures/qa-src-userinfo.m3u" "" "Charlie"
   pause 3
-  ipc_step "back to A through the CLI path" set playlistUrl "$A"
+  # D-SINK-19 R21: the CLI path is refused after the migration; back to A in the app.
+  ipc_step "back to A" switchSource "$KA"
   pause 1
   ipc_step "open the guide" open '{}'
   keys -k Tab o
@@ -620,44 +621,45 @@ scenario_SRC_H08() {
 }
 
 scenario_SRC_H09() {
-  banner SRC-H09; need verbs:sources apply:entry
+  # D-SINK-19 round 11 (R21, the product owner's decision of 2026-10-13):
+  # `omarchy bar set ... playlistUrl|epgUrl` is read ONCE, by the migration,
+  # and REFUSED after it -- never adopted, reported once (a desktop
+  # notification naming the Sources screen, and the console), stripped by the
+  # next owned write. Until 0.13.6 this scenario graded SRC-CLI-01..08 as
+  # adoptions; those rows are superseded by the refusal below.
+  banner SRC-H09; need verbs:sources,pointerState apply:entry
   step "wipe" "$H" clean
   common_start "$A" || return 1
   pause 3
+  ipc_step "the migration landed (marker in the file)" pointerState
+  expect "landedMigrated true, entryInputReports [] (the start migrated A and reported nothing)"
   ipc_step "open the guide on Sources" open '{}'
   keys -k Tab o
   ipc_step "CLI sets an unknown URL" set playlistUrl "$B"
   pause 1
-  ipc_step "row appears without reopening" sources
-  expect "B present with origin cli (state.json), label derived, active, 'not loaded yet' then 5 channels after the first fetch (SRC-CLI-01)"
-  pause 3
-  sh_step "exactly one fetch" "grep -c 'playlist:' $(printf '%q' "$SCRATCH/logs/run.log") || true"
-  ipc_step "CLI sets a known URL" set playlistUrl "$A"
+  ipc_step "no row appears" sources
+  expect "still the one record A, active; no record for B (R21b)"
+  ipc_step "reported once" pointerState
+  expect "entryInputReports [{setting: playlistUrl, reason: retired}]; one notification 'Bar setting ignored' naming the Sources screen, no URL"
+  ipc_step "CLI sets the same URL again" set playlistUrl "$B"
   pause 1
-  sh_step "no new record" "jq -c '[.sources[] | {key, origin, label, labelCustom}]' $(printf '%q' "$SCRATCH/state/omarchy-iptv/state.json")"
-  expect "still two records; A active again (SRC-CLI-02)"
+  ipc_step "not reported twice" pointerState
+  expect "still one report"
   ipc_step "CLI sets an EPG URL" set epgUrl "$EPGA"
   pause 2
-  sh_step "epg helper ran into the active directory" "ls $(printf '%q' "$SCRATCH/cache/omarchy-iptv/sources/$KA"); jq -r '.sources[] | select(.key==\"$KA\") | .epgUrl' $(printf '%q' "$SCRATCH/state/omarchy-iptv/state.json")"
-  expect "epg-now.json / epg-status.json under sources/$KA, record epgUrl adopted (SRC-CLI-08)"
+  sh_step "the record is untouched" "jq -r '.sources[] | select(.key==\"$KA\") | .epgUrl' $(printf '%q' "$SCRATCH/state/omarchy-iptv/state.json")"
+  expect "A's epgUrl unchanged (empty); a second report, for epgUrl"
   local v
   for v in 'ftp://x' 'javascript:alert(1)' '/proc/self/environ'; do
     ipc_step "CLI invalid value $v" set playlistUrl "$v"
     pause 1
-    ipc_step "synthesized error" state
     sh_step "no helper, no record" "pgrep -fc 'omarchy-iptv playlist' || true; jq '.sources|length' $(printf '%q' "$SCRATCH/state/omarchy-iptv/state.json")"
   done
-  expect "emptyKind error with the reason and host '', settingsInvalid set, 0 helper processes, 2 records (SRC-FR-11, SRC-CLI-03)"
-  sh_step "3,000-character CLI value" "$(printf '%q' "$H") ipc set playlistUrl \"\$(python3 -c \"print('http://h.test/' + 'a'*3000, end='')\")\""
-  pause 1
-  ipc_step "too_long synthesized" state
-  ipc_step "CLI clears the URL" set playlistUrl ""
-  pause 1
-  ipc_step "first-run, history untouched" state
-  sh_step "records kept" "jq '.sources|length' $(printf '%q' "$SCRATCH/state/omarchy-iptv/state.json")"
-  expect "2 (SRC-CLI-04); guide shows the first-run form with no rows under it (D-LIVE-19)"
+  expect "each refused and reported once; settingsInvalid stays null (D16 is the migration's), 0 helper processes, 1 record"
+  ipc_step "the stored entry" hostEntry
+  expect "storedKeys carry no playlistUrl and no epgUrl; sourceKey $KA"
   ipc_step "IPC status shape" state
-  expect "service.activeSource null, service.sources[] with key/label/host/active/channelCount/lastUsed; no '://' anywhere (SRC-CLI-06)"
+  expect "service.activeSource names A, service.sources[] with key/label/host/active/channelCount/lastUsed; no '://' anywhere (SRC-CLI-06)"
   harness_stop
 }
 
@@ -748,10 +750,13 @@ scenario_SRC_H11() {
   pause 2
   ipc_step "51st" addSource http://127.0.0.1:9/cap-51.m3u "" ""
   expect "too_many once 50 records exist; canAddSource false; the guide's copy per SRC-DEC-14 (SRC-ERR-05)"
-  ipc_step "CLI 51st: LRU eviction" set playlistUrl http://127.0.0.1:9/cap-cli.m3u
+  # D-SINK-19 R21: the CLI route that evicted (SRC-CLI-05) is refused after
+  # the migration, so a 51st arrives by no route but the add form, which
+  # refuses it above. Eviction is reachable only by a migration.
+  ipc_step "CLI 51st: refused, not evicting" set playlistUrl http://127.0.0.1:9/cap-cli.m3u
   pause 2
-  sh_step "eviction: still 50, the oldest lastUsed non-active gone, console names the key only" "jq '.sources|length' $(printf '%q' "$SCRATCH/state/omarchy-iptv/state.json"); grep -n 'evict' $(printf '%q' "$SCRATCH/logs/run.log") || true"
-  expect "50; the active source never evicted (SRC-CLI-05, SRC-SEC-10)"
+  sh_step "still 50, nothing evicted" "jq '.sources|length' $(printf '%q' "$SCRATCH/state/omarchy-iptv/state.json"); grep -c 'evict' $(printf '%q' "$SCRATCH/logs/run.log") || true"
+  expect "50, 0 evictions; one report for the refused playlistUrl (R21b; SRC-CLI-05 superseded)"
   harness_stop
 }
 
