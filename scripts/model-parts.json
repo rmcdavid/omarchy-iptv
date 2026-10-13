@@ -292,6 +292,7 @@
         "sameEntryInput",
         "MAX_SEEN_INPUTS",
         "entryInputSeen",
+        "entryInputLast",
         "entryInputsSeenAfter",
         "entryInputNotice",
         "ownWriteInForce",

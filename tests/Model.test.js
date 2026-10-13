@@ -7025,6 +7025,10 @@ checkCall("R21: reconcileAction -- MIGRATING, an unseen URL is adopted and an un
     migFirst: row({ first: true, migrating: true, playlist: A, epg: E, seen: {} }),
     migSeen: row({ first: false, migrating: true, playlist: A, epg: "", seen: seenA }),
     migSeenFirst: row({ first: true, migrating: true, playlist: A, epg: "", seen: seenA }),
+    // R1's snapshot inside the migration window: A seen, then B, then A again -- A is the latest input
+    migBackToA: row({ migrating: true, playlist: A, epg: "", seen: Model.entryInputsSeenAfter(seenA, { playlistUrl: "http://b.test/l.m3u" }) }),
+    // ... and after the marker the same history reports nothing: A was seen
+    doneBackToA: row({ migrating: false, playlist: A, epg: "", seen: Model.entryInputsSeenAfter(seenA, { playlistUrl: "http://b.test/l.m3u" }) }),
     migEpgOnly: row({ migrating: true, playlist: "", epg: E, seen: {} }),
     migBad: row({ migrating: true, playlist: BAD, epg: "", seen: {} }),
     migNothingFirst: row({ first: true, migrating: true, playlist: "", epg: "", seen: {} }),
@@ -7041,24 +7045,30 @@ checkCall("R21: reconcileAction -- MIGRATING, an unseen URL is adopted and an un
     nothing: row(null)
   }
 }, { migFirst: ["adopt", true, true, "-", "-"], migSeen: ["ignore", false, false, "-", "-"], migSeenFirst: ["migrate", false, false, "-", "-"],
+     migBackToA: ["adopt", true, false, "-", "-"], doneBackToA: ["ignore", false, false, "playlistUrl", "-"],
      migEpgOnly: ["ignore", false, true, "-", "-"], migBad: ["adopt", true, false, "-", "-"], migNothingFirst: ["migrate", false, false, "-", "-"],
      doneFirst: ["migrate", false, false, "playlistUrl+epgUrl", "playlistUrl+epgUrl"], doneSeen: ["ignore", false, false, "playlistUrl+epgUrl", "-"],
      donePartlySeen: ["ignore", false, false, "playlistUrl+epgUrl", "epgUrl"], doneBad: ["ignore", false, false, "playlistUrl", "playlistUrl"],
      doneWrapped: ["ignore", false, false, "playlistUrl", "-"], doneNothing: ["ignore", false, false, "-", "-"], doneForced: ["migrate", false, false, "-", "-"],
      junkOnly: ["ignore", false, false, "-", "-"], absent: ["ignore", false, false, "playlistUrl+epgUrl", "playlistUrl+epgUrl"], nothing: ["ignore", false, false, "-", "-"] })
-checkCall("R21b: entryInputsSeenAfter -- one form per value, by setting; the SAME object when nothing is new; whitespace and junk are no input; bounded at MAX_SEEN_INPUTS with the oldest dropped", () => {
+checkCall("R21b: entryInputsSeenAfter -- one form per value, by setting, most recent last; the SAME object when the value is already the last; a value seen before moves to the end; whitespace and junk are no input; bounded at MAX_SEEN_INPUTS with the oldest dropped", () => {
   const A = "http://a.test/l.m3u", E = "http://e.test/x.xml"
   const one = Model.entryInputsSeenAfter({}, { playlistUrl: " " + A + "\n", epgUrl: "" })
   const same = Model.entryInputsSeenAfter(one, { playlistUrl: A })
   const two = Model.entryInputsSeenAfter(one, { epgUrl: E, playlistUrl: "HTTP://A.TEST/l.m3u" })
   let many = {}
   for (let i = 0; i < Model.MAX_SEEN_INPUTS + 3; i++) many = Model.entryInputsSeenAfter(many, { playlistUrl: "http://h" + i + ".test/l.m3u" })
+  const B2 = "http://b.test/l.m3u"
+  const ab = Model.entryInputsSeenAfter(one, { playlistUrl: B2 }), aba = Model.entryInputsSeenAfter(ab, { playlistUrl: A })
+  const moved = [ab.playlistUrl.join(" "), aba.playlistUrl.join(" "), aba !== ab, Model.entryInputLast(aba, "playlistUrl", A), Model.entryInputLast(aba, "playlistUrl", B2),
+                 Model.entryInputLast(ab, "playlistUrl", A), Model.entryInputLast({}, "playlistUrl", A), Model.entryInputLast(aba, "playlistUrl", "\t")]
   return [one.playlistUrl, same === one, two.epgUrl, two.playlistUrl.length, one.epgUrl === undefined,
           Model.entryInputsSeenAfter(one, { playlistUrl: "\t ", epgUrl: "\u0007" }) === one,
           Model.entryInputSeen(two, "playlistUrl", "\u2003" + A), Model.entryInputSeen(two, "epgUrl", A), Model.entryInputSeen(null, "playlistUrl", A),
           many.playlistUrl.length, Model.entryInputSeen(many, "playlistUrl", "http://h0.test/l.m3u"), Model.entryInputSeen(many, "playlistUrl", "http://h" + (Model.MAX_SEEN_INPUTS + 2) + ".test/l.m3u"),
-          Model.MAX_SEEN_INPUTS]
-}, [["http://a.test/l.m3u"], true, ["http://e.test/x.xml"], 1, true, true, true, false, false, 32, false, true, 32])
+          Model.MAX_SEEN_INPUTS, moved]
+}, [["http://a.test/l.m3u"], true, ["http://e.test/x.xml"], 1, true, true, true, false, false, 32, false, true, 32,
+    ["http://a.test/l.m3u http://b.test/l.m3u", "http://b.test/l.m3u http://a.test/l.m3u", true, true, false, false, false, false]])
 checkCall("R21b / rule 5: entryInputNotice -- one sentence per reason, naming the setting and the Sources screen and NEVER a value; a name that is not a retired setting reads as a generic one", () => {
   const reasons = ["retired", "no-source", "invalid", "", undefined]
   const rows = []
@@ -11823,8 +11833,12 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       const h = boot({ playlistUrl: NEW, sourceKey: KA, showLogos: false }, oldText([rec(A), rec(B)]), mode, { beforeLoad: x => { x.stateFile.writeFails = true } })
       const first = [h.root.activeSourceKey === KNEW, M.entryMigratedOf(h.root.userState), marked(h)]
       h.host.externalSet("playlistUrl", B); h.drain()
-      return { first, second: [h.root.activeSourceKey === KB, reports(h), has(h.storedEntry(), "playlistUrl")] }
-    }, { first: [true, true, false], second: [true, [], true] })
+      const second = [h.root.activeSourceKey === KB, reports(h), has(h.storedEntry(), "playlistUrl")]
+      // ... and the FIRST URL set again inside the same window is the latest input, not a
+      // value already handled (R1's snapshot; the adapted round-10 matrix's ACT:cli)
+      h.host.externalSet("playlistUrl", NEW); h.drain()
+      return { first, second, back: [h.root.activeSourceKey === KNEW, reports(h)] }
+    }, { first: [true, true, false], second: [true, [], true], back: [true, []] })
     checkCall("R21e (" + mode + " host) migration, a TERM before the migration's write lands: the old file and the URL on the entry are all there is, and the next start migrates from them", () => {
       const h = boot({ playlistUrl: NEW, showLogos: false }, oldText([rec(A)]), mode, { holdEvents: true })
       const died = [h.root.activeSourceKey === KNEW, marked(h), has(h.storedEntry(), "playlistUrl")]

@@ -10,8 +10,8 @@ import {
 } from "./state.mjs"
 import {
   clampSetting, settingsFrom, entryInputForm, RETIRED_SETTINGS,
-  entryInputSeen, entryInputsSeenAfter, entryInputNotice, ownedEntryPatch,
-  entryFlushDisposition, retiredInputsToKeep
+  entryInputSeen, entryInputLast, entryInputsSeenAfter, entryInputNotice,
+  ownedEntryPatch, entryFlushDisposition, retiredInputsToKeep
 } from "./settings.mjs"
 import {
   CACHE_LAYOUT, MAX_SOURCES, MAX_SOURCE_URL, MAX_LABEL, LIMITS,
@@ -332,14 +332,16 @@ function invalidInputBlocks(invalid, activeKey) {
 //              stripped by the next owned write, which every owned write
 //              does unconditionally from now on (Model.retiredInputsToKeep).
 //
-// `seen` is the session's own record of every value it has migrated or
-// refused (Model.entryInputsSeenAfter; in memory only, nothing persisted).
+// `seen` is the session's own ordered record of every value it has migrated
+// or refused (Model.entryInputsSeenAfter; in memory only, nothing persisted).
 // It is what tells a value the user set from the host's stale publish of one
 // already handled: the host publishes `barConfig` one write behind (rule 9),
 // so after the plugin strips a value the lagging host goes on publishing it
-// until somebody else writes. A seen value is neither adopted again nor
-// reported again; a value of whitespace or control characters alone is no
-// input on either phase (R18a, Model.entryInputForm).
+// until somebody else writes. MIGRATING, a value is fresh unless it is the
+// one seen LAST (R1's snapshot, Model.entryInputLast); MIGRATED, a value is
+// reported unless it was seen at all (Model.entryInputSeen). A value of
+// whitespace or control characters alone is no input in either phase (R18a,
+// Model.entryInputForm).
 //
 // -> { act, adoptUrl, adoptEpg, refused, report, migrating }
 //   act       "adopt"   MIGRATING, a playlist URL not seen yet: step 1 of
@@ -361,13 +363,14 @@ function reconcileAction(input) {
   for (var i = 0; i < RETIRED_SETTINGS.length; i++) {
     var name = RETIRED_SETTINGS[i]
     if (entryInputForm(name, values[name]).text === "") continue
-    var fresh = !entryInputSeen(it.seen, name, values[name])
     if (migrating) {
+      // R1's snapshot: unseen, or different from the value seen LAST
+      var fresh = !entryInputLast(it.seen, name, values[name])
       if (name === "playlistUrl") out.adoptUrl = fresh
       else if (name === "epgUrl") out.adoptEpg = fresh
     } else {
       out.refused.push(name)
-      if (fresh) out.report.push(name)
+      if (!entryInputSeen(it.seen, name, values[name])) out.report.push(name)
     }
   }
   if (out.adoptUrl) out.act = "adopt"

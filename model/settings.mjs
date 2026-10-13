@@ -506,6 +506,17 @@ var RETIRED_SETTINGS = ["playlistUrl", "epgUrl"]
 // is right: after the marker has landed the next start refuses whatever the
 // entry carries, and reports it once.
 //
+// It is an ORDERED list, most recent last, and the two phases ask it two
+// different questions. After the marker: "has this session seen this value
+// at all" (entryInputSeen), so each value is reported once. During the
+// migration: "is this the value the entry carried LAST time" (entryInputLast),
+// which is R1's snapshot -- a user who sets B and then the migration's own A
+// again inside the window (a failing disk keeps it open all session) set A
+// last, and membership alone swallowed that A (lane-key-m1's adapted round-10
+// matrix, ACT:cli on `cliP_B > cliP_N`). What neither can tell apart is a
+// re-set of the value the entry ALREADY carries from the host's stale publish
+// of it -- the entry does not change -- which is why it is a no-op.
+//
 // Bounded, because it is a list a user can grow by typing: past
 // MAX_SEEN_INPUTS values of one setting the oldest is dropped, and a value
 // that old reports once more if it comes back -- a report too many, never an
@@ -519,9 +530,18 @@ function entryInputSeen(seen, name, value) {
   return list.indexOf(f.form) !== -1
 }
 
+// Is `value` the most recent value this session saw for `name`?
+function entryInputLast(seen, name, value) {
+  var f = entryInputForm(name, value)
+  if (f.text === "") return false
+  var list = seen && typeof seen === "object" && Object.prototype.toString.call(seen[name]) === "[object Array]" ? seen[name] : []
+  return list.length > 0 && list[list.length - 1] === f.form
+}
+
 // `values` maps setting names to what the entry carries now; every one that
-// is an input (a non-empty form) and not seen yet is added. A NEW object
-// whenever something is added, the SAME object otherwise, so a QML `property
+// is an input (a non-empty form) becomes the most recent of its setting --
+// appended when new, moved to the end when seen before. A NEW object
+// whenever anything moves, the SAME object otherwise, so a QML `property
 // var` holding it raises a change signal only when it changed.
 function entryInputsSeenAfter(seen, values) {
   var have = seen && typeof seen === "object" ? seen : {}
@@ -530,12 +550,12 @@ function entryInputsSeenAfter(seen, values) {
   for (var i = 0; i < RETIRED_SETTINGS.length; i++) {
     var name = RETIRED_SETTINGS[i]
     var f = entryInputForm(name, v[name])
-    if (f.text === "" || entryInputSeen(have, name, v[name])) continue
+    if (f.text === "" || entryInputLast(have, name, v[name])) continue
     if (out === null) {
       out = {}
       for (var k in have) if (Object.prototype.hasOwnProperty.call(have, k)) out[k] = asList(have[k]).slice()
     }
-    var list = out[name] || []
+    var list = (out[name] || []).filter(function (x) { return x !== f.form })
     list.push(f.form)
     while (list.length > MAX_SEEN_INPUTS) list.shift()
     out[name] = list
@@ -839,8 +859,9 @@ export {
   footerWarning, findBarEntry, settingOf, boolSetting, clampInt, clampSetting,
   settingsFrom, entryInputText, entryInputForm, sameEntryInput,
   ownWriteInForce, settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS,
-  RETIRED_SETTINGS, MAX_SEEN_INPUTS, entryInputSeen, entryInputsSeenAfter,
-  entryInputNotice, ownedEntryPatch, barEntryWritable, entryFlushDisposition,
-  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, hostEntryForm,
-  entryWriteRecord, entryWriteNeeded, sameOwnWrite
+  RETIRED_SETTINGS, MAX_SEEN_INPUTS, entryInputSeen, entryInputLast,
+  entryInputsSeenAfter, entryInputNotice, ownedEntryPatch, barEntryWritable,
+  entryFlushDisposition, owedMirrorAction, ownedWriteMode,
+  retiredInputsToKeep, hostEntryForm, entryWriteRecord, entryWriteNeeded,
+  sameOwnWrite
 }
