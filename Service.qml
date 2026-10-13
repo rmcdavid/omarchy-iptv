@@ -4414,7 +4414,8 @@ Item {
     // R19c: `seenAt` is now, in ms -- the moment this service first sees the
     // input, which becomes the record's epgSetAt or the held value's seenAt.
     var out = Model.adoptActiveSource(root.userState, entry, Math.floor(Date.now() / 1000), "",
-                                      { adoptUrl: plan.adoptUrl === true, adoptEpg: plan.adoptEpg === true, seenAt: Date.now() })
+                                      { adoptUrl: plan.adoptUrl === true, adoptEpg: plan.adoptEpg === true, seenAt: Date.now(),
+                                        atStart: plan.first === true })
     root.settingsInvalid = out.invalid
     // Setting and key names only, never a value (rule 5).
     if (out.pendedEpg) console.warn("omarchy-iptv: no source is active; the guide URL input (epgUrl) is held in the state for the next one")

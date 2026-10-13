@@ -7237,7 +7237,7 @@ const r13 = (() => {
     const funnel = fn("writeOwnedEntry")
     const saved = (serviceSource.match(/    onSaved: \{[\s\S]*?\n    \}/) || [""])[0]
     return {
-      seenAt: /\{ adoptUrl: plan\.adoptUrl === true, adoptEpg: plan\.adoptEpg === true, seenAt: Date\.now\(\) \}/.test(fn("adoptActive")),
+      seenAt: /\{ adoptUrl: plan\.adoptUrl === true, adoptEpg: plan\.adoptEpg === true, seenAt: Date\.now\(\)(,\s*atStart: plan\.first === true)? \}/.test(fn("adoptActive")),
       submitStamp: /epgSetAt: Date\.now\(\) \}, Math\.floor\(Date\.now\(\) \/ 1000\)\)/.test(fn("addSource")),
       editStamp: /Model\.updateSource\(root\.userState, key, root\.withKey\(fields \|\| \{\}, "epgSetAt", Date\.now\(\)\)/.test(fn("updateSource")),
       byTime: /Model\.adoptPendingEpg\(root\.userState, key, epg, root\.reconciledEpgUrl, Date\.now\(\)\)/.test(fn("adoptPendingEpgOnto")),
@@ -7262,6 +7262,9 @@ const r13 = (() => {
     const rec = fn("reconcile")
     const saved = (serviceSource.match(/    onSaved: \{[\s\S]*?\n    \}/) || [""])[0]
     return {
+      // AT_START: the first reconcile after a start tells the resolver so (an
+      // EPG input equal to the held one is judged by the held one's time)
+      atStart: /seenAt: Date\.now\(\),\s*atStart: plan\.first === true \}/.test(fn("adoptActive")),
       seeds: /if \(!root\.reconciled\) \{\n\s*root\.reconciledPlaylistUrl = Model\.entryInputSeed\(root\.userState, "playlistUrl", playlist\)\n\s*root\.reconciledEpgUrl = Model\.entryInputSeed\(root\.userState, "epgUrl", epg\)/.test(rec),
       slots: /Model\.entryInputsAfterMove\(root\.userState, "playlistUrl", lastPlaylist, root\.reconciledPlaylistUrl, now\)/.test(rec)
         && /Model\.entryInputsAfterMove\(next, "epgUrl", lastEpg, root\.reconciledEpgUrl, now\)/.test(rec)
@@ -7564,6 +7567,7 @@ const r13 = (() => {
       const before = this.userState
       const opts = { adoptUrl: plan.adoptUrl === true, adoptEpg: plan.adoptEpg === true }
       if (R19.seenAt) opts.seenAt = this.now++
+      if (R20.atStart) opts.atStart = plan.first === true
       const out = Model.adoptActiveSource(this.userState, entry, this.now++, "", opts)
       // the oracle: a held value that met the newly active record (R19c), and
       // a CLI input landed on the active record (set at the input's own time)
@@ -13436,20 +13440,31 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   // R20b, the round-9 lens's P3 at the model: the pending E (seen at t1)
   // lost to A's later guide URL G (t2); the same E fresh on the entry is
   // judged with t1, never with now. Red on lane-key-y2 (A ends on E).
-  checkCall("R20b P3: an EPG input EQUAL to the held pendingEpg is judged with its seenAt -- it loses to a later record time, and is not adopted as seen now", () => {
+  // R20b P3, AT A START: the pending E (seen at t1) lost to A's later guide
+  // URL G (t2); the same E still on the entry when the service starts is
+  // that input, judged with t1, never with now. Red on lane-key-y2 (A ends
+  // on E). In SESSION the service saw the entry change to E, which is the
+  // user setting it again -- a later explicit input that wins by R19c (the
+  // round-9 lens's matrix reddened the in-session reading, EPG:OLD:init and
+  // EPG:OLD:cli on this lane's first build).
+  checkCall("R20b P3: at a start, an EPG input EQUAL to the held pendingEpg is judged with its seenAt -- it loses to a later record time and is not adopted as seen now; in session the same value set again is a later input and wins", () => {
     const st = M.parseState(stateText([rec(A, { epgUrl: G, epgSetAt: 2000 })], KA, { pendingEpg: { url: E, seenAt: 1000 } }))
-    const out = M.adoptActiveSource(st, { playlistUrl: "", epgUrl: E, sourceKey: KA }, 100, "", { adoptUrl: false, adoptEpg: true, seenAt: 9000 })
+    const opts = { adoptUrl: false, adoptEpg: true, seenAt: 9000 }
+    const start = M.adoptActiveSource(st, { playlistUrl: "", epgUrl: E, sourceKey: KA }, 100, "", Object.assign({ atStart: true }, opts))
     const later = M.adoptActiveSource(M.parseState(stateText([rec(A, { epgUrl: G, epgSetAt: 500 })], KA, { pendingEpg: { url: E, seenAt: 1000 } })),
-                                      { playlistUrl: "", epgUrl: E, sourceKey: KA }, 100, "", { adoptUrl: false, adoptEpg: true, seenAt: 9000 })
-    return { earlier: [name(epgOf(out.state, KA)), M.pendingEpgOf(out.state), out.epgConsumed],
-             later: [name(epgOf(later.state, KA)), M.epgSetAtOf(later.state.sources[0]), M.pendingEpgOf(later.state)] }
-  }, { earlier: ["G", null, true], later: ["E", 1000, null] })
-  checkCall("R20b: a held guide URL set again keeps the time it was first seen (adoptActiveSource and adoptPendingEpg alike)", () => {
+                                      { playlistUrl: "", epgUrl: E, sourceKey: KA }, 100, "", Object.assign({ atStart: true }, opts))
+    const session = M.adoptActiveSource(st, { playlistUrl: "", epgUrl: E, sourceKey: KA }, 100, "", opts)
+    return { start: [name(epgOf(start.state, KA)), M.pendingEpgOf(start.state), start.epgConsumed],
+             later: [name(epgOf(later.state, KA)), M.epgSetAtOf(later.state.sources[0]), M.pendingEpgOf(later.state)],
+             session: [name(epgOf(session.state, KA)), M.epgSetAtOf(session.state.sources[0])] }
+  }, { start: ["G", null, true], later: ["E", 1000, null], session: ["E", 9000] })
+  checkCall("R20b: a held guide URL set again keeps the time it was first seen at a start, and is seen now in session", () => {
     const st = M.parseState(stateText([rec(A)], "", { pendingEpg: { url: E, seenAt: 1000 } }))
-    const a = M.adoptActiveSource(st, { playlistUrl: "", epgUrl: E, sourceKey: "" }, 100, "", { adoptUrl: false, adoptEpg: true, seenAt: 9000 })
-    const b = M.adoptPendingEpg(st, KA, E, "", 9000)
-    return [M.pendingEpgOf(a.state).seenAt, a.state === st, M.epgSetAtOf(b.state.sources[0])]
-  }, [1000, true, 1000])
+    const opts = { adoptUrl: false, adoptEpg: true, seenAt: 9000 }
+    const a = M.adoptActiveSource(st, { playlistUrl: "", epgUrl: E, sourceKey: "" }, 100, "", Object.assign({ atStart: true }, opts))
+    const s = M.adoptActiveSource(st, { playlistUrl: "", epgUrl: E, sourceKey: "" }, 100, "", opts)
+    return [M.pendingEpgOf(a.state).seenAt, a.state === st, M.pendingEpgOf(s.state).seenAt]
+  }, [1000, true, 9000])
 })()
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")

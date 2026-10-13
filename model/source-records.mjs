@@ -382,10 +382,13 @@ function reconcileAction(input) {
   // `act` below and nothing else.
   var playlistChanged = playlist.form !== entryInputForm("playlistUrl", it.lastPlaylist).form
   var epgChanged = epg.form !== entryInputForm("epgUrl", it.lastEpg).form
+  // `first` is handed back as it came (R20b, round 10): adoptActiveSource
+  // judges an EPG input equal to the held one by the held one's time only
+  // on the first reconcile after a start.
   var out = { act: "ignore",
               adoptUrl: playlist.text !== "" && playlistChanged,
               adoptEpg: epg.text !== "" && epgChanged,
-              playlistChanged: playlistChanged, epgChanged: epgChanged }
+              playlistChanged: playlistChanged, epgChanged: epgChanged, first: first }
   if (out.adoptUrl) out.act = "adopt"
   else if (first || force) out.act = "migrate"
   return out
@@ -489,14 +492,24 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
     out.state = withActiveKey(st, want)
   }
   out.key = activeKeyOf(out.state)
-  // R20b (round 10): an EPG input EQUAL to the guide URL the state already
-  // holds as pending is that same input, and is judged with the time it was
-  // first seen (its seenAt), never with now. The round-9 lens's P3: the
-  // pending E lost to a later edit G by time just below, and the R4 block
-  // then took the very same E as the latest input there is, seen now, and
-  // replaced G -- an order state.json had already proved the other way.
+  // R20b (round 10): AT A START (`opts.atStart`, the first reconcile after
+  // the service starts), an EPG input EQUAL to the guide URL the state
+  // already holds as pending is that same input, still on the entry because
+  // its strip never landed, and is judged with the time it was first seen
+  // (its seenAt), never with now. The round-9 lens's P3: the pending E lost
+  // to a later edit G by time just below, and the R4 block then took the
+  // very same E as the latest input there is, seen now, and replaced G -- an
+  // order state.json had already proved the other way.
+  // NOT in session: there the service SAW the entry change to that value,
+  // which is the user setting it again, a later explicit input (R19c). The
+  // in-session reading was measured wrong by the round-9 lens's own matrix
+  // (EPG:OLD:init 4 and EPG:OLD:cli 2 at length 2 on lane-key-z1's first
+  // build: a CLI re-set of the held value lost to an older record time).
+  // Usually the start never gets here: R20b's consumed slot proves the value
+  // spent and reconcile does not call it fresh. This is the start over a
+  // file with no slot -- one an earlier build wrote.
   var heldBefore = pendingEpgOf(st)
-  var sameAsHeld = heldBefore !== null && epg.ok && epg.url === heldBefore.url
+  var sameAsHeld = o.atStart === true && heldBefore !== null && epg.ok && epg.url === heldBefore.url
   // R19c: a guide URL held in the state for want of an active source
   // (R19b) meets the record that is active now -- the record a fresh URL
   // just named, or one a hand-edited file names beside it -- and the LATER
@@ -612,11 +625,7 @@ function adoptPendingEpg(state, key, epgInput, lastEpg, nowMs) {
   if (out.pending) {
     var f = entryInputForm("epgUrl", epgInput)
     out.consumed = true
-    // R20b: an input equal to the value already held is that input, and
-    // keeps the time it was first seen.
-    var held = pendingEpgOf(st)
-    var at = held !== null && f.ok && f.url === held.url ? held.seenAt : Math.max(0, Math.trunc(Number(nowMs)) || 0)
-    if (f.ok) st = withPendingEpg(st, { url: f.url, seenAt: at })
+    if (f.ok) st = withPendingEpg(st, { url: f.url, seenAt: Math.max(0, Math.trunc(Number(nowMs)) || 0) })
     else out.refused = true
   }
   var applied = applyPendingEpg(st, k)
