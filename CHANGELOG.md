@@ -6,12 +6,12 @@ version lives in `manifest.json`.
 ## 0.13.6 (2026-10-12)
 
 **For the marketplace; nothing the plugin does has changed.** 0.13.5 could
-not be approved for the Omarchy plugin marketplace: the marketplace's
-automated security scan refuses any file over 512 KiB, and the plugin's
-logic file had grown to 534 KB, so the scan could not complete and no
-review could begin. Until a release passes that scan, a new install from
-the marketplace receives 0.12.0, which predates this week's credential and
-TLS fixes. An install that already updates itself is not affected.
+not be verified by the Omarchy plugin marketplace: its automated security
+scan refuses any text file over 512 KiB, and the plugin's logic file had
+grown to 534 KB, so the scan could not complete and no review could begin.
+Until a release is verified, the marketplace marks the plugin "Update
+unverified"; installing and updating still fetch the repository's current
+code, so nobody was held on an older version.
 
 ### Changed
 
@@ -29,9 +29,10 @@ TLS fixes. An install that already updates itself is not affected.
 ### Worth knowing
 
 - **Restart the shell after this update** (`omarchy-restart-shell`, not
-  `omarchy-refresh-shell`, which resets your shell configuration). A shell
-  left running from before the update still refers to the old file, which
-  this update removes.
+  `omarchy-refresh-shell`, which resets your shell configuration). Until you
+  do, the shell keeps running 0.13.5 from memory and the guide's footer says
+  "Updated · restart the shell to see the new version"; nothing breaks in
+  the meantime.
 
 ## 0.13.5 (2026-10-11)
 

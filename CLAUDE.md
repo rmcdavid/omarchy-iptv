@@ -21,11 +21,17 @@ stopped by the marketplace's automated security baseline, not by him: its
 scanner refuses any non-executable file over 512 KiB and `Model.js` had
 crossed it (D-REL-5, found 2026-10-12, the catalog read that day still
 giving `verificationCommit f89f748`). 0.13.6 is the split that fixes it.
-Consequence, and it is the reason this is in this file: an existing install
-updates immediately, because `omarchy-plugin-update` is `git merge --ff-only`,
-but what the marketplace SERVES to a new install is the verified snapshot --
-so a fresh install today gets 0.12.0, which predates every TLS and credential
-fix of this week. Re-read the catalog before repeating any of this;
+What the verified snapshot does and does not decide, because this file said
+the wrong thing for a week: it decides the marketplace's "Verified" label
+and nothing else. `omarchy plugin add` is a plain `git clone` of the
+repository's current HEAD (`/usr/share/omarchy/bin/omarchy-plugin-add`; the
+catalog's own `installNote` says "Omarchy clones the current upstream
+repository"; nothing under `/usr/share/omarchy` reads `verificationCommit`),
+and `omarchy-plugin-update` is `git merge --ff-only` of the same HEAD. So a
+fresh install gets current `main`, verified or not. This file and the
+lead's memory said a fresh install got the verified 0.12.0 until the 0.13.6
+pre-cut review measured otherwise on 2026-10-12, and 0.13.6's first draft
+of release notes repeated it. Re-read the catalog before repeating any of this;
 the twelve days it sat on v0.7.1 are explained in the decisions log.
 
 ## Branches: `dev` is the tree, `main` is the artifact
