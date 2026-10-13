@@ -260,7 +260,15 @@
         "reloadDisposition",
         "pendingEpgRecord",
         "pendingEpgOf",
-        "withPendingEpg"
+        "withPendingEpg",
+        "entryInputDigest",
+        "entryInputRecord",
+        "entryInputsRecord",
+        "entryInputsOf",
+        "withEntryInputs",
+        "entryInputSeed",
+        "entryInputsAfterMove",
+        "entryInputsAfterWrite"
       ]
     },
     {
@@ -301,6 +309,7 @@
         "entryFlushDisposition",
         "ownedWriteMode",
         "retiredInputsToKeep",
+        "patchInputsToKeep",
         "hostEntryForm",
         "entryWriteRecord",
         "entryWriteNeeded",

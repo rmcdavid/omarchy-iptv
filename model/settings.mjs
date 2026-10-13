@@ -9,7 +9,7 @@ import {
   channelOrderOf
 } from "./channels.mjs"
 import {
-  emptyState, pendingEpgOf
+  emptyState, pendingEpgOf, entryInputDigest, entryInputsOf
 } from "./state.mjs"
 import {
   optInSetting
@@ -622,8 +622,10 @@ function owedMirrorAction(ctx) {
 //          them (`entryWith` with `keepRetired`; the patch's sourceKey is
 //          the host's own value through `ownedEntryPatch` over `settings`,
 //          never memory's). On the lagging host the published entry is one
-//          write behind, so this can carry back for one write a URL our own
-//          heal had just stripped (D-SINK-20). Healing is the key mirror's
+//          write behind, so this carried back a URL our own heal had just
+//          stripped (D-SINK-20) until R20c (round 10) narrowed what it keeps
+//          to what the LANDED state does not hold (patchInputsToKeep below).
+//          Healing is the key mirror's
 //          job, through writeActive under R13, once the file agrees with
 //          memory again
 //
@@ -726,6 +728,76 @@ function retiredInputsToKeep(entry, state, consumed) {
   return keep
 }
 
+// D-SINK-19 round 10, R20c (D-SINK-20). WHAT THE PATCH-ONLY WRITE MAY CARRY
+// BACK.
+//
+// R16's patch-only write (Service.setShowLogos while the state is unloaded or
+// a state write is parked, in flight or failed) carried EVERY retired key the
+// host PUBLISHES, because the URL there may be the only copy of an input
+// whose state write did not land (the round-4 P1). On the host that publishes
+// one write behind (rule 9) the publish still carries a URL our own last heal
+// stripped, so the toggle wrote it back onto the stored entry (D-SINK-20):
+// a value a record already held, and -- the round-9 lens's re-grade -- a
+// REFUSED credential that no record holds, which then stayed in shell.json
+// for the session, because no owned write followed once the failure cleared.
+//
+// The patch-only write now keeps a retired key ONLY when it is a valid input
+// the LAST LANDED state does not hold. "Landed" is the file as this service
+// last knew it to be on disk (`landed`: the state the last landed save
+// serialised, or the file as it was loaded), never memory: memory is what the
+// failed write was carrying, and a value memory holds and the disk does not
+// is exactly the only copy the round-4 P1 lost. The landed state holds a
+// value when
+//   playlistUrl  a record has that URL (adoption's own comparison)
+//   epgUrl       the ACTIVE record has it, or it is the pending guide URL
+//   either       its consumed slot carries the value's digest (R20b): the
+//                service consumed it and that consumption is on disk, so
+//                whatever it became -- a record, a pending value, a refusal,
+//                or a value a later input superseded -- is durable already
+// A REFUSED value is stripped once it has been reported, which is when the
+// service's own snapshot (`consumed`, reconcile's) holds it: it was never a
+// configuration, and rule 5 treats it as a secret. A refused value the
+// service has not seen yet -- before the first state load nothing has been
+// reconciled -- is kept, so the report is not lost with it.
+//
+// Why this is not the narrowing D-SINK-20's record calls WRONG. That one --
+// "keep the retired keys only while no own-write override is in force" --
+// decided from the HOST's state, which says nothing about whether the value
+// is stored anywhere else, so it stripped the only copy of an input whose
+// state write had failed. This decides from the DISK's: a value is stripped
+// only when the plugin's own file, as last confirmed written, already holds
+// it. The round-4 sequences keep their URL (the node suite drives them).
+//
+// No landed state at all (before the first load, `landed` null): nothing is
+// proven held, and every valid value is kept, which is R16's answer.
+// -> a NEW array of the retired key names to keep.
+function patchInputsToKeep(entry, landed, consumed) {
+  var e = entry && typeof entry === "object" ? entry : {}
+  var c = consumed || {}
+  var disk = landed && typeof landed === "object" ? landed : null
+  var keep = []
+  for (var i = 0; i < RETIRED_SETTINGS.length; i++) {
+    var name = RETIRED_SETTINGS[i]
+    var f = entryInputForm(name, e[name])
+    if (f.text === "") continue
+    if (!f.ok) {
+      if (f.form !== entryInputForm(name, c[name]).form) keep.push(name)
+      continue
+    }
+    if (disk === null) { keep.push(name); continue }
+    var slot = entryInputsOf(disk)[name]
+    var held = !!slot && slot.digest === entryInputDigest(name, e[name])
+    if (!held && name === "playlistUrl") held = findSourceByUrl(disk.sources, f.url) !== null
+    if (!held && name === "epgUrl") {
+      var active = activeSourceRecord(disk)
+      var pending = pendingEpgOf(disk)
+      held = (active !== null && f.url === str(active.epgUrl)) || (pending !== null && f.url === pending.url)
+    }
+    if (!held) keep.push(name)
+  }
+  return keep
+}
+
 // D-SINK-19 round 9, R19a. RETIRED: NO SKIP ON AN ESTIMATE.
 //
 // hostEntryForm, entryWriteRecord and entryWriteNeeded below have NO shipped
@@ -822,6 +894,6 @@ export {
   settingsFrom, entryInputText, entryInputForm, sameEntryInput,
   ownWriteInForce, settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS,
   RETIRED_SETTINGS, ownedEntryPatch, barEntryWritable, entryFlushDisposition,
-  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, hostEntryForm,
-  entryWriteRecord, entryWriteNeeded, sameOwnWrite
+  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, patchInputsToKeep,
+  hostEntryForm, entryWriteRecord, entryWriteNeeded, sameOwnWrite
 }

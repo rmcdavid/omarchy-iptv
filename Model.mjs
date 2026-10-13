@@ -66,15 +66,17 @@ export {
   favoriteOrigin, favoriteRemovalNotice, hideNotice, scopeEntryAccessibleName,
   savedSearchArrivals, savedSearchDepartures, savedSearchFooter,
   withSavedSearch, withoutSavedSearch, savedSearchRecord, emptyState,
-  pendingEpgRecord, pendingEpgOf, withPendingEpg, playedRecord, cloneState,
-  withCacheLayout, parseState, pushPlayedRecord, stateOnLoad, isFavorite,
-  toggleFavorite, pushRecent, recordPlayed, clearSession, stateSession,
-  deadSessionVerdict, PLAYER_OUTCOMES, sessionAfterOutcome, withFavorites,
-  hiddenGroupList, hiddenGroupSet, isGroupHidden, toggleHiddenGroup,
-  browsableChannels, hideAction, hideVerb, removeRecent, trimRecents,
-  MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed, prunedFailed,
-  knownIdSet, failedIndex, failedDocument, failedWhen, withFailed,
-  failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
+  pendingEpgRecord, pendingEpgOf, withPendingEpg, entryInputDigest,
+  entryInputRecord, entryInputsRecord, entryInputsOf, withEntryInputs,
+  entryInputSeed, entryInputsAfterMove, entryInputsAfterWrite, playedRecord,
+  cloneState, withCacheLayout, parseState, pushPlayedRecord, stateOnLoad,
+  isFavorite, toggleFavorite, pushRecent, recordPlayed, clearSession,
+  stateSession, deadSessionVerdict, PLAYER_OUTCOMES, sessionAfterOutcome,
+  withFavorites, hiddenGroupList, hiddenGroupSet, isGroupHidden,
+  toggleHiddenGroup, browsableChannels, hideAction, hideVerb, removeRecent,
+  trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed,
+  prunedFailed, knownIdSet, failedIndex, failedDocument, failedWhen,
+  withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
   reloadDisposition
 } from "./model/state.mjs"
 export {
@@ -85,8 +87,8 @@ export {
   entryInputText, entryInputForm, sameEntryInput, ownWriteInForce,
   settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
   ownedEntryPatch, barEntryWritable, entryFlushDisposition, owedMirrorAction,
-  ownedWriteMode, retiredInputsToKeep, hostEntryForm, entryWriteRecord,
-  entryWriteNeeded, sameOwnWrite
+  ownedWriteMode, retiredInputsToKeep, patchInputsToKeep, hostEntryForm,
+  entryWriteRecord, entryWriteNeeded, sameOwnWrite
 } from "./model/settings.mjs"
 export {
   optInSetting, logoSurvey, splitLogoUrl, logoConsentLines, logoFile,

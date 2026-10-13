@@ -10,7 +10,8 @@ import {
 } from "./state.mjs"
 import {
   clampSetting, settingsFrom, entryInputForm, RETIRED_SETTINGS,
-  ownedEntryPatch, entryFlushDisposition, ownedWriteMode, retiredInputsToKeep
+  ownedEntryPatch, entryFlushDisposition, ownedWriteMode, retiredInputsToKeep,
+  patchInputsToKeep
 } from "./settings.mjs"
 import {
   CACHE_LAYOUT, MAX_SOURCES, MAX_SOURCE_URL, MAX_LABEL, LIMITS,
@@ -488,6 +489,14 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
     out.state = withActiveKey(st, want)
   }
   out.key = activeKeyOf(out.state)
+  // R20b (round 10): an EPG input EQUAL to the guide URL the state already
+  // holds as pending is that same input, and is judged with the time it was
+  // first seen (its seenAt), never with now. The round-9 lens's P3: the
+  // pending E lost to a later edit G by time just below, and the R4 block
+  // then took the very same E as the latest input there is, seen now, and
+  // replaced G -- an order state.json had already proved the other way.
+  var heldBefore = pendingEpgOf(st)
+  var sameAsHeld = heldBefore !== null && epg.ok && epg.url === heldBefore.url
   // R19c: a guide URL held in the state for want of an active source
   // (R19b) meets the record that is active now -- the record a fresh URL
   // just named, or one a hand-edited file names beside it -- and the LATER
@@ -515,10 +524,19 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
     // would cost defers the strip behind R13 for nothing (the round-9 matrix
     // measured a re-set of the same value made invisible that way).
     if (epg.ok && active && epg.url !== str(active.epgUrl)) {
-      var patch = { epgUrl: epg.url }
-      if (seenAt > 0) patch.epgSetAt = seenAt
-      out.state = replaceSource(out.state, out.key, patch)
-      out.adoptedEpg = true
+      if (sameAsHeld) {
+        // Already judged, by time, against this record a few lines up
+        // (applyPendingEpg): it won and the record holds it, or it lost to
+        // a later input and must not now win as "seen now".
+        var judged = epgByTime(out.state, out.key, epg.url, heldBefore.seenAt)
+        out.state = judged.state
+        out.adoptedEpg = judged.won
+      } else {
+        var patch = { epgUrl: epg.url }
+        if (seenAt > 0) patch.epgSetAt = seenAt
+        out.state = replaceSource(out.state, out.key, patch)
+        out.adoptedEpg = true
+      }
     }
   } else if (adoptEpg && epg.text !== "") {
     // R19b: NO record can take it. A valid one is held in the state as
@@ -529,7 +547,8 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
     // validation can still carry a credential).
     out.epgConsumed = true
     if (epg.ok) {
-      out.state = withPendingEpg(out.state, { url: epg.url, seenAt: seenAt })
+      // R20b: the value already held keeps the time it was first seen.
+      out.state = withPendingEpg(out.state, { url: epg.url, seenAt: sameAsHeld ? heldBefore.seenAt : seenAt })
       out.pendedEpg = true
     } else {
       out.refusedEpg = true
@@ -593,7 +612,11 @@ function adoptPendingEpg(state, key, epgInput, lastEpg, nowMs) {
   if (out.pending) {
     var f = entryInputForm("epgUrl", epgInput)
     out.consumed = true
-    if (f.ok) st = withPendingEpg(st, { url: f.url, seenAt: Math.max(0, Math.trunc(Number(nowMs)) || 0) })
+    // R20b: an input equal to the value already held is that input, and
+    // keeps the time it was first seen.
+    var held = pendingEpgOf(st)
+    var at = held !== null && f.ok && f.url === held.url ? held.seenAt : Math.max(0, Math.trunc(Number(nowMs)) || 0)
+    if (f.ok) st = withPendingEpg(st, { url: f.url, seenAt: at })
     else out.refused = true
   }
   var applied = applyPendingEpg(st, k)
@@ -866,6 +889,10 @@ function sourcesSummary(state, activeKey) {
 // off is the key mirror's to make, after the save lands. The default is
 // still removal, because the default is what the mirror and the settled
 // toggle use.
+//
+// R20c (round 10): the service no longer passes `keepRetired` at all; the
+// patch-only write hands the keep list Model.patchInputsToKeep answers, and
+// `keepRetired` stays for a caller that means "every one".
 //
 // R17a (round 7): `opts.keep`, an array of retired key names, carries THOSE
 // over unchanged on any write, heal included. The service passes

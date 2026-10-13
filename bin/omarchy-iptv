@@ -1860,11 +1860,23 @@ def remap_state_file(path: str, channels: list[dict[str, Any]]) -> int:
 
     Runs after a successful playlist fetch, when the caller named a state
     directory explicitly (cmd_playlist), and writes only when something
-    actually moves -- which is at most once per state file, ever. That single
-    write lands in the same class as the `state source add` the service
+    actually moves -- which is at most once per state file, ever. It cannot
+    become a periodic writer, because after the first pass the map moves
+    nothing.
+
+    D-SRC-19 (round 9's data-loss lens, measured): this docstring used to say
+    the write "lands in the same class as the `state source add` the service
     already asks for mid-session: the service's FileView reloads state.json
-    and Model.stateOnLoad merges it. It cannot become a periodic writer,
-    because after the first pass the map moves nothing.
+    and Model.stateOnLoad merges it". Neither half held. The service spawns
+    no `state` verb but `init` (Service.qml), and its FileView does not
+    reload after this helper's atomic rename -- its reload counter did not
+    move -- so a running shell keeps its memory and its next save writes that
+    memory over whatever was renamed in. For THIS write that is harmless by
+    construction rather than by reload: the service's active-source fetch is
+    the one call site that passes --state-dir (D-ID-1), and the service
+    remaps its own in-memory state onto the same scheme when it applies the
+    list (Service.adoptIdScheme, D-ID-3), so its next save agrees with this
+    one. A hand-run `state` verb has no such twin (D-SRC-19).
 
     The write edits the RAW document. An earlier version rebuilt it from
     normalize_state, which is a whitelist: every key this helper version does
@@ -7466,6 +7478,64 @@ def non_negative_int(value: Any) -> int:
     return number if number > 0 else 0
 
 
+# D-SINK-19 round 10, R20a (D-SRC-20). THE HELPER KEEPS WHAT THE SERVICE
+# WRITES. Round 9 gave state.json two keys the service writes and this reader
+# did not know -- `pendingEpg` (a guide URL set while no source is active,
+# whose ONLY copy is that key) and every record's `epgSetAt` -- and a
+# hand-run `state favorite add` erased both: live under a nested cage the
+# user's guide URL "EXISTS NOWHERE" after a restart. Round 10 adds a third,
+# `entryInputs`. All three are mirrored here, validated and never invented,
+# on ONE fixture both readers run (the shared state-keys fixture, dev branch), and the
+# node suite holds every key the service can serialise to that fixture's
+# list, so a key added to one reader and not the other is a red gate on the
+# day it is added rather than a lens finding a round later.
+#
+# Mirror of Model.RETIRED_SETTINGS: the bar-entry inputs the service consumes.
+ENTRY_INPUT_SLOTS = ("playlistUrl", "epgUrl")
+_ENTRY_INPUT_DIGEST_RE = re.compile(r"^[0-9a-f]{16}$")
+
+
+def normalize_pending_epg(raw: Any) -> dict[str, Any] | None:
+    """Mirror of Model.pendingEpgRecord: {url, seenAt} or None. `url` must be
+    a string that validates as a CLI guide URL to something non-empty;
+    `seenAt` is milliseconds, coerced the model's way and clamped at 0."""
+    if not isinstance(raw, dict) or not isinstance(raw.get("url"), str):
+        return None
+    checked = validate_source_url(raw["url"], origin="cli")
+    if not checked["ok"] or not checked["url"]:
+        return None
+    return {"url": checked["url"], "seenAt": non_negative_int(raw.get("seenAt"))}
+
+
+def normalize_entry_input(raw: Any) -> dict[str, Any] | None:
+    """Mirror of Model.entryInputRecord: one consumed-input slot, {digest, at}
+    plus `stripped: true` when set. The digest is the model's entryInputDigest,
+    16 lowercase hex digits; this reader never computes one, it only refuses
+    a value that is not one."""
+    if not isinstance(raw, dict):
+        return None
+    digest = raw.get("digest")
+    if not isinstance(digest, str) or not _ENTRY_INPUT_DIGEST_RE.match(digest):
+        return None
+    out: dict[str, Any] = {"digest": digest, "at": non_negative_int(raw.get("at"))}
+    if raw.get("stripped") is True:
+        out["stripped"] = True
+    return out
+
+
+def normalize_entry_inputs(raw: Any) -> dict[str, Any] | None:
+    """Mirror of Model.entryInputsRecord: the slots that validate, None when
+    none does (the key is then absent)."""
+    if not isinstance(raw, dict):
+        return None
+    out: dict[str, Any] = {}
+    for name in ENTRY_INPUT_SLOTS:
+        record = normalize_entry_input(raw.get(name))
+        if record is not None:
+            out[name] = record
+    return out or None
+
+
 def normalize_source(raw: Any) -> dict[str, Any] | None:
     """One history record per the section 2.1 field rules; None drops it.
     A `url` with a control character (NUL, CR, ...) drops the record with a
@@ -7496,7 +7566,7 @@ def normalize_source(raw: Any) -> dict[str, Any] | None:
     # SR22: the helper truncates an over-cap label on read, never errors.
     label = cap_code_points(sanitize_input(raw.get("label"), MAX_SOURCE_URL), MAX_LABEL) or derive_label(playlist["url"], playlist["kind"])
     origin = raw.get("origin")
-    return {
+    record = {
         "key": key,
         "url": playlist["url"],
         "epgUrl": epg["url"] if epg is not None and epg["ok"] else "",
@@ -7510,6 +7580,12 @@ def normalize_source(raw: Any) -> dict[str, Any] | None:
         "channelCount": non_negative_int(raw.get("channelCount")),
         "groupCount": non_negative_int(raw.get("groupCount")),
     }
+    # R20a: when this record's guide URL was last SET, in ms (R19c); carried
+    # only when known, exactly as Model.normalizeSourceRecord carries it.
+    set_at = non_negative_int(raw.get("epgSetAt"))
+    if set_at > 0:
+        record["epgSetAt"] = set_at
+    return record
 
 
 def normalize_state(raw: Any) -> dict[str, Any]:
@@ -7566,6 +7642,14 @@ def normalize_state(raw: Any) -> dict[str, Any]:
     # instead of raising a toast minutes late. Never URL-bearing: a channel id
     # and a display name, which is never a URL.
     state["session"] = normalize_played(raw.get("session"))
+    # R20a (D-SRC-20): the held guide URL and the consumed-input slots, each
+    # absent when there is none, exactly as Model.parseState reads them.
+    pending = normalize_pending_epg(raw.get("pendingEpg"))
+    if pending is not None:
+        state["pendingEpg"] = pending
+    inputs = normalize_entry_inputs(raw.get("entryInputs"))
+    if inputs is not None:
+        state["entryInputs"] = inputs
     state["cacheLayout"] = CACHE_LAYOUT if raw.get("cacheLayout") == CACHE_LAYOUT else 0
     sources = raw.get("sources")
     if isinstance(sources, list):
@@ -7618,6 +7702,15 @@ def public_state(state: dict[str, Any]) -> dict[str, Any]:
     and it is the identifier every other field here is keyed by."""
     out = dict(state)
     out["sources"] = [public_source(record) for record in state.get("sources", [])]
+    # R20a: the held guide URL is a URL like any record's, and this printer
+    # had never met one (it printed whatever the reader kept, and the reader
+    # kept nothing): its host, never the value. `entryInputs` carries digests
+    # only and is printed as it is, on the activeKey precedent above.
+    pending = state.get("pendingEpg")
+    if isinstance(pending, dict):
+        url = str(pending.get("url") or "")
+        out["pendingEpg"] = {"epgHost": "local file" if url.startswith("/") or url.startswith("~") else source_host(url),
+                             "seenAt": pending.get("seenAt", 0)}
     return out
 
 
@@ -7633,7 +7726,8 @@ def check_custom_label(cleaned: str, others: list[str]) -> str:
     return custom
 
 
-def add_source_record(state: dict[str, Any], url: Any, epg_url: Any, label: Any, origin: str, now: int) -> str:
+def add_source_record(state: dict[str, Any], url: Any, epg_url: Any, label: Any, origin: str, now: int,
+                      now_ms: int = 0) -> str:
     """Append a history record (the CLI counterpart of Model.addSource);
     raises the UX-SOURCES.md 5.4 codes plus duplicate / too_many /
     label_taken / label_too_long. Returns the new key."""
@@ -7673,6 +7767,11 @@ def add_source_record(state: dict[str, Any], url: Any, epg_url: Any, label: Any,
         "channelCount": 0,
         "groupCount": 0,
     })
+    # R19c / R20a: a guide URL given here is SET now, as the in-app add form
+    # sets its own at submit (rule 15: the helper is the third route that
+    # sets one; round 9's search named it and left it unstamped).
+    if epg and now_ms > 0:
+        sources[-1]["epgSetAt"] = now_ms
     return key
 
 
@@ -7749,7 +7848,8 @@ def setting_owned_warnings(fields: Any) -> list[str]:
     return out
 
 
-def update_source_record(state: dict[str, Any], key: str, url: Any, epg_url: Any, label: Any, now: int) -> tuple[str, str]:
+def update_source_record(state: dict[str, Any], key: str, url: Any, epg_url: Any, label: Any, now: int,
+                         now_ms: int = 0) -> tuple[str, str]:
     """Edit a record in place. A changed playlist URL re-keys it (fetchedAt
     and the counts reset; the caller moves or removes the cache directory).
     -> (key, replaced key or "")."""
@@ -7784,6 +7884,7 @@ def update_source_record(state: dict[str, Any], key: str, url: Any, epg_url: Any
                 record["label"] = unique_label(derive_label(playlist["url"], playlist["kind"]),
                                                [item["label"] for item in sources if item is not record])
     if epg_url is not None:
+        before = record.get("epgUrl", "")
         if sanitize_input(epg_url, MAX_SOURCE_URL + 1) == "":
             record["epgUrl"] = ""
         else:
@@ -7791,6 +7892,10 @@ def update_source_record(state: dict[str, Any], key: str, url: Any, epg_url: Any
             if not checked["ok"]:
                 raise HelperError(checked["code"], "EPG %s" % checked["message"], field="epgUrl")
             record["epgUrl"] = checked["url"]
+        # R19c / R20a: only a CHANGE is a later explicit input for it, as
+        # Model.updateSource stamps it.
+        if record["epgUrl"] != before and now_ms > 0:
+            record["epgSetAt"] = now_ms
     if label is not None:
         cleaned = _CONTROL_CHARS.sub("", str(label)).strip(" \u00a0")
         others = [item["label"] for item in sources if item is not record]
@@ -7873,11 +7978,14 @@ def cmd_state(args: argparse.Namespace) -> int:
         elif action == "source":
             extra["op"] = args.op
             now = int(args.now) if getattr(args, "now", 0) else int(time.time())
+            # R20a: a record's epgSetAt is in MILLISECONDS (R19c); --now is in
+            # seconds, so a test's clock reads as the start of that second.
+            now_ms = now * 1000 if getattr(args, "now", 0) else int(time.time() * 1000)
             if args.op == "add":
-                extra["key"] = add_source_record(state, args.url, args.epg_url, args.label, args.origin, now)
+                extra["key"] = add_source_record(state, args.url, args.epg_url, args.label, args.origin, now, now_ms)
                 write_json_atomic(path, state)
             elif args.op == "update":
-                extra["key"], extra["replacedKey"] = update_source_record(state, args.key, args.url, args.epg_url, args.label, now)
+                extra["key"], extra["replacedKey"] = update_source_record(state, args.key, args.url, args.epg_url, args.label, now, now_ms)
                 write_json_atomic(path, state)
                 # D-SRC-11: the write happened, and for the active source the
                 # shell owns what was written. Say so on stderr AND in the

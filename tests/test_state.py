@@ -567,6 +567,108 @@ class SessionKeyTest(unittest.TestCase):
                          ["version", "cacheLayout", "favorites", "recents", "lastPlayed", "session",
                           "sources", "savedSearches", "hiddenGroups", "activeKey"])
 
+    # ---- R20a (D-SINK-19 round 10, D-SRC-20): the helper keeps what the
+    # service writes. The same fixture tests/Model.test.js runs; there, every
+    # reducer Service.qml hands the state to is driven and the keys it emits
+    # must EQUAL the fixture's list, and here the helper's reader must emit
+    # exactly that list over the fixture's document. A key taught to one
+    # reader alone is red on one side or the other the day it is added.
+    def _state_keys_fixture(self):
+        with open(ROOT / "tests" / "fixtures" / "state-keys.json", encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def test_r20a_value_cases_run_the_shared_fixture(self):
+        fixture = self._state_keys_fixture()
+        for case in fixture["cases"]:
+            state = helper.normalize_state(json.loads(json.dumps(case["input"])))
+            got = {"pendingEpg": state.get("pendingEpg"), "entryInputs": state.get("entryInputs"),
+                   "epgSetAt": [record.get("epgSetAt") for record in state["sources"]]}
+            self.assertEqual(got, case["expect"], case["name"])
+
+    def test_r20a_the_helper_emits_exactly_the_shared_vocabulary(self):
+        fixture = self._state_keys_fixture()
+        state = helper.normalize_state(json.loads(json.dumps(fixture["document"])))
+        keys = fixture["keys"]
+        only = fixture.get("helperOnly", {})
+
+        def want(name):
+            return sorted(keys[name] + list(only.get(name, {})))
+        played = [r for r in state["recents"] + [state["lastPlayed"], state["session"]] if r]
+        slots = state["entryInputs"].values()
+        self.assertEqual(sorted(state), want("top"))
+        self.assertEqual(sorted({k for r in state["sources"] for k in r}), want("source"))
+        self.assertEqual(sorted({k for r in played for k in r}), want("played"))
+        self.assertEqual(sorted({k for r in state["savedSearches"] for k in r}), want("savedSearch"))
+        self.assertEqual(sorted(state["pendingEpg"]), want("pendingEpg"))
+        self.assertEqual(sorted(state["entryInputs"]), want("entryInputs"))
+        self.assertEqual(sorted({k for r in slots for k in r}), want("entryInput"))
+        # Kept, not merely present: the three round-9/10 values come back as written.
+        document = fixture["document"]
+        self.assertEqual(state["pendingEpg"], document["pendingEpg"])
+        self.assertEqual(state["entryInputs"], document["entryInputs"])
+        self.assertEqual([r.get("epgSetAt") for r in state["sources"]],
+                         [r.get("epgSetAt") for r in document["sources"]])
+
+    def test_r20a_the_entry_input_slots_mirror_the_models_retired_settings(self):
+        # Model.RETIRED_SETTINGS, the list Model.entryInputsRecord walks.
+        model = (ROOT / "model" / "settings.mjs").read_text(encoding="utf-8")
+        import re
+        names = re.search(r'var RETIRED_SETTINGS = \[([^\]]*)\]', model).group(1)
+        self.assertEqual(tuple(n.strip().strip('"') for n in names.split(",")), helper.ENTRY_INPUT_SLOTS)
+
+    def test_r20a_d_src_20_a_helper_write_keeps_the_held_guide_url_and_every_set_time(self):
+        """D-SRC-20, the round-9 lens's sequence at the helper's own sink:
+        `state favorite add`, `clear-recents` and `source update` over a file
+        holding a pending guide URL, a record's epgSetAt and the consumed
+        slots. Seen red on lane-key-y2's helper: pendingEpg absent, epgSetAt
+        [None], entryInputs absent after the first write."""
+        fixture = self._state_keys_fixture()
+        document = json.loads(json.dumps(fixture["document"]))
+        os.makedirs(self.dir, exist_ok=True)
+        self.path.write_text(json.dumps(document), encoding="utf-8")
+        for args in (("favorite", "add", "t:itv.uk"), ("clear-recents",),
+                     ("source", "update", document["sources"][1]["key"], "--label", "Second")):
+            code, _payload, _ = self.state(*args)
+            self.assertEqual(code, 0, args)
+            written = json.loads(self.path.read_text(encoding="utf-8"))
+            self.assertEqual(written.get("pendingEpg"), document["pendingEpg"], args)
+            self.assertEqual(written.get("entryInputs"), document["entryInputs"], args)
+            self.assertEqual([r.get("epgSetAt") for r in written["sources"]], [1760000000000, None], args)
+
+    def test_r20a_stdout_carries_the_held_guide_urls_host_never_the_url(self):
+        """Rule 5. public_state printed whatever the reader kept, and the reader
+        had kept no pendingEpg -- so teaching the reader would have printed the
+        held guide URL, credentials and all, on every `state` verb."""
+        os.makedirs(self.dir, exist_ok=True)
+        held = "http://u:secretpass@p.example.test/xmltv.php?username=u&password=secretpass"
+        self.path.write_text(json.dumps({"version": 2, "pendingEpg": {"url": held, "seenAt": 5}}), encoding="utf-8")
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = helper.main(["state", "--state-dir", self.dir, "show"])
+        self.assertEqual(code, 0)
+        self.assertNotIn("secretpass", out.getvalue())
+        self.assertEqual(json.loads(out.getvalue().strip().splitlines()[-1])["state"]["pendingEpg"],
+                         {"epgHost": "p.example.test", "seenAt": 5})
+
+    def test_r20a_a_guide_url_the_helper_sets_is_stamped_with_its_time_and_an_unchanged_one_is_not(self):
+        """R19c's third route (round 9's rule-15 search left it open): `state
+        source add|update --epg-url` is an explicit input, set NOW, in ms."""
+        code, payload, _ = self.state("source", "add", "--url", "http://z.example.test/l.m3u", "--epg-url", "http://z.example.test/g.xml",
+                                      "--now", "1760000000")
+        self.assertEqual(code, 0)
+        key = payload["key"]
+        record = [r for r in json.loads(self.path.read_text(encoding="utf-8"))["sources"] if r["key"] == key][0]
+        self.assertEqual(record["epgSetAt"], 1760000000000)
+        code, _, _ = self.state("source", "update", key, "--epg-url", "http://z.example.test/g.xml", "--now", "1760000100")
+        record = [r for r in json.loads(self.path.read_text(encoding="utf-8"))["sources"] if r["key"] == key][0]
+        self.assertEqual(record["epgSetAt"], 1760000000000, "the same guide URL again is not a later input")
+        code, _, _ = self.state("source", "update", key, "--epg-url", "http://z.example.test/g2.xml", "--now", "1760000200")
+        record = [r for r in json.loads(self.path.read_text(encoding="utf-8"))["sources"] if r["key"] == key][0]
+        self.assertEqual(record["epgSetAt"], 1760000200000)
+        code, payload, _ = self.state("source", "add", "--url", "http://y.example.test/l.m3u", "--now", "1760000300")
+        record = [r for r in json.loads(self.path.read_text(encoding="utf-8"))["sources"] if r["key"] == payload["key"]][0]
+        self.assertNotIn("epgSetAt", record, "no guide URL given, nothing set")
+
 
 if __name__ == "__main__":
     unittest.main()

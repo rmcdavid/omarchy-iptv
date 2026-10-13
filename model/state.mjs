@@ -3,7 +3,7 @@ import {
   STATE_VERSION, SCOPE_RECENT, SCOPE_FAVORITES, MAX_HIDDEN_GROUPS, SEP
 } from "./build.mjs"
 import {
-  str, asList, normalizeText, searchKey, tokenize, channelId
+  str, asList, normalizeText, searchKey, tokenize, fnv1a32, channelId
 } from "./text.mjs"
 import {
   primaryGroup, prepareChannels
@@ -13,7 +13,7 @@ import {
   effectiveScope, launchScope
 } from "./browse.mjs"
 import {
-  parseJsonObject
+  parseJsonObject, entryInputForm, RETIRED_SETTINGS
 } from "./settings.mjs"
 import {
   WALL_KEY
@@ -36,7 +36,7 @@ import {
 } from "./sources.mjs"
 import {
   warnState, normalizeSourceRecord, activeKeyText, activeKeyOf, withActiveKey,
-  adoptActiveSource
+  reconcileAction, adoptActiveSource
 } from "./source-records.mjs"
 
 // ------------------------------------------------------------ state
@@ -367,12 +367,20 @@ function emptyState() {
 // pending serializes exactly as it did before R19. `url` is the normalized
 // guide URL (validated as a CLI EPG value); a value that does not validate,
 // or is empty, reads as nothing pending. The HELPER's writer
-// (bin/omarchy-iptv normalize_state) is a whitelist too and is not taught
-// this key yet, so a helper write erases it -- recorded as open, not fixed:
-// bin/ is another lane's.
+// (bin/omarchy-iptv normalize_state) is a whitelist too: round 9 did not
+// teach it this key and a hand-run `state favorite add` erased the only copy
+// of the user's guide URL (D-SRC-20). Round 10 (R20a) teaches it, mirrored
+// as normalize_pending_epg on the one shared fixture
+// (the shared state-keys fixture, dev branch), and the node suite holds every key this
+// service can serialise to that fixture, so the next key cannot be added to
+// one reader alone.
+//
+// `url` must BE a string (R20a, the shared fixture): str() would read the
+// list ["http://h/g.xml"] as that URL, and the helper reads it as nothing --
+// the activeKeyText lesson, one key along.
 function pendingEpgRecord(raw) {
-  if (!raw || typeof raw !== "object") return null
-  var v = validateSourceUrl(str(raw.url), { kind: "epg", origin: "cli" })
+  if (!raw || typeof raw !== "object" || typeof raw.url !== "string") return null
+  var v = validateSourceUrl(raw.url, { kind: "epg", origin: "cli" })
   if (!v.ok || str(v.url) === "") return null
   return { url: str(v.url), seenAt: Math.max(0, Math.trunc(Number(raw.seenAt)) || 0) }
 }
@@ -394,6 +402,139 @@ function withPendingEpg(state, rec) {
   delete out.pendingEpg
   if (want !== null) out.pendingEpg = want
   return out
+}
+
+// D-SINK-19 round 10, R20b. WHAT THE SERVICE HAS CONSUMED FROM THE ENTRY
+// SURVIVES A RESTART.
+//
+// The service tells a FRESH bar-entry input from one it has already
+// consumed by two in-memory snapshots (Service.reconciledPlaylistUrl and
+// reconciledEpgUrl; Model.reconcileAction). A restart started both at "", so
+// every value still on the entry read as fresh and was adopted again, seen
+// NOW: a guide URL left there by a failed write (D-SRC-18), or written back
+// by the lagging host's patch-only logo toggle (D-SINK-20's restart half),
+// replaced a later in-app edit that had landed. The order WAS known; it was
+// simply never written down.
+//
+// So it is, as `entryInputs { playlistUrl, epgUrl }` in state.json, one slot
+// per retired input:
+//   digest    entryInputDigest of the consumed value: two FNV-1a 32 passes
+//             over the setting name and the value's ONE form
+//             (Model.entryInputForm), 16 hex digits. A digest and never the
+//             value: a REFUSED input is consumed too, and a refused input
+//             can carry a credential (`ftp://u:p@h/x`); the plugin strips it
+//             from shell.json on purpose (rule 5), and a durable copy in its
+//             own file would undo that for nothing, because the only
+//             question ever asked of this slot is "is the entry's value THIS
+//             one". A collision would make one fresh input read as consumed:
+//             about 2^-64 per comparison.
+//   at        when the service consumed it, in ms (R20b: "with the time it
+//             was consumed"); for the reader and the lens, decided on by
+//             nothing here
+//   stripped  true once an owned write has handed the host an entry WITHOUT
+//             that value (entryInputsAfterWrite). From then on a value equal
+//             to it on the entry at the next start is the user setting it
+//             AGAIN -- an `omarchy bar set ... playlistUrl A` made while the
+//             shell was down, to switch back to A -- and is fresh. Without
+//             this bit the slot would hide that re-set on the lagging host,
+//             whose publish never shows our strip.
+// A slot moves when its snapshot moves (entryInputsAfterMove): set when the
+// service consumes a new value, removed when the input goes away. At the
+// first reconcile after a start the snapshot is seeded from it
+// (entryInputSeed), so a value the state proves consumed and not stripped
+// since is not adopted again.
+//
+// Additive at STATE_VERSION 2 on the pendingEpg precedent, ABSENT when no
+// slot is set, and taught to the helper (normalize_entry_inputs) on the same
+// day and the same shared fixture (R20a).
+function entryInputDigest(name, value) {
+  var f = entryInputForm(name, value)
+  if (f.text === "") return ""
+  var body = str(name) + "\u0000" + f.form
+  return fnv1a32("a" + body) + fnv1a32("b" + body)
+}
+
+// One slot, validated; null when it is not one. Never invented: a digest
+// that is not 16 lowercase hex digits reads as no slot at all.
+function entryInputRecord(raw) {
+  if (!raw || typeof raw !== "object" || typeof raw.digest !== "string" || !/^[0-9a-f]{16}$/.test(raw.digest)) return null
+  var out = { digest: raw.digest, at: Math.max(0, Math.trunc(Number(raw.at)) || 0) }
+  if (raw.stripped === true) out.stripped = true
+  return out
+}
+
+// The whole key, validated slot by slot over RETIRED_SETTINGS; null when no
+// slot survives (the key is then absent from the state).
+function entryInputsRecord(raw) {
+  if (!raw || typeof raw !== "object") return null
+  var out = null
+  for (var i = 0; i < RETIRED_SETTINGS.length; i++) {
+    var rec = entryInputRecord(raw[RETIRED_SETTINGS[i]])
+    if (rec === null) continue
+    if (out === null) out = {}
+    out[RETIRED_SETTINGS[i]] = rec
+  }
+  return out
+}
+
+function entryInputsOf(state) {
+  return entryInputsRecord(state ? state.entryInputs : null) || {}
+}
+
+// Replace the slots; the SAME object back when nothing changes, so a
+// caller's "did the state move" stays an identity test (withPendingEpg's
+// contract).
+function withEntryInputs(state, slots) {
+  var st = state || emptyState()
+  var want = entryInputsRecord(slots)
+  var have = entryInputsRecord(st.entryInputs)
+  if (JSON.stringify(want) === JSON.stringify(have)
+      && (want !== null || !Object.prototype.hasOwnProperty.call(st, "entryInputs"))) return st
+  var out = cloneState(st)
+  delete out.entryInputs
+  if (want !== null) out.entryInputs = want
+  return out
+}
+
+// The snapshot a FIRST reconcile starts from: the entry's own value when the
+// state proves it consumed (a slot with its digest) and not stripped since;
+// "" otherwise, which is today's start -- every value fresh.
+function entryInputSeed(state, name, value) {
+  var slot = entryInputsOf(state)[str(name)]
+  if (!slot || slot.stripped === true) return ""
+  var d = entryInputDigest(name, value)
+  return d !== "" && d === slot.digest ? str(value) : ""
+}
+
+// Snapshot `name` moved from `before` to `after` at `nowMs`: a value the
+// service now holds as consumed gets its slot, an input that went away loses
+// it. A move that changes no form changes nothing.
+function entryInputsAfterMove(state, name, before, after, nowMs) {
+  var st = state || emptyState()
+  if (entryInputForm(name, before).form === entryInputForm(name, after).form) return st
+  var slots = {}
+  var have = entryInputsOf(st)
+  for (var k in have) slots[k] = have[k]
+  var d = entryInputDigest(name, after)
+  if (d === "") delete slots[str(name)]
+  else slots[str(name)] = { digest: d, at: Math.max(0, Math.trunc(Number(nowMs)) || 0) }
+  return withEntryInputs(st, slots)
+}
+
+// An owned write handed the host `entry`: a slot whose value the entry no
+// longer carries is stripped, and one it carries again is not.
+function entryInputsAfterWrite(state, entry) {
+  var st = state || emptyState()
+  var e = entry && typeof entry === "object" ? entry : {}
+  var have = entryInputsOf(st)
+  var slots = {}
+  for (var k in have) {
+    var onEntry = entryInputDigest(k, e[k]) === have[k].digest
+    var rec = { digest: have[k].digest, at: have[k].at }
+    if (!onEntry) rec.stripped = true
+    slots[k] = rec
+  }
+  return withEntryInputs(st, slots)
 }
 
 // One `{id, name, at}` record: the shape a `recents` entry, `lastPlayed`
@@ -449,6 +590,10 @@ function cloneState(state, patch) {
   // with nothing pending clones to exactly the shape it had before.
   var pending = pendingEpgRecord(st.pendingEpg)
   if (pending !== null) out.pendingEpg = pending
+  // D-SINK-19 round 10, R20b: the SEVENTH, on the day it is added, on the
+  // same terms -- carried only when a slot is set.
+  var inputs = entryInputsRecord(st.entryInputs)
+  if (inputs !== null) out.entryInputs = inputs
   var p = patch || {}
   for (var key in p) if (key !== "version") out[key] = p[key]
   return out
@@ -521,6 +666,10 @@ function parseState(text) {
   // active. Absent when none is (pendingEpgRecord).
   var pending = pendingEpgRecord(parsed.pendingEpg)
   if (pending !== null) state.pendingEpg = pending
+  // D-SINK-19 round 10, R20b: what the service consumed from the bar entry.
+  // Absent when no slot is (entryInputsRecord).
+  var inputs = entryInputsRecord(parsed.entryInputs)
+  if (inputs !== null) state.entryInputs = inputs
   var recs = asList(parsed.recents)
   for (var r = 0; r < recs.length; r++) {
     var entry = playedRecord(recs[r])
@@ -1154,14 +1303,17 @@ export {
   favoriteOrigin, favoriteRemovalNotice, hideNotice, scopeEntryAccessibleName,
   savedSearchRows, savedSearchArrivals, savedSearchDepartures,
   savedSearchFooter, withSavedSearch, withoutSavedSearch, savedSearchRecord,
-  emptyState, pendingEpgRecord, pendingEpgOf, withPendingEpg, playedRecord,
-  cloneState, withCacheLayout, parseState, pushPlayedRecord, stateOnLoad,
-  isFavorite, toggleFavorite, pushRecent, recordPlayed, clearSession,
-  stateSession, deadSessionVerdict, PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES,
-  sessionAfterOutcome, withFavorites, hiddenGroupList, hiddenGroupSet,
-  isGroupHidden, toggleHiddenGroup, browsableChannels, hideAction, hideVerb,
-  removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed,
-  normalizeFailed, prunedFailed, knownIdSet, failedIndex, failedDocument,
-  failedWhen, withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
-  countReload, reloadDisposition
+  emptyState, pendingEpgRecord, pendingEpgOf, withPendingEpg,
+  entryInputDigest, entryInputRecord, entryInputsRecord, entryInputsOf,
+  withEntryInputs, entryInputSeed, entryInputsAfterMove,
+  entryInputsAfterWrite, playedRecord, cloneState, withCacheLayout,
+  parseState, pushPlayedRecord, stateOnLoad, isFavorite, toggleFavorite,
+  pushRecent, recordPlayed, clearSession, stateSession, deadSessionVerdict,
+  PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES, sessionAfterOutcome,
+  withFavorites, hiddenGroupList, hiddenGroupSet, isGroupHidden,
+  toggleHiddenGroup, browsableChannels, hideAction, hideVerb, removeRecent,
+  trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed,
+  prunedFailed, knownIdSet, failedIndex, failedDocument, failedWhen,
+  withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
+  reloadDisposition
 }

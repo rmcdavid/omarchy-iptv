@@ -606,6 +606,15 @@ Item {
   // `stateSavesInFlight` is 0 or 1 and keeps its name for the harness.
   property int stateSavesInFlight: 0
   property string lastSaveText: ""
+  // D-SINK-19 round 10, R20c. The state the last LANDED save serialised (or
+  // the file as it was loaded): what the plugin's own disk is known to hold.
+  // The patch-only logo write asks it (Model.patchInputsToKeep) before it
+  // carries a retired input back onto the entry, because memory is what a
+  // failed write was carrying and the disk is what survives. null before the
+  // first load. `lastSaveState` is the object behind lastSaveText, promoted
+  // when that text lands.
+  property var landedState: null
+  property var lastSaveState: null
   property bool stateSaveFailed: false
   property bool stateInitOk: false
   property int stateReloadsIgnored: 0                   // observable by the harness; never a URL
@@ -1922,7 +1931,13 @@ Item {
     var epg = String(root.settings.epgUrl || "")
     var out = Model.adoptPendingEpg(root.userState, key, epg, root.reconciledEpgUrl, Date.now())
     if (out.state !== root.userState) root.userState = out.state
-    if (out.pending) root.reconciledEpgUrl = Model.epgSnapshotAfter(epg, root.reconciledEpgUrl, out.consumed)
+    if (out.pending) {
+      // R20b: the snapshot moves here too, and its slot with it; every
+      // caller saves the state straight after.
+      var lastEpg = root.reconciledEpgUrl
+      root.reconciledEpgUrl = Model.epgSnapshotAfter(epg, root.reconciledEpgUrl, out.consumed)
+      root.userState = Model.entryInputsAfterMove(root.userState, "epgUrl", lastEpg, root.reconciledEpgUrl, Date.now())
+    }
     if (out.adopted) console.warn("omarchy-iptv: a pending guide URL (epgUrl) lands on source " + Model.activeKeyText(key))
     else if (out.superseded) console.warn("omarchy-iptv: a pending guide URL (epgUrl) is superseded: source " + Model.activeKeyText(key) + " keeps the one set later")
     return out.consumed
@@ -2132,7 +2147,11 @@ Item {
     // replacement. Model.stateOnLoad() replays the play this shell recorded
     // while the read was in flight and refuses to resurrect a record already
     // consumed; both answers are the one rule, so neither is decided here.
-    var adopted = Model.stateOnLoad(Model.trimRecents(Model.parseState(text), root.maxRecents),
+    // R20c: the file as it is, before anything is merged onto it, is what the
+    // disk is known to hold.
+    var onDisk = Model.parseState(text)
+    root.landedState = onDisk
+    var adopted = Model.stateOnLoad(Model.trimRecents(onDisk, root.maxRecents),
                                     root.userState,
                                     { loadedBefore: root.stateLoaded, savePending: root.stateSavePending,
                                       maxRecents: root.maxRecents })
@@ -2169,6 +2188,7 @@ Item {
     // Marked BEFORE setText: the file is older than memory from here until
     // stateFile reports on THIS text (R9, R13). The text is kept so `saved`
     // can tell this write from an earlier one still being reported on.
+    root.lastSaveState = root.userState
     root.lastSaveText = text
     root.stateSavesInFlight = 1
     stateFile.setText(text)
@@ -3596,10 +3616,12 @@ Item {
   // caller (setShowLogos, under Model.ownedWriteMode) passes it before the
   // first state load and while a state write is parked, in flight or
   // failed: the entry then keeps the retired URL keys the PUBLISHED entry
-  // carries -- the only copy of a source whose state write has not landed,
-  // and on the lagging host possibly one our last heal stripped (D-SINK-20)
-  // -- and the patch's `sourceKey` is the host's own value (ownedEntryPatch
-  // over `settings`), never memory's.
+  // carries that may be the only copy of an input -- a valid value the LAST
+  // LANDED state does not hold (R20c, round 10: Model.patchInputsToKeep) --
+  // and strips the rest, which on the lagging host includes a value our own
+  // last heal stripped that the publish still shows (D-SINK-20); and the
+  // patch's `sourceKey` is the host's own value (ownedEntryPatch over
+  // `settings`), never memory's.
   //
   // `settings`, not `hostSettings`, is load-bearing (D-LOGO-2): `settings`
   // carries our own last write laid over the host's one-write-behind
@@ -3632,9 +3654,16 @@ Item {
     // now holds that one in the state, which counts as held here too). Key
     // names only in the log line, never a value.
     var published = Model.findBarEntry(root.shell.barConfig, root.pluginId)
-    var keep = Model.retiredInputsToKeep(published, root.userState,
-                                         { playlistUrl: root.reconciledPlaylistUrl, epgUrl: root.reconciledEpgUrl })
-    var entry = Model.entryWith(published, patch, { keepRetired: keepRetired === true, keep: keep })
+    var consumed = { playlistUrl: root.reconciledPlaylistUrl, epgUrl: root.reconciledEpgUrl }
+    // R20c (round 10, D-SINK-20): the PATCH-ONLY write keeps a retired input
+    // only when it is a valid one the LAST LANDED state does not hold
+    // (Model.patchInputsToKeep); one the disk holds, or a refused one already
+    // reported, is stripped like any heal strips it. R16 kept every one, and
+    // on the lagging host that wrote back a URL our own heal had just
+    // stripped -- a refused credential included -- for the rest of the session.
+    var keep = keepRetired === true ? Model.patchInputsToKeep(published, root.landedState, consumed)
+                                    : Model.retiredInputsToKeep(published, root.userState, consumed)
+    var entry = Model.entryWith(published, patch, { keep: keep })
     if (keep.length > 0 && keepRetired !== true) console.warn("omarchy-iptv: the bar entry keeps an input no source has adopted yet (" + keep.join(", ") + ")")
     // R19a (round 9): NO SKIP ON AN ESTIMATE. Every owned write is handed to
     // the host, and updateEntryInline's own answer is the dirty check: `false`
@@ -3656,6 +3685,13 @@ Item {
     // A heal states every owned key and strips what is consumed, so it pays
     // any mirror a failed save left owing (R19d).
     if (keepRetired !== true) root.entryMirrorOwed = false
+    // R20b: a consumed input this entry no longer carries is STRIPPED, so the
+    // same value on the entry at the next start is the user setting it again
+    // (Model.entryInputsAfterWrite). In memory, riding the next save like the
+    // slot itself (see reconcile): every act that makes a re-set of the old
+    // value mean something -- a switch, an edit, a remove -- saves.
+    var inputs = Model.entryInputsAfterWrite(root.userState, entry)
+    if (inputs !== root.userState) root.userState = inputs
     // Nothing was written (`false`): the file is as it was, and the gate in
     // front of the next write is no staler than before. Re-arming here would
     // spend a process on every hand-over the lagging host answers `false` to.
@@ -3773,18 +3809,20 @@ Item {
     // keys, so it can only ever take a credential OUT of that file, and the
     // one write that must never be refused is the one that does that. The
     // patch-only write below carries the entry's URL keys over as the host
-    // PUBLISHES them, and that is not "nothing the file does not already
+    // PUBLISHES them, and that was not "nothing the file does not already
     // hold": on the host that publishes one write behind (through 4.0.4),
     // after a heal write has stripped a URL the user set with `omarchy bar
-    // set`, the published copy still carries it, and this write puts it
-    // back on the stored entry until the next owned write strips it again
-    // -- D-SINK-20, observed live under the harness's lagging fake host.
-    // Bounded, not zero: what comes back was the user's own input one write
-    // earlier and is already a record in the 0600 state file, the echoing
-    // host never re-carries, and the shield keeps the file 0600 meanwhile.
-    // Do NOT narrow it to "keep the retired keys only while no own-write
-    // override is in force": that strips the only copy of an input whose
-    // state write failed (the round-4 P1 back through this writer).
+    // set`, the published copy still carries it, and this write put it back
+    // on the stored entry -- D-SINK-20, observed live under the harness's
+    // lagging fake host, and re-graded P2 by the round-9 data-loss lens: a
+    // REFUSED credential no record holds came back too, and stayed for the
+    // session. R20c (round 10) narrows what the patch carries to a valid
+    // value the LAST LANDED state does not hold (the funnel asks
+    // Model.patchInputsToKeep), which is exactly the only copy the round-4
+    // P1 lost and nothing else. Do NOT narrow it to "keep the retired keys
+    // only while no own-write override is in force": that decides from the
+    // host's state, which knows nothing of the disk, and strips the only
+    // copy of an input whose state write failed.
     // What both get is the shield re-arm, which tightens the file and
     // shortens the drift window by one more event. writeOwnedEntry re-arms
     // the shield itself, so there is no second call here: one write, one
@@ -4315,6 +4353,18 @@ Item {
     var s = root.settings
     var playlist = String(s.playlistUrl || "")
     var epg = String(s.epgUrl || "")
+    // R20b (round 10): the first reconcile after a start does not begin from
+    // nothing. A value the state proves this service already consumed, and
+    // has not stripped since, is not fresh (Model.entryInputSeed): it was
+    // adopted, held or refused before the restart, and adopting it again --
+    // seen NOW -- replaced a later in-app edit that had landed (D-SRC-18,
+    // and D-SINK-20's restart half).
+    if (!root.reconciled) {
+      root.reconciledPlaylistUrl = Model.entryInputSeed(root.userState, "playlistUrl", playlist)
+      root.reconciledEpgUrl = Model.entryInputSeed(root.userState, "epgUrl", epg)
+    }
+    var lastPlaylist = root.reconciledPlaylistUrl
+    var lastEpg = root.reconciledEpgUrl
     var plan = Model.reconcileAction({ first: !root.reconciled, force: force === true,
                                        playlist: playlist, epg: epg,
                                        lastPlaylist: root.reconciledPlaylistUrl,
@@ -4332,6 +4382,18 @@ Item {
     // "ignore" with no fresh EPG input is the ordinary steady state.
     if (!(plan.act === "ignore" && !plan.adoptEpg)) epgConsumed = root.adoptActive(playlist, epg, plan)
     root.reconciledEpgUrl = Model.epgSnapshotAfter(epg, root.reconciledEpgUrl, epgConsumed)
+    // R20b: a snapshot that moved is written down with the time, so the next
+    // start knows it (Model.entryInputsAfterMove; a digest, never the value).
+    // NOT saved for its own sake: it rides the next save, which is the save
+    // that matters -- what an older input on the entry could overwrite at the
+    // next start is a LATER input (an edit, a switch), and that input's own
+    // save carries the slot. A save issued for the slot alone would hold the
+    // strip behind it (R13), and a strip held is what hid a re-set of the
+    // same value in round 9 (308258f; the R19c re-stamp case goes red).
+    var now = Date.now()
+    var next = Model.entryInputsAfterMove(root.userState, "playlistUrl", lastPlaylist, root.reconciledPlaylistUrl, now)
+    next = Model.entryInputsAfterMove(next, "epgUrl", lastEpg, root.reconciledEpgUrl, now)
+    if (next !== root.userState) root.userState = next
   }
 
   // D-SINK-19. ONE resolver for the state load, the `shell` arrival, the
@@ -4860,6 +4922,7 @@ Item {
       if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) {
         root.stateSavesInFlight = 0
         root.stateSaveFailed = false
+        root.landedState = root.lastSaveState   // R20c: what the disk holds now
       }
       root.settleEntryFlush()
       // R19d (D-SRC-18): a mirror a failed save withheld is paid by the first
