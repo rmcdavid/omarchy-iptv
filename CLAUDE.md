@@ -95,6 +95,17 @@ Consequences you must respect:
   demonstrated turnaround of 3.5 days. So a release files a NEW verification
   request and never closes an older one. Settled by the product owner on
   2026-09-26 (F-M3-4).
+- **Exception, decided by the product owner on 2026-10-13: `main` is HELD at
+  0.13.6 until a maintainer actions #11315** (approves it or raises a
+  finding on it). Why this request and not the rule: the marketplace's update
+  validation checks the requested commit against the repository's CURRENT
+  default-branch HEAD (`plugin-update.mjs`: "The repository HEAD no longer
+  matches the requested update commit"), so a moved `main` makes a pending
+  request stale; every request since 0.12.1 was superseded or answered with a
+  finding before it could be approved, and #11315 is the first since 0.13.3
+  whose automated baseline passed. `dev` moves freely; nothing runs
+  `release.py build` or pushes `main` until #11315 is actioned. F-M3-4's
+  half that says never close our own request stands unchanged.
 
 ## Where the truth lives
 
@@ -737,6 +748,16 @@ This project is built by role lanes running in separate git worktrees.
    compositor cannot be asked, because `hyprctl layers` carries no
    keyboard-focus field and `hyprctl activewindow` names the foreground
    toplevel while the overlay is receiving keys (measured 2026-10-06).
+6b. A nested cage gets a PRIVATE D-Bus: a `dbus-daemon` started from a config
+   with NO service directories (the shape `tests/a11y/run_private_bus.py`
+   uses), never plain `dbus-run-session`. Its standard service directories let
+   D-Bus activation start desktop portals inside the nested session, and on
+   2026-10-13 a lane's throwaway rig did exactly that: two portal instances
+   crashed, the host posted a crash notification on the user's desktop, and the
+   user's REAL `xdg-document-portal.service` exited with status 21 the second
+   the rig started and stayed failed (F-M3-21). A rig a lane writes for itself
+   is held to this rule as much as the harness is; the harness's own scripts
+   already never use `dbus-run-session`.
 7. A scenario's output is its evidence, and evidence is never summarised from
    a tail. Every scenario opens a transcript through `qa_transcript_start`
    (`scripts/qa-lib.sh`) and prints the path as its own first line; report

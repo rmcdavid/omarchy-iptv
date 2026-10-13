@@ -13157,6 +13157,49 @@ minute is the logo scenario's `--baseline 159da94` 9 / 24 (cb08eb1), and
 `qml` image probe, never the harness shell -- so it cannot carry this
 error. Every other count against those trees predates 51d686b.
 
+### F-HARNESS-20 fixed, its two siblings, and F-M3-21
+
+**2026-10-13.** The fix lives in the harness, never in shipped code: the
+helper's `host_config_path()` keeps deriving the host's settings file from
+`$HOME` with no override, because the host does. `qa_harness_home` in
+`scripts/qa-lib.sh` gives every process a harness run starts -- the nested
+shell, the helper it spawns, mpv, every scenario driver -- a scratch HOME,
+XDG_CONFIG_HOME and XDG_DATA_HOME, copies the theme files the shell needs
+as 0600 regular files (never a link into the real home), and drops
+MPV_HOME and XCOMPOSEFILE only when they point into the real home. The
+check (`tests/test_harness_home.py`) runs the shipped path resolvers and
+the shipped `config shield` under the environment `run.sh` builds, against
+a decoy "real" home: on `dev` before the fix it failed 7 times and errored
+twice (the shield tightened the decoy's 0644 file, mpv created
+`.config/mpv` in it); after, 10 of 10 pass. Live under a nested cage, the
+harness log reads `config shield: omarchy/shell.json 0644 -> 0600` against
+the scratch copy, scenario counts equal `dev`'s (sources 66 / 0 both), and
+the real `shell.json` and `state.json` kept their mode, mtime, ctime and
+SHA-256 across every run.
+
+The review of the lane found the claim "every driver isolates itself" was
+true only of `scripts/dev-harness/`: `qa-player-scenarios.sh`'s cold phase
+still ran the helper's `player start` under the real XDG_STATE_HOME. Both QA
+drivers in `scripts/` now isolate themselves, their guards compare against
+the recorded real home (with the old `$HOME` line restored, a scratch dir
+inside a decoy's `.config` went through unrefused), and the bookkeeping
+test sees both. The lane's own search found **F-HARNESS-23**: three gate
+steps had been writing content-free caches into the real home on every
+run. And three places described the shield's file as
+`$XDG_CONFIG_HOME/omarchy/shell.json` -- the helper's docstring and help
+text, a `Service.qml` comment -- while `tests/helper_loader.py` followed
+XDG_CONFIG_HOME when choosing which live file to guard, so on a machine
+where the two differ the guard watched the wrong file. All corrected.
+
+**F-M3-21.** The lane reported that its first two live runs, wrapped in
+plain `dbus-run-session`, let D-Bus activation start desktop portals inside
+the nested session: two portal instances crashed, the host posted a crash
+notification, and the user's real `xdg-document-portal.service` exited with
+status 21 at 01:14:27 CDT and stayed failed (`systemctl --user status`
+still read failed at 03:54). Every later run used a private bus with no
+service directories and activated nothing. CLAUDE.md now carries that as a
+rule every lane reads (working in parallel, 6b).
+
 ### 0.13.6: the release record (D-REL-5 shipped)
 
 **Cut 2026-10-12 on the owner's word, after four read-only pre-cut lenses on
