@@ -13157,6 +13157,20 @@ minute is the logo scenario's `--baseline 159da94` 9 / 24 (cb08eb1), and
 `qml` image probe, never the harness shell -- so it cannot carry this
 error. Every other count against those trees predates 51d686b.
 
+### D-LOGO-13: compressed PNG text metadata is the decoder's next unbounded number
+
+**Filed 2026-10-13 from the maintainer's finding on #11315 (0.13.6,
+ca5a3a5); P1; open.** D-LOGO-11 bounded what a logo's HEADER declares --
+the dimensions the decoder's cost is quadratic in -- and left the rest of
+the file as the provider wrote it. A PNG carries more than pixels: `tEXt`,
+`zTXt` and `iTXt` chunks of text, `iCCP` colour profiles, `eXIf`, and any
+private chunk, and the compressed ones are inflated by libpng while it reads
+the header, before a single row is decoded and whatever `sourceSize` says.
+The maintainer's claim is that the inflated text is retained by Qt with the
+image and is bounded by nothing we check: the 256 KiB byte cap limits the
+compressed size, and zlib's ratio is about 1,000 to 1. The owner asked for
+it to be measured before it is fixed, and for the fix to ship as 0.13.7.
+
 ### F-HARNESS-20 fixed, its two siblings, and F-M3-21
 
 **2026-10-13.** The fix lives in the harness, never in shipped code: the
