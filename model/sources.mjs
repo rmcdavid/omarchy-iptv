@@ -194,6 +194,9 @@ function sourceErrorMessage(code, opts) {
     // adoption can have. Names the directory, never a URL, and never
     // `omarchy bar set` (which would put a credential in the shell history).
     state_write_failed: "Could not write state.json" + SEP + "check ~/.local/state/omarchy-iptv",
+    // R22a (round 12): the no-write mode. A source call is refused rather
+    // than made in memory only, because nothing made now would be kept.
+    state_unreadable: "state.json could not be read" + SEP + "nothing is saved until it can be",
     // D-SINK-18. Deliberately NOT the persist_failed sentence: that one sends
     // the user to `omarchy bar set`, which would write the credentialed URL
     // into their shell history permanently -- the durable exposure engineering

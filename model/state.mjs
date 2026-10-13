@@ -1135,6 +1135,147 @@ function reloadDisposition(ctx) {
   if (c.saveFailed === true) return { act: "ignore", reason: "save-failed" }
   return { act: "apply", reason: "file-newer" }
 }
+// ---- D-SINK-19 round 12, R22a: A STATE THAT DID NOT LOAD IS NEVER WRITTEN ----
+//
+// The round-11 data-loss lens (live, both host shapes): a migrated install
+// whose state.json could not be read at the start had an empty state written
+// over it -- every source, credential and favourite gone. stateFile's
+// onLoadFailed used to call applyUserState(""), so a failed read was applied
+// as an EMPTY state, the migration ran on it and marked it, its save parked
+// behind the start-up dirs, the real text arriving with the helper's chmod
+// was ignored because a save was parked (R9), and the parked save landed.
+// The cache layout's save did the same through an unreadable state
+// DIRECTORY on every tree since D-SINK-19 began, 0.13.6 included.
+//
+// What Quickshell's FileView reports, MEASURED on Quickshell 0.3.1 in a
+// nested headless cage on 2026-10-13 (one FileView per case, the enum is
+// qs::io::FileViewError in quickshell-io.qmltypes):
+//   no file at the path                      loadFailed 2 FileNotFound
+//   a file with mode 0000 (or 0200)          loadFailed 3 PermissionDenied
+//   a directory where the file should be     loadFailed 4 NotAFile
+//   a FIFO at the path                       loadFailed 4 NotAFile
+//   the file inside a directory with 0000    loadFailed 2 FileNotFound  <-- !
+//   the file inside a directory with 0600    loadFailed 2 FileNotFound  <-- !
+//   a dangling symlink, a missing parent     loadFailed 2 FileNotFound
+//   an empty file, a file of garbage         loaded (text "" / the garbage)
+// So FileNotFound does NOT mean "the file does not exist": an unreadable
+// directory reads exactly like a fresh install, and no later event says
+// otherwise (the restored 0000 directory raised no fileChanged in that run;
+// inotify_add_watch had failed with EACCES). The one party that can tell the
+// two apart is the helper's start-up `state init`, which lstat()s the path
+// before it changes anything and reports what it found (`found`), so a
+// FileNotFound is a fresh install only when the helper says `absent` too.
+//
+// The numbers are FileViewError's, in its declaration order; the node suite
+// reads the installed qmltypes and fails if the order moves (rule 13: a join
+// by number is checked).
+var STATE_LOAD_ERRORS = { 1: "io-error", 2: "absent", 3: "permission", 4: "not-a-file" }
+
+// One load outcome -> what it IS. `result` is { loaded: true, text } from
+// onLoaded, or { loaded: false, error } from onLoadFailed. "loaded" means the
+// text parses as a state (a JSON object; parseState reads anything that
+// does); "unparsed" is a file that was read and is not one -- an empty file
+// included, since nothing this plugin writes is empty. Any error number this
+// table does not know is an I/O error: never "absent" by default.
+function stateLoadKind(result) {
+  var r = result || {}
+  if (r.loaded !== true) {
+    var e = Math.floor(Number(r.error))
+    return STATE_LOAD_ERRORS[e] || "io-error"
+  }
+  return parseJsonObject(r.text) ? "loaded" : "unparsed"
+}
+
+// The helper's `state init` reply -> "absent" when it found nothing at the
+// path before it created the file, "present" when it found anything at all
+// (a file, a directory, something it could not lstat), and "unknown" when
+// there is no reply to read: the init failed, printed nothing, or is a build
+// that predates the field. Only "absent" can make a fresh install.
+function stateInitFound(text, exitCode) {
+  if (Number(exitCode) !== 0) return "unknown"
+  var lines = str(text).split("\n")
+  for (var i = lines.length - 1; i >= 0; i--) {
+    var o = parseJsonObject(lines[i])
+    if (!o || o.kind !== "state" || o.action !== "init") continue
+    var f = str(o.found)
+    if (f === "absent") return "absent"
+    if (f === "file" || f === "other" || f === "unreadable") return "present"
+    return "unknown"
+  }
+  return "unknown"
+}
+
+// What the service does with a load that is not "loaded".
+//   ctx.kind         Model.stateLoadKind of the latest load
+//   ctx.loadedBefore a state has been applied this session
+//   ctx.initFound    Model.stateInitFound, "" until the start-up init exits
+//   ctx.retried      the one re-read after the init has been spent
+// -> { act, reason }
+//   apply  the load is a state: apply it (and lift any no-write mode)
+//   fresh  nothing exists at the path: an empty state, the migration may run
+//   wait   the start-up init has not answered; nothing is applied or written
+//   retry  re-read once: the init restores the modes of the directory and
+//          file it finds, so the file may be readable now (it is, for both
+//          chmod 0000 cases; a 0000 file also raises its own reload)
+//   block  no-write mode for the session: every state write is refused, the
+//          migration does not run, the entry is left as it is
+// Mid-session (`loadedBefore`) any load that is not a state blocks at once
+// and memory stands: a reload never replaces memory with a state that did
+// not load, and a vanished file is not a fresh install while the session
+// that read it is still running (the unreadable directory reads the same).
+function stateLoadDecision(ctx) {
+  var c = ctx || {}
+  var kind = str(c.kind)
+  if (kind === "loaded") return { act: "apply", reason: "loaded" }
+  if (kind === "") return { act: "wait", reason: "no-load" }
+  if (c.loadedBefore === true) return { act: "block", reason: kind }
+  var found = str(c.initFound)
+  if (found === "") return { act: "wait", reason: "init" }
+  if (kind === "absent" && found === "absent") return { act: "fresh", reason: "absent" }
+  if (c.retried !== true) return { act: "retry", reason: kind }
+  return { act: "block", reason: kind === "absent" && found !== "unknown" ? "absent-unconfirmed" : kind }
+}
+
+// The one gate every state write goes through (Service.saveState).
+//   blocked  the no-write mode's reason, "" when writes are allowed
+//   loaded   a state has been applied this session
+//   dirsReady the start-up `state init` has exited
+// -> "refuse" | "park" | "write". A save asked for before any state has
+// loaded PARKS (the section-15 replay: a play recorded before the load is
+// written once the file it merges onto is known), never writes: before
+// R22a a save made with the dirs ready and the load still out wrote the
+// empty default over the file.
+function stateWriteGate(ctx) {
+  var c = ctx || {}
+  if (str(c.blocked) !== "") return "refuse"
+  if (c.loaded !== true || c.dirsReady !== true) return "park"
+  return "write"
+}
+
+// The user is told ONCE per no-write episode: this sentence, as a desktop
+// notification and a console line. It names the file and what to do, and
+// never a URL (it is composed from the reason and the path alone).
+function stateUnreadableNotice(reason, path) {
+  var file = str(path) !== "" ? str(path) : "state.json"
+  var r = str(reason)
+  var what = "could not be read"
+  var fix = "Check the file and its folder, then run omarchy restart shell."
+  if (r === "permission") {
+    what = "is not readable (permission denied)"
+    fix = "Make it readable with chmod 600 on that file, then run omarchy restart shell."
+  } else if (r === "not-a-file") {
+    what = "is not a regular file"
+    fix = "Move whatever is at that path aside, then run omarchy restart shell."
+  } else if (r === "unparsed") {
+    what = "is not a valid state file"
+    fix = "Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell."
+  } else if (r === "absent" || r === "absent-unconfirmed") {
+    what = "could not be found, or its folder could not be read"
+    fix = "Make the folder readable with chmod 700, then run omarchy restart shell."
+  }
+  return { title: "Saved sources not loaded",
+           body: file + " " + what + ". Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. " + fix }
+}
 export {
   MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedSearchTerms,
   savedSearchHit, savedSearchCount, savedSearchChannels, savedSearchNotice,
@@ -1150,5 +1291,6 @@ export {
   removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed,
   normalizeFailed, prunedFailed, knownIdSet, failedIndex, failedDocument,
   failedWhen, withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
-  countReload, reloadDisposition
+  countReload, reloadDisposition, STATE_LOAD_ERRORS, stateLoadKind,
+  stateInitFound, stateLoadDecision, stateWriteGate, stateUnreadableNotice
 }

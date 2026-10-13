@@ -633,6 +633,25 @@ Item {
   // go red for the start-up chmod reload because the own-write echo after
   // every start satisfied it.
   property var stateReloadsByReason: ({})
+  // D-SINK-19 round 12, R22a. A STATE THAT DID NOT LOAD IS NEVER WRITTEN.
+  // `stateLoadKind` is Model.stateLoadKind of the latest load ("" before the
+  // first): "loaded", "absent", "permission", "not-a-file", "io-error" or
+  // "unparsed". `stateInitFound` is the start-up `state init`'s verdict on
+  // the path BEFORE it touched anything (Model.stateInitFound; "" until it
+  // exits), the one witness that tells a missing file from an unreadable
+  // directory -- FileView reports both as FileNotFound (measured, see
+  // Model.STATE_LOAD_ERRORS). `stateWriteBlocked` is the no-write mode: ""
+  // while writes are allowed, else the reason; every state write and every
+  // owned entry write is refused while it is set, the migration does not
+  // run, and a later load that IS a state lifts it. `stateBlockTold` makes
+  // the notice once per episode; `stateWritesRefused` counts the refusals
+  // for the harness. None of them ever holds a URL.
+  property string stateLoadKind: ""
+  property string stateInitFound: ""
+  property bool stateLoadRetried: false
+  property string stateWriteBlocked: ""
+  property bool stateBlockTold: false
+  property int stateWritesRefused: 0
   // R5: the key whose entry mirror is WAITING for a parked state save
   // (Model.pointerWritePlan "wait-entry"); null when nothing waits. Written
   // by settleEntryFlush once that save has LANDED (R11), never before it.
@@ -1816,6 +1835,8 @@ Item {
   // saveFailed reports through sourcesPersistFailed("state_write_failed").
 
   function sourcesReady() {
+    // R22a: refused, not made in memory only -- nothing made now would be kept.
+    if (root.stateWriteBlocked !== "") return root.sourceResult(false, "state_unreadable", Model.sourceErrorMessage("state_unreadable"), "")
     if (!root.stateLoaded || !root.cacheReady) return root.sourceResult(false, "not_ready", Model.sourceErrorMessage("not_ready"), "")
     if (root.probing || root.switching) return root.sourceResult(false, "busy", Model.sourceErrorMessage("busy"), root.probingKey)
     return null
@@ -1884,6 +1905,7 @@ Item {
   // guide returns to the first-run state (playback, if any, continues).
   function removeSource(id) {
     var key = String(id || "")
+    if (root.stateWriteBlocked !== "") return root.sourceResult(false, "state_unreadable", Model.sourceErrorMessage("state_unreadable"), key)
     if (!root.stateLoaded || !root.cacheReady) return root.sourceResult(false, "not_ready", Model.sourceErrorMessage("not_ready"), key)
     if (root.probing && (root.probingKey === key || root.probeDirKey === key)) return root.sourceResult(false, "busy", Model.sourceErrorMessage("busy"), key)
     if (root.switching) return root.sourceResult(false, "busy", Model.sourceErrorMessage("busy"), key)
@@ -2079,6 +2101,68 @@ Item {
 
   onChannelOrderChanged: root.applyOrder()
 
+  // D-SINK-19 round 12, R22a. EVERY load of state.json arrives here first,
+  // from stateFile's onLoaded and onLoadFailed alike, and is classified
+  // before anything is applied (Model.stateLoadKind). Only a load that IS a
+  // state reaches applyUserState -- and it lifts the no-write mode, which is
+  // what "a later successful load lifts it" means. Anything else waits for,
+  // or is judged with, the helper's start-up verdict (decideStateLoad).
+  function stateLoadArrived(result) {
+    var kind = Model.stateLoadKind(result)
+    root.stateLoadKind = kind
+    if (kind === "loaded") {
+      root.liftStateBlock()
+      root.applyUserState(result.text)
+      return
+    }
+    root.decideStateLoad()
+  }
+
+  // Model.stateLoadDecision, carried out. Called by a load that is not a
+  // state and by the start-up init's exit, in whichever order they come.
+  function decideStateLoad() {
+    if (root.stateLoadKind === "" || root.stateLoadKind === "loaded") return
+    var d = Model.stateLoadDecision({ kind: root.stateLoadKind, loadedBefore: root.stateLoaded,
+                                      initFound: root.stateInitFound, retried: root.stateLoadRetried })
+    if (d.act === "fresh") {
+      // The one load failure that is a fresh install: FileNotFound, AND the
+      // helper found nothing there before it created the file.
+      root.applyUserState("")
+    } else if (d.act === "retry") {
+      root.stateLoadRetried = true
+      stateFile.reload()
+    } else if (d.act === "block") {
+      root.blockStateWrites(d.reason)
+    }
+  }
+
+  // The no-write mode (R22a). Every state write is refused from here on
+  // (saveState's gate), the held entry mirror is dropped and no owned entry
+  // write is made (writeOwnedEntry), reconcile does nothing, and the source
+  // verbs answer `state_unreadable`. Memory stands: at a start it is the
+  // empty default and nothing is applied, mid-session it is what the session
+  // last had. Told once per episode, by Model.stateUnreadableNotice's
+  // sentence, which carries a reason and the path and never a URL.
+  function blockStateWrites(reason) {
+    var r = String(reason || "io-error")
+    if (root.stateWriteBlocked === r) return
+    root.stateWriteBlocked = r
+    root.stateSavePending = false
+    root.settleEntryFlush()
+    if (root.stateBlockTold) return
+    root.stateBlockTold = true
+    var path = root.stateDir + "/state.json"
+    console.warn("omarchy-iptv: " + Model.stateUnreadableNotice(r, path).body)
+    root.notify("stateUnreadable", { reason: r, path: path })
+  }
+
+  function liftStateBlock() {
+    if (root.stateWriteBlocked === "") return
+    console.warn("omarchy-iptv: state.json loaded again; writes resume (they were refused: " + root.stateWriteBlocked + ")")
+    root.stateWriteBlocked = ""
+    root.stateBlockTold = false
+  }
+
   // state.json -> userState (v1 files migrate in memory, section 2.2), then
   // the startup sequence of section 4.4: reconcile the settings into the
   // history and run the one-time cache migration. A reload caused by one
@@ -2139,7 +2223,22 @@ Item {
   }
 
   function saveState() {
-    if (!root.dirsReady) {
+    // R22a / R22b: THE gate. Every writer of state.json in this service goes
+    // through this function (reconcile's adoption, the cache layout,
+    // favourites, hidden groups, saved searches, recents, the session record,
+    // the source verbs, the probe commit, the key mirror's plan, the D-ID-3
+    // remap, the stats adoption), so the no-write mode is decided once, here.
+    // "park" is also the answer before any state has loaded: a save then has
+    // nothing known to merge onto, so it waits for the load (stateOnLoad
+    // replays the session record onto the file) rather than writing the
+    // empty default over a file nobody has read.
+    var gate = Model.stateWriteGate({ blocked: root.stateWriteBlocked, loaded: root.stateLoaded, dirsReady: root.dirsReady })
+    if (gate === "refuse") {
+      root.stateSavePending = false
+      root.stateWritesRefused = root.stateWritesRefused + 1
+      return
+    }
+    if (gate === "park") {
       root.stateSavePending = true
       return
     }
@@ -2165,7 +2264,7 @@ Item {
   // only copy of a source whose state write did not land, and the next start
   // re-adopts it -- and logs a line that carries the reason and no URL.
   function settleEntryFlush() {
-    var d = Model.entryFlushDisposition({ pendingKey: root.pendingEntryKey, dirsReady: root.dirsReady,
+    var d = Model.entryFlushDisposition({ pendingKey: root.pendingEntryKey, blocked: root.stateWriteBlocked, dirsReady: root.dirsReady,
                                           initOk: root.stateInitOk, saveFailed: root.stateSaveFailed,
                                           savePending: root.stateSavePending,
                                           savesInFlight: root.stateSavesInFlight })
@@ -3598,6 +3697,12 @@ Item {
   // the key mirror's job once the file agrees with memory again (writeActive
   // under R13), and the mirror never passes this.
   function writeOwnedEntry(overrides, what, announce, patchOnly) {
+    // R22a: in the no-write mode the entry is left exactly as it is -- it may
+    // hold the only copy of an input the unread file could not tell us about.
+    if (root.stateWriteBlocked !== "") {
+      console.warn("omarchy-iptv: the bar entry is left as it is (state.json was not loaded); no " + what + " written")
+      return false
+    }
     if (!root.shell || typeof root.shell.updateEntryInline !== "function"
         || !Model.barEntryWritable(root.shell.barConfig, root.pluginId)) {
       console.warn("omarchy-iptv: no writable bar entry for the " + what)
@@ -3786,10 +3891,15 @@ Item {
     // -- the only copy of it. Nothing on the guide's path waits for the
     // load (openSources needs serviceReady, toggleLogos inSources), so the
     // gate is here, where the write is decided.
-    var mode = Model.ownedWriteMode({ stateLoaded: root.stateLoaded,
+    var mode = Model.ownedWriteMode({ blocked: root.stateWriteBlocked,
+                                      stateLoaded: root.stateLoaded,
                                       savePending: root.stateSavePending,
                                       savesInFlight: root.stateSavesInFlight,
                                       saveFailed: root.stateSaveFailed })
+    if (mode.mode === "none") {
+      console.warn("omarchy-iptv: logo setting not written (" + mode.reason + "); the bar entry is left as it is")
+      return false
+    }
     if (mode.mode === "patch") {
       console.warn("omarchy-iptv: logo setting written alone; the bar entry's source keys are left as they are (" + mode.reason + ")")
       return root.writeOwnedEntry({ showLogos: want }, "logo setting", false, true)
@@ -4280,7 +4390,10 @@ Item {
   // call both (rule 12). This function moves the session's in-memory record
   // of what it has handled (`entryInputsSeen`), reports, and hands the plan on.
   function reconcile(force) {
-    if (!root.stateLoaded) return
+    // R22a: in the no-write mode the migration does not run, nothing is
+    // reported and nothing is stripped -- whether the marker landed is
+    // exactly what the unread file would have said.
+    if (!root.stateLoaded || root.stateWriteBlocked !== "") return
     var s = root.settings
     var playlist = String(s.playlistUrl || "")
     var epg = String(s.epgUrl || "")
@@ -4836,8 +4949,11 @@ Item {
     watchChanges: true
     atomicWrites: true
     printErrors: false
-    onLoaded: root.applyUserState(text())
-    onLoadFailed: root.applyUserState("")
+    // R22a: a load is classified before anything is applied. A failed load is
+    // NOT an empty state: that was the round-11 P1 (an empty state, migrated
+    // and marked, written over a file that merely could not be read).
+    onLoaded: root.stateLoadArrived({ loaded: true, text: stateFile.text() })
+    onLoadFailed: (error) => root.stateLoadArrived({ loaded: false, error: error })
     // Fires for our own atomic write AND for a bare chmod of the file, mode
     // changed or not (measured 2026-10-11, D-SRC-15); applyUserState decides
     // whether what the reload delivers is newer than memory (R9).
@@ -5294,10 +5410,14 @@ Item {
     // mode of an existing one, so the helper pre-creates state.json 0600
     // (O_EXCL, so the check-and-create is race-free; an existing file is
     // only chmod-ed) before the first saveState(), which dirsReady gates.
-    // Argv only; the helper prints one JSON line that is discarded.
+    // Argv only; the helper prints one JSON line, read at the exit for its
+    // `found` (R22a) and otherwise discarded.
     id: stateInitProc
     command: ["python3", root.helperPath, "state", "--state-dir", root.stateDir, "init"]
-    stdout: StdioCollector { waitForEnd: true }
+    // R22a: the reply is READ now. Its `found` is what was at the path before
+    // the helper touched it, and only `absent` lets a FileNotFound load be a
+    // fresh install (Model.stateInitFound).
+    stdout: StdioCollector { id: stateInitStdout; waitForEnd: true }
     stderr: StdioCollector {
       waitForEnd: true
       onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv state init:", Model.redactUrls(text.trim()))
@@ -5312,6 +5432,11 @@ Item {
       // fail too, and the entry mirror must not strip the URL on top of it.
       root.stateInitOk = exitCode === 0
       if (!root.stateInitOk) console.warn("omarchy-iptv: state init exited " + exitCode + "; state.json may be unwritable")
+      // R22a: the witness the held load was waiting for. A fresh install is
+      // applied here; anything else is re-read once (the helper restores the
+      // modes it finds) and then blocks.
+      root.stateInitFound = Model.stateInitFound(stateInitStdout.text, exitCode)
+      root.decideStateLoad()
       // R5: the parked state save FIRST, then the entry mirror that waited
       // for it. The other order is the pointer-less source the review found.
       // R11: "then" means once the save has LANDED -- settleEntryFlush reads

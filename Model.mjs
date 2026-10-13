@@ -75,7 +75,8 @@ export {
   MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed, prunedFailed,
   knownIdSet, failedIndex, failedDocument, failedWhen, withFailed,
   failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
-  reloadDisposition
+  reloadDisposition, STATE_LOAD_ERRORS, stateLoadKind, stateInitFound,
+  stateLoadDecision, stateWriteGate, stateUnreadableNotice
 } from "./model/state.mjs"
 export {
   parseJsonObject, parseChannels, parseEpgNow, parseHelperStatus,

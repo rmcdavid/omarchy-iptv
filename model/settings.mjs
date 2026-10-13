@@ -647,9 +647,14 @@ function barEntryWritable(barConfig, pluginId) {
 // stateInitProc's exit (after the parked save is issued), from stateFile's
 // `saved` and from its `saveFailed`, and (R13) from persistActive the moment
 // it holds a key on the dirsReady route.
+//
+// R22a (round 12): `blocked`, the no-write mode's reason, drops a held key
+// whatever else is true -- no state write will land to wait for, and the
+// entry is left exactly as it is.
 function entryFlushDisposition(ctx) {
   var c = ctx || {}
   if (c.pendingKey === null || c.pendingKey === undefined) return { act: "none", reason: "nothing-held" }
+  if (str(c.blocked) !== "") return { act: "drop", reason: "state-unreadable" }
   if (c.dirsReady !== true) return { act: "wait", reason: "dirs" }
   if (c.initOk !== true) return { act: "drop", reason: "init-failed" }
   // R13: a save still parked or in flight outranks a STALE failure. The flag
@@ -725,8 +730,15 @@ function owedMirrorAction(ctx) {
 // Takes the four inputs and nothing else; the reason names which one
 // decided, `state-not-loaded` first. In the model so node can call it
 // (rule 12) and the fixture's `ownedWrite` section pins every combination.
+//
+// R22a (round 12): a FIFTH input, `blocked`, and a third answer, "none". In
+// the no-write mode (a state.json that did not load) the entry is left
+// exactly as it is -- it may hold the only copy of an input the file could
+// not tell us about -- so no owned write is made at all, the patch included.
+// It is checked first: it outranks every save flag.
 function ownedWriteMode(flags) {
   var f = flags || {}
+  if (str(f.blocked) !== "") return { mode: "none", reason: "state-unreadable" }
   if (f.stateLoaded !== true) return { mode: "patch", reason: "state-not-loaded" }
   if (f.savePending === true) return { mode: "patch", reason: "save-parked" }
   if ((Number(f.savesInFlight) || 0) > 0) return { mode: "patch", reason: "save-in-flight" }

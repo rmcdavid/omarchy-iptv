@@ -7134,6 +7134,67 @@ check("R21d: the round 9 and 10 exports are gone from the model, and none of the
    "entryInputSeed", "entryInputsAfterMove", "entryInputsAfterWrite", "epgSetAtOf", "adoptPendingEpg", "epgByTime", "applyPendingEpg", "epgSnapshotAfter",
    "patchInputsToKeep"].filter(n => n in Model || serviceSource.indexOf("Model." + n + "(") !== -1),
   [])
+// ---- R22a (D-SINK-19 round 12): the load classification, called for real ----
+//
+// Quickshell 0.3.1's FileView, MEASURED in a nested headless cage on
+// 2026-10-13: FileNotFound 2 for a missing file AND for a file inside a
+// directory it cannot search; PermissionDenied 3 for a 0000 file; NotAFile 4
+// for a directory or a FIFO at the path; `loaded` for an empty or garbage
+// file. The numbers are the enum's declaration order, so this reads the
+// installed qmltypes and fails if the order moves (rule 13).
+;(function () {
+  const qmltypes = "/usr/lib/qt6/qml/Quickshell/Io/quickshell-io.qmltypes"
+  if (!fs.existsSync(qmltypes)) { check("R22a: FileViewError's order (Quickshell not installed here; nothing to compare)", true, true); return }
+  const text = fs.readFileSync(qmltypes, "utf8")
+  const block = (text.match(/name: "qs::io::FileViewError"[\s\S]*?values: \[([\s\S]*?)\]/) || [])[1] || ""
+  const values = (block.match(/"([A-Za-z]+)"/g) || []).map(v => v.slice(1, -1))
+  check("R22a: Model.STATE_LOAD_ERRORS names FileViewError's values by their position in the installed Quickshell's enum",
+    [values, Model.STATE_LOAD_ERRORS[values.indexOf("Unknown")], Model.STATE_LOAD_ERRORS[values.indexOf("FileNotFound")],
+     Model.STATE_LOAD_ERRORS[values.indexOf("PermissionDenied")], Model.STATE_LOAD_ERRORS[values.indexOf("NotAFile")]],
+    [["Success", "Unknown", "FileNotFound", "PermissionDenied", "NotAFile"], "io-error", "absent", "permission", "not-a-file"])
+})()
+check("R22a: stateLoadKind -- a load that parses as an object is a state; an empty file, garbage, an array, a number, null are not; every failure is its kind and an unknown number is an I/O error, never `absent`",
+  [{ loaded: true, text: '{"version":2}' }, { loaded: true, text: "{}\n" }, { loaded: true, text: "" }, { loaded: true, text: "  \n" },
+   { loaded: true, text: '{"version": 2, "sources": [' }, { loaded: true, text: "[]" }, { loaded: true, text: "7" }, { loaded: true, text: "null" },
+   { loaded: false, error: 2 }, { loaded: false, error: 3 }, { loaded: false, error: 4 }, { loaded: false, error: 1 }, { loaded: false, error: 0 },
+   { loaded: false, error: 9 }, { loaded: false }, null, { loaded: "true", text: "{}" }].map(r => Model.stateLoadKind(r)),
+  ["loaded", "loaded", "unparsed", "unparsed", "unparsed", "unparsed", "unparsed", "unparsed",
+   "absent", "permission", "not-a-file", "io-error", "io-error", "io-error", "io-error", "io-error", "io-error"])
+check("R22a: stateInitFound -- only the init's own `absent` is absent; a file, another kind of entry or an lstat that failed is present; a failed exit, no reply, another verb's reply or a reply without the field is unknown",
+  [['{"ok":true,"kind":"state","action":"init","found":"absent","created":true}\n', 0], ['{"ok":true,"kind":"state","action":"init","found":"file","created":false}', 0],
+   ['{"ok":true,"kind":"state","action":"init","found":"other"}', 0], ['{"ok":true,"kind":"state","action":"init","found":"unreadable"}', 0],
+   ['{"ok":true,"kind":"state","action":"init","found":"absent"}', 1], ["", 0], ['{"ok":true,"kind":"state","action":"show","found":"absent"}', 0],
+   ['{"ok":true,"kind":"state","action":"init","created":true}', 0], ['{"ok":true,"kind":"state","action":"init","found":"ABSENT"}', 0],
+   ["warning\n" + '{"ok":true,"kind":"state","action":"init","found":"absent"}', 0], ["not json", 0]].map(a => Model.stateInitFound(a[0], a[1])),
+  ["absent", "present", "present", "present", "unknown", "unknown", "unknown", "unknown", "unknown", "absent", "unknown"])
+check("R22a: stateLoadDecision -- a state applies; mid-session anything else blocks at once; at a start it waits for the init, is fresh ONLY when the load and the helper both say absent, and is otherwise re-read once and then blocks",
+  [{ kind: "loaded" }, { kind: "loaded", loadedBefore: true }, { kind: "" },
+   { kind: "permission", loadedBefore: true }, { kind: "absent", loadedBefore: true, initFound: "absent" }, { kind: "unparsed", loadedBefore: true },
+   { kind: "absent" }, { kind: "absent", initFound: "absent" }, { kind: "absent", initFound: "present" }, { kind: "absent", initFound: "present", retried: true },
+   { kind: "absent", initFound: "unknown" }, { kind: "absent", initFound: "unknown", retried: true },
+   { kind: "permission", initFound: "absent" }, { kind: "permission", initFound: "present", retried: true },
+   { kind: "unparsed", initFound: "present" }, { kind: "unparsed", initFound: "present", retried: true },
+   { kind: "not-a-file", initFound: "present", retried: true }, { kind: "io-error", initFound: "present", retried: true }, null
+  ].map(c => { const d = Model.stateLoadDecision(c); return d.act + "/" + d.reason }),
+  ["apply/loaded", "apply/loaded", "wait/no-load", "block/permission", "block/absent", "block/unparsed",
+   "wait/init", "fresh/absent", "retry/absent", "block/absent-unconfirmed", "retry/absent", "block/absent",
+   "retry/permission", "block/permission", "retry/unparsed", "block/unparsed", "block/not-a-file", "block/io-error", "wait/no-load"])
+check("R22a: stateWriteGate -- the no-write mode refuses whatever else is true; before any state has loaded or before the dirs are ready a save PARKS; it writes only when loaded, ready and not blocked",
+  [{ blocked: "permission", loaded: true, dirsReady: true }, { blocked: "unparsed" }, { loaded: false, dirsReady: true }, { loaded: true, dirsReady: false },
+   { loaded: true, dirsReady: true }, { loaded: "true", dirsReady: true }, { blocked: "", loaded: true, dirsReady: true }, null].map(c => Model.stateWriteGate(c)),
+  ["refuse", "refuse", "park", "park", "write", "park", "write", "park"])
+checkCall("R22a: stateUnreadableNotice -- one sentence per reason, each naming the file and what to do (restart included), none carrying a URL; the notification and the console line are that sentence (74017)", () => {
+  const path = "/home/u/.local/state/omarchy-iptv/state.json"
+  const reasons = ["permission", "not-a-file", "unparsed", "absent", "absent-unconfirmed", "io-error"]
+  const bodies = reasons.map(r => Model.stateUnreadableNotice(r, path).body)
+  const argv = Model.notifyArgv("stateUnreadable", { reason: "permission", path })
+  return { namesTheFile: bodies.every(b => b.indexOf(path) === 0), restart: bodies.every(b => /omarchy restart shell\.$/.test(b)),
+           noUrl: bodies.every(b => b.indexOf("://") === -1), distinct: new Set(bodies).size, title: Model.stateUnreadableNotice("", "").title,
+           noPath: Model.stateUnreadableNotice("permission", "").body.indexOf("state.json is not readable") === 0,
+           argv: [argv[0], argv[argv.indexOf("-r") + 1], argv[argv.length - 2], argv[argv.length - 1] === Model.stateUnreadableNotice("permission", path).body],
+           verb: Model.sourceErrorMessage("state_unreadable") !== "" && Model.sourceErrorMessage("state_unreadable").indexOf("://") === -1 }
+}, { namesTheFile: true, restart: true, noUrl: true, distinct: 5, title: "Saved sources not loaded", noPath: true,
+     argv: ["omarchy-notification-send", "74017", "Saved sources not loaded", true], verb: true })
 
 // R9: the reload disposition, every case from the shared fixture.
 checkCall("R9: reloadDisposition over every `reload` case of the shared fixture -- a reload never replaces in-memory state newer than the file", () => {
@@ -7298,7 +7359,7 @@ checkCall("R13 (structural, SR25 as amended): the state write's failure is repor
   }
 }, { reportsOncePerEpisode: true, reportThenFlagThenSettle: true, noUrlInTheWarn: true, removeNeverReturnsAFailureAfterIssuing: true, switchLogsARefusal: true,
      noFailureResultBuilder: true, writeActiveSilent: true, sentence: true })
-checkCall("R14 (structural): the ignore branch of applyUserState RETURNS inside its block, and saveState PARKS (sets the flag) before the dirs are ready -- the two decisions only the live arm could see", () => {
+checkCall("R14 / R22a (structural): the ignore branch of applyUserState RETURNS inside its block, and saveState asks Model.stateWriteGate FIRST -- refusing returns before anything is written, parking (before the dirs are ready, or before any state has loaded) sets the flag and returns", () => {
   const fn = (serviceSource.match(/function applyUserState\(text\) \{[\s\S]*?\n  \}/) || [""])[0]
   const ignore = (fn.match(/if \(disposition\.act !== "apply"\) \{[\s\S]*?\n    \}/) || [""])[0]
   const save = (serviceSource.match(/function saveState\(\) \{[\s\S]*?\n  \}/) || [""])[0]
@@ -7308,7 +7369,9 @@ checkCall("R14 (structural): the ignore branch of applyUserState RETURNS inside 
     // nested condition and not `return` somewhere later in the function.
     ignoreReturns: /\n\s*return\n\s*\}$/.test(ignore),
     ignoreCountsThenReturns: ignore.indexOf("root.stateReloadsIgnored = root.stateReloadsIgnored + 1") !== -1 && ignore.indexOf("root.stateReloadsIgnored") < ignore.lastIndexOf("return"),
-    parksBeforeDirs: /function saveState\(\) \{\n\s*if \(!root\.dirsReady\) \{\n\s*root\.stateSavePending = true\n\s*return\n\s*\}/.test(save),
+    // R22a: the gate is the first statement (comments aside), handed the three inputs, and both
+    // non-write answers return before the text is even composed
+    parksBeforeDirs: /function saveState\(\) \{\n(\s*\/\/[^\n]*\n)*\s*var gate = Model\.stateWriteGate\(\{ blocked: root\.stateWriteBlocked, loaded: root\.stateLoaded, dirsReady: root\.dirsReady \}\)\n\s*if \(gate === "refuse"\) \{\n\s*root\.stateSavePending = false\n\s*root\.stateWritesRefused = root\.stateWritesRefused \+ 1\n\s*return\n\s*\}\n\s*if \(gate === "park"\) \{\n\s*root\.stateSavePending = true\n\s*return\n\s*\}/.test(save),
     // and the park is cleared on the write itself, not left set
     clearsOnWrite: /root\.stateSavePending = false\n[\s\S]*?stateFile\.setText\(text\)/.test(save)
   }
@@ -7356,20 +7419,20 @@ checkCall("R15 (structural): applyUserState counts every reload by reason throug
 // nowhere. Since R21 the URL half is the funnel's (Model.retiredInputsToKeep
 // over the landed marker) and the key half is still this decision.
 checkCall("R16: ownedWriteMode over every `ownedWrite` case of the shared fixture -- patch before the first state load and whenever a save is parked, in flight or failed; heal only when the state is loaded and nothing is outstanding", () => {
-  return activeKeyFixture.ownedWrite.map(c => c.name + ": " + JSON.stringify(Model.ownedWriteMode({ stateLoaded: c.stateLoaded, savePending: c.savePending, savesInFlight: c.savesInFlight, saveFailed: c.saveFailed })))
+  return activeKeyFixture.ownedWrite.map(c => c.name + ": " + JSON.stringify(Model.ownedWriteMode({ blocked: c.blocked, stateLoaded: c.stateLoaded, savePending: c.savePending, savesInFlight: c.savesInFlight, saveFailed: c.saveFailed })))
 }, activeKeyFixture.ownedWrite.map(c => c.name + ": " + JSON.stringify({ mode: c.mode, reason: c.reason })))
-checkCall("R16: the fixture covers the whole four-input cube, the mode is `patch` exactly when the state is not loaded or any save flag is raised, and the decision takes the four inputs and nothing else", () => {
-  const combos = new Set(activeKeyFixture.ownedWrite.map(c => [c.stateLoaded, c.savePending, c.savesInFlight > 0, c.saveFailed].join("/")))
-  const cube = activeKeyFixture.ownedWrite.every(c => Model.ownedWriteMode(c).mode === ((c.stateLoaded !== true || c.savePending || c.savesInFlight > 0 || c.saveFailed) ? "patch" : "heal"))
+checkCall("R16 / R22a: the fixture covers the whole five-input cube, the mode is `none` whenever the no-write mode holds and otherwise `patch` exactly when the state is not loaded or any save flag is raised, and the decision takes the five inputs and nothing else", () => {
+  const combos = new Set(activeKeyFixture.ownedWrite.map(c => [!!c.blocked, c.stateLoaded, c.savePending, c.savesInFlight > 0, c.saveFailed].join("/")))
+  const cube = activeKeyFixture.ownedWrite.every(c => Model.ownedWriteMode(c).mode === (c.blocked ? "none" : (c.stateLoaded !== true || c.savePending || c.savesInFlight > 0 || c.saveFailed) ? "patch" : "heal"))
   const body = (modelFunctionSource("ownedWriteMode").match(/function ownedWriteMode\(flags\) \{[\s\S]*?\n\}/) || [""])[0]
   const reads = Array.from(new Set((body.match(/f\.([A-Za-z]+)/g) || []).map(x => x.slice(2)))).sort()
   return [combos.size, cube, reads, Model.ownedWriteMode(null).reason, Model.ownedWriteMode({}).reason, Model.ownedWriteMode({ stateLoaded: "true" }).reason,
           Model.ownedWriteMode({ stateLoaded: true }).mode, Model.ownedWriteMode({ stateLoaded: true, savesInFlight: "2" }).reason,
           Model.ownedWriteMode({ stateLoaded: true, saveFailed: "true" }).mode, Model.ownedWriteMode({ stateLoaded: true, savePending: true, savesInFlight: 1, saveFailed: true }).reason,
           Model.ownedWriteMode({ stateLoaded: false, savePending: true, savesInFlight: 1, saveFailed: true }).reason]
-}, [16, true, ["saveFailed", "savePending", "savesInFlight", "stateLoaded"], "state-not-loaded", "state-not-loaded", "state-not-loaded",
+}, [32, true, ["blocked", "saveFailed", "savePending", "savesInFlight", "stateLoaded"], "state-not-loaded", "state-not-loaded", "state-not-loaded",
     "heal", "save-in-flight", "heal", "save-parked", "state-not-loaded"])
-checkCall("R16 / R21 (structural): setShowLogos asks Model.ownedWriteMode with the four inputs, writes showLogos ALONE with patchOnly on `patch`, heals on the other branch; the funnel asks Model.retiredInputsToKeep over the LANDED marker for every write, heal and patch alike", () => {
+checkCall("R16 / R21 / R22a (structural): setShowLogos asks Model.ownedWriteMode with the five inputs, writes NOTHING on `none`, writes showLogos ALONE with patchOnly on `patch`, heals on the other branch; the funnel asks Model.retiredInputsToKeep over the LANDED marker for every write, heal and patch alike", () => {
   const fn = (serviceSource.match(/function setShowLogos\(on\) \{[\s\S]*?\n  \}/) || [""])[0]
   const funnel = (serviceSource.match(/function writeOwnedEntry\(overrides, what, announce, patchOnly\) \{[\s\S]*?\n  \}/) || [""])[0]
   const decide = fn.indexOf("Model.ownedWriteMode(")
@@ -7378,7 +7441,8 @@ checkCall("R16 / R21 (structural): setShowLogos asks Model.ownedWriteMode with t
   return {
     found: fn !== "" && funnel !== "",
     decides: decide !== -1,
-    handsTheFourInputs: /Model\.ownedWriteMode\(\{ stateLoaded: root\.stateLoaded,\s*savePending: root\.stateSavePending,\s*savesInFlight: root\.stateSavesInFlight,\s*saveFailed: root\.stateSaveFailed \}\)/.test(fn),
+    handsTheFourInputs: /Model\.ownedWriteMode\(\{ blocked: root\.stateWriteBlocked,\s*stateLoaded: root\.stateLoaded,\s*savePending: root\.stateSavePending,\s*savesInFlight: root\.stateSavesInFlight,\s*saveFailed: root\.stateSaveFailed \}\)/.test(fn)
+      && /if \(mode\.mode === "none"\) \{\n\s*console\.warn\([^\n]*\)\n\s*return false\n\s*\}/.test(fn),
     decidesBeforeWriting: decide !== -1 && decide < fn.indexOf("root.writeOwnedEntry("),
     patchWritesShowLogosAlone: /return root\.writeOwnedEntry\(\{ showLogos: want \}, "logo setting", false, true\)/.test(patchBranch),
     patchNamesNoKey: patchBranch !== "" && patchBranch.indexOf("sourceKey") === -1 && patchBranch.indexOf("activeSourceKey") === -1,
@@ -12163,6 +12227,135 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     checkCall("R21e: the data-loss matrix (" + SEQ_LEN + " operations over " + names.length + ", both host shapes, a restart after each) -- no in-app input lost, no CLI value adopted, every refusal reported at most once per value, no retired key left, no leak, no loop", () => {
       return { runs, failures: bad.slice(0, 12), failed: bad.length, refusalsReached: refusedSeen > 0, landedEditsReached: landedSeen > 0 }
     }, { runs: 2 * Math.pow(names.length, SEQ_LEN), failures: [], failed: 0, refusalsReached: true, landedEditsReached: true })
+  }
+
+  // ---- R22a / R22b (D-SINK-19 round 12): A STATE THAT DID NOT LOAD IS NEVER WRITTEN ----
+  //
+  // The round-11 data-loss lens's P1, live on both host shapes: a migrated
+  // install whose state.json could not be read at the start had an empty
+  // state, migrated and marked, written over it -- every source, credential
+  // and favourite gone. Its pre-existing sibling (0.13.6 included, measured
+  // live by this lane): a state DIRECTORY that cannot be entered reads as
+  // FileNotFound, and the cache layout's save wrote the empty default over
+  // the file. Every load below is delivered through stateFile's OWN handlers
+  // with the error number Quickshell 0.3.1 was measured to report, the
+  // helper's start-up init is the double tests/test_state.py pins against
+  // the real helper, and startCacheLayout RUNS (R22b; it was stubbed as
+  // "current", which is how the harness missed the directory case). Seen red
+  // against lane-key-m2, the tree the defect lives on (IPTV_SERVICE_QML /
+  // IPTV_MODEL), on every case that asserts a record survives or nothing is
+  // written; the counts are in this lane's report.
+  {
+    const FAV = ["t:bbc1.uk"]
+    const told = h => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74017") !== -1).length
+    const summary = text => { const st = M.parseState(text); return { records: st.sources.length, favorites: st.favorites.length, marker: M.entryMigratedOf(st) } }
+    const entryOf = h => { const e = JSON.parse(JSON.stringify(h.storedEntry())); delete e.id; return e }
+    // Two shapes of install: one the migration has already marked, and one
+    // shaped like 0.13.x (no marker, the active source named by the URL on the
+    // entry) -- the migration WOULD run on the second if the file were read.
+    const STARTS = {
+      migrated: { entry: { sourceKey: KA, showLogos: false }, text: migratedText([rec(A), rec(B)], KA, { favorites: FAV }), active: KA },
+      unmigrated: { entry: { playlistUrl: B, showLogos: false }, text: oldText([rec(A), rec(B)]), active: KB }
+    }
+    // The faults. `repaired`: the helper's start-up init restores the mode it
+    // finds, so the file is READ after all and the start goes on as if
+    // nothing had happened. `blocked`: nothing can make it readable, so the
+    // service stays in the no-write mode.
+    const FAULTS = [
+      { id: "file-0000", fault: "file-0000", outcome: "repaired" },
+      { id: "dir-0000", fault: "dir-0000", outcome: "repaired" },
+      { id: "file-foreign", fault: "file-foreign", outcome: "blocked", reason: "permission" },
+      { id: "dir-foreign", fault: "dir-foreign", outcome: "blocked", reason: "absent-unconfirmed" },
+      { id: "is-dir", fault: "is-dir", outcome: "blocked", reason: "not-a-file" },
+      { id: "garbage", text: "{\"version\": 2, \"sources\": [", outcome: "blocked", reason: "unparsed" },
+      { id: "empty", text: "", outcome: "blocked", reason: "unparsed" }
+    ]
+    const ORDERS = { "reload-first": { initOrder: "reload-first" }, "exit-first": { initOrder: "exit-first" }, "init-first": { initFirst: true } }
+    const bootFault = (start, f, mode, order) => boot(start.entry, f.text !== undefined ? f.text : start.text, mode,
+                                                      Object.assign({ exists: true, fault: f.fault }, ORDERS[order]))
+    for (const mode of ["lag", "echo"]) for (const [shape, start] of Object.entries(STARTS)) for (const f of FAULTS) {
+      if (f.outcome === "repaired") {
+        for (const order of Object.keys(ORDERS)) {
+          checkCall("R22a (" + mode + " host, " + shape + " start, " + order + "): " + f.id + " at the start -- the helper's init restores the mode, the file is READ, every record and favourite survives, the migration runs on what the file holds, and nothing is reported", () => {
+            const h = bootFault(start, f, mode, order)
+            const st = h.file()
+            const next = restart(h)
+            return { file: summary(h.stateFile.disk), active: M.activeKeyOf(st) === start.active, entry: retired(h.storedEntry()), blocked: h.root.stateWriteBlocked, told: told(h),
+                     restart: [summary(next.stateFile.disk).records, next.root.activeSourceKey === start.active] }
+          }, { file: { records: 2, favorites: 1, marker: true }, active: true, entry: [], blocked: "", told: 0, restart: [2, true] })
+        }
+        continue
+      }
+      checkCall("R22a (" + mode + " host, " + shape + " start): " + f.id + " at the start -- nothing is written to state.json, the bar entry is left EXACTLY as it is, the migration does not run, the user is told once, and the source verbs, a favourite and a logo toggle write nothing", () => {
+        const h = bootFault(start, f, mode, "reload-first")
+        const disk0 = h.stateFile.disk
+        const atStart = { disk: h.stateFile.disk === disk0 && h.stateFile.events.length === 0, entry: JSON.stringify(entryOf(h)) === JSON.stringify(start.entry),
+                          blocked: h.root.stateWriteBlocked, told: told(h), loaded: h.root.stateLoaded, marker: M.entryMigratedOf(h.root.userState) }
+        const r = h.root
+        const verbs = [r.addSource({ playlistUrl: NEW }).code, r.switchSource(KB).code, r.removeSource(KA).code, r.updateSource(KA, { label: "x" }).code]
+        r.toggleFavorite("t:x.uk"); r.setShowLogos(true); h.drain()
+        return { atStart, verbs, after: [h.stateFile.disk === disk0, JSON.stringify(entryOf(h)) === JSON.stringify(start.entry), h.host.writes.length, told(h)] }
+      }, { atStart: { disk: true, entry: true, blocked: f.reason, told: 1, loaded: false, marker: false },
+           verbs: ["state_unreadable", "state_unreadable", "state_unreadable", "state_unreadable"], after: [true, true, 0, 1] })
+      checkCall("R22a (" + mode + " host, " + shape + " start): " + f.id + " -- once the file is readable again a load LIFTS the no-write mode: the real state is applied, the migration runs on it, writes resume, and a restart stands on every record", () => {
+        const h = bootFault(start, f, mode, "reload-first")
+        h.stateFile.fault = null; h.stateFile.exists = true; h.stateFile.disk = start.text
+        h.stateFile.reload(); h.drain()
+        const lifted = [h.root.stateWriteBlocked, h.root.stateLoaded, h.root.activeSourceKey === start.active]
+        h.root.toggleFavorite("t:x.uk"); h.drain()
+        const next = restart(h)
+        return { lifted, file: summary(h.stateFile.disk), entry: retired(h.storedEntry()), restart: summary(next.stateFile.disk), told: told(h) }
+      }, { lifted: ["", true, true], file: { records: 2, favorites: shape === "migrated" ? 2 : 2, marker: true }, entry: [], restart: { records: 2, favorites: 2, marker: true }, told: 1 })
+    }
+    // Mid-session: the session has loaded the file; then a reload delivers
+    // something that is not a state. Memory stands, nothing is written (the
+    // atomic write WOULD replace a 0000 file, a garbage file or a vanished
+    // one), the entry is left as it is, the user is told once.
+    const MID = [
+      { id: "chmod 0000", set: h => { h.stateFile.fault = "file-0000" }, reason: "permission" },
+      { id: "directory chmod 0000", set: h => { h.stateFile.fault = "dir-0000" }, reason: "absent" },
+      { id: "replaced by a directory", set: h => { h.stateFile.fault = "is-dir" }, reason: "not-a-file" },
+      { id: "garbage written over it", set: h => { h.stateFile.disk = "{\"half\": " }, reason: "unparsed" },
+      { id: "deleted", set: h => { h.stateFile.exists = false }, reason: "absent" }
+    ]
+    for (const mode of ["lag", "echo"]) for (const m of MID) {
+      checkCall("R22a (" + mode + " host, mid-session): state.json " + m.id + " and reloaded -- memory stands, nothing is written to it or to the entry, the user is told once, and a later load that IS a state lifts it", () => {
+        const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA, { favorites: FAV }), mode)
+        const good = h.stateFile.disk
+        const entry0 = JSON.stringify(entryOf(h))
+        m.set(h)
+        const diskBefore = h.stateFile.disk
+        h.stateFile.reload(); h.drain()
+        const memory = [h.root.userState.sources.length, h.root.activeSourceKey === KA, h.root.stateWriteBlocked, told(h)]
+        h.root.toggleFavorite("t:x.uk"); h.root.setShowLogos(true); h.host.externalSet("playlistUrl", NEW); h.drain()
+        const quiet = [h.stateFile.disk === diskBefore, JSON.stringify(entryOf(h)) === JSON.stringify(Object.assign(JSON.parse(entry0), { playlistUrl: NEW })), h.root.addSource({ playlistUrl: NEW }).code, told(h)]
+        h.stateFile.fault = null; h.stateFile.exists = true; h.stateFile.disk = good
+        h.stateFile.reload(); h.drain()
+        return { memory, quiet, lifted: [h.root.stateWriteBlocked, h.root.userState.sources.length, h.root.userState.favorites.length] }
+      }, { memory: [2, true, m.reason, 1], quiet: [true, true, "state_unreadable", 1], lifted: ["", 2, 1] })
+    }
+    for (const mode of ["lag", "echo"]) {
+      // The control the whole distinction exists for: a FileNotFound IS a
+      // fresh install when the helper found nothing there -- and the cache
+      // layout's own start-up save, which the harness now runs, lands.
+      checkCall("R22a / R22b (" + mode + " host): a fresh install (nothing at the path, the helper agrees) migrates a CLI-only entry, and the REAL startCacheLayout runs `cache migrate` and its save lands", () => {
+        const h = boot({ playlistUrl: NEW, showLogos: false }, "", mode)
+        const migrate = h.cacheRuns.filter(c => c.indexOf("migrate") !== -1).length
+        return [h.root.stateWriteBlocked, h.root.activeSourceKey === KNEW, summary(h.stateFile.disk), h.file().cacheLayout, migrate, told(h)]
+      }, ["", true, { records: 1, favorites: 0, marker: true }, 2, 1, 0])
+      checkCall("R22a (" + mode + " host): nothing at the path but the helper's init FAILED (no witness) -- not a fresh install: re-read once, then the no-write mode; the CLI-only entry keeps its URL", () => {
+        const h = boot({ playlistUrl: NEW, showLogos: false }, "", mode, { initCode: 1 })
+        return [h.root.stateWriteBlocked, h.root.stateLoaded, h.storedEntry().playlistUrl === NEW, h.stateFile.events.length, told(h)]
+      }, ["absent", false, true, 0, 1])
+      // R22b's other half: the dir-0000 start reaches the cache layout. On
+      // lane-key-m2 the failed load was applied as an empty state with
+      // cacheLayout 0, `cache migrate` ran and its save wrote the empty
+      // default over the file (the 0.13.6 loss, measured live).
+      checkCall("R22b (" + mode + " host): the unreadable-directory start never runs the cache layout on a state it did not read -- no `cache migrate`, and the file keeps cacheLayout 2 and both records", () => {
+        const h = bootFault(STARTS.migrated, { fault: "dir-0000" }, mode, "reload-first")
+        return [h.cacheRuns.filter(c => c.indexOf("migrate") !== -1).length, h.file().cacheLayout, summary(h.stateFile.disk).records]
+      }, [0, 2, 2])
+    }
   }
 })()
 

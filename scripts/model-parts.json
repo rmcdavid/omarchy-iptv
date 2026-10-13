@@ -259,7 +259,13 @@
         "withoutFailed",
         "stateSaveLanded",
         "countReload",
-        "reloadDisposition"
+        "reloadDisposition",
+        "STATE_LOAD_ERRORS",
+        "stateLoadKind",
+        "stateInitFound",
+        "stateLoadDecision",
+        "stateWriteGate",
+        "stateUnreadableNotice"
       ]
     },
     {

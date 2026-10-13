@@ -36,15 +36,35 @@
 // the root's own properties (QML's scoping), or to the JavaScript global.
 function makeIds(h) {
   const proc = name => ({ name, running: false, command: [], environment: {}, signal() {} })
+  // cacheProc RUNS (R22b, rule 10): the cache layout's start-up save is one of
+  // the state writers, and the round-11 harness stubbed startCacheLayout as
+  // "current" and so could not see it. Setting `running` queues the helper's
+  // answer for the command it was given (h.cacheAnswer), delivered through
+  // Service.handleCacheExit, the handler the real exit calls.
+  const cacheProc = { name: "cacheProc", command: [], environment: {}, signal() {}, _running: false }
+  Object.defineProperty(cacheProc, "running", {
+    get() { return cacheProc._running },
+    set(v) {
+      cacheProc._running = v
+      if (v === true) {
+        const command = cacheProc.command.slice()
+        h.cacheRuns.push(command)
+        h.later.push({ fn: () => { cacheProc._running = false; h.root.handleCacheExit(h.cacheAnswer(command)) }, args: [] })
+      }
+    }
+  })
   const timer = name => ({ name, restart() {}, stop() {}, start() {}, running: false })
   const view = name => ({ name, reload() {}, text() { return "" }, setText() {} })
   return {
     stateFile: h.stateFile,
     stateInitProc: proc("stateInitProc"),
+    // The start-up init's reply (R22a), written by h.helperInit just before
+    // the exit handler runs, as the collector holds it when `exited` fires.
+    stateInitStdout: h.stateInitStdout,
     sourceProbeProc: proc("sourceProbeProc"),
     configShieldProc: proc("configShieldProc"),
     logoFetchProc: proc("logoFetchProc"),
-    cacheProc: proc("cacheProc"),
+    cacheProc,
     failedProc: proc("failedProc"),
     probeWatchdog: timer("probeWatchdog"),
     switchTimeout: timer("switchTimeout"),
@@ -61,11 +81,8 @@ function makeIds(h) {
 // say in what the bar entry or state.json end up holding.
 const STUBBED = {
   runConfigShield: "starts the D-SINK-18 shield process; the file is taken as private (hostConfigShield below)",
-  queueCacheJob: "queues a cache-directory job for cacheProc; recorded in h.cacheJobs",
-  runNextCacheJob: "drains cacheProc's queue",
   noteSessionOutcome: "the player session record; no part of the source state machine",
   markDeadSession: "the player session record",
-  startCacheLayout: "the one-time cache migration; here the layout is current and the cache ready at once",
   schedulePrune: "the start-up cache prune",
   fetchLogos: "starts the logo fetch",
   clearSourceData: "unbinds the channel and EPG data of the previous source",
@@ -222,22 +239,99 @@ class Host {
 // write queued behind one still in flight is REPLACED by the next, and the
 // replaced write raises nothing -- so at most two events are outstanding,
 // the started one and the latest.
+//
+// R22a (round 12). The file can also be MISSING or UNREADABLE, and a load is
+// delivered through stateFile's own onLoaded / onLoadFailed handlers (compiled
+// from Service.qml), carrying what Quickshell 0.3.1's FileView was MEASURED to
+// report for each case (Model.STATE_LOAD_ERRORS; nested headless cage,
+// 2026-10-13):
+//   exists false            loadFailed 2 (FileNotFound)
+//   fault "file-0000"       loadFailed 3 (PermissionDenied)
+//   fault "dir-0000"        loadFailed 2 (FileNotFound) -- the unreadable
+//                           directory reads like a missing file
+//   fault "is-dir"          loadFailed 4 (NotAFile)
+//   fault "file-foreign",   the same two, for a file or directory the helper
+//   "dir-foreign"           cannot chmod (another owner): nothing repairs them
+//   any other text          loaded, with that text ("" for an empty file)
+// `reload()` queues a load, as stateFile.reload() does. A save to a file
+// whose directory cannot be entered fails, as it does for real.
 class StateFile {
-  constructor(text) { this.disk = text; this.view = text; this.events = []; this.writeFails = false; this.coalesce = false }
+  constructor(text, o) {
+    const opts = o || {}
+    this.exists = opts.exists !== undefined ? opts.exists : text !== ""
+    this.fault = opts.fault || null
+    this.disk = text; this.view = text; this.events = []; this.writeFails = false; this.coalesce = false
+    this.loader = null
+  }
   text() { return this.view }
   setText(text) {
-    const ev = { kind: this.writeFails ? "saveFailed" : "saved", text }
+    // An atomic write replaces the file by a rename inside its directory, so
+    // a file nobody may read is still REPLACED (the round-11 P1's last step)
+    // and only a directory that cannot be entered, or a directory AT the
+    // path, makes it fail.
+    const blocksWrite = this.fault === "dir-0000" || this.fault === "dir-foreign" || this.fault === "is-dir"
+    const ev = { kind: this.writeFails || blocksWrite ? "saveFailed" : "saved", text }
     if (this.coalesce && this.events.length >= 2) this.events[this.events.length - 1] = ev
     else this.events.push(ev)
   }
-  reload() {}
+  // What a load of the file reports, as { loaded, error } plus the text.
+  loadResult() {
+    if (this.fault === "file-0000" || this.fault === "file-foreign") return { loaded: false, error: 3 }
+    if (this.fault === "dir-0000" || this.fault === "dir-foreign") return { loaded: false, error: 2 }
+    if (this.fault === "is-dir") return { loaded: false, error: 4 }
+    if (!this.exists) return { loaded: false, error: 2 }
+    return { loaded: true, text: this.disk }
+  }
+  reload() { if (this.loader) this.loader() }
+}
+
+// The REAL helper's `state init`, as a double that is not more forgiving
+// than it (rule 10) -- every branch below is the shipping helper's, pinned by
+// tests/test_state.py's R22a cases against the same five faults:
+//   nothing there   found "absent"; creates the file 0600 with the default
+//                   state (the helper's own bytes, HELPER_EMPTY_STATE), which
+//                   raises a reload (a watched missing file that appears
+//                   reloads, measured)
+//   "file-0000"     found "file"; chmods it to 0600, which raises a reload
+//                   (inotify IN_ATTRIB, measured)
+//   "dir-0000"      found "unreadable" (lstat EACCES); ensure_private_dir
+//                   chmods the directory to 0700; NO reload follows (the
+//                   watch never attached, measured), but an explicit
+//                   stateFile.reload() then loads the file (measured)
+//   "is-dir"        found "other"; changes nothing
+//   "*-foreign"     found as above; the chmod fails, so nothing changes
+//   garbage / empty found "file"; changes nothing (O_EXCL refuses, the mode
+//                   is already 0600)
+const HELPER_EMPTY_STATE = '{"version":2,"cacheLayout":0,"favorites":[],"recents":[],"lastPlayed":null,"session":null,"sources":[],"savedSearches":[],"hiddenGroups":[],"activeKey":""}\n'
+//   a non-zero exit  nothing printed and nothing changed (the init that
+//                   could not make the directory, say)
+function helperInit(file, code) {
+  if (code !== undefined && code !== 0) return { reply: "", raises: false }
+  let found, raises = false
+  if (file.fault === "dir-0000") { found = "unreadable"; file.fault = null }
+  else if (file.fault === "file-0000") { found = "file"; file.fault = null; raises = true }
+  else if (file.fault === "is-dir") found = "other"
+  else if (file.fault === "file-foreign") found = "file"
+  else if (file.fault === "dir-foreign") found = "unreadable"
+  else if (!file.exists) { found = "absent"; file.exists = true; file.disk = HELPER_EMPTY_STATE; raises = true }
+  else found = "file"
+  return { reply: JSON.stringify({ ok: true, kind: "state", action: "init", found, created: found === "absent" }) + "\n", raises }
 }
 
 function bootService(serviceText, Model, o) {
   const opts = o || {}
-  const h = { clock: opts.clock || 1760000000000, later: [], cacheJobs: [], signals: [], warnings: [], detached: [], turns: 0 }
+  const h = { clock: opts.clock || 1760000000000, later: [], cacheRuns: [], signals: [], warnings: [], detached: [], turns: 0 }
   h.host = new Host(opts.entry, opts.host || "lag")
-  h.stateFile = new StateFile(opts.stateText || "")
+  h.stateFile = new StateFile(opts.stateText || "", { exists: opts.exists, fault: opts.fault })
+  h.stateInitStdout = { text: "" }
+  // The helper's `cache` reply: ok for every verb, unless a test says
+  // otherwise (h.cacheFails = ["migrate"]).
+  h.cacheFails = []
+  h.cacheAnswer = (command) => {
+    const verb = command[command.indexOf("--cache-dir") + 2] || ""
+    if (h.cacheFails.indexOf(verb) !== -1) return JSON.stringify({ ok: false, kind: "cache", action: verb, error: { code: "io", message: "failed" } }) + "\n"
+    return JSON.stringify({ ok: true, kind: "cache", action: verb }) + "\n"
+  }
   const ids = makeIds(h)
   const fns = rootFunctions(serviceText)
   const props = rootProperties(serviceText)
@@ -307,11 +401,8 @@ function bootService(serviceText, Model, o) {
     root[name] = compile(fns[name].args, fns[name].body, name)
   }
   root.runConfigShield = () => {}
-  root.queueCacheJob = (args) => h.cacheJobs.push(args)
-  root.runNextCacheJob = () => {}
   root.noteSessionOutcome = () => {}
   root.markDeadSession = () => {}
-  root.startCacheLayout = () => { root.cacheReady = true }
   root.schedulePrune = () => {}
   root.fetchLogos = () => {}
   root.clearSourceData = () => {}
@@ -325,6 +416,31 @@ function bootService(serviceText, Model, o) {
   const onSaveFailed = compile("error", failedText || "", "onSaveFailed")
   const initText = handlerBlock(serviceText.slice(serviceText.indexOf("target: stateInitProc")), "function onExited(exitCode, exitStatus) {")
   const onInitExited = compile("exitCode, exitStatus", initText || "", "onInitExited")
+  // stateFile's two LOAD handlers, from their own text (R22a): the harness
+  // never calls applyUserState itself any more, so a load is classified the
+  // way the shipping handlers classify it. One-line handlers: `onLoaded: X`
+  // and `onLoadFailed: (error) => X`, inside the stateFile block.
+  const stateBlock = serviceText.slice(serviceText.indexOf("    id: stateFile"))
+  // The pre-R22 handlers (`root.applyUserState(text())` and
+  // `root.applyUserState("")`) compile too, so another tree's Service.qml
+  // (IPTV_SERVICE_QML) runs its OWN load path here: `text()` is the view's.
+  const loadedText = ((stateBlock.match(/^    onLoaded: (.*)$/m) || [])[1] || "").replace(/(^|[^.\w])text\(\)/g, "$1stateFile.text()") || null
+  const failedLoadText = (stateBlock.match(/^    onLoadFailed: (?:\(error\) => )?(.*)$/m) || [])[1]
+  const onLoaded = loadedText ? compile("", loadedText, "stateFile_onLoaded") : () => { throw new Error("service-harness: no stateFile onLoaded") }
+  const onLoadFailed = failedLoadText ? compile("error", failedLoadText, "stateFile_onLoadFailed") : () => { throw new Error("service-harness: no stateFile onLoadFailed") }
+  // One load of the file as it is NOW (the view reads what it loaded).
+  h.loadState = () => {
+    const r = h.stateFile.loadResult()
+    if (r.loaded) { h.stateFile.view = r.text; onLoaded() } else onLoadFailed(r.error)
+  }
+  // stateFile.reload() is asynchronous: the load is queued, not run inline.
+  h.stateFile.loader = () => h.later.push({ fn: h.loadState, args: [] })
+  // The start-up init's exit, with the double's reply and side effects.
+  h.helperInit = (code) => {
+    const out = helperInit(h.stateFile, code)
+    h.stateInitStdout.text = out.reply
+    return out
+  }
 
   const BOUND = opts.bound || 400
   h.root = root
@@ -346,17 +462,31 @@ function bootService(serviceText, Model, o) {
     h.stateFile.view = ev.text
     if (ev.kind === "saved") {
       h.stateFile.disk = ev.text
+      // The rename made a file of OURS at the path, with the mode of the one
+      // it replaced (FileView keeps an existing file's mode, S-02): a foreign
+      // file becomes our 0000 file, a 0000 file stays one.
+      h.stateFile.exists = true
+      if (h.stateFile.fault === "file-foreign") h.stateFile.fault = "file-0000"
       onSaved()
       if (o2 && o2.noLater) return true
       h.runLater()
-      root.applyUserState(h.stateFile.text())
+      // The own-write reload (onFileChanged -> reload -> onLoaded).
+      h.loadState()
     } else {
       onSaveFailed(1)
     }
     if (!(o2 && o2.noLater)) h.runLater()
     return true
   }
-  h.drain = () => { h.runLater(); while (h.deliverOne()) {} h.runLater(); return h }
+  // Bounded like runLater: a save whose own reload re-applies a failed load
+  // and saves again (the pre-R22 load path over an unreadable file) is a
+  // LOOP, reported as one, never a hang.
+  h.drain = () => {
+    h.runLater()
+    while (h.deliverOne()) { if (++h.turns > BOUND) { h.stateFile.events = []; throw new Error("LOOP: " + h.turns + " state events, " + h.host.writes.length + " entry writes") } }
+    h.runLater()
+    return h
+  }
   h.tick = (ms) => { h.clock += ms === undefined ? 1000 : ms }
   h.publish = () => { onHostSettingsChanged(); onSettingsChanged() }
   h.host.onPublish = () => { if (h.started) h.publish() }
@@ -374,10 +504,23 @@ function bootService(serviceText, Model, o) {
   // `beforeLoad(h)`: the start-up window before stateFile's first load --
   // what a guide opened at once meets (the round-5 lens's window).
   if (opts.beforeLoad) { opts.beforeLoad(h); h.runLater() }
-  root.applyUserState(h.stateFile.text())
+  // The init's exit. `initCode` non-zero: the helper failed and printed
+  // nothing. A chmod the init makes raises a reload, queued BEFORE the exit
+  // is handled ("reload-first", the default) or after it ("exit-first"):
+  // the inotify event and QProcess's finished signal race for real.
+  h.initExit = (o2) => {
+    const io = Object.assign({ code: opts.initCode || 0, order: opts.initOrder || "reload-first" }, o2 || {})
+    const out = h.helperInit(io.code)
+    if (out.raises && io.order === "reload-first") { h.loadState(); h.runLater() }
+    onInitExited(io.code, 0)
+    h.runLater()
+    if (out.raises && io.order !== "reload-first") { h.loadState(); h.runLater() }
+  }
+  // `initFirst`: the init exits before the FileView's first load arrives.
+  if (opts.initFirst && !opts.dirsLater) h.initExit()
+  h.loadState()
   h.runLater()
-  if (!opts.dirsLater) { onInitExited(0, 0); h.runLater() }
-  h.initExit = () => { onInitExited(0, 0); h.runLater() }
+  if (!opts.dirsLater && !opts.initFirst) h.initExit()
   if (!opts.holdEvents) h.drain()
   return h
 }
@@ -389,4 +532,4 @@ function restartService(serviceText, Model, h, o) {
                                                           stateText: h.stateFile.disk, host: h.host.mode, clock: h.clock + 60000 }, o || {}))
 }
 
-module.exports = { bootService, restartService, rootFunctions, rootProperties, matchBrace, STUBBED, PID }
+module.exports = { bootService, restartService, rootFunctions, rootProperties, matchBrace, STUBBED, PID, HELPER_EMPTY_STATE }

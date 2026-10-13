@@ -9,6 +9,9 @@ import {
   cleanName
 } from "./channels.mjs"
 import {
+  stateUnreadableNotice
+} from "./state.mjs"
+import {
   parseHelperStatus, entryInputNotice, ownedEntryPatch
 } from "./settings.mjs"
 import {
@@ -277,6 +280,11 @@ function notifyArgv(event, params) {
     // takes a setting NAME and a reason, never a value (rule 5).
     var notice = entryInputNotice(p.setting, p.reason)
     spec = { title: notice.title, body: notice.body, glyph: GLYPHS.alert, urgency: "normal", id: NOTIFY_IDS.entryInputRefused }
+  } else if (event === "stateUnreadable") {
+    // R22a: Model.stateUnreadableNotice's sentence and nothing else, for the
+    // same reason as the refusal above. A reason and a PATH, never a URL.
+    var told = stateUnreadableNotice(p.reason, p.path)
+    spec = { title: told.title, body: told.body, glyph: GLYPHS.alert, urgency: "critical", id: NOTIFY_IDS.stateUnreadable }
   }
   if (!spec) return null
   return ["omarchy-notification-send", "--app-name", "IPTV", "-u", spec.urgency, "-g", spec.glyph, "-r", String(spec.id), spec.title, spec.body]

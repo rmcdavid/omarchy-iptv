@@ -122,9 +122,13 @@ function storedOwnedValue(entry, name) {
 // (`landedMigrated`, off `landedState`) and in memory (`memoryMigrated`).
 // Derived here rather than by publishing `landedState`, which carries every
 // source URL. Absent on a tree that has no such property (NOFIELD).
+// R22a (round 12): the no-write mode and the two facts it is decided from --
+// the latest load's kind, the start-up init's verdict on the path -- and how
+// many writes it refused. Reasons and counts, never a path or a URL.
 var POINTER_FIELDS = ["stateLoaded", "reconciled", "dirsReady", "stateSavePending", "pendingEntryKey", "configured",
                       "activeSourceKey", "stateSavesInFlight", "stateSaveFailed", "stateInitOk", "stateReloadsIgnored",
-                      "stateReloadsByReason", "entryInputReports"]
+                      "stateReloadsByReason", "entryInputReports", "stateWriteBlocked", "stateLoadKind", "stateInitFound",
+                      "stateWritesRefused"]
 function pointerStateOf(s) {
   if (!s) return { ok: false, error: { code: "no_service" } }
   var out = { ok: true }
