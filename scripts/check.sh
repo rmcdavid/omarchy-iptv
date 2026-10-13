@@ -176,7 +176,11 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # and R21's model pins and the shipping-function harness cases came in (121,
 # the data-loss matrix at length 2 among them; IPTV_MATRIX_LEN deepens it
 # off the gate).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2261}
+# 2261 -> 2348 on 2026-10-13, D-SINK-19 round 12 (R22): the load-failure pins
+# through Service.qml's own handlers and the REAL startCacheLayout (80: every
+# fault at a migrated and an unmigrated start, mid-session, both hosts), the
+# R22a model functions (6), and R22e's absence pin (1).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2348}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -196,7 +200,12 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2261}
 # slot pins) replaced by five for the migration marker and the withdrawn
 # set time; and 1152 -> 1153 the same day, the ledger's withdrawn-symbol
 # waiver (tests/test_defect_ledger.py, 1).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1153}
+# 1153 -> 1170 the same day, round 12 (R22): test_state's twelve R22a helper
+# cases (what `state init` found, that it never rewrites what it could not
+# parse, every verb refusing an unread state), tests/test_shipped_copy.py's
+# three (R22c, no shipped string sends the user to a retired setting) and the
+# ledger's two (R22d, an unused waiver is red; the twenty are gone).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1170}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
