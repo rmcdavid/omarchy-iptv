@@ -1298,7 +1298,7 @@ def allocate_source_key(sources: list[dict[str, Any]], url: str) -> str:
 
 
 def host_port_of(url: str) -> str:
-    """Model.hostPortOf: host[:port] of a URL, lower-cased; "" for paths.
+    """Mirror of hostPortOf (model/sources.mjs, internal to the model): host[:port] of a URL, lower-cased; "" for paths.
 
     D-SINK-17. The userinfo ends at the LAST at-sign in the authority, not the
     first. This matched `(?:[^@/?#]*@)?`, which cannot cross an at-sign, so
@@ -1338,7 +1338,7 @@ def derive_label(url: str, kind: str) -> str:
 
 
 def label_key(text: Any) -> str:
-    """Model.labelKey: the case-insensitive comparison form (SR21)."""
+    """Mirror of labelKey (model/sources.mjs, internal to the model): the case-insensitive comparison form (SR21)."""
     return sanitize_input(text, MAX_SOURCE_URL).lower()
 
 
@@ -4714,7 +4714,7 @@ MPV_TLS_VERIFY = "--tls-verify=yes"
 MPV_TLS_VERIFY_PROP = "tls-verify"
 MPV_STREAM_OPTS_PROP = "stream-lavf-o"
 PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "tracks", "seek")
-# Mirror of Model.MPV_HANDOFF and friends (PO-10, D-PLY-5). These options are
+# Mirror of MPV_HANDOFF (model/mpv.mjs, internal to the model) and friends (PO-10, D-PLY-5). These options are
 # allowed - PO-5 keeps `--ytdl` as the documented escape hatch for links that
 # are not direct streams - but each one puts the credentialed stream address
 # on a SECOND program's command line, so the user is told at the moment the
