@@ -99,11 +99,15 @@ ALLOWLIST = (
 # allowlist whole, never that the artifact was one the marketplace can read.
 # So every file on the allowlist, the executable helper included, is held to a
 # ceiling 64 KiB below the scanner's number, and the gate goes red first.
-# The executable is held on purpose, although the scanner's size refusal
-# skips mode 100755: an oversized executable is probed as a binary instead
-# of being scanned, so exempting it here would let the helper ship UNREAD by
-# the baseline, which is a hole and not a pass. Do not align this with the
-# scanner's exemption; tests/test_release.py goes red if it is.
+# The executable is held on purpose. The scanner's size refusal treats mode
+# 100755 differently, but not as an exemption: it reads the first 4 KiB of
+# an oversized executable, and unless those bytes show a binary format (ELF,
+# PE, Mach-O or a NUL) it throws the same scan-limit error, so a text helper
+# over the limit fails the whole baseline exactly as Model.js did (measured
+# by the 0.13.6 pre-cut review against a port of the scanner; an earlier
+# version of this comment said the helper would ship UNREAD, which was
+# wrong). Do not exempt executables here; tests/test_release.py goes red if
+# anyone does.
 SCANNER_FILE_LIMIT = 512 * 1024
 FILE_CEILING = 448 * 1024
 

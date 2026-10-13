@@ -4,7 +4,7 @@ A native Omarchy shell plugin: a keyboard-first live TV guide with EPG,
 favorites, source management, and mpv playback. One plugin id,
 `io.github.rmcdavid.iptv`, with three kinds: `bar-widget`, `overlay`,
 `service`. It runs inside the single long-running `omarchy-shell`
-Quickshell process. Released through v0.13.5. Four of the last releases were cut for a finding
+Quickshell process. Released through v0.13.6. Four of the last releases were cut for a finding
 the marketplace maintainer raised -- D-SINK-8, D-TEXT-1, D-SINK-13, and then
 D-SINK-16 against the release that fixed D-SINK-13, on the verification
 request for that very commit; the
@@ -15,12 +15,23 @@ read on 2026-10-09 gives `verificationCommit f89f748`,
 two fields do not mean the same thing. The requests for 0.12.1, 0.13.0,
 0.13.1 and 0.13.2 were all CLOSED by the maintainer carrying `validated` and
 `plugin-update` but NOT `approved-and-verified`, i.e. superseded rather than
-approved, while he raised a finding on each. Only 0.13.3's (#10802) is open.
-Consequence, and it is the reason this is in this file: an existing install
-updates immediately, because `omarchy-plugin-update` is `git merge --ff-only`,
-but what the marketplace SERVES to a new install is the verified snapshot --
-so a fresh install today gets 0.12.0, which predates every TLS and credential
-fix of this week. Re-read the catalog before repeating any of this;
+approved, while he raised a finding on each, and so were 0.13.3's and
+0.13.4's after his findings D-LOGO-11 and D-CLIP-1. 0.13.5's (#11114) was
+stopped by the marketplace's automated security baseline, not by him: its
+scanner refuses any non-executable file over 512 KiB and `Model.js` had
+crossed it (D-REL-5, found 2026-10-12, the catalog read that day still
+giving `verificationCommit f89f748`). 0.13.6 is the split that fixes it.
+What the verified snapshot does and does not decide, because this file said
+the wrong thing for a week: it decides the marketplace's "Verified" label
+and nothing else. `omarchy plugin add` is a plain `git clone` of the
+repository's current HEAD (`/usr/share/omarchy/bin/omarchy-plugin-add`; the
+catalog's own `installNote` says "Omarchy clones the current upstream
+repository"; nothing under `/usr/share/omarchy` reads `verificationCommit`),
+and `omarchy-plugin-update` is `git merge --ff-only` of the same HEAD. So a
+fresh install gets current `main`, verified or not. This file and the
+lead's memory said a fresh install got the verified 0.12.0 until the 0.13.6
+pre-cut review measured otherwise on 2026-10-12, and 0.13.6's first draft
+of release notes repeated it. Re-read the catalog before repeating any of this;
 the twelve days it sat on v0.7.1 are explained in the decisions log.
 
 ## Branches: `dev` is the tree, `main` is the artifact
@@ -58,7 +69,9 @@ Consequences you must respect:
 - A release is: bump `manifest.json` (and `Model.PLUGIN_VERSION` with it,
   D-HOST-1), date the top `CHANGELOG.md` heading for the day of the cut,
   re-level the test floors in `scripts/check.sh` to the counts on the tree,
-  green gate, run `scripts/dev-harness/key-scenario.sh live` under the
+  green gate, run `scripts/dev-harness/key-scenario.sh live` (once the tree
+  carries it; it arrives with D-SINK-19, and a cut before that runs the
+  dev-harness scenarios the release touches) under the
   nested headless cage and record its count in `docs/QA-RESULTS.md` (the
   live arm is the only observer of the start-up window that D-SRC-15 lives
   in; `check.sh` runs just its 11-check preflight, and a README that
