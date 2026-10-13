@@ -16,8 +16,9 @@ calls the shipping path resolvers and fails if any of them still answers with
 a path under the user's real home.
 
 Since D-SINK-18 the helper can also CHMOD a file -- the host's own
-shell.json -- so XDG_CONFIG_HOME is redirected with the rest and the live
-file's mode is fingerprinted beside its bytes.
+shell.json, which it derives from $HOME as the host does -- so the HOME
+redirect is what keeps it off the live file, and that file's mode is
+fingerprinted beside its bytes.
 """
 import atexit
 import hashlib
@@ -44,9 +45,12 @@ if "XDG_STATE_HOME" in os.environ:
 # does not move mtime, so a bytes-only fingerprint would miss exactly the
 # thing the new verb changes -- captured here as (fingerprint, mode) before
 # any test module is imported.
+# Always $HOME/.config, never $XDG_CONFIG_HOME: the shield derives the file
+# from $HOME because the host does (host_config_path's docstring), so that is
+# the file a test could tighten. Following XDG_CONFIG_HOME here guarded a file
+# the shield never touches on any machine where the two differ (F-HARNESS-20's
+# sibling, found by its lane).
 REAL_CONFIG_FILE = REAL_HOME / ".config" / "omarchy" / "shell.json"
-if "XDG_CONFIG_HOME" in os.environ:
-    REAL_CONFIG_FILE = pathlib.Path(os.environ["XDG_CONFIG_HOME"]).resolve() / "omarchy" / "shell.json"
 
 
 def fingerprint_of(path):

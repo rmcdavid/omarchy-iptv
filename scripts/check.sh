@@ -181,7 +181,10 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2319}
 # 1123 -> 1143 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's 12
 # (the merge never levelled them), round 10's six R20a helper tests and the
 # ledger's two R20e cases.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1143}
+# 1126 -> 1136 on 2026-10-13, F-HARNESS-20: tests/test_harness_home.py, run.sh's
+# harness_env and seeding asked where the SHIPPED helper, Python and mpv land,
+# against a decoy home the shield must not touch (10).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1153}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -552,7 +555,20 @@ fi
 step "qmltestrunner tests/Model.spec.qml"
 if [[ -x "$QT_BIN/qmltestrunner" ]]; then
   qml_log="$CHECK_TMP/qmltest.log"
-  if QT_QPA_PLATFORM=offscreen "$QT_BIN/qmltestrunner" -input "$ROOT/tests/Model.spec.qml" >"$qml_log" 2>&1; then
+  # F-HARNESS-20's sibling in the gate itself. Run with a decoy HOME and decoy
+  # XDG directories on 2026-10-13, the whole gate left exactly two things in
+  # the decoy, both from this step: a QML bytecode cache
+  # (~/.cache/qmltestrunner/qmlcache) and ~/.config/fcitx/dbus. On an ordinary
+  # run that decoy is the developer's real home, on every commit. Both are
+  # content-free, and still not ours to write: the runner gets a home inside
+  # CHECK_TMP, which the EXIT trap removes. (The clip and logo check-trees did
+  # the same and are fixed in their own files.)
+  qml_home="$CHECK_TMP/qml-home"
+  mkdir -p -m 700 "$qml_home"
+  if env -u MPV_HOME -u XCOMPOSEFILE HOME="$qml_home" XDG_CONFIG_HOME="$qml_home/.config" \
+       XDG_CACHE_HOME="$qml_home/.cache" XDG_DATA_HOME="$qml_home/.local/share" \
+       XDG_STATE_HOME="$qml_home/.local/state" QT_QPA_PLATFORM=offscreen \
+       "$QT_BIN/qmltestrunner" -input "$ROOT/tests/Model.spec.qml" >"$qml_log" 2>&1; then
     # E1: this used to be `ok "qml spec ($(grep -c '^PASS' ...) passed)"` - the
     # count interpolated into a message, the grep's status discarded inside
     # the argument. A runner that exits 0 having executed ZERO test functions

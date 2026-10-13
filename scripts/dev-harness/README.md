@@ -163,6 +163,9 @@ layout above.
 ```
 $OMARCHY_IPTV_HARNESS_DIR   (default $XDG_RUNTIME_DIR/omarchy-iptv-harness)
   root/      shell.qml + Commons/ Ui/ symlinks
+  home/      HOME (0700)     -> home/.config/omarchy/shell.json, seeded 0644 every start
+             XDG_CONFIG_HOME -> home/.config, XDG_DATA_HOME -> home/.local/share
+             + home/.local/state/omarchy/current/theme/{colors,shell}.toml, COPIED
   cache/     XDG_CACHE_HOME  -> cache/omarchy-iptv/{channels,playlist-status,epg-now}.json
   state/     XDG_STATE_HOME  -> state/omarchy-iptv/state.json
   runtime/   XDG_RUNTIME_DIR -> runtime/omarchy-iptv/mpv.sock (+ hypr -> real hypr dir)
@@ -171,6 +174,47 @@ $OMARCHY_IPTV_HARNESS_DIR   (default $XDG_RUNTIME_DIR/omarchy-iptv-harness)
   transcripts/  one 0600 file per scenario run (0700 dir); NOT removed by
                 `run.sh clean`, because it is the run's evidence (F-M3-1)
 ```
+
+**The harness has its own HOME (F-HARNESS-20).** The service runs the
+helper's `config shield` at every start, and the helper takes the host's
+settings file from `$HOME/.config/omarchy/shell.json` -- deliberately, because
+the host does, and with no override flag, variable or path argument, by
+ruling. Until 2026-10-13 the harness redirected the XDG directories and left
+`HOME` real, so every harness run (the gate's `clip-scenario.sh check-tree`
+included) aimed that chmod at the developer's own config. It now gives every
+process it starts a scratch home, through ONE function, `qa_harness_home` in
+`scripts/qa-lib.sh`, which `run.sh`'s `harness_env` calls and which every
+scenario driver that uses `run.sh` calls too, for its own helper runs and
+probes:
+
+- `HOME`, `XDG_CONFIG_HOME` and `XDG_DATA_HOME` inside `home/`;
+  `XDG_CACHE_HOME` and `XDG_STATE_HOME` are `cache/` and `state/` as before.
+- `MPV_HOME` and `XCOMPOSEFILE` are dropped when they name a path in the real
+  home (they bypass `HOME`); set anywhere else they are kept, which is how
+  `tls-scenario.sh` hands mpv its own profile directory.
+- `PATH` is inherited unchanged: programs on it are executed, never written.
+- What the harness takes from the real home, measured rather than assumed, is
+  two theme files: the host's `Color` singleton paints from
+  `$HOME/.local/state/omarchy/current/theme/colors.toml` and `shell.toml`
+  (and an optional `$HOME/.config/omarchy/shell.toml`), so those are COPIED,
+  dereferenced, 0600, on every start. Never a symlink: a link into the real
+  home is a way for a harness write to reach the user's files. Fonts need
+  nothing (the Nerd Font and the fontconfig that selects it are system-wide;
+  `fc-match monospace` answers `JetBrainsMono Nerd Font` under an empty home).
+- `tests/test_harness_home.py` runs `harness_env` and the seeding functions
+  out of `run.sh` against a decoy "real" home with a 0644 `shell.json` and
+  asks the SHIPPED helper, Python and mpv where they would read and write;
+  the decoy's mode, mtime and ctime must not move. On the harness before this
+  it fails 9 of its 10 cases, the decoy going 0644 -> 0600.
+- The same question was put to every process the GATE starts, by running
+  `scripts/check.sh` whole with a decoy `HOME` and decoy XDG directories and
+  listing what landed there. Three steps wrote into the home they were given
+  -- on an ordinary run, the developer's real one, on every commit: the clip
+  and logo check-trees (a mesa shader cache, `QtProject/Qml Runtime`,
+  `fcitx/dbus`, from cage and the QML probes the drivers start) and the
+  `qml spec` step (`qmltestrunner/qmlcache`). Each now runs with a home inside
+  its own temporary directory, removed at exit, and the same decoy run leaves
+  the decoy empty.
 
 Because `XDG_RUNTIME_DIR` is redirected, `run.sh` exports `WAYLAND_DISPLAY`
 as the absolute socket path (libwayland accepts that) and symlinks the real
@@ -667,7 +711,9 @@ S6 reads the connection ending rather than assuming it does.
 
 The profile cases need an mpv config and the user's own is not ours to write, so
 the scenario points `MPV_HOME` at a directory under its own work tree and
-deletes it; `HOME` is never touched. It sends no keystroke. The verdict every
+deletes it; `HOME` is the harness's own (see "The harness has its own HOME"),
+and `qa_harness_home` keeps an `MPV_HOME` that names no path in the real home.
+It sends no keystroke. The verdict every
 segment turns on is `qa_outcome` in `scripts/qa-lib.sh`, so that the one
 decision in here that needs no display is driven by `scripts/qa-lib-test.sh`
 for real rather than extracted.

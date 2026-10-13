@@ -164,9 +164,10 @@
 #
 # WHERE THE MPV CONFIG COMES FROM. $MPV_HOME, pointed at a scratch directory
 # this run creates and deletes. The lead's own measurement used a fake HOME and
-# XDG_CONFIG_HOME; this script may not write the user's ~/.config/mpv and does
-# not touch HOME at all, because HOME belongs to every other process in the
-# harness as well. MPV_HOME is read by mpv and by nothing else, and it reaches
+# XDG_CONFIG_HOME; this script may not write the user's ~/.config/mpv. HOME is
+# the harness's own scratch home since F-HARNESS-20 (qa_harness_home, which
+# keeps an MPV_HOME that names no path in the real home, as this one does not).
+# MPV_HOME is read by mpv and by nothing else, and it reaches
 # mpv because the player is exec'd with the environment it inherits
 # (bin/omarchy-iptv `spawn_detached` ends in `os.execvp`, and the service
 # assigns no `environment` to its player Process). Whether mpv honoured it is
@@ -201,6 +202,9 @@ ROOT=$(cd "$HERE/../.." && pwd)
 RUN="$HERE/run.sh"
 REAL_RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 SCRATCH=${OMARCHY_IPTV_HARNESS_DIR:-$REAL_RUNTIME/omarchy-iptv-harness}
+# F-HARNESS-20: this driver's own processes (its helper runs, probes, mpv)
+# get the harness's HOME as well, not only what run.sh starts. Exports only.
+qa_harness_home "$SCRATCH" || exit 2
 SOCK="$SCRATCH/runtime/omarchy-iptv/mpv.sock"
 LOG="$SCRATCH/tls-scenario.log"
 HARNESS_LOG="$SCRATCH/harness${OMARCHY_IPTV_HARNESS_INSTANCE:-}.log"

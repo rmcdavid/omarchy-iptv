@@ -76,6 +76,9 @@ fi
 HELPER=$(readlink -f "${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT}/bin/omarchy-iptv")
 # shellcheck source=scripts/qa-lib.sh
 . "$ROOT/scripts/qa-lib.sh"
+# F-HARNESS-20: this driver's own processes (its helper runs, probes, mpv)
+# get the harness's HOME as well, not only what run.sh starts. Exports only.
+qa_harness_home "$SCRATCH" || exit 2
 PASS=0; FAIL=0
 pass() { PASS=$((PASS+1)); echo "PASS $1"; }
 fail() { FAIL=$((FAIL+1)); echo "FAIL $1${2:+ -- $2}"; }

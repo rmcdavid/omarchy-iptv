@@ -620,6 +620,9 @@ LIVE_DISPLAY=${WAYLAND_DISPLAY:-wayland-1}
 # This scenario's OWN harness directory, never the shared default.
 SCRATCH=${OMARCHY_IPTV_HARNESS_DIR:-$REAL_RUNTIME/omarchy-iptv-key}
 export OMARCHY_IPTV_HARNESS_DIR=$SCRATCH
+# F-HARNESS-20: this driver's own processes (its helper runs, probes, mpv)
+# get the harness's HOME as well, not only what run.sh starts. Exports only.
+qa_harness_home "$SCRATCH" || exit 2
 PLUGIN_ROOT=$ROOT
 EXPORT_DIR=""
 TREE_LINE="== tree $ROOT ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo no-git))"

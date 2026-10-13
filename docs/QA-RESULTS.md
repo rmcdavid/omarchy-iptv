@@ -13157,6 +13157,87 @@ minute is the logo scenario's `--baseline 159da94` 9 / 24 (cb08eb1), and
 `qml` image probe, never the harness shell -- so it cannot carry this
 error. Every other count against those trees predates 51d686b.
 
+### F-HARNESS-20 fixed, its two siblings, and F-M3-21
+
+**2026-10-13.** The fix lives in the harness, never in shipped code: the
+helper's `host_config_path()` keeps deriving the host's settings file from
+`$HOME` with no override, because the host does. `qa_harness_home` in
+`scripts/qa-lib.sh` gives every process a harness run starts -- the nested
+shell, the helper it spawns, mpv, every scenario driver -- a scratch HOME,
+XDG_CONFIG_HOME and XDG_DATA_HOME, copies the theme files the shell needs
+as 0600 regular files (never a link into the real home), and drops
+MPV_HOME and XCOMPOSEFILE only when they point into the real home. The
+check (`tests/test_harness_home.py`) runs the shipped path resolvers and
+the shipped `config shield` under the environment `run.sh` builds, against
+a decoy "real" home: on `dev` before the fix it failed 7 times and errored
+twice (the shield tightened the decoy's 0644 file, mpv created
+`.config/mpv` in it); after, 10 of 10 pass. Live under a nested cage, the
+harness log reads `config shield: omarchy/shell.json 0644 -> 0600` against
+the scratch copy, scenario counts equal `dev`'s (sources 66 / 0 both), and
+the real `shell.json` and `state.json` kept their mode, mtime, ctime and
+SHA-256 across every run.
+
+The review of the lane found the claim "every driver isolates itself" was
+true only of `scripts/dev-harness/`: `qa-player-scenarios.sh`'s cold phase
+still ran the helper's `player start` under the real XDG_STATE_HOME. Both QA
+drivers in `scripts/` now isolate themselves, their guards compare against
+the recorded real home (with the old `$HOME` line restored, a scratch dir
+inside a decoy's `.config` went through unrefused), and the bookkeeping
+test sees both. The lane's own search found **F-HARNESS-23**: three gate
+steps had been writing content-free caches into the real home on every
+run. And three places described the shield's file as
+`$XDG_CONFIG_HOME/omarchy/shell.json` -- the helper's docstring and help
+text, a `Service.qml` comment -- while `tests/helper_loader.py` followed
+XDG_CONFIG_HOME when choosing which live file to guard, so on a machine
+where the two differ the guard watched the wrong file. All corrected.
+
+**F-M3-21.** The lane reported that its first two live runs, wrapped in
+plain `dbus-run-session`, let D-Bus activation start desktop portals inside
+the nested session: two portal instances crashed, the host posted a crash
+notification, and the user's real `xdg-document-portal.service` exited with
+status 21 at 01:14:27 CDT and stayed failed (`systemctl --user status`
+still read failed at 03:54). Every later run used a private bus with no
+service directories and activated nothing. CLAUDE.md now carries that as a
+rule every lane reads (working in parallel, 6b).
+
+### 0.13.6: the release record (D-REL-5 shipped)
+
+**Cut 2026-10-12 on the owner's word, after four read-only pre-cut lenses on
+`dev` f071a55.** What each one measured, and what changed because of it:
+
+| Lens | Result |
+|---|---|
+| Marketplace rules | A hand port of the scanner (read as text, never run) predicts `passed`, findings and capabilities empty; it reproduces 0.13.4's real pass and 0.13.5's `scan-limit` on `Model.js`. 27 of 31 files scanned, 1,582,810 declared text bytes of 8 MiB, largest the helper at 410,678. No rule's keyword appears anywhere in the export. |
+| Live shell | Every model-heavy dev-harness scenario read the same on the candidate, its allowlist export loaded as the plugin root, and 0.13.5's dev source: sources 66 / 0, clip 20 / 0, pip 84 / 0 on all three, and so on; the differences were timing races present on both trees (F-HARNESS-21, F-HARNESS-22). Quickshell saw all 603 exports deep-equal to the 0.13.5 monolith apart from the version. |
+| Upgrade | The stock `omarchy-plugin-update` fast-forwarded a scratch 0.13.5 install to the candidate, validated it and ran `rescanPlugins`. Without a restart the shell keeps running 0.13.5 from memory with the "Updated" footer and nothing fails; after a restart it runs 0.13.6 with favorites, hidden groups, sources and settings intact and no error logged (D-REL-6 records the one path that would fail). |
+| Notes | BLOCKED the first draft: it said a new marketplace install receives 0.12.0, which the marketplace's own catalog and VERIFICATION.md contradict (see the decisions log, 2026-10-12). Every other claim checked by a command. |
+
+The live lens also found a harness safety hole older than this release,
+filed as F-HARNESS-20: the helper derives the host config path from `$HOME`,
+which the harness leaves real, so the service's start-up config shield
+inside every harness run is aimed at the developer's own
+`~/.config/omarchy/shell.json`. It changed nothing here only because that
+file is already 0600; `stat` shows no write to it on the day of about sixty
+harness starts.
+
+The notes were corrected in 7c571a9 (with CLAUDE.md and the comment in
+`release.py` that misdescribed how the scanner handles an oversized
+executable), the gate went green, and `release.py build` wrote `main`
+ca5a3a5162ba12ea761075f194c2d0e15fae6620 (parent 0bd4515, tag `v0.13.6`).
+The verification request is omacom/omarchy-plugin-marketplace#11315; the
+bot's baseline record, decoded, reads `{"baselineVersion": "3",
+"outcome": "passed", "findings": [], "capabilities": []}` at that commit,
+twenty seconds after filing. The maintainer was answered on #11114.
+
+**The live install**, updated on the owner's word: snapshot and SHA-256 of
+`shell.json` and the plugin's `state.json` (both 0600), `omarchy-plugin-update
+io.github.rmcdavid.iptv --yes` (0bd4515 to ca5a3a5, `Model.js` gone, 18
+parts present, tree clean), `omarchy-restart-shell` (rc 0), the plugin
+answering `status` within a second with `build` running and on disk 0.13.6,
+1,479 channels in 28 groups, the journal since the restart carrying only the
+desktop portal's registration warning, and both files byte-identical
+afterwards. The snapshot copies were deleted once the hashes matched.
+
 ### D-SRC-19, D-SRC-20, F-PERF-2 and a re-grade of D-SINK-20: the D-SINK-19 round-9 reviews
 
 **Filed 2026-10-12.** Round 9 landed the D-SINK-19 chain on the split model

@@ -2137,10 +2137,17 @@ is "and the grading stub appears only in its comment table, never in its code" \
 # said to be bookkeeping here rather than left to read as evidence. What
 # OBSERVES the isolation is config-mode-scenario.sh's own C1.
 RS="$ROOT/scripts/dev-harness/run.sh"
-is "run.sh points XDG_CONFIG_HOME inside the scratch tree" \
-   "$(qa_count '^  export XDG_CONFIG_HOME="\$SCRATCH/config"$' "$RS")" "1"
-is "and a clean removes it, so one run cannot inherit the last run's fix" \
-   "$(qa_count '^ *(if ! )?rm -rf "\$SCRATCH/cache" "\$SCRATCH/state" "\$SCRATCH/config"' "$RS")" "1"
+# F-HARNESS-20: and XDG_CONFIG_HOME was the wrong variable to isolate by --
+# the verb reads $HOME, and the harness left HOME real, so these two pins were
+# green while every harness run aimed the shield at the developer's own file.
+# They pin the REPLACEMENT now: harness_env hands the scratch tree to
+# qa_harness_home (driven for real in its own section below, and observed
+# against the shipped helper by tests/test_harness_home.py), and a clean
+# removes the scratch home the shield acts on.
+is "run.sh's harness_env gives its processes the scratch HOME" \
+   "$(qa_count '^  qa_harness_home "\$SCRATCH" \|\| die ' "$RS")" "1"
+is "and a clean removes the scratch home, so one run cannot inherit the last run's fix" \
+   "$(qa_count '^ *(if ! )?rm -rf "\$SCRATCH/cache" "\$SCRATCH/state" "\$SCRATCH/home" ' "$RS")" "1"
 # D-SINK-18 repair: the verb derives its path from $HOME, because the HOST
 # does, so HOME is what isolates a run. This pinned XDG_CONFIG_HOME, which the
 # verb now ignores -- a scenario isolated by a variable nothing reads is a
@@ -2160,7 +2167,7 @@ sed -n '/^seed_scratch_config() {/,/^}/p' "$RS" >"$SEED"
 is "seed_scratch_config was extracted from the real run.sh, not retyped" \
    "$(qa_count '^seed_scratch_config\(\) \{$' "$SEED")" "1"
 SEEDROOT="$TMP/seedscratch"
-mkdir -p "$SEEDROOT/config/omarchy"
+mkdir -p "$SEEDROOT"
 (
   SCRATCH="$SEEDROOT"
   die() { printf 'die: %s\n' "$*" >&2; exit 1; }
@@ -2168,7 +2175,8 @@ mkdir -p "$SEEDROOT/config/omarchy"
   . "$SEED"
   seed_scratch_config
 ) >/dev/null 2>&1
-SEEDED="$SEEDROOT/config/omarchy/shell.json"
+# F-HARNESS-20: where host_config_path() resolves under the harness HOME.
+SEEDED="$SEEDROOT/home/.config/omarchy/shell.json"
 is "run.sh's own seeding code creates the scratch host config" \
    "$([[ -f $SEEDED ]] && echo yes || echo no)" "yes"
 is "and leaves it at the packaged default's EXPOSED mode, not this machine's" \
@@ -2183,6 +2191,59 @@ is "and the seed carries no playlistUrl and no epgUrl" \
 # so the seeded mode is asserted to be the exposed one and not merely "a mode".
 is "a umask-created file here would have been private, which is why the mode is forced" \
    "$(umask 077; : >"$TMP/umaskprobe"; qa_mode_private "$TMP/umaskprobe")" "private"
+
+# ============================================================ qa_harness_home
+
+section "qa_harness_home / F-HARNESS-20: the harness's own HOME"
+
+# Each case runs in a subshell over a fresh environment so one case's exports
+# cannot be the next one's starting point. The "real home" is a directory
+# under $TMP; nothing here names the caller's.
+HH="$TMP/hh"
+mkdir -p "$HH/real/.config" "$HH/scratch" "$HH/elsewhere"
+hh() {  # hh <shell-snippet>: run it after qa_harness_home over a known env
+  env -u OMARCHY_IPTV_HARNESS_REAL_HOME -u MPV_HOME -u XCOMPOSEFILE \
+    HOME="$HH/real" XDG_CONFIG_HOME="$HH/real/.config" XDG_DATA_HOME="$HH/real/.local/share" \
+    XDG_CACHE_HOME="$HH/real/.cache" XDG_STATE_HOME="$HH/real/.local/state" \
+    XDG_RUNTIME_DIR="$HH/run" "${@:2}" \
+    bash -c '. "$1"; qa_harness_home "$2" || exit $?; eval "$3"' hh "$HERE/qa-lib.sh" "$HH/scratch" "$1"
+}
+is "HOME is the scratch home"                 "$(hh 'printf %s "$HOME"')"            "$HH/scratch/home"
+is "XDG_CONFIG_HOME is the scratch home's .config, agreeing with \$HOME/.config" \
+   "$(hh 'printf %s "$XDG_CONFIG_HOME"')" "$HH/scratch/home/.config"
+is "XDG_DATA_HOME is inside the scratch home" "$(hh 'printf %s "$XDG_DATA_HOME"')"   "$HH/scratch/home/.local/share"
+is "XDG_CACHE_HOME is the harness's cache/"   "$(hh 'printf %s "$XDG_CACHE_HOME"')"  "$HH/scratch/cache"
+is "XDG_STATE_HOME is the harness's state/"   "$(hh 'printf %s "$XDG_STATE_HOME"')"  "$HH/scratch/state"
+is "XDG_RUNTIME_DIR is left alone (a driver keeps the real one; run.sh moves it)" \
+   "$(hh 'printf %s "$XDG_RUNTIME_DIR"')" "$HH/run"
+is "the home it replaced is recorded" \
+   "$(hh 'printf %s "$OMARCHY_IPTV_HARNESS_REAL_HOME"')" "$HH/real"
+is "and a second call, HOME already the scratch one, keeps the first record" \
+   "$(hh 'qa_harness_home "$HH_S" >/dev/null; printf %s "$OMARCHY_IPTV_HARNESS_REAL_HOME"' HH_S="$HH/scratch")" "$HH/real"
+is "MPV_HOME inside the real home is dropped (it bypasses HOME entirely)" \
+   "$(hh 'printf %s "${MPV_HOME-UNSET}"' MPV_HOME="$HH/real/.config/mpv")" "UNSET"
+is "MPV_HOME somewhere else is kept (tls-scenario.sh points it at its own work dir)" \
+   "$(hh 'printf %s "${MPV_HOME-UNSET}"' MPV_HOME="$HH/elsewhere/mpv")" "$HH/elsewhere/mpv"
+is "XCOMPOSEFILE inside the real home is dropped" \
+   "$(hh 'printf %s "${XCOMPOSEFILE-UNSET}"' XCOMPOSEFILE="$HH/real/.XCompose")" "UNSET"
+is "it creates nothing (the gate runs check-tree halves that call it)" \
+   "$(hh ':' >/dev/null 2>&1; qa_tree_count "$HH/scratch" -mindepth 1)" "0"
+st "a relative scratch directory is refused, status 2" 2 \
+   bash -c '. "$1"; qa_harness_home relative/dir' hh "$HERE/qa-lib.sh"
+is "and refused means nothing was exported" \
+   "$(env HOME="$HH/real" bash -c '. "$1"; qa_harness_home relative/dir 2>/dev/null; printf %s "$HOME"' hh "$HERE/qa-lib.sh")" "$HH/real"
+# A driver that isolated itself starts run.sh with HOME already the scratch
+# one; the theme run.sh copies must still come from the home the driver
+# REPLACED, which may not be the password database's.
+is "qa_harness_real_home prefers the recorded home over the password database's" \
+   "$(env OMARCHY_IPTV_HARNESS_REAL_HOME="$HH/real" HOME="$HH/scratch/home" bash -c '. "$1"; qa_harness_real_home "$2"' hh "$HERE/qa-lib.sh" "$HH/scratch")" \
+   "$HH/real"
+# HOME already inside the scratch tree with no record: the password
+# database's home, never the scratch one, or the theme copy would copy the
+# harness onto itself.
+is "qa_harness_real_home never answers with the scratch tree itself" \
+   "$(env -u OMARCHY_IPTV_HARNESS_REAL_HOME HOME="$HH/scratch/home" bash -c '. "$1"; qa_harness_real_home "$2"' hh "$HERE/qa-lib.sh" "$HH/scratch")" \
+   "$(getent passwd "$(id -u)" | cut -d: -f6)"
 
 # CLAUDE.md rule 11, applied to this file: if a section stops executing, the
 # summary must say so rather than printing a smaller number nobody reads.
@@ -2282,7 +2343,19 @@ is "a umask-created file here would have been private, which is why the mode is 
 # 454 -> 455 on 2026-10-12, D-SINK-19 round 10: hostEntry's storedShowLogos
 # is a boolean and Y4 reads it (1). Two existing wants moved with Y4 (the
 # U..P log marks, the key-path count).
-EXPECTED=455
+# 418 -> 434 on 2026-10-13, F-HARNESS-20: qa_harness_home over a known
+# environment -- each variable it exports, the one it leaves alone, the record
+# of the home it replaced and that a second call keeps it, the two overrides
+# dropped only when they name the real home (and kept when they do not), that
+# it creates nothing, its refusal and that a refusal exports nothing, and
+# qa_harness_real_home preferring the record and never answering with the
+# scratch tree. The two
+# XDG_CONFIG_HOME pins above were REPLACED, not added: they pinned a variable
+# the verb had stopped reading.
+# 455 + 16 = 471 on 2026-10-13, lane-key-m1 merged dev 4740a50: the lane's
+# 455 and F-HARNESS-20's 16 (418 -> 434, above) were counted on two branches
+# from the same 418, so the merge is their sum.
+EXPECTED=471
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

@@ -45,6 +45,11 @@ T0=1789244100
 
 # shellcheck source=scripts/qa-lib.sh
 . "$ROOT/scripts/qa-lib.sh"
+# F-HARNESS-20: this driver's own processes (helper runs, probes, the player
+# phases' `player start`) get the harness's HOME too, not only what run.sh
+# starts. Exports only. refuse_real_dirs compares against the REAL home through
+# qa_harness_real_home, so the guard does not depend on where this line sits.
+qa_harness_home "$SCRATCH" || exit 2
 
 # Fixture URLs as served by the harness fixture server (run.sh --serve) and their keys.
 A=http://127.0.0.1:8765/qa-src-a.m3u;        KA=584a58e5
@@ -67,7 +72,7 @@ refuse_real_dirs() {
   # CLAUDE.md constraint 2 forbids. Refuse a path that could be shell text.
   qa_safe_path "$SCRATCH" || fail "refusing: OMARCHY_IPTV_HARNESS_DIR carries shell metacharacters: $SCRATCH"
   real=$(realpath -m -- "$SCRATCH")
-  home=$(realpath -m -- "$HOME")
+  home=$(realpath -m -- "$(qa_harness_real_home "$SCRATCH")")
   [[ $real == /* ]] || fail "scratch dir must be absolute: $SCRATCH"
   # Exactly these two are refused as a whole (a scratch dir below $HOME is fine).
   for b in / "$home"; do

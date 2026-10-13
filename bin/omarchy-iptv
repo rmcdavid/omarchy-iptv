@@ -32,7 +32,7 @@ Subcommands (contract of record: ARCHITECTURE.md (dev branch) section 5):
   cache [--cache-dir D] migrate [--key K] | remove --key K | prune [--keep K ...] [--active K]
       per-source cache directories under <cache-dir>/sources/<key>/ (M2-01, D5/D6)
   config shield
-      deny group and other on $XDG_CONFIG_HOME/omarchy/shell.json, the host
+      deny group and other on $HOME/.config/omarchy/shell.json, the host
       file the shell persists source URLs into (D-SINK-18). Takes no path:
       it computes the one path it may touch. Prints modes and a verdict.
 """
@@ -8543,7 +8543,7 @@ def build_parser() -> argparse.ArgumentParser:
     # action can be added later without changing what `config shield` means.
     config = sub.add_parser("config", help="make the host settings file private before a source URL is persisted into it")
     config_actions = config.add_subparsers(dest="action", required=True)
-    shield = config_actions.add_parser("shield", help="deny group and other on $XDG_CONFIG_HOME/omarchy/shell.json (no-op when it already does); prints the modes and a verdict, never the contents")
+    shield = config_actions.add_parser("shield", help="deny group and other on $HOME/.config/omarchy/shell.json (no-op when it already does); prints the modes and a verdict, never the contents")
     shield.set_defaults(func=cmd_config)
     # D-CLIP-1 (R8): the bounded clipboard read the shell's paste runs.
     clipboard = sub.add_parser("clipboard", help="read the Wayland clipboard through wl-paste, at most 32 KiB, under a deadline; prints one JSON object and never logs the text")
