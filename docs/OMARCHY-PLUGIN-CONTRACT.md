@@ -276,7 +276,7 @@ stripped it and the host published the stripped entry at once, so nothing
 was left to adopt -- the plugin had been depending on the host's lag for its
 own state. The fix does not consult the host: the switch and the probe
 commit land a pending input on the record becoming active in the same turn
-(`Model.adoptPendingEpg`), and every owned write leaves an input nothing has
+(`adoptPendingEpg`), and every owned write leaves an input nothing has
 consumed on the entry (`Model.retiredInputsToKeep`). Round 8 (R18,
 2026-10-12) found the other side of the same coin on THIS host: a write the
 host answers `false` to must not re-trigger anything. A refused
@@ -324,7 +324,7 @@ ninth review). What the host publishes is evidence of what the host had a
 write ago, not of whether the value is stored anywhere else, and neither is
 whether an own-write override is in force -- the narrowing that strips the
 only copy of an input whose state write failed. The decision now consults
-the plugin's own disk instead: `Model.patchInputsToKeep` keeps a retired
+the plugin's own disk instead: `patchInputsToKeep` keeps a retired
 key only when it is a valid input the state the last LANDED save
 serialised does not hold. Under the echoing host the publish is current
 and the answer is the same, so the code still does not need to know which
@@ -332,7 +332,21 @@ host it meets. And the funnel's decisions are now driven in node through
 `Service.qml`'s own functions (`tests/service-harness.js`) under both host
 shapes: two consecutive in-app toggles on this host each take, which a skip
 keyed on the stale publish broke without any check noticing in round 9
-(lane A, lane-key-z1; key-scenario Y4 live).] What is NOT yet true
+(lane A, lane-key-z1; key-scenario Y4 live).] [Round 11 (R21, 2026-10-13;
+the product owner dropped the `omarchy bar set` URL route): the question a
+patch-only write asks is no longer about values at all, which removes the
+last place this host's lag reached the retired keys. Before the one
+migration's state write has landed, every owned write keeps every retired
+key the entry carries; after it, none (`Model.retiredInputsToKeep` over the
+landed marker `entryMigrated`), so a stale publish can carry nothing back.
+patchInputsToKeep is withdrawn. What still depends on this host's lag is
+the refusal's report: after the plugin strips a refused value, this host
+goes on publishing it until somebody else writes, and the service's
+in-memory record of what it has handled (`Model.entryInputsSeenAfter`)
+is what keeps that stale publish from being reported again; under the
+echoing host it is reported once and the publish is already clean (node
+`R21e (lag host)` / `(echo host)`; key-scenario X1-X6, X6 on the echo
+lever).] What is NOT yet true
 [amended 2026-10-12, round 7]: `scripts/dev-harness/shell.qml` modelled the
 one-write-behind host only until round 7; it now has an echo lever --
 `run.sh --host echo` makes `syncPluginApis` publish `shellConfig.bar` at
@@ -685,7 +699,12 @@ Two neighbouring facts, read rather than run:
   schema, so a user can set `sourceKey` by hand (the plugin ignores a value
   naming none of their records, and consults it at all only when `state.json`
   names no source), and `omarchy bar set ... playlistUrl ""` stores an empty
-  string, which the plugin treats as a no-op since D-SINK-19.
+  string, which the plugin treats as a no-op since D-SINK-19. [Round 11,
+  2026-10-13: and since R21 a NON-empty `playlistUrl` or `epgUrl` the host
+  stores this way is refused once the migration has landed -- the host still
+  writes it, because it checks no schema, and the plugin's next owned write
+  removes it. Both keys are still declared in `manifest.json`, so the host
+  still offers them; that file is not the documents lane's.]
 - `omarchy plugin disable` removes the entry and everything on it, the mirror
   included (`QA.md` TC-INST-05); the plugin's own `state.json` still names the
   active source, so re-enabling does not need the URL again.
