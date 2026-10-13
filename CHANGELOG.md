@@ -3,6 +3,36 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.13.6 (2026-10-12)
+
+**For the marketplace; nothing the plugin does has changed.** 0.13.5 could
+not be approved for the Omarchy plugin marketplace: the marketplace's
+automated security scan refuses any file over 512 KiB, and the plugin's
+logic file had grown to 534 KB, so the scan could not complete and no
+review could begin. Until a release passes that scan, a new install from
+the marketplace receives 0.12.0, which predates this week's credential and
+TLS fixes. An install that already updates itself is not affected.
+
+### Changed
+
+- **The plugin's logic is split into 18 smaller files** under `model/`,
+  behind a small `Model.mjs` that the guide, the background service and the
+  bar import. The largest is 47 KB. Nothing in them is new: a script cut
+  them from the old single file declaration by declaration and checked every
+  one byte for byte against it, and every live test of the shell read the
+  same results before and after the split.
+- **One shared value is now read-only**, the placeholder used for a channel
+  with no number. The guide, the service and the bar now share one copy of
+  the logic instead of each loading its own, so a value one of them could
+  change would have changed for all three.
+
+### Worth knowing
+
+- **Restart the shell after this update** (`omarchy-restart-shell`, not
+  `omarchy-refresh-shell`, which resets your shell configuration). A shell
+  left running from before the update still refers to the old file, which
+  this update removes.
+
 ## 0.13.5 (2026-10-11)
 
 **Security.** While the add-source or first-run form was open, every editable
