@@ -70,7 +70,14 @@ class LedgerCase(unittest.TestCase):
         aggregator does NOT name."""
         agg = '// header (no defect id here: the fixture board has none for it)\n'
         for name, code in parts:
-            agg += 'export {} from "./model/%s.mjs"\n' % name
+            # R20e: the aggregator re-exports what each part declares at the
+            # top level -- except a name declared `// internal` -- in the
+            # generated block shape model_files.public_names reads.
+            names = [m.group(2) for m in re.finditer(r'^(function|var)\s+([A-Za-z_][A-Za-z0-9_]*)(?![^\n]*// internal)', code, re.M)]
+            if names:
+                agg += 'export {\n  %s\n} from "./model/%s.mjs"\n' % (', '.join(names), name)
+            else:
+                agg += 'export {} from "./model/%s.mjs"\n' % name
             self.write('model/%s.mjs' % name, code)
         for name, code in unlisted.items():
             self.write('model/%s.mjs' % name, code)
@@ -287,6 +294,37 @@ class LedgerCase(unittest.TestCase):
         self.write('docs/QA-RESULTS.md',
                    'The pass filed D-AAA-1 and D-AAA-2. See `Model.inNoPart`.\n')
         self.assertRed(r'Model\.inNoPart is cited in docs/QA-RESULTS\.md')
+
+    def test_a_cited_model_symbol_that_qml_cannot_call_is_red(self):
+        """R20e (D-SINK-19 round 10). `Model.X` in a document is a claim that QML
+        can call X. A part DECLARES many names the aggregator does not export,
+        and QML reads those as undefined; the round-9 lens took two such
+        citations at their word. Declared but not exported is red, with the
+        bare form and the part in the message; exported is green."""
+        self.good_ledger()
+        self.write_model(('one', 'function realThing() { return 1 }\nfunction helperOnly() { return 2 } // internal\n'))
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed D-AAA-1 and D-AAA-2. See `Model.realThing`.\n')
+        self.assertGreen()
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed D-AAA-1 and D-AAA-2. See `Model.helperOnly`.\n')
+        self.assertRed(r'Model\.helperOnly is cited in docs/QA-RESULTS\.md, but Model\.mjs does not export it.*'
+                       r'helperOnly in model/one\.mjs')
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed D-AAA-1 and D-AAA-2. See helperOnly in model/one.mjs.\n')
+        self.assertGreen()
+
+    def test_an_unexported_citation_waiver_holds_in_its_one_file_only_and_is_counted(self):
+        """The three pre-rule citations are waived in the one document that holds
+        them, and nowhere else; the census says how many waivers are in use."""
+        self.good_ledger()
+        self.write_model(('one', 'function realThing() { return 1 }\nfunction copySourceRecord() { return 1 } // internal\n'))
+        self.write('docs/ARCHITECTURE-SOURCES.md', 'Records copy through `Model.copySourceRecord`.\n')
+        out = self.assertGreen()
+        self.assertIn('unexported-citation waivers: 3 listed, 1 in use', out)
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed D-AAA-1 and D-AAA-2. See `Model.copySourceRecord`.\n')
+        self.assertRed(r'Model\.copySourceRecord is cited in docs/QA-RESULTS\.md, but')
 
     def test_the_module_file_name_is_not_a_symbol_citation(self):
         """`Model.mjs` is a FILE, as `Model.js` is; neither cites a symbol.

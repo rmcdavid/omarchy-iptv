@@ -159,6 +159,34 @@ FINDING_WORDS = re.compile(
 FINDING_EXEMPT = re.compile(r'\bno defect ids\b|\bnot defects\b', re.I)
 TITLED_ITEM = re.compile(r'^\s{0,3}(\d+)\.\s+\*\*(.+?)\*\*')
 
+# ---- a cited Model symbol must be one QML can call ------------------------
+#
+# D-SINK-19 round 10, R20e. A `Model.X` citation used to be checked against
+# "some part DECLARES X", and a part declares many names the aggregator does
+# not re-export -- internal helpers that QML's `Model.<name>` cannot reach and
+# reads as `undefined`. The round-9 data-loss lens took two such citations at
+# their word (`copySourceRecord`, `replaceSource`), wrote a mutant that called
+# one from Service.qml, and found it would have thrown at the probe commit;
+# the ledger was green. So a citation in the `Model.` form must name a public
+# name of Model.mjs (scripts/model_files.py public_names, the same export
+# blocks the engine loads). An internal helper is cited BARE, with its part
+# named ("copySourceRecord in model/source-records.mjs").
+#
+# WAIVERS. Three citations predate the rule, all in a document this rule's
+# lane does not own; the documents lane of the same round re-cites them bare
+# (its brief, R20e). Each waiver names the symbol and the ONE file it is
+# waived in; a citation of it anywhere else is red as usual. Printed on every
+# run with how many are still in use, the example-id exemption's precedent:
+# an exemption nobody sees is an exemption that grows. A waiver no citation
+# uses any more is reported by name as unused, and is to be deleted -- it is
+# not red, because the commit that removes the citation belongs to a lane
+# that may not edit this file.
+UNEXPORTED_CITATION_WAIVERS = {
+    'copySourceRecord': ('docs/ARCHITECTURE-SOURCES.md', 'internal to model/source-records.mjs; re-cited bare by the round-10 documents lane'),
+    'replaceSource': ('docs/ARCHITECTURE-SOURCES.md', 'internal to model/source-records.mjs; re-cited bare by the round-10 documents lane'),
+    'countFavorites': ('docs/ARCHITECTURE-SOURCES.md', 'internal to model/browse.mjs; re-cited bare by the round-10 documents lane'),
+}
+
 # A state cell must actually say something. These are the words the board
 # already uses; the point is to reject an empty cell, a dash, or a "?" that
 # reads as tracked when it is not.
@@ -571,20 +599,56 @@ def main(argv=None):
         # Kept as a named, short list rather than a clever pattern: an
         # exception you can read is an exception somebody will notice.
         not_symbols = {'js', 'mjs', 'X'}
+        # R20e: what QML's `Model.<name>` reaches. A model whose aggregator
+        # re-exports nothing readable cannot answer, and every `Model.`
+        # citation of it is then red rather than silently unchecked.
+        try:
+            public = set(model_files.public_names(root))
+        except model_files.ModelLayoutError as error:
+            public = None
+            layout_error = str(error)
+        waivers_used = set()
         for symbol in sorted(cited):
             if symbol in not_symbols:
                 continue
             # A symbol resolves if it is exported, defined, or declared.
-            if re.search(r'\b%s\s*[:=]' % re.escape(symbol), blob):
+            found = (re.search(r'\b%s\s*[:=]' % re.escape(symbol), blob)
+                     or re.search(r'function\s+%s\b' % re.escape(symbol), blob))
+            if not found:
+                problems.append(
+                    'Model.%s is cited in %s and resolves in no source file. '
+                    'Either the symbol was renamed and the document was not, or '
+                    'the document names something that never existed'
+                    % (symbol, ', '.join(sorted(cited[symbol]))))
                 continue
-            if re.search(r'function\s+%s\b' % re.escape(symbol), blob):
+            if public is None:
+                problems.append(
+                    'Model.%s is cited in %s, and which names Model.mjs exports '
+                    'could not be read (%s)'
+                    % (symbol, ', '.join(sorted(cited[symbol])), layout_error))
                 continue
+            if symbol in public:
+                continue
+            waiver = UNEXPORTED_CITATION_WAIVERS.get(symbol)
+            outside = sorted(cited[symbol] - ({waiver[0]} if waiver else set()))
+            if waiver and waiver[0] in cited[symbol]:
+                waivers_used.add(symbol)
+            if not outside:
+                continue
+            part = next((name for name, text in sources.items()
+                         if name != model_files.AGGREGATOR
+                         and re.search(r'^(?:function\s+%s\b|var\s+%s\b)' % (re.escape(symbol), re.escape(symbol)), text, re.M)), 'its part')
             problems.append(
-                'Model.%s is cited in %s and resolves in no source file. '
-                'Either the symbol was renamed and the document was not, or '
-                'the document names something that never existed'
-                % (symbol, ', '.join(sorted(cited[symbol]))))
-        print('symbol citations: %d distinct Model.* names checked' % len(cited))
+                'Model.%s is cited in %s, but Model.mjs does not export it: '
+                'QML\'s Model.%s is undefined. Cite it bare with its part '
+                '("%s in %s"), or export it'
+                % (symbol, ', '.join(outside), symbol, symbol, part))
+        print('symbol citations: %d distinct Model.* names checked, each against '
+              'the names Model.mjs exports' % len(cited))
+        unused = sorted(set(UNEXPORTED_CITATION_WAIVERS) - waivers_used)
+        print('unexported-citation waivers: %d listed, %d in use%s'
+              % (len(UNEXPORTED_CITATION_WAIVERS), len(waivers_used),
+                 '; unused, delete: ' + ', '.join(unused) if unused else ''))
 
     # Printed on every run, green included. An exemption nobody sees is an
     # exemption that grows, so the census is part of the output a reader of the
