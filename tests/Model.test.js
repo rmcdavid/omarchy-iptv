@@ -13437,6 +13437,29 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return { before, afterRestart: [next.root.settingsInvalid === null, has(next.storedEntry(), "playlistUrl"), next.root.activeSourceKey === KA], leak: leaks(next) }
     }, { before: [true, true], afterRestart: [true, false, true], leak: false })
   }
+  // R20b P3 through the shipping functions: a file an earlier build wrote
+  // (no consumed slot) holds the pending E seen at t1 and A's guide URL G set
+  // at t2 > t1; E and A are still on the entry because their strips never
+  // landed. The start adopts A, G beats the held E by time, and the same E on
+  // the entry is judged with t1 -- G stands. Seen red with Service.adoptActive
+  // passing no atStart (Z19): E is adopted, seen now, over G.
+  for (const mode of ["lag", "echo"]) {
+    checkCall("R20b (" + mode + " host) P3 at a start, through Service.qml: E held at t1 and A's guide URL G at t2 in a file with no consumed slot, E and A still on the entry -- the start makes A active and G stands", () => {
+      const h = boot({ playlistUrl: A, epgUrl: E, showLogos: false }, stateText([rec(A, { epgUrl: G, epgSetAt: 1760000000500 }), rec(B)], "", { pendingEpg: { url: E, seenAt: 1760000000100 } }), mode)
+      return [h.root.activeSourceKey === KA, name(epgOf(h.file(), KA)), M.pendingEpgOf(h.file()), has(h.storedEntry(), "epgUrl") && h.storedEntry().epgUrl !== "", has(h.storedEntry(), "playlistUrl")]
+    }, [true, "G", null, false, false])
+    // ... and in SESSION the same value set again is the user's later input.
+    // The round-9 lens's matrix (EPG:OLD:init) on this lane's first build;
+    // seen red with the held-time rule applied in session (Z18).
+    checkCall("R20b (" + mode + " host): in session, the held guide URL E set AGAIN from the CLI is a later input -- it is held with the time it was set again and beats A's older guide URL when A becomes active", () => {
+      const h = boot({ showLogos: false }, stateText([rec(A, { epgUrl: G, epgSetAt: 1760000000500 }), rec(B)], "", { pendingEpg: { url: E, seenAt: 1760000000100 } }), mode)
+      const r = h.root
+      h.tick(60000); h.host.externalSet("epgUrl", E); h.drain()
+      const held = M.pendingEpgOf(h.file())
+      h.tick(); r.switchSource(KA); h.drain()
+      return [held ? held.seenAt > 1760000000500 : "none", r.activeSourceKey === KA, name(epgOf(h.file(), KA))]
+    }, [true, true, "E"])
+  }
   // R20b, the round-9 lens's P3 at the model: the pending E (seen at t1)
   // lost to A's later guide URL G (t2); the same E fresh on the entry is
   // judged with t1, never with now. Red on lane-key-y2 (A ends on E).

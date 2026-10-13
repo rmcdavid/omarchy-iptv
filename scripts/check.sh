@@ -164,12 +164,12 @@ fail=0
 QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
-# 2075 -> 2315 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
+# 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
 # checks had never been levelled -- 193 under the tree at round 9, more than
 # every R19 pin together -- plus round 10's R20a key check and shared-fixture
 # cases, and the R20b/c/d cases that run Service.qml's own functions
 # (tests/service-harness.js).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2315}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2319}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
