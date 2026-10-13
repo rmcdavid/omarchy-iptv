@@ -1,7 +1,7 @@
 import QtQuick
 import qs.Commons
 import qs.Ui
-import "Model.js" as Model
+import "Model.mjs" as Model
 
 // BarWidget.qml -- bar entry point for io.github.rmcdavid.iptv.
 // One instance per bar surface (per monitor); it owns no state. Everything
@@ -89,7 +89,7 @@ BarWidget {
   // Qt.darker reduces HSV value, which raises contrast against a pale
   // background, so the idle glyph rendered BOLDER than the active one on five
   // light themes. Alpha does the same job on a dark theme and the right thing
-  // on a light one. The value lives in Model.js so a test calls the shipping
+  // on a light one. The value lives in the model so a test calls the shipping
   // number rather than transcribing it (rule 12).
   property color glyphColor: root.playing || root.hasError ? root.barFg : Util.alpha(root.barFg, Model.BAR_IDLE_ALPHA)
   // M2-03 6.4: Model.barTooltip prepends the number to the playing line when
