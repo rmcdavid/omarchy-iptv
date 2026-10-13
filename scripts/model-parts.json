@@ -311,9 +311,6 @@
         "entryFlushDisposition",
         "ownedWriteMode",
         "retiredInputsToKeep",
-        "hostEntryForm",
-        "entryWriteRecord",
-        "entryWriteNeeded",
         "sameOwnWrite",
         "owedMirrorAction"
       ]

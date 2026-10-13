@@ -172,48 +172,41 @@ TITLED_ITEM = re.compile(r'^\s{0,3}(\d+)\.\s+\*\*(.+?)\*\*')
 # blocks the engine loads). An internal helper is cited BARE, with its part
 # named ("copySourceRecord in model/source-records.mjs").
 #
-# WAIVERS. Three citations predate the rule, all in a document this rule's
-# lane does not own; the documents lane of the same round re-cites them bare
-# (its brief, R20e). Each waiver names the symbol and the ONE file it is
-# waived in; a citation of it anywhere else is red as usual. Printed on every
-# run with how many are still in use, the example-id exemption's precedent:
-# an exemption nobody sees is an exemption that grows. A waiver no citation
-# uses any more is reported by name as unused, and is to be deleted -- it is
-# not red, because the commit that removes the citation belongs to a lane
-# that may not edit this file.
-UNEXPORTED_CITATION_WAIVERS = {
-    'copySourceRecord': ('docs/ARCHITECTURE-SOURCES.md', 'internal to model/source-records.mjs; re-cited bare by the round-10 documents lane'),
-    'replaceSource': ('docs/ARCHITECTURE-SOURCES.md', 'internal to model/source-records.mjs; re-cited bare by the round-10 documents lane'),
-    'countFavorites': ('docs/ARCHITECTURE-SOURCES.md', 'internal to model/browse.mjs; re-cited bare by the round-10 documents lane'),
-}
-
-# WITHDRAWN SYMBOLS (D-SINK-19 round 11, R21d). R21 deleted the round-9 and
-# round-10 machinery from the model -- the held guide URL, the set times, the
-# persisted consumed-input slots -- and ordered its exports DELETED, not left
-# dead. The documents that describe those rounds still cite them, and the
-# lane that deleted them may not edit docs/; the documents lane of the same
-# round rewrites those passages. Until it does, each withdrawn name is waived
-# in the documents that cite it TODAY and nowhere else: a new citation of one
-# anywhere, or a citation in a document not listed, is red as usual, and so
-# is any withdrawn name that comes BACK into the source (that is not a
-# withdrawal any more, it is the ordinary check's business). Printed on every
-# run with how many are still in use; one no citation uses is reported by
-# name as unused, to be deleted -- not red, for the same reason as above.
-_R21_DOCS = {
-    'AS': 'docs/ARCHITECTURE-SOURCES.md', 'A': 'docs/ARCHITECTURE.md',
-    'C': 'docs/OMARCHY-PLUGIN-CONTRACT.md', 'QS': 'docs/QA-SOURCES.md', 'Q': 'docs/QA.md',
-}
-_R21_REASON = 'withdrawn by R21 (D-SINK-19 round 11); the round-11 documents lane rewrites the passage'
+# WAIVERS. Two tables, emptied of every round-10 and round-11 entry in
+# D-SINK-19 round 12 (R22d) and kept as the one place a waiver may live, with
+# the rule that keeps them clean.
+#
+# UNEXPORTED_CITATION_WAIVERS: symbol -> (the ONE file it is waived in,
+# reason), for a `Model.X` citation of a name Model.mjs does not export.
+# WITHDRAWN_SYMBOL_WAIVERS: symbol -> (frozenset of files, reason), for a
+# citation of a name a ruling DELETED from the model, while the documents
+# that cite it are rewritten. A citation of a waived name anywhere else is
+# red as usual, and so is a withdrawn name that comes back into the source.
+#
+# Round 10 waived three pre-rule citations (copySourceRecord, replaceSource,
+# countFavorites, all in ARCHITECTURE-SOURCES.md) and round 11 the seventeen
+# names R21 withdrew (adoptPendingEpg and its family, in five documents). The
+# documents lanes re-cited every one bare, and every waiver then read
+# "unused, delete" for a round -- while still honouring a NEW citation of
+# the same name in the same document, which is the "documented as live"
+# regression the withdrawal waiver existed to prevent (both round-11 lenses,
+# P2). So R22d: AN UNUSED WAIVER IS ITSELF A FAILURE. The census below still
+# prints how many are listed and in use on every run; a listed waiver no
+# citation uses is now a problem that names it, and the twenty went.
+#
+# In use today: the three R19a estimate functions R22e deleted in round 12
+# (hostEntryForm, entryWriteRecord, entryWriteNeeded), each waived in exactly
+# the documents that cite it in the `Model.` form today. The round-12
+# documents lane re-cites them bare or drops them; the commit that removes
+# the last citation of one must delete its entry here, because the next run
+# names it unused and is red (R22d) -- which is the point.
+UNEXPORTED_CITATION_WAIVERS = {}
+_R22E_REASON = 'deleted by R22e (D-SINK-19 round 12); the round-12 documents lane re-cites it bare or drops it'
 WITHDRAWN_SYMBOL_WAIVERS = {
-    name: (frozenset(_R21_DOCS[d] for d in docs), _R21_REASON)
-    for name, docs in {
-        'adoptPendingEpg': ('AS', 'A', 'C', 'QS', 'Q'), 'applyPendingEpg': ('AS', 'A', 'Q'),
-        'entryInputDigest': ('AS',), 'entryInputRecord': ('AS',), 'entryInputSeed': ('AS',),
-        'entryInputsAfterMove': ('AS',), 'entryInputsAfterWrite': ('AS',), 'entryInputsOf': ('AS',),
-        'entryInputsRecord': ('AS',), 'epgByTime': ('AS', 'A', 'Q'), 'epgSetAtOf': ('AS', 'A'),
-        'epgSnapshotAfter': ('AS', 'A'), 'patchInputsToKeep': ('AS', 'C'), 'pendingEpgOf': ('AS', 'A', 'Q'),
-        'pendingEpgRecord': ('AS',), 'withEntryInputs': ('AS',), 'withPendingEpg': ('AS',),
-    }.items()
+    'entryWriteNeeded': (frozenset({'docs/ARCHITECTURE-SOURCES.md', 'docs/ARCHITECTURE.md',
+                                    'docs/OMARCHY-PLUGIN-CONTRACT.md', 'docs/QA.md'}), _R22E_REASON),
+    'entryWriteRecord': (frozenset({'docs/ARCHITECTURE-SOURCES.md'}), _R22E_REASON),
+    'hostEntryForm': (frozenset({'docs/ARCHITECTURE-SOURCES.md'}), _R22E_REASON),
 }
 
 # A state cell must actually say something. These are the words the board
@@ -679,14 +672,18 @@ def main(argv=None):
                 % (symbol, ', '.join(outside), symbol, symbol, part))
         print('symbol citations: %d distinct Model.* names checked, each against '
               'the names Model.mjs exports' % len(cited))
-        unused = sorted(set(UNEXPORTED_CITATION_WAIVERS) - waivers_used)
-        print('unexported-citation waivers: %d listed, %d in use%s'
-              % (len(UNEXPORTED_CITATION_WAIVERS), len(waivers_used),
-                 '; unused, delete: ' + ', '.join(unused) if unused else ''))
-        unused = sorted(set(WITHDRAWN_SYMBOL_WAIVERS) - withdrawn_used)
-        print('withdrawn-symbol waivers (R21d): %d listed, %d in use%s'
-              % (len(WITHDRAWN_SYMBOL_WAIVERS), len(withdrawn_used),
-                 '; unused, delete: ' + ', '.join(unused) if unused else ''))
+        # R22d: the census, and an unused waiver is red. A waiver whose
+        # citation has gone is not harmless -- it waves through the next one.
+        for label, table, used in (('unexported-citation', UNEXPORTED_CITATION_WAIVERS, waivers_used),
+                                   ('withdrawn-symbol', WITHDRAWN_SYMBOL_WAIVERS, withdrawn_used)):
+            unused = sorted(set(table) - used)
+            print('%s waivers: %d listed, %d in use%s'
+                  % (label, len(table), len(used), '; unused: ' + ', '.join(unused) if unused else ''))
+            for symbol in unused:
+                problems.append(
+                    'the %s waiver for %s is unused: no citation it covers is left, so '
+                    'all it can do now is wave through a new one. Delete it from '
+                    'scripts/check-defect-ledger.py' % (label, symbol))
 
     # Printed on every run, green included. An exemption nobody sees is an
     # exemption that grows, so the census is part of the output a reader of the

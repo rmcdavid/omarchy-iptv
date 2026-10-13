@@ -776,23 +776,14 @@ function retiredInputsToKeep(entry, landed) {
   return keep
 }
 
-// D-SINK-19 round 9, R19a. RETIRED: NO SKIP ON AN ESTIMATE.
-//
-// hostEntryForm, entryWriteRecord and entryWriteNeeded below have NO shipped
-// caller since round 9 (pinned by the node suite on the dev branch, "R19a
-// (structural)").
-// The funnel used to skip a write when entryWriteNeeded said the host
-// already stored the entry, judged from the plugin's record of its last
-// write while the publish equalled the publish recorded then. On the lagging
-// host a publish that goes A -> B -> A (an `omarchy bar set` that restores
-// the earlier entry exactly) brought that record back, and the funnel
-// skipped writes the host WOULD have stored: an in-app logo OFF ignored, a
-// refused credential set twice left in shell.json, an EPG input set twice
-// later overwriting an in-app guide URL edit (both round-8 lenses, live).
-// updateEntryInline's own answer is the dirty check, and sameOwnWrite alone
-// settles the cycle. They stay declared ONLY because docs/ still cite them
-// by name and the ledger resolves a citation against the model; they go in
-// the same commit as the documents that stop citing them.
+// D-SINK-19 round 9, R19a: NO SKIP ON AN ESTIMATE. The funnel used to skip a
+// write when the plugin's record of its last write said the host already
+// stored the entry; on the lagging host a publish that goes A -> B -> A
+// brought that record back and the funnel skipped writes the host WOULD have
+// stored (both round-8 lenses, live). updateEntryInline's own answer is the
+// dirty check, and sameOwnWrite alone settles the cycle. The three functions
+// that made the estimate (hostEntryForm, entryWriteRecord, entryWriteNeeded)
+// had no caller from round 9 on and were DELETED in round 12 (R22e).
 //
 // D-SINK-19 round 8, R18b. THE CYCLE SETTLES: a write that changes nothing
 // changes nothing.
@@ -808,41 +799,10 @@ function retiredInputsToKeep(entry, landed) {
 // record, which re-evaluated `settings`, fired onSettingsChanged and ran
 // reconcile again, every event-loop turn.
 //
-// Two decisions, both here so the node driver calls what Service.qml calls:
+// What is left of it here is the second decision, sameOwnWrite below; the
+// first (an estimate of what the host stores, to skip the hand-over) was
+// withdrawn by R19a.
 //
-// hostEntryForm / entryWriteNeeded / entryWriteRecord. Would handing `entry`
-// to updateEntryInline change what the host STORES? The host's own answer is
-// its dirty check -- JSON.stringify of `{ id } + the entry's other keys`
-// against the stored entry, key order included (shell.qml updateEntryInline)
-// -- but the plugin sees only what the host PUBLISHES, which the lagging
-// host leaves one write behind (rule 9). So the stored entry is estimated:
-// while the publish is still exactly the one that stood when this service
-// last wrote (`lastWrite.published`), the host stores what that write handed
-// it (`lastWrite.stored`); the moment the publish moves -- our own echo, or
-// anybody's write -- the publish is the estimate. A write is needed exactly
-// when the entry differs from the estimate under the host's own comparison,
-// so a write this skips is one the host would have answered `false` to. The
-// estimate never waits for an echo (rule 9): it is the plugin's own record
-// of its own write, dropped as soon as the host says anything else.
-function hostEntryForm(id, entry) {
-  var next = { id: str(id) }
-  var e = entry && typeof entry === "object" ? entry : {}
-  for (var k in e) if (k !== "id") next[k] = e[k]
-  return next
-}
-
-function entryWriteRecord(id, entry, published) {
-  return { published: JSON.stringify(published && typeof published === "object" ? published : {}),
-           stored: JSON.stringify(hostEntryForm(id, entry)) }
-}
-
-function entryWriteNeeded(id, entry, published, lastWrite) {
-  var pub = JSON.stringify(published && typeof published === "object" ? published : {})
-  var stored = lastWrite && typeof lastWrite === "object" && typeof lastWrite.stored === "string"
-               && lastWrite.published === pub ? lastWrite.stored : pub
-  return JSON.stringify(hostEntryForm(id, entry)) !== stored
-}
-
 // sameOwnWrite. The own-write record the funnel would assign, against the one
 // in force: equal when both are absent, or when `base` and `value` carry the
 // same keys with strictly equal values -- exactly the inputs ownWriteInForce
@@ -874,6 +834,5 @@ export {
   RETIRED_SETTINGS, MAX_SEEN_INPUTS, entryInputSeen, entryInputLast,
   entryInputsSeenAfter, entryInputNotice, ownedEntryPatch, barEntryWritable,
   entryFlushDisposition, owedMirrorAction, ownedWriteMode,
-  retiredInputsToKeep, hostEntryForm, entryWriteRecord, entryWriteNeeded,
-  sameOwnWrite
+  retiredInputsToKeep, sameOwnWrite
 }

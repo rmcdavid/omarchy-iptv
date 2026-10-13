@@ -87,8 +87,7 @@ export {
   settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
   MAX_SEEN_INPUTS, entryInputSeen, entryInputLast, entryInputsSeenAfter,
   entryInputNotice, ownedEntryPatch, barEntryWritable, entryFlushDisposition,
-  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, hostEntryForm,
-  entryWriteRecord, entryWriteNeeded, sameOwnWrite
+  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, sameOwnWrite
 } from "./model/settings.mjs"
 export {
   optInSetting, logoSurvey, splitLogoUrl, logoConsentLines, logoFile,

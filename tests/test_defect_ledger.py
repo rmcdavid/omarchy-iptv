@@ -35,6 +35,9 @@ import importlib.util
 _s = importlib.util.spec_from_file_location('check_defect_ledger', _spec)
 checker = importlib.util.module_from_spec(_s)
 _s.loader.exec_module(checker)
+# The waiver tables as the checker ships them (LedgerCase empties them per case).
+SHIPPED_UNEXPORTED = dict(checker.UNEXPORTED_CITATION_WAIVERS)
+SHIPPED_WITHDRAWN = dict(checker.WITHDRAWN_SYMBOL_WAIVERS)
 
 
 HEADER = (
@@ -54,6 +57,11 @@ class LedgerCase(unittest.TestCase):
         self.addCleanup(shutil.rmtree, self.dir, True)
         os.makedirs(os.path.join(self.dir, 'docs'))
         subprocess.run(['git', 'init', '-q', self.dir], check=True)
+        # Every synthetic repository starts with NO waivers: the shipped ones
+        # name this repository's documents, and since R22d a waiver nothing
+        # uses is red. A case that needs one installs it (waive, below).
+        self.waive('UNEXPORTED_CITATION_WAIVERS', {})
+        self.waive('WITHDRAWN_SYMBOL_WAIVERS', {})
 
     def write(self, rel, text):
         path = os.path.join(self.dir, rel)
@@ -314,32 +322,70 @@ class LedgerCase(unittest.TestCase):
                    'The pass filed D-AAA-1 and D-AAA-2. See helperOnly in model/one.mjs.\n')
         self.assertGreen()
 
+    def waive(self, table, entries):
+        """Install waiver entries for one case (the shipped tables are empty
+        since R22d) and restore the shipped table afterwards."""
+        saved = dict(getattr(checker, table))
+        getattr(checker, table).clear()
+        getattr(checker, table).update(entries)
+        self.addCleanup(lambda: (getattr(checker, table).clear(), getattr(checker, table).update(saved)))
+
     def test_an_unexported_citation_waiver_holds_in_its_one_file_only_and_is_counted(self):
-        """The three pre-rule citations are waived in the one document that holds
-        them, and nowhere else; the census says how many waivers are in use."""
+        """A waived pre-rule citation holds in the one document it names, and
+        nowhere else; the census says how many waivers are in use."""
         self.good_ledger()
+        self.waive('UNEXPORTED_CITATION_WAIVERS', {'copySourceRecord': ('docs/ARCHITECTURE-SOURCES.md', 'test')})
         self.write_model(('one', 'function realThing() { return 1 }\nfunction copySourceRecord() { return 1 } // internal\n'))
         self.write('docs/ARCHITECTURE-SOURCES.md', 'Records copy through `Model.copySourceRecord`.\n')
         out = self.assertGreen()
-        self.assertIn('unexported-citation waivers: 3 listed, 1 in use', out)
+        self.assertIn('unexported-citation waivers: 1 listed, 1 in use', out)
         self.write('docs/QA-RESULTS.md',
                    'The pass filed D-AAA-1 and D-AAA-2. See `Model.copySourceRecord`.\n')
         self.assertRed(r'Model\.copySourceRecord is cited in docs/QA-RESULTS\.md, but')
 
     def test_a_withdrawn_symbol_waiver_holds_in_its_listed_files_only_and_is_counted(self):
-        """R21d (D-SINK-19 round 11): a model export the ruling DELETED is waived
-        in the documents that cite it today, and nowhere else, while the
-        documents lane rewrites them; the census says how many are in use. A
-        citation in a document the waiver does not list is red as before.
-        Seen red with the waiver branch removed (the first assertion)."""
+        """R21d (D-SINK-19 round 11): a model export a ruling DELETED is waived
+        in the documents listed for it, and nowhere else; the census says how
+        many are in use. A citation in a document the waiver does not list is
+        red as before. Seen red with the waiver branch removed (the first
+        assertion)."""
         self.good_ledger()
+        self.waive('WITHDRAWN_SYMBOL_WAIVERS', {'pendingEpgOf': (frozenset({'docs/ARCHITECTURE-SOURCES.md'}), 'test')})
         self.write_model(('one', 'function realThing() { return 1 }\n'))
         self.write('docs/ARCHITECTURE-SOURCES.md', 'The held value went through `Model.pendingEpgOf`.\n')
         out = self.assertGreen()
-        self.assertRegex(out, r'withdrawn-symbol waivers \(R21d\): \d+ listed, 1 in use')
+        self.assertIn('withdrawn-symbol waivers: 1 listed, 1 in use', out)
         self.write('docs/QA-RESULTS.md',
                    'The pass filed D-AAA-1 and D-AAA-2. See `Model.pendingEpgOf`.\n')
         self.assertRed(r'Model\.pendingEpgOf is cited in docs/ARCHITECTURE-SOURCES\.md, docs/QA-RESULTS\.md and resolves in no source file')
+
+    def test_an_unused_waiver_is_a_failure_that_names_it(self):
+        """R22d (D-SINK-19 round 12): a waiver whose citation has gone is red,
+        by name, in both tables -- because the round-11 lenses showed an unused
+        waiver still waves through a NEW citation of the same name in the same
+        document. Seen red against the round-11 checker, which only printed
+        "unused, delete" and exited 0."""
+        self.good_ledger()
+        self.write_model(('one', 'function realThing() { return 1 }\nfunction copySourceRecord() { return 1 } // internal\n'))
+        self.waive('WITHDRAWN_SYMBOL_WAIVERS', {'pendingEpgOf': (frozenset({'docs/ARCHITECTURE-SOURCES.md'}), 'test')})
+        self.assertRed(r'the withdrawn-symbol waiver for pendingEpgOf is unused')
+        self.waive('WITHDRAWN_SYMBOL_WAIVERS', {})
+        self.waive('UNEXPORTED_CITATION_WAIVERS', {'copySourceRecord': ('docs/ARCHITECTURE-SOURCES.md', 'test')})
+        self.assertRed(r'the unexported-citation waiver for copySourceRecord is unused')
+        self.waive('UNEXPORTED_CITATION_WAIVERS', {})
+        self.assertGreen()
+
+    def test_the_round_10_and_11_waivers_are_gone(self):
+        """R22d: the twenty waivers of rounds 10 and 11 went once nothing used
+        them; what is left is R22e's three, and a waiver has to be in use to
+        stay green (above), so they go with their last citation."""
+        gone = {'copySourceRecord', 'replaceSource', 'countFavorites', 'adoptPendingEpg', 'applyPendingEpg', 'entryInputDigest',
+                'entryInputRecord', 'entryInputSeed', 'entryInputsAfterMove', 'entryInputsAfterWrite', 'entryInputsOf',
+                'entryInputsRecord', 'epgByTime', 'epgSetAtOf', 'epgSnapshotAfter', 'patchInputsToKeep', 'pendingEpgOf',
+                'pendingEpgRecord', 'withEntryInputs', 'withPendingEpg'}
+        listed = set(SHIPPED_UNEXPORTED) | set(SHIPPED_WITHDRAWN)
+        self.assertEqual(listed & gone, set())
+        self.assertEqual(listed, {'entryWriteNeeded', 'entryWriteRecord', 'hostEntryForm'})
 
     def test_the_module_file_name_is_not_a_symbol_citation(self):
         """`Model.mjs` is a FILE, as `Model.js` is; neither cites a symbol.

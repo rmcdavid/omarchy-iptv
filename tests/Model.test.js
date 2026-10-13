@@ -7134,6 +7134,15 @@ check("R21d: the round 9 and 10 exports are gone from the model, and none of the
    "entryInputSeed", "entryInputsAfterMove", "entryInputsAfterWrite", "epgSetAtOf", "adoptPendingEpg", "epgByTime", "applyPendingEpg", "epgSnapshotAfter",
    "patchInputsToKeep"].filter(n => n in Model || serviceSource.indexOf("Model." + n + "(") !== -1),
   [])
+// R22e (round 12): the R19a estimate, retired in round 9 and kept only for the
+// documents' citations, is deleted too -- from the aggregator AND from its
+// part, so a bare citation cannot point at a function that is still there.
+check("R22e: hostEntryForm, entryWriteRecord and entryWriteNeeded are gone from Model.mjs and from model/settings.mjs, and nothing calls them",
+  ["hostEntryForm", "entryWriteRecord", "entryWriteNeeded"].filter(n => n in Model
+    || new RegExp("function " + n + "\\(").test(require("fs").readFileSync(require("path").join(__dirname, "../model/settings.mjs"), "utf8"))
+    || serviceSource.indexOf(n + "(") !== -1),
+  [])
+
 // ---- R22a (D-SINK-19 round 12): the load classification, called for real ----
 //
 // Quickshell 0.3.1's FileView, MEASURED in a nested headless cage on
@@ -7595,8 +7604,8 @@ checkCall("R18a, the sibling its search found: a guide URL of control characters
   })
 }, [[false, 0, false, false, true], [false, 0, false, false, true], [false, 0, false, false, true]])
 // `R18b: entryWriteNeeded answers the host's own dirty check ...` USED TO BE
-// HERE. R19a withdrew the skip it decided; the function has no shipped caller
-// (pinned below, "R19a (structural)") and is kept only while docs/ cite it.
+// HERE. R19a withdrew the skip it decided; R22e deleted the function (pinned
+// above, "R22e"), and "R19a (structural)" below still pins that nothing calls it.
 checkCall("R18b: sameOwnWrite is equality over exactly what ownWriteInForce and settingsWithOwnWrite read -- the same keys with strictly equal values in base and value; undefined is not \"\", and two absences are equal", () => {
   const host = { sourceKey: "d990c2e4", showLogos: false }
   const a = Model.ownWriteOf(host, { sourceKey: "d990c2e4", showLogos: true })
