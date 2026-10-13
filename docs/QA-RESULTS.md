@@ -13157,6 +13157,25 @@ minute is the logo scenario's `--baseline 159da94` 9 / 24 (cb08eb1), and
 `qml` image probe, never the harness shell -- so it cannot carry this
 error. Every other count against those trees predates 51d686b.
 
+### D-SRC-21: 0.13.6 writes over a state file it could not read
+
+**Filed 2026-10-13 from the D-SINK-19 round-12 data-loss lens; P2; open on
+the shipped release.** Round 11's lens found that the D-SINK-19 branch
+wrote an empty state over a migrated install's unreadable `state.json`, and
+round 12 ruled that a state which did not load is never written (R22). Its
+lens then asked the same question of the shipped 0.13.6, and the answer is
+yes, through three routes. Live under a nested cage with a private bus, a
+state directory made unreadable while the shell was down lost the source
+added in the app at the next start (one record left of two, the other kept
+only because 0.13.6 re-adopts it from the bar entry). A truncated
+`state.json` at start was written over. And the helper's own `state
+favorite add`, run by hand over a truncated, unreadable, empty or garbage
+file, exits 0 and leaves an empty state with that one favourite, on both
+`main` ca5a3a5 and `dev` 4740a50. An unreadable FILE at start survives on
+0.13.6, as round 11 measured. On `lane-key-n1` every one of these refuses
+with nothing written, and the lens's matrix reads 0 problems over about
+240,000 sequences. It ships with D-SINK-19.
+
 ### D-LOGO-13: compressed PNG text metadata is the decoder's next unbounded number
 
 **Filed 2026-10-13 from the maintainer's finding on #11315 (0.13.6,
