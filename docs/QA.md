@@ -96,7 +96,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 | ID | Verifies | How | Expected |
 |---|---|---|---|
 | TC-CFG-01 | `omarchy bar set ... playlistUrl <url>` fetches without restart | M 5.3, 5.4 US1 | helper runs within ~1 s (journal shows one run, 300 ms debounce); bar tooltip `IPTV - click to open the guide`; guide footer `1,475 channels - updated HH:MM` (count from the live list, thousands separator) **[Amended 2026-10-11, D-SINK-19: and afterwards `jq` of the entry in shell.json shows `sourceKey` = the record's key and NO `playlistUrl`; `state.json` `activeKey` = that key; the file is 0600. The same holds when the value was set while the shell was down (SRC-MIG-14 in QA-SOURCES.md, observed live under cage on lane-key-s2: key-scenario C1-C5); at the first build it was discarded and erased instead, and on the round-2 tree it was lost to the start-up reload (D-SRC-15).]** **[OVERTURNED 2026-10-13, D-SINK-19 round 11 (R21; the owner dropped the route): after the migration `omarchy bar set ... playlistUrl` is refused, so this row is now "adding a source in the guide fetches without restart": first-run form or Sources `a`, paste the URL, `Enter`; the same expectations, and the entry carries `sourceKey` and no URL. The command itself is TC-CFG-14; a URL an older version kept on the entry is TC-CFG-15.]** |
-| TC-CFG-02 | HTTP 404 with no cache | M 5.4 US1 step 4 | empty state `Playlist failed to load` / `HTTP 404 Not Found from iptv-org.github.io - check playlistUrl`; hint `r reload - Esc close`; bar glyph U+F0503, tooltip `IPTV - playlist error, open the guide`; notification `Playlist error` / `Could not fetch the playlist (HTTP 404 Not Found). Open the guide for details.` |
+| TC-CFG-02 | HTTP 404 with no cache | M 5.4 US1 step 4 | empty state `Playlist failed to load` / `HTTP 404 Not Found from iptv-org.github.io - check playlistUrl`; hint `r reload - Esc close`; bar glyph U+F0503, tooltip `IPTV - playlist error, open the guide`; notification `Playlist error` / `Could not fetch the playlist (HTTP 404 Not Found). Open the guide for details.` **[Amended 2026-10-13, D-SINK-19 round 12 (R22c): the empty state's line is `HTTP 404 Not Found from iptv-org.github.io - check the source in Sources` (`Guide.qml` `errorCheck` on lane-key-n1); `check playlistUrl` is a FAIL. Seen with the old text on screen by the round-11 live lens on lane-key-m2, whose footer read `r retry - o sources - Esc close` (separators `Model.SEP`). Automated: key-scenario B8 reads the drawn empty state (`kind:error sources:yes retired:no`) and `tests/test_shipped_copy.py` searches every shipped string literal.]** |
 | TC-CFG-03 | unresolvable host | M 5.4 US1 step 5 | reason `Could not resolve host` |
 | TC-CFG-04 | unsupported source scheme | A `python3 -m unittest discover -s tests` (`tests/test_helper.py::test_refuses_unsupported_scheme`); M optional | code `unsupported_scheme`, guide renders the message |
 | TC-CFG-05 | absolute path and `file://` sources | A `tests/test_playlist.py::SourceTest`, `tests/test_helper.py`; M 5.4 US7 (local server) | both load; `sourceHost` = `local file` |
@@ -110,6 +110,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 | TC-CFG-13 | credentials never rendered (R12) | see SEC-07 | no URL beyond scheme+host in guide, tooltip, notification, journal |
 | TC-CFG-14 | `omarchy bar set ... playlistUrl` / `epgUrl` after the migration is REFUSED (D-SINK-19 R21b, 2026-10-13) | A node `R21e (lag host)` / `(echo host) after the marker, a CLI ...`; H key-scenario X1-X6; M 5.4 US1 step 8 | nothing added, the active source and its guide URL unchanged, one notification `Bar setting ignored` / `<setting> is no longer read from the bar settings and was removed. Add or switch sources in the guide's Sources screen.` (replace id 74016; the same sentence once on the console); `jq` of the entry shows no `playlistUrl`/`epgUrl` after the plugin's next write; the same value set again is not reported again; `grep -c '://'` over the journal and the notification text 0 |
 | TC-CFG-15 | a 0.13.x command-line configuration is moved into Sources once (D-SINK-19 R21a, 2026-10-13) | A node `R21e (lag host)` / `(echo host) migration, ...` (one source, two, CLI-only, no-source `epgUrl`, failed write, TERM, downgrade); H key-scenario G1-G5, F, H; M 5.4 US1 step 7 | first start over an entry carrying `playlistUrl` (and `epgUrl`): that playlist is a source and active, the guide URL on it, `state.json` carries `"entryMigrated": true` and `activeKey`, and the entry carries `sourceKey` and no URL once that write has landed; nothing is reported. A guide URL with no source to attach it to: one `Bar setting removed` notification, nothing kept. State directory unwritable at that start: the URL stays on the entry, the next start migrates again |
+| TC-CFG-16 | a `state.json` that exists but cannot be read, or does not parse, is never written (D-SINK-19 R22a, 2026-10-13) | A node `R22a (lag host, ...)` / `(echo host, ...)` at a migrated and at a 0.13.x-shaped start and mid-session, `R22b (...)`, the `R22a:` model units; python `StateNeverWrittenUnreadTest` (`tests/test_state.py`); H key-scenario B1-B7; M 5.4 US5 step 7 | over a file that does not parse: the file byte for byte unchanged after the start, an add or a switch and a restart; one critical notification `Saved sources not loaded` naming the file and saying what to do, no `://`; an add or switch refused with `state.json could not be read - nothing is saved until it can be`; the bar entry unchanged. Over a 0000 file or a 0000 state directory left while the shell was down: NO notification, every source and favourite there after the start (the helper's init restores 0600 / 0700 and the start reads the file). Putting a good file back lifts the mode without a restart (B7). `UX-SOURCES.md` 5.10 has the copy for each reason |
 
 #### Browse (US2, R1, R3, R4, R5, R6, UX 2.x, 3.1, 3.2)
 
@@ -189,7 +190,7 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 | TC-FAV-06 | Recent list rules | A `Model.test.js` (`pushRecent`: newest first, de-duplicated, capped); M 5.4 US5 step 5 | hidden while empty; replay moves to top; cap `maxRecents` |
 | TC-FAV-07 | recent recorded on the play command even when the stream fails (R5) | M 5.4 US3 step 5 | the dead channel is in Recent |
 | TC-FAV-08 | persistence across shell restart; file modes | M 5.4 US5 step 6, 5.7 | favorites and recents survive `omarchy restart shell`; `~/.local/state/omarchy-iptv` 0700, `state.json` 0600 |
-| TC-FAV-09 | corrupt `state.json` | A `Model.test.js` (`parseState`); M 5.4 US5 step 7 | empty state, no crash, file rewritten on next change |
+| TC-FAV-09 | corrupt `state.json` | A `Model.test.js` (`parseState`; since 2026-10-13 `R22a: stateLoadKind ...` and the `R22a (... host, ... start): garbage` / `empty` harness pins); M 5.4 US5 step 7 | ~~empty state, no crash, file rewritten on next change~~ **[Amended 2026-10-13, D-SINK-19 round 12 (R22a): the opposite. The file is never rewritten while it does not parse: no crash, one critical notification `Saved sources not loaded` (`... is not a valid state file. Nothing is saved until it can be read, ...`), the guide on its first-run form (nothing loaded, so no channels to favourite), an add from that form refused with `state.json could not be read - nothing is saved until it can be`, and the file byte for byte as it was afterwards. "Rewritten on next change" is how a start erased every source until round 12 (TC-CFG-16).]** |
 | TC-FAV-10 | ids stable across refresh (decision 6) | A `tests/test_playlist.py` (`assign_ids`), `qa-attrs.m3u`; M 5.4 US7 | favorites still favorites after `r` |
 | TC-FAV-11 | click on the lead slot toggles without playing (UX 2.4, 7.3) | M 5.4 US5 step 1 | star toggles, nothing plays |
 
@@ -383,7 +384,7 @@ P3 "coverage" defect unless it guards a P1/P2 behaviour):
 | `tests/test_helper.py` (lane A) | existing 7 + `too_large` on a sparse 65 MB file (`truncate -s 65M`), `unsafe_path` for `/proc/self/environ` and a symlink into `/proc`, `/dev/zero` refused, gzip bomb capped [D-QA-06], `--timeout` honoured against a listening-but-silent socket, status file written on every failure, `fetchedAt` carried over when stale | synthetic in tmp |
 | `tests/test_epg.py` (lane A, new) | clock pinned to T0 (a `--now` flag or env var is the recommended seam): plain vs gz identical; offsets +0100/-0500/+0530/none/12-digit; overlap, gap, nostop, far (+-24 h window), orphan, nochannel; `@SD` ids; unicode; `epg-now.json` shape (`version`, `generatedAt`, `validUntil`, `channels.<id>.now/next`); `--now-only` recompute without fetch; `too_large` (64 MB cap on the compressed download AND on inflated bytes), `bad_gzip`, HTTP errors; XML entity expansion does not explode (SEC-19); restrict to playlist ids when `channels.json` exists | `tests/fixtures/qa-epg.xml`, `tests/fixtures/qa-nonascii/qa-epg.xml.gz`, generated `gen-*.xml.gz` |
 | `tests/test_mpv_ipc.py` (lane A, new) | fake `AF_UNIX` server: `play` sends `set_property title`, `set_property force-media-title`, per-file header options, `loadfile <url> replace`; `stop` sends `quit`; `status` parses `media-title`, `paused`, `idle-active`; `not_running` unlinks a stale socket; `ipc_error` on garbage; `unknown_channel` when the id is not in `channels.json`; never prints the URL | synthetic |
-| `tests/test_state.py` (lane A, only if the `state` subcommand ships) | dump/favorite/recent round trip, atomic write, corrupt file tolerated | synthetic |
+| `tests/test_state.py` (lane A, only if the `state` subcommand ships) | dump/favorite/recent round trip, atomic write, corrupt file tolerated **[2026-10-13, D-SINK-19 round 12 (R22a): corrupt file REFUSED -- every verb but `init` exits 1 with `state_unreadable` and writes nothing, `init` reports `found` and never rewrites an existing file (`StateNeverWrittenUnreadTest`)]** | synthetic |
 | `tests/Model.test.js` (lane B) | existing 61 + tiers 0-3 with favorites first and playlist order inside a tier; cap 200 + `truncated`; `tokenize` folds the query; `groupChannels` order (Recent, Favorites always, All, groups in first-seen order, `Ungrouped` last); zap ring by launch list (Favorites/group/All, Recent -> channel's group, wrap); `pushRecent` cap/dedupe/replay-to-top; `parseState` garbage; `clampInt` 360/15/1440 and 180/60/600; `splitMpvArgs` reserved incl. `--no-` forms and case [D-QA-11]; `headerArgs` drops CR/LF and empty values; `buildMpvArgv` order (reserved first, headers, user args, `--`, url); `formatClock` 24 h; `formatEpgLine` expired now; `elide`; every UX 6 string present in `Copy.js` | none |
 | `tests/Model.spec.qml` (exists) | keep the vectors in sync with node | none |
 | `tests/Guide.spec.qml`, `tests/BarWidget.spec.qml` (lane B, M1-17) | states from fixture JSON (not configured, loading, error+cache, error no cache, empty favorites, no matches), footer hints per mode, key routing search vs list mode, `Accessible.name` composition, bar label elision at `barLabelMaxWidth`, glyph per state, click routing with a fake `bar` | `tests/fixtures/qa-*.json` may be added by lane B with the qa- prefix if needed (coordinate with QA) |
@@ -555,7 +556,7 @@ case carried a refused or a whitespace-wrapped value) adds unit pins for
 the one normaliser (`Model.entryInputForm`, a 34-case agreement property
 between reconcile's "fresh" and the sink's "consumed", and the
 control-character sibling its search found), for the settling funnel
-(`Model.entryWriteNeeded`, `Model.sameOwnWrite`) and for the add form's
+(`entryWriteNeeded` [deleted 2026-10-13, R22e], `Model.sameOwnWrite`) and for the add form's
 guide URL winning (`adoptPendingEpg` with `formEpg`); the `retiredKeep`
 fixture grows 20 -> 28 (whitespace beside a non-empty snapshot); the
 service-order driver gains refused and whitespace-wrapped cases under
@@ -684,7 +685,43 @@ K, Z, A, Y2, Y3, Q and V moved to the new contract: 98 / 0 forward on 97
 lettered checks, 68 / 30 over `--baseline lane-key-z2`; sources-scenario
 66 / 0; logo-scenario 33 / 0 (lane A's transcripts, nested headless cages
 on a private D-Bus with no service directories). TC-CFG-14 and TC-CFG-15
-are the manual rows.
+are the manual rows. Round 12 (lane-key-n1, 2026-10-13; lead ruling R22,
+after the round-11 data-loss lens found a migrated install's `state.json`
+that could not be read at the start written over with an empty state) adds
+the load classification, called for real: `R22a: FileViewError's order`
+(the enum read from the installed qmltypes), `R22a: stateLoadKind ...`,
+`R22a: stateInitFound ...`, `R22a: stateLoadDecision ...`, `R22a:
+stateWriteGate ...` and `R22a: stateUnreadableNotice ...`; the R16 and R14
+structural pins widened to the five-input `ownedWriteMode` and to
+`saveState` asking `Model.stateWriteGate` first; and, through
+`tests/service-harness.js` under both host shapes, every fault -- a 0000
+file, a 0000 directory, a foreign-owned file or directory, a directory at
+the path, garbage, an empty file -- at a migrated start and at a
+0.13.x-shaped start, in three orders of the init against the load, plus
+the same faults mid-session, a probe that ends in the no-write mode, a
+migration whose write failed followed by a reload that is not a state, a
+fresh install whose init failed, and the real `startCacheLayout` on a fresh
+install and on the unreadable-directory start (`R22a (...)`, `R22b
+(...)`; the harness delivers each load through `stateFile`'s own handlers
+with the measured error numbers and RUNS the cache layout, which it used to
+stub). R22e's absence pin, and R22c's `tests/test_shipped_copy.py` (every
+string literal in every shipped code file, 3 tests). Python: 12
+`test_state.py` tests in `StateNeverWrittenUnreadTest` (the init's `found`
+per fault and that it never rewrites a file it could not parse, by bytes,
+mtime, ctime and inode; every verb refusing each fault; a missing file still
+fresh; the D-ID-1 remap writing nothing), and 2 in `test_defect_ledger.py`
+for R22d. Seen red by lane A, one decision at a time on an export of the
+tip: 17 node mutants from 1 to 54 failures each (three that survived the
+first pass got pins in 4fdb37c and then read 4, 2 and 2), 4 python mutants
+(8 to 46 failing subtests), the ledger's unused-waiver failure removed 1;
+and the whole suite pointed at lane-key-m2's code reads 2,354 checks, 86
+failures -- exactly the 86 R22 harness pins, every older check green there.
+Counts on lane-key-n1's tip 6172d8a: node 2,354 / 0, python 1,170,
+`qa-lib-test.sh` 472, the key preflight 11. The live half is key-scenario
+B1-B8: 106 / 0 forward on 105 lettered checks and 97 / 9 over `--baseline
+lane-key-m2` (B1-B8, and N1 for its new field only); sources-scenario
+66 / 0; logo-scenario 33 / 0 (lane A's transcripts, under the same cage and
+private bus). TC-CFG-16 and TC-FAV-09 are the manual rows.
 
 ## 3. Security test cases (ARCHITECTURE.md section 8, PLAN gate G4)
 
@@ -1255,7 +1292,9 @@ codepoints for `...`, quotes and the middle dot).
    cached HH:MM - offline`, notification `Playlist error` / `Could not fetch the
    playlist (HTTP 404 Not Found). Using cached copy from HH:MM.`; then
    `rm -rf ~/.cache/omarchy-iptv/*` and press `r`: empty state `Playlist failed
-   to load` / `HTTP 404 Not Found from iptv-org.github.io - check playlistUrl`,
+   to load` / `HTTP 404 Not Found from iptv-org.github.io - check playlistUrl`
+   [round 12, 2026-10-13 (R22c): `... - check the source in Sources`; the
+   old text is a FAIL],
    hint `r reload - Esc close`, glyph U+F0503, bar glyph U+F0503 and tooltip
    `IPTV - playlist error, open the guide`, notification body `... Open the
    guide for details.` [TC-CFG-02, TC-UI-03, TC-BAR-04].
@@ -1426,6 +1465,20 @@ codepoints for `...`, quotes and the middle dot).
    ~/.local/state/omarchy-iptv/state.json`; `omarchy restart shell`: guide opens
    with empty Favorites/Recent, no crash, one warning at most; favorite
    something: the file is valid JSON again [TC-FAV-09].
+   **[Round 12, 2026-10-13 (D-SINK-19 R22a): copy the real file aside FIRST
+   (`cp -p ~/.local/state/omarchy-iptv/state.json /tmp/state.keep`, a
+   private copy: it holds your provider URLs), then the garbage. Expected now:
+   no crash; one critical notification `Saved sources not loaded` /
+   `/home/<you>/.local/state/omarchy-iptv/state.json is not a valid state
+   file. Nothing is saved until it can be read, ...`; the guide opens on
+   `No playlist configured` (nothing was loaded, so there is nothing to
+   favourite); pasting a playlist there is refused with `state.json could not
+   be read - nothing is saved until it can be`; and afterwards
+   `cat` of the file still prints `garbage` -- nothing was written over it
+   [TC-FAV-09, TC-CFG-16]. Then `cat /tmp/state.keep >
+   ~/.local/state/omarchy-iptv/state.json` (in place, so the shell's watch
+   reloads it): the guide comes back with every source and favourite, no
+   restart needed; `rm /tmp/state.keep`.]**
 8. `stat -c '%a %n' ~/.local/state/omarchy-iptv ~/.local/state/omarchy-iptv/state.json`
    -> `700`, `600` [TC-FAV-08, SEC-14].
 

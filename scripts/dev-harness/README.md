@@ -1348,6 +1348,15 @@ tests/test_state.py pins the real helper doing them, and RUNS the cache
 layout. Measured on lane-key-n1: 106 / 0 forward (105 lettered checks and
 the floor line), 97 / 9 on `--baseline lane-key-m2`; sources-scenario
 66 / 0 and logo-scenario 33 / 0 under a nested cage.
+[Documents lane, 2026-10-13: the two key-scenario counts re-read from lane
+A's transcripts, `key-20261013-161816-835970` (106 PASS, 0 FAIL) and
+`key-20261013-162220-859113` (97 PASS, 9 FAIL: N1 and B1-B8). Both ran on
+4fdb37c, whose plugin files are the tip's. The FileView probe is lane A's,
+not in this tree (`lane-n1/fvprobe/` in the session's scratch directory);
+its table is in `docs/OMARCHY-PLUGIN-CONTRACT.md`, which is the place to
+re-measure it after a Quickshell update. B's observers are the user's view
+in `docs/UX-SOURCES.md` 5.10 and the rows SRC-MIG-40..43 and SRC-ERR-10 in
+`docs/QA-SOURCES.md`.]
 
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 
