@@ -668,6 +668,100 @@ qa_file_untouched() {
   return 2
 }
 
+# ------------------------------------------------------------ harness home
+#
+# F-HARNESS-20. The harness replaced XDG_CACHE_HOME, XDG_STATE_HOME,
+# XDG_RUNTIME_DIR and XDG_CONFIG_HOME and left HOME real. That was a safety
+# hole from the day the D-SINK-18 repair made the helper derive the host's
+# settings file from $HOME (host_config_path(), mirroring the host's own
+# shell.qml, which reads `home + "/.config/omarchy/shell.json"`), because the
+# service runs `config shield` at EVERY start: every harness run, from every
+# lane, aimed a chmod at the developer's live ~/.config/omarchy/shell.json.
+# It changed nothing on the machine it was found on only because that file
+# was already 0600.
+#
+# The ruling: the fix lives in the HARNESS, never in shipped code. No
+# override flag, no variable the helper or the service reads, no path
+# argument -- the helper takes its home from $HOME exactly as the host does,
+# so the harness gives every process it starts a HOME of its own.
+#
+# qa_harness_home <scratch>
+#   Exports, for this shell and everything it starts:
+#     HOME             <scratch>/home
+#     XDG_CONFIG_HOME  <scratch>/home/.config   (agrees with $HOME/.config,
+#                      as on an ordinary machine -- the host and the helper
+#                      read $HOME/.config, fontconfig and mpv read this)
+#     XDG_DATA_HOME    <scratch>/home/.local/share
+#     XDG_CACHE_HOME   <scratch>/cache          (the harness's existing layout)
+#     XDG_STATE_HOME   <scratch>/state
+#   and UNSETS the per-user location overrides that name a path inside the
+#   real home, because a scratch HOME does nothing about a variable that
+#   bypasses it: MPV_HOME (mpv's whole config directory) and XCOMPOSEFILE
+#   (the compose table the shell's keyboard input reads). Either one set
+#   somewhere ELSE -- tls-scenario.sh points MPV_HOME at its own work
+#   directory on purpose -- is left alone.
+#   XDG_RUNTIME_DIR and WAYLAND_DISPLAY are NOT touched here: a scenario
+#   driver keeps the real runtime directory (its own SCRATCH default and
+#   run.sh's are both derived from it), and run.sh's harness_env moves the
+#   runtime directory for the processes IT starts.
+#   PATH is inherited unchanged and that is deliberate: it is a search path
+#   for programs that are executed, never written (on the machine this was
+#   written on, node resolves into a version manager under the real home).
+#
+#   OMARCHY_IPTV_HARNESS_REAL_HOME records the home this replaced, the first
+#   time only, so a run.sh started by a driver that already isolated itself
+#   still knows where the real one was. It is read by THIS FILE and run.sh
+#   (the theme copy, the unset rule above) and by nothing the plugin ships.
+#
+#   Exports and nothing else: it creates no directory, because the gate runs
+#   the check-tree halves of scenarios that call it and a gate step may leave
+#   nothing behind. run.sh's prepare_root makes <scratch>/home (0700) before
+#   anything that could write into it starts; until then a HOME that does not
+#   exist is a HOME nothing can write through.
+#     0  exported
+#     2  refused, nothing exported: <scratch> is not absolute
+qa_harness_home() {
+  local scratch=${1-} real var val
+  if [[ $scratch != /* ]]; then
+    echo "qa_harness_home: the scratch directory must be absolute, got '${scratch}'" >&2
+    return 2
+  fi
+  scratch=${scratch%/}
+  real=$(qa_harness_real_home "$scratch")
+  # qa_harness_real_home already prefers an existing record, so this keeps
+  # the FIRST home through any number of nested calls.
+  export OMARCHY_IPTV_HARNESS_REAL_HOME="$real"
+  export HOME="$scratch/home"
+  export XDG_CONFIG_HOME="$scratch/home/.config"
+  export XDG_DATA_HOME="$scratch/home/.local/share"
+  export XDG_CACHE_HOME="$scratch/cache"
+  export XDG_STATE_HOME="$scratch/state"
+  for var in MPV_HOME XCOMPOSEFILE; do
+    val=${!var-}
+    [[ -n $val ]] || continue
+    if [[ -n $real && ( $val == "$real" || $val == "$real"/* ) ]]; then
+      unset "$var"
+    fi
+  done
+  return 0
+}
+
+# qa_harness_real_home <scratch>: the home qa_harness_home replaces, on one
+# line. The recorded one when a caller already isolated itself; otherwise
+# $HOME, unless $HOME is already inside <scratch> (then the password
+# database's). May print "" when nothing names one; the callers treat that
+# as "nothing to copy, nothing to compare against".
+qa_harness_real_home() {
+  local scratch=${1%/} h=${OMARCHY_IPTV_HARNESS_REAL_HOME:-}
+  if [[ -z $h ]]; then
+    h=${HOME:-}
+    if [[ -z $h || $h != /* || $h == "$scratch" || $h == "$scratch"/* ]]; then
+      h=$(getent passwd "$(id -u)" 2>/dev/null | cut -d: -f6)
+    fi
+  fi
+  printf '%s\n' "${h%/}"
+}
+
 # ------------------------------------------------------------ transcripts
 
 # F-M3-1, half (b). One live run of m3-scenario.sh answered "17 passed, 14

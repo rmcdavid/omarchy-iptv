@@ -129,6 +129,9 @@ checks=0
 
 # shellcheck source=scripts/qa-lib.sh
 . "$ROOT/scripts/qa-lib.sh"
+# F-HARNESS-20: this driver's own processes (its helper runs, probes, mpv)
+# get the harness's HOME as well, not only what run.sh starts. Exports only.
+qa_harness_home "$SCRATCH" || exit 2
 
 while (($# > 0)); do
   case $1 in

@@ -47,6 +47,22 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
   nothing to anybody. They are rewritten as `X` cases. Where neither calling
   the shipping logic nor observing the sink is possible, the rule the criterion
   covers is marked UNVERIFIED in the document that states it and stays marked.
+- **The dev harness touches nothing the user owns** (F-HARNESS-20). Every
+  process `scripts/dev-harness/run.sh` starts -- the nested shell, the helper
+  the service spawns, the player the helper forks -- and every scenario
+  driver that uses it runs with a scratch `HOME` under the harness directory,
+  with `XDG_CONFIG_HOME`, `XDG_DATA_HOME`, `XDG_CACHE_HOME` and
+  `XDG_STATE_HOME` inside the same tree and `MPV_HOME` / `XCOMPOSEFILE`
+  dropped when they name the real home. The shipped code has no override
+  for this and gets none: the helper's `config shield` takes the host's
+  settings file from `$HOME` because the host does, so the harness moves
+  `HOME`. Two theme files are copied in (never linked); nothing else comes
+  from the real home. Verified by `tests/test_harness_home.py` (A: the
+  shipped helper, Python and mpv asked where their paths land under
+  `harness_env`, and a decoy home's 0644 config proven untouched by the
+  shield) and, live, by `stat` of the real `~/.config/omarchy/shell.json`
+  and `~/.local/state/omarchy-iptv/state.json` before and after a scenario
+  run; `scripts/dev-harness/README.md` has the layout.
 - Every M case is executed on the live shell after the lanes merge, in the
   order of section 5. Results are recorded in `docs/STATUS.md` (handoff
   format, PLAN.md section 7) as `pass` / `fail D-<n>` / `not run <reason>`

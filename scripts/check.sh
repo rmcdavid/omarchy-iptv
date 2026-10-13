@@ -173,7 +173,10 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2075}
 # round 2: the Model-member judge (11), every static import form and the
 # unreadable-model message (11), the generated header and the dropped-line
 # record (7), the shipped Model.js refusal (6), and F-HARNESS-19's shell pin (4).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1126}
+# 1126 -> 1136 on 2026-10-13, F-HARNESS-20: tests/test_harness_home.py, run.sh's
+# harness_env and seeding asked where the SHIPPED helper, Python and mpv land,
+# against a decoy home the shield must not touch (10).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1136}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

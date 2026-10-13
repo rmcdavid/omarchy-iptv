@@ -75,9 +75,12 @@
 #
 # Everything lives under $OMARCHY_IPTV_HARNESS_DIR (default $XDG_RUNTIME_DIR/omarchy-iptv-harness):
 #   root/     scratch Quickshell config root: shell.qml + Commons/ Ui/ symlinks (the `qs` prefix)
+#   home/     HOME            -> home/.config/omarchy/shell.json, seeded 0644 (D-SINK-18), and
+#                                a COPY of the two theme files the host palette reads
+#                                (F-HARNESS-20; see harness_env and qa_harness_home)
+#             XDG_CONFIG_HOME -> home/.config, XDG_DATA_HOME -> home/.local/share
 #   cache/    XDG_CACHE_HOME  -> cache/omarchy-iptv/{channels,playlist-status,epg-now}.json
 #   state/    XDG_STATE_HOME  -> state/omarchy-iptv/state.json
-#   config/   XDG_CONFIG_HOME -> config/omarchy/shell.json (D-SINK-18; see harness_env)
 #   runtime/  XDG_RUNTIME_DIR -> runtime/omarchy-iptv/mpv.sock (+ hypr symlink so hyprctl works)
 #   fixtures/ generated playlist / test.ts (MPEG-TS, like a live stream; an MP4 with a trailing moov is not seekable over HTTP)
 # Never run against a real network stream from here; the fixture uses 127.0.0.1 only.
@@ -193,11 +196,16 @@ cleanup() {
 # the mode the PACKAGED default carries -- 0644, measured off
 # /usr/share/omarchy/config/omarchy/shell.json by the lead on 2026-10-09 --
 # rather than at the mode this machine happens to hold. The harness's own
-# shell.qml models the host config IN MEMORY (persistShellConfig, line 655:
-# one deep copy, no FileView), so nothing here READS this file; it exists
-# because the helper's D-SINK-18 verb computes its path from XDG_CONFIG_HOME
-# and needs a container to act on. Seeding the exposed mode means an ordinary
-# harness run exercises the tightening rather than inheriting a pass.
+# shell.qml models the host config IN MEMORY (persistShellConfig: one deep
+# copy, no FileView), so nothing here READS this file; it exists because the
+# service runs the helper's `config shield` at every start, the helper
+# computes that file from $HOME exactly as the host does (host_config_path),
+# and the shield needs a container to act on. It sits under the harness's own
+# HOME (F-HARNESS-20): until then it sat under XDG_CONFIG_HOME, which the
+# shield IGNORES since the D-SINK-18 repair, so the seed was a decoy nothing
+# touched while the shield was aimed at the developer's real file. Seeding the
+# exposed mode means an ordinary harness run exercises the tightening rather
+# than inheriting a pass.
 #
 # It carries NO playlistUrl and NO epgUrl, which is what lets a scenario tell
 # a URL ARRIVING from a URL that was always there.
@@ -206,10 +214,56 @@ cleanup() {
 # previous run's fix left behind, which would make the second run's green
 # mean nothing.
 seed_scratch_config() {
-  local cfg="$SCRATCH/config/omarchy/shell.json"
+  local cfg="$SCRATCH/home/.config/omarchy/shell.json"
+  mkdir -p "$(dirname "$cfg")" || die "could not create the scratch host config directory"
   printf '%s\n' '{"version":1,"bar":{"layout":{"left":[],"center":[],"right":[{"id":"io.github.rmcdavid.iptv"}]}}}' \
     >"$cfg" || die "could not seed the scratch host config at $cfg"
   chmod 0644 "$cfg" || die "could not seed the scratch host config mode"
+  return 0
+}
+
+# F-HARNESS-20. The ONE thing the scratch home is given from the real one,
+# measured rather than assumed. The host's Color singleton (linked in below as
+# qs.Commons) paints from $HOME/.local/state/omarchy/current/theme/colors.toml
+# and shell.toml, plus an optional $HOME/.config/omarchy/shell.toml override;
+# with HOME moved and nothing provided, the harness would render in Color's
+# built-in fallback palette instead of the developer's theme, which is a
+# different picture from every run before this one. So those files -- and
+# nothing else from the theme directory -- are COPIED, dereferenced, at 0600.
+# Never a symlink: a link into the real home is a path by which a write in
+# the harness reaches the user's files, and tests/test_harness_home.py asserts
+# the scratch home holds none.
+# What the harness does NOT need from the real home, measured 2026-10-13 under
+# a scratch HOME: fonts (fc-match monospace answers JetBrainsMono Nerd Font
+# from /usr/share/fonts and /etc/fonts; this machine has no ~/.local/share/
+# fonts, ~/.fonts or ~/.config/fontconfig at all), the Style singleton's
+# fontconfig and window-gaps FileViews (both optional and watched, both absent
+# here), and mpv's config (the harness player was already kept off the
+# developer's ~/.config/mpv by XDG_CONFIG_HOME, and must not pick up a
+# legacy ~/.mpv through HOME either).
+# Re-seeded on every prepare_root, like the host config, so an edit to the
+# copy cannot outlive the run that made it.
+seed_scratch_theme() {
+  local real src dst f
+  [[ -n $SCRATCH && $SCRATCH != / ]] || die "the scratch directory is empty"
+  real=$(qa_harness_real_home "$SCRATCH")
+  dst="$SCRATCH/home/.local/state/omarchy/current/theme"
+  rm -rf "$SCRATCH/home/.local/state/omarchy/current" "$SCRATCH/home/.config/omarchy/shell.toml" \
+    || die "could not clear the previous scratch theme"
+  [[ -n $real ]] || return 0
+  src="$real/.local/state/omarchy/current/theme"
+  mkdir -p "$dst" || die "could not create the scratch theme directory"
+  for f in colors.toml shell.toml; do
+    [[ -f $src/$f ]] || continue
+    cp -L -- "$src/$f" "$dst/$f" || die "could not copy the theme's $f"
+    chmod 0600 "$dst/$f" || die "could not set the scratch theme's $f mode"
+  done
+  if [[ -f $real/.config/omarchy/shell.toml ]]; then
+    mkdir -p "$SCRATCH/home/.config/omarchy" || die "could not create the scratch host config directory"
+    cp -L -- "$real/.config/omarchy/shell.toml" "$SCRATCH/home/.config/omarchy/shell.toml" \
+      || die "could not copy the user's shell.toml override"
+    chmod 0600 "$SCRATCH/home/.config/omarchy/shell.toml" || die "could not set the shell.toml copy's mode"
+  fi
   return 0
 }
 
@@ -221,9 +275,11 @@ seed_scratch_config() {
 prepare_root() {
   local root; root=$(qs_root)
   mkdir -p "$root" "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/runtime" "$SCRATCH/fixtures" \
-    "$SCRATCH/config/omarchy" \
+    "$SCRATCH/home/.config/omarchy" \
     || die "could not create the scratch tree under $SCRATCH"
+  chmod 0700 "$SCRATCH/home" || die "could not make the scratch home private"
   seed_scratch_config
+  seed_scratch_theme
   ln -sfn "$SHELL_DIR/Commons" "$root/Commons" || die "could not link $SHELL_DIR/Commons"
   ln -sfn "$SHELL_DIR/Ui" "$root/Ui"           || die "could not link $SHELL_DIR/Ui"
   [[ -e $root/Commons && -e $root/Ui ]]        || die "the qs.Commons / qs.Ui links do not resolve"
@@ -299,22 +355,24 @@ harness_env() {
   [[ $wl == /* ]] || wl="$REAL_RUNTIME/$wl"
   export WAYLAND_DISPLAY="$wl"
   export XDG_RUNTIME_DIR="$SCRATCH/runtime"
-  export XDG_CACHE_HOME="$SCRATCH/cache"
-  export XDG_STATE_HOME="$SCRATCH/state"
-  # D-SINK-18, and this one is a SAFETY isolation, not a convenience. Until
-  # now the harness replaced three XDG directories and left the fourth alone,
-  # because nothing the plugin ran had ever read XDG_CONFIG_HOME: the helper
-  # names XDG_CACHE_HOME, XDG_STATE_HOME and XDG_RUNTIME_DIR and no other.
-  # The D-SINK-18 fix changes that -- the helper now computes
-  # $XDG_CONFIG_HOME/omarchy/shell.json and chmods it -- so WITHOUT this line
-  # every harness run that adds or switches a source would reach into the
-  # developer's own ~/.config/omarchy/shell.json and change its mode. The
-  # harness exists so that a scenario touches nothing the user owns; a
-  # scenario that tightens somebody's live config has already failed, however
-  # green it prints. Seeded by prepare_root at the EXPOSED mode on purpose,
-  # so an ordinary harness run exercises the tightening instead of assuming
-  # it.
-  export XDG_CONFIG_HOME="$SCRATCH/config"
+  # F-HARNESS-20, and this one is a SAFETY isolation, not a convenience. The
+  # D-SINK-18 comment that stood here said exporting XDG_CONFIG_HOME kept the
+  # helper's chmod away from the developer's ~/.config/omarchy/shell.json.
+  # It stopped being true the day the D-SINK-18 repair made the helper take
+  # that file from $HOME, as the host does -- and the service runs the shield
+  # at EVERY start, so every harness run since aimed it at the live config
+  # (it changed nothing on the machine that found it only because that file
+  # was already 0600). The fix is HERE and not in the helper, by ruling: no
+  # override flag, no variable the shipped code reads, no path argument. The
+  # harness gives the processes it starts -- quickshell, the helper the
+  # service spawns, mpv the helper forks -- a HOME of their own, with
+  # XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME and XDG_STATE_HOME inside
+  # the scratch tree beside it, and MPV_HOME / XCOMPOSEFILE dropped when they
+  # point into the real home. qa_harness_home (scripts/qa-lib.sh) is the one
+  # definition; every scenario driver calls it too, so the driver's own
+  # helper runs resolve the same way. tests/test_harness_home.py runs this
+  # function and asks the SHIPPED helper where its paths land.
+  qa_harness_home "$SCRATCH" || die "could not give the harness its own HOME under $SCRATCH"
   # M2-05. $SCRATCH/bin goes in FRONT of PATH when a scenario has put
   # something there, which is how pip-scenario.sh hands the shell a stub
   # `hyprctl` (scripts/dev-harness/stub-hyprctl.py). That indirection is not
@@ -630,10 +688,13 @@ except Exception: print("<unreadable>")' | tr -d '\n')
     exit 1
     ;;
   clean)
-    # $SCRATCH/config goes too (D-SINK-18): a clean that left it behind would
-    # leave the mode the last run's fix tightened, and the next run's green
-    # would be inherited rather than earned. prepare_root re-seeds it at 0644.
-    rm -rf "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/config" \
+    # $SCRATCH/home goes too (D-SINK-18, F-HARNESS-20): a clean that left it
+    # behind would leave the mode the last run's shield tightened, and the
+    # next run's green would be inherited rather than earned. prepare_root
+    # re-seeds the host config at 0644 and re-copies the theme.
+    # $SCRATCH/config is the pre-F-HARNESS-20 location, removed so an old
+    # scratch tree does not keep a decoy nothing reads.
+    rm -rf "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/home" "$SCRATCH/config" \
       "$SCRATCH/runtime/omarchy-iptv" "$SCRATCH/shots"
     echo "[run.sh] cleaned $SCRATCH"
     ;;
@@ -719,6 +780,9 @@ except Exception: print("<unreadable>")' | tr -d '\n')
       esac
       shift
     done
+    # F-HARNESS-20: the environment FIRST, so the fixture server and ffmpeg
+    # below run under the scratch HOME like everything else this starts.
+    harness_env
     prepare_root
     if (( ! KEEP )); then rm -rf "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/runtime/omarchy-iptv"; mkdir -p "$SCRATCH/cache" "$SCRATCH/state"; fi
     # Always reap what we start: normal exit, --timeout, Ctrl-C, SIGTERM.
@@ -734,7 +798,6 @@ except Exception: print("<unreadable>")' | tr -d '\n')
     if (( SERVE )); then start_server; live="http://127.0.0.1:$SERVE_PORT/test.ts"; fi
     write_fixture "$live"
     (( FAKE_EPG )) && write_fake_epg
-    harness_env
     if [[ -n $SOURCE2 ]]; then
       # A second history record, never fetched (fetchedAt 0): the switch
       # path through a probe. Output is the helper's, hosts only.

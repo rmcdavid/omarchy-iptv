@@ -381,10 +381,10 @@ echo "config-mode-scenario: $PASS passed, $FAIL failed (helper $HELPER, verb '$V
 # this scenario cannot reach is that Service.qml GATES persistActive on the
 # verb's answer: on a refusal, no URL reaches the bar entry and
 # sourcesPersistFailed carries a reason. The harness can show it -- the service
-# spawns the real helper, which really chmods $XDG_CONFIG_HOME/omarchy/
-# shell.json (run.sh now isolates and seeds that, at 0644, so an ordinary
-# harness run exercises the tightening instead of reaching into the
-# developer's own config) -- and updateEntryInline is already logged with keys
+# spawns the real helper, which really chmods $HOME/.config/omarchy/
+# shell.json (run.sh gives the harness its own HOME and seeds that file at
+# 0644, F-HARNESS-20, so an ordinary harness run exercises the tightening
+# instead of reaching into the developer's own config) -- and updateEntryInline is already logged with keys
 # only. What is missing is the seam itself: at the time this was written the
 # service had no call to the verb, so a live half would have had to invent the
 # API it then asserted. It belongs in the display lane's hands once that seam
