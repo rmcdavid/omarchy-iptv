@@ -6,12 +6,12 @@ import {
   copyGuide, withQuery, withMode
 } from "./browse.mjs"
 import {
-  emptyState, pendingEpgRecord, pendingEpgOf, withPendingEpg, cloneState
+  emptyState, entryMigratedOf, withEntryMigrated, cloneState
 } from "./state.mjs"
 import {
   clampSetting, settingsFrom, entryInputForm, RETIRED_SETTINGS,
-  ownedEntryPatch, entryFlushDisposition, ownedWriteMode, retiredInputsToKeep,
-  patchInputsToKeep
+  entryInputSeen, entryInputsSeenAfter, entryInputNotice, ownedEntryPatch,
+  entryFlushDisposition, retiredInputsToKeep
 } from "./settings.mjs"
 import {
   CACHE_LAYOUT, MAX_SOURCES, MAX_SOURCE_URL, MAX_LABEL, LIMITS,
@@ -64,19 +64,7 @@ function normalizeSourceRecord(raw) {
     channelCount: Math.max(0, Math.floor(Number(raw.channelCount) || 0)),
     groupCount: Math.max(0, Math.floor(Number(raw.groupCount) || 0))
   }
-  // D-SINK-19 round 9, R19c: when this record's guide URL was last SET, in
-  // milliseconds -- by the add form at submit, by the edit form, or by the
-  // adoption of a CLI input (its seenAt). Carried only when known (> 0): a
-  // record written before R19 has none and reads as 0, and a record that
-  // never had one serializes exactly as it did.
-  var setAt = epgSetAtOf(raw)
-  if (setAt > 0) out.epgSetAt = setAt
   return out
-}
-
-// A record's `epgSetAt` as a number, 0 for absent or junk (R19c).
-function epgSetAtOf(rec) {
-  return Math.max(0, Math.trunc(Number(rec && rec.epgSetAt)) || 0)
 }
 
 function copySourceRecord(rec, patch) {
@@ -131,11 +119,6 @@ function addSource(state, fields, nowSec) {
     key: key, url: pv.url, epgUrl: ev.url, kind: pv.kind, label: label, labelCustom: lv.label !== "",
     origin: origin, addedAt: now, lastUsed: now, fetchedAt: 0, channelCount: 0, groupCount: 0
   }
-  // R19c: a guide URL the form carries is SET at submit time -- the moment
-  // this is called (`fields.epgSetAt`, ms), never the probe's commit. A form
-  // left blank sets nothing, so a pending input still lands on it (E4).
-  var setAt = epgSetAtOf(f)
-  if (ev.url !== "" && setAt > 0) rec.epgSetAt = setAt
   return { ok: true, code: "ok", message: "", state: cloneState(st, { sources: st.sources.concat([rec]) }), key: key }
 }
 
@@ -163,11 +146,6 @@ function updateSource(state, key, fields, nowSec) {
     var ev = validateSourceUrl(f.epgUrl, { kind: "epg" })
     if (!ev.ok) return { ok: false, code: ev.code, message: ev.message, state: st, key: rec.key, urlChanged: false, replacedKey: "" }
     patch.epgUrl = ev.url
-    // R19c: the edit form SETS the guide URL only when it changes it. The
-    // form sends every field on every submit, so a label edit that carries
-    // the guide URL back unchanged is not a later explicit input for it.
-    var editAt = epgSetAtOf(f)
-    if (ev.url !== str(rec.epgUrl) && editAt > 0) patch.epgSetAt = editAt
   }
   var urlChanged = false
   var newKey = rec.key
@@ -331,66 +309,69 @@ function invalidInputBlocks(invalid, activeKey) {
 // logic, it is the single most dangerous decision in this change, and inside
 // a QML component no test can call it.
 //
-// REPAIRED after the adversarial review (lead ruling R1). The first version
-// answered "migrate" for every first or forced reconcile and "migrate" never
-// read the entry's URL when the state already held a key -- so a URL set with
-// `omarchy bar set ... playlistUrl` while the shell was down was discarded on
-// the next start and then stripped out of shell.json by the plugin's own
-// write. The user's input was deleted and nothing said so.
+// ROUND 11, R21: THE BAR ENTRY'S URLS ARE READ ONCE, BY THE MIGRATION. The
+// product owner dropped the `omarchy bar set` URL route on 2026-10-13. Ten
+// repair rounds had built state to tell a URL the user set on the entry from
+// the host's stale publish of one the plugin had already consumed (pending
+// inputs, set times, a persisted snapshot, landed-state keep rules), and
+// every P1 from round 3 on was triggered by a URL arriving on the entry from
+// the command line. So there are two phases, and only the first reads a URL:
 //
-// The rule now: a URL on the bar entry that this service has NOT ALREADY
-// CONSUMED is fresh user input and is adopted before any key is trusted. The
-// plugin strips URLs on every own write, so a URL can only be on the entry
-// because a user put it there -- with one qualification the host imposes:
-// barConfig is published ONE WRITE BEHIND and the plugin's own write never
-// echoes (rule 9), so after the strip the host keeps publishing the SAME URL
-// until somebody else writes. That stale echo is what `lastPlaylist` is for.
-// A value equal to the one this service already adopted is consumed, not a
-// command; a value that differs, or any value on the first reconcile of a
-// service (the shell start, where the published entry IS the file), is fresh.
+//   MIGRATING  (`migrating`: the LANDED state does not carry the migration
+//              marker, Model.entryMigratedOf over the state as last confirmed
+//              on disk -- never memory). An install written by 0.13.x names
+//              its active source by the URL on the entry, and that URL is
+//              adopted exactly as it always was (R1: before any key is
+//              trusted; R4: a guide URL onto the active record; R9-R11 for
+//              the reload and the order of the two writes). The marker rides
+//              the same state write (Model.adoptActiveSource), and the entry
+//              is stripped only once that write has landed (R13).
+//   MIGRATED   nothing on the entry is an input. A non-empty `playlistUrl`
+//              or `epgUrl` there is REFUSED -- never adopted, whatever it is
+//              -- reported once per value (Model.entryInputNotice) and
+//              stripped by the next owned write, which every owned write
+//              does unconditionally from now on (Model.retiredInputsToKeep).
 //
-//   adopt    the entry carries a playlist URL this service has not consumed
-//            (first reconcile, or the value differs from the snapshot):
-//            SR8. Whether or not the reconcile was forced.
-//   migrate  a state load or the first reconcile, with no fresh URL: resolve
-//            the active source from the state's key, then the entry's key.
-//   ignore   everything else, including the input going empty, which is the
-//            ordinary steady state after the plugin's own strip.
+// `seen` is the session's own record of every value it has migrated or
+// refused (Model.entryInputsSeenAfter; in memory only, nothing persisted).
+// It is what tells a value the user set from the host's stale publish of one
+// already handled: the host publishes `barConfig` one write behind (rule 9),
+// so after the plugin strips a value the lagging host goes on publishing it
+// until somebody else writes. A seen value is neither adopted again nor
+// reported again; a value of whitespace or control characters alone is no
+// input on either phase (R18a, Model.entryInputForm).
 //
-// `adoptEpg` (R4) is decided the same way and independently of the playlist:
-// a non-empty EPG input this service has not consumed is adopted into the
-// ACTIVE record on any reconcile that sees it, "ignore" included, and taken
-// out of the entry by the same owned write. D-SRC-10 ("an epgUrl that did not
-// change in the write that changed the playlist was written for the previous
-// source") is the same rule seen from the other side: an unchanged value is a
-// consumed one. An EMPTY epg input is a no-op -- the CLI clear lever
-// (`omarchy bar set ... epgUrl ""`) is withdrawn, the Sources screen clears a
-// guide URL.
+// -> { act, adoptUrl, adoptEpg, refused, report, migrating }
+//   act       "adopt"   MIGRATING, a playlist URL not seen yet: step 1 of
+//                       adoptActiveSource
+//             "migrate" the first reconcile after a state load, or a forced
+//                       one, with no URL to adopt: resolve from the state's
+//                       key, then the entry's mirror (steps 2-4)
+//             "ignore"  everything else
+//   adoptEpg  MIGRATING, a non-empty guide URL not seen yet (R4)
+//   refused   MIGRATED, every retired key that carries something: what the
+//             next owned write takes off the entry
+//   report    the refused keys whose value this session has not seen: what
+//             is reported, once
 function reconcileAction(input) {
   var it = input || {}
-  // R18a (round 8): both sides through the one normaliser, so "fresh" here
-  // and "consumed" in retiredInputsToKeep can never disagree about a value
-  // that differs only in its spacing.
-  var playlist = entryInputForm("playlistUrl", it.playlist)
-  var epg = entryInputForm("epgUrl", it.epg)
-  var first = it.first === true
-  var force = it.force === true
-  // `first` carries no weight in "changed": the service's snapshot starts
-  // "" and a value that equals "" is empty, so a first value is fresh by the
-  // comparison alone. The term `first ||` used to sit here and a mutation
-  // that dropped it reddened nothing (round 2 review, P3); `first` decides
-  // `act` below and nothing else.
-  var playlistChanged = playlist.form !== entryInputForm("playlistUrl", it.lastPlaylist).form
-  var epgChanged = epg.form !== entryInputForm("epgUrl", it.lastEpg).form
-  // `first` is handed back as it came (R20b, round 10): adoptActiveSource
-  // judges an EPG input equal to the held one by the held one's time only
-  // on the first reconcile after a start.
-  var out = { act: "ignore",
-              adoptUrl: playlist.text !== "" && playlistChanged,
-              adoptEpg: epg.text !== "" && epgChanged,
-              playlistChanged: playlistChanged, epgChanged: epgChanged, first: first }
+  var migrating = it.migrating === true
+  var values = { playlistUrl: it.playlist, epgUrl: it.epg }
+  var out = { act: "ignore", adoptUrl: false, adoptEpg: false, refused: [], report: [], migrating: migrating }
+  for (var i = 0; i < RETIRED_SETTINGS.length; i++) {
+    var name = RETIRED_SETTINGS[i]
+    if (entryInputForm(name, values[name]).text === "") continue
+    var fresh = !entryInputSeen(it.seen, name, values[name])
+    if (migrating) {
+      if (name === "playlistUrl") out.adoptUrl = fresh
+      else if (name === "epgUrl") out.adoptEpg = fresh
+    } else {
+      out.refused.push(name)
+      if (fresh) out.report.push(name)
+    }
+  }
   if (out.adoptUrl) out.act = "adopt"
-  else if (first || force) out.act = "migrate"
+  else if (it.first === true || it.force === true) out.act = "migrate"
   return out
 }
 
@@ -399,18 +380,18 @@ function reconcileAction(input) {
 // start, a state load, a settings change (R1).
 //
 // `entry` is the host's bar entry as `settingsFrom` read it; `opts` is the
-// plan reconcileAction made (`adoptUrl`, `adoptEpg`; both default to true so
-// a caller with no plan gets the start-of-service behaviour). The order is
-// the whole of the decision and each step is why the next is safe:
+// plan reconcileAction made (`adoptUrl`, `adoptEpg`, `migrating`; each false
+// when absent, so a caller with no plan reads no URL at all -- R21b's answer,
+// which is the one that cannot adopt what it should not). The order is the
+// whole of the decision and each step is why the next is safe:
 //
-//   1. the entry's `playlistUrl`, when the plan says it is fresh. The ONLY
-//      step that reads a URL. Validated; valid -> reconcileSources adopts it
-//      exactly as it adopts a CLI value (SR8): a known URL becomes active, an
-//      unknown one is added with origin "cli", or "migrated" on the very
-//      first v2 run. Invalid -> `invalid` carries the result (D16) and the
-//      resolution continues at step 2, so a typo leaves the active source
-//      exactly as it was. The first version put this step LAST and returned
-//      at step 2 before reaching it; see reconcileAction.
+//   1. the entry's `playlistUrl`, when the plan says to adopt it (MIGRATING
+//      only). The ONLY step that reads a URL. Validated; valid ->
+//      reconcileSources adopts it (SR8's adoption, kept for the migration): a
+//      known URL becomes active, an unknown one is added with origin
+//      "migrated" on the very first v2 run, "cli" otherwise. Invalid ->
+//      `invalid` carries the result (D16) and the resolution continues at
+//      step 2, so a bad value leaves the active source exactly as it was.
 //   2. the state's own `activeKey`, when it names a record this state carries.
 //   3. the entry's `sourceKey`, when it names a record. This is the mirror the
 //      plugin writes; a POINTER and not a credential, so an install that lost
@@ -418,58 +399,45 @@ function reconcileAction(input) {
 //   4. nothing: no active source, and a dangling key is cleared rather than
 //      left in the file for the next reader to resolve again.
 //
-// Then, whichever step answered, a fresh EPG input (R4) is adopted into the
-// record that is now active, when it validates and differs from what the
-// record holds.
+// Then, whichever step answered, a guide URL the plan adopts (R4) reaches the
+// record that is now active when it validates and differs from what the
+// record holds; one that does not validate is `refusedEpg`; and one with NO
+// record to land on is `noSourceEpg` (R21c: it never had a playlist to guide,
+// so it is reported and stripped, never held -- R12 kept it on the entry and
+// R19b in the state, and both were the machinery the ruling withdrew).
 //
-// Returns { state, key, changed, moved, adoptedUrl, adoptedEpg, epgConsumed,
-// invalid, added, evicted, writeEntry }. `changed` is whether the state must
-// be written; `moved` is whether the active source is a DIFFERENT one than
-// before, which is the only thing that resets the status line (the first
-// version reset it on any input change, so a refused typo blanked a working
-// source's status); `writeEntry` is whether the bar entry must be rewritten
-// -- it still holds a playlist URL (fresh, stale or refused: a refused value
-// can still carry credentials), an EPG input that REACHED a record
-// (`epgConsumed`: adopted, already held, or refused -- there was an active
-// record for it to land on), or its mirrored key disagrees with the state.
+// MIGRATING (`opts.migrating`), the result carries the migration marker
+// (Model.withEntryMigrated), so the marker rides the SAME state write as the
+// adoption and the strip that follows it waits for that write to land (R13).
 //
-// R12 (round 3): an input is never stripped unadopted. R19b (round 9) keeps
-// that and moves WHERE the unadopted EPG input waits: with NO active source
-// to land on, a valid one is held in the state as `pendingEpg { url, seenAt }`
-// (`pendedEpg`) and is then CONSUMED, so the owned write that follows the
-// state save takes it off the entry; R12 left it on the entry, a possibly
-// credentialed URL in shell.json for as long as no source existed. A refused
-// one is consumed as refused (`refusedEpg`), as it is beside an active
-// source. `opts.seenAt` (ms) is when the service saw the inputs: it becomes
-// the adopted record's `epgSetAt`, or the pending value's `seenAt` (R19c).
-// The first build stripped an unadopted input in the same write and the
-// value was gone with no copy anywhere (round 2 review, P2); a held one has
-// its copy in the state before the strip, because the strip waits for that
-// save to land (R13).
+// Returns { state, key, changed, moved, adoptedUrl, adoptedEpg, refusedEpg,
+// noSourceEpg, invalid, added, evicted, marked, writeEntry }. `changed` is
+// whether the state must be written; `moved` whether the active source is a
+// DIFFERENT one than before, which is the only thing that resets the status
+// line; `marked` whether this call set the marker; `writeEntry` whether the
+// bar entry must be rewritten -- it carries a retired URL key (adopted,
+// refused, or about to be: every one leaves by the owned write), or its
+// mirrored key disagrees with the state.
 function adoptActiveSource(state, entry, nowSec, origin, opts) {
   var st = state || emptyState()
   var e = entry || {}
   var o = opts || {}
-  var adoptUrl = o.adoptUrl !== false
-  var adoptEpg = o.adoptEpg !== false
+  var adoptUrl = o.adoptUrl === true
+  var adoptEpg = o.adoptEpg === true
   var before = activeKeyOf(st)
-  // R19c: when this service first saw the inputs, in ms; 0 when the caller
-  // has no clock (a record adopted then carries no epgSetAt and reads as 0).
-  var seenAt = Math.max(0, Math.trunc(Number(o.seenAt)) || 0)
   var out = { state: st, key: "", changed: false, moved: false, adoptedUrl: false, adoptedEpg: false,
-              epgConsumed: false, invalid: null, added: "", evicted: [], writeEntry: false,
-              pendedEpg: false, refusedEpg: false, pendingApplied: false, pendingSuperseded: false }
+              refusedEpg: false, noSourceEpg: false, invalid: null, added: "", evicted: [], marked: false,
+              writeEntry: false }
   // R18a: the one normaliser (entryInputForm). `url` is the sanitized text
-  // reconcileSources validates; `epg` is the whole form, so an EPG of
-  // whitespace or control characters alone is NO input (R4's no-op) and not
-  // the empty guide URL it used to validate as.
+  // reconcileSources validates; `epg` is the whole form, so a guide URL of
+  // whitespace or control characters alone is NO input (R4's no-op).
   var url = adoptUrl ? entryInputForm("playlistUrl", e.playlistUrl).text : ""
   var epg = adoptEpg ? entryInputForm("epgUrl", e.epgUrl) : entryInputForm("epgUrl", "")
   var resolved = false
   if (url !== "") {
-    // Step 1. The EPG input is NOT handed to reconcileSources here: the R4
-    // block below is the one place an EPG input reaches a record, whichever
-    // step resolved the key, so there is one rule and not two.
+    // Step 1. The guide URL is NOT handed to reconcileSources here: the R4
+    // block below is the one place a guide URL input reaches a record,
+    // whichever step resolved the key, so there is one rule and not two.
     var rec = reconcileSources(st, url, "", before, nowSec, origin, { adoptEpg: false })
     if (rec.invalid) {
       out.invalid = rec.invalid
@@ -492,195 +460,42 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
     out.state = withActiveKey(st, want)
   }
   out.key = activeKeyOf(out.state)
-  // R20b (round 10): AT A START (`opts.atStart`, the first reconcile after
-  // the service starts), an EPG input EQUAL to the guide URL the state
-  // already holds as pending is that same input, still on the entry because
-  // its strip never landed, and is judged with the time it was first seen
-  // (its seenAt), never with now. The round-9 lens's P3: the pending E lost
-  // to a later edit G by time just below, and the R4 block then took the
-  // very same E as the latest input there is, seen now, and replaced G -- an
-  // order state.json had already proved the other way.
-  // NOT in session: there the service SAW the entry change to that value,
-  // which is the user setting it again, a later explicit input (R19c). The
-  // in-session reading was measured wrong by the round-9 lens's own matrix
-  // (EPG:OLD:init 4 and EPG:OLD:cli 2 at length 2 on lane-key-z1's first
-  // build: a CLI re-set of the held value lost to an older record time).
-  // Usually the start never gets here: R20b's consumed slot proves the value
-  // spent and reconcile does not call it fresh. This is the start over a
-  // file with no slot -- one an earlier build wrote.
-  var heldBefore = pendingEpgOf(st)
-  var sameAsHeld = o.atStart === true && heldBefore !== null && epg.ok && epg.url === heldBefore.url
-  // R19c: a guide URL held in the state for want of an active source
-  // (R19b) meets the record that is active now -- the record a fresh URL
-  // just named, or one a hand-edited file names beside it -- and the LATER
-  // of the two inputs wins, by time (applyPendingEpg). Either way it is
-  // cleared. Before the R4 block, so an input seen in this same reconcile,
-  // which is later than anything pending, lands on top of the result.
-  if (out.key !== "") {
-    var applied = applyPendingEpg(out.state, out.key)
-    out.state = applied.state
-    out.pendingApplied = applied.applied
-    out.pendingSuperseded = applied.superseded
-  }
-  // R4: a fresh EPG input reaches the ACTIVE record on any path -- the record
-  // a fresh URL just named, a state load with an EPG on the entry, an
-  // "ignore" plan that carries only an EPG change (D-SRC-02). R19c: it is
-  // the latest explicit input there is, so it lands with its own seenAt as
-  // the record's epgSetAt.
-  if (adoptEpg && epg.text !== "" && out.key !== "") {
-    out.epgConsumed = true
-    var active = findSource(out.state.sources, out.key)
-    // The guide URL the record ALREADY holds is not re-stamped: no held
-    // value can be waiting for a record while one is active (R19b holds only
-    // with none active, and every move clears it), so a later time on an
-    // equal value is never compared with anything -- and the state write it
-    // would cost defers the strip behind R13 for nothing (the round-9 matrix
-    // measured a re-set of the same value made invisible that way).
-    if (epg.ok && active && epg.url !== str(active.epgUrl)) {
-      if (sameAsHeld) {
-        // Already judged, by time, against this record a few lines up
-        // (applyPendingEpg): it won and the record holds it, or it lost to
-        // a later input and must not now win as "seen now".
-        var judged = epgByTime(out.state, out.key, epg.url, heldBefore.seenAt)
-        out.state = judged.state
-        out.adoptedEpg = judged.won
-      } else {
-        var patch = { epgUrl: epg.url }
-        if (seenAt > 0) patch.epgSetAt = seenAt
-        out.state = replaceSource(out.state, out.key, patch)
-        out.adoptedEpg = true
-      }
-    }
-  } else if (adoptEpg && epg.text !== "") {
-    // R19b: NO record can take it. A valid one is held in the state as
-    // `pendingEpg` -- consumed, so the owned write that follows the save
-    // takes it off the entry -- and a later one replaces an earlier one. A
-    // refused one is consumed as refused, exactly as beside an active
-    // source: reported, and written out (rule 5: a value that failed
-    // validation can still carry a credential).
-    out.epgConsumed = true
-    if (epg.ok) {
-      // R20b: the value already held keeps the time it was first seen.
-      out.state = withPendingEpg(out.state, { url: epg.url, seenAt: sameAsHeld ? heldBefore.seenAt : seenAt })
-      out.pendedEpg = true
-    } else {
+  // R4: a guide URL input reaches the ACTIVE record on any path -- the record
+  // a fresh URL just named, a state load with a guide URL on the entry, an
+  // "ignore" plan that carries only a guide URL change (D-SRC-02).
+  if (epg.text !== "") {
+    var active = out.key !== "" ? findSource(out.state.sources, out.key) : null
+    if (!active) {
+      out.noSourceEpg = true
+    } else if (!epg.ok) {
       out.refusedEpg = true
+    } else if (epg.url !== str(active.epgUrl)) {
+      out.state = replaceSource(out.state, out.key, { epgUrl: epg.url })
+      out.adoptedEpg = true
     }
+  }
+  if (o.migrating === true) {
+    var markedState = withEntryMigrated(out.state)
+    out.marked = markedState !== out.state
+    out.state = markedState
   }
   out.changed = out.state !== st
   out.moved = out.key !== before
-  // R12: `epgConsumed`, not "the entry carries an EPG". A consumed EPG input
-  // (adopted, held already, or refused -- all three had a record to reach)
-  // is taken out, and so is the host's stale echo of one consumed EARLIER
-  // (the plan says `adoptEpg` false: it is not fresh, so it was adopted, rule
-  // 9's one-write-behind host still publishing it). The one EPG that stays
-  // is a FRESH one with no record to land on.
-  var epgEcho = str(e.epgUrl) !== "" && !adoptEpg
-  out.writeEntry = str(e.playlistUrl) !== "" || out.epgConsumed || epgEcho || activeKeyText(e.sourceKey) !== out.key
+  var carries = false
+  for (var i = 0; i < RETIRED_SETTINGS.length; i++) if (str(e[RETIRED_SETTINGS[i]]) !== "") carries = true
+  out.writeEntry = carries || activeKeyText(e.sourceKey) !== out.key
   return out
-}
-
-// D-SINK-19 round 7, R17b; round 9, R19c. THE ACTIVE MOVE MEETS A PENDING
-// GUIDE URL.
-//
-// A guide URL input that arrived while no source was active is held in the
-// state (R19b, `pendingEpg`; R12 kept it on the bar entry until round 9).
-// Until round 7 only reconcile() attached it, and reconcile runs on a state
-// load, a settings change and the shell's arrival -- never on the active key
-// moving. So the moves (Service.switchSource, and the probe commit of an
-// in-app add, an edit or a never-fetched switch) settle it themselves, in the
-// SAME turn, before the state is saved and before the mirror is written.
-//
-// R19c: THE LATEST EXPLICIT INPUT WINS, BY TIME. Round 8 (R18d) let the add
-// form's guide URL supersede a pending CLI value whenever the form carried
-// one, without asking when either was made -- so a CLI epgUrl set while the
-// add's probe ran, AFTER the submit, was dropped although it was the later
-// input (round-8 data-loss lens, P1), and on the edit route the earlier
-// pending value replaced a guide URL typed into the edit form after it (P2).
-// Now every record carries `epgSetAt` (ms; set by the add form at SUBMIT, by
-// the edit form, or by adoption with the input's seenAt) and the pending
-// value lands on the newly active record iff its `seenAt` is LATER than the
-// record's `epgSetAt` (absent = 0); otherwise the record keeps its own.
-// Either way `pendingEpg` is cleared.
-//
-// `epgInput` / `lastEpg`: an input still FRESH on the entry (reconcile has
-// not seen it; it always has once the state is loaded, so this is the
-// defensive half) is first held exactly as reconcile would hold it, seen
-// now (`nowMs`). A key that names no record moves nothing, and whatever is
-// pending stays pending.
-//
-// -> { state, pending, consumed, refused, adopted, superseded, cleared }.
-// `pending`: there was a fresh input on the entry. `consumed`: it was taken
-// into the state (held or refused), and is what Model.epgSnapshotAfter moves
-// the snapshot on. `adopted`: the pending value landed on the record.
-// `superseded`: the record's own, later, guide URL won. `cleared`: there was
-// a pending value and it is gone.
-function adoptPendingEpg(state, key, epgInput, lastEpg, nowMs) {
-  var st = state || emptyState()
-  var out = { state: st, pending: false, consumed: false, refused: false, adopted: false, superseded: false, cleared: false }
-  var plan = reconcileAction({ playlist: "", epg: epgInput, lastPlaylist: "", lastEpg: lastEpg })
-  out.pending = plan.adoptEpg === true
-  var k = activeKeyText(key)
-  if (k === "" || !findSource(st.sources, k)) return out
-  if (out.pending) {
-    var f = entryInputForm("epgUrl", epgInput)
-    out.consumed = true
-    if (f.ok) st = withPendingEpg(st, { url: f.url, seenAt: Math.max(0, Math.trunc(Number(nowMs)) || 0) })
-    else out.refused = true
-  }
-  var applied = applyPendingEpg(st, k)
-  out.state = applied.state
-  out.adopted = applied.applied
-  out.superseded = applied.superseded
-  out.cleared = applied.cleared
-  return out
-}
-
-// R19c's one comparison. `url`, set at `setAt` (ms), lands on record `key`
-// iff `setAt` is LATER than the record's own epgSetAt (absent = 0); an equal
-// time is not later. -> { state, won }; the same state object when it loses
-// or there is no such record. The S5 `known` branch of the probe commit
-// lands the form's guide URL through this too (OQ-X3 ruled): the record the
-// commit keeps takes it only if it was set later than whatever that record
-// already holds.
-function epgByTime(state, key, url, setAt) {
-  var st = state || emptyState()
-  var k = activeKeyText(key)
-  var rec = k === "" ? null : findSource(st.sources, k)
-  var at = Math.max(0, Math.trunc(Number(setAt)) || 0)
-  if (!rec || !(at > epgSetAtOf(rec))) return { state: st, won: false }
-  return { state: replaceSource(st, k, { epgUrl: str(url), epgSetAt: at }), won: true }
-}
-
-// R19c: the pending guide URL meets record `key` (epgByTime) and is
-// cleared. Nothing pending, or no such record: nothing moves.
-// -> { state, applied, superseded, cleared }.
-function applyPendingEpg(state, key) {
-  var st = state || emptyState()
-  var pending = pendingEpgOf(st)
-  var k = activeKeyText(key)
-  if (pending === null || k === "" || !findSource(st.sources, k)) return { state: st, applied: false, superseded: false, cleared: false }
-  var r = epgByTime(st, k, pending.url, pending.seenAt)
-  return { state: withPendingEpg(r.state, null), applied: r.won, superseded: !r.won, cleared: true }
 }
 
 // Service.activeEpgUrl's decision, lifted so node can call it (rule 12; the
 // round-8 lens's a12 mutation reverted the inline read and nothing went red).
-// The guide URL the user set for the active source: the record's own once
-// there is a record. Before that, an input on the entry (it is about to be
-// held), else the one held in the state (R19b). Beside a record, an input
-// that is SOMETHING but does not validate is returned as it is, so the
-// helper reports it (D16's shape); an input of whitespace or control
-// characters alone is NO input (R18a) and the record's value stands.
-function activeEpgUrlOf(record, input, pending) {
-  var f = entryInputForm("epgUrl", input)
-  if (!record) {
-    if (f.text !== "") return str(input)
-    var p = pendingEpgRecord(pending)
-    return p ? p.url : ""
-  }
-  if (f.text !== "" && !f.ok) return str(input)
-  return str(record.epgUrl)
+// The guide URL the user set for the active source: the record's own, and
+// nothing else. R21 took the entry out of it: a guide URL on the bar entry is
+// a migration input that reaches the record through adoptActiveSource, or a
+// refused value that never reaches anything -- never a fallback the helper
+// fetches (the input and pendingEpg fallbacks of rounds 8 and 9 are gone).
+function activeEpgUrlOf(record) {
+  return record ? str(record.epgUrl) : ""
 }
 
 // D-SINK-19 repair, R5 and R13. THE ORDER OF THE TWO WRITES A POINTER
@@ -755,21 +570,6 @@ function pointerWritePlan(input) {
   // read "nothing to save" and wrote the entry before that save landed.
   if (inFlight || saveFailed) return { steps: ["write-entry-after-saved"], entryWaits: true }
   return { steps: ["write-entry"], entryWaits: false }
-}
-
-// R12's other half. The service keeps a snapshot of the last EPG input it saw
-// (reconcileAction compares against it, so a value is adopted once and the
-// host's stale echo of it, rule 9, is not adopted twice). The snapshot moves
-// to the input only when the input was CONSUMED (adoptActiveSource's
-// `epgConsumed`) or when the input went away. Since R19b every non-empty
-// fresh input is consumed when it is seen -- onto the active record, into
-// the state's `pendingEpg`, or refused -- so the "left fresh" branch is now
-// reached only by an input reconcile did not ask about; it is kept because
-// that is still the right answer for one.
-function epgSnapshotAfter(epg, lastEpg, consumed) {
-  var now = str(epg)
-  if (now === "" || consumed === true) return now
-  return str(lastEpg)
 }
 
 // `activeSourceKey(state, playlistUrl)` USED TO BE HERE and is deliberately
@@ -888,34 +688,20 @@ function sourcesSummary(state, activeKey) {
 // wins; nothing in this repository does, and the test that proves it calls
 // `ownedEntryPatch` rather than grepping for the names.
 //
-// R16: `opts.keepRetired === true` carries the retired keys over UNCHANGED.
-// That is the patch-only write (Service.setShowLogos before the first state
-// load or while a state write is outstanding, `ownedWriteMode`): "unchanged"
-// means as `entry` carries them, and the service hands this the PUBLISHED
-// entry, which the lagging host leaves one write behind (D-SINK-20). The
-// URL on the entry may be the only copy
-// of a source whose state write has not landed, and a write that takes it
-// off is the key mirror's to make, after the save lands. The default is
-// still removal, because the default is what the mirror and the settled
-// toggle use.
-//
-// R20c (round 10): the service no longer passes `keepRetired` at all; the
-// patch-only write hands the keep list Model.patchInputsToKeep answers, and
-// `keepRetired` stays for a caller that means "every one".
-//
-// R17a (round 7): `opts.keep`, an array of retired key names, carries THOSE
-// over unchanged on any write, heal included. The service passes
-// Model.retiredInputsToKeep's answer on every owned write, so a retired key
-// is removed only when it is consumed: a record holds it, or the service
-// already consumed it. `keepRetired` still keeps all of them, which is what
-// the patch-only write needs (a record in memory whose state write has not
-// landed is not yet a reason to strip).
+// R17a (round 7), narrowed by R21 (round 11): `opts.keep`, an array of
+// retired key names, carries THOSE over unchanged. The service passes
+// Model.retiredInputsToKeep's answer on every owned write: every retired key
+// the entry carries while the migration marker has not LANDED (the URL there
+// may be the only copy of what the migration's state write carries), and
+// none once it has -- after that nothing on the entry is an input, and every
+// owned write strips them, heal and patch alike (R21b). R16's
+// `keepRetired`, which kept every one, had no caller after round 10 and is
+// gone with the landed-state rules that replaced it.
 function entryWith(entry, patch, opts) {
   var out = {}
   var src = entry && typeof entry === "object" ? entry : {}
-  var keepAll = !!(opts && opts.keepRetired === true)
   var keep = opts && Object.prototype.toString.call(opts.keep) === "[object Array]" ? opts.keep : []
-  for (var k in src) if (keepAll || RETIRED_SETTINGS.indexOf(k) === -1 || keep.indexOf(k) !== -1) out[k] = src[k]
+  for (var k in src) if (RETIRED_SETTINGS.indexOf(k) === -1 || keep.indexOf(k) !== -1) out[k] = src[k]
   var p = patch || {}
   for (var q in p) out[q] = p[q]
   if (str(out.id) === "" && str(src.id) !== "") out.id = str(src.id)
@@ -1186,18 +972,16 @@ function withFormReveal(st, field, revealed) {
   return cur
 }
 export {
-  hasControlChars, warnState, normalizeSourceRecord, epgSetAtOf,
-  copySourceRecord, replaceSource, nowInt, sourceLabels, reducerFail,
-  addSource, updateSource, removeSource, touchSource, statusFetchedAt,
-  sourceStatsDiffer, withSourceStats, activeKeyText, activeKeyOf,
-  activeSourceRecord, withActiveKey, invalidInputBlocks, reconcileAction,
-  adoptActiveSource, adoptPendingEpg, epgByTime, applyPendingEpg,
-  activeEpgUrlOf, pointerWritePlan, epgSnapshotAfter, reconcileSources,
-  sourceForEdit, sourcesSummary, entryWith, cacheStale, formFields,
-  isFormField, formLimit, FORM_SLACK, formCapacity, emptyValues, copyValues,
-  copyForm, formState, formFocusOrder, formHasText, firstFieldWithText,
-  guideWithForm, openForm, openFirstRun, openAddForm, openEditForm,
-  openXtreamForm, closeForm, withFormPatch, withFormValue, withFormFocus,
-  moveFormFocus, fieldMaskable, fieldRevealed, fieldMasked, toggleReveal,
-  withFormReveal
+  hasControlChars, warnState, normalizeSourceRecord, copySourceRecord,
+  replaceSource, nowInt, sourceLabels, reducerFail, addSource, updateSource,
+  removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
+  withSourceStats, activeKeyText, activeKeyOf, activeSourceRecord,
+  withActiveKey, invalidInputBlocks, reconcileAction, adoptActiveSource,
+  activeEpgUrlOf, pointerWritePlan, reconcileSources, sourceForEdit,
+  sourcesSummary, entryWith, cacheStale, formFields, isFormField, formLimit,
+  FORM_SLACK, formCapacity, emptyValues, copyValues, copyForm, formState,
+  formFocusOrder, formHasText, firstFieldWithText, guideWithForm, openForm,
+  openFirstRun, openAddForm, openEditForm, openXtreamForm, closeForm,
+  withFormPatch, withFormValue, withFormFocus, moveFormFocus, fieldMaskable,
+  fieldRevealed, fieldMasked, toggleReveal, withFormReveal
 }

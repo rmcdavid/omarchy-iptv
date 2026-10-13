@@ -126,21 +126,17 @@ Item {
   // to be re-adopted, seen "now", over a later in-app edit at the next start.
   property bool entryMirrorOwed: false
   readonly property var settings: Model.settingsWithOwnWrite(hostSettings, ownWrite)
-  // D-SINK-19. INPUT ONLY. `omarchy bar set io.github.rmcdavid.iptv playlistUrl
-  // <url>` adopts the URL into the history and makes that source active on
-  // EVERY reconcile that sees a value this service has not consumed -- the
-  // shell start, a state load, a settings change (SR8, lead ruling R1 after
-  // the review found the first version discarding a URL set while the shell
-  // was down). A non-empty `epgUrl` reaches the active record the same way
-  // (D-SRC-02, R4); an empty one is a no-op, and the CLI clear lever is
-  // withdrawn -- the Sources screen clears a guide URL. What has stopped is
-  // the plugin IDENTIFYING the active source by this value or writing it
-  // back: the credential lives only in the plugin's own 0600 state.json now,
-  // and the entry carries the key. A user who sets one of these and reads
-  // shell.json back will not find it there, which is cost 1 of the change and
-  // is in the release notes.
-  readonly property string inputPlaylistUrl: settings.playlistUrl
-  readonly property string inputEpgUrl: settings.epgUrl
+  // D-SINK-19 round 11 (R21, the product owner's decision of 2026-10-13):
+  // the bar entry's `playlistUrl` and `epgUrl` are read ONCE, by the
+  // migration of an install written before the change, which named its
+  // active source by the URL there. reconcile() adopts them while the LANDED
+  // state does not carry the migration marker (Model.entryMigratedOf over
+  // `landedState`), and from the moment it does a value found there is
+  // refused, reported once (Model.entryInputNotice) and stripped by the next
+  // owned write. The `omarchy bar set` URL route is gone; the Sources screen
+  // is the one place a source is added, switched or edited. The credential
+  // lives only in the plugin's own 0600 state.json, and the entry carries
+  // the key.
   // The active source's record and its playlist URL: what every fetch, label
   // and host line uses. Derived from state.json's `activeKey`, so a switch
   // moves it in the same event-loop turn as the state write and nothing in
@@ -195,12 +191,12 @@ Item {
   // stored now. The input setting survives as the fallback for the one case
   // that has no record -- a CLI `epgUrl` set before any source exists, and an
   // invalid one, which D16 has to surface rather than swallow.
-  // R19b: with no record, the guide URL HELD in the state (pendingEpg) once
-  // the input has left the entry. Model.activeEpgUrlOf holds the decision
-  // (rule 12: the round-8 lens reverted this read inline and nothing went
-  // red), including R18a's "whitespace or control characters alone is no
-  // input".
-  readonly property string activeEpgUrl: Model.activeEpgUrlOf(root.activeSourceRecord, root.inputEpgUrl, Model.pendingEpgOf(root.userState))
+  // R21: the record's own, and nothing else -- a guide URL on the bar entry
+  // reaches the record through the migration or not at all, so neither the
+  // raw input nor a held value (round 9's pendingEpg) is a fallback any more.
+  // Model.activeEpgUrlOf holds the decision (rule 12: the round-8 lens
+  // reverted this read inline and nothing went red).
+  readonly property string activeEpgUrl: Model.activeEpgUrlOf(root.activeSourceRecord)
   // M4-01 repair 3 (D-EPG-2). The guide URL actually in force, and where it
   // came from: the user's own value when they set one, otherwise the
   // `url-tvg` / `x-tvg-url` the playlist declared, which the helper has
@@ -266,7 +262,9 @@ Item {
   property var probeEdit: null                         // pending replacement record of a URL edit (applied only when its probe succeeds, SR7)
   property var sourceErrors: ({})                      // session-only { key: reason }, URL-free (Model.statusReason)
   // D16 / SR8: the validation result when the `playlistUrl` INPUT is set but
-  // invalid.
+  // invalid. Since R21 an input exists only during the migration, so this is
+  // set only for an invalid URL a 0.13.x entry carried; a value found on the
+  // entry after the marker has landed is refused and never validated here.
   //
   // D-SINK-19 narrowed what this may do. It used to be a statement about the
   // ACTIVE source, because the setting WAS the active source: a typo in
@@ -280,14 +278,21 @@ Item {
   // Does the rejected input become the guide's error state and stop the
   // helper? Only when there is no active source to show instead.
   readonly property bool invalidInputBlocks: Model.invalidInputBlocks(root.settingsInvalid, root.activeSourceKey)
-  // Snapshot of the settings the last reconcile() saw (D-SRC-02 / D-SRC-10,
-  // and since the D-SINK-19 repair the thing that tells a FRESH input from
-  // the host's stale echo of one already adopted -- see Model.reconcileAction).
-  // It moves on every path, including "ignore". The previous active key is
-  // read off the state by Model.adoptActiveSource, not snapshotted here.
+  // Whether reconcile() has run since the state loaded (the first one is
+  // forced: Model.reconcileAction's "migrate").
   property bool reconciled: false
-  property string reconciledPlaylistUrl: ""
-  property string reconciledEpgUrl: ""
+  // R21b. Every value this session has migrated or refused off the bar
+  // entry, by setting (Model.entryInputsSeenAfter): what tells a value the
+  // user set from the host's stale publish of one already handled (rule 9),
+  // so neither is adopted twice nor reported twice. IN MEMORY ONLY, by
+  // ruling: round 10 persisted a digest of it (entryInputs) and the next
+  // review broke it three ways. Never published: the values can carry
+  // credentials.
+  property var entryInputsSeen: ({})
+  // R21b. What this session reported, as { setting, reason } -- names and
+  // reasons only, never a value. The harness reads it through pointerState
+  // to count the reports; the user reads the notification and the console.
+  property var entryInputReports: []
   property var cacheQueue: []                          // FIFO of { args, onDone } for cacheProc (section 4.7)
   property var cacheJob: null
   property var recentSaves: []                         // texts this service wrote to state.json (own-write reloads are skipped)
@@ -606,13 +611,16 @@ Item {
   // `stateSavesInFlight` is 0 or 1 and keeps its name for the harness.
   property int stateSavesInFlight: 0
   property string lastSaveText: ""
-  // D-SINK-19 round 10, R20c. The state the last LANDED save serialised (or
+  // D-SINK-19 round 11, R21a. The state the last LANDED save serialised (or
   // the file as it was loaded): what the plugin's own disk is known to hold.
-  // The patch-only logo write asks it (Model.patchInputsToKeep) before it
-  // carries a retired input back onto the entry, because memory is what a
-  // failed write was carrying and the disk is what survives. null before the
-  // first load. `lastSaveState` is the object behind lastSaveText, promoted
-  // when that text lands.
+  // The ONE question asked of it is whether it carries the migration marker
+  // (Model.entryMigratedOf): until it does the bar entry's URLs are migration
+  // inputs and no owned write may take them off (Model.retiredInputsToKeep),
+  // and from then on they are refused. Memory is not asked, because memory
+  // carries the marker from the moment the migration runs and a write that
+  // fails leaves the disk without it. null before the first load.
+  // `lastSaveState` is the object behind lastSaveText, promoted when that
+  // text lands.
   property var landedState: null
   property var lastSaveState: null
   property bool stateSaveFailed: false
@@ -1825,11 +1833,7 @@ Item {
     var gate = root.sourcesReady()
     if (gate) return gate
     var origin = f.kind === "xtream" ? "xtream" : (String(f.origin || "") || "guide")
-    // R19c: the form's guide URL is SET now, at submit -- not when the probe
-    // commits -- so a CLI epgUrl the user sets while the probe runs is the
-    // later input and wins at the commit.
-    var added = Model.addSource(root.userState, { playlistUrl: f.playlistUrl, epgUrl: f.epgUrl, label: f.label, origin: origin,
-                                                  epgSetAt: Date.now() }, Math.floor(Date.now() / 1000))
+    var added = Model.addSource(root.userState, { playlistUrl: f.playlistUrl, epgUrl: f.epgUrl, label: f.label, origin: origin }, Math.floor(Date.now() / 1000))
     if (!added.ok) return root.sourceResult(false, added.code, added.message, added.key, root.resultField(added.code, added.message))
     root.probeAdd = Model.findSource(added.state.sources, added.key)
     return root.startProbe(added.key, added.key, "add", true)
@@ -1847,9 +1851,7 @@ Item {
     if (gate) return gate
     var rec = Model.findSource(root.userState.sources, key)
     if (!rec) return root.sourceResult(false, "unknown_source", Model.sourceErrorMessage("unknown_source"), key)
-    // R19c: a guide URL this edit CHANGES is set now (Model.updateSource
-    // stamps it only on a change). Never a caller's own epgSetAt.
-    var updated = Model.updateSource(root.userState, key, root.withKey(fields || {}, "epgSetAt", Date.now()), Math.floor(Date.now() / 1000))
+    var updated = Model.updateSource(root.userState, key, fields || {}, Math.floor(Date.now() / 1000))
     if (!updated.ok) return root.sourceResult(false, updated.code, updated.message, updated.key, root.resultField(updated.code, updated.message))
     if (!updated.urlChanged) {
       root.userState = updated.state
@@ -1908,41 +1910,6 @@ Item {
     return root.sourceResult(true, "ok", "", key)
   }
 
-  // D-SINK-19 round 7, R17b; round 9, R19c. THE ACTIVE MOVE MEETS A PENDING
-  // GUIDE URL. A guide URL input set while no source was active is held in
-  // the state as `pendingEpg` (R19b), and reconcile() -- which runs on a state
-  // load, a settings change and the shell's arrival, never on the active key
-  // moving -- cannot settle it. So the moves (switchSource, and the probe
-  // commit of an in-app add, an edit or a never-fetched switch) settle it
-  // themselves, in the same turn, BEFORE the state is saved and before
-  // persistActive holds the mirror, through Model.adoptPendingEpg: the LATER
-  // of the pending value (its seenAt) and the record's own guide URL (its
-  // epgSetAt: the add form's submit, the edit form, an earlier adoption)
-  // wins, and the pending value is cleared either way. Never by waiting for
-  // a host publish (rule 9). removeSource does not call this: with no active
-  // record the value stays pending.
-  //
-  // R18d's form-wins rule is GONE (R19c): it asked nothing about WHEN, so a
-  // CLI epgUrl set while the add's probe ran -- after the submit -- lost to
-  // the earlier form, and an edit-form guide URL lost to an earlier pending
-  // value at the switch. Both log lines name the setting and the source key,
-  // never a URL.
-  function adoptPendingEpgOnto(key) {
-    var epg = String(root.settings.epgUrl || "")
-    var out = Model.adoptPendingEpg(root.userState, key, epg, root.reconciledEpgUrl, Date.now())
-    if (out.state !== root.userState) root.userState = out.state
-    if (out.pending) {
-      // R20b: the snapshot moves here too, and its slot with it; every
-      // caller saves the state straight after.
-      var lastEpg = root.reconciledEpgUrl
-      root.reconciledEpgUrl = Model.epgSnapshotAfter(epg, root.reconciledEpgUrl, out.consumed)
-      root.userState = Model.entryInputsAfterMove(root.userState, "epgUrl", lastEpg, root.reconciledEpgUrl, Date.now())
-    }
-    if (out.adopted) console.warn("omarchy-iptv: a pending guide URL (epgUrl) lands on source " + Model.activeKeyText(key))
-    else if (out.superseded) console.warn("omarchy-iptv: a pending guide URL (epgUrl) is superseded: source " + Model.activeKeyText(key) + " keeps the one set later")
-    return out.consumed
-  }
-
   // Switch (S3, D7): a source with a cache commits at once (settings
   // write -> cache FileViews rebind -> redraw from its channels.json ->
   // background refresh when stale); a never-fetched source probes first.
@@ -1955,9 +1922,6 @@ Item {
     if (key === root.activeSourceKey) return root.sourceResult(true, "ok", "", key)
     if (!(rec.fetchedAt > 0)) return root.startProbe(key, key, "switch", true)
     root.userState = Model.touchSource(root.userState, key, Math.floor(Date.now() / 1000))
-    // R17b: a pending EPG input lands on the record becoming active in THIS
-    // turn, before the save and before the mirror (see adoptPendingEpgOnto).
-    root.adoptPendingEpgOnto(key)
     root.saveState()
     // beginSwitch BEFORE the active key moves: assigning it fans out through
     // activeSourceKey -> activeCacheDir -> onActiveCacheDirChanged in the same
@@ -2147,8 +2111,8 @@ Item {
     // replacement. Model.stateOnLoad() replays the play this shell recorded
     // while the read was in flight and refuses to resurrect a record already
     // consumed; both answers are the one rule, so neither is decided here.
-    // R20c: the file as it is, before anything is merged onto it, is what the
-    // disk is known to hold.
+    // R21a: the file as it is, before anything is merged onto it, is what the
+    // disk is known to hold -- and whether it carries the migration marker.
     var onDisk = Model.parseState(text)
     root.landedState = onDisk
     var adopted = Model.stateOnLoad(Model.trimRecents(onDisk, root.maxRecents),
@@ -3524,11 +3488,13 @@ Item {
   //            Process; `true` is returned, which is "accepted, not refused",
   //            and NOTHING has been written at that point
   //
-  // The shield itself is NOT retired with the URLs, and not for symmetry: the
-  // input path (`omarchy bar set ... playlistUrl <url>`, SR8) still puts a
-  // credential in that file with the user's own hand, and the chmod this runs
-  // is the only thing that limits who can read it in the window before the
-  // plugin adopts the URL and writes the entry back without it.
+  // The shield itself is NOT retired with the URLs, and not for symmetry: a
+  // user can still put a credential in that file with their own hand
+  // (`omarchy bar set ... playlistUrl <url>`, a route R21 refuses but cannot
+  // stop anyone typing; and every 0.13.x entry the migration reads), and the
+  // chmod this runs is the only thing that limits who can read it in the
+  // window before the plugin adopts or refuses it and writes the entry back
+  // without it.
   function persistEntryKey(key) {
     var patch = Model.ownedEntryPatch(root.settings, { sourceKey: Model.activeKeyText(key) })
     var decision = Model.entryShieldDecision(root.hostConfigShield, patch)
@@ -3611,17 +3577,15 @@ Item {
   // on screen for something that is not one. (R13 made it false for the key
   // mirror as well; see writeActive.)
   //
-  // R16: `keepRetired` true is the PATCH-ONLY write, and it is the one
-  // difference between the two writers about what reaches the file. The
-  // caller (setShowLogos, under Model.ownedWriteMode) passes it before the
-  // first state load and while a state write is parked, in flight or
-  // failed: the entry then keeps the retired URL keys the PUBLISHED entry
-  // carries that may be the only copy of an input -- a valid value the LAST
-  // LANDED state does not hold (R20c, round 10: Model.patchInputsToKeep) --
-  // and strips the rest, which on the lagging host includes a value our own
-  // last heal stripped that the publish still shows (D-SINK-20); and the
-  // patch's `sourceKey` is the host's own value (ownedEntryPatch over
-  // `settings`), never memory's.
+  // R16: `patchOnly` true is the PATCH-ONLY write. The caller (setShowLogos,
+  // under Model.ownedWriteMode) passes it before the first state load and
+  // while a state write is parked, in flight or failed: the overrides then
+  // carry `showLogos` alone, so the patch's `sourceKey` is the host's own
+  // value (ownedEntryPatch over `settings`), never memory's, and the write
+  // does not pay a mirror a failed save left owing (R19d). What it does with
+  // the retired URL keys is NOT its own decision any more (R21): every owned
+  // write asks Model.retiredInputsToKeep over the LANDED migration marker,
+  // which keeps every one until the marker has landed and none after it.
   //
   // `settings`, not `hostSettings`, is load-bearing (D-LOGO-2): `settings`
   // carries our own last write laid over the host's one-write-behind
@@ -3633,7 +3597,7 @@ Item {
   // this line names). Healing the entry is
   // the key mirror's job once the file agrees with memory again (writeActive
   // under R13), and the mirror never passes this.
-  function writeOwnedEntry(overrides, what, announce, keepRetired) {
+  function writeOwnedEntry(overrides, what, announce, patchOnly) {
     if (!root.shell || typeof root.shell.updateEntryInline !== "function"
         || !Model.barEntryWritable(root.shell.barConfig, root.pluginId)) {
       console.warn("omarchy-iptv: no writable bar entry for the " + what)
@@ -3645,26 +3609,16 @@ Item {
     }
     var patch = Model.ownedEntryPatch(root.settings, overrides)
     patch.id = root.pluginId
-    // R17a (round 7): a retired input leaves the entry only when it is
-    // CONSUMED -- a record holds it, or this service already adopted or
-    // refused that value (the two snapshots reconcile keeps). Decided here,
-    // in the one funnel, for EVERY owned write, heal and patch alike, so no
-    // caller can strip an input nothing has adopted: R12's EPG with no active
-    // source was stripped by a heal through two callers before this (R19b
-    // now holds that one in the state, which counts as held here too). Key
-    // names only in the log line, never a value.
+    // R21a / R21b, decided here, in the one funnel, for EVERY owned write,
+    // heal and patch alike: until the migration marker has LANDED the entry
+    // keeps every retired URL key it carries (the URL there may be the only
+    // copy of what the migration's state write carries), and from then on
+    // every owned write strips them, whatever they are. R17a's held/consumed
+    // rule and R20c's landed-state rule for the patch are withdrawn: the
+    // only question left is the marker's.
     var published = Model.findBarEntry(root.shell.barConfig, root.pluginId)
-    var consumed = { playlistUrl: root.reconciledPlaylistUrl, epgUrl: root.reconciledEpgUrl }
-    // R20c (round 10, D-SINK-20): the PATCH-ONLY write keeps a retired input
-    // only when it is a valid one the LAST LANDED state does not hold
-    // (Model.patchInputsToKeep); one the disk holds, or a refused one already
-    // reported, is stripped like any heal strips it. R16 kept every one, and
-    // on the lagging host that wrote back a URL our own heal had just
-    // stripped -- a refused credential included -- for the rest of the session.
-    var keep = keepRetired === true ? Model.patchInputsToKeep(published, root.landedState, consumed)
-                                    : Model.retiredInputsToKeep(published, root.userState, consumed)
+    var keep = Model.retiredInputsToKeep(published, Model.entryMigratedOf(root.landedState))
     var entry = Model.entryWith(published, patch, { keep: keep })
-    if (keep.length > 0 && keepRetired !== true) console.warn("omarchy-iptv: the bar entry keeps an input no source has adopted yet (" + keep.join(", ") + ")")
     // R19a (round 9): NO SKIP ON AN ESTIMATE. Every owned write is handed to
     // the host, and updateEntryInline's own answer is the dirty check: `false`
     // from a writable entry is "already stored", which is success. Round 8
@@ -3682,16 +3636,9 @@ Item {
     // pending EPG, at about 3,000 no-op writes a second.
     var record = Model.ownWriteOf(root.hostSettings, Model.ownedEntryPatch(root.settings, overrides))
     if (!Model.sameOwnWrite(root.ownWrite, record)) root.ownWrite = record
-    // A heal states every owned key and strips what is consumed, so it pays
-    // any mirror a failed save left owing (R19d).
-    if (keepRetired !== true) root.entryMirrorOwed = false
-    // R20b: a consumed input this entry no longer carries is STRIPPED, so the
-    // same value on the entry at the next start is the user setting it again
-    // (Model.entryInputsAfterWrite). In memory, riding the next save like the
-    // slot itself (see reconcile): every act that makes a re-set of the old
-    // value mean something -- a switch, an edit, a remove -- saves.
-    var inputs = Model.entryInputsAfterWrite(root.userState, entry)
-    if (inputs !== root.userState) root.userState = inputs
+    // A heal states every owned key, so it pays any mirror a failed save
+    // left owing (R19d).
+    if (patchOnly !== true) root.entryMirrorOwed = false
     // Nothing was written (`false`): the file is as it was, and the gate in
     // front of the next write is no staler than before. Re-arming here would
     // spend a process on every hand-over the lagging host answers `false` to.
@@ -3711,10 +3658,11 @@ Item {
     // credential -- which is a 32-bit confirmation of a guessed URL rather
     // than the URL (Model.entryShieldDecision states that trade). What is
     // still a credential is the one the USER puts there with
-    // `omarchy bar set ... playlistUrl <url>` (SR8): it sits in the file from
-    // their shell's write until this plugin adopts it and writes the entry
-    // back without it, and the chmod below is the only thing narrowing who
-    // can read it in between.
+    // `omarchy bar set ... playlistUrl <url>` (refused since R21, and read by
+    // the migration before it): it sits in the file from their shell's write
+    // until this plugin refuses or adopts it and writes the entry back
+    // without it, and the chmod below is the only thing narrowing who can
+    // read it in between.
     // `hostConfigShield` answers about the file as of the last shield run, so
     // a recreation that lands after that run and before this write is not
     // seen. Two windows, and they are different sizes:
@@ -3805,24 +3753,15 @@ Item {
     // an older build left in the entry instead of carrying it forward.
     //
     // D-SINK-18: still not gated, and the reason is sharper than it was. The
-    // settled write carries `sourceKey` and `showLogos` and strips the URL
-    // keys, so it can only ever take a credential OUT of that file, and the
-    // one write that must never be refused is the one that does that. The
-    // patch-only write below carries the entry's URL keys over as the host
-    // PUBLISHES them, and that was not "nothing the file does not already
-    // hold": on the host that publishes one write behind (through 4.0.4),
-    // after a heal write has stripped a URL the user set with `omarchy bar
-    // set`, the published copy still carries it, and this write put it back
-    // on the stored entry -- D-SINK-20, observed live under the harness's
-    // lagging fake host, and re-graded P2 by the round-9 data-loss lens: a
-    // REFUSED credential no record holds came back too, and stayed for the
-    // session. R20c (round 10) narrows what the patch carries to a valid
-    // value the LAST LANDED state does not hold (the funnel asks
-    // Model.patchInputsToKeep), which is exactly the only copy the round-4
-    // P1 lost and nothing else. Do NOT narrow it to "keep the retired keys
-    // only while no own-write override is in force": that decides from the
-    // host's state, which knows nothing of the disk, and strips the only
-    // copy of an input whose state write failed.
+    // write carries `sourceKey` and `showLogos` (or `showLogos` alone, the
+    // patch below) and no URL of the plugin's own. What it does with a URL a
+    // user put on the entry is the funnel's (R21): kept until the migration
+    // marker has landed, stripped by every write after -- which ended
+    // D-SINK-20, the patch-only toggle on the lagging host writing back a URL
+    // the plugin's own heal had just stripped, a refused credential included.
+    // Do NOT narrow the keep to "while no own-write override is in force":
+    // that decides from the host's state, which knows nothing of the disk,
+    // and strips the only copy of what a failed migration write carried.
     // What both get is the shield re-arm, which tightens the file and
     // shortens the drift window by one more event. writeOwnedEntry re-arms
     // the shield itself, so there is no second call here: one write, one
@@ -3834,10 +3773,10 @@ Item {
     // entry may be the only copy of a source whose write did not land; this
     // write used to mirror the in-memory key and strip that URL, and the
     // next start found the record nowhere. Model.ownedWriteMode decides from
-    // four inputs: "patch" writes `showLogos` alone and leaves `sourceKey`,
-    // `playlistUrl` and `epgUrl` as the host publishes them (ownedEntryPatch
-    // takes the key from `settings`, entryWith keeps the retired keys);
-    // "heal" is today's write. The mirror itself is written by writeActive
+    // four inputs: "patch" writes `showLogos` alone and leaves `sourceKey` as
+    // the host publishes it (ownedEntryPatch takes the key from `settings`);
+    // "heal" is today's write. Either way the retired URL keys are the
+    // funnel's (R21, above). The mirror itself is written by writeActive
     // once the file agrees with memory, under R13.
     //
     // R16 as amended (round 6): `stateLoaded` is the fourth input. Before
@@ -4261,15 +4200,11 @@ Item {
         }
         var known = Model.findSourceByUrl(st.sources, pending.url)
         if (known) {
-          // The same URL arrived through the CLI while the probe ran (S5):
-          // that record wins and the counts land on it. R19c (OQ-X3 ruled):
-          // a guide URL the form SET lands on that record with its submit
-          // time, iff that is later than whatever the record holds
-          // (Model.epgByTime); a pending input is then judged against the
-          // result like any other.
+          // The same URL arrived while the probe ran (S5: a second add, or
+          // the migration of an entry that named it): that record wins and
+          // the counts land on it. Its own guide URL stands; R19c's
+          // later-by-time landing of the form's is withdrawn with R21.
           newKey = String(known.key)
-          var formSetAt = Model.epgSetAtOf(pending)
-          if (formSetAt > 0) st = Model.epgByTime(st, newKey, String(pending.epgUrl || ""), formSetAt).state
         } else {
           newKey = Model.allocateSourceKey(st.sources, pending.url)
           var record = pending
@@ -4288,12 +4223,6 @@ Item {
       st = Model.withSourceStats(st, newKey, status, nowSec)
       st = Model.touchSource(st, newKey, nowSec)
       root.userState = st
-      // R17b / R19c: the record this commit is about to make active meets a
-      // pending guide URL now, before the save and before persistActive's
-      // mirror, and the later of the two wins. A commit that activates
-      // nothing (an inactive edit, a retry of the active source) leaves a
-      // pending value where it is.
-      if (commit && newKey !== root.activeSourceKey) root.adoptPendingEpgOnto(newKey)
       root.saveState()
       if (commit) {
         if (newKey === root.activeSourceKey) {
@@ -4329,71 +4258,77 @@ Item {
     root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: reason, host: host, cancelled: false, replacedId: "" })
   }
 
-  // SR8 PRESERVED, D3 NARROWED (D-SINK-19), REPAIRED after the review (lead
-  // ruling R1). `omarchy bar set ... playlistUrl <url>` adopts: the URL goes
-  // into the history and that source becomes active -- on the shell start, on
-  // a state load and on a settings change alike, whenever the value is one
-  // this service has not already consumed. What has changed since 0.13.3 is
-  // that the settings are no longer the SOURCE OF TRUTH for which source is
-  // active -- state.json's `activeKey` is -- so an EMPTY input is never a
-  // command: the plugin strips the URL keys from the entry on every write, so
-  // the host comes to report them absent, and if that still meant "no active
-  // source" the host catching up would un-configure the plugin. Clearing the
-  // active source is `removeSource` (or the Sources screen).
+  // D-SINK-19, round 11 (R21). WHAT THE BAR ENTRY'S URLS MEAN: one
+  // migration, then nothing.
+  //
+  // While the LANDED state does not carry the migration marker
+  // (Model.entryMigratedOf over `landedState`), the entry's `playlistUrl` and
+  // `epgUrl` are adopted exactly as they were before round 11 (R1: a URL
+  // before any key is trusted; R4: a guide URL onto the active record), and
+  // the marker rides the same state write (Model.adoptActiveSource). The
+  // entry keeps them until that write has landed (R13, Model.retiredInputsToKeep).
+  // From then on nothing on the entry is an input: a value found there is
+  // refused, reported once per value (Model.entryInputNotice, through
+  // reportEntryInput) and stripped by the owned write this asks for. An
+  // EMPTY value is never a command, in either phase: the plugin strips the
+  // keys on its own writes, the host comes to report them absent, and if
+  // that meant "no active source" the host catching up would un-configure
+  // the plugin. Clearing the active source is `removeSource`.
   //
   // The decision is Model.reconcileAction (what this write means) and
   // Model.adoptActiveSource (what the active source is now), so a test can
-  // call both (rule 12). This function only moves the snapshot and hands the
-  // plan on. The first version had TWO resolvers -- a direct reconcileSources
-  // call for a changed input and adoptActiveSource for a forced one -- and
-  // the forced one never read the URL, which is how a value set while the
-  // shell was down was discarded and then stripped from shell.json.
+  // call both (rule 12). This function moves the session's in-memory record
+  // of what it has handled (`entryInputsSeen`), reports, and hands the plan on.
   function reconcile(force) {
     if (!root.stateLoaded) return
     var s = root.settings
     var playlist = String(s.playlistUrl || "")
     var epg = String(s.epgUrl || "")
-    // R20b (round 10): the first reconcile after a start does not begin from
-    // nothing. A value the state proves this service already consumed, and
-    // has not stripped since, is not fresh (Model.entryInputSeed): it was
-    // adopted, held or refused before the restart, and adopting it again --
-    // seen NOW -- replaced a later in-app edit that had landed (D-SRC-18,
-    // and D-SINK-20's restart half).
-    if (!root.reconciled) {
-      root.reconciledPlaylistUrl = Model.entryInputSeed(root.userState, "playlistUrl", playlist)
-      root.reconciledEpgUrl = Model.entryInputSeed(root.userState, "epgUrl", epg)
-    }
-    var lastPlaylist = root.reconciledPlaylistUrl
-    var lastEpg = root.reconciledEpgUrl
     var plan = Model.reconcileAction({ first: !root.reconciled, force: force === true,
-                                       playlist: playlist, epg: epg,
-                                       lastPlaylist: root.reconciledPlaylistUrl,
-                                       lastEpg: root.reconciledEpgUrl })
-    // The playlist snapshot moves on EVERY path (R1): an input that went away
-    // is not a command, and a value adopted below is consumed from here on,
-    // so the host's stale echo of it (rule 9) is not adopted twice. The EPG
-    // snapshot moves only when the input was CONSUMED or went away (R12,
-    // Model.epgSnapshotAfter). Since R19b every non-empty input is consumed
-    // when it is seen: onto the active record, into the state's pendingEpg
-    // when no source is active, or refused.
+                                       migrating: !Model.entryMigratedOf(root.landedState),
+                                       playlist: playlist, epg: epg, seen: root.entryInputsSeen })
     root.reconciled = true
-    root.reconciledPlaylistUrl = playlist
-    var epgConsumed = false
-    // "ignore" with no fresh EPG input is the ordinary steady state.
-    if (!(plan.act === "ignore" && !plan.adoptEpg)) epgConsumed = root.adoptActive(playlist, epg, plan)
-    root.reconciledEpgUrl = Model.epgSnapshotAfter(epg, root.reconciledEpgUrl, epgConsumed)
-    // R20b: a snapshot that moved is written down with the time, so the next
-    // start knows it (Model.entryInputsAfterMove; a digest, never the value).
-    // NOT saved for its own sake: it rides the next save, which is the save
-    // that matters -- what an older input on the entry could overwrite at the
-    // next start is a LATER input (an edit, a switch), and that input's own
-    // save carries the slot. A save issued for the slot alone would hold the
-    // strip behind it (R13), and a strip held is what hid a re-set of the
-    // same value in round 9 (308258f; the R19c re-stamp case goes red).
-    var now = Date.now()
-    var next = Model.entryInputsAfterMove(root.userState, "playlistUrl", lastPlaylist, root.reconciledPlaylistUrl, now)
-    next = Model.entryInputsAfterMove(next, "epgUrl", lastEpg, root.reconciledEpgUrl, now)
-    if (next !== root.userState) root.userState = next
+    // Every value this reconcile looked at is handled from here on: adopted
+    // below, or refused and reported here. The host's stale publish of it
+    // (rule 9) is neither adopted nor reported again.
+    root.entryInputsSeen = Model.entryInputsSeenAfter(root.entryInputsSeen, { playlistUrl: playlist, epgUrl: epg })
+    for (var i = 0; i < plan.report.length; i++) root.reportEntryInput(plan.report[i], "retired")
+    // "ignore" with no guide URL to adopt is the ordinary steady state.
+    if (!(plan.act === "ignore" && !plan.adoptEpg)) root.adoptActive(playlist, epg, plan)
+    // R21b: a refused value leaves by the next owned write, and this is it --
+    // deferred, never from inside the settings' own change notification.
+    if (plan.refused.length > 0) Qt.callLater(root.stripEntryInputs)
+  }
+
+  // R21b. The owned write that takes a refused value off the bar entry: the
+  // PATCH-ONLY shape (R16), every owned key at the value the plugin already
+  // acts on and nothing moved, so it needs no gate -- it cannot mirror a key
+  // the file does not have, and once the marker has landed the funnel strips
+  // every retired key (Model.retiredInputsToKeep). The key mirror's own heal
+  // stays persistActive's, under R13. On the lagging host the publish keeps
+  // showing the value after the strip; the write that answers it is a no-op
+  // the host answers `false` to, and Model.sameOwnWrite settles the cycle
+  // (R19a). One function rather than a closure, so Qt.callLater folds a burst
+  // of settings changes into one write.
+  function stripEntryInputs() {
+    if (!Model.entryMigratedOf(root.landedState)) return
+    root.writeOwnedEntry({}, "refused bar setting", false, true)
+  }
+
+  // R21b. The one report of a value taken off the bar entry without being
+  // adopted: a desktop notification and a console line, both the sentence
+  // Model.entryInputNotice composes from the setting's NAME and the reason --
+  // never the value (rule 5) -- and one { setting, reason } on
+  // `entryInputReports` for the harness to count. Called once per value:
+  // reconcile() only asks for a value `entryInputsSeen` has not seen.
+  function reportEntryInput(setting, reason) {
+    var notice = Model.entryInputNotice(setting, reason)
+    console.warn("omarchy-iptv: " + notice.body)
+    root.notify("entryInputRefused", { setting: setting, reason: reason })
+    var reports = root.entryInputReports.slice()
+    reports.push({ setting: String(setting), reason: String(reason) })
+    while (reports.length > 32) reports.shift()
+    root.entryInputReports = reports
   }
 
   // D-SINK-19. ONE resolver for the state load, the `shell` arrival, the
@@ -4402,32 +4337,31 @@ Item {
   //
   // Model.adoptActiveSource holds the decision (and the reasoning for the
   // order it takes it in). What belongs here is only the consequences: write
-  // the state if it moved, mirror the key into the entry -- which is also
-  // what takes the URL out of that entry, so the migration finishes itself --
-  // and surface an invalid CLI value through D16's synthesized status.
+  // the state if it moved -- the migration marker rides that write (R21a) --
+  // mirror the key into the entry, which is also what takes the URLs out of
+  // it once that write has landed, and surface an invalid migration value
+  // through D16's synthesized status.
   //
   // Idempotent by construction: a second run over the same inputs finds the
-  // URL consumed (reconcileAction) and the state's own `activeKey` answering.
-  // Returns whether an EPG input was consumed (R12: reconcile's snapshot).
+  // values seen (reconcileAction) and the state's own `activeKey` answering.
   function adoptActive(playlist, epg, plan) {
     var entry = { playlistUrl: playlist, epgUrl: epg, sourceKey: String(root.settings.sourceKey || "") }
-    // R19c: `seenAt` is now, in ms -- the moment this service first sees the
-    // input, which becomes the record's epgSetAt or the held value's seenAt.
     var out = Model.adoptActiveSource(root.userState, entry, Math.floor(Date.now() / 1000), "",
-                                      { adoptUrl: plan.adoptUrl === true, adoptEpg: plan.adoptEpg === true, seenAt: Date.now(),
-                                        atStart: plan.first === true })
+                                      { adoptUrl: plan.adoptUrl === true, adoptEpg: plan.adoptEpg === true,
+                                        migrating: plan.migrating === true })
     root.settingsInvalid = out.invalid
-    // Setting and key names only, never a value (rule 5).
-    if (out.pendedEpg) console.warn("omarchy-iptv: no source is active; the guide URL input (epgUrl) is held in the state for the next one")
-    if (out.refusedEpg) console.warn("omarchy-iptv: ignoring an invalid epgUrl setting with no source active")
-    if (out.pendingApplied) console.warn("omarchy-iptv: a pending guide URL (epgUrl) lands on source " + out.key)
-    else if (out.pendingSuperseded) console.warn("omarchy-iptv: a pending guide URL (epgUrl) is superseded: source " + out.key + " keeps the one set later")
+    // R21c: a guide URL the migration found with no source to guide, and one
+    // that does not validate, are reported and stripped -- never held.
+    if (out.noSourceEpg) root.reportEntryInput("epgUrl", "no-source")
+    if (out.refusedEpg) root.reportEntryInput("epgUrl", "invalid")
+    if (out.invalid) root.reportEntryInput("playlistUrl", "invalid")
+    if (out.marked) console.warn("omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on")
     if (out.moved) {
       // A new source starts clean: the previous source's reason and host
       // must not stay on screen while its first fetch runs (UX 4.5,
       // D-LIVE-10). The fetch itself is driven by the new cache's freshness
       // once its directory is bound (section 4.4 step 6), never from here.
-      // `moved`, not "the input changed": a refused typo over a working
+      // `moved`, not "the input changed": a refused value over a working
       // source used to blank that source's status line (review P3).
       root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, error: null })
       root.playlistLoadWarnings = []
@@ -4448,28 +4382,24 @@ Item {
       root.applyInvalidStatus()
       if (!root.invalidInputBlocks) console.warn("omarchy-iptv: ignoring an invalid playlistUrl setting; the active source is unchanged")
     }
-    // The entry still holds a URL (the old shape, a CLI value just adopted,
+    // The entry still carries a URL (a 0.13.x entry, a value just adopted,
     // or a refused one), or its mirrored key disagrees with the state. One
     // owned write fixes both; Model.adoptActiveSource decides (`writeEntry`).
     // Deferred: never write the host's settings from inside their own change
     // notification. persistActive saves the state again only if the key
     // actually moves, so the save above is not duplicated, and its ORDER
-    // against the entry write is Model.pointerWritePlan's (R5).
+    // against the entry write is Model.pointerWritePlan's (R5): the entry
+    // waits for the save above -- the one that carries the marker -- to
+    // LAND (R13), and until it has, the funnel keeps the URLs (R21a).
     //
-    // An INVALID input is written out too, and that is deliberate: a value
+    // An INVALID value is written out too, and that is deliberate: a value
     // that failed validation can still carry credentials (`ftp://u:p@h/x`,
     // or a URL over the 2,048 cap), rule 5 treats whole URLs as secrets, and
-    // the plugin has already consumed and reported it (`settingsInvalid`).
-    // The cost is that the user cannot read their typo back out of
-    // shell.json; it was never a working configuration, and the guide names
-    // the reason it was refused. An EPG input with NO source to land on is
-    // HELD in the state (R19b, pendingEpg) and then written out like any
-    // consumed input, by this same write once the save that holds it lands.
+    // the plugin has already reported it.
     if (out.writeEntry) {
       var key = out.key
       Qt.callLater(function() { root.persistActive(key) })
     }
-    return out.epgConsumed === true
   }
 
   // The synthesized status for an invalid configured URL (D16, SR8): the
@@ -4923,7 +4853,7 @@ Item {
       if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) {
         root.stateSavesInFlight = 0
         root.stateSaveFailed = false
-        root.landedState = root.lastSaveState   // R20c: what the disk holds now
+        root.landedState = root.lastSaveState   // R21a: what the disk holds now, the marker included
       }
       root.settleEntryFlush()
       // R19d (D-SRC-18): a mirror a failed save withheld is paid by the first

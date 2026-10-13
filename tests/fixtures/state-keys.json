@@ -13,8 +13,10 @@
     "added. `serviceOnly` / `helperOnly` name a key one side writes and the other",
     "deliberately does not, each with its reason; both are empty today.",
     "",
-    "`cases` pin the three keys round 9 and 10 added, value by value, through both readers:",
-    "validated, never invented."
+    "Round 11 (R21) withdrew the three keys rounds 9 and 10 added (pendingEpg, every",
+    "record's epgSetAt, entryInputs) with the machinery that wrote them, and added one:",
+    "`entryMigrated`, the migration marker, a boolean present only when exactly true.",
+    "`cases` pin it value by value through both readers: validated, never invented."
   ],
   "keys": {
     "top": [
@@ -28,8 +30,7 @@
       "savedSearches",
       "hiddenGroups",
       "activeKey",
-      "pendingEpg",
-      "entryInputs"
+      "entryMigrated"
     ],
     "source": [
       "key",
@@ -43,8 +44,7 @@
       "lastUsed",
       "fetchedAt",
       "channelCount",
-      "groupCount",
-      "epgSetAt"
+      "groupCount"
     ],
     "played": [
       "id",
@@ -54,19 +54,6 @@
     "savedSearch": [
       "query",
       "at"
-    ],
-    "pendingEpg": [
-      "url",
-      "seenAt"
-    ],
-    "entryInputs": [
-      "playlistUrl",
-      "epgUrl"
-    ],
-    "entryInput": [
-      "digest",
-      "at",
-      "stripped"
     ]
   },
   "serviceOnly": {},
@@ -107,8 +94,7 @@
         "lastUsed": 20,
         "fetchedAt": 30,
         "channelCount": 9,
-        "groupCount": 2,
-        "epgSetAt": 1760000000000
+        "groupCount": 2
       },
       {
         "key": "04533d2d",
@@ -135,25 +121,11 @@
       "Adult"
     ],
     "activeKey": "12e22d28",
-    "pendingEpg": {
-      "url": "http://p.example.test/guide.xml",
-      "seenAt": 1760000000500
-    },
-    "entryInputs": {
-      "playlistUrl": {
-        "digest": "e3c7422c8be3ca15",
-        "at": 1760000000100,
-        "stripped": true
-      },
-      "epgUrl": {
-        "digest": "c4355b6998081b40",
-        "at": 1760000000200
-      }
-    }
+    "entryMigrated": true
   },
   "cases": [
     {
-      "name": "pendingEpg kept as it is",
+      "name": "entryMigrated true is kept as true",
       "input": {
         "version": 2,
         "sources": [
@@ -172,25 +144,207 @@
             "groupCount": 2
           }
         ],
-        "activeKey": "",
-        "pendingEpg": {
-          "url": "http://p.example.test/guide.xml",
-          "seenAt": 1760000000500
+        "activeKey": "12e22d28",
+        "entryMigrated": true
+      },
+      "expect": {
+        "entryMigrated": true
+      }
+    },
+    {
+      "name": "entryMigrated absent is absent (a file no migration has written)",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28"
+      },
+      "expect": {
+        "entryMigrated": null
+      }
+    },
+    {
+      "name": "entryMigrated false is absent, never false",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "entryMigrated": false
+      },
+      "expect": {
+        "entryMigrated": null
+      }
+    },
+    {
+      "name": "entryMigrated the STRING \"true\" is no marker (never a coercion)",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "entryMigrated": "true"
+      },
+      "expect": {
+        "entryMigrated": null
+      }
+    },
+    {
+      "name": "entryMigrated the number 1 is no marker",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "entryMigrated": 1
+      },
+      "expect": {
+        "entryMigrated": null
+      }
+    },
+    {
+      "name": "entryMigrated null is absent",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "entryMigrated": null
+      },
+      "expect": {
+        "entryMigrated": null
+      }
+    },
+    {
+      "name": "entryMigrated a list holding true is no marker",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "entryMigrated": [
+          true
+        ]
+      },
+      "expect": {
+        "entryMigrated": null
+      }
+    },
+    {
+      "name": "entryMigrated an object is no marker",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "entryMigrated": {
+          "value": true
         }
       },
       "expect": {
-        "pendingEpg": {
-          "url": "http://p.example.test/guide.xml",
-          "seenAt": 1760000000500
-        },
-        "entryInputs": null,
-        "epgSetAt": [
-          null
-        ]
+        "entryMigrated": null
       }
     },
     {
-      "name": "pendingEpg url normalized as a CLI guide URL (scheme and host case, default port)",
+      "name": "round 9 and 10 keys are dropped by both readers (pendingEpg, entryInputs, a record's epgSetAt): withdrawn by R21, never carried",
       "input": {
         "version": 2,
         "sources": [
@@ -198,252 +352,6 @@
             "key": "12e22d28",
             "url": "http://a.example.test/list.m3u",
             "epgUrl": "",
-            "kind": "http",
-            "label": "a.example.test",
-            "labelCustom": false,
-            "origin": "cli",
-            "addedAt": 10,
-            "lastUsed": 20,
-            "fetchedAt": 30,
-            "channelCount": 9,
-            "groupCount": 2
-          }
-        ],
-        "activeKey": "",
-        "pendingEpg": {
-          "url": "HTTP://P.Example.TEST:80/guide.xml",
-          "seenAt": 5
-        }
-      },
-      "expect": {
-        "pendingEpg": {
-          "url": "http://p.example.test/guide.xml",
-          "seenAt": 5
-        },
-        "entryInputs": null,
-        "epgSetAt": [
-          null
-        ]
-      }
-    },
-    {
-      "name": "pendingEpg seenAt coerced like every other time (12.9 -> 12)",
-      "input": {
-        "version": 2,
-        "sources": [
-          {
-            "key": "12e22d28",
-            "url": "http://a.example.test/list.m3u",
-            "epgUrl": "",
-            "kind": "http",
-            "label": "a.example.test",
-            "labelCustom": false,
-            "origin": "cli",
-            "addedAt": 10,
-            "lastUsed": 20,
-            "fetchedAt": 30,
-            "channelCount": 9,
-            "groupCount": 2
-          }
-        ],
-        "activeKey": "",
-        "pendingEpg": {
-          "url": "http://p.example.test/g.xml",
-          "seenAt": "12.9"
-        }
-      },
-      "expect": {
-        "pendingEpg": {
-          "url": "http://p.example.test/g.xml",
-          "seenAt": 12
-        },
-        "entryInputs": null,
-        "epgSetAt": [
-          null
-        ]
-      }
-    },
-    {
-      "name": "pendingEpg seenAt negative or junk reads as 0",
-      "input": {
-        "version": 2,
-        "sources": [
-          {
-            "key": "12e22d28",
-            "url": "http://a.example.test/list.m3u",
-            "epgUrl": "",
-            "kind": "http",
-            "label": "a.example.test",
-            "labelCustom": false,
-            "origin": "cli",
-            "addedAt": 10,
-            "lastUsed": 20,
-            "fetchedAt": 30,
-            "channelCount": 9,
-            "groupCount": 2
-          }
-        ],
-        "activeKey": "",
-        "pendingEpg": {
-          "url": "http://p.example.test/g.xml",
-          "seenAt": -7
-        }
-      },
-      "expect": {
-        "pendingEpg": {
-          "url": "http://p.example.test/g.xml",
-          "seenAt": 0
-        },
-        "entryInputs": null,
-        "epgSetAt": [
-          null
-        ]
-      }
-    },
-    {
-      "name": "pendingEpg with a url that is not a string is no pending value (never str() of a list)",
-      "input": {
-        "version": 2,
-        "sources": [
-          {
-            "key": "12e22d28",
-            "url": "http://a.example.test/list.m3u",
-            "epgUrl": "",
-            "kind": "http",
-            "label": "a.example.test",
-            "labelCustom": false,
-            "origin": "cli",
-            "addedAt": 10,
-            "lastUsed": 20,
-            "fetchedAt": 30,
-            "channelCount": 9,
-            "groupCount": 2
-          }
-        ],
-        "activeKey": "",
-        "pendingEpg": {
-          "url": [
-            "http://p.example.test/g.xml"
-          ],
-          "seenAt": 5
-        }
-      },
-      "expect": {
-        "pendingEpg": null,
-        "entryInputs": null,
-        "epgSetAt": [
-          null
-        ]
-      }
-    },
-    {
-      "name": "pendingEpg with an empty url is nothing pending",
-      "input": {
-        "version": 2,
-        "sources": [
-          {
-            "key": "12e22d28",
-            "url": "http://a.example.test/list.m3u",
-            "epgUrl": "",
-            "kind": "http",
-            "label": "a.example.test",
-            "labelCustom": false,
-            "origin": "cli",
-            "addedAt": 10,
-            "lastUsed": 20,
-            "fetchedAt": 30,
-            "channelCount": 9,
-            "groupCount": 2
-          }
-        ],
-        "activeKey": "",
-        "pendingEpg": {
-          "url": "   ",
-          "seenAt": 5
-        }
-      },
-      "expect": {
-        "pendingEpg": null,
-        "entryInputs": null,
-        "epgSetAt": [
-          null
-        ]
-      }
-    },
-    {
-      "name": "pendingEpg with a url that does not validate is nothing pending",
-      "input": {
-        "version": 2,
-        "sources": [
-          {
-            "key": "12e22d28",
-            "url": "http://a.example.test/list.m3u",
-            "epgUrl": "",
-            "kind": "http",
-            "label": "a.example.test",
-            "labelCustom": false,
-            "origin": "cli",
-            "addedAt": 10,
-            "lastUsed": 20,
-            "fetchedAt": 30,
-            "channelCount": 9,
-            "groupCount": 2
-          }
-        ],
-        "activeKey": "",
-        "pendingEpg": {
-          "url": "ftp://u:p@h.example.test/x",
-          "seenAt": 5
-        }
-      },
-      "expect": {
-        "pendingEpg": null,
-        "entryInputs": null,
-        "epgSetAt": [
-          null
-        ]
-      }
-    },
-    {
-      "name": "pendingEpg that is not an object is nothing pending",
-      "input": {
-        "version": 2,
-        "sources": [
-          {
-            "key": "12e22d28",
-            "url": "http://a.example.test/list.m3u",
-            "epgUrl": "",
-            "kind": "http",
-            "label": "a.example.test",
-            "labelCustom": false,
-            "origin": "cli",
-            "addedAt": 10,
-            "lastUsed": 20,
-            "fetchedAt": 30,
-            "channelCount": 9,
-            "groupCount": 2
-          }
-        ],
-        "activeKey": "",
-        "pendingEpg": "http://p.example.test/g.xml"
-      },
-      "expect": {
-        "pendingEpg": null,
-        "entryInputs": null,
-        "epgSetAt": [
-          null
-        ]
-      }
-    },
-    {
-      "name": "epgSetAt kept on a record",
-      "input": {
-        "version": 2,
-        "sources": [
-          {
-            "key": "12e22d28",
-            "url": "http://a.example.test/list.m3u",
-            "epgUrl": "http://a.example.test/xmltv.php?username=u&password=p",
             "kind": "http",
             "label": "a.example.test",
             "labelCustom": false,
@@ -456,285 +364,24 @@
             "epgSetAt": 1760000000000
           }
         ],
-        "activeKey": ""
-      },
-      "expect": {
-        "pendingEpg": null,
-        "entryInputs": null,
-        "epgSetAt": [
-          1760000000000
-        ]
-      }
-    },
-    {
-      "name": "epgSetAt coerced (1e3 -> 1000)",
-      "input": {
-        "version": 2,
-        "sources": [
-          {
-            "key": "12e22d28",
-            "url": "http://a.example.test/list.m3u",
-            "epgUrl": "",
-            "kind": "http",
-            "label": "a.example.test",
-            "labelCustom": false,
-            "origin": "cli",
-            "addedAt": 10,
-            "lastUsed": 20,
-            "fetchedAt": 30,
-            "channelCount": 9,
-            "groupCount": 2,
-            "epgSetAt": "1e3"
-          }
-        ],
-        "activeKey": ""
-      },
-      "expect": {
-        "pendingEpg": null,
-        "entryInputs": null,
-        "epgSetAt": [
-          1000
-        ]
-      }
-    },
-    {
-      "name": "epgSetAt 0, negative or junk is absent, never 0",
-      "input": {
-        "version": 2,
-        "sources": [
-          {
-            "key": "12e22d28",
-            "url": "http://a.example.test/list.m3u",
-            "epgUrl": "",
-            "kind": "http",
-            "label": "a.example.test",
-            "labelCustom": false,
-            "origin": "cli",
-            "addedAt": 10,
-            "lastUsed": 20,
-            "fetchedAt": 30,
-            "channelCount": 9,
-            "groupCount": 2,
-            "epgSetAt": -5
-          }
-        ],
-        "activeKey": ""
-      },
-      "expect": {
-        "pendingEpg": null,
-        "entryInputs": null,
-        "epgSetAt": [
-          null
-        ]
-      }
-    },
-    {
-      "name": "epgSetAt junk text is absent",
-      "input": {
-        "version": 2,
-        "sources": [
-          {
-            "key": "12e22d28",
-            "url": "http://a.example.test/list.m3u",
-            "epgUrl": "",
-            "kind": "http",
-            "label": "a.example.test",
-            "labelCustom": false,
-            "origin": "cli",
-            "addedAt": 10,
-            "lastUsed": 20,
-            "fetchedAt": 30,
-            "channelCount": 9,
-            "groupCount": 2,
-            "epgSetAt": "soon"
-          }
-        ],
-        "activeKey": ""
-      },
-      "expect": {
-        "pendingEpg": null,
-        "entryInputs": null,
-        "epgSetAt": [
-          null
-        ]
-      }
-    },
-    {
-      "name": "entryInputs kept slot by slot, stripped only when true",
-      "input": {
-        "version": 2,
-        "sources": [
-          {
-            "key": "12e22d28",
-            "url": "http://a.example.test/list.m3u",
-            "epgUrl": "",
-            "kind": "http",
-            "label": "a.example.test",
-            "labelCustom": false,
-            "origin": "cli",
-            "addedAt": 10,
-            "lastUsed": 20,
-            "fetchedAt": 30,
-            "channelCount": 9,
-            "groupCount": 2
-          }
-        ],
-        "activeKey": "",
-        "entryInputs": {
-          "playlistUrl": {
-            "digest": "e3c7422c8be3ca15",
-            "at": 7,
-            "stripped": true
-          },
-          "epgUrl": {
-            "digest": "c4355b6998081b40",
-            "at": 8,
-            "stripped": false
-          }
-        }
-      },
-      "expect": {
-        "pendingEpg": null,
-        "entryInputs": {
-          "playlistUrl": {
-            "digest": "e3c7422c8be3ca15",
-            "at": 7,
-            "stripped": true
-          },
-          "epgUrl": {
-            "digest": "c4355b6998081b40",
-            "at": 8
-          }
+        "activeKey": "12e22d28",
+        "pendingEpg": {
+          "url": "http://p.example.test/g.xml",
+          "seenAt": 5
         },
-        "epgSetAt": [
-          null
-        ]
-      }
-    },
-    {
-      "name": "entryInputs drops a slot whose digest is not 16 lowercase hex digits, and an unknown slot",
-      "input": {
-        "version": 2,
-        "sources": [
-          {
-            "key": "12e22d28",
-            "url": "http://a.example.test/list.m3u",
-            "epgUrl": "",
-            "kind": "http",
-            "label": "a.example.test",
-            "labelCustom": false,
-            "origin": "cli",
-            "addedAt": 10,
-            "lastUsed": 20,
-            "fetchedAt": 30,
-            "channelCount": 9,
-            "groupCount": 2
-          }
-        ],
-        "activeKey": "",
         "entryInputs": {
           "playlistUrl": {
-            "digest": "E3C7422C8BE3CA15",
-            "at": 7
-          },
-          "epgUrl": {
-            "digest": "c4355b6998081b40",
-            "at": "8.9"
-          },
-          "mpvArgs": {
-            "digest": "0d6e5f827f732e63",
+            "digest": "e3c7422c8be3ca15",
             "at": 1
           }
         }
       },
       "expect": {
-        "pendingEpg": null,
-        "entryInputs": {
-          "epgUrl": {
-            "digest": "c4355b6998081b40",
-            "at": 8
-          }
-        },
-        "epgSetAt": [
-          null
-        ]
-      }
-    },
-    {
-      "name": "entryInputs with no valid slot is absent",
-      "input": {
-        "version": 2,
-        "sources": [
-          {
-            "key": "12e22d28",
-            "url": "http://a.example.test/list.m3u",
-            "epgUrl": "",
-            "kind": "http",
-            "label": "a.example.test",
-            "labelCustom": false,
-            "origin": "cli",
-            "addedAt": 10,
-            "lastUsed": 20,
-            "fetchedAt": 30,
-            "channelCount": 9,
-            "groupCount": 2
-          }
-        ],
-        "activeKey": "",
-        "entryInputs": {
-          "playlistUrl": {
-            "digest": "http://a.example.test/list.m3u",
-            "at": 7
-          }
-        }
-      },
-      "expect": {
-        "pendingEpg": null,
-        "entryInputs": null,
-        "epgSetAt": [
-          null
-        ]
-      }
-    },
-    {
-      "name": "entryInputs stripped must be the boolean true",
-      "input": {
-        "version": 2,
-        "sources": [
-          {
-            "key": "12e22d28",
-            "url": "http://a.example.test/list.m3u",
-            "epgUrl": "",
-            "kind": "http",
-            "label": "a.example.test",
-            "labelCustom": false,
-            "origin": "cli",
-            "addedAt": 10,
-            "lastUsed": 20,
-            "fetchedAt": 30,
-            "channelCount": 9,
-            "groupCount": 2
-          }
-        ],
-        "activeKey": "",
-        "entryInputs": {
-          "epgUrl": {
-            "digest": "c4355b6998081b40",
-            "at": 8,
-            "stripped": "yes"
-          }
-        }
-      },
-      "expect": {
-        "pendingEpg": null,
-        "entryInputs": {
-          "epgUrl": {
-            "digest": "c4355b6998081b40",
-            "at": 8
-          }
-        },
-        "epgSetAt": [
-          null
+        "entryMigrated": null,
+        "dropped": [
+          "entryInputs",
+          "epgSetAt",
+          "pendingEpg"
         ]
       }
     }

@@ -66,17 +66,15 @@ export {
   favoriteOrigin, favoriteRemovalNotice, hideNotice, scopeEntryAccessibleName,
   savedSearchArrivals, savedSearchDepartures, savedSearchFooter,
   withSavedSearch, withoutSavedSearch, savedSearchRecord, emptyState,
-  pendingEpgRecord, pendingEpgOf, withPendingEpg, entryInputDigest,
-  entryInputRecord, entryInputsRecord, entryInputsOf, withEntryInputs,
-  entryInputSeed, entryInputsAfterMove, entryInputsAfterWrite, playedRecord,
-  cloneState, withCacheLayout, parseState, pushPlayedRecord, stateOnLoad,
-  isFavorite, toggleFavorite, pushRecent, recordPlayed, clearSession,
-  stateSession, deadSessionVerdict, PLAYER_OUTCOMES, sessionAfterOutcome,
-  withFavorites, hiddenGroupList, hiddenGroupSet, isGroupHidden,
-  toggleHiddenGroup, browsableChannels, hideAction, hideVerb, removeRecent,
-  trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed,
-  prunedFailed, knownIdSet, failedIndex, failedDocument, failedWhen,
-  withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
+  entryMigratedOf, withEntryMigrated, playedRecord, cloneState,
+  withCacheLayout, parseState, pushPlayedRecord, stateOnLoad, isFavorite,
+  toggleFavorite, pushRecent, recordPlayed, clearSession, stateSession,
+  deadSessionVerdict, PLAYER_OUTCOMES, sessionAfterOutcome, withFavorites,
+  hiddenGroupList, hiddenGroupSet, isGroupHidden, toggleHiddenGroup,
+  browsableChannels, hideAction, hideVerb, removeRecent, trimRecents,
+  MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed, prunedFailed,
+  knownIdSet, failedIndex, failedDocument, failedWhen, withFailed,
+  failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
   reloadDisposition
 } from "./model/state.mjs"
 export {
@@ -86,9 +84,10 @@ export {
   findBarEntry, settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
   entryInputText, entryInputForm, sameEntryInput, ownWriteInForce,
   settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
+  MAX_SEEN_INPUTS, entryInputSeen, entryInputsSeenAfter, entryInputNotice,
   ownedEntryPatch, barEntryWritable, entryFlushDisposition, owedMirrorAction,
-  ownedWriteMode, retiredInputsToKeep, patchInputsToKeep, hostEntryForm,
-  entryWriteRecord, entryWriteNeeded, sameOwnWrite
+  ownedWriteMode, retiredInputsToKeep, hostEntryForm, entryWriteRecord,
+  entryWriteNeeded, sameOwnWrite
 } from "./model/settings.mjs"
 export {
   optInSetting, logoSurvey, splitLogoUrl, logoConsentLines, logoFile,
@@ -187,12 +186,11 @@ export {
   CLIPBOARD_MAX_BYTES
 } from "./model/sources.mjs"
 export {
-  hasControlChars, normalizeSourceRecord, epgSetAtOf, addSource, updateSource,
+  hasControlChars, normalizeSourceRecord, addSource, updateSource,
   removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
   withSourceStats, activeKeyText, activeKeyOf, activeSourceRecord,
   withActiveKey, invalidInputBlocks, reconcileAction, adoptActiveSource,
-  adoptPendingEpg, epgByTime, applyPendingEpg, activeEpgUrlOf,
-  pointerWritePlan, epgSnapshotAfter, reconcileSources, sourceForEdit,
+  activeEpgUrlOf, pointerWritePlan, reconcileSources, sourceForEdit,
   sourcesSummary, entryWith, cacheStale, formFields, isFormField, formLimit,
   formCapacity, copyForm, formState, formFocusOrder, formHasText, openForm,
   openFirstRun, openAddForm, openEditForm, openXtreamForm, closeForm,

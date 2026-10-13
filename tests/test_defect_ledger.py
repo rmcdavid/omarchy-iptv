@@ -326,6 +326,21 @@ class LedgerCase(unittest.TestCase):
                    'The pass filed D-AAA-1 and D-AAA-2. See `Model.copySourceRecord`.\n')
         self.assertRed(r'Model\.copySourceRecord is cited in docs/QA-RESULTS\.md, but')
 
+    def test_a_withdrawn_symbol_waiver_holds_in_its_listed_files_only_and_is_counted(self):
+        """R21d (D-SINK-19 round 11): a model export the ruling DELETED is waived
+        in the documents that cite it today, and nowhere else, while the
+        documents lane rewrites them; the census says how many are in use. A
+        citation in a document the waiver does not list is red as before.
+        Seen red with the waiver branch removed (the first assertion)."""
+        self.good_ledger()
+        self.write_model(('one', 'function realThing() { return 1 }\n'))
+        self.write('docs/ARCHITECTURE-SOURCES.md', 'The held value went through `Model.pendingEpgOf`.\n')
+        out = self.assertGreen()
+        self.assertRegex(out, r'withdrawn-symbol waivers \(R21d\): \d+ listed, 1 in use')
+        self.write('docs/QA-RESULTS.md',
+                   'The pass filed D-AAA-1 and D-AAA-2. See `Model.pendingEpgOf`.\n')
+        self.assertRed(r'Model\.pendingEpgOf is cited in docs/ARCHITECTURE-SOURCES\.md, docs/QA-RESULTS\.md and resolves in no source file')
+
     def test_the_module_file_name_is_not_a_symbol_citation(self):
         """`Model.mjs` is a FILE, as `Model.js` is; neither cites a symbol.
 

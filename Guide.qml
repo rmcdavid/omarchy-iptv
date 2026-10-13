@@ -224,14 +224,12 @@ Item {
     serviceTitle: "Service not loaded",
     serviceProse: "Run omarchy restart shell",
     unconfiguredTitle: "No playlist configured",
-    unconfiguredProse: "Set your M3U URL or path, then press r to load it:",
-    // D-SINK-19: this is what a click COPIES, so it stays a bare command. It
-    // is an input: the URL is adopted into the plugin's private state and
-    // removed from shell.json by the plugin's next write (see the caption on
-    // the first-run form, `firstRunTerminal`).
-    unconfiguredCommand: "omarchy bar set " + root.pluginId + " playlistUrl <url>",
-    unconfiguredEpg: "Optional EPG:  omarchy bar set " + root.pluginId + " epgUrl <url>  (converted; not kept in shell.json)",
-    unconfiguredWhere: "Both are inputs: the URL moves to ~/.local/state/omarchy-iptv/state.json; other settings live in ~/.config/omarchy/shell.json (entry " + root.pluginId + ")",
+    // D-SINK-19 round 11 (R21): the guide is the one place a source is added.
+    // This used to offer `omarchy bar set ... playlistUrl <url>` as a command
+    // to copy; that route is gone (a URL set there is refused and removed),
+    // so the surface names the Sources screen and nothing to type elsewhere.
+    unconfiguredProse: "Add your M3U URL or path in Sources, with its EPG URL if you have one",
+    unconfiguredWhere: "Sources and their URLs are kept in ~/.local/state/omarchy-iptv/state.json; other settings live in ~/.config/omarchy/shell.json (entry " + root.pluginId + ")",
     loadingTitle: "Loading playlist" + Model.ELLIPSIS,
     loadingFrom: "Fetching from ",
     loadingProse: "Fetching playlist",
@@ -260,7 +258,6 @@ Item {
     transientFavAdded: "Added to Favorites",
     transientFavRemoved: "Removed from Favorites",
     transientRecentRemoved: "Removed from Recent",
-    transientCopied: "Copied",
     accessibleCard: "IPTV guide",
     accessibleSearch: "Search channels",
     accessibleGroups: "Groups",
@@ -272,10 +269,6 @@ Item {
     editSourceTitle: "Edit source",
     xtreamTitle: "Add Xtream login",
     firstRunProse: "Paste or type your M3U URL or path, then press Enter",
-    // D-SINK-19: the command is an INPUT. The URL is moved into the plugin's
-    // own private state and taken back out of shell.json; the caption says so
-    // rather than letting the user look for it there afterwards.
-    firstRunTerminal: "Or from a terminal:  omarchy bar set " + root.pluginId + " playlistUrl <url>  (converted; not kept in shell.json)",
     fieldLabel: "Label",
     fieldPlaylist: "Playlist",
     fieldEpg: "EPG",
@@ -1433,11 +1426,6 @@ Item {
     }
     root.service.refresh()
     root.showTransient(root.copy.transientRefreshing)
-  }
-
-  function copyCommand(text) {
-    Quickshell.execDetached(["wl-copy", String(text)])
-    root.showTransient(root.copy.transientCopied)
   }
 
   // ------------------------------------------------------------ picture in picture (M2-05)
@@ -4348,7 +4336,6 @@ Item {
               }
               return ""
             }
-            readonly property string command: root.copy.unconfiguredCommand
 
             Text {
               width: parent.width
@@ -4380,48 +4367,6 @@ Item {
               visible: text !== ""
               textFormat: Text.PlainText
               text: emptyState.prose
-              color: root.foreground
-              opacity: 0.7
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              horizontalAlignment: Text.AlignHCenter
-              wrapMode: Text.WordWrap
-            }
-
-            // Command box (UX 4.4); click copies with wl-copy.
-            Rectangle {
-              visible: root.emptyKind === "unconfigured"
-              anchors.horizontalCenter: parent.horizontalCenter
-              width: Math.min(parent.width, commandText.implicitWidth + Style.space(16))
-              height: commandText.implicitHeight + Style.space(16)
-              radius: root.cornerRadius
-              color: Style.normalFillFor(root.foreground, root.accent)
-
-              Text {
-                id: commandText
-                anchors.centerIn: parent
-                width: parent.width - Style.space(16)
-                textFormat: Text.PlainText
-                text: emptyState.command
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                elide: Text.ElideMiddle
-                horizontalAlignment: Text.AlignHCenter
-              }
-
-              MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.copyCommand(emptyState.command)
-              }
-            }
-
-            Text {
-              visible: root.emptyKind === "unconfigured"
-              width: parent.width
-              textFormat: Text.PlainText
-              text: root.copy.unconfiguredEpg
               color: root.foreground
               opacity: 0.7
               font.family: root.fontFamily
@@ -5054,29 +4999,6 @@ Item {
               }
             }
 
-            // First run keeps the terminal command (S5 parity); click copies.
-            Text {
-              id: terminalCaption
-              visible: root.firstRunHead
-              width: parent.width
-              textFormat: Text.PlainText
-              text: root.copy.firstRunTerminal
-              color: root.foreground
-              // D-RUNG-14: card rung at the REGULAR floor -- these ship
-              // unbolded on purpose, and regular 10 px does not render at
-              // model accuracy the way bold does.
-              opacity: root.captionAlphaProse
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              horizontalAlignment: Text.AlignHCenter
-              elide: Text.ElideMiddle
-
-              MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.copyCommand(root.copy.unconfiguredCommand)
-              }
-            }
           }
         }
 

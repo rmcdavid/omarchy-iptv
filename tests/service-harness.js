@@ -51,7 +51,9 @@ function makeIds(h) {
     configShieldDebounce: timer("configShieldDebounce"),
     channelsFile: view("channelsFile"),
     playlistStatusFile: view("playlistStatusFile"),
-    Quickshell: { env() { return "" } }
+    // execDetached is the notification sink (Service.notify): recorded as the
+    // argv the shell would run, never run (R21b's report is observed here).
+    Quickshell: { env() { return "" }, execDetached(argv) { h.detached.push(argv.slice()) } }
   }
 }
 
@@ -189,7 +191,10 @@ class Host {
     if (this.onPublish) this.onPublish()
   }
   // shell.qml's updateEntryInline: `false` when the stored entry already is
-  // exactly this (its !dirty branch), else the write and a publish.
+  // exactly this (its !dirty branch), else the write and a publish. A test
+  // that needs the host to have no writer at all (the harness shell.qml's
+  // persistFails) shadows it with `host.updateEntryInline = undefined` and
+  // deletes the shadow to restore it.
   updateEntryInline(id, settings) {
     const next = { id }
     for (const k in settings) if (k !== "id") next[k] = settings[k]
@@ -213,16 +218,24 @@ class Host {
 
 // The state FileView (atomicWrites): setText queues `saved` or `saveFailed`;
 // the view's text is what the last delivered event wrote.
+// `coalesce`: the measured behaviour of a burst (Model.stateSaveLanded): a
+// write queued behind one still in flight is REPLACED by the next, and the
+// replaced write raises nothing -- so at most two events are outstanding,
+// the started one and the latest.
 class StateFile {
-  constructor(text) { this.disk = text; this.view = text; this.events = []; this.writeFails = false }
+  constructor(text) { this.disk = text; this.view = text; this.events = []; this.writeFails = false; this.coalesce = false }
   text() { return this.view }
-  setText(text) { this.events.push({ kind: this.writeFails ? "saveFailed" : "saved", text }) }
+  setText(text) {
+    const ev = { kind: this.writeFails ? "saveFailed" : "saved", text }
+    if (this.coalesce && this.events.length >= 2) this.events[this.events.length - 1] = ev
+    else this.events.push(ev)
+  }
   reload() {}
 }
 
 function bootService(serviceText, Model, o) {
   const opts = o || {}
-  const h = { clock: opts.clock || 1760000000000, later: [], cacheJobs: [], signals: [], warnings: [], turns: 0 }
+  const h = { clock: opts.clock || 1760000000000, later: [], cacheJobs: [], signals: [], warnings: [], detached: [], turns: 0 }
   h.host = new Host(opts.entry, opts.host || "lag")
   h.stateFile = new StateFile(opts.stateText || "")
   const ids = makeIds(h)

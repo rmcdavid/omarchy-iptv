@@ -9,7 +9,7 @@ import {
   channelOrderOf
 } from "./channels.mjs"
 import {
-  emptyState, pendingEpgOf, entryInputDigest, entryInputsOf
+  emptyState, entryMigratedOf
 } from "./state.mjs"
 import {
   optInSetting
@@ -28,8 +28,8 @@ import {
   findSourceByUrl
 } from "./sources.mjs"
 import {
-  activeKeyText, activeKeyOf, activeSourceRecord, adoptActiveSource,
-  pointerWritePlan, epgSnapshotAfter, reconcileSources, entryWith
+  activeKeyText, activeKeyOf, reconcileAction, adoptActiveSource,
+  pointerWritePlan, entryWith
 } from "./source-records.mjs"
 
 // ------------------------------------------------------------ caches
@@ -304,11 +304,12 @@ function settingsFrom(entry) {
   // so a clamp can never be written twice and drift (R2, engineering rule 12 (dev branch)).
   var pip = pipOptions(entry)
   return {
-    // D-SINK-19. These two are INPUT ONLY now: `omarchy bar set ... playlistUrl
-    // <url>` still adopts (SR8), and the plugin takes the URL into its own
-    // 0600 state and then writes the entry back WITHOUT it. Nothing derives
-    // the active source from them any more; `sourceKey` below is the mirror
-    // of what does.
+    // D-SINK-19. These two are read for ONE purpose since round 11 (R21): the
+    // migration of an install written before the change, which named its
+    // active source by the URL here. Once the migration marker has landed in
+    // state.json a value found here is refused, reported once and stripped
+    // (Model.reconcileAction); nothing derives the active source from them,
+    // and `sourceKey` below is the mirror of what does.
     playlistUrl: entryInputText(settingOf(entry, "playlistUrl", "")),
     epgUrl: entryInputText(settingOf(entry, "epgUrl", "")),
     // The active source's key, mirrored into the host entry so an install
@@ -473,10 +474,10 @@ function ownWriteOf(hostSettings, values) {
 // relearned.
 var OWNED_SETTINGS = ["sourceKey", "showLogos"]
 
-// Keys this plugin USED to own and now removes from the entry on every write
-// it makes (D-SINK-19). They are still READ (settingsFrom above, SR8's input
-// path), so a user who sets one gets it adopted; what must not happen is the
-// plugin writing one back, or leaving one behind that it has already adopted.
+// Keys this plugin USED to own (D-SINK-19). They are read by the migration
+// alone (R21a: until the migration marker has landed in state.json) and the
+// plugin never writes one back: from the moment the marker has landed every
+// owned write removes them (R21b), heal and patch alike.
 //
 // Removal lives in `entryWith`, which is the single funnel both
 // `updateEntryInline` call sites go through, rather than in either caller: a
@@ -484,26 +485,89 @@ var OWNED_SETTINGS = ["sourceKey", "showLogos"]
 // both about. The consequence is deliberate and is what makes the migration
 // cheap -- an owned write heals an old entry.
 //
-// R16 (D-SINK-19 round 5) narrows WHICH owned write: healing is the KEY
-// MIRROR's job and happens only once the file agrees with memory (writeActive
-// under R13). The logo toggle heals too while nothing of ours is outstanding,
-// and before the first state load or while a state write is parked, in
-// flight or failed it writes `showLogos` ALONE and leaves these two keys and
-// `sourceKey` as the host publishes them (`ownedWriteMode`, four inputs since
-// round 6; `entryWith` with `keepRetired`; the lagging host's one-write
-// residual is D-SINK-20). The round-4
-// review measured the old rule losing the record: after a failed state write
-// the URL on the entry is the only copy, and "any owned write heals" meant one
-// `g` in Sources stripped it and mirrored a key the file did not have.
-//
-// R17a (D-SINK-19 round 7) narrows WHICH key a heal removes: only a CONSUMED
-// one -- a record holds it, or the service already adopted or refused that
-// value (retiredInputsToKeep, handed to entryWith by the funnel on every
-// owned write). An EPG input R12 left on the entry while no source was
-// active is the case it existed for; "removes on every write" stripped it.
-// Since R19b that input is held in the state (pendingEpg), which counts as
-// held, so the keep decision rarely has one left to keep.
+// R16 (round 5) still decides WHICH owned write may name `sourceKey`: the key
+// mirror heals once the file agrees with memory (writeActive under R13), and
+// the logo toggle writes `showLogos` alone before the first state load or
+// while a state write is parked, in flight or failed (`ownedWriteMode`).
+// What a write keeps of THESE keys is no longer the caller's question, nor a
+// landed-state comparison (R17a's held/consumed rule and R20c's patch rule
+// are withdrawn): it is retiredInputsToKeep, over the marker.
 var RETIRED_SETTINGS = ["playlistUrl", "epgUrl"]
+
+// D-SINK-19 round 11, R21b. WHAT THIS SESSION HAS ALREADY HANDLED.
+//
+// Every value the service has migrated or refused off the bar entry, by
+// setting, as its one form (entryInputForm). It is an IN-MEMORY snapshot and
+// nothing else -- the ruling says so, and the persisted snapshot of round 10
+// (R20b's entryInputs) is what it replaces: a value equal to one this session
+// already handled is neither adopted nor reported again, so the lagging
+// host's stale publish of a value the plugin has just stripped (rule 9)
+// re-adopts nothing and re-reports nothing. A restart starts it empty, which
+// is right: after the marker has landed the next start refuses whatever the
+// entry carries, and reports it once.
+//
+// Bounded, because it is a list a user can grow by typing: past
+// MAX_SEEN_INPUTS values of one setting the oldest is dropped, and a value
+// that old reports once more if it comes back -- a report too many, never an
+// adoption (after the marker nothing is adopted at all).
+var MAX_SEEN_INPUTS = 32
+
+function entryInputSeen(seen, name, value) {
+  var f = entryInputForm(name, value)
+  if (f.text === "") return false
+  var list = seen && typeof seen === "object" && Object.prototype.toString.call(seen[name]) === "[object Array]" ? seen[name] : []
+  return list.indexOf(f.form) !== -1
+}
+
+// `values` maps setting names to what the entry carries now; every one that
+// is an input (a non-empty form) and not seen yet is added. A NEW object
+// whenever something is added, the SAME object otherwise, so a QML `property
+// var` holding it raises a change signal only when it changed.
+function entryInputsSeenAfter(seen, values) {
+  var have = seen && typeof seen === "object" ? seen : {}
+  var v = values || {}
+  var out = null
+  for (var i = 0; i < RETIRED_SETTINGS.length; i++) {
+    var name = RETIRED_SETTINGS[i]
+    var f = entryInputForm(name, v[name])
+    if (f.text === "" || entryInputSeen(have, name, v[name])) continue
+    if (out === null) {
+      out = {}
+      for (var k in have) if (Object.prototype.hasOwnProperty.call(have, k)) out[k] = asList(have[k]).slice()
+    }
+    var list = out[name] || []
+    list.push(f.form)
+    while (list.length > MAX_SEEN_INPUTS) list.shift()
+    out[name] = list
+  }
+  return out === null ? have : out
+}
+
+// D-SINK-19 round 11, R21b / R21c. THE ONE REPORT of a value taken off the
+// bar entry without being adopted. Names the setting and the Sources screen,
+// and NEVER the value: the value can be a credentialed URL (rule 5), and the
+// report goes to a desktop notification and the console. `name` is a setting
+// name the caller holds as a constant; anything else reads as "A URL
+// setting", so no caller can route a value into the text by mistake.
+//   retired    the migration has landed: the entry is not read any more
+//   no-source  a guide URL at the migration with no source to guide (R21c)
+//   invalid    a migration value that does not validate
+// -> { title, body }.
+function entryInputNotice(name, reason) {
+  var setting = RETIRED_SETTINGS.indexOf(str(name)) !== -1 ? str(name) : "A URL setting"
+  var where = "the guide's Sources screen"
+  var r = str(reason)
+  if (r === "no-source") {
+    return { title: "Bar setting removed",
+             body: setting + " was removed from the bar settings: no source was set up for it to guide. Add the source with its EPG URL in " + where + "." }
+  }
+  if (r === "invalid") {
+    return { title: "Bar setting removed",
+             body: setting + " in the bar settings was not a usable URL and was removed. Add or edit sources in " + where + "." }
+  }
+  return { title: "Bar setting ignored",
+           body: setting + " is no longer read from the bar settings and was removed. Add or switch sources in " + where + "." }
+}
 
 // The patch for a settings write: every owned key, at the value it should
 // hold AFTER this write. `effective` is what the plugin currently acts on
@@ -614,20 +678,20 @@ function owedMirrorAction(ctx) {
 // every D-SINK-19 tree). Rule 15's shape: the second writer.
 //
 //   heal   nothing of ours is outstanding: the file agrees with memory, so
-//          the write may name every owned key at its effective value and
-//          drop the retired ones, as the mirror does
+//          the write may name every owned key at its effective value, as
+//          the mirror does
 //   patch  the state has not been loaded yet, or a state write is parked,
 //          in flight or failed: the write carries `showLogos` alone, with
-//          `sourceKey`, `playlistUrl` and `epgUrl` as the host PUBLISHES
-//          them (`entryWith` with `keepRetired`; the patch's sourceKey is
+//          `sourceKey` as the host PUBLISHES it (the patch's sourceKey is
 //          the host's own value through `ownedEntryPatch` over `settings`,
-//          never memory's). On the lagging host the published entry is one
-//          write behind, so this carried back a URL our own heal had just
-//          stripped (D-SINK-20) until R20c (round 10) narrowed what it keeps
-//          to what the LANDED state does not hold (patchInputsToKeep below).
-//          Healing is the key mirror's
-//          job, through writeActive under R13, once the file agrees with
-//          memory again
+//          never memory's). Healing is the key mirror's job, through
+//          writeActive under R13, once the file agrees with memory again
+// Neither answer decides what happens to `playlistUrl` and `epgUrl` any more:
+// that is retiredInputsToKeep, over the migration marker (R21), the same for
+// both. Before round 11 the patch carried them as the host published them,
+// and on the lagging host that carried back a URL the plugin's own heal had
+// just stripped (D-SINK-20); R20c's landed-state narrowing of it is withdrawn
+// with the route it served.
 //
 // R16 as amended (D-SINK-19 round 6, the round-5 data-loss lens's P2): a
 // FOURTH input, `stateLoaded`. Before the first state load memory is
@@ -650,150 +714,32 @@ function ownedWriteMode(flags) {
   return { mode: "heal", reason: "settled" }
 }
 
-// D-SINK-19 round 7, R17a. WHICH RETIRED INPUTS AN OWNED WRITE MUST LEAVE ON
-// THE ENTRY. R12 ("an input is never stripped unadopted") moved from the
-// callers to the sink, the shape R13 and R16 each had to learn twice: every
-// owned write goes through Service.writeOwnedEntry, which hands this answer
-// to entryWith, so no writer -- the key mirror, the logo toggle, or one not
-// written yet -- can take off the entry an input nothing has consumed.
+// D-SINK-19 round 11, R21a / R21b. WHICH RETIRED KEYS AN OWNED WRITE LEAVES ON
+// THE ENTRY: every one it carries while the migration marker has NOT landed,
+// and none once it has.
 //
-// The round-6 data-loss lens found the state the callers could not name: an
-// EPG input R12 leaves on the entry on purpose (no source is active, so
-// nothing can consume it) while the state is loaded and nothing is
-// outstanding. Model.ownedWriteMode answers `heal` there, entryWith dropped
-// every retired key, and the value existed nowhere afterwards -- through the
-// logo toggle on the lagging host (observed live), through a switch or an
-// in-app add on the echoing host. Five rounds of matrices missed it because
-// their oracle checked playlist inputs only.
+// Before the marker has landed, the URL on the entry may be the only copy of
+// what the migration's state write carries (a write parked, in flight, or
+// failed: the round-4 P1 and D-SRC-15's shape), so no owned write may take
+// it off; the key mirror that strips it waits for that write to land (R13),
+// and by then the marker has landed with it. After that nothing on the entry
+// is an input, so every owned write strips them -- heal or patch, valid or
+// refused, held by a record or not -- which also ends D-SINK-20's re-carry:
+// the patch-only toggle on the lagging host no longer writes back a value the
+// plugin's own heal stripped, because it keeps nothing.
 //
-// A retired value is STRIPPABLE only when it is consumed, and KEPT otherwise:
-//   playlistUrl  consumed when a record holds it -- compared the way adoption
-//                compares (sanitized, validated as a CLI value, then the
-//                normalized URL against every record: reconcileSources) --
-//                or when it is the value this service already consumed
-//   epgUrl       consumed when the ACTIVE record holds it (validated as an
-//                EPG URL, against that record's epgUrl; with no active record
-//                nothing holds it) or when it is the value already consumed
-//   anything else in RETIRED_SETTINGS that this function does not know: kept
-//                whenever it is non-empty, so a key retired later is safe
-//                until somebody says what consumes it
-//
-// "Already consumed" is `consumed.playlistUrl` / `consumed.epgUrl`: the
-// service's snapshots (reconciledPlaylistUrl, reconciledEpgUrl), which move
-// only for a value reconcile adopted or refused (Model.epgSnapshotAfter for
-// the EPG). The lead's ruling names "a record holds it" alone; the snapshot
-// clause is this lane's, and it is there because a record that USED to hold
-// a value is not a reason to put the value back. On the lagging host the
-// published entry still carries a URL our own heal stripped (rule 9), and a
-// write made after its record went away -- a remove, an edit that replaced
-// the URL, a switch away from the record that took a CLI EPG -- would carry
-// it back onto the stored entry under the bare rule: the next start then
-// re-adopts a source the user removed, or lands the old source's EPG on the
-// new one (D-SRC-10's shape). Measured by the service-order driver; the
-// cases are named after this ruling in the node suite. A REFUSED value is
-// consumed by the same clause: it was reported (D16) and is written out as
-// before (rule 5: a value that failed validation can still carry a
-// credential).
-//
-// -> an array of the retired key names to keep, a NEW array on every call.
-function retiredInputsToKeep(entry, state, consumed) {
-  var e = entry && typeof entry === "object" ? entry : {}
-  var st = state || emptyState()
-  var c = consumed || {}
-  var keep = []
-  for (var i = 0; i < RETIRED_SETTINGS.length; i++) {
-    var name = RETIRED_SETTINGS[i]
-    // R18a (round 8): the ENTRY value through the one normaliser before any
-    // comparison. Round 7 compared it raw against a snapshot settingsFrom had
-    // trimmed, so a value with surrounding whitespace -- which `omarchy bar
-    // set` stores as typed -- never matched its own snapshot: a refused
-    // credential stayed in shell.json, a removed source was re-adopted at
-    // the next start, and on the echoing host a pending EPG beside it looped.
-    // A key this function does not know is compared the same way (as a
-    // playlist-kind value): it is kept unless its form is empty or consumed.
-    var f = entryInputForm(name, e[name])
-    if (f.text === "" || f.form === entryInputForm(name, c[name]).form) continue
-    var held = false
-    if (name === "playlistUrl") {
-      held = f.ok && findSourceByUrl(st.sources, f.url) !== null
-    } else if (name === "epgUrl") {
-      // R19b (round 9): a guide URL held in the state for want of an active
-      // source is HELD as surely as one on the active record.
-      var active = activeSourceRecord(st)
-      var pending = pendingEpgOf(st)
-      held = f.ok && ((active !== null && f.url === str(active.epgUrl)) || (pending !== null && f.url === pending.url))
-    }
-    if (!held) keep.push(name)
-  }
-  return keep
-}
-
-// D-SINK-19 round 10, R20c (D-SINK-20). WHAT THE PATCH-ONLY WRITE MAY CARRY
-// BACK.
-//
-// R16's patch-only write (Service.setShowLogos while the state is unloaded or
-// a state write is parked, in flight or failed) carried EVERY retired key the
-// host PUBLISHES, because the URL there may be the only copy of an input
-// whose state write did not land (the round-4 P1). On the host that publishes
-// one write behind (rule 9) the publish still carries a URL our own last heal
-// stripped, so the toggle wrote it back onto the stored entry (D-SINK-20):
-// a value a record already held, and -- the round-9 lens's re-grade -- a
-// REFUSED credential that no record holds, which then stayed in shell.json
-// for the session, because no owned write followed once the failure cleared.
-//
-// The patch-only write now keeps a retired key ONLY when it is a valid input
-// the LAST LANDED state does not hold. "Landed" is the file as this service
-// last knew it to be on disk (`landed`: the state the last landed save
-// serialised, or the file as it was loaded), never memory: memory is what the
-// failed write was carrying, and a value memory holds and the disk does not
-// is exactly the only copy the round-4 P1 lost. The landed state holds a
-// value when
-//   playlistUrl  a record has that URL (adoption's own comparison)
-//   epgUrl       the ACTIVE record has it, or it is the pending guide URL
-//   either       its consumed slot carries the value's digest (R20b): the
-//                service consumed it and that consumption is on disk, so
-//                whatever it became -- a record, a pending value, a refusal,
-//                or a value a later input superseded -- is durable already
-// A REFUSED value is stripped once it has been reported, which is when the
-// service's own snapshot (`consumed`, reconcile's) holds it: it was never a
-// configuration, and rule 5 treats it as a secret. A refused value the
-// service has not seen yet -- before the first state load nothing has been
-// reconciled -- is kept, so the report is not lost with it.
-//
-// Why this is not the narrowing D-SINK-20's record calls WRONG. That one --
-// "keep the retired keys only while no own-write override is in force" --
-// decided from the HOST's state, which says nothing about whether the value
-// is stored anywhere else, so it stripped the only copy of an input whose
-// state write had failed. This decides from the DISK's: a value is stripped
-// only when the plugin's own file, as last confirmed written, already holds
-// it. The round-4 sequences keep their URL (the node suite drives them).
-//
-// No landed state at all (before the first load, `landed` null): nothing is
-// proven held, and every valid value is kept, which is R16's answer.
+// `landed` is Model.entryMigratedOf over the state as last confirmed on disk
+// (Service.landedState), never memory: memory carries the marker from the
+// moment the migration runs, and a write that fails leaves the disk without
+// it. A caller that does not know answers false and keeps them, which is the
+// write that cannot lose a record.
 // -> a NEW array of the retired key names to keep.
-function patchInputsToKeep(entry, landed, consumed) {
+function retiredInputsToKeep(entry, landed) {
   var e = entry && typeof entry === "object" ? entry : {}
-  var c = consumed || {}
-  var disk = landed && typeof landed === "object" ? landed : null
   var keep = []
+  if (landed === true) return keep
   for (var i = 0; i < RETIRED_SETTINGS.length; i++) {
-    var name = RETIRED_SETTINGS[i]
-    var f = entryInputForm(name, e[name])
-    if (f.text === "") continue
-    if (!f.ok) {
-      if (f.form !== entryInputForm(name, c[name]).form) keep.push(name)
-      continue
-    }
-    if (disk === null) { keep.push(name); continue }
-    var slot = entryInputsOf(disk)[name]
-    var held = !!slot && slot.digest === entryInputDigest(name, e[name])
-    if (!held && name === "playlistUrl") held = findSourceByUrl(disk.sources, f.url) !== null
-    if (!held && name === "epgUrl") {
-      var active = activeSourceRecord(disk)
-      var pending = pendingEpgOf(disk)
-      held = (active !== null && f.url === str(active.epgUrl)) || (pending !== null && f.url === pending.url)
-    }
-    if (!held) keep.push(name)
+    if (Object.prototype.hasOwnProperty.call(e, RETIRED_SETTINGS[i])) keep.push(RETIRED_SETTINGS[i])
   }
   return keep
 }
@@ -893,7 +839,8 @@ export {
   footerWarning, findBarEntry, settingOf, boolSetting, clampInt, clampSetting,
   settingsFrom, entryInputText, entryInputForm, sameEntryInput,
   ownWriteInForce, settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS,
-  RETIRED_SETTINGS, ownedEntryPatch, barEntryWritable, entryFlushDisposition,
-  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, patchInputsToKeep,
-  hostEntryForm, entryWriteRecord, entryWriteNeeded, sameOwnWrite
+  RETIRED_SETTINGS, MAX_SEEN_INPUTS, entryInputSeen, entryInputsSeenAfter,
+  entryInputNotice, ownedEntryPatch, barEntryWritable, entryFlushDisposition,
+  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, hostEntryForm,
+  entryWriteRecord, entryWriteNeeded, sameOwnWrite
 }

@@ -634,8 +634,9 @@ class SettingOwnedWarningTest(unittest.TestCase):
     "" immediately afterwards), because the settings were the authority for
     the active source and reconcile rewrote the record from them.
 
-    D-SINK-19 overturned that: the record is the only store and the bar
-    entry's URL settings are inputs the shell converts. The warning stays, for
+    D-SINK-19 overturned that: the record is the only store, and since round
+    11 (R21) the bar entry's URL settings are read once, by the migration, and
+    refused after it. The warning stays, for
     what is still true -- the shell reads the file at its next reload unless
     it has a write of its own in flight (D-SRC-15, R9), and `--url` re-keys
     the record -- and these tests pin the shape (both channels, the setting

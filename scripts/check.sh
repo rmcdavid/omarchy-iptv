@@ -169,7 +169,14 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # every R19 pin together -- plus round 10's R20a key check and shared-fixture
 # cases, and the R20b/c/d cases that run Service.qml's own functions
 # (tests/service-harness.js).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2319}
+# 2319 -> 2261 on 2026-10-13, D-SINK-19 round 11 (R21d / R21e), and it is a
+# DELETION the ruling ordered, not a floor lowered to fit: the service-order
+# driver that mirrored Service.qml and every check of the withdrawn R12, R17b,
+# R18c/d, R19b/c and R20b/c machinery went (180 check names gone or renamed),
+# and R21's model pins and the shipping-function harness cases came in (121,
+# the data-loss matrix at length 2 among them; IPTV_MATRIX_LEN deepens it
+# off the gate).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2261}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -184,6 +191,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2319}
 # 1126 -> 1136 on 2026-10-13, F-HARNESS-20: tests/test_harness_home.py, run.sh's
 # harness_env and seeding asked where the SHIPPED helper, Python and mpv land,
 # against a decoy home the shield must not touch (10).
+# 1153 -> 1152 on 2026-10-13, D-SINK-19 round 11 (R21d): test_state's six
+# round-9/10 key tests (pendingEpg, entryInputs, epgSetAt, their stdout and
+# slot pins) replaced by five for the migration marker and the withdrawn
+# set time; and 1152 -> 1153 the same day, the ledger's withdrawn-symbol
+# waiver (tests/test_defect_ledger.py, 1).
 PY_TESTS_MIN=${PY_TESTS_MIN:-1153}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
@@ -203,7 +215,12 @@ MARKETPLACE_FILES_MIN=${MARKETPLACE_FILES_MIN:-35}
 # derives its file list from the release allowlist, and a list that resolves
 # to nothing would scan nothing and exit 0 if the guard did not refuse that
 # itself; this is the second line of defence, in the gate's own vocabulary.
-TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-61}
+# 61 -> 58 on 2026-10-13, D-SINK-19 round 11 (R21): the guide's three Text
+# blocks that advertised `omarchy bar set ... playlistUrl|epgUrl` (the
+# unconfigured surface's command box and its EPG line, and the first-run
+# form's terminal caption) are gone with the route; every remaining one still
+# declares its format.
+TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-58}
 # The player stub's self-test (M5-01): 14 cases when wired in, 16 with F-RWD-15, 17 with the ordering cases, 19 with the F-MPV-1 broadcast pair.
 # 19 -> 26 on 2026-10-07: the stub learned tls-verify and stream-lavf-o for
 # D-SINK-16. The lane that grew it reported there was no floor on this step;

@@ -187,6 +187,35 @@ UNEXPORTED_CITATION_WAIVERS = {
     'countFavorites': ('docs/ARCHITECTURE-SOURCES.md', 'internal to model/browse.mjs; re-cited bare by the round-10 documents lane'),
 }
 
+# WITHDRAWN SYMBOLS (D-SINK-19 round 11, R21d). R21 deleted the round-9 and
+# round-10 machinery from the model -- the held guide URL, the set times, the
+# persisted consumed-input slots -- and ordered its exports DELETED, not left
+# dead. The documents that describe those rounds still cite them, and the
+# lane that deleted them may not edit docs/; the documents lane of the same
+# round rewrites those passages. Until it does, each withdrawn name is waived
+# in the documents that cite it TODAY and nowhere else: a new citation of one
+# anywhere, or a citation in a document not listed, is red as usual, and so
+# is any withdrawn name that comes BACK into the source (that is not a
+# withdrawal any more, it is the ordinary check's business). Printed on every
+# run with how many are still in use; one no citation uses is reported by
+# name as unused, to be deleted -- not red, for the same reason as above.
+_R21_DOCS = {
+    'AS': 'docs/ARCHITECTURE-SOURCES.md', 'A': 'docs/ARCHITECTURE.md',
+    'C': 'docs/OMARCHY-PLUGIN-CONTRACT.md', 'QS': 'docs/QA-SOURCES.md', 'Q': 'docs/QA.md',
+}
+_R21_REASON = 'withdrawn by R21 (D-SINK-19 round 11); the round-11 documents lane rewrites the passage'
+WITHDRAWN_SYMBOL_WAIVERS = {
+    name: (frozenset(_R21_DOCS[d] for d in docs), _R21_REASON)
+    for name, docs in {
+        'adoptPendingEpg': ('AS', 'A', 'C', 'QS', 'Q'), 'applyPendingEpg': ('AS', 'A', 'Q'),
+        'entryInputDigest': ('AS',), 'entryInputRecord': ('AS',), 'entryInputSeed': ('AS',),
+        'entryInputsAfterMove': ('AS',), 'entryInputsAfterWrite': ('AS',), 'entryInputsOf': ('AS',),
+        'entryInputsRecord': ('AS',), 'epgByTime': ('AS', 'A', 'Q'), 'epgSetAtOf': ('AS', 'A'),
+        'epgSnapshotAfter': ('AS', 'A'), 'patchInputsToKeep': ('AS', 'C'), 'pendingEpgOf': ('AS', 'A', 'Q'),
+        'pendingEpgRecord': ('AS',), 'withEntryInputs': ('AS',), 'withPendingEpg': ('AS',),
+    }.items()
+}
+
 # A state cell must actually say something. These are the words the board
 # already uses; the point is to reject an empty cell, a dash, or a "?" that
 # reads as tracked when it is not.
@@ -608,12 +637,17 @@ def main(argv=None):
             public = None
             layout_error = str(error)
         waivers_used = set()
+        withdrawn_used = set()
         for symbol in sorted(cited):
             if symbol in not_symbols:
                 continue
             # A symbol resolves if it is exported, defined, or declared.
             found = (re.search(r'\b%s\s*[:=]' % re.escape(symbol), blob)
                      or re.search(r'function\s+%s\b' % re.escape(symbol), blob))
+            withdrawn = WITHDRAWN_SYMBOL_WAIVERS.get(symbol)
+            if not found and withdrawn and cited[symbol] <= withdrawn[0]:
+                withdrawn_used.add(symbol)
+                continue
             if not found:
                 problems.append(
                     'Model.%s is cited in %s and resolves in no source file. '
@@ -648,6 +682,10 @@ def main(argv=None):
         unused = sorted(set(UNEXPORTED_CITATION_WAIVERS) - waivers_used)
         print('unexported-citation waivers: %d listed, %d in use%s'
               % (len(UNEXPORTED_CITATION_WAIVERS), len(waivers_used),
+                 '; unused, delete: ' + ', '.join(unused) if unused else ''))
+        unused = sorted(set(WITHDRAWN_SYMBOL_WAIVERS) - withdrawn_used)
+        print('withdrawn-symbol waivers (R21d): %d listed, %d in use%s'
+              % (len(WITHDRAWN_SYMBOL_WAIVERS), len(withdrawn_used),
                  '; unused, delete: ' + ', '.join(unused) if unused else ''))
 
     # Printed on every run, green included. An exemption nobody sees is an

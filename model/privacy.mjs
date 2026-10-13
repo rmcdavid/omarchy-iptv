@@ -9,7 +9,7 @@ import {
   cleanName
 } from "./channels.mjs"
 import {
-  parseHelperStatus, ownedEntryPatch
+  parseHelperStatus, entryInputNotice, ownedEntryPatch
 } from "./settings.mjs"
 import {
   helperArgv
@@ -271,6 +271,12 @@ function notifyArgv(event, params) {
     spec = { title: "Guide data error", body: "Could not fetch the EPG (" + (reason || "unknown error") + "). Channels still work.", glyph: GLYPHS.alert, urgency: "low", id: NOTIFY_IDS.epgError }
   } else if (event === "mpvMissing") {
     spec = { title: "mpv not found", body: "Install mpv to play channels.", glyph: GLYPHS.tvOff, urgency: "critical", id: NOTIFY_IDS.mpvMissing }
+  } else if (event === "entryInputRefused") {
+    // R21b: the text is Model.entryInputNotice's and nothing else, so the
+    // notification, the console line and the test read one sentence. It
+    // takes a setting NAME and a reason, never a value (rule 5).
+    var notice = entryInputNotice(p.setting, p.reason)
+    spec = { title: notice.title, body: notice.body, glyph: GLYPHS.alert, urgency: "normal", id: NOTIFY_IDS.entryInputRefused }
   }
   if (!spec) return null
   return ["omarchy-notification-send", "--app-name", "IPTV", "-u", spec.urgency, "-g", spec.glyph, "-r", String(spec.id), spec.title, spec.body]
