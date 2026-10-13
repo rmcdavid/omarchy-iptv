@@ -316,7 +316,12 @@ wait_for "$((r0 + 1))" 10 n_reports || bad "the refused playlistUrl was not repo
 check "the CLI value is REFUSED: no record for basic.m3u, K2 still active, reported once, and the report names the Sources screen" \
   '[[ -z "$(key_of basic.m3u)" && "$(svc "['\''activeSourceKey'\'']")" == "$K2" && "$(n_reports)" == "$((r0 + 1))" ]] && wait_log "playlistUrl is no longer read from the bar settings.*Sources screen" 3'
 ipc addSource "$FIX/basic.m3u" "" "" >/dev/null
-wait_log 'sourceProbeFinished .*"ok":true' 20 || bad "the in-app add of basic.m3u did not finish"
+# The record exists in state.json once the add's probe has COMMITTED (SR23);
+# a `sourceProbeFinished ok` line cannot say which probe it was -- H2's
+# matches first -- so the wait is on the record itself (lane-key-m1's first
+# live run of this block read K3 empty and every later check red).
+has_basic() { [[ -n "$(key_of basic.m3u)" ]] && echo yes || echo no; }
+wait_for yes 20 has_basic || bad "the in-app add of basic.m3u did not commit"
 K3=$(key_of basic.m3u)
 wait_for "$K3" 10 svc "['activeSourceKey']" || bad "the added source did not become active"
 wait_for 3 20 svc "['channels']" || bad "first fetch of the added source did not load"

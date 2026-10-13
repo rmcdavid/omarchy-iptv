@@ -956,6 +956,7 @@ lane's running harness is never reaped by a clip run.
 ```
 scripts/dev-harness/key-scenario.sh check-tree            # the instrument arm, node only; run by check.sh
 scripts/dev-harness/key-scenario.sh                       # the instrument arm, then the real Service.qml under cage, with a transcript
+scripts/dev-harness/key-scenario.sh --baseline lane-key-z2  # the round-11 red run: round 10's code (68 / 30: G1, G2, G5, F4, U1-U7, K1-K3, Z1-Z3, A1, Y2, Y3, Q1, Q2, V1, H1, X1-X6)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-y2  # round 10's baseline is NOT a red run: round 9's code reads 87 / 0, because no segment observes R20a-R20c at the sink (Y4 reds only the S1b export)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-y0  # the round-9 red run: round 8's code (74 / 12 before Y4 existed: U1, U2, U5, K1-K3, Y1-Y3, Q1, V1, H1)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-w2  # the round-8 red run: round 7's code (73 / 6 before Y, Q, V, H existed: K1, K3, Z1, Z2, Z3, A2)
@@ -1311,7 +1312,9 @@ does nothing, because init chmods the directory back to 0700). U, K, Z, A,
 Y2, Y3, Q and V observe the refusal where they observed round 9's held
 guide URL. `pointerState` derives `landedMigrated` and `memoryMigrated` and
 reports `entryInputReports` (names and reasons, never a value). Measured on
-lane-key-m1: 98 / 0 forward (97 lettered checks and the floor line).
+lane-key-m1: 98 / 0 forward (97 lettered checks and the floor line), 68 / 30
+on `--baseline lane-key-z2`; sources-scenario 66 / 0 and logo-scenario 33 / 0
+under a nested cage on the same tree.
 
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 
