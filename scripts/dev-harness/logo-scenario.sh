@@ -132,7 +132,8 @@
 # Holds no display: starts no quickshell, no mpv, sends no keystroke, reads
 # nothing from the live install, touches nothing under ~/.config, ~/.cache or
 # ~/.local/state (the helper is run with HOME and every XDG variable pointed
-# into the scratch directory).
+# into the scratch directory, and since F-HARNESS-20 the QML probe and the
+# rest of the driver run with a home inside the work directory).
 set -uo pipefail
 QML_BIN=${LOGO_QML_BIN:-/usr/lib/qt6/bin/qml}
 # RLIMIT_AS, in bytes, on the qml process alone. Address space, not resident
@@ -220,6 +221,15 @@ cleanup() {
   [[ -n ${EXPORT_DIR:-} && -d $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"
 }
 trap cleanup EXIT
+# F-HARNESS-20, a sibling found by measuring rather than by reading. The
+# header says the helper runs with HOME and every XDG variable in the scratch
+# directory, and it does (serve-and-fetch.py builds that environment); the
+# QML probe did not. Run with a decoy HOME and decoy XDG directories on
+# 2026-10-13, this check-tree left a Qt cache ("QtProject/Qml Runtime") and an
+# fcitx directory in the decoy -- on an ordinary run, the developer's real
+# ~/.cache and ~/.config, on every gate run. The whole driver now has a home
+# inside WORK, which cleanup() removes.
+qa_harness_home "$WORK" || exit 2
 
 PASS=0; FAIL=0
 pass() { PASS=$((PASS+1)); echo "PASS $1"; }

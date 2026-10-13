@@ -163,10 +163,11 @@
 # creates, read from cage's own child and refused if it names the caller's
 # session. It starts no quickshell on the user's session, sends no keystroke
 # there, reads nothing from the live install and touches nothing under
-# ~/.config, ~/.cache or ~/.local/state (the harness points every XDG
-# directory into its own scratch tree, which this scenario keeps apart from
-# the shared harness directory so a display lane's running harness is never
-# reaped by this one).
+# ~/.config, ~/.cache or ~/.local/state: the harness gives the shell its own
+# HOME and XDG directories in its scratch tree, which this scenario keeps apart
+# from the shared harness directory so a display lane's running harness is
+# never reaped by this one, and this driver's own processes get a home inside
+# its work directory (F-HARNESS-20; see the call after WORK is made).
 set -uo pipefail
 SKIP=77
 CAGE_BIN=${CLIP_CAGE_BIN:-cage}
@@ -276,6 +277,18 @@ echo "== mode $MODE   offer ${OFFER_MB} MiB   bands: probe <${PROBE_BAND_MB} MB,
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-iptv-clip.XXXXXX") || exit 2
 chmod 0700 "$WORK"
+# F-HARNESS-20, the sibling this scenario carried. The probe arm's own
+# processes -- cage and the qml probes -- write a mesa shader cache, a Qt
+# cache ("QtProject/Qml Runtime") and an fcitx directory into whatever home
+# they are given. Measured 2026-10-13 by running the check-tree of dev
+# 8c8862f with a decoy HOME and decoy XDG directories: all three landed in the
+# decoy, which on an ordinary run is the developer's REAL ~/.cache and
+# ~/.config, on every gate run -- while the header above said this scenario
+# touched nothing there. The call at the top moved them into $SCRATCH, which a
+# check-tree run then left behind (a gate step may leave nothing). So the
+# driver's home goes into WORK, which cleanup() removes; run.sh, in live
+# mode, still hands the shell the harness's own home under $SCRATCH.
+qa_harness_home "$WORK" || exit 2
 T_START=$(date +%s.%N)
 elapsed() { python3 -c 'import sys; print("%.1f" % (float(sys.argv[1]) - float(sys.argv[2])))' "$(date +%s.%N)" "$T_START"; }
 

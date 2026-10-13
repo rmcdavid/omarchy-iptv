@@ -206,6 +206,15 @@ probes:
   asks the SHIPPED helper, Python and mpv where they would read and write;
   the decoy's mode, mtime and ctime must not move. On the harness before this
   it fails 9 of its 10 cases, the decoy going 0644 -> 0600.
+- The same question was put to every process the GATE starts, by running
+  `scripts/check.sh` whole with a decoy `HOME` and decoy XDG directories and
+  listing what landed there. Three steps wrote into the home they were given
+  -- on an ordinary run, the developer's real one, on every commit: the clip
+  and logo check-trees (a mesa shader cache, `QtProject/Qml Runtime`,
+  `fcitx/dbus`, from cage and the QML probes the drivers start) and the
+  `qml spec` step (`qmltestrunner/qmlcache`). Each now runs with a home inside
+  its own temporary directory, removed at exit, and the same decoy run leaves
+  the decoy empty.
 
 Because `XDG_RUNTIME_DIR` is redirected, `run.sh` exports `WAYLAND_DISPLAY`
 as the absolute socket path (libwayland accepts that) and symlinks the real
