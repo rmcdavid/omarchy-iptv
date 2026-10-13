@@ -663,7 +663,10 @@ itself unavailable rather than half working.
   their URLs (mode 0600). **This is the only copy of your source list and of
   your provider URLs**: lose it and you add your sources again by hand, and a
   copy you keep carries your provider username and password inside the URLs
-  (Settings above says what that means for a backup). Channels that failed to play are
+  (Settings above says what that means for a backup). If the file is there
+  but cannot be read, or is damaged, the plugin writes nothing to it until it
+  can be read again, rather than replacing it with an empty one (see
+  Troubleshooting). Channels that failed to play are
   **not** kept here: they belong to the source that carried them, and live in
   that source's cache directory below
 - `~/.cache/omarchy-iptv/sources/<source>/failed.json` : which channels of
@@ -744,6 +747,30 @@ Nothing inside the plugin directory is written at runtime.
   lost and you do not need your URL again: on the form the guide shows you,
   follow the `Saved sources` link and pick the source. Settings above has the
   detail, including what happens when you update again.
+- A notification titled **Saved sources not loaded** (for example
+  `/home/you/.local/state/omarchy-iptv/state.json is not a valid state file.
+  Nothing is saved until it can be read, so sources, favorites and settings
+  changed now are not kept. ...`): the file that holds your sources is there
+  but could not be read -- its permissions, something other than a file at
+  that path, or contents that are not a state file. The plugin has not
+  touched it and will write nothing to it this session, because it may be
+  the only copy of your sources and provider URLs; earlier versions read
+  such a file as empty and saved an empty one over it. The guide opens as if
+  nothing were set up, and adding or switching a source there answers
+  `state.json could not be read · nothing is saved until it can be`. The
+  notification's last sentence says what to do for the case you hit:
+  `chmod 600` on the file, `chmod 700` on its folder, move whatever is at the
+  path aside, or restore the file from a backup -- then `omarchy restart
+  shell`. Putting a good copy back in place is enough on its own: the plugin
+  notices and carries on with your sources. A file or folder you left at
+  mode 0000 while the shell was not running is NOT this case: the plugin
+  restores the usual permissions at the next start, reads the file and says
+  nothing.
+- `state.json is not a valid state file; nothing was written` (or `state.json
+  could not be read (...); nothing was written`) from the helper's `state`
+  commands run by hand: the same protection on the command line --
+  every `state` command except `state init` refuses a `state.json` it cannot
+  read or parse (exit 1) instead of writing over it.
 - "state.json could not be written" in the shell's journal: the plugin could
   not save its own file, `~/.local/state/omarchy-iptv/state.json`. The source
   you added or switched to is in effect for this session only. If this

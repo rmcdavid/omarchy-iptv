@@ -1397,6 +1397,15 @@ set` and no fixture path. What it looks like on a display -- wrapping,
 elision, contrast -- is still UNVERIFIED, and no committed scenario carries
 the text read yet.]**
 
+**A second save sentence, refused before anything is written (D-SINK-19
+round 12, R22a, 2026-10-13).** While `state.json` exists but could not be
+read or parsed, an add, an edit, a switch and a remove are refused at once,
+with code `state_unreadable` and `state.json could not be read · nothing is
+saved until it can be` on the same line (`Model.sourceErrorMessage`; the
+middle dot is `Model.SEP`). Unlike `state_write_failed` it arrives as the
+call's own answer, not afterwards: nothing was issued. 5.10 is the whole
+behaviour.
+
 **Once per episode, a decision with its consequence (round 4, kept in round
 5).** The failure is signalled on the FIRST `saveFailed` of an episode and
 not again until a later write LANDS (`stateSaveFailed` is sticky, cleared by
@@ -1602,6 +1611,71 @@ key-scenario X5 (one notification per report through a stand-in
 `omarchy-notification-send` in front of PATH, each naming the Sources screen,
 none carrying a URL or the credential). The rendered card is UNVERIFIED on a
 display.
+
+### 5.10 Saved sources not loaded (D-SINK-19 round 12, R22a; 2026-10-13)
+
+`~/.local/state/omarchy-iptv/state.json` is the only copy of the user's
+sources and provider URLs. When it exists but cannot be read -- permission
+denied, not a regular file, an I/O error -- or does not parse as a state
+(an empty file included), the plugin WRITES NOTHING to it for the rest of
+the session. Until round 12 it read such a file as an empty state and saved
+that over it at the start, which erased every source, credential and
+favourite (the round-11 data-loss lens, live). What the user sees, as built
+on lane-key-n1:
+
+1. Once, a desktop notification: `omarchy-notification-send --app-name IPTV
+   -u critical -g <alert glyph> -r 74017 <title> <body>`, and the same body
+   on the shell's console as `omarchy-iptv: <body>`. The text is
+   `Model.stateUnreadableNotice(reason, path)`, composed from the reason and
+   the file's path and never from anything in the file. The title is
+   `Saved sources not loaded`; the body is `<path> <what>. Nothing is saved
+   until it can be read, so sources, favorites and settings changed now are
+   not kept. <fix>`, with `<path>` the full path of `state.json`:
+
+   | Reason | `<what>` | `<fix>` |
+   |---|---|---|
+   | the file is not readable | `is not readable (permission denied)` | `Make it readable with chmod 600 on that file, then run omarchy restart shell.` |
+   | something other than a file is at the path | `is not a regular file` | `Move whatever is at that path aside, then run omarchy restart shell.` |
+   | the file does not parse | `is not a valid state file` | `Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell.` |
+   | the folder cannot be read (the file reads as missing, but the helper found something there) | `could not be found, or its folder could not be read` | `Make the folder readable with chmod 700, then run omarchy restart shell.` |
+   | any other failure | `could not be read` | `Check the file and its folder, then run omarchy restart shell.` |
+
+2. At a start, the guide has nothing loaded, so it opens on the first-run
+   form (3.1.1, `No playlist configured`) with no `Saved sources` link.
+   Submitting it, and any add, edit, switch or remove, is refused on the
+   result line with `state.json could not be read · nothing is saved until
+   it can be` (5.5). The bar entry is left exactly as it is.
+3. Mid-session (the file made unreadable, or emptied or overwritten in
+   place, under a running shell, so the guide's file watch reloads it): the
+   guide keeps the channels, the active
+   source and the favourites it already had. Source changes are refused with
+   the same sentence. A favourite, a hidden group, a saved search or a
+   recent still changes on screen, for this session only: it is not kept,
+   which is what the notification's "changed now are not kept" says.
+4. It ends by itself when a load that IS a state arrives: the file put back
+   in place (the guide's file watch reloads it, key-scenario B7) or fixed and
+   `omarchy restart shell` run. Writes resume at once, and a later episode is
+   told again.
+5. NOT this mode, and told nothing: a `state.json`, or its folder, left at
+   mode 0000 by the user's own chmod while the shell was down. The helper's
+   start-up `state init` restores 0600 and 0700, the start reads the file,
+   and every source is there (key-scenario B1-B4). A file that does not
+   exist at all is a fresh install, as before.
+
+Pinned in node (`R22a: stateUnreadableNotice -- one sentence per reason,
+each naming the file and what to do (restart included), none carrying a URL;
+the notification and the console line are that sentence (74017)`, and the
+`R22a (... host, ... start)` harness pins that drive each fault through the
+real handlers) and observed at the sink by key-scenario B5-B7 on lane-key-n1
+(lane A, transcript `key-20261013-161816-835970`): B5 `file:same
+blocked:unparsed add:state_unreadable switch:state_unreadable told:1 path:1
+urls:0` -- one notification, naming `state.json`, no `://` -- B6 the entry's
+keys and mirror unchanged with `writes:0`, B7 the mode lifted by restoring
+the file and a switch then landing. The first-run form in this mode and the
+notification card are UNVERIFIED on a display. Open for the lead, not
+decided here: whether the guide should carry a surface of its own for this
+mode, rather than a first-run form whose submit is refused and whose reason
+only the notification gives (lane-key-n1's open question).
 
 ---
 

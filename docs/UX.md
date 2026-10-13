@@ -798,6 +798,30 @@ Error, no cache at all (empty state, column hidden):
                                     r retry - Esc close
 ```
 
+**[Amended 2026-10-13, D-SINK-19 round 12 (R22c): the line ends `check the
+source in Sources`.** `check playlistUrl` sent a user whose provider is down
+to a setting the plugin has refused since round 11 (R21), and the round-11
+live lens saw exactly that on screen after a migration. The source's URL is
+checked and edited in Sources, which `o` opens from this state. As shipped on
+lane-key-n1 (74f9a01; `Guide.qml` `errorCheck`), with the footer as the
+round-11 live lens drew it inside a cage on lane-key-m2, which round 12 does
+not change:
+
+```
+                                             ó°
+
+                                   Playlist failed to load
+
+              HTTP 403 Forbidden from tv.example.net - check the source in Sources
+
+                                 r retry - o sources - Esc close
+```
+
+The separators are `Model.SEP`. The text is observed through the harness
+(key-scenario B8 reads the guide's empty state as drawn: `kind:error
+sources:yes retired:no` on lane-key-n1, `retired:yes` on lane-key-m2); the
+wrap of the longer line at the shipped width is UNVERIFIED on a display.]**
+
 ### 4.7 "Now playing" affordance inside the guide
 
 Three coordinated cues, all present at once:
@@ -1180,7 +1204,7 @@ key/verb contrast is the accepted cost of the footer being readable at all.
 |---|---|---|
 | Not configured | `No playlist configured` | `Set your M3U URL or path, then press r to load it:` / command box `omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>` / `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>  (converted; not kept in shell.json)` / `Both are inputs: the URL moves to ~/.local/state/omarchy-iptv/state.json; other settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)` **[Amended 2026-10-12, D-SINK-19 round 3: the last two lines are `Guide.qml`'s `unconfiguredEpg` and `unconfiguredWhere` as shipped on lane-key-s1 (two spaces before the parenthesis), ruled to this exact text by the lead after the review found the previous lines -- `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>` and `Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)` -- presenting the URL keys as stored settings. The command box is unchanged: a click copies it. Both lines wrap (`Text.WordWrap` over the column width); the wireframe in 4.4 wraps them by hand, and the wrap at the shipped width is UNVERIFIED on a display.]** **[Amended 2026-10-13, D-SINK-19 round 11 (R21): the body is now `Add your M3U URL or path in Sources, with its EPG URL if you have one` / `Sources and their URLs are kept in ~/.local/state/omarchy-iptv/state.json; other settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)` (`Guide.qml` `unconfiguredProse` and `unconfiguredWhere` on lane-key-m1). The command box and the `Optional EPG` line are deleted: a URL set with `omarchy bar set` is refused after the migration, so the guide must not offer the command (4.4).]** |
 | Loading, no cache | `Loading playlist...` | `Fetching from <host>` |
-| Fetch failed, no cache | `Playlist failed to load` | `<reason> from <host> - check playlistUrl` where reason is one of `HTTP 403 Forbidden`, `HTTP 404 Not Found`, `HTTP 5xx`, `Could not resolve host`, `Connection refused`, `Timed out`, `Not an M3U playlist`, `File not found` (local path) |
+| Fetch failed, no cache | `Playlist failed to load` | `<reason> from <host> - check playlistUrl` where reason is one of `HTTP 403 Forbidden`, `HTTP 404 Not Found`, `HTTP 5xx`, `Could not resolve host`, `Connection refused`, `Timed out`, `Not an M3U playlist`, `File not found` (local path) **[Amended 2026-10-13, D-SINK-19 round 12 (R22c): `<reason> from <host> - check the source in Sources` (`Guide.qml` `errorCheck` on lane-key-n1). No shipped string tells the user to set `playlistUrl` or `epgUrl` any more; `tests/test_shipped_copy.py` searches every string literal in every shipped code file for one (4.6).]** |
 | Fetch failed, cache present (banner) | -- | `ó°¦  Playlist refresh failed (<reason>) - showing cached copy from 12:40 - r retry` |
 | EPG failed (banner, low emphasis) | -- | `Guide data unavailable (<reason>) - channels still work - r retry` |
 | Playlist loaded with warnings (footer line) | -- | `Playlist warning: <first warning> (+N more)` when more than one. Shown after a load that produced warnings, such as the 50,000 channel or 2,000 group caps, and cleared by the next clean load. It never displaces a playing, refreshing or error state; see the precedence note below |
