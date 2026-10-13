@@ -179,8 +179,11 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # 2261 -> 2348 on 2026-10-13, D-SINK-19 round 12 (R22): the load-failure pins
 # through Service.qml's own handlers and the REAL startCacheLayout (80: every
 # fault at a migrated and an unmigrated start, mid-session, both hosts), the
-# R22a model functions (6), and R22e's absence pin (1).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2348}
+# R22a model functions (6), and R22e's absence pin (1); 2348 -> 2354 the same
+# day, the six pins three surviving mutations asked for (every owned-entry
+# writer in the no-write mode, the unmigrated session, a probe that ends in
+# it; both hosts).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2354}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity

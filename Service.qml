@@ -4298,6 +4298,15 @@ Item {
       root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: Model.sourceErrorMessage("unknown_source"), host: "", cancelled: false, replacedId: "" })
       return
     }
+    // R22a: a probe that ENDS in the no-write mode (started before a reload
+    // that was not a state) records nothing. Its commit is a state write and
+    // a key mirror, and an add or a switch that would not be kept is refused
+    // here as the verbs that start one are; nothing is deleted either (the
+    // start-up prune drops a directory no record names).
+    if (root.stateWriteBlocked !== "") {
+      root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: Model.sourceErrorMessage("state_unreadable"), host: host, cancelled: false, replacedId: "" })
+      return
+    }
     if (status.ok === true) {
       var newKey = key
       if (pending) {

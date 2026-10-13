@@ -12344,6 +12344,48 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       }, { memory: [2, true, m.reason, 1], quiet: [true, true, "state_unreadable", 1], lifted: ["", 2, 1] })
     }
     for (const mode of ["lag", "echo"]) {
+      // R22b, the list as a check: EVERY owned-entry writer the service has,
+      // called in the no-write mode, writes nothing -- the funnel's own gate
+      // included, which the user paths above reach only through gates of
+      // their own (a mutation removing it survived them). And a refusal is
+      // not REPORTED while blocked: its notice says the value was removed,
+      // and nothing can remove it.
+      checkCall("R22b (" + mode + " host, mid-session): in the no-write mode every owned-entry writer -- writeActive, the logo toggle, the strip, the key mirror -- writes nothing, a CLI value is neither adopted nor reported, and a second fault in the same episode tells the user nothing new", () => {
+        const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA, { favorites: FAV }), mode)
+        h.stateFile.fault = "file-0000"; h.stateFile.reload(); h.drain()
+        const writes0 = h.host.writes.length
+        const r = h.root
+        const answers = [r.writeActive(KB), r.setShowLogos(true)]
+        // the key mirror's plan holds the key for a save that cannot land, and drops it
+        r.persistActive(KA); h.drain()
+        answers.push(r.pendingEntryKey === null ? "dropped" : "held")
+        r.stripEntryInputs(); h.drain()
+        h.host.externalSet("playlistUrl", NEW); h.drain()
+        h.stateFile.fault = null; h.stateFile.exists = false; h.stateFile.reload(); h.drain()
+        return { answers: answers.map(a => a === false ? "refused" : a === true ? "accepted" : String(a)), writes: h.host.writes.length - writes0,
+                 active: r.activeSourceKey === KA, memory: r.userState.sources.length, reports: reports(h), blocked: r.stateWriteBlocked, told: told(h) }
+      }, { answers: ["refused", "refused", "dropped"], writes: 0, active: true, memory: 2, reports: [], blocked: "absent", told: 1 })
+      checkCall("R22a (" + mode + " host, mid-session): an add whose probe was running when the no-write mode began records nothing when it ends -- refused with state_unreadable, no record, no switch, no entry write", () => {
+        const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA, { favorites: FAV }), mode)
+        const started = h.root.addSource({ playlistUrl: NEW }).ok
+        h.stateFile.disk = "{\"half\": "; h.stateFile.reload(); h.drain()
+        const writes0 = h.host.writes.length
+        h.probeExit(JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })); h.drain()
+        const fin = h.signals.filter(x => x[0] === "sourceProbeFinished").map(x => [x[1].ok, x[1].reason === M.sourceErrorMessage("state_unreadable")])
+        return [started, fin, h.root.userState.sources.length, h.root.activeSourceKey === KA, h.host.writes.length - writes0, h.stateFile.disk]
+      }, [true, [[false, true]], 2, true, 0, "{\"half\": "])
+      // A session whose migration write FAILED (the marker never landed), then
+      // a reload that is not a state: the next CLI URL is NOT migrated.
+      checkCall("R22a (" + mode + " host, mid-session): a session whose migration write failed, then a reload that is not a state -- a CLI playlistUrl arriving now is not migrated, not adopted, not reported", () => {
+        const h = boot({ playlistUrl: B, showLogos: false }, oldText([rec(A), rec(B)]), mode, { beforeLoad: x => { x.stateFile.writeFails = true } })
+        const before = [h.root.activeSourceKey === KB, marked(h)]
+        h.stateFile.writeFails = false
+        h.stateFile.disk = "{\"half\": "; h.stateFile.reload(); h.drain()
+        h.host.externalSet("playlistUrl", NEW); h.drain()
+        return { before, after: [h.root.activeSourceKey === KB, h.root.userState.sources.length, reports(h), h.root.stateWriteBlocked, h.stateFile.disk === "{\"half\": "] }
+      }, { before: [true, false], after: [true, 2, [], "unparsed", true] })
+    }
+    for (const mode of ["lag", "echo"]) {
       // The control the whole distinction exists for: a FileNotFound IS a
       // fresh install when the helper found nothing there -- and the cache
       // layout's own start-up save, which the harness now runs, lands.
