@@ -1194,6 +1194,10 @@ ShellRoot {
       return JSON.stringify({ stored: harness.entryKey(fakeHost.barConfig), published: harness.entryKey(fakeShell.barConfig),
                               storedKeys: HarnessLib.entryKeyNames(Model.findBarEntry(fakeHost.barConfig, harness.pluginId)),
                               publishedKeys: HarnessLib.entryKeyNames(Model.findBarEntry(fakeShell.barConfig, harness.pluginId)),
+                              // R20d (round 10): the one owned VALUE a check reads off the stored
+                              // entry, as stored -- the plugin writes a boolean there, never a URL --
+                              // and null when the key is absent (key-scenario Y4)
+                              storedShowLogos: HarnessLib.storedOwnedValue(Model.findBarEntry(fakeHost.barConfig, harness.pluginId), "showLogos"),
                               host: harness.hostEchoes ? "echo" : "lag" })
     }
     // D-SINK-19, R5: where the two writes of a pointer change stand. The

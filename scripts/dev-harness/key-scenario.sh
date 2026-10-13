@@ -208,6 +208,9 @@
 #   Y1  on the lagging host: in-app logo OFF, CLI showLogos true again (a
 #       publish A -> B -> A), in-app OFF again -- each OFF takes and is
 #       handed to the host               <- R19a, the round-8 lenses' P1-A
+#   Y4  two in-app toggles in a row (ON, then OFF, nothing between): the
+#       second takes and is handed to the host too
+#                           <- R20d, the round-9 lens's mutant S1b, live
 #   Y2  the same refused credential set three times beside the active
 #       source is off the stored entry after EVERY set          <- R19a
 #   Y3  the same epgUrl set twice, then the guide URL edited in the app:
@@ -1506,6 +1509,24 @@ shell_arm() {
   sleep 0.5
   ck "Y1 in-app OFF, CLI showLogos true again, in-app OFF again: each OFF takes and is handed to the host (logos/entry writes)" \
      "off1:$off1 off2:$(logos)/$(log_since 'updateEntryInline io')" "off1:false/1 off2:false/1"
+  # Y4 (round 10, R20d): two in-app toggles with NOTHING between them. The
+  # round-9 data-loss lens's mutant S1b skipped a write whose patch equalled
+  # the lagging host's publish, and that publish is still the entry from
+  # before the first toggle -- so the second toggle was ignored (its own
+  # child run: `#2: showLogos=True writes 2`), while Y1, which re-sets the
+  # value from the CLI between the two, stayed green. ON needs the count
+  # confirmed (the guide's own `g` then `confirm`), OFF does not.
+  log_mark
+  ipc sourcesKey g >/dev/null; sleep 0.3; ipc sourcesKey confirm >/dev/null
+  wait_for true 10 logos >/dev/null || true
+  sleep 0.5
+  on1="$(logos)/$(log_since 'updateEntryInline io')"
+  ipc sourcesKey g >/dev/null
+  wait_for false 10 logos >/dev/null || true
+  sleep 0.5
+  ck "Y4 two in-app logo toggles in a row, ON then OFF with nothing between: the second takes and is handed to the host too (logos/entry writes)" \
+     "on1:$on1 off2:$(logos)/$(log_since 'updateEntryInline io') stored:$(qa_json_field "d['storedShowLogos']" "$(ipc hostEntry)")" \
+     "on1:true/1 off2:false/2 stored:false"
   ipc close >/dev/null
   seed "$KA"
   start_shell --playlist none --source-key "$KA" || true
@@ -1680,7 +1701,7 @@ instrument
 # (48 -> 61 on 2026-10-12, round 4: W1..W6 and F1..F7; 61 -> 63 the same
 # day, round 5: L1, L2; 63 -> 70 the same day, round 7: U1..U7; 70 -> 78
 # the same day, round 8: K1..K3, Z1..Z3, A1, A2; 78 -> 85 the same day,
-# round 9: Y1..Y3, Q1, Q2, V1, H1.)
+# round 9: Y1..Y3, Q1, Q2, V1, H1; 85 -> 86 on 2026-10-12, round 10: Y4.)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -1690,7 +1711,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=10
 else
-  EXPECTED_CHECKS=85
+  EXPECTED_CHECKS=86
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then

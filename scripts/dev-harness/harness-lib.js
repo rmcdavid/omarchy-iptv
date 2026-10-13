@@ -75,6 +75,18 @@ function entryKeyNames(entry) {
   return out
 }
 
+// D-SINK-19 round 10 (R20d): one OWNED setting's value off an entry, as
+// stored, for a check that must read the stored entry rather than the
+// guide's overlay of our own write (key-scenario Y4: the lagging host's
+// publish is one write behind). Only the two keys the plugin owns, so no
+// retired URL key can ever be read through it; null when absent.
+function storedOwnedValue(entry, name) {
+  if (name !== "showLogos" && name !== "sourceKey") return null
+  if (!entry || typeof entry !== "object" || !Object.prototype.hasOwnProperty.call(entry, name)) return null
+  var v = entry[name]
+  return typeof v === "boolean" || typeof v === "string" ? v : null
+}
+
 // D-SINK-19, R5 and round 6. `ipc pointerState`: where the two writes of a
 // pointer change stand -- the service's start-up gate (`dirsReady`), the
 // state save parked behind it (`stateSavePending`), the entry mirror
@@ -118,5 +130,5 @@ function pointerStateOf(s) {
 }
 
 if (typeof module !== "undefined") {
-  module.exports = { entryKey: entryKey, entryKeyNames: entryKeyNames, pointerStateOf: pointerStateOf, POINTER_FIELDS: POINTER_FIELDS }
+  module.exports = { entryKey: entryKey, entryKeyNames: entryKeyNames, pointerStateOf: pointerStateOf, POINTER_FIELDS: POINTER_FIELDS, storedOwnedValue: storedOwnedValue }
 }

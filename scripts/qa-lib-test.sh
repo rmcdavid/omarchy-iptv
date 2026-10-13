@@ -1249,9 +1249,10 @@ is "key-scenario's cleanup restores the state directory's mode on every exit" \
 # two bare `log_mark` lines between the F banner and the U banner (U, round
 # 7, sets its own before the toggle it counts: one more up to the P banner).
 # Round 9: Y sets its own mark before EACH of its two in-app toggles (Y1
-# counts each toggle's write from its own mark): 1 + 2 = 3 up to P.
+# counts each toggle's write from its own mark): 1 + 2 = 3 up to P. Round
+# 10: Y4 counts its two toggles in a row from ONE mark of its own: 4.
 is "F and L each set their own log mark before the call they count, and U and Y before each toggle" \
-   "$(awk '/^  echo "== F:/,/^  echo "== U:/' "$KS" | grep -cE '^  log_mark$') $(awk '/^  echo "== U:/,/^  echo "== P:/' "$KS" | grep -cE '^  log_mark$')" "2 3"
+   "$(awk '/^  echo "== F:/,/^  echo "== U:/' "$KS" | grep -cE '^  log_mark$') $(awk '/^  echo "== U:/,/^  echo "== P:/' "$KS" | grep -cE '^  log_mark$')" "2 4"
 # L drives the toggle through the guide's own key path (shell.qml's
 # sourcesKey calls the guide's handlers; no keystroke), and both restarts
 # that follow a failed or interrupted write (O and F) reseed the key the
@@ -1259,9 +1260,20 @@ is "F and L each set their own log mark before the call they count, and U and Y 
 # key path (3 more) and restarts twice over the observed entry (2 more).
 # Round 8: Z restarts once over the observed entry after its remove (1 more).
 # Round 9: Y1 drives the key path three more times (enter, g, g), and Y3 and
-# H restart over the observed entry (2 more).
+# H restart over the observed entry (2 more). Round 10: Y4 drives it twice
+# more (g + confirm on one line, then g).
 is "L, U and Y reach setShowLogos through the guide's Sources key path, and F, U, Z, Y and H restart over the observed key as O does" \
-   "$(qa_count '^  ipc sourcesKey (enter|g|confirm) >/dev/null' "$KS") $(qa_count '^  start_shell "\$\{seed_args\[@\]\}" \|\| true$' "$KS")" "9 7"
+   "$(qa_count '^  ipc sourcesKey (enter|g|confirm) >/dev/null' "$KS") $(qa_count '^  start_shell "\$\{seed_args\[@\]\}" \|\| true$' "$KS")" "11 7"
+# Round 10 (Y4): the stored entry's showLogos is read through hostEntry's
+# storedShowLogos, which HarnessLib.storedOwnedValue answers for the two
+# OWNED keys only -- a retired URL key reads null through it -- and Y4 is
+# the check that reads it. Driven, not grepped: the function itself.
+is "HarnessLib.storedOwnedValue reads an owned key as stored and never a retired URL key, and key-scenario's Y4 reads it" \
+   "$(node -e '
+const L = require(process.argv[1])
+const e = { showLogos: false, sourceKey: "12e22d28", playlistUrl: "http://u:p@h/x", epgUrl: "http://h/g" }
+console.log([L.storedOwnedValue(e, "showLogos"), L.storedOwnedValue(e, "sourceKey"), L.storedOwnedValue(e, "playlistUrl"), L.storedOwnedValue(e, "epgUrl"), L.storedOwnedValue({}, "showLogos")].map(String).join(" "))
+' "$ROOT/scripts/dev-harness/harness-lib.js" 2>&1) $(qa_count "qa_json_field \"d\['storedShowLogos'\]\"" "$KS")" "false 12e22d28 null null null 1"
 # Round 9 (Q): the slow listener holding the probe open is the scenario's
 # own, its pid read from the LISTENER (ss -ltnp on its port, never `$!`, the
 # rule the round-2 live pass learned), and cleanup() kills that pid on every
@@ -2267,7 +2279,10 @@ is "a umask-created file here would have been private, which is why the mode is 
 # 453 -> 454 on 2026-10-12, D-SINK-19 round 9: key-scenario's slow listener
 # is killed by the pid its listener names (1). Two existing wants moved with
 # Y and H (the key-path and restart counts, the U..P log marks).
-EXPECTED=454
+# 454 -> 455 on 2026-10-12, D-SINK-19 round 10: hostEntry's storedShowLogos
+# is a boolean and Y4 reads it (1). Two existing wants moved with Y4 (the
+# U..P log marks, the key-path count).
+EXPECTED=455
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
