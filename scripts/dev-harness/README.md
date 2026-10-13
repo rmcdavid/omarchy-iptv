@@ -251,7 +251,8 @@ scripts/dev-harness/run.sh --open --order number      # channelOrder=number (M2-
 scripts/dev-harness/run.sh --open --entry-ms 3000 --no-bar-number
 scripts/dev-harness/run.sh --open --window floating   # harness-only window mode (headless cage)
 scripts/dev-harness/run.sh --playlist /x.m3u --source-key d990c2e4 --keep   # the entry a host holds after
-                                                     # `omarchy bar set playlistUrl` beside the mirror (D-SINK-19)
+                                                     # `omarchy bar set playlistUrl` beside the mirror (D-SINK-19);
+                                                     # since R21 a migration input until the marker lands, refused after
 scripts/dev-harness/run.sh --host echo --keep         # the host that echoes a plugin's own write at once (#15082, D-HOST-4)
 scripts/dev-harness/run.sh ipc state                 # the harness's own target
 scripts/dev-harness/run.sh plugin-ipc status         # the plugin's target: the verbs a user binds
@@ -971,7 +972,10 @@ scripts/dev-harness/key-scenario.sh --tree "$cp"            # a PREPARED export:
 D-SINK-19 takes the provider URL off the host's bar entry: the entry
 carries `sourceKey`, an 8-hex pointer, and `state.json` carries
 `activeKey`; `omarchy bar set ... playlistUrl` is an INPUT that is adopted
-and then removed from the entry by the plugin's own write. Two things in
+and then removed from the entry by the plugin's own write [round 11,
+2026-10-13, R21: only by the one migration, while the landed `state.json`
+lacks `entryMigrated`; after it the value is refused, reported once and
+removed -- the round-11 subsection below]. Two things in
 this directory had to move with it.
 
 * **The instrument (lead ruling R6).** `hostEntry` -- the verb every
@@ -1166,7 +1170,7 @@ the first state load, which no harness reaches), so lane A did not run
 passed, 0 failed** (transcript key-20261012-122314-1907775.out, 72.7 s),
 as expected: no lettered check separates u3 from v1.
 
-**Round 7 (2026-10-12; U1..U7 added, 63 -> 70).** The round-6 data-loss
+**[Round 11: R17b, which U observed, is OVERTURNED by R21; U1-U7 now observe a guide URL set after the migration being refused.]** **Round 7 (2026-10-12; U1..U7 added, 63 -> 70).** The round-6 data-loss
 lens found an input no oracle had covered: an `epgUrl` R12 leaves on the
 entry while no source is active, stripped by any heal write (the logo
 toggle on the lagging host, observed live by the lens; the switch alone on
@@ -1185,7 +1189,7 @@ under a nested headless cage on the same tree. `qa-lib-test.sh` now unsets
 run with the variable exported read 442 / 1 with the old line, 443 / 0 with
 the new one), and pins the `--host` lever (443 checks).
 
-**Round 8 (2026-10-12; K1..K3, Z1..Z3, A1, A2 added, 70 -> 78).** The
+**[Round 11: R18d, which A2 observed, is OVERTURNED by R21; K, Z and A now observe refused values settling, the whitespace-wrapped refusal and the in-app add with no competing value.]** **Round 8 (2026-10-12; K1..K3, Z1..Z3, A1, A2 added, 70 -> 78).** The
 round-7 data-loss lens reproduced two P1s live with drivers of its own,
 and this scenario carried no refused and no whitespace-wrapped value at
 all. K lifts its `loop-child.sh`: a refused `playlistUrl` (an ftp:// URL
@@ -1213,7 +1217,7 @@ handing the form's guide URL over, 78 / 1 (A2). `sources-scenario.sh`
 **66 / 0** (the 10k switch median 33 ms) and `logo-scenario.sh live`
 **33 / 0** under a nested headless cage on the same tree.
 
-**Round 9 (2026-10-12, R19; Y1..Y3, Q1, Q2, V1, H1 added, 78 -> 85; U, K and A re-read).** Both round-8 lenses
+**[Round 11: R19b and R19c, which this paragraph's U, Q and V observe, are OVERTURNED by R21; those segments now observe the refusal and the in-app forms (the round-11 subsection).]** **Round 9 (2026-10-12, R19; Y1..Y3, Q1, Q2, V1, H1 added, 78 -> 85; U, K and A re-read).** Both round-8 lenses
 found the write skip R18b added coming back after a publish A -> B -> A on
 the lagging host, live, and the data-loss lens found the add form's guide
 URL superseding a CLI epgUrl set AFTER the form was submitted (and the
@@ -1244,7 +1248,7 @@ transcripts: `-181012` 86 PASS / 0 FAIL, `-181343` 74 / 12 with exactly the
 twelve letters named, `-182219` 80 / 6 (D2, D3, W2, W3, W4, W6) and
 `-182602` 81 / 5 (D3 green).
 
-**Round 10 (2026-10-12, R20; Y4 added, 85 -> 86; L2 re-wanted).** The
+**[Round 11: R20b and R20c are OVERTURNED by R21; Y4 and L2 stand, L2's want now the R21a keep.]** **Round 10 (2026-10-12, R20; Y4 added, 85 -> 86; L2 re-wanted).** The
 ninth review's data-loss lens found a one-decision mutant of R19a, S1b (a
 write skipped when its patch equals the lagging host's publish, one line
 before the compose), green in node (2,268 / 0) and live (86 / 0) while the
