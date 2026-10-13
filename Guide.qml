@@ -234,7 +234,11 @@ Item {
     loadingFrom: "Fetching from ",
     loadingProse: "Fetching playlist",
     errorTitle: "Playlist failed to load",
-    errorCheck: "check playlistUrl",
+    // D-SINK-19 round 12 (R22c): the fetch-failure hint names the Sources
+    // screen, where a source's URL is checked and edited. It said `check
+    // playlistUrl` -- a setting R21 retired and refuses -- and so sent a user
+    // whose provider is down to the one route that no longer works.
+    errorCheck: "check the source in Sources",
     emptyPlaylistTitle: "Playlist has no channels",
     emptyPlaylistProse: "Parsed 0 channels from ",
     emptyPlaylistCheck: "check the URL points at an M3U",
@@ -732,6 +736,11 @@ Item {
 
   // Empty-state kind: "" while rows exist.
   readonly property string emptyKind: surface.empty
+  // What the empty state SAYS, as drawn (emptyState's own title and prose),
+  // so the harness reads the sentence on the screen rather than a copy of it
+  // (R22c: the fetch-failure hint is observed through the harness, rule 14).
+  readonly property string emptyTitleText: emptyState.title
+  readonly property string emptyProseText: emptyState.prose
 
   // Banner kind (R8): none | playlistError | epgError | epgPending. An EPG
   // fetch failure shows the banner even while an earlier window is still

@@ -1281,7 +1281,13 @@ ShellRoot {
         out.guide = {
           opened: g.opened, mode: g.mode, query: g.query, scopeId: g.scopeId, effectiveScope: g.effectiveScope,
           cursorIndex: g.cursorIndex, rows: g.currentRows.length, resultTotal: g.resultTotal, truncated: g.truncated,
-          rowsHaveDetail: g.rowsHaveDetail, emptyKind: g.emptyKind, bannerKind: g.bannerKind, bannerText: g.bannerText,
+          // R22c: the empty state as DRAWN (emptyTitleText / emptyProseText,
+          // absent on a guide without them, NOFIELD) and the hint's own copy,
+          // which every guide has -- so a tree from before the change reads
+          // its old hint rather than nothing.
+          rowsHaveDetail: g.rowsHaveDetail, emptyKind: g.emptyKind, emptyTitle: g.emptyTitleText, emptyProse: g.emptyProseText,
+          errorCheck: g.copy ? g.copy.errorCheck : undefined,
+          bannerKind: g.bannerKind, bannerText: g.bannerText,
           scopeLabel: g.scopeLabelText, footer: g.footerStatusText, warning: g.warningText, narrow: g.narrow, showColumn: g.showColumn,
           cursorName: g.currentRows.length > g.cursorIndex && g.cursorIndex >= 0 ? g.currentRows[g.cursorIndex].name : "",
           // The cursor row's DETAIL line, composed the way the delegate
