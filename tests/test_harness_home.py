@@ -30,6 +30,7 @@ Run: python3 -m unittest discover -s tests
 """
 import json
 import os
+import re
 import pathlib
 import shutil
 import stat
@@ -265,9 +266,20 @@ class EveryDriverIsolatesItself(unittest.TestCase):
 
     def test_drivers_that_use_run_sh_call_qa_harness_home(self):
         missing = []
-        for p in sorted(SCENARIOS.glob("*-scenario.sh")):
+        # Both homes of a driver: the dev-harness scenarios and the two QA
+        # drivers in scripts/ that also drive run.sh. The first version
+        # globbed the first directory only and was green while
+        # qa-player-scenarios.sh's cold phase still ran `player start` under
+        # the real XDG_STATE_HOME (the F-HARNESS-20 review).
+        drivers = sorted(SCENARIOS.glob("*-scenario.sh")) + sorted((ROOT / "scripts").glob("qa-*-scenarios.sh"))
+        self.assertGreaterEqual(len([d for d in drivers if d.parent.name == "scripts"]), 2, drivers)
+        for p in drivers:
             text = p.read_text(encoding="utf-8")
-            if '"$RUN"' in text or "run.sh" in text and "RUN=" in text:
+            # A driver of the harness is a script that assigns run.sh's path to
+            # a variable: RUN="$HERE/run.sh" in the dev-harness scenarios,
+            # H="$ROOT/scripts/dev-harness/run.sh" in qa-sources-scenarios.sh.
+            # Matching the NAME `RUN` missed the second (the review's sibling).
+            if re.search(r'^\s*[A-Za-z_][A-Za-z0-9_]*="[^"\n]*/run\.sh"\s*$', text, re.M):
                 calls = [ln for ln in text.splitlines()
                          if ln.strip().startswith('qa_harness_home "$SCRATCH"')]
                 if not calls:
