@@ -318,7 +318,7 @@ names only, like `read_local_source`).
 ### 2.4 `state` subcommand in v2
 
 - `default_state()` -> `{"version": 2, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": null, "sources": []}` -- plus, since they were added, `"session": null`, `"savedSearches": []` and `"hiddenGroups": []`, in that order (a python test pins the key order against what the service writes).
-  `state init` therefore creates a v2 file on fresh installs (`init_state_file`, `bin/omarchy-iptv:1579-1598`).
+  `state init` therefore creates a v2 file on fresh installs (`init_state_file`, `bin/omarchy-iptv:1579-1598`). [Round 12, 2026-10-13 (R22a): it reports what it FOUND at the path before it created or chmod-ed anything (`found`: `absent`, `file`, `other` or `unreadable`), never rewrites a file that exists, and every other `state` verb refuses a file that exists and cannot be read or parsed (`state_unreadable`) instead of writing the empty default over it.]
 - Every `state` action prints `state` through `public_state()`: each source
   record is emitted with `url` and `epgUrl` replaced by `host` (`source_host`)
   and `epgHost`, because helper stdout is a sink that must never carry a URL
@@ -502,11 +502,16 @@ by the helper for a syntactic reason; the helper keeps the runtime refusals
 | `activeSourceRecord(st)` | that record, or null |
 | `withActiveKey(st, key)` | the state with `activeKey` set (or cleared); the SAME object when nothing moves, so `changed` stays honest |
 | `reconcileAction({ first, force, playlist, epg, lastPlaylist, lastEpg })` | `{ act, adoptUrl, adoptEpg, playlistChanged, epgChanged }`: `act` is `adopt` for a non-empty playlist input this service has not consumed (first reconcile, or different from the snapshot), `migrate` for a first or forced reconcile with no fresh URL, `ignore` otherwise; `adoptEpg` is the same rule for the EPG input, independently (R1, R4). **Amended 2026-10-12 (round 8, R18a, lane-key-x1 1f8bd1b): both sides are compared through `Model.entryInputForm` -- "changed" is "the forms differ", and "non-empty" is the form's text -- so a value that differs from the snapshot only in surrounding whitespace, scheme or host case, the default port or an embedded control character is NOT fresh, and a value of whitespace or control characters alone is no input. Until round 7 both sides were trimmed by `Model.settingsFrom` and agreed by accident; now they agree with `Model.retiredInputsToKeep` by construction (a 34-case property, round-8 rulings below).** **Amended 2026-10-12 (round 10, R20b): also hands `first` back as it came, because `Model.adoptActiveSource` judges an EPG input equal to the held one by the held one's time only on the first reconcile after a start.** **Amended 2026-10-13 (round 11, R21a/R21b; lane-key-m1 15896f1, b52e745): the signature is `reconcileAction({ first, force, migrating, playlist, epg, seen })` -> `{ act, adoptUrl, adoptEpg, refused, report, migrating }`, and the round-2 snapshot arguments are gone. `migrating` is `!Model.entryMigratedOf(landedState)`. MIGRATING, a value is fresh unless it is the one `seen` holds LAST for its setting (`Model.entryInputLast`, R1's snapshot); `act` is `adopt` for a fresh playlist URL, `migrate` for a first or forced reconcile with nothing to adopt, `ignore` otherwise; `adoptEpg` likewise. MIGRATED, nothing is adopted: every retired key that carries a value (by `Model.entryInputForm`) is in `refused`, and the ones `seen` has not seen at all (`Model.entryInputSeen`) are in `report`. `seen` is `Service.entryInputsSeen`, in memory only (R21b). Lane A's mutants (of 2,261): always migrating 64, membership instead of the last value 3.** |
-| `adoptActiveSource(st, entry, nowSec, origin, { adoptUrl, adoptEpg })` | `{ state, key, changed, moved, adoptedUrl, adoptedEpg, invalid, added, evicted, writeEntry }`: resolves the active source in the order fresh entry URL -> state key -> entry mirror -> nothing (R1), attaches a fresh EPG input to the active record on any path, reports an invalid input without touching the key, and says whether the entry must be rewritten (it still holds a URL, or its mirror disagrees). `moved` -- a DIFFERENT source than before -- is the only thing that resets the status line. **Amended 2026-10-12 (round 8, R18a): the playlist input is `Model.entryInputForm`'s text and the EPG input its whole form, so an EPG of control characters alone is no input and never replaces the active record's guide URL with the empty one it used to validate as (the sibling R18a's search found). `writeEntry` is still asked from the entry as published, stale copy included -- the same answer heals a value D-SINK-20's patch-only write re-carried -- and a write that would change nothing the host stores is declined in the funnel (`Model.entryWriteNeeded`, R18b).** **Amended 2026-10-12 (round 9, R19b/R19c, lane-key-y1 690a888): `opts.seenAt` (ms) is when the service saw the inputs. A held `pendingEpg` meets the record that is active after step 1-4 BEFORE R4 runs, so an input seen in this same reconcile lands on top of the result (`applyPendingEpg`). R4's adoption stamps the record's `epgSetAt` with `seenAt` and does not re-stamp a guide URL the record already holds. With NO active source a valid EPG input is held as `pendingEpg` and CONSUMED (`epgConsumed` true, so the owned write that follows the save strips it), and a refused one is consumed as refused (lane A's reading (a)); R12's "not adopted and not stripped" is overturned. The result gains `pendedEpg`, `refusedEpg`, `pendingApplied` and `pendingSuperseded`, which the service logs by setting and key name.** **Amended 2026-10-12 (round 10, R20b; lane-key-z1 5b21950 and 92395c4): `opts.atStart`.** At a START, an EPG input EQUAL to the guide URL the state already holds as pending is that same input, still on the entry because its strip never landed, and is judged with its `seenAt`, never with now: if the active record's guide URL is later it loses (`epgByTime`), and a value held again keeps its first `seenAt`. This closes the round-9 data-loss lens's P3 (the pending E lost to a later G by time and was then adopted as the latest input in the same call). NOT in session: there the service SAW the entry change to that value, the user setting it again, a later explicit input (R19c); the in-session reading, lane-key-z1's first build, was measured wrong by the round-9 lens's own matrix (`EPG:OLD:init` 4 and `EPG:OLD:cli` 2 at length 2, a CLI re-set of the held value losing to an older record time) and withdrawn in 92395c4. Usually the start never reaches this branch, because the consumed slot (`entryInputs`) proves the value spent; it is the start over a file an earlier build wrote, with no slot. **Amended 2026-10-13 (round 11, R21; lane-key-m1 15896f1): `opts` is `{ adoptUrl, adoptEpg, migrating }`, each false when absent, so a caller with no plan reads no URL at all. The round-9 and round-10 options (`seenAt`, `atStart`) and results (`pendedEpg`, `pendingApplied`, `pendingSuperseded`, the `epgConsumed` / `epgEcho` entry rule) are withdrawn. A guide URL the plan adopts with NO record to land on is `noSourceEpg` (R21c: reported and stripped, never held); one that does not validate is `refusedEpg`; `migrating` sets the marker in the state returned (`Model.withEntryMigrated`; `marked` says whether this call set it); `writeEntry` is true whenever the entry carries a retired key or its mirror disagrees. Lane A's mutant M4, no marker set by the migration: 30 red.** |
+| `adoptActiveSource(st, entry, nowSec, origin, { adoptUrl, adoptEpg })` | `{ state, key, changed, moved, adoptedUrl, adoptedEpg, invalid, added, evicted, writeEntry }`: resolves the active source in the order fresh entry URL -> state key -> entry mirror -> nothing (R1), attaches a fresh EPG input to the active record on any path, reports an invalid input without touching the key, and says whether the entry must be rewritten (it still holds a URL, or its mirror disagrees). `moved` -- a DIFFERENT source than before -- is the only thing that resets the status line. **Amended 2026-10-12 (round 8, R18a): the playlist input is `Model.entryInputForm`'s text and the EPG input its whole form, so an EPG of control characters alone is no input and never replaces the active record's guide URL with the empty one it used to validate as (the sibling R18a's search found). `writeEntry` is still asked from the entry as published, stale copy included -- the same answer heals a value D-SINK-20's patch-only write re-carried -- and a write that would change nothing the host stores is declined in the funnel (`entryWriteNeeded`, R18b).** **Amended 2026-10-12 (round 9, R19b/R19c, lane-key-y1 690a888): `opts.seenAt` (ms) is when the service saw the inputs. A held `pendingEpg` meets the record that is active after step 1-4 BEFORE R4 runs, so an input seen in this same reconcile lands on top of the result (`applyPendingEpg`). R4's adoption stamps the record's `epgSetAt` with `seenAt` and does not re-stamp a guide URL the record already holds. With NO active source a valid EPG input is held as `pendingEpg` and CONSUMED (`epgConsumed` true, so the owned write that follows the save strips it), and a refused one is consumed as refused (lane A's reading (a)); R12's "not adopted and not stripped" is overturned. The result gains `pendedEpg`, `refusedEpg`, `pendingApplied` and `pendingSuperseded`, which the service logs by setting and key name.** **Amended 2026-10-12 (round 10, R20b; lane-key-z1 5b21950 and 92395c4): `opts.atStart`.** At a START, an EPG input EQUAL to the guide URL the state already holds as pending is that same input, still on the entry because its strip never landed, and is judged with its `seenAt`, never with now: if the active record's guide URL is later it loses (`epgByTime`), and a value held again keeps its first `seenAt`. This closes the round-9 data-loss lens's P3 (the pending E lost to a later G by time and was then adopted as the latest input in the same call). NOT in session: there the service SAW the entry change to that value, the user setting it again, a later explicit input (R19c); the in-session reading, lane-key-z1's first build, was measured wrong by the round-9 lens's own matrix (`EPG:OLD:init` 4 and `EPG:OLD:cli` 2 at length 2, a CLI re-set of the held value losing to an older record time) and withdrawn in 92395c4. Usually the start never reaches this branch, because the consumed slot (`entryInputs`) proves the value spent; it is the start over a file an earlier build wrote, with no slot. **Amended 2026-10-13 (round 11, R21; lane-key-m1 15896f1): `opts` is `{ adoptUrl, adoptEpg, migrating }`, each false when absent, so a caller with no plan reads no URL at all. The round-9 and round-10 options (`seenAt`, `atStart`) and results (`pendedEpg`, `pendingApplied`, `pendingSuperseded`, the `epgConsumed` / `epgEcho` entry rule) are withdrawn. A guide URL the plan adopts with NO record to land on is `noSourceEpg` (R21c: reported and stripped, never held); one that does not validate is `refusedEpg`; `migrating` sets the marker in the state returned (`Model.withEntryMigrated`; `marked` says whether this call set it); `writeEntry` is true whenever the entry carries a retired key or its mirror disagrees. Lane A's mutant M4, no marker set by the migration: 30 red.** |
 | `pointerWritePlan({ keyMoved, dirsReady, savePending, savesInFlight, saveFailed })` | `{ steps, entryWaits }` with `steps` drawn from `save-state`, `defer-state`, `write-entry`, `write-entry-after-saved`, `wait-entry`: the state is saved before the entry is written, and the entry WAITS for the state save to LAND on every route (R5, then R13 on 2026-10-12): `write-entry` is immediate only when nothing of ours is outstanding -- no save parked, none in flight, the last one not failed -- otherwise the key is held and `Model.entryFlushDisposition` settles it from the FileView's `saved` / `saveFailed`; `Service.persistActive` executes the steps, and `stateInitProc`'s exit, `saved` and `saveFailed` settle a held entry. `savesInFlight` and `saveFailed` are round-4 inputs (lane-key-t1; `Model.pointerWritePlan`); the shared fixture's `order` section has 13 cases since round 4 (8 before) |
 | `stateSaveLanded(viewText, askedText)` | R13 (lane-key-t1; `Model.stateSaveLanded`): whether the write the service last asked for is the one the FileView has just reported on -- the view's text IS the last text asked for, and that text is non-empty. "Landed" is read by CONTENT, not by counting `saved` signals, because a burst coalesces queued writes and a replaced one raises nothing (10 warm switches: 20 `setText`, 14 `saved` on lane-key-t1, 15 on lane-key-s2; lane A, 2026-10-12, `OMARCHY-PLUGIN-CONTRACT.md`) |
 | `countReload(counts, reason)` | R15 (lane-key-t1; `Model.countReload`): the reload counter by reason -- a NEW object (a `property var` mutated in place raises no change signal) with `reason`'s count incremented, keyed by the string `Model.reloadDisposition` answered, so the counter cannot name a reason the decision does not; the service's `stateReloadsByReason`, reported through the harness's `pointerState` |
-| `ownedWriteMode({ stateLoaded, savePending, savesInFlight, saveFailed })` | R16 (lane-key-u1; `Model.ownedWriteMode`): what an owned-entry write that is NOT the key mirror may carry -- `{ mode, reason }`, `patch` with `save-parked` / `save-in-flight` / `save-failed` whenever one of the three flags is raised, `heal` with `settled` otherwise; the three flags and nothing else (fixture section `ownedWrite`, 8 cases, the whole cube). **Amended 2026-10-12 (round 6, lane-key-v1 78ff442): a FOURTH input, `stateLoaded`, checked first -- anything but `true` answers `patch` with `state-not-loaded`, because before the first state load memory is the empty state and no save flag is raised, so the three flags alone answered `heal` there and a logo toggle stripped a URL set while the shell was down (the fifth review's data-loss P2). `heal` now means loaded AND nothing outstanding; the four inputs and nothing else; the `ownedWrite` section is 16 cases, the four-input cube.** |
+| `ownedWriteMode({ stateLoaded, savePending, savesInFlight, saveFailed })` | R16 (lane-key-u1; `Model.ownedWriteMode`): what an owned-entry write that is NOT the key mirror may carry -- `{ mode, reason }`, `patch` with `save-parked` / `save-in-flight` / `save-failed` whenever one of the three flags is raised, `heal` with `settled` otherwise; the three flags and nothing else (fixture section `ownedWrite`, 8 cases, the whole cube). **Amended 2026-10-12 (round 6, lane-key-v1 78ff442): a FOURTH input, `stateLoaded`, checked first -- anything but `true` answers `patch` with `state-not-loaded`, because before the first state load memory is the empty state and no save flag is raised, so the three flags alone answered `heal` there and a logo toggle stripped a URL set while the shell was down (the fifth review's data-loss P2). `heal` now means loaded AND nothing outstanding; the four inputs and nothing else; the `ownedWrite` section is 16 cases, the four-input cube.** **Amended 2026-10-13 (round 12, R22a; lane-key-n1 16a3bc9): a FIFTH input, `blocked` (the no-write mode's reason), checked before every other, and a third answer, `none` with reason `state-unreadable`: in the no-write mode no owned write is made at all, the patch included, because the entry may hold the only copy of an input the unread file could not tell us about (`R16 / R22a: the fixture covers the whole five-input cube ...`).** |
+| `stateLoadKind(result)`, `STATE_LOAD_ERRORS` | R22a (round 12, lane-key-n1 16a3bc9; `Model.stateLoadKind`, `Model.STATE_LOAD_ERRORS`): what one load of `state.json` IS. `result` is `{ loaded: true, text }` from `onLoaded` or `{ loaded: false, error }` from `onLoadFailed`; the answer is `loaded` (the text parses as a JSON object), `unparsed` (read and not one, an empty file included), or the failure's kind by Quickshell's `FileViewError` number -- 1 `io-error`, 2 `absent`, 3 `permission`, 4 `not-a-file` -- and `io-error` for any number the table does not know, never `absent` by default. The numbers are the enum's declaration order, measured (the round-12 rulings) and pinned against the installed qmltypes |
+| `stateInitFound(text, exitCode)` | R22a (`Model.stateInitFound`): the helper's start-up `state init` reply -> `absent` only for the init's own `found: absent`, `present` for `file`, `other` or `unreadable`, `unknown` for a failed exit, no reply, another verb's reply or a reply without the field. The one witness that tells a missing file from a file inside a directory the FileView cannot search, which it reports identically (FileNotFound) |
+| `stateLoadDecision({ kind, loadedBefore, initFound, retried })` | R22a (`Model.stateLoadDecision`): `{ act, reason }` for a load that is not `loaded` -- `apply` for a state; mid-session (`loadedBefore`) `block` at once; at a start `wait` until the init answers, `fresh` ONLY when the load is `absent` and the init found `absent`, else `retry` once (the init restores the 0000 modes it finds) and then `block`, with reason `absent-unconfirmed` for a FileNotFound the init contradicts |
+| `stateWriteGate({ blocked, loaded, dirsReady })` | R22a / R22b (`Model.stateWriteGate`): the one gate `Service.saveState` asks first -- `refuse` in the no-write mode whatever else is true, `park` before any state has loaded or before the directories are ready, `write` otherwise. Before R22a a save made with the directories ready and the load still outstanding wrote the empty default over the file |
+| `stateUnreadableNotice(reason, path)` | R22a (`Model.stateUnreadableNotice`): `{ title, body }`, the ONE sentence the user is told once per no-write episode, as a critical notification (replace id 74017) and on the console -- `Saved sources not loaded` / `<path> <what>. Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. <fix>`, composed from the reason and the path alone, never a URL; the six reasons and their text are in the round-12 rulings and `UX-SOURCES.md` 5.10 |
 | `persistFailureMessage(reason)` | R16 (lane-key-u1; `Model.persistFailureMessage`): the sentence for THE reason `sourcesPersistFailed` carried, over `Model.PERSIST_FAILURE_REASONS` (`state_write_failed`, `config_unsafe`, `persist_failed`); an unknown reason falls back to `persist_failed`'s sentence; what the guide renders on the result line and in the footer |
 | `invalidInputBlocks(invalid, activeKey)` | whether a refused input becomes the guide's error state: only when there is no active source to show instead (D16, narrowed) |
 | `sourceRows(st, activeKey, nowSec, errors)` | UI rows, sorted `active` first then `lastUsed` desc [UX-ASSUMPTION]: `{ key, label, host, kind, active, channelCount, groupCount, lastUsed, lastUsedText, fetched, epgConfigured, origin, errorReason }` -- no URL field, ever |
@@ -523,7 +528,7 @@ by the helper for a syntactic reason; the helper keeps the runtime refusals
 | `activeEpgUrlOf(record, input, pending)` | R19 / a12 (round 9; `Model.activeEpgUrlOf`): `Service.activeEpgUrl`'s decision, lifted so node calls it (rule 12; the eighth review's a12 mutation reverted the inline read and nothing went red). Beside a record: the record's guide URL, unless the input is SOMETHING that does not validate, which is returned as it is so the helper reports it (D16); an input of whitespace or control characters alone is no input and the record's value stands (R18a; D-SRC-17). With no record: the input on the entry when there is one (it is about to be held), else the held `pendingEpg` URL, else `""` **Amended 2026-10-13 (round 11, R21): `activeEpgUrlOf(record)`, the record's own guide URL and nothing else -- the entry input and the held value are no fallback any more (`R21: activeEpgUrlOf is the record's own guide URL ...`; mutant M11, the input fallback restored: 1 red).** |
 | `owedMirrorAction({ owed, pendingKey, savePending, savesInFlight, saveFailed })` | R19d (round 9; `Model.owedMirrorAction`): `rewrite` or `none`. A held key mirror DROPPED because its state save failed (`Model.entryFlushDisposition`, `save-failed`) leaves a debt (`Service.entryMirrorOwed`); the first save to LAND with no key held, no save parked, none in flight and none failed pays it with one key mirror through the funnel, deferred by `Qt.callLater` from the FileView's `saved`, for the key active then. A heal clears the debt itself, because it strips everything consumed. D-SRC-18 is what this settles |
 | `entryInputText(value)`, `entryInputForm(name, value)`, `sameEntryInput(name, a, b)` | R18a (round 8, lane-key-x1; `Model.entryInputText`, `Model.entryInputForm`, `Model.sameEntryInput`): THE ONE NORMALISER for a value read from the bar entry's two input keys. `Model.entryInputText` is `Model.settingsFrom`'s own trim, named (every `\s` at either edge). `Model.entryInputForm` is that, then `sanitizeInput` (control characters out, the cap), then validation as a CLI value of kind `name` (`epgUrl` validates as an EPG URL), and answers `{ text, ok, url, form }`: `form` is the validated URL when it passes and the sanitized text when it does not, so a refused value is one value whatever its spacing; `text` "" means NO input. Two values are the same input exactly when their forms are equal. Every comparison of an entry value -- against a snapshot, a record or another entry value -- goes through it: `Model.settingsFrom`, `Model.reconcileAction`, `Model.adoptActiveSource`, `Model.retiredInputsToKeep`, `adoptPendingEpg`'s `formEpg`, and `Service.activeEpgUrl`'s "the input does not validate" read. Nothing here is a URL the caller did not already hold **Amended 2026-10-13 (round 11): kept (R21d keeps R18a's normaliser); its callers are now `Model.settingsFrom`, `Model.reconcileAction`, `Model.adoptActiveSource`, `Model.entryInputSeen`, `Model.entryInputLast` and `Model.entryInputsSeenAfter`; adoptPendingEpg's `formEpg` and `Service.activeEpgUrl`'s input read are withdrawn.** |
-| `entryWriteNeeded(id, entry, published, lastWrite)`, `entryWriteRecord(id, entry, published)`, `hostEntryForm(id, entry)` | R18b (round 8, lane-key-x1; `Model.entryWriteNeeded`, `Model.entryWriteRecord`, `Model.hostEntryForm`): would handing `entry` to `updateEntryInline` change what the host STORES? `Model.hostEntryForm` is the object the host compares, `{ id }` then the entry's other keys in order; the host's answer is `JSON.stringify` of it against the stored entry (`shell.qml` `updateEntryInline`, 1094 for a layout entry, 1107 for a plugins entry). The stored entry is estimated: while the publish is still exactly the one that stood when this service last wrote (`lastWrite.published`), it is what that write handed over (`lastWrite.stored`); once the publish moves -- our own echo or anybody's write -- it is the publish. So a write this declines is one the host would have answered `false` to, and the estimate never waits for an echo (rule 9). `Model.entryWriteRecord` is what the funnel records after every write it makes (`Service.lastEntryWrite`); deliberately RAW JSON, not normalised, because it mirrors the host's own byte comparison and a write that strips a whitespace-only value changes bytes **RETIRED 2026-10-12 (round 9, R19a): no shipped caller.** The funnel no longer skips a write on this estimate (the round-9 rulings below say why); `updateEntryInline`'s own answer is the dirty check. The three stay declared only because this table and three other documents cite them by name and the ledger resolves each citation against the model; the round-9 text cites them without the prefix for that reason, and deleting them is a code change that must reword these citations in the same commit. |
+| `entryWriteNeeded(id, entry, published, lastWrite)`, `entryWriteRecord(id, entry, published)`, `hostEntryForm(id, entry)` | R18b (round 8, lane-key-x1; `Model.entryWriteNeeded`, `Model.entryWriteRecord`, `Model.hostEntryForm`): would handing `entry` to `updateEntryInline` change what the host STORES? `hostEntryForm` is the object the host compares, `{ id }` then the entry's other keys in order; the host's answer is `JSON.stringify` of it against the stored entry (`shell.qml` `updateEntryInline`, 1094 for a layout entry, 1107 for a plugins entry). The stored entry is estimated: while the publish is still exactly the one that stood when this service last wrote (`lastWrite.published`), it is what that write handed over (`lastWrite.stored`); once the publish moves -- our own echo or anybody's write -- it is the publish. So a write this declines is one the host would have answered `false` to, and the estimate never waits for an echo (rule 9). `entryWriteRecord` is what the funnel records after every write it makes (`Service.lastEntryWrite`); deliberately RAW JSON, not normalised, because it mirrors the host's own byte comparison and a write that strips a whitespace-only value changes bytes **RETIRED 2026-10-12 (round 9, R19a): no shipped caller.** The funnel no longer skips a write on this estimate (the round-9 rulings below say why); `updateEntryInline`'s own answer is the dirty check. The three stay declared only because this table and three other documents cite them by name and the ledger resolves each citation against the model; the round-9 text cites them without the prefix for that reason, and deleting them is a code change that must reword these citations in the same commit. **DELETED 2026-10-13 (round 12, R22e; lane-key-n1 dab2b56): all three are gone from model/settings.mjs and from `Model.mjs`, pinned absent (`R22e: hostEntryForm, entryWriteRecord and entryWriteNeeded are gone ...`); cited bare everywhere from this round. The three prefixed names at the head of this row are the last citations the ledger's three R22e withdrawn-symbol waivers cover; they go, bare, in the same commit that deletes those waivers from `scripts/check-defect-ledger.py`, because an unused waiver is red (R22d) and that file is not the documents lane's (the round-12 rulings).** |
 | `sameOwnWrite(a, b)` | R18b (round 8, lane-key-x1; `Model.sameOwnWrite`): the own-write record the funnel would assign against the one in force -- equal when both are absent, or when `base` and `value` carry the same keys with strictly equal values (`undefined` is not `""`). That is exactly what `Model.ownWriteInForce` and `Model.settingsWithOwnWrite` read, so an equal record is one no binding can tell apart and reassigning it is the re-trigger and nothing else; the funnel reassigns `ownWrite` only when this answers false **Round 9 (R19a): now the ONE clause that settles the cycle -- with the skip gone, an owned write the host answers `false` to re-triggers nothing because the record is not reassigned. Lane A's mutation m2 shows it is no longer load-bearing for the loop (no LOOP with it removed, because R19b took away the loop's precondition, an EPG input that stayed fresh on the entry forever); it is kept and pinned (m2 reddens 4 checks).** |
 | `entryMigratedOf(st)`, `withEntryMigrated(st)` | R21a (round 11, lane-key-m1 15896f1; `Model.entryMigratedOf`, `Model.withEntryMigrated`): the migration marker (section 2.1). `Model.entryMigratedOf` is true exactly when `st.entryMigrated === true`; `Model.withEntryMigrated` returns the state with it set, the SAME object when it already is, so a caller's "did the state move" stays an identity test. Mutants M10 (`parseState` reads a truthy marker) 5 red, P1/P2 in the helper (drops it; reads it truthily) 3 and 1 red in `tests/test_state.py` |
 | `entryInputSeen(seen, name, value)`, `entryInputLast(seen, name, value)`, `entryInputsSeenAfter(seen, values)`, `MAX_SEEN_INPUTS` | R21b (round 11; `Model.entryInputSeen`, `Model.entryInputLast`, `Model.entryInputsSeenAfter`, `Model.MAX_SEEN_INPUTS`): the session's in-memory, ORDERED record of every value it has migrated or refused off the entry, by setting, each as its one form (`Model.entryInputForm`). `Model.entryInputSeen` asks "seen at all" (after the marker: report once); `Model.entryInputLast` asks "the most recent one" (inside the migration window: R1's snapshot); `Model.entryInputsSeenAfter` moves every non-empty value to the end of its list, a NEW object when anything moves and the SAME object otherwise, at most `Model.MAX_SEEN_INPUTS` (32) values a setting, the oldest dropped -- a value that old reports once more if it comes back, never an adoption. Nothing here is persisted: the persisted snapshot of round 10 (R20b) is what it replaces. Mutant M3, `entryInputSeen` never true: 49 red; M16, freshness by membership instead of the last value: 3 |
@@ -848,11 +853,11 @@ pin, mutation and count is under the round-7 rulings below.
 **Amended 2026-10-12 (round 8, R18, lane-key-x1 1f8bd1b, lane A; the
 seventh review, two lenses over lane-key-w2).** The funnel now declines a
 write that changes nothing, and that is what lets the cycle settle. After
-composing the entry, `writeOwnedEntry` asks `Model.entryWriteNeeded` with
+composing the entry, `writeOwnedEntry` asks `entryWriteNeeded` with
 its own record of its last write (`lastEntryWrite`); when the host would
 answer `false` it returns success without calling `updateEntryInline`,
 without logging the keep warning, and without touching `ownWrite`. When it
-does write, it records `Model.entryWriteRecord` and reassigns `ownWrite`
+does write, it records `entryWriteRecord` and reassigns `ownWrite`
 only when `Model.sameOwnWrite` says the record differs from the one in
 force. Before this, a no-op write still REASSIGNED `ownWrite`, `settings`
 re-evaluated, `onSettingsChanged` ran reconcile, and reconcile asked for
@@ -965,12 +970,27 @@ only because `Model.entryWith` copies them.
    `own-write`, `save-parked`, `save-in-flight` (counted per `setText` in
    round 3; since R13 decided by CONTENT, `Model.stateSaveLanded`, because a burst
    coalesces `saved`), `save-failed`; applied: the first load and a file genuinely newer
-   (a CLI `state ...` write with nothing of ours outstanding). An ignored
+   (a CLI `state ...` write with nothing of ours outstanding [round 12, R22f's
+   search: that write never arrives -- the FileView raises no reload on the
+   helper's atomic rename, D-SRC-19 -- so `apply` for a newer file is reached
+   by a write in place, such as an editor's or key-scenario B7's restore]). An ignored
    reload runs neither `reconcile` nor `startCacheLayout`; the count is
    `stateReloadsIgnored` and, since R15, `stateReloadsByReason` -- one number
    per reason, which is what key-scenario D3 reads (`save-parked`). Step 1's `state init` exit also records
    `stateInitOk` and, after issuing the parked save, settles the held entry
-   mirror (R11, the persistActive amendment in 4.3).]**
+   mirror (R11, the persistActive amendment in 4.3).]** **[Amended
+   2026-10-13, D-SINK-19 round 12 (R22a; lane-key-n1 16a3bc9): step 2 is
+   `stateFile.onLoaded` AND `onLoadFailed` -> `stateLoadArrived` ->
+   `Model.stateLoadKind`, and only a load that parses as a state reaches
+   `applyUserState`. `onLoadFailed` used to call `applyUserState("")`, so a
+   file that could not be read was applied as an EMPTY state, migrated,
+   marked and written over the real one (the round-11 data-loss lens's
+   P1). A FileNotFound is a fresh install only when step 1's `state init`
+   reports `found: absent`, which is why step 1's exit now also records the
+   init's verdict and decides a held load (`Model.stateInitFound`,
+   `Model.stateLoadDecision`); any other failure gets one re-read after the
+   init and then the no-write mode. The FileView measurement and the rest
+   are in the round-12 rulings.]**
 3. `reconcile()` (also from `onPlaylistUrlChanged`, `onEpgUrlChanged`):
    `Model.reconcileSources(userState, playlistUrl, epgUrl, activeSourceKey, now)`;
    on `changed` assign `userState`, `saveState()`; for each `evicted` key
@@ -2361,13 +2381,13 @@ then declined by R18b); the `sourceKey` comparison is `Model.activeKeyText` on
 both sides; `Model.ownWriteInForce` and `Model.settingsWithOwnWrite` compare
 owned keys only, both sides from `Model.settingsFrom`; `Model.ownWriteOf`
 compares nothing; `Model.sameOwnWrite` is deliberately strict, because it
-must equal what the bindings read; `Model.entryWriteNeeded` is deliberately
+must equal what the bindings read; `entryWriteNeeded` is deliberately
 RAW JSON, because it mirrors the host's own byte comparison and normalising
 it would skip a write that changes bytes (stripping a whitespace-only value,
 say); `Model.entryFlushDisposition` reads flags and a key, no entry value;
 `epgSnapshotAfter` is an emptiness test on a trimmed value; the funnel's
 raw `published` feeds only the keep decision (normalised), `Model.entryWith`
-(a copy) and `Model.entryWriteNeeded` (raw by design); `Service.pipConfig` only
+(a copy) and `entryWriteNeeded` (raw by design); `Service.pipConfig` only
 clamps; `Model.sourceView` reads a record, not the entry; and `Guide.qml`
 and `BarWidget.qml` read no entry value.
 
@@ -2378,13 +2398,13 @@ have stored; decision (2), `Model.sameOwnWrite`, stands and alone settles
 the cycle; OQ-X2 is moot. The text is kept as the round-8 ruling read.] A
 write that changes nothing changes nothing. Two
 decisions in the funnel, both in `Model.js` so the node driver calls what
-`Service.qml` calls. (1) `Model.entryWriteNeeded(id, entry, published,
+`Service.qml` calls. (1) `entryWriteNeeded(id, entry, published,
 lastWrite)` answers the host's own dirty check -- `JSON.stringify` of
 `{ id }` plus the entry's other keys against the stored entry, key order
 included (`/usr/share/omarchy/shell/shell.qml` `updateEntryInline`, the
 comparison at 1094 for a layout entry and 1107 for a plugins entry, read on
 this machine) -- against the stored entry as the plugin can know it: its own
-last write (`Service.lastEntryWrite`, recorded by `Model.entryWriteRecord`
+last write (`Service.lastEntryWrite`, recorded by `entryWriteRecord`
 after every write it makes) while the publish is still exactly the one that
 stood when it was made, and the publish once it has moved (our own echo, or
 anybody's write). A write it declines is one the host would have answered
@@ -3511,8 +3531,9 @@ re-read against the tree by this lane):
   patchInputsToKeep and `writeOwnedEntry`'s `keepRetired` branch deleted (the
   parameter is `patchOnly` and gates only the owed-mirror reset).
 - KEPT and why: `Service.landedState`, because R21a asks it for the marker;
-  `Model.hostEntryForm`, `Model.entryWriteRecord` and `Model.entryWriteNeeded`,
-  R19a's retired estimate, outside R21d's list and still cited; the
+  `hostEntryForm`, `entryWriteRecord` and `entryWriteNeeded`,
+  R19a's retired estimate, outside R21d's list and still cited [round 12,
+  2026-10-13: deleted by R22e, the round-12 rulings]; the
   `spikes/key-mutations` patches `d3-save-parked` and `r14-no-return` (R9 and
   R14, which `qa-lib-test.sh` proves still apply); the service-order driver's R13
   sequences, re-run on `Service.qml`'s own functions through
@@ -3564,7 +3585,9 @@ nothing. (5) `manifest.json` still declares `playlistUrl` and `epgUrl` as
 settings with labels (`omarchy bar set` therefore still offers them), and the
 guide's fetch-failure line still ends `check playlistUrl`
 (`Guide.qml` `errorCheck`); both are code, outside this documents lane, and
-are raised to the lead rather than changed here.
+are raised to the lead rather than changed here. [Round 12, 2026-10-13: the
+hint now ends `check the source in Sources` (R22c, lane-key-n1 74f9a01); the
+manifest declarations stand, open item 5 of the round-12 rulings.]
 
 Rule 15, this lane's searches over the nine files it owns. By the shape "an
 instruction to set a source URL from the command line" (`bar set` beside
@@ -3579,3 +3602,348 @@ prefixed citation of a withdrawn export": every one de-prefixed. And by the
 shape "a version number that names the last build to name the source by
 URL": the README said 0.13.5 where the last such release is 0.13.6
 (ca5a3a5), fixed at each place.
+
+### D-SINK-19 round 12 rulings (lead, 2026-10-13; R22, on top of R1-R21, which stand)
+
+**What the round-11 lenses found, on lane-key-m2 (12429dc).** Both lenses
+read 0 problems under R21's own oracle -- the data-loss lens over about
+71,000 sequences a host shape (10,108 at length 2, 61,516 at length 3) run
+through `Service.qml`'s own functions, the live lens over the real upgrade
+from a 0.13.6 install -- and neither matrix ever started from a
+`state.json` that fails to load. That is where the P1 was.
+
+- P1-A (the data-loss lens, live under a nested headless cage on a private
+  D-Bus, both host shapes). A MIGRATED install whose `state.json` could not
+  be read when the shell started (chmod 0000 while it was down) lost every
+  record. `stateFile.onLoadFailed` called `applyUserState("")`; the empty
+  stand-in carries no marker, so reconcile migrated it and
+  `Model.withEntryMigrated` marked it changed; the save parked behind
+  `dirsReady`; the helper's start-up `state init` restored the mode, which
+  raised the reload carrying the REAL text; `Model.reloadDisposition`
+  ignored that reload because a save was parked (R9); and the parked save
+  wrote an empty state plus the marker over the real file. The marker then
+  stopped any later migration, so the loss was permanent: `RESULT file: THE
+  RECORDS ARE GONE (records=0, were 2)` on the lagging and the echoing host
+  alike, where lane-key-z2 and dev 4740a50 (0.13.6) kept both records over
+  the same sequence. A file that does not parse took the same road. Its
+  sibling, OLDER than R21: a state DIRECTORY chmod 0000 lost the records on
+  lane-key-z2 too, through the cache layout's save -- which the node harness
+  could not see, because it stubbed `startCacheLayout` as "the layout is
+  current" (rule 10).
+- P1-B (the live lens, a screenshot inside the cage): the guide's
+  fetch-failure line ended `check playlistUrl` (`Guide.qml` `errorCheck`),
+  sending a user whose provider is down to the one setting R21 refuses;
+  `UX.md` 4.6 and 6.3 and `QA.md` TC-CFG-02 and US1 step 4 prescribed that
+  text, so the QA plan would have graded it a pass.
+- P2 (both lenses): the ledger's 17 withdrawn-symbol and 3
+  unexported-citation waivers were all unused and still honoured, so a NEW
+  stale citation in a waived document passed the gate.
+- P3: the helper's `state source update --help` still said the running
+  shell's `playlistUrl` / `epgUrl` setting owns the active source's URL;
+  key-scenario.sh's round-7-to-10 header described the pending guide URL's
+  adoption as live and cited a withdrawn export; its lane-key-z2 baseline
+  footer miscounted which reds were NOFIELD-only; and hostEntryForm,
+  entryWriteRecord and entryWriteNeeded were still exported with no caller.
+
+**The lead's ruling, R22.**
+
+R22a, A STATE THAT DID NOT LOAD IS NEVER WRITTEN. Only "the file does not
+exist" means a fresh install (and lets the migration run). Any other load
+failure -- permission, not a regular file, an I/O error -- and any text that
+does not parse as a state, puts the service in a no-write mode for the
+session: every state write is refused, the migration does not run and no
+marker is set, the entry is left exactly as it is (it may hold the only copy
+of an input), and the user is told once, by one model function that names
+the file and what to do and never a URL. A later successful load lifts it.
+Measure what Quickshell's FileView reports for each case before deciding how
+to tell them apart; the helper's `state init` must never rewrite a file it
+could not parse.
+
+R22b, RULE 15 AS A LIST. Every writer of `state.json`, in the service and in
+the helper, obeys R22a, each listed with how; the node harness drives the
+load failures through the REAL `startCacheLayout`; the unreadable-directory
+sibling is measured on dev (0.13.6, shipped) as well as on the tree.
+
+R22c, the guide's fetch-failure hint points to Sources, not to a setting,
+and no shipped string anywhere tells the user to set `playlistUrl` or
+`epgUrl`, proved by a search of every shipped file.
+
+R22d, an unused ledger waiver is itself a failure; the unused ones go.
+
+R22e, the three exports R19a retired with no caller are deleted, and the
+documents cite them bare with their part, or not at all.
+
+R22f, the P3s.
+
+**What Quickshell's FileView reports, measured before anything was decided
+(lane-key-n1, lane A, 2026-10-13).** quickshell 0.3.1-1 and Qt 6.11.2 as
+installed (Arch), one FileView per case, under a nested headless cage on a
+private D-Bus with HOME and the XDG directories redirected to a scratch
+tree. The probe and its log (`lane-n1/fvprobe/run.sh`, `qs.log`) are in the
+session's scratch directory, not in this tree; this lane read the log. The
+error argument is `qs::io::FileViewError`
+(`/usr/lib/qt6/qml/Quickshell/Io/quickshell-io.qmltypes`): Success 0,
+Unknown 1, FileNotFound 2, PermissionDenied 3, NotAFile 4.
+
+| What is at the path | What the FileView reports |
+|---|---|
+| nothing: no file, no parent directory, or a dangling symlink | `loadFailed` 2, FileNotFound |
+| a file with mode 0000, or 0200 | `loadFailed` 3, PermissionDenied |
+| a directory, or a FIFO | `loadFailed` 4, NotAFile |
+| a file inside a directory of mode 0000, or of mode 0600 | `loadFailed` 2, FileNotFound -- exactly what a fresh install reports |
+| an empty file | `loaded`, text of length 0 |
+| a file of garbage | `loaded`, the garbage |
+
+Once the modes were put back: the 0000 file raised `fileChanged` and
+loaded; a missing file, once created, raised `fileChanged` and loaded; the
+0000 DIRECTORY raised no `fileChanged` at all (`inotify_add_watch ...
+failed: (Permission denied)` in the log) until an explicit `reload()`, after
+which it loaded and the watch worked. So the FileView alone cannot tell a
+fresh install from a directory it cannot search, and nothing it does later
+tells it either. The witness is the helper: `state init` now `lstat()`s the
+path BEFORE it repairs any mode (`state_path_found` in `bin/omarchy-iptv`)
+and its reply carries `found` -- `absent` (ENOENT, a missing parent
+included), `file` (a regular file, or a symlink to one), `other` (a
+directory, a FIFO, a dangling symlink) or `unreadable` (the lstat itself
+failed: the directory cannot be searched). `tests/test_state.py`
+`StateNeverWrittenUnreadTest` pins `found` for an absent file, a 0000 file,
+a 0000 directory, a directory at the path and a dangling symlink against the
+real helper run as a subprocess. The table above joins the service to
+Quickshell by NUMBER, so the node suite reads the installed qmltypes and goes
+red if the enum's order moves (`R22a: Model.STATE_LOAD_ERRORS names
+FileViewError's values by their position in the installed Quickshell's
+enum`; rule 13).
+
+**What the tree does (lane-key-n1: the helper ec7d00f, the service and model
+16a3bc9, the probe exit 4fdb37c).**
+
+- Every load of `state.json` arrives at `Service.stateLoadArrived`, from
+  `onLoaded` and `onLoadFailed` alike, and is classified before anything is
+  applied. `Model.stateLoadKind` answers `loaded` (the text parses as a JSON
+  object), `unparsed` (read, and not one -- an empty file included, since
+  nothing the plugin writes is empty), `absent` (2), `permission` (3),
+  `not-a-file` (4) or `io-error` (1, and any number the table does not know:
+  never `absent` by default). Only `loaded` reaches `applyUserState`, and it
+  is what lifts the no-write mode.
+- Any other kind goes to `Model.stateLoadDecision({ kind, loadedBefore,
+  initFound, retried })`: `apply`; `fresh` -- FileNotFound AND the init's
+  `found` is `absent`, the one load failure that is an empty state the
+  migration may run on; `wait` -- the start-up init has not answered, so
+  nothing is applied or written; `retry` -- one `reload()` after the init,
+  because the init restores the 0000 modes it finds (the file to 0600, the
+  directory to 0700), which is how both of the lens's cases now recover with
+  nothing reported; `block`. Mid-session (`loadedBefore`) a load that is not
+  a state blocks at once and memory stands: a reload never replaces memory
+  with a state that did not load.
+- `Model.stateInitFound(stdout, exitCode)` reads the init's reply: `absent`
+  only for the init's own `absent`; `present` for `file`, `other` or
+  `unreadable`; `unknown` for a failed exit, no reply, or a helper that
+  predates the field. A FileNotFound whose witness is `unknown` is NOT a
+  fresh install: it is re-read once and then blocks (reason `absent`), and a
+  FileNotFound the init contradicts blocks as `absent-unconfirmed`.
+- The no-write mode is `Service.stateWriteBlocked`: `""` while writes are
+  allowed, else the reason. `saveState` asks `Model.stateWriteGate({
+  blocked, loaded, dirsReady })` before anything else: `refuse` in the mode
+  (counted in `stateWritesRefused`, which the harness reads); `park` before
+  any state has loaded or before the directories are ready -- before R22a a
+  save made with the directories ready and the load still outstanding wrote
+  the empty default over the file; `write` otherwise. In the mode no owned
+  bar-entry write is made (`writeOwnedEntry` returns at its top,
+  `Model.ownedWriteMode` answers `none`, `Model.entryFlushDisposition` drops a
+  held mirror with reason `state-unreadable`); reconcile returns at once, so
+  the migration does not run, nothing is reported and nothing is stripped;
+  `sourcesReady` and `removeSource` answer `state_unreadable`; and a probe
+  that ENDS in the mode, having started before it, records nothing (added in
+  4fdb37c, after a surviving mutation found the probe committing in memory
+  and reporting success). The user is told once per episode
+  (`stateBlockTold`); a load that IS a state lifts the mode
+  (`liftStateBlock`, one console line naming the reason, never a path's
+  contents) and re-arms the notice for a later episode.
+- The helper's half. `state init` never rewrites a file that exists: the
+  create is `O_EXCL` and the existing branch only chmods, so a state it
+  could not parse is left byte for byte -- pinned over garbage, an empty
+  file, `[1,2]`, non-text and a 0000 file, by bytes, mtime, ctime and inode
+  (`test_init_never_rewrites_a_file_it_could_not_parse`). Every other `state`
+  verb, the read-only `show` and `source list` included, reads through
+  `read_state_strict`, which answers the empty default ONLY for a file that
+  does not exist and otherwise refuses -- exit 1, code `state_unreadable`,
+  nothing written.
+
+Lane A's readings where R22a is silent, recorded as built and raised to the
+lead to confirm rather than settled here: an EMPTY `state.json` counts as
+"does not parse" and blocks; a FileNotFound in the middle of a session (the
+file deleted, or its directory made unreadable) blocks rather than counting
+as fresh, because the FileView reports the unreadable directory the same
+way; and a block at a start gets one re-read after the init, so a 0000 file
+or a 0000 directory -- the lens's two cases -- recovers silently. One change
+a hand-run CLI user will see: `state show` and `state source list` over a
+file that does not parse now exit 1 with `state_unreadable`, where they used
+to print an empty state.
+
+**The user-facing copy as shipped** (`Model.stateUnreadableNotice(reason,
+path)` in model/state.mjs; a desktop notification through
+`omarchy-notification-send` with app name `IPTV`, urgency `critical`, the
+alert glyph and replace id 74017, `NOTIFY_IDS.stateUnreadable`; the same body
+on the console as `omarchy-iptv: <body>`). The title is `Saved sources not
+loaded`. The body is `<path> <what>. Nothing is saved until it can be read,
+so sources, favorites and settings changed now are not kept. <fix>`, where
+`<path>` is `<stateDir>/state.json` (on a default install
+`~/.local/state/omarchy-iptv/state.json`, spelled out in full) and the
+sentence is composed from the reason and the path alone:
+
+| Reason | `<what>` | `<fix>` |
+|---|---|---|
+| `permission` | `is not readable (permission denied)` | `Make it readable with chmod 600 on that file, then run omarchy restart shell.` |
+| `not-a-file` | `is not a regular file` | `Move whatever is at that path aside, then run omarchy restart shell.` |
+| `unparsed` | `is not a valid state file` | `Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell.` |
+| `absent`, `absent-unconfirmed` | `could not be found, or its folder could not be read` | `Make the folder readable with chmod 700, then run omarchy restart shell.` |
+| `io-error`, or anything else | `could not be read` | `Check the file and its folder, then run omarchy restart shell.` |
+
+A source call refused in the mode answers code `state_unreadable` with
+`state.json could not be read · nothing is saved until it can be`
+(`Model.sourceErrorMessage`; the middle dot is `Model.SEP`). The helper's
+refusal is one of `state.json could not be read (<strerror>); nothing was
+written`, `state.json is not UTF-8 text; nothing was written` and `state.json
+is not a valid state file; nothing was written`. `omarchy restart shell` is
+the Omarchy CLI's own verb (`omarchy restart --help` lists it on this
+machine, read 2026-10-13). `UX-SOURCES.md` 5.10 is what the user sees.
+
+**R22b, every writer of `state.json`, re-read against lane-key-n1 by this
+lane.** The service writes the file in exactly one place, the
+`stateFile.setText` inside `saveState`, behind the gate above, and
+`saveState` has 19 call sites: `play` (the session and the recents),
+`toggleFavorite`, `toggleHiddenGroup`, `saveSearch`, `forgetSearch`,
+`removeRecent`, `updateSource`, `removeSource`, `switchSource` (the three
+source verbs are also refused up front with `state_unreadable`),
+`adoptIdScheme` (D-ID-3), `applyUserState`'s replay of the session record,
+`adoptSourceStats`, `noteSessionOutcome`, `persistActive` (the D-SRC-15/16
+key-mirror plan, whose held mirror `Model.entryFlushDisposition` drops in the
+mode), `handleProbeExit` (the add's commit, refused at the exit since
+4fdb37c), `adoptActive` (reconcile's migration, which does not run in the
+mode), `startCacheLayout` (it runs only after a state has been applied, and
+its save goes through the gate), `onMaxRecentsChanged`, and `stateInitProc`'s
+exit flush of a parked save. The owned bar-entry writers -- `writeActive`,
+the logo patch and heal, `stripEntryInputs` -- all reach the host through
+`writeOwnedEntry`, which refuses at its top. In the helper, the writers are
+`state favorite add` / `remove`, `clear-recents`, `source add` / `update` /
+`remove` (all through `read_state_strict`), `state init` (`O_EXCL`, chmod
+only) and the `playlist --state-dir` D-ID-1 remap (`remap_state_file`,
+which only ever wrote a dict it had read and is now pinned:
+`test_the_d_id_1_remap_writes_nothing_over_a_file_it_could_not_parse`). The
+node harness (`tests/service-harness.js`) delivers each load through
+`stateFile`'s OWN handlers with the measured error numbers, models the
+init's reply and its mode repair as `tests/test_state.py` pins the real
+helper doing them, and RUNS `startCacheLayout`, `queueCacheJob` and
+`runNextCacheJob` (rule 10; `schedulePrune` stays stubbed and writes no
+state).
+
+**R22c-R22f, what changed.** R22c: `errorCheck` is `check the source in
+Sources` (74f9a01), the guide publishes what its empty state draws
+(`emptyTitleText`, `emptyProseText`) and the harness's `state` verb carries
+them with the copy's `errorCheck`, and `tests/test_shipped_copy.py` searches
+every string literal in every allowlisted code file for an instruction to set
+either key (on lane-key-m2 it named the guide's hint and the helper's
+`--epg-url` help; on lane-key-n1 nothing). R22d (dab2b56): an unused waiver
+is a failure that names it, and the twenty went. R22e (dab2b56): the three
+functions are deleted from model/settings.mjs and from `Model.mjs` and
+pinned absent (`R22e: hostEntryForm, entryWriteRecord and entryWriteNeeded
+are gone ...`). The documents cite them bare from this round, with ONE
+exception: the three prefixed citations in this file's reducer-table row for
+them (section 3.5, marked there) are the last uses of the ledger's three
+R22e waivers, and removing them without deleting those waivers in the same
+commit turns the ledger red (R22d). `scripts/check-defect-ledger.py` is not
+a documents-lane file, so that last step -- three citations de-prefixed and
+three waiver entries deleted, together -- is the lead's to make; it was run
+green in a throwaway export by this lane. R22f: the helper's `--url` and
+`--epg-url` help, its run-time warning and the comment above them now say
+what D-SRC-19 measured (a running shell does not re-read the file after a
+helper write, so its next save wins); key-scenario.sh's round-7 and round-9
+header paragraphs are marked withdrawn; its baseline footer counts EIGHT
+NOFIELD-only reds on lane-key-z2 (F4, U2, K2, K3, Q2, V1, Y2, Z3), not seven.
+
+**The shipped release, said plainly.** 0.13.6 (dev 4740a50) LOSES records
+through an unreadable state directory: measured live by lane A under a
+nested cage on a private bus, a migrated source A plus a source B added in
+the app, the state directory chmod 0000 while the shell was down -- after
+the start `state.json` held one record, and still one after a second start.
+B was gone with everything else in the file; A survived only because 0.13.6
+re-adopts it from the URL its bar entry still carries. The unreadable-FILE
+variant survives on 0.13.6, as the round-11 lens measured. Separately, the
+shipped helper's `state favorite add` over a truncated `state.json` and over
+a 0000 one exits 0 and leaves an empty state plus that one favourite: lane A
+measured it, and this lane re-measured it on 2026-10-13 from `git show
+dev:bin/omarchy-iptv` in a scratch state directory (a record with a
+credentialed URL and the favourite `t:keep`; afterwards `sources` 0 and
+`favorites ['t:x']`, exit 0, in both cases), while the lane-key-n1 helper
+refused both with `state_unreadable`, exit 1, the truncated file byte for
+byte as it was and the 0000 file's record and favourite intact.
+
+**Counts, lane-key-n1's tip 6172d8a (lane A's report; the gate re-run by
+this lane on its own tip).** Node 2,354 checks (2,261 before: 86 harness
+pins, 6 model unit pins, 1 R22e absence pin); python 1,170 (1,153 before: 12
+in test_state, 3 test_shipped_copy, 2 test_defect_ledger); `qa-lib-test.sh`
+472; the key preflight 11; the key scenario's live floor 97 -> 105 (B1-B8);
+the text format guard 58; a11y 35; qml spec 78. The ledger: unexported-
+citation waivers `0 listed, 0 in use`, withdrawn-symbol `3 listed, 3 in use`.
+Live, every run under a nested headless cage on a private D-Bus with no
+service directories (lane A, transcripts in its scratch directory):
+key-scenario 106 / 0 forward (`key-20261013-161816-835970`; B1 `records:2
+active:<KA> marker:true mode:600 told:0`, B3 `records:2 layout:2 dir:700
+found:present`, B5 `file:same blocked:unparsed add:state_unreadable
+switch:state_unreadable told:1 path:1 urls:0`, B6 `keys:same writes:0`, B7
+`blocked: switch:true file:<KC>`, B8 `kind:error sources:yes retired:no`)
+and 97 / 9 on `--baseline lane-key-m2` (`key-20261013-162220-859113`: B1-B8,
+and N1 for its new field alone, `found:NOFIELD`); sources-scenario 66 / 0;
+logo-scenario 33 / 0. Mutation: every new check was seen red (17 node
+mutants and 4 python, one at a time; three that survived the first pass --
+the reconcile gate, the `writeOwnedEntry` gate, the once-per-episode notice
+-- got pins in 4fdb37c and then read 4, 2 and 2). Against lane-key-m2 under
+the new harness the node suite reads 86 failures, exactly the 86 R22 harness
+pins, with every pre-existing check green there, so the double is not more
+forgiving than the code it replaced (rule 10). The round-11 lens's own R21
+matrix (`rk11.js` at length 2, the real v0.13.6 helper for the downgrade)
+reads the same 65 problems a host shape on this tree as on lane-key-m2, all
+the pre-existing D-SRC-19 class, and 0 of every other class.
+
+**Open for the lead (not defects; the board's ids are the lead's to
+assign).** (1) Rule 13: the 0.13.6 losses above -- the unreadable-directory
+start, and the helper verbs writing over a state they could not read --
+need `D-` ids and rows on `docs/STATUS.md`, which no lane this round owns;
+so do the cache-file siblings of the same shape (the helper's `failed.json`
+and status writers read tolerantly and regenerate by design, holding no user
+data), if the lead wants them recorded. (2) The last R22e step (above):
+whose file `scripts/check-defect-ledger.py` is. Until it is made, the
+`entryWriteNeeded` waiver still names four documents where only this one
+cites it, so a new prefixed citation in `ARCHITECTURE.md`, the contract or
+`QA.md` would pass -- the R22d hazard in miniature. (3) Lane A's three
+readings above, and the CLI behaviour change. (4) A no-write START leaves
+`stateLoaded` false, so the guide opens on the first-run form whose submit is
+refused; the notification is the only place that says why. Whether the
+guide gets its own surface is a UX decision (`UX-SOURCES.md` 5.10). (5)
+`manifest.json` still declares `playlistUrl` and `epgUrl` with labels
+(round 11's residual 5, the half R22c did not reach; R22c's search covers
+string literals in code, and the manifest's labels describe the settings
+rather than instruct anyone to set them).
+
+Rule 15, this lane's searches over the nine documents it owns. By the shape
+"a failed or unparsable state described as an empty state that is then
+written": `QA.md` TC-FAV-09, US5 step 7 and the `tests/test_state.py`
+inventory row, and `QA-SOURCES.md` SRC-MIG-08, SRC-HELP-04, SRC-CLI-07 and
+the fixture note, all amended to the no-write mode; nothing in the README,
+the UX documents or the contract said it. By the shape "the start-up
+sequence or the load path described as `onLoaded -> applyUserState` with
+`onLoadFailed` as an empty state": section 4.4 step 2 here and
+`ARCHITECTURE.md` section 5 and R9, amended; the contract's FileView section
+gains the load-failure table. By the shape "a document that says the running
+shell picks up a helper `state` write" (R22f's, applied to documents): the
+R9 lists here (4.4 step 2) and in `ARCHITECTURE.md` say `apply` covers "a
+CLI `state ...` write with nothing of ours outstanding", which D-SRC-19
+measured never arrives; both are bracketed. By the shape "the fetch-failure
+hint as `check playlistUrl`": `UX.md` 4.6 and 6.3, `QA.md` TC-CFG-02 and US1
+step 4, and this file's round-11 residual 5, amended; the `docs/QA-RESULTS.md`
+and `docs/STATUS.md` hits are records of runs that read the old text and are
+not this lane's files. By the shape "a prefixed citation of an R22e name":
+every one de-prefixed but the three named above; the quoted titles of the
+deleted R18b tests (round-8 rows here and in `QA-SOURCES.md` SRC-MIG-26) are
+quotations of names that no longer run, and the ledger does not read them as
+citations, so they are left as quoted.

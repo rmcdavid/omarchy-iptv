@@ -289,7 +289,8 @@ own write, which re-evaluated `settings` and ran reconcile again, about
 `false` is "already stored", as the section above says). The fix is still
 not a wait for the echo. The funnel estimates what the host STORES from
 its own record of its last write while the publish has not moved, and from
-the publish once it has (`Model.entryWriteNeeded`, the host's own
+the publish once it has (`entryWriteNeeded` in model/settings.mjs, deleted
+2026-10-13 by R22e after R19a withdrew the skip; the host's own
 `JSON.stringify` comparison at `shell.qml:1094` for a layout entry and
 `:1107` for a plugins entry, read on this machine), makes no write the host
 would answer `false` to, and re-records its own write only when the record
@@ -720,7 +721,8 @@ tree) and by the harness lane's key scenario (`scripts/dev-harness/
 key-scenario.sh`, segments D and N). The service's `stateFile` is a FileView
 with `watchChanges: true`, `atomicWrites: true` and `onFileChanged: reload()`,
 and these four facts are what R9-R11 (`ARCHITECTURE-SOURCES.md`, round 3)
-are built on:
+are built on [a fifth, about `loadFailed`, was added on 2026-10-13 and is
+what R22a (round 12) is built on]:
 
 - **`saved` fires once per `setText` -- for two back-to-back calls, and NOT
   for a burst (corrected 2026-10-12, round 4).** Two `setText` calls back to
@@ -766,6 +768,35 @@ are built on:
   that drops D2. Whether the watch is installed by the first successful load
   or by the first own write is unmeasured (lane B's DQ-B8); a reader of
   `watchChanges` should not assume a missing file is watched.
+- **`loadFailed`'s error does not tell a missing file from an unreadable
+  directory (D-SINK-19 round 12, measured 2026-10-13).** Lane A's probe on
+  lane-key-n1: one FileView per case, quickshell 0.3.1-1 and Qt 6.11.2,
+  under a nested headless cage on a private D-Bus with HOME and the XDG
+  directories redirected to a scratch tree (`lane-n1/fvprobe/qs.log` in the
+  session's scratch directory, read by the documents lane). The argument is
+  `qs::io::FileViewError` (in the same qmltypes file): Success 0, Unknown 1,
+  FileNotFound 2, PermissionDenied 3, NotAFile 4.
+
+  | At the path | Reported |
+  |---|---|
+  | nothing; a missing parent; a dangling symlink | `loadFailed` 2 |
+  | a file of mode 0000 or 0200 | `loadFailed` 3 |
+  | a directory; a FIFO | `loadFailed` 4 |
+  | a file inside a directory of mode 0000 or 0600 | `loadFailed` 2, the same as nothing there |
+  | an empty file; a file of garbage | `loaded` (text length 0; the garbage) |
+
+  After the modes were restored the 0000 file raised `fileChanged` and
+  loaded, and a missing file once created did the same; the 0000 DIRECTORY
+  raised no `fileChanged` (`inotify_add_watch ... failed: (Permission
+  denied)` in the log) until an explicit `reload()`. So a plugin cannot
+  learn from its FileView whether a file it failed to read exists: "file
+  not found" is also what a directory it cannot search says, and treating it
+  as a fresh install and saving is how the round-11 data-loss lens saw a
+  migrated `state.json` erased. This plugin asks its helper instead (`state
+  init` reports `found` from an `lstat` made before it repairs any mode;
+  `ARCHITECTURE-SOURCES.md` round-12 rulings), and the node suite reads the
+  enum from the installed qmltypes so a reordering on a Quickshell update is
+  a red gate rather than a silent misreading.
 
 `saveFailed` exists (`/usr/lib/qt6/qml/Quickshell/Io/quickshell-io.qmltypes:470`)
 and its argument is an enum, never a path; until round 3 the service

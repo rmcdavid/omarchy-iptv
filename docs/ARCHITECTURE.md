@@ -279,6 +279,34 @@ helper) and held to R20a's key check. An older build drops it, which is why a
 downgrade and a re-upgrade migrate again; `ARCHITECTURE-SOURCES.md` 2.1 and
 the round-11 rulings are the detail.
 
+How the file is READ, amended 2026-10-13 (D-SINK-19 round 12, R22a;
+lane-key-n1): a load is classified before anything is applied, and a state
+that did not load is never written. What Quickshell's `FileView` reports was
+measured first (quickshell 0.3.1-1, Qt 6.11.2, one FileView per case under a
+nested headless cage, lane A, 2026-10-13): `loadFailed` with FileNotFound
+(2) for a missing file, a missing parent or a dangling symlink -- AND for a
+file inside a directory of mode 0000 or 0600; PermissionDenied (3) for a
+0000 or 0200 file; NotAFile (4) for a directory or a FIFO at the path;
+`loaded` for an empty file and for garbage. So FileNotFound does not mean
+"no file", and the one party that can tell a fresh install from an
+unreadable directory is the helper's start-up `state init`, which now
+reports what it found before it repaired any mode (`found`: `absent`,
+`file`, `other`, `unreadable`). `Model.stateLoadKind` names the load
+(`loaded`, `unparsed`, `absent`, `permission`, `not-a-file`, `io-error`);
+only `loaded` is applied; FileNotFound is a fresh install -- an empty
+state the migration may run on -- only when the init found `absent`; any
+other outcome at a start is re-read once after the init (which restores a
+0000 file to 0600 and a 0000 directory to 0700) and then puts the service in
+the no-write mode for the session: every state write and every owned
+bar-entry write is refused, the migration does not run, and the user is
+told once (`Model.stateUnreadableNotice`, a notification naming the file
+and what to do, never a URL). A load that IS a state lifts it. Mid-session,
+a reload that is not a state blocks at once and memory stands. The helper's
+`state` verbs other than `init` refuse such a file the same way
+(`state_unreadable`, exit 1, nothing written), where they used to write the
+empty default over it. `ARCHITECTURE-SOURCES.md`'s round-12 rulings carry
+the table, the decision and every writer.
+
 ### mpv status (helper `status` stdout, M1 target)
 
 ```json
@@ -1012,7 +1040,12 @@ What the tree does now, on lane-key-s1 (3d2d8e7):
 - R9. A reload NEVER replaces in-memory state that is newer than the file.
   `Model.reloadDisposition` is asked first in `applyUserState`: `apply` for the
   first load and for a file that is genuinely newer (a CLI `state ...` write
-  with nothing of ours outstanding); `ignore` for the service's own write
+  with nothing of ours outstanding [round 12, R22f's search: that write never
+  arrives, because the FileView raises no reload on the helper's atomic
+  rename (D-SRC-19); a newer file is applied when it is written in place];
+  and since round 12 (R22a) only a load that parses as a state reaches
+  `applyUserState` at all -- a failed load is no longer applied as an empty
+  state); `ignore` for the service's own write
   echoed back, a save parked behind `dirsReady`, a save in flight
   (`stateSavesInFlight`, counted up before `setText` and down on the
   FileView's `saved` / `saveFailed` -- one `saved` per `setText`, measured, so
@@ -1250,7 +1283,8 @@ kind), through which every comparison of an entry value goes -- reconcile's
 disagree; its search found a sibling, an EPG of control characters alone
 that emptied the active record's guide URL. R18b: a write that changes
 nothing changes nothing -- the funnel declines a write the host would
-answer `false` to (`Model.entryWriteNeeded`, estimating the stored entry
+answer `false` to (`entryWriteNeeded` in model/settings.mjs [withdrawn by
+R19a in round 9 and deleted by R22e in round 12], estimating the stored entry
 from its own last write while the publish has not moved, never waiting for
 an echo) and reassigns the own-write record only when it differs
 (`Model.sameOwnWrite`). R18c: quiescence is a check -- the node driver runs
@@ -1371,6 +1405,40 @@ sources-scenario 66 / 0. R12, R17b, R18d, R19b, R19c, R20b and R20c are
 overturned, not rewritten: every paragraph above stands as the record, and
 the rulings, the deletion inventory and the residuals are in
 `ARCHITECTURE-SOURCES.md`'s round-11 rulings.
+
+**Round 12 (2026-10-13, lead ruling R22; lane-key-n1, lane A).** The
+round-11 data-loss lens found, live on both host shapes, that a MIGRATED
+install whose `state.json` could not be read at the start had an empty state
+written over it -- every source, credential and favourite gone, and the
+marker on disk so nothing ever migrated again. The failed load was applied as
+an empty state, the migration ran on it and marked it, the save parked
+behind the start-up directories, the helper's mode repair raised the reload
+carrying the real text, R9 ignored that reload because a save was parked,
+and the parked save landed. Its sibling is older than D-SINK-19's last
+round: a state DIRECTORY that cannot be entered reads to the FileView
+exactly like a fresh install, and the cache layout's save wrote the empty
+default over the file -- on 0.13.6 (dev 4740a50) too, measured live by lane
+A: an in-app source gone, the one the bar entry still carried re-adopted.
+R22a: a state that did not load is never written; only "the file does not
+exist", confirmed by the helper's `state init` (section 5, as amended),
+is a fresh install; anything else is re-read once and then holds the
+session in a no-write mode -- no state write, no owned entry write, no
+migration, the entry left exactly as it is, the user told once. R22b: every
+writer is listed and goes through one gate (`Model.stateWriteGate` in
+`saveState`; `read_state_strict` in the helper), and the node harness runs
+the REAL cache layout instead of a stub (rule 10). R22c: the guide's
+fetch-failure hint names Sources (`check the source in Sources`), and
+`tests/test_shipped_copy.py` proves no shipped string tells the user to set
+`playlistUrl` or `epgUrl`. R22d: an unused ledger waiver is red. R22e: the
+three R19a functions are deleted. R22f: the helper's help text, the
+scenario's header and its baseline footer are corrected. Observed on
+lane-key-n1: node 2,354 / 0; python 1,170; key-scenario 106 / 0 forward and
+97 / 9 on `--baseline lane-key-m2` (B1-B8 red there: `records:0` at a
+migrated start over a 0000 file and over a 0000 directory, a file that does
+not parse replaced at the start, the hint reading `check playlistUrl`);
+sources-scenario 66 / 0, logo-scenario 33 / 0. The measurement, the
+decision table, the copy and the open items are in
+`ARCHITECTURE-SOURCES.md`'s round-12 rulings.
 
 **What REMAINS, with its size rather than a claim of zero.** The exposure is
 NOT closed. Three things remain, and the first is the one to quote:
@@ -2290,6 +2358,12 @@ login, which the lead's tooling does not hold.
   guide unaffected. A hung mpv is reaped by the health check.
 - Service missing (should not happen; e.g. after a manifest edit): widget
   tooltip and guide status line say "service not loaded -- omarchy restart shell".
+- `state.json` exists but cannot be read, or does not parse (2026-10-13,
+  D-SINK-19 round 12, R22a): nothing is written to it for the session, the
+  bar entry is left as it is, and one critical notification
+  (`Saved sources not loaded`, `Model.stateUnreadableNotice`) names the file
+  and what to do. It used to be read as an empty state and saved over, which
+  is how a start could erase every source (section 5, as amended).
 
 Performance budget (10k channels):
 
@@ -2702,6 +2776,10 @@ Applied in fix round 1 against `docs/SECURITY-REVIEW.md`:
   by mpv, so it carries the plain name.
 - S-02: `state.json` is created 0600 by the helper verb `state init`
   (`O_EXCL`), which `Service.qml` runs after the directory bootstrap.
+  [2026-10-13, D-SINK-19 round 12 (R22a): the verb also reports what it
+  found at the path before it touched anything (`found`), which the service
+  reads to tell a fresh install from a directory it cannot search, and it
+  never rewrites a file that exists, whatever it holds.]
 - S-04: display names never start with `-`; the failure notification body
   is wrapped in curly quotes so it can never parse as a flag.
 - S-05: HTTP reads run under a wall-clock deadline of `max(60 s, 3 x
