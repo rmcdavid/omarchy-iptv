@@ -247,8 +247,8 @@ source is active, absent when nothing is pending, and each source record an
 optional `epgSetAt` (ms, when its guide URL was set), both additive with no
 version bump and both absent in a file that has neither, so such a file
 serializes exactly as before. They are taught to `Model.parseState` and
-`Model.cloneState` (read through `Model.pendingEpgOf` and
-`Model.epgSetAtOf`) and NOT to the helper's `normalize_state` /
+`Model.cloneState` (read through `pendingEpgOf` and
+`epgSetAtOf`) and NOT to the helper's `normalize_state` /
 `normalize_source`, so any helper write of the file erases them -- the first
 state keys added to fewer than all three whitelists, recorded as open in
 `ARCHITECTURE-SOURCES.md` 2.1 rather than called fixed. [Round 10: that
@@ -266,7 +266,18 @@ the value), with when and whether an owned write has since stripped it --
 so a restart no longer reads every value still on the entry as new --
 additive and absent when empty, and taught to all three whitelists on the
 day it was added. The helper's `state` verbs print the held guide URL as
-its host only.
+its host only. Amended 2026-10-13 (D-SINK-19 round 11, R21; the product owner dropped
+the `omarchy bar set` URL route): `pendingEpg`, `epgSetAt` and `entryInputs`
+are WITHDRAWN with the machinery that wrote them (R21d), and both readers drop
+them from a file an earlier build of the chain wrote. Version 2 carries one
+new optional key instead, `entryMigrated`: exactly `true` once the one
+migration of a 0.13.x install has adopted what its bar entry carried, absent
+otherwise, read through `Model.entryMigratedOf` and set through
+`Model.withEntryMigrated` in the same write as the adoption, taught to all
+three whitelists on the day it was added (`normalize_entry_migrated` in the
+helper) and held to R20a's key check. An older build drops it, which is why a
+downgrade and a re-upgrade migrate again; `ARCHITECTURE-SOURCES.md` 2.1 and
+the round-11 rulings are the detail.
 
 ### mpv status (helper `status` stdout, M1 target)
 
@@ -291,8 +302,8 @@ bar entry, read by the service through `shell.barConfig`.
 
 | Key | Type | Default | Validation (service side, the model) |
 |---|---|---|---|
-| `playlistUrl` | string | `""` | trimmed; the helper accepts `http(s)://`, `file://` or an absolute path and refuses everything else. **Amended 2026-10-11 (D-SINK-19): an INPUT, not a stored setting.** A value here that this service has not consumed -- the first reconcile of a service, or a value different from the one it last saw -- is validated and adopted through `Model.reconcileSources` exactly as a CLI value always was (SR8; SR37 in `ARCHITECTURE-SOURCES.md` as amended), the adopted record becomes the active one, and the plugin then rewrites the entry WITHOUT this key (`Model.RETIRED_SETTINGS`, dropped by `Model.entryWith`), so reading the entry back does not show it. A refused value is reported (D16, narrowed by `Model.invalidInputBlocks` to the case with no active source to show instead) and stripped too. An empty value is a no-op: it is the steady state after the plugin's own strip, not a command. The plugin itself never writes a URL here any more |
-| `epgUrl` | string | `""` | same rules. Input-only on the same terms: a fresh non-empty value is attached to the ACTIVE record on any reconcile that sees it (an `ignore` plan included) and stripped from the entry by the same owned write; an empty value is a no-op, and the CLI clear lever is withdrawn -- the Sources screen or `state source update` clears a guide URL (D-SINK-19 round 2, R4). "Empty disables EPG" is now a statement about the RECORD's `epgUrl`, not about this key. **Round 3 (R12, 2026-10-12): never stripped unadopted.** A value set while NO source is active stays on this key (the guide reads it as its fallback) until a source exists and the reconcile that brings it attaches the value to that source; only then is it taken off the entry. Round 2 stripped it in the same write with no copy anywhere. **Round 7 (R17, 2026-10-12): "until a source becomes active", by any route, and enforced at the sink.** Every owned write leaves this key on the entry unless the ACTIVE record holds the value or the service already consumed it (`Model.retiredInputsToKeep`, handed to `Model.entryWith` by the one funnel); a switch or an in-app add that makes a record active lands a pending value on it in the same turn (`Model.adoptPendingEpg`), replacing a guide URL the record had. Until round 7 the logo toggle's heal, and on the echoing host the key mirror's heal after a switch, stripped it with no copy anywhere (the sixth review's P1). **Round 8 (R18, 2026-10-12): compared the way adoption compares, and an add form's own guide URL wins.** The value is read through `Model.entryInputForm` everywhere it is compared, so surrounding whitespace (which `omarchy bar set` stores as typed) does not make it a different value, and a value of whitespace or control characters alone is no input -- it never empties a record's guide URL. A pending value meets an in-app add whose form carries a guide URL of its own (typed, or an Xtream add's `xmltv.php`): the form's wins, and the pending value is superseded and stripped by that commit (R18d). **Round 9 (R19, 2026-10-12): held in the state, and the input set last wins.** A value set while NO source is active no longer waits on this key: it is held in `state.json` as `pendingEpg { url, seenAt }` and taken off the entry by the same R13-gated owned write that strips every consumed input (R19b, overturning R12's on-entry pending state; a refused one is reported and stripped). R18d's form-wins rule is overturned too (R19c): every record carries `epgSetAt`, set by the add form at SUBMIT, by the edit form when it changes the guide URL, or by adoption with the input's `seenAt`, and at the move that makes a record active the held value lands iff it was seen LATER than the record's own was set (`Model.epgByTime`, `Model.applyPendingEpg`); either way it is cleared. Records written before R19 read as 0 |
+| `playlistUrl` | string | `""` | trimmed; the helper accepts `http(s)://`, `file://` or an absolute path and refuses everything else. **Amended 2026-10-11 (D-SINK-19): an INPUT, not a stored setting.** A value here that this service has not consumed -- the first reconcile of a service, or a value different from the one it last saw -- is validated and adopted through `Model.reconcileSources` exactly as a CLI value always was (SR8; SR37 in `ARCHITECTURE-SOURCES.md` as amended), the adopted record becomes the active one, and the plugin then rewrites the entry WITHOUT this key (`Model.RETIRED_SETTINGS`, dropped by `Model.entryWith`), so reading the entry back does not show it. A refused value is reported (D16, narrowed by `Model.invalidInputBlocks` to the case with no active source to show instead) and stripped too. An empty value is a no-op: it is the steady state after the plugin's own strip, not a command. The plugin itself never writes a URL here any more **Overturned 2026-10-13 (D-SINK-19 round 11, R21; the owner's decision): NOT a setting and NOT an input any more, except once.** The value here is read only by the migration of a 0.13.x install, while the LANDED state lacks `entryMigrated` (R21a); once that marker has landed, a value found here is REFUSED -- never adopted, whatever it is -- reported once (`Model.entryInputNotice`, a notification and the console, never the value) and stripped by the next owned write (R21b). It stays declared in `manifest.json` (that file is outside the documents lane; raised to the lead). Everything above is the record of rounds 1-10. |
+| `epgUrl` | string | `""` | same rules. Input-only on the same terms: a fresh non-empty value is attached to the ACTIVE record on any reconcile that sees it (an `ignore` plan included) and stripped from the entry by the same owned write; an empty value is a no-op, and the CLI clear lever is withdrawn -- the Sources screen or `state source update` clears a guide URL (D-SINK-19 round 2, R4). "Empty disables EPG" is now a statement about the RECORD's `epgUrl`, not about this key. **Round 3 (R12, 2026-10-12): never stripped unadopted.** A value set while NO source is active stays on this key (the guide reads it as its fallback) until a source exists and the reconcile that brings it attaches the value to that source; only then is it taken off the entry. Round 2 stripped it in the same write with no copy anywhere. **Round 7 (R17, 2026-10-12): "until a source becomes active", by any route, and enforced at the sink.** Every owned write leaves this key on the entry unless the ACTIVE record holds the value or the service already consumed it (`Model.retiredInputsToKeep`, handed to `Model.entryWith` by the one funnel); a switch or an in-app add that makes a record active lands a pending value on it in the same turn (`adoptPendingEpg`), replacing a guide URL the record had. Until round 7 the logo toggle's heal, and on the echoing host the key mirror's heal after a switch, stripped it with no copy anywhere (the sixth review's P1). **Round 8 (R18, 2026-10-12): compared the way adoption compares, and an add form's own guide URL wins.** The value is read through `Model.entryInputForm` everywhere it is compared, so surrounding whitespace (which `omarchy bar set` stores as typed) does not make it a different value, and a value of whitespace or control characters alone is no input -- it never empties a record's guide URL. A pending value meets an in-app add whose form carries a guide URL of its own (typed, or an Xtream add's `xmltv.php`): the form's wins, and the pending value is superseded and stripped by that commit (R18d). **Round 9 (R19, 2026-10-12): held in the state, and the input set last wins.** A value set while NO source is active no longer waits on this key: it is held in `state.json` as `pendingEpg { url, seenAt }` and taken off the entry by the same R13-gated owned write that strips every consumed input (R19b, overturning R12's on-entry pending state; a refused one is reported and stripped). R18d's form-wins rule is overturned too (R19c): every record carries `epgSetAt`, set by the add form at SUBMIT, by the edit form when it changes the guide URL, or by adoption with the input's `seenAt`, and at the move that makes a record active the held value lands iff it was seen LATER than the record's own was set (`epgByTime`, `applyPendingEpg`); either way it is cleared. Records written before R19 read as 0 **Overturned 2026-10-13 (round 11, R21), on the same terms as `playlistUrl`.** At the migration a value is attached to the source that becomes active, or, with no source to attach it to, reported (`no-source`) and stripped, never held (R21c); after the marker it is refused, reported once and stripped. A record's guide URL is set and cleared only in the Sources forms (or the helper's `state source` verbs). R12, R17b, R18d, R19b, R19c and R20b, recorded above, are overturned. |
 | `sourceKey` | string | `""` | D-SINK-19. Written by the plugin, never derived from user input: `Model.activeKeyText` of the active source's key, 8 lowercase hex with D4's suffix rule, mirrored into the entry by every owned write (`Model.OWNED_SETTINGS` is `["sourceKey", "showLogos"]`). NOT the authority -- `state.json`'s `activeKey` is -- and consulted only when the state names no record (`Model.adoptActiveSource` step 3); a value naming none of the user's records reads as absent. Deliberately NOT declared in `manifest.json` (`barWidget.defaults` and `schema` do not name it): declaring it would offer the mirror as a user setting with help text. The host keeps an undeclared key through its own rewrite -- MEASURED on 2026-10-11 (the host's `updateEntryInline` run in node over its own source, `OMARCHY-PLUGIN-CONTRACT.md`) -- and `omarchy bar set` writes any key without a schema check -- READ, not run: `setBarWidget` at `services/PluginRegistry.qml:342-380` ends `entry[String(key)] = value` with no schema lookup (the contract's "read rather than run" list). The recovery path rests on both; a round-2 sentence here called both measured and the contract entry it cited said otherwise for the second. Not a credential: SR36 states what it is (a 32-bit confirmation of a guessed URL) |
 | `refreshMinutes` | integer | 60 | `clampInt(5..1440)` |
 | `mpvArgs` | string | `""` | whitespace-split; each token must match `^--[a-z0-9][a-z0-9-]*(=.*)?$`; reserved names (`--input-ipc-server`, `--wayland-app-id`, `--title`, `--force-media-title`, `--idle`, `--script(s)`, `--config-dir`, `--load-scripts`, `--tls-verify`, `--stream-lavf-o`, and their `--no-` forms) are dropped with a console warning. This list is the M1 set plus the three later entries worth naming here; `MPV_RESERVED` in the model and its python mirror are the current list and `ARCHITECTURE-PLAYER.md` 4.12 is the register of why each name is on it. The two TLS entries are opposites and 4.15 is where that is specified: `--tls-verify` is the one entry the reserved list does not make safe by itself (D-SINK-13), and `--stream-lavf-o` is the one the reserved list is the only way to close (D-SINK-15). A single string was chosen over a JSON array because `omarchy bar set` writes strings by default and users copy examples from the README. |
@@ -327,7 +338,9 @@ a process the plugin creates itself, 0600 inside 0700, or an environment the
 fetch verbs make non-dumpable. Two things keep the sentence from being
 absolute, and both are bounded rather than denied: a URL the USER sets with
 `omarchy bar set` is written there by the host before the plugin can do
-anything about it, and is removed on adoption rather than never arriving (the
+anything about it, and is removed on adoption [round 11, R21b: removed
+UNADOPTED once the migration has landed -- the window is the same, the value
+is refused rather than adopted] rather than never arriving (the
 window is from the host's write to the plugin's next owned write: one
 reconcile and one `Qt.callLater` while the shell runs, the whole downtime plus
 the first start's reconcile when it was not); and an install upgrading into
@@ -794,7 +807,11 @@ this plugin put into a container it does not own? Swept over the tree at
   10, R20c: no longer -- the patch keeps a retired key only when it is a
   valid input the plugin's last LANDED state does not hold, and strips a
   value that state holds and a refused value already reported, so it puts
-  back nothing the plugin's own file already has or refused].
+  back nothing the plugin's own file already has or refused]. [round 11, 2026-10-13, R21a/R21b: the question is no longer about values.
+  Before the migration marker has landed the patch keeps every retired key
+  the entry carries -- the migration's input is the only copy while its
+  write is outstanding -- and once it has landed every owned write, this one
+  included, keeps none, so it can put nothing back; `Model.retiredInputsToKeep`].
 - **Every helper write.** Each is the existing `O_EXCL` temp + 0600 +
   `os.replace` into a directory the helper creates 0700 through
   `ensure_private_dir`, so no other borrowed container takes a URL. Cleared.
@@ -865,7 +882,8 @@ bar entry carries `sourceKey`, a mirror of that key, and NO URL:
 DROPS the retired keys from every write [round 7, R17a: every CONSUMED retired
 key -- one a record holds or the service already consumed; an input nothing
 has adopted stays, `Model.retiredInputsToKeep`; round 8: "consumed" compared
-through `Model.entryInputForm`, R18a], so the key is removed from the stored
+through `Model.entryInputForm`, R18a] [round 11, R21: every retired key while
+the one migration's write has not landed, none after it], so the key is removed from the stored
 entry rather than emptied -- the host builds the stored entry as `{id}` plus
 exactly what it is handed, measured on 2026-10-11 and recorded in
 `OMARCHY-PLUGIN-CONTRACT.md`. There is now exactly ONE call of
@@ -876,7 +894,11 @@ is rebuilt. The function whose job was "name the active source from a URL" is
 deleted rather than left behind with no caller; the comment above
 `Model.reconcileSources` says why.
 
-**The input path, which the first build got wrong and the adversarial review
+**[Round 11, 2026-10-13: the product owner withdrew this input path (R21,
+below). What this paragraph and its bullets describe now runs ONCE, as the
+migration of a 0.13.x install, and after the migration marker has landed a
+URL on the entry is refused, reported and stripped. The text is kept as the
+record of rounds 2-10.]** **The input path, which the first build got wrong and the adversarial review
 caught (lead rulings R1-R5, 2026-10-11).** `playlistUrl` and `epgUrl` on the
 entry are INPUTS, and the first build read them in the wrong order: its
 resolver trusted the state's key before it looked at the entry, every first or
@@ -928,7 +950,7 @@ now, with each decision lifted into `Model.js` so node can call it (rule 12):
   in the same owned write anyway -- the user's value gone with no copy (review
   P2). Now it stays on the entry, the guide reads it as its fallback meanwhile,
   the service's EPG snapshot moves only for an input that reached a record
-  (`Model.epgSnapshotAfter`, lane-key-s1), and the
+  (`epgSnapshotAfter`, lane-key-s1), and the
   reconcile that brings the first source adopts it; `writeEntry` is asked of
   `epgConsumed`, not of "the entry carries an EPG". The same already held for
   `playlistUrl` by R1. **[Round 7 (R17, 2026-10-12): R12 held only in the
@@ -1194,7 +1216,7 @@ of the ruling: without it the lagging host's stale publish carries a stripped
 URL back after its record is gone, resurrecting a removed source at the next
 start). R17b: `switchSource` and the probe commit land a pending EPG on the
 record becoming active in the same turn, before the save and the mirror
-(`Model.adoptPendingEpg`), never waiting for a host publish to trigger a
+(`adoptPendingEpg`), never waiting for a host publish to trigger a
 reconcile (rule 9); `removeSource` leaves it pending. R17c confirms that an
 absent `stateLoaded` means "not loaded". The rule-15 lesson is the
 instrument's: the service-order driver now audits every owned entry write
@@ -1316,6 +1338,40 @@ D-SINK-20. No shipped live scenario goes red on lane-key-y2 for those
 three; their gate-borne observers are the node and python tests. Detail in
 `ARCHITECTURE-SOURCES.md` 2.1, 3.5, 4.3 and its round-10 rulings.
 
+**Round 11 (2026-10-13, the product owner's decision and lead ruling R21;
+lane-key-m1, lane A).** Ten repair rounds did not converge -- P1s per round
+from round 3: 1, 1, 0, 1, 2, 2, 1, 3 -- and every P1 since round 3 was
+triggered by a URL arriving on the bar entry from the command line, each
+fix adding state the next review broke. The owner dropped the route: the
+in-app Sources form is the only way to add or change a source. R21a: one
+migration. The entry's `playlistUrl` and `epgUrl` are read as input only
+while the LANDED state lacks the marker `entryMigrated` (section 5); the
+migration adopts as before (R1, R4, R9-R11), the marker rides the same state
+write, and the entry is stripped once that write has landed (R13), every
+owned write keeping the retired keys until then. 0.13.6 drops the marker, so
+a downgrade and re-upgrade migrate again, correctly. R21b: after the marker
+nothing on the entry is an input -- a value there is refused, reported once
+per value (`Model.entryInputNotice`: a notification and a console line naming
+the Sources screen, never the value) and stripped by the next owned write;
+every owned write strips the retired keys unconditionally, which ends
+D-SINK-20's re-carry; an in-memory record of what the session has handled
+(`Model.entryInputsSeenAfter`) keeps the lagging host's stale publish from
+re-adopting or re-reporting. R21c: a guide URL at the migration with no
+source to attach it to is reported and stripped, never held. R21d: the
+pending guide URL, the set times, the active-move adoption, the add-form
+supersede rule, the persisted consumed-input snapshot and the landed-state
+patch rules are DELETED, with seventeen `Model.mjs` exports, their fixtures,
+tests and harness segments. R21e: pins that call the shipping code (93 node
+checks titled `R21`, three python tests and the shared fixture's marker
+cases) and live key-scenario segments G1-G5 (the migration, the real 0.13.6
+helper's downgrade, the re-upgrade) and X1-X6 (the refusal at the sink, the
+notification included). Observed on lane-key-m1: node 2,261 / 0; python
+1,153; key-scenario 98 / 0 forward and 68 / 30 on `--baseline lane-key-z2`;
+sources-scenario 66 / 0. R12, R17b, R18d, R19b, R19c, R20b and R20c are
+overturned, not rewritten: every paragraph above stands as the record, and
+the rulings, the deletion inventory and the residuals are in
+`ARCHITECTURE-SOURCES.md`'s round-11 rulings.
+
 **What REMAINS, with its size rather than a claim of zero.** The exposure is
 NOT closed. Three things remain, and the first is the one to quote:
 1. *The key is a confirmation oracle.* It is `fnv1a32` of the normalized URL,
@@ -1330,7 +1386,9 @@ NOT closed. Three things remain, and the first is the one to quote:
    DIGEST of each bar-entry input the service consumed (`entryInputs`,
    R20b), a refused one included -- a confirmation oracle of the same
    kind for that value, in the plugin's own private file rather than in
-   `shell.json`, and never a way back to it.]
+   `shell.json`, and never a way back to it.] [Round 11: no longer --
+   `entryInputs` is withdrawn (R21d), and what the session has handled is
+   held in memory only.]
 2. *The input path.* `omarchy bar set ... playlistUrl` is still supported and
    is still a write of a credential into that file, made by the host on the
    user's instruction, at a moment the plugin cannot gate. The plugin removes
@@ -1372,7 +1430,20 @@ NOT closed. Three things remain, and the first is the one to quote:
    re-graded P2); R20c strips what the last landed state holds and what was
    refused and reported. Observed by the round-9 lens's own driver under
    lane A's cage: `stored epgUrl=no` after the toggle on lane-key-z1, `yes`
-   for the session on lane-key-y2.]
+   for the session on lane-key-y2.] [Round 11, 2026-10-13: the route is
+   WITHDRAWN (R21). `omarchy bar set ... playlistUrl` is no longer supported:
+   after the one migration a value set that way is refused, never adopted,
+   reported once and stripped by the next owned write, which on a running
+   shell is the `Qt.callLater` that follows the reconcile. So the window
+   above is unchanged in shape -- from the host's write to the plugin's next
+   owned write -- and still not something the plugin can prevent, but it is
+   now the whole of the value's life, for a valid URL and a refused one
+   alike, and never ends with the URL adopted into anything. Every owned
+   write strips the retired keys once the marker has landed, so nothing is
+   re-carried (D-SINK-20 ends there). Inside the migration window a
+   migration input whose save fails stays on the entry as its only copy,
+   which is R13's design and the one case in which a URL rests in
+   `shell.json` for longer than one write.]
 3. *Installs upgrading into this release.* Their `shell.json` holds a URL
    until the first owned write on the new version, which the migration itself
    issues on the first reconcile (a URL on the entry makes `writeEntry` true).
@@ -1413,11 +1484,16 @@ holds was re-carried, and no owned write followed, so it stayed for the
 session and replaced a later edit at the next start. R20c is that correct
 narrowing, deciding from the state the last landed save serialised, and
 R20b closes the restart half. D-SINK-20 is closed as filed, the board's
-state the lead's; `ARCHITECTURE-SOURCES.md` round-10 rulings.]
+state the lead's; `ARCHITECTURE-SOURCES.md` round-10 rulings.] [Round 11: and after the migration it cannot happen at all -- the
+patch-only write keeps no retired key once the marker has landed (R21b;
+node `R21e (...) a refused value is stripped by the logo toggle's
+patch-only write too`). R20c's landed-state rule is withdrawn with it.]
 
 **The costs, accepted by the product owner on 2026-10-09 before the work was
 briefed, restated after the review as what the code does.** (1) `omarchy bar
-set ... playlistUrl` is input-only, on the "not consumed" terms above. (2) A
+set ... playlistUrl` is input-only, on the "not consumed" terms above.
+[Round 11: replaced -- it is read once, by the migration, and refused after
+it (R21).] (2) A
 DOWNGRADE reports the plugin as not configured, because an older build looks
 for a URL that is no longer there, and it looks like data loss precisely
 because the migration was silent; the older build's own `Saved sources (n)`
@@ -1429,7 +1505,11 @@ one: the older build's `entryWith` copies every own key of the entry, so
 source picked while downgraded is the one that comes back -- and the owned
 write that follows strips the URL again. Derived from both builds' code
 (1a8dccd for the older one) and pinned by the node suite's adopt cases; the
-live round trip is UNVERIFIED. (3) `state.json` becomes the only copy of the
+live round trip is UNVERIFIED. [Round 11: under R21 the re-upgrade migrates
+again, because 0.13.6 drops `entryMigrated`; observed with the REAL helper
+of the v0.13.6 tag rewriting the file and the current service restarting
+over 0.13.6's entry (key-scenario G4, G5). 0.13.6's own service was not
+run.] (3) `state.json` becomes the only copy of the
 source list, where the URL in `shell.json` used to be an accidental backup
 that `Model.reconcileSources` could rebuild a record from. All three are in
 the README in plain language, none of them softened.
