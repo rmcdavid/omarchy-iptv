@@ -1267,8 +1267,10 @@ is "key-scenario's cleanup restores the state directory's mode on every exit" \
 # Round 9: Y sets its own mark before EACH of its two in-app toggles (Y1
 # counts each toggle's write from its own mark): 1 + 2 = 3 up to P. Round
 # 10: Y4 counts its two toggles in a row from ONE mark of its own: 4.
-is "F and L each set their own log mark before the call they count, and U and Y before each toggle" \
-   "$(awk '/^  echo "== F:/,/^  echo "== U:/' "$KS" | grep -cE '^  log_mark$') $(awk '/^  echo "== U:/,/^  echo "== P:/' "$KS" | grep -cE '^  log_mark$')" "2 4"
+# Round 12: B5 starts its shell by hand (a state that never loads never
+# settles start_shell) and sets the mark B6 counts entry writes from: 5.
+is "F and L each set their own log mark before the call they count, U and Y before each toggle, and B5 before the start B6 counts" \
+   "$(awk '/^  echo "== F:/,/^  echo "== U:/' "$KS" | grep -cE '^  log_mark$') $(awk '/^  echo "== U:/,/^  echo "== P:/' "$KS" | grep -cE '^  log_mark$')" "2 5"
 # L drives the toggle through the guide's own key path (shell.qml's
 # sourcesKey calls the guide's handlers; no keystroke), and both restarts
 # that follow a failed or interrupted write (O and F) reseed the key the

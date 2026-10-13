@@ -83,8 +83,9 @@
 #       own-write echo that follows every start, so the first D3 could not
 #       go red for the chmod reload it named; R15 counts by reason)
 #   N1  a FRESH install (no state directory, no state.json, no cache): the
-#       first start adopts the entry's URL in memory with no file to load
-#       (control)
+#       state is applied only on the helper's word that nothing was at the
+#       path (R22a), and the entry's URL is adopted (it used to be observed
+#       parked before the dirs were ready: a control, re-pointed in round 12)
 #   N2  the adopted key and its record survive the helper CREATING the file:
 #       in memory, in the file, one record, mode 0600
 #   N3  ... the stored entry carries sourceKey = that key and no playlistUrl
@@ -242,6 +243,21 @@
 #   X5  the notification SINK: one notification per report, each naming the
 #       Sources screen, none carrying a URL
 #   X6  the echoing host: refused, reported once, off both sides
+#   B1  a MIGRATED install whose state.json is 0000 at the start: the helper
+#       restores 0600 and the start READS it -- records, key and marker
+#       survive, nothing reported          <- R22a, the round-11 lens's P1
+#   B2  ... and a second, ordinary start stands on both records
+#   B3  the state DIRECTORY 0000 at the start (FileView: FileNotFound): the
+#       helper found the file, restored 0700, the start read it -- records,
+#       cache layout and marker survive    <- R22a, the sibling 0.13.6 has
+#   B4  ... and a second, ordinary start stands on both records
+#   B5  a state.json that does not parse: nothing written over it, an in-app
+#       add and switch refused, the user told ONCE (the notification names
+#       the file, no URL)                  <- R22a, the no-write mode
+#   B6  ... the bar entry left EXACTLY as it is
+#   B7  restoring the file lifts the mode; a switch then lands
+#   B8  the guide's fetch-failure hint, as drawn, names the Sources screen
+#       and no retired setting                                   <- R22c
 #   P1  no labelled harness-log line carries a URL or a fixture path
 #   P2  no credential token anywhere in the harness log
 #   T1  the shell, the compositor and the nested socket are gone (by pid)
@@ -260,6 +276,19 @@
 # refusal at the sink. The seed writes the marker only when a segment says
 # `migrated`; otherwise every start is a migration, which is what D, N, M,
 # J, C, E, R, O, W, L and Y1 assert as before.
+#
+# ROUND 12, R22 (the lead's ruling on the round-11 lenses). A STATE THAT DID
+# NOT LOAD IS NEVER WRITTEN. The round-11 data-loss lens found, live on both
+# host shapes, that a migrated install whose state.json could not be read at
+# the start had an empty state written over it -- every source, credential
+# and favourite gone -- and that a state DIRECTORY that cannot be entered did
+# the same through the cache layout's save, on every tree since D-SINK-19
+# began and on 0.13.6 (re-measured live on dev 4740a50 this round). B lifts
+# the lens's lf-child.sh for both, and adds the no-write mode (B5..B7) and
+# R22c's hint (B8). What Quickshell's FileView reports for each case was
+# measured first, and is in Model.STATE_LOAD_ERRORS' comment: the
+# unreadable directory reads as FileNotFound, exactly like a fresh install,
+# which is why the helper's `state init` now reports what it FOUND.
 #
 # Every segment seeds its OWN state.json, caches and entry and starts a fresh
 # shell, so a red in one is attributable to one ruling and never to the
@@ -379,12 +408,14 @@
 # slow local listener holding the probe open), V lifts T=edit, and H is the
 # board's D-SRC-18 at the sink. R19a: no skip on an estimate -- every owned
 # write is handed to the host and updateEntryInline's own answer is the
-# dirty check. R19b: a guide URL no record can take is HELD in state.json
-# (pendingEpg { url, seenAt }) and taken off the entry, which is why U, K
-# and A read `held:` from the file where they read the entry before.
-# R19c: the latest explicit input wins, by time (seenAt against the
-# record's epgSetAt). R19d: a mirror a failed save withheld is paid by the
-# next save that lands.
+# dirty check. R19b held a guide URL no record could take in state.json
+# (pendingEpg { url, seenAt }), and R19c let the latest explicit input win
+# by time (seenAt against the record's epgSetAt). [R19b and R19c WITHDRAWN
+# 2026-10-13 by R21 and deleted from the model and the helper, with every
+# field they wrote; U, K, A, Q and V observe the refusal instead -- no
+# segment reads `held:` any more.] R19a and R19d stand: R19d, a mirror a
+# failed save withheld is paid by the next save that lands, is what H
+# observes.
 #
 # U, ROUND 7 (R17). The round-6 data-loss lens found an input no oracle
 # had covered for five rounds, because every matrix checked the PLAYLIST
@@ -402,9 +433,16 @@
 # owned write strips a retired input only when it is CONSUMED -- a record
 # holds it, or the service already adopted or refused that value
 # (Model.retiredInputsToKeep, which the funnel hands entryWith on every
-# write). R17b: switchSource and the probe commit adopt a pending EPG onto
-# the newly active record in the same turn (Model.adoptPendingEpg), before
-# the save and before the mirror. The entry's values are never read here:
+# write). R17b: switchSource and the probe commit adopted a pending EPG onto
+# the newly active record in the same turn (adoptPendingEpg, then in
+# model/source-records.mjs), before the save and before the mirror.
+# [WITHDRAWN 2026-10-13 by R21, the product owner's decision, and deleted
+# from the model: R17a's consumed-input keep became the migration marker's
+# (Model.retiredInputsToKeep over the LANDED marker), and R17b's adoption of
+# a pending guide URL is gone with the pending guide URL itself. U is
+# re-pointed at R21c -- a guide URL with no source to guide, at the
+# migration, is reported once and stripped; the paragraph above is the
+# round-7 record, not the code.] The entry's values are never read here:
 # key names from hostEntry, the record's EPG compared inside python and
 # printed as the keys that hold it; and since the harness seed always
 # carries an `epgUrl` NAME (empty when unset), the restart checks read the
@@ -1011,7 +1049,7 @@ shell_arm() {
   export OMARCHY_IPTV_PLUGIN_ROOT=$PLUGIN_ROOT
   CACHE="$SCRATCH/cache/omarchy-iptv"
   STATE="$SCRATCH/state/omarchy-iptv/state.json"
-  KA=$(key_of "$A"); KB=$(key_of "$B"); KC=$(key_of "$C"); KD=$(key_of "$D")
+  KA=$(key_of "$A"); KB=$(key_of "$B"); KC=$(key_of "$C"); KD=$(key_of "$D"); KDEAD=$(key_of "$DEAD")
   echo "   keys: A $KA  B $KB  C $KC  D $KD"
 
   echo "== D: the adoption made at start-up, watched across the start-up dirs becoming ready ($(elapsed) s)"
@@ -1048,10 +1086,16 @@ shell_arm() {
   log_mark
   h --detach --timeout 0 --keep --playlist "$A" >"$WORK/start.log" 2>&1
   SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
-  observe_window "$KA" 20 || true
-  ck "N1 the first start adopts the entry's URL in memory while the save is parked, with no file to load (control)" \
-     "$WINDOW memory:$W_MEMORY dirs:$W_DIRS parked:$W_PARKED" "observed memory:$KA dirs:false parked:true"
+  # R22a (round 12): with no file to load, FileView reports FileNotFound --
+  # which an unreadable directory reports too -- so the state is applied only
+  # once the helper's `state init` says it found NOTHING at the path. The
+  # adoption therefore happens after the dirs are ready (or at the reload the
+  # helper's creation of the file raises), never parked over an unread load;
+  # N1 used to observe it parked, the timing this round changed on purpose.
   wait_for true 20 pf "['dirsReady']" >/dev/null || true
+  wait_for "$KA" 20 pf "['memoryActiveKey']" >/dev/null || true
+  ck "N1 the fresh install is applied on the helper's word: it found nothing at the path, the no-write mode never engaged, and the entry's URL is adopted" \
+     "found:$(pf "['stateInitFound']") blocked:$(pf "['stateWriteBlocked']") memory:$(pf "['memoryActiveKey']")" "found:absent blocked: memory:$KA"
   wait_for 20 20 svc "['channels']" >/dev/null || true
   wait_for no 10 stored_has playlistUrl >/dev/null || true
   ck "N2 the adopted key and its record survive the helper creating state.json: in memory and in the file" \
@@ -1819,6 +1863,111 @@ SLOW
      "host:$(qa_json_field "d['host']" "$(ipc hostEntry)") active:$(svc "['activeSourceKey']") reports:$(reports) notified:$(notified) playlistUrl:$(stored_has playlistUrl)/$(published_has playlistUrl)" \
      "host:echo active:$KA reports:playlistUrl:retired notified:1 playlistUrl:no/no"
 
+  echo "== B: a state.json that does NOT load at the start is never written over (R22a; the round-11 data-loss lens's P1 and its sibling), and the guide's fetch-failure hint (R22c) ($(elapsed) s)"
+  # Lifted from the round-11 data-loss lens's lf-child.sh. Every case is a
+  # MIGRATED install (the marker in the file) whose state.json cannot be read
+  # when the shell starts. Before R22a the failed load was applied as an
+  # EMPTY state: the migration ran on it and marked it, its save parked
+  # behind the start-up dirs, the helper's chmod reload carrying the real
+  # text was ignored because a save was parked (R9), and the parked save
+  # wrote the empty state over the file (B1, B2: every record gone, on
+  # lane-key-m2 and on both host shapes, measured live by the lens). The
+  # directory case reads as FileNotFound -- a fresh install, to Quickshell --
+  # and the cache layout's save did the same on every tree, 0.13.6 included
+  # (B3, B4; measured live on dev 4740a50 by this round's code lane: the
+  # in-app record gone, the entry's one re-adopted). R22a: a load that is not
+  # a state is never applied, a FileNotFound is a fresh install only when
+  # the helper's `state init` found nothing there, and the init's own mode
+  # repair is followed by one re-read. B5..B7: a file that cannot be made
+  # readable holds the session in the no-write mode -- nothing written, the
+  # entry left exactly as it is, the user told once -- until a load that IS
+  # a state lifts it.
+  : >"$NOTIFY_LOG"
+  seed "$KA" migrated
+  chmod 0000 "$STATE"
+  start_shell --playlist none --source-key "$KA" || true
+  sleep 1.0
+  ck "B1 state.json 0000 while the shell was down: the helper restores 0600 and the start READS it -- both records, the active key and the marker survive, nothing is reported" \
+     "records:$(sj "len(d['sources'])") active:$(sj "d.get('activeKey', 'absent')") marker:$(sj "d.get('entryMigrated', 'absent')") mode:$(stat -c %a "$STATE" 2>/dev/null) memory:$(svc "['activeSourceKey']") blocked:$(pf "['stateWriteBlocked']") told:$(qa_count ' 74017 ' "$NOTIFY_LOG")" \
+     "records:2 active:$KA marker:true mode:600 memory:$KA blocked: told:0"
+  stop_shell
+  start_shell --playlist none --source-key "$KA" || true
+  sleep 0.5
+  ck "B2 ... and a second, ordinary start stands on both records" "records:$(sj "len(d['sources'])") active:$(svc "['activeSourceKey']") channels:$(svc "['channels']")" "records:2 active:$KA channels:20"
+  seed "$KA" migrated
+  chmod 0000 "$(dirname "$STATE")"
+  start_shell --playlist none --source-key "$KA" || true
+  sleep 1.0
+  ck "B3 the state DIRECTORY 0000 while the shell was down (FileView: FileNotFound): the helper found the file there, restored 0700, and the start READ it -- both records, the cache layout and the marker survive" \
+     "records:$(sj "len(d['sources'])") layout:$(sj "d.get('cacheLayout')") marker:$(sj "d.get('entryMigrated', 'absent')") dir:$(stat -c %a "$(dirname "$STATE")" 2>/dev/null) memory:$(svc "['activeSourceKey']") found:$(pf "['stateInitFound']") told:$(qa_count ' 74017 ' "$NOTIFY_LOG")" \
+     "records:2 layout:2 marker:true dir:700 memory:$KA found:present told:0"
+  stop_shell
+  chmod 0700 "$(dirname "$STATE")"
+  start_shell --playlist none --source-key "$KA" || true
+  sleep 0.5
+  ck "B4 ... and a second, ordinary start stands on both records" "records:$(sj "len(d['sources'])") active:$(svc "['activeSourceKey']")" "records:2 active:$KA"
+  seed "$KA" migrated
+  cp -p "$STATE" "$WORK/good-state.json"
+  printf '{"version": 2, "sources": [' >"$STATE"
+  chmod 0600 "$STATE"
+  sha0=$(sha "$STATE")
+  (( SHELL_STARTED )) && stop_shell
+  log_mark
+  h --detach --timeout 0 --keep --playlist none --source-key "$KA" >"$WORK/start.log" 2>&1
+  SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
+  # Not start_shell: a state that never loads never settles, by design. The
+  # bound is the no-write mode being reported (or the state loading, on a
+  # tree that applies the garbage), 20 s, and it says when it gave up.
+  for ((i = 0; i < 200; i++)); do
+    [[ $(pf "['stateWriteBlocked']") =~ ^[a-z] || $(svc "['stateLoaded']") == true ]] && break
+    sleep 0.1
+  done
+  (( i == 200 )) && echo "   gave up after 20 s waiting for the no-write mode or a state load"
+  sleep 1.0
+  keys0=$(qa_json_field "','.join(d['storedKeys'])" "$(ipc hostEntry)")
+  add=$(qa_json_field "d['code']" "$(ipc addSource "$D" "" "")")
+  swc=$(qa_json_field "d['code']" "$(ipc switchSource "$KC")")
+  sleep 1.5
+  ck "B5 a state.json that does not parse: NOTHING is written over it, through the start and an in-app add and switch, which are refused; the user is told ONCE, by a notification that names the file and carries no URL" \
+     "file:$([[ $(sha "$STATE") == "$sha0" ]] && echo same || echo changed) blocked:$(pf "['stateWriteBlocked']") add:$add switch:$swc told:$(qa_count ' 74017 ' "$NOTIFY_LOG") path:$(qa_count ' 74017 .*state\.json' "$NOTIFY_LOG") urls:$(qa_count '://' "$NOTIFY_LOG")" \
+     "file:same blocked:unparsed add:state_unreadable switch:state_unreadable told:1 path:1 urls:0"
+  ck "B6 ... and the bar entry is left EXACTLY as it is: the same key names, the same mirror, no owned write" \
+     "keys:$([[ $(qa_json_field "','.join(d['storedKeys'])" "$(ipc hostEntry)") == "$keys0" ]] && echo same || echo changed) stored:$(hf "['stored']") writes:$(log_since 'updateEntryInline')" \
+     "keys:same stored:$KA writes:0"
+  # The user puts the file back, in place (what an editor or a restore does):
+  # the FileView's watch reloads it, and a load that IS a state lifts the mode.
+  cat "$WORK/good-state.json" >"$STATE"
+  wait_for "" 10 pf "['stateWriteBlocked']" >/dev/null || true
+  wait_for true 10 svc "['stateLoaded']" >/dev/null || true
+  wait_for true 10 svc "['cacheReady']" >/dev/null || true
+  res=$(ipc switchSource "$KC")
+  wait_for "$KC" 10 sj "d.get('activeKey', 'absent')" >/dev/null || true
+  ck "B7 restoring the file LIFTS the no-write mode: the state is applied, and a switch then lands in the file" \
+     "blocked:$(pf "['stateWriteBlocked']") loaded:$(svc "['stateLoaded']") switch:$(qa_json_field "d['ok']" "$res") file:$(sj "d.get('activeKey', 'absent')") records:$(sj "len(d['sources'])") told:$(qa_count ' 74017 ' "$NOTIFY_LOG")" \
+     "blocked: loaded:true switch:true file:$KC records:2 told:1"
+  # R22c. A provider that is down: the active record's playlist is a dead
+  # loopback port, so the start's fetch fails and the guide opens on its
+  # error state. What the user is told to check is read off the guide AS
+  # DRAWN (its emptyState's prose) and off its copy, never off this file.
+  seed ""
+  python3 - "$STATE" "$KDEAD" "$DEAD" <<'PYSEED'
+import json, sys
+path, key, url = sys.argv[1], sys.argv[2], sys.argv[3]
+rec = {"key": key, "url": url, "epgUrl": "", "kind": "http", "label": "127.0.0.1", "labelCustom": False, "origin": "guide",
+       "addedAt": 1799990000, "lastUsed": 1799990000, "fetchedAt": 0, "channelCount": 0, "groupCount": 0}
+json.dump({"version": 2, "cacheLayout": 2, "favorites": [], "recents": [], "lastPlayed": None, "session": None, "sources": [rec],
+           "savedSearches": [], "hiddenGroups": [], "activeKey": key, "entryMigrated": True}, open(path, "w"))
+PYSEED
+  chmod 0600 "$STATE"
+  start_shell --playlist none --source-key "$KDEAD" || true
+  wait_for error 15 svc "['status']" >/dev/null || true
+  ipc open '{}' >/dev/null; sleep 0.8
+  gs=$(ipc state)
+  ck "B8 the guide's fetch-failure hint, as drawn, sends the user to the Sources screen and names no retired setting" \
+     "kind:$(qa_json_field "d['guide']['emptyKind']" "$gs") sources:$(qa_json_field "'yes' if 'Sources' in d['guide']['emptyProse'] else 'no'" "$gs") retired:$(qa_json_field "'yes' if ('playlistUrl' in d['guide']['errorCheck'] or 'epgUrl' in d['guide']['errorCheck'] or 'playlistUrl' in d['guide']['emptyProse']) else 'no'" "$gs")" \
+     "kind:error sources:yes retired:no"
+  ipc close >/dev/null
+
   echo "== P: the console sink, then teardown ($(elapsed) s)"
   qa_leak_on_labelled 'sourceProbeFinished|sourceSwitched|sourceRemoved|updateEntryInline' "://|$WORK" "$LOG"
   case $? in 0) left=clean ;; 1) left=LEAK ;; *) left="nothing labelled to judge" ;; esac
@@ -1846,6 +1995,8 @@ EPG="http://u:p@127.0.0.1:9/epg.xml?token=abc&kind=x"
 # for) and a second guide URL, the one an add form carries (A2).
 BAD="ftp://u:p@127.0.0.1:9/refused.m3u"
 FORM_EPG="http://127.0.0.1:9/form-epg.xml?token=abc&kind=form"
+# Round 12 (B8): a provider that is down -- nothing listens on port 9.
+DEAD="http://127.0.0.1:9/dead-provider.m3u"
 
 instrument
 [[ $MODE == live ]] && shell_arm
@@ -1853,14 +2004,15 @@ instrument
 # The floor. A check that stops executing must turn the run red rather than
 # quietly shorten the summary (D-PLY-9). Recount with
 #   grep -cE '^ *ck "[IS][0-9]' key-scenario.sh   -> 10, the instrument arm -> check-tree
-#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 97, both arms          -> live
+#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 105, both arms         -> live
 # (48 -> 61 on 2026-10-12, round 4: W1..W6 and F1..F7; 61 -> 63 the same
 # day, round 5: L1, L2; 63 -> 70 the same day, round 7: U1..U7; 70 -> 78
 # the same day, round 8: K1..K3, Z1..Z3, A1, A2; 78 -> 85 the same day,
 # round 9: Y1..Y3, Q1, Q2, V1, H1; 85 -> 86 on 2026-10-12, round 10: Y4;
 # 86 -> 97 on 2026-10-13, round 11: G1..G5 and X1..X6, the migration and
 # the refusal, R21. U, K, Z, A, Y2, Y3, Q, V, F and H were re-pointed at
-# the R21 contract, one for one.)
+# the R21 contract, one for one; 97 -> 105 the same day, round 12: B1..B8,
+# R22a's load failures and R22c's hint.)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -1870,7 +2022,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=10
 else
-  EXPECTED_CHECKS=97
+  EXPECTED_CHECKS=105
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then
