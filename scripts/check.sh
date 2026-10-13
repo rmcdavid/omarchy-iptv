@@ -164,7 +164,12 @@ fail=0
 QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2075}
+# 2075 -> 2315 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
+# checks had never been levelled -- 193 under the tree at round 9, more than
+# every R19 pin together -- plus round 10's R20a key check and shared-fixture
+# cases, and the R20b/c/d cases that run Service.qml's own functions
+# (tests/service-harness.js).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2315}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -173,7 +178,10 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2075}
 # round 2: the Model-member judge (11), every static import form and the
 # unreadable-model message (11), the generated header and the dropped-line
 # record (7), the shipped Model.js refusal (6), and F-HARNESS-19's shell pin (4).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1123}
+# 1123 -> 1143 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's 12
+# (the merge never levelled them), round 10's six R20a helper tests and the
+# ledger's two R20e cases.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1143}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
