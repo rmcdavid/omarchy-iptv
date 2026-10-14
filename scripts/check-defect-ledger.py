@@ -194,20 +194,17 @@ TITLED_ITEM = re.compile(r'^\s{0,3}(\d+)\.\s+\*\*(.+?)\*\*')
 # prints how many are listed and in use on every run; a listed waiver no
 # citation uses is now a problem that names it, and the twenty went.
 #
-# In use today: the three R19a estimate functions R22e deleted in round 12
-# (hostEntryForm, entryWriteRecord, entryWriteNeeded), each waived in exactly
-# the documents that cite it in the `Model.` form today. The round-12
-# documents lane re-cites them bare or drops them; the commit that removes
-# the last citation of one must delete its entry here, because the next run
-# names it unused and is red (R22d) -- which is the point.
+# In use today: none. Round 12 (R22e) deleted the three R19a estimate
+# functions (hostEntryForm, entryWriteRecord, entryWriteNeeded) and waived
+# them where the documents still cited them prefixed; round 13 (R23i)
+# removed the last three prefixed citations and the three waivers in ONE
+# commit, because each half alone is red: the citations without their
+# waivers resolve in no source file, and the waivers without their
+# citations are unused (R22d). The table stays, empty, as the shape for the
+# next withdrawal: add an entry in the commit that deletes the name, remove
+# it in the commit that removes its last prefixed citation.
 UNEXPORTED_CITATION_WAIVERS = {}
-_R22E_REASON = 'deleted by R22e (D-SINK-19 round 12); the round-12 documents lane re-cites it bare or drops it'
-WITHDRAWN_SYMBOL_WAIVERS = {
-    'entryWriteNeeded': (frozenset({'docs/ARCHITECTURE-SOURCES.md', 'docs/ARCHITECTURE.md',
-                                    'docs/OMARCHY-PLUGIN-CONTRACT.md', 'docs/QA.md'}), _R22E_REASON),
-    'entryWriteRecord': (frozenset({'docs/ARCHITECTURE-SOURCES.md'}), _R22E_REASON),
-    'hostEntryForm': (frozenset({'docs/ARCHITECTURE-SOURCES.md'}), _R22E_REASON),
-}
+WITHDRAWN_SYMBOL_WAIVERS = {}
 
 # A state cell must actually say something. These are the words the board
 # already uses; the point is to reject an empty cell, a dash, or a "?" that

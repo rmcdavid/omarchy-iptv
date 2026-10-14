@@ -378,14 +378,17 @@ class LedgerCase(unittest.TestCase):
     def test_the_round_10_and_11_waivers_are_gone(self):
         """R22d: the twenty waivers of rounds 10 and 11 went once nothing used
         them; what is left is R22e's three, and a waiver has to be in use to
-        stay green (above), so they go with their last citation."""
+        stay green (above), so they go with their last citation. Round 13
+        (R23i) removed those last citations and the three waivers in one
+        commit: the census is empty, and a withdrawn name cited prefixed
+        anywhere is red as an unresolved name."""
         gone = {'copySourceRecord', 'replaceSource', 'countFavorites', 'adoptPendingEpg', 'applyPendingEpg', 'entryInputDigest',
                 'entryInputRecord', 'entryInputSeed', 'entryInputsAfterMove', 'entryInputsAfterWrite', 'entryInputsOf',
                 'entryInputsRecord', 'epgByTime', 'epgSetAtOf', 'epgSnapshotAfter', 'patchInputsToKeep', 'pendingEpgOf',
                 'pendingEpgRecord', 'withEntryInputs', 'withPendingEpg'}
         listed = set(SHIPPED_UNEXPORTED) | set(SHIPPED_WITHDRAWN)
         self.assertEqual(listed & gone, set())
-        self.assertEqual(listed, {'entryWriteNeeded', 'entryWriteRecord', 'hostEntryForm'})
+        self.assertEqual(listed, set())
 
     def test_the_module_file_name_is_not_a_symbol_citation(self):
         """`Model.mjs` is a FILE, as `Model.js` is; neither cites a symbol.
