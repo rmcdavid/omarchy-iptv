@@ -155,7 +155,7 @@ obvious when it happens to you:
   are exercised on every commit's test tree under both kinds of Omarchy host
   (today's, and one carrying the settings fix awaiting review upstream), and
   live, under a headless compositor, by the harness scenario on the `dev`
-  branch (97 checks, 2026-10-13).
+  branch (112 checks, 2026-10-14).
 - **Going back to an older version makes the plugin look unconfigured.** An
   older build looks for the URL on the widget's entry, does not find one, and
   says you have no playlist. Your sources are all still in `state.json`: open
@@ -750,27 +750,46 @@ Nothing inside the plugin directory is written at runtime.
 - A notification titled **Saved sources not loaded** (for example
   `/home/you/.local/state/omarchy-iptv/state.json is not a valid state file.
   Nothing is saved until it can be read, so sources, favorites and settings
-  changed now are not kept. ...`): the file that holds your sources is there
-  but could not be read -- its permissions, something other than a file at
-  that path, or contents that are not a state file. The plugin has not
-  touched it and will write nothing to it this session, because it may be
-  the only copy of your sources and provider URLs; earlier versions read
-  such a file as empty and saved an empty one over it. The guide opens as if
-  nothing were set up, and adding or switching a source there answers
-  `state.json could not be read · nothing is saved until it can be`. The
-  notification's last sentence says what to do for the case you hit:
-  `chmod 600` on the file, `chmod 700` on its folder, move whatever is at the
-  path aside, or restore the file from a backup -- then `omarchy restart
-  shell`. Putting a good copy back in place is enough on its own: the plugin
-  notices and carries on with your sources. A file or folder you left at
-  mode 0000 while the shell was not running is NOT this case: the plugin
-  restores the usual permissions at the next start, reads the file and says
-  nothing.
+  changed now are not kept. ...`), and the guide showing that same title and
+  sentence where it would otherwise show its setup form: the file that holds
+  your sources is there but could not be read -- its permissions, something
+  other than a file at that path, or contents that are not a state file --
+  or the plugin's start-up check of it did not answer within 15 seconds and
+  was stopped. The plugin has not changed the file and will write nothing to
+  it this session, because it may be the only copy of your sources and
+  provider URLs; earlier versions read such a file as empty and saved an
+  empty one over it. Adding, editing, switching or removing a source, and
+  turning channel logos on or off, answers `state.json could not be read ·
+  nothing is saved until it can be`. A favourite, a hidden group or a saved
+  search still changes on screen, but is not kept. The notification's last
+  sentence says what to do for the case you hit: `chmod 600` on the file,
+  `chmod 700` on its folder, move whatever is at the path aside, make sure a
+  regular file or nothing is there, or restore the file from a backup --
+  then `omarchy restart shell`. Putting a good copy back in place is enough
+  on its own: the plugin notices and carries on with your sources. A file or
+  folder you left at mode 0000 while the shell was not running is NOT this
+  case: the plugin restores the usual permissions at the next start, reads
+  the file and says nothing.
+- A directory, a named pipe (FIFO) or a socket at
+  `~/.local/state/omarchy-iptv/state.json`: the case above, with `is not a
+  regular file`. The plugin leaves it exactly as it is -- it no longer
+  changes a directory's permissions there, and a named pipe no longer makes
+  every shell start wait for ever on a helper that never finishes. Move it
+  aside and restart the shell.
+- The file damaged while the shell is running: if the plugin has not saved
+  the file itself yet in this session, it notices the change, keeps the
+  channels and sources it is already showing, and from then on behaves as
+  above. After it has saved the file once in the session, tests disagree on
+  whether it notices; when it does not, its next save writes the sources it
+  holds in memory over the damaged file -- nothing of yours is lost, but the
+  damaged copy is replaced.
 - `state.json is not a valid state file; nothing was written` (or `state.json
-  could not be read (...); nothing was written`) from the helper's `state`
-  commands run by hand: the same protection on the command line --
-  every `state` command except `state init` refuses a `state.json` it cannot
-  read or parse (exit 1) instead of writing over it.
+  could not be read (...); nothing was written`, or `state.json is not a
+  regular file; nothing was written`) from the helper's `state` commands run
+  by hand: the same protection on the command line -- every `state` command
+  except `state init` refuses a `state.json` it cannot read or parse, or
+  that is not a regular file (exit 1), instead of writing over it, and none
+  of them waits on a named pipe.
 - "state.json could not be written" in the shell's journal: the plugin could
   not save its own file, `~/.local/state/omarchy-iptv/state.json`. The source
   you added or switched to is in effect for this session only. If this

@@ -642,6 +642,15 @@ playlistUrl ""`. Clearing the URL clears the channel list and the group column
 with it, so this surface is never drawn over a stale list. Since v0.2.0 this
 state is the Sources first-run form, see `UX-SOURCES.md` 1.2.
 
+**[Round 13, 2026-10-13 (D-SINK-19 R23e): NOT when `state.json` exists and
+could not be read.** Nothing has loaded then either, but the guide is in the
+no-write mode and draws its own surface instead -- the alert glyph over the
+title `Saved sources not loaded` and the notification's own sentence
+(`Model.stateUnreadableNotice`), with no form and no field, and `Esc close`
+as its footer (6.3; `UX-SOURCES.md` 5.10 item 2 has the wireframe and every
+reason's text). Until round 13 that start drew this first-run form, whose
+submit could only be refused.]
+
 ```
 +------------------------------------------------------------------------------------------------+
 |                                                                                                |
@@ -1203,6 +1212,7 @@ key/verb contrast is the accepted cost of the footer being readable at all.
 | State | Title | Body |
 |---|---|---|
 | Not configured | `No playlist configured` | `Set your M3U URL or path, then press r to load it:` / command box `omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>` / `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>  (converted; not kept in shell.json)` / `Both are inputs: the URL moves to ~/.local/state/omarchy-iptv/state.json; other settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)` **[Amended 2026-10-12, D-SINK-19 round 3: the last two lines are `Guide.qml`'s `unconfiguredEpg` and `unconfiguredWhere` as shipped on lane-key-s1 (two spaces before the parenthesis), ruled to this exact text by the lead after the review found the previous lines -- `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>` and `Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)` -- presenting the URL keys as stored settings. The command box is unchanged: a click copies it. Both lines wrap (`Text.WordWrap` over the column width); the wireframe in 4.4 wraps them by hand, and the wrap at the shipped width is UNVERIFIED on a display.]** **[Amended 2026-10-13, D-SINK-19 round 11 (R21): the body is now `Add your M3U URL or path in Sources, with its EPG URL if you have one` / `Sources and their URLs are kept in ~/.local/state/omarchy-iptv/state.json; other settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)` (`Guide.qml` `unconfiguredProse` and `unconfiguredWhere` on lane-key-m1). The command box and the `Optional EPG` line are deleted: a URL set with `omarchy bar set` is refused after the migration, so the guide must not offer the command (4.4).]** |
+| Saved sources not loaded (no-write mode, nothing loaded; D-SINK-19 round 13, R23e, 2026-10-13) | `Saved sources not loaded` (the alert glyph above it) | `<path> <what>. Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. <fix>` -- `Model.stateUnreadableNotice(reason, path)`, the notification's own body, one source of copy; `<what>` and `<fix>` per reason in `UX-SOURCES.md` 5.10 item 1. Footer `Esc close` (no `r retry`; `o sources` only with sources in memory). Replaces `Not configured` whenever the no-write mode holds; drawn as the round-13 live run reads it (key-scenario B11 `title:notice prose:notice editable:0`), the pixels UNVERIFIED on a display |
 | Loading, no cache | `Loading playlist...` | `Fetching from <host>` |
 | Fetch failed, no cache | `Playlist failed to load` | `<reason> from <host> - check playlistUrl` where reason is one of `HTTP 403 Forbidden`, `HTTP 404 Not Found`, `HTTP 5xx`, `Could not resolve host`, `Connection refused`, `Timed out`, `Not an M3U playlist`, `File not found` (local path) **[Amended 2026-10-13, D-SINK-19 round 12 (R22c): `<reason> from <host> - check the source in Sources` (`Guide.qml` `errorCheck` on lane-key-n1). No shipped string tells the user to set `playlistUrl` or `epgUrl` any more; `tests/test_shipped_copy.py` searches every string literal in every shipped code file for one (4.6).]** |
 | Fetch failed, cache present (banner) | -- | `ó°¦  Playlist refresh failed (<reason>) - showing cached copy from 12:40 - r retry` |
