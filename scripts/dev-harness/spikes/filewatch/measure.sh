@@ -31,7 +31,11 @@
 #   link    state.json is a symbolic link to a regular file in another
 #           directory (a dotfiles user); each line also says what is AT the
 #           path afterwards and whether the target holds the bytes
-#   dangle  state.json is a symbolic link to a file that does not exist
+#   dangle  state.json is a symbolic link to a file that does not exist, in
+#           a folder that does not exist either: sequence X's saveFailed is
+#           THAT shape. With the target's folder present the view's save
+#           CREATES the target (the round-14 data-loss lens's C6 and Z9,
+#           D-DOC-11), which tests/service-harness.js now models.
 # and two steps: `garbage` (an in-place write of text that is not JSON) and
 # `repath` (the view's path set to "" and back, the other re-arm candidate).
 #

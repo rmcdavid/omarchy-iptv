@@ -7621,6 +7621,39 @@ checkCall("R24a / R24c: sameState compares what a reader of the file sees -- the
           Model.sameState(JSON.stringify(st, null, 2) + "\n", JSON.stringify(st)), Model.sameState(st, Model.emptyState()),
           Model.sameState(null, Model.emptyState())]
 }, [true, true, true, false, true])
+// ---- R25b (D-SINK-19 round 15, D-SRC-31): A MERGE NEVER DROPS SILENTLY.
+// The caps are applied by Model.mergeForeignState itself, which knows whose
+// element is whose: theirs keeps its place, ours' additions past a cap are
+// dropped AND returned, for one journal line each and one notice.
+checkCall("R25b: mergeForeignState at every cap -- 49 sources + an add on each side, 19 saved searches + one each, 199 hidden groups + one each: theirs kept, ours' addition dropped and RETURNED (sources by key, the others counted); under the caps nothing is dropped", () => {
+  const hex = i => (0x10000000 + i).toString(16)
+  const many = n => Array.from({ length: n }, (_, i) => ({ k: hex(i), label: "s" + i }))
+  const base = mergeState({ sources: many(49), savedSearches: Array.from({ length: 19 }, (_, i) => "q" + i), hiddenGroups: Array.from({ length: 199 }, (_, i) => "g" + i) })
+  const ours = mergeState({ sources: many(49).concat([{ k: "aaaaaaaa", label: "ours" }]), savedSearches: Array.from({ length: 19 }, (_, i) => "q" + i).concat(["mine"]),
+                            hiddenGroups: Array.from({ length: 199 }, (_, i) => "g" + i).concat(["gours"]) })
+  const theirs = mergeState({ sources: many(49).concat([{ k: "bbbbbbbb", label: "theirs" }]), savedSearches: Array.from({ length: 19 }, (_, i) => "q" + i).concat(["theirs"]),
+                              hiddenGroups: Array.from({ length: 199 }, (_, i) => "g" + i).concat(["gtheirs"]) })
+  const r = Model.mergeForeignState(base, ours, theirs)
+  const under = Model.mergeForeignState(mergeState({ sources: many(3) }), mergeState({ sources: many(3).concat([{ k: "aaaaaaaa", label: "ours" }]) }),
+                                        mergeState({ sources: many(3).concat([{ k: "bbbbbbbb", label: "theirs" }]) }))
+  return { counts: [r.state.sources.length, r.state.savedSearches.length, r.state.hiddenGroups.length],
+           kept: [r.state.sources.some(x => x.key === "bbbbbbbb"), r.state.savedSearches.some(x => x.query === "theirs"), r.state.hiddenGroups.indexOf("gtheirs") !== -1],
+           gone: [r.state.sources.some(x => x.key === "aaaaaaaa"), r.state.savedSearches.some(x => x.query === "mine"), r.state.hiddenGroups.indexOf("gours") !== -1],
+           dropped: r.dropped, conflicts: r.conflicts.length, under: [under.state.sources.length, under.dropped] }
+}, { counts: [50, 20, 200], kept: [true, true, true], gone: [false, false, false], dropped: { sources: ["aaaaaaaa"], savedSearches: 1, hiddenGroups: 1 }, conflicts: 0,
+     under: [5, { sources: [], savedSearches: 0, hiddenGroups: 0 }] })
+checkCall("R25b: mergeDropLines -- one journal line per dropped element, a source by its key, the others as themselves, each with its cap; mergeDropNotice -- one notice naming how many and the cap, composed from counts alone, null when nothing was dropped; notifyArgv carries it under its own id", () => {
+  const dropped = { sources: ["aaaaaaaa", "cccccccc"], savedSearches: 1, hiddenGroups: 0 }
+  const lines = Model.mergeDropLines(dropped)
+  const told = Model.mergeDropNotice(dropped)
+  const argv = Model.notifyArgv("mergeDropped", { dropped })
+  return { lines: lines.length, keys: [lines[0].indexOf("the source aaaaaaaa added here was not kept (the limit is 50 sources)") !== -1, lines[1].indexOf("cccccccc") !== -1],
+           search: lines[2].indexOf("a saved search made here was not kept (the limit is 20 saved searches)") !== -1, title: told.title,
+           body: [told.body.indexOf("2 sources added here (the limit is 50 sources) and 1 saved search made here (the limit is 20 saved searches) were not kept") !== -1,
+                  told.body.indexOf("aaaaaaaa") === -1, told.body.indexOf("://") === -1],
+           none: [Model.mergeDropNotice({ sources: [], savedSearches: 0 }), Model.mergeDropLines(null).length, Model.notifyArgv("mergeDropped", { dropped: {} })],
+           argv: [argv[argv.indexOf("-r") + 1], argv[argv.length - 1] === told.body], id: Model.NOTIFY_IDS.mergeDropped }
+}, { lines: 3, keys: [true, true], search: true, title: "Not every change was kept", body: [true, true, true], none: [null, 0, null], argv: ["74018", true], id: 74018 })
 checkCall("R24a: a conflict's console line names the field and the source key, never a URL or a value", () => {
   const r = Model.mergeForeignState(mergeState({ sources: [{ k: "aaaaaaaa", label: "A" }] }), mergeState({ sources: [{ k: "aaaaaaaa", label: "Mine" }] }),
                                     mergeState({ sources: [{ k: "aaaaaaaa", label: "Theirs" }] }))

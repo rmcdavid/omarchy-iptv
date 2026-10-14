@@ -2361,6 +2361,12 @@ PYSEED
   : >"$NOTIFY_LOG"
   seed "$KA" migrated
   start_shell --playlist none --source-key "$KA" || true
+  # start_shell returns once the state loaded and the cache is ready, which
+  # can be BEFORE the start-up `state init` has run -- and the init makes
+  # the directory 0700 again (ensure_private_dir). The first live run of
+  # this segment took `w` away inside that window and saw no failure
+  # (`held:false merged:0`). So: after dirsReady.
+  wait_for true 20 pf "['dirsReady']" >/dev/null || true
   chmod 0500 "$(dirname "$STATE")"
   res=$(ipc updateSource "$KC" '{"label": "in-app-one"}')
   wait_for true 10 pf "['stateSaveFailed']" >/dev/null || true
@@ -2393,6 +2399,7 @@ PYSEED
   # flight. Red on dev (002662d), where it lives.
   seed "$KA" migrated
   start_shell --playlist none --source-key "$KA" || true
+  wait_for true 20 pf "['dirsReady']" >/dev/null || true
   res=$(ipc updateSource "$KA" '{"label": "before-backup"}')
   for ((i = 0; i < 100; i++)); do [[ $(sj "[s['label'] for s in d['sources'] if s['key'] == '$KA'][0]") == before-backup && $(pf "['stateSavesInFlight']") == 0 ]] && break; sleep 0.1; done
   sleep 1.0
@@ -2428,6 +2435,7 @@ PYSEED
   : >"$NOTIFY_LOG"
   seed "$KA" migrated
   start_shell --playlist none --source-key "$KA" || true
+  wait_for true 20 pf "['dirsReady']" >/dev/null || true
   res=$(ipc updateSource "$KC" '{"label": "own-save"}')
   for ((i = 0; i < 100; i++)); do [[ $(sj "[s['label'] for s in d['sources'] if s['key'] == '$KC'][0]") == own-save && $(pf "['stateSavesInFlight']") == 0 ]] && break; sleep 0.1; done
   sleep 1.0
