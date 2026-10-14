@@ -85,7 +85,7 @@ qa_transcript_start <name> || exit 2     # after the preflight, before the first
 * In a scenario with a **`check-tree` mode** the call goes on the `live|""`
   arm of the dispatch, never above it. `scripts/check.sh` runs
   `chno-entry-scenario.sh`, `pip-scenario.sh`, `id-rotate-scenario.sh`,
-  `logo-scenario.sh` and `clip-scenario.sh` in
+  `logo-scenario.sh`, `clip-scenario.sh` and `key-scenario.sh` in
   `check-tree` mode on every commit, and a gate step may neither print a path
   nobody asked for nor leave a file behind. It goes on that arm *above*
   `preflight`, so a live run's transcript covers both halves -- the summary at
@@ -250,6 +250,10 @@ scripts/dev-harness/run.sh --open --vertical         # glyph-only bar widget
 scripts/dev-harness/run.sh --open --order number      # channelOrder=number (M2-03)
 scripts/dev-harness/run.sh --open --entry-ms 3000 --no-bar-number
 scripts/dev-harness/run.sh --open --window floating   # harness-only window mode (headless cage)
+scripts/dev-harness/run.sh --playlist /x.m3u --source-key d990c2e4 --keep   # the entry a host holds after
+                                                     # `omarchy bar set playlistUrl` beside the mirror (D-SINK-19);
+                                                     # since R21 a migration input until the marker lands, refused after
+scripts/dev-harness/run.sh --host echo --keep         # the host that echoes a plugin's own write at once (#15082, D-HOST-4)
 scripts/dev-harness/run.sh ipc state                 # the harness's own target
 scripts/dev-harness/run.sh plugin-ipc status         # the plugin's target: the verbs a user binds
 scripts/dev-harness/run.sh plugin-ipc back 10        # argv is passed through untouched
@@ -407,7 +411,7 @@ $H ipc signals                 # the last 20 source signal payloads (sourceProbe
 $H ipc failPersist true        # takes updateEntryInline off the shell api (a host that cannot write
                                #   our entry) until `failPersist false`; a false RETURN is not a failure
 $H ipc activeCache             # cache/omarchy-iptv/sources/<key> of the active source
-$H ipc set playlistUrl /path   # CLI parity: reconciles into the history (origin cli)
+$H ipc set playlistUrl /path   # `omarchy bar set`: read once, by the migration; REFUSED after it (D-SINK-19 R21)
 $H ipc setStored playlistUrl /path  # `set` without the user-config re-read: the host stores the value
                                #   but has not published it, so the plugin still sees the previous one
 $H ipc hostEntry               # {"stored":"<key>","published":"<key>"}: what the host has stored for our
@@ -439,7 +443,7 @@ new `channels.json` being applied).
 source and saves nothing, SR23), H2 (add, probe, switch), H6/H8 (five
 switches each way against a generated 10k list, median must stay under
 150 ms), probe cancel (a silent loopback server), H9 (CLI parity through
-`set playlistUrl`), H11 (duplicate), H12 (label / EPG edits, `editMasked`),
+`set playlistUrl`, refused since R21, then the same playlist added in the app), H11 (duplicate), H12 (label / EPG edits, `editMasked`),
 H7 (remove the active source), a `failPersist` switch (SR25) and privacy
 greps over the log and IPC output. It prints one PASS/FAIL line per check and a summary; the
 harness log is `$SCRATCH/scenario.log`.
@@ -948,6 +952,470 @@ that no transcript lands. The scenario uses its own harness directory
 (`$XDG_RUNTIME_DIR/omarchy-iptv-clip`), not the shared one, so a display
 lane's running harness is never reaped by a clip run.
 
+### The bar entry names a key, not a URL (D-SINK-19)
+
+```
+scripts/dev-harness/key-scenario.sh check-tree            # the instrument arm, node only; run by check.sh
+scripts/dev-harness/key-scenario.sh                       # the instrument arm, then the real Service.qml under cage, with a transcript
+scripts/dev-harness/key-scenario.sh --baseline lane-key-m2  # the round-12 red run: round 11's code (97 / 9: B1-B8, and N1 for its new field only)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-z2  # the round-11 red run: round 10's code (68 / 30 under the 97-check harness: G1, G2, G5, F4, U1-U7, K1-K3, Z1-Z3, A1, Y2, Y3, Q1, Q2, V1, H1, X1-X6; eight of them NOFIELD-only)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-y2  # round 10's baseline is NOT a red run: round 9's code reads 87 / 0, because no segment observes R20a-R20c at the sink (Y4 reds only the S1b export)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-y0  # the round-9 red run: round 8's code (74 / 12 before Y4 existed: U1, U2, U5, K1-K3, Y1-Y3, Q1, V1, H1)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-w2  # the round-8 red run: round 7's code (73 / 6 before Y, Q, V, H existed: K1, K3, Z1, Z2, Z3, A2)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-v2  # the round-7 red run: round 6's code (66 / 5 before K, Z, A existed: U2, U3, U4, U6, U7)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-t2  # the round-5 red run: round 4's code (60 / 4 before U existed: L1, L2, F6, F7)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-s2  # the round-4 red run: round 3's code (54 / 10: D3, W3, W6, F3..F7, L1, L2)
+scripts/dev-harness/key-scenario.sh --baseline lane-key-r2  # the red run: the tree D-SRC-15 was found on (38 / 26)
+scripts/dev-harness/key-scenario.sh --baseline f275bde      # the earlier red run: the first build (39 / 25; O2 its one discriminator)
+scripts/dev-harness/key-scenario.sh --tree "$cp"            # a PREPARED export: spikes/key-mutations/README.md has the recipe
+```
+
+D-SINK-19 takes the provider URL off the host's bar entry: the entry
+carries `sourceKey`, an 8-hex pointer, and `state.json` carries
+`activeKey`; `omarchy bar set ... playlistUrl` is an INPUT that is adopted
+and then removed from the entry by the plugin's own write [round 11,
+2026-10-13, R21: only by the one migration, while the landed `state.json`
+lacks `entryMigrated`; after it the value is refused, reported once and
+removed -- the round-11 subsection below]. Two things in
+this directory had to move with it.
+
+* **The instrument (lead ruling R6).** `hostEntry` -- the verb every
+  `sources-scenario.sh` check about the one-write-behind host grades
+  through -- derived both sides' keys by hashing the entry's `playlistUrl`,
+  which is the one thing the change takes off the entry, so on the very
+  tree it had to grade it read `""` on both sides. `entryKey` now lives in
+  `harness-lib.js`, which `shell.qml` imports beside `Model.js` and
+  `run.sh` stages the same way, and node can `require` it: `sourceKey`
+  first, the URL hash second, **named candidates only**. A first repair
+  (never merged) iterated every own value of the entry and would have
+  reported a user's `mpvArgs` of `deadbeef` as the active source. The
+  check-tree arm drives the function from node with the tree's own
+  `Model.js` (I1-I7) and pins the three seams that keep `shell.qml`,
+  `hostEntry` and `run.sh` reading through it (S1-S3); `hostEntry` also
+  reports each side's key NAMES (`storedKeys`, `publishedKeys`), never
+  values, so a scenario can see the retired URL keys leave the stored entry.
+  `run.sh --source-key KEY` seeds the mirror on the entry (`""` allowed),
+  which is how a scenario presents the entry a host would hold after an
+  earlier shell wrote it; absent, the entry carries no such key, which is
+  the 0.13.5 shape (rule 10: the seed never carries a key the plugin has
+  not written). `ipc pointerState` reports where the two writes of a
+  pointer change stand (`dirsReady`, `stateSavePending`, the held
+  `pendingEntryKey`, the in-memory `activeKey`) and, since D-SRC-15, the
+  service's own accounting of the file against memory
+  (`stateSavesInFlight`, `stateSaveFailed`, `stateInitOk`,
+  `stateReloadsIgnored`, and since round 4 `stateReloadsByReason`, one
+  number per `Model.reloadDisposition` reason: numbers and booleans, never
+  a URL -- the service's `lastSaveText` beside them is the state.json text
+  and is deliberately not reported), every field optional. Since round 6
+  a field the tree under test does not have is OMITTED rather than
+  reported as null (`HarnessLib.pointerStateOf` in `harness-lib.js`, which
+  `qa-lib-test.sh` drives), so the reader answers NOFIELD for it; before,
+  a pre-change tree published a present null and was indistinguishable
+  from a service holding nothing.
+* **The scenarios (R7).** The live arm runs the real `Service.qml` under a
+  nested cage, IPC only, over ten seeded starts, each from its own
+  `state.json`, caches and entry so a red is attributable to one ruling:
+  the start-up adoption watched across `dirsReady` from inside with the
+  file seeded at 0644 so the helper's chmod fires the reload R9 has to
+  absorb, read off the per-reason counter (D; `save-parked`, because the
+  plain ignored total is satisfied by the own-write echo after every start
+  and could not go red for the chmod reload -- the round-3 review's P2),
+  a fresh install with no state
+  directory, file or cache (N), the two-source migration asserting the
+  count it went in with (M), the idempotent second start (J), a
+  `playlistUrl` and an `epgUrl` set while the shell was down (C, E; the
+  review's P1 and R4), removing the active source (R; R3), and the
+  interrupted order -- a NEW URL on the entry with the service's `state
+  init` held for seconds by `fixtures/slow-helper.py` so the shell can be
+  SIGKILLed between the parked state save and the entry mirror, then
+  restarted over the entry as the host held it, `--source-key` passed only
+  when the entry observed stored carries that NAME (O; R5, the review's
+  P2); since round 4 (2026-10-12) the D-SRC-15 SIBLING, an IPC switch and
+  then a remove made inside that same slow window over a 0644 file so the
+  chmod reload lands after the call (W; lifted from the round-3 lens's
+  scratch driver, the fixture's named case now observed live), and the
+  round-3 P1 at the sink: the state directory made 0500 under a running
+  shell with the dirs ready, then a CLI `playlistUrl` and a switch, which
+  must leave the URL on the entry, the file untouched and one
+  `sourcesPersistFailed("state_write_failed")`, and the next start must
+  re-adopt what the failed write left there (F; R13); and since round 5
+  the LOGO TOGGLE on that same failed disk (L; R16): the guide opened over
+  IPC and driven through `ipc sourcesKey` (`enter`, `g`, `confirm` -- the
+  harness verb that calls the guide's own handlers, no keystroke), which
+  must patch `showLogos` alone and leave the URL and the FILE's mirror on
+  the stored entry, and F6 then restarts over the entry as the host stored
+  it after the toggle. F5's counts are taken from the switch's own log
+  mark and L's from the toggle's (F2's drop line used to pre-satisfy
+  F5's `left:yes`). `cleanup()` records
+  the live shell's children by parent pid before it reaps, so a TERM
+  inside the O window takes the sleeping slow helper with it (proven
+  inside O, D and N; `qa-lib-test.sh` pins the seam), and gives the state
+  directory its mode back on every exit, because a TERM inside F used to
+  leave it 0500 and `rm -rf` of the harness directory then stopped on
+  `state.json` (`run.sh clean` now tolerates that directory too; both
+  measured in round 5; since round 6 a `clean` whose `rm` still fails
+  says so and exits 1 instead of printing `cleaned`). The one window
+  outside that seam, a TERM between `--detach` returning and `qs.pid`
+  being read, is ended by the nested compositor going away rather than by
+  `reap` (which is gated off there); the round-3 review measured it.
+  `qa_json_field` answers `NULL` for a key that is present and null and
+  `NOFIELD` only for one that is absent, so a `held:NULL` want cannot be
+  met by a tree with no `pendingEntryKey` at all (round 4's P3; the three
+  `held:` wants say NULL) -- true only since round 6, when `pointerState`
+  stopped folding an absent property to null: the round-5 split was at the
+  reader alone, and `held:NULL` was green on f275bde (the round-5 live
+  lens's P2).
+
+**What the first run found (2026-10-11, lane-key-r1 at f84ee50), now
+D-SRC-15.** The key adopted at the first start was dropped when the
+helper's start-up `state init` chmodded the EXISTING `state.json`: the
+chmod is an inotify `IN_ATTRIB` on the file the service's `FileView`
+watches (mode changed or not), the reload handed `applyUserState` the
+pre-adoption text, `Model.stateOnLoad` kept only the session record, the
+parked save then wrote the key-less state and the entry flush stripped the
+URL with `sourceKey ""`. Measured by polling `pointerState` at 50 ms
+(+1489 ms adopted and parked, +1909 ms dropped) and attributed by repeating
+it with a helper whose `state init` does nothing (the key survives).
+lane-key-s1 (R9-R12) closes it: a reload never replaces memory that is
+newer than the file, the helper leaves a 0600 file alone, the entry waits
+for the save to land. Counts from the transcripts, 2026-10-11, on the
+round-3 harness (48 lettered checks): the forward run on lane-key-s2
+(lane-key-s1's code) **49 passed, 0 failed**; `--baseline lane-key-r2`
+**36 passed, 13 failed** (D2, D3, M1, M3, M5, C1-C5, E1, O5, O6). On the
+round-4 harness (61 lettered checks: W1-W6 and F1-F7 added, D3 by
+reason), 2026-10-12: the forward run on lane-key-t2 (lane-key-t1's code,
+R13-R15) **62 passed, 0 failed**; `--baseline lane-key-s2` **54 passed, 8
+failed** (D3, W3, W6 for the per-reason counter s2 lacks; F3, F4, F5, F6,
+F7 -- the dirsReady-route state write failing strips the URL from the
+stored entry, moves the mirror and loses the input, no record for it after
+the restart); `--baseline lane-key-r2` **38 passed, 24 failed** (the 13
+above plus W2, W3, W4, W6 -- the in-window switch and remove dropped by
+the same reload -- and F1-F7); `--baseline f275bde` **39 passed, 23
+failed**, O2 still its one discriminator against every later tree, the
+rest instrument absences and the start-up-adoption reds. Two mutations of
+this tree's code through the same harness: `Model.reloadDisposition`'s
+save-parked clause deleted reads 56 / 6 (D2, D3, W2, W3, W4, W6; the
+counter reads `file-newer` and `save-parked` is absent) and
+`applyUserState`'s R14 `return` deleted reads 57 / 5 (D2, W2, W3, W4, W6
+-- and D3 green, because a counter observes the decision and not the
+sink; the `return` is pinned structurally in `tests/Model.test.js`). The
+two mutations are PATCH FILES under `spikes/key-mutations/` (round 5; the
+round-4 throwaway branches are retired, cited nowhere, and the lead's to
+delete), applied to an export and run
+through `--tree`; `qa-lib-test.sh` proves each still applies.
+
+**Round 5 (2026-10-12, R16; 63 lettered checks: L1, L2 added).** The
+round-4 data-loss lens found rule 15's shape in R13 itself: the logo
+toggle is `writeOwnedEntry`'s SECOND caller, mirrored the in-memory key
+with no gate and stripped the URL, so in exactly the state F leaves one
+`g` + confirm in Sources lost the record. L drives that toggle inside F.
+Counts from the transcripts on the round-5 harness: the forward run on
+lane-key-u2 (lane-key-u1's code, R16) **64 passed, 0 failed**;
+`--baseline lane-key-t2` **60 passed, 4 failed** (L1 `stored:<C>
+playlistUrl:no`, L2 `keys:0 alone:0`, and F6/F7 restarting over that
+entry find no record for B); `--baseline lane-key-s2` **54 passed, 10
+failed** (round 4's eight plus L1, L2); the two patches through `--tree`
+read **58 / 6** and **59 / 5**, the same letters as above.
+Two things the first measurement corrected: E1 had been red
+on every tree because its own `want` was wrong (`kind=x` where
+`Model.maskUrl` masks every query value, by calling it on dev, lane-key-r2
+and lane-key-s1 alike), and the created-file shape (no `state.json` at
+all), which the round-2 live lens wrote down as dropping "the same way",
+does NOT drop: N2-N4 are green on `--baseline lane-key-r2` and
+`stateReloadsIgnored` reads 0 across the whole fresh start, because a
+`FileView` loaded over a missing path never sees the helper's create. N
+stays as the control for the one start every new user makes.
+`sources-scenario.sh` under cage read 63 passed, 3 failed on lane-key-s2
+(46 / 22 on lane-key-r2; 66 / 0 on dev): the three pinned behaviour round
+2 changed on purpose. The lead ruled on 2026-10-12 and the three checks
+moved to the ruled contract in round 4, **66 passed, 0 failed** under cage
+on lane-key-t2: an invalid CLI value is reported (`settingsInvalid`),
+logged as ignored, and keeps the active source and its channels (D16 as
+narrowed by D-SINK-19 -- the old check wanted the guide blanked); a host
+that cannot write our entry refuses only the MIRROR, which is logged (`no
+writable bar entry for the settings change`), left for the next start to
+repair, and never raised as `persist_failed` for a switch that has already
+happened (SR25 as amended: `persist_failed` is now the state write
+failing, reported from the FileView as `state_write_failed`, which
+`key-scenario.sh` F observes).
+
+**Round 6 (2026-10-12; no lettered check added, 63 as before).** The
+round-5 live lens found the NULL/NOFIELD split blind to an absent
+`pointerState` field: the verb folded `undefined` to null, so on f275bde
+(no `pendingEntryKey`) W3, F2 and F5 read `held:NULL` and that half of
+each was green. `pointerState` now omits what the tree lacks
+(`harness-lib.js`, `pointerStateOf`, driven by `qa-lib-test.sh`). Counts
+from the transcripts on lane-key-v1 (78ff442): the forward run **64
+passed, 0 failed**, the three `held:` reads NULL as before; `--baseline
+f275bde` **39 passed, 25 failed**, the same letters as round 5, and the
+held half is now red on its own: W1, W3, W5, F2 and F5 read
+`held:NOFIELD` (`held:[NOFIELD]` in W5) where the round-5 transcript read
+`held:NULL`. [Round 7, the round-6 live lens's P3: "red on its own" says
+more than this run shows. Every one of those checks also differs from its
+want in another half on f275bde, so the live run shows the held half is no
+longer satisfied, not that it alone would redden a check; that it alone
+does is proven at the instrument, `qa-lib-test.sh` reading 439 / 2 with the
+round-5 fold put back.] `sources-scenario.sh` **66 / 0** and `logo-scenario.sh live`
+**33 / 0** under a nested headless cage on the same tree. Two gate-side
+repairs the same round: `check.sh` runs `qa-lib-test.sh` with
+`OMARCHY_IPTV_HARNESS_DIR` unset, because one pin asserts the DEFAULT
+transcript directory and an exported variable reddened it over a green tree
+(the old invocation 440 / 1, the new 441 / 0 with it exported); and the two
+load-sensitive timing tests the gate runs (the 10,000-entry parse budget in
+`tests/test_playlist.py`, the stub's real-socket seek in `qa-stub-mpv.py
+--self-test`) say on failure that the number is load-dependent and how to
+re-run that one test alone, with the assertion and the budget unchanged.
+No lettered check observes the round-6 code change (a logo toggle before
+the first state load, which no harness reaches), so lane A did not run
+`--baseline lane-key-u3`; the round-6 live lens did, and it reads **64
+passed, 0 failed** (transcript key-20261012-122314-1907775.out, 72.7 s),
+as expected: no lettered check separates u3 from v1.
+
+**[Round 11: R17b, which U observed, is OVERTURNED by R21; U1-U7 now observe a guide URL set after the migration being refused.]** **Round 7 (2026-10-12; U1..U7 added, 63 -> 70).** The round-6 data-loss
+lens found an input no oracle had covered: an `epgUrl` R12 leaves on the
+entry while no source is active, stripped by any heal write (the logo
+toggle on the lagging host, observed live by the lens; the switch alone on
+the echoing host). R17a keeps a retired input on the entry until it is
+consumed, R17b lands a pending EPG on the record a switch or an in-app add
+makes active. Segment U lifts the lens's `epg-child.sh`: U1..U4 on the
+lagging host through the toggle and then the switch, U5..U7 on the echoing
+fake host (`run.sh --host echo`, the lever above) through the switch alone.
+Counts from the transcripts on lane-key-w1 (2ccbb74), under the scenario's
+own nested cage: the forward run **71 passed, 0 failed** (83.7 s);
+`--baseline lane-key-v2` **66 passed, 5 failed** -- U2, U3, U4, U6, U7, with
+U1 and U5 green as the controls they are and nothing outside U moved.
+`sources-scenario.sh` **66 / 0** and `logo-scenario.sh live` **33 / 0**
+under a nested headless cage on the same tree. `qa-lib-test.sh` now unsets
+`OMARCHY_IPTV_HARNESS_DIR` inside its default-directory pin itself (a bare
+run with the variable exported read 442 / 1 with the old line, 443 / 0 with
+the new one), and pins the `--host` lever (443 checks).
+
+**[Round 11: R18d, which A2 observed, is OVERTURNED by R21; K, Z and A now observe refused values settling, the whitespace-wrapped refusal and the in-app add with no competing value.]** **Round 8 (2026-10-12; K1..K3, Z1..Z3, A1, A2 added, 70 -> 78).** The
+round-7 data-loss lens reproduced two P1s live with drivers of its own,
+and this scenario carried no refused and no whitespace-wrapped value at
+all. K lifts its `loop-child.sh`: a refused `playlistUrl` (an ftp:// URL
+with a credential) beside an `epgUrl` R12 keeps, the shell's entry writes
+(the harness log's `updateEntryInline` lines) and its own CPU ticks
+(utime + stime of the recorded pid) counted over a 5 s window opening 2 s
+after the shell settles; at most 2 writes and 50 ticks is "settled". Z
+lifts `resurrect-child.sh` and `MODE=badws`: a whitespace-wrapped CLI
+playlist adopted then removed (Z1, Z2), and a whitespace-wrapped refused
+credential beside a working source (Z3). A drives the in-app add's probe
+commit through `ipc addSource`, with no guide URL in the form (A1, R17b's
+commit half, which the round-7 live lens found no segment reaching) and
+with one (A2, the lead's OQ-W3 ruling, R18d). Counts from the transcripts
+on lane-key-x1 (7a429cd), under the scenario's own nested cage: the
+forward run **79 passed, 0 failed** (133.0 s; every K window read 0
+writes and 0 ticks); `--baseline lane-key-w2` **73 passed, 6 failed** --
+K1 (17,414 writes, 596 ticks), K3 (19,943 / 637), Z1, Z2, Z3, A2, with K2
+and A1 green as the controls they are and nothing outside K, Z and A
+moved. Through `--tree` over 7a429cd with one decision removed: the keep
+decision comparing the raw entry value against the snapshot again, 75 / 4
+(K3, Z1, Z2, Z3 -- K3 reads `settled` and keeps the credential, because
+the write-settling half alone stops the loop); the funnel's two settling
+decisions removed, 78 / 1 (K1, 14,256 / 601); the probe commit no longer
+handing the form's guide URL over, 78 / 1 (A2). `sources-scenario.sh`
+**66 / 0** (the 10k switch median 33 ms) and `logo-scenario.sh live`
+**33 / 0** under a nested headless cage on the same tree.
+
+**[Round 11: R19b and R19c, which this paragraph's U, Q and V observe, are OVERTURNED by R21; those segments now observe the refusal and the in-app forms (the round-11 subsection).]** **Round 9 (2026-10-12, R19; Y1..Y3, Q1, Q2, V1, H1 added, 78 -> 85; U, K and A re-read).** Both round-8 lenses
+found the write skip R18b added coming back after a publish A -> B -> A on
+the lagging host, live, and the data-loss lens found the add form's guide
+URL superseding a CLI epgUrl set AFTER the form was submitted (and the
+same on the edit form). Y lifts the lens's `aba-child.sh` (T=logo, bad,
+epg) and starts, as that driver does, over an entry carrying A's URL: over
+the harness seed's in-place empty `playlistUrl` / `epgUrl` the first
+restore differs by those two keys and Y1/Y3 were green on the tree that
+has the defect (measured). Q lifts `race-child.sh`: the probe is held open
+by a local listener that answers after 4 s, its pid read from the listener
+(`ss -ltnp`) and killed by that pid, in both orders. V lifts `T=edit`. H is
+D-SRC-18 at the sink, with F's lever (the state directory 0500 under the
+running shell). U, K and A now read `held:` from state.json: R19b holds a
+guide URL with no source to land on there and takes it off the entry.
+Counts from the transcripts on lane-key-y1 (42850dc), under the scenario's
+own nested cage: the forward run **86 passed, 0 failed** (205.2 s; every K
+window 0 writes and 0 ticks); `--baseline lane-key-y0` **74 passed, 12
+failed** -- U1, U2, U5, K1, K2, K3, Y1, Y2, Y3, Q1, V1, H1, with A1, A2 and
+Q2 green as its controls; the two key-mutation patches through `--tree`
+**80 / 6** and **81 / 5**, the same letters as before. `sources-scenario.sh`
+**66 / 0** (the 10k switch median 35 ms) and `logo-scenario.sh live`
+**33 / 0** under a nested headless cage on the same tree. `qa-lib-test.sh`
+goes 453 -> 454: three existing wants move with the scenario (the key path
+6 -> 9, the restarts 5 -> 7, the U..P log marks 1 -> 3), and one new pin
+reads that `cleanup()` kills Q's slow listener by the pid read from the
+listener (`ss -ltnp`) rather than by a pattern (parallel rule 3). The
+documents of round 9 (lane-key-y2) re-read each count above from lane A's
+transcripts: `-181012` 86 PASS / 0 FAIL, `-181343` 74 / 12 with exactly the
+twelve letters named, `-182219` 80 / 6 (D2, D3, W2, W3, W4, W6) and
+`-182602` 81 / 5 (D3 green).
+
+**[Round 11: R20b and R20c are OVERTURNED by R21; Y4 and L2 stand, L2's want now the R21a keep.]** **Round 10 (2026-10-12, R20; Y4 added, 85 -> 86; L2 re-wanted).** The
+ninth review's data-loss lens found a one-decision mutant of R19a, S1b (a
+write skipped when its patch equals the lagging host's publish, one line
+before the compose), green in node (2,268 / 0) and live (86 / 0) while the
+second of two consecutive in-app logo toggles was ignored; Y1 re-sets
+`showLogos` from the CLI between its two toggles and so never toggles twice
+in a row. Y4 does: ON (the guide's own `g` then `confirm`), then OFF with
+nothing between, and reads the stored entry's `showLogos` through a new
+`ipc hostEntry` field, `storedShowLogos` (`HarnessLib.storedOwnedValue`,
+which `qa-lib-test.sh` drives rather than greps). L2's want moved: R20c
+makes the patch-only logo write keep only a valid input the last landed
+state does not hold, and the harness seed's EMPTY `epgUrl` is no input, so
+L2 now asks for `playlistUrl` (the only copy) and `sourceKey` beside
+`showLogos`, read from the write's `keys:` list and its `playlist (set)`
+mark, and no longer for `epgUrl`. Counts from lane A's transcripts on
+lane-key-z1, under the scenario's own nested cage (harness directories
+`/run/user/1000/omarchy-iptv-za-<n>`, removed after), re-read by the
+documents lane: the first forward run, on 92395c4 under the old L2 want,
+**86 passed, 1 failed** -- L2 `keys:0` with every other L and F check
+green (`key-20261012-210503-3375256`); forward on 0d407e5, the tip's code,
+**87 passed, 0 failed** (`-211001-3410753`, 232.2 s; Y4
+`on1:true/1 off2:false/2 stored:false`); `--baseline lane-key-y2` **87 /
+0** (`-211409-3439299`) -- round 10's repairs have no red segment here, and
+were observed at the sink only by the round-9 lens's own driver
+(`r9-child.sh`, in the session scratch) under lane A's cage; the S1b export
+through `--tree` **86 / 1**, Y4 `got [on1:false/0 off2:false/0
+stored:false]` (`-211919-3462671`). `sources-scenario.sh` **66 / 0**,
+`logo-scenario.sh live` **33 / 0** and `tls-scenario.sh` **48 / 0** (in a
+cage rendered with `WLR_RENDERER=gles2`, which mpv needs there; a pixman
+cage asserts in `vo_x11_init`, measured in round 9). `qa-lib-test.sh` goes
+454 -> 455: two wants move with the scenario and one new pin drives
+`storedOwnedValue`. The two key-mutation patches were not re-run through
+`--tree` this round, and the counts the scenario's header quotes for them
+(58 / 6 and 59 / 5) and its baseline narrative, which describes
+lane-key-y0's reds whatever `--baseline` names, predate rounds 8 to 10.
+
+**The weak already-stored check, fixed in round 4.** 'a switch the host
+already stores is not reported as a persist failure' means to make the
+fake's `updateEntryInline` take its `!dirty` branch (the host's "already
+stored", `false` as success). The first version pre-set `playlistUrl` on
+the stored entry, which no D-SINK-19 write can match, so the branch's log
+line `updateEntryInline: nothing changed (already stored)` (shell.qml, the
+only place the string exists) never appeared on any tree and the check
+passed on `ok` alone -- rule 14's shape, found by the round-2 live lens.
+It now seeds `sourceKey` on the stored side (`ipc setStored sourceKey
+<key>`) and waits for one MORE of that line than the log held before, so
+an earlier line cannot satisfy it; `qa-lib-test.sh` pins the seed and the
+wait.
+
+#### Round 11 (R21): one migration, then nothing on the entry is an input
+
+The product owner dropped the `omarchy bar set` URL route on 2026-10-13. The
+bar entry's `playlistUrl` and `epgUrl` are read while the state the service
+last saw LAND does not carry `entryMigrated`, and refused after it: never
+adopted, reported once per value (a desktop notification and the console,
+the sentence Model.entryInputNotice composes from the setting's name), and
+stripped by the next owned write. key-scenario.sh follows: `seed <key>
+migrated` writes the marker; G observes it landing, the REAL 0.13.6 helper
+(the v0.13.6 tag) dropping it, and the re-upgrade migrating again; X observes
+the refusal at the sink -- the notification is the stand-in
+`omarchy-notification-send` shell_arm puts in front of PATH, whose log is the
+scenario's own scratch. F and H observe a migration whose write fails from
+the start through `fixtures/disk-gone-after-init.py` (the state directory
+loses `w` the moment `state init` has run; taking it away before the start
+does nothing, because init chmods the directory back to 0700). U, K, Z, A,
+Y2, Y3, Q and V observe the refusal where they observed round 9's held
+guide URL. `pointerState` derives `landedMigrated` and `memoryMigrated` and
+reports `entryInputReports` (names and reasons, never a value). Measured on
+lane-key-m1: 98 / 0 forward (97 lettered checks and the floor line), 68 / 30
+on `--baseline lane-key-z2`; sources-scenario 66 / 0 and logo-scenario 33 / 0
+under a nested cage on the same tree.
+
+#### Round 12 (R22): a state that did not load is never written
+
+The round-11 data-loss lens found a migrated install whose `state.json`
+could not be read at the start losing every record to an empty state
+written over it, and the same through a state directory that cannot be
+entered (the cache layout's save, on 0.13.6 too). What Quickshell's
+FileView reports was measured first, one FileView per case in a nested
+headless cage: FileNotFound for a missing file AND for a file inside a
+0000 or 0600 directory, PermissionDenied for a 0000 file, NotAFile for a
+directory or FIFO at the path, `loaded` for an empty or garbage file -- so
+the helper's `state init` now reports what it FOUND before it repairs any
+mode, and only its `absent` makes a FileNotFound a fresh install.
+key-scenario.sh's B segment lifts the lens's `lf-child.sh`: B1-B4 the two
+repairable faults at a migrated start (the records survive, and a second
+start stands on them), B5-B7 a file that does not parse (the no-write mode:
+nothing written, the entry left exactly as it is, one notification, lifted
+by putting the file back), B8 the guide's fetch-failure hint as drawn
+(`state`'s new `emptyTitle` / `emptyProse` / `errorCheck`). N1 now asserts
+the init's verdict (`found:absent`) where it observed the adoption parked.
+`pointerState` adds `stateWriteBlocked`, `stateLoadKind`, `stateInitFound`
+and `stateWritesRefused` (reasons and counts). The node harness
+(tests/service-harness.js) delivers loads through stateFile's own handlers
+with the measured error numbers, models the init's reply and repairs as
+tests/test_state.py pins the real helper doing them, and RUNS the cache
+layout. Measured on lane-key-n1: 106 / 0 forward (105 lettered checks and
+the floor line), 97 / 9 on `--baseline lane-key-m2`; sources-scenario
+66 / 0 and logo-scenario 33 / 0 under a nested cage.
+[Documents lane, 2026-10-13: the two key-scenario counts re-read from lane
+A's transcripts, `key-20261013-161816-835970` (106 PASS, 0 FAIL) and
+`key-20261013-162220-859113` (97 PASS, 9 FAIL: N1 and B1-B8). Both ran on
+4fdb37c, whose plugin files are the tip's. The FileView probe is lane A's,
+not in this tree (`lane-n1/fvprobe/` in the session's scratch directory);
+its table is in `docs/OMARCHY-PLUGIN-CONTRACT.md`, which is the place to
+re-measure it after a Quickshell update. B's observers are the user's view
+in `docs/UX-SOURCES.md` 5.10 and the rows SRC-MIG-40..43 and SRC-ERR-10 in
+`docs/QA-SOURCES.md`.]
+
+#### Round 13 (R23): the no-write mode's loose ends
+
+key-scenario.sh B9..B14, under the scenario's own nested cage on a private
+session bus (`private-bus.sh`, committed this round: a `dbus-daemon` from a
+config with no service directories, CLAUDE.md working-in-parallel 6b; the
+round-12 copy lived in /tmp and went with the reboot). B9 two no-write
+episodes in one session with no own save between, reached by in-place
+writes the FileView reloads, each told (R23a). B10 the start-up `state
+init` held 60 s by O's slow tree over a file that does not parse: the
+service's watchdog stops it at 15 s, `init_pids` (an exact-argv scan of
+/proc, never a pattern) finds nothing left running it, and the start
+blocks as `init-timeout` (R23c). B11 a no-write start draws the
+notification's own words and no form, and `ipc editable` -- a census of
+editable text inputs under the guide, new this round -- reads 0 (R23e,
+D-CLIP-1). B12 the logo toggle there says the no-write reason (R23f). B13 a
+fresh install's drawn copy is the first-run form's (R23h: `state`'s
+`emptyTitle` / `emptyProse` now report what is DRAWN, with `emptyShown`,
+`firstRunHead` and `stateBlocked` beside them). B14 a FIFO at state.json
+(R23b). Counts are the summary line's (R23h): forward 112 / 0;
+`--baseline lane-key-n2` 107 / 5 (B10..B14 red; B9 green there, because
+the line it guards existed and only its check did not); `--tree` with
+`spikes/key-mutations/r23a-no-rearm.patch` 111 / 1 (B9, `told:1/1`), and
+with `r23e-editable-field.patch` 111 / 1 (B13, `editable:2`: the census
+sees the form's two fields once they are editable). sources-scenario 66 / 0
+under an outer headless cage on a private bus, logo-scenario 33 / 0.
+
+The FileView's watch was MEASURED this round, because the round-12 lenses
+reported it lost after the view's own first save and the node harness
+delivered a reload on every external change (R23g):
+`spikes/filewatch/measure.sh` runs one FileView declared as stateFile is,
+in a nested cage on a private bus, through 16 sequences of own saves,
+helper renames, in-place writes, chmods and restarts; the result it printed
+is kept beside it. Every external change raised a reload, before or after
+any number of own saves and across a restart; the own save's reload
+delivers a load only sometimes (never for a lone save at idle; under load,
+or with a later write queued, it lands with the view's own text). The real
+Service.qml, driven the same way idle and under six busy loops on four
+cores, agreed. So tests/service-harness.js keeps its hand-delivered
+external reloads and makes the own-write echo a lever, `ownEcho` "load" |
+"none", and scripts/check.sh runs the node suite both ways (2372 / 0
+each). The lost watch the lenses reported (D-SRC-19's mechanism) did not
+reproduce in any sequence here; their rigs were lost with /tmp, so the
+difference is not known.
+
+[Annotated by the round-13 documents lane (lane-key-p2), 2026-10-14. The
+transcripts behind the counts above, in lane A's session scratch directory:
+forward `key-20261014-043943-514380` (112 / 0, 277 s), `--baseline
+lane-key-n2` `key-20261014-044420-538071` (107 / 5, 294 s),
+`r23a-no-rearm.patch` `key-20261013-214109-138686` (111 / 1),
+`r23e-editable-field.patch` `key-20261013-230141-283957` (111 / 1),
+logo-scenario `logo-20261014-043540-501342`. The real-service half of the
+watch measurement (lane A's `svcwatch.sh`) is NOT in this tree: only the bare
+FileView spike is. So the mid-session no-write mode AFTER an own save rests on
+one uncommitted instrument against the round-12 data-loss lens's opposite
+reading, and is UNVERIFIED (rule 14) until a committed scenario observes it;
+B9 covers the half with no own save. `docs/ARCHITECTURE-SOURCES.md`'s
+round-13 rulings hold the decision request.]
+
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 
 `shell.qml` here reproduces the real host's config plumbing in its shape
@@ -965,7 +1433,25 @@ re-trigger its watcher, so its echo never arrives at all.
 The earlier fake fed the plugin's own write straight back into
 `fakeShell.barConfig`, which is exactly what the real host does not do: it
 masked both P1 defects through two QA passes. Keep the ordering above
-intact. `ipc hostEntry` shows the two sides, and the scenario's
+intact.
+
+**The echoing host, as a lever (`run.sh --host echo`; D-HOST-4, D-SINK-19
+round 7).** omacom/omarchy#15082 makes `publicBarConfig()` read
+`shellConfig` directly, so a host carrying it publishes a plugin's own
+write at once. The default stays the lagging host above, and every
+scenario written against it is unchanged. `--host echo` makes
+`syncPluginApis` read `shellConfig.bar` instead of the stale binding, from
+the same handler, with NO intermediate stale publish: a fake that handed
+the plugin the previous bar first and the current one after would give it
+the lagging host's accidental rescue on the echoing host too, more
+forgiving than either real host (rule 10) -- which is exactly the rescue
+that hid the round-6 data-loss lens's P1 on today's host. `ipc hostEntry`
+reports `host: "lag" | "echo"`, so a scenario can assert the lever took;
+`run.sh` refuses any other value at the parse and records the variable in
+`last-start.env`, and `qa-lib-test.sh` pins both. Only `key-scenario.sh`'s
+U5..U7 run on it so far [round 8: and K2, K3, the loop window on the
+echoing host]; the other own-write scenarios (E6, the key
+mirror, the logo toggle) running both ways is the rest of D-HOST-4. `ipc hostEntry` shows the two sides, and the scenario's
 `== D-LIVE-20` block asserts that a switch takes effect **while** the
 published bar still names the previous source. Against a service that waits
 for the echo that block fails, along with H2, H6/H8 and H7.

@@ -3,13 +3,16 @@ import {
   QUOTE_OPEN, QUOTE_CLOSE, SEP, GLYPHS, NOTIFY_IDS
 } from "./build.mjs"
 import {
-  str, asList
+  str, asList, fnv1a32
 } from "./text.mjs"
 import {
   cleanName
 } from "./channels.mjs"
 import {
-  parseHelperStatus
+  stateUnreadableNotice
+} from "./state.mjs"
+import {
+  parseHelperStatus, entryInputNotice, ownedEntryPatch
 } from "./settings.mjs"
 import {
   helperArgv
@@ -24,10 +27,10 @@ import {
   rowDetail, rowAccessibleName
 } from "./contrast.mjs"
 import {
-  resolveEpgUrl
+  resolveEpgUrl, sourceKey
 } from "./sources.mjs"
 import {
-  removeSource
+  removeSource, entryWith
 } from "./source-records.mjs"
 
 // ---- D-SINK-18: the container the host settings file is, before a URL goes
@@ -141,6 +144,34 @@ function configShieldDecision(state, playlistUrl, epgUrl) {
   return CONFIG_DEFER
 }
 
+// D-SINK-19. The gate's question, asked of the ENTRY about to be written
+// instead of of two argument names.
+//
+// Why this exists rather than a call that passes two empty strings. The
+// plugin no longer writes a URL into the host's file at all -- `ownedEntryPatch`
+// names `sourceKey` and `showLogos`, and `entryWith` strips the retired keys --
+// so the gate above would never fire again on any shipping path, and a gate
+// that cannot fire is a gate nobody notices breaking (rule 14). Asking the
+// patch means the answer comes back REFUSE the moment a URL-bearing key is
+// written again, whoever writes it and whatever they call it.
+//
+// IS A SOURCE KEY A SECRET? No, and this is the risk that decision accepts.
+// A key is `fnv1a32` of the normalized playlist URL: eight hex characters,
+// 32 bits, which cannot carry a URL back. What it can do is CONFIRM a guess
+// -- anyone who can read `shell.json` may hash a candidate URL and see
+// whether it matches -- so a reader who already holds a provider URL learns
+// that this user has that account. That is a real loss, it is not zero, and
+// it is smaller by a category than the credential itself, which is what used
+// to be in the file. ACCEPTED, because the alternative is worse: gating the
+// key write would let an exposed file refuse the very write that TAKES THE
+// URL OUT, which is the trap `persistCarriesSecret` already documents one
+// function above. The exposure is not "closed"; it is reduced from the
+// credential to a 32-bit check on a guess.
+function entryShieldDecision(state, patch) {
+  var p = patch || {}
+  return configShieldDecision(state, p.playlistUrl, p.epgUrl)
+}
+
 function seqArg(seq) {
   var n = Math.floor(Number(seq))
   return String(isFinite(n) && n > 0 ? n : 0)
@@ -243,6 +274,17 @@ function notifyArgv(event, params) {
     spec = { title: "Guide data error", body: "Could not fetch the EPG (" + (reason || "unknown error") + "). Channels still work.", glyph: GLYPHS.alert, urgency: "low", id: NOTIFY_IDS.epgError }
   } else if (event === "mpvMissing") {
     spec = { title: "mpv not found", body: "Install mpv to play channels.", glyph: GLYPHS.tvOff, urgency: "critical", id: NOTIFY_IDS.mpvMissing }
+  } else if (event === "entryInputRefused") {
+    // R21b: the text is Model.entryInputNotice's and nothing else, so the
+    // notification, the console line and the test read one sentence. It
+    // takes a setting NAME and a reason, never a value (rule 5).
+    var notice = entryInputNotice(p.setting, p.reason)
+    spec = { title: notice.title, body: notice.body, glyph: GLYPHS.alert, urgency: "normal", id: NOTIFY_IDS.entryInputRefused }
+  } else if (event === "stateUnreadable") {
+    // R22a: Model.stateUnreadableNotice's sentence and nothing else, for the
+    // same reason as the refusal above. A reason and a PATH, never a URL.
+    var told = stateUnreadableNotice(p.reason, p.path)
+    spec = { title: told.title, body: told.body, glyph: GLYPHS.alert, urgency: "critical", id: NOTIFY_IDS.stateUnreadable }
   }
   if (!spec) return null
   return ["omarchy-notification-send", "--app-name", "IPTV", "-u", spec.urgency, "-g", spec.glyph, "-r", String(spec.id), spec.title, spec.body]
@@ -449,8 +491,8 @@ export {
   CONFIG_SHIELD_UNKNOWN, CONFIG_SHIELD_PRIVATE, CONFIG_SHIELD_EXPOSED,
   CONFIG_SHIELD_ABSENT, CONFIG_PERSIST, CONFIG_REFUSE, CONFIG_DEFER,
   configShieldArgv, configShieldState, persistCarriesSecret,
-  configShieldDecision, seqArg, mpvArgArgv, playerSessionArgv,
-  playerStartArgv, playerStopArgv, playerRestartArgv, playerPauseArgv,
-  notifyArgv, sourceLabel, hostOf, SPACE_RE, isSpaceAt, isSchemeRestCode,
-  isLetterCode, redactUrls, scrubUrls, sinkText
+  configShieldDecision, entryShieldDecision, seqArg, mpvArgArgv,
+  playerSessionArgv, playerStartArgv, playerStopArgv, playerRestartArgv,
+  playerPauseArgv, notifyArgv, sourceLabel, hostOf, SPACE_RE, isSpaceAt,
+  isSchemeRestCode, isLetterCode, redactUrls, scrubUrls, sinkText
 }

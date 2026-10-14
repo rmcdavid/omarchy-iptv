@@ -14,6 +14,7 @@ from helper_loader import load_helper
 
 helper = load_helper()
 ROOT = pathlib.Path(__file__).resolve().parent.parent
+HELPER_PATH = ROOT / "bin" / "omarchy-iptv"
 # The session vectors are shared with tests/Model.test.js (CLAUDE.md: a rule
 # written twice gets one fixture).
 FIXTURE = ROOT / "tests" / "fixtures" / "player-argv.json"
@@ -21,7 +22,27 @@ FIXTURE = ROOT / "tests" / "fixtures" / "player-argv.json"
 # cache layout marker and the source history, plus the optional nullable
 # `session` of the detached player (ARCHITECTURE-PLAYER.md section 8), which
 # is additive and does NOT bump the version.
-EMPTY = {"version": 2, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None, "session": None, "sources": [], "savedSearches": [], "hiddenGroups": []}
+# D-SINK-19 adds the fifth additive key, `activeKey`: which source is active,
+# by key, in the plugin's own 0600 file instead of as a URL in the host's.
+# Additive at version 2 like the four before it.
+EMPTY = {"version": 2, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None, "session": None, "sources": [], "savedSearches": [], "hiddenGroups": [], "activeKey": ""}
+
+
+# D-SINK-19's fixtures. Credentialed on purpose: the assertions about stdout
+# and about what is left in the file are only worth anything over a URL that
+# carries something.
+SRC_PROVIDER = {
+    "key": "d990c2e4",
+    "url": "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts",
+    "epgUrl": "http://provider.example.test/xmltv.php?username=u&password=p",
+    "kind": "http", "label": "provider.example.test", "labelCustom": False, "origin": "cli",
+    "addedAt": 10, "lastUsed": 20, "fetchedAt": 30, "channelCount": 9, "groupCount": 2,
+}
+SRC_SECOND = {
+    "key": "42839dd5", "url": "http://second.example.test/list.m3u", "epgUrl": "",
+    "kind": "http", "label": "second.example.test", "labelCustom": False, "origin": "guide",
+    "addedAt": 11, "lastUsed": 21, "fetchedAt": 31, "channelCount": 5, "groupCount": 1,
+}
 
 
 def v2(**patch):
@@ -59,7 +80,7 @@ class StateCommandTest(unittest.TestCase):
         # S-02: the service's FileView would create the file 0644; init runs first.
         code, payload, _ = self.state("init")
         self.assertEqual(code, 0)
-        self.assertEqual(payload, {"ok": True, "kind": "state", "action": "init", "created": True, "state": EMPTY})
+        self.assertEqual(payload, {"ok": True, "kind": "state", "action": "init", "found": "absent", "created": True, "state": EMPTY})
         self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), EMPTY)
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
         self.assertEqual(pathlib.Path(self.dir).stat().st_mode & 0o777, 0o700)
@@ -78,6 +99,47 @@ class StateCommandTest(unittest.TestCase):
         self.assertEqual(payload["state"]["favorites"], ["t:keep"])
         self.assertEqual(self.path.read_text(encoding="utf-8"), content)   # not rewritten
         self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+
+    def _init_as_subprocess(self, mode):
+        """R10 (D-SRC-15), measured on the VERB as a subprocess the way the
+        service runs it, over a file seeded with `mode`. Returns the stat
+        before and after. ctime is the inotify IN_ATTRIB witness: a chmod
+        bumps it whether or not the mode changed; nothing else here does."""
+        import subprocess, sys, time
+        self.path.parent.mkdir(parents=True, mode=0o700)
+        content = json.dumps(v2(favorites=["t:keep"], activeKey="d990c2e4"), indent=2) + "\n"
+        self.path.write_text(content, encoding="utf-8")
+        os.chmod(self.path, mode)
+        before = self.path.stat()
+        time.sleep(0.02)   # so a chmod's ctime is distinguishable at any clock resolution
+        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        proc = subprocess.run([sys.executable, "-I", str(HELPER_PATH), "state", "--state-dir", self.dir, "init"],
+                              capture_output=True, text=True, env=env, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        payload = json.loads(proc.stdout.strip().splitlines()[-1])
+        self.assertFalse(payload["created"])
+        after = self.path.stat()
+        self.assertEqual(self.path.read_text(encoding="utf-8"), content)   # never rewritten
+        self.assertEqual(after.st_mtime_ns, before.st_mtime_ns)             # the content clock never moves
+        self.assertEqual(after.st_mode & 0o777, 0o600)
+        return before, after
+
+    def test_init_leaves_a_file_already_0600_alone(self):
+        """R10: a file that is already private is NOT chmod-ed, so the shell's
+        FileView sees no IN_ATTRIB from the ordinary start. ctime unchanged is
+        the measurement (a chmod to the same mode bumps it; measured on this
+        machine by the sibling test below, which seeds 0644)."""
+        before, after = self._init_as_subprocess(0o600)
+        self.assertEqual(after.st_ctime_ns, before.st_ctime_ns)
+
+    def test_init_still_tightens_a_0644_file(self):
+        """R10's other half, belt and braces: a file left 0644 (a FileView
+        created it before S-02, or the user chmod-ed it) is still tightened,
+        and that chmod IS the IN_ATTRIB the service has to survive (R9) --
+        ctime moves, mtime and content do not."""
+        before, after = self._init_as_subprocess(0o644)
+        self.assertEqual(before.st_mode & 0o777, 0o644)
+        self.assertGreater(after.st_ctime_ns, before.st_ctime_ns)
 
     def test_init_state_file_is_exclusive(self):
         os.makedirs(self.dir, mode=0o700)
@@ -126,11 +188,16 @@ class StateCommandTest(unittest.TestCase):
         self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), payload["state"])
 
     def test_tolerates_malformed_and_foreign_content(self):
+        # R22a (D-SINK-19 round 12): a file that does not parse is no longer
+        # read as the empty state -- `show` says it could not be read, and the
+        # file is left exactly as it was. Foreign CONTENT inside a JSON object
+        # (an unknown version, junk entries, unknown keys) is still tolerated.
         self.path.parent.mkdir(parents=True)
         self.path.write_text("{not json", encoding="utf-8")
         code, payload, _ = self.state("show")
-        self.assertEqual(code, 0)
-        self.assertEqual(payload["state"], EMPTY)
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"]["code"], "state_unreadable")
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "{not json")
         self.path.write_text(json.dumps({
             "version": 99,
             "favorites": ["t:a", "", None, "t:a", 7],
@@ -297,6 +364,144 @@ class SessionKeyTest(unittest.TestCase):
         self.assertEqual(len(helper.normalize_hidden_groups(many)), fixture["cap"])
         self.assertEqual(helper.normalize_hidden_groups(many)[-1], "G%d" % (fixture["cap"] - 1))
 
+    # ---- D-SINK-19: activeKey, the fifth additive key ----------------------
+    #
+    # The plugin used to identify the active source by the provider URL on the
+    # host's bar entry, so the credential HAD to be in a file the plugin does
+    # not own. The key goes in state.json instead -- 0600 inside a 0700
+    # directory -- and the host's file gets a pointer. The exposure is reduced,
+    # not closed: a key is fnv1a32 of the URL, so it cannot carry one back and
+    # it CAN confirm a guessed one (Model.entryShieldDecision states the trade).
+    #
+    # This reader is the dangerous half. It rebuilds the document from
+    # default_state() and copies the keys it knows, so a key it has not been
+    # taught is erased by the next write -- and for THIS key that means the
+    # shell reads as not configured, with the sources still listed and no
+    # active one. savedSearches suffered exactly that erase live.
+
+    def test_active_key_survives_a_write_by_this_writer(self):
+        """The fifth key taught to this whitelist, on the day it was added."""
+        doc = dict(helper.default_state())
+        doc["activeKey"] = "d990c2e4"
+        self.assertEqual(helper.normalize_state(doc)["activeKey"], "d990c2e4")
+
+    def test_active_key_survives_the_real_cli_writer(self):
+        """Through main(), not normalize_state. This is the assertion that would
+        have gone red for the erase savedSearches shipped with: exit 0,
+        "ok": true, and the key gone from the file."""
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        doc = dict(helper.default_state())
+        doc["activeKey"] = "d990c2e4"
+        doc["sources"] = [SRC_PROVIDER]
+        self.path.write_text(json.dumps(doc), encoding="utf-8")
+        for args in (("favorite", "add", "t:x"), ("favorite", "remove", "t:x"), ("clear-recents",)):
+            code, payload, _ = self.state(*args)
+            self.assertEqual(code, 0, args)
+            written = json.loads(self.path.read_text(encoding="utf-8"))
+            self.assertEqual(written["activeKey"], "d990c2e4", args)
+            self.assertEqual(payload["state"]["activeKey"], "d990c2e4", args)
+
+    def test_active_key_runs_the_shared_fixture(self):
+        """tests/fixtures/active-key.json, the same file Model.test.js runs,
+        through normalize_active_key AND through normalize_state.
+
+        The fixture earned its keep on the first run: Model.activeKeyText used
+        str() and coerced the number 12345678 and the list ["d990c2e4"] INTO
+        the key grammar, where this reader rejects both for not being strings.
+        A hand-edited or foreign-written file would have read as configured on
+        one side and unconfigured on the other."""
+        with open(ROOT / "tests" / "fixtures" / "active-key.json", encoding="utf-8") as fh:
+            fixture = json.load(fh)
+        for case in fixture["parse"]:
+            self.assertEqual(helper.normalize_active_key(case["raw"]), case["key"], case["name"])
+            self.assertEqual(helper.normalize_state({"activeKey": case["raw"]})["activeKey"],
+                             case["key"], case["name"])
+        # The fixture holds both answers and the shapes that are not strings.
+        self.assertTrue(any(c["key"] for c in fixture["parse"]))
+        self.assertTrue(any(not c["key"] for c in fixture["parse"]))
+        self.assertTrue(any(not isinstance(c["raw"], str) for c in fixture["parse"]))
+
+    def test_active_key_is_printed_rather_than_redacted(self):
+        """public_state replaces every URL by its host, because stdout is a sink
+        (rule 5). The key needs no treatment: it is fnv1a32 of the URL, it is
+        already the cache directory name on disk, and it is the identifier every
+        other field is keyed by. The assertion that matters beside it is that
+        the URL is still gone."""
+        doc = dict(helper.default_state())
+        doc["activeKey"] = "d990c2e4"
+        doc["sources"] = [SRC_PROVIDER]
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(doc), encoding="utf-8")
+        code, payload, _ = self.state("show")
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["state"]["activeKey"], "d990c2e4")
+        self.assertNotIn("://", json.dumps(payload))
+        self.assertNotIn("password", json.dumps(payload))
+
+    def test_removing_the_active_source_clears_the_pointer(self):
+        """D-SINK-19 introduced this obligation rather than fixing it: before
+        the change nothing in this file could tell which source was active, so
+        a CLI remove could not have left a dangling pointer. Now it could."""
+        doc = dict(helper.default_state())
+        doc["activeKey"] = "d990c2e4"
+        doc["sources"] = [SRC_PROVIDER, SRC_SECOND]
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(doc), encoding="utf-8")
+        # Removing an INACTIVE source leaves the pointer alone.
+        code, payload, _ = self.state("source", "remove", "42839dd5")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["activeKey"], "d990c2e4")
+        # Removing the ACTIVE one clears it.
+        code, payload, _ = self.state("source", "remove", "d990c2e4")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["activeKey"], "")
+
+    def test_remove_runs_the_shared_fixture(self):
+        """The `remove` section of tests/fixtures/active-key.json, the same
+        cases Model.test.js runs through Model.removeSource (R3). The two
+        implementations must leave the same pointer: the review found the JS
+        side keeping a key that named the record it had just removed while
+        this side cleared it, and 1,053 python tests were green because the
+        join between them was a comment, not a call."""
+        with open(ROOT / "tests" / "fixtures" / "active-key.json", encoding="utf-8") as fh:
+            fixture = json.load(fh)
+        self.assertGreaterEqual(len(fixture["remove"]), 4)
+        for case in fixture["remove"]:
+            state = dict(helper.default_state())
+            state["sources"] = [dict(SRC_PROVIDER if k == "d990c2e4" else SRC_SECOND) for k in case["keys"]]
+            state["activeKey"] = case["activeKey"]
+            if case["ok"]:
+                helper.remove_source_record(state, case["remove"])
+            else:
+                with self.assertRaises(helper.HelperError, msg=case["name"]):
+                    helper.remove_source_record(state, case["remove"])
+            self.assertEqual(state["activeKey"], case["want"]["activeKey"], case["name"])
+            self.assertEqual(len(state["sources"]), case["want"]["count"], case["name"])
+            # ... and the document the real writer leaves behind agrees.
+            self.assertEqual(helper.normalize_state(state)["activeKey"], case["want"]["activeKey"], case["name"])
+
+    def test_rekeying_the_active_source_carries_the_pointer_with_it(self):
+        """`state source update --url` re-keys the record. The pointer has to
+        follow, or state.json names a record that no longer exists."""
+        doc = dict(helper.default_state())
+        doc["activeKey"] = "d990c2e4"
+        doc["sources"] = [SRC_PROVIDER, SRC_SECOND]
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        self.path.write_text(json.dumps(doc), encoding="utf-8")
+        code, payload, _ = self.state("source", "update", "d990c2e4",
+                                      "--url", "http://provider.example.test:8080/get.php?username=u&password=p&type=m3u_plus&output=ts")
+        self.assertEqual(code, 0)
+        written = json.loads(self.path.read_text(encoding="utf-8"))
+        self.assertEqual(payload["replacedKey"], "d990c2e4")
+        self.assertEqual(written["activeKey"], payload["key"])
+        self.assertNotEqual(written["activeKey"], "d990c2e4")
+        self.assertTrue(any(r["key"] == written["activeKey"] for r in written["sources"]))
+        # Re-keying an INACTIVE source does not move the pointer.
+        code, payload, _ = self.state("source", "update", "42839dd5",
+                                      "--url", "http://second.example.test/other.m3u")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["activeKey"], written["activeKey"])
+
     def test_saved_searches_run_the_shared_fixture(self):
         """The same file tests/Model.test.js runs, so neither implementation
         can change the folding or the bounds while believing it agrees."""
@@ -364,8 +569,404 @@ class SessionKeyTest(unittest.TestCase):
         # writers are in different languages and a key appended in one place and
         # inserted in the other makes every diff noisy.
         self.assertEqual(list(helper.default_state()),
-                         ["version", "cacheLayout", "favorites", "recents", "lastPlayed", "session", "sources", "savedSearches", "hiddenGroups"])
+                         ["version", "cacheLayout", "favorites", "recents", "lastPlayed", "session",
+                          "sources", "savedSearches", "hiddenGroups", "activeKey"])
 
+    # ---- R20a (D-SINK-19 round 10, D-SRC-20): the helper keeps what the
+    # service writes. The same fixture tests/Model.test.js runs; there, every
+    # reducer Service.qml hands the state to is driven and the keys it emits
+    # must EQUAL the fixture's list, and here the helper's reader must emit
+    # exactly that list over the fixture's document. A key taught to one
+    # reader alone is red on one side or the other the day it is added.
+    def _state_keys_fixture(self):
+        with open(ROOT / "tests" / "fixtures" / "state-keys.json", encoding="utf-8") as fh:
+            return json.load(fh)
+
+    def test_r20a_value_cases_run_the_shared_fixture(self):
+        fixture = self._state_keys_fixture()
+        for case in fixture["cases"]:
+            state = helper.normalize_state(json.loads(json.dumps(case["input"])))
+            got = {"entryMigrated": state.get("entryMigrated")}
+            if "dropped" in case["expect"]:
+                gone = {"pendingEpg", "entryInputs"} - set(state)
+                if not any("epgSetAt" in r for r in state["sources"]):
+                    gone.add("epgSetAt")
+                got["dropped"] = sorted(gone)
+            self.assertEqual(got, case["expect"], case["name"])
+
+    def test_r20a_the_helper_emits_exactly_the_shared_vocabulary(self):
+        fixture = self._state_keys_fixture()
+        state = helper.normalize_state(json.loads(json.dumps(fixture["document"])))
+        keys = fixture["keys"]
+        only = fixture.get("helperOnly", {})
+
+        def want(name):
+            return sorted(keys[name] + list(only.get(name, {})))
+        played = [r for r in state["recents"] + [state["lastPlayed"], state["session"]] if r]
+        self.assertEqual(sorted(state), want("top"))
+        self.assertEqual(sorted({k for r in state["sources"] for k in r}), want("source"))
+        self.assertEqual(sorted({k for r in played for k in r}), want("played"))
+        self.assertEqual(sorted({k for r in state["savedSearches"] for k in r}), want("savedSearch"))
+        # Kept, not merely present: the marker comes back as written.
+        self.assertIs(state["entryMigrated"], True)
+
+    def test_r21a_a_helper_write_keeps_the_migration_marker(self):
+        """R21a's preserved-keys half, at the helper's own sink: `state
+        favorite add`, `clear-recents` and `source update` over a migrated
+        file. Erased, the next shell start would read the bar entry's URLs as
+        migration inputs again. Seen red with the marker line removed from
+        normalize_state (the first write drops it)."""
+        fixture = self._state_keys_fixture()
+        document = json.loads(json.dumps(fixture["document"]))
+        os.makedirs(self.dir, exist_ok=True)
+        self.path.write_text(json.dumps(document), encoding="utf-8")
+        for args in (("favorite", "add", "t:itv.uk"), ("clear-recents",),
+                     ("source", "update", document["sources"][1]["key"], "--label", "Second")):
+            code, _payload, _ = self.state(*args)
+            self.assertEqual(code, 0, args)
+            written = json.loads(self.path.read_text(encoding="utf-8"))
+            self.assertIs(written.get("entryMigrated"), True, args)
+
+    def test_r21a_an_unmigrated_file_stays_unmigrated_and_no_helper_verb_invents_the_marker(self):
+        """The marker is the SERVICE's to set, by the migration; a helper
+        write over a 0.13.x file (no marker) must not set it, or the next start
+        would refuse the URL that file's install named its source by."""
+        os.makedirs(self.dir, exist_ok=True)
+        self.path.write_text(json.dumps({"version": 2, "sources": [], "favorites": []}), encoding="utf-8")
+        for args in (("favorite", "add", "t:itv.uk"), ("source", "add", "--url", "http://z.example.test/l.m3u", "--now", "100")):
+            code, _payload, _ = self.state(*args)
+            self.assertEqual(code, 0, args)
+            self.assertNotIn("entryMigrated", json.loads(self.path.read_text(encoding="utf-8")), args)
+
+    def test_r21d_a_guide_url_the_helper_sets_carries_no_set_time(self):
+        """R21d: R19c's set times are withdrawn, so the helper's third route
+        that set one (round 9's rule-15 search) sets none either."""
+        code, payload, _ = self.state("source", "add", "--url", "http://z.example.test/l.m3u", "--epg-url", "http://z.example.test/g.xml",
+                                      "--now", "1760000000")
+        self.assertEqual(code, 0)
+        key = payload["key"]
+        # Read after EACH write: a stamp the add made would be dropped by the
+        # update's own normalize_state, and a check after the update alone
+        # was green with the add's stamp restored (lane-key-m1's mutation P3).
+        record = [r for r in json.loads(self.path.read_text(encoding="utf-8"))["sources"] if r["key"] == key][0]
+        self.assertNotIn("epgSetAt", record, "the add")
+        code, _, _ = self.state("source", "update", key, "--epg-url", "http://z.example.test/g2.xml", "--now", "1760000200")
+        self.assertEqual(code, 0)
+        record = [r for r in json.loads(self.path.read_text(encoding="utf-8"))["sources"] if r["key"] == key][0]
+        self.assertEqual(record["epgUrl"], "http://z.example.test/g2.xml")
+        self.assertNotIn("epgSetAt", record, "the update")
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StateNeverWrittenUnreadTest(unittest.TestCase):
+    """D-SINK-19 round 12, R22a: A STATE THAT DID NOT LOAD IS NEVER WRITTEN.
+
+    The helper's half. `state init` reports what it FOUND at the path before
+    it touched anything -- the service's one witness that tells a missing
+    file from a file inside a directory it cannot search, which Quickshell's
+    FileView reports identically (FileNotFound, measured) -- and it never
+    rewrites a file it could not parse. Every other `state` verb refuses a
+    file that exists and cannot be read or parsed, instead of writing the
+    empty default over it (read_json + normalize_state used to do exactly
+    that: `state favorite add` over an unreadable file wrote one favourite
+    and nothing else, exit 0).
+
+    These are also the pins for the service harness's double of the init
+    (tests/service-harness.js helperInit, rule 10): each fault below is one
+    of its branches, run against the REAL helper as a subprocess, the way the
+    service runs it. The foreign-owner faults cannot be made without root and
+    are argued, not run: the chmod fails, so nothing changes."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = os.path.join(self.tmp.name, "state")
+        os.makedirs(self.dir, mode=0o700)
+        self.path = pathlib.Path(self.dir) / "state.json"
+        self.real = json.dumps(v2(favorites=["t:keep"], sources=[SRC_PROVIDER, SRC_SECOND], activeKey="d990c2e4", entryMigrated=True), indent=2) + "\n"
+        # a 0000 directory would defeat the TemporaryDirectory cleanup
+        self.addCleanup(lambda: os.chmod(self.dir, 0o700) if os.path.isdir(self.dir) else None)
+
+    def init(self):
+        import subprocess, sys
+        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        proc = subprocess.run([sys.executable, "-I", str(HELPER_PATH), "state", "--state-dir", self.dir, "init"],
+                              capture_output=True, text=True, env=env, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        return json.loads(proc.stdout.strip().splitlines()[-1])
+
+    def test_init_reports_absent_and_creates_the_file(self):
+        payload = self.init()
+        self.assertEqual((payload["found"], payload["created"]), ("absent", True))
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8")), EMPTY)
+
+    def test_init_over_a_0000_file_reports_file_restores_0600_and_never_rewrites_it(self):
+        self.path.write_text(self.real, encoding="utf-8")
+        os.chmod(self.path, 0)
+        before = self.path.stat()
+        payload = self.init()
+        self.assertEqual((payload["found"], payload["created"]), ("file", False))
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), self.real)
+        self.assertEqual(self.path.stat().st_mtime_ns, before.st_mtime_ns)
+
+    def test_init_inside_a_0000_directory_reports_unreadable_restores_0700_and_never_rewrites_the_file(self):
+        self.path.write_text(self.real, encoding="utf-8")
+        os.chmod(self.path, 0o600)
+        mtime = self.path.stat().st_mtime_ns
+        os.chmod(self.dir, 0)
+        payload = self.init()
+        self.assertEqual((payload["found"], payload["created"]), ("unreadable", False))
+        self.assertEqual(pathlib.Path(self.dir).stat().st_mode & 0o777, 0o700)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), self.real)
+        self.assertEqual(self.path.stat().st_mtime_ns, mtime)
+
+    def test_init_over_a_directory_at_the_path_reports_other_and_changes_nothing(self):
+        self.path.mkdir(mode=0o700)
+        payload = self.init()
+        self.assertEqual((payload["found"], payload["created"]), ("other", False))
+        self.assertTrue(self.path.is_dir())
+        self.assertEqual(os.listdir(self.path), [])
+
+    def test_init_over_a_dangling_symlink_reports_other_and_creates_nothing(self):
+        target = pathlib.Path(self.tmp.name) / "gone.json"
+        os.symlink(target, self.path)
+        payload = self.init()
+        self.assertEqual((payload["found"], payload["created"]), ("other", False))
+        self.assertTrue(self.path.is_symlink())
+        self.assertFalse(target.exists())
+
+    def test_init_never_rewrites_a_file_it_could_not_parse(self):
+        for text in ("{\"version\": 2, \"sources\": [", "", "[1, 2]", "\x00\x01 not text"):
+            with self.subTest(text=text[:12]):
+                self.path.write_text(text, encoding="utf-8")
+                os.chmod(self.path, 0o600)
+                before = self.path.stat()
+                payload = self.init()
+                self.assertEqual((payload["found"], payload["created"]), ("file", False))
+                self.assertEqual(self.path.read_bytes(), text.encode("utf-8"))
+                after = self.path.stat()
+                self.assertEqual((after.st_mtime_ns, after.st_ctime_ns, after.st_ino), (before.st_mtime_ns, before.st_ctime_ns, before.st_ino))
+
+    def verbs(self):
+        return [("show",), ("favorite", "add", "t:x"), ("favorite", "remove", "t:keep"), ("clear-recents",),
+                ("source", "list"), ("source", "add", "--url", "http://new.example.test/list.m3u"),
+                ("source", "update", "d990c2e4", "--label", "renamed"), ("source", "remove", "42839dd5")]
+
+    def assert_refused_and_untouched(self, restore=None):
+        before = self.path.read_bytes() if restore is None and self.path.is_file() else None
+        for verb in self.verbs():
+            with self.subTest(verb=" ".join(verb)):
+                code, payload, err = run("state", "--state-dir", self.dir, *verb)
+                self.assertEqual(code, 1)
+                self.assertEqual(payload["ok"], False)
+                self.assertEqual(payload["error"]["code"], "state_unreadable")
+                self.assertNotIn("password", json.dumps(payload) + err)
+        if restore is not None:
+            restore()
+        if before is not None:
+            self.assertEqual(self.path.read_bytes(), before)
+        elif self.path.is_file():
+            self.assertEqual(self.path.read_text(encoding="utf-8"), self.real)
+
+    def test_every_verb_refuses_a_file_that_does_not_parse_and_leaves_it_byte_for_byte(self):
+        for text in ("{\"version\": 2, \"sources\": [", "", "[]", "null", "\"a string\""):
+            with self.subTest(text=text[:12]):
+                self.path.write_text(text, encoding="utf-8")
+                self.assert_refused_and_untouched()
+
+    def test_every_verb_refuses_a_0000_file_and_leaves_it_as_it_was(self):
+        self.path.write_text(self.real, encoding="utf-8")
+        os.chmod(self.path, 0)
+        self.assert_refused_and_untouched(restore=lambda: os.chmod(self.path, 0o600))
+
+    def test_every_verb_refuses_a_0000_directory_and_leaves_the_file_as_it_was(self):
+        self.path.write_text(self.real, encoding="utf-8")
+        os.chmod(self.dir, 0)
+        self.assert_refused_and_untouched(restore=lambda: os.chmod(self.dir, 0o700))
+
+    def test_every_verb_refuses_a_directory_at_the_path(self):
+        self.path.mkdir(mode=0o700)
+        self.assert_refused_and_untouched()
+        self.assertTrue(self.path.is_dir())
+
+    def test_a_missing_file_is_still_a_fresh_state_for_every_writer(self):
+        code, payload, _ = run("state", "--state-dir", self.dir, "favorite", "add", "t:new")
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(self.path.read_text(encoding="utf-8"))["favorites"], ["t:new"])
+
+    def test_the_d_id_1_remap_writes_nothing_over_a_file_it_could_not_parse(self):
+        # R22b's list: the playlist fetch's state remap is the helper's other
+        # writer of state.json, and it already wrote only a dict it read.
+        for text in ("{not json", "", "[]"):
+            with self.subTest(text=text[:12]):
+                self.path.write_text(text, encoding="utf-8")
+                channels = [{"id": "t:a", "name": "A", "url": "http://x.example.test/a.ts", "tvgId": "a"}]
+                self.assertEqual(helper.remap_state_file(str(self.path), channels), 0)
+                self.assertEqual(self.path.read_text(encoding="utf-8"), text)
+
+
+class StateNeverBlocksTest(unittest.TestCase):
+    """D-SINK-19 round 13, R23b and R23d: the helper never opens a state path
+    in a way that can block, never reads one that is not a regular file (or a
+    symlink to one), and never chmods anything that is not the kind it
+    repairs.
+
+    The round-12 lenses measured the defect: with a FIFO at state.json,
+    `state init`, `state show` and `state favorite add` each sat in open()
+    until `timeout` killed them (rc 124), on the shipped 0.13.6 as on the
+    candidate; the service waited on that init forever and every start left
+    an orphaned helper. And `state init` chmod-ed a DIRECTORY at the state
+    path 0755 -> 0600, making the user's directory unsearchable.
+
+    Every case here runs the REAL helper as a subprocess WITH A TIMEOUT, so a
+    regression fails rather than hangs the suite (an in-process call to a
+    blocking open would hang it). The socket is bound by a child that chdirs
+    first, so the test does not depend on how long TMPDIR's path is (a unix
+    socket path is limited to 107 bytes)."""
+
+    TIMEOUT = 20
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = os.path.join(self.tmp.name, "state")
+        os.makedirs(self.dir, mode=0o700)
+        self.path = pathlib.Path(self.dir) / "state.json"
+
+    def helper(self, *argv):
+        import subprocess, sys
+        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        try:
+            proc = subprocess.run([sys.executable, "-I", str(HELPER_PATH), *argv],
+                                  capture_output=True, text=True, env=env, timeout=self.TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.fail("the helper did not answer within %d s: %s" % (self.TIMEOUT, " ".join(argv)))
+        lines = proc.stdout.strip().splitlines()
+        return proc.returncode, (json.loads(lines[-1]) if lines else None), proc.stderr
+
+    def make_fifo(self):
+        os.mkfifo(self.path, 0o600)
+
+    def make_socket(self):
+        import subprocess, sys
+        code = "import os, socket, sys; os.chdir(sys.argv[1]); s = socket.socket(socket.AF_UNIX); s.bind('state.json'); s.close()"
+        subprocess.run([sys.executable, "-I", "-c", code, self.dir], check=True, timeout=self.TIMEOUT)
+
+    def fingerprint(self):
+        st = os.lstat(self.path)
+        return (st.st_mode, st.st_ino, st.st_mtime_ns, st.st_ctime_ns)
+
+    def verbs(self):
+        return [("show",), ("favorite", "add", "t:x"), ("favorite", "remove", "t:x"), ("clear-recents",),
+                ("source", "list"), ("source", "add", "--url", "http://new.example.test/list.m3u"),
+                ("source", "update", "d990c2e4", "--label", "renamed"), ("source", "remove", "42839dd5")]
+
+    def assert_init_reports_other_and_leaves_it(self):
+        before = self.fingerprint()
+        code, payload, err = self.helper("state", "--state-dir", self.dir, "init")
+        self.assertEqual(code, 0, err)
+        self.assertEqual((payload["found"], payload["created"]), ("other", False))
+        self.assertEqual(self.fingerprint(), before)
+
+    def assert_every_verb_refuses_and_leaves_it(self):
+        before = self.fingerprint()
+        for verb in self.verbs():
+            with self.subTest(verb=" ".join(verb)):
+                code, payload, err = self.helper("state", "--state-dir", self.dir, *verb)
+                self.assertEqual(code, 1, err)
+                self.assertEqual(payload["error"]["code"], "state_unreadable")
+                self.assertIn("not a regular file", payload["error"]["message"])
+                self.assertEqual(self.fingerprint(), before)
+
+    def test_init_over_a_fifo_answers_other_at_once_and_leaves_it(self):
+        self.make_fifo()
+        self.assert_init_reports_other_and_leaves_it()
+
+    def test_every_verb_refuses_a_fifo_at_once_and_leaves_it(self):
+        self.make_fifo()
+        self.assert_every_verb_refuses_and_leaves_it()
+
+    def test_init_over_a_socket_answers_other_and_leaves_it(self):
+        self.make_socket()
+        self.assert_init_reports_other_and_leaves_it()
+
+    def test_every_verb_refuses_a_socket_and_leaves_it(self):
+        self.make_socket()
+        self.assert_every_verb_refuses_and_leaves_it()
+
+    def test_every_verb_refuses_a_directory_as_not_a_regular_file(self):
+        self.path.mkdir(mode=0o755)
+        self.assert_every_verb_refuses_and_leaves_it()
+
+    def test_init_never_chmods_a_directory_at_the_path(self):
+        # R23d: the round-12 live lens's case exactly -- a 0755 directory came
+        # back 0600 and its contents could no longer be listed.
+        self.path.mkdir(mode=0o755)
+        os.chmod(self.path, 0o755)
+        (self.path / "inside.txt").write_text("mine", encoding="utf-8")
+        self.assert_init_reports_other_and_leaves_it()
+        self.assertEqual(stat_mode(self.path), 0o755)
+        self.assertEqual((self.path / "inside.txt").read_text(encoding="utf-8"), "mine")
+
+    def test_init_never_chmods_a_fifo_at_the_path(self):
+        os.mkfifo(self.path, 0o644)
+        os.chmod(self.path, 0o644)
+        self.assert_init_reports_other_and_leaves_it()
+        self.assertEqual(stat_mode(self.path), 0o644)
+
+    def test_init_still_repairs_a_symlink_to_a_0000_file(self):
+        # The repair the round-12 CONFIRMED reading depends on still reaches a
+        # regular file behind a symlink (a dotfiles-managed state.json).
+        target = pathlib.Path(self.tmp.name) / "real-state.json"
+        target.write_text(json.dumps(v2(favorites=["t:keep"])) + "\n", encoding="utf-8")
+        os.chmod(target, 0)
+        os.symlink(target, self.path)
+        code, payload, err = self.helper("state", "--state-dir", self.dir, "init")
+        self.assertEqual(code, 0, err)
+        self.assertEqual((payload["found"], payload["created"]), ("file", False))
+        self.assertEqual(stat_mode(target), 0o600)
+        self.assertTrue(self.path.is_symlink())
+
+    def test_init_never_chmods_a_file_where_the_state_directory_should_be(self):
+        # R23d, rule 15's sibling in ensure_private_dir: its last chmod made
+        # whatever was at the DIRECTORY path 0700 -- a regular file there came
+        # out executable.
+        os.rmdir(self.dir)
+        pathlib.Path(self.dir).write_text("not a directory", encoding="utf-8")
+        os.chmod(self.dir, 0o644)
+        code, payload, err = self.helper("state", "--state-dir", self.dir, "init")
+        self.assertEqual(code, 1)
+        self.assertEqual(stat_mode(pathlib.Path(self.dir)), 0o644)
+        self.assertEqual(pathlib.Path(self.dir).read_text(encoding="utf-8"), "not a directory")
+
+    def test_the_d_id_1_remap_reads_a_fifo_without_blocking(self):
+        # The playlist fetch's state remap reads state.json through read_json.
+        # Run in a child with a timeout so a blocking open fails, not hangs.
+        import subprocess, sys
+        self.make_fifo()
+        code = ("import importlib.machinery, importlib.util, sys\n"
+                "loader = importlib.machinery.SourceFileLoader('h', sys.argv[1])\n"
+                "spec = importlib.util.spec_from_loader('h', loader)\n"
+                "h = importlib.util.module_from_spec(spec); loader.exec_module(h)\n"
+                "print(h.remap_state_file(sys.argv[2], [{'id': 't:a', 'name': 'A', 'url': 'http://x.example.test/a.ts', 'tvgId': 'a'}]))\n")
+        try:
+            proc = subprocess.run([sys.executable, "-I", "-B", "-c", code, str(HELPER_PATH), str(self.path)],
+                                  capture_output=True, text=True, timeout=self.TIMEOUT,
+                                  env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+        except subprocess.TimeoutExpired:
+            self.fail("remap_state_file blocked on a FIFO")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "0")
+        self.assertTrue(stat_is_fifo(self.path))
+
+
+def stat_mode(path):
+    return os.lstat(path).st_mode & 0o777
+
+
+def stat_is_fifo(path):
+    import stat as _stat
+    return _stat.S_ISFIFO(os.lstat(path).st_mode)

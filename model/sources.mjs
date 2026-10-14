@@ -189,6 +189,14 @@ function sourceErrorMessage(code, opts) {
     unknown_source: "Source not found",
     not_ready: "Not ready yet" + SEP + "try again in a moment",
     persist_failed: "Could not save settings" + SEP + "try omarchy bar set",
+    // R13 / SR25 as amended 2026-10-12: the state write is the switch, so a
+    // state write that FAILED is the one failure a switch, a remove or an
+    // adoption can have. Names the directory, never a URL, and never
+    // `omarchy bar set` (which would put a credential in the shell history).
+    state_write_failed: "Could not write state.json" + SEP + "check ~/.local/state/omarchy-iptv",
+    // R22a (round 12): the no-write mode. A source call is refused rather
+    // than made in memory only, because nothing made now would be kept.
+    state_unreadable: "state.json could not be read" + SEP + "nothing is saved until it can be",
     // D-SINK-18. Deliberately NOT the persist_failed sentence: that one sends
     // the user to `omarchy bar set`, which would write the credentialed URL
     // into their shell history permanently -- the durable exposure engineering
@@ -213,6 +221,37 @@ function sourceErrorMessage(code, opts) {
 // Older name from the architecture: same sentences.
 function sourceReason(code) {
   return sourceErrorMessage(code)
+}
+
+// Every reason Service.sourcesPersistFailed can carry (SR25 as amended
+// 2026-10-12). The guide renders the sentence for THE reason it was given:
+// `state_write_failed` names the state directory, `config_unsafe` names the
+// chmod, and only `persist_failed` -- a host entry updateEntryInline could
+// not rewrite -- says `omarchy bar set`, because that write carries no
+// credential. An unknown reason falls back to persist_failed's sentence. The
+// round-4 review's P2: the guide rendered persist_failed's copy for every
+// reason, so a failed write in ~/.local/state told the user to put the URL
+// into their shell history, the durable sink rule 5 forbids advising.
+var PERSIST_FAILURE_REASONS = ["state_write_failed", "config_unsafe", "persist_failed"]
+
+function persistFailureMessage(reason) {
+  var r = str(reason)
+  if (PERSIST_FAILURE_REASONS.indexOf(r) === -1) r = "persist_failed"
+  return sourceErrorMessage(r)
+}
+
+// D-SINK-19 round 13, R23f. What a refusal the guide shows SAYS. In the
+// no-write mode (`blocked`, Service.stateWriteBlocked: the reason, "" when
+// writes are allowed) every refusal says the no-write reason, whatever the
+// call answered: the round-12 live lens turned logos on in that mode and
+// was told "Could not save settings - try omarchy bar set" -- the wrong
+// reason and the wrong advice, because the guide mapped every `false` to
+// persist_failed. Otherwise the sentence for the code: `kind` "persist"
+// reads it as a sourcesPersistFailed reason (persistFailureMessage), any
+// other kind as a result code (sourceErrorMessage).
+function refusalMessage(code, blocked, kind) {
+  if (str(blocked) !== "") return sourceErrorMessage("state_unreadable")
+  return kind === "persist" ? persistFailureMessage(code) : sourceErrorMessage(code)
 }
 
 // ---- URL validation (ARCHITECTURE-SOURCES 3.1 with the UX 5.4 codes, SR6)
@@ -890,16 +929,17 @@ export {
   BEHIND_LIVE_SHOW_S, HELP_KEY, SOURCE_KEYS, SOURCE_KEY_RE, SOURCE_ORIGINS,
   URL_FIELDS, FORM_LIMITS, MONTHS, CONTROL_RE, EDGE_SPACE_RE, capLength,
   sanitizeInput, codePoints, codePointLength, capCodePoints, sanitizeTyping,
-  lowerFirst, sourceErrorMessage, sourceReason, ZERO_WIDTH_RE,
-  IPV6_LITERAL_RE, looksLikeHost, validateSourceUrl, normalizeSourceUrl,
-  EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST, epgHintUrl,
-  resolveEpgUrl, EPG_HINT_NOTICE, epgOriginNotice, isUrlField, sourceKey,
-  isSourceKey, findSource, findSourceByUrl, allocateSourceKey, sourceCacheDir,
-  hostPortOf, deriveLabel, labelKey, labelTaken, uniqueLabel,
-  defaultSourceLabel, validateLabel, maskQuery, maskUrl, encodeQueryValue,
-  xtreamUrls, validateXtream, pluralGroups, countsLine, sameDay,
-  formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
-  EPG_HINT_ROW_TEXT, sourceDetail, sourceAccessibleName, sourcesHeaderCount,
+  lowerFirst, sourceErrorMessage, sourceReason, PERSIST_FAILURE_REASONS,
+  persistFailureMessage, refusalMessage, ZERO_WIDTH_RE, IPV6_LITERAL_RE,
+  looksLikeHost, validateSourceUrl, normalizeSourceUrl, EPG_ORIGIN_NONE,
+  EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST, epgHintUrl, resolveEpgUrl,
+  EPG_HINT_NOTICE, epgOriginNotice, isUrlField, sourceKey, isSourceKey,
+  findSource, findSourceByUrl, allocateSourceKey, sourceCacheDir, hostPortOf,
+  deriveLabel, labelKey, labelTaken, uniqueLabel, defaultSourceLabel,
+  validateLabel, maskQuery, maskUrl, encodeQueryValue, xtreamUrls,
+  validateXtream, pluralGroups, countsLine, sameDay, formatLastUsed,
+  formatAgo, sourceView, sourceViews, sourceRows, EPG_HINT_ROW_TEXT,
+  sourceDetail, sourceAccessibleName, sourcesHeaderCount,
   sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
   fetchingLine, probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
   CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS,

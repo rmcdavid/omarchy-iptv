@@ -35,7 +35,8 @@ import {
   uniqueLabel, sameDay, formatLastUsed
 } from "./sources.mjs"
 import {
-  warnState, normalizeSourceRecord
+  warnState, normalizeSourceRecord, activeKeyText, activeKeyOf,
+  adoptActiveSource
 } from "./source-records.mjs"
 
 // ------------------------------------------------------------ state
@@ -347,7 +348,41 @@ function savedSearchRecord(entry) {
 }
 
 function emptyState() {
-  return { version: STATE_VERSION, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [] }
+  return { version: STATE_VERSION, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [], activeKey: "" }
+}
+
+// D-SINK-19 round 11, R21a. THE MIGRATION MARKER.
+//
+// The bar entry's `playlistUrl` and `epgUrl` are read as INPUT exactly once
+// per install: by the migration of a state file written before D-SINK-19
+// (0.13.x named the active source by the URL on the entry). The migration
+// adopts what the entry carries (Model.adoptActiveSource with `migrating`)
+// and sets this boolean in the SAME state write, and from the moment a state
+// write carrying it has LANDED nothing on the entry is an input again: a
+// value found there is refused, reported once and stripped (R21b). The
+// product owner dropped the `omarchy bar set` URL route on 2026-10-13 after
+// ten repair rounds of state built to tell a CLI input from the host's
+// stale echo of one did not converge.
+//
+// Present only when true, so a state that has not migrated serializes as it
+// did before; additive at STATE_VERSION 2 on the activeKey precedent, and
+// taught to the helper's normalize_state on the same day and the same shared
+// fixture (the shared state-keys fixture, dev branch). An OLDER build drops
+// it with every other key it does not know, and that is the downgrade the
+// ruling names: 0.13.6 writes the active URL back onto the entry and keeps
+// no marker, so a re-upgrade migrates again, over what 0.13.6 wrote.
+// Exactly `true`: a string "true" or a 1 is not a marker (activeKeyText's
+// lesson, the coercion that reads one way here and another in the helper).
+function entryMigratedOf(state) {
+  return !!(state && typeof state === "object" && state.entryMigrated === true)
+}
+
+// The state with the marker set; the SAME object when it already carries it,
+// so a caller's "did the state move" stays an identity test.
+function withEntryMigrated(state) {
+  var st = state || emptyState()
+  if (entryMigratedOf(st)) return st
+  return cloneState(st, { entryMigrated: true })
 }
 
 // One `{id, name, at}` record: the shape a `recents` entry, `lastPlayed`
@@ -382,8 +417,26 @@ function cloneState(state, patch) {
     // M3-01. The fourth key this whitelist had to be taught, and the test
     // that proves it is the same shape as the savedSearches one: a state
     // that carries it goes through every reducer and comes out with it.
-    hiddenGroups: asList(st.hiddenGroups).slice()
+    hiddenGroups: asList(st.hiddenGroups).slice(),
+    // D-SINK-19. The FIFTH, and the one whose loss is worst: it is the only
+    // record of which source is active, so a reducer that dropped it would
+    // un-configure the plugin on the next favourite toggle. Additive at
+    // STATE_VERSION 2 exactly like hiddenGroups -- a file without it reads
+    // as "", an older build drops it, the version does not move.
+    //
+    // Through activeKeyText and NOT str(): this is the sibling of the
+    // activeKeyText fix that the first round missed (rule 15). str() coerces
+    // the number 12345678 and the list ["d990c2e4"] into values that sit
+    // inside the key grammar, and every reducer passes through here, so a raw
+    // state object handed to one would have come out "configured" on this
+    // side and unconfigured on the helper's (normalize_active_key requires a
+    // string). One reader, one rule, the same answer as parseState.
+    activeKey: activeKeyText(st.activeKey)
   }
+  // D-SINK-19 round 11, R21a: the SIXTH key this whitelist is taught, on
+  // the day it is added. Carried only when it is exactly true, so a state
+  // that has not migrated clones to exactly the shape it had before.
+  if (st.entryMigrated === true) out.entryMigrated = true
   var p = patch || {}
   for (var key in p) if (key !== "version") out[key] = p[key]
   return out
@@ -446,6 +499,15 @@ function parseState(text) {
   // M3-01. Additive and optional like savedSearches below: a file without
   // it reads as [], an older build drops it, STATE_VERSION stays 2.
   state.hiddenGroups = hiddenGroupList(parsed.hiddenGroups)
+  // D-SINK-19. Which source is active, by KEY. Additive at version 2 on the
+  // same precedent as hiddenGroups and savedSearches. A value that is not a
+  // key reads as "" rather than failing; a key naming no record is kept here
+  // and resolved to "" by activeKeyOf, because dropping it at parse time
+  // would hide the case the migration has to decide about.
+  state.activeKey = activeKeyText(parsed.activeKey)
+  // D-SINK-19 round 11, R21a: the migration marker. Absent unless exactly
+  // true (entryMigratedOf).
+  if (parsed.entryMigrated === true) state.entryMigrated = true
   var recs = asList(parsed.recents)
   for (var r = 0; r < recs.length; r++) {
     var entry = playedRecord(recs[r])
@@ -998,19 +1060,249 @@ function withoutFailed(failed, id) {
   for (var k in src) if (k !== str(id)) out[k] = src[k]
   return out
 }
+
+// R13, the FileView's "landed". Whether the write the service last asked for
+// is the one the FileView has just reported on. One `saved` per setText was
+// measured for two back-to-back calls (2026-10-11) and does NOT hold for a
+// burst: ten warm switches issued 20 setText and raised 14 `saved` on this
+// tree, 15 on lane-key-s2 (a queued write replaced by a later one is dropped
+// without a signal), so a counter of setText calls stays above zero for the
+// rest of the session and every hold waits for ever -- and on lane-key-s2
+// the same stuck counter made every foreign reload read as "save in flight"
+// (D-SRC-15's sibling). Measured 2026-10-12 with a 26-write probe under
+// cage: `text()` tracks the content of the write job that STARTED (after a
+// burst of twenty it still read T19 while T20 was pending; a failed write
+// reads its own content and then `saveFailed`), `textChanged` precedes each
+// `saved`, and the last content asked for is always written last. So the
+// write has landed exactly when the view's text IS the last text asked for;
+// an earlier write's `saved` reads an earlier text and changes nothing.
+function stateSaveLanded(viewText, askedText) {
+  return str(viewText) === str(askedText) && str(askedText) !== ""
+}
+
+// R15. The reload counter counts BY REASON: one number per reason
+// Model.reloadDisposition can answer, keyed by the reason string itself so
+// the counter cannot name a reason the decision does not (rule 13: joined by
+// a call, not by a name). Returns a NEW object, because a QML `property var`
+// mutated in place raises no change signal. The harness reads it through
+// pointerState as `stateReloadsByReason`; key-scenario's D3 asserts the
+// `save-parked` count, which is the one the start-up chmod reload lands on,
+// where the plain total was satisfied by the own-write echo that follows
+// every start (round-3 review, lane B's P2).
+function countReload(counts, reason) {
+  var out = {}
+  var src = counts && typeof counts === "object" ? counts : {}
+  for (var k in src) if (Object.prototype.hasOwnProperty.call(src, k)) out[k] = Number(src[k]) || 0
+  var r = str(reason)
+  if (r === "") r = "unknown"
+  out[r] = (out[r] || 0) + 1
+  return out
+}
+
+// D-SRC-15 (R9). A reload of state.json NEVER replaces in-memory state that
+// is newer than the file. The file is the service's own write target, so the
+// in-memory state is newer whenever a save is parked behind the start-up dirs
+// (`savePending`), a write is still in flight (`savesInFlight`: setText has
+// returned, `saved` has not fired), or the last write FAILED (`saveFailed`:
+// the file never caught up, and applying it would replay the loss). In every
+// one of those the file is older than memory by construction: the parked or
+// in-flight save overwrites it anyway, so an ignored reload loses nothing
+// that was going to survive. The one reload that must always apply is the
+// FIRST (`loadedBefore` false): before it, memory is the empty default plus
+// whatever stateOnLoad replays on top.
+//
+// The reload this exists for is not the service's own write echoed back
+// (`ownWrite`, texts in recentSaves: skipped since R10 of the player design)
+// but a touch by something else: the helper's start-up `state init` chmods
+// the existing file, which is an inotify IN_ATTRIB and a `loaded` with the
+// PRE-adoption text (measured 2026-10-11 on a FileView probe: a chmod from
+// 0600 to 0600 reloads too). Applied, that text replaced the key and the
+// record adoptActiveSource had just adopted, the parked save then wrote the
+// key-less state and the entry flush stripped the URL: the user's active
+// source lost on the first start after the upgrade (D-SRC-15). The sibling
+// is the same flag: an IPC switch or remove before dirsReady (cacheReady
+// comes first) parks a save, so the reload that follows is ignored too.
+//
+// -> { act: "apply" | "ignore", reason }. Called by Service.applyUserState
+// before anything else; an ignored reload runs neither reconcile nor the
+// cache layout.
+function reloadDisposition(ctx) {
+  var c = ctx || {}
+  if (c.loadedBefore !== true) return { act: "apply", reason: "first-load" }
+  if (c.ownWrite === true) return { act: "ignore", reason: "own-write" }
+  if (c.savePending === true) return { act: "ignore", reason: "save-parked" }
+  if ((Number(c.savesInFlight) || 0) > 0) return { act: "ignore", reason: "save-in-flight" }
+  if (c.saveFailed === true) return { act: "ignore", reason: "save-failed" }
+  return { act: "apply", reason: "file-newer" }
+}
+// ---- D-SINK-19 round 12, R22a: A STATE THAT DID NOT LOAD IS NEVER WRITTEN ----
+//
+// The round-11 data-loss lens (live, both host shapes): a migrated install
+// whose state.json could not be read at the start had an empty state written
+// over it -- every source, credential and favourite gone. stateFile's
+// onLoadFailed used to call applyUserState(""), so a failed read was applied
+// as an EMPTY state, the migration ran on it and marked it, its save parked
+// behind the start-up dirs, the real text arriving with the helper's chmod
+// was ignored because a save was parked (R9), and the parked save landed.
+// The cache layout's save did the same through an unreadable state
+// DIRECTORY on every tree since D-SINK-19 began, 0.13.6 included.
+//
+// What Quickshell's FileView reports, MEASURED on Quickshell 0.3.1 in a
+// nested headless cage on 2026-10-13 (one FileView per case, the enum is
+// qs::io::FileViewError in quickshell-io.qmltypes):
+//   no file at the path                      loadFailed 2 FileNotFound
+//   a file with mode 0000 (or 0200)          loadFailed 3 PermissionDenied
+//   a directory where the file should be     loadFailed 4 NotAFile
+//   a FIFO at the path                       loadFailed 4 NotAFile
+//   the file inside a directory with 0000    loadFailed 2 FileNotFound  <-- !
+//   the file inside a directory with 0600    loadFailed 2 FileNotFound  <-- !
+//   a dangling symlink, a missing parent     loadFailed 2 FileNotFound
+//   an empty file, a file of garbage         loaded (text "" / the garbage)
+// So FileNotFound does NOT mean "the file does not exist": an unreadable
+// directory reads exactly like a fresh install, and no later event says
+// otherwise (the restored 0000 directory raised no fileChanged in that run;
+// inotify_add_watch had failed with EACCES). The one party that can tell the
+// two apart is the helper's start-up `state init`, which lstat()s the path
+// before it changes anything and reports what it found (`found`), so a
+// FileNotFound is a fresh install only when the helper says `absent` too.
+//
+// The numbers are FileViewError's, in its declaration order; the node suite
+// reads the installed qmltypes and fails if the order moves (rule 13: a join
+// by number is checked).
+var STATE_LOAD_ERRORS = { 1: "io-error", 2: "absent", 3: "permission", 4: "not-a-file" }
+
+// One load outcome -> what it IS. `result` is { loaded: true, text } from
+// onLoaded, or { loaded: false, error } from onLoadFailed. "loaded" means the
+// text parses as a state (a JSON object; parseState reads anything that
+// does); "unparsed" is a file that was read and is not one -- an empty file
+// included, since nothing this plugin writes is empty. Any error number this
+// table does not know is an I/O error: never "absent" by default.
+function stateLoadKind(result) {
+  var r = result || {}
+  if (r.loaded !== true) {
+    var e = Math.floor(Number(r.error))
+    return STATE_LOAD_ERRORS[e] || "io-error"
+  }
+  return parseJsonObject(r.text) ? "loaded" : "unparsed"
+}
+
+// The helper's `state init` reply -> "absent" when it found nothing at the
+// path before it created the file, "present" when it found anything at all
+// (a file, a directory, something it could not lstat), and "unknown" when
+// there is no reply to read: the init failed, printed nothing, or is a build
+// that predates the field. Only "absent" can make a fresh install.
+// R23c (round 13): `timedOut` -- the service's watchdog killed the init --
+// answers "timeout", whatever the killed process printed or exited with.
+function stateInitFound(text, exitCode, timedOut) {
+  if (timedOut === true) return "timeout"
+  if (Number(exitCode) !== 0) return "unknown"
+  var lines = str(text).split("\n")
+  for (var i = lines.length - 1; i >= 0; i--) {
+    var o = parseJsonObject(lines[i])
+    if (!o || o.kind !== "state" || o.action !== "init") continue
+    var f = str(o.found)
+    if (f === "absent") return "absent"
+    if (f === "file" || f === "other" || f === "unreadable") return "present"
+    return "unknown"
+  }
+  return "unknown"
+}
+
+// What the service does with a load that is not "loaded".
+//   ctx.kind         Model.stateLoadKind of the latest load
+//   ctx.loadedBefore a state has been applied this session
+//   ctx.initFound    Model.stateInitFound, "" until the start-up init exits
+//   ctx.retried      the one re-read after the init has been spent
+// -> { act, reason }
+//   apply  the load is a state: apply it (and lift any no-write mode)
+//   fresh  nothing exists at the path: an empty state, the migration may run
+//   wait   the start-up init has not answered; nothing is applied or written
+//   retry  re-read once: the init restores the modes of the directory and
+//          file it finds, so the file may be readable now (it is, for both
+//          chmod 0000 cases; a 0000 file also raises its own reload)
+//   block  no-write mode for the session: every state write is refused, the
+//          migration does not run, the entry is left as it is
+// Mid-session (`loadedBefore`) any load that is not a state blocks at once
+// and memory stands: a reload never replaces memory with a state that did
+// not load, and a vanished file is not a fresh install while the session
+// that read it is still running (the unreadable directory reads the same).
+function stateLoadDecision(ctx) {
+  var c = ctx || {}
+  var kind = str(c.kind)
+  if (kind === "loaded") return { act: "apply", reason: "loaded" }
+  if (kind === "") return { act: "wait", reason: "no-load" }
+  if (c.loadedBefore === true) return { act: "block", reason: kind }
+  var found = str(c.initFound)
+  if (found === "") return { act: "wait", reason: "init" }
+  // R23c: the init never answered (the service's watchdog killed it), so
+  // there is no witness and nothing a re-read could fix: the load that was
+  // waiting on it decides as the no-write mode, with that reason.
+  if (found === "timeout") return { act: "block", reason: "init-timeout" }
+  if (kind === "absent" && found === "absent") return { act: "fresh", reason: "absent" }
+  if (c.retried !== true) return { act: "retry", reason: kind }
+  return { act: "block", reason: kind === "absent" && found !== "unknown" ? "absent-unconfirmed" : kind }
+}
+
+// The one gate every state write goes through (Service.saveState).
+//   blocked  the no-write mode's reason, "" when writes are allowed
+//   loaded   a state has been applied this session
+//   dirsReady the start-up `state init` has exited
+// -> "refuse" | "park" | "write". A save asked for before any state has
+// loaded PARKS (the section-15 replay: a play recorded before the load is
+// written once the file it merges onto is known), never writes: before
+// R22a a save made with the dirs ready and the load still out wrote the
+// empty default over the file.
+function stateWriteGate(ctx) {
+  var c = ctx || {}
+  if (str(c.blocked) !== "") return "refuse"
+  if (c.loaded !== true || c.dirsReady !== true) return "park"
+  return "write"
+}
+
+// The user is told ONCE per no-write episode: this sentence, as a desktop
+// notification and a console line. It names the file and what to do, and
+// never a URL (it is composed from the reason and the path alone).
+function stateUnreadableNotice(reason, path) {
+  var file = str(path) !== "" ? str(path) : "state.json"
+  var r = str(reason)
+  var what = "could not be read"
+  var fix = "Check the file and its folder, then run omarchy restart shell."
+  if (r === "permission") {
+    what = "is not readable (permission denied)"
+    fix = "Make it readable with chmod 600 on that file, then run omarchy restart shell."
+  } else if (r === "not-a-file") {
+    what = "is not a regular file"
+    fix = "Move whatever is at that path aside, then run omarchy restart shell."
+  } else if (r === "unparsed") {
+    what = "is not a valid state file"
+    fix = "Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell."
+  } else if (r === "absent" || r === "absent-unconfirmed") {
+    what = "could not be found, or its folder could not be read"
+    fix = "Make the folder readable with chmod 700, then run omarchy restart shell."
+  } else if (r === "init-timeout") {
+    // R23c: the start-up check of the file (the helper's `state init`) did
+    // not answer within Service.stateInitTimeoutMs and was stopped.
+    what = "could not be checked: the start-up check did not answer and was stopped"
+    fix = "Make sure a regular file, or nothing, is at that path, then run omarchy restart shell."
+  }
+  return { title: "Saved sources not loaded",
+           body: file + " " + what + ". Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. " + fix }
+}
 export {
   MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedSearchTerms,
   savedSearchHit, savedSearchCount, savedSearchChannels, savedSearchNotice,
   favoriteOrigin, favoriteRemovalNotice, hideNotice, scopeEntryAccessibleName,
   savedSearchRows, savedSearchArrivals, savedSearchDepartures,
   savedSearchFooter, withSavedSearch, withoutSavedSearch, savedSearchRecord,
-  emptyState, playedRecord, cloneState, withCacheLayout, parseState,
-  pushPlayedRecord, stateOnLoad, isFavorite, toggleFavorite, pushRecent,
-  recordPlayed, clearSession, stateSession, deadSessionVerdict,
-  PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES, sessionAfterOutcome,
-  withFavorites, hiddenGroupList, hiddenGroupSet, isGroupHidden,
-  toggleHiddenGroup, browsableChannels, hideAction, hideVerb, removeRecent,
-  trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed,
-  prunedFailed, knownIdSet, failedIndex, failedDocument, failedWhen,
-  withFailed, failedAfterHealthy, withoutFailed
+  emptyState, entryMigratedOf, withEntryMigrated, playedRecord, cloneState,
+  withCacheLayout, parseState, pushPlayedRecord, stateOnLoad, isFavorite,
+  toggleFavorite, pushRecent, recordPlayed, clearSession, stateSession,
+  deadSessionVerdict, PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES,
+  sessionAfterOutcome, withFavorites, hiddenGroupList, hiddenGroupSet,
+  isGroupHidden, toggleHiddenGroup, browsableChannels, hideAction, hideVerb,
+  removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed,
+  normalizeFailed, prunedFailed, knownIdSet, failedIndex, failedDocument,
+  failedWhen, withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
+  countReload, reloadDisposition, STATE_LOAD_ERRORS, stateLoadKind,
+  stateInitFound, stateLoadDecision, stateWriteGate, stateUnreadableNotice
 }

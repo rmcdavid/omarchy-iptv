@@ -4,6 +4,9 @@ import Quickshell.Wayland
 import QtQuick
 import qs.Commons
 import "Model.mjs" as Model
+// The harness's own pure logic (entryKey), staged beside this file by run.sh
+// so node can call the same function a scenario's live arm observes here.
+import "harness-lib.js" as HarnessLib
 
 // Dev harness for io.github.rmcdavid.iptv -- a standalone Quickshell config
 // that loads the three plugin entry points straight from the repo with fake
@@ -26,6 +29,8 @@ import "Model.mjs" as Model
 //   OMARCHY_IPTV_ENTRY_MS   numberEntryMs setting
 //   OMARCHY_IPTV_BAR_NUMBER "false" hides the channel number in the bar
 //   OMARCHY_IPTV_HARNESS_WINDOW "floating" hosts the guide in a FloatingWindow (harness-only; see floatingGuide)
+//   OMARCHY_IPTV_SOURCE_KEY_SET "1" seeds `sourceKey` on the entry (D-SINK-19), at
+//   OMARCHY_IPTV_SOURCE_KEY     this value, "" included (`run.sh --source-key`)
 //
 // Drive it with `run.sh ipc <fn> [args]` (IpcHandler target "harness").
 ShellRoot {
@@ -50,12 +55,31 @@ ShellRoot {
   // longer merely returns `false`: a `false` return from a writable entry is
   // the host's `!dirty` branch, which means "already stored", i.e. success.
   property bool persistFails: false
+  // D-HOST-4, the echo lever (run.sh --host echo; D-SINK-19 round 7). The
+  // real host publishes `barConfig` one write behind through 4.0.4, and
+  // omacom/omarchy#15082 makes publicBarConfig() read shellConfig directly,
+  // so a plugin's own write is echoed at once. The default stays the lagging
+  // host every scenario was written against; `echo` models the fixed one by
+  // publishing what the host now STORES, from the same handler, with no
+  // intermediate stale publish (a fake that published the stale bar first
+  // and the current one after would hand the plugin the lagging host's
+  // rescue and be more forgiving than either host, rule 10).
+  readonly property bool hostEchoes: Quickshell.env("OMARCHY_IPTV_HARNESS_HOST") === "echo"
   // The last pipOutcome() payload, so a scenario can read what the service
   // decided AFTER it read the compositor back, not what it intended.
   property var lastPipOutcome: null
   // The entry shell.json starts with. The live value lives in
   // fakeHost.shellConfig from here on; `barEntry` below reads it back.
-  readonly property var seedBarEntry: ({
+  //
+  // D-SINK-19. `sourceKey` is seeded ONLY when run.sh was given --source-key
+  // (the SET variable), and then at exactly that value, "" included. The
+  // real entry carries the key only once the plugin has written it, so a
+  // seed that always carried one -- even empty -- would present a shape no
+  // 0.13.5 install has and let a scenario's "the entry gained the key" pass
+  // on the seed (rule 10). With it a scenario can present the entry a host
+  // would hold after an earlier shell wrote it: the key beside a fresh
+  // `playlistUrl` set while the shell was down, or the key alone.
+  readonly property var seedBarEntry: harness.withSeedKey({
     id: harness.pluginId,
     playlistUrl: Quickshell.env("OMARCHY_IPTV_PLAYLIST") || "",
     epgUrl: Quickshell.env("OMARCHY_IPTV_EPG") || "",
@@ -79,6 +103,10 @@ ShellRoot {
     pipSizePercent: parseInt(Quickshell.env("OMARCHY_IPTV_PIP_PERCENT") || "30", 10),
     pipMargin: parseInt(Quickshell.env("OMARCHY_IPTV_PIP_MARGIN") || "16", 10)
   })
+  function withSeedKey(entry) {
+    if (Quickshell.env("OMARCHY_IPTV_SOURCE_KEY_SET") === "1") entry.sourceKey = Quickshell.env("OMARCHY_IPTV_SOURCE_KEY") || ""
+    return entry
+  }
   // What the host has actually stored (the shell.json truth), as opposed to
   // what it has published to the plugin, which can lag it by one write.
   readonly property var barEntry: Model.findBarEntry(fakeHost.barConfig, harness.pluginId)
@@ -524,6 +552,31 @@ ShellRoot {
     return acc
   }
 
+  // R23e (D-SINK-19 round 13): how many EDITABLE text inputs exist under the
+  // guide right now -- any item with a boolean `readOnly` that is false and a
+  // numeric `cursorPosition` (TextInput, TextField, TextEdit) -- walked the
+  // way focusWalk walks, children, contentItem and a Loader's item. D-CLIP-1:
+  // an editable TextInput subscribes to the clipboard at construction, so
+  // the no-write surface must leave none, and the drawn check reads this
+  // census instead of trusting that no form was opened (rule 14).
+  function editableWalk(node, depth, acc) {
+    if (!node) return acc
+    if (depth > harness.focusDepthCap || acc.scanned >= harness.focusScanBudget) { acc.exhausted = true; return acc }
+    acc.scanned++
+    try {
+      if (typeof node.readOnly === "boolean" && node.readOnly === false && typeof node.cursorPosition === "number") acc.editable++
+    } catch (e) {}
+    var next = []
+    try { if (node.item) next.push(node.item) } catch (e) {}
+    try { if (node.contentItem) next.push(node.contentItem) } catch (e) {}
+    try {
+      var kids = node.children
+      if (kids) for (var i = 0; i < kids.length; i++) next.push(kids[i])
+    } catch (e) {}
+    for (var k = 0; k < next.length; k++) harness.editableWalk(next[k], depth + 1, acc)
+    return acc
+  }
+
   function focusSnapshot(g) {
     if (!g) {
       return { ok: false, error: "no_guide", open: false, keyboard: false, role: "none",
@@ -659,16 +712,25 @@ ShellRoot {
   // shell.qml syncPluginApis (861-881): every plugin api is handed a fresh
   // deep copy of whatever `shell.barConfig` currently reads as.
   function syncPluginApis() {
-    fakeShell.barConfig = JSON.parse(JSON.stringify(fakeHost.barConfig))
+    // The lagging host reads the `barConfig` binding, which inside
+    // onShellConfigChanged has not re-evaluated yet: the PREVIOUS bar. The
+    // echoing host (#15082) reads shellConfig itself: the bar just stored.
+    var bar = harness.hostEchoes && fakeHost.shellConfig && fakeHost.shellConfig.bar ? fakeHost.shellConfig.bar : fakeHost.barConfig
+    fakeShell.barConfig = JSON.parse(JSON.stringify(bar))
     if (barLoader.item) barLoader.item.settings = Model.findBarEntry(fakeShell.barConfig, harness.pluginId)
   }
 
   // The active source of a bar config as its 8-hex key (or "" when unset):
   // comparable across the stored / published sides without printing a URL.
+  //
+  // D-SINK-19, lead ruling R6: `sourceKey` first, the `playlistUrl` hash
+  // second, named candidates ONLY. The decision and its reasons live in
+  // harness-lib.js so key-scenario.sh can drive the same function from node
+  // (rule 12); this used to hash the URL alone, which the plugin now strips,
+  // so `hostEntry` read "" on both sides and every scenario check grading
+  // through it was blind (the D-SINK-19 review's harness P2).
   function entryKey(barConfig) {
-    var url = Model.settingsFrom(Model.findBarEntry(barConfig, harness.pluginId)).playlistUrl
-    var normalized = Model.normalizeSourceUrl(url, { origin: "cli" })
-    return normalized === "" ? "" : Model.sourceKey(normalized)
+    return HarnessLib.entryKey(Model, Model.findBarEntry(barConfig, harness.pluginId))
   }
 
   // shell.qml applyShellConfig (76-89) driven by the user config FileView:
@@ -946,6 +1008,13 @@ ShellRoot {
     // The compositor cannot answer this; see harness.focusSnapshot for the
     // measurements, including why hyprctl is not the place to look.
     function focusState(): string { return JSON.stringify(harness.focusSnapshot(guideLoader.item)) }
+    // R23e: the editable-input census (editableWalk); a guide that is not
+    // loaded answers editable -1, never 0.
+    function editable(): string {
+      var g = guideLoader.item
+      if (!g) return JSON.stringify({ editable: -1, scanned: 0, exhausted: false })
+      return JSON.stringify(harness.editableWalk(g, 0, { editable: 0, scanned: 0, exhausted: false }))
+    }
     function toggle(): string { return fakeShell.toggle(harness.pluginId, "{}") ? "ok" : "no" }
     function query(text: string): string { if (guideLoader.item) guideLoader.item.setQuery(text); return "ok" }
     function mode(): string { if (guideLoader.item) guideLoader.item.switchMode(); return "ok" }
@@ -1147,8 +1216,29 @@ ShellRoot {
     // after a plugin's own updateEntryInline: the regression D-LIVE-20 is
     // exactly a plugin that waits for `published` to catch up with `stored`.
     // Both sides are reported as source keys, never URLs (S-08).
+    //
+    // D-SINK-19 adds the key NAMES each side's entry carries (`storedKeys`,
+    // `publishedKeys`; names only, `id` excluded, sorted): whether the
+    // retired `playlistUrl` / `epgUrl` are still on the stored entry after
+    // the plugin's write is a question about names, and the values can be
+    // credentialed URLs this reply must never carry.
     function hostEntry(): string {
-      return JSON.stringify({ stored: harness.entryKey(fakeHost.barConfig), published: harness.entryKey(fakeShell.barConfig) })
+      return JSON.stringify({ stored: harness.entryKey(fakeHost.barConfig), published: harness.entryKey(fakeShell.barConfig),
+                              storedKeys: HarnessLib.entryKeyNames(Model.findBarEntry(fakeHost.barConfig, harness.pluginId)),
+                              publishedKeys: HarnessLib.entryKeyNames(Model.findBarEntry(fakeShell.barConfig, harness.pluginId)),
+                              // R20d (round 10): the one owned VALUE a check reads off the stored
+                              // entry, as stored -- the plugin writes a boolean there, never a URL --
+                              // and null when the key is absent (key-scenario Y4)
+                              storedShowLogos: HarnessLib.storedOwnedValue(Model.findBarEntry(fakeHost.barConfig, harness.pluginId), "showLogos"),
+                              host: harness.hostEchoes ? "echo" : "lag" })
+    }
+    // D-SINK-19, R5: where the two writes of a pointer change stand. The
+    // body is HarnessLib.pointerStateOf, so qa-lib-test.sh drives the very
+    // function this verb answers with (rule 12). Round 6: a property the
+    // service does not have is OMITTED, not reported as null, so the
+    // reader's NOFIELD sees an absence (see harness-lib.js).
+    function pointerState(): string {
+      return JSON.stringify(HarnessLib.pointerStateOf(serviceLoader.item))
     }
     function widget(): string {
       var w = barLoader.item
@@ -1223,7 +1313,19 @@ ShellRoot {
         out.guide = {
           opened: g.opened, mode: g.mode, query: g.query, scopeId: g.scopeId, effectiveScope: g.effectiveScope,
           cursorIndex: g.cursorIndex, rows: g.currentRows.length, resultTotal: g.resultTotal, truncated: g.truncated,
-          rowsHaveDetail: g.rowsHaveDetail, emptyKind: g.emptyKind, bannerKind: g.bannerKind, bannerText: g.bannerText,
+          // What the body DRAWS (emptyTitleText / emptyProseText, absent on a
+          // guide without them, NOFIELD): since R23h the first-run form's head
+          // when IT shows, else the empty state when it shows, else "" --
+          // round 12's version of these read the empty state's copy whether
+          // or not it was on screen, and the first-run form draws another
+          // sentence. `emptyShown` and `firstRunHead` say which one it was.
+          // The hint's own copy rides along, which every guide has -- so a
+          // tree from before R22c reads its old hint rather than nothing.
+          rowsHaveDetail: g.rowsHaveDetail, emptyKind: g.emptyKind, emptyTitle: g.emptyTitleText, emptyProse: g.emptyProseText,
+          emptyShown: g.emptyStateShown, firstRunHead: g.firstRunHead, firstRunForm: g.firstRunForm, stateBlocked: g.stateBlocked,
+          footerHints: g.footerHintText,
+          errorCheck: g.copy ? g.copy.errorCheck : undefined,
+          bannerKind: g.bannerKind, bannerText: g.bannerText,
           scopeLabel: g.scopeLabelText, footer: g.footerStatusText, warning: g.warningText, narrow: g.narrow, showColumn: g.showColumn,
           cursorName: g.currentRows.length > g.cursorIndex && g.cursorIndex >= 0 ? g.currentRows[g.cursorIndex].name : "",
           // The cursor row's DETAIL line, composed the way the delegate

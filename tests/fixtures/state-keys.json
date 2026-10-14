@@ -1,0 +1,389 @@
+{
+  "comment": [
+    "D-SINK-19 round 10, R20a (D-SRC-20): THE HELPER KEEPS WHAT THE SERVICE WRITES.",
+    "Run by BOTH tests/Model.test.js and tests/test_state.py (CLAUDE.md: a rule written",
+    "in two languages gets one fixture; the savedSearches precedent).",
+    "",
+    "`keys` is the whole vocabulary of state.json: every key the SERVICE can serialise",
+    "(top level, per source record, and inside the nested records), each one the helper's",
+    "normalize_state preserves. The node suite drives every model reducer Service.qml hands",
+    "the state to, collects every key the results carry, and requires that set to EQUAL",
+    "keys + serviceOnly; the python suite requires normalize_state over `document` to emit",
+    "exactly `keys` + helperOnly. So a key added to either reader alone is red the day it is",
+    "added. `serviceOnly` / `helperOnly` name a key one side writes and the other",
+    "deliberately does not, each with its reason; both are empty today.",
+    "",
+    "Round 11 (R21) withdrew the three keys rounds 9 and 10 added (pendingEpg, every",
+    "record's epgSetAt, entryInputs) with the machinery that wrote them, and added one:",
+    "`entryMigrated`, the migration marker, a boolean present only when exactly true.",
+    "`cases` pin it value by value through both readers: validated, never invented."
+  ],
+  "keys": {
+    "top": [
+      "version",
+      "cacheLayout",
+      "favorites",
+      "recents",
+      "lastPlayed",
+      "session",
+      "sources",
+      "savedSearches",
+      "hiddenGroups",
+      "activeKey",
+      "entryMigrated"
+    ],
+    "source": [
+      "key",
+      "url",
+      "epgUrl",
+      "kind",
+      "label",
+      "labelCustom",
+      "origin",
+      "addedAt",
+      "lastUsed",
+      "fetchedAt",
+      "channelCount",
+      "groupCount"
+    ],
+    "played": [
+      "id",
+      "name",
+      "at"
+    ],
+    "savedSearch": [
+      "query",
+      "at"
+    ]
+  },
+  "serviceOnly": {},
+  "helperOnly": {},
+  "document": {
+    "version": 2,
+    "cacheLayout": 2,
+    "favorites": [
+      "t:bbc1.uk"
+    ],
+    "recents": [
+      {
+        "id": "t:bbc1.uk",
+        "name": "BBC One",
+        "at": 100
+      }
+    ],
+    "lastPlayed": {
+      "id": "t:bbc1.uk",
+      "name": "BBC One",
+      "at": 100
+    },
+    "session": {
+      "id": "t:bbc1.uk",
+      "name": "BBC One",
+      "at": 100
+    },
+    "sources": [
+      {
+        "key": "12e22d28",
+        "url": "http://a.example.test/list.m3u",
+        "epgUrl": "http://a.example.test/xmltv.php?username=u&password=p",
+        "kind": "http",
+        "label": "a.example.test",
+        "labelCustom": false,
+        "origin": "cli",
+        "addedAt": 10,
+        "lastUsed": 20,
+        "fetchedAt": 30,
+        "channelCount": 9,
+        "groupCount": 2
+      },
+      {
+        "key": "04533d2d",
+        "url": "http://b.example.test/list.m3u",
+        "epgUrl": "",
+        "kind": "http",
+        "label": "b.example.test",
+        "labelCustom": false,
+        "origin": "cli",
+        "addedAt": 10,
+        "lastUsed": 20,
+        "fetchedAt": 30,
+        "channelCount": 9,
+        "groupCount": 2
+      }
+    ],
+    "savedSearches": [
+      {
+        "query": "bbc",
+        "at": 90
+      }
+    ],
+    "hiddenGroups": [
+      "Adult"
+    ],
+    "activeKey": "12e22d28",
+    "entryMigrated": true
+  },
+  "cases": [
+    {
+      "name": "entryMigrated true is kept as true",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "entryMigrated": true
+      },
+      "expect": {
+        "entryMigrated": true
+      }
+    },
+    {
+      "name": "entryMigrated absent is absent (a file no migration has written)",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28"
+      },
+      "expect": {
+        "entryMigrated": null
+      }
+    },
+    {
+      "name": "entryMigrated false is absent, never false",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "entryMigrated": false
+      },
+      "expect": {
+        "entryMigrated": null
+      }
+    },
+    {
+      "name": "entryMigrated the STRING \"true\" is no marker (never a coercion)",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "entryMigrated": "true"
+      },
+      "expect": {
+        "entryMigrated": null
+      }
+    },
+    {
+      "name": "entryMigrated the number 1 is no marker",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "entryMigrated": 1
+      },
+      "expect": {
+        "entryMigrated": null
+      }
+    },
+    {
+      "name": "entryMigrated null is absent",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "entryMigrated": null
+      },
+      "expect": {
+        "entryMigrated": null
+      }
+    },
+    {
+      "name": "entryMigrated a list holding true is no marker",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "entryMigrated": [
+          true
+        ]
+      },
+      "expect": {
+        "entryMigrated": null
+      }
+    },
+    {
+      "name": "entryMigrated an object is no marker",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "entryMigrated": {
+          "value": true
+        }
+      },
+      "expect": {
+        "entryMigrated": null
+      }
+    },
+    {
+      "name": "round 9 and 10 keys are dropped by both readers (pendingEpg, entryInputs, a record's epgSetAt): withdrawn by R21, never carried",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2,
+            "epgSetAt": 1760000000000
+          }
+        ],
+        "activeKey": "12e22d28",
+        "pendingEpg": {
+          "url": "http://p.example.test/g.xml",
+          "seenAt": 5
+        },
+        "entryInputs": {
+          "playlistUrl": {
+            "digest": "e3c7422c8be3ca15",
+            "at": 1
+          }
+        }
+      },
+      "expect": {
+        "entryMigrated": null,
+        "dropped": [
+          "entryInputs",
+          "epgSetAt",
+          "pendingEpg"
+        ]
+      }
+    }
+  ]
+}

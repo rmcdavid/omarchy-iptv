@@ -149,7 +149,10 @@ STATE_NOGUIDE='{"guide":null,"service":{"playing":false}}'
 is "qa_json_field reads a value"          "$(qa_json_field "d['buffer']" "$NUM_OK")" "10"
 is "qa_json_field renders a bool as JSON" "$(qa_json_field "d['active']" "$NUM_OK")" "true"
 is "a number the entry really reports"    "$(qa_json_field "d['cursorIndex']" "$NUM_OK")" "3"
-is "a tree without the verb answers NOFIELD, not false" "$(qa_json_field "d['active']" "$NUM_NOVERB")" "NOFIELD"
+# The no-verb answer carries `active` as a PRESENT null (the harness reports
+# every field, null where the tree has nothing): NULL since round 5, and
+# still not "false", which is the whole point.
+is "a tree without the verb answers NULL (a present null), not false" "$(qa_json_field "d['active']" "$NUM_NOVERB")" "NULL"
 is "and the error it carries is readable" "$(qa_json_field "d['error']" "$NUM_NOVERB")" "no_verb"
 is "a dead IPC is NOSTATE, not ''"        "$(qa_json_field "d['active']" "")" "NOSTATE"
 is "an unparseable answer is NOSTATE"     "$(qa_json_field "d['active']" "{oops")" "NOSTATE"
@@ -164,9 +167,27 @@ print(json.dumps(v) if isinstance(v, bool) else ("" if v is None else v))' "$1" 
 ck "a bare reader answers the no-verb tree with '', which an 'is it off?' check accepts" \
    '[[ "$(old_number_field "d['\''active'\'']" "$NUM_NOVERB")" != "true" ]]'
 ck "qa_json_field refuses to let that count as an answer" \
-   '[[ "$(qa_json_field "d['\''active'\'']" "$NUM_NOVERB")" == "NOFIELD" ]]'
+   '[[ "$(qa_json_field "d['\''active'\'']" "$NUM_NOVERB")" == "NULL" ]]'
 ck "and still reports a real 'not active' as false" \
    '[[ "$(qa_json_field "d['\''active'\'']" "{\"active\":false}")" == "false" ]]'
+# D-SINK-19 round 4 (the live review's P3): a key that is THERE and holds
+# null, and a key that is NOT there, are two answers. The harness reports a
+# service property the tree lacks as null, so one sentinel for both let
+# `held:NOFIELD` read "nothing held" on a tree with no instrument at all.
+is "a PRESENT null is NULL, not NOFIELD"            "$(qa_json_field "d['active']" '{"active":null}')" "NULL"
+is "an ABSENT key is NOFIELD, not NULL"             "$(qa_json_field "d['active']" '{"other":1}')" "NOFIELD"
+is "a key under a null parent raises, so NOFIELD"  "$(qa_json_field "d['a']['k']" '{"a":null}')" "NOFIELD"
+ck "qa_value rejects NULL"                          '! qa_value "$QA_NULL"'
+# The one-sentinel fold this replaces, written out: both answers read the same.
+old_json_fold() { python3 -c '
+import json, sys
+try: d = json.loads(sys.argv[2])
+except Exception: print("NOSTATE"); raise SystemExit(0)
+try: v = eval(sys.argv[1])
+except Exception: v = None
+print(json.dumps(v) if isinstance(v, bool) else ("NOFIELD" if v is None else v))' "$1" "$2" 2>/dev/null; }
+is "the one-sentinel fold could not tell a present null from an absent key (the shape replaced)" \
+   "$(old_json_fold "d['active']" '{"active":null}') $(old_json_fold "d['active']" '{"other":1}')" "NOFIELD NOFIELD"
 
 is "qa_guide_field digs into the guide half"   "$(qa_guide_field "d['cursorIndex']" "$STATE_GUIDE")" "3"
 is "it reaches the nested entry"               "$(qa_guide_field "d['numberEntry']['resume']" "$STATE_GUIDE")" "true"
@@ -910,7 +931,13 @@ is "and the same sweep over the same transcript DOES catch a real URL" "$?" "1"
 # ---- 7. nothing lands in the repository. The gate runs three scenarios in
 # check-tree mode on every commit; a transcript under $ROOT would show up as
 # untracked in the git status the next release depends on.
-D=$( . "$HERE/qa-lib.sh"; qa_transcript_dir )
+# The DEFAULT, so the suite owns its environment: the variable is unset
+# inside this subshell, not by whoever runs the suite. A bare run of this
+# file right after a scenario run with OMARCHY_IPTV_HARNESS_DIR exported
+# read the scenario's directory here and went red over a green tree (the
+# round-6 live lens: 440 / 1 standalone, green only through check.sh's
+# `env -u`, which stays as belt and braces).
+D=$( unset OMARCHY_IPTV_HARNESS_DIR; . "$HERE/qa-lib.sh"; qa_transcript_dir )
 ck "the default transcript directory is absolute" '[[ $D == /* ]]'
 ck "and is not inside the repository ($D)" '[[ $D != "$ROOT"/* ]]'
 ck "it is under the harness scratch, which run.sh clean does not remove" \
@@ -1006,7 +1033,7 @@ is "and in a check-tree scenario the call sits on the live arm only" \
 # transcript would land on every commit. The list is literal and so it
 # drifts: logo-scenario.sh joined the gate on 2026-10-11 and this loop did
 # not learn it until a review read the two lists side by side.
-for g in chno-entry pip id-rotate logo clip; do
+for g in chno-entry pip id-rotate logo clip key; do
   lbl=$(grep -nE '^ *live\|"" *\)' "$ROOT/scripts/dev-harness/$g-scenario.sh" | head -1 | cut -d: -f1)
   ck "$g-scenario.sh (run by check.sh in check-tree mode) has a live arm to gate on" '[[ -n $lbl ]]'
 done
@@ -1070,6 +1097,46 @@ cl_swept=$(grep -oE "qa_count '([A-Z]\{64\}\|?)+' \"\\\$SCRATCH/harness.log\"" "
 is "the clip console-sink sweep names every payload letter the scenario offers" \
    "$cl_swept" "$cl_letters"
 is "and that derivation found the offers (non-vacuity)" "${#cl_letters}" "3"
+# D-SINK-19's scenario (key-scenario.sh, joined the gate 2026-10-11): the
+# same joins -- two floors, each to its recipe (every assertion is one
+# `ck "<letter><n>` line, none in a loop; the instrument arm is the I and S
+# lines) and check.sh's floor to the check-tree one plus one. And the
+# instrument itself, DRIVEN rather than grepped: harness-lib.js is loaded
+# from node with the repository's model (the first file qa_model_files
+# names, Model.mjs since D-REL-5), so a copy of the function pasted
+# back into shell.qml beside the import would still pass S1 (a seam) but the
+# lifted body is what these three cases call. The three cases are the
+# ruling's three clauses, each seen red against the body it rules out:
+# `sourceKey` first (f275bde's body hashed the URL alone and reads the
+# URL's key where the mirror names another source), the URL hash second
+# (an entry with no mirror), named candidates only (the first repair, never
+# merged, iterated every own value and reads "deadbeef" off mpvArgs).
+KS="$ROOT/scripts/dev-harness/key-scenario.sh"
+is "the key scenario declares exactly two floors" \
+   "$(qa_count '^ *EXPECTED_CHECKS=[0-9]+$' "$KS")" "2"
+k_tree=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$KS" | sed -n 1p | cut -d= -f2)
+k_live=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$KS" | sed -n 2p | cut -d= -f2)
+is "the key check-tree floor matches its recipe (the I and S lines)" \
+   "$k_tree" "$(qa_count '^ *ck "[IS][0-9]' "$KS")"
+is "the key live floor matches its recipe (every lettered line)" \
+   "$k_live" "$(qa_count '^ *ck "[A-Z][0-9]' "$KS")"
+is "check.sh's key preflight floor matches the scenario's own" \
+   "$(grep -oE 'KEY_PREFLIGHT_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( k_tree + 1 ))"
+k_probe=$(node -e '
+const M = require(process.argv[1]); const H = require(process.argv[2])
+const url = "/tmp/qa-lib-test/a.m3u", other = "/tmp/qa-lib-test/b.m3u"
+const key = M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
+const otherKey = M.sourceKey(M.normalizeSourceUrl(other, { origin: "cli" }))
+const r = [
+  H.entryKey(M, { id: "x", sourceKey: otherKey, playlistUrl: url }) === otherKey ? "key-first" : "url-first",
+  H.entryKey(M, { id: "x", playlistUrl: url }) === key ? "url-second" : "no-url",
+  H.entryKey(M, { id: "x", mpvArgs: "deadbeef", label: "0123abcd", activeKey: "cafebabe", key: "12345678" }) === "" ? "named-only" : "any-value"
+]
+process.stdout.write(r.join(" "))' "$(qa_model_files "$ROOT" | head -n 1)" "$ROOT/scripts/dev-harness/harness-lib.js" 2>/dev/null)
+is "the instrument reads sourceKey first, the URL hash second, named candidates only (driven)" \
+   "$k_probe" "key-first url-second named-only"
+is "and shell.qml stages nothing of its own: entryKey is the lifted function" \
+   "$(qa_count '^ *return HarnessLib\.entryKey\(Model, Model\.findBarEntry\(barConfig, harness\.pluginId\)\)$' "$ROOT/scripts/dev-harness/shell.qml")" "1"
 # INT and TERM trapped into an exit, beside the EXIT trap, in every scenario
 # that detaches a shell and has been PROVEN to clean up on a signal (clip:
 # `timeout -s TERM` after L3 and in the probe arm, and `-s INT`, measured
@@ -1081,10 +1148,198 @@ is "and that derivation found the offers (non-vacuity)" "${#cl_letters}" "3"
 # pip-, sources- and text-scenario.sh also detach and carry the EXIT trap
 # alone; they are not in this list because none has been signalled mid-run
 # and proven, and a list of the proven is what this asserts.
-for sc in clip player rewind tls; do
+# key: a TERM sent to the scenario's own pid inside its O window with the
+# slow helper asleep in `state init` (KEY_SLOW_MS=30000), inside its D
+# window with the real helper's children running, and inside its N
+# window, measured 2026-10-11 leaving no cage, shell, helper child, nested
+# socket or work directory. The first proof landed in M, where no slow
+# helper exists, and the round-2 live lens then landed one in O and found
+# the sleeping child stranded for the rest of its sleep: only the O
+# segment's own recording, taken just before its deliberate SIGKILL, fed
+# ORPHANS. cleanup() now records the shell's children by PARENT pid while
+# the shell is alive, before `reap`, and the pin below is that seam). One
+# window is outside that seam and is covered by something else: a TERM in
+# the ~100 ms between `h --detach` returning and qs.pid being read finds
+# SHELL_STARTED 0 (stop_shell cleared it at the previous segment's end),
+# so cleanup() runs no `reap` and SHELL_PID names the previous, dead
+# shell; the freshly detached quickshell dies because cleanup() ends the
+# nested compositor it is a client of, measured by the round-3 review
+# (alive at the TERM, gone 0.2 s after, with cage, work directory and
+# socket). The first account of that window said `reap` handled it; it
+# does not, and nothing needs it to.
+# D-HOST-4's lever (round 7): run.sh --host echo makes the fake host publish
+# what it stores at once (#15082), and key-scenario's U5..U7 run on it. A
+# typo must not silently run the lagging host, so the value is refused at
+# the parse, before anything is created; and the lever reaches the shell
+# through ONE exported variable that last-start.env records, so a
+# restart-shell keeps the host it was started with.
+hh=$(OMARCHY_IPTV_HARNESS_DIR="$TMP/host-lever" bash "$ROOT/scripts/dev-harness/run.sh" start --host lagging 2>&1 >/dev/null; echo "rc:$?")
+is "run.sh --host refuses anything but lag or echo, before it creates anything" \
+   "$(printf '%s' "$hh" | grep -c 'takes lag or echo') ${hh##*rc:} $([[ -e $TMP/host-lever ]] && echo made || echo none)" "1 2 none"
+is "run.sh exports the host lever once and records it in last-start.env; shell.qml reads that variable alone" \
+   "$(qa_count '^ *export OMARCHY_IPTV_HARNESS_HOST="\$HOST_MODE"$' "$ROOT/scripts/dev-harness/run.sh") $(qa_count '^ *qa_env_line OMARCHY_IPTV_HARNESS_HOST +"\$OMARCHY_IPTV_HARNESS_HOST"$' "$ROOT/scripts/dev-harness/run.sh") $(qa_count 'Quickshell\.env\("OMARCHY_IPTV_HARNESS_HOST"\) === "echo"' "$ROOT/scripts/dev-harness/shell.qml")" "1 1 1"
+for sc in clip player rewind tls key; do
   is "$sc-scenario.sh traps INT and TERM into an exit beside its EXIT trap" \
      "$(qa_count "^trap cleanup EXIT$" "$ROOT/scripts/dev-harness/$sc-scenario.sh") $(qa_count "^trap 'exit 130' INT$" "$ROOT/scripts/dev-harness/$sc-scenario.sh") $(qa_count "^trap 'exit 143' TERM$" "$ROOT/scripts/dev-harness/$sc-scenario.sh")" "1 1 1"
 done
+is "key-scenario.sh's cleanup records the live shell's children by parent pid (never a pattern) before it reaps" \
+   "$(qa_count '^ +if \(\( SHELL_STARTED \)\) && \[\[ -n \$SHELL_PID \]\] && kill -0 "\$SHELL_PID" 2>/dev/null; then$' "$KS") $(qa_count '^ +ORPHANS="\$ORPHANS \$\(pgrep -P "\$SHELL_PID" 2>/dev/null \| tr ' "$KS")" "1 1"
+# Round 4 (R15, the round-3 review's P2 against D3): the service's plain
+# ignored total is satisfied by the own-write echo after every start, so a
+# check reading it cannot go red for the chmod reload it names. The
+# scenario reads the per-reason counter for the reason it means, and no
+# lettered check reads the total; shell.qml's pointerState reports that
+# object and does NOT report `lastSaveText`, the service's copy of the
+# state.json text (URLs included) that sits beside it.
+# Three reads of the per-reason counter (D3, W3, W6; a got-string sits on
+# the line after its `ck "<letter><n>`), and the only reads of the plain
+# total are the two informational `echo` lines beside D and N.
+is "key-scenario D3 and W read the per-reason counter (save-parked), and only informational lines read the ignored total" \
+   "$(qa_count 'save-parked:\$\(reason_some save-parked\)' "$KS") $(qa_count '\$\(pf "\[.stateReloadsIgnored.\]"\)' "$KS") $(qa_count '^ *echo .*\$\(pf "\[.stateReloadsIgnored.\]"\)' "$KS")" "3 2 2"
+# Round 6 (the round-5 live lens's P2): pointerState is now
+# HarnessLib.pointerStateOf, DRIVEN here with fake services and read back
+# through qa_json_field, the reader key-scenario uses. It used to fold
+# `undefined` to null on every field, so a tree LACKING pendingEntryKey
+# published a present null and `held:NULL` was green on f275bde: the
+# reader's NULL/NOFIELD split never saw an absence. Seen red with the fold
+# put back into pointerStateOf (the first pin reads NULL).
+ps_probe() { node -e '
+const H = require(process.argv[1])
+const which = process.argv[2]
+const svc = { userState: { activeKey: "abcd1234", sources: [{}, {}] }, stateLoaded: true, dirsReady: true, stateSavePending: false,
+              stateReloadsByReason: { "own-write": 1 }, lastSaveText: "{\"sources\":[{\"url\":\"http://u:p4ss@h.test/x\"}]}" }
+if (which === "held-null") svc.pendingEntryKey = null
+if (which === "held-key") svc.pendingEntryKey = "d990c2e4"
+const out = which === "bare" ? H.pointerStateOf({}) : which === "none" ? H.pointerStateOf(null) : H.pointerStateOf(svc)
+process.stdout.write(JSON.stringify(out))' "$ROOT/scripts/dev-harness/harness-lib.js" "$1" 2>/dev/null; }
+is "pointerState OMITS a property the service lacks, so a tree without pendingEntryKey reads NOFIELD (driven)" \
+   "$(qa_json_field "d['pendingEntryKey']" "$(ps_probe lacking)")" "NOFIELD"
+is "and a service holding nothing reads NULL, one holding a key reads the key" \
+   "$(qa_json_field "d['pendingEntryKey']" "$(ps_probe held-null)") $(qa_json_field "d['pendingEntryKey']" "$(ps_probe held-key)")" "NULL d990c2e4"
+is "a bare service answers ok and nothing else: none of the twelve fields, no memory key, no count, is reported as null" \
+   "$(ps_probe bare)" '{"ok":true}'
+is "no service at all is no_service, as before" "$(qa_json_field "d['error']['code']" "$(ps_probe none)")" "no_service"
+is "pointerState reports stateReloadsByReason and never the service's lastSaveText or a URL in it" \
+   "$(qa_json_field "d['stateReloadsByReason']['own-write']" "$(ps_probe held-null)") $(ps_probe held-null | grep -c 'lastSaveText\|p4ss\|://')" "1 0"
+# Round 11 (R21): pointerState DERIVES whether the migration marker is in the
+# state the service saw land (`landedMigrated`) and in memory
+# (`memoryMigrated`), and reports the session's refusals as names and
+# reasons -- never `landedState` itself, which carries every source URL.
+# Driven over a fake service whose landed state holds a credentialed URL.
+ps_mig() { node -e '
+const H = require(process.argv[1])
+const svc = { userState: { activeKey: "abcd1234", sources: [{}], entryMigrated: true },
+              landedState: { entryMigrated: true, sources: [{ url: "http://u:p4ss@h.test/x" }] },
+              entryInputReports: [{ setting: "playlistUrl", reason: "retired" }] }
+const which = process.argv[2]
+if (which === "unlanded") svc.landedState = null
+process.stdout.write(JSON.stringify(H.pointerStateOf(svc)))' "$ROOT/scripts/dev-harness/harness-lib.js" "$1" 2>/dev/null; }
+is "pointerState derives landedMigrated and memoryMigrated, reports the refusals by name and reason, and never publishes landedState or a URL in it (R21, driven)" \
+   "$(qa_json_field "d['landedMigrated']" "$(ps_mig landed)") $(qa_json_field "d['landedMigrated']" "$(ps_mig unlanded)") $(qa_json_field "d['memoryMigrated']" "$(ps_mig landed)") $(qa_json_field "d['entryInputReports'][0]['reason']" "$(ps_mig landed)") $(ps_mig landed | grep -c 'landedState\|p4ss\|://')" \
+   "true false true retired 0"
+is "shell.qml answers pointerState with the lifted function and reads no service field itself" \
+   "$(qa_count '^      return JSON\.stringify\(HarnessLib\.pointerStateOf\(serviceLoader\.item\)\)$' "$ROOT/scripts/dev-harness/shell.qml") $(qa_count 's\.lastSaveText|s\.pendingEntryKey' "$ROOT/scripts/dev-harness/shell.qml")" "1 0"
+# sources-scenario.sh's already-stored check (round-2 live lens, fixed in
+# round 4): the stored side is seeded with the KEY the switch will mirror,
+# and the host's `!dirty` line is what the check waits for -- a
+# `playlistUrl` seed could never make the host hold a D-SINK-19 write, and
+# the check then passed on `ok` alone.
+is "sources-scenario seeds sourceKey on the stored side and waits for the host's already-stored line" \
+   "$(qa_count '^ipc setStored sourceKey "\$K2" >/dev/null$' "$SS") $(qa_count '^ipc setStored playlistUrl' "$SS") $(qa_count 'wait_for "\$\(\(n_already \+ 1\)\)" 5 already_stored' "$SS")" "1 0 1"
+# Round 5 (R16 and the round-4 live review's four rig remarks). The joins
+# are by shape (rule 13); the criteria are the live transcripts the
+# scenario's header counts, never these greps (rule 14).
+# A held key that is null is a PRESENT null: every `held:` want says NULL
+# (W3, F2, F5), and none says NOFIELD, which a tree with no pendingEntryKey
+# at all would also have satisfied.
+is "key-scenario's held wants mean a present null: NULL, never NOFIELD" \
+   "$(qa_count 'held:NULL' "$KS") $(qa_count 'held:NOFIELD' "$KS")" "3 0"
+# cleanup() gives the state directory its mode back on every exit: a TERM
+# inside F left it 0500 and `rm -rf` of the harness directory then failed
+# on state.json (round-4 live review P3). Inside cleanup's body, not merely
+# somewhere in the file.
+is "key-scenario's cleanup restores the state directory's mode on every exit" \
+   "$(awk '/^cleanup\(\) \{/,/^\}/' "$KS" | grep -cE 'chmod 0700 "\$\(dirname "\$STATE"\)" 2>/dev/null$')" "1"
+# F counts the switch's lines from the switch's OWN mark and L the toggle's
+# from its own (F5's `left:yes` used to be pre-satisfied by F2's drop line):
+# two bare `log_mark` lines between the F banner and the U banner (U, round
+# 7, sets its own before the toggle it counts: one more up to the P banner).
+# Round 9: Y sets its own mark before EACH of its two in-app toggles (Y1
+# counts each toggle's write from its own mark): 1 + 2 = 3 up to P. Round
+# 10: Y4 counts its two toggles in a row from ONE mark of its own: 4.
+# Round 12: B5 starts its shell by hand (a state that never loads never
+# settles start_shell) and sets the mark B6 counts entry writes from: 5.
+# Round 13: B10, the no-write start B11/B12 read and B14 each start their
+# shell by hand and mark first (B10 counts the watchdog's line, B12 the
+# entry writes): 8.
+is "F and L each set their own log mark before the call they count, U and Y before each toggle, B5 before the start B6 counts, and B10, B11 and B14 before theirs" \
+   "$(awk '/^  echo "== F:/,/^  echo "== U:/' "$KS" | grep -cE '^  log_mark$') $(awk '/^  echo "== U:/,/^  echo "== P:/' "$KS" | grep -cE '^  log_mark$')" "2 8"
+# L drives the toggle through the guide's own key path (shell.qml's
+# sourcesKey calls the guide's handlers; no keystroke), and both restarts
+# that follow a failed or interrupted write (O and F) reseed the key the
+# entry was OBSERVED to carry, never a constant. Round 7: U drives the same
+# key path (3 more) and restarts twice over the observed entry (2 more).
+# Round 8: Z restarts once over the observed entry after its remove (1 more).
+# Round 9: Y1 drives the key path three more times (enter, g, g), and Y3 and
+# H restart over the observed entry (2 more). Round 10: Y4 drives it twice
+# more (g + confirm on one line, then g). Round 13: B12 drives it three
+# more (enter, g, confirm) in the no-write mode.
+is "L, U and Y reach setShowLogos through the guide's Sources key path, and F, U, Z, Y and H restart over the observed key as O does" \
+   "$(qa_count '^  ipc sourcesKey (enter|g|confirm) >/dev/null' "$KS") $(qa_count '^  start_shell "\$\{seed_args\[@\]\}" \|\| true$' "$KS")" "14 7"
+# Round 10 (Y4): the stored entry's showLogos is read through hostEntry's
+# storedShowLogos, which HarnessLib.storedOwnedValue answers for the two
+# OWNED keys only -- a retired URL key reads null through it -- and Y4 is
+# the check that reads it. Driven, not grepped: the function itself.
+is "HarnessLib.storedOwnedValue reads an owned key as stored and never a retired URL key, and key-scenario's Y4 reads it" \
+   "$(node -e '
+const L = require(process.argv[1])
+const e = { showLogos: false, sourceKey: "12e22d28", playlistUrl: "http://u:p@h/x", epgUrl: "http://h/g" }
+console.log([L.storedOwnedValue(e, "showLogos"), L.storedOwnedValue(e, "sourceKey"), L.storedOwnedValue(e, "playlistUrl"), L.storedOwnedValue(e, "epgUrl"), L.storedOwnedValue({}, "showLogos")].map(String).join(" "))
+' "$ROOT/scripts/dev-harness/harness-lib.js" 2>&1) $(qa_count "qa_json_field \"d\['storedShowLogos'\]\"" "$KS")" "false 12e22d28 null null null 1"
+# Round 9 (Q): the slow listener holding the probe open is the scenario's
+# own, its pid read from the LISTENER (ss -ltnp on its port, never `$!`, the
+# rule the round-2 live pass learned), and cleanup() kills that pid on every
+# exit.
+is "key-scenario's Q reads its slow listener's pid from ss -ltnp and cleanup kills that pid" \
+   "$(qa_count '^  SLOW_PID=""; for \(\(i = 0; i < 50; i\+\+\)\); do SLOW_PID=\$\(ss -ltnp 2>/dev/null \| grep ":\$SLOW_PORT "' "$KS") $(awk '/^cleanup\(\) \{/,/^\}/' "$KS" | grep -cE 'kill -TERM "\$SLOW_PID"')" "1 1"
+# The two one-decision mutations the round-4 checks were seen red against
+# are PATCH FILES under spikes/key-mutations/ (the lead's ruling: never a
+# branch that can be merged by accident). Each must still APPLY to this
+# tree -- `git apply --check` is the call -- and the header cites them by
+# file, not by the deleted branch names.
+KM="$ROOT/scripts/dev-harness/spikes/key-mutations"
+# Round 13 adds two: r23a-no-rearm.patch, the lift's notice re-arm deleted,
+# which B9 and the R23a node pins were seen red against, and
+# r23e-editable-field.patch, a form field made editable, which B13's
+# editable-input census was seen red against.
+is "all four key-mutation patches still apply to this tree (git apply --check)" \
+   "$(for km_p in d3-save-parked r14-no-return r23a-no-rearm r23e-editable-field; do git -C "$ROOT" apply --check "$KM/$km_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 "
+is "key-scenario and the README cite the patch files and no mutation branch" \
+   "$(qa_count 'd3-save-parked\.patch|r14-no-return\.patch' "$KS") $(qa_count 'mut-(d3-save-parked|r14-no-return)' "$KS") $(qa_count 'mut-(d3-save-parked|r14-no-return)' "$ROOT/scripts/dev-harness/README.md")" "2 0 0"
+# run.sh clean on the directory a signalled F leaves: DRIVEN. The old
+# `rm -rf` stopped on the 0500 directory's state.json and left it.
+km_clean=$TMP/clean0500; mkdir -p "$km_clean/state/omarchy-iptv"; echo '{}' >"$km_clean/state/omarchy-iptv/state.json"
+chmod 0500 "$km_clean/state/omarchy-iptv"
+OMARCHY_IPTV_HARNESS_DIR=$km_clean "$ROOT/scripts/dev-harness/run.sh" clean >/dev/null 2>&1; km_rc=$?
+is "run.sh clean removes a state directory a signalled F left 0500" \
+   "$km_rc $([[ -e $km_clean/state ]] && echo left || echo gone)" "0 gone"
+chmod -R u+rwX "$km_clean" 2>/dev/null; rm -rf "$km_clean"
+# DQ-B17 (round 6): an rm that fails for a reason the chmod does not reach
+# -- here the harness directory itself 0500, which clean deliberately
+# never chmods -- is REPORTED, with a non-zero exit, and `cleaned` is not
+# printed. The old verb printed `[run.sh] cleaned` with rc 0 and left it.
+km_clean=$TMP/clean-parent; mkdir -p "$km_clean/state/omarchy-iptv"; chmod 0500 "$km_clean"
+km_out=$(OMARCHY_IPTV_HARNESS_DIR=$km_clean "$ROOT/scripts/dev-harness/run.sh" clean 2>&1); km_rc=$?
+is "run.sh clean reports an rm it could not complete and exits non-zero (never 'cleaned')" \
+   "$km_rc $(grep -c 'cleaned' <<<"$km_out") $(grep -c 'could not remove' <<<"$km_out") $([[ -e $km_clean/state ]] && echo left || echo gone)" "1 0 1 left"
+chmod -R u+rwX "$km_clean" 2>/dev/null; rm -rf "$km_clean"
+# DQ-B14 (round 4): a background writer's `>` racing a reader that trusts a
+# non-empty file. sources-scenario clears silent.port before its listener
+# starts (f54f408); rewind-scenario's fixture directory under the SHARED
+# harness directory is cleared before anything writes into it, at column
+# zero (the indented one is cleanup's).
+is "rewind-scenario clears its fixture directory before its listener and ffmpeg write into it" \
+   "$(qa_count '^rm -rf "\$FIX"$' "$ROOT/scripts/dev-harness/rewind-scenario.sh") $(qa_count '^rm -f "\$SCRATCH/silent\.port" "\$SCRATCH/silent\.err"$' "$SS")" "1 1"
 # Its 77 path, DRIVEN rather than grepped: with the cage binary pointed at
 # nothing it must refuse with 77 from both modes, name the tool as its first
 # line out, start nothing, and leave no transcript -- the refusal sits above
@@ -1436,6 +1691,13 @@ is "rewind-scenario.sh --tree <not a plugin tree> likewise" \
    "$(tr_refuse rewind-scenario.sh --tree /etc)" "2 0"
 is "player-scenario.sh --baseline <no such ref> likewise" \
    "$(tr_refuse player-scenario.sh --baseline no-such-ref-for-a-test)" "2 0"
+# key-scenario.sh's --tree lever (round 5: a prepared export with a
+# key-mutations patch applied) carries rewind's two refusals, above the
+# transcript.
+is "key-scenario.sh --baseline X --tree Y refuses and writes no transcript" \
+   "$(tr_refuse key-scenario.sh --baseline HEAD --tree /tmp)" "2 0"
+is "key-scenario.sh --tree <not a plugin tree> likewise" \
+   "$(tr_refuse key-scenario.sh --tree /etc)" "2 0"
 # D-SINK-13's scenario, whose refusals are the only part of it a machine with no
 # display can reach. The third one is not hypothetical: `--baseline` with its
 # value dropped read as `BASELINE=""` and ran the whole LIVE half -- five
@@ -1911,7 +2173,7 @@ RS="$ROOT/scripts/dev-harness/run.sh"
 is "run.sh's harness_env gives its processes the scratch HOME" \
    "$(qa_count '^  qa_harness_home "\$SCRATCH" \|\| die ' "$RS")" "1"
 is "and a clean removes the scratch home, so one run cannot inherit the last run's fix" \
-   "$(qa_count '^    rm -rf "\$SCRATCH/cache" "\$SCRATCH/state" "\$SCRATCH/home" ' "$RS")" "1"
+   "$(qa_count '^ *(if ! )?rm -rf "\$SCRATCH/cache" "\$SCRATCH/state" "\$SCRATCH/home" ' "$RS")" "1"
 # D-SINK-18 repair: the verb derives its path from $HOME, because the HOST
 # does, so HOME is what isolates a run. This pinned XDG_CONFIG_HOME, which the
 # verb now ignores -- a scenario isolated by a variable nothing reads is a
@@ -2060,10 +2322,53 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # by one with L5 reported there, the offer size is pinned by mode (DR-B1),
 # the console-sink sweep is derived from the payload letters, and the four
 # scenarios proven to clean up on INT/TERM carry the two traps.
+# 408 -> 416 on 2026-10-11, D-SINK-19 round two: key-scenario.sh joins the
+# gate's named list (1), its two floors are joined to its recipe and to
+# check.sh (4), the instrument is driven from node over the ruling's three
+# clauses with the seam beside it (2), and it joins the proven-traps list (1).
+# 416 -> 417 on 2026-10-11, D-SINK-19 round three: key-scenario.sh's cleanup
+# records the live shell's children by parent pid before it reaps (1), the
+# seam behind the TERM-inside-O proof.
+# 417 -> 420 on 2026-10-12, D-SINK-19 round four: D3 and W read the
+# per-reason reload counter and no lettered check reads the total (1),
+# shell.qml reports that object and never lastSaveText (1), and
+# sources-scenario's already-stored check seeds the key and waits for the
+# host's line (1).
+# 420 -> 435 the same day, D-SINK-19 round five: qa_json_field tells a
+# present null (NULL) from an absent key (NOFIELD), qa_value rejects NULL,
+# and the one-sentinel fold is shown reading both the same (5);
+# key-scenario's held wants say NULL (1), cleanup restores the state
+# directory's mode (1), F and L mark before the call they count (1), L
+# drives the guide's key path and F restarts over the observed key (1),
+# the two mutation patches apply (1) and are cited by file (1), run.sh
+# clean removes a 0500 state directory, driven (1), rewind clears its
+# fixture directory before its listener (1), and key-scenario's --tree
+# lever refuses above the transcript (2). Two existing wants moved with
+# the sentinel: the no-verb tree's `active` is a present null and reads
+# NULL now (the two pins under "a tree without the verb").
+# Round 6: the one grepped pointerState pin is replaced by six DRIVEN ones
+# over HarnessLib.pointerStateOf (NOFIELD for a lacking field, NULL and the
+# key, a bare service reports nothing, no_service, the per-reason object
+# and no lastSaveText, and shell.qml's one-line delegation): +5; run.sh
+# clean reports an rm it could not complete (1).
+# 441 -> 443 on 2026-10-12, round 7: run.sh --host refuses a typo before it
+# creates anything (1), and the lever's one variable is exported, recorded
+# and read (1). The transcript-directory pin now unsets the variable itself
+# (no count change).
 # 408 -> 418 on 2026-10-12, D-REL-5: qa_model_files and qa_model_count, the
 # shell reader of the split model's part list, driven over a synthetic split
 # tree, a part gone missing, an aggregator naming nothing, a pre-split tree
 # and this repository's own Model.mjs.
+# 443 + 10 = 453 on 2026-10-12, the D-SINK-19 chain landed on the D-REL-5
+# split: the chain's 35 (408 -> 443, above) and the split's 10 (408 -> 418,
+# above) were counted from the same 408 on two branches, so the merge is
+# their sum.
+# 453 -> 454 on 2026-10-12, D-SINK-19 round 9: key-scenario's slow listener
+# is killed by the pid its listener names (1). Two existing wants moved with
+# Y and H (the key-path and restart counts, the U..P log marks).
+# 454 -> 455 on 2026-10-12, D-SINK-19 round 10: hostEntry's storedShowLogos
+# is a boolean and Y4 reads it (1). Two existing wants moved with Y4 (the
+# U..P log marks, the key-path count).
 # 418 -> 434 on 2026-10-13, F-HARNESS-20: qa_harness_home over a known
 # environment -- each variable it exports, the one it leaves alone, the record
 # of the home it replaced and that a second call keeps it, the two overrides
@@ -2073,7 +2378,12 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # scratch tree. The two
 # XDG_CONFIG_HOME pins above were REPLACED, not added: they pinned a variable
 # the verb had stopped reading.
-EXPECTED=434
+# 455 + 16 = 471 on 2026-10-13, lane-key-m1 merged dev 4740a50: the lane's
+# 455 and F-HARNESS-20's 16 (418 -> 434, above) were counted on two branches
+# from the same 418, so the merge is their sum.
+# 471 -> 472 on 2026-10-13, D-SINK-19 round 11 (R21): pointerState's derived
+# migration booleans and refusal reports, driven (1).
+EXPECTED=472
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

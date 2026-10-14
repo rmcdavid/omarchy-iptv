@@ -6,7 +6,7 @@ import {
   prepareChannels
 } from "./channels.mjs"
 import {
-  parseState
+  parseState, stateUnreadableNotice
 } from "./state.mjs"
 import {
   MPV_DISK_WARN, mpvOptionBase, buildMpvArgv
@@ -318,7 +318,14 @@ var NOTIFY_IDS = {
   playlistRefreshed: 74012,
   playlistError: 74013,
   epgError: 74014,
-  mpvMissing: 74015
+  mpvMissing: 74015,
+  // D-SINK-19 round 11, R21b: a URL taken off the bar entry unadopted. One id
+  // for every such report, so a second replaces the first on screen rather
+  // than stacking (a user who sets both URLs sees one card, the last).
+  entryInputRefused: 74016,
+  // D-SINK-19 round 12, R22a: state.json did not load and nothing will be
+  // written this session (Model.stateUnreadableNotice). Told once per episode.
+  stateUnreadable: 74017
 }
 
 // Long enough to cover a first-load failure and the user's reaction, short

@@ -1,0 +1,65 @@
+filewatch: work /run/user/1000/omarchy-iptv-fw.RfucWS, helper <scratchpad>/wt-key-p1/bin/omarchy-iptv, step wait 1.5s, load 1.31 1.54 1.44
+SEQ A: inplace inplace truncate inplace
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  truncate       fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ B: own inplace inplace
+  own            fileChanged+1 loaded+0 loadFailed+0 saved+1 saveFailed+0  view==disk:NO
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ C: helper inplace inplace
+  helper         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ D: own helper inplace
+  own            fileChanged+1 loaded+0 loadFailed+0 saved+1 saveFailed+0  view==disk:NO
+  helper         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ E: chmod inplace inplace
+  chmod          fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ F: own reload inplace
+  own            fileChanged+1 loaded+0 loadFailed+0 saved+1 saveFailed+0  view==disk:NO
+  reload         fileChanged+0 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ G: own inplace restart inplace inplace
+  own            fileChanged+1 loaded+0 loadFailed+0 saved+1 saveFailed+0  view==disk:NO
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  restart        fileChanged+0 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ H: helper own inplace
+  helper         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  own            fileChanged+1 loaded+0 loadFailed+0 saved+1 saveFailed+0  view==disk:NO
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ I: own own inplace
+  own            fileChanged+1 loaded+0 loadFailed+0 saved+1 saveFailed+0  view==disk:NO
+  own            fileChanged+1 loaded+0 loadFailed+0 saved+1 saveFailed+0  view==disk:NO
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ J: own! own! own inplace inplace
+  own+own+own    fileChanged+3 loaded+0 loadFailed+0 saved+3 saveFailed+0  view==disk:NO
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ K: own! inplace inplace
+  own+inplace    fileChanged+2 loaded+1 loadFailed+0 saved+1 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ L: own! helper inplace
+  own+helper     fileChanged+2 loaded+1 loadFailed+0 saved+1 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ M: chmod! own inplace inplace
+  chmod+own      fileChanged+2 loaded+1 loadFailed+0 saved+1 saveFailed+0  view==disk:NO
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ N: own! own inplace
+  own+own        fileChanged+2 loaded+0 loadFailed+0 saved+2 saveFailed+0  view==disk:NO
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ O: own! inplace! inplace inplace
+  own+inplace+inplace fileChanged+3 loaded+2 loadFailed+0 saved+1 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ P: helper! inplace inplace
+  helper+inplace fileChanged+2 loaded+2 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+END
+probe signal lines: 124

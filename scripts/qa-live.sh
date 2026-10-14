@@ -13,7 +13,7 @@
 # Phases:
 #   preflight   read-only checks of this machine (versions, keybinding, dirs, network)
 #   install     snapshot shell.json, git clone (no symlink), validate, rescan, enable
-#   configure   omarchy bar set playlistUrl / epgUrl
+#   configure   prints how to add the source in the guide (no `omarchy bar set`: D-SINK-19 R21)
 #   verify      status IPC, mpv window/process, dirs and modes, no writes in plugin dir
 #   evidence    capture journal, qs log, status, redaction grep into the evidence dir
 #   uninstall   stop, plugin remove --yes, remove cache/state/runtime dirs, diff shell.json
@@ -169,11 +169,17 @@ phase_install() {
 
 phase_configure() {
   note "configure"
-  run omarchy bar set "$ID" playlistUrl "$PLAYLIST_URL"
-  if [[ -n $EPG_URL ]]; then run omarchy bar set "$ID" epgUrl "$EPG_URL"; fi
-  printf '$ jq (our entry in shell.json; a private provider URL would print here, so review before pasting into a report)\n'
+  # D-SINK-19 round 11 (R21): `omarchy bar set ... playlistUrl|epgUrl` is
+  # read once, by the migration of an install written before D-SINK-19, and
+  # REFUSED after it -- a fresh install migrates at its first start, so a
+  # value set here afterwards is reported and removed, never adopted. The
+  # one route is the guide's first-run form or its Sources screen, which
+  # this script cannot drive on the live session; it prints the step.
+  printf 'open the guide (the bar widget, or the keybinding from README.md), and in the first-run form\n'
+  printf 'or Sources -> Add source paste the playlist URL%s, then press Enter\n' "$([[ -n $EPG_URL ]] && echo ' and the EPG URL')"
+  printf '$ jq (our entry in shell.json: it carries sourceKey and no URL once the source is added)\n'
   if (( APPLY )); then jq --arg id "$ID" '.bar.layout[][] | select(.id == $id)' "$SHELL_JSON"; fi
-  echo "wait a few seconds, then: scripts/qa-live.sh verify"
+  echo "then: scripts/qa-live.sh verify"
 }
 
 phase_verify() {

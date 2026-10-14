@@ -91,7 +91,8 @@ qa_model_count() {
 # "the service says this is unset", and three P14 assertions demanded exactly
 # "". These sentinels are non-empty and are not a legal service value.
 QA_NO_STATE=NOSTATE      # the IPC did not answer, or answered unparseable JSON
-QA_NO_FIELD=NOFIELD      # it answered, and the field is absent or null
+QA_NO_FIELD=NOFIELD      # it answered, and the field is absent (qa_json_field) or absent-or-null (qa_field)
+QA_NULL=NULL             # it answered, the key is PRESENT, and its value is JSON null (qa_json_field only)
 QA_NO_FILE=NOFILE        # the file is missing or unparseable
 QA_NO_SESSION=NOSESSION  # the file parsed, and it holds no session record
 QA_NO_DELTA=NODELTA      # one side of a before/after pair was not a number
@@ -100,7 +101,7 @@ QA_NO_DELTA=NODELTA      # one side of a before/after pair was not a number
 # Use this wherever a check used to say [[ -n "$x" ]].
 qa_value() {
   case ${1-} in
-    "" | "$QA_NO_STATE" | "$QA_NO_FIELD" | "$QA_NO_FILE" | "$QA_NO_SESSION" | "$QA_NO_DELTA") return 1 ;;
+    "" | "$QA_NO_STATE" | "$QA_NO_FIELD" | "$QA_NULL" | "$QA_NO_FILE" | "$QA_NO_SESSION" | "$QA_NO_DELTA") return 1 ;;
   esac
   return 0
 }
@@ -315,6 +316,42 @@ print(json.dumps(v) if isinstance(v, bool) else ("NOFIELD" if v is None else v))
 # written as [[ "$(field active)" == "false" ]] would then read "the entry is
 # not active" and PASS against a tree that cannot answer at all. NOFIELD is
 # not "false", so it fails instead.
+#
+# A PRESENT null and an ABSENT key are two different answers (D-SINK-19
+# round 4, the live review's P3): one sentinel for both let `held:NOFIELD`
+# read "nothing held" on a tree with no instrument at all. So: the
+# expression raising (KeyError, TypeError, IndexError -- the key is not
+# there) is NOFIELD; the expression answering None (the key is there and
+# holds null) is NULL. A want that means "present and empty" says NULL and
+# cannot be satisfied by a missing field -- PROVIDED the instrument lets
+# the field be missing. Round 5 split this reader and left the instrument
+# folding: `ipc pointerState` reported a property the tree lacked as null
+# (`s.pendingEntryKey === undefined ? null : ...`), so the absence never
+# reached this layer and `held:NULL` was green on f275bde (round-5 live
+# lens, P2). Since round 6 pointerState is HarnessLib.pointerStateOf, which
+# OMITS a property the service does not have, and qa-lib-test.sh drives it
+# through this function: a service without pendingEntryKey reads NOFIELD,
+# one holding nothing reads NULL.
+#
+# qa_field and qa_guide_field keep the one-sentinel fold on purpose
+# (DQ-B15, rule 15 applied in round 6 and recorded rather than changed):
+#   qa_field        the split would MOVE wants, and not all of them can be
+#                   re-graded on this headless seat: chno-entry N8
+#                   (`sf "['nowPlaying']" == NOFIELD`, a present null),
+#                   player-scenario P14 (`d['failedAt'].get('t:live1')` ==
+#                   NOFIELD, where `.get` turns the ABSENT mark into None, so
+#                   the split would read the absence as NULL and invert the
+#                   want), and qa-lib-test's `an absent field is NOFIELD`
+#                   pair, written with the same `.get`. P14 needs the player
+#                   arm, which this lane did not run.
+#   qa_guide_field  no want moves, and that is the reason NOT to split it:
+#                   the instrument behind it, shell.qml's state() guide half,
+#                   folds `=== undefined ? null` too, so the reader could not
+#                   tell an absence from a null either way -- a split that
+#                   cannot go red for the thing it would be named for.
+#                   Fixing it means doing to state() what round 6 did to
+#                   pointerState, under readers (rewind R13 types into the
+#                   guide with wtype) this seat cannot drive.
 qa_json_field() {
   python3 -c '
 import json, sys
@@ -326,8 +363,8 @@ except Exception:
 try:
     v = eval(sys.argv[1])
 except Exception:
-    v = None
-print(json.dumps(v) if isinstance(v, bool) else ("NOFIELD" if v is None else v))' "$1" "$2" 2>/dev/null \
+    print("NOFIELD"); raise SystemExit(0)
+print(json.dumps(v) if isinstance(v, bool) else ("NULL" if v is None else v))' "$1" "$2" 2>/dev/null \
     || printf '%s\n' "$QA_NO_STATE"
 }
 

@@ -68,6 +68,22 @@ active playlist URL was cleared at runtime, for example by
 `omarchy bar set io.github.rmcdavid.iptv playlistUrl ""`. In the cleared
 case the source record and its cache survive, so this surface shows the
 `Saved sources (n)` link and setting a URL again reloads from cache.
+**[Amended 2026-10-11, D-SINK-19: `configured` is "the plugin's own
+`state.json` names a source it holds", and `omarchy bar set ... playlistUrl
+""` no longer clears anything -- an empty input is a no-op (R1/R4), because
+the plugin itself empties that key on every write. The surface is reached
+by removing the active source (here, or `state source remove`), by a state
+file whose pointer names no record, and -- the case worth knowing about --
+by an OLDER build run over a migrated install, which looks for a URL on the
+entry and finds none; the `Saved sources (n)` link is the recovery in all
+three.]**
+**[Amended 2026-10-13, D-SINK-19 round 11 (R21, the owner's decision to drop
+the `omarchy bar set` URL route): after the one migration a URL set on the
+bar entry is refused, so no command-line value can reach or leave this
+surface; and the caption line with the terminal command in step 1 is GONE --
+`firstRunTerminal` and `copyCommand` are deleted from `Guide.qml` on
+lane-key-m1, and the form offers nothing to type anywhere else. 3.1.1 carries
+the shipped wireframe.]**
 
 1. The guide opens straight into `sourceEdit` with `origin: "firstRun"`.
    The empty-state column keeps its glyph and title (`No playlist
@@ -75,7 +91,8 @@ case the source record and its cache survive, so this surface shows the
    by the `Playlist` field (focused, caret visible, `PanelKeyCatcher`
    blocked), the `EPG` field, the link row `Use Xtream login instead`, a
    `Load` button, and one caption line with the terminal command (S5 parity;
-   clicking it still copies, as shipped).
+   clicking it still copies, as shipped). [Round 11, R21: the caption line is
+   deleted; the form ends at `Load`.]
 2. The user pastes (`Ctrl+V`, `Shift+Insert`, middle click) or types. Every
    arrival is sanitized (2.3): trimmed, newlines and control characters
    removed, capped at `LIMITS.url`. A pasted value that has a query string or
@@ -139,7 +156,9 @@ scope, query survive) unless the active source changed (1.4).
 1. Already active: return to the guide, no reload (parity with `Enter` on the
    playing row).
 2. Otherwise `service.switchSource(id)`: shell.json gets that source's
-   `playlistUrl` / `epgUrl`, the service points at its cache directory, the
+   `playlistUrl` / `epgUrl` **[since D-SINK-19, 2026-10-11: `state.json`
+   gets the source's key as `activeKey`, and shell.json gets that key as
+   `sourceKey` and no URL]**, the service points at its cache directory, the
    in-memory channels are replaced from its `channels.json`, `lastUsedAt` is
    stamped.
 3. The guide returns to `search` mode with an empty query, scope by the
@@ -152,7 +171,9 @@ scope, query survive) unless the active source changed (1.4).
    and the footer shows `Refreshing...` through the shipped
    `service.refreshing` path; success is silent (timer-refresh rules, R12),
    failure shows the shipped banner.
-5. No cache yet (added by CLI, never fetched; or cache deleted): the switch
+5. No cache yet (added by CLI, never fetched; or cache deleted) [round 11:
+   "added by CLI" now means moved in by the migration of a 0.13.x install,
+   R21a]: the switch
    still commits and the shipped `Loading playlist... / Fetching from <host>`
    state shows. On failure the shipped error state appears; its footer hint
    gains `o sources` so the previous source is two keystrokes away.
@@ -175,6 +196,74 @@ goes to `sources` with the cursor on the new row and the transient `Added
 tv.example.net - 1,475 channels in 28 groups`. The new source becomes
 active: the user pasted it to use it, and switching back is two keystrokes.
 
+**A guide URL waiting on the bar entry meets the `EPG` field (round 8,
+2026-10-12; D-SINK-19 R18d, the lead's ruling on OQ-W3).** When the user
+set `epgUrl` from a terminal while no source was active, that value waits
+on the entry for the next source to become active (5.5). If the source
+becoming active is this add and its `EPG` field is NOT empty, the field
+wins: it is the user's later, explicit input for the same slot. The new
+record keeps the field's guide URL, and the waiting value is superseded
+-- the same commit takes it off the entry, and the shell's journal reads
+`the guide URL in the add form supersedes a pending input (epgUrl); the
+bar entry drops it`, the key name and never a URL. If the field is empty,
+the waiting value is attached to the new record, as on every other route.
+Nothing on screen changes in either case: the form never shows the
+waiting value (`Guide.qml` reads no entry input) and the transient is the
+usual `Added ...`. Round 7 did the opposite (the waiting
+value replaced the field's), so a guide URL set long ago from a terminal
+silently beat the one just typed. One case is open (lane A's OQ-X3, for
+the lead and UX): if the same playlist was added from the terminal while
+this add was being probed (S5's duplicate branch), the commit keeps that
+record, the field's guide URL is not on it, and the waiting value is
+attached as before. Observed through the harness by key-scenario A1 (empty
+field) and A2 (a field with its own guide URL; red on `--baseline
+lane-key-w2`), lane A on lane-key-x1, with two saved sources and none
+active; the add into an empty list is node only. [Round 9: the form-wins
+rule above is OVERTURNED, and the open case is ruled; the next paragraph.]
+
+**A guide URL held for the next source meets the `EPG` field (round 9,
+2026-10-12; D-SINK-19 R19b and R19c, overturning R18d).** A guide URL set
+from a terminal while no source was active no longer waits on the bar
+entry: it is held in `state.json` and taken off the entry (5.5). When this
+add makes a source active, the guide URL the user set LAST wins. The `EPG`
+field counts from the moment the form is SUBMITTED (`Enter`), not from the
+moment the probe finishes: so a terminal value set before the submit loses
+to a non-empty field, and one set while `Fetching` is on screen -- after
+the submit -- wins over it. With the field empty the held value is attached
+to the new record, as before. The held value is dropped either way, and the
+shell's journal says which happened, naming the setting and the source's
+short code and never a URL: `a pending guide URL (epgUrl) lands on source
+<key>` or `a pending guide URL (epgUrl) is superseded: source <key> keeps
+the one set later`. Nothing on screen changes in any case: the form never
+shows the held value and the transient is the usual `Added ...`.
+S5's duplicate branch is ruled the same way (lane A's OQ-X3): if the same
+playlist was added from the terminal while this add was probed, the commit
+keeps that record, and the field's guide URL lands on it if it was set
+later than the guide URL that record already holds. Round 8 let the field
+win whatever the order, so the later terminal value ended on no record and
+off the entry (the eighth review's P1-B, live). Observed through the
+harness by key-scenario Q1 (the terminal value set during the probe wins;
+red on `--baseline lane-key-y0`), Q2 (set before the submit, the field
+wins) and A1/A2 as re-read (lane A, lane-key-y1, two saved sources and none
+active); the duplicate branch and the add into an empty list are node only.
+
+**The `EPG` field is the source's guide URL, and nothing else meets it
+(round 11, 2026-10-13; D-SINK-19 R21, OVERTURNING R18d, R19b and R19c).**
+The two paragraphs above are the record of the route the product owner
+withdrew. After the one migration of a 0.13.x install no guide URL waits
+anywhere for a source to become active: a guide URL on the bar entry with no
+source to attach it to is reported and removed at the migration (R21c), and
+one set on the entry after it is refused (R21b). So the add form's `EPG`
+field, typed or filled in by an Xtream login, is simply the new record's
+guide URL; an empty field leaves the record without one; there is no
+supersede, no set time and no journal line about a pending value. A terminal
+`epgUrl` set while `Fetching` is on screen changes nothing on the record and
+shows one `Bar setting ignored` notification (5.9); the field's guide
+URL lands with the record and survives a restart (node `R21e (lag host)` /
+`(echo host) the add form's race ...`; key-scenario Q moved to the new
+contract on lane-key-m1). S5's duplicate branch cannot arise from a terminal
+value after the migration, because none is adopted.
+
 ### 1.6 Editing (S4, S6)
 
 `e` / `E` in `sources`, or the pencil action button on the cursor row ->
@@ -193,6 +282,20 @@ when none). No Xtream link row when editing.
 - Xtream-built sources are edited through this same form: the built URLs
   show masked; there is no password field any more (S6). To change
   credentials, reveal and edit the URL, or add a new Xtream login.
+- [Round 11, 2026-10-13: OVERTURNED by R21 -- nothing is held, no edit is
+  stamped, and the edit form's guide URL is the record's; key-scenario V moved
+  to the new contract. The bullet stands as the round-9 record.] A changed `EPG` field and a guide URL held for the next source (round 9,
+  R19c). Saving an edit that CHANGES the guide URL stamps it with that
+  moment; an edit that sends the same guide URL back (a label-only edit,
+  or re-typing the same URL) stamps nothing. If a guide URL set from a
+  terminal is held while no source is active, and the user then edits a
+  saved source's guide URL and switches to it, the edit is the later input
+  and stands; the held value is dropped. A terminal value set AFTER the edit
+  wins at the switch instead. Round 8 and earlier let any held value
+  replace the edited one at the switch (the eighth review's P2). Nothing on
+  this screen changes either way: the transient is `Saved`. Observed
+  through the harness by key-scenario V1 (red on `--baseline
+  lane-key-y0`); the other order is node only.
 
 ### 1.7 Removing (S7)
 
@@ -231,6 +334,20 @@ saved record is an ordinary source with `kind: "xtream"` (used only for the
 default label and the `Xtream` segment in the row detail). The password
 value is dropped from memory as soon as the URLs are built; the form is
 never shown pre-filled.
+
+The built `xmltv.php` URL counts as the form's own guide URL (round 8,
+R18d): a guide URL waiting on the bar entry is superseded by it exactly as
+by a typed `EPG` field (1.5), because the user's login is the later
+explicit input. Pinned in node (`R18d (lag host) OQ-W3, the Xtream add`
+and its echo-host twin); no live segment drives the Xtream form with a
+value waiting. [Round 9, R19c: the built URL is stamped at the login's
+SUBMIT, and it wins over a held terminal value only when that value was set
+before the submit, exactly as a typed field does (1.5). The node pins are
+renamed `R18d / R19c (... host) OQ-W3, the Xtream add: the xmltv.php URL
+the form derived, submitted after the CLI value, ...`; still no live
+segment.] [Round 11, R21: OVERTURNED with R18d and R19c. The built
+`xmltv.php` URL is the record's guide URL and nothing competes with it; the
+round-8/9 node pins are deleted (R21d).]
 
 ### 1.9 Modes and transitions
 
@@ -482,6 +599,86 @@ The terminal line is `Style.font.caption` at opacity 0.7 and keeps the
 shipped click-to-copy. Placeholder text in the field uses the kit's
 `placeholderTextColor`. The eye slot after each URL field is reserved but
 empty (nothing to mask).
+
+Amended 2026-10-11 (D-SINK-19). The terminal caption in this wireframe and
+the next is the pre-D-SINK-19 text. The shipped string now ends
+` (converted; not kept in shell.json)` -- the exact string is in the table in
+section 5.1 -- because the command is an INPUT: the URL is moved into the
+plugin's private state and taken back out of shell.json by the plugin's next
+write, and a user who looks for it there afterwards should have been told.
+The caption is `elide: Text.ElideMiddle` over the card width; whether the
+longer string elides at the shipped width, and what it looks like when it
+does, is UNVERIFIED (the docs lane holds no display). Two strings on the
+OLDER empty state (the one with the command box, UX.md 4.4) still presented the
+URL settings as stored in that round -- `Settings live in ~/.config/omarchy/shell.json
+(entry ...)` and `Optional EPG:  omarchy bar set ... epgUrl <url>`. **Moved
+2026-10-12 (round 3, lead ruling):** they now read `Optional EPG:  omarchy bar
+set io.github.rmcdavid.iptv epgUrl <url>  (converted; not kept in shell.json)`
+and `Both are inputs: the URL moves to ~/.local/state/omarchy-iptv/state.json;
+other settings live in ~/.config/omarchy/shell.json (entry
+io.github.rmcdavid.iptv)` -- `Guide.qml` `unconfiguredEpg` and
+`unconfiguredWhere` on lane-key-s1, the same parenthetical as the first-run
+caption so one phrase means one thing; UX.md 4.4 and 6.3 carry them. In round
+2 they were an open UX item for the lead, recorded
+here and in the lane report rather than given an id this lane cannot board.
+**A conflict this document raises rather than resolves (round 7, 2026-10-12,
+lane C).** The `Optional EPG` line ends `(converted; not kept in
+shell.json)`, and it belongs to the unconfigured empty state -- no active
+source (whether that state is still on screen behind the first-run form was
+not read for this note) -- which is exactly the state in which R12 -- enforced at the sink since round 7 (R17a) -- KEEPS
+a guide URL set from a terminal on the bar entry in `shell.json` until a
+source becomes active. "Converted" is true eventually; "not kept" is false
+until then, and the README now says it waits on the entry. Whether the
+caption should say so (for example "kept on the entry until a source is
+active") is a copy decision for the lead and the Guide's owner
+(`Guide.qml` `unconfiguredEpg`); nothing here changes it. [Round 9, R19b:
+the conflict is resolved by the code rather than the copy. A guide URL set
+in this state is now held in the plugin's own `state.json` and taken off
+the entry once that write lands, so `not kept in shell.json` is true after
+one write, not only once a source is active. It is still on the entry for
+that one write's span, and for longer only when the state write fails
+(the value is then left on the entry as its only copy, R13). No copy
+change is requested.]
+
+**Amended 2026-10-13 (D-SINK-19 round 11, R21; the owner dropped the
+`omarchy bar set` URL route).** The terminal caption is DELETED, in this
+wireframe and the next: a URL set that way is refused once the migration has
+landed, so the form must not offer it. `firstRunTerminal`, the older empty
+state's command box (`unconfiguredCommand`), its `Optional EPG` line
+(`unconfiguredEpg`), `copyCommand` and the `Copied` transient are gone from
+`Guide.qml` on lane-key-m1, which closes the round-7 conflict above by
+removing the line it was about. The first run as shipped:
+
+```
++------------------------------------------------------------------------------------------------+
+|                                                                                                |
+|  Search channels...                                                                            |
+|                                                                                                |
+|                                                                                                |
+|                                             󰔂                                                  |
+|                                                                                                |
+|                                    No playlist configured                                      |
+|                                                                                                |
+|                     Paste or type your M3U URL or path, then press Enter                       |
+|                                                                                                |
+|            Playlist   [ |https://host/playlist.m3u or /path/to/list.m3u                 ]      |
+|            EPG        [ optional - XMLTV URL, .xml or .xml.gz                           ]      |
+|                                                                                                |
+|                       Use Xtream login instead                                 [ Load ]        |
+|                                                                                                |
+|                                 Enter load - Tab next field - Ctrl+V paste - Esc close         |
++------------------------------------------------------------------------------------------------+
+```
+
+The older empty state (UX.md 4.4) keeps its title and reads, as shipped,
+`Add your M3U URL or path in Sources, with its EPG URL if you have one`
+(`unconfiguredProse`) and `Sources and their URLs are kept in
+~/.local/state/omarchy-iptv/state.json; other settings live in
+~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)`
+(`unconfiguredWhere`). The text-format guard went from 61 blocks to 58 with
+the three deleted `Text`s. The rendered layout without the caption is
+UNVERIFIED on a display (this lane holds none); the strings are read off
+`Guide.qml`.
 
 #### 3.1.2 After paste (both URLs masked)
 
@@ -1077,7 +1274,7 @@ no "please".
 | Header, forms | `Add source`, `Edit source`, `Add Xtream login` |
 | First-run title (shipped) | `No playlist configured` |
 | First-run prose | `Paste or type your M3U URL or path, then press Enter` |
-| First-run terminal caption | `Or from a terminal:  omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>` |
+| First-run terminal caption | `Or from a terminal:  omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>  (converted; not kept in shell.json)` (D-SINK-19, 2026-10-11; two spaces before the parenthesis, as shipped; it was `Or from a terminal:  omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>` before) **DELETED 2026-10-13 (D-SINK-19 round 11, R21): the caption, its click-to-copy and the `Copied` transient are gone from `Guide.qml` (lane-key-m1), because a URL set that way is refused after the migration. The bar-setting notifications are 5.9.** |
 | Field labels, URL form | `Label`, `Playlist`, `EPG` |
 | Field labels, Xtream form | `Label`, `Server`, `Username`, `Password` |
 | Placeholder, Label | the derived label (5.6) once a URL / server parses, otherwise `optional` |
@@ -1160,6 +1357,197 @@ No `https://` auto-prefix and no Xtream URL auto-parse (8).
 
 `<host>` is `Model.hostOf(url)`: never a path, query or userinfo.
 
+**Save failures (asynchronous, same line; D-SINK-19 round 4, R13,
+2026-10-12; the Guide half round 5, R16, the same day).** The state write is
+the switch, so the one failure a switch, a remove or an adoption can have is
+`state.json` not being written:
+`sourcesPersistFailed("state_write_failed")` -> `Could not write state.json -
+check ~/.local/state/omarchy-iptv` (`Model.sourceErrorMessage`; a directory,
+never a URL and never `omarchy bar set`, which would put the credential in
+the shell history). It arrives after the call that issued the write has
+already returned `ok`. A host that refuses the KEY mirror is not an error on
+this screen: logged, repaired at the next start (SR25 as amended in
+`ARCHITECTURE-SOURCES.md`); `config_unsafe` keeps its own sentence
+(D-SINK-18). The guide renders the sentence for THE reason the signal
+carried: `Guide.showPersistFailed(reason)` hands it to
+`Model.persistFailureMessage` [since round 13 (R23f) through
+`Model.refusalMessage(reason, stateWriteBlocked, "persist")`, which answers
+the `state_unreadable` sentence instead while the no-write mode holds] (the three reasons are
+`Model.PERSIST_FAILURE_REASONS`, and an unknown one falls back to
+`persist_failed`'s sentence), on the form's result line while a form is open
+and in the footer otherwise. Until round 5 the guide rendered
+`persist_failed`'s sentence for every code, so a write that failed in
+`~/.local/state` told the user to try `omarchy bar set` -- the opposite
+advice, and the durable sink rule 5 forbids advising (lane A's DQ-T1, the
+round-4 review's P2; closed on lane-key-u1 b42b5ab). OBSERVED at the code by
+two node checks on lane-key-u1, both red over an export of lane-key-t2:
+the routing read off `Guide.qml` (the reason handed through, the message
+composed by `Model.persistFailureMessage` on both surfaces, never
+`persist_failed`'s sentence by name), and the copy for every reason
+`Service.qml` emits -- derived from the service source, none naming a URL,
+only `persist_failed`'s naming `omarchy bar set`, the fallback for an unknown
+reason. The rendered line on a display is UNVERIFIED: no scenario reads the
+result line or the footer for it (key-scenario's L reads the bar entry and
+the guide's `showLogos`), and the docs lane holds no display. **[Round 7,
+2026-10-12 (OQ-C3): narrowed to the pixels. The TEXT the guide binds to both
+surfaces is OBSERVED through the harness: the round-5 live lens drove the
+signal with `state_write_failed` on lane-key-u3 (its `guide-copy.sh`, no
+screenshot) and read the footer's transient with the guide in Sources, and
+the add form's result line with the form open, each equal to
+`Model.persistFailureMessage` of that reason, with no URL, no `omarchy bar
+set` and no fixture path. What it looks like on a display -- wrapping,
+elision, contrast -- is still UNVERIFIED, and no committed scenario carries
+the text read yet.]**
+
+**A second save sentence, refused before anything is written (D-SINK-19
+round 12, R22a, 2026-10-13).** While `state.json` exists but could not be
+read or parsed, an add, an edit, a switch and a remove are refused at once,
+with code `state_unreadable` and `state.json could not be read · nothing is
+saved until it can be` on the same line (`Model.sourceErrorMessage`; the
+middle dot is `Model.SEP`). Unlike `state_write_failed` it arrives as the
+call's own answer, not afterwards: nothing was issued. 5.10 is the whole
+behaviour. [Round 13 (R23f): in that mode the logo toggle and a persist
+failure read this sentence too (`Model.refusalMessage`), never
+`persist_failed`'s `try omarchy bar set`.]
+
+**Once per episode, a decision with its consequence (round 4, kept in round
+5).** The failure is signalled on the FIRST `saveFailed` of an episode and
+not again until a later write LANDS (`stateSaveFailed` is sticky, cleared by
+content). So one switch -- two `setText`s -- shows one line, and that is the
+reason for the rule. The consequence, measured: a SECOND switch on the still
+failed disk reports `ok`, lands in memory only, holds no mirror, and shows
+NOTHING on this screen (key-scenario F5 on lane-key-u2 wants `signalled:0`
+counted from the switch's own mark, and reads it; lane B's transcript,
+2026-10-12); the journal line `state.json could not be written` is per
+failure, so the shell's log still says each time. A user who saw the line
+once and switches again is not told again until a save succeeds. The lead
+kept this over "once per call" on 2026-10-12 (round 5); a retry that is
+silent on screen is the stated cost.
+
+**The logo toggle on a failed disk (round 5, R16).** `g` and the consent's
+confirm behave as they always do -- `Logos on` / `Logos off` in the footer,
+no sentence about the save -- because that write carries no source and
+raises nothing on this channel. What changed is beneath the screen: while a
+state write is parked, in flight or failed -- and, since round 6, in the
+first moments of a shell start before the plugin has read its own state --
+the toggle writes the logo setting ALONE and leaves the entry's source keys
+as the host publishes them (round 5 wrote "holds"; on the host that
+publishes one write behind, the copy it carries can be one write old, which
+is D-SINK-20 and changes nothing on this screen),
+where before round 5 it mirrored the in-memory key and stripped the URL the
+failed write had left on the entry as its only copy (the round-4 review's P1,
+measured live; `ARCHITECTURE-SOURCES.md` 4.3 and SRC-MIG-22). Observed at the
+sink by key-scenario L1/L2 on lane-key-u2 (64 / 0; 60 / 4 on `--baseline
+lane-key-t2` with L1 reading `stored:<C> playlistUrl:no` -- lane B,
+2026-10-12). One sentence of this screen's copy keeps `omarchy bar set`
+honestly: a LOGO write the host refuses outright (no writable bar entry;
+`setShowLogos` returns false) renders `Could not save settings - try omarchy
+bar set` through the return value, and that advice is sound there because
+the write it describes carries no credential (DQ-U5); nothing observes that
+line on a display either.
+
+**A guide URL waiting for a source (round 7, R17).** Nothing on this screen
+changes, and that is the point: an `epgUrl` the user set from a terminal
+while no source was active -- the unconfigured state, or right after
+removing the active source -- stays on the bar entry until a source becomes
+active, and pressing `g` meanwhile no longer takes it away. Until round 7
+the toggle's write, with nothing outstanding, healed the entry and dropped
+the value with no copy anywhere (observed live on the lagging host by the
+sixth review); and on the echoing host simply picking a saved source here
+(`Enter` / `Space`), or adding the first source with the form, did the same
+through the key mirror's write. Now every write the plugin makes leaves an
+input no source has consumed where it is, and the pick or the add that
+makes a source active attaches the waiting guide URL to it in the same turn
+-- replacing that source's own guide URL, or the EPG typed into the add
+form, when they differ (the second is open as lane A's OQ-W3) [round 8,
+R18d: ruled the other way -- a guide URL the add form carries wins and the
+waiting value is superseded, 1.5 and 1.8; with the field empty the waiting
+value is attached as described here] [round 9, R19b and R19c: the value no
+longer waits on the bar entry but in `state.json`, off the entry, and at
+the move the guide URL the user set LAST wins -- the held value, or the
+record's own as set by the add form at submit or by the edit form; 1.5 and
+1.6]. The only
+trace is the shell's journal: `the bar entry keeps an input no source has
+adopted yet (epgUrl)`, the key name and never the value. Observed through
+the harness by key-scenario U1-U7 (lane A, lane-key-w1, 2026-10-12; red on
+`--baseline lane-key-v2`); the form route is node only [round 8: observed
+through the harness too, key-scenario A1 and A2 on lane-key-x1, the add
+into an empty list still node only]. Round 8 also makes the waiting value
+indifferent to spacing: a value pasted with a trailing space or newline
+(`omarchy bar set` stores it as typed) is the same value as without, and a
+value of spaces alone is no value (R18a). A mistyped `playlistUrl` set
+beside a waiting guide URL is reported and removed once, and nothing
+repeats -- on the round-7 build the plugin handed the lagging host the same
+entry about 3,000 times a second in that state, with nothing on screen to
+say so
+(R18b; key-scenario K).
+
+**Setting the same value again (round 9, R19a).** `g` after an `omarchy
+bar set ... showLogos true` turns logos off, every time; a mistyped
+credentialed `playlistUrl` set again from a terminal is removed again; a
+guide URL set again is taken off the entry again. On the round-8 build,
+on today's Omarchy (the host that publishes one write behind), an `omarchy
+bar set` that put the entry back exactly as the plugin had last seen it
+made the plugin skip its next write: the footer said `Logos off` while
+logos stayed on and were fetched, also after a restart, and a re-set
+credential stayed in `shell.json` for the rest of the session (the eighth
+review, both lenses, live). Nothing new is on screen; the screen is now
+true. Observed through the harness by key-scenario Y1 (logos), Y2 (the
+refused credential) and Y3 (a guide URL set twice, then edited in the app,
+the edit standing after a restart), each red on `--baseline lane-key-y0`
+(lane A, lane-key-y1).
+
+**A guide URL whose save failed, then an edit (round 9, R19d; D-SRC-18).**
+When the state write that would adopt a terminal guide URL fails, the
+value is left on the bar entry (R13) and the shell's journal says
+`state.json could not be written`. If the user then changes that source's
+guide URL in the edit form and that save lands, the older terminal value is
+taken off the entry once it has, so the next shell start does not put it
+back over the edit; before round 9 it did. Nothing on screen changes. Observed through
+the harness by key-scenario H1 (red on `--baseline lane-key-y0`). [Round
+10, R20b: also when the shell stops in the instant between that save
+landing and the older value being taken off. The plugin's own file now
+records, as a fingerprint and never the URL, which values it has already
+read from the entry, so a value it has read is not read again as new at
+the next start; before round 10 it was, in that instant, and replaced the
+edit (D-SRC-18's last window). Nothing on screen changes. Observed in node
+through the service's own functions and by the round-9 lens's own driver
+under lane A's cage, not by a key-scenario segment.]
+
+**The logo toggle no longer puts a removed value back (round 10, R20c;
+D-SINK-20).** `g` behaves as it always has. Beneath the screen, on today's
+Omarchy (the host that publishes one write behind), the toggle's
+logo-only write while a save is outstanding used to copy back whatever the
+host still published, including a guide URL or a mistyped credential the
+plugin had just removed from `shell.json`; the credential then stayed there
+for the rest of the session, and a guide URL put back that way replaced a
+later edit at the next start. The write now carries back only a value the
+plugin's own file does not yet hold -- the one copy of an input whose save
+failed, which the round-4 review showed must never be dropped -- and
+nothing it has already stored or refused. Nothing on screen changes; the
+footer's `Logos on` / `Logos off` is the same. Observed in node and by the
+round-9 lens's driver under lane A's cage (`stored epgUrl=no` after the
+toggle on lane-key-z1, `yes` for the session on lane-key-y2); key-scenario
+Y4 observes the toggle itself twice in a row, and L1/L2 that the only copy
+is kept.
+
+**After the migration, none of the four paragraphs above describes a
+terminal value any more (round 11, 2026-10-13; R21).** They are the record of
+rounds 7-10 and stand as written. What the screen does now: a `playlistUrl`
+or `epgUrl` set from a terminal once the migration has landed is refused --
+the active source, the list and the footer do not change -- and shows one
+desktop notification (5.9); the plugin's next write, usually at once, takes
+it off the bar entry. `g` meanwhile carries no retired key at all, so it can
+neither keep nor put back a terminal value (D-SINK-20 ends at the marker).
+Inside the migration window (a 0.13.x install's first start, until the state
+write carrying the marker lands) the old protections stand: a migration
+input whose save failed stays on the entry as its only copy, and `g` leaves
+it there (node `R21e (...) round 4's P1 at the migration`; key-scenario F
+and H through a state directory that loses its write bit after `state
+init`). Observed at the sink by key-scenario X1-X6 and by U, K, Z, A, Y2,
+Y3, Q and V moved to the new contract (lane A, lane-key-m1: 98 / 0 forward,
+68 / 30 on `--baseline lane-key-z2`).
+
 ### 5.6 Default label and duplicates (S4, S5)
 
 `Model.deriveLabel(url, kind)`:
@@ -1189,6 +1577,208 @@ The label is wrapped in the curly quotes UX.md uses (`"x"` -> U+201C/U+201D).
 ### 5.8 Accessible names
 
 See 7.1; they reuse the strings above.
+
+### 5.9 Bar-setting notifications (D-SINK-19 round 11, R21b and R21c; 2026-10-13)
+
+The product owner dropped the `omarchy bar set` URL route on 2026-10-13: the
+Sources screen is the only way to add or change a source. A value the plugin
+takes off the bar entry without adopting it is reported ONCE, as a desktop
+notification and the same sentence on the shell's console
+(`omarchy-iptv: <body>`), and the guide shows nothing -- the active source,
+the list and the footer are untouched, because nothing changed. The text is
+`Model.entryInputNotice(name, reason)` as shipped on lane-key-m1, composed from
+the setting's NAME and the reason and never from the value (rule 5: the value
+can be a credentialed URL); `<setting>` is `playlistUrl` or `epgUrl`, and any
+other name reads `A URL setting`. The notification is `omarchy-notification-send
+--app-name IPTV -u normal -g <alert glyph> -r 74016 <title> <body>`, one replace
+id for every such report, so a user who set both URLs sees one card, the
+last.
+
+| When | Title | Body |
+|---|---|---|
+| After the migration: a `playlistUrl` or `epgUrl` found on the entry (`retired`) | `Bar setting ignored` | `<setting> is no longer read from the bar settings and was removed. Add or switch sources in the guide's Sources screen.` |
+| At the migration: a guide URL with no source to attach it to (`no-source`, R21c) | `Bar setting removed` | `epgUrl was removed from the bar settings: no source was set up for it to guide. Add the source with its EPG URL in the guide's Sources screen.` |
+| At the migration: a value that does not validate (`invalid`) | `Bar setting removed` | `<setting> in the bar settings was not a usable URL and was removed. Add or edit sources in the guide's Sources screen.` |
+
+"Once" is per value per session: the same value set again is not reported
+again (the plugin keeps an in-memory list of what it has handled, nothing on
+disk), a different value is, and a value still on the entry at the next start
+is reported once more. An `invalid` migration value with no source to fall
+back on still reaches the guide's error state through D16, as before. The
+wording, the notification as the only channel, and the absence of anything in
+the guide are the code lane's reading of R21b and are raised to the lead as
+open (lane-key-m1's report); this section records what ships and changes
+nothing. Pinned in node (`R21b / rule 5: entryInputNotice -- one sentence per
+reason ...`, `R21b: the refusal notification is entryInputNotice's sentence,
+with its own replace id, and carries no value`) and observed at the sink by
+key-scenario X5 (one notification per report through a stand-in
+`omarchy-notification-send` in front of PATH, each naming the Sources screen,
+none carrying a URL or the credential). The rendered card is UNVERIFIED on a
+display.
+
+### 5.10 Saved sources not loaded (D-SINK-19 round 12, R22a; round 13, R23; 2026-10-13)
+
+`~/.local/state/omarchy-iptv/state.json` is the only copy of the user's
+sources and provider URLs. When it exists but cannot be read -- permission
+denied, not a regular file, an I/O error -- or does not parse as a state
+(an empty file included, settled by the lead on 2026-10-13), or when the
+start-up check of it does not answer (round 13), the plugin WRITES NOTHING
+to it for the rest of the session. Until round 12 it read such a file as an
+empty state and saved that over it at the start, which erased every source,
+credential and favourite (the round-11 data-loss lens, live). What the user
+sees, as built on lane-key-n1 and amended on lane-key-p1 (round 13):
+
+1. Once per episode, a desktop notification: `omarchy-notification-send
+   --app-name IPTV -u critical -g <alert glyph> -r 74017 <title> <body>`, and
+   the same body on the shell's console as `omarchy-iptv: <body>`. The text
+   is `Model.stateUnreadableNotice(reason, path)`, composed from the reason
+   and the file's path and never from anything in the file. The title is
+   `Saved sources not loaded`; the body is `<path> <what>. Nothing is saved
+   until it can be read, so sources, favorites and settings changed now are
+   not kept. <fix>`, with `<path>` the full path of `state.json`
+   (`Service.stateFilePath`):
+
+   | Reason | `<what>` | `<fix>` |
+   |---|---|---|
+   | the file is not readable (`permission`) | `is not readable (permission denied)` | `Make it readable with chmod 600 on that file, then run omarchy restart shell.` |
+   | something other than a file is at the path (`not-a-file`: a directory or a FIFO, both measured live; a socket is refused by the helper, but what the FileView reports for one is unmeasured, so its row is not known) | `is not a regular file` | `Move whatever is at that path aside, then run omarchy restart shell.` |
+   | the file does not parse (`unparsed`) | `is not a valid state file` | `Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell.` |
+   | the folder cannot be read: the file reads as missing, but the helper found something there (`absent`, `absent-unconfirmed`) | `could not be found, or its folder could not be read` | `Make the folder readable with chmod 700, then run omarchy restart shell.` |
+   | the start-up check did not answer within 15 s and was stopped (`init-timeout`, round 13, R23c) | `could not be checked: the start-up check did not answer and was stopped` | `Make sure a regular file, or nothing, is at that path, then run omarchy restart shell.` |
+   | any other failure (`io-error`) | `could not be read` | `Check the file and its folder, then run omarchy restart shell.` |
+
+   For example, for a file that does not parse, verbatim from the model with
+   the user's home spelled out: `Saved sources not loaded` /
+   `/home/you/.local/state/omarchy-iptv/state.json is not a valid state file.
+   Nothing is saved until it can be read, so sources, favorites and settings
+   changed now are not kept. Restore it from a backup, or move it aside to
+   start with no sources, then run omarchy restart shell.`
+
+2. **At a start, the guide draws the no-write surface, never the first-run
+   form (round 13, R23e; this closes the open question round 12 left
+   here).** Nothing has loaded, so the guide is unconfigured, and
+   `Model.guideSurface` answers `stateUnreadable` instead of `unconfigured`;
+   `Model.firstRunAllowed` is false, so the guide does not open into the
+   first-run form -- not on open, not when the mode begins while the guide is
+   open, and not on the Esc / `o` return from Sources. The body is the empty
+   state with the alert glyph, and its title and prose are
+   `Model.stateUnreadableNotice` for the current reason and path: the SAME
+   words as the notification, one source of copy. Wireframe (UNVERIFIED on a
+   display; the wrap is the card's):
+
+   ```
+   +-----------------------------------------------------------------+
+   |                                                                 |
+   |                        <alert glyph>                            |
+   |                   Saved sources not loaded                      |
+   |   /home/you/.local/state/omarchy-iptv/state.json is not a       |
+   |   valid state file. Nothing is saved until it can be read, so   |
+   |   sources, favorites and settings changed now are not kept.     |
+   |   Restore it from a backup, or move it aside to start with no   |
+   |   sources, then run omarchy restart shell.                      |
+   |                                                                 |
+   +-----------------------------------------------------------------+
+   | Esc close                                                       |
+   +-----------------------------------------------------------------+
+   ```
+
+   - No editable field exists while it shows (D-CLIP-1): there is no form,
+     and the harness's census of editable text inputs reads 0 there
+     (key-scenario B11 `editable:0`).
+   - The footer is `Model.footerHints` for an empty guide with no retry:
+     `Esc close`, plus `o sources` only when sources are in memory -- which at
+     a no-write start they are not, because nothing loaded. `r retry` is not
+     offered: a refresh cannot make the file readable.
+   - The Sources screen stays reachable as it is (R23e): the `o` key is not
+     gated on the source count (`Guide.qml` `handleListLetter`), but at a
+     no-write start Sources lists nothing and the footer does not name it, and
+     no check observes `o` from this surface -- UNVERIFIED; the harness enters
+     Sources there through `ipc sourcesKey enter` (B12). Whether the surface
+     should offer Sources explicitly is raised to the lead (the round-13
+     rulings, decision request 5).
+   - The bar entry is left exactly as it is.
+
+3. **Every refusal says the no-write reason (round 13, R23f).** In the mode,
+   an add, an edit, a switch and a remove are refused on the result line (a
+   form) or in the footer with the service's own code, `state_unreadable`:
+   `state.json could not be read · nothing is saved until it can be` (5.5;
+   the middle dot is `Model.SEP`). The logo toggle (`g` in Sources, on and
+   off) and a persist failure signalled while the mode holds now go through
+   `Model.refusalMessage(code, stateWriteBlocked, kind)` and read the same
+   sentence. Round 12's live lens read `Could not save settings · try omarchy
+   bar set` there -- the wrong reason and the wrong advice; that sentence is
+   still what `persist_failed` reads OUTSIDE the mode. Observed by
+   key-scenario B12 (`says:no-write advice:none writes:0`).
+
+4. **Mid-session** (the file made unreadable, emptied or overwritten in
+   place under a running shell, so the guide's file watch reloads it): the
+   guide keeps the channels, the active source and the favourites it already
+   had -- it never switches to the surface in 2 while it holds channels
+   (lane A's reading of R23e, raised to the lead to confirm). Source changes
+   and the logo toggle are refused with the sentence in 3. A favourite, a
+   hidden group, a saved or forgotten search or a removed recent still
+   changes on screen with its usual confirmation, for this session only: it
+   is not kept, which only the notification's "changed now are not kept"
+   says (raised to the lead: decision request 4). **The condition, as
+   measured:** the mode begins when the FileView delivers the reload. Before
+   the session's first own save that is observed live (round 12's B5-B7,
+   round 13's B9). AFTER an own save it is **UNVERIFIED** (rule 14): lane A's
+   round-13 instrument saw the reload delivered and the mode begin, idle and
+   under load, but that instrument is not committed and no check observes
+   it; the round-12 data-loss lens saw NO reload, the mode not begin, and the
+   next save write the session's memory over the damaged file (nothing lost:
+   memory held it). The two measurements disagree and the lead decides
+   (`ARCHITECTURE-SOURCES.md` round-13 rulings, decision request 1).
+
+5. It ends by itself when a load that IS a state arrives: the file put back
+   in place (the guide's file watch reloads it, key-scenario B7) or fixed and
+   `omarchy restart shell` run. Writes resume at once, and a later episode in
+   the same session is told again -- pinned since round 13 (R23a: node `R23a
+   (<mode> host, mid-session, <between> between): TWO no-write episodes ...`
+   and key-scenario B9 `told:1/2`, both seen red with the re-arm deleted).
+
+6. **Something other than a file at the path, or a start-up check that
+   hangs (round 13, R23b-R23d).** A directory or a FIFO at `state.json` is
+   the `not-a-file` row of 1 (a socket too as far as the helper goes, which
+   refuses it the same way; the FileView's report for a socket is
+   unmeasured): the helper opens the path
+   without blocking, refuses it on the descriptor's own `fstat`, and leaves
+   it exactly as it was -- a directory is no longer chmod-ed to 0600 (round
+   12's live lens saw one made unsearchable), and a FIFO no longer hangs the
+   start (key-scenario B14 `blocked:not-a-file ... left:none fifo:600`). If
+   the helper's start-up check does not answer within 15 s for any other
+   reason, the service stops it (TERM, then KILL 2 s later), leaves no
+   process behind (B10 `left:none`), and enters the mode with the
+   `init-timeout` row. A hand-run `state` command over a non-regular file
+   answers `state.json is not a regular file; nothing was written`, exit 1.
+
+7. NOT this mode, and told nothing: a `state.json`, or its folder, left at
+   mode 0000 by the user's own chmod while the shell was down (settled by the
+   lead on 2026-10-13). The helper's start-up `state init` restores 0600 and
+   0700, the start reads the file, and every source is there (key-scenario
+   B1-B4). A file that does not exist at all is a fresh install, as before,
+   and draws the first-run form (B13 reads its drawn copy, `Paste or type
+   your M3U URL or path, then press Enter`).
+
+Pinned in node (`R22a: stateUnreadableNotice -- one sentence per reason,
+each naming the file and what to do (restart included), none carrying a URL;
+the notification and the console line are that sentence (74017)`, `R23c:
+stateUnreadableNotice("init-timeout") is its own sentence ...`, `R23e:
+guideSurface ...`, `R23e: firstRunAllowed ...`, `R23e: the Esc / o return
+from Sources ...`, `R23f: refusalMessage ...`, and the `R22a`, `R23a` and
+`R23c` harness pins that drive each fault through the real handlers) and
+observed at the sink by key-scenario: B5-B7 on lane-key-n1 (lane A,
+transcript `key-20261013-161816-835970`: B5 `file:same blocked:unparsed
+add:state_unreadable switch:state_unreadable told:1 path:1 urls:0` -- one
+notification, naming `state.json`, no `://` -- B6 the entry's keys and mirror
+unchanged with `writes:0`, B7 the mode lifted by restoring the file and a
+switch then landing), and B9-B14 on lane-key-p1 (lane A, transcript
+`key-20261014-043943-514380`, 112 / 0; B10-B14 red on `--baseline
+lane-key-n2`, `key-20261014-044420-538071`, 107 / 5). B11 reads the surface's
+title and prose as the notice's (`title:notice prose:notice`) through the
+harness's drawn-copy fields, which since R23h report what is DRAWN. The
+rendered surface and the notification card are UNVERIFIED on a display: no
+screenshot of either was taken this round.
 
 ---
 

@@ -418,6 +418,12 @@ echo "== plugin tree $PLUGIN_ROOT   scratch $SCRATCH"
 # ---- the local live stream: a loopback server and two sliding-window HLS
 # outputs. The server is a threading one (a segment fetch must not block
 # the playlist refresh), quiet, and its pid is taken from `ss`.
+# $FIX lives under the SHARED harness directory and cleanup() removes it at
+# exit -- but not after a SIGKILL, and the readiness loop below trusts a
+# live.m3u8 with three segments in it before ffmpeg has truncated the old
+# one (the stale-file shape sources-scenario.sh's silent.port had, D-SINK-19
+# round 4, DQ-B14). Cleared here, before anything writes into it.
+rm -rf "$FIX"
 mkdir -p "$FIX/a" "$FIX/b"
 python3 - "$PORT" "$FIX" >/dev/null 2>&1 <<'PY' &
 import functools, http.server, sys

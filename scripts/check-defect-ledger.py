@@ -159,6 +159,53 @@ FINDING_WORDS = re.compile(
 FINDING_EXEMPT = re.compile(r'\bno defect ids\b|\bnot defects\b', re.I)
 TITLED_ITEM = re.compile(r'^\s{0,3}(\d+)\.\s+\*\*(.+?)\*\*')
 
+# ---- a cited Model symbol must be one QML can call ------------------------
+#
+# D-SINK-19 round 10, R20e. A `Model.X` citation used to be checked against
+# "some part DECLARES X", and a part declares many names the aggregator does
+# not re-export -- internal helpers that QML's `Model.<name>` cannot reach and
+# reads as `undefined`. The round-9 data-loss lens took two such citations at
+# their word (`copySourceRecord`, `replaceSource`), wrote a mutant that called
+# one from Service.qml, and found it would have thrown at the probe commit;
+# the ledger was green. So a citation in the `Model.` form must name a public
+# name of Model.mjs (scripts/model_files.py public_names, the same export
+# blocks the engine loads). An internal helper is cited BARE, with its part
+# named ("copySourceRecord in model/source-records.mjs").
+#
+# WAIVERS. Two tables, emptied of every round-10 and round-11 entry in
+# D-SINK-19 round 12 (R22d) and kept as the one place a waiver may live, with
+# the rule that keeps them clean.
+#
+# UNEXPORTED_CITATION_WAIVERS: symbol -> (the ONE file it is waived in,
+# reason), for a `Model.X` citation of a name Model.mjs does not export.
+# WITHDRAWN_SYMBOL_WAIVERS: symbol -> (frozenset of files, reason), for a
+# citation of a name a ruling DELETED from the model, while the documents
+# that cite it are rewritten. A citation of a waived name anywhere else is
+# red as usual, and so is a withdrawn name that comes back into the source.
+#
+# Round 10 waived three pre-rule citations (copySourceRecord, replaceSource,
+# countFavorites, all in ARCHITECTURE-SOURCES.md) and round 11 the seventeen
+# names R21 withdrew (adoptPendingEpg and its family, in five documents). The
+# documents lanes re-cited every one bare, and every waiver then read
+# "unused, delete" for a round -- while still honouring a NEW citation of
+# the same name in the same document, which is the "documented as live"
+# regression the withdrawal waiver existed to prevent (both round-11 lenses,
+# P2). So R22d: AN UNUSED WAIVER IS ITSELF A FAILURE. The census below still
+# prints how many are listed and in use on every run; a listed waiver no
+# citation uses is now a problem that names it, and the twenty went.
+#
+# In use today: none. Round 12 (R22e) deleted the three R19a estimate
+# functions (hostEntryForm, entryWriteRecord, entryWriteNeeded) and waived
+# them where the documents still cited them prefixed; round 13 (R23i)
+# removed the last three prefixed citations and the three waivers in ONE
+# commit, because each half alone is red: the citations without their
+# waivers resolve in no source file, and the waivers without their
+# citations are unused (R22d). The table stays, empty, as the shape for the
+# next withdrawal: add an entry in the commit that deletes the name, remove
+# it in the commit that removes its last prefixed citation.
+UNEXPORTED_CITATION_WAIVERS = {}
+WITHDRAWN_SYMBOL_WAIVERS = {}
+
 # A state cell must actually say something. These are the words the board
 # already uses; the point is to reject an empty cell, a dash, or a "?" that
 # reads as tracked when it is not.
@@ -571,20 +618,69 @@ def main(argv=None):
         # Kept as a named, short list rather than a clever pattern: an
         # exception you can read is an exception somebody will notice.
         not_symbols = {'js', 'mjs', 'X'}
+        # R20e: what QML's `Model.<name>` reaches. A model whose aggregator
+        # re-exports nothing readable cannot answer, and every `Model.`
+        # citation of it is then red rather than silently unchecked.
+        try:
+            public = set(model_files.public_names(root))
+        except model_files.ModelLayoutError as error:
+            public = None
+            layout_error = str(error)
+        waivers_used = set()
+        withdrawn_used = set()
         for symbol in sorted(cited):
             if symbol in not_symbols:
                 continue
             # A symbol resolves if it is exported, defined, or declared.
-            if re.search(r'\b%s\s*[:=]' % re.escape(symbol), blob):
+            found = (re.search(r'\b%s\s*[:=]' % re.escape(symbol), blob)
+                     or re.search(r'function\s+%s\b' % re.escape(symbol), blob))
+            withdrawn = WITHDRAWN_SYMBOL_WAIVERS.get(symbol)
+            if not found and withdrawn and cited[symbol] <= withdrawn[0]:
+                withdrawn_used.add(symbol)
                 continue
-            if re.search(r'function\s+%s\b' % re.escape(symbol), blob):
+            if not found:
+                problems.append(
+                    'Model.%s is cited in %s and resolves in no source file. '
+                    'Either the symbol was renamed and the document was not, or '
+                    'the document names something that never existed'
+                    % (symbol, ', '.join(sorted(cited[symbol]))))
                 continue
+            if public is None:
+                problems.append(
+                    'Model.%s is cited in %s, and which names Model.mjs exports '
+                    'could not be read (%s)'
+                    % (symbol, ', '.join(sorted(cited[symbol])), layout_error))
+                continue
+            if symbol in public:
+                continue
+            waiver = UNEXPORTED_CITATION_WAIVERS.get(symbol)
+            outside = sorted(cited[symbol] - ({waiver[0]} if waiver else set()))
+            if waiver and waiver[0] in cited[symbol]:
+                waivers_used.add(symbol)
+            if not outside:
+                continue
+            part = next((name for name, text in sources.items()
+                         if name != model_files.AGGREGATOR
+                         and re.search(r'^(?:function\s+%s\b|var\s+%s\b)' % (re.escape(symbol), re.escape(symbol)), text, re.M)), 'its part')
             problems.append(
-                'Model.%s is cited in %s and resolves in no source file. '
-                'Either the symbol was renamed and the document was not, or '
-                'the document names something that never existed'
-                % (symbol, ', '.join(sorted(cited[symbol]))))
-        print('symbol citations: %d distinct Model.* names checked' % len(cited))
+                'Model.%s is cited in %s, but Model.mjs does not export it: '
+                'QML\'s Model.%s is undefined. Cite it bare with its part '
+                '("%s in %s"), or export it'
+                % (symbol, ', '.join(outside), symbol, symbol, part))
+        print('symbol citations: %d distinct Model.* names checked, each against '
+              'the names Model.mjs exports' % len(cited))
+        # R22d: the census, and an unused waiver is red. A waiver whose
+        # citation has gone is not harmless -- it waves through the next one.
+        for label, table, used in (('unexported-citation', UNEXPORTED_CITATION_WAIVERS, waivers_used),
+                                   ('withdrawn-symbol', WITHDRAWN_SYMBOL_WAIVERS, withdrawn_used)):
+            unused = sorted(set(table) - used)
+            print('%s waivers: %d listed, %d in use%s'
+                  % (label, len(table), len(used), '; unused: ' + ', '.join(unused) if unused else ''))
+            for symbol in unused:
+                problems.append(
+                    'the %s waiver for %s is unused: no citation it covers is left, so '
+                    'all it can do now is wave through a new one. Delete it from '
+                    'scripts/check-defect-ledger.py' % (label, symbol))
 
     # Printed on every run, green included. An exemption nobody sees is an
     # exemption that grows, so the census is part of the output a reader of the

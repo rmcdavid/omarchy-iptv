@@ -224,15 +224,21 @@ Item {
     serviceTitle: "Service not loaded",
     serviceProse: "Run omarchy restart shell",
     unconfiguredTitle: "No playlist configured",
-    unconfiguredProse: "Set your M3U URL or path, then press r to load it:",
-    unconfiguredCommand: "omarchy bar set " + root.pluginId + " playlistUrl <url>",
-    unconfiguredEpg: "Optional EPG:  omarchy bar set " + root.pluginId + " epgUrl <url>",
-    unconfiguredWhere: "Settings live in ~/.config/omarchy/shell.json (entry " + root.pluginId + ")",
+    // D-SINK-19 round 11 (R21): the guide is the one place a source is added.
+    // This used to offer `omarchy bar set ... playlistUrl <url>` as a command
+    // to copy; that route is gone (a URL set there is refused and removed),
+    // so the surface names the Sources screen and nothing to type elsewhere.
+    unconfiguredProse: "Add your M3U URL or path in Sources, with its EPG URL if you have one",
+    unconfiguredWhere: "Sources and their URLs are kept in ~/.local/state/omarchy-iptv/state.json; other settings live in ~/.config/omarchy/shell.json (entry " + root.pluginId + ")",
     loadingTitle: "Loading playlist" + Model.ELLIPSIS,
     loadingFrom: "Fetching from ",
     loadingProse: "Fetching playlist",
     errorTitle: "Playlist failed to load",
-    errorCheck: "check playlistUrl",
+    // D-SINK-19 round 12 (R22c): the fetch-failure hint names the Sources
+    // screen, where a source's URL is checked and edited. It said `check
+    // playlistUrl` -- a setting R21 retired and refuses -- and so sent a user
+    // whose provider is down to the one route that no longer works.
+    errorCheck: "check the source in Sources",
     emptyPlaylistTitle: "Playlist has no channels",
     emptyPlaylistProse: "Parsed 0 channels from ",
     emptyPlaylistCheck: "check the URL points at an M3U",
@@ -256,7 +262,6 @@ Item {
     transientFavAdded: "Added to Favorites",
     transientFavRemoved: "Removed from Favorites",
     transientRecentRemoved: "Removed from Recent",
-    transientCopied: "Copied",
     accessibleCard: "IPTV guide",
     accessibleSearch: "Search channels",
     accessibleGroups: "Groups",
@@ -268,7 +273,6 @@ Item {
     editSourceTitle: "Edit source",
     xtreamTitle: "Add Xtream login",
     firstRunProse: "Paste or type your M3U URL or path, then press Enter",
-    firstRunTerminal: "Or from a terminal:  omarchy bar set " + root.pluginId + " playlistUrl <url>",
     fieldLabel: "Label",
     fieldPlaylist: "Playlist",
     fieldEpg: "EPG",
@@ -494,6 +498,17 @@ Item {
   // ---- derived from the service
   readonly property bool serviceReady: service !== null
   readonly property bool configured: serviceReady && service.configured === true
+  // D-SINK-19 round 13, R23e / R23f: the service's no-write mode, by its
+  // reason ("" when writes are allowed, and on a service without the field).
+  readonly property string stateBlocked: serviceReady && typeof service.stateWriteBlocked === "string" ? service.stateWriteBlocked : ""
+  // R23e: whether the unconfigured guide is the first-run form. Not in the
+  // no-write mode, whose submit could only be refused: the body is then
+  // guideSurface's "stateUnreadable" empty state, in the notice's words.
+  readonly property bool firstRunAllowed: Model.firstRunAllowed({ serviceReady: root.serviceReady, configured: root.configured, stateBlocked: root.stateBlocked })
+  // The notification's sentence for the current reason and path (R23e: ONE
+  // source of copy with it, Model.stateUnreadableNotice).
+  readonly property var stateNotice: Model.stateUnreadableNotice(root.stateBlocked,
+                                                                 root.serviceReady && typeof service.stateFilePath === "string" ? service.stateFilePath : "")
   // D-LIVE-19: never `service.channels.length` directly. The body renders
   // one surface at a time and Model.guideSurface decides which; an
   // unconfigured guide has no channels, no column and no counts even if the
@@ -578,8 +593,17 @@ Item {
   }
   // D-SRC-06: a configured URL the validator refused (CLI, SR8) renders the
   // UX 5.4 sentence alone, no host and no `r` hint (nothing to retry).
+  //
+  // D-SINK-19 narrowed it to the case it was written for. `playlistUrl` is an
+  // INPUT now and the active source lives in state.json, so a refused CLI
+  // value no longer takes a working source away -- and this sentence must not
+  // be painted over one. The service answers the question (its
+  // `invalidInputBlocks`, which is Model.invalidInputBlocks) rather than this
+  // file deciding it a second way: one decision, two readers, joined by a
+  // call (rule 13).
   readonly property string invalidSettingsText: {
     if (!root.serviceReady || root.service.settingsInvalid === undefined || !root.service.settingsInvalid) return ""
+    if (root.service.invalidInputBlocks !== true) return ""
     return Model.sourceErrorMessage(String(root.service.settingsInvalid.code || "invalid"))
   }
   // The D9 lever, thrown for good by D-CLIP-1: paste is the out-of-process
@@ -718,11 +742,23 @@ Item {
     scopeId: root.scopeId,
     narrow: root.narrow,
     sources: root.sourceCount,
-    wall: root.wallView
+    wall: root.wallView,
+    stateBlocked: root.stateBlocked
   })
 
   // Empty-state kind: "" while rows exist.
   readonly property string emptyKind: surface.empty
+  // Whether the empty state is ON SCREEN: the Sources screens and the forms
+  // own the body in their modes (emptyState's `visible` is this).
+  readonly property bool emptyStateShown: root.emptyKind !== "" && (root.guideMode || root.inPanel)
+  // What the body SAYS, as drawn, so the harness reads the sentence on the
+  // screen rather than a copy of it (R22c, rule 14). R23h: the first-run
+  // form's head when it shows (its title and firstRunProse -- the round-12
+  // live lens found these reporting the hidden empty state's unconfigured
+  // prose while the form drew another sentence), else the empty state when
+  // it shows, else nothing.
+  readonly property string emptyTitleText: root.firstRunHead ? root.copy.unconfiguredTitle : (root.emptyStateShown ? emptyState.title : "")
+  readonly property string emptyProseText: root.firstRunHead ? root.copy.firstRunProse : (root.emptyStateShown ? emptyState.prose : "")
 
   // Banner kind (R8): none | playlistError | epgError | epgPending. An EPG
   // fetch failure shows the banner even while an earlier window is still
@@ -841,8 +877,12 @@ Item {
   readonly property var hintOpts: {
     var empty = ""
     if (root.emptyKind === "loading") empty = "loading"
-    else if (root.emptyKind === "unconfigured" || root.emptyKind === "error" || root.emptyKind === "service") empty = "error"
-    return { mode: root.mode, query: root.query, empty: empty, sourcesExist: root.sourceCount > 0, retry: root.invalidSettingsText === "", cursorKind: root.sourceCursorKind, form: root.form,
+    else if (root.emptyKind === "unconfigured" || root.emptyKind === "error" || root.emptyKind === "service"
+             || root.emptyKind === "stateUnreadable") empty = "error"
+    // R23e: the no-write surface offers Sources and Esc, never `r retry`: a
+    // refresh cannot make an unread state.json readable.
+    return { mode: root.mode, query: root.query, empty: empty, sourcesExist: root.sourceCount > 0,
+      retry: root.invalidSettingsText === "" && root.emptyKind !== "stateUnreadable", cursorKind: root.sourceCursorKind, form: root.form,
       hasNumbers: root.hasNumbers, numberEntry: root.numberEntryActive ? { active: true } : null,
       // M2-05 section 5: `p pip` only where it can do something.
       pipAvailable: root.pipAvailable,
@@ -956,7 +996,8 @@ Item {
     else if (typeof payload.group === "string" && payload.group !== "") next = Model.withScope(next, Model.groupScopeId(payload.group))
     if (typeof payload.query === "string" && payload.query !== "") next = Model.withQuery(next, payload.query)
     // UX-SOURCES 1.2: unconfigured opens straight into the first-run form.
-    if (root.serviceReady && !root.configured) next = Model.openFirstRun(next)
+    // R23e: never in the no-write mode (Model.firstRunAllowed).
+    if (root.firstRunAllowed) next = Model.openFirstRun(next)
     root.guide = next
     root.transientText = ""
     root.enterPending = false
@@ -1419,11 +1460,6 @@ Item {
     root.showTransient(root.copy.transientRefreshing)
   }
 
-  function copyCommand(text) {
-    Quickshell.execDetached(["wl-copy", String(text)])
-    root.showTransient(root.copy.transientCopied)
-  }
-
   // ------------------------------------------------------------ picture in picture (M2-05)
 
   // `p` in list mode (PIP1: the modified-Enter shortcut is not implemented,
@@ -1661,7 +1697,7 @@ Item {
     // reach Model.onEscape's last branch and DISMISS the whole guide.
     if (root.inPanel) { root.closePanel(); return }
     if (root.listMode && root.cancelNumberEntry()) return
-    root.applyEscapeResult(Model.onEscape(root.guide, { configured: root.configured }))
+    root.applyEscapeResult(Model.onEscape(root.guide, { configured: root.configured, stateBlocked: root.stateBlocked }))
   }
 
   // Applies an onEscape / closeForm result: cancels a running probe, closes
@@ -1869,7 +1905,7 @@ Item {
 
   function leaveSources() {
     root.sourcesNotice = ""
-    root.setGuide(Model.closeSources(root.guide, { configured: root.configured }))
+    root.setGuide(Model.closeSources(root.guide, { configured: root.configured, stateBlocked: root.stateBlocked }))
     if (root.guideMode) root.rebuildDisplay()
     root.refocus()
   }
@@ -2003,8 +2039,13 @@ Item {
     // guide here. openFirstRun changes the mode, which hides the panel by its
     // own `visible` binding; without this the user would sit behind a panel
     // over an unconfigured guide and never reach the first-run form.
-    if (!root.configured && (root.guideMode || root.inPanel)) root.enterFirstRun()
+    if (root.firstRunAllowed && (root.guideMode || root.inPanel)) root.enterFirstRun()
     else if (root.configured && root.firstRunHead && !root.formProbing) root.leaveToGuide()
+    // R23e: the no-write mode began (or the state stayed unread) while the
+    // first-run form was showing -- a start whose init answered late, say:
+    // leave the form for the no-write surface. It holds no input worth
+    // keeping, because its submit could only be refused.
+    else if (root.stateBlocked !== "" && root.firstRunForm && !root.formProbing) root.leaveToGuide()
   }
 
   // ---- forms (UX-SOURCES 1.2, 1.5, 1.6, 1.8)
@@ -2046,11 +2087,18 @@ Item {
   }
 
   // SR25: a persist failure lands on the result line while a form is open,
-  // in the footer otherwise.
-  function showPersistFailed() {
+  // in the footer otherwise. The sentence is THE reason's own
+  // (Model.persistFailureMessage, round-4 review P2): `state_write_failed`
+  // names the state directory and `config_unsafe` the chmod; only
+  // `persist_failed` says `omarchy bar set`, and rendering that one for a
+  // write that failed in ~/.local/state sent the user to the durable sink
+  // rule 5 forbids advising, for a directory it cannot fix.
+  function showPersistFailed(reason) {
     if (!root.opened) return
-    if (root.formActive) root.failForm({ code: "persist_failed", field: "", message: Model.sourceErrorMessage("persist_failed") })
-    else root.showTransient(Model.sourceErrorMessage("persist_failed"))
+    // R23f: in the no-write mode the reason is that mode's, whatever came.
+    var message = Model.refusalMessage(reason, root.stateBlocked, "persist")
+    if (root.formActive) root.failForm({ code: "persist_failed", field: "", message: message })
+    else root.showTransient(message)
   }
 
   function cancelForm() {
@@ -2284,7 +2332,7 @@ Item {
 
   function closeTracks() {
     if (!root.inTracks) return
-    root.applyEscapeResult(Model.onEscape(root.guide, { configured: root.configured }))
+    root.applyEscapeResult(Model.onEscape(root.guide, { configured: root.configured, stateBlocked: root.stateBlocked }))
   }
 
   // A zap while the picker is open (the bar's wheel, an IPC next, Space on
@@ -2470,7 +2518,9 @@ Item {
     }
     if (root.showLogos) {
       if (root.service.setShowLogos(false)) root.showTransient(root.copy.logosOff)
-      else root.showTransient(Model.sourceErrorMessage("persist_failed"))
+      // R23f: the no-write mode's reason in that mode (the round-12 live
+      // lens's P3: "Could not save settings - try omarchy bar set" there).
+      else root.showTransient(Model.refusalMessage("persist_failed", root.stateBlocked))
       return
     }
     removeDialog.selectedIndex = 0
@@ -2484,7 +2534,7 @@ Item {
         && root.service.setShowLogos(true)) {
       root.showTransient(root.copy.logosOn)
     } else {
-      root.showTransient(Model.sourceErrorMessage("persist_failed"))
+      root.showTransient(Model.refusalMessage("persist_failed", root.stateBlocked))
     }
     root.refocus()
   }
@@ -2797,8 +2847,11 @@ Item {
     function onSourceProbeFinished(result) { root.onProbeFinished(result) }
     function onSourcesChanged() { root.syncSourceCursor() }
     function onSourceSwitched(id) { root.showSwitched(id) }
-    function onSourcesPersistFailed(reason) { root.showPersistFailed() }
+    function onSourcesPersistFailed(reason) { root.showPersistFailed(reason) }
     function onConfiguredChanged() { root.onConfiguredFlip() }
+    // R23e: the no-write mode beginning or lifting moves the body the same
+    // way a configured flip does (firstRunAllowed reads both).
+    function onStateWriteBlockedChanged() { root.onConfiguredFlip() }
     function onClipboardText(text) { root.pasteFromProcess(text) }
     // M2-05: the outcome of a toggle, once the service has dispatched and
     // read the state back (PIP11 - there is no other definition of success),
@@ -4288,9 +4341,10 @@ Item {
             // exactly what a user with no playlist yet wants to read -- so
             // the empty state stays drawn under its scrim rather than
             // vanishing for as long as the map is up.
-            visible: root.emptyKind !== "" && (root.guideMode || root.inPanel)
+            visible: root.emptyStateShown
 
             readonly property string glyph: {
+              if (root.emptyKind === "stateUnreadable") return Model.GLYPHS.alert
               if (root.emptyKind === "loading") return Model.GLYPHS.loading
               if (root.emptyKind === "error" || root.emptyKind === "service") return Model.GLYPHS.tvOff
               return Model.GLYPHS.tv
@@ -4298,6 +4352,8 @@ Item {
             readonly property bool emptyPlaylist: root.emptyKind === "error" && root.service.statusReason === root.copy.emptyPlaylistTitle
             readonly property string title: {
               if (root.emptyKind === "service") return root.copy.serviceTitle
+              // R23e: the notification's own words (Model.stateUnreadableNotice).
+              if (root.emptyKind === "stateUnreadable") return root.stateNotice.title
               if (root.emptyKind === "unconfigured") return root.copy.unconfiguredTitle
               if (root.emptyKind === "loading") return root.copy.loadingTitle
               if (root.emptyKind === "error") return emptyState.emptyPlaylist ? root.copy.emptyPlaylistTitle : root.copy.errorTitle
@@ -4307,6 +4363,7 @@ Item {
             }
             readonly property string prose: {
               if (root.emptyKind === "service") return root.copy.serviceProse
+              if (root.emptyKind === "stateUnreadable") return root.stateNotice.body
               if (root.emptyKind === "unconfigured") return root.copy.unconfiguredProse
               if (root.emptyKind === "loading") return root.service.sourceHost !== "" ? root.copy.loadingFrom + root.service.sourceHost : root.copy.loadingProse
               if (root.emptyKind === "error") {
@@ -4326,7 +4383,6 @@ Item {
               }
               return ""
             }
-            readonly property string command: root.copy.unconfiguredCommand
 
             Text {
               width: parent.width
@@ -4358,48 +4414,6 @@ Item {
               visible: text !== ""
               textFormat: Text.PlainText
               text: emptyState.prose
-              color: root.foreground
-              opacity: 0.7
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.body
-              horizontalAlignment: Text.AlignHCenter
-              wrapMode: Text.WordWrap
-            }
-
-            // Command box (UX 4.4); click copies with wl-copy.
-            Rectangle {
-              visible: root.emptyKind === "unconfigured"
-              anchors.horizontalCenter: parent.horizontalCenter
-              width: Math.min(parent.width, commandText.implicitWidth + Style.space(16))
-              height: commandText.implicitHeight + Style.space(16)
-              radius: root.cornerRadius
-              color: Style.normalFillFor(root.foreground, root.accent)
-
-              Text {
-                id: commandText
-                anchors.centerIn: parent
-                width: parent.width - Style.space(16)
-                textFormat: Text.PlainText
-                text: emptyState.command
-                color: root.foreground
-                font.family: root.fontFamily
-                font.pixelSize: Style.font.body
-                elide: Text.ElideMiddle
-                horizontalAlignment: Text.AlignHCenter
-              }
-
-              MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.copyCommand(emptyState.command)
-              }
-            }
-
-            Text {
-              visible: root.emptyKind === "unconfigured"
-              width: parent.width
-              textFormat: Text.PlainText
-              text: root.copy.unconfiguredEpg
               color: root.foreground
               opacity: 0.7
               font.family: root.fontFamily
@@ -5032,29 +5046,6 @@ Item {
               }
             }
 
-            // First run keeps the terminal command (S5 parity); click copies.
-            Text {
-              id: terminalCaption
-              visible: root.firstRunHead
-              width: parent.width
-              textFormat: Text.PlainText
-              text: root.copy.firstRunTerminal
-              color: root.foreground
-              // D-RUNG-14: card rung at the REGULAR floor -- these ship
-              // unbolded on purpose, and regular 10 px does not render at
-              // model accuracy the way bold does.
-              opacity: root.captionAlphaProse
-              font.family: root.fontFamily
-              font.pixelSize: Style.font.caption
-              horizontalAlignment: Text.AlignHCenter
-              elide: Text.ElideMiddle
-
-              MouseArea {
-                anchors.fill: parent
-                cursorShape: Qt.PointingHandCursor
-                onClicked: root.copyCommand(root.copy.unconfiguredCommand)
-              }
-            }
           }
         }
 

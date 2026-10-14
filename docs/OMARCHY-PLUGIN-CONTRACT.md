@@ -240,10 +240,127 @@ hosts, because `Model.ownWriteInForce` holds the local override only while
 the host still reports the PRE-write value and drops it on any other value
 -- the echo of our own write included -- after which `settings` is the host's
 copy carrying the same values; the echo path was built idempotent for
-exactly this. What is NOT yet true: `scripts/dev-harness/shell.qml` models
-the one-write-behind host only (its line ~759), so the own-write scenarios
-have never run against an echoing host; that is D-HOST-4 on the board, due
-when a release carrying #15082 is on this machine. The section above stays
+exactly this. Round 5 of D-SINK-19 (R16, 2026-10-12) adds a second SHAPE of
+own write and it behaves the same way: before the first state load (round
+6) and while a state write is parked, in flight or failed the logo toggle
+writes `{ showLogos }` alone with the entry's source keys as the host
+PUBLISHES them (patch-only; `ARCHITECTURE-SOURCES.md` 4.3; on this
+one-write-behind host that copy can be one write old, which is D-SINK-20), and its record is made against the host value exactly as
+the full write's is, so under the lagging host the override holds
+`showLogos` until the host catches up and lapses on the echo to the same
+value, and under the echoing host it is recorded against the already-echoed
+value and is inert rather than lapsed -- `inForce true` there is not a
+stale override (lane A's DQ-U4). The node driver asserts both shapes for
+both hosts (`R16 (lag host)` / `(echo host)`: `the patch-only write is
+recognised as our own`, lane-key-u1); the echoing host is still modelled,
+not run (D-HOST-4 below) [rounds 7 and 8: modelled in the harness too, by
+an echo lever on the fake host; no real host carrying #15082 has run it]. Round 6 pins the other half of rule 9 in that
+writer: the funnel composes the owned patch from `settings` -- the host's
+publish with our own last write laid over it -- and never from
+`hostSettings`, the bare publish. On this host the difference is one write,
+and composed from the publish the key mirror's heal after a toggle carried
+the PRE-toggle `showLogos` back to disk (D-LOGO-2's shape); that one-token
+mutation read node 2,162 / 0 and live 64 / 0 on lane-key-u3, and on
+lane-key-v1 it reddens 7 node checks, among them a structural pin over the
+call and the driver case `a patch-only toggle on a failed disk, then the key
+mirror's heal write once the disk recovers -- showLogos stays as toggled`
+under the lagging host (lane A, 2026-10-12). On the echoing host the two
+are equal, so the mutation reddens no echo-host case (all seven are the
+structural pin or lag-host cases); the code is right under both hosts
+without knowing which one it meets. Round 7 (R17, 2026-10-12) found the one
+place where that was NOT true, and it is rule 9's exact hazard: an `epgUrl`
+left on the entry while no source is active (R12) survived a switch only
+because THIS host republished the pre-strip entry one write late and the
+next reconcile consumed it. On the echoing host the key mirror's write
+stripped it and the host published the stripped entry at once, so nothing
+was left to adopt -- the plugin had been depending on the host's lag for its
+own state. The fix does not consult the host: the switch and the probe
+commit land a pending input on the record becoming active in the same turn
+(`adoptPendingEpg`), and every owned write leaves an input nothing has
+consumed on the entry (`Model.retiredInputsToKeep`). Round 8 (R18,
+2026-10-12) found the other side of the same coin on THIS host: a write the
+host answers `false` to must not re-trigger anything. A refused
+`playlistUrl` beside a pending `epgUrl`: the plugin's heal stripped the
+refused value from the STORED entry, this host kept publishing the
+pre-write entry, every reconcile asked for the strip again, the host
+answered `false` (nothing changed) -- and the plugin still re-recorded its
+own write, which re-evaluated `settings` and ran reconcile again, about
+3,000 times a second (the seventh review, live on the lagging fake host;
+`false` is "already stored", as the section above says). The fix is still
+not a wait for the echo. The funnel estimates what the host STORES from
+its own record of its last write while the publish has not moved, and from
+the publish once it has (`entryWriteNeeded` in model/settings.mjs, deleted
+2026-10-13 by R22e after R19a withdrew the skip; the host's own
+`JSON.stringify` comparison at `shell.qml:1094` for a layout entry and
+`:1107` for a plugins entry, read on this machine), makes no write the host
+would answer `false` to, and re-records its own write only when the record
+differs (`Model.sameOwnWrite`). On the echoing host the estimate is the
+echo itself, so the same code settles there after one reconcile; the echo
+path stays idempotent. [Round 9 (R19a, 2026-10-12): the estimate is
+WITHDRAWN, and the reason belongs in this section. On THIS host the publish
+recorded right after a write is the PRE-write entry, and an `omarchy bar
+set` that restores that entry exactly (`setBarWidget` assigns in place)
+publishes the write and then the restored entry -- A -> B -> A. The
+plugin's record of its last write then compared equal to the publish again
+although the host now stored A, and the funnel skipped writes the host
+would have stored: a logo OFF, the strip of a re-set refused credential,
+the strip of a re-set guide URL (the eighth review, both lenses, live on
+the lagging fake host; clean on the echoing one). So a plugin cannot
+estimate what this host STORES from its own last write paired with a
+publish, because a publish can recur. The host's own answer is the only
+dirty check: every owned write is handed to `updateEntryInline`, `false`
+from a writable entry is "already stored" and success, and the cycle
+settles because the own-write record is not reassigned when it is equal
+(`Model.sameOwnWrite`) -- which needs no echo and is the same code under
+both hosts. A write the host answers `false` to costs one comparison on
+the host and re-triggers nothing (lane A, lane-key-y1: key-scenario K's 5 s
+windows read 0 entry writes and 0 CPU ticks on both host shapes, and Y1-Y3
+read the re-set taken each time).] [Round 10 (R20c, 2026-10-12): the same
+lesson for what a patch-only write CARRIES. R16's logo write while a state
+write is outstanding kept every retired key the host PUBLISHES, and on
+THIS host the publish is one write behind, so it carried back a URL the
+plugin had just stripped -- a refused credential included, which then
+stayed in `shell.json` for the session (D-SINK-20, re-graded P2 by the
+ninth review). What the host publishes is evidence of what the host had a
+write ago, not of whether the value is stored anywhere else, and neither is
+whether an own-write override is in force -- the narrowing that strips the
+only copy of an input whose state write failed. The decision now consults
+the plugin's own disk instead: `patchInputsToKeep` keeps a retired
+key only when it is a valid input the state the last LANDED save
+serialised does not hold. Under the echoing host the publish is current
+and the answer is the same, so the code still does not need to know which
+host it meets. And the funnel's decisions are now driven in node through
+`Service.qml`'s own functions (`tests/service-harness.js`) under both host
+shapes: two consecutive in-app toggles on this host each take, which a skip
+keyed on the stale publish broke without any check noticing in round 9
+(lane A, lane-key-z1; key-scenario Y4 live).] [Round 11 (R21, 2026-10-13;
+the product owner dropped the `omarchy bar set` URL route): the question a
+patch-only write asks is no longer about values at all, which removes the
+last place this host's lag reached the retired keys. Before the one
+migration's state write has landed, every owned write keeps every retired
+key the entry carries; after it, none (`Model.retiredInputsToKeep` over the
+landed marker `entryMigrated`), so a stale publish can carry nothing back.
+patchInputsToKeep is withdrawn. What still depends on this host's lag is
+the refusal's report: after the plugin strips a refused value, this host
+goes on publishing it until somebody else writes, and the service's
+in-memory record of what it has handled (`Model.entryInputsSeenAfter`)
+is what keeps that stale publish from being reported again; under the
+echoing host it is reported once and the publish is already clean (node
+`R21e (lag host)` / `(echo host)`; key-scenario X1-X6, X6 on the echo
+lever).] What is NOT yet true
+[amended 2026-10-12, round 7]: `scripts/dev-harness/shell.qml` modelled the
+one-write-behind host only until round 7; it now has an echo lever --
+`run.sh --host echo` makes `syncPluginApis` publish `shellConfig.bar` at
+once, with no intermediate stale publish (a fake that published the old bar
+first would hand the plugin this host's accidental rescue on the echoing
+host too, more forgiving than either real host), and `ipc hostEntry`
+reports `host` -- and key-scenario U5-U7 run on it (lane A, lane-key-w1:
+U6 red on `--baseline lane-key-v2`) [round 8: and K2, K3, the loop window
+on the echoing host -- K3 red on `--baseline lane-key-w2` with 19,943
+entry writes in 5 s; lane A, lane-key-x1]. The other own-write scenarios (E6, the
+key-mirror segments, the L toggle) have not run both ways; that, and
+re-verifying this section on the first release carrying #15082, is what
+remains of D-HOST-4 on the board. The section above stays
 as the verified behaviour of every Omarchy up to and including 4.0.4.
 
 ## Verified host renderers for the strings the plugin hands over (2026-10-02)
@@ -536,3 +653,207 @@ not provide a clipboard verb of its own; `Quickshell.clipboardText`
 (quickshell-core.qmltypes) is the same `QClipboard::text()` read in the same
 process and is not used, and the plugin's own unreachable `clipboardText()`
 in `Guide.qml` was deleted at 51866a3.
+
+## Verified host behavior: `updateEntryInline` stores every key it is handed, declared or not (verified 2026-10-11)
+
+Why it matters. D-SINK-19 mirrors the active source's key into the bar entry
+as `sourceKey`, a key `manifest.json` deliberately does not declare (declaring
+it would offer the plugin's own mirror as a user setting with help text). The
+recovery path `Model.adoptActiveSource` step 3 -- an install that lost
+`state.json`'s pointer but still has its sources finds its way back through
+the entry -- rests on the host KEEPING a key it was never told about, and that
+premise had been read off the host's source and never measured.
+
+Measured by running the host's OWN function, not a reimplementation of it:
+`shell.qml:1078-1117` (`/usr/share/omarchy/shell/shell.qml`, Omarchy 4.0.4-1,
+sha256 prefix `4a4b7694e5b9e0bd`) copied by line range into node with stubs
+for `Util.canonicalWidgetId`, `Util.isPlainObject` and `persistShellConfig`,
+over three stored configurations (the script, `host-undeclared-key.js`, and
+its output sit in the docs lane's scratch; re-run it with
+`sed -n 1078,1117p /usr/share/omarchy/shell/shell.qml > host-updateEntryInline.js && node host-undeclared-key.js`
+after checking the function still ends at line 1117):
+
+- **A. The entry is in `bar.layout` only** (the shape `omarchy plugin enable`
+  writes). Handed `{id, sourceKey, showLogos, refreshMinutes}` over a stored
+  entry that carried `playlistUrl`, the stored entry became exactly
+  `{id, sourceKey, showLogos, refreshMinutes}`: the undeclared key is kept, and
+  the key NOT handed over (`playlistUrl`) is GONE rather than emptied. The
+  code is `var next = { id: stripped }; for (var k in settings) if (k !== "id")
+  next[k] = settings[k]` (`shell.qml:1092-1093`); no schema is consulted. This
+  is what lets `Model.entryWith` remove the retired URL keys by omission.
+- **B. The same id is ALSO in the top-level `plugins[]` list.** Only the
+  `bar.layout` copy is rewritten -- the `plugins[]` loop runs only `if
+  (!foundInLayout)` (`shell.qml:1102`) -- and a `plugins[]` copy keeps whatever
+  it had, `playlistUrl` included. The plugin never READS that copy (`barConfig`
+  is built from `bar`), but no write of ours would remove a credential from
+  it. On this machine `plugins` is `[]`, and `omarchy plugin enable` writes
+  `{id}` objects into `bar.layout` (`services/PluginRegistry.qml:526`). Whether
+  any supported command fills `plugins[]` is UNVERIFIED.
+- **C. Handing back exactly what is stored** returns `false` and persists
+  nothing (the one-write-behind section above; `shell.qml:1114`).
+
+Two neighbouring facts, read rather than run:
+
+- `omarchy bar set <id> <key> <value>` writes ANY key. `setBarWidget`
+  (`services/PluginRegistry.qml:342-380`) finds the entry and does
+  `entry[String(key)] = value`; nothing checks the key against the manifest
+  schema, so a user can set `sourceKey` by hand (the plugin ignores a value
+  naming none of their records, and consults it at all only when `state.json`
+  names no source), and `omarchy bar set ... playlistUrl ""` stores an empty
+  string, which the plugin treats as a no-op since D-SINK-19. [Round 11,
+  2026-10-13: and since R21 a NON-empty `playlistUrl` or `epgUrl` the host
+  stores this way is refused once the migration has landed -- the host still
+  writes it, because it checks no schema, and the plugin's next owned write
+  removes it. Both keys are still declared in `manifest.json`, so the host
+  still offers them; that file is not the documents lane's.] [Round 13,
+  2026-10-13, measured by lane A on omarchy 4.0.4-1 and re-read by the
+  documents lane on 2026-10-14; nothing changed. "Offers" is generous: no host
+  file RENDERS `schema` today. An undeclared key on a bar entry still reaches
+  a third-party plugin's `barConfig` -- `shell.qml` 326-328, `function
+  publicBarConfig() { return JSON.parse(JSON.stringify(shell.barConfig ||
+  {})) }`, a deep clone filtered by nothing, handed out by `barConfigFor`
+  (330-333), and `plugins/bar/BarModel.js` `entrySettings` (10-17) copies
+  every key but `id`. `omarchy bar set` stores an undeclared key: `cmd_set` in
+  `/usr/share/omarchy/bin/omarchy-bar` (333-361) passes it to `omarchy-shell
+  shell setBarWidget`, and `services/PluginRegistry.qml` (342-379) checks the
+  location and that the entry is an object, then `entry[String(key)] = value`
+  (379). The manifest's `defaults` never reach an entry (a put entry is `{
+  id: key }`, PluginRegistry.qml 526), and the only host reads of `schema` and
+  `defaults` are the registration at shell.qml 1406-1408. `sourceKey`, which
+  the manifest does not declare, is written and read back through `barConfig`
+  today. So the migration does not depend on the manifest declaring
+  `playlistUrl` or `epgUrl`; whether to stop declaring them is the lead's.]
+- `omarchy plugin disable` removes the entry and everything on it, the mirror
+  included (`QA.md` TC-INST-05); the plugin's own `state.json` still names the
+  active source, so re-enabling does not need the URL again.
+
+## Quickshell `FileView` on this machine: what a reload means (D-SRC-15, measured 2026-10-11)
+
+Not the Omarchy plugin API but the runtime every plugin's `FileView` sits on
+(quickshell 0.3.1-1, Qt 6.11.2 as installed; re-measure on a Quickshell
+update). Measured by the D-SINK-19 code lane with a purpose-built FileView
+probe run by quickshell under a nested headless cage (lane A's
+`fv/probe.qml` + `run-probe.sh`, in the lane's scratch directory, not in the
+tree) and by the harness lane's key scenario (`scripts/dev-harness/
+key-scenario.sh`, segments D and N). The service's `stateFile` is a FileView
+with `watchChanges: true`, `atomicWrites: true` and `onFileChanged: reload()`,
+and these four facts are what R9-R11 (`ARCHITECTURE-SOURCES.md`, round 3)
+are built on [a fifth, about `loadFailed`, was added on 2026-10-13 and is
+what R22a (round 12) is built on; a sixth, about the watch itself, the same
+day by round 13's R23g, and it is disputed]:
+
+- **`saved` fires once per `setText` -- for two back-to-back calls, and NOT
+  for a burst (corrected 2026-10-12, round 4).** Two `setText` calls back to
+  back delivered `saved, fileChanged, saved`; a third delivered `fileChanged,
+  saved` (probe summary: `saved=3 failed=0 fileChanged=4 loaded=3`). So
+  `setText` returning says nothing about the file. But a counter of `setText`
+  calls is NOT the instrument either: lane A's 26-write probe under cage
+  (2026-10-12) raised 25 `saved` + 1 `saveFailed`, `textChanged -> Tn`
+  preceded every `saved #n text()=Tn`, after a burst of twenty `text()` read
+  T19 while T20 was pending, a failed write read its own text and then
+  `saveFailed`, and the last content asked for was always written last; the
+  service under the same conditions coalesced 20 `setText` into 14 `saved`
+  (15 on lane-key-s2), so a signal counter stuck at 5-6 for the rest of the
+  session (and on lane-key-s2 read every later foreign reload as "save in
+  flight"). "A write is in flight" is therefore decided by CONTENT
+  (`Model.stateSaveLanded`: the view's text IS the last text asked for;
+  `stateSavesInFlight` is 0 or 1 and keeps its name for the harness), and an
+  earlier write's `saved` changes nothing. Whether a replaced queued write can
+  ever be the LAST content is unmeasured (the probe and both live runs say
+  the last content is always written; a Quickshell source read would settle
+  it).
+- **A bare chmod reloads, mode changed or not.** A chmod 0644 -> 0600 AND a
+  chmod 0600 -> 0600 each delivered `fileChanged` followed by `loaded` with
+  the file's text. That is inotify `IN_ATTRIB`, and it is the trigger of
+  D-SRC-15: the helper's start-up `state init` chmodded the existing
+  `state.json`, the FileView reloaded the PRE-adoption text while the first
+  save was still parked, and the parked save then wrote the loss. It is also
+  why the helper leaving a 0600 file alone (R10) is belt and braces and not
+  the fix.
+- **The view's own atomic write fires `fileChanged` too.** In the probe run
+  no `loaded` followed it, while the service's `recentSaves` comment assumes
+  one can; which it is was not settled (lane A's DQ-A7) and nothing depends
+  on it, because `Model.reloadDisposition` ignores an own write by its text and a
+  parked or in-flight save by its flag [corrected 2026-10-12, round 7: this
+  said "count"; since R13 the in-flight input is 0 or 1, set when a write is
+  asked for and cleared by content (`Model.stateSaveLanded`), so it is a flag
+  that keeps a counter's name (OQ-C5)]. [Settled 2026-10-13, D-SINK-19 round
+  13 (R23g), lane A: BOTH. A lone own save at idle raised `fileChanged` and
+  `saved` and delivered no load in 16 of 16 sequences (and none for a burst of
+  2-3 own saves); an own save with an external write queued right behind it,
+  or the real service's own save under six busy loops on four cores,
+  delivered a load -- under load carrying the view's own text. The echo is
+  timing-dependent, and the node harness now runs both ways (the sixth fact
+  below).]
+- **A FileView loaded over a MISSING path does not see the file being
+  created by another process.** Over a fresh install (no state directory, no
+  file) the helper's `state init` creates `state.json` under the parked
+  adoption and no reload fires: `stateReloadsIgnored` reads 0 across the
+  whole fresh start and the key scenario's N1-N4 are green on the very tree
+  that drops D2. Whether the watch is installed by the first successful load
+  or by the first own write is unmeasured (lane B's DQ-B8); a reader of
+  `watchChanges` should not assume a missing file is watched.
+- **`loadFailed`'s error does not tell a missing file from an unreadable
+  directory (D-SINK-19 round 12, measured 2026-10-13).** Lane A's probe on
+  lane-key-n1: one FileView per case, quickshell 0.3.1-1 and Qt 6.11.2,
+  under a nested headless cage on a private D-Bus with HOME and the XDG
+  directories redirected to a scratch tree (`lane-n1/fvprobe/qs.log` in the
+  session's scratch directory, read by the documents lane). The argument is
+  `qs::io::FileViewError` (in the same qmltypes file): Success 0, Unknown 1,
+  FileNotFound 2, PermissionDenied 3, NotAFile 4.
+
+  | At the path | Reported |
+  |---|---|
+  | nothing; a missing parent; a dangling symlink | `loadFailed` 2 |
+  | a file of mode 0000 or 0200 | `loadFailed` 3 |
+  | a directory; a FIFO | `loadFailed` 4 |
+  | a file inside a directory of mode 0000 or 0600 | `loadFailed` 2, the same as nothing there |
+  | an empty file; a file of garbage | `loaded` (text length 0; the garbage) |
+
+  After the modes were restored the 0000 file raised `fileChanged` and
+  loaded, and a missing file once created did the same; the 0000 DIRECTORY
+  raised no `fileChanged` (`inotify_add_watch ... failed: (Permission
+  denied)` in the log) until an explicit `reload()`. So a plugin cannot
+  learn from its FileView whether a file it failed to read exists: "file
+  not found" is also what a directory it cannot search says, and treating it
+  as a fresh install and saving is how the round-11 data-loss lens saw a
+  migrated `state.json` erased. This plugin asks its helper instead (`state
+  init` reports `found` from an `lstat` made before it repairs any mode;
+  `ARCHITECTURE-SOURCES.md` round-12 rulings), and the node suite reads the
+  enum from the installed qmltypes so a reordering on a Quickshell update is
+  a red gate rather than a silent misreading.
+- **The watch survived everything lane A did to it (D-SINK-19 round 13,
+  R23g, measured 2026-10-13) -- and that contradicts three earlier
+  measurements.** `scripts/dev-harness/spikes/filewatch/measure.sh` runs one
+  FileView declared as `stateFile` is in a nested headless cage on a private
+  D-Bus with no service directories, through 16 sequences of own saves,
+  helper renames (`state favorite add`), external in-place writes (`>`:
+  truncate, empty, garbage, good content), chmods, explicit reloads and
+  restarts, each on a fresh shell over a fresh file, 1.5 s a step, at load
+  1.31; what it printed is kept beside it as `RESULT-2026-10-13.txt`, so it is
+  re-runnable. Every external change -- an in-place write, a helper rename, a
+  chmod -- raised `fileChanged` and a load; a restart gave a first load; and
+  in every sequence an in-place write after any number of own saves, helper
+  renames, chmods or a restart was still seen. Lane A drove the real
+  `Service.qml` the same way through the dev harness (`svcwatch.sh`, session
+  scratch, not committed), idle and under load, with the same result. The
+  round-9 data-loss lens (D-SRC-19), the round-12 live lens (a helper `state
+  source add`, its reload counter unmoved) and the round-12 data-loss lens
+  (in-place damage after the session's first own save, no reload) each saw
+  the opposite; their rigs were lost when `/tmp` was cleared by a reboot, so
+  what differed is not known. Until it is re-measured, a plugin should not
+  rely on either answer for a change made after its own first save or by a
+  rename: this plugin's no-write mode beginning in that window is marked
+  UNVERIFIED (`UX-SOURCES.md` 5.10, `ARCHITECTURE-SOURCES.md` round-13
+  rulings).
+
+`saveFailed` exists (`/usr/lib/qt6/qml/Quickshell/Io/quickshell-io.qmltypes:470`)
+and its argument is an enum, never a path; until round 3 the service
+connected to neither it nor `saved`, so a refused write was silent and the
+entry mirror went out anyway (R11 is the gate). Since round 4 (R13, lane-key-t1)
+`saveFailed` clears the in-flight flag by content, logs `state.json could not
+be written (error N)` on every failure and emits
+`sourcesPersistFailed("state_write_failed")` once per failure episode; the
+key scenario's F segment drives it with the state directory 0500 under a
+running shell (F4: logged with no `://` in the line, signalled exactly once;
+lane B on lane-key-t2, 2026-10-12).

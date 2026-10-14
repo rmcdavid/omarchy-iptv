@@ -629,13 +629,18 @@ class StateSourceCommandTest(unittest.TestCase):
 
 class SettingOwnedWarningTest(unittest.TestCase):
     """D-SRC-11: `state source update` must not let a user believe a write
-    stuck when the running shell is about to undo it.
+    stuck when the running shell is about to undo it -- as the shell DID
+    before D-SINK-19 (measured live on 2026-10-03: exit 0, "ok": true, record
+    "" immediately afterwards), because the settings were the authority for
+    the active source and reconcile rewrote the record from them.
 
-    The helper writes the source record and the record is the FOLLOWER: the
-    settings are the authority for the active source and reconcile rewrites the
-    active record's `epgUrl` from the plugin's `epgUrl` setting every time it
-    re-reads state.json -- which the CLI's own write causes. Measured live on
-    2026-10-03: exit 0, "ok": true, record "" immediately afterwards.
+    D-SINK-19 overturned that: the record is the only store, and since round
+    11 (R21) the bar entry's URL settings are read once, by the migration, and
+    refused after it. The warning stays, for
+    what is still true -- the shell reads the file at its next reload unless
+    it has a write of its own in flight (D-SRC-15, R9), and `--url` re-keys
+    the record -- and these tests pin the shape (both channels, the setting
+    named, the Sources screen named, no URL), not the old sentence.
 
     These run the SHIPPING VERB through helper.main and read what a user would
     read, on stderr and in the payload. Grepping the --help text for the word

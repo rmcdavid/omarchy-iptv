@@ -104,12 +104,13 @@ TRANSFORM_RULES = [
     },
     {
         "id": "T2-clipboard-shim",
-        "why": "One Quickshell singleton call is reachable from an ordinary "
-               "function (the wl-copy write). Not an accessibility sink; it "
-               "would fail to resolve outside the shell. A local object "
-               "stands in. The clipboard READ this shim also stood in for "
-               "(T4) is gone with D-CLIP-1: nothing in the guide asks Qt for "
-               "the clipboard any more.",
+        "why": "No Quickshell singleton call is reachable from the guide any "
+               "more: the wl-copy write it stood in for (T3) went with the "
+               "`omarchy bar set` command it copied (D-SINK-19 round 11, "
+               "R21), and the clipboard READ (T4) with D-CLIP-1. The local "
+               "object is kept as the copy's one ADDED element, so L4 -- an "
+               "element only the copy has may declare no accessibility -- "
+               "still grades something real; it is never called.",
         "before": [
             "Item {",
             "  id: root",
@@ -123,12 +124,6 @@ TRANSFORM_RULES = [
             "    function execDetached(argv) { }",
             "  }",
         ],
-    },
-    {
-        "id": "T3-execDetached",
-        "why": "Clipboard write. Not an accessibility sink.",
-        "before": ["    Quickshell.execDetached([\"wl-copy\", String(text)])"],
-        "after": ["    probeShim.execDetached([\"wl-copy\", String(text)])"],
     },
     {
         "id": "T5-window",

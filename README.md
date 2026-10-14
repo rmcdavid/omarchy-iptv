@@ -42,17 +42,26 @@ omarchy plugin add https://github.com/rmcdavid/omarchy-iptv.git --enable
 ```
 
 Then click the TV icon that appears in your bar — left click opens the guide —
-and it starts on a form that asks for your playlist. **Add a paid
-provider there, not on the command line.** The form masks what you type, and
-nothing you enter reaches your shell history. `Add Xtream login` takes the
-server, username and password as separate fields.
+and it starts on a form that asks for your playlist. **That form is the way
+to add a playlist**: type or paste its URL or path, optionally a guide-data
+(EPG) URL, and press `Enter`. The form masks what you type, and nothing you
+enter reaches your shell history. `Add Xtream login` takes the server,
+username and password as separate fields. To try the plugin with a free,
+public list, paste one into the same form, for example
+`https://iptv-org.github.io/iptv/countries/us.m3u`. More sources are added,
+switched, edited and removed on the Sources screen (`o` in the guide; see
+**Sources** below).
 
-If you want to point it at a free, public playlist to try it out, that has no
-credentials in it and a command line is fine:
-
-```bash
-omarchy bar set io.github.rmcdavid.iptv playlistUrl "https://iptv-org.github.io/iptv/countries/us.m3u"
-```
+**Setting a playlist from the command line is gone.** Earlier versions took
+`omarchy bar set io.github.rmcdavid.iptv playlistUrl "<url>"` (and `epgUrl`)
+as a way to hand the plugin a playlist. This version does not read either
+setting any more, with one exception: if you set one up that way on 0.13.6 or
+earlier, the first shell start on this version moves it into your Sources
+list once, makes it the active source, and takes the URL out of the shell's
+settings file. You do not need to do anything, and you do not need your URL
+again. After that, a `playlistUrl` or `epgUrl` set with `omarchy bar set` is
+ignored and removed, and a notification says so — see **Bar setting
+ignored** under Troubleshooting.
 
 The plugin id is `io.github.rmcdavid.iptv`. Enabling it places the bar widget
 in the right section (`omarchy bar move io.github.rmcdavid.iptv --section center`
@@ -86,18 +95,94 @@ one-line copies you make yourself):
 ## Settings
 
 Settings live inline on the widget's entry in `~/.config/omarchy/shell.json`
-and are edited with `omarchy bar set io.github.rmcdavid.iptv <key> <value>`.
+and are edited with `omarchy bar set io.github.rmcdavid.iptv <key> <value>`
+— every setting in the table below except the two URLs, which are not
+settings any more: your playlists and their guide-data URLs are kept in
+Sources, and added or changed only in the guide.
 The guide, the bar widget, and the service all read that one entry. Playlist
-and guide-data URLs from paid providers embed credentials, and they rest in
-three files, readable only by you: that `shell.json` entry, the channel cache,
-and `~/.local/state/omarchy-iptv/state.json`, which keeps the Sources history
-and each source's URLs. The last two are the plugin's own files and it creates
-them mode 0600. `shell.json` is not — it belongs to the shell, it can arrive
-readable by everyone on the machine, and the plugin makes it private before it
-puts a URL in it, which is the next paragraph. They are never shown or logged
-beyond their host name. Two sentences in this file used to say two files,
-which mattered because the third is the one you might think safe to copy into
-a dotfiles repository.
+and guide-data URLs from paid providers embed credentials. Where they rest,
+counted: **two files, both the plugin's own, readable only by you** —
+`~/.local/state/omarchy-iptv/state.json`, which keeps your source list, each
+source's URLs and which source is active, and the channel cache under
+`~/.cache/omarchy-iptv/sources/<key>/`, whose `channels.json` carries the
+stream addresses — each created mode 0600 inside a directory only you can
+enter. They are never shown or logged beyond their host name. The shell's
+`shell.json` is **no longer one of them**. Up to and including 0.13.6 the
+active source was identified by its URL on that entry, so the count was three
+and the third was a file the plugin does not own; now the entry carries a short
+code naming the active source, and the plugin never writes a URL into that
+file. A URL still passes through it in two cases, both covered under the next
+heading: the one an install updated from 0.13.6 or earlier still has in it
+until the first shell start on this version moves it into Sources and takes it
+out, and one you put there yourself with `omarchy bar set`, which the plugin
+does not read and removes on its next write. This paragraph has been wrong before — two
+sentences once said two files when there were three — so the count here is
+re-derived for this version rather than copied: two the plugin owns and keeps
+a URL in, and one it does not own that a URL only passes through.
+
+**What the plugin stores, and three things to know about it.** Moving your URL
+out of the shell's settings file costs three things, and none of them is
+obvious when it happens to you:
+
+- **A URL set on the command line is not read; the one you already had is
+  moved, once.** The first shell start on this version reads the
+  `playlistUrl` and `epgUrl` an earlier version kept on the widget's entry,
+  adds that playlist to your sources (or finds it there), makes it the
+  active one, attaches the guide-data URL to it, and records in the plugin's
+  own file that this has been done. Only once that file has been written,
+  and the write confirmed back to the plugin, are the two URLs taken off the
+  entry. If the write fails — `~/.local/state` not writable, a full disk —
+  your URLs are left where they were rather than taken away (turning channel
+  logos on or off meanwhile leaves them too), the source is in effect for
+  this session only, the shell's journal says `state.json could not be
+  written`, and the next shell start moves them again. A guide-data URL with
+  no active source to attach it to is not kept anywhere: there is nothing for
+  it to guide, so it is removed with a notification saying to add the source with
+  its EPG URL in Sources. From then on the plugin does not read either setting
+  at all. Set one with `omarchy bar set` and the plugin adds nothing, switches
+  nothing and changes nothing about the source you are watching: it removes
+  the value from the entry on its next write — usually at once — and shows one
+  notification, `Bar setting ignored`, saying the setting is no longer read
+  and to add or switch sources in the guide's Sources screen. The
+  notification names the setting, never the URL; setting the same value again
+  in the same session does not notify again, and a value still there at the
+  next shell start is reported once more and removed. Spaces around a value
+  make no difference. Use the Sources screen instead; it is the only place a
+  source is added or changed. Builds of this change that never shipped kept
+  reading the command line, and ten rounds of review kept finding ways for a
+  URL set there to be lost or to come back; the owner withdrew the route
+  rather than add an eleventh. The move, the refusal and the notification
+  are exercised on every commit's test tree under both kinds of Omarchy host
+  (today's, and one carrying the settings fix awaiting review upstream), and
+  live, under a headless compositor, by the harness scenario on the `dev`
+  branch (112 checks, 2026-10-14).
+- **Going back to an older version makes the plugin look unconfigured.** An
+  older build looks for the URL on the widget's entry, does not find one, and
+  says you have no playlist. Your sources are all still in `state.json`: open
+  the guide, and on the form it shows you follow the `Saved sources` link and
+  pick one. You do not need to find your URL again. It looks like the update
+  ate your setup only because the conversion happened silently, with nothing
+  to confirm and nothing for you to do — that is the same invisibility working
+  for you on the way up and against you on the way down. Update again and the
+  source you picked while on the older version is the one that comes back:
+  the older build does not keep this version's record that the move has been
+  done, so the first start after updating moves the URL the older build put
+  on the entry once more, and takes it out again.
+- **Your source list now lives in one file only.** `state.json` is the only
+  copy. Before this version the URL in `shell.json` was an accidental second
+  copy, so deleting the state file left the plugin able to rebuild the active
+  source from it on the next start; now there is nothing to rebuild from, and
+  the code on the entry cannot be turned back into a URL. Delete or lose
+  `state.json` and you have lost the list, and you add your sources again by
+  hand. If you decide to keep a copy of that file, remember what is in it: your
+  provider URLs, with your username and password inside them. Treat the copy
+  the way you would treat the password.
+
+The code on the entry is made from the URL by a one-way hash. It cannot be
+turned back into the URL; what it can do is confirm a guess — someone who can
+read the file and already holds a candidate URL can hash it and compare. That
+is far less than the URL itself and it is not nothing, which is why the
+permission change in the next paragraph stays.
 
 **One permission the plugin changes on a file that is not its own.**
 `shell.json` is the shell's settings file, shared by every bar widget you
@@ -105,10 +190,15 @@ have, and it does not always arrive private. The copy Omarchy ships is
 readable by everyone on the machine; a `shell.json` created from it keeps
 whatever your umask gives it, which is usually readable by everyone too, and
 rewriting a file that already exists leaves its permissions alone — so a
-machine that started out readable stays readable. Your provider URL goes into
-that file, so before the plugin writes one it takes group and other access
-away from that single file: on an ordinary 644 file that leaves it 600, which
-is what `chmod 600 ~/.config/omarchy/shell.json` would do. Your own access is
+machine that started out readable stays readable. The plugin no longer puts
+your provider URL in that file, but one can still get in: an install updated
+from 0.13.6 or earlier has one in it until the first shell start on this
+version moves it into Sources and takes it out, and you can still put one there
+yourself with `omarchy bar set`, which the plugin does not read and removes on
+its next write. So the plugin still takes group and other access away from that single
+file — at every shell start, and again after each of its own writes: on an
+ordinary 644 file that leaves it 600, which is what
+`chmod 600 ~/.config/omarchy/shell.json` would do. Your own access is
 not changed.
 If the file is already private, nothing is changed and nothing is said.
 Nothing else is touched: not `~/.config` or `~/.config/omarchy`, which are
@@ -116,9 +206,14 @@ shared with everything on your system and are not the plugin's business, not
 any other file, and not one byte inside `shell.json`. A file only you can read
 is enough on its own, whatever the directories around it allow.
 If it cannot be made private — the file belongs to another account, or it is a
-symlink, or the permissions will not change — then the source is **not saved**
-and the guide says `Settings file is readable by other users`, with the command
-to run yourself. Losing the setting is the better of the two outcomes. This is
+symlink, or the permissions will not change — the plugin will not write a URL
+into it, and says `Settings file could not be made private`, with the command
+to run yourself. Since this version's own writes carry no URL, nothing this
+version does can produce that message any more; the check still runs, and the
+refusal is kept for the write that would. What the check cannot cover either
+way is `omarchy bar set`: that write is the shell's, not the plugin's, and it
+lands whatever the permissions are, for as long as it takes the plugin to
+notice and remove it. This is
 not a one-off repair: the file can be recreated readable again later, by
 `omarchy-refresh-config` among other things, and nothing tells a plugin when
 that happens, so the check runs at every shell start and again before each
@@ -129,8 +224,11 @@ One place they can escape that, worth knowing, and one that used to:
 
 - **Your shell history.** Setting a credentialed URL with `omarchy bar set`
   writes the whole thing into `~/.bash_history` or `~/.zsh_history`, where it
-  stays until you remove it. Use the in-app form instead — that is what it is
-  for. If you have already done it, `history -d` the line and check the file.
+  stays until you remove it — and this version does not even read it, so it
+  buys you nothing. Use the in-app form, which is the only way to add a source
+  now. If you did it on an earlier version, the URL itself has been moved into
+  Sources, but the history line is still there: `history -d` it and check the
+  file.
 - **The process list, no longer.** Earlier releases passed that URL to the
   helper as a command-line argument when fetching your playlist or your guide
   data, and a command line is readable by every account on the machine from
@@ -148,12 +246,15 @@ One place they can escape that, worth knowing, and one that used to:
   carries it. That is true of all three fetches that take a URL -- your
   playlist, your guide data, and the check the Sources screen makes before it
   accepts a source. Nothing else on the plugin's side writes
-  either URL anywhere but the three files above.
+  either URL anywhere but the two files of its own named above; the shell's
+  settings file gets one only from your own `omarchy bar set`, never from the
+  plugin, and loses it again on the plugin's next write.
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `playlistUrl` | string | `""` | `http(s)://` URL or absolute path of the M3U/M3U8 playlist |
-| `epgUrl` | string | `""` | XMLTV URL (plain or gzip), optional. If your playlist names its own guide and you leave this empty, that one is used and the Sources screen says so. Channels are matched by id and, when the ids do not agree, by name -- which is usually what happens, because playlists and guides rarely come from the same place |
+| `playlistUrl` | string | `""` | **Not a setting any more** (it is still among the plugin's declared settings, so `omarchy bar set` still offers it). Read once, at the first shell start on this version, to move a playlist an earlier version was given this way into Sources; after that a value set here adds nothing and switches nothing: it is removed from the entry on the plugin's next write, with one `Bar setting ignored` notification. Add, switch and remove playlists on the Sources screen |
+| `epgUrl` | string | `""` | **Not a setting any more**, on the same terms as `playlistUrl`: read once, at the first start on this version, and attached to the source that becomes active then (removed, with a `Bar setting removed` notification, when there is none); ignored and removed after that. A source's guide-data URL is set in the add or edit form on the Sources screen (`a`, `e`), and cleared there |
+| `sourceKey` | string | `""` | written by the plugin, not by you: the short code naming the active source, the one that names its cache directory under `~/.cache/omarchy-iptv/sources/`. The plugin's own `state.json` is the authority; this is a mirror it falls back to only when that file names no source, and a code that names none of your sources is ignored. It is not among the plugin's declared settings, so `omarchy bar set` shows no help for it, though it writes it like any other key |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
 | `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Options that would write your stream address somewhere durable are refused, and so is `--load-scripts`: the plugin's player loads no mpv scripts, because one of them publishes your playlist URL on the desktop message bus. `--demuxer-cache-unlink-files` is refused too, because with it turned off a copy of the stream can outlive the player at a path nobody listed, and `--cache-on-disk` is accepted with a warning in the guide's footer, because it writes the stream to your disk for as long as a channel plays. The one lever on how far back you can rewind is `--demuxer-max-back-bytes`, which is deliberately not refused: it costs RAM, about 35 to 80 MiB per minute of history at the bitrates this was measured on (4.7 to 10 Mbps), so thirty minutes is 1 to 2.4 GiB per player, and the plugin does not set it for you. `--tls-verify` is refused as well, because the player must check your provider's certificate; a provider whose certificate is self-signed or signed by a private CA is served by `--tls-ca-file=/path/to/ca.pem`, which is accepted -- see below |
 | `showChannelName` | boolean | `true` | show the channel name next to the TV glyph on horizontal bars |
@@ -377,8 +478,9 @@ You no longer need the terminal to configure a playlist. On first run the
 guide shows an input: type or paste (`Ctrl+V`) a playlist URL or absolute
 path, optionally an EPG URL, and press `Enter`. The guide fetches it and
 shows the result inline (`1,475 channels in 28 groups`, or the reason it
-failed). Nothing is saved if the fetch fails, and nothing is saved if the
-shell's settings file cannot be made private first (see Settings above).
+failed). Nothing is saved if the fetch fails. A source you add here is kept in
+the plugin's own file, not in the shell's settings file (Settings above says
+what changed and what it costs).
 
 Press `o` in list mode (or pick the `Sources` row at the bottom of the group
 column) to open the Sources screen: every playlist you have used, with its
@@ -432,8 +534,19 @@ label field: a dead key followed by a letter inserts the plain letter (an
 acute dead key then `e` types `e`), measured. Plain ASCII typing is
 unaffected, and pasting carries any character.
 
-`omarchy bar set ... playlistUrl` still works and shows up in the Sources
-list as well; the two stay in sync. Up to 50 sources are kept.
+The Sources screen is the only place a source is added, switched, edited or
+removed. `omarchy bar set ... playlistUrl` and `... epgUrl` no longer reach
+it: a playlist an earlier version was given that way is moved into this list
+once, at the first shell start on this version, and after that a value set
+that way is removed from the shell's settings file with a `Bar setting
+ignored` notification and changes nothing here (Settings above has the
+detail). A guide-data URL belongs to its source: set it in the add form, or
+later with `e`, and clear it there. If your playlist names its own guide and
+the source has none, that one is used and the Sources screen says so.
+Channels are matched to the guide by id and, when the ids do not agree, by
+name -- which is usually what happens, because playlists and guides rarely
+come from the same place. Up to 50 sources are kept, and this list is the
+only copy of them.
 
 One caveat if you keep **two lists from the same provider** — a full one and a
 filtered one, say. Favourites are shared across sources on purpose, and a
@@ -546,7 +659,14 @@ itself unavailable rather than half working.
   first start.
 - `~/.local/state/omarchy-iptv/state.json` : favorites, recents, last
   played, your saved searches, the groups you have hidden, the player
-  session record, and the Sources history including their URLs (mode 0600). Channels that failed to play are
+  session record, which source is active, and the Sources history including
+  their URLs (mode 0600). **This is the only copy of your source list and of
+  your provider URLs**: lose it and you add your sources again by hand, and a
+  copy you keep carries your provider username and password inside the URLs
+  (Settings above says what that means for a backup). If the file is there
+  but cannot be read, or is damaged, the plugin writes nothing to it until it
+  can be read again, rather than replacing it with an empty one (see
+  Troubleshooting). Channels that failed to play are
   **not** kept here: they belong to the source that carried them, and live in
   that source's cache directory below
 - `~/.cache/omarchy-iptv/sources/<source>/failed.json` : which channels of
@@ -575,19 +695,44 @@ One file in this list is not the plugin's:
   this plugin's entry along with every other widget's. The plugin writes its
   entry through the shell, the same way any widget does, and it changes one
   thing about the file itself — the permissions, so that only your account can
-  read it, because your playlist and guide-data URLs are stored there. Not the
-  contents beyond its own entry, and not the directories around it. See
-  Settings above for what happens when that cannot be done.
+  read it. Your playlist and guide-data URLs are no longer stored there (the
+  entry carries a short code for the active source instead), so that
+  permission change is now a guard for a URL arriving by another route — an
+  install updated from an older version until its first start moves the URL
+  into Sources, or your own `omarchy bar set`, which the plugin removes on its
+  next write — rather than for the plugin's own writing. Not the contents beyond its own entry,
+  and not the directories around it. See Settings above for what happens when
+  that cannot be done.
 
 Nothing inside the plugin directory is written at runtime.
 
 ## Troubleshooting
 
 - "No playlist configured": the guide opens on a form that asks for your
-  playlist -- paste it there. That form masks what you type and the value
-  never reaches your shell history, which `omarchy bar set` cannot avoid;
-  use the command line only for a free public list you do not mind storing
-  in plain text.
+  playlist -- paste it there, or open Sources (`o`) and add it with `a` or
+  `c`. That form masks what you type and the value never reaches your shell
+  history. There is no command-line way to add one any more.
+- A notification titled **Bar setting ignored** (for example `playlistUrl is
+  no longer read from the bar settings and was removed. Add or switch sources
+  in the guide's Sources screen.`): a playlist or guide-data URL was set on
+  the widget's entry with `omarchy bar set`, or by a script that still does
+  that. This version does not read those settings: nothing was added, the
+  source you are watching did not change, and the value has been taken out of
+  `~/.config/omarchy/shell.json`. Add the playlist in the guide instead.
+  The notification names the setting and never the URL. If a script keeps
+  setting it, the notification comes back each time the value changes, and
+  once at every shell start while the value is there; and if the URL carried
+  a password, remove the command from your shell history too (Settings
+  above).
+- A notification titled **Bar setting removed**: seen at most once, at the
+  first start after updating, when the configuration an earlier version kept
+  on the widget's entry could not be moved into Sources whole. `epgUrl was
+  removed from the bar settings: no source was set up for it to guide` means
+  you had a guide-data URL set but no playlist active, so there was nothing
+  to attach it to; add the source with its EPG URL in Sources. `... was not a
+  usable URL and was removed` means the old value was not one the plugin
+  accepts (a typo, a scheme it does not take); add the source again in
+  Sources.
 - Paste does nothing in a form: the plugin pastes by having its helper run
   `wl-paste`, so that must be installed (`wl-clipboard`, an Omarchy
   default). The helper reads at most 32 KiB of the clipboard and gives up
@@ -596,13 +741,74 @@ Nothing inside the plugin directory is written at runtime.
   arrive as the plain letter (the accent is dropped) and an input method
   does not reach the fields at all; paste them instead (see Sources above
   for why).
-- "Settings file is readable by other users": the guide would not save your
-  source, because it could not make `~/.config/omarchy/shell.json` private and
-  your provider URL would have gone into a file other accounts can read.
-  `ls -l ~/.config/omarchy/shell.json` first. If it is yours and a regular
-  file, `chmod 600 ~/.config/omarchy/shell.json` and add the source again.
-  If it belongs to another account or is a symlink, the plugin refuses to
-  change it rather than guess, and that is yours to sort out.
+- "No playlist configured" right after going back to an older version: the
+  older build looks for your playlist URL on the widget's entry, and this
+  version moved it into `~/.local/state/omarchy-iptv/state.json`. Nothing is
+  lost and you do not need your URL again: on the form the guide shows you,
+  follow the `Saved sources` link and pick the source. Settings above has the
+  detail, including what happens when you update again.
+- A notification titled **Saved sources not loaded** (for example
+  `/home/you/.local/state/omarchy-iptv/state.json is not a valid state file.
+  Nothing is saved until it can be read, so sources, favorites and settings
+  changed now are not kept. ...`), and the guide showing that same title and
+  sentence where it would otherwise show its setup form: the file that holds
+  your sources is there but could not be read -- its permissions, something
+  other than a file at that path, or contents that are not a state file --
+  or the plugin's start-up check of it did not answer within 15 seconds and
+  was stopped. The plugin has not changed the file and will write nothing to
+  it this session, because it may be the only copy of your sources and
+  provider URLs; earlier versions read such a file as empty and saved an
+  empty one over it. Adding, editing, switching or removing a source, and
+  turning channel logos on or off, answers `state.json could not be read ·
+  nothing is saved until it can be`. A favourite, a hidden group or a saved
+  search still changes on screen, but is not kept. The notification's last
+  sentence says what to do for the case you hit: `chmod 600` on the file,
+  `chmod 700` on its folder, move whatever is at the path aside, make sure a
+  regular file or nothing is there, or restore the file from a backup --
+  then `omarchy restart shell`. Putting a good copy back in place is enough
+  on its own: the plugin notices and carries on with your sources. A file or
+  folder you left at mode 0000 while the shell was not running is NOT this
+  case: the plugin restores the usual permissions at the next start, reads
+  the file and says nothing.
+- A directory or a named pipe (FIFO) at
+  `~/.local/state/omarchy-iptv/state.json`: the case above, with `is not a
+  regular file`. The plugin leaves it exactly as it is -- it no longer
+  changes a directory's permissions there, and a named pipe no longer makes
+  every shell start wait for ever on a helper that never finishes. Move it
+  aside and restart the shell. (A socket there is refused by the helper the
+  same way; which sentence the notification then shows has not been
+  checked.)
+- The file damaged while the shell is running: if the plugin has not saved
+  the file itself yet in this session, it notices the change, keeps the
+  channels and sources it is already showing, and from then on behaves as
+  above. After it has saved the file once in the session, tests disagree on
+  whether it notices; when it does not, its next save writes the sources it
+  holds in memory over the damaged file -- nothing of yours is lost, but the
+  damaged copy is replaced.
+- `state.json is not a valid state file; nothing was written` (or `state.json
+  could not be read (...); nothing was written`, or `state.json is not a
+  regular file; nothing was written`) from the helper's `state` commands run
+  by hand: the same protection on the command line -- every `state` command
+  except `state init` refuses a `state.json` it cannot read or parse, or
+  that is not a regular file (exit 1), instead of writing over it, and none
+  of them waits on a named pipe.
+- "state.json could not be written" in the shell's journal: the plugin could
+  not save its own file, `~/.local/state/omarchy-iptv/state.json`. The source
+  you added or switched to is in effect for this session only. If this
+  happens at the first start after updating from 0.13.6 or earlier, the URL
+  that version kept on the widget's entry is deliberately left there until a
+  save succeeds, so it is moved again at the next shell start — turning
+  channel logos on or off in between leaves it there too. Check that the directory exists, is yours and is writable
+  (`ls -ld ~/.local/state/omarchy-iptv`) and that the disk is not full.
+- "Settings file could not be made private": the plugin would not write a URL
+  into `~/.config/omarchy/shell.json`, because it could not make that file
+  private and the URL would have gone into a file other accounts can read.
+  This version's own writes carry no URL, so nothing it does produces this
+  message; it is here for a shell still running an older service until you
+  restart it. `ls -l ~/.config/omarchy/shell.json` first. If it is yours and a
+  regular file, `chmod 600 ~/.config/omarchy/shell.json` and add the source
+  again. If it belongs to another account or is a symlink, the plugin refuses
+  to change it rather than guess, and that is yours to sort out.
 - The guide's status line shows the helper's own error text (host name only,
   never the URL). To see the same JSON in a terminal, for a free list:
   `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv playlist --url <url>`.
@@ -652,8 +858,10 @@ and window-rule lines you added by hand.
 
 Note on disabling: `omarchy plugin disable io.github.rmcdavid.iptv` removes
 the widget entry from the bar, and the settings stored on that entry go with
-it. After re-enabling, run the `omarchy bar set` lines again. Favorites and
-recents live in the state directory and survive.
+it — the refresh interval, mpv options and the rest; set those again after
+re-enabling. Your sources, which one is active, favorites and recents all live
+in the state directory and survive, so the guide comes back on the same
+playlist without being told the URL again.
 
 Third-party replacement bars: Omarchy hands widgets on a replacement bar a
 service-less facade, so there the widget shows the TV glyph only; clicking

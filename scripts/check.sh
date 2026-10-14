@@ -164,7 +164,32 @@ fail=0
 QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2075}
+# 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
+# checks had never been levelled -- 193 under the tree at round 9, more than
+# every R19 pin together -- plus round 10's R20a key check and shared-fixture
+# cases, and the R20b/c/d cases that run Service.qml's own functions
+# (tests/service-harness.js).
+# 2319 -> 2261 on 2026-10-13, D-SINK-19 round 11 (R21d / R21e), and it is a
+# DELETION the ruling ordered, not a floor lowered to fit: the service-order
+# driver that mirrored Service.qml and every check of the withdrawn R12, R17b,
+# R18c/d, R19b/c and R20b/c machinery went (180 check names gone or renamed),
+# and R21's model pins and the shipping-function harness cases came in (121,
+# the data-loss matrix at length 2 among them; IPTV_MATRIX_LEN deepens it
+# off the gate).
+# 2261 -> 2348 on 2026-10-13, D-SINK-19 round 12 (R22): the load-failure pins
+# through Service.qml's own handlers and the REAL startCacheLayout (80: every
+# fault at a migrated and an unmigrated start, mid-session, both hosts), the
+# R22a model functions (6), and R22e's absence pin (1); 2348 -> 2354 the same
+# day, the six pins three surviving mutations asked for (every owned-entry
+# writer in the no-write mode, the unmigrated session, a probe that ends in
+# it; both hosts).
+# 2354 -> 2372 on 2026-10-13, round 13 (R23): R23a's four (two no-write
+# episodes in a session, with and without an own save between, both hosts),
+# R23c's eight harness pins (the watchdog armed; a timed-out init over a
+# file that is not one and one that does not parse; a timeout after the
+# load) and two model pins, R23e's three and R23f's one. The node suite now
+# also runs a second time with IPTV_HARNESS_OWN_ECHO=none (R23g), same count.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2372}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -173,10 +198,27 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2075}
 # round 2: the Model-member judge (11), every static import form and the
 # unreadable-model message (11), the generated header and the dropped-line
 # record (7), the shipped Model.js refusal (6), and F-HARNESS-19's shell pin (4).
+# 1123 -> 1143 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's 12
+# (the merge never levelled them), round 10's six R20a helper tests and the
+# ledger's two R20e cases.
 # 1126 -> 1136 on 2026-10-13, F-HARNESS-20: tests/test_harness_home.py, run.sh's
 # harness_env and seeding asked where the SHIPPED helper, Python and mpv land,
 # against a decoy home the shield must not touch (10).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1136}
+# 1153 -> 1152 on 2026-10-13, D-SINK-19 round 11 (R21d): test_state's six
+# round-9/10 key tests (pendingEpg, entryInputs, epgSetAt, their stdout and
+# slot pins) replaced by five for the migration marker and the withdrawn
+# set time; and 1152 -> 1153 the same day, the ledger's withdrawn-symbol
+# waiver (tests/test_defect_ledger.py, 1).
+# 1153 -> 1170 the same day, round 12 (R22): test_state's twelve R22a helper
+# cases (what `state init` found, that it never rewrites what it could not
+# parse, every verb refusing an unread state), tests/test_shipped_copy.py's
+# three (R22c, no shipped string sends the user to a retired setting) and the
+# ledger's two (R22d, an unused waiver is red; the twenty are gone).
+# 1170 -> 1180 the same day, round 13 (R23b, R23d): test_state's ten
+# StateNeverBlocksTest cases, the real helper as a subprocess with a timeout
+# over a FIFO, a socket and a directory at the state path, a file where the
+# state directory should be, and a symlink to a 0000 file.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1180}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -195,7 +237,12 @@ MARKETPLACE_FILES_MIN=${MARKETPLACE_FILES_MIN:-35}
 # derives its file list from the release allowlist, and a list that resolves
 # to nothing would scan nothing and exit 0 if the guard did not refuse that
 # itself; this is the second line of defence, in the gate's own vocabulary.
-TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-61}
+# 61 -> 58 on 2026-10-13, D-SINK-19 round 11 (R21): the guide's three Text
+# blocks that advertised `omarchy bar set ... playlistUrl|epgUrl` (the
+# unconfigured surface's command box and its EPG line, and the first-run
+# form's terminal caption) are gone with the route; every remaining one still
+# declares its format.
+TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-58}
 # The player stub's self-test (M5-01): 14 cases when wired in, 16 with F-RWD-15, 17 with the ordering cases, 19 with the F-MPV-1 broadcast pair.
 # 19 -> 26 on 2026-10-07: the stub learned tls-verify and stream-lavf-o for
 # D-SINK-16. The lane that grew it reported there was no floor on this step;
@@ -224,6 +271,24 @@ LOGO_PREFLIGHT_MIN=${LOGO_PREFLIGHT_MIN:-33}
 # scripts/qa-lib-test.sh asserts this number is the scenario's check-tree
 # EXPECTED_CHECKS plus one.
 CLIP_PREFLIGHT_MIN=${CLIP_PREFLIGHT_MIN:-7}
+# The D-SINK-19 key preflight (scripts/dev-harness/key-scenario.sh
+# check-tree): 10 checks over the harness's own instrument -- entryKey in
+# harness-lib.js, driven from node with the tree's Model.js (lead ruling R6:
+# `sourceKey` first, the URL hash second, named candidates only; the first
+# repair would have reported a user's `mpvArgs` of "deadbeef" as the active
+# source) and three seams that keep shell.qml, hostEntry and run.sh reading
+# through it -- plus its own "ran every check" line. The shell arm (the real
+# Service.qml under cage over ten seeded starts: the start-up adoption
+# watched across the dirs becoming ready with the reload the helper's chmod
+# fires (D-SRC-15, R9 read off the service's own counter), a fresh install
+# with no state.json, the two-source migration, the idempotent second
+# start, a URL and an EPG set while the shell was down, the remove of the
+# active source, and a SIGKILL between the two writes of a pointer change)
+# is the live mode's, for a human; its STATUS paragraph records the drop it
+# found on lane-key-r1 and the counts on the tree that closes it.
+# scripts/qa-lib-test.sh asserts this number is the scenario's check-tree
+# EXPECTED_CHECKS plus one.
+KEY_PREFLIGHT_MIN=${KEY_PREFLIGHT_MIN:-11}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -418,7 +483,7 @@ else
   # calls are never resolved at all.
   stage="$CHECK_TMP/dev-harness"
   mkdir -p "$stage"
-  for f in "$ROOT"/scripts/dev-harness/*.qml; do
+  for f in "$ROOT"/scripts/dev-harness/*.qml "$ROOT"/scripts/dev-harness/*.js; do
     [[ -f $f ]] || continue
     cp "$f" "$stage/" || bad "could not stage $(basename "$f") for linting"
   done
@@ -485,6 +550,23 @@ if command -v node >/dev/null 2>&1; then
     fi
   else
     cat "$node_log"; bad "node tests"
+  fi
+  # R23g (round 13). The real FileView delivers the reload its OWN save
+  # raises only sometimes (never for a lone save at idle; under load, or
+  # with a later write queued, it lands carrying our own text), measured in
+  # scripts/dev-harness/spikes/filewatch/. The harness delivers it by
+  # default; this run delivers it never, so a pin that holds only because
+  # the echo arrived goes red here. Same suite, same count.
+  node_log2="$CHECK_TMP/node-no-echo.log"
+  if IPTV_HARNESS_OWN_ECHO=none node "$ROOT/tests/Model.test.js" >"$node_log2" 2>&1; then
+    node_checks2=$(grep -oE '^[0-9]+ checks' "$node_log2" | head -1 | grep -oE '^[0-9]+')
+    if [[ -z $node_checks2 || $node_checks2 != "${node_checks:-}" ]]; then
+      bad "node tests without the own-write echo ran ${node_checks2:-no} checks, against ${node_checks:-no} with it"
+    else
+      ok "node tests without the own-write echo, R23g ($node_checks2 checks)"
+    fi
+  else
+    grep -E 'FAIL|failure' "$node_log2" | head -40; bad "node tests without the own-write echo (R23g)"
   fi
 else
   bad "node not found (dev-only dependency: mise use node)"
@@ -565,7 +647,14 @@ fi
 step "scripts/qa-lib-test.sh (the harness predicates)"
 # The tooling this project tests itself with is tested here. Every predicate
 # is driven against the condition that used to make its check pass silently.
-if bash "$ROOT/scripts/qa-lib-test.sh" >"$CHECK_TMP/qalib.log" 2>&1; then
+# Run with OMARCHY_IPTV_HARNESS_DIR UNSET (D-SINK-19 round 6, the round-5
+# live lens's P3): the suite pins the DEFAULT transcript directory, and a
+# gate started from a shell that exported the variable for a scenario run
+# went red on that pin over a green tree. The suite sets the variable
+# itself, per call, wherever it means to, and since round 7 the default pin
+# unsets it inside its own subshell too (a bare run of the suite was still
+# red, the round-6 live lens's P3); the `env -u` stays as belt and braces.
+if env -u OMARCHY_IPTV_HARNESS_DIR bash "$ROOT/scripts/qa-lib-test.sh" >"$CHECK_TMP/qalib.log" 2>&1; then
   ok "harness predicates ($(grep -c '^PASS' "$CHECK_TMP/qalib.log") checks)"
   if [[ ${CHECK_VERBOSE:-0} == 1 ]]; then cat "$CHECK_TMP/qalib.log"; fi
 else
@@ -727,6 +816,34 @@ elif (( clip_rc == 77 )); then
   fi
 else
   cat "$clip_log"; bad "clip preflight (exit $clip_rc)"
+fi
+
+step "scripts/dev-harness/key-scenario.sh check-tree (D-SINK-19 R6)"
+# The harness's instrument for the active source -- `hostEntry`, which
+# every sources-scenario.sh check about the one-write-behind host grades
+# through -- hashed the entry's playlistUrl, which D-SINK-19 takes OFF the
+# entry, so it read "" on both sides of the very tree it had to grade and
+# the gate could not see that (the D-SINK-19 review's harness P2). The
+# function now lives in scripts/dev-harness/harness-lib.js, which shell.qml
+# imports and this step drives from node with the tree's own Model.js:
+# `sourceKey` first, the URL hash second, named candidates only. No
+# display, no quickshell, under a second. A machine without node or
+# python3 answers 77, RED here unless KEY_PREFLIGHT_SKIP_OK=1 is set, for
+# the same reason as the two steps above.
+key_log=$CHECK_TMP/key-scenario.log
+"$ROOT/scripts/dev-harness/key-scenario.sh" check-tree >"$key_log" 2>&1; key_rc=$?
+if (( key_rc == 0 )); then
+  key_n=$(grep -c '^PASS' "$key_log" || true)
+  if (( key_n < KEY_PREFLIGHT_MIN )); then cat "$key_log"; bad "key preflight ran $key_n checks, expected at least $KEY_PREFLIGHT_MIN"; else ok "key preflight ($key_n checks)"; fi
+elif (( key_rc == 77 )); then
+  key_why=$(grep -a '^SKIP' "$key_log" | head -1 | sed 's/^SKIP key-scenario: //')
+  if [[ ${KEY_PREFLIGHT_SKIP_OK:-0} == 1 ]]; then
+    printf 'SKIP key preflight (KEY_PREFLIGHT_SKIP_OK=1): %s\n' "$key_why"
+  else
+    bad "key preflight SKIPPED, which is not green: $key_why (set KEY_PREFLIGHT_SKIP_OK=1 to accept a gate that drove no instrument)"
+  fi
+else
+  cat "$key_log"; bad "key preflight (exit $key_rc)"
 fi
 
 step "ascii check (code files)"

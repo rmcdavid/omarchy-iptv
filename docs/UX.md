@@ -642,6 +642,15 @@ playlistUrl ""`. Clearing the URL clears the channel list and the group column
 with it, so this surface is never drawn over a stale list. Since v0.2.0 this
 state is the Sources first-run form, see `UX-SOURCES.md` 1.2.
 
+**[Round 13, 2026-10-13 (D-SINK-19 R23e): NOT when `state.json` exists and
+could not be read.** Nothing has loaded then either, but the guide is in the
+no-write mode and draws its own surface instead -- the alert glyph over the
+title `Saved sources not loaded` and the notification's own sentence
+(`Model.stateUnreadableNotice`), with no form and no field, and `Esc close`
+as its footer (6.3; `UX-SOURCES.md` 5.10 item 2 has the wireframe and every
+reason's text). Until round 13 that start drew this first-run form, whose
+submit could only be refused.]
+
 ```
 +------------------------------------------------------------------------------------------------+
 |                                                                                                |
@@ -659,8 +668,10 @@ state is the Sources first-run form, see `UX-SOURCES.md` 1.2.
 |              |  omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>     |                |
 |              +----------------------------------------------------------------+                |
 |                                                                                                |
-|                  Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>           |
-|                  Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv) |
+|        Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>  (converted; not    |
+|        kept in shell.json)                                                                     |
+|        Both are inputs: the URL moves to ~/.local/state/omarchy-iptv/state.json; other         |
+|        settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)           |
 |                                                                                                |
 |                                                                                                |
 |                                                             r retry - o sources - Esc close    |
@@ -674,6 +685,62 @@ at full opacity. The glyph is `Style.font.displayLarge` in
 `Color.menu.selectedText` at opacity 0.8 (the clipboard's empty-state
 treatment). Clicking the command box copies it with `wl-copy` (mouse
 convenience; not required for keyboard users).
+
+Round 7 note (2026-10-12, D-SINK-19 R17; a conflict raised, not resolved).
+This is the state with no active source, and in it a guide URL set with the
+`Optional EPG` command is KEPT in `shell.json` -- on the bar entry, until a
+source becomes active, which R12 rules and R17a now enforces on every write
+the plugin makes. The caption's `(converted; not kept in shell.json)` is
+therefore true only once a source is active. The copy is the lead's and the
+Guide owner's to decide; `UX-SOURCES.md` 3.1.1 carries the request.
+[Round 9 (2026-10-12, D-SINK-19 R19b): resolved by the code, not the copy.
+A guide URL set in this state is now held in the plugin's own `state.json`
+and taken off the bar entry once that write lands, so the caption is true
+after one write rather than only once a source is active; the value stays
+on the entry longer only when the state write fails (R13). No copy change
+is requested; `UX-SOURCES.md` 3.1.1 says the same.] [Round 10 (2026-10-12,
+R20c): and it stays true. On today's Omarchy a logo toggle while a save was
+outstanding could copy the held guide URL back onto the bar entry from the
+host's one-write-behind publish (D-SINK-20); the toggle now carries back
+nothing the plugin's own file already holds. No copy change.]
+
+**Amended 2026-10-13 (D-SINK-19 round 11, R21; the product owner dropped the
+`omarchy bar set` URL route).** The wireframe above, its command box and the
+two notes before this one are the record of rounds 1-10. A URL set on the bar
+entry is now refused once the one migration of a 0.13.x install has landed,
+so this state no longer offers a command: `unconfiguredCommand`, the command
+box and its click-to-copy (`copyCommand`, the `Copied` transient), and the
+`Optional EPG` line (`unconfiguredEpg`) are deleted from `Guide.qml` on
+lane-key-m1, and the trigger "cleared at runtime with `omarchy bar set ...
+playlistUrl ""`" no longer exists (an empty value was a no-op since round
+2). As shipped:
+
+```
++------------------------------------------------------------------------------------------------+
+|                                                                                                |
+|  Search channels...                                                                            |
+|                                                                                                |
+|                                                                                                |
+|                                                                                                |
+|                                             ó°                                                  |
+|                                                                                                |
+|                                    No playlist configured                                      |
+|                                                                                                |
+|                  Add your M3U URL or path in Sources, with its EPG URL if you have one         |
+|                                                                                                |
+|        Sources and their URLs are kept in ~/.local/state/omarchy-iptv/state.json; other        |
+|        settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)           |
+|                                                                                                |
+|                                                                                                |
+|                                                             r retry - o sources - Esc close    |
++------------------------------------------------------------------------------------------------+
+```
+
+The round-7 conflict about `(converted; not kept in shell.json)` is closed by
+the line's removal. The wrap of the two lines at the shipped width is
+UNVERIFIED on a display; the strings are read off `Guide.qml`. Since v0.2.0
+this state is normally behind the Sources first-run form (`UX-SOURCES.md` 1.2,
+3.1.1, which carry the same change).
 
 ### 4.5 Loading (first fetch, no cache yet)
 
@@ -739,6 +806,30 @@ Error, no cache at all (empty state, column hidden):
 
                                     r retry - Esc close
 ```
+
+**[Amended 2026-10-13, D-SINK-19 round 12 (R22c): the line ends `check the
+source in Sources`.** `check playlistUrl` sent a user whose provider is down
+to a setting the plugin has refused since round 11 (R21), and the round-11
+live lens saw exactly that on screen after a migration. The source's URL is
+checked and edited in Sources, which `o` opens from this state. As shipped on
+lane-key-n1 (74f9a01; `Guide.qml` `errorCheck`), with the footer as the
+round-11 live lens drew it inside a cage on lane-key-m2, which round 12 does
+not change:
+
+```
+                                             ó°
+
+                                   Playlist failed to load
+
+              HTTP 403 Forbidden from tv.example.net - check the source in Sources
+
+                                 r retry - o sources - Esc close
+```
+
+The separators are `Model.SEP`. The text is observed through the harness
+(key-scenario B8 reads the guide's empty state as drawn: `kind:error
+sources:yes retired:no` on lane-key-n1, `retired:yes` on lane-key-m2); the
+wrap of the longer line at the shipped width is UNVERIFIED on a display.]**
 
 ### 4.7 "Now playing" affordance inside the guide
 
@@ -1120,9 +1211,10 @@ key/verb contrast is the accepted cost of the footer being readable at all.
 
 | State | Title | Body |
 |---|---|---|
-| Not configured | `No playlist configured` | `Set your M3U URL or path, then press r to load it:` / command box `omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>` / `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>` / `Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)` |
+| Not configured | `No playlist configured` | `Set your M3U URL or path, then press r to load it:` / command box `omarchy bar set io.github.rmcdavid.iptv playlistUrl <url>` / `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>  (converted; not kept in shell.json)` / `Both are inputs: the URL moves to ~/.local/state/omarchy-iptv/state.json; other settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)` **[Amended 2026-10-12, D-SINK-19 round 3: the last two lines are `Guide.qml`'s `unconfiguredEpg` and `unconfiguredWhere` as shipped on lane-key-s1 (two spaces before the parenthesis), ruled to this exact text by the lead after the review found the previous lines -- `Optional EPG:  omarchy bar set io.github.rmcdavid.iptv epgUrl <url>` and `Settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)` -- presenting the URL keys as stored settings. The command box is unchanged: a click copies it. Both lines wrap (`Text.WordWrap` over the column width); the wireframe in 4.4 wraps them by hand, and the wrap at the shipped width is UNVERIFIED on a display.]** **[Amended 2026-10-13, D-SINK-19 round 11 (R21): the body is now `Add your M3U URL or path in Sources, with its EPG URL if you have one` / `Sources and their URLs are kept in ~/.local/state/omarchy-iptv/state.json; other settings live in ~/.config/omarchy/shell.json (entry io.github.rmcdavid.iptv)` (`Guide.qml` `unconfiguredProse` and `unconfiguredWhere` on lane-key-m1). The command box and the `Optional EPG` line are deleted: a URL set with `omarchy bar set` is refused after the migration, so the guide must not offer the command (4.4).]** |
+| Saved sources not loaded (no-write mode, nothing loaded; D-SINK-19 round 13, R23e, 2026-10-13) | `Saved sources not loaded` (the alert glyph above it) | `<path> <what>. Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. <fix>` -- `Model.stateUnreadableNotice(reason, path)`, the notification's own body, one source of copy; `<what>` and `<fix>` per reason in `UX-SOURCES.md` 5.10 item 1. Footer `Esc close` (no `r retry`; `o sources` only with sources in memory). Replaces `Not configured` whenever the no-write mode holds; drawn as the round-13 live run reads it (key-scenario B11 `title:notice prose:notice editable:0`), the pixels UNVERIFIED on a display |
 | Loading, no cache | `Loading playlist...` | `Fetching from <host>` |
-| Fetch failed, no cache | `Playlist failed to load` | `<reason> from <host> - check playlistUrl` where reason is one of `HTTP 403 Forbidden`, `HTTP 404 Not Found`, `HTTP 5xx`, `Could not resolve host`, `Connection refused`, `Timed out`, `Not an M3U playlist`, `File not found` (local path) |
+| Fetch failed, no cache | `Playlist failed to load` | `<reason> from <host> - check playlistUrl` where reason is one of `HTTP 403 Forbidden`, `HTTP 404 Not Found`, `HTTP 5xx`, `Could not resolve host`, `Connection refused`, `Timed out`, `Not an M3U playlist`, `File not found` (local path) **[Amended 2026-10-13, D-SINK-19 round 12 (R22c): `<reason> from <host> - check the source in Sources` (`Guide.qml` `errorCheck` on lane-key-n1). No shipped string tells the user to set `playlistUrl` or `epgUrl` any more; `tests/test_shipped_copy.py` searches every string literal in every shipped code file for one (4.6).]** |
 | Fetch failed, cache present (banner) | -- | `ó°¦  Playlist refresh failed (<reason>) - showing cached copy from 12:40 - r retry` |
 | EPG failed (banner, low emphasis) | -- | `Guide data unavailable (<reason>) - channels still work - r retry` |
 | Playlist loaded with warnings (footer line) | -- | `Playlist warning: <first warning> (+N more)` when more than one. Shown after a load that produced warnings, such as the 50,000 channel or 2,000 group caps, and cleared by the next clean load. It never displaces a playing, refreshing or error state; see the precedence note below |
@@ -1376,12 +1468,12 @@ keyboard focus of an overlay already ends on Esc).
 | 13 | Open/close animation | None, matching clipboard/menu/emojis and the 150 ms budget. |
 | 14 | Which glyphs | ó° idle, ó°§ playing, ó° error, ó° favorite, ó° playing row, ó°¦ failed/alert, ó° loading, ó° refresh (all verified in the installed font). |
 | 15 | Refresh notifications | Only for manual refresh (`r`, middle click). Timer refreshes are silent unless they fail. |
-| 16 | Where do settings live for a plugin that is both bar-widget and overlay? | The empty state names the command (`omarchy bar set ...`) and the file (`~/.config/omarchy/shell.json`); the architect decides whether the overlay reads the bar-layout entry or a `plugins[]` entry, and the README states which. Copy does not change either way. |
+| 16 | Where do settings live for a plugin that is both bar-widget and overlay? | The empty state names the command (`omarchy bar set ...`) and the file (`~/.config/omarchy/shell.json`); the architect decides whether the overlay reads the bar-layout entry or a `plugins[]` entry, and the README states which. Copy does not change either way. **[2026-10-13, D-SINK-19 round 11: the empty state names no command any more; sources are added in the guide, and the file line names both files (4.4).]** |
 | 17 | Digits | Ignored in list mode (reserved for M2 channel numbers); literal in search mode. |
 | 18 | Uppercase command letters | `F`, `S`, `R`, `X` behave like lowercase (tailscale precedent). |
 | 19 | Narrow screens | Hide the group column under a `Style.space(720)` card width; `h`/`l` keep working with the header scope label as feedback. |
 | 20 | Credentials in UI | Never render the playlist or EPG URL beyond scheme + host anywhere (guide, tooltip, notification, console). |
-| 21 | Clicking the command box in the not-configured state | Copies the command with `wl-copy` and shows `Copied` in the footer for 3 s. Optional; keyboard users have the README. |
+| 21 | Clicking the command box in the not-configured state | Copies the command with `wl-copy` and shows `Copied` in the footer for 3 s. Optional; keyboard users have the README. **[WITHDRAWN 2026-10-13, D-SINK-19 round 11 (R21): the command box, its click-to-copy and the `Copied` transient are deleted (4.4).]** |
 | 22 | Home with a query active in list mode | Jumps the column to All (the "Home for All" hint). Without a query, Home is first row as usual. |
 
 ### 8.1 What the architect and front-end developer must provide
