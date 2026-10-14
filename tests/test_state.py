@@ -730,11 +730,13 @@ class StateNeverWrittenUnreadTest(unittest.TestCase):
         self.assertTrue(self.path.is_dir())
         self.assertEqual(os.listdir(self.path), [])
 
-    def test_init_over_a_dangling_symlink_reports_other_and_creates_nothing(self):
+    def test_init_over_a_dangling_symlink_reports_link_and_creates_nothing(self):
+        # R24b (round 14): `link`, not `other` -- the shell's sentence for it
+        # names the link, where `other` led to the folder-permission advice.
         target = pathlib.Path(self.tmp.name) / "gone.json"
         os.symlink(target, self.path)
         payload = self.init()
-        self.assertEqual((payload["found"], payload["created"]), ("other", False))
+        self.assertEqual((payload["found"], payload["created"]), ("link", False))
         self.assertTrue(self.path.is_symlink())
         self.assertFalse(target.exists())
 
@@ -934,13 +936,31 @@ class StateNeverBlocksTest(unittest.TestCase):
         # R23d, rule 15's sibling in ensure_private_dir: its last chmod made
         # whatever was at the DIRECTORY path 0700 -- a regular file there came
         # out executable.
+        # R24b (round 14, D-SRC-26): and it ANSWERS, cleanly -- `found`
+        # "not-a-dir", nothing created, exit 0 -- where it printed a traceback
+        # and `code: internal` (exit 1) before; the shell maps the answer to a
+        # sentence that names the folder (Model.stateUnreadableNotice).
         os.rmdir(self.dir)
         pathlib.Path(self.dir).write_text("not a directory", encoding="utf-8")
         os.chmod(self.dir, 0o644)
         code, payload, err = self.helper("state", "--state-dir", self.dir, "init")
-        self.assertEqual(code, 1)
+        self.assertEqual(code, 0, err)
+        self.assertEqual((payload["found"], payload["created"]), ("not-a-dir", False))
+        self.assertNotIn("Traceback", err)
         self.assertEqual(stat_mode(pathlib.Path(self.dir)), 0o644)
         self.assertEqual(pathlib.Path(self.dir).read_text(encoding="utf-8"), "not a directory")
+
+    def test_every_verb_refuses_a_file_where_the_state_directory_should_be(self):
+        # R24b: the same path, one answer: refused, exit 1, the file as it was.
+        os.rmdir(self.dir)
+        pathlib.Path(self.dir).write_text("not a directory", encoding="utf-8")
+        for verb in self.verbs():
+            with self.subTest(verb=" ".join(verb)):
+                code, payload, err = self.helper("state", "--state-dir", self.dir, *verb)
+                self.assertEqual(code, 1, err)
+                self.assertEqual(payload["error"]["code"], "state_unreadable")
+                self.assertNotIn("Traceback", err)
+                self.assertEqual(pathlib.Path(self.dir).read_text(encoding="utf-8"), "not a directory")
 
     def test_the_d_id_1_remap_reads_a_fifo_without_blocking(self):
         # The playlist fetch's state remap reads state.json through read_json.
@@ -961,6 +981,206 @@ class StateNeverBlocksTest(unittest.TestCase):
         self.assertEqual(proc.returncode, 0, proc.stderr)
         self.assertEqual(proc.stdout.strip(), "0")
         self.assertTrue(stat_is_fifo(self.path))
+
+
+class StateSymlinkTest(unittest.TestCase):
+    """D-SINK-19 round 14, R24b (D-SRC-23): ONE ANSWER PER PATH for a symlink
+    at state.json. Followed when its target is a regular file -- for reads AND
+    writes: the write lands beside the TARGET and is renamed onto it, so the
+    link survives (the shell's own FileView save was measured doing exactly
+    that, spikes/filewatch set r24) -- and refused like any non-regular path
+    when it dangles or leads to anything else: every verb exit 1, file and
+    link untouched; init `link`. Red on dev (ced1bd1): a dangling link was
+    "absent" to every verb, which wrote an empty state plus its change over
+    it, exit 0, and a valid link was replaced by a regular file. Every case
+    runs the real helper as a subprocess with a timeout (inherited)."""
+
+    SEED = {"version": 2, "cacheLayout": 2, "favorites": ["t:seed"], "recents": [], "sources": [
+        {"key": "d990c2e4", "url": "http://provider.example.test/get.php?username=u&password=p", "epgUrl": "",
+         "kind": "http", "label": "provider.example.test", "labelCustom": False, "origin": "cli",
+         "addedAt": 10, "lastUsed": 20, "fetchedAt": 30, "channelCount": 9, "groupCount": 2},
+        {"key": "42839dd5", "url": "http://second.example.test/list.m3u", "epgUrl": "",
+         "kind": "http", "label": "second.example.test", "labelCustom": False, "origin": "cli",
+         "addedAt": 11, "lastUsed": 21, "fetchedAt": 31, "channelCount": 5, "groupCount": 1}],
+        "activeKey": "d990c2e4"}
+
+    TIMEOUT = StateNeverBlocksTest.TIMEOUT
+    helper = StateNeverBlocksTest.helper
+    verbs = StateNeverBlocksTest.verbs
+
+    def setUp(self):
+        StateNeverBlocksTest.setUp(self)
+        self.elsewhere = pathlib.Path(self.tmp.name) / "dotfiles"
+        os.makedirs(self.elsewhere, mode=0o755)
+        self.target = self.elsewhere / "state.json"
+
+    def link_to(self, target):
+        os.symlink(target, self.path)
+
+    def test_a_valid_link_is_written_THROUGH_by_every_writing_verb_and_survives(self):
+        writers = [v for v in self.verbs() if v[0] not in ("show",) and v[:2] != ("source", "list")]
+        for verb in writers:
+            with self.subTest(verb=" ".join(verb)):
+                if self.path.is_symlink() or self.path.exists():
+                    os.unlink(self.path)
+                self.target.write_text(json.dumps(self.SEED) + "\n", encoding="utf-8")
+                os.chmod(self.target, 0o644)
+                self.link_to(self.target)
+                code, payload, err = self.helper("state", "--state-dir", self.dir, *verb)
+                self.assertEqual(code, 0, err)
+                self.assertTrue(self.path.is_symlink(), "the link was replaced by a regular file")
+                self.assertEqual(os.readlink(self.path), str(self.target))
+                self.assertEqual(json.loads(self.target.read_text(encoding="utf-8")).get("version"), 2)
+                self.assertEqual(stat_mode(self.target), 0o600)
+                # nothing left beside either end, and the target's folder kept its mode
+                self.assertEqual(sorted(os.listdir(self.elsewhere)), ["state.json"])
+                self.assertEqual(sorted(os.listdir(self.dir)), ["state.json"])
+                self.assertEqual(stat_mode(self.elsewhere), 0o755)
+
+    def test_a_valid_link_is_read_through(self):
+        self.target.write_text(json.dumps(self.SEED) + "\n", encoding="utf-8")
+        self.link_to(self.target)
+        code, payload, err = self.helper("state", "--state-dir", self.dir, "show")
+        self.assertEqual(code, 0, err)
+        self.assertEqual(payload["state"]["favorites"], ["t:seed"])
+        self.assertEqual(len(payload["state"]["sources"]), 2)
+
+    def test_the_favorite_lands_in_the_target(self):
+        self.target.write_text(json.dumps(self.SEED) + "\n", encoding="utf-8")
+        self.link_to(self.target)
+        code, payload, err = self.helper("state", "--state-dir", self.dir, "favorite", "add", "t:new")
+        self.assertEqual(code, 0, err)
+        on_disk = json.loads(self.target.read_text(encoding="utf-8"))
+        self.assertEqual(on_disk["favorites"], ["t:seed", "t:new"])
+        self.assertEqual(len(on_disk["sources"]), 2)
+
+    def assert_every_verb_refuses_and_leaves_the_link(self, why):
+        before = os.readlink(self.path)
+        for verb in self.verbs():
+            with self.subTest(case=why, verb=" ".join(verb)):
+                code, payload, err = self.helper("state", "--state-dir", self.dir, *verb)
+                self.assertEqual(code, 1, err)
+                self.assertEqual(payload["error"]["code"], "state_unreadable")
+                self.assertIn("nothing was written", payload["error"]["message"])
+                self.assertTrue(self.path.is_symlink())
+                self.assertEqual(os.readlink(self.path), before)
+                self.assertEqual(sorted(os.listdir(self.dir)), ["state.json"])
+
+    def test_a_dangling_link_is_refused_by_every_verb(self):
+        self.link_to(self.elsewhere / "gone.json")
+        self.assert_every_verb_refuses_and_leaves_the_link("dangling")
+        self.assertFalse((self.elsewhere / "gone.json").exists())
+
+    def test_a_link_into_a_missing_folder_is_refused_by_every_verb(self):
+        # The dotfiles folder not mounted yet: the realistic case.
+        self.link_to(self.elsewhere / "not-mounted" / "state.json")
+        self.assert_every_verb_refuses_and_leaves_the_link("missing folder")
+
+    def test_a_link_to_a_directory_or_a_fifo_is_refused_by_every_verb(self):
+        os.makedirs(self.elsewhere / "adir")
+        self.link_to(self.elsewhere / "adir")
+        self.assert_every_verb_refuses_and_leaves_the_link("to a directory")
+        os.unlink(self.path)
+        os.mkfifo(self.elsewhere / "afifo", 0o600)
+        self.link_to(self.elsewhere / "afifo")
+        self.assert_every_verb_refuses_and_leaves_the_link("to a fifo")
+
+    def test_init_answers_link_for_every_link_it_will_not_follow_and_file_for_one_it_will(self):
+        cases = [("dangling", self.elsewhere / "gone.json", "link"), ("to a directory", self.elsewhere, "link")]
+        for why, target, want in cases:
+            with self.subTest(case=why):
+                if self.path.is_symlink():
+                    os.unlink(self.path)
+                self.link_to(target)
+                code, payload, err = self.helper("state", "--state-dir", self.dir, "init")
+                self.assertEqual(code, 0, err)
+                self.assertEqual((payload["found"], payload["created"]), (want, False))
+                self.assertTrue(self.path.is_symlink())
+        os.unlink(self.path)
+        self.target.write_text(json.dumps(self.SEED) + "\n", encoding="utf-8")
+        self.link_to(self.target)
+        code, payload, err = self.helper("state", "--state-dir", self.dir, "init")
+        self.assertEqual((code, payload["found"], payload["created"]), (0, "file", False))
+        self.assertTrue(self.path.is_symlink())
+
+    def test_the_d_id_1_remap_leaves_a_dangling_link_alone(self):
+        import subprocess, sys
+        code = ("import importlib.machinery, importlib.util, sys\n"
+                "sys.dont_write_bytecode = True\n"
+                "loader = importlib.machinery.SourceFileLoader('h', sys.argv[1])\n"
+                "spec = importlib.util.spec_from_loader('h', loader)\n"
+                "h = importlib.util.module_from_spec(spec); loader.exec_module(h)\n"
+                "print(h.remap_state_file(sys.argv[2], [{'id': 't:a', 'name': 'A', 'url': 'http://x.example.test/a.ts', 'tvgId': 'a'}]))\n")
+        def remap():
+            proc = subprocess.run([sys.executable, "-I", "-B", "-c", code, str(HELPER_PATH), str(self.path)],
+                                  capture_output=True, text=True, timeout=self.TIMEOUT,
+                                  env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+            return proc.returncode, proc.stdout.strip(), proc.stderr
+        self.link_to(self.elsewhere / "gone.json")
+        self.assertEqual(remap()[:2], (0, "0"))
+        self.assertTrue(self.path.is_symlink())
+        self.assertFalse((self.elsewhere / "gone.json").exists())
+
+
+class StateInitDeadlineTest(unittest.TestCase):
+    """D-SINK-19 round 14, R24d (D-SRC-24): `state init` bounds ITSELF.
+    SIGALRM, default action, armed at the top of the verb before the state
+    path is touched, so a shell that stops while the init is held (a hung
+    filesystem) leaves nothing running past STATE_INIT_DEADLINE. Observed by
+    running the REAL verb in a child whose first lstat sleeps (the hung
+    filesystem, made deterministic) with the deadline shrunk to one second:
+    the child must die of SIGALRM. Red on dev (ced1bd1), where it sleeps on."""
+
+    def test_a_held_init_dies_of_its_own_alarm(self):
+        import signal, subprocess, sys
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        code = ("import importlib.machinery, importlib.util, os, sys, time\n"
+                "sys.dont_write_bytecode = True\n"
+                "loader = importlib.machinery.SourceFileLoader('h', sys.argv[1])\n"
+                "spec = importlib.util.spec_from_loader('h', loader)\n"
+                "h = importlib.util.module_from_spec(spec); loader.exec_module(h)\n"
+                "h.STATE_INIT_DEADLINE = 1\n"
+                "real = os.lstat\n"
+                "def slow(p, *a, **k):\n"
+                "    if str(p).endswith('state.json'):\n"
+                "        time.sleep(8)\n"
+                "    return real(p, *a, **k)\n"
+                "os.lstat = slow\n"
+                "sys.exit(h.main(['state', '--state-dir', sys.argv[2], 'init']))\n")
+        try:
+            proc = subprocess.run([sys.executable, "-I", "-B", "-c", code, str(HELPER_PATH), os.path.join(tmp.name, "st")],
+                                  capture_output=True, text=True, timeout=5,
+                                  env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+        except subprocess.TimeoutExpired:
+            self.fail("the held init was still running after 5 s: it does not bound itself")
+        self.assertEqual(proc.returncode, -signal.SIGALRM, proc.stderr)
+
+    def test_the_deadline_is_past_the_services_bound(self):
+        # 15 s watchdog + 2 s kill grace in Service.qml (stateInitTimeoutMs,
+        # stateInitKillGraceMs): the self-bound must never pre-empt them.
+        svc = (ROOT / "Service.qml").read_text(encoding="utf-8")
+        import re
+        timeout = int(re.search(r"stateInitTimeoutMs: (\d+) \* 1000", svc).group(1))
+        grace = int(re.search(r"stateInitKillGraceMs: (\d+) \* 1000", svc).group(1))
+        self.assertGreater(helper.STATE_INIT_DEADLINE, timeout + grace)
+
+    def test_no_other_verb_arms_it(self):
+        import signal, subprocess, sys
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        code = ("import importlib.machinery, importlib.util, signal, sys, io, contextlib\n"
+                "sys.dont_write_bytecode = True\n"
+                "loader = importlib.machinery.SourceFileLoader('h', sys.argv[1])\n"
+                "spec = importlib.util.spec_from_loader('h', loader)\n"
+                "h = importlib.util.module_from_spec(spec); loader.exec_module(h)\n"
+                "out = io.StringIO()\n"
+                "with contextlib.redirect_stdout(out):\n"
+                "    h.main(['state', '--state-dir', sys.argv[2], 'show'])\n"
+                "print(signal.alarm(0))\n")
+        proc = subprocess.run([sys.executable, "-I", "-B", "-c", code, str(HELPER_PATH), os.path.join(tmp.name, "st")],
+                              capture_output=True, text=True, timeout=20, env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+        self.assertEqual(proc.stdout.strip().splitlines()[-1], "0", proc.stderr)
 
 
 def stat_mode(path):
