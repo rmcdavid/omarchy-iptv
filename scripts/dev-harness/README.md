@@ -1358,6 +1358,50 @@ re-measure it after a Quickshell update. B's observers are the user's view
 in `docs/UX-SOURCES.md` 5.10 and the rows SRC-MIG-40..43 and SRC-ERR-10 in
 `docs/QA-SOURCES.md`.]
 
+#### Round 13 (R23): the no-write mode's loose ends
+
+key-scenario.sh B9..B14, under the scenario's own nested cage on a private
+session bus (`private-bus.sh`, committed this round: a `dbus-daemon` from a
+config with no service directories, CLAUDE.md working-in-parallel 6b; the
+round-12 copy lived in /tmp and went with the reboot). B9 two no-write
+episodes in one session with no own save between, reached by in-place
+writes the FileView reloads, each told (R23a). B10 the start-up `state
+init` held 60 s by O's slow tree over a file that does not parse: the
+service's watchdog stops it at 15 s, `init_pids` (an exact-argv scan of
+/proc, never a pattern) finds nothing left running it, and the start
+blocks as `init-timeout` (R23c). B11 a no-write start draws the
+notification's own words and no form, and `ipc editable` -- a census of
+editable text inputs under the guide, new this round -- reads 0 (R23e,
+D-CLIP-1). B12 the logo toggle there says the no-write reason (R23f). B13 a
+fresh install's drawn copy is the first-run form's (R23h: `state`'s
+`emptyTitle` / `emptyProse` now report what is DRAWN, with `emptyShown`,
+`firstRunHead` and `stateBlocked` beside them). B14 a FIFO at state.json
+(R23b). Counts are the summary line's (R23h): forward 112 / 0;
+`--baseline lane-key-n2` 107 / 5 (B10..B14 red; B9 green there, because
+the line it guards existed and only its check did not); `--tree` with
+`spikes/key-mutations/r23a-no-rearm.patch` 111 / 1 (B9, `told:1/1`), and
+with `r23e-editable-field.patch` 111 / 1 (B13, `editable:2`: the census
+sees the form's two fields once they are editable). sources-scenario 66 / 0
+under an outer headless cage on a private bus, logo-scenario 33 / 0.
+
+The FileView's watch was MEASURED this round, because the round-12 lenses
+reported it lost after the view's own first save and the node harness
+delivered a reload on every external change (R23g):
+`spikes/filewatch/measure.sh` runs one FileView declared as stateFile is,
+in a nested cage on a private bus, through 16 sequences of own saves,
+helper renames, in-place writes, chmods and restarts; the result it printed
+is kept beside it. Every external change raised a reload, before or after
+any number of own saves and across a restart; the own save's reload
+delivers a load only sometimes (never for a lone save at idle; under load,
+or with a later write queued, it lands with the view's own text). The real
+Service.qml, driven the same way idle and under six busy loops on four
+cores, agreed. So tests/service-harness.js keeps its hand-delivered
+external reloads and makes the own-write echo a lever, `ownEcho` "load" |
+"none", and scripts/check.sh runs the node suite both ways (2372 / 0
+each). The lost watch the lenses reported (D-SRC-19's mechanism) did not
+reproduce in any sequence here; their rigs were lost with /tmp, so the
+difference is not known.
+
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 
 `shell.qml` here reproduces the real host's config plumbing in its shape

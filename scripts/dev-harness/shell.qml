@@ -552,6 +552,31 @@ ShellRoot {
     return acc
   }
 
+  // R23e (D-SINK-19 round 13): how many EDITABLE text inputs exist under the
+  // guide right now -- any item with a boolean `readOnly` that is false and a
+  // numeric `cursorPosition` (TextInput, TextField, TextEdit) -- walked the
+  // way focusWalk walks, children, contentItem and a Loader's item. D-CLIP-1:
+  // an editable TextInput subscribes to the clipboard at construction, so
+  // the no-write surface must leave none, and the drawn check reads this
+  // census instead of trusting that no form was opened (rule 14).
+  function editableWalk(node, depth, acc) {
+    if (!node) return acc
+    if (depth > harness.focusDepthCap || acc.scanned >= harness.focusScanBudget) { acc.exhausted = true; return acc }
+    acc.scanned++
+    try {
+      if (typeof node.readOnly === "boolean" && node.readOnly === false && typeof node.cursorPosition === "number") acc.editable++
+    } catch (e) {}
+    var next = []
+    try { if (node.item) next.push(node.item) } catch (e) {}
+    try { if (node.contentItem) next.push(node.contentItem) } catch (e) {}
+    try {
+      var kids = node.children
+      if (kids) for (var i = 0; i < kids.length; i++) next.push(kids[i])
+    } catch (e) {}
+    for (var k = 0; k < next.length; k++) harness.editableWalk(next[k], depth + 1, acc)
+    return acc
+  }
+
   function focusSnapshot(g) {
     if (!g) {
       return { ok: false, error: "no_guide", open: false, keyboard: false, role: "none",
@@ -983,6 +1008,13 @@ ShellRoot {
     // The compositor cannot answer this; see harness.focusSnapshot for the
     // measurements, including why hyprctl is not the place to look.
     function focusState(): string { return JSON.stringify(harness.focusSnapshot(guideLoader.item)) }
+    // R23e: the editable-input census (editableWalk); a guide that is not
+    // loaded answers editable -1, never 0.
+    function editable(): string {
+      var g = guideLoader.item
+      if (!g) return JSON.stringify({ editable: -1, scanned: 0, exhausted: false })
+      return JSON.stringify(harness.editableWalk(g, 0, { editable: 0, scanned: 0, exhausted: false }))
+    }
     function toggle(): string { return fakeShell.toggle(harness.pluginId, "{}") ? "ok" : "no" }
     function query(text: string): string { if (guideLoader.item) guideLoader.item.setQuery(text); return "ok" }
     function mode(): string { if (guideLoader.item) guideLoader.item.switchMode(); return "ok" }

@@ -1308,10 +1308,12 @@ is "key-scenario's Q reads its slow listener's pid from ss -ltnp and cleanup kil
 # tree -- `git apply --check` is the call -- and the header cites them by
 # file, not by the deleted branch names.
 KM="$ROOT/scripts/dev-harness/spikes/key-mutations"
-# Round 13 adds the third: r23a-no-rearm.patch, the lift's notice re-arm
-# deleted, which B9 and the R23a node pins were seen red against.
-is "all three key-mutation patches still apply to this tree (git apply --check)" \
-   "$(git -C "$ROOT" apply --check "$KM/d3-save-parked.patch" >/dev/null 2>&1; echo $?) $(git -C "$ROOT" apply --check "$KM/r14-no-return.patch" >/dev/null 2>&1; echo $?) $(git -C "$ROOT" apply --check "$KM/r23a-no-rearm.patch" >/dev/null 2>&1; echo $?)" "0 0 0"
+# Round 13 adds two: r23a-no-rearm.patch, the lift's notice re-arm deleted,
+# which B9 and the R23a node pins were seen red against, and
+# r23e-editable-field.patch, a form field made editable, which B13's
+# editable-input census was seen red against.
+is "all four key-mutation patches still apply to this tree (git apply --check)" \
+   "$(for km_p in d3-save-parked r14-no-return r23a-no-rearm r23e-editable-field; do git -C "$ROOT" apply --check "$KM/$km_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 "
 is "key-scenario and the README cite the patch files and no mutation branch" \
    "$(qa_count 'd3-save-parked\.patch|r14-no-return\.patch' "$KS") $(qa_count 'mut-(d3-save-parked|r14-no-return)' "$KS") $(qa_count 'mut-(d3-save-parked|r14-no-return)' "$ROOT/scripts/dev-harness/README.md")" "2 0 0"
 # run.sh clean on the directory a signalled F leaves: DRIVEN. The old

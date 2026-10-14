@@ -1,0 +1,13 @@
+diff --git a/Guide.qml b/Guide.qml
+index 0000000..0000000 100644
+--- a/Guide.qml
++++ b/Guide.qml
+@@ -4790,7 +4790,7 @@ Item {
+                   // editInsert / editDelete -> applyEdit) and the control only
+                   // renders it; its caret, selection and navigation stay
+                   // native. This line is the fix; do not bind it to anything.
+-                  readOnly: true
++                  readOnly: false
+                   // A masked field is shown from its start so scheme and host
+                   // are always readable (UX-SOURCES 4.4); no caret scrolling.
+                   autoScroll: !fieldRow.masked
