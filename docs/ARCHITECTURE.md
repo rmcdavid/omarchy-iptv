@@ -307,6 +307,61 @@ a reload that is not a state blocks at once and memory stands. The helper's
 empty default over it. `ARCHITECTURE-SOURCES.md`'s round-12 rulings carry
 the table, the decision and every writer.
 
+Amended 2026-10-13 (D-SINK-19 round 13, R23; lane-key-p1, lane A). Five
+things changed about loading and one was measured:
+- The helper never blocks on the state path and never reads anything but a
+  regular file there (R23b): every read goes through one opener,
+  `open_regular` (`O_NONBLOCK`, then `fstat` S_ISREG on the descriptor), so a
+  FIFO or a socket at `state.json` is `found: other` at once instead of an
+  init that hung in `open()` for ever (on 0.13.6 too), and every other `state`
+  verb refuses it with `state.json is not a regular file; nothing was
+  written`, exit 1. Its mode repair touches only a regular file, and the
+  directory repair only a directory (R23d), so a directory at the path is no
+  longer made 0600.
+- The service never waits on the init for ever (R23c): `stateInitWatchdog`
+  TERMs it after `stateInitTimeoutMs` (15 s) and `stateInitKill` KILLs it 2 s
+  later, and a load waiting on it blocks with its own reason, `init-timeout`.
+  The bound is 8.5 times the slowest of 80 timed runs of the real init on
+  this 4-core machine (idle 214-215 ms; 3x oversubscribed, load 7.7, max
+  1,769 ms; 2026-10-13, lane A).
+- The notice is re-armed by every lift, so a second episode in one session
+  is told again; that was always the code and is now pinned (R23a).
+- In the no-write mode an unconfigured guide draws the notice's own words
+  instead of the first-run form (R23e), and every refusal there says the
+  no-write reason (R23f). `UX-SOURCES.md` 5.10.
+- What the FileView does to its WATCH (R23g), measured by lane A in a nested
+  headless cage on a private D-Bus with one FileView declared as `stateFile`
+  is (`scripts/dev-harness/spikes/filewatch/measure.sh`, its result kept
+  beside it as `RESULT-2026-10-13.txt`; 16 sequences, each on a fresh shell
+  over a fresh file, at load 1.31):
+
+  | After | `fileChanged` | load delivered | later in-place write seen |
+  |---|---|---|---|
+  | an external in-place write (truncate, empty, garbage, good content) | yes | yes, every time | yes |
+  | the helper's atomic rename (`state favorite add`) | yes | yes | yes |
+  | a chmod | yes | yes | yes |
+  | the view's own `setText` save, alone, at idle | yes, with `saved` | no (0 of 16; 0 in a burst of 2-3) | yes |
+  | an own save with an external write queued behind it | yes | yes, with the later text | yes |
+  | a restart | -- | the first load | yes |
+
+  The real `Service.qml` driven the same way (lane A's `svcwatch.sh`, session
+  scratch, not committed) agreed idle and under six busy loops on four cores,
+  except that under load the own save DID deliver a load carrying its own
+  text (counted `own-write`): the own echo is timing-dependent, so the node
+  harness now models it both ways (`ownEcho`, and `scripts/check.sh` runs the
+  node suite twice). **This contradicts three earlier measurements** -- the
+  round-9 data-loss lens (the helper's rename raised no reload, D-SRC-19),
+  the round-12 live lens (the same, its `rename.out`) and the round-12
+  data-loss lens (an in-place damage after the session's first own save
+  raised no reload, so the no-write mode never began and the next save wrote
+  memory over the damaged file, nothing lost). Their rigs were lost with
+  `/tmp`; what differed is not known. Until the lead decides, the no-write
+  mode beginning MID-SESSION AFTER AN OWN SAVE is **UNVERIFIED** (rule 14): no
+  committed check observes it. What IS observed live is the mode at a start
+  and mid-session before any own save (key-scenario B5-B7, B9).
+  `ARCHITECTURE-SOURCES.md`'s round-13 rulings carry the detail and the
+  decision requests.
+
 ### mpv status (helper `status` stdout, M1 target)
 
 ```json
@@ -1042,7 +1097,11 @@ What the tree does now, on lane-key-s1 (3d2d8e7):
   first load and for a file that is genuinely newer (a CLI `state ...` write
   with nothing of ours outstanding [round 12, R22f's search: that write never
   arrives, because the FileView raises no reload on the helper's atomic
-  rename (D-SRC-19); a newer file is applied when it is written in place];
+  rename (D-SRC-19); a newer file is applied when it is written in place]
+  [round 13, R23g: lane A's measurement contradicts the bracket above -- the
+  real `Service.qml` applied a helper rename as `file-newer`, idle and under
+  load -- while the round-9 and round-12 lenses measured no reload; section
+  5's round-13 amendment, and undecided];
   and since round 12 (R22a) only a load that parses as a state reaches
   `applyUserState` at all -- a failed load is no longer applied as an empty
   state); `ignore` for the service's own write
@@ -1439,6 +1498,30 @@ not parse replaced at the start, the hint reading `check playlistUrl`);
 sources-scenario 66 / 0, logo-scenario 33 / 0. The measurement, the
 decision table, the copy and the open items are in
 `ARCHITECTURE-SOURCES.md`'s round-12 rulings.
+
+**Round 13 (lead ruling R23, 2026-10-13), after the round-12 lenses.** The
+data-loss lens read 0 problems over about 240,000 sequences and the live lens
+no P1 or P2, and they left one P2 and six P3s. The P2: the lift's re-arm of
+the no-write notice was checked by nothing (deleting it was 0 of 2,354 node
+failures), so a second episode's refused input could go untold; R23a pins it
+in node and live (key-scenario B9). The P3s: a FIFO at `state.json` hung
+`state init` and every `state` verb in `open()`, the service waited on the
+init with no bound and every start orphaned a helper (R23b, one
+non-blocking opener for every state read; R23c, a 15 s watchdog that kills,
+reaps and blocks with reason `init-timeout`); `state init` chmod-ed a
+directory at the path to 0600 (R23d, repairs only a regular file); the logo
+toggle in the no-write mode advised `omarchy bar set` (R23f,
+`Model.refusalMessage`); a no-write start drew the first-run form whose
+submit is refused (R23e, the notice's words as the guide's own surface, no
+editable field); and the harness's counts and drawn-copy fields were
+mislabelled (R23h). R23g measured the FileView's watch (section 5, as
+amended) and found it contradicting three earlier measurements, which is
+left to the lead. R23i removed the ledger's last three withdrawn-symbol
+waivers with their citations. Observed on lane-key-p1 bb5b2de: node 2,372 /
+0 (and 2,372 / 0 with the own-write echo off); python 1,180; key-scenario
+112 / 0 forward and 107 / 5 on `--baseline lane-key-n2` (B10-B14 red there;
+B9 seen red only through its mutation patch, because the line it guards
+existed); sources-scenario 66 / 0, logo-scenario 33 / 0.
 
 **What REMAINS, with its size rather than a claim of zero.** The exposure is
 NOT closed. Three things remain, and the first is the one to quote:
@@ -2364,6 +2447,11 @@ login, which the lead's tooling does not hold.
   (`Saved sources not loaded`, `Model.stateUnreadableNotice`) names the file
   and what to do. It used to be read as an empty state and saved over, which
   is how a start could erase every source (section 5, as amended).
+  [Round 13, 2026-10-13 (R23): the guide's body is then that notice's own
+  words, never the first-run form, and every refusal says the no-write
+  reason; a directory, a FIFO or a socket at the path is refused at once and
+  left untouched; and a start-up check that does not answer within 15 s is
+  stopped, reaped, and treated as this case with reason `init-timeout`.]
 
 Performance budget (10k channels):
 
@@ -2707,7 +2795,12 @@ Manual QA on the live shell (QA role, machine of record):
    when the helper replaces the file by rename. Mitigation already in the
    scaffold: explicit `reload()` after every helper `onExited`. Verify on
    the live shell; if the watch is lost, keep the explicit reloads and stop
-   relying on `onFileChanged`.
+   relying on `onFileChanged`. [2026-10-13, D-SINK-19 round 13 (R23g):
+   measured both ways and not settled. Lane A's FileView spike
+   (`scripts/dev-harness/spikes/filewatch/`) and the real service in a cage
+   saw the watch survive every rename, own save, chmod and restart; the
+   round-9 and round-12 lenses saw a helper rename raise no reload
+   (D-SRC-19). Section 5's round-13 amendment.]
 2. FileView writes into a missing directory: `mkdirProc` creates the three
    directories at service start (argv `mkdir -p -m 700`). Do not call
    `saveState()` before it has run (first user action is always later).
@@ -2779,7 +2872,11 @@ Applied in fix round 1 against `docs/SECURITY-REVIEW.md`:
   [2026-10-13, D-SINK-19 round 12 (R22a): the verb also reports what it
   found at the path before it touched anything (`found`), which the service
   reads to tell a fresh install from a directory it cannot search, and it
-  never rewrites a file that exists, whatever it holds.]
+  never rewrites a file that exists, whatever it holds.] [Round 13 (R23b,
+  R23d): it never blocks on the path (a non-blocking open checked by
+  `fstat`), and its 0600 repair touches only a regular file -- a directory at
+  the path used to be made 0600, unsearchable; the service bounds it with a
+  15 s watchdog (R23c).]
 - S-04: display names never start with `-`; the failure notification body
   is wrapped in curly quotes so it can never parse as a flag.
 - S-05: HTTP reads run under a wall-clock deadline of `max(60 s, 3 x

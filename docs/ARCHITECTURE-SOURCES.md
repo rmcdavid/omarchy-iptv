@@ -3705,7 +3705,12 @@ path BEFORE it repairs any mode (`state_path_found` in `bin/omarchy-iptv`)
 and its reply carries `found` -- `absent` (ENOENT, a missing parent
 included), `file` (a regular file, or a symlink to one), `other` (a
 directory, a FIFO, a dangling symlink) or `unreadable` (the lstat itself
-failed: the directory cannot be searched). `tests/test_state.py`
+failed: the directory cannot be searched) [round 13, R23b: for a FIFO the
+init never got that far on this tree -- it read the file BEFORE the lstat
+and blocked in `open()` until killed (both round-12 lenses, measured; 0.13.6
+the same). Since lane-key-p1 0fbdd47 the lstat comes first and every read
+goes through a non-blocking opener, so a FIFO or a socket answers `other` at
+once (`StateNeverBlocksTest`)]. `tests/test_state.py`
 `StateNeverWrittenUnreadTest` pins `found` for an absent file, a 0000 file,
 a 0000 directory, a directory at the path and a dangling symlink against the
 real helper run as a subprocess. The table above joins the service to
@@ -3758,7 +3763,10 @@ enum`; rule 13).
   and reporting success). The user is told once per episode
   (`stateBlockTold`); a load that IS a state lifts the mode
   (`liftStateBlock`, one console line naming the reason, never a path's
-  contents) and re-arms the notice for a later episode.
+  contents) and re-arms the notice for a later episode [round 13, R23a: no
+  check saw that re-arm until the round-12 data-loss lens deleted it (0 of
+  2,354 node failures); it is now pinned in node and observed live by
+  key-scenario B9].
 - The helper's half. `state init` never rewrites a file that exists: the
   create is `O_EXCL` and the existing branch only chmods, so a state it
   could not parse is left byte for byte -- pinned over garbage, an empty
@@ -3770,7 +3778,8 @@ enum`; rule 13).
   nothing written.
 
 Lane A's readings where R22a is silent, recorded as built and raised to the
-lead to confirm rather than settled here: an EMPTY `state.json` counts as
+lead to confirm rather than settled here [CONFIRMED by the lead on
+2026-10-13 and settled from that date; the round-13 rulings below]: an EMPTY `state.json` counts as
 "does not parse" and blocks; a FileNotFound in the middle of a session (the
 file deleted, or its directory made unreadable) blocks rather than counting
 as fresh, because the FileView reports the unreadable directory the same
@@ -3798,13 +3807,16 @@ sentence is composed from the reason and the path alone:
 | `unparsed` | `is not a valid state file` | `Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell.` |
 | `absent`, `absent-unconfirmed` | `could not be found, or its folder could not be read` | `Make the folder readable with chmod 700, then run omarchy restart shell.` |
 | `io-error`, or anything else | `could not be read` | `Check the file and its folder, then run omarchy restart shell.` |
+| `init-timeout` (round 13, R23c: the start-up `state init` did not answer within 15 s and was stopped) | `could not be checked: the start-up check did not answer and was stopped` | `Make sure a regular file, or nothing, is at that path, then run omarchy restart shell.` |
 
 A source call refused in the mode answers code `state_unreadable` with
 `state.json could not be read · nothing is saved until it can be`
 (`Model.sourceErrorMessage`; the middle dot is `Model.SEP`). The helper's
 refusal is one of `state.json could not be read (<strerror>); nothing was
 written`, `state.json is not UTF-8 text; nothing was written` and `state.json
-is not a valid state file; nothing was written`. `omarchy restart shell` is
+is not a valid state file; nothing was written` [round 13, R23b: and `state.json
+is not a regular file; nothing was written` for a directory, a FIFO or a
+socket at the path]. `omarchy restart shell` is
 the Omarchy CLI's own verb (`omarchy restart --help` lists it on this
 machine, read 2026-10-13). `UX-SOURCES.md` 5.10 is what the user sees.
 
@@ -3857,7 +3869,11 @@ three waiver entries deleted, together -- is the lead's to make; it was run
 green in a throwaway export by this lane. R22f: the helper's `--url` and
 `--epg-url` help, its run-time warning and the comment above them now say
 what D-SRC-19 measured (a running shell does not re-read the file after a
-helper write, so its next save wins); key-scenario.sh's round-7 and round-9
+helper write, so its next save wins) [round 13: lane A's R23g measurement
+did NOT reproduce that -- the real `Service.qml` applied a helper rename as
+`file-newer`, idle and under load -- and the round-12 live lens's `rename.out`
+did; the disagreement is the round-13 rulings' decision request 1, and the
+help text is unchanged until it is decided]; key-scenario.sh's round-7 and round-9
 header paragraphs are marked withdrawn; its baseline footer counts EIGHT
 NOFIELD-only reds on lane-key-z2 (F4, U2, K2, K3, Q2, V1, Y2, Z3), not seven.
 
@@ -3906,7 +3922,10 @@ reads the same 65 problems a host shape on this tree as on lane-key-m2, all
 the pre-existing D-SRC-19 class, and 0 of every other class.
 
 **Open for the lead (not defects; the board's ids are the lead's to
-assign).** (1) Rule 13: the 0.13.6 losses above -- the unreadable-directory
+assign).** [Round 13: (2) is done (R23i, lane-key-p2 fbb61f8); (3) is
+confirmed by the lead; (4) is decided by R23e, the guide's own no-write
+surface; (5) is measured and still the lead's (the round-13 rulings). (1)
+stands.] (1) Rule 13: the 0.13.6 losses above -- the unreadable-directory
 start, and the helper verbs writing over a state they could not read --
 need `D-` ids and rows on `docs/STATUS.md`, which no lane this round owns;
 so do the cache-file siblings of the same shape (the helper's `failed.json`
@@ -3947,3 +3966,442 @@ every one de-prefixed but the three named above; the quoted titles of the
 deleted R18b tests (round-8 rows here and in `QA-SOURCES.md` SRC-MIG-26) are
 quotations of names that no longer run, and the ledger does not read them as
 citations, so they are left as quoted.
+
+### D-SINK-19 round 13 rulings (lead, 2026-10-13; R23, on top of R1-R22, which stand)
+
+**What the round-12 lenses found, on lane-key-n2 (3c2ba57).** The
+data-loss lens read 0 problems over about 240,000 sequences (21,280 at
+length 1 over ten load-failure kinds, 80,864 at length 2, 111,132 at length
+3, 28,824 re-run with a corrected oracle; its `rk12.js`, session scratch),
+through `Service.qml`'s own load handlers, the real helper and the real
+0.13.6 helper. The live lens found no P1 or P2 and verified the upgrade from
+0.13.6 with the real `omarchy-plugin-update`. What they left:
+
+- P2 (the data-loss lens). `liftStateBlock` resets `stateBlockTold`, which is
+  what makes a second no-write episode in one session get told -- and
+  nothing checked it. Its mutant X13 (that one line deleted) read 0 of 2,354
+  node failures and passed live (B5-B7 hold one episode); in the second
+  episode an in-app favourite was refused and the user never told.
+- P3-1 (the data-loss lens, live, its `lf-child-text.sh`). After the
+  session's first own save (an in-app add), an in-place truncation, emptying
+  or garbage write raised no reload: `-- damaged: blocked= add=ok
+  file=CHANGED told=0 urls=0`, so the mode never began and the next save
+  wrote memory over the damaged file (nothing lost: memory held it). With
+  no own save since the start the same damage blocked (`blocked=unparsed
+  add=state_unreadable file=same told=1`). The node harness delivered a
+  reload on every external change (rule 10).
+- P3-2 (both lenses). A FIFO at `state.json`: `state init`, `state show`
+  and `state favorite add` each blocked in `open()` (rc 124 under `timeout`),
+  because the init read the file before its lstat witness; the service waited
+  on the init with no watchdog, the user was never told, and every start left
+  an orphaned helper reparented to the session manager. The same on 0.13.6.
+- P3-3 (the live lens). In the no-write mode the logo toggle answered `Could
+  not save settings · try omarchy bar set` (`Guide.qml` `toggleLogos` /
+  `confirmLogos` mapped every `false` to `persist_failed`).
+- P3-4 (the live lens). `state init` chmod-ed a DIRECTORY at the state path
+  0755 -> 0600, making it unsearchable, while the README said the plugin had
+  not touched it. Pre-existing (dev's `init_state_file` has the same branch).
+- P3-5 (the live lens). A no-write start drew the first-run form (`No
+  playlist configured`), whose submit is refused; only the notification
+  said why.
+- P3-6 (the live lens). key-scenario.sh stated lane-key-m2's baseline as 96 /
+  9 in its header and 97 / 9 in its footer (lettered checks against summary
+  lines, one unlabelled); the harness's `emptyTitle` / `emptyProse`, called
+  "the empty state as DRAWN", read the hidden empty state's prose while the
+  first-run form drew `firstRunProse`.
+- Left by the round-12 lanes: R22e's last step (below, R23i), whose prepared
+  patch was lost when the machine rebooted on 2026-10-13 and `/tmp` (a tmpfs)
+  went with it.
+
+**The lead's ruling, R23.**
+
+R23a. The re-arm is pinned. A node pin through `Service.qml`'s own functions
+(`tests/service-harness.js`): two no-write episodes in one session, the
+second told again, and an in-app input refused in the second episode refused
+AND told. A live segment in key-scenario.sh: two episodes with no own save
+between them, two notices. Both seen red with the reset line deleted, through
+a mutation patch file.
+
+R23b. The helper never opens a state path in a way that can block, and never
+reads one that is not a regular file (or a symlink to one). One shared opener
+for every state read, race-free (a non-blocking open, then `fstat` S_ISREG),
+answering `other` for `init` and `state_unreadable` with exit 1 for the
+verbs, the file left untouched. Pins run the real helper as a subprocess with
+a timeout. Rule 15 over every `open()` of a path a user or another program
+can replace, each with a verdict.
+
+R23c. The service never waits on the init forever: `stateInitProc` gets a
+watchdog in the shape of the service's other helper runs, its bound chosen
+from the init's measured duration idle and under load with the margin
+stated. A timeout kills AND reaps the helper and decides as the no-write
+mode with its own reason (one more reason in `Model.stateUnreadableNotice`),
+told once.
+
+R23d. `init_state_file` never chmods anything that is not a regular file.
+Rule 15 over every chmod in the helper, each with a verdict.
+
+R23e. The no-write mode has its own guide surface. While `stateWriteBlocked`
+is set the guide does NOT draw the first-run form: it draws an empty state
+whose title and prose come from `Model.stateUnreadableNotice` for the current
+reason and path -- ONE source of copy with the notification -- with no
+editable field (D-CLIP-1). The Sources screen stays reachable as it is.
+Pinned through the model and through the harness, red on lane-key-n2.
+
+R23f. Every refusal in the no-write mode says the no-write reason: the logo
+toggle and every other Guide path that maps a service `false` to generic copy
+route through a Model decision that answers the `state_unreadable` sentence
+while `stateWriteBlocked` is set. `ownedWriteMode` stays `none` in the mode.
+
+R23g. Rule 10 for the file model. Measure what the real FileView does to its
+watch after its own save, the helper's atomic rename, an external in-place
+write and a restart; make `tests/service-harness.js` deliver reloads exactly
+as measured; rewrite or report every pin that relied on a reload reality
+would not deliver. Do NOT change the service's watch behaviour: D-SRC-19 is
+its own work, and its scope is whatever is measured.
+
+R23h. Instruments: key-scenario.sh states its baselines in one named unit;
+the harness's drawn-copy fields report what is DRAWN, and a check reads them.
+
+R23i. R22e finished: the one commit that removes the last three prefixed
+citations and their three withdrawn-symbol waivers together.
+
+**Confirmed by the lead (2026-10-13), settled from this date.** Round-12 lane
+A's three readings where R22a was silent, recorded in the round-12 rulings
+above as "built and raised", are now rulings: (1) an EMPTY `state.json` does
+not parse and blocks; (2) a FileNotFound in the middle of a session blocks
+(the FileView reports an unreadable directory the same way); (3) a block at a
+start gets one re-read after the init, so a 0000 file or a 0000 directory
+recovers with no notice, because the init's mode repair fixes it.
+
+**Measure only, nothing changed: can `manifest.json` stop declaring
+`playlistUrl` and `epgUrl`?** Lane A read the host as installed (omarchy
+4.0.4-1) and this lane re-read the same lines on 2026-10-14. An undeclared
+key on a bar entry still reaches a third-party plugin's `barConfig`:
+`/usr/share/omarchy/shell/shell.qml` 326-328 is `function publicBarConfig()
+{ return JSON.parse(JSON.stringify(shell.barConfig || {})) }`, a deep clone
+filtered by nothing, which `barConfigFor` (330-333) hands to a plugin that is
+not first-party, and `plugins/bar/BarModel.js` `entrySettings` (10-17) copies
+every key but `id`. `omarchy bar set` accepts an undeclared key: `cmd_set` in
+`/usr/share/omarchy/bin/omarchy-bar` (333-361) passes it to `omarchy-shell
+shell setBarWidget`, and `services/PluginRegistry.qml` (342-379) checks only
+the location and that the entry is an object, then `entry[String(key)] =
+value` (379). The manifest's `defaults` are never written to an entry (a put
+entry is created as `{ id: key }`, PluginRegistry.qml 526), and the only host
+reads of `schema` and `defaults` are the registration at shell.qml 1406-1408.
+The live proof already exists: `sourceKey` is not declared in `manifest.json`
+and the plugin writes and reads it through `barConfig` today. What would have
+to change: `tests/test_manifest.py`
+`test_the_shipped_seven_keys_are_untouched` asserts both keys in `defaults`
+and `schema`. Answer: on this host the migration does not depend on the
+declaration. The lead decides; nothing is changed this round.
+
+**What the tree does (lane-key-p1, lane A: 0fbdd47 R23b/R23d, d5cd45c R23g,
+418e01e R23a/c/e/f, 7a39498 and bb5b2de the live segments and the census; on
+lane-key-n2 merged with dev e7b1275 as 86e9800).**
+
+- R23a. The reset line stands as it was; what is new is its check. Node:
+  `R23a (<mode> host, mid-session, <between> between): TWO no-write episodes
+  -- the lift re-arms the notice, so the second episode is told again, and an
+  in-app favourite refused in it is refused AND told`, four pins. Live:
+  key-scenario B9, two episodes reached by in-place writes the FileView
+  reloads, with no own save between them (`episodes:unparsed/[]/unparsed
+  told:1/2 path:2 add:state_unreadable file:same urls:0`). Seen red through
+  `scripts/dev-harness/spikes/key-mutations/r23a-no-rearm.patch`: node 4 of
+  2,358, the same 4 with the own-write echo off; live 111 / 1, B9 `told:1/1`
+  (`key-20261013-214109-138686`). On lane-key-n2 both are green, because the
+  line existed there and only its check did not.
+- R23b. One opener, `open_regular` in `bin/omarchy-iptv`: `O_RDONLY |
+  O_NONBLOCK | O_NOCTTY | O_CLOEXEC`, then `fstat` of the descriptor that was
+  opened; anything but S_ISREG raises `NotRegularFile` (an `OSError`, so
+  every tolerant reader that answers `None` for an unreadable file answers
+  `None` for this), and a socket, which cannot be opened at all (ENXIO), is
+  reported the same way. `state init` takes its lstat witness first and then
+  reads through the opener; a regular file swapped for something else between
+  the two is `other`. Every other verb refuses through `read_state_strict`
+  with exit 1, code `state_unreadable` and `state.json is not a regular file;
+  nothing was written`. Python: `StateNeverBlocksTest`, ten tests, each
+  running the real helper as a subprocess with a 20 s timeout -- the init over
+  a FIFO and over a socket answers `other` at once and leaves it, every verb
+  refuses a FIFO, a socket and a directory as not a regular file, the D-ID-1
+  remap reads a FIFO without blocking. Against lane-key-n2's helper with a 3 s
+  timeout: 9 of 10 failed (30 failing subtests: the FIFO, socket and
+  directory timeouts for init and every verb, and the chmods R23d removes);
+  the control, a symlink to a 0000 file, green. Live: key-scenario B14 (`blocked:not-a-file
+  found:present told:1 left:none fifo:600`), red on lane-key-n2 (`blocked:
+  found: told:0 left:<pid>`, the hung helper killed by pid afterwards).
+- R23c. `Service.startStateInit` arms `stateInitWatchdog`
+  (`stateInitTimeoutMs`, 15 s) every time it starts the init; on expiry it
+  logs `omarchy-iptv: state init exceeded 15 s, terminating it`, sets
+  `stateInitTimedOut`, sends TERM, and `stateInitKill`
+  (`stateInitKillGraceMs`, 2 s) sends KILL if the run is still alive. The
+  exit handler stops both timers, counts the run as failed (`stateInitOk`
+  false) and hands the flag to `Model.stateInitFound(stdout, exitCode,
+  timedOut)`, which answers `timeout`; `Model.stateLoadDecision` then blocks a
+  load that was WAITING on the init with reason `init-timeout` (no retry:
+  nothing a re-read could fix). A load that had already been applied when the
+  init timed out is left as it was: no block, no notice, the init counted as
+  failed (lane A's reading, raised below). The bound, from the real `state
+  init` timed on this 4-core machine on 2026-10-13 over a fresh directory and
+  an existing file alternately (lane A's `inittime.py`, session scratch):
+  idle, 30 runs, 214-215 ms; six busy loops (1.5x oversubscribed, load about
+  3), 30 runs, median 543, p90 817, max 968 ms; twelve (3x, load 7.7), 20
+  runs, median 1,246, p90 1,575, max 1,769 ms. 15 s is 8.5 times the worst of
+  those and 70 times idle; a false timeout costs one session in the no-write
+  mode, told, with nothing lost. Live: key-scenario B10, the init held 60 s
+  by a deliberately slow tree over a file that does not parse
+  (`blocked:init-timeout found:timeout helper:yes left:none told:1 stopped:1
+  file:same watchdog:1`; `left:none` is an exact-argv scan of /proc, never a
+  pattern), red on lane-key-n2 (`blocked: found: helper:no(<pid>) left:<pid>
+  told:0`). Node: `R23c: stateInitFound answers "timeout" ...`, `R23c:
+  stateUnreadableNotice("init-timeout") is its own sentence ...`, and per
+  host `R23c (<mode> host): startStateInit arms the init's watchdog ...`, `...
+  the init never answers over <fault> ...`, `... an init that times out AFTER
+  the state loaded leaves the session as it was ...`. Pointed at lane-key-n2's
+  `Service.qml` and model: 6 of 2,372 failed, all R23c harness pins; the
+  loaded-then-timeout pin is a control and green there.
+- R23d. `chmod_if_kind(path, mode, kind)` opens the path `O_PATH` (no
+  permission needed on the target, never opens a FIFO or a device), decides
+  the kind by `fstat`, and chmods through `/proc/self/fd/N`, so a rename
+  between the check and the change cannot redirect it; a mode already right
+  is not touched (a chmod is an inotify `IN_ATTRIB` on what the shell
+  watches); no `/proc` means no repair, never a chmod by name. `init_state_file`
+  repairs only S_ISREG; `ensure_private_dir` only S_ISDIR. The atomic writers
+  and the init's create `fchmod` their own descriptor. Python:
+  `test_init_never_chmods_a_directory_at_the_path`, `..._a_fifo_at_the_path`,
+  `test_init_still_repairs_a_symlink_to_a_0000_file`,
+  `test_init_never_chmods_a_file_where_the_state_directory_should_be`.
+- R23e. `Model.guideSurface` answers `stateUnreadable` for an unconfigured
+  guide while `stateBlocked` is set (`setup` false, no saved-sources link, no
+  rows); `Model.firstRunAllowed({ serviceReady, configured, stateBlocked })`
+  is the one decision the guide asks before opening into the first-run form
+  -- on open, on a `configured` or `stateWriteBlocked` flip while open, and on
+  the Esc / `o` return from Sources (`Model.closeSources`, `Model.onEscape`).
+  The empty state's glyph is the alert glyph, its title and prose are
+  `Model.stateUnreadableNotice(stateBlocked, Service.stateFilePath)` -- the
+  notification's own words -- and its footer drops `r retry` (a refresh cannot
+  make the file readable). A guide that still HAS channels mid-session keeps
+  them: memory stands and plays, and the refusals say why (R23f; lane A's
+  reading, raised below). If the mode begins while the first-run form is
+  showing (an init that answered late), the guide leaves the form for the
+  surface. Node: `R23e: guideSurface ...`, `R23e: firstRunAllowed ...`, `R23e:
+  the Esc / o return from Sources ...`; mutations of each read 1 failure.
+  Live: key-scenario B11 (`kind:stateUnreadable form:false editable:0
+  shown:true title:notice prose:notice sent:1`), red on lane-key-n2
+  (`kind:unconfigured form:true editable:0 shown:NOFIELD`). `editable:0` is
+  the harness's new census (`ipc editable`, the editable text inputs under the
+  guide), which was seen counting through
+  `spikes/key-mutations/r23e-editable-field.patch`: B13 `editable:2`
+  (`key-20261013-230141-283957`, 111 / 1).
+- R23f. `Model.refusalMessage(code, blocked, kind)`: while `blocked` is set,
+  `Model.sourceErrorMessage("state_unreadable")` whatever the code;
+  otherwise `Model.persistFailureMessage(code)` for `kind` `"persist"` and
+  `Model.sourceErrorMessage(code)` for any other kind. `toggleLogos` (off),
+  `confirmLogos` (on) and `showPersistFailed` go through it. Node `R23f:
+  refusalMessage ...`, and the R16 structural pin re-pointed to it. Live:
+  key-scenario B12 (`says:no-write advice:none writes:0`), red on lane-key-n2
+  (`says:other advice:bar-set`).
+- R23g. Measured, below. `tests/service-harness.js` gains `ownEcho`
+  (`"load"` | `"none"`, from its options or `IPTV_HARNESS_OWN_ECHO`) and
+  `scripts/check.sh` runs the node suite a second time with it off: 2,372 / 0
+  both ways. No existing pin relied on a reload the real FileView was not
+  measured to deliver, so none was rewritten. The `none` run has not been seen
+  red: no pin fails without the echo, which is the finding, not a check proven
+  (rule 11).
+- R23h. key-scenario.sh states every count in one named unit (the summary
+  line's) and its header says which; the harness's `state` verb reports
+  `emptyTitle` / `emptyProse` as DRAWN -- the first-run form's head when it
+  shows, else the empty state when it shows, else nothing -- with
+  `emptyShown`, `firstRunHead`, `firstRunForm`, `stateBlocked` and
+  `footerHints` beside them. Live: key-scenario B13, a fresh install's drawn
+  copy (`form:true editable:0 ... prose:Paste or type your M3U URL or path,
+  then press Enter`), red on lane-key-n2 (`prose:Add your M3U URL or path in
+  Sources...`, the hidden empty state's).
+- R23i (this lane, lane-key-p2 fbb61f8). The reducer-table row's three
+  prefixed names went bare and the three waivers went, in one commit; each
+  half alone is red (docs half: `withdrawn-symbol waivers: 3 listed, 0 in
+  use` and three "unused" problems; script half: three `Model.<name> is cited
+  in docs/ARCHITECTURE-SOURCES.md and resolves in no source file`). The
+  ledger reads `withdrawn-symbol waivers: 0 listed, 0 in use` and 244 symbol
+  citations (247 before: the three were the difference). The round-12
+  hazard is closed: entryWriteNeeded cited with the `Model.` prefix in `QA.md`
+  now reads rc 1, where it read rc 0 under the waiver.
+
+**What FileView does to its watch (R23g), measured 2026-10-13 by lane A.**
+quickshell 0.3.1 and Qt 6.11.2 as installed, in a nested headless cage on a
+private D-Bus with no service directories (`scripts/dev-harness/
+private-bus.sh`, committed this round). Instrument 1 is
+`scripts/dev-harness/spikes/filewatch/measure.sh`: one FileView declared
+exactly as `stateFile` is (`watchChanges`, `atomicWrites`, `printErrors:
+false`, `onFileChanged: reload()`), 16 sequences each on a fresh shell over
+a fresh file, 1.5 s per step, at load 1.31; its printed result is kept
+beside it as `RESULT-2026-10-13.txt`, so the measurement is re-runnable.
+
+| Step | `fileChanged` | a load delivered | a later in-place write still seen |
+|---|---|---|---|
+| (iii) an external in-place write (`>`: truncate, empty, garbage, good content) | yes | yes, every time | yes |
+| (ii) the helper's atomic rename (`state favorite add`) | yes | yes | yes |
+| a chmod | yes | yes | yes |
+| (i) the view's OWN `setText` save, alone, at idle | yes, with `saved` | NO: 0 of 16 lone saves, and 0 in a burst of 2-3 own saves | yes |
+| an own save with an external write queued right behind it | yes | yes, with the later text | yes |
+| (iv) a restart | -- | the first load | yes |
+
+In EVERY sequence, an in-place write after any number of own saves, helper
+renames, chmods or a restart was still seen: the watch was never lost.
+Instrument 2 is the real `Service.qml` under the dev harness in a cage (lane
+A's `svcwatch.sh`, session scratch, NOT committed; its output
+`svcwatch-1..4.txt` read by this lane): at idle, after an in-app add's own
+write, in-place garbage, empty and truncated writes each blocked the session
+(`unparsed`) and a restore lifted it; a helper rename (`os.replace`, and
+`state source add`) was applied as `file-newer`. With six busy loops on four
+cores (load 2.6 -> 7.6) the same results held, and the own write DID deliver
+a load carrying its own text, counted `own-write`. Logged event order: at
+idle `setText, setText, saved, fileChanged, saved` and no load; under load
+`saved, saved, fileChanged, load(own=true)`. So the own echo is
+timing-dependent, which is why the harness now runs both ways.
+
+**The measurements disagree, and this lane does not resolve it
+(decision request 1 below).** The round-12 data-loss lens measured,
+live, NO reload after an in-place damage that followed the session's first
+own save (P3-1 above); the round-12 live lens measured NO reload after the
+helper's atomic `state source add` (its `rename.out`: the reload counter
+stayed `{'first-load': 1}`, the service still showed 1 source and the file
+had 2); and D-SRC-19 itself was filed on the round-9 data-loss lens's
+measurement of the same. Lane A's two instruments above, idle and under
+load, reproduced neither: every external change after an own save or a
+helper rename was reloaded. The earlier rigs were lost with `/tmp`, so what
+differed is not known. Consequences stated, not decided:
+- D-SRC-19's scope as lane A measured it is NONE; as the round-9 and
+  round-12 lenses measured it, it is the helper's own verbs AND any external
+  change after the session's first own save. Both are on record. Whether
+  0.13.6 shares it: its `stateFile` has the identical declaration (`git show
+  dev:Service.qml`, `watchChanges: true`, `atomicWrites: true`, `printErrors:
+  false`, `onFileChanged: reload()`), so it shares whatever FileView does.
+- The mid-session no-write mode after an own save is therefore **UNVERIFIED**
+  (rule 14): one instrument, uncommitted, saw it begin; another, lost, saw
+  it not begin; no committed check observes it. key-scenario B9 deliberately
+  reaches its two episodes with NO own save between, which is the half that
+  IS observed, together with B5-B7 (round 12).
+- The helper's own text (`remap_state_file`'s docstring, `state source update
+  --help`, `setting_owned_warnings`) still says a running shell does not
+  re-read `state.json` after a helper write; R22f wrote that on the round-9
+  and round-12 measurements. Re-measure on the earlier lenses' rig shape,
+  re-word, or leave it: the lead's (lane A's open question).
+
+**The no-write copy, as shipped on lane-key-p1.** One more reason in
+`Model.stateUnreadableNotice`; the round-12 table above carries it as its
+own row:
+
+| Reason | `<what>` | `<fix>` |
+|---|---|---|
+| `init-timeout` (R23c) | `could not be checked: the start-up check did not answer and was stopped` | `Make sure a regular file, or nothing, is at that path, then run omarchy restart shell.` |
+
+The guide's no-write surface draws `Saved sources not loaded` over the same
+body as the notification (R23e). Every refusal the guide shows in the mode
+reads `state.json could not be read · nothing is saved until it can be`
+(R23f). The helper adds one refusal, `state.json is not a regular file;
+nothing was written`. `UX-SOURCES.md` 5.10 is what the user sees.
+
+**Rule 15, lane A's searches (lane-key-p1), recorded here so the next person
+inherits them.**
+- Every `open()` in the helper of a path a user or another program can
+  replace (R23b). Routed through `open_regular`: `state.json` for `state
+  init`, every other verb and the D-ID-1 remap; every cache JSON
+  `read_json` reads (`channels.json`, `failed.json`, `playlist-status.json`,
+  `epg-status.json`, the indexes); the EPG window cache (`load_window`); a
+  cached logo (`_read_logo_prefix`); the player lock record
+  (`read_lock_file`); a local playlist or EPG file (`read_local_source`,
+  whose `isfile` check a swap could outrun). Left as they are, with why: the
+  player lock's `O_CREAT | O_RDWR` open (`acquire_lock`; on Linux `O_RDWR`
+  does not block on a FIFO, and its fchmod is now gated on S_ISREG); the
+  config shield's open of `shell.json` (already `O_NONBLOCK | O_NOFOLLOW`,
+  refused by fstat unless a regular file the euid owns); the cache walk's
+  directory opens (`O_DIRECTORY` fails at once on anything else); the atomic
+  writers' temporary files (created `O_EXCL` in a 0700 directory);
+  `manifest.json` in the plugin directory, `/proc/<pid>/*`, `os.devnull`, and
+  the urllib openers (network, not paths). The list also sits in a comment
+  above `NotRegularFile`.
+- Every chmod in the helper (R23d; lane-key-n2 line numbers): 703 and 707,
+  `ensure_private_dir` -- now S_ISDIR only, and 707 was a SIBLING defect: it
+  chmod-ed whatever sat at the state-directory path, so a regular file there
+  came out 0700, executable (pinned, mutation P4 1 failure); 2117 and 2140,
+  the temporary files -- now `fchmod` on the creating descriptor; 7922, the
+  init's repair -- the defect itself, now S_ISREG only on an `O_PATH`
+  descriptor; 7928, the init's create -- `fchmod`; 5120, the player lock --
+  gated on S_ISREG; 8161, the config shield -- already gated on S_ISREG and
+  owner, cleared.
+- Every Guide path that maps a service result to copy (R23f). Routed through
+  `Model.refusalMessage`: `toggleLogos`, `confirmLogos`, `showPersistFailed`.
+  Cleared, because they render the service's own code, which is
+  `state_unreadable` in the mode: `switchSource`, the add / update form's
+  submit (`failForm`), `removeSource`, `retrySource`. Cleared as not
+  refusals of a state write: `not_ready`, `unknown_source`, `too_many`, and
+  the player verbs (`togglePause`, `seek`, `requestTracks`), which write no
+  state. NOT changed, raised below: `toggleFavoriteAt`, `saveCurrentSearch`
+  and `removeAt` (recent, hide, forget) apply in memory and show their
+  success copy; their state write is refused silently and counted in
+  `stateWritesRefused`.
+- Harness pins that relied on a reload the real FileView would not deliver
+  (R23g): none. Other drawn-copy readers (R23h): B8 reads the error kind,
+  where the drawn copy and the empty state's agree; `emptyTitle` and
+  `emptyProse` have no other reader in `scripts/`.
+
+**Mutation, lane A (one decision at a time in a `git archive` export, the
+whole suite counted).** Helper, of 62 `test_state` tests: P1 `O_NONBLOCK`
+removed 11 failed; P2 the S_ISREG refusal removed 16; P3 the init's repair
+chmods any kind 3 (directory, FIFO, socket); P4 `ensure_private_dir` chmods
+any kind 1; P5 the init's `found` override from the descriptor removed 0 --
+equivalent unless a rename races between the lstat and the open, so no
+deterministic test reaches it; kept as a defensive line and raised below.
+Node, of 2,372: N2 `stateInitFound` ignores `timedOut` 5; N3
+`stateLoadDecision` without the timeout line 5; N4 `startStateInit` does not
+arm the watchdog 2; N5 the exit handler does not pass the flag 4; N6 the
+watchdog does not set it 4; N7 no `init-timeout` sentence 1; N8 `guideSurface`
+ignores the mode 1; N9 `firstRunAllowed` ignores it 1; N10 `closeSources`
+ignores it 1; N11 `refusalMessage` ignores it 1.
+
+**Counts.** On lane-key-n2 merged with dev (86e9800): node 2,354; python
+1,170; `qa-lib-test.sh` 472; key preflight 11; key-scenario's live floor 105
+lettered checks, summary 106 / 0; qml spec 78; a11y 35; text format guard
+58; ledger 247 citations, 337 board rows, withdrawn-symbol waivers 3 / 3. On
+lane-key-p1 bb5b2de (lane A's report; `./scripts/check.sh` all green on
+7a39498 and on bb5b2de, about 204 s each at load 0.3-2.1): node 2,372 (+18:
+4 R23a, 10 R23c, 3 R23e, 1 R23f), and 2,372 again with the own-write echo
+off; python 1,180 (+10, `StateNeverBlocksTest`); `qa-lib-test.sh` 472 (the
+patch-apply check now covers four patches); key preflight 11; key-scenario
+live floor 111 (B9-B14), forward 112 / 0 in 277 s
+(`key-20261014-043943-514380`), `--baseline lane-key-n2` 107 / 5 in 294 s,
+B10-B14 red (`key-20261014-044420-538071`); sources-scenario 66 / 0 under an
+outer headless cage on a private bus; logo-scenario 33 / 0
+(`logo-20261014-043540-501342`); qml spec 78, a11y 35, text format guard 58.
+Every live run under a nested headless cage on a private D-Bus with no
+service directories; transcripts in lane A's session scratch directory. On
+lane-key-p2 after R23i: the ledger reads 244 citations, 337 rows,
+withdrawn-symbol waivers 0 / 0.
+
+**Open for the lead (decision requests, not defects; the board's ids are the
+lead's).**
+- (1) The FileView watch measurements disagree (above); D-SRC-19's scope,
+  the mid-session condition and the helper's help text wait on it.
+- (2) (lane A's reading of R23c): an init that times out AFTER the state
+  loaded leaves the session as it was (no block, no notice, the init counted
+  as failed, which gates the entry flush). Confirm, or rule that a timeout
+  always blocks.
+- (3) (lane A's reading of R23e): the no-write surface replaces only the
+  UNCONFIGURED body; a mid-session block keeps its rows. Confirm.
+- (4) (R23f): a favourite, a hidden group, a saved or forgotten search
+  and a removed recent apply in memory and show success copy in the mode;
+  only the once-per-episode notice says changes now are not kept. Should
+  those transients say "not kept" too?
+- (5) (R23e, "Sources stays reachable as it is"): reachability did not
+  change, but a no-write START has 0 sources in memory, so the footer does
+  not offer `o sources` there (the same gate that hid the first-run form's
+  `Saved sources` link). The `o` key itself is not gated on the count
+  (`Guide.qml` `handleListLetter`), but no check observes `o` on that surface
+  -- UNVERIFIED; the harness reaches Sources there through `ipc sourcesKey
+  enter` (B12). Should the surface offer Sources explicitly?
+- (6) the P5 line (init's `found` from the descriptor), reachable only
+  by a rename race. Keep or drop.
+- (7) the manifest answer above.
+- Rule 13: the round-12 open item (1) -- `D-` ids and board rows for the
+  0.13.6 losses -- is not touched by this round; `docs/STATUS.md` is not
+  this lane's.
