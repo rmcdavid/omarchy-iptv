@@ -349,18 +349,79 @@ things changed about loading and one was measured:
   except that under load the own save DID deliver a load carrying its own
   text (counted `own-write`): the own echo is timing-dependent, so the node
   harness now models it both ways (`ownEcho`, and `scripts/check.sh` runs the
-  node suite twice). **This contradicts three earlier measurements** -- the
-  round-9 data-loss lens (the helper's rename raised no reload, D-SRC-19),
-  the round-12 live lens (the same, its `rename.out`) and the round-12
-  data-loss lens (an in-place damage after the session's first own save
-  raised no reload, so the no-write mode never began and the next save wrote
-  memory over the damaged file, nothing lost). Their rigs were lost with
-  `/tmp`; what differed is not known. Until the lead decides, the no-write
-  mode beginning MID-SESSION AFTER AN OWN SAVE is **UNVERIFIED** (rule 14): no
-  committed check observes it. What IS observed live is the mode at a start
-  and mid-session before any own save (key-scenario B5-B7, B9).
-  `ARCHITECTURE-SOURCES.md`'s round-13 rulings carry the detail and the
-  decision requests.
+  node suite twice). [Corrected 2026-10-14, D-DOC-8: this paragraph used to
+say the result contradicted three earlier measurements -- the round-9
+data-loss lens (a helper rename raised no reload, D-SRC-19), the round-12
+live lens (the same, its `rename.out`) and the round-12 data-loss lens (an
+in-place damage after the session's first own save raised no reload) -- and
+that the no-write mode beginning mid-session after an own save was
+UNVERIFIED until decided.] The round-13 live lens found what differed: the
+state DIRECTORY at `stateFile`'s first load. Every one of lane A's rigs
+started with it present, and there every external change reloads, own saves
+or not; the earlier rigs started with it absent -- the production
+fresh-install shape, `~/.local/state` present and `omarchy-iptv/` under it
+absent -- and there the view raised nothing for the whole session, the own
+echo included (live on lane-key-p2 and on a 0.13.6 export, alternating the
+two shapes). The lead ruled on that measurement on 2026-10-14 and round 14
+fixed it (next amendment).
+
+Amended 2026-10-14 (D-SINK-19 round 14, R24; lane-key-q1, lane A). The
+watch, the merge, the symlink and the bound:
+- The first session after a fresh install sees external changes (R24c).
+  Measured in the committed spike (`scripts/dev-harness/spikes/filewatch/
+  measure.sh <helper> r24`, `RESULT-2026-10-14-r24.txt`, nested headless
+  cage on a private D-Bus, two runs at load 1.2-1.7): with the directory
+  absent at the first load, nothing after the start-up `mkdir -p` and `state
+  init` raised a signal -- the init's creation, a helper rename, an in-place
+  write, in-place garbage (sequence Q); ONE explicit `reload()` after them
+  re-armed the view and every later change was seen (R, and after an own
+  save, T and R2); with the directory present and no file, the init's
+  creation was seen without help (U). So `decideStateLoad`'s `fresh` branch
+  calls `stateFile.reload()`, and the reload it causes is the identity:
+  `Model.sameState` of the init's empty default and `parseState("")` is
+  true. The node harness models the unarmed view (rule 10). Observed live by
+  key-scenario B16 (`seen:1 file:C,D blocked:unparsed told:1`; on dev
+  `seen:0 file:D blocked: told:0`).
+- A foreign write is merged, never ignored and never applied blind (R24a,
+  D-SRC-22). The service keeps a BASE, `landedState`: the text it loaded, its
+  last save that LANDED, or the last foreign text it merged. A reload whose
+  text is the base (`Model.sameState`) or one of the service's own writes is
+  ignored while a save is parked, in flight or failed, as R9 had it; any
+  other text in that window is FOREIGN -- a hand-run helper `state` verb, a
+  restore -- and `Model.mergeForeignState(base, ours, theirs)` three-way
+  merges it: sets for favourites, hidden groups and saved searches, records
+  by key for sources, whole values for recents, `activeKey`, `lastPlayed`,
+  `session` and `cacheLayout`, `entryMigrated` kept if either side has it,
+  and a CONFLICT (both sides changed one record, or one value, differently)
+  goes to the foreign write, logged one line per conflict by key and field
+  name (`Model.mergeConflictLine`, never a URL or a value). The result is
+  memory, the foreign text becomes the base, and a save is asked for when
+  the result is not what is on disk. With nothing held a foreign reload is
+  applied whole, as before. `ARCHITECTURE-SOURCES.md`'s round-14 rulings
+  carry the field table and the fixture.
+- One answer per state path (R24b, D-SRC-23, D-SRC-26). A symlink at
+  `state.json` is followed when it leads to a regular file -- for reads, and
+  for writes, which land THROUGH it: a 0600 temporary file beside the target,
+  renamed onto it, so the link survives -- and refused with exit 1 and
+  nothing written when it dangles or leads to anything else. Measured first:
+  the FileView's own save over a valid link writes through it and keeps it
+  (spike sequence V), and dev's helper replaced the link with a regular file
+  and the running view then saw none of its later writes (V, W). `state
+  init` answers `link` for a link it will not follow and `not-a-dir` for a
+  file where the state directory should be (no traceback), and each has its
+  own notice sentence instead of the folder-permission one.
+- One bound over the whole start-up check (R24d, D-SRC-24, D-SRC-25): the
+  15 s watchdog arms when `mkdir` starts and TERMs, then KILLs, whichever of
+  `mkdir` and `state init` is running; and `state init` arms `SIGALRM` for 30
+  s (`STATE_INIT_DEADLINE`, default action) before it names the path, so a
+  shell that stops first leaves nothing running past that (measured: a held
+  init ended by `Alarm clock`, rc 142, after 30.2 s; key-scenario B18). The
+  KILL half is observed now (B17, and seen red without it, R24g). Neither
+  reaches a process in uninterruptible sleep on a hung filesystem.
+- In the no-write mode the playlist fetch is handed no `--state-dir`
+  (`Model.fetchStateDir`, R24e, D-SRC-27), so the D-ID-1 remap cannot write
+  the file the session refuses to write; and the Sources screen draws the
+  notice's title and no Add rows (R24f, D-SRC-28; `UX-SOURCES.md` 5.10).
 
 ### mpv status (helper `status` stdout, M1 target)
 
@@ -1101,7 +1162,10 @@ What the tree does now, on lane-key-s1 (3d2d8e7):
   [round 13, R23g: lane A's measurement contradicts the bracket above -- the
   real `Service.qml` applied a helper rename as `file-newer`, idle and under
   load -- while the round-9 and round-12 lenses measured no reload; section
-  5's round-13 amendment, and undecided];
+  5's round-13 amendment, and undecided] [round 14: decided -- the lenses' rigs started
+  with the state directory absent, the one session that never reloads, and
+  R24c re-arms it; and while a save is held a reload is ignored only when
+  its text is the base, a FOREIGN text being merged (R24a)];
   and since round 12 (R22a) only a load that parses as a state reaches
   `applyUserState` at all -- a failed load is no longer applied as an empty
   state); `ignore` for the service's own write
@@ -2483,6 +2547,15 @@ Performance budget (10k channels):
    resolve to a regular file outside `/proc`, `/sys`, `/dev`; 64 MB cap;
    20 s network timeout; no redirects to other schemes (urllib default).
 5. No writes inside the plugin directory; caches and state are 0700/0600.
+   [2026-10-14, D-SINK-19 round 14, R24b: one stated exception to "the
+   state directory is 0700". When the user has made `state.json` a symlink to
+   a regular file elsewhere (a dotfiles folder), the helper's `state` verbs
+   write THROUGH it: the temporary file is still created 0600 with `O_EXCL`
+   and renamed onto the target, but the target's folder is the user's and is
+   neither created nor chmod-ed, so whatever mode the user gave it stands.
+   The service's own FileView save already wrote through such a link
+   (measured, spike set `r24` sequence V). A link that dangles or leads to
+   anything but a regular file is refused and nothing is written.]
 6. No symlinks in the repo (validator rejects them); no sudo, no pkexec, no
    network from QML.
 7. Credentials: never printed; `sourceHost` instead of URL in caches and
@@ -2800,10 +2873,21 @@ Manual QA on the live shell (QA role, machine of record):
    (`scripts/dev-harness/spikes/filewatch/`) and the real service in a cage
    saw the watch survive every rename, own save, chmod and restart; the
    round-9 and round-12 lenses saw a helper rename raise no reload
-   (D-SRC-19). Section 5's round-13 amendment.]
+   (D-SRC-19). Section 5's round-13 amendment.] [2026-10-14, round 14: the
+   difference was the state DIRECTORY at the first load. A FileView loaded
+   while its directory did not exist watches nothing all session; one
+   explicit `reload()` once the directory exists re-arms it, and the
+   service now makes that call after the start-up check (R24c, measured in
+   the same spike, set `r24`). A rename or an in-place write is otherwise
+   seen. Section 5's round-14 amendment.]
 2. FileView writes into a missing directory: `mkdirProc` creates the three
    directories at service start (argv `mkdir -p -m 700`). Do not call
-   `saveState()` before it has run (first user action is always later).
+   `saveState()` before it has run (first user action is always later). [2026-10-14, round 14: and a FileView
+   that first loaded while its directory was missing does not WATCH the file
+   once the directory exists -- not even the init's creation of it -- until
+   it is reloaded explicitly (R24c, measured); the service reloads
+   `stateFile` once after the start-up check for exactly this. Since R24d one
+   15 s watchdog bounds `mkdirProc` and the init together.]
 3. mpv `loadfile` per-file options: mpv 0.41 accepts
    `loadfile <url> replace <index> <options>`; check whether the options
    argument accepts a JSON object over IPC (newer mpv) or only `k=v,k=v`
