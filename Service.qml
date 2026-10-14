@@ -323,7 +323,14 @@ Item {
   property var entryInputReports: []
   property var cacheQueue: []                          // FIFO of { args, onDone } for cacheProc (section 4.7)
   property var cacheJob: null
-  property var recentSaves: []                         // texts this service wrote to state.json (own-write reloads are skipped)
+  // R25a (D-SINK-19 round 15, D-SRC-30): the texts asked for since the last
+  // save that LANDED -- an echo is only a text still in flight. stateFile's
+  // `saved` clears it when the last text asked for lands; the echo of THAT
+  // save then carries the base and is ignored as `unchanged`, and an older
+  // own text coming back later is a backup put back, another writer's
+  // (Model.reloadDisposition). It used to hold the last eight texts written,
+  // and a restored copy of one of them was ignored and then written over.
+  property var recentSaves: []
   property double switchStartedAt: 0
   property double switchReadMs: 0                      // debug timing: file read, parse+prepare+index, binding fan-out
   property double switchParseMs: 0
@@ -2284,6 +2291,7 @@ Item {
     var disposition = Model.reloadDisposition({ loadedBefore: root.stateLoaded,
                                                 ownWrite: root.recentSaves.indexOf(text) !== -1,
                                                 matchesBase: root.stateLoaded && Model.sameState(text, root.landedState),
+                                                memoryMatchesBase: root.stateLoaded && Model.sameState(root.userState, root.landedState),
                                                 savePending: root.stateSavePending,
                                                 savesInFlight: root.stateSavesInFlight,
                                                 saveFailed: root.stateSaveFailed })
@@ -2343,6 +2351,12 @@ Item {
     var theirs = Model.parseState(text)
     var merged = Model.mergeForeignState(root.landedState, root.userState, theirs)
     for (var i = 0; i < merged.conflicts.length; i++) console.warn("omarchy-iptv: " + Model.mergeConflictLine(merged.conflicts[i]))
+    // R25b (D-SRC-31): an in-app addition the merge dropped at a cap is never
+    // dropped silently -- one journal line each (a key, never a URL), and the
+    // user told once for the whole merge.
+    var drops = Model.mergeDropLines(merged.dropped)
+    for (var j = 0; j < drops.length; j++) console.warn("omarchy-iptv: " + drops[j])
+    if (drops.length > 0) root.notify("mergeDropped", { dropped: merged.dropped })
     root.landedState = theirs
     root.userState = merged.state
     var behind = !Model.sameState(merged.state, theirs)
@@ -2376,6 +2390,8 @@ Item {
     }
     root.stateSavePending = false
     var text = JSON.stringify(root.userState, null, 2) + "\n"
+    // R25a (D-SRC-30): the burst since the last landed save, which `saved`
+    // clears. Capped only so a run of failed saves cannot grow it for ever.
     var saves = root.recentSaves.slice()
     saves.push(text)
     while (saves.length > 8) saves.shift()
@@ -5113,6 +5129,7 @@ Item {
         root.stateSavesInFlight = 0
         root.stateSaveFailed = false
         root.landedState = root.lastSaveState   // R21a: what the disk holds now, the marker included
+        root.recentSaves = []                   // R25a: nothing in flight, so no later reload is an echo
       }
       root.settleEntryFlush()
       // R19d (D-SRC-18): a mirror a failed save withheld is paid by the first

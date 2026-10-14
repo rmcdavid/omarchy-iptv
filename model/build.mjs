@@ -6,7 +6,7 @@ import {
   prepareChannels
 } from "./channels.mjs"
 import {
-  parseState, stateUnreadableNotice
+  parseState, mergeDropNotice, stateUnreadableNotice
 } from "./state.mjs"
 import {
   MPV_DISK_WARN, mpvOptionBase, buildMpvArgv
@@ -325,7 +325,10 @@ var NOTIFY_IDS = {
   entryInputRefused: 74016,
   // D-SINK-19 round 12, R22a: state.json did not load and nothing will be
   // written this session (Model.stateUnreadableNotice). Told once per episode.
-  stateUnreadable: 74017
+  stateUnreadable: 74017,
+  // D-SINK-19 round 15, R25b: a merge of another program's write dropped an
+  // in-app addition at a cap (Model.mergeDropNotice). Told once per merge.
+  mergeDropped: 74018
 }
 
 // Long enough to cover a first-load failure and the user's reaction, short

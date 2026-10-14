@@ -76,8 +76,9 @@ export {
   knownIdSet, failedIndex, failedDocument, failedWhen, withFailed,
   failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
   reloadDisposition, stateCanonical, sameState, mergeForeignState,
-  mergeConflictLine, STATE_LOAD_ERRORS, stateLoadKind, stateInitFound,
-  stateLoadDecision, stateWriteGate, stateUnreadableNotice
+  mergeConflictLine, mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS,
+  stateLoadKind, stateInitFound, stateLoadDecision, stateWriteGate,
+  stateUnreadableNotice
 } from "./model/state.mjs"
 export {
   parseJsonObject, parseChannels, parseEpgNow, parseHelperStatus,

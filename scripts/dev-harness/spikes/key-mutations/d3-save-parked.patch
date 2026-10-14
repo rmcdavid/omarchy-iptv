@@ -2,7 +2,7 @@ diff --git a/model/state.mjs b/model/state.mjs
 index 0000000..0000000 100644
 --- a/model/state.mjs
 +++ b/model/state.mjs
-@@ -1151,8 +1151,8 @@ function reloadDisposition(ctx) {
+@@ -1175,8 +1175,8 @@
    var c = ctx || {}
    if (c.loadedBefore !== true) return { act: "apply", reason: "first-load" }
    if (c.ownWrite === true) return { act: "ignore", reason: "own-write" }
@@ -11,5 +11,5 @@ index 0000000..0000000 100644
 +  // MUTATION (lane B, round 4): the save-parked clause deleted; a reload over a parked save is applied as file-newer
 +  var held = (Number(c.savesInFlight) || 0) > 0 ? "save-in-flight"
      : c.saveFailed === true ? "save-failed" : ""
-   if (held === "") return { act: "apply", reason: "file-newer" }
-   if (c.matchesBase === true) return { act: "ignore", reason: held }
+   if (held === "") {
+     if (c.matchesBase === true && c.memoryMatchesBase === true) return { act: "ignore", reason: "unchanged" }

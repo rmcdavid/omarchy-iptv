@@ -5,9 +5,22 @@
 #   measure.sh [HELPER] [SET]
 #                           HELPER: the bin/omarchy-iptv whose `state` verb
 #                           makes the atomic rename (default: this tree's)
-#                           SET: r23g (default, the round-13 sixteen) or r24
+#                           SET: r23g (default, the round-13 sixteen), r24
 #                           (round 14: the dir-absent first session, R24c,
-#                           and a symlink at the path, R24b)
+#                           and a symlink at the path, R24b) or r25 (round
+#                           15, R25a: what TEXT each echo of a burst of the
+#                           view's own saves carries, and in what order)
+#
+# R25 (round 15). R25a narrows the service's own-write record to the texts
+# still in flight, so whether an echo can carry a text of the burst AFTER
+# the burst's last save has landed decides whether that is safe (rule 10:
+# measured, not assumed). The set issues bursts from INSIDE the probe --
+# `burst` n setText in one turn, `spread` one per timer tick -- with every
+# signal logged in order with the tag of the text the view holds then, at
+# idle and with LOADN busy loops running (bounded by timeout, killed by
+# recorded pid). Each line names the loads and flags STALE: a load carrying
+# an earlier text of the burst after the burst's last text was reported
+# `saved` (the case R25a must not mistake for another writer's).
 #
 # R24 (round 14) adds three file SHAPES the r23g set never started from:
 #   absent  the production fresh-install shape -- the FileView's path is
@@ -176,6 +189,79 @@ PY
   cp "$HERE/shell.qml" "$WORK/cfg/shell.qml"
   : >"$OUT"
   SHAPE_NEXT=file
+  if [[ $SET == r25 ]]; then
+    BURNERS=()
+    burn_on() {
+      local i
+      for ((i = 0; i < ${LOADN:-8}; i++)); do
+        timeout 120 sh -c 'while :; do :; done' &
+        BURNERS+=($!)
+      done
+    }
+    burn_off() {
+      local p
+      for p in "${BURNERS[@]}"; do kill -TERM "$p" 2>/dev/null; wait "$p" 2>/dev/null; done
+      BURNERS=()
+    }
+    trap 'burn_off; stop_qs' EXIT
+    # One burst: KIND burst|spread, N saves, PAD bytes each, MS between
+    # (spread only). Prints the ordered events and the verdict.
+    burst_step() {
+      local kind=$1 n=$2 pad=$3 ms=${4:-0} prefix ev
+      N=$((N + 1)); prefix="b${N}x"
+      ipc clearEvents >/dev/null
+      if [[ $kind == burst ]]; then ipc burst "$n" "$prefix" "$pad" >/dev/null
+      else ipc spread "$n" "$prefix" "$pad" "$ms" >/dev/null; fi
+      sleep "${BURST_WAIT:-2}"
+      ev=$(ipc events)
+      python3 -I - "$kind n=$n pad=$pad ms=$ms load=${LOADSTATE:-idle}" "$prefix" "$n" "$ev" >>"$OUT" <<'PY'
+import json, sys
+label, prefix, n, ev = sys.argv[1], sys.argv[2], int(sys.argv[3]), json.loads(sys.argv[4] or "[]")
+final = prefix + str(n)
+short = lambda t: t.replace(prefix, "T") if t.startswith(prefix) else t
+landed = None
+loads, stale, superseded, notlast = [], [], [], []
+saved_max = 0
+last_saved = None
+for i, e in enumerate(ev):
+    kind, _, tag = e.partition(":")
+    num = int(tag[len(prefix):]) if tag.startswith(prefix) and tag[len(prefix):].isdigit() else None
+    if kind == "saved":
+        if num is not None: saved_max = max(saved_max, num)
+        last_saved = tag
+        if tag == final and landed is None: landed = i
+    if kind == "loaded":
+        loads.append(short(tag) + ("@after-final" if landed is not None else ""))
+        if landed is not None and tag != final: stale.append(short(tag))
+        if num is not None and num < saved_max: superseded.append(short(tag))
+        if tag != last_saved: notlast.append(short(tag))
+print("  %-40s saved:%d loaded:%d landed:%s loads=[%s] STALE:%s superseded-at-load:%s not-the-last-saved:%s"
+      % (label, sum(1 for e in ev if e.startswith("saved:")), len(loads), "yes" if landed is not None else "NO",
+         ",".join(loads), ",".join(stale) or "none", ",".join(superseded) or "none", ",".join(notlast) or "none"))
+print("    order: " + " ".join(short(e.partition(":")[0]) + ":" + short(e.partition(":")[2]) for e in ev))
+PY
+    }
+    for LOADSTATE in idle loaded; do
+      [[ $LOADSTATE == loaded ]] && burn_on
+      echo "SEQ burst ($LOADSTATE, load $(cut -d' ' -f1 /proc/loadavg))" >>"$OUT"
+      fresh_file
+      start_qs || break
+      for ((rep = 0; rep < ${REPS:-3}; rep++)); do
+        burst_step burst 2 0
+        burst_step burst 3 2000
+        burst_step burst 5 4000
+        burst_step burst 10 4000
+        burst_step spread 3 4000 0
+        burst_step spread 5 4000 0
+        burst_step spread 5 4000 5
+        burst_step spread 10 4000 2
+      done
+      stop_qs
+      [[ $LOADSTATE == loaded ]] && burn_off
+    done
+    echo "END" >>"$OUT"
+    exit 0
+  fi
   if [[ $SET == r24 ]]; then
     # R24c: the production fresh shape. Q is the session as it ships (nothing
     # re-arms); R the explicit reload() after the start-up mkdir/init; S the

@@ -7369,7 +7369,8 @@ checkCall("R11 (structural): stateInitProc's exit issues the parked save, THEN s
     // The drop line names the reason and nothing else: no key, no URL.
     dropWarnsNoKey: !/d\.act === "drop"[\s\S]{0,400}console\.warn\([^\n]*(key|Url|url)[^\n]*\)/.test(settleFn),
     // The FileView reports both outcomes and both settle the flush.
-    savedSettles: /onSaved: \{[\s\S]{0,300}root\.settleEntryFlush\(\)/.test(serviceSource),
+    // (400: R25a's recentSaves reset joined the landed branch, round 15)
+    savedSettles: /onSaved: \{[\s\S]{0,400}root\.settleEntryFlush\(\)/.test(serviceSource),
     saveFailedSettles: /onSaveFailed: \(error\) => \{[\s\S]{0,1200}root\.stateSaveFailed = true[\s\S]{0,100}root\.settleEntryFlush\(\)/.test(serviceSource),
     // R13: the outstanding flag is raised BEFORE setText with the text kept,
     // and cleared on either signal ONLY when the view reports on that text
@@ -7602,8 +7603,8 @@ checkCall("R24a: a conflict's console line names the field and the source key, n
                                     mergeState({ sources: [{ k: "aaaaaaaa", label: "Theirs" }] }))
   const lines = r.conflicts.map(Model.mergeConflictLine).concat([Model.mergeConflictLine({ field: "activeKey", key: "" })])
   return { lines, url: lines.some(l => l.indexOf("://") !== -1 || l.indexOf("example.test") !== -1 || l.indexOf("Mine") !== -1 || l.indexOf("Theirs") !== -1) }
-}, { lines: ["state.json was changed by another program while a change made here was not yet saved; kept the other program's the source aaaaaaaa (label)",
-             "state.json was changed by another program while a change made here was not yet saved; kept the other program's activeKey"], url: false })
+}, { lines: ["state.json was changed by another program while a change made here was not yet saved; kept the other program's version of the source aaaaaaaa (label)",
+             "state.json was changed by another program while a change made here was not yet saved; kept the other program's version of activeKey"], url: false })
 checkCall("R15 (structural): applyUserState counts every reload by reason through Model.countReload BEFORE deciding, into a declared var property, and the service warns at exit when an entry mirror is still held", () => {
   const fn = (serviceSource.match(/function applyUserState\(text\) \{[\s\S]*?\n  \}/) || [""])[0]
   const count = fn.indexOf("root.stateReloadsByReason = Model.countReload(root.stateReloadsByReason, disposition.reason)")
@@ -11931,7 +11932,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   const READERS = {
     activeKeyOf: "a key", activeSourceRecord: "a record of the state, unchanged", entryMigratedOf: "a boolean",
     isFavorite: "a boolean", isGroupHidden: "a boolean", sourceForEdit: "the edit form's values",
-    sourceViews: "the Sources rows", sourcesSummary: "the IPC summary", deadSessionVerdict: "a verdict; its state is driven below"
+    sourceViews: "the Sources rows", sourcesSummary: "the IPC summary", deadSessionVerdict: "a verdict; its state is driven below",
+    sameState: "a boolean (R25a: whether memory is the base)"
   }
   const doc = fx.document
   const S = Model.parseState(JSON.stringify(doc))
@@ -12832,6 +12834,148 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
                    sentence: notice.length === 1 && notice[0] === M.stateUnreadableNotice(f.reason, h.root.stateFilePath).body,
                    chmod: notice.some(n => n.indexOf("chmod 700") !== -1), events: h.stateFile.events.length, writes: h.host.writes.length }
         }, { blocked: f.reason, found: f.reason, told: 1, sentence: true, chmod: false, events: 0, writes: 0 })
+      }
+    }
+  }
+
+  // ---- D-SINK-19 round 15, R25 (the lead's ruling on the round-14 lenses),
+  // through the shipping Service.qml. Seen red against dev 002662d
+  // (IPTV_SERVICE_QML / IPTV_MODEL at a dev export) where the defect lives,
+  // and against the mutation patches under
+  // scripts/dev-harness/spikes/key-mutations/ where it does not; the counts
+  // are in this lane's report.
+  {
+    const H4 = "http://h4.example.test/l.m3u"
+    const KH = keyOf(H4)
+    const Z = "http://z.example.test/get.php?username=u&password=zpass"
+    const KZ = keyOf(Z)
+    const keysOf = st => st.sources.map(r => r.key === KA ? "A" : r.key === KB ? "B" : r.key === KH ? "H" : r.key === KZ ? "Z" : r.key)
+    const helperAdd = sf => { const st = JSON.parse(sf.disk); st.sources.push(rec(H4)); sf.disk = JSON.stringify(st) + "\n"; sf.exists = true }
+    const reasons = h => h.root.stateReloadsByReason || {}
+    const foreignReasons = h => Object.keys(reasons(h)).filter(r => /^foreign-/.test(r)).sort()
+    const dropTold = h => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74018") !== -1)
+    const noSecretIn = h => (h.warnings.join("\n") + JSON.stringify(h.detached)).search(/:\/\/|example\.test|zpass/) === -1
+    const START = () => migratedText([rec(A), rec(B)], KA, { favorites: ["t:bbc1.uk"] })
+    for (const mode of ["lag", "echo"]) {
+      for (const ownEcho of ["load", "none"]) {
+        const tag = mode + " host, own echo " + ownEcho
+        // R25a / D-SRC-30: the round-14 data-loss lens's FAV BAK DEL RSTB FAV.
+        checkCall("R25a (" + tag + "): FAV BAK DEL RSTB FAV -- a backup copied from the plugin's own file after its save LANDED, put back after a later in-app remove landed, is another writer's: applied (file-newer, never own-write), the next save keeps it, and a restart stands on it", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.root.toggleFavorite("t:f1.uk"); h.drain()
+          const bak = h.stateFile.disk
+          h.root.removeSource(KB); h.drain()
+          const afterDel = keysOf(h.file())
+          const ownBefore = reasons(h)["own-write"] || 0
+          h.foreign(sf => { sf.disk = bak }); h.drain()
+          const restored = [keysOf(h.root.userState), (reasons(h)["own-write"] || 0) === ownBefore, (reasons(h)["file-newer"] || 0) >= 1]
+          h.root.toggleFavorite("t:f2.uk"); h.drain()
+          const next = restart(h)
+          return { afterDel, restored, file: [keysOf(h.file()), h.file().favorites], memory: [keysOf(h.root.userState), h.root.userState.favorites],
+                   restart: [keysOf(next.root.userState), next.root.userState.favorites], foreign: foreignReasons(h) }
+        }, { afterDel: ["A"], restored: [["A", "B"], true, true], file: [["A", "B"], ["t:bbc1.uk", "t:f1.uk", "t:f2.uk"]],
+             memory: [["A", "B"], ["t:bbc1.uk", "t:f1.uk", "t:f2.uk"]], restart: [["A", "B"], ["t:bbc1.uk", "t:f1.uk", "t:f2.uk"]], foreign: [] })
+        checkCall("R25a (" + tag + "): FAV BAK UNFAV RSTB FAV -- the same with a favourite removed in-app after the backup: the restore brings it back and the next save keeps it", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.root.toggleFavorite("t:f1.uk"); h.drain()
+          const bak = h.stateFile.disk
+          h.root.toggleFavorite("t:bbc1.uk"); h.drain()
+          const afterUnfav = h.file().favorites
+          h.foreign(sf => { sf.disk = bak }); h.drain()
+          h.root.toggleFavorite("t:f2.uk"); h.drain()
+          return { afterUnfav, file: h.file().favorites, memory: h.root.userState.favorites }
+        }, { afterUnfav: ["t:f1.uk"], file: ["t:bbc1.uk", "t:f1.uk", "t:f2.uk"], memory: ["t:bbc1.uk", "t:f1.uk", "t:f2.uk"] })
+        // The controls the lens ran: a backup taken before any own save, and
+        // a restore with no later save -- both already held; kept so the
+        // narrowing is seen to change only the superseded-own-text case.
+        checkCall("R25a (" + tag + "): controls -- BAK before any own save, DEL, RSTB, FAV keeps B; and the echo of a save that just landed changes nothing (ignored as `unchanged` when the view delivers it, never applied and never merged)", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          const bak = h.stateFile.disk
+          h.root.removeSource(KB); h.drain()
+          h.foreign(sf => { sf.disk = bak }); h.drain()
+          h.root.toggleFavorite("t:f2.uk"); h.drain()
+          const echo = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          const before = Object.assign({}, reasons(echo))
+          echo.root.toggleFavorite("t:e1.uk"); echo.drain()
+          const after = reasons(echo)
+          return { kept: keysOf(h.file()), unchanged: (after.unchanged || 0) - (before.unchanged || 0), applied: (after["file-newer"] || 0) - (before["file-newer"] || 0),
+                   foreign: foreignReasons(echo), recent: echo.root.recentSaves.length }
+        }, { kept: ["A", "B"], unchanged: ownEcho === "load" ? 1 : 0, applied: 0, foreign: [], recent: 0 })
+        // R25a's other half (rule 10): a COALESCED burst's mid-burst echo. The
+        // double coalesces as Model.stateSaveLanded's measurement found (a
+        // write queued behind one in flight is replaced) and delivers an echo
+        // after EVERY `saved`, mid-burst included -- more than the r25 spike
+        // ever saw (every echo there carried the latest saved text, and none
+        // arrived while a later text was asked), so this is the adversarial
+        // shape: the first save's echo arrives while the burst's last text is
+        // still in flight, and must still read as our own.
+        checkCall("R25a (" + tag + "): a coalesced burst of three saves -- the mid-burst echo carries the first text while the third is in flight and is still recognised as own-write (never merged as foreign); the record clears when the last lands, and the file and memory hold all three", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.stateFile.coalesce = true
+          const own0 = reasons(h)["own-write"] || 0
+          h.root.toggleFavorite("t:b1.uk"); h.root.toggleFavorite("t:b2.uk"); h.root.toggleFavorite("t:b3.uk")
+          const queued = [h.stateFile.events.length, h.root.recentSaves.length]
+          h.drain()
+          return { queued, own: (reasons(h)["own-write"] || 0) - own0, foreign: foreignReasons(h), recent: h.root.recentSaves.length,
+                   file: h.file().favorites, memory: h.root.userState.favorites }
+        }, { queued: [2, 3], own: ownEcho === "load" ? 1 : 0, foreign: [], recent: 0,
+             file: ["t:bbc1.uk", "t:b1.uk", "t:b2.uk", "t:b3.uk"], memory: ["t:bbc1.uk", "t:b1.uk", "t:b2.uk", "t:b3.uk"] })
+        // R25d / F-HARNESS-26: the round-14 lens's two mutants nothing caught.
+        // a5 -- mergeForeignText without `landedState = theirs`: a SECOND
+        // foreign write inside one held window is compared with a stale base.
+        checkCall("R25d (" + tag + "): a5 -- while a failed save is held, the helper adds a favourite and then removes it again: the second write is compared with the base the FIRST moved it to, so the removal is merged and nothing resurrects the favourite when the disk recovers", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.stateFile.writeFails = true
+          h.root.toggleFavorite("t:f2.uk"); h.drain()
+          h.foreign(sf => { const st = JSON.parse(sf.disk); st.favorites.push("t:h3.uk"); sf.disk = JSON.stringify(st) + "\n" }); h.drain()
+          const mid = h.root.userState.favorites.slice()
+          h.foreign(sf => { const st = JSON.parse(sf.disk); st.favorites = st.favorites.filter(f => f !== "t:h3.uk"); sf.disk = JSON.stringify(st) + "\n" }); h.drain()
+          h.stateFile.writeFails = false
+          h.root.toggleFavorite("t:f5.uk"); h.drain()
+          return { mid, memory: h.root.userState.favorites, file: h.file().favorites, merged: (reasons(h)["foreign-save-failed"] || 0) }
+        }, { mid: ["t:bbc1.uk", "t:h3.uk", "t:f2.uk"], memory: ["t:bbc1.uk", "t:f2.uk", "t:f5.uk"], file: ["t:bbc1.uk", "t:f2.uk", "t:f5.uk"], merged: 2 })
+        // a7 -- `behind` without its in-flight half: a foreign write that
+        // already carries our in-flight change plus another merges to exactly
+        // theirs, and our older save lands over it unless the merge re-saves.
+        checkCall("R25d (" + tag + "): a7 -- a foreign write that already carries the in-flight favourite plus another lands first: the merge is theirs, but our older save would land after it, so the merge is saved again -- the other favourite is on disk and survives a restart", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.root.toggleFavorite("t:f2.uk")
+          const inFlight = h.root.stateSavesInFlight
+          h.foreign(sf => { const st = JSON.parse(sf.disk); st.favorites = st.favorites.concat(["t:f2.uk", "t:other1.uk"]); sf.disk = JSON.stringify(st) + "\n" })
+          h.drain()
+          const next = restart(h)
+          return { inFlight, file: h.file().favorites, memory: h.root.userState.favorites, restart: next.root.userState.favorites }
+        }, { inFlight: 1, file: ["t:bbc1.uk", "t:f2.uk", "t:other1.uk"], memory: ["t:bbc1.uk", "t:f2.uk", "t:other1.uk"], restart: ["t:bbc1.uk", "t:f2.uk", "t:other1.uk"] })
+        // R25b / D-SRC-31: a merge that passes a cap.
+        checkCall("R25b (" + tag + "): at 49 sources, an in-app add whose save FAILED, then a hand-run `state source add` (the helper allows the 50th): theirs keeps its place, the in-app record is dropped -- told ONCE (counts and the cap, no URL, no label), one journal line naming its key -- and nothing is written over theirs", () => {
+          const many = []
+          for (let i = 0; i < 47; i++) many.push(rec("http://m" + i + ".example.test/l.m3u"))
+          const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)].concat(many), KA), mode, { ownEcho })
+          h.stateFile.writeFails = true
+          const added = h.root.addSource({ playlistUrl: Z, epgUrl: "", label: "Mine" })
+          h.probeExit(JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })); h.drain()
+          const inApp = [added.ok, h.root.userState.sources.length, M.findSource(h.root.userState.sources, KZ) !== null]
+          h.stateFile.writeFails = false
+          h.foreign(helperAdd); h.drain()
+          const lines = h.warnings.filter(w => /was not kept \(the limit is 50 sources\)/.test(w))
+          const told = dropTold(h)
+          return { inApp, memory: [h.root.userState.sources.length, M.findSource(h.root.userState.sources, KZ) !== null, M.findSource(h.root.userState.sources, KH) !== null],
+                   file: [h.file().sources.length, M.findSource(h.file().sources, KH) !== null], lines: lines.length, namesKey: lines.every(l => l.indexOf(KZ) !== -1),
+                   told: told.length, body: told.length === 1 && told[0][told[0].length - 1] === M.mergeDropNotice({ sources: [KZ] }).body, clean: noSecretIn(h) }
+        }, { inApp: [true, 50, true], memory: [50, false, true], file: [50, true], lines: 1, namesKey: true, told: 1, body: true, clean: true })
+        checkCall("R25b (" + tag + "): at 19 saved searches, an in-app save of a search IN FLIGHT and a foreign write adding another: theirs keeps its place, ours is dropped, told once, one journal line that names no query", () => {
+          const searches = []
+          for (let i = 0; i < 19; i++) searches.push({ query: "q" + i, at: 10 + i })
+          const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA, { savedSearches: searches }), mode, { ownEcho })
+          const r = h.root.saveSearch("mine")
+          h.foreign(sf => { const st = JSON.parse(sf.disk); st.savedSearches = st.savedSearches.concat([{ query: "theirs", at: 99 }]); sf.disk = JSON.stringify(st) + "\n" })
+          h.drain()
+          const lines = h.warnings.filter(w => /saved search made here was not kept/.test(w))
+          const queries = st => st.savedSearches.map(x => x.query)
+          return { added: r.added, file: [queries(h.file()).length, queries(h.file()).indexOf("theirs") !== -1, queries(h.file()).indexOf("mine") !== -1],
+                   memory: [queries(h.root.userState).length, queries(h.root.userState).indexOf("mine") !== -1], lines: lines.length,
+                   noQuery: lines.every(l => l.indexOf("mine") === -1), told: dropTold(h).length }
+        }, { added: true, file: [20, true, false], memory: [20, false], lines: 1, noQuery: true, told: 1 })
       }
     }
   }
