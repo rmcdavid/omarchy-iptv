@@ -3,7 +3,7 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
-## 0.14.0 (unreleased)
+## 0.14.0 (2026-10-14)
 
 **Privacy.** Your playlist and guide-data URLs carry your provider login,
 and until now the active one was stored in the desktop shell's own settings
@@ -94,6 +94,10 @@ and the plugin keeps the URLs in its own files, readable by you alone:
   because an older build looks for the URL on the widget's entry. Your
   sources are all still in `state.json`: follow the form's `Saved sources`
   link and pick one.
+- **Not in this release:** a fix for the finding the marketplace maintainer
+  raised against 0.13.6 about provider logo images. Channel logos are off
+  unless you turned them on (`showLogos`); with them off the guide loads no
+  logo images.
 - **Restart the shell after this update** (`omarchy-restart-shell`, not
   `omarchy-refresh-shell`).
 
