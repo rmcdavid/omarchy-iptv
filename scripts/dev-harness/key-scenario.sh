@@ -338,6 +338,31 @@
 # lane-key-n2 (--baseline) and the kept mutation r23a-no-rearm.patch
 # (--tree), both in the footer.
 #
+# ROUND 14, R24 (the lead's ruling on the round-13 lenses). B15..B18 above.
+# B16 is the session the round-13 live lens measured as never reloading --
+# the production fresh shape, the state directory absent at the first load
+# -- now re-armed by one stateFile.reload() after the start-up check
+# (measured first, spikes/filewatch set r24). B18 holds the init INSIDE the
+# real helper (slow-helper.py OMARCHY_IPTV_SLOW_AT=inside), so the verb's
+# own SIGALRM deadline is what is observed; the held init was reparented to
+# the user's service manager when the shell stopped, as the lens saw.
+# Measured on lane-key-q1 at 318af7f under this harness, each in its own
+# nested cage on a private bus (scripts/dev-harness/private-bus.sh,
+# harness directories /run/user/1000/omarchy-iptv-q1-<n>, removed after),
+# summary counts (THE UNIT above):
+#   lane-key-q1 forward:                          116 passed, 0 failed
+#       (transcript key-20261014-095236-969838)
+#   --baseline dev (ced1bd1, round 13's code):    113 passed, 3 failed
+#       (key-20261014-095838-996891)
+#       B15 (`header:[No sources] rows:2 after-a:sourceEdit says:other`),
+#       B16 (`seen:0 file:D blocked: told:0`: the helper's record unseen
+#       and written over, the garbage unnoticed) and B18 (the held init
+#       `after-deadline:alive(<pid>)`, killed by cleanup); B17 is GREEN
+#       there, round 13 having the KILL, so it is seen red through
+#   --tree with spikes/key-mutations/r24g-no-kill.patch: 115 passed, 1
+#       failed, B17 (`blocked: helper:no(<pid>) left:<pid> told:0`;
+#       key-20261014-100528-1027361).
+#
 # Every segment seeds its OWN state.json, caches and entry and starts a fresh
 # shell, so a red in one is attributable to one ruling and never to the
 # segment before it (the first version chained them and one red cascaded
