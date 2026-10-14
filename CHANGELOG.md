@@ -3,6 +3,59 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.14.0 (unreleased)
+
+**Privacy.** Your playlist and guide-data URLs carry your provider login,
+and until now the active one was stored in the desktop shell's own settings
+file, `~/.config/omarchy/shell.json`, because that is where the bar widget
+named its source. The widget now names the active source by a short code,
+and the URLs live only in the plugin's own file,
+`~/.local/state/omarchy-iptv/state.json`, readable by you alone.
+
+### Changed
+
+- **The first shell start on this version moves the URLs out of the shell's
+  settings.** A playlist and guide URL set on the bar widget are added to
+  your sources (or found there), made active, and taken off the widget's
+  entry only once the plugin's own file has been written. If that write
+  fails they are left where they were and moved at the next start.
+- **`omarchy bar set playlistUrl` and `epgUrl` no longer do anything.** After
+  the move the plugin does not read either setting: a value set there is
+  removed from the entry, with one `Bar setting ignored` notification naming
+  the setting and never the URL. Add, switch and remove sources on the
+  guide's Sources screen.
+- **The guide's hint after a playlist fails to load says "check the source in
+  Sources"**, not a setting the plugin no longer reads.
+- **For anyone running the helper by hand** (`python3
+  ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv`): its
+  `state show` and `state source list` exit 1 over a `state.json` they
+  cannot read or parse, where they used to print an empty state, and every
+  `state` command refuses a `state.json` that is not a regular file instead
+  of blocking or writing over it.
+
+### Fixed
+
+- **A damaged or unreadable `state.json` is never written over.** On
+  0.13.6, a state folder that could not be read at start lost the sources
+  you had added in the app, a cut-off `state.json` was replaced, and the
+  helper's `state` commands wrote an empty state over a damaged file. Now
+  the plugin saves nothing until the file can be read again, tells you once
+  with a notification that names the file and what to do, and the guide
+  says the same instead of showing the first-run form. Restore the file, or
+  move it aside to start with no sources, then restart the shell.
+- **Something other than a file at `state.json`** (a folder, a pipe) no
+  longer leaves the shell waiting for ever at start or changes that
+  folder's permissions.
+
+### Worth knowing
+
+- **Going back to an older version makes the plugin look unconfigured**,
+  because an older build looks for the URL on the widget's entry. Your
+  sources are all still in `state.json`: follow the form's `Saved sources`
+  link and pick one.
+- **Restart the shell after this update** (`omarchy-restart-shell`, not
+  `omarchy-refresh-shell`).
+
 ## 0.13.6 (2026-10-12)
 
 **For the marketplace; nothing the plugin does has changed.** 0.13.5 could

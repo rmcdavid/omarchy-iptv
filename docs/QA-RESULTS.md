@@ -13157,6 +13157,164 @@ minute is the logo scenario's `--baseline 159da94` 9 / 24 (cb08eb1), and
 `qml` image probe, never the harness shell -- so it cannot carry this
 error. Every other count against those trees predates 51d686b.
 
+### D-SINK-19 lands on dev: rounds 12 and 13, and what round 13 raised
+
+**Integrated 2026-10-14 as `efde249` (`Integrate lane-key-p2`), on the
+owner's word of 2026-10-13.** The chain's last two rounds, with the evidence
+each lens kept:
+
+- **Round 12 (R22, a state that did not load is never written;
+  `lane-key-n1` code, `lane-key-n2` docs).** The data-loss lens rebuilt its
+  simulator over `n2`'s own `Service.qml`, split model and real helper and
+  read 0 problems over about 240,000 sequences: ten load-failure kinds
+  (missing, a 0000 file with and without the init's repair, a 0000
+  directory with and without, a directory at the path, garbage, truncated
+  JSON, an empty file) at a fresh start, a migrated start, mid-session and
+  between any two steps, both host shapes, with restarts and hand-run helper
+  verbs. The same simulator goes red on `lane-key-m2` and on 0.13.6, which
+  is how D-SRC-21 was found. Its one P2 was a check nobody had written: the
+  lift re-arms the no-write notice, and deleting that line failed 0 of 2,354
+  node checks.
+- **Round 13 (R23; `lane-key-p1` code, `lane-key-p2` docs).** R23a pins the
+  re-arm (node, and the live segment B9: `episodes:unparsed/[]/unparsed
+  told:1/2`). R23b gives the helper one opener for every state read
+  (`open_regular`: a non-blocking open, then `fstat` S_ISREG on the
+  descriptor), so a FIFO, a socket or a directory at the path is refused at
+  once instead of blocking in `open()`. R23c bounds the start-up init (15 s,
+  then TERM, then KILL 2 s later; the init measured 214 ms idle and at most
+  1,769 ms at load 7.7) and decides a timeout as the no-write mode with its
+  own reason. R23d gates every mode repair on the kind of file it repairs.
+  R23e draws the no-write mode as its own guide surface from
+  `Model.stateUnreadableNotice` instead of the first-run form, with no
+  editable field (an `ipc editable` census reads 0). R23f routes the logo
+  toggle's refusal through `Model.refusalMessage`. R23g measured the real
+  FileView (below). R23i removed the ledger's last three withdrawn-symbol
+  waivers with their citations.
+- **The live lens on `lane-key-p2`,** under a nested headless cage on a
+  private D-Bus: key-scenario forward 112 passed, 0 failed (transcript
+  `key-20261014-051500-600443`); `--baseline lane-key-n2` 107 passed, 5
+  failed, exactly the new segments B10-B14, each with the old behaviour in
+  its got string (`helper:no(645915) left:645915 told:0` for the hung init,
+  `kind:unconfigured form:true` for the surface, `advice:bar-set` for the
+  toggle); sources 66/0, logo 33/0, tls 48/0. The real
+  `omarchy-plugin-update` fast-forwarded a scratch 0.13.6 install to a
+  scratch-built 0.13.7 of the candidate with rc 0 and 0 status lines.
+- **The claims lens** merged `p2` onto `dev` in its own worktree: 0
+  conflicts, ledger rc 0 with 0 waivers listed, `release.py check` rc 0;
+  `check.sh` red only on the two load-sensitive timing tests at load 6-12
+  with three lenses on four cores, and interleaved re-runs against `dev`'s
+  own export were red as often there.
+
+**What round 13 measured about the watch, which settles a disagreement
+three rounds old.** The code lane's spike
+(`scripts/dev-harness/spikes/filewatch/`, result committed beside it) ran a
+FileView declared as `stateFile` is through 16 sequences idle and loaded:
+every external in-place write, every helper rename and every chmod raised a
+reload, after any number of own saves and across a restart, and the
+view's own save echoed a load only under load (so the node harness now runs
+both ways, `IPTV_HARNESS_OWN_ECHO=load|none`, 2,372 checks each). Rounds 9
+and 12 had seen no reload at all. The live lens found why: the variable is
+whether the state DIRECTORY existed when the view first loaded. With it
+present, every external change reloaded (3 of 3 helper `source add`, 3 of 3
+recoveries from a 0000 file or directory); with it absent, which is the
+first session after every fresh install, the reload counter stayed
+`{"first-load": 1}` for the whole session on `p2` and on a 0.13.6 export
+alike. Every rig that saw no reload started without the directory. That
+re-scopes **D-SRC-19**: in the first session after a fresh install, a
+hand-run `state` verb or a hand edit is never seen and the next in-app save
+writes memory over it; in every other session the service sees it. The
+filing's "never applies a helper write" was this one session shape
+generalised.
+
+**What round 13 raised, each with its id.**
+
+- **D-SRC-22 (P2, the D-SINK-19 tree only; blocks 0.14.0).** R9 ignores a
+  reload while `stateSaveFailed` is set, and that flag clears only when a
+  later write lands. So after a transient write failure the user was told
+  about, a hand-run `omarchy-iptv state source add` is reloaded, ignored,
+  and erased by the next save that lands, while the helper answered `ok:
+  true`. The data-loss lens's sequence `WF FAV WOK HADD FAV` loses the
+  helper's record on all four host and echo shapes on `p2` and `n2`, and
+  0.13.6 keeps it, because its `applyUserState` applies every reload. The
+  `save-parked` branch has the same shape in the start-up window between
+  the first load and the init's exit. Deleting the ignore (mutant MR1)
+  keeps the helper's write and drops the in-app change the user was told
+  had failed, so the repair is a merge of the two or a notice, not a
+  deletion; two node fixtures for R9 and R15 go red under MR1 today.
+- **D-SRC-23 (P2; the helper half shipped).** A dangling symlink at
+  `state.json`: `open_regular` follows it, `read_state_strict` reads its
+  ENOENT as a fresh state, and every hand-run verb but `init` treats the
+  path as absent -- `show` prints an empty state and `favorite add` /
+  `source add` replace the link with a new regular file. `state_path_found`
+  lstat()s and answers `other`, so the two halves of one helper disagree
+  about one path. In a running shell the helper's write lifts the no-write
+  block, its near-empty file is applied over memory, and because that file
+  has no migration marker a refused entry URL is adopted (simulated, 24
+  runs). Found independently by the data-loss and claims lenses; the
+  claims lens's 9-verb by 8-kind matrix refuses every other non-regular kind
+  (FIFO, directory, socket, a link to a FIFO or a directory, `/dev/null`,
+  `/dev/zero`) with rc 1 and the mode unchanged. The README on `p2` promises
+  this case too.
+- **D-DOC-8 (P2).** The round-13 README, UX-SOURCES 5.10 and the
+  ARCHITECTURE-SOURCES round-13 section give the session's own saves as the
+  condition for noticing a damaged file mid-session, and that section calls
+  D-SRC-19's scope "none"; the condition is the one above. Its sibling in
+  code: the helper's `state source update --help` text, the
+  `remap_state_file` docstring and `setting_owned_warnings` say the shell
+  does not re-read `state.json` after a helper write, which is true only in
+  that first session.
+- **D-DOC-9 (P3).** README.md:255 and ARCHITECTURE-SOURCES.md:3587 still say
+  `omarchy bar set` "still offers" the declared keys; the contract was
+  corrected in round 13 and these two were not.
+- **D-DOC-10 (P3).** The README's "nothing of yours is lost" when an
+  unnoticed damage is overwritten holds for corruption, not for the user's
+  own hand edit with a syntax error.
+- **D-SRC-24 (P3).** A shell stopped inside the init's 15 s leaves a hung
+  init orphaned under `systemd --user` (the slow-helper fixture, shell
+  stopped at 5 s: the recorded pid alive afterwards with ppid `systemd
+  --user`). The watchdog's own path was measured clean, a TERM-ignoring
+  variant included.
+- **D-SRC-25 (P3).** `mkdirProc` runs before the init with no watchdog, and
+  the init's watchdog arms only after it exits, so a filesystem that hangs
+  `mkdir` leaves the load waiting with nothing told. Read, not reproduced.
+- **D-SRC-26 (P3).** A dangling link, or a regular file where the state
+  directory should be, is told to `chmod 700` the folder (the
+  `absent-unconfirmed` notice), which changes nothing; `state init` over
+  the second exits with `code: internal` and a traceback.
+- **D-SRC-27 (P3).** The D-ID-1 remap is a second writer of `state.json`
+  that the no-write mode does not reach: the playlist fetch always passes
+  `--state-dir`, and `remap_state_file` writes any file that parses as a
+  dict. Benign (ids move at most once per file), but it makes "writes
+  nothing this session" conditional.
+- **D-SRC-28 (P3).** In the no-write mode the Sources screen still draws a
+  fresh install ("No sources" over the Add rows, the add form opening and
+  refusing), the reason R23e gave for hiding the first-run form.
+- **F-HARNESS-24 (P3).** The KILL half of R23c is observed by nothing: the
+  harness double models the TERM path only, B10's helper dies on TERM, and
+  no mutation targets `stateInitKill`.
+- **F-HARNESS-25 (P3).** The committed filewatch spike redirects no HOME or
+  XDG directory and leaves content-free caches in the real home, F-HARNESS-23's
+  shape on a new rig.
+
+**The rule-15 searches the lenses ran and cleared,** so the next round
+inherits them: every `open(` and `os.open` in the helper (20 sites; the six
+state reads go through `open_regular`, the rest are a lock, the config
+shield's own non-blocking open, directory walks, exclusive temporaries,
+`manifest.json`, `/proc` and `/dev/null`); every `chmod` (through
+`chmod_if_kind`, `fchmod` on an owned descriptor, or gated on a regular file
+and its owner); every guide call into a writing service function (16
+sites); every `Process` in `Service.qml` for a watchdog (19; `mkdirProc` is
+D-SRC-25); and the harness doubles against the real init and FileView.
+
+**The manifest question (decision request 7) was answered by measurement,
+twice.** On omarchy 4.0.4-1 the host hands a plugin a deep clone of its bar
+entry with no schema filter (`shell.qml` 326-333, `BarModel.js` 10-17), and
+`omarchy bar set` passes any key through to `PluginRegistry.setBarWidget`,
+which checks the location and that the entry is an object and nothing else;
+the plugin already writes and reads `sourceKey`, which it has never
+declared. The migration therefore does not depend on the declaration. The
+lead's ruling is in the decisions log.
+
 ### D-SRC-21: 0.13.6 writes over a state file it could not read
 
 **Filed 2026-10-13 from the D-SINK-19 round-12 data-loss lens; P2; open on

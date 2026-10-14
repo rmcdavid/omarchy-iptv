@@ -69,10 +69,10 @@ Consequences you must respect:
 - A release is: bump `manifest.json` (and `Model.PLUGIN_VERSION` with it,
   D-HOST-1), date the top `CHANGELOG.md` heading for the day of the cut,
   re-level the test floors in `scripts/check.sh` to the counts on the tree,
-  green gate, run `scripts/dev-harness/key-scenario.sh live` (once the tree
-  carries it; it arrives with D-SINK-19, and a cut before that runs the
-  dev-harness scenarios the release touches) under the
-  nested headless cage and record its count in `docs/QA-RESULTS.md` (the
+  green gate, run `scripts/dev-harness/key-scenario.sh live` (on the tree
+  since D-SINK-19 landed, `efde249`, 2026-10-14) under the
+  nested headless cage on a private D-Bus (`scripts/dev-harness/private-bus.sh`,
+  rule 6b) and record its count in `docs/QA-RESULTS.md` (the
   live arm is the only observer of the start-up window that D-SRC-15 lives
   in; `check.sh` runs just its 11-check preflight, and a README that
   promises the live run is only true while this step is run), then
@@ -106,6 +106,9 @@ Consequences you must respect:
   whose automated baseline passed. `dev` moves freely; nothing runs
   `release.py build` or pushes `main` until #11315 is actioned. F-M3-4's
   half that says never close our own request stands unchanged.
+  **The hold ended on 2026-10-13**, when the maintainer raised a finding on
+  #11315 (D-LOGO-13); the rule above applies again, and a release still
+  waits for the owner's word.
 
 ## Where the truth lives
 
