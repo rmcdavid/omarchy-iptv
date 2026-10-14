@@ -26,6 +26,21 @@ difference a verb sees is when it starts.
     OMARCHY_IPTV_SLOW_VERBS  comma separated verbs to sleep for
                              (default "seek,status"); anything else is
                              exec'd immediately
+    OMARCHY_IPTV_SLOW_IGNORE_TERM=1
+                             D-SINK-19 round 14, R24g (F-HARNESS-24): a
+                             slowed verb IGNORES SIGTERM, so only the
+                             service's KILL can end it -- the half of the
+                             start-up watchdog nothing observed. SIG_IGN
+                             survives exec, so the real helper ignores it too.
+    OMARCHY_IPTV_SLOW_AT=inside
+                             R24d (D-SRC-24): instead of sleeping BEFORE the
+                             real helper runs, run it in this process and
+                             make its first lstat() of a state.json sleep --
+                             a hung filesystem, made deterministic -- so the
+                             real verb's own code is what is held, its own
+                             SIGALRM self-deadline included. The helper is
+                             loaded from omarchy-iptv.real with bytecode off
+                             (the tree is the scenario's scratch copy).
 
 The verb is read the way the helper's own argv is shaped: `player seek ...`
 is "seek", `status --socket ...` is "status".
@@ -107,12 +122,41 @@ def main():
         # environment in a readable /proc entry.
         sys.stderr.write("slow-helper: could not go non-dumpable, refusing to hold the environment\n")
         return 2
-    if verb_of(argv) in slow and ms > 0:
+    held = verb_of(argv) in slow and ms > 0
+    if held and os.environ.get("OMARCHY_IPTV_SLOW_IGNORE_TERM", "") == "1":
+        import signal
+        signal.signal(signal.SIGTERM, signal.SIG_IGN)
+    if held and os.environ.get("OMARCHY_IPTV_SLOW_AT", "") == "inside":
+        return run_inside(argv, ms)
+    if held:
         time.sleep(ms / 1000.0)
     # Same interpreter, same argv, no shell: the reply the service reads is
     # the real helper's own.
     os.execv(sys.executable, [sys.executable, REAL] + argv)
     return 0   # unreachable unless execv fails, which raises
+
+
+def run_inside(argv, ms):
+    """The real helper's main() in THIS process, with its first lstat() of a
+    path ending in state.json held for `ms` (OMARCHY_IPTV_SLOW_AT=inside)."""
+    import importlib.machinery
+    import importlib.util
+    sys.dont_write_bytecode = True
+    loader = importlib.machinery.SourceFileLoader("omarchy_iptv_real", REAL)
+    spec = importlib.util.spec_from_loader("omarchy_iptv_real", loader)
+    helper = importlib.util.module_from_spec(spec)
+    loader.exec_module(helper)
+    real_lstat = os.lstat
+    state = {"held": False}
+
+    def held_lstat(path, *args, **kwargs):
+        if not state["held"] and str(path).endswith("state.json"):
+            state["held"] = True
+            time.sleep(ms / 1000.0)
+        return real_lstat(path, *args, **kwargs)
+
+    os.lstat = held_lstat
+    return helper.main(argv)
 
 
 if __name__ == "__main__":

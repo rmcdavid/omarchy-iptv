@@ -2,8 +2,25 @@
 # scripts/dev-harness/spikes/filewatch/measure.sh -- R23g (D-SINK-19 round
 # 13): what does Quickshell's FileView do to its watch?
 #
-#   measure.sh [HELPER]     HELPER: the bin/omarchy-iptv whose `state` verb
+#   measure.sh [HELPER] [SET]
+#                           HELPER: the bin/omarchy-iptv whose `state` verb
 #                           makes the atomic rename (default: this tree's)
+#                           SET: r23g (default, the round-13 sixteen) or r24
+#                           (round 14: the dir-absent first session, R24c,
+#                           and a symlink at the path, R24b)
+#
+# R24 (round 14) adds three file SHAPES the r23g set never started from:
+#   absent  the production fresh-install shape -- the FileView's path is
+#           <xs>/omarchy-iptv/state.json with <xs> present and omarchy-iptv/
+#           under it ABSENT, so the first load fails 2; the step `mkinit` is
+#           the service's start-up (mkdir -p -m 700, then the helper's
+#           `state init`, which creates the file)
+#   link    state.json is a symbolic link to a regular file in another
+#           directory (a dotfiles user); each line also says what is AT the
+#           path afterwards and whether the target holds the bytes
+#   dangle  state.json is a symbolic link to a file that does not exist
+# and two steps: `garbage` (an in-place write of text that is not JSON) and
+# `repath` (the view's path set to "" and back, the other re-arm candidate).
 #
 # Runs shell.qml (one FileView declared as Service.qml's stateFile is) in a
 # nested headless cage on a PRIVATE D-Bus (../../private-bus.sh, CLAUDE.md
@@ -26,8 +43,13 @@ STEP_WAIT=${STEP_WAIT:-1.5}
 
 if [[ ${1:-} == --child ]]; then
   # ------------------------------------------------------------ inside cage
-  WORK=$2 HELPER=$3
+  WORK=$2 HELPER=$3 SET=${4:-r23g}
   OUT=$WORK/result.txt
+  SHAPE=file
+  # Where the view looks, per shape (fresh_* sets it before every start).
+  FILE=$WORK/state/state.json
+  STATE_DIR=$WORK/state
+  TARGET=""
   QS_PID=""
   stop_qs() {
     local i
@@ -42,7 +64,7 @@ if [[ ${1:-} == --child ]]; then
   ipc() { timeout 5 qs ipc -p "$WORK/cfg" call probe "$@" 2>/dev/null; }
   start_qs() {
     local i reply
-    FVPROBE_FILE="$WORK/state/state.json" quickshell -p "$WORK/cfg" >>"$WORK/qs.log" 2>&1 &
+    FVPROBE_FILE="$FILE" quickshell -p "$WORK/cfg" >>"$WORK/qs.log" 2>&1 &
     QS_PID=$!
     for ((i = 0; i < 100; i++)); do
       reply=$(ipc counts)
@@ -52,11 +74,38 @@ if [[ ${1:-} == --child ]]; then
     echo "GAVE UP: the probe did not load within 10 s" >>"$OUT"
     return 1
   }
+  SEED='{"version":2,"cacheLayout":0,"favorites":["t:seed"],"recents":[],"lastPlayed":null,"session":null,"sources":[],"savedSearches":[],"hiddenGroups":[],"activeKey":""}'
+  reset_dirs() { rm -rf "$WORK/state" "$WORK/xs" "$WORK/target"; }
   fresh_file() {
-    rm -rf "$WORK/state"
+    reset_dirs
+    SHAPE=file FILE=$WORK/state/state.json STATE_DIR=$WORK/state TARGET=""
     mkdir -m 700 "$WORK/state"
-    printf '{"version":2,"cacheLayout":0,"favorites":["t:seed"],"recents":[],"lastPlayed":null,"session":null,"sources":[],"savedSearches":[],"hiddenGroups":[],"activeKey":""}\n' >"$WORK/state/state.json"
-    chmod 600 "$WORK/state/state.json"
+    printf '%s\n' "$SEED" >"$FILE"
+    chmod 600 "$FILE"
+  }
+  fresh_absent() {
+    reset_dirs
+    SHAPE=absent FILE=$WORK/xs/omarchy-iptv/state.json STATE_DIR=$WORK/xs/omarchy-iptv TARGET=""
+    mkdir -m 700 "$WORK/xs"
+  }
+  fresh_nofile() {
+    reset_dirs
+    SHAPE=nofile FILE=$WORK/state/state.json STATE_DIR=$WORK/state TARGET=""
+    mkdir -m 700 "$WORK/state"
+  }
+  fresh_link() {
+    reset_dirs
+    SHAPE=link FILE=$WORK/state/state.json STATE_DIR=$WORK/state TARGET=$WORK/target/state.json
+    mkdir -m 700 "$WORK/state" "$WORK/target"
+    printf '%s\n' "$SEED" >"$TARGET"
+    chmod 600 "$TARGET"
+    ln -s "$TARGET" "$FILE"
+  }
+  fresh_dangle() {
+    reset_dirs
+    SHAPE=dangle FILE=$WORK/state/state.json STATE_DIR=$WORK/state TARGET=$WORK/target/state.json
+    mkdir -m 700 "$WORK/state"
+    ln -s "$TARGET" "$FILE"
   }
   N=0
   # A step written NAME! is not waited on: the next step follows at once,
@@ -73,35 +122,52 @@ if [[ ${1:-} == --child ]]; then
     N=$((N + 1))
     case $what in
       own)      ipc save "{\"version\":2,\"favorites\":[\"t:own$N\"],\"sources\":[]}" >/dev/null ;;
-      helper)   python3 -I "$HELPER" state --state-dir "$WORK/state" favorite add "t:helper$N" >/dev/null 2>&1 ;;
-      inplace)  printf '{"version":2,"favorites":["t:inplace%s"],"sources":[]}\n' "$N" >"$WORK/state/state.json" ;;
-      truncate) : >"$WORK/state/state.json" ;;
-      chmod)    chmod 600 "$WORK/state/state.json" ;;
+      helper)   python3 -I "$HELPER" state --state-dir "$STATE_DIR" favorite add "t:helper$N" >/dev/null 2>&1 ;;
+      inplace)  printf '{"version":2,"favorites":["t:inplace%s"],"sources":[]}\n' "$N" >"$FILE" ;;
+      garbage)  printf 'not json %s\n' "$N" >"$FILE" ;;
+      truncate) : >"$FILE" ;;
+      chmod)    chmod 600 "$FILE" ;;
       reload)   ipc reload >/dev/null ;;
+      repath)   ipc repath >/dev/null ;;
+      mkinit)   mkdir -p -m 700 "$STATE_DIR" && python3 -I "$HELPER" state --state-dir "$STATE_DIR" init >/dev/null 2>&1 ;;
       restart)  stop_qs; start_qs || return 1; before='{"changed":0,"loaded":0,"failed":0,"saved":0,"saveFailed":0}' ;;
     esac
     sleep "$wait"
     if [[ $wait == 0 ]]; then GROUP="$GROUP$what+"; return 0; fi
     what="$GROUP$what"; GROUP="" GROUP_BEFORE=""
     after=$(ipc counts)
-    python3 -I - "$what" "$before" "$after" "$WORK/state/state.json" >>"$OUT" <<'PY'
-import json, sys
-what, before, after, path = sys.argv[1], json.loads(sys.argv[2] or "{}"), json.loads(sys.argv[3] or "{}"), sys.argv[4]
+    python3 -I - "$what" "$before" "$after" "$FILE" "$SHAPE" "$TARGET" >>"$OUT" <<'PY'
+import json, os, stat, sys
+what, before, after, path, shape, target = sys.argv[1], json.loads(sys.argv[2] or "{}"), json.loads(sys.argv[3] or "{}"), sys.argv[4], sys.argv[5], sys.argv[6]
 d = {k: after.get(k, 0) - before.get(k, 0) for k in ("changed", "loaded", "failed", "saved", "saveFailed")}
 try:
     disk = open(path, encoding="utf-8").read()
 except OSError:
     disk = None
 seen = after.get("text", "") == disk
-print("  %-14s fileChanged+%d loaded+%d loadFailed+%d saved+%d saveFailed+%d  view==disk:%s"
-      % (what, d["changed"], d["loaded"], d["failed"], d["saved"], d["saveFailed"], "yes" if seen else "NO"))
+line = ("  %-14s fileChanged+%d loaded+%d loadFailed+%d saved+%d saveFailed+%d  view==disk:%s"
+        % (what, d["changed"], d["loaded"], d["failed"], d["saved"], d["saveFailed"], "yes" if seen else "NO"))
+if shape in ("link", "dangle"):
+    # What is AT the path now (lstat), and what the link's target holds.
+    try:
+        st = os.lstat(path)
+        kind = "symlink" if stat.S_ISLNK(st.st_mode) else "regular" if stat.S_ISREG(st.st_mode) else "other"
+    except OSError:
+        kind = "nothing"
+    try:
+        held = open(target, encoding="utf-8").read()
+        tgt = "target:%d bytes%s" % (len(held), " (the view's text)" if held == after.get("text", "") else "")
+    except OSError:
+        tgt = "target:none"
+    line += "  at-path:%s %s" % (kind, tgt)
+print(line)
 PY
   }
   sequence() {
     local name=$1 s
     shift
-    echo "SEQ $name: $*" >>"$OUT"
-    fresh_file
+    echo "SEQ $name ($SHAPE_NEXT): $*" >>"$OUT"
+    "fresh_$SHAPE_NEXT"
     start_qs || return
     for s in "$@"; do step "$s" || break; done
     stop_qs
@@ -109,6 +175,31 @@ PY
   mkdir -m 700 -p "$WORK/cfg"
   cp "$HERE/shell.qml" "$WORK/cfg/shell.qml"
   : >"$OUT"
+  SHAPE_NEXT=file
+  if [[ $SET == r24 ]]; then
+    # R24c: the production fresh shape. Q is the session as it ships (nothing
+    # re-arms); R the explicit reload() after the start-up mkdir/init; S the
+    # path reset; T reload then an own save; U the same with the directory
+    # PRESENT and the file absent, for contrast.
+    SHAPE_NEXT=absent
+    sequence Q mkinit helper inplace garbage
+    sequence R mkinit reload helper inplace garbage
+    sequence S mkinit repath helper inplace garbage
+    sequence T mkinit reload own helper garbage
+    sequence R2 mkinit reload helper own inplace
+    # U: the directory exists, the file does not (the r23g shapes all had one).
+    SHAPE_NEXT=nofile
+    sequence U mkinit helper inplace garbage
+    # R24b: what the view's OWN save and the helper's write do to a VALID
+    # symlink at the path, and what each sees of the other.
+    SHAPE_NEXT=link
+    sequence V own helper inplace
+    sequence W helper own helper
+    SHAPE_NEXT=dangle
+    sequence X own
+    echo "END" >>"$OUT"
+    exit 0
+  fi
   sequence A inplace inplace truncate inplace
   sequence B own inplace inplace
   sequence C helper inplace inplace
@@ -131,6 +222,7 @@ fi
 
 # ---------------------------------------------------------------- outside
 HELPER=${1:-$ROOT/bin/omarchy-iptv}
+SET=${2:-r23g}
 RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
 WORK=$(mktemp -d "$RUNTIME/omarchy-iptv-fw.XXXXXX") || exit 2
 chmod 700 "$WORK"
@@ -138,10 +230,10 @@ cleanup() { rm -rf -- "$WORK"; }
 trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
-echo "filewatch: work $WORK, helper $HELPER, step wait ${STEP_WAIT}s, load $(cut -d' ' -f1-3 /proc/loadavg)"
+echo "filewatch: set $SET, work $WORK, helper $HELPER, step wait ${STEP_WAIT}s, load $(cut -d' ' -f1-3 /proc/loadavg)"
 env -u WAYLAND_DISPLAY -u DISPLAY WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 \
   "$ROOT/scripts/dev-harness/private-bus.sh" "$WORK/bus" 240 \
-  cage -- "$0" --child "$WORK" "$HELPER" >"$WORK/cage.log" 2>&1
+  cage -- "$0" --child "$WORK" "$HELPER" "$SET" >"$WORK/cage.log" 2>&1
 status=$?
 if [[ -s $WORK/result.txt ]]; then cat "$WORK/result.txt"; else echo "NO RESULT (cage exit $status)"; tail -n 20 "$WORK/cage.log"; fi
 grep -c 'FVPROBE' "$WORK/qs.log" 2>/dev/null | sed 's/^/probe signal lines: /'

@@ -35,6 +35,10 @@ ShellRoot {
     target: "probe"
     function save(text: string): string { fv.setText(text); return "ok" }
     function reload(): string { fv.reload(); return "ok" }
+    // R24c: the other candidate re-arm, tried only if reload() is not one --
+    // the path set to "" and back, which tears the watch down and builds it
+    // again.
+    function repath(): string { var p = fv.path; fv.path = ""; fv.path = p; return "ok" }
     function counts(): string {
       return JSON.stringify({ changed: root.changed, loaded: root.loaded, failed: root.failed,
                               saved: root.saved, saveFailed: root.saveFailed, text: root.lastText })

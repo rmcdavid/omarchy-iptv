@@ -1,0 +1,101 @@
+R24 (D-SINK-19 round 14), measure.sh <helper> r24, 2026-10-14, Quickshell 0.3.1 / Qt 6.11.2, nested headless cage on a private D-Bus.
+Two runs. The FIRST with dev ced1bd1's helper (its state writer replaces a symlink at the path), the SECOND with lane-key-q1's (it writes through to the target).
+Q..U do not depend on the helper's symlink handling and read the same in both runs; V and W are the difference.
+
+=== run 1: dev's helper (the tree's bin/omarchy-iptv before the R24b commit)
+filewatch: set r24, work /run/user/1000/omarchy-iptv-fw.hhY0Xl, helper <scratchpad>/wt-key-q1/bin/omarchy-iptv, step wait 1.5s, load 1.17 1.32 0.82
+SEQ Q (absent): mkinit helper inplace garbage
+  mkinit         fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO
+  helper         fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO
+  inplace        fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO
+  garbage        fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO
+SEQ R (absent): mkinit reload helper inplace garbage
+  mkinit         fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO
+  reload         fileChanged+0 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  helper         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  garbage        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ S (absent): mkinit repath helper inplace garbage
+  mkinit         fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO
+  repath         fileChanged+0 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  helper         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  garbage        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ T (absent): mkinit reload own helper garbage
+  mkinit         fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO
+  reload         fileChanged+0 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  own            fileChanged+1 loaded+0 loadFailed+0 saved+1 saveFailed+0  view==disk:NO
+  helper         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  garbage        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ R2 (absent): mkinit reload helper own inplace
+  mkinit         fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO
+  reload         fileChanged+0 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  helper         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  own            fileChanged+1 loaded+0 loadFailed+0 saved+1 saveFailed+0  view==disk:NO
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ U (nofile): mkinit helper inplace garbage
+  mkinit         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  helper         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  garbage        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ V (link): own helper inplace
+  own            fileChanged+1 loaded+0 loadFailed+0 saved+1 saveFailed+0  view==disk:NO  at-path:symlink target:50 bytes
+  helper         fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO  at-path:regular target:50 bytes
+  inplace        fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO  at-path:regular target:50 bytes
+SEQ W (link): helper own helper
+  helper         fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO  at-path:regular target:164 bytes (the view's text)
+  own            fileChanged+0 loaded+0 loadFailed+0 saved+1 saveFailed+0  view==disk:NO  at-path:regular target:164 bytes (the view's text)
+  helper         fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO  at-path:regular target:164 bytes (the view's text)
+SEQ X (dangle): own
+  own            fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+1  view==disk:NO  at-path:symlink target:none
+END
+probe signal lines: 49
+
+=== run 2: lane-key-q1's helper (R24b: write through a valid link)
+filewatch: set r24, work /run/user/1000/omarchy-iptv-fw.7gcCZm, helper <scratchpad>/wt-key-q1/bin/omarchy-iptv, step wait 1.5s, load 1.51 1.67 1.52
+SEQ Q (absent): mkinit helper inplace garbage
+  mkinit         fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO
+  helper         fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO
+  inplace        fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO
+  garbage        fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO
+SEQ R (absent): mkinit reload helper inplace garbage
+  mkinit         fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO
+  reload         fileChanged+0 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  helper         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  garbage        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ S (absent): mkinit repath helper inplace garbage
+  mkinit         fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO
+  repath         fileChanged+0 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  helper         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  garbage        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ T (absent): mkinit reload own helper garbage
+  mkinit         fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO
+  reload         fileChanged+0 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  own            fileChanged+1 loaded+1 loadFailed+0 saved+1 saveFailed+0  view==disk:yes
+  helper         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  garbage        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ R2 (absent): mkinit reload helper own inplace
+  mkinit         fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+0  view==disk:NO
+  reload         fileChanged+0 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  helper         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  own            fileChanged+1 loaded+0 loadFailed+0 saved+1 saveFailed+0  view==disk:NO
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ U (nofile): mkinit helper inplace garbage
+  mkinit         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  helper         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+  garbage        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes
+SEQ V (link): own helper inplace
+  own            fileChanged+1 loaded+0 loadFailed+0 saved+1 saveFailed+0  view==disk:NO  at-path:symlink target:50 bytes
+  helper         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes  at-path:symlink target:178 bytes (the view's text)
+  inplace        fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes  at-path:symlink target:55 bytes (the view's text)
+SEQ W (link): helper own helper
+  helper         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes  at-path:symlink target:177 bytes (the view's text)
+  own            fileChanged+1 loaded+0 loadFailed+0 saved+1 saveFailed+0  view==disk:NO  at-path:symlink target:50 bytes
+  helper         fileChanged+1 loaded+1 loadFailed+0 saved+0 saveFailed+0  view==disk:yes  at-path:symlink target:178 bytes (the view's text)
+SEQ X (dangle): own
+  own            fileChanged+0 loaded+0 loadFailed+0 saved+0 saveFailed+1  view==disk:NO  at-path:symlink target:none
+END
+probe signal lines: 59

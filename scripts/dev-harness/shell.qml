@@ -1323,6 +1323,9 @@ ShellRoot {
           // tree from before R22c reads its old hint rather than nothing.
           rowsHaveDetail: g.rowsHaveDetail, emptyKind: g.emptyKind, emptyTitle: g.emptyTitleText, emptyProse: g.emptyProseText,
           emptyShown: g.emptyStateShown, firstRunHead: g.firstRunHead, firstRunForm: g.firstRunForm, stateBlocked: g.stateBlocked,
+          // R24f (round 14): the Sources header's right slot and the rows the
+          // list is built over (its model is this count), as drawn.
+          headerRight: g.headerRight, sourceRows: g.sourceRowCount,
           footerHints: g.footerHintText,
           errorCheck: g.copy ? g.copy.errorCheck : undefined,
           bannerKind: g.bannerKind, bannerText: g.bannerText,
