@@ -4382,8 +4382,10 @@ outer headless cage on a private bus; logo-scenario 33 / 0
 (`logo-20261014-043540-501342`); qml spec 78, a11y 35, text format guard 58.
 Every live run under a nested headless cage on a private D-Bus with no
 service directories; transcripts in lane A's session scratch directory. On
-lane-key-p2 after R23i: the ledger reads 244 citations, 337 rows,
-withdrawn-symbol waivers 0 / 0.
+lane-key-p2: at fbb61f8 (R23i) the ledger read 244 citations, 337 rows,
+withdrawn-symbol waivers 0 / 0; at the lane's documents tip, 247 citations
+(this section cites three names no document cited before, `closeSources`,
+`firstRunAllowed` and `refusalMessage`, each resolving), 337 rows, 0 / 0.
 
 **Open for the lead (decision requests, not defects; the board's ids are the
 lead's).**
