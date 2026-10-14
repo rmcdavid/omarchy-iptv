@@ -2289,10 +2289,11 @@ PYSEED
   done
   after=gone; for p in $initpid; do kill -0 "$p" 2>/dev/null && after="alive($p)"; done
   [[ -z $initpid ]] && after=never-seen
+  left=$(init_pids "$SLOW_TREE/bin/omarchy-iptv"); ORPHANS="$ORPHANS $left"
   ck "B18 the shell stopped 5 s into a held start-up init: the init outlives the shell, and then ENDS by its own deadline -- nothing left running 36 s after it started" \
-     "at-stop:$atstop after-deadline:$after left:$(init_pids "$SLOW_TREE/bin/omarchy-iptv" | sed 's/^$/none/')" \
+     "at-stop:$atstop after-deadline:$after left:${left:-none}" \
      "at-stop:alive after-deadline:gone left:none"
-  for p in $initpid; do kill -KILL "$p" 2>/dev/null; done
+  for p in $initpid $left; do kill -KILL "$p" 2>/dev/null; done
   export OMARCHY_IPTV_PLUGIN_ROOT=$PLUGIN_ROOT; unset OMARCHY_IPTV_SLOW_MS OMARCHY_IPTV_SLOW_VERBS OMARCHY_IPTV_SLOW_AT
 
   echo "== P: the console sink, then teardown ($(elapsed) s)"
