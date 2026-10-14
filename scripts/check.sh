@@ -541,6 +541,23 @@ if command -v node >/dev/null 2>&1; then
   else
     cat "$node_log"; bad "node tests"
   fi
+  # R23g (round 13). The real FileView delivers the reload its OWN save
+  # raises only sometimes (never for a lone save at idle; under load, or
+  # with a later write queued, it lands carrying our own text), measured in
+  # scripts/dev-harness/spikes/filewatch/. The harness delivers it by
+  # default; this run delivers it never, so a pin that holds only because
+  # the echo arrived goes red here. Same suite, same count.
+  node_log2="$CHECK_TMP/node-no-echo.log"
+  if IPTV_HARNESS_OWN_ECHO=none node "$ROOT/tests/Model.test.js" >"$node_log2" 2>&1; then
+    node_checks2=$(grep -oE '^[0-9]+ checks' "$node_log2" | head -1 | grep -oE '^[0-9]+')
+    if [[ -z $node_checks2 || $node_checks2 != "${node_checks:-}" ]]; then
+      bad "node tests without the own-write echo ran ${node_checks2:-no} checks, against ${node_checks:-no} with it"
+    else
+      ok "node tests without the own-write echo, R23g ($node_checks2 checks)"
+    fi
+  else
+    grep -E 'FAIL|failure' "$node_log2" | head -40; bad "node tests without the own-write echo (R23g)"
+  fi
 else
   bad "node not found (dev-only dependency: mise use node)"
 fi

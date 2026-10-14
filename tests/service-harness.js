@@ -255,6 +255,32 @@ class Host {
 //   any other text          loaded, with that text ("" for an empty file)
 // `reload()` queues a load, as stateFile.reload() does. A save to a file
 // whose directory cannot be entered fails, as it does for real.
+//
+// R23g (round 13): WHICH CHANGES RAISE A RELOAD, measured on Quickshell
+// 0.3.1 / Qt 6.11.2 in a nested headless cage on a private D-Bus, both with
+// a bare FileView declared exactly as stateFile is
+// (scripts/dev-harness/spikes/filewatch/measure.sh, 16 sequences) and with
+// the REAL Service.qml under the dev harness, idle and under load:
+//   an external IN-PLACE write (truncate, empty, garbage, a good copy put
+//     back), the helper's atomic rename (`state favorite add`, `state source
+//     add`), a chmod              fileChanged AND a load, every time, before
+//                                 or after any number of the view's own
+//                                 saves, and again after a restart: the
+//                                 watch was never lost in any sequence
+//   the view's OWN setText save   fileChanged, and the reload it causes
+//                                 delivers a load ONLY SOMETIMES: never for
+//                                 a lone save at idle (16 of 16 probe
+//                                 saves), but under load, or when a later
+//                                 setText is already queued, the reload
+//                                 lands and carries our own text (the
+//                                 service counted it as `own-write`)
+// So the external reloads the tests deliver by hand (h.loadState() after a
+// change to h.stateFile.disk) are all reloads the real view delivers, and
+// the own-write echo is a reload it MAY deliver. Both shapes are run:
+// `ownEcho` "load" (the default, the echo delivered after every `saved`)
+// and "none" (never delivered) -- the opts field, or IPTV_HARNESS_OWN_ECHO
+// for a whole run, which scripts/check.sh makes a second time with "none".
+// A pin that holds in only one of the two is relying on timing.
 class StateFile {
   constructor(text, o) {
     const opts = o || {}
@@ -262,6 +288,8 @@ class StateFile {
     this.fault = opts.fault || null
     this.disk = text; this.view = text; this.events = []; this.writeFails = false; this.coalesce = false
     this.loader = null
+    this.ownEcho = opts.ownEcho || process.env.IPTV_HARNESS_OWN_ECHO || "load"
+    if (this.ownEcho !== "load" && this.ownEcho !== "none") throw new Error("service-harness: ownEcho is load or none, not " + this.ownEcho)
   }
   text() { return this.view }
   setText(text) {
@@ -322,7 +350,7 @@ function bootService(serviceText, Model, o) {
   const opts = o || {}
   const h = { clock: opts.clock || 1760000000000, later: [], cacheRuns: [], signals: [], warnings: [], detached: [], turns: 0 }
   h.host = new Host(opts.entry, opts.host || "lag")
-  h.stateFile = new StateFile(opts.stateText || "", { exists: opts.exists, fault: opts.fault })
+  h.stateFile = new StateFile(opts.stateText || "", { exists: opts.exists, fault: opts.fault, ownEcho: opts.ownEcho })
   h.stateInitStdout = { text: "" }
   // The helper's `cache` reply: ok for every verb, unless a test says
   // otherwise (h.cacheFails = ["migrate"]).
@@ -470,8 +498,9 @@ function bootService(serviceText, Model, o) {
       onSaved()
       if (o2 && o2.noLater) return true
       h.runLater()
-      // The own-write reload (onFileChanged -> reload -> onLoaded).
-      h.loadState()
+      // The own-write reload (onFileChanged -> reload -> onLoaded), when the
+      // view delivers one (R23g: sometimes; see StateFile).
+      if (h.stateFile.ownEcho === "load") h.loadState()
     } else {
       onSaveFailed(1)
     }
