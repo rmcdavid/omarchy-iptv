@@ -6,7 +6,7 @@ import {
   str, asList, tokenize, fnv1a32
 } from "./text.mjs"
 import {
-  emptyState
+  emptyState, stateUnreadableNotice
 } from "./state.mjs"
 import {
   logoConsentLines, WALL_KEY
@@ -849,6 +849,15 @@ function sourcesHeaderCount(n) {
   return formatCount(v) + (v === 1 ? " source" : " sources")
 }
 
+// R24f (D-SRC-28). The Sources header's right slot: in the no-write mode it
+// is the R23e notice's TITLE (one source of copy: Model.stateUnreadableNotice,
+// the notification's and the guide body's own words), never "No sources" over
+// a file that holds records nobody could read; otherwise the count.
+function sourcesHeaderRight(n, stateBlocked, path) {
+  if (str(stateBlocked) !== "") return stateUnreadableNotice(stateBlocked, path).title
+  return sourcesHeaderCount(n)
+}
+
 // Pinned column row name (UX-SOURCES 7.1).
 function sourcesRowAccessibleName(n) {
   return "Sources, " + formatCount(n) + " saved"
@@ -939,7 +948,7 @@ export {
   validateLabel, maskQuery, maskUrl, encodeQueryValue, xtreamUrls,
   validateXtream, pluralGroups, countsLine, sameDay, formatLastUsed,
   formatAgo, sourceView, sourceViews, sourceRows, EPG_HINT_ROW_TEXT,
-  sourceDetail, sourceAccessibleName, sourcesHeaderCount,
+  sourceDetail, sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
   sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
   fetchingLine, probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
   CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS,

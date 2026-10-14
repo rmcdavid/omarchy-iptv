@@ -1312,8 +1312,12 @@ KM="$ROOT/scripts/dev-harness/spikes/key-mutations"
 # which B9 and the R23a node pins were seen red against, and
 # r23e-editable-field.patch, a form field made editable, which B13's
 # editable-input census was seen red against.
-is "all four key-mutation patches still apply to this tree (git apply --check)" \
-   "$(for km_p in d3-save-parked r14-no-return r23a-no-rearm r23e-editable-field; do git -C "$ROOT" apply --check "$KM/$km_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 "
+# Round 14 adds r24g-no-kill.patch, the start-up watchdog's KILL deleted,
+# which B17 and the R24g node pins were seen red against (F-HARNESS-24),
+# and re-made d3-save-parked and r14-no-return for R24a's new shape of the
+# same two decisions.
+is "all five key-mutation patches still apply to this tree (git apply --check)" \
+   "$(for km_p in d3-save-parked r14-no-return r23a-no-rearm r23e-editable-field r24g-no-kill; do git -C "$ROOT" apply --check "$KM/$km_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 0 "
 is "key-scenario and the README cite the patch files and no mutation branch" \
    "$(qa_count 'd3-save-parked\.patch|r14-no-return\.patch' "$KS") $(qa_count 'mut-(d3-save-parked|r14-no-return)' "$KS") $(qa_count 'mut-(d3-save-parked|r14-no-return)' "$ROOT/scripts/dev-harness/README.md")" "2 0 0"
 # run.sh clean on the directory a signalled F leaves: DRIVEN. The old

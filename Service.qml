@@ -112,6 +112,16 @@ Item {
   readonly property int stateInitTimeoutMs: 15 * 1000
   // How long a terminated init has to exit before it is killed outright.
   readonly property int stateInitKillGraceMs: 2 * 1000
+  // D-SINK-19 round 14, R24d (D-SRC-25): the bound is over the WHOLE
+  // start-up check -- mkdirProc and stateInitProc alike, armed when mkdir
+  // starts (startStartupCheck), the 15 s spent by whichever is running. A
+  // filesystem that hangs mkdir hangs the init too, and the first version
+  // armed the watchdog only at the init, so a hung mkdir left the load
+  // waiting for ever, untold. And the init bounds ITSELF (the helper's
+  // STATE_INIT_DEADLINE, SIGALRM at the top of the verb, longer than this
+  // bound plus the grace) so a shell that stops first leaves nothing
+  // running past it (D-SRC-24). Neither reaches a process in uninterruptible
+  // sleep on a hung filesystem: a signal waits until the kernel lets go.
 
   // ---- settings (decision 7, R2). shell.barConfig is refreshed by the host on
   // every shell.json change (shell.qml syncPluginApis), so these re-evaluate
@@ -2129,9 +2139,51 @@ Item {
   // blocks on anything at the state path (R23b); this is the second fix,
   // for whatever else could hold it.
   function startStateInit() {
-    root.stateInitTimedOut = false
     stateInitProc.running = true
+  }
+
+  // R24d: the start-up check begins with mkdir, and so does its one bound.
+  function startStartupCheck() {
+    root.stateInitTimedOut = false
+    mkdirProc.running = true
     stateInitWatchdog.restart()
+  }
+
+  // R24d: mkdir's exit. A run the watchdog stopped never starts the init --
+  // the filesystem that held mkdir would hold it too -- and is decided at
+  // once as the timed-out check it is.
+  function startupMkdirExited() {
+    if (root.stateInitTimedOut) root.stateInitExited(-1)
+    else root.startStateInit()
+  }
+
+  // The start-up `state init`'s exit (stateInitProc's handler calls this,
+  // and so does a start-up check stopped in mkdir, with exitCode -1).
+  function stateInitExited(exitCode) {
+    stateInitWatchdog.stop()
+    stateInitKill.stop()
+    root.dirsReady = true
+    // R11: the helper's exit code is read, not assumed. A failed init (the
+    // state directory could not be made, say) means the save below may
+    // fail too, and the entry mirror must not strip the URL on top of it.
+    // R23c: a run the watchdog stopped is a failed one, whatever it exited.
+    root.stateInitOk = exitCode === 0 && !root.stateInitTimedOut
+    if (!root.stateInitOk) console.warn("omarchy-iptv: state init " + (root.stateInitTimedOut ? "was stopped after " + Math.floor(root.stateInitTimeoutMs / 1000) + " s" : "exited " + exitCode) + "; state.json may be unwritable")
+    // R22a: the witness the held load was waiting for. A fresh install is
+    // applied here; anything else is re-read once (the helper restores the
+    // modes it finds) and then blocks. R23c: a timed-out init is no
+    // witness at all, and the held load decides as the no-write mode
+    // ("init-timeout", Model.stateLoadDecision).
+    root.stateInitFound = Model.stateInitFound(stateInitStdout.text, exitCode, root.stateInitTimedOut)
+    root.decideStateLoad()
+    // R5: the parked state save FIRST, then the entry mirror that waited
+    // for it. The other order is the pointer-less source the review found.
+    // R11: "then" means once the save has LANDED -- settleEntryFlush reads
+    // the in-flight count and waits for stateFile's `saved`; the call here
+    // answers the one case with nothing in flight.
+    if (root.stateSavePending) root.saveState()
+    root.settleEntryFlush()
+    root.runNextCacheJob()
   }
 
   // D-SINK-19 round 12, R22a. EVERY load of state.json arrives here first,
@@ -2161,6 +2213,20 @@ Item {
       // The one load failure that is a fresh install: FileNotFound, AND the
       // helper found nothing there before it created the file.
       root.applyUserState("")
+      // R24c (round 14, D-SRC-19 / D-DOC-8): and RE-ARM the watch. Measured
+      // in a nested cage on a private bus (spikes/filewatch, set r24): a
+      // FileView whose path's DIRECTORY did not exist at its first load --
+      // the production fresh-install shape, XDG_STATE_HOME present and
+      // omarchy-iptv/ under it absent -- raises nothing for the rest of the
+      // session, the init's creation of the file, a helper rename and an
+      // in-place garbage write included (sequence Q); one explicit reload()
+      // after the start-up mkdir/init re-arms it, and every later change is
+      // seen (R, T, R2). The reload it causes is the identity under R24a:
+      // it carries the init's created text (or our own save), and
+      // Model.sameState of the init's empty default and parseState("") is
+      // true, so with a save of ours held it is ignored as the base, and
+      // with none it is applied over an equal memory.
+      stateFile.reload()
     } else if (d.act === "retry") {
       root.stateLoadRetried = true
       stateFile.reload()
@@ -2211,12 +2277,21 @@ Item {
     // it dropped the adopted key and record, and the parked save then wrote
     // the loss to disk. An ignored reload runs nothing below: neither
     // reconcile nor the cache layout.
+    // R24a (round 14, D-SRC-22): and whether the text is the disk as the
+    // service last knew it (landedState, the BASE) or a FOREIGN write -- a
+    // hand-run helper verb, a restore -- which is merged while a change is
+    // held instead of being ignored and then written over.
     var disposition = Model.reloadDisposition({ loadedBefore: root.stateLoaded,
                                                 ownWrite: root.recentSaves.indexOf(text) !== -1,
+                                                matchesBase: root.stateLoaded && Model.sameState(text, root.landedState),
                                                 savePending: root.stateSavePending,
                                                 savesInFlight: root.stateSavesInFlight,
                                                 saveFailed: root.stateSaveFailed })
     root.stateReloadsByReason = Model.countReload(root.stateReloadsByReason, disposition.reason)
+    if (disposition.act === "merge") {
+      root.mergeForeignText(text)
+      return
+    }
     if (disposition.act !== "apply") {
       root.stateReloadsIgnored = root.stateReloadsIgnored + 1
       // R14: this `return` IS the decision. Without it the reload is counted
@@ -2253,6 +2328,30 @@ Item {
     // Component.onCompleted against however long a FileView takes). Now
     // there is a state to decide on, so PO-3's verdict runs (4.6).
     if (root.deadSessionPending) root.markDeadSession()
+  }
+
+  // D-SINK-19 round 14, R24a (D-SRC-22). A FOREIGN write arrived while this
+  // session holds a change the file does not (a save parked, in flight or
+  // failed). Model.mergeForeignState decides every field; this carries it
+  // out: the merge becomes memory, the foreign text becomes the base (it is
+  // what the disk holds now), one console line per conflict (the field and a
+  // source key, never a URL), and a save is asked for whenever what is on
+  // disk -- or about to be, when one of ours is still in flight and would
+  // land after it -- is not the merge. Then the tail every applied state
+  // runs: the session outcome, reconcile, the cache layout.
+  function mergeForeignText(text) {
+    var theirs = Model.parseState(text)
+    var merged = Model.mergeForeignState(root.landedState, root.userState, theirs)
+    for (var i = 0; i < merged.conflicts.length; i++) console.warn("omarchy-iptv: " + Model.mergeConflictLine(merged.conflicts[i]))
+    root.landedState = theirs
+    root.userState = merged.state
+    var behind = !Model.sameState(merged.state, theirs)
+                 || (root.stateSavesInFlight > 0 && !Model.sameState(merged.state, root.lastSaveState))
+    var settled = root.userState
+    root.noteSessionOutcome("loaded")
+    if (behind && root.userState === settled) root.saveState()
+    root.reconcile(true)
+    root.startCacheLayout()
   }
 
   function saveState() {
@@ -2391,7 +2490,9 @@ Item {
     // change for exactly that, and they were right: the lane could not land it
     // because Service.qml was not in its ownership, which was my error and not
     // theirs (parallel rule 1 (dev branch), ownership follows the coupling).
-    playlistProc.command = Model.playlistFetchArgv(root.helperPath, root.activeCacheDir, root.stateDir)
+    // R24e (round 14, D-SRC-27): not in the no-write mode -- the remap is a
+    // writer of state.json too, and that mode writes nothing to it.
+    playlistProc.command = Model.playlistFetchArgv(root.helperPath, root.activeCacheDir, Model.fetchStateDir(root.stateDir, root.stateWriteBlocked))
     // D-SINK-8: the URL carries the provider's credentials and goes in the
     // environment, never on argv, where /proc/<pid>/cmdline shows it to every
     // local user for the life of the fetch. Assigned immediately before the
@@ -4836,7 +4937,7 @@ Item {
     // Argv-only. Creates the private cache/state/runtime dirs before any
     // FileView write or mpv socket bind can need them (open risk 2), then
     // state.json itself with mode 0600 (stateInitProc, S-02).
-    mkdirProc.running = true
+    root.startStartupCheck()
     // D-SINK-18, and it is FIRST among the things that must happen before a
     // URL can be persisted, not merely early: the shield decides whether a
     // persist is allowed at all, and a persist that arrives before this run
@@ -5200,14 +5301,17 @@ Item {
     // plus a KILL after a grace, because nothing else would ever reap a
     // helper that ignored the TERM, and the init is the one run the whole
     // start waits on.
+    // R24d: armed when mkdir starts, and it stops whichever of the two
+    // start-up processes is running.
     id: stateInitWatchdog
     interval: root.stateInitTimeoutMs
     repeat: false
     onTriggered: {
-      if (!stateInitProc.running) return
-      console.warn("omarchy-iptv: state init exceeded " + Math.floor(root.stateInitTimeoutMs / 1000) + " s, terminating it")
+      var proc = mkdirProc.running ? mkdirProc : stateInitProc.running ? stateInitProc : null
+      if (proc === null) return
+      console.warn("omarchy-iptv: " + (proc === mkdirProc ? "start-up mkdir" : "state init") + " exceeded " + Math.floor(root.stateInitTimeoutMs / 1000) + " s, terminating it")
       root.stateInitTimedOut = true
-      stateInitProc.signal(15)
+      proc.signal(15)
       stateInitKill.restart()
     }
   }
@@ -5217,9 +5321,10 @@ Item {
     interval: root.stateInitKillGraceMs
     repeat: false
     onTriggered: {
-      if (!stateInitProc.running) return
-      console.warn("omarchy-iptv: state init ignored the terminate signal, killing it")
-      stateInitProc.signal(9)
+      var proc = mkdirProc.running ? mkdirProc : stateInitProc.running ? stateInitProc : null
+      if (proc === null) return
+      console.warn("omarchy-iptv: " + (proc === mkdirProc ? "start-up mkdir" : "state init") + " ignored the terminate signal, killing it")
+      proc.signal(9)
     }
   }
 
@@ -5473,7 +5578,7 @@ Item {
   }
   Connections {
     target: mkdirProc
-    function onExited(exitCode, exitStatus) { root.startStateInit() }
+    function onExited(exitCode, exitStatus) { root.startupMkdirExited() }
   }
 
   Process {
@@ -5496,32 +5601,7 @@ Item {
   }
   Connections {
     target: stateInitProc
-    function onExited(exitCode, exitStatus) {
-      stateInitWatchdog.stop()
-      stateInitKill.stop()
-      root.dirsReady = true
-      // R11: the helper's exit code is read, not assumed. A failed init (the
-      // state directory could not be made, say) means the save below may
-      // fail too, and the entry mirror must not strip the URL on top of it.
-      // R23c: a run the watchdog stopped is a failed one, whatever it exited.
-      root.stateInitOk = exitCode === 0 && !root.stateInitTimedOut
-      if (!root.stateInitOk) console.warn("omarchy-iptv: state init " + (root.stateInitTimedOut ? "was stopped after " + Math.floor(root.stateInitTimeoutMs / 1000) + " s" : "exited " + exitCode) + "; state.json may be unwritable")
-      // R22a: the witness the held load was waiting for. A fresh install is
-      // applied here; anything else is re-read once (the helper restores the
-      // modes it finds) and then blocks. R23c: a timed-out init is no
-      // witness at all, and the held load decides as the no-write mode
-      // ("init-timeout", Model.stateLoadDecision).
-      root.stateInitFound = Model.stateInitFound(stateInitStdout.text, exitCode, root.stateInitTimedOut)
-      root.decideStateLoad()
-      // R5: the parked state save FIRST, then the entry mirror that waited
-      // for it. The other order is the pointer-less source the review found.
-      // R11: "then" means once the save has LANDED -- settleEntryFlush reads
-      // the in-flight count and waits for stateFile's `saved`; the call here
-      // answers the one case with nothing in flight.
-      if (root.stateSavePending) root.saveState()
-      root.settleEntryFlush()
-      root.runNextCacheJob()
-    }
+    function onExited(exitCode, exitStatus) { root.stateInitExited(exitCode) }
   }
 
   Process {

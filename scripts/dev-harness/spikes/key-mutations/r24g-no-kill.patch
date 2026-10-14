@@ -1,0 +1,13 @@
+diff --git a/Service.qml b/Service.qml
+index 0000000..0000000 100644
+--- a/Service.qml
++++ b/Service.qml
+@@ -5324,7 +5324,7 @@ Item {
+       var proc = mkdirProc.running ? mkdirProc : stateInitProc.running ? stateInitProc : null
+       if (proc === null) return
+       console.warn("omarchy-iptv: " + (proc === mkdirProc ? "start-up mkdir" : "state init") + " ignored the terminate signal, killing it")
+-      proc.signal(9)
++      // MUTATION (lane A, round 14): the KILL deleted -- a TERM-ignoring start-up process is never ended
+     }
+   }
+ 

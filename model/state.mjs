@@ -1104,12 +1104,9 @@ function countReload(counts, reason) {
 // in-memory state is newer whenever a save is parked behind the start-up dirs
 // (`savePending`), a write is still in flight (`savesInFlight`: setText has
 // returned, `saved` has not fired), or the last write FAILED (`saveFailed`:
-// the file never caught up, and applying it would replay the loss). In every
-// one of those the file is older than memory by construction: the parked or
-// in-flight save overwrites it anyway, so an ignored reload loses nothing
-// that was going to survive. The one reload that must always apply is the
-// FIRST (`loadedBefore` false): before it, memory is the empty default plus
-// whatever stateOnLoad replays on top.
+// the file never caught up, and applying it would replay the loss). The one
+// reload that must always apply is the FIRST (`loadedBefore` false): before
+// it, memory is the empty default plus whatever stateOnLoad replays on top.
 //
 // The reload this exists for is not the service's own write echoed back
 // (`ownWrite`, texts in recentSaves: skipped since R10 of the player design)
@@ -1123,17 +1120,208 @@ function countReload(counts, reason) {
 // is the same flag: an IPC switch or remove before dirsReady (cacheReady
 // comes first) parks a save, so the reload that follows is ignored too.
 //
-// -> { act: "apply" | "ignore", reason }. Called by Service.applyUserState
-// before anything else; an ignored reload runs neither reconcile nor the
-// cache layout.
+// D-SINK-19 round 14, R24a (D-SRC-22). "Ignored" was right for THAT reload
+// and wrong for another: R9 said "the file is older than memory by
+// construction, so an ignored reload loses nothing", which holds only while
+// nothing but this service writes the file. A hand-run helper verb (`state
+// source add`, `favorite add`) in the window -- a save parked at the start,
+// in flight, or failed and not yet retried -- was ignored and then written
+// over by the next save that landed, while the helper had answered ok:true
+// (the round-13 data-loss lens, WF FAV WOK HADD FAV). 0.13.6 applied every
+// reload and so lost the in-app change instead. Neither is acceptable,
+// because one of them is always silent. So the question is now WHOSE text
+// the reload carries, against the service's BASE (Service.landedState: the
+// text it loaded, or its last save that LANDED, or the last foreign text it
+// merged):
+//   `matchesBase` (Model.sameState of the text and the base): the disk has
+//                 not moved since the service last knew it -- the start-up
+//                 chmod's pre-adoption text is exactly this -- so a held
+//                 change still wins and the reload is ignored for the
+//                 reason it is held, as R9 had it;
+//   otherwise     the text is FOREIGN (neither the base nor one of our own
+//                 writes): while a change is held it is MERGED
+//                 (Model.mergeForeignState), never ignored and never applied
+//                 blind; with nothing held it is applied as before, which is
+//                 the merge with ours == base (pinned to agree).
+//
+// -> { act: "apply" | "ignore" | "merge", reason }. Called by
+// Service.applyUserState before anything else; an ignored reload runs
+// neither reconcile nor the cache layout.
 function reloadDisposition(ctx) {
   var c = ctx || {}
   if (c.loadedBefore !== true) return { act: "apply", reason: "first-load" }
   if (c.ownWrite === true) return { act: "ignore", reason: "own-write" }
-  if (c.savePending === true) return { act: "ignore", reason: "save-parked" }
-  if ((Number(c.savesInFlight) || 0) > 0) return { act: "ignore", reason: "save-in-flight" }
-  if (c.saveFailed === true) return { act: "ignore", reason: "save-failed" }
-  return { act: "apply", reason: "file-newer" }
+  var held = c.savePending === true ? "save-parked"
+    : (Number(c.savesInFlight) || 0) > 0 ? "save-in-flight"
+    : c.saveFailed === true ? "save-failed" : ""
+  if (held === "") return { act: "apply", reason: "file-newer" }
+  if (c.matchesBase === true) return { act: "ignore", reason: held }
+  return { act: "merge", reason: "foreign-" + held }
+}
+
+// R24a. A value with its object keys sorted at every depth, so two states
+// that differ only in key order serialize alike.
+function sortedKeys(value) {
+  if (Array.isArray(value)) return value.map(sortedKeys)
+  if (!value || typeof value !== "object") return value
+  var out = {}
+  var keys = Object.keys(value).sort()
+  for (var i = 0; i < keys.length; i++) out[keys[i]] = sortedKeys(value[keys[i]])
+  return out
+}
+
+// R24a. A state (an object, or the text of a file) as a reader of the file
+// would see it: through parseState, which is the service's own reader, then
+// serialized with sorted keys. Two texts that parse to the same state are
+// the same state whatever their bytes -- the helper writes compact JSON, the
+// service indents it, and `state init` writes its own empty default where a
+// fresh install's memory is parseState(""): R24c's identity, pinned.
+function stateCanonical(state) {
+  var text = typeof state === "string" ? state : JSON.stringify(state === undefined ? null : state)
+  return JSON.stringify(sortedKeys(parseState(text)))
+}
+
+function sameState(a, b) {
+  return stateCanonical(a) === stateCanonical(b)
+}
+
+function canonValue(v) {
+  return JSON.stringify(sortedKeys(v === undefined ? null : v))
+}
+
+// One SET field merged three ways: theirs, minus what ours removed since the
+// base, plus what ours added since the base, in theirs' order with ours'
+// additions after. With ours equal to the base this IS theirs, element for
+// element and in order (R24a's identity). `id` names an element.
+function mergeSetField(base, ours, theirs, id) {
+  var inBase = {}, inOurs = {}, inTheirs = {}, seen = {}
+  var b = asList(base), o = asList(ours), t = asList(theirs)
+  var i, k
+  for (i = 0; i < b.length; i++) inBase[id(b[i])] = true
+  for (i = 0; i < o.length; i++) inOurs[id(o[i])] = true
+  for (i = 0; i < t.length; i++) inTheirs[id(t[i])] = true
+  var out = []
+  for (i = 0; i < t.length; i++) {
+    k = id(t[i])
+    if (seen[k] === true) continue
+    if (inBase[k] === true && inOurs[k] !== true) continue   // ours removed it since the base
+    seen[k] = true
+    out.push(t[i])
+  }
+  for (i = 0; i < o.length; i++) {
+    k = id(o[i])
+    if (seen[k] === true || inBase[k] === true || inTheirs[k] === true) continue   // only ours' additions
+    seen[k] = true
+    out.push(o[i])
+  }
+  return out
+}
+
+// The names of the fields two records disagree on, sorted: what a conflict
+// line names (never a value -- a source record carries a credentialed URL).
+function recordFieldsDiffering(a, b) {
+  var x = a && typeof a === "object" ? a : {}, y = b && typeof b === "object" ? b : {}
+  var names = {}, k
+  for (k in x) names[k] = true
+  for (k in y) names[k] = true
+  var out = []
+  for (k in names) if (canonValue(x[k]) !== canonValue(y[k])) out.push(k)
+  return out.sort()
+}
+
+// The scalars and the one list taken whole: theirs when theirs changed since
+// the base, ours otherwise; both changed, and differently, is a conflict.
+var MERGE_WHOLE_FIELDS = ["recents", "activeKey", "lastPlayed", "session", "cacheLayout"]
+
+// D-SINK-19 round 14, R24a. THE three-way merge of a FOREIGN write into a
+// session that holds a change the file does not (a save parked, in flight
+// or failed). ONE pure function, every field rule here:
+//   favorites, savedSearches, hiddenGroups  SETS: ours, plus what theirs
+//       added since base, minus what theirs removed since base (mergeSetField;
+//       a saved search is named by its folded terms, as parseState
+//       de-duplicates it)
+//   sources  RECORDS BY KEY: an add, a removal or a change made by theirs
+//       since base is applied to ours, and ours' own adds, removals and
+//       changes stand; a record BOTH changed (a change against a change, or
+//       against a removal) is a conflict
+//   recents, activeKey, lastPlayed, session, cacheLayout  theirs when theirs
+//       changed since base and ours did not; ours when only ours did; both,
+//       differently, is a conflict
+//   entryMigrated  true if either side has it (the marker is never undone)
+// A CONFLICT GOES TO THEIRS: the foreign write is the later act, and the
+// in-app side of it was already told its save failed ("Could not write
+// state.json") or has not been told it landed. Each is reported as
+// { field, key } -- the key is a source's 8-hex key or "", never a URL -- and
+// the caller logs one line per conflict.
+// Every input is read through parseState, so a missing base is the empty
+// state and every list is the shape the service holds; the result is read
+// through it once more, so the caps and the de-duplication parseState
+// applies to a file apply to the merge too.
+// -> { state, conflicts }
+function mergeForeignState(base, ours, theirs) {
+  var b = parseState(JSON.stringify(base || emptyState()))
+  var o = parseState(JSON.stringify(ours || emptyState()))
+  var t = parseState(JSON.stringify(theirs || emptyState()))
+  var conflicts = []
+  var out = cloneState(t)
+  out.favorites = mergeSetField(b.favorites, o.favorites, t.favorites, function (x) { return str(x) })
+  out.hiddenGroups = mergeSetField(b.hiddenGroups, o.hiddenGroups, t.hiddenGroups, function (x) { return str(x) })
+  out.savedSearches = mergeSetField(b.savedSearches, o.savedSearches, t.savedSearches,
+                                    function (x) { return savedSearchTerms(x && x.query).join(" ") })
+  var byKey = function (list) { var m = {}; for (var i = 0; i < list.length; i++) m[list[i].key] = list[i]; return m }
+  var mb = byKey(b.sources), mo = byKey(o.sources), mt = byKey(t.sources)
+  var sources = [], i, r, k
+  for (i = 0; i < t.sources.length; i++) {
+    r = t.sources[i]; k = r.key
+    var rb = mb[k], ro = mo[k]
+    var theirsChanged = !rb || canonValue(r) !== canonValue(rb)
+    if (rb && !ro) {
+      // ours removed it since the base
+      if (theirsChanged) { conflicts.push({ field: "sources", key: k, fields: recordFieldsDiffering(rb, r) }); sources.push(r) }
+      continue
+    }
+    if (ro) {
+      var oursChanged = !rb || canonValue(ro) !== canonValue(rb)
+      if (oursChanged && theirsChanged && canonValue(ro) !== canonValue(r)) {
+        conflicts.push({ field: "sources", key: k, fields: recordFieldsDiffering(ro, r) })
+        sources.push(r)
+      } else if (oursChanged && !theirsChanged) sources.push(ro)
+      else sources.push(r)
+      continue
+    }
+    sources.push(r)   // theirs added it
+  }
+  for (i = 0; i < o.sources.length; i++) {
+    r = o.sources[i]; k = r.key
+    if (mt[k]) continue
+    if (!mb[k]) { sources.push(r); continue }   // ours added it
+    // theirs removed it since the base; ours changed it too: a conflict, theirs (the removal) wins
+    if (canonValue(r) !== canonValue(mb[k])) conflicts.push({ field: "sources", key: k, fields: recordFieldsDiffering(mb[k], r) })
+  }
+  out.sources = sources
+  for (i = 0; i < MERGE_WHOLE_FIELDS.length; i++) {
+    var f = MERGE_WHOLE_FIELDS[i]
+    var cb = canonValue(b[f]), co = canonValue(o[f]), ct = canonValue(t[f])
+    if (ct !== cb) {
+      out[f] = t[f]
+      if (co !== cb && co !== ct) conflicts.push({ field: f, key: "" })
+    } else {
+      out[f] = o[f]
+    }
+  }
+  if (entryMigratedOf(o) || entryMigratedOf(t)) out.entryMigrated = true
+  else delete out.entryMigrated
+  return { state: parseState(JSON.stringify(out)), conflicts: conflicts }
+}
+
+// The console line for one conflict: the field, the source key when it is a
+// record, the names of the fields that differed -- never a value.
+function mergeConflictLine(conflict) {
+  var c = conflict || {}
+  var what = str(c.field) === "sources" && isSourceKey(str(c.key))
+    ? "the source " + str(c.key) + (asList(c.fields).length > 0 ? " (" + asList(c.fields).map(str).join(", ") + ")" : "")
+    : str(c.field)
+  return "state.json was changed by another program while a change made here was not yet saved; kept the other program's " + what
 }
 // ---- D-SINK-19 round 12, R22a: A STATE THAT DID NOT LOAD IS NEVER WRITTEN ----
 //
@@ -1193,6 +1381,12 @@ function stateLoadKind(result) {
 // that predates the field. Only "absent" can make a fresh install.
 // R23c (round 13): `timedOut` -- the service's watchdog killed the init --
 // answers "timeout", whatever the killed process printed or exited with.
+// R24b (round 14): two kinds of "present" carry their own answer, because
+// the FileView reports both as FileNotFound and the sentence that fixes
+// each is not the folder-permission one: "link", a symbolic link at the
+// path whose target is missing or not a regular file (the helper refuses to
+// read or write through it), and "not-a-dir", something that is not a
+// directory where the state DIRECTORY (or a folder above it) should be.
 function stateInitFound(text, exitCode, timedOut) {
   if (timedOut === true) return "timeout"
   if (Number(exitCode) !== 0) return "unknown"
@@ -1202,6 +1396,7 @@ function stateInitFound(text, exitCode, timedOut) {
     if (!o || o.kind !== "state" || o.action !== "init") continue
     var f = str(o.found)
     if (f === "absent") return "absent"
+    if (f === "link" || f === "not-a-dir") return f
     if (f === "file" || f === "other" || f === "unreadable") return "present"
     return "unknown"
   }
@@ -1240,6 +1435,10 @@ function stateLoadDecision(ctx) {
   if (found === "timeout") return { act: "block", reason: "init-timeout" }
   if (kind === "absent" && found === "absent") return { act: "fresh", reason: "absent" }
   if (c.retried !== true) return { act: "retry", reason: kind }
+  // R24b: the helper named what is at the path, and that is the reason --
+  // the folder-permission sentence "absent-unconfirmed" carries would send
+  // the user to chmod a folder that is fine.
+  if (found === "link" || found === "not-a-dir") return { act: "block", reason: found }
   return { act: "block", reason: kind === "absent" && found !== "unknown" ? "absent-unconfirmed" : kind }
 }
 
@@ -1276,9 +1475,26 @@ function stateUnreadableNotice(reason, path) {
   } else if (r === "unparsed") {
     what = "is not a valid state file"
     fix = "Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell."
-  } else if (r === "absent" || r === "absent-unconfirmed") {
+  } else if (r === "link") {
+    // R24b: the not-a-file sentence, naming what is there.
+    what = "is a symbolic link whose target is missing or is not a regular file"
+    fix = "Restore the file it points to, or move the link aside, then run omarchy restart shell."
+  } else if (r === "not-a-dir") {
+    // R24b: a regular file (or anything but a folder) where the state FOLDER
+    // should be. The sentence names the folder's path, not the file's.
+    file = str(path) !== "" ? str(path).replace(/\/[^\/]*$/, "") : "The state folder"
+    what = "is not a folder (a file is at that path, or at one above it)"
+    fix = "Move whatever is at that path aside, then run omarchy restart shell."
+  } else if (r === "absent-unconfirmed") {
     what = "could not be found, or its folder could not be read"
     fix = "Make the folder readable with chmod 700, then run omarchy restart shell."
+  } else if (r === "absent") {
+    // Mid-session (the file vanished under a running shell): the helper's
+    // witness is not asked again, so the sentence names both causes the
+    // FileView cannot tell apart -- a broken symbolic link (R24b) and an
+    // unreadable folder.
+    what = "could not be found, or its folder could not be read"
+    fix = "If it is a symbolic link, restore the file it points to; otherwise make the folder readable with chmod 700. Then run omarchy restart shell."
   } else if (r === "init-timeout") {
     // R23c: the start-up check of the file (the helper's `state init`) did
     // not answer within Service.stateInitTimeoutMs and was stopped.
@@ -1303,6 +1519,8 @@ export {
   removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed,
   normalizeFailed, prunedFailed, knownIdSet, failedIndex, failedDocument,
   failedWhen, withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
-  countReload, reloadDisposition, STATE_LOAD_ERRORS, stateLoadKind,
+  countReload, reloadDisposition, sortedKeys, stateCanonical, sameState,
+  canonValue, mergeSetField, recordFieldsDiffering, MERGE_WHOLE_FIELDS,
+  mergeForeignState, mergeConflictLine, STATE_LOAD_ERRORS, stateLoadKind,
   stateInitFound, stateLoadDecision, stateWriteGate, stateUnreadableNotice
 }

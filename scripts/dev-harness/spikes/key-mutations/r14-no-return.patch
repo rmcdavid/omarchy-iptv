@@ -2,8 +2,8 @@ diff --git a/Service.qml b/Service.qml
 index 0000000..0000000 100644
 --- a/Service.qml
 +++ b/Service.qml
-@@ -2065,9 +2065,7 @@ Item {
-     root.stateReloadsByReason = Model.countReload(root.stateReloadsByReason, disposition.reason)
+@@ -2294,9 +2294,7 @@ Item {
+     }
      if (disposition.act !== "apply") {
        root.stateReloadsIgnored = root.stateReloadsIgnored + 1
 -      // R14: this `return` IS the decision. Without it the reload is counted
