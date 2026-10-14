@@ -9,8 +9,9 @@ version lives in `manifest.json`.
 and until now the active one was stored in the desktop shell's own settings
 file, `~/.config/omarchy/shell.json`, because that is where the bar widget
 named its source. The widget now names the active source by a short code,
-and the URLs live only in the plugin's own file,
-`~/.local/state/omarchy-iptv/state.json`, readable by you alone.
+and the plugin keeps the URLs in its own files, readable by you alone:
+`~/.local/state/omarchy-iptv/state.json`, and the per-source cache under
+`~/.cache/omarchy-iptv`.
 
 ### Changed
 
@@ -19,40 +20,47 @@ and the URLs live only in the plugin's own file,
   your sources (or found there), made active, and taken off the widget's
   entry only once the plugin's own file has been written. If that write
   fails they are left where they were and moved at the next start.
-- **`omarchy bar set playlistUrl` and `epgUrl` no longer do anything.** After
-  the move the plugin does not read either setting: a value set there is
-  removed from the entry, with one `Bar setting ignored` notification naming
-  the setting and never the URL. Add, switch and remove sources on the
-  guide's Sources screen.
+- **`omarchy bar set io.github.rmcdavid.iptv playlistUrl` (and `epgUrl`) no
+  longer do anything.** After the move the plugin does not read either
+  setting: a value set there is removed from the entry at the plugin's next
+  write, with one `Bar setting ignored` notification naming the setting and
+  never the URL. Add, switch and remove sources on the guide's Sources
+  screen.
 - **The guide's hint after a playlist fails to load says "check the source in
   Sources"**, not a setting the plugin no longer reads.
 - **A change another program makes to `state.json` is merged with yours.** If
   the helper, or a file you put back, changes it while the plugin holds a
-  change it has not saved yet, both are kept, with two exceptions: where
-  both changed the same source, the other program's change wins and the
-  shell's journal says so; and if keeping both would pass the limit of 50
-  sources or 20 saved searches, the app's additions past it are dropped and
-  a notification says how many.
+  change it has not saved yet, both are kept where they changed different
+  things. Where both changed the same source or the same setting (which
+  source is active, the recent list), the other program's version wins and
+  the shell's journal says so. If keeping both would pass a limit (50
+  sources, 20 saved searches, 200 hidden groups), the app's additions past
+  it are dropped and a notification says how many; one race at the
+  50-source limit, while a source added in the app is still being checked,
+  is not covered yet and is described in the README.
 - **A `state.json` that is a symbolic link is written through and left a
   link**; a link that leads nowhere is refused rather than replaced. A tool
-  that replaces the link or the file behind it while the shell runs (`mv`,
-  `sed -i`, `ln -sfn`) is not noticed, and the shell's next save writes over
-  that change: edit the file the link points to in place, or restart the
-  shell straight after such a tool and before using the guide. 0.13.6 lost
-  the same edits.
+  that replaces the link itself while the shell runs (`mv` or `sed -i` run
+  on `~/.local/state/omarchy-iptv/state.json`, `ln -sfn`) is not noticed,
+  and the shell's next save writes over that change: edit the file the
+  link points to at its own path, or restart the shell straight after such
+  a tool and before using the guide. 0.13.6 lost the same edits.
 - **The plugin's folders may be symbolic links too.** A link at
-  `~/.local/state/omarchy-iptv` is followed and, like the cache folder and
-  the runtime folder when they are links, the folder it leads to is made
-  private (0700); one that leads nowhere is refused with a sentence naming
-  it.
+  `~/.local/state/omarchy-iptv` is followed and the folder it leads to is
+  made private (0700) at every shell start; a linked runtime folder is made
+  0700 when the player starts or stops; a linked cache folder keeps its own
+  mode. A state folder link that leads nowhere is refused with a sentence
+  naming it.
 - **For anyone running the helper by hand** (`python3
   ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv`): its
   `state show` and `state source list` exit 1 over a `state.json` they
-  cannot read or parse, where they used to print an empty state, and every
+  cannot read or parse, where they used to print an empty state; every
   `state` command but `state init` refuses a `state.json` that is not a
-  regular file, or a link to one, instead of blocking or writing over it;
-  a link it cannot write through, or a state folder link that leads
-  nowhere, is answered with a sentence rather than an error.
+  regular file or a link to one, instead of blocking or writing over it;
+  and a link it cannot write through, or a state folder link that leads
+  nowhere, is refused (exit 1) with a sentence saying what is wrong, where
+  0.13.6 replaced the first with a plain file and ended the second in a
+  traceback.
 
 ### Fixed
 
@@ -62,19 +70,21 @@ and the URLs live only in the plugin's own file,
   helper's `state` commands wrote an empty state over a damaged file. Now
   the plugin saves nothing until the file can be read again, tells you once
   with a notification that names the file and what to do, and the guide
-  says the same instead of showing the first-run form (if it happens while
-  you are using the guide, the Sources screen says saving has stopped).
+  says the same instead of showing the first-run form (if it happens after
+  your sources loaded, the Sources screen says saving has stopped).
   Restore the file, or move it aside to start with no sources, then restart
   the shell.
 - **Something other than a file at `state.json`** (a folder, a pipe) no
-  longer leaves the shell waiting for ever at start or changes that
-  folder's permissions.
+  longer leaves the helper waiting for ever or changes that folder's
+  permissions.
 - **In the first session after installing, the shell now notices** when
   another program changes `state.json`; before, it saw nothing until the
   next restart and its next save wrote over the change.
-- **A backup of `state.json` put back while the shell runs is kept.** 0.13.6
-  could take it for one of its own earlier saves and write over it at the
-  next save.
+- **A backup of `state.json` put back while the shell runs is kept**, unless
+  a save of the plugin's has failed or is still under way and the backup is
+  identical to the file as the plugin last knew it (the change made in the
+  app is then saved over it). 0.13.6 took a copy of any of its last eight
+  saves for its own write and wrote over it at the next save.
 
 ### Worth knowing
 

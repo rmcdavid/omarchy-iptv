@@ -13373,6 +13373,21 @@ folder has not been tested" with what two lenses measured, **D-DOC-13** and
 **D-SRC-40**: through a folder link every edit is seen, and re-pointing the
 link is not, after which the next save writes into the new folder.
 
+**The corrections were checked too, and needed correcting (D-DOC-18).** An
+independent claims check of the lead's commit `1927572`, run against the
+helper in scratch homes with 0.13.6 taken from `main`, found three of its
+README and UX-SOURCES sentences false and eight in the CHANGELOG draft --
+among them a linked cache folder said to be made 0700 at every start (only
+`cache migrate` does that, and an upgraded install never runs it again),
+`player start` said to play over any broken plugin folder (it refuses a
+broken runtime folder), a merge's exceptions missing the hidden-groups cap
+and the same setting changed on both sides, and a command a user could not
+run as written. All were corrected in the next commit from the check's own
+measurements. It also raised **D-SINK-21**, unmeasured: a save after a
+linked state folder is re-pointed may create `state.json` at 0644 in the
+new folder; and **D-SRC-45**, a `logos` refusal reported as an internal
+error.
+
 **What the lenses filed and did not block on** (each pre-existing or not
 worse than 0.13.6, and none promised against):
 

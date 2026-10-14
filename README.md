@@ -857,11 +857,14 @@ Nothing inside the plugin directory is written at runtime.
   2026-10-14); re-pointing the folder link itself while the shell runs is
   not, and the next save writes what the shell holds into the new folder's
   `state.json`, so restart the shell straight after re-pointing it. The
-  same rule holds for the plugin's cache folder, `~/.cache/omarchy-iptv`,
-  and its runtime folder under `$XDG_RUNTIME_DIR`: a link there is
-  followed, and the folder it leads to is made private (0700) whenever the
-  plugin uses it -- the cache folder at every shell start, the runtime
-  folder when the player is started or stopped.
+  plugin's cache folder, `~/.cache/omarchy-iptv`, and its runtime folder
+  under `$XDG_RUNTIME_DIR` may be links too, and are followed. A linked
+  runtime folder is made private (0700) whenever the player is started or
+  stopped. A linked cache folder keeps its own mode -- only the one-time
+  cache migration, which an install already on the per-source layout never
+  runs again, makes it 0700 -- while every folder the plugin makes inside
+  it is 0700 and every file 0600; make the linked folder 0700 yourself if
+  you want its listing private too.
   A plain file where the folder should be gets `... is not a folder (a
   file is at that path, or at one above it)`: move it aside and restart.
 - The file changed while the shell is running -- by hand, by a backup put
@@ -889,11 +892,12 @@ Nothing inside the plugin directory is written at runtime.
   still being checked, when another program adds the 50th source in that
   moment -- the guide's source is then kept for the session but dropped,
   without a word, at the next shell start. One case where a backup put
-  back has no effect: when it is exactly
-  what the file already held because a change made in the guide had not
-  been saved yet (its save failed, or was still under way), the plugin
-  cannot tell your restore from nothing having happened, and that change is
-  then saved over it. If the new contents are NOT a state -- a broken hand edit, a
+  back has no effect: while a save of the plugin's has failed or is still
+  under way, a backup identical to the file as the plugin last knew it is
+  taken for nothing having happened, and the change made in the guide is
+  then saved over it. Usually that is exactly what the file already held;
+  after a rare burst of saves whose first was written and a later one
+  failed, it can be the file from one save earlier. If the new contents are NOT a state -- a broken hand edit, a
   truncated copy -- the plugin keeps the channels and sources it is
   showing, writes nothing, and behaves as above until the file is fixed, so
   your broken edit is still in the file for you to repair. For a regular
@@ -917,7 +921,7 @@ Nothing inside the plugin directory is written at runtime.
   of them waits on a named pipe. Run while the shell is running, a `state`
   command that succeeds is picked up by the running shell, as above --
   unless another tool replaced a `state.json` link earlier in that session
-  (the bullet on links). Two more refusals are sentences rather than errors:
+  (the bullet on links). Two more refusals carry a sentence of their own (exit 1) where they used to end in a traceback or a replaced link:
   `the state folder is a symbolic link whose target is missing or is not a
   folder; nothing was written` (the folder link above), and `state.json is
   a symbolic link into a folder that cannot be written (...); nothing was
@@ -925,9 +929,10 @@ Nothing inside the plugin directory is written at runtime.
   that is a link leading nowhere, or a file where one of its folders should
   be, with `<folder> is a symbolic link whose target is missing or is not a
   folder; nothing was written` or `<folder> is not a folder; nothing was
-  written` (exit 1) -- except `player start`, which warns that it could not
-  create its screenshot, watch-later or shader-cache folder and plays
-  anyway.
+  written` (exit 1) when they would write there. `player start` refuses a
+  broken runtime folder the same way; over a broken state folder it warns
+  that it could not create its screenshot folder and plays anyway. Commands
+  with nothing to write there answer as if the folder were empty.
 - "state.json could not be written" in the shell's journal: the plugin could
   not save its own file, `~/.local/state/omarchy-iptv/state.json`. The source
   you added or switched to is in effect for this session only. If this

@@ -1989,7 +1989,11 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    burst of saves whose first lands and a later one fails, within one
    event-loop turn, the base stays at the file before the burst while the
    disk holds the first save, so a copy of that earlier file put back is
-   ignored and written over; the README's same-instant limit covers it.]
+   ignored and written over. The README's same-instant limit does not cover
+   it: only the burst is sub-millisecond, and the restore is ignored
+   whenever it comes, for as long as the failed save is held. The README's
+   restore exception is stated to include it (the plugin's last save
+   failed and the backup matches the file as the plugin last knew it).]
 
 Pinned in node (`R22a: stateUnreadableNotice -- one sentence per reason,
 each naming the file and what to do (restart included), none carrying a URL;

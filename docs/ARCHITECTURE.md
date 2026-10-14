@@ -2623,7 +2623,12 @@ Performance budget (10k channels):
    make it 0700 through the link, as they do the folder they create
    (measured, `scripts/dev-harness/spikes/folder-link/RESULT-2026-10-14.txt`:
    0755 and 0500 both come out 0700, the link left a link; the same for a
-   linked cache or runtime folder). Decided by R24b's principle -- never
+   linked runtime folder under `player start` and `player stop`, and for a
+   linked cache folder under `cache migrate` only -- which an install already
+   at cache layout 2 never runs again, so a linked cache folder keeps its
+   own mode after the upgrade; the README says so [corrected at the round-15
+   integration, D-DOC-15: this said "the same for a linked cache or runtime
+   folder" unqualified]). Decided by R24b's principle -- never
    change what the user's link points at without saying so -- and said in the
    README. A folder link that dangles or leads to anything but a folder is
    refused and nothing is written (R25c).]
