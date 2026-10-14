@@ -1,0 +1,133 @@
+R25 (D-SINK-19 round 15, R25a), measure.sh <helper> r25, 2026-10-14, Quickshell 0.3.1 / Qt 6.11.2, nested headless cage on a private D-Bus.
+What TEXT each echo (a `loaded` after the view's own setText) carries, in order with every signal. Two runs; run 1's 0 ms spread used a Timer of interval 0, which never fired (saved:0), and was replaced by a Qt.callLater chain for run 2.
+Per line: saves, loads, whether the burst's last text was reported saved, the loads in order (@after-final: after the last text's saved), STALE (a load carrying an earlier text of the burst after the last text's saved), superseded-at-load (a load carrying a text older than the latest saved), not-the-last-saved (a load whose text is not the latest saved text).
+
+=== run 1 (REPS=3, LOADN=8)
+filewatch: set r25, work /run/user/1000/omarchy-iptv-fw.5oMfj4, helper <tree>/bin/omarchy-iptv, step wait 1.5s, load 1.23 1.10 0.58
+SEQ burst (idle, load 1.23)
+  burst n=2 pad=0 ms=0 load=idle           saved:2 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  burst n=3 pad=2000 ms=0 load=idle        saved:3 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  burst n=5 pad=4000 ms=0 load=idle        saved:5 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  burst n=10 pad=4000 ms=0 load=idle       saved:10 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  spread n=3 pad=4000 ms=0 load=idle       saved:0 loaded:0 landed:NO loads=[] STALE:none superseded-at-load:none
+  spread n=5 pad=4000 ms=0 load=idle       saved:0 loaded:0 landed:NO loads=[] STALE:none superseded-at-load:none
+  spread n=5 pad=4000 ms=5 load=idle       saved:5 loaded:2 landed:yes loads=[T3,T5@after-final] STALE:none superseded-at-load:none
+  spread n=10 pad=4000 ms=2 load=idle      saved:10 loaded:4 landed:yes loads=[T2,T5,T6,T10@after-final] STALE:none superseded-at-load:none
+  burst n=2 pad=0 ms=0 load=idle           saved:2 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  burst n=3 pad=2000 ms=0 load=idle        saved:3 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  burst n=5 pad=4000 ms=0 load=idle        saved:5 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  burst n=10 pad=4000 ms=0 load=idle       saved:10 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  spread n=3 pad=4000 ms=0 load=idle       saved:0 loaded:0 landed:NO loads=[] STALE:none superseded-at-load:none
+  spread n=5 pad=4000 ms=0 load=idle       saved:0 loaded:0 landed:NO loads=[] STALE:none superseded-at-load:none
+  spread n=5 pad=4000 ms=5 load=idle       saved:5 loaded:2 landed:yes loads=[T3,T5@after-final] STALE:none superseded-at-load:none
+  spread n=10 pad=4000 ms=2 load=idle      saved:10 loaded:5 landed:yes loads=[T2,T4,T6,T7,T10@after-final] STALE:none superseded-at-load:none
+  burst n=2 pad=0 ms=0 load=idle           saved:2 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  burst n=3 pad=2000 ms=0 load=idle        saved:3 loaded:1 landed:yes loads=[T3@after-final] STALE:none superseded-at-load:none
+  burst n=5 pad=4000 ms=0 load=idle        saved:5 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  burst n=10 pad=4000 ms=0 load=idle       saved:10 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  spread n=3 pad=4000 ms=0 load=idle       saved:0 loaded:0 landed:NO loads=[] STALE:none superseded-at-load:none
+  spread n=5 pad=4000 ms=0 load=idle       saved:0 loaded:0 landed:NO loads=[] STALE:none superseded-at-load:none
+  spread n=5 pad=4000 ms=5 load=idle       saved:5 loaded:2 landed:yes loads=[T3,T5@after-final] STALE:none superseded-at-load:none
+  spread n=10 pad=4000 ms=2 load=idle      saved:10 loaded:4 landed:yes loads=[T3,T4,T8,T10@after-final] STALE:none superseded-at-load:none
+SEQ burst (loaded, load 1.30)
+  burst n=2 pad=0 ms=0 load=loaded         saved:2 loaded:1 landed:yes loads=[T2@after-final] STALE:none superseded-at-load:none
+  burst n=3 pad=2000 ms=0 load=loaded      saved:3 loaded:1 landed:yes loads=[T3@after-final] STALE:none superseded-at-load:none
+  burst n=5 pad=4000 ms=0 load=loaded      saved:5 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  burst n=10 pad=4000 ms=0 load=loaded     saved:10 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  spread n=3 pad=4000 ms=0 load=loaded     saved:0 loaded:0 landed:NO loads=[] STALE:none superseded-at-load:none
+  spread n=5 pad=4000 ms=0 load=loaded     saved:0 loaded:0 landed:NO loads=[] STALE:none superseded-at-load:none
+  spread n=5 pad=4000 ms=5 load=loaded     saved:5 loaded:3 landed:yes loads=[T2,T3,T5@after-final] STALE:none superseded-at-load:none
+  spread n=10 pad=4000 ms=2 load=loaded    saved:10 loaded:1 landed:yes loads=[T10@after-final] STALE:none superseded-at-load:none
+  burst n=2 pad=0 ms=0 load=loaded         saved:2 loaded:1 landed:yes loads=[T2@after-final] STALE:none superseded-at-load:none
+  burst n=3 pad=2000 ms=0 load=loaded      saved:3 loaded:1 landed:yes loads=[T3@after-final] STALE:none superseded-at-load:none
+  burst n=5 pad=4000 ms=0 load=loaded      saved:5 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  burst n=10 pad=4000 ms=0 load=loaded     saved:10 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  spread n=3 pad=4000 ms=0 load=loaded     saved:0 loaded:0 landed:NO loads=[] STALE:none superseded-at-load:none
+  spread n=5 pad=4000 ms=0 load=loaded     saved:0 loaded:0 landed:NO loads=[] STALE:none superseded-at-load:none
+  spread n=5 pad=4000 ms=5 load=loaded     saved:5 loaded:2 landed:yes loads=[T2,T5@after-final] STALE:none superseded-at-load:none
+  spread n=10 pad=4000 ms=2 load=loaded    saved:10 loaded:1 landed:yes loads=[T10@after-final] STALE:none superseded-at-load:none
+  burst n=2 pad=0 ms=0 load=loaded         saved:2 loaded:1 landed:yes loads=[T2@after-final] STALE:none superseded-at-load:none
+  burst n=3 pad=2000 ms=0 load=loaded      saved:3 loaded:1 landed:yes loads=[T3@after-final] STALE:none superseded-at-load:none
+  burst n=5 pad=4000 ms=0 load=loaded      saved:5 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  burst n=10 pad=4000 ms=0 load=loaded     saved:10 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+  spread n=3 pad=4000 ms=0 load=loaded     saved:0 loaded:0 landed:NO loads=[] STALE:none superseded-at-load:none
+  spread n=5 pad=4000 ms=0 load=loaded     saved:0 loaded:0 landed:NO loads=[] STALE:none superseded-at-load:none
+  spread n=5 pad=4000 ms=5 load=loaded     saved:5 loaded:1 landed:yes loads=[T2] STALE:none superseded-at-load:none
+  spread n=10 pad=4000 ms=2 load=loaded    saved:10 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none
+END
+probe signal lines: 352
+
+=== run 2 (REPS=4, LOADN=12)
+filewatch: set r25, work /run/user/1000/omarchy-iptv-fw.y1BXg8, helper <tree>/bin/omarchy-iptv, step wait 1.5s, load 1.87 2.32 1.28
+SEQ burst (idle, load 1.87)
+  burst n=2 pad=0 ms=0 load=idle           saved:2 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=3 pad=2000 ms=0 load=idle        saved:3 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=5 pad=4000 ms=0 load=idle        saved:5 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=10 pad=4000 ms=0 load=idle       saved:10 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=3 pad=4000 ms=0 load=idle       saved:3 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=5 pad=4000 ms=0 load=idle       saved:5 loaded:1 landed:yes loads=[T5@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=5 pad=4000 ms=5 load=idle       saved:5 loaded:2 landed:yes loads=[T2,T4] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=10 pad=4000 ms=2 load=idle      saved:10 loaded:1 landed:yes loads=[T8] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=2 pad=0 ms=0 load=idle           saved:2 loaded:1 landed:yes loads=[T2@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=3 pad=2000 ms=0 load=idle        saved:3 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=5 pad=4000 ms=0 load=idle        saved:5 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=10 pad=4000 ms=0 load=idle       saved:10 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=3 pad=4000 ms=0 load=idle       saved:3 loaded:1 landed:yes loads=[T3@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=5 pad=4000 ms=0 load=idle       saved:5 loaded:1 landed:yes loads=[T5@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=5 pad=4000 ms=5 load=idle       saved:5 loaded:2 landed:yes loads=[T2,T4] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=10 pad=4000 ms=2 load=idle      saved:10 loaded:1 landed:yes loads=[T9] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=2 pad=0 ms=0 load=idle           saved:2 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=3 pad=2000 ms=0 load=idle        saved:3 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=5 pad=4000 ms=0 load=idle        saved:5 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=10 pad=4000 ms=0 load=idle       saved:10 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=3 pad=4000 ms=0 load=idle       saved:3 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=5 pad=4000 ms=0 load=idle       saved:5 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=5 pad=4000 ms=5 load=idle       saved:5 loaded:2 landed:yes loads=[T1,T5@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=10 pad=4000 ms=2 load=idle      saved:10 loaded:3 landed:yes loads=[T1,T2,T9] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=2 pad=0 ms=0 load=idle           saved:2 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=3 pad=2000 ms=0 load=idle        saved:3 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=5 pad=4000 ms=0 load=idle        saved:5 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=10 pad=4000 ms=0 load=idle       saved:10 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=3 pad=4000 ms=0 load=idle       saved:3 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=5 pad=4000 ms=0 load=idle       saved:5 loaded:1 landed:yes loads=[T5@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=5 pad=4000 ms=5 load=idle       saved:5 loaded:2 landed:yes loads=[T2,T4] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=10 pad=4000 ms=2 load=idle      saved:10 loaded:3 landed:yes loads=[T5,T6,T9] STALE:none superseded-at-load:none not-the-last-saved:none
+SEQ burst (loaded, load 1.62)
+  burst n=2 pad=0 ms=0 load=loaded         saved:2 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=3 pad=2000 ms=0 load=loaded      saved:3 loaded:1 landed:yes loads=[T3@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=5 pad=4000 ms=0 load=loaded      saved:5 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=10 pad=4000 ms=0 load=loaded     saved:10 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=3 pad=4000 ms=0 load=loaded     saved:3 loaded:1 landed:yes loads=[T3@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=5 pad=4000 ms=0 load=loaded     saved:5 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=5 pad=4000 ms=5 load=loaded     saved:5 loaded:4 landed:yes loads=[T1,T3,T4,T5@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=10 pad=4000 ms=2 load=loaded    saved:10 loaded:3 landed:yes loads=[T1,T2,T10@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=2 pad=0 ms=0 load=loaded         saved:2 loaded:1 landed:yes loads=[T2@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=3 pad=2000 ms=0 load=loaded      saved:3 loaded:1 landed:yes loads=[T3@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=5 pad=4000 ms=0 load=loaded      saved:5 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=10 pad=4000 ms=0 load=loaded     saved:10 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=3 pad=4000 ms=0 load=loaded     saved:3 loaded:1 landed:yes loads=[T3@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=5 pad=4000 ms=0 load=loaded     saved:5 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=5 pad=4000 ms=5 load=loaded     saved:5 loaded:1 landed:yes loads=[T5@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=10 pad=4000 ms=2 load=loaded    saved:10 loaded:2 landed:yes loads=[T2,T10@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=2 pad=0 ms=0 load=loaded         saved:2 loaded:1 landed:yes loads=[T2@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=3 pad=2000 ms=0 load=loaded      saved:3 loaded:1 landed:yes loads=[T3@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=5 pad=4000 ms=0 load=loaded      saved:5 loaded:1 landed:yes loads=[T5@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=10 pad=4000 ms=0 load=loaded     saved:10 loaded:1 landed:yes loads=[T10@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=3 pad=4000 ms=0 load=loaded     saved:3 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=5 pad=4000 ms=0 load=loaded     saved:5 loaded:1 landed:yes loads=[T5@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=5 pad=4000 ms=5 load=loaded     saved:5 loaded:1 landed:yes loads=[T5@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=10 pad=4000 ms=2 load=loaded    saved:10 loaded:2 landed:yes loads=[T4,T10@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=2 pad=0 ms=0 load=loaded         saved:2 loaded:1 landed:yes loads=[T2@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=3 pad=2000 ms=0 load=loaded      saved:3 loaded:1 landed:yes loads=[T3@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=5 pad=4000 ms=0 load=loaded      saved:5 loaded:1 landed:yes loads=[T5@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  burst n=10 pad=4000 ms=0 load=loaded     saved:10 loaded:1 landed:yes loads=[T10@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=3 pad=4000 ms=0 load=loaded     saved:3 loaded:1 landed:yes loads=[T3@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=5 pad=4000 ms=0 load=loaded     saved:5 loaded:1 landed:yes loads=[T5@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=5 pad=4000 ms=5 load=loaded     saved:5 loaded:1 landed:yes loads=[T5@after-final] STALE:none superseded-at-load:none not-the-last-saved:none
+  spread n=10 pad=4000 ms=2 load=loaded    saved:10 loaded:0 landed:yes loads=[] STALE:none superseded-at-load:none not-the-last-saved:none
+END
+probe signal lines: 570
+
+=== across both runs (computed from the order lines, kept in the lane's scratch):
+85 loads in the 100 bursts that saved (112 steps; run 1's 12 Timer-0 spreads never fired). STALE 0, superseded-at-load 0, not-the-last-saved 0. A load carrying a text while a LATER text of the burst had already been asked: 0 of 85.
+Every in-turn burst raised one saved per setText (no coalescing in this rig; the 26-write probe of 2026-10-12 saw some); an echo, when one came, followed its own saved.

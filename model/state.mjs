@@ -1144,6 +1144,30 @@ function countReload(counts, reason) {
 //                 blind; with nothing held it is applied as before, which is
 //                 the merge with ours == base (pinned to agree).
 //
+//
+// D-SINK-19 round 15, R25a (D-SRC-30). AN ECHO IS ONLY A TEXT STILL IN
+// FLIGHT. `ownWrite` used to be "the text is one of the last eight this
+// service wrote", and a backup the user had copied from the plugin's own
+// file, put back after a later in-app change, carried one of those texts:
+// it was ignored as an echo and the next save wrote over the restore,
+// silently (the round-14 data-loss lens, FAV BAK DEL RSTB FAV). So
+// Service.recentSaves now holds only the burst asked for since the last
+// save that LANDED -- D-SRC-16's coalescing is why that can be more than one
+// text -- and is cleared as a save lands. A text equal to an own save that
+// landed and was then superseded is another writer's, and goes through the
+// rest of this decision like any other foreign text. What that rests on is
+// MEASURED (spikes/filewatch set r25, RESULT-2026-10-14-r25.txt): over 100
+// bursts of the view's own saves, idle and loaded, all 85 echoes carried the
+// text of the latest `saved` before them, none a text a later save had
+// superseded, and none arrived while a later text was already asked. The echo of the save that just landed now arrives with
+// nothing held and carries the base itself, so:
+//   `matchesBase` and `memoryMatchesBase` with nothing held: the reload
+//                 changes nothing -- the landed echo, a chmod, an identical
+//                 rewrite -- and is ignored as `unchanged`, which is what
+//                 the eight-text record used to do for the echo. With
+//                 memory NOT the base (the no-write mode refused a change
+//                 and a good copy was put back) it is applied, as before.
+//
 // -> { act: "apply" | "ignore" | "merge", reason }. Called by
 // Service.applyUserState before anything else; an ignored reload runs
 // neither reconcile nor the cache layout.
@@ -1154,7 +1178,10 @@ function reloadDisposition(ctx) {
   var held = c.savePending === true ? "save-parked"
     : (Number(c.savesInFlight) || 0) > 0 ? "save-in-flight"
     : c.saveFailed === true ? "save-failed" : ""
-  if (held === "") return { act: "apply", reason: "file-newer" }
+  if (held === "") {
+    if (c.matchesBase === true && c.memoryMatchesBase === true) return { act: "ignore", reason: "unchanged" }
+    return { act: "apply", reason: "file-newer" }
+  }
   if (c.matchesBase === true) return { act: "ignore", reason: held }
   return { act: "merge", reason: "foreign-" + held }
 }
@@ -1236,10 +1263,13 @@ var MERGE_WHOLE_FIELDS = ["recents", "activeKey", "lastPlayed", "session", "cach
 // D-SINK-19 round 14, R24a. THE three-way merge of a FOREIGN write into a
 // session that holds a change the file does not (a save parked, in flight
 // or failed). ONE pure function, every field rule here:
-//   favorites, savedSearches, hiddenGroups  SETS: ours, plus what theirs
-//       added since base, minus what theirs removed since base (mergeSetField;
-//       a saved search is named by its folded terms, as parseState
-//       de-duplicates it)
+//   favorites, savedSearches, hiddenGroups  SETS, built on THEIRS: theirs'
+//       elements in theirs' order, minus what ours removed since base, then
+//       what ours added since base, in ours' order (mergeSetField; a saved
+//       search is named by its folded terms, as parseState de-duplicates it).
+//       The same SET as "ours, plus what theirs added, minus what theirs
+//       removed"; the ORDER is theirs' (D-SRC-37: this comment used to say
+//       the set was built on ours, which the code never did)
 //   sources  RECORDS BY KEY: an add, a removal or a change made by theirs
 //       since base is applied to ours, and ours' own adds, removals and
 //       changes stand; a record BOTH changed (a change against a change, or
@@ -1255,19 +1285,41 @@ var MERGE_WHOLE_FIELDS = ["recents", "activeKey", "lastPlayed", "session", "cach
 // the caller logs one line per conflict.
 // Every input is read through parseState, so a missing base is the empty
 // state and every list is the shape the service holds; the result is read
-// through it once more, so the caps and the de-duplication parseState
-// applies to a file apply to the merge too.
-// -> { state, conflicts }
+// through it once more, so the de-duplication parseState applies to a file
+// applies to the merge too.
+// D-SINK-19 round 15, R25b (D-SRC-31): A MERGE NEVER DROPS SILENTLY. The
+// caps used to be parseState's, applied to the result, and parseState stops
+// at the cap: at 49 sources an in-app add and a hand-run `state source add`
+// made 51, and the in-app record was cut with no line and no notice. The
+// caps are applied HERE now, where it is known whose element is whose:
+// theirs keeps its place (the later writer, as for a conflict -- and theirs
+// alone is within every cap, it was read through parseState), so what goes
+// past a cap is always ours' additions, at the tail. They are dropped and
+// RETURNED -- `dropped.sources` the keys, `dropped.savedSearches` and
+// `dropped.hiddenGroups` counts (a query and a group name are the user's or
+// the provider's text, never logged) -- for Model.mergeDropLines (the
+// journal, one line each) and Model.mergeDropNotice (the user, once).
+// hiddenGroups is rule 15's sibling: the same shape at MAX_HIDDEN_GROUPS.
+// -> { state, conflicts, dropped }
 function mergeForeignState(base, ours, theirs) {
   var b = parseState(JSON.stringify(base || emptyState()))
   var o = parseState(JSON.stringify(ours || emptyState()))
   var t = parseState(JSON.stringify(theirs || emptyState()))
   var conflicts = []
   var out = cloneState(t)
+  var dropped = { sources: [], savedSearches: 0, hiddenGroups: 0 }
   out.favorites = mergeSetField(b.favorites, o.favorites, t.favorites, function (x) { return str(x) })
   out.hiddenGroups = mergeSetField(b.hiddenGroups, o.hiddenGroups, t.hiddenGroups, function (x) { return str(x) })
+  if (out.hiddenGroups.length > MAX_HIDDEN_GROUPS) {
+    dropped.hiddenGroups = out.hiddenGroups.length - MAX_HIDDEN_GROUPS
+    out.hiddenGroups = out.hiddenGroups.slice(0, MAX_HIDDEN_GROUPS)
+  }
   out.savedSearches = mergeSetField(b.savedSearches, o.savedSearches, t.savedSearches,
                                     function (x) { return savedSearchTerms(x && x.query).join(" ") })
+  if (out.savedSearches.length > MAX_SAVED_SEARCHES) {
+    dropped.savedSearches = out.savedSearches.length - MAX_SAVED_SEARCHES
+    out.savedSearches = out.savedSearches.slice(0, MAX_SAVED_SEARCHES)
+  }
   var byKey = function (list) { var m = {}; for (var i = 0; i < list.length; i++) m[list[i].key] = list[i]; return m }
   var mb = byKey(b.sources), mo = byKey(o.sources), mt = byKey(t.sources)
   var sources = [], i, r, k
@@ -1298,7 +1350,10 @@ function mergeForeignState(base, ours, theirs) {
     // theirs removed it since the base; ours changed it too: a conflict, theirs (the removal) wins
     if (canonValue(r) !== canonValue(mb[k])) conflicts.push({ field: "sources", key: k, fields: recordFieldsDiffering(mb[k], r) })
   }
-  out.sources = sources
+  // Theirs' records were pushed first and number at most MAX_SOURCES, so
+  // the records past the cap are ours' additions (R25b).
+  for (i = MAX_SOURCES; i < sources.length; i++) dropped.sources.push(sources[i].key)
+  out.sources = sources.slice(0, MAX_SOURCES)
   for (i = 0; i < MERGE_WHOLE_FIELDS.length; i++) {
     var f = MERGE_WHOLE_FIELDS[i]
     var cb = canonValue(b[f]), co = canonValue(o[f]), ct = canonValue(t[f])
@@ -1311,17 +1366,65 @@ function mergeForeignState(base, ours, theirs) {
   }
   if (entryMigratedOf(o) || entryMigratedOf(t)) out.entryMigrated = true
   else delete out.entryMigrated
-  return { state: parseState(JSON.stringify(out)), conflicts: conflicts }
+  return { state: parseState(JSON.stringify(out)), conflicts: conflicts, dropped: dropped }
 }
+
+var MERGE_LINE_HEAD = "state.json was changed by another program while a change made here was not yet saved; "
 
 // The console line for one conflict: the field, the source key when it is a
 // record, the names of the fields that differed -- never a value.
+// D-SRC-36 (round 15): "kept the other program's VERSION OF ..."; the line
+// used to read "kept the other program's the source <key>".
 function mergeConflictLine(conflict) {
   var c = conflict || {}
   var what = str(c.field) === "sources" && isSourceKey(str(c.key))
     ? "the source " + str(c.key) + (asList(c.fields).length > 0 ? " (" + asList(c.fields).map(str).join(", ") + ")" : "")
     : str(c.field)
-  return "state.json was changed by another program while a change made here was not yet saved; kept the other program's " + what
+  return MERGE_LINE_HEAD + "kept the other program's version of " + what
+}
+
+function mergeDropCount(dropped) {
+  var d = dropped || {}
+  return { sources: asList(d.sources).filter(function (k) { return isSourceKey(str(k)) }).map(str),
+           savedSearches: Math.max(0, Math.floor(Number(d.savedSearches) || 0)),
+           hiddenGroups: Math.max(0, Math.floor(Number(d.hiddenGroups) || 0)) }
+}
+
+// R25b. The journal: one line per element a merge dropped at a cap -- a
+// source by its key, a saved search or a hidden group as itself, never its
+// text -- with the cap. [] when nothing was dropped.
+function mergeDropLines(dropped) {
+  var d = mergeDropCount(dropped)
+  var out = [], i
+  for (i = 0; i < d.sources.length; i++) {
+    out.push(MERGE_LINE_HEAD + "the source " + d.sources[i] + " added here was not kept (the limit is " + MAX_SOURCES + " sources)")
+  }
+  for (i = 0; i < d.savedSearches; i++) {
+    out.push(MERGE_LINE_HEAD + "a saved search made here was not kept (the limit is " + MAX_SAVED_SEARCHES + " saved searches)")
+  }
+  for (i = 0; i < d.hiddenGroups; i++) {
+    out.push(MERGE_LINE_HEAD + "a group hidden here was not kept (the limit is " + MAX_HIDDEN_GROUPS + " hidden groups)")
+  }
+  return out
+}
+
+// R25b. What the user is told, ONCE per merge that dropped anything: how
+// many of each, and the cap -- composed from counts and constants alone, so
+// it carries no URL, no label, no query and no group name. null when nothing
+// was dropped.
+function mergeDropNotice(dropped) {
+  var d = mergeDropCount(dropped)
+  var parts = []
+  var plural = function (n, one, many) { return n + " " + (n === 1 ? one : many) }
+  if (d.sources.length > 0) parts.push(plural(d.sources.length, "source", "sources") + " added here (the limit is " + MAX_SOURCES + " sources)")
+  if (d.savedSearches > 0) parts.push(plural(d.savedSearches, "saved search", "saved searches") + " made here (the limit is " + MAX_SAVED_SEARCHES + " saved searches)")
+  if (d.hiddenGroups > 0) parts.push(plural(d.hiddenGroups, "hidden group", "hidden groups") + " made here (the limit is " + MAX_HIDDEN_GROUPS + " hidden groups)")
+  if (parts.length === 0) return null
+  var n = d.sources.length + d.savedSearches + d.hiddenGroups
+  return { title: "Not every change was kept",
+           body: "Another program changed state.json while a change made here was not yet saved, and together they went past a limit. "
+                 + "The other program's version was kept, and " + parts.join(" and ") + (n === 1 ? " was" : " were")
+                 + " not kept. Make room, then add " + (n === 1 ? "it" : "them") + " again." }
 }
 // ---- D-SINK-19 round 12, R22a: A STATE THAT DID NOT LOAD IS NEVER WRITTEN ----
 //
@@ -1396,7 +1499,9 @@ function stateInitFound(text, exitCode, timedOut) {
     if (!o || o.kind !== "state" || o.action !== "init") continue
     var f = str(o.found)
     if (f === "absent") return "absent"
-    if (f === "link" || f === "not-a-dir") return f
+    // R25c: "folder-link", a link at the state FOLDER (or above it) that
+    // leads nowhere, is the helper's word too and gets its own sentence.
+    if (f === "link" || f === "not-a-dir" || f === "folder-link") return f
     if (f === "file" || f === "other" || f === "unreadable") return "present"
     return "unknown"
   }
@@ -1438,7 +1543,7 @@ function stateLoadDecision(ctx) {
   // R24b: the helper named what is at the path, and that is the reason --
   // the folder-permission sentence "absent-unconfirmed" carries would send
   // the user to chmod a folder that is fine.
-  if (found === "link" || found === "not-a-dir") return { act: "block", reason: found }
+  if (found === "link" || found === "not-a-dir" || found === "folder-link") return { act: "block", reason: found }
   return { act: "block", reason: kind === "absent" && found !== "unknown" ? "absent-unconfirmed" : kind }
 }
 
@@ -1485,6 +1590,12 @@ function stateUnreadableNotice(reason, path) {
     file = str(path) !== "" ? str(path).replace(/\/[^\/]*$/, "") : "The state folder"
     what = "is not a folder (a file is at that path, or at one above it)"
     fix = "Move whatever is at that path aside, then run omarchy restart shell."
+  } else if (r === "folder-link") {
+    // R25c (D-SRC-32): the state FOLDER is a symbolic link that dangles or
+    // leads to something that is not a folder. The sentence names the folder.
+    file = str(path) !== "" ? str(path).replace(/\/[^\/]*$/, "") : "The state folder"
+    what = "is a symbolic link whose target is missing or is not a folder (or a folder above it is)"
+    fix = "Restore the folder it points to, or move the link aside, then run omarchy restart shell."
   } else if (r === "absent-unconfirmed") {
     what = "could not be found, or its folder could not be read"
     fix = "Make the folder readable with chmod 700, then run omarchy restart shell."
@@ -1504,6 +1615,17 @@ function stateUnreadableNotice(reason, path) {
   return { title: "Saved sources not loaded",
            body: file + " " + what + ". Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. " + fix }
 }
+
+// D-SINK-19 round 15 (D-SRC-38). The no-write mode's SHORT form, for the
+// Sources header's right slot: what the notice's title says, except in a
+// MID-session block, where the sources WERE loaded -- the rows above are the
+// session's and still play -- and what stopped is saving. One function, the
+// notice copy family: at a start it IS stateUnreadableNotice's title.
+function stateBlockedHeader(reason, path, midSession) {
+  if (str(reason) === "") return ""
+  if (midSession === true) return "Saving has stopped"
+  return stateUnreadableNotice(reason, path).title
+}
 export {
   MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedSearchTerms,
   savedSearchHit, savedSearchCount, savedSearchChannels, savedSearchNotice,
@@ -1521,6 +1643,8 @@ export {
   failedWhen, withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
   countReload, reloadDisposition, sortedKeys, stateCanonical, sameState,
   canonValue, mergeSetField, recordFieldsDiffering, MERGE_WHOLE_FIELDS,
-  mergeForeignState, mergeConflictLine, STATE_LOAD_ERRORS, stateLoadKind,
-  stateInitFound, stateLoadDecision, stateWriteGate, stateUnreadableNotice
+  mergeForeignState, MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount,
+  mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
+  stateInitFound, stateLoadDecision, stateWriteGate, stateUnreadableNotice,
+  stateBlockedHeader
 }

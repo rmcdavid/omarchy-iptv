@@ -1,0 +1,12 @@
+diff --git a/Service.qml b/Service.qml
+index 0000000..0000000 100644
+--- a/Service.qml
++++ b/Service.qml
+@@ -5125,6 +5125,7 @@
+     // reload the file is older than memory, and the held entry mirror is
+     // written only once it is clear.
+     onSaved: {
++      root.recentSaves = []   // MUTATION (lane A, round 15): cleared on EVERY saved, mid-burst included
+       if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) {
+         root.stateSavesInFlight = 0
+         root.stateSaveFailed = false

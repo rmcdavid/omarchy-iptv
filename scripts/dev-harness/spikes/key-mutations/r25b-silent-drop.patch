@@ -1,0 +1,13 @@
+diff --git a/Service.qml b/Service.qml
+index 0000000..0000000 100644
+--- a/Service.qml
++++ b/Service.qml
+@@ -2356,7 +2356,7 @@
+     // user told once for the whole merge.
+     var drops = Model.mergeDropLines(merged.dropped)
+     for (var j = 0; j < drops.length; j++) console.warn("omarchy-iptv: " + drops[j])
+-    if (drops.length > 0) root.notify("mergeDropped", { dropped: merged.dropped })
++    // MUTATION (lane A, round 15): the drop is not told
+     root.landedState = theirs
+     root.userState = merged.state
+     var behind = !Model.sameState(merged.state, theirs)

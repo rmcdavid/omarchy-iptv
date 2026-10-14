@@ -9,7 +9,7 @@ import {
   cleanName
 } from "./channels.mjs"
 import {
-  stateUnreadableNotice
+  mergeDropNotice, stateUnreadableNotice
 } from "./state.mjs"
 import {
   parseHelperStatus, entryInputNotice, ownedEntryPatch
@@ -285,6 +285,11 @@ function notifyArgv(event, params) {
     // same reason as the refusal above. A reason and a PATH, never a URL.
     var told = stateUnreadableNotice(p.reason, p.path)
     spec = { title: told.title, body: told.body, glyph: GLYPHS.alert, urgency: "critical", id: NOTIFY_IDS.stateUnreadable }
+  } else if (event === "mergeDropped") {
+    // R25b: Model.mergeDropNotice's sentence and nothing else -- counts and
+    // caps, never a URL, a label, a query or a group name.
+    var dropped = mergeDropNotice(p.dropped)
+    if (dropped) spec = { title: dropped.title, body: dropped.body, glyph: GLYPHS.alert, urgency: "normal", id: NOTIFY_IDS.mergeDropped }
   }
   if (!spec) return null
   return ["omarchy-notification-send", "--app-name", "IPTV", "-u", spec.urgency, "-g", spec.glyph, "-r", String(spec.id), spec.title, spec.body]

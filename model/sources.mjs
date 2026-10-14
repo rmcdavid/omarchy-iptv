@@ -6,7 +6,7 @@ import {
   str, asList, tokenize, fnv1a32
 } from "./text.mjs"
 import {
-  emptyState, stateUnreadableNotice
+  emptyState, stateUnreadableNotice, stateBlockedHeader
 } from "./state.mjs"
 import {
   logoConsentLines, WALL_KEY
@@ -853,8 +853,11 @@ function sourcesHeaderCount(n) {
 // is the R23e notice's TITLE (one source of copy: Model.stateUnreadableNotice,
 // the notification's and the guide body's own words), never "No sources" over
 // a file that holds records nobody could read; otherwise the count.
-function sourcesHeaderRight(n, stateBlocked, path) {
-  if (str(stateBlocked) !== "") return stateUnreadableNotice(stateBlocked, path).title
+// D-SRC-38 (round 15): `midSession` -- the mode began after a state loaded --
+// says that saving has stopped instead (Model.stateBlockedHeader), because the
+// rows under it were loaded and still play.
+function sourcesHeaderRight(n, stateBlocked, path, midSession) {
+  if (str(stateBlocked) !== "") return stateBlockedHeader(stateBlocked, path, midSession === true)
   return sourcesHeaderCount(n)
 }
 

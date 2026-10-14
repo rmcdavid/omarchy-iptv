@@ -744,7 +744,9 @@ are built on [a fifth, about `loadFailed`, was added on 2026-10-13 and is
 what R22a (round 12) is built on; a sixth, about the watch itself, the same
 day by round 13's R23g, disputed until the round-13 live lens found the
 variable on 2026-10-14; the fourth was re-measured and a seventh, about a
-symlink at the path, added the same day by round 14's R24b and R24c]:
+symlink at the path, added the same day by round 14's R24b and R24c; the
+third gained what a burst's echoes carry and the seventh was corrected and
+completed the same day again, by round 15's R25a, R25e and D-DOC-11]:
 
 - **`saved` fires once per `setText` -- for two back-to-back calls, and NOT
   for a burst (corrected 2026-10-12, round 4).** Two `setText` calls back to
@@ -794,7 +796,23 @@ symlink at the path, added the same day by round 14's R24b and R24c]:
   `Model.sameState`); a reload carrying any other text while a save is held
   is a FOREIGN write and is merged (`Model.mergeForeignState`), because
   ignoring it let the next save write over a hand-run helper write
-  (D-SRC-22).]
+  (D-SRC-22).] [2026-10-14, D-SINK-19 round 15 (R25a, D-SRC-30): and "an own
+  write by its text" is narrowed to a text STILL IN FLIGHT. What a burst's
+  echoes carry, measured by lane A with `scripts/dev-harness/spikes/filewatch/measure.sh
+  <helper> r25` (the committed `shell.qml` FileView with an ordered signal
+  log, a nested headless cage on a private D-Bus, two runs at load 1.2-10.2,
+  `RESULT-2026-10-14-r25.txt`): over 100 bursts of the view's own `setText`
+  that saved, the 85 echoes (a `loaded` after an own write) each carried the
+  text of the latest `saved` before it -- none an earlier text of the burst
+  after the last one's `saved`, none a text a later `saved` had superseded,
+  and none arrived while a later text of the burst was already asked (0 of
+  85). Every in-turn burst raised one `saved` per `setText` there (no
+  coalescing in that rig). So an echo carries a text the service has not
+  yet seen land or the text that just landed, and never an older one: the
+  service keeps only the burst since the last landed save as "own"
+  (`recentSaves`, cleared as a save lands), so a COPY of an older own save
+  put back by the user is read as another writer's -- under the old
+  eight-text record it was ignored and then written over.]
 - **A FileView loaded over a MISSING path does not see the file being
   created by another process.** Over a fresh install (no state directory, no
   file) the helper's `state init` creates `state.json` under the parked
@@ -879,21 +897,54 @@ symlink at the path, added the same day by round 14's R24b and R24c]:
   alternating the two shapes, on lane-key-p2 and on a 0.13.6 export; the
   fourth fact's re-measurement reproduces it in the spike). So the own saves
   were never the variable: a watch that exists survives them, and a watch
-  that was never installed sees nothing whatever is done.
-- **A symlink at the path (D-SINK-19 round 14, R24b, measured 2026-10-14).**
-  The same spike, set `r24`, sequences V, W and X. The view's OWN save over
-  a symlink to a regular file writes THROUGH it: the path is still a link
-  afterwards and the target holds the bytes. Its own save over a DANGLING
-  link raises `saveFailed` and leaves the link. A writer that replaces the
-  link with a regular file (this plugin's helper did, by `os.replace` onto
-  the path, until round 14) leaves the view watching nothing: `fileChanged+0`
-  for that write and for every later one, in place or renamed. Written
+  that was never installed sees nothing whatever is done. [2026-10-14, round
+  15 (R25e, D-SRC-29): "survives every external change" was measured with a
+  regular file at the path. A symbolic link at the path is the seventh fact:
+  a change that REPLACES the link, or puts a file over it, is not an
+  external change the watch survives -- it is one the watch never sees, and
+  nothing after it is seen either.]
+- **A symlink at the path (D-SINK-19 round 14, R24b, measured 2026-10-14;
+  corrected and completed by round 15, D-DOC-11 and R25e, the same day).**
+  The same spike, set `r24`, sequences V, W and X, and the round-14
+  data-loss and claims lenses' rigs (a bare FileView declared as `stateFile`
+  and a scratch copy of this spike, set `rk`, each in a nested headless cage
+  on a private D-Bus, and the real `Service.qml` driven live; session
+  scratch, not committed; load 2.2-5.6). The view's OWN save over a symlink
+  to a regular file writes THROUGH it: the path is still a link afterwards
+  and the target holds the bytes. Its own save over a DANGLING link depends
+  on the target's FOLDER: when that folder is missing (sequence X) the save
+  raises `saveFailed` and leaves the link; when it EXISTS -- the usual way a
+  link dangles, its file deleted or moved out of a dotfiles folder -- the
+  save SUCCEEDS (`saved+1`, `saveFailed+0`) and CREATES the target through
+  the link (the lenses' C6 and Z9, two runs). [Until round 15 this fact said
+  every dangling link fails the save; that was X's shape stated for both.]
+  What the watch sees, by who writes and how:
+
+  | Write | Seen? |
+  |---|---|
+  | in place, at the path or at the target (`>`, `cp` onto either) | yes, `fileChanged+1 loaded+1` (Z1) |
+  | a rename onto the TARGET's own path (an editor's save, a helper that resolves the link) | yes (Z2, Z3; lane-key-q1's helper, V and W) |
+  | the view's own saves, before or after any of the above | the watch survives them (Z5) |
+  | a regular file renamed over the LINK's path (`jq ... > tmp && mv tmp state.json`, GNU `sed -i` on the link's path, a backup put back with `mv`); `rm` and `cp` at the path | NO -- `changed:0` for that write and for every later in-place write of the path (C8, C9, C11); the control, the same `mv` over a regular file, is seen (C10, `changed:1 loaded:2`) |
+  | the link re-pointed (`ln -sfn` to another target) | NO -- nothing for the relink, nor for a later helper or in-place write to the new target; the view's next own save writes THROUGH the new link, replacing the new target's contents (C1, C1b, Z4, Z6, Z6b) |
+  | the target removed, then put back | the removal is seen (`fileChanged+1 loadFailed+1`); the return is NOT, nor any write after it (Z8) |
+  | a regular file moved into a dotfiles folder mid-session and linked back (`mv` + `ln`, `cp` + `ln`) | yes, every later helper and in-place write (M1-M3) |
+
+  So a writer that replaces whatever is AT the path -- the link itself, or a
+  file over it -- leaves the view watching nothing, for that write and every
+  later one, whether the replacement is a file or another link (this
+  plugin's helper did it by `os.replace` onto the path until round 14). One
+  explicit `reload()` after such a replacement re-arms the view (Z7:
+  `loaded+1`, then every helper and in-place write `fileChanged+1
+  loaded+1`); this plugin does not call one for it (filed, R25e). Written
   through instead -- a temporary file beside the target, renamed onto the
   TARGET -- every later write is seen (`fileChanged+1 loaded+1`, the path
   still a link). And per the fifth fact a dangling link LOADS as FileNotFound,
   the same as nothing there, so a plugin cannot tell it from a missing file
   through its FileView; this one asks its helper (`state init` answers
-  `link`).
+  `link`; round 15, `folder-link` for a link at the state FOLDER that leads
+  nowhere). What the watch does when the state FOLDER is a link has not been
+  measured.
 
 `saveFailed` exists (`/usr/lib/qt6/qml/Quickshell/Io/quickshell-io.qmltypes:470`)
 and its argument is an enum, never a path; until round 3 the service

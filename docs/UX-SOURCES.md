@@ -937,7 +937,7 @@ right elision. Action buttons stay. The footer hints elide left as shipped.
            iptv-org.github.io - not loaded yet
 ```
 
-#### 3.2.6 The no-write mode (D-SINK-19 round 14, R24f, D-SRC-28; 2026-10-14)
+#### 3.2.6 The no-write mode (D-SINK-19 round 14, R24f, D-SRC-28; round 15, D-SRC-38; 2026-10-14)
 
 At a no-write START nothing loaded, so memory holds no source; the header's
 right slot is the notice's TITLE (`Model.sourcesHeaderRight`, one source of
@@ -958,9 +958,32 @@ harness, and no screenshot was taken):
 
 Mid-session (the mode begun under a running shell) memory still holds the
 records it had, so their rows stay, switchable to nothing (a switch is
-refused, 5.10 item 3) and with the same header; still no Add rows, and the
-footer drops `a add` and `c Xtream`: `j/k move - Enter switch - e edit - x
-remove - g logos on - Esc back` (5.3). That half is pinned in node only.
+refused, 5.10 item 3); still no Add rows, and the footer drops `a add` and
+`c Xtream`: `j/k move - Enter switch - e edit - x remove - g logos on - Esc
+back` (5.3). [Round 15, 2026-10-14, D-SRC-38: the header there is NOT the
+notice's title any more. `Saved sources not loaded` read as false above rows
+that were loaded and still play; what stopped is saving, so the right slot
+reads `Saving has stopped` (`Model.stateBlockedHeader(reason, path,
+midSession)`, the notice copy family; `Guide.qml` passes
+`service.stateLoaded`). At a no-write START it is still the notice's title,
+above. Observed by key-scenario B22 (`header:Saving has stopped rows:2`),
+red on dev (`header:Saved sources not loaded rows:2`); the wireframe is
+UNVERIFIED on a display:]
+
+```
++------------------------------------------------------------------------------------------------+
+|                                                                                                |
+|  Sources                                                                   Saving has stopped  |
+|                                                                                                |
+|> 󰄬 Provider                                              used 21:30                           |
+|>         active - tv.example.net - Xtream - 1,475 channels in 28 groups - EPG                  |
+|                                                                                                |
+|          NAS Tvheadend                                                        used yesterday   |
+|          nas.local:9981 - 84 channels in 6 groups - EPG                                        |
+|                                                                                                |
+|                           j/k move - Enter switch - e edit - x remove - g logos on - Esc back  |
++------------------------------------------------------------------------------------------------+
+```
 
 ### 3.3 Edit form
 
@@ -1643,21 +1666,22 @@ key-scenario X5 (one notification per report through a stand-in
 none carrying a URL or the credential). The rendered card is UNVERIFIED on a
 display.
 
-### 5.10 Saved sources not loaded (D-SINK-19 round 12, R22a; round 13, R23; 2026-10-13; round 14, R24; 2026-10-14)
+### 5.10 Saved sources not loaded (D-SINK-19 round 12, R22a; round 13, R23; 2026-10-13; round 14, R24; round 15, R25; 2026-10-14)
 
 `~/.local/state/omarchy-iptv/state.json` is the only copy of the user's
 sources and provider URLs. When it exists but cannot be read -- permission
 denied, not a regular file, a symbolic link that leads nowhere or to
 something that is not a regular file, a file where its FOLDER should be
-(round 14), an I/O error -- or does not parse as a state (an empty file
+(round 14), a symbolic link AT its folder that leads nowhere or to
+something that is not a folder (round 15), an I/O error -- or does not parse as a state (an empty file
 included, settled by the lead on 2026-10-13), or when the start-up check of
 it does not answer (round 13), the plugin WRITES NOTHING to it for the rest
 of the session -- and since round 14 (R24e) neither does the helper the
 service starts, because the playlist fetch is handed no state directory. Until round 12 it read such a file as an
 empty state and saved that over it at the start, which erased every source,
 credential and favourite (the round-11 data-loss lens, live). What the user
-sees, as built on lane-key-n1 and amended on lane-key-p1 (round 13) and
-lane-key-q1 (round 14):
+sees, as built on lane-key-n1 and amended on lane-key-p1 (round 13),
+lane-key-q1 (round 14) and lane-key-k1 (round 15):
 
 1. Once per episode, a desktop notification: `omarchy-notification-send
    --app-name IPTV -u critical -g <alert glyph> -r 74017 <title> <body>`, and
@@ -1678,6 +1702,7 @@ lane-key-q1 (round 14):
    | mid-session, the file reads as missing (`absent`; round 14, R24b: its own `<fix>`, because the helper is not asked mid-session and a broken symbolic link and an unreadable folder look the same to the FileView) | `could not be found, or its folder could not be read` | `If it is a symbolic link, restore the file it points to; otherwise make the folder readable with chmod 700. Then run omarchy restart shell.` |
    | a symbolic link at the path whose target is missing or is not a regular file, as the helper's start-up check found it (`link`, round 14, R24b) | `is a symbolic link whose target is missing or is not a regular file` | `Restore the file it points to, or move the link aside, then run omarchy restart shell.` |
    | something that is not a folder where the state FOLDER, or one above it, should be (`not-a-dir`, round 14, R24b; `<path>` is then the folder's, `/home/you/.local/state/omarchy-iptv`) | `is not a folder (a file is at that path, or at one above it)` | `Move whatever is at that path aside, then run omarchy restart shell.` |
+   | a symbolic link at the state FOLDER, or at one above it, that leads nowhere or to something that is not a folder (`folder-link`, round 15, R25c, D-SRC-32; `<path>` is the folder's) | `is a symbolic link whose target is missing or is not a folder (or a folder above it is)` | `Restore the folder it points to, or move the link aside, then run omarchy restart shell.` |
    | the start-up check -- since round 14 the `mkdir` before it too (R24d) -- did not answer within 15 s and was stopped (`init-timeout`, round 13, R23c) | `could not be checked: the start-up check did not answer and was stopped` | `Make sure a regular file, or nothing, is at that path, then run omarchy restart shell.` |
    | any other failure (`io-error`) | `could not be read` | `Check the file and its folder, then run omarchy restart shell.` |
 
@@ -1758,7 +1783,8 @@ lane-key-q1 (round 14):
    had -- it never switches to the surface in 2 while it holds channels
    (the lead's ruling (3), 2026-10-14). Source changes, Add and the logo
    toggle are refused with the sentence in 3, and Sources keeps the rows of
-   what memory holds under the notice's title (3.2.6). A favourite, a hidden
+   what memory holds under the header `Saving has stopped` (3.2.6; round
+   15, D-SRC-38 -- under the notice's title until then). A favourite, a hidden
    group, a saved or forgotten search or a removed recent still changes on
    screen with its usual confirmation, for this session only: it is not
    kept, which only the notification's "changed now are not kept" says (the
@@ -1783,11 +1809,29 @@ lane-key-q1 (round 14):
    existing directory with the damage AFTER an own save is observed by the
    committed FileView spike (`scripts/dev-harness/spikes/filewatch/`,
    `RESULT-2026-10-13.txt`, every sequence) and by the round-13 live lens's
-   rig, and by no key-scenario segment.
+   rig, and by no key-scenario segment [round 15, R25d: key-scenario B21
+   observes it -- a migrated install starts, an in-app change's save lands,
+   garbage is written in place, and the mode begins and is told once
+   (`blocked:unparsed told:1 file:garbage{`); it is green on dev, which
+   watched already, and red with `stateFile`'s `onFileChanged: reload()`
+   deleted (`spikes/key-mutations/r25d-no-reload-on-change.patch`)]. This
+   is for a regular `state.json`; for a symbolic link the watch has a limit
+   (item 6). The Sources header in that block is observed by B22; the
+   notification and the guide body keep the notice's title there (a copy
+   question raised to the lead, `ARCHITECTURE-SOURCES.md` round 15).
 
 5. It ends by itself when a load that IS a state arrives: the file put back
    in place (the guide's file watch reloads it, key-scenario B7) or fixed and
-   `omarchy restart shell` run. Writes resume at once, and a later episode in
+   `omarchy restart shell` run. [Round 15, D-SRC-35: "put back in place" is
+   measured for a regular `state.json` whose contents or mode were wrong. A
+   symbolic link whose target went missing mid-session blocks as `absent`,
+   and its target coming back is NEVER seen -- the round-14 lenses, `mv`
+   aside and back (`blocked:[absent]` with no reload counted), and the
+   FileView alone (`fileChanged+0 loaded+0` on the restore and for every
+   write after it) -- so that session stays in the mode until a restart,
+   which reads the restored file. Nothing is lost, and the `absent` sentence
+   already ends with the restart. The README no longer says a good copy is
+   enough on its own for that case.] Writes resume at once, and a later episode in
    the same session is told again -- pinned since round 13 (R23a: node `R23a
    (<mode> host, mid-session, <between> between): TWO no-write episodes ...`
    and key-scenario B9 `told:1/2`, both seen red with the re-arm deleted).
@@ -1821,7 +1865,47 @@ lane-key-q1 (round 14):
    command `the state folder is not a folder (a file is at its path, or above
    it); nothing was written`. Neither fault is driven by a key-scenario
    segment: the copy and the decision are pinned in node, the helper's
-   answers in python. The **bound** now covers the start-up `mkdir` too: one
+   answers in python.
+   [Round 15, 2026-10-14, R25e (D-SRC-29): what a running shell NOTICES
+   through a link at `state.json` is narrower than "every change". It sees a
+   change made THROUGH the link -- the helper's `state` commands, an
+   in-place write of the path or of the target, a `cp` of a backup onto
+   the path, and an edit of the target at its OWN path, in place or by a
+   rename onto it (the round-14 lenses' Z1-Z3, C10). It does NOT see a tool
+   that REPLACES the link, or puts a file over it, at the state path -- `mv`
+   of an edited copy or a backup onto it, GNU `sed -i` on it, `rm` and `cp`,
+   `ln -sfn` to another target -- and after one of those it sees nothing more
+   that session, so the next save (an in-app change, a play, a refresh that
+   updates a source's counts) writes memory over the change, and in the
+   `ln -sfn` case into the NEW target (C1, C8, C9, C11, Z4, Z6; the real
+   `Service.qml` live, `probe14.sh`). 0.13.6 loses the same edits. One
+   explicit `reload()` re-arms the view (Z7); that lever is filed for a later
+   release and not built. What the user is told to do, in the README: edit
+   the target in place, put a backup back with `cp`, or run `omarchy restart
+   shell` straight after such a tool and before using the guide. No
+   key-scenario segment drives a link; the measurements are the lenses' rigs
+   (session scratch), recorded in `ARCHITECTURE-SOURCES.md`'s round-15
+   rulings and the contract's fact seven.]
+   [Round 15, R25c (D-SRC-32): the state FOLDER gets the file's rule. A link
+   at `~/.local/state/omarchy-iptv` that leads to a folder is followed, and
+   the start-up `state init` and every writing `state` command make the
+   folder it leads to 0700, as they make the plugin's own folder (measured,
+   `spikes/folder-link/RESULT-2026-10-14.txt`; the README says so). One that
+   dangles or leads to something that is not a folder (or a link above it
+   that does) blocks the start with the `folder-link` row of 1, naming the
+   FOLDER; `state init` answers `found: folder-link` and creates nothing;
+   every other `state` command answers `the state folder is a symbolic link
+   whose target is missing or is not a folder; nothing was written`, exit 1
+   -- `show` and `source list` included, which printed an empty listing with
+   exit 0 until round 15. The helper's other verbs answer a plugin folder in
+   that shape with `<folder> is a symbolic link whose target is missing or is
+   not a folder; nothing was written` (code `folder_unusable`). Whether the
+   watch notices changes when the FOLDER is a link is not measured. No
+   key-scenario segment drives a folder link.]
+   [Round 15, D-SRC-34: a `state.json` link into a folder the user cannot
+   write is a sentence, `state.json is a symbolic link into a folder that
+   cannot be written (Permission denied); nothing was written`, exit 1, the
+   folder's mode left alone -- it was a traceback with `code: internal`.] The **bound** now covers the start-up `mkdir` too: one
    15 s watchdog from the moment `mkdir` starts, TERM then KILL to whichever
    of the two is running (the KILL observed, B17 `helper:yes left:none
    killed:1`); and the helper's init ends ITSELF 30 s after it starts, so a
@@ -1852,10 +1936,55 @@ lane-key-q1 (round 14):
    already told so (`Could not write state.json · check
    ~/.local/state/omarchy-iptv`) -- and the shell's console gets one line per
    such case, `omarchy-iptv: state.json was changed by another program while
-   a change made here was not yet saved; kept the other program's the source
-   1a2b3c4d (label, url)`, or `... kept the other program's activeKey`: field
-   NAMES and a source's short key, never a URL or a value. Nothing on screen
-   says a conflict happened; the guide simply shows the merged state.
+   a change made here was not yet saved; kept the other program's version of
+   the source 1a2b3c4d (label, url)`, or `... kept the other program's
+   version of activeKey`: field NAMES and a source's short key, never a URL
+   or a value [round 15, D-SRC-36: `version of` added in the model and here;
+   the line read `kept the other program's the source ...` until then].
+   Nothing on screen says a conflict happened; the guide simply shows the
+   merged state. (A conflict lost while the in-app save was in flight or
+   parked, not failed, is told by that journal line alone, D-SRC-33; and a
+   merge can leave the active source naming one the other program removed or
+   re-keyed, with no line, after which the guide falls back as it does at a
+   start, D-SRC-37. Both are filed and not this round's.)
+   [Round 15, R25b (D-SRC-31): **unless together they pass a limit.** Both
+   sides' additions are kept up to 50 sources, 20 saved searches and 200
+   hidden groups; past a limit the other program's version keeps its place
+   and the in-app additions past it are dropped, and the user is TOLD, once
+   per merge, by a notification (`omarchy-notification-send --app-name IPTV
+   -u normal -g <alert glyph> -r 74018 <title> <body>`, `Model.mergeDropNotice`):
+   `Not every change was kept` / `Another program changed state.json while a
+   change made here was not yet saved, and together they went past a limit.
+   The other program's version was kept, and 1 source added here (the limit
+   is 50 sources) was not kept. Make room, then add it again.` -- counts and
+   limits, joined with `and` for more than one kind, never a URL, a label, a
+   query or a group name; and the journal gets one line per dropped element,
+   `... the source <key> added here was not kept (the limit is 50 sources)`,
+   `... a saved search made here was not kept (the limit is 20 saved
+   searches)`, `... a group hidden here was not kept (the limit is 200 hidden
+   groups)` (`Model.mergeDropLines`). Until round 15 the merge cut them at the
+   cap silently. Pinned in node (`R25b: ...`, both hosts and echo modes); not
+   driven live. One reachable case is outside the merge and still silent: an
+   in-app ADD whose probe is running when a hand-run `state source add` takes
+   the 50th place -- the foreign write is applied (nothing is held yet), the
+   probe's commit then makes 51 in memory and in the file, and the next
+   start keeps 50 and drops the in-app source (lane-key-k1's finding, raised
+   to the lead; the README states it).]
+   [Round 15, R25a (D-SRC-30): **a backup put back wins, even a copy of the
+   plugin's own file.** A reload is the service's own echo only while its
+   text is still in flight (the burst since the last save that landed); a
+   copy of an earlier own save, put back after a later in-app change landed,
+   is another program's write -- applied whole when nothing is held, merged
+   when something is -- where until round 15 it was ignored as `own-write`
+   and the next save wrote over it (the round-14 data-loss lens's FAV, BAK,
+   DEL, RSTB, FAV). Observed by key-scenario B20 (`restored:2 records:2
+   label:after-restore restart:2`; on dev `restored:1 records:1 ...
+   restart:1`). One case where a restore has no effect, stated in the
+   README: a copy equal to what the file ALREADY holds, because the in-app
+   change after it was not saved yet (its save failed, parked or in
+   flight), is indistinguishable from nothing happening -- it is ignored for
+   the held reason, and the held change is saved over it. The disk never
+   moved, so nothing the user wrote is lost, but the restore does nothing.]
 
 Pinned in node (`R22a: stateUnreadableNotice -- one sentence per reason,
 each naming the file and what to do (restart included), none carrying a URL;
@@ -1880,12 +2009,19 @@ switch then landing), and B9-B14 on lane-key-p1 (lane A, transcript
 lane-key-n2`, `key-20261014-044420-538071`, 107 / 5), and B15-B18 on
 lane-key-q1 (lane A, `key-20261014-095236-969838`, 116 / 0; B15, B16 and
 B18 red on `--baseline dev`, `key-20261014-095838-996891`, 113 / 3; B17 red
-with the KILL deleted, `key-20261014-100528-1027361`, 115 / 1). B11 reads the surface's
+with the KILL deleted, `key-20261014-100528-1027361`, 115 / 1), and B19-B22 on
+lane-key-k1 (lane A, `key-20261014-153026-1723779`, 120 / 0; B20 and B22
+red on `--baseline dev`, `key-20261014-144201-1513141`, 118 / 2; B19 red
+with `r25d-a5-base-not-moved.patch`, 119 / 1; B21 red with
+`r25d-no-reload-on-change.patch`, 110 / 10). Round 15's node pins: `R25a
+(...)`, `R25b: ...` and `R25b (...)`, `R25c: ...` and `R25c (...)`, `R25d
+(...)`, `D-SRC-38: sourcesHeaderRight / stateBlockedHeader ...`. B11 reads the surface's
 title and prose as the notice's (`title:notice prose:notice`) through the
 harness's drawn-copy fields, which since R23h report what is DRAWN. The
 rendered surface and the notification card are UNVERIFIED on a display: no
 screenshot of either was taken this round, nor of the round-14 Sources
-screen (3.2.6).
+screen (3.2.6), nor in round 15 of the `Saving has stopped` header or the
+`Not every change was kept` notification.
 
 ---
 

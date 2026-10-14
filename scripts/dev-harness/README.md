@@ -1423,6 +1423,7 @@ round-13 rulings hold the decision request.] [2026-10-14, round 14: the
 mode beginning after an own save in that session; for a session whose
 directory already existed, after an own save, the committed spike and the
 round-13 live lens's rig observe it, and no key-scenario segment does.]
+[2026-10-14, round 15: B21 observes that last one now (Round 15 below).]
 
 #### Round 14 (R24): the merge, the fresh session's watch, the KILL and the init's own deadline
 
@@ -1457,6 +1458,8 @@ transcripts are in lane A's session scratch directory, not the tree. The
 R24a merge has no live segment: the ruling asked for the fixture table and
 `tests/service-harness.js`, and the data-loss lens's WF FAV WOK HADD FAV
 runs there on both hosts, both echo modes, parked, in flight and failed.
+[Round 15: B19 is the merge's live segment now, and two of its decisions
+that survived every check above are pinned (Round 15 below).]
 
 What changed in the rigs:
 - `fixtures/slow-helper.py` gains `OMARCHY_IPTV_SLOW_IGNORE_TERM=1` (a
@@ -1499,6 +1502,92 @@ What changed in the rigs:
   true` gives the other shape; and it decides what a TERM-ignoring process
   does, so the KILL is observed (rule 10: an always-armed double fails the 2
   R24c double checks).
+
+#### Round 15 (R25): the restore, the merge observed, the existing folder after an own save, and the mid-session header
+
+key-scenario.sh B19..B22, each under the scenario's own nested cage on a
+private session bus. B19 (R25d, F-HARNESS-26), the R24a merge's first live
+observation: after the start-up init has run (it makes the state folder
+0700 again, so taking `w` away before it measured nothing on the first
+try, `held:false merged:0`), the folder loses `w`, so the in-app label
+change's atomic save fails and is HELD; two hand edits IN PLACE (an
+existing 0600 file needs no folder `w`) add a favourite and remove it again
+inside that one window -- the round-14 lens's a5 -- then a hand-run helper
+write lands (and makes the folder 0700 again), then a second in-app change;
+both in-app changes and the helper's favourite must be in the file, the
+removed favourite must stay removed, and a restart stands on all of it.
+B20 (R25a, D-SRC-30): a copy of `state.json` taken after an in-app save
+LANDED, put back with `cp` after an in-app remove landed: the restore is
+applied, kept by the next save and by a restart. B21 (R25d): the
+EXISTING-folder session damaged after an own save -- a migrated install
+starts, an in-app change's save lands, then garbage is written in place:
+noticed and told once. B22 (D-SRC-38): that block's Sources header reads
+`Saving has stopped`, the rows still there. Counts are the summary line's,
+the floor 119 lettered checks: forward 120 / 0
+(`key-20261014-153026-1723779`, 385.9 s, load 1.9-2.3, on lane-key-k1
+0ccea19; also 120 / 0 on b10b5b6, `key-20261014-143514-1482764`);
+`--baseline dev` (002662d) 118 / 2, B20 `restored:1 records:1
+label:after-restore restart:1` and B22 `header:Saved sources not loaded
+rows:2` (`key-20261014-144201-1513141`); B19 and B21 are green there,
+because round 14 had the behaviour and lacked the checks, and are seen red
+through `--tree`: `spikes/key-mutations/r25d-a5-base-not-moved.patch` 119 /
+1 (B19 `merged:2 ... favs:t:helper.uk,t:h3.uk`,
+`key-20261014-144904-1545059`) and `r25d-no-reload-on-change.patch` 110 /
+10 (B21 `blocked: told:0`, with D3, W3, W6, B7, B9, B16, B19, B20 and B22,
+every segment that needs a reload; `key-20261014-151410-1653892`).
+sources-scenario 66 / 0 and logo-scenario 33 / 0, each as the child of a
+nested headless cage on a private bus. The printed footer of a `--baseline`
+/ `--tree` run now leads with round 15's sentence and says of every older
+round's that it was measured on that round's tree (F-HARNESS-28: round 14
+had left it naming round 13's reds under a run whose reds were B15, B16
+and B18). The transcripts are in lane A's session scratch directory, not
+the tree. R25a's a7 half (a foreign write that already carries the
+in-flight save) has no live segment -- its window is milliseconds -- and
+is pinned in node; R25b's caps and R25c's folder link are not driven live
+(the first needs 49 records seeded, the second a link the scenario does
+not build); no segment drives a symlinked `state.json` at all, so the
+link's limit (R25e) rests on the round-14 lenses' rigs.
+
+What changed in the rigs:
+- The scenario's cage is handed 1500 s (was 500): a mutated tree whose
+  waits all time out (`r25d-no-reload-on-change.patch`) ran 1007 s, and every
+  segment after the cage's end read NOSTATE -- a red for the wrong reason.
+  Still inside `private-bus.sh`'s 2400 s.
+- `spikes/filewatch/measure.sh <helper> r25` is a third sequence set:
+  bursts and spreads of the view's own `setText` (2, 3, 5, 10 texts; 0, 2
+  and 5 ms apart), idle and under busy loops, with `shell.qml` logging every
+  signal in order through new `burst` / `spread` IPC, to learn what TEXT
+  each echo carries (R25a, rule 10). `RESULT-2026-10-14-r25.txt`: 85 echoes
+  over 100 bursts, each the latest `saved`'s text; none stale, none
+  superseded, none while a later text was asked. A `Timer` of interval 0
+  never fired in that rig, so the 0 ms spread is a `Qt.callLater` chain.
+- `spikes/folder-link/measure.py <helper>` (new): the helper as a
+  subprocess (`python3 -B -I`, timeout 30) over a symbolic link at each
+  folder `ensure_private_dir` makes -- the state folder (to a 0755 folder, a
+  0500 folder, an empty folder, nothing, a file), a cache folder, the cache's
+  `sources/`, the runtime folder -- and a `state.json` link into a 0500
+  folder; it prints each verb's exit, code and message and what is at the
+  paths before and after. `RESULT-2026-10-14.txt` holds dev's run and
+  lane-key-k1's. It needs no display and runs in a temporary directory under
+  `$SCR` (or the default temp directory).
+- `spikes/key-mutations/` gains `r25a-keep-landed.patch`,
+  `r25a-clear-every-saved.patch`, `r25b-silent-drop.patch`,
+  `r25d-a5-base-not-moved.patch`, `r25d-a7-no-inflight-half.patch` and
+  `r25d-no-reload-on-change.patch` (its README's table says what each breaks
+  and what goes red), and `d3-save-parked.patch` is re-made once more
+  because R25a's `unchanged` arm moved its hunk.
+- The node double (`tests/service-harness.js`), D-DOC-11 and rule 10: the
+  fault `dangling-link` is now a dangling link whose target's FOLDER exists,
+  and the view's save over it SUCCEEDS and creates the target, after which
+  the link leads somewhere (the round-14 lenses' C6 and Z9); the measured
+  failure is `dangling-link-nodir` (sequence X: the folder missing); and
+  `folder-link` is a link at the state folder that leads nowhere -- found
+  `folder-link` by the init, the save failing for want of a folder. It was
+  `blocksWrite` for every dangling link until round 15, more forgiving of
+  the plugin than the FileView is in the common case.
+- `tests/test_state.py` and `tests/test_source.py`: their in-process
+  `run()` disarms the helper's init alarm after every call, so a module run
+  alone under load is no longer killed by its own `SIGALRM` (F-HARNESS-27).
 
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 
@@ -1620,9 +1709,23 @@ None is part of the gate.
   and W, a valid symlink at the path -- the view's own save writes through
   it, dev's helper replaced it and the view then saw nothing, lane-key-q1's
   writes through and every write is seen; X, a dangling link -- the view's
-  save raises `saveFailed`. The default set is named `r23g`. Needs cage;
+  save raises `saveFailed` [round 15, D-DOC-11: X's link leads into a
+  folder that does not exist; with the target's folder present the same
+  save succeeds and CREATES the target, measured by the round-14 lenses' own
+  rigs (C6, Z9), and the double now models both]. Set `r25` is round 15's
+  (`RESULT-2026-10-14-r25.txt`): what text each echo of a burst of own saves
+  carries -- always the latest `saved`'s. The default set is named `r23g`. Needs cage;
   not part of the gate (`tests/test_harness_home.py` runs it with a stand-in
   `cage` only to check where it writes).
+- `spikes/folder-link/measure.py <helper>`: what the helper does over a
+  symbolic link at each folder it makes private (D-SINK-19 round 15, R25c):
+  the helper as a subprocess, no display, one line per verb with its exit,
+  code and message and what is at the paths before and after.
+  `RESULT-2026-10-14.txt` holds dev 002662d's run and lane-key-k1's: a link
+  that leads to a folder is followed and that folder made 0700; one that
+  leads nowhere was an empty listing (exit 0) or a traceback before, and is
+  a sentence with exit 1 after. Not part of the gate; the python tests
+  (`StateFolderLinkTest`, `FolderLinkSiblingsTest`) are.
 - `spikes/clip-offer/`: the lead's D-CLIP-1 rig, verbatim -- three probe
   windows (`editable.qml`, `readonly.qml`, `nofield.qml`) and the gdb
   catchpoint on `pipe2` (`gdb.cmds`) that attributed the read to

@@ -15,6 +15,7 @@ Run: python3 -m unittest discover -s tests
 import contextlib
 import io
 import json
+import signal
 import re
 import os
 import pathlib
@@ -67,8 +68,13 @@ VECTORS = [
 def run(*args):
     out = io.StringIO()
     err = io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        code = helper.main(list(args))
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = helper.main(list(args))
+    finally:
+        # F-HARNESS-27's sibling: `state init` run in-process arms SIGALRM
+        # (R24d) in the test runner; disarm it (tests/test_state.py's run()).
+        signal.alarm(0)
     lines = out.getvalue().strip().splitlines()
     return code, json.loads(lines[-1]) if lines else None, err.getvalue()
 

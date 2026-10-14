@@ -386,7 +386,8 @@ watch, the merge, the symlink and the bound:
   D-SRC-22). The service keeps a BASE, `landedState`: the text it loaded, its
   last save that LANDED, or the last foreign text it merged. A reload whose
   text is the base (`Model.sameState`) or one of the service's own writes is
-  ignored while a save is parked, in flight or failed, as R9 had it; any
+  ignored while a save is parked, in flight or failed, as R9 had it [round
+  15, R25a: "own" now means still in flight -- next amendment]; any
   other text in that window is FOREIGN -- a hand-run helper `state` verb, a
   restore -- and `Model.mergeForeignState(base, ours, theirs)` three-way
   merges it: sets for favourites, hidden groups and saved searches, records
@@ -398,7 +399,9 @@ watch, the merge, the symlink and the bound:
   memory, the foreign text becomes the base, and a save is asked for when
   the result is not what is on disk. With nothing held a foreign reload is
   applied whole, as before. `ARCHITECTURE-SOURCES.md`'s round-14 rulings
-  carry the field table and the fixture.
+  carry the field table and the fixture. [Round 15, R25b: the caps were
+  applied by `parseState` after the merge and cut the in-app additions
+  silently; next amendment.]
 - One answer per state path (R24b, D-SRC-23, D-SRC-26). A symlink at
   `state.json` is followed when it leads to a regular file -- for reads, and
   for writes, which land THROUGH it: a 0600 temporary file beside the target,
@@ -409,7 +412,11 @@ watch, the merge, the symlink and the bound:
   and the running view then saw none of its later writes (V, W). `state
   init` answers `link` for a link it will not follow and `not-a-dir` for a
   file where the state directory should be (no traceback), and each has its
-  own notice sentence instead of the folder-permission one.
+  own notice sentence instead of the folder-permission one. [Round 15: "the
+  link survives" is true of the plugin's and the helper's writes. A tool of
+  the user's that REPLACES the link, or puts a file over it, is not seen by
+  the running view, which then sees nothing more that session (R25e,
+  D-SRC-29; next amendment).]
 - One bound over the whole start-up check (R24d, D-SRC-24, D-SRC-25): the
   15 s watchdog arms when `mkdir` starts and TERMs, then KILLs, whichever of
   `mkdir` and `state init` is running; and `state init` arms `SIGALRM` for 30
@@ -421,7 +428,57 @@ watch, the merge, the symlink and the bound:
 - In the no-write mode the playlist fetch is handed no `--state-dir`
   (`Model.fetchStateDir`, R24e, D-SRC-27), so the D-ID-1 remap cannot write
   the file the session refuses to write; and the Sources screen draws the
-  notice's title and no Add rows (R24f, D-SRC-28; `UX-SOURCES.md` 5.10).
+  notice's title and no Add rows (R24f, D-SRC-28; `UX-SOURCES.md` 5.10)
+  [round 15, D-SRC-38: `Saving has stopped` instead of the title in a block
+  that began mid-session].
+
+Amended 2026-10-14 (D-SINK-19 round 15, R25; lane-key-k1, lane A). The echo,
+the caps, the state folder and the link's limit:
+- An echo is only a text still in flight (R25a, D-SRC-30). `recentSaves` was
+  the last eight texts the service wrote, so a backup the user had copied
+  from the plugin's own file, put back after a later in-app change landed,
+  was ignored as an echo and the next save wrote over it (the round-14
+  data-loss lens). It is now the burst asked for since the last save that
+  LANDED, cleared as one lands; an older own text coming back is another
+  writer's, applied or merged under R24a. What it rests on is measured
+  (spike set `r25`, `RESULT-2026-10-14-r25.txt`): 85 echoes over 100
+  bursts, each carrying the text of the latest `saved`, none a superseded
+  one. The landed save's own echo now arrives with nothing held and is
+  ignored as `unchanged` (`Model.reloadDisposition`'s new input
+  `memoryMatchesBase`). Observed live by key-scenario B20.
+- A merge never drops silently (R25b, D-SRC-31). `Model.mergeForeignState`
+  applies the caps itself -- theirs first, so what goes past 50 sources, 20
+  saved searches or 200 hidden groups is always the in-app additions --
+  and returns what it dropped; the service logs one line per element
+  (`Model.mergeDropLines`, a source by its key) and tells the user once per
+  merge (`Model.mergeDropNotice`, notification 74018, counts and limits
+  only). An in-app add whose probe is still running when a foreign write
+  takes the 50th place is outside the merge and is still dropped silently at
+  the next start (a new finding, raised to the lead).
+- The state folder gets the file's rule (R25c, D-SRC-32). A symlink at the
+  state folder, or above it, that dangles or leads to something that is not
+  a folder is refused by every `state` verb (exit 1, a sentence) and named by
+  `state init` (`found: folder-link`), which the model maps to its own
+  notice; `ensure_private_dir` refuses the same shapes for every caller --
+  the cache folders, the runtime socket folder, the logo folder -- as
+  `folder_unusable`, never a traceback. A folder link that leads to a folder
+  is followed and the folder it leads to is made 0700 (measured, spike
+  `folder-link`; security standard 5).
+- The link's limit is stated, not fixed (R25e, D-SRC-29). Measured by the
+  round-14 lenses: a writer that replaces whatever is at the state path --
+  the link, or a file over it (`mv`, `sed -i`, `rm` + `cp`, `ln -sfn`) --
+  leaves the view watching nothing for the rest of the session, and the next
+  save writes memory over the change; a write through the link, in place or
+  by a rename onto the target's own path, is seen; a target that went
+  missing is not seen coming back (D-SRC-35). One explicit `reload()`
+  re-arms the view; that lever is filed for a later release. The README
+  says what is noticed and what to do (edit the target in place, or restart
+  the shell straight after such a tool). The contract's seventh FileView
+  fact has the table.
+- The merge is observed live (R25d, F-HARNESS-26): key-scenario B19 (a held
+  failed save, two hand edits in place and a helper write inside it, both
+  in-app changes and the helper's favourite kept through a restart), and
+  B21, the existing-folder session damaged after an own save.
 
 ### mpv status (helper `status` stdout, M1 target)
 
@@ -2558,6 +2615,18 @@ Performance budget (10k channels):
    The service's own FileView save already wrote through such a link
    (measured, spike set `r24` sequence V). A link that dangles or leads to
    anything but a regular file is refused and nothing is written.]
+   [2026-10-14, round 15: that folder's mode can refuse the write, and the
+   refusal is a sentence, `state_unwritable`, never a traceback (D-SRC-34).
+   And the opposite case is NOT an exception: when the user has made the
+   state FOLDER itself a symlink (to a folder elsewhere), the folder it leads
+   to IS the plugin's state folder, so `state init` and every writing verb
+   make it 0700 through the link, as they do the folder they create
+   (measured, `scripts/dev-harness/spikes/folder-link/RESULT-2026-10-14.txt`:
+   0755 and 0500 both come out 0700, the link left a link; the same for a
+   linked cache or runtime folder). Decided by R24b's principle -- never
+   change what the user's link points at without saying so -- and said in the
+   README. A folder link that dangles or leads to anything but a folder is
+   refused and nothing is written (R25c).]
 6. No symlinks in the repo (validator rejects them); no sudo, no pkexec, no
    network from QML.
 7. Credentials: never printed; `sourceHost` instead of URL in caches and
@@ -2881,7 +2950,11 @@ Manual QA on the live shell (QA role, machine of record):
    explicit `reload()` once the directory exists re-arms it, and the
    service now makes that call after the start-up check (R24c, measured in
    the same spike, set `r24`). A rename or an in-place write is otherwise
-   seen. Section 5's round-14 amendment.]
+   seen. Section 5's round-14 amendment.] [2026-10-14, round 15: "a rename
+   is seen" holds for a rename onto the watched file's own path. With
+   `state.json` a symlink, a rename or any replacement at the LINK's path is
+   never seen, nor anything after it (R25e, D-SRC-29; section 5's round-15
+   amendment); filed, and stated in the README.]
 2. FileView writes into a missing directory: `mkdirProc` creates the three
    directories at service start (argv `mkdir -p -m 700`). Do not call
    `saveState()` before it has run (first user action is always later). [2026-10-14, round 14: and a FileView

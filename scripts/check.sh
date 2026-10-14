@@ -198,7 +198,14 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # base reload, a conflict) and R24c's two per mode (20 + 8), R24c's double
 # (2), R24d's mkdir hang (2), R24g's TERM-ignoring init and mkdir (4), R24e
 # (2) and R24b's two faults (4).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2459}
+# 2459 -> 2502 on 2026-10-14, round 15 (R25): through the service harness,
+# on both hosts and both own-echo modes, R25a's four (FAV BAK DEL RSTB FAV,
+# the UNFAV variant, the controls, the coalesced burst's mid-burst echo),
+# R25d's two (the lens's a5 and a7), R25c's folder-link start and R25b's two
+# caps (9 x 4 = 36); the double's dangling-link save, D-DOC-11 (2); and the
+# model's R25c sentence, D-SRC-38's two and R25b's two direct pins (5). The
+# reload fixture's three R25a cases are counted inside R9's one check.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2502}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -232,7 +239,12 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2459}
 # (9), StateInitDeadlineTest's three (the init's own SIGALRM), and
 # tests/test_harness_home.py's two PrivateBusIsolatesHome cases (private-
 # bus.sh and the filewatch spike run for real against a decoy home).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1194}
+# 1194 -> 1202 the same day, round 15 (R25c, D-SRC-34, F-HARNESS-27):
+# test_state's five StateFolderLinkTest cases and FolderLinkSiblingsTest's
+# one (the real helper over a link at the state folder and at every other
+# folder ensure_private_dir makes), the in-process init's alarm (1), and
+# test_logos's logo-folder link (1).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1202}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

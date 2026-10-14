@@ -682,13 +682,44 @@ def mode_text(mode: int) -> str:
     return "0%03o" % stat.S_IMODE(mode)
 
 
+class FolderUnusable(NotADirectoryError):
+    """A folder ensure_private_dir needs is a symbolic link that does not lead
+    to a folder (it dangles, or leads to a file), or something that is not a
+    folder sits at its path or one above it. An OSError, so every caller that
+    already turns an OSError into a warning keeps doing so (ensure_player_dirs);
+    main() reports the rest as `folder_unusable` with this sentence, never a
+    traceback."""
+
+    def __init__(self, path: str, what: str) -> None:
+        super().__init__(errno.ENOTDIR, what)
+        self.sentence = "%s %s; nothing was written" % (path, what)
+
+
 def ensure_private_dir(path: str) -> None:
     """mkdir -p with every directory this call creates set to 0700 (the
     per-source layout means the helper may be the first to create
-    <cache-dir>/sources/, which must be private like its children)."""
+    <cache-dir>/sources/, which must be private like its children).
+
+    D-SINK-19 round 15, R25c (D-SRC-32). A symbolic link AT `path` that leads
+    to a folder is FOLLOWED, and the folder it leads to is made 0700 like
+    one this created -- measured 2026-10-14 on this machine, the helper as a
+    subprocess: a link to a 0755 (or 0500) folder came out 0700 after `state
+    init`, a state write, `cache migrate`, `failed mark` and `player stop`
+    alike, the link left a link. That is the folder the plugin keeps its
+    files in, wherever the user put it, so it gets the plugin's own mode;
+    the README says so. A link here (or ABOVE it) that DANGLES or leads to
+    something that is not a folder is refused with FolderUnusable before
+    anything is created: it used to reach a mkdir under the link and end in
+    a FileNotFoundError traceback and `code: internal` (every caller --
+    the state folder, a cache folder, the runtime socket folder, the logo
+    folder -- measured, the same before.txt run)."""
     missing: list[str] = []
     current = path
     while current and not os.path.isdir(current):
+        if os.path.lexists(current):
+            if os.path.islink(current):
+                raise FolderUnusable(current, "is a symbolic link whose target is missing or is not a folder")
+            raise FolderUnusable(current, "is not a folder")
         missing.append(current)
         parent = os.path.dirname(current)
         if parent == current:
@@ -8045,8 +8076,44 @@ def write_state_file(path: str, target: str, payload: Any) -> None:
     """Write state.json for a `state` verb: at the path, or THROUGH the link
     to `target` (state_file_target). A target that is not the path lives in
     a directory that is not the plugin's, which is not created or chmod-ed;
-    the file itself is still written 0600 by an atomic rename."""
-    write_json_atomic(target, payload, private_dir=os.path.abspath(target) == os.path.abspath(path))
+    the file itself is still written 0600 by an atomic rename.
+
+    D-SINK-19 round 15 (D-SRC-34): that folder can refuse the write -- it is
+    never chmod-ed back to 0700 the way the plugin's own state folder is --
+    and the refusal is a sentence, exit 1, nothing written (the temporary
+    file is removed by write_text_atomic), where it used to be a
+    PermissionError traceback and `code: internal`."""
+    through_link = os.path.abspath(target) != os.path.abspath(path)
+    try:
+        write_json_atomic(target, payload, private_dir=not through_link)
+    except FolderUnusable:
+        raise
+    except OSError as error:
+        reason = error.strerror or type(error).__name__
+        if through_link:
+            raise HelperError("state_unwritable", "state.json is a symbolic link into a folder that cannot be written (%s); nothing was written" % reason)
+        raise HelperError("state_unwritable", "state.json could not be written (%s); nothing was written" % reason)
+
+
+def broken_folder_link(directory: str) -> str:
+    """The state FOLDER's rule, R25c (D-SRC-32): R24b's rule for the file,
+    one level up. A symbolic link at the state folder, or at a folder above
+    it, that dangles or leads to something that is not a folder -> its path;
+    "" when the chain is sound (every component that exists is a folder,
+    through links that lead to folders) or simply absent. Only the FIRST
+    component that exists is asked about: below it nothing exists, and above
+    it the lstat of that component already succeeded."""
+    current = os.path.abspath(directory)
+    while current:
+        if os.path.lexists(current):
+            if os.path.islink(current) and not os.path.isdir(current):
+                return current
+            return ""
+        parent = os.path.dirname(current)
+        if parent == current:
+            return ""
+        current = parent
+    return ""
 
 
 def state_path_found(path: str) -> str:
@@ -8172,6 +8239,18 @@ def cmd_state(args: argparse.Namespace) -> int:
     if action == "source":
         extra["op"] = args.op
     try:
+        # R25c (D-SRC-32): a link at the state folder, or above it, that leads
+        # nowhere. Every verb used to read it as a fresh state -- `show` and
+        # `source list` printed an empty listing, exit 0 -- and the writers
+        # and the init ended in a traceback; now the init names it and every
+        # other verb refuses it, the link untouched.
+        broken = broken_folder_link(directory)
+        if broken and action == "init":
+            emit({"ok": True, "kind": "state", "action": action, "found": "folder-link", "created": False,
+                  "state": public_state(default_state())})
+            return EXIT_OK
+        if broken:
+            raise HelperError("state_unreadable", "the state folder is a symbolic link whose target is missing or is not a folder; nothing was written")
         if action == "init":
             # R22a: `found` first -- the lstat witness, before anything is
             # repaired. The init NEVER rewrites a file that exists, whatever
@@ -8805,6 +8884,12 @@ def main(argv: list[str] | None = None) -> int:
         return int(args.func(args))
     except KeyboardInterrupt:
         return 130
+    except FolderUnusable as error:
+        # R25c: not a bug -- a folder the verb needs is a link to nothing, or
+        # not a folder. One sentence, the exit every refusal has.
+        log("%s: %s" % (args.command, error.sentence))
+        emit({"ok": False, "kind": args.command, "error": {"code": "folder_unusable", "message": redact_urls(error.sentence)}})
+        return EXIT_ERROR
     except Exception as error:
         # A bug. The traceback is the bug report, but it must not carry a URL
         # (section 9), so it is redacted and paired with a structured error.

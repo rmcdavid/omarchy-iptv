@@ -278,6 +278,17 @@
 #   B17 a start-up init that IGNORES the TERM is KILLed and reaped <- R24g
 #   B18 a shell stopped 5 s into a held init leaves it running, and the
 #       init's own deadline ends it                              <- R24d
+#   B19 R24a live: an in-app change held by a failed save, two hand edits
+#       in place in that window (a favourite added, then removed), a
+#       hand-run helper write, a second in-app change -- both in-app
+#       changes and the helper's favourite kept, the removed one stays
+#       removed, through a restart                   <- R25d, F-HARNESS-26
+#   B20 a backup copied from the plugin's own file after its save landed,
+#       put back after an in-app remove landed: the restore wins, through
+#       the next save and a restart                          <- R25a, D-SRC-30
+#   B21 the EXISTING-folder session damaged after an own save landed: the
+#       garbage is noticed, told once                 <- R25d, D-DOC-9's half
+#   B22 ... and the Sources header there says saving has stopped <- D-SRC-38
 #   P1  no labelled harness-log line carries a URL or a fixture path
 #   P2  no credential token anywhere in the harness log
 #   T1  the shell, the compositor and the nested socket are gone (by pid)
@@ -362,6 +373,32 @@
 #   --tree with spikes/key-mutations/r24g-no-kill.patch: 115 passed, 1
 #       failed, B17 (`blocked: helper:no(<pid>) left:<pid> told:0`;
 #       key-20261014-100528-1027361).
+#
+# ROUND 15, R25 (the lead's ruling on the round-14 lenses). B19..B22 above.
+# B19 is the first live observation of R24a's merge (the round-14 data-loss
+# lens's a5 and a7 survived every check; a5 is driven here by two hand
+# edits IN PLACE inside one held window -- a 0600 file needs no directory
+# `w`, so the in-app save keeps failing while they land -- and a7 is pinned
+# in node, its window being milliseconds wide). B20 is R25a's restore, red
+# on dev. B21 is the existing-folder shape the round-14 lanes left to the
+# spike, seen red through r25d-no-reload-on-change.patch; B22 is D-SRC-38,
+# red on dev. Measured on lane-key-k1 under this harness, each in its own
+# nested cage on a private bus (harness directories
+# /run/user/1000/omarchy-iptv-kk1-<n>, removed after), summary counts:
+#   lane-key-k1 forward (b10b5b6):                120 passed, 0 failed
+#       (key-20261014-143514-1482764)
+#   --baseline dev (002662d, round 14's code):    118 passed, 2 failed
+#       (key-20261014-144201-1513141): B20 (`restored:1 records:1 ...
+#       restart:1`, the restore ignored as own-write and written over) and
+#       B22 (`header:Saved sources not loaded rows:2`)
+#   --tree with r25d-a5-base-not-moved.patch:      119 passed, 1 failed
+#       (key-20261014-144904-1545059): B19 (`merged:2 ... favs:
+#       t:helper.uk,t:h3.uk`, the hand edit's removal ignored and written back)
+#   --tree with r25d-no-reload-on-change.patch:    110 passed, 10 failed
+#       (key-20261014-151410-1653892): B21 (`blocked: told:0`) with D3, W3,
+#       W6, B7, B9, B16, B19, B20 and B22, every segment that needs a
+#       reload. Its first run outlived the cage's 500 s lifetime (1007 s;
+#       B19..B22 NOSTATE), which is why cage_start is now handed 1500.
 #
 # Every segment seeds its OWN state.json, caches and entry and starts a fresh
 # shell, so a red in one is attributable to one ruling and never to the
@@ -1128,7 +1165,13 @@ observe_window() {
 shell_arm() {
   local i left before window orphan seed_playlist seed_key sha0 staged
   echo "== shell arm: the real Service.qml under cage (plugin tree $PLUGIN_ROOT) ($(elapsed) s)"
-  cage_start 500
+  # The nested compositor's lifetime is an upper bound only (cage_stop ends
+  # it). Round 15: 500 s was outlived by a mutated tree whose earlier waits
+  # all time out -- r25d-no-reload-on-change.patch ran 1007 s and every
+  # segment after the cage's end read NOSTATE, a red for the wrong reason --
+  # and the forward run itself reached 425 s with B19..B22. So 1500 s, inside
+  # private-bus.sh's 2400 s.
+  cage_start 1500
   # The stub compositor in front of PATH, as pip- and clip-scenario.sh do
   # it, and HYPRLAND_INSTANCE_SIGNATURE unset: the service's hyprctl probe
   # stops at `which`, and nothing can reach the user's compositor from here.
@@ -2321,6 +2364,118 @@ PYSEED
   for p in $initpid $left; do kill -KILL "$p" 2>/dev/null; done
   export OMARCHY_IPTV_PLUGIN_ROOT=$PLUGIN_ROOT; unset OMARCHY_IPTV_SLOW_MS OMARCHY_IPTV_SLOW_VERBS OMARCHY_IPTV_SLOW_AT
 
+  # R25d (F-HARNESS-26): R24a OBSERVED. The round-14 data-loss lens found
+  # that nothing live watched the merge: two of its decisions (a5, the base
+  # moved to theirs; a7, the in-flight re-save) survived every check. The
+  # state directory loses `w` under the running shell (F's staging), so the
+  # FileView's atomic save fails and the in-app label change is HELD; two
+  # hand edits IN PLACE (an existing 0600 file needs no directory `w`) add a
+  # favourite and take it away again inside that one held window -- the
+  # second compared with the base the first moved it to (a5); then a
+  # hand-run helper write, which makes the directory 0700 again
+  # (ensure_private_dir) and lands; then a second in-app change. Both in-app
+  # changes and the helper's favourite must be in the file, the favourite
+  # the hand edits removed must stay removed, and a restart stands on all
+  # of it. Seen red through spikes/key-mutations/r25d-a5-base-not-moved.patch.
+  # Every foreign write MERGED, whichever hold it met (a save failed, or the
+  # merge's own re-save still in flight when the next write lands).
+  merges() { qa_json_field "sum(v for k, v in d['stateReloadsByReason'].items() if k.startswith('foreign-'))" "$(ipc pointerState)"; }
+  : >"$NOTIFY_LOG"
+  seed "$KA" migrated
+  start_shell --playlist none --source-key "$KA" || true
+  # start_shell returns once the state loaded and the cache is ready, which
+  # can be BEFORE the start-up `state init` has run -- and the init makes
+  # the directory 0700 again (ensure_private_dir). The first live run of
+  # this segment took `w` away inside that window and saw no failure
+  # (`held:false merged:0`). So: after dirsReady.
+  wait_for true 20 pf "['dirsReady']" >/dev/null || true
+  chmod 0500 "$(dirname "$STATE")"
+  res=$(ipc updateSource "$KC" '{"label": "in-app-one"}')
+  wait_for true 10 pf "['stateSaveFailed']" >/dev/null || true
+  held="$(pf "['stateSaveFailed']")"
+  python3 -c 'import json, sys; p = sys.argv[1]; d = json.load(open(p)); d["favorites"] = d.get("favorites", []) + ["t:h3.uk"]; open(p, "w").write(json.dumps(d) + "\n")' "$STATE"
+  wait_for 1 10 merges >/dev/null || true
+  python3 -c 'import json, sys; p = sys.argv[1]; d = json.load(open(p)); d["favorites"] = [f for f in d.get("favorites", []) if f != "t:h3.uk"]; open(p, "w").write(json.dumps(d) + "\n")' "$STATE"
+  wait_for 2 10 merges >/dev/null || true
+  python3 "$PLUGIN_ROOT/bin/omarchy-iptv" state --state-dir "$(dirname "$STATE")" favorite add t:helper.uk >/dev/null 2>&1; hrc=$?
+  wait_for false 10 pf "['stateSaveFailed']" >/dev/null || true
+  res2=$(ipc updateSource "$KA" '{"label": "in-app-two"}')
+  sleep 1.5
+  labels() { sj "','.join(('A=' if s['key'] == '$KA' else 'C=' if s['key'] == '$KC' else '?=') + s['label'] for s in sorted(d['sources'], key=lambda s: s['key'] != '$KA'))"; }
+  file1="labels:$(labels) favs:$(sj "','.join(d['favorites']) or '-'")"
+  merged="$(merges)"
+  stop_shell
+  start_shell --playlist none --source-key "$KA" || true
+  sleep 0.5
+  ck "B19 R24a live: an in-app change HELD by a failed save, two hand edits in place inside that window (a favourite added, then removed), a hand-run helper write, a second in-app change -- the file keeps BOTH in-app changes and the helper's favourite, the removed one stays removed, every foreign write was merged, and a restart stands on all of it" \
+     "held:$held edits:$(qa_json_field "d['ok']" "$res")/$(qa_json_field "d['ok']" "$res2") helper:$hrc merged:$merged $file1 restart:$(qa_json_field "','.join(sorted(s['label'] for s in d))" "$(ipc sources)")/$(sj "','.join(d['favorites']) or '-'")" \
+     "held:true edits:true/true helper:0 merged:3 labels:A=in-app-two,C=in-app-one favs:t:helper.uk restart:in-app-one,in-app-two/t:helper.uk"
+  stop_shell
+
+  # R25a (D-SRC-30): THE RESTORE OF A BACKUP TAKEN FROM THE PLUGIN'S OWN
+  # FILE. The round-14 data-loss lens: a copy of state.json taken after an
+  # in-app change had LANDED, then an in-app remove that landed, then the
+  # copy put back in place -- the copy's text was one of the service's last
+  # eight writes, so it was ignored as an echo and the next in-app save
+  # wrote over the restore, silently. The echo is now only a text still in
+  # flight. Red on dev (002662d), where it lives.
+  seed "$KA" migrated
+  start_shell --playlist none --source-key "$KA" || true
+  wait_for true 20 pf "['dirsReady']" >/dev/null || true
+  res=$(ipc updateSource "$KA" '{"label": "before-backup"}')
+  for ((i = 0; i < 100; i++)); do [[ $(sj "[s['label'] for s in d['sources'] if s['key'] == '$KA'][0]") == before-backup && $(pf "['stateSavesInFlight']") == 0 ]] && break; sleep 0.1; done
+  sleep 1.0
+  cp "$STATE" "$WORK/backup.json"
+  res2=$(ipc removeSource "$KC")
+  wait_for 1 10 sj "len(d['sources'])" >/dev/null || true
+  sleep 1.0
+  afterdel=$(sj "len(d['sources'])")
+  cat "$WORK/backup.json" >"$STATE"
+  for ((i = 0; i < 100; i++)); do [[ $(pf "['sourceCount']") == 2 ]] && break; sleep 0.1; done
+  restored="$(pf "['sourceCount']")"
+  res3=$(ipc updateSource "$KA" '{"label": "after-restore"}')
+  sleep 1.5
+  file2="records:$(sj "len(d['sources'])") label:$(sj "[s['label'] for s in d['sources'] if s['key'] == '$KA'][0]")"
+  stop_shell
+  start_shell --playlist none --source-key "$KA" || true
+  sleep 0.5
+  ck "B20 R25a: a backup copied from the plugin's own file AFTER its save landed, put back in place after an in-app remove landed, is another writer's: memory takes it back (2 sources), the next in-app save keeps it, and a restart stands on it" \
+     "edits:$(qa_json_field "d['ok']" "$res")/$(qa_json_field "d['ok']" "$res2")/$(qa_json_field "d['ok']" "$res3") after-remove:$afterdel restored:$restored $file2 restart:$(qa_json_field 'len(d)' "$(ipc sources)")" \
+     "edits:true/true/true after-remove:1 restored:2 records:2 label:after-restore restart:2"
+  stop_shell
+
+  # R25d (D-DOC-9's open half): the EXISTING-folder session damaged AFTER an
+  # own save. B5..B7 and B9 damage a session that has saved nothing of its
+  # own yet, and B16 is the fresh-install shape; the round-14 lane recorded
+  # that no segment observed this one. A migrated install starts (its
+  # directory present at the first load), an in-app change's save LANDS,
+  # and then garbage is written in place: the FileView must still be
+  # watching. Seen red through spikes/key-mutations/r25d-no-reload-on-change.patch
+  # (stateFile's `onFileChanged: reload()` deleted). And D-SRC-38: the
+  # Sources header in that MID-session block says saving stopped -- red on
+  # dev, where it said the sources were not loaded over rows still listed.
+  : >"$NOTIFY_LOG"
+  seed "$KA" migrated
+  start_shell --playlist none --source-key "$KA" || true
+  wait_for true 20 pf "['dirsReady']" >/dev/null || true
+  res=$(ipc updateSource "$KC" '{"label": "own-save"}')
+  for ((i = 0; i < 100; i++)); do [[ $(sj "[s['label'] for s in d['sources'] if s['key'] == '$KC'][0]") == own-save && $(pf "['stateSavesInFlight']") == 0 ]] && break; sleep 0.1; done
+  sleep 1.0
+  landed1="$(sj "[s['label'] for s in d['sources'] if s['key'] == '$KC'][0]")"
+  printf 'garbage{' >"$STATE"
+  wait_for unparsed 10 pf "['stateWriteBlocked']" >/dev/null || true
+  ck "B21 the EXISTING-folder session damaged AFTER an own save landed: the garbage written in place is noticed (the no-write mode, told once), the file left as the user wrote it" \
+     "edit:$(qa_json_field "d['ok']" "$res") landed:$landed1 blocked:$(pf "['stateWriteBlocked']") told:$(qa_count ' 74017 ' "$NOTIFY_LOG") file:$(head -c 8 "$STATE")" \
+     "edit:true landed:own-save blocked:unparsed told:1 file:garbage{"
+  ipc open '{}' >/dev/null; sleep 0.8
+  ipc sourcesKey enter >/dev/null; sleep 0.4
+  gs=$(ipc state)
+  ck "B22 D-SRC-38: in that MID-session block the Sources header says saving has stopped, above the session's own rows -- not that the sources were not loaded" \
+     "mode:$(qa_json_field "d['guide']['mode']" "$gs") header:$(qa_json_field "d['guide']['headerRight']" "$gs") rows:$(qa_json_field "d['guide']['sourceRows']" "$gs")" \
+     "mode:sources header:Saving has stopped rows:2"
+  ipc close >/dev/null
+  stop_shell
+
   echo "== P: the console sink, then teardown ($(elapsed) s)"
   qa_leak_on_labelled 'sourceProbeFinished|sourceSwitched|sourceRemoved|updateEntryInline' "://|$WORK" "$LOG"
   case $? in 0) left=clean ;; 1) left=LEAK ;; *) left="nothing labelled to judge" ;; esac
@@ -2357,7 +2512,7 @@ instrument
 # The floor. A check that stops executing must turn the run red rather than
 # quietly shorten the summary (D-PLY-9). Recount with
 #   grep -cE '^ *ck "[IS][0-9]' key-scenario.sh   -> 10, the instrument arm -> check-tree
-#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 115, both arms         -> live
+#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 119, both arms         -> live
 # (48 -> 61 on 2026-10-12, round 4: W1..W6 and F1..F7; 61 -> 63 the same
 # day, round 5: L1, L2; 63 -> 70 the same day, round 7: U1..U7; 70 -> 78
 # the same day, round 8: K1..K3, Z1..Z3, A1, A2; 78 -> 85 the same day,
@@ -2367,7 +2522,8 @@ instrument
 # the R21 contract, one for one; 97 -> 105 the same day, round 12: B1..B8,
 # R22a's load failures and R22c's hint; 105 -> 111 the same day, round 13:
 # B9..B14, R23a-c, R23e, R23f, R23h; 111 -> 115 on 2026-10-14, round 14:
-# B15..B18, R24f, R24c, R24g, R24d.)
+# B15..B18, R24f, R24c, R24g, R24d; 115 -> 119 the same day, round 15:
+# B19..B22, R25d, R25a, D-SRC-38.)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -2377,7 +2533,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=10
 else
-  EXPECTED_CHECKS=115
+  EXPECTED_CHECKS=119
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then
@@ -2387,7 +2543,12 @@ else
 fi
 
 if [[ -n $BASELINE || -n $TREE ]]; then
-  echo "baseline ${BASELINE:-$TREE}: on lane-key-n2 (round 12's code, measured 2026-10-13 by lane-key-p1 under this harness: 107 passed, 5 failed) the reds are round 13's -- B10 (no watchdog: the init held by the slow tree is still running and the start never decides, \`blocked: found: helper:no(<pid>) left:<pid> told:0\`), B11 (the no-write start draws the first-run form: \`kind:unconfigured form:true shown:NOFIELD title:other prose:other\`), B12 (the logo refusal says \`try omarchy bar set\`: \`says:other advice:bar-set\`), B13 (the drawn-copy field reads the hidden empty state's \`Add your M3U URL or path in Sources...\` over the form that draws \`Paste or type...\`) and B14 (the FIFO hangs the init: \`blocked: found: told:0 left:<pid>\`). B9 is GREEN there: the re-arm it guards was in round 12's code and only its check was missing, so it is seen red through spikes/key-mutations/r23a-no-rearm.patch instead (--tree: 111 passed, 1 failed, B9 \`told:1/1\`); r23e-editable-field.patch reads 111 / 1 the same way (B13, \`editable:2\`). The counts that follow were measured before B9..B14 existed (105 lettered checks). On lane-key-m2 (round 11's code, measured 2026-10-13 by lane-key-n1 under this harness: 97 passed, 9 failed) the reds are round 12's -- B1..B4 (a migrated install whose state.json, or whose state directory, could not be read at the start: the failed load is applied as an EMPTY state and written over the file, \`records:0\` at B1 and at the second start, B2, and through the directory, B3/B4), B5, B6 (a file that does not parse is replaced at the start, \`file:changed\`; an add goes through, \`add:ok\`; the mirror moves, \`writes:2\`), B7 (nothing left to restore: \`records:0\`) and B8 (the hint reads \`check playlistUrl\`: \`retired:yes\`). N1 is red there ONLY for the field it reads (\`found:NOFIELD\`): its adoption is the same. Every other check is green on round 11's code. The counts that follow were measured before B existed (97 lettered checks). On lane-key-z2 (round 10's code, measured 2026-10-13 by lane-key-m1 under the 97-check harness: 68 passed, 30 failed) the reds were G1, G2, G5, F4, U1..U7, K1..K3, Z1..Z3, A1, Y2, Y3, Q1, Q2, V1, H1 and X1..X6, and EIGHT of them -- F4, U2, K2, K3, Q2, V1, Y2 and Z3 -- differ from their want ONLY in \`reports:NOFIELD\`: they prove the refusal record does not exist there, and nothing about behaviour (classified got against want token by token over the round-11 live lens's transcript, which counted seven and missed U2; this footer used to fold Y2 in with Y3's \`twice:E\`, leave Z3 out, and describe K1..K3 by K1's \`file:yes\` alone). The twenty-two that discriminate: G1, G2, G5 (no migration marker is ever written, so a downgrade's entry and a 0.13.5 entry are read alike), U1, U3..U7 (the guide URL with no source is HELD in state.json, \`file:yes\`, and the switch lands it on A: U3 \`on:<A>\`), K1 (the guide URL held in the file, \`file:yes\`), Z1, Z2 and X1..X4 (a CLI value after the marker is ADOPTED: Z1 and X1 read B active), X5, X6 (no notification: the refusal does not exist), A1, Q1 (the CLI guide URL lands on the new record), Y3 (the CLI guide URL is adopted onto A, \`twice:E\`) and H1 (the marker never lands, \`landed:.../false\`). G3, G4, F1..F3, F5..F7, L1, L2 and A2 are its controls (F and L are R13 and R16 on a migration that fails, which round 10 already held). The counts that follow were measured before G and X existed and before U, K, Z, A, Y2, Y3, Q, V, F and H moved to the R21 contract (86 lettered checks). On lane-key-y0 (round 8's code) the reds are round 9's -- U1, U2, U5, K1, K2, K3 (a guide URL with no source to land on waits on the ENTRY instead of being held in state.json), Y1, Y2, Y3 (after a publish A -> B -> A the lagging host's write is skipped: the in-app logo OFF, the strip of a re-set refused credential and of a re-set EPG input that the restart then puts back over an in-app edit), Q1 (a CLI epgUrl set while the add's probe runs exists nowhere), V1 (an earlier held value replaces a guide URL typed in the edit form) and H1 (D-SRC-18): 74 passed, 12 failed; A1, A2 and Q2 are its controls. The counts that follow were measured before Y, Q, V and H existed (78 lettered checks). On lane-key-w2 (round 7's code) the reds are round 8's -- K1 (the lagging host LOOPS on a refused playlistUrl beside a pending EPG: about 17,000 entry writes and 600 CPU ticks in 5 s), K3 (the echoing host loops on the same value wrapped in whitespace and keeps the credential), Z1, Z2 (a whitespace-wrapped CLI playlist removed comes back at the next start), Z3 (a whitespace-wrapped refused credential stays on the stored entry) and A2 (a pending CLI epgUrl replaces the add form's own guide URL): 73 passed, 6 failed; K2 and A1 are its controls. The counts that follow were measured before K, Z and A existed (70 lettered checks). On lane-key-v2 (round 6's code) the reds are round 7's -- U2, U3, U4 (the logo toggle's heal stripped an EPG no source had adopted, so the switch had nothing to land and the restart stands on A with no EPG) and U6, U7 (the same input lost by the switch alone on the echoing fake host): 66 passed, 5 failed. The counts that follow were measured before U existed (63 lettered checks). On lane-key-t2 (round 4's code) the reds are round 5's -- L1, L2 (the logo toggle on the failed disk mirrored the in-memory key and stripped the URL) and F6, F7 (the restart over that entry finds no record for B): 60 passed, 4 failed. On lane-key-s2 (round 3's code) round 4's join them -- D3, W3, W6 (no per-reason counter there), F3, F4, F5 (the dirsReady-route state write failing strips the URL, moves the mirror and loses the input): 54 passed, 10 failed. On lane-key-r2 (the tree D-SRC-15 was found on) D2, D3, W2, W3, W6, M1, M3, M5, C1..C5, E1, O5, O6 and the F and L reds: the start-up chmod reload replaces the adoption and the in-window switch/remove alike (D2 and W at the sink, D3 NOFIELD for want of a counter) and everything resting on a start-up adoption with it: 38 passed, 26 failed. On f275bde (the first build) O2 is the one discriminating red against every later tree (the entry rewritten while the save is parked); D2, M1, M3, M5 pass there by the accident the header describes: 39 passed, 25 failed. The two patches under spikes/key-mutations/ read 58 / 6 (D2, D3, W2, W3, W4, W6) and 59 / 5 (D2, W2, W3, W4, W6; D3 green) through --tree. N1..N4 are green on EVERY tree: the created-file shape never fires the reload. D1, M2, M4, M6, J1..J3, E2, E3, R1..R5, O1, O3, O4, P1, P2, T1 and every I and S check are controls; W1, W5, F1 and F2 are controls wherever the field they read exists (NOFIELD on f275bde and, for F1/F2, on lane-key-r2)."
+  # F-HARNESS-28 (round 15): this footer is what a transcript reader sees
+  # under every --baseline / --tree run, and round 14 added B15..B18 without
+  # a sentence here, so a run whose reds were B15, B16 and B18 printed "the
+  # reds are round 13's -- B10 ... B14". Each round's sentence now leads, and
+  # every older one names the tree it was measured on and says it was.
+  echo "baseline ${BASELINE:-$TREE}: on dev 002662d (round 14's code, measured 2026-10-14 by lane-key-k1 under this harness: 118 passed, 2 failed) the reds are round 15's -- B20 (a backup copied from the plugin's own file, put back after an in-app remove, is ignored as an echo and written over: \`restored:1 records:1 ... restart:1\`) and B22 (the MID-session Sources header reads \`Saved sources not loaded\` above the session's two rows). B19 and B21 are GREEN there: R24a's merge and the FileView's watch after an own save were in round 14's code and only their checks were missing, so they are seen red through spikes/key-mutations/r25d-a5-base-not-moved.patch (--tree: 119 passed, 1 failed, B19 \`merged:2 ... favs:t:helper.uk,t:h3.uk\`: the favourite the second hand edit removed is written back) and r25d-no-reload-on-change.patch (--tree: 110 passed, 10 failed, B21 \`blocked: told:0\` among every segment that needs a reload: D3, W3, W6, B7, B9, B16, B19, B20, B22). The counts that follow were measured before B19..B22 existed (115 lettered checks). On ced1bd1 (round 13's code, measured 2026-10-14 by lane-key-q1 under this harness: 113 passed, 3 failed) the reds were round 14's -- B15 (\`header:[No sources] rows:2 after-a:sourceEdit says:other\`), B16 (\`seen:0 file:D blocked: told:0\`) and B18 (the held init \`after-deadline:alive(<pid>)\`); B17 is GREEN there, round 13 having the KILL, and is seen red through r24g-no-kill.patch (--tree: 115 passed, 1 failed, B17 \`blocked: helper:no(<pid>) left:<pid> told:0\`). The counts that follow were measured before B15..B18 existed (111 lettered checks). On lane-key-n2 (round 12's code, measured 2026-10-13 by lane-key-p1 under this harness: 107 passed, 5 failed) the reds were round 13's -- B10 (no watchdog: the init held by the slow tree is still running and the start never decides, \`blocked: found: helper:no(<pid>) left:<pid> told:0\`), B11 (the no-write start draws the first-run form: \`kind:unconfigured form:true shown:NOFIELD title:other prose:other\`), B12 (the logo refusal says \`try omarchy bar set\`: \`says:other advice:bar-set\`), B13 (the drawn-copy field reads the hidden empty state's \`Add your M3U URL or path in Sources...\` over the form that draws \`Paste or type...\`) and B14 (the FIFO hangs the init: \`blocked: found: told:0 left:<pid>\`). B9 is GREEN there: the re-arm it guards was in round 12's code and only its check was missing, so it is seen red through spikes/key-mutations/r23a-no-rearm.patch instead (--tree: 111 passed, 1 failed, B9 \`told:1/1\`); r23e-editable-field.patch reads 111 / 1 the same way (B13, \`editable:2\`). The counts that follow were measured before B9..B14 existed (105 lettered checks). On lane-key-m2 (round 11's code, measured 2026-10-13 by lane-key-n1 under this harness: 97 passed, 9 failed) the reds are round 12's -- B1..B4 (a migrated install whose state.json, or whose state directory, could not be read at the start: the failed load is applied as an EMPTY state and written over the file, \`records:0\` at B1 and at the second start, B2, and through the directory, B3/B4), B5, B6 (a file that does not parse is replaced at the start, \`file:changed\`; an add goes through, \`add:ok\`; the mirror moves, \`writes:2\`), B7 (nothing left to restore: \`records:0\`) and B8 (the hint reads \`check playlistUrl\`: \`retired:yes\`). N1 is red there ONLY for the field it reads (\`found:NOFIELD\`): its adoption is the same. Every other check is green on round 11's code. The counts that follow were measured before B existed (97 lettered checks). On lane-key-z2 (round 10's code, measured 2026-10-13 by lane-key-m1 under the 97-check harness: 68 passed, 30 failed) the reds were G1, G2, G5, F4, U1..U7, K1..K3, Z1..Z3, A1, Y2, Y3, Q1, Q2, V1, H1 and X1..X6, and EIGHT of them -- F4, U2, K2, K3, Q2, V1, Y2 and Z3 -- differ from their want ONLY in \`reports:NOFIELD\`: they prove the refusal record does not exist there, and nothing about behaviour (classified got against want token by token over the round-11 live lens's transcript, which counted seven and missed U2; this footer used to fold Y2 in with Y3's \`twice:E\`, leave Z3 out, and describe K1..K3 by K1's \`file:yes\` alone). The twenty-two that discriminate: G1, G2, G5 (no migration marker is ever written, so a downgrade's entry and a 0.13.5 entry are read alike), U1, U3..U7 (the guide URL with no source is HELD in state.json, \`file:yes\`, and the switch lands it on A: U3 \`on:<A>\`), K1 (the guide URL held in the file, \`file:yes\`), Z1, Z2 and X1..X4 (a CLI value after the marker is ADOPTED: Z1 and X1 read B active), X5, X6 (no notification: the refusal does not exist), A1, Q1 (the CLI guide URL lands on the new record), Y3 (the CLI guide URL is adopted onto A, \`twice:E\`) and H1 (the marker never lands, \`landed:.../false\`). G3, G4, F1..F3, F5..F7, L1, L2 and A2 are its controls (F and L are R13 and R16 on a migration that fails, which round 10 already held). The counts that follow were measured before G and X existed and before U, K, Z, A, Y2, Y3, Q, V, F and H moved to the R21 contract (86 lettered checks). On lane-key-y0 (round 8's code) the reds are round 9's -- U1, U2, U5, K1, K2, K3 (a guide URL with no source to land on waits on the ENTRY instead of being held in state.json), Y1, Y2, Y3 (after a publish A -> B -> A the lagging host's write is skipped: the in-app logo OFF, the strip of a re-set refused credential and of a re-set EPG input that the restart then puts back over an in-app edit), Q1 (a CLI epgUrl set while the add's probe runs exists nowhere), V1 (an earlier held value replaces a guide URL typed in the edit form) and H1 (D-SRC-18): 74 passed, 12 failed; A1, A2 and Q2 are its controls. The counts that follow were measured before Y, Q, V and H existed (78 lettered checks). On lane-key-w2 (round 7's code) the reds are round 8's -- K1 (the lagging host LOOPS on a refused playlistUrl beside a pending EPG: about 17,000 entry writes and 600 CPU ticks in 5 s), K3 (the echoing host loops on the same value wrapped in whitespace and keeps the credential), Z1, Z2 (a whitespace-wrapped CLI playlist removed comes back at the next start), Z3 (a whitespace-wrapped refused credential stays on the stored entry) and A2 (a pending CLI epgUrl replaces the add form's own guide URL): 73 passed, 6 failed; K2 and A1 are its controls. The counts that follow were measured before K, Z and A existed (70 lettered checks). On lane-key-v2 (round 6's code) the reds are round 7's -- U2, U3, U4 (the logo toggle's heal stripped an EPG no source had adopted, so the switch had nothing to land and the restart stands on A with no EPG) and U6, U7 (the same input lost by the switch alone on the echoing fake host): 66 passed, 5 failed. The counts that follow were measured before U existed (63 lettered checks). On lane-key-t2 (round 4's code) the reds are round 5's -- L1, L2 (the logo toggle on the failed disk mirrored the in-memory key and stripped the URL) and F6, F7 (the restart over that entry finds no record for B): 60 passed, 4 failed. On lane-key-s2 (round 3's code) round 4's join them -- D3, W3, W6 (no per-reason counter there), F3, F4, F5 (the dirsReady-route state write failing strips the URL, moves the mirror and loses the input): 54 passed, 10 failed. On lane-key-r2 (the tree D-SRC-15 was found on) D2, D3, W2, W3, W6, M1, M3, M5, C1..C5, E1, O5, O6 and the F and L reds: the start-up chmod reload replaces the adoption and the in-window switch/remove alike (D2 and W at the sink, D3 NOFIELD for want of a counter) and everything resting on a start-up adoption with it: 38 passed, 26 failed. On f275bde (the first build) O2 is the one discriminating red against every later tree (the entry rewritten while the save is parked); D2, M1, M3, M5 pass there by the accident the header describes: 39 passed, 25 failed. The two patches under spikes/key-mutations/ read 58 / 6 (D2, D3, W2, W3, W4, W6) and 59 / 5 (D2, W2, W3, W4, W6; D3 green) through --tree. N1..N4 are green on EVERY tree: the created-file shape never fires the reload. D1, M2, M4, M6, J1..J3, E2, E3, R1..R5, O1, O3, O4, P1, P2, T1 and every I and S check are controls; W1, W5, F1 and F2 are controls wherever the field they read exists (NOFIELD on f275bde and, for F1/F2, on lane-key-r2)."
 fi
 echo "key-scenario: $PASS passed, $FAIL failed (mode $MODE, tree $PLUGIN_ROOT${BASELINE:+, baseline $BASELINE}${TREE:+, prepared tree}, $(elapsed) s)"
 (( FAIL == 0 ))

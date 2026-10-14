@@ -641,8 +641,10 @@ Item {
     // 2.9 saying both had been restored. Half a repair with a whole claim.
     if (root.guideMode || root.inTracks || root.inPanel) return root.scopeLabelText
     // R24f: the no-write mode's header is the notice's title, not "No sources".
+    // D-SRC-38: a MID-session block (a state had loaded) says saving stopped.
     if (root.inSources || root.confirmOpen) return Model.sourcesHeaderRight(root.sourceCount, root.stateBlocked,
-                                                                            root.serviceReady && typeof service.stateFilePath === "string" ? service.stateFilePath : "")
+                                                                            root.serviceReady && typeof service.stateFilePath === "string" ? service.stateFilePath : "",
+                                                                            root.serviceReady && service.stateLoaded === true)
     return ""
   }
   readonly property string formAccessibleName: {
