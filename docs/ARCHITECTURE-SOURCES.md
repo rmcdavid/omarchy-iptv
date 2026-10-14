@@ -612,7 +612,9 @@ the FileView reports on it later), always through `sourcesPersistFailed`.
 Names a directory, never a URL and never `omarchy bar set`. The sentence is
 in `Model.sourceErrorMessage`. **Round 5 (R16, lane-key-u1 b42b5ab):**
 `Guide.showPersistFailed(reason)` renders `Model.persistFailureMessage` of the reason --
-the reason's own sentence -- on the form's result line while a form is open
+the reason's own sentence [round 13, R23f: through `Model.refusalMessage(reason,
+stateWriteBlocked, "persist")`, which is that outside the no-write mode and
+the `state_unreadable` sentence inside it] -- on the form's result line while a form is open
 and in the footer otherwise; until then the guide rendered `persist_failed`'s
 copy for every code, so a failed write in `~/.local/state` sent the user to
 `omarchy bar set` (lane A's DQ-T1, the round-4 review's P2). Pinned by two
@@ -3768,7 +3770,9 @@ enum`; rule 13).
   2,354 node failures); it is now pinned in node and observed live by
   key-scenario B9].
 - The helper's half. `state init` never rewrites a file that exists: the
-  create is `O_EXCL` and the existing branch only chmods, so a state it
+  create is `O_EXCL` and the existing branch only chmods [round 13, R23d:
+  and only a regular file; it used to chmod whatever was there, a directory
+  included], so a state it
   could not parse is left byte for byte -- pinned over garbage, an empty
   file, `[1,2]`, non-text and a 0000 file, by bytes, mtime, ctime and inode
   (`test_init_never_rewrites_a_file_it_could_not_parse`). Every other `state`
@@ -3851,7 +3855,10 @@ state).
 
 **R22c-R22f, what changed.** R22c: `errorCheck` is `check the source in
 Sources` (74f9a01), the guide publishes what its empty state draws
-(`emptyTitleText`, `emptyProseText`) and the harness's `state` verb carries
+(`emptyTitleText`, `emptyProseText`) [round 13, R23h: it published the
+empty state's copy even while that state was hidden behind the first-run
+form, which draws other words; since lane-key-p1 418e01e it publishes what
+is DRAWN] and the harness's `state` verb carries
 them with the copy's `errorCheck`, and `tests/test_shipped_copy.py` searches
 every string literal in every allowlisted code file for an instruction to set
 either key (on lane-key-m2 it named the guide's hint and the helper's

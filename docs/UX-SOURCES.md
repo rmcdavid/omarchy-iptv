@@ -1370,7 +1370,9 @@ this screen: logged, repaired at the next start (SR25 as amended in
 `ARCHITECTURE-SOURCES.md`); `config_unsafe` keeps its own sentence
 (D-SINK-18). The guide renders the sentence for THE reason the signal
 carried: `Guide.showPersistFailed(reason)` hands it to
-`Model.persistFailureMessage` (the three reasons are
+`Model.persistFailureMessage` [since round 13 (R23f) through
+`Model.refusalMessage(reason, stateWriteBlocked, "persist")`, which answers
+the `state_unreadable` sentence instead while the no-write mode holds] (the three reasons are
 `Model.PERSIST_FAILURE_REASONS`, and an unknown one falls back to
 `persist_failed`'s sentence), on the form's result line while a form is open
 and in the footer otherwise. Until round 5 the guide rendered
@@ -1639,7 +1641,7 @@ sees, as built on lane-key-n1 and amended on lane-key-p1 (round 13):
    | Reason | `<what>` | `<fix>` |
    |---|---|---|
    | the file is not readable (`permission`) | `is not readable (permission denied)` | `Make it readable with chmod 600 on that file, then run omarchy restart shell.` |
-   | something other than a file is at the path (`not-a-file`: a directory, a FIFO, a socket) | `is not a regular file` | `Move whatever is at that path aside, then run omarchy restart shell.` |
+   | something other than a file is at the path (`not-a-file`: a directory or a FIFO, both measured live; a socket is refused by the helper, but what the FileView reports for one is unmeasured, so its row is not known) | `is not a regular file` | `Move whatever is at that path aside, then run omarchy restart shell.` |
    | the file does not parse (`unparsed`) | `is not a valid state file` | `Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell.` |
    | the folder cannot be read: the file reads as missing, but the helper found something there (`absent`, `absent-unconfirmed`) | `could not be found, or its folder could not be read` | `Make the folder readable with chmod 700, then run omarchy restart shell.` |
    | the start-up check did not answer within 15 s and was stopped (`init-timeout`, round 13, R23c) | `could not be checked: the start-up check did not answer and was stopped` | `Make sure a regular file, or nothing, is at that path, then run omarchy restart shell.` |
@@ -1736,8 +1738,10 @@ sees, as built on lane-key-n1 and amended on lane-key-p1 (round 13):
    and key-scenario B9 `told:1/2`, both seen red with the re-arm deleted).
 
 6. **Something other than a file at the path, or a start-up check that
-   hangs (round 13, R23b-R23d).** A directory, a FIFO or a socket at
-   `state.json` is the `not-a-file` row of 1: the helper opens the path
+   hangs (round 13, R23b-R23d).** A directory or a FIFO at `state.json` is
+   the `not-a-file` row of 1 (a socket too as far as the helper goes, which
+   refuses it the same way; the FileView's report for a socket is
+   unmeasured): the helper opens the path
    without blocking, refuses it on the descriptor's own `fstat`, and leaves
    it exactly as it was -- a directory is no longer chmod-ed to 0600 (round
    12's live lens saw one made unsearchable), and a FIFO no longer hangs the

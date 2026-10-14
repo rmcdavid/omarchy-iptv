@@ -770,12 +770,14 @@ Nothing inside the plugin directory is written at runtime.
   folder you left at mode 0000 while the shell was not running is NOT this
   case: the plugin restores the usual permissions at the next start, reads
   the file and says nothing.
-- A directory, a named pipe (FIFO) or a socket at
+- A directory or a named pipe (FIFO) at
   `~/.local/state/omarchy-iptv/state.json`: the case above, with `is not a
   regular file`. The plugin leaves it exactly as it is -- it no longer
   changes a directory's permissions there, and a named pipe no longer makes
   every shell start wait for ever on a helper that never finishes. Move it
-  aside and restart the shell.
+  aside and restart the shell. (A socket there is refused by the helper the
+  same way; which sentence the notification then shows has not been
+  checked.)
 - The file damaged while the shell is running: if the plugin has not saved
   the file itself yet in this session, it notices the change, keeps the
   channels and sources it is already showing, and from then on behaves as
