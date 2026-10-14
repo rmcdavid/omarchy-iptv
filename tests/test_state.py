@@ -806,3 +806,167 @@ class StateNeverWrittenUnreadTest(unittest.TestCase):
                 channels = [{"id": "t:a", "name": "A", "url": "http://x.example.test/a.ts", "tvgId": "a"}]
                 self.assertEqual(helper.remap_state_file(str(self.path), channels), 0)
                 self.assertEqual(self.path.read_text(encoding="utf-8"), text)
+
+
+class StateNeverBlocksTest(unittest.TestCase):
+    """D-SINK-19 round 13, R23b and R23d: the helper never opens a state path
+    in a way that can block, never reads one that is not a regular file (or a
+    symlink to one), and never chmods anything that is not the kind it
+    repairs.
+
+    The round-12 lenses measured the defect: with a FIFO at state.json,
+    `state init`, `state show` and `state favorite add` each sat in open()
+    until `timeout` killed them (rc 124), on the shipped 0.13.6 as on the
+    candidate; the service waited on that init forever and every start left
+    an orphaned helper. And `state init` chmod-ed a DIRECTORY at the state
+    path 0755 -> 0600, making the user's directory unsearchable.
+
+    Every case here runs the REAL helper as a subprocess WITH A TIMEOUT, so a
+    regression fails rather than hangs the suite (an in-process call to a
+    blocking open would hang it). The socket is bound by a child that chdirs
+    first, so the test does not depend on how long TMPDIR's path is (a unix
+    socket path is limited to 107 bytes)."""
+
+    TIMEOUT = 20
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = os.path.join(self.tmp.name, "state")
+        os.makedirs(self.dir, mode=0o700)
+        self.path = pathlib.Path(self.dir) / "state.json"
+
+    def helper(self, *argv):
+        import subprocess, sys
+        env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+        try:
+            proc = subprocess.run([sys.executable, "-I", str(HELPER_PATH), *argv],
+                                  capture_output=True, text=True, env=env, timeout=self.TIMEOUT)
+        except subprocess.TimeoutExpired:
+            self.fail("the helper did not answer within %d s: %s" % (self.TIMEOUT, " ".join(argv)))
+        lines = proc.stdout.strip().splitlines()
+        return proc.returncode, (json.loads(lines[-1]) if lines else None), proc.stderr
+
+    def make_fifo(self):
+        os.mkfifo(self.path, 0o600)
+
+    def make_socket(self):
+        import subprocess, sys
+        code = "import os, socket, sys; os.chdir(sys.argv[1]); s = socket.socket(socket.AF_UNIX); s.bind('state.json'); s.close()"
+        subprocess.run([sys.executable, "-I", "-c", code, self.dir], check=True, timeout=self.TIMEOUT)
+
+    def fingerprint(self):
+        st = os.lstat(self.path)
+        return (st.st_mode, st.st_ino, st.st_mtime_ns, st.st_ctime_ns)
+
+    def verbs(self):
+        return [("show",), ("favorite", "add", "t:x"), ("favorite", "remove", "t:x"), ("clear-recents",),
+                ("source", "list"), ("source", "add", "--url", "http://new.example.test/list.m3u"),
+                ("source", "update", "d990c2e4", "--label", "renamed"), ("source", "remove", "42839dd5")]
+
+    def assert_init_reports_other_and_leaves_it(self):
+        before = self.fingerprint()
+        code, payload, err = self.helper("state", "--state-dir", self.dir, "init")
+        self.assertEqual(code, 0, err)
+        self.assertEqual((payload["found"], payload["created"]), ("other", False))
+        self.assertEqual(self.fingerprint(), before)
+
+    def assert_every_verb_refuses_and_leaves_it(self):
+        before = self.fingerprint()
+        for verb in self.verbs():
+            with self.subTest(verb=" ".join(verb)):
+                code, payload, err = self.helper("state", "--state-dir", self.dir, *verb)
+                self.assertEqual(code, 1, err)
+                self.assertEqual(payload["error"]["code"], "state_unreadable")
+                self.assertIn("not a regular file", payload["error"]["message"])
+                self.assertEqual(self.fingerprint(), before)
+
+    def test_init_over_a_fifo_answers_other_at_once_and_leaves_it(self):
+        self.make_fifo()
+        self.assert_init_reports_other_and_leaves_it()
+
+    def test_every_verb_refuses_a_fifo_at_once_and_leaves_it(self):
+        self.make_fifo()
+        self.assert_every_verb_refuses_and_leaves_it()
+
+    def test_init_over_a_socket_answers_other_and_leaves_it(self):
+        self.make_socket()
+        self.assert_init_reports_other_and_leaves_it()
+
+    def test_every_verb_refuses_a_socket_and_leaves_it(self):
+        self.make_socket()
+        self.assert_every_verb_refuses_and_leaves_it()
+
+    def test_every_verb_refuses_a_directory_as_not_a_regular_file(self):
+        self.path.mkdir(mode=0o755)
+        self.assert_every_verb_refuses_and_leaves_it()
+
+    def test_init_never_chmods_a_directory_at_the_path(self):
+        # R23d: the round-12 live lens's case exactly -- a 0755 directory came
+        # back 0600 and its contents could no longer be listed.
+        self.path.mkdir(mode=0o755)
+        os.chmod(self.path, 0o755)
+        (self.path / "inside.txt").write_text("mine", encoding="utf-8")
+        self.assert_init_reports_other_and_leaves_it()
+        self.assertEqual(stat_mode(self.path), 0o755)
+        self.assertEqual((self.path / "inside.txt").read_text(encoding="utf-8"), "mine")
+
+    def test_init_never_chmods_a_fifo_at_the_path(self):
+        os.mkfifo(self.path, 0o644)
+        os.chmod(self.path, 0o644)
+        self.assert_init_reports_other_and_leaves_it()
+        self.assertEqual(stat_mode(self.path), 0o644)
+
+    def test_init_still_repairs_a_symlink_to_a_0000_file(self):
+        # The repair the round-12 CONFIRMED reading depends on still reaches a
+        # regular file behind a symlink (a dotfiles-managed state.json).
+        target = pathlib.Path(self.tmp.name) / "real-state.json"
+        target.write_text(json.dumps(v2(favorites=["t:keep"])) + "\n", encoding="utf-8")
+        os.chmod(target, 0)
+        os.symlink(target, self.path)
+        code, payload, err = self.helper("state", "--state-dir", self.dir, "init")
+        self.assertEqual(code, 0, err)
+        self.assertEqual((payload["found"], payload["created"]), ("file", False))
+        self.assertEqual(stat_mode(target), 0o600)
+        self.assertTrue(self.path.is_symlink())
+
+    def test_init_never_chmods_a_file_where_the_state_directory_should_be(self):
+        # R23d, rule 15's sibling in ensure_private_dir: its last chmod made
+        # whatever was at the DIRECTORY path 0700 -- a regular file there came
+        # out executable.
+        os.rmdir(self.dir)
+        pathlib.Path(self.dir).write_text("not a directory", encoding="utf-8")
+        os.chmod(self.dir, 0o644)
+        code, payload, err = self.helper("state", "--state-dir", self.dir, "init")
+        self.assertEqual(code, 1)
+        self.assertEqual(stat_mode(pathlib.Path(self.dir)), 0o644)
+        self.assertEqual(pathlib.Path(self.dir).read_text(encoding="utf-8"), "not a directory")
+
+    def test_the_d_id_1_remap_reads_a_fifo_without_blocking(self):
+        # The playlist fetch's state remap reads state.json through read_json.
+        # Run in a child with a timeout so a blocking open fails, not hangs.
+        import subprocess, sys
+        self.make_fifo()
+        code = ("import importlib.machinery, importlib.util, sys\n"
+                "loader = importlib.machinery.SourceFileLoader('h', sys.argv[1])\n"
+                "spec = importlib.util.spec_from_loader('h', loader)\n"
+                "h = importlib.util.module_from_spec(spec); loader.exec_module(h)\n"
+                "print(h.remap_state_file(sys.argv[2], [{'id': 't:a', 'name': 'A', 'url': 'http://x.example.test/a.ts', 'tvgId': 'a'}]))\n")
+        try:
+            proc = subprocess.run([sys.executable, "-I", "-B", "-c", code, str(HELPER_PATH), str(self.path)],
+                                  capture_output=True, text=True, timeout=self.TIMEOUT,
+                                  env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
+        except subprocess.TimeoutExpired:
+            self.fail("remap_state_file blocked on a FIFO")
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(proc.stdout.strip(), "0")
+        self.assertTrue(stat_is_fifo(self.path))
+
+
+def stat_mode(path):
+    return os.lstat(path).st_mode & 0o777
+
+
+def stat_is_fifo(path):
+    import stat as _stat
+    return _stat.S_ISFIFO(os.lstat(path).st_mode)

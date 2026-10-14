@@ -699,14 +699,45 @@ def ensure_private_dir(path: str) -> None:
             os.mkdir(directory, 0o700)
         except FileExistsError:
             continue
-        try:
-            os.chmod(directory, 0o700)
-        except OSError:
-            pass
+        chmod_if_kind(directory, 0o700, stat.S_ISDIR)
+    # R23d (rule 15): only a DIRECTORY is made 0700. This chmod used to take
+    # whatever was at the path, so a regular file where the state directory
+    # should be came out 0700 -- executable -- and a FIFO there was chmod-ed.
+    chmod_if_kind(path, 0o700, stat.S_ISDIR)
+
+
+def chmod_if_kind(path: str, mode: int, kind: Any) -> bool:
+    """chmod `path` to `mode` only when what is there is the KIND it repairs
+    (`stat.S_ISREG` or `stat.S_ISDIR`), decided on the inode that is changed.
+
+    D-SINK-19 round 13, R23d. `state init` chmod-ed a DIRECTORY at the state
+    file's path 0755 -> 0600 and made it unsearchable: the mode repair asked
+    what the mode was and never what the thing was. An O_PATH descriptor is
+    the one open that needs no permission on its target (the 0000 file and
+    the 0000 directory this repairs are exactly the ones a read open cannot
+    reach), never opens a FIFO or a device (nothing blocks, nothing has a
+    side effect), and its fstat decides the kind; the chmod then goes
+    through /proc/self/fd/N, which names that inode and no other, so a
+    rename between the check and the change cannot redirect it (fchmod
+    refuses an O_PATH descriptor with EBADF, measured on Python 3.14 /
+    Linux 7.2). Symlinks are followed, as os.chmod always followed them. No
+    /proc means no repair, never a chmod by name. A mode that is already
+    right is not touched: a chmod is an inotify IN_ATTRIB on whatever the
+    shell watches. -> True when the mode was changed; never raises."""
     try:
-        os.chmod(path, 0o700)
+        fd = os.open(path, os.O_PATH | os.O_CLOEXEC)
     except OSError:
-        pass
+        return False
+    try:
+        st = os.fstat(fd)
+        if not kind(st.st_mode) or stat.S_IMODE(st.st_mode) == mode:
+            return False
+        os.chmod("/proc/self/fd/%d" % fd, mode)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
 
 
 # ------------------------------------------------------------- redaction
@@ -1933,7 +1964,14 @@ def read_local_source(path: str, label: str = "playlist") -> bytes:
     size = os.path.getsize(real)
     if size > MAX_SOURCE_BYTES:
         raise HelperError("too_large", "%s file %s is larger than %d MB" % (label, name, MAX_SOURCE_BYTES // (1024 * 1024)))
-    with open(real, "rb") as handle:
+    # R23b (rule 15): the path is the user's own, but what is at it can be
+    # swapped between the isfile above and this open, and a FIFO would hang
+    # the fetch until the service's watchdog killed it.
+    try:
+        fd = open_regular(real)
+    except NotRegularFile:
+        raise HelperError("not_found", "%s file not found: %s" % (label, name)) from None
+    with os.fdopen(fd, "rb") as handle:
         return handle.read(MAX_SOURCE_BYTES + 1)
 
 
@@ -2114,7 +2152,7 @@ def write_text_atomic(path: str, text: str) -> None:
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(text)
-        os.chmod(tmp, 0o600)
+            os.fchmod(handle.fileno(), 0o600)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -2137,7 +2175,7 @@ def write_bytes_atomic(path: str, data: bytes) -> None:
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
-        os.chmod(tmp, 0o600)
+            os.fchmod(handle.fileno(), 0o600)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -2159,10 +2197,75 @@ def json_string(text: str) -> str:
     return '"' + text + '"'
 
 
+# D-SINK-19 round 13, R23b, rule 15: every open() in this helper of a path
+# a user or another program can replace, and its verdict (2026-10-13).
+#   Routed through open_regular (never blocks; a regular file or a symlink to
+#   one, decided by fstat on the descriptor):
+#     state.json -- `state init`, every other `state` verb (read_state_strict)
+#       and the D-ID-1 remap (remap_state_file, via read_json);
+#     every cache JSON read by read_json -- channels.json, failed.json,
+#       playlist-status.json, epg-status.json, the logo and EPG indexes;
+#     the EPG window cache (load_window); a cached logo (_read_logo_prefix);
+#     the player lock record (read_lock_file); a local playlist or EPG file
+#       (read_local_source), whose isfile check a swap could outrun.
+#   Left as they are, with why:
+#     the player lock's O_CREAT|O_RDWR open (acquire_lock): O_RDWR on
+#       a FIFO does not block on Linux, and its fchmod is gated on S_ISREG;
+#     the host config shield's open of shell.json: already O_NONBLOCK, and
+#       refused by fstat unless a regular file the euid owns;
+#     the cache walk's directory opens: O_DIRECTORY fails at once on
+#       anything that is not a directory;
+#     the atomic writers' temporary files: created by this process with
+#       O_EXCL in a 0700 directory, never an existing path;
+#     manifest.json in the plugin directory (nothing writes there at
+#       runtime, rule 4), /proc/<pid>/*, os.devnull.
+class NotRegularFile(OSError):
+    """Something other than a regular file (or a symlink to one) where one
+    is read. An OSError, so every tolerant reader that already answers None
+    for a file it cannot read answers None for this too."""
+
+
+def open_regular(path: str) -> int:
+    """Open `path` for reading WITHOUT ever blocking, and only when it is a
+    regular file or a symlink to one. -> a descriptor the caller closes.
+
+    D-SINK-19 round 13, R23b. A plain open() of a FIFO blocks until a writer
+    appears: with a FIFO at state.json, `state init`, `show` and `favorite
+    add` each sat in open() until killed, the service waited on that init
+    forever, and every start left an orphaned helper behind (the round-12
+    lenses, measured; the shipped 0.13.6 the same). So: O_NONBLOCK (a FIFO
+    opens at once with no writer), O_NOCTTY (a terminal at the path never
+    becomes ours), and the decision is an fstat of the descriptor that WAS
+    opened -- never an lstat of the name before it, which a rename in
+    between would make a statement about another file. A socket cannot be
+    opened at all (ENXIO) and is reported the same way. O_NONBLOCK changes
+    nothing about reads from a regular file. The rule-15 list of the reads
+    routed here, and of those left as they are, is the comment above."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
+    except OSError as error:
+        if error.errno == errno.ENXIO:
+            raise NotRegularFile(errno.ENXIO, "not a regular file", path) from None
+        raise
+    try:
+        mode = os.fstat(fd).st_mode
+    except BaseException:
+        os.close(fd)
+        raise
+    if not stat.S_ISREG(mode):
+        os.close(fd)
+        raise NotRegularFile(errno.EINVAL, "not a regular file", path)
+    return fd
+
+
+def read_regular_text(path: str) -> str:
+    with os.fdopen(open_regular(path), "r", encoding="utf-8") as handle:
+        return handle.read()
+
+
 def read_json(path: str) -> Any:
     try:
-        with open(path, "r", encoding="utf-8") as handle:
-            return json.load(handle)
+        return json.loads(read_regular_text(path))
     except (OSError, ValueError):
         return None
 
@@ -3170,8 +3273,7 @@ def write_window(path: str, meta: dict[str, Any], channels: dict[str, str]) -> N
 def load_window(path: str) -> dict[str, Any] | None:
     """-> the header keys plus "lines" (the raw channel lines), or None."""
     try:
-        with open(path, "r", encoding="utf-8") as handle:
-            text = handle.read()
+        text = read_regular_text(path)
     except OSError:
         return None
     head, _, body = text.partition("\n")
@@ -4141,7 +4243,7 @@ def logo_dimension_refusal(url: str, data: bytes, ctype: str) -> str:
 
 def _read_logo_prefix(path: str, limit: int) -> bytes | None:
     try:
-        with open(path, "rb") as handle:
+        with os.fdopen(open_regular(path), "rb") as handle:
             return handle.read(limit)
     except OSError:
         return None
@@ -5117,7 +5219,11 @@ def acquire_lock(path: str, timeout: float) -> int:
     for _ in range(LOCK_RETRIES):
         fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            os.fchmod(fd, 0o600)
+            # R23d (rule 15): only a regular file is made 0600, decided on
+            # the descriptor. O_RDWR never blocks on a FIFO (Linux), so the
+            # open above needs no O_NONBLOCK; the chmod is what is gated.
+            if stat.S_ISREG(os.fstat(fd).st_mode):
+                os.fchmod(fd, 0o600)
         except OSError:
             pass
         granted = False
@@ -5171,7 +5277,7 @@ def read_lock_record(fd: int) -> dict[str, Any]:
 def read_lock_file(sock_path: str) -> dict[str, Any]:
     """The record without taking the lock (probe is lock-free)."""
     try:
-        with open(player_lock_path(sock_path), "rb") as handle:
+        with os.fdopen(open_regular(player_lock_path(sock_path)), "rb") as handle:
             document = json.loads(handle.read().decode("utf-8"))
     except (OSError, ValueError, UnicodeDecodeError):
         return {}
@@ -7915,17 +8021,17 @@ def init_state_file(path: str, state: dict[str, Any]) -> bool:
     start never raises it at all. Returns True when created."""
     ensure_private_dir(os.path.dirname(path))
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
     except FileExistsError:
-        try:
-            if stat.S_IMODE(os.stat(path).st_mode) != 0o600:
-                os.chmod(path, 0o600)
-        except OSError:
-            pass
+        # R23d: a REGULAR file (or a symlink to one) is the only thing this
+        # repairs. A directory, a FIFO or a socket at the path is the user's,
+        # and the no-write mode's notice tells them to move it aside; making
+        # it 0600 made a directory unsearchable (round 12, measured live).
+        chmod_if_kind(path, 0o600, stat.S_ISREG)
         return False
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(json.dumps(state, ensure_ascii=False, separators=(",", ":")) + "\n")
-    os.chmod(path, 0o600)
+        os.fchmod(handle.fileno(), 0o600)
     return True
 
 
@@ -7941,10 +8047,13 @@ def read_state_strict(path: str) -> dict[str, Any]:
     fresh state now; anything else is refused before anything is written,
     with the reason and never the file's contents."""
     try:
-        with open(path, "r", encoding="utf-8") as handle:
-            text = handle.read()
+        text = read_regular_text(path)
     except FileNotFoundError:
         return default_state()
+    except NotRegularFile:
+        # R23b: a directory, a FIFO or a socket at the path. Opened without
+        # blocking and refused on the descriptor's own fstat.
+        raise HelperError("state_unreadable", "state.json is not a regular file; nothing was written")
     except OSError as error:
         raise HelperError("state_unreadable", "state.json could not be read (%s); nothing was written"
                           % (error.strerror or type(error).__name__))
@@ -7968,15 +8077,25 @@ def cmd_state(args: argparse.Namespace) -> int:
         extra["op"] = args.op
     try:
         if action == "init":
+            # R22a: `found` first -- the lstat witness, before anything is
+            # repaired. The init NEVER rewrites a file that exists, whatever
+            # it holds -- O_EXCL refuses to create over it and the existing
+            # branch only chmods a regular file (R23d) -- so a state it could
+            # not parse is left byte for byte as it was (test_state's R22a
+            # cases).
+            found = state_path_found(path)
             # The init reads tolerantly: what it read is only ever written
             # when nothing was there (O_EXCL), so tolerance costs nothing.
-            state = normalize_state(read_json(path))
-            # R22a: `found` first, then the init. The init NEVER rewrites a
-            # file that exists, whatever it holds -- O_EXCL refuses to create
-            # over it and the existing branch only chmods -- so a state it
-            # could not parse is left byte for byte as it was (pinned by
-            # test_state's R22a cases).
-            found = state_path_found(path)
+            # R23b: through the one opener, so a FIFO answers at once. The
+            # descriptor outranks the lstat: a regular file swapped for
+            # something else in between is "other".
+            try:
+                state = normalize_state(json.loads(read_regular_text(path)))
+            except NotRegularFile:
+                state = default_state()
+                found = "other"
+            except (OSError, ValueError):
+                state = default_state()
             created = init_state_file(path, state)
             emit({"ok": True, "kind": "state", "action": action, "found": found, "created": created,
                   "state": public_state(state)})
