@@ -258,6 +258,18 @@
 #   B7  restoring the file lifts the mode; a switch then lands
 #   B8  the guide's fetch-failure hint, as drawn, names the Sources screen
 #       and no retired setting                                   <- R22c
+#   B9  two no-write episodes in one session, no own save between: the
+#       second is told again, an in-app add in it refused       <- R23a
+#   B10 a start-up init that never answers is stopped by the watchdog and
+#       reaped (no process left), and the held load decides as the
+#       no-write mode, "init-timeout", told once                <- R23c
+#   B11 a no-write START draws its own surface in the notification's own
+#       words, not the first-run form                     <- R23e, R23h
+#   B12 ... and the logo toggle's refusal there says the no-write reason,
+#       not "try omarchy bar set"                                <- R23f
+#   B13 a fresh install's drawn copy is the first-run form's    <- R23h
+#   B14 a FIFO at state.json: the init answers at once, the start blocks
+#       as not-a-file, no helper left running                    <- R23b
 #   P1  no labelled harness-log line carries a URL or a fixture path
 #   P2  no credential token anywhere in the harness log
 #   T1  the shell, the compositor and the nested socket are gone (by pid)
@@ -291,12 +303,32 @@
 # which is why the helper's `state init` now reports what it FOUND.
 # Measured on lane-key-n1 (4fdb37c) under the scenario's own nested cage,
 # with a private session bus, transcripts key-20261013-161816 and -162220:
-#   lane-key-n1 (round 12's code):                105 passed,  0 failed
-#   --baseline lane-key-m2 (round 11's code):      96 passed,  9 failed
+#   lane-key-n1 (round 12's code):                106 passed,  0 failed
+#   --baseline lane-key-m2 (round 11's code):      97 passed,  9 failed
 #       B1..B8 (the loss itself: `records:0` after B1's start and B3's;
 #       B5's garbage replaced, an add accepted, the mirror moved; B8's hint
 #       `check playlistUrl`), and N1 for its new field alone.
-# (Each count is the lettered checks; the floor line adds one PASS.)
+# THE UNIT. Every "N passed, M failed" in this file, header and footer, is
+# THE SUMMARY LINE'S: what `key-scenario: N passed, M failed` prints at the
+# end of a run, which counts the floor line's PASS as well as the lettered
+# checks (so a green run reads one more than the floor). Round 12 wrote the
+# two lines above in lettered checks (105 / 0, 96 / 9) and its footer in
+# summary counts (97 / 9), with only a parenthesis to say which (R23h).
+# A "(N lettered checks)" or "N-check harness" in the footer is a different
+# quantity, the size of the harness then, and says so.
+#
+# ROUND 13, R23 (the lead's ruling on the round-12 lenses). The no-write
+# mode's loose ends, B9..B14 above: the lift's re-arm of the notice that
+# nothing checked (the data-loss lens deleted it and read 0 red), the
+# start-up init that a FIFO at state.json held for ever (now a non-blocking
+# open in the helper, R23b, and a 15 s watchdog in the service, R23c), the
+# first-run form a no-write start drew, the logo toggle's wrong refusal, and
+# the drawn-copy fields that read the hidden empty state. B10 holds the
+# init with O's slow tree (60 s) over a file that does not parse, so the
+# load waits on the init; its pid is read from /proc by exact argv
+# (init_pids), never by a pattern over a command line. The red runs are
+# lane-key-n2 (--baseline) and the kept mutation r23a-no-rearm.patch
+# (--tree), both in the footer.
 #
 # Every segment seeds its OWN state.json, caches and entry and starts a fresh
 # shell, so a red in one is attributable to one ruling and never to the
@@ -897,6 +929,30 @@ n_reports() { qa_json_field "len(d['entryInputReports'])" "$(ipc pointerState)";
 NOTIFY_LOG=""
 notified() { qa_count ' 74016 ' "$NOTIFY_LOG"; }
 sha() { sha256sum "$1" 2>/dev/null | cut -c1-16; }
+# R23b / R23c: the pids of every process anywhere running `state ... init`
+# through the helper at $1, read from /proc by EXACT argv: argv[1] is that
+# path and `init` is an argument. The scanner's own argv[1] is `-c`, so it
+# cannot match itself (CLAUDE.md parallel rule 3); a pid is never matched by
+# a pattern over a command line.
+init_pids() {
+  python3 -c '
+import os, sys
+want = sys.argv[1]
+for pid in os.listdir("/proc"):
+    if not pid.isdigit():
+        continue
+    try:
+        argv = open("/proc/%s/cmdline" % pid, "rb").read().split(b"\0")
+    except OSError:
+        continue
+    argv = [a.decode("utf-8", "replace") for a in argv if a]
+    if len(argv) > 2 and argv[1] == want and argv[2] == "state" and "init" in argv[3:]:
+        print(pid)' "$1" 2>/dev/null | tr '
+' ' ' | sed 's/ $//'
+}
+# Model.stateUnreadableNotice(reason, path)[field] from the TREE UNDER TEST's
+# model, so the check compares the guide with the notification's own words.
+notice_of() { node -e 'const M = require(process.argv[1]); process.stdout.write(String(M.stateUnreadableNotice(process.argv[2], process.argv[3])[process.argv[4]]))' "$(qa_model_files "$PLUGIN_ROOT" | head -n 1)" "$1" "$2" "$3"; }
 # Bounded, and it SAYS it gave up (CLAUDE.md rule 3).
 wait_for() {
   local want=$1 secs=$2; shift 2
@@ -1976,6 +2032,136 @@ PYSEED
      "kind:error sources:yes retired:no"
   ipc close >/dev/null
 
+  echo "== B, round 13: a second no-write episode is told again (R23a), the start-up init is bounded (R23c), the no-write mode has its own surface (R23e, R23h), its refusals say why (R23f), and a FIFO cannot hang the init (R23b) ($(elapsed) s)"
+  # R23a. The lift re-arms the notice (liftStateBlock resets stateBlockTold).
+  # The round-12 data-loss lens deleted that line and nothing went red,
+  # node or live; here are two episodes in one session with no own save
+  # between them, each reached the way a user reaches it -- the file damaged
+  # IN PLACE under a running shell, which the FileView reloads (measured,
+  # spikes/filewatch/) -- and restored in place between them.
+  : >"$NOTIFY_LOG"
+  seed "$KA" migrated
+  start_shell --playlist none --source-key "$KA" || true
+  cp -p "$STATE" "$WORK/good-state.json"
+  printf 'garbage{' >"$STATE"
+  wait_for unparsed 10 pf "['stateWriteBlocked']" >/dev/null || true
+  ep1=$(pf "['stateWriteBlocked']"); told1=$(qa_count ' 74017 ' "$NOTIFY_LOG")
+  cat "$WORK/good-state.json" >"$STATE"
+  wait_for "" 10 pf "['stateWriteBlocked']" >/dev/null || true
+  lift=$(pf "['stateWriteBlocked']")
+  : >"$STATE"
+  wait_for unparsed 10 pf "['stateWriteBlocked']" >/dev/null || true
+  ep2=$(pf "['stateWriteBlocked']")
+  add=$(qa_json_field "d['code']" "$(ipc addSource "$D" "" "")")
+  sleep 1.0
+  ck "B9 two no-write episodes in ONE session, no own save between: the lift re-arms the notice, so the second is told again (two notices, each naming the file), and an in-app add in it is refused with the file left as the damage left it" \
+     "episodes:$ep1/[$lift]/$ep2 told:$told1/$(qa_count ' 74017 ' "$NOTIFY_LOG") path:$(qa_count ' 74017 .*state\.json' "$NOTIFY_LOG") add:$add file:$([[ -s $STATE ]] && echo written || echo same) urls:$(qa_count '://' "$NOTIFY_LOG")" \
+     "episodes:unparsed/[]/unparsed told:1/2 path:2 add:state_unreadable file:same urls:0"
+  cat "$WORK/good-state.json" >"$STATE"
+  wait_for "" 10 pf "['stateWriteBlocked']" >/dev/null || true
+
+  # R23c. The start-up `state init` held for 60 s by the slow tree (O's
+  # staging: fixtures/slow-helper.py sleeps, then execs the real helper)
+  # over a file that does not parse, so the load WAITS on the init's
+  # witness. The service's watchdog stops it at stateInitTimeoutMs (15 s),
+  # QProcess reaps it, and the held load decides as the no-write mode with
+  # its own reason. The helper's pid is read from the process table by its
+  # exact argv -- argv[1] is the slow tree's helper and the verb is `init` --
+  # by a scanner whose own argv[1] is `-c`, so it can never match itself.
+  : >"$NOTIFY_LOG"
+  seed "$KA" migrated
+  printf '{"version": 2, "sources": [' >"$STATE"; chmod 0600 "$STATE"
+  sha0=$(sha "$STATE")
+  if [[ ! -x $SLOW_TREE/bin/omarchy-iptv ]]; then echo "   the slow tree from O is not staged"; fi
+  export OMARCHY_IPTV_PLUGIN_ROOT=$SLOW_TREE OMARCHY_IPTV_SLOW_MS=60000 OMARCHY_IPTV_SLOW_VERBS="state init"
+  log_mark
+  h --detach --timeout 0 --keep --playlist none --source-key "$KA" >"$WORK/start.log" 2>&1
+  SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
+  initpid=""
+  for ((i = 0; i < 50; i++)); do initpid=$(init_pids "$SLOW_TREE/bin/omarchy-iptv"); [[ -n $initpid ]] && break; sleep 0.1; done
+  ORPHANS="$ORPHANS $initpid"
+  echo "   slow init helper pid ${initpid:-none}"
+  # A wall-clock deadline, not an iteration count: each poll is an IPC
+  # round trip, and 300 of them took over a minute on lane-key-n2, long
+  # enough for the slow init to finish by itself.
+  deadline=$((SECONDS + 25))
+  while (( SECONDS < deadline )); do [[ $(pf "['stateWriteBlocked']") =~ ^[a-z] ]] && break; sleep 0.1; done
+  (( SECONDS >= deadline )) && echo "   gave up after 25 s waiting for the no-write mode"
+  sleep 2.5
+  gone=yes; for p in $initpid; do kill -0 "$p" 2>/dev/null && gone="no($p)"; done
+  [[ -z $initpid ]] && gone=never-seen
+  left=$(init_pids "$SLOW_TREE/bin/omarchy-iptv")
+  ck "B10 a start-up init that never answers is STOPPED by the service's watchdog and reaped -- no process left anywhere running it -- and the held load decides as the no-write mode with its own reason, told once by a sentence that names the file, the file untouched" \
+     "blocked:$(pf "['stateWriteBlocked']") found:$(pf "['stateInitFound']") helper:$gone left:${left:-none} told:$(qa_count ' 74017 ' "$NOTIFY_LOG") stopped:$(qa_count ' 74017 .*state\.json .*stopped' "$NOTIFY_LOG") file:$([[ $(sha "$STATE") == "$sha0" ]] && echo same || echo changed) watchdog:$(log_since 'state init exceeded')" \
+     "blocked:init-timeout found:timeout helper:yes left:none told:1 stopped:1 file:same watchdog:1"
+  for p in $left; do kill -KILL "$p" 2>/dev/null; done
+  stop_shell
+  export OMARCHY_IPTV_PLUGIN_ROOT=$PLUGIN_ROOT; unset OMARCHY_IPTV_SLOW_MS OMARCHY_IPTV_SLOW_VERBS
+
+  # R23e / R23h / R23f. A no-write START (the file does not parse, the real
+  # tree): the guide is opened and what it DRAWS is read -- not the
+  # first-run form, but the notification's own title and body -- and the
+  # logo toggle in Sources, which round 12 answered "Could not save settings
+  # - try omarchy bar set", answers the no-write sentence.
+  : >"$NOTIFY_LOG"
+  seed "$KA" migrated
+  printf '{"version": 2, "sources": [' >"$STATE"; chmod 0600 "$STATE"
+  log_mark
+  h --detach --timeout 0 --keep --playlist none --source-key "$KA" >"$WORK/start.log" 2>&1
+  SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
+  for ((i = 0; i < 200; i++)); do [[ $(pf "['stateWriteBlocked']") =~ ^[a-z] ]] && break; sleep 0.1; done
+  ipc open '{}' >/dev/null; sleep 0.8
+  gs=$(ipc state)
+  want_title=$(notice_of unparsed "$STATE" title); want_body=$(notice_of unparsed "$STATE" body)
+  ck "B11 a no-write START draws its own surface, not the first-run form: no form, the empty state shown, its title and prose the NOTIFICATION's own words (Model.stateUnreadableNotice), and that notification sent once" \
+     "kind:$(qa_json_field "d['guide']['emptyKind']" "$gs") form:$(qa_json_field "d['guide']['firstRunForm']" "$gs") shown:$(qa_json_field "d['guide']['emptyShown']" "$gs") title:$([[ $(qa_json_field "d['guide']['emptyTitle']" "$gs") == "$want_title" ]] && echo notice || echo other) prose:$([[ $(qa_json_field "d['guide']['emptyProse']" "$gs") == "$want_body" ]] && echo notice || echo other) sent:$(grep -aF -c -- "$want_body" "$NOTIFY_LOG")" \
+     "kind:stateUnreadable form:false shown:true title:notice prose:notice sent:1"
+  ipc sourcesKey enter >/dev/null; sleep 0.3
+  ipc sourcesKey g >/dev/null; sleep 0.3
+  ipc sourcesKey confirm >/dev/null; sleep 0.5
+  foot=$(qa_json_field "d['guide']['footer']" "$(ipc state)")
+  ck "B12 in that mode the logo toggle's refusal says the no-write reason, never the persist_failed advice (omarchy bar set)" \
+     "says:$([[ $foot == *"state.json could not be read"* ]] && echo no-write || echo other) advice:$([[ $foot == *"omarchy bar set"* ]] && echo bar-set || echo none) writes:$(log_since 'updateEntryInline')" \
+     "says:no-write advice:none writes:0"
+  ipc close >/dev/null
+  stop_shell
+
+  # R23h, the control the instrument fix needs: a FRESH install's guide
+  # draws the first-run form, and the drawn-copy fields now read THAT
+  # form's sentence -- round 12's read the hidden empty state's.
+  h clean >/dev/null 2>&1
+  start_shell --playlist none --source-key "" || true
+  ipc open '{}' >/dev/null; sleep 0.8
+  gs=$(ipc state)
+  ck "B13 a fresh install's guide draws the first-run form, and the drawn-copy fields read what that form draws (its title and the paste-or-type prose), not the hidden empty state's" \
+     "form:$(qa_json_field "d['guide']['firstRunHead']" "$gs") title:$(qa_json_field "d['guide']['emptyTitle']" "$gs") prose:$(qa_json_field "d['guide']['emptyProse']" "$gs")" \
+     "form:true title:No playlist configured prose:Paste or type your M3U URL or path, then press Enter"
+  ipc close >/dev/null
+  stop_shell
+
+  # R23b. A FIFO at state.json: the real helper's init answers at once
+  # (`other`, never a blocking open), the load (FileView: NotAFile) blocks
+  # as `not-a-file`, the user is told once, and no helper is left running.
+  # On a tree whose init blocks in open(), the start waits for ever and the
+  # helper outlives the shell: its pid is recorded for cleanup.
+  : >"$NOTIFY_LOG"
+  seed "$KA" migrated
+  rm -f "$STATE"; mkfifo -m 600 "$STATE"
+  log_mark
+  h --detach --timeout 0 --keep --playlist none --source-key "$KA" >"$WORK/start.log" 2>&1
+  SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
+  deadline=$((SECONDS + 10))
+  while (( SECONDS < deadline )); do [[ $(pf "['stateWriteBlocked']") =~ ^[a-z] ]] && break; sleep 0.1; done
+  (( SECONDS >= deadline )) && echo "   gave up after 10 s waiting for the no-write mode"
+  sleep 0.5
+  left=$(init_pids "$PLUGIN_ROOT/bin/omarchy-iptv"); ORPHANS="$ORPHANS $left"
+  ck "B14 a FIFO at state.json: the init answers at once (found, not hung), the start blocks as not-a-file, the user is told once, no helper is left running, and the FIFO is left as it was" \
+     "blocked:$(pf "['stateWriteBlocked']") found:$(pf "['stateInitFound']") told:$(qa_count ' 74017 ' "$NOTIFY_LOG") left:${left:-none} fifo:$([[ -p $STATE ]] && stat -c %a "$STATE" || echo gone)" \
+     "blocked:not-a-file found:present told:1 left:none fifo:600"
+  stop_shell
+  for p in $left; do kill -KILL "$p" 2>/dev/null; done
+  rm -f "$STATE"
+
   echo "== P: the console sink, then teardown ($(elapsed) s)"
   qa_leak_on_labelled 'sourceProbeFinished|sourceSwitched|sourceRemoved|updateEntryInline' "://|$WORK" "$LOG"
   case $? in 0) left=clean ;; 1) left=LEAK ;; *) left="nothing labelled to judge" ;; esac
@@ -2012,7 +2198,7 @@ instrument
 # The floor. A check that stops executing must turn the run red rather than
 # quietly shorten the summary (D-PLY-9). Recount with
 #   grep -cE '^ *ck "[IS][0-9]' key-scenario.sh   -> 10, the instrument arm -> check-tree
-#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 105, both arms         -> live
+#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 111, both arms         -> live
 # (48 -> 61 on 2026-10-12, round 4: W1..W6 and F1..F7; 61 -> 63 the same
 # day, round 5: L1, L2; 63 -> 70 the same day, round 7: U1..U7; 70 -> 78
 # the same day, round 8: K1..K3, Z1..Z3, A1, A2; 78 -> 85 the same day,
@@ -2020,7 +2206,8 @@ instrument
 # 86 -> 97 on 2026-10-13, round 11: G1..G5 and X1..X6, the migration and
 # the refusal, R21. U, K, Z, A, Y2, Y3, Q, V, F and H were re-pointed at
 # the R21 contract, one for one; 97 -> 105 the same day, round 12: B1..B8,
-# R22a's load failures and R22c's hint.)
+# R22a's load failures and R22c's hint; 105 -> 111 the same day, round 13:
+# B9..B14, R23a-c, R23e, R23f, R23h.)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -2030,7 +2217,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=10
 else
-  EXPECTED_CHECKS=105
+  EXPECTED_CHECKS=111
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then

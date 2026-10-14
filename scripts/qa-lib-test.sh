@@ -1269,8 +1269,11 @@ is "key-scenario's cleanup restores the state directory's mode on every exit" \
 # 10: Y4 counts its two toggles in a row from ONE mark of its own: 4.
 # Round 12: B5 starts its shell by hand (a state that never loads never
 # settles start_shell) and sets the mark B6 counts entry writes from: 5.
-is "F and L each set their own log mark before the call they count, U and Y before each toggle, and B5 before the start B6 counts" \
-   "$(awk '/^  echo "== F:/,/^  echo "== U:/' "$KS" | grep -cE '^  log_mark$') $(awk '/^  echo "== U:/,/^  echo "== P:/' "$KS" | grep -cE '^  log_mark$')" "2 5"
+# Round 13: B10, the no-write start B11/B12 read and B14 each start their
+# shell by hand and mark first (B10 counts the watchdog's line, B12 the
+# entry writes): 8.
+is "F and L each set their own log mark before the call they count, U and Y before each toggle, B5 before the start B6 counts, and B10, B11 and B14 before theirs" \
+   "$(awk '/^  echo "== F:/,/^  echo "== U:/' "$KS" | grep -cE '^  log_mark$') $(awk '/^  echo "== U:/,/^  echo "== P:/' "$KS" | grep -cE '^  log_mark$')" "2 8"
 # L drives the toggle through the guide's own key path (shell.qml's
 # sourcesKey calls the guide's handlers; no keystroke), and both restarts
 # that follow a failed or interrupted write (O and F) reseed the key the
@@ -1279,9 +1282,10 @@ is "F and L each set their own log mark before the call they count, U and Y befo
 # Round 8: Z restarts once over the observed entry after its remove (1 more).
 # Round 9: Y1 drives the key path three more times (enter, g, g), and Y3 and
 # H restart over the observed entry (2 more). Round 10: Y4 drives it twice
-# more (g + confirm on one line, then g).
+# more (g + confirm on one line, then g). Round 13: B12 drives it three
+# more (enter, g, confirm) in the no-write mode.
 is "L, U and Y reach setShowLogos through the guide's Sources key path, and F, U, Z, Y and H restart over the observed key as O does" \
-   "$(qa_count '^  ipc sourcesKey (enter|g|confirm) >/dev/null' "$KS") $(qa_count '^  start_shell "\$\{seed_args\[@\]\}" \|\| true$' "$KS")" "11 7"
+   "$(qa_count '^  ipc sourcesKey (enter|g|confirm) >/dev/null' "$KS") $(qa_count '^  start_shell "\$\{seed_args\[@\]\}" \|\| true$' "$KS")" "14 7"
 # Round 10 (Y4): the stored entry's showLogos is read through hostEntry's
 # storedShowLogos, which HarnessLib.storedOwnedValue answers for the two
 # OWNED keys only -- a retired URL key reads null through it -- and Y4 is
@@ -1304,8 +1308,10 @@ is "key-scenario's Q reads its slow listener's pid from ss -ltnp and cleanup kil
 # tree -- `git apply --check` is the call -- and the header cites them by
 # file, not by the deleted branch names.
 KM="$ROOT/scripts/dev-harness/spikes/key-mutations"
-is "both key-mutation patches still apply to this tree (git apply --check)" \
-   "$(git -C "$ROOT" apply --check "$KM/d3-save-parked.patch" >/dev/null 2>&1; echo $?) $(git -C "$ROOT" apply --check "$KM/r14-no-return.patch" >/dev/null 2>&1; echo $?)" "0 0"
+# Round 13 adds the third: r23a-no-rearm.patch, the lift's notice re-arm
+# deleted, which B9 and the R23a node pins were seen red against.
+is "all three key-mutation patches still apply to this tree (git apply --check)" \
+   "$(git -C "$ROOT" apply --check "$KM/d3-save-parked.patch" >/dev/null 2>&1; echo $?) $(git -C "$ROOT" apply --check "$KM/r14-no-return.patch" >/dev/null 2>&1; echo $?) $(git -C "$ROOT" apply --check "$KM/r23a-no-rearm.patch" >/dev/null 2>&1; echo $?)" "0 0 0"
 is "key-scenario and the README cite the patch files and no mutation branch" \
    "$(qa_count 'd3-save-parked\.patch|r14-no-return\.patch' "$KS") $(qa_count 'mut-(d3-save-parked|r14-no-return)' "$KS") $(qa_count 'mut-(d3-save-parked|r14-no-return)' "$ROOT/scripts/dev-harness/README.md")" "2 0 0"
 # run.sh clean on the directory a signalled F leaves: DRIVEN. The old

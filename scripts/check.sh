@@ -183,7 +183,13 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # day, the six pins three surviving mutations asked for (every owned-entry
 # writer in the no-write mode, the unmigrated session, a probe that ends in
 # it; both hosts).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2354}
+# 2354 -> 2372 on 2026-10-13, round 13 (R23): R23a's four (two no-write
+# episodes in a session, with and without an own save between, both hosts),
+# R23c's eight harness pins (the watchdog armed; a timed-out init over a
+# file that is not one and one that does not parse; a timeout after the
+# load) and two model pins, R23e's three and R23f's one. The node suite now
+# also runs a second time with IPTV_HARNESS_OWN_ECHO=none (R23g), same count.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2372}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -208,7 +214,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2354}
 # parse, every verb refusing an unread state), tests/test_shipped_copy.py's
 # three (R22c, no shipped string sends the user to a retired setting) and the
 # ledger's two (R22d, an unused waiver is red; the twenty are gone).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1170}
+# 1170 -> 1180 the same day, round 13 (R23b, R23d): test_state's ten
+# StateNeverBlocksTest cases, the real helper as a subprocess with a timeout
+# over a FIFO, a socket and a directory at the state path, a file where the
+# state directory should be, and a symlink to a 0000 file.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1180}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
