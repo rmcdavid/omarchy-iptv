@@ -508,13 +508,15 @@ by the helper for a syntactic reason; the helper keeps the runtime refusals
 | `countReload(counts, reason)` | R15 (lane-key-t1; `Model.countReload`): the reload counter by reason -- a NEW object (a `property var` mutated in place raises no change signal) with `reason`'s count incremented, keyed by the string `Model.reloadDisposition` answered, so the counter cannot name a reason the decision does not; the service's `stateReloadsByReason`, reported through the harness's `pointerState` |
 | `ownedWriteMode({ stateLoaded, savePending, savesInFlight, saveFailed })` | R16 (lane-key-u1; `Model.ownedWriteMode`): what an owned-entry write that is NOT the key mirror may carry -- `{ mode, reason }`, `patch` with `save-parked` / `save-in-flight` / `save-failed` whenever one of the three flags is raised, `heal` with `settled` otherwise; the three flags and nothing else (fixture section `ownedWrite`, 8 cases, the whole cube). **Amended 2026-10-12 (round 6, lane-key-v1 78ff442): a FOURTH input, `stateLoaded`, checked first -- anything but `true` answers `patch` with `state-not-loaded`, because before the first state load memory is the empty state and no save flag is raised, so the three flags alone answered `heal` there and a logo toggle stripped a URL set while the shell was down (the fifth review's data-loss P2). `heal` now means loaded AND nothing outstanding; the four inputs and nothing else; the `ownedWrite` section is 16 cases, the four-input cube.** **Amended 2026-10-13 (round 12, R22a; lane-key-n1 16a3bc9): a FIFTH input, `blocked` (the no-write mode's reason), checked before every other, and a third answer, `none` with reason `state-unreadable`: in the no-write mode no owned write is made at all, the patch included, because the entry may hold the only copy of an input the unread file could not tell us about (`R16 / R22a: the fixture covers the whole five-input cube ...`).** |
 | `stateLoadKind(result)`, `STATE_LOAD_ERRORS` | R22a (round 12, lane-key-n1 16a3bc9; `Model.stateLoadKind`, `Model.STATE_LOAD_ERRORS`): what one load of `state.json` IS. `result` is `{ loaded: true, text }` from `onLoaded` or `{ loaded: false, error }` from `onLoadFailed`; the answer is `loaded` (the text parses as a JSON object), `unparsed` (read and not one, an empty file included), or the failure's kind by Quickshell's `FileViewError` number -- 1 `io-error`, 2 `absent`, 3 `permission`, 4 `not-a-file` -- and `io-error` for any number the table does not know, never `absent` by default. The numbers are the enum's declaration order, measured (the round-12 rulings) and pinned against the installed qmltypes |
-| `stateInitFound(text, exitCode, timedOut)` | R22a (`Model.stateInitFound`): the helper's start-up `state init` reply -> `absent` only for the init's own `found: absent`, [round 14, R24b: `link` and `not-a-dir` for the init's own answers of those names;] `present` for `file`, `other` or `unreadable`, `unknown` for a failed exit, no reply, another verb's reply or a reply without the field. The one witness that tells a missing file from a file inside a directory the FileView cannot search, which it reports identically (FileNotFound) |
-| `stateLoadDecision({ kind, loadedBefore, initFound, retried })` | R22a (`Model.stateLoadDecision`): `{ act, reason }` for a load that is not `loaded` -- `apply` for a state; mid-session (`loadedBefore`) `block` at once; at a start `wait` until the init answers, `fresh` ONLY when the load is `absent` and the init found `absent`, else `retry` once (the init restores the 0000 modes it finds) and then `block`, with reason `absent-unconfirmed` for a FileNotFound the init contradicts [round 14, R24b: after the one re-read, an init that answered `link` or `not-a-dir` blocks with THAT reason instead of `absent-unconfirmed`] |
+| `stateInitFound(text, exitCode, timedOut)` | R22a (`Model.stateInitFound`): the helper's start-up `state init` reply -> `absent` only for the init's own `found: absent`, [round 14, R24b: `link` and `not-a-dir` for the init's own answers of those names; round 15, R25c: `folder-link` too, a link at the state FOLDER, or above it, that dangles or leads to something that is not a folder;] `present` for `file`, `other` or `unreadable`, `unknown` for a failed exit, no reply, another verb's reply or a reply without the field. The one witness that tells a missing file from a file inside a directory the FileView cannot search, which it reports identically (FileNotFound) |
+| `stateLoadDecision({ kind, loadedBefore, initFound, retried })` | R22a (`Model.stateLoadDecision`): `{ act, reason }` for a load that is not `loaded` -- `apply` for a state; mid-session (`loadedBefore`) `block` at once; at a start `wait` until the init answers, `fresh` ONLY when the load is `absent` and the init found `absent`, else `retry` once (the init restores the 0000 modes it finds) and then `block`, with reason `absent-unconfirmed` for a FileNotFound the init contradicts [round 14, R24b: after the one re-read, an init that answered `link` or `not-a-dir` blocks with THAT reason instead of `absent-unconfirmed`; round 15, R25c: and `folder-link`] |
 | `stateWriteGate({ blocked, loaded, dirsReady })` | R22a / R22b (`Model.stateWriteGate`): the one gate `Service.saveState` asks first -- `refuse` in the no-write mode whatever else is true, `park` before any state has loaded or before the directories are ready, `write` otherwise. Before R22a a save made with the directories ready and the load still outstanding wrote the empty default over the file |
-| `stateUnreadableNotice(reason, path)` | R22a (`Model.stateUnreadableNotice`): `{ title, body }`, the ONE sentence the user is told once per no-write episode, as a critical notification (replace id 74017) and on the console -- `Saved sources not loaded` / `<path> <what>. Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. <fix>`, composed from the reason and the path alone, never a URL; the six reasons and their text are in the round-12 rulings and `UX-SOURCES.md` 5.10 |
-| `sameState(a, b)`, `stateCanonical(state)` | R24a / R24c (round 14; `Model.sameState`, `Model.stateCanonical`): whether two states -- objects, or the texts of files -- are the same state as a reader of the file sees it: each read through `parseState`, then serialized with its keys sorted at every depth. So the helper's compact JSON and the service's indented JSON of one state compare equal, and the init's empty default equals `parseState("")` (pinned). What `Service.applyUserState` hands `Model.reloadDisposition` as `matchesBase` |
-| `mergeForeignState(base, ours, theirs)` | R24a (round 14; `Model.mergeForeignState`): `{ state, conflicts }`, THE three-way merge of a FOREIGN write into a session that holds a change the file does not. Sets (`favorites`, `hiddenGroups`, `savedSearches`) merge; `sources` merge by key; `recents`, `activeKey`, `lastPlayed`, `session`, `cacheLayout` are taken whole; `entryMigrated` is set if either side has it; a conflict goes to theirs and is reported as `{ field, key, fields }` with no value. The field table is in the round-14 rulings; the fixture is `tests/fixtures/state-merge.json` |
-| `mergeConflictLine(conflict)` | R24a (round 14; `Model.mergeConflictLine`): the console line for one conflict, `state.json was changed by another program while a change made here was not yet saved; kept the other program's <field>` or `... the source <key> (<field names>)` -- never a URL or a value |
+| `stateUnreadableNotice(reason, path)` | R22a (`Model.stateUnreadableNotice`): `{ title, body }`, the ONE sentence the user is told once per no-write episode, as a critical notification (replace id 74017) and on the console -- `Saved sources not loaded` / `<path> <what>. Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. <fix>`, composed from the reason and the path alone, never a URL; the six reasons and their text are in the round-12 rulings and `UX-SOURCES.md` 5.10 [round 14 added `link` and `not-a-dir` and split `absent`; round 15 adds `folder-link`, which names the FOLDER: `<folder> is a symbolic link whose target is missing or is not a folder (or a folder above it is)` / `Restore the folder it points to, or move the link aside, then run omarchy restart shell.`] |
+| `stateBlockedHeader(reason, path, midSession)` | D-SRC-38 (round 15; `Model.stateBlockedHeader`): the no-write mode's SHORT form, for the Sources header's right slot (`Model.sourcesHeaderRight(n, stateBlocked, path, midSession)`): `""` with no reason; `Saving has stopped` when the block began MID-session (a state had loaded, so the rows under it are the session's and still play; `Guide.qml` hands it `service.stateLoaded`); otherwise `Model.stateUnreadableNotice`'s title, `Saved sources not loaded`. One function, the notice copy family |
+| `sameState(a, b)`, `stateCanonical(state)` | R24a / R24c (round 14; `Model.sameState`, `Model.stateCanonical`): whether two states -- objects, or the texts of files -- are the same state as a reader of the file sees it: each read through `parseState`, then serialized with its keys sorted at every depth. So the helper's compact JSON and the service's indented JSON of one state compare equal, and the init's empty default equals `parseState("")` (pinned). What `Service.applyUserState` hands `Model.reloadDisposition` as `matchesBase` [and, since round 15 (R25a), as `memoryMatchesBase`, `sameState(userState, landedState)`: with nothing held, a reload whose text is the base over a memory that is the base changes nothing and is ignored as `unchanged` -- the echo of the save that just landed, a chmod, an identical rewrite] |
+| `mergeForeignState(base, ours, theirs)` | R24a (round 14; `Model.mergeForeignState`): `{ state, conflicts }` [round 15, R25b: `{ state, conflicts, dropped }`], THE three-way merge of a FOREIGN write into a session that holds a change the file does not. Sets (`favorites`, `hiddenGroups`, `savedSearches`) merge; `sources` merge by key; `recents`, `activeKey`, `lastPlayed`, `session`, `cacheLayout` are taken whole; `entryMigrated` is set if either side has it; a conflict goes to theirs and is reported as `{ field, key, fields }` with no value. The field table is in the round-14 rulings; the fixture is `tests/fixtures/state-merge.json` [round 15, R25b (D-SRC-31): the caps are applied INSIDE the merge, not left to `parseState`: theirs keeps its place and what goes past `MAX_SOURCES` (50), `MAX_SAVED_SEARCHES` (20) or `MAX_HIDDEN_GROUPS` (200) is always ours' additions, dropped and returned as `dropped` -- `sources` the keys, `savedSearches` and `hiddenGroups` counts; and the sets are built on THEIRS, theirs' order first, which the function's comment now says (D-SRC-37)] |
+| `mergeDropLines(dropped)`, `mergeDropNotice(dropped)` | R25b (round 15; `Model.mergeDropLines`, `Model.mergeDropNotice`): what a merge that dropped anything at a cap tells. The journal: one line per dropped element, `state.json was changed by another program while a change made here was not yet saved; the source <key> added here was not kept (the limit is 50 sources)`, `...; a saved search made here was not kept (the limit is 20 saved searches)`, `...; a group hidden here was not kept (the limit is 200 hidden groups)` -- a source by its key, the others as themselves, never a query or a group name. The user, ONCE per merge (notification, replace id 74018, normal urgency): `Not every change was kept` / `Another program changed state.json while a change made here was not yet saved, and together they went past a limit. The other program's version was kept, and <N> source(s) added here (the limit is 50 sources) [and ...] was/were not kept. Make room, then add it/them again.` -- counts and constants only. `null` and `[]` when nothing was dropped |
+| `mergeConflictLine(conflict)` | R24a (round 14; `Model.mergeConflictLine`): the console line for one conflict, `state.json was changed by another program while a change made here was not yet saved; kept the other program's version of <field>` or `... kept the other program's version of the source <key> (<field names>)` -- never a URL or a value [round 15, D-SRC-36: `version of` added; the line read `kept the other program's the source <key>` until then] |
 | `persistFailureMessage(reason)` | R16 (lane-key-u1; `Model.persistFailureMessage`): the sentence for THE reason `sourcesPersistFailed` carried, over `Model.PERSIST_FAILURE_REASONS` (`state_write_failed`, `config_unsafe`, `persist_failed`); an unknown reason falls back to `persist_failed`'s sentence; what the guide renders on the result line and in the footer |
 | `invalidInputBlocks(invalid, activeKey)` | whether a refused input becomes the guide's error state: only when there is no active source to show instead (D16, narrowed) |
 | `sourceRows(st, activeKey, nowSec, errors)` | UI rows, sorted `active` first then `lastUsed` desc [UX-ASSUMPTION]: `{ key, label, host, kind, active, channelCount, groupCount, lastUsed, lastUsedText, fetched, epgConfigured, origin, errorReason }` -- no URL field, ever |
@@ -987,7 +989,13 @@ only because `Model.entryWith` copies them.
    narrows the ignore list: a held save ignores a reload only when its text
    is the BASE (`Service.landedState`, `Model.sameState`); any other text is
    FOREIGN and is merged (`merge`, reasons `foreign-save-parked`,
-   `foreign-save-in-flight`, `foreign-save-failed`), never ignored]). An ignored
+   `foreign-save-in-flight`, `foreign-save-failed`), never ignored]
+   [round 15, 2026-10-14, R25a (D-SRC-30): and `own-write` is narrowed to
+   a text STILL IN FLIGHT -- `Service.recentSaves` is the burst asked for
+   since the last save that landed, cleared when one lands -- so a copy of
+   an earlier own save put back later is another writer's and is applied or
+   merged like any other; with nothing held, a reload equal to the base over
+   a memory equal to the base is ignored as `unchanged`]). An ignored
    reload runs neither `reconcile` nor `startCacheLayout`; the count is
    `stateReloadsIgnored` and, since R15, `stateReloadsByReason` -- one number
    per reason, which is what key-scenario D3 reads (`save-parked`). Step 1's `state init` exit also records
@@ -2732,7 +2740,13 @@ D-SINK-20's patch-only re-carry, already filed. `recentSaves`, own-write
 reload detection by text: OPEN, low severity -- a foreign write byte-identical
 to one of the last 8 pretty-printed saves is ignored, so memory overwrites a
 user's restore of an older `state.json`; the helper writes compact JSON and
-cannot match it, so only a hand edit can. `lastSaveText` /
+cannot match it, so only a hand edit can [round 15, 2026-10-14: closed
+by R25a (D-SRC-30), and "low" and "only a hand edit" were both too kind --
+a COPY of the plugin's own file, which the README advises keeping, is
+byte-identical to one of those saves, and the round-14 data-loss lens put
+one back after an in-app remove and watched the next save write over it
+(FAV BAK DEL RSTB FAV). `recentSaves` now holds only the texts still in
+flight; the round-15 rulings below]. `lastSaveText` /
 `Model.stateSaveLanded`: cleared -- a save sequence A, B, A' can read as
 landed early, but the content then equals memory, and a key mismatch
 resolves through R1 step 2. `preparedLru` (keyed by `channels.json` text)
@@ -2962,7 +2976,7 @@ start, so a removed source comes back. The user was told the write failed
 (`state_write_failed`); whether a failed hold should leave the remove's
 strip in place, deciding by landed content rather than by the last save, is
 the lead's. `recentSaves` matching a hand-restored older `state.json` (low,
-above). The cold first guide open over 150 ms of open work on both trees
+above) [round 15: closed by R25a]. The cold first guide open over 150 ms of open work on both trees
 (R19e). Deleting the three retired functions, which needs the round-8
 citations reworded in the same commit. Lane A's readings (a) to (e), and
 whether to keep the held clause m8 shows equivalent. The in-app add into an
@@ -3377,7 +3391,7 @@ The two `Model.X` citations outside the ledger's corpus, to their owners.
 F-PERF-2's measurement at a quiet load. Retiring the mirrored driver's
 regex bindings for the harness. The R13-class residuals round 9 recorded
 (RZ `cliP_A > removeActive > cliE`, LF 6 and 4 at length 3) and
-`recentSaves`, unchanged. And the documents of this round are
+`recentSaves`, unchanged [round 15: closed by R25a]. And the documents of this round are
 lane-key-z2's, a documents lane that ran nothing live; every live count
 above is lane A's, re-read from its transcripts and outputs, and the two
 counts over lane-key-y2's code were re-run by this lane.
@@ -3840,6 +3854,7 @@ sentence is composed from the reason and the path alone:
 | `absent` (mid-session; round 14, R24b: its own `<fix>`, because the helper is not asked mid-session and the FileView reports a broken symlink and an unreadable folder alike) | `could not be found, or its folder could not be read` | `If it is a symbolic link, restore the file it points to; otherwise make the folder readable with chmod 700. Then run omarchy restart shell.` |
 | `link` (round 14, R24b: the helper's init found a symlink whose target is missing or is not a regular file) | `is a symbolic link whose target is missing or is not a regular file` | `Restore the file it points to, or move the link aside, then run omarchy restart shell.` |
 | `not-a-dir` (round 14, R24b: the helper's init found something that is not a folder where the state folder, or one above it, should be; `<path>` is then the FOLDER's) | `is not a folder (a file is at that path, or at one above it)` | `Move whatever is at that path aside, then run omarchy restart shell.` |
+| `folder-link` (round 15, R25c, D-SRC-32: the helper's init found a symbolic link at the state folder, or at a folder above it, that dangles or leads to something that is not a folder; `<path>` is then the FOLDER's) | `is a symbolic link whose target is missing or is not a folder (or a folder above it is)` | `Restore the folder it points to, or move the link aside, then run omarchy restart shell.` |
 | `io-error`, or anything else | `could not be read` | `Check the file and its folder, then run omarchy restart shell.` |
 | `init-timeout` (round 13, R23c: the start-up `state init` did not answer within 15 s and was stopped) | `could not be checked: the start-up check did not answer and was stopped` | `Make sure a regular file, or nothing, is at that path, then run omarchy restart shell.` |
 
@@ -4334,7 +4349,8 @@ on that measurement, and round 14 reproduced it in the committed spike
   AFTER an own save, it is observed by the committed spike
   (`RESULT-2026-10-13.txt`, every sequence) and by the round-13 live lens's
   rig (`case_episodes`: after an in-app add, garbage in place gave
-  `blocked:unparsed told:1`), and by no key-scenario segment.
+  `blocked:unparsed told:1`), and by no key-scenario segment [round 15:
+  key-scenario B21 observes it].
 - 0.13.6 shares the dir-absent behaviour (the lens's export, and its
   `stateFile` declaration is identical); it has no R24c.
 - The helper's own text now says what was measured (R24c, round 14).
@@ -4580,7 +4596,10 @@ key-scenario B15-B18, the spike's r24 set, `private-bus.sh`'s scratch home;
   (`Model.sameState(text, landedState)`), and answers `apply` | `ignore` |
   `merge`. The base is `Service.landedState`: the text loaded, the last save
   that landed, or the last foreign text merged. First load: apply. Own write
-  (the text is in `recentSaves`): ignore. Nothing held: apply, reason
+  (the text is in `recentSaves`): ignore [round 15, R25a (D-SRC-30):
+  `recentSaves` was the last eight texts written, so a copy of one put back
+  later was ignored too; it is now only the burst still in flight, cleared
+  as a save lands -- the round-15 rulings]. Nothing held: apply, reason
   `file-newer`. A change held (`save-parked`, `save-in-flight`,
   `save-failed`) and the text equal to the base: ignore, for the reason it
   is held -- R9 as it was, and the D-SRC-15 start-up chmod reload is exactly
@@ -4607,12 +4626,17 @@ key-scenario B15-B18, the spike's r24 set, `private-bus.sh`'s scratch home;
   | `entryMigrated` | true if either side has it | none |
 
   The result is read through `parseState` once more, so its caps and
-  de-duplication apply to a merge as to a file. The console line, verbatim
-  from the model for a record: `omarchy-iptv: state.json was changed by
-  another program while a change made here was not yet saved; kept the
-  other program's the source 1a2b3c4d (label, url)` -- the field NAMES that
-  differed, never a value -- and for a whole field `... kept the other
-  program's activeKey`. Pinned: `tests/fixtures/state-merge.json`, 34
+  de-duplication apply to a merge as to a file [round 15, R25b (D-SRC-31):
+  the caps were the silent half -- `parseState` stops at a cap, which cut
+  the in-app additions with no line and no notice; they are applied inside
+  the merge now, theirs first, and what is dropped is logged and told].
+  The console line, verbatim from the model for a record: `omarchy-iptv:
+  state.json was changed by another program while a change made here was
+  not yet saved; kept the other program's version of the source 1a2b3c4d
+  (label, url)` -- the field NAMES that differed, never a value -- and for a
+  whole field `... kept the other program's version of activeKey` [round
+  15, D-SRC-36: `version of` added in the model and in every quotation; on
+  lane-key-q1 the line read `kept the other program's the source ...`]. Pinned: `tests/fixtures/state-merge.json`, 34
   cases (every field rule, every conflict kind, the identities, the
   data-loss lens's WF FAV WOK HADD as a case); node `R24a mergeForeignState:
   <case>` over each, `R24a: the fixture covers every field rule and every
@@ -4625,7 +4649,10 @@ key-scenario B15-B18, the spike's r24 set, `private-bus.sh`'s scratch home;
   `tests/service-harness.js` in 16 modes -- parked, in flight, failed and a
   conflict, on both host shapes and both own-echo modes -- where WF FAV WOK
   HADD FAV keeps both the in-app favourite and the helper's record. No live
-  segment: the ruling asked for the table and the harness, and both exist.
+  segment: the ruling asked for the table and the harness, and both exist
+  [round 15, R25d (F-HARNESS-26): two of the merge's decisions survived
+  every one of those checks; they are pinned now, and key-scenario B19 is
+  the merge's live segment].
 - R24b. The helper: `state_file_target(path)` answers the file a `state` verb
   reads and writes -- the path itself for nothing there or a regular file;
   the link's TARGET (`os.path.realpath`, once `lstat` and `stat` prove a link
@@ -4745,7 +4772,8 @@ key-scenario B15-B18, the spike's r24 set, `private-bus.sh`'s scratch home;
   (`header:[No sources] rows:2 after-a:sourceEdit says:other`); its
   `addhint` token does not discriminate at row 0, the others do. A
   MID-session block, where Sources still lists the records memory holds, is
-  pinned in node only.
+  pinned in node only [round 15: observed by B22, its header `Saving has
+  stopped` since D-SRC-38].
 - R24g. The harness double now decides what a TERM-ignoring process does,
   so the KILL is observed: `R24g (...)`, an init and a mkdir that ignore the
   TERM (2 each), red only with the KILL deleted
@@ -4784,7 +4812,7 @@ is the start-up `mkdir -p` and `state init`.
 | U | directory present, no file | the init's creation was seen without help, and everything after it |
 | V | a valid symlink | the view's OWN save wrote THROUGH it (`at-path:symlink`, the target holding the 50 bytes); dev's helper then REPLACED the link with a regular file (`at-path:regular`), after which the view saw nothing more (`fileChanged+0`, the helper's write and a later in-place write alike); lane-key-q1's helper kept the link and every write was seen (`fileChanged+1 loaded+1 view==disk:yes at-path:symlink`) |
 | W | a valid symlink | the same difference with the helper first |
-| X | a dangling symlink | the view's own save raised `saveFailed` and left the link |
+| X | a dangling symlink | the view's own save raised `saveFailed` and left the link [round 15, D-DOC-11: X's link led into a folder that did not exist. With the target's folder PRESENT the same save SUCCEEDS and creates the target through the link -- `saved+1`, the link left a link (the round-14 data-loss lens's C6 and Z9, two runs; the round-15 rulings). "A dangling link fails the save" holds only for the missing folder] |
 
 So the FileView's own save does not replace a link, and by R24b nothing
 changes on the service's side. Q, R, S, T and U do not depend on the helper
@@ -4806,7 +4834,9 @@ observed for the fresh-install session by key-scenario B16 -- after an own
 save included -- and for an existing directory with no own save by B5-B7
 and B9. The existing-directory session AFTER an own save is observed by the
 committed spike (`RESULT-2026-10-13.txt`, every sequence) and by the
-round-13 live lens's rig (session scratch), and by no key-scenario segment.
+round-13 live lens's rig (session scratch), and by no key-scenario segment
+[round 15, R25d: key-scenario B21 observes it now -- an in-app save lands,
+then garbage written in place is noticed and told once].
 D-DOC-9: this file's round-11 open item (5) and the README's `playlistUrl`
 row no longer say `omarchy bar set` "still offers" the keys. D-DOC-10: the
 README says what a hand edit costs.
@@ -4828,7 +4858,10 @@ inherits them.**
   `read_json` readers answer `None` for a dangling link and no write follows.
 - The D-SRC-26 shape (a file where a directory should be): the init answers
   `not-a-dir` and every verb refuses it. NOT re-checked: the cache writers'
-  `ensure_private_dir` over a file at a cache directory.
+  `ensure_private_dir` over a file at a cache directory [round 15, R25c:
+  checked, every caller -- a file there, or a link that leads nowhere, is
+  now `folder_unusable` with a sentence and exit 1 where it was a
+  traceback; the round-15 rulings list each].
 - The D-SRC-24/25 shape (an unbounded start-up process): every process
   `Component.onCompleted` starts. `mkdirProc` is inside the one bound now.
   `configShieldProc`, `whichProc` and the `hypr*` probes neither open the
@@ -4954,10 +4987,532 @@ lead's).**
   sources not loaded` over the records memory still lists and plays. It is
   the one source of copy R24f asked for; whether the header should say
   something narrower there ("not saved", say) is a copy decision, not made
-  here.
+  here [round 15: decided as D-SRC-38 -- `Saving has stopped`, through
+  `Model.stateBlockedHeader`; observed by key-scenario B22].
 - (8) This lane's: the existing-directory session AFTER an own save is
   observed by the committed spike and a lens rig but by no key-scenario
   segment (above). A B-segment that seeds the directory, makes an in-app add
-  and then damages the file would close it.
+  and then damages the file would close it [round 15: B21 is that segment].
 - Rule 13: the round-12 open item (1) -- ids for the 0.13.6 losses -- is
   still not this lane's to close.
+
+### D-SINK-19 round 15 rulings (lead, 2026-10-14; R25, on top of R1-R24, which stand)
+
+**What the round-14 lenses found, on lane-key-q2 (116308b), now on `dev`
+(002662d).** No P1. Five P2s, each boarded on 2026-10-14: D-SRC-29 (a
+symlinked `state.json` goes unwatched once a tool replaces the link or the
+entry at the path -- `jq` and `mv`, GNU `sed -i`, `rm` and `cp`, a backup put
+back with `mv`, `ln -sfn` -- and the next save writes memory over the change,
+while the round-14 README promised that case worked); D-SRC-30 (a backup
+the user copied from the plugin's own file, put back after a later in-app
+change, was ignored as the service's own write and then written over);
+D-SRC-31 (a merge at the caps dropped the app's new source at 50, or saved
+search at 20, silently, while the README promised both sides' new sources
+are kept); D-SRC-32 (R24b's dangling-link rule missed its folder-level
+sibling: over a dangling link at `~/.local/state/omarchy-iptv`, `state show`
+and `source list` printed an empty state with exit 0 and the writers and
+the init ended in a traceback); F-HARNESS-26 (two R24a decisions, a5 and a7,
+survived the node suite in both echo modes, and the merge had no live
+segment). P3s: D-DOC-11, D-SRC-33, F-HARNESS-27, F-HARNESS-28, D-SRC-34,
+D-SRC-35, D-SRC-36, D-SRC-37, D-SRC-38. Every one is classified on the board
+as present in 0.13.6 too, except where the round-14 code made the promise
+that turned it false.
+
+**The 0.14.0 ship bar (the owner's, 2026-10-14).** No P1; nothing worse than
+0.13.6 (`main` ca5a3a5); no promise in a shipped or project document that the
+code does not keep. Everything else is filed and does not block. This round
+was meant to make 0.14.0 cuttable, so its scope was fixed: the five P2s and
+the false statements below, and nothing else; a new finding is reported with
+evidence and not fixed.
+
+**The lead's ruling, R25 (2026-10-14).**
+
+R25a. D-SRC-30: AN ECHO IS ONLY A TEXT STILL IN FLIGHT. A reload is the
+service's own echo only when its text is one the service asked to write and
+has not yet seen land (the burst since the last landed save -- D-SRC-16's
+coalescing is why that can be more than one text); `recentSaves` is narrowed
+to exactly that, cleared as each save lands. A text equal to an own save that
+has already landed and been superseded is ANOTHER WRITER'S (a backup put
+back) and goes through R24a: merged while a change is held, applied when none
+is. Pin the lens's sequence FAV, BAK, DEL, RSTB, FAV (the restore must win)
+through `tests/service-harness.js` on both hosts and echo modes, AND prove a
+coalesced burst's mid-burst echo is still recognised (rule 10: measure, do
+not assume, what text a burst's echoes carry); red on dev.
+
+R25b. D-SRC-31: A MERGE NEVER DROPS SILENTLY. When the merged result exceeds
+MAX_SOURCES or the saved-search cap, theirs keeps its place (the later
+writer, as for a conflict) and the app's additions past the cap are dropped
+AND the user is told once (a notification naming how many and the cap, never
+a URL or a label) with one journal line per dropped key. One Model function
+decides it; pinned, red on dev.
+
+R25c. D-SRC-32: THE STATE FOLDER GETS THE FILE'S RULE. A symlink at the state
+folder is followed when it leads to a directory and refused when it dangles
+or leads to anything else: every verb exit 1 with a sentence, untouched;
+`state init` answers a `found` value the model maps to its own copy. MEASURE
+what `ensure_private_dir`'s chmod does through a valid folder link and decide
+by the R24b principle (never change what the user's link points at without
+saying so; if it chmods the target, say where in the README). Rule 15: every
+`ensure_private_dir` caller (the cache folders, the runtime socket folder,
+the logo folder) over a dangling link, each with a verdict. Pins run the real
+helper as a subprocess with a timeout; red on dev.
+
+R25d. F-HARNESS-26: THE MERGE IS OBSERVED. Node pins that go red for the
+round-14 data-loss lens's mutants a5 (the base not moved to theirs after a
+merge) and a7 (the in-flight half of the re-save decision), shown red on
+mutation patches kept under `spikes/key-mutations/`; a live key-scenario
+segment for R24a (a failed state write, then a hand-run helper write: both
+changes survive the next save AND a restart; plus the restore of R25a); and a
+live segment for the existing-folder session damaged after an own save. Red
+on dev where the defect lives, on the mutation otherwise.
+
+R25e. D-SRC-29: STATE THE LINK'S LIMIT, DO NOT FIX IT THIS ROUND. Measured: a
+writer that replaces the link or the entry at the path (`mv`, `sed -i`,
+`rm` + `cp`, `ln -sfn`) leaves the view unwatched and the next save writes
+over the change; one explicit `reload()` re-arms it. That lever is filed for
+a later release. This round, every document that mentions a symlinked
+`state.json` says exactly what is noticed (writes through the link, in
+place, and the helper's) and what is not (a tool that replaces the link or
+the file behind it), and what to do (edit the target in place, or restart
+the shell straight after such a tool and before using the guide). Lane A adds
+the matching sentence to the helper's own help text if it mentions links.
+
+The false statements the bar forbids, each to be fixed where it stands:
+D-DOC-11 (contract fact seven and the harness double's dangling-link save:
+with the target's folder present the save CREATES the target; model what was
+measured, rule 10); D-SRC-35 (the README's "putting a good copy back in place
+is enough on its own", read for a link whose target came back); F-HARNESS-28
+(key-scenario's printed `--baseline` footer); D-SRC-36 (the conflict journal
+line as quoted in the README and UX-SOURCES: the grammar fixed in the model
+and every quotation together); D-SRC-37's docstring, which stated a set order
+the code does not keep. Cheap and allowed, and only these: F-HARNESS-27
+(`test_state`'s in-process init must not leave `SIGALRM` armed in the test
+runner); D-SRC-34 (a sentence instead of a traceback when writing through a
+link into an unwritable folder); D-SRC-38 (in a MID-session block the
+Sources header says saving has stopped, not that sources were not loaded --
+one Model function, the notice copy family).
+
+**What the tree does (lane-key-k1, lane A: 56a30d5 the model and service
+half of R25a, R25b, R25d's node pins, D-SRC-36, D-SRC-37 and D-SRC-38;
+1d8599f the helper half of R25c with its rule-15 callers, D-SRC-34,
+D-DOC-11's double, F-HARNESS-27; a800bd5 and b10b5b6 key-scenario B19-B22;
+0ccea19 the counts, F-HARNESS-28 and the cage lifetime).**
+
+- R25a. `Service.recentSaves` is the burst of texts asked for since the last
+  save that LANDED: `saveState` appends each text it asks for (capped at
+  eight only so a run of failed saves cannot grow it for ever), and
+  `stateFile`'s `saved`, in the branch that sees the last text asked for
+  land (`Model.stateSaveLanded`), clears it. So a reload whose text is an
+  own save that already landed and was superseded is not `own-write`; it is
+  foreign, and R24a decides it. The echo of the save that just landed now
+  arrives with nothing held and carries the base itself, which the old
+  eight-text record had swallowed as `own-write`; `Model.reloadDisposition`
+  gains one input, `memoryMatchesBase` (`sameState(userState,
+  landedState)`), and one arm: nothing held, the text the base and memory
+  the base -- ignore, reason `unchanged`. With memory NOT the base (the
+  no-write mode refused a change and a good copy was then put back) the
+  same text is applied as `file-newer`, as before. Pinned through
+  `tests/service-harness.js` on both hosts and both echo modes: `R25a
+  (<host>, <echo>): FAV BAK DEL RSTB FAV -- ...` (the restore applied as
+  `file-newer`, never `own-write`, and the next save keeps it), `... FAV BAK
+  UNFAV RSTB FAV ...` (a favourite removed in-app after the backup comes
+  back), `... controls ...` (a backup taken before any own save; the landed
+  echo ignored as `unchanged`) and `... a coalesced burst of three saves --
+  the mid-burst echo carries the first text while the third is in flight and
+  is still recognised as own-write ...`. Live: key-scenario B20 (`restored:2
+  records:2 label:after-restore restart:2`). What it rests on is measured
+  (below).
+- R25b. `Model.mergeForeignState` applies the caps itself, where it knows
+  whose element is whose: theirs' records, searches and groups first (theirs
+  alone is within every cap -- it was read through `parseState`), then ours'
+  additions; what goes past `MAX_SOURCES` (50), `MAX_SAVED_SEARCHES` (20) or
+  `MAX_HIDDEN_GROUPS` (200) -- the third is rule 15's sibling, found and
+  fixed -- is always ours' additions, at the tail, and is returned as
+  `dropped` (`sources`: the keys; `savedSearches` and `hiddenGroups`:
+  counts, because a query and a group name are the user's or the provider's
+  text). `Service.mergeForeignText` logs `Model.mergeDropLines(dropped)`, one
+  `omarchy-iptv: ...` line per element, and when there is any sends ONE
+  notification, `Model.mergeDropNotice(dropped)` through
+  `Model.notifyArgv("mergeDropped", ...)`, replace id 74018, normal urgency.
+  The text, verbatim: journal `state.json was changed by another program
+  while a change made here was not yet saved; the source <key> added here
+  was not kept (the limit is 50 sources)` (and `...; a saved search made here
+  was not kept (the limit is 20 saved searches)`, `...; a group hidden here
+  was not kept (the limit is 200 hidden groups)`); notification `Not every
+  change was kept` / `Another program changed state.json while a change made
+  here was not yet saved, and together they went past a limit. The other
+  program's version was kept, and 1 source added here (the limit is 50
+  sources) was not kept. Make room, then add it again.` -- plural and joined
+  with `and` when more than one kind or element was dropped. Node: `R25b:
+  mergeForeignState at every cap -- ...`, `R25b: mergeDropLines ...;
+  mergeDropNotice ...`, and through the harness on both hosts and echo modes
+  `R25b (<tag>): at 49 sources, an in-app add whose save FAILED, then a
+  hand-run state source add ...` and `R25b (<tag>): at 19 saved searches, an
+  in-app save of a search IN FLIGHT and a foreign write adding another ...`.
+  No live segment: reaching a cap live needs 49 records seeded, which the
+  ruling did not ask for.
+- R25c. The helper: `broken_folder_link(directory)` answers the first
+  component of the state folder's path that exists, when it is a symbolic
+  link that does not lead to a folder; `cmd_state` asks it before anything
+  else. `state init` answers `found: folder-link`, `created: false`, exit 0,
+  nothing created; every other verb exits 1, `state_unreadable`, `the state
+  folder is a symbolic link whose target is missing or is not a folder;
+  nothing was written` -- `show` and `source list` included, which printed
+  an empty listing with exit 0 before. `ensure_private_dir` refuses the same
+  shapes for EVERY caller with `FolderUnusable` (an `OSError`, so a caller
+  that already downgrades one to a warning keeps doing so), which `main()`
+  reports as code `folder_unusable`, `<path> is a symbolic link whose target
+  is missing or is not a folder; nothing was written` or `<path> is not a
+  folder; nothing was written`, exit 1, never a traceback. A link at a
+  folder that DOES lead to a folder is followed, and the folder it leads to
+  is made 0700 (measured, below; decided: it is the plugin's own folder,
+  wherever the user put it, so it gets rule 6's mode, and the README says
+  so). The model: `Model.stateInitFound` passes `folder-link` through,
+  `Model.stateLoadDecision` re-reads once and then blocks with it, and
+  `Model.stateUnreadableNotice` gains its row (the round-12 table above),
+  naming the FOLDER. Python, the real helper as a subprocess under a
+  timeout: `StateFolderLinkTest` (`test_a_dangling_folder_link_is_refused_by_every_verb_and_left_alone`,
+  `test_init_answers_folder_link_creates_nothing_and_exits_0`,
+  `test_a_link_above_the_folder_is_refused_by_show`,
+  `test_a_valid_folder_link_is_followed_by_every_verb_and_its_target_made_0700`,
+  `test_d_src_34_a_file_link_into_a_folder_that_cannot_be_written_is_a_sentence`),
+  `FolderLinkSiblingsTest` (`test_each_caller_answers_a_sentence_and_writes_nothing`)
+  and `test_r25c_a_logo_folder_link_that_leads_nowhere_is_a_sentence_and_nothing_is_written`
+  in `tests/test_logos.py`; node `R25c: stateInitFound passes folder-link
+  through; ...` and `R25c (<tag>): a start over a state FOLDER link that leads
+  nowhere ...` on both hosts and echo modes. No key-scenario segment drives a
+  folder link.
+- R25d. Node, through the harness on both hosts and echo modes: `R25d
+  (<tag>): a5 -- while a failed save is held, the helper adds a favourite
+  and then removes it again: the second write is compared with the base the
+  FIRST moved it to ...` and `R25d (<tag>): a7 -- a foreign write that
+  already carries the in-flight favourite plus another lands first: ... the
+  merge is saved again ...`, each red on its mutation patch
+  (`spikes/key-mutations/r25d-a5-base-not-moved.patch`, 4 of 4 pins;
+  `r25d-a7-no-inflight-half.patch`, the four a7 pins and the in-flight R25b
+  saved-search pin). Live, key-scenario B19-B22, each in the scenario's own
+  nested cage on a private bus. B19, R24a's first live observation: the
+  state folder loses `w` under the running shell, so the in-app label
+  change's save fails and is HELD; two hand edits IN PLACE (a 0600 file needs
+  no folder `w`) add a favourite and remove it again inside that one window,
+  which is a5's shape; a hand-run helper write lands (and makes the folder
+  0700 again); a second in-app change follows -- both in-app changes and the
+  helper's favourite are in the file, the favourite the hand edits removed
+  stays removed, and a restart stands on all of it (`held:true
+  edits:true/true helper:0 merged:3 labels:A=in-app-two,C=in-app-one
+  favs:t:helper.uk restart:in-app-one,in-app-two/t:helper.uk`). a7's window
+  is milliseconds wide and is pinned in node only, as the ruling allows. B20
+  is R25a's restore. B21, the existing-folder session damaged after an own
+  save: a migrated install starts, an in-app change's save LANDS, then
+  garbage is written in place -- noticed and told once (`blocked:unparsed
+  told:1 file:garbage{`). B22, the same block's Sources header (`header:Saving
+  has stopped rows:2`).
+- R25e. Not fixed, as ruled; the documents state the limit (below). The
+  helper's own help text (`state --help` and the module help) mentions no
+  symbolic link, so it gains no sentence.
+- D-DOC-11. `tests/service-harness.js` models what was measured: a fault
+  `dangling-link-nodir` (the target's folder missing) fails the view's save,
+  and `dangling-link` (the folder present) SUCCEEDS and creates the target,
+  after which the link leads somewhere; `folder-link` fails it, because there
+  is no folder for the temporary file. Pinned `D-DOC-11 (<host> host, the
+  double): ...`, red against dev's double on both hosts.
+- D-SRC-34. `write_state_file` turns an `OSError` writing THROUGH a link into
+  `state_unwritable`, `state.json is a symbolic link into a folder that
+  cannot be written (Permission denied); nothing was written`, exit 1, the
+  temporary file removed and the folder's mode unchanged (and `state.json
+  could not be written (...); nothing was written` at the path itself).
+- D-SRC-36. `Model.mergeConflictLine` reads `... kept the other program's
+  version of the source <key> (<fields>)` and `... kept the other program's
+  version of activeKey`.
+- D-SRC-37. `mergeForeignState`'s comment states the set rule the code keeps:
+  theirs' elements in theirs' order, minus what ours removed since the base,
+  then ours' additions -- the same SET as "ours, plus what theirs added,
+  minus what theirs removed", in theirs' ORDER. The rest of D-SRC-37 (a merge
+  can leave `activeKey` naming a source the other side removed or re-keyed,
+  with no conflict line; `failedProc` and `whichProc` unbounded) is filed and
+  not this round's.
+- D-SRC-38. `Model.stateBlockedHeader(reason, path, midSession)`: `Saving has
+  stopped` in a block that began after a state loaded, the notice's title
+  otherwise; `Model.sourcesHeaderRight` takes the fourth argument and
+  `Guide.qml` hands it `service.stateLoaded`. Node `D-SRC-38:
+  sourcesHeaderRight / stateBlockedHeader -- ...` and `D-SRC-38
+  (structural): the guide hands the header the service's stateLoaded ...`;
+  live B22. The notification and the guide body keep the start's title in a
+  mid-session block (open question 2 below).
+- F-HARNESS-27. `tests/test_state.py`'s in-process `run()` disarms the
+  helper's init alarm after every call, and so does the second in-process
+  runner rule 15 found, `tests/test_source.py`'s; pinned
+  `test_f_harness_27_an_in_process_init_leaves_no_alarm_in_the_test_runner`
+  (red with the disarm deleted: `AssertionError: 30 != 0`).
+- F-HARNESS-28. key-scenario's printed `--baseline` / `--tree` footer leads
+  with round 15's sentence (B20 and B22 red on dev; B19 and B21 seen red by
+  mutation), and every older sentence names the tree it was measured on and
+  says "were". The cage's lifetime is 1500 s, inside `private-bus.sh`'s 2400
+  s: a mutated tree whose waits all time out outlived 500 s and read
+  NOSTATE, a red for the wrong reason.
+
+**What a burst's echoes carry (R25a), measured 2026-10-14 by lane A.**
+`scripts/dev-harness/spikes/filewatch/measure.sh <helper> r25`, the committed
+`shell.qml` FileView with an ordered signal log and `burst` / `spread` IPC,
+in a nested headless cage on a private D-Bus; two runs (REPS 3 with 8 busy
+loops, load 1.2-7.2; REPS 4 with 12, load 1.6-10.2), printed into
+`RESULT-2026-10-14-r25.txt`. Run 1's 0 ms spreads used a `Timer` of interval
+0 that never fired, and run 2 replaced it with a `Qt.callLater` chain. Over
+the 100 bursts that saved, 85 echoes (a `loaded` after the view's own
+`setText`): every one carried the text of the latest `saved` before it; STALE
+0 (an earlier text of the burst after the last text's `saved`), superseded 0,
+and none arrived while a later text of the burst was already asked (0 of 85).
+Every in-turn burst raised one `saved` per `setText` -- no coalescing in this
+rig, where the 26-write probe of 2026-10-12 saw some. So clearing
+`recentSaves` when the last text lands cannot mistake a stale echo for
+another writer's. The node double is MORE adversarial than the measurement
+(rule 10 allows that direction): in coalesce mode it delivers an echo after
+every `saved`, mid-burst included, and the coalesced-burst pin shows that
+echo still reads as own-write; `spikes/key-mutations/r25a-clear-every-saved.patch`
+(clear on every `saved`) turns it foreign.
+
+**What `ensure_private_dir` does through a link at a folder (R25c), measured
+2026-10-14 by lane A.** `scripts/dev-harness/spikes/folder-link/measure.py
+<helper>`, the helper as a subprocess (`python3 -B -I`, timeout 30), dev's
+helper and lane-key-k1's, printed into `RESULT-2026-10-14.txt` beside it:
+
+| Shape | dev 002662d | lane-key-k1 |
+|---|---|---|
+| a link to a 0755 folder: `show`, `source list` | followed; the folder's mode unchanged | the same |
+| a link to a 0755 folder: `init`, `favorite add` | followed; the TARGET made 0700; the link left a link | the same |
+| a link to a 0500 folder: `favorite add` | succeeds; the target made 0700 | the same |
+| a dangling folder link: `show`, `source list` | exit 0 with an EMPTY state | exit 1, `state_unreadable` |
+| a dangling folder link: `init` | `FileNotFoundError` traceback, `internal` | `found: folder-link`, `created: false` |
+| a dangling folder link: `favorite add`, `clear-recents` | traceback, `internal` | exit 1, `state_unreadable` |
+| a folder link to a FILE: `show`, `favorite add` / `init` | exit 1, the not-a-dir sentence / `not-a-dir` | exit 1, `state_unreadable` / `found: folder-link` |
+| a `state.json` link into a 0500 folder: `favorite add` (D-SRC-34) | `PermissionError` traceback, `internal` | exit 1, `state_unwritable`, the folder still 0500 |
+| a cache folder dangling: `cache migrate`, `cache prune`, `failed mark` | traceback, `internal` | exit 1, `folder_unusable` |
+| the cache's `sources/` dangling: `cache migrate` | exit 0, silently | exit 1, `folder_unusable` |
+| a cache folder or the runtime folder linked to a 0755 folder: `failed mark`, `cache migrate`, `player stop` | followed; the target made 0700 | the same |
+| the runtime folder dangling: `player stop` | traceback, `internal` | exit 1, `folder_unusable` |
+
+The logo folder (`write_logo`) is pinned in `tests/test_logos.py`;
+`ensure_player_dirs` (screenshots, watch-later, shader cache) keeps turning
+an `OSError` into a warning, `FolderUnusable` included. A dangling link ABOVE
+the state folder (an `XDG_STATE_HOME` that is a link) is `broken_folder_link`'s
+too, and pinned.
+
+**What the FileView does when a link at `state.json` is REPLACED (R25e),
+measured by the round-14 data-loss and claims lenses.** Their rigs are in
+the session scratch directory, not in the tree: a bare FileView declared as
+`stateFile` (`fvlinks.sh`, `fvlinks2.sh`) and a scratch copy of the
+filewatch spike with a set `rk`, each in a nested headless cage on a private
+bus, and the real `Service.qml` driven live (`probe14.sh`); load 2.2-5.6.
+
+| Sequence | Start | What happened |
+|---|---|---|
+| C8, C9, C11 | a link to a file | a regular file `mv`'d over the PATH (the `jq` + `mv` idiom), `rm` + `cp`, or the target in the same folder: `changed:0` for that write and for a later in-place write of the path; the next own save wrote memory over it |
+| C10 (control) | a regular file | a regular file `mv`'d over it: `changed:1 loaded:2` -- seen |
+| C1, C1b, Z4, Z6, Z6b | a link to a file | the link re-pointed (`ln -sfn`) to a new target: nothing raised for the relink, for a later helper write or for an in-place write to the new target; the next own save replaced the new target's contents with the session's memory |
+| Z7 | a link to a file | re-pointed, then ONE explicit `reload()`: `loaded+1`, and every later helper and in-place write seen (`fileChanged+1 loaded+1`) |
+| Z1, Z2, Z3, Z5 (control) | a link to a file | an in-place edit of the TARGET, a rename onto the TARGET's own path, own saves: all seen |
+| M1-M3 (control) | a regular file | moved into a dotfiles folder mid-session and linked back (`mv` + `ln`, or `cp` + `ln`): helper and in-place writes seen afterwards |
+| Z8 | a link to a file | the target removed (`fileChanged+1 loadFailed+1`: the session blocks as `absent`), then restored: `fileChanged+0 loaded+0`, and a later helper write too -- never seen again (D-SRC-35) |
+| Z9, C6 | a link to a file | the target removed with its folder kept, then an own save: `saved+1`, the target CREATED through the link (D-DOC-11) |
+
+So a replacement at the PATH -- of the link, or by a file over the link --
+leaves the view watching something that is no longer there; a write to the
+TARGET's own path, in place or by rename, is seen. 0.13.6 loses the same edits,
+and its own helper also replaced the link. The lever (one `reload()`
+re-arms, Z7) is filed for a later release; nothing in the tree re-arms the
+view after a replacement it cannot see.
+
+**False statements corrected where they stood (lane-key-k2, the documents
+lane).**
+- D-SRC-29 (R25e) and D-SRC-35: the README's `state.json` entry under "Files
+  it writes", its Troubleshooting bullets on a symbolic link, on a file
+  changed while the shell runs and on "Saved sources not loaded";
+  `UX-SOURCES.md` 5.10 items 5 and 6; the contract's fact seven;
+  `ARCHITECTURE.md` section 5's round-14 amendment and security standard 5;
+  `QA.md` TC-CFG-16 and TC-CFG-21; `QA-SOURCES.md` SRC-MIG-49. Each now says
+  what is noticed (the helper's writes, a write through the link, an edit of
+  the target in place or by a rename onto the target's own path), what is
+  not (a tool that replaces the link or puts a file over it: `mv`, `sed -i`
+  on the link's path, `rm` and `cp`, `ln -sfn`), and what to do (edit the
+  target in place, put a backup back with `cp`, or restart the shell
+  straight after such a tool and before using the guide); and that a link
+  whose target went missing is not noticed coming back.
+- D-DOC-11: the contract's fact seven, this file's round-14 sequence X, the
+  harness README's set `r24` note; the double was lane A's.
+- D-SRC-36: every quotation of the conflict line -- the README, `UX-SOURCES.md`
+  5.10 item 8, this file's round-14 section and its model table, `QA.md`
+  TC-CFG-20.
+- D-SRC-30's promise ("a backup put back is re-read"): it is now true, and
+  the one case where a restore has no effect is stated where the promise is
+  (a copy equal to what the file already holds while a change made here
+  waits to be saved: the README and `UX-SOURCES.md` 5.10 item 8).
+- D-SRC-31's promise ("both sides' new sources are kept"): the README and
+  `UX-SOURCES.md` 5.10 item 8 now add the caps and the notice.
+- The round-14 records that said no key-scenario segment observes the
+  existing-folder session after an own save, or the merge (`UX-SOURCES.md`
+  5.10 item 4, `QA.md` TC-CFG-16 and TC-CFG-20, `QA-SOURCES.md` SRC-MIG-41,
+  -44 and -48, this file's round-14 section, the harness README's round-13
+  and round-14 notes): bracketed with B21 and B19.
+- The README's harness count (116 -> 120, the summary line).
+
+**Rule 15, lane A's searches (lane-key-k1), recorded so the next person
+inherits them.**
+- R25a's shape (an own text treated as an echo after it was superseded):
+  `recentSaves` is the only record of own texts and `applyUserState` its
+  only reader. `lastSaveText` is compared with the view's text only in
+  `onSaved` and `onSaveFailed`, the landing, which is not an echo test:
+  cleared. The other FileViews are written by the helper only and have no
+  own-write test: cleared.
+- R25b's shape (a cap applied silently after a merge): in
+  `mergeForeignState`, `sources`, `savedSearches` and `hiddenGroups`; the
+  third FIXED as the sibling. Favourites have no cap; `recents` and the
+  whole-field values are taken whole, not added: cleared. The round-14
+  reviewer's transient (a 51st record in memory while a URL edit's probe
+  runs): cleared -- the edit keeps the replacement in `probeEdit`, never in
+  `userState`, and its commit removes the old record first. A NEW finding in
+  the same shape outside the merge, not fixed (open question 1 below).
+- R25c's shape (a link at a folder that leads nowhere): every
+  `ensure_private_dir` caller, through the real helper; the table above.
+  A regular file in the chain is a sentence too now (`is not a folder`),
+  where it was a `NotADirectoryError` traceback; the state verbs keep the
+  existing `not-a-dir`. The D-ID-1 remap over a dangling folder: `read_json`
+  answers `None` and nothing is written (unchanged, cleared).
+- D-SRC-34's shape (a write refused in a folder that is not chmod-ed): only
+  `write_state_file` writes with `private_dir` false; every other
+  `write_json_atomic` caller is in the plugin's own folders, which
+  `ensure_private_dir` repairs: cleared.
+- D-DOC-11's shape (the dangling-link save stated wider than measured): the
+  double and `measure.sh`'s `dangle` wording corrected; the RESULT files are
+  records of what was measured and are accurate.
+- D-SRC-36: `mergeConflictLine` is the only composer and no code quotes the
+  old string. D-SRC-38: `sourcesHeaderRight` is the only header composer; the
+  guide body's notice and the notification keep the start's title (open
+  question 2). F-HARNESS-27: the second in-process runner,
+  `tests/test_source.py`'s, fixed the same way. F-HARNESS-28: the footer is
+  the only printed text that cites a red.
+
+**This lane's search, by shape, over the documents (rule 15).**
+- "A symlinked `state.json` is noticed whatever writes it" (D-SRC-29): every
+  sentence in the nine files this lane writes that names a symbolic link at
+  the state path, or promises that another program's change is re-read --
+  the README (the "Files it writes" entry, three Troubleshooting bullets and
+  the helper-refusal bullet's "picked up by the running shell"),
+  `UX-SOURCES.md` 5.10 items 5, 6 and 8, `UX.md` 6.1's round-14 bracket and
+  6.3's row, the contract's facts six and seven, `ARCHITECTURE.md` section 5
+  and security standard 5, `QA.md` TC-CFG-21, `QA-SOURCES.md` SRC-MIG-49, the
+  harness README's set `r24` note. Corrected where a sentence promised more
+  than the measurement; cleared where it already named only the helper's
+  writes (contract fact seven's last sentences, the R24b records).
+- "Putting a good copy back is enough" (D-SRC-35): the README's no-write
+  bullet and `UX-SOURCES.md` 5.10 item 5 (corrected); `QA.md` TC-CFG-16
+  ("putting a good file back lifts the mode", B7: a regular file, true as
+  written; narrowed to say so).
+- "A dangling link fails the view's save" (D-DOC-11): the contract, this
+  file's sequence X, the harness README's set `r24` note, `ARCHITECTURE.md`'s
+  round-14 amendment (which says only that the init answers `link`:
+  cleared).
+- "A merge keeps both sides" (D-SRC-31): the README, `UX-SOURCES.md` 5.10 item
+  8, `QA.md` TC-CFG-20, this file's round-14 merge rules (bracketed);
+  `ARCHITECTURE.md` section 5's round-14 amendment (bracketed).
+- "Sources in a mid-session block reads `Saved sources not loaded`"
+  (D-SRC-38): `UX-SOURCES.md` 3.2.6 and 5.10 item 4, `UX.md` 6.3, the README's
+  no-write bullet, `QA-SOURCES.md` SRC-MIG-52.
+- "A state folder that is a link" (R25c): none of the nine files said
+  anything about it before this round; the README, `UX-SOURCES.md` 5.10 items
+  1 and 6, `UX.md` 6.3, `ARCHITECTURE.md` security standard 5 and `QA.md` /
+  `QA-SOURCES.md` now do. Whether the shell's watch notices changes when the
+  FOLDER is a link has not been measured, and the documents say so rather
+  than extending the file link's facts to it.
+- Numbers round 15 moved: the README's harness count (116 -> 120), the
+  gate's floors (2,459 -> 2,502 node, 1,194 -> 1,202 python), key-scenario's
+  lettered floor (115 -> 119).
+
+**Seen red (lane A).** Node, the tip's `tests/` in a `git archive dev`
+export: 2,502 checks, 36 failures in both echo modes (tip 2,502 / 0) -- R25a's
+four pins on all four host and echo shapes (16), R25b's two service pins (8),
+R25c's folder-link start (4), the R25b model pins (2), R25c's model pin (1),
+D-SRC-38's (2), the reload fixture's R9 and R15 (2) and the conflict-line
+grammar (1). The D-DOC-11 double pin is red against dev's
+`tests/service-harness.js` on both hosts (2). Green on dev and seen red by
+mutation instead (`spikes/key-mutations/`, applied to an export; failures
+with own echo `load` / `none`): `r25d-a5-base-not-moved` 4 / 4, exactly the
+a5 pins; `r25d-a7-no-inflight-half` 8 / 8, the a7 pins and the in-flight
+R25b saved-search pin; `r25a-keep-landed` 16 / 16, every R25a pin;
+`r25a-clear-every-saved` 13 / 11, among them the coalesced-burst pin with the
+echo on; `r25b-silent-drop` 8 / 8, every R25b service pin;
+`d3-save-parked` (re-made, R25a moved its hunk) 10 / 10, the D-SRC-15 pins
+as before. Python, the tip's `tests/` against dev's helper: `test_state` 13
+failures and 5 errors, all in `StateFolderLinkTest` and
+`FolderLinkSiblingsTest`; `test_logos`'s logo-folder pin errors (no
+`FolderUnusable`); the valid-folder-link test is a control dev passes, which
+shows that behaviour unchanged. Live: `--baseline dev` 118 / 2 (B20
+`restored:1 records:1 label:after-restore restart:1`, B22 `header:Saved
+sources not loaded rows:2`; `key-20261014-144201-1513141`); `--tree` with
+`r25d-a5-base-not-moved.patch` 119 / 1 (B19 `merged:2 ...
+favs:t:helper.uk,t:h3.uk`: the favourite the second hand edit removed is
+written back; `key-20261014-144904-1545059`); `--tree` with
+`r25d-no-reload-on-change.patch` 110 / 10 (B21 `blocked: told:0`, with D3,
+W3, W6, B7, B9, B16, B19, B20 and B22, every segment that needs a reload;
+`key-20261014-151410-1653892`).
+
+**Counts.** On dev 002662d: node 2,459 (the same with the own echo off);
+python 1,194; qml spec 78; `qa-lib-test.sh` 472; key preflight 11;
+key-scenario's live floor 115 lettered checks, summary 116. On lane-key-k1
+0ccea19 (lane A's report; `./scripts/check.sh` all green on the tip at load
+about 2.2, and on 56a30d5 and 1d8599f): node 2,502 (+43: 36 through the
+service harness, 2 for the D-DOC-11 double, 5 model pins), the same with the
+echo off; python 1,202 (+8: `StateFolderLinkTest` 5, `FolderLinkSiblingsTest`
+1, the F-HARNESS-27 alarm 1, the logo folder link 1); qml spec 78;
+`qa-lib-test.sh` 472; key preflight 11; `node scripts/split-model.mjs
+--check` 766 declarations in 18 parts; key-scenario live floor 119
+(B19-B22), forward 120 / 0 in 385.9 s at load 1.9-2.3
+(`key-20261014-153026-1723779`; 120 / 0 on b10b5b6 too,
+`key-20261014-143514-1482764`); sources-scenario 66 / 0 and logo-scenario
+33 / 0, each as the child of a nested headless cage on a private bus. The
+gate's floors: `NODE_CHECKS_MIN` 2,502, `PY_TESTS_MIN` 1,202. Every live run
+under a nested headless cage on a private D-Bus with no service directories;
+the real home's mesa shader cache mtime and `~/.config` / `~/.cache` listings
+were unchanged across every run. The transcripts are in lane A's session
+scratch directory, not the tree.
+
+**Open for the lead (decision requests and new findings with evidence; the
+board's ids are the lead's).**
+- (1) A NEW finding, R25b's shape outside the merge, not fixed (lane A,
+  `lane-k1/probe51.js` over the tip's `Service.qml` through
+  `tests/service-harness.js`, both hosts). At 49 sources an in-app add passes
+  the cap check; if a hand-run `state source add` takes the 50th place while
+  the add's probe runs, that foreign write is applied (nothing is held yet),
+  and the probe's commit then appends the in-app record: memory and the file
+  hold 51 (`memory=51 file-records=51`), and the next start's `parseState`
+  keeps 50 and drops the in-app source silently (`after-restart=50
+  Z-after-restart=false warnings-naming-Z=0`). 0.13.6 does the same.
+  Suggested P3; the fix is one guard at the commit, which already has a
+  `too_many` code. The documents promise a notice only for a MERGE that
+  passes a limit, which is what the code keeps, and the README and
+  `UX-SOURCES.md` 5.10 item 8 name this case as not covered yet, so no
+  document promises what the code does not do.
+- (2) D-SRC-38 changed the Sources header only, as ruled; in a MID-session
+  block the guide body's notice and the notification still use the start's
+  title, `Saved sources not loaded`. Should they follow?
+- (3) A restore equal to the CURRENT base while an in-app save is held (an
+  in-app change lands, a copy is taken, the next change's save fails, the
+  copy is put back): the text matches the base, so it is ignored as
+  `save-failed`, and the held change wins at the next landed save. The disk
+  never moved, so nothing the user wrote is lost, but the restore has no
+  effect. The README and `UX-SOURCES.md` now say so; acceptable as stated?
+- (4) A dangling `sources/` link under the cache root: `cache migrate`
+  answered exit 0 over it and now refuses (`folder_unusable`, exit 1), so the
+  start-up cache layout reports a failed migrate there. Every later fetch
+  failed in a traceback on both trees anyway. Confirm this is not "worse
+  than 0.13.6".
+- (5) This lane's: whether the watch notices external changes when the state
+  FOLDER (not the file) is a link was not measured; the documents state the
+  folder link's behaviour for the helper and the start-up block only.
+- (6) This lane's, two small slips in lane A's files (not this lane's to
+  edit): `key-scenario.sh` calls B21 "D-DOC-9's half" where the open half it
+  closes was D-DOC-8's (round-14 open item 8); and
+  `spikes/key-mutations/README.md` says `r25a-keep-landed.patch` is caught
+  by "key-scenario's B19 restore", where the restore segment is B20 (and
+  cites "16 of 2491", a count from before the tip's 2,502).
+- The round-14 open questions (1)-(6) stand as asked; (7) and (8) are
+  answered above (D-SRC-38, B21).
