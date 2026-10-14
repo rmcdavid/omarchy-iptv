@@ -9,6 +9,9 @@ import {
   helperArgv
 } from "./mpv.mjs"
 import {
+  firstRunAllowed
+} from "./view.mjs"
+import {
   MAX_SOURCE_URL, CONTROL_RE, sanitizeInput, sourceErrorMessage,
   validateSourceUrl, normalizeSourceUrl, validateLabel, CLIPBOARD_MAX_CHARS
 } from "./sources.mjs"
@@ -348,7 +351,9 @@ function closeSources(st, opts) {
     if (cur.form) { cur.mode = cur.form.kind === "xtream" ? "sourceXtream" : "sourceEdit"; return cur }
     return openFirstRun(cur)
   }
-  if (o.configured === false) {
+  // R23e: never INTO the first-run form while the no-write mode holds
+  // (Model.firstRunAllowed); the guide behind is the no-write surface then.
+  if (o.configured === false && str(o.stateBlocked) === "") {
     cur.form = null
     return openFirstRun(cur)
   }

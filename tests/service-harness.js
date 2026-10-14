@@ -53,7 +53,9 @@ function makeIds(h) {
       }
     }
   })
-  const timer = name => ({ name, restart() {}, stop() {}, start() {}, running: false })
+  // Timers do not run; restart() and stop() are COUNTED, so a test can see
+  // that a watchdog was armed (R23c) without the harness running its clock.
+  const timer = name => ({ name, restarts: 0, stops: 0, restart() { this.restarts++ }, stop() { this.stops++ }, start() {}, running: false })
   const view = name => ({ name, reload() {}, text() { return "" }, setText() {} })
   return {
     stateFile: h.stateFile,
@@ -67,6 +69,11 @@ function makeIds(h) {
     cacheProc,
     failedProc: proc("failedProc"),
     probeWatchdog: timer("probeWatchdog"),
+    // R23c: the init's watchdog and its kill grace. Timers do not run here;
+    // a test that times the init out calls h.initExit({ timeout: true }),
+    // which runs the watchdog's OWN onTriggered and then the exit handler.
+    stateInitWatchdog: timer("stateInitWatchdog"),
+    stateInitKill: timer("stateInitKill"),
     switchTimeout: timer("switchTimeout"),
     configShieldDebounce: timer("configShieldDebounce"),
     channelsFile: view("channelsFile"),
@@ -444,6 +451,11 @@ function bootService(serviceText, Model, o) {
   const onSaveFailed = compile("error", failedText || "", "onSaveFailed")
   const initText = handlerBlock(serviceText.slice(serviceText.indexOf("target: stateInitProc")), "function onExited(exitCode, exitStatus) {")
   const onInitExited = compile("exitCode, exitStatus", initText || "", "onInitExited")
+  // R23c: the init watchdog's own handler, from its text ("" on a tree
+  // without one: the timeout then changes nothing, which is that tree).
+  const watchdogText = serviceText.indexOf("id: stateInitWatchdog") === -1 ? ""
+    : handlerBlock(serviceText.slice(serviceText.indexOf("id: stateInitWatchdog")), "onTriggered: {") || ""
+  const onInitWatchdog = compile("", watchdogText, "stateInitWatchdog_onTriggered")
   // stateFile's two LOAD handlers, from their own text (R22a): the harness
   // never calls applyUserState itself any more, so a load is classified the
   // way the shipping handlers classify it. One-line handlers: `onLoaded: X`
@@ -524,6 +536,7 @@ function bootService(serviceText, Model, o) {
   // A helper process's exit, with its own status text.
   h.probeExit = (statusText) => { ids.sourceProbeProc.running = false; root.handleProbeExit(statusText); h.runLater() }
   h.STUBBED = STUBBED
+  h.ids = ids
   // The start, in the order the shell makes it: `shell` arrives (a reconcile
   // that is a no-op until the state loads), the state file loads, the
   // helper's `state init` exits, and the queued events drain.
@@ -538,7 +551,20 @@ function bootService(serviceText, Model, o) {
   // is handled ("reload-first", the default) or after it ("exit-first"):
   // the inotify event and QProcess's finished signal race for real.
   h.initExit = (o2) => {
-    const io = Object.assign({ code: opts.initCode || 0, order: opts.initOrder || "reload-first" }, o2 || {})
+    const io = Object.assign({ code: opts.initCode || 0, order: opts.initOrder || "reload-first", timeout: opts.initTimeout === true }, o2 || {})
+    if (io.timeout) {
+      // R23c: the init never answers. The watchdog fires while it runs (its
+      // own handler: TERM and the flag), the process dies having printed
+      // nothing and changed nothing, and QProcess reports the exit -- a
+      // signal death, exit code 15 -- to the shipping exit handler.
+      ids.stateInitProc.running = true
+      onInitWatchdog()
+      ids.stateInitProc.running = false
+      h.stateInitStdout.text = ""
+      onInitExited(15, 1)
+      h.runLater()
+      return
+    }
     const out = h.helperInit(io.code)
     if (out.raises && io.order === "reload-first") { h.loadState(); h.runLater() }
     onInitExited(io.code, 0)

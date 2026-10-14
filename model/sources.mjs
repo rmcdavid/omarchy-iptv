@@ -240,6 +240,20 @@ function persistFailureMessage(reason) {
   return sourceErrorMessage(r)
 }
 
+// D-SINK-19 round 13, R23f. What a refusal the guide shows SAYS. In the
+// no-write mode (`blocked`, Service.stateWriteBlocked: the reason, "" when
+// writes are allowed) every refusal says the no-write reason, whatever the
+// call answered: the round-12 live lens turned logos on in that mode and
+// was told "Could not save settings - try omarchy bar set" -- the wrong
+// reason and the wrong advice, because the guide mapped every `false` to
+// persist_failed. Otherwise the sentence for the code: `kind` "persist"
+// reads it as a sourcesPersistFailed reason (persistFailureMessage), any
+// other kind as a result code (sourceErrorMessage).
+function refusalMessage(code, blocked, kind) {
+  if (str(blocked) !== "") return sourceErrorMessage("state_unreadable")
+  return kind === "persist" ? persistFailureMessage(code) : sourceErrorMessage(code)
+}
+
 // ---- URL validation (ARCHITECTURE-SOURCES 3.1 with the UX 5.4 codes, SR6)
 //
 // Accepted: absolute paths, `file://` URLs (normalized to the path) and
@@ -916,17 +930,18 @@ export {
   URL_FIELDS, FORM_LIMITS, MONTHS, CONTROL_RE, EDGE_SPACE_RE, capLength,
   sanitizeInput, codePoints, codePointLength, capCodePoints, sanitizeTyping,
   lowerFirst, sourceErrorMessage, sourceReason, PERSIST_FAILURE_REASONS,
-  persistFailureMessage, ZERO_WIDTH_RE, IPV6_LITERAL_RE, looksLikeHost,
-  validateSourceUrl, normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
-  EPG_ORIGIN_PLAYLIST, epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE,
-  epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
-  findSourceByUrl, allocateSourceKey, sourceCacheDir, hostPortOf, deriveLabel,
-  labelKey, labelTaken, uniqueLabel, defaultSourceLabel, validateLabel,
-  maskQuery, maskUrl, encodeQueryValue, xtreamUrls, validateXtream,
-  pluralGroups, countsLine, sameDay, formatLastUsed, formatAgo, sourceView,
-  sourceViews, sourceRows, EPG_HINT_ROW_TEXT, sourceDetail,
-  sourceAccessibleName, sourcesHeaderCount, sourcesRowAccessibleName,
-  confirmLogosMessage, confirmRemoveMessage, fetchingLine, probeFailureLine,
-  sourceTransient, CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS,
-  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
+  persistFailureMessage, refusalMessage, ZERO_WIDTH_RE, IPV6_LITERAL_RE,
+  looksLikeHost, validateSourceUrl, normalizeSourceUrl, EPG_ORIGIN_NONE,
+  EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST, epgHintUrl, resolveEpgUrl,
+  EPG_HINT_NOTICE, epgOriginNotice, isUrlField, sourceKey, isSourceKey,
+  findSource, findSourceByUrl, allocateSourceKey, sourceCacheDir, hostPortOf,
+  deriveLabel, labelKey, labelTaken, uniqueLabel, defaultSourceLabel,
+  validateLabel, maskQuery, maskUrl, encodeQueryValue, xtreamUrls,
+  validateXtream, pluralGroups, countsLine, sameDay, formatLastUsed,
+  formatAgo, sourceView, sourceViews, sourceRows, EPG_HINT_ROW_TEXT,
+  sourceDetail, sourceAccessibleName, sourcesHeaderCount,
+  sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
+  fetchingLine, probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
+  CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS,
+  CLIPBOARD_MAX_BYTES
 }

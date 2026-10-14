@@ -1281,11 +1281,17 @@ ShellRoot {
         out.guide = {
           opened: g.opened, mode: g.mode, query: g.query, scopeId: g.scopeId, effectiveScope: g.effectiveScope,
           cursorIndex: g.cursorIndex, rows: g.currentRows.length, resultTotal: g.resultTotal, truncated: g.truncated,
-          // R22c: the empty state as DRAWN (emptyTitleText / emptyProseText,
-          // absent on a guide without them, NOFIELD) and the hint's own copy,
-          // which every guide has -- so a tree from before the change reads
-          // its old hint rather than nothing.
+          // What the body DRAWS (emptyTitleText / emptyProseText, absent on a
+          // guide without them, NOFIELD): since R23h the first-run form's head
+          // when IT shows, else the empty state when it shows, else "" --
+          // round 12's version of these read the empty state's copy whether
+          // or not it was on screen, and the first-run form draws another
+          // sentence. `emptyShown` and `firstRunHead` say which one it was.
+          // The hint's own copy rides along, which every guide has -- so a
+          // tree from before R22c reads its old hint rather than nothing.
           rowsHaveDetail: g.rowsHaveDetail, emptyKind: g.emptyKind, emptyTitle: g.emptyTitleText, emptyProse: g.emptyProseText,
+          emptyShown: g.emptyStateShown, firstRunHead: g.firstRunHead, firstRunForm: g.firstRunForm, stateBlocked: g.stateBlocked,
+          footerHints: g.footerHintText,
           errorCheck: g.copy ? g.copy.errorCheck : undefined,
           bannerKind: g.bannerKind, bannerText: g.bannerText,
           scopeLabel: g.scopeLabelText, footer: g.footerStatusText, warning: g.warningText, narrow: g.narrow, showColumn: g.showColumn,

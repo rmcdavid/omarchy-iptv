@@ -44,6 +44,10 @@ Item {
   readonly property string home: Quickshell.env("HOME")
   readonly property string cacheDir: (Quickshell.env("XDG_CACHE_HOME") || (home + "/.cache")) + "/omarchy-iptv"
   readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || (home + "/.local/state")) + "/omarchy-iptv"
+  // The one spelling of the state file's path: stateFile watches it, the
+  // no-write notice names it, and the guide's no-write surface (R23e) names
+  // it with the notice's own words.
+  readonly property string stateFilePath: stateDir + "/state.json"
   readonly property string runtimeDir: (Quickshell.env("XDG_RUNTIME_DIR") || cacheDir) + "/omarchy-iptv"
   readonly property string socketPath: runtimeDir + "/mpv.sock"
   readonly property string helperPath: decodeURIComponent(Qt.resolvedUrl("bin/omarchy-iptv").toString().replace(/^file:\/\//, ""))
@@ -94,6 +98,20 @@ Item {
   // its own 60 s download deadline; this is the belt and braces for a
   // helper that is stuck anywhere else (DNS, TLS, a parser bug).
   readonly property int helperTimeoutMs: 180 * 1000
+  // D-SINK-19 round 13, R23c: the bound on the start-up `state init`, which
+  // every state write and the held load wait on. Before it there was none:
+  // a FIFO at state.json hung the init in open() (R23b closes that in the
+  // helper) and the service waited for ever, untold, leaving an orphaned
+  // helper at every start. Measured 2026-10-13 on this 4-core machine, 30
+  // runs each of the real init over a fresh and an existing file: idle
+  // 214-215 ms; six busy loops (1.5x oversubscribed) median 543, max 968
+  // ms; twelve (3x) median 1246, max 1769 ms. 15 s is 8.5x the worst of
+  // those and 70x idle: a start that slow is already failing the user, and
+  // a false timeout costs one session in the no-write mode, told, with
+  // nothing lost -- a smaller harm than waiting for ever.
+  readonly property int stateInitTimeoutMs: 15 * 1000
+  // How long a terminated init has to exit before it is killed outright.
+  readonly property int stateInitKillGraceMs: 2 * 1000
 
   // ---- settings (decision 7, R2). shell.barConfig is refreshed by the host on
   // every shell.json change (shell.qml syncPluginApis), so these re-evaluate
@@ -651,6 +669,9 @@ Item {
   property bool stateLoadRetried: false
   property string stateWriteBlocked: ""
   property bool stateBlockTold: false
+  // R23c: set by stateInitWatchdog when it terminates the init; read once,
+  // by the init's exit (Model.stateInitFound answers "timeout").
+  property bool stateInitTimedOut: false
   property int stateWritesRefused: 0
   // R5: the key whose entry mirror is WAITING for a parked state save
   // (Model.pointerWritePlan "wait-entry"); null when nothing waits. Written
@@ -2101,6 +2122,18 @@ Item {
 
   onChannelOrderChanged: root.applyOrder()
 
+  // R23c: the start-up init, bounded. The watchdog (stateInitWatchdog) TERMs
+  // a run that has not exited within stateInitTimeoutMs and KILLs it after
+  // stateInitKillGraceMs; either way QProcess reaps it, and its exit handler
+  // decides the held load as the no-write mode. The helper itself no longer
+  // blocks on anything at the state path (R23b); this is the second fix,
+  // for whatever else could hold it.
+  function startStateInit() {
+    root.stateInitTimedOut = false
+    stateInitProc.running = true
+    stateInitWatchdog.restart()
+  }
+
   // D-SINK-19 round 12, R22a. EVERY load of state.json arrives here first,
   // from stateFile's onLoaded and onLoadFailed alike, and is classified
   // before anything is applied (Model.stateLoadKind). Only a load that IS a
@@ -2151,7 +2184,7 @@ Item {
     root.settleEntryFlush()
     if (root.stateBlockTold) return
     root.stateBlockTold = true
-    var path = root.stateDir + "/state.json"
+    var path = root.stateFilePath
     console.warn("omarchy-iptv: " + Model.stateUnreadableNotice(r, path).body)
     root.notify("stateUnreadable", { reason: r, path: path })
   }
@@ -4954,7 +4987,7 @@ Item {
 
   FileView {
     id: stateFile
-    path: root.stateDir + "/state.json"
+    path: root.stateFilePath
     watchChanges: true
     atomicWrites: true
     printErrors: false
@@ -5158,6 +5191,35 @@ Item {
       console.warn("omarchy-iptv: " + (root.controlKind || "control") + " helper exceeded "
                    + Math.floor(root.controlTimeoutMs / 1000) + " s, terminating it")
       controlProc.signal(15)
+    }
+  }
+
+  Timer {
+    // R23c: the bound on the start-up `state init` (startStateInit). The
+    // shape of playlistWatchdog: TERM, flag, and the exit handler decides --
+    // plus a KILL after a grace, because nothing else would ever reap a
+    // helper that ignored the TERM, and the init is the one run the whole
+    // start waits on.
+    id: stateInitWatchdog
+    interval: root.stateInitTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!stateInitProc.running) return
+      console.warn("omarchy-iptv: state init exceeded " + Math.floor(root.stateInitTimeoutMs / 1000) + " s, terminating it")
+      root.stateInitTimedOut = true
+      stateInitProc.signal(15)
+      stateInitKill.restart()
+    }
+  }
+
+  Timer {
+    id: stateInitKill
+    interval: root.stateInitKillGraceMs
+    repeat: false
+    onTriggered: {
+      if (!stateInitProc.running) return
+      console.warn("omarchy-iptv: state init ignored the terminate signal, killing it")
+      stateInitProc.signal(9)
     }
   }
 
@@ -5411,7 +5473,7 @@ Item {
   }
   Connections {
     target: mkdirProc
-    function onExited(exitCode, exitStatus) { stateInitProc.running = true }
+    function onExited(exitCode, exitStatus) { root.startStateInit() }
   }
 
   Process {
@@ -5435,16 +5497,21 @@ Item {
   Connections {
     target: stateInitProc
     function onExited(exitCode, exitStatus) {
+      stateInitWatchdog.stop()
+      stateInitKill.stop()
       root.dirsReady = true
       // R11: the helper's exit code is read, not assumed. A failed init (the
       // state directory could not be made, say) means the save below may
       // fail too, and the entry mirror must not strip the URL on top of it.
-      root.stateInitOk = exitCode === 0
-      if (!root.stateInitOk) console.warn("omarchy-iptv: state init exited " + exitCode + "; state.json may be unwritable")
+      // R23c: a run the watchdog stopped is a failed one, whatever it exited.
+      root.stateInitOk = exitCode === 0 && !root.stateInitTimedOut
+      if (!root.stateInitOk) console.warn("omarchy-iptv: state init " + (root.stateInitTimedOut ? "was stopped after " + Math.floor(root.stateInitTimeoutMs / 1000) + " s" : "exited " + exitCode) + "; state.json may be unwritable")
       // R22a: the witness the held load was waiting for. A fresh install is
       // applied here; anything else is re-read once (the helper restores the
-      // modes it finds) and then blocks.
-      root.stateInitFound = Model.stateInitFound(stateInitStdout.text, exitCode)
+      // modes it finds) and then blocks. R23c: a timed-out init is no
+      // witness at all, and the held load decides as the no-write mode
+      // ("init-timeout", Model.stateLoadDecision).
+      root.stateInitFound = Model.stateInitFound(stateInitStdout.text, exitCode, root.stateInitTimedOut)
       root.decideStateLoad()
       // R5: the parked state save FIRST, then the entry mirror that waited
       // for it. The other order is the pointer-less source the review found.

@@ -7205,6 +7205,71 @@ checkCall("R22a: stateUnreadableNotice -- one sentence per reason, each naming t
 }, { namesTheFile: true, restart: true, noUrl: true, distinct: 5, title: "Saved sources not loaded", noPath: true,
      argv: ["omarchy-notification-send", "74017", "Saved sources not loaded", true], verb: true })
 
+// ---- R23c (D-SINK-19 round 13): the start-up init is bounded. A run the
+// service's watchdog stopped is no witness ("timeout"), and the load that
+// waited on it decides as the no-write mode with a reason of its own, whose
+// sentence names the file and says what to do -- never a URL.
+checkCall("R23c: stateInitFound answers \"timeout\" for a run the watchdog stopped, whatever it printed or exited with; stateLoadDecision blocks a WAITING load with \"init-timeout\" (no retry: nothing a re-read could fix), while a load that is a state still applies and a mid-session load decides as before", () => {
+  const reply = JSON.stringify({ ok: true, kind: "state", action: "init", found: "absent", created: true })
+  return {
+    found: [Model.stateInitFound("", 15, true), Model.stateInitFound(reply, 0, true), Model.stateInitFound(reply, 0, false), Model.stateInitFound("", 15, false), Model.stateInitFound(reply, 0)],
+    waiting: ["not-a-file", "unparsed", "absent", "permission", "io-error"].map(kind => Model.stateLoadDecision({ kind, initFound: "timeout" })),
+    retriedToo: Model.stateLoadDecision({ kind: "absent", initFound: "timeout", retried: true }),
+    loaded: Model.stateLoadDecision({ kind: "loaded", initFound: "timeout" }).act,
+    midSession: Model.stateLoadDecision({ kind: "unparsed", initFound: "timeout", loadedBefore: true })
+  }
+}, { found: ["timeout", "timeout", "absent", "unknown", "absent"],
+     waiting: ["not-a-file", "unparsed", "absent", "permission", "io-error"].map(() => ({ act: "block", reason: "init-timeout" })),
+     retriedToo: { act: "block", reason: "init-timeout" }, loaded: "apply", midSession: { act: "block", reason: "unparsed" } })
+checkCall("R23c: stateUnreadableNotice(\"init-timeout\") is its own sentence -- it names the file, says the start-up check was stopped and what to do (restart included), carries no URL, and the notification is that sentence", () => {
+  const path = "/home/u/.local/state/omarchy-iptv/state.json"
+  const told = Model.stateUnreadableNotice("init-timeout", path)
+  const others = ["permission", "not-a-file", "unparsed", "absent", "io-error"].map(r => Model.stateUnreadableNotice(r, path).body)
+  const argv = Model.notifyArgv("stateUnreadable", { reason: "init-timeout", path })
+  return [told.title, told.body.indexOf(path) === 0, /stopped/.test(told.body), /omarchy restart shell\.$/.test(told.body),
+          told.body.indexOf("://") === -1, others.indexOf(told.body) === -1, argv[argv.length - 1] === told.body]
+}, ["Saved sources not loaded", true, true, true, true, true, true])
+
+// ---- R23e: the no-write mode has its own guide surface, never the first-run
+// form. The decision (guideSurface, firstRunAllowed, closeSources) here; what
+// is DRAWN is read live through the dev harness (key-scenario B11).
+checkCall("R23e: guideSurface -- an unconfigured guide in the no-write mode is \"stateUnreadable\", not the setup surface (no saved-sources link, no rows); without the mode it is \"unconfigured\" as before; a configured guide that still holds channels keeps its rows", () => {
+  const base = { serviceReady: true, configured: false, channelCount: 0, status: "ok", rowCount: 0, query: "", scopeId: "", sources: 3 }
+  const pick = o => { const s = Model.guideSurface(o); return [s.empty, s.setup, s.savedSources, s.showList] }
+  return [pick(Object.assign({}, base, { stateBlocked: "unparsed" })), pick(Object.assign({}, base, { stateBlocked: "init-timeout" })),
+          pick(base), pick(Object.assign({}, base, { stateBlocked: "" })),
+          pick(Object.assign({}, base, { configured: true, channelCount: 20, rowCount: 20, stateBlocked: "unparsed" })),
+          pick(Object.assign({}, base, { serviceReady: false, stateBlocked: "unparsed" }))]
+}, [["stateUnreadable", false, 0, false], ["stateUnreadable", false, 0, false], ["unconfigured", true, 3, false], ["unconfigured", true, 3, false],
+    ["", false, 0, true], ["service", false, 0, false]])
+check("R23e: firstRunAllowed -- the first-run form only for a ready, unconfigured guide with writes allowed",
+  [{ serviceReady: true, configured: false, stateBlocked: "" }, { serviceReady: true, configured: false, stateBlocked: "unparsed" },
+   { serviceReady: true, configured: true, stateBlocked: "" }, { serviceReady: false, configured: false, stateBlocked: "" },
+   { serviceReady: true, configured: false }, null].map(o => Model.firstRunAllowed(o)),
+  [true, false, false, false, true, true])
+checkCall("R23e: the Esc / `o` return from Sources lands in the first-run form only when writes are allowed -- in the no-write mode it lands in the guide (the no-write surface)", () => {
+  const sources = Model.withMode(Model.guideState(), "sources")
+  const pick = st => [st.mode, st.form ? st.form.origin : null]
+  return [pick(Model.closeSources(sources, { configured: false })), pick(Model.closeSources(sources, { configured: false, stateBlocked: "unparsed" })),
+          pick(Model.onEscape(sources, { configured: false, stateBlocked: "unparsed" }).state), pick(Model.onEscape(sources, { configured: false }).state)]
+}, [["sourceEdit", "firstRun"], ["search", null], ["search", null], ["sourceEdit", "firstRun"]])
+
+// ---- R23f: every refusal the guide shows in the no-write mode says that
+// mode's reason. The round-12 live lens: logos on, in that mode, answered
+// "Could not save settings - try omarchy bar set".
+checkCall("R23f: refusalMessage -- in the no-write mode the state_unreadable sentence whatever the code or kind (never `omarchy bar set`); otherwise the code's own sentence, a persist reason through persistFailureMessage", () => {
+  const unread = Model.sourceErrorMessage("state_unreadable")
+  return {
+    blocked: [Model.refusalMessage("persist_failed", "unparsed"), Model.refusalMessage("persist_failed", "init-timeout", "persist"),
+              Model.refusalMessage("state_write_failed", "permission", "persist"), Model.refusalMessage("busy", "not-a-file")].map(m => m === unread),
+    advice: Model.refusalMessage("persist_failed", "unparsed").indexOf("omarchy bar set") === -1,
+    open: [Model.refusalMessage("persist_failed", "") === Model.sourceErrorMessage("persist_failed"),
+           Model.refusalMessage("state_write_failed", "", "persist") === Model.persistFailureMessage("state_write_failed"),
+           Model.refusalMessage("nonsense", "", "persist") === Model.persistFailureMessage("persist_failed"),
+           Model.refusalMessage("busy", undefined) === Model.sourceErrorMessage("busy")]
+  }
+}, { blocked: [true, true, true, true], advice: true, open: [true, true, true, true] })
+
 // R9: the reload disposition, every case from the shared fixture.
 checkCall("R9: reloadDisposition over every `reload` case of the shared fixture -- a reload never replaces in-memory state newer than the file", () => {
   return activeKeyFixture.reload.map(c => c.name + ": " + JSON.stringify(Model.reloadDisposition(c.ctx)))
@@ -7508,12 +7573,16 @@ checkCall("R16 / round-4 P2: persistFailureMessage renders THE reason's sentence
   }
 }, { emitted: ["config_unsafe", "persist_failed", "state_write_failed"], everyEmittedIsKnown: true, distinct: true, noUrl: true, barSetOnlyFor: ["persist_failed"],
      stateWriteNamesTheDirectory: true, configUnsafeNamesTheChmod: true, sameAsTheTable: true, fallback: true })
-checkCall("R16 / round-4 P2 (structural): the guide hands the signal's reason through and renders Model.persistFailureMessage(reason) on both surfaces, never persist_failed's sentence by name", () => {
+// R23f (round 13): the reason now reaches persistFailureMessage THROUGH
+// Model.refusalMessage(reason, root.stateBlocked, "persist"), which answers
+// the no-write mode's sentence in that mode and persistFailureMessage(reason)
+// otherwise (pinned by calling it, below under R23f).
+checkCall("R16 / round-4 P2 (structural): the guide hands the signal's reason through and renders it through Model.refusalMessage(reason, ..., \"persist\") (persistFailureMessage outside the no-write mode, R23f) on both surfaces, never persist_failed's sentence by name", () => {
   const fn = (guideSource.match(/function showPersistFailed\(reason\) \{[\s\S]*?\n  \}/) || [""])[0]
   return {
     found: fn !== "",
     routes: /function onSourcesPersistFailed\(reason\) \{ root\.showPersistFailed\(reason\) \}/.test(guideSource),
-    rendersTheReason: fn.indexOf("Model.persistFailureMessage(reason)") !== -1,
+    rendersTheReason: fn.indexOf('Model.refusalMessage(reason, root.stateBlocked, "persist")') !== -1,
     bothSurfaces: /root\.failForm\(\{ code: "persist_failed", field: "", message: message \}\)/.test(fn) && /root\.showTransient\(message\)/.test(fn),
     noSentenceByName: fn.indexOf('sourceErrorMessage("persist_failed")') === -1,
     noOtherCaller: (guideSource.match(/root\.showPersistFailed\(/g) || []).length === 1
@@ -12342,6 +12411,64 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         h.stateFile.reload(); h.drain()
         return { memory, quiet, lifted: [h.root.stateWriteBlocked, h.root.userState.sources.length, h.root.userState.favorites.length] }
       }, { memory: [2, true, m.reason, 1], quiet: [true, true, "state_unreadable", 1], lifted: ["", 2, 1] })
+    }
+    // R23a (round 13). The lift RE-ARMS the notice: liftStateBlock resets
+    // stateBlockTold, so a later episode in the same session is told again.
+    // The round-12 data-loss lens deleted that one line (its X13) and read
+    // 0 of 2354 failing here and nothing red live, while in a second episode
+    // an in-app favourite was refused and the user never told. Two episodes,
+    // reached the way the real view reaches them mid-session (an in-place
+    // write it reloads, R23g), with no own save between them. Seen red with
+    // scripts/dev-harness/spikes/key-mutations/r23a-no-rearm.patch applied.
+    for (const mode of ["lag", "echo"]) for (const between of ["no own save", "an own save"]) {
+      checkCall("R23a (" + mode + " host, mid-session, " + between + " between): TWO no-write episodes -- the lift re-arms the notice, so the second episode is told again, and an in-app favourite refused in it is refused AND told", () => {
+        const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA, { favorites: FAV }), mode)
+        const good = h.stateFile.disk
+        h.stateFile.disk = "{\"version\": 2, \"sources\": ["; h.stateFile.reload(); h.drain()
+        const first = [h.root.stateWriteBlocked, told(h)]
+        h.stateFile.disk = good; h.stateFile.reload(); h.drain()
+        const lifted = [h.root.stateWriteBlocked, told(h)]
+        if (between === "an own save") { h.root.toggleFavorite("t:y.uk"); h.drain() }
+        h.stateFile.disk = ""; h.stateFile.reload(); h.drain()
+        const disk2 = h.stateFile.disk, refused0 = h.root.stateWritesRefused
+        h.root.toggleFavorite("t:x.uk"); h.drain()
+        return { first, lifted, second: [h.root.stateWriteBlocked, told(h)], favourite: [h.root.stateWritesRefused - refused0, h.stateFile.disk === disk2] }
+      }, { first: ["unparsed", 1], lifted: ["", 1], second: ["unparsed", 2], favourite: [1, true] })
+    }
+    // R23c (round 13): the start-up init is bounded. The service waited on it
+    // with no watchdog, and the round-12 lenses found a FIFO at state.json
+    // hanging it for ever: no notice, a start that never settled, and an
+    // orphaned helper per start. The helper no longer blocks on anything at
+    // the path (R23b, test_state); this is the second fix. The timeout runs
+    // the watchdog's OWN onTriggered and then the shipping exit handler.
+    for (const mode of ["lag", "echo"]) {
+      checkCall("R23c (" + mode + " host): startStateInit arms the init's watchdog and clears the timed-out flag before every run", () => {
+        const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA, { favorites: FAV }), mode)
+        const before = h.ids.stateInitWatchdog.restarts
+        h.root.stateInitTimedOut = true
+        h.root.startStateInit()
+        return [h.ids.stateInitWatchdog.restarts - before, h.root.stateInitTimedOut, h.ids.stateInitProc.running]
+      }, [1, false, true])
+      for (const f of [{ id: "something that is not a file (a FIFO reads as NotAFile)", fault: "is-dir" }, { id: "a file that does not parse", text: "{\"version\": 2, \"sources\": [" }]) {
+        checkCall("R23c (" + mode + " host): the init never answers over " + f.id + " -- the watchdog stops it, the held load decides as the no-write mode with its own reason, the user is told once by a sentence naming the file, and nothing is written to the file or the entry", () => {
+          const start = { sourceKey: KA, showLogos: false }
+          const text = f.text !== undefined ? f.text : migratedText([rec(A), rec(B)], KA, { favorites: FAV })
+          const h = boot(start, text, mode, { exists: true, fault: f.fault, initTimeout: true })
+          const disk0 = h.stateFile.disk
+          const notice = h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74017") !== -1).map(a => a[a.length - 1])
+          const r = h.root
+          const verbs = [r.addSource({ playlistUrl: NEW }).code, r.switchSource(KB).code]
+          r.toggleFavorite("t:x.uk"); r.setShowLogos(true); h.drain()
+          return { blocked: r.stateWriteBlocked, found: r.stateInitFound, initOk: r.stateInitOk, timedOut: r.stateInitTimedOut, told: told(h),
+                   notice: notice.length === 1 && notice[0] === M.stateUnreadableNotice("init-timeout", r.stateFilePath).body && notice[0].indexOf("://") === -1,
+                   verbs, written: [h.stateFile.disk === disk0, h.stateFile.events.length, h.host.writes.length, JSON.stringify(entryOf(h)) === JSON.stringify(start)] }
+        }, { blocked: "init-timeout", found: "timeout", initOk: false, timedOut: true, told: 1, notice: true,
+             verbs: ["state_unreadable", "state_unreadable"], written: [true, 0, 0, true] })
+      }
+      checkCall("R23c (" + mode + " host): an init that times out AFTER the state loaded leaves the session as it was -- the load had nothing left to wait for; the init counts as failed (stateInitOk false) and nobody is told", () => {
+        const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA, { favorites: FAV }), mode, { initTimeout: true })
+        return [h.root.stateLoaded, h.root.stateWriteBlocked, h.root.stateInitOk, h.root.activeSourceKey === KA, told(h)]
+      }, [true, "", false, true, 0])
     }
     for (const mode of ["lag", "echo"]) {
       // R22b, the list as a check: EVERY owned-entry writer the service has,

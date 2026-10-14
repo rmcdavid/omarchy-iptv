@@ -1191,7 +1191,10 @@ function stateLoadKind(result) {
 // (a file, a directory, something it could not lstat), and "unknown" when
 // there is no reply to read: the init failed, printed nothing, or is a build
 // that predates the field. Only "absent" can make a fresh install.
-function stateInitFound(text, exitCode) {
+// R23c (round 13): `timedOut` -- the service's watchdog killed the init --
+// answers "timeout", whatever the killed process printed or exited with.
+function stateInitFound(text, exitCode, timedOut) {
+  if (timedOut === true) return "timeout"
   if (Number(exitCode) !== 0) return "unknown"
   var lines = str(text).split("\n")
   for (var i = lines.length - 1; i >= 0; i--) {
@@ -1231,6 +1234,10 @@ function stateLoadDecision(ctx) {
   if (c.loadedBefore === true) return { act: "block", reason: kind }
   var found = str(c.initFound)
   if (found === "") return { act: "wait", reason: "init" }
+  // R23c: the init never answered (the service's watchdog killed it), so
+  // there is no witness and nothing a re-read could fix: the load that was
+  // waiting on it decides as the no-write mode, with that reason.
+  if (found === "timeout") return { act: "block", reason: "init-timeout" }
   if (kind === "absent" && found === "absent") return { act: "fresh", reason: "absent" }
   if (c.retried !== true) return { act: "retry", reason: kind }
   return { act: "block", reason: kind === "absent" && found !== "unknown" ? "absent-unconfirmed" : kind }
@@ -1272,6 +1279,11 @@ function stateUnreadableNotice(reason, path) {
   } else if (r === "absent" || r === "absent-unconfirmed") {
     what = "could not be found, or its folder could not be read"
     fix = "Make the folder readable with chmod 700, then run omarchy restart shell."
+  } else if (r === "init-timeout") {
+    // R23c: the start-up check of the file (the helper's `state init`) did
+    // not answer within Service.stateInitTimeoutMs and was stopped.
+    what = "could not be checked: the start-up check did not answer and was stopped"
+    fix = "Make sure a regular file, or nothing, is at that path, then run omarchy restart shell."
   }
   return { title: "Saved sources not loaded",
            body: file + " " + what + ". Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. " + fix }

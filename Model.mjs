@@ -161,9 +161,9 @@ export {
   noMatchesTitle
 } from "./model/contrast.mjs"
 export {
-  barGlyph, barTooltip, barAccessibleName, guideSurface, footerStatus,
-  footerHints, formHints, keyboardMapUntabled, hideMeaning, sameEscape,
-  verbForKey, setKeyRow, keyboardMap, keyboardMapKeys
+  barGlyph, barTooltip, barAccessibleName, guideSurface, firstRunAllowed,
+  footerStatus, footerHints, formHints, keyboardMapUntabled, hideMeaning,
+  sameEscape, verbForKey, setKeyRow, keyboardMap, keyboardMapKeys
 } from "./model/view.mjs"
 export {
   CACHE_LAYOUT, MAX_SOURCES, MAX_SOURCE_URL, MAX_LABEL, MAX_XTREAM_SERVER,
@@ -171,15 +171,15 @@ export {
   TRACKS_KEY, DETAIL_KEY, REWIND_KEY, FORWARD_KEY, LIVE_KEY, REWIND_STEP_S,
   BEHIND_LIVE_SHOW_S, HELP_KEY, SOURCE_KEYS, SOURCE_KEY_RE, sanitizeInput,
   codePointLength, capCodePoints, sanitizeTyping, sourceErrorMessage,
-  sourceReason, PERSIST_FAILURE_REASONS, persistFailureMessage, looksLikeHost,
-  validateSourceUrl, normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
-  EPG_ORIGIN_PLAYLIST, epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE,
-  epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
-  findSourceByUrl, allocateSourceKey, sourceCacheDir, deriveLabel, labelTaken,
-  uniqueLabel, defaultSourceLabel, validateLabel, maskUrl, encodeQueryValue,
-  xtreamUrls, validateXtream, pluralGroups, countsLine, formatLastUsed,
-  formatAgo, sourceView, sourceViews, sourceRows, EPG_HINT_ROW_TEXT,
-  sourceDetail, sourceAccessibleName, sourcesHeaderCount,
+  sourceReason, PERSIST_FAILURE_REASONS, persistFailureMessage,
+  refusalMessage, looksLikeHost, validateSourceUrl, normalizeSourceUrl,
+  EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST, epgHintUrl,
+  resolveEpgUrl, EPG_HINT_NOTICE, epgOriginNotice, isUrlField, sourceKey,
+  isSourceKey, findSource, findSourceByUrl, allocateSourceKey, sourceCacheDir,
+  deriveLabel, labelTaken, uniqueLabel, defaultSourceLabel, validateLabel,
+  maskUrl, encodeQueryValue, xtreamUrls, validateXtream, pluralGroups,
+  countsLine, formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
+  EPG_HINT_ROW_TEXT, sourceDetail, sourceAccessibleName, sourcesHeaderCount,
   sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
   fetchingLine, probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
   CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS,
