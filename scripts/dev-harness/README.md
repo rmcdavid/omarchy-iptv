@@ -1399,8 +1399,12 @@ cores, agreed. So tests/service-harness.js keeps its hand-delivered
 external reloads and makes the own-write echo a lever, `ownEcho` "load" |
 "none", and scripts/check.sh runs the node suite both ways (2372 / 0
 each). The lost watch the lenses reported (D-SRC-19's mechanism) did not
-reproduce in any sequence here; their rigs were lost with /tmp, so the
-difference is not known.
+reproduce in any sequence here. [Corrected 2026-10-14, D-DOC-8: this said
+"the difference is not known". The round-13 live lens found it -- every
+sequence above starts with the state directory PRESENT, and the lenses'
+rigs started with it absent, the first session after a fresh install,
+where the view raises nothing all session; round 14 measured it in this
+spike (set `r24`) and R24c re-arms that session. See Round 14 below.]
 
 [Annotated by the round-13 documents lane (lane-key-p2), 2026-10-14. The
 transcripts behind the counts above, in lane A's session scratch directory:
@@ -1414,7 +1418,87 @@ FileView spike is. So the mid-session no-write mode AFTER an own save rests on
 one uncommitted instrument against the round-12 data-loss lens's opposite
 reading, and is UNVERIFIED (rule 14) until a committed scenario observes it;
 B9 covers the half with no own save. `docs/ARCHITECTURE-SOURCES.md`'s
-round-13 rulings hold the decision request.]
+round-13 rulings hold the decision request.] [2026-10-14, round 14: the
+"opposite reading" was the dir-absent session (above). B16 now observes the
+mode beginning after an own save in that session; for a session whose
+directory already existed, after an own save, the committed spike and the
+round-13 live lens's rig observe it, and no key-scenario segment does.]
+
+#### Round 14 (R24): the merge, the fresh session's watch, the KILL and the init's own deadline
+
+key-scenario.sh B15..B18, each under the scenario's own nested cage on a
+private session bus (`private-bus.sh`). B15 a no-write START's Sources
+screen: the header's right slot is the notice's title (`Model.
+stateUnreadableNotice`), no Add rows, no add hint, and `a` opens no form,
+says the no-write reason and leaves no editable field (R24f). B16 the
+FRESH install's first session in the production shape -- `run.sh` makes
+XDG_STATE_HOME and `h clean` removes `omarchy-iptv/` under it -- where a
+hand-run `state source add` is seen, kept through the next in-app add's
+save, and garbage written in place after that save is noticed and told once
+(R24c). B17 a start-up init that IGNORES TERM is KILLed and reaped, the
+load blocking as `init-timeout` (R24g; the watchdog line and the kill line
+are both read from the log). B18 the shell stopped 5 s into a held init:
+the init outlives the shell, reparented to `systemd --user`, and ends by its
+own SIGALRM deadline, polled by its recorded pid to its start plus 36 s
+(R24d). `left:` in B17 and B18 is `init_pids`, the exact-argv scan of
+/proc; whatever it finds goes to ORPHANS and the scenario's cleanup kills it
+by pid. Counts are the summary line's, the floor 115 lettered checks:
+forward 116 / 0 (`key-20261014-095236-969838`, 342.5 s, on lane-key-q1
+318af7f); `--baseline dev` (ced1bd1) 113 / 3, B15 `header:[No sources]
+rows:2 after-a:sourceEdit says:other`, B16 `seen:0 file:D blocked: told:0`
+and B18 `after-deadline:alive(<pid>)` (`key-20261014-095838-996891`); B17 is
+green there, because dev had the KILL, and is seen red through `--tree`
+with `spikes/key-mutations/r24g-no-kill.patch`: 115 / 1, `blocked:
+helper:no(<pid>) left:<pid> told:0` (`key-20261014-100528-1027361`). B15's
+`addhint` token cannot go red at row 0 (dev's Add-row hints carry no ` add`
+either); its other tokens can. sources-scenario 66 / 0 and logo-scenario
+33 / 0, each as the child of a nested headless cage on a private bus. The
+transcripts are in lane A's session scratch directory, not the tree. The
+R24a merge has no live segment: the ruling asked for the fixture table and
+`tests/service-harness.js`, and the data-loss lens's WF FAV WOK HADD FAV
+runs there on both hosts, both echo modes, parked, in flight and failed.
+
+What changed in the rigs:
+- `fixtures/slow-helper.py` gains `OMARCHY_IPTV_SLOW_IGNORE_TERM=1` (a
+  slowed verb ignores SIGTERM; SIG_IGN survives the exec, so the real
+  helper ignores it too) and `OMARCHY_IPTV_SLOW_AT=inside` (instead of
+  sleeping before the real helper, run it in this process with its first
+  `lstat()` of a `state.json` held -- a hung filesystem made deterministic --
+  so the real verb's own code, its alarm included, is what is held; the
+  helper is loaded with bytecode off from the scenario's scratch copy, so no
+  `__pycache__` is written). Measured alone with `SLOW_AT=inside` and
+  `SLOW_MS=60000`: `state init` died `Alarm clock` (rc 142) after 30.2 s.
+- `private-bus.sh` hands its command a HOME of its own (F-HARNESS-25):
+  HOME, XDG_CONFIG_HOME, XDG_DATA_HOME, XDG_CACHE_HOME and XDG_STATE_HOME
+  inside `DIR/home`, removed with DIR at exit; MPV_HOME and XCOMPOSEFILE
+  dropped; XDG_RUNTIME_DIR left alone (the nested socket and the quickshell
+  instance registry live there). A scenario run under it therefore sees the
+  scratch home as HOME; lane A's runs passed
+  `OMARCHY_IPTV_HARNESS_REAL_HOME=$HOME` so that `run.sh`'s theme copy
+  (`seed_scratch_theme`, through `qa_harness_real_home`) still reads the
+  real theme, read-only:
+  `OMARCHY_IPTV_HARNESS_REAL_HOME=$HOME scripts/dev-harness/private-bus.sh
+  /run/user/1000/omarchy-iptv-q1-b2 2400 env
+  OMARCHY_IPTV_HARNESS_DIR=/run/user/1000/omarchy-iptv-q1-2
+  scripts/dev-harness/key-scenario.sh live`. `tests/test_harness_home.py`
+  `PrivateBusIsolatesHome` runs `private-bus.sh` for real with a probe, and
+  the filewatch spike with a stand-in `cage` that records the environment it
+  is handed, each against a decoy home, and was red against dev's scripts (2
+  of 2).
+  Lane A also compared the real home before and after every cage run (the
+  mesa shader cache's mtime, the `~/.config` and `~/.cache` listings):
+  unchanged.
+- `spikes/filewatch/measure.sh <helper> r24` is a second sequence set (Q..X,
+  below in Spikes); `spikes/key-mutations/` gains `r24g-no-kill.patch`, and
+  `d3-save-parked.patch` and `r14-no-return.patch` are re-made because R24a
+  moved their hunks (the same decision broken, the same comment).
+- The node double (`tests/service-harness.js`): a boot with no file and no
+  fault starts `dirAbsent` and UNARMED, as measured; `reload()` arms it once
+  the file exists; `h.foreign()` and the own-write echo reach only an armed
+  view; the init's creation raises a load only when armed; `dirPresent:
+  true` gives the other shape; and it decides what a TERM-ignoring process
+  does, so the KILL is observed (rule 10: an always-armed double fails the 2
+  R24c double checks).
 
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 
@@ -1521,6 +1605,24 @@ None is part of the gate.
   both), PNG/GIF/WEBP at control memory, and the `QT_IMAGEIO_MAXALLOC`
   bracket that puts the threshold at ceil(dim/8)^2 x 4. It decodes bombs on
   purpose and is never part of the gate; `logo-scenario.sh check-tree` is.
+- `spikes/filewatch/measure.sh <helper> [set]`: what Quickshell's FileView
+  does to its WATCH (D-SINK-19 rounds 13 and 14). One FileView declared
+  exactly as the service's `stateFile` (`shell.qml` beside it), a fresh shell
+  per sequence, 1.5 s a step, run under `private-bus.sh` (so a nested cage on
+  a private D-Bus with no service directories, and a scratch home). The
+  default set is round 13's 16 sequences of own saves, helper renames,
+  in-place writes, chmods and restarts (`RESULT-2026-10-13.txt`: every
+  external change seen); set `r24` is round 14's (`RESULT-2026-10-14-r24.txt`,
+  two runs, dev's helper and lane-key-q1's): Q, the state directory absent at
+  the first load -- nothing seen all session; R, S, T, R2, one `reload()` (or a
+  path reset) after the start-up `mkdir`/`init` re-arms it for good; U, the
+  directory present and the file absent -- the creation seen without help; V
+  and W, a valid symlink at the path -- the view's own save writes through
+  it, dev's helper replaced it and the view then saw nothing, lane-key-q1's
+  writes through and every write is seen; X, a dangling link -- the view's
+  save raises `saveFailed`. The default set is named `r23g`. Needs cage;
+  not part of the gate (`tests/test_harness_home.py` runs it with a stand-in
+  `cage` only to check where it writes).
 - `spikes/clip-offer/`: the lead's D-CLIP-1 rig, verbatim -- three probe
   windows (`editable.qml`, `readonly.qml`, `nofield.qml`) and the gdb
   catchpoint on `pipe2` (`gdb.cmds`) that attributed the read to

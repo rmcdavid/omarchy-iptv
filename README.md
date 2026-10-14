@@ -793,8 +793,8 @@ Nothing inside the plugin directory is written at runtime.
   while the link leads to a regular file -- the plugin and its `state`
   commands read and write the file it points to and leave the link in
   place. Up to and including 0.13.6 the helper's `state` commands replaced
-  such a link with a plain file, after which a running shell saw none of
-  their later writes. If the link leads nowhere (its target moved, or sits
+  such a link with a plain file, and in the test that measured it the
+  running shell then noticed none of the later changes to the file. If the link leads nowhere (its target moved, or sits
   on a drive not mounted yet) or to something that is not a file, the
   plugin writes nothing and says `... is a symbolic link whose target is
   missing or is not a regular file ... Restore the file it points to, or

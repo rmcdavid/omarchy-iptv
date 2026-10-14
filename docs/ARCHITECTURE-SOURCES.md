@@ -4758,8 +4758,9 @@ key-scenario B15-B18, the spike's r24 set, `private-bus.sh`'s scratch home;
   `scripts/dev-harness/private-bus.sh` hands its command HOME and the XDG
   directories inside its own directory and removes them after;
   `tests/test_harness_home.py` `PrivateBusIsolatesHome` runs `private-bus.sh`
-  and the filewatch spike for real against a decoy and is red against dev's
-  scripts (2 of 2, `HOME=... is not the scratch home`). Lane A also checked
+  for real with a probe, and the filewatch spike with a stand-in `cage` that
+  records its environment, each against a decoy home, and is red against
+  dev's scripts (2 of 2, `HOME=... is not the scratch home`). Lane A also checked
   the real home before and after every cage run this round: the mesa shader
   cache's mtime and the `~/.config` and `~/.cache` listings unchanged.
 - R24h. This section, and the corrections below.

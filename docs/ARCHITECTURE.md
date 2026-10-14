@@ -1467,7 +1467,9 @@ re-graded P2: on the lagging host the patch-only logo write re-carried a
 refused credential that no record holds, it stayed in `shell.json` for the
 session, and at the next start the re-carried value, seen as new, replaced a
 later in-app edit that had landed (live). D-SRC-19 (P3, shipped): the
-service never reloads a helper `state` write. F-PERF-2 (P3): the cold first
+service never reloads a helper `state` write [round 14: re-scoped to the
+first session after a fresh install by the round-13 live lens, and re-armed
+there by R24c]. F-PERF-2 (P3): the cold first
 open over 150 ms with `dev` unmeasured. R20a: the helper keeps what the
 service writes, on one shared fixture, with a check over every key the
 service can serialise. R20b: what the service has consumed from the entry is

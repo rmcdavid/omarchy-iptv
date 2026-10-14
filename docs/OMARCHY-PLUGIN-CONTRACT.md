@@ -704,8 +704,10 @@ Two neighbouring facts, read rather than run:
   2026-10-13: and since R21 a NON-empty `playlistUrl` or `epgUrl` the host
   stores this way is refused once the migration has landed -- the host still
   writes it, because it checks no schema, and the plugin's next owned write
-  removes it. Both keys are still declared in `manifest.json`, so the host
-  still offers them; that file is not the documents lane's.] [Round 13,
+  removes it. Both keys are still declared in `manifest.json`; that file is
+  not the documents lane's. (This bracket also said "so the host still offers
+  them"; corrected 2026-10-14, D-DOC-9 -- the next bracket's measurement shows
+  the host offers nothing on the strength of the declaration.)] [Round 13,
   2026-10-13, measured by lane A on omarchy 4.0.4-1 and re-read by the
   documents lane on 2026-10-14; nothing changed. "Offers" is generous: no host
   file RENDERS `schema` today. An undeclared key on a bar entry still reaches
@@ -740,7 +742,9 @@ with `watchChanges: true`, `atomicWrites: true` and `onFileChanged: reload()`,
 and these four facts are what R9-R11 (`ARCHITECTURE-SOURCES.md`, round 3)
 are built on [a fifth, about `loadFailed`, was added on 2026-10-13 and is
 what R22a (round 12) is built on; a sixth, about the watch itself, the same
-day by round 13's R23g, and it is disputed]:
+day by round 13's R23g, disputed until the round-13 live lens found the
+variable on 2026-10-14; the fourth was re-measured and a seventh, about a
+symlink at the path, added the same day by round 14's R24b and R24c]:
 
 - **`saved` fires once per `setText` -- for two back-to-back calls, and NOT
   for a burst (corrected 2026-10-12, round 4).** Two `setText` calls back to
@@ -784,7 +788,13 @@ day by round 13's R23g, and it is disputed]:
   or the real service's own save under six busy loops on four cores,
   delivered a load -- under load carrying the view's own text. The echo is
   timing-dependent, and the node harness now runs both ways (the sixth fact
-  below).]
+  below).] [2026-10-14, D-SINK-19 round 14 (R24a): "ignores a parked or
+  in-flight save by its flag" now holds only for a reload whose text is the
+  service's BASE (the text it loaded or last saw land, compared through
+  `Model.sameState`); a reload carrying any other text while a save is held
+  is a FOREIGN write and is merged (`Model.mergeForeignState`), because
+  ignoring it let the next save write over a hand-run helper write
+  (D-SRC-22).]
 - **A FileView loaded over a MISSING path does not see the file being
   created by another process.** Over a fresh install (no state directory, no
   file) the helper's `state init` creates `state.json` under the parked
@@ -792,7 +802,27 @@ day by round 13's R23g, and it is disputed]:
   whole fresh start and the key scenario's N1-N4 are green on the very tree
   that drops D2. Whether the watch is installed by the first successful load
   or by the first own write is unmeasured (lane B's DQ-B8); a reader of
-  `watchChanges` should not assume a missing file is watched.
+  `watchChanges` should not assume a missing file is watched. [Re-measured
+  2026-10-14, D-SINK-19 round 14 (R24c), lane A:
+  `scripts/dev-harness/spikes/filewatch/measure.sh <helper> r24`, one
+  FileView declared as `stateFile` is, nested headless cage on a private
+  D-Bus, 1.5 s a step, two runs at load 1.2-1.7, printed into
+  `RESULT-2026-10-14-r24.txt`. What decides it is the DIRECTORY. With the
+  path's directory MISSING at the first load (the state home present,
+  `omarchy-iptv/` under it absent: a fresh install), nothing after `mkdir
+  -p` and `state init` raised a signal for the rest of the session -- the
+  creation, a helper rename, an in-place write and in-place garbage each
+  `fileChanged+0 loaded+0` (sequence Q). ONE explicit `reload()` once the
+  file existed delivered a load and re-armed the watch for good: every later
+  helper, in-place and garbage write `fileChanged+1 loaded+1` (R), and the
+  same across a following own save (T, R2); resetting the path re-armed it
+  too (S). With the directory PRESENT and only the file missing, the init's
+  creation WAS seen, and everything after it (U). So DQ-B8's question is
+  answered for the first half (an explicit reload after the file exists
+  installs it) and not for the second (whether an own save alone would: no
+  sequence makes one before the reload). This plugin reloads `stateFile`
+  once after its start-up check; a plugin whose FileView may first load
+  before its directory exists should do the same.]
 - **`loadFailed`'s error does not tell a missing file from an unreadable
   directory (D-SINK-19 round 12, measured 2026-10-13).** Lane A's probe on
   lane-key-n1: one FileView per case, quickshell 0.3.1-1 and Qt 6.11.2,
@@ -822,30 +852,48 @@ day by round 13's R23g, and it is disputed]:
   `ARCHITECTURE-SOURCES.md` round-12 rulings), and the node suite reads the
   enum from the installed qmltypes so a reordering on a Quickshell update is
   a red gate rather than a silent misreading.
-- **The watch survived everything lane A did to it (D-SINK-19 round 13,
-  R23g, measured 2026-10-13) -- and that contradicts three earlier
-  measurements.** `scripts/dev-harness/spikes/filewatch/measure.sh` runs one
-  FileView declared as `stateFile` is in a nested headless cage on a private
-  D-Bus with no service directories, through 16 sequences of own saves,
-  helper renames (`state favorite add`), external in-place writes (`>`:
-  truncate, empty, garbage, good content), chmods, explicit reloads and
-  restarts, each on a fresh shell over a fresh file, 1.5 s a step, at load
-  1.31; what it printed is kept beside it as `RESULT-2026-10-13.txt`, so it is
-  re-runnable. Every external change -- an in-place write, a helper rename, a
-  chmod -- raised `fileChanged` and a load; a restart gave a first load; and
-  in every sequence an in-place write after any number of own saves, helper
-  renames, chmods or a restart was still seen. Lane A drove the real
+- **The watch survives every external change -- once it exists (D-SINK-19
+  round 13, R23g, measured 2026-10-13; the condition found 2026-10-14).**
+  `scripts/dev-harness/spikes/filewatch/measure.sh` runs one FileView
+  declared as `stateFile` is in a nested headless cage on a private D-Bus
+  with no service directories, through 16 sequences of own saves, helper
+  renames (`state favorite add`), external in-place writes (`>`: truncate,
+  empty, garbage, good content), chmods, explicit reloads and restarts,
+  each on a fresh shell over a fresh file, 1.5 s a step, at load 1.31; what
+  it printed is kept beside it as `RESULT-2026-10-13.txt`, so it is
+  re-runnable. Every external change -- an in-place write, a helper rename,
+  a chmod -- raised `fileChanged` and a load; a restart gave a first load;
+  and in every sequence an in-place write after any number of own saves,
+  helper renames, chmods or a restart was still seen. Lane A drove the real
   `Service.qml` the same way through the dev harness (`svcwatch.sh`, session
-  scratch, not committed), idle and under load, with the same result. The
-  round-9 data-loss lens (D-SRC-19), the round-12 live lens (a helper `state
-  source add`, its reload counter unmoved) and the round-12 data-loss lens
-  (in-place damage after the session's first own save, no reload) each saw
-  the opposite; their rigs were lost when `/tmp` was cleared by a reboot, so
-  what differed is not known. Until it is re-measured, a plugin should not
-  rely on either answer for a change made after its own first save or by a
-  rename: this plugin's no-write mode beginning in that window is marked
-  UNVERIFIED (`UX-SOURCES.md` 5.10, `ARCHITECTURE-SOURCES.md` round-13
-  rulings).
+  scratch, not committed), idle and under load, with the same result.
+  [Corrected 2026-10-14, D-DOC-8: this fact used to say the result
+  contradicted three earlier measurements -- the round-9 data-loss lens
+  (D-SRC-19), the round-12 live lens (a helper `state source add`, its
+  reload counter unmoved) and the round-12 data-loss lens (in-place damage
+  after the session's first own save, no reload) -- and that a plugin
+  should rely on neither answer after its own first save.] The round-13 live
+  lens found what differed: every rig above started with the state
+  DIRECTORY present, and the earlier ones in the production fresh-install
+  shape with it absent, where the view raises nothing all session (live,
+  alternating the two shapes, on lane-key-p2 and on a 0.13.6 export; the
+  fourth fact's re-measurement reproduces it in the spike). So the own saves
+  were never the variable: a watch that exists survives them, and a watch
+  that was never installed sees nothing whatever is done.
+- **A symlink at the path (D-SINK-19 round 14, R24b, measured 2026-10-14).**
+  The same spike, set `r24`, sequences V, W and X. The view's OWN save over
+  a symlink to a regular file writes THROUGH it: the path is still a link
+  afterwards and the target holds the bytes. Its own save over a DANGLING
+  link raises `saveFailed` and leaves the link. A writer that replaces the
+  link with a regular file (this plugin's helper did, by `os.replace` onto
+  the path, until round 14) leaves the view watching nothing: `fileChanged+0`
+  for that write and for every later one, in place or renamed. Written
+  through instead -- a temporary file beside the target, renamed onto the
+  TARGET -- every later write is seen (`fileChanged+1 loaded+1`, the path
+  still a link). And per the fifth fact a dangling link LOADS as FileNotFound,
+  the same as nothing there, so a plugin cannot tell it from a missing file
+  through its FileView; this one asks its helper (`state init` answers
+  `link`).
 
 `saveFailed` exists (`/usr/lib/qt6/qml/Quickshell/Io/quickshell-io.qmltypes:470`)
 and its argument is an enum, never a path; until round 3 the service
