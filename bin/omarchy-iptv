@@ -32,8 +32,11 @@ Subcommands (contract of record: ARCHITECTURE.md (dev branch) section 5):
   cache [--cache-dir D] migrate [--key K] | remove --key K | prune [--keep K ...] [--active K]
       per-source cache directories under <cache-dir>/sources/<key>/ (M2-01, D5/D6)
   config shield
-      deny group and other on $HOME/.config/omarchy/shell.json, the host
-      file the shell persists source URLs into (D-SINK-18). Takes no path:
+      deny group and other on $HOME/.config/omarchy/shell.json, the host's
+      settings file, which holds a provider URL only while an older entry
+      waits for the one-time move into state.json, or after one is set with
+      `omarchy bar set` until the plugin's next write removes it (D-SINK-18,
+      D-SINK-19). Takes no path:
       it computes the one path it may touch. Prints modes and a verdict.
 """
 from __future__ import annotations
@@ -8867,7 +8870,7 @@ def build_parser() -> argparse.ArgumentParser:
     # D-SINK-18. No path argument, by design: see host_config_path(). The
     # action is spelled out rather than implied so that a second, read-only
     # action can be added later without changing what `config shield` means.
-    config = sub.add_parser("config", help="make the host settings file private before a source URL is persisted into it")
+    config = sub.add_parser("config", help="make the host settings file private (it can still hold a URL an older version or omarchy bar set put there)")
     config_actions = config.add_subparsers(dest="action", required=True)
     shield = config_actions.add_parser("shield", help="deny group and other on $HOME/.config/omarchy/shell.json (no-op when it already does); prints the modes and a verdict, never the contents")
     shield.set_defaults(func=cmd_config)

@@ -829,8 +829,9 @@ Nothing inside the plugin directory is written at runtime.
   leads nowhere (its target moved, or sits on a drive not mounted yet) or to
   something that is not a file, the plugin writes nothing and says `... is
   a symbolic link whose target is missing or is not a regular file ...
-  Restore the file it points to, or move the link aside`, and every `state`
-  command refuses it (exit 1) and leaves the link alone. A link that breaks
+  Restore the file it points to, or move the link aside`; every `state`
+  command but `state init` refuses it (exit 1), `state init` answers
+  `found: link` (exit 0), and none of them touches the link. A link that breaks
   while the shell is running is reported as `could not be found, or its
   folder could not be read`, with advice for both causes, because the
   plugin cannot tell them apart then; putting the target back is not
@@ -848,11 +849,19 @@ Nothing inside the plugin directory is written at runtime.
   writes nothing and says `... is a symbolic link whose target is missing
   or is not a folder (or a folder above it is). ... Restore the folder it
   points to, or move the link aside, then run omarchy restart shell.`,
-  naming the folder; every `state` command refuses it (exit 1, `the state
-  folder is a symbolic link whose target is missing or is not a folder;
-  nothing was written`) and leaves the link alone. Whether a running shell
-  notices changes to `state.json` when its FOLDER is a link has not been
-  tested on its own; restart the shell after editing it there to be sure.
+  naming the folder; every `state` command but `state init` refuses it
+  (exit 1, `the state folder is a symbolic link whose target is missing or
+  is not a folder; nothing was written`), `state init` answers `found:
+  folder-link` (exit 0), and none of them touches the link. Changes to
+  `state.json` inside a linked folder are noticed like any other (measured
+  2026-10-14); re-pointing the folder link itself while the shell runs is
+  not, and the next save writes what the shell holds into the new folder's
+  `state.json`, so restart the shell straight after re-pointing it. The
+  same rule holds for the plugin's cache folder, `~/.cache/omarchy-iptv`,
+  and its runtime folder under `$XDG_RUNTIME_DIR`: a link there is
+  followed, and the folder it leads to is made private (0700) whenever the
+  plugin uses it -- the cache folder at every shell start, the runtime
+  folder when the player is started or stopped.
   A plain file where the folder should be gets `... is not a folder (a
   file is at that path, or at one above it)`: move it aside and restart.
 - The file changed while the shell is running -- by hand, by a backup put
@@ -916,7 +925,9 @@ Nothing inside the plugin directory is written at runtime.
   that is a link leading nowhere, or a file where one of its folders should
   be, with `<folder> is a symbolic link whose target is missing or is not a
   folder; nothing was written` or `<folder> is not a folder; nothing was
-  written` (exit 1).
+  written` (exit 1) -- except `player start`, which warns that it could not
+  create its screenshot, watch-later or shader-cache folder and plays
+  anyway.
 - "state.json could not be written" in the shell's journal: the plugin could
   not save its own file, `~/.local/state/omarchy-iptv/state.json`. The source
   you added or switched to is in effect for this session only. If this

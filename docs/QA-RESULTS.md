@@ -13315,6 +13315,82 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### D-SINK-19 round 15 on dev: the round-14 P2s, and the 0.14.0 ship bar
+
+**Integrated 2026-10-14 as `542d43b` (`Integrate lane-key-k2`), branched
+from `dev` `002662d`, under the owner's ship bar for 0.14.0: no P1, nothing
+worse than 0.13.6, no promise in a document the code does not keep.** R25:
+
+- **R25a, D-SRC-30.** A reload is the service's own echo only while its
+  text is still in flight: `recentSaves` holds the burst since the last
+  landed save and is cleared as each save lands, so a backup put back is
+  another writer's change and wins. Live B20: `restored:2 records:2
+  label:after-restore restart:2` (on `dev` `restored:1 records:1`).
+- **R25b, D-SRC-31.** Past the source or saved-search cap the other writer
+  keeps its place and the app's overflow is dropped with one notification
+  and one journal line per key.
+- **R25c, D-SRC-32.** A link at the state folder is followed when it leads
+  to a folder (which is made 0700, the link left a link; measured by
+  `spikes/folder-link/`) and refused with a sentence when it does not;
+  every `ensure_private_dir` caller answers the same way.
+- **R25d, F-HARNESS-26.** The two merge decisions round 14 found unobserved
+  are pinned and red on their mutation patches; live B19 (a failed write,
+  then a hand-run helper write: `merged:3 ... restart:in-app-one,in-app-two/
+  t:helper.uk`), B20 (the restore), B21 (an existing folder damaged after
+  an own save: `blocked:unparsed told:1`), B22 (the mid-session Sources
+  header: `header:Saving has stopped rows:2`).
+- **R25e, D-SRC-29.** Not fixed: every document that mentions a linked
+  `state.json` says what is not noticed and what to do. Accepted for 0.14.0
+  by the ship bar (pre-existing, not worse than 0.13.6, stated).
+- **Counts.** key-scenario forward 120 passed, 0 failed; `--baseline dev`
+  red exactly on the new segments; sources 66/0, logo 33/0, tls 48/0; node
+  2,502 checks in each echo mode, python 1,202; the real upgrade from a
+  0.13.6 install held again.
+
+**The three verdicts.** The data-loss lens (about 350,000 simulated runs over
+the real `Service.qml` and helper, 0.13.6 run through the same sequences)
+and the live lens read CUTTABLE. The claims lens read NOT CUTTABLE on five
+text-only false statements, each corrected in the integration commit that
+follows the merge and checked there against the helper:
+
+- **D-DOC-12 (P2).** Two README sentences said every `state` command refuses
+  a dangling file or folder link with exit 1; `state init` answers `found:
+  link` or `found: folder-link` with exit 0, by design (re-run: `init` rc 0,
+  `show` and `favorite add` rc 1, the link untouched).
+- **D-DOC-14 (P2).** The lead's own 0.14.0 CHANGELOG draft promised "both
+  are kept" past the merge's caps and said a replaced link was merely "not
+  noticed until the shell restarts", when the next save writes over it.
+- **D-DOC-15 (P2).** `ARCHITECTURE.md` standard 5 said the README tells the
+  user a linked cache or runtime folder is made 0700; it did not (re-run:
+  `cache migrate` through a linked 0755 folder, `big=700`, the link kept).
+- **D-DOC-16 (P2).** The README said every other helper command refuses a
+  dangling plugin folder with exit 1; `player start` warns and plays.
+- **D-DOC-17 (P2).** The helper's `--help` described `shell.json` as the file
+  the shell persists source URLs into, which is 0.13.6's world.
+
+The same commit replaces the documents' "the watch through a linked state
+folder has not been tested" with what two lenses measured, **D-DOC-13** and
+**D-SRC-40**: through a folder link every edit is seen, and re-pointing the
+link is not, after which the next save writes into the new folder.
+
+**What the lenses filed and did not block on** (each pre-existing or not
+worse than 0.13.6, and none promised against):
+
+- **D-SRC-39 (P3).** A burst whose first save lands and a later one fails
+  leaves the base before the burst, so a restore of that earlier file is
+  ignored and written over; a sub-millisecond window, and 0.13.6 loses the
+  failed in-app change in the same sequence.
+- **D-SRC-41 (P3).** An in-app add whose probe runs while a hand-run add
+  takes the 50th place ends at 51 records and the next start drops the
+  in-app source; the README lists it as not covered.
+- **D-SRC-42 (P3).** A block that starts mid-session is still announced as
+  "Saved sources not loaded".
+- **D-SRC-43 (P3).** After a merge at the cap with a failed save held, the
+  failed flag stays set until the next landed save; no loss.
+- **D-SRC-44 (P3).** The migration at 50 sources evicts the
+  least-recently-used source, the only copy of its URL, with a journal line
+  only; 0.13.6 did the same on every `bar set`.
+
 ### D-SINK-19 round 14 on dev: a foreign write merged, and what the lenses raised
 
 **Integrated 2026-10-14 as `249689a` (`Integrate lane-key-q2`), branched

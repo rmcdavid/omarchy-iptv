@@ -1899,9 +1899,9 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    -- `show` and `source list` included, which printed an empty listing with
    exit 0 until round 15. The helper's other verbs answer a plugin folder in
    that shape with `<folder> is a symbolic link whose target is missing or is
-   not a folder; nothing was written` (code `folder_unusable`). Whether the
-   watch notices changes when the FOLDER is a link is not measured. No
-   key-scenario segment drives a folder link.]
+   not a folder; nothing was written` (code `folder_unusable`). The watch
+   when the FOLDER is a link: measured since by both round-15 data-loss and claims lenses, 2026-10-14: through a valid folder link the service sees a helper write, a temp-and-rename edit and an in-place edit, and keeps all three; re-pointing the folder link (`ln -sfn`) raises nothing, nor does a later edit in the new folder, and the next own save writes the session's state into the new folder's `state.json` (D-SRC-40, the folder twin of D-SRC-29). No key-scenario segment drives a
+   folder link.]
    [Round 15, D-SRC-34: a `state.json` link into a folder the user cannot
    write is a sentence, `state.json is a symbolic link into a folder that
    cannot be written (Permission denied); nothing was written`, exit 1, the
@@ -1984,7 +1984,12 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    change after it was not saved yet (its save failed, parked or in
    flight), is indistinguishable from nothing happening -- it is ignored for
    the held reason, and the held change is saved over it. The disk never
-   moved, so nothing the user wrote is lost, but the restore does nothing.]
+   moved, so nothing the user wrote is lost, but the restore does nothing.
+   One measured exception (the round-15 data-loss lens, D-SRC-39): in a
+   burst of saves whose first lands and a later one fails, within one
+   event-loop turn, the base stays at the file before the burst while the
+   disk holds the first save, so a copy of that earlier file put back is
+   ignored and written over; the README's same-instant limit covers it.]
 
 Pinned in node (`R22a: stateUnreadableNotice -- one sentence per reason,
 each naming the file and what to do (restart included), none carrying a URL;

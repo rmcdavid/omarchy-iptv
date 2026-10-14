@@ -5422,7 +5422,8 @@ inherits them.**
   1 and 6, `UX.md` 6.3, `ARCHITECTURE.md` security standard 5 and `QA.md` /
   `QA-SOURCES.md` now do. Whether the shell's watch notices changes when the
   FOLDER is a link has not been measured, and the documents say so rather
-  than extending the file link's facts to it.
+  than extending the file link's facts to it. [Integration, 2026-10-14:
+  measured since by both round-15 data-loss and claims lenses, 2026-10-14: through a valid folder link the service sees a helper write, a temp-and-rename edit and an in-place edit, and keeps all three; re-pointing the folder link (`ln -sfn`) raises nothing, nor does a later edit in the new folder, and the next own save writes the session's state into the new folder's `state.json` (D-SRC-40, the folder twin of D-SRC-29); the README, UX-SOURCES 5.10 and the contract now say so.]
 - Numbers round 15 moved: the README's harness count (116 -> 120), the
   gate's floors (2,459 -> 2,502 node, 1,194 -> 1,202 python), key-scenario's
   lettered floor (115 -> 119).

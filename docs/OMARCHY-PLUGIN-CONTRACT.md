@@ -943,8 +943,11 @@ completed the same day again, by round 15's R25a, R25e and D-DOC-11]:
   the same as nothing there, so a plugin cannot tell it from a missing file
   through its FileView; this one asks its helper (`state init` answers
   `link`; round 15, `folder-link` for a link at the state FOLDER that leads
-  nowhere). What the watch does when the state FOLDER is a link has not been
-  measured.
+  nowhere). The watch when the state FOLDER is a link: measured since by both round-15 data-loss and claims lenses, 2026-10-14: through a valid folder link the service sees a helper write, a temp-and-rename edit and an in-place edit, and keeps all three; re-pointing the folder link (`ln -sfn`) raises nothing, nor does a later edit in the new folder, and the next own save writes the session's state into the new folder's `state.json` (D-SRC-40, the folder twin of D-SRC-29). And a
+  `state.json` link whose TARGET becomes unreadable mid-session fails one
+  load and then sees nothing more -- the `chmod 600` that repairs it
+  included -- where a regular file's repair is seen (round-15 claims lens,
+  D-DOC-13).
 
 `saveFailed` exists (`/usr/lib/qt6/qml/Quickshell/Io/quickshell-io.qmltypes:470`)
 and its argument is an enum, never a path; until round 3 the service
