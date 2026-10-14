@@ -224,6 +224,25 @@ class LogoFetchGuardsTest(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(os.stat(os.path.join(logo_dir, name)).st_mode), 0o600)
         self.assertEqual(stat.S_IMODE(os.stat(logo_dir).st_mode), 0o700)
 
+    def test_r25c_a_logo_folder_link_that_leads_nowhere_is_a_sentence_and_nothing_is_written(self):
+        # R25c's rule-15 search (tests/test_state.py FolderLinkSiblingsTest):
+        # the logo folder is the one ensure_private_dir caller reached only
+        # through an https fetch, so it is pinned by a call. On dev (002662d)
+        # this was a FileNotFoundError from the temporary file's open, which
+        # ended `logos --fetch` in a traceback and `code: internal`.
+        import os, tempfile, shutil
+        root = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, root, True)
+        logo_dir = os.path.join(root, "logos")
+        os.symlink(os.path.join(root, "gone"), logo_dir)
+        with self.assertRaises(helper.FolderUnusable) as caught:
+            helper.write_logo(logo_dir, "https://x.test/a.png", SAMPLE["image/png"], "image/png")
+        self.assertEqual(caught.exception.sentence,
+                         "%s is a symbolic link whose target is missing or is not a folder; nothing was written" % logo_dir)
+        self.assertIsInstance(caught.exception, OSError)   # ensure_player_dirs' warning path still catches it
+        self.assertEqual(sorted(os.listdir(root)), ["logos"])
+        self.assertFalse(os.path.lexists(os.path.join(root, "gone")))
+
     def test_only_the_allowlisted_types_get_written(self):
         import tempfile, os
         logo_dir = os.path.join(tempfile.mkdtemp(), "logos")

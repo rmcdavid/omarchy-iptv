@@ -328,11 +328,17 @@ class StateFile {
     // An atomic write replaces the file by a rename inside its directory, so
     // a file nobody may read is still REPLACED (the round-11 P1's last step)
     // and only a directory that cannot be entered, or a directory AT the
-    // path, makes it fail. R24b: and a DANGLING symlink (measured: the
-    // view's save follows the link and fails, sequence X) or a file where
-    // the state directory should be.
+    // path, makes it fail. R24b: and a DANGLING symlink whose target's
+    // FOLDER is missing (measured: the view's save follows the link and
+    // fails, sequence X), or a file where the state directory should be.
+    // D-DOC-11 (round 15, rule 10): a dangling link whose target's folder
+    // EXISTS does not fail -- measured (the round-14 lens's C6 and Z9, two
+    // runs): the save follows the link and CREATES the target, saved+1, the
+    // link left a link; deliverOne then finds a link that leads somewhere.
+    // R25c: a link at the state FOLDER that leads nowhere has no folder to
+    // write the temporary file in, which is sequence X's mechanism.
     const blocksWrite = this.fault === "dir-0000" || this.fault === "dir-foreign" || this.fault === "is-dir"
-      || this.fault === "dangling-link" || this.fault === "not-a-dir"
+      || this.fault === "dangling-link-nodir" || this.fault === "not-a-dir" || this.fault === "folder-link"
     const ev = { kind: this.writeFails || blocksWrite ? "saveFailed" : "saved", text }
     if (this.coalesce && this.events.length >= 2) this.events[this.events.length - 1] = ev
     else this.events.push(ev)
@@ -343,8 +349,10 @@ class StateFile {
     if (this.fault === "dir-0000" || this.fault === "dir-foreign") return { loaded: false, error: 2 }
     if (this.fault === "is-dir") return { loaded: false, error: 4 }
     // R24b: both measured as FileNotFound (the round-13 claims lens's
-    // fvkinds.txt: "dangling ... ERR2", "filedir ... ERR2").
-    if (this.fault === "dangling-link" || this.fault === "not-a-dir") return { loaded: false, error: 2 }
+    // fvkinds.txt: "dangling ... ERR2", "filedir ... ERR2"); a dangling link
+    // into a missing folder and a dangling FOLDER link (R25c) are a missing
+    // parent, which the R22a table measured as FileNotFound too.
+    if (this.fault === "dangling-link" || this.fault === "dangling-link-nodir" || this.fault === "not-a-dir" || this.fault === "folder-link") return { loaded: false, error: 2 }
     if (!this.exists) return { loaded: false, error: 2 }
     return { loaded: true, text: this.disk }
   }
@@ -368,7 +376,10 @@ class StateFile {
 //                   watch never attached, measured), but an explicit
 //                   stateFile.reload() then loads the file (measured)
 //   "is-dir"        found "other"; changes nothing
-//   "dangling-link" found "link" (R24b); changes nothing
+//   "dangling-link" found "link" (R24b); changes nothing (and
+//   "-nodir"        the same for the one whose target's folder is missing)
+//   "folder-link"   found "folder-link" (R25c): a link at the state FOLDER
+//                   that dangles or leads to a non-folder; changes nothing
 //   "not-a-dir"     found "not-a-dir" (R24b: a file where the state
 //                   directory should be); changes nothing
 //   "*-foreign"     found as above; the chmod fails, so nothing changes
@@ -385,7 +396,9 @@ function helperInit(file, code) {
   else if (file.fault === "is-dir") found = "other"
   // R24b: the real helper's answers (tests/test_state.py's StateSymlinkTest
   // and the not-a-dir case); it changes nothing at either.
-  else if (file.fault === "dangling-link") found = "link"
+  else if (file.fault === "dangling-link" || file.fault === "dangling-link-nodir") found = "link"
+  // R25c: a link at the state folder (or above it) that leads nowhere.
+  else if (file.fault === "folder-link") found = "folder-link"
   else if (file.fault === "not-a-dir") found = "not-a-dir"
   else if (file.fault === "file-foreign") found = "file"
   else if (file.fault === "dir-foreign") found = "unreadable"
@@ -574,6 +587,8 @@ function bootService(serviceText, Model, o) {
       // file becomes our 0000 file, a 0000 file stays one.
       h.stateFile.exists = true
       if (h.stateFile.fault === "file-foreign") h.stateFile.fault = "file-0000"
+      // D-DOC-11: the save created the dangling link's target; it leads somewhere now.
+      if (h.stateFile.fault === "dangling-link") h.stateFile.fault = null
       onSaved()
       if (o2 && o2.noLater) return true
       h.runLater()

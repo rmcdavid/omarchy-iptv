@@ -1499,7 +1499,9 @@ function stateInitFound(text, exitCode, timedOut) {
     if (!o || o.kind !== "state" || o.action !== "init") continue
     var f = str(o.found)
     if (f === "absent") return "absent"
-    if (f === "link" || f === "not-a-dir") return f
+    // R25c: "folder-link", a link at the state FOLDER (or above it) that
+    // leads nowhere, is the helper's word too and gets its own sentence.
+    if (f === "link" || f === "not-a-dir" || f === "folder-link") return f
     if (f === "file" || f === "other" || f === "unreadable") return "present"
     return "unknown"
   }
@@ -1541,7 +1543,7 @@ function stateLoadDecision(ctx) {
   // R24b: the helper named what is at the path, and that is the reason --
   // the folder-permission sentence "absent-unconfirmed" carries would send
   // the user to chmod a folder that is fine.
-  if (found === "link" || found === "not-a-dir") return { act: "block", reason: found }
+  if (found === "link" || found === "not-a-dir" || found === "folder-link") return { act: "block", reason: found }
   return { act: "block", reason: kind === "absent" && found !== "unknown" ? "absent-unconfirmed" : kind }
 }
 
@@ -1588,6 +1590,12 @@ function stateUnreadableNotice(reason, path) {
     file = str(path) !== "" ? str(path).replace(/\/[^\/]*$/, "") : "The state folder"
     what = "is not a folder (a file is at that path, or at one above it)"
     fix = "Move whatever is at that path aside, then run omarchy restart shell."
+  } else if (r === "folder-link") {
+    // R25c (D-SRC-32): the state FOLDER is a symbolic link that dangles or
+    // leads to something that is not a folder. The sentence names the folder.
+    file = str(path) !== "" ? str(path).replace(/\/[^\/]*$/, "") : "The state folder"
+    what = "is a symbolic link whose target is missing or is not a folder (or a folder above it is)"
+    fix = "Restore the folder it points to, or move the link aside, then run omarchy restart shell."
   } else if (r === "absent-unconfirmed") {
     what = "could not be found, or its folder could not be read"
     fix = "Make the folder readable with chmod 700, then run omarchy restart shell."
@@ -1606,6 +1614,17 @@ function stateUnreadableNotice(reason, path) {
   }
   return { title: "Saved sources not loaded",
            body: file + " " + what + ". Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. " + fix }
+}
+
+// D-SINK-19 round 15 (D-SRC-38). The no-write mode's SHORT form, for the
+// Sources header's right slot: what the notice's title says, except in a
+// MID-session block, where the sources WERE loaded -- the rows above are the
+// session's and still play -- and what stopped is saving. One function, the
+// notice copy family: at a start it IS stateUnreadableNotice's title.
+function stateBlockedHeader(reason, path, midSession) {
+  if (str(reason) === "") return ""
+  if (midSession === true) return "Saving has stopped"
+  return stateUnreadableNotice(reason, path).title
 }
 export {
   MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedSearchTerms,
@@ -1626,5 +1645,6 @@ export {
   canonValue, mergeSetField, recordFieldsDiffering, MERGE_WHOLE_FIELDS,
   mergeForeignState, MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount,
   mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
-  stateInitFound, stateLoadDecision, stateWriteGate, stateUnreadableNotice
+  stateInitFound, stateLoadDecision, stateWriteGate, stateUnreadableNotice,
+  stateBlockedHeader
 }

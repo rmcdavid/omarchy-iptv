@@ -7,6 +7,7 @@ import io
 import json
 import os
 import pathlib
+import signal
 import tempfile
 import unittest
 
@@ -54,8 +55,17 @@ def v2(**patch):
 def run(*args):
     out = io.StringIO()
     err = io.StringIO()
-    with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
-        code = helper.main(list(args))
+    try:
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = helper.main(list(args))
+    finally:
+        # F-HARNESS-27 (round 15): `state init` arms the helper's own
+        # STATE_INIT_DEADLINE as SIGALRM with its DEFAULT action (R24d). Run
+        # in-process here, that alarm belonged to the TEST RUNNER, which it
+        # killed 30 s later (rc 142, no summary) whenever the rest of the
+        # module took that long -- under load, run alone. Disarmed on the way
+        # out of every in-process call.
+        signal.alarm(0)
     lines = out.getvalue().strip().splitlines()
     return code, json.loads(lines[-1]) if lines else None, err.getvalue()
 
@@ -1122,6 +1132,157 @@ class StateSymlinkTest(unittest.TestCase):
         self.assertFalse((self.elsewhere / "gone.json").exists())
 
 
+class StateFolderLinkTest(unittest.TestCase):
+    """D-SINK-19 round 15, R25c (D-SRC-32): THE STATE FOLDER GETS THE FILE'S
+    RULE. A symbolic link AT the state folder (~/.local/state/omarchy-iptv,
+    or --state-dir) is followed when it leads to a folder, and refused when
+    it dangles or leads to anything else: every verb exit 1 with a sentence,
+    link and target untouched; `state init` answers `found: folder-link`.
+    The same for a link ABOVE the folder. Red on dev (002662d): over a
+    dangling folder link `show` and `source list` printed an EMPTY listing,
+    exit 0, and init, `favorite add` and `clear-recents` died with a
+    FileNotFoundError traceback, `code: internal`.
+
+    What the chmod does through a VALID folder link was measured before this
+    was written (the lane's before.txt, the helper as a subprocess): it
+    reaches the TARGET, 0755 -> 0700 and 0500 -> 0700, the link left a link.
+    That is the folder the plugin keeps state.json in, wherever the user
+    keeps it, so it keeps the plugin's own mode; the README says so (R24b's
+    principle: never change what the link points at WITHOUT SAYING SO).
+    Every case runs the real helper as a subprocess with a timeout."""
+
+    TIMEOUT = StateNeverBlocksTest.TIMEOUT
+    helper = StateNeverBlocksTest.helper
+    verbs = StateNeverBlocksTest.verbs
+    SEED = StateSymlinkTest.SEED
+    SENTENCE = "the state folder is a symbolic link whose target is missing or is not a folder; nothing was written"
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = pathlib.Path(self.tmp.name)
+        self.dir = str(self.root / "st")
+
+    def listing(self):
+        return sorted(str(p.relative_to(self.root)) for p in self.root.rglob("*"))
+
+    def test_a_dangling_folder_link_is_refused_by_every_verb_and_left_alone(self):
+        os.symlink(self.root / "gone", self.dir)
+        before = self.listing()
+        for verb in self.verbs() + [("source", "update", "d990c2e4", "--url", "http://other.example.test/l.m3u")]:
+            with self.subTest(verb=" ".join(verb)):
+                code, payload, err = self.helper("state", "--state-dir", self.dir, *verb)
+                self.assertEqual((code, payload["ok"], payload["error"]["code"]), (1, False, "state_unreadable"), err)
+                self.assertEqual(payload["error"]["message"], self.SENTENCE)
+                self.assertNotIn("Traceback", err)
+                self.assertNotIn("state", payload)   # no listing, empty or otherwise
+                self.assertEqual(self.listing(), before)
+                self.assertTrue(os.path.islink(self.dir))
+
+    def test_init_answers_folder_link_creates_nothing_and_exits_0(self):
+        for shape in ("dangling", "file", "above"):
+            with self.subTest(shape=shape):
+                if os.path.lexists(self.dir):
+                    os.unlink(self.dir)
+                state_dir = self.dir
+                if shape == "dangling":
+                    os.symlink(self.root / "gone", self.dir)
+                elif shape == "file":
+                    (self.root / "afile").write_text("x", encoding="utf-8")
+                    os.symlink(self.root / "afile", self.dir)
+                else:
+                    # A link ABOVE the state folder (an XDG_STATE_HOME that is
+                    # a link to a folder not mounted yet): the same answer.
+                    os.symlink(self.root / "gone", self.dir)
+                    state_dir = os.path.join(self.dir, "omarchy-iptv")
+                before = self.listing()
+                code, payload, err = self.helper("state", "--state-dir", state_dir, "init")
+                self.assertEqual((code, payload["found"], payload["created"]), (0, "folder-link", False), err)
+                self.assertNotIn("Traceback", err)
+                self.assertEqual(self.listing(), before)
+
+    def test_a_link_above_the_folder_is_refused_by_show(self):
+        os.symlink(self.root / "gone", self.dir)
+        code, payload, err = self.helper("state", "--state-dir", os.path.join(self.dir, "omarchy-iptv"), "show")
+        self.assertEqual((code, payload["error"]["code"], payload["error"]["message"]), (1, "state_unreadable", self.SENTENCE), err)
+
+    def test_a_valid_folder_link_is_followed_by_every_verb_and_its_target_made_0700(self):
+        target = self.root / "dotfiles"
+        target.mkdir(mode=0o755)
+        os.chmod(target, 0o755)
+        (target / "state.json").write_text(json.dumps(self.SEED) + "\n", encoding="utf-8")
+        os.chmod(target / "state.json", 0o600)
+        os.symlink(target, self.dir)
+        code, payload, err = self.helper("state", "--state-dir", self.dir, "show")
+        self.assertEqual((code, payload["state"]["favorites"]), (0, ["t:seed"]), err)
+        self.assertEqual(stat_mode(target), 0o755)   # a read changes nothing
+        code, payload, err = self.helper("state", "--state-dir", self.dir, "favorite", "add", "t:x")
+        self.assertEqual((code, payload["state"]["favorites"]), (0, ["t:seed", "t:x"]), err)
+        self.assertTrue(os.path.islink(self.dir))
+        self.assertEqual(json.loads((target / "state.json").read_text(encoding="utf-8"))["favorites"], ["t:seed", "t:x"])
+        self.assertEqual(stat_mode(target), 0o700)
+        os.chmod(target, 0o755)
+        code, payload, err = self.helper("state", "--state-dir", self.dir, "init")
+        self.assertEqual((code, payload["found"], payload["created"]), (0, "file", False), err)
+        self.assertEqual(stat_mode(target), 0o700)
+
+    def test_d_src_34_a_file_link_into_a_folder_that_cannot_be_written_is_a_sentence(self):
+        os.makedirs(self.dir, mode=0o700)
+        ro = self.root / "ro"
+        ro.mkdir(mode=0o700)
+        (ro / "state.json").write_text(json.dumps(self.SEED) + "\n", encoding="utf-8")
+        os.chmod(ro / "state.json", 0o600)
+        os.chmod(ro, 0o500)
+        self.addCleanup(os.chmod, ro, 0o700)
+        os.symlink(ro / "state.json", os.path.join(self.dir, "state.json"))
+        before = (ro / "state.json").read_bytes()
+        code, payload, err = self.helper("state", "--state-dir", self.dir, "favorite", "add", "t:x")
+        self.assertEqual((code, payload["ok"], payload["error"]["code"]), (1, False, "state_unwritable"), err)
+        self.assertEqual(payload["error"]["message"],
+                         "state.json is a symbolic link into a folder that cannot be written (Permission denied); nothing was written")
+        self.assertNotIn("Traceback", err)
+        self.assertEqual((ro / "state.json").read_bytes(), before)
+        self.assertEqual(sorted(os.listdir(ro)), ["state.json"])   # no temporary file left
+        self.assertEqual(stat_mode(ro), 0o500)                     # a link target's folder is never chmod-ed (R24b)
+
+
+class FolderLinkSiblingsTest(unittest.TestCase):
+    """R25c's rule-15 search: every ensure_private_dir caller over a link that
+    leads nowhere, through the real helper as a subprocess. The cache folder
+    (`cache migrate`, `cache prune`, `failed mark`) and the runtime socket
+    folder (`player stop`, which runs no mpv) each ended in a traceback and
+    `code: internal` on dev (002662d), having written nothing; each now
+    answers `folder_unusable` with a sentence naming the link, exit 1, and
+    still writes nothing. The logo folder is the same function inside
+    `logos --fetch` (https only, so it is pinned in test_logos by a call, not
+    here). A VALID link at any of them is followed and its target made 0700,
+    as it was."""
+
+    TIMEOUT = StateNeverBlocksTest.TIMEOUT
+    helper = StateNeverBlocksTest.helper
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.root = pathlib.Path(self.tmp.name)
+        self.link = str(self.root / "c")
+        os.symlink(self.root / "gone", self.link)
+
+    def test_each_caller_answers_a_sentence_and_writes_nothing(self):
+        cases = [("cache", "--cache-dir", self.link, "migrate"), ("cache", "--cache-dir", self.link, "prune"),
+                 ("failed", "--cache-dir", self.link, "mark", "--id", "t:x"),
+                 ("player", "stop", "--socket", os.path.join(self.link, "mpv.sock"))]
+        for argv in cases:
+            with self.subTest(argv=" ".join(argv[:2])):
+                code, payload, err = self.helper(*argv)
+                self.assertEqual((code, payload["ok"], payload["error"]["code"]), (1, False, "folder_unusable"), err)
+                self.assertEqual(payload["error"]["message"],
+                                 "%s is a symbolic link whose target is missing or is not a folder; nothing was written" % self.link)
+                self.assertNotIn("Traceback", err)
+                self.assertFalse(os.path.lexists(self.root / "gone"))
+                self.assertTrue(os.path.islink(self.link))
+
+
 class StateInitDeadlineTest(unittest.TestCase):
     """D-SINK-19 round 14, R24d (D-SRC-24): `state init` bounds ITSELF.
     SIGALRM, default action, armed at the top of the verb before the state
@@ -1164,6 +1325,13 @@ class StateInitDeadlineTest(unittest.TestCase):
         timeout = int(re.search(r"stateInitTimeoutMs: (\d+) \* 1000", svc).group(1))
         grace = int(re.search(r"stateInitKillGraceMs: (\d+) \* 1000", svc).group(1))
         self.assertGreater(helper.STATE_INIT_DEADLINE, timeout + grace)
+
+    def test_f_harness_27_an_in_process_init_leaves_no_alarm_in_the_test_runner(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        code, payload, _ = run("state", "--state-dir", os.path.join(tmp.name, "st"), "init")
+        self.assertEqual((code, payload["found"]), (0, "absent"))
+        self.assertEqual(signal.alarm(0), 0)
 
     def test_no_other_verb_arms_it(self):
         import signal, subprocess, sys

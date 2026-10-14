@@ -78,7 +78,7 @@ export {
   reloadDisposition, stateCanonical, sameState, mergeForeignState,
   mergeConflictLine, mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS,
   stateLoadKind, stateInitFound, stateLoadDecision, stateWriteGate,
-  stateUnreadableNotice
+  stateUnreadableNotice, stateBlockedHeader
 } from "./model/state.mjs"
 export {
   parseJsonObject, parseChannels, parseEpgNow, parseHelperStatus,

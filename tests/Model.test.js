@@ -7258,6 +7258,29 @@ checkCall("R24b: the link sentence names the file and the link, the not-a-dir se
            mid: [mid.indexOf("symbolic link") !== -1, mid.indexOf("chmod 700") !== -1], urls: [link, dir, mid].some(b => b.indexOf("://") !== -1) }
 }, { link: [true, true, true], dir: [true, true, true, true], mid: [true, true], urls: false })
 
+// ---- R25c (D-SINK-19 round 15, D-SRC-32): the state FOLDER gets the file's
+// rule. The helper's `folder-link` (a link at the state folder, or above it,
+// that dangles or leads to a non-folder) is an answer of its own, blocks with
+// that reason after the one re-read, and its sentence names the FOLDER.
+checkCall("R25c: stateInitFound passes `folder-link` through; stateLoadDecision re-reads once and then blocks with it; the sentence names the folder, says it is a link, never advises chmod and ends with the restart", () => {
+  const path = "/home/u/.local/state/omarchy-iptv/state.json"
+  const body = Model.stateUnreadableNotice("folder-link", path).body
+  return { found: Model.stateInitFound(JSON.stringify({ ok: true, kind: "state", action: "init", found: "folder-link", created: false }), 0),
+           decide: [Model.stateLoadDecision({ kind: "absent", initFound: "folder-link" }), Model.stateLoadDecision({ kind: "absent", initFound: "folder-link", retried: true })].map(d => d.act + "/" + d.reason),
+           body: [body.indexOf("/home/u/.local/state/omarchy-iptv is a symbolic link") === 0, body.indexOf("state.json") === -1, body.indexOf("chmod") === -1, /omarchy restart shell\.$/.test(body)],
+           distinct: [Model.stateUnreadableNotice("link", path).body, Model.stateUnreadableNotice("not-a-dir", path).body].indexOf(body) === -1 }
+}, { found: "folder-link", decide: ["retry/absent", "block/folder-link"], body: [true, true, true, true], distinct: true })
+// ---- D-SRC-38 (round 15): a MID-session block's Sources header.
+checkCall("D-SRC-38: sourcesHeaderRight / stateBlockedHeader -- a block that began mid-session says saving has stopped; at a start it is the notice's title; with writes allowed, the count", () => ([
+  Model.sourcesHeaderRight(2, "unparsed", "/p/state.json", true), Model.sourcesHeaderRight(2, "unparsed", "/p/state.json", false),
+  Model.sourcesHeaderRight(0, "absent", "/p/state.json"), Model.sourcesHeaderRight(2, "", "/p/state.json", true),
+  Model.stateBlockedHeader("unparsed", "", false) === Model.stateUnreadableNotice("unparsed", "").title, Model.stateBlockedHeader("", "", true)]),
+  ["Saving has stopped", "Saved sources not loaded", "Saved sources not loaded", "2 sources", true, ""])
+checkCall("D-SRC-38 (structural): the guide hands the header the service's stateLoaded, so a mid-session block reads as one", () => {
+  const g = fs.readFileSync(path.join(__dirname, "../Guide.qml"), "utf8")
+  return /Model\.sourcesHeaderRight\(root\.sourceCount, root\.stateBlocked,[\s\S]{0,400}service\.stateLoaded === true\)/.test(g)
+}, true)
+
 // ---- R24f (D-SINK-19 round 14, D-SRC-28): the Sources screen in the
 // no-write mode draws no Add rows, its header is the notice's title, and
 // neither add key is hinted. The live arm observes it (key-scenario B15).
@@ -12793,6 +12816,23 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         h.foreign(helperAdd)
         return { before, unarmed, armed: [h.stateFile.watchArmed, loads] }
       }, { before: [true, false], unarmed: 0, armed: [true, 2] })
+      // D-DOC-11 (round 15, rule 10): the double's save over a dangling link
+      // is what was MEASURED, in both of its shapes: the target's folder there
+      // -- the save creates the target, `saved`, and the link then leads
+      // somewhere; the target's folder missing -- `saveFailed` (sequence X).
+      checkCall("D-DOC-11 (" + mode + " host, the double): a save over a dangling link whose target's folder exists CREATES the target (saved, the link then leads somewhere); with the folder missing it fails", () => {
+        const H = require("./service-harness.js")
+        const out = {}
+        for (const fault of ["dangling-link", "dangling-link-nodir", "folder-link"]) {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { exists: true, fault, holdEvents: true })
+          h.stateFile.events = []
+          h.stateFile.setText(H.HELPER_EMPTY_STATE)
+          const kind = h.stateFile.events[0].kind
+          h.deliverOne()
+          out[fault] = [kind, h.stateFile.fault]
+        }
+        return out
+      }, { "dangling-link": ["saved", null], "dangling-link-nodir": ["saveFailed", "dangling-link-nodir"], "folder-link": ["saveFailed", "folder-link"] })
       // R24d / D-SRC-25: one bound over the whole start-up check.
       const GARBAGE = "{\"version\": 2, \"sources\": ["
       checkCall("R24d (" + mode + " host): a start-up MKDIR that never answers -- the one watchdog (armed when mkdir started) TERMs it, the init is never started, and the held load decides as the no-write mode, told once", () => {
@@ -12946,6 +12986,13 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           const next = restart(h)
           return { inFlight, file: h.file().favorites, memory: h.root.userState.favorites, restart: next.root.userState.favorites }
         }, { inFlight: 1, file: ["t:bbc1.uk", "t:f2.uk", "t:other1.uk"], memory: ["t:bbc1.uk", "t:f2.uk", "t:other1.uk"], restart: ["t:bbc1.uk", "t:f2.uk", "t:other1.uk"] })
+        // R25c / D-SRC-32: a start over a state folder that is a link to nothing.
+        checkCall("R25c (" + tag + "): a start over a state FOLDER link that leads nowhere (FileView: FileNotFound) blocks as \"folder-link\" on the helper's word, told once by the sentence that names the folder, and writes nothing", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho, exists: true, fault: "folder-link" })
+          const notice = h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74017") !== -1).map(a => a[a.length - 1])
+          return { blocked: h.root.stateWriteBlocked, found: h.root.stateInitFound, told: notice.length,
+                   sentence: notice[0] === M.stateUnreadableNotice("folder-link", h.root.stateFilePath).body, events: h.stateFile.events.length, writes: h.host.writes.length }
+        }, { blocked: "folder-link", found: "folder-link", told: 1, sentence: true, events: 0, writes: 0 })
         // R25b / D-SRC-31: a merge that passes a cap.
         checkCall("R25b (" + tag + "): at 49 sources, an in-app add whose save FAILED, then a hand-run `state source add` (the helper allows the 50th): theirs keeps its place, the in-app record is dropped -- told ONCE (counts and the cap, no URL, no label), one journal line naming its key -- and nothing is written over theirs", () => {
           const many = []

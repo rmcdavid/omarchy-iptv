@@ -1,0 +1,104 @@
+R25c (D-SINK-19 round 15, D-SRC-32), measure.py <helper>, 2026-10-14, the helper as a subprocess (python3 -B -I, timeout 30) over a symbolic link at each folder ensure_private_dir makes.
+Paths are shown as <w>, the case's own temporary directory. `before` / `after` on each case's second line are what is at the paths before and after the verb, and the target folder's mode.
+
+=== BEFORE: dev 002662d's helper
+== state folder
+folder link -> dir (0755) show                             rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=st:link dot:dir/755 after=st:link dot:dir/755
+folder link -> dir (0755) source list                      rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=st:link dot:dir/755 after=st:link dot:dir/755
+folder link -> dir (0755) init                             rc=0 ok=True code=None found=file tb=False msg=''
+                                                             before=st:link dot:dir/755 after=st:link dot:dir/700
+folder link -> dir (0755) favorite add b                   rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=st:link dot:dir/755 after=st:link dot:dir/700
+folder link -> EMPTY dir (0755) init                       rc=0 ok=True code=None found=absent tb=False msg=''
+                                                             before=st:link dot:dir/755 file:nothing/none(No such file or directory) after=st:link dot:dir/700 file:file/600
+folder link DANGLING show                                  rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+folder link DANGLING source list                           rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+folder link DANGLING init                                  rc=1 ok=False code=internal found=None tb=True msg="FileNotFoundError: [Errno 2] No such file or directory: '<w>"
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+folder link DANGLING favorite add b                        rc=1 ok=False code=internal found=None tb=True msg="FileNotFoundError: [Errno 2] No such file or directory: '<w>"
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+folder link DANGLING clear-recents                         rc=1 ok=False code=internal found=None tb=True msg="FileNotFoundError: [Errno 2] No such file or directory: '<w>"
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+folder link -> FILE show                                   rc=1 ok=False code=state_unreadable found=None tb=False msg='the state folder is not a folder (a file is at its path, or above it); nothing was written'
+                                                             before=st:link after=st:link
+folder link -> FILE init                                   rc=0 ok=True code=None found=not-a-dir tb=False msg=''
+                                                             before=st:link after=st:link
+folder link -> FILE favorite add b                         rc=1 ok=False code=state_unreadable found=None tb=False msg='the state folder is not a folder (a file is at its path, or above it); nothing was written'
+                                                             before=st:link after=st:link
+folder link -> dir 0500 favorite add                       rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=st:link dot:dir/500 after=st:link dot:dir/700
+FILE link into a 0500 folder favorite add (D-SRC-34)       rc=1 ok=False code=internal found=None tb=True msg="PermissionError: [Errno 13] Permission denied: '<w>"
+                                                             before=ro:500 after=ro:500
+== cache folder (ensure_private_dir callers)
+cache dir link -> dir 0755: cache migrate                  rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=st:link dot:dir/755 after=st:link dot:dir/700
+cache dir DANGLING: cache migrate                          rc=1 ok=False code=internal found=None tb=True msg="FileNotFoundError: [Errno 2] No such file or directory: '<w>"
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+cache dir DANGLING: cache prune                            rc=1 ok=False code=internal found=None tb=True msg="FileNotFoundError: [Errno 2] No such file or directory: '<w>"
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+cache dir DANGLING: failed mark                            rc=1 ok=False code=internal found=None tb=True msg="FileNotFoundError: [Errno 2] No such file or directory: '<w>"
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+cache dir link -> dir 0755: failed mark                    rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=st:link dot:dir/755 after=st:link dot:dir/700
+cache sources/ DANGLING: cache migrate                     rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=sources:link gone:nothing after=sources:link gone:nothing
+== runtime socket folder
+runtime dir DANGLING: player stop                          rc=1 ok=False code=internal found=None tb=True msg="FileNotFoundError: [Errno 2] No such file or directory: '<w>"
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+runtime dir link -> dir 0755: player stop                  rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=st:link dot:dir/755 after=st:link dot:dir/700
+
+=== AFTER: lane-key-k1's helper (R25c)
+== state folder
+folder link -> dir (0755) show                             rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=st:link dot:dir/755 after=st:link dot:dir/755
+folder link -> dir (0755) source list                      rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=st:link dot:dir/755 after=st:link dot:dir/755
+folder link -> dir (0755) init                             rc=0 ok=True code=None found=file tb=False msg=''
+                                                             before=st:link dot:dir/755 after=st:link dot:dir/700
+folder link -> dir (0755) favorite add b                   rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=st:link dot:dir/755 after=st:link dot:dir/700
+folder link -> EMPTY dir (0755) init                       rc=0 ok=True code=None found=absent tb=False msg=''
+                                                             before=st:link dot:dir/755 file:nothing/none(No such file or directory) after=st:link dot:dir/700 file:file/600
+folder link DANGLING show                                  rc=1 ok=False code=state_unreadable found=None tb=False msg='the state folder is a symbolic link whose target is missing or is not a folder; nothing was written'
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+folder link DANGLING source list                           rc=1 ok=False code=state_unreadable found=None tb=False msg='the state folder is a symbolic link whose target is missing or is not a folder; nothing was written'
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+folder link DANGLING init                                  rc=0 ok=True code=None found=folder-link tb=False msg=''
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+folder link DANGLING favorite add b                        rc=1 ok=False code=state_unreadable found=None tb=False msg='the state folder is a symbolic link whose target is missing or is not a folder; nothing was written'
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+folder link DANGLING clear-recents                         rc=1 ok=False code=state_unreadable found=None tb=False msg='the state folder is a symbolic link whose target is missing or is not a folder; nothing was written'
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+folder link -> FILE show                                   rc=1 ok=False code=state_unreadable found=None tb=False msg='the state folder is a symbolic link whose target is missing or is not a folder; nothing was written'
+                                                             before=st:link after=st:link
+folder link -> FILE init                                   rc=0 ok=True code=None found=folder-link tb=False msg=''
+                                                             before=st:link after=st:link
+folder link -> FILE favorite add b                         rc=1 ok=False code=state_unreadable found=None tb=False msg='the state folder is a symbolic link whose target is missing or is not a folder; nothing was written'
+                                                             before=st:link after=st:link
+folder link -> dir 0500 favorite add                       rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=st:link dot:dir/500 after=st:link dot:dir/700
+FILE link into a 0500 folder favorite add (D-SRC-34)       rc=1 ok=False code=state_unwritable found=None tb=False msg='state.json is a symbolic link into a folder that cannot be written (Permission denied); nothing was written'
+                                                             before=ro:500 after=ro:500
+== cache folder (ensure_private_dir callers)
+cache dir link -> dir 0755: cache migrate                  rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=st:link dot:dir/755 after=st:link dot:dir/700
+cache dir DANGLING: cache migrate                          rc=1 ok=False code=folder_unusable found=None tb=False msg='<w>'
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+cache dir DANGLING: cache prune                            rc=1 ok=False code=folder_unusable found=None tb=False msg='<w>'
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+cache dir DANGLING: failed mark                            rc=1 ok=False code=folder_unusable found=None tb=False msg='<w>'
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+cache dir link -> dir 0755: failed mark                    rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=st:link dot:dir/755 after=st:link dot:dir/700
+cache sources/ DANGLING: cache migrate                     rc=1 ok=False code=folder_unusable found=None tb=False msg='<w>'
+                                                             before=sources:link gone:nothing after=sources:link gone:nothing
+== runtime socket folder
+runtime dir DANGLING: player stop                          rc=1 ok=False code=folder_unusable found=None tb=False msg='<w>'
+                                                             before=st:link gone:nothing after=st:link gone:nothing
+runtime dir link -> dir 0755: player stop                  rc=0 ok=True code=None found=None tb=False msg=''
+                                                             before=st:link dot:dir/755 after=st:link dot:dir/700
