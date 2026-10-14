@@ -278,6 +278,17 @@
 #   B17 a start-up init that IGNORES the TERM is KILLed and reaped <- R24g
 #   B18 a shell stopped 5 s into a held init leaves it running, and the
 #       init's own deadline ends it                              <- R24d
+#   B19 R24a live: an in-app change held by a failed save, two hand edits
+#       in place in that window (a favourite added, then removed), a
+#       hand-run helper write, a second in-app change -- both in-app
+#       changes and the helper's favourite kept, the removed one stays
+#       removed, through a restart                   <- R25d, F-HARNESS-26
+#   B20 a backup copied from the plugin's own file after its save landed,
+#       put back after an in-app remove landed: the restore wins, through
+#       the next save and a restart                          <- R25a, D-SRC-30
+#   B21 the EXISTING-folder session damaged after an own save landed: the
+#       garbage is noticed, told once                 <- R25d, D-DOC-9's half
+#   B22 ... and the Sources header there says saving has stopped <- D-SRC-38
 #   P1  no labelled harness-log line carries a URL or a fixture path
 #   P2  no credential token anywhere in the harness log
 #   T1  the shell, the compositor and the nested socket are gone (by pid)
@@ -362,6 +373,16 @@
 #   --tree with spikes/key-mutations/r24g-no-kill.patch: 115 passed, 1
 #       failed, B17 (`blocked: helper:no(<pid>) left:<pid> told:0`;
 #       key-20261014-100528-1027361).
+#
+# ROUND 15, R25 (the lead's ruling on the round-14 lenses). B19..B22 above.
+# B19 is the first live observation of R24a's merge (the round-14 data-loss
+# lens's a5 and a7 survived every check; a5 is driven here by two hand
+# edits IN PLACE inside one held window -- a 0600 file needs no directory
+# `w`, so the in-app save keeps failing while they land -- and a7 is pinned
+# in node, its window being milliseconds wide). B20 is R25a's restore, red
+# on dev. B21 is the existing-folder shape the round-14 lanes left to the
+# spike, seen red through r25d-no-reload-on-change.patch; B22 is D-SRC-38,
+# red on dev. The counts are in the footer below.
 #
 # Every segment seeds its OWN state.json, caches and entry and starts a fresh
 # shell, so a red in one is attributable to one ruling and never to the
@@ -2321,6 +2342,110 @@ PYSEED
   for p in $initpid $left; do kill -KILL "$p" 2>/dev/null; done
   export OMARCHY_IPTV_PLUGIN_ROOT=$PLUGIN_ROOT; unset OMARCHY_IPTV_SLOW_MS OMARCHY_IPTV_SLOW_VERBS OMARCHY_IPTV_SLOW_AT
 
+  # R25d (F-HARNESS-26): R24a OBSERVED. The round-14 data-loss lens found
+  # that nothing live watched the merge: two of its decisions (a5, the base
+  # moved to theirs; a7, the in-flight re-save) survived every check. The
+  # state directory loses `w` under the running shell (F's staging), so the
+  # FileView's atomic save fails and the in-app label change is HELD; two
+  # hand edits IN PLACE (an existing 0600 file needs no directory `w`) add a
+  # favourite and take it away again inside that one held window -- the
+  # second compared with the base the first moved it to (a5); then a
+  # hand-run helper write, which makes the directory 0700 again
+  # (ensure_private_dir) and lands; then a second in-app change. Both in-app
+  # changes and the helper's favourite must be in the file, the favourite
+  # the hand edits removed must stay removed, and a restart stands on all
+  # of it. Seen red through spikes/key-mutations/r25d-a5-base-not-moved.patch.
+  # Every foreign write MERGED, whichever hold it met (a save failed, or the
+  # merge's own re-save still in flight when the next write lands).
+  merges() { qa_json_field "sum(v for k, v in d['stateReloadsByReason'].items() if k.startswith('foreign-'))" "$(ipc pointerState)"; }
+  : >"$NOTIFY_LOG"
+  seed "$KA" migrated
+  start_shell --playlist none --source-key "$KA" || true
+  chmod 0500 "$(dirname "$STATE")"
+  res=$(ipc updateSource "$KC" '{"label": "in-app-one"}')
+  wait_for true 10 pf "['stateSaveFailed']" >/dev/null || true
+  held="$(pf "['stateSaveFailed']")"
+  python3 -c 'import json, sys; p = sys.argv[1]; d = json.load(open(p)); d["favorites"] = d.get("favorites", []) + ["t:h3.uk"]; open(p, "w").write(json.dumps(d) + "\n")' "$STATE"
+  wait_for 1 10 merges >/dev/null || true
+  python3 -c 'import json, sys; p = sys.argv[1]; d = json.load(open(p)); d["favorites"] = [f for f in d.get("favorites", []) if f != "t:h3.uk"]; open(p, "w").write(json.dumps(d) + "\n")' "$STATE"
+  wait_for 2 10 merges >/dev/null || true
+  python3 "$PLUGIN_ROOT/bin/omarchy-iptv" state --state-dir "$(dirname "$STATE")" favorite add t:helper.uk >/dev/null 2>&1; hrc=$?
+  wait_for false 10 pf "['stateSaveFailed']" >/dev/null || true
+  res2=$(ipc updateSource "$KA" '{"label": "in-app-two"}')
+  sleep 1.5
+  labels() { sj "','.join(('A=' if s['key'] == '$KA' else 'C=' if s['key'] == '$KC' else '?=') + s['label'] for s in sorted(d['sources'], key=lambda s: s['key'] != '$KA'))"; }
+  file1="labels:$(labels) favs:$(sj "','.join(d['favorites']) or '-'")"
+  merged="$(merges)"
+  stop_shell
+  start_shell --playlist none --source-key "$KA" || true
+  sleep 0.5
+  ck "B19 R24a live: an in-app change HELD by a failed save, two hand edits in place inside that window (a favourite added, then removed), a hand-run helper write, a second in-app change -- the file keeps BOTH in-app changes and the helper's favourite, the removed one stays removed, every foreign write was merged, and a restart stands on all of it" \
+     "held:$held edits:$(qa_json_field "d['ok']" "$res")/$(qa_json_field "d['ok']" "$res2") helper:$hrc merged:$merged $file1 restart:$(qa_json_field "','.join(sorted(s['label'] for s in d))" "$(ipc sources)")/$(sj "','.join(d['favorites']) or '-'")" \
+     "held:true edits:true/true helper:0 merged:3 labels:A=in-app-two,C=in-app-one favs:t:helper.uk restart:in-app-one,in-app-two/t:helper.uk"
+  stop_shell
+
+  # R25a (D-SRC-30): THE RESTORE OF A BACKUP TAKEN FROM THE PLUGIN'S OWN
+  # FILE. The round-14 data-loss lens: a copy of state.json taken after an
+  # in-app change had LANDED, then an in-app remove that landed, then the
+  # copy put back in place -- the copy's text was one of the service's last
+  # eight writes, so it was ignored as an echo and the next in-app save
+  # wrote over the restore, silently. The echo is now only a text still in
+  # flight. Red on dev (002662d), where it lives.
+  seed "$KA" migrated
+  start_shell --playlist none --source-key "$KA" || true
+  res=$(ipc updateSource "$KA" '{"label": "before-backup"}')
+  for ((i = 0; i < 100; i++)); do [[ $(sj "[s['label'] for s in d['sources'] if s['key'] == '$KA'][0]") == before-backup && $(pf "['stateSavesInFlight']") == 0 ]] && break; sleep 0.1; done
+  sleep 1.0
+  cp "$STATE" "$WORK/backup.json"
+  res2=$(ipc removeSource "$KC")
+  wait_for 1 10 sj "len(d['sources'])" >/dev/null || true
+  sleep 1.0
+  afterdel=$(sj "len(d['sources'])")
+  cat "$WORK/backup.json" >"$STATE"
+  for ((i = 0; i < 100; i++)); do [[ $(pf "['sourceCount']") == 2 ]] && break; sleep 0.1; done
+  restored="$(pf "['sourceCount']")"
+  res3=$(ipc updateSource "$KA" '{"label": "after-restore"}')
+  sleep 1.5
+  file2="records:$(sj "len(d['sources'])") label:$(sj "[s['label'] for s in d['sources'] if s['key'] == '$KA'][0]")"
+  stop_shell
+  start_shell --playlist none --source-key "$KA" || true
+  sleep 0.5
+  ck "B20 R25a: a backup copied from the plugin's own file AFTER its save landed, put back in place after an in-app remove landed, is another writer's: memory takes it back (2 sources), the next in-app save keeps it, and a restart stands on it" \
+     "edits:$(qa_json_field "d['ok']" "$res")/$(qa_json_field "d['ok']" "$res2")/$(qa_json_field "d['ok']" "$res3") after-remove:$afterdel restored:$restored $file2 restart:$(qa_json_field 'len(d)' "$(ipc sources)")" \
+     "edits:true/true/true after-remove:1 restored:2 records:2 label:after-restore restart:2"
+  stop_shell
+
+  # R25d (D-DOC-9's open half): the EXISTING-folder session damaged AFTER an
+  # own save. B5..B7 and B9 damage a session that has saved nothing of its
+  # own yet, and B16 is the fresh-install shape; the round-14 lane recorded
+  # that no segment observed this one. A migrated install starts (its
+  # directory present at the first load), an in-app change's save LANDS,
+  # and then garbage is written in place: the FileView must still be
+  # watching. Seen red through spikes/key-mutations/r25d-no-reload-on-change.patch
+  # (stateFile's `onFileChanged: reload()` deleted). And D-SRC-38: the
+  # Sources header in that MID-session block says saving stopped -- red on
+  # dev, where it said the sources were not loaded over rows still listed.
+  : >"$NOTIFY_LOG"
+  seed "$KA" migrated
+  start_shell --playlist none --source-key "$KA" || true
+  res=$(ipc updateSource "$KC" '{"label": "own-save"}')
+  for ((i = 0; i < 100; i++)); do [[ $(sj "[s['label'] for s in d['sources'] if s['key'] == '$KC'][0]") == own-save && $(pf "['stateSavesInFlight']") == 0 ]] && break; sleep 0.1; done
+  sleep 1.0
+  landed1="$(sj "[s['label'] for s in d['sources'] if s['key'] == '$KC'][0]")"
+  printf 'garbage{' >"$STATE"
+  wait_for unparsed 10 pf "['stateWriteBlocked']" >/dev/null || true
+  ck "B21 the EXISTING-folder session damaged AFTER an own save landed: the garbage written in place is noticed (the no-write mode, told once), the file left as the user wrote it" \
+     "edit:$(qa_json_field "d['ok']" "$res") landed:$landed1 blocked:$(pf "['stateWriteBlocked']") told:$(qa_count ' 74017 ' "$NOTIFY_LOG") file:$(head -c 8 "$STATE")" \
+     "edit:true landed:own-save blocked:unparsed told:1 file:garbage{"
+  ipc open '{}' >/dev/null; sleep 0.8
+  ipc sourcesKey enter >/dev/null; sleep 0.4
+  gs=$(ipc state)
+  ck "B22 D-SRC-38: in that MID-session block the Sources header says saving has stopped, above the session's own rows -- not that the sources were not loaded" \
+     "mode:$(qa_json_field "d['guide']['mode']" "$gs") header:$(qa_json_field "d['guide']['headerRight']" "$gs") rows:$(qa_json_field "d['guide']['sourceRows']" "$gs")" \
+     "mode:sources header:Saving has stopped rows:2"
+  ipc close >/dev/null
+  stop_shell
+
   echo "== P: the console sink, then teardown ($(elapsed) s)"
   qa_leak_on_labelled 'sourceProbeFinished|sourceSwitched|sourceRemoved|updateEntryInline' "://|$WORK" "$LOG"
   case $? in 0) left=clean ;; 1) left=LEAK ;; *) left="nothing labelled to judge" ;; esac
@@ -2357,7 +2482,7 @@ instrument
 # The floor. A check that stops executing must turn the run red rather than
 # quietly shorten the summary (D-PLY-9). Recount with
 #   grep -cE '^ *ck "[IS][0-9]' key-scenario.sh   -> 10, the instrument arm -> check-tree
-#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 115, both arms         -> live
+#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 119, both arms         -> live
 # (48 -> 61 on 2026-10-12, round 4: W1..W6 and F1..F7; 61 -> 63 the same
 # day, round 5: L1, L2; 63 -> 70 the same day, round 7: U1..U7; 70 -> 78
 # the same day, round 8: K1..K3, Z1..Z3, A1, A2; 78 -> 85 the same day,
@@ -2367,7 +2492,8 @@ instrument
 # the R21 contract, one for one; 97 -> 105 the same day, round 12: B1..B8,
 # R22a's load failures and R22c's hint; 105 -> 111 the same day, round 13:
 # B9..B14, R23a-c, R23e, R23f, R23h; 111 -> 115 on 2026-10-14, round 14:
-# B15..B18, R24f, R24c, R24g, R24d.)
+# B15..B18, R24f, R24c, R24g, R24d; 115 -> 119 the same day, round 15:
+# B19..B22, R25d, R25a, D-SRC-38.)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -2377,7 +2503,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=10
 else
-  EXPECTED_CHECKS=115
+  EXPECTED_CHECKS=119
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then

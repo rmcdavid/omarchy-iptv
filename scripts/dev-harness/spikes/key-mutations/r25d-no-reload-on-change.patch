@@ -1,0 +1,13 @@
+diff --git a/Service.qml b/Service.qml
+index 0000000..0000000 100644
+--- a/Service.qml
++++ b/Service.qml
+@@ -5116,7 +5116,7 @@
+     // Fires for our own atomic write AND for a bare chmod of the file, mode
+     // changed or not (measured 2026-10-11, D-SRC-15); applyUserState decides
+     // whether what the reload delivers is newer than memory (R9).
+-    onFileChanged: reload()
++    // MUTATION (lane A, round 15): stateFile no longer reloads on a change -- the watch is deaf
+     // R9 / R11 / R13: `saved` is NOT one per setText -- a burst coalesces
+     // queued writes and the replaced ones raise nothing (measured, see
+     // Model.stateSaveLanded) -- so the write is landed when the view's text

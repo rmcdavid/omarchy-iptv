@@ -1287,9 +1287,10 @@ is "F and L each set their own log mark before the call they count, U and Y befo
 # more (g + confirm on one line, then g). Round 13: B12 drives it three
 # more (enter, g, confirm) in the no-write mode. Round 14: B15 opens Sources
 # the same way in that mode (enter: 1 more; its `a` is not a setShowLogos
-# key and is not counted).
+# key and is not counted). Round 15: B22 opens Sources in a MID-session
+# block the same way (enter: 1 more).
 is "L, U and Y reach setShowLogos through the guide's Sources key path, and F, U, Z, Y and H restart over the observed key as O does" \
-   "$(qa_count '^  ipc sourcesKey (enter|g|confirm) >/dev/null' "$KS") $(qa_count '^  start_shell "\$\{seed_args\[@\]\}" \|\| true$' "$KS")" "15 7"
+   "$(qa_count '^  ipc sourcesKey (enter|g|confirm) >/dev/null' "$KS") $(qa_count '^  start_shell "\$\{seed_args\[@\]\}" \|\| true$' "$KS")" "16 7"
 # Round 10 (Y4): the stored entry's showLogos is read through hostEntry's
 # storedShowLogos, which HarnessLib.storedOwnedValue answers for the two
 # OWNED keys only -- a retired URL key reads null through it -- and Y4 is
@@ -1320,13 +1321,14 @@ KM="$ROOT/scripts/dev-harness/spikes/key-mutations"
 # which B17 and the R24g node pins were seen red against (F-HARNESS-24),
 # and re-made d3-save-parked and r14-no-return for R24a's new shape of the
 # same two decisions.
-# Round 15 adds five (R25a, R25b, R25d / F-HARNESS-26): r25a-keep-landed
+# Round 15 adds six (R25a, R25b, R25d / F-HARNESS-26): r25a-keep-landed
 # and r25a-clear-every-saved (the own-write record kept past a landed save,
 # and cleared mid-burst), r25b-silent-drop (a cap drop not told), and the
 # round-14 lens's two survivors as patches, r25d-a5-base-not-moved and
-# r25d-a7-no-inflight-half.
-is "all ten key-mutation patches still apply to this tree (git apply --check)" \
-   "$(for km_p in d3-save-parked r14-no-return r23a-no-rearm r23e-editable-field r24g-no-kill r25a-keep-landed r25a-clear-every-saved r25b-silent-drop r25d-a5-base-not-moved r25d-a7-no-inflight-half; do git -C "$ROOT" apply --check "$KM/$km_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 0 0 0 0 0 0 "
+# r25d-a7-no-inflight-half, and r25d-no-reload-on-change (stateFile deaf
+# to a change: B21's red).
+is "all eleven key-mutation patches still apply to this tree (git apply --check)" \
+   "$(for km_p in d3-save-parked r14-no-return r23a-no-rearm r23e-editable-field r24g-no-kill r25a-keep-landed r25a-clear-every-saved r25b-silent-drop r25d-a5-base-not-moved r25d-a7-no-inflight-half r25d-no-reload-on-change; do git -C "$ROOT" apply --check "$KM/$km_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 0 0 0 0 0 0 0 "
 is "key-scenario and the README cite the patch files and no mutation branch" \
    "$(qa_count 'd3-save-parked\.patch|r14-no-return\.patch' "$KS") $(qa_count 'mut-(d3-save-parked|r14-no-return)' "$KS") $(qa_count 'mut-(d3-save-parked|r14-no-return)' "$ROOT/scripts/dev-harness/README.md")" "2 0 0"
 # run.sh clean on the directory a signalled F leaves: DRIVEN. The old

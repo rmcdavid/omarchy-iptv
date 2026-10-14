@@ -28,6 +28,7 @@ line, only the file and the hunk's position changed.
 | `r25b-silent-drop.patch` | the merge's cap drop is logged but the user is not told (round 15, R25b) | the eight R25b node pins |
 | `r25d-a5-base-not-moved.patch` | `Service.mergeForeignText` does not move the base to theirs (the round-14 lens's a5, F-HARNESS-26): a second foreign write in one held window is compared with a stale base | the four R25d a5 node pins |
 | `r25d-a7-no-inflight-half.patch` | the in-flight half of `mergeForeignText`'s re-save decision deleted (the lens's a7): our older in-flight save lands over a merge equal to theirs | the four R25d a7 node pins, and the in-flight R25b saved-search pin |
+| `r25d-no-reload-on-change.patch` | `stateFile`'s `onFileChanged: reload()` deleted (round 15, R25d): the view still watches, the service never reloads | key-scenario's B21 (the existing-folder session damaged after an own save: the garbage unnoticed) |
 | `r23e-editable-field.patch` | the form field's `readOnly: true` in `Guide.qml` made `false` (round 13): the D-CLIP-1 switch off, one editable TextInput per form field | B13 (`editable:` above 0 on the first-run form): the control that shows the harness's editable-input census (`ipc editable`) can see a field, so B11's `editable:0` on the no-write surface is an observation and not a census that cannot count |
 
 Round 14 (R24a) re-made `d3-save-parked.patch` and `r14-no-return.patch`
@@ -41,7 +42,7 @@ nothing-held branch below the deleted clause, so the hunk's context moved;
 the decision broken is the same, and with memory moved by the adoption the
 reload still lands on `file-newer`.
 
-All ten apply to the tree they are checked in with (`scripts/qa-lib-test.sh`
+All eleven apply to the tree they are checked in with (`scripts/qa-lib-test.sh`
 runs `git apply --check` on each, so a refactor that moves a hunk is a red
 gate, not a silently stale patch).
 
