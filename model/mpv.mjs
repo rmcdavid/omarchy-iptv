@@ -359,6 +359,19 @@ function playlistFetchArgv(helperPath, cacheDir, stateDir) {
   return helperArgv(helperPath, args)
 }
 
+// D-SINK-19 round 14, R24e (D-SRC-27). The state directory the ACTIVE fetch
+// hands the helper, which is what lets its D-ID-1 remap rewrite state.json:
+// "" -- the flag omitted, so the helper touches no state file -- while the
+// service is in the no-write mode (`blocked`, its stateWriteBlocked reason).
+// The mode was enforced in saveState and writeOwnedEntry, and the remap is a
+// SECOND writer of the same file, gated only by its own read: in a session
+// blocked as init-timeout or absent-unconfirmed over a file that later read
+// valid, an active-source fetch could still rename it. "will write nothing
+// to it this session" is now true of every writer the service starts.
+function fetchStateDir(stateDir, blocked) {
+  return str(blocked) !== "" ? "" : str(stateDir)
+}
+
 function playlistProbeArgv(helperPath, cacheDir) {
   return helperArgv(helperPath, ["playlist", "--cache-dir", str(cacheDir)])
 }
@@ -665,9 +678,10 @@ export {
   MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase, mpvHandoffName, mpvDiskName,
   mpvArgWarning, mpvArgWarnings, splitMpvArgs, headerArgs, MPV_RAW_PREFIX,
   mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv, helperArgv,
-  playlistFetchArgv, playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV,
-  fetchEnvironment, failedArgv, logoFetchArgv, playerTracksArgv, trackChoice,
-  parseTracks, LANG_NAMES, trackLanguage, trackLabel, trackDetail, trackRows,
-  trackCursorHome, moveTrackCursor, TRACKS_RECOVERY_MAX, shouldRefreshTracks,
-  trackPanelMessage, trackAccessibleName
+  playlistFetchArgv, fetchStateDir, playlistProbeArgv, epgFetchArgv,
+  FETCH_URL_ENV, fetchEnvironment, failedArgv, logoFetchArgv,
+  playerTracksArgv, trackChoice, parseTracks, LANG_NAMES, trackLanguage,
+  trackLabel, trackDetail, trackRows, trackCursorHome, moveTrackCursor,
+  TRACKS_RECOVERY_MAX, shouldRefreshTracks, trackPanelMessage,
+  trackAccessibleName
 }

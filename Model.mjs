@@ -75,7 +75,8 @@ export {
   MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed, prunedFailed,
   knownIdSet, failedIndex, failedDocument, failedWhen, withFailed,
   failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
-  reloadDisposition, STATE_LOAD_ERRORS, stateLoadKind, stateInitFound,
+  reloadDisposition, stateCanonical, sameState, mergeForeignState,
+  mergeConflictLine, STATE_LOAD_ERRORS, stateLoadKind, stateInitFound,
   stateLoadDecision, stateWriteGate, stateUnreadableNotice
 } from "./model/state.mjs"
 export {
@@ -110,12 +111,12 @@ export {
   MPV_HANDOFF_TEXT, MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase,
   mpvHandoffName, mpvDiskName, mpvArgWarning, mpvArgWarnings, splitMpvArgs,
   headerArgs, MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf,
-  buildMpvArgv, helperArgv, playlistFetchArgv, playlistProbeArgv,
-  epgFetchArgv, FETCH_URL_ENV, fetchEnvironment, failedArgv, logoFetchArgv,
-  playerTracksArgv, trackChoice, parseTracks, trackLanguage, trackLabel,
-  trackDetail, trackRows, trackCursorHome, moveTrackCursor,
-  TRACKS_RECOVERY_MAX, shouldRefreshTracks, trackPanelMessage,
-  trackAccessibleName
+  buildMpvArgv, helperArgv, playlistFetchArgv, fetchStateDir,
+  playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,
+  failedArgv, logoFetchArgv, playerTracksArgv, trackChoice, parseTracks,
+  trackLanguage, trackLabel, trackDetail, trackRows, trackCursorHome,
+  moveTrackCursor, TRACKS_RECOVERY_MAX, shouldRefreshTracks,
+  trackPanelMessage, trackAccessibleName
 } from "./model/mpv.mjs"
 export {
   SEEK_FLOOR_MARGIN_S, SEEK_EDGE_MARGIN_S, SEEK_MOVED_THRESHOLD_S, SEEK_MAX_S,
@@ -180,10 +181,10 @@ export {
   maskUrl, encodeQueryValue, xtreamUrls, validateXtream, pluralGroups,
   countsLine, formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
   EPG_HINT_ROW_TEXT, sourceDetail, sourceAccessibleName, sourcesHeaderCount,
-  sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
-  fetchingLine, probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
-  CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS,
-  CLIPBOARD_MAX_BYTES
+  sourcesHeaderRight, sourcesRowAccessibleName, confirmLogosMessage,
+  confirmRemoveMessage, fetchingLine, probeFailureLine, sourceTransient,
+  CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
+  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
 } from "./model/sources.mjs"
 export {
   hasControlChars, normalizeSourceRecord, addSource, updateSource,
@@ -201,7 +202,7 @@ export {
   clipboardArgv, clipboardCut, parseClipboardReply, editRange, fullRange,
   editRangeFor, cutApplies, wordBoundary, typedText, editInsert, editDelete,
   withFormError, withFormProbing, formSubmitValues, validateUrlForm,
-  sourcesRowCount, sourcesRowKind, sourcesInitialCursor, cursorAfterRemove,
-  openSources, closeSources, withSourceCursor, startRemove, startLogosConsent,
-  afterRemove, afterSwitch
+  sourcesRowCount, sourcesRowKind, sourcesAddAllowed, sourcesInitialCursor,
+  cursorAfterRemove, openSources, closeSources, withSourceCursor, startRemove,
+  startLogosConsent, afterRemove, afterSwitch
 } from "./model/form-edit.mjs"

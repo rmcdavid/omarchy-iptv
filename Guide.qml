@@ -572,8 +572,9 @@ Item {
   readonly property bool firstRunHead: firstRunForm && form.kind === "url"
   readonly property var formFieldIds: form ? Model.formFields(form) : []
   readonly property int sourceCursor: guide.sourceCursor
-  readonly property int sourceRowCount: Model.sourcesRowCount(sourceCount)
-  readonly property string sourceCursorKind: Model.sourcesRowKind(sourceCursor, sourceCount)
+  // R24f (round 14, D-SRC-28): no Add rows in the no-write mode.
+  readonly property int sourceRowCount: Model.sourcesRowCount(sourceCount, stateBlocked)
+  readonly property string sourceCursorKind: Model.sourcesRowKind(sourceCursor, sourceCount, stateBlocked)
   property string pendingProbeId: ""
   property string pendingCursorId: ""
   property string switchPendingId: ""
@@ -639,7 +640,9 @@ Item {
     // -- and the repair that restored the query line wrote a sentence in UX
     // 2.9 saying both had been restored. Half a repair with a whole claim.
     if (root.guideMode || root.inTracks || root.inPanel) return root.scopeLabelText
-    if (root.inSources || root.confirmOpen) return Model.sourcesHeaderCount(root.sourceCount)
+    // R24f: the no-write mode's header is the notice's title, not "No sources".
+    if (root.inSources || root.confirmOpen) return Model.sourcesHeaderRight(root.sourceCount, root.stateBlocked,
+                                                                            root.serviceReady && typeof service.stateFilePath === "string" ? service.stateFilePath : "")
     return ""
   }
   readonly property string formAccessibleName: {
@@ -883,6 +886,7 @@ Item {
     // refresh cannot make an unread state.json readable.
     return { mode: root.mode, query: root.query, empty: empty, sourcesExist: root.sourceCount > 0,
       retry: root.invalidSettingsText === "" && root.emptyKind !== "stateUnreadable", cursorKind: root.sourceCursorKind, form: root.form,
+      stateBlocked: root.stateBlocked,
       hasNumbers: root.hasNumbers, numberEntry: root.numberEntryActive ? { active: true } : null,
       // M2-05 section 5: `p pip` only where it can do something.
       pipAvailable: root.pipAvailable,
@@ -1952,7 +1956,7 @@ Item {
 
   // Enter (stay false) / Space (stay true) on a Sources row (UX-SOURCES 1.4).
   function activateSourceRow(index, stay) {
-    var kind = Model.sourcesRowKind(index, root.sourceCount)
+    var kind = Model.sourcesRowKind(index, root.sourceCount, root.stateBlocked)
     root.guide = Model.withSourceCursor(root.guide, index)
     if (kind === "add") root.openAddForm()
     else if (kind === "xtream") root.openXtreamForm()
@@ -2063,7 +2067,16 @@ Item {
     return true
   }
 
+  // R24f: `a`, `X` and Enter on an Add row open no form in the no-write
+  // mode -- its submit could only be refused -- and the footer says why.
+  function addRefused() {
+    if (Model.sourcesAddAllowed(root.stateBlocked)) return false
+    root.showTransient(Model.refusalMessage("state_unreadable", root.stateBlocked))
+    return true
+  }
+
   function openAddForm() {
+    if (root.addRefused()) return
     if (root.sourcesFull()) return
     root.setGuide(Model.openAddForm(root.guide))
     root.refocus()
@@ -2081,6 +2094,7 @@ Item {
   }
 
   function openXtreamForm() {
+    if (root.addRefused()) return
     if (root.sourcesFull()) return
     root.setGuide(Model.openXtreamForm(root.guide, root.form ? root.form.origin : "sources"))
     root.refocus()
@@ -4461,7 +4475,7 @@ Item {
                 id: srow
                 required property int index
 
-                readonly property string rowKind: Model.sourcesRowKind(srow.index, root.sourceCount)
+                readonly property string rowKind: Model.sourcesRowKind(srow.index, root.sourceCount, root.stateBlocked)
                 readonly property bool isSource: srow.rowKind === "source"
                 readonly property var source: srow.isSource ? (root.sourceList[srow.index] || null) : null
                 readonly property bool hasCursor: srow.index === root.sourceCursor

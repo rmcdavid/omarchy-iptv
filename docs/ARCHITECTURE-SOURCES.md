@@ -508,10 +508,13 @@ by the helper for a syntactic reason; the helper keeps the runtime refusals
 | `countReload(counts, reason)` | R15 (lane-key-t1; `Model.countReload`): the reload counter by reason -- a NEW object (a `property var` mutated in place raises no change signal) with `reason`'s count incremented, keyed by the string `Model.reloadDisposition` answered, so the counter cannot name a reason the decision does not; the service's `stateReloadsByReason`, reported through the harness's `pointerState` |
 | `ownedWriteMode({ stateLoaded, savePending, savesInFlight, saveFailed })` | R16 (lane-key-u1; `Model.ownedWriteMode`): what an owned-entry write that is NOT the key mirror may carry -- `{ mode, reason }`, `patch` with `save-parked` / `save-in-flight` / `save-failed` whenever one of the three flags is raised, `heal` with `settled` otherwise; the three flags and nothing else (fixture section `ownedWrite`, 8 cases, the whole cube). **Amended 2026-10-12 (round 6, lane-key-v1 78ff442): a FOURTH input, `stateLoaded`, checked first -- anything but `true` answers `patch` with `state-not-loaded`, because before the first state load memory is the empty state and no save flag is raised, so the three flags alone answered `heal` there and a logo toggle stripped a URL set while the shell was down (the fifth review's data-loss P2). `heal` now means loaded AND nothing outstanding; the four inputs and nothing else; the `ownedWrite` section is 16 cases, the four-input cube.** **Amended 2026-10-13 (round 12, R22a; lane-key-n1 16a3bc9): a FIFTH input, `blocked` (the no-write mode's reason), checked before every other, and a third answer, `none` with reason `state-unreadable`: in the no-write mode no owned write is made at all, the patch included, because the entry may hold the only copy of an input the unread file could not tell us about (`R16 / R22a: the fixture covers the whole five-input cube ...`).** |
 | `stateLoadKind(result)`, `STATE_LOAD_ERRORS` | R22a (round 12, lane-key-n1 16a3bc9; `Model.stateLoadKind`, `Model.STATE_LOAD_ERRORS`): what one load of `state.json` IS. `result` is `{ loaded: true, text }` from `onLoaded` or `{ loaded: false, error }` from `onLoadFailed`; the answer is `loaded` (the text parses as a JSON object), `unparsed` (read and not one, an empty file included), or the failure's kind by Quickshell's `FileViewError` number -- 1 `io-error`, 2 `absent`, 3 `permission`, 4 `not-a-file` -- and `io-error` for any number the table does not know, never `absent` by default. The numbers are the enum's declaration order, measured (the round-12 rulings) and pinned against the installed qmltypes |
-| `stateInitFound(text, exitCode)` | R22a (`Model.stateInitFound`): the helper's start-up `state init` reply -> `absent` only for the init's own `found: absent`, `present` for `file`, `other` or `unreadable`, `unknown` for a failed exit, no reply, another verb's reply or a reply without the field. The one witness that tells a missing file from a file inside a directory the FileView cannot search, which it reports identically (FileNotFound) |
-| `stateLoadDecision({ kind, loadedBefore, initFound, retried })` | R22a (`Model.stateLoadDecision`): `{ act, reason }` for a load that is not `loaded` -- `apply` for a state; mid-session (`loadedBefore`) `block` at once; at a start `wait` until the init answers, `fresh` ONLY when the load is `absent` and the init found `absent`, else `retry` once (the init restores the 0000 modes it finds) and then `block`, with reason `absent-unconfirmed` for a FileNotFound the init contradicts |
+| `stateInitFound(text, exitCode, timedOut)` | R22a (`Model.stateInitFound`): the helper's start-up `state init` reply -> `absent` only for the init's own `found: absent`, [round 14, R24b: `link` and `not-a-dir` for the init's own answers of those names;] `present` for `file`, `other` or `unreadable`, `unknown` for a failed exit, no reply, another verb's reply or a reply without the field. The one witness that tells a missing file from a file inside a directory the FileView cannot search, which it reports identically (FileNotFound) |
+| `stateLoadDecision({ kind, loadedBefore, initFound, retried })` | R22a (`Model.stateLoadDecision`): `{ act, reason }` for a load that is not `loaded` -- `apply` for a state; mid-session (`loadedBefore`) `block` at once; at a start `wait` until the init answers, `fresh` ONLY when the load is `absent` and the init found `absent`, else `retry` once (the init restores the 0000 modes it finds) and then `block`, with reason `absent-unconfirmed` for a FileNotFound the init contradicts [round 14, R24b: after the one re-read, an init that answered `link` or `not-a-dir` blocks with THAT reason instead of `absent-unconfirmed`] |
 | `stateWriteGate({ blocked, loaded, dirsReady })` | R22a / R22b (`Model.stateWriteGate`): the one gate `Service.saveState` asks first -- `refuse` in the no-write mode whatever else is true, `park` before any state has loaded or before the directories are ready, `write` otherwise. Before R22a a save made with the directories ready and the load still outstanding wrote the empty default over the file |
 | `stateUnreadableNotice(reason, path)` | R22a (`Model.stateUnreadableNotice`): `{ title, body }`, the ONE sentence the user is told once per no-write episode, as a critical notification (replace id 74017) and on the console -- `Saved sources not loaded` / `<path> <what>. Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. <fix>`, composed from the reason and the path alone, never a URL; the six reasons and their text are in the round-12 rulings and `UX-SOURCES.md` 5.10 |
+| `sameState(a, b)`, `stateCanonical(state)` | R24a / R24c (round 14; `Model.sameState`, `Model.stateCanonical`): whether two states -- objects, or the texts of files -- are the same state as a reader of the file sees it: each read through `parseState`, then serialized with its keys sorted at every depth. So the helper's compact JSON and the service's indented JSON of one state compare equal, and the init's empty default equals `parseState("")` (pinned). What `Service.applyUserState` hands `Model.reloadDisposition` as `matchesBase` |
+| `mergeForeignState(base, ours, theirs)` | R24a (round 14; `Model.mergeForeignState`): `{ state, conflicts }`, THE three-way merge of a FOREIGN write into a session that holds a change the file does not. Sets (`favorites`, `hiddenGroups`, `savedSearches`) merge; `sources` merge by key; `recents`, `activeKey`, `lastPlayed`, `session`, `cacheLayout` are taken whole; `entryMigrated` is set if either side has it; a conflict goes to theirs and is reported as `{ field, key, fields }` with no value. The field table is in the round-14 rulings; the fixture is `tests/fixtures/state-merge.json` |
+| `mergeConflictLine(conflict)` | R24a (round 14; `Model.mergeConflictLine`): the console line for one conflict, `state.json was changed by another program while a change made here was not yet saved; kept the other program's <field>` or `... the source <key> (<field names>)` -- never a URL or a value |
 | `persistFailureMessage(reason)` | R16 (lane-key-u1; `Model.persistFailureMessage`): the sentence for THE reason `sourcesPersistFailed` carried, over `Model.PERSIST_FAILURE_REASONS` (`state_write_failed`, `config_unsafe`, `persist_failed`); an unknown reason falls back to `persist_failed`'s sentence; what the guide renders on the result line and in the footer |
 | `invalidInputBlocks(invalid, activeKey)` | whether a refused input becomes the guide's error state: only when there is no active source to show instead (D16, narrowed) |
 | `sourceRows(st, activeKey, nowSec, errors)` | UI rows, sorted `active` first then `lastUsed` desc [UX-ASSUMPTION]: `{ key, label, host, kind, active, channelCount, groupCount, lastUsed, lastUsedText, fetched, epgConfigured, origin, errorReason }` -- no URL field, ever |
@@ -975,7 +978,16 @@ only because `Model.entryWith` copies them.
    (a CLI `state ...` write with nothing of ours outstanding [round 12, R22f's
    search: that write never arrives -- the FileView raises no reload on the
    helper's atomic rename, D-SRC-19 -- so `apply` for a newer file is reached
-   by a write in place, such as an editor's or key-scenario B7's restore]). An ignored
+   by a write in place, such as an editor's or key-scenario B7's restore]
+   [round 14, 2026-10-14: the bracket before this one is withdrawn. A
+   helper rename IS reloaded (R23g's spike, every sequence), and the one
+   session that saw nothing -- the state directory absent at the first
+   load, the first session after a fresh install -- is re-armed by R24c;
+   key-scenario B16 sees a hand-run `state source add` there. And R24a
+   narrows the ignore list: a held save ignores a reload only when its text
+   is the BASE (`Service.landedState`, `Model.sameState`); any other text is
+   FOREIGN and is merged (`merge`, reasons `foreign-save-parked`,
+   `foreign-save-in-flight`, `foreign-save-failed`), never ignored]). An ignored
    reload runs neither `reconcile` nor `startCacheLayout`; the count is
    `stateReloadsIgnored` and, since R15, `stateReloadsByReason` -- one number
    per reason, which is what key-scenario D3 reads (`save-parked`). Step 1's `state init` exit also records
@@ -1645,7 +1657,10 @@ parked (`stateSavePending`) or in flight (`stateSavesInFlight`, a counter: one
 `saved` per `setText`, measured [round 8, the OQ-C5 sibling: since R13 it is
 0 or 1, set when a write is asked for and cleared by CONTENT through
 `Model.stateSaveLanded`, so a flag that keeps a counter's name]) or the last save failed, the reload is
-ignored and runs neither `reconcile(true)` nor `startCacheLayout`; the sibling
+ignored [round 14, R24a: only when its text is the base the service last
+knew on disk; a FOREIGN text in that window is three-way merged by
+`Model.mergeForeignState`, because "ignored" let a hand-run helper write be
+written over by the next save that landed (D-SRC-22)] and runs neither `reconcile(true)` nor `startCacheLayout`; the sibling
 (an IPC switch or remove before `dirsReady`, since `cacheReady` comes first)
 parks a save and is covered by the same flag. R10: `init_state_file` stats
 first and chmods only when the mode is not already 0600 -- belt and braces,
@@ -2988,7 +3003,10 @@ entry, kept it. The round-9 documents had recorded it as open with no id,
 against rule 13. D-SRC-19 (P3, shipped) is why it needs a restart: the
 service's `stateFile` FileView does not reload after the helper's atomic
 rename (its reload counter did not move), so memory hides the helper's write
-and the next service save writes memory over it. D-SINK-20, re-graded P2 by
+and the next service save writes memory over it [round 14, 2026-10-14: that
+rig's session shape was the one that never reloads -- the state directory
+absent at the first load (the round-13 live lens) -- and R24c re-arms it; in
+every other session the rename is reloaded (R23g)]. D-SINK-20, re-graded P2 by
 the data-loss lens: its record bounded the lagging host's patch-only
 re-carry to a URL a record already held and the next owned write stripped,
 and live on lane-key-y0 and lane-key-y2 both bounds failed -- a refused
@@ -3078,6 +3096,10 @@ passes `--state-dir` (D-ID-1), and the service remaps its own memory onto the
 same scheme when it applies the list (`Service.adoptIdScheme`, D-ID-3), so
 its next save agrees. A hand-run `state` verb has no such twin, and
 D-SRC-19 stays open; round 10 changes nothing in the service's reload.
+[Round 14, 2026-10-14: "the FileView does not reload" held only for a
+session whose state directory did not exist at its first load; R24c
+re-arms that session, R24a merges a helper write that arrives while a save
+is held, and the docstring now says so.]
 
 [Round 11: R20b OVERTURNED by R21b's in-memory record; `entryInputs` deleted, R21d.] R20b, THE CONSUMED SNAPSHOT SURVIVES A RESTART. The ruling: what the
 service has already consumed from the entry -- the in-memory reconciled
@@ -3342,7 +3364,9 @@ preflights ran in the gate.
 What this round leaves open, with its owner. The board states of D-SRC-20
 (closed by R20a), D-SINK-20 (closed as filed) and D-SRC-18 (settled for the
 window R19d left), the lead's, after the round-10 lenses. D-SRC-19, the
-service not reloading a helper write, unchanged and open. The residual of
+service not reloading a helper write, unchanged and open [round 14: re-scoped
+by the round-13 live lens to the first session after a fresh install, and
+re-armed there by R24c]. The residual of
 R20b's riding slot, above, the lead's to give an id or not. Lane A's
 readings, for the lead to confirm: the at-start-only held time (R20b), the
 refused value kept before the first load (R20c), the helper's
@@ -3584,8 +3608,11 @@ before the next start lands it on the new playlist (the lens's
 `EPG:OLD:init`, 1 run); R21c's "reported and stripped" waits for the landing.
 (4) The channel is a notification and a console line; the guide shows
 nothing. (5) `manifest.json` still declares `playlistUrl` and `epgUrl` as
-settings with labels (`omarchy bar set` therefore still offers them), and the
-guide's fetch-failure line still ends `check playlistUrl`
+settings with labels [corrected 2026-10-14, D-DOC-9: a parenthesis here said
+`omarchy bar set` "therefore still offers them"; it does not depend on the
+declaration -- `cmd_set` in `/usr/share/omarchy/bin/omarchy-bar` consults
+none and the host stores any key (the round-13 manifest measurement)], and
+the guide's fetch-failure line still ends `check playlistUrl`
 (`Guide.qml` `errorCheck`); both are code, outside this documents lane, and
 are raised to the lead rather than changed here. [Round 12, 2026-10-13: the
 hint now ends `check the source in Sources` (R22c, lane-key-n1 74f9a01); the
@@ -3809,7 +3836,10 @@ sentence is composed from the reason and the path alone:
 | `permission` | `is not readable (permission denied)` | `Make it readable with chmod 600 on that file, then run omarchy restart shell.` |
 | `not-a-file` | `is not a regular file` | `Move whatever is at that path aside, then run omarchy restart shell.` |
 | `unparsed` | `is not a valid state file` | `Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell.` |
-| `absent`, `absent-unconfirmed` | `could not be found, or its folder could not be read` | `Make the folder readable with chmod 700, then run omarchy restart shell.` |
+| `absent-unconfirmed` (at a start: the FileView found nothing and the helper found something) [round 14, R24b: until then `absent` shared this row] | `could not be found, or its folder could not be read` | `Make the folder readable with chmod 700, then run omarchy restart shell.` |
+| `absent` (mid-session; round 14, R24b: its own `<fix>`, because the helper is not asked mid-session and the FileView reports a broken symlink and an unreadable folder alike) | `could not be found, or its folder could not be read` | `If it is a symbolic link, restore the file it points to; otherwise make the folder readable with chmod 700. Then run omarchy restart shell.` |
+| `link` (round 14, R24b: the helper's init found a symlink whose target is missing or is not a regular file) | `is a symbolic link whose target is missing or is not a regular file` | `Restore the file it points to, or move the link aside, then run omarchy restart shell.` |
+| `not-a-dir` (round 14, R24b: the helper's init found something that is not a folder where the state folder, or one above it, should be; `<path>` is then the FOLDER's) | `is not a folder (a file is at that path, or at one above it)` | `Move whatever is at that path aside, then run omarchy restart shell.` |
 | `io-error`, or anything else | `could not be read` | `Check the file and its folder, then run omarchy restart shell.` |
 | `init-timeout` (round 13, R23c: the start-up `state init` did not answer within 15 s and was stopped) | `could not be checked: the start-up check did not answer and was stopped` | `Make sure a regular file, or nothing, is at that path, then run omarchy restart shell.` |
 
@@ -3880,7 +3910,10 @@ helper write, so its next save wins) [round 13: lane A's R23g measurement
 did NOT reproduce that -- the real `Service.qml` applied a helper rename as
 `file-newer`, idle and under load -- and the round-12 live lens's `rename.out`
 did; the disagreement is the round-13 rulings' decision request 1, and the
-help text is unchanged until it is decided]; key-scenario.sh's round-7 and round-9
+help text is unchanged until it is decided] [round 14: decided by
+measurement -- the variable was the state directory at the first load --
+and the help text, the warning and the docstring now say a running shell
+re-reads the file and keeps the write (R24c)]; key-scenario.sh's round-7 and round-9
 header paragraphs are marked withdrawn; its baseline footer counts EIGHT
 NOFIELD-only reds on lane-key-z2 (F4, U2, K2, K3, Q2, V1, Y2, Z3), not seven.
 
@@ -3964,7 +3997,9 @@ gains the load-failure table. By the shape "a document that says the running
 shell picks up a helper `state` write" (R22f's, applied to documents): the
 R9 lists here (4.4 step 2) and in `ARCHITECTURE.md` say `apply` covers "a
 CLI `state ...` write with nothing of ours outstanding", which D-SRC-19
-measured never arrives; both are bracketed. By the shape "the fetch-failure
+measured never arrives; both are bracketed [round 14: the brackets are
+withdrawn in turn -- it arrives, in the first session after an install too
+since R24c]. By the shape "the fetch-failure
 hint as `check playlistUrl`": `UX.md` 4.6 and 6.3, `QA.md` TC-CFG-02 and US1
 step 4, and this file's round-11 residual 5, amended; the `docs/QA-RESULTS.md`
 and `docs/STATUS.md` hits are records of runs that read the old text and are
@@ -4266,33 +4301,43 @@ idle `setText, setText, saved, fileChanged, saved` and no load; under load
 `saved, saved, fileChanged, load(own=true)`. So the own echo is
 timing-dependent, which is why the harness now runs both ways.
 
-**The measurements disagree, and this lane does not resolve it
-(decision request 1 below).** The round-12 data-loss lens measured,
-live, NO reload after an in-place damage that followed the session's first
-own save (P3-1 above); the round-12 live lens measured NO reload after the
-helper's atomic `state source add` (its `rename.out`: the reload counter
-stayed `{'first-load': 1}`, the service still showed 1 source and the file
-had 2); and D-SRC-19 itself was filed on the round-9 data-loss lens's
-measurement of the same. Lane A's two instruments above, idle and under
-load, reproduced neither: every external change after an own save or a
-helper rename was reloaded. The earlier rigs were lost with `/tmp`, so what
-differed is not known. Consequences stated, not decided:
-- D-SRC-19's scope as lane A measured it is NONE; as the round-9 and
-  round-12 lenses measured it, it is the helper's own verbs AND any external
-  change after the session's first own save. Both are on record. Whether
-  0.13.6 shares it: its `stateFile` has the identical declaration (`git show
-  dev:Service.qml`, `watchChanges: true`, `atomicWrites: true`, `printErrors:
-  false`, `onFileChanged: reload()`), so it shares whatever FileView does.
-- The mid-session no-write mode after an own save is therefore **UNVERIFIED**
-  (rule 14): one instrument, uncommitted, saw it begin; another, lost, saw
-  it not begin; no committed check observes it. key-scenario B9 deliberately
-  reaches its two episodes with NO own save between, which is the half that
-  IS observed, together with B5-B7 (round 12).
-- The helper's own text (`remap_state_file`'s docstring, `state source update
-  --help`, `setting_owned_warnings`) still says a running shell does not
-  re-read `state.json` after a helper write; R22f wrote that on the round-9
-  and round-12 measurements. Re-measure on the earlier lenses' rig shape,
-  re-word, or leave it: the lead's (lane A's open question).
+**The measurements disagreed, and the variable was found after this round
+(corrected 2026-10-14, D-DOC-8: this paragraph used to make the session's
+own saves the variable and to give D-SRC-19's scope as none).** The
+round-12 data-loss lens measured, live, NO reload after an in-place damage
+that followed the session's first own save (P3-1 above); the round-12 live
+lens measured NO reload after the helper's atomic `state source add` (its
+`rename.out`: the reload counter stayed `{'first-load': 1}`); and D-SRC-19
+itself was filed on the round-9 data-loss lens's measurement of the same.
+Lane A's two instruments above, idle and under load, reproduced neither --
+and every one of lane A's rigs started with the state DIRECTORY present.
+The round-13 live lens isolated the variable on lane-key-p2 and on a 0.13.6
+export alike, alternating the two shapes (its `case_watchvar` and
+`case_prodfresh`, session scratch): with the directory present when
+`stateFile` first loaded, every external change reloaded, own saves or not
+(3 of 3 helper `source add`, 3 of 3 recoveries from a 0000 file or
+directory); with it ABSENT -- the production fresh-install shape, the state
+home present and `omarchy-iptv/` under it absent -- the reload counter
+stayed `{"first-load": 1}` all session, the own echo included, a helper
+`source add` was unseen and then written over by the next in-app save, and
+garbage written in place BEFORE any save was not noticed. That is the shape
+the earlier lenses' rigs had. The lead's ruling (1) of 2026-10-14 settled it
+on that measurement, and round 14 reproduced it in the committed spike
+(sequence Q) and fixed it (R24c). As things now stand:
+- D-SRC-19's scope was the first session after a fresh install: neither none
+  nor "after the first own save". On lane-key-q1 that session is re-armed by
+  one `stateFile.reload()` after the start-up check (R24c) and observed by
+  key-scenario B16; the board state is the lead's.
+- The mid-session no-write mode is observed live with no own save before
+  it (B5-B7 round 12, B9 round 13) and, in the fresh-install session, after
+  an own save (B16, round 14). In a session whose directory already existed,
+  AFTER an own save, it is observed by the committed spike
+  (`RESULT-2026-10-13.txt`, every sequence) and by the round-13 live lens's
+  rig (`case_episodes`: after an in-app add, garbage in place gave
+  `blocked:unparsed told:1`), and by no key-scenario segment.
+- 0.13.6 shares the dir-absent behaviour (the lens's export, and its
+  `stateFile` declaration is identical); it has no R24c.
+- The helper's own text now says what was measured (R24c, round 14).
 
 **The no-write copy, as shipped on lane-key-p1.** One more reason in
 `Model.stateUnreadableNotice`; the round-12 table above carries it as its
@@ -4391,6 +4436,9 @@ withdrawn-symbol waivers 0 / 0; at the lane's documents tip, 247 citations
 lead's).**
 - (1) The FileView watch measurements disagree (above); D-SRC-19's scope,
   the mid-session condition and the helper's help text wait on it.
+  [Settled 2026-10-14 by the lead's ruling (1), on the round-13 live lens's
+  measurement: the variable is the state directory at the first load. R24c
+  acts on it; the paragraph above is corrected.]
 - (2) (lane A's reading of R23c): an init that times out AFTER the state
   loaded leaves the session as it was (no block, no notice, the init counted
   as failed, which gates the entry flush). Confirm, or rule that a timeout
@@ -4407,10 +4455,509 @@ lead's).**
   `Saved sources` link). The `o` key itself is not gated on the count
   (`Guide.qml` `handleListLetter`), but no check observes `o` on that surface
   -- UNVERIFIED; the harness reaches Sources there through `ipc sourcesKey
-  enter` (B12). Should the surface offer Sources explicitly?
+  enter` (B12). Should the surface offer Sources explicitly? [Settled
+  2026-10-14, the lead's ruling (5): `o` reaches Sources from the no-write
+  surface -- the round-13 live lens drove `ipc mode` then `ipc listKey o` and
+  it opened Sources (session scratch, not a committed check) -- and what
+  that screen drew is D-SRC-28, fixed by R24f.]
 - (6) the P5 line (init's `found` from the descriptor), reachable only
   by a rename race. Keep or drop.
 - (7) the manifest answer above.
 - Rule 13: the round-12 open item (1) -- `D-` ids and board rows for the
   0.13.6 losses -- is not touched by this round; `docs/STATUS.md` is not
   this lane's.
+
+### D-SINK-19 round 14 rulings (lead, 2026-10-14; R24, on top of R1-R23, which stand)
+
+**What the round-13 lenses found, on lane-key-p2 (f4f86de), now on `dev`
+(efde249).** No P1. Three P2s that block 0.14.0, each boarded on 2026-10-14:
+D-SRC-22 (a hand-run helper write that arrives while a save of the
+session's is parked, in flight or has failed is reloaded, IGNORED, and then
+written over by the next save that lands, while the helper answered `ok:
+true`; 0.13.6 applies every reload and drops the in-app change instead --
+one of the two is always silent); D-SRC-23 (a dangling symlink at
+`state.json` reads as "absent" to every hand-run verb, which then replaces
+the link, while `state init` calls the same path `other`; in a running shell
+the helper's write lifts the block and a marker-less file can adopt a
+refused entry URL); D-DOC-8 (the round-13 documents gave the session's own
+saves as the condition for noticing an external change; the round-13 live
+lens measured that the variable is whether the state DIRECTORY existed when
+`stateFile` first loaded -- D-SRC-19 as re-scoped). P3s: D-SRC-24 (a shell
+stopped inside the init's watchdog leaves the hung init orphaned under
+`systemd --user`), D-SRC-25 (`mkdirProc` unwatched, the init's watchdog
+armed only after it), D-SRC-26 (a dangling link, or a file where the state
+directory should be, advised `chmod 700` on a folder that is fine; the init
+over the second printed a traceback), D-SRC-27 (the D-ID-1 remap writing
+`state.json` in the no-write mode), D-SRC-28 (the Sources screen in the
+no-write mode drawing a fresh install), D-DOC-9 (two "`omarchy bar set`
+still offers" sentences), D-DOC-10 (the README's "nothing of yours is lost"
+too strong for a hand edit), F-HARNESS-24 (the KILL half of R23c observed by
+nothing), F-HARNESS-25 (the filewatch spike writing caches into the real
+home).
+
+**The lead's ruling, R24 (2026-10-14).**
+
+R24a. D-SRC-22: A FOREIGN WRITE IS MERGED, NEVER IGNORED AND NEVER APPLIED
+BLIND. The service keeps a BASE, the state it last knew to be on disk (the
+text it loaded, or its last save that LANDED). A reload whose text is neither
+the base nor a text the service itself asked to write is FOREIGN. While the
+session holds a change the file does not (a save parked, in flight or
+failed), a foreign reload is three-way merged by ONE pure function,
+`mergeForeignState(base, ours, theirs)`; the result becomes memory, the
+foreign text becomes the base, and a save is asked for whenever the result
+differs from what is on disk. Field rules: favorites, savedSearches and
+hiddenGroups are sets; sources are records by key (a record BOTH changed is
+a conflict); recents and the scalars (activeKey, lastPlayed, session,
+cacheLayout) take theirs when theirs changed since the base and ours did
+not; entryMigrated is true if either side has it. A CONFLICT GOES TO THEIRS
+(the foreign write is the later act, and the in-app side was already told
+its save failed), logged one line per conflict with the key and the field,
+never a URL. With no change held a foreign reload is applied as before,
+which is the merge with ours == base (prove they agree). The R22 no-write
+mode is untouched. Pinned with a fixture table and through
+`tests/service-harness.js` on both host shapes, both own-echo modes, for
+parked, in flight and failed; the data-loss lens's WF FAV WOK HADD FAV keeps
+BOTH the in-app favourite and the helper's record; red on dev.
+
+R24b. D-SRC-23 and D-SRC-26: ONE ANSWER PER PATH. A symlink at the state
+path is FOLLOWED when its target is a regular file, for reads and writes,
+and REFUSED like any non-regular path (every verb exit 1, file and link
+untouched) when it dangles or points at anything else. Measure first what
+the helper's writer and the FileView's save each do to a VALID link; a
+writer that replaces a valid link is a defect (fix the helper's: temporary
+file beside the target, renamed onto it); if the FileView's save replaces
+it, report and stop. The shell's copy for a dangling link and for a regular
+file where the state DIRECTORY should be names what is at which path; `state
+init` answers the second cleanly. Pins run the real helper as a subprocess
+with a timeout, red on dev.
+
+R24c. D-SRC-19 and D-DOC-8: THE FIRST SESSION SEES EXTERNAL CHANGES TOO.
+Measure, in a nested cage on a private bus with the production fresh shape,
+what re-arms `stateFile`'s watch once the start-up mkdir / init has created
+the directory -- an explicit `stateFile.reload()` first -- and ship the one
+measured to work, proving the reload it causes is the identity under R24a.
+Model the dir-absent first session in the harness as measured (rule 10);
+add a live segment, red on dev; fix the helper's own sentences that say the
+shell does not re-read `state.json`. If nothing re-arms the watch, say so
+and the documents state the dir-absent condition instead.
+
+R24d. D-SRC-24 and D-SRC-25: ONE BOUND OVER THE WHOLE START-UP CHECK. The
+watchdog arms when mkdir starts and covers mkdir and the init alike (TERM,
+then KILL); and the init bounds ITSELF (`signal.alarm` at the top of the
+verb, a deadline longer than the service's, the default action), so a shell
+that stops first leaves nothing running past it. Measured with the
+slow-helper fixture; state plainly what no bound reaches.
+
+R24e. D-SRC-27: in the no-write mode the playlist fetch does not hand the
+helper the state directory; pinned, red on dev.
+
+R24f. D-SRC-28: in the no-write mode the Sources header carries the R23e
+notice title (one source of copy, `Model.stateUnreadableNotice`), no Add rows
+are drawn, and `a` opens no form; pinned through the model and the harness,
+red on dev.
+
+R24g. F-HARNESS-24: the KILL half observed -- a TERM-ignoring init in the
+harness double and in a live fixture, seen red with the KILL deleted.
+F-HARNESS-25: the filewatch spike and `private-bus.sh` run with a scratch
+HOME and XDG directories, and `tests/test_harness_home.py` is taught them.
+
+R24h. D-DOC-8, D-DOC-9, D-DOC-10: the documents lane states the condition
+lane A MEASURED after R24c (rule 14: what no check observes is UNVERIFIED),
+drops the two "still offers" sentences and narrows "nothing of yours is
+lost".
+
+KEPT: `manifest.json` keeps declaring `playlistUrl` and `epgUrl` through
+0.14.0 (lead ruling (7) of 2026-10-14). The other round-13 lead rulings in
+the `docs/STATUS.md` decisions log for 2026-10-14 stand.
+
+**What the tree does (lane-key-q1, lane A: 3db244c the helper half of R24b
+and R24d and the D-SRC-19 sentences; c078ef3 R24a, R24c, the service and
+double halves of R24d and R24g, the model half of R24b, R24e, R24f; 152e3a6
+key-scenario B15-B18, the spike's r24 set, `private-bus.sh`'s scratch home;
+318af7f the floors; c6315d1 the live counts).**
+
+- R24a. `Model.reloadDisposition` takes one more input, `matchesBase`
+  (`Model.sameState(text, landedState)`), and answers `apply` | `ignore` |
+  `merge`. The base is `Service.landedState`: the text loaded, the last save
+  that landed, or the last foreign text merged. First load: apply. Own write
+  (the text is in `recentSaves`): ignore. Nothing held: apply, reason
+  `file-newer`. A change held (`save-parked`, `save-in-flight`,
+  `save-failed`) and the text equal to the base: ignore, for the reason it
+  is held -- R9 as it was, and the D-SRC-15 start-up chmod reload is exactly
+  this branch. A change held and any other text: `merge`, reason
+  `foreign-<held>` (`foreign-save-parked`, `foreign-save-in-flight`,
+  `foreign-save-failed`), counted per reason like every other.
+  `Service.mergeForeignText` calls `Model.mergeForeignState(landedState,
+  userState, parseState(text))`, logs one `Model.mergeConflictLine` per
+  conflict, sets the base to theirs and memory to the merge, asks for a save
+  when the merge differs from theirs -- or when a save of ours is still in
+  flight and differs from the merge, because it would land after theirs --
+  and then runs what every applied state runs (the session outcome,
+  `reconcile(true)`, the cache layout). "Equal" is `Model.sameState`: both
+  sides through `parseState`, the service's own reader, then serialized with
+  sorted keys (`Model.stateCanonical`), so the helper's compact JSON and the
+  service's indented JSON of one state compare equal.
+  The field rules, all in `mergeForeignState` (`model/state.mjs`):
+
+  | Field | Rule | A conflict |
+  |---|---|---|
+  | `favorites`, `hiddenGroups`, `savedSearches` | a SET: theirs, in theirs' order, minus what ours removed since the base, plus ours' additions after (a saved search is named by its folded terms, as `parseState` de-duplicates it) | none: two sets merge |
+  | `sources` | RECORDS BY KEY: a change by one side only is applied; ours' own adds, removals and changes stand | both changed one record differently; one changed it and the other removed it; both added one key with different records -- THEIRS wins (the record theirs holds, or the removal theirs made) |
+  | `recents`, `activeKey`, `lastPlayed`, `session`, `cacheLayout` | WHOLE: theirs when theirs changed since the base, else ours | both changed it, differently -- theirs |
+  | `entryMigrated` | true if either side has it | none |
+
+  The result is read through `parseState` once more, so its caps and
+  de-duplication apply to a merge as to a file. The console line, verbatim
+  from the model for a record: `omarchy-iptv: state.json was changed by
+  another program while a change made here was not yet saved; kept the
+  other program's the source 1a2b3c4d (label, url)` -- the field NAMES that
+  differed, never a value -- and for a whole field `... kept the other
+  program's activeKey`. Pinned: `tests/fixtures/state-merge.json`, 34
+  cases (every field rule, every conflict kind, the identities, the
+  data-loss lens's WF FAV WOK HADD as a case); node `R24a mergeForeignState:
+  <case>` over each, `R24a: the fixture covers every field rule and every
+  kind of conflict ...`, `R24a: over EVERY fixture case, the merge with ours
+  == base IS theirs and the merge with theirs == base IS ours ...` (the
+  "prove they agree" half, with ONE pinned exception, open question 1
+  below), `R24a / R24c: sameState compares what a reader of the file sees
+  ...`, `R24a: a conflict's console line names the field and the source key,
+  never a URL or a value`; and `R24a (<host>, <echo>, <held>)` through
+  `tests/service-harness.js` in 16 modes -- parked, in flight, failed and a
+  conflict, on both host shapes and both own-echo modes -- where WF FAV WOK
+  HADD FAV keeps both the in-app favourite and the helper's record. No live
+  segment: the ruling asked for the table and the harness, and both exist.
+- R24b. The helper: `state_file_target(path)` answers the file a `state` verb
+  reads and writes -- the path itself for nothing there or a regular file;
+  the link's TARGET (`os.path.realpath`, once `lstat` and `stat` prove a link
+  to a regular file) for a valid symlink; an `HelperError("state_unreadable")`
+  for a link that dangles, leads into a missing folder, or leads to a
+  directory or a FIFO, and for a file where the state folder should be
+  (`lstat` answers ENOTDIR). `write_state_file` writes at the path or THROUGH
+  the link: a 0600 `O_EXCL` temporary file beside the target, renamed onto
+  it, and a target folder that is not the plugin's is neither created nor
+  chmod-ed. Every verb's write and the D-ID-1 remap go through the pair.
+  `state init` answers `found: link` for a link it will not follow and
+  `found: not-a-dir` (exit 0, `created: false`, no traceback) for a file
+  where the folder should be. The refusals, verbatim: `state.json is a
+  symbolic link whose target is missing; nothing was written`, `state.json
+  is not a regular file; nothing was written` (a link to a directory or a
+  FIFO), `the state folder is not a folder (a file is at its path, or above
+  it); nothing was written`; exit 1 each, the link untouched. The model:
+  `Model.stateInitFound` maps `link` and `not-a-dir` to themselves (`file`,
+  `other` and `unreadable` stay `present`), and `Model.stateLoadDecision`,
+  for a FileNotFound load (which is what the FileView reports for both,
+  measured by the round-13 claims lens), re-reads once and then blocks WITH
+  that reason. `Model.stateUnreadableNotice` gains two rows and splits a
+  third (the round-12 table above, amended): `link` -- `is a symbolic link
+  whose target is missing or is not a regular file` / `Restore the file it
+  points to, or move the link aside, then run omarchy restart shell.`;
+  `not-a-dir` -- the FOLDER's path, `is not a folder (a file is at that
+  path, or at one above it)` / `Move whatever is at that path aside, then run
+  omarchy restart shell.`; and a mid-session `absent`, now apart from the
+  start-up `absent-unconfirmed`, ends `If it is a symbolic link, restore the
+  file it points to; otherwise make the folder readable with chmod 700. Then
+  run omarchy restart shell.`, because mid-session the helper is not asked
+  and the FileView cannot tell a broken link from an unreadable folder.
+  Python (`tests/test_state.py`, the real helper as a subprocess under a
+  timeout): `StateSymlinkTest` -- a valid link written THROUGH by every
+  writing verb and surviving, read through, the favourite landing in the
+  target; a dangling link, a link into a missing folder, and a link to a
+  directory or a FIFO refused by every verb; init's `link` and `file`
+  answers; the remap leaving a dangling link alone -- and
+  `test_every_verb_refuses_a_file_where_the_state_directory_should_be`,
+  `test_init_over_a_dangling_symlink_reports_link_and_creates_nothing`.
+  Node `R24b: stateInitFound ...`, `R24b: stateLoadDecision ...`, `R24b: the
+  link sentence names the file and the link, the not-a-dir sentence names
+  the FOLDER's path, neither advises chmod 700 ...`, and `R24b (...)`
+  harness pins over the two faults. No key-scenario segment drives either
+  fault; the notification for them is observed only through the model and
+  the harness.
+- R24c. Measured first (below), then shipped: `Service.decideStateLoad`'s
+  `fresh` branch calls `stateFile.reload()` after `applyUserState("")`. The
+  reload it causes carries the init's created text (or a save of ours), and
+  `Model.sameState` of the init's empty default and `parseState("")` is
+  true (pinned), so with a save of ours held it is ignored as the base and
+  with none it is applied over an equal memory: the identity R24a asks for.
+  `tests/service-harness.js` now models the measured view: a boot with no
+  file and no fault starts `dirAbsent` and UNARMED; `reload()` arms it once
+  the file exists; `h.foreign()` delivers a change only while armed, and so
+  does the own-write echo; the init's creation raises a load only when
+  armed; `dirPresent: true` gives the other shape. Node `R24c (...)`, the
+  fresh session and its identity (8). Live: key-scenario B16 -- the
+  production fresh shape, XDG_STATE_HOME present and `omarchy-iptv/` under
+  it absent -- `first-load:1 found:absent helper:0 seen:1 add:true file:C,D
+  blocked:unparsed told:1`: a hand-run `state source add` seen, kept through
+  the next in-app add's save, and garbage written in place after that save
+  noticed and told once. On dev it reads `seen:0 file:D blocked: told:0`,
+  which is the round-13 live lens's reading reproduced. The helper's own
+  sentences now say what was measured: the `remap_state_file` docstring, the
+  comment above the setting-owned warning, the `state source update --url`
+  and `--epg-url` help (`A running shell re-reads state.json after this and
+  keeps it`), and `setting_owned_warnings` (`A running omarchy-shell re-reads
+  state.json after this write and keeps the <field> it wrote. If the same
+  source was changed in the guide and that change was not saved yet, this
+  write wins for that source. The guide's Sources screen edits the same
+  record inside the shell.`).
+- R24d. `Service.startStartupCheck` clears `stateInitTimedOut`, starts
+  `mkdirProc` and arms `stateInitWatchdog` (15 s) at once; the watchdog and
+  `stateInitKill` (2 s) act on whichever of `mkdirProc` and `stateInitProc`
+  is running and log `omarchy-iptv: start-up mkdir exceeded 15 s, terminating
+  it` or `... state init exceeded 15 s ...`, then `... ignored the terminate
+  signal, killing it`; a mkdir the watchdog stopped never starts the init and
+  is decided at once as the timed-out check (`stateInitExited(-1)`, reason
+  `init-timeout`). The helper's `state init` arms `signal.alarm` with
+  `STATE_INIT_DEADLINE` (30 s, the default action, nothing handles it)
+  BEFORE it names the path; 30 s is past the service's 15 + 2. Measured by
+  lane A with the slow-helper fixture holding the init inside the helper's
+  own first `lstat` (`OMARCHY_IPTV_SLOW_AT=inside`, `SLOW_MS=60000`): `state
+  init` ended by `Alarm clock` (rc 142) after 30.2 s, writing no
+  `__pycache__`. Live: key-scenario B18, the shell stopped 5 s into a held
+  init -- `held init ... alive (parent 827)`, `systemd --user`, then
+  `at-stop:alive after-deadline:gone left:none`; on dev `after-deadline:
+  alive(<pid>)`, killed by the scenario's cleanup. Python
+  `StateInitDeadlineTest`: a held init dies of its own alarm, the deadline
+  is past the service's bound, no other verb arms it. What no bound
+  reaches, stated in `Service.qml` and the helper: a process in
+  uninterruptible sleep on a hung filesystem takes no signal until the
+  kernel lets go -- the service's TERM and KILL and the helper's alarm
+  alike. A hung `mkdir` was not reproduced (no FUSE rig); the mkdir half of
+  the bound is pinned in the harness (`R24d (...)`, 2), not observed live.
+- R24e. `Model.fetchStateDir(stateDir, blocked)` is `""` while the service is
+  in the no-write mode, so `Model.playlistFetchArgv` omits `--state-dir` and
+  the helper's remap touches no state file; `Service.runPlaylistHelper`
+  passes it. Node `R24e (...)` (2), and the id-rotate seam reads the
+  directory through it. A fetch already running when the mode begins keeps
+  the argv it was started with (open question 3).
+- R24f. `Model.sourcesRowCount(n, stateBlocked)` and `Model.sourcesRowKind(i,
+  n, stateBlocked)` draw no Add rows in the mode; `Model.sourcesAddAllowed`
+  is false there, and `a`, `c` and Enter on an Add row open no form and say
+  `state.json could not be read · nothing is saved until it can be` in the
+  footer (`Guide.qml` `addRefused`, through `Model.refusalMessage`); the
+  header's right slot is `Model.sourcesHeaderRight(n, stateBlocked, path)`,
+  the notice's own TITLE, `Saved sources not loaded`, where it read `No
+  sources`; `Model.footerHints` in Sources drops `a add` and `c Xtream` --
+  `Esc back` alone with no source row, `j/k move - Enter switch - e edit - x
+  remove - g logos on - Esc back` on one. Node `R24f: sourcesRowCount /
+  sourcesRowKind ...`, `R24f: sourcesHeaderRight ...`, `R24f:
+  sourcesAddAllowed ...`, `R24f: footerHints in Sources ...`. Live:
+  key-scenario B15 at a no-write START (`mode:sources header:notice rows:0
+  addhint:no after-a:sources says:no-write editable:0`), red on dev
+  (`header:[No sources] rows:2 after-a:sourceEdit says:other`); its
+  `addhint` token does not discriminate at row 0, the others do. A
+  MID-session block, where Sources still lists the records memory holds, is
+  pinned in node only.
+- R24g. The harness double now decides what a TERM-ignoring process does,
+  so the KILL is observed: `R24g (...)`, an init and a mkdir that ignore the
+  TERM (2 each), red only with the KILL deleted
+  (`scripts/dev-harness/spikes/key-mutations/r24g-no-kill.patch`: 4 of
+  2,459, `hung (the kill was not sent)`). Live: key-scenario B17, the
+  slow-helper fixture ignoring SIGTERM (`OMARCHY_IPTV_SLOW_IGNORE_TERM=1`),
+  `blocked:init-timeout helper:yes left:none told:1 file:same watchdog:1
+  killed:1`; green on dev, which had the KILL, and red on the patched tree
+  (`blocked: helper:no(<pid>) left:<pid> told:0`). F-HARNESS-25:
+  `scripts/dev-harness/private-bus.sh` hands its command HOME and the XDG
+  directories inside its own directory and removes them after;
+  `tests/test_harness_home.py` `PrivateBusIsolatesHome` runs `private-bus.sh`
+  for real with a probe, and the filewatch spike with a stand-in `cage` that
+  records its environment, each against a decoy home, and is red against
+  dev's scripts (2 of 2, `HOME=... is not the scratch home`). Lane A also checked
+  the real home before and after every cage run this round: the mesa shader
+  cache's mtime and the `~/.config` and `~/.cache` listings unchanged.
+- R24h. This section, and the corrections below.
+
+**What FileView does over a missing directory and over a symlink (R24b,
+R24c), measured 2026-10-14 by lane A.** quickshell 0.3.1 and Qt 6.11.2 as
+installed, `scripts/dev-harness/spikes/filewatch/measure.sh <helper> r24`,
+one FileView declared exactly as `stateFile` is, in a nested headless cage
+on a private D-Bus, 1.5 s a step; two runs at load 1.2-1.7, the first with
+dev's helper and the second with lane-key-q1's, both printed into
+`RESULT-2026-10-14-r24.txt` beside it. `absent` is the production fresh
+shape (the state home present, `omarchy-iptv/` under it absent); `mkinit`
+is the start-up `mkdir -p` and `state init`.
+
+| Sequence | Start | What happened |
+|---|---|---|
+| Q | absent | after `mkinit` NOTHING raised anything: the init's creation, a helper rename, an in-place write and an in-place garbage write each `fileChanged+0 loaded+0` -- the round-13 live lens's session, reproduced |
+| R | absent | one explicit `reload()` after `mkinit` gave `loaded+1`, and every later helper, in-place and garbage write gave `fileChanged+1 loaded+1` |
+| S | absent | resetting the path instead of `reload()` re-armed it too; not needed, not shipped |
+| T, R2 | absent | the re-arm held across a later own save, before or after a helper write |
+| U | directory present, no file | the init's creation was seen without help, and everything after it |
+| V | a valid symlink | the view's OWN save wrote THROUGH it (`at-path:symlink`, the target holding the 50 bytes); dev's helper then REPLACED the link with a regular file (`at-path:regular`), after which the view saw nothing more (`fileChanged+0`, the helper's write and a later in-place write alike); lane-key-q1's helper kept the link and every write was seen (`fileChanged+1 loaded+1 view==disk:yes at-path:symlink`) |
+| W | a valid symlink | the same difference with the helper first |
+| X | a dangling symlink | the view's own save raised `saveFailed` and left the link |
+
+So the FileView's own save does not replace a link, and by R24b nothing
+changes on the service's side. Q, R, S, T and U do not depend on the helper
+and read the same in both runs.
+
+**D-DOC-8, corrected where it stood (2026-10-14).** The round-13 sentences
+that made the session's own saves the variable were wrong and are corrected
+in place, not appended to: this file's round-13 section (the paragraph on
+the disagreeing measurements and decision request 1), `ARCHITECTURE.md`
+section 5 and its section-11 risk 1, the README's Troubleshooting entry for
+a file damaged under a running shell, `UX-SOURCES.md` 5.10 item 4, the
+contract's FileView facts four and six, `QA.md` TC-CFG-16, `QA-SOURCES.md`
+SRC-MIG-41, -44 and -47, and the harness README's round-13 notes. Each now
+says what was measured, with the run that measured it: before R24c the
+variable was whether the state directory existed when `stateFile` first
+loaded (the round-13 live lens on lane-key-p2 and on a 0.13.6 export;
+spike sequence Q); since R24c every session re-arms or never lost the watch,
+observed for the fresh-install session by key-scenario B16 -- after an own
+save included -- and for an existing directory with no own save by B5-B7
+and B9. The existing-directory session AFTER an own save is observed by the
+committed spike (`RESULT-2026-10-13.txt`, every sequence) and by the
+round-13 live lens's rig (session scratch), and by no key-scenario segment.
+D-DOC-9: this file's round-11 open item (5) and the README's `playlistUrl`
+row no longer say `omarchy bar set` "still offers" the keys. D-DOC-10: the
+README says what a hand edit costs.
+
+**Rule 15, lane A's searches (lane-key-q1), recorded so the next person
+inherits them.**
+- The D-SRC-22 shape (a reload ignored, then written over): every FileView in
+  `Service.qml` the service writes with `setText`. Only `stateFile`.
+  `manifestFile`, `channelsFile`, `failedFile`, `playlistStatusFile`,
+  `epgFile` and `epgStatusFile` are written by the helper only and applied on
+  every load, with no ignore branch: cleared.
+- The D-SRC-23 shape (a writer that replaces a symlink, or reads a dangling
+  one as absent): every `write_json_atomic` / `write_text_atomic` caller in
+  the helper. Fixed: `state.json` for all five verb writes and the D-ID-1
+  remap. Left: the cache JSONs, logos, the EPG window and `failed.json`,
+  which live in the plugin's own 0700 cache directories, where a rename over
+  a link replaces the plugin's own cache. Already guarded: the config shield
+  (`O_NOFOLLOW`) and the player lock (`fchmod` gated on S_ISREG). The tolerant
+  `read_json` readers answer `None` for a dangling link and no write follows.
+- The D-SRC-26 shape (a file where a directory should be): the init answers
+  `not-a-dir` and every verb refuses it. NOT re-checked: the cache writers'
+  `ensure_private_dir` over a file at a cache directory.
+- The D-SRC-24/25 shape (an unbounded start-up process): every process
+  `Component.onCompleted` starts. `mkdirProc` is inside the one bound now.
+  `configShieldProc`, `whichProc` and the `hypr*` probes neither open the
+  state path nor gate the load (the round-13 claims lens cleared them too).
+  `cacheProc` has no watchdog but runs only after `dirsReady` and gates
+  nothing: left.
+- Found and left, the KILL half's sibling: every other watchdog -- playlist,
+  EPG, control, probe, player, the three PiP steps, logo, clipboard -- sends
+  TERM only. The helper never ignores TERM today (the default disposition;
+  the clipboard verb's handler reaps its child and exits), so nothing is
+  stranded, but nothing would end a TERM-ignoring helper there.
+- The R24c shape (a FileView whose directory may be absent at its first
+  load): the cache FileViews are reloaded explicitly after every helper run,
+  `manifestFile` is reloaded explicitly, and `failedFile` has no other writer
+  and its in-memory map is authoritative: cleared.
+- The R24e shape (a spawn handed `--state-dir`): only the active playlist
+  fetch (fixed) and the init, which never rewrites an existing file. The
+  probe carries none.
+- The R24f shape (an add affordance in the no-write mode): `openAddForm` and
+  `openXtreamForm` are the only form openers -- the Sources letters, Enter on
+  an Add row, the form's Xtream link, the footer's Xtream button -- and all
+  pass `addRefused`. `Service.addSource` already refused with
+  `state_unreadable`.
+- Mutation patches whose hunks R24a moved: `d3-save-parked.patch` and
+  `r14-no-return.patch` re-made, the same decision broken with the same
+  comment.
+
+**This lane's search, by shape, over the documents (rule 15, R24h).**
+- "The running shell does not re-read `state.json` after a helper write"
+  (D-SRC-19 as filed): every hit in the nine files this lane writes. The
+  statements of CURRENT behaviour are corrected or bracketed with round 14's
+  measurement: `ARCHITECTURE.md` section 5 R9's bracket, section 5's round-13
+  amendment, section 11 risk 1; this file's 4.4 step 2 bracket and its
+  round-9, round-10 and round-12 records (each bracketed rather than
+  rewritten, because they record what was believed then); the contract's
+  FileView facts; the harness README's round-13 note. Cleared as history
+  that already says it was later contradicted: the round-12 R22f paragraph,
+  which carries its round-13 bracket and now a round-14 one.
+- "A reload is ignored while a save is held" (R9 as written): `ARCHITECTURE.md`
+  section 5 R9, this file's 4.4 step 2 and its round-3 R9 record, the
+  contract's own-write fact: each bracketed with R24a's base rule.
+- "`absent` and `absent-unconfirmed` share the folder sentence": this file's
+  round-12 table (amended above) and `UX-SOURCES.md` 5.10's table (split).
+- "Sources stays reachable as it is" / "Sources lists nothing" in the
+  no-write mode: `UX-SOURCES.md` 5.10 item 2, 2.2, 5.3; `QA.md` US5 step 7.
+- "`omarchy bar set` still offers" (D-DOC-9): the README's `playlistUrl` row
+  and this file's round-11 item (5), both corrected. The contract's round-11
+  bracket said it too and carries round 13's correction beside it; it is
+  reworded so the wrong half no longer stands alone.
+- "Nothing of yours is lost" (D-DOC-10): the README's Troubleshooting only;
+  no other file in this lane's set promises it.
+- Numbers carried from round 13 that round 14 moved: the README's harness
+  count (112 -> 116, the summary line), the gate's floors (2,372 -> 2,459
+  node, 1,180 -> 1,194 python), key-scenario's lettered floor (111 -> 115).
+
+**Seen red (lane A).** Node, the round-14 suite against a `git archive dev`
+export (ced1bd1): 2,459 checks, 85 failures (tip 2,459 / 0) -- all 34 merge
+cases, the identity, `sameState` and conflict-line checks, R24a in all 16
+harness modes, R24c's fresh-session and identity checks (8), R24d's mkdir
+(2), R24e (2), the R24b faults (4), the R24b and R24f model checks (3 and
+4), and the R9, R15, R11, D-ID-1, R22a-notice and R23c/R24d structural
+pins the round re-pointed. Green on dev and seen red by mutation instead:
+R24g's four, through `r24g-no-kill.patch` (4 of 2,459, exactly those four);
+the D-SRC-15 base-reload control, through `matchesBase: false` (8: those
+four and R24c's four identity checks); the R24c double check, through an
+always-armed double (2, and one README check that scratch copy could not
+find). Replacing the merge branch with a blind apply reads 16 failures, and
+with an ignore 16, the same set: every R24a harness pin. One bookkeeping
+check ("the fixture covers every field rule") was not seen red; it reddens
+only if fixture cases are deleted. Python against dev's helper: of 14 new
+or changed `test_state` tests, 9 red (the dangling link, the link into a
+missing folder, the valid link's write-through, the favourite in the target,
+init's `link` twice, the not-a-dir init, the alarm, the deadline constant)
+and 5 controls green there (read-through, a link to a directory or a FIFO,
+the remap leaving a dangling link, no other verb arming the alarm, every
+verb refusing not-a-dir); `PrivateBusIsolatesHome` 2 of 2. Live:
+`--baseline dev` 113 / 3 (B15, B16, B18), and `--tree` with
+`r24g-no-kill.patch` 115 / 1 (B17).
+
+**Counts.** On dev ced1bd1: node 2,372 (and 2,372 with the own echo off);
+python 1,180; qml spec 78; `qa-lib-test.sh` 472; key preflight 11;
+key-scenario's live floor 111 lettered checks (`EXPECTED_CHECKS`), summary
+112. On lane-key-q1 c6315d1 (lane A's report; `./scripts/check.sh` all
+green on the tip at load 2.4, and on 3db244c, c078ef3 and 318af7f): node
+2,459, and 2,459 with the echo off; python 1,194 (+12 `test_state`, +2
+`test_harness_home`); qml spec 78; `qa-lib-test.sh` 472; key preflight 11;
+`node scripts/split-model.mjs --check` 762 declarations in 18 parts;
+key-scenario live floor 115 (B15-B18), forward 116 / 0 in 342.5 s on
+318af7f (`key-20261014-095236-969838`), `--baseline dev` 113 / 3
+(`key-20261014-095838-996891`), the no-kill tree 115 / 1
+(`key-20261014-100528-1027361`); sources-scenario 66 / 0 and logo-scenario
+33 / 0, each as the child of a nested headless cage on a private bus. The
+gate's floors: `NODE_CHECKS_MIN` 2,459, `PY_TESTS_MIN` 1,194. Every live run
+under a nested headless cage on a private D-Bus with no service
+directories; the transcripts are in lane A's session scratch directory, not
+the tree.
+
+**Open for the lead (decision requests, not defects; the board's ids are the
+lead's).**
+- (1) The marker. "entryMigrated is true if either side has it" keeps a
+  marker the base had and theirs dropped (an older writer -- 0.13.6's helper
+  -- rewrote the file); "applied as today when nothing is held" drops it. So
+  `merge(base, base, theirs) == theirs` fails for exactly that case. Lane A
+  kept both rules literally (nothing held applies theirs; a held change
+  keeps the marker) and the identity test names the one exception rather
+  than hiding it. Which rule wins?
+- (2) A dangling link that appears MID-session still reads as `absent` (the
+  helper is not asked mid-session); its sentence now names both causes.
+  Should a mid-session load failure re-run `state init` for the exact reason?
+- (3) R24e gates `--state-dir` at the spawn: a no-write episode that begins
+  while an active fetch is already running does not stop that fetch's remap
+  (narrow -- the remap writes only a file it can parse, moves ids at most
+  once per file). Left.
+- (4) In the conflict pin, a hand-run `source remove` of the source the
+  session had switched to clears `activeKey`, and reconcile then stands on
+  the entry's mirror (A), as it already did. Intended after a foreign
+  removal?
+- (5) `mergeForeignText` runs the session outcome like the apply path; the
+  harness stubs it, so the `session` field's merge is pinned in the fixture
+  and not through the service.
+- (6) Every watchdog but the start-up one is TERM-only (the sibling above).
+- (7) This lane's: the Sources header in a MID-session block reads `Saved
+  sources not loaded` over the records memory still lists and plays. It is
+  the one source of copy R24f asked for; whether the header should say
+  something narrower there ("not saved", say) is a copy decision, not made
+  here.
+- (8) This lane's: the existing-directory session AFTER an own save is
+  observed by the committed spike and a lens rig but by no key-scenario
+  segment (above). A B-segment that seeds the directory, makes an in-app add
+  and then damages the file would close it.
+- Rule 13: the round-12 open item (1) -- ids for the 0.13.6 losses -- is
+  still not this lane's to close.

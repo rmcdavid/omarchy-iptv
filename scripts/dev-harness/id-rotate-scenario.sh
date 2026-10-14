@@ -269,7 +269,8 @@ preflight() {
   # What that calls, and what the helper half still needs (D-ID-1).
   model_seam "the model owns the scheme-1 -> scheme-2 map"             '^function channelIdRemap\(channels\)' 1
   model_seam "the model owns the state move"                           '^function remapStateIds\(state, remap\)' 1
-  seam "the active fetch still carries --state-dir"             "$PLUGIN_ROOT/Service.qml" 'Model\.playlistFetchArgv\(root\.helperPath, root\.activeCacheDir, root\.stateDir\)' 1
+  # R24e (round 14): through Model.fetchStateDir, "" only in the no-write mode.
+  seam "the active fetch still carries --state-dir"             "$PLUGIN_ROOT/Service.qml" 'Model\.playlistFetchArgv\(root\.helperPath, root\.activeCacheDir, (root\.stateDir|Model\.fetchStateDir\(root\.stateDir, root\.stateWriteBlocked\))\)' 1
   # The verbs the live half drives.
   seam "the harness answers state()"                            "$HERE/shell.qml" 'function state\(\): string' 1
   seam "the harness refreshes the active source"                "$HERE/shell.qml" 'function refresh\(\): string' 1

@@ -307,6 +307,12 @@ function footerHints(opts) {
   if (mode === "sourceEdit" || mode === "sourceXtream") return formHints(o.form)
   if (mode === "sources") {
     if (o.cursorKind === "add" || o.cursorKind === "xtream") return [["j/k", "move"], ["Enter", "open"], ["Esc", "back"]]
+    // R24f: in the no-write mode nothing can be added, so neither add key is
+    // hinted; with no source row either there is nothing to move to.
+    if (str(o.stateBlocked) !== "") {
+      if (o.cursorKind !== "source") return [["Esc", "back"]]
+      return [["j/k", "move"], ["Enter", "switch"], [SOURCE_KEYS.edit, "edit"], [SOURCE_KEYS.remove, "remove"], [SOURCE_KEYS.logos, o.showLogos === true ? "logos off" : "logos on"], ["Esc", "back"]]
+    }
     // M2-04: `g logos` reads the CURRENT state, so the key says what it will
     // do rather than what is on. A hint that always reads "logos" leaves the
     // user pressing it to find out, and finding out means contacting sixty-

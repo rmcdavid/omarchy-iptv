@@ -287,5 +287,88 @@ class EveryDriverIsolatesItself(unittest.TestCase):
         self.assertEqual(missing, [])
 
 
+
+class PrivateBusIsolatesHome(unittest.TestCase):
+    """F-HARNESS-25 (round 13), R24g: the committed filewatch spike and
+    scripts/dev-harness/private-bus.sh ran their cage and quickshell under
+    the developer's REAL home, which then held a mesa shader cache and
+    fcitx/dbus it did not hold before (the round-13 claims lens, measured
+    with a decoy). OBSERVED, not grepped: private-bus.sh is run for real
+    (a dbus-daemon from a config with no service directories) with a probe
+    as its command, and the spike is run for real with a stand-in `cage`
+    first on PATH that records the environment it was handed. Both are
+    given a decoy as the "real" home, every XDG variable pointing into it,
+    and must leave it exactly as it was. Red on dev (ced1bd1), where both
+    hand the decoy straight through."""
+
+    PRIVATE_BUS = SCENARIOS / "private-bus.sh"
+    MEASURE = SCENARIOS / "spikes" / "filewatch" / "measure.sh"
+    PROBE = (
+        "import json, os, sys\n"
+        "names = ['HOME', 'XDG_CONFIG_HOME', 'XDG_DATA_HOME', 'XDG_CACHE_HOME', 'XDG_STATE_HOME', 'MPV_HOME', 'XCOMPOSEFILE']\n"
+        "out = {n: os.environ.get(n) for n in names}\n"
+        "out['expanduser'] = os.path.expanduser('~')\n"
+        "cache = os.environ.get('XDG_CACHE_HOME') or os.path.join(os.path.expanduser('~'), '.cache')\n"
+        "os.makedirs(cache, exist_ok=True)\n"
+        "open(os.path.join(cache, 'probe-wrote-here'), 'w').close()\n"
+        "json.dump(out, open(sys.argv[1], 'w'))\n")
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="fh25-")
+        self.addCleanup(shutil.rmtree, self.tmp, True)
+        self.decoy = os.path.join(self.tmp, "realhome")
+        for d in (".config", ".cache", ".local/share", ".local/state"):
+            os.makedirs(os.path.join(self.decoy, d))
+        pathlib.Path(self.decoy, ".config", "keep").write_text("x", encoding="utf-8")
+        self.env = dict(os.environ, HOME=self.decoy,
+                        XDG_CONFIG_HOME=os.path.join(self.decoy, ".config"),
+                        XDG_CACHE_HOME=os.path.join(self.decoy, ".cache"),
+                        XDG_DATA_HOME=os.path.join(self.decoy, ".local/share"),
+                        XDG_STATE_HOME=os.path.join(self.decoy, ".local/state"),
+                        MPV_HOME=os.path.join(self.decoy, ".config", "mpv"),
+                        XCOMPOSEFILE=os.path.join(self.decoy, ".XCompose"))
+        self.before = self.listing()
+
+    def listing(self):
+        out = []
+        for root, dirs, files in os.walk(self.decoy):
+            for name in sorted(dirs + files):
+                out.append(os.path.relpath(os.path.join(root, name), self.decoy))
+        return sorted(out)
+
+    def assert_isolated(self, seen, inside):
+        for name in ("HOME", "XDG_CONFIG_HOME", "XDG_DATA_HOME", "XDG_CACHE_HOME", "XDG_STATE_HOME", "expanduser"):
+            self.assertTrue(seen.get(name) and inside(seen[name]), "%s=%r is not the scratch home" % (name, seen.get(name)))
+        self.assertIsNone(seen.get("MPV_HOME"))
+        self.assertIsNone(seen.get("XCOMPOSEFILE"))
+        self.assertEqual(self.listing(), self.before, "the decoy home changed")
+
+    def test_private_bus_hands_its_command_a_scratch_home_and_removes_it(self):
+        bus = os.path.join(self.tmp, "b")
+        dump = os.path.join(self.tmp, "env.json")
+        proc = subprocess.run(["bash", str(self.PRIVATE_BUS), bus, "20", "python3", "-I", "-c", self.PROBE, dump],
+                              env=self.env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        seen = json.loads(pathlib.Path(dump).read_text(encoding="utf-8"))
+        self.assert_isolated(seen, lambda p: p == bus + "/home" or p.startswith(bus + "/home/"))
+        self.assertFalse(os.path.exists(bus), "private-bus.sh left its directory behind")
+
+    def test_the_filewatch_spike_hands_its_cage_that_home(self):
+        fake = os.path.join(self.tmp, "bin")
+        os.makedirs(fake)
+        dump = os.path.join(self.tmp, "cage-env.json")
+        cage = os.path.join(fake, "cage")
+        pathlib.Path(cage).write_text("#!/bin/sh\nexec python3 -I -c \"$FH25_PROBE\" \"$FH25_DUMP\"\n", encoding="utf-8")
+        os.chmod(cage, 0o700)
+        runtime = os.path.join(self.tmp, "run")
+        os.makedirs(runtime, mode=0o700)
+        env = dict(self.env, PATH=fake + os.pathsep + os.environ.get("PATH", ""), XDG_RUNTIME_DIR=runtime,
+                   FH25_PROBE=self.PROBE, FH25_DUMP=dump)
+        proc = subprocess.run(["bash", str(self.MEASURE), str(HELPER), "r24"], env=env, capture_output=True, text=True, timeout=90)
+        self.assertTrue(os.path.exists(dump), "the stand-in cage never ran: %s %s" % (proc.stdout[-400:], proc.stderr[-400:]))
+        seen = json.loads(pathlib.Path(dump).read_text(encoding="utf-8"))
+        self.assert_isolated(seen, lambda p: p.startswith(runtime + "/"))
+        self.assertEqual(os.listdir(runtime), [], "the spike left its work directory behind")
+
 if __name__ == "__main__":
     unittest.main()

@@ -35,7 +35,9 @@
 // and the fake that stands in for it. Anything else unqualified resolves to
 // the root's own properties (QML's scoping), or to the JavaScript global.
 function makeIds(h) {
-  const proc = name => ({ name, running: false, command: [], environment: {}, signal() {} })
+  // A process fake RECORDS the signals it is sent (R24g): whether a TERM or
+  // a KILL ends it is the double's decision below, never the service's.
+  const proc = name => ({ name, running: false, command: [], environment: {}, signals: [], signal(n) { this.signals.push(n) } })
   // cacheProc RUNS (R22b, rule 10): the cache layout's start-up save is one of
   // the state writers, and the round-11 harness stubbed startCacheLayout as
   // "current" and so could not see it. Setting `running` queues the helper's
@@ -60,6 +62,13 @@ function makeIds(h) {
   return {
     stateFile: h.stateFile,
     stateInitProc: proc("stateInitProc"),
+    // R24d: the start-up mkdir is the first half of the check the watchdog
+    // bounds; it runs (h.initExit delivers its exit) like the init.
+    mkdirProc: proc("mkdirProc"),
+    // R24e: the active fetch's command is observed (Model.fetchStateDir);
+    // nothing is run.
+    playlistProc: proc("playlistProc"),
+    playlistWatchdog: timer("playlistWatchdog"),
     // The start-up init's reply (R22a), written by h.helperInit just before
     // the exit handler runs, as the collector holds it when `exited` fires.
     stateInitStdout: h.stateInitStdout,
@@ -288,11 +297,27 @@ class Host {
 // and "none" (never delivered) -- the opts field, or IPTV_HARNESS_OWN_ECHO
 // for a whole run, which scripts/check.sh makes a second time with "none".
 // A pin that holds in only one of the two is relying on timing.
+//
+// R24c (round 14): WHETHER THE WATCH IS ARMED AT ALL. Measured in the same
+// cage (spikes/filewatch, set r24): a FileView whose path's DIRECTORY did not
+// exist when it first loaded -- the production fresh install, XDG_STATE_HOME
+// present and omarchy-iptv/ under it absent -- raises NOTHING for the rest of
+// the session: not the init's creation of the file, not a helper rename, not
+// an in-place garbage write, and not the echo of its own saves (sequence Q;
+// the round-13 live lens saw the same on the real Service.qml). One explicit
+// reload() once the file exists arms it, and from then on everything is
+// seen (R, T, R2). With the directory present and the file absent, the
+// init's creation IS seen (U). So `dirAbsent` (the default for a boot with
+// no file and no fault; `dirPresent: true` for the other shape) starts the
+// view unarmed: `reload()` arms it when the file exists, h.foreign() delivers
+// a change only while it is armed, and the own-write echo needs it too.
 class StateFile {
   constructor(text, o) {
     const opts = o || {}
     this.exists = opts.exists !== undefined ? opts.exists : text !== ""
     this.fault = opts.fault || null
+    this.dirAbsent = opts.dirAbsent !== undefined ? opts.dirAbsent === true : (!this.exists && !this.fault && opts.dirPresent !== true)
+    this.watchArmed = !this.dirAbsent
     this.disk = text; this.view = text; this.events = []; this.writeFails = false; this.coalesce = false
     this.loader = null
     this.ownEcho = opts.ownEcho || process.env.IPTV_HARNESS_OWN_ECHO || "load"
@@ -303,8 +328,11 @@ class StateFile {
     // An atomic write replaces the file by a rename inside its directory, so
     // a file nobody may read is still REPLACED (the round-11 P1's last step)
     // and only a directory that cannot be entered, or a directory AT the
-    // path, makes it fail.
+    // path, makes it fail. R24b: and a DANGLING symlink (measured: the
+    // view's save follows the link and fails, sequence X) or a file where
+    // the state directory should be.
     const blocksWrite = this.fault === "dir-0000" || this.fault === "dir-foreign" || this.fault === "is-dir"
+      || this.fault === "dangling-link" || this.fault === "not-a-dir"
     const ev = { kind: this.writeFails || blocksWrite ? "saveFailed" : "saved", text }
     if (this.coalesce && this.events.length >= 2) this.events[this.events.length - 1] = ev
     else this.events.push(ev)
@@ -314,10 +342,16 @@ class StateFile {
     if (this.fault === "file-0000" || this.fault === "file-foreign") return { loaded: false, error: 3 }
     if (this.fault === "dir-0000" || this.fault === "dir-foreign") return { loaded: false, error: 2 }
     if (this.fault === "is-dir") return { loaded: false, error: 4 }
+    // R24b: both measured as FileNotFound (the round-13 claims lens's
+    // fvkinds.txt: "dangling ... ERR2", "filedir ... ERR2").
+    if (this.fault === "dangling-link" || this.fault === "not-a-dir") return { loaded: false, error: 2 }
     if (!this.exists) return { loaded: false, error: 2 }
     return { loaded: true, text: this.disk }
   }
-  reload() { if (this.loader) this.loader() }
+  reload() {
+    if (this.exists && !this.fault) this.watchArmed = true
+    if (this.loader) this.loader()
+  }
 }
 
 // The REAL helper's `state init`, as a double that is not more forgiving
@@ -334,6 +368,9 @@ class StateFile {
 //                   watch never attached, measured), but an explicit
 //                   stateFile.reload() then loads the file (measured)
 //   "is-dir"        found "other"; changes nothing
+//   "dangling-link" found "link" (R24b); changes nothing
+//   "not-a-dir"     found "not-a-dir" (R24b: a file where the state
+//                   directory should be); changes nothing
 //   "*-foreign"     found as above; the chmod fails, so nothing changes
 //   garbage / empty found "file"; changes nothing (O_EXCL refuses, the mode
 //                   is already 0600)
@@ -346,9 +383,19 @@ function helperInit(file, code) {
   if (file.fault === "dir-0000") { found = "unreadable"; file.fault = null }
   else if (file.fault === "file-0000") { found = "file"; file.fault = null; raises = true }
   else if (file.fault === "is-dir") found = "other"
+  // R24b: the real helper's answers (tests/test_state.py's StateSymlinkTest
+  // and the not-a-dir case); it changes nothing at either.
+  else if (file.fault === "dangling-link") found = "link"
+  else if (file.fault === "not-a-dir") found = "not-a-dir"
   else if (file.fault === "file-foreign") found = "file"
   else if (file.fault === "dir-foreign") found = "unreadable"
-  else if (!file.exists) { found = "absent"; file.exists = true; file.disk = HELPER_EMPTY_STATE; raises = true }
+  else if (!file.exists) {
+    // R24c: the creation raises a reload only when the view is watching --
+    // the directory existed at its first load (sequence U); in the fresh
+    // install's dir-absent shape it raises nothing (sequence Q).
+    found = "absent"; file.exists = true; file.disk = HELPER_EMPTY_STATE; raises = file.watchArmed
+    file.dirAbsent = false
+  }
   else found = "file"
   return { reply: JSON.stringify({ ok: true, kind: "state", action: "init", found, created: found === "absent" }) + "\n", raises }
 }
@@ -357,7 +404,7 @@ function bootService(serviceText, Model, o) {
   const opts = o || {}
   const h = { clock: opts.clock || 1760000000000, later: [], cacheRuns: [], signals: [], warnings: [], detached: [], turns: 0 }
   h.host = new Host(opts.entry, opts.host || "lag")
-  h.stateFile = new StateFile(opts.stateText || "", { exists: opts.exists, fault: opts.fault, ownEcho: opts.ownEcho })
+  h.stateFile = new StateFile(opts.stateText || "", { exists: opts.exists, fault: opts.fault, ownEcho: opts.ownEcho, dirAbsent: opts.dirAbsent, dirPresent: opts.dirPresent })
   h.stateInitStdout = { text: "" }
   // The helper's `cache` reply: ok for every verb, unless a test says
   // otherwise (h.cacheFails = ["migrate"]).
@@ -456,6 +503,18 @@ function bootService(serviceText, Model, o) {
   const watchdogText = serviceText.indexOf("id: stateInitWatchdog") === -1 ? ""
     : handlerBlock(serviceText.slice(serviceText.indexOf("id: stateInitWatchdog")), "onTriggered: {") || ""
   const onInitWatchdog = compile("", watchdogText, "stateInitWatchdog_onTriggered")
+  // R24g: the kill grace's own handler, from its text, run only when the
+  // service ARMED it (a restart counted since the watchdog fired) -- a tree
+  // without the KILL leaves a TERM-ignoring process running here, as it
+  // would for real.
+  const killText = serviceText.indexOf("id: stateInitKill") === -1 ? ""
+    : handlerBlock(serviceText.slice(serviceText.indexOf("id: stateInitKill")), "onTriggered: {") || ""
+  const onInitKill = compile("", killText, "stateInitKill_onTriggered")
+  // R24d: mkdir's exit handler, from its text (on a tree before R24d it
+  // starts the init, which then arms the watchdog itself).
+  const mkdirText = serviceText.indexOf("target: mkdirProc") === -1 ? ""
+    : handlerBlock(serviceText.slice(serviceText.indexOf("target: mkdirProc")), "function onExited(exitCode, exitStatus) {") || ""
+  const onMkdirExited = compile("exitCode, exitStatus", mkdirText, "onMkdirExited")
   // stateFile's two LOAD handlers, from their own text (R22a): the harness
   // never calls applyUserState itself any more, so a load is classified the
   // way the shipping handlers classify it. One-line handlers: `onLoaded: X`
@@ -475,6 +534,14 @@ function bootService(serviceText, Model, o) {
   }
   // stateFile.reload() is asynchronous: the load is queued, not run inline.
   h.stateFile.loader = () => h.later.push({ fn: h.loadState, args: [] })
+  // R24c: a change made to the file by something else (a hand-run helper
+  // verb, an editor, a restore). `change(stateFile)` makes it; the reload is
+  // delivered only while the view's watch is armed -- in the fresh install's
+  // dir-absent session, until something re-arms it, nothing is.
+  h.foreign = (change) => {
+    change(h.stateFile)
+    if (h.stateFile.watchArmed) { h.loadState(); h.runLater() }
+  }
   // The start-up init's exit, with the double's reply and side effects.
   h.helperInit = (code) => {
     const out = helperInit(h.stateFile, code)
@@ -511,8 +578,9 @@ function bootService(serviceText, Model, o) {
       if (o2 && o2.noLater) return true
       h.runLater()
       // The own-write reload (onFileChanged -> reload -> onLoaded), when the
-      // view delivers one (R23g: sometimes; see StateFile).
-      if (h.stateFile.ownEcho === "load") h.loadState()
+      // view delivers one (R23g: sometimes; see StateFile) -- and never while
+      // its watch is unarmed (R24c: the dir-absent session saw no echo).
+      if (h.stateFile.ownEcho === "load" && h.stateFile.watchArmed) h.loadState()
     } else {
       onSaveFailed(1)
     }
@@ -542,6 +610,10 @@ function bootService(serviceText, Model, o) {
   // helper's `state init` exits, and the queued events drain.
   root.shell = h.host
   h.started = true
+  // Component.onCompleted's start-up check (R24d: mkdir and its bound start
+  // together); a tree without it starts mkdir there and arms nothing yet.
+  if (typeof root.startStartupCheck === "function") root.startStartupCheck()
+  else ids.mkdirProc.running = true
   root.reconcile()
   // `beforeLoad(h)`: the start-up window before stateFile's first load --
   // what a guide opened at once meets (the round-5 lens's window).
@@ -550,22 +622,54 @@ function bootService(serviceText, Model, o) {
   // nothing. A chmod the init makes raises a reload, queued BEFORE the exit
   // is handled ("reload-first", the default) or after it ("exit-first"):
   // the inotify event and QProcess's finished signal race for real.
+  // R24d: the start-up check's FIRST process. mkdir exits at once, unless a
+  // test hangs it (`hangAt: "mkdir"`); its exit handler, from its own text,
+  // starts the init.
+  h.mkdirExit = () => {
+    ids.mkdirProc.running = false
+    onMkdirExited(0, 0)
+    h.runLater()
+  }
+  // R23c / R24d / R24g: one of the two start-up processes never answers. The
+  // watchdog fires only if the service ARMED it (a restart counted); its own
+  // handler sends what it sends; the double then decides what dies: a TERM
+  // ends the process unless `ignoreTerm`, and then the kill grace's own
+  // handler runs only if the service armed IT, and only a KILL ends a
+  // TERM-ignoring process. A process nothing ended stays running and its
+  // exit is never delivered -- the hang, as it is for real. Returns what
+  // happened, for the test to read.
+  const hangOut = (p, exitIfDead) => {
+    const watchArmed = ids.stateInitWatchdog.restarts > 0
+    if (!watchArmed) return "hung (no watchdog armed)"
+    const killsBefore = ids.stateInitKill.restarts
+    onInitWatchdog()
+    if (p.signals.indexOf(15) !== -1 && !h.ignoreTerm) { p.running = false; exitIfDead(15); return "terminated" }
+    if (ids.stateInitKill.restarts === killsBefore) return "hung (no kill armed)"
+    onInitKill()
+    if (p.signals.indexOf(9) !== -1) { p.running = false; exitIfDead(9); return "killed" }
+    return "hung (the kill was not sent)"
+  }
   h.initExit = (o2) => {
     const io = Object.assign({ code: opts.initCode || 0, order: opts.initOrder || "reload-first", timeout: opts.initTimeout === true }, o2 || {})
+    h.ignoreTerm = io.ignoreTerm === true
+    if (io.timeout && io.hangAt === "mkdir") {
+      // The mkdir itself hangs (a hung filesystem): the init is never reached.
+      ids.mkdirProc.running = true
+      h.hang = hangOut(ids.mkdirProc, (sig) => { onMkdirExited(sig, 1); h.runLater() })
+      return
+    }
+    h.mkdirExit()
     if (io.timeout) {
-      // R23c: the init never answers. The watchdog fires while it runs (its
-      // own handler: TERM and the flag), the process dies having printed
-      // nothing and changed nothing, and QProcess reports the exit -- a
-      // signal death, exit code 15 -- to the shipping exit handler.
+      // R23c: the init never answers. It dies having printed nothing and
+      // changed nothing, and QProcess reports the exit -- a signal death --
+      // to the shipping exit handler.
       ids.stateInitProc.running = true
-      onInitWatchdog()
-      ids.stateInitProc.running = false
       h.stateInitStdout.text = ""
-      onInitExited(15, 1)
-      h.runLater()
+      h.hang = hangOut(ids.stateInitProc, (sig) => { onInitExited(sig, 1); h.runLater() })
       return
     }
     const out = h.helperInit(io.code)
+    ids.stateInitProc.running = false
     if (out.raises && io.order === "reload-first") { h.loadState(); h.runLater() }
     onInitExited(io.code, 0)
     h.runLater()

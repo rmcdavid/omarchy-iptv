@@ -22,9 +22,17 @@ line, only the file and the hunk's position changed.
 | `d3-save-parked.patch` | `Model.reloadDisposition`'s (in `model/state.mjs`) `save-parked` clause deleted: a reload over a PARKED save is applied as `file-newer` (the D-SRC-15 drop, re-opened) | D2, D3, W2, W3, W4, W6 -- the per-reason counter reads `{"file-newer": 1, "first-load": 1, "own-write": 1}` and `save-parked` is absent |
 | `r14-no-return.patch` | `Service.applyUserState`'s R14 `return` deleted: the reload is COUNTED as ignored and then applied anyway | D2, W2, W3, W4, W6 -- and D3 GREEN, with `{"save-parked": 1, ...}` beside the loss at the sink: a counter observes the decision, D2/W2 observe the sink, and the `return` itself is pinned structurally in `tests/Model.test.js` (R14) |
 | `r23a-no-rearm.patch` | `Service.liftStateBlock`'s `root.stateBlockTold = false` deleted (round 13, R23a): the lift no longer re-arms the no-write notice, so a second episode in one session is never told -- the round-12 data-loss lens's X13, which no check saw (0 of 2354 node failures, nothing red live) | B9 (`told:1/1`), and in `tests/Model.test.js` the four R23a pins (4 of 2358, both own-write echo modes) |
+| `r24g-no-kill.patch` | the start-up watchdog's KILL in `Service.qml` deleted (round 14, R24g): a TERM-ignoring start-up process (the slow tree's init with `OMARCHY_IPTV_SLOW_IGNORE_TERM=1`) is never ended | B17 (`helper:no(<pid>)`, `blocked:` empty, `told:0`), and in `tests/Model.test.js` the four R24g pins (init and mkdir, both hosts) |
 | `r23e-editable-field.patch` | the form field's `readOnly: true` in `Guide.qml` made `false` (round 13): the D-CLIP-1 switch off, one editable TextInput per form field | B13 (`editable:` above 0 on the first-run form): the control that shows the harness's editable-input census (`ipc editable`) can see a field, so B11's `editable:0` on the no-write surface is an observation and not a census that cannot count |
 
-All four apply to the tree they are checked in with (`scripts/qa-lib-test.sh`
+Round 14 (R24a) re-made `d3-save-parked.patch` and `r14-no-return.patch`
+for the new shape of the same two decisions: `reloadDisposition` now
+computes WHY a change is held before asking whether the text is the base,
+so the save-parked clause is the first arm of that expression, and the R14
+`return` sits below the merge branch. The removed decision and the added
+comment line are the same; the hunks moved.
+
+All five apply to the tree they are checked in with (`scripts/qa-lib-test.sh`
 runs `git apply --check` on each, so a refactor that moves a hunk is a red
 gate, not a silently stale patch).
 

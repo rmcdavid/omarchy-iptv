@@ -439,10 +439,10 @@ Everything else is unchanged. Footer hint line gains a trailing `o sources`
 | `j` / `Down` | Next row; wraps. Action rows are rows. |
 | `k` / `Up` | Previous row; wraps. |
 | `PgDn` / `PgUp` / `Home` / `End` | As in the guide (page, first, last). |
-| `Enter` | Source row: switch and return to the guide (1.4). `Add source` row: add. `Add Xtream login` row: Xtream form. |
+| `Enter` | Source row: switch and return to the guide (1.4). `Add source` row: add. `Add Xtream login` row: Xtream form. [Round 14, R24f: the no-write mode draws no Add rows (3.2.6).] |
 | `Space` | Source row: switch and stay. Action rows: same as `Enter`. |
-| `a` / `A` | Add source (URL form). |
-| `c` / `C` | Add Xtream login (credentials form). |
+| `a` / `A` | Add source (URL form). [Round 14, R24f: in the no-write mode (5.10) no form opens; the footer says `state.json could not be read · nothing is saved until it can be`.] |
+| `c` / `C` | Add Xtream login (credentials form). [The same in the no-write mode.] |
 | `e` / `E` | Edit the cursor source. No-op on action rows. |
 | `x` / `X` / `Delete` | Remove the cursor source, with confirmation. No-op on action rows. |
 | `o` / `O`, `Esc` | Back to the guide (`returnMode`). |
@@ -937,6 +937,31 @@ right elision. Action buttons stay. The footer hints elide left as shipped.
            iptv-org.github.io - not loaded yet
 ```
 
+#### 3.2.6 The no-write mode (D-SINK-19 round 14, R24f, D-SRC-28; 2026-10-14)
+
+At a no-write START nothing loaded, so memory holds no source; the header's
+right slot is the notice's TITLE (`Model.sourcesHeaderRight`, one source of
+copy with the notification and the guide body, 5.10) where 3.2.3 reads `No
+sources`, and there are NO Add rows. Wireframe (UNVERIFIED on a display:
+key-scenario B15 reads the header, the rows and the footer through the
+harness, and no screenshot was taken):
+
+```
++------------------------------------------------------------------------------------------------+
+|                                                                                                |
+|  Sources                                                             Saved sources not loaded  |
+|                                                                                                |
+|                                                                                                |
+|                                                                                       Esc back  |
++------------------------------------------------------------------------------------------------+
+```
+
+Mid-session (the mode begun under a running shell) memory still holds the
+records it had, so their rows stay, switchable to nothing (a switch is
+refused, 5.10 item 3) and with the same header; still no Add rows, and the
+footer drops `a add` and `c Xtream`: `j/k move - Enter switch - e edit - x
+remove - g logos on - Esc back` (5.3). That half is pinned in node only.
+
 ### 3.3 Edit form
 
 #### 3.3.1 Editing an Xtream-built source (URLs masked, Label focused)
@@ -1311,6 +1336,8 @@ then never-used sources in the order they were added.
 | guide, error state, sources exist | shipped | `r retry - o sources - Esc close` |
 | sources | the guide's status (active source) | `j/k move - Enter switch - a add - c Xtream - e edit - x remove - Esc back` |
 | sources, cursor on an action row | same | `j/k move - Enter open - Esc back` |
+| sources in the no-write mode, a source row (round 14, R24f) | same | `j/k move - Enter switch - e edit - x remove - g logos on - Esc back` (no `a add`, no `c Xtream`) |
+| sources in the no-write mode, no source row (a no-write start) | same | `Esc back` |
 | form, plain field | same | `Enter save - Tab next field - Ctrl+V paste - Esc cancel` |
 | form, masked field | same | `Enter save - Tab next field - Ctrl+R reveal - Ctrl+V replace - Esc cancel` |
 | form, revealed field | same | `Enter save - Tab next field - Ctrl+R hide - Esc cancel` |
@@ -1616,17 +1643,21 @@ key-scenario X5 (one notification per report through a stand-in
 none carrying a URL or the credential). The rendered card is UNVERIFIED on a
 display.
 
-### 5.10 Saved sources not loaded (D-SINK-19 round 12, R22a; round 13, R23; 2026-10-13)
+### 5.10 Saved sources not loaded (D-SINK-19 round 12, R22a; round 13, R23; 2026-10-13; round 14, R24; 2026-10-14)
 
 `~/.local/state/omarchy-iptv/state.json` is the only copy of the user's
 sources and provider URLs. When it exists but cannot be read -- permission
-denied, not a regular file, an I/O error -- or does not parse as a state
-(an empty file included, settled by the lead on 2026-10-13), or when the
-start-up check of it does not answer (round 13), the plugin WRITES NOTHING
-to it for the rest of the session. Until round 12 it read such a file as an
+denied, not a regular file, a symbolic link that leads nowhere or to
+something that is not a regular file, a file where its FOLDER should be
+(round 14), an I/O error -- or does not parse as a state (an empty file
+included, settled by the lead on 2026-10-13), or when the start-up check of
+it does not answer (round 13), the plugin WRITES NOTHING to it for the rest
+of the session -- and since round 14 (R24e) neither does the helper the
+service starts, because the playlist fetch is handed no state directory. Until round 12 it read such a file as an
 empty state and saved that over it at the start, which erased every source,
 credential and favourite (the round-11 data-loss lens, live). What the user
-sees, as built on lane-key-n1 and amended on lane-key-p1 (round 13):
+sees, as built on lane-key-n1 and amended on lane-key-p1 (round 13) and
+lane-key-q1 (round 14):
 
 1. Once per episode, a desktop notification: `omarchy-notification-send
    --app-name IPTV -u critical -g <alert glyph> -r 74017 <title> <body>`, and
@@ -1643,8 +1674,11 @@ sees, as built on lane-key-n1 and amended on lane-key-p1 (round 13):
    | the file is not readable (`permission`) | `is not readable (permission denied)` | `Make it readable with chmod 600 on that file, then run omarchy restart shell.` |
    | something other than a file is at the path (`not-a-file`: a directory or a FIFO, both measured live; a socket is refused by the helper, but what the FileView reports for one is unmeasured, so its row is not known) | `is not a regular file` | `Move whatever is at that path aside, then run omarchy restart shell.` |
    | the file does not parse (`unparsed`) | `is not a valid state file` | `Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell.` |
-   | the folder cannot be read: the file reads as missing, but the helper found something there (`absent`, `absent-unconfirmed`) | `could not be found, or its folder could not be read` | `Make the folder readable with chmod 700, then run omarchy restart shell.` |
-   | the start-up check did not answer within 15 s and was stopped (`init-timeout`, round 13, R23c) | `could not be checked: the start-up check did not answer and was stopped` | `Make sure a regular file, or nothing, is at that path, then run omarchy restart shell.` |
+   | at a start, the folder cannot be read: the file reads as missing, but the helper found something there (`absent-unconfirmed`) | `could not be found, or its folder could not be read` | `Make the folder readable with chmod 700, then run omarchy restart shell.` |
+   | mid-session, the file reads as missing (`absent`; round 14, R24b: its own `<fix>`, because the helper is not asked mid-session and a broken symbolic link and an unreadable folder look the same to the FileView) | `could not be found, or its folder could not be read` | `If it is a symbolic link, restore the file it points to; otherwise make the folder readable with chmod 700. Then run omarchy restart shell.` |
+   | a symbolic link at the path whose target is missing or is not a regular file, as the helper's start-up check found it (`link`, round 14, R24b) | `is a symbolic link whose target is missing or is not a regular file` | `Restore the file it points to, or move the link aside, then run omarchy restart shell.` |
+   | something that is not a folder where the state FOLDER, or one above it, should be (`not-a-dir`, round 14, R24b; `<path>` is then the folder's, `/home/you/.local/state/omarchy-iptv`) | `is not a folder (a file is at that path, or at one above it)` | `Move whatever is at that path aside, then run omarchy restart shell.` |
+   | the start-up check -- since round 14 the `mkdir` before it too (R24d) -- did not answer within 15 s and was stopped (`init-timeout`, round 13, R23c) | `could not be checked: the start-up check did not answer and was stopped` | `Make sure a regular file, or nothing, is at that path, then run omarchy restart shell.` |
    | any other failure (`io-error`) | `could not be read` | `Check the file and its folder, then run omarchy restart shell.` |
 
    For example, for a file that does not parse, verbatim from the model with
@@ -1689,13 +1723,21 @@ sees, as built on lane-key-n1 and amended on lane-key-p1 (round 13):
      `Esc close`, plus `o sources` only when sources are in memory -- which at
      a no-write start they are not, because nothing loaded. `r retry` is not
      offered: a refresh cannot make the file readable.
-   - The Sources screen stays reachable as it is (R23e): the `o` key is not
-     gated on the source count (`Guide.qml` `handleListLetter`), but at a
-     no-write start Sources lists nothing and the footer does not name it, and
-     no check observes `o` from this surface -- UNVERIFIED; the harness enters
-     Sources there through `ipc sourcesKey enter` (B12). Whether the surface
-     should offer Sources explicitly is raised to the lead (the round-13
-     rulings, decision request 5).
+   - The Sources screen stays reachable (R23e): the `o` key is not gated on
+     the source count (`Guide.qml` `handleListLetter`), though the footer
+     does not name it here; the round-13 live lens drove `o` from this
+     surface and it opened Sources (the lead's ruling (5), 2026-10-14). What
+     Sources draws in the mode is round 14's (R24f, D-SRC-28; 3.2.6): its
+     header's right slot is the notice's title, `Saved sources not loaded`,
+     where it read `No sources` over a file holding records; NO `Add source`
+     or `Add Xtream login` rows; `a`, `c` and Enter on an Add row open no
+     form and answer `state.json could not be read · nothing is saved until
+     it can be` in the footer; the footer hints are `Esc back` (5.3).
+     Observed by key-scenario B15 at a no-write start (`mode:sources
+     header:notice rows:0 addhint:no after-a:sources says:no-write
+     editable:0`), red on dev (`header:[No sources] rows:2 after-a:sourceEdit
+     says:other`). Its `addhint` token does not discriminate at row 0 (dev's
+     hints on an Add row carry no ` add` either); the other tokens do.
    - The bar entry is left exactly as it is.
 
 3. **Every refusal says the no-write reason (round 13, R23f).** In the mode,
@@ -1714,21 +1756,34 @@ sees, as built on lane-key-n1 and amended on lane-key-p1 (round 13):
    place under a running shell, so the guide's file watch reloads it): the
    guide keeps the channels, the active source and the favourites it already
    had -- it never switches to the surface in 2 while it holds channels
-   (lane A's reading of R23e, raised to the lead to confirm). Source changes
-   and the logo toggle are refused with the sentence in 3. A favourite, a
-   hidden group, a saved or forgotten search or a removed recent still
-   changes on screen with its usual confirmation, for this session only: it
-   is not kept, which only the notification's "changed now are not kept"
-   says (raised to the lead: decision request 4). **The condition, as
-   measured:** the mode begins when the FileView delivers the reload. Before
-   the session's first own save that is observed live (round 12's B5-B7,
-   round 13's B9). AFTER an own save it is **UNVERIFIED** (rule 14): lane A's
-   round-13 instrument saw the reload delivered and the mode begin, idle and
-   under load, but that instrument is not committed and no check observes
-   it; the round-12 data-loss lens saw NO reload, the mode not begin, and the
-   next save write the session's memory over the damaged file (nothing lost:
-   memory held it). The two measurements disagree and the lead decides
-   (`ARCHITECTURE-SOURCES.md` round-13 rulings, decision request 1).
+   (the lead's ruling (3), 2026-10-14). Source changes, Add and the logo
+   toggle are refused with the sentence in 3, and Sources keeps the rows of
+   what memory holds under the notice's title (3.2.6). A favourite, a hidden
+   group, a saved or forgotten search or a removed recent still changes on
+   screen with its usual confirmation, for this session only: it is not
+   kept, which only the notification's "changed now are not kept" says (the
+   lead's ruling (4), 2026-10-14: the transients keep their own copy).
+   **The condition, as measured (corrected 2026-10-14, D-DOC-8: this item
+   used to make the session's own saves the variable).** The mode begins
+   when the FileView delivers the reload, and whether it does depended on
+   one thing: whether the state DIRECTORY existed when the view first loaded
+   (the round-13 live lens, on lane-key-p2 and on a 0.13.6 export). With it
+   present -- every session but one -- every external change is reloaded,
+   before or after the session's own saves. With it absent -- the FIRST
+   session after a fresh install, `omarchy-iptv/` not yet under the state
+   home -- the view saw nothing all session, so garbage written in place was
+   never noticed and a hand-run `state source add` was written over by the
+   next in-app save. Since round 14 the service reloads the view once after
+   its start-up check (R24c) and that session sees changes too. What
+   observes it: key-scenario B5-B7 and B9 (an existing directory, no own
+   save before the damage), B16 (the fresh-install session: a hand-run
+   `state source add` seen and kept through an in-app add's save, then
+   garbage written in place noticed and told once, `seen:1 file:C,D
+   blocked:unparsed told:1`; on dev `seen:0 file:D blocked: told:0`). An
+   existing directory with the damage AFTER an own save is observed by the
+   committed FileView spike (`scripts/dev-harness/spikes/filewatch/`,
+   `RESULT-2026-10-13.txt`, every sequence) and by the round-13 live lens's
+   rig, and by no key-scenario segment.
 
 5. It ends by itself when a load that IS a state arrives: the file put back
    in place (the guide's file watch reloads it, key-scenario B7) or fixed and
@@ -1751,6 +1806,28 @@ sees, as built on lane-key-n1 and amended on lane-key-p1 (round 13):
    process behind (B10 `left:none`), and enters the mode with the
    `init-timeout` row. A hand-run `state` command over a non-regular file
    answers `state.json is not a regular file; nothing was written`, exit 1.
+   [Round 14, R24b and R24d.] A **symbolic link** at the path is followed
+   when it leads to a regular file -- the helper's `state` commands read and
+   write THROUGH it and the link stays a link (the FileView's own save was
+   measured doing the same, spike set `r24` sequence V; until round 14 the
+   helper replaced the link with a plain file and the running view then saw
+   none of its later writes, V and W) -- and refused when it leads nowhere
+   or to anything else: the start blocks with the `link` row, and every
+   `state` command answers `state.json is a symbolic link whose target is
+   missing; nothing was written` (or `... is not a regular file ...` for a
+   link to a directory or a FIFO), exit 1, the link untouched. A **file where
+   the state folder should be** blocks with the `not-a-dir` row; `state init`
+   answers `found: not-a-dir` with no traceback, and every other `state`
+   command `the state folder is not a folder (a file is at its path, or above
+   it); nothing was written`. Neither fault is driven by a key-scenario
+   segment: the copy and the decision are pinned in node, the helper's
+   answers in python. The **bound** now covers the start-up `mkdir` too: one
+   15 s watchdog from the moment `mkdir` starts, TERM then KILL to whichever
+   of the two is running (the KILL observed, B17 `helper:yes left:none
+   killed:1`); and the helper's init ends ITSELF 30 s after it starts, so a
+   shell restarted while the check hangs leaves nothing behind past that
+   (B18 `at-stop:alive after-deadline:gone left:none`). What no bound
+   reaches: a process in uninterruptible sleep on a hung filesystem.
 
 7. NOT this mode, and told nothing: a `state.json`, or its folder, left at
    mode 0000 by the user's own chmod while the shell was down (settled by the
@@ -1760,25 +1837,55 @@ sees, as built on lane-key-n1 and amended on lane-key-p1 (round 13):
    and draws the first-run form (B13 reads its drawn copy, `Paste or type
    your M3U URL or path, then press Enter`).
 
+8. NOT this mode either (round 14, R24a, D-SRC-22): **another program's
+   write that parses.** A hand-run `state` command, or a backup put back,
+   while the session holds a change of its own not yet on disk (a save
+   parked at the start, under way, or failed). Until round 14 the service
+   IGNORED that reload and its next save wrote over the other program's
+   change, which had answered `ok: true`; 0.13.6 applied it and lost the
+   in-app change instead. Now the two are merged (`Model.mergeForeignState`)
+   and nothing is shown: both sides' favourites, hidden groups and saved
+   searches; both sides' new, removed and changed sources; a setting changed
+   by one side only. Where BOTH changed the same source, or the same
+   setting, the other program's version is kept -- it is the later write, and
+   an in-app change that is still unsaved because its save FAILED was
+   already told so (`Could not write state.json · check
+   ~/.local/state/omarchy-iptv`) -- and the shell's console gets one line per
+   such case, `omarchy-iptv: state.json was changed by another program while
+   a change made here was not yet saved; kept the other program's the source
+   1a2b3c4d (label, url)`, or `... kept the other program's activeKey`: field
+   NAMES and a source's short key, never a URL or a value. Nothing on screen
+   says a conflict happened; the guide simply shows the merged state.
+
 Pinned in node (`R22a: stateUnreadableNotice -- one sentence per reason,
 each naming the file and what to do (restart included), none carrying a URL;
 the notification and the console line are that sentence (74017)`, `R23c:
 stateUnreadableNotice("init-timeout") is its own sentence ...`, `R23e:
 guideSurface ...`, `R23e: firstRunAllowed ...`, `R23e: the Esc / o return
 from Sources ...`, `R23f: refusalMessage ...`, and the `R22a`, `R23a` and
-`R23c` harness pins that drive each fault through the real handlers) and
-observed at the sink by key-scenario: B5-B7 on lane-key-n1 (lane A,
+`R23c` harness pins that drive each fault through the real handlers; since
+round 14 `R24a mergeForeignState: <case>` over the 34 cases of
+`tests/fixtures/state-merge.json` and the `R24a (...)` harness pins in 16
+modes, `R24b: the link sentence names the file and the link, the not-a-dir
+sentence names the FOLDER's path, ...`, `R24f: sourcesHeaderRight ...`,
+`R24f: sourcesRowCount / sourcesRowKind ...`, `R24f: sourcesAddAllowed ...`,
+`R24f: footerHints in Sources ...`) and observed at the sink by
+key-scenario: B5-B7 on lane-key-n1 (lane A,
 transcript `key-20261013-161816-835970`: B5 `file:same blocked:unparsed
 add:state_unreadable switch:state_unreadable told:1 path:1 urls:0` -- one
 notification, naming `state.json`, no `://` -- B6 the entry's keys and mirror
 unchanged with `writes:0`, B7 the mode lifted by restoring the file and a
 switch then landing), and B9-B14 on lane-key-p1 (lane A, transcript
 `key-20261014-043943-514380`, 112 / 0; B10-B14 red on `--baseline
-lane-key-n2`, `key-20261014-044420-538071`, 107 / 5). B11 reads the surface's
+lane-key-n2`, `key-20261014-044420-538071`, 107 / 5), and B15-B18 on
+lane-key-q1 (lane A, `key-20261014-095236-969838`, 116 / 0; B15, B16 and
+B18 red on `--baseline dev`, `key-20261014-095838-996891`, 113 / 3; B17 red
+with the KILL deleted, `key-20261014-100528-1027361`, 115 / 1). B11 reads the surface's
 title and prose as the notice's (`title:notice prose:notice`) through the
 harness's drawn-copy fields, which since R23h report what is DRAWN. The
 rendered surface and the notification card are UNVERIFIED on a display: no
-screenshot of either was taken this round.
+screenshot of either was taken this round, nor of the round-14 Sources
+screen (3.2.6).
 
 ---
 

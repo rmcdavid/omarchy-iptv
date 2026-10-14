@@ -1236,7 +1236,10 @@ checkCall("D-ID-1 Service.qml calls the builders and builds no playlist argv of 
     // present but handed an empty state dir, which is byte-for-byte the state
     // two reviewers refused. Counting the call was never enough; what matters
     // is the ARGUMENT, so assert the whole call including root.stateDir.
-    (code.match(/Model\.playlistFetchArgv\(root\.helperPath, root\.activeCacheDir, root\.stateDir\)/g) || []).length,
+    // R24e (round 14): through Model.fetchStateDir with the no-write mode,
+    // which is "" only while that mode holds (pinned by calling it, and
+    // through the service harness, under R24e).
+    (code.match(/Model\.playlistFetchArgv\(root\.helperPath, root\.activeCacheDir, Model\.fetchStateDir\(root\.stateDir, root\.stateWriteBlocked\)\)/g) || []).length,
     // And the probe must never be handed one, by any spelling.
     /playlistProbeArgv\([^)]*stateDir/.test(code)
   ]
@@ -7194,6 +7197,11 @@ check("R22a: stateWriteGate -- the no-write mode refuses whatever else is true; 
   ["refuse", "refuse", "park", "park", "write", "park", "write", "park"])
 checkCall("R22a: stateUnreadableNotice -- one sentence per reason, each naming the file and what to do (restart included), none carrying a URL; the notification and the console line are that sentence (74017)", () => {
   const path = "/home/u/.local/state/omarchy-iptv/state.json"
+  // R24b (round 14): "absent" (mid-session, no witness) and
+  // "absent-unconfirmed" (the start, the helper found something) no longer
+  // share a sentence: the mid-session one also names a broken symbolic link,
+  // which the FileView reports the same way. "link" and "not-a-dir" are
+  // pinned under R24b, the second naming the FOLDER's path.
   const reasons = ["permission", "not-a-file", "unparsed", "absent", "absent-unconfirmed", "io-error"]
   const bodies = reasons.map(r => Model.stateUnreadableNotice(r, path).body)
   const argv = Model.notifyArgv("stateUnreadable", { reason: "permission", path })
@@ -7202,7 +7210,7 @@ checkCall("R22a: stateUnreadableNotice -- one sentence per reason, each naming t
            noPath: Model.stateUnreadableNotice("permission", "").body.indexOf("state.json is not readable") === 0,
            argv: [argv[0], argv[argv.indexOf("-r") + 1], argv[argv.length - 2], argv[argv.length - 1] === Model.stateUnreadableNotice("permission", path).body],
            verb: Model.sourceErrorMessage("state_unreadable") !== "" && Model.sourceErrorMessage("state_unreadable").indexOf("://") === -1 }
-}, { namesTheFile: true, restart: true, noUrl: true, distinct: 5, title: "Saved sources not loaded", noPath: true,
+}, { namesTheFile: true, restart: true, noUrl: true, distinct: 6, title: "Saved sources not loaded", noPath: true,
      argv: ["omarchy-notification-send", "74017", "Saved sources not loaded", true], verb: true })
 
 // ---- R23c (D-SINK-19 round 13): the start-up init is bounded. A run the
@@ -7229,6 +7237,42 @@ checkCall("R23c: stateUnreadableNotice(\"init-timeout\") is its own sentence -- 
   return [told.title, told.body.indexOf(path) === 0, /stopped/.test(told.body), /omarchy restart shell\.$/.test(told.body),
           told.body.indexOf("://") === -1, others.indexOf(told.body) === -1, argv[argv.length - 1] === told.body]
 }, ["Saved sources not loaded", true, true, true, true, true, true])
+
+// ---- R24b (D-SINK-19 round 14, D-SRC-23 / D-SRC-26): one answer per path.
+// The helper's `link` and `not-a-dir` reach the shell as reasons of their own
+// with sentences that name what is at which path -- never the folder-
+// permission advice "absent-unconfirmed" carries, which sent the user to
+// chmod a folder that was fine.
+checkCall("R24b: stateInitFound -- the helper's `link` and `not-a-dir` are answers of their own; file, other and unreadable stay `present`", () => (["link", "not-a-dir", "file", "other", "unreadable"].map(f => Model.stateInitFound(JSON.stringify({ ok: true, kind: "state", action: "init", found: f }), 0))),
+  ["link", "not-a-dir", "present", "present", "present"])
+checkCall("R24b: stateLoadDecision -- FileNotFound with the helper saying link / not-a-dir: re-read once, then blocked with THAT reason; anything else as before", () => ([Model.stateLoadDecision({ kind: "absent", initFound: "link" }), Model.stateLoadDecision({ kind: "absent", initFound: "link", retried: true }),
+   Model.stateLoadDecision({ kind: "not-a-file", initFound: "link", retried: true }), Model.stateLoadDecision({ kind: "absent", initFound: "not-a-dir", retried: true }),
+   Model.stateLoadDecision({ kind: "absent", initFound: "present", retried: true })].map(d => d.act + "/" + d.reason)),
+  ["retry/absent", "block/link", "block/link", "block/not-a-dir", "block/absent-unconfirmed"])
+checkCall("R24b: the link sentence names the file and the link, the not-a-dir sentence names the FOLDER's path, neither advises chmod 700, both end with the restart, and the mid-session `absent` names a broken link too", () => {
+  const path = "/home/u/.local/state/omarchy-iptv/state.json"
+  const link = Model.stateUnreadableNotice("link", path).body, dir = Model.stateUnreadableNotice("not-a-dir", path).body
+  const mid = Model.stateUnreadableNotice("absent", path).body
+  return { link: [link.indexOf(path + " is a symbolic link") === 0, link.indexOf("chmod") === -1, /omarchy restart shell\.$/.test(link)],
+           dir: [dir.indexOf("/home/u/.local/state/omarchy-iptv is not a folder") === 0, dir.indexOf("state.json") === -1, dir.indexOf("chmod") === -1, /omarchy restart shell\.$/.test(dir)],
+           mid: [mid.indexOf("symbolic link") !== -1, mid.indexOf("chmod 700") !== -1], urls: [link, dir, mid].some(b => b.indexOf("://") !== -1) }
+}, { link: [true, true, true], dir: [true, true, true, true], mid: [true, true], urls: false })
+
+// ---- R24f (D-SINK-19 round 14, D-SRC-28): the Sources screen in the
+// no-write mode draws no Add rows, its header is the notice's title, and
+// neither add key is hinted. The live arm observes it (key-scenario B15).
+checkCall("R24f: sourcesRowCount / sourcesRowKind -- two Add rows while writes are allowed, none in the no-write mode, the source rows either way", () => ([Model.sourcesRowCount(2, ""), Model.sourcesRowCount(2, "unparsed"), Model.sourcesRowCount(0, "absent"), Model.sourcesRowCount(0),
+   Model.sourcesRowKind(2, 2, ""), Model.sourcesRowKind(3, 2, ""), Model.sourcesRowKind(2, 2, "unparsed"), Model.sourcesRowKind(0, 0, "unparsed"),
+   Model.sourcesRowKind(1, 2, "unparsed"), Model.sourcesRowKind(0, 0)]),
+  [4, 2, 0, 2, "add", "xtream", "", "", "source", "add"])
+checkCall("R24f: sourcesHeaderRight -- the count while writes are allowed; in the no-write mode the notice's own title (Model.stateUnreadableNotice), never `No sources`", () => ([Model.sourcesHeaderRight(0, "", ""), Model.sourcesHeaderRight(2, "", ""), Model.sourcesHeaderRight(0, "unparsed", "/p/state.json"),
+   Model.sourcesHeaderRight(3, "permission", "") === Model.stateUnreadableNotice("permission", "").title]),
+  ["No sources", "2 sources", "Saved sources not loaded", true])
+checkCall("R24f: sourcesAddAllowed -- never in the no-write mode", () => ([Model.sourcesAddAllowed(""), Model.sourcesAddAllowed("unparsed"), Model.sourcesAddAllowed(undefined)]), [true, false, true])
+checkCall("R24f: footerHints in Sources -- no `a add` or `X Xtream` in the no-write mode, on a source row or with no row at all; unchanged otherwise", () => ([Model.footerHints({ mode: "sources", cursorKind: "source", stateBlocked: "unparsed" }).map(p => p[0]).filter(k => k === Model.SOURCE_KEYS.add || k === Model.SOURCE_KEYS.xtream),
+   Model.footerHints({ mode: "sources", cursorKind: "", stateBlocked: "unparsed" }).map(p => p.join(" ")),
+   Model.footerHints({ mode: "sources", cursorKind: "source" }).map(p => p[0]).filter(k => k === Model.SOURCE_KEYS.add || k === Model.SOURCE_KEYS.xtream).length]),
+  [[], ["Esc back"], 2])
 
 // ---- R23e: the no-write mode has its own guide surface, never the first-run
 // form. The decision (guideSurface, firstRunAllowed, closeSources) here; what
@@ -7302,7 +7346,11 @@ check("R11: the fixture's flush section has all four answers and both drop reaso
 // OBSERVES the sink is key-scenario.sh's D2 (the start-up chmod reload) and
 // the O segment (the interrupted order). These pins are the third leg.
 checkCall("R11 (structural): stateInitProc's exit issues the parked save, THEN settles the flush through the disposition, and never calls flushPendingEntry itself", () => {
-  const block = (serviceSource.match(/target: stateInitProc[\s\S]*?function onExited\(exitCode, exitStatus\) \{[\s\S]*?\n    \}/) || [""])[0]
+  // R24d (round 14): the exit's body is Service.stateInitExited, which the
+  // handler calls and a start-up check stopped in mkdir calls too; the
+  // handler itself is that one call.
+  const handler = (serviceSource.match(/target: stateInitProc\n    function onExited\(exitCode, exitStatus\) \{ root\.stateInitExited\(exitCode\) \}/) || [""])[0]
+  const block = handler === "" ? "" : (serviceSource.match(/  function stateInitExited\(exitCode\) \{[\s\S]*?\n  \}/) || [""])[0]
   const save = block.indexOf("root.saveState()")
   const settle = block.indexOf("root.settleEntryFlush()")
   const settleFn = (serviceSource.match(/function settleEntryFlush\(\)[\s\S]*?\n  \}/) || [""])[0]
@@ -7466,6 +7514,96 @@ checkCall("R15: folding every `reload` case of the shared fixture through reload
   const total = Object.keys(counts).reduce((n, k) => n + counts[k], 0)
   return [Object.keys(counts).sort(), total === activeKeyFixture.reload.length, counts["save-parked"] >= 1, counts["own-write"] >= 1, reasons.indexOf("save-parked") !== -1]
 }, [Array.from(new Set(activeKeyFixture.reload.map(c => c.reason))).sort(), true, true, true, true])
+// ---- R24a (D-SINK-19 round 14, D-SRC-22): A FOREIGN WRITE IS MERGED, NEVER
+// IGNORED AND NEVER APPLIED BLIND. The fixture table pins every field rule,
+// every conflict and the identities of Model.mergeForeignState by calling
+// it; the identities are then checked over EVERY case, so the "no change
+// held" path (applied as before) is proven to be the merge with ours == base.
+const mergeFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/state-merge.json"), "utf8"))
+const mergeState = (spec) => {
+  if (spec === null || spec === undefined) return null
+  const played = id => id === null || id === undefined ? null : { id: String(id), name: String(id), at: 1 }
+  const out = { version: 2, cacheLayout: spec.cacheLayout || 0, favorites: spec.favorites || [], recents: (spec.recents || []).map(played),
+                lastPlayed: played(spec.lastPlayed), session: played(spec.session),
+                sources: (spec.sources || []).map(r => ({ key: r.k, url: "http://" + r.k + ".example.test/list.m3u", epgUrl: "", kind: "http",
+                                                          label: r.label, labelCustom: true, origin: "cli", addedAt: 1, lastUsed: r.lastUsed || 0,
+                                                          fetchedAt: 1, channelCount: 1, groupCount: 1 })),
+                savedSearches: (spec.savedSearches || []).map(q => ({ query: q, at: 1 })), hiddenGroups: spec.hiddenGroups || [], activeKey: spec.activeKey || "" }
+  if (spec.entryMigrated === true) out.entryMigrated = true
+  return out
+}
+const mergeView = (r) => {
+  const st = r.state, w = {}
+  const empty = Model.emptyState()
+  if (JSON.stringify(st.favorites) !== "[]") w.favorites = st.favorites
+  if (JSON.stringify(st.hiddenGroups) !== "[]") w.hiddenGroups = st.hiddenGroups
+  if (st.savedSearches.length) w.savedSearches = st.savedSearches.map(x => x.query)
+  if (st.sources.length) w.sources = st.sources.map(x => x.key + ":" + x.label + ":" + x.lastUsed)
+  if (st.activeKey !== empty.activeKey) w.activeKey = st.activeKey
+  if (st.recents.length) w.recents = st.recents.map(x => x.id)
+  if (st.lastPlayed) w.lastPlayed = st.lastPlayed.id
+  if (st.session) w.session = st.session.id
+  if (st.cacheLayout) w.cacheLayout = st.cacheLayout
+  if (Model.entryMigratedOf(st)) w.entryMigrated = true
+  w.conflicts = r.conflicts.map(c => c.field === "sources" ? "sources:" + c.key + "(" + (c.fields || []).join(",") + ")" : c.field)
+  return w
+}
+// Rule 13: the projection keys in the fixture are the field names the
+// function merges, so a want that names a field the view does not read is
+// a broken case, not a pass.
+const mergeOrder = w => { const o = {}; for (const k of ["favorites", "hiddenGroups", "savedSearches", "sources", "activeKey", "recents", "lastPlayed", "session", "cacheLayout", "entryMigrated", "conflicts"]) if (k in w) o[k] = w[k]; return o }
+for (const c of mergeFixture.cases) {
+  checkCall("R24a mergeForeignState: " + c.name, () => mergeOrder(mergeView(Model.mergeForeignState(mergeState(c.base), mergeState(c.ours), mergeState(c.theirs)))),
+    mergeOrder(c.want))
+}
+checkCall("R24a: the fixture covers every field rule and every kind of conflict the function reports -- each set field, records added / removed / changed by each side, both kinds of record conflict, every whole field, the marker, and both identities", () => {
+  const names = mergeFixture.cases.map(c => c.name).join("\n")
+  const conflicts = [].concat(...mergeFixture.cases.map(c => c.want.conflicts))
+  return {
+    sets: ["favorites", "hiddenGroups", "savedSearches"].every(f => mergeFixture.cases.some(c => c.want[f] !== undefined && JSON.stringify(c.ours[f]) !== JSON.stringify(c.base && c.base[f]))),
+    whole: ["recents", "activeKey", "lastPlayed", "session", "cacheLayout"].every(f => mergeFixture.cases.some(c => c.want[f] !== undefined || (c.theirs && c.theirs[f] !== undefined))),
+    recordConflicts: conflicts.filter(x => /^sources:/.test(x)).length >= 3,
+    scalarConflicts: ["activeKey", "recents", "session"].every(f => conflicts.indexOf(f) !== -1),
+    marker: (names.match(/entryMigrated/g) || []).length >= 3,
+    identities: /identity: ours is the base/.test(names) && /identity: theirs is the base/.test(names),
+    lens: /WF FAV WOK HADD/.test(names)
+  }
+}, { sets: true, whole: true, recordConflicts: true, scalarConflicts: true, marker: true, identities: true, lens: true })
+// ONE disagreement, by the ruling's own two rules, and pinned rather than
+// hidden: "entryMigrated is true if either side has it" keeps a marker the
+// BASE had and theirs dropped (an older writer -- 0.13.6's helper -- rewrote
+// the file), while "applied as today" takes theirs and drops it. With
+// nothing held the service applies as today (the downgrade R21a accepts:
+// the re-upgrade migrates again); with a change held the merge keeps the
+// marker. Raised to the lead in this lane's report.
+checkCall("R24a: over EVERY fixture case, the merge with ours == base IS theirs and the merge with theirs == base IS ours (Model.sameState), with no conflict -- so applying a foreign write when nothing is held is this merge -- except the one field the ruling's marker rule makes differ: a marker the base had and theirs dropped", () => {
+  const bad = []
+  for (const c of mergeFixture.cases) {
+    const base = mergeState(c.base), ours = mergeState(c.ours), theirs = mergeState(c.theirs)
+    const a = Model.mergeForeignState(base, base, theirs)
+    const markerOnly = Model.entryMigratedOf(base) && !Model.entryMigratedOf(theirs)
+      && Model.sameState(Model.cloneState(a.state, { entryMigrated: false }), theirs)
+    if (markerOnly) bad.push("marker kept (ours=base): " + c.name)
+    else if (!Model.sameState(a.state, theirs) || a.conflicts.length) bad.push("ours=base: " + c.name)
+    const b = Model.mergeForeignState(base, ours, base)
+    if (!Model.sameState(b.state, ours) || b.conflicts.length) bad.push("theirs=base: " + c.name)
+  }
+  return bad
+}, ["marker kept (ours=base): entryMigrated: ours has it and theirs (an older writer) dropped it -- kept"])
+checkCall("R24a / R24c: sameState compares what a reader of the file sees -- the init's own empty default, the service's parseState(\"\") and the indented and compact spellings of one state are one state; a changed favourite is not", () => {
+  const H = require("./service-harness.js")
+  const st = Model.parseState(JSON.stringify({ version: 2, favorites: ["t:a"], sources: [] }))
+  return [Model.sameState(H.HELPER_EMPTY_STATE, Model.parseState("")), Model.sameState(H.HELPER_EMPTY_STATE, ""),
+          Model.sameState(JSON.stringify(st, null, 2) + "\n", JSON.stringify(st)), Model.sameState(st, Model.emptyState()),
+          Model.sameState(null, Model.emptyState())]
+}, [true, true, true, false, true])
+checkCall("R24a: a conflict's console line names the field and the source key, never a URL or a value", () => {
+  const r = Model.mergeForeignState(mergeState({ sources: [{ k: "aaaaaaaa", label: "A" }] }), mergeState({ sources: [{ k: "aaaaaaaa", label: "Mine" }] }),
+                                    mergeState({ sources: [{ k: "aaaaaaaa", label: "Theirs" }] }))
+  const lines = r.conflicts.map(Model.mergeConflictLine).concat([Model.mergeConflictLine({ field: "activeKey", key: "" })])
+  return { lines, url: lines.some(l => l.indexOf("://") !== -1 || l.indexOf("example.test") !== -1 || l.indexOf("Mine") !== -1 || l.indexOf("Theirs") !== -1) }
+}, { lines: ["state.json was changed by another program while a change made here was not yet saved; kept the other program's the source aaaaaaaa (label)",
+             "state.json was changed by another program while a change made here was not yet saved; kept the other program's activeKey"], url: false })
 checkCall("R15 (structural): applyUserState counts every reload by reason through Model.countReload BEFORE deciding, into a declared var property, and the service warns at exit when an entry mirror is still held", () => {
   const fn = (serviceSource.match(/function applyUserState\(text\) \{[\s\S]*?\n  \}/) || [""])[0]
   const count = fn.indexOf("root.stateReloadsByReason = Model.countReload(root.stateReloadsByReason, disposition.reason)")
@@ -12442,13 +12580,18 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // the path (R23b, test_state); this is the second fix. The timeout runs
     // the watchdog's OWN onTriggered and then the shipping exit handler.
     for (const mode of ["lag", "echo"]) {
-      checkCall("R23c (" + mode + " host): startStateInit arms the init's watchdog and clears the timed-out flag before every run", () => {
+      // R24d (round 14): the bound is armed when MKDIR starts (the start-up
+      // check's first process), not when the init does: startStartupCheck
+      // arms it and clears the flag, startStateInit only runs the init.
+      checkCall("R23c / R24d (" + mode + " host): startStartupCheck starts mkdir, arms the one watchdog and clears the timed-out flag; the init's start arms nothing more", () => {
         const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA, { favorites: FAV }), mode)
         const before = h.ids.stateInitWatchdog.restarts
         h.root.stateInitTimedOut = true
+        h.root.startStartupCheck()
+        const check = [h.ids.stateInitWatchdog.restarts - before, h.root.stateInitTimedOut, h.ids.mkdirProc.running]
         h.root.startStateInit()
-        return [h.ids.stateInitWatchdog.restarts - before, h.root.stateInitTimedOut, h.ids.stateInitProc.running]
-      }, [1, false, true])
+        return { check, init: [h.ids.stateInitWatchdog.restarts - before, h.ids.stateInitProc.running] }
+      }, { check: [1, false, true], init: [1, true] })
       for (const f of [{ id: "something that is not a file (a FIFO reads as NotAFile)", fault: "is-dir" }, { id: "a file that does not parse", text: "{\"version\": 2, \"sources\": [" }]) {
         checkCall("R23c (" + mode + " host): the init never answers over " + f.id + " -- the watchdog stops it, the held load decides as the no-write mode with its own reason, the user is told once by a sentence naming the file, and nothing is written to the file or the entry", () => {
           const start = { sourceKey: KA, showLogos: false }
@@ -12533,6 +12676,163 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         const h = bootFault(STARTS.migrated, { fault: "dir-0000" }, mode, "reload-first")
         return [h.cacheRuns.filter(c => c.indexOf("migrate") !== -1).length, h.file().cacheLayout, summary(h.stateFile.disk).records]
       }, [0, 2, 2])
+    }
+  }
+
+  // ---- D-SINK-19 round 14, R24 (the lead's ruling on the round-13 lenses),
+  // through the shipping Service.qml. Seen red against dev ced1bd1
+  // (IPTV_SERVICE_QML / IPTV_MODEL at a dev export), with the counts in this
+  // lane's report; the KILL pins against a copy with the KILL deleted.
+  {
+    const H4 = "http://h4.example.test/l.m3u"
+    const KH = keyOf(H4)
+    const told = h => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74017") !== -1).length
+    const failedTold = h => h.signals.filter(x => x[0] === "sourcesPersistFailed").length
+    const keysOf = st => st.sources.map(r => r.key === KA ? "A" : r.key === KB ? "B" : r.key === KH ? "H" : r.key === KNEW ? "NEW" : r.key)
+    // What `state source add --url H4` writes: the file as the helper read
+    // it plus one record, compact, by an atomic rename (h.foreign delivers
+    // the reload when the view is watching).
+    const helperAdd = sf => { const st = JSON.parse(sf.disk); st.sources.push(rec(H4)); sf.disk = JSON.stringify(st) + "\n"; sf.exists = true }
+    const reasonsOf = h => Object.keys(h.root.stateReloadsByReason || {}).sort()
+    const noUrlIn = h => h.warnings.every(w => w.indexOf("://") === -1 && w.indexOf("example.test") === -1)
+    const START = () => migratedText([rec(A), rec(B)], KA, { favorites: ["t:bbc1.uk"] })
+    for (const mode of ["lag", "echo"]) {
+      for (const ownEcho of ["load", "none"]) {
+        const tag = mode + " host, own echo " + ownEcho
+        // R24a / D-SRC-22: the data-loss lens's WF FAV WOK HADD FAV.
+        checkCall("R24a (" + tag + "): FAILED -- a write fails (told), an in-app favourite, the disk recovers, a hand-run `state source add`, another favourite: the file and memory keep BOTH favourites AND the helper's record, the failure told once, the reload merged", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.stateFile.writeFails = true
+          h.root.toggleFavorite("t:f2.uk"); h.drain()
+          h.stateFile.writeFails = false
+          h.foreign(helperAdd); h.drain()
+          h.root.toggleFavorite("t:f5.uk"); h.drain()
+          return { file: [keysOf(h.file()), h.file().favorites], memory: [keysOf(h.root.userState), h.root.userState.favorites],
+                   told: failedTold(h), merged: reasonsOf(h).indexOf("foreign-save-failed") !== -1, clean: [h.root.stateSaveFailed, h.root.stateSavesInFlight], noUrl: noUrlIn(h) }
+        }, { file: [["A", "B", "H"], ["t:bbc1.uk", "t:f2.uk", "t:f5.uk"]], memory: [["A", "B", "H"], ["t:bbc1.uk", "t:f2.uk", "t:f5.uk"]],
+             told: 1, merged: true, clean: [false, 0], noUrl: true })
+        checkCall("R24a (" + tag + "): IN FLIGHT -- the helper's rename lands while an in-app favourite's save is still in flight: ours lands after it, then the merge's save, and the file keeps both", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.root.toggleFavorite("t:f2.uk")
+          const inFlight = h.root.stateSavesInFlight
+          h.foreign(helperAdd)
+          h.drain()
+          return { inFlight, file: [keysOf(h.file()), h.file().favorites], memory: [keysOf(h.root.userState), h.root.userState.favorites],
+                   merged: reasonsOf(h).indexOf("foreign-save-in-flight") !== -1, settled: h.root.stateSavesInFlight }
+        }, { inFlight: 1, file: [["A", "B", "H"], ["t:bbc1.uk", "t:f2.uk"]], memory: [["A", "B", "H"], ["t:bbc1.uk", "t:f2.uk"]], merged: true, settled: 0 })
+        checkCall("R24a (" + tag + "): PARKED -- inside the start-up window (the state loaded, the init not yet exited) an in-app favourite parks its save, the helper writes the file, then the init exits: the parked save keeps both", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho, dirsLater: true })
+          h.root.toggleFavorite("t:win.uk"); h.runLater()
+          const parked = h.root.stateSavePending
+          h.foreign(helperAdd)
+          h.initExit(); h.drain()
+          return { parked, file: [keysOf(h.file()), h.file().favorites], memory: [keysOf(h.root.userState), h.root.userState.favorites],
+                   merged: reasonsOf(h).indexOf("foreign-save-parked") !== -1 }
+        }, { parked: true, file: [["A", "B", "H"], ["t:bbc1.uk", "t:win.uk"]], memory: [["A", "B", "H"], ["t:bbc1.uk", "t:win.uk"]], merged: true })
+        // D-SRC-15, kept: the start-up chmod reload carries the file AS LOADED
+        // -- the base -- and is still ignored while the adoption's save is
+        // parked; R24a must not turn it into a merge that drops the adoption.
+        // The reload is delivered by hand over the unchanged file inside the
+        // window (the IN_ATTRIB of the helper's chmod of a 0644 file, which
+        // the double's init does not raise for a readable file).
+        checkCall("R24a (" + tag + "): the start-up chmod reload (the BASE text) while the adoption's save is parked is still IGNORED as save-parked, not merged: the adopted key and record survive", () => {
+          const h = boot({ playlistUrl: NEW, showLogos: false }, oldText([rec(A)]), mode, { ownEcho, dirsLater: true })
+          const parked = [h.root.stateSavePending, h.root.activeSourceKey === KNEW]
+          h.loadState(); h.runLater()
+          h.initExit(); h.drain()
+          return { parked, active: h.root.activeSourceKey === KNEW, file: [keysOf(h.file()), M.activeKeyOf(h.file()) === KNEW],
+                   parkedReason: (h.root.stateReloadsByReason || {})["save-parked"] >= 1, merged: reasonsOf(h).filter(r => /^foreign-/.test(r)) }
+        }, { parked: [true, true], active: true, file: [["A", "NEW"], true], parkedReason: true, merged: [] })
+        // After the merge, reconcile resolves the now-empty active key the way
+        // it always has: from the bar entry's mirror, which still names A (the
+        // failed switch never mirrored B).
+        checkCall("R24a (" + tag + "): a CONFLICT -- an in-app switch to B whose save failed, then a hand-run `state source remove` of B: the foreign write wins (B gone, its active key cleared), one console line per conflict naming the key, no URL; reconcile then stands on the mirror's A and the file agrees with memory", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.stateFile.writeFails = true
+          sw(h, KB); h.drain()
+          h.stateFile.writeFails = false
+          h.foreign(sf => { const st = JSON.parse(sf.disk); st.sources = st.sources.filter(r => r.key !== KB); st.activeKey = ""; sf.disk = JSON.stringify(st) + "\n" })
+          h.drain()
+          const lines = h.warnings.filter(w => /changed by another program/.test(w))
+          return { memory: [keysOf(h.root.userState), h.root.userState.activeKey], file: [keysOf(h.file()), h.file().activeKey],
+                   lines: lines.length, namesKey: lines.some(l => l.indexOf(KB) !== -1), noUrl: noUrlIn(h) }
+        }, { memory: [["A"], KA], file: [["A"], KA], lines: 2, namesKey: true, noUrl: true })
+        // R24c / D-SRC-19 / D-DOC-8: the first session after a fresh install.
+        checkCall("R24c (" + tag + "): the FRESH install's first session (the state directory absent at the first load): the start re-arms the watch, so a hand-run `state source add` is seen and KEPT by the next in-app save, and garbage written in place is noticed (the no-write mode, told once)", () => {
+          const h = boot({ playlistUrl: NEW, showLogos: false }, "", mode, { ownEcho })
+          const start = [h.stateFile.dirAbsent === false, h.stateFile.watchArmed, h.root.activeSourceKey === KNEW, keysOf(h.file()), marked(h)]
+          h.foreign(helperAdd); h.drain()
+          const seen = M.findSource(h.root.userState.sources, KH) !== null
+          h.root.toggleFavorite("t:x.uk"); h.drain()
+          const kept = [keysOf(h.file()), h.file().favorites]
+          h.foreign(sf => { sf.disk = "garbage{" })
+          return { start, seen, kept, blocked: h.root.stateWriteBlocked, told: told(h), file: h.stateFile.disk }
+        }, { start: [true, true, true, ["NEW"], true], seen: true, kept: [["NEW", "H"], ["t:x.uk"]], blocked: "unparsed", told: 1, file: "garbage{" })
+        checkCall("R24c (" + tag + "): the re-arming reload is the IDENTITY -- it carries the init's created text (or our own save), which compares equal to the base: no foreign merge at the start, memory unchanged, nothing told", () => {
+          const plain = boot({ sourceKey: "", showLogos: false }, "", mode, { ownEcho })
+          const cli = boot({ playlistUrl: NEW, showLogos: false }, "", mode, { ownEcho })
+          return [reasonsOf(plain).filter(r => /^foreign-/.test(r)), M.sameState(plain.root.userState, plain.file()), plain.file().sources.length, told(plain),
+                  reasonsOf(cli).filter(r => /^foreign-/.test(r)), cli.root.activeSourceKey === KNEW, M.sameState(cli.root.userState, cli.file()), told(cli)]
+        }, [[], true, 0, 0, [], true, true, 0])
+      }
+      // The harness's own model of the dir-absent session (rule 10): with the
+      // re-arm deleted the view stays unarmed and the helper's write is lost --
+      // what the round-13 live lens measured on the real Service.qml.
+      checkCall("R24c (" + mode + " host, the double): an unarmed view delivers nothing -- a file another writer creates or changes raises no load -- until reload() is called with the file there", () => {
+        const H = require("./service-harness.js")
+        const h = boot({ sourceKey: "", showLogos: false }, "", mode, { dirsLater: true })
+        const before = [h.stateFile.dirAbsent, h.stateFile.watchArmed]
+        let loads = 0
+        const real = h.loadState
+        h.loadState = () => { loads++; real() }
+        h.foreign(sf => { sf.exists = true; sf.disk = H.HELPER_EMPTY_STATE })
+        const unarmed = loads
+        h.stateFile.reload(); h.runLater()
+        h.foreign(helperAdd)
+        return { before, unarmed, armed: [h.stateFile.watchArmed, loads] }
+      }, { before: [true, false], unarmed: 0, armed: [true, 2] })
+      // R24d / D-SRC-25: one bound over the whole start-up check.
+      const GARBAGE = "{\"version\": 2, \"sources\": ["
+      checkCall("R24d (" + mode + " host): a start-up MKDIR that never answers -- the one watchdog (armed when mkdir started) TERMs it, the init is never started, and the held load decides as the no-write mode, told once", () => {
+        const h = boot({ sourceKey: KA, showLogos: false }, GARBAGE, mode, { exists: true, dirsLater: true })
+        const waiting = h.root.stateWriteBlocked
+        h.initExit({ timeout: true, hangAt: "mkdir" }); h.drain()
+        return { waiting, hang: h.hang, mkdir: h.ids.mkdirProc.signals, initStarted: h.ids.stateInitProc.running, blocked: h.root.stateWriteBlocked,
+                 found: h.root.stateInitFound, told: told(h), line: h.warnings.some(w => /start-up mkdir exceeded 15 s/.test(w)), file: h.stateFile.disk === GARBAGE }
+      }, { waiting: "", hang: "terminated", mkdir: [15], initStarted: false, blocked: "init-timeout", found: "timeout", told: 1, line: true, file: true })
+      // R24g / F-HARNESS-24: the KILL half, observed. Seen red with the
+      // KILL deleted from Service.qml (this lane's report).
+      for (const at of ["init", "mkdir"]) {
+        checkCall("R24g (" + mode + " host): a start-up " + at + " that IGNORES the TERM is KILLed after the grace -- the kill timer's own handler sends 9, the exit is delivered, the no-write mode, told once", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, GARBAGE, mode, { exists: true, dirsLater: true })
+          h.initExit({ timeout: true, ignoreTerm: true, hangAt: at })
+          h.drain()
+          const p = at === "mkdir" ? h.ids.mkdirProc : h.ids.stateInitProc
+          return { hang: h.hang, signals: p.signals, running: p.running, blocked: h.root.stateWriteBlocked, told: told(h),
+                   killLine: h.warnings.some(w => /ignored the terminate signal, killing it/.test(w)) }
+        }, { hang: "killed", signals: [15, 9], running: false, blocked: "init-timeout", told: 1, killLine: true })
+      }
+      // R24e / D-SRC-27: the remap is a writer too.
+      checkCall("R24e (" + mode + " host): the active fetch hands the helper --state-dir while writes are allowed, and NOT in the no-write mode", () => {
+        const h = boot({ sourceKey: KA, showLogos: false }, START(), mode)
+        const p = h.ids.playlistProc
+        p.running = false; h.root.runPlaylistHelper()
+        const allowed = [p.command.indexOf("--state-dir") !== -1, p.running]
+        p.running = false
+        h.foreign(sf => { sf.disk = "garbage{" })
+        h.root.runPlaylistHelper()
+        return { allowed, blocked: [h.root.stateWriteBlocked, p.command.indexOf("--state-dir") !== -1, p.running] }
+      }, { allowed: [true, true], blocked: ["unparsed", false, true] })
+      // R24b / D-SRC-23 / D-SRC-26: what the shell says about each path.
+      for (const f of [{ fault: "dangling-link", reason: "link" }, { fault: "not-a-dir", reason: "not-a-dir" }]) {
+        checkCall("R24b (" + mode + " host): a start over " + f.fault + " (FileView: FileNotFound) blocks as \"" + f.reason + "\" on the helper's word, told once by the sentence that names what is there -- not the folder-permission advice -- and writes nothing", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { exists: true, fault: f.fault })
+          const notice = h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74017") !== -1).map(a => a[a.length - 1])
+          return { blocked: h.root.stateWriteBlocked, found: h.root.stateInitFound, told: told(h),
+                   sentence: notice.length === 1 && notice[0] === M.stateUnreadableNotice(f.reason, h.root.stateFilePath).body,
+                   chmod: notice.some(n => n.indexOf("chmod 700") !== -1), events: h.stateFile.events.length, writes: h.host.writes.length }
+        }, { blocked: f.reason, found: f.reason, told: 1, sentence: true, chmod: false, events: 0, writes: 0 })
+      }
     }
   }
 })()

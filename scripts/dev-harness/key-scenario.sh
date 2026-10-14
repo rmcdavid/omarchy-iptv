@@ -270,6 +270,14 @@
 #   B13 a fresh install's drawn copy is the first-run form's    <- R23h
 #   B14 a FIFO at state.json: the init answers at once, the start blocks
 #       as not-a-file, no helper left running                    <- R23b
+#   B15 a no-write START's Sources screen: the notice's title in its header,
+#       no Add rows, no add hint, `a` opens no form              <- R24f
+#   B16 the FRESH install's first session (state directory absent at the
+#       first load) sees a hand-run `state source add`, keeps it through the
+#       next in-app save, and notices garbage written in place  <- R24c
+#   B17 a start-up init that IGNORES the TERM is KILLed and reaped <- R24g
+#   B18 a shell stopped 5 s into a held init leaves it running, and the
+#       init's own deadline ends it                              <- R24d
 #   P1  no labelled harness-log line carries a URL or a fixture path
 #   P2  no credential token anywhere in the harness log
 #   T1  the shell, the compositor and the nested socket are gone (by pid)
@@ -329,6 +337,31 @@
 # (init_pids), never by a pattern over a command line. The red runs are
 # lane-key-n2 (--baseline) and the kept mutation r23a-no-rearm.patch
 # (--tree), both in the footer.
+#
+# ROUND 14, R24 (the lead's ruling on the round-13 lenses). B15..B18 above.
+# B16 is the session the round-13 live lens measured as never reloading --
+# the production fresh shape, the state directory absent at the first load
+# -- now re-armed by one stateFile.reload() after the start-up check
+# (measured first, spikes/filewatch set r24). B18 holds the init INSIDE the
+# real helper (slow-helper.py OMARCHY_IPTV_SLOW_AT=inside), so the verb's
+# own SIGALRM deadline is what is observed; the held init was reparented to
+# the user's service manager when the shell stopped, as the lens saw.
+# Measured on lane-key-q1 at 318af7f under this harness, each in its own
+# nested cage on a private bus (scripts/dev-harness/private-bus.sh,
+# harness directories /run/user/1000/omarchy-iptv-q1-<n>, removed after),
+# summary counts (THE UNIT above):
+#   lane-key-q1 forward:                          116 passed, 0 failed
+#       (transcript key-20261014-095236-969838)
+#   --baseline dev (ced1bd1, round 13's code):    113 passed, 3 failed
+#       (key-20261014-095838-996891)
+#       B15 (`header:[No sources] rows:2 after-a:sourceEdit says:other`),
+#       B16 (`seen:0 file:D blocked: told:0`: the helper's record unseen
+#       and written over, the garbage unnoticed) and B18 (the held init
+#       `after-deadline:alive(<pid>)`, killed by cleanup); B17 is GREEN
+#       there, round 13 having the KILL, so it is seen red through
+#   --tree with spikes/key-mutations/r24g-no-kill.patch: 115 passed, 1
+#       failed, B17 (`blocked: helper:no(<pid>) left:<pid> told:0`;
+#       key-20261014-100528-1027361).
 #
 # Every segment seeds its OWN state.json, caches and entry and starts a fresh
 # shell, so a red in one is attributable to one ruling and never to the
@@ -2165,6 +2198,129 @@ PYSEED
   for p in $left; do kill -KILL "$p" 2>/dev/null; done
   rm -f "$STATE"
 
+  echo "== B, round 14: the fresh install's first session sees external changes (R24c), Sources in the no-write mode (R24f), the KILL half of the start-up bound (R24g) and the init's own deadline (R24d) ($(elapsed) s)"
+  # R24f (D-SRC-28). The no-write START again (the file does not parse),
+  # and this time Sources: round 13 drew "No sources" over "Add source" and
+  # "Add Xtream login" while the file held two records, and `a` opened a
+  # read-only form whose submit could only be refused.
+  : >"$NOTIFY_LOG"
+  seed "$KA" migrated
+  printf '{"version": 2, "sources": [' >"$STATE"; chmod 0600 "$STATE"
+  log_mark
+  h --detach --timeout 0 --keep --playlist none --source-key "$KA" >"$WORK/start.log" 2>&1
+  SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
+  for ((i = 0; i < 200; i++)); do [[ $(pf "['stateWriteBlocked']") =~ ^[a-z] ]] && break; sleep 0.1; done
+  ipc open '{}' >/dev/null; sleep 0.8
+  ipc sourcesKey enter >/dev/null; sleep 0.4
+  gs=$(ipc state)
+  want_title=$(notice_of unparsed "$STATE" title)
+  hdr=$(qa_json_field "d['guide']['headerRight']" "$gs"); hints=$(qa_json_field "d['guide']['footerHints']" "$gs")
+  m1=$(qa_json_field "d['guide']['mode']" "$gs"); rows=$(qa_json_field "d['guide']['sourceRows']" "$gs")
+  ipc sourcesKey a >/dev/null; sleep 0.4
+  gs=$(ipc state)
+  ck "B15 a no-write START's Sources screen: its header is the notice's title (Model.stateUnreadableNotice), not \"No sources\"; no Add rows are drawn and no add key is hinted; \`a\` opens no form, says the no-write reason, and nothing editable exists" \
+     "mode:$m1 header:$([[ $hdr == "$want_title" ]] && echo notice || echo "[$hdr]") rows:$rows addhint:$([[ $hints == *" add"* || $hints == *"Xtream"* ]] && echo yes || echo no) after-a:$(qa_json_field "d['guide']['mode']" "$gs") says:$([[ $(qa_json_field "d['guide']['footer']" "$gs") == *"state.json could not be read"* ]] && echo no-write || echo other) editable:$(qa_json_field "d['editable']" "$(ipc editable)")" \
+     "mode:sources header:notice rows:0 addhint:no after-a:sources says:no-write editable:0"
+  ipc close >/dev/null
+  stop_shell
+
+  # R24c (D-SRC-19, D-DOC-8). THE FIRST SESSION AFTER A FRESH INSTALL, in
+  # the production shape: XDG_STATE_HOME present (run.sh makes it) and
+  # omarchy-iptv/ under it ABSENT (h clean removed it). The round-13 live
+  # lens measured that such a session NEVER reloads -- a hand-run `state
+  # source add` unseen and then written over by the next in-app save,
+  # in-place garbage unnoticed -- and spikes/filewatch (set r24) that one
+  # explicit reload() after the start-up mkdir/init re-arms the watch.
+  : >"$NOTIFY_LOG"
+  (( SHELL_STARTED )) && stop_shell
+  h clean >/dev/null 2>&1
+  start_shell --playlist none --source-key "" || true
+  shape="first-load:$(pf "['stateReloadsByReason']['first-load']") found:$(pf "['stateInitFound']")"
+  wait_for true 20 pf "['dirsReady']" >/dev/null || true
+  python3 "$PLUGIN_ROOT/bin/omarchy-iptv" state --state-dir "$(dirname "$STATE")" source add --url "$C" >/dev/null 2>&1; hrc=$?
+  wait_for 1 10 qa_json_field 'len(d)' "$(ipc sources)" >/dev/null 2>&1 || true
+  for ((i = 0; i < 100; i++)); do [[ $(qa_json_field 'len(d)' "$(ipc sources)") == 1 ]] && break; sleep 0.1; done
+  seen=$(qa_json_field 'len(d)' "$(ipc sources)")
+  res=$(ipc addSource "$D" "" "")
+  wait_for "$KD" 20 svc "['activeSourceKey']" >/dev/null || true
+  sleep 1.0
+  kept=$(sj "','.join(sorted('C' if s['key'] == '$KC' else 'D' if s['key'] == '$KD' else '?' for s in d['sources']))")
+  printf 'garbage{' >"$STATE"
+  wait_for unparsed 10 pf "['stateWriteBlocked']" >/dev/null || true
+  ck "B16 the FRESH install's first session (state directory absent at the first load): a hand-run \`state source add\` is SEEN, the next in-app add's save KEEPS it, and garbage written in place is NOTICED (the no-write mode, told once)" \
+     "$shape helper:$hrc seen:$seen add:$(qa_json_field "d['ok']" "$res") file:$kept blocked:$(pf "['stateWriteBlocked']") told:$(qa_count ' 74017 ' "$NOTIFY_LOG")" \
+     "first-load:1 found:absent helper:0 seen:1 add:true file:C,D blocked:unparsed told:1"
+  stop_shell
+
+  # R24g (F-HARNESS-24). The KILL half of the start-up bound, observed: the
+  # slow tree's init IGNORES SIGTERM (fixtures/slow-helper.py,
+  # OMARCHY_IPTV_SLOW_IGNORE_TERM=1, inherited across exec), so only the
+  # service's KILL after stateInitKillGraceMs can end it. Seen red with the
+  # KILL deleted: spikes/key-mutations/r24g-no-kill.patch (--tree).
+  : >"$NOTIFY_LOG"
+  seed "$KA" migrated
+  printf '{"version": 2, "sources": [' >"$STATE"; chmod 0600 "$STATE"
+  sha0=$(sha "$STATE")
+  export OMARCHY_IPTV_PLUGIN_ROOT=$SLOW_TREE OMARCHY_IPTV_SLOW_MS=60000 OMARCHY_IPTV_SLOW_VERBS="state init" OMARCHY_IPTV_SLOW_IGNORE_TERM=1
+  log_mark
+  h --detach --timeout 0 --keep --playlist none --source-key "$KA" >"$WORK/start.log" 2>&1
+  SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
+  initpid=""
+  for ((i = 0; i < 50; i++)); do initpid=$(init_pids "$SLOW_TREE/bin/omarchy-iptv"); [[ -n $initpid ]] && break; sleep 0.1; done
+  ORPHANS="$ORPHANS $initpid"
+  echo "   TERM-ignoring init helper pid ${initpid:-none}"
+  deadline=$((SECONDS + 28))
+  while (( SECONDS < deadline )); do [[ $(pf "['stateWriteBlocked']") =~ ^[a-z] ]] && break; sleep 0.1; done
+  (( SECONDS >= deadline )) && echo "   gave up after 28 s waiting for the no-write mode"
+  sleep 1.0
+  gone=yes; for p in $initpid; do kill -0 "$p" 2>/dev/null && gone="no($p)"; done
+  [[ -z $initpid ]] && gone=never-seen
+  left=$(init_pids "$SLOW_TREE/bin/omarchy-iptv")
+  ck "B17 a start-up init that IGNORES the TERM is KILLed after the grace and reaped -- no process left -- and the held load decides as the no-write mode, told once, the file untouched" \
+     "blocked:$(pf "['stateWriteBlocked']") helper:$gone left:${left:-none} told:$(qa_count ' 74017 ' "$NOTIFY_LOG") file:$([[ $(sha "$STATE") == "$sha0" ]] && echo same || echo changed) watchdog:$(log_since 'state init exceeded') killed:$(log_since 'state init ignored the terminate signal, killing it')" \
+     "blocked:init-timeout helper:yes left:none told:1 file:same watchdog:1 killed:1"
+  for p in $left; do kill -KILL "$p" 2>/dev/null; done
+  stop_shell
+  unset OMARCHY_IPTV_SLOW_IGNORE_TERM
+
+  # R24d (D-SRC-24). The shell stopped INSIDE the bound: round 13's live
+  # lens stopped it 5 s after the start with the init held and found the
+  # init reparented to the user's service manager, alive for as long as the
+  # hold lasted. Here the hold is INSIDE the real helper's own code
+  # (OMARCHY_IPTV_SLOW_AT=inside: its first lstat of state.json sleeps 60
+  # s), so the verb's own SIGALRM self-deadline (STATE_INIT_DEADLINE, 30 s)
+  # is what ends it. Polled to the init's start plus 36 s, by its recorded
+  # pid; on a tree without the self-deadline it outlives that and is killed
+  # by cleanup through ORPHANS.
+  seed "$KA" migrated
+  export OMARCHY_IPTV_PLUGIN_ROOT=$SLOW_TREE OMARCHY_IPTV_SLOW_MS=60000 OMARCHY_IPTV_SLOW_VERBS="state init" OMARCHY_IPTV_SLOW_AT=inside
+  t_start=$SECONDS
+  h --detach --timeout 0 --keep --playlist none --source-key "$KA" >"$WORK/start.log" 2>&1
+  SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
+  initpid=""
+  for ((i = 0; i < 50; i++)); do initpid=$(init_pids "$SLOW_TREE/bin/omarchy-iptv"); [[ -n $initpid ]] && break; sleep 0.1; done
+  t_init=$SECONDS
+  ORPHANS="$ORPHANS $initpid"
+  while (( SECONDS < t_start + 5 )); do sleep 0.2; done
+  stop_shell
+  atstop=gone; for p in $initpid; do kill -0 "$p" 2>/dev/null && atstop=alive; done
+  parent=$(ps -o ppid= -p "${initpid:-0}" 2>/dev/null | tr -d ' ')
+  echo "   held init pid ${initpid:-none} after the shell stopped at 5 s: $atstop (parent ${parent:-none})"
+  deadline=$((t_init + 36))
+  while (( SECONDS < deadline )); do
+    alive=no; for p in $initpid; do kill -0 "$p" 2>/dev/null && alive=yes; done
+    [[ $alive == no ]] && break
+    sleep 0.5
+  done
+  after=gone; for p in $initpid; do kill -0 "$p" 2>/dev/null && after="alive($p)"; done
+  [[ -z $initpid ]] && after=never-seen
+  left=$(init_pids "$SLOW_TREE/bin/omarchy-iptv"); ORPHANS="$ORPHANS $left"
+  ck "B18 the shell stopped 5 s into a held start-up init: the init outlives the shell, and then ENDS by its own deadline -- nothing left running 36 s after it started" \
+     "at-stop:$atstop after-deadline:$after left:${left:-none}" \
+     "at-stop:alive after-deadline:gone left:none"
+  for p in $initpid $left; do kill -KILL "$p" 2>/dev/null; done
+  export OMARCHY_IPTV_PLUGIN_ROOT=$PLUGIN_ROOT; unset OMARCHY_IPTV_SLOW_MS OMARCHY_IPTV_SLOW_VERBS OMARCHY_IPTV_SLOW_AT
+
   echo "== P: the console sink, then teardown ($(elapsed) s)"
   qa_leak_on_labelled 'sourceProbeFinished|sourceSwitched|sourceRemoved|updateEntryInline' "://|$WORK" "$LOG"
   case $? in 0) left=clean ;; 1) left=LEAK ;; *) left="nothing labelled to judge" ;; esac
@@ -2201,7 +2357,7 @@ instrument
 # The floor. A check that stops executing must turn the run red rather than
 # quietly shorten the summary (D-PLY-9). Recount with
 #   grep -cE '^ *ck "[IS][0-9]' key-scenario.sh   -> 10, the instrument arm -> check-tree
-#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 111, both arms         -> live
+#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 115, both arms         -> live
 # (48 -> 61 on 2026-10-12, round 4: W1..W6 and F1..F7; 61 -> 63 the same
 # day, round 5: L1, L2; 63 -> 70 the same day, round 7: U1..U7; 70 -> 78
 # the same day, round 8: K1..K3, Z1..Z3, A1, A2; 78 -> 85 the same day,
@@ -2210,7 +2366,8 @@ instrument
 # the refusal, R21. U, K, Z, A, Y2, Y3, Q, V, F and H were re-pointed at
 # the R21 contract, one for one; 97 -> 105 the same day, round 12: B1..B8,
 # R22a's load failures and R22c's hint; 105 -> 111 the same day, round 13:
-# B9..B14, R23a-c, R23e, R23f, R23h.)
+# B9..B14, R23a-c, R23e, R23f, R23h; 111 -> 115 on 2026-10-14, round 14:
+# B15..B18, R24f, R24c, R24g, R24d.)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -2220,7 +2377,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=10
 else
-  EXPECTED_CHECKS=111
+  EXPECTED_CHECKS=115
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then

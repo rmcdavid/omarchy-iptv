@@ -189,7 +189,16 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # file that is not one and one that does not parse; a timeout after the
 # load) and two model pins, R23e's three and R23f's one. The node suite now
 # also runs a second time with IPTV_HARNESS_OWN_ECHO=none (R23g), same count.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2372}
+# 2372 -> 2459 on 2026-10-14, round 14 (R24): the merge fixture table (34
+# cases of tests/fixtures/state-merge.json, its coverage check, the two
+# identities over every case, sameState and the conflict line: 38), the
+# reload fixture's six R24a cases (counted inside R9's one check, so 0 more),
+# R24b's three model pins, R24f's four; and through the service harness, on
+# both hosts, R24a's five per own-echo mode (failed, in flight, parked, the
+# base reload, a conflict) and R24c's two per mode (20 + 8), R24c's double
+# (2), R24d's mkdir hang (2), R24g's TERM-ignoring init and mkdir (4), R24e
+# (2) and R24b's two faults (4).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2459}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -218,7 +227,12 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2372}
 # StateNeverBlocksTest cases, the real helper as a subprocess with a timeout
 # over a FIFO, a socket and a directory at the state path, a file where the
 # state directory should be, and a symlink to a 0000 file.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1180}
+# 1180 -> 1194 on 2026-10-14, round 14 (R24b, R24d, F-HARNESS-25):
+# test_state's eight StateSymlinkTest cases and the not-a-dir verb case
+# (9), StateInitDeadlineTest's three (the init's own SIGALRM), and
+# tests/test_harness_home.py's two PrivateBusIsolatesHome cases (private-
+# bus.sh and the filewatch spike run for real against a decoy home).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1194}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
