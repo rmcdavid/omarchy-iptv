@@ -20,8 +20,8 @@ and the plugin keeps the URLs in its own files, readable by you alone:
   your sources (or found there), made active, and taken off the widget's
   entry only once the plugin's own file has been written. If that write
   fails they are left where they were and moved at the next start.
-- **`omarchy bar set io.github.rmcdavid.iptv playlistUrl` (and `epgUrl`) no
-  longer do anything.** After the move the plugin does not read either
+- **`omarchy bar set io.github.rmcdavid.iptv playlistUrl <value>` (and
+  `epgUrl`) no longer do anything.** After the move the plugin does not read either
   setting: a value set there is removed from the entry at the plugin's next
   write, with one `Bar setting ignored` notification naming the setting and
   never the URL. Add, switch and remove sources on the guide's Sources
@@ -48,9 +48,11 @@ and the plugin keeps the URLs in its own files, readable by you alone:
 - **The plugin's folders may be symbolic links too.** A link at
   `~/.local/state/omarchy-iptv` is followed and the folder it leads to is
   made private (0700) at every shell start; a linked runtime folder is made
-  0700 when the player starts or stops; a linked cache folder keeps its own
-  mode. A state folder link that leads nowhere is refused with a sentence
-  naming it.
+  0700 when the player starts or stops; a linked cache folder is made 0700
+  only by the one-time cache migration at a fresh install's first start, so
+  after an upgrade it keeps its own mode (what the plugin makes inside it is
+  0700 and 0600). A state folder link that leads nowhere is refused with a
+  sentence naming it.
 - **For anyone running the helper by hand** (`python3
   ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv`): its
   `state show` and `state source list` exit 1 over a `state.json` they

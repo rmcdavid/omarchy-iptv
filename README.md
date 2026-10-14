@@ -860,11 +860,13 @@ Nothing inside the plugin directory is written at runtime.
   plugin's cache folder, `~/.cache/omarchy-iptv`, and its runtime folder
   under `$XDG_RUNTIME_DIR` may be links too, and are followed. A linked
   runtime folder is made private (0700) whenever the player is started or
-  stopped. A linked cache folder keeps its own mode -- only the one-time
-  cache migration, which an install already on the per-source layout never
-  runs again, makes it 0700 -- while every folder the plugin makes inside
-  it is 0700 and every file 0600; make the linked folder 0700 yourself if
-  you want its listing private too.
+  stopped. A linked cache folder keeps its own mode -- the shell makes it
+  0700 only through the one-time cache migration at a fresh install's first
+  start, which an install already on the per-source layout never runs
+  again, and a helper command run by hand without `--cache-dir` does too
+  -- while every folder the plugin makes inside it is 0700 and every file
+  0600; make the linked folder 0700 yourself if you want its listing
+  private too.
   A plain file where the folder should be gets `... is not a folder (a
   file is at that path, or at one above it)`: move it aside and restart.
 - The file changed while the shell is running -- by hand, by a backup put
@@ -921,7 +923,7 @@ Nothing inside the plugin directory is written at runtime.
   of them waits on a named pipe. Run while the shell is running, a `state`
   command that succeeds is picked up by the running shell, as above --
   unless another tool replaced a `state.json` link earlier in that session
-  (the bullet on links). Two more refusals carry a sentence of their own (exit 1) where they used to end in a traceback or a replaced link:
+  (the bullet on links). Two more refusals carry a sentence of their own (exit 1), where 0.13.6 ended in a traceback, printed an empty state (`state show` and `state source list` over the folder link), or replaced the link with a plain file:
   `the state folder is a symbolic link whose target is missing or is not a
   folder; nothing was written` (the folder link above), and `state.json is
   a symbolic link into a folder that cannot be written (...); nothing was
