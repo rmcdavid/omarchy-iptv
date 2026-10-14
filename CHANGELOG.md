@@ -26,6 +26,14 @@ and the URLs live only in the plugin's own file,
   guide's Sources screen.
 - **The guide's hint after a playlist fails to load says "check the source in
   Sources"**, not a setting the plugin no longer reads.
+- **A change another program makes to `state.json` is merged with yours.** If
+  the helper, or a file you put back, changes it while the plugin holds a
+  change it has not saved yet, both are kept; where both changed the same
+  source, the other program's change wins and the shell's journal says so.
+- **A `state.json` that is a symbolic link is written through and left a
+  link**; a link that leads nowhere is refused rather than replaced. A tool
+  that replaces the link itself while the shell runs is not noticed until
+  the shell restarts.
 - **For anyone running the helper by hand** (`python3
   ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv`): its
   `state show` and `state source list` exit 1 over a `state.json` they
@@ -46,6 +54,9 @@ and the URLs live only in the plugin's own file,
 - **Something other than a file at `state.json`** (a folder, a pipe) no
   longer leaves the shell waiting for ever at start or changes that
   folder's permissions.
+- **In the first session after installing, the shell now notices** when
+  another program changes `state.json`; before, it saw nothing until the
+  next restart and its next save wrote over the change.
 
 ### Worth knowing
 

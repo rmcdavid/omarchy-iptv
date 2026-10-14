@@ -13315,6 +13315,102 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### D-SINK-19 round 14 on dev: a foreign write merged, and what the lenses raised
+
+**Integrated 2026-10-14 as `249689a` (`Integrate lane-key-q2`), branched
+from `dev` `ced1bd1`.** R24 (ARCHITECTURE-SOURCES, round-14 rulings):
+
+- **R24a, D-SRC-22.** The service keeps a base -- the text it loaded, its
+  last save that landed, or the last foreign text it merged -- and while it
+  holds a change the file lacks, a reload carrying any other text is merged
+  by `Model.mergeForeignState(base, ours, theirs)`: sets for favourites,
+  hidden groups and saved searches, records by key for sources, the
+  scalars and recents to whichever side changed them, a conflict to the
+  later writer with one journal line naming the key and field and never a
+  URL. 34 fixture cases pin it, with `merge(b, b, t) = t` and
+  `merge(b, o, b) = o` over all of them (one named exception, the marker).
+  The data-loss lens rebuilt its simulator over `q2`'s own `Service.qml`,
+  split model and real helper (rk14.js; L1 19,552, L2 70,688, L3 170,368,
+  start-fault L2 57,600 runs): the sequences that lose the app's change on
+  0.13.6 (`WF FAV WOK HADD FAV`, the start-up window's `RW:F`) and those
+  that lose the other writer's (`FI`, the first session's helper writes)
+  keep both on `q2`, in all four host and echo shapes.
+- **R24b, D-SRC-23 and D-SRC-26.** Measured first: the FileView's own save
+  writes THROUGH a valid link and leaves it a link, and `dev`'s helper
+  replaced it with a regular file and cost the running view its watch. The
+  helper now resolves a link to a regular file and renames its temp file
+  onto the target; any other link is refused by every verb (exit 1,
+  untouched), and `state init` answers `link` or `not-a-dir`, each with its
+  own sentence.
+- **R24c, D-SRC-19 and D-DOC-8.** In the production fresh shape nothing
+  re-arms the watch on its own; one explicit `stateFile.reload()` after the
+  start-up init re-arms it, and every later helper, in-place and garbage
+  write is seen (spike set `r24`, committed with its result). Live B16 on
+  `q2`: `seen:1 file:C,D blocked:unparsed told:1`; on `dev`: `seen:0
+  file:D blocked: told:0`. The harness double now starts that session
+  unarmed (rule 10), and the helper's own sentences say the shell re-reads.
+- **R24d-g.** One watchdog over mkdir and init, and the init's own 30 s
+  deadline (B18: `at-stop:alive after-deadline:gone left:none`, on `dev`
+  `after-deadline:alive`); no remap handed the state folder in the no-write
+  mode; Sources in the mode carries the notice's title and draws no Add
+  rows (B15); the KILL half observed by a TERM-ignoring init (B17 red on
+  `r24g-no-kill.patch`); the filewatch rig under a scratch home.
+- **Counts.** key-scenario forward 116 passed, 0 failed (the live lens,
+  transcript `key-20261014-104701-1120542`); `--baseline dev` 113 passed, 3
+  failed, exactly B15, B16 and B18; tls 48/0, sources 66/0, logo 33/0;
+  node 2,459 checks in each echo mode, python 1,194; the claims lens's
+  throwaway merge onto `dev` was a fast-forward, gate green at load 4.7.
+
+**What the lenses raised, each with its id.** No P1, and none of the P2s is
+a regression against 0.13.6.
+
+- **D-SRC-29 (P2, shipped).** A symlinked `state.json` is watched through
+  its target inode, so anything that replaces the link or the entry at the
+  path -- a temp file renamed over it (`jq` plus `mv`, GNU `sed -i`), `rm`
+  and `cp`, `mv` of a backup, `ln -sfn` -- is never seen, and the next save
+  writes the session's memory over the edit, or through a re-pointed link
+  into the new target. The data-loss lens measured it on a bare FileView
+  (`mv` over a link: `changed:0`; over a regular file: `changed:1`) and on
+  the real `Service.qml` live; the claims lens measured the re-point
+  (`view==disk:NO`, the new target replaced), and that one explicit
+  `reload()` re-arms it. The round-14 README invites dotfiles links.
+- **D-SRC-30 (P2, shipped).** A reload whose text equals any of the
+  session's last eight saves is ignored as an echo before the base is
+  consulted, so a backup copied from the plugin's file and put back later
+  is written over by the next save (live, both runs; the same on 0.13.6).
+- **D-SRC-31 (P2).** The merge's result passes through `parseState`'s caps,
+  theirs first, so at 50 sources or 20 saved searches the app's additions
+  are dropped with no line and no notice.
+- **D-SRC-32 (P2, shipped).** A dangling symlink at the state FOLDER:
+  `state show` and `source list` print an empty state with exit 0, `init`
+  and `favorite add` exit with a traceback.
+- **F-HARNESS-26 (P2).** 23 one-decision mutants of R24a-f: 20 red in node,
+  one red live, and two red in neither -- the base moved after a merge, and
+  the in-flight half of the re-save decision -- each shown non-equivalent
+  by a simulated sequence that loses a change. The merge has no live
+  segment, and neither has the existing-folder session damaged after an own
+  save.
+- **D-DOC-11 (P3).** Contract fact seven generalises a dangling-link save
+  failure measured only with the target's folder missing; with it present
+  the save creates the target.
+- **D-SRC-33 (P3).** A conflict lost while the app's save was in flight or
+  parked is told only in the journal.
+- **F-HARNESS-27 (P3).** In-process `state init` calls in `test_state` arm
+  the helper's `SIGALRM` inside the test runner (rc 142 when the module runs
+  alone under load).
+- **F-HARNESS-28 (P3).** The printed `--baseline` footer names round 13's
+  reds.
+- **D-SRC-34 (P3).** Writing through a valid link into an unwritable folder
+  answers with a traceback.
+- **D-SRC-35 (P3).** A link's target restored mid-session is not seen; the
+  session stays in the no-write mode until a restart.
+- **D-SRC-36 (P3).** The conflict journal line is ungrammatical.
+- **D-SRC-37 (P3).** A merge can leave `activeKey` naming a removed or
+  re-keyed source with no line; the docstring states the set order the
+  code does not keep; `failedProc` and `whichProc` have no bound.
+- **D-SRC-38 (P3).** Mid-session, the Sources header in the no-write mode
+  says the sources were not loaded, above rows that did load.
+
 ### D-SRC-21: 0.13.6 writes over a state file it could not read
 
 **Filed 2026-10-13 from the D-SINK-19 round-12 data-loss lens; P2; open on
