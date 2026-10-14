@@ -110,7 +110,10 @@ mode 0600 with `bar.layout.{left,center,right}` entries and an empty
 | TC-CFG-13 | credentials never rendered (R12) | see SEC-07 | no URL beyond scheme+host in guide, tooltip, notification, journal |
 | TC-CFG-14 | `omarchy bar set ... playlistUrl` / `epgUrl` after the migration is REFUSED (D-SINK-19 R21b, 2026-10-13) | A node `R21e (lag host)` / `(echo host) after the marker, a CLI ...`; H key-scenario X1-X6; M 5.4 US1 step 8 | nothing added, the active source and its guide URL unchanged, one notification `Bar setting ignored` / `<setting> is no longer read from the bar settings and was removed. Add or switch sources in the guide's Sources screen.` (replace id 74016; the same sentence once on the console); `jq` of the entry shows no `playlistUrl`/`epgUrl` after the plugin's next write; the same value set again is not reported again; `grep -c '://'` over the journal and the notification text 0 |
 | TC-CFG-15 | a 0.13.x command-line configuration is moved into Sources once (D-SINK-19 R21a, 2026-10-13) | A node `R21e (lag host)` / `(echo host) migration, ...` (one source, two, CLI-only, no-source `epgUrl`, failed write, TERM, downgrade); H key-scenario G1-G5, F, H; M 5.4 US1 step 7 | first start over an entry carrying `playlistUrl` (and `epgUrl`): that playlist is a source and active, the guide URL on it, `state.json` carries `"entryMigrated": true` and `activeKey`, and the entry carries `sourceKey` and no URL once that write has landed; nothing is reported. A guide URL with no source to attach it to: one `Bar setting removed` notification, nothing kept. State directory unwritable at that start: the URL stays on the entry, the next start migrates again |
-| TC-CFG-16 | a `state.json` that exists but cannot be read, or does not parse, is never written (D-SINK-19 R22a, 2026-10-13) | A node `R22a (lag host, ...)` / `(echo host, ...)` at a migrated and at a 0.13.x-shaped start and mid-session, `R22b (...)`, the `R22a:` model units; python `StateNeverWrittenUnreadTest` (`tests/test_state.py`); H key-scenario B1-B7; M 5.4 US5 step 7 | over a file that does not parse: the file byte for byte unchanged after the start, an add or a switch and a restart; one critical notification `Saved sources not loaded` naming the file and saying what to do, no `://`; an add or switch refused with `state.json could not be read - nothing is saved until it can be`; the bar entry unchanged. Over a 0000 file or a 0000 state directory left while the shell was down: NO notification, every source and favourite there after the start (the helper's init restores 0600 / 0700 and the start reads the file). Putting a good file back lifts the mode without a restart (B7). `UX-SOURCES.md` 5.10 has the copy for each reason |
+| TC-CFG-16 | a `state.json` that exists but cannot be read, or does not parse, is never written (D-SINK-19 R22a, 2026-10-13) | A node `R22a (lag host, ...)` / `(echo host, ...)` at a migrated and at a 0.13.x-shaped start and mid-session, `R22b (...)`, the `R22a:` model units; python `StateNeverWrittenUnreadTest` (`tests/test_state.py`); H key-scenario B1-B7; M 5.4 US5 step 7 | over a file that does not parse: the file byte for byte unchanged after the start, an add or a switch and a restart; one critical notification `Saved sources not loaded` naming the file and saying what to do, no `://`; an add or switch refused with `state.json could not be read - nothing is saved until it can be`; the bar entry unchanged. Over a 0000 file or a 0000 state directory left while the shell was down: NO notification, every source and favourite there after the start (the helper's init restores 0600 / 0700 and the start reads the file). Putting a good file back lifts the mode without a restart (B7). `UX-SOURCES.md` 5.10 has the copy for each reason **[Round 13, 2026-10-13 (R23a, R23e): a SECOND episode in the same session is told again, and a favourite refused in it is refused and told (node `R23a (...)`, key-scenario B9 `told:1/2`); and the guide at a no-write start draws `Saved sources not loaded` over the notification's own body, not the first-run form (TC-CFG-17). The mode beginning mid-session AFTER the session's first own save is UNVERIFIED: the measurements disagree (`ARCHITECTURE-SOURCES.md` round-13 rulings, decision request 1)]** |
+| TC-CFG-17 | the no-write mode has its own guide surface, and every refusal in it says the no-write reason (D-SINK-19 R23e, R23f, 2026-10-13) | A node `R23e: guideSurface ...`, `R23e: firstRunAllowed ...`, `R23e: the Esc / o return from Sources ...`, `R23f: refusalMessage ...`, the R16 structural pin through `Model.refusalMessage`; H key-scenario B11, B12, B13; M 5.4 US5 step 7 | at a no-write start: the alert glyph, `Saved sources not loaded` and the notification's body (`Model.stateUnreadableNotice` for the reason and path), no form and no editable field (B11 `kind:stateUnreadable form:false editable:0 shown:true title:notice prose:notice sent:1`), footer `Esc close`, no `r retry`. The logo toggle in Sources answers `state.json could not be read - nothing is saved until it can be`, never `try omarchy bar set` (B12 `says:no-write advice:none writes:0`). A fresh install still draws the first-run form, and the harness reads ITS copy (B13 `prose:Paste or type your M3U URL or path, then press Enter`). Red on lane-key-n2: B11 `kind:unconfigured form:true`, B12 `advice:bar-set`, B13 the hidden empty state's prose. The pixels are UNVERIFIED on a display |
+| TC-CFG-18 | a directory, a FIFO or a socket at the `state.json` path never blocks a start and is never changed (D-SINK-19 R23b, R23d, 2026-10-13) | A python `StateNeverBlocksTest` (`tests/test_state.py`, ten tests, the real helper as a subprocess under a 20 s timeout); H key-scenario B14 | `state init` answers `found: other` at once and chmods nothing that is not a regular file (a directory keeps its mode; round 12 saw one made 0600); every other `state` verb exits 1 with `state.json is not a regular file; nothing was written`; the start enters the no-write mode with `is not a regular file` and leaves no helper behind (B14 `blocked:not-a-file found:present told:1 left:none fifo:600`). Red on lane-key-n2: 9 of 10 python tests (timeouts and chmods), B14 `blocked: found: told:0 left:<pid>` |
+| TC-CFG-19 | the start-up `state init` is bounded (D-SINK-19 R23c, 2026-10-13) | A node `R23c: stateInitFound answers "timeout" ...`, `R23c: stateUnreadableNotice("init-timeout") ...`, `R23c (<mode> host): startStateInit arms the init's watchdog ...`, `... the init never answers over <fault> ...`, `... an init that times out AFTER the state loaded leaves the session as it was ...`; H key-scenario B10 | an init that has not answered after 15 s is sent TERM, then KILL 2 s later, is reaped, and the held load blocks with reason `init-timeout`, told once with `could not be checked: the start-up check did not answer and was stopped`; no process is left running the init (B10 `blocked:init-timeout found:timeout helper:yes left:none told:1 stopped:1 file:same watchdog:1`). Red on lane-key-n2: B10 `blocked: found: helper:no(<pid>) left:<pid> told:0`. The 15 s bound is 8.5x the slowest of 80 runs measured on this machine (lane A, 2026-10-13) |
 
 #### Browse (US2, R1, R3, R4, R5, R6, UX 2.x, 3.1, 3.2)
 
@@ -722,6 +725,49 @@ B1-B8: 106 / 0 forward on 105 lettered checks and 97 / 9 over `--baseline
 lane-key-m2` (B1-B8, and N1 for its new field only); sources-scenario
 66 / 0; logo-scenario 33 / 0 (lane A's transcripts, under the same cage and
 private bus). TC-CFG-16 and TC-FAV-09 are the manual rows.
+
+Round 13 (lane-key-p1, 2026-10-13; lead ruling R23, after the round-12
+lenses: the notice's re-arm checked by nothing, a FIFO at `state.json`
+hanging the init and every verb, the init unbounded, a directory at the path
+chmod-ed 0600, the logo refusal advising `omarchy bar set`, a no-write start
+drawing the first-run form, and two mislabelled instruments). Node, +18:
+`R23a (...)`, two no-write episodes in one session through
+`tests/service-harness.js`, the second told and an in-app favourite in it
+refused and told (4); `R23c (...)`, the init's watchdog armed, a timeout at
+each fault blocking as `init-timeout` and told once with nothing written, and
+the loaded-then-timeout control, per host (8), and the model units
+`R23c: stateInitFound ...` and `R23c: stateUnreadableNotice("init-timeout")
+...` (2); `R23e: guideSurface ...`, `R23e: firstRunAllowed ...`, `R23e: the
+Esc / o return from Sources ...` (3); `R23f: refusalMessage ...` (1). The
+harness gains `ownEcho` ("load" | "none", R23g: the real FileView was
+measured delivering its own-save echo only sometimes), and `scripts/check.sh`
+runs the whole node suite a second time with it off. Python, +10:
+`StateNeverBlocksTest`, the real helper as a subprocess under a timeout over
+a FIFO, a socket, a directory, a file where the state directory should be and
+a symlink to a 0000 file. Seen red: on lane-key-n2's helper with a 3 s
+timeout, 9 of 10 (30 failing subtests); on lane-key-n2's `Service.qml` and
+model, 6 of 2,372 node checks (the R23c harness pins; the control green); one
+decision at a time on an export, P1-P4 in the helper 11, 16, 3 and 1 of 62
+`test_state` tests, N2-N11 in the model and service 5, 5, 2, 4, 4, 1, 1, 1, 1
+and 1 of 2,372; P5, the init's `found` override from the descriptor, 0 --
+equivalent but for a rename race, kept and raised. The R23a re-arm cannot be
+seen red on lane-key-n2 (the line existed; only its check did not), so it is
+seen red through `scripts/dev-harness/spikes/key-mutations/
+r23a-no-rearm.patch`: node 4 of 2,358 in both echo modes. The `ownEcho:
+"none"` run has NOT been seen red -- no pin fails without the echo, which is
+R23g's finding, not a proven check. Counts on lane-key-p1's tip bb5b2de: node
+2,372 / 0 (and 2,372 / 0 with the echo off), python 1,180, `qa-lib-test.sh`
+472, the key preflight 11. The live half is key-scenario B9-B14: 112 / 0
+forward on 111 lettered checks (`key-20261014-043943-514380`), 107 / 5 over
+`--baseline lane-key-n2` (B10-B14; `key-20261014-044420-538071`), 111 / 1
+with each of `r23a-no-rearm.patch` (B9 `told:1/1`) and
+`r23e-editable-field.patch` (B13 `editable:2`, the control that shows the
+new `ipc editable` census can count); sources-scenario 66 / 0 under an outer
+headless cage on a private bus; logo-scenario 33 / 0. TC-CFG-17 to 19 and
+US5 step 7 are the manual rows. The ledger's withdrawn-symbol waivers went
+to 0 with their last citations (R23i, lane-key-p2): `test_defect_ledger.py`'s
+census test now asserts the empty set and was red against the script with
+the three waivers.
 
 ## 3. Security test cases (ARCHITECTURE.md section 8, PLAN gate G4)
 
@@ -1475,7 +1521,13 @@ codepoints for `...`, quotes and the middle dot).
    favourite); pasting a playlist there is refused with `state.json could not
    be read - nothing is saved until it can be`; and afterwards
    `cat` of the file still prints `garbage` -- nothing was written over it
-   [TC-FAV-09, TC-CFG-16]. Then `cat /tmp/state.keep >
+   [TC-FAV-09, TC-CFG-16]. **[Round 13, 2026-10-13 (R23e): the guide no
+   longer opens on `No playlist configured` here. Expected now: the alert
+   glyph, `Saved sources not loaded` and the notification's own body, no
+   form and no field, footer `Esc close`; in Sources (`o` -- no check has
+   observed `o` from this surface yet, so record what it does), `g` (logos)
+   answers `state.json could not be read - nothing is saved until it can be`,
+   not `try omarchy bar set` [TC-CFG-17].]** Then `cat /tmp/state.keep >
    ~/.local/state/omarchy-iptv/state.json` (in place, so the shell's watch
    reloads it): the guide comes back with every source and favourite, no
    restart needed; `rm /tmp/state.keep`.]**

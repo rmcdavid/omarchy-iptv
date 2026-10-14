@@ -705,7 +705,24 @@ Two neighbouring facts, read rather than run:
   stores this way is refused once the migration has landed -- the host still
   writes it, because it checks no schema, and the plugin's next owned write
   removes it. Both keys are still declared in `manifest.json`, so the host
-  still offers them; that file is not the documents lane's.]
+  still offers them; that file is not the documents lane's.] [Round 13,
+  2026-10-13, measured by lane A on omarchy 4.0.4-1 and re-read by the
+  documents lane on 2026-10-14; nothing changed. "Offers" is generous: no host
+  file RENDERS `schema` today. An undeclared key on a bar entry still reaches
+  a third-party plugin's `barConfig` -- `shell.qml` 326-328, `function
+  publicBarConfig() { return JSON.parse(JSON.stringify(shell.barConfig ||
+  {})) }`, a deep clone filtered by nothing, handed out by `barConfigFor`
+  (330-333), and `plugins/bar/BarModel.js` `entrySettings` (10-17) copies
+  every key but `id`. `omarchy bar set` stores an undeclared key: `cmd_set` in
+  `/usr/share/omarchy/bin/omarchy-bar` (333-361) passes it to `omarchy-shell
+  shell setBarWidget`, and `services/PluginRegistry.qml` (342-379) checks the
+  location and that the entry is an object, then `entry[String(key)] = value`
+  (379). The manifest's `defaults` never reach an entry (a put entry is `{
+  id: key }`, PluginRegistry.qml 526), and the only host reads of `schema` and
+  `defaults` are the registration at shell.qml 1406-1408. `sourceKey`, which
+  the manifest does not declare, is written and read back through `barConfig`
+  today. So the migration does not depend on the manifest declaring
+  `playlistUrl` or `epgUrl`; whether to stop declaring them is the lead's.]
 - `omarchy plugin disable` removes the entry and everything on it, the mirror
   included (`QA.md` TC-INST-05); the plugin's own `state.json` still names the
   active source, so re-enabling does not need the URL again.
@@ -722,7 +739,8 @@ key-scenario.sh`, segments D and N). The service's `stateFile` is a FileView
 with `watchChanges: true`, `atomicWrites: true` and `onFileChanged: reload()`,
 and these four facts are what R9-R11 (`ARCHITECTURE-SOURCES.md`, round 3)
 are built on [a fifth, about `loadFailed`, was added on 2026-10-13 and is
-what R22a (round 12) is built on]:
+what R22a (round 12) is built on; a sixth, about the watch itself, the same
+day by round 13's R23g, and it is disputed]:
 
 - **`saved` fires once per `setText` -- for two back-to-back calls, and NOT
   for a burst (corrected 2026-10-12, round 4).** Two `setText` calls back to
@@ -759,7 +777,14 @@ what R22a (round 12) is built on]:
   parked or in-flight save by its flag [corrected 2026-10-12, round 7: this
   said "count"; since R13 the in-flight input is 0 or 1, set when a write is
   asked for and cleared by content (`Model.stateSaveLanded`), so it is a flag
-  that keeps a counter's name (OQ-C5)].
+  that keeps a counter's name (OQ-C5)]. [Settled 2026-10-13, D-SINK-19 round
+  13 (R23g), lane A: BOTH. A lone own save at idle raised `fileChanged` and
+  `saved` and delivered no load in 16 of 16 sequences (and none for a burst of
+  2-3 own saves); an own save with an external write queued right behind it,
+  or the real service's own save under six busy loops on four cores,
+  delivered a load -- under load carrying the view's own text. The echo is
+  timing-dependent, and the node harness now runs both ways (the sixth fact
+  below).]
 - **A FileView loaded over a MISSING path does not see the file being
   created by another process.** Over a fresh install (no state directory, no
   file) the helper's `state init` creates `state.json` under the parked
@@ -797,6 +822,30 @@ what R22a (round 12) is built on]:
   `ARCHITECTURE-SOURCES.md` round-12 rulings), and the node suite reads the
   enum from the installed qmltypes so a reordering on a Quickshell update is
   a red gate rather than a silent misreading.
+- **The watch survived everything lane A did to it (D-SINK-19 round 13,
+  R23g, measured 2026-10-13) -- and that contradicts three earlier
+  measurements.** `scripts/dev-harness/spikes/filewatch/measure.sh` runs one
+  FileView declared as `stateFile` is in a nested headless cage on a private
+  D-Bus with no service directories, through 16 sequences of own saves,
+  helper renames (`state favorite add`), external in-place writes (`>`:
+  truncate, empty, garbage, good content), chmods, explicit reloads and
+  restarts, each on a fresh shell over a fresh file, 1.5 s a step, at load
+  1.31; what it printed is kept beside it as `RESULT-2026-10-13.txt`, so it is
+  re-runnable. Every external change -- an in-place write, a helper rename, a
+  chmod -- raised `fileChanged` and a load; a restart gave a first load; and
+  in every sequence an in-place write after any number of own saves, helper
+  renames, chmods or a restart was still seen. Lane A drove the real
+  `Service.qml` the same way through the dev harness (`svcwatch.sh`, session
+  scratch, not committed), idle and under load, with the same result. The
+  round-9 data-loss lens (D-SRC-19), the round-12 live lens (a helper `state
+  source add`, its reload counter unmoved) and the round-12 data-loss lens
+  (in-place damage after the session's first own save, no reload) each saw
+  the opposite; their rigs were lost when `/tmp` was cleared by a reboot, so
+  what differed is not known. Until it is re-measured, a plugin should not
+  rely on either answer for a change made after its own first save or by a
+  rename: this plugin's no-write mode beginning in that window is marked
+  UNVERIFIED (`UX-SOURCES.md` 5.10, `ARCHITECTURE-SOURCES.md` round-13
+  rulings).
 
 `saveFailed` exists (`/usr/lib/qt6/qml/Quickshell/Io/quickshell-io.qmltypes:470`)
 and its argument is an enum, never a path; until round 3 the service

@@ -1402,6 +1402,20 @@ each). The lost watch the lenses reported (D-SRC-19's mechanism) did not
 reproduce in any sequence here; their rigs were lost with /tmp, so the
 difference is not known.
 
+[Annotated by the round-13 documents lane (lane-key-p2), 2026-10-14. The
+transcripts behind the counts above, in lane A's session scratch directory:
+forward `key-20261014-043943-514380` (112 / 0, 277 s), `--baseline
+lane-key-n2` `key-20261014-044420-538071` (107 / 5, 294 s),
+`r23a-no-rearm.patch` `key-20261013-214109-138686` (111 / 1),
+`r23e-editable-field.patch` `key-20261013-230141-283957` (111 / 1),
+logo-scenario `logo-20261014-043540-501342`. The real-service half of the
+watch measurement (lane A's `svcwatch.sh`) is NOT in this tree: only the bare
+FileView spike is. So the mid-session no-write mode AFTER an own save rests on
+one uncommitted instrument against the round-12 data-loss lens's opposite
+reading, and is UNVERIFIED (rule 14) until a committed scenario observes it;
+B9 covers the half with no own save. `docs/ARCHITECTURE-SOURCES.md`'s
+round-13 rulings hold the decision request.]
+
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 
 `shell.qml` here reproduces the real host's config plumbing in its shape
