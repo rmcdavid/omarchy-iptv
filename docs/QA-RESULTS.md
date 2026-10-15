@@ -13315,6 +13315,19 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### 0.14.0: the release record (D-SINK-19 shipped)
+
+**Cut 2026-10-14 on the owner's word ("install, restart shell and cut
+0.14"), after four read-only pre-cut lenses on `dev` `8ddb785`**
+(workflow `release-0-14-0-precut`). What each measured:
+
+| Lens | Result |
+|---|---|
+| Marketplace rules | A hand port of the current scope, snapshot, analysis and policy scripts (read as text, never run; unchanged since 0.13.6 was scanned) predicts `passed` with findings and capabilities empty for the candidate, and reproduces 0.13.6's recorded record exactly; 18 of 18 mutants of the port behave as its source predicts. 27 of 31 files scanned, 1,785,450 of 8,388,608 bytes; the 3,897 added lines carry no trigger token. `omarchy plugin validate` exits 0. The helper is 438,533 of release.py's 458,752-byte ceiling, 20,219 bytes of headroom after a release that added 27,855: the next split is due before the next release of this size. |
+| Live shell | Every dev-harness scenario under a nested headless cage on a private bus, interleaved with 0.13.6's dev source `7c571a9`: **key-scenario live 120 passed, 0 failed** (transcript `key-20261014-183359-2042582`, the release recipe's step; also 120/0 with the 31-file export as the tree), sources 66/0, clip 20/0, id-rotate 37/0, pip 84/0, logo 33/0, argv 7/0, config-mode 11/0, tls 48/0 on both trees; chno, chno-entry, text, m3, player and rewind red the same way on both (cage limits and the known F-HARNESS-21 and F-HARNESS-22 flakes; m3's P3 red once in five on the candidate, read as the first-run flake). 514 logs and transcripts carry no TypeError, ReferenceError, SyntaxError, used-before-declared or credentialed URL. PERF-02's method, six interleaved pairs: cold open work 89.0 ms median on the candidate and 89.5 on 0.13.6 -- D-SINK-19 did not move it, and F-PERF-2's 158-162 ms did not reproduce. |
+| Upgrade | A scratch install of the real 0.13.6 artifact, seeded with a credentialed bar entry, two sources, favourites, a hidden group and logos on, was updated by the stock `omarchy-plugin-update` to a candidate `main` built in a scratch clone: a fast-forward, 31 files. Before a restart the 0.13.6 shell kept working and wrote nothing new; the first restart migrated (no URL on the entry, `sourceKey` set, both URLs in a 0600 `state.json` with the marker and `activeKey`, everything else kept, the same source played, no `Bar setting ignored`, no URL in any log); a second restart left both files byte-identical. A rollback to 0.13.6 looks unconfigured and re-migrates on the next upgrade with nothing lost. |
+| Notes | True as written: the heading passes `changelog_problems` strictly for the day, the README status line, and the new "Not in this release" bullet (`showLogos` defaults off, and with it off nothing fetches, reads or decodes a logo). It raised the request strategy for the owner: this commit does not fix #11315's finding, so filing a request without saying so on #11315 would read as an answer it is not. |
+
 ### D-SINK-19 round 15 on dev: the round-14 P2s, and the 0.14.0 ship bar
 
 **Integrated 2026-10-14 as `542d43b` (`Integrate lane-key-k2`), branched

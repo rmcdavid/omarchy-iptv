@@ -97,7 +97,8 @@ and the plugin keeps the URLs in its own files, readable by you alone:
 - **Not in this release:** a fix for the finding the marketplace maintainer
   raised against 0.13.6 about provider logo images. Channel logos are off
   unless you turned them on (`showLogos`); with them off the guide loads no
-  logo images.
+  logo images, and if you did turn them on, `g` on the Sources screen turns
+  them off.
 - **Restart the shell after this update** (`omarchy-restart-shell`, not
   `omarchy-refresh-shell`).
 
