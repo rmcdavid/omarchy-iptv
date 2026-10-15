@@ -13328,6 +13328,30 @@ lead's ruling is in the decisions log.
 | Upgrade | A scratch install of the real 0.13.6 artifact, seeded with a credentialed bar entry, two sources, favourites, a hidden group and logos on, was updated by the stock `omarchy-plugin-update` to a candidate `main` built in a scratch clone: a fast-forward, 31 files. Before a restart the 0.13.6 shell kept working and wrote nothing new; the first restart migrated (no URL on the entry, `sourceKey` set, both URLs in a 0600 `state.json` with the marker and `activeKey`, everything else kept, the same source played, no `Bar setting ignored`, no URL in any log); a second restart left both files byte-identical. A rollback to 0.13.6 looks unconfigured and re-migrates on the next upgrade with nothing lost. |
 | Notes | True as written: the heading passes `changelog_problems` strictly for the day, the README status line, and the new "Not in this release" bullet (`showLogos` defaults off, and with it off nothing fetches, reads or decodes a logo). It raised the request strategy for the owner: this commit does not fix #11315's finding, so filing a request without saying so on #11315 would read as an answer it is not. |
 
+`release.py build --gate-already-green` on `dev` `ef69d1b` (the gate green
+on that commit) wrote `main` bfe964dc4904cb2df5946b3f3a57422791499dcf
+(parent ca5a3a5, tag `v0.14.0`, 31 files); `dev`, `main` and the tag were
+pushed before 20:16 CDT.
+
+**The live install**, updated on the owner's word by the upgrade lens's
+checklist: `shell.json` and the plugin's `state.json` snapshotted (both
+0600, the state folder 0700) with names and counts recorded and no value
+printed -- the entry carried `playlistUrl` and `epgUrl`, whose URL was
+already the saved source `d5977d8a`. `omarchy-plugin-update
+io.github.rmcdavid.iptv --yes` (ca5a3a5 to bfe964d, tree clean, 0.14.0 on
+disk; the running shell's status still read `onDisk` 0.13.6, D-HOST-2's
+shape); `omarchy-restart-shell` (rc 0, the plugin answering within a
+second, running 0.14.0). Within a second the migration had landed: the
+entry holds `id`, `showLogos` and `sourceKey` `d5977d8a` and nothing else
+changed in `shell.json`; `state.json` holds the marker and `activeKey`
+`d5977d8a`, the same one source, and its playlist and guide URLs hash
+identical to the ones the entry carried; favourites, recents and the rest
+unchanged; modes 600 / 600 / 700. The journal since the update carries the
+one migration line, no `Bar setting ignored`, no provider host, nothing
+credential-shaped and no QML error. Status: ready, 1,481 channels in 28
+groups, guide data loaded. A second restart left both files byte-identical.
+The snapshot copies were then deleted.
+
 ### D-SINK-19 round 15 on dev: the round-14 P2s, and the 0.14.0 ship bar
 
 **Integrated 2026-10-14 as `542d43b` (`Integrate lane-key-k2`), branched
