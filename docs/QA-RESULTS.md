@@ -13315,6 +13315,174 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### D-LOGO-13 fixed: the canonical PNG
+
+**2026-10-15, on `dev` from e6abcc5, the owner's "option 1" of 2026-10-13
+built fresh** (the first attempt was uncommitted and lost in that day's
+reboot). The finding is the maintainer's seventh, on #11315 against the
+shipped 0.13.6: a PNG's compressed ancillary chunks reach the shell's
+decoder as the provider wrote them and nothing the plugin checks bounds what
+they inflate to. Deliberately NOT measured, by the brief: nothing here builds
+an oversized or highly compressible payload or measures memory, because the
+fix is judged by what it keeps and drops, and ordinary images prove that
+completely. The design and the code are in `docs/ARCHITECTURE.md` section 6
+("D-LOGO-13: the canonical PNG") and CLAUDE.md's image-decoder entry.
+
+**What it is, in one paragraph.** `canonical_png` in the helper walks a
+PNG's chunk list without inflating anything and returns a file holding IHDR,
+PLTE, IDAT, IEND and tRNS, gAMA, cHRM and sRGB at their spec lengths, each
+chunk copied whole (so the IDAT bytes and the pixels are the provider's, and
+a canonical file comes back byte for byte), or None when the walk cannot be
+proved: a bad CRC on any chunk, a truncated file, anything after IEND, more
+than 4,096 chunks, or a broken critical structure. `write_logo` runs it after
+the D-LOGO-11 bound and refuses a None as `logo_chunks` before anything
+touches the disk. The cached-file branch of `logos --fetch` announces a
+cached PNG only once it is canonical: as it stands, rewritten in place (0600,
+atomically, counted in the summary's new `rewritten`), or swept when it
+cannot be walked or runs past the byte cap.
+
+**Rule 11, the red run.** `tests/test_logo_chunks.py`, 27 tests over ordinary
+in-process images (a 2x2 RGBA picture carrying a short `Comment` tEXt, a
+short iTXt and zTXt, an iCCP holding a 3,144-byte profile-sized blob, eXIf,
+pHYs, tIME, bKGD, acTL and a private `prVt`; a 2x2 palette image; a 2x2
+greyscale and truecolour one), read back by the test's own chunk walker and
+CRC. Against the helper at e6abcc5: **23 red (5 failures, 18 errors -- the
+direct calls to `canonical_png`, which did not exist) and 4 green**, the four
+being controls the old code satisfies on purpose: a canonical cached PNG left
+untouched, cached JPEG/GIF/WEBP left untouched, the D-LOGO-11 refusal keeping
+its own code, and JPEG/GIF/WEBP written verbatim. On the fix, 27 of 27. The
+two D-LOGO-11 tests that assumed a PNG is cached verbatim
+(`test_a_legitimate_logo_is_still_written_0600_inside_0700`,
+`test_a_legitimate_cached_logo_is_still_announced_and_not_refetched`) now
+assert the canonical form for the fixture PNGs (which carry cHRM, bKGD, tIME
+and three tEXt: cHRM stays, the rest go, IDAT identical) and are red on
+e6abcc5 (1 failure, 1 error) and green on the fix.
+
+**Rule 11, the mutants.** Each line breaks one decision of the shipping code
+in a scratch copy of `bin/` and `tests/` and runs the three logo test modules
+(tests.test_logo_chunks, tests.test_logo_dimensions, tests.test_logos), on
+the final code. All 37 are killed; the count is the tests that went red.
+
+| Mutant | Red |
+|---|---|
+| keep every unknown ancillary chunk | 12 |
+| keep iTXt | 6 |
+| skip the CRC check | 4 |
+| allow bytes after IEND | 3 |
+| no chunk ceiling / ceiling one lower | 1 / 1 |
+| IEND may carry data / IEND without IDAT | 1 / 1 |
+| IHDR need not be first / IHDR length unchecked | 1 / 1 |
+| IDAT need not be consecutive | 1 |
+| PLTE twice / after IDAT / length unchecked / over 256 entries | 1 / 1 / 1 / 1 |
+| tRNS any length / tRNS past the palette | 1 / 1 |
+| colour chunk any length / after PLTE / repeated / after IDAT | 2 / 1 / 1 / 1 |
+| a dropped colour chunk counts as seen, shutting out a sound one after it | 1 |
+| colour type read from the bit-depth byte | 3 |
+| unknown critical chunk dropped instead of refused | 1 |
+| no signature check / chunk type not checked | 1 / 1 |
+| no end-of-file check (a cut-off IHDR whose CRC is forged to read as the missing field's zero) | 1 |
+| `write_logo` stores the input / skips the walk | 3 / 4 |
+| cached PNG not rewritten / cached malformed PNG announced | 2 / 2 |
+| `rewritten` not counted | 2 |
+| `logo_chunks` not a policy refusal | 1 |
+| cached read without the byte cap | 1 |
+| a cached JPEG/GIF/WEBP treated as malformed | 4 |
+| the refusal names the URL | 1 |
+| the already-canonical shortcut taken whatever was dropped | 16 |
+
+Three survived the first pass and each produced a test: a "keep iTXt"
+mutant that the length check dropped anyway (rewritten to keep it for real),
+"IHDR need not be first" (no input lacked IHDR entirely until "no IHDR at
+all" was added), and the end-of-file check, which only a truncated IHDR with
+a CRC forged over the bytes present can reach, where without the check the
+walk indexes past the last byte (the test solves the four CRC bytes as a
+32x32 linear system over GF(2)).
+
+**The sink.** The 27th test hands Qt 6.11.2's own PNG reader, a QML `Image`
+offscreen (software backend, a scratch HOME, under `prlimit --as=2500000000`
+as the logo scenario runs its probe), the original and the canonical file for
+an RGBA, a palette and a greyscale image, grabs each and compares the
+grabbed pixels: identical for all three. The probe exits non-zero unless
+every image reaches `Image.Ready`, so two failed loads cannot compare equal
+as two blank grabs. It goes red when the canonical form keeps only the first
+IDAT (`Image.Error`) and when it drops tRNS (the alpha differs), and green on
+the unmutated tree.
+
+**The gate's scenario.** `logo-scenario.sh check-tree` 33 passed, 0 failed:
+its corpus PNGs are already canonical, so nothing it checks moved.
+
+**Cost.** 5,000 cached 220x120 PNG logos of about 10 KB, page cache warm,
+medians of five subprocess runs, two rounds interleaved: `logos --fetch`
+725 / 735 ms at e6abcc5, 1,003 / 1,069 ms with the fix and the buffered
+reader, 872 / 815 ms with `_read_logo_prefix` moved to `os.read` (shipped).
+The remainder is the second read of each PNG and the CRC pass, 9.5 us per
+10 KB on this zlib. The one-time rewrite of 5,000 files carrying tEXt, iCCP
+and pHYs took 1,626 ms, and the run after it 1,099 ms with `rewritten` 0.
+The helper is 445,263 of the 458,752-byte ceiling (13,489 bytes of headroom;
+it was 438,533 at e6abcc5).
+
+**The search (rule 15), including what it cleared.**
+
+- *Where else provider image bytes reach a decoder in the shell.* Every
+  `Image`, `AnimatedImage`, `BorderImage`, `IconImage`, `AnimatedSprite` and
+  `Canvas` in the shipped QML: two `Image`s, the wall tile and the row slot
+  in `Guide.qml`, both fed through `Model.logoSlot` (the tile via
+  `Model.wallTile`) with names the helper announced; no `drawImage` or
+  `loadImage`, no notification carrying an image. In the helper, the only
+  writers into a logo directory are `write_logo` and now
+  `canonical_logo_file`; `cache prune` and `cache logos-clear` only remove;
+  XMLTV `<icon src>` is never read; mpv is handed no image by the plugin.
+  Cleared.
+- *Other inflaters fed provider bytes.* In the shell, after this fix, only a
+  logo's pixel stream: PNG IDAT, GIF LZW, WEBP VP8L/ALPH, each decoded into
+  the canvas D-LOGO-11 bounds. One residual read in libpng 1.6.58's
+  `pngrutil.c` (`png_read_IDAT_data` called with no output by
+  `png_read_finish_IDAT`): compressed data past the last row is inflated into
+  a fixed stack buffer and discarded, so it costs CPU on Qt's image-loading
+  thread and no memory; not measured. In the helper, the gzip EPG is read
+  through `CappedReader` under `MAX_SOURCE_BYTES`, and the helper is the
+  process allowed to die. Cleared.
+- *JPEG, GIF and WEBP metadata (the brief's question: can it expand past the
+  byte cap?).* Read, nothing run: Qt's `qjpeghandler.cpp`,
+  `qgifhandler.cpp` and `qpnghandler.cpp` at tag v6.11.2 of qtbase and
+  `qwebphandler.cpp` at v6.11.2 of qtimageformats (raw from the Qt GitHub
+  mirror into a scratch directory), the import tables of this machine's
+  `libQt6Gui.so.6` and `imageformats/libqjpeg.so`, `libqgif.so` and
+  `libqwebp.so` (qt6-base 6.11.2-3, qt6-imageformats 6.11.2-1), libpng(3)
+  and `pnglibconf.h` (libpng 1.6.58-2). JPEG: the handler saves COM, APP1
+  and APP2 with `jpeg_save_markers(..., 0xFFFF)`, keeps the comment text,
+  reads EXIF for the orientation tag only, and concatenates ICC segments;
+  JPEG defines no compression for any of these, so what is kept is the
+  file's own bytes. GIF: Qt's own decoder (the plugin imports no GIF
+  library); the comment-extension case is compiled out (`#if 0`) and every
+  extension but NETSCAPE looping is skipped; extension data is uncompressed
+  sub-blocks anyway. WEBP: the handler reads the ICCP chunk as raw bytes and
+  nothing else (EXIF and XMP are a `###` note); RIFF chunks are stored raw.
+  **None of the three can be expanded beyond the byte cap, so nothing was
+  built for them.** PNG, for the record: the handler calls `png_get_text`
+  after `png_read_info` and again after `png_read_end`, and turns
+  `png_get_iCCP` into a `QColorSpace`; libpng inflates zTXt, iTXt and iCCP
+  up to `PNG_USER_CHUNK_MALLOC_MAX` 8,000,000 bytes each and stores up to
+  `PNG_USER_CHUNK_CACHE_MAX` 1,000 text and unknown chunks per info struct;
+  Qt calls neither `png_set_chunk_malloc_max` nor `png_set_chunk_cache_max`.
+  Also read: Qt applies a file's gamma only when the reader is given one
+  (`gamma != 0.0`, default 0.0), and Qt Quick converts a picture's colours
+  only when the QML `Image` sets `colorSpace` (`qquickpixmapcache.cpp` at
+  qtdeclarative v6.11.2, `targetColorSpace().isValid()`), which no `Image`
+  in the guide does. So neither a dropped profile nor a dropped colour chunk
+  changes a pixel the guide draws; the four colour chunks are kept anyway,
+  because they are what Qt builds the image's colour space from.
+- *Readers of a cached logo.* Only the guide's two `Image`s, through an
+  announced name; the cached-file branch is the one place a name is
+  announced for a file already on disk, and it now goes through
+  `canonical_logo_file`. Cleared.
+
+**Not done, and why.** Nothing was measured for expansion (the brief). A
+picture a running shell has already decoded stays decoded until the shell
+restarts; the rewrite changes the file, not Qt's pixmap cache. 0.14.1 is
+prepared and not cut: no `release.py build`, no push, no request, no comment,
+no change to the live install until the owner's word.
+
 ### 0.14.0: the release record (D-SINK-19 shipped)
 
 **Cut 2026-10-14 on the owner's word ("install, restart shell and cut

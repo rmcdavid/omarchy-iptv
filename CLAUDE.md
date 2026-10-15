@@ -491,6 +491,26 @@ requests and raise the batch.
      has the same property the byte cap had -- it bounds fetches per run, not
      the cache -- and is filed open as D-LOGO-12. A number that cannot fail
      for the thing it looks like it guards is the defect, whatever the number.
+     **The same sink's other axis is what a PNG carries BESIDE its pixels**
+     (D-LOGO-13, the maintainer's seventh finding, against 0.13.6 on #11315;
+     fixed on `dev` 2026-10-15). zTXt, iTXt and iCCP are compressed, libpng
+     inflates them while it reads the header whatever `sourceSize` says, and
+     Qt keeps the text (`png_get_text` after `png_read_info` AND after
+     `png_read_end`) and the profile. libpng 1.6.58's only ceiling is its
+     compiled default, 8,000,000 bytes per chunk and 1,000 stored chunks per
+     info struct, and Qt sets neither (read in the 6.11.2 and 1.6.58 sources
+     and import tables, NOT measured, on purpose: the fix is judged by what it
+     keeps and drops). So the helper caches a PNG only in a CANONICAL form,
+     `canonical_png`: IHDR, PLTE, IDAT, IEND, and tRNS, gAMA, cHRM, sRGB at
+     their spec lengths; everything else dropped; walked without inflating
+     anything, every CRC checked, the IDAT bytes copied untouched, so the
+     pixels are the provider's (observed: Qt draws both files identically).
+     A file it cannot walk is refused (`logo_chunks`), and the cached-file
+     branch announces a PNG only once it is canonical: rewritten in place
+     (0600, atomically) or swept. JPEG, GIF and WEBP are left as they come:
+     Qt reads no compressed metadata from any of them, so what it keeps is
+     bounded by the file's own bytes. A picture already decoded by a running
+     shell has paid; the restart is what clears it.
    - **The clipboard, as an INPUT that blocks** (D-CLIP-1). Every editable
      QtQuick `TextInput` subscribes to `QClipboard::dataChanged` at
      construction, and on the RELEASED Qt 6.11.2 that slot calls

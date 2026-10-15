@@ -244,7 +244,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2502}
 # one (the real helper over a link at the state folder and at every other
 # folder ensure_private_dir makes), the in-process init's alarm (1), and
 # test_logos's logo-folder link (1).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1202}
+# 1202 -> 1229 on 2026-10-15, D-LOGO-13: tests/test_logo_chunks.py (27), the
+# canonical PNG over ordinary images -- what it keeps and drops, what it
+# refuses, `write_logo` and both branches of `logos --fetch`, and Qt drawing
+# the canonical file and the original identically.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1229}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

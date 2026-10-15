@@ -98,6 +98,16 @@ def padded_jpeg(base, segments, trailing=0):
     return base[:2] + MAXIMAL_SEGMENT * segments + base[2:] + b"\x00" * trailing
 
 
+def png_chunks(data):
+    """[(type, body)] of a PNG, read here and not by the helper."""
+    out, pos = [], 8
+    while pos + 8 <= len(data):
+        length = int.from_bytes(data[pos:pos + 4], "big")
+        out.append((data[pos + 4:pos + 8], data[pos + 8:pos + 8 + length]))
+        pos += 12 + length
+    return out
+
+
 def _private_tmpdir(case):
     """A temp directory removed when the case ends.
 
@@ -537,7 +547,17 @@ class WriteLogoBoundTest(unittest.TestCase):
             self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600, cid)
             self.assertEqual(stat.S_IMODE(os.stat(target).st_mode), 0o700, cid)
             with open(path, "rb") as handle:
-                self.assertEqual(handle.read(), case["bytes"], cid)
+                on_disk = handle.read()
+            if case["contentType"] != "image/png":
+                self.assertEqual(on_disk, case["bytes"], cid)
+                continue
+            # D-LOGO-13: a PNG is cached in its canonical form. The fixture's
+            # PNGs carry cHRM, bKGD, tIME and three tEXt chunks; the colour
+            # chunk stays, the rest go, and the image data is the provider's.
+            self.assertEqual([kind for kind, _ in png_chunks(on_disk)],
+                             [b"IHDR", b"cHRM", b"IDAT", b"IEND"], cid)
+            self.assertEqual([c for c in png_chunks(on_disk) if c[0] == b"IDAT"],
+                             [c for c in png_chunks(case["bytes"]) if c[0] == b"IDAT"], cid)
 
     def test_the_magic_check_still_runs_first_and_keeps_its_own_code(self):
         """The bound is beside the magic-byte check, not instead of it: bytes
@@ -741,11 +761,19 @@ class LogoCacheSweepTest(unittest.TestCase):
         self.assertEqual(summary["swept"], 0, summary)
         self.assertEqual(summary["fetched"], 0, "nothing may be refetched")
         self.assertEqual(summary["reasons"], {}, summary)
-        # Same inode: the files were read, not rewritten.
-        for name, ino in before.items():
-            self.assertEqual(os.stat(os.path.join(logo_dir, name)).st_ino, ino, name)
-            self.assertEqual(stat.S_IMODE(os.stat(os.path.join(logo_dir, name)).st_mode),
-                             0o600, name)
+        # Same inode: the files were read, not rewritten -- except the PNG,
+        # which carries text chunks and is made canonical in place first
+        # (D-LOGO-13), keeping its name, its mode and its image data.
+        self.assertEqual(summary["rewritten"], 1, summary)
+        for cid, name in names.items():
+            path = os.path.join(logo_dir, name)
+            self.assertEqual(stat.S_IMODE(os.stat(path).st_mode), 0o600, cid)
+            if cid != "png-small":
+                self.assertEqual(os.stat(path).st_ino, before[name], cid)
+                continue
+            with open(path, "rb") as handle:
+                self.assertEqual([kind for kind, _ in png_chunks(handle.read())],
+                                 [b"IHDR", b"cHRM", b"IDAT", b"IEND"])
 
     def test_the_sweep_stays_inside_the_logo_directory(self):
         """A cache cleaner that unlinks by a name it computed is one bug from

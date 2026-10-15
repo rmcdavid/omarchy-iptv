@@ -2093,13 +2093,98 @@ Details and the mutation table are `docs/QA.md` section 3.2.
   write such a file, because `fetch_logo` refuses a download over 256 KiB
   before `write_logo` runs; it is the shape of a file put into the cache by
   something other than this helper, and for it the sweep bounds the
-  dimensions and not the bytes. Recorded, not fixed.
+  dimensions and not the bytes. Recorded, not fixed -- except for a PNG,
+  which since D-LOGO-13 is read under the cap plus one and swept (below).
 **The siblings, asked before closing (engineering rule 15).** Every `Image`
 in the four shipped QML files: two, both fed by an announced name, and no
 `AnimatedImage`, `icon.source` or SVG anywhere (the lead's census). Every
 other number the helper enforces that could bound the wrong axis: one found,
-D-LOGO-12. Every other place provider bytes are decoded in the shell: none;
-playlist and EPG bytes are parsed in the helper and arrive as JSON.
+D-LOGO-12. A second axis this round did not ask about -- what a file
+carries BESIDE its pixels, which the byte cap bounds only compressed -- was
+raised from outside against 0.13.6 (D-LOGO-13, below). Every other place
+provider bytes are decoded in the shell: none; playlist and EPG bytes are
+parsed in the helper and arrive as JSON.
+
+**D-LOGO-13: the canonical PNG (fixed on `dev` 2026-10-15, the owner's
+"option 1" of 2026-10-13).** Raised by the same maintainer against the
+shipped 0.13.6 on omacom/omarchy-plugin-marketplace#11315: `write_logo`
+proved a logo's type, magic and header and then cached the provider's bytes
+unchanged, and a PNG carries more than pixels. zTXt, iTXt and iCCP are
+compressed; libpng inflates them in `png_read_info`, before a row is decoded
+and whatever `sourceSize` says; and Qt keeps the result -- `qpnghandler.cpp`
+at v6.11.2 calls `png_get_text` after `png_read_info` and again after
+`png_read_end`, and turns `png_get_iCCP` into a `QColorSpace`. libpng's only
+ceiling is its compiled default (libpng(3), and `pnglibconf.h` here:
+`PNG_USER_CHUNK_MALLOC_MAX` 8,000,000 bytes for any chunk but IDAT, inflated;
+`PNG_USER_CHUNK_CACHE_MAX` 1,000 stored text and unknown chunks, applied
+separately to the info and end structs), and Qt sets neither limit: neither
+setter is in QtGui's import table or the handler's source. All of that is
+READ, from the 6.11.2 and 1.6.58 sources and the installed headers and
+binaries; none of it was measured, by decision -- the fix is judged by what
+it keeps and drops, which ordinary images prove completely.
+**What changed.** `canonical_png` walks the chunk list and inflates nothing.
+It keeps IHDR, PLTE, IDAT and IEND, and tRNS, gAMA, cHRM and sRGB when each
+has its spec length (4, 32 and 1 bytes; tRNS 2 for greyscale, 6 for
+truecolour, 1 to the palette's size for a palette image, never with alpha),
+is the first of its kind to be kept, and is in its place (before IDAT; gAMA, cHRM and
+sRGB before PLTE too). A colour chunk that fails any of those is dropped,
+because libpng ignores it as well. Everything else goes: tEXt, zTXt, iTXt,
+iCCP, eXIf, pHYs, tIME, bKGD, APNG's acTL, fcTL and fdAT, private chunks.
+None of them changes a pixel the guide draws: Qt applies a file's gamma
+only when the reader is given one (default 0.0), and Qt Quick converts
+colours only when an `Image` sets `colorSpace`, which none in the guide does
+(`qpnghandler.cpp` and `qquickpixmapcache.cpp` at v6.11.2).
+Kept chunks are copied whole, so the IDAT bytes and the pixels are the
+provider's and a canonical file comes back byte for byte. It refuses
+(None) a file whose walk cannot be proved: a bad CRC on any chunk, dropped
+ones included; a chunk past the end or no IEND; anything after IEND; more
+than 4,096 chunks (`MAX_PNG_CHUNKS`); IHDR not first, not 13 bytes or
+repeated; no IDAT or IDAT split by another chunk; a second, late or
+mis-sized PLTE; any other critical chunk, which libpng refuses too.
+`write_logo` runs it after the D-LOGO-11 bound and before
+`ensure_private_dir`, so a refusal -- `logo_chunks`, a host and no URL,
+counted under `refusedOnPolicy` -- still creates nothing on disk. The
+cached-file branch of `logos --fetch` asks `canonical_logo_file` after
+`logo_file_within_bounds`: a canonical PNG (or another type) is announced as
+it stands, a PNG with other chunks is rewritten in place through
+`write_bytes_atomic` (0600) and then announced, counted in a new summary
+field, `rewritten`, as well as in `cached`, and one that cannot be walked is
+swept and falls through to the fetch. That read stops at the byte cap plus
+one, so a cached PNG over 256 KiB can never walk to its IEND and is swept:
+the window the D-LOGO-11 residuals above record ("a 300 KiB file with a
+sound 64x64 header answers True") is closed for PNG and left as it was for
+the other three types. Measured cost (2026-10-15, 5,000 cached 220x120 PNG
+logos of about 10 KB, page cache warm, medians of five): `logos --fetch`
+725-735 ms at e6abcc5, 815-872 ms now; the difference is the second read and
+the CRC pass, which is about 9.5 us per 10 KB on this zlib. The read moved
+from a buffered file object to `os.read`, which halves the read (about 30
+to 14 us a file); with the buffered read it was 1,003-1,069 ms. The
+one-time rewrite of 5,000 files cost 1,626 ms. **Why JPEG, GIF and WEBP are untouched**, read in the same Qt
+sources: the JPEG handler saves COM, APP1 and APP2 at their raw length
+(`jpeg_save_markers(..., 0xFFFF)`), uses EXIF for the orientation tag only
+and concatenates ICC segments, so nothing is inflated; the GIF handler is
+Qt's own decoder, its comment-extension case is compiled out and every
+extension but NETSCAPE looping is skipped; the WEBP handler reads the ICCP
+chunk as raw bytes and nothing else ("consider parsing EXIF and/or XMP" is a
+`###` note). In all three what Qt keeps is bounded by the file's own bytes.
+**Verified by** `tests/test_logo_chunks.py` (27 tests over ordinary 2x2
+images carrying a short Comment, a short iTXt and zTXt, an iCCP the size of
+a plain sRGB profile, eXIf and a private chunk): on e6abcc5 23 of the 27 are
+red -- 18 of them errors, the calls to a function that did not exist yet --
+and the four controls green; every one of 37 deliberate breaks of
+the shipping code (each refusal, each keep rule, the rewrite, the count, the
+byte-capped read) reddens at least one; and the 27th observes the sink, Qt
+6.11.2's own reader in a QML `Image` offscreen, drawing the canonical file
+and the original identically for an RGBA, a palette and a greyscale image,
+red when the canonical form drops the second IDAT or the tRNS.
+`logo-scenario.sh check-tree` reads 33 / 0 unchanged: its corpus PNGs are
+already canonical. **Residuals.** A picture a running shell has already
+decoded stays decoded until the restart; the rewrite is of the file, not of
+Qt's pixmap cache. And IDAT is still a compressed stream: libpng inflates
+it into the rows the D-LOGO-11 dimensions bound, and inflates any data past
+the last row into a fixed stack buffer and discards it (`png_read_IDAT_data`
+with no output, 1.6.58), so the cost of such trailing data is CPU on Qt's
+image-loading thread, not memory; it is read, not measured.
 
 - Five smaller things the repair round left open, each stated rather than
   rounded away (the review found them recorded in no document):
@@ -2712,6 +2797,16 @@ Performance budget (10k channels):
     sweep and the row slot's `Image` through `logo-scenario.sh`; a grep for
     the constant is rule 14's shape and is not the check. Section 6 carries
     the measurement and the residuals.
+    "Every axis" was written about the header's dimensions, and a PNG has a
+    second: what it carries beside its pixels, some of it compressed and
+    inflated by libpng while it reads the header, which the byte cap bounds
+    only compressed (D-LOGO-13). So a PNG is cached only in a canonical form
+    holding IHDR, PLTE, IDAT, IEND and the four small colour chunks at their
+    spec lengths, its IDAT bytes untouched, and a PNG whose chunk list cannot
+    be walked is not cached at all; a cached PNG is announced only once it is
+    canonical. Verified by calling `canonical_png`, `write_logo` and `logos
+    --fetch` over ordinary images, and by observing Qt draw the canonical
+    file and the original identically.
 13. The shell process never subscribes to a global that another process can
     fill. The clipboard is the instance (D-CLIP-1): an editable `TextInput`
     subscribes to `QClipboard::dataChanged` and the released Qt reads the
