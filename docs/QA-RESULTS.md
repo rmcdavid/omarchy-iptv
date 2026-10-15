@@ -13352,6 +13352,16 @@ credential-shaped and no QML error. Status: ready, 1,481 channels in 28
 groups, guide data loaded. A second restart left both files byte-identical.
 The snapshot copies were then deleted.
 
+**The request.** On the owner's word: omacom/omarchy-plugin-marketplace#11602,
+`[Verify]: IPTV 0.14.0`, the same form as #11315 with target
+`bfe964dc4904cb2df5946b3f3a57422791499dcf` (taken from `v0.14.0^{commit}`, the
+tag being annotated, and checked equal to the remote `main`). The bot's update
+validation passed (source, plugin set and compatibility at `bfe964d`) and its
+automated security baseline passed at that commit, both inside two minutes, as
+the market lens predicted. A comment on #11315 says 0.14.0 does not address
+its finding (D-LOGO-13) and that the fix will come as its own release and
+request; #11315 stays open.
+
 ### D-SINK-19 round 15 on dev: the round-14 P2s, and the 0.14.0 ship bar
 
 **Integrated 2026-10-14 as `542d43b` (`Integrate lane-key-k2`), branched
