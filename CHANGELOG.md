@@ -3,6 +3,45 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.14.1 (2026-10-15)
+
+**Security.** A channel logo in PNG format can carry more than its picture:
+text, colour profiles and other data, some of it compressed, which the
+desktop shell's image decoder expands when it loads the logo. The plugin
+limited a logo's download to 256 KiB and the picture size its file declares,
+and nothing limited what that compressed extra data expands to. Raised by
+the marketplace maintainer against 0.13.6. It matters only with channel
+logos turned on, and they are off by default.
+
+### Fixed
+
+- **A PNG logo is now stored with only what drawing it needs:** its image
+  data and its small colour and transparency settings, copied unchanged, so
+  the picture is the same. Text, colour profiles, animation frames and
+  everything else are dropped before the file is saved.
+- **A PNG whose structure cannot be read from start to end is not stored at
+  all:** a damaged or cut-off file, one with anything after its end, one
+  split into more than 4,096 sections. That channel shows no logo, as it
+  does when a logo cannot be fetched.
+- **Logos an earlier version saved are brought into line at the next
+  fetch:** a PNG is rewritten in place with only what drawing it needs,
+  under the same name, or removed when its structure cannot be read or it
+  is over 256 KiB. A logo that passes is not downloaded again.
+
+### Worth knowing
+
+- JPEG, GIF and WEBP logos are stored as they arrive: the decoder expands
+  nothing they carry beside the picture.
+- Checking the logos already on disk takes a little longer for PNGs, about
+  a tenth to a sixth of a second more per 5,000 logos, in the background
+  helper and never in the guide.
+- **Restart the shell after this update** (`omarchy-restart-shell`, not
+  `omarchy-refresh-shell`, which resets your shell configuration). A logo
+  the running shell has already drawn stays in its memory until then.
+- For anyone running the helper by hand: the `logos --fetch` summary has a
+  new `rewritten` count, and a refused PNG is counted under the reason
+  `logo_chunks`.
+
 ## 0.14.0 (2026-10-14)
 
 **Privacy.** Your playlist and guide-data URLs carry your provider login,

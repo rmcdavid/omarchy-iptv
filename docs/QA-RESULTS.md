@@ -13315,6 +13315,72 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### 0.14.1: prepared, not cut
+
+**Prepared 2026-10-15 on `dev`, for D-LOGO-13 alone; not cut, by
+instruction.** `manifest.json` and `model/build.mjs` `PLUGIN_VERSION` read
+0.14.1, the README status line names it, and the CHANGELOG leads with
+`## 0.14.1 (2026-10-15)`. `release.py build` refuses a heading dated any day
+but the day of the cut (D-REL-4), so a cut on a later day re-dates that one
+line first. The python floor is 1229 (from 1202, the 27 tests of
+`tests/test_logo_chunks.py`); every other floor is unchanged because nothing
+else moved. The helper is 445,263 of the 458,752-byte ceiling.
+
+**The recipe's live step.** `scripts/dev-harness/key-scenario.sh live`
+under the nested headless cage on a private bus
+(`OMARCHY_IPTV_HARNESS_REAL_HOME=$HOME scripts/dev-harness/private-bus.sh
+/run/user/1000/omarchy-iptv-l141-b 2400 env
+OMARCHY_IPTV_HARNESS_DIR=/run/user/1000/omarchy-iptv-l141-h
+scripts/dev-harness/key-scenario.sh live`) on the release-prep tree:
+**120 passed, 0 failed** in 433.6 s on 3d90af9 plus the version edits
+(transcript `key-20261015-061221-2894637`, 0600 under the harness directory;
+the nested cage and the private bus were gone afterwards). 0.14.0's run read
+120 / 0.
+
+**Gate.** `scripts/check.sh` all green on the commit that carries this
+record, `logo preflight (33 checks)` among it.
+
+**What the owner decides, and the one thing worth knowing first.** Cutting
+moves `main`, and the marketplace's update validation compares a request's
+commit with the repository's CURRENT `main` (`plugin-update.mjs`, the reason
+for the 2026-10-13 hold), so #11602 goes stale the moment 0.14.1 is pushed.
+It targets bfe964d, which carries the finding unfixed, so it could not have
+been approved as it stands; the maintainer closed #11315 as superseded by it
+so that review could continue there, which is why the comment below goes on
+#11602 and nowhere else. F-M3-4 stands: a new request for 0.14.1, and #11602
+is never closed by us.
+
+**Drafts for the owner, NOT posted.** The new request, in #11602's form
+(`[Verify]: IPTV 0.14.1`): verification action "Verify and publish a newer
+upstream commit", plugin `io.github.rmcdavid.iptv`, repository
+https://github.com/rmcdavid/omarchy-iptv, target commit the full SHA of
+`v0.14.1^{commit}` once `release.py build` has written it and it is checked
+equal to the remote `main`, both acknowledgments ticked. Then, on #11602,
+with the new request's number and commit filled in:
+
+> The finding raised on #11315, which applies unchanged to 0.14.0 here, is
+> addressed in 0.14.1, filed for verification as #NNNNN at `<full sha>`.
+>
+> The helper no longer caches a provider's PNG as it arrives. After the
+> existing type, magic and dimension checks, `write_logo` rewrites every PNG
+> logo to a canonical file holding only IHDR, PLTE, IDAT, IEND and tRNS,
+> gAMA, cHRM and sRGB at their spec lengths. tEXt, zTXt, iTXt, iCCP, eXIf,
+> APNG and private chunks are dropped, so the decoder is handed no
+> compressed metadata to expand, and IDAT, the one compressed stream left,
+> is decoded into the dimensions the existing limits bound. The walk
+> decompresses nothing and copies each kept chunk byte for byte, so the
+> pixels are unchanged. A PNG whose chunk list cannot be walked to a clean
+> IEND (a bad CRC on any chunk, truncation, data after IEND, more than 4,096
+> chunks, a missing or misplaced critical chunk) is not cached. Logos that
+> earlier versions cached get the same treatment before the helper announces
+> them to the guide: rewritten in place, or removed. JPEG, GIF and WEBP are
+> unchanged: Qt 6.11.2's handlers for them read no compressed metadata, so
+> what they retain is bounded by the 256 KiB file.
+>
+> The code is `canonical_png`, `canonical_logo_file` and `write_logo` in
+> `bin/omarchy-iptv` at that commit; the tests (`tests/test_logo_chunks.py`)
+> and the write-up are on the dev branch. Channel logos stay off by default.
+
 ### D-LOGO-13 fixed: the canonical PNG
 
 **2026-10-15, on `dev` from e6abcc5, the owner's "option 1" of 2026-10-13
