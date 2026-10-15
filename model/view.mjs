@@ -13,7 +13,7 @@ import {
   effectiveScope, guideState, onEscape
 } from "./browse.mjs"
 import {
-  hideAction, hideVerb
+  hideAction, hideVerb, stateUnreadableNotice
 } from "./state.mjs"
 import {
   footerWarning
@@ -136,7 +136,18 @@ function barAccessibleName(opts) {
 //
 // opts: serviceReady, configured, channelCount (what the service holds),
 // status (R8 vocabulary), rowCount (rows left after query and scope),
-// query, scopeId, narrow, sources (records in the history).
+// query, scopeId, narrow, sources (records in the history), stateBlocked
+// (Service.stateWriteBlocked: the no-write mode's reason, "" when off).
+//
+// R23e (D-SINK-19 round 13): an unconfigured guide in the no-write mode is
+// NOT the setup surface. A start whose state.json could not be read has
+// loaded nothing, so it looked exactly like a fresh install -- "No playlist
+// configured" over a form whose submit was then refused -- and only the
+// notification said that saved sources existed. It is "stateUnreadable"
+// instead: an empty state whose words are Model.stateUnreadableNotice's,
+// the notification's own, with no field (firstRunAllowed says the form is
+// not opened). A guide that still HAS channels mid-session keeps them: the
+// session's memory stands and plays, and the refusals say why (R23f).
 function guideSurface(opts) {
   var o = opts || {}
   var ready = o.serviceReady !== false
@@ -145,7 +156,7 @@ function guideSurface(opts) {
   var has = count > 0
   var empty = ""
   if (!ready) empty = "service"
-  else if (!configured) empty = "unconfigured"
+  else if (!configured) empty = str(o.stateBlocked) !== "" ? "stateUnreadable" : "unconfigured"
   else if (!has) empty = str(o.status) === "error" ? "error" : "loading"
   else if (Math.floor(Number(o.rowCount) || 0) > 0) empty = ""
   else if (tokenize(o.query).length > 0) empty = "noMatches"
@@ -163,6 +174,17 @@ function guideSurface(opts) {
     setup: empty === "unconfigured",
     savedSources: empty === "unconfigured" ? Math.max(0, Math.floor(Number(o.sources) || 0)) : 0
   }
+}
+
+// R23e: does an unconfigured guide open into, or return to, the first-run
+// form? Not in the no-write mode -- its submit could only be refused, and
+// the surface there is guideSurface's "stateUnreadable" -- and not before
+// the service is attached. One decision for the four places the guide asks
+// it (opening, `configured` or the mode flipping while open, and the Esc /
+// `o` return from Sources).
+function firstRunAllowed(opts) {
+  var o = opts || {}
+  return o.serviceReady !== false && o.configured !== true && str(o.stateBlocked) === ""
 }
 
 // ------------------------------------------------------------ footer
@@ -285,6 +307,12 @@ function footerHints(opts) {
   if (mode === "sourceEdit" || mode === "sourceXtream") return formHints(o.form)
   if (mode === "sources") {
     if (o.cursorKind === "add" || o.cursorKind === "xtream") return [["j/k", "move"], ["Enter", "open"], ["Esc", "back"]]
+    // R24f: in the no-write mode nothing can be added, so neither add key is
+    // hinted; with no source row either there is nothing to move to.
+    if (str(o.stateBlocked) !== "") {
+      if (o.cursorKind !== "source") return [["Esc", "back"]]
+      return [["j/k", "move"], ["Enter", "switch"], [SOURCE_KEYS.edit, "edit"], [SOURCE_KEYS.remove, "remove"], [SOURCE_KEYS.logos, o.showLogos === true ? "logos off" : "logos on"], ["Esc", "back"]]
+    }
     // M2-04: `g logos` reads the CURRENT state, so the key says what it will
     // do rather than what is on. A hint that always reads "logos" leaves the
     // user pressing it to find out, and finding out means contacting sixty-
@@ -697,8 +725,9 @@ function keyboardMapKeys(opts) {
   return out
 }
 export {
-  barGlyph, barTooltip, barAccessibleName, guideSurface, footerCounts,
-  footerDegraded, footerStatus, arrowVerb, footerHints, scopeVerb, formHints,
-  keyboardMapUntabled, hideMeaning, escapeOutcome, sameEscape, verbForKey,
-  setKeyRow, mergeKeyRows, keyboardMap, keyboardMapKeys
+  barGlyph, barTooltip, barAccessibleName, guideSurface, firstRunAllowed,
+  footerCounts, footerDegraded, footerStatus, arrowVerb, footerHints,
+  scopeVerb, formHints, keyboardMapUntabled, hideMeaning, escapeOutcome,
+  sameEscape, verbForKey, setKeyRow, mergeKeyRows, keyboardMap,
+  keyboardMapKeys
 }

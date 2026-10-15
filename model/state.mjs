@@ -35,7 +35,8 @@ import {
   uniqueLabel, sameDay, formatLastUsed
 } from "./sources.mjs"
 import {
-  warnState, normalizeSourceRecord
+  warnState, normalizeSourceRecord, activeKeyText, activeKeyOf,
+  adoptActiveSource
 } from "./source-records.mjs"
 
 // ------------------------------------------------------------ state
@@ -347,7 +348,41 @@ function savedSearchRecord(entry) {
 }
 
 function emptyState() {
-  return { version: STATE_VERSION, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [] }
+  return { version: STATE_VERSION, cacheLayout: 0, favorites: [], recents: [], lastPlayed: null, session: null, sources: [], savedSearches: [], hiddenGroups: [], activeKey: "" }
+}
+
+// D-SINK-19 round 11, R21a. THE MIGRATION MARKER.
+//
+// The bar entry's `playlistUrl` and `epgUrl` are read as INPUT exactly once
+// per install: by the migration of a state file written before D-SINK-19
+// (0.13.x named the active source by the URL on the entry). The migration
+// adopts what the entry carries (Model.adoptActiveSource with `migrating`)
+// and sets this boolean in the SAME state write, and from the moment a state
+// write carrying it has LANDED nothing on the entry is an input again: a
+// value found there is refused, reported once and stripped (R21b). The
+// product owner dropped the `omarchy bar set` URL route on 2026-10-13 after
+// ten repair rounds of state built to tell a CLI input from the host's
+// stale echo of one did not converge.
+//
+// Present only when true, so a state that has not migrated serializes as it
+// did before; additive at STATE_VERSION 2 on the activeKey precedent, and
+// taught to the helper's normalize_state on the same day and the same shared
+// fixture (the shared state-keys fixture, dev branch). An OLDER build drops
+// it with every other key it does not know, and that is the downgrade the
+// ruling names: 0.13.6 writes the active URL back onto the entry and keeps
+// no marker, so a re-upgrade migrates again, over what 0.13.6 wrote.
+// Exactly `true`: a string "true" or a 1 is not a marker (activeKeyText's
+// lesson, the coercion that reads one way here and another in the helper).
+function entryMigratedOf(state) {
+  return !!(state && typeof state === "object" && state.entryMigrated === true)
+}
+
+// The state with the marker set; the SAME object when it already carries it,
+// so a caller's "did the state move" stays an identity test.
+function withEntryMigrated(state) {
+  var st = state || emptyState()
+  if (entryMigratedOf(st)) return st
+  return cloneState(st, { entryMigrated: true })
 }
 
 // One `{id, name, at}` record: the shape a `recents` entry, `lastPlayed`
@@ -382,8 +417,26 @@ function cloneState(state, patch) {
     // M3-01. The fourth key this whitelist had to be taught, and the test
     // that proves it is the same shape as the savedSearches one: a state
     // that carries it goes through every reducer and comes out with it.
-    hiddenGroups: asList(st.hiddenGroups).slice()
+    hiddenGroups: asList(st.hiddenGroups).slice(),
+    // D-SINK-19. The FIFTH, and the one whose loss is worst: it is the only
+    // record of which source is active, so a reducer that dropped it would
+    // un-configure the plugin on the next favourite toggle. Additive at
+    // STATE_VERSION 2 exactly like hiddenGroups -- a file without it reads
+    // as "", an older build drops it, the version does not move.
+    //
+    // Through activeKeyText and NOT str(): this is the sibling of the
+    // activeKeyText fix that the first round missed (rule 15). str() coerces
+    // the number 12345678 and the list ["d990c2e4"] into values that sit
+    // inside the key grammar, and every reducer passes through here, so a raw
+    // state object handed to one would have come out "configured" on this
+    // side and unconfigured on the helper's (normalize_active_key requires a
+    // string). One reader, one rule, the same answer as parseState.
+    activeKey: activeKeyText(st.activeKey)
   }
+  // D-SINK-19 round 11, R21a: the SIXTH key this whitelist is taught, on
+  // the day it is added. Carried only when it is exactly true, so a state
+  // that has not migrated clones to exactly the shape it had before.
+  if (st.entryMigrated === true) out.entryMigrated = true
   var p = patch || {}
   for (var key in p) if (key !== "version") out[key] = p[key]
   return out
@@ -446,6 +499,15 @@ function parseState(text) {
   // M3-01. Additive and optional like savedSearches below: a file without
   // it reads as [], an older build drops it, STATE_VERSION stays 2.
   state.hiddenGroups = hiddenGroupList(parsed.hiddenGroups)
+  // D-SINK-19. Which source is active, by KEY. Additive at version 2 on the
+  // same precedent as hiddenGroups and savedSearches. A value that is not a
+  // key reads as "" rather than failing; a key naming no record is kept here
+  // and resolved to "" by activeKeyOf, because dropping it at parse time
+  // would hide the case the migration has to decide about.
+  state.activeKey = activeKeyText(parsed.activeKey)
+  // D-SINK-19 round 11, R21a: the migration marker. Absent unless exactly
+  // true (entryMigratedOf).
+  if (parsed.entryMigrated === true) state.entryMigrated = true
   var recs = asList(parsed.recents)
   for (var r = 0; r < recs.length; r++) {
     var entry = playedRecord(recs[r])
@@ -998,19 +1060,591 @@ function withoutFailed(failed, id) {
   for (var k in src) if (k !== str(id)) out[k] = src[k]
   return out
 }
+
+// R13, the FileView's "landed". Whether the write the service last asked for
+// is the one the FileView has just reported on. One `saved` per setText was
+// measured for two back-to-back calls (2026-10-11) and does NOT hold for a
+// burst: ten warm switches issued 20 setText and raised 14 `saved` on this
+// tree, 15 on lane-key-s2 (a queued write replaced by a later one is dropped
+// without a signal), so a counter of setText calls stays above zero for the
+// rest of the session and every hold waits for ever -- and on lane-key-s2
+// the same stuck counter made every foreign reload read as "save in flight"
+// (D-SRC-15's sibling). Measured 2026-10-12 with a 26-write probe under
+// cage: `text()` tracks the content of the write job that STARTED (after a
+// burst of twenty it still read T19 while T20 was pending; a failed write
+// reads its own content and then `saveFailed`), `textChanged` precedes each
+// `saved`, and the last content asked for is always written last. So the
+// write has landed exactly when the view's text IS the last text asked for;
+// an earlier write's `saved` reads an earlier text and changes nothing.
+function stateSaveLanded(viewText, askedText) {
+  return str(viewText) === str(askedText) && str(askedText) !== ""
+}
+
+// R15. The reload counter counts BY REASON: one number per reason
+// Model.reloadDisposition can answer, keyed by the reason string itself so
+// the counter cannot name a reason the decision does not (rule 13: joined by
+// a call, not by a name). Returns a NEW object, because a QML `property var`
+// mutated in place raises no change signal. The harness reads it through
+// pointerState as `stateReloadsByReason`; key-scenario's D3 asserts the
+// `save-parked` count, which is the one the start-up chmod reload lands on,
+// where the plain total was satisfied by the own-write echo that follows
+// every start (round-3 review, lane B's P2).
+function countReload(counts, reason) {
+  var out = {}
+  var src = counts && typeof counts === "object" ? counts : {}
+  for (var k in src) if (Object.prototype.hasOwnProperty.call(src, k)) out[k] = Number(src[k]) || 0
+  var r = str(reason)
+  if (r === "") r = "unknown"
+  out[r] = (out[r] || 0) + 1
+  return out
+}
+
+// D-SRC-15 (R9). A reload of state.json NEVER replaces in-memory state that
+// is newer than the file. The file is the service's own write target, so the
+// in-memory state is newer whenever a save is parked behind the start-up dirs
+// (`savePending`), a write is still in flight (`savesInFlight`: setText has
+// returned, `saved` has not fired), or the last write FAILED (`saveFailed`:
+// the file never caught up, and applying it would replay the loss). The one
+// reload that must always apply is the FIRST (`loadedBefore` false): before
+// it, memory is the empty default plus whatever stateOnLoad replays on top.
+//
+// The reload this exists for is not the service's own write echoed back
+// (`ownWrite`, texts in recentSaves: skipped since R10 of the player design)
+// but a touch by something else: the helper's start-up `state init` chmods
+// the existing file, which is an inotify IN_ATTRIB and a `loaded` with the
+// PRE-adoption text (measured 2026-10-11 on a FileView probe: a chmod from
+// 0600 to 0600 reloads too). Applied, that text replaced the key and the
+// record adoptActiveSource had just adopted, the parked save then wrote the
+// key-less state and the entry flush stripped the URL: the user's active
+// source lost on the first start after the upgrade (D-SRC-15). The sibling
+// is the same flag: an IPC switch or remove before dirsReady (cacheReady
+// comes first) parks a save, so the reload that follows is ignored too.
+//
+// D-SINK-19 round 14, R24a (D-SRC-22). "Ignored" was right for THAT reload
+// and wrong for another: R9 said "the file is older than memory by
+// construction, so an ignored reload loses nothing", which holds only while
+// nothing but this service writes the file. A hand-run helper verb (`state
+// source add`, `favorite add`) in the window -- a save parked at the start,
+// in flight, or failed and not yet retried -- was ignored and then written
+// over by the next save that landed, while the helper had answered ok:true
+// (the round-13 data-loss lens, WF FAV WOK HADD FAV). 0.13.6 applied every
+// reload and so lost the in-app change instead. Neither is acceptable,
+// because one of them is always silent. So the question is now WHOSE text
+// the reload carries, against the service's BASE (Service.landedState: the
+// text it loaded, or its last save that LANDED, or the last foreign text it
+// merged):
+//   `matchesBase` (Model.sameState of the text and the base): the disk has
+//                 not moved since the service last knew it -- the start-up
+//                 chmod's pre-adoption text is exactly this -- so a held
+//                 change still wins and the reload is ignored for the
+//                 reason it is held, as R9 had it;
+//   otherwise     the text is FOREIGN (neither the base nor one of our own
+//                 writes): while a change is held it is MERGED
+//                 (Model.mergeForeignState), never ignored and never applied
+//                 blind; with nothing held it is applied as before, which is
+//                 the merge with ours == base (pinned to agree).
+//
+//
+// D-SINK-19 round 15, R25a (D-SRC-30). AN ECHO IS ONLY A TEXT STILL IN
+// FLIGHT. `ownWrite` used to be "the text is one of the last eight this
+// service wrote", and a backup the user had copied from the plugin's own
+// file, put back after a later in-app change, carried one of those texts:
+// it was ignored as an echo and the next save wrote over the restore,
+// silently (the round-14 data-loss lens, FAV BAK DEL RSTB FAV). So
+// Service.recentSaves now holds only the burst asked for since the last
+// save that LANDED -- D-SRC-16's coalescing is why that can be more than one
+// text -- and is cleared as a save lands. A text equal to an own save that
+// landed and was then superseded is another writer's, and goes through the
+// rest of this decision like any other foreign text. What that rests on is
+// MEASURED (spikes/filewatch set r25, RESULT-2026-10-14-r25.txt): over 100
+// bursts of the view's own saves, idle and loaded, all 85 echoes carried the
+// text of the latest `saved` before them, none a text a later save had
+// superseded, and none arrived while a later text was already asked. The echo of the save that just landed now arrives with
+// nothing held and carries the base itself, so:
+//   `matchesBase` and `memoryMatchesBase` with nothing held: the reload
+//                 changes nothing -- the landed echo, a chmod, an identical
+//                 rewrite -- and is ignored as `unchanged`, which is what
+//                 the eight-text record used to do for the echo. With
+//                 memory NOT the base (the no-write mode refused a change
+//                 and a good copy was put back) it is applied, as before.
+//
+// -> { act: "apply" | "ignore" | "merge", reason }. Called by
+// Service.applyUserState before anything else; an ignored reload runs
+// neither reconcile nor the cache layout.
+function reloadDisposition(ctx) {
+  var c = ctx || {}
+  if (c.loadedBefore !== true) return { act: "apply", reason: "first-load" }
+  if (c.ownWrite === true) return { act: "ignore", reason: "own-write" }
+  var held = c.savePending === true ? "save-parked"
+    : (Number(c.savesInFlight) || 0) > 0 ? "save-in-flight"
+    : c.saveFailed === true ? "save-failed" : ""
+  if (held === "") {
+    if (c.matchesBase === true && c.memoryMatchesBase === true) return { act: "ignore", reason: "unchanged" }
+    return { act: "apply", reason: "file-newer" }
+  }
+  if (c.matchesBase === true) return { act: "ignore", reason: held }
+  return { act: "merge", reason: "foreign-" + held }
+}
+
+// R24a. A value with its object keys sorted at every depth, so two states
+// that differ only in key order serialize alike.
+function sortedKeys(value) {
+  if (Array.isArray(value)) return value.map(sortedKeys)
+  if (!value || typeof value !== "object") return value
+  var out = {}
+  var keys = Object.keys(value).sort()
+  for (var i = 0; i < keys.length; i++) out[keys[i]] = sortedKeys(value[keys[i]])
+  return out
+}
+
+// R24a. A state (an object, or the text of a file) as a reader of the file
+// would see it: through parseState, which is the service's own reader, then
+// serialized with sorted keys. Two texts that parse to the same state are
+// the same state whatever their bytes -- the helper writes compact JSON, the
+// service indents it, and `state init` writes its own empty default where a
+// fresh install's memory is parseState(""): R24c's identity, pinned.
+function stateCanonical(state) {
+  var text = typeof state === "string" ? state : JSON.stringify(state === undefined ? null : state)
+  return JSON.stringify(sortedKeys(parseState(text)))
+}
+
+function sameState(a, b) {
+  return stateCanonical(a) === stateCanonical(b)
+}
+
+function canonValue(v) {
+  return JSON.stringify(sortedKeys(v === undefined ? null : v))
+}
+
+// One SET field merged three ways: theirs, minus what ours removed since the
+// base, plus what ours added since the base, in theirs' order with ours'
+// additions after. With ours equal to the base this IS theirs, element for
+// element and in order (R24a's identity). `id` names an element.
+function mergeSetField(base, ours, theirs, id) {
+  var inBase = {}, inOurs = {}, inTheirs = {}, seen = {}
+  var b = asList(base), o = asList(ours), t = asList(theirs)
+  var i, k
+  for (i = 0; i < b.length; i++) inBase[id(b[i])] = true
+  for (i = 0; i < o.length; i++) inOurs[id(o[i])] = true
+  for (i = 0; i < t.length; i++) inTheirs[id(t[i])] = true
+  var out = []
+  for (i = 0; i < t.length; i++) {
+    k = id(t[i])
+    if (seen[k] === true) continue
+    if (inBase[k] === true && inOurs[k] !== true) continue   // ours removed it since the base
+    seen[k] = true
+    out.push(t[i])
+  }
+  for (i = 0; i < o.length; i++) {
+    k = id(o[i])
+    if (seen[k] === true || inBase[k] === true || inTheirs[k] === true) continue   // only ours' additions
+    seen[k] = true
+    out.push(o[i])
+  }
+  return out
+}
+
+// The names of the fields two records disagree on, sorted: what a conflict
+// line names (never a value -- a source record carries a credentialed URL).
+function recordFieldsDiffering(a, b) {
+  var x = a && typeof a === "object" ? a : {}, y = b && typeof b === "object" ? b : {}
+  var names = {}, k
+  for (k in x) names[k] = true
+  for (k in y) names[k] = true
+  var out = []
+  for (k in names) if (canonValue(x[k]) !== canonValue(y[k])) out.push(k)
+  return out.sort()
+}
+
+// The scalars and the one list taken whole: theirs when theirs changed since
+// the base, ours otherwise; both changed, and differently, is a conflict.
+var MERGE_WHOLE_FIELDS = ["recents", "activeKey", "lastPlayed", "session", "cacheLayout"]
+
+// D-SINK-19 round 14, R24a. THE three-way merge of a FOREIGN write into a
+// session that holds a change the file does not (a save parked, in flight
+// or failed). ONE pure function, every field rule here:
+//   favorites, savedSearches, hiddenGroups  SETS, built on THEIRS: theirs'
+//       elements in theirs' order, minus what ours removed since base, then
+//       what ours added since base, in ours' order (mergeSetField; a saved
+//       search is named by its folded terms, as parseState de-duplicates it).
+//       The same SET as "ours, plus what theirs added, minus what theirs
+//       removed"; the ORDER is theirs' (D-SRC-37: this comment used to say
+//       the set was built on ours, which the code never did)
+//   sources  RECORDS BY KEY: an add, a removal or a change made by theirs
+//       since base is applied to ours, and ours' own adds, removals and
+//       changes stand; a record BOTH changed (a change against a change, or
+//       against a removal) is a conflict
+//   recents, activeKey, lastPlayed, session, cacheLayout  theirs when theirs
+//       changed since base and ours did not; ours when only ours did; both,
+//       differently, is a conflict
+//   entryMigrated  true if either side has it (the marker is never undone)
+// A CONFLICT GOES TO THEIRS: the foreign write is the later act, and the
+// in-app side of it was already told its save failed ("Could not write
+// state.json") or has not been told it landed. Each is reported as
+// { field, key } -- the key is a source's 8-hex key or "", never a URL -- and
+// the caller logs one line per conflict.
+// Every input is read through parseState, so a missing base is the empty
+// state and every list is the shape the service holds; the result is read
+// through it once more, so the de-duplication parseState applies to a file
+// applies to the merge too.
+// D-SINK-19 round 15, R25b (D-SRC-31): A MERGE NEVER DROPS SILENTLY. The
+// caps used to be parseState's, applied to the result, and parseState stops
+// at the cap: at 49 sources an in-app add and a hand-run `state source add`
+// made 51, and the in-app record was cut with no line and no notice. The
+// caps are applied HERE now, where it is known whose element is whose:
+// theirs keeps its place (the later writer, as for a conflict -- and theirs
+// alone is within every cap, it was read through parseState), so what goes
+// past a cap is always ours' additions, at the tail. They are dropped and
+// RETURNED -- `dropped.sources` the keys, `dropped.savedSearches` and
+// `dropped.hiddenGroups` counts (a query and a group name are the user's or
+// the provider's text, never logged) -- for Model.mergeDropLines (the
+// journal, one line each) and Model.mergeDropNotice (the user, once).
+// hiddenGroups is rule 15's sibling: the same shape at MAX_HIDDEN_GROUPS.
+// -> { state, conflicts, dropped }
+function mergeForeignState(base, ours, theirs) {
+  var b = parseState(JSON.stringify(base || emptyState()))
+  var o = parseState(JSON.stringify(ours || emptyState()))
+  var t = parseState(JSON.stringify(theirs || emptyState()))
+  var conflicts = []
+  var out = cloneState(t)
+  var dropped = { sources: [], savedSearches: 0, hiddenGroups: 0 }
+  out.favorites = mergeSetField(b.favorites, o.favorites, t.favorites, function (x) { return str(x) })
+  out.hiddenGroups = mergeSetField(b.hiddenGroups, o.hiddenGroups, t.hiddenGroups, function (x) { return str(x) })
+  if (out.hiddenGroups.length > MAX_HIDDEN_GROUPS) {
+    dropped.hiddenGroups = out.hiddenGroups.length - MAX_HIDDEN_GROUPS
+    out.hiddenGroups = out.hiddenGroups.slice(0, MAX_HIDDEN_GROUPS)
+  }
+  out.savedSearches = mergeSetField(b.savedSearches, o.savedSearches, t.savedSearches,
+                                    function (x) { return savedSearchTerms(x && x.query).join(" ") })
+  if (out.savedSearches.length > MAX_SAVED_SEARCHES) {
+    dropped.savedSearches = out.savedSearches.length - MAX_SAVED_SEARCHES
+    out.savedSearches = out.savedSearches.slice(0, MAX_SAVED_SEARCHES)
+  }
+  var byKey = function (list) { var m = {}; for (var i = 0; i < list.length; i++) m[list[i].key] = list[i]; return m }
+  var mb = byKey(b.sources), mo = byKey(o.sources), mt = byKey(t.sources)
+  var sources = [], i, r, k
+  for (i = 0; i < t.sources.length; i++) {
+    r = t.sources[i]; k = r.key
+    var rb = mb[k], ro = mo[k]
+    var theirsChanged = !rb || canonValue(r) !== canonValue(rb)
+    if (rb && !ro) {
+      // ours removed it since the base
+      if (theirsChanged) { conflicts.push({ field: "sources", key: k, fields: recordFieldsDiffering(rb, r) }); sources.push(r) }
+      continue
+    }
+    if (ro) {
+      var oursChanged = !rb || canonValue(ro) !== canonValue(rb)
+      if (oursChanged && theirsChanged && canonValue(ro) !== canonValue(r)) {
+        conflicts.push({ field: "sources", key: k, fields: recordFieldsDiffering(ro, r) })
+        sources.push(r)
+      } else if (oursChanged && !theirsChanged) sources.push(ro)
+      else sources.push(r)
+      continue
+    }
+    sources.push(r)   // theirs added it
+  }
+  for (i = 0; i < o.sources.length; i++) {
+    r = o.sources[i]; k = r.key
+    if (mt[k]) continue
+    if (!mb[k]) { sources.push(r); continue }   // ours added it
+    // theirs removed it since the base; ours changed it too: a conflict, theirs (the removal) wins
+    if (canonValue(r) !== canonValue(mb[k])) conflicts.push({ field: "sources", key: k, fields: recordFieldsDiffering(mb[k], r) })
+  }
+  // Theirs' records were pushed first and number at most MAX_SOURCES, so
+  // the records past the cap are ours' additions (R25b).
+  for (i = MAX_SOURCES; i < sources.length; i++) dropped.sources.push(sources[i].key)
+  out.sources = sources.slice(0, MAX_SOURCES)
+  for (i = 0; i < MERGE_WHOLE_FIELDS.length; i++) {
+    var f = MERGE_WHOLE_FIELDS[i]
+    var cb = canonValue(b[f]), co = canonValue(o[f]), ct = canonValue(t[f])
+    if (ct !== cb) {
+      out[f] = t[f]
+      if (co !== cb && co !== ct) conflicts.push({ field: f, key: "" })
+    } else {
+      out[f] = o[f]
+    }
+  }
+  if (entryMigratedOf(o) || entryMigratedOf(t)) out.entryMigrated = true
+  else delete out.entryMigrated
+  return { state: parseState(JSON.stringify(out)), conflicts: conflicts, dropped: dropped }
+}
+
+var MERGE_LINE_HEAD = "state.json was changed by another program while a change made here was not yet saved; "
+
+// The console line for one conflict: the field, the source key when it is a
+// record, the names of the fields that differed -- never a value.
+// D-SRC-36 (round 15): "kept the other program's VERSION OF ..."; the line
+// used to read "kept the other program's the source <key>".
+function mergeConflictLine(conflict) {
+  var c = conflict || {}
+  var what = str(c.field) === "sources" && isSourceKey(str(c.key))
+    ? "the source " + str(c.key) + (asList(c.fields).length > 0 ? " (" + asList(c.fields).map(str).join(", ") + ")" : "")
+    : str(c.field)
+  return MERGE_LINE_HEAD + "kept the other program's version of " + what
+}
+
+function mergeDropCount(dropped) {
+  var d = dropped || {}
+  return { sources: asList(d.sources).filter(function (k) { return isSourceKey(str(k)) }).map(str),
+           savedSearches: Math.max(0, Math.floor(Number(d.savedSearches) || 0)),
+           hiddenGroups: Math.max(0, Math.floor(Number(d.hiddenGroups) || 0)) }
+}
+
+// R25b. The journal: one line per element a merge dropped at a cap -- a
+// source by its key, a saved search or a hidden group as itself, never its
+// text -- with the cap. [] when nothing was dropped.
+function mergeDropLines(dropped) {
+  var d = mergeDropCount(dropped)
+  var out = [], i
+  for (i = 0; i < d.sources.length; i++) {
+    out.push(MERGE_LINE_HEAD + "the source " + d.sources[i] + " added here was not kept (the limit is " + MAX_SOURCES + " sources)")
+  }
+  for (i = 0; i < d.savedSearches; i++) {
+    out.push(MERGE_LINE_HEAD + "a saved search made here was not kept (the limit is " + MAX_SAVED_SEARCHES + " saved searches)")
+  }
+  for (i = 0; i < d.hiddenGroups; i++) {
+    out.push(MERGE_LINE_HEAD + "a group hidden here was not kept (the limit is " + MAX_HIDDEN_GROUPS + " hidden groups)")
+  }
+  return out
+}
+
+// R25b. What the user is told, ONCE per merge that dropped anything: how
+// many of each, and the cap -- composed from counts and constants alone, so
+// it carries no URL, no label, no query and no group name. null when nothing
+// was dropped.
+function mergeDropNotice(dropped) {
+  var d = mergeDropCount(dropped)
+  var parts = []
+  var plural = function (n, one, many) { return n + " " + (n === 1 ? one : many) }
+  if (d.sources.length > 0) parts.push(plural(d.sources.length, "source", "sources") + " added here (the limit is " + MAX_SOURCES + " sources)")
+  if (d.savedSearches > 0) parts.push(plural(d.savedSearches, "saved search", "saved searches") + " made here (the limit is " + MAX_SAVED_SEARCHES + " saved searches)")
+  if (d.hiddenGroups > 0) parts.push(plural(d.hiddenGroups, "hidden group", "hidden groups") + " made here (the limit is " + MAX_HIDDEN_GROUPS + " hidden groups)")
+  if (parts.length === 0) return null
+  var n = d.sources.length + d.savedSearches + d.hiddenGroups
+  return { title: "Not every change was kept",
+           body: "Another program changed state.json while a change made here was not yet saved, and together they went past a limit. "
+                 + "The other program's version was kept, and " + parts.join(" and ") + (n === 1 ? " was" : " were")
+                 + " not kept. Make room, then add " + (n === 1 ? "it" : "them") + " again." }
+}
+// ---- D-SINK-19 round 12, R22a: A STATE THAT DID NOT LOAD IS NEVER WRITTEN ----
+//
+// The round-11 data-loss lens (live, both host shapes): a migrated install
+// whose state.json could not be read at the start had an empty state written
+// over it -- every source, credential and favourite gone. stateFile's
+// onLoadFailed used to call applyUserState(""), so a failed read was applied
+// as an EMPTY state, the migration ran on it and marked it, its save parked
+// behind the start-up dirs, the real text arriving with the helper's chmod
+// was ignored because a save was parked (R9), and the parked save landed.
+// The cache layout's save did the same through an unreadable state
+// DIRECTORY on every tree since D-SINK-19 began, 0.13.6 included.
+//
+// What Quickshell's FileView reports, MEASURED on Quickshell 0.3.1 in a
+// nested headless cage on 2026-10-13 (one FileView per case, the enum is
+// qs::io::FileViewError in quickshell-io.qmltypes):
+//   no file at the path                      loadFailed 2 FileNotFound
+//   a file with mode 0000 (or 0200)          loadFailed 3 PermissionDenied
+//   a directory where the file should be     loadFailed 4 NotAFile
+//   a FIFO at the path                       loadFailed 4 NotAFile
+//   the file inside a directory with 0000    loadFailed 2 FileNotFound  <-- !
+//   the file inside a directory with 0600    loadFailed 2 FileNotFound  <-- !
+//   a dangling symlink, a missing parent     loadFailed 2 FileNotFound
+//   an empty file, a file of garbage         loaded (text "" / the garbage)
+// So FileNotFound does NOT mean "the file does not exist": an unreadable
+// directory reads exactly like a fresh install, and no later event says
+// otherwise (the restored 0000 directory raised no fileChanged in that run;
+// inotify_add_watch had failed with EACCES). The one party that can tell the
+// two apart is the helper's start-up `state init`, which lstat()s the path
+// before it changes anything and reports what it found (`found`), so a
+// FileNotFound is a fresh install only when the helper says `absent` too.
+//
+// The numbers are FileViewError's, in its declaration order; the node suite
+// reads the installed qmltypes and fails if the order moves (rule 13: a join
+// by number is checked).
+var STATE_LOAD_ERRORS = { 1: "io-error", 2: "absent", 3: "permission", 4: "not-a-file" }
+
+// One load outcome -> what it IS. `result` is { loaded: true, text } from
+// onLoaded, or { loaded: false, error } from onLoadFailed. "loaded" means the
+// text parses as a state (a JSON object; parseState reads anything that
+// does); "unparsed" is a file that was read and is not one -- an empty file
+// included, since nothing this plugin writes is empty. Any error number this
+// table does not know is an I/O error: never "absent" by default.
+function stateLoadKind(result) {
+  var r = result || {}
+  if (r.loaded !== true) {
+    var e = Math.floor(Number(r.error))
+    return STATE_LOAD_ERRORS[e] || "io-error"
+  }
+  return parseJsonObject(r.text) ? "loaded" : "unparsed"
+}
+
+// The helper's `state init` reply -> "absent" when it found nothing at the
+// path before it created the file, "present" when it found anything at all
+// (a file, a directory, something it could not lstat), and "unknown" when
+// there is no reply to read: the init failed, printed nothing, or is a build
+// that predates the field. Only "absent" can make a fresh install.
+// R23c (round 13): `timedOut` -- the service's watchdog killed the init --
+// answers "timeout", whatever the killed process printed or exited with.
+// R24b (round 14): two kinds of "present" carry their own answer, because
+// the FileView reports both as FileNotFound and the sentence that fixes
+// each is not the folder-permission one: "link", a symbolic link at the
+// path whose target is missing or not a regular file (the helper refuses to
+// read or write through it), and "not-a-dir", something that is not a
+// directory where the state DIRECTORY (or a folder above it) should be.
+function stateInitFound(text, exitCode, timedOut) {
+  if (timedOut === true) return "timeout"
+  if (Number(exitCode) !== 0) return "unknown"
+  var lines = str(text).split("\n")
+  for (var i = lines.length - 1; i >= 0; i--) {
+    var o = parseJsonObject(lines[i])
+    if (!o || o.kind !== "state" || o.action !== "init") continue
+    var f = str(o.found)
+    if (f === "absent") return "absent"
+    // R25c: "folder-link", a link at the state FOLDER (or above it) that
+    // leads nowhere, is the helper's word too and gets its own sentence.
+    if (f === "link" || f === "not-a-dir" || f === "folder-link") return f
+    if (f === "file" || f === "other" || f === "unreadable") return "present"
+    return "unknown"
+  }
+  return "unknown"
+}
+
+// What the service does with a load that is not "loaded".
+//   ctx.kind         Model.stateLoadKind of the latest load
+//   ctx.loadedBefore a state has been applied this session
+//   ctx.initFound    Model.stateInitFound, "" until the start-up init exits
+//   ctx.retried      the one re-read after the init has been spent
+// -> { act, reason }
+//   apply  the load is a state: apply it (and lift any no-write mode)
+//   fresh  nothing exists at the path: an empty state, the migration may run
+//   wait   the start-up init has not answered; nothing is applied or written
+//   retry  re-read once: the init restores the modes of the directory and
+//          file it finds, so the file may be readable now (it is, for both
+//          chmod 0000 cases; a 0000 file also raises its own reload)
+//   block  no-write mode for the session: every state write is refused, the
+//          migration does not run, the entry is left as it is
+// Mid-session (`loadedBefore`) any load that is not a state blocks at once
+// and memory stands: a reload never replaces memory with a state that did
+// not load, and a vanished file is not a fresh install while the session
+// that read it is still running (the unreadable directory reads the same).
+function stateLoadDecision(ctx) {
+  var c = ctx || {}
+  var kind = str(c.kind)
+  if (kind === "loaded") return { act: "apply", reason: "loaded" }
+  if (kind === "") return { act: "wait", reason: "no-load" }
+  if (c.loadedBefore === true) return { act: "block", reason: kind }
+  var found = str(c.initFound)
+  if (found === "") return { act: "wait", reason: "init" }
+  // R23c: the init never answered (the service's watchdog killed it), so
+  // there is no witness and nothing a re-read could fix: the load that was
+  // waiting on it decides as the no-write mode, with that reason.
+  if (found === "timeout") return { act: "block", reason: "init-timeout" }
+  if (kind === "absent" && found === "absent") return { act: "fresh", reason: "absent" }
+  if (c.retried !== true) return { act: "retry", reason: kind }
+  // R24b: the helper named what is at the path, and that is the reason --
+  // the folder-permission sentence "absent-unconfirmed" carries would send
+  // the user to chmod a folder that is fine.
+  if (found === "link" || found === "not-a-dir" || found === "folder-link") return { act: "block", reason: found }
+  return { act: "block", reason: kind === "absent" && found !== "unknown" ? "absent-unconfirmed" : kind }
+}
+
+// The one gate every state write goes through (Service.saveState).
+//   blocked  the no-write mode's reason, "" when writes are allowed
+//   loaded   a state has been applied this session
+//   dirsReady the start-up `state init` has exited
+// -> "refuse" | "park" | "write". A save asked for before any state has
+// loaded PARKS (the section-15 replay: a play recorded before the load is
+// written once the file it merges onto is known), never writes: before
+// R22a a save made with the dirs ready and the load still out wrote the
+// empty default over the file.
+function stateWriteGate(ctx) {
+  var c = ctx || {}
+  if (str(c.blocked) !== "") return "refuse"
+  if (c.loaded !== true || c.dirsReady !== true) return "park"
+  return "write"
+}
+
+// The user is told ONCE per no-write episode: this sentence, as a desktop
+// notification and a console line. It names the file and what to do, and
+// never a URL (it is composed from the reason and the path alone).
+function stateUnreadableNotice(reason, path) {
+  var file = str(path) !== "" ? str(path) : "state.json"
+  var r = str(reason)
+  var what = "could not be read"
+  var fix = "Check the file and its folder, then run omarchy restart shell."
+  if (r === "permission") {
+    what = "is not readable (permission denied)"
+    fix = "Make it readable with chmod 600 on that file, then run omarchy restart shell."
+  } else if (r === "not-a-file") {
+    what = "is not a regular file"
+    fix = "Move whatever is at that path aside, then run omarchy restart shell."
+  } else if (r === "unparsed") {
+    what = "is not a valid state file"
+    fix = "Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell."
+  } else if (r === "link") {
+    // R24b: the not-a-file sentence, naming what is there.
+    what = "is a symbolic link whose target is missing or is not a regular file"
+    fix = "Restore the file it points to, or move the link aside, then run omarchy restart shell."
+  } else if (r === "not-a-dir") {
+    // R24b: a regular file (or anything but a folder) where the state FOLDER
+    // should be. The sentence names the folder's path, not the file's.
+    file = str(path) !== "" ? str(path).replace(/\/[^\/]*$/, "") : "The state folder"
+    what = "is not a folder (a file is at that path, or at one above it)"
+    fix = "Move whatever is at that path aside, then run omarchy restart shell."
+  } else if (r === "folder-link") {
+    // R25c (D-SRC-32): the state FOLDER is a symbolic link that dangles or
+    // leads to something that is not a folder. The sentence names the folder.
+    file = str(path) !== "" ? str(path).replace(/\/[^\/]*$/, "") : "The state folder"
+    what = "is a symbolic link whose target is missing or is not a folder (or a folder above it is)"
+    fix = "Restore the folder it points to, or move the link aside, then run omarchy restart shell."
+  } else if (r === "absent-unconfirmed") {
+    what = "could not be found, or its folder could not be read"
+    fix = "Make the folder readable with chmod 700, then run omarchy restart shell."
+  } else if (r === "absent") {
+    // Mid-session (the file vanished under a running shell): the helper's
+    // witness is not asked again, so the sentence names both causes the
+    // FileView cannot tell apart -- a broken symbolic link (R24b) and an
+    // unreadable folder.
+    what = "could not be found, or its folder could not be read"
+    fix = "If it is a symbolic link, restore the file it points to; otherwise make the folder readable with chmod 700. Then run omarchy restart shell."
+  } else if (r === "init-timeout") {
+    // R23c: the start-up check of the file (the helper's `state init`) did
+    // not answer within Service.stateInitTimeoutMs and was stopped.
+    what = "could not be checked: the start-up check did not answer and was stopped"
+    fix = "Make sure a regular file, or nothing, is at that path, then run omarchy restart shell."
+  }
+  return { title: "Saved sources not loaded",
+           body: file + " " + what + ". Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. " + fix }
+}
+
+// D-SINK-19 round 15 (D-SRC-38). The no-write mode's SHORT form, for the
+// Sources header's right slot: what the notice's title says, except in a
+// MID-session block, where the sources WERE loaded -- the rows above are the
+// session's and still play -- and what stopped is saving. One function, the
+// notice copy family: at a start it IS stateUnreadableNotice's title.
+function stateBlockedHeader(reason, path, midSession) {
+  if (str(reason) === "") return ""
+  if (midSession === true) return "Saving has stopped"
+  return stateUnreadableNotice(reason, path).title
+}
 export {
   MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedSearchTerms,
   savedSearchHit, savedSearchCount, savedSearchChannels, savedSearchNotice,
   favoriteOrigin, favoriteRemovalNotice, hideNotice, scopeEntryAccessibleName,
   savedSearchRows, savedSearchArrivals, savedSearchDepartures,
   savedSearchFooter, withSavedSearch, withoutSavedSearch, savedSearchRecord,
-  emptyState, playedRecord, cloneState, withCacheLayout, parseState,
-  pushPlayedRecord, stateOnLoad, isFavorite, toggleFavorite, pushRecent,
-  recordPlayed, clearSession, stateSession, deadSessionVerdict,
-  PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES, sessionAfterOutcome,
-  withFavorites, hiddenGroupList, hiddenGroupSet, isGroupHidden,
-  toggleHiddenGroup, browsableChannels, hideAction, hideVerb, removeRecent,
-  trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed,
-  prunedFailed, knownIdSet, failedIndex, failedDocument, failedWhen,
-  withFailed, failedAfterHealthy, withoutFailed
+  emptyState, entryMigratedOf, withEntryMigrated, playedRecord, cloneState,
+  withCacheLayout, parseState, pushPlayedRecord, stateOnLoad, isFavorite,
+  toggleFavorite, pushRecent, recordPlayed, clearSession, stateSession,
+  deadSessionVerdict, PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES,
+  sessionAfterOutcome, withFavorites, hiddenGroupList, hiddenGroupSet,
+  isGroupHidden, toggleHiddenGroup, browsableChannels, hideAction, hideVerb,
+  removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed,
+  normalizeFailed, prunedFailed, knownIdSet, failedIndex, failedDocument,
+  failedWhen, withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
+  countReload, reloadDisposition, sortedKeys, stateCanonical, sameState,
+  canonValue, mergeSetField, recordFieldsDiffering, MERGE_WHOLE_FIELDS,
+  mergeForeignState, MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount,
+  mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
+  stateInitFound, stateLoadDecision, stateWriteGate, stateUnreadableNotice,
+  stateBlockedHeader
 }

@@ -3,6 +3,105 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.14.0 (2026-10-14)
+
+**Privacy.** Your playlist and guide-data URLs carry your provider login,
+and until now the active one was stored in the desktop shell's own settings
+file, `~/.config/omarchy/shell.json`, because that is where the bar widget
+named its source. The widget now names the active source by a short code,
+and the plugin keeps the URLs in its own files, readable by you alone:
+`~/.local/state/omarchy-iptv/state.json`, and the per-source cache under
+`~/.cache/omarchy-iptv`.
+
+### Changed
+
+- **The first shell start on this version moves the URLs out of the shell's
+  settings.** A playlist and guide URL set on the bar widget are added to
+  your sources (or found there), made active, and taken off the widget's
+  entry only once the plugin's own file has been written. If that write
+  fails they are left where they were and moved at the next start.
+- **`omarchy bar set io.github.rmcdavid.iptv playlistUrl <value>` (and
+  `epgUrl`) no longer do anything.** After the move the plugin does not read either
+  setting: a value set there is removed from the entry at the plugin's next
+  write, with one `Bar setting ignored` notification naming the setting and
+  never the URL. Add, switch and remove sources on the guide's Sources
+  screen.
+- **The guide's hint after a playlist fails to load says "check the source in
+  Sources"**, not a setting the plugin no longer reads.
+- **A change another program makes to `state.json` is merged with yours.** If
+  the helper, or a file you put back, changes it while the plugin holds a
+  change it has not saved yet, both are kept where they changed different
+  things. Where both changed the same source or the same setting (which
+  source is active, the recent list), the other program's version wins and
+  the shell's journal says so. If keeping both would pass a limit (50
+  sources, 20 saved searches, 200 hidden groups), the app's additions past
+  it are dropped and a notification says how many; one race at the
+  50-source limit, while a source added in the app is still being checked,
+  is not covered yet and is described in the README.
+- **A `state.json` that is a symbolic link is written through and left a
+  link**; a link that leads nowhere is refused rather than replaced. A tool
+  that replaces the link itself while the shell runs (`mv` or `sed -i` run
+  on `~/.local/state/omarchy-iptv/state.json`, `ln -sfn`) is not noticed,
+  and the shell's next save writes over that change: edit the file the
+  link points to at its own path, or restart the shell straight after such
+  a tool and before using the guide. 0.13.6 lost the same edits.
+- **The plugin's folders may be symbolic links too.** A link at
+  `~/.local/state/omarchy-iptv` is followed and the folder it leads to is
+  made private (0700) at every shell start; a linked runtime folder is made
+  0700 when the player starts or stops; a linked cache folder is made 0700
+  only by the one-time cache migration at a fresh install's first start, so
+  after an upgrade it keeps its own mode (what the plugin makes inside it is
+  0700 and 0600). A state folder link that leads nowhere is refused with a
+  sentence naming it.
+- **For anyone running the helper by hand** (`python3
+  ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv`): its
+  `state show` and `state source list` exit 1 over a `state.json` they
+  cannot read or parse, where they used to print an empty state; every
+  `state` command but `state init` refuses a `state.json` that is not a
+  regular file or a link to one, instead of blocking or writing over it;
+  and a link it cannot write through, or a state folder link that leads
+  nowhere, is refused (exit 1) with a sentence saying what is wrong, where
+  0.13.6 replaced the first with a plain file and ended the second in a
+  traceback.
+
+### Fixed
+
+- **A damaged or unreadable `state.json` is never written over.** On
+  0.13.6, a state folder that could not be read at start lost the sources
+  you had added in the app, a cut-off `state.json` was replaced, and the
+  helper's `state` commands wrote an empty state over a damaged file. Now
+  the plugin saves nothing until the file can be read again, tells you once
+  with a notification that names the file and what to do, and the guide
+  says the same instead of showing the first-run form (if it happens after
+  your sources loaded, the Sources screen says saving has stopped).
+  Restore the file, or move it aside to start with no sources, then restart
+  the shell.
+- **Something other than a file at `state.json`** (a folder, a pipe) no
+  longer leaves the helper waiting for ever or changes that folder's
+  permissions.
+- **In the first session after installing, the shell now notices** when
+  another program changes `state.json`; before, it saw nothing until the
+  next restart and its next save wrote over the change.
+- **A backup of `state.json` put back while the shell runs is kept**, unless
+  a save of the plugin's has failed or is still under way and the backup is
+  identical to the file as the plugin last knew it (the change made in the
+  app is then saved over it). 0.13.6 took a copy of any of its last eight
+  saves for its own write and wrote over it at the next save.
+
+### Worth knowing
+
+- **Going back to an older version makes the plugin look unconfigured**,
+  because an older build looks for the URL on the widget's entry. Your
+  sources are all still in `state.json`: follow the form's `Saved sources`
+  link and pick one.
+- **Not in this release:** a fix for the finding the marketplace maintainer
+  raised against 0.13.6 about provider logo images. Channel logos are off
+  unless you turned them on (`showLogos`); with them off the guide loads no
+  logo images, and if you did turn them on, `g` on the Sources screen turns
+  them off.
+- **Restart the shell after this update** (`omarchy-restart-shell`, not
+  `omarchy-refresh-shell`).
+
 ## 0.13.6 (2026-10-12)
 
 **For the marketplace; nothing the plugin does has changed.** 0.13.5 could

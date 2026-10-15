@@ -32,8 +32,11 @@ Subcommands (contract of record: ARCHITECTURE.md (dev branch) section 5):
   cache [--cache-dir D] migrate [--key K] | remove --key K | prune [--keep K ...] [--active K]
       per-source cache directories under <cache-dir>/sources/<key>/ (M2-01, D5/D6)
   config shield
-      deny group and other on $XDG_CONFIG_HOME/omarchy/shell.json, the host
-      file the shell persists source URLs into (D-SINK-18). Takes no path:
+      deny group and other on $HOME/.config/omarchy/shell.json, the host's
+      settings file, which holds a provider URL only while an older entry
+      waits for the one-time move into state.json, or after one is set with
+      `omarchy bar set` until the plugin's next write removes it (D-SINK-18,
+      D-SINK-19). Takes no path:
       it computes the one path it may touch. Prints modes and a verdict.
 """
 from __future__ import annotations
@@ -682,13 +685,44 @@ def mode_text(mode: int) -> str:
     return "0%03o" % stat.S_IMODE(mode)
 
 
+class FolderUnusable(NotADirectoryError):
+    """A folder ensure_private_dir needs is a symbolic link that does not lead
+    to a folder (it dangles, or leads to a file), or something that is not a
+    folder sits at its path or one above it. An OSError, so every caller that
+    already turns an OSError into a warning keeps doing so (ensure_player_dirs);
+    main() reports the rest as `folder_unusable` with this sentence, never a
+    traceback."""
+
+    def __init__(self, path: str, what: str) -> None:
+        super().__init__(errno.ENOTDIR, what)
+        self.sentence = "%s %s; nothing was written" % (path, what)
+
+
 def ensure_private_dir(path: str) -> None:
     """mkdir -p with every directory this call creates set to 0700 (the
     per-source layout means the helper may be the first to create
-    <cache-dir>/sources/, which must be private like its children)."""
+    <cache-dir>/sources/, which must be private like its children).
+
+    D-SINK-19 round 15, R25c (D-SRC-32). A symbolic link AT `path` that leads
+    to a folder is FOLLOWED, and the folder it leads to is made 0700 like
+    one this created -- measured 2026-10-14 on this machine, the helper as a
+    subprocess: a link to a 0755 (or 0500) folder came out 0700 after `state
+    init`, a state write, `cache migrate`, `failed mark` and `player stop`
+    alike, the link left a link. That is the folder the plugin keeps its
+    files in, wherever the user put it, so it gets the plugin's own mode;
+    the README says so. A link here (or ABOVE it) that DANGLES or leads to
+    something that is not a folder is refused with FolderUnusable before
+    anything is created: it used to reach a mkdir under the link and end in
+    a FileNotFoundError traceback and `code: internal` (every caller --
+    the state folder, a cache folder, the runtime socket folder, the logo
+    folder -- measured, the same before.txt run)."""
     missing: list[str] = []
     current = path
     while current and not os.path.isdir(current):
+        if os.path.lexists(current):
+            if os.path.islink(current):
+                raise FolderUnusable(current, "is a symbolic link whose target is missing or is not a folder")
+            raise FolderUnusable(current, "is not a folder")
         missing.append(current)
         parent = os.path.dirname(current)
         if parent == current:
@@ -699,14 +733,45 @@ def ensure_private_dir(path: str) -> None:
             os.mkdir(directory, 0o700)
         except FileExistsError:
             continue
-        try:
-            os.chmod(directory, 0o700)
-        except OSError:
-            pass
+        chmod_if_kind(directory, 0o700, stat.S_ISDIR)
+    # R23d (rule 15): only a DIRECTORY is made 0700. This chmod used to take
+    # whatever was at the path, so a regular file where the state directory
+    # should be came out 0700 -- executable -- and a FIFO there was chmod-ed.
+    chmod_if_kind(path, 0o700, stat.S_ISDIR)
+
+
+def chmod_if_kind(path: str, mode: int, kind: Any) -> bool:
+    """chmod `path` to `mode` only when what is there is the KIND it repairs
+    (`stat.S_ISREG` or `stat.S_ISDIR`), decided on the inode that is changed.
+
+    D-SINK-19 round 13, R23d. `state init` chmod-ed a DIRECTORY at the state
+    file's path 0755 -> 0600 and made it unsearchable: the mode repair asked
+    what the mode was and never what the thing was. An O_PATH descriptor is
+    the one open that needs no permission on its target (the 0000 file and
+    the 0000 directory this repairs are exactly the ones a read open cannot
+    reach), never opens a FIFO or a device (nothing blocks, nothing has a
+    side effect), and its fstat decides the kind; the chmod then goes
+    through /proc/self/fd/N, which names that inode and no other, so a
+    rename between the check and the change cannot redirect it (fchmod
+    refuses an O_PATH descriptor with EBADF, measured on Python 3.14 /
+    Linux 7.2). Symlinks are followed, as os.chmod always followed them. No
+    /proc means no repair, never a chmod by name. A mode that is already
+    right is not touched: a chmod is an inotify IN_ATTRIB on whatever the
+    shell watches. -> True when the mode was changed; never raises."""
     try:
-        os.chmod(path, 0o700)
+        fd = os.open(path, os.O_PATH | os.O_CLOEXEC)
     except OSError:
-        pass
+        return False
+    try:
+        st = os.fstat(fd)
+        if not kind(st.st_mode) or stat.S_IMODE(st.st_mode) == mode:
+            return False
+        os.chmod("/proc/self/fd/%d" % fd, mode)
+        return True
+    except OSError:
+        return False
+    finally:
+        os.close(fd)
 
 
 # ------------------------------------------------------------- redaction
@@ -1298,7 +1363,7 @@ def allocate_source_key(sources: list[dict[str, Any]], url: str) -> str:
 
 
 def host_port_of(url: str) -> str:
-    """Model.hostPortOf: host[:port] of a URL, lower-cased; "" for paths.
+    """Mirror of hostPortOf (model/sources.mjs, internal to the model): host[:port] of a URL, lower-cased; "" for paths.
 
     D-SINK-17. The userinfo ends at the LAST at-sign in the authority, not the
     first. This matched `(?:[^@/?#]*@)?`, which cannot cross an at-sign, so
@@ -1338,7 +1403,7 @@ def derive_label(url: str, kind: str) -> str:
 
 
 def label_key(text: Any) -> str:
-    """Model.labelKey: the case-insensitive comparison form (SR21)."""
+    """Mirror of labelKey (model/sources.mjs, internal to the model): the case-insensitive comparison form (SR21)."""
     return sanitize_input(text, MAX_SOURCE_URL).lower()
 
 
@@ -1860,11 +1925,31 @@ def remap_state_file(path: str, channels: list[dict[str, Any]]) -> int:
 
     Runs after a successful playlist fetch, when the caller named a state
     directory explicitly (cmd_playlist), and writes only when something
-    actually moves -- which is at most once per state file, ever. That single
-    write lands in the same class as the `state source add` the service
-    already asks for mid-session: the service's FileView reloads state.json
-    and Model.stateOnLoad merges it. It cannot become a periodic writer,
-    because after the first pass the map moves nothing.
+    actually moves -- which is at most once per state file, ever. It cannot
+    become a periodic writer, because after the first pass the map moves
+    nothing.
+
+    What the running shell does with this write, MEASURED (D-SRC-19, as
+    re-measured in rounds 13 and 14): its FileView RELOADS state.json after
+    this helper's atomic rename (spikes/filewatch, R23g, idle and under
+    load), and since round 14 that holds for the first session after a fresh
+    install too -- the service re-arms the watch once its start-up check has
+    created the directory (R24c; before that, a session whose state
+    directory did not exist when it first loaded saw no change all session).
+    The reloaded text is not the service's own, so it is a FOREIGN write:
+    applied when the service holds no unsaved change, and three-way MERGED
+    into memory when it does (Model.mergeForeignState, R24a), so neither
+    this write nor the change waiting to be saved is lost. Rounds 9 to 12
+    said the shell never reloads after this rename; that was measured on
+    rigs lost with /tmp, and the dir-absent first session is the one shape
+    that reproduces it. For THIS write the remap is harmless either way: the
+    service's active-source fetch is the one call site that passes
+    --state-dir (D-ID-1), and the service remaps its own in-memory state
+    onto the same scheme when it applies the list (Service.adoptIdScheme,
+    D-ID-3), so the two agree. The service does not pass --state-dir while
+    it is in the no-write mode (R24e), so this never writes a file the
+    shell has refused to write. A symlink at the path is written through to
+    its target, or left alone when it leads nowhere (R24b).
 
     The write edits the RAW document. An earlier version rebuilt it from
     normalize_state, which is a whitelist: every key this helper version does
@@ -1872,7 +1957,11 @@ def remap_state_file(path: str, channels: list[dict[str, Any]]) -> int:
     dropped on a write the user never asked for. Moving four fields is the
     whole remit, so four fields are what it touches.
     """
-    raw = read_json(path)
+    try:
+        target = state_file_target(path)
+    except HelperError:
+        return 0
+    raw = read_json(target)
     if not isinstance(raw, dict):
         return 0
     remap = channel_id_remap(channels)
@@ -1881,7 +1970,7 @@ def remap_state_file(path: str, channels: list[dict[str, Any]]) -> int:
     updated = dict(raw)
     moved = remap_state_ids(updated, remap)
     if moved:
-        write_json_atomic(path, updated)
+        write_state_file(path, target, updated)
     return moved
 
 
@@ -1921,7 +2010,14 @@ def read_local_source(path: str, label: str = "playlist") -> bytes:
     size = os.path.getsize(real)
     if size > MAX_SOURCE_BYTES:
         raise HelperError("too_large", "%s file %s is larger than %d MB" % (label, name, MAX_SOURCE_BYTES // (1024 * 1024)))
-    with open(real, "rb") as handle:
+    # R23b (rule 15): the path is the user's own, but what is at it can be
+    # swapped between the isfile above and this open, and a FIFO would hang
+    # the fetch until the service's watchdog killed it.
+    try:
+        fd = open_regular(real)
+    except NotRegularFile:
+        raise HelperError("not_found", "%s file not found: %s" % (label, name)) from None
+    with os.fdopen(fd, "rb") as handle:
         return handle.read(MAX_SOURCE_BYTES + 1)
 
 
@@ -2093,16 +2189,22 @@ def open_xml_stream(data: bytes) -> Any:
     return io.BytesIO(data)
 
 
-def write_text_atomic(path: str, text: str) -> None:
-    """Temp file in the same (0700) directory, mode 0600, rename over `path`."""
+def write_text_atomic(path: str, text: str, private_dir: bool = True) -> None:
+    """Temp file in the same (0700) directory, mode 0600, rename over `path`.
+
+    `private_dir` False (R24b, round 14): the directory is not the plugin's
+    -- the target of a state.json symlink, a dotfiles folder -- so it is
+    neither created nor chmod-ed; the temporary file is still 0600 and
+    O_EXCL, and the rename still replaces `path` atomically."""
     directory = os.path.dirname(path)
-    ensure_private_dir(directory)
+    if private_dir:
+        ensure_private_dir(directory)
     tmp = os.path.join(directory, ".tmp-%s-%s" % (os.path.basename(path), os.urandom(4).hex()))
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
             handle.write(text)
-        os.chmod(tmp, 0o600)
+            os.fchmod(handle.fileno(), 0o600)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -2125,7 +2227,7 @@ def write_bytes_atomic(path: str, data: bytes) -> None:
     try:
         with os.fdopen(fd, "wb") as handle:
             handle.write(data)
-        os.chmod(tmp, 0o600)
+            os.fchmod(handle.fileno(), 0o600)
         os.replace(tmp, path)
     except BaseException:
         try:
@@ -2135,9 +2237,9 @@ def write_bytes_atomic(path: str, data: bytes) -> None:
         raise
 
 
-def write_json_atomic(path: str, payload: Any) -> None:
+def write_json_atomic(path: str, payload: Any, private_dir: bool = True) -> None:
     # json.dumps (one-shot C encoder) is several times faster than json.dump.
-    write_text_atomic(path, json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n")
+    write_text_atomic(path, json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n", private_dir)
 
 
 def json_string(text: str) -> str:
@@ -2147,10 +2249,75 @@ def json_string(text: str) -> str:
     return '"' + text + '"'
 
 
+# D-SINK-19 round 13, R23b, rule 15: every open() in this helper of a path
+# a user or another program can replace, and its verdict (2026-10-13).
+#   Routed through open_regular (never blocks; a regular file or a symlink to
+#   one, decided by fstat on the descriptor):
+#     state.json -- `state init`, every other `state` verb (read_state_strict)
+#       and the D-ID-1 remap (remap_state_file, via read_json);
+#     every cache JSON read by read_json -- channels.json, failed.json,
+#       playlist-status.json, epg-status.json, the logo and EPG indexes;
+#     the EPG window cache (load_window); a cached logo (_read_logo_prefix);
+#     the player lock record (read_lock_file); a local playlist or EPG file
+#       (read_local_source), whose isfile check a swap could outrun.
+#   Left as they are, with why:
+#     the player lock's O_CREAT|O_RDWR open (acquire_lock): O_RDWR on
+#       a FIFO does not block on Linux, and its fchmod is gated on S_ISREG;
+#     the host config shield's open of shell.json: already O_NONBLOCK, and
+#       refused by fstat unless a regular file the euid owns;
+#     the cache walk's directory opens: O_DIRECTORY fails at once on
+#       anything that is not a directory;
+#     the atomic writers' temporary files: created by this process with
+#       O_EXCL in a 0700 directory, never an existing path;
+#     manifest.json in the plugin directory (nothing writes there at
+#       runtime, rule 4), /proc/<pid>/*, os.devnull.
+class NotRegularFile(OSError):
+    """Something other than a regular file (or a symlink to one) where one
+    is read. An OSError, so every tolerant reader that already answers None
+    for a file it cannot read answers None for this too."""
+
+
+def open_regular(path: str) -> int:
+    """Open `path` for reading WITHOUT ever blocking, and only when it is a
+    regular file or a symlink to one. -> a descriptor the caller closes.
+
+    D-SINK-19 round 13, R23b. A plain open() of a FIFO blocks until a writer
+    appears: with a FIFO at state.json, `state init`, `show` and `favorite
+    add` each sat in open() until killed, the service waited on that init
+    forever, and every start left an orphaned helper behind (the round-12
+    lenses, measured; the shipped 0.13.6 the same). So: O_NONBLOCK (a FIFO
+    opens at once with no writer), O_NOCTTY (a terminal at the path never
+    becomes ours), and the decision is an fstat of the descriptor that WAS
+    opened -- never an lstat of the name before it, which a rename in
+    between would make a statement about another file. A socket cannot be
+    opened at all (ENXIO) and is reported the same way. O_NONBLOCK changes
+    nothing about reads from a regular file. The rule-15 list of the reads
+    routed here, and of those left as they are, is the comment above."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
+    except OSError as error:
+        if error.errno == errno.ENXIO:
+            raise NotRegularFile(errno.ENXIO, "not a regular file", path) from None
+        raise
+    try:
+        mode = os.fstat(fd).st_mode
+    except BaseException:
+        os.close(fd)
+        raise
+    if not stat.S_ISREG(mode):
+        os.close(fd)
+        raise NotRegularFile(errno.EINVAL, "not a regular file", path)
+    return fd
+
+
+def read_regular_text(path: str) -> str:
+    with os.fdopen(open_regular(path), "r", encoding="utf-8") as handle:
+        return handle.read()
+
+
 def read_json(path: str) -> Any:
     try:
-        with open(path, "r", encoding="utf-8") as handle:
-            return json.load(handle)
+        return json.loads(read_regular_text(path))
     except (OSError, ValueError):
         return None
 
@@ -3158,8 +3325,7 @@ def write_window(path: str, meta: dict[str, Any], channels: dict[str, str]) -> N
 def load_window(path: str) -> dict[str, Any] | None:
     """-> the header keys plus "lines" (the raw channel lines), or None."""
     try:
-        with open(path, "r", encoding="utf-8") as handle:
-            text = handle.read()
+        text = read_regular_text(path)
     except OSError:
         return None
     head, _, body = text.partition("\n")
@@ -4129,7 +4295,7 @@ def logo_dimension_refusal(url: str, data: bytes, ctype: str) -> str:
 
 def _read_logo_prefix(path: str, limit: int) -> bytes | None:
     try:
-        with open(path, "rb") as handle:
+        with os.fdopen(open_regular(path), "rb") as handle:
             return handle.read(limit)
     except OSError:
         return None
@@ -4702,7 +4868,7 @@ MPV_TLS_VERIFY = "--tls-verify=yes"
 MPV_TLS_VERIFY_PROP = "tls-verify"
 MPV_STREAM_OPTS_PROP = "stream-lavf-o"
 PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "tracks", "seek")
-# Mirror of Model.MPV_HANDOFF and friends (PO-10, D-PLY-5). These options are
+# Mirror of MPV_HANDOFF (model/mpv.mjs, internal to the model) and friends (PO-10, D-PLY-5). These options are
 # allowed - PO-5 keeps `--ytdl` as the documented escape hatch for links that
 # are not direct streams - but each one puts the credentialed stream address
 # on a SECOND program's command line, so the user is told at the moment the
@@ -5105,7 +5271,11 @@ def acquire_lock(path: str, timeout: float) -> int:
     for _ in range(LOCK_RETRIES):
         fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
         try:
-            os.fchmod(fd, 0o600)
+            # R23d (rule 15): only a regular file is made 0600, decided on
+            # the descriptor. O_RDWR never blocks on a FIFO (Linux), so the
+            # open above needs no O_NONBLOCK; the chmod is what is gated.
+            if stat.S_ISREG(os.fstat(fd).st_mode):
+                os.fchmod(fd, 0o600)
         except OSError:
             pass
         granted = False
@@ -5159,7 +5329,7 @@ def read_lock_record(fd: int) -> dict[str, Any]:
 def read_lock_file(sock_path: str) -> dict[str, Any]:
     """The record without taking the lock (probe is lock-free)."""
     try:
-        with open(player_lock_path(sock_path), "rb") as handle:
+        with os.fdopen(open_regular(player_lock_path(sock_path)), "rb") as handle:
             document = json.loads(handle.read().decode("utf-8"))
     except (OSError, ValueError, UnicodeDecodeError):
         return {}
@@ -7345,7 +7515,24 @@ def cmd_cache(args: argparse.Namespace) -> int:
 
 def default_state() -> dict[str, Any]:
     return {"version": STATE_VERSION, "cacheLayout": 0, "favorites": [], "recents": [], "lastPlayed": None,
-            "session": None, "sources": [], "savedSearches": [], "hiddenGroups": []}
+            "session": None, "sources": [], "savedSearches": [], "hiddenGroups": [], "activeKey": ""}
+
+
+def normalize_active_key(raw: Any) -> str:
+    """Mirror of Model.activeKeyText: the active source's key (D-SINK-19), or
+    "" when the value is not a key. A key naming no record is KEPT -- the shell
+    resolves that case (Model.activeKeyOf) and dropping it here would hide it.
+
+    This is the fifth key this reader had to be taught and the one whose loss
+    would be worst: default_state() is rebuilt field by field and copied into,
+    so a key this function does not exist for is ERASED by the next
+    `state favorite add` -- which for this key means the plugin reads as not
+    configured at all. savedSearches and hiddenGroups both carry that warning
+    above them; this one would have been visible."""
+    if not isinstance(raw, str):
+        return ""
+    key = raw.strip()
+    return key if SOURCE_KEY_RE.match(key) else ""
 
 
 # Must match the model's MAX_SAVED_SEARCHES / MAX_SAVED_TERMS / MAX_SAVED_QUERY and
@@ -7449,6 +7636,35 @@ def non_negative_int(value: Any) -> int:
     return number if number > 0 else 0
 
 
+# D-SINK-19 round 10, R20a (D-SRC-20): THE HELPER KEEPS WHAT THE SERVICE
+# WRITES. normalize_state is a whitelist, so a key the service writes and this
+# reader does not know is ERASED by the next hand-run `state favorite add`
+# (round 9's pendingEpg and epgSetAt were, and the user's guide URL existed
+# nowhere afterwards). The check that holds the two readers together is ONE
+# fixture both run (the shared state-keys fixture, dev branch): the node suite
+# requires every key the service can serialise to equal its list, and the
+# python suite requires this reader to emit exactly that list.
+#
+# Round 11 (R21) withdrew the three keys round 9 and 10 taught this reader
+# (pendingEpg, epgSetAt, entryInputs) with the machinery that wrote them, and
+# added one: the migration marker, below.
+
+
+def normalize_entry_migrated(raw: Any) -> bool:
+    """Mirror of Model.entryMigratedOf: the migration marker (D-SINK-19 R21a),
+    True only for the JSON boolean true. A string "true" or a 1 is no marker:
+    the model reads `=== true`, and a coercion here would read an unmigrated
+    file as migrated on one side and not the other (the activeKeyText lesson).
+
+    Erasing it is NOT harmless and NOT fatal, and the difference matters: a
+    state without it makes the next shell start migrate again, which reads the
+    bar entry's URLs as inputs once more. That is the downgrade the ruling
+    accepts on purpose (0.13.6 drops it and writes its URL back onto the
+    entry, and the re-upgrade must adopt that URL); it is not something a
+    hand-run `state` verb of THIS helper may cause."""
+    return raw is True
+
+
 def normalize_source(raw: Any) -> dict[str, Any] | None:
     """One history record per the section 2.1 field rules; None drops it.
     A `url` with a control character (NUL, CR, ...) drops the record with a
@@ -7479,7 +7695,7 @@ def normalize_source(raw: Any) -> dict[str, Any] | None:
     # SR22: the helper truncates an over-cap label on read, never errors.
     label = cap_code_points(sanitize_input(raw.get("label"), MAX_SOURCE_URL), MAX_LABEL) or derive_label(playlist["url"], playlist["kind"])
     origin = raw.get("origin")
-    return {
+    record = {
         "key": key,
         "url": playlist["url"],
         "epgUrl": epg["url"] if epg is not None and epg["ok"] else "",
@@ -7493,6 +7709,7 @@ def normalize_source(raw: Any) -> dict[str, Any] | None:
         "channelCount": non_negative_int(raw.get("channelCount")),
         "groupCount": non_negative_int(raw.get("groupCount")),
     }
+    return record
 
 
 def normalize_state(raw: Any) -> dict[str, Any]:
@@ -7539,6 +7756,8 @@ def normalize_state(raw: Any) -> dict[str, Any]:
     # writer rebuilds from default_state(), so a key it is not taught is
     # erased by the next `state favorite add`.
     state["hiddenGroups"] = normalize_hidden_groups(raw.get("hiddenGroups"))
+    # Which source is active, by key (D-SINK-19). Same whitelist trap again.
+    state["activeKey"] = normalize_active_key(raw.get("activeKey"))
     state["lastPlayed"] = normalize_played(raw.get("lastPlayed"))
     # What the player was last asked to play (4.6, section 8). Same record as
     # lastPlayed, different lifetime: the service clears it when the player
@@ -7547,6 +7766,12 @@ def normalize_state(raw: Any) -> dict[str, Any]:
     # instead of raising a toast minutes late. Never URL-bearing: a channel id
     # and a display name, which is never a URL.
     state["session"] = normalize_played(raw.get("session"))
+    # D-SINK-19 R21a: the migration marker, absent unless it is exactly true,
+    # exactly as Model.parseState reads it. Same whitelist trap as every key
+    # above: a reader not taught it erases it, and the next shell start would
+    # read the bar entry's URLs as migration inputs again.
+    if normalize_entry_migrated(raw.get("entryMigrated")):
+        state["entryMigrated"] = True
     state["cacheLayout"] = CACHE_LAYOUT if raw.get("cacheLayout") == CACHE_LAYOUT else 0
     sources = raw.get("sources")
     if isinstance(sources, list):
@@ -7593,6 +7818,10 @@ def public_source(record: dict[str, Any]) -> dict[str, Any]:
 
 
 def public_state(state: dict[str, Any]) -> dict[str, Any]:
+    """Every `state` action prints this; stdout is a sink (rule 5) and must
+    never carry a URL. `activeKey` needs no treatment and is printed as it is:
+    it is fnv1a32 of the URL, which the cache directory names on disk already,
+    and it is the identifier every other field here is keyed by."""
     out = dict(state)
     out["sources"] = [public_source(record) for record in state.get("sources", [])]
     return out
@@ -7653,44 +7882,47 @@ def add_source_record(state: dict[str, Any], url: Any, epg_url: Any, label: Any,
     return key
 
 
-# D-SRC-11. The record fields the RUNNING shell owns, with the flag that writes
-# each and the plugin setting that is its authority.
+# D-SRC-11, OVERTURNED IN PART BY D-SINK-19. The record fields `state source
+# update` warns about, with the flag that writes each and the plugin setting
+# the bar entry used to carry for it.
 #
-# The settings are the source of truth for the ACTIVE source and the history
-# follows them (ruling D3 / SR8, and D-SRC-10 for the EPG half). So
-# `state source update --epg-url` writes the FOLLOWER: the shell's reconcile
-# rewrites the active record's `epgUrl` from the plugin's `epgUrl` setting every
-# time it re-reads state.json -- and it re-reads it because this command just
-# wrote it. Measured on the live install 2026-10-03: exit 0, "ok": true, and the
-# record read "" immediately afterwards. Against an isolated state directory the
-# same command writes the value and it persists, so the helper was never wrong;
-# it was silent about who would win.
+# What D-SRC-11 found (2026-10-03, measured on the live install): the settings
+# were the source of truth for the ACTIVE source and the history followed
+# them, so `--epg-url` on the active record was rewritten from the plugin's
+# `epgUrl` setting the moment the shell re-read state.json -- which this
+# command's own write caused -- and the helper said "ok": true about a value
+# that was already gone. The warning below was written for that.
 #
-# WHY THIS WARNS RATHER THAN REFUSES. Three options, and two of them are worse.
-#  - Writing the SETTING as well is out of scope. That is shell.json, whose
-#    schema belongs to the host; this helper is stdlib-only and knows nothing
-#    about the shell on purpose -- shell.json is not named anywhere else in this
-#    file, and teaching it that schema is a coupling the architecture refuses.
-#  - Refusing would break the half that WORKS. Reconcile only touches the
-#    record whose url matches the setting's playlistUrl, so an INACTIVE source
-#    keeps what this command wrote, and switching to it calls
-#    persistActive(rec.url, rec.epgUrl) -- the record's value goes INTO the
-#    setting. The command is right for every source but one. It is also how a
-#    machine with no shell running, and the test suite, set a source up at all.
-#  - And the helper cannot tell WHICH source is the active one: the active key
-#    is derived from the setting's playlistUrl, and state.json does not record
-#    it. Nothing here can make that distinction without reading the shell's
-#    config, which is the first option again.
-# So the command says what it wrote, who owns it, and what to change instead.
+# D-SINK-19 inverted the ownership. The bar entry's `playlistUrl` and `epgUrl`
+# are not read at all once an install has migrated (round 11, R21: the shell
+# reads them once, to migrate a 0.13.x entry, and refuses and removes a value
+# found there afterwards); `activeKey` in state.json names the active source;
+# the record is the only store for both URLs and the shell reads it.
+# So this command's write is no longer undone by a reconcile, and a re-key
+# through `--url` moves `activeKey` with the record (update_source_record).
+# What the warning says now is the two things still worth a line:
+#  - the running shell PICKS THE NEW VALUE UP: its FileView reloads on this
+#    helper's atomic rename (measured, R23g; the first session after a fresh
+#    install included since R24c re-arms the watch), and a change made in
+#    the guide and not yet saved is MERGED with it, this write winning where
+#    both changed the same record (R24a). Rounds 9 to 12 said the opposite
+#    (D-SRC-19); round 14 measured that only the dir-absent first session
+#    behaved that way, and closed it;
+#  - `--url` RE-KEYS the record: the cache directory of the old key is the
+#    caller's to move or remove (the shell does it for its own edits; this
+#    command does not), and the channels are fetched again.
+# The warning still fires for an inactive source too, which is wider than it
+# needs to be; narrowing it is a behaviour change on a documented warning and
+# is not taken here.
+#
+# WHY THIS WARNS RATHER THAN REFUSES (unchanged): writing the host's
+# shell.json is out of scope for a stdlib-only helper that names that file
+# nowhere, and refusing would break the half that is right for every source.
 # Exit code stays 0 because the write did happen.
 #
 # Scope, stated rather than implied: this fires for `update`, which is what
-# D-SRC-11 is filed against. `add --epg-url` has the same exposure in one narrow
-# case -- the url being added IS the setting's playlistUrl and no record existed
-# for it yet, which only happens on a state file the shell has not reconciled --
-# and it is not warned about, because warning on every add would make the
-# ordinary, correct operation noisy and the ordinary add is a source that is not
-# active yet, where the record is the authority until a switch copies it over.
+# D-SRC-11 is filed against; `add` is a source that is not active yet, where
+# nothing competes with the record.
 SETTING_OWNED_SOURCE_FIELDS = (
     ("epgUrl", "--epg-url", "epgUrl", "guide (EPG) URL"),
     ("url", "--url", "playlistUrl", "playlist URL"),
@@ -7698,22 +7930,35 @@ SETTING_OWNED_SOURCE_FIELDS = (
 
 
 def setting_owned_warnings(fields: Any) -> list[str]:
-    """Lines for a `state source update` that writes a field the running shell
-    owns for the active source (D-SRC-11), in a fixed order. Empty when nothing
-    asked for is one, so `--label` on its own says nothing."""
+    """Lines for a `state source update` that writes a URL field of a record
+    (D-SRC-11, as overturned in part by D-SINK-19), in a fixed order. Empty
+    when nothing asked for is one, so `--label` on its own says nothing."""
     asked = [row for row in SETTING_OWNED_SOURCE_FIELDS if row[0] in set(fields or ())]
     if not asked:
         return []
     out = []
     for field, flag, setting, _human in asked:
-        out.append("%s wrote the record's %s, which the running shell OWNS for the active "
-                   "source: the plugin setting '%s' is the authority and omarchy-shell "
-                   "rewrites the record from it whenever it re-reads state.json (D-SRC-11)."
-                   % (flag, field, setting))
-    out.append("So if this is the source the bar is showing, that value is already gone: set "
-               "the %s from the guide's Sources screen instead. For any other source the "
-               "record keeps it, and switching to that source copies it into the setting."
-               % " and ".join(row[3] for row in asked))
+        rekey = ""
+        if field == "url":
+            rekey = (" It also RE-KEYED the record: a new key, 'activeKey' moved with it when it was "
+                     "the active source, the old key's cache directory is yours to remove, and the "
+                     "channels are fetched again.")
+        out.append("%s wrote the record's %s. The record is the only store for it: the plugin "
+                   "setting '%s' on the bar entry is not where the value is kept, and the "
+                   "running shell no longer reads it -- it was read once, to migrate an "
+                   "older install, and a value found there now is refused and removed "
+                   "(D-SINK-19; the D-SRC-11 warning that stood here said the shell would undo "
+                   "this write, and that design is gone).%s"
+                   % (flag, field, setting, rekey))
+    # Round 14 (R24c, rule 15): this line said for two rounds that a running
+    # shell does not re-read state.json after this write. Measured: it does
+    # (R23g), the first session after a fresh install included now (R24c),
+    # and an unsaved in-app change is merged with it rather than written over
+    # it (R24a), this write winning where both changed the same record.
+    out.append("A running omarchy-shell re-reads state.json after this write and keeps the %s it "
+               "wrote. If the same source was changed in the guide and that change was not saved "
+               "yet, this write wins for that source. The guide's Sources screen edits the same "
+               "record inside the shell." % " and ".join(row[3] for row in asked))
     return out
 
 
@@ -7738,6 +7983,13 @@ def update_source_record(state: dict[str, Any], key: str, url: Any, epg_url: Any
             record["url"] = playlist["url"]
             record["kind"] = playlist["kind"]
             record["key"] = allocate_source_key([item for item in sources if item is not record], playlist["url"])
+            # D-SINK-19. The active source is named by key now, so a re-key has
+            # to carry the pointer with it or state.json is left naming a
+            # record that no longer exists. Introduced by that change rather
+            # than fixed by it: before it, nothing in this file could tell
+            # which source was active.
+            if state.get("activeKey") == replaced:
+                state["activeKey"] = record["key"]
             record["fetchedAt"] = 0
             record["channelCount"] = 0
             record["groupCount"] = 0
@@ -7769,7 +8021,137 @@ def remove_source_record(state: dict[str, Any], key: str) -> dict[str, Any]:
     if record is None:
         raise HelperError("unknown_source", "no source with that key")
     state["sources"] = [item for item in state["sources"] if item is not record]
+    # D-SINK-19, the same obligation as the re-key above: removing the ACTIVE
+    # source clears the pointer. Model.activeKeyOf resolves a dangling key to
+    # "" so a shell reading this file is safe either way, but leaving one
+    # behind means the next reader has to decide the same question again.
+    if state.get("activeKey") == record["key"]:
+        state["activeKey"] = ""
     return record
+
+
+def state_file_target(path: str) -> str:
+    """The file a `state` verb reads and WRITES for the state path `path`.
+
+    D-SINK-19 round 14, R24b (D-SRC-23): ONE ANSWER PER PATH. A symlink at
+    state.json (a dotfiles user's) was followed for a read by open_regular
+    and then REPLACED by the write's rename, and a DANGLING one -- the
+    target moved, a folder not mounted yet -- read as ENOENT, so every verb
+    treated it as a fresh state: `show` printed an empty listing and
+    `favorite add` and `source add` wrote an empty state plus their change
+    over the link, exit 0, while `state init` lstat()s the same path and
+    answers `link` (`other` before this round), and the shell refuses it.
+    Measured on this machine on 2026-10-14 (spikes/filewatch, set r24): the
+    shell's own FileView save over a VALID link writes THROUGH it -- the link
+    stays a link and the target takes the bytes -- and this helper's write
+    replaced it with a regular file, after which the running shell saw none
+    of the helper's later writes. So now:
+      nothing at the path      the path itself (a fresh state)
+      a regular file           the path itself
+      a symlink to a regular   the link's TARGET (os.path.realpath): the
+        file                   write lands beside it and is renamed onto
+                               it, so the link survives (write_state_file)
+      a symlink to anything    refused, exit 1, nothing written, link
+        else, or to nothing    untouched
+      anything else            the path; read_state_strict refuses it
+    A link retargeted between this answer and the write is a race this does
+    not close; nothing here follows a link it did not just resolve."""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return path
+    except NotADirectoryError:
+        raise HelperError("state_unreadable", "the state folder is not a folder (a file is at its path, or above it); nothing was written")
+    except OSError:
+        return path
+    if not stat.S_ISLNK(st.st_mode):
+        return path
+    try:
+        target = os.stat(path)
+    except OSError:
+        raise HelperError("state_unreadable", "state.json is a symbolic link whose target is missing; nothing was written")
+    if not stat.S_ISREG(target.st_mode):
+        raise HelperError("state_unreadable", "state.json is not a regular file; nothing was written")
+    return os.path.realpath(path)
+
+
+def write_state_file(path: str, target: str, payload: Any) -> None:
+    """Write state.json for a `state` verb: at the path, or THROUGH the link
+    to `target` (state_file_target). A target that is not the path lives in
+    a directory that is not the plugin's, which is not created or chmod-ed;
+    the file itself is still written 0600 by an atomic rename.
+
+    D-SINK-19 round 15 (D-SRC-34): that folder can refuse the write -- it is
+    never chmod-ed back to 0700 the way the plugin's own state folder is --
+    and the refusal is a sentence, exit 1, nothing written (the temporary
+    file is removed by write_text_atomic), where it used to be a
+    PermissionError traceback and `code: internal`."""
+    through_link = os.path.abspath(target) != os.path.abspath(path)
+    try:
+        write_json_atomic(target, payload, private_dir=not through_link)
+    except FolderUnusable:
+        raise
+    except OSError as error:
+        reason = error.strerror or type(error).__name__
+        if through_link:
+            raise HelperError("state_unwritable", "state.json is a symbolic link into a folder that cannot be written (%s); nothing was written" % reason)
+        raise HelperError("state_unwritable", "state.json could not be written (%s); nothing was written" % reason)
+
+
+def broken_folder_link(directory: str) -> str:
+    """The state FOLDER's rule, R25c (D-SRC-32): R24b's rule for the file,
+    one level up. A symbolic link at the state folder, or at a folder above
+    it, that dangles or leads to something that is not a folder -> its path;
+    "" when the chain is sound (every component that exists is a folder,
+    through links that lead to folders) or simply absent. Only the FIRST
+    component that exists is asked about: below it nothing exists, and above
+    it the lstat of that component already succeeded."""
+    current = os.path.abspath(directory)
+    while current:
+        if os.path.lexists(current):
+            if os.path.islink(current) and not os.path.isdir(current):
+                return current
+            return ""
+        parent = os.path.dirname(current)
+        if parent == current:
+            return ""
+        current = parent
+    return ""
+
+
+def state_path_found(path: str) -> str:
+    """What is at the state path, BEFORE anything is created or chmod-ed.
+
+    D-SINK-19 round 12, R22a: the service's FileView reports "file not found"
+    both for a path with nothing at it and for a file inside a directory it
+    cannot search (measured on Quickshell 0.3.1: a 0000 or 0600 directory
+    reads exactly like a fresh install), and a fresh install is the one load
+    failure that may be written over. This is the witness: an lstat, made
+    first, because init_state_file then restores the modes it finds and the
+    evidence would be gone. -> "absent" (nothing there: ENOENT, a missing
+    parent included), "file" (a regular file, or a symlink to one),
+    "link" (R24b: a symlink whose target is missing or is not a regular
+    file -- the `state` verbs refuse it, state_file_target), "not-a-dir"
+    (R24b: something that is not a directory where the state directory, or
+    one above it, should be: lstat answers ENOTDIR), "other" (a directory,
+    a FIFO, anything else), or "unreadable" (lstat itself failed otherwise:
+    the directory cannot be searched)."""
+    try:
+        st = os.lstat(path)
+    except FileNotFoundError:
+        return "absent"
+    except NotADirectoryError:
+        return "not-a-dir"
+    except OSError:
+        return "unreadable"
+    if stat.S_ISREG(st.st_mode):
+        return "file"
+    if stat.S_ISLNK(st.st_mode):
+        try:
+            return "file" if stat.S_ISREG(os.stat(path).st_mode) else "link"
+        except OSError:
+            return "link"
+    return "other"
 
 
 def init_state_file(path: str, state: dict[str, Any]) -> bool:
@@ -7778,33 +8160,140 @@ def init_state_file(path: str, state: dict[str, Any]) -> bool:
     and keeps the mode of an existing one, so the service runs `state init`
     once at startup before its first write. O_EXCL makes the check-and-create
     atomic: a file that appears in between is left alone. An existing file
-    is not rewritten; only its mode is tightened. Returns True when created."""
+    is not rewritten; its mode is tightened only when it is not 0600 already
+    (D-SRC-15, R10): a chmod is an inotify IN_ATTRIB on the file the shell's
+    FileView watches, mode changed or not, and the reload it causes arrives
+    while the shell's first save is still parked. The shell survives that
+    reload on its own (it ignores a reload while a save is parked or in
+    flight); this leaves the already-private file untouched so the ordinary
+    start never raises it at all. Returns True when created."""
     ensure_private_dir(os.path.dirname(path))
     try:
-        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_CLOEXEC, 0o600)
     except FileExistsError:
-        try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+        # R23d: a REGULAR file (or a symlink to one) is the only thing this
+        # repairs. A directory, a FIFO or a socket at the path is the user's,
+        # and the no-write mode's notice tells them to move it aside; making
+        # it 0600 made a directory unsearchable (round 12, measured live).
+        chmod_if_kind(path, 0o600, stat.S_ISREG)
         return False
     with os.fdopen(fd, "w", encoding="utf-8") as handle:
         handle.write(json.dumps(state, ensure_ascii=False, separators=(",", ":")) + "\n")
-    os.chmod(path, 0o600)
+        os.fchmod(handle.fileno(), 0o600)
     return True
 
 
+def read_state_strict(path: str) -> dict[str, Any]:
+    """state.json for a verb that reads it to WRITE it (or to report it).
+
+    D-SINK-19 round 12, R22a, the helper's half: a state that did not load is
+    never written. read_json answers None for a missing file, an unreadable
+    one and one that does not parse alike, and normalize_state turns None
+    into the empty default -- so `state favorite add` over a file it could
+    not read used to write an empty state plus one favourite over it, every
+    source and credential gone, exit 0. Only "the file does not exist" is a
+    fresh state now; anything else is refused before anything is written,
+    with the reason and never the file's contents."""
+    try:
+        text = read_regular_text(path)
+    except FileNotFoundError:
+        return default_state()
+    except NotRegularFile:
+        # R23b: a directory, a FIFO or a socket at the path. Opened without
+        # blocking and refused on the descriptor's own fstat.
+        raise HelperError("state_unreadable", "state.json is not a regular file; nothing was written")
+    except OSError as error:
+        raise HelperError("state_unreadable", "state.json could not be read (%s); nothing was written"
+                          % (error.strerror or type(error).__name__))
+    except ValueError:
+        raise HelperError("state_unreadable", "state.json is not UTF-8 text; nothing was written")
+    try:
+        raw = json.loads(text)
+    except ValueError:
+        raw = None
+    if not isinstance(raw, dict):
+        raise HelperError("state_unreadable", "state.json is not a valid state file; nothing was written")
+    return normalize_state(raw)
+
+
+# D-SINK-19 round 14, R24d (D-SRC-24). How long `state init` may live, in
+# seconds, armed as SIGALRM at the top of the verb with its DEFAULT action
+# (the process ends; nothing here handles it). The service bounds the
+# start-up check at stateInitTimeoutMs (15 s) plus stateInitKillGraceMs (2 s)
+# and reaps what it stops -- but only while the shell outlives the init: a
+# shell stopped inside that window (a restart, a crash) left a hung init
+# reparented to the user's service manager for as long as the hang lasted
+# (the round-13 live lens, measured). 30 s is past the service's bound, so
+# this never pre-empts it, and it is the most the init can outlive any
+# shell by. What no signal reaches: a process in uninterruptible sleep on a
+# hung filesystem (state D) takes the signal only when the kernel lets go.
+STATE_INIT_DEADLINE = 30
+
+
 def cmd_state(args: argparse.Namespace) -> int:
+    action = args.action
+    if action == "init":
+        # FIRST, before the path is even named: everything after this can
+        # touch a filesystem that hangs.
+        signal.alarm(STATE_INIT_DEADLINE)
     directory = state_dir(args.state_dir)
     path = os.path.join(directory, STATE_FILE)
-    state = normalize_state(read_json(path))
-    action = args.action
     extra: dict[str, Any] = {}
+    if action == "source":
+        extra["op"] = args.op
     try:
-        if action == "init":
-            created = init_state_file(path, state)
-            emit({"ok": True, "kind": "state", "action": action, "created": created, "state": public_state(state)})
+        # R25c (D-SRC-32): a link at the state folder, or above it, that leads
+        # nowhere. Every verb used to read it as a fresh state -- `show` and
+        # `source list` printed an empty listing, exit 0 -- and the writers
+        # and the init ended in a traceback; now the init names it and every
+        # other verb refuses it, the link untouched.
+        broken = broken_folder_link(directory)
+        if broken and action == "init":
+            emit({"ok": True, "kind": "state", "action": action, "found": "folder-link", "created": False,
+                  "state": public_state(default_state())})
             return EXIT_OK
+        if broken:
+            raise HelperError("state_unreadable", "the state folder is a symbolic link whose target is missing or is not a folder; nothing was written")
+        if action == "init":
+            # R22a: `found` first -- the lstat witness, before anything is
+            # repaired. The init NEVER rewrites a file that exists, whatever
+            # it holds -- O_EXCL refuses to create over it and the existing
+            # branch only chmods a regular file (R23d) -- so a state it could
+            # not parse is left byte for byte as it was (test_state's R22a
+            # cases).
+            found = state_path_found(path)
+            if found == "not-a-dir":
+                # R24b (D-SRC-26): a file where the state DIRECTORY should be.
+                # Nothing can be created under it and nothing is changed; the
+                # answer says what was found (this printed a traceback and
+                # `code: internal` before).
+                emit({"ok": True, "kind": "state", "action": action, "found": found, "created": False,
+                      "state": public_state(default_state())})
+                return EXIT_OK
+            # The init reads tolerantly: what it read is only ever written
+            # when nothing was there (O_EXCL), so tolerance costs nothing.
+            # R23b: through the one opener, so a FIFO answers at once. The
+            # descriptor outranks the lstat: a regular file swapped for
+            # something else in between is "other".
+            try:
+                state = normalize_state(json.loads(read_regular_text(path)))
+            except NotRegularFile:
+                state = default_state()
+                if found != "link":
+                    found = "other"
+            except (OSError, ValueError):
+                state = default_state()
+            created = init_state_file(path, state)
+            emit({"ok": True, "kind": "state", "action": action, "found": found, "created": created,
+                  "state": public_state(state)})
+            return EXIT_OK
+        # R22a: every other verb, the read-only `show` and `source list`
+        # included -- an empty listing of a file that could not be read would
+        # be a false statement about it. R24b: through the link to its target
+        # when state.json is a symlink to a regular file, and refused when it
+        # is one to anything else (state_file_target).
+        target = state_file_target(path)
+        state = read_state_strict(target)
         if action == "favorite":
             key = str(args.id or "").strip()
             if not key:
@@ -7814,19 +8303,18 @@ def cmd_state(args: argparse.Namespace) -> int:
                     state["favorites"].append(key)
             else:
                 state["favorites"] = [item for item in state["favorites"] if item != key]
-            write_json_atomic(path, state)
+            write_state_file(path, target, state)
         elif action == "clear-recents":
             state["recents"] = []
-            write_json_atomic(path, state)
+            write_state_file(path, target, state)
         elif action == "source":
-            extra["op"] = args.op
             now = int(args.now) if getattr(args, "now", 0) else int(time.time())
             if args.op == "add":
                 extra["key"] = add_source_record(state, args.url, args.epg_url, args.label, args.origin, now)
-                write_json_atomic(path, state)
+                write_state_file(path, target, state)
             elif args.op == "update":
                 extra["key"], extra["replacedKey"] = update_source_record(state, args.key, args.url, args.epg_url, args.label, now)
-                write_json_atomic(path, state)
+                write_state_file(path, target, state)
                 # D-SRC-11: the write happened, and for the active source the
                 # shell owns what was written. Say so on stderr AND in the
                 # payload, so neither a human nor a script can read "ok": true
@@ -7849,7 +8337,7 @@ def cmd_state(args: argparse.Namespace) -> int:
                         log("state source update: %s" % note)
             elif args.op == "remove":
                 extra["removed"] = remove_source_record(state, args.key)["key"]
-                write_json_atomic(path, state)
+                write_state_file(path, target, state)
         payload: dict[str, Any] = {"ok": True, "kind": "state", "action": action}
         payload.update(extra)
         payload["state"] = public_state(state)
@@ -8347,12 +8835,13 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--now", type=int, default=0, help="clock override in epoch seconds (tests)")
     update = ops.add_parser("update", parents=[common], help="change the label, playlist URL or EPG URL of a source")
     update.add_argument("key", help="source key (8 hex digits)")
-    # D-SRC-11: both of these write a field the running shell owns for the
-    # active source, so both say so here and the command warns when they are
-    # used. The warning is the part a user will actually see; this is so the
-    # help text does not promise more than the command delivers.
-    update.add_argument("--url", default=None, help="new playlist URL (re-keys the record; move or remove its cache). The running shell's 'playlistUrl' setting owns this for the ACTIVE source and will overwrite it")
-    update.add_argument("--epg-url", default=None, help="new EPG URL; an empty string clears it. The running shell's 'epgUrl' setting owns this for the ACTIVE source and will overwrite it; change the setting (Sources screen) instead")
+    # D-SRC-11, as overturned by D-SINK-19 (round 11, R21; this help text
+    # caught up in round 12, R22f, and again in round 14, R24c): the record is
+    # the only store for both URLs and no bar setting overwrites it. A running
+    # shell re-reads the file after this write and keeps it (measured, R23g
+    # and R24c), merging an unsaved in-app change with it (R24a).
+    update.add_argument("--url", default=None, help="new playlist URL (re-keys the record; move or remove its cache). A running shell re-reads state.json after this and keeps it")
+    update.add_argument("--epg-url", default=None, help="new EPG URL; an empty string clears it. A running shell re-reads state.json after this and keeps it")
     update.add_argument("--label", default=None, help="new label; an empty string restores the derived one")
     update.add_argument("--now", type=int, default=0, help="clock override in epoch seconds (tests)")
     remove = ops.add_parser("remove", parents=[common], help="drop a source from the history (its cache dir: `cache remove`)")
@@ -8381,9 +8870,9 @@ def build_parser() -> argparse.ArgumentParser:
     # D-SINK-18. No path argument, by design: see host_config_path(). The
     # action is spelled out rather than implied so that a second, read-only
     # action can be added later without changing what `config shield` means.
-    config = sub.add_parser("config", help="make the host settings file private before a source URL is persisted into it")
+    config = sub.add_parser("config", help="make the host settings file private (it can still hold a URL an older version or omarchy bar set put there)")
     config_actions = config.add_subparsers(dest="action", required=True)
-    shield = config_actions.add_parser("shield", help="deny group and other on $XDG_CONFIG_HOME/omarchy/shell.json (no-op when it already does); prints the modes and a verdict, never the contents")
+    shield = config_actions.add_parser("shield", help="deny group and other on $HOME/.config/omarchy/shell.json (no-op when it already does); prints the modes and a verdict, never the contents")
     shield.set_defaults(func=cmd_config)
     # D-CLIP-1 (R8): the bounded clipboard read the shell's paste runs.
     clipboard = sub.add_parser("clipboard", help="read the Wayland clipboard through wl-paste, at most 32 KiB, under a deadline; prints one JSON object and never logs the text")
@@ -8398,6 +8887,12 @@ def main(argv: list[str] | None = None) -> int:
         return int(args.func(args))
     except KeyboardInterrupt:
         return 130
+    except FolderUnusable as error:
+        # R25c: not a bug -- a folder the verb needs is a link to nothing, or
+        # not a folder. One sentence, the exit every refusal has.
+        log("%s: %s" % (args.command, error.sentence))
+        emit({"ok": False, "kind": args.command, "error": {"code": "folder_unusable", "message": redact_urls(error.sentence)}})
+        return EXIT_ERROR
     except Exception as error:
         # A bug. The traceback is the bug report, but it must not carry a URL
         # (section 9), so it is redacted and paired with a structured error.

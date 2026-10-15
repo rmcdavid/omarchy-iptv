@@ -9,8 +9,12 @@ import {
   helperArgv
 } from "./mpv.mjs"
 import {
+  firstRunAllowed
+} from "./view.mjs"
+import {
   MAX_SOURCE_URL, CONTROL_RE, sanitizeInput, sourceErrorMessage,
-  validateSourceUrl, normalizeSourceUrl, validateLabel, CLIPBOARD_MAX_CHARS
+  refusalMessage, validateSourceUrl, normalizeSourceUrl, validateLabel,
+  CLIPBOARD_MAX_CHARS
 } from "./sources.mjs"
 import {
   isFormField, formCapacity, copyForm, openFirstRun, withFormValue,
@@ -295,18 +299,36 @@ function validateUrlForm(values, existing, selfId) {
 }
 
 // Sources list rows: every source, then `Add source`, then `Add Xtream login`.
-function sourcesRowCount(sourceCount) {
-  return Math.max(0, Math.floor(Number(sourceCount) || 0)) + 2
+// D-SINK-19 round 14, R24f (D-SRC-28): in the no-write mode (`stateBlocked`,
+// the service's stateWriteBlocked reason, "" when writes are allowed)
+// there are NO Add rows. R23e hid the first-run form at a no-write start
+// because its submit could only be refused; the Sources screen drew the same
+// thing -- "No sources" over "Add source" and "Add Xtream login" while the
+// file on disk held two records -- and its form opened, read-only, to a
+// submit refused with state_unreadable. The rows go for the same reason.
+function sourcesAddRows(stateBlocked) {
+  return str(stateBlocked) === "" ? 2 : 0
 }
 
-function sourcesRowKind(index, sourceCount) {
+function sourcesRowCount(sourceCount, stateBlocked) {
+  return Math.max(0, Math.floor(Number(sourceCount) || 0)) + sourcesAddRows(stateBlocked)
+}
+
+function sourcesRowKind(index, sourceCount, stateBlocked) {
   var n = Math.max(0, Math.floor(Number(sourceCount) || 0))
   var i = Math.floor(Number(index))
   if (!isFinite(i) || i < 0) return ""
   if (i < n) return "source"
+  if (sourcesAddRows(stateBlocked) === 0) return ""
   if (i === n) return "add"
   if (i === n + 1) return "xtream"
   return ""
+}
+
+// R24f: whether `a` / `X` (and Enter on an Add row) may open a form. Never in
+// the no-write mode; the guide says why instead (Model.refusalMessage).
+function sourcesAddAllowed(stateBlocked) {
+  return sourcesAddRows(stateBlocked) > 0
 }
 
 // Cursor on entry: the active source, else row 0 (the Add row when empty).
@@ -348,7 +370,9 @@ function closeSources(st, opts) {
     if (cur.form) { cur.mode = cur.form.kind === "xtream" ? "sourceXtream" : "sourceEdit"; return cur }
     return openFirstRun(cur)
   }
-  if (o.configured === false) {
+  // R23e: never INTO the first-run form while the no-write mode holds
+  // (Model.firstRunAllowed); the guide behind is the no-write surface then.
+  if (o.configured === false && str(o.stateBlocked) === "") {
     cur.form = null
     return openFirstRun(cur)
   }
@@ -406,7 +430,8 @@ export {
   editRange, fullRange, editRangeFor, cutApplies, orderedRange, wordBoundary,
   isHighSurrogate, isLowSurrogate, codePointStart, codePointEnd, typedText,
   editInsert, editDelete, withFormError, withFormProbing, formSubmitValues,
-  validateUrlForm, sourcesRowCount, sourcesRowKind, sourcesInitialCursor,
-  cursorAfterRemove, openSources, closeSources, withSourceCursor, startRemove,
-  startLogosConsent, afterRemove, afterSwitch
+  validateUrlForm, sourcesAddRows, sourcesRowCount, sourcesRowKind,
+  sourcesAddAllowed, sourcesInitialCursor, cursorAfterRemove, openSources,
+  closeSources, withSourceCursor, startRemove, startLogosConsent, afterRemove,
+  afterSwitch
 }
