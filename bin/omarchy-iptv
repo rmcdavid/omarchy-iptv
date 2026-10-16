@@ -4294,11 +4294,28 @@ def logo_dimension_refusal(url: str, data: bytes, ctype: str) -> str:
 
 
 def _read_logo_prefix(path: str, limit: int) -> bytes | None:
+    # os.read on the descriptor, not a buffered file object: the sweep reads
+    # every cached logo on every start, twice for a PNG since D-LOGO-13, and
+    # the buffered read cost twice as much (5,000 cached 220x120 PNGs,
+    # 2026-10-15, medians: `logos --fetch` 1,003-1,069 ms buffered, 815-872
+    # ms here, 725-735 ms before D-LOGO-13 added the second read and its CRC).
     try:
-        with os.fdopen(open_regular(path), "rb") as handle:
-            return handle.read(limit)
+        fd = open_regular(path)
     except OSError:
         return None
+    parts: list[bytes] = []
+    try:
+        while limit > 0:
+            part = os.read(fd, limit)
+            if not part:
+                break
+            parts.append(part)
+            limit -= len(part)
+    except OSError:
+        return None
+    finally:
+        os.close(fd)
+    return b"".join(parts)
 
 
 def logo_file_within_bounds(path: str) -> bool:
@@ -4332,6 +4349,113 @@ def logo_file_within_bounds(path: str) -> bool:
     return logo_within_bounds(whole, ctype)
 
 
+# D-LOGO-13, raised by the marketplace maintainer against the shipped 0.13.6:
+# D-LOGO-11 bounds what a PNG's header declares, and the rest of the file
+# reached the decoder as the provider wrote it -- including zTXt, iTXt and
+# iCCP, which libpng INFLATES while it reads the header, before a row is
+# decoded and whatever `sourceSize` says. The byte cap bounds them compressed
+# and nothing bounds them inflated. So a PNG is cached in a canonical form
+# holding only what drawing needs: IHDR, PLTE, IDAT, IEND, and these four
+# small colour chunks at the lengths the spec gives them (tRNS's depends on
+# the colour type and the palette). Everything else -- text, profiles, eXIf,
+# APNG frames, private chunks -- is dropped, so IDAT is the only compressed
+# stream left, and its memory is the dimensions D-LOGO-11 bounds. Measured
+# here: nothing. The fix is judged by what it keeps and drops.
+PNG_COLOUR_CHUNKS = {b"gAMA": 4, b"cHRM": 32, b"sRGB": 1, b"tRNS": 0}
+MAX_PNG_CHUNKS = 4096
+
+
+def canonical_png(data: bytes) -> bytes | None:
+    """The PNG with only the chunks drawing needs, or None to refuse it.
+
+    Walks the chunk list and inflates NOTHING. Every chunk is copied
+    verbatim or dropped whole, so the IDAT bytes -- and the pixels -- are the
+    provider's own, and a canonical file comes back byte for byte (the sweep
+    relies on that: anything else would be rewritten on every start). None
+    when the walk cannot prove what the file holds: a bad CRC on ANY chunk,
+    dropped ones included; a chunk running off the end or no IEND; anything
+    after IEND; more than MAX_PNG_CHUNKS chunks; IHDR not first or twice; no
+    IDAT, or IDAT split by another chunk; a second or misplaced PLTE, or one
+    that is not 1-256 entries; a critical chunk this does not know (libpng
+    refuses those too). A colour chunk at the wrong length, out of its place
+    or after one already kept is DROPPED rather than refused, because libpng
+    ignores it as well, so dropping changes nothing it draws.
+    """
+    if not isinstance(data, (bytes, bytearray)) or not data.startswith(PNG_SIGNATURE):
+        return None
+    data = bytes(data)
+    view = memoryview(data)               # the CRC reads it in place
+    size, pos, count, colour, palette = len(data), 8, 0, -1, 0
+    kept, seen, last = [], set(), b""
+    while pos + 12 <= size and count < MAX_PNG_CHUNKS:
+        count += 1
+        length = int.from_bytes(data[pos:pos + 4], "big")
+        kind = data[pos + 4:pos + 8]
+        end = pos + 12 + length
+        if (end > size or not kind.isalpha()
+                or zlib.crc32(view[pos + 4:end - 4]) != int.from_bytes(data[end - 4:end], "big")):
+            return None
+        keep = True
+        if count == 1:
+            if kind != b"IHDR" or length != 13:
+                return None
+            colour = data[pos + 17]
+        elif kind == b"IEND":
+            if length or b"IDAT" not in seen or end != size:
+                return None
+            if len(kept) + 1 == count:
+                return data               # nothing to drop: already canonical
+            return PNG_SIGNATURE + b"".join(data[a:b] for a, b in kept) + data[pos:end]
+        elif kind == b"IDAT":
+            if b"IDAT" in seen and last != b"IDAT":
+                return None
+        elif kind == b"PLTE":
+            if kind in seen or b"IDAT" in seen or not 0 < length <= 768 or length % 3:
+                return None
+            palette = length // 3
+        elif kind in PNG_COLOUR_CHUNKS:
+            if kind == b"tRNS":
+                fits = length == {0: 2, 2: 6}.get(colour) or colour == 3 and 0 < length <= palette
+            else:
+                fits = length == PNG_COLOUR_CHUNKS[kind] and b"PLTE" not in seen
+            keep = fits and kind not in seen and b"IDAT" not in seen
+        elif not kind[0] & 0x20:
+            return None                   # a critical chunk not named above, IHDR again included
+        else:
+            keep = False
+        if keep:
+            kept.append((pos, end))
+            seen.add(kind)                # dropped chunks never count as seen
+        last = kind
+        pos = end
+    return None
+
+
+def canonical_logo_file(path: str) -> str:
+    """D-LOGO-13 for a file already in the cache, which every version before
+    0.14.1 wrote verbatim. -> "as-is" when it may be announced as it stands
+    (a canonical PNG, or another type), "rewritten" when it was a PNG with
+    other chunks and now holds the canonical form (atomically, 0600), or ""
+    when it may not be announced at all. Read under the byte cap plus one, so
+    a PNG longer than that cannot end in IEND inside the read and is refused.
+    """
+    data = _read_logo_prefix(path, MAX_LOGO_BYTES + 1)
+    if not data:
+        return ""
+    if not data.startswith(PNG_SIGNATURE):
+        return "as-is"
+    canon = canonical_png(data)
+    if canon is None:
+        return ""
+    if canon == data:
+        return "as-is"
+    try:
+        write_bytes_atomic(path, canon)
+    except OSError:
+        return ""
+    return "rewritten"
+
+
 def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
     """Write one logo 0600 into a 0700 directory. Returns the file name.
 
@@ -4354,6 +4478,15 @@ def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
     # for this anyway (R1).
     if not logo_within_bounds(data, ctype):
         raise HelperError("logo_dimensions", logo_dimension_refusal(url, data, ctype))
+    if ctype == "image/png":
+        # D-LOGO-13: only the canonical form is cached, and a PNG whose
+        # chunks cannot be walked is not cached at all. Same place, same
+        # reason: a refusal still creates nothing on disk.
+        canon = canonical_png(data)
+        if canon is None:
+            host = logo_host(urllib.parse.urlsplit(url).netloc or "") or "an unnamed host"
+            raise HelperError("logo_chunks", "refused a logo from %s: its PNG chunks are malformed" % host)
+        data = canon
     ensure_private_dir(logo_dir)
     name = logo_filename(url)
     path = os.path.join(logo_dir, name)
@@ -4457,7 +4590,7 @@ def cmd_logos(args: argparse.Namespace) -> int:
     # ruling's first line) and this flag is off by default here, so nothing
     # contacts anyone because a command was run without reading it.
     logo_dir = os.path.join(directory, LOGO_SUBDIR)
-    fetched, cached, refused, failed, swept, deferred = 0, 0, 0, 0, 0, 0
+    fetched, cached, refused, failed, swept, deferred, rewritten = 0, 0, 0, 0, 0, 0, 0
     reasons: dict[str, int] = {}
     seen: set[str] = set()
     names: list[str] = []
@@ -4500,8 +4633,13 @@ def cmd_logos(args: argparse.Namespace) -> int:
             # `fetched` counts new downloads, so the cap bounds fetches per
             # run and not the size of the cache or the number of files this
             # validates (D-LOGO-12 records the consequence for the cache).
-            if logo_file_within_bounds(path):
+            # D-LOGO-13: a PNG is announced only in its canonical form, so a
+            # file an earlier version cached verbatim is rewritten in place
+            # first, and one whose chunks cannot be walked is swept below.
+            state = canonical_logo_file(path) if logo_file_within_bounds(path) else ""
+            if state:
                 cached += 1
+                rewritten += state == "rewritten"
                 names.append(name)
                 emit({"ok": True, "kind": "logo", "name": name})
                 continue
@@ -4548,7 +4686,7 @@ def cmd_logos(args: argparse.Namespace) -> int:
             reasons[error.code] = reasons.get(error.code, 0) + 1
             if error.code in ("logo_scheme", "logo_userinfo", "logo_redirect",
                               "logo_type", "logo_bytes", "logo_too_large",
-                              "logo_dimensions"):
+                              "logo_dimensions", "logo_chunks"):
                 refused += 1
             else:
                 failed += 1
@@ -4568,9 +4706,11 @@ def cmd_logos(args: argparse.Namespace) -> int:
     # `deferred` is the number of URLs the per-run cap held back from a fetch;
     # the cached-file branch above is never held back, so a cached logo past
     # the cap is in `names` and a cached bomb past it is in `swept`.
+    # `rewritten` counts the cached PNGs made canonical this run (D-LOGO-13);
+    # they are in `cached` too, and a file that could not be is in `swept`.
     emit(dict(survey, ok=True, kind="logos", action="fetch", fetched=fetched,
               cached=cached, refusedOnPolicy=refused, failed=failed, reasons=reasons,
-              names=names, swept=swept, deferred=deferred, cap=MAX_LOGO_FILES,
+              names=names, swept=swept, rewritten=rewritten, deferred=deferred, cap=MAX_LOGO_FILES,
               maxBytes=MAX_LOGO_BYTES, maxSide=MAX_LOGO_SIDE, maxPixels=MAX_LOGO_PIXELS))
     return 0
 
