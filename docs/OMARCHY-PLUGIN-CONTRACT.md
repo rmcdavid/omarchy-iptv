@@ -746,7 +746,10 @@ day by round 13's R23g, disputed until the round-13 live lens found the
 variable on 2026-10-14; the fourth was re-measured and a seventh, about a
 symlink at the path, added the same day by round 14's R24b and R24c; the
 third gained what a burst's echoes carry and the seventh was corrected and
-completed the same day again, by round 15's R25a, R25e and D-DOC-11]:
+completed the same day again, by round 15's R25a, R25e and D-DOC-11; an
+eighth, about a write issued inside the view's own load handler, the mode
+of a file the view creates, a re-point and what re-arms after one, by round
+16's R26 on 2026-10-16]:
 
 - **`saved` fires once per `setText` -- for two back-to-back calls, and NOT
   for a burst (corrected 2026-10-12, round 4).** Two `setText` calls back to
@@ -936,7 +939,9 @@ completed the same day again, by round 15's R25a, R25e and D-DOC-11]:
   plugin's helper did it by `os.replace` onto the path until round 14). One
   explicit `reload()` after such a replacement re-arms the view (Z7:
   `loaded+1`, then every helper and in-place write `fileChanged+1
-  loaded+1`); this plugin does not call one for it (filed, R25e). Written
+  loaded+1`); this plugin does not call one for it (filed, R25e) [2026-10-16,
+  round 16, R26a: it does now -- one before every save it makes, which is
+  when the session learns of such a replacement; the eighth fact]. Written
   through instead -- a temporary file beside the target, renamed onto the
   TARGET -- every later write is seen (`fileChanged+1 loaded+1`, the path
   still a link). And per the fifth fact a dangling link LOADS as FileNotFound,
@@ -947,7 +952,94 @@ completed the same day again, by round 15's R25a, R25e and D-DOC-11]:
   `state.json` link whose TARGET becomes unreadable mid-session fails one
   load and then sees nothing more -- the `chmod 600` that repairs it
   included -- where a regular file's repair is seen (round-15 claims lens,
-  D-DOC-13).
+  D-DOC-13). [2026-10-16, round 16: what the VIEW sees, in the table and
+  the paragraph above, still holds. What the SERVICE does over it changed
+  with R26a, so the sentences above about the service -- the next own save
+  writing memory over a replaced link or into a re-pointed folder's
+  `state.json` (D-SRC-29, D-SRC-40), a target that comes back never seen
+  (D-SRC-35), a repaired target's `chmod 600` never seen (D-DOC-13) --
+  describe the plugin up to 0.14.0. The reload it now makes before every
+  save reads whatever the path leads to at that moment, so each of those
+  is decided at the next save by the dispositions any load gets (the
+  eighth fact; `ARCHITECTURE-SOURCES.md`'s round-16 rulings). The D-DOC-13
+  case was not driven against the new tree; it is the same read over a
+  `permission` block, which `Model.stateSavePlan` answers `verify`.]
+- **A write inside a load handler, a created file's mode, a re-point, and
+  what re-arms after one (D-SINK-19 round 16, R26, measured 2026-10-15 and
+  2026-10-16).** Two rigs, each a bare FileView declared as `stateFile` is,
+  quickshell 0.3.1-1 and Qt 6.11.2, in a nested headless cage on a private
+  D-Bus, umask 0022 in the cage's child: lane W's
+  `spikes/filewatch-links/measure.sh` (committed on branch
+  `lane-clean-w-probe` with its `results/`, NOT in this tree; sets `links`
+  at load 10.4, `inload` at 2.0-3.3, `inflight` at 9.3-14.0, `timing` at
+  7.9-17.7), and lane S's probe (`lane-s-rig/probe/` in the session's
+  scratch directory, not committed). [Recorded by the round-16 documents
+  lane from the two lanes' result files and reports.]
+  - **A `setText` issued inside the view's own `onLoaded` writes the file
+    and raises no `saved`.** 16 of 16 (`inload-1.txt`: eight idle at load
+    2.45, eight with a load running at 3.34): each logged
+    `setText-in-onLoaded`, then the echo `loaded:<the new text>`, and never
+    `saved`; the disk held the text every time. A plugin that decides "a
+    write is in flight" by waiting for `saved` waits for ever. This one did,
+    after an R24a merge asked for its save from inside the load that found
+    the foreign write (D-SRC-46: `stateSavesInFlight` 1 and
+    `stateSaveFailed` true for the rest of the session, live on dev
+    1c88877, whose `Service.qml` is 0.14.0's byte for byte). Since R26b no
+    save is issued from inside any of `stateFile`'s handlers.
+  - **A save that CREATES the file creates it 0666 & ~umask, and a save
+    over an existing file keeps its mode.** Lane S, `atomicWrites` true and
+    false alike: 0644 at umask 022, 0600 at 077, 0664 at 002 for an absent
+    file in a 0755 folder; 0600 and 0640 kept for an existing one. Lane W's
+    L9, the folder link re-pointed at an empty folder and then an own save:
+    `state.json` created 644. The user's own shell runs at umask 0022 here
+    (`Umask` in `/proc/<pid>/status` of `quickshell -n -p
+    /usr/share/omarchy/shell`, and `systemctl --user show -p UMask
+    omarchy-shell.service`). A FileView has no option to refuse to create
+    its file, and the umask is not a QML property, so the view itself
+    cannot keep that save off disk; this plugin keeps it from being ASKED
+    (R26a, the read finds nothing and the save is refused; D-SINK-21).
+  - **A re-point raises nothing.** `ln -sfn` of a `state.json` link to
+    another file (`links-1.txt` L4) and of a state-folder link to another
+    folder (L7) or to an empty one (L9): `changed+0 loaded+0`, and the
+    same for every in-place write of the new target after it; lane S's
+    probe, the folder link re-pointed at an empty folder with no save yet,
+    logged no event at all. A link's TARGET moved away raises
+    `changed+1 failed+1` and moved back raises nothing (L5); the state
+    FOLDER moved away and back raises nothing either, but there the
+    in-place writes after it are seen (L8). With a regular file at the
+    path, a rename over it, `sed -i` and `rm` + `cp` are each seen (C0).
+  - **One `reload()` re-arms.** After each replacement in L1-L5 and L7 one
+    `reload()` delivered `loaded+1` and the next in-place write raised
+    `changed+1 loaded+1`. Over a re-pointed empty folder a reload delivers
+    `loadFailed` (L10; lane S: `loadFailed` 2, FileNotFound, before
+    `waitForJob()` returned).
+  - **A reload while the view's own write is in flight delivers no load of
+    its own.** 30 of 30 (`inflight-1.txt`, fifteen idle and fifteen under
+    load, load 9.3-14.0): `loadedDuring 0`, the write's `saved` arriving
+    during the wait. So a read issued then learns nothing, and the disk is
+    the view's own write anyway; R26a skips its read in that case.
+  - **What a reload costs.** Asynchronous `reload()` to `loaded`: median 2-4
+    ms, max 10, over 8 KB and 160 KB files, idle and with 8 busy loops
+    (`timing-2.txt`, load 12-18). On the real service, lane A's live
+    key-scenario runs on lane-clean-a1 read `stateVerifyMsMax` 6-11 ms over
+    a state of about 3 KB.
+
+  What R26 builds on these (`ARCHITECTURE-SOURCES.md`'s round-16 rulings):
+  every save the gate allows reloads first and is decided by the load it
+  gets (R26a), skips that read while its own write is in flight, and is
+  bounded by a 2 s watchdog that saves without the read, counted and
+  logged; every write is issued from a turn of its own (`Qt.callLater`),
+  never from inside a handler (R26b); and nothing reloads on a timer
+  (R26d), so a replacement with no save after it is not seen until the next
+  save or a restart -- nothing is written meanwhile, so nothing is lost. The
+  node double (`tests/service-harness.js`) models the first three facts
+  (R26c, F-HARNESS-29): a `setText` inside a load is silent and its echo
+  delivered, a created file is 0666 & ~umask and an existing file keeps
+  its mode, a replacement or a re-point raises nothing and unarms the
+  watch (`h.replace`). The fourth, `reload()` arming the view again, it
+  modelled already (R24c). The fifth it does not model: no read is asked
+  for while a write is in flight, which the R26a pins observe through the
+  service (`stateVerifySkipped`, no reload queued).
 
 `saveFailed` exists (`/usr/lib/qt6/qml/Quickshell/Io/quickshell-io.qmltypes:470`)
 and its argument is an enum, never a path; until round 3 the service

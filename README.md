@@ -157,7 +157,7 @@ obvious when it happens to you:
   are exercised on every commit's test tree under both kinds of Omarchy host
   (today's, and one carrying the settings fix awaiting review upstream), and
   live, under a headless compositor, by the harness scenario on the `dev`
-  branch (120 checks, 2026-10-14).
+  branch (129 checks, 2026-10-16).
 - **Going back to an older version makes the plugin look unconfigured.** An
   older build looks for the URL on the widget's entry, does not find one, and
   says you have no playlist. Your sources are all still in `state.json`: open
@@ -677,12 +677,16 @@ itself unavailable rather than half working.
   regular file kept elsewhere, a dotfiles folder say: the plugin and its
   helper write through the link and leave it in place, and a link that
   leads nowhere is refused rather than replaced. A tool that REPLACES the
-  link, or puts a file over it, while the shell is running is not noticed,
-  and the plugin's next save writes over that change (Troubleshooting says
-  what is noticed and what to do). The folder
+  link, or puts a file over it, while the shell is running is not noticed
+  at once; the plugin reads the file again before each save it makes, so it
+  notices at its next save and keeps both that change and its own
+  (Troubleshooting says what is noticed, when, and what to do). The folder
   `~/.local/state/omarchy-iptv` may be a symbolic link too: the plugin
   follows it and makes the folder it leads to private (0700), as it does
   its own, and a folder link that leads nowhere is refused the same way.
+  Pointed somewhere else while the shell runs, it is noticed the same way,
+  at the next save; pointed at an empty folder, it makes the plugin stop
+  saving rather than start a new `state.json` there.
   Channels that failed to play are
   **not** kept here: they belong to the source that carried them, and live in
   that source's cache directory below
@@ -792,11 +796,20 @@ Nothing inside the plugin directory is written at runtime.
   from a backup -- then `omarchy restart shell`. When `state.json` is a
   regular file and only its contents or its permissions were wrong,
   putting a good copy back in place (or the `chmod 600`) is enough on its
-  own: the plugin notices and carries on with your sources. Anything else
-  needs the restart: in particular, when the file is a symbolic link whose
-  target went missing while the shell was running, the plugin does not
-  notice the target coming back, and goes on saving nothing until
-  `omarchy restart shell`. A file or
+  own: the plugin notices and carries on with your sources. Whatever the
+  cause, it also reads the file again each time it would save -- a
+  favourite, a hidden group, any change the guide keeps -- and at the
+  first source change you try (switching, editing, retrying or removing a
+  source), which is refused once more while it looks: if the file can be
+  read by then, saving resumes and the next source change goes through.
+  That is how it notices a `state.json` link's target put back, a folder
+  made readable again, or a fix it was not told about. A favourite made at
+  that moment is kept when your sources had loaded before the problem
+  began; at a start that could not read the file it is not, as the
+  notification said. `a` and `c` in Sources are refused by the guide
+  itself and do not make it look. When the start-up check did not answer
+  (`could not be checked`), only `omarchy restart shell` ends it, and the
+  restart is always a way out. A file or
   folder you left at mode 0000 while the shell was not running is NOT this
   case: the plugin restores the usual permissions at the next start, reads
   the file and says nothing.
@@ -814,20 +827,40 @@ Nothing inside the plugin directory is written at runtime.
   place. Up to and including 0.13.6 the helper's `state` commands replaced
   such a link with a plain file, and in the test that measured it the
   running shell then noticed none of the later changes to the file. While
-  the shell is running, it notices a change made THROUGH the link: the
-  helper's `state` commands, an edit that writes the file in place, a
+  the shell is running, it notices AT ONCE a change made THROUGH the link:
+  the helper's `state` commands, an edit that writes the file in place, a
   backup put back with `cp`, and an edit of the target file at its own
-  path (in place, or by an editor that saves a new file there). It does NOT
-  notice a tool that replaces the link, or puts a file over it, at
-  `~/.local/state/omarchy-iptv/state.json`: `mv` of an edited copy or a
+  path (in place, or by an editor that saves a new file there). A tool that
+  REPLACES the link, or puts a file over it, at
+  `~/.local/state/omarchy-iptv/state.json` -- `mv` of an edited copy or a
   backup onto that path (the usual `jq ... > tmp && mv tmp state.json`),
   `sed -i` on that path, `rm` and `cp`, or `ln -sfn` to point the link at
-  another file. After one of those the plugin notices nothing more about
-  the file for the rest of the session, and its next save -- a change in
-  the guide, a channel played, a refresh that updates a source's channel
-  count -- writes what it holds over the change. So edit the target in place, or run `omarchy restart
-  shell` straight after such a tool and before using the guide. (Up to and
-  including 0.13.6 the same edits were lost the same way.) If the link
+  another file -- is NOT noticed at once, because the shell's file watcher
+  loses track of the path without a word. It is noticed at the plugin's
+  next save -- a change in the guide, a channel played, a refresh that
+  updates a source's channel count -- which reads the file first: your
+  edit is kept and the change that made the save is added to it, as for
+  any other program's change (the bullet on a file changed while the shell
+  is running), and from then on changes are noticed at once again. After
+  `ln -sfn` to another state file, THAT file is what the guide shows and
+  saves to from then on, with the change that made the save added; the
+  file the link used to lead to is left as it was. If the link now leads
+  to a file that does not exist, nothing is created there: the plugin
+  stops saving and says so (the **Saved sources not loaded** bullet above).
+  Until that next save the guide shows what it had and writes nothing, so
+  nothing is lost; run `omarchy restart shell` to see the change straight
+  away. Two narrow exceptions: a save asked for while the plugin's
+  previous save is still being written does not read the file first (the
+  file reader would drop the read then), and if the read has not answered
+  within 2 seconds the save goes ahead without it and the journal says
+  `state.json was not read back within ... ms of a save; saving without
+  the read`. (Up to and including 0.14.0 that next save wrote what the
+  shell held over the change instead -- into the new file, after `ln
+  -sfn` -- and a link pointed at a file that did not exist yet got a new
+  `state.json` there holding your sources and provider URLs, with
+  permissions that let other accounts read it (0644 under the usual umask
+  022) wherever the folders above it let them in. If you did that, check
+  the new file with `ls -l` and `chmod 600` it.) If the link
   leads nowhere (its target moved, or sits on a drive not mounted yet) or to
   something that is not a file, the plugin writes nothing and says `... is
   a symbolic link whose target is missing or is not a regular file ...
@@ -836,8 +869,10 @@ Nothing inside the plugin directory is written at runtime.
   `found: link` (exit 0), and none of them touches the link. A link that breaks
   while the shell is running is reported as `could not be found, or its
   folder could not be read`, with advice for both causes, because the
-  plugin cannot tell them apart then; putting the target back is not
-  noticed, so restart the shell after you have. If the link leads into a
+  plugin cannot tell them apart then; putting the target back is noticed
+  at the next save or source change, as the **Saved sources not loaded**
+  bullet says (the first source change after it is refused once more,
+  the next goes through), and `omarchy restart shell` works too. If the link leads into a
   folder you cannot write, a `state` command says `state.json is a symbolic
   link into a folder that cannot be written (Permission denied); nothing
   was written` and changes nothing: the plugin never changes the
@@ -856,9 +891,30 @@ Nothing inside the plugin directory is written at runtime.
   is not a folder; nothing was written`), `state init` answers `found:
   folder-link` (exit 0), and none of them touches the link. Changes to
   `state.json` inside a linked folder are noticed like any other (measured
-  2026-10-14); re-pointing the folder link itself while the shell runs is
-  not, and the next save writes what the shell holds into the new folder's
-  `state.json`, so restart the shell straight after re-pointing it. The
+  2026-10-14). Re-pointing the folder link itself while the shell runs is
+  not noticed at once; it is noticed at the next save, which reads the
+  `state.json` the link now leads to. If there is one, it is kept, the
+  change that made the save is added to it, and that is what the guide
+  shows and saves to from then on; the folder the link used to lead to is
+  left as it was. The file keeps the permissions it has until the next
+  shell start makes the folder 0700 and the file 0600. If the new folder
+  holds no `state.json` (an empty folder, say), nothing is created there:
+  the plugin stops saving, and says so once (**Saved sources not loaded**,
+  `... could not be found, or its folder could not be read ...`). The
+  change you just made still shows, and its source change answered as
+  done, but it is not kept, and the next source change is refused with
+  `state.json could not be read · nothing is saved until it can be`.
+  Point the link back and the next save (or the second source change)
+  picks your file up again and saving resumes; or
+  restart the shell -- after a restart the folder the link leads to NOW is
+  what loads, so an empty one starts with no sources, like a fresh
+  install, until you point the link back and restart again. (Up to and
+  including 0.14.0 the next save after a re-point wrote what the shell
+  held into the new folder: over its `state.json` if it had one, and into
+  a new one if it did not -- holding your sources and provider URLs, with
+  permissions that let other accounts read it (0644 under the usual umask
+  022) wherever the folders above it let them in, and with nothing said;
+  the next shell start made it 0600.) The
   plugin's cache folder, `~/.cache/omarchy-iptv`, and its runtime folder
   under `$XDG_RUNTIME_DIR` may be links too, and are followed. A linked
   runtime folder is made private (0700) whenever the player is started or
@@ -873,8 +929,9 @@ Nothing inside the plugin directory is written at runtime.
   file is at that path, or at one above it)`: move it aside and restart.
 - The file changed while the shell is running -- by hand, by a backup put
   back, or by one of the helper's `state` commands: the plugin re-reads it
-  (for a `state.json` that is a symbolic link, only a change made through
-  the link: see the bullet on links above). If the new contents are a state
+  (for a `state.json` that is a symbolic link, a change made through the
+  link at once, and one that replaced the link at the next save: see the
+  bullet on links above). If the new contents are a state
   it takes them -- a backup you put back wins over what the guide had
   saved, even when it is a copy of the plugin's own file from earlier in
   the session -- and when it has a change of its own not saved yet (a save
@@ -923,9 +980,9 @@ Nothing inside the plugin directory is written at runtime.
   `state.json` it cannot read or parse, or that is neither a regular file
   nor a symbolic link to one (exit 1), instead of writing over it, and none
   of them waits on a named pipe. Run while the shell is running, a `state`
-  command that succeeds is picked up by the running shell, as above --
-  unless another tool replaced a `state.json` link earlier in that session
-  (the bullet on links). Two more refusals carry a sentence of their own (exit 1), where 0.13.6 ended in a traceback, printed an empty state (`state show` and `state source list` over the folder link), or replaced the link with a plain file:
+  command that succeeds is picked up by the running shell, as above -- at
+  once, or, if another tool replaced a `state.json` link earlier in that
+  session, at the shell's next save (the bullet on links). Two more refusals carry a sentence of their own (exit 1), where 0.13.6 ended in a traceback, printed an empty state (`state show` and `state source list` over the folder link), or replaced the link with a plain file:
   `the state folder is a symbolic link whose target is missing or is not a
   folder; nothing was written` (the folder link above), and `state.json is
   a symbolic link into a folder that cannot be written (...); nothing was
