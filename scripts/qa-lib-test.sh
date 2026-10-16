@@ -610,6 +610,93 @@ chno_floor_verdict=$(
 )
 is "one skipped chno check turns that run RED" "$chno_floor_verdict" "1"
 
+# F-HARNESS-21 / F-HARNESS-22 (2026-10-15): the two chno scenarios play every
+# row from run.sh's fixture server, ask whose the listener is before they
+# count a play, and judge R12 with a needle rule 5 can be held to. Each of
+# the three predicates is driven both ways here, and the eight mutations the
+# repaired checks were seen red against must still apply.
+section "F-HARNESS-21/22: qa_served_fixture, qa_listener_owned, QA_URL_PAST_HOST_ERE"
+SF_TPL="$ROOT/scripts/dev-harness/fixtures/harness.m3u.in"
+sf_out="$TMP/served.m3u"
+st "qa_served_fixture writes the served fixture" 0 qa_served_fixture "$SF_TPL" "$sf_out" 8765
+is "and no row is left dead (the 1.4 s race, F-HARNESS-21)" "$(qa_count '127\.0\.0\.1:9/dead/' "$sf_out")" "0"
+is "every stream row is served, one distinct URL per row (20 rows, 20 URLs)" \
+   "$(qa_count '^http://127\.0\.0\.1:8765/test\.ts' "$sf_out") $(grep -E '^http://127\.0\.0\.1:8765/' "$sf_out" | sort -u | wc -l | tr -d ' ')" "20 20"
+is "the template it reads has the 19 dead rows and the live one it rewrites" \
+   "$(qa_count '^http://127\.0\.0\.1:9/dead/' "$SF_TPL") $(qa_count '^__LIVE__$' "$SF_TPL")" "19 1"
+printf '#EXTM3U\n#EXTINF:-1,X\nhttp://example.test/x.m3u8\n' >"$TMP/nodead.m3u"
+st "a template with nothing dead is refused" 1 qa_served_fixture "$TMP/nodead.m3u" "$TMP/nodead-out.m3u" 8765
+is "and writes nothing" "$([[ -e $TMP/nodead-out.m3u ]] && echo written || echo none)" "none"
+st "a non-numeric port is refused" 1 qa_served_fixture "$SF_TPL" "$TMP/badport.m3u" "87x5"
+# Seen red: the instrument mutation the live dead-fixture runs used, applied
+# to a COPY of this library. The function then leaves the dead rows, and the
+# assertion above would read 19, not 0.
+CM="$ROOT/scripts/dev-harness/spikes/chno-mutations"
+mkdir -p "$TMP/mutlib/scripts" && cp "$HERE/qa-lib.sh" "$TMP/mutlib/scripts/qa-lib.sh"
+( cd "$TMP/mutlib" && git apply "$CM/dead-fixture.patch" ) >/dev/null 2>&1
+is "seen red: under dead-fixture.patch the same call leaves the 19 dead rows" \
+   "$( ( . "$TMP/mutlib/scripts/qa-lib.sh"; qa_served_fixture "$SF_TPL" "$TMP/mut.m3u" 8765; printf '%s %s' "$?" "$(qa_count '127\.0\.0\.1:9/dead/' "$TMP/mut.m3u")" ) )" "0 19"
+# qa_listener_owned against a real listener on a free port, its pid read
+# from the listener. Bounded waits; the server is killed by the pid ss names.
+lo_dir="$TMP/lo-served"; mkdir -p "$lo_dir"
+lo_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1]); s.close()')
+python3 -m http.server "$lo_port" --bind 127.0.0.1 --directory "$lo_dir" >/dev/null 2>&1 &
+lo_wrapper=$!
+lo_up=0
+for ((i = 0; i < 50; i++)); do qa_listener_owned "$lo_port" "$lo_dir"; [[ $? != 2 ]] && { lo_up=1; break; }; sleep 0.1; done
+is "a test listener came up within 5 s" "$lo_up" "1"
+st "qa_listener_owned: the listener whose argv names the needle is ours" 0 qa_listener_owned "$lo_port" "$lo_dir"
+st "qa_listener_owned: the same listener is someone else's for another needle" 1 qa_listener_owned "$lo_port" "$TMP/some-other-harness/fixtures"
+lo_pid=$(ss -ltnpH "sport = :$lo_port" 2>/dev/null | grep -oE 'pid=[0-9]+' | head -n 1 | cut -d= -f2)
+[[ -n $lo_pid ]] && kill "$lo_pid" 2>/dev/null
+kill "$lo_wrapper" 2>/dev/null; wait "$lo_wrapper" 2>/dev/null
+for ((i = 0; i < 50; i++)); do qa_listener_owned "$lo_port" "$lo_dir"; [[ $? == 2 ]] && break; sleep 0.1; done
+st "qa_listener_owned: nothing listening answers 2, not 'someone else'" 2 qa_listener_owned "$lo_port" "$lo_dir"
+st "qa_listener_owned: a missing needle is unusable, 2" 2 qa_listener_owned "$lo_port" ""
+# The R12 needle. The bare `://` the scenarios used (old form, verbatim)
+# reads rule 5's own redaction as a leak; the new needle does not, and still
+# sees every way a URL can carry more than scheme and host.
+redacted='{"service":{"lastError":"Failed to open http://127.0.0.1."}}'
+st "old form: the bare '://' needle calls the scheme://host redaction a URL" 1 qa_answer_lacks '://' "$redacted"
+st "QA_URL_PAST_HOST_ERE: the redaction itself is not a leak" 0 qa_answer_lacks "$QA_URL_PAST_HOST_ERE" "$redacted"
+st "QA_URL_PAST_HOST_ERE: a path is"        1 qa_answer_lacks "$QA_URL_PAST_HOST_ERE" '{"e":"Failed to open http://127.0.0.1:8765/test.ts"}'
+st "QA_URL_PAST_HOST_ERE: a query is"       1 qa_answer_lacks "$QA_URL_PAST_HOST_ERE" '{"e":"https://h.test?token=x"}'
+st "QA_URL_PAST_HOST_ERE: userinfo is"      1 qa_answer_lacks "$QA_URL_PAST_HOST_ERE" '{"e":"http://user:secret@h.test"}'
+st "QA_URL_PAST_HOST_ERE: a fragment is"    1 qa_answer_lacks "$QA_URL_PAST_HOST_ERE" '{"e":"rtmp://h.test#k"}'
+st "QA_URL_PAST_HOST_ERE: an empty answer is still not evidence" 2 qa_answer_lacks "$QA_URL_PAST_HOST_ERE" ""
+is "all eight chno-mutation patches still apply to this tree (git apply --check)" \
+   "$(for cm_p in order-ignored order-always-number flip-refetches unknown-plays bar-no-number bar-ignores-setting miss-plays-cursor dead-fixture; do git -C "$ROOT" apply --check "$CM/$cm_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 0 0 0 0 "
+is "and the folder holds exactly those eight" "$(ls "$CM"/*.patch 2>/dev/null | wc -l | tr -d ' ')" "8"
+# qa_reap_players, driven against stand-in players: scripts NAMED mpv (so
+# `pgrep -x mpv` sees them, as it sees the real one), one ignoring TERM the
+# way the stranded players did, one honouring it, one bound to ANOTHER
+# harness's socket. Every pid is recorded at start and killed by pid after.
+rp_bin="$TMP/rp-bin"; mkdir -p "$rp_bin" "$TMP/rp-honour"
+printf '#!/bin/bash\ntrap "" TERM\nwhile :; do sleep 0.1; done\n' >"$rp_bin/mpv"
+printf '#!/bin/bash\nwhile :; do sleep 0.1; done\n' >"$TMP/rp-honour/mpv"
+chmod +x "$rp_bin/mpv" "$TMP/rp-honour/mpv"
+rp_scr="$TMP/rp-scratch"
+"$rp_bin/mpv" "--input-ipc-server=$rp_scr/runtime/omarchy-iptv/mpv.sock" >/dev/null 2>&1 & rp_deaf=$!
+"$TMP/rp-honour/mpv" "--input-ipc-server=$rp_scr/runtime/omarchy-iptv/mpv.sock" >/dev/null 2>&1 & rp_kind=$!
+"$rp_bin/mpv" "--input-ipc-server=$TMP/rp-other/runtime/omarchy-iptv/mpv.sock" >/dev/null 2>&1 & rp_other=$!
+sleep 0.3
+# The old form, verbatim from run.sh's reap_player: TERM by pattern, and done.
+pkill -f "input-ipc-server=$rp_scr/runtime/omarchy-iptv/mpv.sock" 2>/dev/null
+sleep 0.5
+is "old form: run.sh's TERM-only reap leaves a TERM-ignoring player running" \
+   "$(kill -0 "$rp_deaf" 2>/dev/null && echo alive || echo gone)" "alive"
+"$TMP/rp-honour/mpv" "--input-ipc-server=$rp_scr/runtime/omarchy-iptv/mpv.sock" >/dev/null 2>&1 & rp_kind=$!
+sleep 0.3
+rp_err=$(qa_reap_players "$rp_scr" 2>&1 >/dev/null); rp_rc=$?
+is "qa_reap_players ends both of this harness's players, the deaf one by KILL" \
+   "$rp_rc $(kill -0 "$rp_deaf" 2>/dev/null && echo alive || echo gone) $(kill -0 "$rp_kind" 2>/dev/null && echo alive || echo gone)" "0 gone gone"
+is "and says it had to KILL, naming the pid" "$([[ $rp_err == *"sending KILL"* && $rp_err == *"$rp_deaf"* ]] && echo said || echo "silent: $rp_err")" "said"
+is "and leaves another harness's player alone" "$(kill -0 "$rp_other" 2>/dev/null && echo alive || echo gone)" "alive"
+st "a relative scratch directory is refused" 2 qa_reap_players "rp-scratch"
+st "nothing to reap is 0, not an error" 0 qa_reap_players "$TMP/rp-nothing"
+kill -KILL "$rp_deaf" "$rp_kind" "$rp_other" 2>/dev/null
+wait "$rp_deaf" "$rp_kind" "$rp_other" 2>/dev/null
+
 # M2-03 ruling CN23's runner, the fourth suite. Same two-floor shape as the
 # chno one, and the same reason for asserting it here: scripts/check.sh runs
 # its check-tree half on every commit, so a forgotten bump is caught on this
@@ -2398,7 +2485,12 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # from the same 418, so the merge is their sum.
 # 471 -> 472 on 2026-10-13, D-SINK-19 round 11 (R21): pointerState's derived
 # migration booleans and refusal reports, driven (1).
-EXPECTED=472
+# 472 -> 494 on 2026-10-15, F-HARNESS-21/22 (lane-clean-h): qa_served_fixture,
+# qa_listener_owned and QA_URL_PAST_HOST_ERE driven both ways, the
+# dead-fixture mutation seen red on a copy of this library, and the eight
+# chno-mutation patches pinned to apply (22); qa_reap_players against
+# stand-in players, the old TERM-only reap seen leaving one running (6).
+EXPECTED=500
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

@@ -1,0 +1,12 @@
+diff --git a/Service.qml b/Service.qml
+index 0000000..0000000 100644
+--- a/Service.qml
++++ b/Service.qml
+@@ -1253,6 +1253,7 @@ Item {
+     var asked = Model.sanitizeInput(String(text === undefined || text === null ? "" : text), Model.MAX_CHNO_LABEL)
+     var found = root.channelByNumber(text)
+     if (!found) {
++      if (root.channels.length > 0) root.play(Model.channelId(root.channels[root.channels.length - 1]), true, "")  // MUTATION (F-HARNESS-21): an unknown number tunes the last row
+       return { ok: false, kind: "channel",
+                error: { code: "unknown_chno", message: "no channel " + asked } }
+     }

@@ -1,0 +1,13 @@
+diff --git a/Service.qml b/Service.qml
+index 0000000..0000000 100644
+--- a/Service.qml
++++ b/Service.qml
+@@ -2137,7 +2137,7 @@ Item {
+                                         root.preparedActive.chnoIndex)
+   }
+ 
+-  onChannelOrderChanged: root.applyOrder()
++  onChannelOrderChanged: { root.applyOrder(); root.refreshPlaylist(true) }  // MUTATION (F-HARNESS-21): a re-order re-fetches
+ 
+   // R23c: the start-up init, bounded. The watchdog (stateInitWatchdog) TERMs
+   // a run that has not exited within stateInitTimeoutMs and KILLs it after

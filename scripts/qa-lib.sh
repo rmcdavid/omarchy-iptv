@@ -419,6 +419,102 @@ qa_cmdline() {
   printf '%s\n' "$cmd"
 }
 
+# qa_listener_owned <port> <needle>: whose is the TCP listener on
+# 127.0.0.1:<port>? The pid is read from the LISTENER (`ss -ltnp`), never
+# from `$!` -- behind setsid `$!` is the wrapper (CLAUDE.md, parallel rule 3).
+#   0  a listener exists and its command line carries <needle>
+#   1  a listener exists and it is someone else's (or its pid is unreadable)
+#   2  nothing listens there, or the arguments are unusable
+# F-HARNESS-21 / -22: the chno scenarios play every channel from run.sh's
+# fixture server on its FIXED port, and three lanes share this machine. A
+# second harness's server on that port serves the same file name from ITS
+# directory, so "the stream played" would be evidence about the wrong
+# process; the scenario asks this, with its own scratch directory as the
+# needle, before it counts a single play.
+qa_listener_owned() {
+  local port=${1-} needle=${2-} line pid cmd
+  [[ $port =~ ^[0-9]+$ && -n $needle ]] || return 2
+  line=$(ss -ltnpH "sport = :$port" 2>/dev/null | grep -F "127.0.0.1:$port " | head -n 1)
+  [[ -n $line ]] || return 2
+  pid=$(grep -oE 'pid=[0-9]+' <<<"$line" | head -n 1 | cut -d= -f2)
+  cmd=$(qa_cmdline "$pid") || return 1
+  [[ $cmd == *"$needle"* ]] && return 0
+  return 1
+}
+
+# qa_reap_players <scratch>: end every mpv bound to THIS harness's socket,
+# by pid, and make sure it is gone.
+#   0  none was left (or none existed)
+#   1  one survived even SIGKILL; named on stderr
+#   2  the scratch directory is not an absolute path
+# Found by lane-clean-h on 2026-10-15, and it is the cost of the repair
+# above: once a scenario really PLAYS (a served stream rather than a dead
+# URL), its detached player can outlive the harness. run.sh's reap is
+# `pkill -f` with TERM only, and six of the lane's first fourteen nested-cage
+# runs left a player behind -- each one ignoring TERM, in futex_do_wait at
+# 42-52 % of a core for 35-48 minutes, about 2.7 cores between them on a
+# machine three lanes share, until a SIGKILL ended them. So: matched by
+# EXACT process name (`pgrep -x mpv`, which cannot match the shell running
+# it) and then by the command line naming this scratch directory's socket,
+# TERM, a bounded wait, KILL, and a final look. A kill that is not
+# confirmed is reported, never assumed.
+qa_reap_players() {
+  local scratch=${1-} needle pids="" alive="" p c i
+  [[ $scratch == /* ]] || return 2
+  scratch=${scratch%/}
+  needle="input-ipc-server=$scratch/runtime/omarchy-iptv/mpv.sock"
+  for p in $(pgrep -x mpv 2>/dev/null); do
+    c=$(qa_cmdline "$p") || continue
+    [[ $c == *"$needle"* ]] && pids="$pids $p"
+  done
+  [[ -n $pids ]] || return 0
+  # shellcheck disable=SC2086
+  kill -TERM $pids 2>/dev/null
+  for ((i = 0; i < 50; i++)); do
+    alive=""
+    for p in $pids; do kill -0 "$p" 2>/dev/null && alive="$alive $p"; done
+    [[ -z $alive ]] && return 0
+    sleep 0.1
+  done
+  echo "qa_reap_players: TERM ignored for 5 s by mpv$alive ($scratch); sending KILL" >&2
+  # shellcheck disable=SC2086
+  kill -KILL $alive 2>/dev/null
+  for ((i = 0; i < 30; i++)); do
+    pids=$alive; alive=""
+    for p in $pids; do kill -0 "$p" 2>/dev/null && alive="$alive $p"; done
+    [[ -z $alive ]] && return 0
+    sleep 0.1
+  done
+  echo "qa_reap_players: mpv$alive survived SIGKILL ($scratch)" >&2
+  return 1
+}
+
+# qa_served_fixture <template> <out> <port>: the harness fixture with EVERY
+# stream served by run.sh's fixture server on <port>, one distinct URL per
+# row (`test.ts?ch=<name>`; python's http.server drops the query, so they
+# are one file and twenty channel ids). Status 1, and no file, on a template
+# with no dead stream line or nothing to write.
+# F-HARNESS-21 / -22, the root cause the two chno scenarios shared: the
+# template's streams are DEAD (127.0.0.1:9), so mpv exits about 1.4 s after
+# every tune (measured under a nested cage, 2026-10-15) and the service
+# clears nowPlaying ON ITS OWN. Every check that read "what is playing" a
+# moment after a tune -- chno's N19 tail and N20, chno-entry's N3, N4 and
+# N9 -- was reading a value with a timer on it. With a stream that stays up,
+# nothing clears, and a check that reads nowPlaying reads a decision.
+qa_served_fixture() {
+  local template=${1-} out=${2-} port=${3-} dead
+  [[ -f $template && -r $template && -n $out && $port =~ ^[0-9]+$ ]] || return 1
+  dead=$(qa_count '^http://127\.0\.0\.1:9/dead/[A-Za-z0-9_-]+\.m3u8$' "$template")
+  (( dead > 0 )) || return 1
+  sed -E -e "s|__LIVE__|http://127.0.0.1:$port/test.ts|g" \
+         -e "s|^http://127\\.0\\.0\\.1:9/dead/([A-Za-z0-9_-]+)\\.m3u8\$|http://127.0.0.1:$port/test.ts?ch=\\1|" \
+         "$template" >"$out" 2>/dev/null || { rm -f "$out"; return 1; }
+  # Nothing dead may survive the rewrite: a row still pointing at port 9
+  # would be the race this exists to remove, back on one channel.
+  if (( $(qa_count '127\.0\.0\.1:9/dead/' "$out") > 0 )); then rm -f "$out"; return 1; fi
+  return 0
+}
+
 # ------------------------------------------------------- privacy sweeps
 
 # qa_leak_scan <control-ere> <leak-ere> <file>...
@@ -460,6 +556,17 @@ qa_leak_on_labelled() {
 #   0 the answer is non-empty and does not carry the needle
 #   1 it carries it
 #   2 the answer is empty - the IPC is dead, which is not evidence of anything
+#
+# QA_URL_PAST_HOST_ERE: the needle for "this answer carries a URL" that rule 5
+# can be held to. Rule 5 REDACTS to scheme and host, so `http://127.0.0.1`
+# is the redaction itself, not a leak -- and the bare `://` the R12 checks
+# used matched it: chno-entry's state answer went red on
+# `service.lastError` = "Failed to open http://127.0.0.1." after a dead
+# tune (F-HARNESS-22, measured 2026-10-15). This matches a URL only when
+# something follows its host: a path, a query, a fragment, or userinfo
+# (the `@` the credentials ride in). A host is cut at the first of those,
+# so `user:pass@host` is caught at its `@` and never read as a host.
+QA_URL_PAST_HOST_ERE='[A-Za-z][A-Za-z0-9+.-]*://[^/"?#@ ]*[/?#@]'
 qa_answer_lacks() {
   local needle=$1 answer=$2
   [[ -n $answer ]] || return 2

@@ -69,6 +69,19 @@
 # pair), 900, 901, 1000, 1001 (the two alias attributes). "10" is ambiguous
 # (101/102/103/1000/1001 extend it) and "300" is not, which is what makes the
 # timeout and the instant path both reachable on one list.
+#
+# F-HARNESS-22 (2026-10-15). N9 compared nowPlaying either side of a commit
+# while the channel playing was DEAD (127.0.0.1:9): mpv exits about 1.4 s
+# after such a tune (measured under a nested cage) and the service clears
+# nowPlaying on its own, so the pair could straddle that clear and read red
+# with nothing wrong. N3 and N4 read the same timer (rule 15): N4 was seen
+# red that way at load 10 on 2026-10-15 with the old instrument. The fixture is now served, every row
+# (qa_served_fixture over run.sh's --serve), the server is asserted to be
+# this harness's own (qa_listener_owned), a tuned stream is asserted to HOLD
+# before anything leans on it, and N9 compares the play TOKEN -- the id and
+# the service's play sequence -- with the cursor parked off the playing row,
+# so "plays nothing new" can see a new play of any row. Seen red against
+# spikes/chno-mutations/miss-plays-cursor.patch (README there).
 set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -104,6 +117,10 @@ sf()   { qa_field "d$1" "$(ipc state)"; }
 
 cleanup() {
   if [[ -n $HARNESS_PID ]]; then kill -TERM "$HARNESS_PID" 2>/dev/null; wait "$HARNESS_PID" 2>/dev/null; fi
+  # The live half PLAYS a served stream now, and run.sh's TERM-only reap has
+  # been seen to leave such a player spinning for most of an hour
+  # (qa_reap_players). Ours are ended by pid, with KILL behind the TERM.
+  [[ -n $HARNESS_PID ]] && qa_reap_players "$SCRATCH"
   return 0
 }
 
@@ -118,6 +135,33 @@ wait_for() {
   echo "[chno-entry-scenario] gave up waiting ${secs}s for '$want' from: $*" >&2
   return 1
 }
+
+# What is playing, as one comparable token: the channel id and the service's
+# play sequence (every new play bumps it). NOFIELD when nothing plays.
+playing_token() { sf "['nowPlaying']['id'] + ' ' + str(d['player']['seq'])"; }
+# The stream HOLDS: <chno> is playing and the token does not move across
+# HOLD_S seconds, longer than the 1.4 s a dead stream lasts. Prints "held"
+# or what it saw instead.
+HOLD_S=${OMARCHY_IPTV_CHNO_HOLD_S:-3}
+steady_playing() {
+  local want=$1 first now i
+  for ((i = 0; i < 100; i++)); do
+    [[ "$(sf "['nowPlaying']['chno']")" == "$want" && "$(sf "['player']['up']")" == true ]] && break
+    sleep 0.1
+  done
+  first=$(playing_token)
+  for ((i = 0; i < HOLD_S * 5; i++)); do
+    sleep 0.2
+    now=$(playing_token)
+    [[ $now == "$first" ]] || { echo "moved:$first->$now"; return 1; }
+  done
+  [[ "$(sf "['nowPlaying']['chno']")" == "$want" ]] || { echo "not-$want:$(sf "['nowPlaying']")"; return 1; }
+  echo held
+}
+# R12's needle, with what it matched on a red (scheme://host is the
+# redaction itself, so a red with no context cannot be read). At most three
+# matches, cut after the host.
+url_context() { grep -oE '.{0,60}[a-z]+://[^/"?#@ ]*' <<<"$1" | head -n 3; }
 
 # The digit window, plus a margin. Every timeout check waits exactly this.
 wait_out_entry() { sleep "$(awk -v ms="$ENTRY_MS" 'BEGIN { printf "%.2f", ms / 1000 + 0.4 }')"; }
@@ -196,18 +240,25 @@ live() {
   echo "== setup (scratch $SCRATCH)"
   "$RUN" clean >/dev/null
   mkdir -p "$FIX"
-  sed "s|__LIVE__|http://127.0.0.1:9/dead/live.m3u8|g" "$HERE/fixtures/harness.m3u.in" >"$FIX/harness.m3u"
+  # F-HARNESS-22: every row served, none dead. The port is run.sh's, read
+  # from there; the listener check below makes that join a call.
+  SERVE_PORT=$(grep -oE '^SERVE_PORT=[0-9]+$' "$RUN" | cut -d= -f2)
+  qa_served_fixture "$HERE/fixtures/harness.m3u.in" "$FIX/chno-served.m3u" "${SERVE_PORT:-0}" \
+    || bad "could not write the served fixture (port '${SERVE_PORT}')"
+  qa_listener_owned "${SERVE_PORT:-0}" "$SCRATCH/fixtures"
+  [[ $? == 2 ]] || echo "[chno-entry-scenario] 127.0.0.1:${SERVE_PORT} is already held by another process; run.sh's server cannot bind it" >&2
   # A second, UNNUMBERED list for N14 and N22, generated rather than written
   # so it cannot drift: --numbering none is what every real iptv-org list is.
   python3 "$ROOT/scripts/gen-playlist.py" --profile realistic --numbering none \
     --channels 40 --groups 6 --seed 3 --out "$FIX/nonumbers.m3u" >/dev/null 2>&1
   : >"$LOG"
 
-  echo "== start harness (--open, --entry-ms $ENTRY_MS)"
+  echo "== start harness (--open, --entry-ms $ENTRY_MS, --serve)"
   HARNESS_TIMEOUT=${OMARCHY_IPTV_SCENARIO_TIMEOUT:-300}
-  "$RUN" --keep --open --timeout "$HARNESS_TIMEOUT" --entry-ms "$ENTRY_MS" --playlist "$FIX/harness.m3u" >>"$LOG" 2>&1 &
+  "$RUN" --keep --open --serve --timeout "$HARNESS_TIMEOUT" --entry-ms "$ENTRY_MS" --playlist "$FIX/chno-served.m3u" >>"$LOG" 2>&1 &
   HARNESS_PID=$!
-  wait_for 20 30 sf "['channels']" || bad "the fixture playlist never loaded; every check below is about nothing"
+  wait_for 20 60 sf "['channels']" || bad "the fixture playlist never loaded; every check below is about nothing"
+  check "setup: the stream server on 127.0.0.1:$SERVE_PORT is this harness's own (F-HARNESS-22)" 'qa_listener_owned "$SERVE_PORT" "$SCRATCH/fixtures"'
   wait_for true 10 gf "['opened']" || bad "the guide never opened; every check below is about nothing"
   # F-CHNO-5: the guide is in search mode here, and a digit typed there is
   # literal. Every number check below is about list mode.
@@ -340,6 +391,9 @@ live() {
   check "N3: Enter commits the entry and reports that it landed"         '[[ "$(nf "['\''landed'\'']" "$f1")" == true ]]'
   check "N3: the guide closes"                                           '[[ "$(gf "['\''opened'\'']")" == false ]]'
   check "N3: and the service is playing the number that was typed"       '[[ "$(sf "['\''nowPlaying'\''][\"chno\"]")" == "101" ]]'
+  # F-HARNESS-22: N4 and N9 lean on a tuned stream STAYING tuned.
+  held=$(steady_playing 101)
+  check "N3: and it stays playing (the served fixture holds $HOLD_S s)"   '[[ "$held" == held ]] || { echo "   saw: $held"; false; }'
   ipc open '{}' >/dev/null
   wait_for true 10 gf "['opened']" || bad "the guide did not reopen"
   # F-CHNO-5: Guide.open() rebuilds the state on every open, so the reopened
@@ -358,15 +412,21 @@ live() {
 
   echo "== N9 Enter on a number that does not exist refuses to play"
   ipc move -99 >/dev/null
+  # The row a miss restores to must not be the one playing: a miss that
+  # played the cursor would otherwise re-tune the same id and look like
+  # nothing. `move` wraps, so one step always leaves it.
+  [[ "$(gf "['cursorName']")" == "$(sf "['nowPlaying']['name']")" ]] && ipc move 1 >/dev/null
   ipc number 3009 >/dev/null
-  # "Nothing new" is what is playing before against after, read either side
-  # of the commit: the URLs here are dead, so mpv exits within a second and
-  # nowPlaying clears on its own; a fixed "still 501" would race that.
-  np_before=$(sf "['nowPlaying']")
+  # "Nothing new" is the play token (id and play sequence) before against
+  # after. The stream is served and HOLDS (N3), so nothing clears between
+  # the two reads on its own; the second read waits a second so a play the
+  # commit only scheduled would have landed.
+  np_before=$(playing_token)
   g1=$(ipc commitNumber true false)
-  np_after=$(sf "['nowPlaying']")
+  sleep 1
+  np_after=$(playing_token)
   check "N9: the commit reports that it did not land"                    '[[ "$(nf "['\''landed'\'']" "$g1")" == false ]]'
-  check "N9: it says which number, and plays nothing new"                '[[ "$(nf "['\''transient'\'']" "$g1")" == "No channel 3009" && "$np_after" == "$np_before" ]]'
+  check "N9: it says which number, and plays nothing new"                '[[ "$(nf "['\''transient'\'']" "$g1")" == "No channel 3009" && "$np_before" != NOFIELD && "$np_after" == "$np_before" ]] || { echo "   transient:$(nf "['\''transient'\'']" "$g1") playing:$np_before -> $np_after"; false; }'
   check "N9: and the guide is still open"                                '[[ "$(gf "['\''opened'\'']")" == true ]]'
 
   echo "== N14 / N22 a source with no numbers at all"
@@ -384,23 +444,34 @@ live() {
   check "N14: the hint line drops the 0-9 pair"                          '[[ "$(gf "['\''footerHint'\'']")" != *"0-9"* ]]'
 
   echo "== privacy (R12)"
+  # The needle is QA_URL_PAST_HOST_ERE, not a bare `://`: rule 5 redacts to
+  # scheme and host, and the bare needle went red on that redaction itself
+  # (service.lastError after a dead tune, F-HARNESS-22). Stated plainly: with
+  # every row served nothing fails, so no URL-bearing field is populated
+  # when these run, and a full-URL leak into one of them would be seen only
+  # if it happened anyway. The needle itself is proven both ways in
+  # scripts/qa-lib-test.sh; a failing row for R12 to observe is open.
   checks=$((checks + 1))
-  qa_answer_lacks '://' "$(ipc numberState)"
+  ns_answer=$(ipc numberState)
+  qa_answer_lacks "$QA_URL_PAST_HOST_ERE" "$ns_answer"
   case $? in
-    0) ok "the numberState answer carries no URL" ;;
-    1) bad "the numberState answer carries a URL" ;;
+    0) ok "the numberState answer carries no URL past scheme and host" ;;
+    1) bad "the numberState answer carries a URL past its host"; url_context "$ns_answer" | sed 's/^/   /' ;;
     *) bad "the IPC did not answer at all: 'no URL' is not evidence" ;;
   esac
   checks=$((checks + 1))
-  qa_answer_lacks '://' "$(ipc state)"
+  st_answer=$(ipc state)
+  qa_answer_lacks "$QA_URL_PAST_HOST_ERE" "$st_answer"
   case $? in
-    0) ok "the state answer carries no URL" ;;
-    1) bad "the state answer carries a URL" ;;
+    0) ok "the state answer carries no URL past scheme and host" ;;
+    1) bad "the state answer carries a URL past its host"; url_context "$st_answer" | sed 's/^/   /' ;;
     *) bad "the IPC did not answer at all: 'no URL' is not evidence" ;;
   esac
 }
 
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 case ${1:-live} in
   check-tree) preflight ;;
@@ -431,7 +502,7 @@ esac
 if [[ ${1:-live} == check-tree ]]; then
   EXPECTED_CHECKS=20
 else
-  EXPECTED_CHECKS=75
+  EXPECTED_CHECKS=77
 fi
 ran=$checks
 checks=$((checks + 1))

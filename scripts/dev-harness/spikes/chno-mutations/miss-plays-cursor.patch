@@ -1,0 +1,13 @@
+diff --git a/Guide.qml b/Guide.qml
+index 0000000..0000000 100644
+--- a/Guide.qml
++++ b/Guide.qml
+@@ -1625,7 +1625,7 @@ Item {
+     root.numberTargetName = ""
+     if (done.plan.restore) root.restoreNumberSnapshot(done.snapshot)
+     root.showTransient(done.plan.status)
+-    if (done.plan.play) root.activate(done.plan.keepOpen)
++    if (o.play) root.activate(done.plan.keepOpen)  // MUTATION (F-HARNESS-22): a miss with play plays the row under the cursor
+     return !done.plan.restore
+   }
+ 
