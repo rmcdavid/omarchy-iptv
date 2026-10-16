@@ -205,7 +205,18 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # caps (9 x 4 = 36); the double's dangling-link save, D-DOC-11 (2); and the
 # model's R25c sentence, D-SRC-38's two and R25b's two direct pins (5). The
 # reload fixture's three R25a cases are counted inside R9's one check.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2502}
+# 2502 -> 2561 on 2026-10-16, R26 (lane-clean-a1): Model.stateSavePlan's and
+# Model.stateBlockRecheck's tables and R26b's structural pin over every
+# view's path to the one setText (3); and through the service harness on
+# both hosts and both own-echo modes, R26a's ten (D-SRC-29 by rename and by
+# re-point, D-SINK-21 and its file-link sibling, D-SRC-35 by a favourite and
+# by a source verb, D3/W3's discrimination, the watchdog, the in-flight
+# skip, a foreign write met by the read), R26b's two (D-SRC-46, the
+# handler-write census), R26d's FRESH and R26c's file modes (14 x 4 = 56).
+# The seven families R26a's premise moved were re-levelled in place, not
+# added: R13 and R25a bursts, R21e D-SRC-18, R24a and R25b IN FLIGHT, R25d
+# a7, and the R11 / R14 / R15 structural pins.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2561}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity

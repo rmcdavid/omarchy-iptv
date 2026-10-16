@@ -690,6 +690,37 @@ Item {
   // by the init's exit (Model.stateInitFound answers "timeout").
   property bool stateInitTimedOut: false
   property int stateWritesRefused: 0
+  // D-SINK-19 R26a (2026-10-16): READ BEFORE WRITE, asynchronously. A save
+  // the gate allows first reloads state.json and is decided on what that
+  // load finds, through the dispositions every load already goes through:
+  // the base is written over, a foreign text is merged (R24a) and then
+  // written, a load that is not a state blocks (R22) and nothing is
+  // written. The FileView's watch is lost, WITHOUT a signal, when the path
+  // is replaced or re-pointed (a rename over a link, `sed -i`, rm and copy,
+  // `ln -sfn` to another file or to another folder: measured,
+  // spikes/filewatch-links), so the save was the first time the session
+  // learned of it and it wrote memory over another file, or created a 0644
+  // state.json in an empty folder (D-SINK-21). Model.stateSavePlan decides
+  // each save; Service.saveState carries it out.
+  // `stateVerifyPending`: the reload is out and the save waits for its
+  // load. `stateVerifyDone`: the save issued by that load's finish (no
+  // second read). `stateInHandler`: the depth inside stateFile's own
+  // handlers (R26b). `stateWriteTurn`: saveState called from a turn of its
+  // own (Qt.callLater). The counters are for the harness: verifies
+  // finished, watchdog finishes (no load in stateVerifyWatchdog's 2 s),
+  // reads skipped for a write in flight, re-reads of a liftable no-write
+  // mode, saves deferred to a turn of their own, and the slowest read.
+  property bool stateVerifyPending: false
+  property bool stateVerifyDone: false
+  property int stateInHandler: 0
+  property bool stateWriteTurn: false
+  property double stateVerifyAt: 0
+  property int stateVerifies: 0
+  property int stateVerifyNoLoad: 0
+  property int stateVerifySkipped: 0
+  property int stateVerifyRetries: 0
+  property int stateSavesDeferred: 0
+  property double stateVerifyMsMax: 0
   // R5: the key whose entry mirror is WAITING for a parked state save
   // (Model.pointerWritePlan "wait-entry"); null when nothing waits. Written
   // by settleEntryFlush once that save has LANDED (R11), never before it.
@@ -1874,6 +1905,9 @@ Item {
 
   function sourcesReady() {
     // R22a: refused, not made in memory only -- nothing made now would be kept.
+    // R26a (D-SRC-35): and one reload asked for, so a file that is back lifts
+    // the mode for the NEXT call (this one is refused either way, R26e).
+    root.recheckStateBlock()
     if (root.stateWriteBlocked !== "") return root.sourceResult(false, "state_unreadable", Model.sourceErrorMessage("state_unreadable"), "")
     if (!root.stateLoaded || !root.cacheReady) return root.sourceResult(false, "not_ready", Model.sourceErrorMessage("not_ready"), "")
     if (root.probing || root.switching) return root.sourceResult(false, "busy", Model.sourceErrorMessage("busy"), root.probingKey)
@@ -1943,6 +1977,7 @@ Item {
   // guide returns to the first-run state (playback, if any, continues).
   function removeSource(id) {
     var key = String(id || "")
+    root.recheckStateBlock()
     if (root.stateWriteBlocked !== "") return root.sourceResult(false, "state_unreadable", Model.sourceErrorMessage("state_unreadable"), key)
     if (!root.stateLoaded || !root.cacheReady) return root.sourceResult(false, "not_ready", Model.sourceErrorMessage("not_ready"), key)
     if (root.probing && (root.probingKey === key || root.probeDirKey === key)) return root.sourceResult(false, "busy", Model.sourceErrorMessage("busy"), key)
@@ -2199,15 +2234,69 @@ Item {
   // state reaches applyUserState -- and it lifts the no-write mode, which is
   // what "a later successful load lifts it" means. Anything else waits for,
   // or is judged with, the helper's start-up verdict (decideStateLoad).
+  // R26a: and it is the read a parked save waits for. Whatever load comes
+  // -- the reload saveState asked for, or one a change raised first -- has
+  // been decided by the time the handler returns, so the save goes then,
+  // from a turn of its own (R26b): never from inside the handler.
   function stateLoadArrived(result) {
-    var kind = Model.stateLoadKind(result)
-    root.stateLoadKind = kind
-    if (kind === "loaded") {
-      root.liftStateBlock()
-      root.applyUserState(result.text)
+    root.stateInHandler = root.stateInHandler + 1
+    try {
+      var kind = Model.stateLoadKind(result)
+      root.stateLoadKind = kind
+      if (kind === "loaded") {
+        root.liftStateBlock()
+        root.applyUserState(result.text)
+      } else {
+        root.decideStateLoad()
+      }
+    } finally {
+      root.stateInHandler = root.stateInHandler - 1
+    }
+    if (root.stateVerifyPending && root.stateInHandler === 0) Qt.callLater(root.finishStateVerifyLater)
+  }
+
+  // R26b: a save asked for from the caller's turn is asked again from one
+  // of its own, which is where the write is issued.
+  function saveDeferredState() {
+    if (!root.stateSavePending || root.stateVerifyPending) return
+    root.stateWriteTurn = true
+    try { root.saveState() } finally { root.stateWriteTurn = false }
+  }
+
+  // R26a (D-SRC-35): a source verb meeting a no-write mode a load can lift
+  // asks for one reload (Model.stateBlockRecheck); the verb is refused now,
+  // and if the file is back the load lifts the mode for the next call.
+  function recheckStateBlock() {
+    if (!Model.stateBlockRecheck({ blocked: root.stateWriteBlocked, inHandler: root.stateInHandler > 0,
+                                   verifyPending: root.stateVerifyPending })) return
+    root.stateVerifyRetries = root.stateVerifyRetries + 1
+    stateFile.reload()
+  }
+
+  function finishStateVerifyLater() { if (root.stateVerifyPending) root.finishStateVerify(false) }
+
+  // R26a: the read-before-write is over -- its load decided (or, from the
+  // watchdog, no load came in 2 s and the save goes as it did before R26,
+  // counted and logged). A no-write mode the load set refuses the parked
+  // save; anything else issues it, with no second read.
+  function finishStateVerify(timedOut) {
+    root.stateVerifyPending = false
+    stateVerifyWatchdog.stop()
+    var ms = Date.now() - root.stateVerifyAt
+    root.stateVerifies = root.stateVerifies + 1
+    if (ms > root.stateVerifyMsMax) root.stateVerifyMsMax = ms
+    if (timedOut) {
+      root.stateVerifyNoLoad = root.stateVerifyNoLoad + 1
+      console.warn("omarchy-iptv: state.json was not read back within " + ms + " ms of a save; saving without the read")
+    }
+    if (root.stateWriteBlocked !== "") {
+      root.stateSavePending = false
+      root.stateWritesRefused = root.stateWritesRefused + 1
       return
     }
-    root.decideStateLoad()
+    if (!root.stateSavePending) return
+    root.stateVerifyDone = true
+    try { root.saveState() } finally { root.stateVerifyDone = false }
   }
 
   // Model.stateLoadDecision, carried out. Called by a load that is not a
@@ -2295,7 +2384,10 @@ Item {
                                                 savePending: root.stateSavePending,
                                                 savesInFlight: root.stateSavesInFlight,
                                                 saveFailed: root.stateSaveFailed })
-    root.stateReloadsByReason = Model.countReload(root.stateReloadsByReason, disposition.reason)
+    // R26a: a load met by a read-before-write is counted under its own name,
+    // so a check that needs a genuine save-parked reload (key-scenario's D3
+    // and W3) is never satisfied by the read every save now makes.
+    root.stateReloadsByReason = Model.countReload(root.stateReloadsByReason, (root.stateVerifyPending ? "pre-save-" : "") + disposition.reason)
     if (disposition.act === "merge") {
       root.mergeForeignText(text)
       return
@@ -2378,16 +2470,40 @@ Item {
     // nothing known to merge onto, so it waits for the load (stateOnLoad
     // replays the session record onto the file) rather than writing the
     // empty default over a file nobody has read.
+    // R26a / R26b: and then Model.stateSavePlan says what this call does --
+    // join a read already out, re-read before writing, defer to a turn of
+    // its own, or write. The only setText is below the plan's "write".
     var gate = Model.stateWriteGate({ blocked: root.stateWriteBlocked, loaded: root.stateLoaded, dirsReady: root.dirsReady })
-    if (gate === "refuse") {
+    var plan = Model.stateSavePlan({ verifyPending: root.stateVerifyPending, gate: gate, blocked: root.stateWriteBlocked,
+                                     inHandler: root.stateInHandler > 0, verifyDone: root.stateVerifyDone,
+                                     writeTurn: root.stateWriteTurn, inFlight: root.stateSavesInFlight })
+    if (plan === "join" || plan === "park") {
+      root.stateSavePending = true
+      return
+    }
+    if (plan === "refuse") {
       root.stateSavePending = false
       root.stateWritesRefused = root.stateWritesRefused + 1
       return
     }
-    if (gate === "park") {
+    if (plan === "defer") {
       root.stateSavePending = true
+      root.stateSavesDeferred = root.stateSavesDeferred + 1
+      Qt.callLater(root.saveDeferredState)
       return
     }
+    if (plan === "verify") {
+      // The file as it is NOW, through stateFile's own load handlers; the
+      // save waits for that load (stateLoadArrived), bounded by the watchdog.
+      if (gate === "refuse") root.stateVerifyRetries = root.stateVerifyRetries + 1
+      root.stateSavePending = true
+      root.stateVerifyPending = true
+      root.stateVerifyAt = Date.now()
+      stateFile.reload()
+      stateVerifyWatchdog.restart()
+      return
+    }
+    if (root.stateSavesInFlight > 0 && !root.stateVerifyDone) root.stateVerifySkipped = root.stateVerifySkipped + 1
     root.stateSavePending = false
     var text = JSON.stringify(root.userState, null, 2) + "\n"
     // R25a (D-SRC-30): the burst since the last landed save, which `saved`
@@ -5124,41 +5240,53 @@ Item {
     // nothing: the later write reports on itself. The flag is what tells a
     // reload the file is older than memory, and the held entry mirror is
     // written only once it is clear.
+    // R26b: both outcome handlers count as inside stateFile, so a save they
+    // reach (settleEntryFlush -> the key mirror -> reconcile) is deferred.
     onSaved: {
-      if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) {
-        root.stateSavesInFlight = 0
-        root.stateSaveFailed = false
-        root.landedState = root.lastSaveState   // R21a: what the disk holds now, the marker included
-        root.recentSaves = []                   // R25a: nothing in flight, so no later reload is an echo
-      }
-      root.settleEntryFlush()
-      // R19d (D-SRC-18): a mirror a failed save withheld is paid by the first
-      // save that lands with nothing else outstanding -- deferred, never from
-      // inside the FileView's own signal, and for the key active THEN.
-      if (Model.owedMirrorAction({ owed: root.entryMirrorOwed, pendingKey: root.pendingEntryKey,
-                                   savePending: root.stateSavePending, savesInFlight: root.stateSavesInFlight,
-                                   saveFailed: root.stateSaveFailed }) === "rewrite") {
-        root.entryMirrorOwed = false
-        Qt.callLater(function() { root.persistActive(root.activeSourceKey) })
+      root.stateInHandler = root.stateInHandler + 1
+      try {
+        if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) {
+          root.stateSavesInFlight = 0
+          root.stateSaveFailed = false
+          root.landedState = root.lastSaveState   // R21a: what the disk holds now, the marker included
+          root.recentSaves = []                   // R25a: nothing in flight, so no later reload is an echo
+        }
+        root.settleEntryFlush()
+        // R19d (D-SRC-18): a mirror a failed save withheld is paid by the first
+        // save that lands with nothing else outstanding -- deferred, never from
+        // inside the FileView's own signal, and for the key active THEN.
+        if (Model.owedMirrorAction({ owed: root.entryMirrorOwed, pendingKey: root.pendingEntryKey,
+                                     savePending: root.stateSavePending, savesInFlight: root.stateSavesInFlight,
+                                     saveFailed: root.stateSaveFailed }) === "rewrite") {
+          root.entryMirrorOwed = false
+          Qt.callLater(function() { root.persistActive(root.activeSourceKey) })
+        }
+      } finally {
+        root.stateInHandler = root.stateInHandler - 1
       }
     }
     onSaveFailed: (error) => {
-      if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) root.stateSavesInFlight = 0
-      // The error is an enum, never a path or a URL. Logged on EVERY failure.
-      console.warn("omarchy-iptv: state.json could not be written (error " + error + "); the in-memory state stands")
-      // R13: the state write IS the switch / remove / adoption, so its
-      // failure is the one a source call can have, reported here with a
-      // reason of its own rather than from the call that issued it (which
-      // returned when the write was issued, SR25 as amended 2026-10-12).
-      // Signalled once per failure EPISODE -- the flag below is sticky until
-      // a later write lands -- because one switch issues two writes (the
-      // touch, then the key move) and the guide would show the line twice.
-      if (!root.stateSaveFailed) {
-        root.lastPersistFailure = "state_write_failed"
-        root.sourcesPersistFailed("state_write_failed")
+      root.stateInHandler = root.stateInHandler + 1
+      try {
+        if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) root.stateSavesInFlight = 0
+        // The error is an enum, never a path or a URL. Logged on EVERY failure.
+        console.warn("omarchy-iptv: state.json could not be written (error " + error + "); the in-memory state stands")
+        // R13: the state write IS the switch / remove / adoption, so its
+        // failure is the one a source call can have, reported here with a
+        // reason of its own rather than from the call that issued it (which
+        // returned when the write was issued, SR25 as amended 2026-10-12).
+        // Signalled once per failure EPISODE -- the flag below is sticky until
+        // a later write lands -- because one switch issues two writes (the
+        // touch, then the key move) and the guide would show the line twice.
+        if (!root.stateSaveFailed) {
+          root.lastPersistFailure = "state_write_failed"
+          root.sourcesPersistFailed("state_write_failed")
+        }
+        root.stateSaveFailed = true
+        root.settleEntryFlush()
+      } finally {
+        root.stateInHandler = root.stateInHandler - 1
       }
-      root.stateSaveFailed = true
-      root.settleEntryFlush()
     }
   }
 
@@ -5310,6 +5438,15 @@ Item {
                    + Math.floor(root.controlTimeoutMs / 1000) + " s, terminating it")
       controlProc.signal(15)
     }
+  }
+
+  Timer {
+    // R26a: the read before a save is bounded. No load in 2 s: the save goes
+    // without it, as it did before R26 (counted, and one console line).
+    id: stateVerifyWatchdog
+    interval: 2000
+    repeat: false
+    onTriggered: if (root.stateVerifyPending) root.finishStateVerify(true)
   }
 
   Timer {
