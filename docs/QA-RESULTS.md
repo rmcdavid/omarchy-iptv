@@ -13583,8 +13583,8 @@ seen live. Each segment red on its mutation (no read, no deferral, no verb
 recheck, a periodic reload). The honest double alone turned 12 of dev's
 2,502 checks red (**F-HARNESS-29**). No lens found a P1 or anything worse
 than 0.14.0 (224,508 simulated runs per tree). A save now reaches the disk
-35-110 ms (median, 38 KB state) after the call instead of before it
-returns; what is on screen is unchanged. What stopped the merge was text
+a median of 35 ms after the call when idle and 83-98 ms under load
+(17-172 ms over 48 saves, 38 KB state) instead of before it returns; what is on screen is unchanged. What stopped the merge was text
 and one honesty problem: the double still delivered another program's
 reload while our own write was in flight, which the measured FileView never
 does, and 16 checks passed on that (**F-HARNESS-31**).
@@ -13600,16 +13600,22 @@ behaviour's boundary to 0.14.1, which ships without R26; observed the read's
 (**D-SRC-47**). The re-check: the data-loss lens found no blocker (its M1
 matrix 0 problems on the branch against 3,760 on 0.14.0, every residual of
 M5 and M6 a same-instant edit or one of the documented windows); the claims
-lens found five sentences still promising a little more than the code
-keeps, which the integration commit qualifies. It also left the in-flight
+lens found five places still promising a little more than the code keeps,
+which the integration commits qualify; an independent check of the lead's
+own corrections then found eleven of them false in turn, the worst saying a
+change made during a mid-session block is saved once the file is back when
+on most ways back it is dropped, and those were corrected from its
+measurements. It also left the in-flight
 half of the merge's re-save decision observed by nothing (**F-HARNESS-33**).
 
-Filed and not fixed: **F-HARNESS-32** (`run.sh` still ends the harness
-shell and its fixture server with TERM alone, never observed to fail),
+Filed and not fixed: **F-HARNESS-32** (`run.sh`'s exit cleanup still ends a foreground harness
+shell, and both paths the fixture server, with TERM alone; never observed to
+fail),
 **D-SRC-50** (after re-pointing the folder link at an empty folder, the
 notice's advice leads to a fresh, empty start there; nothing lost), and
 **D-SRC-51** (the notice says changes made in a mid-session block "are not
-kept" when they are saved once the file is back). F-PERF-2 is closed as not
+kept", which is true on most ways back and false on the one where the next
+guide change's own read finds the file back first). F-PERF-2 is closed as not
 reproduced (89.0 against 89.5 ms on 0.14.0's pre-cut run).
 
 ### 0.14.0: the release record (D-SINK-19 shipped)
