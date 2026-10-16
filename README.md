@@ -936,9 +936,11 @@ Nothing inside the plugin directory is written at runtime.
   made still shows, and its source change answered as done, but it is not
   saved while the link points there, and the next source change is
   refused with `state.json could not be read · nothing is saved until it
-  can be`. Point the link back and the next save (or the second source
-  change) picks your file up again, writes into it the change you made
-  meanwhile, and saving resumes; or
+  can be`. Point the link back and the next save picks your file up again,
+  writes into it the change you made meanwhile, and saving resumes; if a
+  source change comes first, it is refused once, its re-read picks your
+  file up as it is (the change made meanwhile is dropped), and the next
+  source change goes through; or
   restart the shell -- after a restart the folder the link leads to NOW is
   what loads, so an empty one starts with no sources, like a fresh
   install, until you point the link back and restart again. (Up to and
