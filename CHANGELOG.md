@@ -3,7 +3,7 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
-## 0.14.1 (2026-10-15)
+## 0.14.1 (2026-10-16)
 
 **Security.** A channel logo in PNG format can carry more than its picture:
 text, colour profiles and other data, some of it compressed, which the
