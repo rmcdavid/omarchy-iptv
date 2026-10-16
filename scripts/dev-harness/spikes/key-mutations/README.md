@@ -19,7 +19,7 @@ line, only the file and the hunk's position changed.
 
 | patch | what it breaks | which checks go red |
 |---|---|---|
-| `d3-save-parked.patch` | `Model.reloadDisposition`'s (in `model/state.mjs`) `save-parked` clause deleted: a reload over a PARKED save is applied as `file-newer` (the D-SRC-15 drop, re-opened) | D2, D3, W2, W3, W4, W6 -- the per-reason counter reads `{"file-newer": 1, "first-load": 1, "own-write": 1}` and `save-parked` is absent |
+| `d3-save-parked.patch` | `Model.reloadDisposition`'s (in `model/state.mjs`) `save-parked` clause deleted: a reload over a PARKED save is applied as `file-newer` (the D-SRC-15 drop, re-opened) | D2, D3, W2, W3, W4, W6 -- the per-reason counter reads `{"file-newer": 1, "first-load": 1, "own-write": 1}` and `save-parked` is absent. Since R26 (2026-10-16, lane-clean-a1, --tree: 76 passed, 53 failed) the clause is load-bearing for EVERY in-app save: each save waits behind a read whose load is the base, and only `save-parked` keeps that load from being applied over the change, so the in-app edits of D, N, M, G, C, E, R, O, W, F, U, A, Y, Q, V and B7..B31 are lost. D3 and W3 still read `save-parked:NOFIELD` (the read's own loads count as `pre-save-*`) |
 | `r14-no-return.patch` | `Service.applyUserState`'s R14 `return` deleted: the reload is COUNTED as ignored and then applied anyway | D2, W2, W3, W4, W6 -- and D3 GREEN, with `{"save-parked": 1, ...}` beside the loss at the sink: a counter observes the decision, D2/W2 observe the sink, and the `return` itself is pinned structurally in `tests/Model.test.js` (R14) |
 | `r23a-no-rearm.patch` | `Service.liftStateBlock`'s `root.stateBlockTold = false` deleted (round 13, R23a): the lift no longer re-arms the no-write notice, so a second episode in one session is never told -- the round-12 data-loss lens's X13, which no check saw (0 of 2354 node failures, nothing red live) | B9 (`told:1/1`), and in `tests/Model.test.js` the four R23a pins (4 of 2358, both own-write echo modes) |
 | `r24g-no-kill.patch` | the start-up watchdog's KILL in `Service.qml` deleted (round 14, R24g): a TERM-ignoring start-up process (the slow tree's init with `OMARCHY_IPTV_SLOW_IGNORE_TERM=1`) is never ended | B17 (`helper:no(<pid>)`, `blocked:` empty, `told:0`), and in `tests/Model.test.js` the four R24g pins (init and mkdir, both hosts) |
@@ -29,6 +29,10 @@ line, only the file and the hunk's position changed.
 | `r25d-a5-base-not-moved.patch` | `Service.mergeForeignText` does not move the base to theirs (the round-14 lens's a5, F-HARNESS-26): a second foreign write in one held window is compared with a stale base | the four R25d a5 node pins |
 | `r25d-a7-no-inflight-half.patch` | the in-flight half of `mergeForeignText`'s re-save decision deleted (the lens's a7): our older in-flight save lands over a merge equal to theirs | the four R25d a7 node pins, and the in-flight R25b saved-search pin |
 | `r25d-no-reload-on-change.patch` | `stateFile`'s `onFileChanged: reload()` deleted (round 15, R25d): the view still watches, the service never reloads | key-scenario's B21 (the existing-folder session damaged after an own save: the garbage unnoticed) |
+| `r26a-no-read.patch` | `Service.saveState`'s read before a write deleted (R26a, 2026-10-16): a save the gate allows is written at once, a refusal stands as the gate gave it -- the 1c88877 behaviour, with R26b's deferral kept | key-scenario's B23..B28 and B31 (--tree: 122 passed, 7 failed; B28 `created:644 holds:[state.json] blocked: told:0`); in `tests/Model.test.js` the R26a pins that need the read and R26d's FRESH (36 of 2561 in each own-echo mode) |
+| `r26b-no-defer.patch` | `Service.saveState`'s deferral deleted (R26b): a save asked for inside one of `stateFile`'s handlers is written there and then, which raises no `saved` (D-SRC-46) | key-scenario's B30 INLOAD (--tree: 128 passed, 1 failed, B30 `inFlight:1 saveFailed:true` with the merge on disk); in `tests/Model.test.js` R26b's D-SRC-46, handler-write census and structural pin, R24a IN FLIGHT, R13's burst and the eight R22a unmigrated starts whose migration save meets the chmod reload (23 of 2561 own echo load, 21 none) |
+| `r26a-no-verb-recheck.patch` | `Service.recheckStateBlock`'s reload deleted (R26a, D-SRC-35): a source verb meeting a liftable no-write mode is refused and nothing reads the file again | key-scenario's B29 (--tree: 128 passed, 1 failed, B29 `lifted:[absent] second:false`); in `tests/Model.test.js` the four R26a/R26e source-verb pins (4 of 2561) |
+| `r26d-periodic-reload.patch` | a 2 s `Timer` that reloads `stateFile` whatever happens -- the periodic reload R26d refused (lane W's option B) | key-scenario's B31, its idle half (--tree: 126 passed, 3 failed, B31 `idle-loads:+15` in 30 s; B28 and B29 red too, because the timer sees the empty folder and the returned target before the first call does: `edit:false`, `first:ok`): no tree before it reloads while idle, so that half is green on every tree without this patch; no node pin (the harness runs no Timer) |
 | `r23e-editable-field.patch` | the form field's `readOnly: true` in `Guide.qml` made `false` (round 13): the D-CLIP-1 switch off, one editable TextInput per form field | B13 (`editable:` above 0 on the first-run form): the control that shows the harness's editable-input census (`ipc editable`) can see a field, so B11's `editable:0` on the no-write surface is an observation and not a census that cannot count |
 
 Round 14 (R24a) re-made `d3-save-parked.patch` and `r14-no-return.patch`
@@ -42,7 +46,14 @@ nothing-held branch below the deleted clause, so the hunk's context moved;
 the decision broken is the same, and with memory moved by the adoption the
 reload still lands on `file-newer`.
 
-All eleven apply to the tree they are checked in with (`scripts/qa-lib-test.sh`
+R26 (2026-10-16) re-made `r25a-keep-landed.patch` and
+`r25a-clear-every-saved.patch`: R26b wraps `stateFile`'s `onSaved` body in
+a handler-depth count and a `try`, which re-indented the hunks. The
+decisions broken are the same two lines, and the node reds are the same
+pins (the coalesced burst, R24a IN FLIGHT and R25d a7 for the second),
+re-levelled to put the save in flight first.
+
+All fifteen apply to the tree they are checked in with (`scripts/qa-lib-test.sh`
 runs `git apply --check` on each, so a refactor that moves a hunk is a red
 gate, not a silently stale patch).
 

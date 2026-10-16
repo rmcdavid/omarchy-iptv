@@ -125,10 +125,16 @@ function storedOwnedValue(entry, name) {
 // R22a (round 12): the no-write mode and the two facts it is decided from --
 // the latest load's kind, the start-up init's verdict on the path -- and how
 // many writes it refused. Reasons and counts, never a path or a URL.
+// R26a (2026-10-16): the read-before-write -- whether a save waits for its
+// read, how many reads finished, how many the watchdog finished with no
+// load, how many were skipped for a write in flight, how many re-reads a
+// liftable no-write mode was given, how many saves were deferred to a turn
+// of their own, and the slowest read in ms. Booleans and numbers only.
 var POINTER_FIELDS = ["stateLoaded", "reconciled", "dirsReady", "stateSavePending", "pendingEntryKey", "configured",
                       "activeSourceKey", "stateSavesInFlight", "stateSaveFailed", "stateInitOk", "stateReloadsIgnored",
                       "stateReloadsByReason", "entryInputReports", "stateWriteBlocked", "stateLoadKind", "stateInitFound",
-                      "stateWritesRefused"]
+                      "stateWritesRefused", "stateVerifyPending", "stateVerifies", "stateVerifyNoLoad", "stateVerifySkipped",
+                      "stateVerifyRetries", "stateSavesDeferred", "stateVerifyMsMax"]
 function pointerStateOf(s) {
   if (!s) return { ok: false, error: { code: "no_service" } }
   var out = { ok: true }

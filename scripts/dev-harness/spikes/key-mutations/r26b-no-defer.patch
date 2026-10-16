@@ -1,0 +1,18 @@
+diff --git a/Service.qml b/Service.qml
+index 0000000..0000000 100644
+--- a/Service.qml
++++ b/Service.qml
+@@ -2486,12 +2486,7 @@ Item {
+       root.stateWritesRefused = root.stateWritesRefused + 1
+       return
+     }
+-    if (plan === "defer") {
+-      root.stateSavePending = true
+-      root.stateSavesDeferred = root.stateSavesDeferred + 1
+-      Qt.callLater(root.saveDeferredState)
+-      return
+-    }
++    // MUTATION (lane A1, R26b): no deferral -- a save asked for inside a handler is written there and then
+     if (plan === "verify") {
+       // The file as it is NOW, through stateFile's own load handlers; the
+       // save waits for that load (stateLoadArrived), bounded by the watchdog.

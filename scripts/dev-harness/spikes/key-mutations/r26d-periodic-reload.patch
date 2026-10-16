@@ -1,0 +1,19 @@
+diff --git a/Service.qml b/Service.qml
+index 0000000..0000000 100644
+--- a/Service.qml
++++ b/Service.qml
+@@ -5449,6 +5449,14 @@ Item {
+     onTriggered: if (root.stateVerifyPending) root.finishStateVerify(true)
+   }
+ 
++  Timer {
++    // MUTATION (lane A1, R26d): the periodic reload R26d refused -- state.json read every 2 s whatever happens
++    interval: 2000
++    repeat: true
++    running: true
++    onTriggered: stateFile.reload()
++  }
++
+   Timer {
+     // R23c: the bound on the start-up `state init` (startStateInit). The
+     // shape of playlistWatchdog: TERM, flag, and the exit handler decides --

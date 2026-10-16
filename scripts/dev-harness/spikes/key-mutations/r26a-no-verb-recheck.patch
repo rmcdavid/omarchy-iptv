@@ -1,0 +1,13 @@
+diff --git a/Service.qml b/Service.qml
+index 0000000..0000000 100644
+--- a/Service.qml
++++ b/Service.qml
+@@ -2270,7 +2270,7 @@ Item {
+     if (!Model.stateBlockRecheck({ blocked: root.stateWriteBlocked, inHandler: root.stateInHandler > 0,
+                                    verifyPending: root.stateVerifyPending })) return
+     root.stateVerifyRetries = root.stateVerifyRetries + 1
+-    stateFile.reload()
++    // MUTATION (lane A1, R26a): the source verb's re-read deleted -- a liftable no-write mode is never read again by a verb
+   }
+ 
+   function finishStateVerifyLater() { if (root.stateVerifyPending) root.finishStateVerify(false) }

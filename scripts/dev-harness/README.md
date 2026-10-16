@@ -11,7 +11,10 @@ Keep runs short; `run.sh` kills Quickshell after `--timeout` seconds
 (default 15). An `EXIT` trap reaps everything it started (the fixture HTTP
 server, Quickshell and any harness mpv) on a normal exit, the timeout,
 Ctrl-C or SIGTERM; a SIGKILL of `run.sh` cannot be trapped, so the next
-start also reaps a stale fixture server. The playlist/EPG source is echoed
+start also reaps a stale fixture server. The player is ended by pid --
+TERM, a bounded 5 s wait, then KILL and a final look (`qa_reap_players` in
+`scripts/qa-lib.sh`, F-HARNESS-30) -- because a served player under a cage
+that is going away ignores TERM, and six once spun for most of an hour. The playlist/EPG source is echoed
 as `scheme://host` only and `updateEntryInline` logs the entry's keys, never
 its values: a real provider URL would carry credentials into the terminal
 scrollback.
@@ -452,7 +455,10 @@ harness log is `$SCRATCH/scenario.log`.
 
 `chno-scenario.sh` covers the service side: the `channel` IPC verb (which
 PLAYS, ruling CN1), the index counts, `channelOrder`, and the bar's number
-slot. Guide digit entry is Lane A's and is not in it.
+slot. Guide digit entry is Lane A's and is not in it. Both chno scenarios
+play every row from run.sh's own fixture server (`--serve`, port 8765, which
+must be free and is asserted to be this harness's), and under a nested cage
+they need `WLR_RENDERER=gles2` for mpv (F-HARNESS-21/22).
 
 ```bash
 scripts/dev-harness/chno-scenario.sh check-tree   # no display, no quickshell
@@ -957,6 +963,7 @@ lane's running harness is never reaped by a clip run.
 ```
 scripts/dev-harness/key-scenario.sh check-tree            # the instrument arm, node only; run by check.sh
 scripts/dev-harness/key-scenario.sh                       # the instrument arm, then the real Service.qml under cage, with a transcript
+scripts/dev-harness/key-scenario.sh --baseline 1c88877      # the R26 red run: round 15's code and 0.14.1 (120 / 9: B23-B31, read before write)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-m2  # the round-12 red run: round 11's code (97 / 9: B1-B8, and N1 for its new field only)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-z2  # the round-11 red run: round 10's code (68 / 30 under the 97-check harness: G1, G2, G5, F4, U1-U7, K1-K3, Z1-Z3, A1, Y2, Y3, Q1, Q2, V1, H1, X1-X6; eight of them NOFIELD-only)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-y2  # round 10's baseline is NOT a red run: round 9's code reads 87 / 0, because no segment observes R20a-R20c at the sink (Y4 reds only the S1b export)

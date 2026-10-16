@@ -182,10 +182,21 @@ except Exception:
 
 # The player is a setsid'd grandchild of the helper now (M2-02), so it is not
 # in any process group this script owns: it is reaped by its command line,
-# which names THIS scratch socket and can never match the live session's.
-player_pattern() { echo "input-ipc-server=$SCRATCH/runtime/omarchy-iptv/mpv.sock"; }
-
-reap_player() { pkill -f "$(player_pattern)" 2>/dev/null; return 0; }
+# which names THIS scratch socket and can never match the live session's
+# (qa_reap_players: `pgrep -x mpv`, then the `input-ipc-server=` argument).
+# F-HARNESS-30 (R26h, 2026-10-16): TERM, a bounded wait, then KILL by pid and
+# a final look -- qa_reap_players (scripts/qa-lib.sh), never `pkill -f` with
+# TERM alone. A served player under a cage that is going away ignores TERM:
+# phase 1 of the R26 work left six of them spinning for 35-48 minutes at
+# 42-52 % of a core each. Every scenario that ends with `run.sh reap`, and
+# run.sh's own exit, comes through here. The helper's own `player stop` is a
+# different path and already escalates to SIGKILL (the D-LIVE-17 ladder).
+reap_player() {
+  local dir=$SCRATCH
+  [[ $dir == /* ]] || dir=$PWD/$dir
+  qa_reap_players "$dir"
+  return 0
+}
 
 cleanup() {
   [[ -n $SERVER_PID ]] && kill "$SERVER_PID" 2>/dev/null

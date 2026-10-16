@@ -2476,6 +2476,227 @@ PYSEED
   ipc close >/dev/null
   stop_shell
 
+  echo "== B, R26: read before write -- a linked state.json replaced three ways and re-pointed, the state folder link re-pointed at another state and at an EMPTY folder, a link target that comes back, a save asked for inside a load, and an idle shell (R26a, R26b, R26d) ($(elapsed) s)"
+  # D-SINK-19 R26 (the lead's ruling of 2026-10-16). The FileView's watch is
+  # lost WITHOUT a signal when the path is replaced or re-pointed (measured
+  # on a bare FileView: spikes/filewatch-links on lane-clean-w-probe), so
+  # before R26 the next in-app save was the first the session knew of it: it
+  # wrote memory over the hand edit (D-SRC-29), over another state the link
+  # now named (D-SRC-29, D-SRC-40), or created a 0644 state.json carrying
+  # every source URL in an empty folder (D-SINK-21). Every save now READS
+  # first and decides through the dispositions every load already has. The
+  # segments are lane W's service rig made checks: S29-mv, S29-sed,
+  # S29-rmcp, S29-ln (B23..B26), S40 (B27), S21 (B28), S35 (B29), INLOAD
+  # (B30, D-SRC-46) and IDLE (B31). Each is seen red on dev 1c88877
+  # (--baseline) and by one decision through --tree: r26a-no-read.patch
+  # (B23..B28 and B31's save half), r26b-no-defer.patch (B30),
+  # r26a-no-verb-recheck.patch (B29) and r26d-periodic-reload.patch (B31's
+  # idle half, which no earlier tree can red: none reloads while idle),
+  # under spikes/key-mutations/.
+  # FRESH (a replacement with no save after it) is the stated gap and has no
+  # check here: R26d refuses a periodic reload, and B31 is what proves none.
+  LINKS="$WORK/links"
+  SDIR=$(dirname "$STATE")
+  # A state with custom labels (a derived label is re-derived on load, and
+  # the hand edits below change A's) and one favourite, from the seed's own
+  # records: r26_state LABEL-A FAVOURITE >file
+  r26_state() {
+    python3 -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+for s in d["sources"]:
+    s["labelCustom"] = True
+    if s["key"] == sys.argv[2]: s["label"] = sys.argv[4]
+    if s["key"] == sys.argv[3]: s["label"] = "c-seven"
+d["favorites"] = [sys.argv[5]]
+print(json.dumps(d))' "$WORK/r26-seed.json" "$KA" "$KC" "$1" "$2"
+  }
+  # Every R26 segment starts from seed, then arranges the links:
+  #   flink  state.json is a link to links/T1/state.json; T2 holds another state
+  #   dlink  the state FOLDER is a link to links/F1; F2 holds another state;
+  #          F3 is EMPTY, made by plain mkdir under this shell's umask
+  #   dir    the plain folder, the seed rewritten as r26_state
+  seed_r26() {
+    seed "$KA" migrated
+    cp "$STATE" "$WORK/r26-seed.json"
+    rm -rf "$LINKS"; mkdir -m 0700 "$LINKS"
+    case $1 in
+      flink) mkdir -m 0700 "$LINKS/T1" "$LINKS/T2"
+             r26_state seed t:seed.uk >"$LINKS/T1/state.json"; r26_state t2-own t:t2.uk >"$LINKS/T2/state.json"
+             chmod 0600 "$LINKS/T1/state.json" "$LINKS/T2/state.json"
+             rm -f "$STATE"; ln -s "$LINKS/T1/state.json" "$STATE" ;;
+      dlink) mkdir -m 0700 "$LINKS/F1" "$LINKS/F2"; mkdir "$LINKS/F3"
+             r26_state seed t:seed.uk >"$LINKS/F1/state.json"; r26_state f2-own t:f2.uk >"$LINKS/F2/state.json"
+             chmod 0600 "$LINKS/F1/state.json" "$LINKS/F2/state.json"
+             rm -rf "$SDIR"; ln -s "$LINKS/F1" "$SDIR" ;;
+      dir)   r26_state seed t:seed.uk >"$STATE"; chmod 0600 "$STATE" ;;
+    esac
+  }
+  # What a state file holds: A's label, C's label, the favourites (keys and
+  # labels only, never a URL); NOFILE when there is none.
+  r26_info() {
+    python3 -c 'import json, sys
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    print("NOFILE"); raise SystemExit(0)
+lab = {s["key"]: s["label"] for s in d.get("sources", [])}
+print("A=%s,C=%s,favs=%s" % (lab.get(sys.argv[2], "-"), lab.get(sys.argv[3], "-"), "+".join(d.get("favorites", [])) or "-"))' "$1" "$KA" "$KC" 2>/dev/null || echo NOFILE
+  }
+  # The session's own labels, from the sources answer.
+  r26_mem() {
+    qa_json_field "','.join(('A=' if s.get('id', s.get('key')) == '$KA' else 'C=' if s.get('id', s.get('key')) == '$KC' else '?=') + str(s.get('label')) for s in sorted(d, key=lambda s: s.get('id', s.get('key')) != '$KA'))" "$(ipc sources)"
+  }
+  # A hand edit of the file at $1, as JSON on stdout: A's label $2, favourite $3 added.
+  r26_hand() {
+    python3 -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+for s in d["sources"]:
+    if s["key"] == sys.argv[2]: s["label"] = sys.argv[3]
+d["favorites"].append(sys.argv[4])
+print(json.dumps(d))' "$1" "$KA" "$2" "$3"
+  }
+  # Bounded: until the file at $1 names C's label $2, then until nothing of
+  # ours is outstanding (6 s; a tree that never writes it is reported by the
+  # check that follows, not waited on).
+  r26_landed() {
+    local i
+    for ((i = 0; i < 60; i++)); do [[ $(r26_info "$1") == *",C=$2,"* ]] && break; sleep 0.1; done
+    for ((i = 0; i < 30; i++)); do [[ $(pf "['stateSavesInFlight']") == 0 && $(pf "['stateSavePending']") == false ]] && break; sleep 0.1; done
+    sleep 0.3
+  }
+  r26_start() { start_shell --playlist none --source-key "$KA" || true; wait_for true 20 pf "['dirsReady']" >/dev/null || true; sleep 0.5; }
+  okf() { qa_json_field "d['ok']" "$1"; }
+
+  # B23..B25: S29 -- the link REPLACED at the path, three ways, each carrying
+  # a hand edit (A's label, a favourite), a second, then an in-app save of C.
+  # r26_replace leaves the shell running and the call's answer in R26_RES.
+  r26_replace() {
+    local kind=$1
+    seed_r26 flink; r26_start
+    case $kind in
+      mv)   r26_hand "$STATE" hand-mv t:hand.uk >"$SDIR/.r26.tmp"; mv -f "$SDIR/.r26.tmp" "$STATE" ;;
+      sed)  sed -i 's/"label": "seed"/"label": "hand-sed"/; s/"t:seed.uk"/"t:seed.uk", "t:hand.uk"/' "$STATE" ;;
+      rmcp) r26_hand "$STATE" hand-rmcp t:hand.uk >"$LINKS/copy.json"; rm -f "$STATE"; cp "$LINKS/copy.json" "$STATE" ;;
+    esac
+    sleep 1
+    R26_RES=$(ipc updateSource "$KC" "{\"label\": \"app-$kind\"}")
+    r26_landed "$STATE" "app-$kind"
+    echo "   S29-$kind: path $([[ -L $STATE ]] && echo link || stat -c '%a %F' "$STATE" 2>/dev/null); verifies $(pf "['stateVerifies']"); reasons $(reasons)"
+  }
+  r26_replace mv
+  ck "B23 R26a (D-SRC-29, S29-mv): the linked state.json REPLACED by a rename carrying a hand edit (no signal), then an in-app save: the save READ the file first and merged -- the file and memory hold both edits, the old target untouched" \
+     "edit:$(okf "$R26_RES") disk:$(r26_info "$STATE") memory:$(r26_mem) old:$(r26_info "$LINKS/T1/state.json")" \
+     "edit:true disk:A=hand-mv,C=app-mv,favs=t:seed.uk+t:hand.uk memory:A=hand-mv,C=app-mv old:A=seed,C=c-seven,favs=t:seed.uk"
+  stop_shell
+  r26_replace sed
+  ck "B24 R26a (D-SRC-29, S29-sed): the linked state.json rewritten by sed -i (a rename over the link, no signal), then an in-app save: both edits kept" \
+     "edit:$(okf "$R26_RES") disk:$(r26_info "$STATE") memory:$(r26_mem) old:$(r26_info "$LINKS/T1/state.json")" \
+     "edit:true disk:A=hand-sed,C=app-sed,favs=t:seed.uk+t:hand.uk memory:A=hand-sed,C=app-sed old:A=seed,C=c-seven,favs=t:seed.uk"
+  stop_shell
+  r26_replace rmcp
+  ck "B25 R26a (D-SRC-29, S29-rmcp): the link removed and a copy put in its place (no signal), then an in-app save: both edits kept" \
+     "edit:$(okf "$R26_RES") disk:$(r26_info "$STATE") memory:$(r26_mem) old:$(r26_info "$LINKS/T1/state.json")" \
+     "edit:true disk:A=hand-rmcp,C=app-rmcp,favs=t:seed.uk+t:hand.uk memory:A=hand-rmcp,C=app-rmcp old:A=seed,C=c-seven,favs=t:seed.uk"
+  stop_shell
+
+  # B26: S29-ln -- the link RE-POINTED at another state.
+  seed_r26 flink; r26_start
+  ln -sfn "$LINKS/T2/state.json" "$STATE"; sleep 1
+  res=$(ipc updateSource "$KC" '{"label": "app-ln"}')
+  r26_landed "$LINKS/T2/state.json" app-ln
+  ck "B26 R26a (D-SRC-29 / D-SRC-40, S29-ln): the state.json link re-pointed (ln -sfn, no signal) at another state, then an in-app save: THAT file keeps its own label and favourite and takes the in-app edit; the old target is untouched; memory is the new file's" \
+     "edit:$(okf "$res") new:$(r26_info "$LINKS/T2/state.json") old:$(r26_info "$LINKS/T1/state.json") memory:$(r26_mem)" \
+     "edit:true new:A=t2-own,C=app-ln,favs=t:t2.uk old:A=seed,C=c-seven,favs=t:seed.uk memory:A=t2-own,C=app-ln"
+  stop_shell
+
+  # B27: S40 -- the state FOLDER link re-pointed at another folder's state.
+  seed_r26 dlink; r26_start
+  ln -sfn "$LINKS/F2" "$SDIR"; sleep 1
+  res=$(ipc updateSource "$KC" '{"label": "app-fl"}')
+  r26_landed "$LINKS/F2/state.json" app-fl
+  ck "B27 R26a (D-SRC-40, S40): the state FOLDER link re-pointed (ln -sfn, no signal) at a folder holding another state, then an in-app save: that state keeps its own and takes the edit; the old folder's is untouched" \
+     "edit:$(okf "$res") new:$(r26_info "$LINKS/F2/state.json") old:$(r26_info "$LINKS/F1/state.json") memory:$(r26_mem)" \
+     "edit:true new:A=f2-own,C=app-fl,favs=t:f2.uk old:A=seed,C=c-seven,favs=t:seed.uk memory:A=f2-own,C=app-fl"
+  stop_shell
+
+  # B28: S21 -- the folder link re-pointed at an EMPTY folder. Before R26 the
+  # save CREATED state.json there at 0666 & ~umask -- 0644, every source URL
+  # in it -- and nothing noticed (D-SINK-21, measured by the sink lane). Now
+  # the read finds nothing: the no-write mode, told once, nothing created;
+  # the call that asked answered ok when its write was issued and the NEXT
+  # call answers state_unreadable (R26e, stated).
+  seed_r26 dlink; r26_start
+  : >"$NOTIFY_LOG"
+  ln -sfn "$LINKS/F3" "$SDIR"; sleep 1
+  res=$(ipc updateSource "$KC" '{"label": "app-empty"}')
+  wait_for absent 6 pf "['stateWriteBlocked']" >/dev/null || true
+  sleep 0.5
+  res2=$(ipc updateSource "$KC" '{"label": "app-empty-two"}')
+  ck "B28 R26a (D-SINK-21, S21): the state FOLDER link re-pointed at an EMPTY folder, then an in-app save: NO file is created there (before R26: a 0644 state.json holding the session's sources), the no-write mode (absent), told once; the call that asked answered ok and the next answers state_unreadable" \
+     "edit:$(okf "$res") created:$([[ -e $LINKS/F3/state.json ]] && stat -c %a "$LINKS/F3/state.json" || echo none) holds:[$(ls -A "$LINKS/F3" | tr '\n' ' ' | sed 's/ $//')] blocked:$(pf "['stateWriteBlocked']") told:$(qa_count ' 74017 ' "$NOTIFY_LOG") next:$(qa_json_field "d['code']" "$res2")" \
+     "edit:true created:none holds:[] blocked:absent told:1 next:state_unreadable"
+  stop_shell
+
+  # B29: S35 -- a link's TARGET moved away (seen: the no-write mode), moved
+  # back (unseen: a move back raises nothing), then two source calls. The
+  # first is refused and asks for one reload (Model.stateBlockRecheck), which
+  # lifts the mode; the second lands. Accepted and stated (R26a).
+  seed_r26 flink; r26_start
+  : >"$NOTIFY_LOG"
+  mv "$LINKS/T1/state.json" "$LINKS/T1/away.json"
+  wait_for absent 10 pf "['stateWriteBlocked']" >/dev/null || true
+  away=$(pf "['stateWriteBlocked']")
+  mv "$LINKS/T1/away.json" "$LINKS/T1/state.json"; sleep 1
+  first=$(ipc updateSource "$KC" '{"label": "app-back"}')
+  wait_for "" 5 pf "['stateWriteBlocked']" >/dev/null || true
+  lifted=$(pf "['stateWriteBlocked']")
+  second=$(ipc updateSource "$KC" '{"label": "app-back"}')
+  r26_landed "$LINKS/T1/state.json" app-back
+  ck "B29 R26a (D-SRC-35, S35): a link's target moved away (the no-write mode, told) and put back unseen: the FIRST source call is refused and its re-read lifts the mode; the SECOND lands" \
+     "away:$away told:$(qa_count ' 74017 ' "$NOTIFY_LOG") first:$(qa_json_field "d['code']" "$first") lifted:[$lifted] second:$(okf "$second") disk:$(r26_info "$LINKS/T1/state.json")" \
+     "away:absent told:1 first:state_unreadable lifted:[] second:true disk:A=seed,C=app-back,favs=t:seed.uk"
+  stop_shell
+
+  # B30: INLOAD (D-SRC-46, R26b) -- a save that FAILS (the folder 0500) is
+  # held; the folder given back; a hand-run helper write lands while the
+  # failure is held, so R24a merges INSIDE that load and asks for a save.
+  # Issued inside stateFile's onLoaded, that write raised no `saved`: the
+  # session read inFlight 1 and saveFailed true for good (lane W, 16 of 16,
+  # and live on dev). Issued from a turn of its own, it is reported.
+  seed_r26 dir; r26_start
+  chmod 0500 "$SDIR"
+  res=$(ipc updateSource "$KC" '{"label": "app-fail"}')
+  wait_for true 10 pf "['stateSaveFailed']" >/dev/null || true
+  held=$(pf "['stateSaveFailed']")
+  chmod 0700 "$SDIR"
+  python3 "$PLUGIN_ROOT/bin/omarchy-iptv" state --state-dir "$SDIR" favorite add t:helper.uk >/dev/null 2>&1; hrc=$?
+  wait_for false 10 pf "['stateSaveFailed']" >/dev/null || true
+  for ((i = 0; i < 30; i++)); do [[ $(pf "['stateSavesInFlight']") == 0 ]] && break; sleep 0.1; done
+  sleep 1.0
+  ck "B30 R26b (D-SRC-46, INLOAD): a failed save held, the folder given back, a hand-run helper write: the merge's save, asked for inside that load, is issued from a turn of its own and REPORTED -- nothing in flight, the failure cleared, both on disk" \
+     "edit:$(okf "$res") held:$held helper:$hrc inFlight:$(pf "['stateSavesInFlight']") saveFailed:$(pf "['stateSaveFailed']") disk:$(r26_info "$STATE")" \
+     "edit:true held:true helper:0 inFlight:0 saveFailed:false disk:A=seed,C=app-fail,favs=t:seed.uk+t:helper.uk"
+  stop_shell
+
+  # B31: IDLE (R26d) -- no periodic reload: 30 s of an idle shell reads the
+  # file NOT ONCE (no load of any kind is counted), and one in-app save then
+  # reads it exactly once before it writes.
+  seed_r26 dir; r26_start
+  sleep 1
+  loads() { qa_json_field "sum(d['stateReloadsByReason'].values())" "$(ipc pointerState)"; }
+  delta() { [[ $1 =~ ^[0-9]+$ && $2 =~ ^[0-9]+$ ]] && echo "+$(( $2 - $1 ))" || echo "$1->$2"; }
+  l0=$(loads); v0=$(pf "['stateVerifies']")
+  sleep 30
+  l1=$(loads); v1=$(pf "['stateVerifies']")
+  res=$(ipc updateSource "$KC" '{"label": "app-idle"}')
+  r26_landed "$STATE" app-idle
+  v2=$(pf "['stateVerifies']")
+  ck "B31 R26d (IDLE): 30 s of an idle shell loads state.json NOT ONCE (no periodic reload); one in-app save then reads it once before it writes" \
+     "idle-loads:$(delta "$l0" "$l1") idle-reads:$(delta "$v0" "$v1") edit:$(okf "$res") save-reads:$(delta "$v1" "$v2") disk:$(r26_info "$STATE")" \
+     "idle-loads:+0 idle-reads:+0 edit:true save-reads:+1 disk:A=seed,C=app-idle,favs=t:seed.uk"
+  stop_shell
+  rm -rf "$LINKS"
+
   echo "== P: the console sink, then teardown ($(elapsed) s)"
   qa_leak_on_labelled 'sourceProbeFinished|sourceSwitched|sourceRemoved|updateEntryInline' "://|$WORK" "$LOG"
   case $? in 0) left=clean ;; 1) left=LEAK ;; *) left="nothing labelled to judge" ;; esac
@@ -2512,7 +2733,7 @@ instrument
 # The floor. A check that stops executing must turn the run red rather than
 # quietly shorten the summary (D-PLY-9). Recount with
 #   grep -cE '^ *ck "[IS][0-9]' key-scenario.sh   -> 10, the instrument arm -> check-tree
-#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 119, both arms         -> live
+#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 128, both arms         -> live
 # (48 -> 61 on 2026-10-12, round 4: W1..W6 and F1..F7; 61 -> 63 the same
 # day, round 5: L1, L2; 63 -> 70 the same day, round 7: U1..U7; 70 -> 78
 # the same day, round 8: K1..K3, Z1..Z3, A1, A2; 78 -> 85 the same day,
@@ -2523,7 +2744,8 @@ instrument
 # R22a's load failures and R22c's hint; 105 -> 111 the same day, round 13:
 # B9..B14, R23a-c, R23e, R23f, R23h; 111 -> 115 on 2026-10-14, round 14:
 # B15..B18, R24f, R24c, R24g, R24d; 115 -> 119 the same day, round 15:
-# B19..B22, R25d, R25a, D-SRC-38.)
+# B19..B22, R25d, R25a, D-SRC-38; 119 -> 128 on 2026-10-16, R26: B23..B31,
+# the read before every write, the in-load save deferred, and idle.)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -2533,7 +2755,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=10
 else
-  EXPECTED_CHECKS=119
+  EXPECTED_CHECKS=128
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then
@@ -2548,7 +2770,7 @@ if [[ -n $BASELINE || -n $TREE ]]; then
   # a sentence here, so a run whose reds were B15, B16 and B18 printed "the
   # reds are round 13's -- B10 ... B14". Each round's sentence now leads, and
   # every older one names the tree it was measured on and says it was.
-  echo "baseline ${BASELINE:-$TREE}: on dev 002662d (round 14's code, measured 2026-10-14 by lane-key-k1 under this harness: 118 passed, 2 failed) the reds are round 15's -- B20 (a backup copied from the plugin's own file, put back after an in-app remove, is ignored as an echo and written over: \`restored:1 records:1 ... restart:1\`) and B22 (the MID-session Sources header reads \`Saved sources not loaded\` above the session's two rows). B19 and B21 are GREEN there: R24a's merge and the FileView's watch after an own save were in round 14's code and only their checks were missing, so they are seen red through spikes/key-mutations/r25d-a5-base-not-moved.patch (--tree: 119 passed, 1 failed, B19 \`merged:2 ... favs:t:helper.uk,t:h3.uk\`: the favourite the second hand edit removed is written back) and r25d-no-reload-on-change.patch (--tree: 110 passed, 10 failed, B21 \`blocked: told:0\` among every segment that needs a reload: D3, W3, W6, B7, B9, B16, B19, B20, B22). The counts that follow were measured before B19..B22 existed (115 lettered checks). On ced1bd1 (round 13's code, measured 2026-10-14 by lane-key-q1 under this harness: 113 passed, 3 failed) the reds were round 14's -- B15 (\`header:[No sources] rows:2 after-a:sourceEdit says:other\`), B16 (\`seen:0 file:D blocked: told:0\`) and B18 (the held init \`after-deadline:alive(<pid>)\`); B17 is GREEN there, round 13 having the KILL, and is seen red through r24g-no-kill.patch (--tree: 115 passed, 1 failed, B17 \`blocked: helper:no(<pid>) left:<pid> told:0\`). The counts that follow were measured before B15..B18 existed (111 lettered checks). On lane-key-n2 (round 12's code, measured 2026-10-13 by lane-key-p1 under this harness: 107 passed, 5 failed) the reds were round 13's -- B10 (no watchdog: the init held by the slow tree is still running and the start never decides, \`blocked: found: helper:no(<pid>) left:<pid> told:0\`), B11 (the no-write start draws the first-run form: \`kind:unconfigured form:true shown:NOFIELD title:other prose:other\`), B12 (the logo refusal says \`try omarchy bar set\`: \`says:other advice:bar-set\`), B13 (the drawn-copy field reads the hidden empty state's \`Add your M3U URL or path in Sources...\` over the form that draws \`Paste or type...\`) and B14 (the FIFO hangs the init: \`blocked: found: told:0 left:<pid>\`). B9 is GREEN there: the re-arm it guards was in round 12's code and only its check was missing, so it is seen red through spikes/key-mutations/r23a-no-rearm.patch instead (--tree: 111 passed, 1 failed, B9 \`told:1/1\`); r23e-editable-field.patch reads 111 / 1 the same way (B13, \`editable:2\`). The counts that follow were measured before B9..B14 existed (105 lettered checks). On lane-key-m2 (round 11's code, measured 2026-10-13 by lane-key-n1 under this harness: 97 passed, 9 failed) the reds are round 12's -- B1..B4 (a migrated install whose state.json, or whose state directory, could not be read at the start: the failed load is applied as an EMPTY state and written over the file, \`records:0\` at B1 and at the second start, B2, and through the directory, B3/B4), B5, B6 (a file that does not parse is replaced at the start, \`file:changed\`; an add goes through, \`add:ok\`; the mirror moves, \`writes:2\`), B7 (nothing left to restore: \`records:0\`) and B8 (the hint reads \`check playlistUrl\`: \`retired:yes\`). N1 is red there ONLY for the field it reads (\`found:NOFIELD\`): its adoption is the same. Every other check is green on round 11's code. The counts that follow were measured before B existed (97 lettered checks). On lane-key-z2 (round 10's code, measured 2026-10-13 by lane-key-m1 under the 97-check harness: 68 passed, 30 failed) the reds were G1, G2, G5, F4, U1..U7, K1..K3, Z1..Z3, A1, Y2, Y3, Q1, Q2, V1, H1 and X1..X6, and EIGHT of them -- F4, U2, K2, K3, Q2, V1, Y2 and Z3 -- differ from their want ONLY in \`reports:NOFIELD\`: they prove the refusal record does not exist there, and nothing about behaviour (classified got against want token by token over the round-11 live lens's transcript, which counted seven and missed U2; this footer used to fold Y2 in with Y3's \`twice:E\`, leave Z3 out, and describe K1..K3 by K1's \`file:yes\` alone). The twenty-two that discriminate: G1, G2, G5 (no migration marker is ever written, so a downgrade's entry and a 0.13.5 entry are read alike), U1, U3..U7 (the guide URL with no source is HELD in state.json, \`file:yes\`, and the switch lands it on A: U3 \`on:<A>\`), K1 (the guide URL held in the file, \`file:yes\`), Z1, Z2 and X1..X4 (a CLI value after the marker is ADOPTED: Z1 and X1 read B active), X5, X6 (no notification: the refusal does not exist), A1, Q1 (the CLI guide URL lands on the new record), Y3 (the CLI guide URL is adopted onto A, \`twice:E\`) and H1 (the marker never lands, \`landed:.../false\`). G3, G4, F1..F3, F5..F7, L1, L2 and A2 are its controls (F and L are R13 and R16 on a migration that fails, which round 10 already held). The counts that follow were measured before G and X existed and before U, K, Z, A, Y2, Y3, Q, V, F and H moved to the R21 contract (86 lettered checks). On lane-key-y0 (round 8's code) the reds are round 9's -- U1, U2, U5, K1, K2, K3 (a guide URL with no source to land on waits on the ENTRY instead of being held in state.json), Y1, Y2, Y3 (after a publish A -> B -> A the lagging host's write is skipped: the in-app logo OFF, the strip of a re-set refused credential and of a re-set EPG input that the restart then puts back over an in-app edit), Q1 (a CLI epgUrl set while the add's probe runs exists nowhere), V1 (an earlier held value replaces a guide URL typed in the edit form) and H1 (D-SRC-18): 74 passed, 12 failed; A1, A2 and Q2 are its controls. The counts that follow were measured before Y, Q, V and H existed (78 lettered checks). On lane-key-w2 (round 7's code) the reds are round 8's -- K1 (the lagging host LOOPS on a refused playlistUrl beside a pending EPG: about 17,000 entry writes and 600 CPU ticks in 5 s), K3 (the echoing host loops on the same value wrapped in whitespace and keeps the credential), Z1, Z2 (a whitespace-wrapped CLI playlist removed comes back at the next start), Z3 (a whitespace-wrapped refused credential stays on the stored entry) and A2 (a pending CLI epgUrl replaces the add form's own guide URL): 73 passed, 6 failed; K2 and A1 are its controls. The counts that follow were measured before K, Z and A existed (70 lettered checks). On lane-key-v2 (round 6's code) the reds are round 7's -- U2, U3, U4 (the logo toggle's heal stripped an EPG no source had adopted, so the switch had nothing to land and the restart stands on A with no EPG) and U6, U7 (the same input lost by the switch alone on the echoing fake host): 66 passed, 5 failed. The counts that follow were measured before U existed (63 lettered checks). On lane-key-t2 (round 4's code) the reds are round 5's -- L1, L2 (the logo toggle on the failed disk mirrored the in-memory key and stripped the URL) and F6, F7 (the restart over that entry finds no record for B): 60 passed, 4 failed. On lane-key-s2 (round 3's code) round 4's join them -- D3, W3, W6 (no per-reason counter there), F3, F4, F5 (the dirsReady-route state write failing strips the URL, moves the mirror and loses the input): 54 passed, 10 failed. On lane-key-r2 (the tree D-SRC-15 was found on) D2, D3, W2, W3, W6, M1, M3, M5, C1..C5, E1, O5, O6 and the F and L reds: the start-up chmod reload replaces the adoption and the in-window switch/remove alike (D2 and W at the sink, D3 NOFIELD for want of a counter) and everything resting on a start-up adoption with it: 38 passed, 26 failed. On f275bde (the first build) O2 is the one discriminating red against every later tree (the entry rewritten while the save is parked); D2, M1, M3, M5 pass there by the accident the header describes: 39 passed, 25 failed. The two patches under spikes/key-mutations/ read 58 / 6 (D2, D3, W2, W3, W4, W6) and 59 / 5 (D2, W2, W3, W4, W6; D3 green) through --tree. N1..N4 are green on EVERY tree: the created-file shape never fires the reload. D1, M2, M4, M6, J1..J3, E2, E3, R1..R5, O1, O3, O4, P1, P2, T1 and every I and S check are controls; W1, W5, F1 and F2 are controls wherever the field they read exists (NOFIELD on f275bde and, for F1/F2, on lane-key-r2)."
+  echo "baseline ${BASELINE:-$TREE}: on dev 1c88877 (round 15's code and 0.14.1, measured 2026-10-16 by lane-clean-a1 under this harness: 120 passed, 9 failed) the reds are R26's -- B23..B27 (a linked state.json replaced by a rename, sed -i or rm-and-copy, or re-pointed, or the state folder link re-pointed: unseen, and the in-app save writes memory over it, \`disk:A=seed\` beside the hand edit lost), B28 (the folder link re-pointed at an EMPTY folder: \`created:644 holds:[state.json] blocked: told:0\`, D-SINK-21), B29 (a target put back stays blocked for every call: \`lifted:[absent] second:false\`), B30 (the merge's save inside the load is never reported: \`inFlight:1 saveFailed:true\`, D-SRC-46) and B31 (\`idle-reads:NOFIELD\`: no read before a save). Through --tree: r26a-no-read.patch 122 / 7 (B23..B28, B31), r26b-no-defer.patch 128 / 1 (B30), r26a-no-verb-recheck.patch 128 / 1 (B29), r26d-periodic-reload.patch 126 / 3 (B31 \`idle-loads:+15\`, and B28 and B29, which the timer answers before the first call does); d3-save-parked.patch now reads 76 / 53, D3 and W3 among them, because every in-app save waits behind a read that only save-parked keeps from being applied. The counts that follow were measured before B23..B31 existed (119 lettered checks). On dev 002662d (round 14's code, measured 2026-10-14 by lane-key-k1 under this harness: 118 passed, 2 failed) the reds are round 15's -- B20 (a backup copied from the plugin's own file, put back after an in-app remove, is ignored as an echo and written over: \`restored:1 records:1 ... restart:1\`) and B22 (the MID-session Sources header reads \`Saved sources not loaded\` above the session's two rows). B19 and B21 are GREEN there: R24a's merge and the FileView's watch after an own save were in round 14's code and only their checks were missing, so they are seen red through spikes/key-mutations/r25d-a5-base-not-moved.patch (--tree: 119 passed, 1 failed, B19 \`merged:2 ... favs:t:helper.uk,t:h3.uk\`: the favourite the second hand edit removed is written back) and r25d-no-reload-on-change.patch (--tree: 110 passed, 10 failed, B21 \`blocked: told:0\` among every segment that needs a reload: D3, W3, W6, B7, B9, B16, B19, B20, B22). The counts that follow were measured before B19..B22 existed (115 lettered checks). On ced1bd1 (round 13's code, measured 2026-10-14 by lane-key-q1 under this harness: 113 passed, 3 failed) the reds were round 14's -- B15 (\`header:[No sources] rows:2 after-a:sourceEdit says:other\`), B16 (\`seen:0 file:D blocked: told:0\`) and B18 (the held init \`after-deadline:alive(<pid>)\`); B17 is GREEN there, round 13 having the KILL, and is seen red through r24g-no-kill.patch (--tree: 115 passed, 1 failed, B17 \`blocked: helper:no(<pid>) left:<pid> told:0\`). The counts that follow were measured before B15..B18 existed (111 lettered checks). On lane-key-n2 (round 12's code, measured 2026-10-13 by lane-key-p1 under this harness: 107 passed, 5 failed) the reds were round 13's -- B10 (no watchdog: the init held by the slow tree is still running and the start never decides, \`blocked: found: helper:no(<pid>) left:<pid> told:0\`), B11 (the no-write start draws the first-run form: \`kind:unconfigured form:true shown:NOFIELD title:other prose:other\`), B12 (the logo refusal says \`try omarchy bar set\`: \`says:other advice:bar-set\`), B13 (the drawn-copy field reads the hidden empty state's \`Add your M3U URL or path in Sources...\` over the form that draws \`Paste or type...\`) and B14 (the FIFO hangs the init: \`blocked: found: told:0 left:<pid>\`). B9 is GREEN there: the re-arm it guards was in round 12's code and only its check was missing, so it is seen red through spikes/key-mutations/r23a-no-rearm.patch instead (--tree: 111 passed, 1 failed, B9 \`told:1/1\`); r23e-editable-field.patch reads 111 / 1 the same way (B13, \`editable:2\`). The counts that follow were measured before B9..B14 existed (105 lettered checks). On lane-key-m2 (round 11's code, measured 2026-10-13 by lane-key-n1 under this harness: 97 passed, 9 failed) the reds are round 12's -- B1..B4 (a migrated install whose state.json, or whose state directory, could not be read at the start: the failed load is applied as an EMPTY state and written over the file, \`records:0\` at B1 and at the second start, B2, and through the directory, B3/B4), B5, B6 (a file that does not parse is replaced at the start, \`file:changed\`; an add goes through, \`add:ok\`; the mirror moves, \`writes:2\`), B7 (nothing left to restore: \`records:0\`) and B8 (the hint reads \`check playlistUrl\`: \`retired:yes\`). N1 is red there ONLY for the field it reads (\`found:NOFIELD\`): its adoption is the same. Every other check is green on round 11's code. The counts that follow were measured before B existed (97 lettered checks). On lane-key-z2 (round 10's code, measured 2026-10-13 by lane-key-m1 under the 97-check harness: 68 passed, 30 failed) the reds were G1, G2, G5, F4, U1..U7, K1..K3, Z1..Z3, A1, Y2, Y3, Q1, Q2, V1, H1 and X1..X6, and EIGHT of them -- F4, U2, K2, K3, Q2, V1, Y2 and Z3 -- differ from their want ONLY in \`reports:NOFIELD\`: they prove the refusal record does not exist there, and nothing about behaviour (classified got against want token by token over the round-11 live lens's transcript, which counted seven and missed U2; this footer used to fold Y2 in with Y3's \`twice:E\`, leave Z3 out, and describe K1..K3 by K1's \`file:yes\` alone). The twenty-two that discriminate: G1, G2, G5 (no migration marker is ever written, so a downgrade's entry and a 0.13.5 entry are read alike), U1, U3..U7 (the guide URL with no source is HELD in state.json, \`file:yes\`, and the switch lands it on A: U3 \`on:<A>\`), K1 (the guide URL held in the file, \`file:yes\`), Z1, Z2 and X1..X4 (a CLI value after the marker is ADOPTED: Z1 and X1 read B active), X5, X6 (no notification: the refusal does not exist), A1, Q1 (the CLI guide URL lands on the new record), Y3 (the CLI guide URL is adopted onto A, \`twice:E\`) and H1 (the marker never lands, \`landed:.../false\`). G3, G4, F1..F3, F5..F7, L1, L2 and A2 are its controls (F and L are R13 and R16 on a migration that fails, which round 10 already held). The counts that follow were measured before G and X existed and before U, K, Z, A, Y2, Y3, Q, V, F and H moved to the R21 contract (86 lettered checks). On lane-key-y0 (round 8's code) the reds are round 9's -- U1, U2, U5, K1, K2, K3 (a guide URL with no source to land on waits on the ENTRY instead of being held in state.json), Y1, Y2, Y3 (after a publish A -> B -> A the lagging host's write is skipped: the in-app logo OFF, the strip of a re-set refused credential and of a re-set EPG input that the restart then puts back over an in-app edit), Q1 (a CLI epgUrl set while the add's probe runs exists nowhere), V1 (an earlier held value replaces a guide URL typed in the edit form) and H1 (D-SRC-18): 74 passed, 12 failed; A1, A2 and Q2 are its controls. The counts that follow were measured before Y, Q, V and H existed (78 lettered checks). On lane-key-w2 (round 7's code) the reds are round 8's -- K1 (the lagging host LOOPS on a refused playlistUrl beside a pending EPG: about 17,000 entry writes and 600 CPU ticks in 5 s), K3 (the echoing host loops on the same value wrapped in whitespace and keeps the credential), Z1, Z2 (a whitespace-wrapped CLI playlist removed comes back at the next start), Z3 (a whitespace-wrapped refused credential stays on the stored entry) and A2 (a pending CLI epgUrl replaces the add form's own guide URL): 73 passed, 6 failed; K2 and A1 are its controls. The counts that follow were measured before K, Z and A existed (70 lettered checks). On lane-key-v2 (round 6's code) the reds are round 7's -- U2, U3, U4 (the logo toggle's heal stripped an EPG no source had adopted, so the switch had nothing to land and the restart stands on A with no EPG) and U6, U7 (the same input lost by the switch alone on the echoing fake host): 66 passed, 5 failed. The counts that follow were measured before U existed (63 lettered checks). On lane-key-t2 (round 4's code) the reds are round 5's -- L1, L2 (the logo toggle on the failed disk mirrored the in-memory key and stripped the URL) and F6, F7 (the restart over that entry finds no record for B): 60 passed, 4 failed. On lane-key-s2 (round 3's code) round 4's join them -- D3, W3, W6 (no per-reason counter there), F3, F4, F5 (the dirsReady-route state write failing strips the URL, moves the mirror and loses the input): 54 passed, 10 failed. On lane-key-r2 (the tree D-SRC-15 was found on) D2, D3, W2, W3, W6, M1, M3, M5, C1..C5, E1, O5, O6 and the F and L reds: the start-up chmod reload replaces the adoption and the in-window switch/remove alike (D2 and W at the sink, D3 NOFIELD for want of a counter) and everything resting on a start-up adoption with it: 38 passed, 26 failed. On f275bde (the first build) O2 is the one discriminating red against every later tree (the entry rewritten while the save is parked); D2, M1, M3, M5 pass there by the accident the header describes: 39 passed, 25 failed. The two patches under spikes/key-mutations/ read 58 / 6 (D2, D3, W2, W3, W4, W6) and 59 / 5 (D2, W2, W3, W4, W6; D3 green) through --tree. N1..N4 are green on EVERY tree: the created-file shape never fires the reload. D1, M2, M4, M6, J1..J3, E2, E3, R1..R5, O1, O3, O4, P1, P2, T1 and every I and S check are controls; W1, W5, F1 and F2 are controls wherever the field they read exists (NOFIELD on f275bde and, for F1/F2, on lane-key-r2)."
 fi
 echo "key-scenario: $PASS passed, $FAIL failed (mode $MODE, tree $PLUGIN_ROOT${BASELINE:+, baseline $BASELINE}${TREE:+, prepared tree}, $(elapsed) s)"
 (( FAIL == 0 ))

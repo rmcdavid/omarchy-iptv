@@ -694,8 +694,33 @@ is "and says it had to KILL, naming the pid" "$([[ $rp_err == *"sending KILL"* &
 is "and leaves another harness's player alone" "$(kill -0 "$rp_other" 2>/dev/null && echo alive || echo gone)" "alive"
 st "a relative scratch directory is refused" 2 qa_reap_players "rp-scratch"
 st "nothing to reap is 0, not an error" 0 qa_reap_players "$TMP/rp-nothing"
-kill -KILL "$rp_deaf" "$rp_kind" "$rp_other" 2>/dev/null
-wait "$rp_deaf" "$rp_kind" "$rp_other" 2>/dev/null
+# F-HARNESS-30 (R26h, 2026-10-16): run.sh's OWN reap, DRIVEN. Its
+# reap_player was the TERM-only `pkill -f` above, and every --serve
+# scenario ends through `run.sh reap` (or run.sh's exit), so a player that
+# ignored TERM outlived all of them. A deaf stand-in bound to a scratch
+# directory, `run.sh reap` on that directory: gone, KILL named, another
+# harness's player untouched. Seen red against 1c88877's run.sh (alive).
+rp_scr2="$TMP/rp-scratch2"; mkdir -p "$rp_scr2"
+"$rp_bin/mpv" "--input-ipc-server=$rp_scr2/runtime/omarchy-iptv/mpv.sock" >/dev/null 2>&1 & rp_deaf2=$!
+sleep 0.3
+rp_err2=$(OMARCHY_IPTV_HARNESS_DIR=$rp_scr2 "$ROOT/scripts/dev-harness/run.sh" reap 2>&1 >/dev/null)
+is "run.sh reap ends a TERM-ignoring player of its own harness (KILL behind the TERM), and says so" \
+   "$(kill -0 "$rp_deaf2" 2>/dev/null && echo alive || echo gone) $([[ $rp_err2 == *"sending KILL"* ]] && echo said || echo silent)" "gone said"
+is "and leaves another harness's player alone" "$(kill -0 "$rp_other" 2>/dev/null && echo alive || echo gone)" "alive"
+kill -KILL "$rp_deaf" "$rp_kind" "$rp_other" "$rp_deaf2" 2>/dev/null
+wait "$rp_deaf" "$rp_kind" "$rp_other" "$rp_deaf2" 2>/dev/null
+# ...and the join that makes it reach every served scenario: run.sh's reap
+# and its exit both call reap_player, reap_player is qa_reap_players, and
+# each of the eight scenarios that start a player ends through `run.sh reap`
+# or calls qa_reap_players itself (chno and chno-entry end their run.sh by
+# pid, whose exit reaps, and then reap by pid themselves).
+is "run.sh's reap and its exit both end the player through reap_player, which is qa_reap_players" \
+   "$(qa_count '^ *(\(\( KEEP_PLAYER \)\) \|\| )?reap_player$' "$ROOT/scripts/dev-harness/run.sh") $(awk '/^reap_player\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c 'qa_reap_players') $(qa_count 'pkill -f "\$\(player_pattern\)"' "$ROOT/scripts/dev-harness/run.sh")" "2 1 0"
+rp_served=""
+for sc in player m3 rewind pip tls text chno chno-entry; do
+  rp_served="$rp_served$sc:$(qa_count '"\$RUN" reap|qa_reap_players "\$SCRATCH"' "$ROOT/scripts/dev-harness/$sc-scenario.sh" | awk '{print ($1 > 0) ? "reaps" : "NO"}') "
+done
+is "every --serve scenario ends through run.sh reap or qa_reap_players" "$rp_served" "player:reaps m3:reaps rewind:reaps pip:reaps tls:reaps text:reaps chno:reaps chno-entry:reaps "
 
 # M2-03 ruling CN23's runner, the fourth suite. Same two-floor shape as the
 # chno one, and the same reason for asserting it here: scripts/check.sh runs
@@ -1414,10 +1439,20 @@ KM="$ROOT/scripts/dev-harness/spikes/key-mutations"
 # round-14 lens's two survivors as patches, r25d-a5-base-not-moved and
 # r25d-a7-no-inflight-half, and r25d-no-reload-on-change (stateFile deaf
 # to a change: B21's red).
-is "all eleven key-mutation patches still apply to this tree (git apply --check)" \
-   "$(for km_p in d3-save-parked r14-no-return r23a-no-rearm r23e-editable-field r24g-no-kill r25a-keep-landed r25a-clear-every-saved r25b-silent-drop r25d-a5-base-not-moved r25d-a7-no-inflight-half r25d-no-reload-on-change; do git -C "$ROOT" apply --check "$KM/$km_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 0 0 0 0 0 0 0 "
+# R26 (2026-10-16) adds four, the decisions B23..B31 and the R26 node pins
+# were seen red against: r26a-no-read (the read before a write deleted),
+# r26b-no-defer (a save asked for inside a handler written there),
+# r26a-no-verb-recheck (a source verb's re-read of a liftable no-write mode
+# deleted) and r26d-periodic-reload (the 2 s reload R26d refused, B31's
+# idle half: no tree before it reloads while idle); and re-made r25a-keep-landed and r25a-clear-every-saved, whose
+# hunks R26b's handler-depth count re-indented -- the same two decisions.
+is "all fifteen key-mutation patches still apply to this tree (git apply --check)" \
+   "$(for km_p in d3-save-parked r14-no-return r23a-no-rearm r23e-editable-field r24g-no-kill r25a-keep-landed r25a-clear-every-saved r25b-silent-drop r25d-a5-base-not-moved r25d-a7-no-inflight-half r25d-no-reload-on-change r26a-no-read r26b-no-defer r26a-no-verb-recheck r26d-periodic-reload; do git -C "$ROOT" apply --check "$KM/$km_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 "
+is "and the key-mutations folder holds exactly those fifteen" "$(ls "$KM"/*.patch 2>/dev/null | wc -l | tr -d ' ')" "15"
+# 2 -> 3 on 2026-10-16: R26's --baseline footer sentence cites
+# d3-save-parked.patch too (its 76 / 53 since every save reads first).
 is "key-scenario and the README cite the patch files and no mutation branch" \
-   "$(qa_count 'd3-save-parked\.patch|r14-no-return\.patch' "$KS") $(qa_count 'mut-(d3-save-parked|r14-no-return)' "$KS") $(qa_count 'mut-(d3-save-parked|r14-no-return)' "$ROOT/scripts/dev-harness/README.md")" "2 0 0"
+   "$(qa_count 'd3-save-parked\.patch|r14-no-return\.patch' "$KS") $(qa_count 'mut-(d3-save-parked|r14-no-return)' "$KS") $(qa_count 'mut-(d3-save-parked|r14-no-return)' "$ROOT/scripts/dev-harness/README.md")" "3 0 0"
 # run.sh clean on the directory a signalled F leaves: DRIVEN. The old
 # `rm -rf` stopped on the 0500 directory's state.json and left it.
 km_clean=$TMP/clean0500; mkdir -p "$km_clean/state/omarchy-iptv"; echo '{}' >"$km_clean/state/omarchy-iptv/state.json"
@@ -2490,7 +2525,11 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # dead-fixture mutation seen red on a copy of this library, and the eight
 # chno-mutation patches pinned to apply (22); qa_reap_players against
 # stand-in players, the old TERM-only reap seen leaving one running (6).
-EXPECTED=500
+# 500 -> 505 on 2026-10-16, R26g/R26h (lane-clean-a1): run.sh reap DRIVEN
+# against a TERM-ignoring stand-in (2), the reap_player join and every
+# served scenario reaching it (2), and the fifteen key-mutation patches
+# counted (1; the apply pin itself was re-counted, not added).
+EXPECTED=505
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

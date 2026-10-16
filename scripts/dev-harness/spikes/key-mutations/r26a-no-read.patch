@@ -1,0 +1,26 @@
+diff --git a/Service.qml b/Service.qml
+index 0000000..0000000 100644
+--- a/Service.qml
++++ b/Service.qml
+@@ -2493,15 +2493,12 @@ Item {
+       return
+     }
+     if (plan === "verify") {
+-      // The file as it is NOW, through stateFile's own load handlers; the
+-      // save waits for that load (stateLoadArrived), bounded by the watchdog.
+-      if (gate === "refuse") root.stateVerifyRetries = root.stateVerifyRetries + 1
+-      root.stateSavePending = true
+-      root.stateVerifyPending = true
+-      root.stateVerifyAt = Date.now()
+-      stateFile.reload()
+-      stateVerifyWatchdog.restart()
+-      return
++      // MUTATION (lane A1, R26a): no read before the write -- a refusal stands as the gate gave it, a write goes at once
++      if (gate === "refuse") {
++        root.stateSavePending = false
++        root.stateWritesRefused = root.stateWritesRefused + 1
++        return
++      }
+     }
+     if (root.stateSavesInFlight > 0 && !root.stateVerifyDone) root.stateVerifySkipped = root.stateVerifySkipped + 1
+     root.stateSavePending = false
