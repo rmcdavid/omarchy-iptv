@@ -12798,19 +12798,29 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
                    told: failedTold(h), merged: reasonsOf(h).indexOf("foreign-save-failed") !== -1, clean: [h.root.stateSaveFailed, h.root.stateSavesInFlight], noUrl: noUrlIn(h) }
         }, { file: [["A", "B", "H"], ["t:bbc1.uk", "t:f2.uk", "t:f5.uk"]], memory: [["A", "B", "H"], ["t:bbc1.uk", "t:f2.uk", "t:f5.uk"]],
              told: 1, merged: true, clean: [false, 0], noUrl: true })
-        checkCall("R24a (" + tag + "): IN FLIGHT -- the helper's rename lands while an in-app favourite's save is still in flight: ours lands after it, then the merge's save, and the file keeps both", () => {
+        checkCall("R24a / F-HARNESS-31 (" + tag + "): IN FLIGHT, the same-instant residual -- the helper's rename lands while an in-app favourite's save is still in flight: the reload it raises is dropped (the measured view), our rename replaces it, and the helper's record is LOST on disk and never reaches memory; nothing is left in flight", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           // R26a (2026-10-16) re-levelled: a save is parked behind its read
           // before it is in flight, so the read is let finish (h.runLater) to
           // put it in flight; a foreign write met BY that read is R26a's own
           // pin ("a foreign write that arrives while a save waits").
+          // F-HARNESS-31 (2026-10-16) re-levelled again: this pin used to
+          // want the helper's record merged, which held only because the
+          // double delivered the helper's reload DURING our write. The
+          // measured FileView delivers no load then (30 of 30), so the
+          // premise is gone: a change another program lands in the same
+          // instant as one of our writes is lost, on this tree and on
+          // 0.14.1 alike, and no plugin-side lock exists against a second
+          // process. What still observes the merge of a helper's write:
+          // R24a FAILED and PARKED below and above, and R26a's "a foreign
+          // write that ARRIVES while a save waits for its read".
           h.root.toggleFavorite("t:f2.uk"); h.runLater()
           const inFlight = h.root.stateSavesInFlight
           h.foreign(helperAdd)
           h.drain()
-          return { inFlight, file: [keysOf(h.file()), h.file().favorites], memory: [keysOf(h.root.userState), h.root.userState.favorites],
+          return { inFlight, dropped: h.droppedForeign, file: [keysOf(h.file()), h.file().favorites], memory: [keysOf(h.root.userState), h.root.userState.favorites],
                    merged: reasonsOf(h).indexOf("foreign-save-in-flight") !== -1, settled: h.root.stateSavesInFlight }
-        }, { inFlight: 1, file: [["A", "B", "H"], ["t:bbc1.uk", "t:f2.uk"]], memory: [["A", "B", "H"], ["t:bbc1.uk", "t:f2.uk"]], merged: true, settled: 0 })
+        }, { inFlight: 1, dropped: 1, file: [["A", "B"], ["t:bbc1.uk", "t:f2.uk"]], memory: [["A", "B"], ["t:bbc1.uk", "t:f2.uk"]], merged: false, settled: 0 })
         checkCall("R24a (" + tag + "): PARKED -- inside the start-up window (the state loaded, the init not yet exited) an in-app favourite parks its save, the helper writes the file, then the init exits: the parked save keeps both", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho, dirsLater: true })
           h.root.toggleFavorite("t:win.uk"); h.runLater()
@@ -13047,18 +13057,27 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         // a7 -- `behind` without its in-flight half: a foreign write that
         // already carries our in-flight change plus another merges to exactly
         // theirs, and our older save lands over it unless the merge re-saves.
-        checkCall("R25d (" + tag + "): a7 -- a foreign write that already carries the in-flight favourite plus another lands first: the merge is theirs, but our older save would land after it, so the merge is saved again -- the other favourite is on disk and survives a restart", () => {
+        checkCall("R25d / F-HARNESS-31 (" + tag + "): a7, the same-instant residual -- a foreign write that already carries the in-flight favourite plus another lands while our save is in flight: its reload is dropped (the measured view) and our rename replaces it, so the other favourite is LOST, on disk, in memory and after a restart; ours is kept", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           // R26a (2026-10-16) re-levelled: the save is let through its read
           // (h.runLater) so that it is IN FLIGHT when the foreign write lands,
-          // which is the half of `behind` this pins.
+          // which is the half of `behind` this pinned.
+          // F-HARNESS-31 (2026-10-16) re-levelled again: the merge this
+          // wanted ("the merge is theirs, so it is saved again") needed the
+          // double to deliver the foreign reload DURING our write, which the
+          // measured FileView does not (30 of 30); our rename lands over the
+          // foreign file and the next load reads our own text. So the other
+          // favourite is lost -- the same-instant residual, on this tree and
+          // on 0.14.1 alike. The in-flight half of `behind` this used to pin
+          // is no longer reached by a FOREIGN write in the double at all; see
+          // spikes/key-mutations/README.md for what r25d-a7 reddens now.
           h.root.toggleFavorite("t:f2.uk"); h.runLater()
           const inFlight = h.root.stateSavesInFlight
           h.foreign(sf => { const st = JSON.parse(sf.disk); st.favorites = st.favorites.concat(["t:f2.uk", "t:other1.uk"]); sf.disk = JSON.stringify(st) + "\n" })
           h.drain()
           const next = restart(h)
-          return { inFlight, file: h.file().favorites, memory: h.root.userState.favorites, restart: next.root.userState.favorites }
-        }, { inFlight: 1, file: ["t:bbc1.uk", "t:f2.uk", "t:other1.uk"], memory: ["t:bbc1.uk", "t:f2.uk", "t:other1.uk"], restart: ["t:bbc1.uk", "t:f2.uk", "t:other1.uk"] })
+          return { inFlight, dropped: h.droppedForeign, file: h.file().favorites, memory: h.root.userState.favorites, restart: next.root.userState.favorites }
+        }, { inFlight: 1, dropped: 1, file: ["t:bbc1.uk", "t:f2.uk"], memory: ["t:bbc1.uk", "t:f2.uk"], restart: ["t:bbc1.uk", "t:f2.uk"] })
         // R25c / D-SRC-32: a start over a state folder that is a link to nothing.
         checkCall("R25c (" + tag + "): a start over a state FOLDER link that leads nowhere (FileView: FileNotFound) blocks as \"folder-link\" on the helper's word, told once by the sentence that names the folder, and writes nothing", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho, exists: true, fault: "folder-link" })
@@ -13083,7 +13102,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
                    file: [h.file().sources.length, M.findSource(h.file().sources, KH) !== null], lines: lines.length, namesKey: lines.every(l => l.indexOf(KZ) !== -1),
                    told: told.length, body: told.length === 1 && told[0][told[0].length - 1] === M.mergeDropNotice({ sources: [KZ] }).body, clean: noSecretIn(h) }
         }, { inApp: [true, 50, true], memory: [50, false, true], file: [50, true], lines: 1, namesKey: true, told: 1, body: true, clean: true })
-        checkCall("R25b (" + tag + "): at 19 saved searches, an in-app save of a search IN FLIGHT and a foreign write adding another: theirs keeps its place, ours is dropped, told once, one journal line that names no query", () => {
+        checkCall("R25b / F-HARNESS-31 (" + tag + "): at 19 saved searches, an in-app save of a search IN FLIGHT and a foreign write adding another in the same instant: the foreign reload is dropped (the measured view), so no cap merge happens -- OURS is kept at 20, theirs is LOST, nothing is told and no journal line is written", () => {
           const searches = []
           for (let i = 0; i < 19; i++) searches.push({ query: "q" + i, at: 10 + i })
           const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA, { savedSearches: searches }), mode, { ownEcho })
@@ -13092,16 +13111,25 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           // premise is now asserted (inFlight), because this pin had gone on
           // passing with the save merely parked, the shape the r25d-a7 patch
           // no longer reddened (found by running every patch on this tree).
+          // F-HARNESS-31 (2026-10-16) re-levelled again: the cap merge this
+          // wanted (theirs keeps its place, ours dropped and told) needed the
+          // double to deliver the foreign reload DURING our write; the
+          // measured FileView does not (30 of 30), so our rename replaces
+          // their search and the merge never runs -- the same-instant
+          // residual, on this tree and on 0.14.1 alike. What still observes
+          // the cap merge, its one notice and its query-free journal line:
+          // the R25b pin above (49 sources over a FAILED save), and the
+          // other R25b pins over a held save.
           const r = h.root.saveSearch("mine"); h.runLater()
           const inFlight = h.root.stateSavesInFlight
           h.foreign(sf => { const st = JSON.parse(sf.disk); st.savedSearches = st.savedSearches.concat([{ query: "theirs", at: 99 }]); sf.disk = JSON.stringify(st) + "\n" })
           h.drain()
           const lines = h.warnings.filter(w => /saved search made here was not kept/.test(w))
           const queries = st => st.savedSearches.map(x => x.query)
-          return { inFlight, added: r.added, file: [queries(h.file()).length, queries(h.file()).indexOf("theirs") !== -1, queries(h.file()).indexOf("mine") !== -1],
+          return { inFlight, dropped: h.droppedForeign, added: r.added, file: [queries(h.file()).length, queries(h.file()).indexOf("theirs") !== -1, queries(h.file()).indexOf("mine") !== -1],
                    memory: [queries(h.root.userState).length, queries(h.root.userState).indexOf("mine") !== -1], lines: lines.length,
                    noQuery: lines.every(l => l.indexOf("mine") === -1), told: dropTold(h).length }
-        }, { inFlight: 1, added: true, file: [20, true, false], memory: [20, false], lines: 1, noQuery: true, told: 1 })
+        }, { inFlight: 1, dropped: 1, added: true, file: [20, false, true], memory: [20, true], lines: 0, noQuery: true, told: 0 })
       }
     }
   }
@@ -13227,7 +13255,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           h.foreign(sf => withFav(sf, "t:helper.uk")); h.drain()
           return { held, inFlight: h.root.stateSavesInFlight, saveFailed: h.root.stateSaveFailed, file: h.file().favorites, handlerWrites: h.stateFile.handlerWrites }
         }, { held: [true, 0], inFlight: 0, saveFailed: false, file: ["t:bbc1.uk", "t:helper.uk", "t:fail.uk"], handlerWrites: 0 })
-        checkCall("R26b (" + tag + "): no setText is issued inside any of stateFile's handlers -- over an unmigrated start whose init chmods the file (the migration's save meets the chmod reload), a fresh install, an in-app switch, a foreign write over a FAILED save (R24a's merge saves inside the load) and over a save IN FLIGHT", () => {
+        checkCall("R26b (" + tag + "): no setText is issued inside any of stateFile's handlers -- over an unmigrated start whose init chmods the file (the migration's save meets the chmod reload), a fresh install, an in-app switch, a foreign write over a FAILED save (R24a's merge saves inside the load) and one over a save IN FLIGHT (dropped by the measured view: F-HARNESS-31's same-instant loss, so helper2 is not on disk)", () => {
           const counts = []
           const a = boot({ playlistUrl: B, showLogos: false }, oldText([rec(A), rec(B)]), mode, { ownEcho, exists: true, fault: "file-0000", initOrder: "exit-first" }); counts.push(a.stateFile.handlerWrites)
           const f = boot({ playlistUrl: A, showLogos: false }, "", mode, { ownEcho }); counts.push(f.stateFile.handlerWrites)
@@ -13236,11 +13264,19 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           h.stateFile.writeFails = true; h.root.toggleFavorite("t:x.uk"); h.drain()
           h.stateFile.writeFails = false
           h.foreign(sf => withFav(sf, "t:helper.uk")); h.drain()
+          // F-HARNESS-31 (2026-10-16) re-levelled: the last leg used to want
+          // helper2 merged, which held only because the double delivered the
+          // foreign reload DURING our write; the measured FileView does not
+          // (30 of 30), so our rename replaces it -- the same-instant loss.
+          // The census itself is unchanged: the merge INSIDE a load that
+          // this pin exists for is still made by the FAILED leg above (and
+          // by R26b's D-SRC-46 pin), and the in-flight leg now observes that
+          // a dropped reload makes no write either.
           h.root.toggleFavorite("t:y.uk"); h.runLater()
           h.foreign(sf => withFav(sf, "t:helper2.uk")); h.drain()
           counts.push(h.stateFile.handlerWrites)
-          return { counts, fresh: f.file().sources.length, adopted: a.root.activeSourceKey === KB, file: h.file().favorites }
-        }, { counts: [0, 0, 0], fresh: 1, adopted: true, file: ["t:bbc1.uk", "t:helper.uk", "t:x.uk", "t:helper2.uk", "t:y.uk"] })
+          return { counts, dropped: h.droppedForeign, fresh: f.file().sources.length, adopted: a.root.activeSourceKey === KB, file: h.file().favorites }
+        }, { counts: [0, 0, 0], dropped: 1, fresh: 1, adopted: true, file: ["t:bbc1.uk", "t:helper.uk", "t:x.uk", "t:y.uk"] })
         checkCall("R26a (" + tag + "): key-scenario D3 / W3 stay discriminating -- the read every in-app save now makes is counted as pre-save-<reason>, so a session with no start-up reload over a parked save reads save-parked 0 after any number of saves", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           const before = reasons(h)["save-parked"] || 0
@@ -13258,6 +13294,39 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           h.verifyWatchdog(); h.drain()
           return { parked, file: h.file().favorites, noLoad: h.root.stateVerifyNoLoad, logged: h.warnings.filter(w => /was not read back within/.test(w)).length }
         }, { parked: [true, true, 1, 1], file: ["t:bbc1.uk", "t:app.uk"], noLoad: 1, logged: 1 })
+        // F4 (2026-10-16, lane-clean-f1): the BOUND itself, which nothing
+        // observed -- the pin above fires the handler by hand, and a review
+        // mutant with `interval: 20` passed node and a live key-scenario
+        // (129 / 0). h.elapse runs the Timer the tree DECLARES: a read whose
+        // load is 1,999 ms late is still waited for and its load decides the
+        // save (a foreign favourite in it is merged, nothing goes without the
+        // read); a load that never comes is given up at 2,000 ms, logged with
+        // that figure. Seen red on spikes/key-mutations/r26a-watchdog-20ms
+        // and r26a-watchdog-no-interval (Qt's default 1000 ms).
+        checkCall("R26a (" + tag + "): the read's bound is 2 s, from the Timer the tree declares -- a load 1,999 ms late still decides the save (merged, no save without its read); a load that never comes is given up at 2,000 ms, not before, counted and logged with that figure", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          const loader = h.stateFile.loader
+          const held = []
+          h.stateFile.loader = () => held.push(1)
+          h.root.toggleFavorite("t:app.uk"); h.drain()
+          h.elapse(1999)
+          const late = [h.root.stateVerifyPending, h.root.stateVerifyNoLoad, h.file().favorites.length]
+          h.stateFile.disk = JSON.stringify(Object.assign(JSON.parse(h.stateFile.disk), { favorites: ["t:bbc1.uk", "t:hand.uk"] })) + "\n"
+          h.stateFile.loader = loader
+          h.later.push({ fn: h.loadState, args: [] }); h.drain()
+          h.elapse(5000)
+          const decided = [h.root.stateVerifyNoLoad, h.file().favorites]
+          const g = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          g.stateFile.loader = () => {}
+          g.root.toggleFavorite("t:app.uk"); g.drain()
+          g.elapse(1999)
+          const before = [g.root.stateVerifyPending, g.file().favorites.length]
+          g.elapse(1); g.drain()
+          return { interval: h.ids.stateVerifyWatchdog.interval, held: held.length, late, decided, before,
+                   after: [g.root.stateVerifyPending, g.root.stateVerifyNoLoad, g.file().favorites],
+                   logged: g.warnings.filter(w => /was not read back within 2000 ms of a save/.test(w)).length }
+        }, { interval: 2000, held: 1, late: [true, 0, 1], decided: [0, ["t:bbc1.uk", "t:hand.uk", "t:app.uk"]], before: [true, 1],
+             after: [false, 1, ["t:bbc1.uk", "t:app.uk"]], logged: 1 })
         checkCall("R26a (" + tag + "): the read is SKIPPED while one of our writes is in flight (the view drops a reload then, measured 30 of 30): the next save is issued from a turn of its own with no reload asked for", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           h.root.toggleFavorite("t:one.uk"); h.runLater()

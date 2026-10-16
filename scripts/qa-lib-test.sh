@@ -1446,9 +1446,13 @@ KM="$ROOT/scripts/dev-harness/spikes/key-mutations"
 # deleted) and r26d-periodic-reload (the 2 s reload R26d refused, B31's
 # idle half: no tree before it reloads while idle); and re-made r25a-keep-landed and r25a-clear-every-saved, whose
 # hunks R26b's handler-depth count re-indented -- the same two decisions.
-is "all fifteen key-mutation patches still apply to this tree (git apply --check)" \
-   "$(for km_p in d3-save-parked r14-no-return r23a-no-rearm r23e-editable-field r24g-no-kill r25a-keep-landed r25a-clear-every-saved r25b-silent-drop r25d-a5-base-not-moved r25d-a7-no-inflight-half r25d-no-reload-on-change r26a-no-read r26b-no-defer r26a-no-verb-recheck r26d-periodic-reload; do git -C "$ROOT" apply --check "$KM/$km_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 "
-is "and the key-mutations folder holds exactly those fifteen" "$(ls "$KM"/*.patch 2>/dev/null | wc -l | tr -d ' ')" "15"
+# F4 (2026-10-16, lane-clean-f1) adds two, the read's 2 s bound the review
+# found nothing observing: r26a-watchdog-20ms (`interval: 2000` made 20)
+# and r26a-watchdog-no-interval (the line deleted: Qt's default 1000 ms),
+# which the node pin "the read's bound is 2 s" was seen red against.
+is "all seventeen key-mutation patches still apply to this tree (git apply --check)" \
+   "$(for km_p in d3-save-parked r14-no-return r23a-no-rearm r23e-editable-field r24g-no-kill r25a-keep-landed r25a-clear-every-saved r25b-silent-drop r25d-a5-base-not-moved r25d-a7-no-inflight-half r25d-no-reload-on-change r26a-no-read r26b-no-defer r26a-no-verb-recheck r26d-periodic-reload r26a-watchdog-20ms r26a-watchdog-no-interval; do git -C "$ROOT" apply --check "$KM/$km_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 "
+is "and the key-mutations folder holds exactly those seventeen" "$(ls "$KM"/*.patch 2>/dev/null | wc -l | tr -d ' ')" "17"
 # 2 -> 3 on 2026-10-16: R26's --baseline footer sentence cites
 # d3-save-parked.patch too (its 76 / 53 since every save reads first).
 is "key-scenario and the README cite the patch files and no mutation branch" \
@@ -2520,7 +2524,7 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # from the same 418, so the merge is their sum.
 # 471 -> 472 on 2026-10-13, D-SINK-19 round 11 (R21): pointerState's derived
 # migration booleans and refusal reports, driven (1).
-# 472 -> 494 on 2026-10-15, F-HARNESS-21/22 (lane-clean-h): qa_served_fixture,
+# 472 -> 500 on 2026-10-15, F-HARNESS-21/22 (lane-clean-h): qa_served_fixture,
 # qa_listener_owned and QA_URL_PAST_HOST_ERE driven both ways, the
 # dead-fixture mutation seen red on a copy of this library, and the eight
 # chno-mutation patches pinned to apply (22); qa_reap_players against
@@ -2529,6 +2533,11 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # against a TERM-ignoring stand-in (2), the reap_player join and every
 # served scenario reaching it (2), and the fifteen key-mutation patches
 # counted (1; the apply pin itself was re-counted, not added).
+# 505 unchanged on 2026-10-16, F4 (lane-clean-f1): the two watchdog
+# patches join the apply pin and the folder count, which were re-counted
+# (fifteen -> seventeen), not added. (The 472 -> 500 line above read
+# "472 -> 494" until then; its own parts, 22 and 6, sum to 500, which is
+# what 86d8265 set EXPECTED to.)
 EXPECTED=505
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"

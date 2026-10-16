@@ -216,7 +216,12 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # The seven families R26a's premise moved were re-levelled in place, not
 # added: R13 and R25a bursts, R21e D-SRC-18, R24a and R25b IN FLIGHT, R25d
 # a7, and the R11 / R14 / R15 structural pins.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2561}
+# 2561 -> 2565 on 2026-10-16, F4 (lane-clean-f1): "the read's bound is 2 s"
+# through the service harness on both hosts and both own-echo modes (4).
+# F-HARNESS-31's sixteen (R24a IN FLIGHT, R25d a7, R25b's in-flight saved
+# search, R26b's census, each x 4) were re-levelled in place to the
+# same-instant loss, not added.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2565}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity

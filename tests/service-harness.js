@@ -83,9 +83,10 @@ function makeIds(h) {
     // which runs the watchdog's OWN onTriggered and then the exit handler.
     stateInitWatchdog: timer("stateInitWatchdog"),
     stateInitKill: timer("stateInitKill"),
-    // R26a: the bound on the read before a save. It does not run here; a
-    // test that needs it to fire calls h.verifyWatchdog(), which runs its
-    // OWN onTriggered from its text.
+    // R26a: the bound on the read before a save. A test fires it by hand
+    // with h.verifyWatchdog(), which runs its OWN onTriggered from its text,
+    // or by moving the clock with h.elapse(ms), which fires it at the
+    // interval the tree DECLARES (F4, lane-clean-f1; bootService below).
     stateVerifyWatchdog: timer("stateVerifyWatchdog"),
     switchTimeout: timer("switchTimeout"),
     configShieldDebounce: timer("configShieldDebounce"),
@@ -336,6 +337,11 @@ class Host {
 //     view watches nothing after it until one reload() re-arms it. Here:
 //     h.replace(change) changes the disk and unarms the watch, delivering no
 //     load; reload() arms it again when there is a file to watch.
+//   F-HARNESS-31 (lane-clean-f1, the same measurement's set `inflight`):
+//   a reload asked while the view's OWN write is out delivers no load
+//     during that write (30 of 30). Here: h.foreign delivers nothing while
+//     one of our writes is queued (counted in h.droppedForeign), so the
+//     change it made is replaced by our rename -- the same-instant loss.
 class StateFile {
   constructor(text, o) {
     const opts = o || {}
@@ -587,8 +593,21 @@ function bootService(serviceText, Model, o) {
   // verb, an editor, a restore). `change(stateFile)` makes it; the reload is
   // delivered only while the view's watch is armed -- in the fresh install's
   // dir-absent session, until something re-arms it, nothing is.
+  //
+  // F-HARNESS-31 (rule 10): the reload such a change raises is asked by the
+  // service's own onFileChanged, and a reload asked while one of OUR writes
+  // is out delivers no load during that write (measured, 30 of 30: lane W's
+  // spikes/filewatch-links inflight-1.txt on lane-clean-w-probe, the
+  // contract's eighth FileView fact). Our rename then replaces the change,
+  // and the next load reads our own text: a change another program lands in
+  // the same instant as one of our writes is LOST, on this double as on the
+  // real view. Counted in `droppedForeign`, so a pin can see it happen.
+  // Before this line the double delivered the change during our write and
+  // the service merged it -- more forgiving than the FileView.
+  h.droppedForeign = 0
   h.foreign = (change) => {
     change(h.stateFile)
+    if (h.stateFile.watchArmed && h.stateFile.events.length) { h.droppedForeign++; return }
     if (h.stateFile.watchArmed) { h.loadState(); h.runLater() }
   }
   // R26c: the path REPLACED or RE-POINTED by something else -- a rename over
@@ -602,6 +621,26 @@ function bootService(serviceText, Model, o) {
   // R26a: the read-before-write's watchdog, from its own text, as if its 2 s
   // passed with no load (the reload the save asked for was never delivered).
   h.verifyWatchdog = () => { onVerifyWatchdog(); h.runLater() }
+  // F4 (2026-10-16, lane-clean-f1): the watchdog's BOUND, observed. The
+  // Timer's declared `interval` is evaluated from its own block in the
+  // tree's Service.qml (Qt's default, 1000 ms, when the block declares
+  // none; null when there is no such Timer), and h.elapse(ms) moves the
+  // clock and fires it, through its own onTriggered, once a restart() is
+  // that old and no stop() came after -- so a pin can see a read still
+  // awaited at 1,999 ms and given up at 2,000. Nothing else here runs a
+  // Timer; h.verifyWatchdog() above still fires it by hand.
+  const verifyBlock = serviceText.indexOf("id: stateVerifyWatchdog") === -1 ? null
+    : serviceText.slice(serviceText.lastIndexOf("  Timer {", serviceText.indexOf("id: stateVerifyWatchdog")), serviceText.indexOf("\n  }", serviceText.indexOf("id: stateVerifyWatchdog")))
+  const verifyIntervalText = verifyBlock === null ? null : ((verifyBlock.match(/^    interval: (.*)$/m) || [])[1] || "1000")
+  const vw = ids.stateVerifyWatchdog
+  vw.interval = verifyIntervalText === null ? null : compile("", "return (" + verifyIntervalText + ")", "stateVerifyWatchdog_interval")()
+  vw.armedAt = null
+  vw.restart = function () { this.restarts++; this.running = true; this.armedAt = h.clock }
+  vw.stop = function () { this.stops++; this.running = false; this.armedAt = null }
+  h.elapse = (ms) => {
+    h.clock += ms
+    if (vw.running && vw.interval !== null && h.clock - vw.armedAt >= vw.interval) { vw.running = false; vw.armedAt = null; onVerifyWatchdog(); h.runLater() }
+  }
   // The start-up init's exit, with the double's reply and side effects.
   h.helperInit = (code) => {
     const out = helperInit(h.stateFile, code)
