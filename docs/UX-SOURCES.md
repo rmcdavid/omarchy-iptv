@@ -1865,8 +1865,12 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    block that began MID-session it is kept and written; at a no-write
    START it lifts the mode but is not kept -- the file's state is applied
    over it -- which the notification's "changed now are not kept" already
-   says. The restart stays the way out for every reason, and the only one
-   for `init-timeout`.] Writes resume at once, and a later episode in
+   says. The restart stays the way out for every reason. For
+   `init-timeout` no save and no source verb re-reads, but a watched load
+   of a good state lifts it like any other reason (`liftStateBlock` does
+   not look at the reason; the claims lens's probe, re-run on
+   lane-clean-f1: `before:init-timeout ... afterForeignEdit:[] switch:ok`
+   on both hosts).] Writes resume at once, and a later episode in
    the same session is told again -- pinned since round 13 (R23a: node `R23a
    (<mode> host, mid-session, <between> between): TWO no-write episodes ...`
    and key-scenario B9 `told:1/2`, both seen red with the re-arm deleted).
@@ -1932,7 +1936,8 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    another state): THAT file keeps its own label and favourite, takes the
    in-app edit, and becomes what the session holds. A link re-pointed at a
    file that does not exist yet creates nothing and begins the mode (item 4;
-   node only). Until that next save the guide shows what it had and
+   node only) -- outside the three windows of milliseconds the folder-link
+   bracket below names, in which the save still creates it at 0644. Until that next save the guide shows what it had and
    nothing is written (FRESH, stated: node `R26d (...): FRESH, stated --
    ...`), so nothing is lost; the README says to restart to see the change
    at once. The README's advice changes from "restart straight after such
@@ -1958,8 +1963,13 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    the change and becomes what the session holds, the old folder untouched
    (key-scenario B27 `new:A=f2-own,C=app-fl,favs=t:f2.uk
    old:A=seed,C=c-seven,favs=t:seed.uk`); none there begins the mode with
-   nothing created (item 4, B28) -- where until 0.14.0 the save created a
-   0644 `state.json` holding every source URL, unnoticed. B23-B31 drive the
+   nothing created (item 4, B28) -- where up to and including 0.14.1 the
+   save created a 0644 `state.json` holding every source URL, unnoticed.
+   Three windows still create it, each milliseconds long unless the disk
+   stalls (the README's link bullet names them; lane-clean-f1's node
+   probe over the shipping `Service.qml`): a save asked while the previous
+   write is in flight skips its read; a re-point landing between the
+   read's load and the write it allows; and the 2 s watchdog firing. B23-B31 drive the
    links now; the README says that after re-pointing and restarting, the
    NEW folder is what loads.]
    [Round 15, D-SRC-34: a `state.json` link into a folder the user cannot

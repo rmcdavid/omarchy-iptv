@@ -5594,6 +5594,21 @@ models what was measured -- `setText` inside a load is silent (no `saved`;
 the echo delivered), a save that creates the file creates it 0666 & ~umask
 (0644 at umask 022) and keeps an existing file's mode, a re-point raises
 nothing. Its red: the improved double goes red on the old `saveState`.
+[lane-clean-f1, 2026-10-16, F-HARNESS-31 (the round-16 data-loss lens's
+P2): the double still delivered the reload a FOREIGN change raises while
+one of our writes was in flight, which the measured view does not
+(`inflight-1.txt`, 30 of 30), and sixteen pins passed only because of it.
+It drops that load now (`h.foreign`, counted in `droppedForeign`); the
+sixteen -- R24a IN FLIGHT, R25d a7, R25b's in-flight saved search and
+R26b's census, each x 4 -- are re-levelled to what the view does: a change
+another program lands in the same instant as one of our writes is lost,
+on this tree and on 0.14.1 alike, with no plugin-side lock against a
+second process. Seen red both ways: the old wants on the new double, 16 of
+2561 in each own-echo mode; the new wants on the old double, 16 of 2561.
+`r25d-a7-no-inflight-half.patch` is now reddened by no node pin (8 -> 0):
+the half it deletes is reached only by a foreign load during our write,
+which the view does not deliver; whether any other load can reach it is
+unmeasured.]
 
 R26d. NO PERIODIC TIMER. A replacement with no save after it stays unseen
 until the next save or a restart, and nothing is lost meanwhile because
@@ -5779,7 +5794,15 @@ what R26 does, and keeps what 0.14.0 did as the past.
   `ARCHITECTURE.md` security standard 5 (bracketed) and rule 6 of the
   project instructions (not this lane's file; true of the tree now but for
   the watchdog's residual, reasoned and not measured, in `ARCHITECTURE.md`
-  section 5's round-16 amendment).
+  section 5's round-16 amendment). [lane-clean-f1, 2026-10-16: not true
+  without three exceptions, each now stated where the sentence stands --
+  a save asked while our previous write is in flight skips its read; a
+  re-point landing between the read's load and the write it allows; the
+  2 s watchdog firing -- each of which still asks the view to create the
+  0644 file, measured through the node double over the shipping
+  `Service.qml` (both hosts, both echo modes); and a 0644 file the user
+  put at the path (`mv`, `rm` + `cp`) is written into at its own mode
+  until the next start's `state init`.]
 - "The watch is the only way the session learns of a change" (R26d's
   shape): `UX-SOURCES.md` 5.10 item 4 ("the mode begins when the FileView
   delivers the reload": bracketed, it can begin at a save now); the
@@ -5821,7 +5844,8 @@ board's ids are the lead's).**
   closures of D-SINK-21, D-SRC-29, D-SRC-35 and D-SRC-40 (and F-HARNESS-21
   and F-HARNESS-22), are `STATUS.md`'s, which neither lane A nor this lane
   writes; until they land the gate is red on the ledger only.
-- (2) A finding lane A raised, no id yet: R25a's own-write record keeps
+- (2) D-SRC-47 (lane A's finding; the id given on lane-clean-f1,
+  2026-10-16): R25a's own-write record keeps
   eight texts, and a burst of more than eight writes made a turn apart
   while the first is in flight pushes the first text out, so its echo is
   merged as foreign and can undo the last in-app change (ten switches a
@@ -5857,3 +5881,6 @@ board's ids are the lead's).**
 - (9) The README names "up to and including 0.14.0" for the old behaviour.
   That is right if R26 ships as 0.14.1, the manifest's version on
   lane-clean-a1; if 0.14.1 is cut without R26 it must read 0.14.1.
+  [lane-clean-f1, 2026-10-16: 0.14.1 is dev 1c88877's code, which carries
+  no R26, so the README, `UX-SOURCES.md` and the contract now say "up to and
+  including 0.14.1".]

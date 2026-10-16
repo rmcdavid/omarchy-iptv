@@ -1465,6 +1465,8 @@ transcripts are in lane A's session scratch directory, not the tree. The
 R24a merge has no live segment: the ruling asked for the fixture table and
 `tests/service-harness.js`, and the data-loss lens's WF FAV WOK HADD FAV
 runs there on both hosts, both echo modes, parked, in flight and failed.
+[2026-10-16, F-HARNESS-31: in flight it now LOSES the helper's record, the
+measured view's same-instant loss; parked and failed still keep both.]
 [Round 15: B19 is the merge's live segment now, and two of its decisions
 that survived every check above are pinned (Round 15 below).]
 
@@ -1675,6 +1677,14 @@ What changed in the rigs:
   watch with no load delivered; `h.verifyWatchdog()` runs the read's
   watchdog from its own text. Dev's suite with only this double swapped in
   reads 12 of 2,502 red: the old double was more forgiving than the view.
+  [lane-clean-f1, 2026-10-16: two more. F-HARNESS-31 -- `h.foreign`
+  delivers nothing while one of our writes is queued (lane W's `inflight`,
+  30 of 30), counted in `h.droppedForeign`; sixteen pins that passed on
+  the forgiving shape are re-levelled to the same-instant loss (16 of 2,561
+  red both ways). F4 -- `h.elapse(ms)` moves the clock and fires the read's
+  watchdog at the interval the tree's `Service.qml` declares (Qt's default
+  1000 ms when none), so the 2 s bound is pinned; `r26a-watchdog-20ms` and
+  `r26a-watchdog-no-interval` under `spikes/key-mutations/` are its reds.]
 - The FileView measurements R26 rests on (`spikes/filewatch-links/`,
   `measure.sh` with sets `links`, `inload`, `inflight`, `timing`, a service
   rig and its results) are committed on branch `lane-clean-w-probe` and

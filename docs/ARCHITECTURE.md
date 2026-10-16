@@ -515,7 +515,8 @@ before write:
 - No write from inside a handler (R26b, D-SRC-46). A `setText` issued
   inside `stateFile`'s own `onLoaded` writes the file and raises no `saved`
   (measured 16 of 16), so after an R24a merge saved from inside its load
-  the session read a write in flight and a failed save for good (0.14.0).
+  the session read a write in flight and a failed save for good (0.14.0
+  and 0.14.1).
   Every write is now issued from a turn of its own (`Qt.callLater`):
   `finishStateVerify` is entered only from `Qt.callLater` and the
   watchdog's Timer, `saveDeferredState` only from `Qt.callLater`, and a call
@@ -526,23 +527,42 @@ before write:
   own), every one through the plan's "write". Observed live by B30.
 - The double is the measured FileView (R26c, F-HARNESS-29): a `setText`
   inside a load is silent, a created file is 0666 & ~umask, an existing
-  file keeps its mode, a replacement or a re-point raises nothing.
+  file keeps its mode, a replacement or a re-point raises nothing; and
+  (F-HARNESS-31, lane-clean-f1) the reload a foreign change raises while
+  one of our writes is in flight delivers nothing, so that change is lost
+  to our rename, as on the real view (30 of 30).
 - No periodic reload (R26d). A replacement with no save after it is
   unseen until the next save or a restart (FRESH); nothing writes
   meanwhile, so nothing is lost. A timer would leave a window of one
   period in which a save still writes over the change or creates the
   0644 file, and reads the file for ever (lane W: at 10 s, 360 reloads an
   hour idle). B31 observes 0 loads in 30 s idle.
-- What remains, stated: a re-point landing between the read's load and
-  the write it allows (not measured; the asynchronous write is issued from
-  the next turn); the watchdog's save goes without its read, so a
-  replacement in that 2 s goes unseen as before R26, and over a missing
-  file it would create one at 0666 & ~umask (reasoned, not measured: a
-  missing file answers the read with `loadFailed` before the watchdog
-  fires); and R25a's own-write record keeps eight texts, so a burst of more
-  than eight writes a turn apart while the first is in flight can push the
-  first out and read its echo as foreign (lane A, found while re-levelling
-  R13; raised to the lead, no id yet).
+- What remains, stated: three windows in which a save is still written
+  without a read that would have stopped it, so a replacement in the
+  window is written over and a path that has just lost its file (a link
+  re-pointed at a missing file, a folder link at an empty folder) gets the
+  file created at 0666 & ~umask, holding the URLs -- a save asked while
+  our previous write is in flight (its read skipped; the re-point landing
+  between the two renames); a re-point landing between the read's load
+  and the write it allows (the asynchronous write is issued from the next
+  turn); and the watchdog's save, which goes without its read, so a
+  replacement in that 2 s goes unseen as before R26 (a missing file
+  answers the read with `loadFailed` before the watchdog fires, so this
+  one needs a load that never comes). All three are reproduced through
+  the node double over the shipping `Service.qml` on lane-clean-f1 (both
+  hosts, both echo modes, `created:true mode:644 holdsUrl:true`; a control
+  re-point with no window `created:false blocked:[absent]`) and by the
+  round-16 data-loss lens's simulator (identically on 0.14.0); none is
+  driven live. The watchdog's 2 s itself is pinned since lane-clean-f1
+  (node "the read's bound is 2 s", red on `interval: 20` and with the line
+  deleted). A change another program lands in the same instant as one of
+  our writes is lost (F-HARNESS-31: the view drops the reload it raises).
+  A 0644 file the user put at the path is written into at its own mode
+  until the next start's `state init` makes it 0600. And D-SRC-47: R25a's
+  own-write record keeps eight texts, so a burst of more than eight writes
+  a turn apart while the first is in flight can push the first out and
+  read its echo as foreign (lane A, found while re-levelling R13; the id
+  given on lane-clean-f1).
 
 ### mpv status (helper `status` stdout, M1 target)
 
@@ -2797,7 +2817,11 @@ Performance budget (10k channels):
    above it can be entered -- not inside this machine's 0700 home). Since
    R26a every save reads `state.json` first and a load that finds nothing
    refuses the save (the R22 `absent` mode), so the service never asks the
-   view to create the file. A save over an existing file keeps that file's
+   view to create the file -- outside three windows of milliseconds (a
+   save asked while our previous write is in flight skips its read; a
+   re-point landing between the read's load and the write; the 2 s
+   watchdog firing), in which it still does (section 5's round-16
+   amendment, "What remains"; lane-clean-f1). A save over an existing file keeps that file's
    mode, so a re-pointed folder holding a 0644 `state.json` keeps 0644
    until the next start makes it 0600 (measured by the sink lane through a
    restart).]

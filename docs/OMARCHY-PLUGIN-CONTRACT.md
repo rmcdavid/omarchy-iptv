@@ -958,7 +958,8 @@ of a file the view creates, a re-point and what re-arms after one, by round
   writing memory over a replaced link or into a re-pointed folder's
   `state.json` (D-SRC-29, D-SRC-40), a target that comes back never seen
   (D-SRC-35), a repaired target's `chmod 600` never seen (D-DOC-13) --
-  describe the plugin up to 0.14.0. The reload it now makes before every
+  describe the plugin up to and including 0.14.1 (0.14.1 is dev 1c88877's
+  code, which carries no R26). The reload it now makes before every
   save reads whatever the path leads to at that moment, so each of those
   is decided at the next save by the dispositions any load gets (the
   eighth fact; `ARCHITECTURE-SOURCES.md`'s round-16 rulings). The D-DOC-13
@@ -997,7 +998,17 @@ of a file the view creates, a re-point and what re-arms after one, by round
     omarchy-shell.service`). A FileView has no option to refuse to create
     its file, and the umask is not a QML property, so the view itself
     cannot keep that save off disk; this plugin keeps it from being ASKED
-    (R26a, the read finds nothing and the save is refused; D-SINK-21).
+    (R26a, the read finds nothing and the save is refused; D-SINK-21) --
+    except in three windows, where a save is still asked over a path that
+    has just lost its file: a save asked while the previous write is in
+    flight skips its read (the last fact below); a re-point landing between
+    the read's load and the write it allows; and the 2 s watchdog firing
+    with no load. Each creates the 0644 file holding the URLs, measured by
+    calling the shipping `Service.qml` through the node double on
+    lane-clean-f1 (all three, both hosts, both echo modes: `created:true
+    mode:644 holdsUrl:true`, and a control re-point with no window
+    `created:false blocked:[absent]`) and by the round-16 data-loss lens's
+    simulator on lane-clean-c1 and on 0.14.0 alike; not driven live.
   - **A re-point raises nothing.** `ln -sfn` of a `state.json` link to
     another file (`links-1.txt` L4) and of a state-folder link to another
     folder (L7) or to an empty one (L9): `changed+0 loaded+0`, and the
@@ -1017,7 +1028,16 @@ of a file the view creates, a re-point and what re-arms after one, by round
     its own.** 30 of 30 (`inflight-1.txt`, fifteen idle and fifteen under
     load, load 9.3-14.0): `loadedDuring 0`, the write's `saved` arriving
     during the wait. So a read issued then learns nothing, and the disk is
-    the view's own write anyway; R26a skips its read in that case.
+    the view's own write anyway; R26a skips its read in that case. The
+    same holds for the reload the service's own `onFileChanged` asks when
+    ANOTHER program writes the file in that instant: it delivers nothing
+    during our write, our rename then replaces that program's file, and the
+    next load reads our own text -- so a change any other program lands in
+    the same instant as one of our writes can be lost, on every tree, and
+    no plugin-side lock exists against a second process (F-HARNESS-31; the
+    round-16 data-loss lens's simulator, `NEW-lost-ext ... watch-dropped`
+    in all four host and echo shapes on lane-clean-c1 and 0.14.0 alike,
+    and `[]` with the drop off).
   - **What a reload costs.** Asynchronous `reload()` to `loaded`: median 2-4
     ms, max 10, over 8 KB and 160 KB files, idle and with 8 busy loops
     (`timing-2.txt`, load 12-18). On the real service, lane A's live
@@ -1037,9 +1057,19 @@ of a file the view creates, a re-point and what re-arms after one, by round
   delivered, a created file is 0666 & ~umask and an existing file keeps
   its mode, a replacement or a re-point raises nothing and unarms the
   watch (`h.replace`). The fourth, `reload()` arming the view again, it
-  modelled already (R24c). The fifth it does not model: no read is asked
-  for while a write is in flight, which the R26a pins observe through the
-  service (`stateVerifySkipped`, no reload queued).
+  modelled already (R24c). The fifth, the drop of a reload while our own
+  write is in flight, it models for the reload a FOREIGN change raises
+  (`h.foreign` delivers nothing while one of our writes is queued, counted
+  in `droppedForeign`; F-HARNESS-31, lane-clean-f1): until then it
+  delivered that load during our write and the service merged it, more
+  forgiving than the view, and sixteen pins (R24a IN FLIGHT, R25d a7,
+  R25b's in-flight saved search, R26b's census, each on both hosts and both
+  echo modes) passed only because of it -- 2561 checks, 16 failures with
+  the drop and the old wants; re-levelled to the loss, they are red on the
+  old double instead (16 of 2561 in each echo mode). The service's OWN
+  read is never asked while a write is in flight, which the R26a pins
+  observe (`stateVerifySkipped`, no reload queued); the double does not
+  drop that one, because nothing asks for it.
 
 `saveFailed` exists (`/usr/lib/qt6/qml/Quickshell/Io/quickshell-io.qmltypes:470`)
 and its argument is an enum, never a path; until round 3 the service

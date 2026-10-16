@@ -117,9 +117,11 @@ sf()   { qa_field "d$1" "$(ipc state)"; }
 
 cleanup() {
   if [[ -n $HARNESS_PID ]]; then kill -TERM "$HARNESS_PID" 2>/dev/null; wait "$HARNESS_PID" 2>/dev/null; fi
-  # The live half PLAYS a served stream now, and run.sh's TERM-only reap has
-  # been seen to leave such a player spinning for most of an hour
-  # (qa_reap_players). Ours are ended by pid, with KILL behind the TERM.
+  # The live half PLAYS a served stream now. run.sh's reap used to end such
+  # a player with TERM alone and was seen to leave one spinning for most of
+  # an hour (F-HARNESS-30); since R26h it is qa_reap_players too. This
+  # cleanup calls it as well, so ours are ended by pid, with KILL behind
+  # the TERM, whether or not run.sh's own cleanup runs.
   [[ -n $HARNESS_PID ]] && qa_reap_players "$SCRATCH"
   return 0
 }

@@ -662,7 +662,10 @@ itself unavailable rather than half working.
 - `~/.local/state/omarchy-iptv/state.json` : favorites, recents, last
   played, your saved searches, the groups you have hidden, the player
   session record, which source is active, and the Sources history including
-  their URLs (mode 0600). **This is the only copy of your source list and of
+  their URLs (mode 0600; a file you put there yourself -- a `mv` of an
+  edited copy, or `rm` and `cp` -- keeps the mode it came with, 0644 say,
+  through the plugin's saves until the next shell start makes it 0600).
+  **This is the only copy of your source list and of
   your provider URLs**: lose it and you add your sources again by hand, and a
   copy you keep carries your provider username and password inside the URLs
   (Settings above says what that means for a backup). If the file is there
@@ -686,7 +689,8 @@ itself unavailable rather than half working.
   its own, and a folder link that leads nowhere is refused the same way.
   Pointed somewhere else while the shell runs, it is noticed the same way,
   at the next save; pointed at an empty folder, it makes the plugin stop
-  saving rather than start a new `state.json` there.
+  saving rather than start a new `state.json` there -- outside three
+  narrow windows, which Troubleshooting's bullet on links names.
   Channels that failed to play are
   **not** kept here: they belong to the source that carried them, and live in
   that source's cache directory below
@@ -808,8 +812,9 @@ Nothing inside the plugin directory is written at runtime.
   began; at a start that could not read the file it is not, as the
   notification said. `a` and `c` in Sources are refused by the guide
   itself and do not make it look. When the start-up check did not answer
-  (`could not be checked`), only `omarchy restart shell` ends it, and the
-  restart is always a way out. A file or
+  (`could not be checked`), the plugin's saves do not read the file again,
+  but a good copy put back in place (`cp`, not `mv`) while the shell runs
+  is noticed and ends it too; the restart is always a way out. A file or
   folder you left at mode 0000 while the shell was not running is NOT this
   case: the plugin restores the usual permissions at the next start, reads
   the file and says nothing.
@@ -845,16 +850,25 @@ Nothing inside the plugin directory is written at runtime.
   `ln -sfn` to another state file, THAT file is what the guide shows and
   saves to from then on, with the change that made the save added; the
   file the link used to lead to is left as it was. If the link now leads
-  to a file that does not exist, nothing is created there: the plugin
-  stops saving and says so (the **Saved sources not loaded** bullet above).
+  to a file that does not exist, nothing is created there, outside the
+  three narrow windows below: the plugin stops saving and says so (the
+  **Saved sources not loaded** bullet above).
   Until that next save the guide shows what it had and writes nothing, so
   nothing is lost; run `omarchy restart shell` to see the change straight
-  away. Two narrow exceptions: a save asked for while the plugin's
-  previous save is still being written does not read the file first (the
-  file reader would drop the read then), and if the read has not answered
+  away. Three narrow exceptions, each a window of milliseconds unless the
+  disk stalls: a save asked for while the plugin's previous save is still
+  being written does not read the file first (the file reader would drop
+  the read then); a re-point that lands between the read and the write it
+  allows is not seen by that write; and if the read has not answered
   within 2 seconds the save goes ahead without it and the journal says
   `state.json was not read back within ... ms of a save; saving without
-  the read`. (Up to and including 0.14.0 that next save wrote what the
+  the read`. In each of them a replacement is written over as before, and
+  a link re-pointed at a file that does not exist, or a folder link at a
+  folder with no `state.json`, gets a new one created there, holding your
+  sources and provider URLs, at 0644 under the usual umask 022 -- so after
+  re-pointing a link, check the new place with `ls -l` and `chmod 600` a
+  `state.json` you did not expect. (Up to and including 0.14.1 that next
+  save wrote what the
   shell held over the change instead -- into the new file, after `ln
   -sfn` -- and a link pointed at a file that did not exist yet got a new
   `state.json` there holding your sources and provider URLs, with
@@ -898,18 +912,20 @@ Nothing inside the plugin directory is written at runtime.
   shows and saves to from then on; the folder the link used to lead to is
   left as it was. The file keeps the permissions it has until the next
   shell start makes the folder 0700 and the file 0600. If the new folder
-  holds no `state.json` (an empty folder, say), nothing is created there:
-  the plugin stops saving, and says so once (**Saved sources not loaded**,
-  `... could not be found, or its folder could not be read ...`). The
-  change you just made still shows, and its source change answered as
-  done, but it is not kept, and the next source change is refused with
-  `state.json could not be read · nothing is saved until it can be`.
-  Point the link back and the next save (or the second source change)
-  picks your file up again and saving resumes; or
+  holds no `state.json` (an empty folder, say), nothing is created there,
+  outside the three windows the bullet above names: the plugin stops
+  saving, and says so once (**Saved sources not loaded**, `... could not
+  be found, or its folder could not be read ...`). The change you just
+  made still shows, and its source change answered as done, but it is not
+  saved while the link points there, and the next source change is
+  refused with `state.json could not be read · nothing is saved until it
+  can be`. Point the link back and the next save (or the second source
+  change) picks your file up again, writes into it the change you made
+  meanwhile, and saving resumes; or
   restart the shell -- after a restart the folder the link leads to NOW is
   what loads, so an empty one starts with no sources, like a fresh
   install, until you point the link back and restart again. (Up to and
-  including 0.14.0 the next save after a re-point wrote what the shell
+  including 0.14.1 the next save after a re-point wrote what the shell
   held into the new folder: over its `state.json` if it had one, and into
   a new one if it did not -- holding your sources and provider URLs, with
   permissions that let other accounts read it (0644 under the usual umask
@@ -935,7 +951,9 @@ Nothing inside the plugin directory is written at runtime.
   it takes them -- a backup you put back wins over what the guide had
   saved, even when it is a copy of the plugin's own file from earlier in
   the session -- and when it has a change of its own not saved yet (a save
-  still under way, or one that failed) it keeps both sides: your new
+  that failed, or one still waiting to be written) it keeps both sides,
+  except in the instant its own save is being written (the limit at the
+  end of this bullet): your new
   favourite AND the source a `state source add` just added, say. Where both
   changed the same source, or the same setting (which source is active,
   the recent list), the other program's version wins, because it was
@@ -966,10 +984,14 @@ Nothing inside the plugin directory is written at runtime.
   has, the first session after a fresh install included: up to and
   including 0.13.6 that first session never noticed the file change at all,
   so a `state` command run in it was not seen and the next save wrote over
-  it. One limit: a hand edit written in the same instant as one of the
-  plugin's own saves has not been tested, so assume that save can replace
-  it. Edit the file by hand with the shell stopped, keep a copy first (it
-  holds your provider URLs), then `omarchy restart shell`.
+  it. One limit: a change ANY other program writes in the same instant as
+  one of the plugin's own saves -- a hand edit, a helper `state` command,
+  a backup put back -- can be lost: the plugin's save lands over it, and
+  the shell's file reader does not re-read the file while that save is
+  being written (measured), so the plugin never sees it. Nothing in the
+  plugin can lock the file against another program. Edit the file by hand
+  with the shell stopped, keep a copy first (it holds your provider URLs),
+  then `omarchy restart shell`.
 - `state.json is not a valid state file; nothing was written` (or `state.json
   could not be read (...); nothing was written`, `state.json is not a
   regular file; nothing was written`, `state.json is a symbolic link whose
