@@ -108,7 +108,9 @@ counted: **two files, both the plugin's own, readable only by you** —
 source's URLs and which source is active, and the channel cache under
 `~/.cache/omarchy-iptv/sources/<key>/`, whose `channels.json` carries the
 stream addresses — each created mode 0600 inside a directory only you can
-enter. They are never shown or logged beyond their host name. The shell's
+enter (one exception, three windows of a few milliseconds in which a save can
+create `state.json` at your umask's mode, usually 0644, until the next shell
+start corrects it, is under Troubleshooting). They are never shown or logged beyond their host name. The shell's
 `shell.json` is **no longer one of them**. Up to and including 0.13.6 the
 active source was identified by its URL on that entry, so the count was three
 and the third was a file the plugin does not own; now the entry carries a short
@@ -676,14 +678,19 @@ itself unavailable rather than half working.
   back, even a copy of the plugin's own file taken earlier -- the plugin
   re-reads it and keeps both its own unsaved changes and the other
   program's (Troubleshooting says what happens when both changed the same
-  thing, or together went past a limit). It may be a symbolic link to a
+  thing, or together went past a limit, and the one case where the other
+  program's change is lost: one written in the same instant as one of the
+  plugin's own saves). It may be a symbolic link to a
   regular file kept elsewhere, a dotfiles folder say: the plugin and its
   helper write through the link and leave it in place, and a link that
-  leads nowhere is refused rather than replaced. A tool that REPLACES the
+  leads nowhere is refused rather than replaced (except in the three narrow
+  windows Troubleshooting names, where a save can create the file it points
+  to). A tool that REPLACES the
   link, or puts a file over it, while the shell is running is not noticed
   at once; the plugin reads the file again before each save it makes, so it
-  notices at its next save and keeps both that change and its own
-  (Troubleshooting says what is noticed, when, and what to do). The folder
+  notices at its next save and keeps both that change and its own, unless
+  the two land in the same instant (Troubleshooting says what is noticed,
+  when, and what to do). The folder
   `~/.local/state/omarchy-iptv` may be a symbolic link too: the plugin
   follows it and makes the folder it leads to private (0700), as it does
   its own, and a folder link that leads nowhere is refused the same way.
@@ -783,12 +790,14 @@ Nothing inside the plugin directory is written at runtime.
   that are not a state file -- or
   the plugin's start-up check of it did not answer within 15 seconds and was
   stopped. The plugin has not changed the file and will write nothing to
-  it this session, because it may be the only copy of your sources and
+  it until it can be read again, because it may be the only copy of your sources and
   provider URLs; earlier versions read such a file as empty and saved an
   empty one over it. Adding, editing, switching or removing a source, and
   turning channel logos on or off, answers `state.json could not be read ·
   nothing is saved until it can be`. A favourite, a hidden group or a saved
-  search still changes on screen, but is not kept. The Sources screen (`o`)
+  search still changes on screen, but is not saved while this lasts: when
+  this began while the shell was already running it is saved once the file
+  can be read again, and at a start it is not kept. The Sources screen (`o`)
   shows the same title where it would count your sources -- or, when this
   started while the shell was already running and your sources are still
   listed, `Saving has stopped` -- offers no `Add source` or `Add Xtream
