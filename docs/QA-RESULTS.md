@@ -13315,6 +13315,32 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### 0.14.1: the release record (D-LOGO-13 shipped)
+
+**Cut 2026-10-16 on the owner's word ("cut 0.14.1 but make sure to update
+changelog date to today").** The CHANGELOG heading was re-dated from
+2026-10-15 to 2026-10-16 (e33ff0a); since the live run of 2026-10-15 that
+line was the only shipped change (`git diff --stat c4c7a3e e33ff0a` over the
+allowlist). The gate read all green on e33ff0a: python 1,229, logo preflight
+33, key preflight 11, the allowlist 31 files, the helper 445,263 of 458,752
+bytes. The recipe's live step was run again on e33ff0a, under the nested
+headless cage on a private bus: `key-scenario.sh live` **120 passed, 0
+failed** in 422.7 s (transcript `key-20261016-182506-1464746`; no cage left
+afterwards). `release.py build --gate-already-green --trailer
+"Co-Authored-By: ..."` on `dev` e33ff0a wrote `main` bf075caa7fe8b7cec4e4cf69a9d82b1832760358
+(parent bfe964d, tag `v0.14.1`, 31 files; the build's own `omarchy plugin
+validate` passed). The artifact, checked: 31 files, version 0.14.1, the
+heading dated 2026-10-16, the README status v0.14.1, `bin/omarchy-iptv` mode
+100755, identical to `dev`'s and carrying `canonical_png`. `dev`, `main` and
+the tag were pushed (e6abcc5..e33ff0a, bfe964d..bf075ca, the new tag), and
+the remote `main` and `v0.14.1^{}` both read bf075ca.
+
+**Not done, each waiting on the owner's word:** the verification request
+(its form, below, now carries the target), the comment on #11602, the live
+install (still 0.14.0), and the merge of `lane-helper-split` (D-REL-7),
+which the owner held on 2026-10-16. #11602 is stale for update validation
+now that `main` has moved, and we never close it (F-M3-4).
+
 ### 0.14.1: prepared, not cut
 
 **Prepared 2026-10-15 on `dev`, for D-LOGO-13 alone; not cut, by
@@ -13353,13 +13379,14 @@ is never closed by us.
 **Drafts for the owner, NOT posted.** The new request, in #11602's form
 (`[Verify]: IPTV 0.14.1`): verification action "Verify and publish a newer
 upstream commit", plugin `io.github.rmcdavid.iptv`, repository
-https://github.com/rmcdavid/omarchy-iptv, target commit the full SHA of
-`v0.14.1^{commit}` once `release.py build` has written it and it is checked
-equal to the remote `main`, both acknowledgments ticked. Then, on #11602,
+https://github.com/rmcdavid/omarchy-iptv, target commit
+`bf075caa7fe8b7cec4e4cf69a9d82b1832760358` (`v0.14.1^{commit}`, checked equal to the remote
+`main` on 2026-10-16), both acknowledgments ticked. Then, on #11602,
 with the new request's number and commit filled in:
 
 > The finding raised on #11315, which applies unchanged to 0.14.0 here, is
-> addressed in 0.14.1, filed for verification as #NNNNN at `<full sha>`.
+> addressed in 0.14.1, filed for verification as #NNNNN at
+> `bf075caa7fe8b7cec4e4cf69a9d82b1832760358`.
 >
 > The helper no longer caches a provider's PNG as it arrives. After the
 > existing type, magic and dimension checks, `write_logo` rewrites every PNG
