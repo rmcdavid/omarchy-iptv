@@ -181,8 +181,11 @@ def load_helper(path=None):
     `bin/__pycache__` into the tree (CLAUDE.md "Never touch").
 
     `path` points it at ANOTHER helper, which is how rule 11 is served here:
-    `git show <rev>:bin/omarchy-iptv > /tmp/old` and grade the pairing the
-    code made before a change.
+    `git show <rev>:bin/omarchy-iptv > /tmp/old` for a revision before
+    D-REL-7, and for a later one `git archive <rev> bin | tar -x -C /tmp/old`
+    and `/tmp/old/bin/omarchy-iptv` (the helper is a stub that loads its parts
+    from `bin/helper/` beside it); then grade the pairing the code made before
+    a change.
     """
     sys.dont_write_bytecode = True
     import importlib.machinery

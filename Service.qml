@@ -921,7 +921,7 @@ Item {
   readonly property int pipSnapshotRequestId: 3
   // And 4 asks the player for its own pid. G-2 proved mpv's `pid` property
   // is the pid Hyprland reports for the window, with no wrapper process in
-  // between; the helper resolves it the same way (bin/omarchy-iptv:3029).
+  // between; the helper's `find_player` finds the same process by its argv.
   // Taken over the player's own private socket rather than out of a helper
   // reply, because that one connection covers all three ways a player
   // becomes ours - a cold start, a respawn, and a reattach after

@@ -59,10 +59,11 @@ def shield_environment():
 
     This fixture sits between the service and the helper and INHERITS the
     helper's environment, OMARCHY_IPTV_URL and its credentials with it. The
-    real helper shields itself within about 105 ms of exec; this one sleeps
+    real helper shields itself within about 30 ms of exec since it became a
+    stub and its parts (D-REL-7; about 105 ms as one file); this one sleeps
     for seconds on purpose, so leaving it dumpable would turn a measured
-    105 ms window into a measured four-second one and re-open the sink the
-    helper closed -- in a fixture a scenario runs on the owner's own
+    window of milliseconds into a measured four-second one and re-open the
+    sink the helper closed -- in a fixture a scenario runs on the owner's own
     machine. The review of the F-RWD-18 round found it. prctl(PR_SET_DUMPABLE,
     0) is what the helper calls; it is in ctypes, which is why the import
     below is the only one above this line."""

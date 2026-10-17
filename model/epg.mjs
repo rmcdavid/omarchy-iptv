@@ -241,7 +241,7 @@ function epgEpisodeText(value) {
 // "the one cap", which is wrong in a way that matters to anyone reasoning
 // about the worst case. The helper has already capped the same three fields
 // before they are written to epg-now.json: EPG_MAX_DESC = 400,
-// EPG_MAX_CATEGORY = 48, EPG_MAX_EPISODE = 32 (bin/omarchy-iptv:234-236,
+// EPG_MAX_CATEGORY = 48, EPG_MAX_EPISODE = 32 (constants in the helper,
 // applied in clean_detail). Those are the ones that BIND on any record this
 // plugin produces -- 600 never does -- so the 20,000 character case the node
 // suite exercises can only arrive from a cache this plugin did not write, or

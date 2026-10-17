@@ -13315,6 +13315,193 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### D-REL-7: the helper split, rebuilt on today's dev
+
+**2026-10-17, branch `lane-split-s1` from `dev` 1ecfd9d (0.14.2 released as
+`main` 85206f2), on the owner's three decisions of 2026-10-15** (one
+namespace, the eleven parts under `bin/helper/`, after the cut, which the
+owner later moved to after 0.14.2). Not on `dev`; nothing released. The
+first build (`lane-helper-split`, 38f12eb and e73cdce) was cut from 1c88877,
+before 0.14.1; since then the helper gained D-LOGO-13, D-LOGO-14 and D-EPG-6
+and reached 447,660 of the 458,752 bytes `release.py` allows a shipped file.
+
+**The cut, made again rather than merged.** Every banner `CUTS` names still
+starts exactly one line of 1ecfd9d's helper and in order (lines 1166 to
+8550), so the list did not change. `scripts/split-helper.py --write
+--from-git 1ecfd9d` wrote the stub and the parts and `--verify --from-git
+1ecfd9d` on the mechanical commit b80c7ff reads clean: every file byte for
+byte the cut, the stub's head and tail and the parts without their headers
+reassembling 1ecfd9d's `bin/omarchy-iptv` exactly. Against the first build's
+parts, three differ, by exactly the 68 lines dev added since 1c88877
+(`03-io-playlist.py` +45, `04-epg.py` 1 changed, `05-ipc-logos.py` +22 / -9);
+the other eight are identical. The one change to the generated text: the
+loader's comment says the helper had grown to 447 KB, not 445. The
+documents commit after it edits the stub's shield docstring (the figures
+below), so the verify is pinned to b80c7ff, as the first build's was to
+38f12eb.
+
+| file | bytes |
+|---|---|
+| `bin/omarchy-iptv` (stub) | 6,445 at b80c7ff; 6,502 with the docstring's new figures |
+| `bin/helper/01-core.py` | 56,389 |
+| `bin/helper/02-sources.py` | 36,503 |
+| `bin/helper/03-io-playlist.py` | 23,627 |
+| `bin/helper/04-epg.py` | 56,180 |
+| `bin/helper/05-ipc-logos.py` | 42,179 |
+| `bin/helper/06-failed.py` | 20,095 |
+| `bin/helper/07-player.py` | 45,346 |
+| `bin/helper/08-player-verbs.py` | 70,864 (the largest part) |
+| `bin/helper/09-cache.py` | 15,926 |
+| `bin/helper/10-state.py` | 44,319 |
+| `bin/helper/11-cli.py` | 34,338 |
+
+`release.py check`: 42 files, the largest shipped file `Service.qml` at
+323,805 of 458,752 bytes.
+
+**What came over from the first build, conflicts resolved toward dev.**
+`scripts/split-helper.py`, `scripts/helper_files.py`, `tests/test_split_helper.py`,
+`release.py` (the eleven parts on `ALLOWLIST`, the `HELPER_PARTS` resolver,
+the parts in the citation scan, the subcommand list from the whole helper),
+the gate's new "helper split" step, `qa_helper_parts` and its eight
+predicate cases, the slow-helper trees of `key-scenario.sh` and
+`rewind-scenario.sh`, the four text readers (`test_state`, `test_release`,
+`test_shipped_copy`, the node GS11 pins), the EPG oracle's recipe, and the
+two shipped comments that cited helper line numbers. The two conflicts were
+counts: the python floor 1240 -> 1272 (dev's D-LOGO-14 / D-EPG-6 eleven
+kept, the first build's thirty-two added) and `qa-lib-test.sh`'s EXPECTED
+505 -> 513 (the cleanup round's counts kept, `qa_helper_parts`'s eight
+added). One placement was wrong in the first build and is fixed: its
+`qa_helper_parts` block sat inside the `qa_model_files` section, between
+that section's last two checks. And one sentence: CLAUDE.md's helper
+paragraph had been put between the model's coding rules and "Two of those
+rules are measured hazards under Quickshell", which then read as the
+helper's; it now follows that sentence.
+
+**Seen red on today's tree (rules 10 and 11).**
+- The resolver: `tests/test_release.py` against dev's `release.py` on the
+  split tree, in a scratch git copy: 66 run, **9 failed** (the five new
+  cases and the four whose doubles moved into the parser part). Dev's
+  `release.py check` on that tree reads **green at 31 files**, and the
+  31-file artifact's stub, run with `python3 -I`, answers
+  `omarchy-iptv: cannot read bin/helper/01-core.py (No such file or
+  directory); reinstall the plugin`, exit 1: the failure the resolver exists
+  for.
+- The split script, its loader and `scripts/helper_files.py`: **24 of 24
+  one-decision mutants killed** by `tests/test_split_helper.py` (the first
+  part's boundary; banner uniqueness and order; the loader's place in the
+  cut; `--write`'s refusal; verify's byte compare and stray detection; each
+  `--check` rule -- a one-file helper, the generated block, its place after
+  the shield, a missing part, the header, compiling, a stray; the loader's
+  one-line refusal, its one namespace, every part rather than all but the
+  last; and the reader's refusals of a doubled name, a path, a second
+  assignment, an empty tuple and an evaluated expression, its copy's rename
+  and its whole-helper source). The three loader mutants are also red
+  through `test_the_tree_checks_clean`, because the tree's stub stops
+  matching the generated block; each is red through a synthetic case as
+  well, except the whole-helper source, whose one red is the tree case.
+- `qa_helper_parts`: **5 of 5 mutants killed** by `scripts/qa-lib-test.sh`
+  (a missing part, an empty block, a one-file helper, no helper, every part
+  printed), each 511 or 512 of 513.
+- The four text readers, each put back in its one-file form on the split
+  tree: `test_state` `0 != 1` on `int(float(`; the node suite's GS11 pin
+  fails; `test_release`'s `test_the_scan_catches_every_line_that_actually_shipped`
+  fails; `test_shipped_copy` without `.py` fails its coverage case, and a
+  planted `"set playlistUrl in the bar"` in a part is caught only with the
+  `.py` it now scans.
+
+**Runtime, from a 42-file export of b80c7ff.** Every helper argv the service
+builds, generated by the export's own `Model.mjs` builders and run with
+`python3 -I` under a scratch HOME and XDG directories, a stub `mpv`
+(`scripts/qa-stub-mpv.py`) and a stub `wl-paste`: the help, `--version`,
+`state init`, `cache migrate`, the playlist probe and fetch (URL in the
+environment), the EPG fetch and `--now-only`, `logos --fetch`, `failed`
+mark and clear, `config shield`, `clipboard`, `player` probe, start, pause,
+seek by and to live, tracks, orphan-check, restart and stop, the legacy
+`play`, `cache epg-clear` and `prune`, and the README's `state show`,
+`favorite add`, `source list`, `logos`, `failed list`, `cache logos-clear`
+and `remove`: 33 runs, all exit 0, no traceback. Afterwards the export held
+the same 46 entries (42 files, 4 directories) and nothing else: no
+`__pycache__`, no `.pyc`, nothing off the allowlist. Both stub players the
+helper started were gone after its own `player stop`. With
+`07-player.py` removed from a copy: `omarchy-iptv: cannot read
+bin/helper/07-player.py (No such file or directory); reinstall the plugin`,
+one stderr line, nothing on stdout, exit 1.
+
+**Live, each under a nested headless cage on a private bus
+(`private-bus.sh`; the cage scenarios as the cage's child, key-scenario in
+its own), the split (b80c7ff) and 1ecfd9d interleaved, the load average
+2.3-3.6 at each start except where noted.** Transcripts are 0600 copies in the lane's
+scratch.
+
+| scenario | split | 1ecfd9d |
+|---|---|---|
+| sources | 66 / 0 | 66 / 0 |
+| argv | 7 / 0; S4b 61 ms (per fetch 0, 61, 0, 59; bound 723) | 7 / 0; S4b 192 ms (192, 122, 126, 122; bound 795) |
+| logo live | 33 / 0 | 33 / 0 |
+| player (gles2) | 76 / 9, twice | 64 / 23, then 76 / 9 |
+| rewind (gles2) | 104 / 10 at load 5.1, then 110 / 4 twice | 109 / 5, then 110 / 4 twice |
+| key live | 129 / 0 in 493.9 s | 129 / 0 in 497.4 s |
+
+The player's nine are the same nine on both trees in the paired runs, every
+one a window check (`hyprctl clients` sees no window inside a headless cage,
+and the runs had `HYPRLAND_INSTANCE_SIGNATURE` unset so nothing could reach
+the live compositor); 1ecfd9d's first 64 / 23 added P10 and P11 under a
+run that took 266 s against 125 s. The rewind's four are the same four on
+both trees in the four later runs: R13 and R14, which hold `b` down through
+`wtype` into a guide window that never maps under cage (no layer-shell,
+docs/SPIKE-CAGE-HEADLESS.md). The split's one 104 / 10 started at a load
+average of 5.08 and failed its own first positive control (the player
+playing A) before the rest; the six reruns did not repeat it. R16, the
+slow-helper tree that now copies the parts beside `omarchy-iptv.real`,
+passed on all three split runs (22 of 22 each), as did key-scenario's
+slow-tree segments.
+
+**The window (D-SINK-9), by the method HELPER-SPLIT.md names.** A same-uid
+reader polls `/proc/<pid>/environ` every 0.2 ms from the moment `Popen`
+returns, and the window is the last read that still held
+`OMARCHY_IPTV_URL`; the child is the `playlist` fetch verb with the URL in
+its environment, as the service runs it, over a local file. 12 runs per
+tree per pass, the order alternating, twice, load average 3.06-3.65:
+
+| | pass 1 median (range) | pass 2 median (range) | refused | to exit, median |
+|---|---|---|---|---|
+| 1ecfd9d, one file | 148.4 ms (141.8-164.0) | 148.2 ms (136.8-160.4) | 24 / 24 | 264, 266 ms |
+| split | 27.0 ms (23.2-40.1) | 27.1 ms (22.9-37.0) | 24 / 24 | 242, 242 ms |
+
+The first build measured 24.7-33.7 ms against 129-156 ms under a load of
+about 3. The argv scenario's S4b, at 50 ms sampling, caught the split
+helper unshielded on two of four fetches (59 and 61 ms) where the first
+build's run read 0 on all four. A sampler at 50 ms catches a window of
+about 30 ms only when a sample lands inside it, so S4b reads 0 or one
+sample's worth run to run; it bounds the window against an in-run control,
+not an absolute number, and both trees passed it.
+
+**The search (rule 15): what landed on dev after the first build and
+treats the helper as one file.** Over 1c88877..1ecfd9d (16 commits, 48
+files): the D-LOGO-14 and D-EPG-6 tests (`test_logo_dimensions.py`,
+`test_epg.py`) call the helper's functions through `helper_loader`, never
+its text; the cleanup round's harness (`key-scenario.sh` B23-B31,
+`run.sh`'s reap, the chno and key mutation patches) runs the helper by path
+or not at all, and no mutation patch under `spikes/` targets
+`bin/omarchy-iptv`; `key-scenario.sh`'s `git show v0.13.6:bin/omarchy-iptv`
+names a release before the split and stays right. Across the whole tree,
+every other copy of the helper is a `git archive` of the whole tree (the
+`--baseline` exports of argv, key, logo, clip, m3, player, rewind, text and
+tls, and `qa-player-scenarios.sh`'s) and carries the parts; `player-scenario.sh`'s `pgrep -f "bin/omarchy-iptv
+player start"` matches the stub's command line, which is unchanged;
+`slow-helper.py` and `disk-gone-after-init.py` exec or load
+`omarchy-iptv.real` beside the copied parts. Line citations of the helper
+outside `docs/`: one, in a `test_release.py` comment pinned to 1ebbc5b, which
+is history. Stale window figures: `slow-helper.py`'s "within about 105 ms"
+(updated), and the 0.9.2 CHANGELOG entry's "tenth of a second", which is the
+notes of a release that shipped that way and stays.
+
+**The gate.** `./scripts/check.sh` all green on the commit that carries
+this record: python 1,272 (floor from 1,240), node 2,565 (unchanged), qml 78,
+harness predicates 513 (from 505), "helper split (11 parts, largest
+08-player-verbs.py at 70864 bytes; the stub 6502 bytes)", the allowlist at
+42 files, the capability scan 0 hits over 110 files.
+
 ### 0.14.2: the release record (D-LOGO-14, D-EPG-6 and the cleanup round shipped)
 
 **Cut on the owner's word, 2026-10-17** ("Cut 0.14.2 (release.py build,

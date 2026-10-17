@@ -247,10 +247,10 @@ One place they can escape that, worth knowing, and one that used to:
   then refuses to everyone but root -- not other accounts, and not other
   programs running as you either -- before it loads anything else. The
   moment between the helper starting and that point is the only window
-  left: about a tenth of a second on an idle machine, longer on a busy one,
-  and readable in that moment by programs running as you alone, never by
-  other accounts. The helper's command line no longer
-  carries it. That is true of all three fetches that take a URL -- your
+  left: about three hundredths of a second, measured with other work
+  running, and longer on a busier machine, readable in that moment by
+  programs running as you alone, never by other accounts. The helper's
+  command line no longer carries it. That is true of all three fetches that take a URL -- your
   playlist, your guide data, and the check the Sources screen makes before it
   accepts a source. Nothing else on the plugin's side writes
   either URL anywhere but the two files of its own named above; the shell's

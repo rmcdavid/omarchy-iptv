@@ -37,8 +37,9 @@ the twelve days it sat on v0.7.1 are explained in the decisions log.
 ## Branches: `dev` is the tree, `main` is the artifact
 
 You are on `dev`. Everything is here. `main` holds ONLY the install artifact:
-the files in `ALLOWLIST` in `scripts/release.py` (31 since D-REL-5 split the
-model into `Model.mjs` and `model/`), exported from a
+the files in `ALLOWLIST` in `scripts/release.py` (42 since D-REL-5 split the
+model into `Model.mjs` and `model/` and D-REL-7 split the helper into
+`bin/omarchy-iptv` and `bin/helper/`), exported from a
 clean, green `dev` by `scripts/release.py build`, committed onto `main` with
 its previous tip as parent, and tagged. Nobody commits to `main` by hand, and
 nothing is ever pushed to `main` except the output of that script.
@@ -60,6 +61,9 @@ Consequences you must respect:
   branch by URL. The gate rejects a bare `docs/...` in the README.
 - Adding a file the plugin needs at runtime means adding it to `ALLOWLIST`,
   or the release ships broken. The gate catches an import it cannot find.
+  A new helper part goes into the stub's `HELPER_PARTS` and into `ALLOWLIST`
+  together: `release.py check` refuses a part the stub loads that does not
+  ship, and one that ships that the stub does not load (D-REL-7).
 - `main` must stay linear: `omarchy-plugin-update` is `git merge --ff-only`,
   so a force-push to `main` strands every install. Never rewrite it. A GitHub
   ruleset (`main-is-the-artifact`, #23743896) enforces this on the remote --
@@ -190,17 +194,21 @@ requests and raise the batch.
      its whole environment to systemd-coredump, durably, in the journal).
      Measured both ways on 2026-10-01. What remains is the window between
      exec and the shield, which sits before every import but `sys`: the
-     interpreter starting and compiling a 5,000-line file. It is CPU-bound,
-     so it scales with load -- 98-113 ms idle at sub-millisecond resolution,
-     median 105 over twelve runs (about 125 ms when the shield sat below
-     the stdlib imports, which is where the first version put it while
-     calling it the first statement), 264-634 ms with the cores oversubscribed twice over -- and
-     it is NOT the floor: a split stub that shields before compiling the
-     body reaches about 25 ms. An earlier version of this rule said nothing
-     a child does can shorten it; that was false by about five times.
+     interpreter starting and compiling what precedes the shield. It is
+     CPU-bound, so it scales with load. With the whole helper in one file it
+     was 98-113 ms idle at sub-millisecond resolution, median 105 over twelve
+     runs (about 125 ms when the shield sat below the stdlib imports, which
+     is where the first version put it while calling it the first
+     statement), 264-634 ms with the cores oversubscribed twice over. Since
+     D-REL-7 the helper is a 6 KB stub that shields and only then compiles
+     the parts, and the window is 22.9-40.1 ms (medians 27.0 and 27.1)
+     against 136.8-164.0 ms (medians 148.4 and 148.2) for 0.14.2's one-file
+     helper, 12 interleaved runs each, twice, under a load average of 3.1-3.7
+     (2026-10-17, QA-RESULTS "D-REL-7: the helper split, rebuilt on today's
+     dev"). An earlier version of this rule said
+     nothing a child does can shorten it; that was false by about five times.
      Readable in that window by same-uid processes only. State it as a
-     bounded, measured window under a stated load, never as zero and never
-     as unshortenable. The fetch verbs start no child process,
+     bounded, measured window under a stated load, never as zero. The fetch verbs start no child process,
      so nothing inherits the variable -- the helper forks mpv only in
      `player start`, on a Process the service never hands this environment;
      keep BOTH halves that way. In QML, assign
@@ -730,11 +738,26 @@ file under 448 KiB, executables included. Edit the part a declaration
 belongs in, then `node scripts/split-model.mjs --relink` rewrites the
 generated import and export lines and `--check`, which the gate runs, judges
 the tree; `docs/ARCHITECTURE.md` section 9 holds the model's coding rules and
-how a new public name or a new part is added. Two of those rules are
+how a new public name or a new part is added.
+Two of those rules are
 measured hazards under Quickshell that the script refuses: a part may not
 read another part's declaration in a top-level initializer (it reads
 `undefined`, silently, across an import cycle), and a `var` is declared
-above the first function in its part that names it. A rule implemented in both JavaScript and Python gets one
+above the first function in its part that names it.
+The helper went the same way for the same reason (D-REL-7, decided
+2026-10-15 and cut from 0.14.2's one-file helper on 2026-10-17,
+`docs/HELPER-SPLIT.md`): `bin/omarchy-iptv` is a stub that makes the process
+non-dumpable and then compiles `bin/helper/NN-*.py`, in the order of its
+`HELPER_PARTS`, into its OWN namespace, so the parts behave as the one file
+they were cut from -- one set of globals, one module a test patches. Edit the
+part a function belongs in. `scripts/split-helper.py --check`, which the gate
+runs, proves the loader is exactly what the list generates and sits directly
+after the shield, and that every part carries its header, compiles and is
+named; `release.py` proves the list and the allowlist agree. Anything that
+needs the helper's FILES reads the list from the stub
+(`scripts/helper_files.py`, `qa_helper_parts`); a copy of the stub alone is
+a helper that cannot start.
+A rule implemented in both JavaScript and Python gets one
 shared JSON fixture that both implementations run.
 
 ## Working in parallel

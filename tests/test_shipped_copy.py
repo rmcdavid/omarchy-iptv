@@ -38,7 +38,7 @@ SETTING = re.compile(r"\b(?:playlistUrl|epgUrl)\b")
 # An instruction: a verb a sentence would use to send the user to the
 # setting, or the command that sets it.
 INSTRUCTION = re.compile(r"\b(?:set|sets|check|configure|enter|edit|change|fix|update|use|try|run|paste|put)\b|bar set", re.I)
-CODE = (".qml", ".mjs", ".js", ".json", ".jsonc", ".lua")
+CODE = (".qml", ".mjs", ".js", ".json", ".jsonc", ".lua", ".py")
 COMMENT = ("//", "#", "*", "/*")
 
 
@@ -66,6 +66,8 @@ class ShippedCopyTest(unittest.TestCase):
         for rel in ("Guide.qml", "Service.qml", "BarWidget.qml", "bin/omarchy-iptv", "Model.mjs", "manifest.json"):
             self.assertIn(rel, files)
         self.assertTrue(any(rel.startswith("model/") for rel in files))
+        # D-REL-7: the helper's code is mostly in its parts.
+        self.assertTrue(any(rel.startswith("bin/helper/") for rel in files))
 
     def test_no_shipped_string_tells_the_user_to_set_a_retired_url_setting(self):
         found = []

@@ -268,7 +268,12 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2565}
 # GifCanvasTest (7), a GIF's canvas as its frames' edges over GIFs built in
 # the test, and EntityDeclarationTest (4), an XMLTV feed that declares an
 # entity refused and one that does not parsed as before.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1240}
+# 1240 -> 1272 on 2026-10-17, D-REL-7 landed on dev: tests/test_split_helper.py
+# (27), the split script's every decision and the stub's one-namespace
+# property over synthetic one-file helpers and this tree; and test_release's
+# five for the parts (the resolver both ways, an unreadable list, the parts as
+# shipped sources, the whole helper and nothing else under bin/ shipping).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1272}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -656,6 +661,23 @@ if command -v node >/dev/null 2>&1; then
   fi
 else
   bad "node not found; the model split cannot be checked"
+fi
+
+step "helper split (scripts/split-helper.py --check)"
+# D-REL-7. The helper is bin/omarchy-iptv, a stub that shields and then
+# compiles the parts its HELPER_PARTS names, from bin/helper/, into its own
+# namespace, so they run as the one file they were cut from. This proves the
+# tree as it stands: the list is a literal of distinct names (read the one way
+# every reader reads it, scripts/helper_files.py); the stub carries exactly
+# the loader those names generate, directly after the shield, so nothing is
+# compiled before the process is non-dumpable (D-SINK-9); every named part
+# starts with the generated header and compiles; and bin/helper/ holds
+# nothing the list leaves out. The release allowlist step below proves every
+# part ships, and the python suite runs the helper they make.
+if python3 "$ROOT/scripts/split-helper.py" --check --root "$ROOT" >"$CHECK_TMP/split-helper.log" 2>&1; then
+  ok "helper split ($(sed -n 's/^split-helper: check ok (\(.*\))$/\1/p' "$CHECK_TMP/split-helper.log" | head -1))"
+else
+  bad "helper split"; cat "$CHECK_TMP/split-helper.log"
 fi
 
 step "qmltestrunner tests/Model.spec.qml"

@@ -84,6 +84,31 @@ qa_model_count() {
   qa_count_multi "$ere" "${files[@]}"
 }
 
+# -------------------------------------------------------------- the helper
+
+# qa_helper_parts <plugin-root>
+# The helper's parts (D-REL-7), one absolute path per line, in the order the
+# stub compiles them: the names in its generated `HELPER_PARTS = (` block,
+# under bin/helper/. The list is read from the stub, never kept here, which
+# makes this the one reader of it in shell (scripts/helper_files.py is the one
+# in python, and qa-lib-test.sh proves the two agree on the real tree). The
+# block's exact shape is guaranteed by scripts/split-helper.py --check.
+# A tree from before the split -- a --baseline ref -- has a one-file helper,
+# no HELPER_PARTS, and no parts: nothing printed, exit 0, because a copy of
+# that stub alone is the whole helper. Exit 1 (and nothing printed) when the
+# stub is missing, when the block names nothing, or when a named part is not
+# there: a copy that leaves a part behind is a helper that cannot start.
+qa_helper_parts() {
+  local root=$1 rel
+  local -a parts=()
+  [[ -f $root/bin/omarchy-iptv ]] || return 1
+  grep -q '^HELPER_PARTS = ($' "$root/bin/omarchy-iptv" || return 0
+  mapfile -t parts < <(sed -n '/^HELPER_PARTS = ($/,/^)$/s/^    "\([0-9][0-9]-[a-z][a-z0-9-]*\.py\)",$/\1/p' "$root/bin/omarchy-iptv")
+  (( ${#parts[@]} > 0 )) || return 1
+  for rel in "${parts[@]}"; do [[ -f $root/bin/helper/$rel ]] || return 1; done
+  for rel in "${parts[@]}"; do printf '%s\n' "$root/bin/helper/$rel"; done
+}
+
 # ------------------------------------------------------------- sentinels
 
 # The tooling must never answer a question with the same value a healthy run
