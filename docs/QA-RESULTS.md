@@ -13335,11 +13335,41 @@ heading dated 2026-10-16, the README status v0.14.1, `bin/omarchy-iptv` mode
 the tag were pushed (e6abcc5..e33ff0a, bfe964d..bf075ca, the new tag), and
 the remote `main` and `v0.14.1^{}` both read bf075ca.
 
-**Not done, each waiting on the owner's word:** the verification request
-(its form, below, now carries the target), the comment on #11602, the live
-install (still 0.14.0), and the merge of `lane-helper-split` (D-REL-7),
-which the owner held on 2026-10-16. #11602 is stale for update validation
-now that `main` has moved, and we never close it (F-M3-4).
+**The request, the comment and the live install, on the owner's word the
+same evening** ("File the request and post the #11602 comment, then update
+my live install to 0.14.1 and restart the shell with omarchy-restart-shell,
+snapshotting shell.json and state.json first").
+omacom/omarchy-plugin-marketplace#11892, `[Verify]: IPTV 0.14.1`, filed in
+#11602's form with target `bf075caa7fe8b7cec4e4cf69a9d82b1832760358` (the
+remote `main` re-read first). Within a minute the bot's update validation
+passed (source, plugin set, compatibility at `bf075ca`) and its automated
+security baseline passed; the baseline record, decoded, reads `commitSha`
+bf075ca, `outcome` passed, `findings` [], `capabilities` [], baseline
+version 3. Labels `validated` and `plugin-update`. The drafted comment
+below, with #11892 and the SHA filled in, was posted on #11602, which stays
+open (F-M3-4) and is stale for update validation now that `main` has moved.
+
+The live install: pre-flight at `bfe964d` (0.14.0) with a clean tree, shell
+pid 2444067, the plugin answering 1,483 channels in 28 groups, logos off (0
+announced, `showLogos` false). `shell.json` (a1ab05bd52b4b482) and
+`state.json` (bb99aa407f5de3e3), both 0600, snapshotted as 0600 copies in a
+0700 directory, with key names and counts recorded and no value printed.
+`omarchy-plugin-update io.github.rmcdavid.iptv --yes` (rc 0) took the clone
+to `bf075ca`, clean, manifest 0.14.1; `omarchy-restart-shell` (rc 0). Within
+about 2 s the plugin answered from the new shell (pid 1564865): running and
+on disk 0.14.1, not stale, 1,483 channels, 28 groups. A status read between
+the update and the restart came back empty, most likely while the old shell
+reloaded the changed files; it was not investigated further. The journal
+since the restart: eleven lines, the host's launch and idle lines and the
+desktop portal's usual registration warning, no QML error, no plugin line,
+no provider host or credential-shaped string. Both files byte-identical to
+the snapshots afterwards and still 0600; the snapshots were then deleted.
+Logos being off, nothing touched the logo cache; read-only, with the shipping
+`canonical_png`, its 1,174 files are 1,105 PNGs (649 canonical, 456 carrying
+other chunks that the first logo fetch after logos are turned on will
+rewrite in place, none it would sweep) and 69 of the other types.
+
+**Still held by the owner:** the merge of `lane-helper-split` (D-REL-7).
 
 ### 0.14.1: prepared, not cut
 
