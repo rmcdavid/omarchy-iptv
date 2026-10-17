@@ -1,0 +1,13 @@
+diff --git a/Service.qml b/Service.qml
+index 0000000..0000000 100644
+--- a/Service.qml
++++ b/Service.qml
+@@ -5444,7 +5444,7 @@
+     // R26a: the read before a save is bounded. No load in 2 s: the save goes
+     // without it, as it did before R26 (counted, and one console line).
+     id: stateVerifyWatchdog
+-    interval: 2000
++    // MUTATION (lane F, F4): the declared bound removed (Qt's default, 1000 ms)
+     repeat: false
+     onTriggered: if (root.stateVerifyPending) root.finishStateVerify(true)
+   }

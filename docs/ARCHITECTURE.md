@@ -474,11 +474,95 @@ the caps, the state folder and the link's limit:
   re-arms the view; that lever is filed for a later release. The README
   says what is noticed and what to do (edit the target in place, or restart
   the shell straight after such a tool). The contract's seventh FileView
-  fact has the table.
+  fact has the table. [Round 16, R26a: fixed -- the lever is pulled before
+  every save; next amendment.]
 - The merge is observed live (R25d, F-HARNESS-26): key-scenario B19 (a held
   failed save, two hand edits in place and a helper write inside it, both
   in-app changes and the helper's favourite kept through a restart), and
   B21, the existing-folder session damaged after an own save.
+
+Amended 2026-10-16 (D-SINK-19 round 16, R26; lane-clean-a1, lane A). Read
+before write:
+- Every save reads first (R26a; closes D-SRC-29, D-SRC-40, D-SINK-21 and
+  its file-link twin; D-SRC-35 on the second call). The FileView's watch is
+  lost WITHOUT a signal when the path is replaced or re-pointed (the
+  contract's eighth fact), so the session's next save was the first it
+  learned of it, and it wrote memory over the change, over the other state
+  the link now named, or CREATED `state.json` in an empty re-pointed folder
+  at 0666 & ~umask, 0644 here, holding every source URL (D-SINK-21,
+  measured by the sink lane on 1c88877 and on 0.13.6). Now a save the gate
+  allows reloads `state.json` and waits for that load, which is decided by
+  the dispositions every load already has: the base -> written; a foreign
+  text -> merged (R24a), then written; not a state -> the R22 no-write mode,
+  nothing written, told once. `Model.stateSavePlan` decides each call --
+  join a read already out, park, refuse, verify, defer, write -- and
+  `Service.saveState` carries it out. The read is skipped while one of the
+  service's own writes is in flight (the view drops a reload then, measured
+  30 of 30, and the disk is that write); a load met during the read is
+  counted as `pre-save-<reason>`, so key-scenario's D3 and W3, which need a
+  genuine `save-parked` reload, are not satisfied by the read; and
+  `stateVerifyWatchdog` bounds it -- no load in 2 s, the save goes without
+  it, counted (`stateVerifyNoLoad`) and logged once. A refused save re-reads
+  too, unless the reason is `init-timeout`, and a source verb meeting the
+  mode asks for one reload (`Model.stateBlockRecheck`): that verb is refused
+  and, if the file is back, the next call lands (R26e: a verb answers when
+  its write is ISSUED; one the read then refuses is told by the R22
+  notification, and the next call answers `state_unreadable`). Cost: one
+  asynchronous reload per save, 6-11 ms at most on the real service over a
+  state of about 3 KB, and the GUI thread never blocks on file I/O (the
+  R23c / R24d stance; the blocking peek and the synchronous variant were
+  measured and not taken). Observed live by key-scenario B23-B29.
+- No write from inside a handler (R26b, D-SRC-46). A `setText` issued
+  inside `stateFile`'s own `onLoaded` writes the file and raises no `saved`
+  (measured 16 of 16), so after an R24a merge saved from inside its load
+  the session read a write in flight and a failed save for good (0.14.0
+  and 0.14.1).
+  Every write is now issued from a turn of its own (`Qt.callLater`):
+  `finishStateVerify` is entered only from `Qt.callLater` and the
+  watchdog's Timer, `saveDeferredState` only from `Qt.callLater`, and a call
+  from inside any of `stateFile`'s handlers is deferred (`stateInHandler`
+  counts the depth). `stateFile.setText` is the one FileView write in the
+  shipped files; it is reached from five handlers of three views
+  (`channelsFile`'s two, `playlistStatusFile`'s `onLoaded`, `stateFile`'s
+  own), every one through the plan's "write". Observed live by B30.
+- The double is the measured FileView (R26c, F-HARNESS-29): a `setText`
+  inside a load is silent, a created file is 0666 & ~umask, an existing
+  file keeps its mode, a replacement or a re-point raises nothing; and
+  (F-HARNESS-31, lane-clean-f1) the reload a foreign change raises while
+  one of our writes is in flight delivers nothing, so that change is lost
+  to our rename, as on the real view (30 of 30).
+- No periodic reload (R26d). A replacement with no save after it is
+  unseen until the next save or a restart (FRESH); nothing writes
+  meanwhile, so nothing is lost. A timer would leave a window of one
+  period in which a save still writes over the change or creates the
+  0644 file, and reads the file for ever (lane W: at 10 s, 360 reloads an
+  hour idle). B31 observes 0 loads in 30 s idle.
+- What remains, stated: three windows in which a save is still written
+  without a read that would have stopped it, so a replacement in the
+  window is written over and a path that has just lost its file (a link
+  re-pointed at a missing file, a folder link at an empty folder) gets the
+  file created at 0666 & ~umask, holding the URLs -- a save asked while
+  our previous write is in flight (its read skipped; the re-point landing
+  between the two renames); a re-point landing between the read's load
+  and the write it allows (the asynchronous write is issued from the next
+  turn); and the watchdog's save, which goes without its read, so a
+  replacement in that 2 s goes unseen as before R26 (a missing file
+  answers the read with `loadFailed` before the watchdog fires, so this
+  one needs a load that never comes). All three are reproduced through
+  the node double over the shipping `Service.qml` on lane-clean-f1 (both
+  hosts, both echo modes, `created:true mode:644 holdsUrl:true`; a control
+  re-point with no window `created:false blocked:[absent]`) and by the
+  round-16 data-loss lens's simulator (identically on 0.14.0); none is
+  driven live. The watchdog's 2 s itself is pinned since lane-clean-f1
+  (node "the read's bound is 2 s", red on `interval: 20` and with the line
+  deleted). A change another program lands in the same instant as one of
+  our writes is lost (F-HARNESS-31: the view drops the reload it raises).
+  A 0644 file the user put at the path is written into at its own mode
+  until the next start's `state init` makes it 0600. And D-SRC-47: R25a's
+  own-write record keeps eight texts, so a burst of more than eight writes
+  a turn apart while the first is in flight can push the first out and
+  read its echo as foreign (lane A, found while re-levelling R13; the id
+  given on lane-clean-f1).
 
 ### mpv status (helper `status` stdout, M1 target)
 
@@ -2720,6 +2804,27 @@ Performance budget (10k channels):
    change what the user's link points at without saying so -- and said in the
    README. A folder link that dangles or leads to anything but a folder is
    refused and nothing is written (R25c).]
+   [2026-10-16, round 16, R26a (D-SINK-21): "state is 0600" was not kept by
+   the service's own save. A FileView save that CREATES its file creates it
+   0666 & ~umask -- 0644 at the shell's umask 022 -- whatever `atomicWrites`
+   says (measured); the helper writes 0600, and its start-up `state init`
+   repairs the mode once per start, but the service's own save is the
+   view's. So a state-folder link
+   re-pointed mid-session at an empty folder, or a `state.json` link
+   re-pointed at a file that did not exist yet, got a 0644 `state.json`
+   holding every source URL at the next save, unnoticed (measured on
+   1c88877 and 0.13.6; readable by another account only where the folders
+   above it can be entered -- not inside this machine's 0700 home). Since
+   R26a every save reads `state.json` first and a load that finds nothing
+   refuses the save (the R22 `absent` mode), so the service never asks the
+   view to create the file -- outside three windows of milliseconds (a
+   save asked while our previous write is in flight skips its read; a
+   re-point landing between the read's load and the write; the 2 s
+   watchdog firing), in which it still does (section 5's round-16
+   amendment, "What remains"; lane-clean-f1). A save over an existing file keeps that file's
+   mode, so a re-pointed folder holding a 0644 `state.json` keeps 0644
+   until the next start makes it 0600 (measured by the sink lane through a
+   restart).]
 6. No symlinks in the repo (validator rejects them); no sudo, no pkexec, no
    network from QML.
 7. Credentials: never printed; `sourceHost` instead of URL in caches and
@@ -3057,7 +3162,11 @@ Manual QA on the live shell (QA role, machine of record):
    is seen" holds for a rename onto the watched file's own path. With
    `state.json` a symlink, a rename or any replacement at the LINK's path is
    never seen, nor anything after it (R25e, D-SRC-29; section 5's round-15
-   amendment); filed, and stated in the README.]
+   amendment); filed, and stated in the README.] [2026-10-16, round 16
+   (R26a): the service now reloads `stateFile` before every save, so such a
+   replacement is decided at the next save and the watch is re-armed by
+   that reload; a periodic reload is refused (R26d). Section 5's round-16
+   amendment.]
 2. FileView writes into a missing directory: `mkdirProc` creates the three
    directories at service start (argv `mkdir -p -m 700`). Do not call
    `saveState()` before it has run (first user action is always later). [2026-10-14, round 14: and a FileView

@@ -5517,3 +5517,370 @@ board's ids are the lead's).**
   cites "16 of 2491", a count from before the tip's 2,502).
 - The round-14 open questions (1)-(6) stand as asked; (7) and (8) are
   answered above (D-SRC-38, B21).
+
+### D-SINK-19 round 16 rulings (lead, 2026-10-16; R26, on top of R1-R25, which stand)
+
+**What phase 1 of the clean-up found (three lanes, 2026-10-15 and
+2026-10-16, each in a nested headless cage on a private D-Bus).**
+- The sink lane (S) measured D-SINK-21 real, on the real `Service.qml` at
+  dev 1c88877 (whose `Service.qml` is 0.14.0's byte for byte) and on 0.13.6
+  (7c571a9): the state-folder link re-pointed while the shell ran at an
+  EMPTY folder made by plain `mkdir` (0755), then one in-app label change --
+  a new `state.json` at 0644, owner the user, holding the session's whole
+  state with a source's credentialed guide URL, the folder left 0755, and
+  nothing told (no block, no failed save, no notification, no journal
+  line); a second save kept it 0644; the next start made the folder 0700
+  and the file 0600. Its sibling (rule 15): a `state.json` LINK re-pointed
+  at a file that did not exist yet, in an existing 0755 folder -- the save
+  created the target at 0644 with the credential, on both trees. Who can
+  read it: another account only through folders it can enter -- not inside
+  this machine's 0700 home (`HOME_MODE 0700`, the user's group has no other
+  members); not tried as another uid, which needs sudo. A bare FileView
+  creates a missing file at 0666 & ~umask whatever `atomicWrites` says and
+  keeps an existing file's mode; the user's shell runs at umask 0022. The
+  lane measured a blocking peek (a second FileView, `blockLoading`, waited
+  on inside `saveState`) closing both routes: 3 of 3 sink checks green
+  where both shipped trees read 0 of 3.
+- The watch lane (W) measured what the FileView does to a replaced or
+  re-pointed link (the contract's eighth fact) and five ways to close
+  D-SRC-29, D-SRC-40, D-SINK-21 and D-SRC-35 on the real `Service.qml`: A
+  and A2 (an asynchronous read before every save), B (a periodic reload),
+  C and C2 (a synchronous read). B cannot close the data loss -- at 10 s
+  with a 1 s gap every segment was lost as on dev, a 0644 file with the
+  secret included -- and costs 360 reloads an hour idle at 10 s, 1,800 at
+  2 s. C2 closes all four on the first call but blocks the GUI thread on
+  file I/O for every save (up to 29 ms measured under load; unbounded on a
+  hung filesystem, which R23c and R24d treat as in scope). A2 closes them
+  without blocking and D-SRC-35 on the second call. The lane also found
+  D-SRC-46: a `setText` issued inside `stateFile`'s own `onLoaded` writes
+  the file and never raises `saved` (16 of 16), so after an R24a merge's
+  save the session read `stateSavesInFlight` 1 and `stateSaveFailed` true
+  for good -- live on dev, and hidden by the node double (F-HARNESS-29).
+- The harness lane (H) repaired the two always-red chno scenarios
+  (F-HARNESS-21: the pre-Sources cache path, a wrapping `move -99`, dead
+  stream URLs; F-HARNESS-22: N9's pair straddling a dead stream's clear),
+  chno 46 / 0 and chno-entry 78 / 0 three times each on two trees, and
+  found F-HARNESS-30: `run.sh`'s player reap sent TERM only, and six
+  served players that ignored it spun for 35-48 minutes at 42-52 % of a
+  core each.
+
+**The lead's ruling, R26 (2026-10-16).**
+
+R26a. ASYNCHRONOUS READ-BEFORE-WRITE (lane W's A2; lane S's blocking peek
+and C2 are NOT taken: the shell never blocks its GUI thread on file I/O, the
+R23c / R24d stance, and the peek does not merge). Every state save the gate
+allows first reloads `state.json` and decides on what it finds through the
+existing dispositions: the base -> write; a foreign text -> the R24a merge,
+then write; a load failure -> the R22 no-write mode, nothing written, told
+once. A save asked for inside any load is parked and deferred. The read is
+skipped while one of our own writes is in flight. A 2 s watchdog: no load
+-> save as today, counted and logged. Reasons met during the verify are
+counted as `pre-save-*`. This closes D-SINK-21 (a 0644 `state.json` in a
+re-pointed empty folder, measured real), D-SRC-29 (every replacement kind),
+D-SRC-40 and D-SINK-21's file-link sibling; D-SRC-35 closes on the second
+call (the first source call after the target returns is refused and lifts
+the mode) -- accepted and stated.
+
+R26b. NEVER `setText` INSIDE A FileView HANDLER. D-SRC-46 (new, P2, shipped
+in 0.14.0): a `setText` issued inside `stateFile`'s `onLoaded` writes the
+file but never raises `saved` (16 of 16 measured), so after an R24a merge's
+save `stateSavesInFlight` stays 1 and `stateSaveFailed` stays true. The
+deferral (`Qt.callLater`) fixes it. Rule 15: every `setText` and every write
+in `Service.qml` reached from a FileView handler, listed with a verdict.
+Pinned (the merge's save clears inFlight and saveFailed) and live (INLOAD).
+
+R26c. RULE 10 FOR THE DOUBLE (F-HARNESS-29, new): `tests/service-harness.js`
+models what was measured -- `setText` inside a load is silent (no `saved`;
+the echo delivered), a save that creates the file creates it 0666 & ~umask
+(0644 at umask 022) and keeps an existing file's mode, a re-point raises
+nothing. Its red: the improved double goes red on the old `saveState`.
+[lane-clean-f1, 2026-10-16, F-HARNESS-31 (the round-16 data-loss lens's
+P2): the double still delivered the reload a FOREIGN change raises while
+one of our writes was in flight, which the measured view does not
+(`inflight-1.txt`, 30 of 30), and sixteen pins passed only because of it.
+It drops that load now (`h.foreign`, counted in `droppedForeign`); the
+sixteen -- R24a IN FLIGHT, R25d a7, R25b's in-flight saved search and
+R26b's census, each x 4 -- are re-levelled to what the view does: a change
+another program lands in the same instant as one of our writes is lost,
+on this tree and on 0.14.1 alike, with no plugin-side lock against a
+second process. Seen red both ways: the old wants on the new double, 16 of
+2561 in each own-echo mode; the new wants on the old double, 16 of 2561.
+`r25d-a7-no-inflight-half.patch` is now reddened by no node pin (8 -> 0):
+the half it deletes is reached only by a foreign load during our write,
+which the view does not deliver; whether any other load can reach it is
+unmeasured.]
+
+R26d. NO PERIODIC TIMER. A replacement with no save after it stays unseen
+until the next save or a restart, and nothing is lost meanwhile because
+nothing writes; the documents state it (FRESH), and an IDLE live segment
+proves 0 reloads while idle.
+
+R26e. Source verbs keep answering synchronously when their write is ISSUED
+(R13); a write the verify then refuses is told by the R22 notification, and
+the next call answers `state_unreadable`. Stated, not changed.
+
+R26f. THE RE-LEVELS. The checks A2 turns red because their premise changed
+are each re-levelled with a sentence naming why the premise changed and
+what now observes the original concern; none is deleted to green;
+key-scenario D3 and W3 stay discriminating (a verify does not satisfy the
+save-parked count).
+
+R26g. LIVE SEGMENTS in `key-scenario.sh`: S29-mv, S29-sed, S29-rmcp,
+S29-ln, S40, S21 (no file created, `blocked=absent`, `told:1`), S35, INLOAD,
+IDLE; each seen red three ways (the reload removed from `saveState`; the
+deferral removed; the verb recheck removed), the mutation patches kept
+under `spikes/key-mutations/`.
+
+R26h. THE HARNESS. Lane H's branch taken whole, squashed into one green
+commit. F-HARNESS-30 (new): every `--serve` scenario (player, m3, rewind,
+pip, tls, text, chno, chno-entry) goes through `qa_reap_players` (TERM, a
+bounded wait, KILL by pid, confirmed). The helper's own `player stop`
+already escalates to SIGKILL (the D-LIVE-17 ladder): confirmed by reading,
+`bin/` not changed.
+
+R26i. The documents: the README's link and folder-link paragraphs say what
+is now noticed and when (at the next save), FRESH, the first refused call
+after a target returns, and that after re-pointing a folder link and
+restarting, the NEW folder is what loads; the contract gains the measured
+FileView facts; R26 as a dated ruling (this section).
+
+**What the tree does (lane-clean-a1, lane A: 86d8265 lane H's branch
+squashed; 5d193f2 R26a-c, the model, `Service.qml`, the double, the node
+pins and the re-levels; 5ee0e5f R26g-h, key-scenario B23-B31, the four
+mutation patches, `run.sh`'s reap).**
+- R26a. `Model.stateSavePlan(ctx)` (in `model/state.mjs`) answers each
+  save `join` (a read is already out: it decides this save too), `park`
+  (no state loaded, or the directories not ready), `refuse` (the no-write
+  mode and nothing a re-read can lift now: `init-timeout`, or the call IS
+  the verify's own finish, or it runs inside a load, which is that read),
+  `verify` (reload first), `defer` (ask again from a turn of its own) or
+  `write`. A write is answered only to the verify's finish
+  (`verifyDone`), or to a deferred turn (`writeTurn`) while one of our
+  writes is in flight -- when the read is skipped, because the view drops
+  a reload then (30 of 30) and the disk is that write. `Service.saveState`
+  carries the answer out: `verify` sets `stateSavePending` and
+  `stateVerifyPending`, calls `stateFile.reload()` and restarts
+  `stateVerifyWatchdog` (2000 ms); whatever load arrives,
+  `stateLoadArrived` decides it through the existing dispositions and,
+  with the handler depth back at 0, `Qt.callLater(finishStateVerifyLater)`;
+  `finishStateVerify` refuses the parked save if the load set a no-write
+  mode (counted in `stateWritesRefused`) and otherwise issues it once. A
+  load met during the read is counted as `pre-save-<reason>` in
+  `stateReloadsByReason`, so D3 and W3 need a genuine `save-parked`.
+  `Model.stateBlockRecheck` asks for one reload when a source verb
+  (`sourcesReady`, so add, edit, switch and retry; and `removeSource`)
+  meets a liftable mode -- not `init-timeout`, not inside a load, not while
+  a read is out; the verb is refused either way. The counters for the
+  harness: `stateVerifies`, `stateVerifyNoLoad` (the watchdog's),
+  `stateVerifySkipped`, `stateVerifyRetries`, `stateSavesDeferred`,
+  `stateVerifyMsMax`. The watchdog's console line: `state.json was not read
+  back within <n> ms of a save; saving without the read`.
+- R26b. `stateInHandler` counts the depth inside `stateFile`'s handlers --
+  `stateLoadArrived` (both load handlers) and `onSaved` / `onSaveFailed`,
+  each in a `try` / `finally` -- and a save asked for at depth > 0 is
+  `defer`red through `Qt.callLater(saveDeferredState)`. `stateFile.setText`
+  is reached only below the plan's `write`, and the two flags that let a
+  call write are raised only in `finishStateVerify` (entered only from
+  `Qt.callLater` and the watchdog's Timer) and `saveDeferredState`
+  (entered only from `Qt.callLater`). The rule-15 search is below.
+- R26c. The double, as the contract's eighth fact describes it; pinned
+  `R26c (<tag>): the double creates a missing file as 0666 & ~umask and
+  keeps an existing file's mode ...` (`["644", "600", "664", "640"]`).
+- R26d. No timer reloads `stateFile`. Node `R26d (<tag>): FRESH, stated --
+  ...` (the replacement unseen, nothing written, the next save merges);
+  live B31.
+- R26e. Unchanged code, stated in the README and `UX-SOURCES.md` 5.10 items
+  4 and 5; observed by B28 (`edit:true ... next:state_unreadable`).
+- R26f. The re-levels, each with its sentence in the test or the script:
+  R11 (structural: the `onSaved` window 400 -> 700 characters, the landed
+  branch unchanged); R14 / R22a `parksBeforeDirs` (the gate is now one
+  input of the plan; the pin matches the plan's join / park and refuse
+  branches); R15 (the counted name now carries the `pre-save-` prefix,
+  still one count before the decision); R13's burst x2 (saves in one turn
+  join one read, so the burst is built behind a write in flight); R25a's
+  coalesced burst x4 (the saves a turn apart); R21e D-SRC-18 at the
+  migration x2 (the edit's read let finish before the save lands and the
+  shell dies); R24a IN FLIGHT x4 and R25d a7 x4 (the read let finish so
+  the save IS in flight when the helper write lands); R25b's saved search
+  IN FLIGHT x4 (the same, and it now asserts `inFlight:1` -- it had passed
+  with the save merely parked, found by running every existing patch on
+  the new tree); key-scenario's live floor 119 -> 128; `qa-lib-test.sh`
+  500 -> 505; `check.sh`'s `NODE_CHECKS_MIN` 2,502 -> 2,561;
+  `KEY_PREFLIGHT_MIN` stays 11. D3 and W3 still go red under
+  `d3-save-parked.patch` (`save-parked:NOFIELD`).
+- R26g. key-scenario B23-B31 (the harness README's Round 16 has each
+  segment's want). B23-B25 S29 `mv` / `sed` / `rmcp`, B26 S29-ln, B27 S40,
+  B28 S21, B29 S35, B30 INLOAD, B31 IDLE.
+- R26h. `run.sh`'s `reap_player` calls `qa_reap_players` on its scratch
+  directory; the helper's `player stop` read (quit, TERM at 2 s, then
+  SIGKILL), not changed.
+
+**The measurements R26 rests on.** The contract's eighth FileView fact
+(`OMARCHY-PLUGIN-CONTRACT.md`): a `setText` inside `onLoaded` raises no
+`saved` (16 of 16); a created file is 0666 & ~umask and an existing one
+keeps its mode; a re-point raises nothing; one `reload()` re-arms; a reload
+while an own write is in flight delivers no load (30 of 30); a reload costs
+median 2-4 ms, max 10, at 8 KB and 160 KB. Lane W's rig is committed on
+branch `lane-clean-w-probe` (`scripts/dev-harness/spikes/filewatch-links/`
+with `results/`) and is NOT in this tree; `Service.qml`'s R26a comment and
+key-scenario's B header cite it by that branch. Lane S's probe and the
+peek patch are in the session's scratch directory.
+
+**False statements corrected where they stood (lane-clean-c1, the
+documents lane).** Each sentence below said, as of 0.14.0 and correctly
+then, that a replacement or a re-point is never noticed and the next save
+writes over it, or that a returned target is never seen; each now says
+what R26 does, and keeps what 0.14.0 did as the past.
+- README: the `state.json` entry under "Files it writes"; Troubleshooting's
+  **Saved sources not loaded** bullet ("anything else needs the restart",
+  narrowed to `init-timeout`, with the read at the next save and the
+  second source call), the `state.json` link bullet (what is noticed at
+  once, what at the next save, FRESH, `ln -sfn` to another file and to a
+  missing one, the two narrow exceptions, the past 0644 file), the folder
+  link bullet (a re-point decided at the next save, an empty folder stops
+  saving with nothing created, and after a restart the NEW folder is what
+  loads), the "file changed while running" bullet's link parenthesis, the
+  helper-refusal bullet's "unless another tool replaced a link"; and the
+  harness count (120 -> 129, 2026-10-16).
+- `UX-SOURCES.md` 5.10: the heading; item 4 (the mode can begin at a save,
+  B28); item 5 (it ends at the next save, D-SRC-35 on the second call,
+  B29); item 6's two round-15 brackets (D-SRC-29 and D-SRC-40 closed).
+- The contract: the facts list's bracket, fact seven's "this plugin does
+  not call one", and a bracket on fact seven's sentences about the service;
+  the eighth fact.
+- `ARCHITECTURE.md`: section 5's round-15 "the link's limit is stated, not
+  fixed" bracketed; section 5's round-16 amendment; security standard 5's
+  "state is 0600", which the service's own save did not keep (D-SINK-21);
+  risk 1's round-15 bracket.
+- `QA.md`: TC-CFG-16's and TC-CFG-21's round-15 brackets -- TC-CFG-21's
+  manual check expected the `mv` edit to be LOST, and now expects it kept;
+  the round-16 record; TC-CFG-30 to 32. `QA-SOURCES.md`: SRC-MIG-41's and
+  SRC-MIG-49's round-15 brackets; SRC-MIG-58 to 60.
+- `scripts/dev-harness/README.md`: round 15's "no segment drives a
+  symlinked `state.json`" bracketed; the Round 16 record. Lane A had already
+  added the reap paragraph, the chno `--serve` note and the `--baseline
+  1c88877` line.
+
+**This lane's search, by shape, over the documents (rule 15).**
+- "A replacement or re-point at the state path is never noticed, and the
+  next save writes over it" (D-SRC-29, D-SRC-40): grep over the nine files
+  for `ln -sfn`, `re-point`, `replaces the link`, `straight after`, `not
+  noticed`, `D-SRC-29`, `D-SRC-40`, `filed, R25e` and `does not call one`.
+  Corrected: every hit above. Cleared: this file's round-14 and round-15
+  records (records of what was measured then, true of that tree), the
+  contract's table rows for the bare view (still true of the view), the
+  `ln -sfn` command lines in `QA.md`, `QA-SOURCES.md`, `ARCHITECTURE.md`
+  and the contract (qmllint's import roots, a playlist fixture), and SR30
+  (the clone's `origin`).
+- "A returned target, or a repair, is never seen" (D-SRC-35, D-DOC-13):
+  `coming back`, `target came back`, `restart`. Corrected: the README's
+  no-write and link bullets, `UX-SOURCES.md` 5.10 item 5, `QA.md`
+  TC-CFG-16, `QA-SOURCES.md` SRC-MIG-41, the contract's D-DOC-13 sentence
+  (bracketed: the case was not driven against the new tree; it is the same
+  read over a `permission` block, which `Model.stateSavePlan` answers
+  `verify`). The README's "anything else needs the restart" was wider than
+  D-SRC-35: the documents lane called the shipping `Service.qml` through
+  `tests/service-harness.js` for a start block (`permission`,
+  `absent-unconfirmed`, `unparsed`) and a mid-session one (`permission`,
+  `absent`, `unparsed`), each repaired with no signal: on the tip a
+  favourite lifts every one and a source call lifts it on the second try;
+  on dev's `Service.qml` (with the same double) none lifts. The favourite
+  made at that moment is KEPT in the mid-session shapes and NOT kept at a
+  start (the file's state is applied over it); the README says both.
+- "A state file the service writes is 0600" (D-SINK-21's shape: a mode
+  promise the view's own create does not keep): the README's "Files it
+  writes" (`state.json` "mode 0600"; true of every file the plugin now
+  writes, since the service no longer asks the view to create one),
+  `ARCHITECTURE.md` security standard 5 (bracketed) and rule 6 of the
+  project instructions (not this lane's file; true of the tree now but for
+  the watchdog's residual, reasoned and not measured, in `ARCHITECTURE.md`
+  section 5's round-16 amendment). [lane-clean-f1, 2026-10-16: not true
+  without three exceptions, each now stated where the sentence stands --
+  a save asked while our previous write is in flight skips its read; a
+  re-point landing between the read's load and the write it allows; the
+  2 s watchdog firing -- each of which still asks the view to create the
+  0644 file, measured through the node double over the shipping
+  `Service.qml` (both hosts, both echo modes); and a 0644 file the user
+  put at the path (`mv`, `rm` + `cp`) is written into at its own mode
+  until the next start's `state init`.]
+- "The watch is the only way the session learns of a change" (R26d's
+  shape): `UX-SOURCES.md` 5.10 item 4 ("the mode begins when the FileView
+  delivers the reload": bracketed, it can begin at a save now); the
+  harness README's round notes (records, cleared).
+- Counts round 16 moved: the README's harness count (120 -> 129); the
+  harness README and `QA.md` records carry node 2,561, `qa-lib-test.sh`
+  505 and the live floor 128.
+
+**Seen red (lane A).** Node: the tip's tests over dev 1c88877's
+`Service.qml` read 64 of 2,561, among them the fourteen R26 harness pins
+in all four host and echo shapes (56) and the R26b structural pin; dev's own suite with only
+the new double swapped in, 12 of 2,502 (eight R22a unmigrated starts, four
+R24a IN FLIGHT: D-SRC-46 surfacing in existing checks). By mutation:
+`r26a-no-read.patch` 36; `r26b-no-defer.patch` 23 / 21 (echo load / none);
+`r26a-no-verb-recheck.patch` 4. Live: `--baseline 1c88877` 120 / 9, exactly
+B23-B31 (the transcripts in lane A's scratch); `--tree` with
+`r26a-no-read.patch` 122 / 7, `r26b-no-defer.patch` 128 / 1,
+`r26a-no-verb-recheck.patch` 128 / 1, `r26d-periodic-reload.patch` 126 / 3,
+`d3-save-parked.patch` 76 / 53. `qa-lib-test.sh`'s `run.sh reap` pin red
+against 1c88877's `run.sh` (the deaf player alive, nothing said).
+
+**Counts.** On dev 1c88877: node 2,502 in both echo modes; python 1,229;
+qml spec 78; `qa-lib-test.sh` 472; key preflight 11; key-scenario's live
+floor 119 lettered checks, summary 120. On lane-clean-a1 5ee0e5f (lane A's
+report): node 2,561 / 0 in both echo modes; python 1,229; qml spec 78;
+`qa-lib-test.sh` 505 / 0; harness predicates 505; key preflight 11;
+key-scenario live 129 / 0 (128 lettered checks and the floor,
+`key-20261016-084228-582473`); sources 66 / 0, logo 33 / 0, chno 46 / 0,
+chno-entry 78 / 0; player 76 / 9 and rewind 110 / 4, the same reds as dev
+under the same rig (P1-P12 read the real `hyprctl clients`; R13 / R14 count
+key presses, and a cage's seat has no keyboard). `./scripts/check.sh` on
+5ee0e5f exits 1 on the defect ledger alone: D-SRC-46, F-HARNESS-29 and
+F-HARNESS-30 are cited and have no row on `docs/STATUS.md`; with the three
+rows added uncommitted the same commit reads "all green".
+
+**Open for the lead (decision requests and findings with evidence; the
+board's ids are the lead's).**
+- (1) The board rows for D-SRC-46, F-HARNESS-29 and F-HARNESS-30, and the
+  closures of D-SINK-21, D-SRC-29, D-SRC-35 and D-SRC-40 (and F-HARNESS-21
+  and F-HARNESS-22), are `STATUS.md`'s, which neither lane A nor this lane
+  writes; until they land the gate is red on the ledger only.
+- (2) D-SRC-47 (lane A's finding; the id given on lane-clean-f1,
+  2026-10-16): R25a's own-write record keeps
+  eight texts, and a burst of more than eight writes made a turn apart
+  while the first is in flight pushes the first text out, so its echo is
+  merged as foreign and can undo the last in-app change (ten switches a
+  turn apart ended on B, not A). It predates R26 and is rarer under it.
+- (3) Lane A's: under R26 `d3-save-parked.patch` loses every in-app save
+  (53 live reds, not 6). Should the `save-parked` clause get a dedicated
+  live check beyond D3 and W3?
+- (4) This lane's: lane W's `spikes/filewatch-links/` is cited by
+  `Service.qml`, key-scenario and these documents and lives only on
+  `lane-clean-w-probe`. Merge it (its `results/` included) so the citation
+  resolves on `dev`, or keep it as a branch reference?
+- (5) This lane's: "after re-pointing a folder link to an EMPTY folder and
+  restarting, the guide starts with no sources, like a fresh install" is
+  lane S's observation on its peek patch, not re-run on lane-clean-a1. R26
+  changes no start-up LOAD (only how a save is issued), so the README
+  states it; a live segment (B28 followed by a restart) would observe it.
+- (6) This lane's: in a no-write START, a favourite made once the file is
+  readable again lifts the mode but is not kept -- the file's state is
+  applied over it -- where a mid-session block keeps it (the probe above).
+  Consistent with the notification ("changed now are not kept"); the
+  README says it. Acceptable as stated?
+- (7) This lane's: the absent row's `<fix>` (`If it is a symbolic link,
+  restore the file it points to; otherwise make the folder readable with
+  chmod 700. Then run omarchy restart shell.`) is what B28's user reads
+  after re-pointing a folder link at an empty folder; neither half fits
+  that case, and since R26 the restart is no longer the only way out. A
+  copy question; the notice is `Model.stateUnreadableNotice`, not this
+  lane's.
+- (8) This lane's: `a` and `c` in Sources are refused by the guide
+  (`Model.sourcesAddAllowed`) without asking the service for a reload, so
+  pressing them never lifts a mode a returned file could lift; every other
+  source change does. Worth a recheck there too?
+- (9) The README names "up to and including 0.14.0" for the old behaviour.
+  That is right if R26 ships as 0.14.1, the manifest's version on
+  lane-clean-a1; if 0.14.1 is cut without R26 it must read 0.14.1.
+  [lane-clean-f1, 2026-10-16: 0.14.1 is dev 1c88877's code, which carries
+  no R26, so the README, `UX-SOURCES.md` and the contract now say "up to and
+  including 0.14.1".]

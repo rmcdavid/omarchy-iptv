@@ -13606,6 +13606,75 @@ restarts; the rewrite changes the file, not Qt's pixmap cache. 0.14.1 is
 prepared and not cut: no `release.py build`, no push, no request, no comment,
 no change to the live install until the owner's word.
 
+### The cleanup round (2026-10-15..16): a read before every save, and two scenarios that were red on every tree
+
+**On the owner's "Start the cleanup" of 2026-10-15; built on `lane-clean-*`
+from `dev` `1c88877`, never touching `bin/` (the helper split) or `dev`, and
+merged only after 0.14.1 is cut.** Three phases.
+
+**Phase 1** measured and prototyped. The harness lane found why chno and
+chno-entry were red on every tree, the plugin at fault in neither: the
+scenario read the cache at its pre-Sources path, parked its cursor with a
+`move -99` that wraps, and played rows whose URLs were dead on purpose, so
+mpv exited and the service cleared "now playing" under the checks
+(F-HARNESS-21, F-HARNESS-22). Repaired, each check seen red on its own
+mutation: chno 46/0 and chno-entry 78/0, three times on `1c88877` and three
+on 0.13.6. The security lane measured **D-SINK-21** real: a linked state
+folder re-pointed to an empty 0755 folder, then one in-app change, and a new
+`state.json` sat at 0644 with the credentials, the session silent; a
+FileView creates a missing file at 0666 & ~umask. The watch lane prototyped
+a read before every save (blocking and asynchronous), a periodic reload, and
+variants. A periodic reload cannot close it -- a save inside one period still
+writes over the change -- and the lane found **D-SRC-46**: a `setText`
+inside `stateFile`'s `onLoaded` never raises `saved` (16 of 16), so after a
+merge's save the service believes a write is still out. The harness lane
+also left six TERM-ignoring players burning 2.7 cores for up to 48 minutes,
+because `run.sh` reaped with TERM only (**F-HARNESS-30**); the helper's own
+`player stop` already escalates to SIGKILL.
+
+**Phase 2** built R26 (decisions log, 2026-10-16) on `lane-clean-a1` and
+`lane-clean-c1`. key-scenario live 129 passed, 0 failed, and `--baseline
+1c88877` 120 / 9, exactly the nine new segments B23-B31 -- B28 on the old
+code reading `created:644 holds:[state.json] blocked: told:0`, D-SINK-21
+seen live. Each segment red on its mutation (no read, no deferral, no verb
+recheck, a periodic reload). The honest double alone turned 12 of dev's
+2,502 checks red (**F-HARNESS-29**). No lens found a P1 or anything worse
+than 0.14.0 (224,508 simulated runs per tree). A save now reaches the disk
+a median of 35 ms after the call when idle and 83-98 ms under load
+(17-172 ms over 48 saves, 38 KB state) instead of before it returns; what is on screen is unchanged. What stopped the merge was text
+and one honesty problem: the double still delivered another program's
+reload while our own write was in flight, which the measured FileView never
+does, and 16 checks passed on that (**F-HARNESS-31**).
+
+**Phase 3** (`lane-clean-f1`) made `h.foreign` drop that load and
+re-levelled the 16 checks to what the real view does -- a change another
+program writes in the same instant as one of our saves is lost, on every
+tree (**D-SRC-48**); stated the three millisecond windows in which a save
+can still create a 0644 `state.json` (**D-SINK-22**) and the 0644 file a
+user's own `mv` leaves written into (**D-SRC-49**); moved the old
+behaviour's boundary to 0.14.1, which ships without R26; observed the read's
+2 s bound (red at 20 ms); and gave R25a's eight-text record its id
+(**D-SRC-47**). The re-check: the data-loss lens found no blocker (its M1
+matrix 0 problems on the branch against 3,760 on 0.14.0, every residual of
+M5 and M6 a same-instant edit or one of the documented windows); the claims
+lens found five places still promising a little more than the code keeps,
+which the integration commits qualify; an independent check of the lead's
+own corrections then found eleven of them false in turn, the worst saying a
+change made during a mid-session block is saved once the file is back when
+on most ways back it is dropped, and those were corrected from its
+measurements. It also left the in-flight
+half of the merge's re-save decision observed by nothing (**F-HARNESS-33**).
+
+Filed and not fixed: **F-HARNESS-32** (`run.sh`'s exit cleanup still ends a foreground harness
+shell, and both paths the fixture server, with TERM alone; never observed to
+fail),
+**D-SRC-50** (after re-pointing the folder link at an empty folder, the
+notice's advice leads to a fresh, empty start there; nothing lost), and
+**D-SRC-51** (the notice says changes made in a mid-session block "are not
+kept", which is true on most ways back and false on the one where the next
+guide change's own read finds the file back first). F-PERF-2 is closed as not
+reproduced (89.0 against 89.5 ms on 0.14.0's pre-cut run).
+
 ### 0.14.0: the release record (D-SINK-19 shipped)
 
 **Cut 2026-10-14 on the owner's word ("install, restart shell and cut

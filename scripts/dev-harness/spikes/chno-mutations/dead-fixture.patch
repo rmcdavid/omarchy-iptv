@@ -1,0 +1,18 @@
+diff --git a/scripts/qa-lib.sh b/scripts/qa-lib.sh
+index 0000000..0000000 100755
+--- a/scripts/qa-lib.sh
++++ b/scripts/qa-lib.sh
+@@ -460,11 +460,11 @@ qa_served_fixture() {
+   dead=$(qa_count '^http://127\.0\.0\.1:9/dead/[A-Za-z0-9_-]+\.m3u8$' "$template")
+   (( dead > 0 )) || return 1
+   sed -E -e "s|__LIVE__|http://127.0.0.1:$port/test.ts|g" \
+-         -e "s|^http://127\\.0\\.0\\.1:9/dead/([A-Za-z0-9_-]+)\\.m3u8\$|http://127.0.0.1:$port/test.ts?ch=\\1|" \
++         -e "s|^MUTATION-NEVER-MATCHES\$||" \
+          "$template" >"$out" 2>/dev/null || { rm -f "$out"; return 1; }
+   # Nothing dead may survive the rewrite: a row still pointing at port 9
+   # would be the race this exists to remove, back on one channel.
+-  if (( $(qa_count '127\.0\.0\.1:9/dead/' "$out") > 0 )); then rm -f "$out"; return 1; fi
++  # MUTATION (F-HARNESS-21/22, instrument): the dead rows are left dead, the pre-repair fixture
+   return 0
+ }
+ 

@@ -83,6 +83,11 @@ function makeIds(h) {
     // which runs the watchdog's OWN onTriggered and then the exit handler.
     stateInitWatchdog: timer("stateInitWatchdog"),
     stateInitKill: timer("stateInitKill"),
+    // R26a: the bound on the read before a save. A test fires it by hand
+    // with h.verifyWatchdog(), which runs its OWN onTriggered from its text,
+    // or by moving the clock with h.elapse(ms), which fires it at the
+    // interval the tree DECLARES (F4, lane-clean-f1; bootService below).
+    stateVerifyWatchdog: timer("stateVerifyWatchdog"),
     switchTimeout: timer("switchTimeout"),
     configShieldDebounce: timer("configShieldDebounce"),
     channelsFile: view("channelsFile"),
@@ -311,6 +316,32 @@ class Host {
 // no file and no fault; `dirPresent: true` for the other shape) starts the
 // view unarmed: `reload()` arms it when the file exists, h.foreign() delivers
 // a change only while it is armed, and the own-write echo needs it too.
+//
+// R26c (2026-10-16, F-HARNESS-29, rule 10): three more measured facts, from
+// a bare FileView declared as stateFile is and from the real Service.qml,
+// in a nested cage on a private bus (scripts/dev-harness/spikes/filewatch-
+// links on lane-clean-w-probe, and the sink lane's lane-s-rig probe):
+//   a setText issued INSIDE the view's own onLoaded  writes the file and
+//     raises NO `saved` (16 of 16); the reload its change raises is still
+//     delivered. Here: a "silent" event -- the disk takes the text, nothing
+//     is reported, the echo comes when the watch is armed. `handlerWrites`
+//     counts every setText made inside any of the view's handlers, so a
+//     pin can hold the service to none.
+//   a save that CREATES the file  creates it 0666 & ~umask -- 0644 at the
+//     shell's umask 022 (measured on the user's own omarchy-shell and in the
+//     rig) -- whatever atomicWrites says; a save over an EXISTING file keeps
+//     that file's mode (0600 and 0640 measured). Here: `mode` (null while
+//     there is no file) and `umask`; the helper's `state init` creates 0600.
+//   a REPLACEMENT or a RE-POINT at the path  (a rename over a link, sed -i,
+//     rm and cp, ln -sfn to another file or folder) raises NOTHING, and the
+//     view watches nothing after it until one reload() re-arms it. Here:
+//     h.replace(change) changes the disk and unarms the watch, delivering no
+//     load; reload() arms it again when there is a file to watch.
+//   F-HARNESS-31 (lane-clean-f1, the same measurement's set `inflight`):
+//   a reload asked while the view's OWN write is out delivers no load
+//     during that write (30 of 30). Here: h.foreign delivers nothing while
+//     one of our writes is queued (counted in h.droppedForeign), so the
+//     change it made is replaced by our rename -- the same-instant loss.
 class StateFile {
   constructor(text, o) {
     const opts = o || {}
@@ -320,6 +351,9 @@ class StateFile {
     this.watchArmed = !this.dirAbsent
     this.disk = text; this.view = text; this.events = []; this.writeFails = false; this.coalesce = false
     this.loader = null
+    this.mode = this.exists ? (opts.mode !== undefined ? opts.mode : 0o600) : null
+    this.umask = opts.umask !== undefined ? opts.umask : 0o022
+    this.inLoad = false; this.inHandler = 0; this.handlerWrites = 0
     this.ownEcho = opts.ownEcho || process.env.IPTV_HARNESS_OWN_ECHO || "load"
     if (this.ownEcho !== "load" && this.ownEcho !== "none") throw new Error("service-harness: ownEcho is load or none, not " + this.ownEcho)
   }
@@ -339,7 +373,9 @@ class StateFile {
     // write the temporary file in, which is sequence X's mechanism.
     const blocksWrite = this.fault === "dir-0000" || this.fault === "dir-foreign" || this.fault === "is-dir"
       || this.fault === "dangling-link-nodir" || this.fault === "not-a-dir" || this.fault === "folder-link"
-    const ev = { kind: this.writeFails || blocksWrite ? "saveFailed" : "saved", text }
+    // R26c: inside the view's own onLoaded, a write that lands raises nothing.
+    if (this.inHandler > 0) this.handlerWrites++
+    const ev = { kind: this.writeFails || blocksWrite ? "saveFailed" : (this.inLoad ? "silent" : "saved"), text }
     if (this.coalesce && this.events.length >= 2) this.events[this.events.length - 1] = ev
     else this.events.push(ev)
   }
@@ -406,7 +442,7 @@ function helperInit(file, code) {
     // R24c: the creation raises a reload only when the view is watching --
     // the directory existed at its first load (sequence U); in the fresh
     // install's dir-absent shape it raises nothing (sequence Q).
-    found = "absent"; file.exists = true; file.disk = HELPER_EMPTY_STATE; raises = file.watchArmed
+    found = "absent"; file.exists = true; file.disk = HELPER_EMPTY_STATE; file.mode = 0o600; raises = file.watchArmed
     file.dirAbsent = false
   }
   else found = "file"
@@ -417,7 +453,7 @@ function bootService(serviceText, Model, o) {
   const opts = o || {}
   const h = { clock: opts.clock || 1760000000000, later: [], cacheRuns: [], signals: [], warnings: [], detached: [], turns: 0 }
   h.host = new Host(opts.entry, opts.host || "lag")
-  h.stateFile = new StateFile(opts.stateText || "", { exists: opts.exists, fault: opts.fault, ownEcho: opts.ownEcho, dirAbsent: opts.dirAbsent, dirPresent: opts.dirPresent })
+  h.stateFile = new StateFile(opts.stateText || "", { exists: opts.exists, fault: opts.fault, ownEcho: opts.ownEcho, dirAbsent: opts.dirAbsent, dirPresent: opts.dirPresent, mode: opts.mode, umask: opts.umask })
   h.stateInitStdout = { text: "" }
   // The helper's `cache` reply: ok for every verb, unless a test says
   // otherwise (h.cacheFails = ["migrate"]).
@@ -523,6 +559,9 @@ function bootService(serviceText, Model, o) {
   const killText = serviceText.indexOf("id: stateInitKill") === -1 ? ""
     : handlerBlock(serviceText.slice(serviceText.indexOf("id: stateInitKill")), "onTriggered: {") || ""
   const onInitKill = compile("", killText, "stateInitKill_onTriggered")
+  // R26a: the verify watchdog's one-line handler ("" on a tree without one).
+  const verifyText = (serviceText.slice(Math.max(0, serviceText.indexOf("id: stateVerifyWatchdog"))).match(/^    onTriggered: (.*)$/m) || [])[1]
+  const onVerifyWatchdog = serviceText.indexOf("id: stateVerifyWatchdog") === -1 || !verifyText ? () => {} : compile("", verifyText, "stateVerifyWatchdog_onTriggered")
   // R24d: mkdir's exit handler, from its text (on a tree before R24d it
   // starts the init, which then arms the watchdog itself).
   const mkdirText = serviceText.indexOf("target: mkdirProc") === -1 ? ""
@@ -543,7 +582,10 @@ function bootService(serviceText, Model, o) {
   // One load of the file as it is NOW (the view reads what it loaded).
   h.loadState = () => {
     const r = h.stateFile.loadResult()
-    if (r.loaded) { h.stateFile.view = r.text; onLoaded() } else onLoadFailed(r.error)
+    h.stateFile.inLoad = true; h.stateFile.inHandler++
+    try {
+      if (r.loaded) { h.stateFile.view = r.text; onLoaded() } else onLoadFailed(r.error)
+    } finally { h.stateFile.inLoad = false; h.stateFile.inHandler-- }
   }
   // stateFile.reload() is asynchronous: the load is queued, not run inline.
   h.stateFile.loader = () => h.later.push({ fn: h.loadState, args: [] })
@@ -551,9 +593,53 @@ function bootService(serviceText, Model, o) {
   // verb, an editor, a restore). `change(stateFile)` makes it; the reload is
   // delivered only while the view's watch is armed -- in the fresh install's
   // dir-absent session, until something re-arms it, nothing is.
+  //
+  // F-HARNESS-31 (rule 10): the reload such a change raises is asked by the
+  // service's own onFileChanged, and a reload asked while one of OUR writes
+  // is out delivers no load during that write (measured, 30 of 30: lane W's
+  // spikes/filewatch-links inflight-1.txt on lane-clean-w-probe, the
+  // contract's eighth FileView fact). Our rename then replaces the change,
+  // and the next load reads our own text: a change another program lands in
+  // the same instant as one of our writes is LOST, on this double as on the
+  // real view. Counted in `droppedForeign`, so a pin can see it happen.
+  // Before this line the double delivered the change during our write and
+  // the service merged it -- more forgiving than the FileView.
+  h.droppedForeign = 0
   h.foreign = (change) => {
     change(h.stateFile)
+    if (h.stateFile.watchArmed && h.stateFile.events.length) { h.droppedForeign++; return }
     if (h.stateFile.watchArmed) { h.loadState(); h.runLater() }
+  }
+  // R26c: the path REPLACED or RE-POINTED by something else -- a rename over
+  // a link, `sed -i`, rm and cp, `ln -sfn` to another file or folder. The
+  // view raises nothing and watches nothing from then on (measured), so no
+  // load is delivered; the next reload() re-arms it.
+  h.replace = (change) => {
+    change(h.stateFile)
+    h.stateFile.watchArmed = false
+  }
+  // R26a: the read-before-write's watchdog, from its own text, as if its 2 s
+  // passed with no load (the reload the save asked for was never delivered).
+  h.verifyWatchdog = () => { onVerifyWatchdog(); h.runLater() }
+  // F4 (2026-10-16, lane-clean-f1): the watchdog's BOUND, observed. The
+  // Timer's declared `interval` is evaluated from its own block in the
+  // tree's Service.qml (Qt's default, 1000 ms, when the block declares
+  // none; null when there is no such Timer), and h.elapse(ms) moves the
+  // clock and fires it, through its own onTriggered, once a restart() is
+  // that old and no stop() came after -- so a pin can see a read still
+  // awaited at 1,999 ms and given up at 2,000. Nothing else here runs a
+  // Timer; h.verifyWatchdog() above still fires it by hand.
+  const verifyBlock = serviceText.indexOf("id: stateVerifyWatchdog") === -1 ? null
+    : serviceText.slice(serviceText.lastIndexOf("  Timer {", serviceText.indexOf("id: stateVerifyWatchdog")), serviceText.indexOf("\n  }", serviceText.indexOf("id: stateVerifyWatchdog")))
+  const verifyIntervalText = verifyBlock === null ? null : ((verifyBlock.match(/^    interval: (.*)$/m) || [])[1] || "1000")
+  const vw = ids.stateVerifyWatchdog
+  vw.interval = verifyIntervalText === null ? null : compile("", "return (" + verifyIntervalText + ")", "stateVerifyWatchdog_interval")()
+  vw.armedAt = null
+  vw.restart = function () { this.restarts++; this.running = true; this.armedAt = h.clock }
+  vw.stop = function () { this.stops++; this.running = false; this.armedAt = null }
+  h.elapse = (ms) => {
+    h.clock += ms
+    if (vw.running && vw.interval !== null && h.clock - vw.armedAt >= vw.interval) { vw.running = false; vw.armedAt = null; onVerifyWatchdog(); h.runLater() }
   }
   // The start-up init's exit, with the double's reply and side effects.
   h.helperInit = (code) => {
@@ -580,7 +666,23 @@ function bootService(serviceText, Model, o) {
     const ev = h.stateFile.events.shift()
     if (!ev) return false
     h.stateFile.view = ev.text
+    if (ev.kind === "silent") {
+      // R26c: the write landed and the view reported nothing; only the echo
+      // its change raises, when the watch is armed.
+      if (!h.stateFile.exists) h.stateFile.mode = 0o666 & ~h.stateFile.umask
+      h.stateFile.disk = ev.text
+      h.stateFile.exists = true
+      if (h.stateFile.fault === "dangling-link") h.stateFile.fault = null
+      if (o2 && o2.noLater) return true
+      h.runLater()
+      if (h.stateFile.ownEcho === "load" && h.stateFile.watchArmed) h.loadState()
+      h.runLater()
+      return true
+    }
     if (ev.kind === "saved") {
+      // R26c: a save that CREATES the file makes it 0666 & ~umask; one over
+      // an existing file keeps its mode.
+      if (!h.stateFile.exists) h.stateFile.mode = 0o666 & ~h.stateFile.umask
       h.stateFile.disk = ev.text
       // The rename made a file of OURS at the path, with the mode of the one
       // it replaced (FileView keeps an existing file's mode, S-02): a foreign
@@ -589,7 +691,8 @@ function bootService(serviceText, Model, o) {
       if (h.stateFile.fault === "file-foreign") h.stateFile.fault = "file-0000"
       // D-DOC-11: the save created the dangling link's target; it leads somewhere now.
       if (h.stateFile.fault === "dangling-link") h.stateFile.fault = null
-      onSaved()
+      h.stateFile.inHandler++
+      try { onSaved() } finally { h.stateFile.inHandler-- }
       if (o2 && o2.noLater) return true
       h.runLater()
       // The own-write reload (onFileChanged -> reload -> onLoaded), when the
@@ -597,7 +700,8 @@ function bootService(serviceText, Model, o) {
       // its watch is unarmed (R24c: the dir-absent session saw no echo).
       if (h.stateFile.ownEcho === "load" && h.stateFile.watchArmed) h.loadState()
     } else {
-      onSaveFailed(1)
+      h.stateFile.inHandler++
+      try { onSaveFailed(1) } finally { h.stateFile.inHandler-- }
     }
     if (!(o2 && o2.noLater)) h.runLater()
     return true

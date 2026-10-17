@@ -1,0 +1,13 @@
+diff --git a/model/channels.mjs b/model/channels.mjs
+index 0000000..0000000 100644
+--- a/model/channels.mjs
++++ b/model/channels.mjs
+@@ -397,7 +397,7 @@ function channelOrderOf(value) {
+ // Identity (the same array, no copy) for the default, so the shipped path
+ // costs nothing.
+ function orderChannels(channels, order, index) {
+-  if (channelOrderOf(order) !== "number") return channels
++  // MUTATION (F-HARNESS-21): channelOrder playlist ignored, number order always
+   var idx = index || {}
+   if (idx.hasNumbers !== true) return channels
+   var list = asList(channels)

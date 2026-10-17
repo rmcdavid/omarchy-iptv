@@ -38,8 +38,28 @@
 # (8-1 -> 8.1), leading zeros (0042 -> 42), a non-numeric value (N/A, which
 # is NOT a number, CN6) and both alias attributes (1000, 1001).
 #
-# `channel` PLAYS (CN1), so the live half starts the harness player against
-# the fixture's dead URLs exactly as player-scenario.sh does.
+# `channel` PLAYS (CN1), so the live half starts the harness player.
+#
+# F-HARNESS-21 (2026-10-15). This scenario was red 6-8 checks on EVERY tree
+# for two reasons, and neither was the plugin:
+#   - it read the cache at `.../cache/omarchy-iptv/channels.json`, the path
+#     from before Sources. The cache has lived in `sources/<key>/` since M2;
+#     the active directory is what `ipc activeCache` answers, and N17/N18 now
+#     read the file there (and assert it IS there).
+#   - every channel it tuned was DEAD (127.0.0.1:9). mpv exits about 1.4 s
+#     after such a tune (measured under a nested cage) and the service then
+#     clears nowPlaying by itself, so "it did not change what is playing"
+#     and the three N20 bar checks read a value on a timer. The live half
+#     now plays every row from run.sh's fixture server (`--serve`,
+#     qa_served_fixture), refuses to count a play from a server that is not
+#     this harness's (qa_listener_owned), and asserts the stream HOLDS
+#     before any check leans on it.
+#   - N17's "lowest number first" parked with `move -99`, which WRAPS
+#     (moveCursorBy(delta, true)): on 20 rows it is +1, so it read row 1.
+#     park_top moves by minus the cursor index, which lands on 0 exactly,
+#     and the check asserts the index it read.
+# Each repaired check was seen red against a one-decision mutation kept in
+# spikes/chno-mutations/ (README there has the table and the counts).
 set -uo pipefail
 
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -73,10 +93,66 @@ svc()  { py "d['service']$1" "$(ipc state)"; }
 
 cleanup() {
   if [[ -n $HARNESS_PID ]]; then kill -TERM "$HARNESS_PID" 2>/dev/null; wait "$HARNESS_PID" 2>/dev/null; fi
+  # The live half PLAYS a served stream now. run.sh's reap used to end such
+  # a player with TERM alone and was seen to leave one spinning for most of
+  # an hour (F-HARNESS-30); since R26h it is qa_reap_players too. This
+  # cleanup calls it as well, so ours are ended by pid, with KILL behind
+  # the TERM, whether or not run.sh's own cleanup runs.
+  [[ -n $HARNESS_PID ]] && qa_reap_players "$SCRATCH"
   return 0
 }
 
-cache_mtime() { stat -c %Y "$CACHE/channels.json" 2>/dev/null; }
+# The active source's cache directory, as the service itself answers it, and
+# only when it is a per-source directory inside this harness's cache: an
+# answer outside it (a pre-Sources path, an empty string from a dead IPC) is
+# "no cache", never a path to stat.
+active_cache() {
+  local d
+  d=$(ipc activeCache)
+  [[ $d == "$CACHE/sources/"?* && -d $d ]] && printf '%s\n' "$d"
+}
+# The cache file's identity: inode, nanosecond mtime, size and content hash.
+# A helper run replaces the file by rename, which a one-second mtime could
+# not see inside the same second; the inode and the hash can.
+cache_identity() {
+  local f=$1/channels.json
+  [[ -f $f ]] || return 1
+  printf '%s %s\n' "$(stat -c '%i %.9Y %s' "$f" 2>/dev/null)" "$(sha256sum <"$f" | cut -c1-16)"
+}
+# Put the guide's cursor on row 0. `move` WRAPS, so `move -99` is not the
+# top (on 20 rows it is +1); minus the current index is, exactly.
+park_top() {
+  local at
+  at=$(py "d['guide']['cursorIndex']" "$(ipc state)")
+  [[ $at =~ ^[0-9]+$ ]] && (( at > 0 )) && ipc move "-$at" >/dev/null
+  return 0
+}
+# What is playing, as one comparable token: the channel id and the service's
+# play sequence (every new play bumps it, a re-tune of the same id included).
+playing_token() { py "(d['service']['nowPlaying'] or {}).get('id','NONE') + ' ' + str(d['service']['player']['seq'])" "$(ipc state)"; }
+# The stream HOLDS: <chno> is playing, and the token does not change across
+# HOLD_S seconds -- longer than the 1.4 s a dead stream lasts. Prints the
+# verdict, "held" or what it saw instead.
+HOLD_S=${OMARCHY_IPTV_CHNO_HOLD_S:-3}
+steady_playing() {
+  local want=$1 first="" now i
+  for ((i = 0; i < 100; i++)); do
+    [[ "$(svc "['nowPlaying']['chno']")" == "$want" && "$(svc "['player']['up']")" == true ]] && break
+    sleep 0.1
+  done
+  first=$(playing_token)
+  for ((i = 0; i < HOLD_S * 5; i++)); do
+    sleep 0.2
+    now=$(playing_token)
+    [[ $now == "$first" ]] || { echo "moved:$first->$now"; return 1; }
+  done
+  [[ "$(svc "['nowPlaying']['chno']")" == "$want" ]] || { echo "not-$want:$(svc "['nowPlaying']")"; return 1; }
+  echo held
+}
+# R12's needle, with what it matched on a red: a privacy check that fails
+# with no context cannot be told from a redacted host (scheme://host is the
+# redaction itself). Prints at most three matches, cut after the host.
+url_context() { grep -oE '.{0,60}[a-z]+://[^/"?#@ ]*' <<<"$1" | head -n 3; }
 
 wait_for() {   # wait_for <want> <secs> <cmd...>: bounded, and it SAYS it gave up
   local want=$1 secs=$2; shift 2
@@ -126,15 +202,23 @@ preflight() {
 live() {
   echo "== setup (scratch $SCRATCH)"
   "$RUN" clean >/dev/null
-  mkdir -p "$FIX" "$CACHE"
-  sed "s|__LIVE__|http://127.0.0.1:9/dead/live.m3u8|g" "$HERE/fixtures/harness.m3u.in" >"$FIX/harness.m3u"
+  mkdir -p "$FIX"
+  # F-HARNESS-21: every row served, none dead (qa_served_fixture). The port
+  # is run.sh's; it is read from there rather than written twice, and the
+  # listener check below is what makes that join a call.
+  SERVE_PORT=$(grep -oE '^SERVE_PORT=[0-9]+$' "$RUN" | cut -d= -f2)
+  qa_served_fixture "$HERE/fixtures/harness.m3u.in" "$FIX/chno-served.m3u" "${SERVE_PORT:-0}" \
+    || bad "could not write the served fixture (port '${SERVE_PORT}')"
   : >"$LOG"
+  qa_listener_owned "${SERVE_PORT:-0}" "$SCRATCH/fixtures"
+  [[ $? == 2 ]] || echo "[chno-scenario] 127.0.0.1:${SERVE_PORT} is already held by another process; run.sh's server cannot bind it" >&2
 
-  echo "== start harness (--order playlist)"
+  echo "== start harness (--order playlist, --serve)"
   HARNESS_TIMEOUT=${OMARCHY_IPTV_SCENARIO_TIMEOUT:-300}
-  "$RUN" --keep --timeout "$HARNESS_TIMEOUT" --playlist "$FIX/harness.m3u" >>"$LOG" 2>&1 &
+  "$RUN" --keep --serve --timeout "$HARNESS_TIMEOUT" --playlist "$FIX/chno-served.m3u" >>"$LOG" 2>&1 &
   HARNESS_PID=$!
-  wait_for 20 30 svc "['channels']" || bad "the fixture playlist never loaded; every check below is about nothing"
+  wait_for 20 60 svc "['channels']" || bad "the fixture playlist never loaded; every check below is about nothing"
+  check "the stream server on 127.0.0.1:$SERVE_PORT is this harness's own (F-HARNESS-21)" 'qa_listener_owned "$SERVE_PORT" "$SCRATCH/fixtures"'
 
   echo "== N19 the channel verb"
   # 15 of the fixture's 20 rows carry a usable number; ZDF's "N/A" is not one
@@ -151,6 +235,10 @@ live() {
   check "and it is what is now playing"                     '[[ "$(svc "['\''nowPlaying'\'']['\''id'\'']")" == "$(py "d['\''id'\'']" "$a101")" ]]'
   check "status carries the playing channel's number"       '[[ "$(svc "['\''nowPlaying'\'']['\''chno'\'']")" == "101" ]]'
   check "status carries hasNumbers"                         '[[ "$(svc "['\''hasNumbers'\'']")" == true ]]'
+  # F-HARNESS-21: everything below that reads "what is playing" leans on a
+  # tuned stream STAYING tuned. Asserted, not assumed.
+  held=$(steady_playing 101)
+  check "a tuned channel stays playing (the served fixture holds $HOLD_S s)" '[[ "$held" == held ]] || { echo "   saw: $held"; false; }'
   a0101=$(ipc channel 0101)
   check "leading zeros reach the same channel (CN7)"        '[[ "$(py "d['\''id'\'']" "$a0101")" == "$(py "d['\''id'\'']" "$a101")" ]]'
   a81=$(ipc channel 8-1)
@@ -159,59 +247,83 @@ live() {
   check "a 0042 playlist value answers to 42"               '[[ "$(py "d['\''name'\'']" "$a42")" == "DW English" ]]'
   a1000=$(ipc channel 1000)
   check "an alias attribute is reachable too (CN11)"        '[[ "$(py "d['\''ok'\'']" "$a1000")" == true ]]'
+  tok1000=$(playing_token)
   bad205=$(ipc channel 20509)
   check "an unknown number is an error, not a play"         '[[ "$(py "d['\''ok'\'']" "$bad205")" == false && "$(py "d['\''error'\'']['\''code'\'']" "$bad205")" == "unknown_chno" ]]'
   check "the error says which number, sanitized"            '[[ "$(py "d['\''error'\'']['\''message'\'']" "$bad205")" == "no channel 20509" ]]'
-  check "it did not change what is playing"                 '[[ "$(svc "['\''nowPlaying'\'']['\''chno'\'']")" == "1000" ]]'
+  # The play token (id and play sequence) as well as the number: a refusal
+  # that re-tuned anything at all, the same channel included, moves it.
+  check "it did not change what is playing"                 'np=$(svc "['\''nowPlaying'\'']['\''chno'\'']"); now=$(playing_token); [[ "$np" == "1000" && "$now" == "$tok1000" ]] || { echo "   chno:$np token:$tok1000 -> $now"; false; }'
   junk=$(ipc channel "N/A")
   check "a non-numeric argument is the same error (CN6)"    '[[ "$(py "d['\''error'\'']['\''code'\'']" "$junk")" == "unknown_chno" ]]'
 
   echo "== N20 the bar"
-  check "the bar draws the number"                          '[[ "$(py "d['\''number'\'']" "$(ipc widget)")" == "1000" ]]'
-  check "the tooltip carries it"                            '[[ "$(py "d['\''tooltip'\'']" "$(ipc widget)")" == *"1000"* ]]'
+  check "the bar draws the number"                          'w=$(ipc widget); [[ "$(py "d['\''number'\'']" "$w")" == "1000" ]] || { echo "   widget: $w"; false; }'
+  check "the tooltip carries it"                            'w=$(ipc widget); [[ "$(py "d['\''tooltip'\'']" "$w")" == *"1000"* ]] || { echo "   widget: $w"; false; }'
   ipc set barShowChannelNumber false >/dev/null
   wait_for false 5 svc "['barShowChannelNumber']" || true
-  check "barShowChannelNumber false drops it from the bar"  '[[ "$(py "d['\''number'\'']" "$(ipc widget)")" == "" && "$(py "d['\''chno'\'']" "$(ipc widget)")" == "1000" ]]'
+  check "barShowChannelNumber false drops it from the bar"  'w=$(ipc widget); [[ "$(py "d['\''number'\'']" "$w")" == "" && "$(py "d['\''chno'\'']" "$w")" == "1000" ]] || { echo "   widget: $w"; false; }'
   ipc set barShowChannelNumber true >/dev/null
 
   echo "== N17 / N18 channelOrder"
-  check "playlist order is the shipped order"               '[[ "$(py "d['\''channels'\''][0]['\''name'\'']" "$(cat "$CACHE/channels.json")")" == "Harness Live" ]]'
+  # F-HARNESS-21: the per-source directory the service reads, not the
+  # pre-Sources root.
+  CACHE_DIR=$(active_cache)
+  ipc setScope all >/dev/null
+  park_top
+  # The guide's first row AND the cache file's first entry: the order the
+  # user sees is the playlist's, read from the file the helper wrote.
+  check "playlist order is the shipped order"               'st=$(ipc state); at=$(py "d['\''guide'\'']['\''cursorIndex'\'']" "$st"); nm=$(py "d['\''guide'\'']['\''cursorName'\'']" "$st"); c0=$(py "d['\''channels'\''][0]['\''name'\'']" "$(cat "$CACHE_DIR/channels.json" 2>/dev/null)"); [[ "$at" == 0 && "$nm" == "Harness Live" && "$c0" == "Harness Live" ]] || { echo "   row $at: $nm; cache[0]: $c0 (in ${CACHE_DIR:-no cache dir})"; false; }'
   # N18's real question is whether the flip re-derives from the prepared
-  # entry or re-fetches. The cache file's mtime answers it without depending
-  # on a log line the helper only writes when it has something to say.
-  mtime_before=$(cache_mtime)
-  check "there is a cache to compare against"               '[[ -n "$mtime_before" ]]'
+  # entry or re-fetches. The cache file's identity answers it without
+  # depending on a log line the helper only writes when it has something to
+  # say.
+  id_before=$(cache_identity "$CACHE_DIR")
+  check "there is a cache to compare against"               '[[ -n "$CACHE_DIR" && -n "$id_before" ]] || { echo "   activeCache: $(ipc activeCache)"; false; }'
   ipc set channelOrder number >/dev/null
   wait_for number 5 svc "['channelOrder']" || bad "the service never saw channelOrder=number"
   ipc setScope all >/dev/null
-  ipc move -99 >/dev/null
-  check "number order puts the lowest number first"         '[[ "$(py "d['\''guide'\'']['\''cursorName'\'']" "$(ipc state)")" == "Sky News" ]]'
+  park_top
+  check "number order puts the lowest number first"         'st=$(ipc state); at=$(py "d['\''guide'\'']['\''cursorIndex'\'']" "$st"); nm=$(py "d['\''guide'\'']['\''cursorName'\'']" "$st"); [[ "$at" == 0 && "$nm" == "Sky News" ]] || { echo "   row $at: $nm"; false; }'
   check "the index is untouched by the re-order"            '[[ "$(py "d['\''count'\'']" "$(ipc chnoIndex)")" == 15 ]]'
   check "channel 101 still reaches BBC One HD"              '[[ "$(py "d['\''name'\'']" "$(ipc channel 101)")" == "BBC One HD" ]]'
-  # N18: a re-order is derived from the prepared entry, never re-fetched.
-  check "the flip rewrote no cache, so no helper ran"       '[[ -n "$(cache_mtime)" && "$(cache_mtime)" == "$mtime_before" ]]'
+  # N18: a re-order is derived from the prepared entry, never re-fetched. An
+  # absence needs a window: FLIP_SETTLE_S is longer than a fetch of this
+  # 20-row local file takes (the flip-refetches mutation rewrites it inside
+  # it, spikes/chno-mutations/README.md).
+  sleep "${OMARCHY_IPTV_CHNO_FLIP_SETTLE_S:-3}"
+  check "the flip rewrote no cache, so no helper ran"       'now=$(cache_identity "$CACHE_DIR"); [[ -n "$now" && "$now" == "$id_before" ]] || { echo "   $id_before -> $now"; false; }'
   ipc set channelOrder playlist >/dev/null
 
   echo "== privacy (R12)"
+  # The needle is QA_URL_PAST_HOST_ERE, not a bare `://`: rule 5 redacts to
+  # scheme and host, and the bare needle went red on that redaction itself
+  # (service.lastError after a dead tune, F-HARNESS-22). Stated plainly: with
+  # every row served nothing fails, so no URL-bearing field is populated
+  # when these run, and a full-URL leak into one of them would be seen only
+  # if it happened anyway. The needle itself is proven both ways in
+  # scripts/qa-lib-test.sh; a failing row for R12 to observe is open.
   status_answer=$(ipc state)
-  qa_answer_lacks '://' "$status_answer"
+  qa_answer_lacks "$QA_URL_PAST_HOST_ERE" "$status_answer"
   case $? in
-    0) ok "the state answer carries no URL" ;;
-    1) bad "the state answer carries a URL" ;;
+    0) ok "the state answer carries no URL past scheme and host" ;;
+    1) bad "the state answer carries a URL past its host"; url_context "$status_answer" | sed 's/^/   /' ;;
     *) bad "the IPC did not answer at all: 'no URL' is not evidence" ;;
   esac
   checks=$((checks + 1))
   chan_answer=$(ipc channel 101)
-  qa_answer_lacks '://' "$chan_answer"
+  qa_answer_lacks "$QA_URL_PAST_HOST_ERE" "$chan_answer"
   case $? in
-    0) ok "the channel answer carries no URL" ;;
-    1) bad "the channel answer carries a URL" ;;
+    0) ok "the channel answer carries no URL past scheme and host" ;;
+    1) bad "the channel answer carries a URL past its host"; url_context "$chan_answer" | sed 's/^/   /' ;;
     *) bad "the IPC did not answer at all: 'no URL' is not evidence" ;;
   esac
   checks=$((checks + 1))
 }
 
 trap cleanup EXIT
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 case ${1:-live} in
   check-tree) preflight ;;
@@ -239,7 +351,7 @@ esac
 if [[ ${1:-live} == check-tree ]]; then
   EXPECTED_CHECKS=14
 else
-  EXPECTED_CHECKS=43
+  EXPECTED_CHECKS=45
 fi
 ran=$checks
 checks=$((checks + 1))

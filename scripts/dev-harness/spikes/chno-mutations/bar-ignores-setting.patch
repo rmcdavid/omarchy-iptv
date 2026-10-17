@@ -1,0 +1,9 @@
+diff --git a/BarWidget.qml b/BarWidget.qml
+index 0000000..0000000 100644
+--- a/BarWidget.qml
++++ b/BarWidget.qml
+@@ -41,3 +41,3 @@ BarWidget {
+   // settings are separate.
+-  readonly property bool showChannelNumber: Model.boolSetting(setting("barShowChannelNumber", true))
++  readonly property bool showChannelNumber: true  // MUTATION (F-HARNESS-21): barShowChannelNumber ignored
+ 

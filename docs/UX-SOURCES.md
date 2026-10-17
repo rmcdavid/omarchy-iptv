@@ -1666,7 +1666,7 @@ key-scenario X5 (one notification per report through a stand-in
 none carrying a URL or the credential). The rendered card is UNVERIFIED on a
 display.
 
-### 5.10 Saved sources not loaded (D-SINK-19 round 12, R22a; round 13, R23; 2026-10-13; round 14, R24; round 15, R25; 2026-10-14)
+### 5.10 Saved sources not loaded (D-SINK-19 round 12, R22a; round 13, R23; 2026-10-13; round 14, R24; round 15, R25; 2026-10-14; round 16, R26; 2026-10-16)
 
 `~/.local/state/omarchy-iptv/state.json` is the only copy of the user's
 sources and provider URLs. When it exists but cannot be read -- permission
@@ -1819,6 +1819,21 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    (item 6). The Sources header in that block is observed by B22; the
    notification and the guide body keep the notice's title there (a copy
    question raised to the lead, `ARCHITECTURE-SOURCES.md` round 15).
+   [Round 16, 2026-10-16, R26a: the mode can also begin at a SAVE. Every
+   save the session makes now reloads `state.json` first and is decided by
+   what that load finds, so a path the watch lost without a signal -- a
+   `state.json` link or the state-folder link re-pointed at a place with no
+   `state.json` -- begins the mode at the next save instead of that save
+   creating a file there (D-SINK-21). Observed by key-scenario B28 (the
+   folder link re-pointed at an empty folder, then an in-app label edit:
+   `edit:true created:none holds:[] blocked:absent told:1
+   next:state_unreadable`); the file-link twin is pinned in node only. The
+   reason is `absent` and the copy is that row's: nothing new is drawn. The
+   change that asked for the save shows on screen and its source call
+   answered `ok` -- the call answers when its write is ISSUED (R13), and
+   the read that refuses it comes after (R26e, stated, not changed) -- so
+   the notification is what tells the user it was not kept, and the next
+   source call answers `state_unreadable`.]
 
 5. It ends by itself when a load that IS a state arrives: the file put back
    in place (the guide's file watch reloads it, key-scenario B7) or fixed and
@@ -1831,7 +1846,31 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    write after it) -- so that session stays in the mode until a restart,
    which reads the restored file. Nothing is lost, and the `absent` sentence
    already ends with the restart. The README no longer says a good copy is
-   enough on its own for that case.] Writes resume at once, and a later episode in
+   enough on its own for that case.] [Round 16, 2026-10-16, R26a
+   (D-SRC-35): it also ends at the next SAVE, and that is how a returned
+   link target is noticed. A save asked for in the mode (a favourite, a
+   hidden group, a saved or forgotten search, a removed recent: each calls
+   `saveState`) reloads the file first unless the reason is `init-timeout`
+   (`Model.stateSavePlan` answers `verify`), and a load that is a state
+   lifts the mode; a source call (switch, edit, retry, remove:
+   `sourcesReady` and `removeSource`) meeting the mode is refused as before
+   and asks for one reload (`Model.stateBlockRecheck`), so the FIRST source
+   call after the file comes back is refused and the SECOND lands
+   (key-scenario B29 `away:absent told:1 first:state_unreadable lifted:[]
+   second:true`). Accepted and stated by the lead. `a` and `c` are refused
+   by the guide itself (`Model.sourcesAddAllowed`) and ask for no reload.
+   What a favourite made at that moment keeps, by calling the shipping
+   `Service.qml` through `tests/service-harness.js` (the documents lane's
+   probe, every block shape here, the path repaired with no signal): in a
+   block that began MID-session it is kept and written; at a no-write
+   START it lifts the mode but is not kept -- the file's state is applied
+   over it -- which the notification's "changed now are not kept" already
+   says. The restart stays the way out for every reason. For
+   `init-timeout` no save and no source verb re-reads, but a watched load
+   of a good state lifts it like any other reason (`liftStateBlock` does
+   not look at the reason; the claims lens's probe, re-run on
+   lane-clean-f1: `before:init-timeout ... afterForeignEdit:[] switch:ok`
+   on both hosts).] Writes resume at once, and a later episode in
    the same session is told again -- pinned since round 13 (R23a: node `R23a
    (<mode> host, mid-session, <between> between): TWO no-write episodes ...`
    and key-scenario B9 `told:1/2`, both seen red with the re-arm deleted).
@@ -1886,6 +1925,23 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    key-scenario segment drives a link; the measurements are the lenses' rigs
    (session scratch), recorded in `ARCHITECTURE-SOURCES.md`'s round-15
    rulings and the contract's fact seven.]
+   [Round 16, 2026-10-16, R26a (D-SRC-29 closed): such a replacement is
+   still not seen WHEN it happens -- the watch loses the path without a
+   signal, and R26d refuses a periodic reload -- but it is seen at the next
+   save, which reloads the file first, merges it with the change being
+   saved through R24a's rules (item 8), and re-arms the watch. key-scenario
+   B23-B25 (`mv`, `sed -i`, `rm` + `cp` over a linked `state.json`, each
+   carrying a hand edit, then an in-app label edit): the file and memory
+   hold both edits and the old target is untouched; B26 (`ln -sfn` to
+   another state): THAT file keeps its own label and favourite, takes the
+   in-app edit, and becomes what the session holds. A link re-pointed at a
+   file that does not exist yet creates nothing and begins the mode (item 4;
+   node only) -- outside the three windows of milliseconds the folder-link
+   bracket below names, in which the save still creates it at 0644. Until that next save the guide shows what it had and
+   nothing is written (FRESH, stated: node `R26d (...): FRESH, stated --
+   ...`), so nothing is lost; the README says to restart to see the change
+   at once. The README's advice changes from "restart straight after such
+   a tool" to "it is noticed at the next save".]
    [Round 15, R25c (D-SRC-32): the state FOLDER gets the file's rule. A link
    at `~/.local/state/omarchy-iptv` that leads to a folder is followed, and
    the start-up `state init` and every writing `state` command make the
@@ -1901,7 +1957,21 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    that shape with `<folder> is a symbolic link whose target is missing or is
    not a folder; nothing was written` (code `folder_unusable`). The watch
    when the FOLDER is a link: measured since by both round-15 data-loss and claims lenses, 2026-10-14: through a valid folder link the service sees a helper write, a temp-and-rename edit and an in-place edit, and keeps all three; re-pointing the folder link (`ln -sfn`) raises nothing, nor does a later edit in the new folder, and the next own save writes the session's state into the new folder's `state.json` (D-SRC-40, the folder twin of D-SRC-29). No key-scenario segment drives a
-   folder link.]
+   folder link.] [Round 16, 2026-10-16, R26a (D-SRC-40 and D-SINK-21
+   closed): the re-point still raises nothing, and the next save now READS
+   the new folder's `state.json` first: one that is there is merged with
+   the change and becomes what the session holds, the old folder untouched
+   (key-scenario B27 `new:A=f2-own,C=app-fl,favs=t:f2.uk
+   old:A=seed,C=c-seven,favs=t:seed.uk`); none there begins the mode with
+   nothing created (item 4, B28) -- where up to and including 0.14.1 the
+   save created a 0644 `state.json` holding every source URL, unnoticed.
+   Three windows still create it, each milliseconds long unless the disk
+   stalls (the README's link bullet names them; lane-clean-f1's node
+   probe over the shipping `Service.qml`): a save asked while the previous
+   write is in flight skips its read; a re-point landing between the
+   read's load and the write it allows; and the 2 s watchdog firing. B23-B31 drive the
+   links now; the README says that after re-pointing and restarting, the
+   NEW folder is what loads.]
    [Round 15, D-SRC-34: a `state.json` link into a folder the user cannot
    write is a sentence, `state.json is a symbolic link into a folder that
    cannot be written (Permission denied); nothing was written`, exit 1, the

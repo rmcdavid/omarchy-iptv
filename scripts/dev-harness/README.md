@@ -11,7 +11,10 @@ Keep runs short; `run.sh` kills Quickshell after `--timeout` seconds
 (default 15). An `EXIT` trap reaps everything it started (the fixture HTTP
 server, Quickshell and any harness mpv) on a normal exit, the timeout,
 Ctrl-C or SIGTERM; a SIGKILL of `run.sh` cannot be trapped, so the next
-start also reaps a stale fixture server. The playlist/EPG source is echoed
+start also reaps a stale fixture server. The player is ended by pid --
+TERM, a bounded 5 s wait, then KILL and a final look (`qa_reap_players` in
+`scripts/qa-lib.sh`, F-HARNESS-30) -- because a served player under a cage
+that is going away ignores TERM, and six once spun for most of an hour. The playlist/EPG source is echoed
 as `scheme://host` only and `updateEntryInline` logs the entry's keys, never
 its values: a real provider URL would carry credentials into the terminal
 scrollback.
@@ -452,7 +455,10 @@ harness log is `$SCRATCH/scenario.log`.
 
 `chno-scenario.sh` covers the service side: the `channel` IPC verb (which
 PLAYS, ruling CN1), the index counts, `channelOrder`, and the bar's number
-slot. Guide digit entry is Lane A's and is not in it.
+slot. Guide digit entry is Lane A's and is not in it. Both chno scenarios
+play every row from run.sh's own fixture server (`--serve`, port 8765, which
+must be free and is asserted to be this harness's), and under a nested cage
+they need `WLR_RENDERER=gles2` for mpv (F-HARNESS-21/22).
 
 ```bash
 scripts/dev-harness/chno-scenario.sh check-tree   # no display, no quickshell
@@ -957,6 +963,7 @@ lane's running harness is never reaped by a clip run.
 ```
 scripts/dev-harness/key-scenario.sh check-tree            # the instrument arm, node only; run by check.sh
 scripts/dev-harness/key-scenario.sh                       # the instrument arm, then the real Service.qml under cage, with a transcript
+scripts/dev-harness/key-scenario.sh --baseline 1c88877      # the R26 red run: round 15's code and 0.14.1 (120 / 9: B23-B31, read before write)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-m2  # the round-12 red run: round 11's code (97 / 9: B1-B8, and N1 for its new field only)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-z2  # the round-11 red run: round 10's code (68 / 30 under the 97-check harness: G1, G2, G5, F4, U1-U7, K1-K3, Z1-Z3, A1, Y2, Y3, Q1, Q2, V1, H1, X1-X6; eight of them NOFIELD-only)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-y2  # round 10's baseline is NOT a red run: round 9's code reads 87 / 0, because no segment observes R20a-R20c at the sink (Y4 reds only the S1b export)
@@ -1458,6 +1465,8 @@ transcripts are in lane A's session scratch directory, not the tree. The
 R24a merge has no live segment: the ruling asked for the fixture table and
 `tests/service-harness.js`, and the data-loss lens's WF FAV WOK HADD FAV
 runs there on both hosts, both echo modes, parked, in flight and failed.
+[2026-10-16, F-HARNESS-31: in flight it now LOSES the helper's record, the
+measured view's same-instant loss; parked and failed still keep both.]
 [Round 15: B19 is the merge's live segment now, and two of its decisions
 that survived every check above are pinned (Round 15 below).]
 
@@ -1546,7 +1555,9 @@ in-flight save) has no live segment -- its window is milliseconds -- and
 is pinned in node; R25b's caps and R25c's folder link are not driven live
 (the first needs 49 records seeded, the second a link the scenario does
 not build); no segment drives a symlinked `state.json` at all, so the
-link's limit (R25e) rests on the round-14 lenses' rigs.
+link's limit (R25e) rests on the round-14 lenses' rigs. [Round 16: B23-B29
+drive a linked `state.json` and a linked state folder now (Round 16
+below).]
 
 What changed in the rigs:
 - The scenario's cage is handed 1500 s (was 500): a mutated tree whose
@@ -1588,6 +1599,97 @@ What changed in the rigs:
 - `tests/test_state.py` and `tests/test_source.py`: their in-process
   `run()` disarms the helper's init alarm after every call, so a module run
   alone under load is no longer killed by its own `SIGALRM` (F-HARNESS-27).
+
+#### Round 16 (R26): read before write, no write inside a load, and the reap
+
+key-scenario.sh B23..B31, each under the scenario's own nested cage on a
+private session bus, are lane W's service rig made checks (lane-clean-a1,
+2026-10-16). Every segment seeds the state with custom labels and one
+favourite, arranges a link (`flink`: `state.json` a link to `links/T1`,
+`T2` holding another state; `dlink`: the state FOLDER a link to
+`links/F1`, `F2` holding another state, `F3` an EMPTY folder made by plain
+`mkdir` under the scenario's umask; `dir`: the plain folder), starts the
+shell, does one thing the watch cannot see, then makes one in-app change
+through `ipc updateSource` and reads the file, memory and the old target.
+B23-B25 (S29): the linked `state.json` replaced by `mv`, `sed -i` and `rm`
++ `cp`, each carrying a hand edit -- both edits kept, the old target
+untouched. B26 (S29-ln): the link re-pointed with `ln -sfn` at `T2` --
+`T2` keeps its own label and favourite and takes the edit, and memory is
+`T2`'s. B27 (S40): the folder link re-pointed at `F2` -- the same. B28
+(S21, D-SINK-21): at `F3` -- nothing created, `blocked:absent`, `told:1`,
+the call `ok` and the next `state_unreadable`. B29 (S35, D-SRC-35): a
+link's target moved away (the mode, told) and back (unseen) -- the first
+source call refused, its re-read lifts the mode, the second lands. B30
+(INLOAD, D-SRC-46): a save failed and held (the folder 0500), the folder
+given back, a hand-run `state favorite add` -- the merge's save is reported,
+`inFlight:0 saveFailed:false`. B31 (IDLE, R26d): 30 s of an idle shell
+loads the file not once, and one save reads it once. FRESH, a replacement
+with no save after it, has no check: it is the stated gap, and B31 is what
+proves no timer covers it. Counts are the summary line's, the floor 128
+lettered checks: forward 129 / 0 (`key-20261016-084228-582473`, on
+lane-clean-a1 5ee0e5f; 129 / 0 on 3003ca8 too); `--baseline 1c88877` 120 /
+9, exactly B23-B31 (B28 `created:644 holds:[state.json] blocked: told:0`);
+through `--tree`, `r26a-no-read.patch` 122 / 7 (B23-B28, B31),
+`r26b-no-defer.patch` 128 / 1 (B30), `r26a-no-verb-recheck.patch` 128 / 1
+(B29), `r26d-periodic-reload.patch` 126 / 3 (B31 `idle-loads:+15`, and B28
+and B29, which the timer answers first); `d3-save-parked.patch` now reads
+76 / 53 with D3 and W3 still red (`save-parked:NOFIELD`), because every
+in-app save waits behind a read whose base load only `save-parked` keeps
+from being applied over the change. One `r26a-no-read` run is VOID and is
+not cited: `key-scenario.sh` was edited while that run read it, and bash
+reads a script by offset (`line 2730: wn: command not found`, earlier
+segments run again); it was ended by its recorded pid and re-run clean.
+Do not edit a scenario while a run of it is going. The transcripts are in
+lane A's session scratch directory, not the tree.
+
+What changed in the rigs:
+- `run.sh reap` and `run.sh`'s own exit end the player through
+  `qa_reap_players` (F-HARNESS-30): TERM, a bounded 5 s wait, KILL by pid
+  and a final look. A served player under a cage that is going away
+  ignores TERM, and phase 1 of this work left six of them spinning at 42-52
+  % of a core each for 35-48 minutes. `scripts/qa-lib-test.sh` pins it
+  against a TERM-ignoring stand-in mpv: `run.sh reap` ends it and says
+  `sending KILL`; 1c88877's `run.sh` left it alive and said nothing. The
+  six `--serve` scenarios that end through `run.sh reap` (player, m3,
+  rewind, pip, tls, text) and the two chno scenarios, which kill their
+  `run.sh` by pid and call `qa_reap_players` themselves, are all covered.
+  The helper's own `player stop` is another path and already escalates to
+  SIGKILL (quit, TERM at 2 s, then KILL; read, not changed).
+- The chno scenarios play every row from `run.sh`'s fixture server
+  (`--serve`, port 8765, asserted to be this harness's own by
+  `qa_listener_owned`) and compare a play token, the channel id and the
+  service's `player.seq` (F-HARNESS-21, F-HARNESS-22; lane H, squashed into
+  86d8265). Their mutation patches and the seen-red table are under
+  `spikes/chno-mutations/`. The R12 privacy needle is
+  `QA_URL_PAST_HOST_ERE`, which matches a URL with something after its
+  host, so a compliant `scheme://host` redaction is not read as a leak;
+  `sources-scenario.sh`, `pip-scenario.sh` and `id-rotate-scenario.sh` still
+  carry the bare `://` needle (not migrated).
+- `spikes/key-mutations/` gains the four R26 patches above, and
+  `r25a-keep-landed.patch` and `r25a-clear-every-saved.patch` are re-made
+  because R26b wrapped `onSaved`'s body (the same decisions broken).
+- The node double (`tests/service-harness.js`, R26c, F-HARNESS-29) models
+  what lane W and lane S measured on a bare FileView: a `setText` inside the
+  view's own load is "silent" (no `saved`, the echo delivered),
+  `handlerWrites` counts writes made inside any of its handlers, a save that
+  creates the file sets `mode` to 0666 & ~`umask` and one over an existing
+  file keeps it, and `h.replace(change)` changes the disk and unarms the
+  watch with no load delivered; `h.verifyWatchdog()` runs the read's
+  watchdog from its own text. Dev's suite with only this double swapped in
+  reads 12 of 2,502 red: the old double was more forgiving than the view.
+  [lane-clean-f1, 2026-10-16: two more. F-HARNESS-31 -- `h.foreign`
+  delivers nothing while one of our writes is queued (lane W's `inflight`,
+  30 of 30), counted in `h.droppedForeign`; sixteen pins that passed on
+  the forgiving shape are re-levelled to the same-instant loss (16 of 2,561
+  red both ways). F4 -- `h.elapse(ms)` moves the clock and fires the read's
+  watchdog at the interval the tree's `Service.qml` declares (Qt's default
+  1000 ms when none), so the 2 s bound is pinned; `r26a-watchdog-20ms` and
+  `r26a-watchdog-no-interval` under `spikes/key-mutations/` are its reds.]
+- The FileView measurements R26 rests on (`spikes/filewatch-links/`,
+  `measure.sh` with sets `links`, `inload`, `inflight`, `timing`, a service
+  rig and its results) are committed on branch `lane-clean-w-probe` and
+  are NOT in this tree; lane S's probe is in the session's scratch
+  directory. The contract's eighth FileView fact records what they printed.
 
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 

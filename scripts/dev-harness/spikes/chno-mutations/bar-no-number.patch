@@ -1,0 +1,13 @@
+diff --git a/BarWidget.qml b/BarWidget.qml
+index 0000000..0000000 100644
+--- a/BarWidget.qml
++++ b/BarWidget.qml
+@@ -50,7 +50,7 @@ BarWidget {
+   // The service derives this from the loaded cache. Guarded for `undefined`
+   // because the harness runs this widget against a pre-change service too,
+   // and an undefined read must never invent a value (engineering rule 10 (dev branch)).
+-  readonly property string nowPlayingChno: playing && service.nowPlayingChno !== undefined ? String(service.nowPlayingChno) : ""
++  readonly property string nowPlayingChno: ""  // MUTATION (F-HARNESS-21): the bar never learns the playing number
+   readonly property bool configured: serviceReady && service.configured === true
+   readonly property bool refreshing: serviceReady && service.refreshing === true
+   readonly property bool hasError: serviceReady && service.status === "error"
