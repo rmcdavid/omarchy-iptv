@@ -1563,6 +1563,57 @@ function stateWriteGate(ctx) {
   return "write"
 }
 
+// D-SINK-19 R26a / R26b (2026-10-16): what Service.saveState does with ONE
+// save, given the gate's answer (stateWriteGate) and where the call stands.
+//   verifyPending a read-before-write is out (a reload issued, no load yet)
+//   gate          stateWriteGate's answer
+//   blocked       the no-write mode's reason
+//   inHandler     the call is inside one of stateFile's own handlers
+//   verifyDone    the call IS the verify's finish (or its watchdog's)
+//   writeTurn     the call is a deferred turn of saveState's own
+//   inFlight      one of our writes is still being reported on
+// -> "join"   the read in flight decides this save too
+//    "park"   no state loaded or dirs not ready: held for the load
+//    "refuse" the no-write mode, and nothing a re-read can lift now
+//    "verify" reload state.json first and decide on what it finds
+//    "defer"  ask again from a turn of its own (Qt.callLater)
+//    "write"  issue the write now
+// Every write is asked for again from a turn of its own before it is
+// issued, because a setText inside stateFile's own onLoaded writes the file
+// and raises NO `saved` (D-SRC-46, measured 16 of 16), and a turn called
+// from a handler cannot tell which handler it is in. The read is skipped
+// while one of our writes is in flight: the view DROPS a reload then
+// (measured 30 of 30), and the disk is our own write. A refused save
+// re-reads unless the reason is init-timeout (no load can lift it, R23c)
+// or the refusal is the verify's own answer; inside a handler the load
+// that is running IS that read.
+function stateSavePlan(ctx) {
+  var c = ctx || {}
+  if (c.verifyPending === true) return "join"
+  var gate = str(c.gate)
+  if (gate === "park") return "park"
+  if (gate === "refuse") {
+    if (str(c.blocked) === "init-timeout" || c.verifyDone === true || c.inHandler === true) return "refuse"
+    return "verify"
+  }
+  if (gate !== "write") return "refuse"
+  if (c.verifyDone === true) return "write"
+  if (c.inHandler === true) return "defer"
+  if ((Number(c.inFlight) || 0) > 0) return c.writeTurn === true ? "write" : "defer"
+  return "verify"
+}
+
+// R26a (D-SRC-35): a source verb that meets a no-write mode a load can lift
+// asks for ONE reload and is refused now; if the file is back, the load
+// lifts the mode and the next call goes through. Not for init-timeout (no
+// load lifts it), not from inside a load (that load is the read), and not
+// while a read-before-write is already out.
+function stateBlockRecheck(ctx) {
+  var c = ctx || {}
+  var b = str(c.blocked)
+  return b !== "" && b !== "init-timeout" && c.inHandler !== true && c.verifyPending !== true
+}
+
 // The user is told ONCE per no-write episode: this sentence, as a desktop
 // notification and a console line. It names the file and what to do, and
 // never a URL (it is composed from the reason and the path alone).
@@ -1645,6 +1696,6 @@ export {
   canonValue, mergeSetField, recordFieldsDiffering, MERGE_WHOLE_FIELDS,
   mergeForeignState, MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount,
   mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
-  stateInitFound, stateLoadDecision, stateWriteGate, stateUnreadableNotice,
-  stateBlockedHeader
+  stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
+  stateBlockRecheck, stateUnreadableNotice, stateBlockedHeader
 }
