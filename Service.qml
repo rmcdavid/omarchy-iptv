@@ -2844,9 +2844,10 @@ Item {
         // as a proxy for "it sits in the healthy branch", and a block
         // inserted ahead of it is what turns the proxy red.
         root.applyRewind(status)
-      } else if (code === "not_implemented" || code === "no_output") {
-        // The helper cannot tell (stub or crash): neither healthy nor a
-        // strike, so a missing subcommand never reaps a working player.
+      } else if (Model.helperCannotTell(code)) {
+        // The helper cannot tell (stub, crash, or a damaged part the stub
+        // refused, D-REL-7): neither healthy nor a strike, so a missing
+        // subcommand never reaps a working player.
         if (root.healthFailures === 0) console.warn("omarchy-iptv: status check unavailable:", Model.statusReason(status))
       } else {
         root.healthFailures += 1

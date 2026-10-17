@@ -18,7 +18,8 @@ THE SHAPE.
                       then its tail (the `if __name__ == "__main__":` guard)
   bin/helper/NN-*.py  each a contiguous run of the body between them, cut at
                       a section banner of the one-file helper (CUTS below),
-                      behind the generated HEADER
+                      behind the generated HEADER and above the generated
+                      last line (WITNESS below), which the stub checks
 
 MODES (exactly one):
   --write   cut the one-file helper (--from-git REF, or --input FILE) into
@@ -26,16 +27,21 @@ MODES (exactly one):
             whose bin/helper/ already holds anything.
   --verify  the same cut in memory against the tree on disk, every file byte
             for byte, and the proof that the cut loses nothing: head + body +
-            tail is the input, and the parts without their headers
-            concatenate to the body.
+            tail is the input, and the parts without their headers and last
+            lines concatenate to the body. A stub that differs is reported by
+            region (head, loader, tail), because the head is the one-file
+            helper's own text and is edited like any other code.
   --check   the tree as it stands, which the gate runs: HELPER_PARTS is read
             the one way every reader reads it (scripts/helper_files.py); the
             stub carries exactly the LOADER block those names generate,
             directly after the shield, so nothing is compiled before it; every
-            name is a file under bin/helper/ that starts with HEADER and
-            compiles, and bin/helper/ holds nothing else. The size ceiling is
-            release.py's, on every allowlisted file, and its resolver proves
-            every part ships.
+            name is a file under bin/helper/ that starts with HEADER, ends with
+            its WITNESS line and compiles, and bin/helper/ holds nothing else.
+            The size ceiling is release.py's, on every allowlisted file, and
+            its resolver proves every part ships.
+  --seal    after an ordinary edit to a part (the parts are cut once and then
+            edited as code): rewrite each part's last line for the bytes above
+            it and the stub's loader for its HELPER_PARTS, then --check.
 
 Exit status: 0 clean, 1 a problem (one line each on stderr), 2 usage.
 Python 3 standard library only; ASCII only.
@@ -43,8 +49,10 @@ Python 3 standard library only; ASCII only.
 
 import argparse
 import os
+import re
 import subprocess
 import sys
+import zlib
 
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, SCRIPT_DIR)
@@ -80,6 +88,21 @@ HEADER = (
     'from __future__ import annotations\n'
 )
 
+# The fixed last line of every part (P2 of the D-REL-7 reviews). The stub
+# refuses a part whose last line is not exactly this for the bytes above it,
+# which is how a part cut off -- by a checkout half done, a copy interrupted,
+# a disk that filled -- is told from a whole one: a truncated file has lost
+# its last line, wherever it was cut. A checksum and a length rather than a
+# cryptographic digest, on purpose: the line sits in the file it describes,
+# so anyone able to rewrite the part can rewrite the line, and no digest
+# stored there can authenticate anything. It detects DAMAGE, and CRC-32
+# catches every truncation and every error burst up to 32 bits; zlib is
+# already loaded by the helper's first part, where hashlib is deliberately
+# imported late (01-core.py's import note). The length is for a human
+# comparing two copies.
+WITNESS = '# end of %s: %d bytes above, crc32 %08x\n'
+WITNESS_SHAPE = re.compile(r'^# end of \S+: [0-9]+ bytes above, crc32 [0-9a-f]{8}\n$')
+
 LOADER = '''
 
 # D-REL-7: the rest of the helper is in the files below, under bin/helper/,
@@ -91,26 +114,65 @@ LOADER = '''
 # AFTER the shield above, which is the point of the order: what a same-uid
 # process can read is now the interpreter starting and compiling this short
 # file. The list is fixed and the files are read from this file's own
-# directory, never from argv or the environment, and compile() writes no
-# bytecode, so nothing is written into the plugin directory. Generated, and
-# checked by the gate, by the split script on the dev branch.
+# directory (through any symlink to it), never from argv or the environment,
+# and compile() writes no bytecode, so nothing is written into the plugin
+# directory. ALL of them are read and checked before ANY of them runs: a part
+# missing, unreadable, empty, cut off (its generated last line is gone or
+# does not match the bytes above it), not text, or not compiling, or a file
+# here the list does not name, ends the run before a verb can write anything,
+# with one JSON error object on stdout and one line on stderr, like every
+# other failure. Generated, and checked by the gate, by the split script on
+# the dev branch.
 HELPER_PARTS = (
-%s)
+@PARTS@)
 
 
 def _load_parts(namespace: dict) -> None:
     import os
-    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "helper")
+    import zlib
+
+    def refuse(name, what):
+        import json
+        line = "bin/helper/%s %s; reinstall the plugin" % (name, what)
+        sys.stdout.write(json.dumps({"ok": False, "part": name, "error": {
+            "code": "helper_damaged", "message": line}}) + "\\n")
+        sys.stdout.flush()
+        sys.stderr.write("omarchy-iptv: %s\\n" % line)
+        raise SystemExit(1)
+
+    here = os.path.join(os.path.dirname(os.path.realpath(__file__)), "helper")
+    codes = []
     for name in HELPER_PARTS:
         path = os.path.join(here, name)
         try:
             with open(path, "rb") as handle:
                 source = handle.read()
         except OSError as error:
-            sys.stderr.write("omarchy-iptv: cannot read bin/helper/%%s (%%s); reinstall the plugin\\n"
-                             %% (name, error.strerror or type(error).__name__))
-            raise SystemExit(1)
-        exec(compile(source, path, "exec", dont_inherit=True), namespace)
+            refuse(name, "cannot be read (%s)" % (error.strerror or type(error).__name__))
+        if not source:
+            refuse(name, "is empty")
+        end = source.rfind(b"\\n", 0, len(source) - 1) + 1
+        if source[end:] != (b"# end of %s: %d bytes above, crc32 %08x\\n"
+                            % (name.encode(), end, zlib.crc32(source[:end]))):
+            refuse(name, "is cut off or altered (its last line does not match it)")
+        try:
+            if b"\\0" in source:
+                raise UnicodeError
+            source.decode("utf-8")
+        except UnicodeError:
+            refuse(name, "is not text")
+        try:
+            codes.append(compile(source, path, "exec", dont_inherit=True))
+        except (SyntaxError, ValueError) as error:
+            refuse(name, "does not compile (line %s)" % (getattr(error, "lineno", None) or "?"))
+    try:
+        found = os.listdir(here)
+    except OSError as error:
+        refuse("", "cannot be listed (%s)" % (error.strerror or type(error).__name__))
+    for name in sorted(set(found) - set(HELPER_PARTS)):
+        refuse(ascii(name)[1:-1], "is not one of this helper's parts")
+    for code in codes:
+        exec(code, namespace)
 
 
 _load_parts(globals())
@@ -124,7 +186,27 @@ class SplitError(Exception):
 
 
 def loader_block(names):
-    return LOADER % ''.join('    "%s",\n' % name for name in names)
+    return LOADER.replace('@PARTS@', ''.join('    "%s",\n' % name for name in names))
+
+
+def witness(name, body):
+    """The last line the split writes under `body` in part `name`, which
+    the stub's loader recomputes byte for byte (the same format as WITNESS,
+    inlined there so the stub reads no table)."""
+    data = body.encode('utf-8')
+    return WITNESS % (name, len(data), zlib.crc32(data))
+
+
+def split_witness(name, text):
+    """-> (the part above its last line, problem or None)."""
+    if not text.endswith('\n'):
+        return text, 'does not end with a newline, so it has no generated last line'
+    end = text.rfind('\n', 0, len(text) - 1) + 1
+    body, last = text[:end], text[end:]
+    if last != witness(name, body):
+        return body, ('does not end with its generated last line for the bytes above it '
+                      '(cut off, or edited without --seal)')
+    return body, None
 
 
 def one_line(lines, prefix, what):
@@ -150,14 +232,17 @@ def cut(text):
     head = ''.join(lines[:shield + 1])
     body = ''.join(lines[shield + 1:guard])
     tail = ''.join(lines[guard:])
-    parts = [(name, HEADER + ''.join(lines[a:b])) for (name, _), a, b in zip(CUTS, starts, ends)]
+    parts = []
+    for (name, _), a, b in zip(CUTS, starts, ends):
+        above = HEADER + ''.join(lines[a:b])
+        parts.append((name, above + witness(name, above)))
     names = [name for name, _ in parts]
     stub = head + loader_block(names) + tail
     # The two facts the cut rests on, checked rather than trusted.
     if head + body + tail != text:
         raise SplitError('the cut does not reassemble the input')
-    if ''.join(part[len(HEADER):] for _, part in parts) != body:
-        raise SplitError('the parts without their headers are not the body')
+    if ''.join(split_witness(name, part)[0][len(HEADER):] for name, part in parts) != body:
+        raise SplitError('the parts without their headers and last lines are not the body')
     return stub, parts
 
 
@@ -201,13 +286,72 @@ def verify(root, text):
             problems.append('%s: unreadable (%s)' % (rel, error))
             continue
         if have != want:
-            problems.append('%s differs from the cut' % rel)
+            problems.append('%s differs from the cut%s' % (rel, stub_region(have, want) if rel == STUB else ''))
     on_disk = sorted(os.listdir(os.path.join(root, PART_DIR))) if os.path.isdir(
         os.path.join(root, PART_DIR)) else []
     extra = sorted(set(on_disk) - {name for name, _ in parts})
     if extra:
         problems.append('%s holds files the cut does not: %s' % (PART_DIR, ', '.join(extra)))
     return problems
+
+
+def stub_regions(text):
+    """-> (head through the shield, the loader, the tail from the guard), or
+    None when the stub does not have that shape."""
+    lines = text.splitlines(keepends=True)
+    shields = [i for i, line in enumerate(lines) if line == SHIELD_LINE]
+    guards = [i for i, line in enumerate(lines) if line == GUARD_LINE]
+    if len(shields) != 1 or len(guards) != 1 or guards[0] < shields[0]:
+        return None
+    s, g = shields[0], guards[0]
+    return ''.join(lines[:s + 1]), ''.join(lines[s + 1:g]), ''.join(lines[g:])
+
+
+def stub_region(have, want):
+    """Which of the stub's three regions differ, for --verify's line: the head
+    is the one-file helper's own text, so an edit made since the cut (the
+    shield docstring at c46ce50) shows there and nowhere else."""
+    a, b = stub_regions(have), stub_regions(want)
+    if a is None or b is None:
+        return ' (it is not head, loader, tail)'
+    which = [label for label, x, y in zip(('head', 'loader', 'tail'), a, b) if x != y]
+    return ' (in its %s)' % ' and '.join(which)
+
+
+def seal(root):
+    """After an ordinary edit to a part: rewrite every part's generated last
+    line for the bytes above it, and the stub's loader for its HELPER_PARTS.
+    Nothing else is touched; --check then judges the result."""
+    stub = helper_files.read(root, STUB)
+    names = helper_files.part_names(stub)
+    if not names:
+        raise SplitError('%s assigns no HELPER_PARTS; --seal works on the split helper' % STUB)
+    regions = stub_regions(stub)
+    if regions is None:
+        raise SplitError('%s does not have one shield line and one main guard' % STUB)
+    changed = []
+    for name in names:
+        rel = '%s/%s' % (PART_DIR, name)
+        text = helper_files.read(root, rel)
+        body, problem = split_witness(name, text)
+        if problem is not None and not WITNESS_SHAPE.match(text[len(body):]):
+            body = text if text.endswith('\n') else text + '\n'
+        sealed = body + witness(name, body)
+        if sealed != text:
+            write_text(os.path.join(root, rel), sealed)
+            changed.append(rel)
+    resealed = regions[0] + loader_block(names) + regions[2]
+    if resealed != stub:
+        write_text(os.path.join(root, STUB), resealed)
+        changed.append(STUB)
+    return changed
+
+
+def write_text(path, text):
+    mode = os.stat(path).st_mode & 0o777
+    with open(path, 'w', encoding='utf-8', newline='') as fh:
+        fh.write(text)
+    os.chmod(path, mode)
 
 
 def check(root):
@@ -243,14 +387,20 @@ def check(root):
             continue
         if not text.startswith(HEADER):
             problems.append('%s does not start with the generated part header' % rel)
+        _, problem = split_witness(name, text)
+        if problem is not None:
+            problems.append('%s %s' % (rel, problem))
         try:
             compile(text, rel, 'exec', dont_inherit=True)
         except SyntaxError as error:
             problems.append('%s does not compile: %s' % (rel, error))
-    stray = sorted(on_disk - set(names) - {'__pycache__'})   # gitignored, never ships
+    # Nothing is exempt, a bytecode directory included: the stub refuses any
+    # entry here its list does not name, so the gate may not be more forgiving
+    # than the helper it judges (rule 10).
+    stray = sorted(on_disk - set(names))
     if stray:
-        problems.append('%s holds what HELPER_PARTS does not name, which would never run: %s'
-                        % (PART_DIR, ', '.join(stray)))
+        problems.append('%s holds what HELPER_PARTS does not name, which the helper '
+                        'refuses to start beside: %s' % (PART_DIR, ', '.join(stray)))
     return problems
 
 
@@ -260,6 +410,7 @@ def main(argv=None):
     mode.add_argument('--write', action='store_true')
     mode.add_argument('--verify', action='store_true')
     mode.add_argument('--check', action='store_true')
+    mode.add_argument('--seal', action='store_true')
     source = parser.add_mutually_exclusive_group()
     source.add_argument('--from-git', metavar='REF')
     source.add_argument('--input', metavar='FILE')
@@ -270,14 +421,20 @@ def main(argv=None):
     try:
         if args.write:
             write(args.root, input_text(args))
-        if args.write or args.verify:
+        if args.seal:
+            for rel in seal(args.root):
+                print('split-helper: sealed %s' % rel)
+            problems, what = check(args.root), 'seal and check'
+        elif args.write or args.verify:
             problems = verify(args.root, input_text(args))
             what = 'write and verify' if args.write else 'verify'
         else:
             problems = check(args.root)
             what = 'check'
     except SplitError as error:
-        problems, what = [str(error)], 'write' if args.write else ('verify' if args.verify else 'check')
+        problems = [str(error)]
+        what = ('write' if args.write else 'verify' if args.verify
+                else 'seal' if args.seal else 'check')
     for problem in problems:
         sys.stderr.write('split-helper: %s\n' % problem)
     if problems:

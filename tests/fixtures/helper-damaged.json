@@ -1,0 +1,298 @@
+{
+  "about": "D-REL-7, the split's reviews P2 and P3a: what the helper's stub prints when a part is missing or damaged, and the sentence the shell shows for it. Both sides run this file: tests/test_split_helper.py applies each damage to a copy of the real helper and compares the stub's stdout with `reply` byte for byte (json.dumps of it) and its one stderr line with `omarchy-iptv: ` + reply.error.message; tests/Model.test.js maps `reply` through Model.parseHelperStatus and Model.statusReason and compares `reason`. The `damage` names are the python test's vocabulary. `replies` are shapes no damage produces, for the mapping alone: a `part` that is not a part's name is never shown.",
+  "refusals": [
+    {
+      "damage": "missing",
+      "part": "05-ipc-logos.py",
+      "reply": {
+        "ok": false,
+        "part": "05-ipc-logos.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/05-ipc-logos.py cannot be read (No such file or directory); reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (05-ipc-logos.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "unreadable",
+      "part": "10-state.py",
+      "reply": {
+        "ok": false,
+        "part": "10-state.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/10-state.py cannot be read (Permission denied); reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (10-state.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "directory",
+      "part": "01-core.py",
+      "reply": {
+        "ok": false,
+        "part": "01-core.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/01-core.py cannot be read (Is a directory); reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (01-core.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "empty",
+      "part": "05-ipc-logos.py",
+      "reply": {
+        "ok": false,
+        "part": "05-ipc-logos.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/05-ipc-logos.py is empty; reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (05-ipc-logos.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "empty",
+      "part": "02-sources.py",
+      "reply": {
+        "ok": false,
+        "part": "02-sources.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/02-sources.py is empty; reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (02-sources.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "truncated-at-a-line",
+      "part": "05-ipc-logos.py",
+      "reply": {
+        "ok": false,
+        "part": "05-ipc-logos.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/05-ipc-logos.py is cut off or altered (its last line does not match it); reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (05-ipc-logos.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "truncated-mid-line",
+      "part": "11-cli.py",
+      "reply": {
+        "ok": false,
+        "part": "11-cli.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/11-cli.py is cut off or altered (its last line does not match it); reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (11-cli.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "syntax-error",
+      "part": "07-player.py",
+      "reply": {
+        "ok": false,
+        "part": "07-player.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/07-player.py is cut off or altered (its last line does not match it); reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (07-player.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "syntax-error-resealed",
+      "part": "07-player.py",
+      "reply": {
+        "ok": false,
+        "part": "07-player.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/07-player.py does not compile (line 5); reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (07-player.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "nul-byte",
+      "part": "04-epg.py",
+      "reply": {
+        "ok": false,
+        "part": "04-epg.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/04-epg.py is cut off or altered (its last line does not match it); reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (04-epg.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "nul-byte-resealed",
+      "part": "04-epg.py",
+      "reply": {
+        "ok": false,
+        "part": "04-epg.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/04-epg.py is not text; reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (04-epg.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "not-utf8-resealed",
+      "part": "09-cache.py",
+      "reply": {
+        "ok": false,
+        "part": "09-cache.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/09-cache.py is not text; reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (09-cache.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "wrong-last-line",
+      "part": "06-failed.py",
+      "reply": {
+        "ok": false,
+        "part": "06-failed.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/06-failed.py is cut off or altered (its last line does not match it); reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (06-failed.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "extra-file",
+      "part": "12-extra.py",
+      "reply": {
+        "ok": false,
+        "part": "12-extra.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/12-extra.py is not one of this helper's parts; reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (12-extra.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "extra-file",
+      "part": ".05-ipc-logos.py.swp",
+      "reply": {
+        "ok": false,
+        "part": ".05-ipc-logos.py.swp",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/.05-ipc-logos.py.swp is not one of this helper's parts; reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "unlistable",
+      "part": "",
+      "reply": {
+        "ok": false,
+        "part": "",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/ cannot be listed (Permission denied); reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged \u00b7 reinstall the plugin"
+    }
+  ],
+  "replies": [
+    {
+      "why": "a path",
+      "reply": {
+        "ok": false,
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/x is empty; reinstall the plugin"
+        },
+        "part": "../../etc/passwd"
+      },
+      "reason": "Plugin files damaged \u00b7 reinstall the plugin"
+    },
+    {
+      "why": "markup",
+      "reply": {
+        "ok": false,
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/x is empty; reinstall the plugin"
+        },
+        "part": "<img src=\"http://h/x.png\">.py"
+      },
+      "reason": "Plugin files damaged \u00b7 reinstall the plugin"
+    },
+    {
+      "why": "absent",
+      "reply": {
+        "ok": false,
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/x is empty; reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged \u00b7 reinstall the plugin"
+    },
+    {
+      "why": "a number",
+      "reply": {
+        "ok": false,
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/x is empty; reinstall the plugin"
+        },
+        "part": 42
+      },
+      "reason": "Plugin files damaged \u00b7 reinstall the plugin"
+    },
+    {
+      "why": "not a part's shape",
+      "reply": {
+        "ok": false,
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/x is empty; reinstall the plugin"
+        },
+        "part": "05-IPC-logos.py"
+      },
+      "reason": "Plugin files damaged \u00b7 reinstall the plugin"
+    },
+    {
+      "why": "a trailing newline",
+      "reply": {
+        "ok": false,
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/x is empty; reinstall the plugin"
+        },
+        "part": "05-ipc-logos.py\n"
+      },
+      "reason": "Plugin files damaged \u00b7 reinstall the plugin"
+    },
+    {
+      "why": "a credentialed URL in the message never reaches the sentence",
+      "reply": {
+        "ok": false,
+        "part": "03-io-playlist.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "http://u:secret@h.example.test/x"
+        }
+      },
+      "reason": "Plugin files damaged (03-io-playlist.py) \u00b7 reinstall the plugin"
+    }
+  ]
+}

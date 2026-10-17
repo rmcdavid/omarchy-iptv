@@ -99,9 +99,15 @@ SHIELDED = shield_environment()
 # AFTER the shield above, which is the point of the order: what a same-uid
 # process can read is now the interpreter starting and compiling this short
 # file. The list is fixed and the files are read from this file's own
-# directory, never from argv or the environment, and compile() writes no
-# bytecode, so nothing is written into the plugin directory. Generated, and
-# checked by the gate, by the split script on the dev branch.
+# directory (through any symlink to it), never from argv or the environment,
+# and compile() writes no bytecode, so nothing is written into the plugin
+# directory. ALL of them are read and checked before ANY of them runs: a part
+# missing, unreadable, empty, cut off (its generated last line is gone or
+# does not match the bytes above it), not text, or not compiling, or a file
+# here the list does not name, ends the run before a verb can write anything,
+# with one JSON error object on stdout and one line on stderr, like every
+# other failure. Generated, and checked by the gate, by the split script on
+# the dev branch.
 HELPER_PARTS = (
     "01-core.py",
     "02-sources.py",
@@ -119,17 +125,50 @@ HELPER_PARTS = (
 
 def _load_parts(namespace: dict) -> None:
     import os
-    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "helper")
+    import zlib
+
+    def refuse(name, what):
+        import json
+        line = "bin/helper/%s %s; reinstall the plugin" % (name, what)
+        sys.stdout.write(json.dumps({"ok": False, "part": name, "error": {
+            "code": "helper_damaged", "message": line}}) + "\n")
+        sys.stdout.flush()
+        sys.stderr.write("omarchy-iptv: %s\n" % line)
+        raise SystemExit(1)
+
+    here = os.path.join(os.path.dirname(os.path.realpath(__file__)), "helper")
+    codes = []
     for name in HELPER_PARTS:
         path = os.path.join(here, name)
         try:
             with open(path, "rb") as handle:
                 source = handle.read()
         except OSError as error:
-            sys.stderr.write("omarchy-iptv: cannot read bin/helper/%s (%s); reinstall the plugin\n"
-                             % (name, error.strerror or type(error).__name__))
-            raise SystemExit(1)
-        exec(compile(source, path, "exec", dont_inherit=True), namespace)
+            refuse(name, "cannot be read (%s)" % (error.strerror or type(error).__name__))
+        if not source:
+            refuse(name, "is empty")
+        end = source.rfind(b"\n", 0, len(source) - 1) + 1
+        if source[end:] != (b"# end of %s: %d bytes above, crc32 %08x\n"
+                            % (name.encode(), end, zlib.crc32(source[:end]))):
+            refuse(name, "is cut off or altered (its last line does not match it)")
+        try:
+            if b"\0" in source:
+                raise UnicodeError
+            source.decode("utf-8")
+        except UnicodeError:
+            refuse(name, "is not text")
+        try:
+            codes.append(compile(source, path, "exec", dont_inherit=True))
+        except (SyntaxError, ValueError) as error:
+            refuse(name, "does not compile (line %s)" % (getattr(error, "lineno", None) or "?"))
+    try:
+        found = os.listdir(here)
+    except OSError as error:
+        refuse("", "cannot be listed (%s)" % (error.strerror or type(error).__name__))
+    for name in sorted(set(found) - set(HELPER_PARTS)):
+        refuse(ascii(name)[1:-1], "is not one of this helper's parts")
+    for code in codes:
+        exec(code, namespace)
 
 
 _load_parts(globals())

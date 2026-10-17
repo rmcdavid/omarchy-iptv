@@ -13384,6 +13384,59 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   }
 })()
 
+// ---- D-REL-7, the split's reviews P2 and P3a: a damaged helper says so.
+// The stub reads and checks every part before any runs and refuses with one
+// reply, code `helper_damaged`. tests/fixtures/helper-damaged.json is the
+// join: tests/test_split_helper.py proves the stub prints each `reply` byte
+// for byte over the damage named beside it, and these map the same replies.
+;(function () {
+  const fs = require("fs"), path = require("path")
+  const fx = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/helper-damaged.json"), "utf8"))
+  const reasonOf = r => Model.statusReason(Model.parseHelperStatus(JSON.stringify(r) + "\n", "playlist"))
+  checkCall("D-REL-7 P3a: every refusal the stub prints maps to the fixture's sentence -- reinstall, and the part's name when it has a part's shape", () =>
+    fx.refusals.map(c => reasonOf(c.reply)), fx.refusals.map(c => c.reason))
+  checkCall("D-REL-7 P3a: a `part` that is not a part's name (a path, markup, a number, absent, a trailing newline) is never shown, and the message is never the sentence", () =>
+    fx.replies.map(c => reasonOf(c.reply)), fx.replies.map(c => c.reason))
+  checkCall("D-REL-7 P3a: helperDamagedReason is the one function -- the same sentence from statusReason and from a direct call, and it names nothing beyond the part", () => {
+    const r = fx.refusals[0].reply
+    const direct = Model.helperDamagedReason(r)
+    return [direct === reasonOf(r), direct.indexOf("/") === -1, Model.helperDamagedReason(null), Model.helperDamagedReason(undefined)]
+  }, [true, true, "Plugin files damaged \u00b7 reinstall the plugin", "Plugin files damaged \u00b7 reinstall the plugin"])
+  checkCall("D-REL-7 P3a: the reply keeps the CALLER's kind (the stub writes none) and is a failure, not stale", () => {
+    const st = Model.parseHelperStatus(JSON.stringify(fx.refusals[0].reply), "epg")
+    return [st.kind, st.ok, st.stale, st.error.code]
+  }, ["epg", false, false, "helper_damaged"])
+  // The routing is what an empty stdout had, because nothing ran: the code
+  // changes the sentence and nothing else. Every non-status reader reads the
+  // reply exactly as it read the empty stdout the stub used to leave.
+  checkCall("D-REL-7: helper_damaged routes as no_output did -- 'cannot tell' on the status branch, 'unknown' on the play branch -- and a real failure still does not", () => {
+    const ctx = { playerUp: true, nowPlaying: true, userStopped: false, retriesLeft: true }
+    return [["helper_damaged", "no_output", "not_implemented", "ipc_error", ""].map(Model.helperCannotTell),
+            ["helper_damaged", "no_output", "ipc_error"].map(c => Model.playFailureVerdict(c, Object.assign({}, ctx, { retriesLeft: false })))]
+  }, [[true, true, true, false, false], ["unknown", "unknown", "failed"]])
+  checkCall("D-REL-7: every other reader of a helper reply reads the refusal as it read the empty stdout -- state init, the config shield, clipboard, probe, failed marks, the logo stream", () => {
+    const damaged = JSON.stringify(fx.refusals[3].reply) + "\n"
+    const read = t => [Model.stateInitFound(t, 1, false), Model.configShieldState(t), Model.parseClipboardReply(t),
+                       Model.parsePlayerProbe(t), Model.parseFailed(t), Model.logoStreamName(t), Model.logoSummaryNames(t)]
+    return JSON.stringify(read(damaged)) === JSON.stringify(read(""))
+  }, true)
+  checkCall("D-REL-7: Service.qml's own status branch (the harness runs it) takes a damaged helper as 'cannot tell' -- no health strike, no restart through the same broken helper; a real failure is still a strike", () => {
+    const H = require("./service-harness.js")
+    const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+    const run = reply => {
+      const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+      let restarts = 0
+      h.root.restartPlayer = () => { restarts++ }
+      h.root.healthFailures = 1
+      h.root.controlKind = "status"
+      h.root.handleControlResult(reply)
+      return [h.root.healthFailures, restarts]
+    }
+    return [run(JSON.stringify(fx.refusals[0].reply) + "\n"), run(""),
+            run(JSON.stringify({ ok: false, kind: "status", error: { code: "ipc_error", message: "x" } }) + "\n")]
+  }, [[1, 0], [1, 0], [2, 1]])
+})()
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All model tests passed.")

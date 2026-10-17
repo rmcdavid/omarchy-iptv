@@ -221,7 +221,11 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # F-HARNESS-31's sixteen (R24a IN FLIGHT, R25d a7, R25b's in-flight saved
 # search, R26b's census, each x 4) were re-levelled in place to the
 # same-instant loss, not added.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2565}
+# 2565 -> 2572 on 2026-10-17, the split's reviews P2/P3a (lane-split-f1): the
+# damaged-helper reply mapped through the shared helper-damaged fixture (4),
+# its routing as no_output's (1), every other reply reader unchanged by it
+# (1), and Service.qml's own status branch through the harness (1).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2572}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -273,7 +277,13 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2565}
 # property over synthetic one-file helpers and this tree; and test_release's
 # five for the parts (the resolver both ways, an unreadable list, the parts as
 # shipped sources, the whole helper and nothing else under bin/ shipping).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1272}
+# 1272 -> 1284 on 2026-10-17, the split's reviews P2/P3a/P3b (lane-split-f1):
+# the damaged-part matrix over the real helper (16 damages as subtests of one
+# test, and its intact control: 2), nothing runs before every part is checked
+# (2), the symlinked stub and plugin directory (2), the check's last-line rule
+# (1), and --seal (5). The bytecode directory's exemption became a stray in
+# place, not added.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1284}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -671,8 +681,11 @@ step "helper split (scripts/split-helper.py --check)"
 # every reader reads it, scripts/helper_files.py); the stub carries exactly
 # the loader those names generate, directly after the shield, so nothing is
 # compiled before the process is non-dumpable (D-SINK-9); every named part
-# starts with the generated header and compiles; and bin/helper/ holds
-# nothing the list leaves out. The release allowlist step below proves every
+# starts with the generated header, ends with its generated last line for
+# the bytes above it (the witness the stub checks, so a part cut off is told
+# from a whole one) and compiles; and bin/helper/ holds nothing the list
+# leaves out, a bytecode directory included, because the stub refuses to
+# start beside any of it. The release allowlist step below proves every
 # part ships, and the python suite runs the helper they make.
 if python3 "$ROOT/scripts/split-helper.py" --check --root "$ROOT" >"$CHECK_TMP/split-helper.log" 2>&1; then
   ok "helper split ($(sed -n 's/^split-helper: check ok (\(.*\))$/\1/p' "$CHECK_TMP/split-helper.log" | head -1))"

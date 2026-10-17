@@ -1002,3 +1002,4 @@ def stop_ladder(sock_path: str, targets: list[dict[str, Any]], from_rung: str = 
     return result
 
 
+# end of 07-player.py: 45346 bytes above, crc32 d88b22ed

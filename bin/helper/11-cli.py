@@ -556,3 +556,4 @@ def main(argv: list[str] | None = None) -> int:
         return EXIT_ERROR
 
 
+# end of 11-cli.py: 34338 bytes above, crc32 b292a815

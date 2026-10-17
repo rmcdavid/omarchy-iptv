@@ -922,3 +922,4 @@ def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
     return name
 
 
+# end of 05-ipc-logos.py: 42179 bytes above, crc32 848354c6

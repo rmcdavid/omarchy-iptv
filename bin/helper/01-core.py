@@ -1077,3 +1077,4 @@ def fnv1a32(value: Any) -> str:
     return "%08x" % hash_
 
 
+# end of 01-core.py: 56389 bytes above, crc32 5cbac197

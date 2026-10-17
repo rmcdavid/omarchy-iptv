@@ -526,3 +526,4 @@ def cmd_playlist(args: argparse.Namespace) -> int:
         return EXIT_ERROR
 
 
+# end of 03-io-playlist.py: 23627 bytes above, crc32 946429af

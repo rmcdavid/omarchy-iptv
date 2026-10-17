@@ -82,14 +82,15 @@ export {
 } from "./model/state.mjs"
 export {
   parseJsonObject, parseChannels, parseEpgNow, parseHelperStatus,
-  statusReason, statusHost, statusHealthy, statusWarnings, WARNING_PREFIX,
-  warningLabel, labelWarning, labelWarnings, warningLine, footerWarning,
-  findBarEntry, settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
-  entryInputText, entryInputForm, sameEntryInput, ownWriteInForce,
-  settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
-  MAX_SEEN_INPUTS, entryInputSeen, entryInputLast, entryInputsSeenAfter,
-  entryInputNotice, ownedEntryPatch, barEntryWritable, entryFlushDisposition,
-  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, sameOwnWrite
+  helperDamagedReason, statusReason, statusHost, statusHealthy,
+  statusWarnings, WARNING_PREFIX, warningLabel, labelWarning, labelWarnings,
+  warningLine, footerWarning, findBarEntry, settingOf, boolSetting, clampInt,
+  clampSetting, settingsFrom, entryInputText, entryInputForm, sameEntryInput,
+  ownWriteInForce, settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS,
+  RETIRED_SETTINGS, MAX_SEEN_INPUTS, entryInputSeen, entryInputLast,
+  entryInputsSeenAfter, entryInputNotice, ownedEntryPatch, barEntryWritable,
+  entryFlushDisposition, owedMirrorAction, ownedWriteMode,
+  retiredInputsToKeep, sameOwnWrite
 } from "./model/settings.mjs"
 export {
   optInSetting, logoSurvey, splitLogoUrl, logoConsentLines, logoFile,
@@ -101,12 +102,12 @@ export {
 } from "./model/logos.mjs"
 export {
   stopEscalation, healthTick, playFork, playForkBlind, zapArgs,
-  playFailureVerdict, replyTarget, reconcileVerdict, sessionIntentRepair,
-  playerOrphanCheckArgv, playerStash, tlsPropertiesSafe, playerTls,
-  tlsReloadDisposition, playerTlsVerdict, parsePlayerProbe, parsePlayerEvent,
-  endedVerdict, probeVerdict, playerDeathKind, playerSessionFollowUp,
-  playerRouterState, pushPlayerLog, routePlayerEvent, rememberEntryOwner,
-  channelForEnd, endedReport
+  helperCannotTell, playFailureVerdict, replyTarget, reconcileVerdict,
+  sessionIntentRepair, playerOrphanCheckArgv, playerStash, tlsPropertiesSafe,
+  playerTls, tlsReloadDisposition, playerTlsVerdict, parsePlayerProbe,
+  parsePlayerEvent, endedVerdict, probeVerdict, playerDeathKind,
+  playerSessionFollowUp, playerRouterState, pushPlayerLog, routePlayerEvent,
+  rememberEntryOwner, channelForEnd, endedReport
 } from "./model/player.mjs"
 export {
   MPV_HANDOFF_TEXT, MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase,

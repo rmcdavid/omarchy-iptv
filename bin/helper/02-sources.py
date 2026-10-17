@@ -813,3 +813,4 @@ def remap_state_file(path: str, channels: list[dict[str, Any]]) -> int:
     return moved
 
 
+# end of 02-sources.py: 36503 bytes above, crc32 028afaf6

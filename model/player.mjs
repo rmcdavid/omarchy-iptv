@@ -113,7 +113,22 @@ function zapArgs(socket, cacheDir, key, nowPlaying) {
 // "neither healthy nor a strike, so a missing subcommand never reaps a
 // working player" - and the play branch never grew it, so an empty stdout or
 // a python traceback (both parse to `no_output`) took the rollback.
-var PLAY_UNREADABLE = ["no_output", "not_implemented", "unknown_channel", "no_cache"]
+//
+// `helper_damaged` (D-REL-7) is the stub refusing to start over a missing or
+// damaged part. It used to reach the shell as an empty stdout, `no_output`,
+// and it routes exactly as that did -- on this branch and on the status
+// branch (helperCannotTell) -- because nothing ran: no switch failed, no
+// player misbehaved. Only the sentence changed (settings.mjs maps the code).
+var PLAY_UNREADABLE = ["no_output", "not_implemented", "unknown_channel", "no_cache", "helper_damaged"]
+
+// The status branch's "cannot tell": a helper that could not answer is
+// neither healthy nor a health strike, so a stub or a damaged install never
+// reaps a working player by restarting it through the same broken helper.
+var HELPER_CANNOT_TELL = ["not_implemented", "no_output", "helper_damaged"]
+
+function helperCannotTell(code) {
+  return HELPER_CANNOT_TELL.indexOf(str(code)) !== -1
+}
 // A refusal, not a verdict. `busy` cannot reach a zap today - `cmd_play`
 // takes no lock - and routing it is the first half of ruling CL4's order:
 // refusals first, THEN a sequence number and the lock. Without this it falls
@@ -583,11 +598,11 @@ function endedReport(context) {
 }
 export {
   stopEscalation, healthTick, playFork, playForkBlind, zapArgs,
-  PLAY_UNREADABLE, PLAY_RETRYABLE, playFailureVerdict, replyTarget,
-  reconcileVerdict, sessionIntentRepair, playerOrphanCheckArgv, playerStash,
-  playerOwner, tlsPropertiesSafe, playerTls, tlsReloadDisposition,
-  playerTlsVerdict, parsePlayerProbe, parsePlayerEvent, playerEntryId,
-  endedVerdict, probeVerdict, playerDeathKind, playerSessionFollowUp,
-  playerRouterState, pushPlayerLog, routePlayerEvent, rememberEntryOwner,
-  channelForEnd, endedReport
+  PLAY_UNREADABLE, HELPER_CANNOT_TELL, helperCannotTell, PLAY_RETRYABLE,
+  playFailureVerdict, replyTarget, reconcileVerdict, sessionIntentRepair,
+  playerOrphanCheckArgv, playerStash, playerOwner, tlsPropertiesSafe,
+  playerTls, tlsReloadDisposition, playerTlsVerdict, parsePlayerProbe,
+  parsePlayerEvent, playerEntryId, endedVerdict, probeVerdict,
+  playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
+  routePlayerEvent, rememberEntryOwner, channelForEnd, endedReport
 }

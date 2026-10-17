@@ -1389,3 +1389,4 @@ def cmd_player(args: argparse.Namespace) -> int:
     return player_orphan_check(args)
 
 
+# end of 08-player-verbs.py: 70864 bytes above, crc32 06552753
