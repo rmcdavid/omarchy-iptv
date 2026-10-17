@@ -276,8 +276,8 @@ var EPG_DETAIL_MAX = 600
 //     pattern that MISSED one is worse than a slow one. Re-measured through
 //     this function on 2026-10-06, best of 20: 0.0114 ms for 300 characters
 //     of words, 0.0078 at 400 no-space characters plus a URL, 0.0082 at 600,
-//     0.0162 at 5,000 and 0.0167 at 20,000. The producer's caps (EPG_MAX_DESC
-//     = 400, bin/omarchy-iptv) and this function's 600 still bind for the
+//     0.0162 at 5,000 and 0.0167 at 20,000. The producer's caps (the helper's
+//     EPG_MAX_DESC = 400) and this function's 600 still bind for the
 //     reasons the cap comment gives; they are no longer what stands between
 //     this panel and a stall.
 //  2. The cut is made AFTER redaction, never before, and the order is a
