@@ -13315,6 +13315,45 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### 0.14.2: the release record (D-LOGO-14, D-EPG-6 and the cleanup round shipped)
+
+**Cut on the owner's word, 2026-10-17** ("Cut 0.14.2 (release.py build,
+push dev, main and the tag), then file the drafted 0.14.2 request and post
+the drafted reply on #11892. Leave the live install alone for now.").
+`release.py build` refuses any branch but `dev`, which is checked out in the
+primary checkout, so that checkout's `dev` was fast-forwarded from 0ae0cc1
+to the pushed 8225761 (it was clean) and the build was run against it with
+`--root`, WITHOUT `--gate-already-green`, so it ran `check.sh` itself on
+that checkout first: green. `dev` 8225761 -> `main`
+85206f2418b41816fbe45afc3db070d21c0aee49, parent bf075ca, tag `v0.14.2`
+(annotated, object a55e710), a fast-forward, 31 files, the 0.14.1 commit's
+trailer. Checked before the push: the parent is bf075ca, 31 paths and none
+under `docs/`, `tests/`, `scripts/` or an agent file, manifest 0.14.2, the
+CHANGELOG heading `## 0.14.2 (2026-10-17)`, and `bin/omarchy-iptv`,
+`Service.qml` and `model/state.mjs` identical to `dev`. `main` and the tag
+were pushed (bf075ca..85206f2, the new tag; `dev` was already at 8225761);
+the remote `main` and `v0.14.2^{}` both read 85206f2.
+
+**The request and the reply, on the same word.**
+omacom/omarchy-plugin-marketplace#11935, `[Verify]: IPTV 0.14.2`, filed
+with #11892's body and only the target commit changed, to
+`85206f2418b41816fbe45afc3db070d21c0aee49` (the remote `main` re-read
+first). The drafted reply below, with #11935 and the SHA filled in and its
+paragraphs unwrapped as the #11602 comment was, was posted on #11892,
+which stays open (F-M3-4) and is stale for update validation now that
+`main` has moved. Filed 12:51:06Z; the bot's update
+validation passed 66 s later (source, plugin set, compatibility at
+`85206f2`) and its automated security baseline 3 s after that; the
+baseline record, decoded, reads `commitSha` 85206f2, `outcome` passed,
+`findings` [], `capabilities` [], baseline version 3. Labels `validated`
+and `plugin-update`.
+
+**Not done, by instruction:** the live install stays on 0.14.1 (nothing
+under `~/.config/omarchy/plugins/` was touched). The helper split (D-REL-7)
+is next: `lane-helper-split` was cut from 1c88877 and has neither of
+af7a2ae's helper edits, so its merge carries them into the parts and
+re-proves the byte-for-byte join against the current `dev`.
+
 ### 0.14.2: prepared, not cut
 
 **2026-10-17, on `dev` after af7a2ae (D-LOGO-14 and D-EPG-6).** 0.14.2
