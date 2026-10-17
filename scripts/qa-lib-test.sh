@@ -332,6 +332,30 @@ is "this repository's own model is the aggregator plus every part it names" \
    "$(qa_model_files "$ROOT" | wc -l | tr -d ' ')" \
    "$(( 1 + $(grep -cE '^(\}|export \{\}) from "\./model/' "$ROOT/Model.mjs") ))"
 
+# ================================================ qa_helper_parts (D-REL-7)
+
+section "qa_helper_parts / D-REL-7: a copy of the helper takes every part, or says it cannot"
+
+is "on this tree it names exactly the parts scripts/helper_files.py names" \
+   "$(qa_helper_parts "$ROOT" | sed "s#^$ROOT/##" | tr '\n' ' ')" \
+   "$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1] + "/scripts"); import helper_files; print("".join(p + " " for p in helper_files.part_paths(sys.argv[1])), end="")' "$ROOT")"
+HROOT="$TMP/helper-tree"
+mkdir -p "$HROOT/bin/helper"
+printf 'import sys\nHELPER_PARTS = (\n    "01-a.py",\n    "02-b.py",\n)\n' >"$HROOT/bin/omarchy-iptv"
+: >"$HROOT/bin/helper/01-a.py"; : >"$HROOT/bin/helper/02-b.py"
+is "the parts, in the stub's order" \
+   "$(qa_helper_parts "$HROOT" | sed "s#^$HROOT/##" | tr '\n' ' ')" "bin/helper/01-a.py bin/helper/02-b.py "
+rm "$HROOT/bin/helper/02-b.py"
+st "a named part that is not there is refused" 1 qa_helper_parts "$HROOT"
+is "and nothing is printed" "$(qa_helper_parts "$HROOT")" ""
+printf 'import sys\nHELPER_PARTS = (\n)\n' >"$HROOT/bin/omarchy-iptv"
+st "a block that names nothing is refused" 1 qa_helper_parts "$HROOT"
+printf 'def main():\n    return 0\n' >"$HROOT/bin/omarchy-iptv"
+st "a one-file helper from before the split has no parts, and that is fine" 0 qa_helper_parts "$HROOT"
+is "and prints nothing" "$(qa_helper_parts "$HROOT")" ""
+rm "$HROOT/bin/omarchy-iptv"
+st "a root with no helper at all is refused" 1 qa_helper_parts "$HROOT"
+
 # ======================================================== qa_tree_count (A2)
 
 section "qa_tree_count / A2: 'no writes in the plugin dir' for a dir that is not there"
@@ -2538,7 +2562,10 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # (fifteen -> seventeen), not added. (The 472 -> 500 line above read
 # "472 -> 494" until then; its own parts, 22 and 6, sum to 500, which is
 # what 86d8265 set EXPECTED to.)
-EXPECTED=505
+# 505 -> 513 on 2026-10-17, D-REL-7 landed on dev: qa_helper_parts against
+# the python reader on this tree, its order, a missing part, an empty block,
+# a one-file helper and no helper at all (8).
+EXPECTED=513
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

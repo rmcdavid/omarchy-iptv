@@ -1,0 +1,528 @@
+# A part of bin/omarchy-iptv (D-REL-7), not a module: the helper compiles
+# this file into its own namespace in the order its HELPER_PARTS lists, so
+# a part sees every name the parts before it define. Run the helper.
+from __future__ import annotations
+# ------------------------------------------------------------------- IO
+
+# validate_source_url codes -> the helper's runtime error codes of 0.1 (the
+# guide renders these through Model.statusReason; CLI users see them too).
+_RESOLVE_CODES = {"empty": "no_source", "scheme": "unsupported_scheme", "invalid": "bad_url", "relative_path": "bad_url"}
+
+
+def resolve_source(url: str, label: str = "playlist") -> tuple[str, str]:
+    """-> ("http", normalized url) or ("file", absolute path). Refuses
+    anything else through validate_source_url (D11: the guide and the
+    helper accept exactly the same set; the 2,048-character cap and control
+    characters are enforced here too). A leading `~` is expanded first, as
+    in 0.1, for values set from the command line."""
+    value = (url or "").strip()
+    if value.startswith("~"):
+        value = os.path.expanduser(value)
+    result = validate_source_url(value)
+    if not result["ok"]:
+        code = _RESOLVE_CODES.get(result["code"], result["code"])
+        if code == "no_source":
+            raise HelperError(code, "no %s URL configured" % label)
+        raise HelperError(code, "%s %s" % (label, result["message"]))
+    return result["kind"], result["url"]
+
+
+def read_local_source(path: str, label: str = "playlist") -> bytes:
+    """Messages carry the base name only, never the full path (R12, D-QA-12)."""
+    real = os.path.realpath(path)
+    name = os.path.basename(real) or "file"
+    if not os.path.isabs(real) or real.startswith(("/proc/", "/sys/", "/dev/")):
+        raise HelperError("unsafe_path", "refusing to read a %s from /proc, /sys or /dev" % label)
+    if not os.path.isfile(real):
+        raise HelperError("not_found", "%s file not found: %s" % (label, name))
+    size = os.path.getsize(real)
+    if size > MAX_SOURCE_BYTES:
+        raise HelperError("too_large", "%s file %s is larger than %d MB" % (label, name, MAX_SOURCE_BYTES // (1024 * 1024)))
+    # R23b (rule 15): the path is the user's own, but what is at it can be
+    # swapped between the isfile above and this open, and a FIFO would hang
+    # the fetch until the service's watchdog killed it.
+    try:
+        fd = open_regular(real)
+    except NotRegularFile:
+        raise HelperError("not_found", "%s file not found: %s" % (label, name)) from None
+    with os.fdopen(fd, "rb") as handle:
+        return handle.read(MAX_SOURCE_BYTES + 1)
+
+
+def split_userinfo(url: str) -> tuple[str, str]:
+    """-> (URL without user:pass@, "user:pass" or ""). urllib does not accept
+    userinfo in the netloc, so it is sent as HTTP Basic auth instead."""
+    parts = urllib.parse.urlsplit(url)
+    if parts.username is None:
+        return url, ""
+    host = parts.hostname or ""
+    if ":" in host:
+        host = "[" + host + "]"
+    if parts.port is not None:
+        host = "%s:%d" % (host, parts.port)
+    auth = "%s:%s" % (urllib.parse.unquote(parts.username), urllib.parse.unquote(parts.password or ""))
+    return urllib.parse.urlunsplit((parts.scheme, host, parts.path, parts.query, parts.fragment)), auth
+
+
+def request_origin(url: str) -> tuple[str, str, int | None]:
+    """(scheme, host, port): the scope a credential belongs to."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        return parts.scheme.lower(), (parts.hostname or "").lower(), parts.port
+    except ValueError:
+        return "", "", None
+
+
+def make_opener(label: str, host: str) -> Any:
+    """urlopen replacement whose redirect handler (S-06) refuses non-http(s)
+    targets (urllib's default happily follows a 302 to ftp://) and drops
+    Authorization / Cookie when the origin (scheme, host, port) changes, so
+    a provider that bounces to a third party never receives the user's
+    credentials. urllib itself refuses file:/data: targets and loops with a
+    3xx HTTPError, which read_http_source maps to the same error code."""
+    import urllib.request
+
+    class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
+            scheme = stream_scheme(newurl)
+            if scheme not in ("http", "https"):
+                try:
+                    fp.close()
+                except OSError:
+                    pass
+                raise HelperError("unsafe_redirect", "%s from %s redirected to an unsupported scheme '%s'" % (label, host, scheme or "none"))
+            new = super().redirect_request(req, fp, code, msg, headers, newurl)
+            if new is not None and request_origin(newurl) != request_origin(req.full_url):
+                for name in ("Authorization", "Cookie"):
+                    new.remove_header(name)
+            return new
+
+    return urllib.request.build_opener(SafeRedirectHandler())
+
+
+def http_deadline(timeout: float) -> float:
+    """Wall-clock budget in seconds for one download (see HTTP_DEADLINE_MIN)."""
+    override = os.environ.get(HTTP_DEADLINE_ENV, "")
+    if override:
+        try:
+            return max(0.05, float(override))
+        except ValueError:
+            pass
+    return max(HTTP_DEADLINE_MIN, 3.0 * float(timeout))
+
+
+def read_http_source(url: str, timeout: float, label: str = "playlist") -> bytes:
+    import base64
+    import http.client
+    import urllib.error
+    import urllib.request
+    host = source_host(url)
+    target, auth = split_userinfo(url)
+    headers = {"User-Agent": USER_AGENT, "Accept": "*/*"}
+    if auth:
+        headers["Authorization"] = "Basic " + base64.b64encode(auth.encode("utf-8")).decode("ascii")
+    request = urllib.request.Request(target, headers=headers)
+    opener = make_opener(label, host)
+    budget = http_deadline(timeout)
+    deadline = time.monotonic() + budget
+    chunks: list[bytes] = []
+    total = 0
+    try:
+        with opener.open(request, timeout=timeout) as response:
+            # read1: at most one socket read per call, so a trickling server
+            # cannot park us inside read() past the deadline check.
+            while total <= MAX_SOURCE_BYTES:
+                if time.monotonic() >= deadline:
+                    # No seconds in the message: the guide renders the code as
+                    # "Timed out" and the README states the deadline, so a
+                    # number here could only disagree with them (D-LIVE-11).
+                    raise HelperError("timeout", "%s download from %s exceeded its deadline" % (label, host))
+                chunk = response.read1(HTTP_CHUNK)
+                if not chunk:
+                    break
+                chunks.append(chunk)
+                total += len(chunk)
+    except HelperError:
+        raise
+    except urllib.error.HTTPError as error:
+        if 300 <= error.code < 400:
+            # urllib refused the redirect itself (file:, data:, a loop); its
+            # message carries the target URL, so it is not repeated here.
+            raise HelperError("unsafe_redirect", "%s redirect from %s not followed" % (label, host))
+        raise HelperError("http_%d" % error.code, "HTTP %d from %s" % (error.code, host))
+    except urllib.error.URLError as error:
+        reason = getattr(error, "reason", error)
+        raise HelperError("network", "could not reach %s: %s" % (host, redact_urls(reason)))
+    except (TimeoutError, OSError, ValueError, http.client.HTTPException) as error:
+        raise HelperError("network", "could not reach %s: %s" % (host, redact_urls(error)))
+    if total > MAX_SOURCE_BYTES:
+        raise HelperError("too_large", "%s from %s exceeds %d MB" % (label, host, MAX_SOURCE_BYTES // (1024 * 1024)))
+    return b"".join(chunks)
+
+
+def fetch_bytes(url: str, timeout: float, label: str = "playlist") -> bytes:
+    kind, target = resolve_source(url, label)
+    if kind == "file":
+        return read_local_source(target, label)
+    return read_http_source(target, timeout, label)
+
+
+def too_large_inflated(label: str) -> HelperError:
+    return HelperError("too_large", "decompressed %s exceeds %d MB" % (label, MAX_SOURCE_BYTES // (1024 * 1024)))
+
+
+def decode_text(data: bytes, label: str = "playlist") -> str:
+    """UTF-8 text; gzip (by magic bytes) is inflated with the same 64 MB cap
+    as the download so a gzip bomb cannot exhaust memory (D-QA-06)."""
+    if data[:2] == b"\x1f\x8b":
+        try:
+            with gzip.GzipFile(fileobj=io.BytesIO(data), mode="rb") as stream:
+                data = stream.read(MAX_SOURCE_BYTES + 1)
+        except (OSError, EOFError, zlib.error) as error:
+            raise HelperError("bad_gzip", "could not decompress %s: %s" % (label, error))
+        if len(data) > MAX_SOURCE_BYTES:
+            raise too_large_inflated(label)
+    return data.decode("utf-8", errors="replace")
+
+
+def fetch_source(url: str, timeout: float) -> str:
+    return decode_text(fetch_bytes(url, timeout, "playlist"), "playlist")
+
+
+class CappedReader:
+    """Binary stream wrapper that refuses to hand out more than `limit` bytes
+    in total (the inflated-size cap for streamed gzip, D-QA-06)."""
+
+    def __init__(self, stream: Any, limit: int, label: str) -> None:
+        self.stream = stream
+        self.limit = limit
+        self.label = label
+        self.total = 0
+
+    def read(self, size: int = -1) -> bytes:
+        chunk = self.stream.read(size)
+        self.total += len(chunk)
+        if self.total > self.limit:
+            raise too_large_inflated(self.label)
+        return chunk
+
+    def close(self) -> None:
+        self.stream.close()
+
+
+class EntityRefusingReader:
+    """D-EPG-6 (the maintainer on #11892): ElementTree expands the entities a
+    feed declares in its internal subset, and MAX_SOURCE_BYTES bounds only the
+    input. XMLTV declares none (a DOCTYPE naming xmltv.dtd WITHOUT a subset is
+    common, and passes), so the first read runs the prolog through its own
+    expat parser, whose EntityDeclHandler refuses general and parameter
+    entities alike, and hands the parse nothing until that parser reaches the
+    root's start tag: a declaration can only come before it."""
+
+    class Root(Exception):
+        pass
+
+    def __init__(self, stream: Any) -> None:
+        self.stream = stream
+        self.cleared = False
+
+    def read(self, size: int = -1) -> bytes:
+        if self.cleared:
+            return self.stream.read(size)
+        import xml.parsers.expat
+
+        def declared(*_: Any) -> None:
+            raise HelperError("bad_xml", "refused the EPG: it declares an XML entity, which XMLTV feeds never do")
+
+        def root(*_: Any) -> None:
+            raise EntityRefusingReader.Root()
+
+        parser = xml.parsers.expat.ParserCreate()
+        parser.EntityDeclHandler = declared
+        parser.StartElementHandler = root
+        held = []
+        chunk = b"-"
+        while chunk:
+            chunk = self.stream.read(size)
+            held.append(chunk)
+            try:
+                parser.Parse(chunk, not chunk)
+            except EntityRefusingReader.Root:
+                break
+            except xml.parsers.expat.ExpatError as error:
+                raise HelperError("bad_xml", "could not parse EPG XML: %s" % error)
+        self.cleared = True
+        return b"".join(held)
+
+
+def open_xml_stream(data: bytes) -> Any:
+    """Bytes -> readable stream; gzip is detected by magic bytes, not by name."""
+    if data[:2] == b"\x1f\x8b":
+        return CappedReader(gzip.GzipFile(fileobj=io.BytesIO(data), mode="rb"), MAX_SOURCE_BYTES, "EPG")
+    return io.BytesIO(data)
+
+
+def write_text_atomic(path: str, text: str, private_dir: bool = True) -> None:
+    """Temp file in the same (0700) directory, mode 0600, rename over `path`.
+
+    `private_dir` False (R24b, round 14): the directory is not the plugin's
+    -- the target of a state.json symlink, a dotfiles folder -- so it is
+    neither created nor chmod-ed; the temporary file is still 0600 and
+    O_EXCL, and the rename still replaces `path` atomically."""
+    directory = os.path.dirname(path)
+    if private_dir:
+        ensure_private_dir(directory)
+    tmp = os.path.join(directory, ".tmp-%s-%s" % (os.path.basename(path), os.urandom(4).hex()))
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as handle:
+            handle.write(text)
+            os.fchmod(handle.fileno(), 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def write_bytes_atomic(path: str, data: bytes) -> None:
+    """The binary sibling of write_text_atomic, same 0700 / 0600 discipline.
+
+    Added for logos (M2-04), which are the first non-text thing this helper
+    writes into the cache.
+    """
+    directory = os.path.dirname(path)
+    ensure_private_dir(directory)
+    tmp = os.path.join(directory, ".tmp-%s-%s" % (os.path.basename(path), os.urandom(4).hex()))
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        with os.fdopen(fd, "wb") as handle:
+            handle.write(data)
+            os.fchmod(handle.fileno(), 0o600)
+        os.replace(tmp, path)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def write_json_atomic(path: str, payload: Any, private_dir: bool = True) -> None:
+    # json.dumps (one-shot C encoder) is several times faster than json.dump.
+    write_text_atomic(path, json.dumps(payload, ensure_ascii=False, separators=(",", ":")) + "\n", private_dir)
+
+
+def json_string(text: str) -> str:
+    """JSON string literal; the common quote-free case skips the encoder."""
+    if '"' in text or "\\" in text:
+        return json.dumps(text, ensure_ascii=False)
+    return '"' + text + '"'
+
+
+# D-SINK-19 round 13, R23b, rule 15: every open() in this helper of a path
+# a user or another program can replace, and its verdict (2026-10-13).
+#   Routed through open_regular (never blocks; a regular file or a symlink to
+#   one, decided by fstat on the descriptor):
+#     state.json -- `state init`, every other `state` verb (read_state_strict)
+#       and the D-ID-1 remap (remap_state_file, via read_json);
+#     every cache JSON read by read_json -- channels.json, failed.json,
+#       playlist-status.json, epg-status.json, the logo and EPG indexes;
+#     the EPG window cache (load_window); a cached logo (_read_logo_prefix);
+#     the player lock record (read_lock_file); a local playlist or EPG file
+#       (read_local_source), whose isfile check a swap could outrun.
+#   Left as they are, with why:
+#     the player lock's O_CREAT|O_RDWR open (acquire_lock): O_RDWR on
+#       a FIFO does not block on Linux, and its fchmod is gated on S_ISREG;
+#     the host config shield's open of shell.json: already O_NONBLOCK, and
+#       refused by fstat unless a regular file the euid owns;
+#     the cache walk's directory opens: O_DIRECTORY fails at once on
+#       anything that is not a directory;
+#     the atomic writers' temporary files: created by this process with
+#       O_EXCL in a 0700 directory, never an existing path;
+#     manifest.json in the plugin directory (nothing writes there at
+#       runtime, rule 4), /proc/<pid>/*, os.devnull.
+class NotRegularFile(OSError):
+    """Something other than a regular file (or a symlink to one) where one
+    is read. An OSError, so every tolerant reader that already answers None
+    for a file it cannot read answers None for this too."""
+
+
+def open_regular(path: str) -> int:
+    """Open `path` for reading WITHOUT ever blocking, and only when it is a
+    regular file or a symlink to one. -> a descriptor the caller closes.
+
+    D-SINK-19 round 13, R23b. A plain open() of a FIFO blocks until a writer
+    appears: with a FIFO at state.json, `state init`, `show` and `favorite
+    add` each sat in open() until killed, the service waited on that init
+    forever, and every start left an orphaned helper behind (the round-12
+    lenses, measured; the shipped 0.13.6 the same). So: O_NONBLOCK (a FIFO
+    opens at once with no writer), O_NOCTTY (a terminal at the path never
+    becomes ours), and the decision is an fstat of the descriptor that WAS
+    opened -- never an lstat of the name before it, which a rename in
+    between would make a statement about another file. A socket cannot be
+    opened at all (ENXIO) and is reported the same way. O_NONBLOCK changes
+    nothing about reads from a regular file. The rule-15 list of the reads
+    routed here, and of those left as they are, is the comment above."""
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
+    except OSError as error:
+        if error.errno == errno.ENXIO:
+            raise NotRegularFile(errno.ENXIO, "not a regular file", path) from None
+        raise
+    try:
+        mode = os.fstat(fd).st_mode
+    except BaseException:
+        os.close(fd)
+        raise
+    if not stat.S_ISREG(mode):
+        os.close(fd)
+        raise NotRegularFile(errno.EINVAL, "not a regular file", path)
+    return fd
+
+
+def read_regular_text(path: str) -> str:
+    with os.fdopen(open_regular(path), "r", encoding="utf-8") as handle:
+        return handle.read()
+
+
+def read_json(path: str) -> Any:
+    try:
+        return json.loads(read_regular_text(path))
+    except (OSError, ValueError):
+        return None
+
+
+def emit(payload: Any) -> None:
+    sys.stdout.write(json.dumps(payload, ensure_ascii=False) + "\n")
+    sys.stdout.flush()
+
+
+def error_payload(kind: str, error: HelperError, **extra: Any) -> dict[str, Any]:
+    payload: dict[str, Any] = {
+        "ok": False,
+        "kind": kind,
+        "error": {"code": error.code, "message": redact_urls(error.message)},
+    }
+    payload.update(error.extra)
+    payload.update(extra)
+    return payload
+
+
+def write_status_quietly(path: str, status: dict[str, Any]) -> None:
+    try:
+        write_json_atomic(path, status)
+    except OSError as io_error:
+        log("could not write %s: %s" % (os.path.basename(path), io_error))
+
+
+# ------------------------------------------------------------ playlist
+
+def url_from(args: argparse.Namespace) -> str:
+    """The source URL of a fetch verb: a non-empty --url, else $OMARCHY_IPTV_URL.
+
+    D-SINK-8. The shell passes the URL in the environment, never on the
+    command line: /proc/<pid>/cmdline is world-readable for as long as the
+    fetch runs, and /proc/<pid>/environ is refused to everyone but root from
+    before this file imports anything but sys (shield_environment, D-SINK-9).
+    The playlist and epg verbs download with urllib and start no child process -- this helper does fork
+    mpv, but only in `player start`, on a Process the service never hands
+    this variable -- so nothing inherits it. --url stays for a human at their
+    own shell, whose argv is their own; an EMPTY --url is treated as absent.
+    The value is read once, here, and the URL's host is the only part of it
+    that ever reaches a message (source_host); a LOCAL file's base name is
+    printed on purpose (D12, read_local_source) and carries no credential;
+    log() redacts whatever is left.
+    """
+    explicit = (getattr(args, "url", None) or "").strip()
+    if explicit:
+        return explicit
+    return (os.environ.get(URL_ENV) or "").strip()
+
+
+def cmd_playlist(args: argparse.Namespace) -> int:
+    directory = cache_dir(args.cache_dir)
+    channels_path = os.path.join(directory, CHANNELS_FILE)
+    status_path = os.path.join(directory, PLAYLIST_STATUS_FILE)
+    previous = read_json(status_path) or {}
+    url = url_from(args)
+    started = time.monotonic()
+    try:
+        if not url:
+            # A status the service can switch on, not an argparse usage exit:
+            # the verb has no required argument any more, because the shell
+            # never passes one.
+            raise HelperError("bad_url", "no playlist URL: pass --url or set $%s" % URL_ENV)
+        text = fetch_source(url, args.timeout)
+        parsed = parse_m3u(text)
+        if not parsed["channels"]:
+            if not parsed["isPlaylist"]:
+                raise HelperError("not_a_playlist", "source from %s is not an M3U playlist (no #EXTM3U or #EXTINF lines)" % source_host(url))
+            raise HelperError("empty_playlist", "no playable channels found in playlist from %s" % source_host(url))
+        now = int(time.time())
+        document = {
+            "version": 1,
+            "generatedAt": now,
+            "sourceHost": source_host(url),
+            "epgUrlHint": parsed["epgUrlHint"],
+            "count": len(parsed["channels"]),
+            "channels": parsed["channels"],
+        }
+        write_json_atomic(channels_path, document)
+        groups = {channel["group"] for channel in parsed["channels"]}
+        status = {
+            "ok": True,
+            "kind": "playlist",
+            "sourceHost": source_host(url),
+            "fetchedAt": now,
+            "durationMs": int((time.monotonic() - started) * 1000),
+            "channelCount": len(parsed["channels"]),
+            "groupCount": len(groups),
+            "warnings": parsed["warnings"],
+            "stale": False,
+            "error": None,
+        }
+        write_json_atomic(status_path, status)
+        # The upgrade path of ARCHITECTURE.md decision 6. A state file written
+        # under id scheme 1 still names its favorites by a hash of the
+        # credentialed stream URL, and this is the one place the helper holds
+        # both that state and the channel list needed to move them. It writes
+        # at most once per state file and never fails the fetch: a playlist
+        # that parsed is a success whatever the state file turns out to be.
+        #
+        # `--state-dir` is REQUIRED, with no default of any kind. An earlier
+        # version resolved it with `state_dir(getattr(args, "state_dir",
+        # None))`, so every `playlist` run that did not name a state directory
+        # reached into the live one: one `unittest discover` put 124 remap
+        # passes over the user's own ~/.local/state/omarchy-iptv/state.json,
+        # and `playlist --url ... --cache-dir /tmp/scratch` did the same from
+        # a shell. Two callers pass a playlist URL here -- the active source's
+        # fetch and the probe that runs while a NEW source is being added --
+        # and only the first may move saved references, so the caller has to
+        # say which it is. Silence means touch nothing.
+        if args.state_dir:
+            try:
+                moved = remap_state_file(os.path.join(state_dir(args.state_dir), STATE_FILE), parsed["channels"])
+                if moved:
+                    log("playlist: moved %d saved channel reference(s) onto id scheme %d" % (moved, CHANNEL_ID_SCHEME))
+            except OSError as error:
+                log("playlist: could not update saved channel references (%s)" % type(error).__name__)
+        emit(status)
+        return EXIT_OK
+    except HelperError as error:
+        stale = os.path.isfile(channels_path)
+        status = error_payload(
+            "playlist", error,
+            sourceHost=source_host(url) if url else "",   # no URL is not a "local file"
+            fetchedAt=previous.get("fetchedAt") if isinstance(previous, dict) else None,
+            stale=stale,
+            durationMs=int((time.monotonic() - started) * 1000),
+        )
+        write_status_quietly(status_path, status)
+        log("playlist: %s" % error.message)
+        emit(status)
+        return EXIT_ERROR
+
+

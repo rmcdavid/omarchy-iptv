@@ -33,11 +33,26 @@ release = importlib.util.module_from_spec(_spec)
 _spec.loader.exec_module(release)
 sys.path.insert(0, os.path.join(ROOT, 'scripts'))
 import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
+import helper_files  # noqa: E402  the helper's files, read from its stub (D-REL-7)
 
 # The real model's layout, so the fixture tree has the same files the
 # artifact must carry. The first part holds the fixture's PLUGIN_VERSION.
 PARTS = model_files.part_paths(ROOT)
 VERSION_PART = PARTS[0]
+
+# The real helper's parts (D-REL-7), read from THIS repository's stub through
+# the one reader of HELPER_PARTS, so the fixture carries what the artifact
+# must and a part dropped from the allowlist is red. The parser lives in the
+# part that holds `build_parser`, and the fixture writes its doubles there.
+HELPER_PARTS = helper_files.part_paths(ROOT)
+PARSER_PART = [rel for rel in HELPER_PARTS
+               if 'def build_parser(' in helper_files.read(ROOT, rel)][0]
+
+
+def helper_stub(parts):
+    """A stub in the shape the split writes: the list is all the resolver reads."""
+    return ('#!/usr/bin/env python3\nimport sys\nHELPER_PARTS = (\n%s)\n'
+            % ''.join('    "%s",\n' % rel.rsplit('/', 1)[1] for rel in parts))
 
 
 def must_ship():
@@ -46,7 +61,7 @@ def must_ship():
         'BarWidget.qml', 'Guide.qml', 'Service.qml',
         'bin/omarchy-iptv',
         'contrib/bindings.lua', 'contrib/omarchy-menu.jsonc', 'contrib/windows.lua',
-    } | set(model_files.model_paths(ROOT))
+    } | set(model_files.model_paths(ROOT)) | set(helper_files.part_paths(ROOT))
 
 
 def aggregator(parts):
@@ -78,6 +93,7 @@ class ReleaseCase(unittest.TestCase):
         self.write('Service.qml', 'import "Model.mjs" as Model\n'
                    'x: Qt.resolvedUrl("bin/omarchy-iptv")\n')
         self.write('Model.mjs', aggregator(PARTS))
+        self.write('bin/omarchy-iptv', helper_stub(HELPER_PARTS))
         # D-HOST-1: the runtime compares this against manifest.json to notice a
         # hot reload that left an older component mounted, so the check demands
         # it and the double must carry it. A double more forgiving than the
@@ -225,7 +241,7 @@ class ReleaseCase(unittest.TestCase):
     def test_shipped_prose_that_runs_the_helper_bare_is_a_problem(self):
         """PLY-WEAK-05, verified 2026-09-14: the README told the user to run
         `omarchy-iptv player stop`, and omarchy-iptv is on nobody's PATH."""
-        self.write('bin/omarchy-iptv', self.HELPER_WITH_PARSER)
+        self.write(PARSER_PART, self.HELPER_WITH_PARSER)
         self.write('README.md', 'If one is left behind, run `omarchy-iptv player stop`.\n')
         self.commit_all()
         problems = release.check(self.dir, out=io.StringIO())
@@ -235,14 +251,14 @@ class ReleaseCase(unittest.TestCase):
     def test_the_changelog_ships_too_and_is_scanned_too(self):
         """The third instance, 2026-09-25: fixed in the README and written
         again into the CHANGELOG in the same change."""
-        self.write('bin/omarchy-iptv', self.HELPER_WITH_PARSER)
+        self.write(PARSER_PART, self.HELPER_WITH_PARSER)
         self.write('CHANGELOG.md', '- Run `omarchy-iptv cache logos-clear --key <key>`.\n')
         self.commit_all()
         problems = release.check(self.dir, out=io.StringIO())
         self.assertTrue(any('CHANGELOG.md:1' in p and 'D-REL-3' in p for p in problems), problems)
 
     def test_the_path_form_and_the_names_that_are_not_commands_are_fine(self):
-        self.write('bin/omarchy-iptv', self.HELPER_WITH_PARSER)
+        self.write(PARSER_PART, self.HELPER_WITH_PARSER)
         self.write('README.md',
                    'Run `python3 ~/.config/omarchy/plugins/x/bin/omarchy-iptv player stop`.\n'
                    'One mpv window, class `omarchy-iptv`, titled with the channel name.\n'
@@ -257,7 +273,7 @@ class ReleaseCase(unittest.TestCase):
         wrong; one that declares `frobnicate` makes `omarchy-iptv frobnicate`
         a problem without anyone editing the check."""
         self.assertEqual([], release.bare_helper_invocations('run omarchy-iptv player stop', []))
-        self.write('bin/omarchy-iptv', 'sub.add_parser("frobnicate")\n')
+        self.write(PARSER_PART, 'sub.add_parser("frobnicate")\n')
         self.write('README.md', 'Try `omarchy-iptv frobnicate` and `omarchy-iptv player stop`.\n')
         self.commit_all()
         problems = release.check(self.dir, out=io.StringIO())
@@ -269,8 +285,7 @@ class ReleaseCase(unittest.TestCase):
         parser. README bullet 6 at 05a0d3a~1 (2026-09-14, PLY-WEAK-05);
         README line 101 as shipped in v0.7.6 through v0.7.10; and the
         CHANGELOG line written on 2026-09-25 and caught before it shipped."""
-        with open(os.path.join(ROOT, 'bin', 'omarchy-iptv'), encoding='utf-8') as fh:
-            subs = release.helper_subcommands(fh.read())
+        subs = release.helper_subcommands(helper_files.helper_source(ROOT))
         self.assertIn('player', subs)
         self.assertIn('logos', subs)
         shipped = (
@@ -327,6 +342,50 @@ class ReleaseCase(unittest.TestCase):
         problems = release.check(self.dir, out=io.StringIO())
         self.assertTrue(any("%s:1 names 'docs/UX.md'" % VERSION_PART in p for p in problems), problems)
         self.assertTrue(any("bin/omarchy-iptv:2 names 'tests/fixtures/x.json'" in p for p in problems), problems)
+
+    def test_a_helper_part_is_a_shipped_source_too(self):
+        """D-REL-7. The parts carry the comments the one-file helper did, so
+        the citation scan reads them: a part citing a path the install lacks
+        is the same D-REL-2 problem as the stub doing it."""
+        self.write(HELPER_PARTS[3], '# measured by tests/test_logo_chunks.py\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any("%s:1 names 'tests/test_logo_chunks.py'" % HELPER_PARTS[3] in p
+                            for p in problems), problems)
+
+    # -- the helper's parts (D-REL-7) --------------------------------------
+
+    def test_a_part_the_stub_loads_must_be_on_the_allowlist(self):
+        """The prototype of the split showed this check green while the
+        artifact it would build shipped a stub naming parts it did not carry:
+        a helper that cannot start on any install."""
+        extra = 'bin/helper/12-extra.py'
+        self.write(extra, '# a part nobody listed\n')
+        self.write('bin/omarchy-iptv', helper_stub(HELPER_PARTS + [extra]))
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any(extra in p and 'not on the allowlist' in p for p in problems), problems)
+
+    def test_an_allowlisted_part_the_stub_does_not_load_is_a_problem(self):
+        dropped = HELPER_PARTS[5]
+        self.write('bin/omarchy-iptv', helper_stub([p for p in HELPER_PARTS if p != dropped]))
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any(dropped in p and 'does not load' in p for p in problems), problems)
+
+    def test_a_stub_whose_part_list_cannot_be_read_is_a_problem(self):
+        self.write('bin/omarchy-iptv', '#!/usr/bin/env python3\nHELPER_PARTS = tuple(PARTS)\n')
+        self.commit_all()
+        problems = release.check(self.dir, out=io.StringIO())
+        self.assertTrue(any('HELPER_PARTS is not a literal' in p for p in problems), problems)
+
+    def test_the_whole_helper_ships_and_nothing_else_under_bin(self):
+        self.write('bin/helper/notes.txt', 'scratch\n')
+        self.commit_all()
+        self.build()
+        tree = self.main_tree()
+        self.assertTrue(set(HELPER_PARTS) <= tree, sorted(set(HELPER_PARTS) - tree))
+        self.assertNotIn('bin/helper/notes.txt', tree)
 
     def test_a_shipped_source_naming_the_rule_and_the_branch_is_fine(self):
         self.write(VERSION_PART, '// engineering rule 12 (dev branch); UX.md section 3 on the dev branch\n'

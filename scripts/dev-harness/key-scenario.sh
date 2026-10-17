@@ -1371,6 +1371,15 @@ shell_arm() {
   done
   cp -R "$PLUGIN_ROOT/contrib" "$SLOW_TREE/contrib" 2>/dev/null || true
   cp "$PLUGIN_ROOT/bin/omarchy-iptv" "$SLOW_TREE/bin/omarchy-iptv.real" 2>/dev/null || staged=0
+  # D-REL-7: the helper is a stub and the parts it names, and the stub finds
+  # them in bin/helper/ beside itself whatever it is called, so they are
+  # copied there too (none for a tree from before the split).
+  local -a helper_parts=(); local hp
+  qa_helper_parts "$PLUGIN_ROOT" >/dev/null || staged=0
+  mapfile -t helper_parts < <(qa_helper_parts "$PLUGIN_ROOT")
+  for hp in "${helper_parts[@]}"; do
+    mkdir -p "$SLOW_TREE/bin/helper" && cp "$hp" "$SLOW_TREE/bin/helper/" 2>/dev/null || staged=0
+  done
   cp "$HERE/fixtures/slow-helper.py" "$SLOW_TREE/bin/omarchy-iptv" 2>/dev/null || staged=0
   chmod +x "$SLOW_TREE/bin/omarchy-iptv" "$SLOW_TREE/bin/omarchy-iptv.real" 2>/dev/null || true
   (( staged )) || echo "   the slow tree could not be staged from $PLUGIN_ROOT"

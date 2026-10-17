@@ -44,6 +44,7 @@ import tempfile
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import model_files  # noqa: E402  the model's files, read from Model.mjs (D-REL-5)
+import helper_files  # noqa: E402  the helper's files, read from its stub (D-REL-7)
 
 RELEASE_BRANCH = 'main'
 DEV_BRANCH = 'dev'
@@ -83,7 +84,24 @@ ALLOWLIST = (
     'model/sources.mjs',
     'model/source-records.mjs',
     'model/form-edit.mjs',
+    # D-REL-7: the helper, as a stub that shields and then compiles these
+    # parts, in the order its HELPER_PARTS lists, into its own namespace
+    # (scripts/split-helper.py cut them from the one-file helper when it
+    # neared FILE_CEILING). check() reads that list out of the stub, so a part
+    # the stub loads that is missing here is red, and so is one listed here
+    # that the stub does not load.
     'bin/omarchy-iptv',
+    'bin/helper/01-core.py',
+    'bin/helper/02-sources.py',
+    'bin/helper/03-io-playlist.py',
+    'bin/helper/04-epg.py',
+    'bin/helper/05-ipc-logos.py',
+    'bin/helper/06-failed.py',
+    'bin/helper/07-player.py',
+    'bin/helper/08-player-verbs.py',
+    'bin/helper/09-cache.py',
+    'bin/helper/10-state.py',
+    'bin/helper/11-cli.py',
     'contrib/bindings.lua',
     'contrib/omarchy-menu.jsonc',
     'contrib/windows.lua',
@@ -330,6 +348,28 @@ def check(root, out=sys.stdout):
                 '%s is on the allowlist but nothing the plugin loads imports it'
                 % path)
 
+    # D-REL-7. The helper the service runs is a stub that compiles the parts
+    # its HELPER_PARTS names, so those must ship and nothing else under
+    # bin/helper/ may: a part missing from the artifact is a helper that
+    # cannot start on any install, and the split's prototype passed every
+    # other check here while shipping exactly that.
+    helper_parts = []
+    if helper_files.STUB in have:
+        try:
+            helper_parts = helper_files.part_paths(root)
+        except helper_files.HelperLayoutError as error:
+            problems.append('%s' % error)
+        for rel in helper_parts:
+            if rel not in allow:
+                problems.append(
+                    '%s loads %s, which is not on the allowlist: the artifact would ship a '
+                    'helper that cannot start (D-REL-7)' % (helper_files.STUB, rel))
+        for rel in ALLOWLIST:
+            if rel.startswith(helper_files.PART_DIR + '/') and rel not in helper_parts:
+                problems.append(
+                    '%s is on the allowlist but %s does not load it (D-REL-7)'
+                    % (rel, helper_files.STUB))
+
     # D-HOST-1. Model.PLUGIN_VERSION travels with the LOADED QML; the version
     # in manifest.json travels with the DIRECTORY. The plugin compares them at
     # runtime to notice that a hot reload left an older component mounted, and
@@ -404,8 +444,11 @@ def check(root, out=sys.stdout):
                     'and the rows below render as text' % (doc, n + 1))
 
     # Shipped prose may not tell the user to run what they cannot.
-    subcommands = (helper_subcommands(read(root, 'bin/omarchy-iptv'))
-                   if 'bin/omarchy-iptv' in have else [])
+    try:
+        subcommands = (helper_subcommands(helper_files.helper_source(root))
+                       if helper_files.STUB in have else [])
+    except (OSError, helper_files.HelperLayoutError):
+        subcommands = []                  # already a problem above
     for doc in SHIPPED_PROSE:
         if doc not in have:
             continue
@@ -415,7 +458,8 @@ def check(root, out=sys.stdout):
                 'PATH; spell it %s (D-REL-3)' % (doc, n, hit, HELPER_PATH_FORM))
 
     # Shipped sources may not cite what does not ship, even in a comment.
-    for src in SHIPPED_SOURCES + tuple(p for p in reached if p not in SHIPPED_SOURCES):
+    helper_sources = tuple(p for p in helper_parts if p in allow)
+    for src in SHIPPED_SOURCES + helper_sources + tuple(p for p in reached if p not in SHIPPED_SOURCES):
         if src not in have:
             continue
         for n, line in enumerate(read(root, src).splitlines(), 1):

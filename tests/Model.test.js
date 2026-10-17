@@ -550,7 +550,21 @@ const oneFav = { version: 1, favorites: ["United States:0"], recents: [], lastPl
 // down this file. `qmlBlock` takes an element from its `id:` to the next one.
 const guideSource = require("fs").readFileSync(require("path").join(__dirname, "../Guide.qml"), "utf8")
 const serviceSource = require("fs").readFileSync(require("path").join(__dirname, "../Service.qml"), "utf8")
-const helperSource = require("fs").readFileSync(require("path").join(__dirname, "../bin/omarchy-iptv"), "utf8")
+// The helper's text. Since D-REL-7 the helper is bin/omarchy-iptv, a stub,
+// and the parts its generated HELPER_PARTS block names under bin/helper/,
+// compiled in that order into one namespace, so a pin reads all of them in
+// that order -- the way scripts/helper_files.py does in python, and
+// split-helper.py --check proves the block has this shape. A stub with no
+// block is a one-file helper and is read alone.
+const helperSource = (function () {
+  const fs = require("fs"), path = require("path")
+  const stub = fs.readFileSync(path.join(__dirname, "../bin/omarchy-iptv"), "utf8")
+  const block = /^HELPER_PARTS = \(\n((?: {4}"[0-9]{2}-[a-z][a-z0-9-]*\.py",\n)+)\)$/m.exec(stub)
+  const parts = block ? block[1].match(/"[^"]+"/g).map(function (q) { return q.slice(1, -1) }) : []
+  return stub + parts.map(function (name) {
+    return fs.readFileSync(path.join(__dirname, "../bin/helper", name), "utf8")
+  }).join("")
+})()
 // The model's own text, for the few pins that read a decision's body. Since
 // D-REL-5 the model is Model.mjs and parts under model/, so no single file
 // holds it; the text is taken from the function the aggregator EXPORTS

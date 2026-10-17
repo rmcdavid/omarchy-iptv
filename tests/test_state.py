@@ -565,7 +565,12 @@ class SessionKeyTest(unittest.TestCase):
         divergence being discovered years later by an unrelated fixture.
         """
         import inspect
-        source = inspect.getsource(helper)
+        import sys
+        sys.path.insert(0, str(ROOT / "scripts"))
+        import helper_files
+        # The WHOLE helper, the stub and every part (D-REL-7): since the split
+        # `inspect.getsource(helper)` is the stub alone, and this count read 0.
+        source = helper_files.helper_source(str(ROOT))
         self.assertEqual(source.count("int(float("), 1,
                          "coerce_int should be the only place that parses a number this way")
         for name in ("normalize_played", "non_negative_int", "normalize_saved_search"):
