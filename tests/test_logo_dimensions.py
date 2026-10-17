@@ -41,6 +41,7 @@ import pathlib
 import re
 import shutil
 import stat
+import struct
 import subprocess
 import sys
 import tempfile
@@ -990,6 +991,93 @@ class LogoFetchCapTest(unittest.TestCase):
         self.assertEqual(again["failed"], 3, "the two late URLs and the swept bomb's URL")
         self.assertEqual(sorted(again["names"]), sorted(summary["names"]))
         self.assertEqual(sorted(l["name"] for l in announced_again), sorted(summary["names"]))
+
+
+def tiny_gif(screen, frames):
+    """A GIF89a built here, a few dozen bytes: a logical screen of `screen`
+    (w, h), a two-colour table, one image descriptor per (left, top, w, h) in
+    `frames`, each carrying the 1x1 LZW stream of the classic 43-byte GIF,
+    then the trailer. The reader walks blocks and decodes nothing, so the
+    pixel stream does not have to fill the descriptor."""
+    out = b"GIF89a" + struct.pack("<HH", *screen) + b"\x80\x00\x00\x00\x00\x00\xff\xff\xff"
+    for frame in frames:
+        out += b"\x2c" + struct.pack("<HHHH", *frame) + b"\x00\x02\x02\x44\x01\x00"
+    return out + b"\x3b"
+
+
+class GifCanvasTest(unittest.TestCase):
+    """D-LOGO-14, the maintainer's eighth finding, on #11892 against 0.14.1:
+    the GIF reader took the larger of the logical screen and each frame's
+    SIZE, while Qt's handler builds a zero logical screen from the first
+    frame's left+width and top+height before it allocates. A 1x1 frame at
+    8190,8190 under a 0x0 screen read as 1x1 and passed. The canvas is now the
+    largest of the screen and every frame's right and bottom edge, and a zero
+    screen or a zero frame is refused. Every input is built here and is a few
+    dozen bytes; nothing is decoded."""
+
+    def dims(self, screen, *frames):
+        return helper.logo_dimensions(tiny_gif(screen, frames), "image/gif")
+
+    def within(self, screen, *frames):
+        return helper.logo_within_bounds(tiny_gif(screen, frames), "image/gif")
+
+    def test_a_valid_tiny_gif_passes_and_an_offset_inside_the_canvas_changes_nothing(self):
+        self.assertEqual(len(tiny_gif((1, 1), [(0, 0, 1, 1)])), 35)
+        self.assertEqual(self.dims((1, 1), (0, 0, 1, 1)), (1, 1))
+        self.assertTrue(self.within((1, 1), (0, 0, 1, 1)))
+        self.assertEqual(self.dims((64, 64), (16, 16, 32, 32)), (64, 64))
+        name = helper.write_logo(os.path.join(_private_tmpdir(self), "logos"),
+                                 "https://logos.provider.test/g",
+                                 tiny_gif((64, 64), [(16, 16, 32, 32)]), "image/gif")
+        self.assertTrue(name)
+
+    def test_a_small_frame_at_an_offset_past_the_side_bound_is_refused(self):
+        blob = tiny_gif((1, 1), [(8190, 8190, 1, 1)])
+        self.assertLess(len(blob), 48)
+        self.assertEqual(helper.logo_dimensions(blob, "image/gif"), (8191, 8191))
+        self.assertFalse(helper.logo_within_bounds(blob, "image/gif"))
+        target = os.path.join(_private_tmpdir(self), "logos")
+        with self.assertRaises(helper.HelperError) as caught:
+            helper.write_logo(target, "https://logos.provider.test/g", blob, "image/gif")
+        self.assertEqual(caught.exception.code, "logo_dimensions")
+        self.assertIn("8191x8191", caught.exception.message)
+        self.assertFalse(os.path.exists(target))
+        # The cached-file branch reaches the same verdict on the same bytes.
+        planted = os.path.join(_private_tmpdir(self), "planted")
+        pathlib.Path(planted).write_bytes(blob)
+        self.assertFalse(helper.logo_file_within_bounds(planted))
+
+    def test_a_frame_offset_past_the_area_bound_is_refused_with_both_sides_legal(self):
+        self.assertEqual(self.dims((1, 1), (2047, 2048, 1, 1)), (2048, 2049))
+        self.assertFalse(self.within((1, 1), (2047, 2048, 1, 1)))
+
+    def test_every_frame_is_offset_not_only_the_first(self):
+        self.assertFalse(self.within((64, 64), (0, 0, 64, 64), (8000, 0, 64, 64)))
+        self.assertFalse(self.within((64, 64), (0, 0, 64, 64), (0, 0, 64, 64), (0, 4096, 1, 1)))
+
+    def test_a_zero_logical_screen_is_refused(self):
+        # The maintainer's shape: Qt would size this canvas from the frame.
+        self.assertIsNone(self.dims((0, 0), (8190, 8190, 1, 1)))
+        self.assertIsNone(self.dims((0, 0), (0, 0, 1, 1)))
+        self.assertIsNone(self.dims((0, 64), (0, 0, 64, 64)))
+        self.assertIsNone(self.dims((64, 0), (0, 0, 64, 64)))
+
+    def test_a_zero_sized_frame_is_refused(self):
+        self.assertIsNone(self.dims((64, 64), (0, 0, 0, 64)))
+        self.assertIsNone(self.dims((64, 64), (0, 0, 64, 64), (0, 0, 64, 0)))
+
+    def test_a_frame_reaching_each_bound_exactly_passes_and_one_more_does_not(self):
+        side, area = helper.MAX_LOGO_SIDE, helper.MAX_LOGO_PIXELS
+        self.assertEqual((side, area), (4096, 4194304))
+        self.assertEqual(self.dims((1, 1), (side - 1, 0, 1, 1)), (side, 1))
+        self.assertTrue(self.within((1, 1), (side - 1, 0, 1, 1)))
+        self.assertFalse(self.within((1, 1), (side, 0, 1, 1)))
+        self.assertEqual(self.dims((1, 1), (2047, 2047, 1, 1)), (2048, 2048))
+        self.assertTrue(self.within((1, 1), (2047, 2047, 1, 1)))
+        # Both bounds at once: a 4096-wide strip whose bottom edge is row 1024.
+        self.assertEqual(self.dims((1, 1), (0, 1023, side, 1)), (side, area // side))
+        self.assertTrue(self.within((1, 1), (0, 1023, side, 1)))
+        self.assertFalse(self.within((1, 1), (0, 1024, side, 1)))
 
 
 if __name__ == "__main__":

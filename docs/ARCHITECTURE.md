@@ -216,7 +216,10 @@ Error codes: `no_source`, `unsupported_scheme`, `unsafe_path`, `not_found`,
 
 Keyed by tvg-id; times are epoch seconds (XMLTV offsets applied by the
 helper). `epg-status.json` mirrors the playlist status shape with
-`"kind": "epg"`.
+`"kind": "epg"`. A feed that declares an XML entity is refused as
+`bad_xml` with one sentence and no URL, before ElementTree reads a byte of
+it (D-EPG-6, security standard 2); a `<!DOCTYPE tv SYSTEM "xmltv.dtd">`
+line without an internal subset is accepted as it always was.
 
 ### `state.json` (service <-> disk, via `Model.parseState`)
 
@@ -2270,6 +2273,42 @@ the last row into a fixed stack buffer and discards it (`png_read_IDAT_data`
 with no output, 1.6.58), so the cost of such trailing data is CPU on Qt's
 image-loading thread, not memory; it is read, not measured.
 
+**D-LOGO-14: a GIF canvas is an edge, not a size (fixed on `dev`
+2026-10-16).** Raised by the same maintainer against the shipped 0.14.1 on
+omacom/omarchy-plugin-marketplace#11892: `_gif_dimensions` took the larger
+of the logical screen and each frame's WIDTH and HEIGHT, ignored each frame's
+left and top, and accepted a zero logical screen. Qt's handler
+(`qgifhandler.cpp`, identical at v6.11.2 and on qtbase's `dev`, read and not
+run) sizes a screen side that is zero from the first image descriptor's
+`newleft + newwidth` and `newtop + newheight`, then allocates that canvas,
+before anything is scaled; its own limits are `width * height < 16384^2`
+pixels and the 256 MiB allocation limit, so a 1x1 frame at 8190,8190 under a
+0x0 screen is an 8191x8191 ARGB canvas just under both, which the helper had
+read as 1x1. A later frame does not enlarge the canvas (Qt clips it to
+`swidth`/`sheight`), and the reader does not rely on that. **What changed.**
+The canvas the reader returns is the largest of the logical screen and every
+frame's right edge (left + width) and bottom edge (top + height), over the
+whole walk to the trailer; a logical screen with a zero side, or a frame
+with one, makes the header unreadable, which the bound already refuses
+(R4). The existing bounds then apply to that canvas unchanged, at
+`write_logo` and in the cached-file sweep alike. **Verified by**
+`GifCanvasTest` in `tests/test_logo_dimensions.py`, seven tests over GIFs of
+35 to 65 bytes built in the test: on bf075ca six red and the control green,
+on the fix seven green, and each of six one-decision mutants (no left
+offset, no top offset, a zero screen allowed, a zero screen height allowed,
+a zero frame allowed, a zero frame height allowed) reddens at least one.
+Nothing was decoded and nothing measured. **The other three types, read for
+the same shape** (a declared size a decoder may enlarge from another field):
+none has one. PNG: Qt allocates from `png_get_IHDR`, and the canonical form
+keeps no other chunk that names a size. JPEG: libjpeg-turbo 3.2.0's
+`get_sof` refuses a zero height (the DNL form) and a second SOF, and Qt's
+`scale_num` is `qBound(1, qCeil(8/f), 8)` over a denominator of 8, so libjpeg
+is never asked to enlarge. WEBP: libwebp 1.6.0's demuxer refuses a frame
+whose offset plus size passes the VP8X canvas and requires a still frame to
+equal it (`CheckFrameBounds`), Qt allocates the canvas and each frame from
+the demuxer's numbers, and the VP8 header's two scale bits are stored and
+never applied (`vp8_dec.c`). The searches are in `docs/QA-RESULTS.md`.
+
 - Five smaller things the repair round left open, each stated rather than
   rounded away (the review found them recorded in no document):
   1. Turning logos OFF while a fetch is dying sets the same restart flag a
@@ -2768,6 +2807,14 @@ Performance budget (10k channels):
    follows `--`; headers become `--user-agent=`, `--referrer=`,
    `--http-header-fields-append=` items with validated names; everything else
    from `#EXTVLCOPT`/`#KODIPROP` is stored, not applied (M1).
+   Nor may an XMLTV feed define text for the parser to expand: ElementTree
+   expands the entities a document declares in its internal subset, and the
+   64 MiB cap bounds only the input, so `EntityRefusingReader` runs the
+   prolog through its own expat parser, refuses any entity declaration,
+   general or parameter, and hands the parse nothing until that parser has
+   reached the root's start tag (D-EPG-6; XMLTV declares none). Verified by
+   calling `parse_xmltv` and the `epg` verb over small documents, plain and
+   gzip.
 3. Stream URLs are allow-listed by scheme (`http https rtmp rtmps rtsp udp rtp
    mms mmsh srt`); `file:`, `plugin:`, `javascript:` and option-looking lines
    (`-...`) are dropped and counted.
@@ -2912,6 +2959,13 @@ Performance budget (10k channels):
     canonical. Verified by calling `canonical_png`, `write_logo` and `logos
     --fetch` over ordinary images, and by observing Qt draw the canonical
     file and the original identically.
+    And a declared size is not the only number a decoder sizes from: Qt's GIF
+    handler builds a zero logical screen from the first frame's left+width
+    and top+height (D-LOGO-14). So a GIF's canvas is the largest of the
+    logical screen and every frame's right and bottom edge, and a zero
+    screen or a zero frame is refused. Verified by calling `logo_dimensions`,
+    `write_logo` and `logo_file_within_bounds` over GIFs of a few dozen bytes
+    built in the test.
 13. The shell process never subscribes to a global that another process can
     fill. The clipboard is the instance (D-CLIP-1): an editable `TextInput`
     subscribes to `QClipboard::dataChanged` and the released Qt reads the
@@ -3204,7 +3258,9 @@ Manual QA on the live shell (QA role, machine of record):
     both request a refresh; the 300 ms debounce collapses them. Keep the
     debounce when adding new triggers.
 11. EPG size: a 10k-channel XMLTV can exceed 100 MB; the helper must stream
-    (`iterparse`) and cap at 64 MB compressed or bail with `too_large`.
+    (`iterparse`) and cap at 64 MB compressed or bail with `too_large`. The
+    cap bounds input, not expansion, so a feed that declares an entity is
+    refused (D-EPG-6, security standard 2).
 12. Vertical bars: the widget shows the glyph only (`vertical` check);
     first-class vertical layout is M2 per PRODUCT.md.
 

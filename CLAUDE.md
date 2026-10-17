@@ -511,6 +511,17 @@ requests and raise the batch.
      Qt reads no compressed metadata from any of them, so what it keeps is
      bounded by the file's own bytes. A picture already decoded by a running
      shell has paid; the restart is what clears it.
+     **And a declared size is not the only number the decoder sizes from**
+     (D-LOGO-14, the eighth finding, against 0.14.1 on #11892; fixed on
+     `dev` 2026-10-16). Qt's GIF handler builds a ZERO logical screen from
+     the first frame's left+width and top+height before it allocates, and
+     the reader took each frame's size and ignored its offsets, so a 1x1
+     frame at 8190,8190 under a 0x0 screen read as 1x1 and is an 8191x8191
+     canvas, inside Qt's own limits. `_gif_dimensions` now returns the
+     largest of the screen and every frame's right and bottom edge, and a
+     zero screen or zero frame is unreadable, so refused. Rule 15 over the
+     other three types, read in their sources and not run: none sizes from a
+     field the reader does not read.
    - **The clipboard, as an INPUT that blocks** (D-CLIP-1). Every editable
      QtQuick `TextInput` subscribes to `QClipboard::dataChanged` at
      construction, and on the RELEASED Qt 6.11.2 that slot calls
@@ -557,6 +568,18 @@ requests and raise the batch.
      subscription made at construction is a sink opened by an object's
      mere existence, not by anything it is asked to do. Reported upstream
      to Omarchy and Qt with the measurements.
+   - **The helper's XML parser** (D-EPG-6, the ninth finding, against 0.14.1
+     on #11892; fixed on `dev` 2026-10-16), which is D-LOGO-11's shape in
+     the helper: a parser that EXPANDS is a decoder, and its cost is not its
+     input. ElementTree expands the entities a document declares in its
+     internal subset, `MAX_SOURCE_BYTES` bounds the bytes in and not the
+     text out, and an element is released only once it is complete. XMLTV
+     declares no entity (the common `<!DOCTYPE tv SYSTEM "xmltv.dtd">` has no
+     subset and passes), so `EntityRefusingReader` reads the prolog with its
+     own expat parser, refuses any entity declaration, general or parameter,
+     as `bad_xml` (one sentence, no URL), and hands ElementTree nothing until
+     that parser has reached the root's start tag; no external DTD is read.
+     It is the helper's only markup parser; the search is in QA-RESULTS.
    When you add a sink, add it here.
 6. Files the plugin writes: cache under `~/.cache/omarchy-iptv/sources/<key>/`,
    state at `~/.local/state/omarchy-iptv/state.json`, socket under

@@ -13315,6 +13315,172 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### D-LOGO-14 and D-EPG-6 fixed: the GIF canvas and the XMLTV entity declarations
+
+**2026-10-16, on `dev` from 0ae0cc1.** Both raised by the marketplace
+maintainer on omacom/omarchy-plugin-marketplace#11892 against the shipped
+0.14.1 (bf075ca), his eighth and ninth findings, posted after that request's
+automated baseline had passed. Deliberately NOT measured, by the brief:
+nothing here builds an oversized, deeply nested or expanding input or reads a
+memory figure, and the maintainer's numbers were not reproduced. Each fix is
+judged by what it accepts and refuses, which small ordinary inputs prove.
+The helper is identical at bf075ca and 0ae0cc1 (`git diff bf075ca 0ae0cc1
+-- bin/` is empty), so "red on bf075ca" is red on the shipped code and on
+what `dev` held.
+
+**D-LOGO-14, what Qt does, read and not run.** `qgifhandler.cpp` at qtbase
+v6.11.2, byte-identical on qtbase `dev` (the maintainer's "Qt 6.12"),
+`QGIFFormat::decode`, image-descriptor case: a logical-screen side that is
+zero (`swidth <= 0`) is replaced by the first descriptor's `newleft +
+newwidth` (and `newtop + newheight`), and only then is the canvas allocated,
+through `withinSizeLimit` (`width * height < 16384 * 16384` pixels) and
+`QImageIOHandler::allocateImage` (the 256 MiB limit); nothing is scaled
+before that, because the handler offers no scaled read. An 8191x8191 ARGB32
+canvas is 268,369,924 bytes, just under both. A later descriptor does not
+enlarge an allocated canvas: `right` and `bottom` are clipped to
+`swidth`/`sheight`. The "disbelieve ridiculous logical screen sizes" test
+(`swidth/10 > qMax(newwidth, 16384)`) cannot fire for a 16-bit field. The
+helper's `_gif_dimensions` took `max(width, frame_w)`, never read a frame's
+left or top, and accepted the zero screen, so that file read as 1x1.
+
+**What changed.** `_gif_dimensions` returns the largest of the logical screen
+and every frame's right edge (left + width) and bottom edge (top + height)
+over the whole walk to the trailer, and returns None for a logical screen
+with a zero side and for a frame with one; None is a refusal at
+`write_logo` and in the cached-file sweep alike (R4), and the existing
+`MAX_LOGO_SIDE` and `MAX_LOGO_PIXELS` then apply to that canvas unchanged.
+It is the larger of what Qt allocates in every case: with the zero screen
+refused, Qt's canvas is the logical screen, and the reader never answers
+less than that.
+
+**Rule 11, the red run.** `GifCanvasTest` in `tests/test_logo_dimensions.py`,
+seven tests over GIF89a files built in the test by `tiny_gif` (a two-colour
+table and the classic 1x1 LZW stream under every descriptor, 35 to 65 bytes;
+the reader walks blocks and decodes nothing), each calling the shipping
+`logo_dimensions`, `logo_within_bounds`, `write_logo` or
+`logo_file_within_bounds`:
+
+| Test | bf075ca | fix |
+|---|---|---|
+| a valid 1x1 GIF passes, and a 32x32 frame at 16,16 in a 64x64 screen reads 64x64 and is written (control) | pass | pass |
+| a 1x1 frame at 8190,8190 under a 1x1 screen (35 bytes): 8191x8191, refused at `write_logo` naming 8191x8191 with nothing on disk, and refused by the sweep | fail (1x1) | pass |
+| a 1x1 frame at 2047,2048: 2048x2049, refused on area with both sides legal | fail | pass |
+| every frame is offset, the second (8000,0) and the third (0,4096), not only the first | fail | pass |
+| a zero logical screen, 0x0 with the maintainer's 8190,8190 frame, 0x0 at 0,0, 0x64 and 64x0: unreadable | fail (1x1, 64x64) | pass |
+| a zero-width frame, and a zero-height second frame: unreadable | fail (64x64) | pass |
+| the bound exactly: 4095,0 reads 4096x1 and passes, 4096,0 refused; 2047,2047 reads 2048x2048 and passes; a 4096x1 strip at row 1023 reads 4096x1024 and passes, at row 1024 refused | fail | pass |
+
+6 red and 1 green on bf075ca's helper (scratch copy of `tests/` with
+bf075ca's `bin/omarchy-iptv`); 7 of 7 on the fix. The 114 existing tests in
+the three logo modules stay green on both.
+
+**Rule 11, the mutants**, each one decision broken in a scratch copy and the
+three logo modules run: no left offset (4 red), no top offset (4), a zero
+screen allowed (1), only a zero screen WIDTH refused (1), a zero frame
+allowed (1), only a zero frame WIDTH refused (1). All six killed.
+
+**D-EPG-6, what changed.** `EntityRefusingReader` wraps the stream
+`parse_xmltv` hands to `ET.iterparse`. Its first read creates its own
+`xml.parsers.expat.ParserCreate()` parser, whose `EntityDeclHandler` raises
+`HelperError("bad_xml", "refused the EPG: it declares an XML entity, which
+XMLTV feeds never do")` (expat calls it for general and parameter, internal,
+external and unparsed entities alike) and whose `StartElementHandler` ends
+the pass; it reads and holds chunks until that parser has reached the root's
+start tag, and only then returns them, so ElementTree is handed no byte of a
+prolog that has not been read through. An internal subset can only come
+before the root, and ElementTree reads no DTD the DOCTYPE names (pinned by a
+control below), so the prolog is the only way a declaration reaches it. A prolog the pass
+cannot parse is refused as `bad_xml` with expat's own message, the shape
+ElementTree's errors already had. Observed on this machine's Python 3.14.7
+and expat 2.8.4, with an ordinary 1 KB document: a raise from the handler
+stops the parser at the declaration (`CurrentByteIndex` 45, a further
+`Parse` reports "parsing finished"), so the pass reads nothing past it; the
+design does not depend on that, because ElementTree is given nothing until
+the pass is through.
+
+**Rule 11, the red run.** `EntityDeclarationTest` in `tests/test_epg.py`,
+four tests calling the shipping `parse_xmltv` and the `epg` verb:
+
+| Test | bf075ca | fix |
+|---|---|---|
+| a small XMLTV document with no DOCTYPE, with `<!DOCTYPE tv SYSTEM "xmltv.dtd">`, and with that and a comment parses to the same channel with no warnings (control) | pass | pass |
+| `<!ENTITY x "y">` in an internal subset, the same after `SYSTEM "xmltv.dtd"`, and one parameter entity `<!ENTITY % p "y">`, none of them referenced: `bad_xml`, message naming an entity | fail (parsed) | pass |
+| the first of those gzipped, through the `epg` verb: exit 1, `bad_xml`, one sentence, the path in neither the message nor stderr | fail | pass |
+| an entity declared only in a DTD file the DOCTYPE names, and referenced: `undefined entity`, so that file was never read (control, the premise) | pass | pass |
+
+2 red and 2 green on bf075ca; 4 of 4 on the fix. The existing SEC-19 test
+(`test_entity_expansion_bomb_is_refused_quickly`, payload unchanged) is
+`bad_xml` on both; on the fix it is refused at its first declaration, and its
+comment now says so.
+
+**Rule 11, the mutants**, run over `test_epg*.py` before the premise control
+was added: no declaration handler (2
+red); parameter entities only refused (2); general entities only refused
+(1); `iterparse` handed the raw stream (2); any DOCTYPE refused, the
+over-strict fix (11 failures, 10 errors). Five killed. The sixth survives
+and is equivalent: a prolog the pass cannot parse handed on to ElementTree
+instead of refused, which then refuses the same bytes with the same expat
+message. It stays fail-closed, so that a difference between the two parsers
+can never let a declaration through unread.
+
+**The searches (rule 15), including what they cleared.**
+
+- *D-LOGO-14's shape in the other three readers: a declared size a decoder
+  may enlarge from another field.* Read, nothing run. PNG: Qt allocates from
+  `png_get_IHDR` (`qpnghandler.cpp` v6.11.2), and the canonical form keeps no
+  chunk but IHDR that names a size. JPEG: libjpeg-turbo 3.2.0's `get_sof`
+  (`jdmarker.c`) refuses a zero height (the DNL form) and a second SOF, so
+  the first SOF, which `_jpeg_dimensions` reads, is the one decoded; Qt's
+  `scale_num` is `qBound(1, qCeil(8/f), 8)` over a denominator of 8
+  (`qjpeghandler.cpp`), so libjpeg is never asked to enlarge, and EXIF
+  orientation swaps sides without changing the area. WEBP: libwebp 1.6.0's
+  `CheckFrameBounds` (`demux.c`) refuses a frame whose offset plus size
+  passes the VP8X canvas and requires a still frame to equal it exactly; Qt
+  (`qwebphandler.cpp` v6.11.2) allocates the animation canvas from the
+  features and each frame from the demuxer's frame size; the VP8 header's
+  two scale bits are stored and never applied (`vp8_dec.c`), and the reader
+  masks them as libwebp does. Cleared: the GIF zero screen is the only
+  field of its kind.
+- *Other readers of a GIF's size.* `_gif_dimensions` has one caller,
+  `logo_dimensions`, whose callers are `logo_within_bounds` (the gate and
+  the sweep) and `logo_dimension_refusal`, which now names the canvas. The
+  spike corpus builder is not runtime. Cleared.
+- *Every other place the helper parses XML or provider-supplied markup.*
+  `xml.etree` is imported once, in `parse_xmltv`; `xml.parsers.expat` only in
+  the guard; no `minidom`, `sax`, `html.parser`, `html.unescape` or
+  `plistlib` in the helper. `parse_xmltv` has one shipping caller,
+  `fetch_window`, through `open_xml_stream` (plain and gzip), and the guard
+  is inside it, so no caller can skip it. M3U is read line by line and
+  decodes no entity. Every `json.loads` reads the helper's own state, lock
+  or cache files or mpv's replies on its private socket; JSON has no
+  entities and none of them is a provider feed. Cleared.
+- *Markup in the shell.* No `XmlListModel`, `XMLHttpRequest`,
+  `responseXML` or `DOMParser` in the shipped QML or model, and every `Text`
+  is PlainText (D-TEXT-1). Qt's SVG reader is installed (`libqsvg.so`), but
+  the guide decodes only names the helper announced, and the helper caches
+  only bytes whose magic is JPEG, PNG, GIF or WEBP (`write_logo`; the sweep
+  through `logo_sniff_type`), so no SVG reaches an `Image`. Cleared.
+- *Not searched:* stream manifests (HLS, DASH) are parsed by mpv and FFmpeg
+  in the player process, which is neither the helper nor the shell.
+
+**Sources read**, as raw text from the official GitHub mirrors into a scratch
+directory, never built or run: qtbase v6.11.2 `qgifhandler.cpp` (and
+qtbase `dev`, identical), `qjpeghandler.cpp`, `qpnghandler.cpp`;
+qtimageformats v6.11.2 `qwebphandler.cpp`; libwebp v1.6.0 `demux.c`,
+`webp_dec.c`, `vp8_dec.c`; libjpeg-turbo 3.2.0 `jdmarker.c`. They match the
+installed qt6-base 6.11.2-3, qt6-imageformats 6.11.2-1 (whose WEBP plugin
+links the system libwebp), libwebp 1.6.0-2 and libjpeg-turbo 3.2.0-2.
+
+**Cost.** The helper is 447,660 bytes (445,263 at bf075ca, so 2,397 for
+both fixes), 11,092 under the 458,752-byte ceiling. The GIF walk reads two
+more fields per descriptor. The EPG parse makes one more expat pass over
+the prolog only, and holds the bytes read until the root's start tag.
+
+**Not done, and why.** Nothing was measured (the brief). A GIF already
+decoded by a running shell stays decoded until the restart. Nothing is
+released: 0.14.2 is prepared below, and the build, the push of `main`, the
+request and any comment on #11892 wait for the owner's word.
+
 ### 0.14.1: the release record (D-LOGO-13 shipped)
 
 **Cut 2026-10-16 on the owner's word ("cut 0.14.1 but make sure to update

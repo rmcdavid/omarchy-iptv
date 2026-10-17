@@ -2182,6 +2182,51 @@ class CappedReader:
         self.stream.close()
 
 
+class EntityRefusingReader:
+    """D-EPG-6 (the maintainer on #11892): ElementTree expands the entities a
+    feed declares in its internal subset, and MAX_SOURCE_BYTES bounds only the
+    input. XMLTV declares none (a DOCTYPE naming xmltv.dtd WITHOUT a subset is
+    common, and passes), so the first read runs the prolog through its own
+    expat parser, whose EntityDeclHandler refuses general and parameter
+    entities alike, and hands the parse nothing until that parser reaches the
+    root's start tag: a declaration can only come before it."""
+
+    class Root(Exception):
+        pass
+
+    def __init__(self, stream: Any) -> None:
+        self.stream = stream
+        self.cleared = False
+
+    def read(self, size: int = -1) -> bytes:
+        if self.cleared:
+            return self.stream.read(size)
+        import xml.parsers.expat
+
+        def declared(*_: Any) -> None:
+            raise HelperError("bad_xml", "refused the EPG: it declares an XML entity, which XMLTV feeds never do")
+
+        def root(*_: Any) -> None:
+            raise EntityRefusingReader.Root()
+
+        parser = xml.parsers.expat.ParserCreate()
+        parser.EntityDeclHandler = declared
+        parser.StartElementHandler = root
+        held = []
+        chunk = b"-"
+        while chunk:
+            chunk = self.stream.read(size)
+            held.append(chunk)
+            try:
+                parser.Parse(chunk, not chunk)
+            except EntityRefusingReader.Root:
+                break
+            except xml.parsers.expat.ExpatError as error:
+                raise HelperError("bad_xml", "could not parse EPG XML: %s" % error)
+        self.cleared = True
+        return b"".join(held)
+
+
 def open_xml_stream(data: bytes) -> Any:
     """Bytes -> readable stream; gzip is detected by magic bytes, not by name."""
     if data[:2] == b"\x1f\x8b":
@@ -3104,7 +3149,7 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
     total_programmes = 0
     root: Any = None
     try:
-        for event, elem in ET.iterparse(stream, events=("start", "end")):
+        for event, elem in ET.iterparse(EntityRefusingReader(stream), events=("start", "end")):
             if event == "start":
                 if root is None:
                     root = elem
@@ -4119,7 +4164,7 @@ def _gif_skip_subblocks(data: bytes, pos: int) -> int | None:
 
 
 def _gif_dimensions(data: bytes) -> tuple[int, int] | None:
-    """The logical screen, widened by any frame that declares more.
+    """The logical screen, widened to every frame's right and bottom EDGE.
 
     The LOGICAL SCREEN is the allocation: the lead's measurement includes a
     110-byte GIF whose canvas is 65500x65500 and whose only frame is 64x64,
@@ -4127,18 +4172,27 @@ def _gif_dimensions(data: bytes) -> tuple[int, int] | None:
     frame descriptor can declare a rectangle larger than the canvas, so the
     answer is the maximum over both.
 
-    The walk has to reach the trailer. Whether Qt's handler clips a frame to
-    the canvas is NOT measured here, so a later frame this did not reach is a
-    frame whose size is unproven, and R4 makes unproven a refusal. The cost is
-    stated rather than hidden: a GIF whose block structure does not complete
-    inside the bytes handed to this function is refused, and for the sweep
-    that is the whole file (see logo_file_within_bounds).
+    An edge and not a size (D-LOGO-14, the maintainer on #11892): Qt 6.11.2's
+    handler sizes a ZERO screen from the first frame's left+width and
+    top+height before it allocates or scales, so a 1x1 frame at 8190,8190
+    under a 0x0 screen is an 8191x8191 canvas, and this read it as 1x1. A
+    zero screen or a zero frame is refused rather than reasoned about.
+
+    The walk has to reach the trailer. Qt clips a later frame to the canvas
+    (read in its source, not measured), and this does not rely on it: a
+    frame this did not reach is a frame whose size is unproven, and R4 makes
+    unproven a refusal. The cost is stated rather than hidden: a GIF whose
+    block structure does not complete inside the bytes handed to this
+    function is refused, and for the sweep that is the whole file (see
+    logo_file_within_bounds).
     """
     size = len(data)
     if size < 13 or data[:6] not in (b"GIF87a", b"GIF89a"):
         return None
     width = data[6] | (data[7] << 8)
     height = data[8] | (data[9] << 8)
+    if not width or not height:
+        return None
     flags = data[10]
     pos = 13
     if flags & 0x80:
@@ -4161,8 +4215,12 @@ def _gif_dimensions(data: bytes) -> tuple[int, int] | None:
             # left(2) top(2) width(2) height(2) packed(1) after the separator.
             if pos + 9 > size:
                 return None
+            left = data[pos] | (data[pos + 1] << 8)
+            top = data[pos + 2] | (data[pos + 3] << 8)
             frame_w = data[pos + 4] | (data[pos + 5] << 8)
             frame_h = data[pos + 6] | (data[pos + 7] << 8)
+            if not frame_w or not frame_h:
+                return None                        # a zero-sized frame
             packed = data[pos + 8]
             pos += 9
             if packed & 0x80:
@@ -4174,8 +4232,8 @@ def _gif_dimensions(data: bytes) -> tuple[int, int] | None:
             if nxt is None:
                 return None
             pos = nxt
-            width = max(width, frame_w)
-            height = max(height, frame_h)
+            width = max(width, left + frame_w)
+            height = max(height, top + frame_h)
             continue
         return None                                # not a block this format defines
 

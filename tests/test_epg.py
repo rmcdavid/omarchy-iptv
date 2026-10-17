@@ -364,6 +364,63 @@ def generate_xmltv(path, channel_count, per_channel, first_start, detail=False):
         handle.write("</tv>\n")
 
 
+class EntityDeclarationTest(unittest.TestCase):
+    """D-EPG-6, the maintainer's ninth finding, on #11892 against 0.14.1: the
+    parse expanded entities a feed declares for itself, and the byte cap
+    bounds only the input. XMLTV never declares one, so a feed that does is
+    refused before ElementTree sees a byte. Ordinary documents only: one
+    small declaration, never referenced, is all the refusal needs."""
+
+    BODY = ('<tv><channel id="a.tv"><display-name>A</display-name></channel>'
+            '<programme start="20260912203000 +0000" stop="20260912213000 +0000" '
+            'channel="a.tv"><title>News</title></programme></tv>')
+
+    def parse(self, prolog):
+        document = ('<?xml version="1.0" encoding="UTF-8"?>' + prolog + self.BODY).encode("ascii")
+        return helper.parse_xmltv(helper.open_xml_stream(document), NOW, None)
+
+    def test_a_feed_with_and_without_the_xmltv_doctype_parses_as_before(self):
+        for prolog in ("", '<!DOCTYPE tv SYSTEM "xmltv.dtd">',
+                       '<!DOCTYPE tv SYSTEM "xmltv.dtd">\n<!-- a comment -->\n'):
+            parsed = self.parse(prolog)
+            self.assertEqual(sorted(parsed["channels"]), ["a.tv"], prolog)
+            self.assertEqual(parsed["warnings"], [], prolog)
+
+    def test_one_small_entity_declaration_is_refused(self):
+        for prolog in ('<!DOCTYPE tv [<!ENTITY x "y">]>',
+                       '<!DOCTYPE tv SYSTEM "xmltv.dtd" [<!ENTITY x "y">]>',
+                       '<!DOCTYPE tv [<!ENTITY % p "y">]>'):
+            with self.assertRaises(helper.HelperError, msg=prolog) as caught:
+                self.parse(prolog)
+            self.assertEqual(caught.exception.code, "bad_xml", prolog)
+            self.assertIn("entity", caught.exception.message, prolog)
+
+    def test_an_external_dtd_is_never_read(self):
+        # What the guard rests on: a declaration can only reach ElementTree
+        # through the prolog, because a DTD the DOCTYPE names is not loaded.
+        with tempfile.TemporaryDirectory() as tmp:
+            dtd = os.path.join(tmp, "ext.dtd")
+            pathlib.Path(dtd).write_text('<!ENTITY x "y">\n', encoding="ascii")
+            document = ('<!DOCTYPE tv SYSTEM "%s">' % dtd + self.BODY).replace("News", "&x;")
+            with self.assertRaises(helper.HelperError) as caught:
+                helper.parse_xmltv(helper.open_xml_stream(document.encode("ascii")), NOW, None)
+            self.assertEqual(caught.exception.code, "bad_xml")
+            self.assertIn("undefined entity", caught.exception.message)
+
+    def test_a_declared_entity_is_refused_through_gzip_and_by_the_verb_without_a_url(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            source = os.path.join(tmp, "guide.xml.gz")
+            pathlib.Path(source).write_bytes(gzip.compress(
+                ('<!DOCTYPE tv [<!ENTITY x "y">]>' + self.BODY).encode("ascii")))
+            code, status, stderr = run("epg", "--url", source, "--cache-dir", tmp, "--now", str(NOW))
+            self.assertEqual(code, 1)
+            self.assertEqual(status["error"]["code"], "bad_xml")
+            message = status["error"]["message"]
+            self.assertIn("entity", message)
+            self.assertNotIn(tmp, message + stderr)
+            self.assertEqual(message.count(". "), 0, message)
+
+
 T0 = 1789244100   # 2026-09-12T20:15:00Z, the reference instant of docs/QA.md TC-EPG-*
 QA_XMLTV = str(FIXTURES / "qa-epg.xml")
 QA_XMLTV_GZ = str(FIXTURES / "qa-nonascii" / "qa-epg.xml.gz")
@@ -451,7 +508,7 @@ class QaEpgFixtureTest(unittest.TestCase):
             self.assertEqual(status["error"]["code"], "too_large")
 
     def test_entity_expansion_bomb_is_refused_quickly(self):
-        # SEC-19: libexpat's amplification limit turns a billion-laughs document into bad_xml.
+        # SEC-19: bad_xml, and since D-EPG-6 at its first declaration, before anything expands.
         with tempfile.TemporaryDirectory() as tmp:
             entities = ["<!ENTITY a0 \"lol lol lol lol lol lol lol lol lol lol\">"]
             for level in range(1, 9):
