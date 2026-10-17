@@ -129,7 +129,8 @@ library (`json`, `re`, `urllib`, `gzip`, `socket`, `xml.etree`).
 | `Guide.qml` | Fullscreen overlay: search, groups, favorites, EPG lines; `open/close/toggle`; dismisses via `shell.hide`. |
 | `Model.mjs` | The model's public surface: re-exports every public name from the part that declares it. Header comment and generated export lines only. |
 | `model/*.mjs` | Pure logic shared by QML and node, one part per domain: normalization, ids, filtering, groups, state, settings, logos, mpv argv, the player, picture in picture, privacy, EPG, contrast, the guide view, sources, form editing. Cut from the one-file `Model.js` by `scripts/split-model.mjs` (D-REL-5). |
-| `bin/omarchy-iptv` | Python 3 helper (executable, stdlib only): `playlist` (done), `epg`, `play`, `stop`, `status`, `state` (stubs). |
+| `bin/omarchy-iptv` | Python 3 helper (executable, stdlib only), every verb's entry point. Since D-REL-7 a stub: the docstring, the D-SINK-9 shield, and a generated loader that compiles the parts into its own namespace. |
+| `bin/helper/NN-*.py` | The helper's body, cut by domain at its section banners (core, sources, IO and playlist, EPG, IPC and logos, dead-channel marks, the player, its verbs, cache, state, CLI). Not modules: compiled in the stub's order into one namespace. |
 | `tests/Model.test.js` | node runner for the model (`Model.mjs`). |
 | `tests/Model.spec.qml` | QtTest spec proving the model loads in the QML engine. |
 | `tests/test_playlist.py` | Parser unit tests (attributes, EXTGRP, VLCOPT, KODIPROP, ids, normalization parity with the model). |
@@ -691,13 +692,17 @@ process running as the same uid, plus root -- which is why the fetch verbs
 call `shield_environment()` (PR_SET_DUMPABLE 0) before reading the variable.
 Non-dumpable, a same-uid reader gets EACCES and only root reads it -- from
 before the helper imports anything but `sys`; the window before that is the
-interpreter starting and compiling the file, 98-113 ms idle at
-sub-millisecond resolution (median 105 ms over twelve runs, 2026-10-01) and
-264-634 ms under a doubled CPU load (the final review's measurement; `scripts/dev-harness/argv-scenario.sh` reads it
+interpreter starting and compiling what precedes the shield: with the whole
+helper in one file, 98-113 ms idle at sub-millisecond resolution (median 105
+ms over twelve runs, 2026-10-01) and 264-634 ms under a doubled CPU load (the
+final review's measurement; `scripts/dev-harness/argv-scenario.sh` reads it
 at 50 ms sampling and bounds it against an in-run control rather than an
-absolute number), readable by same-uid processes only, and shortenable to
-about 25 ms by a stub that shields before compiling the body, which this
-project has not done -- and the
+absolute number); since D-REL-7 the helper is a stub that shields before
+compiling its parts, and the window is 22.9-40.1 ms (medians 27.0 and 27.1)
+against 136.8-164.0 ms (medians 148.4 and 148.2) for 0.14.2's one-file
+helper, 12 interleaved runs each, twice, under a load average of 3.1-3.7
+(2026-10-17).
+Readable by same-uid processes only -- and the
 kernel writes no core for it either, which closes a second, durable sink:
 `systemd-coredump` stores a dumpable crash's whole environment in the
 journal as `COREDUMP_ENVIRON`, readable by the journal groups. Both
@@ -3069,6 +3074,39 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
 - Anything in Python or shell that needs the model's FILES reads the part
   list from `Model.mjs`: `scripts/model_files.py` in Python, `qa_model_files`
   in `scripts/qa-lib.sh` in shell. Never a second list.
+
+**The helper's parts (D-REL-7).** `bin/omarchy-iptv` is a stub that makes the
+process non-dumpable (D-SINK-9) and then compiles `bin/helper/NN-*.py`, in
+the order its `HELPER_PARTS` tuple lists, into its own namespace with
+`exec(compile(source, path, "exec", dont_inherit=True), namespace)`. One
+namespace is the design, not a shortcut (docs/HELPER-SPLIT.md weighs it
+against real modules): the parts are one module's globals in one definition
+order, so a function in any part sees every name, and a test that replaces
+`helper.fetch_logo` replaces it for every caller. The rules that follow:
+- A part's top-level code may use names from the parts BEFORE it, as in one
+  file; a later part's names exist only inside function bodies that run
+  after loading. A violation is a NameError the first time anything loads
+  the helper, which every helper test does.
+- Each part opens with the generated header (what it is, and its own
+  `from __future__ import annotations`, which binds one compilation unit).
+- The loader is generated text: `scripts/split-helper.py --check` (the gate)
+  goes red on an edit to it, or on the loader anywhere but directly after the
+  shield. A new part is a file with the header, its name added to the tuple
+  in the generated shape (`    "12-x.py",`, which keeps the loader equal to
+  what the list generates), and its path added to `ALLOWLIST`, which
+  `release.py check` cross-checks against the tuple both ways.
+- The loader takes no input -- fixed names, its own directory -- and
+  `compile()` writes no bytecode, so the plugin directory stays read-only at
+  runtime (constraint 4). A missing part ends the run with one stderr line.
+- Anything that needs the helper's FILES reads the tuple from the stub:
+  `scripts/helper_files.py` in Python (by `ast`, never by running the stub),
+  `qa_helper_parts` in shell. A pin that used to read the one file reads
+  `helper_files.helper_source`, the stub and every part in order.
+- `split-helper.py --verify --from-git 1ecfd9d` on the commit that cut it
+  (b80c7ff, on `lane-split-s1`) proves that helper is 1ecfd9d's one file --
+  0.14.2's, 447,660 bytes -- byte for byte; edits since then, the stub's
+  shield docstring first among them, are ordinary edits, and the parts are
+  never cut again.
 
 **What the cut dropped, recorded (D-REL-5 round 2, R4).** The one-file
 `Model.js` opened with the header below and closed with a CommonJS export

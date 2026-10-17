@@ -1,7 +1,19 @@
 # Splitting `bin/omarchy-iptv` (D-REL-7): the design, for the owner
 
-Written 2026-10-15 on `dev` c4c7a3e. Nothing here is built yet. The
-implementation waits for the owner's word on the three decisions at the end.
+Written 2026-10-15 on `dev` c4c7a3e. **Decided and built the same day**: the
+owner chose A, this layout, and "after 0.14.1 is cut" (the decisions log),
+later moved to after 0.14.2. The first build was on branch
+`lane-helper-split` (38f12eb, e73cdce), cut from the helper as it stood
+before 0.14.1; it never reached `dev`. **Rebuilt on today's `dev` on
+2026-10-17** as branch `lane-split-s1`, for merge onto `dev` after review:
+the parts cut afresh from 0.14.2's
+one-file helper (1ecfd9d, 447,660 bytes) at the same eleven banners, and
+the branch's tooling carried over (QA-RESULTS "D-REL-7: the helper split,
+rebuilt on today's dev"). The table below is the prototype's; at this cut
+the stub is 6,502 bytes and the parts 15,926 to 70,864, the largest still
+`08-player-verbs.py`. The next release's notes should say the helper is now
+several files and the window before the shield is about 30 ms, not about a
+tenth of a second.
 
 ## Why now
 

@@ -61,16 +61,16 @@ def shield_environment() -> bool:
       non-dumpable process at all.
 
     Called at module level, for every verb, before this file imports
-    anything but `sys`: the window left is the interpreter starting and
-    compiling this file, plus the one import above. The final review of
-    D-SINK-9 measured it at about 125 ms idle with the shield below the
-    stdlib imports and 98-113 ms (median 105) with it here, and a split stub
-    that compiled the body only after shielding could reach about 25 ms --
-    so this is the cheap position, not the floor, and no sentence should
-    call it unshortenable. It is measured by the argv scenario on the dev
-    branch rather than assumed away, and it grows under load. Harmless to
-    the verbs that carry no URL, and the player verb's mpv is exec'd, which
-    resets the flag.
+    anything but `sys` and before the parts below are compiled (D-REL-7):
+    the window left is the interpreter starting and compiling this short
+    file, plus the one import above. With the whole helper in one file it
+    was 98-113 ms idle (median 105, 2026-10-01); with the body in parts it
+    was 22.9-40.1 ms (medians 27.0 and 27.1) against 136.8-164.0 ms for the
+    one file (medians 148.4 and 148.2), interleaved on one machine under a
+    load average of 3.1-3.7 (2026-10-17). It is measured by the argv
+    scenario on the dev branch rather than assumed away, and it grows under
+    load, so no sentence should call it zero. Harmless to the verbs that carry no URL, and the
+    player verb's mpv is exec'd, which resets the flag.
     Best effort: where prctl is missing the old boundary applies and nothing
     is worse than before; the failure is reported without any URL. ctypes is
     stdlib (rule 3).
