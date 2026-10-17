@@ -3,6 +3,77 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.14.2 (2026-10-17)
+
+**Security.** Two findings the marketplace maintainer raised against
+0.14.1. A GIF channel logo whose only frame is one pixel could make the
+desktop shell set aside about 256 MiB: the plugin checked each frame's
+size and not where the frame sits, and the shell's image decoder builds
+the picture area from both. That matters only with channel logos turned
+on, and they are off by default. And the plugin's guide-data (EPG) reader,
+a background process, expanded text that an XML file defines for itself,
+which the limit on the download's size cannot bound.
+
+**Privacy.** When a `state.json` link, or the link at
+`~/.local/state/omarchy-iptv`, was pointed while the shell ran at a place
+that held no `state.json`, the next save created one there holding your
+sources and provider URLs at your umask's mode (usually 0644, which other
+accounts can read wherever the folders above it let them in), and nothing
+said so.
+
+### Fixed
+
+- **A GIF logo is measured by the whole area its frames reach.** Each
+  frame's position counts as well as its size, every frame counts, and a
+  GIF that declares an empty picture area or an empty frame is refused.
+  A refused logo is not stored and that channel shows no logo, as when a
+  logo cannot be fetched; one an earlier version stored is removed at the
+  next fetch.
+- **A guide-data file that defines XML entities of its own is refused**,
+  with the banner `Guide data unavailable (refused the EPG: it declares an
+  XML entity, which XMLTV feeds never do)`; the guide data you already had
+  keeps working. XMLTV files do not contain such definitions, and the usual
+  `<!DOCTYPE tv SYSTEM "xmltv.dtd">` line is accepted as before.
+- **Saves read `state.json` first** (the exceptions are below). A tool
+  that replaces a `state.json` link while the shell runs (`mv` of an edited
+  copy, `sed -i`, `rm` and `cp`, `ln -sfn`), or that points the state
+  folder link at another folder, is noticed at the plugin's next save,
+  which keeps that change and adds its own; 0.14.1 wrote what the shell
+  held over it. A link pointed at a place with no `state.json` makes the
+  plugin stop saving and say so, where 0.14.1 created the file there.
+- **A `state.json` link whose target went missing while the shell ran is
+  noticed when the target comes back**, at the next save or source change
+  (the first source change after it is refused once more); 0.14.1 needed a
+  shell restart.
+- **After merging another program's change into one of its own, the plugin
+  no longer goes on treating later changes to `state.json` as its own save
+  still being written**, for the rest of the session, as 0.14.0 and 0.14.1
+  could.
+
+### Worth knowing
+
+- A save now reaches the disk a little after the change instead of at
+  once, because the read comes first: tens of milliseconds, up to about a
+  fifth of a second on a busy machine. What is on screen does not change.
+  If the read does not answer within 2 seconds, the save goes ahead
+  without it and the shell's journal says so.
+- Three narrow windows remain in which a save goes ahead without seeing a
+  change to the file or its link, so it can write over a replaced file or
+  create `state.json` at your umask's mode where a link now points: a save
+  asked for while the previous one is still being written, a re-point that
+  lands between the read and the write, and that 2-second case. The next
+  shell start makes the file 0600; the README's Troubleshooting names them.
+- A change another program writes in the same instant as one of the
+  plugin's own saves can be lost, as on earlier versions. A `state.json`
+  you put in place at 0644 yourself keeps that mode through the plugin's
+  saves until the next shell start makes it 0600.
+- **Restart the shell after this update** (`omarchy-restart-shell`, not
+  `omarchy-refresh-shell`, which resets your shell configuration): the
+  saving changes are in the shell's own files, and a logo the running shell
+  has already drawn stays in its memory until then.
+- For anyone running the helper by hand: `epg` over such a guide-data file
+  exits 1 with the error code `bad_xml`.
+
 ## 0.14.1 (2026-10-16)
 
 **Security.** A channel logo in PNG format can carry more than its picture:

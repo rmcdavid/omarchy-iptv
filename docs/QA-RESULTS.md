@@ -13315,6 +13315,125 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### 0.14.2: prepared, not cut
+
+**2026-10-17, on `dev` after af7a2ae (D-LOGO-14 and D-EPG-6).** 0.14.2
+carries the two fixes for the maintainer's findings on #11892 against
+0.14.1 and the cleanup round merged at 0ae0cc1 after the 0.14.1 cut (R26,
+the decisions log of 2026-10-16): every save the gate allows reads
+`state.json` first (D-SINK-21, D-SRC-29, D-SRC-35, D-SRC-40), and no write
+is issued from inside a FileView handler (D-SRC-46). What ships from the
+cleanup round is `Service.qml`, `model/state.mjs`, one export line of
+`Model.mjs` and the README (`git diff e33ff0a 0ae0cc1` over the 31
+allowlisted files); its harness repairs (F-HARNESS-21, -22, -29, -30, -31)
+are on `dev` only and are not in the notes, which describe what a user
+gets. Its open residuals are in the notes' "Worth knowing" (D-SINK-22,
+D-SRC-48, D-SRC-49).
+
+**The notes, checked sentence by sentence.** Each claim of the CHANGELOG
+section was checked against the code or the record it rests on: the GIF
+and EPG bullets against `_gif_dimensions`, `logo_file_within_bounds` and
+`EntityRefusingReader` and their tests; the banner text against
+`Guide.qml` (`bannerEpg` + `epgReason` + `bannerEpgStill`) and
+`Model.statusReason`, which passes a `bad_xml` message through
+`scrubUrls`; "the guide data you already had keeps working" against the
+`epg` verb's error path, which a refused parse shares with a failed
+download because `fetch_window` raises before it writes a window
+(`test_fetch_failure_keeps_stale_window_and_refreshes_now`: the old window
+kept, marked stale); the
+saving bullets against `Model.stateSavePlan`, `stateBlockRecheck` and
+`Service.saveState` / `finishStateVerify` / `stateVerifyWatchdog` at
+0ae0cc1 (the read before a write; the 2,000 ms watchdog and its console
+line; the skipped read while a write is in flight; the source verbs'
+recheck, refused once), the README's link bullets and the board rows; the
+timing against the cleanup round's record (a median of 35 ms idle and
+83-98 ms under load, 17-172 ms over 48 saves); "restart the shell" against
+D-HOST-1 (an update does not make a QML change take effect); the helper
+line against `EntityDeclarationTest` (exit 1, `bad_xml`).
+
+**The recipe.** `manifest.json` and `model/build.mjs` `PLUGIN_VERSION`
+read 0.14.2; the README status line reads v0.14.2; the CHANGELOG leads
+with `## 0.14.2 (2026-10-17)`. `release.py build` refuses a heading dated
+any day but the day of the cut (D-REL-4), so a cut on a later day re-dates
+that one line first (the prep began on 2026-10-16 and the heading was
+re-dated when the date turned). The python floor is 1240 (from 1229: the
+7 tests of `GifCanvasTest` and the 4 of `EntityDeclarationTest`); every
+other floor already equals the tree (node 2565, qml 78, a11y 35, text
+blocks 58, stub 28, logo 33, clip 7, key 11, chno-entry 21, pip 41,
+id-rotate 14). The helper is 447,660 of the 458,752-byte ceiling.
+
+**The recipe's live step.** `scripts/dev-harness/key-scenario.sh live`
+under the nested headless cage on a private bus
+(`OMARCHY_IPTV_HARNESS_REAL_HOME=$HOME scripts/dev-harness/private-bus.sh
+/run/user/1000/omarchy-iptv-l142-b 2400 env
+OMARCHY_IPTV_HARNESS_DIR=/run/user/1000/omarchy-iptv-l142-h
+scripts/dev-harness/key-scenario.sh live`) on the release-prep tree, af7a2ae
+plus the version, floor and notes edits with the heading still dated
+2026-10-16 (re-dated after the run; nothing the scenario reads):
+**129 passed, 0 failed** in 475.8 s, from 23:59 on 2026-10-16 into
+2026-10-17 (transcript `key-20261016-235925-1773995`, 0600 under the
+harness directory; the nested cage and the private bus were gone
+afterwards). The cleanup round's run on its branch read 129 / 0, and
+0.14.1's 120 / 0 before B23-B31 existed. No hyprlock, no other cage, and
+only the user's own shell running when it started.
+
+**Gate.** `scripts/check.sh` all green on the commit that carries this
+record (python 1240, node 2565, qml 78, logo preflight 33, key preflight
+11, release allowlist 31 files), and `scripts/dev-harness/logo-scenario.sh
+check-tree` 33 passed, 0 failed.
+
+**What the owner decides.** Cutting moves `main`, which makes #11892 stale
+for update validation (it targets bf075ca, which carries both findings
+unfixed). F-M3-4 stands: a new request for 0.14.2, and #11892 is never
+closed by us. Not done, each waiting on the owner's word: `release.py
+build`, the push of `main` and the tag, the request, the reply on #11892,
+and the live install (on 0.14.1; nothing in it was touched). `dev` is
+pushed. The helper split (D-REL-7, `lane-helper-split`) is untouched and
+still planned for after 0.14.2.
+
+**Drafts for the owner, NOT posted.** The new request, in #11892's form
+(`[Verify]: IPTV 0.14.2`): verification action "Verify and publish a newer
+upstream commit", plugin `io.github.rmcdavid.iptv`, repository
+https://github.com/rmcdavid/omarchy-iptv, target commit: the `main` commit
+`release.py build` makes from this tree (`v0.14.2^{commit}`, to be checked
+equal to the remote `main` before filing), both acknowledgments ticked.
+Then, on #11892, with the new request's number and commit filled in:
+
+> Both findings raised here against 0.14.1 are addressed in 0.14.2, filed
+> for verification as #NNNNN at `<commit>`.
+>
+> GIF canvas. The dimension reader now takes the canvas as the largest of
+> the logical screen and every image descriptor's right edge (left + width)
+> and bottom edge (top + height), over every frame up to the trailer, and
+> treats a logical screen with a zero width or height, or a frame with one,
+> as an unreadable header, which is refused. The existing 4096-pixel side
+> and 4,194,304-pixel area limits then apply to that canvas, both when a
+> logo is downloaded and when an already cached logo is checked (one that
+> fails is removed). Your example, a 1x1 frame at 8190,8190, is refused:
+> under a 0x0 screen as unreadable, under any other screen as an 8191x8191
+> canvas. The PNG, JPEG and WEBP readers were checked for the same pattern
+> (a decoder sizing its allocation from a field the reader does not read)
+> against the Qt 6.11.2, libjpeg-turbo 3.2.0 and libwebp 1.6.0 sources, and
+> none does.
+>
+> EPG entities. Before ElementTree sees any byte, the helper reads the
+> document's prolog with a separate expat parser whose EntityDeclHandler
+> refuses any entity declaration, general or parameter; ElementTree is
+> handed the bytes only after that parser has reached the root element's
+> start tag, and an internal subset can only come before it. ElementTree
+> loads no external DTD, so the prolog is the only place a declaration can
+> reach it. A feed that declares an entity fails with `bad_xml` and one
+> sentence. XMLTV feeds do not declare entities, and a `<!DOCTYPE tv SYSTEM
+> "xmltv.dtd">` line without an internal subset is accepted as before.
+>
+> The code is `_gif_dimensions` and `EntityRefusingReader` in
+> `bin/omarchy-iptv` at that commit; the tests (`GifCanvasTest` in
+> `tests/test_logo_dimensions.py`, `EntityDeclarationTest` in
+> `tests/test_epg.py`) and the write-up are on the dev branch. 0.14.2 also
+> changes how the plugin saves its own state file (it reads `state.json`
+> before each save), as the changelog says. Channel logos stay off by
+> default.
+
 ### D-LOGO-14 and D-EPG-6 fixed: the GIF canvas and the XMLTV entity declarations
 
 **2026-10-16, on `dev` from 0ae0cc1.** Both raised by the marketplace
@@ -13478,7 +13597,7 @@ the prolog only, and holds the bytes read until the root's start tag.
 
 **Not done, and why.** Nothing was measured (the brief). A GIF already
 decoded by a running shell stays decoded until the restart. Nothing is
-released: 0.14.2 is prepared below, and the build, the push of `main`, the
+released: 0.14.2 is prepared above, and the build, the push of `main`, the
 request and any comment on #11892 wait for the owner's word.
 
 ### 0.14.1: the release record (D-LOGO-13 shipped)

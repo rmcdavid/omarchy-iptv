@@ -264,7 +264,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2565}
 # canonical PNG over ordinary images -- what it keeps and drops, what it
 # refuses, `write_logo` and both branches of `logos --fetch`, and Qt drawing
 # the canonical file and the original identically.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1229}
+# 1229 -> 1240 on 2026-10-16, D-LOGO-14 and D-EPG-6 (levelled for 0.14.2):
+# GifCanvasTest (7), a GIF's canvas as its frames' edges over GIFs built in
+# the test, and EntityDeclarationTest (4), an XMLTV feed that declares an
+# entity refused and one that does not parsed as before.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1240}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
