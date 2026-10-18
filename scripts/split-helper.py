@@ -105,7 +105,7 @@ HEADER = (
 # A checksum and a length rather than a cryptographic digest, on purpose:
 # anyone able to rewrite the parts can rewrite the stub beside them, so no
 # digest stored there could authenticate anything. It detects DAMAGE and a
-# MIX: CRC-32 catches every truncation and every error burst up to 32 bits,
+# MIX: the length catches every truncation, CRC-32 every error burst up to 32 bits,
 # and two releases of a part agree on both length and CRC by chance about
 # once in four billion. zlib is cheap to import, where hashlib is imported
 # late on purpose (01-core.py's import note).

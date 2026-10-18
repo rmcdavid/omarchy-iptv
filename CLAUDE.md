@@ -61,9 +61,11 @@ Consequences you must respect:
   branch by URL. The gate rejects a bare `docs/...` in the README.
 - Adding a file the plugin needs at runtime means adding it to `ALLOWLIST`,
   or the release ships broken. The gate catches an import it cannot find.
-  A new helper part goes into the stub's `HELPER_PARTS` and into `ALLOWLIST`
-  together: `release.py check` refuses a part the stub loads that does not
-  ship, and one that ships that the stub does not load (D-REL-7).
+  A new helper part goes into the stub's `HELPER_PARTS` as
+  `("12-x.py", 1, 0x00000000),` and into `ALLOWLIST` together, then
+  `scripts/split-helper.py --seal` fills in its length and CRC-32:
+  `release.py check` refuses a part the stub loads that does not ship, and
+  one that ships that the stub does not load (D-REL-7).
 - `main` must stay linear: `omarchy-plugin-update` is `git merge --ff-only`,
   so a force-push to `main` strands every install. Never rewrite it. A GitHub
   ruleset (`main-is-the-artifact`, #23743896) enforces this on the remote --
@@ -194,14 +196,17 @@ requests and raise the batch.
      its whole environment to systemd-coredump, durably, in the journal).
      Measured both ways on 2026-10-01. What remains is the window between
      exec and the shield, which sits before every import but `sys`: the
-     interpreter starting and compiling what precedes the shield. It is
+     interpreter starting and compiling the stub, which is compiled whole
+     before its first statement runs, so its size is in the window. It is
      CPU-bound, so it scales with load. With the whole helper in one file it
      was 98-113 ms idle at sub-millisecond resolution, median 105 over twelve
      runs (about 125 ms when the shield sat below the stdlib imports, which
      is where the first version put it while calling it the first
      statement), 264-634 ms with the cores oversubscribed twice over. Since
-     D-REL-7 the helper is a 6 KB stub that shields and only then compiles
-     the parts, and the window is 22.9-40.1 ms (medians 27.0 and 27.1)
+     D-REL-7 the helper is a 9 KB stub that shields and only then reads,
+     checks and compiles the parts, and the window is 22.9-40.1 ms (medians
+     27.0 and 27.1, measured on the 6,502-byte stub; the checking loader
+     adds about 0.6 ms of compile at load 3.9)
      against 136.8-164.0 ms (medians 148.4 and 148.2) for 0.14.2's one-file
      helper, 12 interleaved runs each, twice, under a load average of 3.1-3.7
      (2026-10-17, QA-RESULTS "D-REL-7: the helper split, rebuilt on today's
@@ -751,9 +756,17 @@ non-dumpable and then compiles `bin/helper/NN-*.py`, in the order of its
 `HELPER_PARTS`, into its OWN namespace, so the parts behave as the one file
 they were cut from -- one set of globals, one module a test patches. Edit the
 part a function belongs in. `scripts/split-helper.py --check`, which the gate
-runs, proves the loader is exactly what the list generates and sits directly
-after the shield, and that every part carries its header, compiles and is
-named; `release.py` proves the list and the allowlist agree. Anything that
+runs, proves that the loader is exactly what the list generates and sits
+directly after the shield; that every part carries its header, compiles, and
+matches its entry (the length and CRC-32 of its text with CRLF read as LF);
+and that `bin/helper/` holds nothing else except names starting with `.`.
+Each entry is a part's (name, length, crc32), so EVERY edit to a part changes
+the stub: run `scripts/split-helper.py --seal` after any part edit. Until you
+do, the stub refuses that part with `helper_damaged` and every helper test
+goes red, not only `--check`. Two lanes that edit the same part or adjacent
+parts conflict on the stub's entries; resolve that by taking either side and
+running `--seal`, never by editing an entry by hand. `release.py` proves the
+list and the allowlist agree. Anything that
 needs the helper's FILES reads the list from the stub
 (`scripts/helper_files.py`, `qa_helper_parts`); a copy of the stub alone is
 a helper that cannot start.

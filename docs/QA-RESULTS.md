@@ -13315,6 +13315,30 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### D-REL-7's two follow-ups: a checked stub, before any release ships the split
+
+**Merged onto `dev` 2026-10-17 as `92a2a16`, after the split itself
+(`63b470a`).** The split's identity lens found **D-REL-10**: the first
+loader caught a missing part only, so a syntax error or a NUL byte in a part
+gave a traceback and a 0-byte part let verbs such as `state init` and
+`cache prune` exit 0 and write. The first follow-up (`lane-split-f1`) gave
+each part a witness last line and a `helper_damaged` reply; its robustness
+lens then found **D-REL-11**, a P1 that never shipped -- under
+`core.autocrlf=true`, which `git clone` and `merge --ff-only` honour, every
+part arrived with CRLF, the witness read that as damage and every verb
+refused, reinstalling included -- and measured **D-REL-12**: a spawn between
+two part rewrites of an update ran parts of two releases, creating
+directories before a NameError. The second follow-up (`lane-split-f2`)
+moved the witness into the stub: `HELPER_PARTS` holds each part's length and
+CRC-32 over its text with CRLF read as LF, and git writes the stub after the
+parts, so an update's old stub refuses new parts. Its robustness lens ran
+every line-ending configuration for add and update, and 6,851 spawns raced
+against real updates, rollbacks and a part rename: no half-run, no
+traceback, no write from a refused run. Recorded, not fixed: **D-REL-8**
+(the stub's own rewrite window), **D-REL-9** (new QML written before the
+helper in the same update), **F-HARNESS-34** (a CRLF dev checkout cannot run
+the gate) and **D-SRC-52** (an update-window error lingering in `lastError`).
+
 ### D-REL-7: the helper split, rebuilt on today's dev
 
 **2026-10-17, branch `lane-split-s1` from `dev` 1ecfd9d (0.14.2 released as

@@ -357,7 +357,11 @@ file`, exit 2, nothing on stdout), an EMPTY file (exit 0, nothing on stdout)
 or a PARTIAL stub (a `SyntaxError` traceback, exit 1, nothing on stdout).
 None of the three runs a verb or writes anything, and the service reads
 each as the empty stdout it already handles ("cannot tell", never a health
-strike). Once the stub is whole, the split runs. So this update needs
+strike) -- except `state init` at a shell start that lands in that window:
+an EMPTY stub exits 0, so the init reads as answered with nothing found,
+and the session takes the no-write mode with the bar entry left as it is
+(D-REL-8; nothing is written or exposed, and 0.14.2's rewrite of its
+447 KB one-file helper had the same window, longer). Once the stub is whole, the split runs. So this update needs
 nothing from the checks, and gets nothing from them either: they ship with
 it.
 
