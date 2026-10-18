@@ -15,7 +15,7 @@ import {
   PIP_CLASS
 } from "./pip.mjs"
 var MAX_ROWS_DEFAULT = 200
-// Helper-side cap on channels.json (bin/omarchy-iptv MAX_CHANNELS, S-07);
+// Helper-side cap on channels.json (the helper's MAX_CHANNELS, S-07);
 // prepareChannels re-applies it so a hand-edited cache stays bounded too.
 var MAX_CHANNELS = 50000
 // Player shutdown ladder (D-LIVE-17): `quit` over IPC, SIGTERM once
@@ -98,7 +98,7 @@ var SCOPE_FAVORITES = "favorites"
 var SCOPE_ALL = "all"
 var GROUP_SCOPE_PREFIX = "g:"
 // M3-01 (PLAN-M3 decision 4): hidden groups are names, global, capped.
-// Mirrored by MAX_HIDDEN_GROUPS in bin/omarchy-iptv; one fixture pins both.
+// Mirrored by MAX_HIDDEN_GROUPS in the helper (bin/helper/); one fixture pins both.
 var MAX_HIDDEN_GROUPS = 200
 
 // Typographic characters Omarchy uses (UX.md preamble table).

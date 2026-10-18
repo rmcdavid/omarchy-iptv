@@ -52,7 +52,7 @@ PARSER_PART = [rel for rel in HELPER_PARTS
 def helper_stub(parts):
     """A stub in the shape the split writes: the list is all the resolver reads."""
     return ('#!/usr/bin/env python3\nimport sys\nHELPER_PARTS = (\n%s)\n'
-            % ''.join('    "%s",\n' % rel.rsplit('/', 1)[1] for rel in parts))
+            % ''.join('    ("%s", 1, 0x00000000),\n' % rel.rsplit('/', 1)[1] for rel in parts))
 
 
 def must_ship():

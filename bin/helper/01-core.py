@@ -35,9 +35,11 @@ def _manifest_version() -> str:
     D-REL-1: a constant here said 0.2.0 for four releases while the manifest
     moved on, so --version and the User-Agent both lied and nothing noticed.
     manifest.json is on the release allowlist, so it is always beside the
-    helper in an install; the fallback only keeps a stray copy starting."""
+    helper in an install; the fallback only keeps a stray copy starting.
+    Resolved through realpath, as the stub finds its parts (D-REL-7), so a
+    symlink to the helper placed elsewhere reads the manifest it belongs to."""
     try:
-        here = os.path.dirname(os.path.abspath(__file__))
+        here = os.path.dirname(os.path.realpath(__file__))
         with open(os.path.join(here, os.pardir, "manifest.json"), encoding="utf-8") as fh:
             found = json.load(fh).get("version")
         if isinstance(found, str) and found.strip():

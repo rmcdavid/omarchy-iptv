@@ -88,8 +88,8 @@ qa_model_count() {
 
 # qa_helper_parts <plugin-root>
 # The helper's parts (D-REL-7), one absolute path per line, in the order the
-# stub compiles them: the names in its generated `HELPER_PARTS = (` block,
-# under bin/helper/. The list is read from the stub, never kept here, which
+# stub compiles them: the names in its generated `HELPER_PARTS = (` block
+# (one `    ("NN-x.py", <length>, <crc32>),` entry a line), under bin/helper/. The list is read from the stub, never kept here, which
 # makes this the one reader of it in shell (scripts/helper_files.py is the one
 # in python, and qa-lib-test.sh proves the two agree on the real tree). The
 # block's exact shape is guaranteed by scripts/split-helper.py --check.
@@ -103,7 +103,7 @@ qa_helper_parts() {
   local -a parts=()
   [[ -f $root/bin/omarchy-iptv ]] || return 1
   grep -q '^HELPER_PARTS = ($' "$root/bin/omarchy-iptv" || return 0
-  mapfile -t parts < <(sed -n '/^HELPER_PARTS = ($/,/^)$/s/^    "\([0-9][0-9]-[a-z][a-z0-9-]*\.py\)",$/\1/p' "$root/bin/omarchy-iptv")
+  mapfile -t parts < <(sed -n '/^HELPER_PARTS = ($/,/^)$/s/^    ("\([0-9][0-9]-[a-z][a-z0-9-]*\.py\)", [1-9][0-9]*, 0x[0-9a-f]\{8\}),$/\1/p' "$root/bin/omarchy-iptv")
   (( ${#parts[@]} > 0 )) || return 1
   for rel in "${parts[@]}"; do [[ -f $root/bin/helper/$rel ]] || return 1; done
   for rel in "${parts[@]}"; do printf '%s\n' "$root/bin/helper/$rel"; done

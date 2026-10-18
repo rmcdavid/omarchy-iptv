@@ -28,7 +28,7 @@ verb in a subprocess (argv list, never a shell string), with --cache-dir and
 
 Read tests/fixtures/qa-id-rotate/README.md for the seed, row by row.
 
-RULE 11. With `channel_id_remap` returning {} in bin/omarchy-iptv (a dead
+RULE 11. With `channel_id_remap` returning {} in the helper (bin/helper/02-sources.py; a dead
 migration behind a wired call site, the refused state) this module runs 7
 tests and FAILS 4: test_the_first_run_moves_every_seeded_reference (no `moved`
 line; the moved favourites orphaned against v1's own channels.json),

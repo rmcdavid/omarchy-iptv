@@ -3077,7 +3077,8 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
 
 **The helper's parts (D-REL-7).** `bin/omarchy-iptv` is a stub that makes the
 process non-dumpable (D-SINK-9) and then compiles `bin/helper/NN-*.py`, in
-the order its `HELPER_PARTS` tuple lists, into its own namespace with
+the order its `HELPER_PARTS` tuple lists -- each entry the part's name, its
+length and its CRC-32 -- into its own namespace with
 `exec(compile(source, path, "exec", dont_inherit=True), namespace)`. One
 namespace is the design, not a shortcut (docs/HELPER-SPLIT.md weighs it
 against real modules): the parts are one module's globals in one definition
@@ -3089,15 +3090,68 @@ order, so a function in any part sees every name, and a test that replaces
   the helper, which every helper test does.
 - Each part opens with the generated header (what it is, and its own
   `from __future__ import annotations`, which binds one compilation unit).
+  The stub's entry for it, `("05-ipc-logos.py", 42179, 0x848354c6),`, is
+  the length and CRC-32 of the part's text with CRLF read as LF, and the
+  stub recomputes both before any part runs: a part cut off, changed, or
+  from another release does not match. The entry lives in the STUB, not in
+  the part (the follow-up to the split's review, P2a), because an update
+  writes the parts before the stub: an old stub then refuses every new part
+  rather than run two releases at once. CRLF is read as LF because `git
+  clone` and `git merge` honour a user's `core.autocrlf=true` and `main`
+  ships no `.gitattributes`; Python compiles such a part unchanged, so it is
+  not damage (P1 of that review: an entry over the raw bytes refused every
+  verb on such a checkout). A checksum, not a digest: whoever can rewrite a
+  part can rewrite the stub beside it, so it detects damage and a mix and
+  cannot authenticate. Every edit to a part therefore changes the stub:
+  `split-helper.py --seal` rewrites the entries after an ordinary edit,
+  and `--check` is red until it has.
 - The loader is generated text: `scripts/split-helper.py --check` (the gate)
   goes red on an edit to it, or on the loader anywhere but directly after the
-  shield. A new part is a file with the header, its name added to the tuple
-  in the generated shape (`    "12-x.py",`, which keeps the loader equal to
-  what the list generates), and its path added to `ALLOWLIST`, which
-  `release.py check` cross-checks against the tuple both ways.
-- The loader takes no input -- fixed names, its own directory -- and
-  `compile()` writes no bytecode, so the plugin directory stays read-only at
-  runtime (constraint 4). A missing part ends the run with one stderr line.
+  shield. A new part is a file with the header, an entry added to the tuple
+  in the generated shape (`    ("12-x.py", 1, 0x00000000),`, then `--seal`
+  fills in its length and CRC-32 and regenerates the loader), and its path
+  added to `ALLOWLIST`, which `release.py check` cross-checks against the
+  tuple both ways.
+- The loader takes no input -- fixed names, its own directory, found
+  through `realpath(__file__)` so a symlink to the stub works as the one file
+  did -- and `compile()` writes no bytecode, so the plugin directory stays
+  read-only at runtime (constraint 4).
+- **All parts are checked before any runs** (the split's review, P2). A part
+  missing, unreadable, not a regular file (each is opened without blocking,
+  so a FIFO in a part's place cannot stall the start), empty, not matching
+  its entry, not text, or not compiling, or any entry in `bin/helper/` the
+  tuple does not name (a name starting with `.` excepted: an editor's swap
+  file cannot be a part, and `--check` exempts the same names), ends the run
+  before a single part executes, so no verb can run or write with half a
+  helper, or with parts of two releases. The
+  refusal is one JSON object on stdout, code `helper_damaged` with the
+  part's name and no `kind` (the caller's stands), its message as the one
+  stderr line, exit 1. `Model.helperDamagedReason` is its sentence
+  ("reinstall the plugin", naming only a well-shaped part) and it routes as
+  the empty stdout it replaced, `no_output`: never a health strike
+  (`Model.helperCannotTell`), and `unknown` on the play branch, from
+  `Model.playFailureVerdict` through `PLAY_UNREADABLE` (`Model.playFork`
+  decides start, queue or zap from the player state and never sees it).
+  `tests/fixtures/helper-damaged.json` joins the stub's real replies to
+  the mapping. During an in-place update git rewrites each changed part in
+  place (unlink, create, write) and every part before the stub, so a helper
+  spawned then meets a part missing, empty, cut off or of the next release
+  beside the old stub, and is refused; while the stub itself is rewritten
+  it meets no stub, an empty one or a partial one, none of which runs a
+  verb (docs/HELPER-SPLIT.md, "What an in-place update can meet", has the
+  measurements step by step).
+- **Behaviour identical, bytecode not.** CPython 3.14 compiles a call on a
+  module bound by an import in ANOTHER compilation unit as `LOAD_ATTR` then
+  `PUSH_NULL` rather than a method load: 248 call sites, because the
+  imports are in `01-core.py`. Same behaviour for a module object, and
+  measured as such: a 129-step corpus of every verb the service runs is
+  byte for byte the one-file helper's.
+- **The marketplace scanner reads the parts as `.py`.** The one-file helper
+  was an extensionless executable, read under the baseline's runtime rules;
+  the parts are 100644 `.py` and read under its launcher-literal rules
+  instead. The outcome is the same, measured with an independent port of
+  the baseline: `passed`, no findings, no capabilities, with the parts as
+  shipped and re-marked executable.
 - Anything that needs the helper's FILES reads the tuple from the stub:
   `scripts/helper_files.py` in Python (by `ast`, never by running the stub),
   `qa_helper_parts` in shell. A pin that used to read the one file reads
@@ -3106,7 +3160,16 @@ order, so a function in any part sees every name, and a test that replaces
   (b80c7ff, on `lane-split-s1`) proves that helper is 1ecfd9d's one file --
   0.14.2's, 447,660 bytes -- byte for byte; edits since then, the stub's
   shield docstring first among them, are ordinary edits, and the parts are
-  never cut again.
+  never cut again. Since the entries moved into the stub (2026-10-17, the
+  follow-up's P2a) `--verify --from-git 85206f2` reports two differences
+  and names them: "bin/omarchy-iptv differs from the cut (in its head and
+  loader, at the entry for 01-core.py only)" and "bin/helper/01-core.py
+  differs from the cut (from line 38)". The head differs by that docstring;
+  01-core.py by `_manifest_version`, which now resolves the manifest
+  through `realpath` as the loader resolves the parts, so `--version`
+  through a symlink to the stub prints the plugin's version; the loader by
+  that part's entry. The other ten parts and the tail are the cut's byte for
+  byte.
 
 **What the cut dropped, recorded (D-REL-5 round 2, R4).** The one-file
 `Model.js` opened with the header below and closed with a CommonJS export

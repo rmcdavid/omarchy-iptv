@@ -341,7 +341,7 @@ is "on this tree it names exactly the parts scripts/helper_files.py names" \
    "$(python3 -c 'import sys; sys.path.insert(0, sys.argv[1] + "/scripts"); import helper_files; print("".join(p + " " for p in helper_files.part_paths(sys.argv[1])), end="")' "$ROOT")"
 HROOT="$TMP/helper-tree"
 mkdir -p "$HROOT/bin/helper"
-printf 'import sys\nHELPER_PARTS = (\n    "01-a.py",\n    "02-b.py",\n)\n' >"$HROOT/bin/omarchy-iptv"
+printf 'import sys\nHELPER_PARTS = (\n    ("01-a.py", 1, 0x00000000),\n    ("02-b.py", 12, 0x0000abcd),\n)\n' >"$HROOT/bin/omarchy-iptv"
 : >"$HROOT/bin/helper/01-a.py"; : >"$HROOT/bin/helper/02-b.py"
 is "the parts, in the stub's order" \
    "$(qa_helper_parts "$HROOT" | sed "s#^$HROOT/##" | tr '\n' ' ')" "bin/helper/01-a.py bin/helper/02-b.py "

@@ -3,7 +3,7 @@
     "D-SINK-16. The one rule that decides whether an ADOPTED mpv process is safe",
     "to hand a credentialed URL and the provider headers to, written once and run",
     "by both implementations: Model.tlsPropertiesSafe (tests/Model.test.js) and",
-    "tls_properties_safe in bin/omarchy-iptv (tests/test_mpv.py).",
+    "tls_properties_safe in the helper, bin/helper/08-player-verbs.py (tests/test_mpv.py).",
     "",
     "`verify` is mpv's `tls-verify` property as its JSON IPC answers it, and",
     "`optionCount` is how many entries `stream-lavf-o` holds -- a COUNT and never",

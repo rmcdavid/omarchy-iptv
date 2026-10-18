@@ -89,6 +89,10 @@ function makeIds(h) {
     // interval the tree DECLARES (F4, lane-clean-f1; bootService below).
     stateVerifyWatchdog: timer("stateVerifyWatchdog"),
     switchTimeout: timer("switchTimeout"),
+    // D-REL-7: the control slot's watchdog, which handleControlResult stops
+    // first; a test runs that handler to see how the status branch routes a
+    // reply from a damaged helper. Counted like every timer, never run.
+    controlWatchdog: timer("controlWatchdog"),
     configShieldDebounce: timer("configShieldDebounce"),
     channelsFile: view("channelsFile"),
     playlistStatusFile: view("playlistStatusFile"),

@@ -221,7 +221,11 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # F-HARNESS-31's sixteen (R24a IN FLIGHT, R25d a7, R25b's in-flight saved
 # search, R26b's census, each x 4) were re-levelled in place to the
 # same-instant loss, not added.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2565}
+# 2565 -> 2572 on 2026-10-17, the split's reviews P2/P3a (lane-split-f1): the
+# damaged-helper reply mapped through the shared helper-damaged fixture (4),
+# its routing as no_output's (1), every other reply reader unchanged by it
+# (1), and Service.qml's own status branch through the harness (1).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2572}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -273,7 +277,24 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2565}
 # property over synthetic one-file helpers and this tree; and test_release's
 # five for the parts (the resolver both ways, an unreadable list, the parts as
 # shipped sources, the whole helper and nothing else under bin/ shipping).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1272}
+# 1272 -> 1284 on 2026-10-17, the split's reviews P2/P3a/P3b (lane-split-f1):
+# the damaged-part matrix over the real helper (16 damages as subtests of one
+# test, and its intact control: 2), nothing runs before every part is checked
+# (2), the symlinked stub and plugin directory (2), the check's last-line rule
+# (1), and --seal (5). The bytecode directory's exemption became a stray in
+# place, not added.
+# 1284 -> 1293 on 2026-10-17, the split follow-up's P1/P2a-c/P3s
+# (lane-split-f2): an add and an ff update cloned under core.autocrlf=true
+# (1), a CRLF part matching its entry in the gate (1), a name starting with
+# "." ignored by the gate and the stub (1) and by the real helper's verbs
+# (1), parts of two releases refused both ways (2: the control, the mixes),
+# every step of an update emulated and every byte prefix of the stub (2),
+# and --version through a symlink to the stub (1). The last-line rule became
+# the entry rule in place, and --seal's stale-line case became its removal
+# of that line, not added; the matrix's subtests went 16 -> 18, gaining a
+# FIFO, a part of another release, an entry one byte short and __pycache__,
+# and losing the wrong last line and the swap file (now the ignored case).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1293}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -671,9 +692,13 @@ step "helper split (scripts/split-helper.py --check)"
 # every reader reads it, scripts/helper_files.py); the stub carries exactly
 # the loader those names generate, directly after the shield, so nothing is
 # compiled before the process is non-dumpable (D-SINK-9); every named part
-# starts with the generated header and compiles; and bin/helper/ holds
-# nothing the list leaves out. The release allowlist step below proves every
-# part ships, and the python suite runs the helper they make.
+# starts with the generated header, matches the length and CRC-32 its entry
+# in the list gives (with CRLF read as LF, as the stub reads it, so a
+# core.autocrlf checkout is not damage; an edit is sealed with --seal) and
+# compiles; and bin/helper/ holds nothing the list leaves out but names
+# starting with ".", a bytecode directory included, because the stub
+# refuses to start beside any of it. The release allowlist step below proves
+# every part ships, and the python suite runs the helper they make.
 if python3 "$ROOT/scripts/split-helper.py" --check --root "$ROOT" >"$CHECK_TMP/split-helper.log" 2>&1; then
   ok "helper split ($(sed -n 's/^split-helper: check ok (\(.*\))$/\1/p' "$CHECK_TMP/split-helper.log" | head -1))"
 else

@@ -31,8 +31,8 @@ Every list is generated into a mkdtemp() by scripts/gen-playlist.py with
 --now set to the current time, so the guide window is always current (the
 committed tests/fixtures/qa-epg.xml went stale exactly that way). The epgMap
 is NOT hand-built: the real helper builds it (`playlist`, then `epg`, both
-with --cache-dir under the scratch directory), because bin/omarchy-iptv's epg
-verb is what writes the epg-now.json Service.qml loads into `epgNow`, and its
+with --cache-dir under the scratch directory), because the helper's epg verb
+(cmd_epg, bin/helper/04-epg.py) is what writes the epg-now.json Service.qml loads into `epgNow`, and its
 alias table already restricts the map to playlist ids, which gives a second
 observable along the same data (status["matched"]). The verdict is then
 taken from Model.js itself through tests/fixtures/qa-gs2/verify.js (CLAUDE.md

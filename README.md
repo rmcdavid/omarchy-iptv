@@ -777,6 +777,18 @@ Nothing inside the plugin directory is written at runtime.
   usable URL and was removed` means the old value was not one the plugin
   accepts (a typo, a scheme it does not take); add the source again in
   Sources.
+- **Plugin files damaged (05-ipc-logos.py) · reinstall the plugin** (any
+  part name): the helper is `bin/omarchy-iptv` and the eleven files under
+  `bin/helper/` beside it, and it checks all of them before it does
+  anything. One of them is missing, unreadable, empty, cut off, not what
+  the release wrote or from another release, or that folder holds a file
+  the release did not put there (a hidden one, such as an editor's swap
+  file, is ignored), so the helper refused to run rather than run half of
+  itself, and nothing was changed. Seen once during `omarchy plugin
+  update`, it is the update caught half written and clears by itself
+  when the update finishes; if it stays, disable,
+  remove and add the plugin again (Install and Uninstall). Your sources,
+  favorites and guide data are kept outside the plugin and are not touched.
 - Paste does nothing in a form: the plugin pastes by having its helper run
   `wl-paste`, so that must be installed (`wl-clipboard`, an Omarchy
   default). The helper reads at most 32 KiB of the clipboard and gives up

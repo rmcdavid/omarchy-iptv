@@ -42,7 +42,7 @@ class HostConfigPathTest(unittest.TestCase):
         expr = match.group(1).strip()
         self.assertEqual(expr, 'home + "/.config/omarchy/shell.json"',
                          "the host changed how it names its settings file; "
-                         "host_config_path() in bin/omarchy-iptv must follow it")
+                         "host_config_path() in the helper (bin/helper/01-core.py) must follow it")
 
     def test_the_host_reads_home_rather_than_xdg_config_home(self):
         """The reason the helper may not use $XDG_CONFIG_HOME. If the host ever
