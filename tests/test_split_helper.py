@@ -428,6 +428,21 @@ class NothingRunsBeforeEveryPartIsCheckedTest(unittest.TestCase):
             self.assertEqual(json.loads(done.stdout)["error"]["code"], "helper_damaged", damage)
 
 
+def as_committed(top):
+    """Every file under `top` with CRLF read as LF: the bytes main's blobs
+    hold, whatever line endings the checkout these tests run in was given
+    (a core.autocrlf checkout of dev writes CRLF, and a damage or a blob
+    built from those bytes would not be the one an install receives)."""
+    for base, _, files in os.walk(top):
+        for name in files:
+            path = os.path.join(base, name)
+            with open(path, "rb") as fh:
+                data = fh.read()
+            if b"\r\n" in data:
+                with open(path, "wb") as fh:
+                    fh.write(data.replace(b"\r\n", b"\n"))
+
+
 def copy_plugin(case):
     """A copy of this repository's helper as an install holds it (the stub,
     its parts, the manifest beside them), and an empty home to run it in."""
@@ -437,6 +452,7 @@ def copy_plugin(case):
     os.makedirs(os.path.join(plugin, "bin"))
     helper_files.copy_helper(str(ROOT), plugin)
     shutil.copy2(str(ROOT / "manifest.json"), plugin)
+    as_committed(plugin)
     home = os.path.join(top, "home")
     os.makedirs(home)
     return plugin, home
@@ -848,7 +864,8 @@ class CrlfCheckoutTest(unittest.TestCase):
         os.makedirs(os.path.join(upstream, "bin"))
         helper_files.copy_helper(str(ROOT), upstream)
         shutil.copy2(str(ROOT / "manifest.json"), upstream)
-        # The upstream's blobs are this tree's bytes, LF, as main's are.
+        as_committed(upstream)
+        # The upstream's blobs are this tree's text, LF, as main's are.
         self.git(upstream, env, "-c", "core.autocrlf=false", "init", "-q")
         self.git(upstream, env, "-c", "core.autocrlf=false", "add", "-A")
         self.git(upstream, env, "-c", "core.autocrlf=false", "commit", "-q", "-m", "this release")

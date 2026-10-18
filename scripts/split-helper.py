@@ -494,10 +494,12 @@ def main(argv=None):
     if problems:
         return 1
     names = helper_files.part_names(helper_files.read(args.root, STUB))
-    sizes = sorted((os.path.getsize(os.path.join(args.root, PART_DIR, n)), n) for n in names)
+    # Sizes as the stub counts them, CRLF read as LF: the committed text,
+    # whatever line endings this checkout was given.
+    sizes = sorted((len(normalised(read_bytes(args.root, '%s/%s' % (PART_DIR, n)))), n) for n in names)
     print('split-helper: %s ok (%d parts, largest %s at %d bytes; the stub %d bytes)'
           % (what, len(names), sizes[-1][1], sizes[-1][0],
-             os.path.getsize(os.path.join(args.root, STUB))))
+             len(normalised(read_bytes(args.root, STUB)))))
     return 0
 
 

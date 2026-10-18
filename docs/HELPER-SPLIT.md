@@ -303,11 +303,37 @@ were one ever added, both sides would still agree, because both read the
 same normalised text. `tests/test_split_helper.py` clones a scratch upstream
 under a scratch HOME whose `.gitconfig` sets `autocrlf = true`, for an add
 and for a fast-forward update, checks the clone really is CRLF, and runs the
-verbs; it fails against lane-split-f1 with that review's reply. Its sibling
-search over the other checks that read a shipped file's bytes is in the
-lane's write-up: under a checkout whose shipped files are CRLF, the gate
-steps that judge them pass, and the QML, the model and the manifest load
-(Qt, node and JSON read CRLF unchanged).
+verbs; it fails against lane-split-f1 with that review's reply.
+
+The sibling search (rule 15), run rather than reasoned, over a tree whose 41
+shipped text files were rewritten with CRLF exactly as autocrlf writes them
+(the rest of the tree left LF), the whole gate run over it:
+- *What an install runs* reads CRLF unchanged: the stub (above); `omarchy
+  plugin validate` over the manifest; qmllint parses the five QML files with
+  0 errors; the qml spec, which imports `Model.mjs` and its parts through the
+  QML engine, passes 78 of 78; node imports the CRLF `Model.mjs` (654
+  exports) from a real autocrlf clone. Nothing else in an install reads its
+  own files.
+- *The gate's judges of shipped files*: `split-helper.py --check` passes
+  and reports the same sizes (they are counted over the normalised text);
+  `release.py check`, the capability scan and the text-format guard pass.
+  `release.py`'s size ceiling counts the bytes on disk, so under CRLF it
+  counts one byte more per line (Service.qml 330,175 against 323,837):
+  it can refuse a file early, never pass one that is over, and the ceiling
+  sits 64 KiB under the scanner's limit; left as it is.
+- *Dev-only readers that break on CRLF*, recorded rather than fixed: 29 node
+  checks (15 in a real autocrlf clone, where the fixtures are CRLF too) that pin the text of `Guide.qml`, `Service.qml` or the helper with
+  `\n` in a pattern; `split-model.mjs --check` ("not a generated export
+  line"); and `qa_model_files` in `scripts/qa-lib.sh`, so 34 harness
+  predicates, `run.sh` (three python tests), and the check-tree preflights
+  that find the model through it. They cannot matter alone: a real
+  `core.autocrlf=true` clone of `dev` checks out the shell scripts with CRLF
+  too, and `scripts/check.sh` then stops at its first line (`/bin/bash^M:
+  bad interpreter`). A developer with that setting needs a `.gitattributes`
+  on `dev`, which is a decision for the lead, not a fix to each reader.
+  Two cases in `tests/test_split_helper.py` built their upstream and their
+  damages from the checkout's bytes and failed there; they now start from
+  the committed text, and pass in that tree.
 
 **What an in-place update can meet, step by step** (re-measured
 2026-10-17 for the next CHANGELOG). `omarchy-plugin-update` is `git fetch`
