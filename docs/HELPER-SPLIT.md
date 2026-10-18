@@ -123,10 +123,11 @@ What that buys, each point measured or read rather than assumed:
   the marketplace recorded for 0.14.2's one file, and passes it again with
   all eleven parts re-marked 100755; the launcher-literal regex matches 5
   calls across the parts (two in 05, two in 08, one in 11), none of whose
-  arguments contains curl, wget, git or cargo. Re-run on this lane's
-  export (the stub with its checking loader, the parts with their last
-  lines): `passed`, `[]`, `[]`, 38 files scanned, both with the parts as
-  100644 and re-marked 100755.
+  arguments contains curl, wget, git or cargo. Re-run on lane-split-f1's
+  export (the stub with its first checking loader, the parts with their
+  last lines) and again on lane-split-f2's (adbba9a: the entries in the
+  stub, no last lines): `passed`, `[]`, `[]`, 38 files scanned each time,
+  both with the parts as 100644 and re-marked 100755.
 
 The cost is one `exec(compile(...))` in a shipped file, which a human
 reviewer will read. The stub is about 9 KB, the loader takes no input (fixed
