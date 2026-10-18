@@ -1,5 +1,5 @@
 {
-  "about": "D-REL-7, the split's reviews P2 and P3a: what the helper's stub prints when a part is missing or damaged, and the sentence the shell shows for it. Both sides run this file: tests/test_split_helper.py applies each damage to a copy of the real helper and compares the stub's stdout with `reply` byte for byte (json.dumps of it) and its one stderr line with `omarchy-iptv: ` + reply.error.message; tests/Model.test.js maps `reply` through Model.parseHelperStatus and Model.statusReason and compares `reason`. The `damage` names are the python test's vocabulary. `replies` are shapes no damage produces, for the mapping alone: a `part` that is not a part's name is never shown.",
+  "about": "D-REL-7, the split's reviews P2 and P3a and the follow-up's P2a-P2c: what the helper's stub prints when a part is missing or damaged, and the sentence the shell shows for it. Both sides run this file: tests/test_split_helper.py applies each damage to a copy of the real helper and compares the stub's stdout with `reply` byte for byte (json.dumps of it) and its one stderr line with `omarchy-iptv: ` + reply.error.message; tests/Model.test.js maps `reply` through Model.parseHelperStatus and Model.statusReason and compares `reason`. The `damage` names are the python test's vocabulary; a `-resealed` damage rewrites the stub's entry for the part too (split-helper.py --seal), so it reaches the checks after the entry's. `ignored` are entries in bin/helper/ the stub starts beside: a name starting with '.' cannot be a part. `replies` are shapes no damage produces, for the mapping alone: a `part` that is not a part's name is never shown.",
   "refusals": [
     {
       "damage": "missing",
@@ -35,10 +35,23 @@
         "part": "01-core.py",
         "error": {
           "code": "helper_damaged",
-          "message": "bin/helper/01-core.py cannot be read (Is a directory); reinstall the plugin"
+          "message": "bin/helper/01-core.py is not a regular file; reinstall the plugin"
         }
       },
       "reason": "Plugin files damaged (01-core.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "fifo",
+      "part": "03-io-playlist.py",
+      "reply": {
+        "ok": false,
+        "part": "03-io-playlist.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/03-io-playlist.py is not a regular file; reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (03-io-playlist.py) \u00b7 reinstall the plugin"
     },
     {
       "damage": "empty",
@@ -74,7 +87,7 @@
         "part": "05-ipc-logos.py",
         "error": {
           "code": "helper_damaged",
-          "message": "bin/helper/05-ipc-logos.py is cut off or altered (its last line does not match it); reinstall the plugin"
+          "message": "bin/helper/05-ipc-logos.py is not the part this helper names (cut off, altered, or from another release); reinstall the plugin"
         }
       },
       "reason": "Plugin files damaged (05-ipc-logos.py) \u00b7 reinstall the plugin"
@@ -87,7 +100,7 @@
         "part": "11-cli.py",
         "error": {
           "code": "helper_damaged",
-          "message": "bin/helper/11-cli.py is cut off or altered (its last line does not match it); reinstall the plugin"
+          "message": "bin/helper/11-cli.py is not the part this helper names (cut off, altered, or from another release); reinstall the plugin"
         }
       },
       "reason": "Plugin files damaged (11-cli.py) \u00b7 reinstall the plugin"
@@ -100,10 +113,49 @@
         "part": "07-player.py",
         "error": {
           "code": "helper_damaged",
-          "message": "bin/helper/07-player.py is cut off or altered (its last line does not match it); reinstall the plugin"
+          "message": "bin/helper/07-player.py is not the part this helper names (cut off, altered, or from another release); reinstall the plugin"
         }
       },
       "reason": "Plugin files damaged (07-player.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "nul-byte",
+      "part": "04-epg.py",
+      "reply": {
+        "ok": false,
+        "part": "04-epg.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/04-epg.py is not the part this helper names (cut off, altered, or from another release); reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (04-epg.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "another-release",
+      "part": "03-io-playlist.py",
+      "reply": {
+        "ok": false,
+        "part": "03-io-playlist.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/03-io-playlist.py is not the part this helper names (cut off, altered, or from another release); reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (03-io-playlist.py) \u00b7 reinstall the plugin"
+    },
+    {
+      "damage": "entry-length-one-short",
+      "part": "06-failed.py",
+      "reply": {
+        "ok": false,
+        "part": "06-failed.py",
+        "error": {
+          "code": "helper_damaged",
+          "message": "bin/helper/06-failed.py is not the part this helper names (cut off, altered, or from another release); reinstall the plugin"
+        }
+      },
+      "reason": "Plugin files damaged (06-failed.py) \u00b7 reinstall the plugin"
     },
     {
       "damage": "syntax-error-resealed",
@@ -117,19 +169,6 @@
         }
       },
       "reason": "Plugin files damaged (07-player.py) \u00b7 reinstall the plugin"
-    },
-    {
-      "damage": "nul-byte",
-      "part": "04-epg.py",
-      "reply": {
-        "ok": false,
-        "part": "04-epg.py",
-        "error": {
-          "code": "helper_damaged",
-          "message": "bin/helper/04-epg.py is cut off or altered (its last line does not match it); reinstall the plugin"
-        }
-      },
-      "reason": "Plugin files damaged (04-epg.py) \u00b7 reinstall the plugin"
     },
     {
       "damage": "nul-byte-resealed",
@@ -158,19 +197,6 @@
       "reason": "Plugin files damaged (09-cache.py) \u00b7 reinstall the plugin"
     },
     {
-      "damage": "wrong-last-line",
-      "part": "06-failed.py",
-      "reply": {
-        "ok": false,
-        "part": "06-failed.py",
-        "error": {
-          "code": "helper_damaged",
-          "message": "bin/helper/06-failed.py is cut off or altered (its last line does not match it); reinstall the plugin"
-        }
-      },
-      "reason": "Plugin files damaged (06-failed.py) \u00b7 reinstall the plugin"
-    },
-    {
       "damage": "extra-file",
       "part": "12-extra.py",
       "reply": {
@@ -184,14 +210,14 @@
       "reason": "Plugin files damaged (12-extra.py) \u00b7 reinstall the plugin"
     },
     {
-      "damage": "extra-file",
-      "part": ".05-ipc-logos.py.swp",
+      "damage": "extra-directory",
+      "part": "__pycache__",
       "reply": {
         "ok": false,
-        "part": ".05-ipc-logos.py.swp",
+        "part": "__pycache__",
         "error": {
           "code": "helper_damaged",
-          "message": "bin/helper/.05-ipc-logos.py.swp is not one of this helper's parts; reinstall the plugin"
+          "message": "bin/helper/__pycache__ is not one of this helper's parts; reinstall the plugin"
         }
       },
       "reason": "Plugin files damaged \u00b7 reinstall the plugin"
@@ -208,6 +234,18 @@
         }
       },
       "reason": "Plugin files damaged \u00b7 reinstall the plugin"
+    }
+  ],
+  "ignored": [
+    {
+      "damage": "extra-file",
+      "part": ".05-ipc-logos.py.swp",
+      "why": "vim's swap file for a part open in the editor"
+    },
+    {
+      "damage": "extra-file",
+      "part": ".#11-cli.py",
+      "why": "emacs's lock file for a part being edited"
     }
   ],
   "replies": [

@@ -551,7 +551,8 @@ const oneFav = { version: 1, favorites: ["United States:0"], recents: [], lastPl
 const guideSource = require("fs").readFileSync(require("path").join(__dirname, "../Guide.qml"), "utf8")
 const serviceSource = require("fs").readFileSync(require("path").join(__dirname, "../Service.qml"), "utf8")
 // The helper's text. Since D-REL-7 the helper is bin/omarchy-iptv, a stub,
-// and the parts its generated HELPER_PARTS block names under bin/helper/,
+// and the parts its generated HELPER_PARTS block names under bin/helper/
+// (one `("NN-x.py", <length>, <crc32>),` entry a line),
 // compiled in that order into one namespace, so a pin reads all of them in
 // that order -- the way scripts/helper_files.py does in python, and
 // split-helper.py --check proves the block has this shape. A stub with no
@@ -559,7 +560,7 @@ const serviceSource = require("fs").readFileSync(require("path").join(__dirname,
 const helperSource = (function () {
   const fs = require("fs"), path = require("path")
   const stub = fs.readFileSync(path.join(__dirname, "../bin/omarchy-iptv"), "utf8")
-  const block = /^HELPER_PARTS = \(\n((?: {4}"[0-9]{2}-[a-z][a-z0-9-]*\.py",\n)+)\)$/m.exec(stub)
+  const block = /^HELPER_PARTS = \(\n((?: {4}\("[0-9]{2}-[a-z][a-z0-9-]*\.py", [1-9][0-9]*, 0x[0-9a-f]{8}\),\n)+)\)$/m.exec(stub)
   const parts = block ? block[1].match(/"[^"]+"/g).map(function (q) { return q.slice(1, -1) }) : []
   return stub + parts.map(function (name) {
     return fs.readFileSync(path.join(__dirname, "../bin/helper", name), "utf8")
@@ -9604,7 +9605,7 @@ check("the shared dispatch fixture: the snapshot written at PiP-on is the one th
 
 // The third copy of one string, and the one with teeth. The window class PiP
 // matches on is the app-id the player is LAUNCHED with, and that flag is
-// written in three places: here, in bin/omarchy-iptv's mirror, and in the
+// written in three places: here, in the helper's mirror (bin/helper/07-player.py), and in the
 // finder. The first two are pinned to each other by player-argv.json; the
 // finder was pinned to neither, so a renamed app-id would have left PiP
 // answering "Cannot find the player window" for ever, silently, with every

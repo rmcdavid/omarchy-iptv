@@ -852,4 +852,3 @@ def cmd_state(args: argparse.Namespace) -> int:
         return EXIT_ERROR
 
 
-# end of 10-state.py: 44319 bytes above, crc32 5ed305c7

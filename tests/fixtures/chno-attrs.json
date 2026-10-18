@@ -2,7 +2,7 @@
   "why": [
     "M2-03 ruling CN11: which attribute carries a channel number, and in what",
     "precedence order. The rule is stated twice, in two files two different",
-    "lanes own -- CHNO_ATTRS in bin/omarchy-iptv (the helper decides which",
+    "lanes own -- CHNO_ATTRS in the helper, bin/helper/02-sources.py (the helper decides which",
     "ATTRIBUTE) and CHNO_FIELDS in Model.js (the model decides what the value",
     "MEANS). Nothing held the two statements together, so this file does:",
     "tests/test_playlist.py and tests/Model.test.js both read it and drive",

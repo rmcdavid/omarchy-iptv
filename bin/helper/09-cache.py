@@ -368,4 +368,3 @@ def cmd_cache(args: argparse.Namespace) -> int:
         return EXIT_ERROR
 
 
-# end of 09-cache.py: 15926 bytes above, crc32 7360cbac

@@ -104,14 +104,17 @@ var HTTP_REASONS = { 401: "Unauthorized", 403: "Forbidden", 404: "Not Found", 42
 
 // D-REL-7 (the split's reviews, P3a). The helper's stub reads and checks all
 // of its parts before any of them runs, and refuses with ONE reply, code
-// `helper_damaged`, when one is missing, unreadable, empty, cut off, not
-// text or not compiling, or when bin/helper/ holds a file it does not name:
+// `helper_damaged`, when one is missing, not a regular file, empty, not the
+// part the stub's list names (cut off, altered, or from another release, as
+// mid-update), not text or not compiling, or when bin/helper/ holds a file
+// it does not name (a name starting with "." excepted):
 // `{"ok": false, "part": "05-ipc-logos.py", "error": {...}}`. The only cure is
 // a fresh copy of the plugin, so that is what the sentence says. It names the
 // part and nothing else: `part` is shown only when it has a part's shape, so
-// a stray file's name -- anything at all -- never reaches a toast, and no
-// directory does (the reply carries none; the stub's own stderr line names
-// bin/helper/ inside the plugin, which the console redacts like any other).
+// a stray file's name -- anything at all -- never reaches a toast. The
+// reply's `error.message` does name the part under bin/helper/ (a path
+// relative to the plugin, nothing of the user's), and this sentence never
+// reads it.
 // Pinned against the stub's real replies by one shared fixture (dev branch).
 var HELPER_PART_RE = /^[0-9]{2}-[a-z][a-z0-9-]{0,40}\.py$/
 

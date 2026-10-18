@@ -2,7 +2,8 @@
 
 `bin/omarchy-iptv` is a stub: it makes the process non-dumpable (D-SINK-9)
 and then compiles the parts under `bin/helper/`, in the order its
-`HELPER_PARTS` tuple lists, into its own namespace, so the parts behave as
+`HELPER_PARTS` tuple lists (each entry a part's name, length and CRC-32,
+which the stub checks first), into its own namespace, so the parts behave as
 the one file they were cut from (scripts/split-helper.py cuts and checks
 them; docs/HELPER-SPLIT.md says why). Anything in Python that needs the
 helper's FILES -- the release allowlist's resolver, a pin that reads the
@@ -32,10 +33,12 @@ class HelperLayoutError(Exception):
     pass
 
 
-def part_names(stub_text):
-    """The names HELPER_PARTS assigns at the stub's top level, in order, or
-    () when it assigns none. Read with `ast.literal_eval`, never by running
-    the stub, so a reader cannot be made to execute anything."""
+def part_records(stub_text):
+    """The entries HELPER_PARTS assigns at the stub's top level, in order, as
+    (name, length, crc32) tuples -- the length and CRC-32 of the part's text
+    with CRLF read as LF, which the stub checks before any part runs -- or ()
+    when it assigns none. Read with `ast.literal_eval`, never by running the
+    stub, so a reader cannot be made to execute anything."""
     try:
         tree = ast.parse(stub_text)
     except SyntaxError as error:
@@ -51,12 +54,22 @@ def part_names(stub_text):
     except ValueError:
         raise HelperLayoutError('%s: HELPER_PARTS is not a literal' % STUB)
     if (not isinstance(value, tuple) or not value
-            or not all(isinstance(v, str) and PART_NAME.match(v) for v in value)):
-        raise HelperLayoutError('%s: HELPER_PARTS is not a tuple of part names like '
-                                '"01-core.py"' % STUB)
-    if len(set(value)) != len(value):
+            or not all(isinstance(v, tuple) and len(v) == 3
+                       and isinstance(v[0], str) and PART_NAME.match(v[0])
+                       and type(v[1]) is int and v[1] > 0
+                       and type(v[2]) is int and 0 <= v[2] <= 0xFFFFFFFF for v in value)):
+        raise HelperLayoutError('%s: HELPER_PARTS is not a tuple of entries like '
+                                '("01-core.py", <length>, <crc32>)' % STUB)
+    names = [v[0] for v in value]
+    if len(set(names)) != len(names):
         raise HelperLayoutError('%s names a part twice in HELPER_PARTS' % STUB)
     return value
+
+
+def part_names(stub_text):
+    """The part names HELPER_PARTS lists, in order, or () for a one-file
+    helper."""
+    return tuple(entry[0] for entry in part_records(stub_text))
 
 
 def read(root, rel):

@@ -394,4 +394,3 @@ def cmd_status(args: argparse.Namespace) -> int:
         client.close()
 
 
-# end of 06-failed.py: 20095 bytes above, crc32 8659dd1a

@@ -1,5 +1,5 @@
 {
-  "comment": "D-LOGO-11. Cases for logo_dimensions and logo_within_bounds in bin/omarchy-iptv, read by tests/test_logo_dimensions.py. Bytes are hex because .js and .py sources are ASCII only (CLAUDE.md rule 8); the cases are tiny real images from ImageMagick, some with their declared dimensions rewritten in the header, which is the whole point of the defect: the cost is quadratic in a number the bytes do not have to honour. dimensions is null where the header cannot be read, and withinBounds is then false, because a bound that cannot tell 'unreadable' from 'small' IS the defect (ruling R4).",
+  "comment": "D-LOGO-11. Cases for logo_dimensions and logo_within_bounds in the helper (bin/helper/05-ipc-logos.py), read by tests/test_logo_dimensions.py. Bytes are hex because .js and .py sources are ASCII only (CLAUDE.md rule 8); the cases are tiny real images from ImageMagick, some with their declared dimensions rewritten in the header, which is the whole point of the defect: the cost is quadratic in a number the bytes do not have to honour. dimensions is null where the header cannot be read, and withinBounds is then false, because a bound that cannot tell 'unreadable' from 'small' IS the defect (ruling R4).",
   "maxSide": 4096,
   "maxPixels": 4194304,
   "cases": [

@@ -283,7 +283,18 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2572}
 # (2), the symlinked stub and plugin directory (2), the check's last-line rule
 # (1), and --seal (5). The bytecode directory's exemption became a stray in
 # place, not added.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1284}
+# 1284 -> 1293 on 2026-10-17, the split follow-up's P1/P2a-c/P3s
+# (lane-split-f2): an add and an ff update cloned under core.autocrlf=true
+# (1), a CRLF part matching its entry in the gate (1), a name starting with
+# "." ignored by the gate and the stub (1) and by the real helper's verbs
+# (1), parts of two releases refused both ways (2: the control, the mixes),
+# every step of an update emulated and every byte prefix of the stub (2),
+# and --version through a symlink to the stub (1). The last-line rule became
+# the entry rule in place, and --seal's stale-line case became its removal
+# of that line, not added; the matrix's subtests went 16 -> 18, gaining a
+# FIFO, a part of another release, an entry one byte short and __pycache__,
+# and losing the wrong last line and the swap file (now the ignored case).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1293}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -681,12 +692,13 @@ step "helper split (scripts/split-helper.py --check)"
 # every reader reads it, scripts/helper_files.py); the stub carries exactly
 # the loader those names generate, directly after the shield, so nothing is
 # compiled before the process is non-dumpable (D-SINK-9); every named part
-# starts with the generated header, ends with its generated last line for
-# the bytes above it (the witness the stub checks, so a part cut off is told
-# from a whole one) and compiles; and bin/helper/ holds nothing the list
-# leaves out, a bytecode directory included, because the stub refuses to
-# start beside any of it. The release allowlist step below proves every
-# part ships, and the python suite runs the helper they make.
+# starts with the generated header, matches the length and CRC-32 its entry
+# in the list gives (with CRLF read as LF, as the stub reads it, so a
+# core.autocrlf checkout is not damage; an edit is sealed with --seal) and
+# compiles; and bin/helper/ holds nothing the list leaves out but names
+# starting with ".", a bytecode directory included, because the stub
+# refuses to start beside any of it. The release allowlist step below proves
+# every part ships, and the python suite runs the helper they make.
 if python3 "$ROOT/scripts/split-helper.py" --check --root "$ROOT" >"$CHECK_TMP/split-helper.log" 2>&1; then
   ok "helper split ($(sed -n 's/^split-helper: check ok (\(.*\))$/\1/p' "$CHECK_TMP/split-helper.log" | head -1))"
 else

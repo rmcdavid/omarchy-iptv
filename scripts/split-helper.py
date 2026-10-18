@@ -18,8 +18,9 @@ THE SHAPE.
                       then its tail (the `if __name__ == "__main__":` guard)
   bin/helper/NN-*.py  each a contiguous run of the body between them, cut at
                       a section banner of the one-file helper (CUTS below),
-                      behind the generated HEADER and above the generated
-                      last line (WITNESS below), which the stub checks
+                      behind the generated HEADER; the stub's HELPER_PARTS
+                      names each with its length and CRC-32 (record below),
+                      which the stub checks before any part runs
 
 MODES (exactly one):
   --write   cut the one-file helper (--from-git REF, or --input FILE) into
@@ -27,21 +28,23 @@ MODES (exactly one):
             whose bin/helper/ already holds anything.
   --verify  the same cut in memory against the tree on disk, every file byte
             for byte, and the proof that the cut loses nothing: head + body +
-            tail is the input, and the parts without their headers and last
-            lines concatenate to the body. A stub that differs is reported by
+            tail is the input, and the parts without their headers
+            concatenate to the body. A stub that differs is reported by
             region (head, loader, tail), because the head is the one-file
             helper's own text and is edited like any other code.
   --check   the tree as it stands, which the gate runs: HELPER_PARTS is read
             the one way every reader reads it (scripts/helper_files.py); the
             stub carries exactly the LOADER block those names generate,
             directly after the shield, so nothing is compiled before it; every
-            name is a file under bin/helper/ that starts with HEADER, ends with
-            its WITNESS line and compiles, and bin/helper/ holds nothing else.
+            name is a file under bin/helper/ that starts with HEADER, matches
+            its entry and compiles, and bin/helper/ holds nothing else but
+            names starting with "." (which the stub ignores too).
             The size ceiling is release.py's, on every allowlisted file, and
             its resolver proves every part ships.
   --seal    after an ordinary edit to a part (the parts are cut once and then
-            edited as code): rewrite each part's last line for the bytes above
-            it and the stub's loader for its HELPER_PARTS, then --check.
+            edited as code): rewrite the stub's loader, so each entry of its
+            HELPER_PARTS carries the part's length and CRC-32 as it now is,
+            then --check. Every part edit changes the stub.
 
 Exit status: 0 clean, 1 a problem (one line each on stderr), 2 usage.
 Python 3 standard library only; ASCII only.
@@ -88,22 +91,52 @@ HEADER = (
     'from __future__ import annotations\n'
 )
 
-# The fixed last line of every part (P2 of the D-REL-7 reviews). The stub
-# refuses a part whose last line is not exactly this for the bytes above it,
-# which is how a part cut off -- by a checkout half done, a copy interrupted,
-# a disk that filled -- is told from a whole one: a truncated file has lost
-# its last line, wherever it was cut. A checksum and a length rather than a
-# cryptographic digest, on purpose: the line sits in the file it describes,
-# so anyone able to rewrite the part can rewrite the line, and no digest
-# stored there can authenticate anything. It detects DAMAGE, and CRC-32
-# catches every truncation and every error burst up to 32 bits; zlib is
-# already loaded by the helper's first part, where hashlib is deliberately
-# imported late (01-core.py's import note). The length is for a human
-# comparing two copies.
-WITNESS = '# end of %s: %d bytes above, crc32 %08x\n'
-WITNESS_SHAPE = re.compile(r'^# end of \S+: [0-9]+ bytes above, crc32 [0-9a-f]{8}\n$')
+# What the stub knows about each part (P2 of the D-REL-7 follow-up). Each
+# entry of HELPER_PARTS is a part's name, its length and its CRC-32, both
+# taken over the part's text with CRLF read as LF (`normalised` below), and
+# the stub refuses a part that does not match its entry before any part
+# runs. Kept in the STUB, not in the part, for the case a line in the part
+# could not see: an update rewrites the parts one after another and the stub
+# after them (git writes in index order and `h` sorts before `o`), so a
+# helper spawned in between used to meet whole parts of two releases, run,
+# write, and die on a NameError. Now the old stub refuses every part of the
+# new release until the new stub lands, and a new stub refuses an old part.
+#
+# A checksum and a length rather than a cryptographic digest, on purpose:
+# anyone able to rewrite the parts can rewrite the stub beside them, so no
+# digest stored there could authenticate anything. It detects DAMAGE and a
+# MIX: CRC-32 catches every truncation and every error burst up to 32 bits,
+# and two releases of a part agree on both length and CRC by chance about
+# once in four billion. zlib is cheap to import, where hashlib is imported
+# late on purpose (01-core.py's import note).
+#
+# CRLF is read as LF because `omarchy plugin add` is a plain `git clone`
+# and `omarchy-plugin-update` a `git merge --ff-only`, both of which honour
+# a user's core.autocrlf=true and write every text file with CRLF (main
+# ships no .gitattributes). Python compiles CRLF source as it compiles LF,
+# so such a checkout is not damaged, and an entry over the raw bytes made
+# every verb refuse on it while 0.14.2 ran (P1 of the follow-up's review).
+# No part and not the stub holds a CR byte of its own (measured
+# 2026-10-17), so the normalised text of any checkout is the committed blob.
 
-LOADER = '''
+
+def normalised(data):
+    """A part's bytes as the stub judges them: CRLF read as LF."""
+    return data.replace(b'\r\n', b'\n')
+
+
+def record(name, data):
+    """-> (name, length, crc32) of `data`, normalised: the entry the stub
+    carries for the part and recomputes at every start."""
+    data = normalised(data)
+    return (name, len(data), zlib.crc32(data))
+
+
+# The last line every part carried at lane-split-f1 (never shipped): --seal
+# removes it, because the stub's record replaces it.
+LEGACY_WITNESS = re.compile(rb'\n# end of \S+: [0-9]+ bytes above, crc32 [0-9a-f]{8}\n\Z')
+
+LOADER = """
 
 # D-REL-7: the rest of the helper is in the files below, under bin/helper/,
 # because the marketplace's security scan refuses a file over 512 KiB and
@@ -116,19 +149,25 @@ LOADER = '''
 # file. The list is fixed and the files are read from this file's own
 # directory (through any symlink to it), never from argv or the environment,
 # and compile() writes no bytecode, so nothing is written into the plugin
-# directory. ALL of them are read and checked before ANY of them runs: a part
-# missing, unreadable, empty, cut off (its generated last line is gone or
-# does not match the bytes above it), not text, or not compiling, or a file
-# here the list does not name, ends the run before a verb can write anything,
-# with one JSON error object on stdout and one line on stderr, like every
-# other failure. Generated, and checked by the gate, by the split script on
-# the dev branch.
+# directory. Each entry carries the part's length and CRC-32 with CRLF read
+# as LF (a core.autocrlf checkout is not damage), and ALL parts are read and
+# checked before ANY of them runs: a part missing, not a regular file (opened
+# without blocking, so a FIFO cannot stall the start), empty, not the part
+# this list names (cut off, altered, or from another release, as during an
+# update, which writes the parts before this file), not text, or not
+# compiling, or a file here the list does not name (a name starting with "."
+# excepted: an editor's swap file is not a part), ends the run before a verb
+# can write anything, with one JSON error object on stdout and one line on
+# stderr, like every other failure. Generated, and checked by the gate, by
+# the split script on the dev branch.
 HELPER_PARTS = (
 @PARTS@)
 
 
 def _load_parts(namespace: dict) -> None:
+    import errno
     import os
+    import stat
     import zlib
 
     def refuse(name, what):
@@ -142,19 +181,23 @@ def _load_parts(namespace: dict) -> None:
 
     here = os.path.join(os.path.dirname(os.path.realpath(__file__)), "helper")
     codes = []
-    for name in HELPER_PARTS:
+    for name, size, crc in HELPER_PARTS:
         path = os.path.join(here, name)
         try:
-            with open(path, "rb") as handle:
-                source = handle.read()
+            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                refuse(name, "is not a regular file")
+            with open(fd, "rb") as handle:
+                source = handle.read(2 * size + 2)
         except OSError as error:
+            if error.errno == errno.ENXIO:
+                refuse(name, "is not a regular file")
             refuse(name, "cannot be read (%s)" % (error.strerror or type(error).__name__))
+        source = source.replace(b"\\r\\n", b"\\n")
         if not source:
             refuse(name, "is empty")
-        end = source.rfind(b"\\n", 0, len(source) - 1) + 1
-        if source[end:] != (b"# end of %s: %d bytes above, crc32 %08x\\n"
-                            % (name.encode(), end, zlib.crc32(source[:end]))):
-            refuse(name, "is cut off or altered (its last line does not match it)")
+        if len(source) != size or zlib.crc32(source) != crc:
+            refuse(name, "is not the part this helper names (cut off, altered, or from another release)")
         try:
             if b"\\0" in source:
                 raise UnicodeError
@@ -169,8 +212,10 @@ def _load_parts(namespace: dict) -> None:
         found = os.listdir(here)
     except OSError as error:
         refuse("", "cannot be listed (%s)" % (error.strerror or type(error).__name__))
-    for name in sorted(set(found) - set(HELPER_PARTS)):
-        refuse(ascii(name)[1:-1], "is not one of this helper's parts")
+    named = set(name for name, _, _ in HELPER_PARTS)
+    for name in sorted(set(found) - named):
+        if not name.startswith("."):
+            refuse(ascii(name)[1:-1], "is not one of this helper's parts")
     for code in codes:
         exec(code, namespace)
 
@@ -178,35 +223,21 @@ def _load_parts(namespace: dict) -> None:
 _load_parts(globals())
 
 
-'''
+"""
 
 
 class SplitError(Exception):
     pass
 
 
-def loader_block(names):
-    return LOADER.replace('@PARTS@', ''.join('    "%s",\n' % name for name in names))
+def loader_block(records):
+    """The generated loader for these (name, length, crc32) entries."""
+    return LOADER.replace('@PARTS@', ''.join('    ("%s", %d, 0x%08x),\n' % entry for entry in records))
 
 
-def witness(name, body):
-    """The last line the split writes under `body` in part `name`, which
-    the stub's loader recomputes byte for byte (the same format as WITNESS,
-    inlined there so the stub reads no table)."""
-    data = body.encode('utf-8')
-    return WITNESS % (name, len(data), zlib.crc32(data))
-
-
-def split_witness(name, text):
-    """-> (the part above its last line, problem or None)."""
-    if not text.endswith('\n'):
-        return text, 'does not end with a newline, so it has no generated last line'
-    end = text.rfind('\n', 0, len(text) - 1) + 1
-    body, last = text[:end], text[end:]
-    if last != witness(name, body):
-        return body, ('does not end with its generated last line for the bytes above it '
-                      '(cut off, or edited without --seal)')
-    return body, None
+def read_bytes(root, rel):
+    with open(os.path.join(root, rel), 'rb') as fh:
+        return fh.read()
 
 
 def one_line(lines, prefix, what):
@@ -232,17 +263,13 @@ def cut(text):
     head = ''.join(lines[:shield + 1])
     body = ''.join(lines[shield + 1:guard])
     tail = ''.join(lines[guard:])
-    parts = []
-    for (name, _), a, b in zip(CUTS, starts, ends):
-        above = HEADER + ''.join(lines[a:b])
-        parts.append((name, above + witness(name, above)))
-    names = [name for name, _ in parts]
-    stub = head + loader_block(names) + tail
+    parts = [(name, HEADER + ''.join(lines[a:b])) for (name, _), a, b in zip(CUTS, starts, ends)]
+    stub = head + loader_block([record(name, part.encode('utf-8')) for name, part in parts]) + tail
     # The two facts the cut rests on, checked rather than trusted.
     if head + body + tail != text:
         raise SplitError('the cut does not reassemble the input')
-    if ''.join(split_witness(name, part)[0][len(HEADER):] for name, part in parts) != body:
-        raise SplitError('the parts without their headers and last lines are not the body')
+    if ''.join(part[len(HEADER):] for _, part in parts) != body:
+        raise SplitError('the parts without their headers are not the body')
     return stub, parts
 
 
@@ -286,10 +313,11 @@ def verify(root, text):
             problems.append('%s: unreadable (%s)' % (rel, error))
             continue
         if have != want:
-            problems.append('%s differs from the cut%s' % (rel, stub_region(have, want) if rel == STUB else ''))
+            where = stub_region(have, want) if rel == STUB else first_difference(have, want)
+            problems.append('%s differs from the cut%s' % (rel, where))
     on_disk = sorted(os.listdir(os.path.join(root, PART_DIR))) if os.path.isdir(
         os.path.join(root, PART_DIR)) else []
-    extra = sorted(set(on_disk) - {name for name, _ in parts})
+    extra = sorted(n for n in set(on_disk) - {name for name, _ in parts} if not n.startswith('.'))
     if extra:
         problems.append('%s holds files the cut does not: %s' % (PART_DIR, ', '.join(extra)))
     return problems
@@ -315,13 +343,35 @@ def stub_region(have, want):
     if a is None or b is None:
         return ' (it is not head, loader, tail)'
     which = [label for label, x, y in zip(('head', 'loader', 'tail'), a, b) if x != y]
+    if 'loader' in which:
+        # A part edited since the cut changes its entry, and only that.
+        try:
+            mine, cuts = helper_files.part_records(have), helper_files.part_records(want)
+        except helper_files.HelperLayoutError:
+            mine = cuts = None
+        if mine and cuts and len(mine) == len(cuts) and (
+                stub_regions(have)[1] == stub_regions(want)[1].replace(
+                    loader_block(cuts), loader_block(mine))):
+            names = [x[0] for x, y in zip(mine, cuts) if x != y]
+            which[which.index('loader')] = 'loader, at the entr%s for %s only' % (
+                'y' if len(names) == 1 else 'ies', ', '.join(names))
     return ' (in its %s)' % ' and '.join(which)
 
 
+def first_difference(have, want):
+    a, b = have.splitlines(keepends=True), want.splitlines(keepends=True)
+    for n, (x, y) in enumerate(zip(a, b), 1):
+        if x != y:
+            return ' (from line %d)' % n
+    return ' (from line %d)' % (min(len(a), len(b)) + 1)
+
+
 def seal(root):
-    """After an ordinary edit to a part: rewrite every part's generated last
-    line for the bytes above it, and the stub's loader for its HELPER_PARTS.
-    Nothing else is touched; --check then judges the result."""
+    """After an ordinary edit to a part: rewrite the stub's loader for the
+    parts as they now are, each entry of HELPER_PARTS taking the length and
+    CRC-32 of its part. A part still ending in lane-split-f1's generated
+    last line (never shipped) loses it, since the entry replaces it. Nothing
+    else is touched; --check then judges the result."""
     stub = helper_files.read(root, STUB)
     names = helper_files.part_names(stub)
     if not names:
@@ -329,18 +379,17 @@ def seal(root):
     regions = stub_regions(stub)
     if regions is None:
         raise SplitError('%s does not have one shield line and one main guard' % STUB)
-    changed = []
+    changed, records = [], []
     for name in names:
         rel = '%s/%s' % (PART_DIR, name)
-        text = helper_files.read(root, rel)
-        body, problem = split_witness(name, text)
-        if problem is not None and not WITNESS_SHAPE.match(text[len(body):]):
-            body = text if text.endswith('\n') else text + '\n'
-        sealed = body + witness(name, body)
-        if sealed != text:
-            write_text(os.path.join(root, rel), sealed)
+        data = read_bytes(root, rel)
+        legacy = LEGACY_WITNESS.search(normalised(data))
+        if legacy is not None:
+            data = normalised(data)[:legacy.start() + 1]
+            write_text(os.path.join(root, rel), data.decode('utf-8'))
             changed.append(rel)
-    resealed = regions[0] + loader_block(names) + regions[2]
+        records.append(record(name, data))
+    resealed = regions[0] + loader_block(records) + regions[2]
     if resealed != stub:
         write_text(os.path.join(root, STUB), resealed)
         changed.append(STUB)
@@ -358,12 +407,13 @@ def check(root):
     problems = []
     try:
         stub = helper_files.read(root, STUB)
-        names = helper_files.part_names(stub)
+        records = helper_files.part_records(stub)
     except (OSError, helper_files.HelperLayoutError) as error:
         return ['%s' % error]
-    if not names:
+    if not records:
         return ['%s assigns no HELPER_PARTS; it is not the split helper' % STUB]
-    block = loader_block(names)
+    names = [name for name, _, _ in records]
+    block = loader_block(records)
     lines = stub.splitlines(keepends=True)
     try:
         shield = one_line(lines, SHIELD_LINE, STUB)
@@ -378,26 +428,30 @@ def check(root):
                         'shield; nothing may be compiled before it (D-SINK-9)' % STUB)
     part_dir = os.path.join(root, PART_DIR)
     on_disk = set(os.listdir(part_dir)) if os.path.isdir(part_dir) else set()
-    for name in names:
+    for entry in records:
+        name = entry[0]
         rel = '%s/%s' % (PART_DIR, name)
         try:
-            text = helper_files.read(root, rel)
-        except OSError as error:
+            data = read_bytes(root, rel)
+            text = normalised(data).decode('utf-8')
+        except (OSError, UnicodeError) as error:
             problems.append('%s is named in HELPER_PARTS and unreadable (%s)' % (rel, error))
             continue
         if not text.startswith(HEADER):
             problems.append('%s does not start with the generated part header' % rel)
-        _, problem = split_witness(name, text)
-        if problem is not None:
-            problems.append('%s %s' % (rel, problem))
+        if record(name, data) != entry:
+            problems.append('%s does not match its entry in HELPER_PARTS, which the helper '
+                            'refuses (edited without --seal, or cut off)' % rel)
         try:
             compile(text, rel, 'exec', dont_inherit=True)
         except SyntaxError as error:
             problems.append('%s does not compile: %s' % (rel, error))
-    # Nothing is exempt, a bytecode directory included: the stub refuses any
-    # entry here its list does not name, so the gate may not be more forgiving
-    # than the helper it judges (rule 10).
-    stray = sorted(on_disk - set(names))
+    # Nothing is exempt but what the stub exempts, a bytecode directory
+    # included, so the gate is never more forgiving than the helper it
+    # judges (rule 10): the stub ignores a name starting with "." (an
+    # editor's swap file cannot be a part) and refuses anything else here
+    # its list does not name.
+    stray = sorted(name for name in on_disk - set(names) if not name.startswith('.'))
     if stray:
         problems.append('%s holds what HELPER_PARTS does not name, which the helper '
                         'refuses to start beside: %s' % (PART_DIR, ', '.join(stray)))

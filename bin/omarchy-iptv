@@ -101,30 +101,36 @@ SHIELDED = shield_environment()
 # file. The list is fixed and the files are read from this file's own
 # directory (through any symlink to it), never from argv or the environment,
 # and compile() writes no bytecode, so nothing is written into the plugin
-# directory. ALL of them are read and checked before ANY of them runs: a part
-# missing, unreadable, empty, cut off (its generated last line is gone or
-# does not match the bytes above it), not text, or not compiling, or a file
-# here the list does not name, ends the run before a verb can write anything,
-# with one JSON error object on stdout and one line on stderr, like every
-# other failure. Generated, and checked by the gate, by the split script on
-# the dev branch.
+# directory. Each entry carries the part's length and CRC-32 with CRLF read
+# as LF (a core.autocrlf checkout is not damage), and ALL parts are read and
+# checked before ANY of them runs: a part missing, not a regular file (opened
+# without blocking, so a FIFO cannot stall the start), empty, not the part
+# this list names (cut off, altered, or from another release, as during an
+# update, which writes the parts before this file), not text, or not
+# compiling, or a file here the list does not name (a name starting with "."
+# excepted: an editor's swap file is not a part), ends the run before a verb
+# can write anything, with one JSON error object on stdout and one line on
+# stderr, like every other failure. Generated, and checked by the gate, by
+# the split script on the dev branch.
 HELPER_PARTS = (
-    "01-core.py",
-    "02-sources.py",
-    "03-io-playlist.py",
-    "04-epg.py",
-    "05-ipc-logos.py",
-    "06-failed.py",
-    "07-player.py",
-    "08-player-verbs.py",
-    "09-cache.py",
-    "10-state.py",
-    "11-cli.py",
+    ("01-core.py", 56542, 0x5597ba5d),
+    ("02-sources.py", 36503, 0x028afaf6),
+    ("03-io-playlist.py", 23627, 0x946429af),
+    ("04-epg.py", 56180, 0x8f917f1f),
+    ("05-ipc-logos.py", 42179, 0x848354c6),
+    ("06-failed.py", 20095, 0x8659dd1a),
+    ("07-player.py", 45346, 0xd88b22ed),
+    ("08-player-verbs.py", 70864, 0x06552753),
+    ("09-cache.py", 15926, 0x7360cbac),
+    ("10-state.py", 44319, 0x5ed305c7),
+    ("11-cli.py", 34338, 0xb292a815),
 )
 
 
 def _load_parts(namespace: dict) -> None:
+    import errno
     import os
+    import stat
     import zlib
 
     def refuse(name, what):
@@ -138,19 +144,23 @@ def _load_parts(namespace: dict) -> None:
 
     here = os.path.join(os.path.dirname(os.path.realpath(__file__)), "helper")
     codes = []
-    for name in HELPER_PARTS:
+    for name, size, crc in HELPER_PARTS:
         path = os.path.join(here, name)
         try:
-            with open(path, "rb") as handle:
-                source = handle.read()
+            fd = os.open(path, os.O_RDONLY | os.O_NONBLOCK | os.O_NOCTTY | os.O_CLOEXEC)
+            if not stat.S_ISREG(os.fstat(fd).st_mode):
+                refuse(name, "is not a regular file")
+            with open(fd, "rb") as handle:
+                source = handle.read(2 * size + 2)
         except OSError as error:
+            if error.errno == errno.ENXIO:
+                refuse(name, "is not a regular file")
             refuse(name, "cannot be read (%s)" % (error.strerror or type(error).__name__))
+        source = source.replace(b"\r\n", b"\n")
         if not source:
             refuse(name, "is empty")
-        end = source.rfind(b"\n", 0, len(source) - 1) + 1
-        if source[end:] != (b"# end of %s: %d bytes above, crc32 %08x\n"
-                            % (name.encode(), end, zlib.crc32(source[:end]))):
-            refuse(name, "is cut off or altered (its last line does not match it)")
+        if len(source) != size or zlib.crc32(source) != crc:
+            refuse(name, "is not the part this helper names (cut off, altered, or from another release)")
         try:
             if b"\0" in source:
                 raise UnicodeError
@@ -165,8 +175,10 @@ def _load_parts(namespace: dict) -> None:
         found = os.listdir(here)
     except OSError as error:
         refuse("", "cannot be listed (%s)" % (error.strerror or type(error).__name__))
-    for name in sorted(set(found) - set(HELPER_PARTS)):
-        refuse(ascii(name)[1:-1], "is not one of this helper's parts")
+    named = set(name for name, _, _ in HELPER_PARTS)
+    for name in sorted(set(found) - named):
+        if not name.startswith("."):
+            refuse(ascii(name)[1:-1], "is not one of this helper's parts")
     for code in codes:
         exec(code, namespace)
 

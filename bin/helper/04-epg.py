@@ -1136,4 +1136,3 @@ def cmd_epg(args: argparse.Namespace) -> int:
         return EXIT_ERROR
 
 
-# end of 04-epg.py: 56180 bytes above, crc32 8f917f1f

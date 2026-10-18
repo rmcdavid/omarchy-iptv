@@ -107,7 +107,8 @@ merged favourite once.
 
 ## Rule 11: the fixture goes red against a dead migration
 
-With `channel_id_remap` returning `{}` in `bin/omarchy-iptv` (a wired call
+With `channel_id_remap` returning `{}` in the helper (`bin/helper/02-sources.py`
+since D-REL-7; `bin/omarchy-iptv` when this was measured) (a wired call
 site around a migration that moves nothing, which is the refused state), 4 of
 the 7 tests in `tests/test_fixture_id_rotate.py` fail: the first run reports
 no `moved` line and every moved favourite is orphaned against v1's own
