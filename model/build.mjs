@@ -6,8 +6,7 @@ import {
   prepareChannels
 } from "./channels.mjs"
 import {
-  parseState, mergeDropNotice, STATE_READ_TELL_MS, stateUnreadableNotice,
-  stateReadStalledNotice
+  parseState, mergeDropNotice, stateUnreadableNotice
 } from "./state.mjs"
 import {
   MPV_DISK_WARN, mpvOptionBase, buildMpvArgv
@@ -329,12 +328,10 @@ var NOTIFY_IDS = {
   stateUnreadable: 74017,
   // D-SINK-19 round 15, R25b: a merge of another program's write dropped an
   // in-app addition at a cap (Model.mergeDropNotice). Told once per merge.
-  mergeDropped: 74018,
-  // R28a (2026-10-20): a held save whose read has been silent for
-  // Model.STATE_READ_TELL_MS (Model.stateReadStalledNotice). Its own id: it
-  // refuses nothing, so it must not replace a no-write card, nor be replaced
-  // by one. Told once per held save.
-  stateReadStalled: 74019
+  mergeDropped: 74018
+  // 74019 was R28a's "Saving is waiting" card, withdrawn by R29a with the
+  // held save it told about; not reused, so an old card cannot be replaced
+  // by a new meaning.
 }
 
 // Long enough to cover a first-load failure and the user's reaction, short

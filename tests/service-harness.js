@@ -646,10 +646,10 @@ function bootService(serviceText, Model, o) {
     : serviceText.slice(serviceText.lastIndexOf("  Timer {", serviceText.indexOf("id: stateVerifyWatchdog")), serviceText.indexOf("\n  }", serviceText.indexOf("id: stateVerifyWatchdog")))
   const verifyIntervalText = verifyBlock === null ? null : ((verifyBlock.match(/^    interval: (.*)$/m) || [])[1] || "1000")
   const vw = ids.stateVerifyWatchdog
-  // R28a: the interval is a BINDING (root.stateVerifyBoundMs, the schedule's
-  // current bound), so it is read from its own text every time, and a
-  // restart() arms the Timer with the interval it has at that moment -- the
-  // order QML's Timer takes it in (the service sets the bound, then restarts).
+  // The interval is read from its own text every time, and a restart() arms
+  // the Timer with the interval it has at that moment -- the order QML's
+  // Timer takes it in. R28a made it a binding (its schedule's bound); R29a
+  // put back R26a's literal 2000, and the getter reads either the same way.
   const verifyInterval = verifyIntervalText === null ? null : compile("", "return (" + verifyIntervalText + ")", "stateVerifyWatchdog_interval")
   Object.defineProperty(vw, "interval", { get() { return verifyInterval === null ? null : verifyInterval() }, enumerable: true, configurable: true })
   vw.armedAt = null

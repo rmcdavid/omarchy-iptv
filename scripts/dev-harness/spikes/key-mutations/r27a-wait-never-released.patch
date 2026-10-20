@@ -1,10 +1,11 @@
+diff --git a/Service.qml b/Service.qml
 --- a/Service.qml
 +++ b/Service.qml
-@@ -2324,7 +2324,6 @@
+@@ -2325,7 +2325,6 @@
        root.stateWriteWaitExpired = true
        console.warn("omarchy-iptv: a state.json write was not reported within " + ms + " ms; the next save reads the file first all the same")
      }
 -    if (root.stateSavePending) Qt.callLater(root.saveDeferredState)
    }
  
-   // R26a: the read-before-write is over -- its load decided. A no-write mode
+   // R26a: the read-before-write is over -- its load decided (or, from the

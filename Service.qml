@@ -722,26 +722,17 @@ Item {
   property int stateVerifyRetries: 0
   property int stateSavesDeferred: 0
   property double stateVerifyMsMax: 0
-  // R27a (D-SINK-22). NO WRITE WITHOUT A READ. R28a (2026-10-20): A STALLED
-  // READ IS NOT A NO-WRITE BLOCK. `stateVerifySilences`: how many times the
-  // read before the held save has had no load within its bound; each silence
-  // asks for the read again with the next bound of Model's schedule
-  // (`stateVerifyBoundMs`, the watchdog's interval; Model.stateVerifyTimeoutAct)
-  // and the save STAYS parked, memory the authority -- never a write without
-  // the read, never a drop. `stateReadStallTold`: the user has been told about
-  // this held save (once, past Model.STATE_READ_TELL_MS). All three are reset
-  // when the read finishes, and only there. `stateWriteWaiting`: a save asked while our previous
-  // write is in flight is HELD for that write to land, then reads (window
-  // a); before R27 it skipped its read. The counters are the harness's and
-  // the measurement's: saves that met the wait (every call, so a burst's
+  // R27a (D-SINK-22, window a). `stateWriteWaiting`: a save asked while our
+  // previous write is in flight is HELD for that write to land, then reads;
+  // before R27 it skipped its read. The counters are the harness's and the
+  // measurement's: saves that met the wait (every call, so a burst's
   // coalescing is a ratio of these to the writes), wait episodes, waits the
-  // write never answered within stateWriteWaitWatchdog's bound, second
-  // reads asked, and the longest wait. None of them ever holds a URL.
-  property int stateVerifySilences: 0
-  property int stateVerifyBoundMs: Model.STATE_READ_BOUNDS_MS[0]
-  property bool stateReadStallTold: false
-  property int stateReadStalls: 0
-  property int stateVerifyRereads: 0
+  // write never answered within stateWriteWaitWatchdog's bound, writes
+  // issued, and the longest wait. None of them ever holds a URL.
+  // R29a (2026-10-20, the lead's ruling): the read before a save is bounded
+  // as R26a bounded it, and only so -- R27a's window-c second read and the
+  // no-write mode it led to, and R28a's held save past the bound with its
+  // schedule, re-reads and notice, are withdrawn (finishStateVerify).
   // R27d (D-SRC-44): this session's one-time migration found Sources full
   // and did not run (it never evicts); told once. Booleans, never a URL.
   property bool migrationHeldFull: false
@@ -752,7 +743,6 @@ Item {
   property int stateSavesWaited: 0
   property int stateWriteWaits: 0
   property int stateWriteWaitTimeouts: 0
-  property int stateVerifySecondReads: 0
   property int stateWritesIssued: 0
   property double stateWriteWaitMsMax: 0
   // R5: the key whose entry mirror is WAITING for a parked state save
@@ -2316,25 +2306,14 @@ Item {
 
   function finishStateVerifyLater() { if (root.stateVerifyPending) root.finishStateVerify(false) }
 
-  // R28a: a read asked while one of our writes was out is dropped by the view
-  // (F-HARNESS-31), and a read that has been silent is asked again at once
-  // when a change joins the held save -- not inside a handler (the load that
-  // is running there IS the read), never while a write of ours is still out,
-  // and only while that read is still awaited. The watchdog's schedule is
-  // left as it is: this read is extra, and if it answers it ends the wait.
-  function rereadStateVerify() {
-    if (!root.stateVerifyPending || root.stateInHandler > 0 || root.stateSavesInFlight > 0) return
-    root.stateVerifyRereads = root.stateVerifyRereads + 1
-    stateFile.reload()
-  }
-
   // R27a (window a): the write a held save was waiting for has been reported
   // (from stateFile's `saved` / `saveFailed`, `timedOut` false) or was not
   // within stateWriteWaitWatchdog's bound (`timedOut` true: the held save
   // goes to its read anyway, and if the view still holds the write the read
-  // is dropped and its own bound decides -- which never writes blind). The
-  // held save is asked again from a turn of its own, never from inside the
-  // handler (R26b); there it reads, then writes.
+  // is dropped and its own 2 s bound decides -- R29a: as R26a decided it,
+  // so the wait never outlasts that bound). The held save is asked again
+  // from a turn of its own, never from inside the handler (R26b); there it
+  // reads, then writes.
   function endStateWriteWait(timedOut) {
     if (!root.stateWriteWaiting) return
     root.stateWriteWaiting = false
@@ -2349,52 +2328,29 @@ Item {
     if (root.stateSavePending) Qt.callLater(root.saveDeferredState)
   }
 
-  // R26a: the read-before-write is over -- its load decided. A no-write mode
-  // the load set refuses the parked save; anything else issues it, with no
-  // second read.
-  // R28a (2026-10-20, replacing R27a's window c): from the watchdog, no load
-  // came within the bound. That is not a block and not a write: the save
-  // stays parked with memory as the authority (stateSavePending and
-  // stateVerifyPending stay set, so every load that comes is decided by
-  // R26a's dispositions with the change held, and every save asked meanwhile
-  // joins), the read is asked again with the next bound of Model's schedule
-  // (Model.stateVerifyTimeoutAct: 2, 4, 8, 16, 32 s after the save, then every
-  // 30 s), and once the silence has lasted Model.STATE_READ_TELL_MS the user
-  // is told, once for this held save. The wait ends only when a load comes:
-  // our own write's echo, the re-read a joining change or a landed write
-  // asks for, another program's write, or the stalled read answering late.
+  // R26a: the read-before-write is over -- its load decided (or, from the
+  // watchdog, no load came in 2 s and the save goes as it did before R26,
+  // counted and logged). A no-write mode the load set refuses the parked
+  // save; anything else issues it, with no second read.
+  // R29a (2026-10-20, the lead's ruling): BACK TO R26a'S BOUND FOR A SILENT
+  // READ. R27a made a second silence the no-write mode, whose lift dropped
+  // the held change; R28a held the save past the bound on a schedule, and a
+  // stalled read that answered late returned the OLD text, over which the
+  // save then wrote another program's write (round 2's live review, a slow
+  // FUSE file). Each attempt to hold a change across a read that does not
+  // answer for 2 s made a new silent loss, so D-SINK-22's window c stays as
+  // it is on 0.14.2: the save is written without its read, counted
+  // (stateVerifyNoLoad) and logged.
   function finishStateVerify(timedOut) {
-    var ms = Date.now() - root.stateVerifyAt
-    if (timedOut) {
-      root.stateVerifyNoLoad = root.stateVerifyNoLoad + 1
-      var silences = root.stateVerifySilences + 1
-      var act = Model.stateVerifyTimeoutAct({ silences: silences, silentMs: ms, told: root.stateReadStallTold })
-      root.stateVerifySilences = silences
-      root.stateVerifySecondReads = root.stateVerifySecondReads + 1
-      console.warn("omarchy-iptv: state.json was not read back within " + ms + " ms of a save; the change is kept and the file is read again, waiting " + act.boundMs + " ms")
-      if (act.tell) {
-        root.stateReadStallTold = true
-        root.stateReadStalls = root.stateReadStalls + 1
-        var told = Model.stateReadStalledNotice(root.stateFilePath)
-        console.warn("omarchy-iptv: " + told.title + ": " + told.body)
-        root.notify("stateReadStalled", { path: root.stateFilePath })
-      }
-      root.stateVerifyBoundMs = act.boundMs
-      stateFile.reload()
-      stateVerifyWatchdog.restart()
-      return
-    }
-    if (root.stateVerifySilences > 0) console.warn("omarchy-iptv: state.json answered " + ms + " ms after a save asked for it; the change held meanwhile is decided now")
     root.stateVerifyPending = false
-    // R28c: the three resets of a held save's read, made here and nowhere
-    // else, so the next save's read starts the schedule at its first bound
-    // and is told about on its own.
-    root.stateVerifySilences = 0
-    root.stateVerifyBoundMs = Model.STATE_READ_BOUNDS_MS[0]
-    root.stateReadStallTold = false
     stateVerifyWatchdog.stop()
+    var ms = Date.now() - root.stateVerifyAt
     root.stateVerifies = root.stateVerifies + 1
     if (ms > root.stateVerifyMsMax) root.stateVerifyMsMax = ms
+    if (timedOut) {
+      root.stateVerifyNoLoad = root.stateVerifyNoLoad + 1
+      console.warn("omarchy-iptv: state.json was not read back within " + ms + " ms of a save; saving without the read")
+    }
     if (root.stateWriteBlocked !== "") {
       root.stateSavePending = false
       root.stateWritesRefused = root.stateWritesRefused + 1
@@ -2589,10 +2545,6 @@ Item {
                                      waitExpired: root.stateWriteWaitExpired })
     if (plan === "join" || plan === "park") {
       root.stateSavePending = true
-      // R28a: a change joining a held save whose read has been silent asks
-      // for that read again now (from a turn of its own), so a file that is
-      // answering again ends the wait without waiting for the schedule.
-      if (plan === "join" && root.stateVerifySilences > 0) Qt.callLater(root.rereadStateVerify)
       return
     }
     if (plan === "refuse") {
@@ -5411,9 +5363,6 @@ Item {
           // R27a: a save held for this write now reads, from a turn of its own.
           root.stateWriteWaitExpired = false
           root.endStateWriteWait(false)
-          // R28a: and a read asked while it was out, which the view dropped,
-          // is asked again now that nothing of ours is out.
-          if (root.stateVerifyPending) Qt.callLater(root.rereadStateVerify)
         }
         root.settleEntryFlush()
         // R19d (D-SRC-18): a mirror a failed save withheld is paid by the first
@@ -5437,7 +5386,6 @@ Item {
           root.stateSavesInFlight = 0
           root.stateWriteWaitExpired = false
           root.endStateWriteWait(false)
-          if (root.stateVerifyPending) Qt.callLater(root.rereadStateVerify)   // R28a, as in onSaved
         }
         // The error is an enum, never a path or a URL. Logged on EVERY failure.
         console.warn("omarchy-iptv: state.json could not be written (error " + error + "); the in-memory state stands")
@@ -5611,11 +5559,11 @@ Item {
   }
 
   Timer {
-    // R26a: the read before a save is bounded. R28a: no load within the
-    // bound asks for the read again with the next bound of Model's schedule
-    // (finishStateVerify); the save stays parked and nothing is written.
+    // R26a: the read before a save is bounded. No load in 2 s: the save goes
+    // without it, as it did before R26 (counted, and one console line).
+    // R29a: R28a's schedule bound here is withdrawn; the bound is this one.
     id: stateVerifyWatchdog
-    interval: root.stateVerifyBoundMs
+    interval: 2000
     repeat: false
     onTriggered: if (root.stateVerifyPending) root.finishStateVerify(true)
   }

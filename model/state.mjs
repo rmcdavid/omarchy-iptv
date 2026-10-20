@@ -1597,8 +1597,11 @@ function stateWriteGate(ctx) {
 // held save (they coalesce). `waitExpired` -- the write was not reported
 // within the wait's own bound (Service.stateWriteWaitWatchdog) -- lets the
 // held save go to its read anyway: if the view is still holding the write
-// the read is dropped and the read's own bound decides (R27a window c),
-// which never writes blind.
+// the read is dropped and the read's own bound decides. R29a (2026-10-20):
+// that bound is R26a's, so the held save never waits on a read past 2 s --
+// no load in that time and the save is written without its read, counted
+// and logged, as on 0.14.2 (D-SINK-22's window c, which R27a and R28a tried
+// to close and the lead's ruling leaves open, documented).
 function stateSavePlan(ctx) {
   var c = ctx || {}
   if (c.verifyPending === true) return "join"
@@ -1613,58 +1616,6 @@ function stateSavePlan(ctx) {
   if ((Number(c.inFlight) || 0) > 0 && c.waitExpired !== true) return "wait"
   if (c.inHandler === true) return "defer"
   return "verify"
-}
-
-// R28a (2026-10-20, the lead's ruling replacing R27a's window c): A STALLED
-// READ IS NOT A NO-WRITE BLOCK. Under R27a a read before a save that did not
-// answer twice put the session in the R22 no-write mode ("read-timeout"),
-// and the mode set the held save aside: when a load lifted it -- our own
-// write's echo, a source verb's re-read, another program's write, the stalled
-// read answering late -- the disk was applied over memory and the change held
-// during the block was dropped from memory and file, an in-app source add
-// included (both round-1 reviews, measured through the shipping Service.qml).
-// Now a silent read changes nothing but WHEN the file is read again: the save
-// stays parked with memory as the authority, every save asked meanwhile joins
-// it (stateSavePlan "join"), and nothing is written until a read answers --
-// never blind, never dropped. Whatever load answers is decided by R26a's
-// dispositions like any other (the base -> write; another program's text ->
-// the R24a merge, then write; a load that is not a state -> R22).
-//
-// THE SCHEDULE. The read's first bound is STATE_READ_BOUNDS_MS[0], 2 s (the
-// R26a bound). After the n-th silence the read is asked again with the bound
-// STATE_READ_BOUNDS_MS[n], the last entry for every n past the end: so the
-// re-reads go out at 2, 4, 8, 16 and 32 s after the save asked, and every
-// 30 s after that for as long as the change is held. The interval is bounded
-// (never more than 30 s); the number of re-reads is not, because the change
-// is kept until the file answers. A re-read is also asked at once when one of
-// our writes is reported (a read asked while it was out was dropped by the
-// view, F-HARNESS-31) and when a new change joins the held save.
-//
-// THE NOTICE. Once the reads have been silent for STATE_READ_TELL_MS (8 s:
-// the third silence on this schedule) the user is told, once per held save
-// (Model.stateReadStalledNotice): the change is kept in the session and saved
-// when the file answers, and a shell stopped first loses it.
-var STATE_READ_BOUNDS_MS = [2000, 2000, 4000, 8000, 16000, 30000]
-var STATE_READ_TELL_MS = 8000
-// The read's bound for the read asked after `silences` silences (0: the read
-// a save asks first).
-function stateReadBoundMs(silences) {
-  var n = Math.floor(Number(silences))
-  if (!(n > 0)) n = 0
-  return STATE_READ_BOUNDS_MS[Math.min(n, STATE_READ_BOUNDS_MS.length - 1)]
-}
-// What Service.finishStateVerify does when its watchdog fires with no load.
-//   silences  the silences of this held save so far, THIS one included
-//   silentMs  ms since the read was first asked
-//   told      the user has already been told about this held save
-// -> { act: "retry", boundMs, tell }. Always "retry": there is no answer here
-//    that writes, refuses or drops. `boundMs` is the next read's bound, and
-//    `tell` whether this silence is the one that tells the user.
-function stateVerifyTimeoutAct(ctx) {
-  var c = ctx || {}
-  var silentMs = Number(c.silentMs) || 0
-  return { act: "retry", boundMs: stateReadBoundMs(c.silences),
-           tell: c.told !== true && silentMs >= STATE_READ_TELL_MS }
 }
 
 // R26a (D-SRC-35): a source verb that meets a no-write mode a load can lift
@@ -1708,9 +1659,8 @@ function stateBlockRecheck(ctx) {
 //     everything, where restoring "the file it points to" or a restart with
 //     the link still on an empty folder starts a fresh, empty install there
 //     (D-SRC-50).
-//   R28a withdrew "read-timeout": a read that does not answer is no block
-//     any more (Model.stateVerifyTimeoutAct), and the read that finally
-//     answers with a load failure blocks with that load's own reason.
+//   "read-timeout" is withdrawn (R28a, and R29a kept it so): a read that
+//     does not answer is no block; its save is written after R26a's bound.
 var STATE_BLOCK_TITLE_START = "Saved sources not loaded"
 var STATE_BLOCK_TITLE_MID = "Saving has stopped"
 var STATE_BLOCK_UNSAVED_START = "Sources, favorites and settings changed now are not kept."
@@ -1787,18 +1737,22 @@ function stateBlockedHeader(reason, path, midSession) {
   if (str(reason) === "") return ""
   return stateUnreadableNotice(reason, path, midSession === true).title
 }
-// R28a (2026-10-20): the one sentence a held save's stalled read tells the
-// user, once, when the reads have been silent for STATE_READ_TELL_MS. It
-// names the file and the wait and never a URL (composed from the path and
-// the constant alone). It is not a no-write notice: nothing is refused, the
-// change is kept in memory, and the file is read again on the schedule
-// above until it answers.
-function stateReadStalledNotice(path) {
-  var file = str(path) !== "" ? str(path) : "state.json"
-  return { title: "Saving is waiting",
-           body: file + " has not answered for " + Math.round(STATE_READ_TELL_MS / 1000) + " seconds when it was read before a save. "
-                 + "The change is kept in this session and saved when the file answers; if the shell is stopped first, it is lost." }
-}
+// R29a (2026-10-20) WITHDREW R28a's held save past the read's bound, its
+// schedule and its notice ("Saving is waiting", id 74019). NOTHING BELOW IS
+// BEHAVIOUR: no file of the plugin calls these five names, and each answers
+// null. They stay declared and exported ONLY because the documents still cite
+// them in the `Model.` form, the defect ledger joins every such citation to
+// an export, and the lane that withdrew them may not edit the documents. The
+// documents lane re-cites them bare (or not at all), and the integration
+// deletes this block -- and the five names in Model.mjs's export list -- in
+// the commit that removes the last such citation (the project's rule, on the
+// dev branch: no shims at merge). No copy lives here: the notice that promised "saved when the file
+// answers" is gone with its sentence.
+var STATE_READ_BOUNDS_MS = null
+var STATE_READ_TELL_MS = null
+function stateReadBoundMs() { return null }
+function stateVerifyTimeoutAct() { return null }
+function stateReadStalledNotice() { return null }
 export {
   MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedSearchTerms,
   savedSearchHit, savedSearchCount, savedSearchChannels, savedSearchNotice,
@@ -1819,9 +1773,9 @@ export {
   mergeForeignState, MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount,
   mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
   stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
+  stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
+  STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
+  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader,
   STATE_READ_BOUNDS_MS, STATE_READ_TELL_MS, stateReadBoundMs,
-  stateVerifyTimeoutAct, stateBlockRecheck, STATE_BLOCK_TITLE_START,
-  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
-  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
-  stateBlockedHeader, stateReadStalledNotice
+  stateVerifyTimeoutAct, stateReadStalledNotice
 }

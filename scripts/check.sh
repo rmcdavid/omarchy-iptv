@@ -237,7 +237,15 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # resets (3 x 4), R28b (2 model, 2 x 4), R28e's two ways-back pins (2 x 4)
 # and its probe line and one cap (2 model). The write-wait bound pin and
 # R27e's five fixture pins were re-levelled in place.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2692}
+# 2692 -> 2651 on 2026-10-20, R29a (lane-sweep-a3), -41, a DELETION the
+# lead's ruling ordered: R28a's held save past the read's bound came out --
+# its 2 model pins (the schedule, the stall notice) and its 9 x 4 harness
+# pins, and R28c's read-state reset (1 x 4), the state it reset gone with
+# it -- and one model pin came in (the withdrawal: no 74019, no notice, the
+# cited names inert). R26a's two bound pins went back to 6f1d176's answer
+# (saved without the read at 2 s), and the write-wait bound and R28c's two
+# expiry pins were re-levelled in place to it.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2651}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
