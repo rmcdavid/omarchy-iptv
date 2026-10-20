@@ -41,9 +41,10 @@ Each trial: a python writer (an atomic rename like the helper's, or an in-place 
      3  during rename mit=true C-survived:yes view-saw-C:no mitigation:asked/C later:C
   trials 368, recovers-new 0
 
-VERDICT. 608 trials, 30 of them with C landed DURING our write. recovers-new: 0 of 608.
+VERDICT. 608 trials, 25 of them with C landed DURING our write (196 before it began, 387 after it was saved). recovers-new: 0 of 608.
+  (R28e, 2026-10-20: this line read "30 of them" and the second bullet "21 of the 30" until round 1's review recounted the raw lines below: `grep -c 'C@during'` is 25, of which `C-survived:no` 20 and `C-survived:yes` 5; 196 + 25 + 387 = 608. The headline and the verdict were right.)
   - The mitigation's read loaded C in 4 trials (all four C landed during our write and survived), and in all 4 the later read loaded C too: the two reads read the same disk, and between them nothing of ours writes it (R27a: no write without a read).
-  - 21 of the 30 during-trials LOST C: it landed before our rename and the rename replaced it. No read of any kind recovers that -- it is D-SRC-48 itself, on every tree, and so are the before-set trials (76 in run 2, 120 in run 1), C landing before our write began.
+  - 20 of the 25 during-trials LOST C: it landed before our rename and the rename replaced it. No read of any kind recovers that -- it is D-SRC-48 itself, on every tree, and so are the before-set trials (76 in run 2, 120 in run 1), C landing before our write began.
   - 9 trials ended with C on disk and NEVER seen by the view on its own (4 during, 5 after-saved; one of them with no mitigation at all): the later read loaded C in all 9.
 So the mitigation changes only WHEN memory learns of a surviving C -- at once, instead of at the next save's read (or the next foreign change) -- and recovers nothing that read does not. Nothing was built (R27b: build nothing and say so).
 

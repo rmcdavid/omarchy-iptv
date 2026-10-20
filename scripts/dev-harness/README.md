@@ -1697,22 +1697,33 @@ What changed in the rigs:
 key-scenario.sh B32, B33 and B35-B37 (lane-sweep-a1, 2026-10-20), each
 under the scenario's own nested cage on a private session bus.
 - B32 (R27e, D-SRC-42): a block that begins MID-session is told as `Saving
-  has stopped`, its body saying changes are not saved until the file can be
-  read again: `saving-stopped:1 not-loaded:0 body:1`.
+  has stopped`: `saving-stopped:1 not-loaded:0 body:1`. Its body said
+  changes made now are not saved until the file can be read again; R28e
+  replaced that sentence (true of one way back out of the block, false of
+  three), and B32 now reads the mid-session sentence that names them.
 - B33 (R27a window a, D-SINK-22): the harness's `editDuringWrite` makes a
   label edit and a second one while the first write is OUT; the second
   waits for it to land and then reads -- `skipped +0`, the wait counted,
-  the second edit on disk. On 6f1d176 it is red only through its field
-  (`waited:NOFIELD`): on this machine the first write had always landed by
-  the deferred turn, so window (a) does not open from outside the shell,
-  and the node pins are where it is timed. It is seen red on behaviour
+  the second edit on disk. On 6f1d176 at idle it is red only through its
+  field (`waited:NOFIELD`), because the first write had landed by the
+  deferred turn. That is LOAD-DEPENDENT, and this paragraph said "window (a)
+  does not open from outside the shell" until round 1's live review ran the
+  baseline at load 5-8 and saw it open: `skipped:+1`, a write without its
+  read, red on behaviour (`key-20261020-135918-1751390`). So window (a)
+  does open from outside the shell under load; the node pins time it
+  either way. It is seen red on behaviour
   through `spikes/key-mutations/r27a-wait-never-released.patch` (`--tree`:
   134 / 1 by the summary line, B33, the held edit never written).
 - The burst (R27a's measurement, printed, not graded): `burst_run` makes N
   label edits a turn apart through `ipc burst` and reads `ipc burstResult`
-  and the read counter. It was a check, B34, and read green on 6f1d176 and
-  through the mutation alike, so it could not go red for what it named
-  (rule 11) and was dropped; the letter is unused. Final run: bursts of 2,
+  and the read counter. It was a check, B34, and read green on 6f1d176 AT
+  IDLE and through the mutation alike, so it was dropped (rule 11); the
+  letter is unused. "It could not go red" was load-dependent too: under
+  load (round 1's review, load 5-8) 6f1d176's bursts of 5, 10 and 20 made 3,
+  5 and 7 writes with only 2, 4 and 6 reads, which the dropped check would
+  have read red, while lane-sweep-c1's read as many as it wrote (1/1, 2/2,
+  3/3, 6/6). A check that is red only under load is not a gate, so it stays
+  a printed measurement. Final run: bursts of 2,
   5, 10 and 20 landed 7, 11, 20 and 29 ms after the first edit with 1, 2, 4
   and 7 writes and as many reads (6f1d176: 7, 9, 19, 36 ms; 1, 2, 4, 7
   writes).

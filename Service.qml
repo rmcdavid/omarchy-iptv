@@ -356,7 +356,8 @@ Item {
   readonly property string activeCacheDir: (root.stateLoaded && root.cacheReady && root.activeSourceKey !== "")
     ? Model.sourceCacheDir(root.cacheDir, root.activeSourceKey) : ""
   readonly property int sourceCount: Model.asList(root.userState.sources).length
-  readonly property bool canAddSource: root.sourceCount < Model.LIMITS.sources && !root.probing
+  // R28e: the cap is Model.sourcesFull's decision, here as everywhere.
+  readonly property bool canAddSource: !Model.sourcesFull(root.userState) && !root.probing
   // View objects for the guide (SR1, ordered per SR32); `sourcesChanged` is
   // this property's change signal (SR3) and fires on every state, settings,
   // error or clock change.
@@ -982,7 +983,7 @@ Item {
   // ---- sources signals (SR3). Payloads are URL-free: `reason` comes from
   // Model.statusReason, `host` from the validator.
   //   sourceProbeFinished({ ok, id, channelCount, groupCount, reason, host,
-  //                         cancelled, replacedId }) after an add / URL edit /
+  //                         cancelled, replacedId, code? }) after an add / URL edit /
   //     never-fetched switch / retry probe; on ok the switch is committed.
   //   sourceSwitched(id) once the new source's cache (or its absence) is in
   //     `channels`. sourceRemoved(id). sourcesPersistFailed(reason) when
@@ -4694,7 +4695,7 @@ Item {
     var status = Model.parseHelperStatus(timedOut ? root.helperTimeoutStatus("playlist", false) : text, "playlist")
     if (!rec) {
       root.queueCacheJob(["remove", "--key", dirKey], null)
-      root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: Model.sourceErrorMessage("unknown_source"), host: "", cancelled: false, replacedId: "" })
+      root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: Model.sourceErrorMessage("unknown_source"), code: "unknown_source", host: "", cancelled: false, replacedId: "" })
       return
     }
     // R22a: a probe that ENDS in the no-write mode (started before a reload
@@ -4703,7 +4704,7 @@ Item {
     // here as the verbs that start one are; nothing is deleted either (the
     // start-up prune drops a directory no record names).
     if (root.stateWriteBlocked !== "") {
-      root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: Model.sourceErrorMessage("state_unreadable"), host: host, cancelled: false, replacedId: "" })
+      root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: Model.sourceErrorMessage("state_unreadable"), code: "state_unreadable", host: host, cancelled: false, replacedId: "" })
       return
     }
     if (status.ok === true) {

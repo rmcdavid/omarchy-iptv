@@ -5733,6 +5733,22 @@ check("sourcesRowAccessibleName", Model.sourcesRowAccessibleName(3), "Sources, 3
 check("confirmRemoveMessage", [Model.confirmRemoveMessage("NAS Tvheadend", false), Model.confirmRemoveMessage("Provider", true)], ["Remove " + Q("NAS Tvheadend") + "? Its cache is deleted too.", "Remove " + Q("Provider") + "? It is the active source; the guide returns to setup."])
 check("fetchingLine", [Model.fetchingLine("tv.example.net", "url"), Model.fetchingLine("", "file")], ["Fetching from tv.example.net" + ELL, "Reading the file" + ELL])
 check("probeFailureLine url / path / redacted", [Model.probeFailureLine("HTTP 403 Forbidden", "tv.example.net", "url"), Model.probeFailureLine("File not found", "", "file"), Model.probeFailureLine("could not open http://u:p@h.test/x", "h.test", "url"), Model.probeFailureLine("", "h.test", "url")], ["HTTP 403 Forbidden from tv.example.net", "File not found", "could not open h.test from h.test", "Unknown error from h.test"])
+// R28e (2026-10-20): a refusal the plugin made itself at the commit names no
+// host -- round 1's review read "Sources is full (50) . remove one first from
+// 127.0.0.1"; a failure the fetch reported keeps it.
+check("R28e: probeFailureLine -- a commit refusal with its code (too_many, state_unreadable, unknown_source) reads its reason alone; a fetch failure, with no code or another, keeps \"from <host>\"", [
+  Model.probeFailureLine(Model.sourceErrorMessage("too_many"), "127.0.0.1", "url", "too_many"), Model.probeFailureLine(Model.sourceErrorMessage("state_unreadable"), "h.test", "url", "state_unreadable"),
+  Model.probeFailureLine(Model.sourceErrorMessage("unknown_source"), "h.test", "url", "unknown_source"), Model.probeFailureLine("HTTP 403 Forbidden", "tv.example.net", "url", ""),
+  Model.probeFailureLine("HTTP 403 Forbidden", "tv.example.net", "url", "http_error")],
+  [Model.sourceErrorMessage("too_many"), Model.sourceErrorMessage("state_unreadable"), Model.sourceErrorMessage("unknown_source"), "HTTP 403 Forbidden from tv.example.net", "HTTP 403 Forbidden from tv.example.net"])
+checkCall("R28e (structural): both of the guide's probe-failure lines hand probeFailureLine the result's code, and the cap is ONE decision -- Guide.sourcesFull and Service.canAddSource call Model.sourcesFull and compare against no limit of their own", () => {
+  const g = fs.readFileSync(path.join(__dirname, "../Guide.qml"), "utf8")
+  const sv = fs.readFileSync(path.join(__dirname, "../Service.qml"), "utf8")
+  return [(g.match(/Model\.probeFailureLine\([^\n]*, String\(r\.code \|\| ""\)\)/g) || []).length, (g.match(/Model\.probeFailureLine\(/g) || []).length,
+          /function sourcesFull\(\) \{\n    if \(!Model\.sourcesFull\(root\.serviceReady \? root\.service\.userState : null\)\) return false/.test(g),
+          /readonly property bool canAddSource: !Model\.sourcesFull\(root\.userState\) && !root\.probing/.test(sv),
+          (g + sv).search(/LIMITS\.sources|sourceCount < Model\.|>= Model\.MAX_SOURCES/) === -1]
+}, [2, 2, true, true, true])
 check("sourceTransient strings (UX 5.3)", [
   Model.sourceTransient("loaded", { channelCount: 1475, groupCount: 28 }),
   Model.sourceTransient("added", { host: "tv.example.net", channelCount: 1475, groupCount: 28 }),
@@ -13846,10 +13862,11 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           h.probeExit(JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })); h.drain()
           const res = probed(h)
           const next = restart(h)
-          return { added: added.ok, during, result: res.map(r => [r.ok, r.reason]), memory: [h.root.userState.sources.length, M.findSource(h.root.userState.sources, KZ) !== null],
+          return { added: added.ok, during, result: res.map(r => [r.ok, r.reason]), code: res.map(r => r.code), line: res.map(r => M.probeFailureLine(r.reason, r.host, "url", r.code)),
+                   canAdd: h.root.canAddSource, memory: [h.root.userState.sources.length, M.findSource(h.root.userState.sources, KZ) !== null],
                    file: [h.file().sources.length, M.findSource(h.file().sources, KH) !== null, M.findSource(h.file().sources, KZ) !== null],
                    restart: [next.file().sources.length, next.root.userState.sources.length], removed: h.cacheRuns.some(c => c.indexOf("remove") !== -1 && c.indexOf(KZ) !== -1), clean: clean(h) }
-        }, { added: true, during: 50, result: [[false, M.sourceErrorMessage("too_many")]], memory: [50, false], file: [50, true, false], restart: [50, 50], removed: true, clean: true })
+        }, { added: true, during: 50, result: [[false, M.sourceErrorMessage("too_many")]], code: ["too_many"], line: [M.sourceErrorMessage("too_many")], canAdd: false, memory: [50, false], file: [50, true, false], restart: [50, 50], removed: true, clean: true })
         checkCall("R27c (" + tag + "): the control -- at 48 sources the same race leaves room: the in-app add commits as the 50th beside the hand-run one, and both survive a restart", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)].concat(many(46)), KA), mode, { ownEcho })
           h.root.addSource({ playlistUrl: Z, epgUrl: "", label: "Mine" })

@@ -6,7 +6,8 @@ import {
   copyGuide, withQuery, withMode
 } from "./browse.mjs"
 import {
-  emptyState, entryMigratedOf, withEntryMigrated, cloneState
+  emptyState, entryMigratedOf, withEntryMigrated, cloneState, parseState,
+  mergeForeignState
 } from "./state.mjs"
 import {
   clampSetting, settingsFrom, entryInputForm, RETIRED_SETTINGS,
@@ -101,6 +102,13 @@ function reducerFail(state, code, key, opts) {
 // probe ends (D-SRC-41: a hand-run add may have taken the last place while
 // it ran), and the one-time migration does not run rather than evict
 // (D-SRC-44: the evicted record was the only copy of its URL).
+// R28e: round 1's review found two more places deciding "is there room"
+// with their own comparison, Service.canAddSource and Guide.sourcesFull;
+// both call this now, so the sentence above is true of the tree. What is
+// NOT this decision, and says so: parseState (model/state.mjs) and
+// Model.mergeForeignState TRUNCATE a list already over the cap to
+// MAX_SOURCES -- a file written by something else -- rather than refuse an
+// addition; they share the constant, not the question.
 function sourcesFull(state) {
   return asList(state ? state.sources : []).length >= MAX_SOURCES
 }
