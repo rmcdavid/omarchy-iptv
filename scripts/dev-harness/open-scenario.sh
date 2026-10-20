@@ -352,7 +352,11 @@ else
         ck "${L}1 $view: the instrument ran to its end on the cold open, its tail included, and named the presenting view" "$(jf "['state']" "$COLD_RES") $(jf "['endedBy']" "$COLD_RES") $(jf "['view']" "$COLD_RES")" "done settled $want"
         ck "${L}2 $view: the cold open SETTLED (a frame whose drawn set tiles the visible area) and saw the guide's window" "$(jf "['settled']" "$COLD_RES") $(jf "['hasWindow']" "$COLD_RES")" "true true"
         ck "${L}3 $view: a warm open settled too" "$(jf "['settled']" "$WARM_RES")" "true"
-        ck "${L}4 $view: it counted the DRAWN screen -- more than 4 delegates, and fewer than the view had built (the cacheBuffer's off-screen ones are not counted)" "$(python3 -c 'import sys; c, b = int(sys.argv[1]), int(sys.argv[2]); print("yes" if 4 < c < b else "no:%d/%d" % (c, b))' "$(jf "['count']" "$COLD_RES")" "$(jf "['built']" "$COLD_RES")" 2>/dev/null)" "yes"
+        # Against the most the view held in the run, tail included, not at
+        # the decision: a view may build its cacheBuffer rows a frame AFTER
+        # the screen is drawn (late-fill.patch's run did), and the count is
+        # right then too.
+        ck "${L}4 $view: it counted the DRAWN screen -- more than 4 delegates, and fewer than the view built in the run (the cacheBuffer's off-screen ones are not counted)" "$(python3 -c 'import sys; c, b = int(sys.argv[1]), int(sys.argv[2]); print("yes" if 4 < c < b else "no:%d/%d" % (c, b))' "$(jf "['count']" "$COLD_RES")" "$(jf "['builtMax']" "$COLD_RES")" 2>/dev/null)" "yes"
         ck "${L}5 $view: the realised time is measured AFTER the summon returned (realised >= summon)" "$(python3 -c 'import sys; print("yes" if float(sys.argv[2]) >= float(sys.argv[1]) else "no")' "$(jf "['summonMs']" "$COLD_RES")" "$(jf "['realisedMs']" "$COLD_RES")" 2>/dev/null)" "yes"
         echo "   $view cold trace (ms:drawn/built:reason): $(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(" ".join("%s:%s/%s:%s" % (f["at"], f["drawn"], f["built"], f["reason"] or "ok") for f in d.get("trace", [])[:20]))' "$COLD_RES" 2>/dev/null)"
         echo "   $view legacy openMs, cold, a shell of its own (printed, not graded): $(legacy_cold "$view")"

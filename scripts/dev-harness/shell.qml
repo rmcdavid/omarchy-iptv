@@ -1144,7 +1144,8 @@ ShellRoot {
     // `realisedMs` is the first frame whose drawn set tiles the visible area
     // (openDrawnSettle's realisedAt), `count` the delegates DRAWN then and
     // `built` every delegate the view held then (the cacheBuffer's
-    // included: what R27f counted); `changedAfter` the frames in the
+    // included: what R27f counted), `builtMax` the most it held in any
+    // frame of the run, tail included; `changedAfter` the frames in the
     // openTailMs after the decision whose drawn set changed; `frames` the
     // samples, `trace` the first 40 of them.
     function openAsyncResult(): string {
@@ -1152,8 +1153,10 @@ ShellRoot {
       if (!r) return JSON.stringify({ state: "none" })
       var s = r.settle || HarnessLib.openDrawnSettle(r.frames, harness.openTailMs)
       var at = s.frame >= 0 ? r.frames[s.frame] : null
+      var builtMax = -1
+      for (var i = 0; i < r.frames.length; i++) if (r.frames[i].built > builtMax) builtMax = r.frames[i].built
       return JSON.stringify({ state: r.done ? "done" : "running", endedBy: r.endedBy, view: r.view, cold: r.cold,
-                              summonMs: r.summonMs, realisedMs: s.realisedAt, count: s.count, built: at ? at.built : -1,
+                              summonMs: r.summonMs, realisedMs: s.realisedAt, count: s.count, built: at ? at.built : -1, builtMax: builtMax,
                               changedAfter: s.changedAfter, tailFrames: s.tailFrames, frames: r.frames.length,
                               settled: s.settled, hasWindow: harness.openProbe ? harness.openProbe.hasWindow === true : false, rows: guideLoader.item ? guideLoader.item.currentRows.length : -1,
                               trace: r.frames.slice(0, 40).map(function (f) { return { at: f.at, drawn: f.drawn, built: f.built, complete: f.complete, reason: f.reason } }) })
