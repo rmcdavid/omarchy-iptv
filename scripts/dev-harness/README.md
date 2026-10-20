@@ -963,6 +963,7 @@ lane's running harness is never reaped by a clip run.
 ```
 scripts/dev-harness/key-scenario.sh check-tree            # the instrument arm, node only; run by check.sh
 scripts/dev-harness/key-scenario.sh                       # the instrument arm, then the real Service.qml under cage, with a transcript
+scripts/dev-harness/key-scenario.sh --baseline 6f1d176      # the R27 red run: 0.14.2's code, the helper split on top (130 / 5 with 134 lettered checks: B32, B33, B35, B36, B37; B34 since dropped)
 scripts/dev-harness/key-scenario.sh --baseline 1c88877      # the R26 red run: round 15's code and 0.14.1 (120 / 9: B23-B31, read before write)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-m2  # the round-12 red run: round 11's code (97 / 9: B1-B8, and N1 for its new field only)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-z2  # the round-11 red run: round 10's code (68 / 30 under the 97-check harness: G1, G2, G5, F4, U1-U7, K1-K3, Z1-Z3, A1, Y2, Y3, Q1, Q2, V1, H1, X1-X6; eight of them NOFIELD-only)
@@ -1690,6 +1691,110 @@ What changed in the rigs:
   rig and its results) are committed on branch `lane-clean-w-probe` and
   are NOT in this tree; lane S's probe is in the session's scratch
   directory. The contract's eighth FileView fact records what they printed.
+
+#### Round 17 (R27): no write without a read, the cap, and the notice's words
+
+key-scenario.sh B32, B33 and B35-B37 (lane-sweep-a1, 2026-10-20), each
+under the scenario's own nested cage on a private session bus.
+- B32 (R27e, D-SRC-42): a block that begins MID-session is told as `Saving
+  has stopped`, its body saying changes are not saved until the file can be
+  read again: `saving-stopped:1 not-loaded:0 body:1`.
+- B33 (R27a window a, D-SINK-22): the harness's `editDuringWrite` makes a
+  label edit and a second one while the first write is OUT; the second
+  waits for it to land and then reads -- `skipped +0`, the wait counted,
+  the second edit on disk. On 6f1d176 it is red only through its field
+  (`waited:NOFIELD`): on this machine the first write had always landed by
+  the deferred turn, so window (a) does not open from outside the shell,
+  and the node pins are where it is timed. It is seen red on behaviour
+  through `spikes/key-mutations/r27a-wait-never-released.patch` (`--tree`:
+  134 / 1 by the summary line, B33, the held edit never written).
+- The burst (R27a's measurement, printed, not graded): `burst_run` makes N
+  label edits a turn apart through `ipc burst` and reads `ipc burstResult`
+  and the read counter. It was a check, B34, and read green on 6f1d176 and
+  through the mutation alike, so it could not go red for what it named
+  (rule 11) and was dropped; the letter is unused. Final run: bursts of 2,
+  5, 10 and 20 landed 7, 11, 20 and 29 ms after the first edit with 1, 2, 4
+  and 7 writes and as many reads (6f1d176: 7, 9, 19, 36 ms; 1, 2, 4, 7
+  writes).
+- B35 and B36 (R27d, D-SRC-44): a 0.13.6 install with 50 sources and the
+  entry's URL not among them -- the migration does not run (none evicted,
+  none added, no marker, the entry keeps its URL, `Sources is full` told
+  once, `playlistUrl:full`); then one record removed in Sources, and the
+  next reconcile migrates the URL into the freed place, ACTIVE, the marker
+  landed, the entry stripped. On 6f1d176: `same:no d:true marker:true
+  entry:no told:0` and `records:49 told:0`.
+- B37 (R27c, D-SRC-41): 49 records, an in-app add whose probe runs while a
+  hand-run `state source add` takes the 50th -- the commit refuses
+  `too_many`, 50 on disk with the hand-run one among them, a restart drops
+  nothing. On 6f1d176: `probe:ok`, the 51st committed.
+- Counts are the summary line's, the floor 133 lettered checks: forward 134
+  / 0 (`key-20261020-131102-1636986`, 479.9 s, on lane-sweep-a1 070cd35);
+  `--baseline 6f1d176` 130 / 5 with B34 still in it (B32, B33, B35, B36,
+  B37), so 129 / 5 now. Not live: window (b), a re-point timed inside a
+  write, and window (c), a read stalled for 2 s (no way without FUSE or
+  root); the node pins time both. The transcripts are in lane A's session
+  scratch directory, not the tree.
+
+What changed in the rigs:
+- `tests/service-harness.js` drops the service's own `reload()` while one
+  of our writes is queued (`droppedReloads`), as the view does (30 of 30):
+  R27a's expired write wait can ask for a read then. Against 6f1d176 alone
+  it turns nothing red (2,572 / 0 in both echo modes), because that tree
+  never reloads while a write is out.
+- `spikes/key-mutations/` gains `r27a-no-wait.patch` (node only, not run
+  live) and `r27a-wait-never-released.patch`; four older patches are re-made
+  for R27a's moved context, the same decisions broken (their node counts are
+  in that folder's README).
+- `spikes/filewatch/measure.sh` gains set `r27b` and
+  `RESULT-2026-10-20-r27b.txt`: R27b's mitigation recovered 0 of 608
+  (the contract's eighth fact).
+
+### The open, measured with its delegates (D-PERF-1, R27f)
+
+```
+scripts/dev-harness/open-scenario.sh check-tree                                         # the instrument arm, node only; run by check.sh (9 checks)
+scripts/dev-harness/private-bus.sh <dir> 1800 scripts/dev-harness/open-scenario.sh live  # the instrument arm, then the shell arm under its own nested cage
+scripts/dev-harness/private-bus.sh <dir> 1800 scripts/dev-harness/open-scenario.sh live --tree <export>   # e.g. an export carrying spikes/open-mutations/slow-delegate.patch
+```
+
+`openMs` (the IPC verb every open figure before 2026-10-20 came from)
+force-lays-out the channel view in the turn of the summon and stops its
+clock there, so the view has not made its delegates when it looks
+(D-PERF-1). `openAsync <list|wall>` starts the clock, summons and RETURNS;
+a probe Item the harness parents into the guide's window counts the
+delegates the PRESENTING view has realised on every `frameSwapped` and asks
+for the next frame; `openAsyncResult` answers `running` or `done` with the
+summon time, `realisedMs` (the first frame of a count stable over three
+frames, `HarnessLib.openSettle`), `lastChildFrameMs` (the frame after the
+last delegate was made), the count, and a trace. Bounded by 240 frames and
+5,000 ms: a run that does not settle says so in `endedBy`, never a number.
+A warm open is a CLOSED guide summoned again (the verb refuses an open
+guide). Nothing in the product changes.
+
+The instrument arm drives `openSettle` from node over hand-made traces
+(O1-O7: a count that settles, one still growing, a delegate after a stable
+run, an empty view, two frames, a warm open with no child event, a count
+that moves once) and checks the seams in `shell.qml`; O1-O7 were seen red
+on two `openSettle` mutations (without the last-child condition O3; a
+one-frame stable run O1, O2, O6, O7). The shell arm grades the INSTRUMENT
+(L1-L6 for the list, W1-W6 for the wall: it ran, named the view, settled
+cold and warm, counted a screen, and the legacy `openMs` still counts
+fewer on a cold open) and prints the BUDGET line in plain words, ungraded:
+a number over 150 ms is a product finding, not an instrument fault.
+`OPEN_CHANNELS` (10000), `OPEN_COLD` (3 shells per view) and `OPEN_WARM`
+(8 opens per shell) set the run; each warm open is interleaved with
+PERF-02's method A (`open` round trip minus the median `ping`).
+
+Measured 2026-10-20 (lane-sweep-a1; transcripts in lane A's session
+scratch directory): 21 passed, 0 failed (`open-20261020-123554-1529605`).
+List cold realised median 546 ms (541-552), wall cold 580 (538-620), list
+warm 34 (29-40), wall warm 32 (29-43); summon 95 / 94 cold, 12 warm; 13 rows
+and 21 tiles; method A about 0 ms (-7 to 6). A 40-channel control
+(`open-20261020-124019-1545245`): 452 / 495 cold, 21 / 22 warm.
+`slow-delegate.patch` (`open-20261020-123804-1537394`): cold list 546 ->
+647, cold wall 580 -> 640, cold summon 95 -> 207, warm unchanged. So rule
+7's 150 ms holds warm and not cold in the cage's floating window; the
+production layer-shell surface on Hyprland is UNVERIFIED.
 
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 
