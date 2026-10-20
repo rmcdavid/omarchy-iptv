@@ -13456,6 +13456,20 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           return { inFlight, held, readsAfter: h.root.stateVerifies - verifies0, skipped: h.root.stateVerifySkipped, dropped: h.stateFile.droppedReloads,
                    waiting: h.root.stateWriteWaiting, file: h.file().favorites }
         }, { inFlight: 1, held: [0, 1, true, true], readsAfter: 1, skipped: 0, dropped: 0, waiting: false, file: ["t:bbc1.uk", "t:one.uk", "t:two.uk"] })
+        // D-SRC-47's mechanism, closed as a consequence (rule 15): R25a's
+        // own-write record keeps eight texts, and a burst of more than eight
+        // writes a turn apart pushed the first out, so its echo could be
+        // merged as another program's. With no write issued while one is out
+        // the record never holds more than the one text in flight.
+        checkCall("R27a (" + tag + "): D-SRC-47's mechanism -- twelve saves a turn apart never put more than ONE text in R25a's own-write record (no write is issued while another is out), every echo reads as ours or the base, none as foreign, and all twelve land", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.stateFile.coalesce = true
+          let most = 0
+          for (let i = 1; i <= 12; i++) { h.root.toggleFavorite("t:k" + i + ".uk"); h.runLater(); most = Math.max(most, h.root.recentSaves.length); if (i % 3 === 0) { h.deliverOne(); most = Math.max(most, h.root.recentSaves.length) } }
+          h.drain()
+          const foreign = Object.keys(reasons(h)).filter(k => /foreign/.test(k))
+          return { most, foreign, landed: h.file().favorites.length, outstanding: [h.root.stateSavesInFlight, h.root.stateSavePending] }
+        }, { most: 1, foreign: [], landed: 13, outstanding: [0, false] })
         // The defect itself (D-SINK-22 window a): the state FOLDER link
         // re-pointed at an EMPTY folder (no signal) just after our write
         // landed and before the save that was asked during it is written.

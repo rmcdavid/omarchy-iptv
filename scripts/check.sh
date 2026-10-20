@@ -365,6 +365,12 @@ CLIP_PREFLIGHT_MIN=${CLIP_PREFLIGHT_MIN:-7}
 # scripts/qa-lib-test.sh asserts this number is the scenario's check-tree
 # EXPECTED_CHECKS plus one.
 KEY_PREFLIGHT_MIN=${KEY_PREFLIGHT_MIN:-11}
+# R27f (2026-10-20, D-PERF-1): the async open instrument's preflight --
+# HarnessLib.openSettle driven from node over seven traces, and the seam that
+# keeps shell.qml's frame handler deciding through it -- eight checks plus the
+# scenario's own "ran every check" line. The live arm (the guide's open at
+# 10,000 channels under cage, cold and warm, list and wall) is a human's.
+OPEN_PREFLIGHT_MIN=${OPEN_PREFLIGHT_MIN:-9}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -913,6 +919,18 @@ elif (( clip_rc == 77 )); then
   fi
 else
   cat "$clip_log"; bad "clip preflight (exit $clip_rc)"
+fi
+
+step "scripts/dev-harness/open-scenario.sh check-tree (R27f, D-PERF-1)"
+open_log=$CHECK_TMP/open-scenario.log
+"$ROOT/scripts/dev-harness/open-scenario.sh" check-tree >"$open_log" 2>&1; open_rc=$?
+if (( open_rc == 0 )); then
+  open_n=$(grep -c '^PASS' "$open_log" || true)
+  if (( open_n < OPEN_PREFLIGHT_MIN )); then cat "$open_log"; bad "open preflight ran $open_n checks, expected at least $OPEN_PREFLIGHT_MIN"; else ok "open preflight ($open_n checks)"; fi
+elif (( open_rc == 77 )); then
+  bad "open preflight SKIPPED, which is not green: $(grep -a '^SKIP' "$open_log" | head -1)"
+else
+  cat "$open_log"; bad "open preflight (exit $open_rc)"
 fi
 
 step "scripts/dev-harness/key-scenario.sh check-tree (D-SINK-19 R6)"
