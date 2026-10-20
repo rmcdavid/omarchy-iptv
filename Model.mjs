@@ -79,8 +79,8 @@ export {
   mergeConflictLine, mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS,
   stateLoadKind, stateInitFound, stateLoadDecision, stateWriteGate,
   stateSavePlan, STATE_READ_BOUNDS_MS, STATE_READ_TELL_MS, stateReadBoundMs,
-  stateReadSilenceAct, stateBlockRecheck, STATE_BLOCK_TITLE_START,
-  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED_MID,
+  stateVerifyTimeoutAct, stateBlockRecheck, STATE_BLOCK_TITLE_START,
+  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
   STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
   stateBlockedHeader, stateReadStalledNotice
 } from "./model/state.mjs"

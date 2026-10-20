@@ -1660,7 +1660,7 @@ function stateReadBoundMs(silences) {
 // -> { act: "retry", boundMs, tell }. Always "retry": there is no answer here
 //    that writes, refuses or drops. `boundMs` is the next read's bound, and
 //    `tell` whether this silence is the one that tells the user.
-function stateReadSilenceAct(ctx) {
+function stateVerifyTimeoutAct(ctx) {
   var c = ctx || {}
   var silentMs = Number(c.silentMs) || 0
   return { act: "retry", boundMs: stateReadBoundMs(c.silences),
@@ -1700,20 +1700,21 @@ function stateBlockRecheck(ctx) {
 //     comes back by itself (a restore, a chmod back: the view sees it and
 //     the load is applied), when the change that finds it is a source change
 //     (refused, and its re-read applies the file), and by a stopped shell. So
-//     the sentence names all four (STATE_BLOCK_UNSAVED_MID); tests/Model.
-//     test.js pins each way to it.
+//     the sentence names all four (STATE_BLOCK_UNSAVED, the name R27e gave
+//     the one sentence, kept for the mid-session one); the node suite (dev
+//     branch) pins each way to it.
 //   a file or folder that has gone missing names the LINK case first: a
 //     link pointed back at the folder or file that holds the state restores
 //     everything, where restoring "the file it points to" or a restart with
 //     the link still on an empty folder starts a fresh, empty install there
 //     (D-SRC-50).
 //   R28a withdrew "read-timeout": a read that does not answer is no block
-//     any more (Model.stateReadSilenceAct), and the read that finally
+//     any more (Model.stateVerifyTimeoutAct), and the read that finally
 //     answers with a load failure blocks with that load's own reason.
 var STATE_BLOCK_TITLE_START = "Saved sources not loaded"
 var STATE_BLOCK_TITLE_MID = "Saving has stopped"
 var STATE_BLOCK_UNSAVED_START = "Sources, favorites and settings changed now are not kept."
-var STATE_BLOCK_UNSAVED_MID = "Favorites and other changes made now are held in this session only: the next such change made here saves them if it finds the file again, but they are dropped if the file comes back by itself first, if a source change is what finds it, or if the shell is stopped."
+var STATE_BLOCK_UNSAVED = "Favorites and other changes made now are held in this session only: the next such change made here saves them if it finds the file again, but they are dropped if the file comes back by itself first, if a source change is what finds it, or if the shell is stopped."
 var STATE_BLOCK_LINK_FIRST = "If it is a symbolic link, point it back at the folder or file that holds your state"
 function stateUnreadableNotice(reason, path, midSession) {
   var file = str(path) !== "" ? str(path) : "state.json"
@@ -1767,7 +1768,7 @@ function stateUnreadableNotice(reason, path, midSession) {
     fix = "Make sure a regular file, or nothing, is at that path, then run omarchy restart shell."
   }
   return { title: midSession === true ? STATE_BLOCK_TITLE_MID : STATE_BLOCK_TITLE_START,
-           body: file + " " + what + ". " + (midSession === true ? STATE_BLOCK_UNSAVED_MID : STATE_BLOCK_UNSAVED_START) + " " + fix }
+           body: file + " " + what + ". " + (midSession === true ? STATE_BLOCK_UNSAVED : STATE_BLOCK_UNSAVED_START) + " " + fix }
 }
 
 // R27e: the journal's line for the same episode -- the title, then the body
@@ -1819,8 +1820,8 @@ export {
   mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
   stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
   STATE_READ_BOUNDS_MS, STATE_READ_TELL_MS, stateReadBoundMs,
-  stateReadSilenceAct, stateBlockRecheck, STATE_BLOCK_TITLE_START,
-  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED_MID,
+  stateVerifyTimeoutAct, stateBlockRecheck, STATE_BLOCK_TITLE_START,
+  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
   STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
   stateBlockedHeader, stateReadStalledNotice
 }

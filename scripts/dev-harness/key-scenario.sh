@@ -2792,6 +2792,46 @@ json.dump(d, open(sys.argv[1], "w"))' "$STATE"
      "remove:true records:50 d:true active:D marker:true entry:no told:1"
   stop_shell
 
+  # B38, B39: R28b (2026-10-20) -- A HELD MIGRATION HOLDS BOTH URLS. The same
+  # 0.13.6 install, the bar entry naming D AND a guide URL, and A carrying a
+  # guide URL of its own. The user picks A, the shell restarts over the entry
+  # the plugin left (D and the guide URL still on it, the key mirrored): on
+  # lane-sweep-c1 the held migration ran R4 on the step-2 key and A's own
+  # guide URL -- its only copy -- read the bar's after the restart, and the
+  # guide URL was reported "removed" while it stayed on the entry. Then one
+  # record removed: D moves in WITH the bar's guide URL (on c1 it got none,
+  # and the strip took it off the entry). On 6f1d176 the migration evicted
+  # and ran at the first start, so the entry no longer carries either.
+  AOWN=/srv/none/a-own.xml
+  : >"$NOTIFY_LOG"
+  seed50
+  python3 -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+for r in d["sources"]:
+    if r["key"] == sys.argv[2]: r["epgUrl"] = sys.argv[3]
+json.dump(d, open(sys.argv[1], "w"))' "$STATE" "$KA" "$AOWN"
+  chmod 0600 "$STATE"
+  epg_of() { local e; e=$(sj "([s.get('epgUrl', '') for s in d['sources'] if s['key'] == '$1'] or ['<none>'])[0]"); [[ $e == "$AOWN" ]] && echo own || { [[ $e == "$EPG" ]] && echo bar || { [[ -z $e ]] && echo empty || echo other; }; }; }
+  start_shell --playlist "$D" --epg "$EPG" || true
+  sleep 3
+  ipc switchSource "$KA" >/dev/null
+  wait_for "$KA" 15 svc "['activeSourceKey']" >/dev/null || true
+  for ((i = 0; i < 100; i++)); do [[ $(sj "d.get('activeKey', '')") == "$KA" && $(pf "['stateSavesInFlight']") == 0 ]] && break; sleep 0.1; done
+  sleep 1
+  stop_shell
+  start_shell --playlist "$D" --epg "$EPG" --source-key "$KA" || true
+  sleep 3
+  ck "B38 R28b: at 50 sources the bar's playlist AND guide URL are held TOGETHER -- the entry keeps both, a source the user picked keeps its OWN guide URL across a restart, and the one card each start is \"Sources is full\" (never \"Bar setting removed\")" \
+     "a-epg:$(epg_of "$KA") active:$([[ $(svc "['activeSourceKey']") == "$KA" ]] && echo A || echo other) entry:$(stored_has playlistUrl)/$(stored_has epgUrl) removed-card:$(qa_count ' 74016 Bar setting removed ' "$NOTIFY_LOG") full-card:$(qa_count ' 74016 Sources is full ' "$NOTIFY_LOG") reports:$(reports)" \
+     "a-epg:own active:A entry:yes/yes removed-card:0 full-card:2 reports:playlistUrl:full"
+  res=$(ipc removeSource 10000007)
+  wait_for "$KD" 15 svc "['activeSourceKey']" >/dev/null || true
+  wait_for true 10 landed >/dev/null 2>&1; wait_for no 10 stored_has epgUrl >/dev/null 2>&1; sleep 0.5
+  ck "B39 R28b: then ONE record removed, and D moves in WITH the bar's guide URL -- D active, its guide URL the bar's, the entry stripped of both, A's own guide URL kept, 50 records" \
+     "remove:$(okf "$res") d-epg:$(epg_of "$KD") active:$([[ $(svc "['activeSourceKey']") == "$KD" ]] && echo D || echo other) entry:$(stored_has playlistUrl)/$(stored_has epgUrl) a-epg:$(epg_of "$KA") records:$(sj "len(d['sources'])")" \
+     "remove:true d-epg:bar active:D entry:no/no a-epg:own records:50"
+  stop_shell
+
   # B37: R27c (D-SRC-41) -- the probe commit re-checks the cap. 49 records,
   # an in-app add of a source behind a server that answers after 4 s, and a
   # hand-run `state source add` taking the 50th place 1 s into the probe.
@@ -2888,7 +2928,9 @@ instrument
 # 133 on 2026-10-20, R27: B32 (the mid-session notice's title, R27e), B33
 # (no write without a read, R27a), B35 and B36 (the migration at the cap,
 # R27d) and B37 (the probe commit at the cap, R27c); B34 is unused, the
-# burst measurement it was is printed, not graded.)
+# burst measurement it was is printed, not graded; 135 on 2026-10-20, R28b:
+# B38 and B39 (the held migration holds the bar's guide URL with its
+# playlist).)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -2898,7 +2940,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=10
 else
-  EXPECTED_CHECKS=133
+  EXPECTED_CHECKS=135
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then

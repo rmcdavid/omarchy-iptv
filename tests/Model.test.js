@@ -7371,7 +7371,7 @@ checkCall("D-SRC-38: sourcesHeaderRight / stateBlockedHeader -- a block that beg
   checkCall("R28e: the second sentence says what becomes of a change made now -- at a START \"not kept\"; MID-session it is held in the session, saved by the next such change that finds the file, dropped if the file comes back by itself, if a source change finds it, or if the shell stops -- once each, as the body's second sentence, and no body promises \"not saved until the file can be read again\"", () => {
     const starts = Object.keys(B.start).map(r => B.start[r]), mids = Object.keys(B.midSession).map(r => B.midSession[r])
     const once = (bodies, sentence) => bodies.every(b => b.split(sentence).length === 2 && b.indexOf(". " + sentence + " ") !== -1)
-    return [fx.unsaved.start, Model.STATE_BLOCK_UNSAVED_START === fx.unsaved.start, Model.STATE_BLOCK_UNSAVED_MID === fx.unsaved.midSession,
+    return [fx.unsaved.start, Model.STATE_BLOCK_UNSAVED_START === fx.unsaved.start, Model.STATE_BLOCK_UNSAVED === fx.unsaved.midSession,
             once(starts, fx.unsaved.start), once(mids, fx.unsaved.midSession),
             ["saves them if it finds the file again", "dropped if the file comes back by itself first", "if a source change is what finds it", "or if the shell is stopped"].every(w => fx.unsaved.midSession.indexOf(w) !== -1),
             starts.concat(mids).some(b => /not saved until the file can be read again/.test(b))]
@@ -7403,11 +7403,11 @@ checkCall("D-SRC-38: sourcesHeaderRight / stateBlockedHeader -- a block that beg
             /if the shell is stopped first, it is lost\.$/.test(n.body), argv.slice(-2).join("|") === n.title + "|" + n.body, argv[argv.indexOf("-r") + 1], argv[argv.indexOf("-u") + 1],
             argv.join(" ").indexOf("://") === -1, Model.NOTIFY_IDS.stateReadStalled !== Model.NOTIFY_IDS.stateUnreadable, Model.stateReadStalledNotice("").body.indexOf("state.json ") === 0]
   }, ["Saving is waiting", true, true, true, true, true, "74019", "normal", true, true, true])
-  checkCall("R28a: the schedule -- Model.stateReadBoundMs gives 2, 2, 4, 8, 16 s and then 30 s for ever (bounded); Model.stateReadSilenceAct always retries, never blocks or writes, and tells exactly once the silence reaches STATE_READ_TELL_MS (8 s)", () => {
+  checkCall("R28a: the schedule -- Model.stateReadBoundMs gives 2, 2, 4, 8, 16 s and then 30 s for ever (bounded); Model.stateVerifyTimeoutAct always retries, never blocks or writes, and tells exactly once the silence reaches STATE_READ_TELL_MS (8 s)", () => {
     const bounds = [0, 1, 2, 3, 4, 5, 6, 50, -1, undefined].map(n => Model.stateReadBoundMs(n))
-    const act = (n, ms, told) => Model.stateReadSilenceAct({ silences: n, silentMs: ms, told })
+    const act = (n, ms, told) => Model.stateVerifyTimeoutAct({ silences: n, silentMs: ms, told })
     return [bounds, Model.STATE_READ_TELL_MS, [act(1, 2000).act, act(1, 2000).boundMs, act(1, 2000).tell], [act(2, 7999).tell, act(3, 8000).tell, act(3, 8000, true).tell, act(9, 99999).act],
-            Model.stateReadSilenceAct(undefined)]
+            Model.stateVerifyTimeoutAct(undefined)]
   }, [[2000, 2000, 4000, 8000, 16000, 30000, 30000, 30000, 2000, 2000], 8000, ["retry", 2000, false], [false, true, false, "retry"], { act: "retry", boundMs: 2000, tell: false }])
   checkCall("R27e (structural): the guide's own notice (the empty state's words) takes the service's stateLoaded too, so it is titled as the notification is", () => {
     const g = fs.readFileSync(path.join(__dirname, "../Guide.qml"), "utf8")
@@ -13782,7 +13782,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         // sentence that names it (rule 14: the copy is graded by the
         // behaviour, not by a grep for itself). A favourite toggled in a
         // MID-session block (the file gone, seen) is kept only by the first.
-        checkCall("R28e (" + tag + "): the ways back out of a MID-session block, as STATE_BLOCK_UNSAVED_MID names them -- a favourite made in the block is SAVED when the next favourite finds the file again, and DROPPED when the file comes back by itself first, when a source change is what finds it, and by a stopped shell", () => {
+        checkCall("R28e (" + tag + "): the ways back out of a MID-session block, as STATE_BLOCK_UNSAVED names them -- a favourite made in the block is SAVED when the next favourite finds the file again, and DROPPED when the file comes back by itself first, when a source change is what finds it, and by a stopped shell", () => {
           const way = (fn) => {
             const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
             const keep = h.stateFile.disk

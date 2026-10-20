@@ -726,7 +726,7 @@ Item {
   // READ IS NOT A NO-WRITE BLOCK. `stateVerifySilences`: how many times the
   // read before the held save has had no load within its bound; each silence
   // asks for the read again with the next bound of Model's schedule
-  // (`stateVerifyBoundMs`, the watchdog's interval; Model.stateReadSilenceAct)
+  // (`stateVerifyBoundMs`, the watchdog's interval; Model.stateVerifyTimeoutAct)
   // and the save STAYS parked, memory the authority -- never a write without
   // the read, never a drop. `stateReadStallTold`: the user has been told about
   // this held save (once, past Model.STATE_READ_TELL_MS). All three are reset
@@ -2358,7 +2358,7 @@ Item {
   // stateVerifyPending stay set, so every load that comes is decided by
   // R26a's dispositions with the change held, and every save asked meanwhile
   // joins), the read is asked again with the next bound of Model's schedule
-  // (Model.stateReadSilenceAct: 2, 4, 8, 16, 32 s after the save, then every
+  // (Model.stateVerifyTimeoutAct: 2, 4, 8, 16, 32 s after the save, then every
   // 30 s), and once the silence has lasted Model.STATE_READ_TELL_MS the user
   // is told, once for this held save. The wait ends only when a load comes:
   // our own write's echo, the re-read a joining change or a landed write
@@ -2368,7 +2368,7 @@ Item {
     if (timedOut) {
       root.stateVerifyNoLoad = root.stateVerifyNoLoad + 1
       var silences = root.stateVerifySilences + 1
-      var act = Model.stateReadSilenceAct({ silences: silences, silentMs: ms, told: root.stateReadStallTold })
+      var act = Model.stateVerifyTimeoutAct({ silences: silences, silentMs: ms, told: root.stateReadStallTold })
       root.stateVerifySilences = silences
       root.stateVerifySecondReads = root.stateVerifySecondReads + 1
       console.warn("omarchy-iptv: state.json was not read back within " + ms + " ms of a save; the change is kept and the file is read again, waiting " + act.boundMs + " ms")
