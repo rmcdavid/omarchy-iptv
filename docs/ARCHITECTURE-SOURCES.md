@@ -6285,7 +6285,7 @@ board's ids and states are the lead's).**
   reads `state.json could not be read · nothing is saved until it can be
   from <host>`. A service-side refusal is not a fetch failure. [Round 18,
   R28e: fixed for both, and for `unknown_source`: a result that carries one
-  of those codes reads its sentence alone (`Model.PROBE_LOCAL_REFUSALS`).]
+  of those codes reads its sentence alone (`PROBE_LOCAL_REFUSALS` in model/sources.mjs).]
 - (4) A UX question that follows from R27d: while the migration is held on
   a 0.13.6 upgrade the guide opens unconfigured over 50 saved sources, and
   the `Sources is full` card does not say a source can be picked meanwhile.
@@ -6452,7 +6452,7 @@ calling the model, by driving the shipping `Service.qml` through
   `min(rowCount, 6)` until 300 ms after `open()`). The harness README's
   open-scenario section has the rule. No product code changed.
 - R28e. `Model.probeFailureLine(reason, host, kind, code)` drops `from
-  <host>` when `code` is one of `Model.PROBE_LOCAL_REFUSALS` (`too_many`,
+  <host>` when `code` is one of `PROBE_LOCAL_REFUSALS` in model/sources.mjs (`too_many`,
   `state_unreadable`, `unknown_source`), refusals the plugin made itself;
   the service's probe results carry `code`, and both `Guide.qml` call
   sites pass it. Called: `Sources is full (50) · remove one first` and
