@@ -610,9 +610,11 @@ function entryInputNotice(name, reason) {
   }
   // R27d (D-SRC-44): the migration did not run because Sources is full. The
   // URL stays on the bar entry; nothing names it or the entry's label.
+  // R28b: and the guide URL set beside it is held with it, so the sentence
+  // names both -- they move in together once a source is removed.
   if (r === "full") {
     return { title: "Sources is full",
-             body: "The playlist set on the bar was not moved into Sources: Sources already holds " + MAX_SOURCES + " sources, the most it can. Remove one in " + where + " and the bar's playlist moves in." }
+             body: "The playlist set on the bar, and its guide URL if one is set, were not moved into Sources: Sources already holds " + MAX_SOURCES + " sources, the most it can. Remove one in " + where + " and the bar's playlist and its guide move in together." }
   }
   return { title: "Bar setting ignored",
            body: setting + " is no longer read from the bar settings and was removed. Add or switch sources in " + where + "." }

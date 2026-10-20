@@ -6429,10 +6429,29 @@ check("R27d: reconcileAction -- `heldFull` makes a migrating playlist URL fresh 
   Model.reconcileAction({ migrating: true, playlist: "http://new.test/", seen: Model.entryInputsSeenAfter([], { playlistUrl: "http://new.test/" }), heldFull: true }).act,
   Model.reconcileAction({ migrating: true, playlist: "http://new.test/", seen: Model.entryInputsSeenAfter([], { playlistUrl: "http://new.test/" }) }).act,
   Model.reconcileAction({ migrating: false, playlist: "http://new.test/", seen: [], heldFull: true }).act], ["adopt", "ignore", "ignore"])
-checkCall("R27d: the notice -- Model.entryInputNotice(\"playlistUrl\", \"full\"): \"Sources is full\", says the bar's playlist moves in once one is removed in Sources, names the cap, and carries no URL", () => {
+// R28b (2026-10-20) re-levelled the sentence: the guide URL is held with the
+// playlist, so the notice names both and says they move in together.
+checkCall("R27d / R28b: the notice -- Model.entryInputNotice(\"playlistUrl\", \"full\"): \"Sources is full\", says the bar's playlist AND its guide move in together once one is removed in Sources, names the cap, and carries no URL", () => {
   const n = Model.entryInputNotice("playlistUrl", "full")
   return [n.title, n.body, n.body.indexOf("://") === -1]
-}, ["Sources is full", "The playlist set on the bar was not moved into Sources: Sources already holds 50 sources, the most it can. Remove one in the guide's Sources screen and the bar's playlist moves in.", true])
+}, ["Sources is full", "The playlist set on the bar, and its guide URL if one is set, were not moved into Sources: Sources already holds 50 sources, the most it can. Remove one in the guide's Sources screen and the bar's playlist and its guide move in together.", true])
+// R28b: A HELD MIGRATION HOLDS BOTH URLS. Seen red on lane-sweep-c1, whose
+// R4 block ran on the step-2 key: `adoptedEpg` true and A's own guide URL
+// replaced, or `noSourceEpg` true (reported as removed while it stayed).
+checkCall("R28b: adoptActiveSource MIGRATING at the cap with an unknown playlist AND a guide URL -- the guide URL is HELD with it: not adopted onto the active record (its own guide URL kept), not refused, not reported as having no source; `heldEpg`; the entry still to be written with both kept", () => {
+  const own = "http://own.example.test/a.xml"
+  const st = Model.withActiveKey(Model.cloneState(full50, { sources: full50.sources.map((r, i) => i === 2 ? Object.assign({}, r, { epgUrl: own }) : r) }), full50.sources[2].key)
+  const entry = { playlistUrl: "http://new.test/", epgUrl: "http://bar.example.test/g.xml", sourceKey: "" }
+  const out = Model.adoptActiveSource(st, entry, 999, "", { adoptUrl: true, adoptEpg: true, migrating: true })
+  const none = Model.adoptActiveSource(full50, entry, 999, "", { adoptUrl: true, adoptEpg: true, migrating: true })
+  const bare = Model.adoptActiveSource(st, { playlistUrl: "http://new.test/", epgUrl: "", sourceKey: "" }, 999, "", { adoptUrl: true, adoptEpg: true, migrating: true })
+  return [out.full, out.heldEpg, out.adoptedEpg, out.refusedEpg, out.noSourceEpg, Model.findSource(out.state.sources, full50.sources[2].key).epgUrl === own, out.changed, out.writeEntry,
+          [none.full, none.heldEpg, none.noSourceEpg], [bare.full, bare.heldEpg]]
+}, [true, true, false, false, false, true, false, true, [true, true, false], [true, false]])
+check("R28b: reconcileAction -- `heldFull` makes the guide URL fresh with the playlist, so the retry after a removal adopts BOTH; without it the guide URL seen last is not re-adopted", [
+  (() => { const seen = Model.entryInputsSeenAfter([], { playlistUrl: "http://new.test/", epgUrl: "http://bar.example.test/g.xml" }); const a = Model.reconcileAction({ migrating: true, playlist: "http://new.test/", epg: "http://bar.example.test/g.xml", seen, heldFull: true }); return [a.adoptUrl, a.adoptEpg] })(),
+  (() => { const seen = Model.entryInputsSeenAfter([], { playlistUrl: "http://new.test/", epgUrl: "http://bar.example.test/g.xml" }); const a = Model.reconcileAction({ migrating: true, playlist: "http://new.test/", epg: "http://bar.example.test/g.xml", seen }); return [a.adoptUrl, a.adoptEpg] })()],
+  [[true, true], [false, false]])
 check("reconcileSources does not mutate the input", twoState.sources.length, 2)
 // SR11: the settings path is the CLI path. `omarchy bar set ... playlistUrl ~/list.m3u`
 // reconciles into the history and becomes active; the forms keep refusing `~`.
@@ -13678,22 +13697,25 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           h.drain()
           return { first, second, file: h.file().favorites.length }
         }, { first: [1, 3], second: [true, 0, 1, false], file: 5 })
-        checkCall("R28c (" + tag + "): the write wait's expiry is reset when the slow write is reported FAILED (onSaveFailed) -- the next save asked during a write waits for it again", () => {
+        // The disk keeps failing through the first episode, so no write
+        // LANDS to reset the expiry on onSaved's branch: only onSaveFailed's
+        // reset stands between the slow write and the next episode.
+        checkCall("R28c (" + tag + "): the write wait's expiry is reset when the slow write is reported FAILED (onSaveFailed) -- with every write failing, the next save asked during a write waits for it again; once the disk recovers all of it lands", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           h.stateFile.writeFails = true
           h.root.toggleFavorite("t:one.uk"); h.runLater()
           h.root.toggleFavorite("t:two.uk"); h.runLater()
           h.elapse(2000)
-          h.stateFile.writeFails = false
           h.drain()
-          const first = [h.root.stateWriteWaitTimeouts, h.root.stateSaveFailed]
+          const first = [h.root.stateWriteWaitTimeouts, h.root.stateSaveFailed, h.file().favorites.length]
           h.root.toggleFavorite("t:three.uk"); h.runLater()
           const dropped0 = h.stateFile.droppedReloads
           h.root.toggleFavorite("t:four.uk"); h.runLater()
           const second = [h.root.stateWriteWaiting, h.stateFile.droppedReloads - dropped0, h.root.stateWriteWaitExpired]
+          h.stateFile.writeFails = false
           h.drain()
           return { first, second, file: h.file().favorites.length }
-        }, { first: [1, false], second: [true, 0, false], file: 5 })
+        }, { first: [1, true, 1], second: [true, 0, false], file: 5 })
         // (2) The read's state is reset when it FINISHES: R27a's
         // stateVerifyRetried, whose successors are the silence count, the
         // bound and the told flag. A second held save starts the schedule
@@ -13853,6 +13875,37 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           return { held, rm: rm.ok, file: [h.file().sources.length, M.findSource(h.file().sources, KNEW) !== null, M.findSource(h.file().sources, gone) !== null, marked(h), M.activeKeyOf(h.file()) === KNEW],
                    entry: retired(h.storedEntry()), heldAfter: h.root.migrationHeldFull, told: fullTold(h).length, restart: [next.file().sources.length, next.root.activeSourceKey === KNEW, fullTold(next).length] }
         }, { held: [true, false], rm: true, file: [50, true, false, true, true], entry: [], heldAfter: false, told: 1, restart: [50, true, 0] })
+        // R28b (2026-10-20): A HELD MIGRATION HOLDS BOTH URLS. Both seen red
+        // on lane-sweep-c1: there a picked source's own guide URL read BAR
+        // after the restart, the guide URL was reported "removed" while it
+        // stayed on the entry, and "Remove one" migrated the playlist with
+        // no guide URL and stripped the bar's.
+        const OWN = "http://own.example.test/a.xml"
+        const allTold = h => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74016") !== -1).map(a => a[a.length - 2])
+        checkCall("R28b (" + tag + "): a 0.13.6 install with 50 sources and the bar's playlist AND guide URL not among them -- held TOGETHER: both stay on the entry, no record's guide URL changes, ONE card (\"Sources is full\", never \"Bar setting removed\"); a source the user picks keeps its OWN guide URL across a restart; then \"Remove one\" moves both in together -- the new record carries the bar's guide URL, the entry is stripped of both, and nothing else is lost", () => {
+          const fifty = [rec(A, { epgUrl: OWN }), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.drain()
+          const held = { entry: [h.storedEntry().playlistUrl === NEW, h.storedEntry().epgUrl === E], aEpg: name(epgOf(h.file(), KA)), reports: reports(h), told: allTold(h) }
+          sw(h, KA); h.drain()
+          const r1 = restart(h); r1.drain()
+          const picked = { active: r1.root.activeSourceKey === KA, aEpg: name(epgOf(r1.file(), KA)), entry: [r1.storedEntry().playlistUrl === NEW, r1.storedEntry().epgUrl === E], told: allTold(r1) }
+          const gone = keyOf("http://m0.example.test/l.m3u")
+          const rm = r1.root.removeSource(gone); r1.drain()
+          const r2 = restart(r1)
+          return { held, picked, removed: { rm: rm.ok, newEpg: name(epgOf(r1.file(), KNEW)), active: r1.root.activeSourceKey === KNEW, marked: marked(r1), entry: retired(r1.storedEntry()),
+                                           aEpg: name(epgOf(r1.file(), KA)), count: r1.file().sources.length, restart: [name(epgOf(r2.file(), KNEW)), name(epgOf(r2.file(), KA)), r2.file().sources.length] },
+                   clean: clean(h) && clean(r1) && !leaks(r1) }
+        }, { held: { entry: [true, true], aEpg: OWN, reports: ["playlistUrl:full"], told: ["Sources is full"] },
+             picked: { active: true, aEpg: OWN, entry: [true, true], told: ["Sources is full"] },
+             removed: { rm: true, newEpg: "E", active: true, marked: true, entry: [], aEpg: OWN, count: 50, restart: ["E", OWN, 50] }, clean: true })
+        checkCall("R28b (" + tag + "): the first start of an install whose state names A active but carries no migration marker, at 50 sources, with the bar's playlist and guide URL not among them -- A keeps its OWN guide URL (on lane-sweep-c1 the bar's replaced it, the only copy), the guide URL stays on the entry, and one card", () => {
+          const fifty = [rec(A, { epgUrl: OWN }), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, stateText(fifty, KA), mode, { ownEcho })
+          h.drain()
+          const next = restart(h)
+          return { active: h.root.activeSourceKey === KA, aEpg: name(epgOf(h.file(), KA)), entry: h.storedEntry().epgUrl === E, reports: reports(h), told: allTold(h), restart: name(epgOf(next.file(), KA)) }
+        }, { active: true, aEpg: OWN, entry: true, reports: ["playlistUrl:full"], told: ["Sources is full"], restart: OWN })
         checkCall("R27d (" + tag + "): D-SRC-44 -- held full, then a HAND-RUN `state source remove` (a foreign write): the reconcile that load runs migrates the entry's URL into the place it left", () => {
           const fifty = [rec(A), rec(B)].concat(many(48))
           const h = boot({ playlistUrl: NEW, showLogos: false }, oldText(fifty), mode, { ownEcho })

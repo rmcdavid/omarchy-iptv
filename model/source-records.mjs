@@ -368,6 +368,10 @@ function invalidInputBlocks(invalid, activeKey) {
 // R27d: `heldFull` -- this session's migration found Sources full and did
 // not run -- makes a MIGRATING playlist URL fresh again whatever `seen`
 // says, so the next reconcile (a removal's) tries it once more.
+// R28b (2026-10-20): and its guide URL with it. The two are held together
+// (adoptActiveSource), so the retry adopts both together (R21); before R28b
+// the guide URL read as seen on the retry and the migrated record got none,
+// while the strip that followed took it off the entry.
 function reconcileAction(input) {
   var it = input || {}
   var migrating = it.migrating === true
@@ -378,7 +382,7 @@ function reconcileAction(input) {
     if (entryInputForm(name, values[name]).text === "") continue
     if (migrating) {
       // R1's snapshot: unseen, or different from the value seen LAST
-      var fresh = it.heldFull === true && name === "playlistUrl" ? true : !entryInputLast(it.seen, name, values[name])
+      var fresh = it.heldFull === true ? true : !entryInputLast(it.seen, name, values[name])
       if (name === "playlistUrl") out.adoptUrl = fresh
       else if (name === "epgUrl") out.adoptEpg = fresh
     } else {
@@ -435,8 +439,19 @@ function reconcileAction(input) {
 // shield) and the next reconcile after a removal migrates it
 // (Model.reconcileAction's `heldFull`).
 //
+// R28b (2026-10-20): A HELD MIGRATION HOLDS BOTH URLS. With step 1 `full`,
+// the entry's guide URL belongs to the playlist that was held, not to
+// whichever record steps 2-4 name, so the R4 block below does not run: it
+// is not adopted onto any record, not refused, not reported as having no
+// source, and it stays on the entry beside its playlist (the same funnel
+// keep rule). Round 1 measured both losses R27d had left: a source the user
+// picked had its own guide URL replaced by the bar's at the next start (its
+// only copy), and "Remove one" migrated the playlist with no guide URL and
+// stripped the bar's. `heldEpg` says the entry carries a guide URL that was
+// held with it.
+//
 // Returns { state, key, changed, moved, adoptedUrl, adoptedEpg, refusedEpg,
-// noSourceEpg, invalid, added, full, marked, writeEntry }. `changed` is
+// noSourceEpg, invalid, added, full, heldEpg, marked, writeEntry }. `changed` is
 // whether the state must be written; `moved` whether the active source is a
 // DIFFERENT one than before, which is the only thing that resets the status
 // line; `marked` whether this call set the marker; `writeEntry` whether the
@@ -451,8 +466,8 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   var adoptEpg = o.adoptEpg === true
   var before = activeKeyOf(st)
   var out = { state: st, key: "", changed: false, moved: false, adoptedUrl: false, adoptedEpg: false,
-              refusedEpg: false, noSourceEpg: false, invalid: null, added: "", full: false, marked: false,
-              writeEntry: false }
+              refusedEpg: false, noSourceEpg: false, invalid: null, added: "", full: false, heldEpg: false,
+              marked: false, writeEntry: false }
   // R18a: the one normaliser (entryInputForm). `url` is the sanitized text
   // reconcileSources validates; `epg` is the whole form, so a guide URL of
   // whitespace or control characters alone is NO input (R4's no-op).
@@ -489,7 +504,9 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   // R4: a guide URL input reaches the ACTIVE record on any path -- the record
   // a fresh URL just named, a state load with a guide URL on the entry, an
   // "ignore" plan that carries only a guide URL change (D-SRC-02).
-  if (epg.text !== "") {
+  if (epg.text !== "" && out.full) {
+    out.heldEpg = true
+  } else if (epg.text !== "") {
     var active = out.key !== "" ? findSource(out.state.sources, out.key) : null
     if (!active) {
       out.noSourceEpg = true
