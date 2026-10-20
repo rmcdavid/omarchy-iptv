@@ -146,21 +146,25 @@ obvious when it happens to you:
   it to guide, so it is removed with a notification saying to add the source with
   its EPG URL in Sources. If Sources already holds 50 sources and the
   playlist is not one of them, nothing is moved and no source is removed to
-  make room: the playlist stays on the entry, nothing is marked as done, and
-  a notification titled **Sources is full** says `The playlist set on the bar
-  was not moved into Sources: Sources already holds 50 sources, the most it
-  can. Remove one in the guide's Sources screen and the bar's playlist moves
-  in.` (once a session, and again at each shell start while it lasts).
-  Remove one -- in Sources, or with the helper's `state source remove` -- and
-  the playlist is added and becomes the active source. Up to and including
+  make room: the playlist stays on the entry, and so does a guide-data URL
+  set beside it -- neither is attached to any of your sources -- nothing is
+  marked as done, and a notification titled **Sources is full** says `The
+  playlist set on the bar, and its guide URL if one is set, were not moved
+  into Sources: Sources already holds 50 sources, the most it can. Remove
+  one in the guide's Sources screen and the bar's playlist and its guide
+  move in together.` (once a session, and again at each shell start while
+  it lasts). Remove one -- in Sources, or with the helper's `state source
+  remove` -- and the playlist is added with its guide-data URL and becomes
+  the active source, over whichever source was active. Up to and including
   0.14.2 the least recently used source was removed to make room, with only
-  a journal line, and its URL went with it. Not covered yet: an install
-  updated from 0.13.6 records no active source, so until then the guide opens
-  on its setup form (its `Saved sources` link lists the 50); a guide-data URL
-  on the entry beside that playlist is reported as removed but stays on the
-  entry, is NOT attached to the playlist when it moves in (add it again with
-  `e` in Sources), and if you pick a source meanwhile, the next shell start
-  puts it on THAT source in place of the source's own guide-data URL.
+  a journal line, and its URL went with it. An install updated from 0.13.6
+  records no active source, so until a source is removed the guide opens on
+  its setup form; its `Saved sources` link lists the 50, and a source you
+  pick there keeps its own guide-data URL across shell starts. (Builds of
+  this change that never shipped reported the bar's guide-data URL as
+  removed while it stayed on the entry, dropped it when the playlist moved
+  in, and put it on a source picked meanwhile in place of that source's
+  own.)
   From then on the plugin does not read either setting
   at all. Set one with `omarchy bar set` and the plugin adds nothing, switches
   nothing and changes nothing about the source you are watching: it removes
@@ -178,7 +182,7 @@ obvious when it happens to you:
   are exercised on every commit's test tree under both kinds of Omarchy host
   (today's, and one carrying the settings fix awaiting review upstream), and
   live, under a headless compositor, by the harness scenario on the `dev`
-  branch (134 checks, 2026-10-20).
+  branch (136 checks, 2026-10-20).
 - **Going back to an older version makes the plugin look unconfigured.** An
   older build looks for the URL on the widget's entry, does not find one, and
   says you have no playlist. Your sources are all still in `state.json`: open
@@ -720,8 +724,9 @@ itself unavailable rather than half working.
   link, or puts a file over it, while the shell is running is not noticed
   at once; the plugin reads the file again before each save it makes, so it
   notices at its next save and keeps both that change and its own, unless
-  the two land in the same instant; if that read does not answer at all
-  (twice, 2 seconds each), the plugin writes nothing and says so
+  the two land in the same instant; if that read does not answer at all,
+  the plugin writes nothing, keeps your change and reads the file again
+  until it answers, and says so if that takes more than 8 seconds
   (Troubleshooting says what is noticed, when, and what to do). The folder
   `~/.local/state/omarchy-iptv` may be a symbolic link too: the plugin
   follows it and makes the folder it leads to private (0700), as it does
@@ -827,18 +832,21 @@ Nothing inside the plugin directory is written at runtime.
   the shell starts, or **Saving has stopped** when it begins while the shell
   is running and your sources are already listed (for example
   `/home/you/.local/state/omarchy-iptv/state.json is not a valid state file.
-  Sources, favorites and settings changed now are not saved until the file
-  can be read again. ...`; the shell's journal gets the title and the same
-  sentence), and the guide showing that same title and
+  Sources, favorites and settings changed now are not kept. ...` at a start,
+  and `... is not a valid state file. Favorites and other changes made now
+  are held in this session only: the next such change made here saves them
+  if it finds the file again, but they are dropped if the file comes back by
+  itself first, if a source change is what finds it, or if the shell is
+  stopped. ...` while it runs; the shell's journal gets the title and the
+  same sentence), and the guide showing that same title and
   sentence where it would otherwise show its setup form: the file that holds
   your sources is there but could not be read -- its permissions, something
   other than a file at that path, a symbolic link that leads nowhere (at the
   file, or at its folder), a file where its folder should be, or contents
   that are not a state file -- or
   the plugin's start-up check of it did not answer within 15 seconds and was
-  stopped, or, while the shell was running, the plugin's read of the file
-  before a save did not answer (`... did not answer when it was read before
-  a save (twice, 2 seconds each)`). The plugin has not changed the file and will write nothing to
+  stopped. (A read of the file that simply does not answer is not this
+  case: the next bullet.) The plugin has not changed the file and will write nothing to
   it until it can be read again, because it may be the only copy of your sources and
   provider URLs; earlier versions read such a file as empty and saved an
   empty one over it. Adding, editing, switching or removing a source, and
@@ -857,15 +865,13 @@ Nothing inside the plugin directory is written at runtime.
   hit: `chmod 600` on the file, `chmod 700` on its folder, move whatever is
   at the path aside, point a symbolic link back at the file or folder that
   holds your state, make sure a regular file or nothing is there, restore
-  the file from a backup, or check the disk or folder that holds it -- then
+  the file from a backup, or check the file and its folder -- then
   `omarchy restart shell`. When a file or folder has gone missing while the
   shell runs, it names the link case first (`If it is a symbolic link,
   point it back at the folder or file that holds your state; otherwise make
   the folder readable with chmod 700.`), because a restart with a link
   still on an empty folder starts there with no sources, like a fresh
-  install. After a read that did not answer, the next change you make in
-  the guide reads the file again, and if it answers, saving resumes and
-  that change and the ones made meanwhile are saved. When `state.json` is a
+  install. When `state.json` is a
   regular file and only its contents or its permissions were wrong,
   putting a good copy back in place (or the `chmod 600`) is enough on its
   own: the plugin notices and carries on with your sources. Whatever the
@@ -886,6 +892,29 @@ Nothing inside the plugin directory is written at runtime.
   folder you left at mode 0000 while the shell was not running is NOT this
   case: the plugin restores the usual permissions at the next start, reads
   the file and says nothing.
+- A notification titled **Saving is waiting**
+  (`/home/you/.local/state/omarchy-iptv/state.json has not answered for 8
+  seconds when it was read before a save. The change is kept in this
+  session and saved when the file answers; if the shell is stopped first,
+  it is lost.`): the plugin reads `state.json` before every save, and that
+  read has had no answer -- a disk or network mount that has stalled, say.
+  Nothing is refused and nothing is written: your change stays on screen
+  and in memory, every change you make meanwhile (a source added or edited
+  included) is kept with it, and the plugin reads the file again 2, 4, 8,
+  16, 32 and 62 seconds after the save, then every 30 seconds, and at once
+  when you make another change. When the file answers, everything held is
+  saved; if another program changed the file meanwhile, the two are
+  merged first, as the bullet on a file changed while the shell is running
+  says; and if what answers cannot be read as a state, it is the case in
+  the bullet above. The journal says `state.json was not read back within ... ms of
+  a save; the change is kept and the file is read again, waiting ... ms`
+  each time, and `state.json answered ... ms after a save asked for it`
+  when it does. Do not stop or restart the shell while this lasts unless
+  you accept losing those changes. You are told once each time it happens.
+  (Builds of this change that never shipped stopped saving after two such
+  reads, 4 seconds, and could then lose the change when the file answered.
+  Up to and including 0.14.2 the plugin saved without the read after 2
+  seconds.)
 - A directory or a named pipe (FIFO) at
   `~/.local/state/omarchy-iptv/state.json`: the case above, with `is not a
   regular file`. The plugin leaves it exactly as it is -- it no longer
@@ -937,11 +966,8 @@ Nothing inside the plugin directory is written at runtime.
   ahead without it (the journal said `saving without the read`). Now a
   save asked for while the previous one is being written waits for it to
   land and then reads the file; and a read that does not answer is asked
-  for once more, and if it is silent again the plugin writes nothing and
-  stops saving (**Saving has stopped**, `... did not answer when it was
-  read before a save (twice, 2 seconds each)`, the journal saying
-  `state.json was not read back within ... ms of a save, twice; nothing is
-  written until a read answers`) until a later read answers. (Up to and
+  for again, the change held, until one answers -- nothing is written
+  without it (**Saving is waiting**, the bullet above). (Up to and
   including 0.14.1 that next
   save wrote what the
   shell held over the change instead -- into the new file, after `ln
@@ -1050,8 +1076,7 @@ Nothing inside the plugin directory is written at runtime.
   again. A source added in the guide while its URL is still being checked,
   when another program adds the 50th source in that moment, is refused
   when the check ends: nothing is added, the form stays open with what you
-  typed and says `Sources is full (50) · remove one first from <host>`
-  (the provider's host; a file on disk shows the sentence alone), and the
+  typed and says `Sources is full (50) · remove one first`, and the
   journal says `the new source was not
   added: Sources is full (50)`. Up to and including 0.14.2 the guide kept
   it for the session and the next shell start dropped it without a word.
