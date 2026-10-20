@@ -183,7 +183,10 @@ cache directory removed -- the same rule as any CLI adoption (risk R3)
 [round 17, 2026-10-20, R27d (D-SRC-44): no longer. At the cap the step does
 not run: nothing is added or evicted, the marker is not set, the entry keeps
 its URL and the user is told once (`Sources is full`); the next reconcile
-after a removal migrates. The round-17 rulings]. The
+after a removal migrates. The round-17 rulings] [round 18, 2026-10-20,
+R28b: and a guide URL on the entry beside that playlist is held WITH it --
+not attached to any record, not reported, not stripped -- and moves in
+with it after the removal. The round-18 rulings]. The
 first version of this paragraph said the step "creates no record and deletes
 none"; that was false against the code and is withdrawn. "Must not lose a
 source" (SR38) is graded as "keeps the count it went in with" over a two-source
@@ -494,7 +497,7 @@ by the helper for a syntactic reason; the helper keeps the runtime refusals
 | `parseState(text)` | v1 or v2 text -> v2 object (section 2.2), records validated **Amended 2026-10-12 (round 9, R19b/R19c): carries `pendingEpg` (normalized, absent when nothing valid is pending) and each record's `epgSetAt` (absent when 0), so a state with neither parses and serializes exactly as before.** **Amended 2026-10-12 (round 10, R20b): carries `entryInputs` (`entryInputsRecord`, slot by slot, absent when no slot validates); and since R20a a `pendingEpg` whose `url` is not a string is no pending value.** **Amended 2026-10-13 (round 11, R21d): carries `entryMigrated` (exactly `true`, else absent) and no longer `pendingEpg`, `entryInputs` or a record's `epgSetAt`; a file an earlier build of this chain wrote is read without them.** |
 | `cloneState(st, patch)` | new state with `patch` keys replacing; used by every existing reducer **Amended 2026-10-12 (round 9, R19b): the sixth key this whitelist is taught, `pendingEpg`, on the day it was added, carried only when a valid one is pending.** **Amended 2026-10-12 (round 10, R20b): the seventh key, `entryInputs`, on the day it was added, on the same terms -- carried only when a slot is set.** **Amended 2026-10-13 (round 11, R21d): the keys round 9 and 10 taught it are withdrawn with their machinery, and the marker `entryMigrated` is taught on the day it was added, carried only when it is `true` (lane A's mutant M9, `cloneState` drops the marker: 6 of 2,261 red).** |
 | `withCacheLayout(st, n)` | `cacheLayout` set |
-| `sourcesFull(state)` | R27c / R27d (round 17, 2026-10-20; `Model.sourcesFull`): THE CAP, one decision -- true when the state holds `MAX_SOURCES` (50) records or more; an empty or missing state has room. Asked by `addSource` (`too_many`), by the service's probe commit against the state as it is when the probe ends (D-SRC-41: a hand-run `state source add` may have taken the last place meanwhile; refused `too_many`, told through `sourceProbeFinished`, nothing recorded, the probe's cache directory removed), and by `reconcileSources` (`full`, never an eviction, D-SRC-44). The guide's own gate on the Add rows and `a` / `c` (`Guide.qml` `sourcesFull()`, SR24) compares `sourceCount` with `Model.LIMITS.sources`, the same constant, and is not this function |
+| `sourcesFull(state)` | R27c / R27d (round 17, 2026-10-20; `Model.sourcesFull`): THE CAP, one decision -- true when the state holds `MAX_SOURCES` (50) records or more; an empty or missing state has room. Asked by `addSource` (`too_many`), by the service's probe commit against the state as it is when the probe ends (D-SRC-41: a hand-run `state source add` may have taken the last place meanwhile; refused `too_many`, told through `sourceProbeFinished`, nothing recorded, the probe's cache directory removed), and by `reconcileSources` (`full`, never an eviction, D-SRC-44). The guide's own gate on the Add rows and `a` / `c` (`Guide.qml` `sourcesFull()`, SR24) compares `sourceCount` with `Model.LIMITS.sources`, the same constant, and is not this function **[Round 18, 2026-10-20, R28e: no longer -- round 1's review found a third comparison, `Service.canAddSource` (`sourceCount < Model.LIMITS.sources`), and both it and `Guide.sourcesFull()` now call this function over the service's `userState`, so the cap is one decision in the tree as the comment says. `parseState` and `mergeForeignState` share the constant and not the question: they TRUNCATE a list already over the cap that something else wrote, and say so in a comment]** |
 | `addSource(st, fields, nowSec)` | `{ ok, code, message, state, key }`; `fields = { playlistUrl, epgUrl, label, origin }`; codes `empty`, `too_long`, `bad_url`, `unsupported_scheme`, `unsafe_path`, `duplicate` (returns the existing `key`), `too_many` **Amended 2026-10-12 (round 9, R19c, lane-key-y1): `fields.epgSetAt` (ms) is the moment the form was SUBMITTED, handed by `Service.addSource`; the new record carries it as `epgSetAt` only when the form carries a guide URL, so a blank field sets nothing and a pending input still lands on it (E4).** **Amended 2026-10-13 (round 11, R21d): `fields.epgSetAt` is gone; the record carries no set time whatever the caller hands it (`R21d: no reducer writes a set time ...`). The in-app forms are sequential, so the form's guide URL is simply the record's.** **Round 17, 2026-10-20 (R27c): the cap is `Model.sourcesFull(state)`, the one decision the probe commit asks too.** |
 | `updateSource(st, key, fields, nowSec)` | `{ ok, code, message, state, key, urlChanged, replacedKey }`; label -> `labelCustom: true`; a changed playlist URL yields a NEW record (`key` new, `replacedKey` old, `fetchedAt: 0`, label/addedAt copied) and leaves the old one in place until the service confirms the probe (section 4.6); `unknown_source` **Amended 2026-10-12 (round 9, R19c): `fields.epgSetAt` (ms) stamps the guide URL only when the edit CHANGES it; the service always hands `Date.now()` and never a caller's own value, and a playlist-URL change carries the stamp to the replacement record.** **Amended 2026-10-13 (round 11, R21d): `fields.epgSetAt` is gone, as in `addSource`.** |
 | `removeSource(st, key)` | `{ state, removed }` (`removed` = record or null). **D-SINK-19 round 2 (R3): removing the ACTIVE record clears `activeKey` in the state it returns**, so the file never names a record it no longer holds; the helper's `remove_source_record` has done the same since the key existed, and the shared fixture's `remove` cases run both |
@@ -506,8 +509,8 @@ by the helper for a syntactic reason; the helper keeps the runtime refusals
 | `activeKeyOf(st)` | the state's `activeKey` when it names a record in `sources[]`, else `""`. The one resolver; `configured` is `activeKeyOf(state) !== ""` |
 | `activeSourceRecord(st)` | that record, or null |
 | `withActiveKey(st, key)` | the state with `activeKey` set (or cleared); the SAME object when nothing moves, so `changed` stays honest |
-| `reconcileAction({ first, force, playlist, epg, lastPlaylist, lastEpg })` | `{ act, adoptUrl, adoptEpg, playlistChanged, epgChanged }`: `act` is `adopt` for a non-empty playlist input this service has not consumed (first reconcile, or different from the snapshot), `migrate` for a first or forced reconcile with no fresh URL, `ignore` otherwise; `adoptEpg` is the same rule for the EPG input, independently (R1, R4). **Amended 2026-10-12 (round 8, R18a, lane-key-x1 1f8bd1b): both sides are compared through `Model.entryInputForm` -- "changed" is "the forms differ", and "non-empty" is the form's text -- so a value that differs from the snapshot only in surrounding whitespace, scheme or host case, the default port or an embedded control character is NOT fresh, and a value of whitespace or control characters alone is no input. Until round 7 both sides were trimmed by `Model.settingsFrom` and agreed by accident; now they agree with `Model.retiredInputsToKeep` by construction (a 34-case property, round-8 rulings below).** **Amended 2026-10-12 (round 10, R20b): also hands `first` back as it came, because `Model.adoptActiveSource` judges an EPG input equal to the held one by the held one's time only on the first reconcile after a start.** **Amended 2026-10-13 (round 11, R21a/R21b; lane-key-m1 15896f1, b52e745): the signature is `reconcileAction({ first, force, migrating, playlist, epg, seen })` -> `{ act, adoptUrl, adoptEpg, refused, report, migrating }`, and the round-2 snapshot arguments are gone. `migrating` is `!Model.entryMigratedOf(landedState)`. MIGRATING, a value is fresh unless it is the one `seen` holds LAST for its setting (`Model.entryInputLast`, R1's snapshot); `act` is `adopt` for a fresh playlist URL, `migrate` for a first or forced reconcile with nothing to adopt, `ignore` otherwise; `adoptEpg` likewise. MIGRATED, nothing is adopted: every retired key that carries a value (by `Model.entryInputForm`) is in `refused`, and the ones `seen` has not seen at all (`Model.entryInputSeen`) are in `report`. `seen` is `Service.entryInputsSeen`, in memory only (R21b). Lane A's mutants (of 2,261): always migrating 64, membership instead of the last value 3.** **Round 17, 2026-10-20 (R27d): `heldFull` -- this session's migration found Sources full -- makes a MIGRATING playlist URL fresh again whatever `seen` says, so the reconcile a removal asks for tries it once more; the guide URL is not made fresh by it.** |
-| `adoptActiveSource(st, entry, nowSec, origin, { adoptUrl, adoptEpg })` | `{ state, key, changed, moved, adoptedUrl, adoptedEpg, invalid, added, evicted, writeEntry }`: resolves the active source in the order fresh entry URL -> state key -> entry mirror -> nothing (R1), attaches a fresh EPG input to the active record on any path, reports an invalid input without touching the key, and says whether the entry must be rewritten (it still holds a URL, or its mirror disagrees). `moved` -- a DIFFERENT source than before -- is the only thing that resets the status line. **Amended 2026-10-12 (round 8, R18a): the playlist input is `Model.entryInputForm`'s text and the EPG input its whole form, so an EPG of control characters alone is no input and never replaces the active record's guide URL with the empty one it used to validate as (the sibling R18a's search found). `writeEntry` is still asked from the entry as published, stale copy included -- the same answer heals a value D-SINK-20's patch-only write re-carried -- and a write that would change nothing the host stores is declined in the funnel (`entryWriteNeeded`, R18b).** **Amended 2026-10-12 (round 9, R19b/R19c, lane-key-y1 690a888): `opts.seenAt` (ms) is when the service saw the inputs. A held `pendingEpg` meets the record that is active after step 1-4 BEFORE R4 runs, so an input seen in this same reconcile lands on top of the result (`applyPendingEpg`). R4's adoption stamps the record's `epgSetAt` with `seenAt` and does not re-stamp a guide URL the record already holds. With NO active source a valid EPG input is held as `pendingEpg` and CONSUMED (`epgConsumed` true, so the owned write that follows the save strips it), and a refused one is consumed as refused (lane A's reading (a)); R12's "not adopted and not stripped" is overturned. The result gains `pendedEpg`, `refusedEpg`, `pendingApplied` and `pendingSuperseded`, which the service logs by setting and key name.** **Amended 2026-10-12 (round 10, R20b; lane-key-z1 5b21950 and 92395c4): `opts.atStart`.** At a START, an EPG input EQUAL to the guide URL the state already holds as pending is that same input, still on the entry because its strip never landed, and is judged with its `seenAt`, never with now: if the active record's guide URL is later it loses (`epgByTime`), and a value held again keeps its first `seenAt`. This closes the round-9 data-loss lens's P3 (the pending E lost to a later G by time and was then adopted as the latest input in the same call). NOT in session: there the service SAW the entry change to that value, the user setting it again, a later explicit input (R19c); the in-session reading, lane-key-z1's first build, was measured wrong by the round-9 lens's own matrix (`EPG:OLD:init` 4 and `EPG:OLD:cli` 2 at length 2, a CLI re-set of the held value losing to an older record time) and withdrawn in 92395c4. Usually the start never reaches this branch, because the consumed slot (`entryInputs`) proves the value spent; it is the start over a file an earlier build wrote, with no slot. **Amended 2026-10-13 (round 11, R21; lane-key-m1 15896f1): `opts` is `{ adoptUrl, adoptEpg, migrating }`, each false when absent, so a caller with no plan reads no URL at all. The round-9 and round-10 options (`seenAt`, `atStart`) and results (`pendedEpg`, `pendingApplied`, `pendingSuperseded`, the `epgConsumed` / `epgEcho` entry rule) are withdrawn. A guide URL the plan adopts with NO record to land on is `noSourceEpg` (R21c: reported and stripped, never held); one that does not validate is `refusedEpg`; `migrating` sets the marker in the state returned (`Model.withEntryMigrated`; `marked` says whether this call set it); `writeEntry` is true whenever the entry carries a retired key or its mirror disagrees. Lane A's mutant M4, no marker set by the migration: 30 red.** **Round 17, 2026-10-20 (R27d): `evicted` is replaced by `full` -- step 1 found Sources full; resolution continues at step 2 as for an invalid value, and the marker is NOT set when `full`, so the entry funnel keeps the URL (`retiredInputsToKeep`) and the next reconcile after a removal migrates (`reconcileAction`'s `heldFull`). The R4 guide-URL block still runs on the step-2 key: with a fresh entry guide URL it is attached to whatever source step 2 resolved, which is not the entry's playlist -- measured by the documents lane, raised to the lead (the round-17 rulings).** |
+| `reconcileAction({ first, force, playlist, epg, lastPlaylist, lastEpg })` | `{ act, adoptUrl, adoptEpg, playlistChanged, epgChanged }`: `act` is `adopt` for a non-empty playlist input this service has not consumed (first reconcile, or different from the snapshot), `migrate` for a first or forced reconcile with no fresh URL, `ignore` otherwise; `adoptEpg` is the same rule for the EPG input, independently (R1, R4). **Amended 2026-10-12 (round 8, R18a, lane-key-x1 1f8bd1b): both sides are compared through `Model.entryInputForm` -- "changed" is "the forms differ", and "non-empty" is the form's text -- so a value that differs from the snapshot only in surrounding whitespace, scheme or host case, the default port or an embedded control character is NOT fresh, and a value of whitespace or control characters alone is no input. Until round 7 both sides were trimmed by `Model.settingsFrom` and agreed by accident; now they agree with `Model.retiredInputsToKeep` by construction (a 34-case property, round-8 rulings below).** **Amended 2026-10-12 (round 10, R20b): also hands `first` back as it came, because `Model.adoptActiveSource` judges an EPG input equal to the held one by the held one's time only on the first reconcile after a start.** **Amended 2026-10-13 (round 11, R21a/R21b; lane-key-m1 15896f1, b52e745): the signature is `reconcileAction({ first, force, migrating, playlist, epg, seen })` -> `{ act, adoptUrl, adoptEpg, refused, report, migrating }`, and the round-2 snapshot arguments are gone. `migrating` is `!Model.entryMigratedOf(landedState)`. MIGRATING, a value is fresh unless it is the one `seen` holds LAST for its setting (`Model.entryInputLast`, R1's snapshot); `act` is `adopt` for a fresh playlist URL, `migrate` for a first or forced reconcile with nothing to adopt, `ignore` otherwise; `adoptEpg` likewise. MIGRATED, nothing is adopted: every retired key that carries a value (by `Model.entryInputForm`) is in `refused`, and the ones `seen` has not seen at all (`Model.entryInputSeen`) are in `report`. `seen` is `Service.entryInputsSeen`, in memory only (R21b). Lane A's mutants (of 2,261): always migrating 64, membership instead of the last value 3.** **Round 17, 2026-10-20 (R27d): `heldFull` -- this session's migration found Sources full -- makes a MIGRATING playlist URL fresh again whatever `seen` says, so the reconcile a removal asks for tries it once more; the guide URL is not made fresh by it.** **Round 18, 2026-10-20 (R28b): it makes the guide URL fresh too, so the retry adopts the two together (R21); with only the playlist fresh the guide URL read as seen, the migrated record got none, and the strip that followed took it off the entry (lane A's mutation "retry fresh for the playlist only": 5 red in each echo mode).** |
+| `adoptActiveSource(st, entry, nowSec, origin, { adoptUrl, adoptEpg })` | `{ state, key, changed, moved, adoptedUrl, adoptedEpg, invalid, added, evicted, writeEntry }`: resolves the active source in the order fresh entry URL -> state key -> entry mirror -> nothing (R1), attaches a fresh EPG input to the active record on any path, reports an invalid input without touching the key, and says whether the entry must be rewritten (it still holds a URL, or its mirror disagrees). `moved` -- a DIFFERENT source than before -- is the only thing that resets the status line. **Amended 2026-10-12 (round 8, R18a): the playlist input is `Model.entryInputForm`'s text and the EPG input its whole form, so an EPG of control characters alone is no input and never replaces the active record's guide URL with the empty one it used to validate as (the sibling R18a's search found). `writeEntry` is still asked from the entry as published, stale copy included -- the same answer heals a value D-SINK-20's patch-only write re-carried -- and a write that would change nothing the host stores is declined in the funnel (`entryWriteNeeded`, R18b).** **Amended 2026-10-12 (round 9, R19b/R19c, lane-key-y1 690a888): `opts.seenAt` (ms) is when the service saw the inputs. A held `pendingEpg` meets the record that is active after step 1-4 BEFORE R4 runs, so an input seen in this same reconcile lands on top of the result (`applyPendingEpg`). R4's adoption stamps the record's `epgSetAt` with `seenAt` and does not re-stamp a guide URL the record already holds. With NO active source a valid EPG input is held as `pendingEpg` and CONSUMED (`epgConsumed` true, so the owned write that follows the save strips it), and a refused one is consumed as refused (lane A's reading (a)); R12's "not adopted and not stripped" is overturned. The result gains `pendedEpg`, `refusedEpg`, `pendingApplied` and `pendingSuperseded`, which the service logs by setting and key name.** **Amended 2026-10-12 (round 10, R20b; lane-key-z1 5b21950 and 92395c4): `opts.atStart`.** At a START, an EPG input EQUAL to the guide URL the state already holds as pending is that same input, still on the entry because its strip never landed, and is judged with its `seenAt`, never with now: if the active record's guide URL is later it loses (`epgByTime`), and a value held again keeps its first `seenAt`. This closes the round-9 data-loss lens's P3 (the pending E lost to a later G by time and was then adopted as the latest input in the same call). NOT in session: there the service SAW the entry change to that value, the user setting it again, a later explicit input (R19c); the in-session reading, lane-key-z1's first build, was measured wrong by the round-9 lens's own matrix (`EPG:OLD:init` 4 and `EPG:OLD:cli` 2 at length 2, a CLI re-set of the held value losing to an older record time) and withdrawn in 92395c4. Usually the start never reaches this branch, because the consumed slot (`entryInputs`) proves the value spent; it is the start over a file an earlier build wrote, with no slot. **Amended 2026-10-13 (round 11, R21; lane-key-m1 15896f1): `opts` is `{ adoptUrl, adoptEpg, migrating }`, each false when absent, so a caller with no plan reads no URL at all. The round-9 and round-10 options (`seenAt`, `atStart`) and results (`pendedEpg`, `pendingApplied`, `pendingSuperseded`, the `epgConsumed` / `epgEcho` entry rule) are withdrawn. A guide URL the plan adopts with NO record to land on is `noSourceEpg` (R21c: reported and stripped, never held); one that does not validate is `refusedEpg`; `migrating` sets the marker in the state returned (`Model.withEntryMigrated`; `marked` says whether this call set it); `writeEntry` is true whenever the entry carries a retired key or its mirror disagrees. Lane A's mutant M4, no marker set by the migration: 30 red.** **Round 17, 2026-10-20 (R27d): `evicted` is replaced by `full` -- step 1 found Sources full; resolution continues at step 2 as for an invalid value, and the marker is NOT set when `full`, so the entry funnel keeps the URL (`retiredInputsToKeep`) and the next reconcile after a removal migrates (`reconcileAction`'s `heldFull`). The R4 guide-URL block still runs on the step-2 key: with a fresh entry guide URL it is attached to whatever source step 2 resolved, which is not the entry's playlist -- measured by the documents lane, raised to the lead (the round-17 rulings).** **Round 18, 2026-10-20 (R28b): A HELD MIGRATION HOLDS BOTH URLS. With `full`, the R4 block does not run: the entry's guide URL is not adopted onto any record, not refused, not reported `no-source`, and stays on the entry beside its playlist; the result gains `heldEpg` (the entry carries a guide URL held with it). Round 1 measured both losses the step-2 attachment caused, through the shipping `Service.qml`: a source picked meanwhile had its own guide URL replaced by the bar's at the next start, and "Remove one" migrated the playlist with no guide URL and stripped the bar's. Lane A's mutation "R4 runs on full": 9 red in each echo mode.** |
 | `pointerWritePlan({ keyMoved, dirsReady, savePending, savesInFlight, saveFailed })` | `{ steps, entryWaits }` with `steps` drawn from `save-state`, `defer-state`, `write-entry`, `write-entry-after-saved`, `wait-entry`: the state is saved before the entry is written, and the entry WAITS for the state save to LAND on every route (R5, then R13 on 2026-10-12): `write-entry` is immediate only when nothing of ours is outstanding -- no save parked, none in flight, the last one not failed -- otherwise the key is held and `Model.entryFlushDisposition` settles it from the FileView's `saved` / `saveFailed`; `Service.persistActive` executes the steps, and `stateInitProc`'s exit, `saved` and `saveFailed` settle a held entry. `savesInFlight` and `saveFailed` are round-4 inputs (lane-key-t1; `Model.pointerWritePlan`); the shared fixture's `order` section has 13 cases since round 4 (8 before) |
 | `stateSaveLanded(viewText, askedText)` | R13 (lane-key-t1; `Model.stateSaveLanded`): whether the write the service last asked for is the one the FileView has just reported on -- the view's text IS the last text asked for, and that text is non-empty. "Landed" is read by CONTENT, not by counting `saved` signals, because a burst coalesces queued writes and a replaced one raises nothing (10 warm switches: 20 `setText`, 14 `saved` on lane-key-t1, 15 on lane-key-s2; lane A, 2026-10-12, `OMARCHY-PLUGIN-CONTRACT.md`) |
 | `countReload(counts, reason)` | R15 (lane-key-t1; `Model.countReload`): the reload counter by reason -- a NEW object (a `property var` mutated in place raises no change signal) with `reason`'s count incremented, keyed by the string `Model.reloadDisposition` answered, so the counter cannot name a reason the decision does not; the service's `stateReloadsByReason`, reported through the harness's `pointerState` |
@@ -516,9 +519,11 @@ by the helper for a syntactic reason; the helper keeps the runtime refusals
 | `stateInitFound(text, exitCode, timedOut)` | R22a (`Model.stateInitFound`): the helper's start-up `state init` reply -> `absent` only for the init's own `found: absent`, [round 14, R24b: `link` and `not-a-dir` for the init's own answers of those names; round 15, R25c: `folder-link` too, a link at the state FOLDER, or above it, that dangles or leads to something that is not a folder;] `present` for `file`, `other` or `unreadable`, `unknown` for a failed exit, no reply, another verb's reply or a reply without the field. The one witness that tells a missing file from a file inside a directory the FileView cannot search, which it reports identically (FileNotFound) |
 | `stateLoadDecision({ kind, loadedBefore, initFound, retried })` | R22a (`Model.stateLoadDecision`): `{ act, reason }` for a load that is not `loaded` -- `apply` for a state; mid-session (`loadedBefore`) `block` at once; at a start `wait` until the init answers, `fresh` ONLY when the load is `absent` and the init found `absent`, else `retry` once (the init restores the 0000 modes it finds) and then `block`, with reason `absent-unconfirmed` for a FileNotFound the init contradicts [round 14, R24b: after the one re-read, an init that answered `link` or `not-a-dir` blocks with THAT reason instead of `absent-unconfirmed`; round 15, R25c: and `folder-link`] |
 | `stateWriteGate({ blocked, loaded, dirsReady })` | R22a / R22b (`Model.stateWriteGate`): the one gate `Service.saveState` asks first -- `refuse` in the no-write mode whatever else is true, `park` before any state has loaded or before the directories are ready, `write` otherwise. Before R22a a save made with the directories ready and the load still outstanding wrote the empty default over the file |
-| `stateSavePlan(ctx)`, `stateVerifyTimeoutAct(ctx)` | R26a / R26b, amended by R27a (round 17, 2026-10-20, D-SINK-22; `Model.stateSavePlan`, `Model.stateVerifyTimeoutAct`). `stateSavePlan` answers each save `join`, `park`, `refuse`, `verify`, `defer`, `write` (the round-16 rulings) or, since R27a, `wait`: one of our writes is in flight (`inFlight > 0`) and the wait has not expired, so nothing is issued; the FileView's `saved` or `saveFailed` for that write ends the wait (`Service.endStateWriteWait`) and asks for the save again from a turn of its own, which reads. Every save asked during the wait is the same held save. A wait not ended within 2 s (`stateWriteWaitWatchdog`) sets `waitExpired`, and the held save goes to its read, which the view drops while the write is out, so the read's own bound decides. `write` is answered only to the verify's finish (`verifyDone`); the R26 branch that wrote from a deferred turn while a write was in flight, skipping the read, is gone. `stateVerifyTimeoutAct({ retried })`: the read's 2 s bound fired -- `retry` (ask for the load once more, the bound again) the first time, `block` (the R22 no-write mode, reason `read-timeout`, the save refused) the second. Never a write: until R27 the watchdog wrote without the read |
-| `stateUnreadableNotice(reason, path, midSession)` | R22a (`Model.stateUnreadableNotice`): `{ title, body }`, the ONE sentence the user is told once per no-write episode, as a critical notification (replace id 74017) and on the console -- `Saved sources not loaded` / `<path> <what>. Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. <fix>`, composed from the reason and the path alone, never a URL; the six reasons and their text are in the round-12 rulings and `UX-SOURCES.md` 5.10 [round 14 added `link` and `not-a-dir` and split `absent`; round 15 adds `folder-link`, which names the FOLDER: `<folder> is a symbolic link whose target is missing or is not a folder (or a folder above it is)` / `Restore the folder it points to, or move the link aside, then run omarchy restart shell.`] **Round 17, 2026-10-20 (R27e, D-SRC-42, D-SRC-50, D-SRC-51): the title is `Saved sources not loaded` (`STATE_BLOCK_TITLE_START`) for a block that begins at a start and `Saving has stopped` (`STATE_BLOCK_TITLE_MID`) for one that begins after a state loaded; the body is `<path> <what>. Sources, favorites and settings changed now are not saved until the file can be read again. <fix>` (`STATE_BLOCK_UNSAVED`); `absent`'s `<fix>` leads with `STATE_BLOCK_LINK_FIRST`, `link` and `folder-link` say point it back; R27a adds `read-timeout`. Every sentence is in `tests/fixtures/state-notices.json`; the round-12 table below carries the current copy.** |
+| `stateSavePlan(ctx)`, `stateVerifyTimeoutAct(ctx)` | R26a / R26b, amended by R27a (round 17, 2026-10-20, D-SINK-22; `Model.stateSavePlan`, `Model.stateVerifyTimeoutAct`). `stateSavePlan` answers each save `join`, `park`, `refuse`, `verify`, `defer`, `write` (the round-16 rulings) or, since R27a, `wait`: one of our writes is in flight (`inFlight > 0`) and the wait has not expired, so nothing is issued; the FileView's `saved` or `saveFailed` for that write ends the wait (`Service.endStateWriteWait`) and asks for the save again from a turn of its own, which reads. Every save asked during the wait is the same held save. A wait not ended within 2 s (`stateWriteWaitWatchdog`) sets `waitExpired`, and the held save goes to its read, which the view drops while the write is out, so the read's own bound decides. `write` is answered only to the verify's finish (`verifyDone`); the R26 branch that wrote from a deferred turn while a write was in flight, skipping the read, is gone. `stateVerifyTimeoutAct({ retried })`: the read's 2 s bound fired -- `retry` (ask for the load once more, the bound again) the first time, `block` (the R22 no-write mode, reason `read-timeout`, the save refused) the second. Never a write: until R27 the watchdog wrote without the read **[Round 18, 2026-10-20, R28a: `block` is gone, and with it `read-timeout`. `stateVerifyTimeoutAct({ silences, silentMs, told })` -> `{ act: "retry", boundMs, tell }` always: `silences` counts this held save's silent reads, this one included; `boundMs` is the next read's bound, `stateReadBoundMs(silences)`; `tell` is true once `silentMs` reaches `STATE_READ_TELL_MS` (8000) and the user has not been told about this held save. The save stays parked (`stateSavePending` and `stateVerifyPending` stay set), memory the authority, and every save asked meanwhile joins it (`join`). The name is R27a's, kept because the documents and the defect ledger cite it]** |
+| `stateUnreadableNotice(reason, path, midSession)` | R22a (`Model.stateUnreadableNotice`): `{ title, body }`, the ONE sentence the user is told once per no-write episode, as a critical notification (replace id 74017) and on the console -- `Saved sources not loaded` / `<path> <what>. Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. <fix>`, composed from the reason and the path alone, never a URL; the six reasons and their text are in the round-12 rulings and `UX-SOURCES.md` 5.10 [round 14 added `link` and `not-a-dir` and split `absent`; round 15 adds `folder-link`, which names the FOLDER: `<folder> is a symbolic link whose target is missing or is not a folder (or a folder above it is)` / `Restore the folder it points to, or move the link aside, then run omarchy restart shell.`] **Round 17, 2026-10-20 (R27e, D-SRC-42, D-SRC-50, D-SRC-51): the title is `Saved sources not loaded` (`STATE_BLOCK_TITLE_START`) for a block that begins at a start and `Saving has stopped` (`STATE_BLOCK_TITLE_MID`) for one that begins after a state loaded; the body is `<path> <what>. Sources, favorites and settings changed now are not saved until the file can be read again. <fix>` (`STATE_BLOCK_UNSAVED`); `absent`'s `<fix>` leads with `STATE_BLOCK_LINK_FIRST`, `link` and `folder-link` say point it back; R27a adds `read-timeout`. Every sentence is in `tests/fixtures/state-notices.json`; the round-12 table below carries the current copy.** **Round 18, 2026-10-20 (R28e, R28a): the body's second sentence differs between the two. At a start it is `STATE_BLOCK_UNSAVED_START`, `Sources, favorites and settings changed now are not kept.` -- nothing has loaded, so the load that lifts the block is applied over such a change on every way back. Mid-session it is `STATE_BLOCK_UNSAVED` (R27e's name, kept for the documents that cite it), `Favorites and other changes made now are held in this session only: the next such change made here saves them if it finds the file again, but they are dropped if the file comes back by itself first, if a source change is what finds it, or if the shell is stopped.` -- R27e's "not saved until the file can be read again" was true of one way back and false of three (round 1's review, measured live and through the shipping `Service.qml`). `read-timeout` is withdrawn (R28a); a reason the function does not know reads `io-error`'s `<what>` and `<fix>`. The fixture holds `bodies.start` (ten reasons) and `bodies.midSession` (the five load kinds), word for word.** |
 | `stateUnreadableJournal(reason, path, midSession)` | R27e (round 17, 2026-10-20; `Model.stateUnreadableJournal`): the console line for the same episode, `<title>: <body>` of `stateUnreadableNotice`, so the journal is titled as the notification is (D-SRC-42). `Service.blockStateWrites` logs it as `omarchy-iptv: <line>` and hands the notification `midSession` = `stateLoaded` |
+| `STATE_READ_BOUNDS_MS`, `STATE_READ_TELL_MS`, `stateReadBoundMs(silences)` | R28a (round 18, 2026-10-20; `Model.STATE_READ_BOUNDS_MS`, `Model.STATE_READ_TELL_MS`, `Model.stateReadBoundMs`): the held save's read schedule. `STATE_READ_BOUNDS_MS` is `[2000, 2000, 4000, 8000, 16000, 30000]`; `stateReadBoundMs(n)` is the bound of the read asked after `n` silences, the last entry for every `n` past the end, and 2000 for `n` of 0 or anything that is not a positive number. So a silent file is read again at 2, 4, 8, 16, 32 and 62 s after the save first asked, then every 30 s, for as long as the change is held: the interval is bounded, the number of re-reads is not. `Service.stateVerifyWatchdog`'s interval is the binding `stateVerifyBoundMs`, set from this before each restart. `STATE_READ_TELL_MS` is 8000, the third silence on this schedule |
+| `stateReadStalledNotice(path)` | R28a (round 18, 2026-10-20; `Model.stateReadStalledNotice`): `{ title, body }`, told ONCE per held save when its reads have been silent for `STATE_READ_TELL_MS`, as a normal-urgency notification with its own replace id 74019 (`NOTIFY_IDS.stateReadStalled`; it refuses nothing, so it neither replaces nor is replaced by the no-write card on 74017) and on the console as `omarchy-iptv: <title>: <body>`: `Saving is waiting` / `<path> has not answered for 8 seconds when it was read before a save. The change is kept in this session and saved when the file answers; if the shell is stopped first, it is lost.` Composed from the path and the constant alone, never a URL. The told flag is reset when the read finishes, with the silence count and the bound, in `finishStateVerify` and nowhere else (R28c) |
 | `stateBlockedHeader(reason, path, midSession)` | D-SRC-38 (round 15; `Model.stateBlockedHeader`): the no-write mode's SHORT form, for the Sources header's right slot (`Model.sourcesHeaderRight(n, stateBlocked, path, midSession)`): `""` with no reason; `Saving has stopped` when the block began MID-session (a state had loaded, so the rows under it are the session's and still play; `Guide.qml` hands it `service.stateLoaded`); otherwise `Model.stateUnreadableNotice`'s title, `Saved sources not loaded`. One function, the notice copy family **Round 17, 2026-10-20 (R27e): it is now simply `stateUnreadableNotice(reason, path, midSession).title` -- the header, the notification and the journal take one word.** |
 | `sameState(a, b)`, `stateCanonical(state)` | R24a / R24c (round 14; `Model.sameState`, `Model.stateCanonical`): whether two states -- objects, or the texts of files -- are the same state as a reader of the file sees it: each read through `parseState`, then serialized with its keys sorted at every depth. So the helper's compact JSON and the service's indented JSON of one state compare equal, and the init's empty default equals `parseState("")` (pinned). What `Service.applyUserState` hands `Model.reloadDisposition` as `matchesBase` [and, since round 15 (R25a), as `memoryMatchesBase`, `sameState(userState, landedState)`: with nothing held, a reload whose text is the base over a memory that is the base changes nothing and is ignored as `unchanged` -- the echo of the save that just landed, a chmod, an identical rewrite] |
 | `mergeForeignState(base, ours, theirs)` | R24a (round 14; `Model.mergeForeignState`): `{ state, conflicts }` [round 15, R25b: `{ state, conflicts, dropped }`], THE three-way merge of a FOREIGN write into a session that holds a change the file does not. Sets (`favorites`, `hiddenGroups`, `savedSearches`) merge; `sources` merge by key; `recents`, `activeKey`, `lastPlayed`, `session`, `cacheLayout` are taken whole; `entryMigrated` is set if either side has it; a conflict goes to theirs and is reported as `{ field, key, fields }` with no value. The field table is in the round-14 rulings; the fixture is `tests/fixtures/state-merge.json` [round 15, R25b (D-SRC-31): the caps are applied INSIDE the merge, not left to `parseState`: theirs keeps its place and what goes past `MAX_SOURCES` (50), `MAX_SAVED_SEARCHES` (20) or `MAX_HIDDEN_GROUPS` (200) is always ours' additions, dropped and returned as `dropped` -- `sources` the keys, `savedSearches` and `hiddenGroups` counts; and the sets are built on THEIRS, theirs' order first, which the function's comment now says (D-SRC-37)] |
@@ -544,7 +549,7 @@ by the helper for a syntactic reason; the helper keeps the runtime refusals
 | `sameOwnWrite(a, b)` | R18b (round 8, lane-key-x1; `Model.sameOwnWrite`): the own-write record the funnel would assign against the one in force -- equal when both are absent, or when `base` and `value` carry the same keys with strictly equal values (`undefined` is not `""`). That is exactly what `Model.ownWriteInForce` and `Model.settingsWithOwnWrite` read, so an equal record is one no binding can tell apart and reassigning it is the re-trigger and nothing else; the funnel reassigns `ownWrite` only when this answers false **Round 9 (R19a): now the ONE clause that settles the cycle -- with the skip gone, an owned write the host answers `false` to re-triggers nothing because the record is not reassigned. Lane A's mutation m2 shows it is no longer load-bearing for the loop (no LOOP with it removed, because R19b took away the loop's precondition, an EPG input that stayed fresh on the entry forever); it is kept and pinned (m2 reddens 4 checks).** |
 | `entryMigratedOf(st)`, `withEntryMigrated(st)` | R21a (round 11, lane-key-m1 15896f1; `Model.entryMigratedOf`, `Model.withEntryMigrated`): the migration marker (section 2.1). `Model.entryMigratedOf` is true exactly when `st.entryMigrated === true`; `Model.withEntryMigrated` returns the state with it set, the SAME object when it already is, so a caller's "did the state move" stays an identity test. Mutants M10 (`parseState` reads a truthy marker) 5 red, P1/P2 in the helper (drops it; reads it truthily) 3 and 1 red in `tests/test_state.py` |
 | `entryInputSeen(seen, name, value)`, `entryInputLast(seen, name, value)`, `entryInputsSeenAfter(seen, values)`, `MAX_SEEN_INPUTS` | R21b (round 11; `Model.entryInputSeen`, `Model.entryInputLast`, `Model.entryInputsSeenAfter`, `Model.MAX_SEEN_INPUTS`): the session's in-memory, ORDERED record of every value it has migrated or refused off the entry, by setting, each as its one form (`Model.entryInputForm`). `Model.entryInputSeen` asks "seen at all" (after the marker: report once); `Model.entryInputLast` asks "the most recent one" (inside the migration window: R1's snapshot); `Model.entryInputsSeenAfter` moves every non-empty value to the end of its list, a NEW object when anything moves and the SAME object otherwise, at most `Model.MAX_SEEN_INPUTS` (32) values a setting, the oldest dropped -- a value that old reports once more if it comes back, never an adoption. Nothing here is persisted: the persisted snapshot of round 10 (R20b) is what it replaces. Mutant M3, `entryInputSeen` never true: 49 red; M16, freshness by membership instead of the last value: 3 |
-| `entryInputNotice(name, reason)` | R21b / R21c (round 11; `Model.entryInputNotice`): THE ONE REPORT of a value taken off the bar entry without being adopted, `{ title, body }`, composed from the setting's NAME and the reason (`retired`, `no-source`, `invalid`) and never from the value (rule 5); a name that is not one of the two retired settings reads `A URL setting`. The texts are in the round-11 rulings at the end of this file and in `UX-SOURCES.md` 5. `Model.notifyArgv`'s `entryInputRefused` event renders the same sentence with replace id 74016; `Service.reportEntryInput` also logs it to the console. Mutants M7, no notification: 48 red; M13, any name passed through: 1 |
+| `entryInputNotice(name, reason)` | R21b / R21c (round 11; `Model.entryInputNotice`): THE ONE REPORT of a value taken off the bar entry without being adopted, `{ title, body }`, composed from the setting's NAME and the reason (`retired`, `no-source`, `invalid`) and never from the value (rule 5); a name that is not one of the two retired settings reads `A URL setting`. The texts are in the round-11 rulings at the end of this file and in `UX-SOURCES.md` 5. `Model.notifyArgv`'s `entryInputRefused` event renders the same sentence with replace id 74016; `Service.reportEntryInput` also logs it to the console. Mutants M7, no notification: 48 red; M13, any name passed through: 1 **Round 17 (R27d) added the reason `full` (`Sources is full`), and round 18 (R28b, 2026-10-20) changed its body, because the guide URL beside the held playlist is now held with it: `The playlist set on the bar, and its guide URL if one is set, were not moved into Sources: Sources already holds 50 sources, the most it can. Remove one in the guide's Sources screen and the bar's playlist and its guide move in together.` On that path no `Bar setting removed` card is sent any more, so nothing on 74016 is replaced by it in the same turn (round 1's review saw the two share the id)** |
 | `ownedEntryPatch(effective, overrides)` | every key in `OWNED_SETTINGS` (`sourceKey`, `showLogos` since D-SINK-19) at the value it should hold after this write (D-LOGO-2); the one place that decides what a write carries |
 | `entryShieldDecision(shieldState, patch)` | the D-SINK-18 gate asked of the ENTRY about to be written: `persist` when the patch carries no URL-bearing key (every shipping write), `refuse` / `defer` when it does |
 | `cacheStale(status, refreshMinutes, nowSec)` | true when `status.ok !== true`, `fetchedAt` missing/0, or `nowSec - fetchedAt >= refreshMinutes * 60` |
@@ -1313,7 +1318,7 @@ edit the control's copy and the next bound write would overwrite it.
 | Item | Budget | How |
 |---|---|---|
 | Switch redraw (warm cache) | < 150 ms at 10k | Section 4.5: synchronous in-process settings write, FileView auto reload, existing load path; no helper on the redraw path; optional prepared-LRU if measured over budget |
-| Guide open | unchanged < 150 ms | Sources rows derive from `userState.sources` in memory (<= 50 records); no file or helper access on open; the group column gains one row. **[2026-10-20, R27f: the budget itself is not met by a cold open in the cage, sources or not -- 546 ms list, 580 ms wall at 10,000 channels, about 450 ms of it the first show of the window -- and is met warm (34 / 32 ms); the round-17 rulings have the table]** |
+| Guide open | unchanged < 150 ms | Sources rows derive from `userState.sources` in memory (<= 50 records); no file or helper access on open; the group column gains one row. **[2026-10-20, R27f: the budget itself is not met by a cold open in the cage, sources or not -- 546 ms list, 580 ms wall at 10,000 channels, about 450 ms of it the first show of the window -- and is met warm (34 / 32 ms); the round-17 rulings have the table]** **[2026-10-20, R28d: re-measured with an instrument that counts only what is DRAWN -- 548 ms list, 534 ms wall cold, 33 / 31 ms warm, about 440 ms of the cold figure the first show of the window whatever the channel count; the round-18 rulings have the table]** |
 | Sources screen open | < 10 ms | `Model.sourceRows` over <= 50 records; a `ListModel` of <= 50 rows |
 | Helper runs on open | 0 | none added; probes run only on add/edit/never-fetched switch, `cache` jobs only at start and on removal |
 | state.json | <= ~35 KB | 50 x ~600 B records + favorites/recents |
@@ -3846,6 +3851,8 @@ to print an empty state.
 title, the body's second sentence and the three link `<fix>`es below are
 round 17's, and `read-timeout` is R27a's; `tests/fixtures/state-notices.json`
 holds every sentence verbatim and node pins the model to it both ways]
+[round 18, 2026-10-20, R28e and R28a: the body's second sentence is now
+one of two, and `read-timeout` is withdrawn -- below]
 (`Model.stateUnreadableNotice(reason,
 path, midSession)` in model/state.mjs; a desktop notification through
 `omarchy-notification-send` with app name `IPTV`, urgency `critical`, the
@@ -3853,10 +3860,19 @@ alert glyph and replace id 74017, `NOTIFY_IDS.stateUnreadable`; the same body
 on the console as `omarchy-iptv: <title>: <body>`, R27e). The title is `Saved sources not
 loaded` for a block that begins at a start and `Saving has stopped` for one
 that begins after a state loaded (R27e). The body is `<path> <what>.
-Sources, favorites and settings changed now are not saved until the file
-can be read again. <fix>` (until R27e: `Nothing is saved until it can be
-read, so sources, favorites and settings changed now are not kept.`), where
-`<path>` is `<stateDir>/state.json` (on a default install
+<unsaved> <fix>`, where `<unsaved>` is, at a start, `Sources, favorites and
+settings changed now are not kept.` (`STATE_BLOCK_UNSAVED_START`) and, for a
+block that begins after a state loaded, `Favorites and other changes made
+now are held in this session only: the next such change made here saves
+them if it finds the file again, but they are dropped if the file comes
+back by itself first, if a source change is what finds it, or if the shell
+is stopped.` (`STATE_BLOCK_UNSAVED`; R28e). Until R27e both read `Nothing
+is saved until it can be read, so sources, favorites and settings changed
+now are not kept.`; from R27e until R28e both read `Sources, favorites and
+settings changed now are not saved until the file can be read again.`,
+which named the one way back on which a mid-session change is kept and
+none of the three on which it is dropped. `<path>` is
+`<stateDir>/state.json` (on a default install
 `~/.local/state/omarchy-iptv/state.json`, spelled out in full) and the
 sentence is composed from the reason and the path alone:
 
@@ -3872,7 +3888,7 @@ sentence is composed from the reason and the path alone:
 | `folder-link` (round 15, R25c, D-SRC-32: the helper's init found a symbolic link at the state folder, or at a folder above it, that dangles or leads to something that is not a folder; `<path>` is then the FOLDER's; round 17, R27e) | `is a symbolic link whose target is missing or is not a folder (or a folder above it is)` | `Point it back at the folder that holds your state, or move the link aside, then run omarchy restart shell.` |
 | `io-error`, or anything else | `could not be read` | `Check the file and its folder, then run omarchy restart shell.` |
 | `init-timeout` (round 13, R23c: the start-up `state init` did not answer within 15 s and was stopped) | `could not be checked: the start-up check did not answer and was stopped` | `Make sure a regular file, or nothing, is at that path, then run omarchy restart shell.` |
-| `read-timeout` (round 17, R27a, D-SINK-22 window c: the read before a save did not answer within 2 s, twice; always mid-session) | `did not answer when it was read before a save (twice, 2 seconds each)` | `The next change made here reads it again, and saving resumes if it answers. If it keeps stopping, check the disk or folder that holds it, then run omarchy restart shell.` |
+| ~~`read-timeout`~~ (round 17, R27a, D-SINK-22 window c: the read before a save did not answer within 2 s, twice; always mid-session). **WITHDRAWN 2026-10-20 (round 18, R28a): a read that does not answer is no block; the save stays held and the file is read again (`Model.stateReadStalledNotice`, the round-18 rulings). The reason no longer exists, and a load failure the stalled read finally answers with blocks under that load's own row** | ~~`did not answer when it was read before a save (twice, 2 seconds each)`~~ | ~~`The next change made here reads it again, and saving resumes if it answers. If it keeps stopping, check the disk or folder that holds it, then run omarchy restart shell.`~~ |
 
 A source call refused in the mode answers code `state_unreadable` with
 `state.json could not be read · nothing is saved until it can be`
@@ -5696,7 +5712,11 @@ mutation patches, `run.sh`'s reap).**
   (window c): the watchdog no longer saves. Its first firing asks for the
   load once more (`... of a save; reading it once more`), its second puts
   the session in the no-write mode `read-timeout` (`... of a save, twice;
-  nothing is written until a read answers`).]
+  nothing is written until a read answers`).] [Round 18, R28a: no block.
+  Every firing keeps the save held and asks for the load again with the
+  schedule's next bound: `state.json was not read back within <n> ms of a
+  save; the change is kept and the file is read again, waiting <bound>
+  ms`.]
 - R26b. `stateInHandler` counts the depth inside `stateFile`'s handlers --
   `stateLoadArrived` (both load handlers) and `onSaved` / `onSaveFailed`,
   each in a `try` / `finally` -- and a save asked for at depth > 0 is
@@ -5931,7 +5951,11 @@ read -- it waits for that write to land, then reads, then writes; (c) a read
 that does not answer within its bound is retried once, never followed by a
 blind write; if the retry is silent too, the session takes the R22 no-write
 mode with its own reason (`read-timeout`: one Model sentence, names the
-file, no URL, told once), lifted by a later read that answers. Window (b), a
+file, no URL, told once), lifted by a later read that answers. [Round 18,
+2026-10-20: R28a REPLACES this half of (c). The no-write mode lost the
+change it held when it lifted (round 1's two reviews), so a silent read now
+keeps the save parked and reads again on a bounded schedule, and
+`read-timeout` is withdrawn. The round-18 rulings.] Window (b), a
 re-point between the read's load and its write, stays: milliseconds,
 documented. Measure what the waits cost a burst of saves (latency,
 coalescing) and that D-SRC-16's and R25a's echo handling still hold.
@@ -5966,7 +5990,9 @@ family with the R23e / R25 copy: a block that begins MID-SESSION is titled
 `Saving has stopped` in the notification and the journal (the start-up
 reasons keep `Saved sources not loaded`); the body says changes made now
 "are not saved until the file can be read again" (true on every way back),
-not "are not kept"; and the advice for a file or folder that has gone
+not "are not kept" [round 18, R28e: true of the words only; on three of the
+four ways back out of a mid-session block the change is dropped, and the
+sentence now says which -- the round-18 rulings]; and the advice for a file or folder that has gone
 missing names the link case first ("if it is a symbolic link, point it back
 at the folder or file that holds your state"). Every sentence pinned; the
 README and `UX-SOURCES.md` quote them verbatim (lane C).
@@ -6000,7 +6026,13 @@ reading the code at that commit).**
   the save. The mode is lifted like any reason a load can lift: the next
   save reads (plan `verify`), a source verb is refused once and asks for one
   reload (`Model.stateBlockRecheck`), and `stateLoadArrived` lifts it on a
-  load that is a state. Window (b) is unchanged and is stated in
+  load that is a state. [Round 18: `blockStateWrites` set
+  `stateSavePending` false, so the load that lifted the block was applied
+  over memory and the held change was lost on every lift but the next
+  in-app change's -- our own late echo, a source verb's re-read, another
+  program's write, the stalled read answering. The two round-1 reviews
+  measured it through the shipping `Service.qml` on both hosts and both
+  echo modes; 0.14.2 kept every such change. R28a replaced it.] Window (b) is unchanged and is stated in
   `Model.stateSavePlan`'s comment. `stateFile.setText` remains the only
   writer, reached only through the plan's `write`, which only the verify's
   finish gets.
@@ -6011,7 +6043,8 @@ reading the code at that commit).**
   `sourceProbeFinished` with `ok: false`, `code: too_many`, `reason` the
   `too_many` sentence. The guide's form shows it through
   `Model.probeFailureLine` as `Sources is full (50) · remove one first from
-  <host>`. `Model.addSource` asks the same function.
+  <host>` [round 18, R28e: without the host now -- `Sources is full (50) ·
+  remove one first`]. `Model.addSource` asks the same function.
 - R27d. `reconcileSources` answers `full` at the cap and never evicts; the
   service's eviction loop is deleted. `adoptActiveSource` sets `full`, does
   not set the marker, and resolves the active source from step 2.
@@ -6059,13 +6092,18 @@ session scratch directory, not the tree).**
   delay while the probe saves, by rename and in place, with and without the
   mitigation, and a read one second later stands in for R26a's next read.
   The mitigation recovered a change the later read did not in **0 of 608**.
-  The change landed during our write in 30 trials; in 21 our rename had
+  The change landed during our write in 25 trials; in 20 our rename had
   replaced it, which no read recovers (D-SRC-48 itself, on every tree, as
   in the 196 trials where it landed before our write began); the
   mitigation's read loaded it in 4 and the later read in all 4; in 9
   trials (4 during our write, 5 after it) it survived on disk unseen by the
   view on its own, and the later read loaded it in all 9. Nothing built;
-  the row is the lead's to mark accepted.
+  the row is the lead's to mark accepted. [Round 18, R28e: this bullet read
+  "30" and "21" until round 1's review recounted the raw lines of the
+  RESULT file -- 25 `C@during`, 20 of them `C-survived:no`, 5 survived;
+  196 before our write and 387 after it was saved, 196 + 25 + 387 = 608.
+  The RESULT file's VERDICT carried the same miscount and is corrected
+  there. The headline, 0 of 608, and the verdict stand.]
 - R27f, the open budget, at 10,000 channels in the cage's floating-window
   mode, 3 cold shells and 24 warm opens per view, interleaved with PERF-02
   method A (transcript `open-20261020-123554-1529605`, 21 passed, 0
@@ -6077,6 +6115,13 @@ session scratch directory, not the tree).**
   | wall, cold | 94 ms | 580 ms (538-620) | 21 |
   | list, warm | 12 ms | 34 ms (29-40) | 13 |
   | wall, warm | 12 ms | 32 ms (29-43) | 21 |
+
+  [Round 18, R28d: the "Delegates" column counts every delegate the view
+  had BUILT, its cacheBuffer's off-screen ones included; a screen at this
+  size DRAWS 10 rows and 16 tiles. The settle rule (a count stable over
+  three frames) therefore trailed the drawn screen and let a view that drew
+  six rows and filled the rest 300 ms later pass L1-L5 (round 1's live
+  review). The round-18 rulings re-measure the open with the drawn count.]
 
   **Rule 7's 150 ms budget does NOT hold for the first open of a session,
   and holds for every later one.** On a cold open the two settle rules
@@ -6096,7 +6141,10 @@ session scratch directory, not the tree).**
   `open-20261020-123804-1537394`): cold list 546 -> 647 ms, cold wall 580
   -> 640, cold summon 95 -> 207, warm unchanged at 34 (a warm open creates
   no delegate). The legacy `openMs` still under-counts a cold open (10 rows
-  against 13, 18 tiles against 21). The defect R27f asks to be filed is the
+  against 13, 18 tiles against 21) [round 18, R28d: an under-count of the
+  BUILT delegates only; against what is drawn `openMs` reads the same 10
+  rows and two more than the 16 tiles. What it misses is the frames up to
+  the first drawn screen, not the delegates]. The defect R27f asks to be filed is the
   board's (`docs/STATUS.md`, the lead's); lane A proposed the next free
   `D-PERF` number. Nothing in the product changed.
 
@@ -6227,13 +6275,17 @@ board's ids and states are the lead's).**
   6f1d176 the same start evicted the least recently used source (D-SRC-44)
   and put the guide URL on the bar's playlist, so this is new in R27d's
   shape, narrower than what it replaced, and silent. The README states it
-  as not covered.
+  as not covered. [Round 18: confirmed by both round-1 reviews as a P1 and
+  fixed by R28b; the guide URL is held with the playlist and moves in with
+  it.]
 - (3) A copy finding: the probe commit's refusal reaches the form through
   `Model.probeFailureLine`, which appends ` from <host>`, so it reads
   `Sources is full (50) · remove one first from tv.example.net`. Its
   sibling (rule 15) is older: the same commit's `state_unreadable` refusal
   reads `state.json could not be read · nothing is saved until it can be
-  from <host>`. A service-side refusal is not a fetch failure.
+  from <host>`. A service-side refusal is not a fetch failure. [Round 18,
+  R28e: fixed for both, and for `unknown_source`: a result that carries one
+  of those codes reads its sentence alone (`Model.PROBE_LOCAL_REFUSALS`).]
 - (4) A UX question that follows from R27d: while the migration is held on
   a 0.13.6 upgrade the guide opens unconfigured over 50 saved sources, and
   the `Sources is full` card does not say a source can be picked meanwhile.
@@ -6251,4 +6303,394 @@ board's ids and states are the lead's).**
 - (7) Rule 15, the cap: the guide gates `a`, `c` and the Add rows with its
   own `sourcesFull()` (`sourceCount < Model.LIMITS.sources`), not
   `Model.sourcesFull`; the same constant, so not a defect today, but the
-  one cap decision R27c names is two functions.
+  one cap decision R27c names is two functions. [Round 18, R28e: three --
+  `Service.canAddSource` was the third, which a round-1 review found -- and
+  now one: all three call `Model.sourcesFull`.]
+
+### D-SINK-19 round 18 rulings (lead, 2026-10-20; R28, on top of R1-R27, which stand except where R28 replaces them)
+
+**What the round began from.** Round 17's candidate (lane-sweep-a1 070cd35
+and the documents on lane-sweep-c1 843ae87) held live in everything R27 set
+out to do, and three reviews found it NOT MERGEABLE on two P1s, both new
+data loss against `dev` 6f1d176, both measured through the shipping
+`Service.qml` on both hosts and both echo modes:
+- R27a's window (c) put the session in the R22 no-write mode
+  (`read-timeout`) after two silent reads, and `blockStateWrites` set the
+  held save aside. When a load then lifted the block -- our own write's
+  echo reported late, the re-read a source verb asks for, another program's
+  write, the stalled read answering -- `Model.reloadDisposition` saw nothing
+  held and applied the disk over memory: the change was gone from memory
+  and file, an in-app source add whose probe had succeeded included
+  (`addOk:true ... inMemAfter:false onDisk:false` in 6 of 8 host, echo and
+  next-act cases). It needs no user action with own-echo `load`: a write
+  of ours reported after about 6 s is enough. 0.14.2 kept every such change.
+- R27d's held migration did not hold the entry's GUIDE URL: with step 1
+  answering `full`, `adoptActiveSource` still ran the R4 guide-URL block on
+  the step-2 key. A source the user picked meanwhile had its own guide URL
+  replaced by the bar's at the next start (its only copy; live on c1,
+  `after restart: A-epg:BAR`); "Remove one" migrated the playlist with no
+  guide URL and stripped the bar's; and the `Bar setting removed` card said
+  the URL was removed while it stayed on the entry, overwritten at once by
+  `Sources is full` on the same replace id.
+
+Beside them: two R27a resets no check held (deleted, node read 2,634 / 0 in
+both echo modes); the open instrument counting off-screen delegates and
+passing a view that fills in late; R27b's breakdown miscounted (30 and 21
+for 25 and 20); the open-mutations README's claim that the summon time does
+not grow under `slow-delegate.patch`; the probe-commit refusal reading
+`Sources is full (50) · remove one first from 127.0.0.1`; the cap decided in
+three places under a comment calling it one; the mid-session notice's "not
+saved until the file can be read again" against the ways back on which the
+change is dropped; and two load-dependent sentences in the harness README.
+
+**The lead's ruling, R28 (2026-10-20), replacing the parts of R27 they
+break.**
+
+R28a. A STALLED READ IS NOT A NO-WRITE BLOCK. After a silent read the save
+STAYS PARKED with memory as the authority; the read is retried on a bounded
+backoff (the schedule stated); there is never a blind write and never a
+drop; when a read answers, R26a's dispositions decide (the base -> write;
+another program's text -> the R24a merge, then write; a load failure ->
+R22). If the reads stay silent past a stated time the user is told once (one
+Model sentence, names the file, no URL: the change is kept in the session
+and saved when the file answers; a shell stopped first loses it). Saving
+other changes meanwhile coalesces into the same parked save. Pins on every
+path that ends the wait (own echo, a source verb, a foreign write, a late
+answer, a restart), both hosts, both echo modes: the held change survives
+each, red on lane-sweep-c1. The `read-timeout` reason and its copy go, or
+are re-used only if the stalled read answers with a load FAILURE.
+
+R28b. A HELD MIGRATION HOLDS BOTH URLS. With the migration held at the cap
+(step 1 `full`), the entry's `epgUrl` is held on the entry WITH its
+`playlistUrl`: no R4 adoption onto any record, no strip, no "removed"
+report; the notice says the bar's playlist and its guide move in once a
+source is removed; after a removal the migration takes both together (R21).
+Pinned: a picked source keeps its own guide URL across a restart, and
+"Remove one" loses nothing; red on lane-sweep-c1.
+
+R28c. THE TWO UNPINNED RESETS -- the write wait's expiry reset when a write
+lands, and the read's "asked once more" reset when it finishes, or their
+R28a successors -- each go red in node, both echo modes, when a mutation
+deletes it.
+
+R28d. THE OPEN INSTRUMENT COUNTS WHAT IS DRAWN: only delegates that
+intersect the presenting view's visible area, stopping at the first frame
+after that set is complete, with a late-fill mutation that goes red.
+Re-measure the 10,000-channel open (list and wall, cold and warm,
+interleaved with PERF-02's method) and report it. No product code changes.
+
+R28e. THE MISCOUNTS AND round 1's P3s: R27b's breakdown everywhere it is
+quoted; the open-mutations README and `open-scenario.sh`'s header; the
+probe-commit refusal's host; the cap in one place, or the comment saying
+three; the mid-session sentence against the ways back; and the
+load-dependent sentences.
+
+**What the tree does (lane-sweep-a2, 2bed7c2, on lane-sweep-c1; lane A's
+report, each behaviour claim below re-checked by this lane on 2bed7c2 by
+calling the model, by driving the shipping `Service.qml` through
+`tests/service-harness.js`, or by reading the code).**
+- R28a. `Service.finishStateVerify(true)` -- the watchdog fired with no
+  load -- no longer blocks or writes. It counts the silence
+  (`stateVerifySilences`), asks `Model.stateVerifyTimeoutAct({ silences,
+  silentMs, told })`, which always answers `retry` with the next bound,
+  sets `stateVerifyBoundMs` (the watchdog's interval is that binding),
+  reloads and restarts the watchdog; `stateSavePending` and
+  `stateVerifyPending` stay set, so whatever load comes is decided by
+  R26a's dispositions with the change held, and every save asked meanwhile
+  is plan `join`. The schedule is `Model.STATE_READ_BOUNDS_MS`, `[2000,
+  2000, 4000, 8000, 16000, 30000]`: re-reads at 2, 4, 8, 16, 32 and 62 s
+  after the save first asked, then every 30 s (called:
+  `stateReadBoundMs(0..8)` summed gives 2000, 4000, 8000, 16000, 32000,
+  62000, 92000, 122000, 152000). The interval is bounded, the count of
+  re-reads is not. A read is also asked at once (`rereadStateVerify`,
+  from a turn of its own, never inside a `stateFile` handler and never
+  while a write of ours is out) when a change joins a held save after a
+  silence, and when one of our writes is reported (`onSaved`, and
+  `onSaveFailed` when the text landed): a read asked while our write was
+  out was dropped by the view (F-HARNESS-31). At the third silence, 8 s
+  (`Model.STATE_READ_TELL_MS`), the user is told once for this held save
+  (`Model.stateReadStalledNotice`, id 74019, urgency normal; on the
+  console as `omarchy-iptv: <title>: <body>`): `Saving is waiting` /
+  `<path> has not answered for 8 seconds when it was read before a save.
+  The change is kept in this session and saved when the file answers; if
+  the shell is stopped first, it is lost.` Each silence logs `state.json
+  was not read back within <ms> ms of a save; the change is kept and the
+  file is read again, waiting <bound> ms`, and the answer after one
+  `state.json answered <ms> ms after a save asked for it; the change held
+  meanwhile is decided now`. `read-timeout` is gone from `Service.qml` and
+  the model; a load FAILURE the stalled read answers with blocks under
+  that load's own reason (over an empty folder, `absent`, told once on
+  74017, no file created).
+- R28b. `adoptActiveSource` skips the R4 block when `full` and sets
+  `heldEpg`; `reconcileAction` makes BOTH URLs fresh under `heldFull`; the
+  `full` notice is re-worded (below). Driven through the shipping
+  `Service.qml` on 2bed7c2 by this lane (round 1's probes, retargeted), both
+  hosts: a 0.13.6-shaped state at 50 sources with the entry carrying a new
+  playlist and a guide URL tells `Sources is full` alone (no `Bar setting
+  removed`), reports `playlistUrl:full` alone, keeps both URLs on the
+  entry and source A's own guide URL; one removal adds the playlist WITH
+  the bar's guide URL, ACTIVE, the entry stripped of both; A picked and
+  the shell restarted, A's guide URL is still its own (`afterRestart:
+  ... Aepg: OWN ... entryEpg: true`). On lane-sweep-c1 the same probes read
+  `newEpg: ""` and `Aepg: BAR`.
+- R28c. The three resets of a held save's read (the silence count, the
+  bound and the told flag) are made in `finishStateVerify`'s answered
+  branch and nowhere else, and the write wait's expiry
+  (`stateWriteWaitExpired`) is reset in `onSaved` and in `onSaveFailed`.
+  Each deletion is red in node in both echo modes (below).
+- R28d. `scripts/dev-harness/shell.qml`'s `openSample` / `openFrame` and
+  `HarnessLib.openDrawnSet` / `openDrawnSettle`: a delegate is counted when
+  it is shown and intersects the view's visible area, and the open is
+  realised at the first frame whose drawn set TILES that area against the
+  guide's `rowCount` (contiguous, nothing missing above or below, a grid
+  row whole); the instrument then samples 600 ms more and counts frames
+  whose drawn set changed. The live arm grades the warm median against
+  150 ms (L6 / W6) and no change after any decision (L7 / W7); L4 compares
+  the drawn count with the most the view built. The cold budget and the
+  legacy `openMs` are printed, not graded. New mutation:
+  `spikes/open-mutations/late-fill.patch` (both views' model is
+  `min(rowCount, 6)` until 300 ms after `open()`). The harness README's
+  open-scenario section has the rule. No product code changed.
+- R28e. `Model.probeFailureLine(reason, host, kind, code)` drops `from
+  <host>` when `code` is one of `Model.PROBE_LOCAL_REFUSALS` (`too_many`,
+  `state_unreadable`, `unknown_source`), refusals the plugin made itself;
+  the service's probe results carry `code`, and both `Guide.qml` call
+  sites pass it. Called: `Sources is full (50) · remove one first` and
+  `state.json could not be read · nothing is saved until it can be` with a
+  host and those codes; `HTTP 404 Not Found from tv.example.net` for a
+  fetch failure, unchanged. `Service.canAddSource` and `Guide.sourcesFull()`
+  call `Model.sourcesFull`. The no-write body's second sentence is
+  `STATE_BLOCK_UNSAVED_START` at a start and `STATE_BLOCK_UNSAVED`
+  mid-session (the round-12 copy table above). The RESULT file, the
+  open-mutations README, `open-scenario.sh`'s header and the harness
+  README's Round 17 record are corrected in lane A's files.
+
+**What the new mid-session sentence describes, and does not change (lane
+A's measurement through `Service.qml`, both hosts and both echo modes; R22's
+behaviour, the same on 6f1d176).** In a block that begins after a state
+loaded, a change made in the block -- a favourite, a hidden group, a saved
+search -- is saved if the NEXT such change's own read finds the file again
+(R26a); it is dropped if the file comes back by itself first (a backup put
+back, a `chmod 600`: the view sees it and the load is applied), if the
+change that finds it is a source change (refused once, and its re-read
+applies the file), or if the shell is stopped. R28e made the sentence say
+so; whether a change made in an R22 block should be held like R28a's is
+lane A's open question for the lead, below.
+
+**The measurements R28 rests on (lane A2's runs; transcripts in that lane's
+session scratch directory, copied 0600, not the tree).**
+- R28a has no live segment, as R27a's window (c) had none: nothing in the
+  cage stalls a FileView read without FUSE or root (a FIFO at the path is
+  `not-a-file` and answers at once, round 1's live review). The node pins
+  are the evidence, through the shipping `Service.qml` on both hosts and
+  both echo modes (`R28a (<tag>): ...`): the schedule over an EMPTY folder
+  (re-reads at 2, 4, 8, 16, 32, 62 and 92 s, told once at 8 s, nothing
+  blocked, refused, written or created, and the read's eventual `absent`
+  blocked and told); the wait ended by our own write reported at 6.5 s; by
+  a source verb (`updateSource` answers ok, not `state_unreadable`); by an
+  in-app add whose probe succeeds; by another program's write (merged); by
+  the stalled read answering late; by the schedule's re-read; three
+  changes joining one write; and a restart while held (the file unchanged,
+  and the notice said a stopped shell loses it). Every keeping path is
+  also checked after a restart. Round 1's own lens scripts, retargeted at
+  2bed7c2, read every change kept on all four host and echo combinations
+  (re-run by this lane: the two favourites with the first write reported
+  at 6.5 s, `mem` and `file` both; the in-app add, `inMemAfter:true
+  onDisk:true` in all 8 cases; the source verb, `first:"ok"` with the
+  favourite on disk).
+- key-scenario live, each under its own nested cage on a private bus:
+  forward 136 passed, 0 failed (`key-20261020-155757-2060758`, 492.4 s);
+  `--baseline 843ae87` (lane-sweep-c1) 133 / 3, B32, B38 `a-epg:bar`, B39
+  `d-epg:empty ... a-epg:bar` (`key-20261020-161525-2136277`);
+  `--baseline 6f1d176` 129 / 7, B32, B33 (`waited:NOFIELD` at load 2-3),
+  B35-B37, B38, B39 (`key-20261020-160609-2096379`). B38 / B39 are R28b's
+  live segments: a 0.13.6 install at 50 sources whose entry carries the
+  playlist D and a guide URL, A with a guide URL of its own; A picked and
+  the shell restarted, A's own guide URL stands, each start tells
+  `Sources is full` and never `Bar setting removed`; one record removed, D
+  moves in with the bar's guide URL. `sources-scenario.sh` 66 / 0
+  (`sources-20261020-161452-2134037`).
+- R28d, the open, at 10,000 channels in the cage's floating window, 3 cold
+  shells and 24 warm opens per view, interleaved with PERF-02 method A
+  (tip c06f436, `open-20261020-154123-1999165`, 30 passed, 0 failed, load
+  2-3):
+
+  | Open | Summon median | Realised median (range) | Drawn | Built at the decision |
+  |---|---|---|---|---|
+  | list, cold | 93 ms | 548 ms (540-549) | 10 rows | 13 |
+  | wall, cold | 91 ms | 534 ms (519-537) | 16 tiles | 18-21 |
+  | list, warm | 12 ms | 33 ms (27-41) | 10 rows | 13 |
+  | wall, warm | 12 ms | 31 ms (27-39) | 16 tiles | 21 |
+
+  **Rule 7's 150 ms holds for every warm open and does NOT hold for the
+  first open of a session.** On every cold open the first frame swapped
+  already drew the whole screen, so the cold time is the first frame, and
+  the instrument now stops there instead of trailing the cacheBuffer.
+  Method A read a median of -2 / -4 ms: it cannot see the open. The run
+  before, at 2f846b7 (`open-20261020-153505-1977171`), read 526 / 540 cold
+  and 32 / 31 warm. A 40-channel control (`open-20261020-155426-2050158`,
+  30 / 0): 450 / 440 ms cold, 21 / 21 warm, summon 25 / 23 cold -- about
+  440 ms of a cold open is the first show of the guide's window in the
+  cage whatever the channel count; 10,000 channels add about 100 ms to the
+  cold realised time and about 70 ms to the cold summon. The floating xdg
+  window under cage is not the production layer-shell surface, so the cold
+  figure on Hyprland is UNVERIFIED. `late-fill.patch`
+  (`open-20261020-154400-2009476`): 28 / 2, L6 and W6 red, warm median 370
+  / 362 ms, the six-row frame refused as `below` in both cold traces.
+  `openDrawnSet` counting every BUILT delegate, in a copy of the harness
+  (`open-20261020-154651-2020565`): 18 / 12. `slow-delegate.patch`
+  (`open-20261020-155149-2039814`, load 3.7-6.7): 30 / 0, cold summon 93
+  -> 207 ms (list) and 91 -> 191 (wall), cold realised 548 -> 673 and 534
+  -> 628, warm unchanged at 32: a cold summon builds delegates
+  synchronously, the hidden view's among them, so the summon grows too.
+
+**Seen red (lane A2, by its report).** The final node suite over
+lane-sweep-c1's `Service.qml` and model: 66 failures of 2,692 in each own-echo
+mode, on behaviour (R28a's ways read `read-timeout` and the change lost; the
+source verb `state_unreadable`; R28b's `aEpg:"E"` after a restart and
+`newEpg:"-"` after a removal; R28c's three; the probe line). Over 6f1d176:
+112 of 2,692 in each. One-decision mutations of 2bed7c2, failures per echo
+mode, identical in both: silence blocks (R27a's shape) 44, silence writes
+blind 45, silence clears the held save 44, no join re-read 9, no landing
+re-read 6, never tell 13, tell at 4 s 14, a flat 2 s schedule 13, re-read
+while a write is out 4; R28c -- expiry not reset in `onSaved` 4, nor in
+`onSaveFailed` 4, silences not reset 12, bound not reset 4, told not reset
+4; R28b -- R4 runs on `full` 9, retry fresh for the playlist only 5; R28e --
+`probeFailureLine` ignores `code` 5, a commit result without `code` 4,
+`canAddSource` back to its own compare 1 (the structural pin; the
+behaviour is identical), one sentence for start and mid-session 2; the
+re-made `r26a-watchdog-20ms.patch` and `r26a-watchdog-no-interval.patch` 24
+each. open-scenario's check-tree D1-D10 and E1-E4 were each red on a
+one-decision mutation of the function they drive (the harness README lists
+them). Not seen red: the R28e ways-back service pins (green on c1 and
+6f1d176 alike: they pin behaviour that predates the round; the copy they
+bind to is red under the one-sentence mutation), and the S1 seam (a
+structural check).
+
+**Counts.** On 2bed7c2: node 2,692 in both own-echo modes (2,634 on
+lane-sweep-c1), python 1,293, qml spec 78, `qa-lib-test.sh` 515, open
+preflight 16 (9), key preflight 11, model declarations 786 (780).
+Floors: `NODE_CHECKS_MIN` 2,634 -> 2,692, `OPEN_PREFLIGHT_MIN` 9 -> 16,
+key-scenario's live `EXPECTED_CHECKS` 133 -> 135 (B38, B39),
+open-scenario's 8 -> 15 (check-tree) and 20 -> 29 (live).
+
+**Documents corrected (lane-sweep-c2, the documents lane).** Each was
+true of lane-sweep-c1 or of an earlier tree and is now history or wrong.
+- README: the migration paragraph (the guide URL held with the playlist,
+  the `Sources is full` body, and its "Not covered yet" for the guide URL
+  withdrawn); the `state.json` entry under "Files it writes" (a read that
+  does not answer keeps the change); the no-write bullet (both second sentences, the
+  `read-timeout` cause and advice and its way back gone); a new
+  troubleshooting bullet, `Saving is waiting`; the link bullet (the
+  stalled read, the past window's account); the merge bullet's
+  probe-commit refusal (no host); the harness count (134 -> 136).
+- `UX-SOURCES.md`: 5.5's probe-commit row; 5.9's `full` row and its
+  record; 5.10's introduction, item 1 (the two second sentences, the
+  `read-timeout` row withdrawn, the example), item 2's wireframe, items 4
+  and 5 (brackets), and a new item for the stalled read.
+- `UX.md`: 4.4's bracket; 6.4's no-write row, the `full` card, and the new
+  `Saving is waiting` card on 74019.
+- This file: section 2.2's migration paragraph, the model table
+  (`sourcesFull`, `reconcileAction`, `adoptActiveSource`,
+  `stateSavePlan` / `stateVerifyTimeoutAct`, `stateUnreadableNotice`,
+  `entryInputNotice`, and new rows for the read schedule and
+  `stateReadStalledNotice`), section 6's open row, the round-12 copy table,
+  the R26 record's watchdog line, and the round-17 record (bracketed where
+  R28 overturns it: window (c),
+  R27e's "true on every way back", R27c's quote, R27b's counts, the open
+  table's delegate column and the `openMs` sentence, open items 2, 3 and 7).
+- `ARCHITECTURE.md`: section 5's round-17 amendment (window c), section 4's
+  migration line, the failure-modes entry, and the open-budget row.
+- `OMARCHY-PLUGIN-CONTRACT.md`: the eighth fact (the watchdog's answer
+  and R27b's counts).
+- `QA.md`: TC-CFG-33 to TC-CFG-36 re-graded, TC-CFG-37 and TC-CFG-38 new
+  (R28a, R28b), PERF-02's note, the manual step that quotes the body, and
+  the round-18 record. `QA-SOURCES.md`: SRC-MIG-61 to SRC-MIG-64 and
+  SRC-PERF-04, SRC-MIG-65 and SRC-MIG-66 new.
+- `scripts/dev-harness/README.md`: lane A2's Round 18 record and its
+  re-written open-scenario section stand as that lane left them, checked
+  against its report; the Round 17 record's "not live: window (c)" stays
+  true of R28a and is not changed.
+
+**This lane's search, by shape (rule 15).**
+- "A read that does not answer stops saving": grep over the nine files for
+  `read-timeout`, `twice, 2 seconds`, `window (c)`, `window c`, `once
+  more`, `saving resumes if it answers`, `stops saving`, `did not answer`.
+  Corrected: every hit that states it as current (the README's three, this
+  file's model and copy tables, `UX-SOURCES.md` 5.10, `ARCHITECTURE.md`,
+  the contract, `QA.md`, `QA-SOURCES.md`). Cleared: the round-17 records
+  (bracketed, history), D-CLIP-1's "1 s per-read timeout" (the clipboard),
+  and the start-up check's `did not answer` (`init-timeout`, which stands).
+- "Not saved until the file can be read again" and its paraphrases: grep
+  `until the file can be read`, `not saved until`, `true on every way
+  back`. Corrected: the README bullet, `UX-SOURCES.md` 5.10 items 1, 2, 4
+  and 5, `UX.md` 4.4 and 6.4, this file's tables and R27e (bracketed),
+  `ARCHITECTURE.md`'s failure-modes entry, `QA.md` TC-CFG-34 and its manual
+  step. Cleared: `nothing is saved until it can be` -- the source-call
+  refusal's sentence, unchanged.
+- "The bar's guide URL beside a held playlist": grep `no-source`, `Bar
+  setting removed`, `moves in`, `Not covered`, `guide URL`, `guide-data
+  URL`, `heldFull`. Corrected: the README migration paragraph,
+  `UX-SOURCES.md` 5.9, `UX.md` 6.4, this file's model rows and open item
+  2, `QA.md` TC-CFG-35, `QA-SOURCES.md` SRC-MIG-63. Cleared: the
+  `no-source` row itself, which still holds when step 1 is not `full` and
+  no source is active (not driven by this lane; the model's branch is
+  unchanged), and the `invalid` branch, which still attaches the entry's
+  guide URL to the step-2 record (lane A's open question 2, below).
+- "From `<host>`" on a refusal: grep `from <host>`, `from 127`, `remove one
+  first`. Corrected: README, `UX-SOURCES.md` 5.5, `QA-SOURCES.md`
+  SRC-MIG-62, this file's R27c and open item 3. Cleared: every fetch
+  failure's `<reason> from <host>` (UX 5.5, `UX.md`, QA's TC-RFR-08), which
+  keeps the host.
+- The open instrument's claims: grep `13 rows`, `21 tiles`, `13 |`,
+  `under-count`, `a screen of delegates`, `openMs`, `summon`, `stable over
+  three`, `546`, `580`. Corrected: `ARCHITECTURE.md`'s budget row, `QA.md`
+  TC-CFG-36 and PERF-02, `QA-SOURCES.md` SRC-PERF-04, this file's section-6
+  row and R27f table (bracketed). Cleared: `UX.md`'s dated delegate and
+  paint measurements (their own instruments), and the round-8 to round-10
+  records.
+- R27b's counts: grep `in 30 trials`, `21 of the 30`, `of the 30`, `30
+  that landed`. Corrected: this file's R27b bullet and the contract's
+  eighth fact. No other quote.
+- The cap's places: grep `LIMITS.sources`, `MAX_SOURCES`, `one decision`,
+  `sourcesFull`. Corrected: this file's `sourcesFull` row and open item 7,
+  `QA.md` TC-CFG-35. Cleared: SR24's row and SRC-SEC-10 (the add form's
+  own refusal, by the same function now).
+- Every quoted notice in the nine files was checked against the model on
+  2bed7c2 by a one-off script that composes the corpus from
+  `stateUnreadableNotice`, `stateUnreadableJournal` and `stateBlockedHeader`
+  for every reason both ways, `stateReadStalledNotice`, `entryInputNotice`
+  for each reason, `sourceErrorMessage` and `probeFailureLine`, and finds
+  each quote's pieces in order (session scratch, not the tree).
+
+**Open for the lead (decision requests and evidence; the board's ids and
+states are the lead's, and none is cited here).**
+- (1) The board: the two round-1 P1s fixed on lane-sweep-a2 (R28a, R28b);
+  R28c's two resets pinned; R27b's miscount, the open-mutations claim, the
+  probe line's host and the three-place cap corrected (R28e); D-PERF-1's
+  instrument re-made (R28d); and the cold-open budget defect R27f asked to
+  be filed, still unfiled -- about 530-550 ms at 10,000 channels and about
+  445 ms at 40 in the cage (round 1 proposed the next free `D-PERF`
+  number).
+- (2) Lane A's open question 1, rule 15 over R28a: should "never a drop"
+  extend to R22 mid-session blocks? Today a change made in one is dropped
+  on three ways back (above), on 6f1d176 and 0.14.2 too, because
+  `blockStateWrites` sets `stateSavePending` false. R28e fixed the words;
+  holding the change so the lifting load merges it is a behaviour change.
+- (3) Lane A's open question 2, a sibling of R28b: when the bar's playlist
+  is INVALID, `adoptActiveSource` still adopts the entry's guide URL onto
+  the step-2 record and can replace that record's own guide URL; 6f1d176
+  does the same.
+- (4) Lane A's open question 3: a held change cannot survive a shell
+  stopped while it is held, because nothing writes without its read; the
+  restart pin asserts the stated loss and nothing worse. To confirm.
+- (5) Lane A's choices to confirm: the stall notice's own id (74019, not
+  74017), once per held save (reset when its read finishes), its title,
+  and the schedule and the 8 s tell time.
+- (6) Rule 13, carried from round 17: the README and `UX-SOURCES.md` quote
+  `tests/fixtures/state-notices.json` word for word and no check joins
+  them; this lane checked the join once, by script.
+- (7) Round 17's UX question (4) stands: at a held migration on a 0.13.6
+  upgrade the guide opens unconfigured over 50 saved sources, and when
+  one is removed the bar's playlist becomes the ACTIVE source over whatever
+  the user picked (driven: `active: NEW` after the removal with A picked).
