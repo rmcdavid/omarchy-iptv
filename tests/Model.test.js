@@ -13479,9 +13479,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           h.replace(sf => { sf.exists = false; sf.disk = ""; sf.mode = null })
           h.stateFile.loader = () => {}
           h.root.toggleFavorite("t:app.uk"); h.drain()
-          h.elapse(2000)
+          h.elapse(2000); h.drain()
           const once = [h.root.stateVerifySecondReads, h.root.stateWriteBlocked, h.stateFile.exists]
-          h.elapse(2000)
+          h.elapse(2000); h.drain()
           const told = lastNotice(h)
           return { once, blocked: h.root.stateWriteBlocked, created: h.stateFile.exists, mode: octal(h.stateFile.mode), told: blockTold(h),
                    title: told && told[0], namesFile: !!told && told[1].indexOf("/state.json") !== -1, noUrl: !!told && told[1].indexOf("://") === -1,
@@ -13493,7 +13493,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           const loader = h.stateFile.loader
           h.stateFile.loader = () => {}
-          h.root.toggleFavorite("t:one.uk"); h.drain(); h.elapse(4000)
+          h.root.toggleFavorite("t:one.uk"); h.drain(); h.elapse(4000); h.drain()
           const blocked = [h.root.stateWriteBlocked, h.file().favorites.length]
           h.stateFile.loader = loader
           h.root.toggleFavorite("t:two.uk"); h.drain()
@@ -13503,7 +13503,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           const loader = h.stateFile.loader
           h.stateFile.loader = () => {}
-          h.root.toggleFavorite("t:one.uk"); h.drain(); h.elapse(4000)
+          h.root.toggleFavorite("t:one.uk"); h.drain(); h.elapse(4000); h.drain()
           h.stateFile.loader = loader
           const first = h.root.updateSource(KB, { label: "edited" }); h.drain()
           const lifted = h.root.stateWriteBlocked
