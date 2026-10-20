@@ -115,6 +115,12 @@ Consequences you must respect:
   **The hold ended on 2026-10-13**, when the maintainer raised a finding on
   #11315 (D-LOGO-13); the rule above applies again, and a release still
   waits for the owner's word.
+- **The same exception again, decided by the owner on 2026-10-20: `main` is
+  HELD at 0.14.2 until a maintainer actions #11935** (approves it or raises
+  a finding on it), for the same reason: a moved `main` makes the pending
+  request stale. `dev` moves freely -- the helper split (D-REL-7) waits on
+  it, unreleased. If the maintainer raises a finding, its fix ships at once
+  in a new release, which then carries what `dev` holds.
 
 ## Where the truth lives
 
