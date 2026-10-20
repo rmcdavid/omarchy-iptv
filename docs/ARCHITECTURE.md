@@ -567,6 +567,30 @@ before write:
   a turn apart while the first is in flight can push the first out and
   read its echo as foreign (lane A, found while re-levelling R13; the id
   given on lane-clean-f1).
+- [Amended 2026-10-20 (D-SINK-19 round 17, R27a; lane-sweep-a1). Two of the
+  three windows are closed and the third is the one that remains: NO WRITE
+  WITHOUT A READ. A save asked while our previous write is in flight now
+  WAITS (`Model.stateSavePlan` answers `wait`) until that write's `saved` or
+  `saveFailed`, then reads and writes from a turn of its own; the wait has
+  its own 2 s bound (`stateWriteWaitWatchdog`), which releases the save to
+  its read, never to a write. The read's 2 s watchdog no longer saves: it
+  asks for the load once more, and a second silence puts the session in the
+  R22 no-write mode with reason `read-timeout`, told once (`Saving has
+  stopped`, `... did not answer when it was read before a save (twice, 2
+  seconds each)`), lifted by a later read that answers. What remains is
+  window (b), a re-point landing between the read's load and the write it
+  allows, a turn apart: milliseconds, stated in `Model.stateSavePlan`'s
+  comment and the README. Pinned through the node double over the shipping
+  `Service.qml` on both hosts and both echo modes (`R27a (<tag>): ...`, six
+  pins, among them window (a) with the folder link re-pointed at an empty
+  folder as the first write lands -- no file created, `absent`, told once --
+  and window (c) over an empty folder -- no file created, `read-timeout`);
+  live by key-scenario B33. A consequence, pinned: no write is issued while
+  another is out, so R25a's record never holds more than one text and
+  D-SRC-47's overflow can no longer happen. The same-instant loss (D-SRC-48)
+  stands: R27b measured the one mitigation proposed for it and it
+  recovered nothing a later read does not (0 of 608 trials,
+  `spikes/filewatch/RESULT-2026-10-20-r27b.txt`).]
 
 ### mpv status (helper `status` stdout, M1 target)
 
@@ -1213,7 +1237,11 @@ now, with each decision lifted into `Model.js` so node can call it (rule 12):
   through `Model.reconcileSources` exactly as a CLI value always has (a known
   URL becomes active; an unknown one is added with origin `cli`, or `migrated`
   on the very first v2 run; at the 50 cap the least-recently-used non-active
-  record is evicted and its cache directory removed), invalid is reported and
+  record is evicted and its cache directory removed [2026-10-20, R27d,
+  D-SRC-44: no longer -- at the cap step (1) answers `full`, nothing is added
+  or evicted, the marker is not set, the entry keeps its URL and the user
+  is told once (`Sources is full`); the next reconcile after a removal
+  migrates]), invalid is reported and
   the key is left exactly as it was; (2) the state's `activeKey` when it
   names a record; (3) the entry's `sourceKey` when it names a record; (4)
   nothing, and a dangling key is cleared rather than left for the next reader.
@@ -2781,7 +2809,10 @@ login, which the lead's tooling does not hold.
   D-SINK-19 round 12, R22a): nothing is written to it for the session, the
   bar entry is left as it is, and one critical notification
   (`Saved sources not loaded`, `Model.stateUnreadableNotice`) names the file
-  and what to do. It used to be read as an empty state and saved over, which
+  and what to do [2026-10-20, R27e: titled `Saving has stopped` when the
+  block begins after the sources loaded, and the body says changes made now
+  "are not saved until the file can be read again"; R27a adds the reason
+  `read-timeout`, a read before a save that did not answer twice]. It used to be read as an empty state and saved over, which
   is how a start could erase every source (section 5, as amended).
   [Round 13, 2026-10-13 (R23): the guide's body is then that notice's own
   words, never the first-run form, and every refusal says the no-write
@@ -2793,7 +2824,7 @@ Performance budget (10k channels):
 
 | Item | Budget | How |
 |---|---|---|
-| Overlay open | < 150 ms | keepLoaded window; `rebuildDisplay` appends at most 300 rows; channels already parsed in memory |
+| Overlay open | < 150 ms | keepLoaded window; `rebuildDisplay` appends at most 300 rows; channels already parsed in memory. **Measured 2026-10-20 (R27f, D-PERF-1's async instrument, `scripts/dev-harness/open-scenario.sh`) at 10,000 channels in the cage's floating window: met by every open after the first (warm, realised median 34 ms list / 32 ms wall, max 43), NOT met by the first open of a session (cold, realised median 546 ms list / 580 ms wall), about 450 ms of which a 40-channel control shows too (the first show of the window in the cage). On Hyprland's layer-shell surface the cold figure is UNVERIFIED. Every open figure recorded before 2026-10-20 was taken without the delegates (D-PERF-1); the round-17 rulings in `ARCHITECTURE-SOURCES.md` have the table** |
 | Keystroke to redraw | < 30 ms | one linear scan over precomputed `searchKey`s, bounded materialization |
 | Helper `playlist` | < 1.5 s for 10k entries on this machine (excluding network) | single pass regex parser, no DOM |
 | Helper `epg` | < 4 s for a 50 MB XMLTV | `xml.etree.iterparse`, programmes outside a +-24 h window dropped, gzip streamed |
@@ -2873,7 +2904,9 @@ Performance budget (10k channels):
    save asked while our previous write is in flight skips its read; a
    re-point landing between the read's load and the write; the 2 s
    watchdog firing), in which it still does (section 5's round-16
-   amendment, "What remains"; lane-clean-f1). A save over an existing file keeps that file's
+   amendment, "What remains"; lane-clean-f1). [2026-10-20, round 17, R27a:
+   one window remains, the re-point between the read's load and the write;
+   the other two are closed (section 5's round-17 amendment).] A save over an existing file keeps that file's
    mode, so a re-pointed folder holding a 0644 `state.json` keeps 0644
    until the next start makes it 0600 (measured by the sink lane through a
    restart).]
