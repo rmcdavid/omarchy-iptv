@@ -135,9 +135,10 @@ var POINTER_FIELDS = ["stateLoaded", "reconciled", "dirsReady", "stateSavePendin
                       "stateReloadsByReason", "entryInputReports", "stateWriteBlocked", "stateLoadKind", "stateInitFound",
                       "stateWritesRefused", "stateVerifyPending", "stateVerifies", "stateVerifyNoLoad", "stateVerifySkipped",
                       "stateVerifyRetries", "stateSavesDeferred", "stateVerifyMsMax",
-                      // R27a (2026-10-20): the second read, the write wait,
+                      // R27a (2026-10-20): the re-reads (R28a: the silences of a held
+                      // save's read, its re-reads and the stall notices), the write wait,
                       // writes issued; R27d: the migration held at the cap.
-                      "stateVerifyRetried", "stateVerifySecondReads", "stateWriteWaiting", "stateSavesWaited", "stateWriteWaits",
+                      "stateVerifySilences", "stateVerifySecondReads", "stateReadStalls", "stateVerifyRereads", "stateWriteWaiting", "stateSavesWaited", "stateWriteWaits",
                       "stateWriteWaitTimeouts", "stateWritesIssued", "stateWriteWaitMsMax", "migrationHeldFull", "migrationFullTold"]
 function pointerStateOf(s) {
   if (!s) return { ok: false, error: { code: "no_service" } }

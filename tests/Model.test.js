@@ -7319,32 +7319,61 @@ checkCall("D-SRC-38: sourcesHeaderRight / stateBlockedHeader -- a block that beg
   // The reasons a block can carry: the load kinds, the start-up decision's
   // own (Model.stateLoadDecision), and R27a's read-timeout.
   const kinds = Object.keys(Model.STATE_LOAD_ERRORS).map(k => Model.STATE_LOAD_ERRORS[k]).concat(["unparsed"])
-  const decided = ["absent-unconfirmed", "init-timeout", "link", "not-a-dir", "folder-link", "read-timeout"]
-  checkCall("R27e: the notice fixture covers every reason a block can carry, and nothing else", () =>
-    Object.keys(fx.bodies).sort(), Array.from(new Set(kinds.concat(decided))).sort())
-  checkCall("R27e: every body is the fixture's sentence, word for word (the fixture is the copy the README and UX-SOURCES quote)", () =>
-    Object.keys(fx.bodies).filter(r => Model.stateUnreadableNotice(r, P).body !== fx.bodies[r]), [])
-  checkCall("R27e (D-SRC-51): every body says a change made now is \"not saved until the file can be read again\" -- once, as its second sentence -- and none says \"not kept\"", () => {
-    const bodies = Object.keys(fx.bodies).map(r => fx.bodies[r])
-    return [fx.unsaved, bodies.every(b => b.split(fx.unsaved).length === 2 && b.indexOf(". " + fx.unsaved + " ") !== -1), bodies.some(b => /not kept/.test(b))]
-  }, ["Sources, favorites and settings changed now are not saved until the file can be read again.", true, false])
+  // R28a (2026-10-20) withdrew read-timeout: a silent read is no block.
+  const decided = ["absent-unconfirmed", "init-timeout", "link", "not-a-dir", "folder-link"]
+  const B = fx.bodies
+  checkCall("R27e / R28e: the notice fixture covers every reason a block can carry, and nothing else -- at a START every load kind and every reason the start-up decision adds; MID-session the load kinds alone (Model.stateLoadDecision blocks with the kind itself); read-timeout is gone (R28a)", () =>
+    [Object.keys(B.start).sort(), Object.keys(B.midSession).sort(), Model.stateLoadDecision({ kind: "permission", loadedBefore: true }).reason],
+    [Array.from(new Set(kinds.concat(decided))).sort(), Array.from(new Set(kinds)).sort(), "permission"])
+  checkCall("R27e / R28e: every body is the fixture's sentence, word for word, at a start and mid-session (the fixture is the copy the README and UX-SOURCES quote)", () =>
+    [Object.keys(B.start).filter(r => Model.stateUnreadableNotice(r, P, false).body !== B.start[r]),
+     Object.keys(B.midSession).filter(r => Model.stateUnreadableNotice(r, P, true).body !== B.midSession[r])], [[], []])
+  // R28e (2026-10-20): R27e's "not saved until the file can be read again"
+  // was true of one way back out of a MID-session block and false of three
+  // (round 1's live review, H5 and H2; measured again through the shipping
+  // Service.qml by the pins "R28e (... ): the ways back" below). So the
+  // sentence differs: at a start "not kept", mid-session the four ways named.
+  checkCall("R28e: the second sentence says what becomes of a change made now -- at a START \"not kept\"; MID-session it is held in the session, saved by the next such change that finds the file, dropped if the file comes back by itself, if a source change finds it, or if the shell stops -- once each, as the body's second sentence, and no body promises \"not saved until the file can be read again\"", () => {
+    const starts = Object.keys(B.start).map(r => B.start[r]), mids = Object.keys(B.midSession).map(r => B.midSession[r])
+    const once = (bodies, sentence) => bodies.every(b => b.split(sentence).length === 2 && b.indexOf(". " + sentence + " ") !== -1)
+    return [fx.unsaved.start, Model.STATE_BLOCK_UNSAVED_START === fx.unsaved.start, Model.STATE_BLOCK_UNSAVED_MID === fx.unsaved.midSession,
+            once(starts, fx.unsaved.start), once(mids, fx.unsaved.midSession),
+            ["saves them if it finds the file again", "dropped if the file comes back by itself first", "if a source change is what finds it", "or if the shell is stopped"].every(w => fx.unsaved.midSession.indexOf(w) !== -1),
+            starts.concat(mids).some(b => /not saved until the file can be read again/.test(b))]
+  }, ["Sources, favorites and settings changed now are not kept.", true, true, true, true, true, false])
   checkCall("R27e (D-SRC-50): the advice for a file or folder gone missing names the LINK case first -- `absent` leads with \"if it is a symbolic link, point it back at the folder or file that holds your state\"; a dangling file link and folder link say point it back; no sentence tells the user to restore what a link points to", () => {
-    const b = fx.bodies
-    const fix = r => b[r].slice(b[r].indexOf(fx.unsaved) + fx.unsaved.length + 1)
-    return [fx.linkFirst, fix("absent").indexOf(fx.linkFirst) === 0, /^Point it back at the file that holds your state/.test(fix("link")), /^Point it back at the folder that holds your state/.test(fix("folder-link")),
-            Object.keys(b).filter(r => /[Rr]estore the (file|folder) it points to/.test(b[r]))]
-  }, ["If it is a symbolic link, point it back at the folder or file that holds your state", true, true, true, []])
+    const fix = (set, r) => B[set][r].slice(B[set][r].indexOf(fx.unsaved[set]) + fx.unsaved[set].length + 1)
+    const all = Object.keys(B.start).map(r => B.start[r]).concat(Object.keys(B.midSession).map(r => B.midSession[r]))
+    return [fx.linkFirst, fix("midSession", "absent").indexOf(fx.linkFirst) === 0, fix("start", "absent").indexOf(fx.linkFirst) === 0,
+            /^Point it back at the file that holds your state/.test(fix("start", "link")), /^Point it back at the folder that holds your state/.test(fix("start", "folder-link")),
+            all.filter(b => /[Rr]estore the (file|folder) it points to/.test(b))]
+  }, ["If it is a symbolic link, point it back at the folder or file that holds your state", true, true, true, true, []])
   checkCall("R27e (D-SRC-42): the TITLE -- \"Saving has stopped\" for a block that began mid-session, \"Saved sources not loaded\" at a start, for every reason; the journal line is the title then the body; the header and the notification take the same word", () => {
-    const rs = Object.keys(fx.bodies)
+    const rs = Object.keys(B.start)
     const argv = (mid) => Model.notifyArgv("stateUnreadable", { reason: "absent", path: P, midSession: mid })
     return [rs.every(r => Model.stateUnreadableNotice(r, P, true).title === fx.titles.midSession), rs.every(r => Model.stateUnreadableNotice(r, P, false).title === fx.titles.start),
             rs.every(r => Model.stateUnreadableNotice(r, P).title === fx.titles.start),
-            rs.every(r => Model.stateUnreadableJournal(r, P, true) === fx.titles.midSession + ": " + fx.bodies[r]),
-            rs.every(r => Model.stateUnreadableJournal(r, P, false) === fx.titles.start + ": " + fx.bodies[r]),
+            Object.keys(B.midSession).every(r => Model.stateUnreadableJournal(r, P, true) === fx.titles.midSession + ": " + B.midSession[r]),
+            rs.every(r => Model.stateUnreadableJournal(r, P, false) === fx.titles.start + ": " + B.start[r]),
             [Model.stateBlockedHeader("absent", P, true), Model.stateBlockedHeader("absent", P, false)],
-            [argv(true).slice(-2), argv(false)[argv(false).length - 2], argv(undefined)[argv(undefined).length - 2]]]
+            [argv(true).slice(-2), argv(false).slice(-2), argv(undefined)[argv(undefined).length - 2]]]
   }, [true, true, true, true, true, ["Saving has stopped", "Saved sources not loaded"],
-      [["Saving has stopped", fx.bodies.absent], "Saved sources not loaded", "Saved sources not loaded"]])
+      [["Saving has stopped", B.midSession.absent], ["Saved sources not loaded", B.start.absent], "Saved sources not loaded"]])
+  // R28a: the stalled read's notice -- its own sentence, its own id, the
+  // file and the wait named, never a URL, and none of the no-write words.
+  checkCall("R28a: Model.stateReadStalledNotice -- \"Saving is waiting\", names the file and the 8 seconds, says the change is kept and saved when the file answers and that a shell stopped first loses it; notifyArgv sends it as stateReadStalled (74019, normal), no URL, never the no-write card's id", () => {
+    const n = Model.stateReadStalledNotice(P)
+    const argv = Model.notifyArgv("stateReadStalled", { path: P, url: "http://u:p@h.example.test/x" })
+    return [n.title, n.body.indexOf(P) === 0, /has not answered for 8 seconds/.test(n.body), /kept in this session and saved when the file answers/.test(n.body),
+            /if the shell is stopped first, it is lost\.$/.test(n.body), argv.slice(-2).join("|") === n.title + "|" + n.body, argv[argv.indexOf("-r") + 1], argv[argv.indexOf("-u") + 1],
+            argv.join(" ").indexOf("://") === -1, Model.NOTIFY_IDS.stateReadStalled !== Model.NOTIFY_IDS.stateUnreadable, Model.stateReadStalledNotice("").body.indexOf("state.json ") === 0]
+  }, ["Saving is waiting", true, true, true, true, true, "74019", "normal", true, true, true])
+  checkCall("R28a: the schedule -- Model.stateReadBoundMs gives 2, 2, 4, 8, 16 s and then 30 s for ever (bounded); Model.stateReadSilenceAct always retries, never blocks or writes, and tells exactly once the silence reaches STATE_READ_TELL_MS (8 s)", () => {
+    const bounds = [0, 1, 2, 3, 4, 5, 6, 50, -1, undefined].map(n => Model.stateReadBoundMs(n))
+    const act = (n, ms, told) => Model.stateReadSilenceAct({ silences: n, silentMs: ms, told })
+    return [bounds, Model.STATE_READ_TELL_MS, [act(1, 2000).act, act(1, 2000).boundMs, act(1, 2000).tell], [act(2, 7999).tell, act(3, 8000).tell, act(3, 8000, true).tell, act(9, 99999).act],
+            Model.stateReadSilenceAct(undefined)]
+  }, [[2000, 2000, 4000, 8000, 16000, 30000, 30000, 30000, 2000, 2000], 8000, ["retry", 2000, false], [false, true, false, "retry"], { act: "retry", boundMs: 2000, tell: false }])
   checkCall("R27e (structural): the guide's own notice (the empty state's words) takes the service's stateLoaded too, so it is titled as the notification is", () => {
     const g = fs.readFileSync(path.join(__dirname, "../Guide.qml"), "utf8")
     return /readonly property var stateNotice: Model\.stateUnreadableNotice\(root\.stateBlocked,[\s\S]{0,300}service\.stateLoaded === true\)/.test(g)
@@ -7601,7 +7630,7 @@ checkCall("R14 / R22a (structural): the ignore branch of applyUserState RETURNS 
     // "join", a read already out) and "refuse" -- each returns exactly as the
     // gate's own branches did. What the gate decides (Model.stateWriteGate)
     // is pinned by its fixture; the plan's table by the R26a pins below.
-    parksBeforeDirs: /function saveState\(\) \{\n(\s*\/\/[^\n]*\n)*\s*var gate = Model\.stateWriteGate\(\{ blocked: root\.stateWriteBlocked, loaded: root\.stateLoaded, dirsReady: root\.dirsReady \}\)\n\s*var plan = Model\.stateSavePlan\(\{ verifyPending: root\.stateVerifyPending, gate: gate, blocked: root\.stateWriteBlocked,\n\s*inHandler: root\.stateInHandler > 0, verifyDone: root\.stateVerifyDone,\n\s*writeTurn: root\.stateWriteTurn, inFlight: root\.stateSavesInFlight,\n\s*waitExpired: root\.stateWriteWaitExpired \}\)\n\s*if \(plan === "join" \|\| plan === "park"\) \{\n\s*root\.stateSavePending = true\n\s*return\n\s*\}\n\s*if \(plan === "refuse"\) \{\n\s*root\.stateSavePending = false\n\s*root\.stateWritesRefused = root\.stateWritesRefused \+ 1\n\s*return\n\s*\}/.test(save),
+    parksBeforeDirs: /function saveState\(\) \{\n(\s*\/\/[^\n]*\n)*\s*var gate = Model\.stateWriteGate\(\{ blocked: root\.stateWriteBlocked, loaded: root\.stateLoaded, dirsReady: root\.dirsReady \}\)\n\s*var plan = Model\.stateSavePlan\(\{ verifyPending: root\.stateVerifyPending, gate: gate, blocked: root\.stateWriteBlocked,\n\s*inHandler: root\.stateInHandler > 0, verifyDone: root\.stateVerifyDone,\n\s*writeTurn: root\.stateWriteTurn, inFlight: root\.stateSavesInFlight,\n\s*waitExpired: root\.stateWriteWaitExpired \}\)\n\s*if \(plan === "join" \|\| plan === "park"\) \{\n\s*root\.stateSavePending = true\n(\s*\/\/[^\n]*\n)*\s*if \(plan === "join" && root\.stateVerifySilences > 0\) Qt\.callLater\(root\.rereadStateVerify\)\n\s*return\n\s*\}\n\s*if \(plan === "refuse"\) \{\n\s*root\.stateSavePending = false\n\s*root\.stateWritesRefused = root\.stateWritesRefused \+ 1\n\s*return\n\s*\}/.test(save),
     // and the park is cleared on the write itself, not left set
     clearsOnWrite: /root\.stateSavePending = false\n[\s\S]*?stateFile\.setText\(text\)/.test(save)
   }
@@ -13262,13 +13291,13 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         // asks (no read and no write while it is out); only the wait's own
         // bound releases it to its read, deferred from a handler as ever.
         P({ gate: "write", inFlight: 1, waitExpired: true }), P({ gate: "write", inFlight: 1, waitExpired: true, inHandler: true }),
-        P({ gate: "write", inFlight: 1, verifyDone: true }), P({ gate: "refuse", blocked: "read-timeout" })
+        P({ gate: "write", inFlight: 1, verifyDone: true })
       ]
     }, ["join", "join", "park", "refuse", "refuse", "refuse", "verify", "verify", "verify", "write", "write",
         // R27a re-levelled 2026-10-20: these three read "defer", "defer",
         // "write" -- the in-flight save skipped its read (D-SINK-22 window a)
         "defer", "wait", "wait", "wait", "verify", "refuse", "refuse",
-        "verify", "defer", "write", "verify"])
+        "verify", "defer", "write"])
     // R26b's rule-15 search made a check. stateFile.setText is the ONE
     // FileView write in the shipped files, and it is reached from FIVE
     // handlers of three views (channelsFile's two through adoptIdScheme,
@@ -13436,7 +13465,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           g.elapse(1); g.drain()
           return { interval: h.ids.stateVerifyWatchdog.interval, held: held.length, late, decided, before,
                    after: [g.root.stateVerifyPending, g.root.stateVerifyNoLoad, g.root.stateVerifySecondReads, g.file().favorites],
-                   logged: g.warnings.filter(w => /was not read back within 2000 ms of a save; reading it once more/.test(w)).length }
+                   logged: g.warnings.filter(w => /was not read back within 2000 ms of a save; the change is kept and the file is read again, waiting 2000 ms/.test(w)).length }
         }, { interval: 2000, held: 1, late: [true, 0, 1], decided: [0, ["t:bbc1.uk", "t:hand.uk", "t:app.uk"]], before: [true, 1],
              after: [true, 1, 1, ["t:bbc1.uk"]], logged: 1 })
         // R27a (2026-10-20, D-SINK-22 window a) replaces R26a's "the read is
@@ -13486,9 +13515,15 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         }, { created: false, mode: "none", blocked: "absent", told: 1, memory: ["t:bbc1.uk", "t:one.uk", "t:two.uk"] })
         // The wait's own bound: a write the view never reports. The held save
         // is released to its read after 2 s; the read is then asked while the
-        // write is still out, so the honest view drops it, and the read's own
-        // bound -- twice -- ends in the no-write mode: nothing written blind.
-        checkCall("R27a (" + tag + "): the write wait is BOUNDED at 2 s from the Timer the tree declares -- a write never reported releases the held save to its read, which the view drops while the write is out; the read's own bound, twice, ends in read-timeout: no second write", () => {
+        // write is still out, so the honest view drops it.
+        // R28a (2026-10-20) re-levelled: R27a ended this in the no-write mode
+        // read-timeout, and the next load that lifted it dropped the held
+        // change (both round-1 reviews' first P1). Now the read is asked
+        // again on the schedule, nothing is blocked or written while our
+        // write is out, and once that write is reported the held change
+        // lands -- through the echo, or (own echo none) the re-read the
+        // landed write asks for.
+        checkCall("R27a / R28a (" + tag + "): the write wait is BOUNDED at 2 s from the Timer the tree declares -- a write never reported releases the held save to its read, which the view drops while the write is out; the read is asked again on the schedule, never blocked and never written blind, and the held change lands once our write is reported", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           h.root.toggleFavorite("t:one.uk"); h.runLater()
           h.root.toggleFavorite("t:two.uk"); h.runLater()
@@ -13497,51 +13532,188 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           h.elapse(1)
           const released = [h.root.stateWriteWaiting, h.root.stateWriteWaitTimeouts, h.root.stateVerifyPending, h.stateFile.droppedReloads]
           h.elapse(4000)
-          return { interval: h.ids.stateWriteWaitWatchdog.interval, at1999, released, blocked: h.root.stateWriteBlocked, writes: h.stateFile.events.length,
-                   issued: h.root.stateWritesIssued, logged: h.warnings.filter(w => /write was not reported within 2000 ms/.test(w)).length }
-        }, { interval: 2000, at1999: [true, 0], released: [false, 1, true, 1], blocked: "read-timeout", writes: 1, issued: 1, logged: 1 })
-        // R27a (2026-10-20, D-SINK-22 window c): a read that does not answer.
-        // Before R27 the save went without it after 2 s -- so a folder link
-        // re-pointed at an empty folder on a filesystem slow to answer was
-        // written into, at 0666 & ~umask. Now: once more, then the R22
-        // no-write mode with its own reason, told once, nothing written.
-        const lastNotice = h => { const n = h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74017") !== -1); return n.length ? n[n.length - 1].slice(-2) : null }
-        checkCall("R27a (" + tag + "): window c -- a read that never answers is asked ONCE more at 2 s; a second silence at 4 s is the no-write mode `read-timeout`, told once (\"Saving has stopped\", the file named, no URL), the save refused, nothing written -- and over an EMPTY folder no file is created (before R27: a 0644 state.json)", () => {
+          const parked = [h.root.stateWriteBlocked, h.stateFile.events.length, h.root.stateWritesIssued, h.root.stateVerifyPending, h.root.stateSavePending, h.root.stateVerifySilences]
+          h.drain()
+          return { interval: h.ids.stateWriteWaitWatchdog.interval, at1999, released, parked, file: h.file().favorites, issued: h.root.stateWritesIssued,
+                   outstanding: [h.root.stateVerifyPending, h.root.stateSavePending, h.root.stateSavesInFlight], told: h.root.stateReadStalls,
+                   logged: h.warnings.filter(w => /write was not reported within 2000 ms/.test(w)).length }
+        }, { interval: 2000, at1999: [true, 0], released: [false, 1, true, 1], parked: ["", 1, 1, true, true, 2], file: ["t:bbc1.uk", "t:one.uk", "t:two.uk"], issued: 2,
+             outstanding: [false, false, 0], told: 0, logged: 1 })
+        // R28a (2026-10-20, replacing R27a's window c): A STALLED READ IS NOT
+        // A NO-WRITE BLOCK. Before R27 the save went without its read after
+        // 2 s (a 0644 state.json in an empty folder); R27a made a second
+        // silence the no-write mode, whose lift dropped the held change. Now:
+        // the schedule, the notice once, never blocked, never written, and
+        // over an EMPTY folder no file -- until the read answers, which here
+        // is with a load FAILURE, and that is R22 with the load's own reason.
+        const stallTold = h => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74019") !== -1)
+        checkCall("R28a (" + tag + "): a read that never answers is asked again at 2, 4, 8, 16, 32 and 62 s after the save (then every 30 s); the user is told ONCE, at 8 s (\"Saving is waiting\", the file named, no URL); nothing is blocked, refused or written, memory keeps the change -- and over an EMPTY folder no file is created; when the read finally answers with a load FAILURE, that is the R22 mode with the load's own reason", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           h.replace(sf => { sf.exists = false; sf.disk = ""; sf.mode = null })
+          const loader = h.stateFile.loader
           h.stateFile.loader = () => {}
           h.root.toggleFavorite("t:app.uk"); h.drain()
+          const reads = []
+          let last = 0
+          for (const t of [1999, 2000, 3999, 4000, 7999, 8000, 15999, 16000, 31999, 32000, 61999, 62000, 92000]) {
+            h.elapse(t - last); h.drain(); last = t
+            reads.push(t + ":" + h.root.stateVerifySecondReads + (stallTold(h).length ? "T" : ""))
+          }
+          const told = stallTold(h)
+          const during = { blocked: h.root.stateWriteBlocked, refused: h.root.stateWritesRefused, issued: h.root.stateWritesIssued, created: h.stateFile.exists,
+                           pending: [h.root.stateVerifyPending, h.root.stateSavePending], memory: h.root.userState.favorites.indexOf("t:app.uk") !== -1, noBlockCard: blockTold(h) }
+          h.stateFile.loader = loader
+          h.elapse(30000); h.drain()
+          return { reads, told: told.length, title: told.length && told[0][told[0].length - 2], body: told.length && told[0][told[0].length - 1] === M.stateReadStalledNotice(h.root.stateFilePath).body,
+                   noUrl: told.every(a => a.join(" ").indexOf("://") === -1), during,
+                   answered: [h.root.stateWriteBlocked, h.stateFile.exists, octal(h.stateFile.mode), blockTold(h), h.root.stateVerifyPending, h.root.stateVerifySilences] }
+        }, { reads: ["1999:0", "2000:1", "3999:1", "4000:2", "7999:2", "8000:3T", "15999:3T", "16000:4T", "31999:4T", "32000:5T", "61999:5T", "62000:6T", "92000:7T"],
+             told: 1, title: "Saving is waiting", body: true, noUrl: true,
+             during: { blocked: "", refused: 0, issued: 0, created: false, pending: [true, true], memory: true, noBlockCard: 0 },
+             answered: ["absent", false, "none", 1, false, 0] })
+        // R28a: EVERY path that ends the wait keeps the held change -- in
+        // memory, on disk, and across a restart. Each was red on
+        // lane-sweep-c1 (R27a's read-timeout lift applied the disk).
+        const stalled = (h, mode2) => {
+          // Two silences (4 s): R27a's read-timeout point, and past it.
+          h.stateFile.loader = mode2 === "hold" ? () => h.heldLoads.push(1) : () => {}
+          h.heldLoads = []
+          h.root.toggleFavorite("t:one.uk"); h.drain(); h.elapse(4000); h.drain()
+          return [h.root.stateWriteBlocked, h.root.stateVerifyPending, h.root.stateSavePending, h.file().favorites.indexOf("t:one.uk") !== -1]
+        }
+        const kept = (h, extra) => {
+          const next = restart(h)
+          const want = ["t:one.uk"].concat(extra || [])
+          return { memory: want.every(f => h.root.userState.favorites.indexOf(f) !== -1), file: want.every(f => h.file().favorites.indexOf(f) !== -1),
+                   restart: want.every(f => next.root.userState.favorites.indexOf(f) !== -1), blocked: h.root.stateWriteBlocked,
+                   outstanding: [h.root.stateVerifyPending, h.root.stateSavePending, h.root.stateSavesInFlight] }
+        }
+        const KEPT = { memory: true, file: true, restart: true, blocked: "", outstanding: [false, false, 0] }
+        const PARKED = ["", true, true, false]
+        checkCall("R28a (" + tag + "): the wait ends by OUR OWN WRITE reported late -- a second favourite held behind a write the view reports only at 6.5 s (the wait expired, its read dropped while the write was out, two silences): once the write is reported, the held favourite is written; both kept, on disk and across a restart (on lane-sweep-c1: read-timeout, and the echo's lift dropped t:two)", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.root.toggleFavorite("t:one.uk"); h.runLater()
+          h.root.toggleFavorite("t:two.uk"); h.runLater()
+          h.elapse(6500)
+          const atLand = [h.root.stateWriteBlocked, h.root.stateVerifyPending, h.root.stateSavePending, h.stateFile.droppedReloads > 0]
+          h.drain()
+          return { atLand, ...kept(h, ["t:two.uk"]) }
+        }, Object.assign({ atLand: ["", true, true, true] }, KEPT))
+        checkCall("R28a (" + tag + "): the wait ends by a SOURCE verb -- a stalled favourite, then a label edit: the edit is NOT refused (nothing is blocked), it joins the held save and asks for the read again, which answers; the favourite and the label kept, on disk and across a restart (on lane-sweep-c1: refused state_unreadable, and its re-read dropped the favourite)", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          const loader = h.stateFile.loader
+          const parked = stalled(h)
+          h.stateFile.loader = loader
+          const r = h.root.updateSource(KB, { label: "edited" }); h.drain()
+          const next = restart(h)
+          return { parked, verb: [r.ok, r.code], label: [labelOf(h.file(), KB), labelOf(next.file(), KB)], rereads: h.root.stateVerifyRereads, ...kept(h) }
+        }, Object.assign({ parked: PARKED, verb: [true, "ok"], label: ["edited", "edited"], rereads: 1 }, KEPT))
+        checkCall("R28a (" + tag + "): the wait ends by an in-app source ADD -- a stalled favourite, then a source added in the app whose probe succeeds: the commit joins the held save; the favourite and the new source kept, on disk and across a restart (on lane-sweep-c1 the source the user typed was lost)", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          const loader = h.stateFile.loader
+          const parked = stalled(h)
+          h.stateFile.loader = loader
+          const added = h.root.addSource({ playlistUrl: NEW, epgUrl: "", label: "Mine" }); h.drain()
+          h.probeExit(JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })); h.drain()
+          const next = restart(h)
+          return { parked, added: added.ok, source: [M.findSource(h.root.userState.sources, KNEW) !== null, M.findSource(h.file().sources, KNEW) !== null, M.findSource(next.file().sources, KNEW) !== null], ...kept(h) }
+        }, Object.assign({ parked: PARKED, added: true, source: [true, true, true] }, KEPT))
+        checkCall("R28a (" + tag + "): the wait ends by ANOTHER PROGRAM'S WRITE -- a stalled favourite, then a hand-run helper favourite: its load is merged with the change held (R24a), then written; both kept, on disk and across a restart (on lane-sweep-c1: read-timeout, and that load applied the disk)", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          const parked = stalled(h)
+          h.foreign(sf => withFav(sf, "t:helper.uk")); h.drain()
+          return { parked, merged: (reasons(h)["pre-save-foreign-save-parked"] || 0) >= 1, ...kept(h, ["t:helper.uk"]) }
+        }, Object.assign({ parked: PARKED, merged: true }, KEPT))
+        checkCall("R28a (" + tag + "): the wait ends by the STALLED READ ANSWERING LATE -- the load a silent read asked for arrives at 4.5 s with nothing else asked meanwhile: it is the base and the change is held, so the favourite is written; kept, on disk and across a restart (on lane-sweep-c1: that load lifted read-timeout and was applied over memory)", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          const parked = stalled(h, "hold")
+          h.elapse(500)
+          h.later.push({ fn: h.loadState, args: [] }); h.drain()
+          return { parked, ...kept(h) }
+        }, Object.assign({ parked: PARKED }, KEPT))
+        checkCall("R28a (" + tag + "): changes made while a save is held JOIN it -- two more favourites during a stall issue no write and keep the one read awaited; when that read answers, ONE write carries all three, and all three survive a restart", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          const parked = stalled(h, "hold")
+          const issued0 = h.root.stateWritesIssued, verifies0 = h.root.stateVerifies
+          h.root.toggleFavorite("t:a.uk"); h.drain(); h.root.toggleFavorite("t:b.uk"); h.drain()
+          const joined = [h.root.stateWritesIssued - issued0, h.root.stateVerifyPending, h.root.stateVerifies - verifies0]
+          h.later.push({ fn: h.loadState, args: [] }); h.drain()
+          return { parked, joined, writes: h.root.stateWritesIssued - issued0, ...kept(h, ["t:a.uk", "t:b.uk"]) }
+        }, Object.assign({ parked: PARKED, joined: [0, true, 0], writes: 1 }, KEPT))
+        checkCall("R28a (" + tag + "): the wait ends by the SCHEDULE's re-read answering -- the file answers again from the third read on: the re-read at 8 s finds it and the favourite is written; kept, on disk and across a restart", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          const loader = h.stateFile.loader
+          const parked = stalled(h)
+          h.stateFile.loader = loader
+          h.elapse(3999); h.drain()
+          const before = h.file().favorites.indexOf("t:one.uk") !== -1
+          h.elapse(1); h.drain()
+          return { parked, before, silences: h.root.stateVerifySilences, ...kept(h) }
+        }, Object.assign({ parked: PARKED, before: false, silences: 0 }, KEPT))
+        checkCall("R28a (" + tag + "): a RESTART while the save is held is the stated loss and nothing worse -- the file is exactly what it was (no write without its read), the next session loads it, and the notice that was sent said a shell stopped first loses the change", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          const before = h.stateFile.disk
+          stalled(h); h.elapse(4000); h.drain()
+          const next = restart(h)
+          const told = stallTold(h)
+          return { same: h.stateFile.disk === before, issued: h.root.stateWritesIssued, next: [next.root.stateLoaded, next.root.stateWriteBlocked, next.file().favorites.indexOf("t:one.uk")],
+                   says: told.length === 1 && /if the shell is stopped first, it is lost\.$/.test(told[0][told[0].length - 1]) }
+        }, { same: true, issued: 0, next: [true, "", -1], says: true })
+        // R28c (2026-10-20): the two resets round 1's review deleted with
+        // node at 2634/0 in both echo modes (M2, M4), and their R28a
+        // successors. Each deletion is red here.
+        // (1) The write wait's expiry is reset when a write LANDS: after one
+        // slow write, the next save asked during a write must WAIT again, not
+        // read while the write is out (a read the view drops).
+        checkCall("R28c (" + tag + "): the write wait's expiry is reset when the slow write LANDS (onSaved) -- after one write reported late, a save asked during the NEXT write waits for it again: no read asked while that write is out, none dropped", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.root.toggleFavorite("t:one.uk"); h.runLater()
+          h.root.toggleFavorite("t:two.uk"); h.runLater()
           h.elapse(2000); h.drain()
-          const once = [h.root.stateVerifySecondReads, h.root.stateWriteBlocked, h.stateFile.exists]
-          h.elapse(2000); h.drain()
-          const told = lastNotice(h)
-          return { once, blocked: h.root.stateWriteBlocked, created: h.stateFile.exists, mode: octal(h.stateFile.mode), told: blockTold(h),
-                   title: told && told[0], namesFile: !!told && told[1].indexOf("/state.json") !== -1, noUrl: !!told && told[1].indexOf("://") === -1,
-                   refused: h.root.stateWritesRefused, pending: [h.root.stateVerifyPending, h.root.stateSavePending], memory: h.root.userState.favorites.indexOf("t:app.uk") !== -1,
-                   logged: h.warnings.filter(w => /not read back within 4000 ms of a save, twice/.test(w)).length }
-        }, { once: [1, "", false], blocked: "read-timeout", created: false, mode: "none", told: 1, title: "Saving has stopped", namesFile: true, noUrl: true,
-             refused: 1, pending: [false, false], memory: true, logged: 1 })
-        checkCall("R27a (" + tag + "): window c -- the read-timeout mode is lifted by a later read that ANSWERS: the next in-app change reads, the file is there, the mode lifts and the change made during the block and this one are both written; told once in all", () => {
+          const first = [h.root.stateWriteWaitTimeouts, h.file().favorites.length]
+          h.root.toggleFavorite("t:three.uk"); h.runLater()
+          const dropped0 = h.stateFile.droppedReloads, waits0 = h.root.stateWriteWaits
+          h.root.toggleFavorite("t:four.uk"); h.runLater()
+          const second = [h.root.stateWriteWaiting, h.stateFile.droppedReloads - dropped0, h.root.stateWriteWaits - waits0, h.root.stateWriteWaitExpired]
+          h.drain()
+          return { first, second, file: h.file().favorites.length }
+        }, { first: [1, 3], second: [true, 0, 1, false], file: 5 })
+        checkCall("R28c (" + tag + "): the write wait's expiry is reset when the slow write is reported FAILED (onSaveFailed) -- the next save asked during a write waits for it again", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.stateFile.writeFails = true
+          h.root.toggleFavorite("t:one.uk"); h.runLater()
+          h.root.toggleFavorite("t:two.uk"); h.runLater()
+          h.elapse(2000)
+          h.stateFile.writeFails = false
+          h.drain()
+          const first = [h.root.stateWriteWaitTimeouts, h.root.stateSaveFailed]
+          h.root.toggleFavorite("t:three.uk"); h.runLater()
+          const dropped0 = h.stateFile.droppedReloads
+          h.root.toggleFavorite("t:four.uk"); h.runLater()
+          const second = [h.root.stateWriteWaiting, h.stateFile.droppedReloads - dropped0, h.root.stateWriteWaitExpired]
+          h.drain()
+          return { first, second, file: h.file().favorites.length }
+        }, { first: [1, false], second: [true, 0, false], file: 5 })
+        // (2) The read's state is reset when it FINISHES: R27a's
+        // stateVerifyRetried, whose successors are the silence count, the
+        // bound and the told flag. A second held save starts the schedule
+        // over -- re-asked at 2 s and 4 s, told at 8 s, on its own.
+        checkCall("R28c (" + tag + "): a held save's read state is reset when the read FINISHES -- after one stall that was told and then answered, the next held save's read is re-asked at 2 s and 4 s (the schedule from its start), and is told about again at 8 s, not before", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           const loader = h.stateFile.loader
           h.stateFile.loader = () => {}
-          h.root.toggleFavorite("t:one.uk"); h.drain(); h.elapse(4000); h.drain()
-          const blocked = [h.root.stateWriteBlocked, h.file().favorites.length]
+          h.root.toggleFavorite("t:one.uk"); h.drain(); h.elapse(8000); h.drain()
           h.stateFile.loader = loader
+          h.elapse(8000); h.drain()
+          const first = [stallTold(h).length, h.file().favorites.indexOf("t:one.uk") !== -1, h.root.stateVerifyPending]
+          h.stateFile.loader = () => {}
+          const r0 = h.root.stateVerifySecondReads
           h.root.toggleFavorite("t:two.uk"); h.drain()
-          return { blocked, lifted: h.root.stateWriteBlocked, file: h.file().favorites, told: blockTold(h) }
-        }, { blocked: ["read-timeout", 1], lifted: "", file: ["t:bbc1.uk", "t:one.uk", "t:two.uk"], told: 1 })
-        checkCall("R27a / R26e (" + tag + "): window c through a SOURCE verb -- in the read-timeout mode the first call is refused state_unreadable and asks for one reload; when that read answers the mode lifts and the second call lands", () => {
-          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
-          const loader = h.stateFile.loader
-          h.stateFile.loader = () => {}
-          h.root.toggleFavorite("t:one.uk"); h.drain(); h.elapse(4000); h.drain()
-          h.stateFile.loader = loader
-          const first = h.root.updateSource(KB, { label: "edited" }); h.drain()
-          const lifted = h.root.stateWriteBlocked
-          const second = h.root.updateSource(KB, { label: "edited" }); h.drain()
-          return { first: first.code, lifted, second: second.ok, label: labelOf(h.file(), KB) }
-        }, { first: "state_unreadable", lifted: "", second: true, label: "edited" })
+          const at = []
+          let last = 0
+          for (const t of [1999, 2000, 3999, 4000, 7999, 8000]) { h.elapse(t - last); h.drain(); last = t; at.push(t + ":" + (h.root.stateVerifySecondReads - r0) + ":" + stallTold(h).length) }
+          return { first, at }
+        }, { first: [1, true, false], at: ["1999:0:1", "2000:1:1", "3999:1:1", "4000:2:1", "7999:2:1", "8000:3:2"] })
         checkCall("R27e / rule 15 (" + tag + "): the bar-entry refusal's journal line in a block uses the episode's words -- \"state.json was not loaded\" at a start, \"saving to state.json has stopped\" mid-session", () => {
           const line = h => h.warnings.filter(w => /the bar entry is left as it is/.test(w)).map(w => (w.match(/\(([^)]*)\)/) || [])[1])
           const s = boot({ sourceKey: KA, showLogos: false }, "{not json", mode, { ownEcho, exists: true })
@@ -13563,6 +13735,35 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           return { start: [s.root.stateWriteBlocked, told(s), journal(s)], mid: [m.root.stateWriteBlocked, told(m), journal(m)],
                    body: body.length === 1 && body[0] === M.stateUnreadableNotice("absent", m.root.stateFilePath, true).body }
         }, { start: ["unparsed", ["Saved sources not loaded"], ["Saved sources not loaded"]], mid: ["absent", ["Saving has stopped"], ["Saving has stopped"]], body: true })
+        // R28e (2026-10-20): the ways back out of a block, each pinned to the
+        // sentence that names it (rule 14: the copy is graded by the
+        // behaviour, not by a grep for itself). A favourite toggled in a
+        // MID-session block (the file gone, seen) is kept only by the first.
+        checkCall("R28e (" + tag + "): the ways back out of a MID-session block, as STATE_BLOCK_UNSAVED_MID names them -- a favourite made in the block is SAVED when the next favourite finds the file again, and DROPPED when the file comes back by itself first, when a source change is what finds it, and by a stopped shell", () => {
+          const way = (fn) => {
+            const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+            const keep = h.stateFile.disk
+            h.foreign(sf => { sf.exists = false; sf.disk = "" }); h.drain()
+            h.root.toggleFavorite("t:blk.uk"); h.drain()
+            const blocked = h.root.stateWriteBlocked
+            const next = fn(h, keep)
+            return blocked + ":" + ((next || h).file().favorites.indexOf("t:blk.uk") !== -1 ? "saved" : "dropped")
+          }
+          return {
+            nextChange: way((h, keep) => { h.replace(sf => { sf.exists = true; sf.disk = keep }); h.root.toggleFavorite("t:next.uk"); h.drain() }),
+            byItself: way((h, keep) => { h.foreign(sf => { sf.exists = true; sf.disk = keep }); h.drain(); h.root.toggleFavorite("t:next.uk"); h.drain() }),
+            sourceChange: way((h, keep) => { h.replace(sf => { sf.exists = true; sf.disk = keep }); h.root.updateSource(KB, { label: "x" }); h.drain(); h.root.updateSource(KB, { label: "y" }); h.drain() }),
+            stopped: way((h, keep) => { h.replace(sf => { sf.exists = true; sf.disk = keep }); return restart(h) })
+          }
+        }, { nextChange: "absent:saved", byItself: "absent:dropped", sourceChange: "absent:dropped", stopped: "absent:dropped" })
+        checkCall("R28e (" + tag + "): at a START no way back keeps a change made in the block, as STATE_BLOCK_UNSAVED_START says (\"not kept\") -- the file that did not parse put back, then the next favourite: the first load is applied, the block's favourite gone", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, "{not json", mode, { ownEcho, exists: true })
+          const blocked = h.root.stateWriteBlocked
+          h.root.toggleFavorite("t:blk.uk"); h.drain()
+          h.replace(sf => { sf.disk = START() })
+          h.root.toggleFavorite("t:next.uk"); h.drain()
+          return [blocked, h.root.stateWriteBlocked, h.root.userState.favorites.indexOf("t:blk.uk"), h.file().favorites.indexOf("t:blk.uk")]
+        }, ["unparsed", "", -1, -1])
         checkCall("R26a (" + tag + "): a foreign write that ARRIVES while a save waits for its read IS that read -- merged once, written once, both kept", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           h.root.toggleFavorite("t:app.uk")

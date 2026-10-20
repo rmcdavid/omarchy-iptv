@@ -646,9 +646,15 @@ function bootService(serviceText, Model, o) {
     : serviceText.slice(serviceText.lastIndexOf("  Timer {", serviceText.indexOf("id: stateVerifyWatchdog")), serviceText.indexOf("\n  }", serviceText.indexOf("id: stateVerifyWatchdog")))
   const verifyIntervalText = verifyBlock === null ? null : ((verifyBlock.match(/^    interval: (.*)$/m) || [])[1] || "1000")
   const vw = ids.stateVerifyWatchdog
-  vw.interval = verifyIntervalText === null ? null : compile("", "return (" + verifyIntervalText + ")", "stateVerifyWatchdog_interval")()
+  // R28a: the interval is a BINDING (root.stateVerifyBoundMs, the schedule's
+  // current bound), so it is read from its own text every time, and a
+  // restart() arms the Timer with the interval it has at that moment -- the
+  // order QML's Timer takes it in (the service sets the bound, then restarts).
+  const verifyInterval = verifyIntervalText === null ? null : compile("", "return (" + verifyIntervalText + ")", "stateVerifyWatchdog_interval")
+  Object.defineProperty(vw, "interval", { get() { return verifyInterval === null ? null : verifyInterval() }, enumerable: true, configurable: true })
   vw.armedAt = null
-  vw.restart = function () { this.restarts++; this.running = true; this.armedAt = h.clock }
+  vw.armedInterval = null
+  vw.restart = function () { this.restarts++; this.running = true; this.armedAt = h.clock; this.armedInterval = this.interval }
   vw.stop = function () { this.stops++; this.running = false; this.armedAt = null }
   // R27a: the write-wait watchdog the same way, from its own block.
   const waitAt = serviceText.indexOf("id: stateWriteWaitWatchdog")
@@ -660,7 +666,7 @@ function bootService(serviceText, Model, o) {
   const ww = ids.stateWriteWaitWatchdog
   ww.interval = waitIntervalText === null ? null : compile("", "return (" + waitIntervalText + ")", "stateWriteWaitWatchdog_interval")()
   ww.armedAt = null
-  ww.restart = function () { this.restarts++; this.running = true; this.armedAt = h.clock }
+  ww.restart = function () { this.restarts++; this.running = true; this.armedAt = h.clock; this.armedInterval = this.interval }
   ww.stop = function () { this.stops++; this.running = false; this.armedAt = null }
   h.writeWaitWatchdog = () => { onWriteWaitWatchdog(); h.runLater() }
   // Each Timer fires once its restart() is `interval` old, in the order they
@@ -670,11 +676,11 @@ function bootService(serviceText, Model, o) {
     const end = h.clock + ms
     for (;;) {
       const due = [[vw, onVerifyWatchdog], [ww, onWriteWaitWatchdog]]
-        .filter(([t]) => t.running && t.interval !== null && t.armedAt + t.interval <= end)
-        .sort((a, b) => (a[0].armedAt + a[0].interval) - (b[0].armedAt + b[0].interval))
+        .filter(([t]) => t.running && t.armedInterval !== null && t.armedAt + t.armedInterval <= end)
+        .sort((a, b) => (a[0].armedAt + a[0].armedInterval) - (b[0].armedAt + b[0].armedInterval))
       if (!due.length) break
       const [t, fire] = due[0]
-      h.clock = t.armedAt + t.interval
+      h.clock = t.armedAt + t.armedInterval
       t.running = false; t.armedAt = null
       fire(); h.runLater()
     }

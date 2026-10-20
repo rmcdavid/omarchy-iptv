@@ -2486,8 +2486,10 @@ PYSEED
   # titled so too -- the one sentence family, at the sink (the stand-in
   # omarchy-notification-send's argv). Red on 6f1d176, which titled every
   # block "Saved sources not loaded".
-  ck "B32 R27e (D-SRC-42): the notification of that MID-session block is titled \"Saving has stopped\" and its body says changes are not saved until the file can be read again" \
-     "saving-stopped:$(qa_count ' 74017 Saving has stopped ' "$NOTIFY_LOG") not-loaded:$(qa_count ' 74017 Saved sources not loaded ' "$NOTIFY_LOG") body:$(qa_count 'are not saved until the file can be read again' "$NOTIFY_LOG")" \
+  # R28e (2026-10-20): the body's second sentence is the MID-session one,
+  # which names the ways back on which a change made now is dropped.
+  ck "B32 R27e (D-SRC-42) / R28e: the notification of that MID-session block is titled \"Saving has stopped\" and its body says changes made now are held in this session only, and when they are dropped" \
+     "saving-stopped:$(qa_count ' 74017 Saving has stopped ' "$NOTIFY_LOG") not-loaded:$(qa_count ' 74017 Saved sources not loaded ' "$NOTIFY_LOG") body:$(qa_count 'are held in this session only: the next such change made here saves them if it finds the file again, but they are dropped if the file comes back by itself first' "$NOTIFY_LOG")" \
      "saving-stopped:1 not-loaded:0 body:1"
   ipc close >/dev/null
   stop_shell

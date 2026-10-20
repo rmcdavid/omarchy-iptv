@@ -1615,17 +1615,56 @@ function stateSavePlan(ctx) {
   return "verify"
 }
 
-// R27a (D-SINK-22, window c): what the read before a save does when its
-// load has not come within the bound (Service.stateVerifyWatchdog).
-//   retried  this read has already been asked once more
-// -> "retry" ask for the load once more, with the bound again
-//    "block" the R22 no-write mode, reason "read-timeout"; the save is
-//            refused. Never a write: until R27 the watchdog's answer was to
-//            write without the read, which is the third window in which a
-//            0644 state.json could be created.
-function stateVerifyTimeoutAct(ctx) {
+// R28a (2026-10-20, the lead's ruling replacing R27a's window c): A STALLED
+// READ IS NOT A NO-WRITE BLOCK. Under R27a a read before a save that did not
+// answer twice put the session in the R22 no-write mode ("read-timeout"),
+// and the mode set the held save aside: when a load lifted it -- our own
+// write's echo, a source verb's re-read, another program's write, the stalled
+// read answering late -- the disk was applied over memory and the change held
+// during the block was dropped from memory and file, an in-app source add
+// included (both round-1 reviews, measured through the shipping Service.qml).
+// Now a silent read changes nothing but WHEN the file is read again: the save
+// stays parked with memory as the authority, every save asked meanwhile joins
+// it (stateSavePlan "join"), and nothing is written until a read answers --
+// never blind, never dropped. Whatever load answers is decided by R26a's
+// dispositions like any other (the base -> write; another program's text ->
+// the R24a merge, then write; a load that is not a state -> R22).
+//
+// THE SCHEDULE. The read's first bound is STATE_READ_BOUNDS_MS[0], 2 s (the
+// R26a bound). After the n-th silence the read is asked again with the bound
+// STATE_READ_BOUNDS_MS[n], the last entry for every n past the end: so the
+// re-reads go out at 2, 4, 8, 16 and 32 s after the save asked, and every
+// 30 s after that for as long as the change is held. The interval is bounded
+// (never more than 30 s); the number of re-reads is not, because the change
+// is kept until the file answers. A re-read is also asked at once when one of
+// our writes is reported (a read asked while it was out was dropped by the
+// view, F-HARNESS-31) and when a new change joins the held save.
+//
+// THE NOTICE. Once the reads have been silent for STATE_READ_TELL_MS (8 s:
+// the third silence on this schedule) the user is told, once per held save
+// (Model.stateReadStalledNotice): the change is kept in the session and saved
+// when the file answers, and a shell stopped first loses it.
+var STATE_READ_BOUNDS_MS = [2000, 2000, 4000, 8000, 16000, 30000]
+var STATE_READ_TELL_MS = 8000
+// The read's bound for the read asked after `silences` silences (0: the read
+// a save asks first).
+function stateReadBoundMs(silences) {
+  var n = Math.floor(Number(silences))
+  if (!(n > 0)) n = 0
+  return STATE_READ_BOUNDS_MS[Math.min(n, STATE_READ_BOUNDS_MS.length - 1)]
+}
+// What Service.finishStateVerify does when its watchdog fires with no load.
+//   silences  the silences of this held save so far, THIS one included
+//   silentMs  ms since the read was first asked
+//   told      the user has already been told about this held save
+// -> { act: "retry", boundMs, tell }. Always "retry": there is no answer here
+//    that writes, refuses or drops. `boundMs` is the next read's bound, and
+//    `tell` whether this silence is the one that tells the user.
+function stateReadSilenceAct(ctx) {
   var c = ctx || {}
-  return c.retried === true ? "block" : "retry"
+  var silentMs = Number(c.silentMs) || 0
+  return { act: "retry", boundMs: stateReadBoundMs(c.silences),
+           tell: c.told !== true && silentMs >= STATE_READ_TELL_MS }
 }
 
 // R26a (D-SRC-35): a source verb that meets a no-write mode a load can lift
@@ -1649,21 +1688,32 @@ function stateBlockRecheck(ctx) {
 //     the journal alike: the sources DID load and are still listed, and it
 //     is saving that stopped. A block at the start keeps "Saved sources not
 //     loaded" (STATE_BLOCK_TITLE_START).
-//   the body says a change made now is "not saved until the file can be
-//     read again" -- true on every way back. It used to say "not kept",
-//     which is false on the one way back where the next change's own read
-//     finds the file first and saves it (D-SRC-51).
+//   the body's second sentence says what becomes of a change made now, and
+//     it differs between the two (R28e, 2026-10-20). At a START nothing has
+//     loaded, so whatever load lifts the block is the first and is applied:
+//     a change made in the block is "not kept" on every way back
+//     (STATE_BLOCK_UNSAVED_START). MID-session the ways back differ, and
+//     R27e's "not saved until the file can be read again" was true only of
+//     the one where the next in-app change's own read finds the file first
+//     and saves it (D-SRC-51); measured through the shipping Service.qml,
+//     both hosts and echo modes, the same change is DROPPED when the file
+//     comes back by itself (a restore, a chmod back: the view sees it and
+//     the load is applied), when the change that finds it is a source change
+//     (refused, and its re-read applies the file), and by a stopped shell. So
+//     the sentence names all four (STATE_BLOCK_UNSAVED_MID); tests/Model.
+//     test.js pins each way to it.
 //   a file or folder that has gone missing names the LINK case first: a
 //     link pointed back at the folder or file that holds the state restores
 //     everything, where restoring "the file it points to" or a restart with
 //     the link still on an empty folder starts a fresh, empty install there
 //     (D-SRC-50).
-//   "read-timeout" (R27a, D-SINK-22 window c): the read before a save did
-//     not answer within its bound, twice. Always mid-session (a save needs a
-//     loaded state), and lifted by a later read that answers.
+//   R28a withdrew "read-timeout": a read that does not answer is no block
+//     any more (Model.stateReadSilenceAct), and the read that finally
+//     answers with a load failure blocks with that load's own reason.
 var STATE_BLOCK_TITLE_START = "Saved sources not loaded"
 var STATE_BLOCK_TITLE_MID = "Saving has stopped"
-var STATE_BLOCK_UNSAVED = "Sources, favorites and settings changed now are not saved until the file can be read again."
+var STATE_BLOCK_UNSAVED_START = "Sources, favorites and settings changed now are not kept."
+var STATE_BLOCK_UNSAVED_MID = "Favorites and other changes made now are held in this session only: the next such change made here saves them if it finds the file again, but they are dropped if the file comes back by itself first, if a source change is what finds it, or if the shell is stopped."
 var STATE_BLOCK_LINK_FIRST = "If it is a symbolic link, point it back at the folder or file that holds your state"
 function stateUnreadableNotice(reason, path, midSession) {
   var file = str(path) !== "" ? str(path) : "state.json"
@@ -1715,13 +1765,9 @@ function stateUnreadableNotice(reason, path, midSession) {
     // not answer within Service.stateInitTimeoutMs and was stopped.
     what = "could not be checked: the start-up check did not answer and was stopped"
     fix = "Make sure a regular file, or nothing, is at that path, then run omarchy restart shell."
-  } else if (r === "read-timeout") {
-    // R27a (window c): the read before a save, asked twice, never answered.
-    what = "did not answer when it was read before a save (twice, 2 seconds each)"
-    fix = "The next change made here reads it again, and saving resumes if it answers. If it keeps stopping, check the disk or folder that holds it, then run omarchy restart shell."
   }
   return { title: midSession === true ? STATE_BLOCK_TITLE_MID : STATE_BLOCK_TITLE_START,
-           body: file + " " + what + ". " + STATE_BLOCK_UNSAVED + " " + fix }
+           body: file + " " + what + ". " + (midSession === true ? STATE_BLOCK_UNSAVED_MID : STATE_BLOCK_UNSAVED_START) + " " + fix }
 }
 
 // R27e: the journal's line for the same episode -- the title, then the body
@@ -1739,6 +1785,18 @@ function stateUnreadableJournal(reason, path, midSession) {
 function stateBlockedHeader(reason, path, midSession) {
   if (str(reason) === "") return ""
   return stateUnreadableNotice(reason, path, midSession === true).title
+}
+// R28a (2026-10-20): the one sentence a held save's stalled read tells the
+// user, once, when the reads have been silent for STATE_READ_TELL_MS. It
+// names the file and the wait and never a URL (composed from the path and
+// the constant alone). It is not a no-write notice: nothing is refused, the
+// change is kept in memory, and the file is read again on the schedule
+// above until it answers.
+function stateReadStalledNotice(path) {
+  var file = str(path) !== "" ? str(path) : "state.json"
+  return { title: "Saving is waiting",
+           body: file + " has not answered for " + Math.round(STATE_READ_TELL_MS / 1000) + " seconds when it was read before a save. "
+                 + "The change is kept in this session and saved when the file answers; if the shell is stopped first, it is lost." }
 }
 export {
   MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedSearchTerms,
@@ -1760,7 +1818,9 @@ export {
   mergeForeignState, MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount,
   mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
   stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
-  stateVerifyTimeoutAct, stateBlockRecheck, STATE_BLOCK_TITLE_START,
-  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
-  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
+  STATE_READ_BOUNDS_MS, STATE_READ_TELL_MS, stateReadBoundMs,
+  stateReadSilenceAct, stateBlockRecheck, STATE_BLOCK_TITLE_START,
+  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED_MID,
+  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
+  stateBlockedHeader, stateReadStalledNotice
 }

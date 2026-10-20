@@ -9,7 +9,7 @@ import {
   cleanName
 } from "./channels.mjs"
 import {
-  mergeDropNotice, stateUnreadableNotice
+  mergeDropNotice, stateUnreadableNotice, stateReadStalledNotice
 } from "./state.mjs"
 import {
   parseHelperStatus, entryInputNotice, ownedEntryPatch
@@ -291,6 +291,11 @@ function notifyArgv(event, params) {
     // caps, never a URL, a label, a query or a group name.
     var dropped = mergeDropNotice(p.dropped)
     if (dropped) spec = { title: dropped.title, body: dropped.body, glyph: GLYPHS.alert, urgency: "normal", id: NOTIFY_IDS.mergeDropped }
+  } else if (event === "stateReadStalled") {
+    // R28a: Model.stateReadStalledNotice's sentence and nothing else -- the
+    // path and a number of seconds, never a URL.
+    var stalled = stateReadStalledNotice(p.path)
+    spec = { title: stalled.title, body: stalled.body, glyph: GLYPHS.alert, urgency: "normal", id: NOTIFY_IDS.stateReadStalled }
   }
   if (!spec) return null
   return ["omarchy-notification-send", "--app-name", "IPTV", "-u", spec.urgency, "-g", spec.glyph, "-r", String(spec.id), spec.title, spec.body]
