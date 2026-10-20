@@ -577,20 +577,44 @@ before write:
   asks for the load once more, and a second silence puts the session in the
   R22 no-write mode with reason `read-timeout`, told once (`Saving has
   stopped`, `... did not answer when it was read before a save (twice, 2
-  seconds each)`), lifted by a later read that answers. What remains is
+  seconds each)`), lifted by a later read that answers [round 18, R28a: no
+  longer -- the lift lost the held change; a silent read now keeps it held
+  and reads again, the amendment below]. What remains is
   window (b), a re-point landing between the read's load and the write it
   allows, a turn apart: milliseconds, stated in `Model.stateSavePlan`'s
   comment and the README. Pinned through the node double over the shipping
   `Service.qml` on both hosts and both echo modes (`R27a (<tag>): ...`, six
   pins, among them window (a) with the folder link re-pointed at an empty
   folder as the first write lands -- no file created, `absent`, told once --
-  and window (c) over an empty folder -- no file created, `read-timeout`);
+  and window (c) over an empty folder -- no file created, `read-timeout`
+  [R28a: `absent` once the read answers]);
   live by key-scenario B33. A consequence, pinned: no write is issued while
   another is out, so R25a's record never holds more than one text and
   D-SRC-47's overflow can no longer happen. The same-instant loss (D-SRC-48)
   stands: R27b measured the one mitigation proposed for it and it
   recovered nothing a later read does not (0 of 608 trials,
   `spikes/filewatch/RESULT-2026-10-20-r27b.txt`).]
+- [Amended 2026-10-20 (D-SINK-19 round 18, R28a; lane-sweep-a2). Window
+  (c)'s answer above is withdrawn: a read that is silent twice no longer
+  puts the session in the no-write mode. That mode set the held save aside,
+  so the load that lifted it -- our own write's echo reported late, a
+  source verb's re-read, another program's write, the stalled read
+  answering -- was applied over memory and the change was lost, an in-app
+  source add included (both round-1 reviews, through the shipping
+  `Service.qml`). Now a silent read keeps the save PARKED with memory as the
+  authority, every save asked meanwhile joins it, and the file is read
+  again with the bound `Model.stateReadBoundMs` gives: at 2, 4, 8, 16, 32
+  and 62 s after the save asked, then every 30 s, and at once when a change
+  joins or one of our writes is reported. Still no write without a read:
+  whatever load answers is decided by R26a's dispositions (the base ->
+  write; another program's text -> the merge, then write; a load that is
+  not a state -> the R22 mode with that load's own reason). After 8 s of
+  silence the user is told once (`Saving is waiting`, 74019,
+  `Model.stateReadStalledNotice`); a shell stopped while the change is held
+  loses it, and the notice says so. `read-timeout` is gone. Pinned through
+  the node double on both hosts and both echo modes, one pin per way the
+  wait ends, each red on lane-sweep-c1; no live segment (nothing in the
+  cage stalls a read). Window (b) is unchanged.]
 
 ### mpv status (helper `status` stdout, M1 target)
 
@@ -1241,7 +1265,9 @@ now, with each decision lifted into `Model.js` so node can call it (rule 12):
   D-SRC-44: no longer -- at the cap step (1) answers `full`, nothing is added
   or evicted, the marker is not set, the entry keeps its URL and the user
   is told once (`Sources is full`); the next reconcile after a removal
-  migrates]), invalid is reported and
+  migrates] [2026-10-20, R28b: the entry's `epgUrl` is held with it, not
+  attached to the step-2 record, and the migration after a removal takes
+  both]), invalid is reported and
   the key is left exactly as it was; (2) the state's `activeKey` when it
   names a record; (3) the entry's `sourceKey` when it names a record; (4)
   nothing, and a dangling key is cleared rather than left for the next reader.
@@ -2812,7 +2838,12 @@ login, which the lead's tooling does not hold.
   and what to do [2026-10-20, R27e: titled `Saving has stopped` when the
   block begins after the sources loaded, and the body says changes made now
   "are not saved until the file can be read again"; R27a adds the reason
-  `read-timeout`, a read before a save that did not answer twice]. It used to be read as an empty state and saved over, which
+  `read-timeout`, a read before a save that did not answer twice]
+  [2026-10-20, R28e and R28a: the body says changes made now `are not
+  kept` at a start, and mid-session names the ways back on which they are
+  kept or dropped (`UX-SOURCES.md` 5.10 item 1); `read-timeout` is
+  withdrawn -- a read that does not answer keeps the change held and is
+  asked again, told once as `Saving is waiting`]. It used to be read as an empty state and saved over, which
   is how a start could erase every source (section 5, as amended).
   [Round 13, 2026-10-13 (R23): the guide's body is then that notice's own
   words, never the first-run form, and every refusal says the no-write
@@ -2824,7 +2855,7 @@ Performance budget (10k channels):
 
 | Item | Budget | How |
 |---|---|---|
-| Overlay open | < 150 ms | keepLoaded window; `rebuildDisplay` appends at most 300 rows; channels already parsed in memory. **Measured 2026-10-20 (R27f, D-PERF-1's async instrument, `scripts/dev-harness/open-scenario.sh`) at 10,000 channels in the cage's floating window: met by every open after the first (warm, realised median 34 ms list / 32 ms wall, max 43), NOT met by the first open of a session (cold, realised median 546 ms list / 580 ms wall), about 450 ms of which a 40-channel control shows too (the first show of the window in the cage). On Hyprland's layer-shell surface the cold figure is UNVERIFIED. Every open figure recorded before 2026-10-20 was taken without the delegates (D-PERF-1); the round-17 rulings in `ARCHITECTURE-SOURCES.md` have the table** |
+| Overlay open | < 150 ms | keepLoaded window; `rebuildDisplay` appends at most 300 rows; channels already parsed in memory. **Measured 2026-10-20 (R28d, D-PERF-1's async instrument as re-made, `scripts/dev-harness/open-scenario.sh`: the clock stops at the first frame whose presenting view DRAWS a whole screen, 10 rows or 16 tiles, counting only delegates that intersect its visible area) at 10,000 channels in the cage's floating window: met by every open after the first (warm, realised median 33 ms list / 31 ms wall, max 41), NOT met by the first open of a session (cold, realised median 548 ms list / 534 ms wall), about 440 ms of which a 40-channel control shows too (the first show of the window in the cage). On Hyprland's layer-shell surface the cold figure is UNVERIFIED. R27f's figures the same day (546 / 580 cold, 34 / 32 warm) counted delegates built off screen as well and trailed the drawn screen. Every open figure recorded before 2026-10-20 came from `openMs`, whose clock stops in the turn of the summon, before the first frame (D-PERF-1); it did lay out the on-screen delegates (10 rows, as drawn), so what it missed is the frames up to the first drawn screen. The round-18 rulings in `ARCHITECTURE-SOURCES.md` have the table** |
 | Keystroke to redraw | < 30 ms | one linear scan over precomputed `searchKey`s, bounded materialization |
 | Helper `playlist` | < 1.5 s for 10k entries on this machine (excluding network) | single pass regex parser, no DOM |
 | Helper `epg` | < 4 s for a 50 MB XMLTV | `xml.etree.iterparse`, programmes outside a +-24 h window dropped, gzip streamed |

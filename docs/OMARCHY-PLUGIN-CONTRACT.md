@@ -1015,7 +1015,12 @@ of a file the view creates, a re-point and what re-arms after one, by round
     and then reads; the watchdog asks for the load once more and then takes
     the no-write mode `read-timeout`, never saving without the read. Pinned
     through the node double on lane-sweep-a1, both hosts and both echo
-    modes, each over an empty folder: no file created.]
+    modes, each over an empty folder: no file created.] [2026-10-20, round
+    18, R28a: the watchdog's answer is now to keep the save held and read
+    again on a bounded schedule (2, 4, 8, 16, 32, 62 s, then every 30 s),
+    never a block and never a write; over an empty folder the read's
+    eventual load failure is the `absent` mode, still with no file created
+    (pinned on lane-sweep-a2, the same four shapes).]
   - **A re-point raises nothing.** `ln -sfn` of a `state.json` link to
     another file (`links-1.txt` L4) and of a state-folder link to another
     folder (L7) or to an empty one (L9): `changed+0 loaded+0`, and the
@@ -1052,8 +1057,9 @@ of a file the view creates, a re-point and what re-arms after one, by round
     set `r27b`, two runs, 608 trials, `RESULT-2026-10-20-r27b.txt`): one
     re-read after our own `saved` when a change was signalled during the
     write recovers NOTHING that the read before the next save does not --
-    0 of 608. A change that landed before our rename is gone from disk (21
-    of the 30 that landed during our write); one that survived it is loaded
+    0 of 608. A change that landed before our rename is gone from disk (20
+    of the 25 that landed during our write; this read 21 of 30 until round
+    18's R28e recounted the RESULT file's raw lines); one that survived it is loaded
     by the later read in every trial -- the 4 the mitigation's read also
     loaded, and the 9 (4 during our write, 5 after it) the view never saw
     on its own. The re-read changes only WHEN memory learns of the
@@ -1070,7 +1076,10 @@ of a file the view creates, a re-point and what re-arms after one, by round
   bounded by a 2 s watchdog that saves without the read, counted and
   logged [2026-10-20, round 17, R27a: neither any more -- the save waits
   for the write in flight and then reads, and the watchdog retries the read
-  once and then stops saving with reason `read-timeout`]; every write is issued from a turn of its own (`Qt.callLater`),
+  once and then stops saving with reason `read-timeout`] [round 18, R28a:
+  and not that either -- a silent read keeps the save held, memory the
+  authority, and is asked again on a bounded schedule until a load
+  answers]; every write is issued from a turn of its own (`Qt.callLater`),
   never from inside a handler (R26b); and nothing reloads on a timer
   (R26d), so a replacement with no save after it is not seen until the next
   save or a restart -- nothing is written meanwhile, so nothing is lost. The
