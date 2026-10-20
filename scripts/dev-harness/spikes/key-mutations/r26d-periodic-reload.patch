@@ -2,11 +2,10 @@ diff --git a/Service.qml b/Service.qml
 index 0000000..0000000 100644
 --- a/Service.qml
 +++ b/Service.qml
-@@ -5449,6 +5449,14 @@ Item {
-     onTriggered: if (root.stateVerifyPending) root.finishStateVerify(true)
+@@ -5571,6 +5571,14 @@
    }
  
-+  Timer {
+   Timer {
 +    // MUTATION (lane A1, R26d): the periodic reload R26d refused -- state.json read every 2 s whatever happens
 +    interval: 2000
 +    repeat: true
@@ -14,6 +13,7 @@ index 0000000..0000000 100644
 +    onTriggered: stateFile.reload()
 +  }
 +
-   Timer {
-     // R23c: the bound on the start-up `state init` (startStateInit). The
-     // shape of playlistWatchdog: TERM, flag, and the exit handler decides --
++  Timer {
+     // R27a (window a): the bound on a save held for our write in flight. A
+     // write the view has not reported in 2 s releases the held save to its
+     // read (endStateWriteWait), which has a bound of its own; nothing here

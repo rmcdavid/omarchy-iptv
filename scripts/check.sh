@@ -225,7 +225,12 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # damaged-helper reply mapped through the shared helper-damaged fixture (4),
 # its routing as no_output's (1), every other reply reader unchanged by it
 # (1), and Service.qml's own status branch through the harness (1).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2572}
+# 2572 -> 2634 on 2026-10-20, R27 (lane-sweep-a1): R27a's waits, second
+# read and read-timeout mode (window a twice, the wait's bound, window c
+# three times, D-SRC-47's mechanism: 7 x 4), R27e's notice family (5 model,
+# and the start/mid title and the entry-refusal journal line x 4), R27c (2
+# x 4) and R27d (6 model, 3 x 4); the eviction pins were replaced, not added.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2634}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity

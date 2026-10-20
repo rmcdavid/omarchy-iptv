@@ -1258,6 +1258,15 @@ is "the key live floor matches its recipe (every lettered line)" \
    "$k_live" "$(qa_count '^ *ck "[A-Z][0-9]' "$KS")"
 is "check.sh's key preflight floor matches the scenario's own" \
    "$(grep -oE 'KEY_PREFLIGHT_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( k_tree + 1 ))"
+# R27f (2026-10-20, D-PERF-1): the open instrument's floor, joined the same
+# way -- the check-tree count is its O and S lines, and check.sh's floor is
+# that plus the scenario's own "ran every check" line.
+OS_SCEN="$ROOT/scripts/dev-harness/open-scenario.sh"
+o_tree=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$OS_SCEN" | sed -n 1p | cut -d= -f2)
+is "the open check-tree floor matches its recipe (the O and S lines)" \
+   "$o_tree" "$(qa_count '^ *ck "[OS][0-9]' "$OS_SCEN")"
+is "check.sh's open preflight floor matches the scenario's own" \
+   "$(grep -oE 'OPEN_PREFLIGHT_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( o_tree + 1 ))"
 k_probe=$(node -e '
 const M = require(process.argv[1]); const H = require(process.argv[2])
 const url = "/tmp/qa-lib-test/a.m3u", other = "/tmp/qa-lib-test/b.m3u"
@@ -1440,9 +1449,9 @@ console.log([L.storedOwnedValue(e, "showLogos"), L.storedOwnedValue(e, "sourceKe
 # Round 9 (Q): the slow listener holding the probe open is the scenario's
 # own, its pid read from the LISTENER (ss -ltnp on its port, never `$!`, the
 # rule the round-2 live pass learned), and cleanup() kills that pid on every
-# exit.
-is "key-scenario's Q reads its slow listener's pid from ss -ltnp and cleanup kills that pid" \
-   "$(qa_count '^  SLOW_PID=""; for \(\(i = 0; i < 50; i\+\+\)\); do SLOW_PID=\$\(ss -ltnp 2>/dev/null \| grep ":\$SLOW_PORT "' "$KS") $(awk '/^cleanup\(\) \{/,/^\}/' "$KS" | grep -cE 'kill -TERM "\$SLOW_PID"')" "1 1"
+# exit. R27c (2026-10-20) adds B37's, the same shape: 1 -> 2 readers.
+is "key-scenario's Q and B37 read their slow listener's pid from ss -ltnp and cleanup kills that pid" \
+   "$(qa_count '^  SLOW_PID=""; for \(\(i = 0; i < 50; i\+\+\)\); do SLOW_PID=\$\(ss -ltnp 2>/dev/null \| grep ":\$SLOW_PORT "' "$KS") $(awk '/^cleanup\(\) \{/,/^\}/' "$KS" | grep -cE 'kill -TERM "\$SLOW_PID"')" "2 1"
 # The two one-decision mutations the round-4 checks were seen red against
 # are PATCH FILES under spikes/key-mutations/ (the lead's ruling: never a
 # branch that can be merged by accident). Each must still APPLY to this
@@ -1474,9 +1483,14 @@ KM="$ROOT/scripts/dev-harness/spikes/key-mutations"
 # found nothing observing: r26a-watchdog-20ms (`interval: 2000` made 20)
 # and r26a-watchdog-no-interval (the line deleted: Qt's default 1000 ms),
 # which the node pin "the read's bound is 2 s" was seen red against.
-is "all seventeen key-mutation patches still apply to this tree (git apply --check)" \
-   "$(for km_p in d3-save-parked r14-no-return r23a-no-rearm r23e-editable-field r24g-no-kill r25a-keep-landed r25a-clear-every-saved r25b-silent-drop r25d-a5-base-not-moved r25d-a7-no-inflight-half r25d-no-reload-on-change r26a-no-read r26b-no-defer r26a-no-verb-recheck r26d-periodic-reload r26a-watchdog-20ms r26a-watchdog-no-interval; do git -C "$ROOT" apply --check "$KM/$km_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 "
-is "and the key-mutations folder holds exactly those seventeen" "$(ls "$KM"/*.patch 2>/dev/null | wc -l | tr -d ' ')" "17"
+# R27a (2026-10-20, lane-sweep-a1) adds two: r27a-no-wait (the plan's wait
+# put back to R26's skipped read) and r27a-wait-never-released (the held
+# save never asked again), which B33 and the R27a node pins were seen red
+# against; and re-made r25a-keep-landed, r26a-no-read, r26b-no-defer and
+# r26d-periodic-reload, whose hunks R27a's lines moved -- the same decisions.
+is "all nineteen key-mutation patches still apply to this tree (git apply --check)" \
+   "$(for km_p in d3-save-parked r14-no-return r23a-no-rearm r23e-editable-field r24g-no-kill r25a-keep-landed r25a-clear-every-saved r25b-silent-drop r25d-a5-base-not-moved r25d-a7-no-inflight-half r25d-no-reload-on-change r26a-no-read r26b-no-defer r26a-no-verb-recheck r26d-periodic-reload r26a-watchdog-20ms r26a-watchdog-no-interval r27a-no-wait r27a-wait-never-released; do git -C "$ROOT" apply --check "$KM/$km_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 "
+is "and the key-mutations folder holds exactly those nineteen" "$(ls "$KM"/*.patch 2>/dev/null | wc -l | tr -d ' ')" "19"
 # 2 -> 3 on 2026-10-16: R26's --baseline footer sentence cites
 # d3-save-parked.patch too (its 76 / 53 since every save reads first).
 is "key-scenario and the README cite the patch files and no mutation branch" \
@@ -2565,7 +2579,9 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # 505 -> 513 on 2026-10-17, D-REL-7 landed on dev: qa_helper_parts against
 # the python reader on this tree, its order, a missing part, an empty block,
 # a one-file helper and no helper at all (8).
-EXPECTED=513
+# 513 -> 515 on 2026-10-20, R27f (lane-sweep-a1): the open instrument's two
+# floor joins (its check-tree recipe, and check.sh's OPEN_PREFLIGHT_MIN).
+EXPECTED=515
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

@@ -84,3 +84,11 @@ against the decision it names, never against a line number.
 Measured 2026-10-12 on lane-key-u2 (round 5, 63 lettered checks): the
 counts are in key-scenario.sh's header under "RULE 11, THE RED RUN" and in
 the transcript each run prints as its first line.
+
+R27a (2026-10-20, lane-sweep-a1) re-made `r25a-keep-landed.patch`,
+`r26a-no-read.patch`, `r26b-no-defer.patch` and `r26d-periodic-reload.patch`
+against the tree that carries R27a's lines (the wait branch beside the
+refusal, the end of the write wait in `onSaved`, the wait's own Timer after
+the read's): the same removed and added lines, only their context moved, so
+`git apply --check` passes again (scripts/qa-lib-test.sh). They were not
+re-run live through --tree after the re-make.

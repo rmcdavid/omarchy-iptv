@@ -2,8 +2,8 @@ diff --git a/Service.qml b/Service.qml
 index 0000000..0000000 100644
 --- a/Service.qml
 +++ b/Service.qml
-@@ -2486,12 +2486,7 @@ Item {
-       root.stateWritesRefused = root.stateWritesRefused + 1
+@@ -2573,12 +2573,7 @@
+       }
        return
      }
 -    if (plan === "defer") {
