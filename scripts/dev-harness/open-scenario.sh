@@ -181,6 +181,9 @@ console.log("D7 " + d(range(0, 14).map(i => tile(i, 4)), vp(0, 520, 480), GRID))
 console.log("D8 " + d(range(0, 14).map(i => tile(i, 4)), vp(0, 520, 480), Object.assign({}, GRID, { total: 14 })))
 console.log("D9 " + d(range(0, 13).map(i => Object.assign(row(i), { shown: i !== 3 })), vp(), LIST))
 console.log("D10 " + d([], vp(), LIST))
+console.log("D11 " + d(range(0, 13).map(i => Object.assign(row(i), { opacity: 0 })), vp(), LIST))
+console.log("D12 " + d(range(0, 13).map(i => Object.assign(row(i), { opacity: i === 3 ? 0 : 1 })), vp(), LIST))
+console.log("D13 " + d(range(0, 13).map(i => Object.assign(row(i), { opacity: 0.3 })), vp(), LIST))
 const fr = (...xs) => xs.map((x, i) => Object.assign({ at: 16 * (i + 1) }, x))
 const A = { drawn: 6, minIndex: 0, maxIndex: 5, complete: false }, C = { drawn: 10, minIndex: 0, maxIndex: 9, complete: true }
 const S = (frames, tail) => { const r = H.openDrawnSettle(frames, tail); return [r.settled, r.realisedAt, r.count, r.changedAfter, r.tailFrames, r.tailDone].join(",") }
@@ -200,13 +203,19 @@ console.log("E4 " + S(fr(A, C, C), 600))
   ck "D8 the same grid when the guide ends at that cell: complete" "$(line D8)" "14,14,0,13,true,"
   ck "D9 a hidden delegate is not drawn, and the hole it leaves is a gap" "$(line D9)" "9,13,0,9,false,gap"
   ck "D10 an empty view draws nothing" "$(line D10)" "0,0,-1,-1,false,empty"
+  # R29e (round 2's live review, P3): a view painted at opacity 0 is not
+  # drawn. A fade counts from its first frame above 0 (D13): the claim is
+  # "painted at all", never "painted at full strength".
+  ck "D11 a screen of delegates whose effective opacity is 0 draws nothing" "$(line D11)" "0,13,-1,-1,false,empty"
+  ck "D12 one delegate at opacity 0 is a hole, so a gap" "$(line D12)" "9,13,0,9,false,gap"
+  ck "D13 a screen at opacity 0.3 counts as drawn (what the instrument does not grade: a fade's strength)" "$(line D13)" "10,13,0,9,true,"
   ck "E1 the open is realised at the FIRST frame whose drawn set is complete; nothing changes in the tail, which runs out" "$(line E1)" "true,48,10,0,2,true"
   ck "E2 a set that never completes never settles" "$(line E2)" "false,-1,-1,0,0,false"
   ck "E3 a drawn set that changes after the decision is counted in the tail" "$(line E3)" "true,32,10,1,3,false"
   ck "E4 a tail that has not run its time is not done" "$(line E4)" "true,32,10,0,1,false"
   local seam
-  seam="$(qa_count '^    var settle = HarnessLib\.openDrawnSettle\(frames, harness\.openTailMs\)$' "$HERE/shell.qml") $(qa_count '^    return HarnessLib\.openDrawnSet\(items, \{ x: v\.contentX, y: v\.contentY, w: v\.width, h: v\.height \},$' "$HERE/shell.qml") $(qa_count 'kind: grid \? "grid" : "list", total: g \? g\.rowCount : v\.count,' "$HERE/shell.qml") $(qa_count 'p\.Window\.window\.update\(\)' "$HERE/shell.qml") $(qa_count 'function onFrameSwapped\(\) \{ p\.frame\(\) \}' "$HERE/shell.qml")"
-  ck "S1 shell.qml's frame handler decides through HarnessLib.openDrawnSettle, samples through openDrawnSet over the visible area against the guide's rowCount, asks the window for the next frame and listens to its swaps" "$seam" "1 1 1 1 1"
+  seam="$(qa_count '^    var settle = HarnessLib\.openDrawnSettle\(frames, harness\.openTailMs\)$' "$HERE/shell.qml") $(qa_count '^    return HarnessLib\.openDrawnSet\(items, \{ x: v\.contentX, y: v\.contentY, w: v\.width, h: v\.height \},$' "$HERE/shell.qml") $(qa_count 'kind: grid \? "grid" : "list", total: g \? g\.rowCount : v\.count,' "$HERE/shell.qml") $(qa_count 'p\.Window\.window\.update\(\)' "$HERE/shell.qml") $(qa_count 'function onFrameSwapped\(\) \{ p\.frame\(\) \}' "$HERE/shell.qml") $(qa_count '^ *opacity: alpha \* \(Number\(k\.opacity\) >= 0 \? Number\(k\.opacity\) : 1\) \}\)$' "$HERE/shell.qml")"
+  ck "S1 shell.qml's frame handler decides through HarnessLib.openDrawnSettle, samples through openDrawnSet over the visible area against the guide's rowCount (each delegate with its effective opacity), asks the window for the next frame and listens to its swaps" "$seam" "1 1 1 1 1 1"
   echo "== instrument arm done"
 }
 
@@ -329,7 +338,7 @@ PY
 
 instrument
 if [[ $MODE == check-tree ]]; then
-  EXPECTED_CHECKS=15
+  EXPECTED_CHECKS=18
 else
   CHANNELS=${OPEN_CHANNELS:-10000}
   COLD=${OPEN_COLD:-3}
@@ -402,7 +411,7 @@ for view in ("list", "wall"):
     print("  %-4s PERF-02 method A (open round trip - median ping %.0f): %s" % (view, ping, sa))
 print("BUDGET (rule 7, 150 ms, the realised time; the warm median is graded as L6/W6, the rest reported): " + "; ".join(verdict))
 PY
-  EXPECTED_CHECKS=29
+  EXPECTED_CHECKS=32
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then

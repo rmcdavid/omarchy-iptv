@@ -391,7 +391,10 @@ CLIP_PREFLIGHT_MIN=${CLIP_PREFLIGHT_MIN:-7}
 # found on lane-key-r1 and the counts on the tree that closes it.
 # scripts/qa-lib-test.sh asserts this number is the scenario's check-tree
 # EXPECTED_CHECKS plus one.
-KEY_PREFLIGHT_MIN=${KEY_PREFLIGHT_MIN:-11}
+# 11 -> 12 on 2026-10-20, R29e (lane-sweep-a3): S4, init_pids answers this
+# run's start-up init only (its own --state-dir), seen red on the unscoped
+# scanner that read another harness's helper as `left:` in B14.
+KEY_PREFLIGHT_MIN=${KEY_PREFLIGHT_MIN:-12}
 # R27f (2026-10-20, D-PERF-1): the async open instrument's preflight, plus
 # the scenario's own "ran every check" line. The live arm (the guide's open at
 # 10,000 channels under cage, cold and warm, list and wall) is a human's.
@@ -399,7 +402,11 @@ KEY_PREFLIGHT_MIN=${KEY_PREFLIGHT_MIN:-11}
 # DRAWN -- HarnessLib.openDrawnSet driven over ten frames (D1..D10),
 # openDrawnSettle over four (E1..E4) and the seam (S1); R27f's openSettle and
 # its seven traces are gone with it.
-OPEN_PREFLIGHT_MIN=${OPEN_PREFLIGHT_MIN:-16}
+# 16 -> 19 on 2026-10-20, R29e (lane-sweep-a3): D11..D13, a delegate at
+# effective opacity 0 is not drawn (a screen of them, one of them) and one
+# at 0.3 is (the claim narrowed to "painted at all"); seen red on the
+# harness-lib that read visible alone.
+OPEN_PREFLIGHT_MIN=${OPEN_PREFLIGHT_MIN:-19}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }

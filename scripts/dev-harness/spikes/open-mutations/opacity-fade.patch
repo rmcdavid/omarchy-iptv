@@ -1,0 +1,37 @@
+diff --git a/Guide.qml b/Guide.qml
+--- a/Guide.qml
++++ b/Guide.qml
+@@ -156,6 +156,9 @@
+   // an 11k-channel scope costs one property write and the view instantiates
+   // only the visible delegates (D-LIVE-01, PERF-02).
+   property int rowCount: 0
++  // MUTATION (spikes/open-mutations/opacity-fade.patch): both channel views are painted at opacity 0 until 300 ms after open()
++  property bool harnessLateOpaque: true
++  Timer { id: harnessLateOpaqueTimer; interval: 300; repeat: false; onTriggered: root.harnessLateOpaque = true }
+   property bool truncated: false
+   property var scopeList: []
+   // M2-09 D1: the one measured fact about the group axis, taken from the same
+@@ -985,6 +988,7 @@
+   }
+ 
+   function open(payloadJson) {
++    root.harnessLateOpaque = false; harnessLateOpaqueTimer.restart()   // MUTATION (opacity-fade.patch)
+     root.resolveService()
+     var payload = Model.parseJsonObject(payloadJson) || {}
+     var channels = root.serviceReady ? root.service.channels : []
+@@ -3575,6 +3579,7 @@
+               // multiple removes the disagreement.
+               GridView {
+                 id: channelWall
++                opacity: root.harnessLateOpaque ? 1 : 0   // MUTATION (opacity-fade.patch)
+                 // The harness resolves the channel view by objectName to force
+                 // a layout before it stops the open clock. A view that is not
+                 // on that list cannot be measured, and openMs reports view:""
+@@ -3808,6 +3813,7 @@
+ 
+               ListView {
+                 id: resultList
++                opacity: root.harnessLateOpaque ? 1 : 0   // MUTATION (opacity-fade.patch)
+                 visible: !root.wallView
+                 // Inert at runtime, and the only way the performance budget
+                 // can be measured: `id` is compile-time and does not reach the

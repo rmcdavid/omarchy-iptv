@@ -175,7 +175,15 @@ function pointerStateOf(s) {
 // `layout` { kind: "list" | "grid", total: the rows the guide HAS (its own
 // rowCount, never the view's count, so a view whose model is cut short reads
 // as unfilled), spacing (list), cellW, cellH (grid) }. DRAWN is a delegate
-// that is shown and intersects the visible area. The set is COMPLETE when it
+// that is shown and intersects the visible area. R29e (2026-10-20, round 2's
+// live review, P3): and whose `opacity` -- the EFFECTIVE one, its own times
+// every ancestor's up to the window, which shell.qml computes -- is above 0:
+// a view painted at opacity 0 for 300 ms after the summon read about 35 ms
+// before. What this does NOT cover, so the claim is no wider than the test:
+// an item stacked OVER the view, a clip by an ancestor narrower than the
+// view, a layer or shader effect, and a fade -- counted drawn from its first
+// frame above 0, however faint. An item with no `opacity` reads as opaque
+// (the check-tree fixtures). The set is COMPLETE when it
 // tiles the visible area: not empty, its indices contiguous (no slot missing
 // in between), nothing missing above it (index 0, or the slot before the
 // first would lie wholly above the area) and nothing missing below it (the
@@ -199,6 +207,7 @@ function openDrawnSet(items, vp, layout) {
   for (var i = 0; i < its.length; i++) {
     var it = its[i] || {}
     if (it.shown === false) continue
+    if (it.opacity !== undefined && !(Number(it.opacity) > 0)) continue
     var x = Number(it.x), y = Number(it.y), w = Number(it.w), h = Number(it.h)
     if (!(w > 0) || !(h > 0)) continue
     if (x < vx + vw && x + w > vx && y < vy + vh && y + h > vy) drawn.push({ index: Math.floor(Number(it.index)), y: y, h: h })

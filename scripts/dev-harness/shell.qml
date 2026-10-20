@@ -460,10 +460,16 @@ ShellRoot {
     if (!v || !v.contentItem || !v.contentItem.children) return HarnessLib.openDrawnSet([], null, null)
     var kids = v.contentItem.children
     var items = []
+    // R29e: the effective opacity -- every ancestor's from the content item
+    // up to the window's root, times each delegate's own (HarnessLib.openDrawnSet
+    // reads 0 as not drawn).
+    var alpha = 1
+    try { for (var a = v.contentItem; a; a = a.parent) alpha = alpha * (Number(a.opacity) >= 0 ? Number(a.opacity) : 1) } catch (e) {}
     for (var i = 0; i < kids.length; i++) {
       try {
         var k = kids[i]
-        if (k && k.channelId !== undefined) items.push({ index: k.index, x: k.x, y: k.y, w: k.width, h: k.height, shown: k.visible === true })
+        if (k && k.channelId !== undefined) items.push({ index: k.index, x: k.x, y: k.y, w: k.width, h: k.height, shown: k.visible === true,
+                                                        opacity: alpha * (Number(k.opacity) >= 0 ? Number(k.opacity) : 1) })
       } catch (e) {}
     }
     var grid = v.cellWidth !== undefined

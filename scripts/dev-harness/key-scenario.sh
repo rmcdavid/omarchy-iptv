@@ -944,6 +944,24 @@ JS
   ck "S2 hostEntry reads both sides through entryKey and the names through entryKeyNames" "$seams" "1 1"
   seams="$(qa_count '^ *cp "\$HERE/harness-lib\.js" "\$root/harness-lib\.js" \|\| die' "$RUN") $(qa_count '^ *qa_same_file "\$HERE/harness-lib\.js" "\$root/harness-lib\.js"' "$RUN") $(qa_count '^import "harness-lib\.js" as HarnessLib$' "$HERE/shell.qml")"
   ck "S3 run.sh stages harness-lib.js beside the model and proves the copy; shell.qml imports it" "$seams" "1 1 1"
+  # S4 (R29e): init_pids answers THIS run's start-up init and no other's.
+  # Two stand-ins with the helper's exact argv shape run the same path, one
+  # with this run's state folder and one with another's; only the first may
+  # be named. Red on the unscoped scanner (both pids, round 2's B14 red in
+  # miniature). The stand-ins are this shell's own children, killed by the
+  # pids recorded here.
+  local s4fake="$WORK/s4-helper.py" s4mine="$WORK/s4-mine/omarchy-iptv" s4theirs="$WORK/s4-theirs/omarchy-iptv" s4a s4b s4got s4i
+  printf 'import time\ntime.sleep(30)\n' >"$s4fake"
+  python3 "$s4fake" state --state-dir "$s4mine" init & s4a=$!
+  python3 "$s4fake" state --state-dir "$s4theirs" init & s4b=$!
+  for ((s4i = 0; s4i < 100; s4i++)); do
+    [[ $(tr '\0' ' ' <"/proc/$s4a/cmdline" 2>/dev/null) == *" init "* && $(tr '\0' ' ' <"/proc/$s4b/cmdline" 2>/dev/null) == *" init "* ]] && break
+    sleep 0.05
+  done
+  s4got=$(init_pids "$s4fake" "$s4mine")
+  kill -TERM "$s4a" "$s4b" 2>/dev/null; wait "$s4a" "$s4b" 2>/dev/null
+  ck "S4 init_pids names this run's start-up init only (its own state folder), never another harness's over the same helper path" \
+     "$([[ $s4got == "$s4a" ]] && echo mine || echo "got:${s4got:-none} mine:$s4a theirs:$s4b")" "mine"
   echo "== instrument arm done ($(elapsed) s)"
 }
 
@@ -1004,10 +1022,18 @@ sha() { sha256sum "$1" 2>/dev/null | cut -c1-16; }
 # path and `init` is an argument. The scanner's own argv[1] is `-c`, so it
 # cannot match itself (CLAUDE.md parallel rule 3); a pid is never matched by
 # a pattern over a command line.
+# R29e (2026-10-20, round 2's live review, P3): and only THIS scenario's --
+# `--state-dir $2` in the argv, the folder the service hands its init
+# (Service.qml's stateInitProc), which is under this run's own scratch. A
+# second harness driving the same tree's helper at the same moment read as
+# `left:<its pid>` in B14, and the reaps after B10 and B18 KILL what this
+# returns, so an unscoped answer could kill another run's helper. The state
+# folder is required; without it nothing matches.
 init_pids() {
   python3 -c '
 import os, sys
 want = sys.argv[1]
+state_dir = sys.argv[2] if len(sys.argv) > 2 else ""
 for pid in os.listdir("/proc"):
     if not pid.isdigit():
         continue
@@ -1016,8 +1042,10 @@ for pid in os.listdir("/proc"):
     except OSError:
         continue
     argv = [a.decode("utf-8", "replace") for a in argv if a]
+    if not state_dir or "--state-dir" not in argv[3:-1] or argv[argv.index("--state-dir", 3) + 1] != state_dir:
+        continue
     if len(argv) > 2 and argv[1] == want and argv[2] == "state" and "init" in argv[3:]:
-        print(pid)' "$1" 2>/dev/null | tr '
+        print(pid)' "$1" "${2:-}" 2>/dev/null | tr '
 ' ' ' | sed 's/ $//'
 }
 # Model.stateUnreadableNotice(reason, path)[field] from the TREE UNDER TEST's
@@ -2167,7 +2195,7 @@ PYSEED
   h --detach --timeout 0 --keep --playlist none --source-key "$KA" >"$WORK/start.log" 2>&1
   SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
   initpid=""
-  for ((i = 0; i < 50; i++)); do initpid=$(init_pids "$SLOW_TREE/bin/omarchy-iptv"); [[ -n $initpid ]] && break; sleep 0.1; done
+  for ((i = 0; i < 50; i++)); do initpid=$(init_pids "$SLOW_TREE/bin/omarchy-iptv" "$(dirname "$STATE")"); [[ -n $initpid ]] && break; sleep 0.1; done
   ORPHANS="$ORPHANS $initpid"
   echo "   slow init helper pid ${initpid:-none}"
   # A wall-clock deadline, not an iteration count: each poll is an IPC
@@ -2179,7 +2207,7 @@ PYSEED
   sleep 2.5
   gone=yes; for p in $initpid; do kill -0 "$p" 2>/dev/null && gone="no($p)"; done
   [[ -z $initpid ]] && gone=never-seen
-  left=$(init_pids "$SLOW_TREE/bin/omarchy-iptv")
+  left=$(init_pids "$SLOW_TREE/bin/omarchy-iptv" "$(dirname "$STATE")")
   ck "B10 a start-up init that never answers is STOPPED by the service's watchdog and reaped -- no process left anywhere running it -- and the held load decides as the no-write mode with its own reason, told once by a sentence that names the file, the file untouched" \
      "blocked:$(pf "['stateWriteBlocked']") found:$(pf "['stateInitFound']") helper:$gone left:${left:-none} told:$(qa_count ' 74017 ' "$NOTIFY_LOG") stopped:$(qa_count ' 74017 .*state\.json .*stopped' "$NOTIFY_LOG") file:$([[ $(sha "$STATE") == "$sha0" ]] && echo same || echo changed) watchdog:$(log_since 'state init exceeded')" \
      "blocked:init-timeout found:timeout helper:yes left:none told:1 stopped:1 file:same watchdog:1"
@@ -2246,7 +2274,7 @@ PYSEED
   while (( SECONDS < deadline )); do [[ $(pf "['stateWriteBlocked']") =~ ^[a-z] ]] && break; sleep 0.1; done
   (( SECONDS >= deadline )) && echo "   gave up after 10 s waiting for the no-write mode"
   sleep 0.5
-  left=$(init_pids "$PLUGIN_ROOT/bin/omarchy-iptv"); ORPHANS="$ORPHANS $left"
+  left=$(init_pids "$PLUGIN_ROOT/bin/omarchy-iptv" "$(dirname "$STATE")"); ORPHANS="$ORPHANS $left"
   ck "B14 a FIFO at state.json: the init answers at once (found, not hung), the start blocks as not-a-file, the user is told once, no helper is left running, and the FIFO is left as it was" \
      "blocked:$(pf "['stateWriteBlocked']") found:$(pf "['stateInitFound']") told:$(qa_count ' 74017 ' "$NOTIFY_LOG") left:${left:-none} fifo:$([[ -p $STATE ]] && stat -c %a "$STATE" || echo gone)" \
      "blocked:not-a-file found:present told:1 left:none fifo:600"
@@ -2322,7 +2350,7 @@ PYSEED
   h --detach --timeout 0 --keep --playlist none --source-key "$KA" >"$WORK/start.log" 2>&1
   SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
   initpid=""
-  for ((i = 0; i < 50; i++)); do initpid=$(init_pids "$SLOW_TREE/bin/omarchy-iptv"); [[ -n $initpid ]] && break; sleep 0.1; done
+  for ((i = 0; i < 50; i++)); do initpid=$(init_pids "$SLOW_TREE/bin/omarchy-iptv" "$(dirname "$STATE")"); [[ -n $initpid ]] && break; sleep 0.1; done
   ORPHANS="$ORPHANS $initpid"
   echo "   TERM-ignoring init helper pid ${initpid:-none}"
   deadline=$((SECONDS + 28))
@@ -2331,7 +2359,7 @@ PYSEED
   sleep 1.0
   gone=yes; for p in $initpid; do kill -0 "$p" 2>/dev/null && gone="no($p)"; done
   [[ -z $initpid ]] && gone=never-seen
-  left=$(init_pids "$SLOW_TREE/bin/omarchy-iptv")
+  left=$(init_pids "$SLOW_TREE/bin/omarchy-iptv" "$(dirname "$STATE")")
   ck "B17 a start-up init that IGNORES the TERM is KILLed after the grace and reaped -- no process left -- and the held load decides as the no-write mode, told once, the file untouched" \
      "blocked:$(pf "['stateWriteBlocked']") helper:$gone left:${left:-none} told:$(qa_count ' 74017 ' "$NOTIFY_LOG") file:$([[ $(sha "$STATE") == "$sha0" ]] && echo same || echo changed) watchdog:$(log_since 'state init exceeded') killed:$(log_since 'state init ignored the terminate signal, killing it')" \
      "blocked:init-timeout helper:yes left:none told:1 file:same watchdog:1 killed:1"
@@ -2354,7 +2382,7 @@ PYSEED
   h --detach --timeout 0 --keep --playlist none --source-key "$KA" >"$WORK/start.log" 2>&1
   SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
   initpid=""
-  for ((i = 0; i < 50; i++)); do initpid=$(init_pids "$SLOW_TREE/bin/omarchy-iptv"); [[ -n $initpid ]] && break; sleep 0.1; done
+  for ((i = 0; i < 50; i++)); do initpid=$(init_pids "$SLOW_TREE/bin/omarchy-iptv" "$(dirname "$STATE")"); [[ -n $initpid ]] && break; sleep 0.1; done
   t_init=$SECONDS
   ORPHANS="$ORPHANS $initpid"
   while (( SECONDS < t_start + 5 )); do sleep 0.2; done
@@ -2370,7 +2398,7 @@ PYSEED
   done
   after=gone; for p in $initpid; do kill -0 "$p" 2>/dev/null && after="alive($p)"; done
   [[ -z $initpid ]] && after=never-seen
-  left=$(init_pids "$SLOW_TREE/bin/omarchy-iptv"); ORPHANS="$ORPHANS $left"
+  left=$(init_pids "$SLOW_TREE/bin/omarchy-iptv" "$(dirname "$STATE")"); ORPHANS="$ORPHANS $left"
   ck "B18 the shell stopped 5 s into a held start-up init: the init outlives the shell, and then ENDS by its own deadline -- nothing left running 36 s after it started" \
      "at-stop:$atstop after-deadline:$after left:${left:-none}" \
      "at-stop:alive after-deadline:gone left:none"
@@ -2939,8 +2967,8 @@ instrument
 
 # The floor. A check that stops executing must turn the run red rather than
 # quietly shorten the summary (D-PLY-9). Recount with
-#   grep -cE '^ *ck "[IS][0-9]' key-scenario.sh   -> 10, the instrument arm -> check-tree
-#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 136, both arms         -> live
+#   grep -cE '^ *ck "[IS][0-9]' key-scenario.sh   -> 11, the instrument arm -> check-tree
+#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 137, both arms         -> live
 # (48 -> 61 on 2026-10-12, round 4: W1..W6 and F1..F7; 61 -> 63 the same
 # day, round 5: L1, L2; 63 -> 70 the same day, round 7: U1..U7; 70 -> 78
 # the same day, round 8: K1..K3, Z1..Z3, A1, A2; 78 -> 85 the same day,
@@ -2958,8 +2986,9 @@ instrument
 # R27d) and B37 (the probe commit at the cap, R27c); B34 is unused, the
 # burst measurement it was is printed, not graded; 135 on 2026-10-20, R28b:
 # B38 and B39 (the held migration holds the bar's guide URL with its
-# playlist); 136 the same day, R29d: B40 (a guide URL beside an unusable
-# playlist is never adopted onto the active source).)
+# playlist); 137 the same day, R29: B40 (R29d, a guide URL beside an
+# unusable playlist is never adopted onto the active source) and S4 (R29e,
+# init_pids scoped to this run), which also takes check-tree 10 -> 11.)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -2967,9 +2996,9 @@ instrument
 # scripts/check.sh's KEY_PREFLIGHT_MIN is the check-tree number plus one
 # (this line), and scripts/qa-lib-test.sh asserts every join.
 if [[ $MODE == check-tree ]]; then
-  EXPECTED_CHECKS=10
+  EXPECTED_CHECKS=11
 else
-  EXPECTED_CHECKS=136
+  EXPECTED_CHECKS=137
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then
