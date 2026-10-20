@@ -6172,7 +6172,7 @@ below was true of 0.14.2 and is now history or wrong.
   and this file's switch-redraw budget (not an open); bracketed: this
   file's section 6 "Guide open | unchanged < 150 ms" row.
 - Not changed: section 1's "inside the 150 ms budget" (a switch redraw, not
-  an open) and the round-9 to round-12 records of a cold open over 150 ms
+  an open) and the round-8 to round-10 records of a cold open over 150 ms
   by PERF-02's method (true of their method; R27f's table supersedes them).
 - Every sentence this lane added about what the plugin does was checked by
   calling the model at 070cd35 (`Model.stateUnreadableNotice`,
