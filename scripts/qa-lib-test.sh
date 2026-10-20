@@ -1259,12 +1259,13 @@ is "the key live floor matches its recipe (every lettered line)" \
 is "check.sh's key preflight floor matches the scenario's own" \
    "$(grep -oE 'KEY_PREFLIGHT_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( k_tree + 1 ))"
 # R27f (2026-10-20, D-PERF-1): the open instrument's floor, joined the same
-# way -- the check-tree count is its O and S lines, and check.sh's floor is
-# that plus the scenario's own "ran every check" line.
+# way -- the check-tree count is its instrument-arm lines, and check.sh's
+# floor is that plus the scenario's own "ran every check" line. R28d moved
+# the arm to D (openDrawnSet), E (openDrawnSettle) and S (the seam).
 OS_SCEN="$ROOT/scripts/dev-harness/open-scenario.sh"
 o_tree=$(grep -oE 'EXPECTED_CHECKS=[0-9]+' "$OS_SCEN" | sed -n 1p | cut -d= -f2)
-is "the open check-tree floor matches its recipe (the O and S lines)" \
-   "$o_tree" "$(qa_count '^ *ck "[OS][0-9]' "$OS_SCEN")"
+is "the open check-tree floor matches its recipe (the D, E and S lines)" \
+   "$o_tree" "$(qa_count '^ *ck "[DES][0-9]' "$OS_SCEN")"
 is "check.sh's open preflight floor matches the scenario's own" \
    "$(grep -oE 'OPEN_PREFLIGHT_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( o_tree + 1 ))"
 k_probe=$(node -e '

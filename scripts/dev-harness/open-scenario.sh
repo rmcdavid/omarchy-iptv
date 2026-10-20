@@ -13,22 +13,31 @@
 # 2026-09-23 was taken without the delegates. Rule 7's 150 ms budget has
 # never been verified against the thing it is about (D-PERF-1).
 #
-# THE INSTRUMENT (shell.qml `openAsync` / `openAsyncResult`, the settle rule
-# in harness-lib.js `openSettle`). The clock starts at the summon and the
-# call RETURNS; the guide's window swaps frames, and on each swap the
-# delegates the PRESENTING view has realised are counted and the creation of
-# its last delegate is timed. The open is over at the first frame of a run
-# of three frames with the same count above zero, provided no delegate was
-# created after it; the frame after the last delegate's creation is reported
-# beside it, so a run shows which definition settles and whether they agree.
+# THE INSTRUMENT (shell.qml `openAsync` / `openAsyncResult`; the decision in
+# harness-lib.js `openDrawnSet` and `openDrawnSettle`). The clock starts at
+# the summon and the call RETURNS; the guide's window swaps frames, and on
+# each swap the PRESENTING view is sampled. R28d (2026-10-20, the lead's
+# ruling): it counts what is DRAWN -- the delegates that intersect the view's
+# visible area, never the cacheBuffer's off-screen ones that R27f counted
+# (13 rows and 21 tiles where 10 and 16 are drawn) -- and the open is
+# realised at the FIRST frame whose drawn set tiles that area, measured
+# against the rows the guide has (its rowCount, not the view's count), so a
+# view that draws part of a screen and fills the rest later is realised only
+# when it has. It samples on for 600 ms after the decision and counts the
+# frames whose drawn set changed. R27f's rule (a count stable over three
+# frames) trailed the drawn screen by the off-screen delegates' cost (94-182
+# ms on a cold open) and passed a view that filled in late.
 #
 # Two arms:
-#   the instrument arm (check-tree, and the preflight of live): openSettle
-#   DRIVEN from node over hand-made traces (a count that settles, one that
-#   is still growing, one whose last delegate comes after a stable run, an
-#   empty view, frames too few), and the seams: shell.qml's frame handler
-#   calls HarnessLib.openSettle, counts by `channelId` on the presenting
-#   view, and asks the window for the next frame.
+#   the instrument arm (check-tree, and the preflight of live): openDrawnSet
+#   and openDrawnSettle DRIVEN from node over hand-made frames (a list screen
+#   under its cacheBuffer, a gap, a screen filled in part, a guide that ends
+#   on screen, a scrolled list missing a row above, a grid's full rows, a
+#   grid row half-filled, a grid that ends on screen, hidden delegates, an
+#   empty view; a decision, none, a drawn set that changes after it, a tail
+#   not yet run), and the seams: shell.qml's frame handler decides through
+#   both, against the guide's rowCount, and asks the window for the next
+#   frame.
 #   the shell arm (live): the dev-harness fake shell with the real
 #   Service.qml and Guide.qml, in the harness-only floating window, under a
 #   nested headless cage this script starts, over a 10,000-channel playlist
@@ -38,15 +47,24 @@
 #   minus the median round trip of a call that does nothing), list view and
 #   wall. OPEN_COLD shells per view, OPEN_WARM opens per shell. The checks
 #   grade the INSTRUMENT (it ran, it named the view it was asked for, it
-#   settled, it counted a screen of delegates, it measured after the summon,
-#   and the legacy openMs still reads fewer delegates than it does); the
-#   BUDGET is reported in plain words beside them, not graded, because a
-#   number over 150 ms is a product finding to file, not an instrument fault.
+#   settled, it counted a drawn screen and not the off-screen delegates, it
+#   measured after the summon, nothing drawn changed after its decision) and
+#   the WARM budget (rule 7's 150 ms, the median of the warm opens: it holds
+#   there, and a view that fills in late breaks it); the COLD budget is
+#   reported in plain words beside them, not graded, because the first open
+#   of a session is over 150 ms (round 17, most of it the window's first
+#   show) and that is a product finding filed by the lead, not an
+#   instrument fault. The legacy openMs is printed beside the result for
+#   comparison and graded by nothing (round 1's L6 claimed it under-counts;
+#   against the DRAWN screen it does not).
 #
-# PROVING IT CAN FAIL (rule 11): spikes/open-mutations/slow-delegate.patch
-# makes every channel delegate spend 4 ms in its Component.onCompleted; run
-# this with --tree over a copy carrying it and the realised time must grow by
-# about 4 ms a delegate while openMs's number does not.
+# PROVING IT CAN FAIL (rule 11), spikes/open-mutations/, through --tree over
+# a copy carrying the patch: slow-delegate.patch makes every channel
+# delegate spend 4 ms in its Component.onCompleted, and both the summon (a
+# cold summon builds delegates synchronously, the hidden view's among them)
+# and the realised time grow; late-fill.patch gives both channel views a
+# model of 6 rows until 300 ms after open(), and the warm budget check (L6,
+# W6) goes red where R27f's instrument read that partial screen as the open.
 #
 # Run the live arm on a PRIVATE D-Bus (CLAUDE.md, parallel 6b):
 #   scripts/dev-harness/private-bus.sh <dir> 1800 scripts/dev-harness/open-scenario.sh live
@@ -144,30 +162,51 @@ ck() { local label=$1 got=$2 want=$3; [[ $got == "$want" ]] && pass "$label: $wa
 # ------------------------------------------------------- the instrument arm
 instrument() {
   local out
-  echo "== instrument arm: harness-lib.js openSettle, driven"
+  echo "== instrument arm: harness-lib.js openDrawnSet / openDrawnSettle, driven"
   out=$(node -e '
 const H = require(process.argv[1])
-const f = (...cs) => cs.map((c, i) => ({ at: 16 * (i + 1), count: c }))
-const s = (fr, lc, k) => { const r = H.openSettle(fr, lc, k); return [r.settled, r.stableAt, r.stableCount, r.lastChildFrameAt].join(",") }
-console.log("O1 " + s(f(0, 12, 30, 30, 30), 30, 3))
-console.log("O2 " + s(f(0, 12, 20, 30), 40, 3))
-console.log("O3 " + s(f(30, 30, 30, 31), 60, 3))
-console.log("O4 " + s(f(0, 0, 0, 0), -1, 3))
-console.log("O5 " + s(f(30, 30), 10, 3))
-console.log("O6 " + s(f(5, 30, 30, 30, 30), -1, 3))
-console.log("O7 " + s(f(30, 31, 31, 31), 20, 3))
+const row = (i, h) => ({ index: i, x: 0, y: i * 52, w: 600, h: h || 50, shown: true })
+const tile = (i, cols) => ({ index: i, x: (i % cols) * 120, y: Math.floor(i / cols) * 130, w: 120, h: 130, shown: true })
+const range = (a, b) => { const o = []; for (let i = a; i < b; i++) o.push(i); return o }
+const LIST = { kind: "list", total: 10000, spacing: 2 }, GRID = { kind: "grid", total: 10000, cellW: 120, cellH: 130 }
+const vp = (y, h, w) => ({ x: 0, y: y || 0, w: w || 600, h: h || 514 })
+const d = (items, v, l) => { const r = H.openDrawnSet(items, v, l); return [r.drawn, r.built, r.minIndex, r.maxIndex, r.complete, r.reason].join(",") }
+console.log("D1 " + d(range(0, 13).map(i => row(i)), vp(), LIST))
+console.log("D2 " + d(range(0, 13).filter(i => i !== 4).map(i => row(i)), vp(), LIST))
+console.log("D3 " + d(range(0, 6).map(i => row(i)), vp(), LIST))
+console.log("D4 " + d(range(0, 6).map(i => row(i)), vp(), Object.assign({}, LIST, { total: 6 })))
+console.log("D5 " + d(range(4, 20).map(i => row(i)), vp(4 * 52 - 30), LIST))
+console.log("D6 " + d(range(0, 20).map(i => tile(i, 4)), vp(0, 520, 480), GRID))
+console.log("D7 " + d(range(0, 14).map(i => tile(i, 4)), vp(0, 520, 480), GRID))
+console.log("D8 " + d(range(0, 14).map(i => tile(i, 4)), vp(0, 520, 480), Object.assign({}, GRID, { total: 14 })))
+console.log("D9 " + d(range(0, 13).map(i => Object.assign(row(i), { shown: i !== 3 })), vp(), LIST))
+console.log("D10 " + d([], vp(), LIST))
+const fr = (...xs) => xs.map((x, i) => Object.assign({ at: 16 * (i + 1) }, x))
+const A = { drawn: 6, minIndex: 0, maxIndex: 5, complete: false }, C = { drawn: 10, minIndex: 0, maxIndex: 9, complete: true }
+const S = (frames, tail) => { const r = H.openDrawnSettle(frames, tail); return [r.settled, r.realisedAt, r.count, r.changedAfter, r.tailFrames, r.tailDone].join(",") }
+console.log("E1 " + S(fr(A, A, C, C, C, C), 40))
+console.log("E2 " + S(fr(A, A, A, A), 40))
+console.log("E3 " + S(fr(A, C, Object.assign({}, C, { drawn: 11, maxIndex: 10 }), C, C), 100))
+console.log("E4 " + S(fr(A, C, C), 600))
 ' "$HERE/harness-lib.js" 2>&1)
   line() { printf '%s\n' "$out" | grep -a "^$1 " | head -1 | cut -d' ' -f2-; }
-  ck "O1 a count that grows and then holds three frames settles at the first frame of the run, with the last delegate's frame beside it" "$(line O1)" "true,48,30,32"
-  ck "O2 a count still growing when the frames run out has not settled" "$(line O2)" "false,-1,-1,48"
-  ck "O3 a delegate created after a stable run means it had not settled" "$(line O3)" "false,16,30,64"
-  ck "O4 an empty view never settles" "$(line O4)" "false,-1,-1,-1"
-  ck "O5 two frames are not three" "$(line O5)" "false,-1,-1,16"
-  ck "O6 no child event (a warm open over delegates that already exist) settles on the count alone" "$(line O6)" "true,32,30,-1"
-  ck "O7 a count that moves once and then holds settles at the frame it reached its final value" "$(line O7)" "true,32,31,32"
+  ck "D1 a list screen with its cacheBuffer below: 13 built, the 10 that intersect the visible area are drawn, and they tile it" "$(line D1)" "10,13,0,9,true,"
+  ck "D2 a row missing among the drawn ones is a gap, not a screen" "$(line D2)" "9,12,0,9,false,gap"
+  ck "D3 six rows drawn where ten fit, the guide holding 10,000: not complete (the slot after the last is in view)" "$(line D3)" "6,6,0,5,false,below"
+  ck "D4 the same six rows when the guide HAS six: complete (the guide ends on screen)" "$(line D4)" "6,6,0,5,true,"
+  ck "D5 a scrolled list whose first drawn row starts below the top with rows before it: not complete (a row missing above)" "$(line D5)" "10,16,4,13,false,above"
+  ck "D6 a grid of four columns: the four full rows in view are drawn, the fifth row of the cacheBuffer is not" "$(line D6)" "16,20,0,15,true,"
+  ck "D7 a grid whose last row in view has two of its four cells: not complete" "$(line D7)" "14,14,0,13,false,below"
+  ck "D8 the same grid when the guide ends at that cell: complete" "$(line D8)" "14,14,0,13,true,"
+  ck "D9 a hidden delegate is not drawn, and the hole it leaves is a gap" "$(line D9)" "9,13,0,9,false,gap"
+  ck "D10 an empty view draws nothing" "$(line D10)" "0,0,-1,-1,false,empty"
+  ck "E1 the open is realised at the FIRST frame whose drawn set is complete; nothing changes in the tail, which runs out" "$(line E1)" "true,48,10,0,2,true"
+  ck "E2 a set that never completes never settles" "$(line E2)" "false,-1,-1,0,0,false"
+  ck "E3 a drawn set that changes after the decision is counted in the tail" "$(line E3)" "true,32,10,1,3,false"
+  ck "E4 a tail that has not run its time is not done" "$(line E4)" "true,32,10,0,1,false"
   local seam
-  seam="$(qa_count '^    var settle = HarnessLib\.openSettle\(frames, r\.lastChildAt, harness\.openSettleFrames\)$' "$HERE/shell.qml") $(qa_count '^      try \{ if \(kids\[i\] && kids\[i\]\.channelId !== undefined\) n\+\+ \} catch \(e\) \{\}$' "$HERE/shell.qml") $(qa_count 'p\.Window\.window\.update\(\)' "$HERE/shell.qml") $(qa_count 'function onFrameSwapped\(\) \{ p\.frame\(\) \}' "$HERE/shell.qml")"
-  ck "S1 shell.qml's frame handler decides through HarnessLib.openSettle, counts delegates by channelId (twice: openMs's and openAsync's), asks the window for the next frame and listens to its swaps" "$seam" "1 2 1 1"
+  seam="$(qa_count '^    var settle = HarnessLib\.openDrawnSettle\(frames, harness\.openTailMs\)$' "$HERE/shell.qml") $(qa_count '^    return HarnessLib\.openDrawnSet\(items, \{ x: v\.contentX, y: v\.contentY, w: v\.width, h: v\.height \},$' "$HERE/shell.qml") $(qa_count 'kind: grid \? "grid" : "list", total: g \? g\.rowCount : v\.count,' "$HERE/shell.qml") $(qa_count 'p\.Window\.window\.update\(\)' "$HERE/shell.qml") $(qa_count 'function onFrameSwapped\(\) \{ p\.frame\(\) \}' "$HERE/shell.qml")"
+  ck "S1 shell.qml's frame handler decides through HarnessLib.openDrawnSettle, samples through openDrawnSet over the visible area against the guide's rowCount, asks the window for the next frame and listens to its swaps" "$seam" "1 1 1 1 1"
   echo "== instrument arm done"
 }
 
@@ -249,36 +288,48 @@ legacy_cold() {   # legacy_cold <view>
 
 SAMPLES="$WORK/samples.tsv"
 : >"$SAMPLES"
-record() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@" >>"$SAMPLES"; }
+# view, kind, summon, realised, drawn, built, changedAfter, method A or ping
+record() { printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$@" >>"$SAMPLES"; }
+rec_open() {   # rec_open <view> <kind> <result json>
+  record "$1" "$2" "$(jf "['summonMs']" "$3")" "$(jf "['realisedMs']" "$3")" "$(jf "['count']" "$3")" "$(jf "['built']" "$3")" "$(jf "['changedAfter']" "$3")" "-"
+}
 measure_shell() {   # measure_shell <view> <shell-number>
-  local view=$1 n=$2 res a k want_view
-  [[ $view == wall ]] && want_view=channelWall || want_view=resultList
+  local view=$1 n=$2 res a k
   start_shell || { echo "   shell $n ($view) did not settle; no samples from it"; return 1; }
   # COLD: the first open this shell makes
-  if res=$(async_open "$view"); then
-    record "$view" cold "$(jf "['summonMs']" "$res")" "$(jf "['realisedMs']" "$res")" "$(jf "['lastChildFrameMs']" "$res")" "$(jf "['count']" "$res")" "-"
-    [[ $n == 1 ]] && { COLD_RES=$res; }
-  else
-    record "$view" cold-unsettled "$(jf "['summonMs']" "$res")" -1 -1 "$(jf "['count']" "$res")" "-"
-    [[ $n == 1 ]] && COLD_RES=$res
-  fi
+  if res=$(async_open "$view"); then rec_open "$view" cold "$res"; else rec_open "$view" cold-unsettled "$res"; fi
+  [[ $n == 1 ]] && COLD_RES=$res
   # WARM, interleaved with method A
   for ((k = 0; k < WARM; k++)); do
-    if res=$(async_open "$view"); then
-      record "$view" warm "$(jf "['summonMs']" "$res")" "$(jf "['realisedMs']" "$res")" "$(jf "['lastChildFrameMs']" "$res")" "$(jf "['count']" "$res")" "-"
-      WARM_RES=$res
-    else
-      record "$view" warm-unsettled "$(jf "['summonMs']" "$res")" -1 -1 "$(jf "['count']" "$res")" "-"
-    fi
-    a=$(method_a); record "$view" methodA - - - - "$a"
-    record "$view" ping - - - - "$(ping_ms)"
+    if res=$(async_open "$view"); then rec_open "$view" warm "$res"; WARM_RES=$res; else rec_open "$view" warm-unsettled "$res"; fi
+    a=$(method_a); record "$view" methodA - - - - - "$a"
+    record "$view" ping - - - - - "$(ping_ms)"
   done
   stop_shell
+}
+# The figures one view's samples give, for the checks and the BUDGET line.
+view_stat() {   # view_stat <view> <what>: warm-median | changed | unsettled
+  python3 - "$SAMPLES" "$1" "$2" <<'PY'
+import statistics, sys
+rows = [l.rstrip("\n").split("\t") for l in open(sys.argv[1]) if l.strip()]
+view, what = sys.argv[2], sys.argv[3]
+def num(x):
+    try: return float(x)
+    except Exception: return None
+opens = [r for r in rows if r[0] == view and r[1] in ("cold", "warm")]
+if what == "warm-median":
+    xs = [num(r[3]) for r in opens if r[1] == "warm" and num(r[3]) is not None and num(r[3]) >= 0]
+    print("%.0f" % statistics.median(xs) if xs else "none")
+elif what == "changed":
+    print(sum(int(num(r[6]) or 0) for r in opens))
+elif what == "unsettled":
+    print(len([r for r in rows if r[0] == view and r[1].endswith("-unsettled")]))
+PY
 }
 
 instrument
 if [[ $MODE == check-tree ]]; then
-  EXPECTED_CHECKS=8
+  EXPECTED_CHECKS=15
 else
   CHANNELS=${OPEN_CHANNELS:-10000}
   COLD=${OPEN_COLD:-3}
@@ -292,28 +343,29 @@ else
   h reap >/dev/null 2>&1
   echo "== shell arm: $CHANNELS channels, $COLD cold shells and $WARM warm opens per view, floating window, cage $NESTED, load $(cut -d' ' -f1-3 /proc/loadavg)"
   for view in list wall; do
+    [[ $view == wall ]] && want=channelWall || want=resultList
+    L=${view:0:1}; L=${L^^}
     for ((s = 1; s <= COLD; s++)); do
-      COLD_RES=""; WARM_RES=""; LEGACY=""
+      COLD_RES=""; WARM_RES=""
       measure_shell "$view" "$s"
       if [[ $s == 1 ]]; then
-        [[ $view == wall ]] && want=channelWall || want=resultList
-        L=${view:0:1}; L=${L^^}
-        ck "${L}1 $view: the instrument ran to its end on the cold open and named the presenting view" "$(jf "['state']" "$COLD_RES") $(jf "['view']" "$COLD_RES")" "done $want"
-        ck "${L}2 $view: the cold open SETTLED (a count stable over three frames, no delegate after it) and saw the guide's window" "$(jf "['settled']" "$COLD_RES") $(jf "['hasWindow']" "$COLD_RES")" "true true"
+        ck "${L}1 $view: the instrument ran to its end on the cold open, its tail included, and named the presenting view" "$(jf "['state']" "$COLD_RES") $(jf "['endedBy']" "$COLD_RES") $(jf "['view']" "$COLD_RES")" "done settled $want"
+        ck "${L}2 $view: the cold open SETTLED (a frame whose drawn set tiles the visible area) and saw the guide's window" "$(jf "['settled']" "$COLD_RES") $(jf "['hasWindow']" "$COLD_RES")" "true true"
         ck "${L}3 $view: a warm open settled too" "$(jf "['settled']" "$WARM_RES")" "true"
-        ck "${L}4 $view: it counted a SCREEN of delegates (more than 4, the legacy instrument's list figure)" "$(python3 -c 'import sys; print("yes" if int(sys.argv[1]) > 4 else "no:" + sys.argv[1])' "$(jf "['count']" "$COLD_RES")" 2>/dev/null)" "yes"
+        ck "${L}4 $view: it counted the DRAWN screen -- more than 4 delegates, and fewer than the view had built (the cacheBuffer's off-screen ones are not counted)" "$(python3 -c 'import sys; c, b = int(sys.argv[1]), int(sys.argv[2]); print("yes" if 4 < c < b else "no:%d/%d" % (c, b))' "$(jf "['count']" "$COLD_RES")" "$(jf "['built']" "$COLD_RES")" 2>/dev/null)" "yes"
         ck "${L}5 $view: the realised time is measured AFTER the summon returned (realised >= summon)" "$(python3 -c 'import sys; print("yes" if float(sys.argv[2]) >= float(sys.argv[1]) else "no")' "$(jf "['summonMs']" "$COLD_RES")" "$(jf "['realisedMs']" "$COLD_RES")" 2>/dev/null)" "yes"
-        LEGACY=$(legacy_cold "$view")
-        ck "${L}6 $view: the legacy openMs, on a cold open of its own fresh shell, realised FEWER delegates than the async instrument counts on a cold open (D-PERF-1, still true of openMs)" "$(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print("yes" if int(d.get("realised",-1)) < int(sys.argv[2]) else "no:%s/%s" % (d.get("realised"), sys.argv[2]))' "$LEGACY" "$(jf "['count']" "$COLD_RES")" 2>/dev/null)" "yes"
-        echo "   $view cold trace (ms:count): $(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(" ".join("%s:%s" % (f["at"], f["count"]) for f in d.get("trace", [])[:20]))' "$COLD_RES" 2>/dev/null)"
-        echo "   $view legacy openMs: $LEGACY"
+        echo "   $view cold trace (ms:drawn/built:reason): $(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(" ".join("%s:%s/%s:%s" % (f["at"], f["drawn"], f["built"], f["reason"] or "ok") for f in d.get("trace", [])[:20]))' "$COLD_RES" 2>/dev/null)"
+        echo "   $view legacy openMs, cold, a shell of its own (printed, not graded): $(legacy_cold "$view")"
       fi
     done
+    wm=$(view_stat "$view" warm-median)
+    ck "${L}6 $view: the WARM open is within rule 7's budget -- the median realised time of the warm opens is under 150 ms" "$(python3 -c 'import sys; print("yes" if sys.argv[1] != "none" and float(sys.argv[1]) < 150 else "no:" + sys.argv[1])' "$wm" 2>/dev/null)" "yes"
+    ck "${L}7 $view: in the 600 ms after every decision, cold and warm, nothing drawn changed (no view still filling after the instrument called it open), and every open settled" "changed:$(view_stat "$view" changed) unsettled:$(view_stat "$view" unsettled)" "changed:0 unsettled:0"
   done
   cage_stop
-  echo "== samples (view, kind, summon, realised, lastChild, count, method A or ping round trip; ms)"
+  echo "== samples (view, kind, summon, realised, drawn, built, changed after, method A or ping round trip; ms)"
   sed 's/^/   /' "$SAMPLES"
-  echo "== results (ms; realised = the first frame of the stable count, lastChild = the frame after the last delegate)"
+  echo "== results (ms; realised = the first frame whose drawn set tiles the visible area)"
   python3 - "$SAMPLES" <<'PY'
 import statistics, sys
 rows = [l.rstrip("\n").split("\t") for l in open(sys.argv[1]) if l.strip()]
@@ -326,27 +378,27 @@ def summary(xs):
     return "n=%d median %.0f min %.0f max %.0f" % (len(xs), statistics.median(xs), min(xs), max(xs))
 verdict = []
 for view in ("list", "wall"):
-    pings = [num(r[6]) for r in rows if r[0] == view and r[1] == "ping"]
+    pings = [num(r[7]) for r in rows if r[0] == view and r[1] == "ping"]
     ping = statistics.median([p for p in pings if p is not None]) if pings else 0
     for kind in ("cold", "warm"):
         rs = [r for r in rows if r[0] == view and r[1] == kind]
         un = [r for r in rows if r[0] == view and r[1] == kind + "-unsettled"]
-        print("  %-4s %-4s summon %s | realised %s | lastChild %s | count %s | unsettled %d" % (view, kind,
+        print("  %-4s %-4s summon %s | realised %s | drawn %s | built %s | unsettled %d" % (view, kind,
               summary([num(r[2]) for r in rs]), summary([num(r[3]) for r in rs]), summary([num(r[4]) for r in rs]),
               summary([num(r[5]) for r in rs]), len(un)))
         real = [num(r[3]) for r in rs if num(r[3]) is not None and num(r[3]) >= 0]
         if real:
             verdict.append("%s %s median %.0f ms max %.0f ms: %s" % (view, kind, statistics.median(real), max(real),
                            "within 150 ms" if max(real) < 150 else ("median within, max over" if statistics.median(real) < 150 else "OVER 150 ms")))
-    a = [num(r[6]) for r in rows if r[0] == view and r[1] == "methodA"]
+    a = [num(r[7]) for r in rows if r[0] == view and r[1] == "methodA"]
     a = [x - ping for x in a if x is not None]
     # method A's difference can be negative: the round trip is mostly the
     # IPC client's own start, and the open's share sits inside its noise
     sa = ("n=%d median %.0f min %.0f max %.0f" % (len(a), statistics.median(a), min(a), max(a))) if a else "n=0"
     print("  %-4s PERF-02 method A (open round trip - median ping %.0f): %s" % (view, ping, sa))
-print("BUDGET (rule 7, 150 ms, the realised time): " + "; ".join(verdict))
+print("BUDGET (rule 7, 150 ms, the realised time; the warm median is graded as L6/W6, the rest reported): " + "; ".join(verdict))
 PY
-  EXPECTED_CHECKS=20
+  EXPECTED_CHECKS=29
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then

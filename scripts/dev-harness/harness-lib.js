@@ -157,44 +157,101 @@ function pointerStateOf(s) {
 
 // R27f (2026-10-20, D-PERF-1): WHEN HAS AN OPEN FINISHED? The async open
 // instrument (shell.qml, `openAsync`) starts its clock at the summon, lets
-// the event loop run, and records one sample per frame the guide's window
-// swaps: { at: ms since the summon, count: delegates the PRESENTING view has
-// realised }. It also records when the view's contentItem last gained a
-// child (`lastChildAt`: the last delegate created). Two candidate
-// definitions of "the first screen is realised", both computed here so the
-// instrument can report which one settles and whether they agree:
-//   stable   the first frame of a run of K consecutive frames whose count
-//            is the same and above zero (a count that stops moving)
-//   lastChild the first frame whose time is at or after the last delegate's
-//            creation (the frame after the last delegate completes)
-// `settled` needs BOTH: stable confirmed by K frames, and no child created
-// after the stable run began (a late delegate means it had not settled).
-// Pure, so node drives the decision the live arm reads (rule 12).
-function openSettle(frames, lastChildAt, k) {
-  var K = Math.max(1, Math.floor(Number(k) || 3))
+// the event loop run, and samples the PRESENTING view on every frame the
+// guide's window swaps.
+//
+// R28d (2026-10-20, the lead's ruling): IT COUNTS WHAT IS DRAWN. R27f counted
+// every delegate in the view's contentItem -- the cacheBuffer's off-screen
+// ones included (13 rows and 21 tiles where 10 and 16 are drawn) -- and
+// settled on a count that held for three frames, so it trailed the drawn
+// screen by the time it took to build the off-screen ones (94-182 ms on a
+// cold open, round 1's live review) and let a view that realised part of a
+// screen and filled the rest later pass L1-L5 with the partial time. Now:
+//
+// openDrawnSet(items, vp, layout) -- one frame. `items` are the view's
+// channel delegates as { index, x, y, w, h, shown } in content coordinates,
+// `vp` the visible area { x, y, w, h } (contentX, contentY, width, height),
+// `layout` { kind: "list" | "grid", total: the rows the guide HAS (its own
+// rowCount, never the view's count, so a view whose model is cut short reads
+// as unfilled), spacing (list), cellW, cellH (grid) }. DRAWN is a delegate
+// that is shown and intersects the visible area. The set is COMPLETE when it
+// tiles the visible area: not empty, its indices contiguous (no slot missing
+// in between), nothing missing above it (index 0, or the slot before the
+// first would lie wholly above the area) and nothing missing below it (the
+// last index of the guide, or the slot after the last would lie wholly below
+// the area). On a grid a slot is a cell and a row is `cols` cells: a row in
+// view is complete only when all its cells are drawn, or the guide ends in it.
+// -> { drawn, built, minIndex, maxIndex, complete, reason } where `built` is
+// every delegate (what R27f counted) and `reason` names the first test that
+// failed ("" when complete): empty | gap | above | below.
+function openDrawnSet(items, vp, layout) {
+  var its = Array.isArray(items) ? items : []
+  var v = vp || {}
+  var L = layout || {}
+  var vx = Number(v.x) || 0, vy = Number(v.y) || 0, vw = Number(v.w) || 0, vh = Number(v.h) || 0
+  var total = Math.max(0, Math.floor(Number(L.total) || 0))
+  var grid = L.kind === "grid"
+  var cellW = Number(L.cellW) || 0, cellH = Number(L.cellH) || 0
+  var cols = grid && cellW > 0 ? Math.max(1, Math.floor(vw / cellW)) : 1
+  var spacing = Number(L.spacing) || 0
+  var drawn = []
+  for (var i = 0; i < its.length; i++) {
+    var it = its[i] || {}
+    if (it.shown === false) continue
+    var x = Number(it.x), y = Number(it.y), w = Number(it.w), h = Number(it.h)
+    if (!(w > 0) || !(h > 0)) continue
+    if (x < vx + vw && x + w > vx && y < vy + vh && y + h > vy) drawn.push({ index: Math.floor(Number(it.index)), y: y, h: h })
+  }
+  drawn.sort(function (p, q) { return p.index - q.index })
+  var out = { drawn: drawn.length, built: its.length, minIndex: -1, maxIndex: -1, complete: false, reason: "empty" }
+  if (!drawn.length) return out
+  var first = drawn[0], last = drawn[drawn.length - 1]
+  out.minIndex = first.index; out.maxIndex = last.index
+  for (var j = 1; j < drawn.length; j++) if (drawn[j].index !== drawn[j - 1].index + 1) { out.reason = "gap"; return out }
+  // above: the slot before the first drawn one
+  if (first.index > 0) {
+    if (grid && first.index % cols !== 0) { out.reason = "above"; return out }
+    var prevBottom = grid ? first.y : first.y - spacing
+    if (prevBottom > vy) { out.reason = "above"; return out }
+  }
+  // below: the slot after the last drawn one
+  if (last.index < total - 1) {
+    if (grid && (last.index + 1) % cols !== 0) { out.reason = "below"; return out }
+    var nextTop = grid ? last.y + cellH : last.y + last.h + spacing
+    if (nextTop < vy + vh) { out.reason = "below"; return out }
+  }
+  out.complete = true; out.reason = ""
+  return out
+}
+
+// openDrawnSettle(frames, tailMs) -- the open. `frames` are the samples in
+// order, each { at: ms since the summon, drawn, complete, minIndex,
+// maxIndex }. The open is REALISED at the first frame whose drawn set is
+// complete: the first frame swapped with the visible area tiled. After it
+// the instrument keeps sampling for `tailMs` (shell.qml's openTailMs) and
+// `changedAfter` counts the frames in that tail whose drawn set differs from
+// the decision's -- a view still filling after the decision, which a correct
+// completeness test makes impossible and this check makes visible.
+// -> { settled, realisedAt, count, frame, changedAfter, tailFrames, tailDone }
+function openDrawnSettle(frames, tailMs) {
   var fs = Array.isArray(frames) ? frames : []
-  var out = { settled: false, stableAt: -1, stableCount: -1, stableFrame: -1, lastChildFrameAt: -1, frames: fs.length, k: K }
-  var lc = Number(lastChildAt)
-  var hasChild = isFinite(lc) && lc >= 0
-  if (hasChild) {
-    for (var j = 0; j < fs.length; j++) if (Number(fs[j].at) >= lc) { out.lastChildFrameAt = Number(fs[j].at); break }
+  var tail = Math.max(0, Number(tailMs) || 0)
+  var out = { settled: false, realisedAt: -1, count: -1, frame: -1, changedAfter: 0, tailFrames: 0, tailDone: false }
+  for (var i = 0; i < fs.length; i++) {
+    if (fs[i] && fs[i].complete === true) { out.settled = true; out.realisedAt = Number(fs[i].at); out.count = Number(fs[i].drawn); out.frame = i; break }
   }
-  for (var i = 0; i + K <= fs.length; i++) {
-    var c = Number(fs[i].count)
-    if (!(c > 0)) continue
-    var same = true
-    for (var m = 1; m < K; m++) if (Number(fs[i + m].count) !== c) { same = false; break }
-    if (!same) continue
-    // the first frame of the run: the earliest frame holding this count
-    // (it may have been reached before the run that confirms it)
-    out.stableAt = Number(fs[i].at); out.stableCount = c; out.stableFrame = i
-    break
+  if (!out.settled) return out
+  var d = fs[out.frame]
+  for (var k = out.frame + 1; k < fs.length; k++) {
+    var f = fs[k] || {}
+    if (Number(f.at) - out.realisedAt > tail) { out.tailDone = true; break }
+    out.tailFrames++
+    if (Number(f.drawn) !== Number(d.drawn) || Number(f.minIndex) !== Number(d.minIndex) || Number(f.maxIndex) !== Number(d.maxIndex)) out.changedAfter++
   }
-  out.settled = out.stableAt >= 0 && (!hasChild || lc <= out.stableAt)
   return out
 }
 
 if (typeof module !== "undefined") {
   module.exports = { entryKey: entryKey, entryKeyNames: entryKeyNames, pointerStateOf: pointerStateOf, POINTER_FIELDS: POINTER_FIELDS, storedOwnedValue: storedOwnedValue,
-                     openSettle: openSettle }
+                     openDrawnSet: openDrawnSet, openDrawnSettle: openDrawnSettle }
 }

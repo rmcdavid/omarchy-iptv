@@ -399,31 +399,32 @@ ShellRoot {
   //
   // openMs below has never measured what its comment promises: it calls
   // forceLayout SYNCHRONOUSLY in the turn of the summon, and a view is not
-  // laid out until the event loop runs, so at 10,000 channels it reported 4
-  // realised rows for the list and 1 tile for the wall -- and a bounded
-  // synchronous poll cannot fix it, because blocking the event loop is
-  // exactly what stops the delegates being created. This one does not
-  // block. `openAsync` starts the clock, summons, and RETURNS; the guide's
-  // window then swaps frames, and on every swap (a probe Item the harness
-  // parents into the guide's window, listening to that window's
-  // frameSwapped and asking for the next frame) the delegates the PRESENTING
-  // view has realised are counted, and the view's contentItem gaining a
-  // child is timed. HarnessLib.openSettle decides when the first screen is
-  // realised -- by a count stable over openSettleFrames frames, and by the
-  // frame after the last delegate was created -- and `openAsyncResult`
-  // reports the summon time, the realised time and the count. Bounded by
-  // openMaxFrames frames and openMaxMs: a run that does not settle says so
-  // (`endedBy`), never a number.
+  // laid out until the event loop runs. This one does not block.
+  // `openAsync` starts the clock, summons, and RETURNS; the guide's window
+  // then swaps frames, and on every swap (a probe Item the harness parents
+  // into the guide's window, listening to that window's frameSwapped and
+  // asking for the next frame) the PRESENTING view is sampled.
   //
-  // Nothing in the product changes: the probe is created and owned here and
-  // listens only; Guide.qml is read through the same object walk openMs uses.
+  // R28d (2026-10-20): what is sampled is what is DRAWN -- the delegates
+  // that intersect the view's visible area (HarnessLib.openDrawnSet), never
+  // the cacheBuffer's off-screen ones, which R27f counted (13 rows and 21
+  // tiles where 10 and 16 are drawn) -- and the open is realised at the
+  // first frame whose drawn set TILES that area (HarnessLib.openDrawnSettle),
+  // measured against the rows the guide has (its rowCount), so a view that
+  // draws part of a screen and fills the rest later is not realised until it
+  // has. After the decision it samples on for openTailMs and counts the
+  // frames whose drawn set changed. Bounded by openMaxFrames frames and
+  // openMaxMs: a run that does not settle says so (`endedBy`), never a
+  // number. Nothing in the product changes: the probe is created and owned
+  // here and listens only; Guide.qml is read through the object walk openMs
+  // uses.
   property var openRun: null
   property var openProbe: null
   property var openViewObj: null
   property bool openedOnce: false
-  readonly property int openSettleFrames: 3
-  readonly property int openMaxFrames: 240
-  readonly property int openMaxMs: 5000
+  readonly property int openTailMs: 600
+  readonly property int openMaxFrames: 400
+  readonly property int openMaxMs: 6000
   function presentingView(g) {
     for (var i = 0; i < harness.channelViews.length; i++) {
       var v = harness.findById(g, harness.channelViews[i], 0)
@@ -450,37 +451,39 @@ ShellRoot {
     harness.openProbe = p
     return p
   }
-  function openChild() {
-    var r = harness.openRun
-    if (!r || r.done) return
-    r.lastChildAt = Date.now() - r.t0
-    r.children = r.children + 1
-    harness.openRun = r
-  }
-  function openCount(r) {
+  // One frame's sample of the presenting view: its channel delegates (by
+  // channelId) with their geometry, the visible area, and the layout the
+  // completeness test needs. The guide's own rowCount is the total.
+  function openSample() {
     var v = harness.openViewObj
-    if (!v || !v.contentItem || !v.contentItem.children) return -1
+    var g = guideLoader.item
+    if (!v || !v.contentItem || !v.contentItem.children) return HarnessLib.openDrawnSet([], null, null)
     var kids = v.contentItem.children
-    var n = 0
+    var items = []
     for (var i = 0; i < kids.length; i++) {
-      try { if (kids[i] && kids[i].channelId !== undefined) n++ } catch (e) {}
+      try {
+        var k = kids[i]
+        if (k && k.channelId !== undefined) items.push({ index: k.index, x: k.x, y: k.y, w: k.width, h: k.height, shown: k.visible === true })
+      } catch (e) {}
     }
-    return n
+    var grid = v.cellWidth !== undefined
+    return HarnessLib.openDrawnSet(items, { x: v.contentX, y: v.contentY, w: v.width, h: v.height },
+                                   { kind: grid ? "grid" : "list", total: g ? g.rowCount : v.count, spacing: grid ? 0 : v.spacing,
+                                     cellW: grid ? v.cellWidth : 0, cellH: grid ? v.cellHeight : 0 })
   }
   function openFrame() {
     var r = harness.openRun
     if (!r || r.done) return
     var at = Date.now() - r.t0
+    var d = harness.openSample()
     var frames = r.frames.slice()
-    frames.push({ at: at, count: harness.openCount(r) })
+    frames.push({ at: at, drawn: d.drawn, built: d.built, complete: d.complete, reason: d.reason, minIndex: d.minIndex, maxIndex: d.maxIndex })
     r.frames = frames
-    var settle = HarnessLib.openSettle(frames, r.lastChildAt, harness.openSettleFrames)
-    if (settle.settled || frames.length >= harness.openMaxFrames || at >= harness.openMaxMs) {
+    var settle = HarnessLib.openDrawnSettle(frames, harness.openTailMs)
+    if (settle.tailDone || frames.length >= harness.openMaxFrames || at >= harness.openMaxMs) {
       r.done = true
       r.settle = settle
-      r.endedBy = settle.settled ? "settled" : (frames.length >= harness.openMaxFrames ? "frames" : "time")
-      var v = harness.openViewObj
-      if (v && v.contentItem) { try { v.contentItem.childrenChanged.disconnect(harness.openChild) } catch (e) {} }
+      r.endedBy = settle.tailDone ? "settled" : (frames.length >= harness.openMaxFrames ? "frames" : "time")
     }
     harness.openRun = r
     if (!r.done && harness.openProbe) harness.openProbe.poke()
@@ -1127,9 +1130,8 @@ ShellRoot {
       var pv = harness.presentingView(g)
       harness.openViewObj = pv ? pv.view : null
       var cold = !harness.openedOnce
-      if (harness.openViewObj && harness.openViewObj.contentItem) harness.openViewObj.contentItem.childrenChanged.connect(harness.openChild)
       var t0 = Date.now()
-      harness.openRun = { t0: t0, frames: [], lastChildAt: -1, children: 0, done: false, view: pv ? pv.name : "", cold: cold,
+      harness.openRun = { t0: t0, frames: [], done: false, view: pv ? pv.name : "", cold: cold,
                           summonMs: -1, endedBy: "", settle: null, hasWindow: p.hasWindow }
       fakeShell.summon(harness.pluginId, "{}")
       var r = harness.openRun
@@ -1138,19 +1140,23 @@ ShellRoot {
       p.poke()
       return JSON.stringify({ ok: true, view: r.view, cold: cold, summonMs: r.summonMs, hasWindow: p.hasWindow })
     }
-    // R27f: the run's answer. `state` running | done | none. `realisedMs` is
-    // the stable count's first frame (openSettle's stableAt), `lastChildFrameMs`
-    // the frame after the last delegate was created; `count` the delegates
-    // realised; `frames` the samples, `trace` the first 40 of them.
+    // R27f / R28d: the run's answer. `state` running | done | none.
+    // `realisedMs` is the first frame whose drawn set tiles the visible area
+    // (openDrawnSettle's realisedAt), `count` the delegates DRAWN then and
+    // `built` every delegate the view held then (the cacheBuffer's
+    // included: what R27f counted); `changedAfter` the frames in the
+    // openTailMs after the decision whose drawn set changed; `frames` the
+    // samples, `trace` the first 40 of them.
     function openAsyncResult(): string {
       var r = harness.openRun
       if (!r) return JSON.stringify({ state: "none" })
-      var s = r.settle || HarnessLib.openSettle(r.frames, r.lastChildAt, harness.openSettleFrames)
+      var s = r.settle || HarnessLib.openDrawnSettle(r.frames, harness.openTailMs)
+      var at = s.frame >= 0 ? r.frames[s.frame] : null
       return JSON.stringify({ state: r.done ? "done" : "running", endedBy: r.endedBy, view: r.view, cold: r.cold,
-                              summonMs: r.summonMs, realisedMs: s.stableAt, lastChildFrameMs: s.lastChildFrameAt,
-                              lastChildMs: r.lastChildAt, count: s.stableCount, children: r.children, frames: r.frames.length,
+                              summonMs: r.summonMs, realisedMs: s.realisedAt, count: s.count, built: at ? at.built : -1,
+                              changedAfter: s.changedAfter, tailFrames: s.tailFrames, frames: r.frames.length,
                               settled: s.settled, hasWindow: harness.openProbe ? harness.openProbe.hasWindow === true : false, rows: guideLoader.item ? guideLoader.item.currentRows.length : -1,
-                              trace: r.frames.slice(0, 40) })
+                              trace: r.frames.slice(0, 40).map(function (f) { return { at: f.at, drawn: f.drawn, built: f.built, complete: f.complete, reason: f.reason } }) })
     }
     // PERF-02's method A, in the harness: the round trip of a call that does
     // nothing, to subtract from the round trip of `open`.

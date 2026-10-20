@@ -370,12 +370,14 @@ CLIP_PREFLIGHT_MIN=${CLIP_PREFLIGHT_MIN:-7}
 # scripts/qa-lib-test.sh asserts this number is the scenario's check-tree
 # EXPECTED_CHECKS plus one.
 KEY_PREFLIGHT_MIN=${KEY_PREFLIGHT_MIN:-11}
-# R27f (2026-10-20, D-PERF-1): the async open instrument's preflight --
-# HarnessLib.openSettle driven from node over seven traces, and the seam that
-# keeps shell.qml's frame handler deciding through it -- eight checks plus the
-# scenario's own "ran every check" line. The live arm (the guide's open at
+# R27f (2026-10-20, D-PERF-1): the async open instrument's preflight, plus
+# the scenario's own "ran every check" line. The live arm (the guide's open at
 # 10,000 channels under cage, cold and warm, list and wall) is a human's.
-OPEN_PREFLIGHT_MIN=${OPEN_PREFLIGHT_MIN:-9}
+# 9 -> 16 on 2026-10-20, R28d (lane-sweep-a2): the instrument counts what is
+# DRAWN -- HarnessLib.openDrawnSet driven over ten frames (D1..D10),
+# openDrawnSettle over four (E1..E4) and the seam (S1); R27f's openSettle and
+# its seven traces are gone with it.
+OPEN_PREFLIGHT_MIN=${OPEN_PREFLIGHT_MIN:-16}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }

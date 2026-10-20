@@ -1,0 +1,40 @@
+diff --git a/Guide.qml b/Guide.qml
+index 723c4a2..c4e2e5a 100644
+--- a/Guide.qml
++++ b/Guide.qml
+@@ -156,6 +156,9 @@ Item {
+   // an 11k-channel scope costs one property write and the view instantiates
+   // only the visible delegates (D-LIVE-01, PERF-02).
+   property int rowCount: 0
++  // MUTATION (spikes/open-mutations/late-fill.patch): both channel views draw at most 6 rows until 300 ms after open()
++  property bool harnessLateFill: false
++  Timer { id: harnessLateFillTimer; interval: 300; repeat: false; onTriggered: root.harnessLateFill = true }
+   property bool truncated: false
+   property var scopeList: []
+   // M2-09 D1: the one measured fact about the group axis, taken from the same
+@@ -985,6 +988,7 @@ Item {
+   }
+ 
+   function open(payloadJson) {
++    root.harnessLateFill = false; harnessLateFillTimer.restart()   // MUTATION (late-fill.patch)
+     root.resolveService()
+     var payload = Model.parseJsonObject(payloadJson) || {}
+     var channels = root.serviceReady ? root.service.channels : []
+@@ -3582,7 +3586,7 @@ Item {
+                 width: Math.min(parent.width, root.wallGeom.gridWidth)
+                 height: parent.height
+                 anchors.horizontalCenter: parent.horizontalCenter
+-                model: root.rowCount
++                model: root.harnessLateFill ? root.rowCount : Math.min(root.rowCount, 6)   // MUTATION (late-fill.patch)
+                 clip: true
+                 cellWidth: root.wallGeom.cellWidth
+                 cellHeight: root.wallGeom.cellHeight
+@@ -3817,7 +3821,7 @@ Item {
+                 // Integer model over root.currentRows: setting the count is
+                 // O(1) for any scope size and only the visible delegates
+                 // (plus cacheBuffer) are ever created (D-LIVE-01).
+-                model: root.rowCount
++                model: root.harnessLateFill ? root.rowCount : Math.min(root.rowCount, 6)   // MUTATION (late-fill.patch)
+                 clip: true
+                 spacing: root.rowSpacing
+                 boundsBehavior: Flickable.StopAtBounds
