@@ -28,8 +28,8 @@ import {
   findSourceByUrl
 } from "./sources.mjs"
 import {
-  activeKeyText, activeKeyOf, reconcileAction, adoptActiveSource,
-  pointerWritePlan, entryWith
+  activeKeyText, activeKeyOf, withActiveKey, reconcileAction,
+  adoptActiveSource, pointerWritePlan, reconcileSources, entryWith
 } from "./source-records.mjs"
 
 // ------------------------------------------------------------ caches
@@ -595,6 +595,11 @@ function entryInputsSeenAfter(seen, values) {
 //   retired    the migration has landed: the entry is not read any more
 //   no-source  a guide URL at the migration with no source to guide (R21c)
 //   invalid    a migration value that does not validate
+//   invalid-pair  R29d: a playlistUrl that does not validate AND the epgUrl set
+//              beside it, told in ONE notice and removed together (the guide
+//              URL is never adopted onto another source); named from the
+//              playlist when `name` is playlistUrl, from the guide URL when it
+//              is epgUrl (the playlist was told about before)
 // -> { title, body }.
 function entryInputNotice(name, reason) {
   var setting = RETIRED_SETTINGS.indexOf(str(name)) !== -1 ? str(name) : "A URL setting"
@@ -604,6 +609,18 @@ function entryInputNotice(name, reason) {
     return { title: "Bar setting removed",
              body: setting + " was removed from the bar settings: no source was set up for it to guide. Add the source with its EPG URL in " + where + "." }
   }
+  if (r === "invalid-pair") {
+    // The two names are composed, never written into the sentence beside a
+    // verb, so the shipped-copy test (no literal sends the user to a retired
+    // setting) reads the same rule here as everywhere.
+    var playlist = RETIRED_SETTINGS[0], guide = RETIRED_SETTINGS[1]
+    if (setting === guide) {
+      return { title: "Bar setting removed",
+               body: guide + " in the bar settings came with a " + playlist + " that was not a usable URL, and was removed with it. Add or edit sources in " + where + "." }
+    }
+    return { title: "Bar setting removed",
+             body: setting + " in the bar settings was not a usable URL and was removed, with the " + guide + " beside it. Add or edit sources in " + where + "." }
+  }
   if (r === "invalid") {
     return { title: "Bar setting removed",
              body: setting + " in the bar settings was not a usable URL and was removed. Add or edit sources in " + where + "." }
@@ -612,9 +629,13 @@ function entryInputNotice(name, reason) {
   // URL stays on the bar entry; nothing names it or the entry's label.
   // R28b: and the guide URL set beside it is held with it, so the sentence
   // names both -- they move in together once a source is removed.
+  // R29e (2026-10-20, round 2's P3): and it says which source is active
+  // after that, because the migration makes the bar's playlist active over
+  // whichever source the user had picked meanwhile (Service.retryHeldMigration
+  // -> Model.reconcileSources' withActiveKey; pinned through Service.qml).
   if (r === "full") {
     return { title: "Sources is full",
-             body: "The playlist set on the bar, and its guide URL if one is set, were not moved into Sources: Sources already holds " + MAX_SOURCES + " sources, the most it can. Remove one in " + where + " and the bar's playlist and its guide move in together." }
+             body: "The playlist set on the bar, and its guide URL if one is set, were not moved into Sources: Sources already holds " + MAX_SOURCES + " sources, the most it can. Remove one in " + where + " and the bar's playlist and its guide move in together; the bar's playlist then becomes the active source." }
   }
   return { title: "Bar setting ignored",
            body: setting + " is no longer read from the bar settings and was removed. Add or switch sources in " + where + "." }

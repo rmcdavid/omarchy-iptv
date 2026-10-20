@@ -4843,7 +4843,11 @@ Item {
     // that does not validate, are reported and stripped -- never held.
     if (out.noSourceEpg) root.reportEntryInput("epgUrl", "no-source")
     if (out.refusedEpg) root.reportEntryInput("epgUrl", "invalid")
-    if (out.invalid) root.reportEntryInput("playlistUrl", "invalid")
+    // R29d: a guide URL that came with an unusable playlist is told WITH it,
+    // in one notice, and goes with it (the owned write strips both once the
+    // marker has landed); never adopted onto the active source.
+    if (out.invalid) root.reportEntryInput("playlistUrl", out.epgWithInvalid ? "invalid-pair" : "invalid")
+    else if (out.epgWithInvalid) root.reportEntryInput("epgUrl", "invalid-pair")
     if (out.marked) console.warn("omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on")
     // R27d (D-SRC-44): the migration did not run -- Sources is full and it
     // never evicts. The entry keeps its URL (no marker, so the funnel keeps

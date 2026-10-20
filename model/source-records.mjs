@@ -458,14 +458,40 @@ function reconcileAction(input) {
 // stripped the bar's. `heldEpg` says the entry carries a guide URL that was
 // held with it.
 //
+// R29d (2026-10-20, the lead's ruling on round 2's P3, R28b's sibling): A
+// GUIDE URL THAT CAME WITH AN UNUSABLE PLAYLIST IS NEVER ADOPTED ONTO ANOTHER
+// SOURCE. With step 1 `invalid`, steps 2-4 name whichever record was active,
+// and until R29d the R4 block below put the entry's guide URL on THAT record
+// -- replacing its own guide URL, often the only copy, with no notice but the
+// playlist's (dev 6f1d176, 0.14.2 and lane-sweep-c2 alike; round 2's review,
+// through the shipping Service.qml). Now the R4 block does not run: the guide
+// URL is reported WITH the playlist, in its one notice (Model.entryInputNotice
+// "invalid-pair", no URL), and stripped with it, because the migration's
+// marker rides this write and the owned write after it takes every retired
+// key off the entry. The same holds when the playlist on the entry was
+// already handled (seen, so not adopted again) and is unusable while a fresh
+// guide URL arrives beside it before the marker has landed: the guide URL
+// came with that playlist too. `epgWithInvalid` says so.
+//
 // Returns { state, key, changed, moved, adoptedUrl, adoptedEpg, refusedEpg,
-// noSourceEpg, invalid, added, full, heldEpg, marked, writeEntry }. `changed` is
+// noSourceEpg, invalid, added, full, heldEpg, epgWithInvalid, marked,
+// writeEntry }. `changed` is
 // whether the state must be written; `moved` whether the active source is a
 // DIFFERENT one than before, which is the only thing that resets the status
 // line; `marked` whether this call set the marker; `writeEntry` whether the
 // bar entry must be rewritten -- it carries a retired URL key (adopted,
 // refused, or about to be: every one leaves by the owned write), or its
 // mirrored key disagrees with the state.
+// R29d: whether the entry's playlistUrl is a value that does not validate --
+// the test reconcileSources makes (the CLI origin, `~` paths accepted), and
+// nothing is adopted or read from it here. An empty or whitespace-only value
+// is no input (R18a), so it is not "unusable".
+function entryPlaylistUnusable(raw) {
+  var text = entryInputForm("playlistUrl", raw).text
+  if (text === "") return false
+  return !validateSourceUrl(sanitizeInput(text, MAX_SOURCE_URL + 1), { origin: "cli" }).ok
+}
+
 function adoptActiveSource(state, entry, nowSec, origin, opts) {
   var st = state || emptyState()
   var e = entry || {}
@@ -475,7 +501,7 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   var before = activeKeyOf(st)
   var out = { state: st, key: "", changed: false, moved: false, adoptedUrl: false, adoptedEpg: false,
               refusedEpg: false, noSourceEpg: false, invalid: null, added: "", full: false, heldEpg: false,
-              marked: false, writeEntry: false }
+              epgWithInvalid: false, marked: false, writeEntry: false }
   // R18a: the one normaliser (entryInputForm). `url` is the sanitized text
   // reconcileSources validates; `epg` is the whole form, so a guide URL of
   // whitespace or control characters alone is NO input (R4's no-op).
@@ -512,8 +538,14 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   // R4: a guide URL input reaches the ACTIVE record on any path -- the record
   // a fresh URL just named, a state load with a guide URL on the entry, an
   // "ignore" plan that carries only a guide URL change (D-SRC-02).
+  // R29d: the playlist beside the guide URL is unusable -- the one step 1
+  // just refused, or (not adopted again because it was seen) the one the
+  // entry still carries.
+  var playlistUnusable = out.invalid !== null || (!adoptUrl && entryPlaylistUnusable(e.playlistUrl))
   if (epg.text !== "" && out.full) {
     out.heldEpg = true
+  } else if (epg.text !== "" && playlistUnusable) {
+    out.epgWithInvalid = true
   } else if (epg.text !== "") {
     var active = out.key !== "" ? findSource(out.state.sources, out.key) : null
     if (!active) {
@@ -1021,12 +1053,13 @@ export {
   replaceSource, nowInt, sourceLabels, reducerFail, sourcesFull, addSource,
   updateSource, removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
   withSourceStats, activeKeyText, activeKeyOf, activeSourceRecord,
-  withActiveKey, invalidInputBlocks, reconcileAction, adoptActiveSource,
-  activeEpgUrlOf, pointerWritePlan, reconcileSources, sourceForEdit,
-  sourcesSummary, entryWith, cacheStale, formFields, isFormField, formLimit,
-  FORM_SLACK, formCapacity, emptyValues, copyValues, copyForm, formState,
-  formFocusOrder, formHasText, firstFieldWithText, guideWithForm, openForm,
-  openFirstRun, openAddForm, openEditForm, openXtreamForm, closeForm,
-  withFormPatch, withFormValue, withFormFocus, moveFormFocus, fieldMaskable,
-  fieldRevealed, fieldMasked, toggleReveal, withFormReveal
+  withActiveKey, invalidInputBlocks, reconcileAction, entryPlaylistUnusable,
+  adoptActiveSource, activeEpgUrlOf, pointerWritePlan, reconcileSources,
+  sourceForEdit, sourcesSummary, entryWith, cacheStale, formFields,
+  isFormField, formLimit, FORM_SLACK, formCapacity, emptyValues, copyValues,
+  copyForm, formState, formFocusOrder, formHasText, firstFieldWithText,
+  guideWithForm, openForm, openFirstRun, openAddForm, openEditForm,
+  openXtreamForm, closeForm, withFormPatch, withFormValue, withFormFocus,
+  moveFormFocus, fieldMaskable, fieldRevealed, fieldMasked, toggleReveal,
+  withFormReveal
 }

@@ -1673,6 +1673,10 @@ shell_arm() {
   # `invalid`, the guide URL has no source and is reported `no-source`
   # (R21c), and the migration's write strips both once it has landed --
   # nothing is held, and the cycle must still settle on the lagging host.
+  # R29d (2026-10-20) re-levelled the reports: a guide URL that came with
+  # an unusable playlist is told WITH it, one notice, `playlistUrl:invalid-pair`
+  # (until R29d `epgUrl:no-source,playlistUrl:invalid`, two); the loop
+  # window and the strip are unchanged.
   loop_window() {
     local w0 t0 w1 t1
     sleep 2
@@ -1689,19 +1693,19 @@ shell_arm() {
   verdict=$(loop_window)
   ck "K1 the lagging host with a refused playlistUrl beside a guide URL with no source SETTLES (at most 2 entry writes and 50 CPU ticks in 5 s), both reported once, both off the stored entry, the guide URL nowhere in the file (R21c)" \
      "$verdict host:$(qa_json_field "d['host']" "$(ipc hostEntry)") playlistUrl:$(stored_has playlistUrl) epgUrl:$(stored_has epgUrl) reports:$(reports) file:$(infile) on:$(epg_on)" \
-     "settled host:lag playlistUrl:no epgUrl:no reports:epgUrl:no-source,playlistUrl:invalid file:no on:none"
+     "settled host:lag playlistUrl:no epgUrl:no reports:playlistUrl:invalid-pair file:no on:none"
   seed ""
   start_shell --host echo --playlist "$BAD" --epg "$EPG" --source-key "" || true
   verdict=$(loop_window)
   ck "K2 the echoing host with the same entry settles too (control: the echo host settled on a bare value on every tree), both reported once and off the stored entry" \
      "$verdict host:$(qa_json_field "d['host']" "$(ipc hostEntry)") playlistUrl:$(stored_has playlistUrl) epgUrl:$(stored_has epgUrl) reports:$(reports)" \
-     "settled host:echo playlistUrl:no epgUrl:no reports:epgUrl:no-source,playlistUrl:invalid"
+     "settled host:echo playlistUrl:no epgUrl:no reports:playlistUrl:invalid-pair"
   seed ""
   start_shell --host echo --playlist "  $BAD " --epg "$EPG" --source-key "" || true
   verdict=$(loop_window)
   ck "K3 the echoing host with the refused value WRAPPED IN WHITESPACE (as \`omarchy bar set\` stores it) settles, and the refused credential leaves the stored entry once reported" \
      "$verdict host:$(qa_json_field "d['host']" "$(ipc hostEntry)") playlistUrl:$(stored_has playlistUrl) epgUrl:$(stored_has epgUrl) reports:$(reports)" \
-     "settled host:echo playlistUrl:no epgUrl:no reports:epgUrl:no-source,playlistUrl:invalid"
+     "settled host:echo playlistUrl:no epgUrl:no reports:playlistUrl:invalid-pair"
 
   echo "== Z: whitespace-wrapped values after the marker are refused the way any value is, compared the way adoption compares (R18a, R21b; the round-7 data-loss lens's P1-A) ($(elapsed) s)"
   # Lifted from the lens's resurrect-child.sh and loop-child.sh MODE=badws.
@@ -2832,6 +2836,30 @@ json.dump(d, open(sys.argv[1], "w"))' "$STATE" "$KA" "$AOWN"
      "remove:true d-epg:bar active:D entry:no/no a-epg:own records:50"
   stop_shell
 
+  # B40: R29d (2026-10-20) -- R28b's sibling. A 0.13.6 install whose state
+  # names A active (no marker), A carrying a guide URL of its own, and the
+  # bar entry holding a playlistUrl that is NOT A USABLE URL with a guide URL
+  # beside it. On lane-sweep-c2, 6f1d176 and 0.14.2 the migration refused
+  # the playlist, resolved A from the state's key and ran R4 there: A's own
+  # guide URL -- its only copy -- became the bar's, and the only card was the
+  # playlist's. Now the guide URL goes WITH the playlist: one card naming the
+  # pair (no URL), A keeps its own, and both leave the entry once the
+  # marker's write has landed.
+  : >"$NOTIFY_LOG"
+  seed "$KA"
+  python3 -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+for r in d["sources"]:
+    if r["key"] == sys.argv[2]: r["epgUrl"] = sys.argv[3]
+json.dump(d, open(sys.argv[1], "w"))' "$STATE" "$KA" "$AOWN"
+  chmod 0600 "$STATE"
+  start_shell --playlist "$BAD" --epg "$EPG" --source-key "$KA" || true
+  wait_for true 15 landed >/dev/null 2>&1; wait_for no 10 stored_has epgUrl >/dev/null 2>&1; sleep 0.5
+  ck "B40 R29d: an UNUSABLE bar playlist with a guide URL beside it, A active with its OWN guide URL -- A keeps its own (the guide URL is never adopted onto it), ONE card names the pair with no URL, the guide URL is nowhere in the file, and both leave the entry once the marker has landed" \
+     "a-epg:$(epg_of "$KA") active:$([[ $(svc "['activeSourceKey']") == "$KA" ]] && echo A || echo other) entry:$(stored_has playlistUrl)/$(stored_has epgUrl) marker:$(landed) cards:$(qa_count ' 74016 ' "$NOTIFY_LOG") pair:$(qa_count ' 74016 Bar setting removed playlistUrl in the bar settings was not a usable URL and was removed, with the epgUrl beside it' "$NOTIFY_LOG") url-in-notice:$(qa_count '://' "$NOTIFY_LOG") file:$(python3 -c 'import sys; print("yes" if sys.argv[2] in open(sys.argv[1]).read() else "no")' "$STATE" "$EPG" 2>/dev/null || echo NOFILE) reports:$(reports)" \
+     "a-epg:own active:A entry:no/no marker:true cards:1 pair:1 url-in-notice:0 file:no reports:playlistUrl:invalid-pair"
+  stop_shell
+
   # B37: R27c (D-SRC-41) -- the probe commit re-checks the cap. 49 records,
   # an in-app add of a source behind a server that answers after 4 s, and a
   # hand-run `state source add` taking the 50th place 1 s into the probe.
@@ -2912,7 +2940,7 @@ instrument
 # The floor. A check that stops executing must turn the run red rather than
 # quietly shorten the summary (D-PLY-9). Recount with
 #   grep -cE '^ *ck "[IS][0-9]' key-scenario.sh   -> 10, the instrument arm -> check-tree
-#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 133, both arms         -> live
+#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 136, both arms         -> live
 # (48 -> 61 on 2026-10-12, round 4: W1..W6 and F1..F7; 61 -> 63 the same
 # day, round 5: L1, L2; 63 -> 70 the same day, round 7: U1..U7; 70 -> 78
 # the same day, round 8: K1..K3, Z1..Z3, A1, A2; 78 -> 85 the same day,
@@ -2930,7 +2958,8 @@ instrument
 # R27d) and B37 (the probe commit at the cap, R27c); B34 is unused, the
 # burst measurement it was is printed, not graded; 135 on 2026-10-20, R28b:
 # B38 and B39 (the held migration holds the bar's guide URL with its
-# playlist).)
+# playlist); 136 the same day, R29d: B40 (a guide URL beside an unusable
+# playlist is never adopted onto the active source).)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -2940,7 +2969,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=10
 else
-  EXPECTED_CHECKS=135
+  EXPECTED_CHECKS=136
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then

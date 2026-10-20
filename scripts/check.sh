@@ -245,7 +245,14 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # cited names inert). R26a's two bound pins went back to 6f1d176's answer
 # (saved without the read at 2 s), and the write-wait bound and R28c's two
 # expiry pins were re-levelled in place to it.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2651}
+# 2651 -> 2664 the same day, R29d and R29e's notice (lane-sweep-a3), +13:
+# R29d through the service harness on both hosts and both own-echo modes
+# (3 x 4: the unusable playlist beside A's own guide URL, the same entry
+# with no source, and the seen playlist with a guide URL arriving before
+# the marker lands) and the pair's notice (1 model); the shared fixture's
+# three new adopt cases and R29e's "becomes the active source" sentence
+# are counted inside checks that existed.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2664}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity

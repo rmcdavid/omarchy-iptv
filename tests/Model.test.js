@@ -6447,10 +6447,20 @@ check("R27d: reconcileAction -- `heldFull` makes a migrating playlist URL fresh 
   Model.reconcileAction({ migrating: false, playlist: "http://new.test/", seen: [], heldFull: true }).act], ["adopt", "ignore", "ignore"])
 // R28b (2026-10-20) re-levelled the sentence: the guide URL is held with the
 // playlist, so the notice names both and says they move in together.
-checkCall("R27d / R28b: the notice -- Model.entryInputNotice(\"playlistUrl\", \"full\"): \"Sources is full\", says the bar's playlist AND its guide move in together once one is removed in Sources, names the cap, and carries no URL", () => {
+checkCall("R27d / R28b / R29e: the notice -- Model.entryInputNotice(\"playlistUrl\", \"full\"): \"Sources is full\", says the bar's playlist AND its guide move in together once one is removed in Sources and that the bar's playlist is then the ACTIVE source (R28b's service pin observes it active over the source the user picked), names the cap, and carries no URL", () => {
   const n = Model.entryInputNotice("playlistUrl", "full")
   return [n.title, n.body, n.body.indexOf("://") === -1]
-}, ["Sources is full", "The playlist set on the bar, and its guide URL if one is set, were not moved into Sources: Sources already holds 50 sources, the most it can. Remove one in the guide's Sources screen and the bar's playlist and its guide move in together.", true])
+}, ["Sources is full", "The playlist set on the bar, and its guide URL if one is set, were not moved into Sources: Sources already holds 50 sources, the most it can. Remove one in the guide's Sources screen and the bar's playlist and its guide move in together; the bar's playlist then becomes the active source.", true])
+// R29d (2026-10-20): the pair's ONE notice -- an unusable playlist and the
+// guide URL beside it, told together, from whichever side the session meets
+// first; names both settings and the Sources screen, never a value.
+checkCall("R29d: entryInputNotice(name, \"invalid-pair\") -- \"Bar setting removed\", one sentence naming BOTH settings and that both were removed, from the playlist's side and from the guide URL's; no value, ASCII", () => {
+  const p = Model.entryInputNotice("playlistUrl", "invalid-pair"), e = Model.entryInputNotice("epgUrl", "invalid-pair")
+  const argv = Model.notifyArgv("entryInputRefused", { setting: "playlistUrl", reason: "invalid-pair", url: "ftp://u:lenspass@h.test/x" })
+  return [p.title, p.body, e.title, e.body, argv.slice(-2).join(" | ") === p.title + " | " + p.body, (argv.join(" ") + p.body + e.body).indexOf("lenspass") === -1,
+          /^[\x20-\x7e]*$/.test(p.body + e.body), p.body !== Model.entryInputNotice("playlistUrl", "invalid").body]
+}, ["Bar setting removed", "playlistUrl in the bar settings was not a usable URL and was removed, with the epgUrl beside it. Add or edit sources in the guide's Sources screen.",
+    "Bar setting removed", "epgUrl in the bar settings came with a playlistUrl that was not a usable URL, and was removed with it. Add or edit sources in the guide's Sources screen.", true, true, true, true])
 // R28b: A HELD MIGRATION HOLDS BOTH URLS. Seen red on lane-sweep-c1, whose
 // R4 block ran on the step-2 key: `adoptedEpg` true and A's own guide URL
 // replaced, or `noSourceEpg` true (reported as removed while it stayed).
@@ -6968,7 +6978,7 @@ checkCall("R1/R4/R21: adoptActiveSource over every `adopt` case of the shared fi
                     invalid: out.invalid ? out.invalid.code : null, moved: out.moved, changed: out.changed,
                     writeEntry: out.writeEntry, sources: out.state.sources.length,
                     epgOnActive: active ? String(active.epgUrl) : "", refusedEpg: out.refusedEpg, noSourceEpg: out.noSourceEpg,
-                    marked: out.marked, migrated: Model.entryMigratedOf(Model.parseState(JSON.stringify(out.state))) }
+                    epgWithInvalid: out.epgWithInvalid, marked: out.marked, migrated: Model.entryMigratedOf(Model.parseState(JSON.stringify(out.state))) }
     // In the fixture's own key order, so the comparison is about values.
     const got = {}
     Object.keys(c.want).forEach(k => { got[k] = facts[k] })
@@ -6987,13 +6997,19 @@ check("R1/R21: the fixture's adopt section covers every step, both refusals, the
    // R21c: a guide URL with no record to land on is reported and stripped, never held
    activeKeyFixture.adopt.filter(c => c.entry.epgUrl !== "" && c.want.key === "" && c.want.noSourceEpg === true && c.want.changed === false && c.want.writeEntry === true).length >= 2,
    activeKeyFixture.adopt.filter(c => c.want.refusedEpg === true).length >= 1,
+   // R29d: a guide URL beside an unusable playlist goes with it -- step 1's
+   // refusal with and without a record active, the seen playlist, and the
+   // usable control
+   activeKeyFixture.adopt.filter(c => c.want.epgWithInvalid === true && c.want.invalid === "scheme").length >= 2,
+   activeKeyFixture.adopt.filter(c => c.want.epgWithInvalid === true && c.opts && c.opts.adoptUrl === false).length >= 1,
+   activeKeyFixture.adopt.filter(c => c.want.epgWithInvalid === false && c.want.adoptedEpg === true && c.opts && c.opts.adoptUrl === false && c.entry.playlistUrl !== "").length >= 1,
    // R21a: the marker rides the migration's result, on every migrating shape, and on no other
    activeKeyFixture.adopt.filter(c => c.opts && c.opts.migrating === true && c.want.marked === true).length >= 3,
    activeKeyFixture.adopt.filter(c => c.opts && c.opts.migrating === true && c.migrated && c.want.marked === false).length >= 1,
    activeKeyFixture.adopt.filter(c => !(c.opts && c.opts.migrating === true) && c.want.marked === true).length === 0,
    // R21b: no plan reads no URL
    activeKeyFixture.adopt.filter(c => c.opts && Object.keys(c.opts).length === 0 && c.entry.playlistUrl !== "" && c.want.adoptedUrl === false).length >= 1],
-  [true, true, true, true, true, true, true, true, true, true, true, true])
+  [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true])
 
 // R3: removing the active record clears the pointer in the state returned,
 // from the shared fixture (the helper's remove_source_record runs the same
@@ -13792,6 +13808,34 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           const next = restart(h)
           return { active: h.root.activeSourceKey === KA, aEpg: name(epgOf(h.file(), KA)), entry: h.storedEntry().epgUrl === E, reports: reports(h), told: allTold(h), restart: name(epgOf(next.file(), KA)) }
         }, { active: true, aEpg: OWN, entry: true, reports: ["playlistUrl:full"], told: ["Sources is full"], restart: OWN })
+        // R29d (2026-10-20, the lead's ruling on round 2's P3): the R28b
+        // sibling. The bar's playlist is NOT A USABLE URL and a guide URL is
+        // set beside it, at a 0.13.6 start whose state names A active (A
+        // carrying its OWN guide URL, its only copy). Seen red on
+        // lane-sweep-c2, dev 6f1d176 and 0.14.2 alike: A's guide URL read the
+        // bar's, and the only notice was the playlist's.
+        const BADP = "ftp://u:lenspass@bad.example.test/l.m3u"
+        const pairTold = h => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74016") !== -1).map(a => a.slice(-2).join(" | "))
+        const pair = M.entryInputNotice("playlistUrl", "invalid-pair")
+        checkCall("R29d (" + tag + "): an UNUSABLE bar playlist with a guide URL beside it, A active with its OWN guide URL -- the guide URL is never adopted onto A (A keeps OWN, across a restart), it is told WITH the playlist in ONE notice (\"invalid-pair\", no URL), and both leave the entry once the marker has landed", () => {
+          const h = boot({ playlistUrl: BADP, epgUrl: E, showLogos: false }, stateText([rec(A, { epgUrl: OWN }), rec(B)], KA), mode, { ownEcho })
+          h.drain()
+          const next = restart(h)
+          return { active: h.root.activeSourceKey === KA, aEpg: name(epgOf(h.file(), KA)), bEpg: name(epgOf(h.file(), KB)), reports: reports(h), told: pairTold(h),
+                   entry: retired(h.storedEntry()), marked: marked(h), leak: leaks(h), restart: [name(epgOf(next.file(), KA)), reports(next), retired(next.storedEntry())] }
+        }, { active: true, aEpg: OWN, bEpg: "-", reports: ["playlistUrl:invalid-pair"], told: [pair.title + " | " + pair.body], entry: [], marked: true, leak: false, restart: [OWN, [], []] })
+        checkCall("R29d (" + tag + "): the same entry with NO active source -- one notice for the pair (until R29d two: the guide URL's no-source and the playlist's invalid), nothing in the file carries the guide URL, both off the entry", () => {
+          const h = boot({ playlistUrl: BADP, epgUrl: E, showLogos: false }, oldText([rec(A, { epgUrl: OWN }), rec(B)]), mode, { ownEcho })
+          h.drain()
+          return { active: h.root.activeSourceKey, reports: reports(h), told: pairTold(h).length, inFile: h.stateFile.disk.indexOf("e.example.test"), entry: retired(h.storedEntry()), aEpg: name(epgOf(h.file(), KA)) }
+        }, { active: "", reports: ["playlistUrl:invalid-pair"], told: 1, inFile: -1, entry: [], aEpg: OWN })
+        checkCall("R29d (" + tag + "), rule 15: the unusable playlist was told about already (seen, so not adopted again) and a NEW guide URL arrives beside it before the migration's write has landed -- it came with that playlist too: not adopted onto A, told once as the pair (from the guide URL's side), and off the entry with it", () => {
+          const h = boot({ playlistUrl: BADP, showLogos: false }, stateText([rec(A, { epgUrl: OWN }), rec(B)], KA), mode, { ownEcho, holdEvents: true })
+          const first = [reports(h), marked(h)]
+          h.host.externalSet("epgUrl", E)
+          h.drain()
+          return { first, aEpg: name(epgOf(h.file(), KA)), memory: name(epgOf(h.root.userState, KA)), reports: reports(h), entry: retired(h.storedEntry()), marked: marked(h), leak: leaks(h) }
+        }, { first: [["playlistUrl:invalid"], false], aEpg: OWN, memory: OWN, reports: ["playlistUrl:invalid", "epgUrl:invalid-pair"], entry: [], marked: true, leak: false })
         checkCall("R27d (" + tag + "): D-SRC-44 -- held full, then a HAND-RUN `state source remove` (a foreign write): the reconcile that load runs migrates the entry's URL into the place it left", () => {
           const fifty = [rec(A), rec(B)].concat(many(48))
           const h = boot({ playlistUrl: NEW, showLogos: false }, oldText(fifty), mode, { ownEcho })
