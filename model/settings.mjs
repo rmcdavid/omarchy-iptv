@@ -24,7 +24,7 @@ import {
   EPG_DETAIL_FIELDS, programmeDetail
 } from "./epg.mjs"
 import {
-  MAX_SOURCE_URL, sanitizeInput, validateSourceUrl, sourceKey,
+  MAX_SOURCES, MAX_SOURCE_URL, sanitizeInput, validateSourceUrl, sourceKey,
   findSourceByUrl
 } from "./sources.mjs"
 import {
@@ -607,6 +607,12 @@ function entryInputNotice(name, reason) {
   if (r === "invalid") {
     return { title: "Bar setting removed",
              body: setting + " in the bar settings was not a usable URL and was removed. Add or edit sources in " + where + "." }
+  }
+  // R27d (D-SRC-44): the migration did not run because Sources is full. The
+  // URL stays on the bar entry; nothing names it or the entry's label.
+  if (r === "full") {
+    return { title: "Sources is full",
+             body: "The playlist set on the bar was not moved into Sources: Sources already holds " + MAX_SOURCES + " sources, the most it can. Remove one in " + where + " and the bar's playlist moves in." }
   }
   return { title: "Bar setting ignored",
            body: setting + " is no longer read from the bar settings and was removed. Add or switch sources in " + where + "." }

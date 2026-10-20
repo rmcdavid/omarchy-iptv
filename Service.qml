@@ -732,6 +732,10 @@ Item {
   // write never answered within stateWriteWaitWatchdog's bound, second
   // reads asked, and the longest wait. None of them ever holds a URL.
   property bool stateVerifyRetried: false
+  // R27d (D-SRC-44): this session's one-time migration found Sources full
+  // and did not run (it never evicts); told once. Booleans, never a URL.
+  property bool migrationHeldFull: false
+  property bool migrationFullTold: false
   property bool stateWriteWaiting: false
   property bool stateWriteWaitExpired: false
   property double stateWriteWaitAt: 0
@@ -2022,8 +2026,15 @@ Item {
       console.warn("omarchy-iptv: removed the active source but could not mirror the cleared key into the bar entry")
     }
     root.sourceRemoved(key)
+    // R27d: a migration held because Sources was full runs now there is room
+    // -- deferred, after the removal's own save has been asked for.
+    if (root.migrationHeldFull) Qt.callLater(root.retryHeldMigration)
     return root.sourceResult(true, "ok", "", key)
   }
+
+  // R27d: one function rather than a closure, so Qt.callLater folds a burst
+  // of removals into one reconcile.
+  function retryHeldMigration() { if (root.migrationHeldFull) root.reconcile(true) }
 
   // Switch (S3, D7): a source with a cache commits at once (settings
   // write -> cache FileViews rebind -> redraw from its channels.json ->
@@ -4664,6 +4675,20 @@ Item {
           root.sourceErrors = root.withoutKey(root.sourceErrors, key)
         }
         var known = Model.findSourceByUrl(st.sources, pending.url)
+        // R27c (D-SRC-41): the cap, against the state as it is NOW -- after any
+        // merge that landed while the probe ran (a hand-run `state source add`
+        // can take the last place). Until R27 the commit appended a 51st
+        // record, which the next start's parse drops, silently. Refused with
+        // `too_many`, told through the probe's own result; nothing recorded,
+        // the probe's directory goes. An edit's old record is gone by here,
+        // so a replacement never trips it.
+        if (!known && Model.sourcesFull(st)) {
+          root.queueCacheJob(["remove", "--key", dirKey], null)
+          console.warn("omarchy-iptv: the new source was not added: Sources is full (" + Model.MAX_SOURCES + ")")
+          root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: Model.sourceErrorMessage("too_many"), code: "too_many",
+                                     host: host, cancelled: false, replacedId: "" })
+          return
+        }
         if (known) {
           // The same URL arrived while the probe ran (S5: a second add, or
           // the migration of an entry that named it): that record wins and
@@ -4754,7 +4779,8 @@ Item {
     var epg = String(s.epgUrl || "")
     var plan = Model.reconcileAction({ first: !root.reconciled, force: force === true,
                                        migrating: !Model.entryMigratedOf(root.landedState),
-                                       playlist: playlist, epg: epg, seen: root.entryInputsSeen })
+                                       playlist: playlist, epg: epg, seen: root.entryInputsSeen,
+                                       heldFull: root.migrationHeldFull })
     root.reconciled = true
     // Every value this reconcile looked at is handled from here on: adopted
     // below, or refused and reported here. The host's stale publish of it
@@ -4824,6 +4850,19 @@ Item {
     if (out.refusedEpg) root.reportEntryInput("epgUrl", "invalid")
     if (out.invalid) root.reportEntryInput("playlistUrl", "invalid")
     if (out.marked) console.warn("omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on")
+    // R27d (D-SRC-44): the migration did not run -- Sources is full and it
+    // never evicts. The entry keeps its URL (no marker, so the funnel keeps
+    // it), the user is told ONCE (Model.entryInputNotice "full": no URL, no
+    // label), and the next reconcile after a removal tries again.
+    if (out.full) {
+      root.migrationHeldFull = true
+      if (!root.migrationFullTold) {
+        root.migrationFullTold = true
+        root.reportEntryInput("playlistUrl", "full")
+      }
+    } else if (out.adoptedUrl) {
+      root.migrationHeldFull = false
+    }
     if (out.moved) {
       // A new source starts clean: the previous source's reason and host
       // must not stay on screen while its first fetch runs (UX 4.5,
@@ -4838,10 +4877,6 @@ Item {
     if (out.changed) {
       root.userState = out.state
       root.saveState()
-    }
-    for (var i = 0; i < out.evicted.length; i++) {
-      console.warn("omarchy-iptv: source history full, evicting", out.evicted[i])
-      root.queueCacheJob(["remove", "--key", out.evicted[i]], null)
     }
     if (out.invalid) {
       // D16, narrowed by D-SINK-19: the error becomes the guide's body only

@@ -192,8 +192,8 @@ export {
   CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
 } from "./model/sources.mjs"
 export {
-  hasControlChars, normalizeSourceRecord, addSource, updateSource,
-  removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
+  hasControlChars, normalizeSourceRecord, sourcesFull, addSource,
+  updateSource, removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
   withSourceStats, activeKeyText, activeKeyOf, activeSourceRecord,
   withActiveKey, invalidInputBlocks, reconcileAction, adoptActiveSource,
   activeEpgUrlOf, pointerWritePlan, reconcileSources, sourceForEdit,

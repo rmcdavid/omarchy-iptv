@@ -6392,7 +6392,7 @@ function recordKeyForUrl(state, url) {
 check("D-SINK-19: identity by URL survives as findSourceByUrl + normalizeSourceUrl, and normalizes before matching", [recordKeyForUrl(twoState, "HTTP://PROVIDER.example.test:80/get.php?username=u&password=p&type=m3u_plus&output=ts"), recordKeyForUrl(twoState, "file:///srv/tv/local.m3u"), recordKeyForUrl(twoState, "http://other.test/"), recordKeyForUrl(twoState, ""), recordKeyForUrl(null, "x")], ["d990c2e4", "b0eed9fb", "", "", ""])
 
 // reconcile (D3 / SR8)
-check("reconcileSources: empty playlistUrl is a no-op", Model.reconcileSources(twoState, "", "", "", 1), { state: twoState, changed: false, activeKey: "", added: "", evicted: [], invalid: null })
+check("reconcileSources: empty playlistUrl is a no-op", Model.reconcileSources(twoState, "", "", "", 1), { state: twoState, changed: false, activeKey: "", added: "", full: false, invalid: null })
 check("reconcileSources: invalid value synthesizes the validation result, never adds", (() => { const r = Model.reconcileSources(twoState, "ftp://x", "", "", 1); return [r.changed, r.activeKey, r.invalid.code, r.state.sources.length] })(), [false, "", "scheme", 2])
 // R2 (D-SINK-19 repair): the adopted key is written INTO the returned state,
 // so "same active key" means the state already names it. Before R2 the key
@@ -6414,8 +6414,25 @@ check("reconcileSources: adopts a changed valid epgUrl, ignores an invalid one",
 check("reconcileSources: unknown url is added with origin cli and a derived label", (() => { const r = Model.reconcileSources(twoState, "https://iptv-org.github.io/iptv/countries/us.m3u", "", "d990c2e4", 6000); const s = r.state.sources[2]; return [r.changed, r.activeKey, r.added, s.origin, s.label, s.lastUsed, s.fetchedAt, s.labelCustom] })(), [true, "d5977d8a", "d5977d8a", "cli", "iptv-org.github.io", 6000, 0, false])
 check("reconcileSources: first v2 run (no history, legacy layout) tags the record migrated", [Model.reconcileSources(Model.emptyState(), "https://iptv-org.github.io/iptv/countries/us.m3u", "", "", 1).state.sources[0].origin, Model.reconcileSources(Model.withCacheLayout(Model.emptyState(), 2), "https://iptv-org.github.io/iptv/countries/us.m3u", "", "", 1).state.sources[0].origin, Model.reconcileSources(Model.emptyState(), "http://x.test/", "", "", 1, "cli").state.sources[0].origin], ["migrated", "cli", "cli"])
 check("reconcileSources: derived label is made unique", Model.reconcileSources(twoState, "http://provider.example.test/second.m3u", "", "", 1).state.sources[2].label, "provider.example.test 2")
-check("reconcileSources: at the cap the least recently used non-active record is evicted", (() => { const r = Model.reconcileSources(full50, "http://new.test/", "", "00989680", 999); return [r.state.sources.length, r.evicted, r.state.sources.some(s => s.key === "00989680"), r.state.sources.some(s => s.url === "http://new.test/")] })(), [50, ["00989680"], false, true])
-check("reconcileSources: eviction never drops the new active record", Model.reconcileSources(full50, "http://new.test/", "", "", 0).state.sources.some(s => s.url === "http://new.test/"), true)
+// R27d (2026-10-20, D-SRC-44) replaces the two eviction pins that stood here
+// ("at the cap the least recently used non-active record is evicted",
+// "eviction never drops the new active record"): THE MIGRATION NEVER EVICTS.
+check("R27d: reconcileSources at the cap -- an unknown URL is NOT added and nothing is evicted: `full`, the state returned as it was, no key, unchanged", (() => { const r = Model.reconcileSources(full50, "http://new.test/", "", "00989680", 999); return [r.full, Model.sameState(r.state, full50), r.state.sources.length, r.changed, r.activeKey, r.added, "evicted" in r] })(), [true, true, 50, false, "", "", false])
+check("R27d: reconcileSources at the cap -- a URL ALREADY among the 50 still resolves (the cap refuses only a new record)", (() => { const r = Model.reconcileSources(full50, full50.sources[3].url, "", "", 999); return [r.full, r.activeKey === full50.sources[3].key, r.state.sources.length] })(), [false, true, 50])
+check("R27d: Model.sourcesFull -- the one cap decision: 49 is room, 50 is full, an empty or missing state is room", [Model.sourcesFull(Model.cloneState(full50, { sources: full50.sources.slice(1) })), Model.sourcesFull(full50), Model.sourcesFull(Model.emptyState()), Model.sourcesFull(null)], [false, true, false, false])
+checkCall("R27d: adoptActiveSource MIGRATING at the cap with an unknown entry URL -- `full`, nothing adopted, the state's own key stands, the marker NOT set, and the entry is still to be written with its URL kept (writeEntry: the funnel keeps a retired key until the marker lands)", () => {
+  const st = Model.withActiveKey(full50, full50.sources[2].key)
+  const out = Model.adoptActiveSource(st, { playlistUrl: "http://new.test/", epgUrl: "", sourceKey: "" }, 999, "", { adoptUrl: true, migrating: true })
+  return [out.full, out.adoptedUrl, out.key === full50.sources[2].key, out.marked, Model.entryMigratedOf(out.state), out.state.sources.length, out.writeEntry, "evicted" in out]
+}, [true, false, true, false, false, 50, true, false])
+check("R27d: reconcileAction -- `heldFull` makes a migrating playlist URL fresh again though it is the value seen last; without it the same value is not re-adopted; never once migrated", [
+  Model.reconcileAction({ migrating: true, playlist: "http://new.test/", seen: Model.entryInputsSeenAfter([], { playlistUrl: "http://new.test/" }), heldFull: true }).act,
+  Model.reconcileAction({ migrating: true, playlist: "http://new.test/", seen: Model.entryInputsSeenAfter([], { playlistUrl: "http://new.test/" }) }).act,
+  Model.reconcileAction({ migrating: false, playlist: "http://new.test/", seen: [], heldFull: true }).act], ["adopt", "ignore", "ignore"])
+checkCall("R27d: the notice -- Model.entryInputNotice(\"playlistUrl\", \"full\"): \"Sources is full\", says the bar's playlist moves in once one is removed in Sources, names the cap, and carries no URL", () => {
+  const n = Model.entryInputNotice("playlistUrl", "full")
+  return [n.title, n.body, n.body.indexOf("://") === -1]
+}, ["Sources is full", "The playlist set on the bar was not moved into Sources: Sources already holds 50 sources, the most it can. Remove one in the guide's Sources screen and the bar's playlist moves in.", true])
 check("reconcileSources does not mutate the input", twoState.sources.length, 2)
 // SR11: the settings path is the CLI path. `omarchy bar set ... playlistUrl ~/list.m3u`
 // reconciles into the history and becomes active; the forms keep refusing `~`.
@@ -12060,7 +12077,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     activeKeyOf: "a key", activeSourceRecord: "a record of the state, unchanged", entryMigratedOf: "a boolean",
     isFavorite: "a boolean", isGroupHidden: "a boolean", sourceForEdit: "the edit form's values",
     sourceViews: "the Sources rows", sourcesSummary: "the IPC summary", deadSessionVerdict: "a verdict; its state is driven below",
-    sameState: "a boolean (R25a: whether memory is the base)"
+    sameState: "a boolean (R25a: whether memory is the base)",
+    sourcesFull: "a boolean (R27c: the cap, at the probe commit)"
   }
   const doc = fx.document
   const S = Model.parseState(JSON.stringify(doc))
@@ -13550,6 +13568,74 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           }
           return [sfMode(0o022, false), sfMode(0o077, false), sfMode(0o002, false), sfMode(0o022, true)]
         }, ["644", "600", "664", "640"])
+      }
+    }
+  }
+
+  // ---- R27c / R27d (2026-10-20): THE CAP, at the two paths that add a record
+  // without the add form's own refusal in front of them. Through the shipping
+  // Service.qml; seen red against 6f1d176 (the counts are in this lane's
+  // report).
+  {
+    const H4 = "http://h4.example.test/l.m3u", KH = keyOf(H4)
+    const Z = "http://z.example.test/get.php?username=u&password=zpass", KZ = keyOf(Z)
+    const many = n => { const out = []; for (let i = 0; i < n; i++) out.push(rec("http://m" + i + ".example.test/l.m3u", { lastUsed: 100 + i })); return out }
+    const helperAdd = sf => { const st = JSON.parse(sf.disk); st.sources.push(rec(H4)); sf.disk = JSON.stringify(st) + "\n"; sf.exists = true }
+    const fullTold = h => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74016") !== -1 && a[a.length - 2] === "Sources is full")
+    const clean = h => (h.warnings.join("\n") + JSON.stringify(h.detached)).search(/:\/\/|example\.test|zpass|password/) === -1
+    const probed = h => h.signals.filter(s => s[0] === "sourceProbeFinished").map(s => s[1])
+    for (const mode of ["lag", "echo"]) {
+      for (const ownEcho of ["load", "none"]) {
+        const tag = mode + " host, own echo " + ownEcho
+        checkCall("R27c (" + tag + "): D-SRC-41 -- at 49 sources an in-app add's probe runs while a hand-run `state source add` takes the 50th place: the commit re-checks the cap against the state as it is NOW and refuses `too_many`, told through the probe's result; 50 on disk, and the next start drops nothing (before R27: 51 committed, the in-app source dropped by the next start's parse)", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)].concat(many(47)), KA), mode, { ownEcho })
+          const added = h.root.addSource({ playlistUrl: Z, epgUrl: "", label: "Mine" })
+          h.foreign(helperAdd); h.drain()
+          const during = h.root.userState.sources.length
+          h.probeExit(JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })); h.drain()
+          const res = probed(h)
+          const next = restart(h)
+          return { added: added.ok, during, result: res.map(r => [r.ok, r.reason]), memory: [h.root.userState.sources.length, M.findSource(h.root.userState.sources, KZ) !== null],
+                   file: [h.file().sources.length, M.findSource(h.file().sources, KH) !== null, M.findSource(h.file().sources, KZ) !== null],
+                   restart: [next.file().sources.length, next.root.userState.sources.length], removed: h.cacheRuns.some(c => c.indexOf("remove") !== -1 && c.indexOf(KZ) !== -1), clean: clean(h) }
+        }, { added: true, during: 50, result: [[false, M.sourceErrorMessage("too_many")]], memory: [50, false], file: [50, true, false], restart: [50, 50], removed: true, clean: true })
+        checkCall("R27c (" + tag + "): the control -- at 48 sources the same race leaves room: the in-app add commits as the 50th beside the hand-run one, and both survive a restart", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)].concat(many(46)), KA), mode, { ownEcho })
+          h.root.addSource({ playlistUrl: Z, epgUrl: "", label: "Mine" })
+          h.foreign(helperAdd); h.drain()
+          h.probeExit(JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })); h.drain()
+          const next = restart(h)
+          return { result: probed(h).map(r => r.ok), restart: [next.file().sources.length, M.findSource(next.file().sources, KZ) !== null, M.findSource(next.file().sources, KH) !== null] }
+        }, { result: [true], restart: [50, true, true] })
+        checkCall("R27d (" + tag + "): D-SRC-44 -- a 0.13.6 install with 50 sources and an entry URL not among them: the one-time migration does NOT run -- no record evicted, none added, no marker, the entry keeps its URL -- and the user is told ONCE (\"Sources is full\", no URL, no label); a restart holds the same (before R27: the least recently used source evicted, its URL with it)", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.root.reconcile(false); h.drain()
+          const keys = st => st.sources.map(r => r.key).sort().join(",")
+          const next = restart(h)
+          return { file: [h.file().sources.length, keys(h.file()) === keys({ sources: fifty }), M.findSource(h.file().sources, KNEW) !== null, marked(h)],
+                   entry: h.storedEntry().playlistUrl === NEW, told: fullTold(h).length, body: fullTold(h).map(a => a[a.length - 1])[0] === M.entryInputNotice("playlistUrl", "full").body,
+                   reports: reports(h), clean: clean(h) && !leaks(h), cacheRemoves: h.cacheRuns.filter(c => c.indexOf("remove") !== -1).length,
+                   restart: [next.file().sources.length, marked(next), next.storedEntry().playlistUrl === NEW, fullTold(next).length] }
+        }, { file: [50, true, false, false], entry: true, told: 1, body: true, reports: ["playlistUrl:full"], clean: true, cacheRemoves: 0, restart: [50, false, true, 1] })
+        checkCall("R27d (" + tag + "): D-SRC-44 -- held full, then ONE source removed in Sources: the next reconcile migrates -- the entry's URL ends in a record (the R21 oracle), active, the marker lands and the entry is stripped; 50 records, nothing else lost", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.drain()
+          const held = [h.root.migrationHeldFull, M.findSource(h.root.userState.sources, KNEW) !== null]
+          const gone = keyOf("http://m0.example.test/l.m3u")
+          const rm = h.root.removeSource(gone); h.drain()
+          const next = restart(h)
+          return { held, rm: rm.ok, file: [h.file().sources.length, M.findSource(h.file().sources, KNEW) !== null, M.findSource(h.file().sources, gone) !== null, marked(h), M.activeKeyOf(h.file()) === KNEW],
+                   entry: retired(h.storedEntry()), heldAfter: h.root.migrationHeldFull, told: fullTold(h).length, restart: [next.file().sources.length, next.root.activeSourceKey === KNEW, fullTold(next).length] }
+        }, { held: [true, false], rm: true, file: [50, true, false, true, true], entry: [], heldAfter: false, told: 1, restart: [50, true, 0] })
+        checkCall("R27d (" + tag + "): D-SRC-44 -- held full, then a HAND-RUN `state source remove` (a foreign write): the reconcile that load runs migrates the entry's URL into the place it left", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.drain()
+          h.foreign(sf => { const st = JSON.parse(sf.disk); st.sources = st.sources.filter(r => r.url !== "http://m1.example.test/l.m3u"); sf.disk = JSON.stringify(st) + "\n" }); h.drain()
+          return { file: [h.file().sources.length, M.findSource(h.file().sources, KNEW) !== null, marked(h)], active: h.root.activeSourceKey === KNEW, entry: retired(h.storedEntry()) }
+        }, { file: [50, true, true], active: true, entry: [] })
       }
     }
   }
