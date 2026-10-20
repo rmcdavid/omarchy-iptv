@@ -13613,11 +13613,16 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           h.root.toggleFavorite("t:one.uk"); h.runLater()
           h.root.toggleFavorite("t:two.uk"); h.runLater()
-          h.elapse(6500)
-          const atLand = [h.root.stateWriteBlocked, h.root.stateVerifyPending, h.root.stateSavePending, h.stateFile.droppedReloads > 0]
+          h.elapse(5000)
+          // A change joining the held save while our write is still out asks
+          // for no read the view would only drop (rereadStateVerify's guard):
+          // the three dropped are the schedule's, at 2, 4 and 6 s.
+          h.root.toggleFavorite("t:three.uk"); h.runLater()
+          h.elapse(1500)
+          const atLand = [h.root.stateWriteBlocked, h.root.stateVerifyPending, h.root.stateSavePending, h.stateFile.droppedReloads]
           h.drain()
-          return { atLand, ...kept(h, ["t:two.uk"]) }
-        }, Object.assign({ atLand: ["", true, true, true] }, KEPT))
+          return { atLand, ...kept(h, ["t:two.uk", "t:three.uk"]) }
+        }, Object.assign({ atLand: ["", true, true, 3] }, KEPT))
         checkCall("R28a (" + tag + "): the wait ends by a SOURCE verb -- a stalled favourite, then a label edit: the edit is NOT refused (nothing is blocked), it joins the held save and asks for the read again, which answers; the favourite and the label kept, on disk and across a restart (on lane-sweep-c1: refused state_unreadable, and its re-read dropped the favourite)", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           const loader = h.stateFile.loader
