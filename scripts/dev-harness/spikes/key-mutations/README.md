@@ -90,5 +90,8 @@ R27a (2026-10-20, lane-sweep-a1) re-made `r25a-keep-landed.patch`,
 against the tree that carries R27a's lines (the wait branch beside the
 refusal, the end of the write wait in `onSaved`, the wait's own Timer after
 the read's): the same removed and added lines, only their context moved, so
-`git apply --check` passes again (scripts/qa-lib-test.sh). They were not
+`git apply --check` passes again (scripts/qa-lib-test.sh). Re-run through
+node after the re-make (2634 checks, each own-echo mode alike):
+`r25a-keep-landed` 24 failures, `r26a-no-read` 68, `r26b-no-defer` 35;
+`r26d-periodic-reload` has no node pin (the harness runs no Timer). None was
 re-run live through --tree after the re-make.
