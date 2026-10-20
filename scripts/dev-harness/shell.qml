@@ -395,6 +395,97 @@ ShellRoot {
     return n
   }
 
+  // ---- R27f (2026-10-20, D-PERF-1): THE ASYNC OPEN INSTRUMENT.
+  //
+  // openMs below has never measured what its comment promises: it calls
+  // forceLayout SYNCHRONOUSLY in the turn of the summon, and a view is not
+  // laid out until the event loop runs, so at 10,000 channels it reported 4
+  // realised rows for the list and 1 tile for the wall -- and a bounded
+  // synchronous poll cannot fix it, because blocking the event loop is
+  // exactly what stops the delegates being created. This one does not
+  // block. `openAsync` starts the clock, summons, and RETURNS; the guide's
+  // window then swaps frames, and on every swap (a probe Item the harness
+  // parents into the guide's window, listening to that window's
+  // frameSwapped and asking for the next frame) the delegates the PRESENTING
+  // view has realised are counted, and the view's contentItem gaining a
+  // child is timed. HarnessLib.openSettle decides when the first screen is
+  // realised -- by a count stable over openSettleFrames frames, and by the
+  // frame after the last delegate was created -- and `openAsyncResult`
+  // reports the summon time, the realised time and the count. Bounded by
+  // openMaxFrames frames and openMaxMs: a run that does not settle says so
+  // (`endedBy`), never a number.
+  //
+  // Nothing in the product changes: the probe is created and owned here and
+  // listens only; Guide.qml is read through the same object walk openMs uses.
+  property var openRun: null
+  property var openProbe: null
+  property var openViewObj: null
+  property bool openedOnce: false
+  readonly property int openSettleFrames: 3
+  readonly property int openMaxFrames: 240
+  readonly property int openMaxMs: 5000
+  function presentingView(g) {
+    for (var i = 0; i < harness.channelViews.length; i++) {
+      var v = harness.findById(g, harness.channelViews[i], 0)
+      if (!v) continue
+      var shown = true
+      try { shown = v.visible !== false } catch (e) {}
+      if (shown) return { name: harness.channelViews[i], view: v }
+    }
+    return null
+  }
+  function ensureOpenProbe(g) {
+    if (harness.openProbe) return harness.openProbe
+    var host = g ? g.hostWindow : null
+    if (!host || !host.contentItem) return null
+    var p = Qt.createQmlObject("import QtQuick\n"
+      + "Item {\n"
+      + "  id: p\n"
+      + "  signal frame()\n"
+      + "  readonly property bool hasWindow: p.Window.window !== null\n"
+      + "  function poke() { if (p.Window.window) p.Window.window.update() }\n"
+      + "  Connections { target: p.Window.window; function onFrameSwapped() { p.frame() } }\n"
+      + "}\n", host.contentItem, "harnessOpenProbe")
+    p.frame.connect(harness.openFrame)
+    harness.openProbe = p
+    return p
+  }
+  function openChild() {
+    var r = harness.openRun
+    if (!r || r.done) return
+    r.lastChildAt = Date.now() - r.t0
+    r.children = r.children + 1
+    harness.openRun = r
+  }
+  function openCount(r) {
+    var v = harness.openViewObj
+    if (!v || !v.contentItem || !v.contentItem.children) return -1
+    var kids = v.contentItem.children
+    var n = 0
+    for (var i = 0; i < kids.length; i++) {
+      try { if (kids[i] && kids[i].channelId !== undefined) n++ } catch (e) {}
+    }
+    return n
+  }
+  function openFrame() {
+    var r = harness.openRun
+    if (!r || r.done) return
+    var at = Date.now() - r.t0
+    var frames = r.frames.slice()
+    frames.push({ at: at, count: harness.openCount(r) })
+    r.frames = frames
+    var settle = HarnessLib.openSettle(frames, r.lastChildAt, harness.openSettleFrames)
+    if (settle.settled || frames.length >= harness.openMaxFrames || at >= harness.openMaxMs) {
+      r.done = true
+      r.settle = settle
+      r.endedBy = settle.settled ? "settled" : (frames.length >= harness.openMaxFrames ? "frames" : "time")
+      var v = harness.openViewObj
+      if (v && v.contentItem) { try { v.contentItem.childrenChanged.disconnect(harness.openChild) } catch (e) {} }
+    }
+    harness.openRun = r
+    if (!r.done && harness.openProbe) harness.openProbe.poke()
+  }
+
   // Every objectName that can be the guide's channel view, newest first.
   // A name that is not on this list cannot be measured, and openMs says so by
   // reporting view:"" rather than by returning a number for it.
@@ -782,6 +873,7 @@ ShellRoot {
       harness.log("summon", id, payloadJson || "")
       if (!guideLoader.item) return false
       guideLoader.item.open(payloadJson || "{}")
+      harness.openedOnce = true   // R27f: every later open is a warm one
       return true
     }
     function hide(id) {
@@ -964,6 +1056,51 @@ ShellRoot {
                               view: forced,
                               realised: forced === "" ? -1 : harness.realisedCount(g, forced) })
     }
+    // R27f: start one asynchronous open (see harness.openRun). `view` is
+    // "list" or "wall" (the guide's own flag, set before the summon) or ""
+    // for whichever is current. Refused while the guide is open (a warm
+    // open is a CLOSED guide summoned again: close it first, in a turn of
+    // its own) or while a run is still out. Returns at once; the result is
+    // openAsyncResult's.
+    function openAsync(view: string): string {
+      var g = guideLoader.item
+      if (!g) return JSON.stringify({ ok: false, error: "no-guide" })
+      if (g.opened === true) return JSON.stringify({ ok: false, error: "open" })
+      if (harness.openRun && !harness.openRun.done) return JSON.stringify({ ok: false, error: "busy" })
+      if (view === "wall" || view === "list") g.wallView = (view === "wall")
+      var p = harness.ensureOpenProbe(g)
+      if (!p) return JSON.stringify({ ok: false, error: "no-window" })
+      var pv = harness.presentingView(g)
+      harness.openViewObj = pv ? pv.view : null
+      var cold = !harness.openedOnce
+      if (harness.openViewObj && harness.openViewObj.contentItem) harness.openViewObj.contentItem.childrenChanged.connect(harness.openChild)
+      var t0 = Date.now()
+      harness.openRun = { t0: t0, frames: [], lastChildAt: -1, children: 0, done: false, view: pv ? pv.name : "", cold: cold,
+                          summonMs: -1, endedBy: "", settle: null, hasWindow: p.hasWindow }
+      fakeShell.summon(harness.pluginId, "{}")
+      var r = harness.openRun
+      r.summonMs = Date.now() - t0
+      harness.openRun = r
+      p.poke()
+      return JSON.stringify({ ok: true, view: r.view, cold: cold, summonMs: r.summonMs, hasWindow: p.hasWindow })
+    }
+    // R27f: the run's answer. `state` running | done | none. `realisedMs` is
+    // the stable count's first frame (openSettle's stableAt), `lastChildFrameMs`
+    // the frame after the last delegate was created; `count` the delegates
+    // realised; `frames` the samples, `trace` the first 40 of them.
+    function openAsyncResult(): string {
+      var r = harness.openRun
+      if (!r) return JSON.stringify({ state: "none" })
+      var s = r.settle || HarnessLib.openSettle(r.frames, r.lastChildAt, harness.openSettleFrames)
+      return JSON.stringify({ state: r.done ? "done" : "running", endedBy: r.endedBy, view: r.view, cold: r.cold,
+                              summonMs: r.summonMs, realisedMs: s.stableAt, lastChildFrameMs: s.lastChildFrameAt,
+                              lastChildMs: r.lastChildAt, count: s.stableCount, children: r.children, frames: r.frames.length,
+                              settled: s.settled, hasWindow: r.hasWindow, rows: guideLoader.item ? guideLoader.item.currentRows.length : -1,
+                              trace: r.frames.slice(0, 40) })
+    }
+    // PERF-02's method A, in the harness: the round trip of a call that does
+    // nothing, to subtract from the round trip of `open`.
+    function ping(): string { return "pong" }
     // D-TEXT-1's scenario: how many delegates a named channel view holds
     // RIGHT NOW, without the re-open openMs performs to time one. openMs
     // reports 1 for a hidden channelWall (what an empty view looks like), so

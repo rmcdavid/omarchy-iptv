@@ -134,7 +134,11 @@ var POINTER_FIELDS = ["stateLoaded", "reconciled", "dirsReady", "stateSavePendin
                       "activeSourceKey", "stateSavesInFlight", "stateSaveFailed", "stateInitOk", "stateReloadsIgnored",
                       "stateReloadsByReason", "entryInputReports", "stateWriteBlocked", "stateLoadKind", "stateInitFound",
                       "stateWritesRefused", "stateVerifyPending", "stateVerifies", "stateVerifyNoLoad", "stateVerifySkipped",
-                      "stateVerifyRetries", "stateSavesDeferred", "stateVerifyMsMax"]
+                      "stateVerifyRetries", "stateSavesDeferred", "stateVerifyMsMax",
+                      // R27a (2026-10-20): the second read, the write wait,
+                      // writes issued; R27d: the migration held at the cap.
+                      "stateVerifyRetried", "stateVerifySecondReads", "stateWriteWaiting", "stateSavesWaited", "stateWriteWaits",
+                      "stateWriteWaitTimeouts", "stateWritesIssued", "stateWriteWaitMsMax", "migrationHeldFull", "migrationFullTold"]
 function pointerStateOf(s) {
   if (!s) return { ok: false, error: { code: "no_service" } }
   var out = { ok: true }
@@ -150,6 +154,46 @@ function pointerStateOf(s) {
   return out
 }
 
+// R27f (2026-10-20, D-PERF-1): WHEN HAS AN OPEN FINISHED? The async open
+// instrument (shell.qml, `openAsync`) starts its clock at the summon, lets
+// the event loop run, and records one sample per frame the guide's window
+// swaps: { at: ms since the summon, count: delegates the PRESENTING view has
+// realised }. It also records when the view's contentItem last gained a
+// child (`lastChildAt`: the last delegate created). Two candidate
+// definitions of "the first screen is realised", both computed here so the
+// instrument can report which one settles and whether they agree:
+//   stable   the first frame of a run of K consecutive frames whose count
+//            is the same and above zero (a count that stops moving)
+//   lastChild the first frame whose time is at or after the last delegate's
+//            creation (the frame after the last delegate completes)
+// `settled` needs BOTH: stable confirmed by K frames, and no child created
+// after the stable run began (a late delegate means it had not settled).
+// Pure, so node drives the decision the live arm reads (rule 12).
+function openSettle(frames, lastChildAt, k) {
+  var K = Math.max(1, Math.floor(Number(k) || 3))
+  var fs = Array.isArray(frames) ? frames : []
+  var out = { settled: false, stableAt: -1, stableCount: -1, stableFrame: -1, lastChildFrameAt: -1, frames: fs.length, k: K }
+  var lc = Number(lastChildAt)
+  var hasChild = isFinite(lc) && lc >= 0
+  if (hasChild) {
+    for (var j = 0; j < fs.length; j++) if (Number(fs[j].at) >= lc) { out.lastChildFrameAt = Number(fs[j].at); break }
+  }
+  for (var i = 0; i + K <= fs.length; i++) {
+    var c = Number(fs[i].count)
+    if (!(c > 0)) continue
+    var same = true
+    for (var m = 1; m < K; m++) if (Number(fs[i + m].count) !== c) { same = false; break }
+    if (!same) continue
+    // the first frame of the run: the earliest frame holding this count
+    // (it may have been reached before the run that confirms it)
+    out.stableAt = Number(fs[i].at); out.stableCount = c; out.stableFrame = i
+    break
+  }
+  out.settled = out.stableAt >= 0 && (!hasChild || lc <= out.stableAt)
+  return out
+}
+
 if (typeof module !== "undefined") {
-  module.exports = { entryKey: entryKey, entryKeyNames: entryKeyNames, pointerStateOf: pointerStateOf, POINTER_FIELDS: POINTER_FIELDS, storedOwnedValue: storedOwnedValue }
+  module.exports = { entryKey: entryKey, entryKeyNames: entryKeyNames, pointerStateOf: pointerStateOf, POINTER_FIELDS: POINTER_FIELDS, storedOwnedValue: storedOwnedValue,
+                     openSettle: openSettle }
 }
