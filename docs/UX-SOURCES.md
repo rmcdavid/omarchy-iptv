@@ -1402,6 +1402,7 @@ No `https://` auto-prefix and no Xtream URL auto-parse (8).
 | fetching, path | `Reading the file...` |
 | failed, URL | `<reason> from <host>` with `<reason>` from the shipped `Model.statusReason`: `HTTP 403 Forbidden`, `HTTP 404 Not Found`, `HTTP 503 Service Unavailable`, `Could not resolve host`, `Connection refused`, `Timed out`, `TLS error`, `Network error`, `Not an M3U playlist`, `Playlist has no channels`, `Source too large`, `Unsafe redirect` |
 | failed, path | `<reason>` alone: `File not found`, `Path not allowed`, `Not an M3U playlist`, `Playlist has no channels` |
+| refused at the commit: another program took the last of the 50 places while the probe ran (round 17, R27c, D-SRC-41) | `Sources is full (50) · remove one first from <host>` (the `too_many` sentence through `Model.probeFailureLine`, which appends ` from <host>` to every failure with a host; a file source reads the sentence alone); nothing is recorded and the probe's cache directory is removed. Until R27 the 51st record was committed and the next start's parse dropped it silently. The appended host reads as if the user should remove one from the provider -- a copy question raised to the lead, as is its sibling, the `state_unreadable` refusal the same commit can answer (`state.json could not be read · nothing is saved until it can be from <host>`) |
 | cancelled | no line; the form thaws |
 | success | never shown on the form (it closes); the footer transient carries `1,475 channels in 28 groups` |
 
@@ -1649,6 +1650,7 @@ last.
 | After the migration: a `playlistUrl` or `epgUrl` found on the entry (`retired`) | `Bar setting ignored` | `<setting> is no longer read from the bar settings and was removed. Add or switch sources in the guide's Sources screen.` |
 | At the migration: a guide URL with no source to attach it to (`no-source`, R21c) | `Bar setting removed` | `epgUrl was removed from the bar settings: no source was set up for it to guide. Add the source with its EPG URL in the guide's Sources screen.` |
 | At the migration: a value that does not validate (`invalid`) | `Bar setting removed` | `<setting> in the bar settings was not a usable URL and was removed. Add or edit sources in the guide's Sources screen.` |
+| At the migration: Sources already holds 50 sources and the entry's playlist is not among them, so the migration does not run (`full`, round 17, R27d, D-SRC-44; reported once a session as `playlistUrl:full`, and again at each start while it holds) | `Sources is full` | `The playlist set on the bar was not moved into Sources: Sources already holds 50 sources, the most it can. Remove one in the guide's Sources screen and the bar's playlist moves in.` |
 
 "Once" is per value per session: the same value set again is not reported
 again (the plugin keeps an in-memory list of what it has handled, nothing on
@@ -1666,7 +1668,34 @@ key-scenario X5 (one notification per report through a stand-in
 none carrying a URL or the credential). The rendered card is UNVERIFIED on a
 display.
 
-### 5.10 Saved sources not loaded (D-SINK-19 round 12, R22a; round 13, R23; 2026-10-13; round 14, R24; round 15, R25; 2026-10-14; round 16, R26; 2026-10-16)
+[Round 17, 2026-10-20, R27d (D-SRC-44): THE MIGRATION NEVER EVICTS. The
+`full` row is not a removal: the playlist URL STAYS on the entry (the
+migration marker is not set, so the entry funnel keeps the retired keys;
+`shell.json` is 0600 under the D-SINK-18 shield), no record is added or
+evicted, and the report `playlistUrl:full` is what keeps round 11's oracle
+-- an entry URL ends in a record or is reported -- true. It shares replace
+id 74016, so on screen it replaces a refusal card shown just before it.
+The next reconcile after a removal migrates the URL and makes it the
+ACTIVE source: an in-app removal asks for one (`Service.retryHeldMigration`,
+folded by `Qt.callLater`), and a hand-run `state source remove` is picked
+up by the reconcile its load runs. Pinned in node through the shipping
+`Service.qml` on both hosts and both own-echo modes (`R27d (<tag>): D-SRC-44
+-- ...`, three pins) and live by key-scenario B35 and B36. Until R27 the
+least recently used source was evicted to make room, its URL the only copy,
+with a journal line only. What the code does around it that no pin
+covers, measured by the documents lane through `tests/service-harness.js`
+on lane-sweep-a1 (both hosts): an install updated from 0.13.6 has no
+`activeKey`, so while the migration is held NO source is active and the
+guide is unconfigured; a guide URL on the entry beside the playlist is
+reported `no-source` (`Bar setting removed`, which says it was removed) but
+stays on the entry, and is NOT attached when the playlist moves in (the
+new record's guide URL is empty and the entry is stripped of both); and a
+source picked in Sources meanwhile receives that guide URL at the next
+start, in place of its own (`A` with its own guide URL, picked, restart:
+`A`'s guide URL is the bar's). Raised to the lead; the README states it as
+not covered.]
+
+### 5.10 Saved sources not loaded, and Saving has stopped (D-SINK-19 round 12, R22a; round 13, R23; 2026-10-13; round 14, R24; round 15, R25; 2026-10-14; round 16, R26; 2026-10-16; round 17, R27; 2026-10-20)
 
 `~/.local/state/omarchy-iptv/state.json` is the only copy of the user's
 sources and provider URLs. When it exists but cannot be read -- permission
@@ -1675,8 +1704,9 @@ something that is not a regular file, a file where its FOLDER should be
 (round 14), a symbolic link AT its folder that leads nowhere or to
 something that is not a folder (round 15), an I/O error -- or does not parse as a state (an empty file
 included, settled by the lead on 2026-10-13), or when the start-up check of
-it does not answer (round 13), the plugin WRITES NOTHING to it for the rest
-of the session -- and since round 14 (R24e) neither does the helper the
+it does not answer (round 13), or, mid-session, the read before a save
+does not answer twice (round 17, R27a), the plugin WRITES NOTHING to it for the rest
+of the session [round 16 and 17: until a read finds it readable again, item 5] -- and since round 14 (R24e) neither does the helper the
 service starts, because the playlist fetch is handed no state directory. Until round 12 it read such a file as an
 empty state and saved that over it at the start, which erased every source,
 credential and favourite (the round-11 data-loss lens, live). What the user
@@ -1685,13 +1715,30 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
 
 1. Once per episode, a desktop notification: `omarchy-notification-send
    --app-name IPTV -u critical -g <alert glyph> -r 74017 <title> <body>`, and
-   the same body on the shell's console as `omarchy-iptv: <body>`. The text
-   is `Model.stateUnreadableNotice(reason, path)`, composed from the reason
-   and the file's path and never from anything in the file. The title is
-   `Saved sources not loaded`; the body is `<path> <what>. Nothing is saved
-   until it can be read, so sources, favorites and settings changed now are
-   not kept. <fix>`, with `<path>` the full path of `state.json`
-   (`Service.stateFilePath`):
+   the same words on the shell's console. The text
+   is `Model.stateUnreadableNotice(reason, path, midSession)`, composed from the reason
+   and the file's path and never from anything in the file.
+   **[Round 17, 2026-10-20, R27e (D-SRC-42, D-SRC-50, D-SRC-51): the copy
+   below is the shipping model's, and `tests/fixtures/state-notices.json`
+   holds every sentence of it verbatim for one path, pinned both ways by
+   node (`R27e: every body is the fixture's sentence, word for word`).]**
+   The title is `Saved sources not loaded` when the block begins at a start
+   (`Model.STATE_BLOCK_TITLE_START`) and `Saving has stopped` when it begins
+   after a state has loaded (`Model.STATE_BLOCK_TITLE_MID`; `midSession` is
+   the service's `stateLoaded` when the block begins) -- in the notification,
+   on the console and in the guide's own notice alike (until R27e only the
+   Sources header said `Saving has stopped`, D-SRC-38, and the notification
+   called a mid-session block `Saved sources not loaded` over sources that
+   had loaded, D-SRC-42). The console line is
+   `Model.stateUnreadableJournal`: `omarchy-iptv: <title>: <body>`. The body
+   is `<path> <what>. Sources, favorites and settings changed now are not
+   saved until the file can be read again. <fix>`
+   (`Model.STATE_BLOCK_UNSAVED`), with `<path>` the full path of `state.json`
+   (`Service.stateFilePath`). It said `Nothing is saved until it can be
+   read, so sources, favorites and settings changed now are not kept.` until
+   R27e, which is false on the one way back where the next change's own read
+   finds the file first and saves it (D-SRC-51); "not saved until" is true on
+   every way back (item 5 says which way keeps what):
 
    | Reason | `<what>` | `<fix>` |
    |---|---|---|
@@ -1699,19 +1746,21 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    | something other than a file is at the path (`not-a-file`: a directory or a FIFO, both measured live; a socket is refused by the helper, but what the FileView reports for one is unmeasured, so its row is not known) | `is not a regular file` | `Move whatever is at that path aside, then run omarchy restart shell.` |
    | the file does not parse (`unparsed`) | `is not a valid state file` | `Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell.` |
    | at a start, the folder cannot be read: the file reads as missing, but the helper found something there (`absent-unconfirmed`) | `could not be found, or its folder could not be read` | `Make the folder readable with chmod 700, then run omarchy restart shell.` |
-   | mid-session, the file reads as missing (`absent`; round 14, R24b: its own `<fix>`, because the helper is not asked mid-session and a broken symbolic link and an unreadable folder look the same to the FileView) | `could not be found, or its folder could not be read` | `If it is a symbolic link, restore the file it points to; otherwise make the folder readable with chmod 700. Then run omarchy restart shell.` |
-   | a symbolic link at the path whose target is missing or is not a regular file, as the helper's start-up check found it (`link`, round 14, R24b) | `is a symbolic link whose target is missing or is not a regular file` | `Restore the file it points to, or move the link aside, then run omarchy restart shell.` |
+   | mid-session, the file reads as missing (`absent`; round 14, R24b: its own `<fix>`, because the helper is not asked mid-session and a broken symbolic link and an unreadable folder look the same to the FileView; round 17, R27e, D-SRC-50: the link case first, and pointed BACK, `Model.STATE_BLOCK_LINK_FIRST`) | `could not be found, or its folder could not be read` | `If it is a symbolic link, point it back at the folder or file that holds your state; otherwise make the folder readable with chmod 700. Then run omarchy restart shell.` |
+   | a symbolic link at the path whose target is missing or is not a regular file, as the helper's start-up check found it (`link`, round 14, R24b; round 17, R27e: point it back) | `is a symbolic link whose target is missing or is not a regular file` | `Point it back at the file that holds your state, or move the link aside, then run omarchy restart shell.` |
    | something that is not a folder where the state FOLDER, or one above it, should be (`not-a-dir`, round 14, R24b; `<path>` is then the folder's, `/home/you/.local/state/omarchy-iptv`) | `is not a folder (a file is at that path, or at one above it)` | `Move whatever is at that path aside, then run omarchy restart shell.` |
-   | a symbolic link at the state FOLDER, or at one above it, that leads nowhere or to something that is not a folder (`folder-link`, round 15, R25c, D-SRC-32; `<path>` is the folder's) | `is a symbolic link whose target is missing or is not a folder (or a folder above it is)` | `Restore the folder it points to, or move the link aside, then run omarchy restart shell.` |
+   | a symbolic link at the state FOLDER, or at one above it, that leads nowhere or to something that is not a folder (`folder-link`, round 15, R25c, D-SRC-32; `<path>` is the folder's; round 17, R27e: point it back) | `is a symbolic link whose target is missing or is not a folder (or a folder above it is)` | `Point it back at the folder that holds your state, or move the link aside, then run omarchy restart shell.` |
    | the start-up check -- since round 14 the `mkdir` before it too (R24d) -- did not answer within 15 s and was stopped (`init-timeout`, round 13, R23c) | `could not be checked: the start-up check did not answer and was stopped` | `Make sure a regular file, or nothing, is at that path, then run omarchy restart shell.` |
+   | mid-session, the read before a save did not answer within 2 s, was asked once more, and did not answer again (`read-timeout`, round 17, R27a, D-SINK-22 window c; always mid-session, so always titled `Saving has stopped`) | `did not answer when it was read before a save (twice, 2 seconds each)` | `The next change made here reads it again, and saving resumes if it answers. If it keeps stopping, check the disk or folder that holds it, then run omarchy restart shell.` |
    | any other failure (`io-error`) | `could not be read` | `Check the file and its folder, then run omarchy restart shell.` |
 
-   For example, for a file that does not parse, verbatim from the model with
-   the user's home spelled out: `Saved sources not loaded` /
+   For example, for a file that does not parse at a start, verbatim from the
+   model with the user's home spelled out: `Saved sources not loaded` /
    `/home/you/.local/state/omarchy-iptv/state.json is not a valid state file.
-   Nothing is saved until it can be read, so sources, favorites and settings
-   changed now are not kept. Restore it from a backup, or move it aside to
-   start with no sources, then run omarchy restart shell.`
+   Sources, favorites and settings changed now are not saved until the file
+   can be read again. Restore it from a backup, or move it aside to start
+   with no sources, then run omarchy restart shell.` The same file emptied
+   under a running shell reads `Saving has stopped` over the same body.
 
 2. **At a start, the guide draws the no-write surface, never the first-run
    form (round 13, R23e; this closes the open question round 12 left
@@ -1731,10 +1780,10 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    |                        <alert glyph>                            |
    |                   Saved sources not loaded                      |
    |   /home/you/.local/state/omarchy-iptv/state.json is not a       |
-   |   valid state file. Nothing is saved until it can be read, so   |
-   |   sources, favorites and settings changed now are not kept.     |
-   |   Restore it from a backup, or move it aside to start with no   |
-   |   sources, then run omarchy restart shell.                      |
+   |   valid state file. Sources, favorites and settings changed     |
+   |   now are not saved until the file can be read again. Restore   |
+   |   it from a backup, or move it aside to start with no sources,  |
+   |   then run omarchy restart shell.                               |
    |                                                                 |
    +-----------------------------------------------------------------+
    | Esc close                                                       |
@@ -1789,6 +1838,11 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    screen with its usual confirmation, for this session only: it is not
    kept, which only the notification's "changed now are not kept" says (the
    lead's ruling (4), 2026-10-14: the transients keep their own copy).
+   [Round 17, 2026-10-20, R27e (D-SRC-51): the notification now says such a
+   change is "not saved until the file can be read again", and whether it is
+   kept depends on the way back (item 5): kept when the next change's own
+   read finds the file first, dropped when a load of the file arrives on its
+   own first.]
    **The condition, as measured (corrected 2026-10-14, D-DOC-8: this item
    used to make the session's own saves the variable).** The mode begins
    when the FileView delivers the reload, and whether it does depended on
@@ -1874,6 +1928,21 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    the same session is told again -- pinned since round 13 (R23a: node `R23a
    (<mode> host, mid-session, <between> between): TWO no-write episodes ...`
    and key-scenario B9 `told:1/2`, both seen red with the re-arm deleted).
+   [Round 17, 2026-10-20, R27a and R27e. Where this item and item 4 quote
+   the notification's "changed now are not kept", it now reads "are not
+   saved until the file can be read again" (item 1). The new reason,
+   `read-timeout`, ends the same way as any liftable one: a save asked for
+   in it reads the file first (`Model.stateSavePlan` answers `verify`), and
+   a source call is refused once and asks for one reload
+   (`Model.stateBlockRecheck`); a read that answers lifts it. Pinned through
+   `tests/service-harness.js` on both hosts and both own-echo modes: the
+   next in-app change reads, the mode lifts, and the change made in the block
+   and this one are both written, told once in all (`R27a (<tag>): window c
+   -- the read-timeout mode is lifted by a later read that ANSWERS ...`);
+   through a source verb, the first call answers `state_unreadable` and the
+   second lands (`R27a / R26e (<tag>): window c through a SOURCE verb ...`).
+   No live segment: no way was found to stall a FileView read for 2 s in the
+   cage without FUSE or root (lane-sweep-a1's report).]
 
 6. **Something other than a file at the path, or a start-up check that
    hangs (round 13, R23b-R23d).** A directory or a FIFO at `state.json` is

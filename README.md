@@ -1051,7 +1051,8 @@ Nothing inside the plugin directory is written at runtime.
   when another program adds the 50th source in that moment, is refused
   when the check ends: nothing is added, the form stays open with what you
   typed and says `Sources is full (50) · remove one first from <host>`
-  (the provider's host), and the journal says `the new source was not
+  (the provider's host; a file on disk shows the sentence alone), and the
+  journal says `the new source was not
   added: Sources is full (50)`. Up to and including 0.14.2 the guide kept
   it for the session and the next shell start dropped it without a word.
   One case where a backup put
