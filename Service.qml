@@ -4057,7 +4057,9 @@ Item {
     // R22a: in the no-write mode the entry is left exactly as it is -- it may
     // hold the only copy of an input the unread file could not tell us about.
     if (root.stateWriteBlocked !== "") {
-      console.warn("omarchy-iptv: the bar entry is left as it is (state.json was not loaded); no " + what + " written")
+      // R27e's rule-15 sibling (D-SRC-42): the journal says why in the words
+      // of the episode -- a block that began after a load is saving stopped.
+      console.warn("omarchy-iptv: the bar entry is left as it is (" + (root.stateLoaded ? "saving to state.json has stopped" : "state.json was not loaded") + "); no " + what + " written")
       return false
     }
     if (!root.shell || typeof root.shell.updateEntryInline !== "function"

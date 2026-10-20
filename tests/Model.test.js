@@ -13542,6 +13542,15 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           const second = h.root.updateSource(KB, { label: "edited" }); h.drain()
           return { first: first.code, lifted, second: second.ok, label: labelOf(h.file(), KB) }
         }, { first: "state_unreadable", lifted: "", second: true, label: "edited" })
+        checkCall("R27e / rule 15 (" + tag + "): the bar-entry refusal's journal line in a block uses the episode's words -- \"state.json was not loaded\" at a start, \"saving to state.json has stopped\" mid-session", () => {
+          const line = h => h.warnings.filter(w => /the bar entry is left as it is/.test(w)).map(w => (w.match(/\(([^)]*)\)/) || [])[1])
+          const s = boot({ sourceKey: KA, showLogos: false }, "{not json", mode, { ownEcho, exists: true })
+          s.root.writeOwnedEntry({ showLogos: true }, "logo toggle", false, true)
+          const m = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          m.foreign(sf => { sf.exists = false; sf.disk = "" }); m.drain()
+          m.root.writeOwnedEntry({ showLogos: true }, "logo toggle", false, true)
+          return { start: line(s).slice(-1), mid: line(m).slice(-1) }
+        }, { start: ["state.json was not loaded"], mid: ["saving to state.json has stopped"] })
         // R27e (D-SRC-42), through the shipping Service.qml: the title the
         // user is told by, in the notification AND the journal line.
         checkCall("R27e (" + tag + "): a block at the START is told as \"Saved sources not loaded\", one that begins MID-SESSION as \"Saving has stopped\" -- the notification's title and the journal line alike, the body the Model's sentence", () => {
