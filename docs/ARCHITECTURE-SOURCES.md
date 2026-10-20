@@ -1313,7 +1313,7 @@ edit the control's copy and the next bound write would overwrite it.
 | Item | Budget | How |
 |---|---|---|
 | Switch redraw (warm cache) | < 150 ms at 10k | Section 4.5: synchronous in-process settings write, FileView auto reload, existing load path; no helper on the redraw path; optional prepared-LRU if measured over budget |
-| Guide open | unchanged < 150 ms | Sources rows derive from `userState.sources` in memory (<= 50 records); no file or helper access on open; the group column gains one row |
+| Guide open | unchanged < 150 ms | Sources rows derive from `userState.sources` in memory (<= 50 records); no file or helper access on open; the group column gains one row. **[2026-10-20, R27f: the budget itself is not met by a cold open in the cage, sources or not -- 546 ms list, 580 ms wall at 10,000 channels, about 450 ms of it the first show of the window -- and is met warm (34 / 32 ms); the round-17 rulings have the table]** |
 | Sources screen open | < 10 ms | `Model.sourceRows` over <= 50 records; a `ListModel` of <= 50 rows |
 | Helper runs on open | 0 | none added; probes run only on add/edit/never-fetched switch, `cache` jobs only at start and on removal |
 | state.json | <= ~35 KB | 50 x ~600 B records + favorites/recents |
@@ -6169,7 +6169,11 @@ below was true of 0.14.2 and is now history or wrong.
   `QA.md` PERF-02, `QA-SOURCES.md` SRC-PERF-04, the harness README. Cleared:
   the README (no open figure), `UX.md`'s wall delegate counts and
   `cacheBuffer` row (paint and delegate measurements of their own, dated),
-  and this file's switch-redraw budget (not an open).
+  and this file's switch-redraw budget (not an open); bracketed: this
+  file's section 6 "Guide open | unchanged < 150 ms" row.
+- Not changed: section 1's "inside the 150 ms budget" (a switch redraw, not
+  an open) and the round-9 to round-12 records of a cold open over 150 ms
+  by PERF-02's method (true of their method; R27f's table supersedes them).
 - Every sentence this lane added about what the plugin does was checked by
   calling the model at 070cd35 (`Model.stateUnreadableNotice`,
   `stateUnreadableJournal`, `stateBlockedHeader`, `stateSavePlan`,
