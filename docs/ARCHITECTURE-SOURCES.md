@@ -6062,9 +6062,10 @@ session scratch directory, not the tree).**
   The change landed during our write in 30 trials; in 21 our rename had
   replaced it, which no read recovers (D-SRC-48 itself, on every tree, as
   in the 196 trials where it landed before our write began); the
-  mitigation's read loaded it in 4 and the later read in all 4; in 9 it
-  survived on disk unseen by the view, and the later read loaded it in all
-  9. Nothing built; the row is the lead's to mark accepted.
+  mitigation's read loaded it in 4 and the later read in all 4; in 9
+  trials (4 during our write, 5 after it) it survived on disk unseen by the
+  view on its own, and the later read loaded it in all 9. Nothing built;
+  the row is the lead's to mark accepted.
 - R27f, the open budget, at 10,000 channels in the cage's floating-window
   mode, 3 cold shells and 24 warm opens per view, interleaved with PERF-02
   method A (transcript `open-20261020-123554-1529605`, 21 passed, 0
