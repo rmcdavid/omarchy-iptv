@@ -1760,52 +1760,132 @@ What changed in the rigs:
   `RESULT-2026-10-20-r27b.txt`: R27b's mitigation recovered 0 of 608
   (the contract's eighth fact).
 
-### The open, measured with its delegates (D-PERF-1, R27f)
+#### Round 18 (R28): a stalled read keeps the change, a held migration keeps both URLs
+
+lane-sweep-a2, 2026-10-20, on lane-sweep-c1 (R28, the lead's ruling after
+round 1's two P1s).
+- R28a has NO live segment, as R27a's window (c) had none: nothing in the
+  cage stalls a FileView read for 2 s without FUSE or root (a FIFO at the
+  path is `not-a-file` and answers at once, round 1's review). Its pins are
+  node's, through the shipping Service.qml on both hosts and both echo
+  modes, one per way the wait ends (our own late write, a source verb, an
+  in-app add, another program's write, the stalled read answering, the
+  schedule's re-read) and the restart's stated loss.
+- `tests/service-harness.js`: `stateVerifyWatchdog`'s interval is a
+  BINDING now (`root.stateVerifyBoundMs`, the schedule's bound), so the
+  double reads it from its own text at every `restart()` and arms the Timer
+  with the interval it has then, as QML does.
+- B32 reads R28e's mid-session sentence.
+- B38 and B39 (R28b): a 0.13.6 install at 50 sources whose entry carries
+  the playlist D AND a guide URL, A carrying a guide URL of its own; A
+  picked and the shell restarted over the entry the plugin left: the entry
+  keeps both, A's own guide URL stands, each start tells `Sources is full`
+  and never `Bar setting removed`; then one record removed, and D moves in
+  WITH the bar's guide URL, the entry stripped of both.
+- `spikes/key-mutations/r26a-watchdog-20ms.patch` and
+  `r26a-watchdog-no-interval.patch` are re-made for the binding interval,
+  the same decisions broken.
+- Counts are the summary line's, the floor 135 lettered checks: forward
+  136 / 0 (`key-20261020-155757-2060758`, 492.4 s, at c06f436);
+  `--baseline 843ae87` (lane-sweep-c1) 133 / 3, B32, B38 `a-epg:bar` and
+  B39 `d-epg:empty ... a-epg:bar` (`key-20261020-161525-2136277`);
+  `--baseline 6f1d176` 129 / 7, B32, B33 (`waited:NOFIELD` at load 2-3),
+  B35-B37, and B38 / B39, the migration having evicted and run at the
+  first start (`key-20261020-160609-2096379`). `sources-scenario.sh` 66 / 0
+  (`sources-20261020-161452-2134037`). The transcripts are in lane A2's
+  session scratch directory, not the tree.
+
+### The open, measured with its delegates (D-PERF-1, R27f; R28d)
 
 ```
-scripts/dev-harness/open-scenario.sh check-tree                                         # the instrument arm, node only; run by check.sh (9 checks)
+scripts/dev-harness/open-scenario.sh check-tree                                         # the instrument arm, node only; run by check.sh (16 checks)
 scripts/dev-harness/private-bus.sh <dir> 1800 scripts/dev-harness/open-scenario.sh live  # the instrument arm, then the shell arm under its own nested cage
-scripts/dev-harness/private-bus.sh <dir> 1800 scripts/dev-harness/open-scenario.sh live --tree <export>   # e.g. an export carrying spikes/open-mutations/slow-delegate.patch
+scripts/dev-harness/private-bus.sh <dir> 1800 scripts/dev-harness/open-scenario.sh live --tree <export>   # e.g. an export carrying spikes/open-mutations/late-fill.patch
 ```
 
 `openMs` (the IPC verb every open figure before 2026-10-20 came from)
 force-lays-out the channel view in the turn of the summon and stops its
 clock there, so the view has not made its delegates when it looks
 (D-PERF-1). `openAsync <list|wall>` starts the clock, summons and RETURNS;
-a probe Item the harness parents into the guide's window counts the
-delegates the PRESENTING view has realised on every `frameSwapped` and asks
-for the next frame; `openAsyncResult` answers `running` or `done` with the
-summon time, `realisedMs` (the first frame of a count stable over three
-frames, `HarnessLib.openSettle`), `lastChildFrameMs` (the frame after the
-last delegate was made), the count, and a trace. Bounded by 240 frames and
-5,000 ms: a run that does not settle says so in `endedBy`, never a number.
-A warm open is a CLOSED guide summoned again (the verb refuses an open
-guide). Nothing in the product changes.
+a probe Item the harness parents into the guide's window samples the
+PRESENTING view on every `frameSwapped` and asks for the next frame.
 
-The instrument arm drives `openSettle` from node over hand-made traces
-(O1-O7: a count that settles, one still growing, a delegate after a stable
-run, an empty view, two frames, a warm open with no child event, a count
-that moves once) and checks the seams in `shell.qml`; O1-O7 were seen red
-on two `openSettle` mutations (without the last-child condition O3; a
-one-frame stable run O1, O2, O6, O7). The shell arm grades the INSTRUMENT
-(L1-L6 for the list, W1-W6 for the wall: it ran, named the view, settled
-cold and warm, counted a screen, and the legacy `openMs` still counts
-fewer on a cold open) and prints the BUDGET line in plain words, ungraded:
-a number over 150 ms is a product finding, not an instrument fault.
+R28d (2026-10-20) changed what a sample is. R27f counted every delegate in
+the view's contentItem, the cacheBuffer's off-screen ones included (13 rows
+and 21 tiles where 10 and 16 are drawn), settled on a count stable over
+three frames, and so trailed the drawn screen and passed a view that drew
+six rows and filled the rest 300 ms later (round 1's live review). Now a
+sample is `HarnessLib.openDrawnSet`: the delegates that are shown and
+intersect the view's visible area, and whether they TILE it (contiguous,
+nothing missing above, nothing missing below, a grid row whole), measured
+against the rows the guide has (its `rowCount`, not the view's count). The
+open is realised at the first frame whose drawn set is complete
+(`openDrawnSettle`), and the instrument samples 600 ms more, counting
+frames whose drawn set changed. `openAsyncResult` answers `running` or
+`done` with the summon time, `realisedMs`, `count` (drawn), `built` (every
+delegate at the decision), `builtMax` (the most in any frame), and
+`changedAfter`. Bounded by 400 frames and 6,000 ms: a run that does not
+settle says so in `endedBy`, never a number. A warm open is a CLOSED guide
+summoned again (the verb refuses an open guide). Nothing in the product
+changes.
+
+The instrument arm drives `openDrawnSet` over ten hand-made frames (D1-D10:
+a list screen under its cacheBuffer, a gap, a screen filled in part, a
+guide that ends on screen, a row missing above, a grid's full rows, a grid
+row half-filled, a grid that ends on screen, a hidden delegate, an empty
+view) and `openDrawnSettle` over four (E1-E4), and checks the seam in
+`shell.qml` (S1). Each D and E check was seen red on a one-decision
+mutation of the function it drives (no "below" test: D3; no gap test: D2,
+D9; no "above" test: D5; a grid row not required whole: D7; every built
+delegate counted: D1, D2, D5, D6, D9; hidden delegates counted: D9; the
+LAST complete frame taken: E1, E3, E4; no tail comparison: E3). The shell
+arm grades the instrument (L1-L5 for the list, W1-W5 for the wall: it ran
+its tail out, named the view, settled cold and warm, counted a drawn
+screen and fewer than the view built, measured after the summon), the
+WARM budget (L6, W6: the median warm realised time under 150 ms), and that
+nothing drawn changed after any decision (L7, W7). The cold budget is
+printed on the BUDGET line, ungraded: the first open of a session is over
+150 ms, and that is a product finding for the lead. The legacy `openMs` is
+printed beside the cold trace and graded by nothing: round 1's L6 said it
+"realised fewer delegates" than the async instrument, which was true only
+of the built count; against the drawn screen it reads 10 rows (the same)
+and 18 tiles (two more).
+
 `OPEN_CHANNELS` (10000), `OPEN_COLD` (3 shells per view) and `OPEN_WARM`
 (8 opens per shell) set the run; each warm open is interleaved with
 PERF-02's method A (`open` round trip minus the median `ping`).
 
-Measured 2026-10-20 (lane-sweep-a1; transcripts in lane A's session
-scratch directory): 21 passed, 0 failed (`open-20261020-123554-1529605`).
-List cold realised median 546 ms (541-552), wall cold 580 (538-620), list
-warm 34 (29-40), wall warm 32 (29-43); summon 95 / 94 cold, 12 warm; 13 rows
-and 21 tiles; method A about 0 ms (-7 to 6). A 40-channel control
-(`open-20261020-124019-1545245`): 452 / 495 cold, 21 / 22 warm.
-`slow-delegate.patch` (`open-20261020-123804-1537394`): cold list 546 ->
-647, cold wall 580 -> 640, cold summon 95 -> 207, warm unchanged. So rule
-7's 150 ms holds warm and not cold in the cage's floating window; the
-production layer-shell surface on Hyprland is UNVERIFIED.
+Measured 2026-10-20 by lane-sweep-a2 at c06f436 (transcripts in that lane's
+session scratch directory, copied 0600; load 1.7-3.0 unless stated):
+- forward, 10,000 channels (`open-20261020-154123-1999165`): 30 passed, 0
+  failed. List cold realised median 548 ms (540-549), wall cold 534
+  (519-537); list warm 33 (27-41), wall warm 31 (27-39); summon 93 / 91
+  cold, 12 / 12 warm; drawn 10 rows and 16 tiles, built 13 and 18-21;
+  method A median -2 / -4 ms (it cannot see the open). The run before it
+  at 2f846b7 (`open-20261020-153505-1977171`) read 526 / 540 cold and 32 /
+  31 warm, 30 / 0.
+- 40 channels, the control (`open-20261020-155426-2050158`): 30 / 0; cold
+  450 / 440, warm 21 / 21, summon 25 / 23 cold and 1 warm. So about 440 ms
+  of a cold open is the first show of the guide's window in the cage and
+  does not depend on channel count; 10,000 channels add about 100 ms to the
+  cold realised time and about 70 ms to the cold summon.
+- `late-fill.patch` (`open-20261020-154400-2009476`): 28 passed, 2 failed --
+  L6 and W6, warm median 370 / 362 ms; the cold traces show the six-row
+  frame refused as `below` before the filled one. (The run before
+  L4's comparison moved to `builtMax`, `open-20261020-153752-1987563`, read
+  L4 red too, for a reason it does not name: the list drew ten rows a
+  frame before it built its three cacheBuffer rows.)
+- `openDrawnSet` counting every built delegate, in a copy of the harness
+  (`open-20261020-154651-2020565`): 18 passed, 12 failed -- D1, D2, D5, D6,
+  D9, L4 (13 of 13) and every W check (a grid's cacheBuffer row is never
+  whole, so the wall never settles).
+- `slow-delegate.patch` (`open-20261020-155149-2039814`, load 3.7-6.7): 30
+  / 0; cold summon 93 -> 207 ms (list) and 91 -> 191 (wall), cold realised
+  548 -> 673 and 534 -> 628, warm unchanged at 32. The cold summon grows
+  because a cold summon builds delegates synchronously, the hidden view's
+  among them.
+So rule 7's 150 ms holds warm and not cold in the cage's floating window;
+the production layer-shell surface on Hyprland is UNVERIFIED.
 
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 

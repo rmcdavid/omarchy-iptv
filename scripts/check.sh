@@ -230,7 +230,14 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # three times, D-SRC-47's mechanism: 7 x 4), R27e's notice family (5 model,
 # and the start/mid title and the entry-refusal journal line x 4), R27c (2
 # x 4) and R27d (6 model, 3 x 4); the eviction pins were replaced, not added.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2634}
+# 2634 -> 2692 on 2026-10-20, R28 (lane-sweep-a2), +58: R28a (2 model --
+# the schedule, the stall notice -- and 9 x 4 through the harness: the
+# silent read on its schedule, six ways the wait ends, the join, the
+# restart; R27a's three window-c pins, 3 x 4, are gone), R28c's three
+# resets (3 x 4), R28b (2 model, 2 x 4), R28e's two ways-back pins (2 x 4)
+# and its probe line and one cap (2 model). The write-wait bound pin and
+# R27e's five fixture pins were re-levelled in place.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2692}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
