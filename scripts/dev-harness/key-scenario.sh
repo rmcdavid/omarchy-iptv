@@ -2482,6 +2482,13 @@ PYSEED
   ck "B22 D-SRC-38: in that MID-session block the Sources header says saving has stopped, above the session's own rows -- not that the sources were not loaded" \
      "mode:$(qa_json_field "d['guide']['mode']" "$gs") header:$(qa_json_field "d['guide']['headerRight']" "$gs") rows:$(qa_json_field "d['guide']['sourceRows']" "$gs")" \
      "mode:sources header:Saving has stopped rows:2"
+  # R27e (2026-10-20, D-SRC-42): and the NOTIFICATION that block sent is
+  # titled so too -- the one sentence family, at the sink (the stand-in
+  # omarchy-notification-send's argv). Red on 6f1d176, which titled every
+  # block "Saved sources not loaded".
+  ck "B32 R27e (D-SRC-42): the notification of that MID-session block is titled \"Saving has stopped\" and its body says changes are not saved until the file can be read again" \
+     "saving-stopped:$(qa_count ' 74017 Saving has stopped ' "$NOTIFY_LOG") not-loaded:$(qa_count ' 74017 Saved sources not loaded ' "$NOTIFY_LOG") body:$(qa_count 'are not saved until the file can be read again' "$NOTIFY_LOG")" \
+     "saving-stopped:1 not-loaded:0 body:1"
   ipc close >/dev/null
   stop_shell
 
@@ -2706,6 +2713,124 @@ print(json.dumps(d))' "$1" "$KA" "$2" "$3"
   stop_shell
   rm -rf "$LINKS"
 
+  echo "== B, R27: no write without a read, the cap at the migration and at the probe commit (R27a, R27c, R27d) ($(elapsed) s)"
+  # B33: R27a window (a). The harness's editDuringWrite makes a label edit
+  # and asks a SECOND in the first turn after the service reports that
+  # edit's write in flight. Before R27 that save skipped its read (the view
+  # drops a reload while our write is out) and was written from the next
+  # turn; now it waits for the write to land, reads, then writes. Whether a
+  # re-point can be timed INSIDE that window from outside the shell: no --
+  # the window is the few milliseconds between the first write landing and
+  # the second's read, inside the shell's own turn order, and nothing a
+  # process outside it does lands there on purpose. The node pins time it
+  # (tests/Model.test.js, R27a window a, D-SINK-22); this observes the
+  # ordering on the real FileView.
+  seed_r26 dir; r26_start
+  w0=$(pf "['stateSavesWaited']"); k0=$(pf "['stateVerifySkipped']")
+  res=$(ipc editDuringWrite "$KC" w-one w-two)
+  for ((i = 0; i < 50; i++)); do [[ $(qa_json_field "d['state']" "$(ipc editDuringWriteResult)") == asked ]] && break; sleep 0.1; done
+  r26_landed "$STATE" w-two
+  dw=$(ipc editDuringWriteResult)
+  ck "B33 R27a (D-SINK-22 window a): a second in-app change asked while the first one's write is OUT waits for it to land and then reads -- nothing written without a read (skipped +0), the wait counted, the second edit on disk" \
+     "first:$(okf "$res") asked-in-flight:$(qa_json_field "d['inFlightAtAsk']" "$dw") second:$(qa_json_field "d['secondOk']" "$dw") waited:$(delta "$w0" "$(pf "['stateSavesWaited']")") skipped:$(delta "$k0" "$(pf "['stateVerifySkipped']")") disk:$(r26_info "$STATE") mode:$(stat -c %a "$STATE")" \
+     "first:true asked-in-flight:1 second:true waited:+1 skipped:+0 disk:A=seed,C=w-two,favs=t:seed.uk mode:600"
+  # B34: what the wait costs a BURST (R27a's measurement). N label edits one
+  # a turn apart, timed in the shell from the first to the turn the last has
+  # landed; the writes and the reads it made. The check holds the property
+  # (every write after its own read); the numbers are printed for the record.
+  burst_run() {
+    local n=$1 i r
+    v0=$(pf "['stateVerifies']")
+    ipc burst "$KC" "$n" "b$n-" >/dev/null
+    for ((i = 0; i < 150; i++)); do r=$(ipc burstResult); [[ $(qa_json_field "d['state']" "$r") != running ]] && break; sleep 0.1; done
+    BURST=$r; BURST_READS=$(delta "$v0" "$(pf "['stateVerifies']")")
+    echo "   burst of $n: $(qa_json_field "d['state']" "$r"), last asked at $(qa_json_field "d['lastAskMs']" "$r") ms, landed at $(qa_json_field "d['landedMs']" "$r") ms, $(qa_json_field "d['writes']" "$r") writes, reads $BURST_READS, disk $(r26_info "$STATE")"
+  }
+  for n in 2 5 20; do burst_run "$n"; done
+  burst_run 10
+  ck "B34 R27a: a burst of ten edits a turn apart lands whole -- the last edit on disk, nothing outstanding -- and every write it made came after a read of its own (writes == reads)" \
+     "state:$(qa_json_field "d['state']" "$BURST") disk:$(r26_info "$STATE") writes==reads:$([[ "+$(qa_json_field "d['writes']" "$BURST")" == "$BURST_READS" ]] && echo yes || echo "no(+$(qa_json_field "d['writes']" "$BURST")/$BURST_READS)")" \
+     "state:done disk:A=seed,C=b10-10,favs=t:seed.uk writes==reads:yes"
+  stop_shell
+
+  # B35, B36: R27d (D-SRC-44) -- THE MIGRATION NEVER EVICTS. A 0.13.6
+  # install: 50 records, no migration marker, and the bar entry naming D,
+  # which is not among them. Before R27 the migration evicted the least
+  # recently used record -- the only copy of its URL -- with a journal line;
+  # now it does not run: nothing evicted or added, no marker, the entry
+  # keeps D's URL, the user told once. Then one record removed in Sources:
+  # the next reconcile migrates D into the place it left.
+  seed50() {
+    seed "$KA"
+    python3 -c 'import json, sys
+d = json.load(open(sys.argv[1]))
+base = d["sources"][0]
+for i in range(48):
+    r = dict(base); r["key"] = "%08x" % (0x10000000 + i); r["url"] = "/srv/none/m%d.m3u" % i; r["label"] = "m%d" % i; r["lastUsed"] = 1799990000 - 1000 - i
+    d["sources"].append(r)
+json.dump(d, open(sys.argv[1], "w"))' "$STATE"
+    chmod 0600 "$STATE"
+  }
+  : >"$NOTIFY_LOG"
+  seed50
+  keys50=$(sj "','.join(sorted(s['key'] for s in d['sources']))")
+  start_shell --playlist "$D" || true
+  sleep 3
+  ck "B35 R27d (D-SRC-44): at 50 sources with the entry's URL not among them the migration does NOT run -- the 50 kept (none evicted, none added), no marker, the entry keeps its URL, told ONCE (\"Sources is full\", no URL), reported as playlistUrl:full" \
+     "records:$(sj "len(d['sources'])") same:$([[ $(sj "','.join(sorted(s['key'] for s in d['sources']))") == "$keys50" ]] && echo yes || echo no) d:$(sj "'$KD' in [s['key'] for s in d['sources']]") marker:$(sj "d.get('entryMigrated', False)") entry:$(stored_has playlistUrl) told:$(qa_count ' 74016 Sources is full ' "$NOTIFY_LOG") url-in-notice:$(qa_count '://|/srv/|fixtures' "$NOTIFY_LOG") reports:$(reports)" \
+     "records:50 same:yes d:false marker:false entry:yes told:1 url-in-notice:0 reports:playlistUrl:full"
+  res=$(ipc removeSource 10000007)
+  wait_for "$KD" 15 svc "['activeSourceKey']" >/dev/null || true
+  wait_for true 10 landed >/dev/null 2>&1; wait_for no 10 stored_has playlistUrl >/dev/null 2>&1; sleep 0.5
+  ck "B36 R27d: ONE record removed in Sources, and the next reconcile migrates the entry's URL into the place it left -- 50 records, D active, the marker landed, the entry stripped; told once in all" \
+     "remove:$(okf "$res") records:$(sj "len(d['sources'])") d:$(sj "'$KD' in [s['key'] for s in d['sources']]") active:$([[ $(svc "['activeSourceKey']") == "$KD" ]] && echo D || echo other) marker:$(sj "d.get('entryMigrated', False)") entry:$(stored_has playlistUrl) told:$(qa_count ' 74016 Sources is full ' "$NOTIFY_LOG")" \
+     "remove:true records:50 d:true active:D marker:true entry:no told:1"
+  stop_shell
+
+  # B37: R27c (D-SRC-41) -- the probe commit re-checks the cap. 49 records,
+  # an in-app add of a source behind a server that answers after 4 s, and a
+  # hand-run `state source add` taking the 50th place 1 s into the probe.
+  # Before R27 the commit appended a 51st, which the next start's parse
+  # dropped in silence; now it is refused too_many, told through the probe's
+  # own result, and a restart reads the same 50.
+  python3 - "$WORK/slow2.port" "$C" >"$WORK/slow2.log" 2>&1 <<'SLOW' &
+import http.server, sys, time
+body = open(sys.argv[2], "rb").read()
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        time.sleep(4)
+        self.send_response(200); self.send_header("Content-Type", "audio/x-mpegurl"); self.send_header("Content-Length", str(len(body))); self.end_headers(); self.wfile.write(body)
+    def log_message(self, *a): pass
+srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+open(sys.argv[1], "w").write(str(srv.server_address[1]))
+srv.serve_forever()
+SLOW
+  SLOW_PORT=""; for ((i = 0; i < 50; i++)); do [[ -s $WORK/slow2.port ]] && { SLOW_PORT=$(cat "$WORK/slow2.port"); break; }; sleep 0.1; done
+  SLOW_PID=""; for ((i = 0; i < 50; i++)); do SLOW_PID=$(ss -ltnp 2>/dev/null | grep ":$SLOW_PORT " | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2); [[ -n $SLOW_PID ]] && break; sleep 0.1; done
+  SLOW2="http://127.0.0.1:$SLOW_PORT/slow2.m3u"; KS2=$(key_of "$SLOW2")
+  echo "   slow listener on port ${SLOW_PORT:-none}, pid ${SLOW_PID:-none}"
+  seed50
+  python3 -c 'import json, sys
+d = json.load(open(sys.argv[1])); d["sources"] = d["sources"][:49]; d["entryMigrated"] = True
+json.dump(d, open(sys.argv[1], "w"))' "$STATE"; chmod 0600 "$STATE"
+  start_shell --playlist none --source-key "$KA" || true
+  wait_for true 20 pf "['dirsReady']" >/dev/null || true; sleep 0.5
+  res=$(ipc addSource "$SLOW2" "" "")
+  sleep 1.0
+  python3 "$PLUGIN_ROOT/bin/omarchy-iptv" state --state-dir "$SDIR" source add --url "$D" >/dev/null 2>&1; hrc=$?
+  wait_for 50 10 pf "['sourceCount']" >/dev/null || true
+  for ((i = 0; i < 100; i++)); do [[ $(qa_json_field "len([s for s in d if s.get('signal') == 'sourceProbeFinished'])" "$(ipc signals)") -ge 1 ]] && break; sleep 0.1; done
+  sleep 1.0
+  probe=$(qa_json_field "json.dumps([s for s in d if s.get('signal') == 'sourceProbeFinished'][-1]['payload'])" "$(ipc signals)")
+  stop_shell
+  start_shell --playlist none --source-key "$KA" || true
+  sleep 0.5
+  ck "B37 R27c (D-SRC-41): at 49 sources an in-app add's probe runs while a hand-run \`state source add\` takes the 50th place: the commit refuses too_many (told through the probe's result) -- 50 on disk, the hand-run one among them, and a restart drops nothing (before R27: 51 committed, the next start's parse dropping the in-app one)" \
+     "add:$(okf "$res") helper:$hrc probe:$(qa_json_field "'ok' if d.get('ok') else d.get('reason', '?')" "$probe") on-disk:$(sj "len(d['sources'])") d:$(sj "'$KD' in [s['key'] for s in d['sources']]") slow:$(sj "'$KS2' in [s['key'] for s in d['sources']]") restart:$(qa_json_field 'len(d)' "$(ipc sources)")" \
+     "add:true helper:0 probe:$(node -e 'const M = require(process.argv[1]); process.stdout.write(M.sourceErrorMessage("too_many"))' "$(qa_model_files "$PLUGIN_ROOT" | head -n 1)") on-disk:50 d:true slow:false restart:50"
+  stop_shell
+  kill_pid "$SLOW_PID"; SLOW_PID=""
+
   echo "== P: the console sink, then teardown ($(elapsed) s)"
   qa_leak_on_labelled 'sourceProbeFinished|sourceSwitched|sourceRemoved|updateEntryInline' "://|$WORK" "$LOG"
   case $? in 0) left=clean ;; 1) left=LEAK ;; *) left="nothing labelled to judge" ;; esac
@@ -2742,7 +2867,7 @@ instrument
 # The floor. A check that stops executing must turn the run red rather than
 # quietly shorten the summary (D-PLY-9). Recount with
 #   grep -cE '^ *ck "[IS][0-9]' key-scenario.sh   -> 10, the instrument arm -> check-tree
-#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 128, both arms         -> live
+#   grep -cE '^ *ck "[A-Z][0-9]' key-scenario.sh  -> 134, both arms         -> live
 # (48 -> 61 on 2026-10-12, round 4: W1..W6 and F1..F7; 61 -> 63 the same
 # day, round 5: L1, L2; 63 -> 70 the same day, round 7: U1..U7; 70 -> 78
 # the same day, round 8: K1..K3, Z1..Z3, A1, A2; 78 -> 85 the same day,
@@ -2754,7 +2879,10 @@ instrument
 # B9..B14, R23a-c, R23e, R23f, R23h; 111 -> 115 on 2026-10-14, round 14:
 # B15..B18, R24f, R24c, R24g, R24d; 115 -> 119 the same day, round 15:
 # B19..B22, R25d, R25a, D-SRC-38; 119 -> 128 on 2026-10-16, R26: B23..B31,
-# the read before every write, the in-load save deferred, and idle.)
+# the read before every write, the in-load save deferred, and idle; 128 ->
+# 134 on 2026-10-20, R27: B32 (the mid-session notice's title, R27e), B33
+# and B34 (no write without a read, R27a), B35 and B36 (the migration at
+# the cap, R27d) and B37 (the probe commit at the cap, R27c).)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -2764,7 +2892,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=10
 else
-  EXPECTED_CHECKS=128
+  EXPECTED_CHECKS=134
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then

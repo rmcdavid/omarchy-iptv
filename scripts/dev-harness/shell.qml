@@ -486,6 +486,60 @@ ShellRoot {
     if (!r.done && harness.openProbe) harness.openProbe.poke()
   }
 
+  // ---- R27a (2026-10-20, D-SINK-22 window a): saves asked while a write is
+  // OUT. `writesSeen` counts the service's state writes by the change of the
+  // text it last asked to write (lastSaveText, which every tree has; the
+  // count is all this reads of it -- the text holds the session's state and
+  // is never logged or returned). `dwRun` is one editDuringWrite: a label
+  // edit, and a second one asked in the first turn after the service says a
+  // write of its own is in flight. `burstRun` is one burst: N label edits a
+  // turn apart, timed to the turn the last has landed.
+  property int writesSeen: 0
+  property var dwRun: null
+  property var burstRun: null
+  function dwAsk() {
+    var r = harness.dwRun, s = serviceLoader.item
+    if (!r || r.asked || !s) return
+    r.asked = true
+    r.inFlightAtAsk = Number(s.stateSavesInFlight) || 0
+    var res = s.updateSource(r.key, { label: r.second })
+    r.secondOk = res.ok === true
+    harness.dwRun = r
+  }
+  function burstTurn() {
+    var r = harness.burstRun, s = serviceLoader.item
+    if (!r || !s) return
+    if (r.asked < r.n) {
+      r.asked = r.asked + 1
+      s.updateSource(r.key, { label: r.prefix + r.asked })
+      if (r.asked === r.n) r.lastAskAt = Date.now() - r.t0
+      harness.burstRun = r
+      Qt.callLater(harness.burstTurn)
+      return
+    }
+    // landed: the service holds nothing back and has nothing out
+    if (s.stateSavesInFlight === 0 && s.stateSavePending !== true && s.stateVerifyPending !== true) {
+      r.landedAt = Date.now() - r.t0
+      r.writes = harness.writesSeen - r.writes0
+      r.done = true
+      harness.burstRun = r
+      return
+    }
+    if (Date.now() - r.t0 > 10000) { r.done = true; r.gaveUp = true; harness.burstRun = r; return }
+    harness.burstRun = r
+    burstPoll.restart()
+  }
+  Timer { id: burstPoll; interval: 1; repeat: false; onTriggered: harness.burstTurn() }
+  Connections {
+    target: serviceLoader.item
+    ignoreUnknownSignals: true
+    function onLastSaveTextChanged() { harness.writesSeen = harness.writesSeen + 1 }
+    function onStateSavesInFlightChanged() {
+      var r = harness.dwRun
+      if (r && !r.asked && serviceLoader.item && serviceLoader.item.stateSavesInFlight > 0) Qt.callLater(harness.dwAsk)
+    }
+  }
+
   // Every objectName that can be the guide's channel view, newest first.
   // A name that is not on this list cannot be measured, and openMs says so by
   // reporting view:"" rather than by returning a number for it.
@@ -1095,7 +1149,7 @@ ShellRoot {
       return JSON.stringify({ state: r.done ? "done" : "running", endedBy: r.endedBy, view: r.view, cold: r.cold,
                               summonMs: r.summonMs, realisedMs: s.stableAt, lastChildFrameMs: s.lastChildFrameAt,
                               lastChildMs: r.lastChildAt, count: s.stableCount, children: r.children, frames: r.frames.length,
-                              settled: s.settled, hasWindow: r.hasWindow, rows: guideLoader.item ? guideLoader.item.currentRows.length : -1,
+                              settled: s.settled, hasWindow: harness.openProbe ? harness.openProbe.hasWindow === true : false, rows: guideLoader.item ? guideLoader.item.currentRows.length : -1,
                               trace: r.frames.slice(0, 40) })
     }
     // PERF-02's method A, in the harness: the round trip of a call that does
@@ -1291,6 +1345,35 @@ ShellRoot {
       return s ? JSON.stringify(s.updateSource(key, fields)) : "{}"
     }
     function removeSource(key: string): string { var s = serviceLoader.item; return s ? JSON.stringify(s.removeSource(key)) : "{}" }
+    // R27a: a label edit, and a SECOND asked in the turn after the service
+    // reports its first write in flight (window a). Labels only, never a URL.
+    function editDuringWrite(key: string, first: string, second: string): string {
+      var s = serviceLoader.item
+      if (!s) return "{}"
+      harness.dwRun = { key: key, second: second, asked: false, inFlightAtAsk: -1, secondOk: null, writes0: harness.writesSeen }
+      var res = s.updateSource(key, { label: first })
+      return JSON.stringify({ ok: res.ok === true })
+    }
+    function editDuringWriteResult(): string {
+      var r = harness.dwRun
+      if (!r) return JSON.stringify({ state: "none" })
+      return JSON.stringify({ state: r.asked ? "asked" : "waiting", inFlightAtAsk: r.inFlightAtAsk, secondOk: r.secondOk, writes: harness.writesSeen - r.writes0 })
+    }
+    // R27a: the cost of the wait to a burst -- N label edits, one a turn,
+    // timed from the first to the turn the last has LANDED (nothing pending,
+    // nothing in flight, no read out), with the writes they made.
+    function burst(key: string, n: int, prefix: string): string {
+      var s = serviceLoader.item
+      if (!s) return "{}"
+      harness.burstRun = { key: key, n: Math.max(1, n), prefix: prefix, asked: 0, t0: Date.now(), lastAskAt: -1, landedAt: -1, writes0: harness.writesSeen, writes: -1, done: false, gaveUp: false }
+      Qt.callLater(harness.burstTurn)
+      return "started"
+    }
+    function burstResult(): string {
+      var r = harness.burstRun
+      if (!r) return JSON.stringify({ state: "none" })
+      return JSON.stringify({ state: r.done ? (r.gaveUp ? "gave-up" : "done") : "running", n: r.n, lastAskMs: r.lastAskAt, landedMs: r.landedAt, writes: r.writes })
+    }
     function switchSource(key: string): string { var s = serviceLoader.item; return s ? JSON.stringify(s.switchSource(key)) : "{}" }
     function retrySource(key: string): string { var s = serviceLoader.item; return s ? JSON.stringify(s.retrySource(key)) : "{}" }
     function cancelProbe(): string { var s = serviceLoader.item; return s ? JSON.stringify(s.cancelProbe()) : "{}" }
