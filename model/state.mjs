@@ -1577,16 +1577,28 @@ function stateWriteGate(ctx) {
 //    "refuse" the no-write mode, and nothing a re-read can lift now
 //    "verify" reload state.json first and decide on what it finds
 //    "defer"  ask again from a turn of its own (Qt.callLater)
+//    "wait"   one of our writes is in flight: held until it lands (or
+//             fails), then asked again from a turn of its own, which reads
 //    "write"  issue the write now
 // Every write is asked for again from a turn of its own before it is
 // issued, because a setText inside stateFile's own onLoaded writes the file
 // and raises NO `saved` (D-SRC-46, measured 16 of 16), and a turn called
-// from a handler cannot tell which handler it is in. The read is skipped
-// while one of our writes is in flight: the view DROPS a reload then
-// (measured 30 of 30), and the disk is our own write. A refused save
+// from a handler cannot tell which handler it is in. A refused save
 // re-reads unless the reason is init-timeout (no load can lift it, R23c)
 // or the refusal is the verify's own answer; inside a handler the load
 // that is running IS that read.
+// R27a (D-SINK-22, window a): NO WRITE WITHOUT A READ. Until R27 a save
+// asked while one of our writes was in flight SKIPPED its read -- the view
+// drops a reload then (measured 30 of 30) -- and was written from the next
+// turn, so a re-point landing in that window was written over (or a 0644
+// file created in an empty folder). Now it WAITS: nothing is issued while
+// the write is out, and the save is asked again once that write has landed,
+// when a read is answered. Every save asked during the wait is the same
+// held save (they coalesce). `waitExpired` -- the write was not reported
+// within the wait's own bound (Service.stateWriteWaitWatchdog) -- lets the
+// held save go to its read anyway: if the view is still holding the write
+// the read is dropped and the read's own bound decides (R27a window c),
+// which never writes blind.
 function stateSavePlan(ctx) {
   var c = ctx || {}
   if (c.verifyPending === true) return "join"
@@ -1598,9 +1610,22 @@ function stateSavePlan(ctx) {
   }
   if (gate !== "write") return "refuse"
   if (c.verifyDone === true) return "write"
+  if ((Number(c.inFlight) || 0) > 0 && c.waitExpired !== true) return "wait"
   if (c.inHandler === true) return "defer"
-  if ((Number(c.inFlight) || 0) > 0) return c.writeTurn === true ? "write" : "defer"
   return "verify"
+}
+
+// R27a (D-SINK-22, window c): what the read before a save does when its
+// load has not come within the bound (Service.stateVerifyWatchdog).
+//   retried  this read has already been asked once more
+// -> "retry" ask for the load once more, with the bound again
+//    "block" the R22 no-write mode, reason "read-timeout"; the save is
+//            refused. Never a write: until R27 the watchdog's answer was to
+//            write without the read, which is the third window in which a
+//            0644 state.json could be created.
+function stateVerifyTimeoutAct(ctx) {
+  var c = ctx || {}
+  return c.retried === true ? "block" : "retry"
 }
 
 // R26a (D-SRC-35): a source verb that meets a no-write mode a load can lift
@@ -1617,7 +1642,30 @@ function stateBlockRecheck(ctx) {
 // The user is told ONCE per no-write episode: this sentence, as a desktop
 // notification and a console line. It names the file and what to do, and
 // never a URL (it is composed from the reason and the path alone).
-function stateUnreadableNotice(reason, path) {
+// R27e (2026-10-20; D-SRC-42, D-SRC-50, D-SRC-51), one family with the R23e
+// and R25 copy:
+//   `midSession` -- the block began after a state had loaded -- titles it
+//     "Saving has stopped" (STATE_BLOCK_TITLE_MID), in the notification and
+//     the journal alike: the sources DID load and are still listed, and it
+//     is saving that stopped. A block at the start keeps "Saved sources not
+//     loaded" (STATE_BLOCK_TITLE_START).
+//   the body says a change made now is "not saved until the file can be
+//     read again" -- true on every way back. It used to say "not kept",
+//     which is false on the one way back where the next change's own read
+//     finds the file first and saves it (D-SRC-51).
+//   a file or folder that has gone missing names the LINK case first: a
+//     link pointed back at the folder or file that holds the state restores
+//     everything, where restoring "the file it points to" or a restart with
+//     the link still on an empty folder starts a fresh, empty install there
+//     (D-SRC-50).
+//   "read-timeout" (R27a, D-SINK-22 window c): the read before a save did
+//     not answer within its bound, twice. Always mid-session (a save needs a
+//     loaded state), and lifted by a later read that answers.
+var STATE_BLOCK_TITLE_START = "Saved sources not loaded"
+var STATE_BLOCK_TITLE_MID = "Saving has stopped"
+var STATE_BLOCK_UNSAVED = "Sources, favorites and settings changed now are not saved until the file can be read again."
+var STATE_BLOCK_LINK_FIRST = "If it is a symbolic link, point it back at the folder or file that holds your state"
+function stateUnreadableNotice(reason, path, midSession) {
   var file = str(path) !== "" ? str(path) : "state.json"
   var r = str(reason)
   var what = "could not be read"
@@ -1632,9 +1680,10 @@ function stateUnreadableNotice(reason, path) {
     what = "is not a valid state file"
     fix = "Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell."
   } else if (r === "link") {
-    // R24b: the not-a-file sentence, naming what is there.
+    // R24b: the not-a-file sentence, naming what is there. R27e: the link
+    // pointed back, not its target "restored" (D-SRC-50).
     what = "is a symbolic link whose target is missing or is not a regular file"
-    fix = "Restore the file it points to, or move the link aside, then run omarchy restart shell."
+    fix = "Point it back at the file that holds your state, or move the link aside, then run omarchy restart shell."
   } else if (r === "not-a-dir") {
     // R24b: a regular file (or anything but a folder) where the state FOLDER
     // should be. The sentence names the folder's path, not the file's.
@@ -1646,25 +1695,40 @@ function stateUnreadableNotice(reason, path) {
     // leads to something that is not a folder. The sentence names the folder.
     file = str(path) !== "" ? str(path).replace(/\/[^\/]*$/, "") : "The state folder"
     what = "is a symbolic link whose target is missing or is not a folder (or a folder above it is)"
-    fix = "Restore the folder it points to, or move the link aside, then run omarchy restart shell."
+    fix = "Point it back at the folder that holds your state, or move the link aside, then run omarchy restart shell."
   } else if (r === "absent-unconfirmed") {
+    // R27e left this one as it was: at a START the helper names a link that
+    // leads nowhere itself ("link", "folder-link"), so the file it found and
+    // the view could not reach is a folder-permission case, not a link one.
     what = "could not be found, or its folder could not be read"
     fix = "Make the folder readable with chmod 700, then run omarchy restart shell."
   } else if (r === "absent") {
     // Mid-session (the file vanished under a running shell): the helper's
     // witness is not asked again, so the sentence names both causes the
     // FileView cannot tell apart -- a broken symbolic link (R24b) and an
-    // unreadable folder.
+    // unreadable folder. R27e: a link pointed BACK, never its target
+    // restored, which on an empty folder makes a fresh, empty start (D-SRC-50).
     what = "could not be found, or its folder could not be read"
-    fix = "If it is a symbolic link, restore the file it points to; otherwise make the folder readable with chmod 700. Then run omarchy restart shell."
+    fix = STATE_BLOCK_LINK_FIRST + "; otherwise make the folder readable with chmod 700. Then run omarchy restart shell."
   } else if (r === "init-timeout") {
     // R23c: the start-up check of the file (the helper's `state init`) did
     // not answer within Service.stateInitTimeoutMs and was stopped.
     what = "could not be checked: the start-up check did not answer and was stopped"
     fix = "Make sure a regular file, or nothing, is at that path, then run omarchy restart shell."
+  } else if (r === "read-timeout") {
+    // R27a (window c): the read before a save, asked twice, never answered.
+    what = "did not answer when it was read before a save (twice, 2 seconds each)"
+    fix = "The next change made here reads it again, and saving resumes if it answers. If it keeps stopping, check the disk or folder that holds it, then run omarchy restart shell."
   }
-  return { title: "Saved sources not loaded",
-           body: file + " " + what + ". Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. " + fix }
+  return { title: midSession === true ? STATE_BLOCK_TITLE_MID : STATE_BLOCK_TITLE_START,
+           body: file + " " + what + ". " + STATE_BLOCK_UNSAVED + " " + fix }
+}
+
+// R27e: the journal's line for the same episode -- the title, then the body
+// -- so the journal is titled as the notification is (D-SRC-42).
+function stateUnreadableJournal(reason, path, midSession) {
+  var n = stateUnreadableNotice(reason, path, midSession)
+  return n.title + ": " + n.body
 }
 
 // D-SINK-19 round 15 (D-SRC-38). The no-write mode's SHORT form, for the
@@ -1674,8 +1738,7 @@ function stateUnreadableNotice(reason, path) {
 // notice copy family: at a start it IS stateUnreadableNotice's title.
 function stateBlockedHeader(reason, path, midSession) {
   if (str(reason) === "") return ""
-  if (midSession === true) return "Saving has stopped"
-  return stateUnreadableNotice(reason, path).title
+  return stateUnreadableNotice(reason, path, midSession === true).title
 }
 export {
   MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedSearchTerms,
@@ -1697,5 +1760,7 @@ export {
   mergeForeignState, MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount,
   mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
   stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
-  stateBlockRecheck, stateUnreadableNotice, stateBlockedHeader
+  stateVerifyTimeoutAct, stateBlockRecheck, STATE_BLOCK_TITLE_START,
+  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
+  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
 }

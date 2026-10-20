@@ -78,7 +78,10 @@ export {
   reloadDisposition, stateCanonical, sameState, mergeForeignState,
   mergeConflictLine, mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS,
   stateLoadKind, stateInitFound, stateLoadDecision, stateWriteGate,
-  stateSavePlan, stateBlockRecheck, stateUnreadableNotice, stateBlockedHeader
+  stateSavePlan, stateVerifyTimeoutAct, stateBlockRecheck,
+  STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED,
+  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
+  stateBlockedHeader
 } from "./model/state.mjs"
 export {
   parseJsonObject, parseChannels, parseEpgNow, parseHelperStatus,

@@ -507,8 +507,11 @@ Item {
   readonly property bool firstRunAllowed: Model.firstRunAllowed({ serviceReady: root.serviceReady, configured: root.configured, stateBlocked: root.stateBlocked })
   // The notification's sentence for the current reason and path (R23e: ONE
   // source of copy with it, Model.stateUnreadableNotice).
+  // R27e: titled as the notification is -- "Saving has stopped" when the
+  // block began after a state loaded (D-SRC-42).
   readonly property var stateNotice: Model.stateUnreadableNotice(root.stateBlocked,
-                                                                 root.serviceReady && typeof service.stateFilePath === "string" ? service.stateFilePath : "")
+                                                                 root.serviceReady && typeof service.stateFilePath === "string" ? service.stateFilePath : "",
+                                                                 root.serviceReady && service.stateLoaded === true)
   // D-LIVE-19: never `service.channels.length` directly. The body renders
   // one surface at a time and Model.guideSurface decides which; an
   // unconfigured guide has no channels, no column and no counts even if the

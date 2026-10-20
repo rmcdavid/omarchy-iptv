@@ -7291,6 +7291,48 @@ checkCall("D-SRC-38: sourcesHeaderRight / stateBlockedHeader -- a block that beg
   Model.sourcesHeaderRight(0, "absent", "/p/state.json"), Model.sourcesHeaderRight(2, "", "/p/state.json", true),
   Model.stateBlockedHeader("unparsed", "", false) === Model.stateUnreadableNotice("unparsed", "").title, Model.stateBlockedHeader("", "", true)]),
   ["Saving has stopped", "Saved sources not loaded", "Saved sources not loaded", "2 sources", true, ""])
+// ---- R27e (2026-10-20; D-SRC-42, D-SRC-50, D-SRC-51): ONE notice family.
+// Every sentence is pinned verbatim through tests/fixtures/state-notices.json,
+// which the README and docs/UX-SOURCES.md quote; both directions: every reason
+// the service can block with has its sentence there, and every sentence there
+// is the function's word for word.
+;(function () {
+  const fx = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/state-notices.json"), "utf8"))
+  const P = fx.path
+  // The reasons a block can carry: the load kinds, the start-up decision's
+  // own (Model.stateLoadDecision), and R27a's read-timeout.
+  const kinds = Object.keys(Model.STATE_LOAD_ERRORS).map(k => Model.STATE_LOAD_ERRORS[k]).concat(["unparsed"])
+  const decided = ["absent-unconfirmed", "init-timeout", "link", "not-a-dir", "folder-link", "read-timeout"]
+  checkCall("R27e: the notice fixture covers every reason a block can carry, and nothing else", () =>
+    Object.keys(fx.bodies).sort(), Array.from(new Set(kinds.concat(decided))).sort())
+  checkCall("R27e: every body is the fixture's sentence, word for word (the fixture is the copy the README and UX-SOURCES quote)", () =>
+    Object.keys(fx.bodies).filter(r => Model.stateUnreadableNotice(r, P).body !== fx.bodies[r]), [])
+  checkCall("R27e (D-SRC-51): every body says a change made now is \"not saved until the file can be read again\" -- once, as its second sentence -- and none says \"not kept\"", () => {
+    const bodies = Object.keys(fx.bodies).map(r => fx.bodies[r])
+    return [fx.unsaved, bodies.every(b => b.split(fx.unsaved).length === 2 && b.indexOf(". " + fx.unsaved + " ") !== -1), bodies.some(b => /not kept/.test(b))]
+  }, ["Sources, favorites and settings changed now are not saved until the file can be read again.", true, false])
+  checkCall("R27e (D-SRC-50): the advice for a file or folder gone missing names the LINK case first -- `absent` leads with \"if it is a symbolic link, point it back at the folder or file that holds your state\"; a dangling file link and folder link say point it back; no sentence tells the user to restore what a link points to", () => {
+    const b = fx.bodies
+    const fix = r => b[r].slice(b[r].indexOf(fx.unsaved) + fx.unsaved.length + 1)
+    return [fx.linkFirst, fix("absent").indexOf(fx.linkFirst) === 0, /^Point it back at the file that holds your state/.test(fix("link")), /^Point it back at the folder that holds your state/.test(fix("folder-link")),
+            Object.keys(b).filter(r => /[Rr]estore the (file|folder) it points to/.test(b[r]))]
+  }, ["If it is a symbolic link, point it back at the folder or file that holds your state", true, true, true, []])
+  checkCall("R27e (D-SRC-42): the TITLE -- \"Saving has stopped\" for a block that began mid-session, \"Saved sources not loaded\" at a start, for every reason; the journal line is the title then the body; the header and the notification take the same word", () => {
+    const rs = Object.keys(fx.bodies)
+    const argv = (mid) => Model.notifyArgv("stateUnreadable", { reason: "absent", path: P, midSession: mid })
+    return [rs.every(r => Model.stateUnreadableNotice(r, P, true).title === fx.titles.midSession), rs.every(r => Model.stateUnreadableNotice(r, P, false).title === fx.titles.start),
+            rs.every(r => Model.stateUnreadableNotice(r, P).title === fx.titles.start),
+            rs.every(r => Model.stateUnreadableJournal(r, P, true) === fx.titles.midSession + ": " + fx.bodies[r]),
+            rs.every(r => Model.stateUnreadableJournal(r, P, false) === fx.titles.start + ": " + fx.bodies[r]),
+            [Model.stateBlockedHeader("absent", P, true), Model.stateBlockedHeader("absent", P, false)],
+            [argv(true).slice(-2), argv(false)[argv(false).length - 2], argv(undefined)[argv(undefined).length - 2]]]
+  }, [true, true, true, true, true, ["Saving has stopped", "Saved sources not loaded"],
+      [["Saving has stopped", fx.bodies.absent], "Saved sources not loaded", "Saved sources not loaded"]])
+  checkCall("R27e (structural): the guide's own notice (the empty state's words) takes the service's stateLoaded too, so it is titled as the notification is", () => {
+    const g = fs.readFileSync(path.join(__dirname, "../Guide.qml"), "utf8")
+    return /readonly property var stateNotice: Model\.stateUnreadableNotice\(root\.stateBlocked,[\s\S]{0,300}service\.stateLoaded === true\)/.test(g)
+  }, true)
+})()
 checkCall("D-SRC-38 (structural): the guide hands the header the service's stateLoaded, so a mid-session block reads as one", () => {
   const g = fs.readFileSync(path.join(__dirname, "../Guide.qml"), "utf8")
   return /Model\.sourcesHeaderRight\(root\.sourceCount, root\.stateBlocked,[\s\S]{0,400}service\.stateLoaded === true\)/.test(g)
@@ -7409,9 +7451,11 @@ checkCall("R11 (structural): stateInitProc's exit issues the parked save, THEN s
     // The FileView reports both outcomes and both settle the flush.
     // (400: R25a's recentSaves reset joined the landed branch, round 15;
     // 700: R26b's handler-depth count and its try now wrap the body, the
-    // landed branch and the settle unchanged inside it, 2026-10-16)
-    savedSettles: /onSaved: \{[\s\S]{0,700}root\.settleEntryFlush\(\)/.test(serviceSource),
-    saveFailedSettles: /onSaveFailed: \(error\) => \{[\s\S]{0,1200}root\.stateSaveFailed = true[\s\S]{0,100}root\.settleEntryFlush\(\)/.test(serviceSource),
+    // landed branch and the settle unchanged inside it, 2026-10-16;
+    // 900 / 1400: R27a's end of the write wait joined both landed branches,
+    // 2026-10-20, the settle unchanged after it)
+    savedSettles: /onSaved: \{[\s\S]{0,900}root\.settleEntryFlush\(\)/.test(serviceSource),
+    saveFailedSettles: /onSaveFailed: \(error\) => \{[\s\S]{0,1400}root\.stateSaveFailed = true[\s\S]{0,100}root\.settleEntryFlush\(\)/.test(serviceSource),
     // R13: the outstanding flag is raised BEFORE setText with the text kept,
     // and cleared on either signal ONLY when the view reports on that text
     // (Model.stateSaveLanded), never by counting signals.
@@ -7540,7 +7584,7 @@ checkCall("R14 / R22a (structural): the ignore branch of applyUserState RETURNS 
     // "join", a read already out) and "refuse" -- each returns exactly as the
     // gate's own branches did. What the gate decides (Model.stateWriteGate)
     // is pinned by its fixture; the plan's table by the R26a pins below.
-    parksBeforeDirs: /function saveState\(\) \{\n(\s*\/\/[^\n]*\n)*\s*var gate = Model\.stateWriteGate\(\{ blocked: root\.stateWriteBlocked, loaded: root\.stateLoaded, dirsReady: root\.dirsReady \}\)\n\s*var plan = Model\.stateSavePlan\(\{ verifyPending: root\.stateVerifyPending, gate: gate, blocked: root\.stateWriteBlocked,\n\s*inHandler: root\.stateInHandler > 0, verifyDone: root\.stateVerifyDone,\n\s*writeTurn: root\.stateWriteTurn, inFlight: root\.stateSavesInFlight \}\)\n\s*if \(plan === "join" \|\| plan === "park"\) \{\n\s*root\.stateSavePending = true\n\s*return\n\s*\}\n\s*if \(plan === "refuse"\) \{\n\s*root\.stateSavePending = false\n\s*root\.stateWritesRefused = root\.stateWritesRefused \+ 1\n\s*return\n\s*\}/.test(save),
+    parksBeforeDirs: /function saveState\(\) \{\n(\s*\/\/[^\n]*\n)*\s*var gate = Model\.stateWriteGate\(\{ blocked: root\.stateWriteBlocked, loaded: root\.stateLoaded, dirsReady: root\.dirsReady \}\)\n\s*var plan = Model\.stateSavePlan\(\{ verifyPending: root\.stateVerifyPending, gate: gate, blocked: root\.stateWriteBlocked,\n\s*inHandler: root\.stateInHandler > 0, verifyDone: root\.stateVerifyDone,\n\s*writeTurn: root\.stateWriteTurn, inFlight: root\.stateSavesInFlight,\n\s*waitExpired: root\.stateWriteWaitExpired \}\)\n\s*if \(plan === "join" \|\| plan === "park"\) \{\n\s*root\.stateSavePending = true\n\s*return\n\s*\}\n\s*if \(plan === "refuse"\) \{\n\s*root\.stateSavePending = false\n\s*root\.stateWritesRefused = root\.stateWritesRefused \+ 1\n\s*return\n\s*\}/.test(save),
     // and the park is cleared on the write itself, not left set
     clearsOnWrite: /root\.stateSavePending = false\n[\s\S]*?stateFile\.setText\(text\)/.test(save)
   }
@@ -12355,6 +12399,13 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       // writes a turn apart would push the first out of R25a's eight-text
       // own-write record, and its echo would then be merged as foreign: the
       // cap's own limit, recorded by this lane, not this pin's concern.)
+      // R27a (2026-10-20) re-levelled: NO burst forms any more. A save asked
+      // while our write is in flight waits for it to land and then reads, so
+      // at most ONE write is out at any moment and the view never has a
+      // queued write to coalesce: `raised` is 1 (the first switch's write;
+      // the other nine wait and are written together, after their read).
+      // What this pin protects still holds: nothing outstanding after the
+      // burst, the mirror names the last key, a later foreign reload applies.
       sw(h, KB); h.runLater(); sw(h, KA); h.runLater()
       for (let i = 0; i < 4; i++) { sw(h, KB); sw(h, KA) }
       h.runLater()
@@ -12364,7 +12415,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       const foreign = JSON.stringify(Object.assign(M.parseState(h.stateFile.disk), { favorites: ["t:new"] })) + "\n"
       h.stateFile.disk = foreign; h.stateFile.view = foreign; h.root.applyUserState(foreign); h.runLater()
       return { raised, after, foreign: String(h.root.userState.favorites), marker: M.entryMigratedOf(h.root.userState) }
-    }, { raised: 2, after: [0, null, true, true], foreign: "t:new", marker: true })
+    }, { raised: 1, after: [0, null, true, true], foreign: "t:new", marker: true })
     checkCall("R13 (" + mode + " host): after a failed write a landed one clears the sticky flag, and the entry written then names the landed key", () => {
       const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), mode)
       h.stateFile.writeFails = true; sw(h, KB); h.drain()
@@ -13048,12 +13099,19 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           // read-before-write and make one write, so no burst forms. A burst
           // still forms behind a write in flight (no read then; each save
           // issued from its own turn, R26b), so the saves are a turn apart.
+          // R27a (2026-10-20) re-levelled: and no burst forms at all now --
+          // the second and third saves WAIT for the first write to land, then
+          // read, then go as ONE write: one queued, one text recorded. The
+          // first write's echo then arrives while the second is in flight,
+          // after `saved` has cleared the record: it is the base, so it reads
+          // `save-in-flight` (ignored), never foreign -- the property this pin
+          // is for, in the only shape the service can still make.
           h.root.toggleFavorite("t:b1.uk"); h.runLater(); h.root.toggleFavorite("t:b2.uk"); h.runLater(); h.root.toggleFavorite("t:b3.uk"); h.runLater()
           const queued = [h.stateFile.events.length, h.root.recentSaves.length]
           h.drain()
-          return { queued, own: (reasons(h)["own-write"] || 0) - own0, foreign: foreignReasons(h), recent: h.root.recentSaves.length,
+          return { queued, own: (reasons(h)["own-write"] || 0) - own0, inFlightEcho: reasons(h)["save-in-flight"] || 0, foreign: foreignReasons(h), recent: h.root.recentSaves.length,
                    file: h.file().favorites, memory: h.root.userState.favorites }
-        }, { queued: [2, 3], own: ownEcho === "load" ? 1 : 0, foreign: [], recent: 0,
+        }, { queued: [1, 1], own: 0, inFlightEcho: ownEcho === "load" ? 1 : 0, foreign: [], recent: 0,
              file: ["t:bbc1.uk", "t:b1.uk", "t:b2.uk", "t:b3.uk"], memory: ["t:bbc1.uk", "t:b1.uk", "t:b2.uk", "t:b3.uk"] })
         // R25d / F-HARNESS-26: the round-14 lens's two mutants nothing caught.
         // a5 -- mergeForeignText without `landedState = theirs`: a SECOND
@@ -13181,10 +13239,18 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         P({ gate: "write" }), P({ gate: "write", verifyDone: true }), P({ gate: "write", verifyDone: true, inHandler: true }),
         P({ gate: "write", inHandler: true }), P({ gate: "write", inHandler: true, inFlight: 1, writeTurn: true }),
         P({ gate: "write", inFlight: 1 }), P({ gate: "write", inFlight: 1, writeTurn: true }), P({ gate: "write", writeTurn: true }),
-        P({ gate: "bogus" }), P(undefined)
+        P({ gate: "bogus" }), P(undefined),
+        // R27a (window a): a write in flight HOLDS the save, whatever turn
+        // asks (no read and no write while it is out); only the wait's own
+        // bound releases it to its read, deferred from a handler as ever.
+        P({ gate: "write", inFlight: 1, waitExpired: true }), P({ gate: "write", inFlight: 1, waitExpired: true, inHandler: true }),
+        P({ gate: "write", inFlight: 1, verifyDone: true }), P({ gate: "refuse", blocked: "read-timeout" })
       ]
     }, ["join", "join", "park", "refuse", "refuse", "refuse", "verify", "verify", "verify", "write", "write",
-        "defer", "defer", "defer", "write", "verify", "refuse", "refuse"])
+        // R27a re-levelled 2026-10-20: these three read "defer", "defer",
+        // "write" -- the in-flight save skipped its read (D-SINK-22 window a)
+        "defer", "wait", "wait", "wait", "verify", "refuse", "refuse",
+        "verify", "defer", "write", "verify"])
     // R26b's rule-15 search made a check. stateFile.setText is the ONE
     // FileView write in the shipped files, and it is reached from FIVE
     // handlers of three views (channelsFile's two through adoptIdScheme,
@@ -13203,10 +13269,15 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         finishFromLater: /function finishStateVerifyLater\(\) \{ if \(root\.stateVerifyPending\) root\.finishStateVerify\(false\) \}/.test(serviceSource),
         finishFromWatchdog: /id: stateVerifyWatchdog[\s\S]{0,120}onTriggered: if \(root\.stateVerifyPending\) root\.finishStateVerify\(true\)/.test(serviceSource),
         laterOnly: [calls(/root\.finishStateVerifyLater\b/g), calls(/Qt\.callLater\(root\.finishStateVerifyLater\)/g), calls(/root\.saveDeferredState\b/g), calls(/Qt\.callLater\(root\.saveDeferredState\)/g)],
+        // R27a: the write wait's end is reached from the two FileView outcome
+        // handlers and its own Timer, and asks for the held save only
+        // through Qt.callLater -- never a write from inside a handler.
+        waitEnd: [calls(/root\.endStateWriteWait\(/g), /function endStateWriteWait\(timedOut\) \{[\s\S]*?if \(root\.stateSavePending\) Qt\.callLater\(root\.saveDeferredState\)\n  \}/.test(serviceSource),
+                  /id: stateWriteWaitWatchdog[\s\S]{0,120}onTriggered: if \(root\.stateWriteWaiting\) root\.endStateWriteWait\(true\)/.test(serviceSource)],
         verifyDoneRaised: [calls(/root\.stateVerifyDone = true/g), fnOf("finishStateVerify").indexOf("root.stateVerifyDone = true") !== -1],
         writeTurnRaised: [calls(/root\.stateWriteTurn = true/g), fnOf("saveDeferredState").indexOf("root.stateWriteTurn = true") !== -1]
       }
-    }, { setText: 1, finishCalls: 2, finishFromLater: true, finishFromWatchdog: true, laterOnly: [1, 1, 1, 1],
+    }, { setText: 1, finishCalls: 2, finishFromLater: true, finishFromWatchdog: true, laterOnly: [1, 1, 2, 2], waitEnd: [3, true, true],
          verifyDoneRaised: [1, true], writeTurnRaised: [1, true] })
     checkCall("R26a (D-SRC-35): Model.stateBlockRecheck -- a source verb re-reads a liftable no-write mode, never init-timeout, never from inside a load, never while a read is already out, and not when nothing is blocked", () => {
       const R = c => M.stateBlockRecheck(c)
@@ -13298,7 +13369,10 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           h.root.toggleFavorite("t:a.uk"); h.drain(); h.root.toggleFavorite("t:b.uk"); h.drain()
           return { before, after: reasons(h)["save-parked"] || 0, preSave: (reasons(h)["pre-save-save-parked"] || 0) >= 2, verifies: h.root.stateVerifies >= 2 }
         }, { before: 0, after: 0, preSave: true, verifies: true })
-        checkCall("R26a (" + tag + "): the read is BOUNDED -- a reload the view never delivers leaves the save parked (nothing written) until stateVerifyWatchdog's own handler fires; then it is saved as before R26, counted and logged once", () => {
+        // R27a (2026-10-20) re-levelled: the watchdog no longer saves without
+        // the read; it asks for the read once more, and the load of THAT
+        // read decides (here the view answers it, so the save goes after it).
+        checkCall("R26a / R27a (" + tag + "): the read is BOUNDED -- a reload the view never delivers leaves the save parked (nothing written) until stateVerifyWatchdog's own handler fires; then the read is asked ONCE more and its load decides the save, counted and logged once", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           const loader = h.stateFile.loader
           h.stateFile.loader = () => {}
@@ -13307,8 +13381,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           const parked = [h.root.stateSavePending, h.root.stateVerifyPending, h.file().favorites.length, h.ids.stateVerifyWatchdog.restarts - armed0]
           h.stateFile.loader = loader
           h.verifyWatchdog(); h.drain()
-          return { parked, file: h.file().favorites, noLoad: h.root.stateVerifyNoLoad, logged: h.warnings.filter(w => /was not read back within/.test(w)).length }
-        }, { parked: [true, true, 1, 1], file: ["t:bbc1.uk", "t:app.uk"], noLoad: 1, logged: 1 })
+          return { parked, file: h.file().favorites, noLoad: h.root.stateVerifyNoLoad, second: h.root.stateVerifySecondReads, blocked: h.root.stateWriteBlocked,
+                   logged: h.warnings.filter(w => /was not read back within/.test(w)).length }
+        }, { parked: [true, true, 1, 1], file: ["t:bbc1.uk", "t:app.uk"], noLoad: 1, second: 1, blocked: "", logged: 1 })
         // F4 (2026-10-16, lane-clean-f1): the BOUND itself, which nothing
         // observed -- the pin above fires the handler by hand, and a review
         // mutant with `interval: 20` passed node and a live key-scenario
@@ -13318,7 +13393,11 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         // read); a load that never comes is given up at 2,000 ms, logged with
         // that figure. Seen red on spikes/key-mutations/r26a-watchdog-20ms
         // and r26a-watchdog-no-interval (Qt's default 1000 ms).
-        checkCall("R26a (" + tag + "): the read's bound is 2 s, from the Timer the tree declares -- a load 1,999 ms late still decides the save (merged, no save without its read); a load that never comes is given up at 2,000 ms, not before, counted and logged with that figure", () => {
+        // R27a (2026-10-20) re-levelled: a load that never comes is no longer
+        // "given up" into a write at 2,000 ms -- the read is asked again
+        // there (logged with that figure), and the save is never written
+        // without one (R27a's own pins below take it to the no-write mode).
+        checkCall("R26a / R27a (" + tag + "): the read's bound is 2 s, from the Timer the tree declares -- a load 1,999 ms late still decides the save (merged, no save without its read); a load that never comes is asked for again at 2,000 ms, not before, logged with that figure, and nothing is written", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           const loader = h.stateFile.loader
           const held = []
@@ -13338,20 +13417,111 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           const before = [g.root.stateVerifyPending, g.file().favorites.length]
           g.elapse(1); g.drain()
           return { interval: h.ids.stateVerifyWatchdog.interval, held: held.length, late, decided, before,
-                   after: [g.root.stateVerifyPending, g.root.stateVerifyNoLoad, g.file().favorites],
-                   logged: g.warnings.filter(w => /was not read back within 2000 ms of a save/.test(w)).length }
+                   after: [g.root.stateVerifyPending, g.root.stateVerifyNoLoad, g.root.stateVerifySecondReads, g.file().favorites],
+                   logged: g.warnings.filter(w => /was not read back within 2000 ms of a save; reading it once more/.test(w)).length }
         }, { interval: 2000, held: 1, late: [true, 0, 1], decided: [0, ["t:bbc1.uk", "t:hand.uk", "t:app.uk"]], before: [true, 1],
-             after: [false, 1, ["t:bbc1.uk", "t:app.uk"]], logged: 1 })
-        checkCall("R26a (" + tag + "): the read is SKIPPED while one of our writes is in flight (the view drops a reload then, measured 30 of 30): the next save is issued from a turn of its own with no reload asked for", () => {
+             after: [true, 1, 1, ["t:bbc1.uk"]], logged: 1 })
+        // R27a (2026-10-20, D-SINK-22 window a) replaces R26a's "the read is
+        // SKIPPED while one of our writes is in flight": the save asked then
+        // no longer goes from the next turn without its read -- it WAITS,
+        // issuing nothing (no reload, which the view would drop, and no
+        // write), and once that write has landed it reads and then writes.
+        checkCall("R27a (" + tag + "): window a -- a save asked while our write is in flight WAITS: no reload asked, no write issued while it is out, and once that write lands the held save READS and then writes; nothing skipped, no reload dropped", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           h.root.toggleFavorite("t:one.uk"); h.runLater()
           const inFlight = h.root.stateSavesInFlight
           const loadsBefore = h.later.filter(e => e.fn === h.loadState).length
-          h.root.toggleFavorite("t:two.uk")
-          const asked = h.later.filter(e => e.fn === h.loadState).length - loadsBefore
+          const verifies0 = h.root.stateVerifies
+          h.root.toggleFavorite("t:two.uk"); h.runLater()
+          const held = [h.later.filter(e => e.fn === h.loadState).length - loadsBefore, h.stateFile.events.length, h.root.stateWriteWaiting, h.root.stateSavePending]
           h.drain()
-          return { inFlight, asked, skipped: h.root.stateVerifySkipped, file: h.file().favorites }
-        }, { inFlight: 1, asked: 0, skipped: 1, file: ["t:bbc1.uk", "t:one.uk", "t:two.uk"] })
+          return { inFlight, held, readsAfter: h.root.stateVerifies - verifies0, skipped: h.root.stateVerifySkipped, dropped: h.stateFile.droppedReloads,
+                   waiting: h.root.stateWriteWaiting, file: h.file().favorites }
+        }, { inFlight: 1, held: [0, 1, true, true], readsAfter: 1, skipped: 0, dropped: 0, waiting: false, file: ["t:bbc1.uk", "t:one.uk", "t:two.uk"] })
+        // The defect itself (D-SINK-22 window a): the state FOLDER link
+        // re-pointed at an EMPTY folder (no signal) just after our write
+        // landed and before the save that was asked during it is written.
+        // Before R27 that save had already been issued without a read and
+        // created state.json there at 0666 & ~umask, provider URLs and all.
+        checkCall("R27a (" + tag + "): window a, D-SINK-22 -- a second in-app change asked while the first write is in flight, the folder link re-pointed at an EMPTY folder as that write lands: the held save reads, finds nothing, takes the no-write mode (absent), told once -- and NO file is created (before R27: a 0644 state.json)", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.root.toggleFavorite("t:one.uk"); h.runLater()
+          h.root.toggleFavorite("t:two.uk"); h.runLater()
+          h.deliverOne({ noLater: true })
+          h.replace(sf => { sf.exists = false; sf.disk = ""; sf.mode = null })
+          h.drain()
+          return { created: h.stateFile.exists, mode: octal(h.stateFile.mode), blocked: h.root.stateWriteBlocked, told: blockTold(h), memory: h.root.userState.favorites }
+        }, { created: false, mode: "none", blocked: "absent", told: 1, memory: ["t:bbc1.uk", "t:one.uk", "t:two.uk"] })
+        // The wait's own bound: a write the view never reports. The held save
+        // is released to its read after 2 s; the read is then asked while the
+        // write is still out, so the honest view drops it, and the read's own
+        // bound -- twice -- ends in the no-write mode: nothing written blind.
+        checkCall("R27a (" + tag + "): the write wait is BOUNDED at 2 s from the Timer the tree declares -- a write never reported releases the held save to its read, which the view drops while the write is out; the read's own bound, twice, ends in read-timeout: no second write", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.root.toggleFavorite("t:one.uk"); h.runLater()
+          h.root.toggleFavorite("t:two.uk"); h.runLater()
+          h.elapse(1999)
+          const at1999 = [h.root.stateWriteWaiting, h.root.stateWriteWaitTimeouts]
+          h.elapse(1)
+          const released = [h.root.stateWriteWaiting, h.root.stateWriteWaitTimeouts, h.root.stateVerifyPending, h.stateFile.droppedReloads]
+          h.elapse(4000)
+          return { interval: h.ids.stateWriteWaitWatchdog.interval, at1999, released, blocked: h.root.stateWriteBlocked, writes: h.stateFile.events.length,
+                   issued: h.root.stateWritesIssued, logged: h.warnings.filter(w => /write was not reported within 2000 ms/.test(w)).length }
+        }, { interval: 2000, at1999: [true, 0], released: [false, 1, true, 1], blocked: "read-timeout", writes: 1, issued: 1, logged: 1 })
+        // R27a (2026-10-20, D-SINK-22 window c): a read that does not answer.
+        // Before R27 the save went without it after 2 s -- so a folder link
+        // re-pointed at an empty folder on a filesystem slow to answer was
+        // written into, at 0666 & ~umask. Now: once more, then the R22
+        // no-write mode with its own reason, told once, nothing written.
+        const lastNotice = h => { const n = h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74017") !== -1); return n.length ? n[n.length - 1].slice(-2) : null }
+        checkCall("R27a (" + tag + "): window c -- a read that never answers is asked ONCE more at 2 s; a second silence at 4 s is the no-write mode `read-timeout`, told once (\"Saving has stopped\", the file named, no URL), the save refused, nothing written -- and over an EMPTY folder no file is created (before R27: a 0644 state.json)", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.replace(sf => { sf.exists = false; sf.disk = ""; sf.mode = null })
+          h.stateFile.loader = () => {}
+          h.root.toggleFavorite("t:app.uk"); h.drain()
+          h.elapse(2000)
+          const once = [h.root.stateVerifySecondReads, h.root.stateWriteBlocked, h.stateFile.exists]
+          h.elapse(2000)
+          const told = lastNotice(h)
+          return { once, blocked: h.root.stateWriteBlocked, created: h.stateFile.exists, mode: octal(h.stateFile.mode), told: blockTold(h),
+                   title: told && told[0], namesFile: !!told && told[1].indexOf("/state.json") !== -1, noUrl: !!told && told[1].indexOf("://") === -1,
+                   refused: h.root.stateWritesRefused, pending: [h.root.stateVerifyPending, h.root.stateSavePending], memory: h.root.userState.favorites.indexOf("t:app.uk") !== -1,
+                   logged: h.warnings.filter(w => /not read back within 4000 ms of a save, twice/.test(w)).length }
+        }, { once: [1, "", false], blocked: "read-timeout", created: false, mode: "none", told: 1, title: "Saving has stopped", namesFile: true, noUrl: true,
+             refused: 1, pending: [false, false], memory: true, logged: 1 })
+        checkCall("R27a (" + tag + "): window c -- the read-timeout mode is lifted by a later read that ANSWERS: the next in-app change reads, the file is there, the mode lifts and the change made during the block and this one are both written; told once in all", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          const loader = h.stateFile.loader
+          h.stateFile.loader = () => {}
+          h.root.toggleFavorite("t:one.uk"); h.drain(); h.elapse(4000)
+          const blocked = [h.root.stateWriteBlocked, h.file().favorites.length]
+          h.stateFile.loader = loader
+          h.root.toggleFavorite("t:two.uk"); h.drain()
+          return { blocked, lifted: h.root.stateWriteBlocked, file: h.file().favorites, told: blockTold(h) }
+        }, { blocked: ["read-timeout", 1], lifted: "", file: ["t:bbc1.uk", "t:one.uk", "t:two.uk"], told: 1 })
+        checkCall("R27a / R26e (" + tag + "): window c through a SOURCE verb -- in the read-timeout mode the first call is refused state_unreadable and asks for one reload; when that read answers the mode lifts and the second call lands", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          const loader = h.stateFile.loader
+          h.stateFile.loader = () => {}
+          h.root.toggleFavorite("t:one.uk"); h.drain(); h.elapse(4000)
+          h.stateFile.loader = loader
+          const first = h.root.updateSource(KB, { label: "edited" }); h.drain()
+          const lifted = h.root.stateWriteBlocked
+          const second = h.root.updateSource(KB, { label: "edited" }); h.drain()
+          return { first: first.code, lifted, second: second.ok, label: labelOf(h.file(), KB) }
+        }, { first: "state_unreadable", lifted: "", second: true, label: "edited" })
+        // R27e (D-SRC-42), through the shipping Service.qml: the title the
+        // user is told by, in the notification AND the journal line.
+        checkCall("R27e (" + tag + "): a block at the START is told as \"Saved sources not loaded\", one that begins MID-SESSION as \"Saving has stopped\" -- the notification's title and the journal line alike, the body the Model's sentence", () => {
+          const told = h => { const n = h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74017") !== -1); return n.map(a => a[a.length - 2]) }
+          const journal = h => h.warnings.filter(w => /^omarchy-iptv: (Saved sources not loaded|Saving has stopped): /.test(w)).map(w => w.split(": ")[1])
+          const s = boot({ sourceKey: KA, showLogos: false }, "{not json", mode, { ownEcho, exists: true })
+          const m = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          m.foreign(sf => { sf.exists = false; sf.disk = "" }); m.drain()
+          const body = m.warnings.filter(w => /^omarchy-iptv: Saving has stopped: /.test(w)).map(w => w.slice("omarchy-iptv: Saving has stopped: ".length))
+          return { start: [s.root.stateWriteBlocked, told(s), journal(s)], mid: [m.root.stateWriteBlocked, told(m), journal(m)],
+                   body: body.length === 1 && body[0] === M.stateUnreadableNotice("absent", m.root.stateFilePath, true).body }
+        }, { start: ["unparsed", ["Saved sources not loaded"], ["Saved sources not loaded"]], mid: ["absent", ["Saving has stopped"], ["Saving has stopped"]], body: true })
         checkCall("R26a (" + tag + "): a foreign write that ARRIVES while a save waits for its read IS that read -- merged once, written once, both kept", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           h.root.toggleFavorite("t:app.uk")

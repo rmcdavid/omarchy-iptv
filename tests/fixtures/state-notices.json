@@ -1,0 +1,23 @@
+{
+  "about": "R27e (2026-10-20; D-SRC-42, D-SRC-50, D-SRC-51): every sentence of the no-write notice, verbatim, for one path. tests/Model.test.js holds Model.stateUnreadableNotice, stateUnreadableJournal and stateBlockedHeader to it, both ways (every reason here is the function's, every sentence the function's). The README and docs/UX-SOURCES.md quote these words.",
+  "path": "/home/u/.local/state/omarchy-iptv/state.json",
+  "titles": {
+    "start": "Saved sources not loaded",
+    "midSession": "Saving has stopped"
+  },
+  "unsaved": "Sources, favorites and settings changed now are not saved until the file can be read again.",
+  "linkFirst": "If it is a symbolic link, point it back at the folder or file that holds your state",
+  "bodies": {
+    "permission": "/home/u/.local/state/omarchy-iptv/state.json is not readable (permission denied). Sources, favorites and settings changed now are not saved until the file can be read again. Make it readable with chmod 600 on that file, then run omarchy restart shell.",
+    "not-a-file": "/home/u/.local/state/omarchy-iptv/state.json is not a regular file. Sources, favorites and settings changed now are not saved until the file can be read again. Move whatever is at that path aside, then run omarchy restart shell.",
+    "unparsed": "/home/u/.local/state/omarchy-iptv/state.json is not a valid state file. Sources, favorites and settings changed now are not saved until the file can be read again. Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell.",
+    "link": "/home/u/.local/state/omarchy-iptv/state.json is a symbolic link whose target is missing or is not a regular file. Sources, favorites and settings changed now are not saved until the file can be read again. Point it back at the file that holds your state, or move the link aside, then run omarchy restart shell.",
+    "not-a-dir": "/home/u/.local/state/omarchy-iptv is not a folder (a file is at that path, or at one above it). Sources, favorites and settings changed now are not saved until the file can be read again. Move whatever is at that path aside, then run omarchy restart shell.",
+    "folder-link": "/home/u/.local/state/omarchy-iptv is a symbolic link whose target is missing or is not a folder (or a folder above it is). Sources, favorites and settings changed now are not saved until the file can be read again. Point it back at the folder that holds your state, or move the link aside, then run omarchy restart shell.",
+    "absent-unconfirmed": "/home/u/.local/state/omarchy-iptv/state.json could not be found, or its folder could not be read. Sources, favorites and settings changed now are not saved until the file can be read again. Make the folder readable with chmod 700, then run omarchy restart shell.",
+    "absent": "/home/u/.local/state/omarchy-iptv/state.json could not be found, or its folder could not be read. Sources, favorites and settings changed now are not saved until the file can be read again. If it is a symbolic link, point it back at the folder or file that holds your state; otherwise make the folder readable with chmod 700. Then run omarchy restart shell.",
+    "init-timeout": "/home/u/.local/state/omarchy-iptv/state.json could not be checked: the start-up check did not answer and was stopped. Sources, favorites and settings changed now are not saved until the file can be read again. Make sure a regular file, or nothing, is at that path, then run omarchy restart shell.",
+    "read-timeout": "/home/u/.local/state/omarchy-iptv/state.json did not answer when it was read before a save (twice, 2 seconds each). Sources, favorites and settings changed now are not saved until the file can be read again. The next change made here reads it again, and saving resumes if it answers. If it keeps stopping, check the disk or folder that holds it, then run omarchy restart shell.",
+    "io-error": "/home/u/.local/state/omarchy-iptv/state.json could not be read. Sources, favorites and settings changed now are not saved until the file can be read again. Check the file and its folder, then run omarchy restart shell."
+  }
+}

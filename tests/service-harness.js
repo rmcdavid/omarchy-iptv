@@ -88,6 +88,9 @@ function makeIds(h) {
     // or by moving the clock with h.elapse(ms), which fires it at the
     // interval the tree DECLARES (F4, lane-clean-f1; bootService below).
     stateVerifyWatchdog: timer("stateVerifyWatchdog"),
+    // R27a: the bound on a save held for our write in flight. Fired by hand
+    // with h.writeWaitWatchdog(), or by h.elapse(ms) at its declared interval.
+    stateWriteWaitWatchdog: timer("stateWriteWaitWatchdog"),
     switchTimeout: timer("switchTimeout"),
     // D-REL-7: the control slot's watchdog, which handleControlResult stops
     // first; a test runs that handler to see how the status branch routes a
@@ -357,7 +360,7 @@ class StateFile {
     this.loader = null
     this.mode = this.exists ? (opts.mode !== undefined ? opts.mode : 0o600) : null
     this.umask = opts.umask !== undefined ? opts.umask : 0o022
-    this.inLoad = false; this.inHandler = 0; this.handlerWrites = 0
+    this.inLoad = false; this.inHandler = 0; this.handlerWrites = 0; this.droppedReloads = 0
     this.ownEcho = opts.ownEcho || process.env.IPTV_HARNESS_OWN_ECHO || "load"
     if (this.ownEcho !== "load" && this.ownEcho !== "none") throw new Error("service-harness: ownEcho is load or none, not " + this.ownEcho)
   }
@@ -396,7 +399,13 @@ class StateFile {
     if (!this.exists) return { loaded: false, error: 2 }
     return { loaded: true, text: this.disk }
   }
+  // R27a (rule 10): a reload asked while one of OUR writes is out delivers
+  // NO load during that write -- the measured view (F-HARNESS-31, 30 of 30),
+  // which until R27 this double modelled only for a FOREIGN change's reload
+  // (h.foreign) and delivered here. Counted in `droppedReloads`, so a pin can
+  // see a read the service asked for at the wrong time go unanswered.
   reload() {
+    if (this.events.length > 0) { this.droppedReloads++; return }
     if (this.exists && !this.fault) this.watchArmed = true
     if (this.loader) this.loader()
   }
@@ -641,9 +650,35 @@ function bootService(serviceText, Model, o) {
   vw.armedAt = null
   vw.restart = function () { this.restarts++; this.running = true; this.armedAt = h.clock }
   vw.stop = function () { this.stops++; this.running = false; this.armedAt = null }
+  // R27a: the write-wait watchdog the same way, from its own block.
+  const waitAt = serviceText.indexOf("id: stateWriteWaitWatchdog")
+  const waitBlock = waitAt === -1 ? null
+    : serviceText.slice(serviceText.lastIndexOf("  Timer {", waitAt), serviceText.indexOf("\n  }", waitAt))
+  const waitIntervalText = waitBlock === null ? null : ((waitBlock.match(/^    interval: (.*)$/m) || [])[1] || "1000")
+  const waitTrigText = waitBlock === null ? null : (waitBlock.match(/^    onTriggered: (.*)$/m) || [])[1]
+  const onWriteWaitWatchdog = waitTrigText ? compile("", waitTrigText, "stateWriteWaitWatchdog_onTriggered") : () => {}
+  const ww = ids.stateWriteWaitWatchdog
+  ww.interval = waitIntervalText === null ? null : compile("", "return (" + waitIntervalText + ")", "stateWriteWaitWatchdog_interval")()
+  ww.armedAt = null
+  ww.restart = function () { this.restarts++; this.running = true; this.armedAt = h.clock }
+  ww.stop = function () { this.stops++; this.running = false; this.armedAt = null }
+  h.writeWaitWatchdog = () => { onWriteWaitWatchdog(); h.runLater() }
+  // Each Timer fires once its restart() is `interval` old, in the order they
+  // come due; a handler that re-arms its Timer (R27a's second read) is due
+  // again `interval` after the moment it fired.
   h.elapse = (ms) => {
-    h.clock += ms
-    if (vw.running && vw.interval !== null && h.clock - vw.armedAt >= vw.interval) { vw.running = false; vw.armedAt = null; onVerifyWatchdog(); h.runLater() }
+    const end = h.clock + ms
+    for (;;) {
+      const due = [[vw, onVerifyWatchdog], [ww, onWriteWaitWatchdog]]
+        .filter(([t]) => t.running && t.interval !== null && t.armedAt + t.interval <= end)
+        .sort((a, b) => (a[0].armedAt + a[0].interval) - (b[0].armedAt + b[0].interval))
+      if (!due.length) break
+      const [t, fire] = due[0]
+      h.clock = t.armedAt + t.interval
+      t.running = false; t.armedAt = null
+      fire(); h.runLater()
+    }
+    h.clock = end
   }
   // The start-up init's exit, with the double's reply and side effects.
   h.helperInit = (code) => {
