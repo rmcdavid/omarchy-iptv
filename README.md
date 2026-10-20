@@ -110,10 +110,9 @@ counted: **two files, both the plugin's own, readable only by you** —
 source's URLs and which source is active, and the channel cache under
 `~/.cache/omarchy-iptv/sources/<key>/`, whose `channels.json` carries the
 stream addresses — each created mode 0600 inside a directory only you can
-enter (one exception, three narrow windows -- two of a few milliseconds, one
-where a save's read of the file does not answer within its 2 s bound -- in
-which a save can create `state.json` at your umask's mode, usually 0644,
-until the next shell start corrects it, is under Troubleshooting). They are never shown or logged beyond their host name. The shell's
+enter (one exception, a narrow window of a few milliseconds in which a save
+can create `state.json` at your umask's mode, usually 0644, until the next
+shell start corrects it, is under Troubleshooting). They are never shown or logged beyond their host name. The shell's
 `shell.json` is **no longer one of them**. Up to and including 0.13.6 the
 active source was identified by its URL on that entry, so the count was three
 and the third was a file the plugin does not own; now the entry carries a short
@@ -145,7 +144,24 @@ obvious when it happens to you:
   written`, and the next shell start moves them again. A guide-data URL with
   no active source to attach it to is not kept anywhere: there is nothing for
   it to guide, so it is removed with a notification saying to add the source with
-  its EPG URL in Sources. From then on the plugin does not read either setting
+  its EPG URL in Sources. If Sources already holds 50 sources and the
+  playlist is not one of them, nothing is moved and no source is removed to
+  make room: the playlist stays on the entry, nothing is marked as done, and
+  a notification titled **Sources is full** says `The playlist set on the bar
+  was not moved into Sources: Sources already holds 50 sources, the most it
+  can. Remove one in the guide's Sources screen and the bar's playlist moves
+  in.` (once a session, and again at each shell start while it lasts).
+  Remove one -- in Sources, or with the helper's `state source remove` -- and
+  the playlist is added and becomes the active source. Up to and including
+  0.14.2 the least recently used source was removed to make room, with only
+  a journal line, and its URL went with it. Not covered yet: an install
+  updated from 0.13.6 records no active source, so until then the guide opens
+  on its setup form (its `Saved sources` link lists the 50); a guide-data URL
+  on the entry beside that playlist is reported as removed but stays on the
+  entry, is NOT attached to the playlist when it moves in (add it again with
+  `e` in Sources), and if you pick a source meanwhile, the next shell start
+  puts it on THAT source in place of the source's own guide-data URL.
+  From then on the plugin does not read either setting
   at all. Set one with `omarchy bar set` and the plugin adds nothing, switches
   nothing and changes nothing about the source you are watching: it removes
   the value from the entry on its next write — usually at once — and shows one
@@ -162,7 +178,7 @@ obvious when it happens to you:
   are exercised on every commit's test tree under both kinds of Omarchy host
   (today's, and one carrying the settings fix awaiting review upstream), and
   live, under a headless compositor, by the harness scenario on the `dev`
-  branch (129 checks, 2026-10-16).
+  branch (134 checks, 2026-10-20).
 - **Going back to an older version makes the plugin look unconfigured.** An
   older build looks for the URL on the widget's entry, does not find one, and
   says you have no playlist. Your sources are all still in `state.json`: open
@@ -553,7 +569,12 @@ the source has none, that one is used and the Sources screen says so.
 Channels are matched to the guide by id and, when the ids do not agree, by
 name -- which is usually what happens, because playlists and guides rarely
 come from the same place. Up to 50 sources are kept, and this list is the
-only copy of them.
+only copy of them. Nothing ever removes a source to make room: at 50, `a`,
+`c` and the Add rows say `Sources is full (50) · remove one first` instead
+of opening a form; a playlist that another program adds while yours is
+being checked can take the last place, and yours is then refused the same
+way when its check ends (Troubleshooting); and a playlist an earlier
+version kept on the bar waits there until there is room (Settings above).
 
 One caveat if you keep **two lists from the same provider** — a full one and a
 filtered one, say. Favourites are shared across sources on purpose, and a
@@ -689,27 +710,26 @@ itself unavailable rather than half working.
   program's (Troubleshooting says what happens when both changed the same
   thing, or together went past a limit, and the cases where the other
   program's change can be lost: one written in the same instant as one of
-  the plugin's own saves, one that a save writes over because the file
-  could not be read back within 2 seconds, and a backup put back that the
-  plugin takes for the file it last knew). It may be a symbolic link to a
+  the plugin's own saves, and a backup put back that the plugin takes for
+  the file it last knew). It may be a symbolic link to a
   regular file kept elsewhere, a dotfiles folder say: the plugin and its
   helper write through the link and leave it in place, and a link that
-  leads nowhere is refused rather than replaced (except in the three narrow
-  windows Troubleshooting names, where a save can create the file it points
+  leads nowhere is refused rather than replaced (except in one narrow
+  window Troubleshooting names, where a save can create the file it points
   to). A tool that REPLACES the
   link, or puts a file over it, while the shell is running is not noticed
   at once; the plugin reads the file again before each save it makes, so it
   notices at its next save and keeps both that change and its own, unless
-  the two land in the same instant or that save cannot read the file back
-  within 2 seconds (Troubleshooting says what is noticed,
-  when, and what to do). The folder
+  the two land in the same instant; if that read does not answer at all
+  (twice, 2 seconds each), the plugin writes nothing and says so
+  (Troubleshooting says what is noticed, when, and what to do). The folder
   `~/.local/state/omarchy-iptv` may be a symbolic link too: the plugin
   follows it and makes the folder it leads to private (0700), as it does
   its own, and a folder link that leads nowhere is refused the same way.
   Pointed somewhere else while the shell runs, it is noticed the same way,
   at the next save; pointed at an empty folder, it makes the plugin stop
-  saving rather than start a new `state.json` there -- outside three
-  narrow windows, which Troubleshooting's bullet on links names.
+  saving rather than start a new `state.json` there -- outside one narrow
+  window, which Troubleshooting's bullet on links names.
   Channels that failed to play are
   **not** kept here: they belong to the source that carried them, and live in
   that source's cache directory below
@@ -803,17 +823,22 @@ Nothing inside the plugin directory is written at runtime.
   lost and you do not need your URL again: on the form the guide shows you,
   follow the `Saved sources` link and pick the source. Settings above has the
   detail, including what happens when you update again.
-- A notification titled **Saved sources not loaded** (for example
+- A notification titled **Saved sources not loaded** when it happens as
+  the shell starts, or **Saving has stopped** when it begins while the shell
+  is running and your sources are already listed (for example
   `/home/you/.local/state/omarchy-iptv/state.json is not a valid state file.
-  Nothing is saved until it can be read, so sources, favorites and settings
-  changed now are not kept. ...`), and the guide showing that same title and
+  Sources, favorites and settings changed now are not saved until the file
+  can be read again. ...`; the shell's journal gets the title and the same
+  sentence), and the guide showing that same title and
   sentence where it would otherwise show its setup form: the file that holds
   your sources is there but could not be read -- its permissions, something
   other than a file at that path, a symbolic link that leads nowhere (at the
   file, or at its folder), a file where its folder should be, or contents
   that are not a state file -- or
   the plugin's start-up check of it did not answer within 15 seconds and was
-  stopped. The plugin has not changed the file and will write nothing to
+  stopped, or, while the shell was running, the plugin's read of the file
+  before a save did not answer (`... did not answer when it was read before
+  a save (twice, 2 seconds each)`). The plugin has not changed the file and will write nothing to
   it until it can be read again, because it may be the only copy of your sources and
   provider URLs; earlier versions read such a file as empty and saved an
   empty one over it. Adding, editing, switching or removing a source, and
@@ -826,15 +851,21 @@ Nothing inside the plugin directory is written at runtime.
   first -- a good copy put back in place, a `chmod 600`, or the re-read your
   first source change makes -- it takes the file as it is and drops the
   change made meanwhile. At a start it is not kept. The Sources screen (`o`)
-  shows the same title where it would count your sources -- or, when this
-  started while the shell was already running and your sources are still
-  listed, `Saving has stopped` -- offers no `Add source` or `Add Xtream
-  login` rows, and `a` or `c` answers with that refusal instead of opening
+  shows the notification's title where it would count your sources, offers
+  no `Add source` or `Add Xtream login` rows, and `a` or `c` answers with that refusal instead of opening
   a form. The notification's last sentence says what to do for the case you
   hit: `chmod 600` on the file, `chmod 700` on its folder, move whatever is
-  at the path aside, restore the file or the folder a symbolic link points
-  to, make sure a regular file or nothing is there, or restore the file
-  from a backup -- then `omarchy restart shell`. When `state.json` is a
+  at the path aside, point a symbolic link back at the file or folder that
+  holds your state, make sure a regular file or nothing is there, restore
+  the file from a backup, or check the disk or folder that holds it -- then
+  `omarchy restart shell`. When a file or folder has gone missing while the
+  shell runs, it names the link case first (`If it is a symbolic link,
+  point it back at the folder or file that holds your state; otherwise make
+  the folder readable with chmod 700.`), because a restart with a link
+  still on an empty folder starts there with no sources, like a fresh
+  install. After a read that did not answer, the next change you make in
+  the guide reads the file again, and if it answers, saving resumes and
+  that change and the ones made meanwhile are saved. When `state.json` is a
   regular file and only its contents or its permissions were wrong,
   putting a good copy back in place (or the `chmod 600`) is enough on its
   own: the plugin notices and carries on with your sources. Whatever the
@@ -888,23 +919,30 @@ Nothing inside the plugin directory is written at runtime.
   saves to from then on, with the change that made the save added; the
   file the link used to lead to is left as it was. If the link now leads
   to a file that does not exist, nothing is created there, outside the
-  three narrow windows below: the plugin stops saving and says so (the
-  **Saved sources not loaded** bullet above).
+  narrow window below: the plugin stops saving and says so (**Saving has
+  stopped**; the **Saved sources not loaded** bullet above).
   Until that next save the guide shows what it had and writes nothing, so
   nothing is lost; run `omarchy restart shell` to see the change straight
-  away. Three narrow exceptions, each a window of milliseconds unless the
-  disk stalls: a save asked for while the plugin's previous save is still
-  being written does not read the file first (the file reader would drop
-  the read then); a re-point that lands between the read and the write it
-  allows is not seen by that write; and if the read has not answered
-  within 2 seconds the save goes ahead without it and the journal says
-  `state.json was not read back within ... ms of a save; saving without
-  the read`. In each of them a replacement is written over as before, and
-  a link re-pointed at a file that does not exist, or a folder link at a
-  folder with no `state.json`, gets a new one created there, holding your
-  sources and provider URLs, at 0644 under the usual umask 022 -- so after
-  re-pointing a link, check the new place with `ls -l` and `chmod 600` a
-  `state.json` you did not expect. (Up to and including 0.14.1 that next
+  away. One narrow exception, a window of milliseconds: a re-point that
+  lands between the plugin's read of the file and the write that read
+  allows is not seen by that write. Then a replacement is written over as
+  before, and a link re-pointed at a file that does not exist, or a folder
+  link at a folder with no `state.json`, gets a new one created there,
+  holding your sources and provider URLs, at 0644 under the usual umask
+  022 -- so after re-pointing a link, check the new place with `ls -l` and
+  `chmod 600` a `state.json` you did not expect. Up to and including
+  0.14.2 there were two more such windows: a save asked for while the
+  plugin's previous save was still being written did not read the file
+  first, and a save whose read had not answered within 2 seconds went
+  ahead without it (the journal said `saving without the read`). Now a
+  save asked for while the previous one is being written waits for it to
+  land and then reads the file; and a read that does not answer is asked
+  for once more, and if it is silent again the plugin writes nothing and
+  stops saving (**Saving has stopped**, `... did not answer when it was
+  read before a save (twice, 2 seconds each)`, the journal saying
+  `state.json was not read back within ... ms of a save, twice; nothing is
+  written until a read answers`) until a later read answers. (Up to and
+  including 0.14.1 that next
   save wrote what the
   shell held over the change instead -- into the new file, after `ln
   -sfn` -- and a link pointed at a file that did not exist yet got a new
@@ -915,12 +953,13 @@ Nothing inside the plugin directory is written at runtime.
   leads nowhere (its target moved, or sits on a drive not mounted yet) or to
   something that is not a file, the plugin writes nothing and says `... is
   a symbolic link whose target is missing or is not a regular file ...
-  Restore the file it points to, or move the link aside`; every `state`
+  Point it back at the file that holds your state, or move the link
+  aside`; every `state`
   command but `state init` refuses it (exit 1), `state init` answers
   `found: link` (exit 0), and none of them touches the link. A link that breaks
   while the shell is running is reported as `could not be found, or its
-  folder could not be read`, with advice for both causes, because the
-  plugin cannot tell them apart then; putting the target back is noticed
+  folder could not be read`, with advice for both causes, the link first,
+  because the plugin cannot tell them apart then; putting the target back is noticed
   at the next save or source change, as the **Saved sources not loaded**
   bullet says (the first source change after it is refused once more,
   the next goes through), and `omarchy restart shell` works too. If the link leads into a
@@ -935,8 +974,9 @@ Nothing inside the plugin directory is written at runtime.
   kept, wherever you put it. If the folder link leads nowhere, or to
   something that is not a folder (or a folder above it does), the plugin
   writes nothing and says `... is a symbolic link whose target is missing
-  or is not a folder (or a folder above it is). ... Restore the folder it
-  points to, or move the link aside, then run omarchy restart shell.`,
+  or is not a folder (or a folder above it is). ... Point it back at the
+  folder that holds your state, or move the link aside, then run omarchy
+  restart shell.`,
   naming the folder; every `state` command but `state init` refuses it
   (exit 1, `the state folder is a symbolic link whose target is missing or
   is not a folder; nothing was written`), `state init` answers `found:
@@ -945,14 +985,15 @@ Nothing inside the plugin directory is written at runtime.
   2026-10-14). Re-pointing the folder link itself while the shell runs is
   not noticed at once; it is noticed at the next save, which reads the
   `state.json` the link now leads to. If there is one, it is kept (outside
-  the three windows above), the change that made the save is added to it, and that is what the guide
+  the window above), the change that made the save is added to it, and that is what the guide
   shows and saves to from then on; the folder the link used to lead to is
   left as it was. The file keeps the permissions it has until the next
   shell start makes the folder 0700 and the file 0600. If the new folder
   holds no `state.json` (an empty folder, say), nothing is created there,
-  outside the three windows the bullet above names: the plugin stops
-  saving, and says so once (**Saved sources not loaded**, `... could not
-  be found, or its folder could not be read ...`). The change you just
+  outside the window the bullet above names: the plugin stops saving, and
+  says so once (**Saving has stopped**, `... could not be found, or its
+  folder could not be read. ... If it is a symbolic link, point it back at
+  the folder or file that holds your state; otherwise ...`). The change you just
   made still shows, and its source change answered as done, but it is not
   saved while the link points there, and the next source change is
   refused with `state.json could not be read · nothing is saved until it
@@ -1006,10 +1047,14 @@ Nothing inside the plugin directory is written at runtime.
   is not kept: a notification titled **Not every change was kept** says how
   many and which limit (never a name or a URL), and the journal gets one
   line for each, naming a source by its short code; make room and add it
-  again. Not covered yet: a source added in the guide while its URL is
-  still being checked, when another program adds the 50th source in that
-  moment -- the guide's source is then kept for the session but dropped,
-  without a word, at the next shell start. One case where a backup put
+  again. A source added in the guide while its URL is still being checked,
+  when another program adds the 50th source in that moment, is refused
+  when the check ends: nothing is added, the form stays open with what you
+  typed and says `Sources is full (50) · remove one first from <host>`
+  (the provider's host), and the journal says `the new source was not
+  added: Sources is full (50)`. Up to and including 0.14.2 the guide kept
+  it for the session and the next shell start dropped it without a word.
+  One case where a backup put
   back has no effect: while a save of the plugin's has failed or is still
   under way, a backup identical to the file as the plugin last knew it is
   taken for nothing having happened, and the change made in the guide is
