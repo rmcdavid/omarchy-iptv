@@ -1,0 +1,13 @@
+diff --git a/model/state.mjs b/model/state.mjs
+index a8345f7..bb9c76c 100644
+--- a/model/state.mjs
++++ b/model/state.mjs
+@@ -1610,7 +1610,7 @@ function stateSavePlan(ctx) {
+   }
+   if (gate !== "write") return "refuse"
+   if (c.verifyDone === true) return "write"
+-  if ((Number(c.inFlight) || 0) > 0 && c.waitExpired !== true) return "wait"
++  if ((Number(c.inFlight) || 0) > 0) return c.writeTurn === true ? "write" : "defer"
+   if (c.inHandler === true) return "defer"
+   return "verify"
+ }
