@@ -853,7 +853,8 @@ Nothing inside the plugin directory is written at runtime.
   removed with the playlist, attached to none of your sources. If the
   guide-data URL was set only after that playlist had been reported, and
   before the plugin has recorded the one-time move into Sources (the first
-  moments after the shell starts), it gets the second notification, from
+  moments after the shell starts; for the whole session if that write
+  fails), it gets the second notification, from
   its own side: `epgUrl in the bar settings came with a playlistUrl that
   was not a usable URL, and was removed with it. Add or edit sources in the
   guide's Sources screen.` Once the move is recorded, a guide-data URL set
