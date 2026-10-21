@@ -13315,6 +13315,39 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### D-M3U-1 and the 0.14.3 pre-cut record
+
+**The finding (2026-10-20T18:47Z, #11935, against 0.14.2):** the playlist
+parser kept an `#EXTGRP` value for every following entry and copied it,
+however long, into each channel's `searchKey` and group fields; the input
+cap bounds bytes in, not what the parse builds. **The fix** (`lane-m3u-a1`,
+merged as `d1bd2e1`): every provider-controlled text a channel keeps has a
+cap, chosen from the 23 test playlists (285 channels; the longest title 290,
+group-title 24, tvg-id 26, URL 84); display text is cut, identifiers, URLs
+and option values are dropped, and each kind is counted in one warning. The
+playlist and epg verbs set `RLIMIT_DATA` to 512 MiB after the shield and
+before they fetch, from the smallest limit each ordinary input passes under
+(10k realistic channels 36 MiB; 50,000 channels 108; a 64 MiB playlist with
+an emoji in every tenth name 256; an EPG of 54.9 MB over 48k channels 206),
+so 2x the worst; local and gzip reads no longer reserve 64 MiB up front, and
+playlists are parsed line by line. `tests/test_m3u_bounds.py`: 28 cases, 25
+red on 0.14.2, all with ordinary small inputs; every fixture's output
+byte-identical to 0.14.2's. In a nested cage a 10,000-channel source loads
+and a 24 MiB limit shows `Source too large`.
+
+**The three pre-cut lenses.** Fix: CUT, with P3s filed as **D-M3U-2**
+(a capped field can change a channel's id across the upgrade) and **D-M3U-3**
+(a status write under the limit near it). Release: CUT -- the marketplace's
+baseline scripts unchanged since 2026-10-17, the port passes the 42-file
+artifact with findings and capabilities empty, every file at least 200 KB
+under the scanner's limit, and the upgrade from a running 0.14.2 install
+held; it also raised **D-M3U-4** (warning grammar) and **D-EPG-7** (a 64 MiB
+EPG of minimal programmes may pass the limit, unverified). Claims: DO NOT
+CUT as drafted -- the footer names only a load's first warning, an empty
+reply during the update window is a failure on the playlist and EPG paths,
+and "real playlists stay far below" had never been measured; corrected from
+its replacements in `91b8a66`.
+
 ### D-REL-7's two follow-ups: a checked stub, before any release ships the split
 
 **Merged onto `dev` 2026-10-17 as `92a2a16`, after the split itself

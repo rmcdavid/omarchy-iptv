@@ -120,7 +120,8 @@ Consequences you must respect:
   a finding on it), for the same reason: a moved `main` makes the pending
   request stale. `dev` moves freely -- the helper split (D-REL-7) waits on
   it, unreleased. If the maintainer raises a finding, its fix ships at once
-  in a new release, which then carries what `dev` holds.
+  in a new release, which then carries what `dev` holds. **This hold ended
+  at 2026-10-20T18:47Z**, when the maintainer raised D-M3U-1 on #11935.
 
 ## Where the truth lives
 
