@@ -225,7 +225,38 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # damaged-helper reply mapped through the shared helper-damaged fixture (4),
 # its routing as no_output's (1), every other reply reader unchanged by it
 # (1), and Service.qml's own status branch through the harness (1).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2572}
+# 2572 -> 2634 on 2026-10-20, R27 (lane-sweep-a1): R27a's waits, second
+# read and read-timeout mode (window a twice, the wait's bound, window c
+# three times, D-SRC-47's mechanism: 7 x 4), R27e's notice family (5 model,
+# and the start/mid title and the entry-refusal journal line x 4), R27c (2
+# x 4) and R27d (6 model, 3 x 4); the eviction pins were replaced, not added.
+# 2634 -> 2692 on 2026-10-20, R28 (lane-sweep-a2), +58: R28a (2 model --
+# the schedule, the stall notice -- and 9 x 4 through the harness: the
+# silent read on its schedule, six ways the wait ends, the join, the
+# restart; R27a's three window-c pins, 3 x 4, are gone), R28c's three
+# resets (3 x 4), R28b (2 model, 2 x 4), R28e's two ways-back pins (2 x 4)
+# and its probe line and one cap (2 model). The write-wait bound pin and
+# R27e's five fixture pins were re-levelled in place.
+# 2692 -> 2651 on 2026-10-20, R29a (lane-sweep-a3), -41, a DELETION the
+# lead's ruling ordered: R28a's held save past the read's bound came out --
+# its 2 model pins (the schedule, the stall notice) and its 9 x 4 harness
+# pins, and R28c's read-state reset (1 x 4), the state it reset gone with
+# it -- and one model pin came in (the withdrawal: no 74019, no notice, the
+# cited names inert). R26a's two bound pins went back to 6f1d176's answer
+# (saved without the read at 2 s), and the write-wait bound and R28c's two
+# expiry pins were re-levelled in place to it.
+# 2651 -> 2664 the same day, R29d and R29e's notice (lane-sweep-a3), +13:
+# R29d through the service harness on both hosts and both own-echo modes
+# (3 x 4: the unusable playlist beside A's own guide URL, the same entry
+# with no source, and the seen playlist with a guide URL arriving before
+# the marker lands) and the pair's notice (1 model); the shared fixture's
+# three new adopt cases and R29e's "becomes the active source" sentence
+# are counted inside checks that existed.
+# 2664 -> 2678 on 2026-10-20 (the P3 sweep's finishing round, lane-sweep-f4):
+# +4 F1 race and +4 F1 same-playlist sibling through the service harness
+# (both hosts, both own-echo modes), +1 F1 model, +1 F4 (R29d's CLI origin),
+# +4 F2 (window (c) decided by when the other program writes).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2678}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -372,7 +403,22 @@ CLIP_PREFLIGHT_MIN=${CLIP_PREFLIGHT_MIN:-7}
 # found on lane-key-r1 and the counts on the tree that closes it.
 # scripts/qa-lib-test.sh asserts this number is the scenario's check-tree
 # EXPECTED_CHECKS plus one.
-KEY_PREFLIGHT_MIN=${KEY_PREFLIGHT_MIN:-11}
+# 11 -> 12 on 2026-10-20, R29e (lane-sweep-a3): S4, init_pids answers this
+# run's start-up init only (its own --state-dir), seen red on the unscoped
+# scanner that read another harness's helper as `left:` in B14.
+KEY_PREFLIGHT_MIN=${KEY_PREFLIGHT_MIN:-12}
+# R27f (2026-10-20, D-PERF-1): the async open instrument's preflight, plus
+# the scenario's own "ran every check" line. The live arm (the guide's open at
+# 10,000 channels under cage, cold and warm, list and wall) is a human's.
+# 9 -> 16 on 2026-10-20, R28d (lane-sweep-a2): the instrument counts what is
+# DRAWN -- HarnessLib.openDrawnSet driven over ten frames (D1..D10),
+# openDrawnSettle over four (E1..E4) and the seam (S1); R27f's openSettle and
+# its seven traces are gone with it.
+# 16 -> 19 on 2026-10-20, R29e (lane-sweep-a3): D11..D13, a delegate at
+# effective opacity 0 is not drawn (a screen of them, one of them) and one
+# at 0.3 is (the claim narrowed to "painted at all"); seen red on the
+# harness-lib that read visible alone.
+OPEN_PREFLIGHT_MIN=${OPEN_PREFLIGHT_MIN:-19}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -921,6 +967,18 @@ elif (( clip_rc == 77 )); then
   fi
 else
   cat "$clip_log"; bad "clip preflight (exit $clip_rc)"
+fi
+
+step "scripts/dev-harness/open-scenario.sh check-tree (R27f, D-PERF-1)"
+open_log=$CHECK_TMP/open-scenario.log
+"$ROOT/scripts/dev-harness/open-scenario.sh" check-tree >"$open_log" 2>&1; open_rc=$?
+if (( open_rc == 0 )); then
+  open_n=$(grep -c '^PASS' "$open_log" || true)
+  if (( open_n < OPEN_PREFLIGHT_MIN )); then cat "$open_log"; bad "open preflight ran $open_n checks, expected at least $OPEN_PREFLIGHT_MIN"; else ok "open preflight ($open_n checks)"; fi
+elif (( open_rc == 77 )); then
+  bad "open preflight SKIPPED, which is not green: $(grep -a '^SKIP' "$open_log" | head -1)"
+else
+  cat "$open_log"; bad "open preflight (exit $open_rc)"
 fi
 
 step "scripts/dev-harness/key-scenario.sh check-tree (D-SINK-19 R6)"

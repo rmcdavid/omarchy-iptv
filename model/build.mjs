@@ -329,6 +329,9 @@ var NOTIFY_IDS = {
   // D-SINK-19 round 15, R25b: a merge of another program's write dropped an
   // in-app addition at a cap (Model.mergeDropNotice). Told once per merge.
   mergeDropped: 74018
+  // 74019 was R28a's "Saving is waiting" card, withdrawn by R29a with the
+  // held save it told about; not reused, so an old card cannot be replaced
+  // by a new meaning.
 }
 
 // Long enough to cover a first-load failure and the user's reaction, short

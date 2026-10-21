@@ -1009,6 +1009,26 @@ of a file the view creates, a re-point and what re-arms after one, by round
     mode:644 holdsUrl:true`, and a control re-point with no window
     `created:false blocked:[absent]`) and by the round-16 data-loss lens's
     simulator on lane-clean-c1 and on 0.14.0 alike; not driven live.
+    [2026-10-20, D-SINK-19 round 17, R27a: one window remains, the re-point
+    landing between the read's load and the write. A save asked while our
+    write is in flight now waits for that write's `saved` / `saveFailed`
+    and then reads; the watchdog asks for the load once more and then takes
+    the no-write mode `read-timeout`, never saving without the read. Pinned
+    through the node double on lane-sweep-a1, both hosts and both echo
+    modes, each over an empty folder: no file created.] [2026-10-20, round
+    18, R28a: the watchdog's answer is now to keep the save held and read
+    again on a bounded schedule (2, 4, 8, 16, 32, 62 s, then every 30 s),
+    never a block and never a write; over an empty folder the read's
+    eventual load failure is the `absent` mode, still with no file created
+    (pinned on lane-sweep-a2, the same four shapes).] [2026-10-20, round
+    19, R29a (the lead's ruling): both answers are withdrawn and the
+    watchdog's is 0.14.2's again -- no load within 2 s and the save is
+    written without the read, counted and logged. Two windows remain: the
+    re-point between the read's load and the write, and this one. The
+    write-wait answer of R27a stays, bounded: a write never reported
+    releases the held save to its read at 2 s and the save is written
+    without it at 2 s more (pinned on lane-sweep-a3, `R27a / R29a (<tag>):
+    the write wait is BOUNDED ...`).]
   - **A re-point raises nothing.** `ln -sfn` of a `state.json` link to
     another file (`links-1.txt` L4) and of a state-folder link to another
     folder (L7) or to an empty one (L9): `changed+0 loaded+0`, and the
@@ -1028,7 +1048,9 @@ of a file the view creates, a re-point and what re-arms after one, by round
     its own.** 30 of 30 (`inflight-1.txt`, fifteen idle and fifteen under
     load, load 9.3-14.0): `loadedDuring 0`, the write's `saved` arriving
     during the wait. So a read issued then learns nothing, and the disk is
-    the view's own write anyway; R26a skips its read in that case. The
+    the view's own write anyway; R26a skips its read in that case
+    [2026-10-20, R27a: no longer skipped -- the save waits for that write to
+    land and then reads, so a re-point landing in the write is seen]. The
     same holds for the reload the service's own `onFileChanged` asks when
     ANOTHER program writes the file in that instant: it delivers nothing
     during our write, our rename then replaces that program's file, and the
@@ -1038,6 +1060,36 @@ of a file the view creates, a re-point and what re-arms after one, by round
     round-16 data-loss lens's simulator, `NEW-lost-ext ... watch-dropped`
     in all four host and echo shapes on lane-clean-c1 and 0.14.0 alike,
     and `[]` with the drop off).
+    [2026-10-20, R27b (D-SRC-48), measured on the real FileView under cage
+    on a private bus (`scripts/dev-harness/spikes/filewatch/`, `measure.sh`
+    set `r27b`, two runs, 608 trials, `RESULT-2026-10-20-r27b.txt`): one
+    re-read after our own `saved` when a change was signalled during the
+    write recovers NOTHING that the read before the next save does not --
+    0 of 608. A change that landed before our rename is gone from disk (20
+    of the 25 that landed during our write; this read 21 of 30 until round
+    18's R28e recounted the RESULT file's raw lines); one that survived it is loaded
+    by the later read in every trial -- the 4 the mitigation's read also
+    loaded, and the 9 (4 during our write, 5 after it) the view never saw
+    on its own. The re-read changes only WHEN memory learns of the
+    change, never WHETHER it is kept, so nothing was built.]
+  - **A read stalled in the filesystem answers with the file as it was
+    when it was asked, and a rename while it is out raises no new read.**
+    Measured 2026-10-20 by round 2's live review of R28 with a stalling
+    FUSE passthrough over the harness state directory (its mode Q stalls
+    only quickshell's `read()` of `state.json`, so another process's rename
+    is not held up), the real `Service.qml` under a nested cage: the
+    helper's `state source add` renamed a new `state.json` into place
+    during the stall, the shell opened nothing after that rename, and the
+    stalled read returned the old text 27 s later (FUSE log,
+    `key-20261020-172836-2368558`). So a design that WAITS for a stalled
+    read and trusts its answer writes over the other program's file: R28a
+    did, 4 of 4 runs, and R29a withdrew it. On 6f1d176, whose save had
+    already been written without its read at 2 s, the same rename raised a
+    fresh read at once (the same rig, `key-20261020-172838-2368906`:
+    `read-STALL-begin` right after it), and both changes were kept. The rig is the
+    review's (scratch, not the tree); the open() stall it can also produce
+    queued a foreign rename behind libfuse's own path lock, which says
+    nothing about a real mount.
   - **What a reload costs.** Asynchronous `reload()` to `loaded`: median 2-4
     ms, max 10, over 8 KB and 160 KB files, idle and with 8 busy loops
     (`timing-2.txt`, load 12-18). On the real service, lane A's live
@@ -1048,7 +1100,15 @@ of a file the view creates, a re-point and what re-arms after one, by round
   every save the gate allows reloads first and is decided by the load it
   gets (R26a), skips that read while its own write is in flight, and is
   bounded by a 2 s watchdog that saves without the read, counted and
-  logged; every write is issued from a turn of its own (`Qt.callLater`),
+  logged [2026-10-20, round 17, R27a: neither any more -- the save waits
+  for the write in flight and then reads, and the watchdog retries the read
+  once and then stops saving with reason `read-timeout`] [round 18, R28a:
+  and not that either -- a silent read keeps the save held, memory the
+  authority, and is asked again on a bounded schedule until a load
+  answers] [round 19, R29a: withdrawn, back to the 2 s watchdog that saves
+  without the read, counted and logged; the save asked while our write is
+  in flight still waits for it, at most 2 s, and then reads under that
+  bound]; every write is issued from a turn of its own (`Qt.callLater`),
   never from inside a handler (R26b); and nothing reloads on a timer
   (R26d), so a replacement with no save after it is not seen until the next
   save or a restart -- nothing is written meanwhile, so nothing is lost. The
@@ -1069,7 +1129,16 @@ of a file the view creates, a re-point and what re-arms after one, by round
   old double instead (16 of 2561 in each echo mode). The service's OWN
   read is never asked while a write is in flight, which the R26a pins
   observe (`stateVerifySkipped`, no reload queued); the double does not
-  drop that one, because nothing asks for it.
+  drop that one, because nothing asks for it. [2026-10-20, round 17, R27a
+  (lane-sweep-a1): something can now -- a write the view has not reported
+  within the write wait's 2 s bound releases the held save to its read
+  while that write may still be out -- so the double drops the service's
+  own `reload()` too while one of our writes is queued (`droppedReloads`),
+  as the view does (30 of 30); the read's own bound then decides, which
+  never writes [round 19, R29a: which writes without the read, at R26a's
+  2 s, as on 0.14.2]. Against 6f1d176 alone the new drop turns nothing red (2,572
+  / 0 in both echo modes), because that tree never reloads while a write is
+  out.]
 
 `saveFailed` exists (`/usr/lib/qt6/qml/Quickshell/Io/quickshell-io.qmltypes:470`)
 and its argument is an enum, never a path; until round 3 the service

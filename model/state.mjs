@@ -1300,8 +1300,28 @@ var MERGE_WHOLE_FIELDS = ["recents", "activeKey", "lastPlayed", "session", "cach
 // the provider's text, never logged) -- for Model.mergeDropLines (the
 // journal, one line each) and Model.mergeDropNotice (the user, once).
 // hiddenGroups is rule 15's sibling: the same shape at MAX_HIDDEN_GROUPS.
-// -> { state, conflicts, dropped }
-function mergeForeignState(base, ours, theirs) {
+// F1 (D-SINK-19 round 3 of the sweep, 2026-10-20): THE MIGRATION RIDES ITS
+// RECORD. `opts.migrationKey` is the key of the record this session's
+// one-time migration added (Service's migrationAddedKey; "" when it added
+// none). When the marker is OURS ALONE -- the migration ran since the base
+// and theirs does not carry it -- and the cap drops that record, the
+// migration did not happen: the marker is NOT carried (the entry keeps both
+// URLs: the funnel keeps a retired key until the marker has landed), the
+// active key it set goes back to theirs, the record is not counted among
+// `dropped.sources` (the user added nothing, and "make room, then add it
+// again" names a URL the entry still holds), and `migrationHeld` is "full":
+// the migration is held full again.
+// Before F1 the marker survived the merge, landed, and the owned write
+// stripped the bar's playlist and guide URL off the entry with neither in
+// any record. Rule 15's sibling, the same shape without the cap: another
+// program added the SAME playlist in the window, so the record stands but
+// as THEIRS (a conflict goes to theirs) and without the bar's guide URL;
+// `migrationHeld` is "changed", the marker again is not carried, and the
+// retry the caller runs at once finds the record and adopts the guide URL
+// onto it -- the outcome the other order (their add first) has always had.
+// "" when the migration's record landed as ours.
+// -> { state, conflicts, dropped, migrationHeld }
+function mergeForeignState(base, ours, theirs, opts) {
   var b = parseState(JSON.stringify(base || emptyState()))
   var o = parseState(JSON.stringify(ours || emptyState()))
   var t = parseState(JSON.stringify(theirs || emptyState()))
@@ -1364,9 +1384,21 @@ function mergeForeignState(base, ours, theirs) {
       out[f] = o[f]
     }
   }
-  if (entryMigratedOf(o) || entryMigratedOf(t)) out.entryMigrated = true
+  var migrationKey = str((opts || {}).migrationKey)
+  var migrationHeld = ""
+  if (migrationKey !== "" && entryMigratedOf(o) && !entryMigratedOf(b) && !entryMigratedOf(t) && mo[migrationKey]) {
+    var landed = null
+    for (i = 0; i < out.sources.length; i++) if (out.sources[i].key === migrationKey) landed = out.sources[i]
+    if (!landed) migrationHeld = "full"
+    else if (canonValue(landed) !== canonValue(mo[migrationKey])) migrationHeld = "changed"
+  }
+  if (migrationHeld === "full") {
+    dropped.sources = dropped.sources.filter(function (key) { return key !== migrationKey })
+    if (str(out.activeKey) === migrationKey) out.activeKey = t.activeKey
+  }
+  if (migrationHeld === "" && (entryMigratedOf(o) || entryMigratedOf(t))) out.entryMigrated = true
   else delete out.entryMigrated
-  return { state: parseState(JSON.stringify(out)), conflicts: conflicts, dropped: dropped }
+  return { state: parseState(JSON.stringify(out)), conflicts: conflicts, dropped: dropped, migrationHeld: migrationHeld }
 }
 
 var MERGE_LINE_HEAD = "state.json was changed by another program while a change made here was not yet saved; "
@@ -1406,6 +1438,17 @@ function mergeDropLines(dropped) {
     out.push(MERGE_LINE_HEAD + "a group hidden here was not kept (the limit is " + MAX_HIDDEN_GROUPS + " hidden groups)")
   }
   return out
+}
+
+// F1. The journal line for a merge that held the migration again, by the
+// reason mergeForeignState gave: no key, no URL -- the bar entry still holds
+// what the record would have carried.
+function migrationHeldAgainLine(why) {
+  if (str(why) === "changed") {
+    return MERGE_LINE_HEAD + "another program added the bar's playlist itself, so it is moved into Sources again over that record"
+  }
+  return MERGE_LINE_HEAD + "the bar's playlist could not be moved into Sources, which is full again (the limit is " + MAX_SOURCES +
+    " sources); it stays on the bar entry, with its guide-data URL, until a source is removed"
 }
 
 // R25b. What the user is told, ONCE per merge that dropped anything: how
@@ -1577,16 +1620,31 @@ function stateWriteGate(ctx) {
 //    "refuse" the no-write mode, and nothing a re-read can lift now
 //    "verify" reload state.json first and decide on what it finds
 //    "defer"  ask again from a turn of its own (Qt.callLater)
+//    "wait"   one of our writes is in flight: held until it lands (or
+//             fails), then asked again from a turn of its own, which reads
 //    "write"  issue the write now
 // Every write is asked for again from a turn of its own before it is
 // issued, because a setText inside stateFile's own onLoaded writes the file
 // and raises NO `saved` (D-SRC-46, measured 16 of 16), and a turn called
-// from a handler cannot tell which handler it is in. The read is skipped
-// while one of our writes is in flight: the view DROPS a reload then
-// (measured 30 of 30), and the disk is our own write. A refused save
+// from a handler cannot tell which handler it is in. A refused save
 // re-reads unless the reason is init-timeout (no load can lift it, R23c)
 // or the refusal is the verify's own answer; inside a handler the load
 // that is running IS that read.
+// R27a (D-SINK-22, window a): NO WRITE WITHOUT A READ. Until R27 a save
+// asked while one of our writes was in flight SKIPPED its read -- the view
+// drops a reload then (measured 30 of 30) -- and was written from the next
+// turn, so a re-point landing in that window was written over (or a 0644
+// file created in an empty folder). Now it WAITS: nothing is issued while
+// the write is out, and the save is asked again once that write has landed,
+// when a read is answered. Every save asked during the wait is the same
+// held save (they coalesce). `waitExpired` -- the write was not reported
+// within the wait's own bound (Service.stateWriteWaitWatchdog) -- lets the
+// held save go to its read anyway: if the view is still holding the write
+// the read is dropped and the read's own bound decides. R29a (2026-10-20):
+// that bound is R26a's, so the held save never waits on a read past 2 s --
+// no load in that time and the save is written without its read, counted
+// and logged, as on 0.14.2 (D-SINK-22's window c, which R27a and R28a tried
+// to close and the lead's ruling leaves open, documented).
 function stateSavePlan(ctx) {
   var c = ctx || {}
   if (c.verifyPending === true) return "join"
@@ -1598,8 +1656,8 @@ function stateSavePlan(ctx) {
   }
   if (gate !== "write") return "refuse"
   if (c.verifyDone === true) return "write"
+  if ((Number(c.inFlight) || 0) > 0 && c.waitExpired !== true) return "wait"
   if (c.inHandler === true) return "defer"
-  if ((Number(c.inFlight) || 0) > 0) return c.writeTurn === true ? "write" : "defer"
   return "verify"
 }
 
@@ -1617,7 +1675,41 @@ function stateBlockRecheck(ctx) {
 // The user is told ONCE per no-write episode: this sentence, as a desktop
 // notification and a console line. It names the file and what to do, and
 // never a URL (it is composed from the reason and the path alone).
-function stateUnreadableNotice(reason, path) {
+// R27e (2026-10-20; D-SRC-42, D-SRC-50, D-SRC-51), one family with the R23e
+// and R25 copy:
+//   `midSession` -- the block began after a state had loaded -- titles it
+//     "Saving has stopped" (STATE_BLOCK_TITLE_MID), in the notification and
+//     the journal alike: the sources DID load and are still listed, and it
+//     is saving that stopped. A block at the start keeps "Saved sources not
+//     loaded" (STATE_BLOCK_TITLE_START).
+//   the body's second sentence says what becomes of a change made now, and
+//     it differs between the two (R28e, 2026-10-20). At a START nothing has
+//     loaded, so whatever load lifts the block is the first and is applied:
+//     a change made in the block is "not kept" on every way back
+//     (STATE_BLOCK_UNSAVED_START). MID-session the ways back differ, and
+//     R27e's "not saved until the file can be read again" was true only of
+//     the one where the next in-app change's own read finds the file first
+//     and saves it (D-SRC-51); measured through the shipping Service.qml,
+//     both hosts and echo modes, the same change is DROPPED when the file
+//     comes back by itself (a restore, a chmod back: the view sees it and
+//     the load is applied), when the change that finds it is a source change
+//     (refused, and its re-read applies the file), and by a stopped shell. So
+//     the sentence names all four (STATE_BLOCK_UNSAVED, the name R27e gave
+//     the one sentence, kept for the mid-session one); the node suite (dev
+//     branch) pins each way to it.
+//   a file or folder that has gone missing names the LINK case first: a
+//     link pointed back at the folder or file that holds the state restores
+//     everything, where restoring "the file it points to" or a restart with
+//     the link still on an empty folder starts a fresh, empty install there
+//     (D-SRC-50).
+//   "read-timeout" is withdrawn (R28a, and R29a kept it so): a read that
+//     does not answer is no block; its save is written after R26a's bound.
+var STATE_BLOCK_TITLE_START = "Saved sources not loaded"
+var STATE_BLOCK_TITLE_MID = "Saving has stopped"
+var STATE_BLOCK_UNSAVED_START = "Sources, favorites and settings changed now are not kept."
+var STATE_BLOCK_UNSAVED = "Favorites and other changes made now are held in this session only: the next such change made here saves them if it finds the file again, but they are dropped if the file comes back by itself first, if a source change is what finds it, or if the shell is stopped."
+var STATE_BLOCK_LINK_FIRST = "If it is a symbolic link, point it back at the folder or file that holds your state"
+function stateUnreadableNotice(reason, path, midSession) {
   var file = str(path) !== "" ? str(path) : "state.json"
   var r = str(reason)
   var what = "could not be read"
@@ -1632,9 +1724,10 @@ function stateUnreadableNotice(reason, path) {
     what = "is not a valid state file"
     fix = "Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell."
   } else if (r === "link") {
-    // R24b: the not-a-file sentence, naming what is there.
+    // R24b: the not-a-file sentence, naming what is there. R27e: the link
+    // pointed back, not its target "restored" (D-SRC-50).
     what = "is a symbolic link whose target is missing or is not a regular file"
-    fix = "Restore the file it points to, or move the link aside, then run omarchy restart shell."
+    fix = "Point it back at the file that holds your state, or move the link aside, then run omarchy restart shell."
   } else if (r === "not-a-dir") {
     // R24b: a regular file (or anything but a folder) where the state FOLDER
     // should be. The sentence names the folder's path, not the file's.
@@ -1646,25 +1739,36 @@ function stateUnreadableNotice(reason, path) {
     // leads to something that is not a folder. The sentence names the folder.
     file = str(path) !== "" ? str(path).replace(/\/[^\/]*$/, "") : "The state folder"
     what = "is a symbolic link whose target is missing or is not a folder (or a folder above it is)"
-    fix = "Restore the folder it points to, or move the link aside, then run omarchy restart shell."
+    fix = "Point it back at the folder that holds your state, or move the link aside, then run omarchy restart shell."
   } else if (r === "absent-unconfirmed") {
+    // R27e left this one as it was: at a START the helper names a link that
+    // leads nowhere itself ("link", "folder-link"), so the file it found and
+    // the view could not reach is a folder-permission case, not a link one.
     what = "could not be found, or its folder could not be read"
     fix = "Make the folder readable with chmod 700, then run omarchy restart shell."
   } else if (r === "absent") {
     // Mid-session (the file vanished under a running shell): the helper's
     // witness is not asked again, so the sentence names both causes the
     // FileView cannot tell apart -- a broken symbolic link (R24b) and an
-    // unreadable folder.
+    // unreadable folder. R27e: a link pointed BACK, never its target
+    // restored, which on an empty folder makes a fresh, empty start (D-SRC-50).
     what = "could not be found, or its folder could not be read"
-    fix = "If it is a symbolic link, restore the file it points to; otherwise make the folder readable with chmod 700. Then run omarchy restart shell."
+    fix = STATE_BLOCK_LINK_FIRST + "; otherwise make the folder readable with chmod 700. Then run omarchy restart shell."
   } else if (r === "init-timeout") {
     // R23c: the start-up check of the file (the helper's `state init`) did
     // not answer within Service.stateInitTimeoutMs and was stopped.
     what = "could not be checked: the start-up check did not answer and was stopped"
     fix = "Make sure a regular file, or nothing, is at that path, then run omarchy restart shell."
   }
-  return { title: "Saved sources not loaded",
-           body: file + " " + what + ". Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. " + fix }
+  return { title: midSession === true ? STATE_BLOCK_TITLE_MID : STATE_BLOCK_TITLE_START,
+           body: file + " " + what + ". " + (midSession === true ? STATE_BLOCK_UNSAVED : STATE_BLOCK_UNSAVED_START) + " " + fix }
+}
+
+// R27e: the journal's line for the same episode -- the title, then the body
+// -- so the journal is titled as the notification is (D-SRC-42).
+function stateUnreadableJournal(reason, path, midSession) {
+  var n = stateUnreadableNotice(reason, path, midSession)
+  return n.title + ": " + n.body
 }
 
 // D-SINK-19 round 15 (D-SRC-38). The no-write mode's SHORT form, for the
@@ -1674,8 +1778,7 @@ function stateUnreadableNotice(reason, path) {
 // notice copy family: at a start it IS stateUnreadableNotice's title.
 function stateBlockedHeader(reason, path, midSession) {
   if (str(reason) === "") return ""
-  if (midSession === true) return "Saving has stopped"
-  return stateUnreadableNotice(reason, path).title
+  return stateUnreadableNotice(reason, path, midSession === true).title
 }
 export {
   MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedSearchTerms,
@@ -1695,7 +1798,10 @@ export {
   countReload, reloadDisposition, sortedKeys, stateCanonical, sameState,
   canonValue, mergeSetField, recordFieldsDiffering, MERGE_WHOLE_FIELDS,
   mergeForeignState, MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount,
-  mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
-  stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
-  stateBlockRecheck, stateUnreadableNotice, stateBlockedHeader
+  mergeDropLines, migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS,
+  stateLoadKind, stateInitFound, stateLoadDecision, stateWriteGate,
+  stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
+  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
+  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
+  stateBlockedHeader
 }

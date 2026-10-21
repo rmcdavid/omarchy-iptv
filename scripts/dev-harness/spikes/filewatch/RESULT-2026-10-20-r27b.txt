@@ -1,0 +1,662 @@
+R27b (2026-10-20, D-SRC-48), measure.sh <helper> r27b, Quickshell 0.3.1 / Qt 6.11.2, nested headless cage on a private D-Bus (private-bus.sh), one FileView declared as Service.qml's stateFile is.
+
+THE QUESTION. Does ONE re-read after our own `saved`, made when a fileChanged came while our write was out (the board's candidate mitigation), ever recover a change another program wrote that the read R26a makes before the NEXT save (here `laterRead`, one reload a second later) does not already recover?
+
+Each trial: a python writer (an atomic rename like the helper's, or an in-place write) writes change C=c<N> DELAY ms after it starts while the probe saves own<N> (PAD bytes, so the write lasts long enough to be landed in). Every signal is stamped on the wall clock the writer stamps too, so C@ says where C landed against our write: before-set (before our setText), during (between our setText and our `saved`), after-saved. C-survived: the file holds C when the trial settles. view-saw-C: a load carrying C reached the view on its own (no mitigation, before the later read). mitigation: asked when the probe made the re-read, C when that read loaded C. later-read: C when the read a second later loaded C. recovers-new: the cell that matters -- the mitigation loaded C and the later read did not.
+
+=== run 1: REPS=2, PADS 40000 4000000, DELAYS 40..200 (the 4 MB pad built one character at a time, which took longer than the race; fixed for run 2 with String.repeat)
+    30  after-saved inplace pad=40000 mit=false C-survived:yes view-saw-C:yes mitigation:-/- later:C
+    16  after-saved inplace pad=40000 mit=true C-survived:yes view-saw-C:yes mitigation:-/- later:C
+    14  after-saved inplace pad=40000 mit=true C-survived:yes view-saw-C:yes mitigation:asked/- later:C
+    30  after-saved rename pad=40000 mit=false C-survived:yes view-saw-C:yes mitigation:-/- later:C
+    20  after-saved rename pad=40000 mit=true C-survived:yes view-saw-C:yes mitigation:-/- later:C
+    10  after-saved rename pad=40000 mit=true C-survived:yes view-saw-C:yes mitigation:asked/- later:C
+    30  before-set inplace pad=4000000 mit=false C-survived:no view-saw-C:no mitigation:-/- later:-
+    30  before-set inplace pad=4000000 mit=true C-survived:no view-saw-C:no mitigation:asked/- later:-
+    30  before-set rename pad=4000000 mit=false C-survived:no view-saw-C:no mitigation:-/- later:-
+    30  before-set rename pad=4000000 mit=true C-survived:no view-saw-C:no mitigation:asked/- later:-
+  trials 240, recovers-new 0
+
+=== run 2: REPS=2, PADS 2000000 4000000, DELAYS 30..250 step 10
+    68  after-saved inplace mit=false C-survived:yes view-saw-C:yes mitigation:-/- later:C
+     2  after-saved inplace mit=true C-survived:yes view-saw-C:no mitigation:asked/- later:C
+    18  after-saved inplace mit=true C-survived:yes view-saw-C:yes mitigation:-/- later:C
+    46  after-saved inplace mit=true C-survived:yes view-saw-C:yes mitigation:asked/- later:C
+     1  after-saved rename mit=false C-survived:yes view-saw-C:no mitigation:-/- later:C
+    66  after-saved rename mit=false C-survived:yes view-saw-C:yes mitigation:-/- later:C
+     2  after-saved rename mit=true C-survived:yes view-saw-C:no mitigation:asked/- later:C
+    11  after-saved rename mit=true C-survived:yes view-saw-C:yes mitigation:-/- later:C
+    53  after-saved rename mit=true C-survived:yes view-saw-C:yes mitigation:asked/- later:C
+    19  before-set inplace mit=false C-survived:no view-saw-C:no mitigation:-/- later:-
+     2  before-set inplace mit=true C-survived:no view-saw-C:no mitigation:-/- later:-
+    17  before-set inplace mit=true C-survived:no view-saw-C:no mitigation:asked/- later:-
+    20  before-set rename mit=false C-survived:no view-saw-C:no mitigation:-/- later:-
+    18  before-set rename mit=true C-survived:no view-saw-C:no mitigation:asked/- later:-
+     4  during inplace mit=false C-survived:no view-saw-C:no mitigation:-/- later:-
+     1  during inplace mit=false C-survived:yes view-saw-C:yes mitigation:-/- later:C
+     6  during inplace mit=true C-survived:no view-saw-C:no mitigation:asked/- later:-
+     1  during inplace mit=true C-survived:yes view-saw-C:no mitigation:asked/C later:C
+     5  during rename mit=false C-survived:no view-saw-C:no mitigation:-/- later:-
+     5  during rename mit=true C-survived:no view-saw-C:no mitigation:asked/- later:-
+     3  during rename mit=true C-survived:yes view-saw-C:no mitigation:asked/C later:C
+  trials 368, recovers-new 0
+
+VERDICT. 608 trials, 25 of them with C landed DURING our write (196 before it began, 387 after it was saved). recovers-new: 0 of 608.
+  (R28e, 2026-10-20: this line read "30 of them" and the second bullet "21 of the 30" until round 1's review recounted the raw lines below: `grep -c 'C@during'` is 25, of which `C-survived:no` 20 and `C-survived:yes` 5; 196 + 25 + 387 = 608. The headline and the verdict were right.)
+  - The mitigation's read loaded C in 4 trials (all four C landed during our write and survived), and in all 4 the later read loaded C too: the two reads read the same disk, and between them nothing of ours writes it (R27a: no write without a read).
+  - 20 of the 25 during-trials LOST C: it landed before our rename and the rename replaced it. No read of any kind recovers that -- it is D-SRC-48 itself, on every tree, and so are the before-set trials (76 in run 2, 120 in run 1), C landing before our write began.
+  - 9 trials ended with C on disk and NEVER seen by the view on its own (4 during, 5 after-saved; one of them with no mitigation at all): the later read loaded C in all 9.
+So the mitigation changes only WHEN memory learns of a surviving C -- at once, instead of at the next save's read (or the next foreign change) -- and recovers nothing that read does not. Nothing was built (R27b: build nothing and say so).
+
+=== raw, run 1
+SEQ race (load 1.82)
+  rename  delay=40   pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c1) recovers-new:-
+  rename  delay=40   pad=40000   mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c2) recovers-new:-
+  rename  delay=50   pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c3) recovers-new:-
+  rename  delay=50   pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c4) recovers-new:-
+  rename  delay=60   pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c5) recovers-new:-
+  rename  delay=60   pad=40000   mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c6) recovers-new:-
+  rename  delay=70   pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c7) recovers-new:-
+  rename  delay=70   pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c8) recovers-new:-
+  rename  delay=80   pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c9) recovers-new:-
+  rename  delay=80   pad=40000   mit=false C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c10) recovers-new:-
+  rename  delay=90   pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c11) recovers-new:-
+  rename  delay=90   pad=40000   mit=false C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c12) recovers-new:-
+  rename  delay=100  pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c13) recovers-new:-
+  rename  delay=100  pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c14) recovers-new:-
+  rename  delay=110  pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c15) recovers-new:-
+  rename  delay=110  pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c16) recovers-new:-
+  rename  delay=120  pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c17) recovers-new:-
+  rename  delay=120  pad=40000   mit=false C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c18) recovers-new:-
+  rename  delay=130  pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c19) recovers-new:-
+  rename  delay=130  pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c20) recovers-new:-
+  rename  delay=140  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c21) recovers-new:-
+  rename  delay=140  pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c22) recovers-new:-
+  rename  delay=150  pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c23) recovers-new:-
+  rename  delay=150  pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c24) recovers-new:-
+  rename  delay=160  pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c25) recovers-new:-
+  rename  delay=160  pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c26) recovers-new:-
+  rename  delay=180  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c27) recovers-new:-
+  rename  delay=180  pad=40000   mit=false C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c28) recovers-new:-
+  rename  delay=200  pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c29) recovers-new:-
+  rename  delay=200  pad=40000   mit=false C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c30) recovers-new:-
+  rename  delay=40   pad=4000000 mit=true  C@before-set  write=  8.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own31) recovers-new:-
+  rename  delay=40   pad=4000000 mit=false C@before-set  write=132.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own32) recovers-new:-
+  rename  delay=50   pad=4000000 mit=true  C@before-set  write=132.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own33) recovers-new:-
+  rename  delay=50   pad=4000000 mit=false C@before-set  write=137.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own34) recovers-new:-
+  rename  delay=60   pad=4000000 mit=true  C@before-set  write=134.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own35) recovers-new:-
+  rename  delay=60   pad=4000000 mit=false C@before-set  write=132.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own36) recovers-new:-
+  rename  delay=70   pad=4000000 mit=true  C@before-set  write=133.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own37) recovers-new:-
+  rename  delay=70   pad=4000000 mit=false C@before-set  write=131.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own38) recovers-new:-
+  rename  delay=80   pad=4000000 mit=true  C@before-set  write=134.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own39) recovers-new:-
+  rename  delay=80   pad=4000000 mit=false C@before-set  write=132.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own40) recovers-new:-
+  rename  delay=90   pad=4000000 mit=true  C@before-set  write=138.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own41) recovers-new:-
+  rename  delay=90   pad=4000000 mit=false C@before-set  write=144.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own42) recovers-new:-
+  rename  delay=100  pad=4000000 mit=true  C@before-set  write=130.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own43) recovers-new:-
+  rename  delay=100  pad=4000000 mit=false C@before-set  write=131.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own44) recovers-new:-
+  rename  delay=110  pad=4000000 mit=true  C@before-set  write=133.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own45) recovers-new:-
+  rename  delay=110  pad=4000000 mit=false C@before-set  write=133.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own46) recovers-new:-
+  rename  delay=120  pad=4000000 mit=true  C@before-set  write=131.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own47) recovers-new:-
+  rename  delay=120  pad=4000000 mit=false C@before-set  write=135.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own48) recovers-new:-
+  rename  delay=130  pad=4000000 mit=true  C@before-set  write=131.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own49) recovers-new:-
+  rename  delay=130  pad=4000000 mit=false C@before-set  write=132.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own50) recovers-new:-
+  rename  delay=140  pad=4000000 mit=true  C@before-set  write=144.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own51) recovers-new:-
+  rename  delay=140  pad=4000000 mit=false C@before-set  write=130.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own52) recovers-new:-
+  rename  delay=150  pad=4000000 mit=true  C@before-set  write=128.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own53) recovers-new:-
+  rename  delay=150  pad=4000000 mit=false C@before-set  write=141.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own54) recovers-new:-
+  rename  delay=160  pad=4000000 mit=true  C@before-set  write=133.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own55) recovers-new:-
+  rename  delay=160  pad=4000000 mit=false C@before-set  write=133.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own56) recovers-new:-
+  rename  delay=180  pad=4000000 mit=true  C@before-set  write=132.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own57) recovers-new:-
+  rename  delay=180  pad=4000000 mit=false C@before-set  write=134.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own58) recovers-new:-
+  rename  delay=200  pad=4000000 mit=true  C@before-set  write=136.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own59) recovers-new:-
+  rename  delay=200  pad=4000000 mit=false C@before-set  write=160.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own60) recovers-new:-
+  inplace delay=40   pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c61) recovers-new:-
+  inplace delay=40   pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c62) recovers-new:-
+  inplace delay=50   pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c63) recovers-new:-
+  inplace delay=50   pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c64) recovers-new:-
+  inplace delay=60   pad=40000   mit=true  C@after-saved write=  0.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c65) recovers-new:-
+  inplace delay=60   pad=40000   mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c66) recovers-new:-
+  inplace delay=70   pad=40000   mit=true  C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c67) recovers-new:-
+  inplace delay=70   pad=40000   mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c68) recovers-new:-
+  inplace delay=80   pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c69) recovers-new:-
+  inplace delay=80   pad=40000   mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c70) recovers-new:-
+  inplace delay=90   pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c71) recovers-new:-
+  inplace delay=90   pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c72) recovers-new:-
+  inplace delay=100  pad=40000   mit=true  C@after-saved write=  0.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c73) recovers-new:-
+  inplace delay=100  pad=40000   mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c74) recovers-new:-
+  inplace delay=110  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c75) recovers-new:-
+  inplace delay=110  pad=40000   mit=false C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c76) recovers-new:-
+  inplace delay=120  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c77) recovers-new:-
+  inplace delay=120  pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c78) recovers-new:-
+  inplace delay=130  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c79) recovers-new:-
+  inplace delay=130  pad=40000   mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c80) recovers-new:-
+  inplace delay=140  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c81) recovers-new:-
+  inplace delay=140  pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c82) recovers-new:-
+  inplace delay=150  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c83) recovers-new:-
+  inplace delay=150  pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c84) recovers-new:-
+  inplace delay=160  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c85) recovers-new:-
+  inplace delay=160  pad=40000   mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c86) recovers-new:-
+  inplace delay=180  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c87) recovers-new:-
+  inplace delay=180  pad=40000   mit=false C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c88) recovers-new:-
+  inplace delay=200  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c89) recovers-new:-
+  inplace delay=200  pad=40000   mit=false C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c90) recovers-new:-
+  inplace delay=40   pad=4000000 mit=true  C@before-set  write=130.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own91) recovers-new:-
+  inplace delay=40   pad=4000000 mit=false C@before-set  write=129.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own92) recovers-new:-
+  inplace delay=50   pad=4000000 mit=true  C@before-set  write=135.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own93) recovers-new:-
+  inplace delay=50   pad=4000000 mit=false C@before-set  write=131.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own94) recovers-new:-
+  inplace delay=60   pad=4000000 mit=true  C@before-set  write=134.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own95) recovers-new:-
+  inplace delay=60   pad=4000000 mit=false C@before-set  write=134.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own96) recovers-new:-
+  inplace delay=70   pad=4000000 mit=true  C@before-set  write=128.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own97) recovers-new:-
+  inplace delay=70   pad=4000000 mit=false C@before-set  write=132.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own98) recovers-new:-
+  inplace delay=80   pad=4000000 mit=true  C@before-set  write=130.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own99) recovers-new:-
+  inplace delay=80   pad=4000000 mit=false C@before-set  write=132.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own100) recovers-new:-
+  inplace delay=90   pad=4000000 mit=true  C@before-set  write=229.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own101) recovers-new:-
+  inplace delay=90   pad=4000000 mit=false C@before-set  write=134.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own102) recovers-new:-
+  inplace delay=100  pad=4000000 mit=true  C@before-set  write=134.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own103) recovers-new:-
+  inplace delay=100  pad=4000000 mit=false C@before-set  write=128.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own104) recovers-new:-
+  inplace delay=110  pad=4000000 mit=true  C@before-set  write=130.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own105) recovers-new:-
+  inplace delay=110  pad=4000000 mit=false C@before-set  write=136.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own106) recovers-new:-
+  inplace delay=120  pad=4000000 mit=true  C@before-set  write=138.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own107) recovers-new:-
+  inplace delay=120  pad=4000000 mit=false C@before-set  write=131.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own108) recovers-new:-
+  inplace delay=130  pad=4000000 mit=true  C@before-set  write=134.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own109) recovers-new:-
+  inplace delay=130  pad=4000000 mit=false C@before-set  write=131.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own110) recovers-new:-
+  inplace delay=140  pad=4000000 mit=true  C@before-set  write=129.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own111) recovers-new:-
+  inplace delay=140  pad=4000000 mit=false C@before-set  write=135.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own112) recovers-new:-
+  inplace delay=150  pad=4000000 mit=true  C@before-set  write=131.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own113) recovers-new:-
+  inplace delay=150  pad=4000000 mit=false C@before-set  write=130.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own114) recovers-new:-
+  inplace delay=160  pad=4000000 mit=true  C@before-set  write=131.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own115) recovers-new:-
+  inplace delay=160  pad=4000000 mit=false C@before-set  write=131.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own116) recovers-new:-
+  inplace delay=180  pad=4000000 mit=true  C@before-set  write=128.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own117) recovers-new:-
+  inplace delay=180  pad=4000000 mit=false C@before-set  write=132.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own118) recovers-new:-
+  inplace delay=200  pad=4000000 mit=true  C@before-set  write=134.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own119) recovers-new:-
+  inplace delay=200  pad=4000000 mit=false C@before-set  write=133.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own120) recovers-new:-
+  rename  delay=40   pad=40000   mit=true  C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c121) recovers-new:-
+  rename  delay=40   pad=40000   mit=false C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c122) recovers-new:-
+  rename  delay=50   pad=40000   mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c123) recovers-new:-
+  rename  delay=50   pad=40000   mit=false C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c124) recovers-new:-
+  rename  delay=60   pad=40000   mit=true  C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c125) recovers-new:-
+  rename  delay=60   pad=40000   mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c126) recovers-new:-
+  rename  delay=70   pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c127) recovers-new:-
+  rename  delay=70   pad=40000   mit=false C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c128) recovers-new:-
+  rename  delay=80   pad=40000   mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c129) recovers-new:-
+  rename  delay=80   pad=40000   mit=false C@after-saved write=  0.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c130) recovers-new:-
+  rename  delay=90   pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c131) recovers-new:-
+  rename  delay=90   pad=40000   mit=false C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c132) recovers-new:-
+  rename  delay=100  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c133) recovers-new:-
+  rename  delay=100  pad=40000   mit=false C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c134) recovers-new:-
+  rename  delay=110  pad=40000   mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c135) recovers-new:-
+  rename  delay=110  pad=40000   mit=false C@after-saved write=  0.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c136) recovers-new:-
+  rename  delay=120  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c137) recovers-new:-
+  rename  delay=120  pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c138) recovers-new:-
+  rename  delay=130  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c139) recovers-new:-
+  rename  delay=130  pad=40000   mit=false C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c140) recovers-new:-
+  rename  delay=140  pad=40000   mit=true  C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c141) recovers-new:-
+  rename  delay=140  pad=40000   mit=false C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c142) recovers-new:-
+  rename  delay=150  pad=40000   mit=true  C@after-saved write=  0.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c143) recovers-new:-
+  rename  delay=150  pad=40000   mit=false C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c144) recovers-new:-
+  rename  delay=160  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c145) recovers-new:-
+  rename  delay=160  pad=40000   mit=false C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c146) recovers-new:-
+  rename  delay=180  pad=40000   mit=true  C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c147) recovers-new:-
+  rename  delay=180  pad=40000   mit=false C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c148) recovers-new:-
+  rename  delay=200  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c149) recovers-new:-
+  rename  delay=200  pad=40000   mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c150) recovers-new:-
+  rename  delay=40   pad=4000000 mit=true  C@before-set  write=136.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own151) recovers-new:-
+  rename  delay=40   pad=4000000 mit=false C@before-set  write=131.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own152) recovers-new:-
+  rename  delay=50   pad=4000000 mit=true  C@before-set  write=132.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own153) recovers-new:-
+  rename  delay=50   pad=4000000 mit=false C@before-set  write=134.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own154) recovers-new:-
+  rename  delay=60   pad=4000000 mit=true  C@before-set  write=130.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own155) recovers-new:-
+  rename  delay=60   pad=4000000 mit=false C@before-set  write=134.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own156) recovers-new:-
+  rename  delay=70   pad=4000000 mit=true  C@before-set  write=131.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own157) recovers-new:-
+  rename  delay=70   pad=4000000 mit=false C@before-set  write=130.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own158) recovers-new:-
+  rename  delay=80   pad=4000000 mit=true  C@before-set  write=128.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own159) recovers-new:-
+  rename  delay=80   pad=4000000 mit=false C@before-set  write=136.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own160) recovers-new:-
+  rename  delay=90   pad=4000000 mit=true  C@before-set  write=173.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own161) recovers-new:-
+  rename  delay=90   pad=4000000 mit=false C@before-set  write=137.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own162) recovers-new:-
+  rename  delay=100  pad=4000000 mit=true  C@before-set  write=147.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own163) recovers-new:-
+  rename  delay=100  pad=4000000 mit=false C@before-set  write=150.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own164) recovers-new:-
+  rename  delay=110  pad=4000000 mit=true  C@before-set  write=134.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own165) recovers-new:-
+  rename  delay=110  pad=4000000 mit=false C@before-set  write=133.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own166) recovers-new:-
+  rename  delay=120  pad=4000000 mit=true  C@before-set  write=138.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own167) recovers-new:-
+  rename  delay=120  pad=4000000 mit=false C@before-set  write=136.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own168) recovers-new:-
+  rename  delay=130  pad=4000000 mit=true  C@before-set  write=136.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own169) recovers-new:-
+  rename  delay=130  pad=4000000 mit=false C@before-set  write=150.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own170) recovers-new:-
+  rename  delay=140  pad=4000000 mit=true  C@before-set  write=133.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own171) recovers-new:-
+  rename  delay=140  pad=4000000 mit=false C@before-set  write=132.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own172) recovers-new:-
+  rename  delay=150  pad=4000000 mit=true  C@before-set  write=139.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own173) recovers-new:-
+  rename  delay=150  pad=4000000 mit=false C@before-set  write=141.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own174) recovers-new:-
+  rename  delay=160  pad=4000000 mit=true  C@before-set  write=133.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own175) recovers-new:-
+  rename  delay=160  pad=4000000 mit=false C@before-set  write=148.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own176) recovers-new:-
+  rename  delay=180  pad=4000000 mit=true  C@before-set  write=128.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own177) recovers-new:-
+  rename  delay=180  pad=4000000 mit=false C@before-set  write=133.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own178) recovers-new:-
+  rename  delay=200  pad=4000000 mit=true  C@before-set  write=128.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own179) recovers-new:-
+  rename  delay=200  pad=4000000 mit=false C@before-set  write=125.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own180) recovers-new:-
+  inplace delay=40   pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c181) recovers-new:-
+  inplace delay=40   pad=40000   mit=false C@after-saved write=  0.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c182) recovers-new:-
+  inplace delay=50   pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c183) recovers-new:-
+  inplace delay=50   pad=40000   mit=false C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c184) recovers-new:-
+  inplace delay=60   pad=40000   mit=true  C@after-saved write=  0.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c185) recovers-new:-
+  inplace delay=60   pad=40000   mit=false C@after-saved write=  0.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c186) recovers-new:-
+  inplace delay=70   pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c187) recovers-new:-
+  inplace delay=70   pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c188) recovers-new:-
+  inplace delay=80   pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c189) recovers-new:-
+  inplace delay=80   pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c190) recovers-new:-
+  inplace delay=90   pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c191) recovers-new:-
+  inplace delay=90   pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c192) recovers-new:-
+  inplace delay=100  pad=40000   mit=true  C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c193) recovers-new:-
+  inplace delay=100  pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c194) recovers-new:-
+  inplace delay=110  pad=40000   mit=true  C@after-saved write=  0.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c195) recovers-new:-
+  inplace delay=110  pad=40000   mit=false C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c196) recovers-new:-
+  inplace delay=120  pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c197) recovers-new:-
+  inplace delay=120  pad=40000   mit=false C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c198) recovers-new:-
+  inplace delay=130  pad=40000   mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c199) recovers-new:-
+  inplace delay=130  pad=40000   mit=false C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c200) recovers-new:-
+  inplace delay=140  pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c201) recovers-new:-
+  inplace delay=140  pad=40000   mit=false C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c202) recovers-new:-
+  inplace delay=150  pad=40000   mit=true  C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c203) recovers-new:-
+  inplace delay=150  pad=40000   mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c204) recovers-new:-
+  inplace delay=160  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c205) recovers-new:-
+  inplace delay=160  pad=40000   mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c206) recovers-new:-
+  inplace delay=180  pad=40000   mit=true  C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c207) recovers-new:-
+  inplace delay=180  pad=40000   mit=false C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c208) recovers-new:-
+  inplace delay=200  pad=40000   mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c209) recovers-new:-
+  inplace delay=200  pad=40000   mit=false C@after-saved write=  1.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c210) recovers-new:-
+  inplace delay=40   pad=4000000 mit=true  C@before-set  write=131.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own211) recovers-new:-
+  inplace delay=40   pad=4000000 mit=false C@before-set  write=130.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own212) recovers-new:-
+  inplace delay=50   pad=4000000 mit=true  C@before-set  write=148.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own213) recovers-new:-
+  inplace delay=50   pad=4000000 mit=false C@before-set  write=126.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own214) recovers-new:-
+  inplace delay=60   pad=4000000 mit=true  C@before-set  write=134.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own215) recovers-new:-
+  inplace delay=60   pad=4000000 mit=false C@before-set  write=124.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own216) recovers-new:-
+  inplace delay=70   pad=4000000 mit=true  C@before-set  write=133.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own217) recovers-new:-
+  inplace delay=70   pad=4000000 mit=false C@before-set  write=128.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own218) recovers-new:-
+  inplace delay=80   pad=4000000 mit=true  C@before-set  write=137.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own219) recovers-new:-
+  inplace delay=80   pad=4000000 mit=false C@before-set  write=136.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own220) recovers-new:-
+  inplace delay=90   pad=4000000 mit=true  C@before-set  write=141.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own221) recovers-new:-
+  inplace delay=90   pad=4000000 mit=false C@before-set  write=133.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own222) recovers-new:-
+  inplace delay=100  pad=4000000 mit=true  C@before-set  write=134.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own223) recovers-new:-
+  inplace delay=100  pad=4000000 mit=false C@before-set  write=150.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own224) recovers-new:-
+  inplace delay=110  pad=4000000 mit=true  C@before-set  write=131.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own225) recovers-new:-
+  inplace delay=110  pad=4000000 mit=false C@before-set  write=128.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own226) recovers-new:-
+  inplace delay=120  pad=4000000 mit=true  C@before-set  write=131.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own227) recovers-new:-
+  inplace delay=120  pad=4000000 mit=false C@before-set  write=127.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own228) recovers-new:-
+  inplace delay=130  pad=4000000 mit=true  C@before-set  write=132.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own229) recovers-new:-
+  inplace delay=130  pad=4000000 mit=false C@before-set  write=132.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own230) recovers-new:-
+  inplace delay=140  pad=4000000 mit=true  C@before-set  write=137.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own231) recovers-new:-
+  inplace delay=140  pad=4000000 mit=false C@before-set  write=134.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own232) recovers-new:-
+  inplace delay=150  pad=4000000 mit=true  C@before-set  write=130.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own233) recovers-new:-
+  inplace delay=150  pad=4000000 mit=false C@before-set  write=133.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own234) recovers-new:-
+  inplace delay=160  pad=4000000 mit=true  C@before-set  write=130.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own235) recovers-new:-
+  inplace delay=160  pad=4000000 mit=false C@before-set  write=144.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own236) recovers-new:-
+  inplace delay=180  pad=4000000 mit=true  C@before-set  write=139.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own237) recovers-new:-
+  inplace delay=180  pad=4000000 mit=false C@before-set  write=136.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own238) recovers-new:-
+  inplace delay=200  pad=4000000 mit=true  C@before-set  write=163.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own239) recovers-new:-
+  inplace delay=200  pad=4000000 mit=false C@before-set  write=142.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own240) recovers-new:-
+=== raw, run 2
+SEQ race (load 1.36)
+  rename  delay=30   pad=2000000 mit=true  C@before-set  write=  4.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own1) recovers-new:-
+  rename  delay=30   pad=2000000 mit=false C@before-set  write=  5.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own2) recovers-new:-
+  rename  delay=40   pad=2000000 mit=true  C@during      write=  6.0ms C-survived:yes view-saw-C:no  changed-during:1 mitigation:asked/C later-read:C(c3) recovers-new:-
+  rename  delay=40   pad=2000000 mit=false C@before-set  write=  2.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own4) recovers-new:-
+  rename  delay=50   pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c5) recovers-new:-
+  rename  delay=50   pad=2000000 mit=false C@before-set  write=  8.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own6) recovers-new:-
+  rename  delay=60   pad=2000000 mit=true  C@before-set  write=  3.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own7) recovers-new:-
+  rename  delay=60   pad=2000000 mit=false C@during      write= 10.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own8) recovers-new:-
+  rename  delay=70   pad=2000000 mit=true  C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c9) recovers-new:-
+  rename  delay=70   pad=2000000 mit=false C@before-set  write=  5.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own10) recovers-new:-
+  rename  delay=80   pad=2000000 mit=true  C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c11) recovers-new:-
+  rename  delay=80   pad=2000000 mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c12) recovers-new:-
+  rename  delay=90   pad=2000000 mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c13) recovers-new:-
+  rename  delay=90   pad=2000000 mit=false C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c14) recovers-new:-
+  rename  delay=100  pad=2000000 mit=true  C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c15) recovers-new:-
+  rename  delay=100  pad=2000000 mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c16) recovers-new:-
+  rename  delay=110  pad=2000000 mit=true  C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c17) recovers-new:-
+  rename  delay=110  pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c18) recovers-new:-
+  rename  delay=120  pad=2000000 mit=true  C@after-saved write= 11.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c19) recovers-new:-
+  rename  delay=120  pad=2000000 mit=false C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c20) recovers-new:-
+  rename  delay=130  pad=2000000 mit=true  C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c21) recovers-new:-
+  rename  delay=130  pad=2000000 mit=false C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c22) recovers-new:-
+  rename  delay=140  pad=2000000 mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c23) recovers-new:-
+  rename  delay=140  pad=2000000 mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c24) recovers-new:-
+  rename  delay=150  pad=2000000 mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c25) recovers-new:-
+  rename  delay=150  pad=2000000 mit=false C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c26) recovers-new:-
+  rename  delay=160  pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c27) recovers-new:-
+  rename  delay=160  pad=2000000 mit=false C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c28) recovers-new:-
+  rename  delay=170  pad=2000000 mit=true  C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c29) recovers-new:-
+  rename  delay=170  pad=2000000 mit=false C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c30) recovers-new:-
+  rename  delay=180  pad=2000000 mit=true  C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c31) recovers-new:-
+  rename  delay=180  pad=2000000 mit=false C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c32) recovers-new:-
+  rename  delay=190  pad=2000000 mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c33) recovers-new:-
+  rename  delay=190  pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c34) recovers-new:-
+  rename  delay=200  pad=2000000 mit=true  C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c35) recovers-new:-
+  rename  delay=200  pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c36) recovers-new:-
+  rename  delay=210  pad=2000000 mit=true  C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c37) recovers-new:-
+  rename  delay=210  pad=2000000 mit=false C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c38) recovers-new:-
+  rename  delay=220  pad=2000000 mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c39) recovers-new:-
+  rename  delay=220  pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c40) recovers-new:-
+  rename  delay=230  pad=2000000 mit=true  C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c41) recovers-new:-
+  rename  delay=230  pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c42) recovers-new:-
+  rename  delay=240  pad=2000000 mit=true  C@after-saved write= 10.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c43) recovers-new:-
+  rename  delay=240  pad=2000000 mit=false C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c44) recovers-new:-
+  rename  delay=250  pad=2000000 mit=true  C@after-saved write= 10.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c45) recovers-new:-
+  rename  delay=250  pad=2000000 mit=false C@after-saved write= 11.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c46) recovers-new:-
+  rename  delay=30   pad=4000000 mit=true  C@before-set  write= 13.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own47) recovers-new:-
+  rename  delay=30   pad=4000000 mit=false C@before-set  write= 24.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own48) recovers-new:-
+  rename  delay=40   pad=4000000 mit=true  C@before-set  write= 16.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own49) recovers-new:-
+  rename  delay=40   pad=4000000 mit=false C@before-set  write= 14.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own50) recovers-new:-
+  rename  delay=50   pad=4000000 mit=true  C@before-set  write= 14.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own51) recovers-new:-
+  rename  delay=50   pad=4000000 mit=false C@before-set  write= 15.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own52) recovers-new:-
+  rename  delay=60   pad=4000000 mit=true  C@before-set  write= 13.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own53) recovers-new:-
+  rename  delay=60   pad=4000000 mit=false C@before-set  write= 13.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own54) recovers-new:-
+  rename  delay=70   pad=4000000 mit=true  C@before-set  write= 18.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own55) recovers-new:-
+  rename  delay=70   pad=4000000 mit=false C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c56) recovers-new:-
+  rename  delay=80   pad=4000000 mit=true  C@during      write= 12.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own57) recovers-new:-
+  rename  delay=80   pad=4000000 mit=false C@before-set  write=  7.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own58) recovers-new:-
+  rename  delay=90   pad=4000000 mit=true  C@during      write= 18.0ms C-survived:yes view-saw-C:no  changed-during:1 mitigation:asked/C later-read:C(c59) recovers-new:-
+  rename  delay=90   pad=4000000 mit=false C@during      write= 13.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own60) recovers-new:-
+  rename  delay=100  pad=4000000 mit=true  C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c61) recovers-new:-
+  rename  delay=100  pad=4000000 mit=false C@after-saved write= 12.0ms C-survived:yes view-saw-C:no  changed-during:0 mitigation:-/- later-read:C(c62) recovers-new:-
+  rename  delay=110  pad=4000000 mit=true  C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c63) recovers-new:-
+  rename  delay=110  pad=4000000 mit=false C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c64) recovers-new:-
+  rename  delay=120  pad=4000000 mit=true  C@after-saved write= 12.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c65) recovers-new:-
+  rename  delay=120  pad=4000000 mit=false C@after-saved write= 15.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c66) recovers-new:-
+  rename  delay=130  pad=4000000 mit=true  C@during      write= 15.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own67) recovers-new:-
+  rename  delay=130  pad=4000000 mit=false C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c68) recovers-new:-
+  rename  delay=140  pad=4000000 mit=true  C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c69) recovers-new:-
+  rename  delay=140  pad=4000000 mit=false C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c70) recovers-new:-
+  rename  delay=150  pad=4000000 mit=true  C@during      write= 16.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own71) recovers-new:-
+  rename  delay=150  pad=4000000 mit=false C@after-saved write= 15.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c72) recovers-new:-
+  rename  delay=160  pad=4000000 mit=true  C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c73) recovers-new:-
+  rename  delay=160  pad=4000000 mit=false C@after-saved write= 10.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c74) recovers-new:-
+  rename  delay=170  pad=4000000 mit=true  C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c75) recovers-new:-
+  rename  delay=170  pad=4000000 mit=false C@after-saved write= 10.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c76) recovers-new:-
+  rename  delay=180  pad=4000000 mit=true  C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c77) recovers-new:-
+  rename  delay=180  pad=4000000 mit=false C@after-saved write= 17.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c78) recovers-new:-
+  rename  delay=190  pad=4000000 mit=true  C@after-saved write= 12.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c79) recovers-new:-
+  rename  delay=190  pad=4000000 mit=false C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c80) recovers-new:-
+  rename  delay=200  pad=4000000 mit=true  C@after-saved write= 16.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c81) recovers-new:-
+  rename  delay=200  pad=4000000 mit=false C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c82) recovers-new:-
+  rename  delay=210  pad=4000000 mit=true  C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c83) recovers-new:-
+  rename  delay=210  pad=4000000 mit=false C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c84) recovers-new:-
+  rename  delay=220  pad=4000000 mit=true  C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c85) recovers-new:-
+  rename  delay=220  pad=4000000 mit=false C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c86) recovers-new:-
+  rename  delay=230  pad=4000000 mit=true  C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c87) recovers-new:-
+  rename  delay=230  pad=4000000 mit=false C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c88) recovers-new:-
+  rename  delay=240  pad=4000000 mit=true  C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c89) recovers-new:-
+  rename  delay=240  pad=4000000 mit=false C@after-saved write= 12.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c90) recovers-new:-
+  rename  delay=250  pad=4000000 mit=true  C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c91) recovers-new:-
+  rename  delay=250  pad=4000000 mit=false C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c92) recovers-new:-
+  inplace delay=30   pad=2000000 mit=true  C@before-set  write=  6.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own93) recovers-new:-
+  inplace delay=30   pad=2000000 mit=false C@before-set  write=  3.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own94) recovers-new:-
+  inplace delay=40   pad=2000000 mit=true  C@before-set  write=  4.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own95) recovers-new:-
+  inplace delay=40   pad=2000000 mit=false C@during      write=  6.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own96) recovers-new:-
+  inplace delay=50   pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c97) recovers-new:-
+  inplace delay=50   pad=2000000 mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c98) recovers-new:-
+  inplace delay=60   pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c99) recovers-new:-
+  inplace delay=60   pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c100) recovers-new:-
+  inplace delay=70   pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c101) recovers-new:-
+  inplace delay=70   pad=2000000 mit=false C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c102) recovers-new:-
+  inplace delay=80   pad=2000000 mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c103) recovers-new:-
+  inplace delay=80   pad=2000000 mit=false C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c104) recovers-new:-
+  inplace delay=90   pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c105) recovers-new:-
+  inplace delay=90   pad=2000000 mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c106) recovers-new:-
+  inplace delay=100  pad=2000000 mit=true  C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c107) recovers-new:-
+  inplace delay=100  pad=2000000 mit=false C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c108) recovers-new:-
+  inplace delay=110  pad=2000000 mit=true  C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c109) recovers-new:-
+  inplace delay=110  pad=2000000 mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c110) recovers-new:-
+  inplace delay=120  pad=2000000 mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c111) recovers-new:-
+  inplace delay=120  pad=2000000 mit=false C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c112) recovers-new:-
+  inplace delay=130  pad=2000000 mit=true  C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c113) recovers-new:-
+  inplace delay=130  pad=2000000 mit=false C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c114) recovers-new:-
+  inplace delay=140  pad=2000000 mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c115) recovers-new:-
+  inplace delay=140  pad=2000000 mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c116) recovers-new:-
+  inplace delay=150  pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c117) recovers-new:-
+  inplace delay=150  pad=2000000 mit=false C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c118) recovers-new:-
+  inplace delay=160  pad=2000000 mit=true  C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c119) recovers-new:-
+  inplace delay=160  pad=2000000 mit=false C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c120) recovers-new:-
+  inplace delay=170  pad=2000000 mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c121) recovers-new:-
+  inplace delay=170  pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c122) recovers-new:-
+  inplace delay=180  pad=2000000 mit=true  C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c123) recovers-new:-
+  inplace delay=180  pad=2000000 mit=false C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c124) recovers-new:-
+  inplace delay=190  pad=2000000 mit=true  C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c125) recovers-new:-
+  inplace delay=190  pad=2000000 mit=false C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c126) recovers-new:-
+  inplace delay=200  pad=2000000 mit=true  C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c127) recovers-new:-
+  inplace delay=200  pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c128) recovers-new:-
+  inplace delay=210  pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c129) recovers-new:-
+  inplace delay=210  pad=2000000 mit=false C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c130) recovers-new:-
+  inplace delay=220  pad=2000000 mit=true  C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c131) recovers-new:-
+  inplace delay=220  pad=2000000 mit=false C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c132) recovers-new:-
+  inplace delay=230  pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c133) recovers-new:-
+  inplace delay=230  pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c134) recovers-new:-
+  inplace delay=240  pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c135) recovers-new:-
+  inplace delay=240  pad=2000000 mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c136) recovers-new:-
+  inplace delay=250  pad=2000000 mit=true  C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c137) recovers-new:-
+  inplace delay=250  pad=2000000 mit=false C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c138) recovers-new:-
+  inplace delay=30   pad=4000000 mit=true  C@before-set  write= 13.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own139) recovers-new:-
+  inplace delay=30   pad=4000000 mit=false C@before-set  write= 16.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own140) recovers-new:-
+  inplace delay=40   pad=4000000 mit=true  C@before-set  write= 12.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own141) recovers-new:-
+  inplace delay=40   pad=4000000 mit=false C@before-set  write= 14.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own142) recovers-new:-
+  inplace delay=50   pad=4000000 mit=true  C@before-set  write=  7.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own143) recovers-new:-
+  inplace delay=50   pad=4000000 mit=false C@before-set  write=  7.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own144) recovers-new:-
+  inplace delay=60   pad=4000000 mit=true  C@before-set  write=  9.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own145) recovers-new:-
+  inplace delay=60   pad=4000000 mit=false C@before-set  write= 14.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own146) recovers-new:-
+  inplace delay=70   pad=4000000 mit=true  C@before-set  write= 14.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own147) recovers-new:-
+  inplace delay=70   pad=4000000 mit=false C@before-set  write=  8.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own148) recovers-new:-
+  inplace delay=80   pad=4000000 mit=true  C@during      write= 14.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own149) recovers-new:-
+  inplace delay=80   pad=4000000 mit=false C@before-set  write= 13.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own150) recovers-new:-
+  inplace delay=90   pad=4000000 mit=true  C@during      write= 19.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own151) recovers-new:-
+  inplace delay=90   pad=4000000 mit=false C@during      write= 14.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own152) recovers-new:-
+  inplace delay=100  pad=4000000 mit=true  C@after-saved write= 15.0ms C-survived:yes view-saw-C:no  changed-during:1 mitigation:asked/- later-read:C(c153) recovers-new:-
+  inplace delay=100  pad=4000000 mit=false C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c154) recovers-new:-
+  inplace delay=110  pad=4000000 mit=true  C@during      write= 14.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own155) recovers-new:-
+  inplace delay=110  pad=4000000 mit=false C@after-saved write= 11.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c156) recovers-new:-
+  inplace delay=120  pad=4000000 mit=true  C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c157) recovers-new:-
+  inplace delay=120  pad=4000000 mit=false C@after-saved write= 17.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c158) recovers-new:-
+  inplace delay=130  pad=4000000 mit=true  C@after-saved write= 16.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c159) recovers-new:-
+  inplace delay=130  pad=4000000 mit=false C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c160) recovers-new:-
+  inplace delay=140  pad=4000000 mit=true  C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c161) recovers-new:-
+  inplace delay=140  pad=4000000 mit=false C@after-saved write= 11.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c162) recovers-new:-
+  inplace delay=150  pad=4000000 mit=true  C@after-saved write= 10.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c163) recovers-new:-
+  inplace delay=150  pad=4000000 mit=false C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c164) recovers-new:-
+  inplace delay=160  pad=4000000 mit=true  C@after-saved write= 10.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c165) recovers-new:-
+  inplace delay=160  pad=4000000 mit=false C@after-saved write= 17.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c166) recovers-new:-
+  inplace delay=170  pad=4000000 mit=true  C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c167) recovers-new:-
+  inplace delay=170  pad=4000000 mit=false C@after-saved write= 10.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c168) recovers-new:-
+  inplace delay=180  pad=4000000 mit=true  C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c169) recovers-new:-
+  inplace delay=180  pad=4000000 mit=false C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c170) recovers-new:-
+  inplace delay=190  pad=4000000 mit=true  C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c171) recovers-new:-
+  inplace delay=190  pad=4000000 mit=false C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c172) recovers-new:-
+  inplace delay=200  pad=4000000 mit=true  C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c173) recovers-new:-
+  inplace delay=200  pad=4000000 mit=false C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c174) recovers-new:-
+  inplace delay=210  pad=4000000 mit=true  C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c175) recovers-new:-
+  inplace delay=210  pad=4000000 mit=false C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c176) recovers-new:-
+  inplace delay=220  pad=4000000 mit=true  C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c177) recovers-new:-
+  inplace delay=220  pad=4000000 mit=false C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c178) recovers-new:-
+  inplace delay=230  pad=4000000 mit=true  C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c179) recovers-new:-
+  inplace delay=230  pad=4000000 mit=false C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c180) recovers-new:-
+  inplace delay=240  pad=4000000 mit=true  C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c181) recovers-new:-
+  inplace delay=240  pad=4000000 mit=false C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c182) recovers-new:-
+  inplace delay=250  pad=4000000 mit=true  C@after-saved write= 18.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c183) recovers-new:-
+  inplace delay=250  pad=4000000 mit=false C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c184) recovers-new:-
+  rename  delay=30   pad=2000000 mit=true  C@during      write=  5.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own185) recovers-new:-
+  rename  delay=30   pad=2000000 mit=false C@before-set  write=  4.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own186) recovers-new:-
+  rename  delay=40   pad=2000000 mit=true  C@before-set  write=  6.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own187) recovers-new:-
+  rename  delay=40   pad=2000000 mit=false C@before-set  write=  7.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own188) recovers-new:-
+  rename  delay=50   pad=2000000 mit=true  C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c189) recovers-new:-
+  rename  delay=50   pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c190) recovers-new:-
+  rename  delay=60   pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c191) recovers-new:-
+  rename  delay=60   pad=2000000 mit=false C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c192) recovers-new:-
+  rename  delay=70   pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c193) recovers-new:-
+  rename  delay=70   pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c194) recovers-new:-
+  rename  delay=80   pad=2000000 mit=true  C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c195) recovers-new:-
+  rename  delay=80   pad=2000000 mit=false C@after-saved write= 10.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c196) recovers-new:-
+  rename  delay=90   pad=2000000 mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c197) recovers-new:-
+  rename  delay=90   pad=2000000 mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c198) recovers-new:-
+  rename  delay=100  pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c199) recovers-new:-
+  rename  delay=100  pad=2000000 mit=false C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c200) recovers-new:-
+  rename  delay=110  pad=2000000 mit=true  C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c201) recovers-new:-
+  rename  delay=110  pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c202) recovers-new:-
+  rename  delay=120  pad=2000000 mit=true  C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c203) recovers-new:-
+  rename  delay=120  pad=2000000 mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c204) recovers-new:-
+  rename  delay=130  pad=2000000 mit=true  C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c205) recovers-new:-
+  rename  delay=130  pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c206) recovers-new:-
+  rename  delay=140  pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c207) recovers-new:-
+  rename  delay=140  pad=2000000 mit=false C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c208) recovers-new:-
+  rename  delay=150  pad=2000000 mit=true  C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c209) recovers-new:-
+  rename  delay=150  pad=2000000 mit=false C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c210) recovers-new:-
+  rename  delay=160  pad=2000000 mit=true  C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c211) recovers-new:-
+  rename  delay=160  pad=2000000 mit=false C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c212) recovers-new:-
+  rename  delay=170  pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c213) recovers-new:-
+  rename  delay=170  pad=2000000 mit=false C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c214) recovers-new:-
+  rename  delay=180  pad=2000000 mit=true  C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c215) recovers-new:-
+  rename  delay=180  pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c216) recovers-new:-
+  rename  delay=190  pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c217) recovers-new:-
+  rename  delay=190  pad=2000000 mit=false C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c218) recovers-new:-
+  rename  delay=200  pad=2000000 mit=true  C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c219) recovers-new:-
+  rename  delay=200  pad=2000000 mit=false C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c220) recovers-new:-
+  rename  delay=210  pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c221) recovers-new:-
+  rename  delay=210  pad=2000000 mit=false C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c222) recovers-new:-
+  rename  delay=220  pad=2000000 mit=true  C@after-saved write=  2.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c223) recovers-new:-
+  rename  delay=220  pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c224) recovers-new:-
+  rename  delay=230  pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c225) recovers-new:-
+  rename  delay=230  pad=2000000 mit=false C@after-saved write= 12.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c226) recovers-new:-
+  rename  delay=240  pad=2000000 mit=true  C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c227) recovers-new:-
+  rename  delay=240  pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c228) recovers-new:-
+  rename  delay=250  pad=2000000 mit=true  C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c229) recovers-new:-
+  rename  delay=250  pad=2000000 mit=false C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c230) recovers-new:-
+  rename  delay=30   pad=4000000 mit=true  C@before-set  write= 35.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own231) recovers-new:-
+  rename  delay=30   pad=4000000 mit=false C@before-set  write= 14.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own232) recovers-new:-
+  rename  delay=40   pad=4000000 mit=true  C@before-set  write= 15.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own233) recovers-new:-
+  rename  delay=40   pad=4000000 mit=false C@before-set  write= 17.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own234) recovers-new:-
+  rename  delay=50   pad=4000000 mit=true  C@before-set  write= 16.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own235) recovers-new:-
+  rename  delay=50   pad=4000000 mit=false C@before-set  write= 12.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own236) recovers-new:-
+  rename  delay=60   pad=4000000 mit=true  C@before-set  write= 17.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own237) recovers-new:-
+  rename  delay=60   pad=4000000 mit=false C@before-set  write= 16.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own238) recovers-new:-
+  rename  delay=70   pad=4000000 mit=true  C@before-set  write= 43.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own239) recovers-new:-
+  rename  delay=70   pad=4000000 mit=false C@before-set  write=  9.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own240) recovers-new:-
+  rename  delay=80   pad=4000000 mit=true  C@before-set  write= 24.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own241) recovers-new:-
+  rename  delay=80   pad=4000000 mit=false C@before-set  write=  8.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own242) recovers-new:-
+  rename  delay=90   pad=4000000 mit=true  C@before-set  write= 44.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own243) recovers-new:-
+  rename  delay=90   pad=4000000 mit=false C@before-set  write= 15.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own244) recovers-new:-
+  rename  delay=100  pad=4000000 mit=true  C@during      write= 18.0ms C-survived:yes view-saw-C:no  changed-during:1 mitigation:asked/C later-read:C(c245) recovers-new:-
+  rename  delay=100  pad=4000000 mit=false C@before-set  write= 12.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own246) recovers-new:-
+  rename  delay=110  pad=4000000 mit=true  C@before-set  write= 22.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own247) recovers-new:-
+  rename  delay=110  pad=4000000 mit=false C@after-saved write= 17.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c248) recovers-new:-
+  rename  delay=120  pad=4000000 mit=true  C@during      write= 15.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own249) recovers-new:-
+  rename  delay=120  pad=4000000 mit=false C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c250) recovers-new:-
+  rename  delay=130  pad=4000000 mit=true  C@after-saved write= 14.0ms C-survived:yes view-saw-C:no  changed-during:1 mitigation:asked/- later-read:C(c251) recovers-new:-
+  rename  delay=130  pad=4000000 mit=false C@after-saved write= 12.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c252) recovers-new:-
+  rename  delay=140  pad=4000000 mit=true  C@before-set  write= 21.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own253) recovers-new:-
+  rename  delay=140  pad=4000000 mit=false C@during      write= 29.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own254) recovers-new:-
+  rename  delay=150  pad=4000000 mit=true  C@after-saved write= 17.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c255) recovers-new:-
+  rename  delay=150  pad=4000000 mit=false C@during      write= 19.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own256) recovers-new:-
+  rename  delay=160  pad=4000000 mit=true  C@before-set  write= 18.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own257) recovers-new:-
+  rename  delay=160  pad=4000000 mit=false C@before-set  write= 19.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own258) recovers-new:-
+  rename  delay=170  pad=4000000 mit=true  C@after-saved write= 23.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c259) recovers-new:-
+  rename  delay=170  pad=4000000 mit=false C@after-saved write= 28.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c260) recovers-new:-
+  rename  delay=180  pad=4000000 mit=true  C@after-saved write= 18.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c261) recovers-new:-
+  rename  delay=180  pad=4000000 mit=false C@after-saved write= 11.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c262) recovers-new:-
+  rename  delay=190  pad=4000000 mit=true  C@after-saved write= 27.0ms C-survived:yes view-saw-C:no  changed-during:1 mitigation:asked/- later-read:C(c263) recovers-new:-
+  rename  delay=190  pad=4000000 mit=false C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c264) recovers-new:-
+  rename  delay=200  pad=4000000 mit=true  C@after-saved write= 17.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c265) recovers-new:-
+  rename  delay=200  pad=4000000 mit=false C@during      write= 16.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own266) recovers-new:-
+  rename  delay=210  pad=4000000 mit=true  C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c267) recovers-new:-
+  rename  delay=210  pad=4000000 mit=false C@after-saved write= 12.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c268) recovers-new:-
+  rename  delay=220  pad=4000000 mit=true  C@after-saved write= 22.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c269) recovers-new:-
+  rename  delay=220  pad=4000000 mit=false C@after-saved write= 22.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c270) recovers-new:-
+  rename  delay=230  pad=4000000 mit=true  C@after-saved write= 12.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c271) recovers-new:-
+  rename  delay=230  pad=4000000 mit=false C@after-saved write= 15.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c272) recovers-new:-
+  rename  delay=240  pad=4000000 mit=true  C@after-saved write= 17.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c273) recovers-new:-
+  rename  delay=240  pad=4000000 mit=false C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c274) recovers-new:-
+  rename  delay=250  pad=4000000 mit=true  C@after-saved write= 10.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c275) recovers-new:-
+  rename  delay=250  pad=4000000 mit=false C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c276) recovers-new:-
+  inplace delay=30   pad=2000000 mit=true  C@before-set  write=  5.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own277) recovers-new:-
+  inplace delay=30   pad=2000000 mit=false C@before-set  write= 13.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own278) recovers-new:-
+  inplace delay=40   pad=2000000 mit=true  C@before-set  write= 11.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own279) recovers-new:-
+  inplace delay=40   pad=2000000 mit=false C@before-set  write=  3.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own280) recovers-new:-
+  inplace delay=50   pad=2000000 mit=true  C@before-set  write=  9.0ms C-survived:no  view-saw-C:no  changed-during:0 mitigation:-/- later-read:-(own281) recovers-new:-
+  inplace delay=50   pad=2000000 mit=false C@during      write=  8.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c282) recovers-new:-
+  inplace delay=60   pad=2000000 mit=true  C@before-set  write= 13.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own283) recovers-new:-
+  inplace delay=60   pad=2000000 mit=false C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c284) recovers-new:-
+  inplace delay=70   pad=2000000 mit=true  C@before-set  write=  7.0ms C-survived:no  view-saw-C:no  changed-during:0 mitigation:-/- later-read:-(own285) recovers-new:-
+  inplace delay=70   pad=2000000 mit=false C@during      write=  6.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own286) recovers-new:-
+  inplace delay=80   pad=2000000 mit=true  C@after-saved write= 11.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c287) recovers-new:-
+  inplace delay=80   pad=2000000 mit=false C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c288) recovers-new:-
+  inplace delay=90   pad=2000000 mit=true  C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c289) recovers-new:-
+  inplace delay=90   pad=2000000 mit=false C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c290) recovers-new:-
+  inplace delay=100  pad=2000000 mit=true  C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c291) recovers-new:-
+  inplace delay=100  pad=2000000 mit=false C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c292) recovers-new:-
+  inplace delay=110  pad=2000000 mit=true  C@after-saved write= 15.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c293) recovers-new:-
+  inplace delay=110  pad=2000000 mit=false C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c294) recovers-new:-
+  inplace delay=120  pad=2000000 mit=true  C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c295) recovers-new:-
+  inplace delay=120  pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c296) recovers-new:-
+  inplace delay=130  pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c297) recovers-new:-
+  inplace delay=130  pad=2000000 mit=false C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c298) recovers-new:-
+  inplace delay=140  pad=2000000 mit=true  C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c299) recovers-new:-
+  inplace delay=140  pad=2000000 mit=false C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c300) recovers-new:-
+  inplace delay=150  pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c301) recovers-new:-
+  inplace delay=150  pad=2000000 mit=false C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c302) recovers-new:-
+  inplace delay=160  pad=2000000 mit=true  C@after-saved write=  4.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c303) recovers-new:-
+  inplace delay=160  pad=2000000 mit=false C@after-saved write= 16.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c304) recovers-new:-
+  inplace delay=170  pad=2000000 mit=true  C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c305) recovers-new:-
+  inplace delay=170  pad=2000000 mit=false C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c306) recovers-new:-
+  inplace delay=180  pad=2000000 mit=true  C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c307) recovers-new:-
+  inplace delay=180  pad=2000000 mit=false C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c308) recovers-new:-
+  inplace delay=190  pad=2000000 mit=true  C@after-saved write=  3.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c309) recovers-new:-
+  inplace delay=190  pad=2000000 mit=false C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:2 mitigation:-/- later-read:C(c310) recovers-new:-
+  inplace delay=200  pad=2000000 mit=true  C@after-saved write= 10.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c311) recovers-new:-
+  inplace delay=200  pad=2000000 mit=false C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c312) recovers-new:-
+  inplace delay=210  pad=2000000 mit=true  C@after-saved write=  9.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c313) recovers-new:-
+  inplace delay=210  pad=2000000 mit=false C@after-saved write=  6.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c314) recovers-new:-
+  inplace delay=220  pad=2000000 mit=true  C@after-saved write= 11.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c315) recovers-new:-
+  inplace delay=220  pad=2000000 mit=false C@after-saved write= 12.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c316) recovers-new:-
+  inplace delay=230  pad=2000000 mit=true  C@after-saved write=  5.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c317) recovers-new:-
+  inplace delay=230  pad=2000000 mit=false C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c318) recovers-new:-
+  inplace delay=240  pad=2000000 mit=true  C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c319) recovers-new:-
+  inplace delay=240  pad=2000000 mit=false C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c320) recovers-new:-
+  inplace delay=250  pad=2000000 mit=true  C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c321) recovers-new:-
+  inplace delay=250  pad=2000000 mit=false C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c322) recovers-new:-
+  inplace delay=30   pad=4000000 mit=true  C@before-set  write= 19.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own323) recovers-new:-
+  inplace delay=30   pad=4000000 mit=false C@before-set  write= 23.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own324) recovers-new:-
+  inplace delay=40   pad=4000000 mit=true  C@before-set  write= 20.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own325) recovers-new:-
+  inplace delay=40   pad=4000000 mit=false C@before-set  write= 14.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own326) recovers-new:-
+  inplace delay=50   pad=4000000 mit=true  C@before-set  write= 13.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own327) recovers-new:-
+  inplace delay=50   pad=4000000 mit=false C@before-set  write= 16.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own328) recovers-new:-
+  inplace delay=60   pad=4000000 mit=true  C@before-set  write= 13.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own329) recovers-new:-
+  inplace delay=60   pad=4000000 mit=false C@before-set  write=  8.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own330) recovers-new:-
+  inplace delay=70   pad=4000000 mit=true  C@during      write= 10.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own331) recovers-new:-
+  inplace delay=70   pad=4000000 mit=false C@before-set  write= 14.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own332) recovers-new:-
+  inplace delay=80   pad=4000000 mit=true  C@before-set  write= 16.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own333) recovers-new:-
+  inplace delay=80   pad=4000000 mit=false C@before-set  write= 14.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own334) recovers-new:-
+  inplace delay=90   pad=4000000 mit=true  C@before-set  write= 13.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own335) recovers-new:-
+  inplace delay=90   pad=4000000 mit=false C@before-set  write= 18.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own336) recovers-new:-
+  inplace delay=100  pad=4000000 mit=true  C@during      write= 16.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:asked/- later-read:-(own337) recovers-new:-
+  inplace delay=100  pad=4000000 mit=false C@during      write= 15.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own338) recovers-new:-
+  inplace delay=110  pad=4000000 mit=true  C@before-set  write= 16.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own339) recovers-new:-
+  inplace delay=110  pad=4000000 mit=false C@after-saved write= 11.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c340) recovers-new:-
+  inplace delay=120  pad=4000000 mit=true  C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c341) recovers-new:-
+  inplace delay=120  pad=4000000 mit=false C@before-set  write= 15.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own342) recovers-new:-
+  inplace delay=130  pad=4000000 mit=true  C@after-saved write= 16.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c343) recovers-new:-
+  inplace delay=130  pad=4000000 mit=false C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c344) recovers-new:-
+  inplace delay=140  pad=4000000 mit=true  C@during      write= 16.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:asked/- later-read:-(own345) recovers-new:-
+  inplace delay=140  pad=4000000 mit=false C@before-set  write= 15.0ms C-survived:no  view-saw-C:no  changed-during:2 mitigation:-/- later-read:-(own346) recovers-new:-
+  inplace delay=150  pad=4000000 mit=true  C@during      write= 17.0ms C-survived:yes view-saw-C:no  changed-during:2 mitigation:asked/C later-read:C(c347) recovers-new:-
+  inplace delay=150  pad=4000000 mit=false C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c348) recovers-new:-
+  inplace delay=160  pad=4000000 mit=true  C@after-saved write= 13.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c349) recovers-new:-
+  inplace delay=160  pad=4000000 mit=false C@before-set  write= 14.0ms C-survived:no  view-saw-C:no  changed-during:1 mitigation:-/- later-read:-(own350) recovers-new:-
+  inplace delay=170  pad=4000000 mit=true  C@after-saved write= 20.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c351) recovers-new:-
+  inplace delay=170  pad=4000000 mit=false C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c352) recovers-new:-
+  inplace delay=180  pad=4000000 mit=true  C@after-saved write= 15.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c353) recovers-new:-
+  inplace delay=180  pad=4000000 mit=false C@after-saved write= 15.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c354) recovers-new:-
+  inplace delay=190  pad=4000000 mit=true  C@after-saved write= 56.0ms C-survived:yes view-saw-C:no  changed-during:1 mitigation:asked/- later-read:C(c355) recovers-new:-
+  inplace delay=190  pad=4000000 mit=false C@after-saved write= 12.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c356) recovers-new:-
+  inplace delay=200  pad=4000000 mit=true  C@after-saved write= 16.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c357) recovers-new:-
+  inplace delay=200  pad=4000000 mit=false C@after-saved write= 18.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c358) recovers-new:-
+  inplace delay=210  pad=4000000 mit=true  C@after-saved write= 31.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c359) recovers-new:-
+  inplace delay=210  pad=4000000 mit=false C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c360) recovers-new:-
+  inplace delay=220  pad=4000000 mit=true  C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c361) recovers-new:-
+  inplace delay=220  pad=4000000 mit=false C@after-saved write= 15.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c362) recovers-new:-
+  inplace delay=230  pad=4000000 mit=true  C@after-saved write= 19.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c363) recovers-new:-
+  inplace delay=230  pad=4000000 mit=false C@after-saved write=  8.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c364) recovers-new:-
+  inplace delay=240  pad=4000000 mit=true  C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:0 mitigation:-/- later-read:C(c365) recovers-new:-
+  inplace delay=240  pad=4000000 mit=false C@after-saved write= 14.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c366) recovers-new:-
+  inplace delay=250  pad=4000000 mit=true  C@after-saved write= 20.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:asked/- later-read:C(c367) recovers-new:-
+  inplace delay=250  pad=4000000 mit=false C@after-saved write=  7.0ms C-survived:yes view-saw-C:yes changed-during:1 mitigation:-/- later-read:C(c368) recovers-new:-

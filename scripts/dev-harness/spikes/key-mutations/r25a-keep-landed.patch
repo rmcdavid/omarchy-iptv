@@ -2,12 +2,12 @@ diff --git a/Service.qml b/Service.qml
 index 0000000..0000000 100644
 --- a/Service.qml
 +++ b/Service.qml
-@@ -5249,7 +5249,7 @@ Item {
+@@ -5366,7 +5366,7 @@
            root.stateSavesInFlight = 0
            root.stateSaveFailed = false
            root.landedState = root.lastSaveState   // R21a: what the disk holds now, the marker included
 -          root.recentSaves = []                   // R25a: nothing in flight, so no later reload is an echo
 +          // MUTATION (lane A, round 15): the record is not cleared when a save lands (the eight-text record)
-         }
-         root.settleEntryFlush()
-         // R19d (D-SRC-18): a mirror a failed save withheld is paid by the first
+           // R27a: a save held for this write now reads, from a turn of its own.
+           root.stateWriteWaitExpired = false
+           root.endStateWriteWait(false)

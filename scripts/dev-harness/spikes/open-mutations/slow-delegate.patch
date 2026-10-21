@@ -1,0 +1,20 @@
+--- a/Guide.qml
++++ b/Guide.qml
+@@ -3607,6 +3607,8 @@
+                 Accessible.ignored: !visible
+ 
+                 delegate: Item {
++                  // MUTATION (spikes/open-mutations/slow-delegate.patch): every channel delegate spends 4 ms being created
++                  Component.onCompleted: { var t0 = Date.now(); while (Date.now() - t0 < 4) {} }
+                   id: tile
+                   required property int index
+                   readonly property var channel: tile.index < root.rowCount ? (root.currentRows[tile.index] || null) : null
+@@ -3828,6 +3830,8 @@
+                 onHeightChanged: root.scrollToCursor()
+ 
+                 delegate: BorderSurface {
++                  // MUTATION (spikes/open-mutations/slow-delegate.patch): every channel delegate spends 4 ms being created
++                  Component.onCompleted: { var t0 = Date.now(); while (Date.now() - t0 < 4) {} }
+                   id: row
+                   required property int index
+ 

@@ -283,7 +283,8 @@ function notifyArgv(event, params) {
   } else if (event === "stateUnreadable") {
     // R22a: Model.stateUnreadableNotice's sentence and nothing else, for the
     // same reason as the refusal above. A reason and a PATH, never a URL.
-    var told = stateUnreadableNotice(p.reason, p.path)
+    // R27e: and the mid-session title when the block began after a load.
+    var told = stateUnreadableNotice(p.reason, p.path, p.midSession === true)
     spec = { title: told.title, body: told.body, glyph: GLYPHS.alert, urgency: "critical", id: NOTIFY_IDS.stateUnreadable }
   } else if (event === "mergeDropped") {
     // R25b: Model.mergeDropNotice's sentence and nothing else -- counts and

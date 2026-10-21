@@ -37,9 +37,30 @@ ShellRoot {
     if (root.spreadDone < root.spreadLeft) Qt.callLater(root.spreadTurn)
   }
   function textFor(tag) {
-    var p = ""
-    for (var i = 0; i < root.pad; i++) p += "x"
+    // R27b: String.repeat, not a loop -- a 4 MB pad built one character at
+    // a time took longer than the race it was meant to time.
+    var p = root.pad > 0 ? "x".repeat(root.pad) : ""
     return JSON.stringify({ version: 2, favorites: ["t:" + tag], sources: [], pad: p }, null, 2) + "\n"
+  }
+  // R27b (2026-10-20, D-SRC-48): one race. The probe's OWN save of `tag`,
+  // timed (Date.now(), the wall clock the driver's writer also stamps), with
+  // every fileChanged and loaded after it timed and tagged. `mitigate`: the
+  // candidate mitigation the board names -- ONE reload after our own `saved`
+  // when a change was signalled while the write was out -- and its load is
+  // marked as the mitigation's.
+  property var race: null
+  function raceEv(kind) {
+    if (root.race === null) return
+    var r = root.race
+    var e = r.events.slice(); e.push({ kind: kind, at: Date.now(), tag: root.tagOf(fv.text()), mitigation: kind === "loaded" && r.mitigationAsked && !r.mitigationLoaded })
+    r.events = e
+    if (kind === "loaded" && r.mitigationAsked && !r.mitigationLoaded) r.mitigationLoaded = true
+    if (kind === "changed" && r.savedAt === 0) r.changedDuring = r.changedDuring + 1
+    if (kind === "saved" && r.savedAt === 0) {
+      r.savedAt = Date.now()
+      if (r.mitigate && r.changedDuring > 0) { r.mitigationAsked = true; Qt.callLater(function() { fv.reload() }) }
+    }
+    root.race = r
   }
   function note(kind, extra) {
     console.log("FVPROBE " + kind + " " + String(extra === undefined ? "" : extra))
@@ -51,10 +72,10 @@ ShellRoot {
     atomicWrites: true
     printErrors: false
     onTextChanged: root.ev("text")
-    onLoaded: { root.ev("loaded"); root.loaded += 1; root.lastText = fv.text(); root.note("loaded", root.lastText.length) }
+    onLoaded: { root.ev("loaded"); root.raceEv("loaded"); root.loaded += 1; root.lastText = fv.text(); root.note("loaded", root.lastText.length) }
     onLoadFailed: (error) => { root.failed += 1; root.note("loadFailed", error) }
-    onFileChanged: { root.ev("changed"); root.changed += 1; root.note("fileChanged"); reload() }
-    onSaved: { root.ev("saved"); root.saved += 1; root.note("saved") }
+    onFileChanged: { root.ev("changed"); root.raceEv("changed"); root.changed += 1; root.note("fileChanged"); reload() }
+    onSaved: { root.ev("saved"); root.raceEv("saved"); root.saved += 1; root.note("saved") }
     onSaveFailed: (error) => { root.ev("saveFailed"); root.saveFailed += 1; root.note("saveFailed", error) }
   }
   Timer {
@@ -88,6 +109,21 @@ ShellRoot {
       spreadTimer.interval = ms; spreadTimer.start()
       return "ok"
     }
+    function race(tag: string, pad: int, mitigate: bool): string {
+      root.pad = pad
+      var text = root.textFor(tag)
+      root.race = { tag: tag, mitigate: mitigate, setAt: Date.now(), savedAt: 0, changedDuring: 0, mitigationAsked: false, mitigationLoaded: false, events: [] }
+      fv.setText(text)
+      return "ok"
+    }
+    // The read R26a makes before the NEXT save: one reload, later, marked.
+    function laterRead(): string {
+      if (root.race === null) return "none"
+      var r = root.race; r.laterAt = Date.now(); root.race = r
+      fv.reload()
+      return "ok"
+    }
+    function raceResult(): string { return JSON.stringify(root.race) }
     function events(): string { return JSON.stringify(root.log) }
     function clearEvents(): string { root.log = []; return "ok" }
     function counts(): string {

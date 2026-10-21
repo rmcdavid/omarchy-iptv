@@ -13315,6 +13315,45 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### The P3 sweep (2026-10-20..21): four rounds, one descope, and what it closed
+
+**Merged onto `dev` after the 0.14.3 cut, as `lane-sweep-int`.** The owner chose
+the round on 2026-10-20 while `main` was held for #11935. **Round 1 (R27)**
+built: a save asked while our previous write is in flight waits for it and
+then reads (D-SINK-22's window (a)); the cap re-checked at the probe commit
+(D-SRC-41); a migration at the cap that never evicts (D-SRC-44); the no-write
+notice's wording (D-SRC-42, D-SRC-50, D-SRC-51); the board's re-read
+mitigation for D-SRC-48 measured on the real FileView, which in 608 trials
+never saw a change the later read did not (so D-SRC-48 is accepted); and an asynchronous open instrument
+(D-PERF-1), which measured **D-PERF-2**: the first guide open of a session
+takes about 548 ms in the cage, most of it the window's first show, and every
+later open about 33 ms. Its lenses found two P1s new against `dev`:
+**D-SRC-54**, the stalled-read block dropped the change it held when it
+lifted, and **D-SRC-55**, the held migration let the bar's guide URL replace a
+source's own. **Round 2 (R28)** fixed both, and its live lens, with a really
+slow FUSE `state.json`, found **D-SRC-56**: the stalled read's late answer is
+the file as it was, and the save then overwrote another program's write. The
+lead then withdrew all stalled-read handling (**R29**): a save whose read does
+not answer within 2 s is written as R26a wrote it, so D-SINK-22's window (c)
+stays, documented. **Round 3** also fixed **D-SRC-57**, which had shipped:
+a guide-data URL beside an unusable bar playlist was adopted onto the active
+source in place of its own. The **finishing round** fixed **D-SRC-53**, a held
+migration retried while another program refilled the freed place, which lost
+both bar URLs (no F1 loss in S7's 43,904 runs, against 13,512 on
+`lane-sweep-c3`: 7,032 playlist and 6,480 guide URL), deleted five inert stubs
+and corrected the window-(c) sentence. Final lenses, two on the finishing
+round: data loss MERGEABLE (no F1 loss; against `6f1d176` the only worse runs
+are holds with both bar URLs still on the entry and window-(c) losses that
+`6f1d176` never reaches); claims MERGEABLE once the integration fixed one
+README sentence, minted D-SRC-53 and D-PERF-2, and moved the version boundary
+to 0.14.3, which shipped without this work. The last live lens was round 3's,
+MERGEABLE on `lane-sweep-c3`. An independent check of the lead's integration
+text then corrected nine sentences, among them D-SRC-47, which is narrowed
+rather than fixed: a write held past 4 s still lets the own-write record fill
+after nine saves. Filed
+alongside: **F-HARNESS-35**, the README's quoted notices joined to the model
+by nothing.
+
 ### D-M3U-1 and the 0.14.3 pre-cut record
 
 **The finding (2026-10-20T18:47Z, #11935, against 0.14.2):** the playlist

@@ -507,8 +507,11 @@ Item {
   readonly property bool firstRunAllowed: Model.firstRunAllowed({ serviceReady: root.serviceReady, configured: root.configured, stateBlocked: root.stateBlocked })
   // The notification's sentence for the current reason and path (R23e: ONE
   // source of copy with it, Model.stateUnreadableNotice).
+  // R27e: titled as the notification is -- "Saving has stopped" when the
+  // block began after a state loaded (D-SRC-42).
   readonly property var stateNotice: Model.stateUnreadableNotice(root.stateBlocked,
-                                                                 root.serviceReady && typeof service.stateFilePath === "string" ? service.stateFilePath : "")
+                                                                 root.serviceReady && typeof service.stateFilePath === "string" ? service.stateFilePath : "",
+                                                                 root.serviceReady && service.stateLoaded === true)
   // D-LIVE-19: never `service.channels.length` directly. The body renders
   // one surface at a time and Model.guideSurface decides which; an
   // unconfigured guide has no channels, no column and no counts even if the
@@ -2063,8 +2066,10 @@ Item {
 
   // SR24: at the cap the add entry points show the `too_many` message
   // instead of opening a form.
+  // R28e: the cap is Model.sourcesFull's decision (one, with the service's
+  // canAddSource and the probe commit), over the service's own state.
   function sourcesFull() {
-    if (root.sourceCount < Model.LIMITS.sources) return false
+    if (!Model.sourcesFull(root.serviceReady ? root.service.userState : null)) return false
     root.showTransient(Model.sourceErrorMessage("too_many"))
     return true
   }
@@ -2224,7 +2229,7 @@ Item {
       return
     }
     var field = root.form.kind === "xtream" ? "server" : "playlist"
-    root.failForm({ code: "probe", field: field, message: Model.probeFailureLine(r.reason, String(r.host || root.form.probeHost), root.form.probeKind) })
+    root.failForm({ code: "probe", field: field, message: Model.probeFailureLine(r.reason, String(r.host || root.form.probeHost), root.form.probeKind, String(r.code || "")) })
   }
 
   // A probe outside a form: Enter / Space on a never-fetched source, or an
@@ -2240,7 +2245,7 @@ Item {
     }
     if (r.cancelled === true || !root.inSources) return
     var view = root.findSourceView(id)
-    root.sourcesNotice = Model.probeFailureLine(r.reason, String(r.host || ""), view ? String(view.kind) : "url")
+    root.sourcesNotice = Model.probeFailureLine(r.reason, String(r.host || ""), view ? String(view.kind) : "url", String(r.code || ""))
   }
 
   // Leave the form after a successful save: first run lands in the guide

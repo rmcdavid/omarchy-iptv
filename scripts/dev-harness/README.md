@@ -963,6 +963,7 @@ lane's running harness is never reaped by a clip run.
 ```
 scripts/dev-harness/key-scenario.sh check-tree            # the instrument arm, node only; run by check.sh
 scripts/dev-harness/key-scenario.sh                       # the instrument arm, then the real Service.qml under cage, with a transcript
+scripts/dev-harness/key-scenario.sh --baseline 6f1d176      # the R27 red run: 0.14.2's code, the helper split on top (130 / 5 with 134 lettered checks: B32, B33, B35, B36, B37; B34 since dropped)
 scripts/dev-harness/key-scenario.sh --baseline 1c88877      # the R26 red run: round 15's code and 0.14.1 (120 / 9: B23-B31, read before write)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-m2  # the round-12 red run: round 11's code (97 / 9: B1-B8, and N1 for its new field only)
 scripts/dev-harness/key-scenario.sh --baseline lane-key-z2  # the round-11 red run: round 10's code (68 / 30 under the 97-check harness: G1, G2, G5, F4, U1-U7, K1-K3, Z1-Z3, A1, Y2, Y3, Q1, Q2, V1, H1, X1-X6; eight of them NOFIELD-only)
@@ -1690,6 +1691,269 @@ What changed in the rigs:
   rig and its results) are committed on branch `lane-clean-w-probe` and
   are NOT in this tree; lane S's probe is in the session's scratch
   directory. The contract's eighth FileView fact records what they printed.
+
+#### Round 17 (R27): no write without a read, the cap, and the notice's words
+
+key-scenario.sh B32, B33 and B35-B37 (lane-sweep-a1, 2026-10-20), each
+under the scenario's own nested cage on a private session bus.
+- B32 (R27e, D-SRC-42): a block that begins MID-session is told as `Saving
+  has stopped`: `saving-stopped:1 not-loaded:0 body:1`. Its body said
+  changes made now are not saved until the file can be read again; R28e
+  replaced that sentence (true of one way back out of the block, false of
+  three), and B32 now reads the mid-session sentence that names them.
+- B33 (R27a window a, D-SINK-22): the harness's `editDuringWrite` makes a
+  label edit and a second one while the first write is OUT; the second
+  waits for it to land and then reads -- `skipped +0`, the wait counted,
+  the second edit on disk. On 6f1d176 at idle it is red only through its
+  field (`waited:NOFIELD`), because the first write had landed by the
+  deferred turn. That is LOAD-DEPENDENT, and this paragraph said "window (a)
+  does not open from outside the shell" until round 1's live review ran the
+  baseline at load 5-8 and saw it open: `skipped:+1`, a write without its
+  read, red on behaviour (`key-20261020-135918-1751390`). So window (a)
+  does open from outside the shell under load; the node pins time it
+  either way. It is seen red on behaviour
+  through `spikes/key-mutations/r27a-wait-never-released.patch` (`--tree`:
+  134 / 1 by the summary line, B33, the held edit never written).
+- The burst (R27a's measurement, printed, not graded): `burst_run` makes N
+  label edits a turn apart through `ipc burst` and reads `ipc burstResult`
+  and the read counter. It was a check, B34, and read green on 6f1d176 AT
+  IDLE and through the mutation alike, so it was dropped (rule 11); the
+  letter is unused. "It could not go red" was load-dependent too: under
+  load (round 1's review, load 5-8) 6f1d176's bursts of 5, 10 and 20 made 3,
+  5 and 7 writes with only 2, 4 and 6 reads, which the dropped check would
+  have read red, while lane-sweep-c1's read as many as it wrote (1/1, 2/2,
+  3/3, 6/6). A check that is red only under load is not a gate, so it stays
+  a printed measurement. Final run: bursts of 2,
+  5, 10 and 20 landed 7, 11, 20 and 29 ms after the first edit with 1, 2, 4
+  and 7 writes and as many reads (6f1d176: 7, 9, 19, 36 ms; 1, 2, 4, 7
+  writes).
+- B35 and B36 (R27d, D-SRC-44): a 0.13.6 install with 50 sources and the
+  entry's URL not among them -- the migration does not run (none evicted,
+  none added, no marker, the entry keeps its URL, `Sources is full` told
+  once, `playlistUrl:full`); then one record removed in Sources, and the
+  next reconcile migrates the URL into the freed place, ACTIVE, the marker
+  landed, the entry stripped. On 6f1d176: `same:no d:true marker:true
+  entry:no told:0` and `records:49 told:0`.
+- B37 (R27c, D-SRC-41): 49 records, an in-app add whose probe runs while a
+  hand-run `state source add` takes the 50th -- the commit refuses
+  `too_many`, 50 on disk with the hand-run one among them, a restart drops
+  nothing. On 6f1d176: `probe:ok`, the 51st committed.
+- Counts are the summary line's, the floor 133 lettered checks: forward 134
+  / 0 (`key-20261020-131102-1636986`, 479.9 s, on lane-sweep-a1 070cd35);
+  `--baseline 6f1d176` 130 / 5 with B34 still in it (B32, B33, B35, B36,
+  B37), so 129 / 5 now. Not live: window (b), a re-point timed inside a
+  write, and window (c), a read stalled for 2 s (no way without FUSE or
+  root); the node pins time both. The transcripts are in lane A's session
+  scratch directory, not the tree.
+
+What changed in the rigs:
+- `tests/service-harness.js` drops the service's own `reload()` while one
+  of our writes is queued (`droppedReloads`), as the view does (30 of 30):
+  R27a's expired write wait can ask for a read then. Against 6f1d176 alone
+  it turns nothing red (2,572 / 0 in both echo modes), because that tree
+  never reloads while a write is out.
+- `spikes/key-mutations/` gains `r27a-no-wait.patch` (node only, not run
+  live) and `r27a-wait-never-released.patch`; four older patches are re-made
+  for R27a's moved context, the same decisions broken (their node counts are
+  in that folder's README).
+- `spikes/filewatch/measure.sh` gains set `r27b` and
+  `RESULT-2026-10-20-r27b.txt`: R27b's mitigation recovered 0 of 608
+  (the contract's eighth fact).
+
+#### Round 18 (R28): a stalled read keeps the change, a held migration keeps both URLs
+
+lane-sweep-a2, 2026-10-20, on lane-sweep-c1 (R28, the lead's ruling after
+round 1's two P1s).
+- R28a has NO live segment, as R27a's window (c) had none: nothing in the
+  cage stalls a FileView read for 2 s without FUSE or root (a FIFO at the
+  path is `not-a-file` and answers at once, round 1's review). Its pins are
+  node's, through the shipping Service.qml on both hosts and both echo
+  modes, one per way the wait ends (our own late write, a source verb, an
+  in-app add, another program's write, the stalled read answering, the
+  schedule's re-read) and the restart's stated loss. [Round 19 (R29a): R28a
+  and those pins are withdrawn; round 2's live review then DID stall a
+  FileView read, with a FUSE passthrough of its own (scratch, not the
+  tree), and found R28a writing over another program's change -- Round 19
+  below.]
+- `tests/service-harness.js`: `stateVerifyWatchdog`'s interval is a
+  BINDING now (`root.stateVerifyBoundMs`, the schedule's bound), so the
+  double reads it from its own text at every `restart()` and arms the Timer
+  with the interval it has then, as QML does. [Round 19 (R29a) withdrew
+  R28a and put the literal `interval: 2000` back; the double reads either.]
+- B32 reads R28e's mid-session sentence.
+- B38 and B39 (R28b): a 0.13.6 install at 50 sources whose entry carries
+  the playlist D AND a guide URL, A carrying a guide URL of its own; A
+  picked and the shell restarted over the entry the plugin left: the entry
+  keeps both, A's own guide URL stands, each start tells `Sources is full`
+  and never `Bar setting removed`; then one record removed, and D moves in
+  WITH the bar's guide URL, the entry stripped of both.
+- `spikes/key-mutations/r26a-watchdog-20ms.patch` and
+  `r26a-watchdog-no-interval.patch` are re-made for the binding interval,
+  the same decisions broken. [Round 19: re-made again for the literal
+  interval, with `r27a-wait-never-released.patch`; node counts in that
+  folder's README.]
+- Counts are the summary line's, the floor 135 lettered checks: forward
+  136 / 0 (`key-20261020-155757-2060758`, 492.4 s, at c06f436);
+  `--baseline 843ae87` (lane-sweep-c1) 133 / 3, B32, B38 `a-epg:bar` and
+  B39 `d-epg:empty ... a-epg:bar` (`key-20261020-161525-2136277`);
+  `--baseline 6f1d176` 129 / 7, B32, B33 (`waited:NOFIELD` at load 2-3),
+  B35-B37, and B38 / B39, the migration having evicted and run at the
+  first start (`key-20261020-160609-2096379`). `sources-scenario.sh` 66 / 0
+  (`sources-20261020-161452-2134037`). The transcripts are in lane A2's
+  session scratch directory, not the tree.
+
+#### Round 19 (R29): back to R26a's bound, the pair, and two harness fixes
+
+lane-sweep-a3, 2026-10-20, on lane-sweep-c2 (R29, the lead's ruling after
+round 2's reviews).
+- R29a withdraws R28a (and R27a's window c): a save whose read has no load
+  within 2 s is written without it, counted (`stateVerifyNoLoad`) and
+  logged, as on 0.14.2. R28a's four counters (`stateVerifySilences`,
+  `stateVerifySecondReads`, `stateReadStalls`, `stateVerifyRereads`) left
+  `POINTER_FIELDS` with it; the Round 18 bullets above describe a tree that
+  no longer exists. Window a stays, with the ruling's proviso: the read the
+  held save is released to has R26a's bound, so it never waits longer.
+- The proviso was checked live with round 2's slow-file rig (its FUSE
+  passthrough, mode Q: only quickshell's read() of state.json stalls),
+  rebuilt over this tree in the lane's scratch (`a3-slow`, not the tree):
+  an edit, and a second asked while the first one's write is OUT
+  (`editDuringWrite`), with every read stalled. The FUSE log reads: read
+  stall at +0, w-one written at +2.0 s (no load: `saving without the read`),
+  the second edit's read stalled at +2.0 s, w-two written at +4.0 s; no
+  74019, no 74017, nothing blocked, both labels across a restart (twice,
+  2002 / 2001 and 2103 / 2022 ms; the unstalled control the same with no
+  watchdog line). Round 2's HS5 (an in-app add and a hand-run helper add
+  during the stall) keeps both on this tree, as on 6f1d176; HS7 (an atomic
+  replace adding a favourite during the stall, beside a label edit) loses
+  the favourite, as on 6f1d176 -- D-SINK-22's window c, left open and
+  documented by the ruling. Transcript `key-20261020-184229-2540898`.
+  [F2, 2026-10-20: the two differ by WHEN the other program wrote, not by which program it was -- the FUSE log has the helper's rename 1.7 s after the shell's write without its read and the replace's 1.4 s before it; a helper add within the 2 s bound, or before a later save while the reads stay stalled, is lost the same way (round 3's live review: a helper add followed 1 s later by a label edit, lost 3 of 3 on lane-sweep-c3 and on 6f1d176; node `F2 (<tag>): window (c), stated ...`)]
+- B40 (R29d): a 0.13.6 install whose state names A active, A carrying its
+  own guide URL, and the bar entry holding an unusable playlistUrl with a
+  guide URL beside it -- A keeps its own, one card names the pair, the
+  guide URL is in no file, both leave the entry. K1..K3 read
+  `playlistUrl:invalid-pair` (one notice) where they read
+  `epgUrl:no-source,playlistUrl:invalid`.
+- S4 (R29e): `init_pids` requires this run's own `--state-dir` in the argv
+  it matches, so a second harness over the same tree's helper no longer
+  reads as `left:` in B14 -- and no longer has its helper KILLED by the
+  reaps after B10 and B18, which kill what `init_pids` returns. Seen red on
+  the unscoped scanner in check-tree (`got:<both pids>`).
+- Counts are the summary line's, the floor 137 lettered checks: forward 138
+  / 0 (`key-20261020-184353-2546836`, 575.9 s, at e5f6d4d, load 4-6 while
+  a gate ran); `--baseline lane-sweep-c2` 134 / 4, K1..K3 (`reports:
+  epgUrl:no-source,playlistUrl:invalid`) and B40 (`a-epg:bar ... pair:0
+  file:yes`), `key-20261020-190233-2645772`; `--baseline 6f1d176` 127 / 11,
+  the same four and B32, B33 (`waited:NOFIELD`), B35..B39
+  (`key-20261020-185340-2605786`). `sources-scenario.sh` 66 / 0
+  (`sources-20261020-185340-2605788`). The transcripts are in the lane's
+  session scratch directory, not the tree.
+
+### The open, measured with its delegates (D-PERF-1, R27f; R28d)
+
+```
+scripts/dev-harness/open-scenario.sh check-tree                                         # the instrument arm, node only; run by check.sh (19 checks)
+scripts/dev-harness/private-bus.sh <dir> 1800 scripts/dev-harness/open-scenario.sh live  # the instrument arm, then the shell arm under its own nested cage
+scripts/dev-harness/private-bus.sh <dir> 1800 scripts/dev-harness/open-scenario.sh live --tree <export>   # e.g. an export carrying spikes/open-mutations/late-fill.patch
+```
+
+`openMs` (the IPC verb every open figure before 2026-10-20 came from)
+force-lays-out the channel view in the turn of the summon and stops its
+clock there, so the view has not made its delegates when it looks
+(D-PERF-1). `openAsync <list|wall>` starts the clock, summons and RETURNS;
+a probe Item the harness parents into the guide's window samples the
+PRESENTING view on every `frameSwapped` and asks for the next frame.
+
+R28d (2026-10-20) changed what a sample is. R27f counted every delegate in
+the view's contentItem, the cacheBuffer's off-screen ones included (13 rows
+and 21 tiles where 10 and 16 are drawn), settled on a count stable over
+three frames, and so trailed the drawn screen and passed a view that drew
+six rows and filled the rest 300 ms later (round 1's live review). Now a
+sample is `HarnessLib.openDrawnSet`: the delegates that are shown, whose
+EFFECTIVE opacity is above 0 (R29e: each delegate's own times every
+ancestor's up to the window, which `openSample` computes), and that
+intersect the view's visible area, and whether they TILE it (contiguous,
+nothing missing above, nothing missing below, a grid row whole), measured
+against the rows the guide has (its `rowCount`, not the view's count). The
+open is realised at the first frame whose drawn set is complete
+(`openDrawnSettle`), and the instrument samples 600 ms more, counting
+frames whose drawn set changed. `openAsyncResult` answers `running` or
+`done` with the summon time, `realisedMs`, `count` (drawn), `built` (every
+delegate at the decision), `builtMax` (the most in any frame), and
+`changedAfter`. Bounded by 400 frames and 6,000 ms: a run that does not
+settle says so in `endedBy`, never a number. A warm open is a CLOSED guide
+summoned again (the verb refuses an open guide). Nothing in the product
+changes.
+
+The instrument arm drives `openDrawnSet` over thirteen hand-made frames
+(D1-D13: a list screen under its cacheBuffer, a gap, a screen filled in
+part, a guide that ends on screen, a row missing above, a grid's full rows,
+a grid row half-filled, a grid that ends on screen, a hidden delegate, an
+empty view, and since R29e a screen at opacity 0, one delegate at opacity 0,
+and a screen at 0.3) and `openDrawnSettle` over four (E1-E4), and checks the seam in
+`shell.qml` (S1). Each D and E check was seen red on a one-decision
+mutation of the function it drives (no "below" test: D3; no gap test: D2,
+D9; no "above" test: D5; a grid row not required whole: D7; every built
+delegate counted: D1, D2, D5, D6, D9; hidden delegates counted: D9; the
+LAST complete frame taken: E1, E3, E4; no tail comparison: E3; opacity
+not read: D11, D12). What "drawn" does NOT cover, so no sentence should
+claim it: an item stacked over the view, an ancestor's clip narrower than
+the view, a layer or shader effect, and a fade's strength -- a delegate is
+drawn from its first frame above opacity 0, however faint (D13). The shell
+arm grades the instrument (L1-L5 for the list, W1-W5 for the wall: it ran
+its tail out, named the view, settled cold and warm, counted a drawn
+screen and fewer than the view built, measured after the summon), the
+WARM budget (L6, W6: the median warm realised time under 150 ms), and that
+nothing drawn changed after any decision (L7, W7). The cold budget is
+printed on the BUDGET line, ungraded: the first open of a session is over
+150 ms, and that is a product finding for the lead. The legacy `openMs` is
+printed beside the cold trace and graded by nothing: round 1's L6 said it
+"realised fewer delegates" than the async instrument, which was true only
+of the built count; against the drawn screen it reads 10 rows (the same)
+and 18 tiles (two more).
+
+`OPEN_CHANNELS` (10000), `OPEN_COLD` (3 shells per view) and `OPEN_WARM`
+(8 opens per shell) set the run; each warm open is interleaved with
+PERF-02's method A (`open` round trip minus the median `ping`).
+
+Measured 2026-10-20 by lane-sweep-a2 at c06f436 (transcripts in that lane's
+session scratch directory, copied 0600; load 1.7-3.0 unless stated):
+- forward, 10,000 channels (`open-20261020-154123-1999165`): 30 passed, 0
+  failed. List cold realised median 548 ms (540-549), wall cold 534
+  (519-537); list warm 33 (27-41), wall warm 31 (27-39); summon 93 / 91
+  cold, 12 / 12 warm; drawn 10 rows and 16 tiles, built 13 and 18-21;
+  method A median -2 / -4 ms (it cannot see the open). The run before it
+  at 2f846b7 (`open-20261020-153505-1977171`) read 526 / 540 cold and 32 /
+  31 warm, 30 / 0.
+- 40 channels, the control (`open-20261020-155426-2050158`): 30 / 0; cold
+  450 / 440, warm 21 / 21, summon 25 / 23 cold and 1 warm. So about 440 ms
+  of a cold open is the first show of the guide's window in the cage and
+  does not depend on channel count; 10,000 channels add about 100 ms to the
+  cold realised time and about 70 ms to the cold summon.
+- `late-fill.patch` (`open-20261020-154400-2009476`): 28 passed, 2 failed --
+  L6 and W6, warm median 370 / 362 ms; the cold traces show the six-row
+  frame refused as `below` before the filled one. (The run before
+  L4's comparison moved to `builtMax`, `open-20261020-153752-1987563`, read
+  L4 red too, for a reason it does not name: the list drew ten rows a
+  frame before it built its three cacheBuffer rows.)
+- `openDrawnSet` counting every built delegate, in a copy of the harness
+  (`open-20261020-154651-2020565`): 18 passed, 12 failed -- D1, D2, D5, D6,
+  D9, L4 (13 of 13) and every W check (a grid's cacheBuffer row is never
+  whole, so the wall never settles).
+- `slow-delegate.patch` (`open-20261020-155149-2039814`, load 3.7-6.7): 30
+  / 0; cold summon 93 -> 207 ms (list) and 91 -> 191 (wall), cold realised
+  548 -> 673 and 534 -> 628, warm unchanged at 32. The cold summon grows
+  because a cold summon builds delegates synchronously, the hidden view's
+  among them.
+- R29e (lane-sweep-a3 at e5f6d4d, load 1.4-3.5): forward
+  (`open-20261020-192446-2690236`) 33 / 0 -- list cold realised median 547
+  ms (546-558), wall 547 (519-572); warm 34 (27-45) and 32 (29-39); drawn
+  10 and 16, built 13 and 18-21. `opacity-fade.patch`
+  (`open-20261020-192723-2700535`): 31 / 2, L6 and W6 at a warm median of
+  338 / 341 ms, where the instrument that read `visible` alone passed the
+  same mutation at 33 / 38 (round 2's live review).
+So rule 7's 150 ms holds warm and not cold in the cage's floating window;
+the production layer-shell surface on Hyprland is UNVERIFIED.
 
 ### The fake host publishes one write behind (D-LIVE-20 / D-LIVE-21)
 

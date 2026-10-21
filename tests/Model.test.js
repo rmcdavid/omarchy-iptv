@@ -5733,6 +5733,22 @@ check("sourcesRowAccessibleName", Model.sourcesRowAccessibleName(3), "Sources, 3
 check("confirmRemoveMessage", [Model.confirmRemoveMessage("NAS Tvheadend", false), Model.confirmRemoveMessage("Provider", true)], ["Remove " + Q("NAS Tvheadend") + "? Its cache is deleted too.", "Remove " + Q("Provider") + "? It is the active source; the guide returns to setup."])
 check("fetchingLine", [Model.fetchingLine("tv.example.net", "url"), Model.fetchingLine("", "file")], ["Fetching from tv.example.net" + ELL, "Reading the file" + ELL])
 check("probeFailureLine url / path / redacted", [Model.probeFailureLine("HTTP 403 Forbidden", "tv.example.net", "url"), Model.probeFailureLine("File not found", "", "file"), Model.probeFailureLine("could not open http://u:p@h.test/x", "h.test", "url"), Model.probeFailureLine("", "h.test", "url")], ["HTTP 403 Forbidden from tv.example.net", "File not found", "could not open h.test from h.test", "Unknown error from h.test"])
+// R28e (2026-10-20): a refusal the plugin made itself at the commit names no
+// host -- round 1's review read "Sources is full (50) . remove one first from
+// 127.0.0.1"; a failure the fetch reported keeps it.
+check("R28e: probeFailureLine -- a commit refusal with its code (too_many, state_unreadable, unknown_source) reads its reason alone; a fetch failure, with no code or another, keeps \"from <host>\"", [
+  Model.probeFailureLine(Model.sourceErrorMessage("too_many"), "127.0.0.1", "url", "too_many"), Model.probeFailureLine(Model.sourceErrorMessage("state_unreadable"), "h.test", "url", "state_unreadable"),
+  Model.probeFailureLine(Model.sourceErrorMessage("unknown_source"), "h.test", "url", "unknown_source"), Model.probeFailureLine("HTTP 403 Forbidden", "tv.example.net", "url", ""),
+  Model.probeFailureLine("HTTP 403 Forbidden", "tv.example.net", "url", "http_error")],
+  [Model.sourceErrorMessage("too_many"), Model.sourceErrorMessage("state_unreadable"), Model.sourceErrorMessage("unknown_source"), "HTTP 403 Forbidden from tv.example.net", "HTTP 403 Forbidden from tv.example.net"])
+checkCall("R28e (structural): both of the guide's probe-failure lines hand probeFailureLine the result's code, and the cap is ONE decision -- Guide.sourcesFull and Service.canAddSource call Model.sourcesFull and compare against no limit of their own", () => {
+  const g = fs.readFileSync(path.join(__dirname, "../Guide.qml"), "utf8")
+  const sv = fs.readFileSync(path.join(__dirname, "../Service.qml"), "utf8")
+  return [(g.match(/Model\.probeFailureLine\([^\n]*, String\(r\.code \|\| ""\)\)/g) || []).length, (g.match(/Model\.probeFailureLine\(/g) || []).length,
+          /function sourcesFull\(\) \{\n    if \(!Model\.sourcesFull\(root\.serviceReady \? root\.service\.userState : null\)\) return false/.test(g),
+          /readonly property bool canAddSource: !Model\.sourcesFull\(root\.userState\) && !root\.probing/.test(sv),
+          (g + sv).search(/LIMITS\.sources|sourceCount < Model\.|>= Model\.MAX_SOURCES/) === -1]
+}, [2, 2, true, true, true])
 check("sourceTransient strings (UX 5.3)", [
   Model.sourceTransient("loaded", { channelCount: 1475, groupCount: 28 }),
   Model.sourceTransient("added", { host: "tv.example.net", channelCount: 1475, groupCount: 28 }),
@@ -6392,7 +6408,7 @@ function recordKeyForUrl(state, url) {
 check("D-SINK-19: identity by URL survives as findSourceByUrl + normalizeSourceUrl, and normalizes before matching", [recordKeyForUrl(twoState, "HTTP://PROVIDER.example.test:80/get.php?username=u&password=p&type=m3u_plus&output=ts"), recordKeyForUrl(twoState, "file:///srv/tv/local.m3u"), recordKeyForUrl(twoState, "http://other.test/"), recordKeyForUrl(twoState, ""), recordKeyForUrl(null, "x")], ["d990c2e4", "b0eed9fb", "", "", ""])
 
 // reconcile (D3 / SR8)
-check("reconcileSources: empty playlistUrl is a no-op", Model.reconcileSources(twoState, "", "", "", 1), { state: twoState, changed: false, activeKey: "", added: "", evicted: [], invalid: null })
+check("reconcileSources: empty playlistUrl is a no-op", Model.reconcileSources(twoState, "", "", "", 1), { state: twoState, changed: false, activeKey: "", added: "", full: false, invalid: null })
 check("reconcileSources: invalid value synthesizes the validation result, never adds", (() => { const r = Model.reconcileSources(twoState, "ftp://x", "", "", 1); return [r.changed, r.activeKey, r.invalid.code, r.state.sources.length] })(), [false, "", "scheme", 2])
 // R2 (D-SINK-19 repair): the adopted key is written INTO the returned state,
 // so "same active key" means the state already names it. Before R2 the key
@@ -6414,8 +6430,104 @@ check("reconcileSources: adopts a changed valid epgUrl, ignores an invalid one",
 check("reconcileSources: unknown url is added with origin cli and a derived label", (() => { const r = Model.reconcileSources(twoState, "https://iptv-org.github.io/iptv/countries/us.m3u", "", "d990c2e4", 6000); const s = r.state.sources[2]; return [r.changed, r.activeKey, r.added, s.origin, s.label, s.lastUsed, s.fetchedAt, s.labelCustom] })(), [true, "d5977d8a", "d5977d8a", "cli", "iptv-org.github.io", 6000, 0, false])
 check("reconcileSources: first v2 run (no history, legacy layout) tags the record migrated", [Model.reconcileSources(Model.emptyState(), "https://iptv-org.github.io/iptv/countries/us.m3u", "", "", 1).state.sources[0].origin, Model.reconcileSources(Model.withCacheLayout(Model.emptyState(), 2), "https://iptv-org.github.io/iptv/countries/us.m3u", "", "", 1).state.sources[0].origin, Model.reconcileSources(Model.emptyState(), "http://x.test/", "", "", 1, "cli").state.sources[0].origin], ["migrated", "cli", "cli"])
 check("reconcileSources: derived label is made unique", Model.reconcileSources(twoState, "http://provider.example.test/second.m3u", "", "", 1).state.sources[2].label, "provider.example.test 2")
-check("reconcileSources: at the cap the least recently used non-active record is evicted", (() => { const r = Model.reconcileSources(full50, "http://new.test/", "", "00989680", 999); return [r.state.sources.length, r.evicted, r.state.sources.some(s => s.key === "00989680"), r.state.sources.some(s => s.url === "http://new.test/")] })(), [50, ["00989680"], false, true])
-check("reconcileSources: eviction never drops the new active record", Model.reconcileSources(full50, "http://new.test/", "", "", 0).state.sources.some(s => s.url === "http://new.test/"), true)
+// R27d (2026-10-20, D-SRC-44) replaces the two eviction pins that stood here
+// ("at the cap the least recently used non-active record is evicted",
+// "eviction never drops the new active record"): THE MIGRATION NEVER EVICTS.
+check("R27d: reconcileSources at the cap -- an unknown URL is NOT added and nothing is evicted: `full`, the state returned as it was, no key, unchanged", (() => { const r = Model.reconcileSources(full50, "http://new.test/", "", "00989680", 999); return [r.full, Model.sameState(r.state, full50), r.state.sources.length, r.changed, r.activeKey, r.added, "evicted" in r] })(), [true, true, 50, false, "", "", false])
+check("R27d: reconcileSources at the cap -- a URL ALREADY among the 50 still resolves (the cap refuses only a new record)", (() => { const r = Model.reconcileSources(full50, full50.sources[3].url, "", "", 999); return [r.full, r.activeKey === full50.sources[3].key, r.state.sources.length] })(), [false, true, 50])
+checkCall("R27d: Model.sourcesFull -- the one cap decision: 49 is room, 50 is full, an empty or missing state is room", () => [Model.sourcesFull(Model.cloneState(full50, { sources: full50.sources.slice(1) })), Model.sourcesFull(full50), Model.sourcesFull(Model.emptyState()), Model.sourcesFull(null)], [false, true, false, false])
+checkCall("R27d: adoptActiveSource MIGRATING at the cap with an unknown entry URL -- `full`, nothing adopted, the state's own key stands, the marker NOT set, and the entry is still to be written with its URL kept (writeEntry: the funnel keeps a retired key until the marker lands)", () => {
+  const st = Model.withActiveKey(full50, full50.sources[2].key)
+  const out = Model.adoptActiveSource(st, { playlistUrl: "http://new.test/", epgUrl: "", sourceKey: "" }, 999, "", { adoptUrl: true, migrating: true })
+  return [out.full, out.adoptedUrl, out.key === full50.sources[2].key, out.marked, Model.entryMigratedOf(out.state), out.state.sources.length, out.writeEntry, "evicted" in out]
+}, [true, false, true, false, false, 50, true, false])
+check("R27d: reconcileAction -- `heldFull` makes a migrating playlist URL fresh again though it is the value seen last; without it the same value is not re-adopted; never once migrated", [
+  Model.reconcileAction({ migrating: true, playlist: "http://new.test/", seen: Model.entryInputsSeenAfter([], { playlistUrl: "http://new.test/" }), heldFull: true }).act,
+  Model.reconcileAction({ migrating: true, playlist: "http://new.test/", seen: Model.entryInputsSeenAfter([], { playlistUrl: "http://new.test/" }) }).act,
+  Model.reconcileAction({ migrating: false, playlist: "http://new.test/", seen: [], heldFull: true }).act], ["adopt", "ignore", "ignore"])
+// R28b (2026-10-20) re-levelled the sentence: the guide URL is held with the
+// playlist, so the notice names both and says they move in together.
+checkCall("R27d / R28b / R29e: the notice -- Model.entryInputNotice(\"playlistUrl\", \"full\"): \"Sources is full\", says the bar's playlist AND its guide move in together once one is removed in Sources and that the bar's playlist is then the ACTIVE source (R28b's service pin observes it active over the source the user picked), names the cap, and carries no URL", () => {
+  const n = Model.entryInputNotice("playlistUrl", "full")
+  return [n.title, n.body, n.body.indexOf("://") === -1]
+}, ["Sources is full", "The playlist set on the bar, and its guide URL if one is set, were not moved into Sources: Sources already holds 50 sources, the most it can. Remove one in the guide's Sources screen and the bar's playlist and its guide move in together; the bar's playlist then becomes the active source.", true])
+// R29d (2026-10-20): the pair's ONE notice -- an unusable playlist and the
+// guide URL beside it, told together, from whichever side the session meets
+// first; names both settings and the Sources screen, never a value.
+checkCall("R29d: entryInputNotice(name, \"invalid-pair\") -- \"Bar setting removed\", one sentence naming BOTH settings and that both were removed, from the playlist's side and from the guide URL's; no value, ASCII", () => {
+  const p = Model.entryInputNotice("playlistUrl", "invalid-pair"), e = Model.entryInputNotice("epgUrl", "invalid-pair")
+  const argv = Model.notifyArgv("entryInputRefused", { setting: "playlistUrl", reason: "invalid-pair", url: "ftp://u:lenspass@h.test/x" })
+  return [p.title, p.body, e.title, e.body, argv.slice(-2).join(" | ") === p.title + " | " + p.body, (argv.join(" ") + p.body + e.body).indexOf("lenspass") === -1,
+          /^[\x20-\x7e]*$/.test(p.body + e.body), p.body !== Model.entryInputNotice("playlistUrl", "invalid").body]
+}, ["Bar setting removed", "playlistUrl in the bar settings was not a usable URL and was removed, with the epgUrl beside it. Add or edit sources in the guide's Sources screen.",
+    "Bar setting removed", "epgUrl in the bar settings came with a playlistUrl that was not a usable URL, and was removed with it. Add or edit sources in the guide's Sources screen.", true, true, true, true])
+// R28b: A HELD MIGRATION HOLDS BOTH URLS. Seen red on lane-sweep-c1, whose
+// R4 block ran on the step-2 key: `adoptedEpg` true and A's own guide URL
+// replaced, or `noSourceEpg` true (reported as removed while it stayed).
+checkCall("R28b: adoptActiveSource MIGRATING at the cap with an unknown playlist AND a guide URL -- the guide URL is HELD with it: not adopted onto the active record (its own guide URL kept), not refused, not reported as having no source; `heldEpg`; the entry still to be written with both kept", () => {
+  const own = "http://own.example.test/a.xml"
+  const st = Model.withActiveKey(Model.cloneState(full50, { sources: full50.sources.map((r, i) => i === 2 ? Object.assign({}, r, { epgUrl: own }) : r) }), full50.sources[2].key)
+  const entry = { playlistUrl: "http://new.test/", epgUrl: "http://bar.example.test/g.xml", sourceKey: "" }
+  const out = Model.adoptActiveSource(st, entry, 999, "", { adoptUrl: true, adoptEpg: true, migrating: true })
+  const none = Model.adoptActiveSource(full50, entry, 999, "", { adoptUrl: true, adoptEpg: true, migrating: true })
+  const bare = Model.adoptActiveSource(st, { playlistUrl: "http://new.test/", epgUrl: "", sourceKey: "" }, 999, "", { adoptUrl: true, adoptEpg: true, migrating: true })
+  return [out.full, out.heldEpg, out.adoptedEpg, out.refusedEpg, out.noSourceEpg, Model.findSource(out.state.sources, full50.sources[2].key).epgUrl === own, out.changed, out.writeEntry,
+          [none.full, none.heldEpg, none.noSourceEpg], [bare.full, bare.heldEpg]]
+}, [true, true, false, false, false, true, false, true, [true, true, false], [true, false]])
+check("R28b: reconcileAction -- `heldFull` makes the guide URL fresh with the playlist, so the retry after a removal adopts BOTH; without it the guide URL seen last is not re-adopted", [
+  (() => { const seen = Model.entryInputsSeenAfter([], { playlistUrl: "http://new.test/", epgUrl: "http://bar.example.test/g.xml" }); const a = Model.reconcileAction({ migrating: true, playlist: "http://new.test/", epg: "http://bar.example.test/g.xml", seen, heldFull: true }); return [a.adoptUrl, a.adoptEpg] })(),
+  (() => { const seen = Model.entryInputsSeenAfter([], { playlistUrl: "http://new.test/", epgUrl: "http://bar.example.test/g.xml" }); const a = Model.reconcileAction({ migrating: true, playlist: "http://new.test/", epg: "http://bar.example.test/g.xml", seen }); return [a.adoptUrl, a.adoptEpg] })()],
+  [[true, true], [false, false]])
+// F4 (round 3's dataloss review, P3): R29d's test is reconcileSources' own --
+// the CLI origin, `~` paths accepted. Seen red with { origin: "guide" } in
+// entryPlaylistUnusable (2664/0 checks there before this pin): a `~` bar
+// playlist read as unusable, and a fresh guide URL beside it was stripped
+// with a false "invalid-pair" notice instead of reaching its record.
+checkCall("F4 / R29d: a guide URL arriving beside a playlist already seen (not adopted again) -- the playlist is judged as reconcileSources judges it (origin cli): beside a `~` path or an absolute path the guide URL reaches the active record; beside a relative path, ftp or javascript: it is `epgWithInvalid`; beside an empty playlist it is an ordinary guide URL", () => {
+  const tilde = Model.reconcileSources(Model.emptyState(), "~/tv.m3u", "", "", 1)
+  return ["~/tv.m3u", "/srv/tv/list.m3u", "./tv.m3u", "ftp://h.test/x", "javascript:alert(1)", "", "  "].map(v => {
+    const out = Model.adoptActiveSource(tilde.state, { playlistUrl: v, epgUrl: "http://e.example.test/x.xml", sourceKey: "" }, 2, "", { adoptUrl: false, adoptEpg: true, migrating: true })
+    return [out.epgWithInvalid, out.adoptedEpg, Model.findSource(out.state.sources, tilde.added).epgUrl === "http://e.example.test/x.xml"]
+  })
+}, [[false, true, true], [false, true, true], [true, false, false], [true, false, false], [true, false, false], [false, true, true], [false, true, true]])
+// F1 (round 3's dataloss review, P2): THE MIGRATION RIDES ITS RECORD. A merge
+// that drops, at the cap, the record this session's migration added does not
+// carry the marker -- the migration is held again -- and does not count that
+// record as one "added here". Seen red on lane-sweep-c3 (the service pins
+// under F1 below, through the shipping Service.qml).
+checkCall("F1: mergeForeignState -- the migration's record dropped at the cap: no marker, the active key theirs', the record not among `dropped.sources`, `migrationHeld`; an in-app add dropped beside it is still reported; without `migrationKey`, or when theirs carries the marker, the marker stands; rule 15: the same playlist added by theirs is \"changed\", no marker, the record theirs; and a migration whose record was removed here stands", () => {
+  const base = Model.cloneState(full50, { sources: full50.sources.slice(1), activeKey: full50.sources[3].key })
+  const mig = { key: "0abc0001", url: "http://new.test/", epgUrl: "http://e.test/g.xml", kind: "http", label: "new", labelCustom: false, origin: "cli", addedAt: 9, lastUsed: 9, fetchedAt: 0, channelCount: 0, groupCount: 0 }
+  const app = Object.assign({}, mig, { key: "0abc0002", url: "http://app.test/", epgUrl: "", label: "app" })
+  const other = Object.assign({}, mig, { key: "0abc0003", url: "http://other.test/", epgUrl: "", label: "other" })
+  const ours = Model.withEntryMigrated(Model.cloneState(base, { sources: base.sources.concat([mig]), activeKey: mig.key }))
+  const theirs = Model.cloneState(base, { sources: base.sources.concat([other]) })
+  const held = Model.mergeForeignState(base, ours, theirs, { migrationKey: mig.key })
+  // Two places freed (48 on the base): an in-app add and the migration take
+  // them, and another program fills both.
+  const base48 = Model.cloneState(base, { sources: base.sources.slice(1) })
+  const other2 = Object.assign({}, other, { key: "0abc0004", url: "http://other2.test/", label: "other2" })
+  const both = Model.mergeForeignState(base48, Model.cloneState(ours, { sources: base48.sources.concat([app, mig]) }),
+                                       Model.cloneState(base48, { sources: base48.sources.concat([other, other2]) }), { migrationKey: mig.key })
+  const noKey = Model.mergeForeignState(base, ours, theirs)
+  const theirsMarked = Model.mergeForeignState(base, ours, Model.withEntryMigrated(theirs), { migrationKey: mig.key })
+  const kept = Model.mergeForeignState(base, ours, base, { migrationKey: mig.key })
+  // Rule 15's sibling: another program added the SAME playlist (no guide URL).
+  const same = Model.mergeForeignState(base, ours, Model.cloneState(base, { sources: base.sources.concat([Object.assign({}, mig, { epgUrl: "", label: "theirs" })]) }), { migrationKey: mig.key })
+  // The migration's record removed HERE before it landed (the user removed it
+  // in Sources): the removal stands and the migration is done, never retried.
+  const removedHere = Model.mergeForeignState(base, Model.withEntryMigrated(base), theirs, { migrationKey: mig.key })
+  const line = Model.migrationHeldAgainLine("full"), changedLine = Model.migrationHeldAgainLine("changed")
+  return { held: [Model.entryMigratedOf(held.state), held.state.activeKey === base.activeKey, held.state.sources.length, Model.findSource(held.state.sources, mig.key) !== null, held.dropped.sources, held.migrationHeld],
+           both: [Model.entryMigratedOf(both.state), both.dropped.sources, both.migrationHeld],
+           noKey: [Model.entryMigratedOf(noKey.state), noKey.dropped.sources, noKey.migrationHeld],
+           theirsMarked: [Model.entryMigratedOf(theirsMarked.state), theirsMarked.migrationHeld],
+           kept: [Model.entryMigratedOf(kept.state), Model.findSource(kept.state.sources, mig.key) !== null, kept.migrationHeld],
+           same: [Model.entryMigratedOf(same.state), Model.findSource(same.state.sources, mig.key).epgUrl, same.state.activeKey === mig.key, same.dropped.sources, same.migrationHeld, same.conflicts.length],
+           removedHere: [Model.entryMigratedOf(removedHere.state), Model.findSource(removedHere.state.sources, mig.key) !== null, removedHere.migrationHeld],
+           line: [line.indexOf("://") === -1, line.indexOf("50 sources") !== -1, /^[\x20-\x7e]*$/.test(line + changedLine), changedLine !== line, Model.migrationHeldAgainLine() === line] }
+}, { held: [false, true, 50, false, [], "full"], both: [false, ["0abc0002"], "full"], noKey: [true, ["0abc0001"], ""], theirsMarked: [true, ""], kept: [true, true, ""],
+     same: [false, "", true, [], "changed", 1], removedHere: [true, false, ""], line: [true, true, true, true, true] })
 check("reconcileSources does not mutate the input", twoState.sources.length, 2)
 // SR11: the settings path is the CLI path. `omarchy bar set ... playlistUrl ~/list.m3u`
 // reconciles into the history and becomes active; the forms keep refusing `~`.
@@ -6916,7 +7028,7 @@ checkCall("R1/R4/R21: adoptActiveSource over every `adopt` case of the shared fi
                     invalid: out.invalid ? out.invalid.code : null, moved: out.moved, changed: out.changed,
                     writeEntry: out.writeEntry, sources: out.state.sources.length,
                     epgOnActive: active ? String(active.epgUrl) : "", refusedEpg: out.refusedEpg, noSourceEpg: out.noSourceEpg,
-                    marked: out.marked, migrated: Model.entryMigratedOf(Model.parseState(JSON.stringify(out.state))) }
+                    epgWithInvalid: out.epgWithInvalid, marked: out.marked, migrated: Model.entryMigratedOf(Model.parseState(JSON.stringify(out.state))) }
     // In the fixture's own key order, so the comparison is about values.
     const got = {}
     Object.keys(c.want).forEach(k => { got[k] = facts[k] })
@@ -6935,13 +7047,19 @@ check("R1/R21: the fixture's adopt section covers every step, both refusals, the
    // R21c: a guide URL with no record to land on is reported and stripped, never held
    activeKeyFixture.adopt.filter(c => c.entry.epgUrl !== "" && c.want.key === "" && c.want.noSourceEpg === true && c.want.changed === false && c.want.writeEntry === true).length >= 2,
    activeKeyFixture.adopt.filter(c => c.want.refusedEpg === true).length >= 1,
+   // R29d: a guide URL beside an unusable playlist goes with it -- step 1's
+   // refusal with and without a record active, the seen playlist, and the
+   // usable control
+   activeKeyFixture.adopt.filter(c => c.want.epgWithInvalid === true && c.want.invalid === "scheme").length >= 2,
+   activeKeyFixture.adopt.filter(c => c.want.epgWithInvalid === true && c.opts && c.opts.adoptUrl === false).length >= 1,
+   activeKeyFixture.adopt.filter(c => c.want.epgWithInvalid === false && c.want.adoptedEpg === true && c.opts && c.opts.adoptUrl === false && c.entry.playlistUrl !== "").length >= 1,
    // R21a: the marker rides the migration's result, on every migrating shape, and on no other
    activeKeyFixture.adopt.filter(c => c.opts && c.opts.migrating === true && c.want.marked === true).length >= 3,
    activeKeyFixture.adopt.filter(c => c.opts && c.opts.migrating === true && c.migrated && c.want.marked === false).length >= 1,
    activeKeyFixture.adopt.filter(c => !(c.opts && c.opts.migrating === true) && c.want.marked === true).length === 0,
    // R21b: no plan reads no URL
    activeKeyFixture.adopt.filter(c => c.opts && Object.keys(c.opts).length === 0 && c.entry.playlistUrl !== "" && c.want.adoptedUrl === false).length >= 1],
-  [true, true, true, true, true, true, true, true, true, true, true, true])
+  [true, true, true, true, true, true, true, true, true, true, true, true, true, true, true])
 
 // R3: removing the active record clears the pointer in the state returned,
 // from the shared fixture (the helper's remove_source_record runs the same
@@ -7291,6 +7409,72 @@ checkCall("D-SRC-38: sourcesHeaderRight / stateBlockedHeader -- a block that beg
   Model.sourcesHeaderRight(0, "absent", "/p/state.json"), Model.sourcesHeaderRight(2, "", "/p/state.json", true),
   Model.stateBlockedHeader("unparsed", "", false) === Model.stateUnreadableNotice("unparsed", "").title, Model.stateBlockedHeader("", "", true)]),
   ["Saving has stopped", "Saved sources not loaded", "Saved sources not loaded", "2 sources", true, ""])
+// ---- R27e (2026-10-20; D-SRC-42, D-SRC-50, D-SRC-51): ONE notice family.
+// Every sentence is pinned verbatim through tests/fixtures/state-notices.json,
+// which the README and docs/UX-SOURCES.md quote; both directions: every reason
+// the service can block with has its sentence there, and every sentence there
+// is the function's word for word.
+;(function () {
+  const fx = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/state-notices.json"), "utf8"))
+  const P = fx.path
+  // The reasons a block can carry: the load kinds and the start-up
+  // decision's own (Model.stateLoadDecision).
+  const kinds = Object.keys(Model.STATE_LOAD_ERRORS).map(k => Model.STATE_LOAD_ERRORS[k]).concat(["unparsed"])
+  // R28a (2026-10-20) withdrew R27a's read-timeout, and R29a kept it out: a
+  // silent read is no block; its save is written after R26a's 2 s bound.
+  const decided = ["absent-unconfirmed", "init-timeout", "link", "not-a-dir", "folder-link"]
+  const B = fx.bodies
+  checkCall("R27e / R28e: the notice fixture covers every reason a block can carry, and nothing else -- at a START every load kind and every reason the start-up decision adds; MID-session the load kinds alone (Model.stateLoadDecision blocks with the kind itself); read-timeout is gone (R28a)", () =>
+    [Object.keys(B.start).sort(), Object.keys(B.midSession).sort(), Model.stateLoadDecision({ kind: "permission", loadedBefore: true }).reason],
+    [Array.from(new Set(kinds.concat(decided))).sort(), Array.from(new Set(kinds)).sort(), "permission"])
+  checkCall("R27e / R28e: every body is the fixture's sentence, word for word, at a start and mid-session (the fixture is the copy the README and UX-SOURCES quote)", () =>
+    [Object.keys(B.start).filter(r => Model.stateUnreadableNotice(r, P, false).body !== B.start[r]),
+     Object.keys(B.midSession).filter(r => Model.stateUnreadableNotice(r, P, true).body !== B.midSession[r])], [[], []])
+  // R28e (2026-10-20): R27e's "not saved until the file can be read again"
+  // was true of one way back out of a MID-session block and false of three
+  // (round 1's live review, H5 and H2; measured again through the shipping
+  // Service.qml by the pins "R28e (... ): the ways back" below). So the
+  // sentence differs: at a start "not kept", mid-session the four ways named.
+  checkCall("R28e: the second sentence says what becomes of a change made now -- at a START \"not kept\"; MID-session it is held in the session, saved by the next such change that finds the file, dropped if the file comes back by itself, if a source change finds it, or if the shell stops -- once each, as the body's second sentence, and no body promises \"not saved until the file can be read again\"", () => {
+    const starts = Object.keys(B.start).map(r => B.start[r]), mids = Object.keys(B.midSession).map(r => B.midSession[r])
+    const once = (bodies, sentence) => bodies.every(b => b.split(sentence).length === 2 && b.indexOf(". " + sentence + " ") !== -1)
+    return [fx.unsaved.start, Model.STATE_BLOCK_UNSAVED_START === fx.unsaved.start, Model.STATE_BLOCK_UNSAVED === fx.unsaved.midSession,
+            once(starts, fx.unsaved.start), once(mids, fx.unsaved.midSession),
+            ["saves them if it finds the file again", "dropped if the file comes back by itself first", "if a source change is what finds it", "or if the shell is stopped"].every(w => fx.unsaved.midSession.indexOf(w) !== -1),
+            starts.concat(mids).some(b => /not saved until the file can be read again/.test(b))]
+  }, ["Sources, favorites and settings changed now are not kept.", true, true, true, true, true, false])
+  checkCall("R27e (D-SRC-50): the advice for a file or folder gone missing names the LINK case first -- `absent` leads with \"if it is a symbolic link, point it back at the folder or file that holds your state\"; a dangling file link and folder link say point it back; no sentence tells the user to restore what a link points to", () => {
+    const fix = (set, r) => B[set][r].slice(B[set][r].indexOf(fx.unsaved[set]) + fx.unsaved[set].length + 1)
+    const all = Object.keys(B.start).map(r => B.start[r]).concat(Object.keys(B.midSession).map(r => B.midSession[r]))
+    return [fx.linkFirst, fix("midSession", "absent").indexOf(fx.linkFirst) === 0, fix("start", "absent").indexOf(fx.linkFirst) === 0,
+            /^Point it back at the file that holds your state/.test(fix("start", "link")), /^Point it back at the folder that holds your state/.test(fix("start", "folder-link")),
+            all.filter(b => /[Rr]estore the (file|folder) it points to/.test(b))]
+  }, ["If it is a symbolic link, point it back at the folder or file that holds your state", true, true, true, true, []])
+  checkCall("R27e (D-SRC-42): the TITLE -- \"Saving has stopped\" for a block that began mid-session, \"Saved sources not loaded\" at a start, for every reason; the journal line is the title then the body; the header and the notification take the same word", () => {
+    const rs = Object.keys(B.start)
+    const argv = (mid) => Model.notifyArgv("stateUnreadable", { reason: "absent", path: P, midSession: mid })
+    return [rs.every(r => Model.stateUnreadableNotice(r, P, true).title === fx.titles.midSession), rs.every(r => Model.stateUnreadableNotice(r, P, false).title === fx.titles.start),
+            rs.every(r => Model.stateUnreadableNotice(r, P).title === fx.titles.start),
+            Object.keys(B.midSession).every(r => Model.stateUnreadableJournal(r, P, true) === fx.titles.midSession + ": " + B.midSession[r]),
+            rs.every(r => Model.stateUnreadableJournal(r, P, false) === fx.titles.start + ": " + B.start[r]),
+            [Model.stateBlockedHeader("absent", P, true), Model.stateBlockedHeader("absent", P, false)],
+            [argv(true).slice(-2), argv(false).slice(-2), argv(undefined)[argv(undefined).length - 2]]]
+  }, [true, true, true, true, true, ["Saving has stopped", "Saved sources not loaded"],
+      [["Saving has stopped", B.midSession.absent], ["Saved sources not loaded", B.start.absent], "Saved sources not loaded"]])
+  // R29a (2026-10-20): R28a's held save past the read's bound is withdrawn,
+  // and with it its notice and its schedule. Nothing sends the "Saving is
+  // waiting" card any more: no NOTIFY_IDS entry, and notifyArgv sends
+  // nothing for the event. (F3, 2026-10-20: the five inert stubs that stood
+  // in for R28a's names were deleted with their pin.)
+  checkCall("R29a: the stall notice and schedule are withdrawn -- no notify id 74019, notifyArgv(\"stateReadStalled\") sends nothing (no shipped copy promises \"saved when the file answers\")", () => {
+    const ids = Object.keys(Model.NOTIFY_IDS).map(k => Model.NOTIFY_IDS[k])
+    return [ids.indexOf(74019), "stateReadStalled" in Model.NOTIFY_IDS, Model.notifyArgv("stateReadStalled", { path: P })]
+  }, [-1, false, null])
+  checkCall("R27e (structural): the guide's own notice (the empty state's words) takes the service's stateLoaded too, so it is titled as the notification is", () => {
+    const g = fs.readFileSync(path.join(__dirname, "../Guide.qml"), "utf8")
+    return /readonly property var stateNotice: Model\.stateUnreadableNotice\(root\.stateBlocked,[\s\S]{0,300}service\.stateLoaded === true\)/.test(g)
+  }, true)
+})()
 checkCall("D-SRC-38 (structural): the guide hands the header the service's stateLoaded, so a mid-session block reads as one", () => {
   const g = fs.readFileSync(path.join(__dirname, "../Guide.qml"), "utf8")
   return /Model\.sourcesHeaderRight\(root\.sourceCount, root\.stateBlocked,[\s\S]{0,400}service\.stateLoaded === true\)/.test(g)
@@ -7409,9 +7593,11 @@ checkCall("R11 (structural): stateInitProc's exit issues the parked save, THEN s
     // The FileView reports both outcomes and both settle the flush.
     // (400: R25a's recentSaves reset joined the landed branch, round 15;
     // 700: R26b's handler-depth count and its try now wrap the body, the
-    // landed branch and the settle unchanged inside it, 2026-10-16)
-    savedSettles: /onSaved: \{[\s\S]{0,700}root\.settleEntryFlush\(\)/.test(serviceSource),
-    saveFailedSettles: /onSaveFailed: \(error\) => \{[\s\S]{0,1200}root\.stateSaveFailed = true[\s\S]{0,100}root\.settleEntryFlush\(\)/.test(serviceSource),
+    // landed branch and the settle unchanged inside it, 2026-10-16;
+    // 900 / 1400: R27a's end of the write wait joined both landed branches,
+    // 2026-10-20, the settle unchanged after it)
+    savedSettles: /onSaved: \{[\s\S]{0,900}root\.settleEntryFlush\(\)/.test(serviceSource),
+    saveFailedSettles: /onSaveFailed: \(error\) => \{[\s\S]{0,1400}root\.stateSaveFailed = true[\s\S]{0,100}root\.settleEntryFlush\(\)/.test(serviceSource),
     // R13: the outstanding flag is raised BEFORE setText with the text kept,
     // and cleared on either signal ONLY when the view reports on that text
     // (Model.stateSaveLanded), never by counting signals.
@@ -7540,7 +7726,9 @@ checkCall("R14 / R22a (structural): the ignore branch of applyUserState RETURNS 
     // "join", a read already out) and "refuse" -- each returns exactly as the
     // gate's own branches did. What the gate decides (Model.stateWriteGate)
     // is pinned by its fixture; the plan's table by the R26a pins below.
-    parksBeforeDirs: /function saveState\(\) \{\n(\s*\/\/[^\n]*\n)*\s*var gate = Model\.stateWriteGate\(\{ blocked: root\.stateWriteBlocked, loaded: root\.stateLoaded, dirsReady: root\.dirsReady \}\)\n\s*var plan = Model\.stateSavePlan\(\{ verifyPending: root\.stateVerifyPending, gate: gate, blocked: root\.stateWriteBlocked,\n\s*inHandler: root\.stateInHandler > 0, verifyDone: root\.stateVerifyDone,\n\s*writeTurn: root\.stateWriteTurn, inFlight: root\.stateSavesInFlight \}\)\n\s*if \(plan === "join" \|\| plan === "park"\) \{\n\s*root\.stateSavePending = true\n\s*return\n\s*\}\n\s*if \(plan === "refuse"\) \{\n\s*root\.stateSavePending = false\n\s*root\.stateWritesRefused = root\.stateWritesRefused \+ 1\n\s*return\n\s*\}/.test(save),
+    // R29a: R28a's re-read on a join is withdrawn, so the park and the join
+    // return as they did on 6f1d176 (only R27a's waitExpired input stays).
+    parksBeforeDirs: /function saveState\(\) \{\n(\s*\/\/[^\n]*\n)*\s*var gate = Model\.stateWriteGate\(\{ blocked: root\.stateWriteBlocked, loaded: root\.stateLoaded, dirsReady: root\.dirsReady \}\)\n\s*var plan = Model\.stateSavePlan\(\{ verifyPending: root\.stateVerifyPending, gate: gate, blocked: root\.stateWriteBlocked,\n\s*inHandler: root\.stateInHandler > 0, verifyDone: root\.stateVerifyDone,\n\s*writeTurn: root\.stateWriteTurn, inFlight: root\.stateSavesInFlight,\n\s*waitExpired: root\.stateWriteWaitExpired \}\)\n\s*if \(plan === "join" \|\| plan === "park"\) \{\n\s*root\.stateSavePending = true\n\s*return\n\s*\}\n\s*if \(plan === "refuse"\) \{\n\s*root\.stateSavePending = false\n\s*root\.stateWritesRefused = root\.stateWritesRefused \+ 1\n\s*return\n\s*\}/.test(save),
     // and the park is cleared on the write itself, not left set
     clearsOnWrite: /root\.stateSavePending = false\n[\s\S]*?stateFile\.setText\(text\)/.test(save)
   }
@@ -12016,7 +12204,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     activeKeyOf: "a key", activeSourceRecord: "a record of the state, unchanged", entryMigratedOf: "a boolean",
     isFavorite: "a boolean", isGroupHidden: "a boolean", sourceForEdit: "the edit form's values",
     sourceViews: "the Sources rows", sourcesSummary: "the IPC summary", deadSessionVerdict: "a verdict; its state is driven below",
-    sameState: "a boolean (R25a: whether memory is the base)"
+    sameState: "a boolean (R25a: whether memory is the base)",
+    sourcesFull: "a boolean (R27c: the cap, at the probe commit)"
   }
   const doc = fx.document
   const S = Model.parseState(JSON.stringify(doc))
@@ -12355,6 +12544,13 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       // writes a turn apart would push the first out of R25a's eight-text
       // own-write record, and its echo would then be merged as foreign: the
       // cap's own limit, recorded by this lane, not this pin's concern.)
+      // R27a (2026-10-20) re-levelled: NO burst forms any more. A save asked
+      // while our write is in flight waits for it to land and then reads, so
+      // at most ONE write is out at any moment and the view never has a
+      // queued write to coalesce: `raised` is 1 (the first switch's write;
+      // the other nine wait and are written together, after their read).
+      // What this pin protects still holds: nothing outstanding after the
+      // burst, the mirror names the last key, a later foreign reload applies.
       sw(h, KB); h.runLater(); sw(h, KA); h.runLater()
       for (let i = 0; i < 4; i++) { sw(h, KB); sw(h, KA) }
       h.runLater()
@@ -12364,7 +12560,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       const foreign = JSON.stringify(Object.assign(M.parseState(h.stateFile.disk), { favorites: ["t:new"] })) + "\n"
       h.stateFile.disk = foreign; h.stateFile.view = foreign; h.root.applyUserState(foreign); h.runLater()
       return { raised, after, foreign: String(h.root.userState.favorites), marker: M.entryMigratedOf(h.root.userState) }
-    }, { raised: 2, after: [0, null, true, true], foreign: "t:new", marker: true })
+    }, { raised: 1, after: [0, null, true, true], foreign: "t:new", marker: true })
     checkCall("R13 (" + mode + " host): after a failed write a landed one clears the sticky flag, and the entry written then names the landed key", () => {
       const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), mode)
       h.stateFile.writeFails = true; sw(h, KB); h.drain()
@@ -13048,12 +13244,19 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           // read-before-write and make one write, so no burst forms. A burst
           // still forms behind a write in flight (no read then; each save
           // issued from its own turn, R26b), so the saves are a turn apart.
+          // R27a (2026-10-20) re-levelled: and no burst forms at all now --
+          // the second and third saves WAIT for the first write to land, then
+          // read, then go as ONE write: one queued, one text recorded. The
+          // first write's echo then arrives while the second is in flight,
+          // after `saved` has cleared the record: it is the base, so it reads
+          // `save-in-flight` (ignored), never foreign -- the property this pin
+          // is for, in the only shape the service can still make.
           h.root.toggleFavorite("t:b1.uk"); h.runLater(); h.root.toggleFavorite("t:b2.uk"); h.runLater(); h.root.toggleFavorite("t:b3.uk"); h.runLater()
           const queued = [h.stateFile.events.length, h.root.recentSaves.length]
           h.drain()
-          return { queued, own: (reasons(h)["own-write"] || 0) - own0, foreign: foreignReasons(h), recent: h.root.recentSaves.length,
+          return { queued, own: (reasons(h)["own-write"] || 0) - own0, inFlightEcho: reasons(h)["save-in-flight"] || 0, foreign: foreignReasons(h), recent: h.root.recentSaves.length,
                    file: h.file().favorites, memory: h.root.userState.favorites }
-        }, { queued: [2, 3], own: ownEcho === "load" ? 1 : 0, foreign: [], recent: 0,
+        }, { queued: [1, 1], own: 0, inFlightEcho: ownEcho === "load" ? 1 : 0, foreign: [], recent: 0,
              file: ["t:bbc1.uk", "t:b1.uk", "t:b2.uk", "t:b3.uk"], memory: ["t:bbc1.uk", "t:b1.uk", "t:b2.uk", "t:b3.uk"] })
         // R25d / F-HARNESS-26: the round-14 lens's two mutants nothing caught.
         // a5 -- mergeForeignText without `landedState = theirs`: a SECOND
@@ -13181,10 +13384,18 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         P({ gate: "write" }), P({ gate: "write", verifyDone: true }), P({ gate: "write", verifyDone: true, inHandler: true }),
         P({ gate: "write", inHandler: true }), P({ gate: "write", inHandler: true, inFlight: 1, writeTurn: true }),
         P({ gate: "write", inFlight: 1 }), P({ gate: "write", inFlight: 1, writeTurn: true }), P({ gate: "write", writeTurn: true }),
-        P({ gate: "bogus" }), P(undefined)
+        P({ gate: "bogus" }), P(undefined),
+        // R27a (window a): a write in flight HOLDS the save, whatever turn
+        // asks (no read and no write while it is out); only the wait's own
+        // bound releases it to its read, deferred from a handler as ever.
+        P({ gate: "write", inFlight: 1, waitExpired: true }), P({ gate: "write", inFlight: 1, waitExpired: true, inHandler: true }),
+        P({ gate: "write", inFlight: 1, verifyDone: true })
       ]
     }, ["join", "join", "park", "refuse", "refuse", "refuse", "verify", "verify", "verify", "write", "write",
-        "defer", "defer", "defer", "write", "verify", "refuse", "refuse"])
+        // R27a re-levelled 2026-10-20: these three read "defer", "defer",
+        // "write" -- the in-flight save skipped its read (D-SINK-22 window a)
+        "defer", "wait", "wait", "wait", "verify", "refuse", "refuse",
+        "verify", "defer", "write"])
     // R26b's rule-15 search made a check. stateFile.setText is the ONE
     // FileView write in the shipped files, and it is reached from FIVE
     // handlers of three views (channelsFile's two through adoptIdScheme,
@@ -13203,10 +13414,15 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         finishFromLater: /function finishStateVerifyLater\(\) \{ if \(root\.stateVerifyPending\) root\.finishStateVerify\(false\) \}/.test(serviceSource),
         finishFromWatchdog: /id: stateVerifyWatchdog[\s\S]{0,120}onTriggered: if \(root\.stateVerifyPending\) root\.finishStateVerify\(true\)/.test(serviceSource),
         laterOnly: [calls(/root\.finishStateVerifyLater\b/g), calls(/Qt\.callLater\(root\.finishStateVerifyLater\)/g), calls(/root\.saveDeferredState\b/g), calls(/Qt\.callLater\(root\.saveDeferredState\)/g)],
+        // R27a: the write wait's end is reached from the two FileView outcome
+        // handlers and its own Timer, and asks for the held save only
+        // through Qt.callLater -- never a write from inside a handler.
+        waitEnd: [calls(/root\.endStateWriteWait\(/g), /function endStateWriteWait\(timedOut\) \{[\s\S]*?if \(root\.stateSavePending\) Qt\.callLater\(root\.saveDeferredState\)\n  \}/.test(serviceSource),
+                  /id: stateWriteWaitWatchdog[\s\S]{0,120}onTriggered: if \(root\.stateWriteWaiting\) root\.endStateWriteWait\(true\)/.test(serviceSource)],
         verifyDoneRaised: [calls(/root\.stateVerifyDone = true/g), fnOf("finishStateVerify").indexOf("root.stateVerifyDone = true") !== -1],
         writeTurnRaised: [calls(/root\.stateWriteTurn = true/g), fnOf("saveDeferredState").indexOf("root.stateWriteTurn = true") !== -1]
       }
-    }, { setText: 1, finishCalls: 2, finishFromLater: true, finishFromWatchdog: true, laterOnly: [1, 1, 1, 1],
+    }, { setText: 1, finishCalls: 2, finishFromLater: true, finishFromWatchdog: true, laterOnly: [1, 1, 2, 2], waitEnd: [3, true, true],
          verifyDoneRaised: [1, true], writeTurnRaised: [1, true] })
     checkCall("R26a (D-SRC-35): Model.stateBlockRecheck -- a source verb re-reads a liftable no-write mode, never init-timeout, never from inside a load, never while a read is already out, and not when nothing is blocked", () => {
       const R = c => M.stateBlockRecheck(c)
@@ -13298,7 +13514,13 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           h.root.toggleFavorite("t:a.uk"); h.drain(); h.root.toggleFavorite("t:b.uk"); h.drain()
           return { before, after: reasons(h)["save-parked"] || 0, preSave: (reasons(h)["pre-save-save-parked"] || 0) >= 2, verifies: h.root.stateVerifies >= 2 }
         }, { before: 0, after: 0, preSave: true, verifies: true })
-        checkCall("R26a (" + tag + "): the read is BOUNDED -- a reload the view never delivers leaves the save parked (nothing written) until stateVerifyWatchdog's own handler fires; then it is saved as before R26, counted and logged once", () => {
+        // R29a (2026-10-20) restores R26a's answer here: R27a asked for the
+        // read once more and then blocked (read-timeout), R28a re-read on a
+        // schedule and held the save past the bound; the lead's ruling takes
+        // both out, so no load in the bound and the save goes without it,
+        // counted and logged, as on 6f1d176 (the pin below is that tree's,
+        // word for word, plus the write count).
+        checkCall("R26a / R29a (" + tag + "): the read is BOUNDED -- a reload the view never delivers leaves the save parked (nothing written) until stateVerifyWatchdog's own handler fires; then it is saved as before R26, counted and logged once", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           const loader = h.stateFile.loader
           h.stateFile.loader = () => {}
@@ -13307,8 +13529,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           const parked = [h.root.stateSavePending, h.root.stateVerifyPending, h.file().favorites.length, h.ids.stateVerifyWatchdog.restarts - armed0]
           h.stateFile.loader = loader
           h.verifyWatchdog(); h.drain()
-          return { parked, file: h.file().favorites, noLoad: h.root.stateVerifyNoLoad, logged: h.warnings.filter(w => /was not read back within/.test(w)).length }
-        }, { parked: [true, true, 1, 1], file: ["t:bbc1.uk", "t:app.uk"], noLoad: 1, logged: 1 })
+          return { parked, file: h.file().favorites, noLoad: h.root.stateVerifyNoLoad, blocked: h.root.stateWriteBlocked, issued: h.root.stateWritesIssued,
+                   logged: h.warnings.filter(w => /was not read back within [0-9]+ ms of a save; saving without the read/.test(w)).length }
+        }, { parked: [true, true, 1, 1], file: ["t:bbc1.uk", "t:app.uk"], noLoad: 1, blocked: "", issued: 1, logged: 1 })
         // F4 (2026-10-16, lane-clean-f1): the BOUND itself, which nothing
         // observed -- the pin above fires the handler by hand, and a review
         // mutant with `interval: 20` passed node and a live key-scenario
@@ -13318,7 +13541,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         // read); a load that never comes is given up at 2,000 ms, logged with
         // that figure. Seen red on spikes/key-mutations/r26a-watchdog-20ms
         // and r26a-watchdog-no-interval (Qt's default 1000 ms).
-        checkCall("R26a (" + tag + "): the read's bound is 2 s, from the Timer the tree declares -- a load 1,999 ms late still decides the save (merged, no save without its read); a load that never comes is given up at 2,000 ms, not before, counted and logged with that figure", () => {
+        // R29a: R26a's pin again (R27a and R28a had re-levelled it to a
+        // second read, then to a schedule; both withdrawn).
+        checkCall("R26a / R29a (" + tag + "): the read's bound is 2 s, from the Timer the tree declares -- a load 1,999 ms late still decides the save (merged, no save without its read); a load that never comes is given up at 2,000 ms, not before, counted and logged with that figure", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           const loader = h.stateFile.loader
           const held = []
@@ -13339,19 +13564,209 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           g.elapse(1); g.drain()
           return { interval: h.ids.stateVerifyWatchdog.interval, held: held.length, late, decided, before,
                    after: [g.root.stateVerifyPending, g.root.stateVerifyNoLoad, g.file().favorites],
-                   logged: g.warnings.filter(w => /was not read back within 2000 ms of a save/.test(w)).length }
+                   logged: g.warnings.filter(w => /was not read back within 2000 ms of a save; saving without the read/.test(w)).length }
         }, { interval: 2000, held: 1, late: [true, 0, 1], decided: [0, ["t:bbc1.uk", "t:hand.uk", "t:app.uk"]], before: [true, 1],
              after: [false, 1, ["t:bbc1.uk", "t:app.uk"]], logged: 1 })
-        checkCall("R26a (" + tag + "): the read is SKIPPED while one of our writes is in flight (the view drops a reload then, measured 30 of 30): the next save is issued from a turn of its own with no reload asked for", () => {
+        // F2 (round 3's claims reviews, P2): WINDOW (C) IS DECIDED BY WHEN, NOT
+        // BY WHO. The documents said a hand-run `state source add` survived a
+        // stalled read while a favourite another program added by replacing
+        // the file did not; both are renames, which raise nothing on a stalled
+        // read (the contract's FileView fact), and what decided the live runs
+        // was whether the shell saved again after the other program's write.
+        // Here every read the shell asks for stalls, and the same two writes
+        // land within the 2 s bound (before the save goes without its read),
+        // after it with no later save, and after it followed by an in-app
+        // edit. Identical on 6f1d176 (this lane's report). Seen red on a
+        // mutant whose bound holds the save instead of writing it.
+        checkCall("F2 (" + tag + "): window (c), stated -- with every read stalled, another program's write is lost when it lands within the read's 2 s bound or before a later save of the shell's, and kept when it lands after the save went without its read and the shell saves nothing more; the same for a helper `state source add` and a replaced file adding a favourite", () => {
+          const HH = "http://hh.example.test/l.m3u"
+          const helperAdd = sf => { const st = JSON.parse(sf.disk); st.sources.push(rec(HH)); sf.disk = JSON.stringify(st) + "\n" }
+          const run = (change, shape) => {
+            const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+            h.drain()
+            h.stateFile.loader = () => {}
+            h.root.toggleFavorite("t:app.uk"); h.drain()
+            if (shape === "within") h.replace(change)
+            h.verifyWatchdog(); h.drain()
+            if (shape !== "within") { h.replace(change); h.drain() }
+            if (shape === "then-edit") { h.root.toggleFavorite("t:app2.uk"); h.drain(); h.verifyWatchdog(); h.drain() }
+            const f = restart(h).file()
+            return [M.findSource(f.sources, keyOf(HH)) !== null || f.favorites.indexOf("t:hand.uk") !== -1, f.favorites.indexOf("t:app.uk") !== -1]
+          }
+          const out = {}
+          for (const [who, change] of [["helper", helperAdd], ["replace", sf => withFav(sf, "t:hand.uk")]]) for (const shape of ["within", "after", "then-edit"]) out[who + " " + shape] = run(change, shape)
+          return out
+        }, { "helper within": [false, true], "helper after": [true, true], "helper then-edit": [false, true],
+             "replace within": [false, true], "replace after": [true, true], "replace then-edit": [false, true] })
+        // R27a (2026-10-20, D-SINK-22 window a) replaces R26a's "the read is
+        // SKIPPED while one of our writes is in flight": the save asked then
+        // no longer goes from the next turn without its read -- it WAITS,
+        // issuing nothing (no reload, which the view would drop, and no
+        // write), and once that write has landed it reads and then writes.
+        checkCall("R27a (" + tag + "): window a -- a save asked while our write is in flight WAITS: no reload asked, no write issued while it is out, and once that write lands the held save READS and then writes; nothing skipped, no reload dropped", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           h.root.toggleFavorite("t:one.uk"); h.runLater()
           const inFlight = h.root.stateSavesInFlight
           const loadsBefore = h.later.filter(e => e.fn === h.loadState).length
-          h.root.toggleFavorite("t:two.uk")
-          const asked = h.later.filter(e => e.fn === h.loadState).length - loadsBefore
+          const verifies0 = h.root.stateVerifies
+          h.root.toggleFavorite("t:two.uk"); h.runLater()
+          const held = [h.later.filter(e => e.fn === h.loadState).length - loadsBefore, h.stateFile.events.length, h.root.stateWriteWaiting, h.root.stateSavePending]
           h.drain()
-          return { inFlight, asked, skipped: h.root.stateVerifySkipped, file: h.file().favorites }
-        }, { inFlight: 1, asked: 0, skipped: 1, file: ["t:bbc1.uk", "t:one.uk", "t:two.uk"] })
+          return { inFlight, held, readsAfter: h.root.stateVerifies - verifies0, skipped: h.root.stateVerifySkipped, dropped: h.stateFile.droppedReloads,
+                   waiting: h.root.stateWriteWaiting, file: h.file().favorites }
+        }, { inFlight: 1, held: [0, 1, true, true], readsAfter: 1, skipped: 0, dropped: 0, waiting: false, file: ["t:bbc1.uk", "t:one.uk", "t:two.uk"] })
+        // D-SRC-47's mechanism, closed as a consequence (rule 15): R25a's
+        // own-write record keeps eight texts, and a burst of more than eight
+        // writes a turn apart pushed the first out, so its echo could be
+        // merged as another program's. With no write issued while one is out
+        // the record never holds more than the one text in flight.
+        checkCall("R27a (" + tag + "): D-SRC-47's mechanism -- twelve saves a turn apart never put more than ONE text in R25a's own-write record (no write is issued while another is out), every echo reads as ours or the base, none as foreign, and all twelve land", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.stateFile.coalesce = true
+          let most = 0
+          for (let i = 1; i <= 12; i++) { h.root.toggleFavorite("t:k" + i + ".uk"); h.runLater(); most = Math.max(most, h.root.recentSaves.length); if (i % 3 === 0) { h.deliverOne(); most = Math.max(most, h.root.recentSaves.length) } }
+          h.drain()
+          const foreign = Object.keys(reasons(h)).filter(k => /foreign/.test(k))
+          return { most, foreign, landed: h.file().favorites.length, outstanding: [h.root.stateSavesInFlight, h.root.stateSavePending] }
+        }, { most: 1, foreign: [], landed: 13, outstanding: [0, false] })
+        // The defect itself (D-SINK-22 window a): the state FOLDER link
+        // re-pointed at an EMPTY folder (no signal) just after our write
+        // landed and before the save that was asked during it is written.
+        // Before R27 that save had already been issued without a read and
+        // created state.json there at 0666 & ~umask, provider URLs and all.
+        checkCall("R27a (" + tag + "): window a, D-SINK-22 -- a second in-app change asked while the first write is in flight, the folder link re-pointed at an EMPTY folder as that write lands: the held save reads, finds nothing, takes the no-write mode (absent), told once -- and NO file is created (before R27: a 0644 state.json)", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.root.toggleFavorite("t:one.uk"); h.runLater()
+          h.root.toggleFavorite("t:two.uk"); h.runLater()
+          h.deliverOne({ noLater: true })
+          h.replace(sf => { sf.exists = false; sf.disk = ""; sf.mode = null })
+          h.drain()
+          return { created: h.stateFile.exists, mode: octal(h.stateFile.mode), blocked: h.root.stateWriteBlocked, told: blockTold(h), memory: h.root.userState.favorites }
+        }, { created: false, mode: "none", blocked: "absent", told: 1, memory: ["t:bbc1.uk", "t:one.uk", "t:two.uk"] })
+        // The wait's own bound: a write the view never reports. The held save
+        // is released to its read after 2 s; the read is then asked while the
+        // write is still out, so the honest view drops it.
+        // R29a (2026-10-20) re-levelled, and this is the ruling's proviso for
+        // keeping window a: THE WAIT NEVER WAITS ON A READ PAST THE BOUND. The
+        // dropped read's own 2 s bound is R26a's, so the held save is written
+        // without its read 2 s after it was released -- 4 s after it was
+        // asked -- counted and logged; nothing is blocked and nothing waits on.
+        // (R27a ended this in the no-write mode read-timeout, whose lift
+        // dropped the change; R28a kept it parked on a schedule.)
+        checkCall("R27a / R29a (" + tag + "): the write wait is BOUNDED at 2 s from the Timer the tree declares, and the read it releases to at 2 s more -- a write never reported releases the held save to its read, which the view drops while the write is out; at R26a's bound the save is written without the read (4 s after it was asked), never blocked, never held longer", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.root.toggleFavorite("t:one.uk"); h.runLater()
+          h.root.toggleFavorite("t:two.uk"); h.runLater()
+          h.elapse(1999)
+          const at1999 = [h.root.stateWriteWaiting, h.root.stateWriteWaitTimeouts]
+          h.elapse(1)
+          const released = [h.root.stateWriteWaiting, h.root.stateWriteWaitTimeouts, h.root.stateVerifyPending, h.stateFile.droppedReloads]
+          h.elapse(1999)
+          const at3999 = [h.root.stateVerifyPending, h.root.stateWritesIssued, h.root.stateVerifyNoLoad]
+          h.elapse(1)
+          const at4000 = [h.root.stateWriteBlocked, h.root.stateVerifyPending, h.root.stateSavePending, h.root.stateWritesIssued, h.root.stateVerifyNoLoad]
+          h.drain()
+          return { interval: h.ids.stateWriteWaitWatchdog.interval, at1999, released, at3999, at4000, file: h.file().favorites,
+                   outstanding: [h.root.stateVerifyPending, h.root.stateSavePending, h.root.stateSavesInFlight],
+                   logged: [h.warnings.filter(w => /write was not reported within 2000 ms/.test(w)).length, h.warnings.filter(w => /not read back within 2000 ms of a save; saving without the read/.test(w)).length] }
+        }, { interval: 2000, at1999: [true, 0], released: [false, 1, true, 1], at3999: [true, 1, 0], at4000: ["", false, false, 2, 1], file: ["t:bbc1.uk", "t:one.uk", "t:two.uk"],
+             outstanding: [false, false, 0], logged: [1, 1] })
+        // R28c (2026-10-20): the two resets round 1's review deleted with
+        // node at 2634/0 in both echo modes (M2, M4). Each deletion is red
+        // here. R29a re-levelled both by one step: the read the expired wait
+        // releases to is dropped while the slow write is out, and nothing
+        // re-asks it now (R28a's re-read on a landed write is withdrawn), so
+        // the first episode ends when a load answers it: our own write's echo
+        // (own echo load), or else R26a's bound, 2 s later, with the write
+        // made without its read.
+        // (1) The write wait's expiry is reset when a write LANDS: after one
+        // slow write, the next save asked during a write must WAIT again, not
+        // read while the write is out (a read the view drops).
+        checkCall("R28c (" + tag + "): the write wait's expiry is reset when the slow write LANDS (onSaved) -- after one write reported late, a save asked during the NEXT write waits for it again: no read asked while that write is out, none dropped", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.root.toggleFavorite("t:one.uk"); h.runLater()
+          h.root.toggleFavorite("t:two.uk"); h.runLater()
+          h.elapse(2000); h.drain(); h.elapse(2000); h.drain()
+          const first = [h.root.stateWriteWaitTimeouts, h.file().favorites.length]
+          h.root.toggleFavorite("t:three.uk"); h.runLater()
+          const dropped0 = h.stateFile.droppedReloads, waits0 = h.root.stateWriteWaits
+          h.root.toggleFavorite("t:four.uk"); h.runLater()
+          const second = [h.root.stateWriteWaiting, h.stateFile.droppedReloads - dropped0, h.root.stateWriteWaits - waits0, h.root.stateWriteWaitExpired]
+          h.drain()
+          return { first, second, file: h.file().favorites.length }
+        }, { first: [1, 3], second: [true, 0, 1, false], file: 5 })
+        // The disk keeps failing through the first episode, so no write
+        // LANDS to reset the expiry on onSaved's branch: only onSaveFailed's
+        // reset stands between the slow write and the next episode.
+        checkCall("R28c (" + tag + "): the write wait's expiry is reset when the slow write is reported FAILED (onSaveFailed) -- with every write failing, the next save asked during a write waits for it again; once the disk recovers all of it lands", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          h.stateFile.writeFails = true
+          h.root.toggleFavorite("t:one.uk"); h.runLater()
+          h.root.toggleFavorite("t:two.uk"); h.runLater()
+          h.elapse(2000)
+          h.drain(); h.elapse(2000); h.drain()
+          const first = [h.root.stateWriteWaitTimeouts, h.root.stateSaveFailed, h.file().favorites.length, h.root.stateVerifyNoLoad]
+          h.root.toggleFavorite("t:three.uk"); h.runLater()
+          const dropped0 = h.stateFile.droppedReloads
+          h.root.toggleFavorite("t:four.uk"); h.runLater()
+          const second = [h.root.stateWriteWaiting, h.stateFile.droppedReloads - dropped0, h.root.stateWriteWaitExpired]
+          h.stateFile.writeFails = false
+          h.drain()
+          return { first, second, file: h.file().favorites.length }
+        }, { first: [1, true, 1, 1], second: [true, 0, false], file: 5 })
+        // R29a: R28c's third pin -- the held save's read state (silences,
+        // bound, told flag) reset when the read finishes -- went with the
+        // state it reset.
+        checkCall("R27e / rule 15 (" + tag + "): the bar-entry refusal's journal line in a block uses the episode's words -- \"state.json was not loaded\" at a start, \"saving to state.json has stopped\" mid-session", () => {
+          const line = h => h.warnings.filter(w => /the bar entry is left as it is/.test(w)).map(w => (w.match(/\(([^)]*)\)/) || [])[1])
+          const s = boot({ sourceKey: KA, showLogos: false }, "{not json", mode, { ownEcho, exists: true })
+          s.root.writeOwnedEntry({ showLogos: true }, "logo toggle", false, true)
+          const m = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          m.foreign(sf => { sf.exists = false; sf.disk = "" }); m.drain()
+          m.root.writeOwnedEntry({ showLogos: true }, "logo toggle", false, true)
+          return { start: line(s).slice(-1), mid: line(m).slice(-1) }
+        }, { start: ["state.json was not loaded"], mid: ["saving to state.json has stopped"] })
+        // R27e (D-SRC-42), through the shipping Service.qml: the title the
+        // user is told by, in the notification AND the journal line.
+        checkCall("R27e (" + tag + "): a block at the START is told as \"Saved sources not loaded\", one that begins MID-SESSION as \"Saving has stopped\" -- the notification's title and the journal line alike, the body the Model's sentence", () => {
+          const told = h => { const n = h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74017") !== -1); return n.map(a => a[a.length - 2]) }
+          const journal = h => h.warnings.filter(w => /^omarchy-iptv: (Saved sources not loaded|Saving has stopped): /.test(w)).map(w => w.split(": ")[1])
+          const s = boot({ sourceKey: KA, showLogos: false }, "{not json", mode, { ownEcho, exists: true })
+          const m = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+          m.foreign(sf => { sf.exists = false; sf.disk = "" }); m.drain()
+          const body = m.warnings.filter(w => /^omarchy-iptv: Saving has stopped: /.test(w)).map(w => w.slice("omarchy-iptv: Saving has stopped: ".length))
+          return { start: [s.root.stateWriteBlocked, told(s), journal(s)], mid: [m.root.stateWriteBlocked, told(m), journal(m)],
+                   body: body.length === 1 && body[0] === M.stateUnreadableNotice("absent", m.root.stateFilePath, true).body }
+        }, { start: ["unparsed", ["Saved sources not loaded"], ["Saved sources not loaded"]], mid: ["absent", ["Saving has stopped"], ["Saving has stopped"]], body: true })
+        // R28e (2026-10-20): the ways back out of a block, each pinned to the
+        // sentence that names it (rule 14: the copy is graded by the
+        // behaviour, not by a grep for itself). A favourite toggled in a
+        // MID-session block (the file gone, seen) is kept only by the first.
+        checkCall("R28e (" + tag + "): the ways back out of a MID-session block, as STATE_BLOCK_UNSAVED names them -- a favourite made in the block is SAVED when the next favourite finds the file again, and DROPPED when the file comes back by itself first, when a source change is what finds it, and by a stopped shell", () => {
+          const way = (fn) => {
+            const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+            const keep = h.stateFile.disk
+            h.foreign(sf => { sf.exists = false; sf.disk = "" }); h.drain()
+            h.root.toggleFavorite("t:blk.uk"); h.drain()
+            const blocked = h.root.stateWriteBlocked
+            const next = fn(h, keep)
+            return blocked + ":" + ((next || h).file().favorites.indexOf("t:blk.uk") !== -1 ? "saved" : "dropped")
+          }
+          return {
+            nextChange: way((h, keep) => { h.replace(sf => { sf.exists = true; sf.disk = keep }); h.root.toggleFavorite("t:next.uk"); h.drain() }),
+            byItself: way((h, keep) => { h.foreign(sf => { sf.exists = true; sf.disk = keep }); h.drain(); h.root.toggleFavorite("t:next.uk"); h.drain() }),
+            sourceChange: way((h, keep) => { h.replace(sf => { sf.exists = true; sf.disk = keep }); h.root.updateSource(KB, { label: "x" }); h.drain(); h.root.updateSource(KB, { label: "y" }); h.drain() }),
+            stopped: way((h, keep) => { h.replace(sf => { sf.exists = true; sf.disk = keep }); return restart(h) })
+          }
+        }, { nextChange: "absent:saved", byItself: "absent:dropped", sourceChange: "absent:dropped", stopped: "absent:dropped" })
+        checkCall("R28e (" + tag + "): at a START no way back keeps a change made in the block, as STATE_BLOCK_UNSAVED_START says (\"not kept\") -- the file that did not parse put back, then the next favourite: the first load is applied, the block's favourite gone", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, "{not json", mode, { ownEcho, exists: true })
+          const blocked = h.root.stateWriteBlocked
+          h.root.toggleFavorite("t:blk.uk"); h.drain()
+          h.replace(sf => { sf.disk = START() })
+          h.root.toggleFavorite("t:next.uk"); h.drain()
+          return [blocked, h.root.stateWriteBlocked, h.root.userState.favorites.indexOf("t:blk.uk"), h.file().favorites.indexOf("t:blk.uk")]
+        }, ["unparsed", "", -1, -1])
         checkCall("R26a (" + tag + "): a foreign write that ARRIVES while a save waits for its read IS that read -- merged once, written once, both kept", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
           h.root.toggleFavorite("t:app.uk")
@@ -13380,6 +13795,196 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           }
           return [sfMode(0o022, false), sfMode(0o077, false), sfMode(0o002, false), sfMode(0o022, true)]
         }, ["644", "600", "664", "640"])
+      }
+    }
+  }
+
+  // ---- R27c / R27d (2026-10-20): THE CAP, at the two paths that add a record
+  // without the add form's own refusal in front of them. Through the shipping
+  // Service.qml; seen red against 6f1d176 (the counts are in this lane's
+  // report).
+  {
+    const H4 = "http://h4.example.test/l.m3u", KH = keyOf(H4)
+    const Z = "http://z.example.test/get.php?username=u&password=zpass", KZ = keyOf(Z)
+    const many = n => { const out = []; for (let i = 0; i < n; i++) out.push(rec("http://m" + i + ".example.test/l.m3u", { lastUsed: 100 + i })); return out }
+    const helperAdd = sf => { const st = JSON.parse(sf.disk); st.sources.push(rec(H4)); sf.disk = JSON.stringify(st) + "\n"; sf.exists = true }
+    const fullTold = h => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74016") !== -1 && a[a.length - 2] === "Sources is full")
+    const clean = h => (h.warnings.join("\n") + JSON.stringify(h.detached)).search(/:\/\/|example\.test|zpass|password/) === -1
+    const probed = h => h.signals.filter(s => s[0] === "sourceProbeFinished").map(s => s[1])
+    for (const mode of ["lag", "echo"]) {
+      for (const ownEcho of ["load", "none"]) {
+        const tag = mode + " host, own echo " + ownEcho
+        checkCall("R27c (" + tag + "): D-SRC-41 -- at 49 sources an in-app add's probe runs while a hand-run `state source add` takes the 50th place: the commit re-checks the cap against the state as it is NOW and refuses `too_many`, told through the probe's result; 50 on disk, and the next start drops nothing (before R27: 51 committed, the in-app source dropped by the next start's parse)", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)].concat(many(47)), KA), mode, { ownEcho })
+          const added = h.root.addSource({ playlistUrl: Z, epgUrl: "", label: "Mine" })
+          h.foreign(helperAdd); h.drain()
+          const during = h.root.userState.sources.length
+          h.probeExit(JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })); h.drain()
+          const res = probed(h)
+          const next = restart(h)
+          return { added: added.ok, during, result: res.map(r => [r.ok, r.reason]), code: res.map(r => r.code), line: res.map(r => M.probeFailureLine(r.reason, r.host, "url", r.code)),
+                   canAdd: h.root.canAddSource, memory: [h.root.userState.sources.length, M.findSource(h.root.userState.sources, KZ) !== null],
+                   file: [h.file().sources.length, M.findSource(h.file().sources, KH) !== null, M.findSource(h.file().sources, KZ) !== null],
+                   restart: [next.file().sources.length, next.root.userState.sources.length], removed: h.cacheRuns.some(c => c.indexOf("remove") !== -1 && c.indexOf(KZ) !== -1), clean: clean(h) }
+        }, { added: true, during: 50, result: [[false, M.sourceErrorMessage("too_many")]], code: ["too_many"], line: [M.sourceErrorMessage("too_many")], canAdd: false, memory: [50, false], file: [50, true, false], restart: [50, 50], removed: true, clean: true })
+        checkCall("R27c (" + tag + "): the control -- at 48 sources the same race leaves room: the in-app add commits as the 50th beside the hand-run one, and both survive a restart", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)].concat(many(46)), KA), mode, { ownEcho })
+          h.root.addSource({ playlistUrl: Z, epgUrl: "", label: "Mine" })
+          h.foreign(helperAdd); h.drain()
+          h.probeExit(JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })); h.drain()
+          const next = restart(h)
+          return { result: probed(h).map(r => r.ok), restart: [next.file().sources.length, M.findSource(next.file().sources, KZ) !== null, M.findSource(next.file().sources, KH) !== null] }
+        }, { result: [true], restart: [50, true, true] })
+        checkCall("R27d (" + tag + "): D-SRC-44 -- a 0.13.6 install with 50 sources and an entry URL not among them: the one-time migration does NOT run -- no record evicted, none added, no marker, the entry keeps its URL -- and the user is told ONCE (\"Sources is full\", no URL, no label); a restart holds the same (before R27: the least recently used source evicted, its URL with it)", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.root.reconcile(false); h.drain()
+          const keys = st => st.sources.map(r => r.key).sort().join(",")
+          const next = restart(h)
+          return { file: [h.file().sources.length, keys(h.file()) === keys({ sources: fifty }), M.findSource(h.file().sources, KNEW) !== null, marked(h)],
+                   entry: h.storedEntry().playlistUrl === NEW, told: fullTold(h).length, body: fullTold(h).map(a => a[a.length - 1])[0] === M.entryInputNotice("playlistUrl", "full").body,
+                   reports: reports(h), clean: clean(h) && !leaks(h), cacheRemoves: h.cacheRuns.filter(c => c.indexOf("remove") !== -1).length,
+                   restart: [next.file().sources.length, marked(next), next.storedEntry().playlistUrl === NEW, fullTold(next).length] }
+        }, { file: [50, true, false, false], entry: true, told: 1, body: true, reports: ["playlistUrl:full"], clean: true, cacheRemoves: 0, restart: [50, false, true, 1] })
+        checkCall("R27d (" + tag + "): D-SRC-44 -- held full, then ONE source removed in Sources: the next reconcile migrates -- the entry's URL ends in a record (the R21 oracle), active, the marker lands and the entry is stripped; 50 records, nothing else lost", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.drain()
+          const held = [h.root.migrationHeldFull, M.findSource(h.root.userState.sources, KNEW) !== null]
+          const gone = keyOf("http://m0.example.test/l.m3u")
+          const rm = h.root.removeSource(gone); h.drain()
+          const next = restart(h)
+          return { held, rm: rm.ok, file: [h.file().sources.length, M.findSource(h.file().sources, KNEW) !== null, M.findSource(h.file().sources, gone) !== null, marked(h), M.activeKeyOf(h.file()) === KNEW],
+                   entry: retired(h.storedEntry()), heldAfter: h.root.migrationHeldFull, told: fullTold(h).length, restart: [next.file().sources.length, next.root.activeSourceKey === KNEW, fullTold(next).length] }
+        }, { held: [true, false], rm: true, file: [50, true, false, true, true], entry: [], heldAfter: false, told: 1, restart: [50, true, 0] })
+        // R28b (2026-10-20): A HELD MIGRATION HOLDS BOTH URLS. Both seen red
+        // on lane-sweep-c1: there a picked source's own guide URL read BAR
+        // after the restart, the guide URL was reported "removed" while it
+        // stayed on the entry, and "Remove one" migrated the playlist with
+        // no guide URL and stripped the bar's.
+        const OWN = "http://own.example.test/a.xml"
+        const allTold = h => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74016") !== -1).map(a => a[a.length - 2])
+        checkCall("R28b (" + tag + "): a 0.13.6 install with 50 sources and the bar's playlist AND guide URL not among them -- held TOGETHER: both stay on the entry, no record's guide URL changes, ONE card (\"Sources is full\", never \"Bar setting removed\"); a source the user picks keeps its OWN guide URL across a restart; then \"Remove one\" moves both in together -- the new record carries the bar's guide URL, the entry is stripped of both, and nothing else is lost", () => {
+          const fifty = [rec(A, { epgUrl: OWN }), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.drain()
+          const held = { entry: [h.storedEntry().playlistUrl === NEW, h.storedEntry().epgUrl === E], aEpg: name(epgOf(h.file(), KA)), reports: reports(h), told: allTold(h) }
+          sw(h, KA); h.drain()
+          const r1 = restart(h); r1.drain()
+          const picked = { active: r1.root.activeSourceKey === KA, aEpg: name(epgOf(r1.file(), KA)), entry: [r1.storedEntry().playlistUrl === NEW, r1.storedEntry().epgUrl === E], told: allTold(r1) }
+          const gone = keyOf("http://m0.example.test/l.m3u")
+          const rm = r1.root.removeSource(gone); r1.drain()
+          const r2 = restart(r1)
+          return { held, picked, removed: { rm: rm.ok, newEpg: name(epgOf(r1.file(), KNEW)), active: r1.root.activeSourceKey === KNEW, marked: marked(r1), entry: retired(r1.storedEntry()),
+                                           aEpg: name(epgOf(r1.file(), KA)), count: r1.file().sources.length, restart: [name(epgOf(r2.file(), KNEW)), name(epgOf(r2.file(), KA)), r2.file().sources.length] },
+                   clean: clean(h) && clean(r1) && !leaks(r1) }
+        }, { held: { entry: [true, true], aEpg: OWN, reports: ["playlistUrl:full"], told: ["Sources is full"] },
+             picked: { active: true, aEpg: OWN, entry: [true, true], told: ["Sources is full"] },
+             removed: { rm: true, newEpg: "E", active: true, marked: true, entry: [], aEpg: OWN, count: 50, restart: ["E", OWN, 50] }, clean: true })
+        checkCall("R28b (" + tag + "): the first start of an install whose state names A active but carries no migration marker, at 50 sources, with the bar's playlist and guide URL not among them -- A keeps its OWN guide URL (on lane-sweep-c1 the bar's replaced it, the only copy), the guide URL stays on the entry, and one card", () => {
+          const fifty = [rec(A, { epgUrl: OWN }), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, stateText(fifty, KA), mode, { ownEcho })
+          h.drain()
+          const next = restart(h)
+          return { active: h.root.activeSourceKey === KA, aEpg: name(epgOf(h.file(), KA)), entry: h.storedEntry().epgUrl === E, reports: reports(h), told: allTold(h), restart: name(epgOf(next.file(), KA)) }
+        }, { active: true, aEpg: OWN, entry: true, reports: ["playlistUrl:full"], told: ["Sources is full"], restart: OWN })
+        // R29d (2026-10-20, the lead's ruling on round 2's P3): the R28b
+        // sibling. The bar's playlist is NOT A USABLE URL and a guide URL is
+        // set beside it, at a 0.13.6 start whose state names A active (A
+        // carrying its OWN guide URL, its only copy). Seen red on
+        // lane-sweep-c2, dev 6f1d176 and 0.14.2 alike: A's guide URL read the
+        // bar's, and the only notice was the playlist's.
+        const BADP = "ftp://u:lenspass@bad.example.test/l.m3u"
+        const pairTold = h => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74016") !== -1).map(a => a.slice(-2).join(" | "))
+        const pair = M.entryInputNotice("playlistUrl", "invalid-pair")
+        checkCall("R29d (" + tag + "): an UNUSABLE bar playlist with a guide URL beside it, A active with its OWN guide URL -- the guide URL is never adopted onto A (A keeps OWN, across a restart), it is told WITH the playlist in ONE notice (\"invalid-pair\", no URL), and both leave the entry once the marker has landed", () => {
+          const h = boot({ playlistUrl: BADP, epgUrl: E, showLogos: false }, stateText([rec(A, { epgUrl: OWN }), rec(B)], KA), mode, { ownEcho })
+          h.drain()
+          const next = restart(h)
+          return { active: h.root.activeSourceKey === KA, aEpg: name(epgOf(h.file(), KA)), bEpg: name(epgOf(h.file(), KB)), reports: reports(h), told: pairTold(h),
+                   entry: retired(h.storedEntry()), marked: marked(h), leak: leaks(h), restart: [name(epgOf(next.file(), KA)), reports(next), retired(next.storedEntry())] }
+        }, { active: true, aEpg: OWN, bEpg: "-", reports: ["playlistUrl:invalid-pair"], told: [pair.title + " | " + pair.body], entry: [], marked: true, leak: false, restart: [OWN, [], []] })
+        checkCall("R29d (" + tag + "): the same entry with NO active source -- one notice for the pair (until R29d two: the guide URL's no-source and the playlist's invalid), nothing in the file carries the guide URL, both off the entry", () => {
+          const h = boot({ playlistUrl: BADP, epgUrl: E, showLogos: false }, oldText([rec(A, { epgUrl: OWN }), rec(B)]), mode, { ownEcho })
+          h.drain()
+          return { active: h.root.activeSourceKey, reports: reports(h), told: pairTold(h).length, inFile: h.stateFile.disk.indexOf("e.example.test"), entry: retired(h.storedEntry()), aEpg: name(epgOf(h.file(), KA)) }
+        }, { active: "", reports: ["playlistUrl:invalid-pair"], told: 1, inFile: -1, entry: [], aEpg: OWN })
+        checkCall("R29d (" + tag + "), rule 15: the unusable playlist was told about already (seen, so not adopted again) and a NEW guide URL arrives beside it before the migration's write has landed -- it came with that playlist too: not adopted onto A, told once as the pair (from the guide URL's side), and off the entry with it", () => {
+          const h = boot({ playlistUrl: BADP, showLogos: false }, stateText([rec(A, { epgUrl: OWN }), rec(B)], KA), mode, { ownEcho, holdEvents: true })
+          const first = [reports(h), marked(h)]
+          h.host.externalSet("epgUrl", E)
+          h.drain()
+          return { first, aEpg: name(epgOf(h.file(), KA)), memory: name(epgOf(h.root.userState, KA)), reports: reports(h), entry: retired(h.storedEntry()), marked: marked(h), leak: leaks(h) }
+        }, { first: [["playlistUrl:invalid"], false], aEpg: OWN, memory: OWN, reports: ["playlistUrl:invalid", "epgUrl:invalid-pair"], entry: [], marked: true, leak: false })
+        checkCall("R27d (" + tag + "): D-SRC-44 -- held full, then a HAND-RUN `state source remove` (a foreign write): the reconcile that load runs migrates the entry's URL into the place it left", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.drain()
+          h.foreign(sf => { const st = JSON.parse(sf.disk); st.sources = st.sources.filter(r => r.url !== "http://m1.example.test/l.m3u"); sf.disk = JSON.stringify(st) + "\n" }); h.drain()
+          return { file: [h.file().sources.length, M.findSource(h.file().sources, KNEW) !== null, marked(h)], active: h.root.activeSourceKey === KNEW, entry: retired(h.storedEntry()) }
+        }, { file: [50, true, true], active: true, entry: [] })
+        // F1 (round 3's dataloss review, P2): THE RETRY RACES THE CAP AGAIN.
+        // A removal frees a place, the retry migrates the bar's playlist and
+        // guide URL into memory with the marker, and before that save's read
+        // answers another program fills the place. The merge keeps theirs and
+        // drops the migrated record; until F1 the marker survived the merge,
+        // landed, and the owned write stripped both URLs off the entry -- in no
+        // record and not on the entry, the playlist told only as "1 source
+        // added here ... was not kept" (the user added nothing) and the guide
+        // URL not at all. Now the migration stays HELD: heldFull kept, the
+        // entry left with both URLs, the same one card, and the next removal
+        // migrates both. Seen red on lane-sweep-c3 (the counts are in this
+        // lane's report).
+        const H5 = "http://h5.example.test/l.m3u"
+        const refillBeforeRead = h => {
+          const l0 = h.stateFile.loader; let fired = false
+          // A hand-run `state source add` succeeds only below the cap (the helper's
+          // own too_many), so it fires at the first read that finds a place free.
+          h.stateFile.loader = () => { const st = JSON.parse(h.stateFile.disk)
+            if (!fired && st.sources.length < 50) { fired = true; st.sources.push(rec(H5)); h.stateFile.disk = JSON.stringify(st) + "\n" } l0() }
+          return () => fired
+        }
+        const dropTold = h => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74018") !== -1).length
+        // The R21 oracle: each entry URL is in a record, still on the entry, or reported.
+        const oracle = h => { const st = h.file(), e = h.storedEntry(), rs = reports(h)
+          return [M.findSource(st.sources, KNEW) !== null || e.playlistUrl === NEW || rs.indexOf("playlistUrl:full") === -1 && rs.length > 0,
+                  st.sources.some(r => r.epgUrl === E) || e.epgUrl === E] }
+        const raced = (h, free) => {
+          const fired = refillBeforeRead(h)
+          free(h); h.drain(); h.elapse(3000); h.drain()
+          return { fired: fired(), file: [h.file().sources.length, M.findSource(h.file().sources, KNEW) !== null, h.stateFile.disk.indexOf("e.example.test"), marked(h)],
+                   entry: [h.storedEntry().playlistUrl === NEW, h.storedEntry().epgUrl === E], held: h.root.migrationHeldFull, oracle: oracle(h),
+                   reports: reports(h), told: allTold(h), dropTold: dropTold(h), clean: clean(h) && !leaks(h) }
+        }
+        const afterRace = { fired: true, file: [50, false, -1, false], entry: [true, true], held: true, oracle: [true, true],
+                            reports: ["playlistUrl:full"], told: ["Sources is full"], dropTold: 0, clean: true }
+        const thenRemoveOne = (h, gone) => {
+          const rm = h.root.removeSource(gone); h.drain(); h.elapse(3000); h.drain()
+          const next = restart(h)
+          return { rm: rm.ok, file: [h.file().sources.length, name(epgOf(h.file(), KNEW)), marked(h), M.activeKeyOf(h.file()) === KNEW], entry: retired(h.storedEntry()),
+                   held: h.root.migrationHeldFull, restart: [next.file().sources.length, name(epgOf(next.file(), KNEW)), next.root.activeSourceKey === KNEW, reports(next)] }
+        }
+        const migrated = { rm: true, file: [50, "E", true, true], entry: [], held: false, restart: [50, "E", true, []] }
+        checkCall("F1 (" + tag + "): held full, a HAND-RUN `state source remove` frees a place, and another program fills it before the retry's save has read the file -- the migration stays HELD: no marker, both URLs on the entry, the one \"Sources is full\" card and no \"not kept\" card; then \"Remove one\" moves both in", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.drain()
+          const race = raced(h, x => x.foreign(sf => { const st = JSON.parse(sf.disk); st.sources = st.sources.filter(r => r.url !== "http://m7.example.test/l.m3u"); sf.disk = JSON.stringify(st) + "\n" }))
+          return { race, then: thenRemoveOne(h, keyOf("http://m8.example.test/l.m3u")) }
+        }, { race: afterRace, then: migrated })
+        checkCall("F1 (" + tag + "), rule 15: held full, a hand-run removal frees a place, and another program adds the SAME playlist (no guide URL) before the retry's save has read the file -- the record stands as theirs, and the migration is retried over it at once: the bar's guide URL reaches the record, the marker lands, the entry is stripped; nothing told but the one full card (before F1 the guide URL was lost, told by a journal line only)", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.drain()
+          const l0 = h.stateFile.loader; let fired = false
+          h.stateFile.loader = () => { const st = JSON.parse(h.stateFile.disk)
+            if (!fired && st.sources.length < 50) { fired = true; st.sources.push(rec(NEW, { label: "theirs" })); h.stateFile.disk = JSON.stringify(st) + "\n" } l0() }
+          h.foreign(sf => { const st = JSON.parse(sf.disk); st.sources = st.sources.filter(r => r.url !== "http://m7.example.test/l.m3u"); sf.disk = JSON.stringify(st) + "\n" })
+          h.drain(); h.elapse(3000); h.drain()
+          const next = restart(h)
+          return { fired, file: [h.file().sources.length, name(epgOf(h.file(), KNEW)), marked(h), M.activeKeyOf(h.file()) === KNEW], entry: retired(h.storedEntry()), held: h.root.migrationHeldFull,
+                   reports: reports(h), told: allTold(h), dropTold: dropTold(h), clean: clean(h) && !leaks(h), restart: [name(epgOf(next.file(), KNEW)), next.root.activeSourceKey === KNEW] }
+        }, { fired: true, file: [50, "E", true, true], entry: [], held: false, reports: ["playlistUrl:full"], told: ["Sources is full"], dropTold: 0, clean: true, restart: ["E", true] })
       }
     }
   }

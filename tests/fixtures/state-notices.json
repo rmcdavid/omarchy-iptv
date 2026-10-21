@@ -1,0 +1,34 @@
+{
+  "about": "R27e (2026-10-20; D-SRC-42, D-SRC-50, D-SRC-51), re-levelled by R28e and R28a the same day: every sentence of the no-write notice, verbatim, for one path. `start` holds every reason a block at the START can carry and `midSession` every reason a block that begins after a load can carry (the load kinds: Model.stateLoadDecision blocks mid-session with the load kind itself). The two differ in the second sentence only (R28e: what becomes of a change made now). R28a withdrew read-timeout, and R29a (which withdrew R28a's held save and its \"Saving is waiting\" notice) kept it withdrawn: a read that does not answer within 2 s is no block, its save is written without it. tests/Model.test.js holds Model.stateUnreadableNotice, stateUnreadableJournal and stateBlockedHeader to it, both ways, and pins each way back out of a mid-session block to the sentence that names it. The README and docs/UX-SOURCES.md quote these words.",
+  "path": "/home/u/.local/state/omarchy-iptv/state.json",
+  "titles": {
+    "start": "Saved sources not loaded",
+    "midSession": "Saving has stopped"
+  },
+  "unsaved": {
+    "start": "Sources, favorites and settings changed now are not kept.",
+    "midSession": "Favorites and other changes made now are held in this session only: the next such change made here saves them if it finds the file again, but they are dropped if the file comes back by itself first, if a source change is what finds it, or if the shell is stopped."
+  },
+  "linkFirst": "If it is a symbolic link, point it back at the folder or file that holds your state",
+  "bodies": {
+    "start": {
+      "permission": "/home/u/.local/state/omarchy-iptv/state.json is not readable (permission denied). Sources, favorites and settings changed now are not kept. Make it readable with chmod 600 on that file, then run omarchy restart shell.",
+      "not-a-file": "/home/u/.local/state/omarchy-iptv/state.json is not a regular file. Sources, favorites and settings changed now are not kept. Move whatever is at that path aside, then run omarchy restart shell.",
+      "unparsed": "/home/u/.local/state/omarchy-iptv/state.json is not a valid state file. Sources, favorites and settings changed now are not kept. Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell.",
+      "link": "/home/u/.local/state/omarchy-iptv/state.json is a symbolic link whose target is missing or is not a regular file. Sources, favorites and settings changed now are not kept. Point it back at the file that holds your state, or move the link aside, then run omarchy restart shell.",
+      "not-a-dir": "/home/u/.local/state/omarchy-iptv is not a folder (a file is at that path, or at one above it). Sources, favorites and settings changed now are not kept. Move whatever is at that path aside, then run omarchy restart shell.",
+      "folder-link": "/home/u/.local/state/omarchy-iptv is a symbolic link whose target is missing or is not a folder (or a folder above it is). Sources, favorites and settings changed now are not kept. Point it back at the folder that holds your state, or move the link aside, then run omarchy restart shell.",
+      "absent-unconfirmed": "/home/u/.local/state/omarchy-iptv/state.json could not be found, or its folder could not be read. Sources, favorites and settings changed now are not kept. Make the folder readable with chmod 700, then run omarchy restart shell.",
+      "absent": "/home/u/.local/state/omarchy-iptv/state.json could not be found, or its folder could not be read. Sources, favorites and settings changed now are not kept. If it is a symbolic link, point it back at the folder or file that holds your state; otherwise make the folder readable with chmod 700. Then run omarchy restart shell.",
+      "init-timeout": "/home/u/.local/state/omarchy-iptv/state.json could not be checked: the start-up check did not answer and was stopped. Sources, favorites and settings changed now are not kept. Make sure a regular file, or nothing, is at that path, then run omarchy restart shell.",
+      "io-error": "/home/u/.local/state/omarchy-iptv/state.json could not be read. Sources, favorites and settings changed now are not kept. Check the file and its folder, then run omarchy restart shell."
+    },
+    "midSession": {
+      "io-error": "/home/u/.local/state/omarchy-iptv/state.json could not be read. Favorites and other changes made now are held in this session only: the next such change made here saves them if it finds the file again, but they are dropped if the file comes back by itself first, if a source change is what finds it, or if the shell is stopped. Check the file and its folder, then run omarchy restart shell.",
+      "absent": "/home/u/.local/state/omarchy-iptv/state.json could not be found, or its folder could not be read. Favorites and other changes made now are held in this session only: the next such change made here saves them if it finds the file again, but they are dropped if the file comes back by itself first, if a source change is what finds it, or if the shell is stopped. If it is a symbolic link, point it back at the folder or file that holds your state; otherwise make the folder readable with chmod 700. Then run omarchy restart shell.",
+      "permission": "/home/u/.local/state/omarchy-iptv/state.json is not readable (permission denied). Favorites and other changes made now are held in this session only: the next such change made here saves them if it finds the file again, but they are dropped if the file comes back by itself first, if a source change is what finds it, or if the shell is stopped. Make it readable with chmod 600 on that file, then run omarchy restart shell.",
+      "not-a-file": "/home/u/.local/state/omarchy-iptv/state.json is not a regular file. Favorites and other changes made now are held in this session only: the next such change made here saves them if it finds the file again, but they are dropped if the file comes back by itself first, if a source change is what finds it, or if the shell is stopped. Move whatever is at that path aside, then run omarchy restart shell.",
+      "unparsed": "/home/u/.local/state/omarchy-iptv/state.json is not a valid state file. Favorites and other changes made now are held in this session only: the next such change made here saves them if it finds the file again, but they are dropped if the file comes back by itself first, if a source change is what finds it, or if the shell is stopped. Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell."
+    }
+  }
+}

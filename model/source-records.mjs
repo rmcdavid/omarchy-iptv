@@ -6,7 +6,8 @@ import {
   copyGuide, withQuery, withMode
 } from "./browse.mjs"
 import {
-  emptyState, entryMigratedOf, withEntryMigrated, cloneState
+  emptyState, entryMigratedOf, withEntryMigrated, cloneState, parseState,
+  mergeForeignState
 } from "./state.mjs"
 import {
   clampSetting, settingsFrom, entryInputForm, RETIRED_SETTINGS,
@@ -95,6 +96,23 @@ function reducerFail(state, code, key, opts) {
   return { ok: false, code: code, message: sourceErrorMessage(code, opts), state: state, key: str(key) }
 }
 
+// R27c / R27d (2026-10-20): THE CAP, one decision. A state holding
+// MAX_SOURCES records takes no new one: Model.addSource refuses `too_many`,
+// the probe commit refuses `too_many` against the state as it is when the
+// probe ends (D-SRC-41: a hand-run add may have taken the last place while
+// it ran), and the one-time migration does not run rather than evict
+// (D-SRC-44: the evicted record was the only copy of its URL).
+// R28e: round 1's review found two more places deciding "is there room"
+// with their own comparison, Service.canAddSource and Guide.sourcesFull;
+// both call this now, so the sentence above is true of the tree. What is
+// NOT this decision, and says so: parseState (model/state.mjs) and
+// Model.mergeForeignState TRUNCATE a list already over the cap to
+// MAX_SOURCES -- a file written by something else -- rather than refuse an
+// addition; they share the constant, not the question.
+function sourcesFull(state) {
+  return asList(state ? state.sources : []).length >= MAX_SOURCES
+}
+
 // fields = { playlistUrl, epgUrl, label, origin }. Codes: the UX 5.4 URL
 // codes, `label_too_long`, `label_taken` (a typed label that collides),
 // `duplicate` (with the existing key), `too_many`. An empty label derives
@@ -108,7 +126,7 @@ function addSource(state, fields, nowSec) {
   if (!ev.ok) return reducerFail(st, ev.code, "", { field: "epg" })
   var dup = findSourceByUrl(st.sources, pv.url)
   if (dup) return reducerFail(st, "duplicate", dup.key, { label: dup.label })
-  if (st.sources.length >= MAX_SOURCES) return reducerFail(st, "too_many", "")
+  if (sourcesFull(st)) return reducerFail(st, "too_many", "")
   var lv = validateLabel(f.label, sourceLabels(st), "")
   if (!lv.ok) return reducerFail(st, lv.code, "", { label: lv.label })
   var origin = SOURCE_ORIGINS.indexOf(str(f.origin)) === -1 ? "guide" : str(f.origin)
@@ -355,6 +373,13 @@ function invalidInputBlocks(invalid, activeKey) {
 //             next owned write takes off the entry
 //   report    the refused keys whose value this session has not seen: what
 //             is reported, once
+// R27d: `heldFull` -- this session's migration found Sources full and did
+// not run -- makes a MIGRATING playlist URL fresh again whatever `seen`
+// says, so the next reconcile (a removal's) tries it once more.
+// R28b (2026-10-20): and its guide URL with it. The two are held together
+// (adoptActiveSource), so the retry adopts both together (R21); before R28b
+// the guide URL read as seen on the retry and the migrated record got none,
+// while the strip that followed took it off the entry.
 function reconcileAction(input) {
   var it = input || {}
   var migrating = it.migrating === true
@@ -365,7 +390,7 @@ function reconcileAction(input) {
     if (entryInputForm(name, values[name]).text === "") continue
     if (migrating) {
       // R1's snapshot: unseen, or different from the value seen LAST
-      var fresh = !entryInputLast(it.seen, name, values[name])
+      var fresh = it.heldFull === true ? true : !entryInputLast(it.seen, name, values[name])
       if (name === "playlistUrl") out.adoptUrl = fresh
       else if (name === "epgUrl") out.adoptEpg = fresh
     } else {
@@ -413,14 +438,60 @@ function reconcileAction(input) {
 // (Model.withEntryMigrated), so the marker rides the SAME state write as the
 // adoption and the strip that follows it waits for that write to land (R13).
 //
+// R27d (D-SINK-19, D-SRC-44): THE MIGRATION NEVER EVICTS. When step 1's URL
+// names no record and the state already holds MAX_SOURCES, nothing is
+// adopted and nothing evicted: `full` is set, the resolution continues at
+// step 2 (as for an invalid value), and the marker is NOT set -- so the
+// entry keeps its URL (the funnel keeps a retired key until the marker has
+// landed, Model.retiredInputsToKeep; shell.json is 0600 under the D-SINK-18
+// shield) and the next reconcile after a removal migrates it
+// (Model.reconcileAction's `heldFull`).
+//
+// R28b (2026-10-20): A HELD MIGRATION HOLDS BOTH URLS. With step 1 `full`,
+// the entry's guide URL belongs to the playlist that was held, not to
+// whichever record steps 2-4 name, so the R4 block below does not run: it
+// is not adopted onto any record, not refused, not reported as having no
+// source, and it stays on the entry beside its playlist (the same funnel
+// keep rule). Round 1 measured both losses R27d had left: a source the user
+// picked had its own guide URL replaced by the bar's at the next start (its
+// only copy), and "Remove one" migrated the playlist with no guide URL and
+// stripped the bar's. `heldEpg` says the entry carries a guide URL that was
+// held with it.
+//
+// R29d (2026-10-20, the lead's ruling on round 2's P3, R28b's sibling): A
+// GUIDE URL THAT CAME WITH AN UNUSABLE PLAYLIST IS NEVER ADOPTED ONTO ANOTHER
+// SOURCE. With step 1 `invalid`, steps 2-4 name whichever record was active,
+// and until R29d the R4 block below put the entry's guide URL on THAT record
+// -- replacing its own guide URL, often the only copy, with no notice but the
+// playlist's (dev 6f1d176, 0.14.2 and lane-sweep-c2 alike; round 2's review,
+// through the shipping Service.qml). Now the R4 block does not run: the guide
+// URL is reported WITH the playlist, in its one notice (Model.entryInputNotice
+// "invalid-pair", no URL), and stripped with it, because the migration's
+// marker rides this write and the owned write after it takes every retired
+// key off the entry. The same holds when the playlist on the entry was
+// already handled (seen, so not adopted again) and is unusable while a fresh
+// guide URL arrives beside it before the marker has landed: the guide URL
+// came with that playlist too. `epgWithInvalid` says so.
+//
 // Returns { state, key, changed, moved, adoptedUrl, adoptedEpg, refusedEpg,
-// noSourceEpg, invalid, added, evicted, marked, writeEntry }. `changed` is
+// noSourceEpg, invalid, added, full, heldEpg, epgWithInvalid, marked,
+// writeEntry }. `changed` is
 // whether the state must be written; `moved` whether the active source is a
 // DIFFERENT one than before, which is the only thing that resets the status
 // line; `marked` whether this call set the marker; `writeEntry` whether the
 // bar entry must be rewritten -- it carries a retired URL key (adopted,
 // refused, or about to be: every one leaves by the owned write), or its
 // mirrored key disagrees with the state.
+// R29d: whether the entry's playlistUrl is a value that does not validate --
+// the test reconcileSources makes (the CLI origin, `~` paths accepted), and
+// nothing is adopted or read from it here. An empty or whitespace-only value
+// is no input (R18a), so it is not "unusable".
+function entryPlaylistUnusable(raw) {
+  var text = entryInputForm("playlistUrl", raw).text
+  if (text === "") return false
+  return !validateSourceUrl(sanitizeInput(text, MAX_SOURCE_URL + 1), { origin: "cli" }).ok
+}
+
 function adoptActiveSource(state, entry, nowSec, origin, opts) {
   var st = state || emptyState()
   var e = entry || {}
@@ -429,8 +500,8 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   var adoptEpg = o.adoptEpg === true
   var before = activeKeyOf(st)
   var out = { state: st, key: "", changed: false, moved: false, adoptedUrl: false, adoptedEpg: false,
-              refusedEpg: false, noSourceEpg: false, invalid: null, added: "", evicted: [], marked: false,
-              writeEntry: false }
+              refusedEpg: false, noSourceEpg: false, invalid: null, added: "", full: false, heldEpg: false,
+              epgWithInvalid: false, marked: false, writeEntry: false }
   // R18a: the one normaliser (entryInputForm). `url` is the sanitized text
   // reconcileSources validates; `epg` is the whole form, so a guide URL of
   // whitespace or control characters alone is NO input (R4's no-op).
@@ -444,13 +515,14 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
     var rec = reconcileSources(st, url, "", before, nowSec, origin, { adoptEpg: false })
     if (rec.invalid) {
       out.invalid = rec.invalid
+    } else if (rec.full) {
+      out.full = true
     } else {
       // The original object when nothing moved, so `changed` below stays an
       // honest "must this be written" and a consumed re-run saves nothing.
       out.state = rec.changed ? rec.state : st
       out.adoptedUrl = true
       out.added = rec.added
-      out.evicted = rec.evicted
       resolved = true
     }
   }
@@ -466,7 +538,15 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   // R4: a guide URL input reaches the ACTIVE record on any path -- the record
   // a fresh URL just named, a state load with a guide URL on the entry, an
   // "ignore" plan that carries only a guide URL change (D-SRC-02).
-  if (epg.text !== "") {
+  // R29d: the playlist beside the guide URL is unusable -- the one step 1
+  // just refused, or (not adopted again because it was seen) the one the
+  // entry still carries.
+  var playlistUnusable = out.invalid !== null || (!adoptUrl && entryPlaylistUnusable(e.playlistUrl))
+  if (epg.text !== "" && out.full) {
+    out.heldEpg = true
+  } else if (epg.text !== "" && playlistUnusable) {
+    out.epgWithInvalid = true
+  } else if (epg.text !== "") {
     var active = out.key !== "" ? findSource(out.state.sources, out.key) : null
     if (!active) {
       out.noSourceEpg = true
@@ -477,7 +557,7 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
       out.adoptedEpg = true
     }
   }
-  if (o.migrating === true) {
+  if (o.migrating === true && !out.full) {
     var markedState = withEntryMigrated(out.state)
     out.marked = markedState !== out.state
     out.state = markedState
@@ -596,7 +676,11 @@ function pointerWritePlan(input) {
 // the active key actually changed and adopts a changed (valid) EPG URL; an
 // unknown URL is added with a derived label and `origin` "migrated" on the
 // very first v2 run (no history, legacy cache layout) or "cli" afterwards.
-// Beyond MAX_SOURCES the least recently used non-active records are evicted.
+// R27d (D-SRC-44): at MAX_SOURCES an unknown URL is NOT added and nothing is
+// evicted -- `full` says so and the state is returned as it was. Until R27
+// the least recently used record was evicted to make room, and its URL, the
+// only copy, went with a journal line. (The only caller is the migration,
+// Model.adoptActiveSource's step 1.)
 // `invalid` carries the validation result for a set but invalid URL (D16).
 // `opts.adoptEpg === false` (D-SRC-10): the settings' epgUrl was written
 // for the previous source (it did not change in the settings write that
@@ -605,7 +689,7 @@ function pointerWritePlan(input) {
 // D-SRC-02, or the first reconcile after a state load).
 function reconcileSources(state, playlistUrl, epgUrl, previousActiveKey, nowSec, origin, opts) {
   var st = cloneState(state)
-  var out = { state: st, changed: false, activeKey: "", added: "", evicted: [], invalid: null }
+  var out = { state: st, changed: false, activeKey: "", added: "", full: false, invalid: null }
   var raw = sanitizeInput(playlistUrl, MAX_SOURCE_URL + 1)
   if (raw === "") return out
   // The settings are the CLI path: `~` paths stay accepted here (SR11,
@@ -631,6 +715,7 @@ function reconcileSources(state, playlistUrl, epgUrl, previousActiveKey, nowSec,
     out.changed = out.changed || out.state !== st
     return out
   }
+  if (sourcesFull(st)) { out.full = true; return out }
   var kind = str(origin) !== "" && SOURCE_ORIGINS.indexOf(str(origin)) !== -1 ? str(origin) : (st.sources.length === 0 && st.cacheLayout !== CACHE_LAYOUT ? "migrated" : "cli")
   var key = allocateSourceKey(st.sources, pv.url)
   var record = {
@@ -638,18 +723,7 @@ function reconcileSources(state, playlistUrl, epgUrl, previousActiveKey, nowSec,
     label: uniqueLabel(deriveLabel(pv.url, pv.kind), sourceLabels(st)), labelCustom: false,
     origin: kind, addedAt: now, lastUsed: now, fetchedAt: 0, channelCount: 0, groupCount: 0
   }
-  var sources = st.sources.concat([record])
-  while (sources.length > MAX_SOURCES) {
-    var victim = -1
-    for (var i = 0; i < sources.length; i++) {
-      if (sources[i].key === key) continue
-      if (victim === -1 || Number(sources[i].lastUsed) < Number(sources[victim].lastUsed)) victim = i
-    }
-    if (victim === -1) break
-    out.evicted.push(str(sources[victim].key))
-    sources.splice(victim, 1)
-  }
-  out.state = withActiveKey(cloneState(st, { sources: sources }), key)
+  out.state = withActiveKey(cloneState(st, { sources: st.sources.concat([record]) }), key)
   out.changed = true
   out.activeKey = key
   out.added = key
@@ -976,15 +1050,16 @@ function withFormReveal(st, field, revealed) {
 }
 export {
   hasControlChars, warnState, normalizeSourceRecord, copySourceRecord,
-  replaceSource, nowInt, sourceLabels, reducerFail, addSource, updateSource,
-  removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
+  replaceSource, nowInt, sourceLabels, reducerFail, sourcesFull, addSource,
+  updateSource, removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
   withSourceStats, activeKeyText, activeKeyOf, activeSourceRecord,
-  withActiveKey, invalidInputBlocks, reconcileAction, adoptActiveSource,
-  activeEpgUrlOf, pointerWritePlan, reconcileSources, sourceForEdit,
-  sourcesSummary, entryWith, cacheStale, formFields, isFormField, formLimit,
-  FORM_SLACK, formCapacity, emptyValues, copyValues, copyForm, formState,
-  formFocusOrder, formHasText, firstFieldWithText, guideWithForm, openForm,
-  openFirstRun, openAddForm, openEditForm, openXtreamForm, closeForm,
-  withFormPatch, withFormValue, withFormFocus, moveFormFocus, fieldMaskable,
-  fieldRevealed, fieldMasked, toggleReveal, withFormReveal
+  withActiveKey, invalidInputBlocks, reconcileAction, entryPlaylistUnusable,
+  adoptActiveSource, activeEpgUrlOf, pointerWritePlan, reconcileSources,
+  sourceForEdit, sourcesSummary, entryWith, cacheStale, formFields,
+  isFormField, formLimit, FORM_SLACK, formCapacity, emptyValues, copyValues,
+  copyForm, formState, formFocusOrder, formHasText, firstFieldWithText,
+  guideWithForm, openForm, openFirstRun, openAddForm, openEditForm,
+  openXtreamForm, closeForm, withFormPatch, withFormValue, withFormFocus,
+  moveFormFocus, fieldMaskable, fieldRevealed, fieldMasked, toggleReveal,
+  withFormReveal
 }

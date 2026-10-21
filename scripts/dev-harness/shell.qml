@@ -395,6 +395,160 @@ ShellRoot {
     return n
   }
 
+  // ---- R27f (2026-10-20, D-PERF-1): THE ASYNC OPEN INSTRUMENT.
+  //
+  // openMs below has never measured what its comment promises: it calls
+  // forceLayout SYNCHRONOUSLY in the turn of the summon, and a view is not
+  // laid out until the event loop runs. This one does not block.
+  // `openAsync` starts the clock, summons, and RETURNS; the guide's window
+  // then swaps frames, and on every swap (a probe Item the harness parents
+  // into the guide's window, listening to that window's frameSwapped and
+  // asking for the next frame) the PRESENTING view is sampled.
+  //
+  // R28d (2026-10-20): what is sampled is what is DRAWN -- the delegates
+  // that intersect the view's visible area (HarnessLib.openDrawnSet), never
+  // the cacheBuffer's off-screen ones, which R27f counted (13 rows and 21
+  // tiles where 10 and 16 are drawn) -- and the open is realised at the
+  // first frame whose drawn set TILES that area (HarnessLib.openDrawnSettle),
+  // measured against the rows the guide has (its rowCount), so a view that
+  // draws part of a screen and fills the rest later is not realised until it
+  // has. After the decision it samples on for openTailMs and counts the
+  // frames whose drawn set changed. Bounded by openMaxFrames frames and
+  // openMaxMs: a run that does not settle says so (`endedBy`), never a
+  // number. Nothing in the product changes: the probe is created and owned
+  // here and listens only; Guide.qml is read through the object walk openMs
+  // uses.
+  property var openRun: null
+  property var openProbe: null
+  property var openViewObj: null
+  property bool openedOnce: false
+  readonly property int openTailMs: 600
+  readonly property int openMaxFrames: 400
+  readonly property int openMaxMs: 6000
+  function presentingView(g) {
+    for (var i = 0; i < harness.channelViews.length; i++) {
+      var v = harness.findById(g, harness.channelViews[i], 0)
+      if (!v) continue
+      var shown = true
+      try { shown = v.visible !== false } catch (e) {}
+      if (shown) return { name: harness.channelViews[i], view: v }
+    }
+    return null
+  }
+  function ensureOpenProbe(g) {
+    if (harness.openProbe) return harness.openProbe
+    var host = g ? g.hostWindow : null
+    if (!host || !host.contentItem) return null
+    var p = Qt.createQmlObject("import QtQuick\n"
+      + "Item {\n"
+      + "  id: p\n"
+      + "  signal frame()\n"
+      + "  readonly property bool hasWindow: p.Window.window !== null\n"
+      + "  function poke() { if (p.Window.window) p.Window.window.update() }\n"
+      + "  Connections { target: p.Window.window; function onFrameSwapped() { p.frame() } }\n"
+      + "}\n", host.contentItem, "harnessOpenProbe")
+    p.frame.connect(harness.openFrame)
+    harness.openProbe = p
+    return p
+  }
+  // One frame's sample of the presenting view: its channel delegates (by
+  // channelId) with their geometry, the visible area, and the layout the
+  // completeness test needs. The guide's own rowCount is the total.
+  function openSample() {
+    var v = harness.openViewObj
+    var g = guideLoader.item
+    if (!v || !v.contentItem || !v.contentItem.children) return HarnessLib.openDrawnSet([], null, null)
+    var kids = v.contentItem.children
+    var items = []
+    // R29e: the effective opacity -- every ancestor's from the content item
+    // up to the window's root, times each delegate's own (HarnessLib.openDrawnSet
+    // reads 0 as not drawn).
+    var alpha = 1
+    try { for (var a = v.contentItem; a; a = a.parent) alpha = alpha * (Number(a.opacity) >= 0 ? Number(a.opacity) : 1) } catch (e) {}
+    for (var i = 0; i < kids.length; i++) {
+      try {
+        var k = kids[i]
+        if (k && k.channelId !== undefined) items.push({ index: k.index, x: k.x, y: k.y, w: k.width, h: k.height, shown: k.visible === true,
+                                                        opacity: alpha * (Number(k.opacity) >= 0 ? Number(k.opacity) : 1) })
+      } catch (e) {}
+    }
+    var grid = v.cellWidth !== undefined
+    return HarnessLib.openDrawnSet(items, { x: v.contentX, y: v.contentY, w: v.width, h: v.height },
+                                   { kind: grid ? "grid" : "list", total: g ? g.rowCount : v.count, spacing: grid ? 0 : v.spacing,
+                                     cellW: grid ? v.cellWidth : 0, cellH: grid ? v.cellHeight : 0 })
+  }
+  function openFrame() {
+    var r = harness.openRun
+    if (!r || r.done) return
+    var at = Date.now() - r.t0
+    var d = harness.openSample()
+    var frames = r.frames.slice()
+    frames.push({ at: at, drawn: d.drawn, built: d.built, complete: d.complete, reason: d.reason, minIndex: d.minIndex, maxIndex: d.maxIndex })
+    r.frames = frames
+    var settle = HarnessLib.openDrawnSettle(frames, harness.openTailMs)
+    if (settle.tailDone || frames.length >= harness.openMaxFrames || at >= harness.openMaxMs) {
+      r.done = true
+      r.settle = settle
+      r.endedBy = settle.tailDone ? "settled" : (frames.length >= harness.openMaxFrames ? "frames" : "time")
+    }
+    harness.openRun = r
+    if (!r.done && harness.openProbe) harness.openProbe.poke()
+  }
+
+  // ---- R27a (2026-10-20, D-SINK-22 window a): saves asked while a write is
+  // OUT. `writesSeen` counts the service's state writes by the change of the
+  // text it last asked to write (lastSaveText, which every tree has; the
+  // count is all this reads of it -- the text holds the session's state and
+  // is never logged or returned). `dwRun` is one editDuringWrite: a label
+  // edit, and a second one asked in the first turn after the service says a
+  // write of its own is in flight. `burstRun` is one burst: N label edits a
+  // turn apart, timed to the turn the last has landed.
+  property int writesSeen: 0
+  property var dwRun: null
+  property var burstRun: null
+  function dwAsk() {
+    var r = harness.dwRun, s = serviceLoader.item
+    if (!r || r.asked || !s) return
+    r.asked = true
+    r.inFlightAtAsk = Number(s.stateSavesInFlight) || 0
+    var res = s.updateSource(r.key, { label: r.second })
+    r.secondOk = res.ok === true
+    harness.dwRun = r
+  }
+  function burstTurn() {
+    var r = harness.burstRun, s = serviceLoader.item
+    if (!r || !s) return
+    if (r.asked < r.n) {
+      r.asked = r.asked + 1
+      s.updateSource(r.key, { label: r.prefix + r.asked })
+      if (r.asked === r.n) r.lastAskAt = Date.now() - r.t0
+      harness.burstRun = r
+      Qt.callLater(harness.burstTurn)
+      return
+    }
+    // landed: the service holds nothing back and has nothing out
+    if (s.stateSavesInFlight === 0 && s.stateSavePending !== true && s.stateVerifyPending !== true) {
+      r.landedAt = Date.now() - r.t0
+      r.writes = harness.writesSeen - r.writes0
+      r.done = true
+      harness.burstRun = r
+      return
+    }
+    if (Date.now() - r.t0 > 10000) { r.done = true; r.gaveUp = true; harness.burstRun = r; return }
+    harness.burstRun = r
+    burstPoll.restart()
+  }
+  Timer { id: burstPoll; interval: 1; repeat: false; onTriggered: harness.burstTurn() }
+  Connections {
+    target: serviceLoader.item
+    ignoreUnknownSignals: true
+    function onLastSaveTextChanged() { harness.writesSeen = harness.writesSeen + 1 }
+    function onStateSavesInFlightChanged() {
+      var r = harness.dwRun
+      if (r && !r.asked && serviceLoader.item && serviceLoader.item.stateSavesInFlight > 0) Qt.callLater(harness.dwAsk)
+    }
+  }
+
   // Every objectName that can be the guide's channel view, newest first.
   // A name that is not on this list cannot be measured, and openMs says so by
   // reporting view:"" rather than by returning a number for it.
@@ -782,6 +936,7 @@ ShellRoot {
       harness.log("summon", id, payloadJson || "")
       if (!guideLoader.item) return false
       guideLoader.item.open(payloadJson || "{}")
+      harness.openedOnce = true   // R27f: every later open is a warm one
       return true
     }
     function hide(id) {
@@ -964,6 +1119,57 @@ ShellRoot {
                               view: forced,
                               realised: forced === "" ? -1 : harness.realisedCount(g, forced) })
     }
+    // R27f: start one asynchronous open (see harness.openRun). `view` is
+    // "list" or "wall" (the guide's own flag, set before the summon) or ""
+    // for whichever is current. Refused while the guide is open (a warm
+    // open is a CLOSED guide summoned again: close it first, in a turn of
+    // its own) or while a run is still out. Returns at once; the result is
+    // openAsyncResult's.
+    function openAsync(view: string): string {
+      var g = guideLoader.item
+      if (!g) return JSON.stringify({ ok: false, error: "no-guide" })
+      if (g.opened === true) return JSON.stringify({ ok: false, error: "open" })
+      if (harness.openRun && !harness.openRun.done) return JSON.stringify({ ok: false, error: "busy" })
+      if (view === "wall" || view === "list") g.wallView = (view === "wall")
+      var p = harness.ensureOpenProbe(g)
+      if (!p) return JSON.stringify({ ok: false, error: "no-window" })
+      var pv = harness.presentingView(g)
+      harness.openViewObj = pv ? pv.view : null
+      var cold = !harness.openedOnce
+      var t0 = Date.now()
+      harness.openRun = { t0: t0, frames: [], done: false, view: pv ? pv.name : "", cold: cold,
+                          summonMs: -1, endedBy: "", settle: null, hasWindow: p.hasWindow }
+      fakeShell.summon(harness.pluginId, "{}")
+      var r = harness.openRun
+      r.summonMs = Date.now() - t0
+      harness.openRun = r
+      p.poke()
+      return JSON.stringify({ ok: true, view: r.view, cold: cold, summonMs: r.summonMs, hasWindow: p.hasWindow })
+    }
+    // R27f / R28d: the run's answer. `state` running | done | none.
+    // `realisedMs` is the first frame whose drawn set tiles the visible area
+    // (openDrawnSettle's realisedAt), `count` the delegates DRAWN then and
+    // `built` every delegate the view held then (the cacheBuffer's
+    // included: what R27f counted), `builtMax` the most it held in any
+    // frame of the run, tail included; `changedAfter` the frames in the
+    // openTailMs after the decision whose drawn set changed; `frames` the
+    // samples, `trace` the first 40 of them.
+    function openAsyncResult(): string {
+      var r = harness.openRun
+      if (!r) return JSON.stringify({ state: "none" })
+      var s = r.settle || HarnessLib.openDrawnSettle(r.frames, harness.openTailMs)
+      var at = s.frame >= 0 ? r.frames[s.frame] : null
+      var builtMax = -1
+      for (var i = 0; i < r.frames.length; i++) if (r.frames[i].built > builtMax) builtMax = r.frames[i].built
+      return JSON.stringify({ state: r.done ? "done" : "running", endedBy: r.endedBy, view: r.view, cold: r.cold,
+                              summonMs: r.summonMs, realisedMs: s.realisedAt, count: s.count, built: at ? at.built : -1, builtMax: builtMax,
+                              changedAfter: s.changedAfter, tailFrames: s.tailFrames, frames: r.frames.length,
+                              settled: s.settled, hasWindow: harness.openProbe ? harness.openProbe.hasWindow === true : false, rows: guideLoader.item ? guideLoader.item.currentRows.length : -1,
+                              trace: r.frames.slice(0, 40).map(function (f) { return { at: f.at, drawn: f.drawn, built: f.built, complete: f.complete, reason: f.reason } }) })
+    }
+    // PERF-02's method A, in the harness: the round trip of a call that does
+    // nothing, to subtract from the round trip of `open`.
+    function ping(): string { return "pong" }
     // D-TEXT-1's scenario: how many delegates a named channel view holds
     // RIGHT NOW, without the re-open openMs performs to time one. openMs
     // reports 1 for a hidden channelWall (what an empty view looks like), so
@@ -1154,6 +1360,35 @@ ShellRoot {
       return s ? JSON.stringify(s.updateSource(key, fields)) : "{}"
     }
     function removeSource(key: string): string { var s = serviceLoader.item; return s ? JSON.stringify(s.removeSource(key)) : "{}" }
+    // R27a: a label edit, and a SECOND asked in the turn after the service
+    // reports its first write in flight (window a). Labels only, never a URL.
+    function editDuringWrite(key: string, first: string, second: string): string {
+      var s = serviceLoader.item
+      if (!s) return "{}"
+      harness.dwRun = { key: key, second: second, asked: false, inFlightAtAsk: -1, secondOk: null, writes0: harness.writesSeen }
+      var res = s.updateSource(key, { label: first })
+      return JSON.stringify({ ok: res.ok === true })
+    }
+    function editDuringWriteResult(): string {
+      var r = harness.dwRun
+      if (!r) return JSON.stringify({ state: "none" })
+      return JSON.stringify({ state: r.asked ? "asked" : "waiting", inFlightAtAsk: r.inFlightAtAsk, secondOk: r.secondOk, writes: harness.writesSeen - r.writes0 })
+    }
+    // R27a: the cost of the wait to a burst -- N label edits, one a turn,
+    // timed from the first to the turn the last has LANDED (nothing pending,
+    // nothing in flight, no read out), with the writes they made.
+    function burst(key: string, n: int, prefix: string): string {
+      var s = serviceLoader.item
+      if (!s) return "{}"
+      harness.burstRun = { key: key, n: Math.max(1, n), prefix: prefix, asked: 0, t0: Date.now(), lastAskAt: -1, landedAt: -1, writes0: harness.writesSeen, writes: -1, done: false, gaveUp: false }
+      Qt.callLater(harness.burstTurn)
+      return "started"
+    }
+    function burstResult(): string {
+      var r = harness.burstRun
+      if (!r) return JSON.stringify({ state: "none" })
+      return JSON.stringify({ state: r.done ? (r.gaveUp ? "gave-up" : "done") : "running", n: r.n, lastAskMs: r.lastAskAt, landedMs: r.landedAt, writes: r.writes })
+    }
     function switchSource(key: string): string { var s = serviceLoader.item; return s ? JSON.stringify(s.switchSource(key)) : "{}" }
     function retrySource(key: string): string { var s = serviceLoader.item; return s ? JSON.stringify(s.retrySource(key)) : "{}" }
     function cancelProbe(): string { var s = serviceLoader.item; return s ? JSON.stringify(s.cancelProbe()) : "{}" }

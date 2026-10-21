@@ -9,7 +9,11 @@
 #                           (round 14: the dir-absent first session, R24c,
 #                           and a symlink at the path, R24b) or r25 (round
 #                           15, R25a: what TEXT each echo of a burst of the
-#                           view's own saves carries, and in what order)
+#                           view's own saves carries, and in what order) or
+#                           r27b (2026-10-20, D-SRC-48: whether one re-read
+#                           after our own `saved` recovers a change another
+#                           program wrote during the write that the read
+#                           before the NEXT save does not)
 #
 # R25 (round 15). R25a narrows the service's own-write record to the texts
 # still in flight, so whether an echo can carry a text of the burst AFTER
@@ -266,6 +270,96 @@ PY
     echo "END" >>"$OUT"
     exit 0
   fi
+  if [[ $SET == r27b ]]; then
+    # R27b (2026-10-20, D-SRC-48): DOES ONE RE-READ AFTER OUR OWN `saved`
+    # RECOVER ANYTHING? Each trial: another program (a python writer, an
+    # atomic rename like the helper's, or an in-place write) writes change
+    # C=c<N> at DELAY ms while the probe makes its own save of own<N> (PAD
+    # bytes, so the write lasts long enough to land inside). Every signal is
+    # timed on the wall clock the writer stamps too. With MIT the probe makes
+    # the board's mitigation (one reload after `saved` when a fileChanged
+    # came while the write was out). Then, a second later, the read R26a
+    # makes before the NEXT save (laterRead). Each line: where C landed
+    # against our write, whether C survived on disk, whether the view saw C
+    # on its own, whether the mitigation's read saw it, whether the later
+    # read did. The verdict counts the one cell that matters: the mitigation
+    # saw C and the later read did not.
+    writer() {  # FILE TAG DELAY_MS MODE OUT
+      python3 -I - "$@" <<'PY' &
+import json, os, sys, time
+path, tag, delay, mode, out = sys.argv[1], sys.argv[2], float(sys.argv[3]), sys.argv[4], sys.argv[5]
+text = json.dumps({"version": 2, "favorites": ["t:" + tag], "sources": []}) + "\n"
+end = time.monotonic() + delay / 1000.0
+while time.monotonic() < end:
+    pass
+if mode == "rename":
+    tmp = os.path.join(os.path.dirname(path), ".c-" + tag)
+    with open(tmp, "w", encoding="utf-8") as f:
+        f.write(text)
+    os.chmod(tmp, 0o600)
+    os.replace(tmp, path)
+else:
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+with open(out, "w") as f:
+    f.write("%.3f" % (time.time() * 1000.0))
+PY
+      WRITER_PID=$!
+    }
+    race_trial() {  # MODE DELAY PAD MIT
+      local mode=$1 delay=$2 pad=$3 mit=$4 i res disk cat
+      N=$((N + 1))
+      rm -f "$WORK/c.at"
+      writer "$FILE" "c$N" "$delay" "$mode" "$WORK/c.at"
+      ipc race "own$N" "$pad" "$mit" >/dev/null
+      for ((i = 0; i < 50; i++)); do kill -0 "$WRITER_PID" 2>/dev/null || break; sleep 0.1; done
+      kill -0 "$WRITER_PID" 2>/dev/null && { kill -KILL "$WRITER_PID" 2>/dev/null; echo "  writer did not finish in 5 s (killed $WRITER_PID)" >>"$OUT"; }
+      wait "$WRITER_PID" 2>/dev/null
+      sleep "${RACE_SETTLE:-1}"
+      disk=$(python3 -I -c 'import json,sys
+try: print(json.load(open(sys.argv[1]))["favorites"][0][2:])
+except Exception: print("?")' "$FILE")
+      ipc laterRead >/dev/null
+      sleep 0.5
+      res=$(ipc raceResult)
+      python3 -I - "$mode" "$delay" "$pad" "$mit" "c$N" "own$N" "$(cat "$WORK/c.at" 2>/dev/null)" "$disk" "$res" >>"$OUT" <<'PY'
+import json, sys
+mode, delay, pad, mit, c, own, cat, disk, res = sys.argv[1:10]
+r = json.loads(res or "null") or {}
+cat = float(cat) if cat else None
+ev = r.get("events", [])
+later = r.get("laterAt", 0)
+set_at, saved_at = r.get("setAt", 0), r.get("savedAt", 0)
+where = "?" if cat is None or not saved_at else ("before-set" if cat < set_at else ("during" if cat < saved_at else "after-saved"))
+natural = any(e["kind"] == "loaded" and e["tag"] == c and not e["mitigation"] and (not later or e["at"] < later) for e in ev)
+mitig = any(e["kind"] == "loaded" and e["mitigation"] and e["tag"] == c for e in ev)
+mitig_asked = r.get("mitigationAsked", False)
+later_c = any(e["kind"] == "loaded" and later and e["at"] >= later and e["tag"] == c for e in ev)
+later_any = [e["tag"] for e in ev if e["kind"] == "loaded" and later and e["at"] >= later]
+cell = "NEW" if (mitig and not later_c) else "-"
+print("  %-7s delay=%-4s pad=%-7s mit=%-5s C@%-11s write=%5.1fms C-survived:%-3s view-saw-C:%-3s changed-during:%d mitigation:%s/%s later-read:%s(%s) recovers-new:%s"
+      % (mode, delay, pad, mit, where, (saved_at - set_at) if saved_at else -1, "yes" if disk == c else "no",
+         "yes" if natural else "no", r.get("changedDuring", 0), "asked" if mitig_asked else "-", "C" if mitig else "-",
+         "C" if later_c else "-", ",".join(later_any) or "none", cell))
+PY
+    }
+    echo "SEQ race (load $(cut -d' ' -f1 /proc/loadavg))" >>"$OUT"
+    fresh_file
+    start_qs || exit 0
+    for ((rep = 0; rep < ${REPS:-2}; rep++)); do
+      for mode in rename inplace; do
+        for pad in ${PADS:-40000 4000000}; do
+          for delay in ${DELAYS:-0 10 20 30 40 50 60 80 100 140}; do
+            race_trial "$mode" "$delay" "$pad" true
+            race_trial "$mode" "$delay" "$pad" false
+          done
+        done
+      done
+    done
+    stop_qs
+    echo "END" >>"$OUT"
+    exit 0
+  fi
   if [[ $SET == r24 ]]; then
     # R24c: the production fresh shape. Q is the session as it ships (nothing
     # re-arms); R the explicit reload() after the start-up mkdir/init; S the
@@ -314,7 +408,7 @@ fi
 HELPER=${1:-$ROOT/bin/omarchy-iptv}
 SET=${2:-r23g}
 RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
-WORK=$(mktemp -d "$RUNTIME/omarchy-iptv-fw.XXXXXX") || exit 2
+WORK=$(mktemp -d "$RUNTIME/${FW_PREFIX:-omarchy-iptv-fw}.XXXXXX") || exit 2
 chmod 700 "$WORK"
 cleanup() { rm -rf -- "$WORK"; }
 trap cleanup EXIT
@@ -322,7 +416,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 echo "filewatch: set $SET, work $WORK, helper $HELPER, step wait ${STEP_WAIT}s, load $(cut -d' ' -f1-3 /proc/loadavg)"
 env -u WAYLAND_DISPLAY -u DISPLAY WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 \
-  "$ROOT/scripts/dev-harness/private-bus.sh" "$WORK/bus" 240 \
+  "$ROOT/scripts/dev-harness/private-bus.sh" "$WORK/bus" "${CAGE_SECONDS:-240}" \
   cage -- "$0" --child "$WORK" "$HELPER" "$SET" >"$WORK/cage.log" 2>&1
 status=$?
 if [[ -s $WORK/result.txt ]]; then cat "$WORK/result.txt"; else echo "NO RESULT (cage exit $status)"; tail -n 20 "$WORK/cage.log"; fi

@@ -889,9 +889,16 @@ function fetchingLine(host, kind) {
   return "Fetching from " + str(host) + ELLIPSIS
 }
 
-function probeFailureLine(reason, host, kind) {
+// R28e (2026-10-20): `code`, when the result carries one, names a refusal
+// the plugin made ITSELF at the commit -- Sources full (R27c), the no-write
+// mode, a record gone -- which is about this machine, not the host, so the
+// line does not say "from <host>": round 1's review read "Sources is full
+// (50) \u00b7 remove one first from 127.0.0.1". A failure the fetch reported
+// (no code) keeps the host, as UX-SOURCES 5.5 has it.
+var PROBE_LOCAL_REFUSALS = ["too_many", "state_unreadable", "unknown_source"]
+function probeFailureLine(reason, host, kind, code) {
   var text = redactUrls(str(reason)) || "Unknown error"
-  if (kind === "file" || str(host) === "") return text
+  if (kind === "file" || str(host) === "" || PROBE_LOCAL_REFUSALS.indexOf(str(code)) !== -1) return text
   return text + " from " + str(host)
 }
 
@@ -953,7 +960,7 @@ export {
   formatAgo, sourceView, sourceViews, sourceRows, EPG_HINT_ROW_TEXT,
   sourceDetail, sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
   sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
-  fetchingLine, probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
-  CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS,
-  CLIPBOARD_MAX_BYTES
+  fetchingLine, PROBE_LOCAL_REFUSALS, probeFailureLine, sourceTransient,
+  CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
+  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
 }

@@ -356,7 +356,8 @@ Item {
   readonly property string activeCacheDir: (root.stateLoaded && root.cacheReady && root.activeSourceKey !== "")
     ? Model.sourceCacheDir(root.cacheDir, root.activeSourceKey) : ""
   readonly property int sourceCount: Model.asList(root.userState.sources).length
-  readonly property bool canAddSource: root.sourceCount < Model.LIMITS.sources && !root.probing
+  // R28e: the cap is Model.sourcesFull's decision, here as everywhere.
+  readonly property bool canAddSource: !Model.sourcesFull(root.userState) && !root.probing
   // View objects for the guide (SR1, ordered per SR32); `sourcesChanged` is
   // this property's change signal (SR3) and fires on every state, settings,
   // error or clock change.
@@ -721,6 +722,34 @@ Item {
   property int stateVerifyRetries: 0
   property int stateSavesDeferred: 0
   property double stateVerifyMsMax: 0
+  // R27a (D-SINK-22, window a). `stateWriteWaiting`: a save asked while our
+  // previous write is in flight is HELD for that write to land, then reads;
+  // before R27 it skipped its read. The counters are the harness's and the
+  // measurement's: saves that met the wait (every call, so a burst's
+  // coalescing is a ratio of these to the writes), wait episodes, waits the
+  // write never answered within stateWriteWaitWatchdog's bound, writes
+  // issued, and the longest wait. None of them ever holds a URL.
+  // R29a (2026-10-20, the lead's ruling): the read before a save is bounded
+  // as R26a bounded it, and only so -- R27a's window-c second read and the
+  // no-write mode it led to, and R28a's held save past the bound with its
+  // schedule, re-reads and notice, are withdrawn (finishStateVerify).
+  // R27d (D-SRC-44): this session's one-time migration found Sources full
+  // and did not run (it never evicts); told once. Booleans, never a URL.
+  property bool migrationHeldFull: false
+  property bool migrationFullTold: false
+  // F1: the key of the record this session's migration added ("" when it
+  // added none), so a merge that drops that record at the cap holds the
+  // migration again rather than landing its marker (Model.mergeForeignState).
+  // A source key, never a URL.
+  property string migrationAddedKey: ""
+  property bool stateWriteWaiting: false
+  property bool stateWriteWaitExpired: false
+  property double stateWriteWaitAt: 0
+  property int stateSavesWaited: 0
+  property int stateWriteWaits: 0
+  property int stateWriteWaitTimeouts: 0
+  property int stateWritesIssued: 0
+  property double stateWriteWaitMsMax: 0
   // R5: the key whose entry mirror is WAITING for a parked state save
   // (Model.pointerWritePlan "wait-entry"); null when nothing waits. Written
   // by settleEntryFlush once that save has LANDED (R11), never before it.
@@ -949,7 +978,7 @@ Item {
   // ---- sources signals (SR3). Payloads are URL-free: `reason` comes from
   // Model.statusReason, `host` from the validator.
   //   sourceProbeFinished({ ok, id, channelCount, groupCount, reason, host,
-  //                         cancelled, replacedId }) after an add / URL edit /
+  //                         cancelled, replacedId, code? }) after an add / URL edit /
   //     never-fetched switch / retry probe; on ok the switch is committed.
   //   sourceSwitched(id) once the new source's cache (or its absence) is in
   //     `channels`. sourceRemoved(id). sourcesPersistFailed(reason) when
@@ -2002,8 +2031,15 @@ Item {
       console.warn("omarchy-iptv: removed the active source but could not mirror the cleared key into the bar entry")
     }
     root.sourceRemoved(key)
+    // R27d: a migration held because Sources was full runs now there is room
+    // -- deferred, after the removal's own save has been asked for.
+    if (root.migrationHeldFull) Qt.callLater(root.retryHeldMigration)
     return root.sourceResult(true, "ok", "", key)
   }
+
+  // R27d: one function rather than a closure, so Qt.callLater folds a burst
+  // of removals into one reconcile.
+  function retryHeldMigration() { if (root.migrationHeldFull) root.reconcile(true) }
 
   // Switch (S3, D7): a source with a cache commits at once (settings
   // write -> cache FileViews rebind -> redraw from its channels.json ->
@@ -2275,10 +2311,41 @@ Item {
 
   function finishStateVerifyLater() { if (root.stateVerifyPending) root.finishStateVerify(false) }
 
+  // R27a (window a): the write a held save was waiting for has been reported
+  // (from stateFile's `saved` / `saveFailed`, `timedOut` false) or was not
+  // within stateWriteWaitWatchdog's bound (`timedOut` true: the held save
+  // goes to its read anyway, and if the view still holds the write the read
+  // is dropped and its own 2 s bound decides -- R29a: as R26a decided it,
+  // so the wait never outlasts that bound). The held save is asked again
+  // from a turn of its own, never from inside the handler (R26b); there it
+  // reads, then writes.
+  function endStateWriteWait(timedOut) {
+    if (!root.stateWriteWaiting) return
+    root.stateWriteWaiting = false
+    stateWriteWaitWatchdog.stop()
+    var ms = Date.now() - root.stateWriteWaitAt
+    if (ms > root.stateWriteWaitMsMax) root.stateWriteWaitMsMax = ms
+    if (timedOut) {
+      root.stateWriteWaitTimeouts = root.stateWriteWaitTimeouts + 1
+      root.stateWriteWaitExpired = true
+      console.warn("omarchy-iptv: a state.json write was not reported within " + ms + " ms; the next save reads the file first all the same")
+    }
+    if (root.stateSavePending) Qt.callLater(root.saveDeferredState)
+  }
+
   // R26a: the read-before-write is over -- its load decided (or, from the
   // watchdog, no load came in 2 s and the save goes as it did before R26,
   // counted and logged). A no-write mode the load set refuses the parked
   // save; anything else issues it, with no second read.
+  // R29a (2026-10-20, the lead's ruling): BACK TO R26a'S BOUND FOR A SILENT
+  // READ. R27a made a second silence the no-write mode, whose lift dropped
+  // the held change; R28a held the save past the bound on a schedule, and a
+  // stalled read that answered late returned the OLD text, over which the
+  // save then wrote another program's write (round 2's live review, a slow
+  // FUSE file). Each attempt to hold a change across a read that does not
+  // answer for 2 s made a new silent loss, so D-SINK-22's window c stays as
+  // it is on 0.14.2: the save is written without its read, counted
+  // (stateVerifyNoLoad) and logged.
   function finishStateVerify(timedOut) {
     root.stateVerifyPending = false
     stateVerifyWatchdog.stop()
@@ -2347,8 +2414,11 @@ Item {
     if (root.stateBlockTold) return
     root.stateBlockTold = true
     var path = root.stateFilePath
-    console.warn("omarchy-iptv: " + Model.stateUnreadableNotice(r, path).body)
-    root.notify("stateUnreadable", { reason: r, path: path })
+    // R27e (D-SRC-42): a block that begins once a state has loaded is titled
+    // "Saving has stopped", here and in the notification; one Model sentence.
+    var midSession = root.stateLoaded
+    console.warn("omarchy-iptv: " + Model.stateUnreadableJournal(r, path, midSession))
+    root.notify("stateUnreadable", { reason: r, path: path, midSession: midSession })
   }
 
   function liftStateBlock() {
@@ -2441,8 +2511,20 @@ Item {
   // runs: the session outcome, reconcile, the cache layout.
   function mergeForeignText(text) {
     var theirs = Model.parseState(text)
-    var merged = Model.mergeForeignState(root.landedState, root.userState, theirs)
+    var merged = Model.mergeForeignState(root.landedState, root.userState, theirs, { migrationKey: root.migrationAddedKey })
     for (var i = 0; i < merged.conflicts.length; i++) console.warn("omarchy-iptv: " + Model.mergeConflictLine(merged.conflicts[i]))
+    // F1: the record this session's migration added did not land as ours --
+    // another program took the place it used ("full"), or added the same
+    // playlist itself ("changed"). No marker was carried, so the entry keeps
+    // both URLs, and the migration is HELD: the reconcile below retries it
+    // at once (Model.reconcileAction's `heldFull`), which over "changed"
+    // finds the record and migrates, and over "full" holds it under the one
+    // "Sources is full" card (adoptActive tells it, once) until a removal.
+    if (merged.migrationHeld !== "") {
+      console.warn("omarchy-iptv: " + Model.migrationHeldAgainLine(merged.migrationHeld))
+      root.migrationHeldFull = true
+      root.migrationAddedKey = ""
+    }
     // R25b (D-SRC-31): an in-app addition the merge dropped at a cap is never
     // dropped silently -- one journal line each (a key, never a URL), and the
     // user told once for the whole merge.
@@ -2476,7 +2558,8 @@ Item {
     var gate = Model.stateWriteGate({ blocked: root.stateWriteBlocked, loaded: root.stateLoaded, dirsReady: root.dirsReady })
     var plan = Model.stateSavePlan({ verifyPending: root.stateVerifyPending, gate: gate, blocked: root.stateWriteBlocked,
                                      inHandler: root.stateInHandler > 0, verifyDone: root.stateVerifyDone,
-                                     writeTurn: root.stateWriteTurn, inFlight: root.stateSavesInFlight })
+                                     writeTurn: root.stateWriteTurn, inFlight: root.stateSavesInFlight,
+                                     waitExpired: root.stateWriteWaitExpired })
     if (plan === "join" || plan === "park") {
       root.stateSavePending = true
       return
@@ -2484,6 +2567,20 @@ Item {
     if (plan === "refuse") {
       root.stateSavePending = false
       root.stateWritesRefused = root.stateWritesRefused + 1
+      return
+    }
+    if (plan === "wait") {
+      // R27a (window a): held for our write in flight. stateFile's `saved`
+      // (or `saveFailed`) ends the wait and asks again from a turn of its
+      // own (endStateWriteWait), which reads; bounded by its own watchdog.
+      root.stateSavePending = true
+      root.stateSavesWaited = root.stateSavesWaited + 1
+      if (!root.stateWriteWaiting) {
+        root.stateWriteWaiting = true
+        root.stateWriteWaits = root.stateWriteWaits + 1
+        root.stateWriteWaitAt = Date.now()
+        stateWriteWaitWatchdog.restart()
+      }
       return
     }
     if (plan === "defer") {
@@ -2503,8 +2600,11 @@ Item {
       stateVerifyWatchdog.restart()
       return
     }
+    // R27a: no write is issued without its read any more, so this counter
+    // stays 0; it is kept, under its R26 name, so the harness can say so.
     if (root.stateSavesInFlight > 0 && !root.stateVerifyDone) root.stateVerifySkipped = root.stateVerifySkipped + 1
     root.stateSavePending = false
+    root.stateWritesIssued = root.stateWritesIssued + 1
     var text = JSON.stringify(root.userState, null, 2) + "\n"
     // R25a (D-SRC-30): the burst since the last landed save, which `saved`
     // clears. Capped only so a run of failed saves cannot grow it for ever.
@@ -3967,7 +4067,9 @@ Item {
     // R22a: in the no-write mode the entry is left exactly as it is -- it may
     // hold the only copy of an input the unread file could not tell us about.
     if (root.stateWriteBlocked !== "") {
-      console.warn("omarchy-iptv: the bar entry is left as it is (state.json was not loaded); no " + what + " written")
+      // R27e's rule-15 sibling (D-SRC-42): the journal says why in the words
+      // of the episode -- a block that began after a load is saving stopped.
+      console.warn("omarchy-iptv: the bar entry is left as it is (" + (root.stateLoaded ? "saving to state.json has stopped" : "state.json was not loaded") + "); no " + what + " written")
       return false
     }
     if (!root.shell || typeof root.shell.updateEntryInline !== "function"
@@ -4562,7 +4664,7 @@ Item {
     var status = Model.parseHelperStatus(timedOut ? root.helperTimeoutStatus("playlist", false) : text, "playlist")
     if (!rec) {
       root.queueCacheJob(["remove", "--key", dirKey], null)
-      root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: Model.sourceErrorMessage("unknown_source"), host: "", cancelled: false, replacedId: "" })
+      root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: Model.sourceErrorMessage("unknown_source"), code: "unknown_source", host: "", cancelled: false, replacedId: "" })
       return
     }
     // R22a: a probe that ENDS in the no-write mode (started before a reload
@@ -4571,7 +4673,7 @@ Item {
     // here as the verbs that start one are; nothing is deleted either (the
     // start-up prune drops a directory no record names).
     if (root.stateWriteBlocked !== "") {
-      root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: Model.sourceErrorMessage("state_unreadable"), host: host, cancelled: false, replacedId: "" })
+      root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: Model.sourceErrorMessage("state_unreadable"), code: "state_unreadable", host: host, cancelled: false, replacedId: "" })
       return
     }
     if (status.ok === true) {
@@ -4585,6 +4687,20 @@ Item {
           root.sourceErrors = root.withoutKey(root.sourceErrors, key)
         }
         var known = Model.findSourceByUrl(st.sources, pending.url)
+        // R27c (D-SRC-41): the cap, against the state as it is NOW -- after any
+        // merge that landed while the probe ran (a hand-run `state source add`
+        // can take the last place). Until R27 the commit appended a 51st
+        // record, which the next start's parse drops, silently. Refused with
+        // `too_many`, told through the probe's own result; nothing recorded,
+        // the probe's directory goes. An edit's old record is gone by here,
+        // so a replacement never trips it.
+        if (!known && Model.sourcesFull(st)) {
+          root.queueCacheJob(["remove", "--key", dirKey], null)
+          console.warn("omarchy-iptv: the new source was not added: Sources is full (" + Model.MAX_SOURCES + ")")
+          root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: Model.sourceErrorMessage("too_many"), code: "too_many",
+                                     host: host, cancelled: false, replacedId: "" })
+          return
+        }
         if (known) {
           // The same URL arrived while the probe ran (S5: a second add, or
           // the migration of an entry that named it): that record wins and
@@ -4675,7 +4791,8 @@ Item {
     var epg = String(s.epgUrl || "")
     var plan = Model.reconcileAction({ first: !root.reconciled, force: force === true,
                                        migrating: !Model.entryMigratedOf(root.landedState),
-                                       playlist: playlist, epg: epg, seen: root.entryInputsSeen })
+                                       playlist: playlist, epg: epg, seen: root.entryInputsSeen,
+                                       heldFull: root.migrationHeldFull })
     root.reconciled = true
     // Every value this reconcile looked at is handled from here on: adopted
     // below, or refused and reported here. The host's stale publish of it
@@ -4743,8 +4860,26 @@ Item {
     // that does not validate, are reported and stripped -- never held.
     if (out.noSourceEpg) root.reportEntryInput("epgUrl", "no-source")
     if (out.refusedEpg) root.reportEntryInput("epgUrl", "invalid")
-    if (out.invalid) root.reportEntryInput("playlistUrl", "invalid")
+    // R29d: a guide URL that came with an unusable playlist is told WITH it,
+    // in one notice, and goes with it (the owned write strips both once the
+    // marker has landed); never adopted onto the active source.
+    if (out.invalid) root.reportEntryInput("playlistUrl", out.epgWithInvalid ? "invalid-pair" : "invalid")
+    else if (out.epgWithInvalid) root.reportEntryInput("epgUrl", "invalid-pair")
     if (out.marked) console.warn("omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on")
+    if (out.marked) root.migrationAddedKey = out.added
+    // R27d (D-SRC-44): the migration did not run -- Sources is full and it
+    // never evicts. The entry keeps its URL (no marker, so the funnel keeps
+    // it), the user is told ONCE (Model.entryInputNotice "full": no URL, no
+    // label), and the next reconcile after a removal tries again.
+    if (out.full) {
+      root.migrationHeldFull = true
+      if (!root.migrationFullTold) {
+        root.migrationFullTold = true
+        root.reportEntryInput("playlistUrl", "full")
+      }
+    } else if (out.adoptedUrl) {
+      root.migrationHeldFull = false
+    }
     if (out.moved) {
       // A new source starts clean: the previous source's reason and host
       // must not stay on screen while its first fetch runs (UX 4.5,
@@ -4759,10 +4894,6 @@ Item {
     if (out.changed) {
       root.userState = out.state
       root.saveState()
-    }
-    for (var i = 0; i < out.evicted.length; i++) {
-      console.warn("omarchy-iptv: source history full, evicting", out.evicted[i])
-      root.queueCacheJob(["remove", "--key", out.evicted[i]], null)
     }
     if (out.invalid) {
       // D16, narrowed by D-SINK-19: the error becomes the guide's body only
@@ -5251,6 +5382,9 @@ Item {
           root.stateSaveFailed = false
           root.landedState = root.lastSaveState   // R21a: what the disk holds now, the marker included
           root.recentSaves = []                   // R25a: nothing in flight, so no later reload is an echo
+          // R27a: a save held for this write now reads, from a turn of its own.
+          root.stateWriteWaitExpired = false
+          root.endStateWriteWait(false)
         }
         root.settleEntryFlush()
         // R19d (D-SRC-18): a mirror a failed save withheld is paid by the first
@@ -5269,7 +5403,12 @@ Item {
     onSaveFailed: (error) => {
       root.stateInHandler = root.stateInHandler + 1
       try {
-        if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) root.stateSavesInFlight = 0
+        // R27a: and a save held for this write, failed or not, reads first.
+        if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) {
+          root.stateSavesInFlight = 0
+          root.stateWriteWaitExpired = false
+          root.endStateWriteWait(false)
+        }
         // The error is an enum, never a path or a URL. Logged on EVERY failure.
         console.warn("omarchy-iptv: state.json could not be written (error " + error + "); the in-memory state stands")
         // R13: the state write IS the switch / remove / adoption, so its
@@ -5444,10 +5583,22 @@ Item {
   Timer {
     // R26a: the read before a save is bounded. No load in 2 s: the save goes
     // without it, as it did before R26 (counted, and one console line).
+    // R29a: R28a's schedule bound here is withdrawn; the bound is this one.
     id: stateVerifyWatchdog
     interval: 2000
     repeat: false
     onTriggered: if (root.stateVerifyPending) root.finishStateVerify(true)
+  }
+
+  Timer {
+    // R27a (window a): the bound on a save held for our write in flight. A
+    // write the view has not reported in 2 s releases the held save to its
+    // read (endStateWriteWait), which has a bound of its own; nothing here
+    // writes.
+    id: stateWriteWaitWatchdog
+    interval: 2000
+    repeat: false
+    onTriggered: if (root.stateWriteWaiting) root.endStateWriteWait(true)
   }
 
   Timer {

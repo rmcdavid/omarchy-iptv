@@ -76,9 +76,12 @@ export {
   knownIdSet, failedIndex, failedDocument, failedWhen, withFailed,
   failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
   reloadDisposition, stateCanonical, sameState, mergeForeignState,
-  mergeConflictLine, mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS,
-  stateLoadKind, stateInitFound, stateLoadDecision, stateWriteGate,
-  stateSavePlan, stateBlockRecheck, stateUnreadableNotice, stateBlockedHeader
+  mergeConflictLine, mergeDropLines, migrationHeldAgainLine, mergeDropNotice,
+  STATE_LOAD_ERRORS, stateLoadKind, stateInitFound, stateLoadDecision,
+  stateWriteGate, stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
+  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
+  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
+  stateBlockedHeader
 } from "./model/state.mjs"
 export {
   parseJsonObject, parseChannels, parseEpgNow, parseHelperStatus,
@@ -189,8 +192,8 @@ export {
   CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
 } from "./model/sources.mjs"
 export {
-  hasControlChars, normalizeSourceRecord, addSource, updateSource,
-  removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
+  hasControlChars, normalizeSourceRecord, sourcesFull, addSource,
+  updateSource, removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
   withSourceStats, activeKeyText, activeKeyOf, activeSourceRecord,
   withActiveKey, invalidInputBlocks, reconcileAction, adoptActiveSource,
   activeEpgUrlOf, pointerWritePlan, reconcileSources, sourceForEdit,
