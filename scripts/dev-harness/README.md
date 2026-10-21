@@ -1774,7 +1774,8 @@ round 1's two P1s).
 - `tests/service-harness.js`: `stateVerifyWatchdog`'s interval is a
   BINDING now (`root.stateVerifyBoundMs`, the schedule's bound), so the
   double reads it from its own text at every `restart()` and arms the Timer
-  with the interval it has then, as QML does.
+  with the interval it has then, as QML does. [Round 19 (R29a) withdrew
+  R28a and put the literal `interval: 2000` back; the double reads either.]
 - B32 reads R28e's mid-session sentence.
 - B38 and B39 (R28b): a 0.13.6 install at 50 sources whose entry carries
   the playlist D AND a guide URL, A carrying a guide URL of its own; A
@@ -1795,10 +1796,56 @@ round 1's two P1s).
   (`sources-20261020-161452-2134037`). The transcripts are in lane A2's
   session scratch directory, not the tree.
 
+#### Round 19 (R29): back to R26a's bound, the pair, and two harness fixes
+
+lane-sweep-a3, 2026-10-20, on lane-sweep-c2 (R29, the lead's ruling after
+round 2's reviews).
+- R29a withdraws R28a (and R27a's window c): a save whose read has no load
+  within 2 s is written without it, counted (`stateVerifyNoLoad`) and
+  logged, as on 0.14.2. R28a's four counters (`stateVerifySilences`,
+  `stateVerifySecondReads`, `stateReadStalls`, `stateVerifyRereads`) left
+  `POINTER_FIELDS` with it; the Round 18 bullets above describe a tree that
+  no longer exists. Window a stays, with the ruling's proviso: the read the
+  held save is released to has R26a's bound, so it never waits longer.
+- The proviso was checked live with round 2's slow-file rig (its FUSE
+  passthrough, mode Q: only quickshell's read() of state.json stalls),
+  rebuilt over this tree in the lane's scratch (`a3-slow`, not the tree):
+  an edit, and a second asked while the first one's write is OUT
+  (`editDuringWrite`), with every read stalled. The FUSE log reads: read
+  stall at +0, w-one written at +2.0 s (no load: `saving without the read`),
+  the second edit's read stalled at +2.0 s, w-two written at +4.0 s; no
+  74019, no 74017, nothing blocked, both labels across a restart (twice,
+  2002 / 2001 and 2103 / 2022 ms; the unstalled control the same with no
+  watchdog line). Round 2's HS5 (an in-app add and a hand-run helper add
+  during the stall) keeps both on this tree, as on 6f1d176; HS7 (an atomic
+  replace adding a favourite during the stall, beside a label edit) loses
+  the favourite, as on 6f1d176 -- D-SINK-22's window c, left open and
+  documented by the ruling. Transcript `key-20261020-184229-2540898`.
+- B40 (R29d): a 0.13.6 install whose state names A active, A carrying its
+  own guide URL, and the bar entry holding an unusable playlistUrl with a
+  guide URL beside it -- A keeps its own, one card names the pair, the
+  guide URL is in no file, both leave the entry. K1..K3 read
+  `playlistUrl:invalid-pair` (one notice) where they read
+  `epgUrl:no-source,playlistUrl:invalid`.
+- S4 (R29e): `init_pids` requires this run's own `--state-dir` in the argv
+  it matches, so a second harness over the same tree's helper no longer
+  reads as `left:` in B14 -- and no longer has its helper KILLED by the
+  reaps after B10 and B18, which kill what `init_pids` returns. Seen red on
+  the unscoped scanner in check-tree (`got:<both pids>`).
+- Counts are the summary line's, the floor 137 lettered checks: forward 138
+  / 0 (`key-20261020-184353-2546836`, 575.9 s, at e5f6d4d, load 4-6 while
+  a gate ran); `--baseline lane-sweep-c2` 134 / 4, K1..K3 (`reports:
+  epgUrl:no-source,playlistUrl:invalid`) and B40 (`a-epg:bar ... pair:0
+  file:yes`), `key-20261020-190233-2645772`; `--baseline 6f1d176` 127 / 11,
+  the same four and B32, B33 (`waited:NOFIELD`), B35..B39
+  (`key-20261020-185340-2605786`). `sources-scenario.sh` 66 / 0
+  (`sources-20261020-185340-2605788`). The transcripts are in the lane's
+  session scratch directory, not the tree.
+
 ### The open, measured with its delegates (D-PERF-1, R27f; R28d)
 
 ```
-scripts/dev-harness/open-scenario.sh check-tree                                         # the instrument arm, node only; run by check.sh (16 checks)
+scripts/dev-harness/open-scenario.sh check-tree                                         # the instrument arm, node only; run by check.sh (19 checks)
 scripts/dev-harness/private-bus.sh <dir> 1800 scripts/dev-harness/open-scenario.sh live  # the instrument arm, then the shell arm under its own nested cage
 scripts/dev-harness/private-bus.sh <dir> 1800 scripts/dev-harness/open-scenario.sh live --tree <export>   # e.g. an export carrying spikes/open-mutations/late-fill.patch
 ```
@@ -1815,7 +1862,9 @@ the view's contentItem, the cacheBuffer's off-screen ones included (13 rows
 and 21 tiles where 10 and 16 are drawn), settled on a count stable over
 three frames, and so trailed the drawn screen and passed a view that drew
 six rows and filled the rest 300 ms later (round 1's live review). Now a
-sample is `HarnessLib.openDrawnSet`: the delegates that are shown and
+sample is `HarnessLib.openDrawnSet`: the delegates that are shown, whose
+EFFECTIVE opacity is above 0 (R29e: each delegate's own times every
+ancestor's up to the window, which `openSample` computes), and that
 intersect the view's visible area, and whether they TILE it (contiguous,
 nothing missing above, nothing missing below, a grid row whole), measured
 against the rows the guide has (its `rowCount`, not the view's count). The
@@ -1829,16 +1878,21 @@ settle says so in `endedBy`, never a number. A warm open is a CLOSED guide
 summoned again (the verb refuses an open guide). Nothing in the product
 changes.
 
-The instrument arm drives `openDrawnSet` over ten hand-made frames (D1-D10:
-a list screen under its cacheBuffer, a gap, a screen filled in part, a
-guide that ends on screen, a row missing above, a grid's full rows, a grid
-row half-filled, a grid that ends on screen, a hidden delegate, an empty
-view) and `openDrawnSettle` over four (E1-E4), and checks the seam in
+The instrument arm drives `openDrawnSet` over thirteen hand-made frames
+(D1-D13: a list screen under its cacheBuffer, a gap, a screen filled in
+part, a guide that ends on screen, a row missing above, a grid's full rows,
+a grid row half-filled, a grid that ends on screen, a hidden delegate, an
+empty view, and since R29e a screen at opacity 0, one delegate at opacity 0,
+and a screen at 0.3) and `openDrawnSettle` over four (E1-E4), and checks the seam in
 `shell.qml` (S1). Each D and E check was seen red on a one-decision
 mutation of the function it drives (no "below" test: D3; no gap test: D2,
 D9; no "above" test: D5; a grid row not required whole: D7; every built
 delegate counted: D1, D2, D5, D6, D9; hidden delegates counted: D9; the
-LAST complete frame taken: E1, E3, E4; no tail comparison: E3). The shell
+LAST complete frame taken: E1, E3, E4; no tail comparison: E3; opacity
+not read: D11, D12). What "drawn" does NOT cover, so no sentence should
+claim it: an item stacked over the view, an ancestor's clip narrower than
+the view, a layer or shader effect, and a fade's strength -- a delegate is
+drawn from its first frame above opacity 0, however faint (D13). The shell
 arm grades the instrument (L1-L5 for the list, W1-W5 for the wall: it ran
 its tail out, named the view, settled cold and warm, counted a drawn
 screen and fewer than the view built, measured after the summon), the
@@ -1884,6 +1938,13 @@ session scratch directory, copied 0600; load 1.7-3.0 unless stated):
   548 -> 673 and 534 -> 628, warm unchanged at 32. The cold summon grows
   because a cold summon builds delegates synchronously, the hidden view's
   among them.
+- R29e (lane-sweep-a3 at e5f6d4d, load 1.4-3.5): forward
+  (`open-20261020-192446-2690236`) 33 / 0 -- list cold realised median 547
+  ms (546-558), wall 547 (519-572); warm 34 (27-45) and 32 (29-39); drawn
+  10 and 16, built 13 and 18-21. `opacity-fade.patch`
+  (`open-20261020-192723-2700535`): 31 / 2, L6 and W6 at a warm median of
+  338 / 341 ms, where the instrument that read `visible` alone passed the
+  same mutation at 33 / 38 (round 2's live review).
 So rule 7's 150 ms holds warm and not cold in the cage's floating window;
 the production layer-shell surface on Hyprland is UNVERIFIED.
 

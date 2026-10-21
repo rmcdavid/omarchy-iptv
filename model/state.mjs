@@ -1746,8 +1746,8 @@ function stateBlockedHeader(reason, path, midSession) {
 // documents lane re-cites them bare (or not at all), and the integration
 // deletes this block -- and the five names in Model.mjs's export list -- in
 // the commit that removes the last such citation (the project's rule, on the
-// dev branch: no shims at merge). No copy lives here: the notice that promised "saved when the file
-// answers" is gone with its sentence.
+// dev branch: no shims at merge). No copy lives here: the notice's sentence
+// is gone with the notice.
 var STATE_READ_BOUNDS_MS = null
 var STATE_READ_TELL_MS = null
 function stateReadBoundMs() { return null }
