@@ -632,6 +632,22 @@ carry channel ids — most do — are not affected at all.
   `Playlist warning: ...` after such a load, and the warnings are also in
   `~/.cache/omarchy-iptv/playlist-status.json` and in the output of
   `omarchy-shell io.github.rmcdavid.iptv status`.
+- Each channel's text has a length limit too. Channel names, `tvg-name` and
+  a group value (`group-title`, or an `#EXTGRP` line, which applies to the
+  entries after it) are cut at 512 characters, one group name at 128, and a
+  channel keeps its first 16 groups. A `tvg-id` over 256 characters, a
+  channel number over 32, a logo or `url-tvg` address over 2,048, and a
+  player option or header whose name is over 64 characters or whose value
+  is over 1,024 (or past the sixteenth on one channel) are left out; an
+  entry whose stream address is over 4,096 characters is skipped. Real
+  playlists stay far below all of these. The footer's `Playlist warning:`
+  says how many were cut or left out, and lists at most 20 per-channel
+  warnings, then a count of the rest.
+- Reading a playlist or guide data runs in a background helper that is
+  allowed 512 MB of memory. One that would need more stops there and shows
+  `Source too large`, and the channels or guide data you already had stay.
+  A 50,000-channel playlist needs about 110 MB, so only a hostile or
+  broken source should meet this.
 - Downloads (playlist and EPG) must finish within 60 seconds; redirects to
   anything but http(s) are refused and credentials are dropped when a
   redirect changes host.

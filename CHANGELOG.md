@@ -3,6 +3,58 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.14.3 (unreleased)
+
+**Security.** A finding the marketplace maintainer raised against 0.14.2.
+A playlist could make the plugin's background helper ask for far more
+memory than the playlist's own size: the group named by an `#EXTGRP` line
+applies to every entry after it, and the helper copied it, however long,
+into each of those channels. Nothing but a three-minute timeout bounded
+the run.
+
+### Fixed
+
+- **Every piece of text a channel keeps has a length limit**, so a channel
+  can only take so much room whatever the playlist repeats. Names and group
+  values are cut at 512 characters and a group name at 128; an identifier,
+  an address or a player option that is too long is left out rather than
+  cut, because a shortened one would be a different, wrong one. The limits
+  are in the README; real playlists stay far below them, and every
+  playlist this project tests with loads exactly as it did. The footer's
+  `Playlist warning:` says how many were cut or left out.
+- **Reading a playlist or guide data is limited to 512 MB of memory.** A
+  source that would need more stops with `Source too large`, and the
+  channels or guide data you already had stay. A 50,000-channel playlist,
+  the most the plugin keeps, needs about 110 MB.
+- **Reading a local playlist or guide-data file, or a gzip one, no longer
+  sets aside 64 MB first.** The helper used to reserve the whole size limit
+  before reading a byte; it now reads in pieces.
+- **The per-channel playlist warnings are capped at 20**, followed by a
+  count of the rest. A playlist with a problem on every channel used to put
+  one line per channel into the status the shell reads.
+
+### Changed
+
+- **The helper is now several files**: a short `bin/omarchy-iptv` and
+  eleven parts under `bin/helper/`, because the marketplace's security scan
+  refuses any file over 512 KiB and the single file had reached 447 KB.
+  It behaves as before. It checks every part's length and checksum before
+  running any of them, and a missing, damaged or mismatched part shows
+  `Plugin files damaged`, naming the part, with `reinstall the plugin`.
+- **The moment before the helper hides your provider address from other
+  programs is about five times shorter**: about 30 ms instead of about
+  150 ms, measured on the same machine under the same load, because only
+  the short first file is compiled before it.
+
+### Worth knowing
+
+- **Updating from 0.14.2 has a few milliseconds in which the helper cannot
+  answer**, while git rewrites its first file. Anything the plugin asks in
+  that moment gets no reply, which it already treats as no answer rather
+  than as a failure; only a shell that is starting at that exact moment
+  can come up not saving its settings until it is restarted. Nothing is
+  written or exposed, and 0.14.2's own update had the same moment, longer.
+
 ## 0.14.2 (2026-10-17)
 
 **Security.** Two findings the marketplace maintainer raised against
