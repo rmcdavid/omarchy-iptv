@@ -1737,22 +1737,6 @@ function stateBlockedHeader(reason, path, midSession) {
   if (str(reason) === "") return ""
   return stateUnreadableNotice(reason, path, midSession === true).title
 }
-// R29a (2026-10-20) WITHDREW R28a's held save past the read's bound, its
-// schedule and its notice ("Saving is waiting", id 74019). NOTHING BELOW IS
-// BEHAVIOUR: no file of the plugin calls these five names, and each answers
-// null. They stay declared and exported ONLY because the documents still cite
-// them in the `Model.` form, the defect ledger joins every such citation to
-// an export, and the lane that withdrew them may not edit the documents. The
-// documents lane re-cites them bare (or not at all), and the integration
-// deletes this block -- and the five names in Model.mjs's export list -- in
-// the commit that removes the last such citation (the project's rule, on the
-// dev branch: no shims at merge). No copy lives here: the notice's sentence
-// is gone with the notice.
-var STATE_READ_BOUNDS_MS = null
-var STATE_READ_TELL_MS = null
-function stateReadBoundMs() { return null }
-function stateVerifyTimeoutAct() { return null }
-function stateReadStalledNotice() { return null }
 export {
   MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedSearchTerms,
   savedSearchHit, savedSearchCount, savedSearchChannels, savedSearchNotice,
@@ -1775,7 +1759,5 @@ export {
   stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
   stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
   STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
-  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader,
-  STATE_READ_BOUNDS_MS, STATE_READ_TELL_MS, stateReadBoundMs,
-  stateVerifyTimeoutAct, stateReadStalledNotice
+  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
 }

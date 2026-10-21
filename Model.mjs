@@ -81,8 +81,7 @@ export {
   stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
   STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
   STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
-  stateBlockedHeader, STATE_READ_BOUNDS_MS, STATE_READ_TELL_MS,
-  stateReadBoundMs, stateVerifyTimeoutAct, stateReadStalledNotice
+  stateBlockedHeader
 } from "./model/state.mjs"
 export {
   parseJsonObject, parseChannels, parseEpgNow, parseHelperStatus,

@@ -7413,14 +7413,13 @@ checkCall("D-SRC-38: sourcesHeaderRight / stateBlockedHeader -- a block that beg
       [["Saving has stopped", B.midSession.absent], ["Saved sources not loaded", B.start.absent], "Saved sources not loaded"]])
   // R29a (2026-10-20): R28a's held save past the read's bound is withdrawn,
   // and with it its notice and its schedule. Nothing sends the "Saving is
-  // waiting" card any more: no NOTIFY_IDS entry, notifyArgv sends nothing
-  // for the event, and the five names the documents still cite are inert
-  // until the integration deletes them (model/state.mjs says why they stay).
-  checkCall("R29a: the stall notice and schedule are withdrawn -- no notify id 74019, notifyArgv(\"stateReadStalled\") sends nothing, and the five R28a names the documents still cite answer null (no shipped copy promises \"saved when the file answers\")", () => {
+  // waiting" card any more: no NOTIFY_IDS entry, and notifyArgv sends
+  // nothing for the event. (F3, 2026-10-20: the five inert stubs that stood
+  // in for R28a's names were deleted with their pin.)
+  checkCall("R29a: the stall notice and schedule are withdrawn -- no notify id 74019, notifyArgv(\"stateReadStalled\") sends nothing (no shipped copy promises \"saved when the file answers\")", () => {
     const ids = Object.keys(Model.NOTIFY_IDS).map(k => Model.NOTIFY_IDS[k])
-    return [ids.indexOf(74019), "stateReadStalled" in Model.NOTIFY_IDS, Model.notifyArgv("stateReadStalled", { path: P }),
-            [Model.STATE_READ_BOUNDS_MS, Model.STATE_READ_TELL_MS, Model.stateReadBoundMs(1), Model.stateVerifyTimeoutAct({ silences: 1 }), Model.stateReadStalledNotice(P)]]
-  }, [-1, false, null, [null, null, null, null, null]])
+    return [ids.indexOf(74019), "stateReadStalled" in Model.NOTIFY_IDS, Model.notifyArgv("stateReadStalled", { path: P })]
+  }, [-1, false, null])
   checkCall("R27e (structural): the guide's own notice (the empty state's words) takes the service's stateLoaded too, so it is titled as the notification is", () => {
     const g = fs.readFileSync(path.join(__dirname, "../Guide.qml"), "utf8")
     return /readonly property var stateNotice: Model\.stateUnreadableNotice\(root\.stateBlocked,[\s\S]{0,300}service\.stateLoaded === true\)/.test(g)
