@@ -6478,6 +6478,18 @@ check("R28b: reconcileAction -- `heldFull` makes the guide URL fresh with the pl
   (() => { const seen = Model.entryInputsSeenAfter([], { playlistUrl: "http://new.test/", epgUrl: "http://bar.example.test/g.xml" }); const a = Model.reconcileAction({ migrating: true, playlist: "http://new.test/", epg: "http://bar.example.test/g.xml", seen, heldFull: true }); return [a.adoptUrl, a.adoptEpg] })(),
   (() => { const seen = Model.entryInputsSeenAfter([], { playlistUrl: "http://new.test/", epgUrl: "http://bar.example.test/g.xml" }); const a = Model.reconcileAction({ migrating: true, playlist: "http://new.test/", epg: "http://bar.example.test/g.xml", seen }); return [a.adoptUrl, a.adoptEpg] })()],
   [[true, true], [false, false]])
+// F4 (round 3's dataloss review, P3): R29d's test is reconcileSources' own --
+// the CLI origin, `~` paths accepted. Seen red with { origin: "guide" } in
+// entryPlaylistUnusable (2664/0 checks there before this pin): a `~` bar
+// playlist read as unusable, and a fresh guide URL beside it was stripped
+// with a false "invalid-pair" notice instead of reaching its record.
+checkCall("F4 / R29d: a guide URL arriving beside a playlist already seen (not adopted again) -- the playlist is judged as reconcileSources judges it (origin cli): beside a `~` path or an absolute path the guide URL reaches the active record; beside a relative path, ftp or javascript: it is `epgWithInvalid`; beside an empty playlist it is an ordinary guide URL", () => {
+  const tilde = Model.reconcileSources(Model.emptyState(), "~/tv.m3u", "", "", 1)
+  return ["~/tv.m3u", "/srv/tv/list.m3u", "./tv.m3u", "ftp://h.test/x", "javascript:alert(1)", "", "  "].map(v => {
+    const out = Model.adoptActiveSource(tilde.state, { playlistUrl: v, epgUrl: "http://e.example.test/x.xml", sourceKey: "" }, 2, "", { adoptUrl: false, adoptEpg: true, migrating: true })
+    return [out.epgWithInvalid, out.adoptedEpg, Model.findSource(out.state.sources, tilde.added).epgUrl === "http://e.example.test/x.xml"]
+  })
+}, [[false, true, true], [false, true, true], [true, false, false], [true, false, false], [true, false, false], [false, true, true], [false, true, true]])
 // F1 (round 3's dataloss review, P2): THE MIGRATION RIDES ITS RECORD. A merge
 // that drops, at the cap, the record this session's migration added does not
 // carry the marker -- the migration is held again -- and does not count that

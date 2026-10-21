@@ -152,8 +152,10 @@ obvious when it happens to you:
   says `playlistUrl in the bar settings was not a usable URL and was
   removed, with the epgUrl beside it. Add or edit sources in the guide's
   Sources screen.` (Up to and including 0.14.2 that guide-data URL was put
-  on the source that was active, if there was one, in place of that
-  source's own, and only the playlist was reported.) If Sources already
+  on the source that was active, in place of that source's own, and only
+  the playlist was reported; with no source active, it was reported in a
+  notification of its own, as having no source to guide, beside the
+  playlist's.) If Sources already
   holds 50 sources and the playlist is not one of them, nothing is moved and no source is removed to
   make room: the playlist stays on the entry, and so does a guide-data URL
   set beside it -- neither is attached to any of your sources -- nothing is
@@ -812,8 +814,9 @@ Nothing inside the plugin directory is written at runtime.
   once at every shell start while the value is there; and if the URL carried
   a password, remove the command from your shell history too (Settings
   above).
-- A notification titled **Bar setting removed**: seen at most once, at the
-  first start after updating, when the configuration an earlier version kept
+- A notification titled **Bar setting removed**: seen once, at the first
+  start after updating (twice in the one case at the end of this item),
+  when the configuration an earlier version kept
   on the widget's entry could not be moved into Sources whole. `epgUrl was
   removed from the bar settings: no source was set up for it to guide` means
   you had a guide-data URL set but no playlist active, so there was nothing
@@ -821,9 +824,14 @@ Nothing inside the plugin directory is written at runtime.
   usable URL and was removed` means the old value was not one the plugin
   accepts (a typo, a scheme it does not take); add the source again in
   Sources. When that was the playlist and a guide-data URL was set beside
-  it, the one notification says so (`..., with the epgUrl beside it.`), and
-  the guide-data URL is removed with the playlist, attached to none of your
-  sources.
+  it, the one notification says so -- `playlistUrl in the bar settings was
+  not a usable URL and was removed, with the epgUrl beside it. Add or edit
+  sources in the guide's Sources screen.` -- and the guide-data URL is
+  removed with the playlist, attached to none of your sources. If the
+  guide-data URL was set only after that playlist had been reported, it
+  gets the second notification, from its own side: `epgUrl in the bar
+  settings came with a playlistUrl that was not a usable URL, and was
+  removed with it. Add or edit sources in the guide's Sources screen.`
 - **Plugin files damaged (05-ipc-logos.py) · reinstall the plugin** (any
   part name): the helper is `bin/omarchy-iptv` and the eleven files under
   `bin/helper/` beside it, and it checks all of them before it does
