@@ -6478,6 +6478,44 @@ check("R28b: reconcileAction -- `heldFull` makes the guide URL fresh with the pl
   (() => { const seen = Model.entryInputsSeenAfter([], { playlistUrl: "http://new.test/", epgUrl: "http://bar.example.test/g.xml" }); const a = Model.reconcileAction({ migrating: true, playlist: "http://new.test/", epg: "http://bar.example.test/g.xml", seen, heldFull: true }); return [a.adoptUrl, a.adoptEpg] })(),
   (() => { const seen = Model.entryInputsSeenAfter([], { playlistUrl: "http://new.test/", epgUrl: "http://bar.example.test/g.xml" }); const a = Model.reconcileAction({ migrating: true, playlist: "http://new.test/", epg: "http://bar.example.test/g.xml", seen }); return [a.adoptUrl, a.adoptEpg] })()],
   [[true, true], [false, false]])
+// F1 (round 3's dataloss review, P2): THE MIGRATION RIDES ITS RECORD. A merge
+// that drops, at the cap, the record this session's migration added does not
+// carry the marker -- the migration is held again -- and does not count that
+// record as one "added here". Seen red on lane-sweep-c3 (the service pins
+// under F1 below, through the shipping Service.qml).
+checkCall("F1: mergeForeignState -- the migration's record dropped at the cap: no marker, the active key theirs', the record not among `dropped.sources`, `migrationHeld`; an in-app add dropped beside it is still reported; without `migrationKey`, or when theirs carries the marker, the marker stands; rule 15: the same playlist added by theirs is \"changed\", no marker, the record theirs; and a migration whose record was removed here stands", () => {
+  const base = Model.cloneState(full50, { sources: full50.sources.slice(1), activeKey: full50.sources[3].key })
+  const mig = { key: "0abc0001", url: "http://new.test/", epgUrl: "http://e.test/g.xml", kind: "http", label: "new", labelCustom: false, origin: "cli", addedAt: 9, lastUsed: 9, fetchedAt: 0, channelCount: 0, groupCount: 0 }
+  const app = Object.assign({}, mig, { key: "0abc0002", url: "http://app.test/", epgUrl: "", label: "app" })
+  const other = Object.assign({}, mig, { key: "0abc0003", url: "http://other.test/", epgUrl: "", label: "other" })
+  const ours = Model.withEntryMigrated(Model.cloneState(base, { sources: base.sources.concat([mig]), activeKey: mig.key }))
+  const theirs = Model.cloneState(base, { sources: base.sources.concat([other]) })
+  const held = Model.mergeForeignState(base, ours, theirs, { migrationKey: mig.key })
+  // Two places freed (48 on the base): an in-app add and the migration take
+  // them, and another program fills both.
+  const base48 = Model.cloneState(base, { sources: base.sources.slice(1) })
+  const other2 = Object.assign({}, other, { key: "0abc0004", url: "http://other2.test/", label: "other2" })
+  const both = Model.mergeForeignState(base48, Model.cloneState(ours, { sources: base48.sources.concat([app, mig]) }),
+                                       Model.cloneState(base48, { sources: base48.sources.concat([other, other2]) }), { migrationKey: mig.key })
+  const noKey = Model.mergeForeignState(base, ours, theirs)
+  const theirsMarked = Model.mergeForeignState(base, ours, Model.withEntryMigrated(theirs), { migrationKey: mig.key })
+  const kept = Model.mergeForeignState(base, ours, base, { migrationKey: mig.key })
+  // Rule 15's sibling: another program added the SAME playlist (no guide URL).
+  const same = Model.mergeForeignState(base, ours, Model.cloneState(base, { sources: base.sources.concat([Object.assign({}, mig, { epgUrl: "", label: "theirs" })]) }), { migrationKey: mig.key })
+  // The migration's record removed HERE before it landed (the user removed it
+  // in Sources): the removal stands and the migration is done, never retried.
+  const removedHere = Model.mergeForeignState(base, Model.withEntryMigrated(base), theirs, { migrationKey: mig.key })
+  const line = Model.migrationHeldAgainLine("full"), changedLine = Model.migrationHeldAgainLine("changed")
+  return { held: [Model.entryMigratedOf(held.state), held.state.activeKey === base.activeKey, held.state.sources.length, Model.findSource(held.state.sources, mig.key) !== null, held.dropped.sources, held.migrationHeld],
+           both: [Model.entryMigratedOf(both.state), both.dropped.sources, both.migrationHeld],
+           noKey: [Model.entryMigratedOf(noKey.state), noKey.dropped.sources, noKey.migrationHeld],
+           theirsMarked: [Model.entryMigratedOf(theirsMarked.state), theirsMarked.migrationHeld],
+           kept: [Model.entryMigratedOf(kept.state), Model.findSource(kept.state.sources, mig.key) !== null, kept.migrationHeld],
+           same: [Model.entryMigratedOf(same.state), Model.findSource(same.state.sources, mig.key).epgUrl, same.state.activeKey === mig.key, same.dropped.sources, same.migrationHeld, same.conflicts.length],
+           removedHere: [Model.entryMigratedOf(removedHere.state), Model.findSource(removedHere.state.sources, mig.key) !== null, removedHere.migrationHeld],
+           line: [line.indexOf("://") === -1, line.indexOf("50 sources") !== -1, /^[\x20-\x7e]*$/.test(line + changedLine), changedLine !== line, Model.migrationHeldAgainLine() === line] }
+}, { held: [false, true, 50, false, [], "full"], both: [false, ["0abc0002"], "full"], noKey: [true, ["0abc0001"], ""], theirsMarked: [true, ""], kept: [true, true, ""],
+     same: [false, "", true, [], "changed", 1], removedHere: [true, false, ""], line: [true, true, true, true, true] })
 check("reconcileSources does not mutate the input", twoState.sources.length, 2)
 // SR11: the settings path is the CLI path. `omarchy bar set ... playlistUrl ~/list.m3u`
 // reconciles into the history and becomes active; the forms keep refusing `~`.
@@ -13842,6 +13880,68 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           h.foreign(sf => { const st = JSON.parse(sf.disk); st.sources = st.sources.filter(r => r.url !== "http://m1.example.test/l.m3u"); sf.disk = JSON.stringify(st) + "\n" }); h.drain()
           return { file: [h.file().sources.length, M.findSource(h.file().sources, KNEW) !== null, marked(h)], active: h.root.activeSourceKey === KNEW, entry: retired(h.storedEntry()) }
         }, { file: [50, true, true], active: true, entry: [] })
+        // F1 (round 3's dataloss review, P2): THE RETRY RACES THE CAP AGAIN.
+        // A removal frees a place, the retry migrates the bar's playlist and
+        // guide URL into memory with the marker, and before that save's read
+        // answers another program fills the place. The merge keeps theirs and
+        // drops the migrated record; until F1 the marker survived the merge,
+        // landed, and the owned write stripped both URLs off the entry -- in no
+        // record and not on the entry, the playlist told only as "1 source
+        // added here ... was not kept" (the user added nothing) and the guide
+        // URL not at all. Now the migration stays HELD: heldFull kept, the
+        // entry left with both URLs, the same one card, and the next removal
+        // migrates both. Seen red on lane-sweep-c3 (the counts are in this
+        // lane's report).
+        const H5 = "http://h5.example.test/l.m3u"
+        const refillBeforeRead = h => {
+          const l0 = h.stateFile.loader; let fired = false
+          // A hand-run `state source add` succeeds only below the cap (the helper's
+          // own too_many), so it fires at the first read that finds a place free.
+          h.stateFile.loader = () => { const st = JSON.parse(h.stateFile.disk)
+            if (!fired && st.sources.length < 50) { fired = true; st.sources.push(rec(H5)); h.stateFile.disk = JSON.stringify(st) + "\n" } l0() }
+          return () => fired
+        }
+        const dropTold = h => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74018") !== -1).length
+        // The R21 oracle: each entry URL is in a record, still on the entry, or reported.
+        const oracle = h => { const st = h.file(), e = h.storedEntry(), rs = reports(h)
+          return [M.findSource(st.sources, KNEW) !== null || e.playlistUrl === NEW || rs.indexOf("playlistUrl:full") === -1 && rs.length > 0,
+                  st.sources.some(r => r.epgUrl === E) || e.epgUrl === E] }
+        const raced = (h, free) => {
+          const fired = refillBeforeRead(h)
+          free(h); h.drain(); h.elapse(3000); h.drain()
+          return { fired: fired(), file: [h.file().sources.length, M.findSource(h.file().sources, KNEW) !== null, h.stateFile.disk.indexOf("e.example.test"), marked(h)],
+                   entry: [h.storedEntry().playlistUrl === NEW, h.storedEntry().epgUrl === E], held: h.root.migrationHeldFull, oracle: oracle(h),
+                   reports: reports(h), told: allTold(h), dropTold: dropTold(h), clean: clean(h) && !leaks(h) }
+        }
+        const afterRace = { fired: true, file: [50, false, -1, false], entry: [true, true], held: true, oracle: [true, true],
+                            reports: ["playlistUrl:full"], told: ["Sources is full"], dropTold: 0, clean: true }
+        const thenRemoveOne = (h, gone) => {
+          const rm = h.root.removeSource(gone); h.drain(); h.elapse(3000); h.drain()
+          const next = restart(h)
+          return { rm: rm.ok, file: [h.file().sources.length, name(epgOf(h.file(), KNEW)), marked(h), M.activeKeyOf(h.file()) === KNEW], entry: retired(h.storedEntry()),
+                   held: h.root.migrationHeldFull, restart: [next.file().sources.length, name(epgOf(next.file(), KNEW)), next.root.activeSourceKey === KNEW, reports(next)] }
+        }
+        const migrated = { rm: true, file: [50, "E", true, true], entry: [], held: false, restart: [50, "E", true, []] }
+        checkCall("F1 (" + tag + "): held full, a HAND-RUN `state source remove` frees a place, and another program fills it before the retry's save has read the file -- the migration stays HELD: no marker, both URLs on the entry, the one \"Sources is full\" card and no \"not kept\" card; then \"Remove one\" moves both in", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.drain()
+          const race = raced(h, x => x.foreign(sf => { const st = JSON.parse(sf.disk); st.sources = st.sources.filter(r => r.url !== "http://m7.example.test/l.m3u"); sf.disk = JSON.stringify(st) + "\n" }))
+          return { race, then: thenRemoveOne(h, keyOf("http://m8.example.test/l.m3u")) }
+        }, { race: afterRace, then: migrated })
+        checkCall("F1 (" + tag + "), rule 15: held full, a hand-run removal frees a place, and another program adds the SAME playlist (no guide URL) before the retry's save has read the file -- the record stands as theirs, and the migration is retried over it at once: the bar's guide URL reaches the record, the marker lands, the entry is stripped; nothing told but the one full card (before F1 the guide URL was lost, told by a journal line only)", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.drain()
+          const l0 = h.stateFile.loader; let fired = false
+          h.stateFile.loader = () => { const st = JSON.parse(h.stateFile.disk)
+            if (!fired && st.sources.length < 50) { fired = true; st.sources.push(rec(NEW, { label: "theirs" })); h.stateFile.disk = JSON.stringify(st) + "\n" } l0() }
+          h.foreign(sf => { const st = JSON.parse(sf.disk); st.sources = st.sources.filter(r => r.url !== "http://m7.example.test/l.m3u"); sf.disk = JSON.stringify(st) + "\n" })
+          h.drain(); h.elapse(3000); h.drain()
+          const next = restart(h)
+          return { fired, file: [h.file().sources.length, name(epgOf(h.file(), KNEW)), marked(h), M.activeKeyOf(h.file()) === KNEW], entry: retired(h.storedEntry()), held: h.root.migrationHeldFull,
+                   reports: reports(h), told: allTold(h), dropTold: dropTold(h), clean: clean(h) && !leaks(h), restart: [name(epgOf(next.file(), KNEW)), next.root.activeSourceKey === KNEW] }
+        }, { fired: true, file: [50, "E", true, true], entry: [], held: false, reports: ["playlistUrl:full"], told: ["Sources is full"], dropTold: 0, clean: true, restart: ["E", true] })
       }
     }
   }

@@ -737,6 +737,11 @@ Item {
   // and did not run (it never evicts); told once. Booleans, never a URL.
   property bool migrationHeldFull: false
   property bool migrationFullTold: false
+  // F1: the key of the record this session's migration added ("" when it
+  // added none), so a merge that drops that record at the cap holds the
+  // migration again rather than landing its marker (Model.mergeForeignState).
+  // A source key, never a URL.
+  property string migrationAddedKey: ""
   property bool stateWriteWaiting: false
   property bool stateWriteWaitExpired: false
   property double stateWriteWaitAt: 0
@@ -2506,8 +2511,20 @@ Item {
   // runs: the session outcome, reconcile, the cache layout.
   function mergeForeignText(text) {
     var theirs = Model.parseState(text)
-    var merged = Model.mergeForeignState(root.landedState, root.userState, theirs)
+    var merged = Model.mergeForeignState(root.landedState, root.userState, theirs, { migrationKey: root.migrationAddedKey })
     for (var i = 0; i < merged.conflicts.length; i++) console.warn("omarchy-iptv: " + Model.mergeConflictLine(merged.conflicts[i]))
+    // F1: the record this session's migration added did not land as ours --
+    // another program took the place it used ("full"), or added the same
+    // playlist itself ("changed"). No marker was carried, so the entry keeps
+    // both URLs, and the migration is HELD: the reconcile below retries it
+    // at once (Model.reconcileAction's `heldFull`), which over "changed"
+    // finds the record and migrates, and over "full" holds it under the one
+    // "Sources is full" card (adoptActive tells it, once) until a removal.
+    if (merged.migrationHeld !== "") {
+      console.warn("omarchy-iptv: " + Model.migrationHeldAgainLine(merged.migrationHeld))
+      root.migrationHeldFull = true
+      root.migrationAddedKey = ""
+    }
     // R25b (D-SRC-31): an in-app addition the merge dropped at a cap is never
     // dropped silently -- one journal line each (a key, never a URL), and the
     // user told once for the whole merge.
@@ -4849,6 +4866,7 @@ Item {
     if (out.invalid) root.reportEntryInput("playlistUrl", out.epgWithInvalid ? "invalid-pair" : "invalid")
     else if (out.epgWithInvalid) root.reportEntryInput("epgUrl", "invalid-pair")
     if (out.marked) console.warn("omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on")
+    if (out.marked) root.migrationAddedKey = out.added
     // R27d (D-SRC-44): the migration did not run -- Sources is full and it
     // never evicts. The entry keeps its URL (no marker, so the funnel keeps
     // it), the user is told ONCE (Model.entryInputNotice "full": no URL, no

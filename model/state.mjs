@@ -1300,8 +1300,28 @@ var MERGE_WHOLE_FIELDS = ["recents", "activeKey", "lastPlayed", "session", "cach
 // the provider's text, never logged) -- for Model.mergeDropLines (the
 // journal, one line each) and Model.mergeDropNotice (the user, once).
 // hiddenGroups is rule 15's sibling: the same shape at MAX_HIDDEN_GROUPS.
-// -> { state, conflicts, dropped }
-function mergeForeignState(base, ours, theirs) {
+// F1 (D-SINK-19 round 3 of the sweep, 2026-10-20): THE MIGRATION RIDES ITS
+// RECORD. `opts.migrationKey` is the key of the record this session's
+// one-time migration added (Service's migrationAddedKey; "" when it added
+// none). When the marker is OURS ALONE -- the migration ran since the base
+// and theirs does not carry it -- and the cap drops that record, the
+// migration did not happen: the marker is NOT carried (the entry keeps both
+// URLs: the funnel keeps a retired key until the marker has landed), the
+// active key it set goes back to theirs, the record is not counted among
+// `dropped.sources` (the user added nothing, and "make room, then add it
+// again" names a URL the entry still holds), and `migrationHeld` is "full":
+// the migration is held full again.
+// Before F1 the marker survived the merge, landed, and the owned write
+// stripped the bar's playlist and guide URL off the entry with neither in
+// any record. Rule 15's sibling, the same shape without the cap: another
+// program added the SAME playlist in the window, so the record stands but
+// as THEIRS (a conflict goes to theirs) and without the bar's guide URL;
+// `migrationHeld` is "changed", the marker again is not carried, and the
+// retry the caller runs at once finds the record and adopts the guide URL
+// onto it -- the outcome the other order (their add first) has always had.
+// "" when the migration's record landed as ours.
+// -> { state, conflicts, dropped, migrationHeld }
+function mergeForeignState(base, ours, theirs, opts) {
   var b = parseState(JSON.stringify(base || emptyState()))
   var o = parseState(JSON.stringify(ours || emptyState()))
   var t = parseState(JSON.stringify(theirs || emptyState()))
@@ -1364,9 +1384,21 @@ function mergeForeignState(base, ours, theirs) {
       out[f] = o[f]
     }
   }
-  if (entryMigratedOf(o) || entryMigratedOf(t)) out.entryMigrated = true
+  var migrationKey = str((opts || {}).migrationKey)
+  var migrationHeld = ""
+  if (migrationKey !== "" && entryMigratedOf(o) && !entryMigratedOf(b) && !entryMigratedOf(t) && mo[migrationKey]) {
+    var landed = null
+    for (i = 0; i < out.sources.length; i++) if (out.sources[i].key === migrationKey) landed = out.sources[i]
+    if (!landed) migrationHeld = "full"
+    else if (canonValue(landed) !== canonValue(mo[migrationKey])) migrationHeld = "changed"
+  }
+  if (migrationHeld === "full") {
+    dropped.sources = dropped.sources.filter(function (key) { return key !== migrationKey })
+    if (str(out.activeKey) === migrationKey) out.activeKey = t.activeKey
+  }
+  if (migrationHeld === "" && (entryMigratedOf(o) || entryMigratedOf(t))) out.entryMigrated = true
   else delete out.entryMigrated
-  return { state: parseState(JSON.stringify(out)), conflicts: conflicts, dropped: dropped }
+  return { state: parseState(JSON.stringify(out)), conflicts: conflicts, dropped: dropped, migrationHeld: migrationHeld }
 }
 
 var MERGE_LINE_HEAD = "state.json was changed by another program while a change made here was not yet saved; "
@@ -1406,6 +1438,17 @@ function mergeDropLines(dropped) {
     out.push(MERGE_LINE_HEAD + "a group hidden here was not kept (the limit is " + MAX_HIDDEN_GROUPS + " hidden groups)")
   }
   return out
+}
+
+// F1. The journal line for a merge that held the migration again, by the
+// reason mergeForeignState gave: no key, no URL -- the bar entry still holds
+// what the record would have carried.
+function migrationHeldAgainLine(why) {
+  if (str(why) === "changed") {
+    return MERGE_LINE_HEAD + "another program added the bar's playlist itself, so it is moved into Sources again over that record"
+  }
+  return MERGE_LINE_HEAD + "the bar's playlist could not be moved into Sources, which is full again (the limit is " + MAX_SOURCES +
+    " sources); it stays on the bar entry, with its guide-data URL, until a source is removed"
 }
 
 // R25b. What the user is told, ONCE per merge that dropped anything: how
@@ -1755,9 +1798,10 @@ export {
   countReload, reloadDisposition, sortedKeys, stateCanonical, sameState,
   canonValue, mergeSetField, recordFieldsDiffering, MERGE_WHOLE_FIELDS,
   mergeForeignState, MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount,
-  mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
-  stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
-  stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
-  STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
-  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
+  mergeDropLines, migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS,
+  stateLoadKind, stateInitFound, stateLoadDecision, stateWriteGate,
+  stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
+  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
+  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
+  stateBlockedHeader
 }

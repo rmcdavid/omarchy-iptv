@@ -165,7 +165,13 @@ obvious when it happens to you:
   (once a session, and again at each shell start while it lasts). Remove
   one -- in Sources, or with the helper's `state source remove` -- and the
   playlist is added with its guide-data URL and becomes the active source,
-  over whichever source was active. Up to and including 0.14.2 the least
+  over whichever source was active. If another program fills the freed
+  place first -- a hand-run `state source add` in the moment before the
+  plugin's save has read the file -- the move does not happen: both URLs
+  stay on the entry, nothing new is told, and the next removal tries again.
+  (Builds of this change that never shipped took both off the entry in that
+  case with neither in any source, saying only that a source "added here"
+  was not kept.) Up to and including 0.14.2 the least
   recently used source was removed to make room, with only a journal line,
   and its URL went with it. An install updated from 0.13.6 records no
   active source, so until you pick one, or a source is removed, the guide

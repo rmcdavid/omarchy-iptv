@@ -76,9 +76,9 @@ export {
   knownIdSet, failedIndex, failedDocument, failedWhen, withFailed,
   failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
   reloadDisposition, stateCanonical, sameState, mergeForeignState,
-  mergeConflictLine, mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS,
-  stateLoadKind, stateInitFound, stateLoadDecision, stateWriteGate,
-  stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
+  mergeConflictLine, mergeDropLines, migrationHeldAgainLine, mergeDropNotice,
+  STATE_LOAD_ERRORS, stateLoadKind, stateInitFound, stateLoadDecision,
+  stateWriteGate, stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
   STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
   STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
   stateBlockedHeader

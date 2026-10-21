@@ -1682,7 +1682,17 @@ ACTIVE source: an in-app removal asks for one (`Service.retryHeldMigration`,
 folded by `Qt.callLater`), and a hand-run `state source remove` is picked
 up by the reconcile its load runs. Pinned in node through the shipping
 `Service.qml` on both hosts and both own-echo modes (`R27d (<tag>): D-SRC-44
--- ...`, three pins) and live by key-scenario B35 and B36. Until R27 the
+-- ...`, three pins) and live by key-scenario B35 and B36. [2026-10-20, F1
+(round 3's dataloss review, P2): when another program fills the freed
+place before the retry's save has read the file, the merge drops the
+migrated record at the cap, and until F1 the marker landed anyway: both
+URLs left the entry for no record, told only as `1 source added here ...
+was not kept`. Now the migration stays HELD -- no marker, both URLs on the
+entry, this same card and no new one, the next removal tries again
+(`Model.mergeForeignState`'s `migrationHeld`); and when the other program
+added the same playlist itself, the migration runs again over its record
+at once, the bar's guide URL with it. Pinned: `F1 (<tag>): held full, a
+HAND-RUN ...` and `F1 (<tag>), rule 15: ...`, red on lane-sweep-c3.] Until R27 the
 least recently used source was evicted to make room, its URL the only copy,
 with a journal line only. What the code does around it that no pin
 covers, measured by the documents lane through `tests/service-harness.js`
