@@ -152,7 +152,7 @@ obvious when it happens to you:
   any of your sources: one notification, titled **Bar setting removed**,
   says `playlistUrl in the bar settings was not a usable URL and was
   removed, with the epgUrl beside it. Add or edit sources in the guide's
-  Sources screen.` (Up to and including 0.14.2 that guide-data URL was put
+  Sources screen.` (Up to and including 0.14.3 that guide-data URL was put
   on the source that was active, in place of that source's own, and only
   the playlist was reported; with no source active, it was reported in a
   notification of its own, as having no source to guide, beside the
@@ -174,7 +174,7 @@ obvious when it happens to you:
   stay on the entry, nothing new is told, and the next removal tries again.
   (Builds of this change that never shipped took both off the entry in that
   case with neither in any source, saying only that a source "added here"
-  was not kept.) Up to and including 0.14.2 the least
+  was not kept.) Up to and including 0.14.3 the least
   recently used source was removed to make room, with only a journal line,
   and its URL went with it. An install updated from 0.13.6 records no
   active source, so until you pick one, or a source is removed, the guide
@@ -851,10 +851,13 @@ Nothing inside the plugin directory is written at runtime.
   not a usable URL and was removed, with the epgUrl beside it. Add or edit
   sources in the guide's Sources screen.` -- and the guide-data URL is
   removed with the playlist, attached to none of your sources. If the
-  guide-data URL was set only after that playlist had been reported, it
-  gets the second notification, from its own side: `epgUrl in the bar
-  settings came with a playlistUrl that was not a usable URL, and was
-  removed with it. Add or edit sources in the guide's Sources screen.`
+  guide-data URL was set only after that playlist had been reported, and
+  before the plugin has recorded the one-time move into Sources (the first
+  moments after the shell starts), it gets the second notification, from
+  its own side: `epgUrl in the bar settings came with a playlistUrl that
+  was not a usable URL, and was removed with it. Add or edit sources in the
+  guide's Sources screen.` Once the move is recorded, a guide-data URL set
+  on the bar gets **Bar setting ignored**, as above.
 - **Plugin files damaged (05-ipc-logos.py) · reinstall the plugin** (any
   part name): the helper is `bin/omarchy-iptv` and the eleven files under
   `bin/helper/` beside it, and it checks all of them before it does
@@ -994,7 +997,7 @@ Nothing inside the plugin directory is written at runtime.
   gets a new one created there, holding your sources and provider URLs, at
   0644 under the usual umask 022 -- so after re-pointing a link, check the
   new place with `ls -l` and `chmod 600` a `state.json` you did not expect.
-  Up to and including 0.14.2 there was a third such window: a save asked
+  Up to and including 0.14.3 there was a third such window: a save asked
   for while the plugin's previous save was still being written did not
   read the file first. Now it waits for that write to land and then reads
   the file; it is never held longer than 4 seconds, because a write not
@@ -1116,7 +1119,7 @@ Nothing inside the plugin directory is written at runtime.
   when the check ends: nothing is added, the form stays open with what you
   typed and says `Sources is full (50) · remove one first`, and the
   journal says `the new source was not
-  added: Sources is full (50)`. Up to and including 0.14.2 the guide kept
+  added: Sources is full (50)`. Up to and including 0.14.3 the guide kept
   it for the session and the next shell start dropped it without a word.
   One case where a backup put
   back has no effect: while a save of the plugin's has failed or is still
@@ -1140,13 +1143,14 @@ Nothing inside the plugin directory is written at runtime.
   happen to a change written while the plugin's read of the file before a
   save has gone unanswered: after 2 seconds that save goes ahead without
   the read (the bullet on links). What decides it is when the other
-  program writes, not which program it is: measured with a `state.json`
-  whose reads were held up on purpose, a change another program wrote
+  program writes, not which program it is: a change another program wrote
   within those 2 seconds, or before a later save of the plugin's while the
   reads were still held up, was lost -- a favourite added by replacing the
-  file and a source added with the helper's `state source add` alike --
-  and one written after that save, with no later save before the reads
-  came back, was kept. Nothing in the
+  file (measured live, with a `state.json` whose reads were held up on
+  purpose) and a source added with the helper's `state source add` (shown
+  through the service's own code in the test harness) alike -- and one
+  written after that save, with no later save before the reads came back,
+  was kept. Nothing in the
   plugin can lock the file against another program. Edit the file by hand
   with the shell stopped, keep a copy first (it holds your provider URLs),
   then `omarchy restart shell`.

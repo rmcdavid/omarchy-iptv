@@ -252,6 +252,10 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # the marker lands) and the pair's notice (1 model); the shared fixture's
 # three new adopt cases and R29e's "becomes the active source" sentence
 # are counted inside checks that existed.
+# 2664 -> 2678 on 2026-10-21 (the P3 sweep's finishing round, lane-sweep-f4):
+# +4 F1 race and +4 F1 same-playlist sibling through the service harness
+# (both hosts, both own-echo modes), +1 F1 model, +1 F4 (R29d's CLI origin),
+# +4 F2 (window (c) decided by when the other program writes).
 NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2678}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
