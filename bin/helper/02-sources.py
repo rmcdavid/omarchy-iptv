@@ -368,15 +368,99 @@ def clean_name(value: str) -> str:
     return _LEADING_DASHES.sub("", value or "").strip()
 
 
+# D-M3U-1: the warning each length cap adds, once per kind and with a count,
+# in the order they are reported. The figure in each is its cap.
+M3U_CUT_WARNINGS = (
+    ("name", "%d channel names cut to " + str(M3U_MAX_NAME) + " characters"),
+    ("tvgName", "%d tvg-name values cut to " + str(M3U_MAX_NAME) + " characters"),
+    ("groupText", "%d group values cut to " + str(M3U_MAX_GROUP_TEXT) + " characters"),
+    ("group", "%d group names cut to " + str(M3U_MAX_GROUP) + " characters"),
+    ("groupCount", "%d channels listed in more than " + str(M3U_MAX_GROUPS_PER_CHANNEL) + " groups kept the first " + str(M3U_MAX_GROUPS_PER_CHANNEL)),
+    ("tvgId", "%d tvg-id values longer than " + str(M3U_MAX_TVG_ID) + " characters dropped"),
+    ("chno", "%d channel numbers longer than " + str(M3U_MAX_CHNO) + " characters dropped"),
+    ("logo", "%d logo URLs longer than " + str(M3U_MAX_LOGO_URL) + " characters dropped"),
+    ("option", "%d options or headers dropped: a name over " + str(M3U_MAX_OPTION_KEY) + " or a value over " + str(M3U_MAX_OPTION_VALUE) + " characters"),
+    ("optionCount", "%d options or headers dropped: more than " + str(M3U_MAX_OPTIONS) + " on one channel"),
+    ("url", "%d entries skipped: stream URL longer than " + str(M3U_MAX_URL) + " characters"),
+    ("epgHint", "%d EPG hints longer than " + str(M3U_MAX_EPG_HINT) + " characters dropped"),
+    ("warnings", "%d more warnings like the ones above not listed"),
+)
+
+
+def bound_count(bounds: dict[str, int] | None, kind: str) -> None:
+    if bounds is not None:
+        bounds[kind] = bounds.get(kind, 0) + 1
+
+
+def cut_text(value: str, limit: int, kind: str, bounds: dict[str, int] | None) -> str:
+    """D-M3U-1: `value` cut to `limit` code points (a str slice never splits
+    one), trailing whitespace trimmed, counted under `kind` when it was cut."""
+    if len(value) <= limit:
+        return value
+    bound_count(bounds, kind)
+    return value[:limit].rstrip()
+
+
+def bound_groups(groups: list[str], bounds: dict[str, int] | None) -> list[str]:
+    """split_groups' list with each name cut to M3U_MAX_GROUP and at most
+    M3U_MAX_GROUPS_PER_CHANNEL of them; a cut that makes two names equal
+    keeps the first, as split_groups does for a repeat."""
+    out: list[str] = []
+    for name in groups:
+        if len(out) >= M3U_MAX_GROUPS_PER_CHANNEL:
+            bound_count(bounds, "groupCount")
+            break
+        name = cut_text(name, M3U_MAX_GROUP, "group", bounds)
+        if name and name not in out:
+            out.append(name)
+    return out
+
+
+def channel_warning(warnings: list[str], bounds: dict[str, int] | None, text: str) -> None:
+    """A per-channel warning: kept while fewer than M3U_MAX_CHANNEL_WARNINGS
+    have been, counted after that (D-M3U-1's sibling, lane A's OQ-6)."""
+    if bounds is None:
+        warnings.append(text)
+        return
+    if bounds.get("listed", 0) < M3U_MAX_CHANNEL_WARNINGS:
+        bounds["listed"] = bounds.get("listed", 0) + 1
+        warnings.append(text)
+    else:
+        bound_count(bounds, "warnings")
+
+
+def bounded_option(key: str, value: str, store: dict[str, str], bounds: dict[str, int] | None) -> None:
+    """store[key] = value unless either is over its D-M3U-1 cap or the store
+    already holds M3U_MAX_OPTIONS other keys: then dropped and counted."""
+    if len(key) > M3U_MAX_OPTION_KEY or len(value) > M3U_MAX_OPTION_VALUE:
+        bound_count(bounds, "option")
+    elif key not in store and len(store) >= M3U_MAX_OPTIONS:
+        bound_count(bounds, "optionCount")
+    else:
+        store[key] = value
+
+
 def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
                  vlcopt: dict[str, str], kodiprop: dict[str, str],
-                 warnings: list[str], index: int = 1) -> dict[str, Any]:
+                 warnings: list[str], index: int = 1,
+                 bounds: dict[str, int] | None = None) -> dict[str, Any]:
+    """One channels.json row. Every provider-controlled text it keeps is
+    held to its D-M3U-1 cap (01-core.py); `bounds` counts what was cut or
+    dropped, for parse_m3u's warnings. Without `bounds` the caps still
+    apply and only the counting is skipped."""
     tvg_id = attrs.get("tvg-id", "").strip()
-    tvg_name = attrs.get("tvg-name", "").strip()
+    if len(tvg_id) > M3U_MAX_TVG_ID:
+        bound_count(bounds, "tvgId")
+        tvg_id = ""
+    tvg_name = cut_text(attrs.get("tvg-name", "").strip(), M3U_MAX_NAME, "tvgName", bounds)
     # Never fall back to the URL: the name is rendered everywhere (R12, D-QA-02).
-    name = clean_name(title) or clean_name(tvg_name) or clean_name(tvg_id) or GENERATED_NAME_FORMAT % index
-    group_text = attrs.get("group-title", "").strip() or extgrp
-    groups = split_groups(group_text) if group_text else []
+    name = cut_text(clean_name(title), M3U_MAX_NAME, "name", bounds) or clean_name(tvg_name) or clean_name(tvg_id) or GENERATED_NAME_FORMAT % index
+    # D-M3U-1: `extgrp` is the value that PERSISTS across entries, so it
+    # arrives already cut (parse_m3u cuts it once, at its own line, and
+    # counts it there); a group-title is this entry's own and is cut here.
+    group_title = attrs.get("group-title", "").strip()
+    group_text = cut_text(group_title, M3U_MAX_GROUP_TEXT, "groupText", bounds) if group_title else extgrp
+    groups = bound_groups(split_groups(group_text), bounds) if group_text else []
     # Sources ruling R5 (groups; not the D-LOGO-11 logo ruling of the same
     # number): multi-group entries list under the FIRST group; the whole
     # group string stays searchable through searchKey and `groups`.
@@ -395,8 +479,14 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
         channel["tvgName"] = tvg_name
     logo = attrs.get("tvg-logo", "").strip()
     if logo and stream_scheme(logo) in ("http", "https"):
-        channel["logo"] = logo
+        if len(logo) > M3U_MAX_LOGO_URL:
+            bound_count(bounds, "logo")
+        else:
+            channel["logo"] = logo
     chno = channel_number(attrs)
+    if len(chno) > M3U_MAX_CHNO:
+        bound_count(bounds, "chno")
+        chno = ""
     if chno:
         channel["chno"] = chno
 
@@ -406,26 +496,26 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
         cleaned = clean_header_value(value)
         if key == "http-user-agent":
             if cleaned:
-                headers["User-Agent"] = cleaned
+                bounded_option("User-Agent", cleaned, headers, bounds)
         elif key == "http-referrer":
             if cleaned:
-                headers["Referer"] = cleaned
+                bounded_option("Referer", cleaned, headers, bounds)
         elif _SAFE_OPTION.match(key):
-            options["vlc:" + key] = value
+            bounded_option("vlc:" + key, value, options, bounds)
         else:
-            warnings.append("dropped option-looking key for %s" % name)
+            channel_warning(warnings, bounds, "dropped option-looking key for %s" % name)
     for key, value in kodiprop.items():
         if key in ("inputstream.adaptive.stream_headers", "inputstream.adaptive.manifest_headers"):
             for hname, hvalue in urllib.parse.parse_qsl(value, keep_blank_values=False):
                 cleaned = clean_header_value(hvalue)
                 if not _HEADER_NAME.match(hname):
-                    warnings.append("dropped header with unsafe name for %s" % name)
+                    channel_warning(warnings, bounds, "dropped header with unsafe name for %s" % name)
                 elif cleaned:
-                    headers[hname] = cleaned
+                    bounded_option(hname, cleaned, headers, bounds)
         elif _SAFE_OPTION.match(key):
-            options["kodi:" + key] = value
+            bounded_option("kodi:" + key, value, options, bounds)
         else:
-            warnings.append("dropped option-looking key for %s" % name)
+            channel_warning(warnings, bounds, "dropped option-looking key for %s" % name)
     if headers:
         channel["headers"] = headers
     if options:
@@ -453,13 +543,33 @@ def parse_m3u(text: str) -> dict[str, Any]:
     Understands #EXTM3U (url-tvg / x-tvg-url hint), #EXTINF with quoted or
     bare attributes and a title that may contain commas (comma optional),
     #EXTGRP (persists until the next #EXTGRP, like VLC; group-title wins),
-    #EXTVLCOPT and #KODIPROP (apply to the next URL line only). Unknown
+    #EXTVLCOPT and #KODIPROP (apply to the next URL line only, and are
+    reset by it whether or not it made a channel). Unknown
     comments are ignored. Accepts a BOM, CRLF and blank lines. Location
     lines outside STREAM_SCHEMES (bare paths, option-looking lines, free
     text, URLs without a host) are skipped and counted; an #EXTINF that is
     followed by another #EXTINF is counted as having no URL. Output is
     bounded by MAX_CHANNELS and MAX_GROUPS (S-07); a channel moved to
-    UNGROUPED keeps its provider group in `groups` and `searchKey`.
+    UNGROUPED keeps its provider group in `groups` and `searchKey`. And
+    each channel is bounded by a constant (D-M3U-1): every text it keeps is
+    held to its M3U_MAX_* cap, so the whole output is at most MAX_CHANNELS
+    times that constant, whatever the input repeats.
+
+    What persists from one entry to the next, and why (D-M3U-1, rule 15):
+      #EXTGRP  persists, because that is what the tag means -- it opens a
+               group for the entries that follow, and lists that use it
+               write it once per block. It is the value the finding was
+               about, so it is cut to M3U_MAX_GROUP_TEXT ONCE, at its own
+               line, and counted there; every entry after it copies at
+               most that.
+      #EXTVLCOPT, #KODIPROP  never pass a location line: both are reset by
+               the next URL line, kept or skipped, and by an orphan line.
+               Between two #EXTINF lines with no URL they carry forward to
+               the next entry that has one, which is still one channel.
+      #EXTM3U's url-tvg / x-tvg-url  one value for the whole document,
+               written once into channels.json and copied into no channel;
+               held to M3U_MAX_EPG_HINT anyway.
+      A pending #EXTINF  belongs to the one entry it opens.
     """
     channels: list[dict[str, Any]] = []
     warnings: list[str] = []
@@ -475,6 +585,7 @@ def parse_m3u(text: str) -> dict[str, Any]:
     regrouped = 0
     seen_groups: set[str] = set()
     is_playlist = False
+    bounds: dict[str, int] = {}
 
     if text.startswith("\ufeff"):
         text = text[1:]
@@ -486,7 +597,11 @@ def parse_m3u(text: str) -> dict[str, Any]:
         if line.startswith("#EXTM3U"):
             is_playlist = True
             attrs, _ = parse_attrs(line[len("#EXTM3U"):])
-            epg_hint = attrs.get("url-tvg") or attrs.get("x-tvg-url") or epg_hint
+            hint = attrs.get("url-tvg") or attrs.get("x-tvg-url") or ""
+            if len(hint) > M3U_MAX_EPG_HINT:
+                bound_count(bounds, "epgHint")
+            elif hint:
+                epg_hint = hint
             continue
         if line.startswith("#EXTINF:"):
             is_playlist = True
@@ -495,7 +610,7 @@ def parse_m3u(text: str) -> dict[str, Any]:
             pending = parse_extinf(line)
             continue
         if line.startswith("#EXTGRP:"):
-            extgrp = line[len("#EXTGRP:"):].strip()
+            extgrp = cut_text(line[len("#EXTGRP:"):].strip(), M3U_MAX_GROUP_TEXT, "groupText", bounds)
             continue
         if line.startswith("#EXTVLCOPT:"):
             key, _, value = line[len("#EXTVLCOPT:"):].partition("=")
@@ -514,13 +629,15 @@ def parse_m3u(text: str) -> dict[str, Any]:
             vlcopt, kodiprop = {}, {}
             continue
         url = line
-        if not is_stream_url(url):
+        if len(url) > M3U_MAX_URL:
+            bound_count(bounds, "url")
+        elif not is_stream_url(url):
             skipped_scheme += 1
         elif len(channels) >= MAX_CHANNELS:
             over_cap += 1
         else:
             attrs, title = pending
-            channel = make_channel(attrs, title, url, extgrp, vlcopt, kodiprop, warnings, len(channels) + 1)
+            channel = make_channel(attrs, title, url, extgrp, vlcopt, kodiprop, warnings, len(channels) + 1, bounds)
             group = channel["group"]
             if group not in seen_groups:
                 if len(seen_groups) >= MAX_GROUPS and group != UNGROUPED:
@@ -543,6 +660,9 @@ def parse_m3u(text: str) -> dict[str, Any]:
         warnings.append("truncated to %d channels (%d entries skipped)" % (MAX_CHANNELS, over_cap))
     if regrouped:
         warnings.append("group count capped at %d; %d channels listed under %s" % (MAX_GROUPS, regrouped, UNGROUPED))
+    for kind, sentence in M3U_CUT_WARNINGS:
+        if bounds.get(kind):
+            warnings.append(sentence % bounds[kind])
     assign_ids(channels)
     return {"channels": channels, "warnings": warnings, "epgUrlHint": epg_hint, "isPlaylist": is_playlist}
 

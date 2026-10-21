@@ -1058,9 +1058,12 @@ def cmd_epg(args: argparse.Namespace) -> int:
     channels_path = os.path.join(directory, CHANNELS_FILE)
     url = url_from(args)
     started = time.monotonic()
-    window = load_window(window_path)
     previous = read_json(status_path) or {}
+    window = None
+    # D-M3U-1: bounded before the cached window is read or a guide fetched.
+    held = limit_memory(EPG_PRELOAD)
     try:
+        window = load_window(window_path)
         if args.now_only:
             if window is None:
                 raise HelperError("no_cache", "no cached EPG window yet; fetch the EPG first")
@@ -1114,25 +1117,38 @@ def cmd_epg(args: argparse.Namespace) -> int:
         write_json_atomic(status_path, status)
         emit(status)
         return EXIT_OK
-    except HelperError as error:
-        if window is not None:
-            try:
-                write_epg_now(directory, window, now)
-            except OSError as io_error:
-                log("could not refresh %s: %s" % (EPG_NOW_FILE, io_error))
-        host = source_host(url) if url else (window.get("sourceHost", "") if window else "")
-        status = error_payload(
-            "epg", error,
-            sourceHost=host,
-            fetchedAt=window.get("fetchedAt") if window else (previous.get("fetchedAt") if isinstance(previous, dict) else None),
-            stale=window is not None,
-            matched=window.get("matched") if window else None,
-            channelTotal=window.get("channelTotal") if window else None,
-            durationMs=int((time.monotonic() - started) * 1000),
-        )
-        write_status_quietly(status_path, status)
-        log("epg: %s" % error.message)
-        emit(status)
-        return EXIT_ERROR
+    except HelperError as caught:
+        error = caught
+        cached = window is not None
+    except MemoryError:
+        # D-M3U-1, as in cmd_playlist: release, lift the limit, then speak.
+        # The window is dropped whichever one it was -- the cached one, or a
+        # fetched one whose epg-now.json may be the step that ran out -- so
+        # nothing is recomputed on the way out. Both files are written
+        # atomically: what is on disk is the previous run's, or nothing, and
+        # `stale` says whether a previous window is there.
+        window = None
+        release_memory_limit(held)
+        error = memory_refusal("EPG", source_host(url) if url else "", held)
+        cached = os.path.isfile(window_path)
+    if window is not None:
+        try:
+            write_epg_now(directory, window, now)
+        except OSError as io_error:
+            log("could not refresh %s: %s" % (EPG_NOW_FILE, io_error))
+    host = source_host(url) if url else (window.get("sourceHost", "") if window else "")
+    status = error_payload(
+        "epg", error,
+        sourceHost=host,
+        fetchedAt=window.get("fetchedAt") if window else (previous.get("fetchedAt") if isinstance(previous, dict) else None),
+        stale=cached,
+        matched=window.get("matched") if window else None,
+        channelTotal=window.get("channelTotal") if window else None,
+        durationMs=int((time.monotonic() - started) * 1000),
+    )
+    write_status_quietly(status_path, status)
+    log("epg: %s" % error.message)
+    emit(status)
+    return EXIT_ERROR
 
 

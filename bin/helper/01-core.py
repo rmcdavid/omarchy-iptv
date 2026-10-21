@@ -71,6 +71,58 @@ MAX_SOURCE_BYTES = 64 * 1024 * 1024
 # (which may exist as one extra bucket, so at most MAX_GROUPS + 1 groups).
 MAX_CHANNELS = 50000
 MAX_GROUPS = 2000
+# D-M3U-1 (the maintainer on #11935, against 0.14.2). The two counts above
+# bound how MANY channels there are and say nothing about how LONG each one
+# is, and MAX_SOURCE_BYTES bounds the input, not what the parser copies out
+# of it. `#EXTGRP` persists until the next one, so a single long group line
+# was copied into the `group`, `groups` and `searchKey` of every entry after
+# it: one line, paid for once in the input, paid for again per channel. So
+# every provider-controlled text the parser keeps per channel has a length
+# cap here, in code points, and per-channel output is bounded by a constant.
+# Display text is CUT at its cap (trailing whitespace trimmed, nothing
+# appended); an identifier, a URL or an option value is DROPPED instead,
+# because a truncated one is a different and wrong value. Either way the
+# parser counts it and says so once per kind in `warnings`, as it already
+# does for the counts above.
+#
+# Chosen from what real playlists carry, measured over all 23 playlist
+# fixtures (tests/fixtures and the dev harness's, 284 channels, 2026-10-20):
+# the longest title 290 (qa-attrs.m3u's deliberately long one; the next is
+# under 40), group-title 24, one group 18, groups per entry 3, #EXTGRP 9,
+# tvg-id 26, tvg-name 18, tvg-chno 4, tvg-logo 77, stream URL 84, option
+# key 37 and value 88, headers 3 and options 2 per channel. Every cap sits
+# well above those, so no fixture's output moves (pinned by the D-M3U-1
+# tests), and well below what made the finding: each one is a constant.
+M3U_MAX_NAME = 512              # the title and tvg-name: cut
+M3U_MAX_GROUP_TEXT = 512        # #EXTGRP or group-title, before the `;` split: cut
+M3U_MAX_GROUP = 128             # one group after the split: cut
+M3U_MAX_GROUPS_PER_CHANNEL = 16  # groups after the first sixteen: dropped
+M3U_MAX_TVG_ID = 256            # tvg-id: dropped (it becomes an id and an EPG key)
+M3U_MAX_CHNO = 32               # a channel-number attribute: dropped
+M3U_MAX_URL = 4096              # a stream URL: the entry is skipped
+M3U_MAX_LOGO_URL = 2048         # tvg-logo: dropped (MAX_SOURCE_URL's figure)
+M3U_MAX_OPTION_KEY = 64         # an #EXTVLCOPT / #KODIPROP key or header name: dropped
+M3U_MAX_OPTION_VALUE = 1024     # its value, or one header value: dropped
+M3U_MAX_OPTIONS = 16            # headers, and options, per channel: the rest dropped
+M3U_MAX_EPG_HINT = 2048         # url-tvg / x-tvg-url: dropped (MAX_SOURCE_URL's figure)
+# The per-channel warnings ("dropped option-looking key for <name>") were
+# bounded only by MAX_CHANNELS times the name: a few MB on the one status
+# line the service collects (lane A's OQ-6, D-CLIP-1). The first ones are
+# kept verbatim, the rest counted in one more line.
+M3U_MAX_CHANNEL_WARNINGS = 20
+# D-M3U-1, defence in depth: the fourth helper memory path a marketplace
+# reviewer has found (D-QA-06's gzip, D-EPG-6's entities, D-LOGO-11's
+# decoder, this), and the service's 180 s watchdog bounds time only. So the
+# verbs that parse provider bytes -- `playlist` (the refresh and the source
+# probe both run it) and `epg` -- set RLIMIT_AS to this before they fetch
+# or parse anything (limit_memory), and a run that needs more ends with
+# one sentence under the code `too_large`, never a traceback.
+# MEMORY_LIMIT_PLACEHOLDER
+MEMORY_LIMIT_MIB = 512
+# Tests and QA LOWER the limit through this (in MiB); a value above the
+# default is ignored, so the variable can never be used to lift it. The
+# service never sets it.
+MEMORY_LIMIT_ENV = "OMARCHY_IPTV_MEMORY_LIMIT_MB"
 DEFAULT_TIMEOUT = 20
 # `--timeout` is a per-socket-operation timeout; a server that trickles one
 # byte per second would keep the helper alive forever (S-05). Every HTTP

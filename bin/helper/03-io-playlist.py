@@ -27,6 +27,27 @@ def resolve_source(url: str, label: str = "playlist") -> tuple[str, str]:
     return result["kind"], result["url"]
 
 
+def read_capped(stream: Any, limit: int) -> bytes:
+    """At most `limit` + 1 bytes of `stream`, read HTTP_CHUNK at a time.
+
+    D-M3U-1. `stream.read(limit + 1)` looks the same and is not: CPython
+    allocates the whole `limit + 1` bytes before it reads one, so every
+    playlist, a three-line one included, reserved the 64 MiB input cap --
+    measured as the floor of every `playlist` run under an address-space
+    limit, 93 MiB for a 3-channel file and for a 10,000-channel one alike.
+    In chunks, what is reserved is what arrived (and once more while they
+    are joined). The caller still decides what more than `limit` means."""
+    chunks: list[bytes] = []
+    total = 0
+    while total <= limit:
+        chunk = stream.read(min(HTTP_CHUNK, limit + 1 - total))
+        if not chunk:
+            break
+        chunks.append(chunk)
+        total += len(chunk)
+    return b"".join(chunks)
+
+
 def read_local_source(path: str, label: str = "playlist") -> bytes:
     """Messages carry the base name only, never the full path (R12, D-QA-12)."""
     real = os.path.realpath(path)
@@ -46,7 +67,7 @@ def read_local_source(path: str, label: str = "playlist") -> bytes:
     except NotRegularFile:
         raise HelperError("not_found", "%s file not found: %s" % (label, name)) from None
     with os.fdopen(fd, "rb") as handle:
-        return handle.read(MAX_SOURCE_BYTES + 1)
+        return read_capped(handle, MAX_SOURCE_BYTES)
 
 
 def split_userinfo(url: str) -> tuple[str, str]:
@@ -97,7 +118,11 @@ def make_opener(label: str, host: str) -> Any:
                     new.remove_header(name)
             return new
 
-    return urllib.request.build_opener(SafeRedirectHandler())
+    handlers: list[Any] = [SafeRedirectHandler()]
+    context = TLS_CONTEXT.get("https")
+    if context is not None:
+        handlers.append(urllib.request.HTTPSHandler(context=context))
+    return urllib.request.build_opener(*handlers)
 
 
 def http_deadline(timeout: float) -> float:
@@ -109,6 +134,157 @@ def http_deadline(timeout: float) -> float:
         except ValueError:
             pass
     return max(HTTP_DEADLINE_MIN, 3.0 * float(timeout))
+
+
+# What limit_memory set in this process (see there). A dict changed in
+# place, so no part needs a `global` statement.
+MEMORY_HELD: dict[str, Any] = {"limit": 0, "previous": None}
+
+
+def memory_limit_bytes() -> int:
+    """The data limit a fetch verb sets (D-M3U-1): MEMORY_LIMIT_MIB,
+    or a LOWER figure from MEMORY_LIMIT_ENV. A higher one, or one that does
+    not parse, is ignored, so the variable can only tighten the limit."""
+    limit = MEMORY_LIMIT_MIB * 1024 * 1024
+    override = os.environ.get(MEMORY_LIMIT_ENV, "")
+    if override:
+        try:
+            wanted = int(float(override) * 1024 * 1024)
+        except (ValueError, OverflowError):
+            wanted = 0
+        if 0 < wanted < limit:
+            limit = wanted
+    return limit
+
+
+# Every module a fetch verb imports lazily on its way through, imported
+# BEFORE the limit is set (limit_memory): a module loaded under the limit
+# maps its shared object there, and a refused mapping is an ImportError
+# from somewhere deep in urllib, not the MemoryError the verb answers.
+# Measured, not supposed: under a 16 MiB limit set before these, the
+# playlist verb ended in "ImportError: ... binascii ...: failed to map
+# segment from shared object" and the epg verb in "No module named expat".
+# The names are the lazy `import` lines of 01- to 04- and 11-cli.py's
+# traceback, plus what urllib loads on a request: `ssl` (http.client), and
+# `encodings.idna` (socket encodes every host name through it).
+FETCH_PRELOAD = ("base64", "binascii", "http.client", "ssl", "urllib.error", "urllib.request",
+                 "encodings.idna", "unicodedata", "traceback")
+EPG_PRELOAD = FETCH_PRELOAD + ("calendar", "hashlib", "xml.etree.ElementTree", "xml.parsers.expat")
+
+
+def quiet_unraisable(unraisable: Any) -> None:
+    """sys.unraisablehook while a fetch verb runs bounded (D-M3U-1). A
+    MemoryError inside urllib can leave a half-built HTTPResponse whose
+    finalizer then fails, and CPython's own hook prints that as a traceback
+    on stderr -- seen under a 16 MiB limit. This keeps the verb's promise of
+    one sentence and no traceback: one line naming the two types, never the
+    object's repr or the exception's text, either of which can quote a URL."""
+    log("ignored %s while releasing %s" % (type(unraisable.exc_value).__name__,
+                                           type(unraisable.object).__name__ if unraisable.object is not None else "an object"))
+
+
+# The TLS context urllib would build for this run's opener, built instead
+# by limit_memory before the limit is set (D-M3U-1). urllib makes one per
+# opener -- loading the system's CA store -- and OpenSSL reports an
+# allocation it was refused as an SSLError ("No cipher can be selected"),
+# not a MemoryError: seen under an 8 MiB test limit. It is the SAME
+# context, from the same function urllib.request.HTTPSHandler calls when
+# it is given none (http.client._create_https_context), so certificate
+# verification, the ALPN and the post-handshake setting are exactly
+# urllib's; when that function is missing the opener builds its own, as
+# before. Empty until a fetch verb runs as the program.
+TLS_CONTEXT: dict[str, Any] = {}
+
+
+def prepare_tls_context() -> None:
+    try:
+        import http.client
+        create = getattr(http.client, "_create_https_context", None)
+        if create is not None:
+            TLS_CONTEXT["https"] = create(http.client.HTTPSConnection._http_vsn)
+    except (ImportError, AttributeError, OSError, ValueError):
+        TLS_CONTEXT.pop("https", None)
+
+
+def limit_memory(preload: tuple[str, ...] = FETCH_PRELOAD) -> dict[str, Any]:
+    """Hold this process to memory_limit_bytes() of data, before a fetch
+    verb downloads or parses anything (D-M3U-1), once `preload` is loaded.
+
+    RLIMIT_DATA, not RLIMIT_AS, measured on this machine with CPython 3.14
+    (2026-10-20). Over a parse, both end in a plain MemoryError the verb
+    catches, each within a few MiB of the run's peak VmData or VmSize (the
+    two differ by the libraries' text, about 14 MiB). What decided it is
+    everything that is not the parse: AS counts every FILE mapping too, so a
+    shared library the run maps after the limit -- an extension module, or
+    an NSS module that getaddrinfo dlopens to resolve the provider's host --
+    is refused under AS and fails as something other than memory (the
+    import error above, or a lookup that reads as a network failure). DATA
+    counts the private writable memory, which is every Python object, the
+    heap and every anonymous mapping CPython makes, and leaves out read-only
+    and executable file mappings, which are bounded by the files. An
+    existing soft limit that is already tighter (a user's own `ulimit -d`)
+    is kept. -> {"limit": the bytes the run is held to (0 when unbounded),
+    "previous": the (soft, hard) pair it replaced, for release_memory_limit,
+    or None when nothing changed}. Best effort: where the module or the call
+    is unavailable the verb runs unbounded, as before, and says so on stderr.
+
+    Only when this file is the program. A test that loads the helper as a
+    module and calls a verb in its own process would otherwise hold its
+    whole test runner to the limit for the rest of the run, so there the
+    verb runs unbounded and the limit is observed by running the helper as
+    a subprocess, the way the service does (tests/test_m3u_bounds.py).
+
+    The record is also kept in MEMORY_HELD, which main() reads when a
+    MemoryError escapes a verb anyway, to lift the limit before it speaks."""
+    MEMORY_HELD.clear()
+    MEMORY_HELD.update({"limit": 0, "previous": None})
+    if __name__ != "__main__":
+        return MEMORY_HELD
+    sys.unraisablehook = quiet_unraisable
+    try:
+        import importlib
+        import resource
+        for name in preload:
+            try:
+                importlib.import_module(name)
+            except ImportError:
+                pass            # the verb meets the same absence unbounded
+        prepare_tls_context()
+        limit = memory_limit_bytes()
+        soft, hard = resource.getrlimit(resource.RLIMIT_DATA)
+        if hard != resource.RLIM_INFINITY and hard < limit:
+            limit = hard
+        if soft != resource.RLIM_INFINITY and soft <= limit:
+            MEMORY_HELD["limit"] = soft
+            return MEMORY_HELD
+        resource.setrlimit(resource.RLIMIT_DATA, (limit, hard))
+        MEMORY_HELD.update({"limit": limit, "previous": (soft, hard)})
+    except (ImportError, ValueError, OSError) as error:
+        log("could not set a memory limit (%s); this run is not bounded" % type(error).__name__)
+    return MEMORY_HELD
+
+
+def release_memory_limit(held: dict[str, Any]) -> None:
+    """Put back the limit limit_memory replaced, so a refusal can be written
+    however close to the limit the run stopped (the verb exits right after)."""
+    previous = held.get("previous")
+    if previous is None:
+        return
+    try:
+        import resource
+        resource.setrlimit(resource.RLIMIT_DATA, previous)
+    except (ImportError, ValueError, OSError):
+        pass
+
+
+def memory_refusal(label: str, host: str, held: dict[str, Any]) -> HelperError:
+    """The one sentence a run that hit the limit ends with. The host only,
+    never the URL; `too_large`, so the guide reads it as `Source too large`.
+    Called after the run's own objects are released and the limit lifted
+    (release_memory_limit), which is what leaves room to compose it."""
+    limit = int(held.get("limit") or 0)
+    bound = "the %d MB of memory this helper allows itself" % (limit // (1024 * 1024)) if limit else "the memory available"
+    return HelperError("too_large", "%s from %s needs more than %s" % (label, host or "the source", bound))
 
 
 def read_http_source(url: str, timeout: float, label: str = "playlist") -> bytes:
@@ -177,7 +353,7 @@ def decode_text(data: bytes, label: str = "playlist") -> str:
     if data[:2] == b"\x1f\x8b":
         try:
             with gzip.GzipFile(fileobj=io.BytesIO(data), mode="rb") as stream:
-                data = stream.read(MAX_SOURCE_BYTES + 1)
+                data = read_capped(stream, MAX_SOURCE_BYTES)
         except (OSError, EOFError, zlib.error) as error:
             raise HelperError("bad_gzip", "could not decompress %s: %s" % (label, error))
         if len(data) > MAX_SOURCE_BYTES:
@@ -449,6 +625,10 @@ def cmd_playlist(args: argparse.Namespace) -> int:
     previous = read_json(status_path) or {}
     url = url_from(args)
     started = time.monotonic()
+    text = parsed = document = groups = None
+    # D-M3U-1: bounded before anything is fetched or parsed. The refresh
+    # and the source probe are both this verb.
+    held = limit_memory()
     try:
         if not url:
             # A status the service can switch on, not an argparse usage exit:
@@ -511,18 +691,29 @@ def cmd_playlist(args: argparse.Namespace) -> int:
                 log("playlist: could not update saved channel references (%s)" % type(error).__name__)
         emit(status)
         return EXIT_OK
-    except HelperError as error:
-        stale = os.path.isfile(channels_path)
-        status = error_payload(
-            "playlist", error,
-            sourceHost=source_host(url) if url else "",   # no URL is not a "local file"
-            fetchedAt=previous.get("fetchedAt") if isinstance(previous, dict) else None,
-            stale=stale,
-            durationMs=int((time.monotonic() - started) * 1000),
-        )
-        write_status_quietly(status_path, status)
-        log("playlist: %s" % error.message)
-        emit(status)
-        return EXIT_ERROR
+    except HelperError as caught:
+        error = caught
+    except MemoryError:
+        # D-M3U-1. Release before speaking: the text, the channel list and
+        # the document are dropped here and the frames the traceback held go
+        # with this clause, then the limit is lifted for the few lines left.
+        # Nothing was half-written: write_json_atomic composes the document
+        # before it opens the temporary file, and removes the file when a
+        # write fails, so channels.json is the previous run's or absent.
+        text = parsed = document = groups = None
+        release_memory_limit(held)
+        error = memory_refusal("playlist", source_host(url) if url else "", held)
+    stale = os.path.isfile(channels_path)
+    status = error_payload(
+        "playlist", error,
+        sourceHost=source_host(url) if url else "",   # no URL is not a "local file"
+        fetchedAt=previous.get("fetchedAt") if isinstance(previous, dict) else None,
+        stale=stale,
+        durationMs=int((time.monotonic() - started) * 1000),
+    )
+    write_status_quietly(status_path, status)
+    log("playlist: %s" % error.message)
+    emit(status)
+    return EXIT_ERROR
 
 
