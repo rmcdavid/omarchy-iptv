@@ -1116,10 +1116,14 @@ Nothing inside the plugin directory is written at runtime.
   being written (measured), so the plugin never sees it. The same can
   happen to a change written while the plugin's read of the file before a
   save has gone unanswered: after 2 seconds that save goes ahead without
-  the read (the bullet on links). Measured with a `state.json` whose reads
-  were held up on purpose, a favourite another program added by replacing
-  the file was lost that way, while a source added with the helper's
-  `state source add` was kept. Nothing in the
+  the read (the bullet on links). What decides it is when the other
+  program writes, not which program it is: measured with a `state.json`
+  whose reads were held up on purpose, a change another program wrote
+  within those 2 seconds, or before a later save of the plugin's while the
+  reads were still held up, was lost -- a favourite added by replacing the
+  file and a source added with the helper's `state source add` alike --
+  and one written after that save, with no later save before the reads
+  came back, was kept. Nothing in the
   plugin can lock the file against another program. Edit the file by hand
   with the shell stopped, keep a copy first (it holds your provider URLs),
   then `omarchy restart shell`.

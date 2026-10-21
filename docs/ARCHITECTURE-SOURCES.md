@@ -6880,7 +6880,7 @@ session scratch directory, copied 0600, not the tree).**
   watchdog line. Window (c) as on 0.14.2 with the same rig: HS5 (an in-app
   add and a hand-run helper add during the stall) keeps both; HS7 (an
   atomic replace adding a favourite beside a label edit) loses the
-  favourite and keeps the label, as on 6f1d176.
+  favourite and keeps the label, as on 6f1d176. [F2, 2026-10-20: the two differ by WHEN the other program wrote, not by which program it was -- the FUSE log has the helper's rename 1.7 s after the shell's write without its read and the replace's 1.4 s before it; a helper add within the 2 s bound, or before a later save while the reads stay stalled, is lost the same way (round 3's live review: a helper add followed 1 s later by a label edit, lost 3 of 3 on lane-sweep-c3 and on 6f1d176; node `F2 (<tag>): window (c), stated ...`)]
 - key-scenario: forward 138 / 0 (`key-20261020-184353-2546836`, 575.9 s,
   load 4-6); `--baseline lane-sweep-c2` 134 / 4, K1..K3 (`reports:
   epgUrl:no-source,playlistUrl:invalid`) and B40 (`a-epg:bar ... pair:0
@@ -7069,3 +7069,139 @@ states are the lead's, and none is cited here).**
   `tests/fixtures/state-notices.json` and `Model.entryInputNotice` word for
   word, and no check joins them; this lane checked the join once, by
   script.
+
+### D-SINK-19 round 19, the fourth sweep (lane-sweep-f4, 2026-10-20; the lead's F1-F4 from round 3's three reviews of lane-sweep-c3)
+
+**What the lead asked for.** Four items from the reviews of lane-sweep-c3
+(4925696), named F1 to F4 in the lead's brief (lane labels, not board ids):
+F1, P2, the held-full migration's retry losing both URLs; F2, P2, the
+documents' claim that a hand-run `state source add` survived a stalled
+read; F3, P2, the five inert stub exports; F4, four P3s (an unpinned
+decision in R29d and three sentences).
+
+**F1. THE MIGRATION RIDES ITS RECORD.** The retry after a removal migrated
+the bar's playlist and guide URL into memory with the marker; another
+program filled the freed place before that save's read answered; the merge
+kept theirs and dropped the migrated record at the cap; the marker survived
+the merge and landed; and the owned write stripped both URLs off the
+entry. Neither was in any record, and the user was told only
+`1 source added here (the limit is 50 sources) was not kept. Make room,
+then add it again.`, about a source they had not added. Round 3's dataloss
+review measured it with `pcap.js` on all four host and echo combinations of
+c3 and of c2; 6f1d176 evicts silently instead. Now
+`Model.mergeForeignState(base, ours, theirs, opts)` takes
+`opts.migrationKey`, the key of the record this session's migration added
+(`Service.migrationAddedKey`, set when the marker is set, "" when the
+migration added no record), and when the marker is OURS ALONE and that
+record did not land as ours the marker is not carried and
+`migrationHeld` says why: "full" (dropped at the cap; not counted among
+`dropped.sources`, so no 74018, and an `activeKey` naming it goes back to
+theirs) or "changed" (rule 15's sibling below). The service logs
+`Model.migrationHeldAgainLine(why)` (no key, no URL), sets
+`migrationHeldFull`, and the reconcile the merge already runs retries at
+once -- over "full" it is held again under the one `Sources is full` card
+(`adoptActive` tells it, once a session), so the next removal retries it;
+over "changed" it migrates onto the record theirs added.
+- Measured: `pcap.js` on this tree, every combination:
+  `{"fired":true,"n":50,"newInFile":false,"eInFile":false,"marked":false,"entryPl":true,"entryEpg":true,"notes":["74016"],"reports":["playlistUrl:full"]}`
+  (on c3 `marked:true`, `entryPl:false`, `entryEpg:false`, notes 74016 and
+  74018).
+- Pinned through `tests/service-harness.js` on both hosts and both echo
+  modes: `F1 (<tag>): held full, a HAND-RUN ...` (the race, then one more
+  removal moves both in, across a restart; the R21 oracle on both URLs)
+  and `F1 (<tag>), rule 15: ...`; in the model `F1: mergeForeignState --
+  ...` (seven cases, among them an in-app add dropped beside the migrated
+  record still reported, no `migrationKey`, theirs carrying the marker,
+  and the migrated record removed HERE before it landed, which stands and
+  is never retried).
+- Seen red on lane-sweep-c3 with this tree's test file: 9 of 2,678 checks
+  in each own-echo mode, the four race pins, the four sibling pins and the
+  model pin. Ten mutants of the fix, each red in both modes: the
+  service not recording the key (8), not passing it (8), not setting
+  `migrationHeldFull` in the merge (8), the "changed" branch removed (5),
+  the record still counted dropped (5), the marker carried regardless (5),
+  the `activeKey` not restored (1), theirs' marker ignored (1), the "ours
+  holds the record" guard removed (1), the journal line ignoring its
+  reason (1).
+- An in-app removal has no such window: its retry joins the removal's own
+  read, and a probe whose hand-run add fires at the first read that finds a
+  place free never fired on that path (`fired:false`; the helper refuses
+  `too_many` at 50, so no read in between can see a free place).
+
+**F2. WINDOW (C) IS DECIDED BY WHEN, NOT BY WHO.** The README, `UX-SOURCES.md`
+5.10 item 9, `ARCHITECTURE.md` section 5's round-19 amendment, the round-19
+record above and `QA.md` TC-CFG-37 contrasted a helper add that was kept
+with a replaced favourite that was lost. Lane A3's own FUSE log
+(`a3-slow/run1.out`) has the helper's rename 1.7 s AFTER the shell's write
+without its read (599234291 -> 599235999) and the replace's 1.4 s BEFORE
+it (599265697 -> 599267127); round 3's live review lost a helper add
+followed 1 s later by an in-app label edit 3 of 3 on c3 and 3 of 3 on
+6f1d176; and its node probe lost a helper-style add landing within the
+bound. The measured rule, now stated in each of those places: with the
+reads stalled, another program's write is lost when it lands within the
+read's 2 s bound or before a later save of the shell's while the reads
+stay stalled, and kept when it lands after that save with no later save --
+whichever program wrote it. Pinned: `F2 (<tag>): window (c), stated ...`
+(a helper add and a replace, each within, after, and after-then-edit; the
+in-app favourite kept in all six), identical on 6f1d176 by the same probe
+over its own `Service.qml`; red on a mutant whose bound holds the save
+instead of writing it (18 checks) and on a double whose replace raises a
+load (24).
+
+**F3.** The five stubs are deleted from `model/state.mjs` and from
+`Model.mjs` through `split-model.mjs --relink` (`check ok`, 783
+declarations in 18 parts), with the stub half of the R29a pin; the rows
+that called them inert stubs say they were deleted, and no document cites
+any of them in the `Model.` form.
+
+**F4.**
+- R29d's `{ origin: "cli" }` in `entryPlaylistUnusable` is pinned, through
+  `Model.adoptActiveSource` (the function is not public):
+  `F4 / R29d: a guide URL arriving beside a playlist already seen ...`,
+  seven playlist values; red with `"guide"` (1 check in each mode).
+- The README's 0.14.2 parenthetical now gives the no-active case (two
+  notices: the playlist's and the guide URL's `no-source`), measured by
+  round 3's `adopt.mjs` on a `git archive` of v0.14.2:
+  `noactive {"invalid":true,"noSourceEpg":true}`, and 0.14.2's
+  `Service.qml` reports each.
+- The README's `Bar setting removed` bullet quotes both `invalid-pair`
+  sentences, counted against `Model.entryInputNotice` by a scratch script
+  (the playlist's twice in the README, the guide URL's once), and says
+  twice in the one case the R29d rule-15 pin shows (`playlistUrl:invalid`
+  then `epgUrl:invalid-pair`).
+- `ARCHITECTURE.md`'s open-budget row gives its load (1.40 as the run
+  started, 1.4-3.5 over it) and the heavy-load figures from round 3's live
+  review (`open-20261020-210029-2957576`, load 10.37: warm median 120 /
+  126 ms, max 158 / 217; cold 2,354 / 2,291), and says the budget is not
+  met under heavy load.
+
+**Rule 15, what was searched.** For F1, every place a merge or a cap can
+remove a record ours added while something that depends on it survives:
+`mergeForeignState`'s cap truncation (fixed), its conflict branch for a
+record both sides added (the sibling, fixed as "changed"), its branch for
+a record theirs removed (cleared: a record ours ADDED is not in the base,
+so theirs cannot remove it; and a migration that resolved to an EXISTING
+record theirs then removed is the user's own removal of that source, whose
+guide URL goes with it as any removal's does -- recorded below), the
+probe commit's cap (R27c, already re-checks), `parseState`'s cap on a load
+(theirs alone, no marker of ours), and the saved-search and hidden-group
+caps (no marker depends on them). For F2, every document sentence that
+contrasts the helper with the replace: the five named, the round-19
+record's HS5 / HS7 sentence and the harness README's (bracketed), and
+`OMARCHY-PLUGIN-CONTRACT.md`'s FileView fact (cleared: it states the
+timing). For F3, `git grep` for the five names: only history rows remain,
+each now saying deleted.
+
+**Open for the lead (decision requests, no defect ids: the board's ids are
+the lead's).**
+- (1) A migration that resolved to an existing record which another
+  program removes in the read window lands its marker; the bar's guide URL
+  adopted onto that record goes with it, told by the merge's conflict
+  line only. Recorded as the user's removal, not fixed; to confirm.
+- (2) Rule 13, carried from round 19's item (7): no check joins the
+  README's and `UX-SOURCES.md`'s quotes to the model; this lane counted
+  them once, by script.
+- (3) Round 3's other P3s were not in the brief and are untouched: R29b's
+  `else if (out.adoptedUrl)` still survives deletion (now also reached by
+  the "changed" retry, where it clears `migrationHeldFull`), and window
+  (a)'s untold 4 s.

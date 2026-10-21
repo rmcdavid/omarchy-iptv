@@ -2264,7 +2264,23 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    reads, no 74019 and no 74017, both kept across a restart; a hand-run
    helper `state source add` during the stall was kept beside an in-app
    add; and an atomic replace adding a favourite during the stall was lost
-   beside a label edit -- each exactly as on 6f1d176. Pinned in node
+   beside a label edit -- each exactly as on 6f1d176. What separated those
+   two was WHEN the other program wrote, not which program it was (round
+   3's claims reviews, F2): the rig's FUSE log has the helper's rename
+   1.7 s AFTER the shell's write without its read and the replace's 1.4 s
+   BEFORE it, and both are renames, which raise no new read while a read
+   is stalled (`OMARCHY-PLUGIN-CONTRACT.md`, FileView). So the rule is:
+   another program's write is lost when it lands within the read's 2 s
+   bound, or before a later save of the shell's while the reads are still
+   stalled, and kept when it lands after that save with no later save
+   before the reads answer -- a helper add and a replaced file alike.
+   Measured live on lane-sweep-c3 and 6f1d176 alike by round 3's live
+   review (a helper add with an in-app label edit 1 s later lost 3 of 3 on
+   each tree), and pinned in node through the shipping `Service.qml` on
+   both hosts and both own-echo modes (`F2 (<tag>): window (c), stated
+   ...`: within, after, and after-then-edit, for each writer; seen red on
+   a mutant whose bound holds the save instead of writing it, and on a
+   double whose replace raises a load). Pinned in node
    through the shipping `Service.qml` on both hosts and both own-echo modes
    (`R26a / R29a (<tag>): the read is BOUNDED ...`, `... the read's bound
    is 2 s, from the Timer the tree declares ...`, `R27a / R29a (<tag>): the

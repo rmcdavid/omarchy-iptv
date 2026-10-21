@@ -657,7 +657,16 @@ before write:
   `key-20261020-184229-2540898`): writes at +2.0 s and +4.0 s without their
   reads, nothing blocked, nothing told; a helper `state source add` during
   the stall kept, an atomic replace adding a favourite lost -- as on
-  6f1d176. Pinned in node through the shipping `Service.qml` on both hosts
+  6f1d176. The writer did not decide that; the timing did (round 3's
+  claims reviews, F2): the helper's rename landed 1.7 s after the shell's
+  write without its read, the replace's 1.4 s before it, and a rename
+  raises no new read while one is stalled. Another program's write is
+  lost when it lands within the 2 s bound or before a later save of the
+  shell's while the reads stay stalled, and kept when it lands after that
+  save with none after it -- a helper add and a replace alike (pinned:
+  `F2 (<tag>): window (c), stated ...`; live, a helper add followed 1 s
+  later by an in-app label edit lost 3 of 3 on lane-sweep-c3 and on
+  6f1d176). Pinned in node through the shipping `Service.qml` on both hosts
   and both echo modes (`R26a / R29a (<tag>): the read is BOUNDED ...` and
   `... the read's bound is 2 s ...`), red on lane-sweep-c2 (`noLoad:2`, the
   save still parked). The rulings are at the end of

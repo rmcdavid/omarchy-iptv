@@ -13567,6 +13567,37 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
                    logged: g.warnings.filter(w => /was not read back within 2000 ms of a save; saving without the read/.test(w)).length }
         }, { interval: 2000, held: 1, late: [true, 0, 1], decided: [0, ["t:bbc1.uk", "t:hand.uk", "t:app.uk"]], before: [true, 1],
              after: [false, 1, ["t:bbc1.uk", "t:app.uk"]], logged: 1 })
+        // F2 (round 3's claims reviews, P2): WINDOW (C) IS DECIDED BY WHEN, NOT
+        // BY WHO. The documents said a hand-run `state source add` survived a
+        // stalled read while a favourite another program added by replacing
+        // the file did not; both are renames, which raise nothing on a stalled
+        // read (the contract's FileView fact), and what decided the live runs
+        // was whether the shell saved again after the other program's write.
+        // Here every read the shell asks for stalls, and the same two writes
+        // land within the 2 s bound (before the save goes without its read),
+        // after it with no later save, and after it followed by an in-app
+        // edit. Identical on 6f1d176 (this lane's report). Seen red on a
+        // mutant whose bound holds the save instead of writing it.
+        checkCall("F2 (" + tag + "): window (c), stated -- with every read stalled, another program's write is lost when it lands within the read's 2 s bound or before a later save of the shell's, and kept when it lands after the save went without its read and the shell saves nothing more; the same for a helper `state source add` and a replaced file adding a favourite", () => {
+          const HH = "http://hh.example.test/l.m3u"
+          const helperAdd = sf => { const st = JSON.parse(sf.disk); st.sources.push(rec(HH)); sf.disk = JSON.stringify(st) + "\n" }
+          const run = (change, shape) => {
+            const h = boot({ sourceKey: KA, showLogos: false }, START(), mode, { ownEcho })
+            h.drain()
+            h.stateFile.loader = () => {}
+            h.root.toggleFavorite("t:app.uk"); h.drain()
+            if (shape === "within") h.replace(change)
+            h.verifyWatchdog(); h.drain()
+            if (shape !== "within") { h.replace(change); h.drain() }
+            if (shape === "then-edit") { h.root.toggleFavorite("t:app2.uk"); h.drain(); h.verifyWatchdog(); h.drain() }
+            const f = restart(h).file()
+            return [M.findSource(f.sources, keyOf(HH)) !== null || f.favorites.indexOf("t:hand.uk") !== -1, f.favorites.indexOf("t:app.uk") !== -1]
+          }
+          const out = {}
+          for (const [who, change] of [["helper", helperAdd], ["replace", sf => withFav(sf, "t:hand.uk")]]) for (const shape of ["within", "after", "then-edit"]) out[who + " " + shape] = run(change, shape)
+          return out
+        }, { "helper within": [false, true], "helper after": [true, true], "helper then-edit": [false, true],
+             "replace within": [false, true], "replace after": [true, true], "replace then-edit": [false, true] })
         // R27a (2026-10-20, D-SINK-22 window a) replaces R26a's "the read is
         // SKIPPED while one of our writes is in flight": the save asked then
         // no longer goes from the next turn without its read -- it WAITS,

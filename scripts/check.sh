@@ -252,7 +252,7 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # the marker lands) and the pair's notice (1 model); the shared fixture's
 # three new adopt cases and R29e's "becomes the active source" sentence
 # are counted inside checks that existed.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2664}
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2678}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity

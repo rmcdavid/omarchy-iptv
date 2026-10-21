@@ -1827,6 +1827,7 @@ round 2's reviews).
   replace adding a favourite during the stall, beside a label edit) loses
   the favourite, as on 6f1d176 -- D-SINK-22's window c, left open and
   documented by the ruling. Transcript `key-20261020-184229-2540898`.
+  [F2, 2026-10-20: the two differ by WHEN the other program wrote, not by which program it was -- the FUSE log has the helper's rename 1.7 s after the shell's write without its read and the replace's 1.4 s before it; a helper add within the 2 s bound, or before a later save while the reads stay stalled, is lost the same way (round 3's live review: a helper add followed 1 s later by a label edit, lost 3 of 3 on lane-sweep-c3 and on 6f1d176; node `F2 (<tag>): window (c), stated ...`)]
 - B40 (R29d): a 0.13.6 install whose state names A active, A carrying its
   own guide URL, and the bar entry holding an unusable playlistUrl with a
   guide URL beside it -- A keeps its own, one card names the pair, the
