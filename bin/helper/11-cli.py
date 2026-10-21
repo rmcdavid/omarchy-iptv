@@ -540,6 +540,15 @@ def main(argv: list[str] | None = None) -> int:
         return int(args.func(args))
     except KeyboardInterrupt:
         return 130
+    except MemoryError:
+        # D-M3U-1. The fetch verbs answer this themselves, with their status
+        # file; this is for one that ran out before or after its own net.
+        # The limit is lifted first so the sentence can be composed.
+        release_memory_limit(MEMORY_HELD)
+        line = "%s needs more memory than this helper allows itself" % args.command
+        log("%s: %s" % (args.command, line))
+        emit({"ok": False, "kind": args.command, "error": {"code": "too_large", "message": line}})
+        return EXIT_ERROR
     except FolderUnusable as error:
         # R25c: not a bug -- a folder the verb needs is a link to nothing, or
         # not a folder. One sentence, the exit every refusal has.

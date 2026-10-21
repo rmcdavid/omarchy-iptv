@@ -294,7 +294,15 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2572}
 # of that line, not added; the matrix's subtests went 16 -> 18, gaining a
 # FIFO, a part of another release, an entry one byte short and __pycache__,
 # and losing the wrong last line and the swap file (now the ignored case).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1293}
+# 1293 -> 1321 on 2026-10-20, D-M3U-1 (lane-m3u-a1): tests/test_m3u_bounds.py,
+# 28 cases -- the per-channel caps over a few KB per field (16), the fixtures
+# untouched by every cap and parsed alike line by line and whole (3), the
+# memory limit observed in a subprocess, refusing ordinary inputs when set
+# low and leaving RLIMIT_DATA at 512 MiB when run as the program, and a
+# local source no longer reserving the input cap (7), and
+# the TLS context built ahead of the limit, verifying (2). 25 of them seen
+# red against 0.14.2 (85206f2); the other three pin what did not change.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1321}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

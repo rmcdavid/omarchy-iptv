@@ -86,7 +86,9 @@ library (`json`, `re`, `urllib`, `gzip`, `socket`, `xml.etree`).
    click or `Ctrl+R` calls `refreshPlaylist()` -> 300 ms debounce.
 2. `playlistProc` runs the helper (argv only; the URL rides in its
    environment as `OMARCHY_IPTV_URL`, section 6, D-SINK-8). The helper
-   fetches (20 s timeout, 64 MB cap, gzip tolerated), parses, assigns ids,
+   fetches (20 s timeout, 64 MB cap, gzip tolerated) under a 512 MiB data
+   limit (section 8 item 15), parses with every per-channel text held to a
+   cap (item 14), assigns ids,
    writes `channels.json` and `playlist-status.json` atomically (temp file +
    rename, mode 0600, dir 0700) and prints the status JSON.
 3. `onExited` calls `channelsFile.reload()` / `playlistStatusFile.reload()`
@@ -201,7 +203,9 @@ Failure (exit 1), cache kept if it existed:
 ```
 
 Error codes: `no_source`, `unsupported_scheme`, `unsafe_path`, `not_found`,
-`too_large`, `http_<status>`, `network`, `bad_gzip`, `empty_playlist`,
+`too_large` (the input cap, or since D-M3U-1 the memory limit: "needs more
+than the 512 MiB of memory this helper allows itself"), `http_<status>`,
+`network`, `bad_gzip`, `empty_playlist`,
 `not_implemented`. Stubs exit 3 with
 `{"ok": false, "kind": "<cmd>", "error": {"code": "not_implemented", "message": "not implemented"}}`.
 
@@ -2987,6 +2991,130 @@ Performance budget (10k channels):
     memory and an IPC round-trip while a foreign producer offers 100 MB
     inside a nested compositor (section 6's entry; `docs/QA.md` 3.3). A
     grep for `readOnly: true` is rule 14's shape and is not the check.
+14. What the parser keeps per channel is bounded by a constant, not only the
+    number of channels (D-M3U-1, raised by the marketplace maintainer on
+    omacom/omarchy-plugin-marketplace#11935 against 0.14.2). `#EXTGRP`
+    persists until the next one, and its value was copied, unbounded, into
+    the `group`, `groups` and `searchKey` of every entry after it: one line
+    paid for once in the input and again per channel, so a playlist of a
+    few MiB could ask for gigabytes under the 64 MiB input cap.
+    `MAX_CHANNELS` and `MAX_GROUPS` (S-07) bound counts and said nothing
+    about lengths. Every provider-controlled text a channel keeps now has a
+    cap, named in `bin/helper/01-core.py`, in code points:
+
+    | Field | Cap | Over it |
+    |---|---|---|
+    | title, `tvg-name` | 512 (`M3U_MAX_NAME`) | cut |
+    | `#EXTGRP` or `group-title`, before the `;` split | 512 (`M3U_MAX_GROUP_TEXT`) | cut; `#EXTGRP` once, at its own line |
+    | one group after the split | 128 (`M3U_MAX_GROUP`) | cut |
+    | groups per channel | 16 (`M3U_MAX_GROUPS_PER_CHANNEL`) | the rest dropped |
+    | `tvg-id` | 256 (`M3U_MAX_TVG_ID`) | dropped (it becomes an id and an EPG key) |
+    | a channel-number attribute | 32 (`M3U_MAX_CHNO`) | dropped |
+    | stream URL | 4,096 (`M3U_MAX_URL`) | the entry skipped |
+    | `tvg-logo` | 2,048 (`M3U_MAX_LOGO_URL`) | dropped |
+    | `#EXTVLCOPT` / `#KODIPROP` key, header name | 64 (`M3U_MAX_OPTION_KEY`), counted with the stored `vlc:` / `kodi:` prefix, so 60 / 59 as the playlist writes it | dropped |
+    | its value, one header value | 1,024 (`M3U_MAX_OPTION_VALUE`) | dropped |
+    | headers, options, per channel | 16 each (`M3U_MAX_OPTIONS`) | the rest dropped |
+    | `url-tvg` / `x-tvg-url` | 2,048 (`M3U_MAX_EPG_HINT`) | dropped |
+    | per-channel warnings | 20 (`M3U_MAX_CHANNEL_WARNINGS`) | counted in one more line |
+
+    The derived `nameKey` and `searchKey` can reach three times their source, because NFD splits a
+    composition-excluded character into up to three code points (measured: 600 x U+FB2C gives name
+    512, nameKey 1,536, searchKey 1,921); still a constant per channel.
+
+    Display text is cut (trailing whitespace trimmed, nothing appended); an
+    identifier, a URL or an option value is dropped, because a truncated
+    one is a different and wrong value. Each kind is counted and reported
+    once in `warnings`, as the counts already were. The figures sit above
+    everything the 23 playlist fixtures carry (tests/fixtures and the dev
+    harness's, 285 channels, measured 2026-10-20: the longest title 290,
+    group-title 24, one group 18, three groups per entry, `#EXTGRP` 9,
+    `tvg-id` 26, `tvg-name` 18, `tvg-chno` 4, `tvg-logo` 77, stream URL 84,
+    option key 37 and value 88, three headers and two options per
+    channel), and the parsed output of every fixture is byte-identical to
+    0.14.2's. What persists from one entry to the next, and why: `#EXTGRP`
+    persists, because the tag opens a group for the entries that follow and
+    lists write it once per block, so it is bounded rather than reset;
+    `#EXTVLCOPT` and `#KODIPROP` never cross a location line (reset by the
+    next one, kept or skipped, as they always were); the EPG hint is one
+    value per document, written once into `channels.json` and copied into
+    no channel. The last warning cap closes lane A's OQ-6 under D-CLIP-1:
+    the `playlist` status line's `warnings` held one entry per affected
+    channel, a few MB at `MAX_CHANNELS`.
+    The rule-15 search, by shape ("a value that outlives the item it came
+    from, copied into each later item"; "a per-item copy of a value whose
+    length nothing bounds"), and what it cleared: the EPG parse keeps no
+    value across programmes -- a programme's fields come from its own
+    element and are capped (`EPG_MAX_TITLE`, `EPG_MAX_DESC`, ...), a guide
+    channel's id and claimed name are stored once per guide channel, and
+    `time_cache` holds one entry per distinct time string; the address
+    tokens are bounded by `EPG_ADDR_MAX_TOKENS` per row; the logo survey
+    counts by host; `failed.json` is capped by `MAX_FAILED`; and
+    `state.json` is the plugin's own file, whose recents names come from
+    channel names and are now bounded with them. None repeats an unbounded
+    value per item. Verified by calling `parse_m3u` over a few-KB line per
+    field and asserting what each channel comes out as
+    (`tests/test_m3u_bounds.py`); never by building the payload.
+15. The verbs that parse a provider's bytes run under a memory limit
+    (D-M3U-1, defence in depth: the marketplace maintainer's second memory
+    finding in the helper, after D-EPG-6's entities, and the fourth memory
+    path in the plugin's handling of provider bytes, with D-QA-06's gzip
+    (found by this project's own QA) and the shell's logo decoder
+    (D-LOGO-11, D-LOGO-13); the service's 180 s watchdog bounds time
+    only). `playlist` (the refresh and the source probe) and `epg` set
+    `RLIMIT_DATA` to `MEMORY_LIMIT_MIB` = 512 MiB (`limit_memory`) after the
+    credential shield and before they fetch or parse, and a run that needs
+    more ends with one `too_large` sentence carrying the host only --
+    `playlist from <host> needs more than the 512 MiB of memory this helper
+    allows itself` -- which the guide renders `Source too large` (the EPG
+    banner `Guide data unavailable (Source too large)`); the previous cache
+    is kept, as on any failed fetch. Measured on this machine, CPython
+    3.14.7, 2026-10-20, each figure the smallest `RLIMIT_DATA` the run
+    succeeds under (bisected to 2 MiB) on the final tree:
+
+    | Ordinary input | Smallest limit that succeeds |
+    |---|---|
+    | 10,000-channel playlist, both generator profiles (1.8 and 2.3 MB) | 34 (synthetic) and 36 (realistic) MiB |
+    | 50,000 channels (`MAX_CHANNELS`, 11.7 MB) | 108 MiB |
+    | 64 MiB playlist of ordinary entries (280,000, 50,000 kept) | 160 MiB |
+    | the same with a flag emoji in one name in ten | 256 MiB (474 before the line-by-line parse below) |
+    | EPG, 62.4 MB, 10,000 channels, 396,565 programmes | 138 MiB |
+    | EPG, 54.9 MB, 48,000 channels, 339,624 programmes | 206 MiB |
+
+    So the margin is 2.0x over the worst ordinary input the plugin accepts
+    (a 64 MiB playlist whose names carry emoji), 2.5x over the larger guide
+    and 4.7x over `MAX_CHANNELS` ordinary channels; 512 MiB is about a
+    fifteenth of this machine's 7.6 GiB. Peak RSS stays below each figure
+    (the limit counts reserved pages too). The generator is
+    `scripts/gen-playlist.py --profile synthetic|realistic`; the guides are
+    its `--xmltv` at `--hours 29` (10,000 channels) and `--hours 12`
+    (48,000).
+    `RLIMIT_DATA`, not `RLIMIT_AS`, by measurement: both end an over-limit
+    parse in a plain `MemoryError`, but `RLIMIT_AS` also counts every file
+    mapping, and under it a module or NSS library mapped after the limit
+    failed as something other than memory (`ImportError: ... failed to map
+    segment from shared object`). The lazy imports and urllib's TLS context
+    are therefore made before the limit is set (`FETCH_PRELOAD`,
+    `prepare_tls_context`, the same context urllib builds, verified to
+    refuse a self-signed server), and a finalizer that fails after a
+    `MemoryError` is reported in one line rather than CPython's traceback.
+    The test variable `OMARCHY_IPTV_MEMORY_LIMIT_MB` (whole MiB) can lower
+    the limit and never raise it; the service never sets it. Before the
+    context moved ahead of the limit, an 8 MiB run failed inside OpenSSL as
+    `SSLError: No cipher can be selected`; a library that reports a refused
+    allocation as something else can still do so below the run's floor
+    (about 16 MiB for a three-channel playlist), which the default never
+    approaches. UNVERIFIED for the TLS handshake itself: no test fetches
+    over https under a low limit. Two costs the limit made
+    visible were fixed on the way: a local source and a gzip one were read
+    with `read(MAX_SOURCE_BYTES + 1)`, which allocates the whole 64 MiB
+    before reading a byte (93 MiB of address space for a three-channel
+    file), and the playlist was decoded into one str, which a single
+    non-BMP character widens to four bytes per character; both are now
+    chunked and line by line, with results identical to before. Observed
+    through the real service under a nested cage: a 10,000-channel source
+    loads (10,000 channels, 120 groups), and with the test variable at 24
+    the service reports `Source too large`.
 
 ## 9. Coding standards
 
@@ -3414,5 +3542,8 @@ Applied in fix round 1 against `docs/SECURITY-REVIEW.md`:
   `Authorization` and `Cookie` are dropped when scheme, host, or port change.
 - S-07: `MAX_CHANNELS = 50000`, `MAX_GROUPS = 2000` in the helper, mirrored
   by `Model.prepareChannels`; overflow produces warnings, never an error.
+  [2026-10-20, D-M3U-1: counts only. Each channel's LENGTH is bounded too,
+  in the helper alone (section 8 item 14), and the parsing verbs run under
+  a memory limit (item 15).]
 - S-03 is documented in the README (first-play URL visible in `ps`); the M2
   detached/idle mpv rework removes it.
