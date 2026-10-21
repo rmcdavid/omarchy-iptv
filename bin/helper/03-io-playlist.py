@@ -159,9 +159,13 @@ def memory_limit_bytes() -> int:
 # BEFORE the limit is set (limit_memory): a module loaded under the limit
 # maps its shared object there, and a refused mapping is an ImportError
 # from somewhere deep in urllib, not the MemoryError the verb answers.
-# Measured, not supposed: under a 16 MiB limit set before these, the
-# playlist verb ended in "ImportError: ... binascii ...: failed to map
-# segment from shared object" and the epg verb in "No module named expat".
+# Measured, not supposed: under a 16 MiB ADDRESS-SPACE limit set before
+# these (RLIMIT_AS, the first version), the playlist verb ended in
+# "ImportError: ... binascii ...: failed to map segment from shared object"
+# and the epg verb in "No module named expat". RLIMIT_DATA does not count
+# a library's text, so this matters less under it; it still counts the
+# library's writable pages, and the preload keeps imports out of the
+# question either way.
 # The names are the lazy `import` lines of 01- to 04- and 11-cli.py's
 # traceback, plus what urllib loads on a request: `ssl` (http.client), and
 # `encodings.idna` (socket encodes every host name through it).
@@ -213,10 +217,11 @@ def limit_memory(preload: tuple[str, ...] = FETCH_PRELOAD) -> dict[str, Any]:
     catches, each within a few MiB of the run's peak VmData or VmSize (the
     two differ by the libraries' text, about 14 MiB). What decided it is
     everything that is not the parse: AS counts every FILE mapping too, so a
-    shared library the run maps after the limit -- an extension module, or
-    an NSS module that getaddrinfo dlopens to resolve the provider's host --
-    is refused under AS and fails as something other than memory (the
-    import error above, or a lookup that reads as a network failure). DATA
+    shared library the run maps after the limit is refused under AS and
+    fails as something other than memory -- measured for an extension
+    module (the import error above); an NSS module that getaddrinfo
+    dlopens to resolve the provider's host is the same mapping and would
+    read as a network failure (not measured). DATA
     counts the private writable memory, which is every Python object, the
     heap and every anonymous mapping CPython makes, and leaves out read-only
     and executable file mappings, which are bounded by the files. An
@@ -377,10 +382,6 @@ def inflate_source(data: bytes, label: str = "playlist") -> bytes:
         if len(data) > MAX_SOURCE_BYTES:
             raise too_large_inflated(label)
     return data
-
-
-def fetch_source(url: str, timeout: float) -> str:
-    return decode_text(fetch_bytes(url, timeout, "playlist"), "playlist")
 
 
 class CappedReader:
