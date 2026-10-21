@@ -4,7 +4,7 @@ A native Omarchy shell plugin: a keyboard-first live TV guide with EPG,
 favorites, source management, and mpv playback. One plugin id,
 `io.github.rmcdavid.iptv`, with three kinds: `bar-widget`, `overlay`,
 `service`. It runs inside the single long-running `omarchy-shell`
-Quickshell process. Released through v0.14.2 (2026-10-17, D-LOGO-14, D-EPG-6 and the R26 read before every save). Four of the last releases were cut for a finding
+Quickshell process. Released through v0.14.3 (2026-10-21, D-M3U-1 and the helper split). Four of the last releases were cut for a finding
 the marketplace maintainer raised -- D-SINK-8, D-TEXT-1, D-SINK-13, and then
 D-SINK-16 against the release that fixed D-SINK-13, on the verification
 request for that very commit; the
@@ -120,7 +120,8 @@ Consequences you must respect:
   a finding on it), for the same reason: a moved `main` makes the pending
   request stale. `dev` moves freely -- the helper split (D-REL-7) waits on
   it, unreleased. If the maintainer raises a finding, its fix ships at once
-  in a new release, which then carries what `dev` holds.
+  in a new release, which then carries what `dev` holds. **This hold ended
+  at 2026-10-20T18:47Z**, when the maintainer raised D-M3U-1 on #11935.
 
 ## Where the truth lives
 
