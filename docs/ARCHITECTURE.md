@@ -569,7 +569,9 @@ before write:
   given on lane-clean-f1).
 - [Amended 2026-10-20 (D-SINK-19 round 17, R27a; lane-sweep-a1). Two of the
   three windows are closed and the third is the one that remains: NO WRITE
-  WITHOUT A READ. A save asked while our previous write is in flight now
+  WITHOUT A READ. [Round 19, R29a: no longer -- window (a)'s closure
+  stands, window (c) is open again as on 0.14.2, so two remain; the
+  round-19 amendment below.] A save asked while our previous write is in flight now
   WAITS (`Model.stateSavePlan` answers `wait`) until that write's `saved` or
   `saveFailed`, then reads and writes from a turn of its own; the wait has
   its own 2 s bound (`stateWriteWaitWatchdog`), which releases the save to
@@ -579,7 +581,9 @@ before write:
   stopped`, `... did not answer when it was read before a save (twice, 2
   seconds each)`), lifted by a later read that answers [round 18, R28a: no
   longer -- the lift lost the held change; a silent read now keeps it held
-  and reads again, the amendment below]. What remains is
+  and reads again, the amendment below] [round 19, R29a: and that is
+  withdrawn too -- a silent read's save goes ahead without it after 2 s,
+  the last amendment below]. What remains is
   window (b), a re-point landing between the read's load and the write it
   allows, a turn apart: milliseconds, stated in `Model.stateSavePlan`'s
   comment and the README. Pinned through the node double over the shipping
@@ -587,14 +591,25 @@ before write:
   pins, among them window (a) with the folder link re-pointed at an empty
   folder as the first write lands -- no file created, `absent`, told once --
   and window (c) over an empty folder -- no file created, `read-timeout`
-  [R28a: `absent` once the read answers]);
+  [R28a: `absent` once the read answers] [R29a: the window-(c) pins went
+  with R28a's; the four R27a pins on the tree are window (a)'s, D-SRC-47's
+  mechanism, window (a) over an empty folder, and the write wait's bound,
+  `R27a / R29a (<tag>): ...`]);
   live by key-scenario B33. A consequence, pinned: no write is issued while
   another is out, so R25a's record never holds more than one text and
-  D-SRC-47's overflow can no longer happen. The same-instant loss (D-SRC-48)
+  D-SRC-47's overflow can no longer happen [round 19, R29a: only while our
+  writes are reported within 4 s -- a write the view never reports
+  releases the held save to its read at 2 s, the view drops that read
+  while the write is out, and at R26a's bound the save is written without
+  it, 4 s after it was asked, while the first may still be out (pinned:
+  `R27a / R29a (<tag>): the write wait is BOUNDED at 2 s ...`); so a long
+  run of unreported writes could still reach D-SRC-47]. The same-instant loss (D-SRC-48)
   stands: R27b measured the one mitigation proposed for it and it
   recovered nothing a later read does not (0 of 608 trials,
   `spikes/filewatch/RESULT-2026-10-20-r27b.txt`).]
-- [Amended 2026-10-20 (D-SINK-19 round 18, R28a; lane-sweep-a2). Window
+- [Amended 2026-10-20 (D-SINK-19 round 18, R28a; lane-sweep-a2; WITHDRAWN
+  the same day by round 19, R29a, the next amendment -- this one is
+  history). Window
   (c)'s answer above is withdrawn: a read that is silent twice no longer
   puts the session in the no-write mode. That mode set the held save aside,
   so the load that lifted it -- our own write's echo reported late, a
@@ -603,18 +618,50 @@ before write:
   source add included (both round-1 reviews, through the shipping
   `Service.qml`). Now a silent read keeps the save PARKED with memory as the
   authority, every save asked meanwhile joins it, and the file is read
-  again with the bound `Model.stateReadBoundMs` gives: at 2, 4, 8, 16, 32
+  again with the bound R28a's schedule gave: at 2, 4, 8, 16, 32
   and 62 s after the save asked, then every 30 s, and at once when a change
   joins or one of our writes is reported. Still no write without a read:
   whatever load answers is decided by R26a's dispositions (the base ->
   write; another program's text -> the merge, then write; a load that is
   not a state -> the R22 mode with that load's own reason). After 8 s of
-  silence the user is told once (`Saving is waiting`, 74019,
-  `Model.stateReadStalledNotice`); a shell stopped while the change is held
-  loses it, and the notice says so. `read-timeout` is gone. Pinned through
-  the node double on both hosts and both echo modes, one pin per way the
-  wait ends, each red on lane-sweep-c1; no live segment (nothing in the
-  cage stalls a read). Window (b) is unchanged.]
+  silence the user is told once (`Saving is waiting`, 74019); a shell
+  stopped while the change is held loses it, and the notice says so.
+  `read-timeout` is gone. Pinned through the node double on both hosts and
+  both echo modes, one pin per way the wait ends, each red on
+  lane-sweep-c1; no live segment (nothing in the cage stalls a read).
+  Window (b) is unchanged.]
+- [Amended 2026-10-20 (D-SINK-19 round 19, R29a, the lead's ruling;
+  lane-sweep-a3). BACK TO R26a'S BOUND FOR A SILENT READ: R27a's window-(c)
+  answer and all of R28a's are withdrawn. A save whose read has no load
+  within 2 s (`stateVerifyWatchdog`, `interval: 2000`) is written without
+  it, counted (`stateVerifyNoLoad`) and logged (`state.json was not read
+  back within <ms> ms of a save; saving without the read`), word for word
+  6f1d176's R26a body; there is no schedule, no re-read, no notice, and id
+  74019 is retired, not reused. Why (the ruling): it only matters when the
+  filesystem does not answer a read for two seconds, and each attempt to
+  hold the change across that stall made a new silent loss -- round 1, the
+  lifted block dropped it; round 2, the late answer to a read stalled on a
+  slow FUSE file was the OLD text, so the save then wrote over another
+  program's write made during the stall (4 of 4 live runs; 6f1d176 kept it
+  in the same shapes, 2 of 2), and a stalled read that answered with a load
+  failure turned the held change into an R22 change. So window (c) STAYS,
+  documented, as it is on 0.14.2: a replacement made while the read is
+  stalled is written over, and a path that has just lost its file can get
+  one created at 0666 & ~umask (the "What remains" bullet above). Window
+  (a)'s answer is KEPT with the ruling's proviso: the wait for our own
+  write has its 2 s bound and the read it releases to has R26a's, so a save
+  is never held past 4 s and never blocked (pinned: `R27a / R29a (<tag>):
+  the write wait is BOUNDED at 2 s ...`). Window (b) is unchanged. So two
+  windows remain, (b) and (c). Measured live on lane-sweep-a3 with round
+  2's slow-file rig rebuilt over the tree (transcript
+  `key-20261020-184229-2540898`): writes at +2.0 s and +4.0 s without their
+  reads, nothing blocked, nothing told; a helper `state source add` during
+  the stall kept, an atomic replace adding a favourite lost -- as on
+  6f1d176. Pinned in node through the shipping `Service.qml` on both hosts
+  and both echo modes (`R26a / R29a (<tag>): the read is BOUNDED ...` and
+  `... the read's bound is 2 s ...`), red on lane-sweep-c2 (`noLoad:2`, the
+  save still parked). The rulings are at the end of
+  `ARCHITECTURE-SOURCES.md` (round 19).]
 
 ### mpv status (helper `status` stdout, M1 target)
 
@@ -640,7 +687,7 @@ bar entry, read by the service through `shell.barConfig`.
 | Key | Type | Default | Validation (service side, the model) |
 |---|---|---|---|
 | `playlistUrl` | string | `""` | trimmed; the helper accepts `http(s)://`, `file://` or an absolute path and refuses everything else. **Amended 2026-10-11 (D-SINK-19): an INPUT, not a stored setting.** A value here that this service has not consumed -- the first reconcile of a service, or a value different from the one it last saw -- is validated and adopted through `Model.reconcileSources` exactly as a CLI value always was (SR8; SR37 in `ARCHITECTURE-SOURCES.md` as amended), the adopted record becomes the active one, and the plugin then rewrites the entry WITHOUT this key (`Model.RETIRED_SETTINGS`, dropped by `Model.entryWith`), so reading the entry back does not show it. A refused value is reported (D16, narrowed by `Model.invalidInputBlocks` to the case with no active source to show instead) and stripped too. An empty value is a no-op: it is the steady state after the plugin's own strip, not a command. The plugin itself never writes a URL here any more **Overturned 2026-10-13 (D-SINK-19 round 11, R21; the owner's decision): NOT a setting and NOT an input any more, except once.** The value here is read only by the migration of a 0.13.x install, while the LANDED state lacks `entryMigrated` (R21a); once that marker has landed, a value found here is REFUSED -- never adopted, whatever it is -- reported once (`Model.entryInputNotice`, a notification and the console, never the value) and stripped by the next owned write (R21b). It stays declared in `manifest.json` (that file is outside the documents lane; raised to the lead). Everything above is the record of rounds 1-10. |
-| `epgUrl` | string | `""` | same rules. Input-only on the same terms: a fresh non-empty value is attached to the ACTIVE record on any reconcile that sees it (an `ignore` plan included) and stripped from the entry by the same owned write; an empty value is a no-op, and the CLI clear lever is withdrawn -- the Sources screen or `state source update` clears a guide URL (D-SINK-19 round 2, R4). "Empty disables EPG" is now a statement about the RECORD's `epgUrl`, not about this key. **Round 3 (R12, 2026-10-12): never stripped unadopted.** A value set while NO source is active stays on this key (the guide reads it as its fallback) until a source exists and the reconcile that brings it attaches the value to that source; only then is it taken off the entry. Round 2 stripped it in the same write with no copy anywhere. **Round 7 (R17, 2026-10-12): "until a source becomes active", by any route, and enforced at the sink.** Every owned write leaves this key on the entry unless the ACTIVE record holds the value or the service already consumed it (`Model.retiredInputsToKeep`, handed to `Model.entryWith` by the one funnel); a switch or an in-app add that makes a record active lands a pending value on it in the same turn (`adoptPendingEpg`), replacing a guide URL the record had. Until round 7 the logo toggle's heal, and on the echoing host the key mirror's heal after a switch, stripped it with no copy anywhere (the sixth review's P1). **Round 8 (R18, 2026-10-12): compared the way adoption compares, and an add form's own guide URL wins.** The value is read through `Model.entryInputForm` everywhere it is compared, so surrounding whitespace (which `omarchy bar set` stores as typed) does not make it a different value, and a value of whitespace or control characters alone is no input -- it never empties a record's guide URL. A pending value meets an in-app add whose form carries a guide URL of its own (typed, or an Xtream add's `xmltv.php`): the form's wins, and the pending value is superseded and stripped by that commit (R18d). **Round 9 (R19, 2026-10-12): held in the state, and the input set last wins.** A value set while NO source is active no longer waits on this key: it is held in `state.json` as `pendingEpg { url, seenAt }` and taken off the entry by the same R13-gated owned write that strips every consumed input (R19b, overturning R12's on-entry pending state; a refused one is reported and stripped). R18d's form-wins rule is overturned too (R19c): every record carries `epgSetAt`, set by the add form at SUBMIT, by the edit form when it changes the guide URL, or by adoption with the input's `seenAt`, and at the move that makes a record active the held value lands iff it was seen LATER than the record's own was set (`epgByTime`, `applyPendingEpg`); either way it is cleared. Records written before R19 read as 0 **Overturned 2026-10-13 (round 11, R21), on the same terms as `playlistUrl`.** At the migration a value is attached to the source that becomes active, or, with no source to attach it to, reported (`no-source`) and stripped, never held (R21c); after the marker it is refused, reported once and stripped. A record's guide URL is set and cleared only in the Sources forms (or the helper's `state source` verbs). R12, R17b, R18d, R19b, R19c and R20b, recorded above, are overturned. |
+| `epgUrl` | string | `""` | same rules. Input-only on the same terms: a fresh non-empty value is attached to the ACTIVE record on any reconcile that sees it (an `ignore` plan included) and stripped from the entry by the same owned write; an empty value is a no-op, and the CLI clear lever is withdrawn -- the Sources screen or `state source update` clears a guide URL (D-SINK-19 round 2, R4). "Empty disables EPG" is now a statement about the RECORD's `epgUrl`, not about this key. **Round 3 (R12, 2026-10-12): never stripped unadopted.** A value set while NO source is active stays on this key (the guide reads it as its fallback) until a source exists and the reconcile that brings it attaches the value to that source; only then is it taken off the entry. Round 2 stripped it in the same write with no copy anywhere. **Round 7 (R17, 2026-10-12): "until a source becomes active", by any route, and enforced at the sink.** Every owned write leaves this key on the entry unless the ACTIVE record holds the value or the service already consumed it (`Model.retiredInputsToKeep`, handed to `Model.entryWith` by the one funnel); a switch or an in-app add that makes a record active lands a pending value on it in the same turn (`adoptPendingEpg`), replacing a guide URL the record had. Until round 7 the logo toggle's heal, and on the echoing host the key mirror's heal after a switch, stripped it with no copy anywhere (the sixth review's P1). **Round 8 (R18, 2026-10-12): compared the way adoption compares, and an add form's own guide URL wins.** The value is read through `Model.entryInputForm` everywhere it is compared, so surrounding whitespace (which `omarchy bar set` stores as typed) does not make it a different value, and a value of whitespace or control characters alone is no input -- it never empties a record's guide URL. A pending value meets an in-app add whose form carries a guide URL of its own (typed, or an Xtream add's `xmltv.php`): the form's wins, and the pending value is superseded and stripped by that commit (R18d). **Round 9 (R19, 2026-10-12): held in the state, and the input set last wins.** A value set while NO source is active no longer waits on this key: it is held in `state.json` as `pendingEpg { url, seenAt }` and taken off the entry by the same R13-gated owned write that strips every consumed input (R19b, overturning R12's on-entry pending state; a refused one is reported and stripped). R18d's form-wins rule is overturned too (R19c): every record carries `epgSetAt`, set by the add form at SUBMIT, by the edit form when it changes the guide URL, or by adoption with the input's `seenAt`, and at the move that makes a record active the held value lands iff it was seen LATER than the record's own was set (`epgByTime`, `applyPendingEpg`); either way it is cleared. Records written before R19 read as 0 **Overturned 2026-10-13 (round 11, R21), on the same terms as `playlistUrl`.** At the migration a value is attached to the source that becomes active, or, with no source to attach it to, reported (`no-source`) and stripped, never held (R21c); after the marker it is refused, reported once and stripped. **Round 19 (R29d, 2026-10-20): not when it came with an unusable playlist.** A value set beside a `playlistUrl` that does not validate is attached to no source -- until R29d it replaced the active record's own guide URL -- and is reported WITH the playlist in one notice (`Bar setting removed`, reason `invalid-pair`) and stripped with it (`Model.adoptActiveSource`'s `epgWithInvalid`; `ARCHITECTURE-SOURCES.md`, round 19). A record's guide URL is set and cleared only in the Sources forms (or the helper's `state source` verbs). R12, R17b, R18d, R19b, R19c and R20b, recorded above, are overturned. |
 | `sourceKey` | string | `""` | D-SINK-19. Written by the plugin, never derived from user input: `Model.activeKeyText` of the active source's key, 8 lowercase hex with D4's suffix rule, mirrored into the entry by every owned write (`Model.OWNED_SETTINGS` is `["sourceKey", "showLogos"]`). NOT the authority -- `state.json`'s `activeKey` is -- and consulted only when the state names no record (`Model.adoptActiveSource` step 3); a value naming none of the user's records reads as absent. Deliberately NOT declared in `manifest.json` (`barWidget.defaults` and `schema` do not name it): declaring it would offer the mirror as a user setting with help text. The host keeps an undeclared key through its own rewrite -- MEASURED on 2026-10-11 (the host's `updateEntryInline` run in node over its own source, `OMARCHY-PLUGIN-CONTRACT.md`) -- and `omarchy bar set` writes any key without a schema check -- READ, not run: `setBarWidget` at `services/PluginRegistry.qml:342-380` ends `entry[String(key)] = value` with no schema lookup (the contract's "read rather than run" list). The recovery path rests on both; a round-2 sentence here called both measured and the contract entry it cited said otherwise for the second. Not a credential: SR36 states what it is (a 32-bit confirmation of a guessed URL) |
 | `refreshMinutes` | integer | 60 | `clampInt(5..1440)` |
 | `mpvArgs` | string | `""` | whitespace-split; each token must match `^--[a-z0-9][a-z0-9-]*(=.*)?$`; reserved names (`--input-ipc-server`, `--wayland-app-id`, `--title`, `--force-media-title`, `--idle`, `--script(s)`, `--config-dir`, `--load-scripts`, `--tls-verify`, `--stream-lavf-o`, and their `--no-` forms) are dropped with a console warning. This list is the M1 set plus the three later entries worth naming here; `MPV_RESERVED` in the model and its python mirror are the current list and `ARCHITECTURE-PLAYER.md` 4.12 is the register of why each name is on it. The two TLS entries are opposites and 4.15 is where that is specified: `--tls-verify` is the one entry the reserved list does not make safe by itself (D-SINK-13), and `--stream-lavf-o` is the one the reserved list is the only way to close (D-SINK-15). A single string was chosen over a JSON array because `omarchy bar set` writes strings by default and users copy examples from the README. |
@@ -1268,7 +1315,11 @@ now, with each decision lifted into `Model.js` so node can call it (rule 12):
   migrates] [2026-10-20, R28b: the entry's `epgUrl` is held with it, not
   attached to the step-2 record, and the migration after a removal takes
   both]), invalid is reported and
-  the key is left exactly as it was; (2) the state's `activeKey` when it
+  the key is left exactly as it was [2026-10-20, R29d: and the entry's
+  `epgUrl` beside an invalid playlist is not attached to the step-2 record
+  either -- until R29d it replaced that record's own guide URL -- but
+  reported with the playlist in one notice (`invalid-pair`) and stripped
+  with it; `epgWithInvalid` in the result]; (2) the state's `activeKey` when it
   names a record; (3) the entry's `sourceKey` when it names a record; (4)
   nothing, and a dangling key is cleared rather than left for the next reader.
   Then a fresh EPG input is attached to whichever record is now active, on
@@ -2843,7 +2894,10 @@ login, which the lead's tooling does not hold.
   kept` at a start, and mid-session names the ways back on which they are
   kept or dropped (`UX-SOURCES.md` 5.10 item 1); `read-timeout` is
   withdrawn -- a read that does not answer keeps the change held and is
-  asked again, told once as `Saving is waiting`]. It used to be read as an empty state and saved over, which
+  asked again, told once as `Saving is waiting`] [2026-10-20, R29a: that
+  hold and its notice are withdrawn as well; a read that does not answer
+  within 2 s lets its save go ahead without it, counted and logged, as on
+  0.14.2, and nothing is told (section 5, the round-19 amendment)]. It used to be read as an empty state and saved over, which
   is how a start could erase every source (section 5, as amended).
   [Round 13, 2026-10-13 (R23): the guide's body is then that notice's own
   words, never the first-run form, and every refusal says the no-write
@@ -2855,7 +2909,7 @@ Performance budget (10k channels):
 
 | Item | Budget | How |
 |---|---|---|
-| Overlay open | < 150 ms | keepLoaded window; `rebuildDisplay` appends at most 300 rows; channels already parsed in memory. **Measured 2026-10-20 (R28d, D-PERF-1's async instrument as re-made, `scripts/dev-harness/open-scenario.sh`: the clock stops at the first frame whose presenting view DRAWS a whole screen, 10 rows or 16 tiles, counting only delegates that intersect its visible area) at 10,000 channels in the cage's floating window: met by every open after the first (warm, realised median 33 ms list / 31 ms wall, max 41), NOT met by the first open of a session (cold, realised median 548 ms list / 534 ms wall), about 440 ms of which a 40-channel control shows too (the first show of the window in the cage). On Hyprland's layer-shell surface the cold figure is UNVERIFIED. R27f's figures the same day (546 / 580 cold, 34 / 32 warm) counted delegates built off screen as well and trailed the drawn screen. Every open figure recorded before 2026-10-20 came from `openMs`, whose clock stops in the turn of the summon, before the first frame (D-PERF-1); it did lay out the on-screen delegates (10 rows, as drawn), so what it missed is the frames up to the first drawn screen. The round-18 rulings in `ARCHITECTURE-SOURCES.md` have the table** |
+| Overlay open | < 150 ms | keepLoaded window; `rebuildDisplay` appends at most 300 rows; channels already parsed in memory. **Measured 2026-10-20 (R28d, D-PERF-1's async instrument as re-made, `scripts/dev-harness/open-scenario.sh`: the clock stops at the first frame whose presenting view DRAWS a whole screen, 10 rows or 16 tiles, counting only delegates that are shown, intersect its visible area and -- since R29e the same day -- are painted at an effective opacity above 0, each delegate's own times every ancestor's up to the window; not covered, so not claimed: an item stacked over the view, an ancestor's clip, a layer or shader effect, and a fade's strength) at 10,000 channels in the cage's floating window: met by every open after the first (warm, realised median 34 ms list / 32 ms wall on R29e's instrument, `open-20261020-192446-2690236`; R28d's read 33 / 31, max 41), NOT met by the first open of a session (cold, realised median 547 ms list / 547 ms wall on R29e's; R28d's 548 / 534), about 440 ms of which a 40-channel control shows too (the first show of the window in the cage). On Hyprland's layer-shell surface the cold figure is UNVERIFIED. R27f's figures the same day (546 / 580 cold, 34 / 32 warm) counted delegates built off screen as well and trailed the drawn screen. Every open figure recorded before 2026-10-20 came from `openMs`, whose clock stops in the turn of the summon, before the first frame (D-PERF-1); it did lay out the on-screen delegates (10 rows, as drawn), so what it missed is the frames up to the first drawn screen. A guide that faded its views in would have passed R28d's instrument (round 2's review: 30 / 0 under a 300 ms opacity-0 mutation); R29e's reads it red (`spikes/open-mutations/opacity-fade.patch`, L6 and W6 at a warm median of 338 / 341 ms). The round-18 and round-19 rulings in `ARCHITECTURE-SOURCES.md` have the tables** |
 | Keystroke to redraw | < 30 ms | one linear scan over precomputed `searchKey`s, bounded materialization |
 | Helper `playlist` | < 1.5 s for 10k entries on this machine (excluding network) | single pass regex parser, no DOM |
 | Helper `epg` | < 4 s for a 50 MB XMLTV | `xml.etree.iterparse`, programmes outside a +-24 h window dropped, gzip streamed |
@@ -2937,7 +2991,10 @@ Performance budget (10k channels):
    watchdog firing), in which it still does (section 5's round-16
    amendment, "What remains"; lane-clean-f1). [2026-10-20, round 17, R27a:
    one window remains, the re-point between the read's load and the write;
-   the other two are closed (section 5's round-17 amendment).] A save over an existing file keeps that file's
+   the other two are closed (section 5's round-17 amendment).] [2026-10-20,
+   round 19, R29a: two remain -- the re-point, and the 2 s watchdog's save
+   without its read, open again as on 0.14.2; only the save asked while our
+   write is in flight stays closed (section 5's round-19 amendment).] A save over an existing file keeps that file's
    mode, so a re-pointed folder holding a 0644 `state.json` keeps 0644
    until the next start makes it 0600 (measured by the sink lane through a
    restart).]

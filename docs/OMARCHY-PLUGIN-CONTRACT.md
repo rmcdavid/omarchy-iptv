@@ -1020,7 +1020,15 @@ of a file the view creates, a re-point and what re-arms after one, by round
     again on a bounded schedule (2, 4, 8, 16, 32, 62 s, then every 30 s),
     never a block and never a write; over an empty folder the read's
     eventual load failure is the `absent` mode, still with no file created
-    (pinned on lane-sweep-a2, the same four shapes).]
+    (pinned on lane-sweep-a2, the same four shapes).] [2026-10-20, round
+    19, R29a (the lead's ruling): both answers are withdrawn and the
+    watchdog's is 0.14.2's again -- no load within 2 s and the save is
+    written without the read, counted and logged. Two windows remain: the
+    re-point between the read's load and the write, and this one. The
+    write-wait answer of R27a stays, bounded: a write never reported
+    releases the held save to its read at 2 s and the save is written
+    without it at 2 s more (pinned on lane-sweep-a3, `R27a / R29a (<tag>):
+    the write wait is BOUNDED ...`).]
   - **A re-point raises nothing.** `ln -sfn` of a `state.json` link to
     another file (`links-1.txt` L4) and of a state-folder link to another
     folder (L7) or to an empty one (L9): `changed+0 loaded+0`, and the
@@ -1064,6 +1072,24 @@ of a file the view creates, a re-point and what re-arms after one, by round
     loaded, and the 9 (4 during our write, 5 after it) the view never saw
     on its own. The re-read changes only WHEN memory learns of the
     change, never WHETHER it is kept, so nothing was built.]
+  - **A read stalled in the filesystem answers with the file as it was
+    when it was asked, and a rename while it is out raises no new read.**
+    Measured 2026-10-20 by round 2's live review of R28 with a stalling
+    FUSE passthrough over the harness state directory (its mode Q stalls
+    only quickshell's `read()` of `state.json`, so another process's rename
+    is not held up), the real `Service.qml` under a nested cage: the
+    helper's `state source add` renamed a new `state.json` into place
+    during the stall, the shell opened nothing after that rename, and the
+    stalled read returned the old text 27 s later (FUSE log,
+    `key-20261020-172836-2368558`). So a design that WAITS for a stalled
+    read and trusts its answer writes over the other program's file: R28a
+    did, 4 of 4 runs, and R29a withdrew it. On 6f1d176, whose save had
+    already been written without its read at 2 s, the same rename raised a
+    fresh read at once (the same rig, `key-20261020-172838-2368906`:
+    `read-STALL-begin` right after it), and both changes were kept. The rig is the
+    review's (scratch, not the tree); the open() stall it can also produce
+    queued a foreign rename behind libfuse's own path lock, which says
+    nothing about a real mount.
   - **What a reload costs.** Asynchronous `reload()` to `loaded`: median 2-4
     ms, max 10, over 8 KB and 160 KB files, idle and with 8 busy loops
     (`timing-2.txt`, load 12-18). On the real service, lane A's live
@@ -1079,7 +1105,10 @@ of a file the view creates, a re-point and what re-arms after one, by round
   once and then stops saving with reason `read-timeout`] [round 18, R28a:
   and not that either -- a silent read keeps the save held, memory the
   authority, and is asked again on a bounded schedule until a load
-  answers]; every write is issued from a turn of its own (`Qt.callLater`),
+  answers] [round 19, R29a: withdrawn, back to the 2 s watchdog that saves
+  without the read, counted and logged; the save asked while our write is
+  in flight still waits for it, at most 2 s, and then reads under that
+  bound]; every write is issued from a turn of its own (`Qt.callLater`),
   never from inside a handler (R26b); and nothing reloads on a timer
   (R26d), so a replacement with no save after it is not seen until the next
   save or a restart -- nothing is written meanwhile, so nothing is lost. The
@@ -1106,7 +1135,8 @@ of a file the view creates, a re-point and what re-arms after one, by round
   while that write may still be out -- so the double drops the service's
   own `reload()` too while one of our writes is queued (`droppedReloads`),
   as the view does (30 of 30); the read's own bound then decides, which
-  never writes. Against 6f1d176 alone the new drop turns nothing red (2,572
+  never writes [round 19, R29a: which writes without the read, at R26a's
+  2 s, as on 0.14.2]. Against 6f1d176 alone the new drop turns nothing red (2,572
   / 0 in both echo modes), because that tree never reloads while a write is
   out.]
 

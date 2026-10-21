@@ -1770,7 +1770,11 @@ round 1's two P1s).
   node's, through the shipping Service.qml on both hosts and both echo
   modes, one per way the wait ends (our own late write, a source verb, an
   in-app add, another program's write, the stalled read answering, the
-  schedule's re-read) and the restart's stated loss.
+  schedule's re-read) and the restart's stated loss. [Round 19 (R29a): R28a
+  and those pins are withdrawn; round 2's live review then DID stall a
+  FileView read, with a FUSE passthrough of its own (scratch, not the
+  tree), and found R28a writing over another program's change -- Round 19
+  below.]
 - `tests/service-harness.js`: `stateVerifyWatchdog`'s interval is a
   BINDING now (`root.stateVerifyBoundMs`, the schedule's bound), so the
   double reads it from its own text at every `restart()` and arms the Timer
@@ -1785,7 +1789,9 @@ round 1's two P1s).
   WITH the bar's guide URL, the entry stripped of both.
 - `spikes/key-mutations/r26a-watchdog-20ms.patch` and
   `r26a-watchdog-no-interval.patch` are re-made for the binding interval,
-  the same decisions broken.
+  the same decisions broken. [Round 19: re-made again for the literal
+  interval, with `r27a-wait-never-released.patch`; node counts in that
+  folder's README.]
 - Counts are the summary line's, the floor 135 lettered checks: forward
   136 / 0 (`key-20261020-155757-2060758`, 492.4 s, at c06f436);
   `--baseline 843ae87` (lane-sweep-c1) 133 / 3, B32, B38 `a-epg:bar` and
