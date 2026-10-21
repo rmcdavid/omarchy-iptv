@@ -30,7 +30,7 @@ function looksLikeUrl(text) {
 // omarchy-notification-send as an argv item, and a body such as
 // "--urgency=x did not play" would be parsed as an option and suppress the
 // toast. Leading dashes and whitespace are dropped; an all-dash name falls
-// through to the next candidate. Mirrors clean_name in bin/omarchy-iptv.
+// through to the next candidate. Mirrors the helper's clean_name.
 function cleanName(text) {
   return str(text).replace(/^[\s-]+/, "").replace(/\s+$/, "")
 }

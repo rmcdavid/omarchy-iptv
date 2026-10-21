@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.14.2. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.14.3. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, picture in picture, pausing live TV and winding it back a few
 minutes, a guide that remembers which
@@ -16,9 +16,10 @@ releases that went to real provider scale, search accuracy and readable
 contrast were 0.6.0 and 0.7.0, and the ones between built the Sources
 screen, saved searches and channel logos. 0.14.0 takes your provider URLs
 out of the desktop shell's settings file and keeps them in the plugin's own,
-0.14.1 stores PNG channel logos with only what drawing them needs, and
+0.14.1 stores PNG channel logos with only what drawing them needs,
 0.14.2 reads `state.json` before every save and closes two findings about
-GIF logos and guide-data files.
+GIF logos and guide-data files, and 0.14.3 bounds every playlist field a
+channel keeps and splits the background helper into several files.
 `CHANGELOG.md` has the release notes.
 
 This branch is the install artifact and nothing else: what `omarchy plugin
@@ -247,10 +248,10 @@ One place they can escape that, worth knowing, and one that used to:
   then refuses to everyone but root -- not other accounts, and not other
   programs running as you either -- before it loads anything else. The
   moment between the helper starting and that point is the only window
-  left: about a tenth of a second on an idle machine, longer on a busy one,
-  and readable in that moment by programs running as you alone, never by
-  other accounts. The helper's command line no longer
-  carries it. That is true of all three fetches that take a URL -- your
+  left: about three hundredths of a second, measured with other work
+  running, and longer on a busier machine, readable in that moment by
+  programs running as you alone, never by other accounts. The helper's
+  command line no longer carries it. That is true of all three fetches that take a URL -- your
   playlist, your guide data, and the check the Sources screen makes before it
   accepts a source. Nothing else on the plugin's side writes
   either URL anywhere but the two files of its own named above; the shell's
@@ -630,8 +631,30 @@ carry channel ids — most do — are not affected at all.
 - Playlists are capped at 50,000 channels and 2,000 groups; extra channels
   are skipped and extra groups fold into Ungrouped. The guide footer shows
   `Playlist warning: ...` after such a load, and the warnings are also in
-  `~/.cache/omarchy-iptv/playlist-status.json` and in the output of
+  the source's `~/.cache/omarchy-iptv/sources/<key>/playlist-status.json`
+  and in the output of
   `omarchy-shell io.github.rmcdavid.iptv status`.
+- Each channel's text has a length limit too. Channel names, `tvg-name` and
+  a group value (`group-title`, or an `#EXTGRP` line, which applies to the
+  entries after it) are cut at 512 characters, one group name at 128, and a
+  channel keeps its first 16 groups. A `tvg-id` over 256 characters, a
+  channel number over 32, a logo or `url-tvg` address over 2,048, and a
+  header whose name is over 64 characters, a player option whose name is
+  over 60 (`#EXTVLCOPT`) or 59 (`#KODIPROP`) characters, or either whose
+  value is over 1,024 (or past the sixteenth on one channel) are left out;
+  an entry whose stream address is over 4,096 characters is skipped. The
+  23 playlists this project tests with stay far below all of these; no
+  provider's own list has been measured against them. Each kind that was
+  cut or left out is counted in one warning line, and the warnings list at
+  most 20 per-channel warnings, then a count of the rest. The footer's
+  `Playlist warning:` shows the first of them and how many more; the whole
+  list is in the status file and the `status` output named above.
+- Reading a playlist or guide data runs in a background helper that is
+  allowed 512 MiB of memory. One that would need more stops there and shows
+  `Source too large`, and the channels or guide data you already had stay.
+  A 50,000-channel playlist needs about 110 MiB (up to about 230 MiB with
+  an emoji in every name), so only a hostile or
+  broken source should meet this.
 - Downloads (playlist and EPG) must finish within 60 seconds; redirects to
   anything but http(s) are refused and credentials are dropped when a
   redirect changes host.
@@ -777,6 +800,18 @@ Nothing inside the plugin directory is written at runtime.
   usable URL and was removed` means the old value was not one the plugin
   accepts (a typo, a scheme it does not take); add the source again in
   Sources.
+- **Plugin files damaged (05-ipc-logos.py) · reinstall the plugin** (any
+  part name): the helper is `bin/omarchy-iptv` and the eleven files under
+  `bin/helper/` beside it, and it checks all of them before it does
+  anything. One of them is missing, unreadable, empty, cut off, not what
+  the release wrote or from another release, or that folder holds a file
+  the release did not put there (a hidden one, such as an editor's swap
+  file, is ignored), so the helper refused to run rather than run half of
+  itself, and nothing was changed. Seen once during `omarchy plugin
+  update`, it is the update caught half written and clears by itself
+  when the update finishes; if it stays, disable,
+  remove and add the plugin again (Install and Uninstall). Your sources,
+  favorites and guide data are kept outside the plugin and are not touched.
 - Paste does nothing in a form: the plugin pastes by having its helper run
   `wl-paste`, so that must be installed (`wl-clipboard`, an Omarchy
   default). The helper reads at most 32 KiB of the clipboard and gives up

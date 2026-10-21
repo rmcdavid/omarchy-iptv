@@ -49,7 +49,7 @@ function optInSetting(value) {
 }
 
 // Who enabling logos would contact, counted from the cache and contacting
-// nothing. The mirror of `logo_survey` in bin/omarchy-iptv; both run
+// nothing. The mirror of the helper's `logo_survey`; both run
 // the shared logo-survey fixture (dev branch) so the two cannot drift, because the
 // sentence the user consents to is composed from these numbers and a guide
 // that disagrees with the helper is a guide that lies in the consent dialog.
@@ -123,7 +123,7 @@ function splitLogoUrl(raw) {
 }
 
 // The host a logo URL would disclose to, or "" when it discloses to none.
-// The mirror of `logo_host` in bin/omarchy-iptv.
+// The mirror of the helper's `logo_host`.
 //
 // The PORT is not part of the answer: the question the survey exists to
 // answer is how many parties learn which channels this user has, and

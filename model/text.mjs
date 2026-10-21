@@ -41,7 +41,7 @@ var FOLD = (function() {
 
 // ASCII whitespace and punctuation collapse to one space; every other
 // character (any script) is kept, so Cyrillic/Greek/Arabic names stay
-// searchable. Mirrors _PUNCT in bin/omarchy-iptv.
+// searchable. Mirrors the helper's _PUNCT.
 var PUNCT_RE = /[\s!-\/:-@\[-`{-~]+/g
 
 // The same class WITHOUT `*` (U+002A) and `+` (U+002B), for the id fold only.
@@ -55,7 +55,7 @@ var PUNCT_RE = /[\s!-\/:-@\[-`{-~]+/g
 // Keeping them takes the four lists from 75 colliding groups / 155 rows to
 // 65 / 133 and raises surviving ids from 5,108 to 5,127 of 5,221. `&`, `#`
 // and `@` were measured the same way and change nothing on any of the four,
-// so they are not in the class. Mirrors _ID_PUNCT in bin/omarchy-iptv.
+// so they are not in the class. Mirrors the helper's _ID_PUNCT.
 var ID_PUNCT_RE = /[\s!-\)\,-\/:-@\[-`{-~]+/g
 
 function str(value) {
@@ -165,7 +165,7 @@ function fnv1a32(value) {
 }
 
 // Channel id schemes (ARCHITECTURE.md decision 6; python mirror:
-// CHANNEL_ID_SCHEME in bin/omarchy-iptv). Scheme 1 shipped from 0.1 to 0.7:
+// CHANNEL_ID_SCHEME in the helper, bin/helper/). Scheme 1 shipped from 0.1 to 0.7:
 // `t:<tvg-id>` when unique in the playlist, else `u:<fnv1a32(url)>`. An
 // Xtream stream URL carries the account password, so every `u:` id dies the
 // day that password is rotated -- 1 id of 3,335 survived one on the user's
@@ -235,7 +235,7 @@ function suffixIds(bases) {
 // (78 rows, largest 2), so at most 133 rows of 5,221 are exposed and only if
 // the provider drops one of a pair. The rate is unknown: nobody has a second
 // snapshot. The full note, and what would settle it, is in the python mirror
-// (channel_ids in bin/omarchy-iptv).
+// (channel_ids in the helper, bin/helper/).
 function channelIds(channels, scheme) {
   var legacy = legacyChannelIds(channels)
   if ((scheme === undefined ? CHANNEL_ID_SCHEME : Number(scheme)) < CHANNEL_ID_SCHEME) return legacy

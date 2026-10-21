@@ -921,7 +921,7 @@ Item {
   readonly property int pipSnapshotRequestId: 3
   // And 4 asks the player for its own pid. G-2 proved mpv's `pid` property
   // is the pid Hyprland reports for the window, with no wrapper process in
-  // between; the helper resolves it the same way (bin/omarchy-iptv:3029).
+  // between; the helper's `find_player` finds the same process by its argv.
   // Taken over the player's own private socket rather than out of a helper
   // reply, because that one connection covers all three ways a player
   // becomes ours - a cold start, a respawn, and a reattach after
@@ -2844,9 +2844,10 @@ Item {
         // as a proxy for "it sits in the healthy branch", and a block
         // inserted ahead of it is what turns the proxy red.
         root.applyRewind(status)
-      } else if (code === "not_implemented" || code === "no_output") {
-        // The helper cannot tell (stub or crash): neither healthy nor a
-        // strike, so a missing subcommand never reaps a working player.
+      } else if (Model.helperCannotTell(code)) {
+        // The helper cannot tell (stub, crash, or a damaged part the stub
+        // refused, D-REL-7): neither healthy nor a strike, so a missing
+        // subcommand never reaps a working player.
         if (root.healthFailures === 0) console.warn("omarchy-iptv: status check unavailable:", Model.statusReason(status))
       } else {
         root.healthFailures += 1

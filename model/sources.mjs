@@ -375,7 +375,7 @@ function normalizeSourceUrl(text, opts) {
 // ---- the guide URL the playlist declares (M4-01 repair 3, D-EPG-2)
 //
 // `#EXTM3U url-tvg="..."` / `x-tvg-url="..."` has reached channels.json as
-// `epgUrlHint` since the first playlist parser (bin/omarchy-iptv) and NOTHING
+// `epgUrlHint` since the helper's first playlist parser and NOTHING
 // has ever read it. A provider that tells us where its guide lives was
 // ignored, and the owner's own install carries no guide URL at all -- so the
 // one repair of the four that can fix an install without the user typing
@@ -917,7 +917,7 @@ function sourceTransient(event, opts) {
 // user Ctrl+V over a 100 MB foreign offer cost the shell +298 MB and kept
 // most of it; the bound was time, not bytes.
 //
-// The arithmetic, mirrored by MAX_CLIPBOARD_* in bin/omarchy-iptv and
+// The arithmetic, mirrored by MAX_CLIPBOARD_* in the helper (bin/helper/) and
 // pinned on both sides by the shared clipboard fixture: the shell keeps
 // LIMITS.url * 4 = 8192 UTF-16 units; a UTF-8 character is at most 4
 // bytes, so 32768 bytes (32 KiB) is the most a reply can need. The helper's

@@ -35,7 +35,7 @@ import {
 // receives the address. `--script` / `--scripts` are reserved, so mpv's own
 // builtin scripts are the only ones these options can reach.
 //
-// Mirrored by `mpv_arg_warnings()` in bin/omarchy-iptv and pinned by the
+// Mirrored by `mpv_arg_warnings()` in the helper (bin/helper/) and pinned by the
 // `mpvHandoff` vectors in the player-argv.json. fixture (dev branch)
 var MPV_HANDOFF = {
   "--ytdl-format": true,
@@ -53,7 +53,7 @@ var MPV_HANDOFF_TEXT = " hands the stream address to another program"
 // (1.8 to 4.5 GiB per hour at the measured bitrates, into a file mpv unlinks
 // at creation, so `ls` and `du` show nothing). Allowed, because it is the
 // user's disk; said out loud, because nothing else would say it. Mirrored
-// by `mpv_arg_writes_disk()` in bin/omarchy-iptv, same fixture.
+// by `mpv_arg_writes_disk()` in the helper (bin/helper/), same fixture.
 var MPV_DISK_WARN = { "--cache-on-disk": true }
 var MPV_DISK_TEXT = " writes the stream to disk while it plays"
 
@@ -192,7 +192,7 @@ function mpvWindowTitle(name) {
 //    belongs in the runtime directory - already 0700, already documented,
 //    gone at logout - and adds no durable path and nothing to clean up.
 //
-// Mirrored by `player_dirs()` in bin/omarchy-iptv.
+// Mirrored by `player_dirs()` in the helper (bin/helper/).
 function playerDirs(socketPath, stateDir) {
   var runtime = dirnameOf(socketPath)
   return {
@@ -221,7 +221,7 @@ function dirnameOf(path) {
 // a failure" behaviour and the degraded 10 s status-poll fallback.
 // The neutral `--title=$>IPTV` / `--force-media-title=IPTV` keep mpv from
 // flashing its own "No file - mpv"; the channel title follows over IPC.
-// Mirrored by `mpv_launch_argv()` in bin/omarchy-iptv, pinned by the shared
+// Mirrored by `mpv_launch_argv()` in the helper (bin/helper/), pinned by the shared
 // vectors in the player-argv.json. fixture (dev branch)
 function buildMpvArgv(params) {
   var p = params || {}
@@ -312,7 +312,7 @@ function buildMpvArgv(params) {
   //    rides in extraArgs, and names a CA for THIS token to verify against.
   //    Measured playing a private-CA stream with the trailing token in place.
   //
-  // Mirrored by mpv_launch_argv() in bin/omarchy-iptv and pinned there by the
+  // Mirrored by mpv_launch_argv() in the helper (bin/helper/) and pinned there by the
   // `--profile=evil` vector in the player-argv.json fixture (dev branch),
   // whose user arguments are what make this line visible at all.
   return argv.concat(asList(p.extraArgs)).concat([MPV_TLS_VERIFY])
