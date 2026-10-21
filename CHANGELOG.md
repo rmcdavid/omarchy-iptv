@@ -19,13 +19,18 @@ the run.
   values are cut at 512 characters and a group name at 128; an identifier,
   an address or a player option that is too long is left out rather than
   cut, because a shortened one would be a different, wrong one. The limits
-  are in the README; real playlists stay far below them, and every
-  playlist this project tests with loads exactly as it did. The footer's
-  `Playlist warning:` says how many were cut or left out.
-- **Reading a playlist or guide data is limited to 512 MB of memory.** A
+  are in the README; the 23 playlists this project tests with stay far
+  below them and load exactly as they did; no provider's own list has been
+  measured against them yet. Each kind that was cut or left out is counted
+  in one line among the load's warnings, in the source's
+  `playlist-status.json` and in `omarchy-shell io.github.rmcdavid.iptv
+  status`; the footer's `Playlist warning:` shows a load's first warning
+  and how many more there are.
+- **Reading a playlist or guide data is limited to 512 MiB of memory.** A
   source that would need more stops with `Source too large`, and the
   channels or guide data you already had stay. A 50,000-channel playlist,
-  the most the plugin keeps, needs about 110 MB.
+  the most the plugin keeps, needs about 110 MiB, up to about 230 MiB with
+  an emoji in every name.
 - **Reading a local playlist or guide-data file, or a gzip one, no longer
   sets aside 64 MB first.** The helper used to reserve the whole size limit
   before reading a byte; it now reads in pieces.
@@ -37,7 +42,9 @@ the run.
 
 - **The helper is now several files**: a short `bin/omarchy-iptv` and
   eleven parts under `bin/helper/`, because the marketplace's security scan
-  refuses any file over 512 KiB and the single file had reached 447 KB.
+  refuses any file over 512 KiB, and the single file had reached 447 KB,
+  within the 448 KiB ceiling this project holds every file under so it
+  never nears that limit.
   It behaves as before. It checks every part's length and checksum before
   running any of them, and a missing, damaged or mismatched part shows
   `Plugin files damaged`, naming the part, with `reinstall the plugin`.
@@ -48,12 +55,15 @@ the run.
 
 ### Worth knowing
 
-- **Updating from 0.14.2 has a few milliseconds in which the helper cannot
-  answer**, while git rewrites its first file. Anything the plugin asks in
-  that moment gets no reply, which it already treats as no answer rather
-  than as a failure; only a shell that is starting at that exact moment
-  can come up not saving its settings until it is restarted. Nothing is
-  written or exposed, and 0.14.2's own update had the same moment, longer.
+- **Updating from 0.14.2 has a moment, well under a millisecond when
+  measured, in which the helper cannot answer**, while git rewrites its
+  first file. Anything the plugin asks in that moment gets no reply. A
+  player or status check reads that as no answer rather than as a failure.
+  A playlist or guide refresh that lands in it reports `Helper produced no
+  output` and keeps the channels and guide data you had until the next
+  refresh. A shell that is starting at that exact moment can come up not
+  saving its settings until it is restarted. Nothing is written or exposed,
+  and 0.14.2's own update had the same moment, longer.
 
 ## 0.14.2 (2026-10-17)
 

@@ -286,7 +286,7 @@ def memory_refusal(label: str, host: str, held: dict[str, Any]) -> HelperError:
     Called after the run's own objects are released and the limit lifted
     (release_memory_limit), which is what leaves room to compose it."""
     limit = int(held.get("limit") or 0)
-    bound = "the %d MB of memory this helper allows itself" % (limit // (1024 * 1024)) if limit else "the memory available"
+    bound = "the %d MiB of memory this helper allows itself" % (limit // (1024 * 1024)) if limit else "the memory available"
     return HelperError("too_large", "%s from %s needs more than %s" % (label, host or "the source", bound))
 
 

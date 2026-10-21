@@ -204,7 +204,7 @@ Failure (exit 1), cache kept if it existed:
 
 Error codes: `no_source`, `unsupported_scheme`, `unsafe_path`, `not_found`,
 `too_large` (the input cap, or since D-M3U-1 the memory limit: "needs more
-than the 512 MB of memory this helper allows itself"), `http_<status>`,
+than the 512 MiB of memory this helper allows itself"), `http_<status>`,
 `network`, `bad_gzip`, `empty_playlist`,
 `not_implemented`. Stubs exit 3 with
 `{"ok": false, "kind": "<cmd>", "error": {"code": "not_implemented", "message": "not implemented"}}`.
@@ -3012,18 +3012,22 @@ Performance budget (10k channels):
     | a channel-number attribute | 32 (`M3U_MAX_CHNO`) | dropped |
     | stream URL | 4,096 (`M3U_MAX_URL`) | the entry skipped |
     | `tvg-logo` | 2,048 (`M3U_MAX_LOGO_URL`) | dropped |
-    | `#EXTVLCOPT` / `#KODIPROP` key, header name | 64 (`M3U_MAX_OPTION_KEY`) | dropped |
+    | `#EXTVLCOPT` / `#KODIPROP` key, header name | 64 (`M3U_MAX_OPTION_KEY`), counted with the stored `vlc:` / `kodi:` prefix, so 60 / 59 as the playlist writes it | dropped |
     | its value, one header value | 1,024 (`M3U_MAX_OPTION_VALUE`) | dropped |
     | headers, options, per channel | 16 each (`M3U_MAX_OPTIONS`) | the rest dropped |
     | `url-tvg` / `x-tvg-url` | 2,048 (`M3U_MAX_EPG_HINT`) | dropped |
     | per-channel warnings | 20 (`M3U_MAX_CHANNEL_WARNINGS`) | counted in one more line |
+
+    The derived `nameKey` and `searchKey` can reach three times their source, because NFD splits a
+    composition-excluded character into up to three code points (measured: 600 x U+FB2C gives name
+    512, nameKey 1,536, searchKey 1,921); still a constant per channel.
 
     Display text is cut (trailing whitespace trimmed, nothing appended); an
     identifier, a URL or an option value is dropped, because a truncated
     one is a different and wrong value. Each kind is counted and reported
     once in `warnings`, as the counts already were. The figures sit above
     everything the 23 playlist fixtures carry (tests/fixtures and the dev
-    harness's, 284 channels, measured 2026-10-20: the longest title 290,
+    harness's, 285 channels, measured 2026-10-20: the longest title 290,
     group-title 24, one group 18, three groups per entry, `#EXTGRP` 9,
     `tvg-id` 26, `tvg-name` 18, `tvg-chno` 4, `tvg-logo` 77, stream URL 84,
     option key 37 and value 88, three headers and two options per
@@ -3052,14 +3056,16 @@ Performance budget (10k channels):
     field and asserting what each channel comes out as
     (`tests/test_m3u_bounds.py`); never by building the payload.
 15. The verbs that parse a provider's bytes run under a memory limit
-    (D-M3U-1, defence in depth: this is the fourth helper memory path a
-    marketplace reviewer has found, after D-QA-06's gzip, D-EPG-6's
-    entities and the logo decoder, and the service's 180 s watchdog bounds
-    time only). `playlist` (the refresh and the source probe) and `epg` set
+    (D-M3U-1, defence in depth: the marketplace maintainer's second memory
+    finding in the helper, after D-EPG-6's entities, and the fourth memory
+    path in the plugin's handling of provider bytes, with D-QA-06's gzip
+    (found by this project's own QA) and the shell's logo decoder
+    (D-LOGO-11, D-LOGO-13); the service's 180 s watchdog bounds time
+    only). `playlist` (the refresh and the source probe) and `epg` set
     `RLIMIT_DATA` to `MEMORY_LIMIT_MIB` = 512 MiB (`limit_memory`) after the
     credential shield and before they fetch or parse, and a run that needs
     more ends with one `too_large` sentence carrying the host only --
-    `playlist from <host> needs more than the 512 MB of memory this helper
+    `playlist from <host> needs more than the 512 MiB of memory this helper
     allows itself` -- which the guide renders `Source too large` (the EPG
     banner `Guide data unavailable (Source too large)`); the previous cache
     is kept, as on any failed fetch. Measured on this machine, CPython

@@ -86,7 +86,7 @@ MAX_GROUPS = 2000
 # does for the counts above.
 #
 # Chosen from what real playlists carry, measured over all 23 playlist
-# fixtures (the test suite's and the dev harness's, on the dev branch; 284
+# fixtures (the test suite's and the dev harness's, on the dev branch; 285
 # channels, 2026-10-20): the longest title 290 (qa-attrs.m3u's deliberately
 # long one; the next is 89), group-title 24, one group 18, groups per entry 3, #EXTGRP 9,
 # tvg-id 26, tvg-name 18, tvg-chno 4, tvg-logo 77, stream URL 84, option
@@ -110,9 +110,11 @@ M3U_MAX_EPG_HINT = 2048         # url-tvg / x-tvg-url: dropped (MAX_SOURCE_URL's
 # line the service collects (lane A's OQ-6, D-CLIP-1). The first ones are
 # kept verbatim, the rest counted in one more line.
 M3U_MAX_CHANNEL_WARNINGS = 20
-# D-M3U-1, defence in depth: the fourth helper memory path a marketplace
-# reviewer has found (D-QA-06's gzip, D-EPG-6's entities, D-LOGO-11's
-# decoder, this), and the service's 180 s watchdog bounds time only. So the
+# D-M3U-1, defence in depth: the marketplace maintainer's second memory
+# finding in the helper (after D-EPG-6's entities), and the fourth memory
+# path in the plugin's handling of provider bytes (with D-QA-06's gzip,
+# found by our own QA, and the shell's logo decoder, D-LOGO-11/13); the
+# service's 180 s watchdog bounds time only. So the
 # verbs that parse provider bytes -- `playlist` (the refresh and the source
 # probe both run it) and `epg` -- set RLIMIT_DATA to this before they fetch
 # or parse anything (limit_memory, which says why DATA and not AS), and a
