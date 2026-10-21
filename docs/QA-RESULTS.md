@@ -13348,6 +13348,17 @@ reply during the update window is a failure on the playlist and EPG paths,
 and "real playlists stay far below" had never been measured; corrected from
 its replacements in `91b8a66`.
 
+**The cut, 2026-10-21.** The release commit `2e66a73` (version 0.14.3, the
+notes dated for the day) gated green at load 2.4 -- after the P3 sweep's
+five simulator processes were paused by recorded pid, because at load 9-11
+the 10k parse-and-write test failed on the release and on `6f1d176` alike
+(interleaved: 1,131 / 1,107 / 1,131 ms against 1,065 / 1,110 / 1,295 ms)
+and the stub player's seek self-test, which nothing here touches, failed
+3 of 3. **key-scenario live on the release tree: 129 passed, 0 failed**
+(transcript `key-20261021-002135-3621644`, 465.7 s; an early run on
+`c4d02e7` read the same). `release.py build` wrote `main` 205ee12 (parent
+85206f2, tag `v0.14.3`, 42 files); `dev`, `main` and the tag pushed.
+
 ### D-REL-7's two follow-ups: a checked stub, before any release ships the split
 
 **Merged onto `dev` 2026-10-17 as `92a2a16`, after the split itself
