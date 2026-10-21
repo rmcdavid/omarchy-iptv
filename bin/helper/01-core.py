@@ -86,9 +86,9 @@ MAX_GROUPS = 2000
 # does for the counts above.
 #
 # Chosen from what real playlists carry, measured over all 23 playlist
-# fixtures (tests/fixtures and the dev harness's, 284 channels, 2026-10-20):
-# the longest title 290 (qa-attrs.m3u's deliberately long one; the next is
-# under 40), group-title 24, one group 18, groups per entry 3, #EXTGRP 9,
+# fixtures (the test suite's and the dev harness's, on the dev branch; 284
+# channels, 2026-10-20): the longest title 290 (qa-attrs.m3u's deliberately
+# long one; the next is 89), group-title 24, one group 18, groups per entry 3, #EXTGRP 9,
 # tvg-id 26, tvg-name 18, tvg-chno 4, tvg-logo 77, stream URL 84, option
 # key 37 and value 88, headers 3 and options 2 per channel. Every cap sits
 # well above those, so no fixture's output moves (pinned by the D-M3U-1
@@ -114,10 +114,19 @@ M3U_MAX_CHANNEL_WARNINGS = 20
 # reviewer has found (D-QA-06's gzip, D-EPG-6's entities, D-LOGO-11's
 # decoder, this), and the service's 180 s watchdog bounds time only. So the
 # verbs that parse provider bytes -- `playlist` (the refresh and the source
-# probe both run it) and `epg` -- set RLIMIT_AS to this before they fetch
-# or parse anything (limit_memory), and a run that needs more ends with
-# one sentence under the code `too_large`, never a traceback.
-# MEMORY_LIMIT_PLACEHOLDER
+# probe both run it) and `epg` -- set RLIMIT_DATA to this before they fetch
+# or parse anything (limit_memory, which says why DATA and not AS), and a
+# run that needs more ends with one sentence under the code `too_large`,
+# never a traceback.
+#
+# From the measured need of the largest ordinary inputs, each the smallest
+# RLIMIT_DATA the run succeeds under (bisected to 2 MiB, CPython 3.14.7,
+# 2026-10-20; the playlists from the dev branch's gen-playlist.py): 10,000
+# channels 34-36 MiB; 50,000 (MAX_CHANNELS) 108; a 64 MiB playlist of
+# 280,000 ordinary entries 160, and 256 with a flag emoji in one name in
+# ten; a 62.4 MB guide for 10,000 channels 138, and a 54.9 MB one for
+# 48,000, 206. So 2.0x over the worst of them, 4.7x over MAX_CHANNELS, and
+# a 64 MiB input cannot reach it with ordinary content.
 MEMORY_LIMIT_MIB = 512
 # Tests and QA LOWER the limit through this (in MiB); a value above the
 # default is ignored, so the variable can never be used to lift it. The

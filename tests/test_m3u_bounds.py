@@ -200,12 +200,12 @@ class ChannelBoundTest(unittest.TestCase):
                 'tvg-chno="%s",%s\n#EXTVLCOPT:http-user-agent=%s\n%shttp://x.test/a\n') % (
                     long, long, long, ";".join([long] * 20), long, long, long, long, options)
         channel = parse(text)["channels"][0]
+        self.assertLess(len(json.dumps(channel)), 50000)
         # Every cap summed, with room for the JSON punctuation: the figure a
         # channel can never exceed, however long its input lines are.
         ceiling = (4 * helper.M3U_MAX_NAME + helper.M3U_MAX_GROUP + helper.M3U_MAX_GROUP_TEXT * 2
                    + helper.M3U_MAX_TVG_ID * 2 + helper.M3U_MAX_URL + helper.M3U_MAX_LOGO_URL + helper.M3U_MAX_CHNO
                    + 2 * helper.M3U_MAX_OPTIONS * (helper.M3U_MAX_OPTION_KEY + helper.M3U_MAX_OPTION_VALUE + 8) + 1024)
-        self.assertLess(len(json.dumps(channel)), 50000)
         self.assertLess(len(json.dumps(channel)), ceiling)
 
 
@@ -300,8 +300,9 @@ class MemoryLimitTest(unittest.TestCase):
     def test_the_variable_can_only_lower_the_limit(self):
         with mock.patch.dict(os.environ, {LIMIT_ENV: "100000"}):
             self.assertEqual(helper.memory_limit_bytes(), helper.MEMORY_LIMIT_MIB * 1024 * 1024)
-        with mock.patch.dict(os.environ, {LIMIT_ENV: "nonsense"}):
-            self.assertEqual(helper.memory_limit_bytes(), helper.MEMORY_LIMIT_MIB * 1024 * 1024)
+        for value in ("nonsense", "1e400", "-5", "0", "12.5", ""):
+            with mock.patch.dict(os.environ, {LIMIT_ENV: value}):
+                self.assertEqual(helper.memory_limit_bytes(), helper.MEMORY_LIMIT_MIB * 1024 * 1024, value)
         with mock.patch.dict(os.environ, {LIMIT_ENV: "64"}):
             self.assertEqual(helper.memory_limit_bytes(), 64 * 1024 * 1024)
 
@@ -388,6 +389,43 @@ class PrebuiltTlsContextTest(unittest.TestCase):
         self.assertRegex(status["error"]["message"], "(?i)certificate")
         self.assertEqual(seen, [])                     # no request was ever sent
         self.assertNotIn(SECRET, stdout + stderr)
+
+
+class LineByLineTest(unittest.TestCase):
+    """The `playlist` verb parses playlist_lines(bytes), never one str of
+    the whole document (D-M3U-1's measurement: a flag emoji widens a str to
+    four bytes per character). The two must give the same result, invalid
+    UTF-8, a BOM, CRLF and gzip included."""
+
+    VECTORS = [
+        b"\xef\xbb\xbf#EXTM3U\r\n#EXTINF:-1 group-title=\"A\",One\r\nhttp://x.test/1\r\n",
+        b"#EXTM3U\n#EXTINF:-1,Bad \xe2\x82\n#EXTINF:-1,Cut \xf0\x9f\x87\nhttp://x.test/2\n",
+        b"#EXTM3U\n#EXTINF:-1,\xf0\x9f\x87\xba\xf0\x9f\x87\xb8 Flag\nhttp://x.test/3\n\xff\xfe\n",
+        b"#EXTINF:-1,No header\nhttp://x.test/4",
+        b"",
+    ]
+
+    def test_lines_and_whole_text_parse_the_same(self):
+        import gzip
+        files = sorted(p for base in (FIXTURES, HARNESS_FIXTURES) for p in base.rglob("*") if p.is_file() and ".m3u" in p.name)
+        cases = [p.read_bytes() for p in files] + self.VECTORS
+        for data in cases + [gzip.compress(data, mtime=0) for data in self.VECTORS[:3]]:
+            whole = helper.parse_m3u(helper.decode_text(data))
+            lines = helper.parse_m3u(helper.playlist_lines(data))
+            self.assertEqual(lines, whole, data[:60])
+
+    def test_the_verb_parses_line_by_line(self):
+        seen = []
+        real = helper.parse_m3u
+
+        def spy(text):
+            seen.append(type(text).__name__)
+            return real(text)
+        out = io.StringIO()
+        with tempfile.TemporaryDirectory() as cache, mock.patch.object(helper, "parse_m3u", side_effect=spy), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(helper.main(["playlist", "--url", str(FIXTURES / "basic.m3u"), "--cache-dir", cache]), 0)
+        self.assertEqual(seen, ["generator"])
 
 
 if __name__ == "__main__":

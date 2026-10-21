@@ -143,15 +143,13 @@ MEMORY_HELD: dict[str, Any] = {"limit": 0, "previous": None}
 
 def memory_limit_bytes() -> int:
     """The data limit a fetch verb sets (D-M3U-1): MEMORY_LIMIT_MIB,
-    or a LOWER figure from MEMORY_LIMIT_ENV. A higher one, or one that does
-    not parse, is ignored, so the variable can only tighten the limit."""
+    or a LOWER figure from MEMORY_LIMIT_ENV, in whole MiB. A higher one, or
+    anything but one to seven digits, is ignored, so the variable can only
+    tighten the limit."""
     limit = MEMORY_LIMIT_MIB * 1024 * 1024
-    override = os.environ.get(MEMORY_LIMIT_ENV, "")
-    if override:
-        try:
-            wanted = int(float(override) * 1024 * 1024)
-        except (ValueError, OverflowError):
-            wanted = 0
+    override = os.environ.get(MEMORY_LIMIT_ENV, "").strip()
+    if re.fullmatch(r"[0-9]{1,7}", override):
+        wanted = int(override) * 1024 * 1024
         if 0 < wanted < limit:
             limit = wanted
     return limit
@@ -232,7 +230,7 @@ def limit_memory(preload: tuple[str, ...] = FETCH_PRELOAD) -> dict[str, Any]:
     module and calls a verb in its own process would otherwise hold its
     whole test runner to the limit for the rest of the run, so there the
     verb runs unbounded and the limit is observed by running the helper as
-    a subprocess, the way the service does (tests/test_m3u_bounds.py).
+    a subprocess, the way the service does (the D-M3U-1 tests, dev branch).
 
     The record is also kept in MEMORY_HELD, which main() reads when a
     MemoryError escapes a verb anyway, to lift the limit before it speaks."""
@@ -350,6 +348,26 @@ def too_large_inflated(label: str) -> HelperError:
 def decode_text(data: bytes, label: str = "playlist") -> str:
     """UTF-8 text; gzip (by magic bytes) is inflated with the same 64 MB cap
     as the download so a gzip bomb cannot exhaust memory (D-QA-06)."""
+    return inflate_source(data, label).decode("utf-8", errors="replace")
+
+
+def playlist_lines(data: bytes, label: str = "playlist") -> Any:
+    """The source's lines, decoded one at a time, each with its line break.
+
+    D-M3U-1. decode_text's one str is what parse_m3u used to walk, and a str
+    is stored at the width of its widest character: a 64 MiB playlist with a
+    flag emoji in one name in ten (a common provider habit) became a 256 MiB
+    str, and its split another copy, which put the verb at 474 MiB of a
+    512 MiB limit. Line by line, the text never exists whole. The result is
+    identical: a line break is ASCII and can sit inside no UTF-8 sequence,
+    so the decoder starts every line fresh either way, and errors="replace"
+    replaces exactly what decoding the whole would have."""
+    for raw in io.BytesIO(inflate_source(data, label)):
+        yield raw.decode("utf-8", errors="replace")
+
+
+def inflate_source(data: bytes, label: str = "playlist") -> bytes:
+    """`data`, gunzipped when it is gzip (by magic bytes), under the cap."""
     if data[:2] == b"\x1f\x8b":
         try:
             with gzip.GzipFile(fileobj=io.BytesIO(data), mode="rb") as stream:
@@ -358,7 +376,7 @@ def decode_text(data: bytes, label: str = "playlist") -> str:
             raise HelperError("bad_gzip", "could not decompress %s: %s" % (label, error))
         if len(data) > MAX_SOURCE_BYTES:
             raise too_large_inflated(label)
-    return data.decode("utf-8", errors="replace")
+    return data
 
 
 def fetch_source(url: str, timeout: float) -> str:
@@ -635,8 +653,8 @@ def cmd_playlist(args: argparse.Namespace) -> int:
             # the verb has no required argument any more, because the shell
             # never passes one.
             raise HelperError("bad_url", "no playlist URL: pass --url or set $%s" % URL_ENV)
-        text = fetch_source(url, args.timeout)
-        parsed = parse_m3u(text)
+        text = fetch_bytes(url, args.timeout, "playlist")
+        parsed = parse_m3u(playlist_lines(text))
         if not parsed["channels"]:
             if not parsed["isPlaylist"]:
                 raise HelperError("not_a_playlist", "source from %s is not an M3U playlist (no #EXTM3U or #EXTINF lines)" % source_host(url))

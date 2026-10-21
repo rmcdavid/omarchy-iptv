@@ -537,8 +537,14 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     return channel
 
 
-def parse_m3u(text: str) -> dict[str, Any]:
+def parse_m3u(text: Any) -> dict[str, Any]:
     """Tolerant M3U/M3U8 parser.
+
+    `text` is the playlist as one str, or its lines as any iterable of str
+    (playlist_lines, which is how the `playlist` verb calls it, D-M3U-1: a
+    whole-document str costs up to four bytes per character for EVERY
+    character once one of them is outside the BMP, and a flag emoji is).
+    The two give the same result; a line may keep its line break.
 
     Understands #EXTM3U (url-tvg / x-tvg-url hint), #EXTINF with quoted or
     bare attributes and a title that may contain commas (comma optional),
@@ -587,10 +593,19 @@ def parse_m3u(text: str) -> dict[str, Any]:
     is_playlist = False
     bounds: dict[str, int] = {}
 
-    if text.startswith("\ufeff"):
-        text = text[1:]
+    if isinstance(text, str):
+        if text.startswith("\ufeff"):
+            text = text[1:]
+        lines: Any = text.split("\n")
+    else:
+        lines = text
+    first = True
 
-    for raw in text.split("\n"):
+    for raw in lines:
+        if first:
+            first = False
+            if raw.startswith("\ufeff"):
+                raw = raw[1:]
         line = raw.strip()
         if not line:
             continue
