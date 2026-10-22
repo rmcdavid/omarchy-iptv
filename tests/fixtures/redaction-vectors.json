@@ -464,6 +464,15 @@
     "a@",
     "b.example.test"
    ]
+  },
+  {
+   "why": "R32a': '&' ends the printed host too (RFC reg-name admits it), so a parameter glued to the host never prints -- free text on purpose, as the ';' and '=' vectors",
+   "text": "fetch http://h.example.test&password=P4SSW0RD/x failed",
+   "host": "h.example.test",
+   "mustNotAppear": [
+    "password",
+    "P4SSW0RD"
+   ]
   }
  ]
 }
