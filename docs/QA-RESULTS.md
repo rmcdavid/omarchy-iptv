@@ -12829,7 +12829,7 @@ state file was read read-only and holds no userinfo.
 **Two P3s, both real.** The new comment said `redactUrls` cuts over an isolated
 authority; it does not. It bounds the userinfo scan at `/` and whitespace only,
 never at `?` or `#`, so `redactUrls("http://h.test?a=b@c")` returns `"c"` and
-`sourceLabel` agrees. It never under-redacts, and anything through
+`sourceLabel` agrees. It never under-redact (corrected 2026-10-21, D-DOC-20: D-SINK-23 found a query password let through on a URL with no path, so this held for the shapes then tested, not for every URL)s, and anything through
 `validateSourceUrl` carries a path, so the Sources path is closed; but the
 sentence told the next reader a neighbour was safe in a way it is not, which is
 the reasoning that let D-SINK-1 sit three thousand lines from D-SINK-17. And the
@@ -13314,6 +13314,16 @@ which checks the location and that the entry is an object and nothing else;
 the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
+
+### The bounds sweep, round 2 (2026-10-21): three lanes off the round-1 integration, and the rulings R32
+
+**Lane H (`lane-bounds-h`, `8a3a0de`)**: D-EPG-10 (without an index the parse admits at most MAX_CHANNELS guide channels and refuses ids over 256 characters, counted by programme), D-EPG-8 (the qualifier strip without a regex, equal to the old pattern on 20,000 seeded names; display-names folded and cut first; every helper regex graded in a new gate step, `scripts/check-helper-regex.py`), D-EPG-9 (one backward pass, byte-identical output), the EPG counted sentences, and the round-1 rechecks' items; under rule 15 it fixed **D-PERF-7**, **D-PERF-8**, **D-PERF-9** and **D-PERF-10** and found **D-PERF-6** open. Its recheck: NOT MERGEABLE, one P1 -- `_EPG_NAME_NOISE` is still quadratic and the guard calls it linear (**D-EPG-12**) -- and three P3s.
+
+**Lane G (`lane-bounds-g`, `6383300`)**: D-SRC-58, D-LOGO-15, D-LOGO-16, D-SRC-59, D-SRC-60, D-LOGO-18 fixed and D-LOGO-17 narrowed; under rule 15 **D-SRC-61** fixed and **D-SRC-62**, **D-LOGO-20**, **D-LOGO-21**, **D-LOGO-22** found. Its recheck: MERGEABLE (29 of 31 new tests red on the base; 9 of 12 Python and 6 of 6 node mutations red), four P3s: **F-HARNESS-36**, **D-LOGO-23**, three unpinned decisions, two README sentences. Merged into `lane-bounds-int` as `c4784d2`.
+
+**Lane S (`lane-bounds-s`, `f22b092`, `b394cc2`)**: D-SG-3 (null-prototype keyed maps, pinned on V4 by an offscreen probe as well as node), D-PERF-3 (native trims; the gate now refuses the trim idioms and `trimEnd`/`trimStart`, which V4 lacks: **F-GATE-3**, **F-GATE-4**, **F-GATE-5**), D-SINK-23, D-SINK-24, D-SINK-25, D-PERF-4, D-DOC-19; under rule 10 and 15 **F-HARNESS-37**, **F-HARNESS-38**, **D-SG-4**, **D-SINK-26**, **D-DOC-20**. Its recheck: NOT MERGEABLE on a P1 the lane's D-SINK-25 refusal introduced (**D-SINK-27**: a stored Xtream or WebDAV link with `me@mail.test` in its path is dropped after the upgrade), two P2s on the redactors (**D-SINK-28**; D-SINK-24 not closed for bearer and basic-auth values) and one weak check (**F-HARNESS-39**).
+
+The rulings R32 are in the decisions log. Round 3 fixes H and S from these and the integration follows.
 
 ### The bounds sweep, round 1 (2026-10-21): two lanes and a review through the maintainer's lens
 
