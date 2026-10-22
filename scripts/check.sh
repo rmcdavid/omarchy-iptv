@@ -555,7 +555,15 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2984}
 # keeps the parked pair and prints its hosts only), test_model_regex_guard's
 # R33d test (+1: `globalThis.RegExp(` and `window.RegExp(`); both red on
 # fe40b2c (the lane report).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1487}
+# 2026-10-22, lane-r7-docs (round 7: D-SINK-37, D-DOC-22, D-DOC-23,
+# D-DOC-24): 1485 -> 1492 -- tests/test_doc_host_mode.py (+7), the joins
+# between the documents' mode sentences and the host scripts' lines, the
+# backup names and the scripts' templates, UX-SOURCES 2.3's caps and the
+# model. Red on fe40b2c's documents (7/7) and on a host copy with one
+# command changed (2/7, 4/7); see the lane report.
+# 2026-10-22, lane-r8 (the round 7 merge): the two lanes' floors added,
+# 1487 + 7 = 1494 -- both lanes' tests are on the merged tree.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1494}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

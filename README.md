@@ -123,13 +123,36 @@ code naming the active source, and the plugin never writes a URL into that
 file. A URL still passes through it in two cases, both covered under the next
 heading: the one an install updated from 0.13.6 or earlier still has in it
 until the plugin moves it into Sources and takes it out -- at the first shell
-start on this version, at a later one if that start cannot save the move, or,
-while Sources already holds 50 sources, only once one is removed -- and one you
-put there yourself with `omarchy bar set`, which the plugin
+start on this version, or at a later one if that start cannot save the move;
+while Sources already holds 50 sources the playlist and its guide URL are
+parked in `state.json`, not left on the entry, until one is removed -- and one
+you put there yourself with `omarchy bar set`, which the plugin
 does not read and removes on its next write. This paragraph has been wrong before — two
 sentences once said two files when there were three — so the count here is
 re-derived for this version rather than copied: two the plugin owns and keeps
 a URL in, and one it does not own that a URL only passes through.
+
+One more place a URL can rest, made by the host and not the plugin, and
+not counted above because it holds only what the shell's file held when the
+copy was taken: `omarchy refresh shell` and
+`omarchy-refresh-config omarchy/shell.json` save the old `shell.json` beside
+the new one as `shell.json.bak.<number>` (the number is the time of the copy),
+and the Omarchy 4 upgrade saves it as
+`shell.json.omarchy-upgrade-to-quattro.<suffix>.bak`. Each holds this
+plugin's entry as it was then, URL included if one was on it, and keeps the
+permissions `shell.json` itself had at the time, never wider: a private
+(0600) file gives a private backup, a readable (0644) one gives a readable
+backup under the usual umask 022 (the refresh copy is narrowed by a stricter
+umask; the upgrade's keeps the mode exactly), measured on this version's
+Omarchy. So a backup is readable by other accounts only if the
+file it copied already was -- an install from before 0.13.3, which had no
+permission check and kept the URL on the entry, that ran one of those
+commands; or a file `omarchy-reinstall-configs` had just made readable again
+and `omarchy bar set` had put a URL on before the plugin's next start. The
+plugin never touches those copies: its permission check reaches
+`shell.json` and nothing beside it. `ls -l ~/.config/omarchy/shell.json*`
+shows them; `chmod 600` or remove any you do not need (Troubleshooting has
+the same one-liner).
 
 **What the plugin stores, and three things to know about it.** Moving your URL
 out of the shell's settings file costs three things, and none of them is
@@ -248,15 +271,21 @@ permission change in the next paragraph stays.
 **One permission the plugin changes on a file that is not its own.**
 `shell.json` is the shell's settings file, shared by every bar widget you
 have, and it does not always arrive private. The copy Omarchy ships is
-readable by everyone on the machine; a `shell.json` created from it keeps
-whatever your umask gives it, which is usually readable by everyone too, and
-rewriting a file that already exists leaves its permissions alone — so a
-machine that started out readable stays readable. The plugin no longer puts
+readable by everyone on the machine; a `shell.json` created from it gets
+whatever your umask gives it, which is usually readable by everyone too. The
+shell's own writes — your settings, `omarchy bar set`, enabling a plugin —
+keep whatever permissions the file has, so a file that arrived readable stays
+readable through them; `omarchy bar defaults` and the other `omarchy bar`
+layout commands rewrite it private (0600) whatever it was; and
+`omarchy-reinstall-configs` copies the shipped file over yours and makes it
+readable again, with the shipped contents, so your entry and anything on it
+are gone rather than exposed. The plugin no longer puts
 your provider URL in that file, but one can still get in: an install updated
 from 0.13.6 or earlier has one in it until the plugin moves it into Sources and
-takes it out (at the first shell start on this version, at a later one if that
-start cannot save the move, or, while Sources already holds 50 sources, only
-once one is removed), and you can still put one there
+takes it out (at the first shell start on this version, or at a later one if
+that start cannot save the move; while Sources already holds 50 sources the
+URL is parked in `state.json`, not left on the entry, until one is removed),
+and you can still put one there
 yourself with `omarchy bar set`, which the plugin does not read and removes on
 its next write. So the plugin still takes group and other access away from that single
 file — at every shell start, and again after each of its own writes: on an
@@ -277,11 +306,16 @@ refusal is kept for the write that would. What the check cannot cover either
 way is `omarchy bar set`: that write is the shell's, not the plugin's, and it
 lands whatever the permissions are, for as long as it takes the plugin to
 notice and remove it. This is
-not a one-off repair: the file can be recreated readable again later, by
-`omarchy-refresh-config` among other things, and nothing tells a plugin when
+not a one-off repair: the file can be made readable again later —
+`omarchy-reinstall-configs` copies the shipped file over yours at its shipped
+permissions, and `omarchy-refresh-config` or the Omarchy upgrade create a
+missing one at your umask's — and nothing tells a plugin when
 that happens, so the check runs at every shell start and again before each
 write. Between those moments the plugin is not watching, and a URL already in
-the file would stay readable until the next one.
+the file would stay readable until the next one. The check also does not
+reach the backup copies the host makes of the file (`shell.json.bak.<number>`
+and `shell.json.omarchy-upgrade-to-quattro.<suffix>.bak`, under Settings
+above): each keeps the permissions `shell.json` had when it was copied.
 
 One place they can escape that, worth knowing, and one that used to:
 
@@ -1231,6 +1265,19 @@ Nothing inside the plugin directory is written at runtime.
   regular file, `chmod 600 ~/.config/omarchy/shell.json` and add the source
   again. If it belongs to another account or is a symlink, the plugin refuses
   to change it rather than guess, and that is yours to sort out.
+- Backup copies of `shell.json` beside it: `omarchy refresh shell` and
+  `omarchy-refresh-config omarchy/shell.json` leave the old file as
+  `shell.json.bak.<number>`, and the Omarchy 4 upgrade as
+  `shell.json.omarchy-upgrade-to-quattro.<suffix>.bak`. Each holds the
+  plugin's settings as they were, a playlist URL included if one was on the
+  entry then, with the permissions `shell.json` had at the time, never wider
+  (a 0600 file gives a 0600 copy, a 0644 one a 0644 copy under the usual
+  umask 022); the plugin's permission check
+  never touches them. `ls -l ~/.config/omarchy/shell.json*` to see them, then
+  `chmod 600 ~/.config/omarchy/shell.json.bak.*` (and the upgrade's `*.bak`)
+  or remove the ones you do not need. The permission check reaches
+  `shell.json` alone, on purpose: a check that walked its neighbours would be
+  changing files the plugin has no business in.
 - The guide's status line shows the helper's own error text (host name only,
   never the URL). To see the same JSON in a terminal, for a free list:
   `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv playlist --url <url>`.

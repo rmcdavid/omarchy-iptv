@@ -520,8 +520,10 @@ of only as a wrong-password failure; now the validator refuses the value
 on the result line and the user sees why). Typed text never carries a
 control character (Qt's own acceptance rule, mirrored by `typedText`), so
 only a paste can. Cap at the field's limit (`LIMITS.url` 2048,
-`LIMITS.label` 40, `LIMITS.server` 256, `LIMITS.user` / `LIMITS.pass`
-128). URL fields are also trimmed on paste (the six ASCII whitespace
+`LIMITS.label` 64, `LIMITS.server` 512, `LIMITS.user` / `LIMITS.pass`
+256 -- read from `model/sources.mjs` on 2026-10-22, D-DOC-24; this sentence
+carried 40, 256 and 128 from an older draft, and
+`tests/test_doc_host_mode.py` now pins it to the code). URL fields are also trimmed on paste (the six ASCII whitespace
 characters and NBSP off both ends: a trailing newline from `wl-copy` never
 reaches the validator); every field is trimmed on submit (so a label can
 be typed with spaces).
