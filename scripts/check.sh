@@ -286,7 +286,13 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # sets, never by a key a provider can spell) and "D-EPG-11 E2-5" (count is
 # distinct ids on both paths). Both red on lane-epg11's tip 40c0006 (2713
 # checks, 4 failures there: these two and the two pins that now carry `kind`).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2713}
+# 2026-10-22, lane-epg11-f (the round's recheck, blocker 1, rule 11): 2713 ->
+# 2714. epgEntry's OWN tag gate: over an untagged map whose provider id `map`
+# carries now/next, the ids `now` and `next` answer null. The E2-3 check
+# stayed green with that gate reverted to the old presence guard, so nothing
+# pinned it; this one is red on a 3d03526 export carrying that guard (2714
+# checks, 1 failure: the programme records handed back).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2714}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity

@@ -73,7 +73,7 @@ python3 scripts/dev-harness/spikes/epg11-store/run-probe.py parse IN/c4000/epg-n
 
 A per-channel figure is a SLOPE between two sizes (the 2,000 and 4,000
 channel files, or 4,000 and 10,000), not one file over the baseline: Qt
-offscreen's own footprint is about 74 MiB and moves by a megabyte between
+offscreen's own footprint is about 72.5 MiB and moves by a megabyte between
 runs. Timing modes print milliseconds per call and microseconds per tick
 from `Date.now()`, so `reps` is chosen to be readable in whole
 milliseconds. It is for a human at a terminal, never for the gate: a hold
@@ -83,20 +83,28 @@ run takes about three seconds, a 2,000-tick run about four.
 
 Qt 6.11.2 (`Qml Runtime 6.11.2`, qt6-declarative), `QT_QPA_PLATFORM=offscreen`,
 Linux 7.2.5, util-linux `prlimit`, the one-minute load average 2.7-2.9 for
-the timing runs. Resident figures are `steady_rss_kb` of the `RESULT` line;
-the tree under test is lane-epg11 at `9e58749` (the same model as the
-merged code) and the base is a `git archive 2bb05c6` export. Files as
-above, detail on every programme.
+the timing runs. Resident figures are `steady_rss_kb` of the `RESULT` line,
+VmRSS in KiB, converted to MiB at 1,024 KiB. (The round's first write-up
+and both of its lenses divided the KiB by 1,000 and called the result MiB,
+so every absolute they state is 2.4% high: 99.9 where the table below says
+97.6, and the 4,000-channel absolutes they quote, 81.8 / 102.0-102.3 /
+83.9-84.1 over 74.3, are the matrix's 81,768-81,924 / 102,036-102,260 /
+83,912-84,108 over 74,260 KiB the same way, which is 79.9-80.0 / 99.6-99.9
+/ 81.9-82.1 over 72.5 MiB. The per-channel slopes, the deltas, the ratios
+and every conclusion were computed in KiB and are unchanged; corrected on
+the recheck, 2026-10-22.) The tree under test is lane-epg11 at `9e58749`
+(the same model as the merged code) and the base is a `git archive 2bb05c6`
+export. Files as above, detail on every programme.
 
 Per channel, as the slope between the 2,000 and 4,000 channel files, two
 passes each:
 
 | held | KiB a channel | at 10,000 channels (9,708 entries) |
 |---|---|---|
-| text alone | 1.83-1.91 | 93.0 MiB |
-| text + the parsed map (`parseEpgNow`, what the service held) | 7.13-7.18 | 146.8 MiB |
-| text + the store (`parseEpgNowStore`) | 2.50-2.56 | 99.9 MiB |
-| (empty baseline) | | 74.3 MiB |
+| text alone | 1.83-1.91 | 90.8 MiB (93,016 KiB) |
+| text + the parsed map (`parseEpgNow`, what the service held) | 7.13-7.18 | 143.4 MiB (146,792 KiB) |
+| text + the store (`parseEpgNowStore`) | 2.50-2.56 | 97.6 MiB (99,928 KiB) |
+| (empty baseline) | | 72.5 MiB (74,260 KiB) |
 
 so 7.2-7.4 KiB a channel for the old shape at 10,000 against about 2.6 for
 the store, the index about 0.7 KiB of it; +70 MiB against +25 over the
@@ -118,9 +126,10 @@ The tick is 2.1x the base's, about 0.3 ms moved onto each 30 s tick. Each
 `epgEntry` is a JSON.parse of one line of about 650 bytes and materialises
 the ~7 KiB of objects the old map held for that entry plus a UTF-16 slice,
 so a tick is about 110-120 KiB of garbage: measured NOT retained. The held
-RSS after 200 / 500 / 2,000 / 8,000 ticks (gc before the hold) read 117 /
-118 / 252 / 216 MiB, non-monotonic, and the old map path reaches the same
-248 MiB after 8,000 ticks of its own, so that is V4's collector high-water
+RSS after 200 / 500 / 2,000 / 8,000 ticks (gc before the hold) read 115 /
+116 / 246 / 211 MiB (117,452 / 118,492 / 251,968 / 216,472 KiB),
+non-monotonic, and the old map path reaches the same band, 242 MiB
+(247,668 KiB), after 8,000 ticks of its own, so that is V4's collector high-water
 and not the store (the performance lens's `rev-perf/timing.log`). The
 base's tick and the scroll are the lens's figures; the lane measured the
 store's tick only.
@@ -149,7 +158,7 @@ RESULT tree=wt-epg11-f mode=store file=epg-now.json rc=0 steady_rss_kb=77772 pea
 The lane's two passes the same day read 77,860 and 78,152 KiB steady for
 the same file (its `rss-matrix.log`), the text alone 76,092-76,160, the
 parsed map 80,472-80,652, over a one-channel baseline of 74,260-74,544. A
-re-run that reads within a few megabytes of 77.8 MiB steady, 973 entries,
+re-run that reads within a few megabytes of 75.9 MiB steady, 973 entries,
 `legacy=false` and `sharesText=true` is the same measurement; a store that
 no longer shares the V4 string, or an entry count that moves, is a change
 worth a look before the figures above are repeated.

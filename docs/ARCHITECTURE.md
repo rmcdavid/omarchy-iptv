@@ -2993,7 +2993,7 @@ Performance budget (10k channels):
 | Helper `playlist` | < 1.5 s for 10k entries on this machine (excluding network) | single pass regex parser, no DOM |
 | Helper `epg` | < 4 s for a 50 MB XMLTV | `xml.etree.iterparse`, programmes outside a +-24 h window dropped, gzip streamed |
 | `channels.json` | ~2 MB at 10k | omit empty keys, compact separators |
-| `epg-now.json` | about 1.9 MB at 10k with titles alone (1,858,336 bytes, 9,724 entries), 6.3 MB with a description, category and episode on now and next (6,347,940 bytes, 9,708 entries; measured 2026-10-22 over files the helper wrote from generated guides, the `epg11-store` spike on the dev branch; the "< 1 MB" this row gave before was never measured, D-DOC-21) | now/next only; the shell holds the text and an index, about 2.6 KiB a channel at 10k on the detail-bearing file (99.9 MiB resident against 93.0 for the text alone and 146.8 for the old parsed map, over a 74.3 MiB empty baseline), and parses one entry per realised row (D-EPG-11) |
+| `epg-now.json` | about 1.9 MB at 10k with titles alone (1,858,336 bytes, 9,724 entries), 6.3 MB with a description, category and episode on now and next (6,347,940 bytes, 9,708 entries; measured 2026-10-22 over files the helper wrote from generated guides, the `epg11-store` spike on the dev branch; the "< 1 MB" this row gave before was never measured, D-DOC-21) | now/next only; the shell holds the text and an index, about 2.6 KiB a channel at 10k on the detail-bearing file (97.6 MiB resident against 90.8 for the text alone and 143.4 for the old parsed map, over a 72.5 MiB empty baseline), and parses one entry per realised row (D-EPG-11) |
 | JSON.parse of channels in QML | ~50 ms, off the open path | happens on file load, not on summon |
 | Helper `logos --fetch`, cached-file check | ~45 us per cached file; the whole subprocess 375 -> 601 ms median over 5,000 cached logos, page cache warm (D-LOGO-11, helper lane) | one `LOGO_HEADER_BYTES` read per file, no decode, in the helper; cold cache unmeasured |
 
@@ -3593,8 +3593,8 @@ Performance budget (10k channels):
     one-channel baseline, **1.9 KiB a channel for the text alone, 7.0-7.2
     KiB for the text plus the parsed map** (the slopes between 2,000 and
     4,000 channels, two passes each: 1.83-2.02 and 7.13-7.24; at 10,000
-    channels 93.0 MiB and 146.7 MiB against a 74.3 MiB baseline, so about
-    7.4 KiB a channel). Entries are at most `MAX_CHANNELS` = 50,000: the
+    channels 90.8 MiB and 143.2-143.4 MiB against a 72.5 MiB baseline, so
+    about 7.4 KiB a channel). Entries are at most `MAX_CHANNELS` = 50,000: the
     playlist's distinct tvg-ids with a playlist index, and, without one,
     the first 50,000 guide channels, each key at most 256 code points (this
     said "the playlist's distinct tvg-ids" alone while a guide fetched
@@ -3626,10 +3626,10 @@ Performance budget (10k channels):
     holds it (R31c), which is right because the helper never writes an
     entry without a titled now or next (pinned in Python). Measured the
     same way on the same files: **2.0-2.6 KiB a channel for the text plus
-    the store** (slopes 2.02-2.56; 99.9 MiB at 10,000 channels, about 2.6
-    KiB a channel, the index about 0.7 KiB of it), so about **125 MiB at
+    the store** (slopes 2.02-2.56; 97.6 MiB at 10,000 channels, about 2.6
+    KiB a channel, the index about 0.7 KiB of it), so about **122 MiB at
     `MAX_CHANNELS`** (UNVERIFIED at that size, by the same extrapolation;
-    about 25 MiB at 10,000) in place of 340, and the recompute no longer
+    about 24 MiB at 10,000) in place of 340, and the recompute no longer
     rebuilds a graph: `parseEpgNowStore` over the 10,000-channel file is
     25.5-27.7 ms a call (10 calls, three passes) against 188-212 ms for the
     whole parse, both under a one-minute load average of 2.7-2.9. The tick

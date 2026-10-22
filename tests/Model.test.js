@@ -14424,6 +14424,21 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       '{"total":5,"withId":5,"matched":0,"carries":false}', '{"total":5,"withId":5,"matched":1,"carries":true}', null, null,
       "epg-store", "epg-store", "epg-store"])
 
+  // epgEntry's own tag gate, pinned on its own (the round's recheck, rule
+  // 11): the check above stays green with the gate reverted to the old
+  // presence guard (`epgStore && typeof epgStore === "object"`), because
+  // under that guard the map's `map` entry is read AS the legacy map and the
+  // ids looked up are simply not that entry's keys. The ids that ARE its
+  // keys tell the two apart: `now` and `next`. Through the old guard
+  // epgEntry(plain, "now") answered the programme record `{ title: "N" }`
+  // out of the provider entry filed under the tvg-id `map`; through the tag
+  // gate a plain map is never read, so every id answers null, its real one
+  // included.
+  checkCall("D-EPG-11 E2-3: epgEntry over an untagged map whose provider id `map` carries now/next answers null for `now` and `next` (the old presence guard read that entry as the legacy map and handed back the programme) and for the map's real id", () => {
+    const plain = { map: { now: { title: "N", start: NOW - 60, stop: NOW + 60 }, next: { title: "X", start: NOW + 60 } }, "a.tv": { now: { title: "A" } } }
+    return [Model.epgEntry(plain, "now"), Model.epgEntry(plain, "next"), Model.epgEntry(plain, "a.tv")]
+  }, [null, null, null])
+
   // E2-5 (the lens's remark): `count` is the number of DISTINCT ids on both
   // paths. The helper cannot write an id twice, but a hand-built file can;
   // the line walk keeps the LAST line for the id, as JSON.parse keeps the
