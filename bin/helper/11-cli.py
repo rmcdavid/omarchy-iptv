@@ -195,14 +195,21 @@ def cmd_config(args: argparse.Namespace) -> int:
 # ----------------------------------------------------------- clipboard (R8)
 
 def clipboard_deadline() -> float:
-    """Seconds the clipboard read may take (CLIPBOARD_TIMEOUT unless a test
-    shrinks it through CLIPBOARD_TIMEOUT_ENV)."""
+    """Seconds the clipboard read may take: CLIPBOARD_TIMEOUT, or LESS when a
+    test shrinks it through CLIPBOARD_TIMEOUT_ENV. The variable can only
+    lower the bound (F-HARNESS-36, R32f), like HTTP_DEADLINE_ENV and
+    MEMORY_LIMIT_ENV: it used to take any figure over 0.05, so the variable
+    that exists for tests could lift the 5 s the engineering rules (rule 5,
+    D-CLIP-1) and ARCHITECTURE state. The shell's clipboardWatchdog was the
+    outer bound either way."""
     override = os.environ.get(CLIPBOARD_TIMEOUT_ENV, "")
     if override:
         try:
-            return max(0.05, float(override))
+            wanted = float(override)
         except ValueError:
-            pass
+            return CLIPBOARD_TIMEOUT
+        if wanted == wanted:              # not NaN
+            return min(CLIPBOARD_TIMEOUT, max(0.05, wanted))
     return CLIPBOARD_TIMEOUT
 
 
@@ -533,6 +540,35 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# D-SRC-13's rule 15 sweep (2026-10-21): main()'s answer to a bug is part of
+# EVERY verb's reply, and the shell collects every helper verb's stdout and
+# stderr whole. The exception's own text is the one part of it no verb
+# composes -- `str(error)` can quote any input the bug was handed, whatever
+# its length -- so the structured message keeps its first
+# INTERNAL_MESSAGE_MAX characters and the traceback its first and last
+# INTERNAL_TRACE_MAX / 2, the middle counted. Both are cut AFTER the
+# redaction, so the redactor always sees a whole URL: a cut can shorten a
+# redacted `scheme://host`, never leave part of a userinfo, path or query
+# behind it (pinned with a cap that falls inside the userinfo).
+INTERNAL_MESSAGE_MAX = 1024
+INTERNAL_TRACE_MAX = 16384
+
+
+def bounded_text(text: str, limit: int, keep_tail: bool = False) -> str:
+    """`text` when it fits; else its first `limit` characters, or with
+    keep_tail its first and last limit // 2 and a counted line between,
+    read for one as well as for many (the round-1 recheck of lane-bounds-p:
+    "[1 characters not shown]" was the D-M3U-4 sibling this function
+    introduced)."""
+    if len(text) <= limit:
+        return text
+    if not keep_tail:
+        return text[:limit]
+    half = limit // 2
+    hidden = counted_sentence(len(text) - 2 * half, "[%d character not shown]", "[%d characters not shown]")
+    return "%s\n%s\n%s" % (text[:half], hidden, text[-half:])
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -559,9 +595,9 @@ def main(argv: list[str] | None = None) -> int:
         # A bug. The traceback is the bug report, but it must not carry a URL
         # (section 9), so it is redacted and paired with a structured error.
         import traceback
-        sys.stderr.write(redact_urls(traceback.format_exc()))
-        message = "%s: %s" % (type(error).__name__, error)
-        emit({"ok": False, "kind": args.command, "error": {"code": "internal", "message": redact_urls(message)}})
+        sys.stderr.write(bounded_text(redact_urls(traceback.format_exc()), INTERNAL_TRACE_MAX, keep_tail=True))
+        message = bounded_text(redact_urls("%s: %s" % (type(error).__name__, error)), INTERNAL_MESSAGE_MAX)
+        emit({"ok": False, "kind": args.command, "error": {"code": "internal", "message": message}})
         return EXIT_ERROR
 
 

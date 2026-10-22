@@ -297,6 +297,20 @@ def owner_claim(owner_pid: int) -> dict[str, Any] | None:
             "startTime": proc_start_time(int(owner_pid)), "at": int(time.time())}
 
 
+# D-SRC-13's rule 15 sweep (2026-10-21): the reason a first load failed is
+# mpv's last error-level log line, which is free text of any length (a
+# demuxer or a server can put its own words in it), and it rides the
+# `player start` reply the shell collects whole (playerStdout). Cut here, at
+# the one place the reply's reason is composed; the launch window's own
+# reason is already held to LAUNCH_STDERR_MAX, and mpv's file_error is one
+# of its fixed strings.
+FIRST_LOAD_REASON_MAX = 512
+
+
+def first_load_result(state: str, reason: str) -> dict[str, Any]:
+    return {"state": state, "reason": reason[:FIRST_LOAD_REASON_MAX].rstrip()}
+
+
 def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
                        launch_errors: list[str] | None = None) -> dict[str, Any]:
     """F3: `player start` watches its own first load on the connection it
@@ -350,11 +364,11 @@ def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
                     # The log line says what actually went wrong; mpv's own
                     # file_error is a generic "loading failed". Both are
                     # already redacted, here, inside python (section 6).
-                    return {"state": "failed", "reason": last_error or verdict["reason"]}
+                    return first_load_result("failed", last_error or verdict["reason"])
                 return {"state": "unknown", "reason": ""}
     if state == "failed" and not reason:
         reason = last_error or PLAYER_GENERIC_FAILURE
-    return {"state": state, "reason": reason}
+    return first_load_result(state, reason)
 
 
 # -------------------------------------------------------------- the verbs
@@ -779,13 +793,36 @@ def player_pause(args: argparse.Namespace) -> int:
 # file-supplied. Counted against the manual by the 0.9.0 preflight.
 TRACK_TYPES = ("audio", "sub")
 TRACK_FIELDS = ("id", "type", "selected", "lang", "title", "codec", "default", "forced", "external")
+# D-SRC-13's rule 15 sweep (2026-10-21): the tracks reply is collected WHOLE
+# by the shell (controlStdout, a StdioCollector with waitForEnd), and both
+# the number of tracks and the three free-text fields are the stream's, so
+# neither was bounded by anything but the stream. Each is now a constant:
+# at most TRACK_MAX_ROWS rows, kept in mpv's order, the rest COUNTED in the
+# reply's `tracksOmitted` (parse_m3u's channel_warning shape); each text cut
+# to its cap. The figures are chosen, not measured: a picker of 64 rows is
+# already more than a person reads, a language code is three letters and a
+# codec name a word, so the caps cut nothing an ordinary stream carries,
+# and the reply is at most TRACK_MAX_ROWS rows of a constant size.
+TRACK_MAX_ROWS = 64
+TRACK_MAX_TITLE = 256
+TRACK_MAX_LANG = 64
+TRACK_MAX_CODEC = 64
 
 
-def track_rows(data: Any) -> list[dict[str, Any]]:
+def track_text(value: Any, limit: int) -> str:
+    """A track's free-text field, redacted and then cut to `limit` code points
+    (the cut after the redaction, so a URL is never half-redacted)."""
+    if not isinstance(value, str):
+        return ""
+    return redact_urls(value)[:limit]
+
+
+def track_rows(data: Any, omitted: list[int] | None = None) -> list[dict[str, Any]]:
     """The picker's rows from a raw track-list: audio and sub only, ints for
     ids, strings for text, bools for flags, in the order mpv listed them.
     Anything malformed is dropped rather than raising: a picker with one
-    strange row missing beats no picker."""
+    strange row missing beats no picker. At most TRACK_MAX_ROWS rows; every
+    well-formed row past them is counted into `omitted[0]` when it is given."""
     rows: list[dict[str, Any]] = []
     if not isinstance(data, list):
         return rows
@@ -796,13 +833,17 @@ def track_rows(data: Any) -> list[dict[str, Any]]:
         ident = entry.get("id")
         if kind not in TRACK_TYPES or isinstance(ident, bool) or not isinstance(ident, int):
             continue
+        if len(rows) >= TRACK_MAX_ROWS:
+            if omitted is not None:
+                omitted[0] += 1
+            continue
         rows.append({
             "id": ident,
             "type": kind,
             "selected": entry.get("selected") is True,
-            "lang": redact_urls(entry.get("lang")) if isinstance(entry.get("lang"), str) else "",
-            "title": redact_urls(entry.get("title")) if isinstance(entry.get("title"), str) else "",
-            "codec": redact_urls(entry.get("codec")) if isinstance(entry.get("codec"), str) else "",
+            "lang": track_text(entry.get("lang"), TRACK_MAX_LANG),
+            "title": track_text(entry.get("title"), TRACK_MAX_TITLE),
+            "codec": track_text(entry.get("codec"), TRACK_MAX_CODEC),
             "default": entry.get("default") is True,
             "forced": entry.get("forced") is True,
             "external": entry.get("external") is True,
@@ -862,7 +903,12 @@ def player_tracks(args: argparse.Namespace) -> int:
                 raise HelperError("track_refused", "the player refused that track")
             payload["changed"] = True
         ok, data = client.try_command("get_property", "track-list")
-        payload["tracks"] = track_rows(data) if ok else []
+        omitted = [0]
+        payload["tracks"] = track_rows(data, omitted) if ok else []
+        if omitted[0]:
+            # Additive, and present only when rows were left out: the reply
+            # of every ordinary stream is byte-identical to before.
+            payload["tracksOmitted"] = omitted[0]
         emit(payload)
         return EXIT_OK
     except HelperError as error:

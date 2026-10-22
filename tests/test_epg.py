@@ -126,9 +126,9 @@ class EpgCommandTest(unittest.TestCase):
         self.assertEqual(status["nowCount"], 6)
         self.assertEqual(status["validUntil"], NOW + 300)
         self.assertEqual(sorted(status["warnings"]), sorted([
-            "1 programmes with unreadable times skipped",
-            "1 programmes without a title skipped",
-            "1 programmes for channels not in the playlist dropped",
+            "1 programme with an unreadable time skipped",
+            "1 programme without a title skipped",
+            "1 programme for a channel not in the playlist dropped",
         ]))
         self.assertEqual(read(self.path("epg-status.json")), status)
 

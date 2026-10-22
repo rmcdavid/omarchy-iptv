@@ -38,6 +38,10 @@
 #                                or Text.StyledText under a MARKUP-EXCEPTION
 #                                comment -- a missing line is AutoText, which
 #                                fetches an <img> out of a channel name)
+#  12. helper regex guard        (scripts/check-helper-regex.py: every regex the
+#                                helper compiles has a reviewed verdict on its
+#                                cost -- R30g, D-EPG-8 -- and an `open` one is
+#                                printed on every run)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
@@ -256,7 +260,20 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # +4 F1 race and +4 F1 same-playlist sibling through the service harness
 # (both hosts, both own-echo modes), +1 F1 model, +1 F4 (R29d's CLI origin),
 # +4 F2 (window (c) decided by when the other program writes).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2678}
+# 2678 -> 2679 on 2026-10-21 (lane-bounds-l, D-SRC-45 / D-LOGO-12): the
+# shell's reading of the logos verb's no_cache refusal and of a summary at
+# the ceiling (seen red on a mutation of Model.logoSummaryNames).
+# 2679 -> 2699 on 2026-10-21 (lane-bounds-g, R30c / R30e): the shared
+# logo-deadlines fixture's three numbers (2) and its thirteen summary lines
+# through Model.logoSummaryNotice (13), and Service.qml's own logoFetchWatchdog
+# interval and onTriggered, logoFetchProc's onRunningChanged and onExited, and
+# onLogoLine's journal line, compiled against fakes (5). All 20 red against
+# lane-bounds-int's Service.qml and model (17a2407).
+# 2026-10-22, lane-bounds-g2 (R32f): 2699 -> 2702. D-LOGO-20's two harness
+# pins (the start-up prune once, a prune at every switch naming the new
+# active key; a restart's first switch) and the fixture's busy-with-names
+# notice (D-LOGO-23). Both pins red on lane-bounds-int e8d2b35.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2702}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -333,7 +350,77 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2678}
 # local source no longer reserving the input cap (7), and
 # the TLS context built ahead of the limit, verifying (2). 25 of them seen
 # red against 0.14.2 (85206f2); the other three pin what did not change.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1321}
+# 1321 -> 1342 on 2026-10-21, D-SRC-13 / D-M3U-3 / D-M3U-4 (lane-bounds-p):
+# tests/test_reply_bounds.py, 21 cases -- the playlist status line's warnings
+# bounded by count through the verb with the cap lowered (2), the memory
+# limit lifted before every status write and every printed line, observed
+# in a real helper process at each open and each write (5) and in process
+# by call order (1), every counted sentence for one and for many (3), and
+# the rule-15 replies: tracks (4), the first-load reason (3), main()'s
+# answer to a bug (3). 16 seen red on f55a32f, the other 5 on a mutation of
+# the shipping decision. test_m3u_bounds's "leaves RLIMIT_DATA at 512 MiB"
+# case became "holds it while parsing and lifts it after", in place.
+# 1321 -> 1338 on 2026-10-21 (lane-bounds-l): tests/test_logo_ceiling.py (7),
+# D-LOGO-12's ceiling on what a source's logo folder holds, over a real
+# local TLS server with the cap lowered, and D-SRC-45's no_cache answer;
+# test_failed_marks's MissingIdTest (1), the rule-15 sibling; and
+# tests/test_epg_retention.py (9), D-EPG-7's compact retention held
+# byte-identical to f55a32f's output, its measured cost, and the bounded
+# time memo. All seen red on f55a32f except the three differential cases,
+# which compare against f55a32f itself and were seen red on four mutations.
+# LogoFetchCapTest was rewritten for the ceiling in place, not added.
+# 1342 / 1338 -> 1359 on 2026-10-21, the two lanes together (lane-bounds-int).
+# 1359 -> 1390 on 2026-10-21 (lane-bounds-g, R30a-c / R30e, D-SRC-59,
+# D-SRC-60): tests/test_fetch_bounds.py (16) -- the five redirect methods of
+# both openers closing a 3xx body unread (2), the whole download held to one
+# deadline over a local scripted server with the deadline lowered (7), the
+# status line's text redacted then cut (3), stale temporaries swept by the
+# first write into a folder (4); tests/test_logo_run.py (15) -- one logo's
+# and the run's deadline and a redirect body over TLS (3), the memory limit
+# observed in a real helper process (1), the folder lock (3), the ceiling's
+# sweep of unnamed files and of a stale temporary (3), the folder's age and
+# its mark (3), the shared fixture (2). 29 red on lane-bounds-int (17a2407),
+# the other 2 on a mutation of the shipping decision.
+# 1359 -> 1391 on 2026-10-21 (lane-bounds-h, the bounds sweep's round 2):
+# tests/test_epg_parse_bounds.py (24) -- D-EPG-10's guide-channel cap with
+# MAX_CHANNELS and EPG_MAX_GUIDE_ID lowered, through the parse and the verb
+# (6); every EPG counted sentence for one and for many (2); D-EPG-8's
+# qualifier strip held equal to the old pattern as an oracle, the display
+# name folded and cut before keying, _IPV6_LITERAL held equal to its old
+# form (6); D-EPG-9's backward pass read-counted and differential against
+# lane-bounds-int (4); the duplicate key's stop half (3); the ASCII-only
+# time memo (1). tests/test_helper_regex_guard.py (7), the R30g regex
+# review guard over copies of the parts and over lane-bounds-int's helper.
+# test_reply_bounds (1): "[1 character not shown]". And two more in
+# test_epg_parse_bounds (LinearSiblingsTest): split_groups, build_alias's
+# bare lists and addrNameConflicts, one pass each, held to lane-bounds-int.
+# 15 seen red on lane-bounds-int, the rest on a mutation of the shipping
+# decision.
+# 1390 / 1391 -> 1422 on 2026-10-21 (lane-bounds-h2): the merge of
+# lane-bounds-h onto the integration branch that holds lane-bounds-g, the
+# two lanes' suites together, counted by the gate on the merge commit.
+# 1422 -> 1434 on 2026-10-21 (lane-bounds-h2, R32d, D-EPG-12):
+# tests/test_epg_parse_bounds.py (9) -- _EPG_NAME_NOISE's rewritten
+# alternative held equal to the old pattern as an oracle (2, red on two
+# mutations of the new one), the one fold both sides of the name key take
+# (4, red on the base), the two guide caps at their boundary (3, red on
+# the off-by-one mutations); tests/test_helper_regex_guard.py (3) -- the
+# guard over a copy of the parts carrying the old pattern, the grader on
+# named shapes, flags it cannot read refused (all red on the base's guard).
+# 2026-10-22, lane-bounds-g2 (R32f): 1390 -> 1399. tests/test_logo_run.py
+# (5): a busy run announces the present names read-only (D-LOGO-23), a
+# failed URL tried once a run (D-LOGO-22, pinned as it stands), a logo's
+# budget never more than what is left of the run (recheck M8), the folder
+# marked before the first fetch, a held folder left by prune and said once
+# (D-LOGO-21); tests/test_fetch_bounds.py (3): trailers past the deadline
+# refused off the main thread (recheck M1), another uid's temporary left
+# (M4), every env lever on a bound lower-only (F-HARNESS-36);
+# tests/test_clipboard.py (1): the clipboard variable lower-only. 5 of the 9
+# red on lane-bounds-int e8d2b35 (and the busy-run test changed in place),
+# the other 4 on a mutation of the shipping line (scratchpad g2-red).
+# the two sides' larger floor, the bounds integration, 2026-10-22
+# 1434 -> 1443 on 2026-10-22: the H2 and G2 merges together (lane-bounds-int 84cf2d1).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1443}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -358,6 +445,12 @@ MARKETPLACE_FILES_MIN=${MARKETPLACE_FILES_MIN:-35}
 # form's terminal caption) are gone with the route; every remaining one still
 # declares its format.
 TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-58}
+# The helper regex guard: 34 regex calls across the eleven helper parts when
+# it landed (2026-10-21, lane-bounds-h, R30g). A floor for the text format
+# guard's reason -- a scan that finds nothing has reviewed nothing. 36 once
+# lane-bounds-g's two file-name patterns (_TEMP_SUFFIX, _LOGO_NAME) were
+# merged beside it (2026-10-21, lane-bounds-h2).
+HELPER_REGEX_SITES_MIN=${HELPER_REGEX_SITES_MIN:-36}
 # The player stub's self-test (M5-01): 14 cases when wired in, 16 with F-RWD-15, 17 with the ordering cases, 19 with the F-MPV-1 broadcast pair.
 # 19 -> 26 on 2026-10-07: the stub learned tls-verify and stream-lavf-o for
 # D-SINK-16. The lane that grew it reported there was no floor on this step;
@@ -1156,6 +1249,28 @@ if python3 "$ROOT/scripts/check-text-format.py" >"$textfmt_log" 2>&1; then
   fi
 else
   cat "$textfmt_log"; bad "text format guard"
+fi
+
+step "helper regex guard (every helper regex has a reviewed cost)"
+# R30g, D-EPG-8 (2026-10-21): a pattern quadratic in a whitespace run read
+# guide display-names nobody capped, a month after F-SINK-11 fixed the same
+# shape in the URL redactor only. A review one pattern at a time is the one
+# rule 15 forbids, so the review is a table the gate holds every pattern to:
+# a new or changed pattern is unreviewed and red; an `open` verdict is
+# printed on every run and is the board's business, not the gate's.
+regex_log=$CHECK_TMP/helper-regex.log
+if python3 "$ROOT/scripts/check-helper-regex.py" >"$regex_log" 2>&1; then
+  regex_n=$(grep -oE '^helper regex guard: [0-9]+ regex call' "$regex_log" | head -1 | grep -oE '[0-9]+')
+  if [[ -z $regex_n ]]; then
+    cat "$regex_log"; bad "helper regex guard printed no call count at all"
+  elif (( regex_n < HELPER_REGEX_SITES_MIN )); then
+    cat "$regex_log"; bad "helper regex guard found $regex_n regex call(s), expected at least $HELPER_REGEX_SITES_MIN"
+  else
+    grep -E '^helper regex guard: OPEN' "$regex_log" || true
+    ok "helper regex guard ($regex_n regex calls reviewed)"
+  fi
+else
+  cat "$regex_log"; bad "helper regex guard"
 fi
 
 if (( fail )); then echo "check.sh: FAILED"; exit 1; fi

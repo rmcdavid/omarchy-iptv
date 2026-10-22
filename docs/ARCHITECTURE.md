@@ -2181,17 +2181,55 @@ BELOW the cached-file branch and `continue`s rather than breaking: a cached
 file past the cap is validated and announced, a URL past it is not fetched
 this run and is counted in a new summary field, `deferred`, so a run that
 stopped short says so. The shell reads only `names` from the summary
-(`logoSummaryNames` in the model), so the field is inert there. Proved by
-`LogoFetchCapTest` in `tests/test_logo_dimensions.py`, at the real cap with
-a double standing in for the network only: 5,000 new URLs, three files
-planted past the cap (two sound, one bomb) and two more URLs after them;
-`fetched` 5,000 and exactly the first 5,000 URLs served, `cached` 2 with
-both sound names announced, the bomb swept and off disk, `deferred` 3,
-5,002 names; then the real helper as a subprocess over the cache that run
-left, `cached` 5,002 and the same names. Red against the 995c6be helper
-(that one test fails; 85 of 85 green on the fix across tests.test_logo_dimensions and tests.test_logos together, lane commit ddc0a7b; the dimension file alone is 38 at integration).
-D-LOGO-12 stays open: the cap bounds fetches per run and nothing yet bounds
-what is ON DISK.
+(`logoSummaryNames` in the model), so the field is inert there; since R30c
+the shell writes one journal line from it (`logoSummaryNotice`, below).
+Proved at the time by `LogoFetchCapTest` in `tests/test_logo_dimensions.py`
+at the real cap (5,000 new URLs beside three planted files; red against the
+995c6be helper, lane commit ddc0a7b). D-LOGO-12 then forbade that
+construction -- 5,003 files on disk is the state the ceiling exists to
+prevent -- so the test as it stands runs with the cap LOWERED to 5, a double
+standing in for the network only: five new URLs, then three planted files
+(two sound, and in place of the bomb an ordinary unreadable file, a PNG
+signature with nothing after it, which takes the same sweep branch; the
+dimension sweep itself is `LogoCacheSweepTest`'s), then two more URLs. It
+asserts the two sound files validated and announced past the ceiling, the
+unreadable one swept and its slot taken by its own URL, `fetched` 3,
+`deferred` 5, the directory at the cap and never past it, and then the real
+helper as a subprocess over that cache: `cached` 5, the same names, the five
+held-back URLs failing against the dead host.
+**D-LOGO-12 (2026-10-21): the cap is now a ceiling on what is ON DISK.**
+Until then it bounded fetches per run, and `fetched` counts this run's
+downloads, so the directory grew by up to the cap on every run -- 2, 4, 6, 7
+over four runs with the cap lowered to 2 against seven ordinary logos over a
+local TLS server, rerun on f55a32f with the new test's own rig -- and a
+`MAX_CHANNELS` playlist reached 50,000 files over ten service starts while
+the comments called 5,000 a ceiling. A run now counts every entry in the
+logo directory before it starts (`logo_dir_entries`: any kind, a leftover
+`.tmp-` file and a stray folder included, a link at the path followed
+because that is where `write_logo` writes, a directory that cannot be listed
+counted as full) and fetches only while `present + fetched < MAX_LOGO_FILES`;
+a file the sweep unlinks frees its slot. What the ceiling held back is
+`deferred`, the summary says `atCeiling` and `files`, and stderr says it
+once, counted, with no URL. So ONE source's logos hold at most 5,000 files
+of at most 256 KiB, 1,310,720,000 bytes (1.22 GiB). Two things the ceiling
+does not do, stated: a directory an older version left fuller is announced
+and never grown, and stays that size until `cache logos-clear` or the
+source's removal; and a file whose URL has left the playlist still held its
+slot, so a playlist whose logos churn reached the ceiling and stopped getting
+new ones until the same verb ran -- since R30b (D-LOGO-18) the run sweeps
+such files at the ceiling, item 17 of section 8. The ceiling is per source:
+the history keeps up to `MAX_SOURCES` (50) sources with a directory each,
+which made every source together 50 x 1.22 GiB, 65.5 GB; since R30a
+(D-LOGO-17) `cache prune` ages a kept source's folder, and item 17 states
+the install-wide bound that leaves. Proved by
+`tests/test_logo_ceiling.py` with the cap lowered to 2 or 3 over a real
+local TLS server, the GETs counted by the server and the directory counted by
+the test: 2, 2, 2, 2 over four runs with two GETs in all (red on f55a32f, 4
+failed and 3 errored of 7), a swept file freeing its slot, an older fuller
+directory never grown, every entry counted, an unlistable one contacting
+nobody. `LogoFetchCapTest` was rewritten for the ceiling with the cap
+lowered to 5 (its old construction, 5,000 downloads beside three cached
+files, is the state the fix forbids), red on f55a32f.
 **What the fix rests on in the guide, and the blocker the review found
 there.** The sweep protects a user only because nothing in the shell decodes
 a cache file the helper did not announce -- and at 995c6be the announced set
@@ -2287,10 +2325,11 @@ Details and the mutation table are `docs/QA.md` section 3.2.
   no limit near this size holds; what this machine (`vm.overcommit_memory=0`,
   7.8 GB RAM, 15.4 GB swap) would do with it uncapped is reasoning, not
   measurement.
-- `MAX_LOGO_FILES` bounds fetches per run and not the cache. The sweep is no
-  longer bounded by it (above), so every cached file for a URL in the current playlist is validated on every
-  run; what remains open is the cache's size on disk, which nothing bounds
-  (D-LOGO-12, open).
+- `MAX_LOGO_FILES` bounded fetches per run and not the cache until D-LOGO-12
+  (above) made it a ceiling on the entries one source's logo directory
+  holds. The sweep is not held back by it, so every cached file for a URL in
+  the current playlist is validated on every run. What stays unbounded is the
+  sum over sources (up to 50 x 1.22 GiB), proposed rather than built.
 - The windows `LOGO_HEADER_BYTES` and the byte cap leave, stated exactly
   (called on the lane-R2 helper, 2026-10-11). A JPEG whose frame header sits
   past the first 128 KiB costs a second read, not a wrong answer, and the
@@ -2606,7 +2645,8 @@ reads at most `MAX_CLIPBOARD_BYTES` = 32,768 bytes from it (8,192 UTF-16
 units, `Model.LIMITS.url * 4`, times the 4 bytes a UTF-8 character can
 need), terminates the child the moment the cap, EOF or its 5 s deadline
 (`CLIPBOARD_TIMEOUT`, `Model.CLIPBOARD_TIMEOUT_MS`, one shared fixture
-`tests/fixtures/clipboard.json`) is reached -- SIGTERM, a 1 s grace,
+`tests/fixtures/clipboard.json`; the test-only
+`OMARCHY_IPTV_CLIPBOARD_DEADLINE` can only lower it, F-HARNESS-36) is reached -- SIGTERM, a 1 s grace,
 SIGKILL -- and prints ONE JSON line, nothing on stderr, with the text cut at
 a character boundary to at most 8,192 units; a timeout, a failed or a
 missing `wl-paste` is `{"ok": false, "code": ...}` with no text, and no
@@ -3245,6 +3285,478 @@ Performance budget (10k channels):
     through the real service under a nested cage: a 10,000-channel source
     loads (10,000 channels, 120 groups), and with the test variable at 24
     the service reports `Source too large`.
+    The limit covers the fetch, the parse and the file the parse produces
+    (`channels.json`; for `epg`, the window and `epg-now.json`), and nothing
+    after them (D-M3U-3, 2026-10-21): each verb lifts it in a `finally`
+    around that block, on every way out -- success, a refusal, the memory
+    refusal, a bug -- so no status is composed, written or printed under
+    it. It used to be lifted on `MemoryError` alone, so a refusal raised
+    near the limit wrote its status under it. Observed in a real helper
+    process at every file it opens and every line it prints
+    (`tests/test_reply_bounds.py`), red against the code before.
+16. Every reply the shell collects whole is bounded -- by a constant, or,
+    for the two verbs named at the end of this item, by a file the plugin
+    owns (D-SRC-13 and its rule-15 sweep, 2026-10-21; the heading said "by
+    a constant" for all of them until the round-1 recheck of
+    lane-bounds-p). Each helper Process in
+    `Service.qml` reads its stdout through a `StdioCollector` with
+    `waitForEnd`, so a reply is held in the shell in one piece; a list or a
+    string in it whose size is the provider's is held to a cap, and what
+    the cap leaves out is COUNTED rather than dropped in silence. (The
+    round-1 recheck of lane-bounds-p found one reply outside the sweep, a
+    fetch error's message carrying the server's HTTP status line, bounded
+    only by `http.client`'s 64 KiB line limit; that is D-SRC-59, closed
+    below.) The
+    playlist status line (`playlist`, and the source probe, which is the
+    same verb): at most `M3U_MAX_CHANNEL_WARNINGS` per-channel warnings,
+    each a fixed phrase and a name held to `M3U_MAX_NAME`, and at most
+    eighteen counted sentences, one of them the tail that counts the
+    warnings not listed -- by arithmetic at most 65,444 bytes of JSON with
+    every name at its cap and every character escaped. `player tracks`: at
+    most `TRACK_MAX_ROWS` rows with the title, language and codec cut to
+    `TRACK_MAX_TITLE` / `TRACK_MAX_LANG` / `TRACK_MAX_CODEC`, the rest
+    counted in `tracksOmitted`. `player start`: the first-load reason cut
+    to `FIRST_LOAD_REASON_MAX`. main()'s answer to a bug, which any verb
+    can end in: the message cut to `INTERNAL_MESSAGE_MAX` and the
+    traceback to the first and last halves of `INTERNAL_TRACE_MAX`, the
+    middle counted. The library text in a `network` refusal of `playlist`,
+    the probe and `epg` (`could not reach <host>: ...`): cut to
+    `NETWORK_DETAIL_MAX` = 200 characters and three dots, its control
+    characters folded to spaces (D-SRC-59, 2026-10-21) -- for
+    `http.client.BadStatusLine` that text is the server's own first line,
+    which `readline` admits up to 65,536 characters of and which reached the
+    reply, both status files and the stderr line whole; the line is decoded
+    ISO-8859-1, so the detail is at most (200 + 3) x 2 = 406 bytes of JSON.
+    Every cut is made after the redaction, so the redactor
+    always sees a whole URL: a cut can shorten a redacted `scheme://host`,
+    but it never leaves part of a userinfo, a path or a query behind it
+    (pinned with caps that fall inside the userinfo, red with the order
+    reversed; at the caps the first tests used, both orders gave the same
+    answer). The counted line reads for one as well as for many
+    (`[1 character not shown]`). Bounded without a new cap, and why:
+    `epg` (fixed fields and at most five counted sentences; a cached
+    window's warnings are the helper's own); `clipboard`
+    (`MAX_CLIPBOARD_CHARS`, D-CLIP-1); `config shield` (modes, a verdict
+    and two path components); `player probe` and `status` (the stash and
+    owner records this plugin writes into the player, whose name and
+    group come from `channels.json`); `play` and `player start`'s `name`
+    (`channels.json`, `M3U_MAX_NAME` since 0.14.3); `player start`'s
+    `warnings` (option names from the user's own `mpvArgs`, the argv the
+    shell built); `player pause`, `seek`
+    and `stop` (numbers and booleans). Bounded by a file the plugin owns
+    rather than by a constant: `state init` echoes `state.json`, which the
+    shell already reads whole; the `cache` verbs list names inside the
+    plugin's own 0700 cache directories.
+
+    **What the EPG parse retains is bounded during the parse (D-EPG-7,
+    2026-10-21).** `parse_xmltv` kept every in-window programme of every
+    matched channel until the parse ended as a 4-tuple (start, stop, title,
+    detail dict) -- five or six objects a programme, every str widened to
+    four bytes a character by one emoji -- and `EPG_MAX_PER_CHANNEL` was
+    applied only afterwards. It now keeps ONE bytes object a programme
+    (`retain_programme`): the start and the raw stop in decimal, then the
+    title, description, category and episode as the cleaners left them,
+    UTF-8, separated by `\x1f` (every text has been through `_CONTROL_WS`,
+    so neither separator can occur in one, and one that did would be folded
+    rather than move a boundary). JSON is made by `record_body` for the
+    records actually written, as before. `encode_retained` makes every
+    decision `encode_records` made, in the same order -- stable sort by
+    start, a missing stop from the next strictly later start or
+    `EPG_DEFAULT_DURATION`, skip a stop not after its start, drop a repeat of
+    the last record kept, keep the first `EPG_MAX_PER_CHANNEL` -- with the
+    next later start of every position written by ONE backward pass over
+    the sorted starts (D-EPG-9, ruling R30h; the rescan from every stopless
+    programme it replaces was quadratic in programmes sharing a start, and
+    this branch's first repair was a forward pointer). `_retained_start`
+    runs twice a programme, for the sort and for that pass, whatever the
+    input, counted by `EncodeLinearityTest` (red with the rescan restored);
+    the output equals the forward pointer's byte for byte
+    (`EncodeDifferentialTest`, 9,000 small channels and 80 seeded guides
+    against lane-bounds-int). The duplicate check's STOP half is pinned by
+    `DuplicateKeyStopTest`, red with the key reduced to (start, texts),
+    which every earlier EPG test passed. Rule 15 over the same shape -- a
+    membership scan repeated per item -- found three more on provider text,
+    each now one pass and held to lane-bounds-int's output
+    (`LinearSiblingsTest`): `split_groups`, which a persistent `#EXTGRP` of
+    up to 256 parts sent through about 32,000 comparisons for every channel
+    after it; `build_alias`'s bare-name owner lists, k*k/2 for k rows sharing
+    a name; and `addrNameConflicts`' set difference, a copy of the guide's
+    declarations per row. Each channel's bytes are released
+    as its record string is made. No per-channel heap and no programme cap
+    were added: neither lowers the per-programme worst case. The channel
+    count IS capped where nothing else caps it, below (D-EPG-10).
+
+    Measured on ordinary small guides (2,000 vs 4,000 programmes over 50
+    channels, `parse_xmltv`'s marginal traced peak; `RetainedCostTest` pins
+    it, red on f55a32f): 724 bytes a programme on f55a32f against 213 now
+    with a 120-character description, category and episode on each; 144
+    against 58 title-only (inside the unittest run, 801-879 against
+    215-217, and 151-156 against 65-71). The bound at the cap, by arithmetic:
+    a bytes object is 33 bytes of header plus its length, rounded up to 16,
+    plus an 8-byte list slot, so a programme with no stop costs at most
+    72 + t bytes and one with a stop (twelve digits at most) 84 + t, where t
+    is its texts' UTF-8 length; its XML is at least 67 + t and 83 + t
+    (`<programme start="YYYYMMDD" channel="a">`, a title element, the stop
+    attribute when there is one). So the PROGRAMMES the parse retains are
+    at most about 1.08 bytes a byte of guide, **69 MiB at the 64 MiB cap**
+    (986,895 title-only programmes of 68 bytes is the most it can hold),
+    except where URL redaction lengthens a description -- `a://@` becomes
+    `a://[redacted]`, 2.8 times the token, never past the field's 400 code
+    points -- which caps them at about 2 bytes a byte, **128 MiB**. Before:
+    144 bytes per title-only programme measured with every start shared
+    across 50 channels, about 136 MiB over the 986,895 the cap can hold,
+    with the time memo below on top of it when the starts are not shared.
+
+    That is one of TWO terms, and the first version of this section stated
+    it as the whole bound (D-EPG-10, found by the round-1 recheck of
+    lane-bounds-l). A programme is kept under a CHANNEL, and a channel costs
+    its programme list, its key, a claim tuple holding the guide's own id,
+    and a slot in three tables. Measured on ordinary guides (1,000 vs 2,000
+    channels of one title-only programme each, fourteen-character ids,
+    `parse_xmltv`'s marginal traced peak, 2026-10-21, the same with a
+    playlist index and without, and the same on lane-bounds-int): **380
+    bytes per channel and its programme** against 216 bytes of XML; the
+    programme is 58 of it and the id's str 63, so a channel costs about 260
+    bytes plus its id.
+    - **With a playlist index** every key is a playlist tvg-id, so there are
+      at most `MAX_CHANNELS` claims: 50,000 x 260 = **12.4 MiB**, plus the
+      guide ids the claims keep, which the bytes of the attributes they
+      came from bound.
+    - **Without one** (no readable `channels.json` when the guide is
+      fetched, which a first start meets whenever the playlist fetch, run
+      beside it, has not landed) the parse kept EVERY guide channel under
+      its own id, bounded only by the input: a minimal programme for a new
+      channel is about 72 bytes of XML, so about 930,000 channels at the
+      cap and about **340 MiB** (arithmetic, the recheck's figure), all of
+      which reached `epg-now.json` and the shell. Ruling R30d: it now admits
+      at most `MAX_CHANNELS` distinct guide channels -- the first ones the
+      guide's programmes name -- and no id longer than `EPG_MAX_GUIDE_ID`
+      (256, `M3U_MAX_TVG_ID`, so no id a playlist tvg-id could never equal),
+      and counts the programmes it refuses in one sentence each, for one and
+      for many. Counted by programme because counting refused CHANNELS
+      would need the set this bound exists to stop. So at most 50,000 x
+      (260 + 1,100 for a 256-character id of astral characters) =
+      **65 MiB**, and 50,000 x 330 = 16 MiB with ordinary twenty-character
+      ids. With an index nothing changes.
+    Both are arithmetic at the cap and UNVERIFIED at that size by design;
+    `GuideChannelCapTest` pins the cap with `MAX_CHANNELS` lowered to 3 and
+    2, through the parse and through the verb into `epg-now.json`, red on
+    lane-bounds-int.
+
+    Its neighbours, found under rule 15 and stated with the same care:
+
+    | Held during the parse | Bound | Changed |
+    |---|---|---|
+    | programmes (`pending`) | 1.08 x the guide's programme bytes, 2 x with redaction growth: 69-128 MiB | compact form, above |
+    | channels (`pending`'s lists, `claim`, `seen_ids`, the keys) | about 260 bytes a channel plus its id: 12.4 MiB with a playlist index; without one at most `MAX_CHANNELS` ids of at most 256 code points, 65 MiB (16 MiB with ordinary ids) | without an index it was every guide channel, about 340 MiB at the cap (D-EPG-10, R30d) |
+    | the time memo (`parse_xmltv_time`) | `EPG_TIME_CACHE_MAX` 16,384 ASCII keys of at most `EPG_TIME_CACHE_KEY_MAX` 64 characters: 16,384 x (105 + 32 + about 40) bytes, about 2.8 MiB | was one key per distinct start or stop, a junk value of any length kept whole; then a non-ASCII key of 64 astral characters (316 bytes) put the "about 3 MiB" this row said near 6, so only an ASCII key is kept now (a non-ASCII time is still parsed) |
+    | the download | 64 MiB (`MAX_SOURCE_BYTES`; a gzip stream is inflated in chunks) | released when `parse_xmltv` returns: alive through the parse and the per-channel encoding at its end, released before the window's lines are built and written (this row said "once parsed, before the window is encoded" until the recheck read the order) |
+    | the playlist cache (`channels.json` as Python objects) | the whole playlist, for the whole parse | now only each row's `tvgId` (what `match_counts` reads) is kept; the document is released before the parse |
+    | guide-side name tables (`guide_names`, `bare_guide`) | 355 bytes per ordinary declaration whose name the playlist claims (measured, 112-byte declarations, both trees alike), so at most 50,000 x 355 = 17 MiB for distinct names; about 100 bytes per further declaration colliding on a claimed name (the existing measurement in `parse_xmltv`'s docstring), so at most about 1.7 x the guide's declaration bytes | not changed |
+    | the playlist index (`build_alias`) | 178.8 MiB traced at the playlist caps, measured when `EPG_ADDR_MAX_TOKENS` was set | not changed |
+
+    A byte of guide is either a programme or a declaration, so the parse's
+    programme and name tables hold at most about 2 x 64 MiB plus 17 MiB.
+    With a playlist index, adding the channels, the download, the index at
+    the playlist caps, the memo and the interpreter, the sum of every worst
+    case at once is about 64 + 145 + 12 + 179 + 3 + 20 = 423 MiB; without
+    one there is no index and no name table, and it is about 64 + 128 + 65
+    + 3 + 20 = 280 MiB. Both are under the 512 MiB limit, and a run over it
+    is refused as `too_large` with the old guide kept. The playlist index
+    is the largest single term; it is the next one to shrink, not this
+    round's.
+
+    **What a guide name costs to key, and every regex's cost (D-EPG-8,
+    ruling R30g, 2026-10-21).** The bare-name key stripped a trailing
+    qualifier with `\s*\([^()]*\)\s*$` under `.sub()`, on `<display-name>`
+    text nothing folded or capped: no literal prefix, so the engine tried
+    every position, and inside a whitespace run of k each one scanned the
+    rest of the run and backed off -- about k*k/2 steps for one run
+    (arithmetic; under the sweep's input rule nothing was built to time it).
+    `strip_trailing_qualifier` gives the same answer with three linear
+    scans, held equal to the old pattern, run as an oracle, on 20,000
+    generated names and every code point's whitespace class; and every
+    display-name is folded (`_CONTROL_WS`) and cut to `EPG_MAX_DISPLAY_NAME`
+    (`M3U_MAX_NAME`, 512) before either key is made, pinned with the cap
+    lowered. Rule 15 over every regex the helper compiles, 36 calls, is now
+    a table the gate holds them to (`scripts/check-helper-regex.py`): each
+    pattern with what it reads (provider text, user text, or the plugin's
+    own data) and why its cost is linear, and a new or changed pattern is
+    red until its review is written. The search found one more quadratic
+    pattern and fixed it -- `_IPV6_LITERAL`'s two adjacent runs over one
+    class, on a source URL already capped at 2,048 characters (D-PERF-7)
+    -- and one it left OPEN, because the function is another lane's: the
+    URL redactor's scheme-run search, `[A-Za-z0-9+.\-]*\Z` under
+    `search()`, tries every start in its window, so a scheme-legal run
+    broken once inside the window costs about r*r/2 for a run of r
+    (arithmetic, UNVERIFIED by run; D-PERF-6, ruled R32e to be fixed with a
+    literal-anchored search); the guard prints it on every run until it is
+    closed.
+
+    **The table's own false verdict, and what grades the shape now
+    (D-EPG-12, ruling R32d, 2026-10-21).** That first table certified
+    `_EPG_NAME_NOISE`'s `[not 24/7]` alternative,
+    `\[\s*not\s*24\s*[-/]?\s*7\s*\]`, linear because "its `\s*` runs are
+    separated by literals they cannot hold" -- and `[-/]?` is OPTIONAL, so
+    the third and fourth runs were adjacent repeats over one class: after
+    `[not 24` a whitespace run of k not followed by `7` was retried at every
+    split, about k*k/2 steps, and `build_alias` reached it twice per
+    playlist row on the UNFOLDED name (the guide side had been folded by
+    D-EPG-8; the playlist side had not). Found by the round-2 recheck. The
+    alternative now reads `\[\s*not\s*24\s*(?:[-/]\s*)?7\s*\]`: the fourth
+    run exists only behind the separator, which whitespace cannot open, so
+    each run backs off at most once over its length; held EQUAL to the old
+    pattern, run as the oracle, on 20,000 generated spellings of the marker
+    and on ordinary names. And the guard no longer takes a human's word
+    for this shape: it walks each compiled pattern (`super_linear_pairs`)
+    and reports two unbounded repeats over overlapping character classes
+    with nothing between them the first run could not have taken --
+    anchors, assertions, groups and repeats that may match nothing, or
+    single characters the first class also matches, which is the old
+    `_IPV6_LITERAL` shape as well -- as super-linear, red whatever the
+    table says; proved by running it over a copy of the parts carrying the
+    old pattern. What it does NOT grade is stated in the script: a run with
+    no literal prefix searched from every position (D-EPG-8, F-SINK-11,
+    D-PERF-6) and a nested unbounded repeat stay a person's review, and
+    the walk reads one sequence at a time. The same ruling made the fold
+    ONE function, `epg_name_text`, inside both key functions, so the
+    playlist side and the guide side key the same text the same way: a
+    name carrying a DEL or a C0 control (legal in a playlist; a DEL and a
+    tab are legal XML too) used to key as `alpha\x7fone` from the playlist
+    and `alpha one` from the guide, and the same name on both sides did
+    not match. An ordinary name is unchanged, because the key already
+    folded its whitespace; pinned through the real `build_alias` and
+    `parse_xmltv`.
+
+    After the parse, UNVERIFIED and stated: a channel's record string is a
+    Python str, which one astral character (an emoji) in any of its records
+    widens to four bytes a character, so the encoded window can cost up to
+    four times the retained bytes in a guide built for it -- titles of one
+    emoji and 199 double quotes, each quote two characters once escaped. The
+    lines are now made once and the same list is written and returned (they
+    were made twice, with the channel strings held throughout, three copies
+    at the write); one copy is written. Keeping the window as UTF-8 bytes
+    end to end would remove the widening and is proposed, not built: it
+    changes `fetch_window`, `compute_now_next` and the tests that read the
+    window as text. `RetentionDifferentialTest` holds this tree to f55a32f's
+    output on 60 seeded small guides (shuffled, repeated programmes, missing
+    stops, stops not after their start, twelve-digit stops, shared starts,
+    quotes, backslashes, astral characters, with and without a playlist, the
+    per-channel cap at 400 and lowered to 3) and byte for byte on the files
+    `epg` writes; it went red for four mutations of the shipping decisions
+    (sort by the whole item, an equal start taken as the next, a duplicate
+    check blind to the texts, window lines reversed).
+
+    **What the long-running shell holds from the guide data (D-EPG-7, rule
+    15), which has no memory limit.** The shell never reads
+    `epg-window.txt`; it reads `epg-now.json` through a `FileView`, trims
+    the text, `JSON.parse`s it and keeps `doc.channels` by reference
+    (`Model.parseEpgNow`, `Service.qml` `applyEpgNow`). Measured with a
+    probe that does exactly that on Qt 6.11.2 offscreen (an XHR read in
+    place of the `FileView`, which holds the file's text besides), over
+    files the shipping helper wrote from ordinary guides of 2,000 and 4,000
+    matched channels with a description, category and episode on now and
+    next: 529 bytes of JSON a channel, and 6.85-7.03 KiB of resident memory
+    a channel, twice each (71.7 MiB with one channel, 85.1 and 98.8 MiB at
+    2,000 and 4,000). Entries are at most `MAX_CHANNELS` = 50,000: the
+    playlist's distinct tvg-ids with a playlist index, and, without one,
+    the first 50,000 guide channels, each key at most 256 code points (this
+    said "the playlist's distinct tvg-ids" alone while a guide fetched
+    without an index wrote every guide channel; D-EPG-10, R30d). An
+    ordinary guide of 50,000 matched
+    channels with two programmes each in the window is about 33 MB of XML,
+    inside the input cap. So the shell can hold about **340 MiB** for the
+    guide's now/next at `MAX_CHANNELS` (UNVERIFIED at that size; about 67 MiB
+    at 10,000), and more with every detail field at its cap (11.6 MiB of
+    JSON at 10,000 channels, about 2.3 times this probe's per-channel JSON).
+    That is not small, and it is not bounded by this change: bounding it
+    means a different shape for `epg-now.json` in the shell (each channel's
+    entry kept as text and parsed when a row asks, about 1 KiB a channel by
+    the same arithmetic), or descriptions fetched on demand, both changes to
+    the guide's data path and its 150 ms open budget, proposed for a ruling.
+
+17. Every fetch the helper makes runs under ONE wall-clock deadline, and
+    what a fetch leaves on disk is bounded (R30, the bounds sweep's round 2,
+    2026-10-21).
+
+    **The deadline (R30e: D-SRC-58, D-LOGO-16).** `--timeout` is a
+    per-socket-operation timeout and bounds each connect and each read,
+    never their sum. S-05's wall clock was checked only between body reads,
+    after `open()` had returned, so the connect, the TLS handshake, the
+    status line, up to 100 header lines of 65,536 bytes, and every redirect
+    ran outside it, bounded in the service only by the 180 s watchdogs; and
+    a chunked body's trailer lines, which `http.client` reads inside the
+    `read1` that ends the body, could end a download that had overrun and
+    have it ACCEPTED. The logo fetch had no wall clock at all: `response.read`
+    loops on `recv` until the cap or the end, so a host sending a byte inside
+    every 10 s held one logo for up to 262,145 x 10 s (about 30 days), the
+    run fetches one logo at a time, and `logoFetchProc` was the one
+    network-facing Process in `Service.qml` without a watchdog. Now
+    `FetchDeadline` arms `ITIMER_REAL` for the budget with a `SIGALRM`
+    handler that raises `FetchExpired` (a `BaseException`, so no
+    `except OSError` in urllib can take it for a network error), around the
+    whole of `read_http_source` (the playlist, the probe and the guide:
+    `http_deadline`, 60 s, code `timeout`) and of `fetch_logo`
+    (`LOGO_DEADLINE`, 30 s, code `logo_timeout`). CPython re-runs a socket
+    call interrupted by a signal only after running the handler (PEP 475),
+    so the handler's exception ends the call wherever it waits; the read
+    loop's monotonic check stays for a caller off the main thread, where no
+    handler can be installed, and is made once more after the loop for the
+    trailers. A logo run starts no fetch after `LOGO_RUN_DEADLINE`, 3,600 s
+    -- about three times the quarter of an hour D-LOGO-8 measured for a
+    first enable of 1,436 logos -- and gives each logo the lesser of its
+    own deadline and what is left of the run's, so the run ends by that mark
+    plus the host-name lookup; what it held back is `postponed` and
+    `runExpired` in the summary, and the next run fetches it, because a file
+    on disk is never fetched again. The shell's `logoFetchWatchdog` is the
+    outer bound, `Model.LOGO_FETCH_WATCHDOG_MS` = the run's deadline + one
+    logo's + 60 s (3,690 s) for the cached-file pass (about 45 us a file),
+    the interpreter's start and the lookup, armed and stopped by the
+    Process's own `running` state; it TERMs the helper and logs no URL. The
+    three numbers are one shared fixture, `tests/fixtures/logo-deadlines.json`,
+    which both suites read. What no signal cuts short, stated rather than
+    rounded away: `getaddrinfo`, which runs in the C library and retries its
+    own poll after a signal, so a host-name lookup ends on the system
+    resolver's timeout and the handler runs then (UNVERIFIED by run). The
+    test-only `OMARCHY_IPTV_HTTP_DEADLINE` now only LOWERS the budget, as
+    `OMARCHY_IPTV_MEMORY_LIMIT_MB` does; it used to take any figure. So
+    does `OMARCHY_IPTV_CLIPBOARD_DEADLINE` since F-HARNESS-36 (R32f), the
+    rule-15 sibling the round-2 search missed: it, too, took any figure
+    over 0.05 and could lift the clipboard read's 5 s. Those three are
+    every environment variable the helper reads that touches a bound, and
+    each is pinned lower-only by `tests/test_fetch_bounds.py`
+    (`EnvironmentLeverTest`); the rest -- `OMARCHY_IPTV_URL`, `$HOME` and
+    the four `$XDG_*` paths -- carry no bound (and urllib's own
+    `http_proxy` family, read by the stdlib's `ProxyHandler`, routes a
+    fetch and bounds nothing).
+
+    **Redirect bodies are never read (R30e: D-LOGO-15, D-SRC-58).** The
+    stdlib's `HTTPRedirectHandler.http_error_302` composes the next request,
+    checks for a loop and then runs `fp.read(); fp.close()` on the 3xx
+    response before following it -- an uncapped read of whatever body the
+    server attaches, up to `max_redirections` (10) times a fetch -- and
+    `http_error_301`, `303`, `307` and `308` are the same function, bound by
+    name in that class's body. Both openers overrode `redirect_request` only,
+    so `MAX_SOURCE_BYTES` and `MAX_LOGO_BYTES` bounded the FINAL response and
+    nothing bounded a hop. `unread_redirect_handler` overrides all five: each
+    closes the response at once and hands the stdlib method an `UnreadBody`
+    whose `read` answers nothing, so every decision the stdlib makes -- the
+    Location header, its scheme check, the loop check, the subclass's
+    `redirect_request` -- is still its own, and only the read is gone.
+    `make_opener` (S-06) and `logo_opener` (D-LOGO-1) both build on it.
+
+    **The logo run's memory, lock and ceiling (R30e, R30b).** `logos
+    --fetch` runs under `limit_memory` like the playlist and epg verbs and
+    lifts it before its summary (D-M3U-3); its opener uses the TLS context
+    `limit_memory` prepared, so the CA store is loaded once a run, before
+    the limit. The run takes an exclusive non-blocking `flock` on the
+    source's logo folder for its whole length (`lock_logo_dir`): a second
+    run on the same source -- from a terminal, or left behind by a shell
+    restart -- answers `busy: true` with the survey's counts, fetches
+    nothing and exits 0, so two runs can no longer each count the folder
+    at their start and together pass the ceiling (D-LOGO-18). Since
+    D-LOGO-23 (R32f) the busy reply also carries `names`: the cached files
+    the playlist names that pass the cached-file check AS THEY STAND
+    (`present_logo_names`: header within bounds, a PNG already canonical),
+    each as a progress line too, so a shell that restarted while a fetch
+    was running draws the logos it has rather than blank rows until the
+    next run -- the first version answered no `names`, which kept the old
+    shell's set and gave a new shell nothing. Read-only by construction:
+    `canonical_logo_file(path, rewrite=False)` never writes, a PNG that
+    would need rewriting and a file that fails the check are simply not
+    named, nothing is unlinked, no temporary is swept and the folder is not
+    marked; that is the holder's work, and the holder may unlink a file
+    after the busy run named it (one `Cannot open` in the journal until the
+    holder's summary replaces the set). The shell's one journal line for
+    `busy` stays. The folder is created for the lock only
+    when the run could fetch something; one that cannot be made or opened
+    leaves the run unlocked, as nothing can be written there either. At the
+    ceiling, before a URL is counted as held back, the run removes once the
+    logo files no channel of the current playlist names
+    (`sweep_unnamed_logos`: only names of a logo's own shape, eight hex
+    digits, and only regular files; anything else stays and still counts),
+    reported as `unnamed`. They are a cache: a channel that names one again
+    gets it fetched again.
+
+    **The install-wide bound (R30a, D-LOGO-17; D-LOGO-20, R32f).** A run
+    marks its folder's modification time when it starts (`lock_logo_dir`,
+    through the locked descriptor) and when it ends (`cmd_logos`), a run
+    that fetched nothing included -- the start mark is R32f's, because a
+    run the shell stops with SIGTERM (a switch, the setting turned off, the
+    watchdog) reaches no `finally`, and one that wrote nothing left the
+    folder's older time, so the README's "since a fetch last ran for it"
+    was stronger than the code. Runs happen, from the shell, only for the
+    active source with logos on. `cache prune` removes the logo folder of a
+    kept source that is not active once that mark is `--epg-max-age` old
+    (`DEFAULT_EPG_MAX_AGE`, a day), as it already aged those sources' EPG
+    files (`agedLogos` in its reply; a link at `logos/` is never followed,
+    the removal being `remove_cache_subdir`'s) -- and the service runs it
+    once at every start (`schedulePrune`) AND at every source switch
+    (`onActiveCacheDirChanged` -> `queuePrune`, D-LOGO-20), where before it
+    ran at start only, so one session that switched through fifty sources
+    kept fifty folders until the next start. One folder holds at most
+    1,310,720,000 bytes (1.22 GiB, D-LOGO-12), and a folder grows only
+    while its source is active, which ends in a switch. So at every moment
+    of a session, not only after a restart, the install holds the active
+    source's folder and those of sources whose last fetch started or ended
+    within the past day: **1.22 GiB x (1 + the sources given logos in the
+    day before the last start or switch)**. `MAX_SOURCES` x 1.22 GiB,
+    65.5 GB, is reachable only by switching through all fifty with logos
+    on inside one day and filling each to its ceiling. UNVERIFIED at size;
+    arithmetic over the code; the switch prune is pinned through
+    `tests/service-harness.js`, which runs the directory's change handler
+    from its own text. The removal takes the folder's flock, non-blocking,
+    on a descriptor opened `O_NOFOLLOW` and held across it (D-LOGO-21,
+    R32f): a folder a running fetch holds -- a `logos --fetch` from a
+    terminal on a non-active source, which the shell never starts -- is
+    skipped, named in `busyLogos`, said once on stderr for however many,
+    and aged by the next prune; before, such a run could lose its folder
+    mid-run and `write_logo` then recreated an unlocked, uncounted one.
+    What stays as it was, stated (D-LOGO-22): a logo URL that failed --
+    timeout, refusal, 404 -- is tried once per run (the run's `seen` set
+    remembers every URL it looked at, pinned) and again at the next run;
+    nothing records a failure on disk, and `LOGO_RUN_DEADLINE` bounds what
+    a dead host costs a run. The cost, by the ruling: switching back to a
+    source whose folder was aged fetches its logos again, which contacts
+    those hosts again.
+
+    **Leftovers of a killed write (D-SRC-60).** The atomic writers remove
+    their temporary on every exit Python sees, and a SIGTERM is not one: the
+    service sends it from the playlist, guide and probe watchdogs, a probe's
+    cancel and the logo fetch's stop, and each kill inside a write can leave
+    one `.tmp-<name>-<8 hex>`, no larger than its target, 0600 in a 0700
+    folder. Nothing swept one in a kept or active source's folder, its
+    `logos/` -- where it held a slot under the ceiling -- or the state
+    folder. The first atomic write a process makes into a folder now removes
+    the leftovers there (`sweep_stale_temps`): exactly the writers' own name
+    shape, regular files only (never followed), owned by this user, and
+    last modified at least `STALE_TEMP_AGE` ago, a day. A writer writes its
+    temporary in one call and renames it straight after, so one a live
+    writer holds was modified moments ago; a day is about 23 times the
+    longest watchdog (the logo fetch's, 3,690 s). In a folder that is not
+    the plugin's (the target of a `state.json` link) only the target's own
+    leftovers go. The logo run sweeps its folder before counting it
+    (`staleTemps` in its summary), and `cache prune` sweeps the folders of
+    kept sources that are not active.
+
+    **The one line the shell writes (R30c).** A run that stopped at the
+    ceiling or at its deadline, or found the folder busy, exits 0, and its
+    counted stderr line went to a Process with no stderr reader. The
+    summary handler now writes one console line to the shell's journal,
+    composed by `Model.logoSummaryNotice` from the summary's numbers and
+    fixed words only, never a host, a name or a URL.
+
+    Proved by `tests/test_fetch_bounds.py` and `tests/test_logo_run.py` over
+    `tests/scripted_server.py`, a local server whose every response is an
+    ordinary small one sent a fixed fraction of a second after the deadline
+    the test lowers (TLS with a throwaway certificate for the logos), with
+    the deadline, the age, the cap and the detail cap LOWERED and never a
+    large or endless input; the redirect methods are also called directly
+    with a fake response that records whether it was read. 29 of their 31
+    tests are red on lane-bounds-int (17a2407); the other two, and the
+    node checks that run `Service.qml`'s own watchdog, `onRunningChanged`,
+    `onExited` and `onLogoLine` text against fakes, were seen red on
+    mutations of the shipping decision.
 
 ## 9. Coding standards
 
@@ -3667,7 +4179,10 @@ Applied in fix round 1 against `docs/SECURITY-REVIEW.md`:
   is wrapped in curly quotes so it can never parse as a flag.
 - S-05: HTTP reads run under a wall-clock deadline of `max(60 s, 3 x
   --timeout)` (code `timeout`); `Service.qml` watchdogs kill a helper that
-  exceeds 180 s and report `helper_timeout` without a URL.
+  exceeds 180 s and report `helper_timeout` without a URL. [2026-10-21,
+  R30e (D-SRC-58): the deadline was checked only between body reads, so
+  connect, TLS, the headers and every redirect ran outside it; it now covers
+  the whole fetch, the logo fetch included, section 8 item 17.]
 - S-06: redirects to non-http(s) targets are refused (`unsafe_redirect`);
   `Authorization` and `Cookie` are dropped when scheme, host, or port change.
 - S-07: `MAX_CHANNELS = 50000`, `MAX_GROUPS = 2000` in the helper, mirrored

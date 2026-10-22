@@ -111,7 +111,9 @@ const STUBBED = {
   runConfigShield: "starts the D-SINK-18 shield process; the file is taken as private (hostConfigShield below)",
   noteSessionOutcome: "the player session record; no part of the source state machine",
   markDeadSession: "the player session record",
-  schedulePrune: "the start-up cache prune",
+  // schedulePrune and queuePrune RUN since D-LOGO-20 (R32f): a prune is a
+  // cache job, recorded in h.cacheRuns like migrate and remove, so a pin can
+  // see the start-up prune once and the switch prune on every switch.
   fetchLogos: "starts the logo fetch",
   clearSourceData: "unbinds the channel and EPG data of the previous source",
   pruneFailed: "dead-channel memory"
@@ -191,7 +193,19 @@ function rootProperties(text) {
       out.push({ readonly: !!m[1], type: m[2], name: m[3], expr: text.slice(start + 1, close), block: true })
       continue
     }
-    const end = scan(text, start, true)
+    let end = scan(text, start, true)
+    // A binding continued on the next line by a ternary's `?` or `:` is ONE
+    // expression (the shape `activeCacheDir` and `failedPath` take). The
+    // scanner stopped at the first newline and compiled only the first
+    // line, so `activeCacheDir` read as true or false here, equal across
+    // every switch, and nothing keyed on it could be seen to change -- found
+    // pinning D-LOGO-20 (R32f), rule 10: a double was more forgiving than
+    // the binding it stood for.
+    for (;;) {
+      const nextEnd = text.indexOf("\n", end + 1)
+      if (!/^[ \t]*[?:]/.test(text.slice(end + 1, nextEnd === -1 ? text.length : nextEnd))) break
+      end = scan(text, end + 1, true)
+    }
     out.push({ readonly: !!m[1], type: m[2], name: m[3], expr: text.slice(start, end), block: false })
   }
   return out
@@ -530,6 +544,13 @@ function bootService(serviceText, Model, o) {
         const before = values[p.name]
         values[p.name] = v
         if (p.name === "ownWrite" && v !== before && h.started) onSettingsChanged()
+        // D-LOGO-20 (R32f): `activeCacheDir` is a readonly binding over
+        // stateLoaded, cacheReady and the active key, and QML fires its
+        // change handler synchronously the moment any of them moves it.
+        // The handler is compiled from its own text below and fired here,
+        // after every plain-property set that changed the binding's value
+        // -- the start's first value included, as the shell sees it.
+        if (h.started && typeof h.checkActiveDir === "function") h.checkActiveDir()
       },
       enumerable: true, configurable: true
     })
@@ -547,10 +568,25 @@ function bootService(serviceText, Model, o) {
   root.runConfigShield = () => {}
   root.noteSessionOutcome = () => {}
   root.markDeadSession = () => {}
-  root.schedulePrune = () => {}
   root.fetchLogos = () => {}
   root.clearSourceData = () => {}
   root.pruneFailed = () => {}
+  // D-LOGO-20 (R32f): onActiveCacheDirChanged from its own text, fired by
+  // the property setters above whenever the binding's value moved (""
+  // before the state loads, as in the shell). A tree without the handler
+  // fires nothing. Re-entrant sets inside the handler (pendingFreshness)
+  // re-check and find no further change.
+  const activeDirText = handlerBlock(serviceText, "  onActiveCacheDirChanged: {")
+  const onActiveCacheDirChanged = activeDirText ? compile("", activeDirText, "onActiveCacheDirChanged") : () => {}
+  let lastActiveDir = ""
+  h.activeDirChanges = 0
+  h.checkActiveDir = () => {
+    const now = String(root.activeCacheDir || "")
+    if (now === lastActiveDir) return
+    lastActiveDir = now
+    h.activeDirChanges++
+    onActiveCacheDirChanged()
+  }
   root.hostConfigShield = Model.CONFIG_SHIELD_PRIVATE
   root.manifest = { id: PID }
   // The FileView's two outcome handlers and the start-up init's exit, from

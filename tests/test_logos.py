@@ -419,7 +419,7 @@ class LogoFetchCacheTest(unittest.TestCase):
         import tempfile
         calls = []
 
-        def fetcher(url, timeout):
+        def fetcher(url, timeout, budget=None):
             calls.append(url)
             return SAMPLE["image/png"], "image/png"
 
@@ -442,7 +442,7 @@ class LogoFetchCacheTest(unittest.TestCase):
         """`names` goes over stdout to the service; rule 5 covers that sink too."""
         import tempfile
 
-        def fetcher(url, timeout):
+        def fetcher(url, timeout, budget=None):
             return SAMPLE["image/png"], "image/png"
 
         report = self.run_fetch(tempfile.mkdtemp(),
@@ -458,7 +458,7 @@ class LogoFetchCacheTest(unittest.TestCase):
         """The guide must not point an Image at a file that was never written."""
         import tempfile
 
-        def fetcher(url, timeout):
+        def fetcher(url, timeout, budget=None):
             if url.endswith("2.png"):
                 raise helper.HelperError("logo_fetch", "could not fetch a logo from h.test")
             return SAMPLE["image/png"], "image/png"
@@ -779,7 +779,7 @@ class LogoStreamTest(unittest.TestCase):
         finally:
             helper.fetch_logo = real
 
-    def png(self, url, timeout):
+    def png(self, url, timeout, budget=None):
         return SAMPLE["image/png"], "image/png"
 
     def test_one_line_per_logo_as_it_lands_and_the_summary_last(self):
@@ -808,7 +808,7 @@ class LogoStreamTest(unittest.TestCase):
         """The shell must never be told a file is there when it is not."""
         import tempfile
 
-        def flaky(url, timeout):
+        def flaky(url, timeout, budget=None):
             if url.endswith("1.png"):
                 raise helper.HelperError("logo_fetch", "could not fetch a logo from h.test")
             return SAMPLE["image/png"], "image/png"

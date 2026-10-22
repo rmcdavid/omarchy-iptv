@@ -4966,10 +4966,22 @@ Item {
   }
 
   // Section 4.4 step 7: once per start, drop orphan directories and age the
-  // EPG files of inactive sources.
+  // EPG files and logo folders of inactive sources.
   function schedulePrune() {
     if (root.pruned) return
     root.pruned = true
+    root.queuePrune()
+  }
+
+  // D-LOGO-20 (R32f): the same prune again at every source switch
+  // (onActiveCacheDirChanged, once the start-up one has been queued), so the
+  // install-wide logo bound ARCHITECTURE section 8 item 17 states -- 1.22 GiB
+  // for the active source plus 1.22 GiB for each source given logos within
+  // the day -- holds at every moment of a session and not only after a
+  // restart: a session that switched through fifty sources with logos on
+  // used to keep all fifty folders until the next start. Keys only; the
+  // helper skips a folder a running fetch holds and says so once.
+  function queuePrune() {
     var args = ["prune", "--keep"]
     var sources = root.userState.sources
     for (var i = 0; i < sources.length; i++) args.push(sources[i].key)
@@ -5195,6 +5207,12 @@ Item {
     root.clearSourceData()
     root.pendingFreshness = root.activeCacheDir !== ""
     if (root.activeCacheDir === "") root.finishSwitch()
+    // D-LOGO-20 (R32f): a source became active -- a switch, or the first
+    // source added -- so the folders of the sources left behind are aged
+    // now, not at the next start. `pruned` is set by the start-up prune
+    // (schedulePrune), which this directory's FIRST value, at start, must
+    // not double; the start-up one is queued in the same turn it is set.
+    if (root.pruned && root.activeCacheDir !== "") root.queuePrune()
   }
 
   Component.onCompleted: {
@@ -5960,7 +5978,14 @@ Item {
   }
   Connections {
     target: logoFetchProc
+    // D-LOGO-16: the watchdog runs exactly while the process does, whoever
+    // started or stopped it (fetchLogos, the setting, a source switch).
+    function onRunningChanged() {
+      if (logoFetchProc.running) logoFetchWatchdog.restart()
+      else logoFetchWatchdog.stop()
+    }
     function onExited(exitCode, exitStatus) {
+      logoFetchWatchdog.stop()
       // Nothing is reported to the user on success: the pictures appearing is
       // the report. A failure is not an error either -- a logo host being
       // down is not a reason to interrupt someone watching television -- so
@@ -6012,6 +6037,33 @@ Item {
       root.logoPending = []
       root.logoHave = Model.logoHaveSet(names, root.logoFetchDir)
       root.logoFetchSeq += 1
+    }
+    // R30c: a run that stopped at the logo folder's ceiling or at its time
+    // limit, or found another run holding the folder, exits 0 and says so
+    // on a stderr this Process never reads; this is the one line that
+    // reaches the journal. Counted, fixed words, no URL (rule 5).
+    var notice = Model.logoSummaryNotice(line)
+    if (notice !== "") console.log(notice)
+  }
+
+  Timer {
+    // D-LOGO-16 (R30e): the OUTER bound on a logo fetch, which was the one
+    // network-facing helper here without one. The helper stops itself
+    // first -- each logo has LOGO_DEADLINE_MS and the run starts nothing
+    // after LOGO_RUN_DEADLINE_MS -- and this sits a logo deadline and a
+    // minute past that (Model.LOGO_FETCH_WATCHDOG_MS), so a run that stops on
+    // time is read to its summary and one that cannot is terminated. Not
+    // playlistWatchdog's 180 s: a first enable of 1,436 logos took about a
+    // quarter of an hour (D-LOGO-8). Armed and disarmed by logoFetchProc's
+    // own running state; onExited flushes what landed and leaves the next
+    // run to the next refresh. No URL is logged.
+    id: logoFetchWatchdog
+    interval: Model.LOGO_FETCH_WATCHDOG_MS
+    repeat: false
+    onTriggered: {
+      if (!logoFetchProc.running) return
+      console.warn("omarchy-iptv: logo fetch exceeded " + Math.floor(Model.LOGO_FETCH_WATCHDOG_MS / 1000) + " s, terminating it")
+      logoFetchProc.signal(15)
     }
   }
 

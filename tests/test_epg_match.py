@@ -1259,7 +1259,7 @@ class AddressNameConflictTest(unittest.TestCase):
                          helper.epg_name_key("ESPN (Deportes) Live"))
 
     def test_the_guide_side_shortcut_agrees_with_bare_name_key(self):
-        """parse_xmltv skips the second fold when the raw display-name does not
+        """parse_xmltv skips the second fold when the folded display-name does not
         end with `)`, and uses `epg_name_key`'s answer instead. That shortcut
         is only correct if the two functions agree on exactly those strings --
         it is a performance decision inside a hot loop, so it is asserted here

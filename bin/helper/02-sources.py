@@ -333,13 +333,16 @@ def clean_header_value(value: str) -> str:
 
 
 def split_groups(value: str) -> list[str]:
-    """`A;B;C` -> ["A", "B", "C"] (trimmed, empties and repeats dropped)."""
-    groups: list[str] = []
-    for part in value.split(";"):
-        name = part.strip()
-        if name and name not in groups:
-            groups.append(name)
-    return groups
+    """`A;B;C` -> ["A", "B", "C"] (trimmed, empties and repeats dropped, the
+    first of each kept in order).
+
+    Linear (rule 15 over R30h, lane-bounds-h): a `name not in groups` test
+    per part scanned the list, k*k/2 comparisons for k parts, and a
+    persistent `#EXTGRP` of up to M3U_MAX_GROUP_TEXT characters -- up to 256
+    one-character parts -- is split again for every channel after it, so a
+    50,000-channel list paid about 32,000 comparisons a channel. Same list,
+    one pass."""
+    return list(dict.fromkeys(name for name in (part.strip() for part in value.split(";")) if name))
 
 
 def channel_number(attrs: dict[str, str]) -> str:
@@ -369,22 +372,52 @@ def clean_name(value: str) -> str:
 
 
 # D-M3U-1: the warning each length cap adds, once per kind and with a count,
-# in the order they are reported. The figure in each is its cap.
+# in the order they are reported. The figure in each is its cap. D-M3U-4:
+# each kind carries its sentence for ONE and for more than one, because the
+# count is the user's number ("1 channel names cut" was in the guide footer);
+# counted_sentence picks between them, and every other counted sentence
+# parse_m3u writes goes through it too.
 M3U_CUT_WARNINGS = (
-    ("name", "%d channel names cut to " + str(M3U_MAX_NAME) + " characters"),
-    ("tvgName", "%d tvg-name values cut to " + str(M3U_MAX_NAME) + " characters"),
-    ("groupText", "%d group values cut to " + str(M3U_MAX_GROUP_TEXT) + " characters"),
-    ("group", "%d group names cut to " + str(M3U_MAX_GROUP) + " characters"),
-    ("groupCount", "%d channels listed in more than " + str(M3U_MAX_GROUPS_PER_CHANNEL) + " groups kept the first " + str(M3U_MAX_GROUPS_PER_CHANNEL)),
-    ("tvgId", "%d tvg-id values longer than " + str(M3U_MAX_TVG_ID) + " characters dropped"),
-    ("chno", "%d channel numbers longer than " + str(M3U_MAX_CHNO) + " characters dropped"),
-    ("logo", "%d logo URLs longer than " + str(M3U_MAX_LOGO_URL) + " characters dropped"),
-    ("option", "%d options or headers dropped: a name over " + str(M3U_MAX_OPTION_KEY) + " or a value over " + str(M3U_MAX_OPTION_VALUE) + " characters"),
-    ("optionCount", "%d options or headers dropped: more than " + str(M3U_MAX_OPTIONS) + " on one channel"),
-    ("url", "%d entries skipped: stream URL longer than " + str(M3U_MAX_URL) + " characters"),
-    ("epgHint", "%d EPG hints longer than " + str(M3U_MAX_EPG_HINT) + " characters dropped"),
-    ("warnings", "%d more warnings like the ones above not listed"),
+    ("name", "%d channel name cut to " + str(M3U_MAX_NAME) + " characters",
+             "%d channel names cut to " + str(M3U_MAX_NAME) + " characters"),
+    ("tvgName", "%d tvg-name value cut to " + str(M3U_MAX_NAME) + " characters",
+                "%d tvg-name values cut to " + str(M3U_MAX_NAME) + " characters"),
+    ("groupText", "%d group value cut to " + str(M3U_MAX_GROUP_TEXT) + " characters",
+                  "%d group values cut to " + str(M3U_MAX_GROUP_TEXT) + " characters"),
+    ("group", "%d group name cut to " + str(M3U_MAX_GROUP) + " characters",
+              "%d group names cut to " + str(M3U_MAX_GROUP) + " characters"),
+    ("groupCount", "%d channel listed in more than " + str(M3U_MAX_GROUPS_PER_CHANNEL) + " groups kept the first " + str(M3U_MAX_GROUPS_PER_CHANNEL),
+                   "%d channels listed in more than " + str(M3U_MAX_GROUPS_PER_CHANNEL) + " groups kept the first " + str(M3U_MAX_GROUPS_PER_CHANNEL)),
+    ("tvgId", "%d tvg-id value longer than " + str(M3U_MAX_TVG_ID) + " characters dropped",
+              "%d tvg-id values longer than " + str(M3U_MAX_TVG_ID) + " characters dropped"),
+    ("chno", "%d channel number longer than " + str(M3U_MAX_CHNO) + " characters dropped",
+             "%d channel numbers longer than " + str(M3U_MAX_CHNO) + " characters dropped"),
+    ("logo", "%d logo URL longer than " + str(M3U_MAX_LOGO_URL) + " characters dropped",
+             "%d logo URLs longer than " + str(M3U_MAX_LOGO_URL) + " characters dropped"),
+    ("option", "%d option or header dropped: a name over " + str(M3U_MAX_OPTION_KEY) + " or a value over " + str(M3U_MAX_OPTION_VALUE) + " characters",
+               "%d options or headers dropped: a name over " + str(M3U_MAX_OPTION_KEY) + " or a value over " + str(M3U_MAX_OPTION_VALUE) + " characters"),
+    ("optionCount", "%d option or header dropped: more than " + str(M3U_MAX_OPTIONS) + " on one channel",
+                    "%d options or headers dropped: more than " + str(M3U_MAX_OPTIONS) + " on one channel"),
+    ("url", "%d entry skipped: stream URL longer than " + str(M3U_MAX_URL) + " characters",
+            "%d entries skipped: stream URL longer than " + str(M3U_MAX_URL) + " characters"),
+    ("epgHint", "%d EPG hint longer than " + str(M3U_MAX_EPG_HINT) + " characters dropped",
+                "%d EPG hints longer than " + str(M3U_MAX_EPG_HINT) + " characters dropped"),
+    ("warnings", "%d more warning like the ones above not listed",
+                 "%d more warnings like the ones above not listed"),
 )
+
+
+def counted_sentence(count: int, one: str, many: str) -> str:
+    """`one % count` for a count of exactly one, `many % count` otherwise
+    (D-M3U-4). Both templates take the count as their first %d."""
+    return (one if count == 1 else many) % count
+
+
+def bound_warnings(bounds: dict[str, int]) -> list[str]:
+    """The M3U_CUT_WARNINGS sentence of every kind `bounds` counted, in the
+    table's order, each read for its own count."""
+    return [counted_sentence(bounds[kind], one, many)
+            for kind, one, many in M3U_CUT_WARNINGS if bounds.get(kind)]
 
 
 def bound_count(bounds: dict[str, int] | None, kind: str) -> None:
@@ -665,19 +698,25 @@ def parse_m3u(text: Any) -> dict[str, Any]:
 
     if pending is not None:
         skipped_no_url += 1
+    # D-M3U-4, rule 15: every count here is the user's number, so each
+    # sentence is read for one as well as for many (counted_sentence).
     if skipped_scheme:
-        warnings.append("%d entries skipped: unsupported URL scheme" % skipped_scheme)
+        warnings.append(counted_sentence(skipped_scheme, "%d entry skipped: unsupported URL scheme",
+                                         "%d entries skipped: unsupported URL scheme"))
     if skipped_orphan:
-        warnings.append("%d URL lines without #EXTINF skipped" % skipped_orphan)
+        warnings.append(counted_sentence(skipped_orphan, "%d URL line without #EXTINF skipped",
+                                         "%d URL lines without #EXTINF skipped"))
     if skipped_no_url:
-        warnings.append("%d #EXTINF entries without a URL skipped" % skipped_no_url)
+        warnings.append(counted_sentence(skipped_no_url, "%d #EXTINF entry without a URL skipped",
+                                         "%d #EXTINF entries without a URL skipped"))
     if over_cap:
-        warnings.append("truncated to %d channels (%d entries skipped)" % (MAX_CHANNELS, over_cap))
+        warnings.append("truncated to %s (%s)" % (
+            counted_sentence(MAX_CHANNELS, "%d channel", "%d channels"),
+            counted_sentence(over_cap, "%d entry skipped", "%d entries skipped")))
     if regrouped:
-        warnings.append("group count capped at %d; %d channels listed under %s" % (MAX_GROUPS, regrouped, UNGROUPED))
-    for kind, sentence in M3U_CUT_WARNINGS:
-        if bounds.get(kind):
-            warnings.append(sentence % bounds[kind])
+        warnings.append("group count capped at %d; %s under %s" % (
+            MAX_GROUPS, counted_sentence(regrouped, "%d channel listed", "%d channels listed"), UNGROUPED))
+    warnings.extend(bound_warnings(bounds))
     assign_ids(channels)
     return {"channels": channels, "warnings": warnings, "epgUrlHint": epg_hint, "isPlaylist": is_playlist}
 

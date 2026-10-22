@@ -12829,7 +12829,7 @@ state file was read read-only and holds no userinfo.
 **Two P3s, both real.** The new comment said `redactUrls` cuts over an isolated
 authority; it does not. It bounds the userinfo scan at `/` and whitespace only,
 never at `?` or `#`, so `redactUrls("http://h.test?a=b@c")` returns `"c"` and
-`sourceLabel` agrees. It never under-redacts, and anything through
+`sourceLabel` agrees. It never under-redact (corrected 2026-10-21, D-DOC-20: D-SINK-23 found a query password let through on a URL with no path, so this held for the shapes then tested, not for every URL)s, and anything through
 `validateSourceUrl` carries a path, so the Sources path is closed; but the
 sentence told the next reader a neighbour was safe in a way it is not, which is
 the reasoning that let D-SINK-1 sit three thousand lines from D-SINK-17. And the
@@ -13314,6 +13314,81 @@ which checks the location and that the entry is an object and nothing else;
 the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
+
+### The bounds sweep, round 3 (2026-10-22): H2 and G2 merged, S2 held on the lead's own ruling
+
+**Lane H2 (`lane-bounds-h2`, `97ba41f`)**: D-EPG-12 (R32d), one fold (`epg_name_text`) inside both key functions so `build_alias` and `parse_xmltv` key a DEL, tab or C0 name identically (the base keyed `alpha\x7fone` against `alpha one`), the guide caps pinned at their exact boundary, the README's cap sentence made true, the regex guard grading the adjacent-overlapping-runs shape by structure (`super_linear_pairs`) and red on a copy of the old pattern. Its recheck: MERGEABLE, two P3s (**F-GATE-6** among them), its own 7.2M-string enumeration equal. Under rule 15 it reported **D-PERF-11** for the model lane and cleared the JS for any name-key mirror.
+
+**Lane G2 (`lane-bounds-g2`, `2d8c84a`)**: F-HARNESS-36, D-LOGO-23, D-LOGO-20 (prune at every change of the active directory), D-LOGO-21, D-LOGO-22 narrowed, the three unpinned decisions pinned, the README sentences; and **F-HARNESS-40**, a harness scanner defect invisible to 2,699 checks. Its recheck: MERGEABLE (6 tests / 12 subtests red on the base; 11 mutations each red), three P3s including **F-HARNESS-41**, a timing flake under load.
+
+**Lane S2 (`lane-bounds-s2`, `cb43094`)**: implemented R32a-c and R32e as written and raised, as its first open question, that the free-text rule prints a password tail on an Xtream-shaped path credential. Its recheck proved it on the shipping path (**D-SINK-29**, P1, the lead's ruling, not the lane's work), found the warning unimplemented for a non-digit password prefix (P2), and three P3s. The lane also fixed D-SINK-26 and reported **D-SINK-30** and **D-SINK-31**. NOT MERGEABLE until R32a' (the decisions log) is implemented: round 4.
+
+Both merges were resealed and gated: `84cf2d1`, 1,443 python tests, 2,702 node checks, the helper regex guard at 36 reviewed calls with D-PERF-6 printed OPEN until lane S2's search lands.
+
+### The bounds sweep, round 2 (2026-10-21): three lanes off the round-1 integration, and the rulings R32
+
+**Lane H (`lane-bounds-h`, `8a3a0de`)**: D-EPG-10 (without an index the parse admits at most MAX_CHANNELS guide channels and refuses ids over 256 characters, counted by programme), D-EPG-8 (the qualifier strip without a regex, equal to the old pattern on 20,000 seeded names; display-names folded and cut first; every helper regex graded in a new gate step, `scripts/check-helper-regex.py`), D-EPG-9 (one backward pass, byte-identical output), the EPG counted sentences, and the round-1 rechecks' items; under rule 15 it fixed **D-PERF-7**, **D-PERF-8**, **D-PERF-9** and **D-PERF-10** and found **D-PERF-6** open. Its recheck: NOT MERGEABLE, one P1 -- `_EPG_NAME_NOISE` is still quadratic and the guard calls it linear (**D-EPG-12**) -- and three P3s.
+
+**Lane G (`lane-bounds-g`, `6383300`)**: D-SRC-58, D-LOGO-15, D-LOGO-16, D-SRC-59, D-SRC-60, D-LOGO-18 fixed and D-LOGO-17 narrowed; under rule 15 **D-SRC-61** fixed and **D-SRC-62**, **D-LOGO-20**, **D-LOGO-21**, **D-LOGO-22** found. Its recheck: MERGEABLE (29 of 31 new tests red on the base; 9 of 12 Python and 6 of 6 node mutations red), four P3s: **F-HARNESS-36**, **D-LOGO-23**, three unpinned decisions, two README sentences. Merged into `lane-bounds-int` as `c4784d2`.
+
+**Lane S (`lane-bounds-s`, `f22b092`, `b394cc2`)**: D-SG-3 (null-prototype keyed maps, pinned on V4 by an offscreen probe as well as node), D-PERF-3 (native trims; the gate now refuses the trim idioms and `trimEnd`/`trimStart`, which V4 lacks: **F-GATE-3**, **F-GATE-4**, **F-GATE-5**), D-SINK-23, D-SINK-24, D-SINK-25, D-PERF-4, D-DOC-19; under rule 10 and 15 **F-HARNESS-37**, **F-HARNESS-38**, **D-SG-4**, **D-SINK-26**, **D-DOC-20**. Its recheck: NOT MERGEABLE on a P1 the lane's D-SINK-25 refusal introduced (**D-SINK-27**: a stored Xtream or WebDAV link with `me@mail.test` in its path is dropped after the upgrade), two P2s on the redactors (**D-SINK-28**; D-SINK-24 not closed for bearer and basic-auth values) and one weak check (**F-HARNESS-39**).
+
+The rulings R32 are in the decisions log. Round 3 fixes H and S from these and the integration follows.
+
+### The bounds sweep, round 1 (2026-10-21): two lanes and a review through the maintainer's lens
+
+**On the owner's word ("Bounds sweep"), with `main` held for #12474.** The
+work list was the board's own open items of the shape the maintainer's last
+six findings share, an input that costs far more than its size: D-SRC-13,
+D-M3U-3, D-M3U-4, D-LOGO-12, D-EPG-7 and D-SRC-45. Workflow
+`wf_61c16c5d-cb5`, base `dev` `f55a32f`, every prompt under one input rule:
+no input built to exhaust memory, CPU, disk or time at any size, and no
+measurement of what one would cost. Bounds were shown by arithmetic, by the
+cost of one ordinary record, and by tests that lower a cap.
+
+**Lane P (`lane-bounds-p`, `6782bc8`).** D-SRC-13 is closed by D-M3U-1's
+`channel_warning` cap, decided by calling the playlist verb with the cap
+lowered (3 listed and "7 more"), and pinned red on a mutation. The rule-15
+sweep over every reply the shell collects whole bounded two that were not:
+`player tracks` and the first-load reason, and capped main()'s answer to a
+bug. D-M3U-3: the fetch verbs lift the limit in a `finally` before any status
+is composed, observed at each open and write in a real helper process.
+D-M3U-4: every counted sentence reads right for one and for many. Its recheck
+found it NOT MERGEABLE on two P2s: the tests pinning "cut after the
+redaction" stay green with the order reversed, and the server's HTTP status
+line reaches the replies verbatim (**D-SRC-59**).
+
+**Lane L (`lane-bounds-l`, `1b5397a`, `76564b4`).** D-LOGO-12: a run counts
+the folder first and fetches only below the ceiling (2, 2, 2, 2 files across
+four runs at cap 2, against `f55a32f`'s 2, 4, 6, 7). D-EPG-7: each retained
+programme is one bytes object, byte-identical output to `f55a32f` over 240
+seeded differential comparisons. D-SRC-45 answers `no_cache`. Under rule 15
+it found **D-LOGO-17** (the ceiling is per source: 65.5 GB across fifty) and
+**D-EPG-11** (the shell holds about 7 KiB per channel from epg-now.json,
+measured at 2,000 and 4,000 channels). Its recheck found it MERGEABLE with
+P2s owed: the ceiling stop the README says is logged reaches nothing in the
+shell, the retention bound counts the programme and not the channel
+(**D-EPG-10**), and no test pins the stop half of the duplicate key; and
+**D-LOGO-18** among its P3s.
+
+**The review: four finders over `f55a32f`, each answered by a verifier told
+to refute.** Confirmed or plausible and new to the board: **D-SG-3** (a group
+named `__proto__` pollutes the shell's shared `Object.prototype`, measured on
+V4 and in node), **D-PERF-3** (trailing-whitespace regexes on the shell's
+main thread), **D-EPG-8** (the bare-name qualifier regex), **D-EPG-9** (the
+stop derivation's forward scan), **D-LOGO-15** (a redirect body read whole),
+**D-LOGO-16** (no wall-clock bound on the logo fetch), **D-LOGO-19** (an
+undecodable cached logo), **D-SRC-58** (the 60 s download deadline covers
+the body only), **D-SRC-60** (temporary files left by a SIGTERM),
+**D-SINK-23** (a query password on a URL with no path), **D-SINK-24**
+(rejected `mpvArgs` journaled verbatim), **D-SINK-25** (a digits-only
+password prefix read as a port), **D-PERF-4** (`preparedLru`), **D-PERF-5**
+(the apply path at 50,000 channels never measured), **D-M3U-5** (the
+persistent `#EXTGRP` in every channel's group text) and **D-DOC-19** (the
+README's summary of the migration). Refuted: `parse_attrs` keeping every
+attribute, and the mpv IPC reader's line length. Every helper finding is in
+0.14.3 as well; D-DOC-19 is on `dev` only. The record is the workflow's
+journal; the lanes merge as `lane-bounds-int`, and round 2 fixes from there.
 
 ### The P3 sweep (2026-10-20..21): four rounds, one descope, and what it closed
 

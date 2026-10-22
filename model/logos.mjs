@@ -651,6 +651,58 @@ function logoSummaryNames(line) {
     return null
   }
 }
+
+// D-LOGO-16 (R30e). The helper's deadlines, mirrored from LOGO_DEADLINE
+// (bin/helper/05-ipc-logos.py) and LOGO_RUN_DEADLINE (06-failed.py) and
+// pinned on both sides by the shared logo-deadlines fixture: one logo has
+// LOGO_DEADLINE_MS from before its connection opens to its last byte, and a
+// run starts no fetch after LOGO_RUN_DEADLINE_MS, so it ends one logo
+// deadline after that at the latest. The shell's watchdog (Service.qml
+// logoFetchWatchdog) is the OUTER bound and sits past both by a minute more
+// -- the cached-file pass, which the run's deadline does not cut, measured at
+// about 45 us a file (5,000 files, a quarter of a second), the interpreter's
+// start, and the host-name lookup no signal interrupts -- so a run that
+// stops itself on time is read to its summary rather than killed, and one
+// that cannot stop is still killed. Before it, logoFetchProc was the one
+// network-facing Process in the service with no watchdog.
+var LOGO_DEADLINE_MS = 30 * 1000
+var LOGO_RUN_DEADLINE_MS = 3600 * 1000
+var LOGO_FETCH_WATCHDOG_MS = LOGO_RUN_DEADLINE_MS + LOGO_DEADLINE_MS + 60 * 1000
+
+// The one journal line the shell writes for a fetch's summary (R30c), or ""
+// for a summary that needs none and for any other line. A run that stopped at
+// the logo folder's ceiling exits 0 and said so only on its stderr, which the
+// service never reads, so logos stopped arriving in silence. Composed from
+// the summary's numbers and fixed words only, never a host, a name or a URL;
+// a number that is not a whole number reads as 0.
+function logoSummaryNotice(line) {
+  var text = str(line).trim()
+  if (text === "") return ""
+  var doc
+  try {
+    doc = JSON.parse(text)
+  } catch (e) {
+    return ""
+  }
+  if (!doc || typeof doc !== "object" || Array.isArray(doc) || str(doc.kind) !== "logos") return ""
+  function whole(value) {
+    return typeof value === "number" && isFinite(value) && value >= 0 ? Math.floor(value) : 0
+  }
+  function logos(n, verb) {
+    return n === 1 ? "1 logo " + verb[0] : n + " logos " + verb[1]
+  }
+  if (doc.busy === true) return "[iptv] logo fetch skipped: another fetch is running for this source"
+  var parts = []
+  if (doc.atCeiling === true) {
+    parts.push("the logo folder is full (" + whole(doc.files) + " files, ceiling " + whole(doc.cap) + "); "
+               + logos(whole(doc.deferred), ["was", "were"]) + " not fetched")
+  }
+  if (doc.runExpired === true) {
+    parts.push("the run reached its time limit; " + logos(whole(doc.postponed), ["was", "were"])
+               + " left for the next run")
+  }
+  return parts.length === 0 ? "" : "[iptv] logo fetch: " + parts.join("; ")
+}
 export {
   LOGO_SCHEMES, optInSetting, logoSurvey, splitLogoUrl, logoHost,
   logoConsentLines, logoFile, logoSlot, WALL_KEY, FOOTER_DROP_ORDER,
@@ -658,5 +710,6 @@ export {
   WALL_PLATE_ASPECT, wallGeometry, wallTile, arrowAction, wallStep,
   logoDirFor, logoHaveSet, logoHaveIsSet, logoHaveMerge, logoHaveCount,
   logoFetchPlan, logoColumnShown, logoStreamName, logoNamesFrom,
-  logoSummaryNames
+  logoSummaryNames, LOGO_DEADLINE_MS, LOGO_RUN_DEADLINE_MS,
+  LOGO_FETCH_WATCHDOG_MS, logoSummaryNotice
 }

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import array
 import bisect
 import codecs
 import errno
@@ -249,6 +250,38 @@ EPG_REFETCH_MARGIN = 2 * 3600     # re-download when the window ends sooner than
 EPG_VALID_MAX = 300               # epg-now.json is never declared valid longer than this
 EPG_MAX_TITLE = 200
 EPG_MAX_PER_CHANNEL = 400
+# D-EPG-7: the time memo's bounds (parse_xmltv_time). A well-formed XMLTV
+# time is at most 20 characters ("YYYYMMDDHHMMSS +HHMM"); 64 leaves room for
+# padding whitespace and refuses only junk. The memo keeps an ASCII key only
+# (the round-1 recheck of lane-bounds-l, P3 (d)): the first version said
+# "about 3 MiB, whatever the feed" while a 64-character key of astral
+# characters is a 316-byte str, which put the worst case near 6 MiB. A
+# non-ASCII value is still parsed (`\d` reads any decimal digit); it is only
+# not remembered, and a memo changes no answer. At the cap the memo holds
+# 16,384 ASCII keys of at most 64 characters: 16,384 x (105 bytes, what
+# sys.getsizeof gives a 64-character ASCII str on CPython 3.14 + 32 for the
+# epoch int + about 40 of dict table) = 2.9 MB, about 2.8 MiB, whatever the
+# feed.
+EPG_TIME_CACHE_MAX = 16384
+EPG_TIME_CACHE_KEY_MAX = 64
+# D-EPG-8 (R30g): a guide <display-name> is folded (_CONTROL_WS) and cut to
+# this many code points before either name key is made, the playlist's own
+# cap on a channel name, so a name key costs at most what a playlist name
+# can. A longer name could never equal a playlist name anyway. Since
+# D-EPG-12 (R32d) the fold is epg_name_text, inside the key functions, so
+# the playlist side takes the same one.
+EPG_MAX_DISPLAY_NAME = M3U_MAX_NAME
+# D-EPG-10 (R30d): WITHOUT a playlist index (no readable channels.json when
+# the guide is fetched) the parse keeps every guide channel under its own
+# id, and what it keeps -- the claim, the programme list, the id itself,
+# and the epg-now.json entry the shell holds -- was bounded only by the
+# input. It now admits at most MAX_CHANNELS distinct guide channels, the
+# playlist's own cap (the shell can show no more rows than that), and an
+# id longer than M3U_MAX_TVG_ID, which no playlist tvg-id can equal, is
+# not admitted at all (rule 15: the entry's KEY was the other unbounded
+# term). Programmes refused either way are counted, never dropped in
+# silence. With an index neither applies: every key is a playlist tvg-id.
+EPG_MAX_GUIDE_ID = M3U_MAX_TVG_ID
 EPG_DEFAULT_DURATION = 3600       # for a programme without a stop and no successor
 # M4-02 detail caps, in code points, applied when the whitespace is folded
 # and again after the URLs are redacted (see clean_detail). A longer value is
@@ -540,7 +573,19 @@ _AUTHORITY_END = re.compile(r"[/?#]")
 _BARE_HOST_CHARS = re.compile(r"[:\[\]]")
 _ASCII_DIGITS = re.compile(r"^[0-9]+$")
 _ZERO_WIDTH = re.compile("[\u200b-\u200d\u2060\ufeff]")
-_IPV6_LITERAL = re.compile(r"^\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(?:%25[A-Za-z0-9._~\-]+)?\]$")
+# R30g, rule 15 over D-EPG-8: this was `^\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*...`,
+# two adjacent runs over the SAME class (the colon between them is in it), so
+# a literal that failed after the second run was retried at every split
+# point, k*k steps for k characters. It reads user text only (a source URL,
+# already capped at MAX_SOURCE_URL), but a quadratic pattern is the shape
+# R30g refuses wherever it stands. Same language: "a run over [hex:.]
+# holding at least one colon" is "a run whose first character outside
+# [hex.] is a colon", which a lookahead over the class WITHOUT the colon
+# asks in one pass; the single run that follows ends where the class does,
+# so nothing after it can make it back off more than once a character.
+# Held equal to the old pattern by an equivalence test (the parse-bounds
+# suite, dev branch).
+_IPV6_LITERAL = re.compile(r"^\[(?=[0-9A-Fa-f.]*:)[0-9A-Fa-f:.]*(?:%25[A-Za-z0-9._~\-]+)?\]$")
 _URL_SPACE = re.compile("[\\s\ufeff]")          # JS \s includes U+FEFF, Python's does not
 _BAD_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _XMLTV_TIME = re.compile(r"^(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?\s*(?:([+-])(\d{2})(\d{2})|Z)?$")
@@ -1036,8 +1081,47 @@ _EPG_NAME_NOISE = re.compile(
     # of this narrowing matched the two byte-for-byte and lost all 142 rows
     # to any of those, which is a provider changing its own punctuation
     # between fetches, not a different provider.
-    r"|\[\s*not\s*24\s*[-/]?\s*7\s*\]"
+    #
+    # D-EPG-12 (ruling R32d, 2026-10-21): this alternative used to read
+    # `24\s*[-/]?\s*7`, two unbounded `\s*` runs with only an OPTIONAL atom
+    # between them, so the two were adjacent repeats over one class: after
+    # `[not 24` a whitespace run of k not followed by `7` was retried at
+    # every split of the run, about k*k/2 steps, and build_alias reached it
+    # twice per playlist row on the unfolded name. The guard the round before
+    # had certified it linear because "its runs are separated by literals",
+    # which the optional `[-/]?` is not. Now the second run exists only
+    # behind the separator, `(?:[-/]\s*)?`, which whitespace cannot open, so
+    # each run backs off at most once over its own length. Same language:
+    # held equal to the old pattern on generated inputs, and the helper
+    # regex guard on the dev branch grades the old shape super-linear by
+    # structure, not by the table alone.
+    r"|\[\s*not\s*24\s*(?:[-/]\s*)?7\s*\]"
     r"|\[\s*geo[\s-]*blocked\s*\]", re.IGNORECASE)
+
+
+def epg_name_text(value: Any) -> str:
+    """The ONE fold a channel name takes before it is keyed, on BOTH sides
+    of the match: every run of whitespace and control characters to one
+    space, the ends trimmed, cut to EPG_MAX_DISPLAY_NAME code points.
+
+    D-EPG-12, ruling R32d (2026-10-21). The guide side folded a
+    <display-name> through clean_field before keying (D-EPG-8), and the
+    playlist side keyed the raw channels.json name, which the M3U parse
+    leaves holding a DEL or a C0 control (sanitize_input runs on user
+    input, not on playlist text). _ID_PUNCT folds `\\s`, so a tab keyed
+    the same from either side, but `\\x7f` and `\\x00-\\x1b` are not `\\s`:
+    a row and a display-name that both carried U+007F keyed differently
+    and did not match, and a DEL on one side only matched a name without
+    it on the other. Folding inside the key functions, so every caller
+    keys the same whatever it passes, is what makes the two sides one.
+    An ordinary name is unchanged by it: the key already folded its
+    whitespace, and a playlist name is at most M3U_MAX_NAME, which is the
+    cap here. Idempotent, so the guide side may fold once more to look at
+    the text itself (parse_xmltv's trailing-parenthesis test) at no change.
+    """
+    if not value:
+        return ""
+    return _CONTROL_WS.sub(" ", str(value)).strip()[:EPG_MAX_DISPLAY_NAME]
 
 
 def epg_name_key(value: Any) -> str:
@@ -1057,14 +1141,44 @@ def epg_name_key(value: Any) -> str:
     227 -> 226, and the one pair lost is the wrong one; nameIndexed 1,443 ->
     1,453 and nameDroppedPlaylist 10 -> 0, so the repair costs one bad pair
     and returns ten channels to the index. No confirmed pair moved.
+
+    Folds through epg_name_text first (D-EPG-12): the playlist side and the
+    guide side of the match key the same text the same way.
     """
-    return normalize_id_text(_EPG_NAME_NOISE.sub(" ", str(value or "")))
+    return normalize_id_text(_EPG_NAME_NOISE.sub(" ", epg_name_text(value)))
 
 
-# A TRAILING parenthetical, which on the owner's list is the country
-# qualifier: `Pluto TV Reality (United States)`. Nothing in the matcher reads
-# this; see bare_name_key.
-_EPG_NAME_QUALIFIER = re.compile(r"\s*\([^()]*\)\s*$")
+def strip_trailing_qualifier(text: str) -> str:
+    """`text` without a TRAILING parenthetical, which on the owner's list is
+    the country qualifier: `Pluto TV Reality (United States)` ->
+    `Pluto TV Reality`. Nothing in the matcher reads this; see bare_name_key.
+
+    D-EPG-8, ruling R30g: no regex whose cost is super-linear in its input
+    is applied to provider text. This was `\\s*\\([^()]*\\)\\s*$` under
+    .sub(), which has no literal prefix (it opens with `\\s*`), so the engine
+    tried it at EVERY position, and at each position inside a run of k
+    whitespace characters `\\s*` took the rest of the run and backed off one
+    character at a time looking for `(`: about k*k/2 steps for one run, on
+    `<display-name>` text that nothing folded or capped. The answer is the
+    same and is computed by three linear scans, because the pattern's match
+    is unique when it exists: the `)` must be the last non-whitespace
+    character (`\\s*$` takes all trailing whitespace, a final newline
+    included), the `(` the last one before it with no `)` between them
+    (`[^()]*` holds neither), and the match starts where the whitespace run
+    before that `(` starts (the leftmost start the engine reaches), so what
+    is left is everything before the `(`, right-stripped. `str.rstrip()`
+    and `\\s` test the same predicate (Py_UNICODE_ISSPACE); the equivalence
+    test runs the old pattern as an oracle over every code point and over
+    generated names, and calls this.
+    """
+    stripped = text.rstrip()
+    if not stripped.endswith(")"):
+        return text
+    close = len(stripped) - 1
+    open_at = stripped.rfind("(", 0, close)
+    if open_at < 0 or stripped.find(")", open_at + 1, close) >= 0:
+        return text
+    return stripped[:open_at].rstrip()
 
 
 def bare_name_key(value: Any) -> str:
@@ -1096,8 +1210,12 @@ def bare_name_key(value: Any) -> str:
     that the case is now COUNTED instead of invisible: `addrNameConflicts` is
     1 on the frozen inputs, and a reader who sees it rise knows a second one
     exists without having to run an audit nobody scheduled.
+
+    The fold (epg_name_text) comes BEFORE the strip, as the guide side has
+    always ordered it, so the playlist side gives the same key for the same
+    text (D-EPG-12); epg_name_key folds once more, which changes nothing.
     """
-    return epg_name_key(_EPG_NAME_QUALIFIER.sub("", str(value or "")))
+    return epg_name_key(strip_trailing_qualifier(epg_name_text(value)))
 
 
 def normalize_text(value: Any) -> str:

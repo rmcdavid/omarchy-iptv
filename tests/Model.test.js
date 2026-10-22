@@ -2567,6 +2567,128 @@ checkCall("D-LOGO-11 blocker (c): an empty summary replaces the set, and only th
           Model.logoHaveCount(before), Model.logoHaveCount(after)]
 }, [[], ["ab12cd34"], null, null, null, null, null, null, null, 2, 0])
 
+// D-SRC-45 and D-LOGO-12, the shell's half. `logos --fetch` over a source
+// with no channel list now prints its own refusal, `no_cache`, where it used
+// to print `internal` (the line below is the one tests/test_logo_ceiling.py
+// pins from the real helper); and a run that stops at the ceiling carries
+// `atCeiling`, `files` and `deferred` beside `names`. Neither may move the
+// set: the refusal is "no names" (null, the set kept as it was), and a run at
+// the ceiling replaces the set with exactly its names, as any summary does.
+checkCall("D-SRC-45 / D-LOGO-12: the no_cache refusal names nothing, and a summary at the ceiling replaces the set with its names", function () {
+  const refusal = JSON.stringify({ ok: false, kind: "logos", error: { code: "no_cache",
+    message: "This source has no channel list yet; refresh the playlist first." }, action: "fetch" })
+  const ceiling = JSON.stringify({ ok: true, kind: "logos", action: "fetch", names: ["ab12cd34", "ff00ff00"],
+                                   fetched: 0, cached: 2, deferred: 5, cap: 2, atCeiling: true, files: 2 })
+  return [Model.logoSummaryNames(refusal), Model.logoStreamName(refusal),
+          Model.logoSummaryNames(ceiling), Model.logoStreamName(ceiling)]
+}, [null, "", ["ab12cd34", "ff00ff00"], ""])
+
+// ---- R30c / R30e (D-LOGO-16): the logo fetch's bounds and its one journal line ----
+//
+// tests/fixtures/logo-deadlines.json is shared: tests/test_logo_run.py pins
+// the helper's LOGO_DEADLINE and LOGO_RUN_DEADLINE to the same numbers and
+// finds every `summaryFields` name in what the real verb prints. The service
+// half runs Service.qml's OWN text -- the watchdog Timer's interval and
+// onTriggered, the logoFetchProc Connections' onRunningChanged and onExited,
+// and onLogoLine -- compiled against fakes, the way
+// tests/service-harness.js compiles the root's functions. IPTV_SERVICE_QML and
+// IPTV_MODEL point it at another tree, as that harness's cases do.
+;(function () {
+  const fs = require("fs"), path = require("path")
+  const H = require("./service-harness.js")
+  const fx = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/logo-deadlines.json"), "utf8"))
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
+
+  checkCall("R30e: the logo deadlines are the shared fixture's", function () {
+    return [M.LOGO_DEADLINE_MS, M.LOGO_RUN_DEADLINE_MS, M.LOGO_FETCH_WATCHDOG_MS]
+  }, [fx.logoMs, fx.runMs, fx.watchdogMs])
+  checkCall("R30e: the shell's watchdog is the OUTER bound, past the run's deadline and one logo's", function () {
+    return M.LOGO_FETCH_WATCHDOG_MS > M.LOGO_RUN_DEADLINE_MS + M.LOGO_DEADLINE_MS
+  }, true)
+  fx.notices.forEach(function (c) {
+    checkCall("R30c: logoSummaryNotice: " + c.why, function () { return M.logoSummaryNotice(c.line) }, c.expect)
+  })
+
+  // The text of one block of Service.qml: the brace after `anchor`, found
+  // after `from`. null when either is missing, which every check reads red.
+  function block(from, anchor) {
+    const start = svcText.indexOf(from)
+    if (start === -1) return null
+    const at = svcText.indexOf(anchor, start)
+    if (at === -1) return null
+    const open = svcText.indexOf("{", at + anchor.length - 1)
+    const close = H.matchBrace(svcText, open)
+    return close === -1 ? null : svcText.slice(open + 1, close)
+  }
+  function compiled(body, scope) {
+    if (body === null) return null
+    return new Function("scope", "with (scope) { return function () {" + body + "\n} }")(scope)
+  }
+  function fakes() {
+    const log = []
+    const timer = { restarts: 0, stops: 0, restart() { this.restarts++ }, stop() { this.stops++ } }
+    const proc = { running: false, signals: [], signal(n) { this.signals.push(n) } }
+    const konsole = { log() { log.push(["log", [].slice.call(arguments).join(" ")]) },
+                      warn() { log.push(["warn", [].slice.call(arguments).join(" ")]) } }
+    return { log, timer, proc, scope: { Model: M, logoFetchWatchdog: timer, logoFetchProc: proc, console: konsole, Math } }
+  }
+  const timerText = block("id: logoFetchWatchdog", "onTriggered: {")
+  const intervalLine = (function () {
+    const at = svcText.indexOf("id: logoFetchWatchdog")
+    if (at === -1) return null
+    const m = svcText.slice(at, at + 400).match(/\n\s*interval: (.*)\n/)
+    return m ? m[1] : null
+  })()
+
+  checkCall("R30e: Service.qml's logoFetchWatchdog fires at Model.LOGO_FETCH_WATCHDOG_MS", function () {
+    if (intervalLine === null) return "no logoFetchWatchdog"
+    return new Function("Model", "return (" + intervalLine + ")")(M)
+  }, fx.watchdogMs)
+  checkCall("R30e: the watchdog TERMs a logo fetch still running, logs no URL, and leaves a finished one alone", function () {
+    const f = fakes()
+    const fire = compiled(timerText, f.scope)
+    if (fire === null) return "no logoFetchWatchdog"
+    fire()
+    const idle = f.proc.signals.slice()
+    f.proc.running = true
+    fire()
+    return [idle, f.proc.signals, f.log.length, f.log.every(function (l) { return l[1].indexOf("://") === -1 })]
+  }, [[], [15], 1, true])
+  checkCall("R30e: the watchdog runs exactly while logoFetchProc does", function () {
+    const f = fakes()
+    const changed = compiled(block("target: logoFetchProc", "function onRunningChanged() {"), f.scope)
+    if (changed === null) return "no onRunningChanged"
+    f.proc.running = true
+    changed()
+    f.proc.running = false
+    changed()
+    return [f.timer.restarts, f.timer.stops]
+  }, [1, 1])
+  checkCall("R30e: the exit handler stops the watchdog too", function () {
+    const f = fakes()
+    const body = block("target: logoFetchProc", "function onExited(exitCode, exitStatus) {")
+    if (body === null) return "no onExited"
+    const scope = Object.assign({}, f.scope, { root: { showLogos: false, logoPending: ["x"], logoFetchAgain: false },
+                                               logoRerunDebounce: { restart() {} } })
+    new Function("scope", "with (scope) { return function (exitCode, exitStatus) {" + body + "\n} }")(scope)(0, 0)
+    return [f.timer.stops, scope.root.logoPending]
+  }, [1, []])
+  checkCall("R30c: onLogoLine writes the summary's one journal line, and none for a progress line", function () {
+    const f = fakes()
+    const fn = H.rootFunctions(svcText).onLogoLine
+    if (!fn) return "no onLogoLine"
+    const root = { logoPending: [], logoHave: {}, logoFetchSeq: 0, logoFetchDir: "/c/logos" }
+    const scope = Object.assign({}, f.scope, { root, logoFlushTimer: { restart() {} } })
+    const call = new Function("scope", "with (scope) { return function (" + fn.args + ") {" + fn.body + "\n} }")(scope)
+    call(JSON.stringify({ ok: true, kind: "logo", name: "ab12cd34" }))
+    call(fx.notices[1].line)
+    call(fx.notices[5].line)
+    call(fx.notices[0].line)
+    return f.log
+  }, [["log", fx.notices[1].expect], ["log", fx.notices[5].expect]])
+})()
+
 checkCall("D-LOGO-11 blocker (d): a fetch running for another directory restarts, for the same one it is skipped", function () {
   return [Model.logoFetchPlan({ showLogos: true, wantDir: "/B", running: true, runningDir: "/A" }),
           Model.logoFetchPlan({ showLogos: true, wantDir: "/A", running: true, runningDir: "/A" }),
@@ -5478,7 +5600,7 @@ check("footerStatus no warning keeps the counts line", Model.footerStatus({ coun
 // purpose: merging lower rungs first leaves the higher rung's value in place,
 // which is exactly what footerWarning does when both helpers warn at once.
 const ladderBase = { configured: true, count: 8, lastUpdated: "22:49" }
-const epgWarnText = "1 programmes for channels not in the playlist dropped"
+const epgWarnText = "1 programme for a channel not in the playlist dropped"
 const warnBoth = Model.footerWarning(["truncated to 50,000 channels"], [epgWarnText])
 const warnEpgOnly = Model.footerWarning([], [epgWarnText])
 const cachedLine = "8 channels" + SEP + "cached 22:49" + SEP + "offline"
@@ -12338,6 +12460,40 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return { one, two, three, afterRestart: next.root.showLogos }
     }, { one: [true, true, 1], two: [false, false, 2], three: [true, true, 3], afterRestart: true })
   }
+
+  // ---- D-LOGO-20 (R32f): `cache prune` at every source switch, not only at start ----
+  //
+  // The start-up prune (schedulePrune, once) and the switch prune
+  // (onActiveCacheDirChanged -> queuePrune) both run here as cache jobs:
+  // the harness fires the directory's change handler from its own text
+  // whenever the binding moves, and records every cache command. Red on
+  // lane-bounds-int e8d2b35 (one prune, at start, however many switches).
+  checkCall("D-LOGO-20: the start-up prune runs once; every switch queues a prune naming the NEW active key and keeping every source; the same key again is no switch", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), "lag")
+    const prunes = () => h.cacheRuns.filter(c => c.indexOf("prune") !== -1)
+    const actives = () => prunes().map(c => c[c.indexOf("--active") + 1])
+    const atStart = actives()
+    sw(h, KB); h.drain()
+    const afterOne = actives()
+    sw(h, KA); h.drain()
+    const afterTwo = actives()
+    h.root.switchSource(KA); h.drain()
+    const sameKey = actives()
+    const keeps = prunes().every(c => c[0] === "python3" && c.indexOf("--keep") !== -1 && c.indexOf(KA) !== -1 && c.indexOf(KB) !== -1 && c.indexOf("--epg-max-age") !== -1)
+    const noUrl = prunes().every(c => c.join(" ").indexOf("://") === -1)
+    return { atStart, afterOne, afterTwo, sameKey, keeps, noUrl }
+  }, { atStart: [KA], afterOne: [KA, KB], afterTwo: [KA, KB, KA], sameKey: [KA, KB, KA], keeps: true, noUrl: true })
+  checkCall("D-LOGO-20: a restart prunes once at start and again at its first switch; removing the active source (no directory) queues no prune", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), "lag")
+    const next = restart(h)
+    const actives = () => next.cacheRuns.filter(c => c.indexOf("prune") !== -1).map(c => c[c.indexOf("--active") + 1])
+    const atStart = actives()
+    sw(next, KB); next.drain()
+    const afterSwitch = actives()
+    next.root.removeSource(KB); next.drain()
+    const afterRemoval = actives()
+    return { atStart, afterSwitch, afterRemoval, activeDir: next.root.activeCacheDir === "" ? "" : "set" }
+  }, { atStart: [KA], afterSwitch: [KA, KB], afterRemoval: [KA, KB], activeDir: "" })
 
   // ---- R21e (D-SINK-19 round 11): THE MIGRATION, through Service.qml ----
   //
