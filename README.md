@@ -21,8 +21,7 @@ out of the desktop shell's settings file and keeps them in the plugin's own,
 GIF logos and guide-data files, 0.14.3 bounds every playlist field a
 channel keeps and splits the background helper into several files, and
 0.15.0 holds far less guide data in the shell, parks a playlist that
-cannot move into Sources in `state.json`, and bounds every download and
-every parse by time and memory.
+cannot move into Sources in `state.json`, and bounds every download by a deadline and the playlist and guide parses by a memory limit.
 `CHANGELOG.md` has the release notes.
 
 This branch is the install artifact and nothing else: what `omarchy plugin

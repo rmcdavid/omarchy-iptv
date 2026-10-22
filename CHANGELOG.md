@@ -32,7 +32,7 @@ Nothing here needs anything from you except a shell restart.
   50 waits in the plugin's own `state.json`.** The first shell start after
   an update from 0.13.6 or earlier moves the bar entry's playlist and
   guide-data URL into Sources. When Sources is full, both are now parked in
-  `state.json` (readable by you alone) and taken off the bar entry as soon
+  `state.json` (the plugin's own file, private in the ordinary case; see D-SINK-22 below) and taken off the bar entry as soon
   as that is written, and a notification titled **Sources is full** says
   so, once a session and again at each shell start while it lasts. Remove
   a source and they move in together, the playlist becoming the active
@@ -97,8 +97,7 @@ Nothing here needs anything from you except a shell restart.
   an `@` follows (`The host before the first / has no dot and an @ follows
   it. If a password holds /, ? or #, write them as %2F, %3F and %23.`),
   and never refuses for that alone. A space, tab, line break or any other
-  control character inside a typed URL is refused with a sentence naming
-  it, where 0.14.3 silently deleted a tab or a C0 separator and sent the
+  control character inside a typed URL is refused with a sentence saying so, where 0.14.3 silently deleted a tab or a C0 separator and sent the
   rewritten password to the provider (D-SRC-63); the Xtream username and
   password fields refuse the same instead of deleting it (D-SRC-65). The
   one exception: a paste into a URL field joins its lines -- carriage
@@ -133,9 +132,8 @@ Nothing here needs anything from you except a shell restart.
 - **The helper's parsers cost what their input is.** Guide data read while
   the source has no channel list yet keeps the first 50,000 distinct
   channel ids its programmes name and leaves out an id over 256
-  characters, counting what it left out in a `Guide data warning:` line
-  (D-EPG-10). Every regular expression in the helper and in the shell's
-  model is linear, and a gate check grades each by its structure
+  characters, counting the programmes it dropped for either reason in a `Guide data warning:` line
+  (D-EPG-10). Every regular expression in the helper has a reviewed cost and every one in the shell's model is graded by its structure, both in the gate
   (D-EPG-8, D-EPG-12, D-PERF-6, D-PERF-11); a programme without a stop no
   longer scans forward once per programme (D-EPG-9), and each programme
   kept during the parse is one bytes object (D-EPG-7). The playlist and
@@ -185,11 +183,10 @@ Nothing here needs anything from you except a shell restart.
   writes so that its own echo undoes the last change made in the guide
   (D-SRC-47).
 - **The first guide open of a session takes about half a second or more;
-  every later one well under 150 ms.** Measured in the test cage at 10,000
+  every later one well under 150 ms at ordinary load.** Measured in the test cage at 10,000
   channels with no guide data: about 548 ms cold, about 440 ms of it the
   window's first show whatever the channel count, and about 33 ms warm;
-  with a 10,000-channel guide held, 750-915 ms cold and 36-54 ms warm. The
-  150 ms budget is met by every open but the first (D-PERF-2).
+  with a 10,000-channel guide held, 750-915 ms cold and 36-54 ms warm. The 150 ms budget is met by every open but the first at load 2-3 in the cage; under heavy load (10-14) a warm open passed it too, and Hyprland's layer-shell surface is not yet measured (D-PERF-2).
 - **What the redaction rule leaves, by design.** A space inside a password
   still splits a printed URL at that space (`http://myuser:pa ss@cdn.test/x`
   prints `myuser ss@cdn.test/x`), exactly as 0.14.3 did, for the six
@@ -433,8 +430,7 @@ and the plugin keeps the URLs in its own files, readable by you alone:
   0700 when the player starts or stops; a linked cache folder is made 0700
   only by the one-time cache migration at a fresh install's first start, so
   after an upgrade it keeps its own mode (what the plugin makes inside it is
-  0700 and 0600). A state folder link that leads nowhere is refused with a
-  sentence naming it.
+  0700 and 0600). A state folder link that leads nowhere is refused with a sentence saying so.
 - **For anyone running the helper by hand** (`python3
   ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv`): its
   `state show` and `state source list` exit 1 over a `state.json` they
