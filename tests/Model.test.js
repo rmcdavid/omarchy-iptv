@@ -2567,6 +2567,22 @@ checkCall("D-LOGO-11 blocker (c): an empty summary replaces the set, and only th
           Model.logoHaveCount(before), Model.logoHaveCount(after)]
 }, [[], ["ab12cd34"], null, null, null, null, null, null, null, 2, 0])
 
+// D-SRC-45 and D-LOGO-12, the shell's half. `logos --fetch` over a source
+// with no channel list now prints its own refusal, `no_cache`, where it used
+// to print `internal` (the line below is the one tests/test_logo_ceiling.py
+// pins from the real helper); and a run that stops at the ceiling carries
+// `atCeiling`, `files` and `deferred` beside `names`. Neither may move the
+// set: the refusal is "no names" (null, the set kept as it was), and a run at
+// the ceiling replaces the set with exactly its names, as any summary does.
+checkCall("D-SRC-45 / D-LOGO-12: the no_cache refusal names nothing, and a summary at the ceiling replaces the set with its names", function () {
+  const refusal = JSON.stringify({ ok: false, kind: "logos", error: { code: "no_cache",
+    message: "This source has no channel list yet; refresh the playlist first." }, action: "fetch" })
+  const ceiling = JSON.stringify({ ok: true, kind: "logos", action: "fetch", names: ["ab12cd34", "ff00ff00"],
+                                   fetched: 0, cached: 2, deferred: 5, cap: 2, atCeiling: true, files: 2 })
+  return [Model.logoSummaryNames(refusal), Model.logoStreamName(refusal),
+          Model.logoSummaryNames(ceiling), Model.logoStreamName(ceiling)]
+}, [null, "", ["ab12cd34", "ff00ff00"], ""])
+
 checkCall("D-LOGO-11 blocker (d): a fetch running for another directory restarts, for the same one it is skipped", function () {
   return [Model.logoFetchPlan({ showLogos: true, wantDir: "/B", running: true, runningDir: "/A" }),
           Model.logoFetchPlan({ showLogos: true, wantDir: "/A", running: true, runningDir: "/A" }),

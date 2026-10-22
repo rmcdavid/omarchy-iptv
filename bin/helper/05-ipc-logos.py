@@ -243,6 +243,13 @@ def logo_survey(channels: Any) -> dict[str, Any]:
 
 
 MAX_LOGO_BYTES = 256 * 1024
+# The most entries ONE source's logo directory holds (D-LOGO-12): a fetch run
+# counts what is there first and fetches only while that count plus its own
+# downloads stays below this, so a source's logos never exceed
+# MAX_LOGO_FILES * MAX_LOGO_BYTES = 1,310,720,000 bytes (1.22 GiB) on disk. It
+# used to bound downloads per RUN, and the directory grew by up to this much on
+# every service start. Per source, not per install: see cache_logos_clear for
+# what every source together can hold.
 MAX_LOGO_FILES = 5000
 
 # The DIMENSION bound, D-LOGO-11. MAX_LOGO_BYTES bounds the wrong axis: the

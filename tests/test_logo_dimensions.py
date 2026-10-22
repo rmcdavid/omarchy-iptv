@@ -113,7 +113,7 @@ def _private_tmpdir(case):
     """A temp directory removed when the case ends.
 
     A review found these tests leaving their directories behind -- the cap
-    test alone leaves 5,002 files a run -- on a /tmp that is a quota-bound
+    test alone left 5,002 files a run before D-LOGO-12 lowered it -- on a /tmp that is a quota-bound
     tmpfs, where a full /tmp turns a gate red for a reason that says nothing
     about the tree.
     """
@@ -891,45 +891,50 @@ class LogoSecondReadTest(unittest.TestCase):
 
 
 class LogoFetchCapTest(unittest.TestCase):
-    """MAX_LOGO_FILES bounds NEW FETCHES only; a cached file past it is still
-    validated and announced.
+    """The ceiling holds back FETCHES only; a cached file is still validated
+    and announced wherever it falls in channel order.
 
     The cap check used to be the first line of the loop, as a `break`, so in
     a run that fetched 5,000 new files every cached file later in channel
     order was neither validated nor announced that run: blank slots for logos
     the guide already had, and a cached bomb past the cap left on disk (R5).
 
-    The state is CONSTRUCTED rather than the cap lowered, because the helper
-    has no lever for the cap and a lever that could also raise it would be a
-    disclosure lever. 5,000 new URLs are served by a double standing in for
-    the network only -- `fetch_logo` is the one function replaced, the way
-    every fetch test in tests/test_logos.py replaces it -- and `cmd_logos`
-    itself runs for real, at the real cap, over a real cache directory. The
-    second half then runs the REAL HELPER AS A SUBPROCESS over the cache the
-    capped run left, which is the run an upgraded install's next start is.
+    D-LOGO-12 then made the cap a CEILING on what the directory holds, so the
+    state this test used to construct -- 5,000 fresh downloads beside three
+    cached files, 5,003 on disk -- is exactly what the fix forbids, and the
+    test is now run with the cap LOWERED to 5 in this process (the helper has
+    no lever for it, and one that could also raise it would be a disclosure
+    lever). The swept file is a PNG signature with nothing after it, an
+    ordinary unreadable file: the sweep branch it exercises is the one a bomb
+    takes, and the dimension sweep itself is proved by
+    LogoCacheSweepTest above. `fetch_logo` is the one function replaced, by a
+    double standing in for the network; the second half runs the REAL HELPER
+    AS A SUBPROCESS over the cache the first run left, which is the run an
+    upgraded install's next start is. tests/test_logo_ceiling.py proves the
+    ceiling itself over a real local TLS server.
     """
 
-    def test_a_cached_logo_past_the_cap_is_validated_and_announced_and_a_bomb_is_swept(self):
+    def test_a_cached_logo_past_the_ceiling_is_validated_and_announced_and_an_unreadable_one_is_swept(self):
         import argparse
         import contextlib
         import io
-        import tempfile
         cache = _private_tmpdir(self)
         logo_dir = os.path.join(cache, helper.LOGO_SUBDIR)
         os.makedirs(logo_dir, mode=0o700)
         dead = "https://127.0.0.1:1/%s.png"
-        cap = helper.MAX_LOGO_FILES
-        self.assertEqual(cap, 5000, "the constructed state assumes the shipped cap")
-        # Channel order: `cap` new URLs, then three cached files (two safe,
-        # one bomb), then two more new URLs the cap must defer.
+        cap = 5
+        # Channel order: five new URLs, then three cached files (two sound,
+        # one unreadable), then two more new URLs.
         new_urls = [dead % ("new-%d" % i) for i in range(cap)]
-        planted = ["png-small", "jpeg-bomb-progressive-20000", "gif-small"]
+        planted = {"png-small": BY_ID["png-small"]["bytes"],
+                   "unreadable": b"\x89PNG\r\n\x1a\n",
+                   "gif-small": BY_ID["gif-small"]["bytes"]}
         planted_names = {}
-        for cid in planted:
+        for cid, data in planted.items():
             name = helper.logo_filename(dead % cid)
             planted_names[cid] = name
             with open(os.path.join(logo_dir, name), "wb") as handle:
-                handle.write(BY_ID[cid]["bytes"])
+                handle.write(data)
         after_urls = [dead % "late-0", dead % "late-1"]
         urls = new_urls + [dead % cid for cid in planted] + after_urls
         channels = [{"id": "c%d" % i, "name": "C%d" % i, "group": "G",
@@ -944,51 +949,51 @@ class LogoFetchCapTest(unittest.TestCase):
             served.append(url)
             return BY_ID["webp-small-vp8l"]["bytes"], "image/webp"
 
-        real = helper.fetch_logo
-        helper.fetch_logo = network_double
+        real_fetch, real_cap = helper.fetch_logo, helper.MAX_LOGO_FILES
+        helper.fetch_logo, helper.MAX_LOGO_FILES = network_double, cap
         try:
             out = io.StringIO()
-            with contextlib.redirect_stdout(out):
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
                 helper.cmd_logos(argparse.Namespace(cache_dir=cache, fetch=True,
                                                     survey=False, timeout=1))
         finally:
-            helper.fetch_logo = real
+            helper.fetch_logo, helper.MAX_LOGO_FILES = real_fetch, real_cap
         lines = [json.loads(l) for l in out.getvalue().splitlines() if l.strip()]
         summary, announced = lines[-1], [l["name"] for l in lines if l.get("kind") == "logo"]
 
-        self.assertEqual(summary["fetched"], cap)
-        self.assertEqual(served, new_urls, "exactly the first `cap` URLs were fetched, "
-                         "nothing past the cap and never the cached ones")
-        # The cached files PAST the cap: validated, the safe ones announced.
-        safe = sorted([planted_names["png-small"], planted_names["gif-small"]])
+        # Three files on disk at the start, so two fetches fill the ceiling;
+        # the swept file frees one slot, which its own URL then takes.
+        self.assertEqual(served, new_urls[:2] + [dead % "unreadable"],
+                         "fetched only while the directory had room, never a cached URL")
+        self.assertEqual(summary["fetched"], 3, summary)
+        self.assertEqual(sorted(os.listdir(logo_dir)), sorted(summary["names"]))
+        self.assertEqual(len(os.listdir(logo_dir)), cap, "the directory is at its ceiling, not past it")
+        self.assertEqual(summary["files"], cap)
+        # The cached files PAST the ceiling: validated, the sound ones announced.
+        sound = sorted([planted_names["png-small"], planted_names["gif-small"]])
         self.assertEqual(summary["cached"], 2, summary)
-        self.assertEqual(sorted(n for n in announced if n in planted_names.values()), safe)
-        self.assertTrue(set(safe) <= set(summary["names"]), "a cached logo past the cap "
+        self.assertEqual(sorted(n for n in announced if n in sound), sound)
+        self.assertTrue(set(sound) <= set(summary["names"]), "a cached logo past the ceiling "
                         "was not announced, so the guide draws a blank slot it need not")
-        self.assertNotIn(planted_names["jpeg-bomb-progressive-20000"], summary["names"])
-        self.assertNotIn(planted_names["jpeg-bomb-progressive-20000"], announced)
-        # The bomb past the cap is swept, not left for the shell.
         self.assertEqual(summary["swept"], 1, summary)
-        self.assertFalse(os.path.exists(os.path.join(
-            logo_dir, planted_names["jpeg-bomb-progressive-20000"])), "a cached bomb past "
-            "the cap survived the run")
-        # And what the cap held back is a number: the two late URLs plus the
-        # swept bomb that fell through to a fetch the cap refused.
-        self.assertEqual(summary["deferred"], 3, summary)
+        # And what the ceiling held back is a number: three new URLs and the
+        # two late ones.
+        self.assertEqual(summary["deferred"], 5, summary)
+        self.assertTrue(summary["atCeiling"])
         self.assertEqual(summary["cap"], cap)
-        self.assertEqual(len(summary["names"]), cap + 2)
 
-        # Second half: the real helper, as a subprocess, over the cache this
-        # run left behind. Everything is cached now, so the cap is not reached
-        # and the three deferred URLs go to the dead host and fail; what must
-        # hold is that every file the capped run wrote or kept is announced.
+        # Second half: the real helper, as a subprocess at the shipped
+        # ceiling, over the cache this run left behind. Every file is cached
+        # and announced; the five held-back URLs now have room and go to the
+        # dead host and fail.
         done, again, announced_again = run_logos_subprocess(cache)
         self.assertEqual(done.returncode, 0, done.stderr)
-        self.assertEqual(again["cached"], cap + 2, again)
+        self.assertEqual(again["cached"], cap, again)
         self.assertEqual(again["fetched"], 0)
         self.assertEqual(again["deferred"], 0)
+        self.assertFalse(again["atCeiling"])
         self.assertEqual(again["swept"], 0)
-        self.assertEqual(again["failed"], 3, "the two late URLs and the swept bomb's URL")
+        self.assertEqual(again["failed"], 5, "the three held-back new URLs and the two late ones")
         self.assertEqual(sorted(again["names"]), sorted(summary["names"]))
         self.assertEqual(sorted(l["name"] for l in announced_again), sorted(summary["names"]))
 

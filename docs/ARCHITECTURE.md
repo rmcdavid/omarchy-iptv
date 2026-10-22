@@ -2190,8 +2190,38 @@ both sound names announced, the bomb swept and off disk, `deferred` 3,
 5,002 names; then the real helper as a subprocess over the cache that run
 left, `cached` 5,002 and the same names. Red against the 995c6be helper
 (that one test fails; 85 of 85 green on the fix across tests.test_logo_dimensions and tests.test_logos together, lane commit ddc0a7b; the dimension file alone is 38 at integration).
-D-LOGO-12 stays open: the cap bounds fetches per run and nothing yet bounds
-what is ON DISK.
+**D-LOGO-12 (2026-10-21): the cap is now a ceiling on what is ON DISK.**
+Until then it bounded fetches per run, and `fetched` counts this run's
+downloads, so the directory grew by up to the cap on every run -- 2, 4, 6, 7
+over four runs with the cap lowered to 2 against seven ordinary logos over a
+local TLS server, rerun on f55a32f with the new test's own rig -- and a
+`MAX_CHANNELS` playlist reached 50,000 files over ten service starts while
+the comments called 5,000 a ceiling. A run now counts every entry in the
+logo directory before it starts (`logo_dir_entries`: any kind, a leftover
+`.tmp-` file and a stray folder included, a link at the path followed
+because that is where `write_logo` writes, a directory that cannot be listed
+counted as full) and fetches only while `present + fetched < MAX_LOGO_FILES`;
+a file the sweep unlinks frees its slot. What the ceiling held back is
+`deferred`, the summary says `atCeiling` and `files`, and stderr says it
+once, counted, with no URL. So ONE source's logos hold at most 5,000 files
+of at most 256 KiB, 1,310,720,000 bytes (1.22 GiB). Two things the ceiling
+does not do, stated: a directory an older version left fuller is announced
+and never grown, and stays that size until `cache logos-clear` or the
+source's removal; and a file whose URL has left the playlist still holds its
+slot, so a playlist whose logos churn reaches the ceiling and stops getting
+new ones until the same verb runs (a prune of such files is a separate
+decision). The ceiling is per source: the history keeps up to `MAX_SOURCES`
+(50) sources with a directory each, so every source together is bounded by
+50 x 1.22 GiB, 65.5 GB, which is a figure and not a budget; a cross-source
+bound is proposed to the lead, not built. Proved by
+`tests/test_logo_ceiling.py` with the cap lowered to 2 or 3 over a real
+local TLS server, the GETs counted by the server and the directory counted by
+the test: 2, 2, 2, 2 over four runs with two GETs in all (red on f55a32f, 4
+failed and 3 errored of 7), a swept file freeing its slot, an older fuller
+directory never grown, every entry counted, an unlistable one contacting
+nobody. `LogoFetchCapTest` was rewritten for the ceiling with the cap
+lowered to 5 (its old construction, 5,000 downloads beside three cached
+files, is the state the fix forbids), red on f55a32f.
 **What the fix rests on in the guide, and the blocker the review found
 there.** The sweep protects a user only because nothing in the shell decodes
 a cache file the helper did not announce -- and at 995c6be the announced set
@@ -2287,10 +2317,11 @@ Details and the mutation table are `docs/QA.md` section 3.2.
   no limit near this size holds; what this machine (`vm.overcommit_memory=0`,
   7.8 GB RAM, 15.4 GB swap) would do with it uncapped is reasoning, not
   measurement.
-- `MAX_LOGO_FILES` bounds fetches per run and not the cache. The sweep is no
-  longer bounded by it (above), so every cached file for a URL in the current playlist is validated on every
-  run; what remains open is the cache's size on disk, which nothing bounds
-  (D-LOGO-12, open).
+- `MAX_LOGO_FILES` bounded fetches per run and not the cache until D-LOGO-12
+  (above) made it a ceiling on the entries one source's logo directory
+  holds. The sweep is not held back by it, so every cached file for a URL in
+  the current playlist is validated on every run. What stays unbounded is the
+  sum over sources (up to 50 x 1.22 GiB), proposed rather than built.
 - The windows `LOGO_HEADER_BYTES` and the byte cap leave, stated exactly
   (called on the lane-R2 helper, 2026-10-11). A JPEG whose frame header sits
   past the first 128 KiB costs a second read, not a wrong answer, and the
