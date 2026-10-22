@@ -533,6 +533,29 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
+# D-SRC-13's rule 15 sweep (2026-10-21): main()'s answer to a bug is part of
+# EVERY verb's reply, and the shell collects every helper verb's stdout and
+# stderr whole. The exception's own text is the one part of it no verb
+# composes -- `str(error)` can quote any input the bug was handed, whatever
+# its length -- so the structured message keeps its first
+# INTERNAL_MESSAGE_MAX characters and the traceback its first and last
+# INTERNAL_TRACE_MAX / 2, the middle counted. Both are cut AFTER the
+# redaction, so a cut can never leave half a URL unredacted.
+INTERNAL_MESSAGE_MAX = 1024
+INTERNAL_TRACE_MAX = 16384
+
+
+def bounded_text(text: str, limit: int, keep_tail: bool = False) -> str:
+    """`text` when it fits; else its first `limit` characters, or with
+    keep_tail its first and last limit // 2 and a counted line between."""
+    if len(text) <= limit:
+        return text
+    if not keep_tail:
+        return text[:limit]
+    half = limit // 2
+    return "%s\n[%d characters not shown]\n%s" % (text[:half], len(text) - 2 * half, text[-half:])
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
@@ -559,9 +582,9 @@ def main(argv: list[str] | None = None) -> int:
         # A bug. The traceback is the bug report, but it must not carry a URL
         # (section 9), so it is redacted and paired with a structured error.
         import traceback
-        sys.stderr.write(redact_urls(traceback.format_exc()))
-        message = "%s: %s" % (type(error).__name__, error)
-        emit({"ok": False, "kind": args.command, "error": {"code": "internal", "message": redact_urls(message)}})
+        sys.stderr.write(bounded_text(redact_urls(traceback.format_exc()), INTERNAL_TRACE_MAX, keep_tail=True))
+        message = bounded_text(redact_urls("%s: %s" % (type(error).__name__, error)), INTERNAL_MESSAGE_MAX)
+        emit({"ok": False, "kind": args.command, "error": {"code": "internal", "message": message}})
         return EXIT_ERROR
 
 

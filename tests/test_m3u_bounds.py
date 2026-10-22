@@ -76,7 +76,7 @@ class ExtgrpBoundTest(unittest.TestCase):
             self.assertTrue(group.startswith(channel["group"]))
             self.assertNotIn("groups", channel)
         # Cut ONCE, at its own line, and said once.
-        self.assertIn("1 group values cut to %d characters" % helper.M3U_MAX_GROUP_TEXT, result["warnings"])
+        self.assertIn("1 group value cut to %d characters" % helper.M3U_MAX_GROUP_TEXT, result["warnings"])
 
     def test_extgrp_still_persists_until_the_next_one(self):
         # The semantics are kept: the tag opens a group for what follows.
@@ -117,7 +117,7 @@ class NameBoundTest(unittest.TestCase):
         self.assertLessEqual(len(channel["nameKey"]), 512)
         self.assertLessEqual(len(channel["searchKey"]), 600)
         self.assertEqual(channel["name"], name[:helper.M3U_MAX_NAME].rstrip())
-        self.assertIn("1 channel names cut to %d characters" % helper.M3U_MAX_NAME, result["warnings"])
+        self.assertIn("1 channel name cut to %d characters" % helper.M3U_MAX_NAME, result["warnings"])
 
     def test_long_tvg_name_is_cut(self):
         channel = parse('#EXTM3U\n#EXTINF:-1 tvg-name="%s",Short\nhttp://x.test/a\n' % ("T" * LONG))["channels"][0]
@@ -145,7 +145,7 @@ class OptionBoundTest(unittest.TestCase):
         for channel in result["channels"][1:]:
             self.assertNotIn("headers", channel)
             self.assertNotIn("options", channel)
-        self.assertTrue(any(w.startswith("1 options or headers dropped") for w in result["warnings"]), result["warnings"])
+        self.assertTrue(any(w.startswith("1 option or header dropped") for w in result["warnings"]), result["warnings"])
 
     def test_long_kodiprop_header_value_is_dropped(self):
         text = ("#EXTM3U\n#EXTINF:-1,A\n#KODIPROP:inputstream.adaptive.stream_headers=Cookie=%s&X-Ok=1\n"
@@ -165,7 +165,7 @@ class UrlFieldBoundTest(unittest.TestCase):
         long_url = "http://x.test/" + "p" * LONG
         result = parse("#EXTM3U\n#EXTINF:-1,Long\n%s\n%s" % (long_url, entries(1)))
         self.assertEqual([c["name"] for c in result["channels"]], ["Channel 0"])
-        self.assertIn("1 entries skipped: stream URL longer than %d characters" % helper.M3U_MAX_URL, result["warnings"])
+        self.assertIn("1 entry skipped: stream URL longer than %d characters" % helper.M3U_MAX_URL, result["warnings"])
 
     def test_long_logo_and_channel_number_are_dropped(self):
         text = '#EXTM3U\n#EXTINF:-1 tvg-logo="https://l.test/%s" tvg-chno="%s",A\nhttp://x.test/a\n' % ("l" * LONG, "9" * 64)
@@ -214,7 +214,7 @@ class FixturesUntouchedTest(unittest.TestCase):
     cap that fired on a fixture would change that fixture's output."""
 
     def test_no_cap_fires_on_any_playlist_fixture(self):
-        cut = tuple(sentence.split("%d ", 1)[1] for _, sentence in helper.M3U_CUT_WARNINGS)
+        cut = tuple(sentence.split("%d ", 1)[1] for entry in helper.M3U_CUT_WARNINGS for sentence in entry[1:])
         files = sorted(p for base in (FIXTURES, HARNESS_FIXTURES) for p in base.rglob("*") if p.is_file() and ".m3u" in p.name)
         self.assertGreaterEqual(len(files), 20)
         for path in files:
@@ -282,20 +282,31 @@ class MemoryLimitTest(unittest.TestCase):
         self.assert_refused(code, status, stdout, stderr, "epg")
         self.assertFalse(os.path.exists(os.path.join(self.cache, helper.EPG_WINDOW_FILE)))
 
-    def test_the_verb_leaves_the_limit_set_in_its_process(self):
-        # Run as the program (runpy, run_name __main__), then read the limit
-        # the verb left on the process it ran in.
-        probe = ("import resource, runpy, sys\n"
+    def test_the_verb_holds_the_limit_while_it_parses_and_lifts_it_after(self):
+        # Run as the program (runpy, run_name __main__). The limit is read
+        # when the verb opens channels.json's temporary file -- the parse's
+        # own output, written under it -- and again once the verb returned.
+        # This case used to assert the limit was still SET after the verb;
+        # D-M3U-3 lifts it on every way out (test_reply_bounds.py holds the
+        # rule at each status write and each printed line).
+        probe = ("import os, resource, runpy, sys\n"
+                 "seen = []\n"
+                 "def hook(event, args):\n"
+                 "    if event == 'open' and isinstance(args[0], str) and os.path.basename(args[0]).startswith('.tmp-channels.json'):\n"
+                 "        seen.append(resource.getrlimit(resource.RLIMIT_DATA)[0])\n"
+                 "sys.addaudithook(hook)\n"
+                 "before = resource.getrlimit(resource.RLIMIT_DATA)[0]\n"
                  "sys.argv = ['omarchy-iptv', 'playlist', '--url', sys.argv[1], '--cache-dir', sys.argv[2]]\n"
                  "try:\n    runpy.run_path(%r, run_name='__main__')\n"
                  "except SystemExit:\n    pass\n"
-                 "sys.stderr.write('LIMIT %%d\\n' %% resource.getrlimit(resource.RLIMIT_DATA)[0])\n") % str(HELPER)
+                 "after = resource.getrlimit(resource.RLIMIT_DATA)[0]\n"
+                 "sys.stderr.write('HELD %%s LIFTED %%s\\n' %% (seen, after == before))\n") % str(HELPER)
         env = dict(os.environ)
         env.pop(LIMIT_ENV, None)
         done = subprocess.run([sys.executable, "-c", probe, str(FIXTURES / "basic.m3u"), self.cache],
                               capture_output=True, text=True, env=env, timeout=60)
-        line = [l for l in done.stderr.splitlines() if l.startswith("LIMIT ")]
-        self.assertEqual(line, ["LIMIT %d" % (512 * 1024 * 1024)], done.stderr)
+        line = [l for l in done.stderr.splitlines() if l.startswith("HELD ")]
+        self.assertEqual(line, ["HELD [%d] LIFTED True" % (512 * 1024 * 1024)], done.stderr)
 
     def test_the_variable_can_only_lower_the_limit(self):
         with mock.patch.dict(os.environ, {LIMIT_ENV: "100000"}):

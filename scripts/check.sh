@@ -333,7 +333,17 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2678}
 # local source no longer reserving the input cap (7), and
 # the TLS context built ahead of the limit, verifying (2). 25 of them seen
 # red against 0.14.2 (85206f2); the other three pin what did not change.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1321}
+# 1321 -> 1342 on 2026-10-21, D-SRC-13 / D-M3U-3 / D-M3U-4 (lane-bounds-p):
+# tests/test_reply_bounds.py, 21 cases -- the playlist status line's warnings
+# bounded by count through the verb with the cap lowered (2), the memory
+# limit lifted before every status write and every printed line, observed
+# in a real helper process at each open and each write (5) and in process
+# by call order (1), every counted sentence for one and for many (3), and
+# the rule-15 replies: tracks (4), the first-load reason (3), main()'s
+# answer to a bug (3). 16 seen red on f55a32f, the other 5 on a mutation of
+# the shipping decision. test_m3u_bounds's "leaves RLIMIT_DATA at 512 MiB"
+# case became "holds it while parsing and lifts it after", in place.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1342}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

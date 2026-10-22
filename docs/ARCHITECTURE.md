@@ -3245,6 +3245,48 @@ Performance budget (10k channels):
     through the real service under a nested cage: a 10,000-channel source
     loads (10,000 channels, 120 groups), and with the test variable at 24
     the service reports `Source too large`.
+    The limit covers the fetch, the parse and the file the parse produces
+    (`channels.json`; for `epg`, the window and `epg-now.json`), and nothing
+    after them (D-M3U-3, 2026-10-21): each verb lifts it in a `finally`
+    around that block, on every way out -- success, a refusal, the memory
+    refusal, a bug -- so no status is composed, written or printed under
+    it. It used to be lifted on `MemoryError` alone, so a refusal raised
+    near the limit wrote its status under it. Observed in a real helper
+    process at every file it opens and every line it prints
+    (`tests/test_reply_bounds.py`), red against the code before.
+16. Every reply the shell collects whole is bounded by a constant
+    (D-SRC-13 and its rule-15 sweep, 2026-10-21). Each helper Process in
+    `Service.qml` reads its stdout through a `StdioCollector` with
+    `waitForEnd`, so a reply is held in the shell in one piece; a list or a
+    string in it whose size is the provider's is held to a cap, and what
+    the cap leaves out is COUNTED rather than dropped in silence. The
+    playlist status line (`playlist`, and the source probe, which is the
+    same verb): at most `M3U_MAX_CHANNEL_WARNINGS` per-channel warnings,
+    each a fixed phrase and a name held to `M3U_MAX_NAME`, and at most
+    eighteen counted sentences, one of them the tail that counts the
+    warnings not listed -- by arithmetic at most 65,444 bytes of JSON with
+    every name at its cap and every character escaped. `player tracks`: at
+    most `TRACK_MAX_ROWS` rows with the title, language and codec cut to
+    `TRACK_MAX_TITLE` / `TRACK_MAX_LANG` / `TRACK_MAX_CODEC`, the rest
+    counted in `tracksOmitted`. `player start`: the first-load reason cut
+    to `FIRST_LOAD_REASON_MAX`. main()'s answer to a bug, which any verb
+    can end in: the message cut to `INTERNAL_MESSAGE_MAX` and the
+    traceback to the first and last halves of `INTERNAL_TRACE_MAX`, the
+    middle counted. Every cut is made after the redaction, so it can never
+    leave half a URL behind it. Bounded without a new cap, and why:
+    `epg` (fixed fields and at most five counted sentences; a cached
+    window's warnings are the helper's own); `clipboard`
+    (`MAX_CLIPBOARD_CHARS`, D-CLIP-1); `config shield` (modes, a verdict
+    and two path components); `player probe` and `status` (the stash and
+    owner records this plugin writes into the player, whose name and
+    group come from `channels.json`); `play` and `player start`'s `name`
+    (`channels.json`, `M3U_MAX_NAME` since 0.14.3); `player start`'s
+    `warnings` (option names from the user's own `mpvArgs`, the argv the
+    shell built); `player pause`, `seek`
+    and `stop` (numbers and booleans). Bounded by a file the plugin owns
+    rather than by a constant: `state init` echoes `state.json`, which the
+    shell already reads whole; the `cache` verbs list names inside the
+    plugin's own 0700 cache directories.
 
 ## 9. Coding standards
 
