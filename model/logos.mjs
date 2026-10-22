@@ -3,7 +3,7 @@ import {
   SEP, GLYPHS
 } from "./build.mjs"
 import {
-  str, asList, fnv1a32
+  str, asList, keyedMap, fnv1a32
 } from "./text.mjs"
 import {
   moveCursor
@@ -55,8 +55,11 @@ function optInSetting(value) {
 // that disagrees with the helper is a guide that lies in the consent dialog.
 function logoSurvey(channels) {
   var rows = asList(channels)
-  var hosts = {}
-  var schemes = {}
+  // D-SG-3: keyed by the provider's logo host and scheme. On a plain `{}`
+  // a host spelled `constructor` started its count from the Object function,
+  // so the count became a STRING and the consent sentence's total with it.
+  var hosts = keyedMap()
+  var schemes = keyedMap()
   var withLogo = 0
   var refused = 0
   for (var i = 0; i < rows.length; i++) {
@@ -133,7 +136,7 @@ function splitLogoUrl(raw) {
 // Userinfo makes the answer "". fetch_logo refuses such a URL outright, so
 // the host is never contacted, and naming it would print the credentials.
 function logoHost(netloc) {
-  var text = str(netloc).replace(/^\s+|\s+$/g, "").toLowerCase()
+  var text = str(netloc).trim().toLowerCase()
   if (text.indexOf("@") !== -1) return ""
   if (text.charAt(0) === "[") {
     var close = text.indexOf("]")
@@ -603,7 +606,7 @@ function logoColumnShown(rows, enabled, logoDir) {
 // separately. Defensive on purpose: this parses a line at a time from a
 // long-running process, and a malformed one must cost that logo, not the run.
 function logoStreamName(line) {
-  var text = str(line).replace(/^\s+|\s+$/g, "")
+  var text = str(line).trim()
   if (text === "") return ""
   try {
     var doc = JSON.parse(text)
@@ -639,7 +642,7 @@ function logoNamesFrom(stdoutText) {
 // `names.length > 0` on the caller's side kept a stale set alive through
 // exactly that summary.
 function logoSummaryNames(line) {
-  var text = str(line).replace(/^\s+|\s+$/g, "")
+  var text = str(line).trim()
   if (text === "") return null
   try {
     var doc = JSON.parse(text)

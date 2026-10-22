@@ -566,7 +566,23 @@ class StartTest(PlayerTestCase):
         self.assertNotIn("--log-file=/tmp/mpv.log", argv)
         self.assertNotIn("--input-ipc-server=/tmp/evil.sock", argv)
         self.assertEqual(argv.count("--input-ipc-server=%s" % self.sock), 1)
-        self.assertEqual(payload["warnings"], ["dropped mpvArg --log-file", "dropped mpvArg --input-ipc-server", "dropped mpvArg ; rm -rf"])
+        # D-SINK-24 (R32b): a token that is not an option is journaled as the
+        # word `<token>`, never as itself.
+        self.assertEqual(payload["warnings"], ["dropped mpvArg --log-file", "dropped mpvArg --input-ipc-server", "dropped mpvArg <token>"])
+
+    def test_a_refused_token_that_is_a_value_is_journaled_as_token_and_never_as_itself(self):
+        """D-SINK-24 (R32b), the recheck's shapes: a bearer value, a basic-auth
+        value and a scheme-less proxy split off their options by the
+        whitespace split reach the warnings as `<token>`; an option keeps its
+        name and loses its value."""
+        code, payload, _, stderr = self.player_start(
+            "--mpv-arg=Bearer", "--mpv-arg=eyJSECRETTOKEN", "--mpv-arg=Basic", "--mpv-arg=dXNlcjpwYXNzd29yZA==",
+            "--mpv-arg=user:pw@proxy.example.test:3128", "--mpv-arg=--stream-lavf-o=http_proxy=http://user:pw@proxy.example.test:3128")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["warnings"], ["dropped mpvArg <token>"] * 5 + ["dropped mpvArg --stream-lavf-o"])
+        self.assertNotIn("SECRET", json.dumps(payload) + stderr)
+        self.assertNotIn("dXNl", json.dumps(payload) + stderr)
+        self.assertNotIn("user:pw", json.dumps(payload) + stderr)
 
     def test_the_profile_bypass_is_overridden_on_the_argv_the_helper_actually_execs(self):
         """D-SINK-13, observed at the spawn rather than at the builder.

@@ -35,8 +35,9 @@ export {
   PLACE_TTL_SEC, ZAP_MAX_SKIP
 } from "./model/build.mjs"
 export {
-  FOLD_GROUPS, asList, normalizeText, normalizeIdText, searchKey, tokenize,
-  fnv1a32, CHANNEL_ID_SCHEME_LEGACY, CHANNEL_ID_SCHEME, nameIdKey, suffixIds,
+  FOLD_GROUPS, asList, keyedMap, hasOwnKey, ownKeyValue, trimEndSpace,
+  normalizeText, normalizeIdText, searchKey, tokenize, fnv1a32,
+  CHANNEL_ID_SCHEME_LEGACY, CHANNEL_ID_SCHEME, nameIdKey, suffixIds,
   channelIds, channelIdRemap, remapStateIds, remapChannelIds, channelId,
   indexById, findByUrl
 } from "./model/text.mjs"
@@ -75,25 +76,25 @@ export {
   MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed, prunedFailed,
   knownIdSet, failedIndex, failedDocument, failedWhen, withFailed,
   failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
-  reloadDisposition, stateCanonical, sameState, mergeForeignState,
-  mergeConflictLine, mergeDropLines, migrationHeldAgainLine, mergeDropNotice,
-  STATE_LOAD_ERRORS, stateLoadKind, stateInitFound, stateLoadDecision,
-  stateWriteGate, stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
-  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
-  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
-  stateBlockedHeader
+  reloadDisposition, stateCanonical, sameState, mergeSetField,
+  mergeForeignState, mergeConflictLine, mergeDropLines,
+  migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
+  stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
+  stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
+  STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
+  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
 } from "./model/state.mjs"
 export {
-  parseJsonObject, parseChannels, parseEpgNow, parseHelperStatus,
-  helperDamagedReason, statusReason, statusHost, statusHealthy,
-  statusWarnings, WARNING_PREFIX, warningLabel, labelWarning, labelWarnings,
-  warningLine, footerWarning, findBarEntry, settingOf, boolSetting, clampInt,
-  clampSetting, settingsFrom, entryInputText, entryInputForm, sameEntryInput,
-  ownWriteInForce, settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS,
-  RETIRED_SETTINGS, MAX_SEEN_INPUTS, entryInputSeen, entryInputLast,
-  entryInputsSeenAfter, entryInputNotice, ownedEntryPatch, barEntryWritable,
-  entryFlushDisposition, owedMirrorAction, ownedWriteMode,
-  retiredInputsToKeep, sameOwnWrite
+  parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
+  parseEpgNow, parseHelperStatus, helperDamagedReason, statusReason,
+  statusHost, statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel,
+  labelWarning, labelWarnings, warningLine, footerWarning, findBarEntry,
+  settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
+  entryInputText, entryInputForm, sameEntryInput, ownWriteInForce,
+  settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
+  MAX_SEEN_INPUTS, entryInputSeen, entryInputLast, entryInputsSeenAfter,
+  entryInputNotice, ownedEntryPatch, barEntryWritable, entryFlushDisposition,
+  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, sameOwnWrite
 } from "./model/settings.mjs"
 export {
   optInSetting, logoSurvey, splitLogoUrl, logoConsentLines, logoFile,
@@ -116,13 +117,14 @@ export {
 export {
   MPV_HANDOFF_TEXT, MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase,
   mpvHandoffName, mpvDiskName, mpvArgWarning, mpvArgWarnings, splitMpvArgs,
-  headerArgs, MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf,
-  buildMpvArgv, helperArgv, playlistFetchArgv, fetchStateDir,
-  playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,
-  failedArgv, logoFetchArgv, playerTracksArgv, trackChoice, parseTracks,
-  trackLanguage, trackLabel, trackDetail, trackRows, trackCursorHome,
-  moveTrackCursor, TRACKS_RECOVERY_MAX, shouldRefreshTracks,
-  trackPanelMessage, trackAccessibleName
+  mpvRejectedLine, mpvRejectedName, headerArgs, MPV_RAW_PREFIX,
+  mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv, helperArgv,
+  playlistFetchArgv, fetchStateDir, playlistProbeArgv, epgFetchArgv,
+  FETCH_URL_ENV, fetchEnvironment, failedArgv, logoFetchArgv,
+  playerTracksArgv, trackChoice, parseTracks, trackLanguage, trackLabel,
+  trackDetail, trackRows, trackCursorHome, moveTrackCursor,
+  TRACKS_RECOVERY_MAX, shouldRefreshTracks, trackPanelMessage,
+  trackAccessibleName
 } from "./model/mpv.mjs"
 export {
   SEEK_FLOOR_MARGIN_S, SEEK_EDGE_MARGIN_S, SEEK_MOVED_THRESHOLD_S, SEEK_MAX_S,
@@ -153,9 +155,9 @@ export {
 } from "./model/privacy.mjs"
 export {
   formatClock, formatCount, pluralChannels, epgFraction, epgNowStale,
-  epgFields, epgCoverage, formatEpgLine, joinParts, EPG_DETAIL_FIELDS,
-  programmeFieldText, epgEpisodeText, EPG_DETAIL_MAX, epgDetailText,
-  formatTimeRange, programmeDetail, rowFailedMeta, rowMeta
+  epgEntry, epgFields, epgCoverage, formatEpgLine, joinParts,
+  EPG_DETAIL_FIELDS, programmeFieldText, epgEpisodeText, EPG_DETAIL_MAX,
+  epgDetailText, formatTimeRange, programmeDetail, rowFailedMeta, rowMeta
 } from "./model/epg.mjs"
 export {
   relativeLuminance, contrastRatio, colorOver, colorMix, WCAG_AA_TEXT,
@@ -177,20 +179,22 @@ export {
   MAX_XTREAM_FIELD, SOURCES_DIR, MASK, MASK_CLEAR_PARAMS, LIMITS, PAUSE_KEY,
   TRACKS_KEY, DETAIL_KEY, REWIND_KEY, FORWARD_KEY, LIVE_KEY, REWIND_STEP_S,
   BEHIND_LIVE_SHOW_S, HELP_KEY, SOURCE_KEYS, SOURCE_KEY_RE, sanitizeInput,
-  codePointLength, capCodePoints, sanitizeTyping, sourceErrorMessage,
-  sourceReason, PERSIST_FAILURE_REASONS, persistFailureMessage,
-  refusalMessage, looksLikeHost, validateSourceUrl, normalizeSourceUrl,
-  EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST, epgHintUrl,
-  resolveEpgUrl, EPG_HINT_NOTICE, epgOriginNotice, isUrlField, sourceKey,
-  isSourceKey, findSource, findSourceByUrl, allocateSourceKey, sourceCacheDir,
-  deriveLabel, labelTaken, uniqueLabel, defaultSourceLabel, validateLabel,
-  maskUrl, encodeQueryValue, xtreamUrls, validateXtream, pluralGroups,
-  countsLine, formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
-  EPG_HINT_ROW_TEXT, sourceDetail, sourceAccessibleName, sourcesHeaderCount,
-  sourcesHeaderRight, sourcesRowAccessibleName, confirmLogosMessage,
-  confirmRemoveMessage, fetchingLine, probeFailureLine, sourceTransient,
-  CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
-  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
+  trimEdgeSpace, codePointLength, capCodePoints, sanitizeTyping,
+  sourceErrorMessage, sourceReason, PERSIST_FAILURE_REASONS,
+  persistFailureMessage, refusalMessage, isIpv6Literal, cutQueryAndFragment,
+  WARN_AT_AFTER_AUTHORITY, sourceUrlWarning, formWarningLine, looksLikeHost,
+  validateSourceUrl, normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
+  EPG_ORIGIN_PLAYLIST, epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE,
+  epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
+  findSourceByUrl, allocateSourceKey, sourceCacheDir, deriveLabel, labelTaken,
+  uniqueLabel, defaultSourceLabel, validateLabel, maskUrl, encodeQueryValue,
+  xtreamUrls, validateXtream, pluralGroups, countsLine, formatLastUsed,
+  formatAgo, sourceView, sourceViews, sourceRows, EPG_HINT_ROW_TEXT,
+  sourceDetail, sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
+  sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
+  fetchingLine, probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
+  CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS,
+  CLIPBOARD_MAX_BYTES
 } from "./model/sources.mjs"
 export {
   hasControlChars, normalizeSourceRecord, sourcesFull, addSource,

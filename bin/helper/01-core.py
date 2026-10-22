@@ -545,15 +545,24 @@ _LATIN_MARKS = re.compile("([a-z])[\u0300-\u036f]+")
 # outside ASCII.
 _URL_TAIL_RE = re.compile(r"[^\s'\"<>]+")
 _WORD_CHAR_RE = re.compile(r"\w")
-# The scheme-legal run that ENDS at a given position: `search(s, lo, j)` leaves
-# `$`/`\Z` at `j`, so the leftmost match starts the maximal run reaching `j`.
-# One native search rather than a python character loop walking back over the
-# same set -- the loop was correct and measurably slower, 168.5 ms against
-# 1 MiB of letters followed by a URL where this is 54.4 ms (3.810 ms against
-# 40,000 where this is 0.363), and the whole point of F-SINK-11 is that the
-# size is the provider's to choose. Both are linear; this one has the smaller
-# constant and neither copies a slice.
-_SCHEME_RUN_RE = re.compile(r"[A-Za-z0-9+.\-]*\Z")
+# The scheme-legal run that ENDS at a given position. D-PERF-6 (R32e): it
+# was `[A-Za-z0-9+.\-]*\Z` under search(s, lo, j), which has NO literal
+# prefix, so the engine tried every start in the window and a failed start
+# cost the distance to the next non-scheme character: about K*K/2 steps on
+# `'a'*K + '!' + 'a'*K + '://x'`, reached on uncapped text (track titles,
+# main()'s message and traceback, a fetch error's status line). Now one
+# anchored match on [lo, j): `.*` under DOTALL runs to j and backs off to the
+# LAST non-scheme character, so the match's end is the run's start, or lo
+# when the window is all scheme characters -- the same b, found in one pass
+# over the window. A python character loop walking back was measured slower
+# (168.5 ms against 54.4 at 1 MiB, F-SINK-11), which is why this stays a
+# native match rather than a loop. Equal output on the shared fixture and on
+# the generated corpus (the redaction-cost suite on the dev branch); the
+# bound is arithmetic, UNVERIFIED by run under the round's input rule.
+_SCHEME_RUN_RE = re.compile(r"(?:.*[^A-Za-z0-9+.\-])?", re.S)
+# run_host's host end: R32a's `/`, `?`, `#`, the port's `:`, and the query and
+# parameter delimiters `&`, `=`, `;` (a neighbouring parameter never prints).
+_RUN_HOST_END = re.compile(r"[/?#:&=;]")
 _LEADING_DASHES = re.compile(r"^[\s\-]+")
 # make_channel's last-resort display name, and the pattern that recognises one
 # after normalize_text. Built from the same constant so the two cannot drift:
@@ -818,6 +827,32 @@ def source_host(url: str) -> str:
     return "local file"
 
 
+def run_host(raw: str) -> str:
+    """The host a FREE-TEXT redactor prints for one `scheme://...` run, the
+    mirror of the scan inside Model.redactUrls (ruling R32a, 2026-10-21).
+
+    Not url_host: that is urllib's RFC reading, right for a display sink and
+    for validation (source_host, validate_source_url), and wrong here, where
+    a username IS the RFC host whenever a password holds an unencoded `/`,
+    `?` or `#` -- `http://myuser:pa#ss@cdn.test/x` printed `http://myuser`
+    (D-SINK-28). So the userinfo runs to the LAST `@` of the whole run, and
+    the host is what follows it, ended at the first `/`, `?`, `#` or `:` and
+    at the first `&`, `=` or `;` (a neighbouring query parameter never
+    prints, D-SINK-23); a bracketed literal is the host up to its `]`, or
+    nothing. The cost, stated in ARCHITECTURE-SOURCES 3.1: an `@` in a path
+    or query moves the printed host to the segment after it (an Xtream
+    `/playlist/me@mail.test/pw/...` prints `mail.test`) -- over-redaction,
+    never a credential. No host-shape rule is applied. The shared redaction
+    fixture (dev branch) holds both mirrors to this."""
+    rest = raw[raw.find("://") + 3:]
+    rest = rest[rest.rfind("@") + 1:]
+    if rest.startswith("["):
+        close = rest.find("]")
+        return rest[:close + 1].lower() if close != -1 else ""
+    cut = _RUN_HOST_END.search(rest)
+    return (rest if cut is None else rest[:cut.start()]).lower()
+
+
 def redact_urls(text: Any) -> str:
     """Replace every URL inside `text` with scheme://host (R12).
 
@@ -882,7 +917,7 @@ def redact_urls(text: Any) -> str:
             lo = j - window
             if lo < resume:
                 lo = resume
-            b = _SCHEME_RUN_RE.search(s, lo, j).start()
+            b = _SCHEME_RUN_RE.match(s, lo, j).end()
             if b > lo or lo == resume:
                 break
             window *= 2
@@ -912,11 +947,16 @@ def redact_urls(text: Any) -> str:
             continue
         end = tail.end()
         raw = s[start:end]
+        # Sentence punctuation after a URL is put back. A `]` is kept when the
+        # run holds a `[`: it closes an IPv6 literal, and stripping it left
+        # `http://[2001:db8::5].` with no host to show (R32a; a D-SINK-23
+        # sibling lane S recorded).
+        bracket = "[" in raw
         trailing = ""
-        while raw and raw[-1] in ".,;:!?)]":
+        while raw and raw[-1] in ".,;:!?)]" and not (bracket and raw[-1] == "]"):
             trailing = raw[-1] + trailing
             raw = raw[:-1]
-        host = url_host(raw)
+        host = run_host(raw)
         out.append(s[copied:start])
         out.append("%s://%s%s" % (s[start:j].lower(), host or "[redacted]", trailing))
         copied = end

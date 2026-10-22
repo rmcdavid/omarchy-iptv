@@ -34,21 +34,46 @@ from helper_loader import load_helper
 
 helper = load_helper()
 
-# The pattern as it shipped, kept here and ONLY here.
+# The pattern as it shipped, kept here and ONLY here. The HOST it prints is
+# R32a's free-text rule (2026-10-21), stated independently of the helper so a
+# drift in run_host is caught: the segment after the LAST '@' of the run,
+# ended at '/', '?', '#', ':', '&', '=' or ';', a bracketed literal to its ']'.
+# It was helper.url_host (urllib's RFC reading) until R32a, which printed the
+# username for a password holding an unencoded '/', '?' or '#' (D-SINK-28).
 _AS_SHIPPED = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*)://[^\s'\"<>]+")
+_HOST_END_AS_RULED = re.compile(r"[/?#:&=;]")
+
+
+def host_as_ruled(raw):
+    rest = raw[raw.find("://") + 3:]
+    rest = rest[rest.rfind("@") + 1:]
+    if rest.startswith("["):
+        close = rest.find("]")
+        return rest[:close + 1].lower() if close != -1 else ""
+    cut = _HOST_END_AS_RULED.search(rest)
+    return (rest if cut is None else rest[:cut.start()]).lower()
 
 
 def redact_urls_as_shipped(text):
     def replace(match):
         raw = match.group(0)
+        bracket = "[" in raw
         trailing = ""
-        while raw and raw[-1] in ".,;:!?)]":
+        while raw and raw[-1] in ".,;:!?)]" and not (bracket and raw[-1] == "]"):
             trailing = raw[-1] + trailing
             raw = raw[:-1]
-        host = helper.url_host(raw)
+        host = host_as_ruled(raw)
         return "%s://%s%s" % (match.group(1).lower(), host or "[redacted]", trailing)
 
     return _AS_SHIPPED.sub(replace, "" if text is None else str(text))
+
+
+# D-PERF-6 (R32e): the scheme-run search as it shipped before, kept as the
+# oracle for the anchored match that replaced it. `search(s, lo, j)` with
+# `\Z` at j: the leftmost start whose run reaches j. Quadratic in a window
+# (no literal prefix), which is why it is only ever run here, on short
+# ordinary strings.
+_SCHEME_RUN_BEFORE = re.compile(r"[A-Za-z0-9+.\-]*\Z")
 
 
 # Reaches every branch of the scan: scheme characters, the authority
@@ -139,6 +164,50 @@ class RedactionIsUnchangedTests(unittest.TestCase):
         mismatches = [text for text in corpus
                       if helper.redact_urls(text) != redact_urls_as_shipped(text)]
         self.assertEqual([repr(t) for t in mismatches[:4]], [])
+
+    def test_d_perf_6_the_anchored_scheme_run_match_starts_where_the_old_search_did(self):
+        """R32e: on every window of every ordinary string here, the match's
+        end is the old search's start -- the run's first character, or lo
+        when the window is all scheme characters."""
+        texts = ["http://h.test/x", "aaa!aaa://x", "a.b+c-d://h", "!://", "://", "ab cd://x",
+                 "x\ny://h", "aa!aa!aa://h", "\u00e9://h", "+.-://h", "a" * 70 + "://h"]
+        for seed in range(1, 300):
+            texts.append(generated(40, seed))
+            texts.append(generated(24, seed) + "://" + generated(8, seed + 1))
+            texts.append(generated(9, seed) + "://" + generated(9, seed + 2) + "://x")
+        checked = 0
+        for text in texts:
+            j = text.find("://")
+            while j >= 0:
+                for lo in range(0, j + 1):
+                    before = _SCHEME_RUN_BEFORE.search(text, lo, j).start()
+                    after = helper._SCHEME_RUN_RE.match(text, lo, j).end()
+                    self.assertEqual(after, before, (repr(text), lo, j))
+                    checked += 1
+                j = text.find("://", j + 1)
+        self.assertGreater(checked, 2000)
+
+    def test_r32a_the_free_text_host_is_the_segment_after_the_last_at_sign(self):
+        """R32a (D-SINK-28, D-SINK-23): the typo shapes print the host after
+        the last '@', a pathless query stops at '&', a path '@' prints the
+        segment after it (the stated cost), an unclosed '[' prints nothing."""
+        cases = [
+            ("Failed to open http://myuser:pa#ss@cdn.test/live/1.ts.", "Failed to open http://cdn.test."),
+            ("Failed to open http://myuser:pa?ss@cdn.test/live/1.ts.", "Failed to open http://cdn.test."),
+            ("Failed to open http://myuser:pa/ss@cdn.test/live/1.ts.", "Failed to open http://cdn.test."),
+            ("http://host?password=x", "http://host"),
+            ("http://h.test?u=me@b.test&p=SECRET", "http://b.test"),
+            ("http://host.test:25461/playlist/me@mail.test/pw/m3u_plus", "http://mail.test"),
+            ("open http://[2001:db8::5 now", "open http://[redacted] now"),
+            ("x http://[2001:db8::5]. y", "x http://[2001:db8::5]. y"),
+            ("http://a@b@c@h.test/x", "http://h.test"),
+        ]
+        for text, want in cases:
+            self.assertEqual(helper.redact_urls(text), want, text)
+        # The display sinks keep the RFC reading: that is the two-rule shape
+        # R32a decides, not a drift.
+        self.assertEqual(helper.url_host("http://myuser:pa#ss@cdn.test/live/1.ts"), "myuser")
+        self.assertEqual(helper.run_host("http://myuser:pa#ss@cdn.test/live/1.ts"), "cdn.test")
 
     def test_none_and_non_strings_are_unchanged_too(self):
         for value in (None, 42, True, 1.5, [], {}):

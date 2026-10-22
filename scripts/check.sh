@@ -42,6 +42,10 @@
 #                                helper compiles has a reviewed verdict on its
 #                                cost -- R30g, D-EPG-8 -- and an `open` one is
 #                                printed on every run)
+#  13. trim shape guard          (scripts/check-trim-shapes.py: no
+#                                trailing-whitespace pattern that is quadratic
+#                                in a run, and no trimEnd/trimStart, which
+#                                Qt 6.11.2's V4 does not have; D-PERF-3)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
@@ -165,7 +169,9 @@ fail=0
 # prevented by a sentence. The honest statement is the one above -- the
 # numbers below are the measured counts on this tree, with zero margin, and
 # they are correct only until the next test is written.
-QML_SPEC_MIN=${QML_SPEC_MIN:-78}
+# 78 -> 79 on 2026-10-22 (lane-bounds-s2): test_r32a_urlAuthority, the
+# R32a/R32b functions under Qt's own engine; red on 2ffde4c.
+QML_SPEC_MIN=${QML_SPEC_MIN:-79}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -273,7 +279,30 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # pins (the start-up prune once, a prune at every switch naming the new
 # active key; a restart's first switch) and the fixture's busy-with-names
 # notice (D-LOGO-23). Both pins red on lane-bounds-int e8d2b35.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2702}
+# 2679 -> 2747 on 2026-10-21 (lane-bounds-s), +68: D-SG-3's probe in a
+# child process over every browse and apply path and the service's (30) and
+# in process (5), the shared channel-ids vector a prototype-named tvg-id adds
+# (5), the shared source-urls cases for D-SINK-25 (14), the D-SINK-23 oracle
+# check (1), D-PERF-3's equivalences (7), D-SINK-25's display (2), D-SINK-24's
+# journal line (2) and D-PERF-4's LRU (2). 48 of them red on lane-bounds-int,
+# with 3 existing checks the new shared vectors turn red there; the other 20
+# pin what stayed the same (an accepted URL, a path the bug never reached);
+# the lane's 22 mutations of the new code are each red (lane report).
+# Merged 2026-10-21 (lane-bounds-s2): the larger of the two sides' figures
+# taken at the merge of lane-bounds-s into lane-bounds-int gave 2747; the
+# merged tree counts 2767 (both lanes' checks are additive).
+# 2767 -> 2813 on 2026-10-22 (lane-bounds-s2, R32a-c, D-SINK-27/28,
+# D-SINK-24, F-HARNESS-39): the source-urls fixture's eleven new readings
+# and its `warn` flags (18 fixture checks), the R32a display and warning
+# checks (7), the R32b journal checks (3), the F-HARNESS-39 pins (2), the
+# redaction fixture's split-host check (1); 33 of the lane's checks red on
+# the merge commit 2ffde4c, the rest green there by design (accepted
+# readings, a vector the base already met); every shipping decision red on
+# a mutation (lane report).
+# 2026-10-22, lane-bounds-s3: the merge of lane-bounds-s2 (2813) into the
+# bounds integration (2702); the larger side's floor taken at the merge, the
+# merged tree's own count re-levelled below once the lane's work is in.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2813}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -420,6 +449,21 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2702}
 # the other 4 on a mutation of the shipping line (scratchpad g2-red).
 # the two sides' larger floor, the bounds integration, 2026-10-22
 # 1434 -> 1443 on 2026-10-22: the H2 and G2 merges together (lane-bounds-int 84cf2d1).
+# 1359 -> 1375 on 2026-10-21 (lane-bounds-s): tests/test_proto_v4.py (11),
+# D-SG-3's probe and D-PERF-3's equivalences in Qt's own V4 offscreen under
+# prlimit, all 11 red on lane-bounds-int; tests/test_trim_guard.py (5), the
+# guard below, its whole-tree case red on lane-bounds-int (26 sites).
+# Merged 2026-10-21 (lane-bounds-s2): the larger of the two sides' figures
+# taken at the merge of lane-bounds-s into lane-bounds-int gave 1390; the
+# merged tree counts 1406.
+# 1406 -> 1409 on 2026-10-22 (lane-bounds-s2): tests/test_redaction_cost.py
+# (2) -- D-PERF-6's anchored scheme-run match against the old search on
+# every window of 900 ordinary strings, and R32a's free-text host rule --
+# and tests/test_player.py (1), R32b's `<token>` placeholder for a bearer,
+# basic-auth and scheme-less proxy value. All 3 red on 2ffde4c, with 5
+# existing tests the shared fixtures turn red there.
+# 2026-10-22, lane-bounds-s3: the merge of lane-bounds-s2 (1409) into the
+# bounds integration (1443); the larger side's floor taken at the merge.
 PY_TESTS_MIN=${PY_TESTS_MIN:-1443}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
@@ -512,6 +556,10 @@ KEY_PREFLIGHT_MIN=${KEY_PREFLIGHT_MIN:-12}
 # at 0.3 is (the claim narrowed to "painted at all"); seen red on the
 # harness-lib that read visible alone.
 OPEN_PREFLIGHT_MIN=${OPEN_PREFLIGHT_MIN:-19}
+# D-PERF-3 (2026-10-21, lane-bounds-s): the trim shape guard reads Model.mjs,
+# the 18 parts and the 3 shipped .qml files; fewer means it stopped reading
+# some of them.
+TRIM_GUARD_FILES_MIN=${TRIM_GUARD_FILES_MIN:-22}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -1271,6 +1319,28 @@ if python3 "$ROOT/scripts/check-helper-regex.py" >"$regex_log" 2>&1; then
   fi
 else
   cat "$regex_log"; bad "helper regex guard"
+fi
+
+step "trim shape guard (no quadratic trailing trim, no trimEnd)"
+# D-PERF-3, ruling R30g: `/\s+$/` and `/^\s+|\s+$/g` were the model's trims of
+# provider text -- the whole channels.json, every name, every group on every
+# browse pass -- and an unanchored `\s+$` is quadratic in a whitespace run.
+# Their replacements are trim() and Model.trimEndSpace / trimEdgeSpace, never
+# trimEnd or trimStart, which Qt 6.11.2's V4 does not have (node does). A
+# guard against those two known-bad shapes, not an acceptance criterion: the
+# equivalences and the V4 probe (tests/test_proto_v4.py) are what show it.
+trim_log=$CHECK_TMP/trim-shapes.log
+if python3 "$ROOT/scripts/check-trim-shapes.py" >"$trim_log" 2>&1; then
+  trim_n=$(grep -oE '^trim shape guard: [0-9]+ file' "$trim_log" | head -1 | grep -oE '[0-9]+')
+  if [[ -z $trim_n ]]; then
+    cat "$trim_log"; bad "trim shape guard printed no file count at all"
+  elif (( trim_n < TRIM_GUARD_FILES_MIN )); then
+    cat "$trim_log"; bad "trim shape guard read $trim_n file(s), expected at least $TRIM_GUARD_FILES_MIN"
+  else
+    ok "$(tail -1 "$trim_log")"
+  fi
+else
+  cat "$trim_log"; bad "trim shape guard"
 fi
 
 if (( fail )); then echo "check.sh: FAILED"; exit 1; fi

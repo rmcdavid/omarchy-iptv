@@ -397,6 +397,58 @@ again inside `validateSourceUrl`.
    tokens are case-sensitive), a bare `?` dropped; fragment dropped
    (never sent). Whitespace anywhere in the rest -> `bad_url`.
    `url = scheme://[userinfo@]host[:port]path[?query]`, `host` as computed.
+   **D-SINK-25 / D-SINK-27, ruling R32a (2026-10-21, round 3).** No URL is
+   refused for an `@` after its authority, in either mirror. A password
+   holding an unencoded `/`, `?` or `#` ends the authority early, and the
+   string then READS as host = the username, port = the password's prefix:
+   `http://user:2024/ab@host.test/list.m3u` is accepted as host `user`, port
+   2024, labelled `user:2024` -- the RFC reading, which every standard parser
+   gives and which is where a fetch goes. Round 2's refusal of that shape
+   (`passwordReadAsPort`, lane-bounds-s, never shipped) also refused an
+   Xtream `/playlist/<email>/<pass>/m3u_plus` link and a WebDAV link on a
+   non-default port, both stored and working, and the helper dropped such a
+   source on the first normalize after the upgrade (D-SINK-27); it is
+   withdrawn. The display sinks (`hostPortOf`, `deriveLabel`, `sourceLabel`,
+   `hostOf`) and validation show and use the RFC host, so a stored
+   `http://host.test:25461/playlist/me@mail.test/pw/m3u_plus` resolves,
+   normalizes and labels as `host.test:25461` exactly as before -- and the
+   typo shape labels as its username, which is why the FORM WARNS rather
+   than guesses: `Model.sourceUrlWarning(text)` answers one sentence
+   (`WARN_AT_AFTER_AUTHORITY`: "The host before the first / has no dot and an
+   @ follows it. If that is a password holding /, ? or #, write them as %2F,
+   %3F and %23.") when the value validates as http(s), its RFC host has no
+   dot and is not a bracketed literal, and an `@` follows the authority in
+   the TYPED text (a fragment counts: normalization drops it). The form's
+   result line renders `Model.formWarningLine(form)` over the playlist, then
+   the EPG field, or the Xtream server, while the value warrants it
+   (UX-SOURCES 4.3, 5.4); submit proceeds. A LAN name draws it too
+   (`http://nas:8000/files/me@home/x`): a sentence, not a refusal. The shared
+   fixture carries the readings for both mirrors and a `warn` flag the node
+   suite and the QML spec read (the helper has no form).
+
+   **Free-text redaction under R32a** (`Model.redactUrls`, the helper's
+   `redact_urls` through `run_host`; the display rule above does NOT apply).
+   A free-text sink -- an mpv error, a helper line, a notification body --
+   must never carry a credential, and the host is a courtesy. There the
+   userinfo runs to the LAST `@` of the whole run (up to whitespace, crossing
+   `/`, `?` and `#`), and the host is what follows it, ended at the first
+   `/`, `?`, `#` or `:` and at the first `&`, `=` or `;` (a neighbouring
+   query parameter never prints, D-SINK-23); a bracketed literal is the host
+   up to its `]`, or nothing. So `http://myuser:pa#ss@cdn.test/x` redacts
+   to `cdn.test` -- the RFC reading printed `myuser`, the username, and that
+   was D-SINK-28 -- and `http://host?password=x` to `host`. No port-shape
+   or host-shape rule is applied. THE ACCEPTED SIDE, stated: an `@` in a
+   path or query moves the printed host to the segment after it, so the
+   Xtream link above redacts to `mail.test` and not `host.test`, a WebDAV
+   link to the email's domain, and an `@` INSIDE a path or query credential
+   prints that credential's tail up to the next delimiter
+   (`/live/U5ER/P4@SS/1.ts` prints `SS`; the base printed `prov.test` there).
+   That last shape is pinned in the fixture so it is seen rather than
+   discovered, and the lane report raises printing nothing for an `@` after
+   the authority as the alternative. One shared fixture,
+   `tests/fixtures/redaction-vectors.json`, holds both mirrors to the
+   free-text rule (`host`) and the display sinks to the RFC host (`rfcHost`,
+   `displayMustNotAppear`) where the two differ.
 6. Anything else (`ftp:`, `data:`, `javascript:`, `rtsp:`) -> `unsupported_scheme`.
 
 Vectors (in `tests/fixtures/source-urls.json`, consumed by node, the QML

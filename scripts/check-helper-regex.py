@@ -86,12 +86,17 @@ REVIEWED = [
      "linear: matched at one given position, one run and nothing after it (_URL_TAIL_RE, redact_urls)"),
     (r"\w", "provider",
      "constant: one character at one given position (_WORD_CHAR_RE, redact_urls)"),
-    (r"[A-Za-z0-9+.\-]*\Z", "provider",
-     "open: D-PERF-6. search() has no literal prefix (minimum width 0), so it tries every start of "
-     "redact_urls' window, and a start that fails costs the distance to the next non-scheme "
-     "character; a scheme-legal run broken once inside the window costs about r*r/2 for a run of r. "
-     "Found by lane-bounds-h; ruled R32e, fixed by the lane that owns redact_urls with a "
-     "literal-anchored search, whose new pattern replaces this entry (_SCHEME_RUN_RE)"),
+    (r"(?:.*[^A-Za-z0-9+.\-])?", "provider",
+     "linear: D-PERF-6 (R32e), fixed by lane-bounds-s2. The old `[A-Za-z0-9+.\\-]*\\Z` under search() "
+     "had no literal prefix, so it tried every start of redact_urls' window and a failed start cost "
+     "the distance to the next non-scheme character, about r*r/2 for a scheme-legal run broken once "
+     "inside the window (found by lane-bounds-h). This one is used with match(s, lo, j) under DOTALL: "
+     "`.*` runs to j once and backs off once to the LAST non-scheme character, so an attempt costs at "
+     "most 2*(j - lo), and the doubling windows sum to under 8R + 128 steps for a run of R -- "
+     "independent of the text before it (_SCHEME_RUN_RE, redact_urls)"),
+    (r"[/?#:&=;]", "provider",
+     "linear: one character class, no quantifier (_RUN_HOST_END, run_host: the delimiters that end a "
+     "free-text host, R32a)"),
     (r"^[\s\-]+", "provider",
      "linear: anchored at the start, one run and nothing after it (_LEADING_DASHES, clean_name)"),
     ("'^' + GENERATED_NAME_WORD.lower() + ' [0-9]+$'", "provider",
