@@ -242,7 +242,16 @@ def logo_survey(channels: Any) -> dict[str, Any]:
     }
 
 
+# The most bytes of one logo's body a fetch reads (the final response's: a
+# redirect's body is never read, D-LOGO-15), so the most a cached logo is.
 MAX_LOGO_BYTES = 256 * 1024
+# The most entries ONE source's logo directory holds (D-LOGO-12): a fetch run
+# counts what is there first and fetches only while that count plus its own
+# downloads stays below this, so a source's logos never exceed
+# MAX_LOGO_FILES * MAX_LOGO_BYTES = 1,310,720,000 bytes (1.22 GiB) on disk. It
+# used to bound downloads per RUN, and the directory grew by up to this much on
+# every service start. Per source, not per install: see cache_prune for what
+# every source together can hold (D-LOGO-17).
 MAX_LOGO_FILES = 5000
 
 # The DIMENSION bound, D-LOGO-11. MAX_LOGO_BYTES bounds the wrong axis: the
@@ -328,10 +337,18 @@ def logo_opener(host: str) -> Any:
     is to a party the named host chose rather than one this plugin invented.
     It is transient, carries no credentials, and is reasoned about here rather
     than left implicit.
+
+    D-LOGO-15: the handler is unread_redirect_handler's, so a redirect's body
+    is never read. This handler overrode redirect_request alone, and the
+    stdlib's http_error_302 (and 301, 303, 307, 308, the same function) read
+    each 3xx body whole before following it, up to ten hops, with no byte cap:
+    MAX_LOGO_BYTES bounded the final response only. The TLS context is the
+    one limit_memory prepared, as make_opener's is, so the CA store is loaded
+    once a run and before the memory limit rather than once a logo under it.
     """
     import urllib.request
 
-    class LogoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    class LogoRedirectHandler(unread_redirect_handler()):
         def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
             parsed = urllib.parse.urlsplit(newurl)
             if parsed.scheme.lower() not in LOGO_SCHEMES:
@@ -360,14 +377,30 @@ def logo_opener(host: str) -> Any:
     # No FTPHandler: build_opener adds the defaults, and the redirect guard
     # already refuses an ftp target, but a handler that cannot be reached is
     # one fewer thing to reason about.
-    opener = urllib.request.build_opener(LogoRedirectHandler())
+    handlers: list[Any] = [LogoRedirectHandler()]
+    context = TLS_CONTEXT.get("https")
+    if context is not None:
+        handlers.append(urllib.request.HTTPSHandler(context=context))
+    opener = urllib.request.build_opener(*handlers)
     opener.handlers = [h for h in opener.handlers
                        if h.__class__.__name__ not in ("FTPHandler", "CacheFTPHandler",
                                                        "FileHandler", "DataHandler")]
     return opener
 
 
-def fetch_logo(url: str, timeout: float) -> tuple[bytes, str]:
+# D-LOGO-16 (R30e): the most one logo may take, in seconds, from before its
+# connection is opened to its last byte, redirects included, whatever the
+# per-read `--timeout` (10 s by default) allows each step. A 256 KiB logo in
+# 30 s needs about 70 kbit/s. Before this the only bound was that per-read
+# timeout, so a host sending one byte inside every 10 s held one logo for up
+# to 262,145 x 10 s, about 30 days, and the run fetches one logo at a time.
+# The run as a whole has its own deadline, LOGO_RUN_DEADLINE (06-failed.py),
+# and a logo is never given more than what is left of it. Mirrored by
+# Model.LOGO_DEADLINE_MS through the shared logo-deadlines fixture.
+LOGO_DEADLINE = 30.0
+
+
+def fetch_logo(url: str, timeout: float, budget: float | None = None) -> tuple[bytes, str]:
     """Fetch one logo under the ruling's guards. Returns (bytes, content type).
 
     Deliberately NOT read_http_source. That path sends an Authorization header
@@ -376,8 +409,12 @@ def fetch_logo(url: str, timeout: float) -> tuple[bytes, str]:
     its playlist would receive the subscription credentials as a side effect of
     a picture. This sends no credentials, follows no userinfo, and refuses
     anything that is not https.
+
+    The whole fetch -- connect, TLS, headers, every redirect (whose bodies are
+    never read) and the body -- runs under ONE wall-clock deadline of `budget`
+    seconds, LOGO_DEADLINE when not given (FetchDeadline, R30e), and answers
+    `logo_timeout` when it passes.
     """
-    import urllib.error
     import urllib.request
     parsed = urllib.parse.urlsplit(url)
     if parsed.scheme.lower() not in LOGO_SCHEMES:
@@ -387,7 +424,19 @@ def fetch_logo(url: str, timeout: float) -> tuple[bytes, str]:
     host = parsed.netloc.lower()
     request = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "image/*"})
     try:
-        with logo_opener(host).open(request, timeout=timeout) as response:
+        with FetchDeadline(LOGO_DEADLINE if budget is None else budget):
+            data, ctype = read_logo_response(logo_opener(host), request, timeout, host)
+    except FetchExpired:
+        raise HelperError("logo_timeout", "a logo from %s took longer than its deadline" % host) from None
+    if len(data) > MAX_LOGO_BYTES:
+        raise HelperError("logo_too_large", "a logo from %s exceeds %d KB" % (host, MAX_LOGO_BYTES // 1024))
+    return data, ctype
+
+
+def read_logo_response(opener: Any, request: Any, timeout: float, host: str) -> tuple[bytes, str]:
+    import urllib.error
+    try:
+        with opener.open(request, timeout=timeout) as response:
             ctype = (response.headers.get("Content-Type") or "").split(";")[0].strip().lower()
             if ctype not in LOGO_TYPES:
                 raise HelperError("logo_type", "refused %s from %s" % (ctype or "an unnamed type", host))
@@ -396,8 +445,6 @@ def fetch_logo(url: str, timeout: float) -> tuple[bytes, str]:
         raise
     except (urllib.error.URLError, OSError, ValueError) as error:
         raise HelperError("logo_fetch", "could not fetch a logo from %s: %s" % (host, error.__class__.__name__))
-    if len(data) > MAX_LOGO_BYTES:
-        raise HelperError("logo_too_large", "a logo from %s exceeds %d KB" % (host, MAX_LOGO_BYTES // 1024))
     return data, ctype
 
 
@@ -859,13 +906,19 @@ def canonical_png(data: bytes) -> bytes | None:
     return None
 
 
-def canonical_logo_file(path: str) -> str:
+def canonical_logo_file(path: str, rewrite: bool = True) -> str:
     """D-LOGO-13 for a file already in the cache, which every version before
     0.14.1 wrote verbatim. -> "as-is" when it may be announced as it stands
     (a canonical PNG, or another type), "rewritten" when it was a PNG with
     other chunks and now holds the canonical form (atomically, 0600), or ""
     when it may not be announced at all. Read under the byte cap plus one, so
     a PNG longer than that cannot end in IEND inside the read and is refused.
+
+    `rewrite` False (D-LOGO-23, R32f): a READ-ONLY check, for a run that
+    does not hold the folder's lock. A PNG that would need rewriting is then
+    "" -- not announced, and left exactly as it is for the run that holds
+    the lock -- because the guide may only ever be pointed at a canonical
+    file, and this run may write nothing.
     """
     data = _read_logo_prefix(path, MAX_LOGO_BYTES + 1)
     if not data:
@@ -877,6 +930,8 @@ def canonical_logo_file(path: str) -> str:
         return ""
     if canon == data:
         return "as-is"
+    if not rewrite:
+        return ""
     try:
         write_bytes_atomic(path, canon)
     except OSError:

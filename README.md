@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.14.3. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.15.0. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, picture in picture, pausing live TV and winding it back a few
 minutes, a guide that remembers which
@@ -18,8 +18,10 @@ screen, saved searches and channel logos. 0.14.0 takes your provider URLs
 out of the desktop shell's settings file and keeps them in the plugin's own,
 0.14.1 stores PNG channel logos with only what drawing them needs,
 0.14.2 reads `state.json` before every save and closes two findings about
-GIF logos and guide-data files, and 0.14.3 bounds every playlist field a
-channel keeps and splits the background helper into several files.
+GIF logos and guide-data files, 0.14.3 bounds every playlist field a
+channel keeps and splits the background helper into several files, and
+0.15.0 holds far less guide data in the shell, parks a playlist that
+cannot move into Sources in `state.json`, and bounds every download by a deadline and the playlist and guide parses by a memory limit.
 `CHANGELOG.md` has the release notes.
 
 This branch is the install artifact and nothing else: what `omarchy plugin
@@ -63,8 +65,9 @@ as a way to hand the plugin a playlist. This version does not read either
 setting any more, with one exception: if you set one up that way on 0.13.6 or
 earlier, the first shell start on this version moves it into your Sources
 list once, makes it the active source, and takes the URL out of the shell's
-settings file. You do not need to do anything, and you do not need your URL
-again. After that, a `playlistUrl` or `epgUrl` set with `omarchy bar set` is
+settings file -- unless Sources already holds 50 sources, in which case the URL
+stays where it is until you remove one (see below). You do not need to do
+anything else, and you do not need your URL again. After that, a `playlistUrl` or `epgUrl` set with `omarchy bar set` is
 ignored and removed, and a notification says so — see **Bar setting
 ignored** under Troubleshooting.
 
@@ -108,10 +111,12 @@ The guide, the bar widget, and the service all read that one entry. Playlist
 and guide-data URLs from paid providers embed credentials. Where they rest,
 counted: **two files, both the plugin's own, readable only by you** —
 `~/.local/state/omarchy-iptv/state.json`, which keeps your source list, each
-source's URLs and which source is active, and the channel cache under
+source's URLs and which source is active (and, while a playlist from the bar
+waits for a free place in Sources, that playlist and its guide-data URL,
+under the next heading), and the channel cache under
 `~/.cache/omarchy-iptv/sources/<key>/`, whose `channels.json` carries the
 stream addresses — each created mode 0600 inside a directory only you can
-enter (one exception, three narrow windows -- two of a few milliseconds, one
+enter (one exception, two narrow windows -- one of a few milliseconds, one
 where a save's read of the file does not answer within its 2 s bound -- in
 which a save can create `state.json` at your umask's mode, usually 0644,
 until the next shell start corrects it, is under Troubleshooting). They are never shown or logged beyond their host name. The shell's
@@ -121,12 +126,44 @@ and the third was a file the plugin does not own; now the entry carries a short
 code naming the active source, and the plugin never writes a URL into that
 file. A URL still passes through it in two cases, both covered under the next
 heading: the one an install updated from 0.13.6 or earlier still has in it
-until the first shell start on this version moves it into Sources and takes it
-out, and one you put there yourself with `omarchy bar set`, which the plugin
+until the plugin moves it into Sources and takes it out -- at the first shell
+start on this version, or at a later one if that start cannot save the move;
+while Sources already holds 50 sources the playlist and its guide URL are
+parked in `state.json`, not left on the entry, until one is removed -- and one
+you put there yourself with `omarchy bar set`, which the plugin
 does not read and removes on its next write. This paragraph has been wrong before — two
 sentences once said two files when there were three — so the count here is
 re-derived for this version rather than copied: two the plugin owns and keeps
 a URL in, and one it does not own that a URL only passes through.
+
+One more place a URL can rest, made by the host and not the plugin, and
+not counted above because it holds only what the shell's file held when the
+copy was taken: `omarchy refresh shell` and
+`omarchy-refresh-config omarchy/shell.json` save the old `shell.json` beside
+the new one as `shell.json.bak.<number>` (the number is the time of the copy;
+removed again at once when your file already equalled the shipped one, so
+you may find none), and the Omarchy 4 upgrade saves it as
+`shell.json.omarchy-upgrade-to-quattro.<suffix>.bak`. Each holds this
+plugin's entry as it was then, URL included if one was on it, and keeps the
+permissions `shell.json` itself had at the time, never wider: a private
+(0600) file gives a private backup, a readable (0644) one gives a readable
+backup under the usual umask 022 (the refresh copy is narrowed by a stricter
+umask; the upgrade's keeps the mode exactly), measured on this version's
+Omarchy. So a backup is readable by other accounts only if the
+file it copied already was -- an install from before 0.13.3, which had no
+permission check and kept the URL on the entry, that ran one of those
+commands; or a file `omarchy-reinstall-configs` had just made readable again
+(with the shipped contents, so this plugin's entry gone with the rest), then
+`omarchy plugin enable` had put the entry back and `omarchy bar set` a URL
+on it, and one of those commands ran before the plugin's next own write --
+on an install that has already moved its URLs into Sources that write takes
+a URL it does not read off the entry and makes the file private again, and
+since this version the permission check also runs again after every change
+the shell publishes, so the window is that one reconcile. The
+plugin never touches those copies: its permission check reaches
+`shell.json` and nothing beside it. `ls -l ~/.config/omarchy/shell.json*`
+shows them; `chmod 600` or remove any you do not need (Troubleshooting has
+the same one-liner).
 
 **What the plugin stores, and three things to know about it.** Moving your URL
 out of the shell's settings file costs three things, and none of them is
@@ -146,7 +183,61 @@ obvious when it happens to you:
   written`, and the next shell start moves them again. A guide-data URL with
   no active source to attach it to is not kept anywhere: there is nothing for
   it to guide, so it is removed with a notification saying to add the source with
-  its EPG URL in Sources. From then on the plugin does not read either setting
+  its EPG URL in Sources. A playlist URL there that the plugin cannot use
+  (a typo, a scheme it does not take) is not added and is removed, and a
+  guide-data URL set beside it is removed with it rather than attached to
+  any of your sources: one notification, titled **Bar setting removed**,
+  says `playlistUrl in the bar settings was not a usable URL and was
+  removed, with the epgUrl beside it. Add or edit sources in the guide's
+  Sources screen.` (Up to and including 0.14.3 that guide-data URL was put
+  on the source that was active, in place of that source's own, and only
+  the playlist was reported; with no source active, it was reported in a
+  notification of its own, as having no source to guide, beside the
+  playlist's.) If Sources already
+  holds 50 sources and the playlist is not one of them, nothing is moved and no source is removed to
+  make room: the playlist, and a guide-data URL set beside it, are kept in
+  the plugin's own `state.json` (readable by you alone) and taken off the
+  bar entry as soon as that is written -- neither is attached to any of your
+  sources, neither counts as one, and neither is shown as one -- nothing is
+  marked as done, and a notification titled **Sources is full** says `The
+  playlist set on the bar, and its guide URL if one is set, were not moved
+  into Sources: Sources already holds 50 sources, the most it can. Remove
+  one in the guide's Sources screen and the bar's playlist and its guide
+  move in together; the bar's playlist then becomes the active source.`
+  (once a session, and again at each shell start while it lasts). Remove
+  one -- in Sources, or with the helper's `state source remove` -- and the
+  playlist is added with its guide-data URL and becomes the active source,
+  over whichever source was active. A playlist set on the bar with
+  `omarchy bar set` while the wait lasts takes the waiting playlist's place
+  and keeps the waiting guide-data URL beside it (a guide-data URL set the
+  same way replaces that one): nothing waiting is dropped without being
+  told. If another program fills the freed
+  place first -- a hand-run `state source add` in the moment before the
+  plugin's save has read the file -- the move does not happen: both URLs
+  stay kept in `state.json`, nothing new is told, and the next removal tries
+  again; and if that other program added the same playlist itself, the
+  guide-data URL joins that source and the wait ends. If the plugin cannot
+  write `state.json` when the hold begins, the two stay on the bar entry
+  until it can, and the next start picks them up from there. (Builds of this
+  change that never shipped took both off the entry in that case with
+  neither in any source, saying only that a source "added here" was not
+  kept; the builds between 0.14.3 and this one kept both on the bar entry
+  for as long as the wait lasted, which is the shell's settings file, read
+  by anything that reads your settings and copied by `omarchy refresh
+  shell`.) Up to and including 0.14.3 the least
+  recently used source was removed to make room, with only a journal line,
+  and its URL went with it. An install updated from 0.13.6 records no
+  active source, so until you pick one, or a source is removed, the guide
+  opens on its setup form; its `Saved sources` link lists the 50, and a
+  source you pick there is the one the guide opens on from then on and
+  keeps its own guide-data URL across shell starts -- until a source is
+  removed, when the bar's playlist moves in and takes its place as the
+  active source, as the notification says. (Builds of
+  this change that never shipped reported the bar's guide-data URL as
+  removed while it stayed on the entry, dropped it when the playlist moved
+  in, and put it on a source picked meanwhile in place of that source's
+  own.)
+  From then on the plugin does not read either setting
   at all. Set one with `omarchy bar set` and the plugin adds nothing, switches
   nothing and changes nothing about the source you are watching: it removes
   the value from the entry on its next write — usually at once — and shows one
@@ -163,7 +254,7 @@ obvious when it happens to you:
   are exercised on every commit's test tree under both kinds of Omarchy host
   (today's, and one carrying the settings fix awaiting review upstream), and
   live, under a headless compositor, by the harness scenario on the `dev`
-  branch (129 checks, 2026-10-16).
+  branch (138 checks, 2026-10-20).
 - **Going back to an older version makes the plugin look unconfigured.** An
   older build looks for the URL on the widget's entry, does not find one, and
   says you have no playlist. Your sources are all still in `state.json`: open
@@ -195,16 +286,26 @@ permission change in the next paragraph stays.
 **One permission the plugin changes on a file that is not its own.**
 `shell.json` is the shell's settings file, shared by every bar widget you
 have, and it does not always arrive private. The copy Omarchy ships is
-readable by everyone on the machine; a `shell.json` created from it keeps
-whatever your umask gives it, which is usually readable by everyone too, and
-rewriting a file that already exists leaves its permissions alone — so a
-machine that started out readable stays readable. The plugin no longer puts
+readable by everyone on the machine; a `shell.json` created from it gets
+whatever your umask gives it, which is usually readable by everyone too. The
+shell's own writes — your settings, `omarchy bar set`, enabling a plugin —
+keep whatever permissions the file has, so a file that arrived readable stays
+readable through them; `omarchy bar defaults` and the other `omarchy bar`
+layout commands rewrite it private (0600) whatever it was; and
+`omarchy-reinstall-configs` copies the shipped file over yours and makes it
+readable again, with the shipped contents, so your entry and anything on it
+are gone rather than exposed. The plugin no longer puts
 your provider URL in that file, but one can still get in: an install updated
-from 0.13.6 or earlier has one in it until the first shell start on this
-version moves it into Sources and takes it out, and you can still put one there
+from 0.13.6 or earlier has one in it until the plugin moves it into Sources and
+takes it out (at the first shell start on this version, or at a later one if
+that start cannot save the move; while Sources already holds 50 sources the
+URL is parked in `state.json`, not left on the entry, until one is removed),
+and you can still put one there
 yourself with `omarchy bar set`, which the plugin does not read and removes on
 its next write. So the plugin still takes group and other access away from that single
-file — at every shell start, and again after each of its own writes: on an
+file — at every shell start, again after each of its own writes, and, since
+this version, again after every change to the file the shell reports to it
+(whoever made it): on an
 ordinary 644 file that leaves it 600, which is what
 `chmod 600 ~/.config/omarchy/shell.json` would do. Your own access is
 not changed.
@@ -222,11 +323,21 @@ refusal is kept for the write that would. What the check cannot cover either
 way is `omarchy bar set`: that write is the shell's, not the plugin's, and it
 lands whatever the permissions are, for as long as it takes the plugin to
 notice and remove it. This is
-not a one-off repair: the file can be recreated readable again later, by
-`omarchy-refresh-config` among other things, and nothing tells a plugin when
-that happens, so the check runs at every shell start and again before each
-write. Between those moments the plugin is not watching, and a URL already in
-the file would stay readable until the next one.
+not a one-off repair: the file can be made readable again later —
+`omarchy-reinstall-configs` copies the shipped file over yours at its shipped
+permissions, and `omarchy-refresh-config` or the Omarchy upgrade create a
+missing one at your umask's — and nothing tells a plugin that it is about
+to happen, so the check runs at every shell start, again before each write,
+and again each time the shell reports a change to the file, which it does
+for its own commands' rewrites as it does for yours (this last run is
+pinned through the plugin's test harness, not yet watched on a running
+shell). Between a change and that run the plugin is not watching -- a
+helper process it starts about a fifth of a second after the report on an
+idle machine, longer under load -- and a URL already in the file would stay
+readable for that long. The check also does not
+reach the backup copies the host makes of the file (`shell.json.bak.<number>`
+and `shell.json.omarchy-upgrade-to-quattro.<suffix>.bak`, under Settings
+above): each keeps the permissions `shell.json` had when it was copied.
 
 One place they can escape that, worth knowing, and one that used to:
 
@@ -260,7 +371,7 @@ One place they can escape that, worth knowing, and one that used to:
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `playlistUrl` | string | `""` | **Not a setting any more**. Read once, at the first shell start on this version, to move a playlist an earlier version was given this way into Sources; after that a value set here adds nothing and switches nothing: it is removed from the entry on the plugin's next write, with one `Bar setting ignored` notification. Add, switch and remove playlists on the Sources screen |
+| `playlistUrl` | string | `""` | **Not a setting any more**. Read once, at the first shell start on this version, to move a playlist an earlier version was given this way into Sources (while Sources already holds 50 sources it is kept in the plugin's own `state.json`, taken off the entry, and moved in when one is removed); after that a value set here adds nothing and switches nothing: it is removed from the entry on the plugin's next write, with one `Bar setting ignored` notification. Add, switch and remove playlists on the Sources screen |
 | `epgUrl` | string | `""` | **Not a setting any more**, on the same terms as `playlistUrl`: read once, at the first start on this version, and attached to the source that becomes active then (removed, with a `Bar setting removed` notification, when there is none); ignored and removed after that. A source's guide-data URL is set in the add or edit form on the Sources screen (`a`, `e`), and cleared there |
 | `sourceKey` | string | `""` | written by the plugin, not by you: the short code naming the active source, the one that names its cache directory under `~/.cache/omarchy-iptv/sources/`. The plugin's own `state.json` is the authority; this is a mirror it falls back to only when that file names no source, and a code that names none of your sources is ignored. It is not among the plugin's declared settings, so `omarchy bar set` shows no help for it, though it writes it like any other key |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
@@ -276,7 +387,7 @@ One place they can escape that, worth knowing, and one that used to:
 | `pipSizePercent` | integer 15-60 | `30` | width of the box as a percentage of the monitor (a proportion, so it is right on a laptop and on a large screen) |
 | `pipMargin` | integer 0-200 | `16` | gap between the box and the screen edge, in pixels |
 
-**Channel logos are off by default, and turning them on tells you the cost first.** Logos are hosted by third parties named in your playlist, not by this plugin, so showing them means fetching pictures from whoever the playlist author pointed at. On the list this was measured against that was 63 different hosts, one of them covering two thirds of the channels. Nothing is contacted until you say so: press `g` on the Sources screen and the guide tells you how many hosts it would contact and which one gets the most, counted from your own cached playlist without making a single request. Turning it back off is one keypress and no dialog, and it stops a fetch already in progress -- but the pictures it already downloaded stay on disk, because a cache you might want again in a minute should not be thrown away by a toggle. When you do want the space back, `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv cache logos-clear --key <key>` deletes one source's logos and nothing else: its channel list, its guide data and the source itself are untouched. `ls ~/.cache/omarchy-iptv/sources/` names the keys. Logos are `https` only, fetched once and cached under `~/.cache/omarchy-iptv/`, never re-fetched while the file is there, and a logo request carries none of your playlist's credentials, headers or query string -- a redirect to a non-`https` host is refused rather than followed. Each logo file is capped at 256 KiB, and that cap bounds the download and nothing about what drawing the picture costs: an image decoder works from the size the file's header declares, the bytes do not have to honour it, and a logo of a few hundred bytes can claim to be 20,000 pixels square and cost the shell hundreds of megabytes to draw (a marketplace reviewer reported that against 0.13.3; the measurements are on the `dev` branch at https://github.com/rmcdavid/omarchy-iptv/tree/dev). So a logo is also refused when its header declares a side over 4096 pixels or more than 4,194,304 pixels in all, and a header that cannot be read is refused too. For a GIF the size that counts is the whole area its frames reach, because the decoder places each frame at the position the file gives it: a one-pixel frame placed thousands of pixels from the corner counts as that whole area, and a GIF that declares an empty picture area or an empty frame is refused (a marketplace reviewer reported that against 0.14.1). Those two numbers are not arbitrary: at the bound, the costliest JPEG layout allowed holds about 24 MiB of decoder coefficients, which is the order of memory a logo could already cost before any of this, and a 1920x1080 provider banner passes with room to spare. A PNG can also carry text, colour profiles and other data beside its picture, some of it compressed, and the decoder expands that whatever the file's size suggests (a marketplace reviewer reported that against 0.13.6). So a PNG logo is stored with only what drawing it needs -- its image data and its small colour and transparency settings, copied unchanged, so the picture is the same -- and the rest is dropped; a PNG whose structure cannot be read from start to end is not stored at all. JPEG, GIF and WEBP logos carry nothing the decoder expands beside their pictures and are stored as they arrive. Logos cached by an earlier version were never checked this way, so each one is checked on the next fetch and removed when it fails the same check a new download gets: its header declares a size over the bound, its header cannot be read, its bytes are not one of the four image types the plugin accepts (JPEG, PNG, GIF, WEBP), it is a PNG whose structure cannot be read or that is larger than the 256 KiB cap, or it is larger than the cap with its header past the first 128 KiB the check reads (a file no download of the plugin's own could have left there). A cached PNG that passes is rewritten in place with only what drawing it needs, under the same name. You may see a logo disappear, and it comes back only if the provider's file passes when it is fetched again. The check is a read of each cached file in the helper process (its header, and the whole file for a PNG), never a decode, and it is not limited to the first 5,000 files a run would download: every cached file for a logo named in the current playlist is checked on every fetch (a file whose address has left the playlist is neither checked nor announced, so it is never drawn; `cache logos-clear` removes it). A channel with no logo gets empty space rather than a placeholder box, and the column is not drawn at all on a list that has none. The same helper's `logos` subcommand prints that survey from the command line and makes no request. Names, groups, guide titles and every other string the plugin itself draws from a playlist or a guide feed are drawn as plain text (the strings it hands to the shell are drawn by the shell as plain text too, except the body of a failure toast, which the shell's notification card draws behind its own image-tag stripper), so a playlist cannot route around that switch by hiding a picture tag inside a channel name. One caption on the channel wall did let it through: a marketplace reviewer reported that against 0.9.2, and 0.9.3 closes it.
+**Channel logos are off by default, and turning them on tells you the cost first.** Logos are hosted by third parties named in your playlist, not by this plugin, so showing them means fetching pictures from whoever the playlist author pointed at. On the list this was measured against that was 63 different hosts, one of them covering two thirds of the channels. Nothing is contacted until you say so: press `g` on the Sources screen and the guide tells you how many hosts it would contact and which one gets the most, counted from your own cached playlist without making a single request. Turning it back off is one keypress and no dialog, and it stops a fetch already in progress -- but the pictures it already downloaded stay on disk, because a cache you might want again in a minute should not be thrown away by a toggle. The logos of a source you are not using are not kept forever: when the shell starts, and again every time you switch source, the logo folder of any saved source other than the active one is deleted once a day has passed since a fetch last ran for it (a fetch marks its folder when it starts and when it ends, so one the shell stopped early still counts; a folder a running fetch holds is left for the next time), and switching back to that source fetches its logos again. When you do want the space back, `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv cache logos-clear --key <key>` deletes one source's logos and nothing else: its channel list, its guide data and the source itself are untouched. `ls ~/.cache/omarchy-iptv/sources/` names the keys. Logos are `https` only, fetched once and cached under `~/.cache/omarchy-iptv/`, never re-fetched while the file is there, and a logo request carries none of your playlist's credentials, headers or query string -- a redirect to a non-`https` host is refused rather than followed. Each logo file is capped at 256 KiB: the download stops there, and the body of a redirect on the way is never read at all. A logo has 30 seconds in all, from opening the connection to its last byte, redirects included -- plus the system resolver's own timeout for the host-name lookup, which no deadline of the plugin's can interrupt -- and one fetch starts no new download after an hour; what it leaves is fetched the next time, because a logo already on disk is never fetched again. The cap bounds the download and nothing about what drawing the picture costs: an image decoder works from the size the file's header declares, the bytes do not have to honour it, and a logo of a few hundred bytes can claim to be 20,000 pixels square and cost the shell hundreds of megabytes to draw (a marketplace reviewer reported that against 0.13.3; the measurements are on the `dev` branch at https://github.com/rmcdavid/omarchy-iptv/tree/dev). So a logo is also refused when its header declares a side over 4096 pixels or more than 4,194,304 pixels in all, and a header that cannot be read is refused too. For a GIF the size that counts is the whole area its frames reach, because the decoder places each frame at the position the file gives it: a one-pixel frame placed thousands of pixels from the corner counts as that whole area, and a GIF that declares an empty picture area or an empty frame is refused (a marketplace reviewer reported that against 0.14.1). Those two numbers are not arbitrary: at the bound, the costliest JPEG layout allowed holds about 24 MiB of decoder coefficients, which is the order of memory a logo could already cost before any of this, and a 1920x1080 provider banner passes with room to spare. A PNG can also carry text, colour profiles and other data beside its picture, some of it compressed, and the decoder expands that whatever the file's size suggests (a marketplace reviewer reported that against 0.13.6). So a PNG logo is stored with only what drawing it needs -- its image data and its small colour and transparency settings, copied unchanged, so the picture is the same -- and the rest is dropped; a PNG whose structure cannot be read from start to end is not stored at all. JPEG, GIF and WEBP logos carry nothing the decoder expands beside their pictures and are stored as they arrive. Logos cached by an earlier version were never checked this way, so each one is checked on the next fetch and removed when it fails the same check a new download gets: its header declares a size over the bound, its header cannot be read, its bytes are not one of the four image types the plugin accepts (JPEG, PNG, GIF, WEBP), it is a PNG whose structure cannot be read or that is larger than the 256 KiB cap, or it is larger than the cap with its header past the first 128 KiB the check reads (a file no download of the plugin's own could have left there). A cached PNG that passes is rewritten in place with only what drawing it needs, under the same name. You may see a logo disappear, and it comes back only if the provider's file passes when it is fetched again. The check is a read of each cached file in the helper process (its header, and the whole file for a PNG), never a decode, and it covers every cached file for a logo named in the current playlist on every fetch (a file whose address has left the playlist is neither checked nor announced, so it is never drawn; `cache logos-clear` removes it). One source keeps at most 5,000 logo files, so at most about 1.3 GB at the 256 KiB cap: a fetch counts what is already there, and at that ceiling it first deletes the logo files no channel of your current playlist names any more (they are fetched again if a channel names them later). If the folder is still full it stops and fetches the rest only after `cache logos-clear` makes room. Only one fetch runs for a source at a time; a second one started meanwhile (from a terminal, say, or by a shell that restarted while the first was still running) downloads nothing and changes nothing on disk, but it does report the logos already there that pass the check, so a restarted shell draws them rather than blank rows until the first fetch ends. A logo address that failed is not tried again within the same fetch; the next fetch tries it again. A fetch that stopped at the ceiling or at its one-hour limit, or that found another fetch running, writes one line in the shell's journal saying so and how many logos it left, with no address in it. A folder an earlier version filled past 5,000 is not added to. The ceiling is per source, and every source you keep in the Sources list has its own; together the folders hold, at any moment, at most 1.3 GB for the active source plus 1.3 GB for each other source you had logos on for within the past day, because the shell deletes the rest when it starts and whenever you switch source (above). A channel with no logo gets empty space rather than a placeholder box, and the column is not drawn at all on a list that has none. The same helper's `logos` subcommand prints that survey from the command line and makes no request. Names, groups, guide titles and every other string the plugin itself draws from a playlist or a guide feed are drawn as plain text (the strings it hands to the shell are drawn by the shell as plain text too, except the body of a failure toast, which the shell's notification card draws behind its own image-tag stripper), so a playlist cannot route around that switch by hiding a picture tag inside a channel name. One caption on the channel wall did let it through: a marketplace reviewer reported that against 0.9.2, and 0.9.3 closes it.
 
 One warning about `mpvArgs`. Options are filtered, and the ones the plugin
 needs for itself are refused, but a few legitimate options change where your
@@ -545,7 +656,8 @@ unaffected, and pasting carries any character.
 The Sources screen is the only place a source is added, switched, edited or
 removed. `omarchy bar set ... playlistUrl` and `... epgUrl` no longer reach
 it: a playlist an earlier version was given that way is moved into this list
-once, at the first shell start on this version, and after that a value set
+once, at the first shell start on this version (or, if this list already
+holds 50 sources then, when one is removed), and after that a value set
 that way is removed from the shell's settings file with a `Bar setting
 ignored` notification and changes nothing here (Settings above has the
 detail). A guide-data URL belongs to its source: set it in the add form, or
@@ -554,7 +666,12 @@ the source has none, that one is used and the Sources screen says so.
 Channels are matched to the guide by id and, when the ids do not agree, by
 name -- which is usually what happens, because playlists and guides rarely
 come from the same place. Up to 50 sources are kept, and this list is the
-only copy of them.
+only copy of them. Nothing ever removes a source to make room: at 50, `a`,
+`c` and the Add rows say `Sources is full (50) · remove one first` instead
+of opening a form; a playlist that another program adds while yours is
+being checked can take the last place, and yours is then refused the same
+way when its check ends (Troubleshooting); and a playlist an earlier
+version kept on the bar waits there until there is room (Settings above).
 
 One caveat if you keep **two lists from the same provider** — a full one and a
 filtered one, say. Favourites are shared across sources on purpose, and a
@@ -649,15 +766,33 @@ carry channel ids — most do — are not affected at all.
   most 20 per-channel warnings, then a count of the rest. The footer's
   `Playlist warning:` shows the first of them and how many more; the whole
   list is in the status file and the `status` output named above.
+- Guide data is held to the same limits. A channel name in the guide is
+  cut at 512 characters before it is matched. Guide data read while the
+  source has no channel list yet (the first load, before the playlist has
+  arrived) keeps the first 50,000 distinct channel ids its programmes
+  name, in the order the programmes appear (a channel declared but given
+  no programme takes no place), and leaves out a channel whose id is over
+  256 characters, which no playlist `tvg-id` can match. The programmes
+  left out either way are counted in a `Guide data warning:` line. Once
+  the channel list is there, the next guide refresh matches the guide
+  against it and these two limits no longer apply.
 - Reading a playlist or guide data runs in a background helper that is
   allowed 512 MiB of memory. One that would need more stops there and shows
   `Source too large`, and the channels or guide data you already had stay.
   A 50,000-channel playlist needs about 110 MiB (up to about 230 MiB with
   an emoji in every name), so only a hostile or
   broken source should meet this.
-- Downloads (playlist and EPG) must finish within 60 seconds; redirects to
-  anything but http(s) are refused and credentials are dropped when a
-  redirect changes host.
+- A download (the playlist, guide data, or the check of a new source) has
+  60 seconds in all, from opening the connection to the last byte,
+  redirects included, and shows `Timed out` when it takes longer; the one
+  step that cannot be cut short is the system's own lookup of the host's
+  name, which ends on the system resolver's timeout. The body of a redirect
+  is never read, redirects to anything but http(s) are refused, and
+  credentials are dropped when a redirect changes host. When the server's
+  answer is not HTTP at all, the error shows at most 200 characters of it.
+- A file the plugin was writing when it was stopped (a timeout, a source
+  switch) can leave a `.tmp-` file beside it in the cache; one more than a
+  day old is deleted the next time the plugin writes in that folder.
 - A guide-data file that defines XML entities of its own (an `<!ENTITY ...>`
   declaration inside its `<!DOCTYPE ...>`) is refused with `refused the EPG:
   it declares an XML entity, which XMLTV feeds never do`. A size limit on
@@ -695,8 +830,10 @@ itself unavailable rather than half working.
   first start.
 - `~/.local/state/omarchy-iptv/state.json` : favorites, recents, last
   played, your saved searches, the groups you have hidden, the player
-  session record, which source is active, and the Sources history including
-  their URLs (mode 0600; a file you put there yourself -- a `mv` of an
+  session record, which source is active, the Sources history including
+  their URLs, and -- while a playlist from the bar waits for a free place in
+  Sources (Settings above) -- that playlist and its guide-data URL (mode
+  0600; a file you put there yourself -- a `mv` of an
   edited copy, or `rm` and `cp` -- keeps the mode it came with, 0644 say,
   through the plugin's saves until the next shell start makes it 0600).
   **This is the only copy of your source list and of
@@ -717,22 +854,22 @@ itself unavailable rather than half working.
   plugin takes for the file it last knew). It may be a symbolic link to a
   regular file kept elsewhere, a dotfiles folder say: the plugin and its
   helper write through the link and leave it in place, and a link that
-  leads nowhere is refused rather than replaced (except in the three narrow
+  leads nowhere is refused rather than replaced (except in the two narrow
   windows Troubleshooting names, where a save can create the file it points
   to). A tool that REPLACES the
   link, or puts a file over it, while the shell is running is not noticed
   at once; the plugin reads the file again before each save it makes, so it
   notices at its next save and keeps both that change and its own, unless
   the two land in the same instant or that save cannot read the file back
-  within 2 seconds (Troubleshooting says what is noticed,
-  when, and what to do). The folder
+  within 2 seconds (Troubleshooting says what is noticed, when, and what
+  to do). The folder
   `~/.local/state/omarchy-iptv` may be a symbolic link too: the plugin
   follows it and makes the folder it leads to private (0700), as it does
   its own, and a folder link that leads nowhere is refused the same way.
   Pointed somewhere else while the shell runs, it is noticed the same way,
   at the next save; pointed at an empty folder, it makes the plugin stop
-  saving rather than start a new `state.json` there -- outside three
-  narrow windows, which Troubleshooting's bullet on links names.
+  saving rather than start a new `state.json` there -- outside two narrow
+  windows, which Troubleshooting's bullet on links names.
   Channels that failed to play are
   **not** kept here: they belong to the source that carried them, and live in
   that source's cache directory below
@@ -765,8 +902,10 @@ One file in this list is not the plugin's:
   read it. Your playlist and guide-data URLs are no longer stored there (the
   entry carries a short code for the active source instead), so that
   permission change is now a guard for a URL arriving by another route — an
-  install updated from an older version until its first start moves the URL
-  into Sources, or your own `omarchy bar set`, which the plugin removes on its
+  install updated from an older version until the plugin moves the URL into
+  Sources (at its first start, at a later one if that start cannot save the
+  move, or, while Sources already holds 50 sources, only once one is
+  removed), or your own `omarchy bar set`, which the plugin removes on its
   next write — rather than for the plugin's own writing. Not the contents beyond its own entry,
   and not the directories around it. See Settings above for what happens when
   that cannot be done.
@@ -791,15 +930,28 @@ Nothing inside the plugin directory is written at runtime.
   once at every shell start while the value is there; and if the URL carried
   a password, remove the command from your shell history too (Settings
   above).
-- A notification titled **Bar setting removed**: seen at most once, at the
-  first start after updating, when the configuration an earlier version kept
+- A notification titled **Bar setting removed**: seen once, at the first
+  start after updating (twice in the one case at the end of this item),
+  when the configuration an earlier version kept
   on the widget's entry could not be moved into Sources whole. `epgUrl was
   removed from the bar settings: no source was set up for it to guide` means
   you had a guide-data URL set but no playlist active, so there was nothing
   to attach it to; add the source with its EPG URL in Sources. `... was not a
   usable URL and was removed` means the old value was not one the plugin
   accepts (a typo, a scheme it does not take); add the source again in
-  Sources.
+  Sources. When that was the playlist and a guide-data URL was set beside
+  it, the one notification says so -- `playlistUrl in the bar settings was
+  not a usable URL and was removed, with the epgUrl beside it. Add or edit
+  sources in the guide's Sources screen.` -- and the guide-data URL is
+  removed with the playlist, attached to none of your sources. If the
+  guide-data URL was set only after that playlist had been reported, and
+  before the plugin has recorded the one-time move into Sources (the first
+  moments after the shell starts; for the whole session if that write
+  fails), it gets the second notification, from
+  its own side: `epgUrl in the bar settings came with a playlistUrl that
+  was not a usable URL, and was removed with it. Add or edit sources in the
+  guide's Sources screen.` Once the move is recorded, a guide-data URL set
+  on the bar gets **Bar setting ignored**, as above.
 - **Plugin files damaged (05-ipc-logos.py) · reinstall the plugin** (any
   part name): the helper is `bin/omarchy-iptv` and the eleven files under
   `bin/helper/` beside it, and it checks all of them before it does
@@ -826,17 +978,26 @@ Nothing inside the plugin directory is written at runtime.
   lost and you do not need your URL again: on the form the guide shows you,
   follow the `Saved sources` link and pick the source. Settings above has the
   detail, including what happens when you update again.
-- A notification titled **Saved sources not loaded** (for example
+- A notification titled **Saved sources not loaded** when it happens as
+  the shell starts, or **Saving has stopped** when it begins while the shell
+  is running and your sources are already listed (for example
   `/home/you/.local/state/omarchy-iptv/state.json is not a valid state file.
-  Nothing is saved until it can be read, so sources, favorites and settings
-  changed now are not kept. ...`), and the guide showing that same title and
+  Sources, favorites and settings changed now are not kept. ...` at a start,
+  and `... is not a valid state file. Favorites and other changes made now
+  are held in this session only: the next such change made here saves them
+  if it finds the file again, but they are dropped if the file comes back by
+  itself first, if a source change is what finds it, or if the shell is
+  stopped. ...` while it runs; the shell's journal gets the title and the
+  same sentence), and the guide showing that same title and
   sentence where it would otherwise show its setup form: the file that holds
   your sources is there but could not be read -- its permissions, something
   other than a file at that path, a symbolic link that leads nowhere (at the
   file, or at its folder), a file where its folder should be, or contents
   that are not a state file -- or
   the plugin's start-up check of it did not answer within 15 seconds and was
-  stopped. The plugin has not changed the file and will write nothing to
+  stopped. (A read of the file before a save that simply does not answer
+  is not this case: after 2 seconds the save goes ahead without it, as
+  the bullet on `state.json` as a symbolic link says.) The plugin has not changed the file and will write nothing to
   it until it can be read again, because it may be the only copy of your sources and
   provider URLs; earlier versions read such a file as empty and saved an
   empty one over it. Adding, editing, switching or removing a source, and
@@ -849,15 +1010,19 @@ Nothing inside the plugin directory is written at runtime.
   first -- a good copy put back in place, a `chmod 600`, or the re-read your
   first source change makes -- it takes the file as it is and drops the
   change made meanwhile. At a start it is not kept. The Sources screen (`o`)
-  shows the same title where it would count your sources -- or, when this
-  started while the shell was already running and your sources are still
-  listed, `Saving has stopped` -- offers no `Add source` or `Add Xtream
-  login` rows, and `a` or `c` answers with that refusal instead of opening
+  shows the notification's title where it would count your sources, offers
+  no `Add source` or `Add Xtream login` rows, and `a` or `c` answers with that refusal instead of opening
   a form. The notification's last sentence says what to do for the case you
   hit: `chmod 600` on the file, `chmod 700` on its folder, move whatever is
-  at the path aside, restore the file or the folder a symbolic link points
-  to, make sure a regular file or nothing is there, or restore the file
-  from a backup -- then `omarchy restart shell`. When `state.json` is a
+  at the path aside, point a symbolic link back at the file or folder that
+  holds your state, make sure a regular file or nothing is there, restore
+  the file from a backup, or check the file and its folder -- then
+  `omarchy restart shell`. When a file or folder has gone missing while the
+  shell runs, it names the link case first (`If it is a symbolic link,
+  point it back at the folder or file that holds your state; otherwise make
+  the folder readable with chmod 700.`), because a restart with a link
+  still on an empty folder starts there with no sources, like a fresh
+  install. When `state.json` is a
   regular file and only its contents or its permissions were wrong,
   putting a good copy back in place (or the `chmod 600`) is enough on its
   own: the plugin notices and carries on with your sources. Whatever the
@@ -911,23 +1076,34 @@ Nothing inside the plugin directory is written at runtime.
   saves to from then on, with the change that made the save added; the
   file the link used to lead to is left as it was. If the link now leads
   to a file that does not exist, nothing is created there, outside the
-  three narrow windows below: the plugin stops saving and says so (the
-  **Saved sources not loaded** bullet above).
+  two narrow windows below: the plugin stops saving and says so (**Saving
+  has stopped**; the **Saved sources not loaded** bullet above).
   Until that next save the guide shows what it had and writes nothing, so
   nothing is lost; run `omarchy restart shell` to see the change straight
-  away. Three narrow exceptions, each a window of milliseconds unless the
-  disk stalls: a save asked for while the plugin's previous save is still
-  being written does not read the file first (the file reader would drop
-  the read then); a re-point that lands between the read and the write it
-  allows is not seen by that write; and if the read has not answered
-  within 2 seconds the save goes ahead without it and the journal says
-  `state.json was not read back within ... ms of a save; saving without
-  the read`. In each of them a replacement is written over as before, and
-  a link re-pointed at a file that does not exist, or a folder link at a
-  folder with no `state.json`, gets a new one created there, holding your
-  sources and provider URLs, at 0644 under the usual umask 022 -- so after
-  re-pointing a link, check the new place with `ls -l` and `chmod 600` a
-  `state.json` you did not expect. (Up to and including 0.14.1 that next
+  away. Two narrow exceptions: a re-point that lands between the plugin's
+  read of the file and the write that read allows is not seen by that
+  write (a window of milliseconds); and if the read has not answered
+  within 2 seconds -- a disk or network mount that has stalled, say -- the
+  save goes ahead without it and the journal says `state.json was not read
+  back within ... ms of a save; saving without the read`. In each of them
+  a replacement is written over as before, and a link re-pointed at a file
+  that does not exist, or a folder link at a folder with no `state.json`,
+  gets a new one created there, holding your sources and provider URLs, at
+  0644 under the usual umask 022 -- so after re-pointing a link, check the
+  new place with `ls -l` and `chmod 600` a `state.json` you did not expect.
+  Up to and including 0.14.3 there was a third such window: a save asked
+  for while the plugin's previous save was still being written did not
+  read the file first. Now it waits for that write to land and then reads
+  the file; it is never held longer than 4 seconds, because a write not
+  reported within 2 seconds sends the save to its read anyway, and that
+  read has the same 2-second bound. (Builds of this change that
+  never shipped tried to hold the change past the read's 2 seconds instead
+  of saving without the read; each way of holding it lost a change in a
+  new way -- on a file whose reads were stalled, the late answer was the
+  file as it had been, and the save then wrote over another program's
+  change -- so that was withdrawn, and a read that does not answer is the
+  second of the two windows above, as it was in 0.14.2.) (Up to and
+  including 0.14.1 that next
   save wrote what the
   shell held over the change instead -- into the new file, after `ln
   -sfn` -- and a link pointed at a file that did not exist yet got a new
@@ -938,12 +1114,13 @@ Nothing inside the plugin directory is written at runtime.
   leads nowhere (its target moved, or sits on a drive not mounted yet) or to
   something that is not a file, the plugin writes nothing and says `... is
   a symbolic link whose target is missing or is not a regular file ...
-  Restore the file it points to, or move the link aside`; every `state`
+  Point it back at the file that holds your state, or move the link
+  aside`; every `state`
   command but `state init` refuses it (exit 1), `state init` answers
   `found: link` (exit 0), and none of them touches the link. A link that breaks
   while the shell is running is reported as `could not be found, or its
-  folder could not be read`, with advice for both causes, because the
-  plugin cannot tell them apart then; putting the target back is noticed
+  folder could not be read`, with advice for both causes, the link first,
+  because the plugin cannot tell them apart then; putting the target back is noticed
   at the next save or source change, as the **Saved sources not loaded**
   bullet says (the first source change after it is refused once more,
   the next goes through), and `omarchy restart shell` works too. If the link leads into a
@@ -958,8 +1135,9 @@ Nothing inside the plugin directory is written at runtime.
   kept, wherever you put it. If the folder link leads nowhere, or to
   something that is not a folder (or a folder above it does), the plugin
   writes nothing and says `... is a symbolic link whose target is missing
-  or is not a folder (or a folder above it is). ... Restore the folder it
-  points to, or move the link aside, then run omarchy restart shell.`,
+  or is not a folder (or a folder above it is). ... Point it back at the
+  folder that holds your state, or move the link aside, then run omarchy
+  restart shell.`,
   naming the folder; every `state` command but `state init` refuses it
   (exit 1, `the state folder is a symbolic link whose target is missing or
   is not a folder; nothing was written`), `state init` answers `found:
@@ -968,14 +1146,15 @@ Nothing inside the plugin directory is written at runtime.
   2026-10-14). Re-pointing the folder link itself while the shell runs is
   not noticed at once; it is noticed at the next save, which reads the
   `state.json` the link now leads to. If there is one, it is kept (outside
-  the three windows above), the change that made the save is added to it, and that is what the guide
+  the two windows above), the change that made the save is added to it, and that is what the guide
   shows and saves to from then on; the folder the link used to lead to is
   left as it was. The file keeps the permissions it has until the next
   shell start makes the folder 0700 and the file 0600. If the new folder
   holds no `state.json` (an empty folder, say), nothing is created there,
-  outside the three windows the bullet above names: the plugin stops
-  saving, and says so once (**Saved sources not loaded**, `... could not
-  be found, or its folder could not be read ...`). The change you just
+  outside the two windows the bullet above names: the plugin stops saving, and
+  says so once (**Saving has stopped**, `... could not be found, or its
+  folder could not be read. ... If it is a symbolic link, point it back at
+  the folder or file that holds your state; otherwise ...`). The change you just
   made still shows, and its source change answered as done, but it is not
   saved while the link points there, and the next source change is
   refused with `state.json could not be read · nothing is saved until it
@@ -1029,10 +1208,14 @@ Nothing inside the plugin directory is written at runtime.
   is not kept: a notification titled **Not every change was kept** says how
   many and which limit (never a name or a URL), and the journal gets one
   line for each, naming a source by its short code; make room and add it
-  again. Not covered yet: a source added in the guide while its URL is
-  still being checked, when another program adds the 50th source in that
-  moment -- the guide's source is then kept for the session but dropped,
-  without a word, at the next shell start. One case where a backup put
+  again. A source added in the guide while its URL is still being checked,
+  when another program adds the 50th source in that moment, is refused
+  when the check ends: nothing is added, the form stays open with what you
+  typed and says `Sources is full (50) · remove one first`, and the
+  journal says `the new source was not
+  added: Sources is full (50)`. Up to and including 0.14.3 the guide kept
+  it for the session and the next shell start dropped it without a word.
+  One case where a backup put
   back has no effect: while a save of the plugin's has failed or is still
   under way, a backup identical to the file as the plugin last knew it is
   taken for nothing having happened, and the change made in the guide is
@@ -1050,7 +1233,18 @@ Nothing inside the plugin directory is written at runtime.
   one of the plugin's own saves -- a hand edit, a helper `state` command,
   a backup put back -- can be lost: the plugin's save lands over it, and
   the shell's file reader does not re-read the file while that save is
-  being written (measured), so the plugin never sees it. Nothing in the
+  being written (measured), so the plugin never sees it. The same can
+  happen to a change written while the plugin's read of the file before a
+  save has gone unanswered: after 2 seconds that save goes ahead without
+  the read (the bullet on links). What decides it is when the other
+  program writes, not which program it is: a change another program wrote
+  within those 2 seconds, or before a later save of the plugin's while the
+  reads were still held up, was lost -- a favourite added by replacing the
+  file (measured live, with a `state.json` whose reads were held up on
+  purpose) and a source added with the helper's `state source add` (shown
+  through the service's own code in the test harness) alike -- and one
+  written after that save, with no later save before the reads came back,
+  was kept. Nothing in the
   plugin can lock the file against another program. Edit the file by hand
   with the shell stopped, keep a copy first (it holds your provider URLs),
   then `omarchy restart shell`.
@@ -1095,6 +1289,21 @@ Nothing inside the plugin directory is written at runtime.
   regular file, `chmod 600 ~/.config/omarchy/shell.json` and add the source
   again. If it belongs to another account or is a symlink, the plugin refuses
   to change it rather than guess, and that is yours to sort out.
+- Backup copies of `shell.json` beside it: `omarchy refresh shell` and
+  `omarchy-refresh-config omarchy/shell.json` leave the old file as
+  `shell.json.bak.<number>` (unless it already equalled the shipped file,
+  in which case that copy is removed again at once), and the Omarchy 4
+  upgrade as
+  `shell.json.omarchy-upgrade-to-quattro.<suffix>.bak`. Each holds the
+  plugin's settings as they were, a playlist URL included if one was on the
+  entry then, with the permissions `shell.json` had at the time, never wider
+  (a 0600 file gives a 0600 copy, a 0644 one a 0644 copy under the usual
+  umask 022); the plugin's permission check
+  never touches them. `ls -l ~/.config/omarchy/shell.json*` to see them, then
+  `chmod 600 ~/.config/omarchy/shell.json.bak.*` (and the upgrade's `*.bak`)
+  or remove the ones you do not need. The permission check reaches
+  `shell.json` alone, on purpose: a check that walked its neighbours would be
+  changing files the plugin has no business in.
 - The guide's status line shows the helper's own error text (host name only,
   never the URL). To see the same JSON in a terminal, for a free list:
   `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv playlist --url <url>`.

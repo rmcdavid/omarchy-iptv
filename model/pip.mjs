@@ -9,12 +9,6 @@ import {
   settingOf, clampSetting
 } from "./settings.mjs"
 import {
-  buildMpvArgv
-} from "./mpv.mjs"
-import {
-  footerHints
-} from "./view.mjs"
-import {
   PAUSE_KEY, TRACKS_KEY, DETAIL_KEY, REWIND_KEY, FORWARD_KEY, LIVE_KEY,
   HELP_KEY, SOURCE_KEYS
 } from "./sources.mjs"
@@ -212,13 +206,13 @@ function focusPlayerArgv(address) {
 // so this reads the reply as a keyword, never as text to show anyone. It is
 // a cheap first filter only - pipVerify is the definition of success.
 function pipDispatchAccepted(stdout) {
-  return str(stdout).replace(/^\s+|\s+$/g, "") === "ok"
+  return str(stdout).trim() === "ok"
 }
 
 // ---- settings (section 6)
 
 function pipCornerOf(value) {
-  var v = str(value).toLowerCase().replace(/^\s+|\s+$/g, "")
+  var v = str(value).toLowerCase().trim()
   return pipAllows(PIP_CORNERS, v) ? v : PIP_CORNERS[0]
 }
 
@@ -656,7 +650,7 @@ function pipRestoreAutoResize(mpvArgs) {
 // carries `error`. Never throws. Routing a reply to the request that asked
 // for it is the caller's job - this only says what the line is.
 function parsePlayerReply(line) {
-  var text = str(line).replace(/^\s+|\s+$/g, "")
+  var text = str(line).trim()
   if (text === "") return null
   var obj
   try { obj = JSON.parse(text) } catch (error) { return null }

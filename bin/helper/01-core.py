@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import array
 import bisect
 import codecs
 import errno
@@ -249,6 +250,38 @@ EPG_REFETCH_MARGIN = 2 * 3600     # re-download when the window ends sooner than
 EPG_VALID_MAX = 300               # epg-now.json is never declared valid longer than this
 EPG_MAX_TITLE = 200
 EPG_MAX_PER_CHANNEL = 400
+# D-EPG-7: the time memo's bounds (parse_xmltv_time). A well-formed XMLTV
+# time is at most 20 characters ("YYYYMMDDHHMMSS +HHMM"); 64 leaves room for
+# padding whitespace and refuses only junk. The memo keeps an ASCII key only
+# (the round-1 recheck of lane-bounds-l, P3 (d)): the first version said
+# "about 3 MiB, whatever the feed" while a 64-character key of astral
+# characters is a 316-byte str, which put the worst case near 6 MiB. A
+# non-ASCII value is still parsed (`\d` reads any decimal digit); it is only
+# not remembered, and a memo changes no answer. At the cap the memo holds
+# 16,384 ASCII keys of at most 64 characters: 16,384 x (105 bytes, what
+# sys.getsizeof gives a 64-character ASCII str on CPython 3.14 + 32 for the
+# epoch int + about 40 of dict table) = 2.9 MB, about 2.8 MiB, whatever the
+# feed.
+EPG_TIME_CACHE_MAX = 16384
+EPG_TIME_CACHE_KEY_MAX = 64
+# D-EPG-8 (R30g): a guide <display-name> is folded (_CONTROL_WS) and cut to
+# this many code points before either name key is made, the playlist's own
+# cap on a channel name, so a name key costs at most what a playlist name
+# can. A longer name could never equal a playlist name anyway. Since
+# D-EPG-12 (R32d) the fold is epg_name_text, inside the key functions, so
+# the playlist side takes the same one.
+EPG_MAX_DISPLAY_NAME = M3U_MAX_NAME
+# D-EPG-10 (R30d): WITHOUT a playlist index (no readable channels.json when
+# the guide is fetched) the parse keeps every guide channel under its own
+# id, and what it keeps -- the claim, the programme list, the id itself,
+# and the epg-now.json entry the shell holds -- was bounded only by the
+# input. It now admits at most MAX_CHANNELS distinct guide channels, the
+# playlist's own cap (the shell can show no more rows than that), and an
+# id longer than M3U_MAX_TVG_ID, which no playlist tvg-id can equal, is
+# not admitted at all (rule 15: the entry's KEY was the other unbounded
+# term). Programmes refused either way are counted, never dropped in
+# silence. With an index neither applies: every key is a playlist tvg-id.
+EPG_MAX_GUIDE_ID = M3U_MAX_TVG_ID
 EPG_DEFAULT_DURATION = 3600       # for a programme without a stop and no successor
 # M4-02 detail caps, in code points, applied when the whitespace is folded
 # and again after the URLs are redacted (see clean_detail). A longer value is
@@ -504,23 +537,93 @@ _SAFE_OPTION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]*$")   # never option-loo
 # decomposed Latin accent. Marks on other scripts stay (Cyrillic breve in
 # "\u0439" must not fold to "\u0438").
 _LATIN_MARKS = re.compile("([a-z])[\u0300-\u036f]+")
+# TWO whitespace classes for two purposes, and the difference is the rule
+# (R32a''', 2026-10-22, D-SINK-36; R32a'' before it, D-SINK-32, D-SINK-33):
+#
+#   A URL READER REFUSES THE UNION. validate_source_url (and
+#   Model.validateSourceUrl over URL_SPACE_CODES) refuses a typed or stored
+#   URL holding ANY member of URL_SPACE_CHARS, the union of JS `\s`, Python
+#   `\s` and U+FEFF, so that no engine's own notion of whitespace is ever
+#   consulted and a URL one mirror accepts is never one the other splits.
+#
+#   A FREE-TEXT REDACTOR DELIMITS AT ASCII. redact_urls ends a URL run
+#   (_URL_TAIL_RE), and run_host_parts ends its authority (_URL_DELIMITER),
+#   at URL_DELIMITER_CHARS ONLY: space, tab, LF, CR, FF, VT -- six code
+#   points, Model.URL_DELIMITER_CODES the same six. Every other whitespace
+#   or control code point is URL TEXT: a password holding U+FEFF, NBSP,
+#   U+2028, U+0085 or an information separator stays inside the run, its
+#   authority ends at the `@`, and the HOST prints. Under R32a'' both
+#   redactors ended the run at the union, and each mirror took the other's
+#   worse case: this helper printed `http://myuser<U+FEFF>ss@prov.test/live/1.ts`
+#   -- the username and the tail -- where 0.14.3 printed the host
+#   (D-SINK-36). A redactor's job is that nothing of a credential survives;
+#   the wider the class that ends the run, the more of a password it copies
+#   through. The accepted cost (D-SINK-34) is now confined to the six
+#   delimiters: a SPACE or a TAB inside a password still splits the run,
+#   and the shared fixture pins that output for each of the six and the
+#   HOST for every other member.
+#
+# Both lists are pinned code point by code point over the whole Unicode
+# range by the shared url-whitespace fixture (dev branch) in both suites.
+# The union, every member listed, none a regex metacharacter inside a class:
+#   U+0009 tab, U+000A LF, U+000B VT, U+000C FF, U+000D CR,
+#   U+001C U+001D U+001E U+001F (the information separators: Python's `\s`,
+#     not JS's),
+#   U+0020 space, U+0085 NEL (Python's, not JS's), U+00A0 NBSP,
+#   U+1680 ogham space, U+2000..U+200A (en quad .. hair space),
+#   U+2028 line separator, U+2029 paragraph separator,
+#   U+202F narrow NBSP, U+205F medium mathematical space,
+#   U+3000 ideographic space, U+FEFF (JS's `\s`, not Python's).
+# `'`, `"`, `<` and `>` are in neither: a password may hold them, so they
+# are trailing punctuation (_TRAILING_PUNCTUATION), stripped off the run's
+# end and put back.
+URL_SPACE_CHARS = ("\t\n\x0b\x0c\r\x1c\x1d\x1e\x1f \x85\xa0\u1680"
+                   "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+                   "\u2028\u2029\u202f\u205f\u3000\ufeff")
+# The reader's class: what validate_source_url refuses.
+_URL_SPACE = re.compile("[" + URL_SPACE_CHARS + "]")
+# The redactor's class (R32a'''): the six ASCII delimiters, and nothing
+# else, end a free-text URL run and its authority.
+URL_DELIMITER_CHARS = "\t\n\x0b\x0c\r "
+_URL_DELIMITER = re.compile("[" + URL_DELIMITER_CHARS + "]")
 # redact_urls' pieces (F-SINK-11). It used to be one pattern,
 # `\b([A-Za-z][A-Za-z0-9+.\-]*)://[^\s'\"<>]+`, whose scheme run the engine
 # re-read from every word boundary; the scan is anchored on "://" now and these
-# are the parts of that pattern it still needs. The tail is unchanged. `\w` is
+# are the parts of that pattern it still needs. The tail ends at the six
+# delimiters alone (R32a'''; it was that pattern's `[^\s'"<>]+` until
+# 2026-10-22, and the 30-point union for one round after that). `\w` is
 # asked rather than guessed, so the word-boundary rule stays Python's own
 # outside ASCII.
-_URL_TAIL_RE = re.compile(r"[^\s'\"<>]+")
+_URL_TAIL_RE = re.compile("[^" + URL_DELIMITER_CHARS + "]+")
+# The sentence punctuation redact_urls strips off a run's end and puts back
+# after the host; Model.trailingPunctuationLength has the same set. A `]` is
+# kept when the run holds a `[` (an IPv6 literal).
+_TRAILING_PUNCTUATION = ".,;:!?)]'\"<>"
 _WORD_CHAR_RE = re.compile(r"\w")
-# The scheme-legal run that ENDS at a given position: `search(s, lo, j)` leaves
-# `$`/`\Z` at `j`, so the leftmost match starts the maximal run reaching `j`.
-# One native search rather than a python character loop walking back over the
-# same set -- the loop was correct and measurably slower, 168.5 ms against
-# 1 MiB of letters followed by a URL where this is 54.4 ms (3.810 ms against
-# 40,000 where this is 0.363), and the whole point of F-SINK-11 is that the
-# size is the provider's to choose. Both are linear; this one has the smaller
-# constant and neither copies a slice.
-_SCHEME_RUN_RE = re.compile(r"[A-Za-z0-9+.\-]*\Z")
+# The scheme-legal run that ENDS at a given position. D-PERF-6 (R32e): it
+# was `[A-Za-z0-9+.\-]*\Z` under search(s, lo, j), which has NO literal
+# prefix, so the engine tried every start in the window and a failed start
+# cost the distance to the next non-scheme character: about K*K/2 steps on
+# `'a'*K + '!' + 'a'*K + '://x'`, reached on uncapped text (track titles,
+# main()'s message and traceback, a fetch error's status line). Now one
+# anchored match on [lo, j): `.*` under DOTALL runs to j and backs off to the
+# LAST non-scheme character, so the match's end is the run's start, or lo
+# when the window is all scheme characters -- the same b, found in one pass
+# over the window. A python character loop walking back was measured slower
+# (168.5 ms against 54.4 at 1 MiB, F-SINK-11), which is why this stays a
+# native match rather than a loop. Equal output on the shared fixture and on
+# the generated corpus (the redaction-cost suite on the dev branch); the
+# bound is arithmetic, UNVERIFIED by run under the round's input rule.
+_SCHEME_RUN_RE = re.compile(r"(?:.*[^A-Za-z0-9+.\-])?", re.S)
+# run_host_parts' host end inside the authority (which _AUTHORITY_END has
+# already cut at `/`, `?` or `#`): the port's `:` and the parameter
+# delimiters `;`, `=`, `&`, so a neighbouring parameter never prints (R32a').
+_RUN_HOST_END = re.compile(r"[:;=&]")
+# ... and where the port after that `:` ends (R32a'', the non-numeric-port arm).
+_PORT_END = re.compile(r"[;=&]")
+# The token a free-text redactor prints in place of a withheld host (R32a').
+# Model.HOST_WITHHELD owns it; the shared redaction fixture holds both to it.
+HOST_WITHHELD = "[host withheld]"
 _LEADING_DASHES = re.compile(r"^[\s\-]+")
 # make_channel's last-resort display name, and the pattern that recognises one
 # after normalize_text. Built from the same constant so the two cannot drift:
@@ -540,8 +643,19 @@ _AUTHORITY_END = re.compile(r"[/?#]")
 _BARE_HOST_CHARS = re.compile(r"[:\[\]]")
 _ASCII_DIGITS = re.compile(r"^[0-9]+$")
 _ZERO_WIDTH = re.compile("[\u200b-\u200d\u2060\ufeff]")
-_IPV6_LITERAL = re.compile(r"^\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(?:%25[A-Za-z0-9._~\-]+)?\]$")
-_URL_SPACE = re.compile("[\\s\ufeff]")          # JS \s includes U+FEFF, Python's does not
+# R30g, rule 15 over D-EPG-8: this was `^\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*...`,
+# two adjacent runs over the SAME class (the colon between them is in it), so
+# a literal that failed after the second run was retried at every split
+# point, k*k steps for k characters. It reads user text only (a source URL,
+# already capped at MAX_SOURCE_URL), but a quadratic pattern is the shape
+# R30g refuses wherever it stands. Same language: "a run over [hex:.]
+# holding at least one colon" is "a run whose first character outside
+# [hex.] is a colon", which a lookahead over the class WITHOUT the colon
+# asks in one pass; the single run that follows ends where the class does,
+# so nothing after it can make it back off more than once a character.
+# Held equal to the old pattern by an equivalence test (the parse-bounds
+# suite, dev branch).
+_IPV6_LITERAL = re.compile(r"^\[(?=[0-9A-Fa-f.]*:)[0-9A-Fa-f:.]*(?:%25[A-Za-z0-9._~\-]+)?\]$")
 _BAD_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _XMLTV_TIME = re.compile(r"^(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?\s*(?:([+-])(\d{2})(\d{2})|Z)?$")
 
@@ -773,6 +887,91 @@ def source_host(url: str) -> str:
     return "local file"
 
 
+def run_host_parts(body: str) -> tuple[str, bool]:
+    """Mirror of Model.runHostParts (R32a', D-SINK-29, 2026-10-22): for the
+    text after one `scheme://`, the RFC host a FREE-TEXT redactor prints and
+    whether it is WITHHELD.
+
+    The authority ends at the first `/`, `?`, `#` or whitespace after the
+    scheme, its userinfo at the LAST `@` within it (D-SINK-1), and the host
+    is what follows that `@`, cut at the first `:` (a port), `;`, `=` or `&`
+    (a parameter delimiter, so a neighbouring parameter never prints,
+    D-SINK-23); a bracketed literal is the host up to its `]`, or nothing.
+    `withheld` is the one predicate the Sources form warns with
+    (Model.urlHostWithheld), two arms (R32a'', 2026-10-22), each needing an
+    `@` after the authority before whitespace: the host is not bracketed
+    and has no dot -- a dotless "host" with a later `@` is most likely a
+    username in front of a password holding an unencoded `/`, `?` or `#`,
+    and printing it printed the username (`http://myuser:pa#ss@...` ->
+    `http://myuser`, D-SINK-28); OR the authority carries a NON-NUMERIC
+    port, a `:` after its last `@` whose text up to the next `;`, `=` or
+    `&` is non-empty and not all digits (`http://user.name:pa/ss@h.test/x`
+    reads as host `user.name`, port `pa`: a dotted username and a password,
+    D-SINK-35; `http://me@mail.test:pa/ss@h.test/x` the same). What
+    remains, stated: a dotted username before a digits-only password
+    prefix (`http://user.name:2024/ab@host/x` -> `user.name`) reads as host
+    and port. An empty port validates as an RFC shape and does not count;
+    a bracketed literal is never withheld. The authority ends at the six
+    ASCII delimiters (_URL_DELIMITER, R32a''': the same six that end the
+    run; the authority and the run were cut at two classes until R32a'',
+    D-SINK-32, and at the 30-point union for one round after it,
+    D-SINK-36) and at no other whitespace: a password holding U+FEFF or
+    NBSP is URL text, and its host prints. Where that cut is observable,
+    stated: through redact_urls REMOVING it changes nothing (the run
+    handed in was already cut at the same six), while cutting at a WIDER
+    class shows (a run holding U+FEFF would print the username, D-SINK-32's
+    shape, pinned by the shared vectors); through host_withheld over
+    validate_source_url's text, removing it shows since D-SRC-63 (a tab is
+    kept there): `http://my:pa<TAB>/ss@h.test/x` ends its authority at the
+    tab, before the `/`, so the later `@` is not seen (pinned by the
+    source tests; each mutation measured red, 2026-10-22). Not url_host:
+    urllib's RFC reading is
+    right for a display sink and for validation (source_host,
+    validate_source_url) and prints that username. Not round 3's last-`@`-
+    of-the-run scan either (never shipped): crossing the `/` put a password
+    TAIL in the host position (`/live/U5ER/P4@SSW0RD/1.ts` -> `ssw0rd`,
+    D-SINK-29) on mpv's error line into the journal and the notification.
+    The cost, stated in ARCHITECTURE-SOURCES 3.1: a dotless intranet URL with
+    a path `@` withholds its host, `localhost` included. One pass over the
+    run: one search per class, no retry; the shared redaction fixture (dev
+    branch) holds both mirrors to it."""
+    space = _URL_DELIMITER.search(body)
+    if space is not None:
+        body = body[:space.start()]
+    cut = _AUTHORITY_END.search(body)
+    authority = body if cut is None else body[:cut.start()]
+    rest = "" if cut is None else body[cut.start():]
+    hostport = authority[authority.rfind("@") + 1:]
+    if hostport.startswith("["):
+        close = hostport.find("]")
+        return (hostport[:close + 1].lower() if close != -1 else ""), False
+    end = _RUN_HOST_END.search(hostport)
+    host = hostport if end is None else hostport[:end.start()]
+    port = ""
+    if end is not None and hostport[end.start()] == ":":
+        port = hostport[end.start() + 1:]
+        port_end = _PORT_END.search(port)
+        if port_end is not None:
+            port = port[:port_end.start()]
+    later_at = "@" in rest
+    dotless = host != "" and "." not in host
+    bad_port = port != "" and _ASCII_DIGITS.match(port) is None
+    return host.lower(), later_at and (dotless or bad_port)
+
+
+def host_withheld(url: str) -> bool:
+    """R32a': the predicate alone, over a whole URL (or any text holding one)."""
+    j = url.find("://")
+    return j != -1 and run_host_parts(url[j + 3:])[1]
+
+
+def run_host(raw: str) -> str:
+    """What redact_urls prints for one `scheme://...` run: the RFC host, or
+    HOST_WITHHELD."""
+    host, withheld = run_host_parts(raw[raw.find("://") + 3:])
+    return HOST_WITHHELD if withheld else host
+
+
 def redact_urls(text: Any) -> str:
     """Replace every URL inside `text` with scheme://host (R12).
 
@@ -837,7 +1036,7 @@ def redact_urls(text: Any) -> str:
             lo = j - window
             if lo < resume:
                 lo = resume
-            b = _SCHEME_RUN_RE.search(s, lo, j).start()
+            b = _SCHEME_RUN_RE.match(s, lo, j).end()
             if b > lo or lo == resume:
                 break
             window *= 2
@@ -867,11 +1066,16 @@ def redact_urls(text: Any) -> str:
             continue
         end = tail.end()
         raw = s[start:end]
+        # Sentence punctuation after a URL is put back. A `]` is kept when the
+        # run holds a `[`: it closes an IPv6 literal, and stripping it left
+        # `http://[2001:db8::5].` with no host to show (R32a; a D-SINK-23
+        # sibling lane S recorded).
+        bracket = "[" in raw
         trailing = ""
-        while raw and raw[-1] in ".,;:!?)]":
+        while raw and raw[-1] in _TRAILING_PUNCTUATION and not (bracket and raw[-1] == "]"):
             trailing = raw[-1] + trailing
             raw = raw[:-1]
-        host = url_host(raw)
+        host = run_host(raw)
         out.append(s[copied:start])
         out.append("%s://%s%s" % (s[start:j].lower(), host or "[redacted]", trailing))
         copied = end
@@ -1036,8 +1240,47 @@ _EPG_NAME_NOISE = re.compile(
     # of this narrowing matched the two byte-for-byte and lost all 142 rows
     # to any of those, which is a provider changing its own punctuation
     # between fetches, not a different provider.
-    r"|\[\s*not\s*24\s*[-/]?\s*7\s*\]"
+    #
+    # D-EPG-12 (ruling R32d, 2026-10-21): this alternative used to read
+    # `24\s*[-/]?\s*7`, two unbounded `\s*` runs with only an OPTIONAL atom
+    # between them, so the two were adjacent repeats over one class: after
+    # `[not 24` a whitespace run of k not followed by `7` was retried at
+    # every split of the run, about k*k/2 steps, and build_alias reached it
+    # twice per playlist row on the unfolded name. The guard the round before
+    # had certified it linear because "its runs are separated by literals",
+    # which the optional `[-/]?` is not. Now the second run exists only
+    # behind the separator, `(?:[-/]\s*)?`, which whitespace cannot open, so
+    # each run backs off at most once over its own length. Same language:
+    # held equal to the old pattern on generated inputs, and the helper
+    # regex guard on the dev branch grades the old shape super-linear by
+    # structure, not by the table alone.
+    r"|\[\s*not\s*24\s*(?:[-/]\s*)?7\s*\]"
     r"|\[\s*geo[\s-]*blocked\s*\]", re.IGNORECASE)
+
+
+def epg_name_text(value: Any) -> str:
+    """The ONE fold a channel name takes before it is keyed, on BOTH sides
+    of the match: every run of whitespace and control characters to one
+    space, the ends trimmed, cut to EPG_MAX_DISPLAY_NAME code points.
+
+    D-EPG-12, ruling R32d (2026-10-21). The guide side folded a
+    <display-name> through clean_field before keying (D-EPG-8), and the
+    playlist side keyed the raw channels.json name, which the M3U parse
+    leaves holding a DEL or a C0 control (sanitize_input runs on user
+    input, not on playlist text). _ID_PUNCT folds `\\s`, so a tab keyed
+    the same from either side, but `\\x7f` and `\\x00-\\x1b` are not `\\s`:
+    a row and a display-name that both carried U+007F keyed differently
+    and did not match, and a DEL on one side only matched a name without
+    it on the other. Folding inside the key functions, so every caller
+    keys the same whatever it passes, is what makes the two sides one.
+    An ordinary name is unchanged by it: the key already folded its
+    whitespace, and a playlist name is at most M3U_MAX_NAME, which is the
+    cap here. Idempotent, so the guide side may fold once more to look at
+    the text itself (parse_xmltv's trailing-parenthesis test) at no change.
+    """
+    if not value:
+        return ""
+    return _CONTROL_WS.sub(" ", str(value)).strip()[:EPG_MAX_DISPLAY_NAME]
 
 
 def epg_name_key(value: Any) -> str:
@@ -1057,14 +1300,44 @@ def epg_name_key(value: Any) -> str:
     227 -> 226, and the one pair lost is the wrong one; nameIndexed 1,443 ->
     1,453 and nameDroppedPlaylist 10 -> 0, so the repair costs one bad pair
     and returns ten channels to the index. No confirmed pair moved.
+
+    Folds through epg_name_text first (D-EPG-12): the playlist side and the
+    guide side of the match key the same text the same way.
     """
-    return normalize_id_text(_EPG_NAME_NOISE.sub(" ", str(value or "")))
+    return normalize_id_text(_EPG_NAME_NOISE.sub(" ", epg_name_text(value)))
 
 
-# A TRAILING parenthetical, which on the owner's list is the country
-# qualifier: `Pluto TV Reality (United States)`. Nothing in the matcher reads
-# this; see bare_name_key.
-_EPG_NAME_QUALIFIER = re.compile(r"\s*\([^()]*\)\s*$")
+def strip_trailing_qualifier(text: str) -> str:
+    """`text` without a TRAILING parenthetical, which on the owner's list is
+    the country qualifier: `Pluto TV Reality (United States)` ->
+    `Pluto TV Reality`. Nothing in the matcher reads this; see bare_name_key.
+
+    D-EPG-8, ruling R30g: no regex whose cost is super-linear in its input
+    is applied to provider text. This was `\\s*\\([^()]*\\)\\s*$` under
+    .sub(), which has no literal prefix (it opens with `\\s*`), so the engine
+    tried it at EVERY position, and at each position inside a run of k
+    whitespace characters `\\s*` took the rest of the run and backed off one
+    character at a time looking for `(`: about k*k/2 steps for one run, on
+    `<display-name>` text that nothing folded or capped. The answer is the
+    same and is computed by three linear scans, because the pattern's match
+    is unique when it exists: the `)` must be the last non-whitespace
+    character (`\\s*$` takes all trailing whitespace, a final newline
+    included), the `(` the last one before it with no `)` between them
+    (`[^()]*` holds neither), and the match starts where the whitespace run
+    before that `(` starts (the leftmost start the engine reaches), so what
+    is left is everything before the `(`, right-stripped. `str.rstrip()`
+    and `\\s` test the same predicate (Py_UNICODE_ISSPACE); the equivalence
+    test runs the old pattern as an oracle over every code point and over
+    generated names, and calls this.
+    """
+    stripped = text.rstrip()
+    if not stripped.endswith(")"):
+        return text
+    close = len(stripped) - 1
+    open_at = stripped.rfind("(", 0, close)
+    if open_at < 0 or stripped.find(")", open_at + 1, close) >= 0:
+        return text
+    return stripped[:open_at].rstrip()
 
 
 def bare_name_key(value: Any) -> str:
@@ -1096,8 +1369,12 @@ def bare_name_key(value: Any) -> str:
     that the case is now COUNTED instead of invisible: `addrNameConflicts` is
     1 on the frozen inputs, and a reader who sees it rise knows a second one
     exists without having to run an audit nobody scheduled.
+
+    The fold (epg_name_text) comes BEFORE the strip, as the guide side has
+    always ordered it, so the playlist side gives the same key for the same
+    text (D-EPG-12); epg_name_key folds once more, which changes nothing.
     """
-    return epg_name_key(_EPG_NAME_QUALIFIER.sub("", str(value or "")))
+    return epg_name_key(strip_trailing_qualifier(epg_name_text(value)))
 
 
 def normalize_text(value: Any) -> str:

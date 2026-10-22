@@ -3,14 +3,11 @@ import {
   SEP, SETTING_RANGES
 } from "./build.mjs"
 import {
-  str, asList
+  str, asList, keyedMap, hasOwnKey
 } from "./text.mjs"
 import {
   channelOrderOf
 } from "./channels.mjs"
-import {
-  emptyState, entryMigratedOf
-} from "./state.mjs"
 import {
   optInSetting
 } from "./logos.mjs"
@@ -18,24 +15,28 @@ import {
   pipOptions
 } from "./pip.mjs"
 import {
-  configShieldState, redactUrls, scrubUrls
+  redactUrls, scrubUrls
 } from "./privacy.mjs"
 import {
-  EPG_DETAIL_FIELDS, programmeDetail
-} from "./epg.mjs"
-import {
-  MAX_SOURCE_URL, sanitizeInput, validateSourceUrl, sourceKey,
-  findSourceByUrl
+  MAX_SOURCES, MAX_SOURCE_URL, sanitizeInput, sanitizeUrlInput,
+  validateSourceUrl, sourceKey
 } from "./sources.mjs"
 import {
-  activeKeyText, activeKeyOf, reconcileAction, adoptActiveSource,
-  pointerWritePlan, entryWith
+  activeKeyText
 } from "./source-records.mjs"
 
 // ------------------------------------------------------------ caches
 
 function parseJsonObject(text) {
-  var raw = str(text).replace(/^\s+|\s+$/g, "")
+  // D-PERF-3 (R30g). This trimmed the WHOLE file -- channels.json at up to
+  // 64 MiB, epg-now.json, every helper reply -- with `/^\s+|\s+$/g`, which is
+  // quadratic in a whitespace run, and the helper keeps interior runs in
+  // names, groups, tvg-ids and stream URLs. JSON.parse would accept the JSON
+  // whitespace around a document by itself (space, tab, CR, LF), but NOT a
+  // byte-order mark or a no-break space, which this trim has always let a
+  // hand-edited state.json carry; so the trim stays, as the engine's own,
+  // linear in the length of the text.
+  var raw = str(text).trim()
   if (raw === "") return null
   try {
     var parsed = JSON.parse(raw)
@@ -50,9 +51,45 @@ function parseChannels(text) {
   var doc = parseJsonObject(text)
   if (!doc) return { ok: false, channels: [], meta: {}, error: "channels cache is empty or not JSON" }
   if (!Array.isArray(doc.channels)) return { ok: false, channels: [], meta: {}, error: "channels cache has no channels array" }
-  var meta = {}
-  for (var key in doc) if (key !== "channels") meta[key] = doc[key]
+  // D-SG-3: the file's own top-level keys, so null-prototype.
+  var meta = keyedMap()
+  for (var key in doc) if (key !== "channels" && hasOwnKey(doc, key)) meta[key] = doc[key]
   return { ok: true, channels: doc.channels, meta: meta, error: "" }
+}
+
+// D-PERF-4. The service's prepared-channels LRU (Service.applyChannels): a
+// parsed, prepared channels.json per entry, so a switch back to a source
+// the shell has just shown costs no parse (ARCHITECTURE-SOURCES 4.5). It was
+// keyed by the file's TEXT alone, and every helper run writes a new
+// `generatedAt`, so a refresh of the source on screen never hit: the new list
+// went in front and the old one stayed behind it, unreachable -- one source
+// in use, two prepared copies of it held for the session, until a switch to
+// a second source displaced the stale one. An entry now carries the SOURCE
+// it was read from (the cache directory), a hit needs the same source and
+// the same text, and a new entry REPLACES its own source's slot.
+function preparedLruFind(lru, text, source) {
+  var list = asList(lru)
+  var src = str(source)
+  for (var i = 0; i < list.length; i++) {
+    var e = list[i]
+    if (e && e.text === text && str(e.source) === src) return e
+  }
+  return null
+}
+
+// The LRU after `prepared` lands: it first, then the other SOURCES' entries
+// in their order, at most `size` in all. Never two entries for one source.
+function preparedLruNext(lru, prepared, size) {
+  var list = asList(lru)
+  var max = Math.max(1, Math.floor(Number(size)) || 1)
+  var src = str(prepared && prepared.source)
+  var next = [prepared]
+  for (var i = 0; i < list.length && next.length < max; i++) {
+    var e = list[i]
+    if (!e || e === prepared || str(e.source) === src) continue
+    next.push(e)
+  }
+  return next
 }
 
 // epg-now.json -> { channels: {tvgId: {now, next}}, meta }
@@ -69,9 +106,155 @@ function parseChannels(text) {
 function parseEpgNow(text) {
   var doc = parseJsonObject(text)
   if (!doc || !doc.channels || typeof doc.channels !== "object" || Array.isArray(doc.channels)) return { ok: false, channels: {}, meta: {} }
-  var meta = {}
-  for (var key in doc) if (key !== "channels") meta[key] = doc[key]
+  var meta = keyedMap()
+  for (var key in doc) if (key !== "channels" && hasOwnKey(doc, key)) meta[key] = doc[key]
+  // `channels` stays the parsed object, by reference (above): it is keyed by
+  // the provider's tvg-ids and is an ORDINARY object, so every read of it
+  // goes through Model.epgMapEntry (the store reader epgEntry reads a
+  // legacy store through it too), never `map[tvgId]` (D-SG-3).
   return { ok: true, channels: doc.channels, meta: meta }
+}
+
+// epg-now.json -> the guide-data STORE the shell holds (D-EPG-11, R31a).
+//
+//   { kind: "epg-store", ok, meta, index, text, count, legacy, map }
+//
+// `kind` is the TAG that says "this is a store": the two functions that read
+// one (epgCoverage, epgEntry) still accept the plain map the old whole parse
+// gave, and they tell the two apart by this tag, never by the presence of a
+// key such as `index` or `map` -- on a plain map every key is a provider's
+// tvg-id, so a provider id spelt `index` would otherwise flip the reader
+// into store mode and grade that entry's `now`/`next` as the index
+// (R30f's shape one layer up, the correctness lens's finding on the first
+// cut). A map's values are entry objects, so no provider text can make
+// `kind === "epg-store"` true. `count` is the number of DISTINCT ids in the
+// index on both paths: the helper cannot write an id twice (it iterates a
+// dict), but a hand-built file can, and the index keeps the last line as
+// JSON.parse keeps the last key.
+//
+// The shell used to JSON.parse the whole file and keep `doc.channels` by
+// reference: measured at 6.85-7.03 KiB of resident memory a channel for 529
+// bytes of JSON, about 67 MiB at 10,000 channels and about 340 MiB at
+// MAX_CHANNELS (UNVERIFIED at that size), rebuilt on every 5-minute
+// recompute. The store instead keeps ONE text -- the file the FileView
+// already holds -- and a null-prototype `index` from tvg-id to
+// [offset, length] into it, and parses ONE entry when a row asks
+// (epgEntry). Nothing here parses the document whole.
+//
+// THE SHAPE INDEXED (R31b, written by the helper's write_epg_now): the
+// header line, ending in `,"channels":{`; then one channel fragment per
+// line, `"<json id>":{...}` with a trailing comma on every line but the
+// last; then `}}`. The whole is the same valid JSON document it always was,
+// so every other reader (json.load, jq, the old parseEpgNow) is unchanged.
+// A line's key is the JSON string literal up to the unescaped closing quote
+// -- an id may hold quotes, backslashes, non-ASCII and `__proto__`, and is
+// at most 256 code points -- decoded with JSON.parse of that literal; the
+// entry slice runs from after `":` to the end of the line minus the
+// trailing comma and a CR. The text is kept as it came: offsets are into
+// it, trailing newline or none, CRLF or LF.
+//
+// A LEGACY file (one line, 0.14.3's helper during an update window,
+// D-REL-9) or any text the line walk cannot index is accepted ONCE through
+// the old whole-parse path and marked `legacy: true`: `map` holds the parsed
+// channels, `index` holds the ids whose entry carries a titled programme
+// (the old coverage rule), and the next `epg --now-only` recompute (5 min)
+// rewrites the file in the new shape. The shape alone triggers no fetch.
+//
+// R31f (D-SG-3): the index is a null-prototype object, so `__proto__`,
+// `constructor` and `hasOwnProperty` are plain tvg-ids on it, and nothing
+// here keys a plain object by provider text. R31g: the index holds ids and
+// numbers only; an entry's text leaves through epgFields / programmeDetail
+// -> sinkText exactly as before.
+var EPG_CHANNELS_OPEN = ',"channels":{'
+var EPG_STORE_KIND = "epg-store"
+
+function emptyEpgStore() {
+  return { kind: EPG_STORE_KIND, ok: false, meta: {}, index: Object.create(null), text: "", count: 0, legacy: false, map: null }
+}
+
+function parseEpgNowStore(text) {
+  var raw = str(text)
+  var store = emptyEpgStore()
+  if (raw === "") return store
+  var nl = raw.indexOf("\n")
+  var header = nl === -1 ? raw : raw.slice(0, nl)
+  if (header.charCodeAt(header.length - 1) === 13) header = header.slice(0, -1)
+  var indexed = nl !== -1 && header.length > EPG_CHANNELS_OPEN.length
+    && header.slice(header.length - EPG_CHANNELS_OPEN.length) === EPG_CHANNELS_OPEN
+    ? epgNowIndex(raw, header, nl + 1) : null
+  if (indexed) return indexed
+  // The old path, once: a single-line file, or a shape the walk refused.
+  var doc = parseEpgNow(raw)
+  if (!doc.ok) return store
+  store.ok = true
+  store.meta = doc.meta
+  store.map = doc.channels
+  store.legacy = true
+  for (var id in doc.channels) {
+    if (!Object.prototype.hasOwnProperty.call(doc.channels, id)) continue
+    var entry = doc.channels[id]
+    if (!entry || typeof entry !== "object") continue
+    if ((entry.now && str(entry.now.title) !== "") || (entry.next && str(entry.next.title) !== "")) {
+      store.index[id] = null
+      store.count++
+    }
+  }
+  return store
+}
+
+// The line walk. -> a store, or null when a line is not a fragment (the
+// caller then takes the old path, so a file this cannot index is never
+// blank, only costly, exactly as today). `from` is the offset of the first
+// fragment line; `header` is the first line without its CR.
+//
+// It walks the text by OFFSET and never slices a line out of it: a slice
+// per channel is a second UTF-16 copy of the file left for the collector,
+// and it was measured in the held RSS (about 1.3 KiB a channel of the
+// store's first cut, which read 3.7-4.0 KiB a channel against the text's
+// 1.9). The only strings made here are each key's literal and its decoded
+// id, which the index keeps.
+function epgNowIndex(raw, header, from) {
+  var meta = parseJsonObject(header.slice(0, header.length - EPG_CHANNELS_OPEN.length) + "}")
+  if (!meta) return null
+  var index = Object.create(null)
+  var count = 0
+  var pos = from
+  var length = raw.length
+  var closed = false
+  while (pos < length) {
+    var end = raw.indexOf("\n", pos)
+    if (end === -1) end = length
+    var stop = end
+    if (stop > pos && raw.charCodeAt(stop - 1) === 13) stop--
+    if (stop === pos) { pos = end + 1; continue }
+    // `}}` on its own line closes the map; anything after it is not a shape
+    // this knows.
+    if (stop - pos === 2 && raw.charCodeAt(pos) === 125 && raw.charCodeAt(pos + 1) === 125) { closed = true; pos = end + 1; continue }
+    if (closed || raw.charCodeAt(pos) !== 34) return null
+    // The key: to the first quote not escaped by an odd run of backslashes,
+    // within this line.
+    var q = pos + 1
+    for (;;) {
+      q = raw.indexOf('"', q)
+      if (q === -1 || q >= stop) return null
+      var slashes = 0
+      for (var b = q - 1; b > pos && raw.charCodeAt(b) === 92; b--) slashes++
+      if (slashes % 2 === 0) break
+      q++
+    }
+    if (raw.charCodeAt(q + 1) !== 58) return null
+    var id
+    try { id = JSON.parse(raw.slice(pos, q + 1)) } catch (e) { return null }
+    if (typeof id !== "string") return null
+    var entryEnd = stop
+    if (raw.charCodeAt(entryEnd - 1) === 44) entryEnd--
+    if (entryEnd <= q + 2) return null
+    if (!(id in index)) count++
+    index[id] = [q + 2, entryEnd - (q + 2)]
+    pos = end + 1
+  }
+  if (!closed) return null
+  return { kind: EPG_STORE_KIND, ok: true, meta: meta, index: index, text: raw, count: count, legacy: false, map: null }
 }
 
 // Helper status JSON -> normalized object the UI can render directly.
@@ -207,7 +390,7 @@ function statusWarnings(status) {
   var list = asList(status.warnings)
   var out = []
   for (var i = 0; i < list.length; i++) {
-    var text = redactUrls(str(list[i])).replace(/^\s+|\s+$/g, "")
+    var text = redactUrls(str(list[i])).trim()
     if (text !== "") out.push(text)
   }
   return out
@@ -377,8 +560,9 @@ function settingsFrom(entry) {
 //                   service's snapshots are taken from `settings`, which is
 //                   this; a raw published value becomes this before anything
 //                   compares it.
-//   entryInputForm  then what adoption does with it: sanitizeInput (control
-//                   characters out, the space / NBSP edges, the cap), then
+//   entryInputForm  then what adoption does with it: sanitizeUrlInput (the
+//                   leading BOM, the ASCII-whitespace / NBSP edges, the cap;
+//                   nothing inside deleted, D-SRC-63), then
 //                   validateSourceUrl as a CLI value of that kind. `form` is
 //                   the validated URL when it passes (what a record stores
 //                   and what findSourceByUrl compares) and the sanitized text
@@ -393,12 +577,17 @@ function settingsFrom(entry) {
 // Two forms are the same input exactly when their `form`s are equal
 // (sameEntryInput). Nothing here is a URL the caller did not already hold.
 function entryInputText(value) {
-  return str(value).replace(/^\s+|\s+$/g, "")
+  return str(value).trim()
 }
 
 function entryInputForm(name, value) {
-  var text = sanitizeInput(entryInputText(value), MAX_SOURCE_URL + 1)
-  if (text === "") return { text: "", ok: false, url: "", form: "" }
+  // "No input" is still judged by sanitizeInput's emptiness (R4, R18a: a
+  // value of whitespace or control characters alone is an absent key), but
+  // the value that is validated is the URL boundary's (D-SRC-63): nothing
+  // inside it deleted, so `http://u:pa<TAB>ss@h.test/x` set with
+  // `omarchy bar set` is refused as invalid rather than adopted as `pass`.
+  if (sanitizeInput(entryInputText(value), MAX_SOURCE_URL + 1) === "") return { text: "", ok: false, url: "", form: "" }
+  var text = sanitizeUrlInput(entryInputText(value), MAX_SOURCE_URL + 1)
   var v = validateSourceUrl(text, name === "epgUrl" ? { kind: "epg", origin: "cli" } : { origin: "cli" })
   var ok = v.ok === true && str(v.url) !== ""
   return { text: text, ok: ok, url: ok ? str(v.url) : "", form: ok ? str(v.url) : text }
@@ -455,7 +644,9 @@ function settingsWithOwnWrite(hostSettings, ownWrite) {
   var host = hostSettings || {}
   if (!ownWriteInForce(host, ownWrite)) return host
   var out = {}
-  for (var k in host) out[k] = host[k]
+  // D-SG-3: own keys only, never `__proto__` (the host's entry is the user's
+  // file, parsed by the host).
+  for (var k in host) if (k !== "__proto__" && hasOwnKey(host, k)) out[k] = host[k]
   for (var w in ownWrite.value) {
     if (Object.prototype.hasOwnProperty.call(ownWrite.value, w)) out[w] = ownWrite.value[w]
   }
@@ -595,6 +786,11 @@ function entryInputsSeenAfter(seen, values) {
 //   retired    the migration has landed: the entry is not read any more
 //   no-source  a guide URL at the migration with no source to guide (R21c)
 //   invalid    a migration value that does not validate
+//   invalid-pair  R29d: a playlistUrl that does not validate AND the epgUrl set
+//              beside it, told in ONE notice and removed together (the guide
+//              URL is never adopted onto another source); named from the
+//              playlist when `name` is playlistUrl, from the guide URL when it
+//              is epgUrl (the playlist was told about before)
 // -> { title, body }.
 function entryInputNotice(name, reason) {
   var setting = RETIRED_SETTINGS.indexOf(str(name)) !== -1 ? str(name) : "A URL setting"
@@ -604,9 +800,34 @@ function entryInputNotice(name, reason) {
     return { title: "Bar setting removed",
              body: setting + " was removed from the bar settings: no source was set up for it to guide. Add the source with its EPG URL in " + where + "." }
   }
+  if (r === "invalid-pair") {
+    // The two names are composed, never written into the sentence beside a
+    // verb, so the shipped-copy test (no literal sends the user to a retired
+    // setting) reads the same rule here as everywhere.
+    var playlist = RETIRED_SETTINGS[0], guide = RETIRED_SETTINGS[1]
+    if (setting === guide) {
+      return { title: "Bar setting removed",
+               body: guide + " in the bar settings came with a " + playlist + " that was not a usable URL, and was removed with it. Add or edit sources in " + where + "." }
+    }
+    return { title: "Bar setting removed",
+             body: setting + " in the bar settings was not a usable URL and was removed, with the " + guide + " beside it. Add or edit sources in " + where + "." }
+  }
   if (r === "invalid") {
     return { title: "Bar setting removed",
              body: setting + " in the bar settings was not a usable URL and was removed. Add or edit sources in " + where + "." }
+  }
+  // R27d (D-SRC-44): the migration did not run because Sources is full. The
+  // URL rests in state.json's parked pair since D-SRC-64 (on the bar entry
+  // before it); nothing names it or the entry's label.
+  // R28b: and the guide URL set beside it is held with it, so the sentence
+  // names both -- they move in together once a source is removed.
+  // R29e (2026-10-20, round 2's P3): and it says which source is active
+  // after that, because the migration makes the bar's playlist active over
+  // whichever source the user had picked meanwhile (Service.retryHeldMigration
+  // -> Model.reconcileSources' withActiveKey; pinned through Service.qml).
+  if (r === "full") {
+    return { title: "Sources is full",
+             body: "The playlist set on the bar, and its guide URL if one is set, were not moved into Sources: Sources already holds " + MAX_SOURCES + " sources, the most it can. Remove one in " + where + " and the bar's playlist and its guide move in together; the bar's playlist then becomes the active source." }
   }
   return { title: "Bar setting ignored",
            body: setting + " is no longer read from the bar settings and was removed. Add or switch sources in " + where + "." }
@@ -788,13 +1009,32 @@ function ownedWriteMode(flags) {
 // moment the migration runs, and a write that fails leaves the disk without
 // it. A caller that does not know answers false and keeps them, which is the
 // write that cannot lose a record.
+//
+// D-SRC-64 (round 7, 2026-10-22): a THIRD input, `parked`, the pair a
+// migration held at the cap has parked in the state AS LAST CONFIRMED ON
+// DISK (Model.migrationPendingOf over Service.landedState, never memory, for
+// the same reason as `landed`). A retired key whose value is the parked one
+// -- the entry's value through Model.entryInputForm, the pair's as written
+// by the hold, compared key by key -- is redundant and is stripped: the
+// state holds that copy now. One that differs (a guide URL set after the
+// hold, say) is kept until the hold re-parks it. Until D-SRC-64 a held
+// migration kept both URLs on the entry for as long as the hold lasted, and
+// every owned write re-carried them, the shield's verdict notwithstanding
+// (the #14748 review, `Q4 heldExposed`).
 // -> a NEW array of the retired key names to keep.
-function retiredInputsToKeep(entry, landed) {
+function retiredInputsToKeep(entry, landed, parked) {
   var e = entry && typeof entry === "object" ? entry : {}
+  var p = parked && typeof parked === "object" && typeof parked.playlistUrl === "string" && parked.playlistUrl !== "" ? parked : null
   var keep = []
   if (landed === true) return keep
   for (var i = 0; i < RETIRED_SETTINGS.length; i++) {
-    if (Object.prototype.hasOwnProperty.call(e, RETIRED_SETTINGS[i])) keep.push(RETIRED_SETTINGS[i])
+    var name = RETIRED_SETTINGS[i]
+    if (!Object.prototype.hasOwnProperty.call(e, name)) continue
+    if (p !== null) {
+      var text = entryInputForm(name, e[name]).text
+      if (text !== "" && text === str(p[name])) continue
+    }
+    keep.push(name)
   }
   return keep
 }
@@ -848,8 +1088,10 @@ function sameOwnWrite(a, b) {
   return same(ao.base, bo.base) && same(ao.value, bo.value)
 }
 export {
-  parseJsonObject, parseChannels, parseEpgNow, parseHelperStatus,
-  HTTP_REASONS, HELPER_PART_RE, helperDamagedReason, statusReason, statusHost,
+  parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
+  parseEpgNow, EPG_CHANNELS_OPEN, EPG_STORE_KIND, emptyEpgStore,
+  parseEpgNowStore, epgNowIndex, parseHelperStatus, HTTP_REASONS,
+  HELPER_PART_RE, helperDamagedReason, statusReason, statusHost,
   statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel, labelWarning,
   labelWarnings, warningLine, footerWarning, findBarEntry, settingOf,
   boolSetting, clampInt, clampSetting, settingsFrom, entryInputText,

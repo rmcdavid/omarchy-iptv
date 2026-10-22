@@ -107,15 +107,19 @@ Item {
   // The one argument Model.programmeDetail takes. The lane contract calls it
   // `row`, and the row THE GUIDE DRAWS is a channel plus the guide entry it
   // matched: the description, category and episode fields exist only on the
-  // epg-now record (Model.parseEpgNow), so a channel row on its own cannot
-  // answer this question. `entry` is undefined for a channel with no tvg-id
-  // and for one whose id matched nothing, which is 1,453 of 1,453 channels on
-  // the owner's own install until M4-01 lands (D-EPG-2).
+  // epg-now record (Model.parseEpgNowStore / Model.epgEntry), so a channel
+  // row on its own cannot answer this question. `entry` is null for a channel
+  // with no tvg-id and for one whose id matched nothing, which is 1,453 of
+  // 1,453 channels on the owner's own install until M4-01 lands (D-EPG-2).
+  // D-EPG-11: the entry is parsed out of the store here, for the one row the
+  // cursor is on, rather than looked up in a map of every channel.
   readonly property var detailRow: {
     var ch = root.rowAt(root.cursorIndex)
     if (!ch) return null
     var id = ch.tvgId !== undefined ? String(ch.tvgId) : ""
-    return { channel: ch, entry: id !== "" ? root.epgMap[id] : null, nowSec: root.nowSec }
+    // D-SG-3 (lane S): never a bare `map[id]` -- the store reader answers
+    // an OWN tvg-id only, so `constructor` never finds Object.
+    return { channel: ch, entry: id !== "" ? Model.epgEntry(root.epgStore, id) : null, nowSec: root.nowSec }
   }
   // What the open panel renders. Recomputed on the 30 s clock tick as well as
   // on the cursor, so an open panel follows the programme over a boundary
@@ -507,8 +511,11 @@ Item {
   readonly property bool firstRunAllowed: Model.firstRunAllowed({ serviceReady: root.serviceReady, configured: root.configured, stateBlocked: root.stateBlocked })
   // The notification's sentence for the current reason and path (R23e: ONE
   // source of copy with it, Model.stateUnreadableNotice).
+  // R27e: titled as the notification is -- "Saving has stopped" when the
+  // block began after a state loaded (D-SRC-42).
   readonly property var stateNotice: Model.stateUnreadableNotice(root.stateBlocked,
-                                                                 root.serviceReady && typeof service.stateFilePath === "string" ? service.stateFilePath : "")
+                                                                 root.serviceReady && typeof service.stateFilePath === "string" ? service.stateFilePath : "",
+                                                                 root.serviceReady && service.stateLoaded === true)
   // D-LIVE-19: never `service.channels.length` directly. The body renders
   // one surface at a time and Model.guideSurface decides which; an
   // unconfigured guide has no channels, no column and no counts even if the
@@ -676,8 +683,13 @@ Item {
   // rows pay for them and a favorite toggle, a zap or the 30 s EPG tick
   // never rebuilds the list (D-LIVE-01).
   readonly property var favoriteSet: Model.favoriteSet(root.serviceReady ? root.service.userState.favorites : [])
-  readonly property var failedMap: root.serviceReady && root.service.failedAt ? root.service.failedAt : ({})
-  readonly property var epgMap: root.serviceReady && root.epgLoaded ? root.service.epgNow : ({})
+  readonly property var failedMap: root.serviceReady && root.service.failedAt ? root.service.failedAt : Model.keyedMap()
+  // D-EPG-11 (R31a): the guide-data STORE, not a map -- the file's text and
+  // an index into it. A row reads its entry through Model.epgEntry(store,
+  // id), one small JSON.parse per realised row per tick, and the coverage
+  // count below reads the index. Model.emptyEpgStore() while nothing is
+  // loaded, so every reader sees one shape.
+  readonly property var epgStore: root.serviceReady && root.epgLoaded ? root.service.epgNow : Model.emptyEpgStore()
   // Two-line rows whenever the detail line can have content for this list
   // (UX 2.4): a mixed list shows the group, EPG adds now/next.
   //
@@ -713,7 +725,7 @@ Item {
   // in a different costume.
   //
   // NOT a binding, deliberately, and this is R-C rather than an optimisation.
-  // `epgMap` is replaced when the EPG fetch lands, when a refresh rewrites the
+  // `epgStore` is replaced when the EPG fetch lands, when a refresh rewrites the
   // window and when a programme window expires, and every one of those can
   // happen while the card is on screen -- a binding here would re-height 3,335
   // rows under the cursor with no user action, which is the hazard D4 deleted
@@ -730,7 +742,7 @@ Item {
   property bool epgCarriesRows: false
 
   function measureEpgRows() {
-    root.epgCarriesRows = root.serviceReady && Model.epgCoverage(root.service.channels, root.epgMap).carries
+    root.epgCarriesRows = root.serviceReady && Model.epgCoverage(root.service.channels, root.epgStore).carries
   }
 
   // The whole body decision in one object (Model.guideSurface, D-LIVE-19):
@@ -2063,8 +2075,10 @@ Item {
 
   // SR24: at the cap the add entry points show the `too_many` message
   // instead of opening a form.
+  // R28e: the cap is Model.sourcesFull's decision (one, with the service's
+  // canAddSource and the probe commit), over the service's own state.
   function sourcesFull() {
-    if (root.sourceCount < Model.LIMITS.sources) return false
+    if (!Model.sourcesFull(root.serviceReady ? root.service.userState : null)) return false
     root.showTransient(Model.sourceErrorMessage("too_many"))
     return true
   }
@@ -2224,7 +2238,7 @@ Item {
       return
     }
     var field = root.form.kind === "xtream" ? "server" : "playlist"
-    root.failForm({ code: "probe", field: field, message: Model.probeFailureLine(r.reason, String(r.host || root.form.probeHost), root.form.probeKind) })
+    root.failForm({ code: "probe", field: field, message: Model.probeFailureLine(r.reason, String(r.host || root.form.probeHost), root.form.probeKind, String(r.code || "")) })
   }
 
   // A probe outside a form: Enter / Space on a never-fetched source, or an
@@ -2240,7 +2254,7 @@ Item {
     }
     if (r.cancelled === true || !root.inSources) return
     var view = root.findSourceView(id)
-    root.sourcesNotice = Model.probeFailureLine(r.reason, String(r.host || ""), view ? String(view.kind) : "url")
+    root.sourcesNotice = Model.probeFailureLine(r.reason, String(r.host || ""), view ? String(view.kind) : "url", String(r.code || ""))
   }
 
   // Leave the form after a successful save: first run lands in the guide
@@ -2713,7 +2727,13 @@ Item {
       ? Model.editRangeFor(root.fieldMasked(id), value, item.cursorPosition, item.selectionStart, item.selectionEnd)
       : Model.editRangeFor(true, value, 0, 0, 0)
     var cap = Model.formCapacity(id)
-    var edit = Model.editInsert(value, range.start, range.end, Model.sanitizeInput(text, cap), cap)
+    // D-SRC-63: the boundary rule is the FIELD's. A URL field keeps what
+    // is inside the pasted text (a tab in a password is refused by the
+    // validator, never deleted into `pass`); a name field strips controls.
+    // R33a: with the one stated exception -- a paste into a URL field joins
+    // its lines first (CR and LF removed, nothing else), so a URL a mail
+    // client wrapped is taken (Model.sanitizePasteInput).
+    var edit = Model.editInsert(value, range.start, range.end, Model.sanitizePasteInput(id, text, cap), cap)
     if (!edit.changed) return
     root.guide = Model.withFormValue(root.guide, id, edit.value, { typed: false })
     if (item) item.cursorPosition = edit.caret
@@ -3863,7 +3883,9 @@ Item {
                   // bug.
                   readonly property string failedAt: row.channelId !== ""
                     ? Model.failedWhen(root.failedMap[row.channelId], root.nowSec) : ""
-                  readonly property var epg: Model.epgFields(row.tvgId !== "" ? root.epgMap[row.tvgId] : null, root.nowSec)
+                  // D-EPG-11: one entry parsed out of the store for this row,
+                  // re-evaluated on the 30 s tick like everything on this line.
+                  readonly property var epg: Model.epgFields(row.tvgId !== "" ? Model.epgEntry(root.epgStore, row.tvgId) : null, root.nowSec)
                   readonly property string nowTitle: row.epg.nowTitle
                   readonly property string nextTitle: row.epg.nextTitle
                   readonly property int nowStart: row.epg.nowStart
@@ -4911,10 +4933,17 @@ Item {
               radius: root.cornerRadius
 
               readonly property bool isError: root.formError !== null
+              // R32a (D-SINK-25): the model's one warning for a URL whose
+              // RFC host has no dot and an `@` follows later -- most likely
+              // a password with an unencoded `/`, `?` or `#`. Advice, shown
+              // once per value on this line while the field holds it; it
+              // never blocks submit and the error and fetching lines win.
+              readonly property string warningText: !isError && !root.formProbing && root.form ? Model.formWarningLine(root.form) : ""
+              readonly property bool isWarning: warningText !== ""
               readonly property string lineText: {
                 if (root.formError) return String(root.formError.message)
                 if (root.formProbing && root.form) return Model.fetchingLine(root.form.probeHost, root.form.probeKind)
-                return ""
+                return warningText
               }
 
               opacity: lineText !== "" ? 1 : 0
@@ -4932,7 +4961,7 @@ Item {
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
                   textFormat: Text.PlainText
-                  text: resultLine.isError ? Model.GLYPHS.alert : Model.GLYPHS.loading
+                  text: resultLine.isError || resultLine.isWarning ? Model.GLYPHS.alert : Model.GLYPHS.loading
                   color: resultLine.isError ? root.urgent : root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.icon

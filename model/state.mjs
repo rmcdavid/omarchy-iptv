@@ -3,14 +3,14 @@ import {
   STATE_VERSION, SCOPE_RECENT, SCOPE_FAVORITES, MAX_HIDDEN_GROUPS, SEP
 } from "./build.mjs"
 import {
-  str, asList, normalizeText, searchKey, tokenize, channelId
+  str, asList, keyedMap, hasOwnKey, normalizeText, searchKey, tokenize,
+  channelId
 } from "./text.mjs"
 import {
-  primaryGroup, prepareChannels
+  primaryGroup
 } from "./channels.mjs"
 import {
-  matchRank, filterChannels, countFavorites, scopeSurface, channelsForScope,
-  effectiveScope, launchScope
+  matchRank, channelsForScope, effectiveScope
 } from "./browse.mjs"
 import {
   parseJsonObject
@@ -19,24 +19,17 @@ import {
   WALL_KEY
 } from "./logos.mjs"
 import {
-  reconcileVerdict
-} from "./player.mjs"
-import {
-  redactUrls, scrubUrls
+  scrubUrls
 } from "./privacy.mjs"
 import {
   formatClock, formatCount, pluralChannels
 } from "./epg.mjs"
 import {
-  guideSurface, footerStatus
-} from "./view.mjs"
-import {
-  CACHE_LAYOUT, MAX_SOURCES, MAX_LABEL, MONTHS, isSourceKey, deriveLabel,
-  uniqueLabel, sameDay, formatLastUsed
+  CACHE_LAYOUT, MAX_SOURCES, MONTHS, isSourceKey, deriveLabel, uniqueLabel,
+  sameDay
 } from "./sources.mjs"
 import {
-  warnState, normalizeSourceRecord, activeKeyText, activeKeyOf,
-  adoptActiveSource
+  warnState, normalizeSourceRecord, activeKeyText
 } from "./source-records.mjs"
 
 // ------------------------------------------------------------ state
@@ -93,7 +86,7 @@ function savedSearchCount(channels, query) {
   // one more row than Favourites actually gains. Found by putting a real
   // duplicate in the fixture.
   var list = asList(channels)
-  var seen = {}
+  var seen = keyedMap()
   var n = 0
   for (var i = 0; i < list.length; i++) {
     if (!savedSearchHit(list[i], tokens)) continue
@@ -121,7 +114,7 @@ function savedSearchChannels(channels, saved) {
   }
   if (terms.length === 0) return []
   var out = []
-  var seen = {}
+  var seen = keyedMap()
   for (var i = 0; i < list.length; i++) {
     var channel = list[i]
     if (!channel) continue
@@ -299,7 +292,7 @@ function savedSearchFooter(state, channels) {
   // them -- which is exactly the shape countFavorites has.
   var rows = 0
   var favRows = channelsForScope(channels, SCOPE_FAVORITES, st)
-  var starred = {}
+  var starred = keyedMap()
   for (var f = 0; f < st.favorites.length; f++) starred[str(st.favorites[f])] = true
   for (var r = 0; r < favRows.length; r++) if (starred[channelId(favRows[r])] !== true) rows++
   return formatCount(saved.length) + (saved.length === 1 ? " saved search" : " saved searches") +
@@ -385,6 +378,59 @@ function withEntryMigrated(state) {
   return cloneState(st, { entryMigrated: true })
 }
 
+// D-SRC-64 (round 7, 2026-10-22, the owner's decision). THE PARKED PAIR.
+//
+// A migration HELD at the MAX_SOURCES cap used to leave both bar URLs on the
+// bar entry until a removal freed a place -- unbounded in time, re-carried by
+// every owned write, and re-carried even when the D-SINK-18 shield reported
+// the file EXPOSED, because the refusal decides over the patch and the funnel
+// re-attached the kept keys afterwards (the #14748 review's plugin lens,
+// `Q4 heldExposed`: three URL-bearing hand-overs, zero refusals). Now the
+// hold parks them HERE, in state.json (the plugin's own 0600 file), under a
+// key of the migration's own: `migrationPending: { playlistUrl, epgUrl }`.
+// Not a source record (never counted against the cap, never a Sources row),
+// and not a marker: the pair and the marker never coexist, because the
+// marker says the migration ran and the pair says it is still to run.
+// Model.adoptActiveSource writes it when step 1 finds Sources full and drops
+// it the moment the pair lands (a new record after a removal, or the record
+// another program added for the same playlist meanwhile) or is refused as
+// invalid; the funnel strips the entry's copy once the state write that
+// carries the pair has LANDED (Model.retiredInputsToKeep's third input), so
+// the entry carries a URL only until that write lands, and a write that
+// FAILED leaves the entry as it is (R21e's shape: the entry is the backup
+// until the state holds it). The helper's normalize_state mirrors the
+// reader (10-state.py), under the shared state-keys fixture, so a hand-run
+// `state` verb keeps it; an OLDER build's helper drops it as it drops the
+// marker, and that is the downgrade the ruling accepts.
+//
+// The reader: an object whose `playlistUrl` is a non-empty string; `epgUrl`
+// the string beside it, "" otherwise. Nothing is rewritten or validated
+// here -- the pair is what the migration read off the entry (the URL
+// boundary's text), and it is validated when it lands, exactly as the entry
+// value was. Present only when it is a pair, so a state without one
+// serializes as before (the activeKey / entryMigrated precedent).
+function migrationPendingOf(state) {
+  var raw = state && typeof state === "object" ? state.migrationPending : null
+  if (!raw || typeof raw !== "object" || Object.prototype.toString.call(raw) !== "[object Object]") return null
+  if (typeof raw.playlistUrl !== "string" || raw.playlistUrl === "") return null
+  return { playlistUrl: raw.playlistUrl, epgUrl: typeof raw.epgUrl === "string" ? raw.epgUrl : "" }
+}
+
+// The state with the pair set (`pending` as migrationPendingOf reads it) or
+// dropped (`pending` null); the SAME object when nothing moves, so "did the
+// state move" stays an identity test.
+function withMigrationPending(state, pending) {
+  var st = state || emptyState()
+  var want = migrationPendingOf({ migrationPending: pending })
+  var have = migrationPendingOf(st)
+  if (want === null && have === null) return st
+  if (want !== null && have !== null && want.playlistUrl === have.playlistUrl && want.epgUrl === have.epgUrl) return st
+  var out = cloneState(st)
+  if (want === null) delete out.migrationPending
+  else out.migrationPending = want
+  return out
+}
+
 // One `{id, name, at}` record: the shape a `recents` entry, `lastPlayed`
 // and `session` all share (python mirror: `normalize_played`). A value
 // without an `id` is dropped, which is also how a state file written
@@ -437,8 +483,16 @@ function cloneState(state, patch) {
   // the day it is added. Carried only when it is exactly true, so a state
   // that has not migrated clones to exactly the shape it had before.
   if (st.entryMigrated === true) out.entryMigrated = true
+  // D-SRC-64 (round 7): the SEVENTH, the parked pair of a migration held at
+  // the cap. Carried only when it reads as a pair (migrationPendingOf), so a
+  // state without one clones to exactly the shape it had before. The only
+  // copy of a credential while it is held; a reducer that dropped it would
+  // lose it between the hold and the removal that lands it.
+  var pending = migrationPendingOf(st)
+  if (pending !== null) out.migrationPending = pending
   var p = patch || {}
-  for (var key in p) if (key !== "version") out[key] = p[key]
+  // D-SG-3: own keys only, so nothing inherited is ever written to state.json.
+  for (var key in p) if (key !== "version" && key !== "__proto__" && hasOwnKey(p, key)) out[key] = p[key]
   return out
 }
 
@@ -455,8 +509,11 @@ function parseState(text) {
   if (!parsed) return state
   state.cacheLayout = Number(parsed.cacheLayout) === CACHE_LAYOUT ? CACHE_LAYOUT : 0
   var srcs = asList(parsed.sources)
-  var seenUrl = {}
-  var seenKey = {}
+  // D-SG-3: a hand-edited or foreign state.json chooses these strings (the
+  // JS reader keeps a record's url as written), and a url spelled
+  // `constructor` read as already seen on a plain `{}`.
+  var seenUrl = keyedMap()
+  var seenKey = keyedMap()
   for (var s = 0; s < srcs.length && state.sources.length < MAX_SOURCES; s++) {
     var rec = normalizeSourceRecord(srcs[s])
     if (!rec) {
@@ -508,6 +565,11 @@ function parseState(text) {
   // D-SINK-19 round 11, R21a: the migration marker. Absent unless exactly
   // true (entryMigratedOf).
   if (parsed.entryMigrated === true) state.entryMigrated = true
+  // D-SRC-64 (round 7): the parked pair of a held migration, absent unless
+  // it reads as one (migrationPendingOf); the helper's normalize_state reads
+  // it the same way, under the shared state-keys fixture.
+  var pending = migrationPendingOf(parsed)
+  if (pending !== null) state.migrationPending = pending
   var recs = asList(parsed.recents)
   for (var r = 0; r < recs.length; r++) {
     var entry = playedRecord(recs[r])
@@ -520,7 +582,9 @@ function parseState(text) {
   // on the folded terms, not on the raw string, so `BBC ` and `bbc` are one
   // saved search and not two.
   var saves = asList(parsed.savedSearches)
-  var seenTerms = {}
+  // D-SG-3: a saved search whose folded terms are `constructor` was dropped
+  // on every load as a duplicate of the Object function.
+  var seenTerms = keyedMap()
   for (var v = 0; v < saves.length && state.savedSearches.length < MAX_SAVED_SEARCHES; v++) {
     var rec2 = savedSearchRecord(saves[v])
     if (!rec2) continue
@@ -794,10 +858,10 @@ function withFavorites(state, favorites) {
 function hiddenGroupList(raw) {
   var list = asList(raw)
   var out = []
-  var seen = {}
+  var seen = keyedMap()
   for (var i = 0; i < list.length && out.length < MAX_HIDDEN_GROUPS; i++) {
     if (typeof list[i] !== "string") continue
-    var name = list[i].replace(/^\s+|\s+$/g, "")
+    var name = list[i].trim()
     if (name === "" || seen[name] === true) continue
     seen[name] = true
     out.push(name)
@@ -808,7 +872,10 @@ function hiddenGroupList(raw) {
 function hiddenGroupSet(state) {
   var st = state || emptyState()
   var list = asList(st.hiddenGroups)
-  var out = {}
+  // D-SG-3: a group the provider named `__proto__` could not be hidden --
+  // `out["__proto__"] = true` hits Object.prototype's setter and stores
+  // nothing -- so it is null-prototype, like every map keyed by a group.
+  var out = keyedMap()
   for (var i = 0; i < list.length; i++) if (typeof list[i] === "string" && list[i] !== "") out[list[i]] = true
   return out
 }
@@ -823,7 +890,7 @@ function isGroupHidden(state, name) {
 // "nothing changed" from "changed" without a second call.
 function toggleHiddenGroup(state, name) {
   var st = state || emptyState()
-  var key = str(name).replace(/^\s+|\s+$/g, "")
+  var key = str(name).trim()
   if (key === "") return st
   var list = hiddenGroupList(st.hiddenGroups)
   var at = list.indexOf(key)
@@ -935,7 +1002,7 @@ function parseFailed(text) {
 function normalizeFailed(list) {
   var rows = asList(list)
   var out = []
-  var seen = {}
+  var seen = keyedMap()
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i]
     if (!r || typeof r !== "object") continue
@@ -973,7 +1040,7 @@ function prunedFailed(list, nowSec, knownIds) {
 // { id: true } for prunedFailed, from whatever channel list the caller holds.
 function knownIdSet(channels) {
   var list = asList(channels)
-  var out = {}
+  var out = keyedMap()
   for (var i = 0; i < list.length; i++) {
     var id = channelId(list[i])
     if (id !== "") out[id] = true
@@ -985,7 +1052,7 @@ function knownIdSet(channels) {
 // still asks by id, so this is the shape the render path keeps.
 function failedIndex(list) {
   var rows = normalizeFailed(list)
-  var out = {}
+  var out = keyedMap()
   for (var i = 0; i < rows.length; i++) out[rows[i].id] = rows[i].at
   return out
 }
@@ -1022,9 +1089,9 @@ function failedWhen(atSec, nowSec) {
 // disk and strings from this turn, and the two would format identically right
 // up until something compared them.
 function withFailed(failed, id, at) {
-  var out = {}
+  var out = keyedMap()
   var src = failed && typeof failed === "object" ? failed : {}
-  for (var k in src) out[k] = src[k]
+  for (var k in src) if (hasOwnKey(src, k)) out[k] = src[k]
   if (str(id) !== "") out[str(id)] = typeof at === "number" ? at : str(at)
   return out
 }
@@ -1050,14 +1117,14 @@ function failedAfterHealthy(failed, verdictState, nowPlaying) {
   var src = failed && typeof failed === "object" ? failed : {}
   if (str(verdictState) !== "agree" || !nowPlaying) return src
   var id = str(nowPlaying.id)
-  if (id === "" || src[id] === undefined) return src
+  if (id === "" || !hasOwnKey(src, id)) return src
   return withoutFailed(src, id)
 }
 
 function withoutFailed(failed, id) {
-  var out = {}
+  var out = keyedMap()
   var src = failed && typeof failed === "object" ? failed : {}
-  for (var k in src) if (k !== str(id)) out[k] = src[k]
+  for (var k in src) if (k !== str(id) && hasOwnKey(src, k)) out[k] = src[k]
   return out
 }
 
@@ -1191,7 +1258,9 @@ function reloadDisposition(ctx) {
 function sortedKeys(value) {
   if (Array.isArray(value)) return value.map(sortedKeys)
   if (!value || typeof value !== "object") return value
-  var out = {}
+  // D-SG-3: the keys are whatever the file held; an own `__proto__` from
+  // JSON.parse is a key here, not a prototype to adopt.
+  var out = keyedMap()
   var keys = Object.keys(value).sort()
   for (var i = 0; i < keys.length; i++) out[keys[i]] = sortedKeys(value[keys[i]])
   return out
@@ -1221,7 +1290,8 @@ function canonValue(v) {
 // additions after. With ours equal to the base this IS theirs, element for
 // element and in order (R24a's identity). `id` names an element.
 function mergeSetField(base, ours, theirs, id) {
-  var inBase = {}, inOurs = {}, inTheirs = {}, seen = {}
+  // D-SG-3: named by a favorite id, a group name or a saved search's terms.
+  var inBase = keyedMap(), inOurs = keyedMap(), inTheirs = keyedMap(), seen = keyedMap()
   var b = asList(base), o = asList(ours), t = asList(theirs)
   var i, k
   for (i = 0; i < b.length; i++) inBase[id(b[i])] = true
@@ -1248,7 +1318,7 @@ function mergeSetField(base, ours, theirs, id) {
 // line names (never a value -- a source record carries a credentialed URL).
 function recordFieldsDiffering(a, b) {
   var x = a && typeof a === "object" ? a : {}, y = b && typeof b === "object" ? b : {}
-  var names = {}, k
+  var names = keyedMap(), k
   for (k in x) names[k] = true
   for (k in y) names[k] = true
   var out = []
@@ -1300,8 +1370,42 @@ var MERGE_WHOLE_FIELDS = ["recents", "activeKey", "lastPlayed", "session", "cach
 // the provider's text, never logged) -- for Model.mergeDropLines (the
 // journal, one line each) and Model.mergeDropNotice (the user, once).
 // hiddenGroups is rule 15's sibling: the same shape at MAX_HIDDEN_GROUPS.
-// -> { state, conflicts, dropped }
-function mergeForeignState(base, ours, theirs) {
+// F1 (D-SINK-19 round 3 of the sweep, 2026-10-20): THE MIGRATION RIDES ITS
+// RECORD. `opts.migrationKey` is the key of the record this session's
+// one-time migration added (Service's migrationAddedKey; "" when it added
+// none). When the marker is OURS ALONE -- the migration ran since the base
+// and theirs does not carry it -- and the cap drops that record, the
+// migration did not happen: the marker is NOT carried (the entry kept both
+// URLs under F1; since D-SRC-64 the pair is re-parked, below), the
+// active key it set goes back to theirs, the record is not counted among
+// `dropped.sources` (the user added nothing, and "make room, then add it
+// again" names a URL the entry still holds), and `migrationHeld` is "full":
+// the migration is held full again.
+// Before F1 the marker survived the merge, landed, and the owned write
+// stripped the bar's playlist and guide URL off the entry with neither in
+// any record. Rule 15's sibling, the same shape without the cap: another
+// program added the SAME playlist in the window, so the record stands but
+// as THEIRS (a conflict goes to theirs) and without the bar's guide URL;
+// `migrationHeld` is "changed", the marker again is not carried, and the
+// retry the caller runs at once finds the record and adopts the guide URL
+// onto it -- the outcome the other order (their add first) has always had.
+// "" when the migration's record landed as ours.
+// D-SRC-64 (round 7, 2026-10-22): THE PARKED PAIR RIDES THE HOLD. Since the
+// hold parks both bar URLs in the state (`migrationPending`) and the entry
+// is stripped once that write has landed, a merge is the one place the pair
+// could go missing with the entry already empty. So: ours' pair stands when
+// ours holds one (the hold is this session's, and memory is the only place
+// its credential is sure to be); when ours holds none and the migration is
+// held AGAIN by this merge ("full" or "changed"), the pair is rebuilt from
+// the record the migration had added -- its url and epgUrl ARE the pair --
+// so the retry the caller runs at once has an input although the entry no
+// longer carries one; otherwise theirs' pair is kept only when the base had
+// none (a pair another program parked; nothing here knows better), because
+// a pair in base and theirs that ours dropped is one ours LANDED. A conflict
+// goes to theirs everywhere else; here the only copy of a credential goes
+// to whoever still holds it.
+// -> { state, conflicts, dropped, migrationHeld }
+function mergeForeignState(base, ours, theirs, opts) {
   var b = parseState(JSON.stringify(base || emptyState()))
   var o = parseState(JSON.stringify(ours || emptyState()))
   var t = parseState(JSON.stringify(theirs || emptyState()))
@@ -1320,7 +1424,7 @@ function mergeForeignState(base, ours, theirs) {
     dropped.savedSearches = out.savedSearches.length - MAX_SAVED_SEARCHES
     out.savedSearches = out.savedSearches.slice(0, MAX_SAVED_SEARCHES)
   }
-  var byKey = function (list) { var m = {}; for (var i = 0; i < list.length; i++) m[list[i].key] = list[i]; return m }
+  var byKey = function (list) { var m = keyedMap(); for (var i = 0; i < list.length; i++) m[list[i].key] = list[i]; return m }
   var mb = byKey(b.sources), mo = byKey(o.sources), mt = byKey(t.sources)
   var sources = [], i, r, k
   for (i = 0; i < t.sources.length; i++) {
@@ -1364,9 +1468,30 @@ function mergeForeignState(base, ours, theirs) {
       out[f] = o[f]
     }
   }
-  if (entryMigratedOf(o) || entryMigratedOf(t)) out.entryMigrated = true
+  var migrationKey = str((opts || {}).migrationKey)
+  var migrationHeld = ""
+  if (migrationKey !== "" && entryMigratedOf(o) && !entryMigratedOf(b) && !entryMigratedOf(t) && mo[migrationKey]) {
+    var landed = null
+    for (i = 0; i < out.sources.length; i++) if (out.sources[i].key === migrationKey) landed = out.sources[i]
+    if (!landed) migrationHeld = "full"
+    else if (canonValue(landed) !== canonValue(mo[migrationKey])) migrationHeld = "changed"
+  }
+  if (migrationHeld === "full") {
+    dropped.sources = dropped.sources.filter(function (key) { return key !== migrationKey })
+    if (str(out.activeKey) === migrationKey) out.activeKey = t.activeKey
+  }
+  if (migrationHeld === "" && (entryMigratedOf(o) || entryMigratedOf(t))) out.entryMigrated = true
   else delete out.entryMigrated
-  return { state: parseState(JSON.stringify(out)), conflicts: conflicts, dropped: dropped }
+  // D-SRC-64: the parked pair (the rule in the header above).
+  var pending = migrationPendingOf(o)
+  if (pending === null && migrationHeld !== "") {
+    var added = mo[migrationKey]
+    pending = { playlistUrl: str(added.url), epgUrl: str(added.epgUrl) }
+  }
+  if (pending === null && migrationPendingOf(b) === null) pending = migrationPendingOf(t)
+  if (pending !== null && pending.playlistUrl !== "") out.migrationPending = pending
+  else delete out.migrationPending
+  return { state: parseState(JSON.stringify(out)), conflicts: conflicts, dropped: dropped, migrationHeld: migrationHeld }
 }
 
 var MERGE_LINE_HEAD = "state.json was changed by another program while a change made here was not yet saved; "
@@ -1406,6 +1531,23 @@ function mergeDropLines(dropped) {
     out.push(MERGE_LINE_HEAD + "a group hidden here was not kept (the limit is " + MAX_HIDDEN_GROUPS + " hidden groups)")
   }
   return out
+}
+
+// F1. The journal line for a merge that held the migration again, by the
+// reason mergeForeignState gave: no key, no URL. Round 8 (2026-10-22, the
+// round 7 recheck's P2 #2): the "full" line says where the held playlist
+// rests -- state.json, the plugin's own file, where the merge re-parked
+// the pair (D-SRC-64) -- and no longer "on the bar entry", which D-SRC-64
+// made false (the entry is empty by then). It is the ONE journal line a
+// re-park by a merge prints: the retry that follows finds the state already
+// holding exactly that pair, so adoptActiveSource's `changed` is false and
+// the service's own "kept in state.json" line does not print again.
+function migrationHeldAgainLine(why) {
+  if (str(why) === "changed") {
+    return MERGE_LINE_HEAD + "another program added the bar's playlist itself, so it is moved into Sources again over that record"
+  }
+  return MERGE_LINE_HEAD + "the bar's playlist could not be moved into Sources, which is full again (the limit is " + MAX_SOURCES +
+    " sources); it is kept, with its guide-data URL, in state.json (the plugin's own file) until a source is removed"
 }
 
 // R25b. What the user is told, ONCE per merge that dropped anything: how
@@ -1577,16 +1719,31 @@ function stateWriteGate(ctx) {
 //    "refuse" the no-write mode, and nothing a re-read can lift now
 //    "verify" reload state.json first and decide on what it finds
 //    "defer"  ask again from a turn of its own (Qt.callLater)
+//    "wait"   one of our writes is in flight: held until it lands (or
+//             fails), then asked again from a turn of its own, which reads
 //    "write"  issue the write now
 // Every write is asked for again from a turn of its own before it is
 // issued, because a setText inside stateFile's own onLoaded writes the file
 // and raises NO `saved` (D-SRC-46, measured 16 of 16), and a turn called
-// from a handler cannot tell which handler it is in. The read is skipped
-// while one of our writes is in flight: the view DROPS a reload then
-// (measured 30 of 30), and the disk is our own write. A refused save
+// from a handler cannot tell which handler it is in. A refused save
 // re-reads unless the reason is init-timeout (no load can lift it, R23c)
 // or the refusal is the verify's own answer; inside a handler the load
 // that is running IS that read.
+// R27a (D-SINK-22, window a): NO WRITE WITHOUT A READ. Until R27 a save
+// asked while one of our writes was in flight SKIPPED its read -- the view
+// drops a reload then (measured 30 of 30) -- and was written from the next
+// turn, so a re-point landing in that window was written over (or a 0644
+// file created in an empty folder). Now it WAITS: nothing is issued while
+// the write is out, and the save is asked again once that write has landed,
+// when a read is answered. Every save asked during the wait is the same
+// held save (they coalesce). `waitExpired` -- the write was not reported
+// within the wait's own bound (Service.stateWriteWaitWatchdog) -- lets the
+// held save go to its read anyway: if the view is still holding the write
+// the read is dropped and the read's own bound decides. R29a (2026-10-20):
+// that bound is R26a's, so the held save never waits on a read past 2 s --
+// no load in that time and the save is written without its read, counted
+// and logged, as on 0.14.2 (D-SINK-22's window c, which R27a and R28a tried
+// to close and the lead's ruling leaves open, documented).
 function stateSavePlan(ctx) {
   var c = ctx || {}
   if (c.verifyPending === true) return "join"
@@ -1598,8 +1755,8 @@ function stateSavePlan(ctx) {
   }
   if (gate !== "write") return "refuse"
   if (c.verifyDone === true) return "write"
+  if ((Number(c.inFlight) || 0) > 0 && c.waitExpired !== true) return "wait"
   if (c.inHandler === true) return "defer"
-  if ((Number(c.inFlight) || 0) > 0) return c.writeTurn === true ? "write" : "defer"
   return "verify"
 }
 
@@ -1617,7 +1774,41 @@ function stateBlockRecheck(ctx) {
 // The user is told ONCE per no-write episode: this sentence, as a desktop
 // notification and a console line. It names the file and what to do, and
 // never a URL (it is composed from the reason and the path alone).
-function stateUnreadableNotice(reason, path) {
+// R27e (2026-10-20; D-SRC-42, D-SRC-50, D-SRC-51), one family with the R23e
+// and R25 copy:
+//   `midSession` -- the block began after a state had loaded -- titles it
+//     "Saving has stopped" (STATE_BLOCK_TITLE_MID), in the notification and
+//     the journal alike: the sources DID load and are still listed, and it
+//     is saving that stopped. A block at the start keeps "Saved sources not
+//     loaded" (STATE_BLOCK_TITLE_START).
+//   the body's second sentence says what becomes of a change made now, and
+//     it differs between the two (R28e, 2026-10-20). At a START nothing has
+//     loaded, so whatever load lifts the block is the first and is applied:
+//     a change made in the block is "not kept" on every way back
+//     (STATE_BLOCK_UNSAVED_START). MID-session the ways back differ, and
+//     R27e's "not saved until the file can be read again" was true only of
+//     the one where the next in-app change's own read finds the file first
+//     and saves it (D-SRC-51); measured through the shipping Service.qml,
+//     both hosts and echo modes, the same change is DROPPED when the file
+//     comes back by itself (a restore, a chmod back: the view sees it and
+//     the load is applied), when the change that finds it is a source change
+//     (refused, and its re-read applies the file), and by a stopped shell. So
+//     the sentence names all four (STATE_BLOCK_UNSAVED, the name R27e gave
+//     the one sentence, kept for the mid-session one); the node suite (dev
+//     branch) pins each way to it.
+//   a file or folder that has gone missing names the LINK case first: a
+//     link pointed back at the folder or file that holds the state restores
+//     everything, where restoring "the file it points to" or a restart with
+//     the link still on an empty folder starts a fresh, empty install there
+//     (D-SRC-50).
+//   "read-timeout" is withdrawn (R28a, and R29a kept it so): a read that
+//     does not answer is no block; its save is written after R26a's bound.
+var STATE_BLOCK_TITLE_START = "Saved sources not loaded"
+var STATE_BLOCK_TITLE_MID = "Saving has stopped"
+var STATE_BLOCK_UNSAVED_START = "Sources, favorites and settings changed now are not kept."
+var STATE_BLOCK_UNSAVED = "Favorites and other changes made now are held in this session only: the next such change made here saves them if it finds the file again, but they are dropped if the file comes back by itself first, if a source change is what finds it, or if the shell is stopped."
+var STATE_BLOCK_LINK_FIRST = "If it is a symbolic link, point it back at the folder or file that holds your state"
+function stateUnreadableNotice(reason, path, midSession) {
   var file = str(path) !== "" ? str(path) : "state.json"
   var r = str(reason)
   var what = "could not be read"
@@ -1632,9 +1823,10 @@ function stateUnreadableNotice(reason, path) {
     what = "is not a valid state file"
     fix = "Restore it from a backup, or move it aside to start with no sources, then run omarchy restart shell."
   } else if (r === "link") {
-    // R24b: the not-a-file sentence, naming what is there.
+    // R24b: the not-a-file sentence, naming what is there. R27e: the link
+    // pointed back, not its target "restored" (D-SRC-50).
     what = "is a symbolic link whose target is missing or is not a regular file"
-    fix = "Restore the file it points to, or move the link aside, then run omarchy restart shell."
+    fix = "Point it back at the file that holds your state, or move the link aside, then run omarchy restart shell."
   } else if (r === "not-a-dir") {
     // R24b: a regular file (or anything but a folder) where the state FOLDER
     // should be. The sentence names the folder's path, not the file's.
@@ -1646,25 +1838,36 @@ function stateUnreadableNotice(reason, path) {
     // leads to something that is not a folder. The sentence names the folder.
     file = str(path) !== "" ? str(path).replace(/\/[^\/]*$/, "") : "The state folder"
     what = "is a symbolic link whose target is missing or is not a folder (or a folder above it is)"
-    fix = "Restore the folder it points to, or move the link aside, then run omarchy restart shell."
+    fix = "Point it back at the folder that holds your state, or move the link aside, then run omarchy restart shell."
   } else if (r === "absent-unconfirmed") {
+    // R27e left this one as it was: at a START the helper names a link that
+    // leads nowhere itself ("link", "folder-link"), so the file it found and
+    // the view could not reach is a folder-permission case, not a link one.
     what = "could not be found, or its folder could not be read"
     fix = "Make the folder readable with chmod 700, then run omarchy restart shell."
   } else if (r === "absent") {
     // Mid-session (the file vanished under a running shell): the helper's
     // witness is not asked again, so the sentence names both causes the
     // FileView cannot tell apart -- a broken symbolic link (R24b) and an
-    // unreadable folder.
+    // unreadable folder. R27e: a link pointed BACK, never its target
+    // restored, which on an empty folder makes a fresh, empty start (D-SRC-50).
     what = "could not be found, or its folder could not be read"
-    fix = "If it is a symbolic link, restore the file it points to; otherwise make the folder readable with chmod 700. Then run omarchy restart shell."
+    fix = STATE_BLOCK_LINK_FIRST + "; otherwise make the folder readable with chmod 700. Then run omarchy restart shell."
   } else if (r === "init-timeout") {
     // R23c: the start-up check of the file (the helper's `state init`) did
     // not answer within Service.stateInitTimeoutMs and was stopped.
     what = "could not be checked: the start-up check did not answer and was stopped"
     fix = "Make sure a regular file, or nothing, is at that path, then run omarchy restart shell."
   }
-  return { title: "Saved sources not loaded",
-           body: file + " " + what + ". Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. " + fix }
+  return { title: midSession === true ? STATE_BLOCK_TITLE_MID : STATE_BLOCK_TITLE_START,
+           body: file + " " + what + ". " + (midSession === true ? STATE_BLOCK_UNSAVED : STATE_BLOCK_UNSAVED_START) + " " + fix }
+}
+
+// R27e: the journal's line for the same episode -- the title, then the body
+// -- so the journal is titled as the notification is (D-SRC-42).
+function stateUnreadableJournal(reason, path, midSession) {
+  var n = stateUnreadableNotice(reason, path, midSession)
+  return n.title + ": " + n.body
 }
 
 // D-SINK-19 round 15 (D-SRC-38). The no-write mode's SHORT form, for the
@@ -1674,8 +1877,7 @@ function stateUnreadableNotice(reason, path) {
 // notice copy family: at a start it IS stateUnreadableNotice's title.
 function stateBlockedHeader(reason, path, midSession) {
   if (str(reason) === "") return ""
-  if (midSession === true) return "Saving has stopped"
-  return stateUnreadableNotice(reason, path).title
+  return stateUnreadableNotice(reason, path, midSession === true).title
 }
 export {
   MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedSearchTerms,
@@ -1683,19 +1885,22 @@ export {
   favoriteOrigin, favoriteRemovalNotice, hideNotice, scopeEntryAccessibleName,
   savedSearchRows, savedSearchArrivals, savedSearchDepartures,
   savedSearchFooter, withSavedSearch, withoutSavedSearch, savedSearchRecord,
-  emptyState, entryMigratedOf, withEntryMigrated, playedRecord, cloneState,
-  withCacheLayout, parseState, pushPlayedRecord, stateOnLoad, isFavorite,
-  toggleFavorite, pushRecent, recordPlayed, clearSession, stateSession,
-  deadSessionVerdict, PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES,
-  sessionAfterOutcome, withFavorites, hiddenGroupList, hiddenGroupSet,
-  isGroupHidden, toggleHiddenGroup, browsableChannels, hideAction, hideVerb,
-  removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed,
-  normalizeFailed, prunedFailed, knownIdSet, failedIndex, failedDocument,
-  failedWhen, withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
-  countReload, reloadDisposition, sortedKeys, stateCanonical, sameState,
-  canonValue, mergeSetField, recordFieldsDiffering, MERGE_WHOLE_FIELDS,
-  mergeForeignState, MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount,
-  mergeDropLines, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
+  emptyState, entryMigratedOf, withEntryMigrated, migrationPendingOf,
+  withMigrationPending, playedRecord, cloneState, withCacheLayout, parseState,
+  pushPlayedRecord, stateOnLoad, isFavorite, toggleFavorite, pushRecent,
+  recordPlayed, clearSession, stateSession, deadSessionVerdict,
+  PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES, sessionAfterOutcome,
+  withFavorites, hiddenGroupList, hiddenGroupSet, isGroupHidden,
+  toggleHiddenGroup, browsableChannels, hideAction, hideVerb, removeRecent,
+  trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed,
+  prunedFailed, knownIdSet, failedIndex, failedDocument, failedWhen,
+  withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
+  reloadDisposition, sortedKeys, stateCanonical, sameState, canonValue,
+  mergeSetField, recordFieldsDiffering, MERGE_WHOLE_FIELDS, mergeForeignState,
+  MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount, mergeDropLines,
+  migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
   stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
-  stateBlockRecheck, stateUnreadableNotice, stateBlockedHeader
+  stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
+  STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
+  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
 }

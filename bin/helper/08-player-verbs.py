@@ -4,18 +4,30 @@
 from __future__ import annotations
 # ------------------------------------------------------------- the channel
 
+def fallback_channel_name(url: str, default: str) -> str:
+    """The name of a channel that has none: its host, which is the title mpv
+    shows and the name a notification quotes. D-SINK-31 (R32a', 2026-10-22):
+    when the URL's RFC host has no dot and an `@` follows it -- the typo
+    shape, where that host is most likely a username -- the name is the word
+    `Stream`, through the one predicate the free-text redactors withhold
+    with (host_withheld); a dotted host (every Xtream link) still names it."""
+    if host_withheld(url):
+        return "Stream"
+    return url_host(url) or default
+
+
 def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, Any]:
     """Resolve the channel the helper will play. The URL is read from the
     0600 cache by the helper itself and never crosses a process boundary."""
     if channel_id:
         channel = find_channel(load_channels(cache_dir(directory)), channel_id)
         url = str(channel.get("url") or "")
-        name = str(channel.get("name") or "") or url_host(url) or "channel"
+        name = str(channel.get("name") or "") or fallback_channel_name(url, "channel")
         headers = channel.get("headers") if isinstance(channel.get("headers"), dict) else {}
         group = str(channel.get("group") or "")
     else:
         url = (raw_url or "").strip()
-        name = url_host(url) or "stream"
+        name = fallback_channel_name(url, "stream")
         headers = {}
         group = ""
     if not is_stream_url(url):
@@ -297,6 +309,20 @@ def owner_claim(owner_pid: int) -> dict[str, Any] | None:
             "startTime": proc_start_time(int(owner_pid)), "at": int(time.time())}
 
 
+# D-SRC-13's rule 15 sweep (2026-10-21): the reason a first load failed is
+# mpv's last error-level log line, which is free text of any length (a
+# demuxer or a server can put its own words in it), and it rides the
+# `player start` reply the shell collects whole (playerStdout). Cut here, at
+# the one place the reply's reason is composed; the launch window's own
+# reason is already held to LAUNCH_STDERR_MAX, and mpv's file_error is one
+# of its fixed strings.
+FIRST_LOAD_REASON_MAX = 512
+
+
+def first_load_result(state: str, reason: str) -> dict[str, Any]:
+    return {"state": state, "reason": reason[:FIRST_LOAD_REASON_MAX].rstrip()}
+
+
 def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
                        launch_errors: list[str] | None = None) -> dict[str, Any]:
     """F3: `player start` watches its own first load on the connection it
@@ -350,11 +376,11 @@ def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
                     # The log line says what actually went wrong; mpv's own
                     # file_error is a generic "loading failed". Both are
                     # already redacted, here, inside python (section 6).
-                    return {"state": "failed", "reason": last_error or verdict["reason"]}
+                    return first_load_result("failed", last_error or verdict["reason"])
                 return {"state": "unknown", "reason": ""}
     if state == "failed" and not reason:
         reason = last_error or PLAYER_GENERIC_FAILURE
-    return {"state": state, "reason": reason}
+    return first_load_result(state, reason)
 
 
 # -------------------------------------------------------------- the verbs
@@ -455,7 +481,14 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
     warnings: list[str] = []
     mpv_args, rejected = filter_mpv_args(list(args.mpv_arg or []))
     for token in rejected:
-        warnings.append("dropped mpvArg %s" % token.split("=", 1)[0])
+        # D-SINK-24 (R32b', 2026-10-22): the option NAME only -- the text
+        # before "=" -- and only when the token is option-shaped (MPV_ARG_RE,
+        # `^--[a-z0-9][a-z0-9-]*(=.*)?$`), so a token refused BECAUSE its name
+        # is not (`--u:pw@h=1`) prints the fixed word "<token>", as does a
+        # value (a bearer or basic-auth value split off a header option, a
+        # scheme-less user:pw@proxy). Never a value, never a bare token.
+        # Mirrors Model.mpvRejectedName; the reply's warnings reach the journal.
+        warnings.append("dropped mpvArg %s" % (token.split("=", 1)[0] if MPV_ARG_RE.match(token) else "<token>"))
     # PO-10: kept, not dropped - and said out loud. The service shows the
     # same line the guide already has; this one is for the CLI and the log.
     warnings.extend(mpv_arg_warnings(mpv_args))
@@ -779,13 +812,36 @@ def player_pause(args: argparse.Namespace) -> int:
 # file-supplied. Counted against the manual by the 0.9.0 preflight.
 TRACK_TYPES = ("audio", "sub")
 TRACK_FIELDS = ("id", "type", "selected", "lang", "title", "codec", "default", "forced", "external")
+# D-SRC-13's rule 15 sweep (2026-10-21): the tracks reply is collected WHOLE
+# by the shell (controlStdout, a StdioCollector with waitForEnd), and both
+# the number of tracks and the three free-text fields are the stream's, so
+# neither was bounded by anything but the stream. Each is now a constant:
+# at most TRACK_MAX_ROWS rows, kept in mpv's order, the rest COUNTED in the
+# reply's `tracksOmitted` (parse_m3u's channel_warning shape); each text cut
+# to its cap. The figures are chosen, not measured: a picker of 64 rows is
+# already more than a person reads, a language code is three letters and a
+# codec name a word, so the caps cut nothing an ordinary stream carries,
+# and the reply is at most TRACK_MAX_ROWS rows of a constant size.
+TRACK_MAX_ROWS = 64
+TRACK_MAX_TITLE = 256
+TRACK_MAX_LANG = 64
+TRACK_MAX_CODEC = 64
 
 
-def track_rows(data: Any) -> list[dict[str, Any]]:
+def track_text(value: Any, limit: int) -> str:
+    """A track's free-text field, redacted and then cut to `limit` code points
+    (the cut after the redaction, so a URL is never half-redacted)."""
+    if not isinstance(value, str):
+        return ""
+    return redact_urls(value)[:limit]
+
+
+def track_rows(data: Any, omitted: list[int] | None = None) -> list[dict[str, Any]]:
     """The picker's rows from a raw track-list: audio and sub only, ints for
     ids, strings for text, bools for flags, in the order mpv listed them.
     Anything malformed is dropped rather than raising: a picker with one
-    strange row missing beats no picker."""
+    strange row missing beats no picker. At most TRACK_MAX_ROWS rows; every
+    well-formed row past them is counted into `omitted[0]` when it is given."""
     rows: list[dict[str, Any]] = []
     if not isinstance(data, list):
         return rows
@@ -796,13 +852,17 @@ def track_rows(data: Any) -> list[dict[str, Any]]:
         ident = entry.get("id")
         if kind not in TRACK_TYPES or isinstance(ident, bool) or not isinstance(ident, int):
             continue
+        if len(rows) >= TRACK_MAX_ROWS:
+            if omitted is not None:
+                omitted[0] += 1
+            continue
         rows.append({
             "id": ident,
             "type": kind,
             "selected": entry.get("selected") is True,
-            "lang": redact_urls(entry.get("lang")) if isinstance(entry.get("lang"), str) else "",
-            "title": redact_urls(entry.get("title")) if isinstance(entry.get("title"), str) else "",
-            "codec": redact_urls(entry.get("codec")) if isinstance(entry.get("codec"), str) else "",
+            "lang": track_text(entry.get("lang"), TRACK_MAX_LANG),
+            "title": track_text(entry.get("title"), TRACK_MAX_TITLE),
+            "codec": track_text(entry.get("codec"), TRACK_MAX_CODEC),
             "default": entry.get("default") is True,
             "forced": entry.get("forced") is True,
             "external": entry.get("external") is True,
@@ -862,7 +922,12 @@ def player_tracks(args: argparse.Namespace) -> int:
                 raise HelperError("track_refused", "the player refused that track")
             payload["changed"] = True
         ok, data = client.try_command("get_property", "track-list")
-        payload["tracks"] = track_rows(data) if ok else []
+        omitted = [0]
+        payload["tracks"] = track_rows(data, omitted) if ok else []
+        if omitted[0]:
+            # Additive, and present only when rows were left out: the reply
+            # of every ordinary stream is byte-identical to before.
+            payload["tracksOmitted"] = omitted[0]
         emit(payload)
         return EXIT_OK
     except HelperError as error:

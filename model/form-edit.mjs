@@ -9,16 +9,12 @@ import {
   helperArgv
 } from "./mpv.mjs"
 import {
-  firstRunAllowed
-} from "./view.mjs"
-import {
-  MAX_SOURCE_URL, CONTROL_RE, sanitizeInput, sourceErrorMessage,
-  refusalMessage, validateSourceUrl, normalizeSourceUrl, validateLabel,
+  MAX_SOURCE_URL, CONTROL_RE, sanitizeInput, sanitizeUrlInput,
+  sourceErrorMessage, validateSourceUrl, normalizeSourceUrl, validateLabel,
   CLIPBOARD_MAX_CHARS
 } from "./sources.mjs"
 import {
-  isFormField, formCapacity, copyForm, openFirstRun, withFormValue,
-  withFormFocus
+  isFormField, formCapacity, copyForm, openFirstRun, withFormFocus
 } from "./source-records.mjs"
 
 // ---- form editing (D-CLIP-1) ----
@@ -206,11 +202,16 @@ function typedText(text, ctrlOnly) {
 // refused and a long paste keeps what fits. The cap is the field's CAPACITY
 // (limit plus slack, formCapacity), so an over-limit value survives long
 // enough to be refused with its error on submit (SR18, SR22). `caret` is
-// meaningful only when `changed`.
+// meaningful only when `changed`. The text is inserted AS GIVEN: the caller
+// has applied the field's boundary rule -- typedText for a key (Qt's own
+// acceptance rule: no control character ever types), sanitizeFieldInput for
+// a paste -- and until D-SRC-63 this stripped every control character
+// again, which is what kept a tab pasted into a URL field from reaching
+// the validator that refuses it.
 function editInsert(value, selStart, selEnd, text, cap) {
   var v = str(value)
   var r = orderedRange(v, selStart, selEnd)
-  var ins = str(text).replace(CONTROL_RE, "")
+  var ins = str(text)
   var room = editCapacity(cap) - (v.length - (r.end - r.start))
   if (ins.length > room) ins = ins.substring(0, Math.max(0, room))
   if (ins === "") return { value: v, caret: r.start, changed: false }
@@ -268,11 +269,47 @@ function withFormProbing(st, probing, opts) {
   return cur
 }
 
-// Values as submitted: every field trimmed (UX 2.3).
+// The boundary rule for one field's text, on a paste and on submit
+// (D-SRC-63, R32a''', 2026-10-22). A URL field -- the playlist, the EPG,
+// the Xtream server -- gets sanitizeUrlInput: nothing inside the text is
+// deleted, so a tab, a line break or an information separator in it
+// reaches validateSourceUrl and is REFUSED there, where sanitizeInput used
+// to delete it and `http://u:pa<TAB>ss@h.test/x` became the password
+// `pass`. A name field -- the label, the Xtream username and password --
+// keeps sanitizeInput: a control character in a name carries no meaning a
+// user could have intended, and a label is displayed, never fetched.
+var URL_INPUT_FIELDS = ["playlist", "epg", "server"]
+
+function sanitizeFieldInput(field, text, limit) {
+  return URL_INPUT_FIELDS.indexOf(str(field)) !== -1 ? sanitizeUrlInput(text, limit) : sanitizeInput(text, limit)
+}
+
+// The boundary rule for a PASTE, and the one stated exception to "nothing
+// inside a URL is deleted" (R33a, round 7, 2026-10-22): a paste into a URL
+// field JOINS ITS LINES first -- CR and LF removed, nothing else -- and then
+// takes the field's rule above. A URL wrapped by a mail client or a chat
+// window is a paste the form must take, and under D-SRC-63 alone it was
+// refused as a URL with a line break inside it, which is true and useless.
+// Only CR and LF: a tab, U+0085, U+2028 or an information separator inside
+// the pasted text still reaches validateSourceUrl and is refused there,
+// with the sentence that names it (R33b). A name field keeps sanitizeInput,
+// which removes every control character anyway (6.1: a multi-line paste
+// into a name collapses to one line). Typing cannot insert CR or LF (Qt's
+// own acceptance rule, typedText), and the submit path reads a value this
+// has already joined, so the paste is the one place the join is made.
+var PASTE_LINE_BREAK_RE = /[\r\n]/g
+
+function sanitizePasteInput(field, text, limit) {
+  var t = str(text)
+  if (URL_INPUT_FIELDS.indexOf(str(field)) !== -1) t = t.replace(PASTE_LINE_BREAK_RE, "")
+  return sanitizeFieldInput(field, t, limit)
+}
+
+// Values as submitted: every field trimmed (UX 2.3), by its own rule.
 function formSubmitValues(form) {
   var f = copyForm(form)
   var out = {}
-  for (var k in f.values) out[k] = sanitizeInput(f.values[k], formCapacity(k))
+  for (var k in f.values) out[k] = sanitizeFieldInput(k, f.values[k], formCapacity(k))
   return out
 }
 
@@ -429,9 +466,10 @@ export {
   parseClipboardReply, isWordSpace, isWordSeparator, clampIndex, editCapacity,
   editRange, fullRange, editRangeFor, cutApplies, orderedRange, wordBoundary,
   isHighSurrogate, isLowSurrogate, codePointStart, codePointEnd, typedText,
-  editInsert, editDelete, withFormError, withFormProbing, formSubmitValues,
-  validateUrlForm, sourcesAddRows, sourcesRowCount, sourcesRowKind,
-  sourcesAddAllowed, sourcesInitialCursor, cursorAfterRemove, openSources,
-  closeSources, withSourceCursor, startRemove, startLogosConsent, afterRemove,
-  afterSwitch
+  editInsert, editDelete, withFormError, withFormProbing, URL_INPUT_FIELDS,
+  sanitizeFieldInput, PASTE_LINE_BREAK_RE, sanitizePasteInput,
+  formSubmitValues, validateUrlForm, sourcesAddRows, sourcesRowCount,
+  sourcesRowKind, sourcesAddAllowed, sourcesInitialCursor, cursorAfterRemove,
+  openSources, closeSources, withSourceCursor, startRemove, startLogosConsent,
+  afterRemove, afterSwitch
 }
