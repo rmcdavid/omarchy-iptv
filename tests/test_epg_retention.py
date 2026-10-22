@@ -160,8 +160,20 @@ def playlist_doc(ids):
     return {"version": 1, "count": len(rows), "channels": rows}
 
 
-def comparable(result):
+def baseline_wording(text):
+    """This tree's counted sentences as f55a32f worded them, for a count of
+    one (H4, the D-M3U-4 sibling: "1 programmes ..." became "1 programme
+    ..."). The ONLY difference allowed between the two trees' output, and
+    applied to this tree's side only; any other difference still fails."""
+    for _, one, many in helper.epg_parse_warnings():
+        text = text.replace(one % 1, many % 1)
+    return text
+
+
+def comparable(result, reword=False):
     out = dict(result)
+    if reword:
+        out["warnings"] = [baseline_wording(line) for line in result["warnings"]]
     out["channels"] = list(result["channels"].items())      # order matters: it is the file's order
     out["seenIds"] = sorted(result["seenIds"])
     return out
@@ -183,7 +195,8 @@ class RetentionDifferentialTest(unittest.TestCase):
                 module.EPG_MAX_PER_CHANNEL = cap
             try:
                 index = module.build_alias(json.loads(json.dumps(index_doc)))[0] if index_doc else None
-                results.append(comparable(module.parse_xmltv(module.open_xml_stream(data), NOW, index)))
+                results.append(comparable(module.parse_xmltv(module.open_xml_stream(data), NOW, index),
+                                          reword=module is helper))
             finally:
                 module.EPG_MAX_PER_CHANNEL = saved
         return results
@@ -242,10 +255,15 @@ class RetentionDifferentialTest(unittest.TestCase):
                                       capture_output=True, text=True, timeout=60,
                                       env=dict(os.environ, PYTHONDONTWRITEBYTECODE="1"))
                 self.assertEqual(done.returncode, 0, done.stdout + done.stderr)
+                mine = stub != self.old_stub
                 status = json.loads(done.stdout.strip().splitlines()[-1])
                 status.pop("durationMs")
+                if mine:
+                    status["warnings"] = [baseline_wording(line) for line in status["warnings"]]
                 with open(os.path.join(cache, "epg-window.txt"), "rb") as handle:
                     window = handle.read()
+                if mine:
+                    window = baseline_wording(window.decode("utf-8")).encode("utf-8")
                 with open(os.path.join(cache, "epg-now.json"), "rb") as handle:
                     now_doc = handle.read()
                 outputs.append((window, now_doc, status))

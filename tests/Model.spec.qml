@@ -1399,8 +1399,8 @@ TestCase {
   // vocabulary (`stale: serviceStatus === "cached"`), which the service sets
   // for a failed refresh and for a stale cache alike.
   function test_footerPrecedenceCachedOverWarnings() {
-    var epgWarn = Model.footerWarning([], ["1 programmes for channels not in the playlist dropped"])
-    var bothWarn = Model.footerWarning(["truncated to 50,000 channels"], ["1 programmes for channels not in the playlist dropped"])
+    var epgWarn = Model.footerWarning([], ["1 programme for a channel not in the playlist dropped"])
+    var bothWarn = Model.footerWarning(["truncated to 50,000 channels"], ["1 programme for a channel not in the playlist dropped"])
     var cached = "8 channels" + Model.SEP + "cached 22:49" + Model.SEP + "offline"
     compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, warning: epgWarn }), cached)
     compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, warning: bothWarn }), cached)
@@ -1412,7 +1412,7 @@ TestCase {
     compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", stale: true, transient: "Refreshed", warning: epgWarn }), "Refreshed")
     // A fresh copy leaves both warnings on their own rungs, playlist first.
     compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", warning: bothWarn }), "Playlist warning: truncated to 50,000 channels")
-    compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", warning: epgWarn }), "Guide data warning: 1 programmes for channels not in the playlist dropped")
+    compare(Model.footerStatus({ configured: true, count: 8, lastUpdated: "22:49", warning: epgWarn }), "Guide data warning: 1 programme for a channel not in the playlist dropped")
     // An error with no cache still speaks in the body, not the footer (D-LIVE-09).
     compare(Model.footerStatus({ configured: true, count: 0, stale: true, warning: bothWarn }), "")
   }
