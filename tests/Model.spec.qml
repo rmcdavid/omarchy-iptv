@@ -504,7 +504,10 @@ TestCase {
       compare(live.userState.session, played.session)
       compare(live.writes, 0)
       // Kill the shell here and nothing witnessed the outcome: PO-3 marks.
-      compare(Model.deadSessionVerdict(live.userState, true, ({}), "21:30").failed, { "t:bbc1.uk": "21:30" })
+      // JSON, not the object: the marks are a null-prototype map since D-SG-3,
+      // and TestCase.compare throws a TypeError on an object with no
+      // prototype (measured here, qmltestrunner on Qt 6.11.2).
+      compare(JSON.stringify(Model.deadSessionVerdict(live.userState, true, ({}), "21:30").failed), JSON.stringify({ "t:bbc1.uk": "21:30" }))
     }
     // A first load that failed with a live socket hands the record to the EOF
     // rather than racing it, and the EOF retires it.
@@ -577,7 +580,7 @@ TestCase {
     compare(svc.writes > 0, true)                               // and it is persisted
     // The consequence the race cost: a reattach can mark the channel that
     // died unattended.
-    compare(Model.deadSessionVerdict(svc.userState, true, ({}), "21:30").failed, { "t:bbc1.uk": "21:30" })
+    compare(JSON.stringify(Model.deadSessionVerdict(svc.userState, true, ({}), "21:30").failed), JSON.stringify({ "t:bbc1.uk": "21:30" }))   // D-SG-3: see above
     // A later load is an external edit and wins; the record is not resurrected.
     var after = freshSession(Model.emptyState())
     after.userState = Model.recordPlayed(after.userState, { tvgId: "bbc1.uk", name: "BBC One HD" }, 10, 1758000123)

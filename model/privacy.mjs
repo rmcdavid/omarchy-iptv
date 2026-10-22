@@ -27,7 +27,7 @@ import {
   rowDetail, rowAccessibleName
 } from "./contrast.mjs"
 import {
-  resolveEpgUrl, sourceKey
+  passwordReadAsPort, authorityHost, resolveEpgUrl, sourceKey
 } from "./sources.mjs"
 import {
   removeSource, entryWith
@@ -300,8 +300,19 @@ function notifyArgv(event, params) {
 
 // "scheme://host" for http(s) URLs, "local file" for paths, "" otherwise.
 // Never returns path, query or userinfo (credentials live there).
+//
+// D-SINK-23. The userinfo is searched for INSIDE THE AUTHORITY, which ends at
+// the first `/`, `?` or `#` (RFC 3986), and not at the first `/` alone. On a
+// URL with no path the old `(?:[^\/\s]*@)?` crossed into the query, took an
+// at-sign THERE as the end of the userinfo, and printed what followed it as
+// the host: `http://h.test?u=me@b.test&p=SECRET` gave `b.test&p=SECRET`,
+// while the helper's url_host (urllib) gave `h.test`. A bracketed IPv6 host
+// is kept whole (it used to stop at its first `:` and read as `[`).
+// D-SINK-25: a URL whose password prefix the RFC reading takes for a port is
+// labelled by the host after its later at-sign (passwordReadAsPort), never
+// by the username.
 function sourceLabel(url) {
-  var text = str(url).replace(/^\s+|\s+$/g, "")
+  var text = str(url).trim()
   if (text === "") return ""
   if (/^file:/i.test(text)) return "local file"
   // D-SINK-1's authority rule, which this spelling did not get when
@@ -312,10 +323,12 @@ function sourceLabel(url) {
   // is the defect redactUrls was fixed for. Both halves are needed: either
   // alone still leaks. M4-01 made this reachable from a remote party, because
   // resolveEpgUrl publishes `hostOf` over a `url-tvg` the PLAYLIST declared.
-  var m = text.match(/^([a-z][a-z0-9+.-]*):\/\/(?:[^\/\s]*@)?([^\/\s?#:@]+)(?::\d+)?/i)
+  var m = text.match(/^([a-z][a-z0-9+.-]*):\/\/(?:[^\/?#\s]*@)?(\[[^\/?#\s\]]*\]|[^\/\s?#:@\[]+)(?::\d+)?/i)
   if (m) {
     var scheme = m[1].toLowerCase()
     if (scheme === "file") return "local file"
+    var later = passwordReadAsPort(text.substring(m[1].length + 3))
+    if (later !== "") return scheme + "://" + authorityHost(later)
     return scheme + "://" + m[2]
   }
   if (text.charAt(0) === "/" || text.charAt(0) === "~") return "local file"
@@ -369,7 +382,9 @@ function hostOf(url) {
 // to backtrack to. So "walk back from each `://` over the scheme-legal run,
 // then forward to the first letter in it" picks the same leftmost start the
 // engine picked, and the authority rules below (userinfo to the LAST `@`
-// before the first `/`, host excluding `@`) are the old groups transcribed
+// before the first `/`, host excluding `@`) were the old groups transcribed
+// (D-SINK-23 since moved the authority's end to the first `/`, `?` or `#`,
+// so the oracle in the node suite is that pattern with `?#` added)
 // character class by character class. The node suite (dev branch) drives the
 // OLD pattern as an oracle over the shared fixture and thousands of generated
 // strings and asserts the two agree character for character, so the claim is
@@ -430,10 +445,20 @@ function redactUrls(text) {
     }
     var end = j + 3                    // the old `[^\s]*` tail
     while (end < n && !isSpaceAt(s, end)) end++
-    var slash = j + 3                  // `[^\/\s]*` stops at the first `/`
-    while (slash < end && s.charCodeAt(slash) !== 47) slash++
-    // D-SINK-1: userinfo runs to the LAST `@` of the authority (RFC 3986),
-    // which is what the old `(?:[^\/\s]*@)?` resolved to by backtracking.
+    // D-SINK-23. The authority ends at the first `/`, `?` or `#` (RFC 3986).
+    // It used to end at `/` alone -- the old pattern's `[^\/\s]*` -- so on a
+    // URL with no path the at-sign search below ran on into the QUERY, and
+    // `http://h.test?u=me@b.test&p=SECRET` redacted to `b.test&p=SECRET`,
+    // the password included, where the helper's redact_urls (urllib) says
+    // `h.test`. The two mirrors now cut the authority at the same place, and
+    // the shared fixture (redaction-vectors.json) holds both of them to it.
+    var slash = j + 3
+    while (slash < end) {
+      var d = s.charCodeAt(slash)
+      if (d === 47 || d === 63 || d === 35) break
+      slash++
+    }
+    // D-SINK-1: userinfo runs to the LAST `@` of the authority (RFC 3986).
     var h0 = j + 3
     for (var k = j + 3; k < slash; k++) if (s.charCodeAt(k) === 64) h0 = k + 1
     // `([^\/\s?#:@]*)`. The `@` in that class was half of D-SINK-1 and it is
@@ -446,10 +471,18 @@ function redactUrls(text) {
     // a mutation that drops `c === 64` is not, and that is a fact about this
     // code rather than a gap in the suite.
     var h1 = h0
-    while (h1 < end) {
-      var c = s.charCodeAt(h1)
-      if (c === 47 || c === 63 || c === 35 || c === 58 || c === 64) break
-      h1++
+    if (h0 < slash && s.charCodeAt(h0) === 91) {
+      // D-SINK-23: a bracketed IPv6 host is the host up to its `]`, as
+      // urllib reads it; the scan below stopped at its first `:` and gave
+      // `[`. With no `]` inside the authority there is no host to show.
+      var close = s.indexOf("]", h0)
+      h1 = close !== -1 && close < slash ? close + 1 : h0
+    } else {
+      while (h1 < end) {
+        var c = s.charCodeAt(h1)
+        if (c === 47 || c === 63 || c === 35 || c === 58 || c === 64) break
+        h1++
+      }
     }
     var host = s.substring(h0, h1)
     out += s.substring(copied, p) + (host !== "" ? host : "[url]")

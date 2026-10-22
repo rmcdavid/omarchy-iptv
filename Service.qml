@@ -369,7 +369,10 @@ Item {
 
   // ---- data (read by Guide.qml / BarWidget.qml; never mutated by them)
   property var channels: []                 // Model.prepareChannels output, in the ACTIVE order
-  property var channelIndex: ({})
+  // D-SG-3: keyed by channel id, and read with ids from state.json and from
+  // IPC `play`, so null-prototype from the start -- on a plain `({})` the id
+  // `constructor` found the Object function and read as a loaded channel.
+  property var channelIndex: Model.keyedMap()
   // Channel numbers (M2-03 1.4). Keyed by number, never by position, so it
   // survives a channelOrder flip untouched; its `byKey` / `order` entries are
   // indices into the PLAYLIST-order array, which is why channelByNumber()
@@ -594,7 +597,7 @@ Item {
       root.clearTracks()
     }
   }
-  property var failedAt: ({})
+  property var failedAt: Model.keyedMap()   // D-SG-3: keyed by channel id
   // The file behind it. Loaded on every source switch, so the marks a source
   // carries arrive with its channels and leave with it.
   readonly property string failedPath: root.activeCacheDir === ""
@@ -810,7 +813,7 @@ Item {
   // the gate FAILS OPEN, so an unknown id degrades the name and never
   // suppresses the notification.
   property int currentEntryId: 0
-  property var entryOwners: ({})
+  property var entryOwners: Model.keyedMap()
   property var lastEndFile: null            // { entryId, reason, fileError }
   property bool playerIdle: false           // observed idle-active, informational
   property string playerKind: ""            // which player verb is in flight
@@ -1071,7 +1074,7 @@ Item {
     // A new play puts the last failure behind us: the next guide open is a
     // fresh start, not a come-back.
     root.lastFailedId = ""
-    if (root.failedAt[key] !== undefined) {
+    if (Model.hasOwnKey(root.failedAt, key)) {
       root.failedAt = Model.withoutFailed(root.failedAt, key)
       root.persistFailed("clear", key)
     }
@@ -2129,18 +2132,17 @@ Item {
 
   // ------------------------------------------------------------ internals
 
-  function applyChannels(text) {
+  // `source` is the cache directory the text was read from (D-PERF-4: the
+  // LRU holds one entry per source, so a refresh replaces its own slot).
+  function applyChannels(text, source) {
     var t0 = Date.now()
     root.switchReadMs = root.switching ? t0 - root.switchStartedAt : 0
-    var prepared = null
     var lru = root.preparedLru
-    for (var i = 0; i < lru.length; i++) {
-      if (lru[i].text === text) { prepared = lru[i]; break }
-    }
+    var prepared = Model.preparedLruFind(lru, text, source)
     if (!prepared) {
       var parsed = Model.parseChannels(text)
       var channels = parsed.ok ? Model.prepareChannels(parsed.channels) : []
-      prepared = { text: text, channels: channels, channelIndex: Model.indexById(channels),
+      prepared = { text: text, source: String(source || ""), channels: channels, channelIndex: Model.indexById(channels),
                    chnoIndex: Model.buildChnoIndex(channels), channelsMeta: parsed.meta,
                    // D-ID-3. The scheme-1 -> scheme-2 map of THIS list, computed
                    // once here where the O(n) parse is already paid: it hashes
@@ -2150,11 +2152,7 @@ Item {
                    // applied to (the state) is decided at apply time below.
                    idRemap: Model.channelIdRemap(channels) }
     }
-    if (text !== "" && prepared.channels.length > 0) {
-      var next = [prepared]
-      for (var k = 0; k < lru.length && next.length < root.preparedLruSize; k++) if (lru[k] !== prepared) next.push(lru[k])
-      root.preparedLru = next
-    }
+    if (text !== "" && prepared.channels.length > 0) root.preparedLru = Model.preparedLruNext(lru, prepared, root.preparedLruSize)
     var t1 = Date.now()
     // The LRU entry always holds PLAYLIST order; the display order is derived
     // from it here and again whenever channelOrder changes (5.2), so a flip
@@ -3101,7 +3099,9 @@ Item {
   // this shell's pid as the owner claim (4.14).
   function issuePlayerSession(verb, channel, fromRung) {
     var extra = Model.splitMpvArgs(root.mpvArgs)
-    if (extra.rejected.length > 0) console.warn("omarchy-iptv: ignoring mpvArgs tokens:", extra.rejected.join(" "))
+    // D-SINK-24: option names only, redacted -- never the refused token whole.
+    var rejectedLine = Model.mpvRejectedLine(extra.rejected)
+    if (rejectedLine !== "") console.warn(rejectedLine)
     var np = root.nowPlaying
     var key = np ? String(np.id) : Model.channelId(channel)
     var scope = np ? String(np.launchedFrom || "") : ""
@@ -3790,7 +3790,7 @@ Item {
     // behind if nobody clears it, and the next reattach would read that as a
     // channel that died unattended (PO-3).
     root.noteSessionOutcome("ended")
-    root.entryOwners = ({})
+    root.entryOwners = Model.keyedMap()
     if (!report.notify) return
     // report.reason is the log-message tail when there is one ("Failed to
     // open scheme://host" says what actually went wrong), else mpv's own
@@ -5024,7 +5024,7 @@ Item {
   // `Loading playlist...` for good (D-SRC-03).
   function clearSourceData() {
     root.channels = []
-    root.channelIndex = ({})
+    root.channelIndex = Model.keyedMap()
     // No stale numbers across a swap: the number space belongs to one source
     // (1.5), and a guide showing the previous playlist's numbers would let a
     // digit tune to a channel that is no longer loaded.
@@ -5087,16 +5087,17 @@ Item {
     return Model.findSource(root.userState.sources, key)
   }
 
+  // D-SG-3: own keys into a null-prototype copy.
   function withKey(obj, key, value) {
-    var out = {}
-    for (var k in obj) out[k] = obj[k]
+    var out = Model.keyedMap()
+    for (var k in obj) if (Model.hasOwnKey(obj, k)) out[k] = obj[k]
     out[key] = value
     return out
   }
 
   function withoutKey(obj, key) {
-    var out = {}
-    for (var k in obj) if (k !== key) out[k] = obj[k]
+    var out = Model.keyedMap()
+    for (var k in obj) if (k !== key && Model.hasOwnKey(obj, k)) out[k] = obj[k]
     return out
   }
 
@@ -5281,7 +5282,7 @@ Item {
     watchChanges: true
     printErrors: false
     onLoaded: {
-      root.applyChannels(text())
+      root.applyChannels(text(), root.activeCacheDir)
       root.finishSwitch()
       // M2-04. A refreshed playlist can name logos the cache has never seen,
       // and a switch to another source has a logo directory of its own. The

@@ -397,6 +397,26 @@ again inside `validateSourceUrl`.
    tokens are case-sensitive), a bare `?` dropped; fragment dropped
    (never sent). Whitespace anywhere in the rest -> `bad_url`.
    `url = scheme://[userinfo@]host[:port]path[?query]`, `host` as computed.
+   **D-SINK-25 (2026-10-21, lane-bounds-s).** Refused as `bad_url`
+   (`invalid`, the existing sentence) when a password holding an unencoded
+   `/`, `?` or `#` makes this reading take the username for the host and the
+   password's prefix for the port: the authority ends early at one of the
+   three, its host part (after its own last `@`) is not bracketed and holds a
+   `:`, and the rest of the URL holds an `@` before its first `=` or `&` whose
+   last occurrence is followed, up to the next `/`, `?`, `#` or the end, by a
+   dotted name or a bracketed literal with an optional port. Before this,
+   `http://user:2024/ab@host.test/list.m3u` was ACCEPTED as host `user`, port
+   2024, labelled `user:2024`. Narrow on purpose: the helper drops a stored
+   source whose URL stops validating, so a wider rule deletes working
+   sources on the upgrade. An ordinary Xtream `get.php?username=me@mail.test`
+   is not the shape (the `@` is a parameter's value). The cost, pinned in the
+   fixture: an explicit port with a path whose first `@` is followed by a
+   dotted name (`http://h.test:8080/me@mail.test/list.m3u`) is refused too;
+   percent-encode the `@`. Not caught, recorded: a password whose unencoded
+   part holds `=` or `&` before its `@`, and a later `@` before a single-label
+   name. A record stored before the rule is shown by the host after its later
+   `@` (`Model.passwordReadAsPort`, through `hostPortOf`, `deriveLabel` and
+   `sourceLabel`), never by the username or the prefix.
 6. Anything else (`ftp:`, `data:`, `javascript:`, `rtsp:`) -> `unsupported_scheme`.
 
 Vectors (in `tests/fixtures/source-urls.json`, consumed by node, the QML

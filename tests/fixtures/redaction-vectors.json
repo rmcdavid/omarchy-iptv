@@ -82,6 +82,65 @@
         "u5er",
         "p4ss"
       ]
+    },
+    {
+      "why": "D-SINK-23: a query password on a URL with NO PATH -- the model read the at-sign in the query as the end of the userinfo and printed the rest, password included, as the host",
+      "text": "Failed to open http://h.example.test:8080?username=me@mail.example.test&password=P4SSW0RD.",
+      "host": "h.example.test",
+      "mustNotAppear": [
+        "P4SSW0RD",
+        "mail.example.test",
+        "username",
+        "8080"
+      ]
+    },
+    {
+      "why": "D-SINK-23: the same as a bare URL, which sourceLabel and hostOf also take",
+      "text": "http://h.example.test?u=me@b.example.test&p=P4SSW0RD",
+      "host": "h.example.test",
+      "mustNotAppear": [
+        "P4SSW0RD",
+        "b.example.test"
+      ]
+    },
+    {
+      "why": "D-SINK-23: a fragment ends the authority as a query does",
+      "text": "http://h.example.test#u=me@b.example.test&p=P4SSW0RD",
+      "host": "h.example.test",
+      "mustNotAppear": [
+        "P4SSW0RD",
+        "b.example.test"
+      ]
+    },
+    {
+      "why": "D-SINK-23: real userinfo AND an at-sign in a pathless query",
+      "text": "http://u5er:p4ss@h.example.test?x=a@b.example.test",
+      "host": "h.example.test",
+      "mustNotAppear": [
+        "u5er",
+        "p4ss",
+        "b.example.test"
+      ]
+    },
+    {
+      "why": "an IPv6 host behind a doubled-at userinfo, with a port and a path (free text, so the bare-URL check leaves it to redactUrls: the model shows the literal in its brackets, the helper without)",
+      "text": "open http://u5er:p4@ss@[2001:db8::7]:8080/live/1.ts now",
+      "host": "2001:db8::7",
+      "mustNotAppear": [
+        "u5er",
+        "p4@ss",
+        "8080",
+        "live"
+      ]
+    },
+    {
+      "why": "D-SINK-23: an IPv6 host with no path and a password in the query",
+      "text": "open http://[2001:db8::6]?password=P4SSW0RD now",
+      "host": "2001:db8::6",
+      "mustNotAppear": [
+        "P4SSW0RD",
+        "password"
+      ]
     }
   ]
 }

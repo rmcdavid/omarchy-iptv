@@ -38,6 +38,10 @@
 #                                or Text.StyledText under a MARKUP-EXCEPTION
 #                                comment -- a missing line is AutoText, which
 #                                fetches an <img> out of a channel name)
+#  12. trim shape guard          (scripts/check-trim-shapes.py: no
+#                                trailing-whitespace pattern that is quadratic
+#                                in a run, and no trimEnd/trimStart, which
+#                                Qt 6.11.2's V4 does not have; D-PERF-3)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
@@ -259,7 +263,15 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # 2678 -> 2679 on 2026-10-21 (lane-bounds-l, D-SRC-45 / D-LOGO-12): the
 # shell's reading of the logos verb's no_cache refusal and of a summary at
 # the ceiling (seen red on a mutation of Model.logoSummaryNames).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2679}
+# 2679 -> 2746 on 2026-10-21 (lane-bounds-s), +67: D-SG-3's probe in a
+# child process over every browse and apply path and the service's (30) and
+# in process (5), the shared channel-ids vector a prototype-named tvg-id adds
+# (5), the shared source-urls cases for D-SINK-25 (13), the D-SINK-23 oracle
+# check (1), D-PERF-3's equivalences (7), D-SINK-25's display (2), D-SINK-24's
+# journal line (2) and D-PERF-4's LRU (2). 48 of them red on lane-bounds-int,
+# with 3 existing checks the new shared vectors turn red there; the other 19
+# pin what stayed the same (an accepted URL, a path the bug never reached).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2746}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -356,7 +368,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2679}
 # which compare against f55a32f itself and were seen red on four mutations.
 # LogoFetchCapTest was rewritten for the ceiling in place, not added.
 # 1342 / 1338 -> 1359 on 2026-10-21, the two lanes together (lane-bounds-int).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1359}
+# 1359 -> 1375 on 2026-10-21 (lane-bounds-s): tests/test_proto_v4.py (11),
+# D-SG-3's probe and D-PERF-3's equivalences in Qt's own V4 offscreen under
+# prlimit, all 11 red on lane-bounds-int; tests/test_trim_guard.py (5), the
+# guard below, its whole-tree case red on lane-bounds-int (26 sites).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1375}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -442,6 +458,10 @@ KEY_PREFLIGHT_MIN=${KEY_PREFLIGHT_MIN:-12}
 # at 0.3 is (the claim narrowed to "painted at all"); seen red on the
 # harness-lib that read visible alone.
 OPEN_PREFLIGHT_MIN=${OPEN_PREFLIGHT_MIN:-19}
+# D-PERF-3 (2026-10-21, lane-bounds-s): the trim shape guard reads Model.mjs,
+# the 18 parts and the 3 shipped .qml files; fewer means it stopped reading
+# some of them.
+TRIM_GUARD_FILES_MIN=${TRIM_GUARD_FILES_MIN:-22}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -1179,6 +1199,28 @@ if python3 "$ROOT/scripts/check-text-format.py" >"$textfmt_log" 2>&1; then
   fi
 else
   cat "$textfmt_log"; bad "text format guard"
+fi
+
+step "trim shape guard (no quadratic trailing trim, no trimEnd)"
+# D-PERF-3, ruling R30g: `/\s+$/` and `/^\s+|\s+$/g` were the model's trims of
+# provider text -- the whole channels.json, every name, every group on every
+# browse pass -- and an unanchored `\s+$` is quadratic in a whitespace run.
+# Their replacements are trim() and Model.trimEndSpace / trimEdgeSpace, never
+# trimEnd or trimStart, which Qt 6.11.2's V4 does not have (node does). A
+# guard against those two known-bad shapes, not an acceptance criterion: the
+# equivalences and the V4 probe (tests/test_proto_v4.py) are what show it.
+trim_log=$CHECK_TMP/trim-shapes.log
+if python3 "$ROOT/scripts/check-trim-shapes.py" >"$trim_log" 2>&1; then
+  trim_n=$(grep -oE '^trim shape guard: [0-9]+ file' "$trim_log" | head -1 | grep -oE '[0-9]+')
+  if [[ -z $trim_n ]]; then
+    cat "$trim_log"; bad "trim shape guard printed no file count at all"
+  elif (( trim_n < TRIM_GUARD_FILES_MIN )); then
+    cat "$trim_log"; bad "trim shape guard read $trim_n file(s), expected at least $TRIM_GUARD_FILES_MIN"
+  else
+    ok "$(tail -1 "$trim_log")"
+  fi
+else
+  cat "$trim_log"; bad "trim shape guard"
 fi
 
 if (( fail )); then echo "check.sh: FAILED"; exit 1; fi
