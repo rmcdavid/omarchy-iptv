@@ -13315,6 +13315,86 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### D-EPG-11 (2026-10-22): the shell keeps the guide's now/next as text and an index, and parses one entry when a row asks
+
+**On the owner's word of 2026-10-21 ("Take on D-EPG-11 after this round").**
+Rulings R31a-h (the lead's, in the round's brief): one text plus a
+null-prototype index of tvg-id -> [offset, length]; `Model.epgEntry` parses one
+slice on demand; the FILE stays valid JSON, one channel fragment per line, so
+`jq`, `json.load` and every fixture reader are unchanged; a single-line file
+written by 0.14.3 is accepted once through the old path, marked `legacy`, and
+rewritten by the next five-minute recompute with no fetch; coverage counts
+index presence, pinned in Python by `write_epg_now` never emitting an untitled
+entry (and `compute_now_next` now drops an untitled half, so the invariant
+holds for any window a writer builds); D-SG-3's null-prototype rule applies;
+no new sink. Workflow `wf_2d7587fc-e5e`: lane-epg11 (`9e58749`, `3d33a39`,
+`40c0006`), a correctness recheck and an independent performance lens, both
+MERGEABLE; then the finishing round `wf_6cb99a81-a11` (lane-epg11-f,
+`a8dafbd`, `3d03526`, and `5d94147`, the pin and the units after its recheck).
+
+**Measured, V4 offscreen under `prlimit`, VmRSS sampled from outside, median
+while the state is held, over files the shipping helper wrote from ordinary
+guides with a description, category and episode on now and next (654 bytes of
+JSON a channel; `scripts/dev-harness/spikes/epg11-store/` re-runs it):**
+per channel, as the slope between 2,000 and 4,000 channels, the file's text
+alone 1.9 KiB, today's parsed map 7.1-7.2 KiB, the store 2.5-2.6 KiB (the index
+about 0.7 KiB of it). At 10,000 channels: text 90.8 MiB, the old parse 143.4
+MiB, the store 97.6 MiB, over a 72.5 MiB empty-shell baseline -- about 25 MiB
+held for the guide where the old shape held about 71. By linear extrapolation,
+UNVERIFIED at size: about 122 MiB at `MAX_CHANNELS` = 50,000 against about
+340. The performance lens reproduced every figure on its own inputs and probe
+(7.2-7.4 -> 2.4-2.7 KiB a channel). `applyEpgNow` at 10,000 channels: 190-210
+ms a call on the old parse, 26-30 ms on the store (V4, load 2.7-2.9), so the
+five-minute recompute's main-thread cost drops by about 170 ms. The cost moved
+onto the 30 s tick: 13 realised rows plus the open panel through `epgEntry`,
+575-587 us a tick against the old map's 270-280 -- 0.3 ms per 30 s -- and a
+scroll that realises every one of 9,708 rows once parses 345-348 ms spread
+over the scroll against 134-145. Each `epgEntry` materialises the same ~7 KiB
+of objects the old map held for that entry plus a UTF-16 slice, about 110-120
+KiB of garbage a tick, measured NOT retained: the held RSS after 200 / 500 /
+2,000 / 8,000 ticks reads 115 / 116 / 246 / 211 MiB, non-monotonic,
+and the old map path reaches the same high-water after 8,000 ticks.
+
+**The open budget with a 10,000-channel guide HELD** (`open-scenario.sh live`
+under the nested headless cage on the private bus, `OPEN_EPG=1`: every channel
+with a tvg-id, the shell's own helper run writing the guide, every open timed
+only after `epg.loaded` read true; the first run of that instrument with guide
+data in the rows). Warm list opens: medians 36-54 ms on both trees across four
+runs (base `2bb05c6` 54 and 49; tip 36-49), inside rule 7's 150 ms. Cold opens
+750-915 ms on both trees, over the budget as D-PERF-2 records and not
+comparable across the runs (the cold shell's own 35 MB XMLTV fetch raises the
+load during a run: base 2.3 -> 5.1, tip 5.1 -> 5.9). 33 passed / 0 failed on
+each run. Transcripts under `/run/user/1000/omarchy-iptv-open/transcripts/`
+(`open-20261022-015355-1019437.out`, the lane's base run) and the lens's four
+(`open-20261022-022325-1109485.out`, `-022650-1122225.out`,
+`-023052-1135610.out`, `-023405-1147592.out`).
+
+**Correctness, the lens's own differential:** 16 ids the lane did not try (an
+escaped quote, a trailing backslash, `}}`, `\":{`, U+2028 in the id, a tab and a
+newline in the id, an astral emoji, `__proto__`, `toString`, a 257-code-point
+id, CRLF in a description) over three text variants (LF, CRLF, no trailing
+newline): 0 differences between `Model.epgEntry` over the store, the tip's
+`parseEpgNow`, AND the base shell's `parseEpgNow` over the same tip-written
+file -- so an old shell under a new helper, the D-REL-9 window, reads the
+file. The red proof on `2bb05c6`: 9 node failures and 4 python; mutations of
+the escaped-quote scan, the trailing-comma strip, the legacy path and the
+coverage rule each red.
+
+**What the lenses found, and the finishing round closed:** the store is
+recognised by a tag the parser sets (`kind: "epg-store"`), never by a key a
+provider can spell, in both `epgCoverage` and `epgEntry`, with the pin the
+recheck asked for; `count` means distinct ids on both paths; the probe is a
+spike in the tree; **F-GATE-8** -- `split-model.mjs --relink` read cross-part
+references out of a part's raw text, comments and literals included, so a
+comment naming another part's export created an import: comment-only imports
+across 16 of the 18 parts for the life of the split, no runtime change, the
+dependency picture wrong -- fixed with the lexer's blanked text and a test red
+on a comment-only mention; **D-DOC-21**, section 7's `epg-now.json | < 1 MB at
+10k`, never measured (1.9 MB with titles, 6.3 MB with detail). The absolute
+MiB figures the round first wrote were KiB / 1000; corrected to / 1024 in the
+docs and the spike before the merge (the per-channel slopes, deltas and every
+conclusion unchanged).
+
 ### The bounds sweep, round 4 (2026-10-22): lane S3 under R32a', and the two-class defect its recheck found
 
 **Lane S3 (`lane-bounds-s3`, `0c59eab`, `1cbc3fa`, `69a4197`, `ac13f59`)** merged lane-bounds-s2 (gated first, after the lane itself corrected its own order: F-M3-22), then implemented R32a' and R32b': the model's `runHostParts` and the helper's `run_host_parts` (on the lane branch, not yet on `dev`) read the RFC authority, cut the printed host at `:` `;` `=` `&`, and withhold it as `[host withheld]` when the host has no dot and an `@` follows; the Sources form's refusal carries the encoding sentence when the predicate holds; a nameless channel on such a URL is `Stream` (D-SINK-31); `maskUrl` walks indexes (D-PERF-11); the guard's entry for D-PERF-6 closes and `test_e` no longer needs an open verdict to stay green (**F-GATE-7**). The shared fixture grew from 27 to 39 redaction vectors and pins the P1's two shapes to the host in both mirrors. Gate on the tip: 2,878 node checks, 1,466 python tests, the helper regex guard 37 calls / 36 reviewed / 0 open.
