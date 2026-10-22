@@ -2521,8 +2521,9 @@ Item {
     for (var i = 0; i < merged.conflicts.length; i++) console.warn("omarchy-iptv: " + Model.mergeConflictLine(merged.conflicts[i]))
     // F1: the record this session's migration added did not land as ours --
     // another program took the place it used ("full"), or added the same
-    // playlist itself ("changed"). No marker was carried, so the entry keeps
-    // both URLs, and the migration is HELD: the reconcile below retries it
+    // playlist itself ("changed"). No marker was carried; the merge re-parked
+    // the pair from the record it dropped (D-SRC-64; the entry is empty by
+    // now), and the migration is HELD: the reconcile below retries it
     // at once (Model.reconcileAction's `heldFull`), which over "changed"
     // finds the record and migrates, and over "full" holds it under the one
     // "Sources is full" card (adoptActive tells it, once) until a removal.
@@ -4171,7 +4172,7 @@ Item {
     //     in time. It is bounded in EVENTS: the answer is at most one shield
     //     run old, and a run follows service start, every persist, every
     //     logo toggle and, since D-SINK-38, every host publish of the file
-    //     (onSettingsChanged), which is the event a recreation raises.
+    //     (onHostSettingsChanged), which is the event a recreation raises.
     // What closes the second window is making every persist wait for its own
     // fresh answer -- the defer machinery already exists, so it is a one-line
     // change from "consult the cached state" to "always defer" -- at the cost
@@ -5154,7 +5155,12 @@ Item {
   // playlist changed (the derived playlistUrl / epgUrl bindings may still
   // hold the previous values inside this handler).
   // D-SINK-38 (round 7, 2026-10-22, the owner's decision): and the shield is
-  // asked again on every host publish of shell.json, through its debounce.
+  // asked again on every HOST publish of shell.json, through its debounce
+  // -- from onHostSettingsChanged below, not from here (round 8, the lead's
+  // answer to round 7's open question): `settings` also re-evaluates on the
+  // plugin's own ownWrite reassignment, so a re-arm here cost an owned
+  // write the funnel's run plus one or two debounce runs; the host's signal
+  // fires once per publish and never for the override.
   // The host's reset commands (omarchy-reinstall-configs, the quattro
   // upgrade's copy, omarchy-refresh-config on a missing file) can re-create
   // the file 0644 mid-session, and until now the shield ran only on the
@@ -5168,7 +5174,7 @@ Item {
   // one publish a chmod can raise through the host's file watch meets a run
   // that changes nothing; and sameOwnWrite already bounds the lagging
   // host's publish cycle. Pinned through the service harness.
-  onSettingsChanged: { root.reconcile(); configShieldDebounce.restart() }
+  onSettingsChanged: root.reconcile()
   // Our own write stands in for the host's value only until the host
   // reports something else -- its (late) echo of our own value, or a
   // foreign change such as `omarchy bar set`. Both make the host
@@ -5178,7 +5184,13 @@ Item {
   // `settings` re-evaluates is what a QML change handler does by
   // construction (it runs before the bindings that depend on the same
   // property), which is also the host behaviour this works around.
-  onHostSettingsChanged: if (root.ownWrite && !Model.ownWriteInForce(root.hostSettings, root.ownWrite)) root.ownWrite = null
+  // D-SINK-38 (round 8): and the shield's debounce is re-armed here, once
+  // per host publish -- the republish of unchanged content, the file replaced
+  // by the package default, the lagging host's late echo of an owned write.
+  // The verb chmods only a file that is not yet private (`changed: false`
+  // otherwise), so the one publish a chmod can raise meets a run that
+  // changes nothing; a shield exit re-arms nothing by itself.
+  onHostSettingsChanged: { if (root.ownWrite && !Model.ownWriteInForce(root.hostSettings, root.ownWrite)) root.ownWrite = null; configShieldDebounce.restart() }
   // D-LIVE-19, and D-SINK-19 changed what reaches it. The active source's
   // in-memory data goes with the active key, so the channel list, the group
   // column and the counts are gone by the time the guide draws its setup

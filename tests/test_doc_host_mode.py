@@ -10,7 +10,11 @@ it. This does (D-SINK-37, D-DOC-22, D-DOC-23, D-DOC-24, 2026-10-22):
   on this machine must carry the command the sentence attributes to it;
 - the README and the contract name the two backup files; the names are
   derived here from the scripts' own templates, not copied;
-- UX-SOURCES 2.3's caps are read from `model/sources.mjs`.
+- UX-SOURCES 2.3's caps, and 5.4's cap sentences (round 8, 2026-10-22: 5.4
+  said 40 and 128 after 2.3 was corrected), are read from `model/sources.mjs`;
+- every (script, line) pin in EXPECT is reached by at least one backticked
+  citation in the five documents (round 8: three pins were written as prose
+  line references, `line 33`, and so verified nothing -- rule 13's shape).
 
 OMARCHY_BIN_DIR and OMARCHY_SHELL_DIR point the host half at a copy, which is
 how it was proven red (one command changed on a copy of
@@ -218,8 +222,25 @@ class BackupNameCase(unittest.TestCase):
         self.assert_names(text, "the contract's refresh-shell section")
 
 
+class PinReachedCase(unittest.TestCase):
+    """Every EXPECT pin is cited somewhere, in the form the test reads; a pin
+    nothing reaches is decoration (rule 13)."""
+
+    DOCS = ("README.md", "docs/OMARCHY-PLUGIN-CONTRACT.md", "docs/ARCHITECTURE.md",
+            "docs/ARCHITECTURE-SOURCES.md", "docs/UX-SOURCES.md")
+
+    def test_every_pin_is_reached_by_a_backticked_citation(self):
+        cited = set()
+        for rel in self.DOCS:
+            cited |= citations(doc(rel))
+        unreached = sorted(c for c in EXPECT if c not in cited)
+        self.assertEqual([], unreached,
+                         "EXPECT pins never reached by a `script:N` citation in %s: %r" % (", ".join(self.DOCS), unreached))
+
+
 class FormCapCase(unittest.TestCase):
-    """UX-SOURCES 2.3's caps are the model's numbers."""
+    """UX-SOURCES 2.3's caps, and 5.4's cap sentences, are the model's
+    numbers."""
 
     def model_caps(self):
         src = doc("model/sources.mjs")
@@ -238,6 +259,17 @@ class FormCapCase(unittest.TestCase):
         stated = [int(g.replace(",", "")) for g in m.groups()]
         self.assertEqual([caps["MAX_SOURCE_URL"], caps["MAX_LABEL"], caps["MAX_XTREAM_SERVER"], caps["MAX_XTREAM_FIELD"]], stated,
                          "UX-SOURCES 2.3 states caps the model does not have (url, label, server, user/pass)")
+
+    def test_ux_sources_5_4_cap_sentences_are_the_models(self):
+        caps = self.model_caps()
+        text = passage(doc("docs/UX-SOURCES.md"), "### 5.4", "\n### 5.5", "UX-SOURCES 5.4")
+        found = {}
+        for field, key in (("Label", "MAX_LABEL"), ("Username", "MAX_XTREAM_FIELD"), ("Password", "MAX_XTREAM_FIELD")):
+            m = re.search(r"`%s too long - max (\d+) characters`" % field, text)
+            self.assertIsNotNone(m, "UX-SOURCES 5.4 no longer states the %s cap sentence this test reads" % field)
+            found[field] = (int(m.group(1)), caps[key])
+        wrong = {f: v for f, v in found.items() if v[0] != v[1]}
+        self.assertEqual({}, wrong, "UX-SOURCES 5.4 states caps the model does not have: {field: (stated, model)} %r" % wrong)
 
 
 if __name__ == "__main__":

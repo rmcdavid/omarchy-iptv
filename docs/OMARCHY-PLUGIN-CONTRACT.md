@@ -38,7 +38,8 @@ re-read them. `$OMARCHY_PATH` = `/usr/share/omarchy` and is READ-ONLY.
   `/etc/skel/.config/omarchy/shell.json`, both 0644 root, byte-identical);
   created under the user's umask by `omarchy-refresh-config` on a missing
   file (`omarchy-refresh-config:42`, `cp -f`: 0644
-  under 022, 0600 under 077; onto an existing file, line 33, the file's own
+  under 022, 0600 under 077; onto an existing file,
+  `omarchy-refresh-config:33`, the file's own
   mode and inode are kept) and by the Omarchy 4 upgrade's `cp -P`
   (`omarchy-upgrade-to-quattro:1731,1735`, `rm -f` then the copy;
   `omarchy-upgrade-to-quattro:1750` for a
@@ -511,11 +512,13 @@ plugin came back reporting its channels and EPG, with no second restart.
 **It also leaves a copy of the old file beside the new one, and so does the
 Omarchy 4 upgrade (verified 2026-10-22, D-SINK-37).** `omarchy-refresh-config`
 copies the existing file to `shell.json.bak.<epoch>` before replacing it
-(`omarchy-refresh-config:22,32`, `cp -f`; removed again at line 36 only when
-the file was already the default), and the upgrade's `backup_config_file`
+(`omarchy-refresh-config:22,32`, `cp -f`; removed again,
+`omarchy-refresh-config:36`, only when the file was already the default),
+and the upgrade's `backup_config_file`
 copies it to `shell.json.omarchy-upgrade-to-quattro.<suffix>.bak`
 (`omarchy-upgrade-to-quattro:1654`, `cp -af`; the suffix is a `date
-+%Y%m%d%H%M%S` set at line 390) before `rm -f` and `cp -P`. Each holds the
++%Y%m%d%H%M%S` set at `omarchy-upgrade-to-quattro:390`) before `rm -f` and
+`cp -P`. Each holds the
 plugin's entry as it was, URLs included, and nothing rewrites it afterwards.
 Mode, measured on scratch copies under umask 022 and 077: `cp -f` gives the
 backup the source's mode masked by the umask (0600 -> 0600 under both; 0644

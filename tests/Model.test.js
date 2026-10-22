@@ -6938,9 +6938,13 @@ checkCall("F1: mergeForeignState -- the migration's record dropped at the cap: n
            kept: [Model.entryMigratedOf(kept.state), Model.findSource(kept.state.sources, mig.key) !== null, kept.migrationHeld],
            same: [Model.entryMigratedOf(same.state), Model.findSource(same.state.sources, mig.key).epgUrl, same.state.activeKey === mig.key, same.dropped.sources, same.migrationHeld, same.conflicts.length],
            removedHere: [Model.entryMigratedOf(removedHere.state), Model.findSource(removedHere.state.sources, mig.key) !== null, removedHere.migrationHeld],
-           line: [line.indexOf("://") === -1, line.indexOf("50 sources") !== -1, /^[\x20-\x7e]*$/.test(line + changedLine), changedLine !== line, Model.migrationHeldAgainLine() === line] }
+           // Round 8 (2026-10-22, the round 7 recheck's P2 #2): the "full" line
+           // names state.json, where the merge re-parks the pair (D-SRC-64),
+           // and no longer says the playlist "stays on the bar entry".
+           line: [line.indexOf("://") === -1, line.indexOf("50 sources") !== -1, /^[\x20-\x7e]*$/.test(line + changedLine), changedLine !== line, Model.migrationHeldAgainLine() === line,
+                  line.indexOf("state.json") !== -1, line.indexOf("guide-data URL") !== -1, /bar entry|on the entry/.test(line + changedLine)] }
 }, { held: [false, true, 50, false, [], "full"], both: [false, ["0abc0002"], "full"], noKey: [true, ["0abc0001"], ""], theirsMarked: [true, ""], kept: [true, true, ""],
-     same: [false, "", true, [], "changed", 1], removedHere: [true, false, ""], line: [true, true, true, true, true] })
+     same: [false, "", true, [], "changed", 1], removedHere: [true, false, ""], line: [true, true, true, true, true, true, true, false] })
 
 // ---- D-SRC-64 (round 7, 2026-10-22, the owner's decision): THE PARKED PAIR ----
 // A migration held at the cap parks both bar URLs in state.json under
@@ -7033,6 +7037,31 @@ checkCall("F1: mergeForeignState -- the migration's record dropped at the cap: n
     return [Model.retiredInputsToKeep(e, false, PAIR), Model.retiredInputsToKeep({ playlistUrl: PL, epgUrl: "http://g.test/x.xml" }, false, PAIR), Model.retiredInputsToKeep({ playlistUrl: "http://g.test/l.m3u", epgUrl: EP }, false, PAIR),
             Model.retiredInputsToKeep(e, false), Model.retiredInputsToKeep(e, false, null), Model.retiredInputsToKeep(e, false, { playlistUrl: "" }), Model.retiredInputsToKeep(e, true, PAIR)]
   }, [[], ["epgUrl"], ["playlistUrl"], ["playlistUrl", "epgUrl"], ["playlistUrl", "epgUrl"], ["playlistUrl", "epgUrl"], []])
+  // Round 8 (2026-10-22, the round 7 recheck's P2 #1). Red on the round 7
+  // merge (4cf8910): the re-park wrote `{ OTHER, "" }` and the landing put
+  // no guide URL on the record.
+  const OTHER = "http://other.test/get.php?username=o&password=zpass"
+  checkCall("round 8, the round 7 recheck's P2 #1: a playlist the ENTRY brings during a hold (a hand `omarchy bar set playlistUrl`) carries the PARKED guide URL when the entry has none -- the re-park at the cap keeps it beside the entry's playlist (heldEpg), a landing puts it on the entry playlist's record, the same playlist re-parks the same pair (unchanged, no write), an entry guide URL beside it wins, and reconcileAction's plan says adoptEpg for the parked guide URL on that path too", () => {
+    const parked = Model.withMigrationPending(Model.withActiveKey(full50, full50.sources[2].key), PAIR)
+    const plan = Model.reconcileAction({ migrating: true, playlist: OTHER, epg: "", seen: [], parked: Model.migrationPendingOf(parked), heldFull: true })
+    const planWithEpg = Model.reconcileAction({ migrating: true, playlist: OTHER, epg: "http://g.test/x.xml", seen: [], parked: Model.migrationPendingOf(parked), heldFull: true })
+    const opts = { adoptUrl: plan.adoptUrl, adoptEpg: plan.adoptEpg, migrating: true }
+    const repark = Model.adoptActiveSource(parked, { playlistUrl: OTHER, epgUrl: "", sourceKey: "" }, 999, "", opts)
+    const same = Model.adoptActiveSource(parked, { playlistUrl: " " + PL, epgUrl: "", sourceKey: "" }, 999, "", opts)
+    const entryEpg = Model.adoptActiveSource(parked, { playlistUrl: OTHER, epgUrl: "http://g.test/x.xml", sourceKey: "" }, 999, "", { adoptUrl: true, adoptEpg: planWithEpg.adoptEpg, migrating: true })
+    const room = Model.cloneState(parked, { sources: parked.sources.slice(1) })
+    const landed = Model.adoptActiveSource(room, { playlistUrl: OTHER, epgUrl: "", sourceKey: "" }, 999, "", opts)
+    const rec = Model.findSourceByUrl(landed.state.sources, Model.normalizeSourceUrl(OTHER, { origin: "cli" }))
+    return { plan: [plan.act, plan.adoptUrl, plan.adoptEpg, plan.parked], planWithEpg: [planWithEpg.adoptEpg, planWithEpg.parked],
+             repark: [repark.full, repark.parked, repark.changed, repark.heldEpg, Model.migrationPendingOf(repark.state)],
+             same: [same.full, same.parked, same.changed, Model.migrationPendingOf(same.state)],
+             entryEpg: [entryEpg.full, Model.migrationPendingOf(entryEpg.state)],
+             landed: [landed.adoptedUrl, landed.marked, Model.migrationPendingOf(landed.state), rec !== null && rec.epgUrl === EP, landed.key === (rec && rec.key)] }
+  }, { plan: ["adopt", true, true, false], planWithEpg: [true, false],
+       repark: [true, true, true, true, { playlistUrl: OTHER, epgUrl: EP }],
+       same: [true, true, false, PAIR],
+       entryEpg: [true, { playlistUrl: OTHER, epgUrl: "http://g.test/x.xml" }],
+       landed: [true, true, null, true, true] })
 })()
 
 // ---- R33a (round 7, 2026-10-22): A PASTE INTO A URL FIELD JOINS ITS LINES ----
@@ -14641,6 +14670,52 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
                    entry: retired(h.storedEntry()), held: h.root.migrationHeldFull, reports: reports(h), told: allTold(h), dropTold: dropTold(h),
                    restart: [pendingOf(next.file()), name(epgOf(next.file(), KNEW)), next.root.activeSourceKey === KNEW, reports(next)], clean: clean(h) && !leaks(h) }
         }, { before: { parked: PAIR, entry: [] }, file: [50, "E", true, true, null], label: "theirs", entry: [], held: false, reports: ["playlistUrl:full"], told: ["Sources is full"], dropTold: 0, restart: [null, "E", true, []], clean: true })
+        // ---- Round 8 (2026-10-22, the round 7 recheck's P2 #1): a hand
+        // `omarchy bar set playlistUrl <any>` DURING the hold. Red on the
+        // round 7 merge (4cf8910): the re-park was `{ Z, "" }` and E -- the
+        // only copy -- was nowhere (disk, entry, memory) with nothing told;
+        // fe40b2c had kept it on the entry beside the new playlist.
+        checkCall("round 8, the round 7 recheck's P2 #1 (" + tag + "): held (the pair parked, the entry empty), then a hand `omarchy bar set playlistUrl` of ANOTHER playlist -- the re-park keeps the parked guide URL beside the entry's playlist (one journal line naming both, no URL), the entry is stripped again, E is in the file and in memory (the R21 oracle holds for E); the SAME playlist set again changes nothing and prints nothing; a guide URL set on the entry wins over the parked one; then \"Remove one\" lands the entry's playlist WITH the parked guide URL", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.drain()
+          const j0 = parkedLine(h), w0 = h.warnings.length
+          h.host.externalSet("playlistUrl", Z); h.drain()
+          const other = { parked: pendingOf(h.file()), memory: pendingOf(h.root.userState), entry: retired(h.storedEntry()), oracleE: oracle(h)[1], journal: parkedLine(h) - j0,
+                          both: h.warnings.slice(w0).filter(w => /playlist and guide URL are kept in state\.json/.test(w)).length, urlWrites: urlWrites(h), told: allTold(h), heldFull: h.root.migrationHeldFull }
+          const j1 = parkedLine(h)
+          h.host.externalSet("playlistUrl", Z); h.drain()
+          const again = { parked: pendingOf(h.file()), entry: retired(h.storedEntry()), journal: parkedLine(h) - j1, urlWrites: urlWrites(h) }
+          h.host.externalSet("epgUrl", F); h.drain()
+          const entryWins = { parked: pendingOf(h.file()), entry: retired(h.storedEntry()), urlWrites: urlWrites(h) }
+          const g = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          g.drain(); g.host.externalSet("playlistUrl", Z); g.drain()
+          const rm = g.root.removeSource(keyOf("http://m0.example.test/l.m3u")); g.drain()
+          const next = restart(g)
+          return { other, again, entryWins,
+                   landed: { rm: rm.ok, parked: pendingOf(g.file()), zEpg: name(epgOf(g.file(), KZ)), newInRecords: M.findSource(g.file().sources, KNEW) !== null, active: g.root.activeSourceKey === KZ, marked: marked(g), entry: retired(g.storedEntry()), count: g.file().sources.length,
+                             restart: [pendingOf(next.file()), name(epgOf(next.file(), KZ)), next.root.activeSourceKey === KZ] },
+                   clean: clean(h) && clean(g) && clean(next) && !leaks(h) && !leaks(g) }
+        }, { other: { parked: { playlistUrl: Z, epgUrl: E }, memory: { playlistUrl: Z, epgUrl: E }, entry: [], oracleE: true, journal: 1, both: 1, urlWrites: 0, told: ["Sources is full"], heldFull: true },
+             again: { parked: { playlistUrl: Z, epgUrl: E }, entry: [], journal: 0, urlWrites: 0 },
+             entryWins: { parked: { playlistUrl: Z, epgUrl: F }, entry: [], urlWrites: 0 },
+             landed: { rm: true, parked: null, zEpg: "E", newInRecords: false, active: true, marked: true, entry: [], count: 50, restart: [null, "E", true] }, clean: true })
+        // ---- Round 8 (2026-10-22, the round 7 recheck's P2 #2 and the lead's
+        // answer on F1's re-hold): the ONE journal line a re-park by a merge
+        // prints says where the pair rests. Red on the round 7 merge
+        // (4cf8910): the line said the playlist "stays on the bar entry".
+        checkCall("round 8, the round 7 recheck's P2 #2 (" + tag + "): F1's held-again merge (the freed place refilled before the retry's read) prints exactly ONE journal line about the re-parked pair -- Model.migrationHeldAgainLine(\"full\") -- and it names state.json, not the bar entry, and carries no URL; the service's own \"kept in state.json\" line does not print again (the retry finds the pair already parked, nothing changed)", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.drain()
+          const w0 = h.warnings.length, j0 = parkedLine(h)
+          raced(h, x => x.foreign(sf => { const st = JSON.parse(sf.disk); st.sources = st.sources.filter(r => r.url !== "http://m7.example.test/l.m3u"); sf.disk = JSON.stringify(st) + "\n" }))
+          const since = h.warnings.slice(w0)
+          const heldAgain = since.filter(w => /full again/.test(w))
+          return { lines: heldAgain.length, exact: heldAgain.map(w => w === "omarchy-iptv: " + M.migrationHeldAgainLine("full")),
+                   says: heldAgain.map(w => [w.indexOf("state.json") !== -1, /bar entry|on the entry/.test(w), w.indexOf("://") === -1]),
+                   parkedAgain: parkedLine(h) - j0, pair: pendingOf(h.file()), entry: retired(h.storedEntry()), clean: clean(h) && !leaks(h) }
+        }, { lines: 1, exact: [true], says: [[true, false, true]], parkedAgain: 0, pair: { playlistUrl: NEW, epgUrl: E }, entry: [], clean: true })
         // ---- D-SINK-38 (round 7, the owner's decision): THE SHIELD RE-ARMS
         // ON EVERY HOST PUBLISH, through its debounce. The review's Q1
         // measured 0 shield runs for a republish of unchanged content and for
@@ -14648,22 +14723,42 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         // refresh-config and the quattro copy leave): the shield ran on the
         // service's own events only. Timers do not run here; a restart() is
         // counted, and the exit handler is the shipping one.
-        checkCall("D-SINK-38 (" + tag + "): a host republish of UNCHANGED content arms the shield's debounce once and writes nothing; the host's file replaced by the package default (our entry gone) arms it once more and writes nothing; a shield exit that found the file private raises no publish, no owned write and no re-arm (no loop); after an EXPOSED answer the gate refuses a URL-bearing write and still passes the key-only one that takes a URL out", () => {
+        // Round 8 (2026-10-22, the lead's answer to round 7's open question):
+        // the re-arm moved from onSettingsChanged to onHostSettingsChanged,
+        // one per HOST publish and none for the plugin's own ownWrite
+        // reassignment. The `owned` arm pins that: an owned write (the logo
+        // toggle) arms the debounce exactly as many times as the host
+        // publishes (once: the host publishes every write, one behind on the
+        // lagging host) beside the funnel's own run; on the round 7 merge
+        // (4cf8910) it armed it twice (lag) and three times (echo) for that
+        // one publish.
+        checkCall("D-SINK-38 (" + tag + "): a host republish of UNCHANGED content arms the shield's debounce once and writes nothing; the host's file replaced by the package default (our entry gone) arms it once more and writes nothing; an OWNED write arms it once per host publish (round 8: not for the plugin's own ownWrite reassignment) beside the funnel's run; a shield exit that found the file private raises no publish, no owned write and no re-arm (no loop); after an EXPOSED answer the gate refuses a URL-bearing write and still passes the key-only one that takes a URL out", () => {
           const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), mode, { ownEcho })
           const t = h.ids.configShieldDebounce
+          let publishes = 0, funnelRuns = 0
+          const publish0 = h.publish
+          h.publish = () => { publishes++; publish0() }
+          h.root.runConfigShield = () => { funnelRuns++ }
           const r0 = t.restarts, w0 = h.host.writes.length
           h.publish(); h.drain()
           const same = { restarts: t.restarts - r0, writes: h.host.writes.length - w0 }
           h.host.stored.bar.layout.right = []; h.host.published = JSON.parse(JSON.stringify(h.host.stored.bar)); h.publish(); h.drain()
           const gone = { restarts: t.restarts - r0, writes: h.host.writes.length - w0, warn: h.warnings.filter(w => /no writable bar entry/.test(w)).length }
+          h.host.stored.bar.layout.right = [{ id: "io.github.rmcdavid.iptv", sourceKey: KA, showLogos: false }]; h.host.published = JSON.parse(JSON.stringify(h.host.stored.bar)); h.publish(); h.drain()
+          const rO = t.restarts, wO = h.host.writes.length, pO = publishes, fO = funnelRuns
+          h.root.setShowLogos(true); h.drain()
+          const owned = { restarts: t.restarts - rO, publishes: publishes - pO, funnelRuns: funnelRuns - fO, writes: h.host.writes.length - wO, logos: h.storedEntry().showLogos === true }
           const r1 = t.restarts, w1 = h.host.writes.length
           h.root.onConfigShieldExit(JSON.stringify({ ok: true, kind: "config", action: "shield", verdict: "private", private: true, changed: false, modeBefore: "0600", modeAfter: "0600" }) + "\n"); h.drain()
           const exit = { restarts: t.restarts - r1, writes: h.host.writes.length - w1, state: h.root.hostConfigShield, pending: h.root.pendingPersist }
           h.root.onConfigShieldExit(JSON.stringify({ ok: true, kind: "config", action: "shield", verdict: "exposed", private: false, changed: false, modeBefore: "0644", modeAfter: "0644" }) + "\n"); h.drain()
           const exposed = { state: h.root.hostConfigShield, url: M.entryShieldDecision(h.root.hostConfigShield, { sourceKey: KA, showLogos: false, playlistUrl: NEW }), keyOnly: M.entryShieldDecision(h.root.hostConfigShield, M.ownedEntryPatch(h.root.settings, { sourceKey: KA })) }
-          return { same, gone, exit, exposed, handler: /^  onSettingsChanged: \{ root\.reconcile\(\); configShieldDebounce\.restart\(\) \}$/m.test(svcText) }
-        }, { same: { restarts: 1, writes: 0 }, gone: { restarts: 2, writes: 0, warn: 0 }, exit: { restarts: 0, writes: 0, state: M.CONFIG_SHIELD_PRIVATE, pending: null },
-             exposed: { state: M.CONFIG_SHIELD_EXPOSED, url: M.CONFIG_REFUSE, keyOnly: M.CONFIG_PERSIST }, handler: true })
+          return { same, gone, owned, exit, exposed,
+                   handler: [/^  onSettingsChanged: root\.reconcile\(\)$/m.test(svcText),
+                             /^  onHostSettingsChanged: \{ if \(root\.ownWrite && !Model\.ownWriteInForce\(root\.hostSettings, root\.ownWrite\)\) root\.ownWrite = null; configShieldDebounce\.restart\(\) \}$/m.test(svcText)] }
+        }, { same: { restarts: 1, writes: 0 }, gone: { restarts: 2, writes: 0, warn: 0 }, owned: { restarts: 1, publishes: 1, funnelRuns: 1, writes: 1, logos: true },
+             exit: { restarts: 0, writes: 0, state: M.CONFIG_SHIELD_PRIVATE, pending: null },
+             exposed: { state: M.CONFIG_SHIELD_EXPOSED, url: M.CONFIG_REFUSE, keyOnly: M.CONFIG_PERSIST }, handler: [true, true] })
       }
     }
   }

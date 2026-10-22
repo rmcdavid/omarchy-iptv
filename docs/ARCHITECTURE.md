@@ -1229,12 +1229,15 @@ measurement this lane could take:
    under umask 022 and 077 (D-DOC-23; the first version of this item said
    "by CREATING the file" and "a tool nobody here has enumerated", and the
    first was false for the third path): `useradd -m` seeding a new home from
-   `/etc/skel`, whose copy is 0644 root-owned (`cp -a` of it gives 0644 under
-   both umasks; the home itself is 0700 by `HOME_MODE` in `/etc/login.defs`);
+   `/etc/skel`, whose copy is 0644 root-owned -- INFERRED, not measured:
+   `useradd` was not run here, its copy routine was read in shadow's source,
+   and `cp -a` of skel gives 0644 under both umasks (the home itself is 0700
+   by `HOME_MODE` in `/etc/login.defs`, read);
    `omarchy-refresh-config omarchy/shell.json` on a MISSING file
    (`omarchy-refresh-config:42` -- every script here is under
    `/usr/share/omarchy/bin` -- `cp -f`, the umask:
-   0644 under 022, 0600 under 077; onto an EXISTING file, line 33, it keeps
+   0644 under 022, 0600 under 077; onto an EXISTING file
+   (`omarchy-refresh-config:33`) it keeps
    that file's mode and inode, 0600 stays 0600); `omarchy-reinstall-configs`
    (`omarchy-reinstall-configs:19`, `cp -af /etc/skel/. ~/`), the one path
    that LOOSENS an existing file IN PLACE -- a 0600 file becomes 0644 on the
@@ -1261,7 +1264,14 @@ measurement this lane could take:
    mitigation is the re-arm: the shield runs again after every successful
    write and after the logo toggle's write, so the gate in front of the next
    persist is answering about the file as it is now rather than as it was at
-   login.
+   login -- and, since D-SINK-38 (round 7 of the bounds sweep, 2026-10-22,
+   the owner's decision), on every host publish of the file as well
+   (`onHostSettingsChanged`, one debounced run per publish; moved there
+   from `onSettingsChanged` in round 8 so the plugin's own override
+   reassignment arms nothing), which is the event each of the reset paths
+   above raises through the shell's file watch. Pinned through the service
+   harness on both hosts; whether the shell's FileView publishes a
+   recreation and the plugin's own fchmod is UNVERIFIED on a running shell.
 3. *Installs that are already exposed.* The shield runs on the startup path
    unconditionally, independent of `mkdirProc`'s chain and independent of
    whether any persist happens, so an install whose `shell.json` is 0644 with
@@ -1275,11 +1285,13 @@ measurement this lane could take:
    Two of the reset paths in residual 2 copy the OLD file beside the new one
    before replacing it: `omarchy-refresh-config` writes
    `shell.json.bak.<epoch>` (`omarchy-refresh-config:32`, `cp -f`, kept
-   unless the file was already the default, line 36), and the Omarchy 4
+   unless the file was already the default: `omarchy-refresh-config:36`,
+   `rm` after a `cmp -s`), and the Omarchy 4
    upgrade's `backup_config_file` writes
    `shell.json.omarchy-upgrade-to-quattro.<suffix>.bak`
    (`omarchy-upgrade-to-quattro:1654`, `cp -af`, the suffix a timestamp set
-   at line 390). Each holds the plugin's entry as it was, URLs included, for
+   at `omarchy-upgrade-to-quattro:390`). Each holds the plugin's entry as it
+   was, URLs included, for
    ever, and the shield never opens either: it opens exactly
    `$HOME/.config/omarchy/shell.json` (the paragraph above). Their mode,
    measured on scratch copies under umask 022 and 077 on 2026-10-22: `cp -f`
@@ -1292,7 +1304,14 @@ measurement this lane could take:
    before 0.13.3 (no shield; the URL on the entry by design) whose 0644 file
    met `omarchy refresh shell`, `omarchy-refresh-config omarchy/shell.json`
    or the upgrade, plus a file `omarchy-reinstall-configs` had reset to 0644
-   and `omarchy bar set` had given a URL before the plugin's next start. On
+   (skel's contents: no plugin entry), `omarchy plugin enable` had put the
+   entry back (the shell's `enablePlugin`, the FileView writer, 0644 kept;
+   a kept service instance is not recreated on re-enable, `keepLoaded`, so
+   no start-up shield runs) and `omarchy bar set` had given a URL, all
+   before the plugin's next owned write -- on a migrated install that write
+   strips the URL (R21b) and re-arms the shield, and since D-SINK-38 every
+   host publish re-arms it too, so the window is the one reconcile; "until
+   the plugin's next start" only in a no-write state (R22a, R21e). On
    this machine both backups are 0600 (stat only; a 0600 source each time),
    and `cp -f` onto a 0600 file keeps it 0600 (residual 2), so a shielded
    install's backups are private. The README's Settings and Troubleshooting
@@ -1462,7 +1481,8 @@ now, with each decision lifted into `Model.js` so node can call it (rule 12):
   is told once (`Sources is full`); the next reconcile after a removal
   migrates] [2026-10-20, R28b: the entry's `epgUrl` is held with it, not
   attached to the step-2 record, and the migration after a removal takes
-  both]), invalid is reported and
+  both] [2026-10-22, D-SRC-64: both rest in `state.json`'s parked pair and
+  the entry is stripped once that write has landed]), invalid is reported and
   the key is left exactly as it was [2026-10-20, R29d: and the entry's
   `epgUrl` beside an invalid playlist is not attached to the step-2 record
   either -- until R29d it replaced that record's own guide URL -- but

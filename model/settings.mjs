@@ -817,7 +817,8 @@ function entryInputNotice(name, reason) {
              body: setting + " in the bar settings was not a usable URL and was removed. Add or edit sources in " + where + "." }
   }
   // R27d (D-SRC-44): the migration did not run because Sources is full. The
-  // URL stays on the bar entry; nothing names it or the entry's label.
+  // URL rests in state.json's parked pair since D-SRC-64 (on the bar entry
+  // before it); nothing names it or the entry's label.
   // R28b: and the guide URL set beside it is held with it, so the sentence
   // names both -- they move in together once a source is removed.
   // R29e (2026-10-20, round 2's P3): and it says which source is active

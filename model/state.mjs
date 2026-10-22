@@ -1375,8 +1375,8 @@ var MERGE_WHOLE_FIELDS = ["recents", "activeKey", "lastPlayed", "session", "cach
 // one-time migration added (Service's migrationAddedKey; "" when it added
 // none). When the marker is OURS ALONE -- the migration ran since the base
 // and theirs does not carry it -- and the cap drops that record, the
-// migration did not happen: the marker is NOT carried (the entry keeps both
-// URLs: the funnel keeps a retired key until the marker has landed), the
+// migration did not happen: the marker is NOT carried (the entry kept both
+// URLs under F1; since D-SRC-64 the pair is re-parked, below), the
 // active key it set goes back to theirs, the record is not counted among
 // `dropped.sources` (the user added nothing, and "make room, then add it
 // again" names a URL the entry still holds), and `migrationHeld` is "full":
@@ -1534,14 +1534,20 @@ function mergeDropLines(dropped) {
 }
 
 // F1. The journal line for a merge that held the migration again, by the
-// reason mergeForeignState gave: no key, no URL -- the bar entry still holds
-// what the record would have carried.
+// reason mergeForeignState gave: no key, no URL. Round 8 (2026-10-22, the
+// round 7 recheck's P2 #2): the "full" line says where the held playlist
+// rests -- state.json, the plugin's own file, where the merge re-parked
+// the pair (D-SRC-64) -- and no longer "on the bar entry", which D-SRC-64
+// made false (the entry is empty by then). It is the ONE journal line a
+// re-park by a merge prints: the retry that follows finds the state already
+// holding exactly that pair, so adoptActiveSource's `changed` is false and
+// the service's own "kept in state.json" line does not print again.
 function migrationHeldAgainLine(why) {
   if (str(why) === "changed") {
     return MERGE_LINE_HEAD + "another program added the bar's playlist itself, so it is moved into Sources again over that record"
   }
   return MERGE_LINE_HEAD + "the bar's playlist could not be moved into Sources, which is full again (the limit is " + MAX_SOURCES +
-    " sources); it stays on the bar entry, with its guide-data URL, until a source is removed"
+    " sources); it is kept, with its guide-data URL, in state.json (the plugin's own file) until a source is removed"
 }
 
 // R25b. What the user is told, ONCE per merge that dropped anything: how

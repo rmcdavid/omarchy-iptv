@@ -364,7 +364,13 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-80}
 # state-keys fixture's nine parked cases and its `pending` group (10, one
 # re-counted); 61 red on fe40b2c, every shipping decision red on a mutation
 # (the lane report).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2984}
+# 2026-10-22, lane-r8 (round 8, the round 7 integration): 2984 -> 2993 --
+# the bar-set-during-hold rule (1 model + 4 harness: the parked guide URL
+# rides with the entry's playlist), the held-again line names state.json (4
+# harness; the F1 model check re-levelled in place), the D-SINK-38 pin
+# re-levelled in place for the onHostSettingsChanged re-arm; 14 red on the
+# round 7 merge 4cf8910 (the lane report).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2993}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -563,7 +569,10 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2984}
 # command changed (2/7, 4/7); see the lane report.
 # 2026-10-22, lane-r8 (the round 7 merge): the two lanes' floors added,
 # 1487 + 7 = 1494 -- both lanes' tests are on the merged tree.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1494}
+# 2026-10-22, lane-r8 (round 8): 1494 -> 1496 -- test_doc_host_mode's
+# PinReachedCase (+1: every EXPECT pin is reached by a backticked citation)
+# and the UX-SOURCES 5.4 cap test (+1); both red on 4cf8910's documents.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1496}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

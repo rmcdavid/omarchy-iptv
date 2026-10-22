@@ -416,10 +416,17 @@ function reconcileAction(input) {
     }
   }
   var parked = migrationPendingOf({ migrationPending: it.parked })
-  if (migrating && parked !== null && entryInputForm("playlistUrl", values.playlistUrl).text === "") {
-    out.adoptUrl = true
-    out.parked = true
-    if (parked.epgUrl !== "") out.adoptEpg = true
+  if (migrating && parked !== null) {
+    if (entryInputForm("playlistUrl", values.playlistUrl).text === "") {
+      out.adoptUrl = true
+      out.parked = true
+    }
+    // Round 8 (2026-10-22, the round 7 recheck's P2 #1): the parked guide
+    // URL is an input whenever the entry carries none -- beside the parked
+    // playlist, or beside a playlist the entry brought (a hand `omarchy bar
+    // set playlistUrl` during the hold), which used to re-park with "" for
+    // the guide URL and lose the only copy unreported.
+    if (parked.epgUrl !== "" && entryInputForm("epgUrl", values.epgUrl).text === "") out.adoptEpg = true
   }
   if (out.adoptUrl) out.act = "adopt"
   else if (it.first === true || it.force === true) out.act = "migrate"
@@ -465,17 +472,20 @@ function reconcileAction(input) {
 // names no record and the state already holds MAX_SOURCES, nothing is
 // adopted and nothing evicted: `full` is set, the resolution continues at
 // step 2 (as for an invalid value), and the marker is NOT set -- so the
-// entry keeps its URL (the funnel keeps a retired key until the marker has
+// entry kept its URL (the funnel keeps a retired key until the marker has
 // landed, Model.retiredInputsToKeep; shell.json is 0600 under the D-SINK-18
 // shield) and the next reconcile after a removal migrates it
-// (Model.reconcileAction's `heldFull`).
+// (Model.reconcileAction's `heldFull`). Since D-SRC-64 (below) the held
+// URL rests in state.json instead, and the entry is stripped once that
+// write has landed.
 //
 // R28b (2026-10-20): A HELD MIGRATION HOLDS BOTH URLS. With step 1 `full`,
 // the entry's guide URL belongs to the playlist that was held, not to
 // whichever record steps 2-4 name, so the R4 block below does not run: it
 // is not adopted onto any record, not refused, not reported as having no
-// source, and it stays on the entry beside its playlist (the same funnel
-// keep rule). Round 1 measured both losses R27d had left: a source the user
+// source, and it is held beside its playlist -- on the entry under R28b,
+// in state.json's parked pair since D-SRC-64 (the same funnel keep rule
+// strips the entry once the pair has landed). Round 1 measured both losses R27d had left: a source the user
 // picked had its own guide URL replaced by the bar's at the next start (its
 // only copy), and "Remove one" migrated the playlist with no guide URL and
 // stripped the bar's. `heldEpg` says the entry carries a guide URL that was
@@ -552,12 +562,25 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   // whitespace or control characters alone is NO input (R4's no-op).
   // D-SRC-64: with no playlist URL on the entry, the parked pair is the
   // input -- its playlist, and its guide URL unless the entry carries one.
+  // Round 8 (2026-10-22, the round 7 recheck's P2 #1): the parked guide
+  // URL rides with WHICHEVER playlist is the input when the entry carries
+  // no guide URL -- the parked playlist, or one the entry brought over it
+  // (a hand `omarchy bar set playlistUrl <any>` during the hold, the parked
+  // one included). The first cut read the guide URL from the ENTRY alone
+  // on that path, which the hold had already stripped, and re-parked
+  // `{ entry playlist, "" }`: the parked guide URL, the only copy, was gone
+  // with nothing told (fe40b2c kept it on the entry beside the new
+  // playlist). An entry guide URL, when present, wins (R21: the entry is
+  // read until the marker lands); a re-park keeps the parked one beside
+  // the entry's playlist, and a landing puts it on the record. Nothing is
+  // dropped silently: an entry URL ends in a record, in the parked pair, or
+  // is reported (the R21 oracle), on this path too.
   var parked = adoptUrl ? migrationPendingOf(st) : null
   var entryUrl = adoptUrl ? entryInputForm("playlistUrl", e.playlistUrl).text : ""
   var fromParked = adoptUrl && entryUrl === "" && parked !== null
   var url = fromParked ? entryInputForm("playlistUrl", parked.playlistUrl).text : entryUrl
   var epg = adoptEpg ? entryInputForm("epgUrl", e.epgUrl) : entryInputForm("epgUrl", "")
-  if (fromParked && epg.text === "") epg = entryInputForm("epgUrl", parked.epgUrl)
+  if (parked !== null && epg.text === "") epg = entryInputForm("epgUrl", parked.epgUrl)
   var resolved = false
   if (url !== "") {
     // Step 1. The guide URL is NOT handed to reconcileSources here: the R4

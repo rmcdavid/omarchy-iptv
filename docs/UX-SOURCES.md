@@ -1405,19 +1405,19 @@ Key names at opacity 0.7, verbs at 0.45, as shipped.
 | `empty` | nothing after trim | `Enter a playlist URL or path` | (EPG is optional; no error) |
 | `scheme` | `ftp://`, `rtmp://`, `mailto:`, `javascript:`, a bare host, anything not `http(s)://` or `/` | `Start with http://, https://, or / for a local file` | `EPG: start with http://, https://, or / for a local file` |
 | `invalid` | scheme present but no host, illegal characters, unparsable | `Invalid URL - check the host` | `EPG: invalid URL - check the host` |
-| `invalid`, the inner-character sentence (R33b, round 7, 2026-10-22; the code stays `invalid`, the sentence is `Model.sourceErrorMessage("url_control")`) | a space, a tab, a line break or any control character INSIDE the value, in a path too, since D-SRC-63 (`http://u:pa<TAB>ss@h.test/x`, which used to submit as the password `pass`; `http://h .test/`; a paste of `http://h.test/x<LF>http://evil.test/` is first JOINED by R33a -- CR and LF only -- and then refused as one URL with no host it can read, or accepted when the join made a URL) | `Remove the space, tab, line break or control character inside the URL` (the Server field the same) | `EPG: remove the space, tab, line break or control character inside the URL` |
+| `invalid`, the inner-character sentence (R33b, round 7, 2026-10-22; the code stays `invalid`, the sentence is `Model.sourceErrorMessage("url_control")`) | a space, a tab, a line break or any control character INSIDE the value, in a path too, since D-SRC-63 (`http://u:pa<TAB>ss@h.test/x`, which used to submit as the password `pass`; `http://h .test/`; a paste of `http://h.test/x<LF>http://evil.test/` is first JOINED by R33a -- CR and LF only -- and submits as ONE URL, `http://h.test/xhttp://evil.test/`, which validates: the first line's path swallows the second line, D-SRC-63's cost as ARCHITECTURE-SOURCES 6.1 states it; a join that makes no URL is refused with this sentence) | `Remove the space, tab, line break or control character inside the URL` (the Server field the same) | `EPG: remove the space, tab, line break or control character inside the URL` |
 | `invalid`, with the predicate (R32a', R32a'') | an `@` follows the first `/` and either the host before it has no dot (`http://myuser:pa#ss@cdn.test/x`, `pa?ss`, `pa/ss`: port `pa`) or the port after it is not a number (`http://user.name:pa/ss@h.test/x`, `http://h.test:pa/me@x.test/y`), and the value does not validate | `Invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` | `EPG: invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` (the Server field the same, without the prefix) |
 | `relative_path` | starts with `~`, `./` or a name | `Use an absolute path (starts with /, not ~)` | `EPG: use an absolute path (starts with /, not ~)` |
 | `too_long` | over `LIMITS.url` | `Too long - max 2,048 characters` | `EPG: too long - max 2,048 characters` |
 | `duplicate` | same playlist URL as another source (exact after trim) | `Already in Sources as "Provider"` | -- |
-| `label_too_long` | over `LIMITS.label` | `Label too long - max 40 characters` | |
+| `label_too_long` | over `LIMITS.label` | `Label too long - max 64 characters` (64 since D-DOC-24, 2026-10-22; this row said 40) | |
 | `label_taken` | another source has this label (case-insensitive, trimmed) | `A source named "Provider" already exists` | |
 | `server_empty` | | `Enter the server URL` | |
 | `server_scheme` | not `http(s)://` | `Server must start with http:// or https://` | |
 | `server_path` | anything after `host[:port]` (a `get.php?...` paste) | `Server is just http://host:port - no path` | |
 | `user_empty` / `pass_empty` | | `Enter the username` / `Enter the password` | |
 | `user_control` / `pass_control` (D-SRC-65, R33c, round 7, 2026-10-22) | a tab, a line break or any control character inside or at an edge of the username or password -- refused, never deleted (`xtreamUrls` used to delete it, so `pa<TAB>ss` reached the provider as `pass`); a space is allowed and encoded | `Remove the tab, line break or control character inside the username` / `Remove the tab, line break or control character inside the password` (the URL sentence with the noun swapped and no space named) | |
-| `user_too_long` / `pass_too_long` | over 128 | `Username too long - max 128 characters` / `Password too long - max 128 characters` | |
+| `user_too_long` / `pass_too_long` | over `LIMITS.user` / `LIMITS.pass`, 256 | `Username too long - max 256 characters` / `Password too long - max 256 characters` (256 since D-DOC-24, 2026-10-22; this row said 128) | |
 
 One error at a time, first failing field in form order; focus moves to it.
 No `https://` auto-prefix and no Xtream URL auto-parse (8).
@@ -1725,9 +1725,12 @@ none carrying a URL or the credential). The rendered card is UNVERIFIED on a
 display.
 
 [Round 17, 2026-10-20, R27d (D-SRC-44): THE MIGRATION NEVER EVICTS. The
-`full` row is not a removal: the playlist URL STAYS on the entry (the
-migration marker is not set, so the entry funnel keeps the retired keys;
-`shell.json` is 0600 under the D-SINK-18 shield), no record is added or
+`full` row is not a removal: the playlist URL STAYED on the entry until
+D-SRC-64 (round 7 of the bounds sweep, 2026-10-22: both URLs rest in
+`state.json` and the entry is stripped once that write has landed, the row
+above; until then the migration marker was not set, so the entry funnel kept
+the retired keys, and `shell.json` is 0600 under the D-SINK-18 shield), no
+record is added or
 evicted, and the report `playlistUrl:full` is what keeps round 11's oracle
 -- an entry URL ends in a record or is reported -- true. It shares replace
 id 74016, so on screen it replaces a refusal card shown just before it.
