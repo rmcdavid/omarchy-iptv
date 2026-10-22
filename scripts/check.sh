@@ -541,7 +541,13 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2943}
 # 2026-10-22, lane-bounds-s5 (round 6): 1481 -> 1485 -- test_source's
 # D-SRC-63 reader test (+1), test_model_regex_guard's three F-GATE-9 tests
 # (+3); test_helper's class test and exact-`py` test rewritten in place.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1485}
+# 2026-10-22, lane-r7-docs (round 7: D-SINK-37, D-DOC-22, D-DOC-23,
+# D-DOC-24): 1485 -> 1492 -- tests/test_doc_host_mode.py (+7), the joins
+# between the documents' mode sentences and the host scripts' lines, the
+# backup names and the scripts' templates, UX-SOURCES 2.3's caps and the
+# model. Red on fe40b2c's documents (7/7) and on a host copy with one
+# command changed (2/7, 4/7); see the lane report.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1492}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
