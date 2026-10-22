@@ -12,7 +12,7 @@ import {
   logoConsentLines, WALL_KEY
 } from "./logos.mjs"
 import {
-  sourceLabel, hostOf, redactUrls
+  sourceLabel, hostOf, isUrlSpaceAt, urlSpaceIndex, redactUrls
 } from "./privacy.mjs"
 import {
   formatClock, formatCount, pluralChannels, joinParts
@@ -364,13 +364,25 @@ var HOST_WITHHELD = "[host withheld]"
 // (the first `/`, `?`, `#` or whitespace) and at the first `:` (a port),
 // `;`, `=` or `&` (a parameter delimiter, so a neighbouring parameter never
 // prints, D-SINK-23); a bracketed literal is the host up to its `]`, or
-// nothing. `withheld` is the predicate: the host is not bracketed, has no
-// dot, and an `@` follows the authority before whitespace. Every scan is one
-// index walk or one single-class search; nothing here is retried.
-// The helper's `run_host_parts` is the mirror.
+// nothing. `withheld` is the predicate, two arms (R32a'', 2026-10-22), each
+// needing an `@` after the authority before whitespace: the host is not
+// bracketed and has no dot (D-SINK-28: `http://myuser:pa#ss@cdn.test/x`
+// reads as host `myuser`, port `pa`); OR the authority carries a NON-NUMERIC
+// port -- a `:` after its last `@` whose text, up to the next `;`, `=` or
+// `&`, is non-empty and not all digits (D-SINK-35:
+// `http://user.name:pa/ss@h.test/x` reads as host `user.name`, port `pa`,
+// which is a dotted username and a password; `http://me@mail.test:pa/ss@h.test/x`
+// the same). What remains, stated: a dotted username before a digits-only
+// password prefix (`http://user.name:2024/ab@host/x` prints `user.name`)
+// reads as host and port and nothing here can tell. An EMPTY port
+// (`http://user:/ab@h.test/x`) validates as an RFC shape and does not count
+// as non-numeric; a bracketed literal is never withheld. Whitespace is the
+// shared URL class (isUrlSpaceAt), the same one that ends the run. Every
+// scan is one index walk or one single-class search; nothing here is
+// retried. The helper's `run_host_parts` is the mirror.
 function runHostParts(body) {
   var s = str(body)
-  var sp = s.search(/\s/)
+  var sp = urlSpaceIndex(s)
   if (sp !== -1) s = s.substring(0, sp)
   var cut = s.search(/[\/?#]/)
   var authority = cut === -1 ? s : s.substring(0, cut)
@@ -382,7 +394,16 @@ function runHostParts(body) {
   }
   var end = hostport.search(/[:;=&]/)
   var host = end === -1 ? hostport : hostport.substring(0, end)
-  return { host: host, withheld: host !== "" && host.indexOf(".") === -1 && rest.indexOf("@") !== -1 }
+  var port = ""
+  if (end !== -1 && hostport.charAt(end) === ":") {
+    port = hostport.substring(end + 1)
+    var portEnd = port.search(/[;=&]/)
+    if (portEnd !== -1) port = port.substring(0, portEnd)
+  }
+  var laterAt = rest.indexOf("@") !== -1
+  var dotless = host !== "" && host.indexOf(".") === -1
+  var badPort = port !== "" && !/^[0-9]+$/.test(port)
+  return { host: host, withheld: laterAt && (dotless || badPort) }
 }
 
 // R32a': the predicate alone, over a whole URL (or any text holding one).
@@ -469,7 +490,10 @@ function validateSourceUrl(text, opts) {
   }
   if (scheme !== "http" && scheme !== "https") return fail("scheme")
   if (rest.indexOf("//") !== 0) return invalid()
-  if (/\s/.test(rest)) return invalid()
+  // R32a'': the shared URL whitespace class, the one the redactors end a
+  // run at. sanitizeInput has dropped U+0085 and U+001C..U+001F already, so
+  // this refuses exactly what `/\s/` refused; one class, one place.
+  if (urlSpaceIndex(rest) !== -1) return invalid()
   var body = rest.substring(2)
   var cut = body.search(/[\/?#]/)
   var authority = cut === -1 ? body : body.substring(0, cut)

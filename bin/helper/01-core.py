@@ -537,13 +537,44 @@ _SAFE_OPTION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]*$")   # never option-loo
 # decomposed Latin accent. Marks on other scripts stay (Cyrillic breve in
 # "\u0439" must not fold to "\u0438").
 _LATIN_MARKS = re.compile("([a-z])[\u0300-\u036f]+")
+# R32a'' (2026-10-22, D-SINK-32, D-SINK-33). The ONE whitespace class that
+# ends a free-text URL's RUN (_URL_TAIL_RE, redact_urls) and its AUTHORITY
+# (_URL_SPACE, run_host_parts), and the whitespace validate_source_url
+# refuses -- shared with Model.isUrlSpaceAt and pinned code point by code
+# point by tests/fixtures/url-whitespace.json in both suites. It is NOT `\s`,
+# on purpose: lane-bounds-s3 ended the run at Python's `\s` plus `'"<>`
+# (_URL_TAIL_RE as 0.14.3 shipped it) and the authority at Python's `\s` plus
+# U+FEFF, two classes, so a password holding U+FEFF printed the username; and
+# the model's run ended at JS `\s`, a third. This is the union of JS `\s`,
+# Python `\s` and U+FEFF, every member listed, none a regex metacharacter
+# inside a class:
+#   U+0009 tab, U+000A LF, U+000B VT, U+000C FF, U+000D CR,
+#   U+001C U+001D U+001E U+001F (the information separators: Python's `\s`,
+#     not JS's),
+#   U+0020 space, U+0085 NEL (Python's, not JS's), U+00A0 NBSP,
+#   U+1680 ogham space, U+2000..U+200A (en quad .. hair space),
+#   U+2028 line separator, U+2029 paragraph separator,
+#   U+202F narrow NBSP, U+205F medium mathematical space,
+#   U+3000 ideographic space, U+FEFF (JS's `\s`, not Python's).
+# `'`, `"`, `<` and `>` are NOT whitespace: a password may hold them, so they
+# are trailing punctuation now (_TRAILING_PUNCTUATION), stripped off the
+# run's end and put back.
+URL_SPACE_CHARS = ("\t\n\x0b\x0c\r\x1c\x1d\x1e\x1f \x85\xa0\u1680"
+                   "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
+                   "\u2028\u2029\u202f\u205f\u3000\ufeff")
+_URL_SPACE = re.compile("[" + URL_SPACE_CHARS + "]")
 # redact_urls' pieces (F-SINK-11). It used to be one pattern,
 # `\b([A-Za-z][A-Za-z0-9+.\-]*)://[^\s'\"<>]+`, whose scheme run the engine
 # re-read from every word boundary; the scan is anchored on "://" now and these
-# are the parts of that pattern it still needs. The tail is unchanged. `\w` is
-# asked rather than guessed, so the word-boundary rule stays Python's own
-# outside ASCII.
-_URL_TAIL_RE = re.compile(r"[^\s'\"<>]+")
+# are the parts of that pattern it still needs. The tail ends at the shared
+# class alone (R32a''; it was that pattern's `[^\s'"<>]+` until 2026-10-22).
+# `\w` is asked rather than guessed, so the word-boundary rule stays Python's
+# own outside ASCII.
+_URL_TAIL_RE = re.compile("[^" + URL_SPACE_CHARS + "]+")
+# The sentence punctuation redact_urls strips off a run's end and puts back
+# after the host; Model.trailingPunctuationLength has the same set. A `]` is
+# kept when the run holds a `[` (an IPv6 literal).
+_TRAILING_PUNCTUATION = ".,;:!?)]'\"<>"
 _WORD_CHAR_RE = re.compile(r"\w")
 # The scheme-legal run that ENDS at a given position. D-PERF-6 (R32e): it
 # was `[A-Za-z0-9+.\-]*\Z` under search(s, lo, j), which has NO literal
@@ -564,6 +595,8 @@ _SCHEME_RUN_RE = re.compile(r"(?:.*[^A-Za-z0-9+.\-])?", re.S)
 # already cut at `/`, `?` or `#`): the port's `:` and the parameter
 # delimiters `;`, `=`, `&`, so a neighbouring parameter never prints (R32a').
 _RUN_HOST_END = re.compile(r"[:;=&]")
+# ... and where the port after that `:` ends (R32a'', the non-numeric-port arm).
+_PORT_END = re.compile(r"[;=&]")
 # The token a free-text redactor prints in place of a withheld host (R32a').
 # Model.HOST_WITHHELD owns it; the shared redaction fixture holds both to it.
 HOST_WITHHELD = "[host withheld]"
@@ -599,7 +632,6 @@ _ZERO_WIDTH = re.compile("[\u200b-\u200d\u2060\ufeff]")
 # Held equal to the old pattern by an equivalence test (the parse-bounds
 # suite, dev branch).
 _IPV6_LITERAL = re.compile(r"^\[(?=[0-9A-Fa-f.]*:)[0-9A-Fa-f:.]*(?:%25[A-Za-z0-9._~\-]+)?\]$")
-_URL_SPACE = re.compile("[\\s\ufeff]")          # JS \s includes U+FEFF, Python's does not
 _BAD_ESCAPE = re.compile(r"%(?![0-9A-Fa-f]{2})")
 _XMLTV_TIME = re.compile(r"^(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?\s*(?:([+-])(\d{2})(\d{2})|Z)?$")
 
@@ -842,11 +874,23 @@ def run_host_parts(body: str) -> tuple[str, bool]:
     (a parameter delimiter, so a neighbouring parameter never prints,
     D-SINK-23); a bracketed literal is the host up to its `]`, or nothing.
     `withheld` is the one predicate the Sources form warns with
-    (Model.urlHostWithheld): the host is not bracketed, has no dot, and an
-    `@` follows the authority -- a dotless "host" with a later `@` is most
-    likely a username in front of a password holding an unencoded `/`, `?`
-    or `#`, and printing it printed the username (`http://myuser:pa#ss@...`
-    -> `http://myuser`, D-SINK-28). Not url_host: urllib's RFC reading is
+    (Model.urlHostWithheld), two arms (R32a'', 2026-10-22), each needing an
+    `@` after the authority before whitespace: the host is not bracketed
+    and has no dot -- a dotless "host" with a later `@` is most likely a
+    username in front of a password holding an unencoded `/`, `?` or `#`,
+    and printing it printed the username (`http://myuser:pa#ss@...` ->
+    `http://myuser`, D-SINK-28); OR the authority carries a NON-NUMERIC
+    port, a `:` after its last `@` whose text up to the next `;`, `=` or
+    `&` is non-empty and not all digits (`http://user.name:pa/ss@h.test/x`
+    reads as host `user.name`, port `pa`: a dotted username and a password,
+    D-SINK-35; `http://me@mail.test:pa/ss@h.test/x` the same). What
+    remains, stated: a dotted username before a digits-only password
+    prefix (`http://user.name:2024/ab@host/x` -> `user.name`) reads as host
+    and port. An empty port validates as an RFC shape and does not count;
+    a bracketed literal is never withheld. Whitespace here is the shared
+    class URL_SPACE_CHARS, the one that ends the run (the authority and the
+    run were cut at two classes until R32a'', D-SINK-32). Not url_host:
+    urllib's RFC reading is
     right for a display sink and for validation (source_host,
     validate_source_url) and prints that username. Not round 3's last-`@`-
     of-the-run scan either (never shipped): crossing the `/` put a password
@@ -868,7 +912,16 @@ def run_host_parts(body: str) -> tuple[str, bool]:
         return (hostport[:close + 1].lower() if close != -1 else ""), False
     end = _RUN_HOST_END.search(hostport)
     host = hostport if end is None else hostport[:end.start()]
-    return host.lower(), (host != "" and "." not in host and "@" in rest)
+    port = ""
+    if end is not None and hostport[end.start()] == ":":
+        port = hostport[end.start() + 1:]
+        port_end = _PORT_END.search(port)
+        if port_end is not None:
+            port = port[:port_end.start()]
+    later_at = "@" in rest
+    dotless = host != "" and "." not in host
+    bad_port = port != "" and _ASCII_DIGITS.match(port) is None
+    return host.lower(), later_at and (dotless or bad_port)
 
 
 def host_withheld(url: str) -> bool:
@@ -984,7 +1037,7 @@ def redact_urls(text: Any) -> str:
         # sibling lane S recorded).
         bracket = "[" in raw
         trailing = ""
-        while raw and raw[-1] in ".,;:!?)]" and not (bracket and raw[-1] == "]"):
+        while raw and raw[-1] in _TRAILING_PUNCTUATION and not (bracket and raw[-1] == "]"):
             trailing = raw[-1] + trailing
             raw = raw[:-1]
         host = run_host(raw)

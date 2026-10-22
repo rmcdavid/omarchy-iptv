@@ -151,7 +151,8 @@ export {
   configShieldArgv, configShieldState, persistCarriesSecret,
   configShieldDecision, entryShieldDecision, playerStartArgv, playerStopArgv,
   playerRestartArgv, playerPauseArgv, notifyArgv, sourceLabel, hostOf,
-  redactUrls, scrubUrls, sinkText
+  URL_SPACE_CODES, isUrlSpaceAt, trailingPunctuationLength, redactUrls,
+  scrubUrls, sinkText
 } from "./model/privacy.mjs"
 export {
   formatClock, formatCount, pluralChannels, epgFraction, epgNowStale,

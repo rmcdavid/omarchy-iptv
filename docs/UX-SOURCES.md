@@ -1390,7 +1390,7 @@ Key names at opacity 0.7, verbs at 0.45, as shipped.
 | `empty` | nothing after trim | `Enter a playlist URL or path` | (EPG is optional; no error) |
 | `scheme` | `ftp://`, `rtmp://`, `mailto:`, `javascript:`, a bare host, anything not `http(s)://` or `/` | `Start with http://, https://, or / for a local file` | `EPG: start with http://, https://, or / for a local file` |
 | `invalid` | scheme present but no host, spaces or illegal characters, unparsable | `Invalid URL - check the host` | `EPG: invalid URL - check the host` |
-| `invalid`, with the predicate (R32a') | the host before the first `/` has no dot and an `@` follows later, and the value does not validate: `http://myuser:pa#ss@cdn.test/x`, `pa?ss`, `pa/ss` (port `pa`) | `Invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` | `EPG: invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` (the Server field the same, without the prefix) |
+| `invalid`, with the predicate (R32a', R32a'') | an `@` follows the first `/` and either the host before it has no dot (`http://myuser:pa#ss@cdn.test/x`, `pa?ss`, `pa/ss`: port `pa`) or the port after it is not a number (`http://user.name:pa/ss@h.test/x`, `http://h.test:pa/me@x.test/y`), and the value does not validate | `Invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` | `EPG: invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` (the Server field the same, without the prefix) |
 | `relative_path` | starts with `~`, `./` or a name | `Use an absolute path (starts with /, not ~)` | `EPG: use an absolute path (starts with /, not ~)` |
 | `too_long` | over `LIMITS.url` | `Too long - max 2,048 characters` | `EPG: too long - max 2,048 characters` |
 | `duplicate` | same playlist URL as another source (exact after trim) | `Already in Sources as "Provider"` | -- |
@@ -1405,12 +1405,14 @@ Key names at opacity 0.7, verbs at 0.45, as shipped.
 One error at a time, first failing field in form order; focus moves to it.
 No `https://` auto-prefix and no Xtream URL auto-parse (8).
 
-**Warning (R32a, 2026-10-21; R32a', 2026-10-22; not an error, never
-refuses).** When the Playlist, EPG or Server value validates but its host
-before the first `/` has no dot (and is not a bracketed literal) and an `@`
-follows later in the typed value -- most likely a password with an unencoded
-`/`, `?` or `#`, which the URL then reads as the host and port -- the result
-line shows, once, while the value warrants it. Which shapes draw which line:
+**Warning (R32a, 2026-10-21; R32a' and R32a'', 2026-10-22; not an error,
+never refuses).** When the Playlist, EPG or Server value validates but its
+host before the first `/` has no dot (and is not a bracketed literal) and an
+`@` follows later in the typed value -- most likely a password with an
+unencoded `/`, `?` or `#`, which the URL then reads as the host and port --
+the result line shows, once, while the value warrants it. The predicate's
+second arm (a non-numeric port with a later `@`) never validates, so it is
+only ever seen on the error line. Which shapes draw which line:
 
 | Shape | Validates? | Line |
 |---|---|---|
@@ -1418,7 +1420,10 @@ line shows, once, while the value warrants it. Which shapes draw which line:
 | dotless host, later `@`, any other prefix (`http://myuser:pa#ss@cdn.test/x`, `pa?ss`, `pa/ss`) | no (port `pa`) | error: `Invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` |
 | LAN name with a path `@` (`http://nas:8000/files/me@home/x`, `http://localhost:8080/me@x.test/y`) | yes | the warning; a sentence, not a refusal |
 | dotted host with a later `@` (an Xtream `/playlist/<email>/<pass>/m3u_plus` link), a bracketed literal, an encoded password (`pa%2Fss`), a userinfo `@` with no later one (`http://u:p@nas/x`) | yes | nothing |
-| dotted host with a bad port and a later `@` (`http://h.test:pa/me@x.test/y`) | no | the bare `Invalid URL - check the host` |
+| a NON-NUMERIC port and a later `@`, dotted host or not (`http://user.name:pa/ss@h.test/x`, `http://me@mail.test:pa/ss@h.test/x`, `http://h.test:pa/me@x.test/y`, `http://h.test:8080x/me@x.test/y`) | no (port `pa`, `8080x`) | error: `Invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` (R32a''; under R32a' the dotted-host case drew the bare refusal) |
+| a dotted username before a digits-only password prefix (`http://user.name:2024/ab@host.test/x`) | yes (host `user.name`, port 2024) | nothing: the first arm needs a dotless host and the second a non-numeric port (D-SINK-35's residual, stated) |
+| a dotted host with an EMPTY port and a later `@` (`http://h.test:/me@x.test/y`) | yes | nothing: an empty port is an RFC shape, not a non-numeric one |
+| a non-numeric port with no later `@` (`http://h.test:pa/ss`) | no | the bare `Invalid URL - check the host` |
 
 Submit proceeds on every row that validates. The sentences are
 `Model.WARN_AT_AFTER_AUTHORITY` and `Model.ENCODE_SENTENCE` (its second

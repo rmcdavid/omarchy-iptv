@@ -3,7 +3,7 @@ import {
   QUOTE_OPEN, QUOTE_CLOSE, SEP, GLYPHS, NOTIFY_IDS
 } from "./build.mjs"
 import {
-  str, asList, fnv1a32
+  str, asList, trimEndSpace, fnv1a32
 } from "./text.mjs"
 import {
   cleanName
@@ -404,6 +404,64 @@ function isSpaceAt(s, i) {
   return SPACE_RE.test(s.charAt(i))
 }
 
+// R32a'' (2026-10-22, D-SINK-32, D-SINK-33). The ONE whitespace class that
+// ends a free-text URL's RUN (redactUrls) and its AUTHORITY (runHostParts),
+// and the whitespace validateSourceUrl refuses -- shared with the helper's
+// URL_SPACE_CHARS and pinned code point by code point by
+// tests/fixtures/url-whitespace.json in both suites. It is NOT `\s`, on
+// purpose: lane-bounds-s3's helper ended the run at Python's `\s` plus
+// `'"<>` and the authority at Python's `\s` plus U+FEFF, two classes, so a
+// password holding U+FEFF printed the username; and the JS run ended at
+// JS `\s`, a third class. This is the union of JS `\s`, Python `\s` and
+// U+FEFF, every member listed:
+//   U+0009 tab, U+000A LF, U+000B VT, U+000C FF, U+000D CR,
+//   U+001C U+001D U+001E U+001F (the information separators: Python's `\s`,
+//     not JS's),
+//   U+0020 space, U+0085 NEL (Python's, not JS's), U+00A0 NBSP,
+//   U+1680 ogham space, U+2000..U+200A (en quad .. hair space),
+//   U+2028 line separator, U+2029 paragraph separator,
+//   U+202F narrow NBSP, U+205F medium mathematical space,
+//   U+3000 ideographic space, U+FEFF (JS's `\s`, not Python's).
+// `'`, `"`, `<` and `>` are NOT whitespace: they ended the helper's run
+// until R32a'' (D-SINK-33, a password holding `'` printed the username and
+// the tail) and are trailing punctuation now, stripped off the run's end
+// and put back (redactUrls). isSpaceAt above stays JS `\s` for trimEndSpace.
+var URL_SPACE_CODES = [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x85, 0xa0,
+  0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009,
+  0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff]
+
+function isUrlSpaceAt(s, i) {
+  var c = s.charCodeAt(i)
+  if (c === 0x20 || (c >= 0x09 && c <= 0x0d) || (c >= 0x1c && c <= 0x1f)) return true
+  if (c < 0x85) return false
+  return c === 0x85 || c === 0xa0 || c === 0x1680 || (c >= 0x2000 && c <= 0x200a)
+    || c === 0x2028 || c === 0x2029 || c === 0x202f || c === 0x205f || c === 0x3000 || c === 0xfeff
+}
+
+// The index of the first URL whitespace in `s`, or -1 (runHostParts,
+// validateSourceUrl): one index walk, nothing retried.
+function urlSpaceIndex(s) {
+  for (var i = 0; i < s.length; i++) if (isUrlSpaceAt(s, i)) return i
+  return -1
+}
+
+// R32a''. The sentence punctuation a free-text redactor strips off the end
+// of a URL run and puts back after the host, both mirrors alike (the
+// helper's redact_urls has the same set): the helper always restored
+// `.,;:!?)]`, the model never did, and `'"<>` ended the helper's run
+// (D-SINK-33). A `]` is kept when the run holds a `[`: it closes an IPv6
+// literal. Returns the number of characters to put back.
+function trailingPunctuationLength(run) {
+  var bracket = run.indexOf("[") !== -1
+  var k = run.length
+  while (k > 0) {
+    var ch = run.charAt(k - 1)
+    if (".,;:!?)]'\"<>".indexOf(ch) === -1 || (bracket && ch === "]")) break
+    k--
+  }
+  return run.length - k
+}
+
 // `[a-z0-9+.-]` under the `i` flag.
 function isSchemeRestCode(c) {
   return (c >= 97 && c <= 122) || (c >= 65 && c <= 90) || (c >= 48 && c <= 57)
@@ -441,8 +499,14 @@ function redactUrls(text) {
       j = s.indexOf("://", j + 1)
       continue
     }
-    var end = j + 3                    // the old `[^\s]*` tail
-    while (end < n && !isSpaceAt(s, end)) end++
+    // The run: to the first URL whitespace (R32a'', the shared class; it
+    // was the old `[^\s]*` tail, JS `\s`, until 2026-10-22), then the
+    // sentence punctuation stripped off its end and put back after the
+    // host, so `... http://h.test/x.` prints `h.test.` as the helper does.
+    var end = j + 3
+    while (end < n && !isUrlSpaceAt(s, end)) end++
+    var put = trailingPunctuationLength(s.substring(j + 3, end))
+    var runEnd = end - put
     // R32a' (D-SINK-29, 2026-10-22; D-SINK-23, D-SINK-28). This is a
     // FREE-TEXT redactor, not a parser: the string is an mpv error, a helper
     // line, a notification body, and the one job here is that NOTHING of a
@@ -474,9 +538,18 @@ function redactUrls(text) {
     // the same one the Sources form warns with, and the helper's
     // redact_urls (run_host) is the same rule; the shared fixture holds both
     // to it. runHostParts is one pass over the run.
-    var parts = runHostParts(s.substring(j + 3, end))
+    // R32a'' (2026-10-22, D-SINK-32, D-SINK-33): the run and the authority
+    // end at ONE enumerated whitespace class (isUrlSpaceAt) in both
+    // mirrors; `'"<>` never end a run (a password may hold them) and are
+    // trailing punctuation instead; and the predicate has a second arm, a
+    // NON-NUMERIC port followed by a later `@` (`http://user.name:pa/ss@h.test/x`
+    // is a dotted username and a password, withheld; D-SINK-35). The cost
+    // this adds, accepted as D-SINK-34: a whitespace character INSIDE a
+    // password splits the run, so `http://myuser:pa ss@cdn.test/x` prints
+    // `myuser ss@cdn.test/x` -- the fixture pins that output, per character.
+    var parts = runHostParts(s.substring(j + 3, runEnd))
     var host = parts.withheld ? HOST_WITHHELD : parts.host
-    out += s.substring(copied, p) + (host !== "" ? host : "[url]")
+    out += s.substring(copied, p) + (host !== "" ? host : "[url]") + s.substring(runEnd, end)
     copied = end
     resume = end
     j = s.indexOf("://", resume)
@@ -524,5 +597,6 @@ export {
   configShieldDecision, entryShieldDecision, seqArg, mpvArgArgv,
   playerSessionArgv, playerStartArgv, playerStopArgv, playerRestartArgv,
   playerPauseArgv, notifyArgv, sourceLabel, hostOf, SPACE_RE, isSpaceAt,
+  URL_SPACE_CODES, isUrlSpaceAt, urlSpaceIndex, trailingPunctuationLength,
   isSchemeRestCode, isLetterCode, redactUrls, scrubUrls, sinkText
 }

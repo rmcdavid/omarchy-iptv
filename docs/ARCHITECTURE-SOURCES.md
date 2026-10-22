@@ -418,8 +418,20 @@ again inside `validateSourceUrl`.
    ONE predicate, `Model.urlHostWithheld(text)` (the helper's
    `host_withheld`): the RFC host, read from the TYPED text (a fragment
    counts: normalization drops it), is not a bracketed literal and has no
-   dot, and an `@` follows the authority before any whitespace. It is
-   computed independently of validation and has three customers:
+   dot, and an `@` follows the authority before any URL whitespace.
+   **R32a'' (2026-10-22, round 5)** gives it a second arm, under the same
+   later-`@` condition: the authority carries a NON-NUMERIC port -- a `:`
+   after its last `@` whose text, up to the next `;`, `=` or `&`, is
+   non-empty and not all digits -- so `http://user.name:pa/ss@h.test/x`
+   (a dotted username, which the first arm cannot see, D-SINK-35) and
+   `http://me@mail.test:pa/ss@h.test/x` hold it, and so does a dotted host
+   with a bad port and a later `@` (`http://h.test:pa/me@x.test/y`), which
+   was the one invalid shape that drew the bare refusal under R32a'. A
+   numeric port is not it (`http://user.name:2024/ab@host.test/x` reads as
+   host `user.name`, port 2024, validates and prints `user.name`: the
+   residual, stated); an EMPTY port is an RFC shape (`http://user:/ab@host.test`
+   validates) and is not non-numeric; a bracketed literal is never withheld.
+   It is computed independently of validation and has three customers:
    - a value that VALIDATES as http(s) draws the warning line,
      `Model.sourceUrlWarning(text)` -> `WARN_AT_AFTER_AUTHORITY` ("The host
      before the first / has no dot and an @ follows it. If a password holds
@@ -447,13 +459,29 @@ again inside `validateSourceUrl`.
    `run_host_parts`). A free-text sink -- an mpv error, a helper line, a
    notification body -- must never carry a credential, and the host is a
    courtesy. The host is the RFC one, exactly as validation reads it: the
-   authority ends at the first `/`, `?`, `#` or whitespace, its userinfo at
-   the LAST `@` within it (D-SINK-1), and the printed host is cut at the
+   authority ends at the first `/`, `?`, `#` or URL whitespace, its userinfo
+   at the LAST `@` within it (D-SINK-1), and the printed host is cut at the
    first `:` (a port), `;`, `=` or `&` (a parameter delimiter, so a
    neighbouring query parameter never prints, D-SINK-23:
    `http://h.test?u=me@b.test&p=SECRET` prints `h.test`); a bracketed
-   literal is the host up to its `]`, or nothing. When the predicate above
-   holds -- a dotless host with an `@` after the authority -- the host is
+   literal is the host up to its `]`, or nothing. **The RUN** -- where the
+   URL stops inside the text -- ends at the SAME whitespace class as the
+   authority, in both mirrors (R32a'', D-SINK-32, D-SINK-33): ONE class,
+   the union of JS `\s`, Python `\s` and U+FEFF (30 code points, each
+   listed beside `Model.isUrlSpaceAt` and the helper's `URL_SPACE_CHARS`,
+   and pinned by `tests/fixtures/url-whitespace.json` over the whole
+   Unicode range in both suites). Until R32a'' the helper ended the run at
+   Python `\s` plus `'"<>` and the authority at Python `\s` plus U+FEFF,
+   and the model ended its run at JS `\s`: three classes, so a password
+   holding U+FEFF printed the username in the helper, and one holding `'`
+   printed the username AND the tail `'ss@prov.test/...`. `'`, `"`, `<`
+   and `>` never end a run now; they are sentence punctuation, and both
+   mirrors strip `.,;:!?)]'"<>` off the run's end and put it back after the
+   host (a `]` is kept when the run holds a `[`), so the model prints
+   `Failed to open h.test.` where it used to drop the `.` and the helper
+   prints `'http://h.test'` for a quoted URL. When the predicate above
+   holds -- a dotless host, or a non-numeric port, with an `@` after the
+   authority -- the host is
    WITHHELD and the one token `[host withheld]` prints in its place
    (`Model.HOST_WITHHELD`, the helper's `HOST_WITHHELD`; the model prints the
    bare token as it prints a bare host, the helper `scheme://[host withheld]`
@@ -468,16 +496,28 @@ again inside `validateSourceUrl`.
    lead's ruling misreading the base; never shipped). Under R32a' both print
    the host, `prov.test` and `host.test`, and an Xtream
    `/playlist/<email>/<pass>/m3u_plus` link prints its server, not the
-   email's domain. THE COST, stated: a dotless intranet URL with a path `@`
+   email's domain. THE COSTS, stated: a dotless intranet URL with a path `@`
    (`http://nas:8000/files/me@home/x`) and a `localhost` URL with one are
    withheld, in free text only; the Sources row, the label and validation
-   still show `nas` and `localhost`. The nameless-channel fallback in the
+   still show `nas` and `localhost`. A whitespace character INSIDE a
+   password ends the run, so `http://myuser:pa ss@cdn.test/x` prints
+   `myuser ss@cdn.test/x` in both mirrors -- the username and the
+   password's tail -- and so does U+FEFF, U+0085, U+001C..U+001F, U+2028,
+   NBSP or a tab in the same place (D-SINK-34, accepted; under 0.14.3 the
+   helper printed the host for U+FEFF and the model for U+0085 and
+   U+001C..U+001F, each mirror's own `\s`, and R32a'' makes both the same).
+   A dotted username before a digits-only password prefix prints as the
+   host (`http://user.name:2024/ab@host/x` -> `user.name`, D-SINK-35's
+   residual). The fixture pins every one of these outputs exactly (`js`,
+   `py`, `accepted`), so the cost is seen on every run rather than
+   described. The nameless-channel fallback in the
    helper's play path (`fallback_channel_name`, D-SINK-31) uses the same
    predicate and names such a channel `Stream`. One shared fixture,
    `tests/fixtures/redaction-vectors.json`, holds both mirrors to the
    free-text rule (`host`, the token included) and the display sinks to the
    RFC host (`rfcHost`, `displayMustNotAppear`) where the two differ -- and
-   under R32a' they differ ONLY by withholding, which the node suite asserts.
+   under R32a' they differ ONLY by withholding or by an accepted cost,
+   which the node suite asserts.
    The sink path is pinned as well as the function: the helper's player
    suite drives mpv's error line for the P1's URL into the `player start`
    reply's reason, and the node suite drives that reason shape through

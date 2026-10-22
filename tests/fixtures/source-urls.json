@@ -973,8 +973,8 @@
   "input": "http://h.test:pa/me@x.test/y",
   "ok": false,
   "code": "invalid",
-  "warn": false,
-  "note": "R32a': a DOTTED host with a bad port and a later '@' is plain invalid -- no encoding sentence, the predicate needs a dotless host"
+  "warn": true,
+  "note": "R32a'' (D-SINK-35): a DOTTED host with a NON-NUMERIC port and a later '@' is the predicate's second arm -- invalid (port `pa`) WITH the encoding sentence; until R32a'' it was plain invalid"
  },
  {
   "input": "http://nas:pa/list.m3u",
@@ -1009,5 +1009,53 @@
   "key": "f5284733",
   "warn": true,
   "note": "R32a': a dotless host with userinfo AND a later '@' warns"
+ },
+ {
+  "input": "http://user.name:pa/ss@h.test/x",
+  "ok": false,
+  "code": "invalid",
+  "warn": true,
+  "note": "R32a'' (D-SINK-35 narrowed): a dotted USERNAME before a password holding '/' reads as host `user.name`, port `pa`; the non-numeric port with a later '@' is the second arm, so the refusal carries the encoding sentence"
+ },
+ {
+  "input": "http://me@mail.test:pa/ss@h.test/x",
+  "ok": false,
+  "code": "invalid",
+  "warn": true,
+  "note": "R32a'' (D-SINK-35 narrowed): an email username; RFC host `mail.test`, port `pa`; the second arm, with the sentence"
+ },
+ {
+  "input": "http://h.test:8080x/me@x.test/y",
+  "ok": false,
+  "code": "invalid",
+  "warn": true,
+  "note": "R32a'': a port that is digits and a letter is non-numeric; the second arm"
+ },
+ {
+  "input": "http://user.name:pa/ss",
+  "ok": false,
+  "code": "invalid",
+  "warn": false,
+  "note": "R32a'': a non-numeric port with NO later '@' after the authority is plain invalid; neither arm"
+ },
+ {
+  "input": "http://user.name:2024/ab@host.test/x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://user.name:2024/ab@host.test/x",
+  "host": "user.name",
+  "key": "4f16085a",
+  "warn": false,
+  "note": "D-SINK-35 (accepted residual): a dotted username before a digits-only password prefix reads as host `user.name`, port 2024 -- validates, labels `user.name:2024`, and draws no warning: the second arm needs a non-numeric port and the first a dotless host"
+ },
+ {
+  "input": "http://h.test:/me@x.test/y",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h.test/me@x.test/y",
+  "host": "h.test",
+  "key": "7e3572fe",
+  "warn": false,
+  "note": "R32a'': an empty port is an RFC shape and not non-numeric; a dotted host with one and a later '@' is neither arm, no warning"
  }
 ]

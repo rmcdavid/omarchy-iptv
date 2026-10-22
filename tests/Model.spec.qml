@@ -944,7 +944,7 @@ TestCase {
   }
 
   function test_privacy() {
-    compare(Model.redactUrls("Failed to open http://u:p@h.test/x?y."), "Failed to open h.test")
+    compare(Model.redactUrls("Failed to open http://u:p@h.test/x?y."), "Failed to open h.test.")  // R32a'': the sentence's final `.` is put back
     compare(Model.sourceLabel("http://u:p@tv.example.net:8080/get.php?u=1"), "http://tv.example.net")
     compare(Model.hostOf("/home/x/list.m3u"), "local file")
   }
@@ -957,9 +957,9 @@ TestCase {
   function test_r32a_urlAuthority() {
     var typo = "http://user:2024/ab@host.test/list.m3u"
     compare(Model.HOST_WITHHELD, "[host withheld]")
-    compare(Model.redactUrls("Failed to open http://prov.test/live/U5ER/P4@SSW0RD/1.ts."), "Failed to open prov.test")
+    compare(Model.redactUrls("Failed to open http://prov.test/live/U5ER/P4@SSW0RD/1.ts."), "Failed to open prov.test.")
     compare(Model.redactUrls("x http://host.test:25461/get.php?username=me@mail.test&password=p@ssw0rd y"), "x host.test y")
-    compare(Model.redactUrls("Failed to open http://myuser:pa#ss@cdn.test/live/1.ts."), "Failed to open [host withheld]")
+    compare(Model.redactUrls("Failed to open http://myuser:pa#ss@cdn.test/live/1.ts."), "Failed to open [host withheld].")
     compare(Model.redactUrls(typo), "[host withheld]")
     compare(Model.redactUrls("http://nas:8000/files/me@home/x"), "[host withheld]")
     compare(Model.redactUrls("http://u:p@nas/x"), "nas")
@@ -970,7 +970,7 @@ TestCase {
     compare(Model.urlHostWithheld("http://myuser:pa#ss@cdn.test/x"), true)
     compare(Model.urlHostWithheld("http://host.test:25461/playlist/me@mail.test/pw/m3u_plus"), false)
     compare(Model.validateSourceUrl("http://myuser:pa#ss@cdn.test/x").message, Model.sourceErrorMessage("invalid") + ". " + Model.ENCODE_SENTENCE)
-    compare(Model.validateSourceUrl("http://h.test:pa/me@x.test/y").message, Model.sourceErrorMessage("invalid"))
+    compare(Model.validateSourceUrl("http://h.test:pa/ss").message, Model.sourceErrorMessage("invalid"))
     compare(Model.sourceUrlWarning("http://myuser:pa#ss@cdn.test/x"), "")
     compare(Model.maskUrl("http://u:p@h.test/a#fr\nag"), "http://u:p@h.test/a#fr\nag")
     compare(Model.maskUrl("http://u:p@h.test:8080/a/b?x=1&type=m3u#frag"), "http://****@h.test:8080/a/b?x=****&type=m3u#****")
@@ -987,6 +987,36 @@ TestCase {
     compare(Model.mpvRejectedLine(Model.splitMpvArgs("--http-proxy user:pw@proxy.test:3128 --stream-lavf-o=tls_verify=0").rejected),
             "omarchy-iptv: ignoring mpvArgs tokens: <token> --stream-lavf-o")
   }
+  // R32a'' (2026-10-22, D-SINK-32..35) under V4: the one enumerated
+  // whitespace class ends the run and the authority (U+FEFF, U+0085 and
+  // U+001C each split the run, the accepted D-SINK-34 cost; `'"<>` never
+  // do), sentence punctuation is put back, and a non-numeric port followed
+  // by a later `@` withholds. The node suite runs the shared fixtures over
+  // the whole Unicode range; this pins the same functions in Qt's engine.
+  function test_r32a2_urlWhitespaceAndPunctuation() {
+    compare(Model.URL_SPACE_CODES.length, 30)
+    compare(Model.isUrlSpaceAt("\ufeff", 0), true)
+    compare(Model.isUrlSpaceAt("\u0085", 0), true)
+    compare(Model.isUrlSpaceAt("\u001c", 0), true)
+    compare(Model.isUrlSpaceAt("'", 0), false)
+    compare(Model.isUrlSpaceAt("<", 0), false)
+    compare(Model.redactUrls("Failed to open http://myuser:pa'ss@prov.test/live/1.ts."), "Failed to open prov.test.")
+    compare(Model.redactUrls("x http://myuser:pa<ss@prov.test/x> y"), "x prov.test> y")
+    compare(Model.redactUrls("Failed to open http://myuser:pa\ufeffss@prov.test/live/1.ts."), "Failed to open myuser\ufeffss@prov.test/live/1.ts.")
+    compare(Model.redactUrls("http://myuser:pa\u0085ss@h.test/x"), "myuser\u0085ss@h.test/x")
+    compare(Model.redactUrls("see 'http://u:p@h.test/x', <http://a.test> and \"http://b.test\"."), "see 'h.test', <a.test> and \"b.test\".")
+    compare(Model.redactUrls("x http://[2001:db8::5]. y"), "x [2001:db8::5]. y")
+    compare(Model.trailingPunctuationLength("h.test/x.,;:!?)]'\"<>"), 12)
+    compare(Model.redactUrls("http://user.name:pa/ss@h.test/x"), "[host withheld]")
+    compare(Model.redactUrls("http://me@mail.test:pa/ss@h.test/x"), "[host withheld]")
+    compare(Model.redactUrls("http://user.name:2024/ab@host/x"), "user.name")
+    compare(Model.urlHostWithheld("http://h.test:pa/me@x.test/y"), true)
+    compare(Model.urlHostWithheld("http://h.test:/me@x.test/y"), false)
+    compare(Model.validateSourceUrl("http://h.test:pa/me@x.test/y").message, Model.sourceErrorMessage("invalid") + ". " + Model.ENCODE_SENTENCE)
+    compare(Model.validateSourceUrl("http://user.name:2024/ab@host.test/x").ok, true)
+    compare(Model.sourceUrlWarning("http://user.name:2024/ab@host.test/x"), "")
+  }
+
 
   function test_columnAnchor() {
     // D-LIVE-16: pinned entries show the column from the top; groups are contained.

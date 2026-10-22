@@ -43,10 +43,17 @@ helper = load_helper()
 # It was helper.url_host (urllib's RFC reading) until R32a, which printed the
 # username for a password holding an unencoded '/', '?' or '#' (D-SINK-28);
 # R32a's last-'@'-of-the-run scan (round 3, never shipped) printed a password
-# TAIL for an '@' inside a path credential (D-SINK-29).
-_AS_SHIPPED = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*)://[^\s'\"<>]+")
-_AUTHORITY_END_AS_RULED = re.compile(r"[/?#\s\ufeff]")
+# TAIL for an '@' inside a path credential (D-SINK-29). R32a'' (D-SINK-32,
+# D-SINK-33): the run and the authority end at ONE enumerated whitespace
+# class -- the union of JS \\s, Python \\s and U+FEFF, spelt out here as a
+# class literal independently of the helper's URL_SPACE_CHARS -- `'"<>`
+# are sentence punctuation put back after the host, and a NON-NUMERIC port
+# followed by a later '@' withholds too (the second arm, D-SINK-35).
+_WS = "\t\n\x0b\x0c\r\x1c\x1d\x1e\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+_AS_SHIPPED = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*)://[^" + _WS + "]+")
+_AUTHORITY_END_AS_RULED = re.compile("[/?#" + _WS + "]")
 _HOST_END_AS_RULED = re.compile(r"[:;=&]")
+_PORT_AS_RULED = re.compile(r"^[^:;=&]*:([^;=&]*)")
 HOST_WITHHELD = "[host withheld]"
 
 
@@ -62,7 +69,9 @@ def host_as_ruled(raw):
         return hostport[:close + 1].lower() if close != -1 else ""
     end = _HOST_END_AS_RULED.search(hostport)
     host = hostport if end is None else hostport[:end.start()]
-    if host and "." not in host and "@" in rest:
+    port = _PORT_AS_RULED.match(hostport)
+    port = port.group(1) if port else ""
+    if "@" in rest and ((host and "." not in host) or (port and not port.isdigit())):
         return HOST_WITHHELD
     return host.lower()
 
@@ -72,7 +81,7 @@ def redact_urls_as_shipped(text):
         raw = match.group(0)
         bracket = "[" in raw
         trailing = ""
-        while raw and raw[-1] in ".,;:!?)]" and not (bracket and raw[-1] == "]"):
+        while raw and raw[-1] in ".,;:!?)]'\"<>" and not (bracket and raw[-1] == "]"):
             trailing = raw[-1] + trailing
             raw = raw[:-1]
         host = host_as_ruled(raw)
@@ -94,7 +103,7 @@ _SCHEME_RUN_BEFORE = re.compile(r"[A-Za-z0-9+.\-]*\Z")
 # class excludes, several kinds of whitespace, and non-ASCII (`\w` and `\s` are
 # both Unicode-aware here, which is why the scan asks the engine rather than
 # guessing).
-ALPHABET = "ahHt p:/@?#.+-_019\t\n\xa0\u2028\ufeffx[]%&=,;'\"<>"
+ALPHABET = "ahHt p:/@?#.+-_019\t\n\xa0\u2028\ufeff\x85\x1cx[]%&=,;'\"<>"
 
 
 def generated(length, seed):
@@ -120,8 +129,13 @@ EDGES = [
     "a://b c://d", "file:///etc/x", "see http://h.test, then https://i.test.",
     "\xa0http://h.test\xa0y", "aaa://\u2028x", "no urls here", "http://",
     "http://?x",
-    # The tail class excludes these three, so the URL stops at them.
-    "'http://h.test'", "<http://h.test>", "\"http://h.test\"",
+    # Quotes and angle brackets around a URL: trailing punctuation since
+    # R32a'' (they ended the run until then), and inside a password.
+    "'http://h.test'", "<http://h.test>", "\"http://h.test\"", "http://myuser:pa'ss@prov.test/x",
+    "http://myuser:pa<ss@prov.test/x", "http://myuser:pa\x85ss@h.test/x", "http://myuser:pa\x1css@h.test/x",
+    "http://myuser:pa\ufeffss@h.test/x", "http://user.name:pa/ss@h.test/x", "http://me@mail.test:pa&x=1/ss@h.test/x",
+    "http://user.name:2024/ab@host/x", "http://h.test:/me@x.test/y", "see 'http://u:p@h.test/x', <http://a.test> and \"http://b.test\".",
+    "http://.", "x http://. y", "http://[::1]].", "http://[::1]:pa/me@x", "http://h.test:80x/a@b", "http://:pa/me@x", "http://h.test:;=&/a@b",
     # A "://" the pattern cannot match followed by one it can: the scan has to
     # keep looking past the first, and stopping there leaves a live credential.
     "://x http://u:p@h.test/a", "1://x http://u:p@h.test/a",
@@ -245,7 +259,8 @@ class RedactionIsUnchangedTests(unittest.TestCase):
         for url, want in [("http://myuser:pa#ss@cdn.test/x", True), ("http://user:2024/ab@host.test/list.m3u", True),
                           ("http://nas:8000/files/me@home/x", True), ("http://localhost/me@x", True), ("http://nas:8080?u=me@b.test", True),
                           ("http://u:p@nas:8080/me@x", True), ("see http://nas/me@x now", True),
-                          ("http://h.test:pa/me@x.test/y", False), ("http://[2001:db8::1]:8080/me@mail.test", False),
+                          # R32a'': a dotted host with a NON-NUMERIC port and a later '@' is the second arm
+                          ("http://h.test:pa/me@x.test/y", True), ("http://[2001:db8::1]:8080/me@mail.test", False),
                           ("http://[2001:db8::1:x/me@mail.test", False), ("http://u:p@nas", False), ("http://u:p@nas/x?a=1#f", False),
                           ("http://host.test:25461/playlist/me@mail.test/pw/m3u_plus", False), ("http://nas", False),
                           ("nas/me@x", False), ("", False), ("http://h .test/me@x", False), ("http:///me@x", False), ("http://:8080/me@x", False)]:

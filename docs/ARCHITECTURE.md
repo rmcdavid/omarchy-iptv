@@ -790,17 +790,34 @@ local used everywhere the argument was; `playlist` with neither is a
 service cannot switch on a usage exit. `--url` stays for a human running the
 helper by hand, in their own shell and their own argv. Redaction is
 unchanged: the helper prints neither the variable nor any URL beyond scheme
-and host -- where "host" is the RFC host in every sink (ruling R32a',
-2026-10-22; `run_host_parts` in the helper, `Model.runHostParts` in the
-model): the authority ends at the first `/`, `?`, `#` or whitespace, its
-userinfo at the last `@` within it, and a FREE-TEXT sink cuts the host at
-the first `:`, `;`, `=` or `&` and WITHHOLDS it, as the one token
-`[host withheld]`, when it has no dot and an `@` follows the authority --
-because the RFC host of a password holding an unencoded `/`, `?` or `#` is
-the username (D-SINK-28), and a scan that crossed the `/` to the run's last
-`@` printed a password tail instead (D-SINK-29, round 3, never shipped). A
-display sink and validation read the RFC host unconditionally. Both rules,
-the cost of the withholding and the shared fixture are in
+and host -- where "host" is the RFC host in every sink (rulings R32a' and
+R32a'', 2026-10-22; `run_host_parts` in the helper, `Model.runHostParts`
+in the model): the authority ends at the first `/`, `?`, `#` or URL
+whitespace, its userinfo at the last `@` within it, and a FREE-TEXT sink
+cuts the host at the first `:`, `;`, `=` or `&` and WITHHOLDS it, as the
+one token `[host withheld]`, when an `@` follows the authority and either
+the host has no dot or the port after it is non-numeric -- because the RFC
+host of a password holding an unencoded `/`, `?` or `#` is the username
+(D-SINK-28), a dotted username reads as a host with a port that is the
+password's prefix (D-SINK-35), and a scan that crossed the `/` to the run's
+last `@` printed a password tail instead (D-SINK-29, round 3, never
+shipped). "URL whitespace" is ONE class, enumerated code point by code
+point and shared by both mirrors (`Model.isUrlSpaceAt`, the helper's
+`URL_SPACE_CHARS`; the union of JS `\s`, Python `\s` and U+FEFF, pinned by
+`tests/fixtures/url-whitespace.json` over the whole Unicode range): it ends
+the free-text RUN and the authority alike, in both, because the helper once
+ended them at two different classes and a password holding U+FEFF printed
+the username (D-SINK-32), and `'`, `"`, `<` and `>` never end a run -- they
+ended the helper's until R32a'' (D-SINK-33) and are sentence punctuation
+now, stripped off the run's end and put back after the host by both
+mirrors (`.,;:!?)]'"<>`; a `]` kept when the run holds a `[`), so
+`Failed to open http://u:p@h.test/x.` prints `Failed to open h.test.` in
+the journal and `... http://h.test.` from the helper. The cost the one
+class carries, accepted as D-SINK-34: a whitespace character INSIDE a
+password ends the run, so the username and the password's tail print, in
+both mirrors, and the shared fixture pins that output for every member the
+ruling names. A display sink and validation read the RFC host
+unconditionally. Both rules, the costs and the shared fixture are in
 `ARCHITECTURE-SOURCES.md` 3.1.
 
 Why environ is the route. `/proc/<pid>/cmdline` is readable by every uid on

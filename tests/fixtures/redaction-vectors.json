@@ -1,5 +1,5 @@
 {
- "note": "Shared redaction vectors. CLAUDE.md: a rule implemented in both JavaScript and Python gets ONE fixture that both implementations run. Before this file existed they were pinned by two DISJOINT hand-written lists, every vector in each carrying exactly one '@' -- so D-SINK-1 (a password tail surviving into the host position when the password contains an un-encoded '@') was invisible to both. The two renderings differ on purpose: the helper emits scheme://host, Model emits the bare host. So a vector pins the PROPERTY, not the formatting: the host must appear, and no fragment listed in mustNotAppear may. R32a' (2026-10-22, D-SINK-29): the FREE-TEXT rule prints the RFC host -- the authority ends at the first '/', '?', '#' or whitespace, its userinfo at the LAST '@' within it, and the printed host is cut at the first ':', ';', '=' or '&' -- and WITHHOLDS it, as the one token `[host withheld]`, when that host has no dot and an '@' follows the authority. A DISPLAY sink (sourceLabel, hostOf) prints the RFC host unconditionally. Where the two differ a vector carries `rfcHost` (and `displayMustNotAppear`) for the display check; `host` is always what the free-text redactors print, and an empty `host` requires no host at all.",
+ "note": "Shared redaction vectors. CLAUDE.md: a rule implemented in both JavaScript and Python gets ONE fixture that both implementations run. Before this file existed they were pinned by two DISJOINT hand-written lists, every vector in each carrying exactly one '@' -- so D-SINK-1 (a password tail surviving into the host position when the password contains an un-encoded '@') was invisible to both. The two renderings differ on purpose: the helper emits scheme://host, Model emits the bare host. So a vector pins the PROPERTY, not the formatting: the host must appear, and no fragment listed in mustNotAppear may. R32a' (2026-10-22, D-SINK-29): the FREE-TEXT rule prints the RFC host -- the authority ends at the first '/', '?', '#' or whitespace, its userinfo at the LAST '@' within it, and the printed host is cut at the first ':', ';', '=' or '&' -- and WITHHOLDS it, as the one token `[host withheld]`, when that host has no dot and an '@' follows the authority. A DISPLAY sink (sourceLabel, hostOf) prints the RFC host unconditionally. Where the two differ a vector carries `rfcHost` (and `displayMustNotAppear`) for the display check; `host` is always what the free-text redactors print, and an empty `host` requires no host at all. R32a'' (2026-10-22, D-SINK-32, D-SINK-33): the run and the authority end at ONE enumerated whitespace class (tests/fixtures/url-whitespace.json) in both mirrors; `'`, `\"`, `<` and `>` never end a run and are trailing punctuation (`.,;:!?)]'\"<>`), which both mirrors strip off the run's end and put back after the host, so the model restores a sentence's final `.` as the helper always did; and the predicate's second arm withholds a NON-NUMERIC port followed by a later `@`. A vector may carry `js` and `py`, the EXACT output of Model.redactUrls and of the helper's redact_urls, where the formatting is the point (the restored punctuation) or the output is an accepted cost that must be seen rather than described: `accepted` names the board id. D-SINK-34 is that cost -- a whitespace character INSIDE a password ends the run, so the username and the password's tail print, in both mirrors, one vector per class member the ruling names; D-SINK-35 is the other -- a dotted username before a digits-only password prefix reads as host and port.",
  "credentialsAreFake": "Every credential here is invented and every host is under the reserved .test TLD. Never put a real provider value in this file.",
  "vectors": [
   {
@@ -473,6 +473,311 @@
     "password",
     "P4SSW0RD"
    ]
+  },
+  {
+   "why": "R32a'' / D-SINK-34 (accepted cost, U+FEFF, the byte-order mark inside the password): the shared class ends the RUN there in both mirrors, so the username and the password's tail print; 0.14.3's helper printed the host for U+FEFF and its model printed it for U+0085 and U+001C..U+001F (each mirror's own \\s), and R32a'' makes both the same",
+   "text": "Failed to open http://myuser:pa\ufeffss@prov.test/live/1.ts.",
+   "host": "myuser",
+   "mustNotAppear": [
+    ":pa",
+    "pa\ufeff"
+   ],
+   "js": "Failed to open myuser\ufeffss@prov.test/live/1.ts.",
+   "py": "Failed to open http://myuser\ufeffss@prov.test/live/1.ts.",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "why": "R32a'' / D-SINK-34 (accepted cost, U+0085 NEL (Python whitespace, not JS) inside the password): the shared class ends the RUN there in both mirrors, so the username and the password's tail print; 0.14.3's helper printed the host for U+FEFF and its model printed it for U+0085 and U+001C..U+001F (each mirror's own \\s), and R32a'' makes both the same",
+   "text": "Failed to open http://myuser:pa\u0085ss@prov.test/live/1.ts.",
+   "host": "myuser",
+   "mustNotAppear": [
+    ":pa",
+    "pa\u0085"
+   ],
+   "js": "Failed to open myuser\u0085ss@prov.test/live/1.ts.",
+   "py": "Failed to open http://myuser\u0085ss@prov.test/live/1.ts.",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "why": "R32a'' / D-SINK-34 (accepted cost, U+001C (Python whitespace, not JS) inside the password): the shared class ends the RUN there in both mirrors, so the username and the password's tail print; 0.14.3's helper printed the host for U+FEFF and its model printed it for U+0085 and U+001C..U+001F (each mirror's own \\s), and R32a'' makes both the same",
+   "text": "Failed to open http://myuser:pa\u001css@prov.test/live/1.ts.",
+   "host": "myuser",
+   "mustNotAppear": [
+    ":pa",
+    "pa\u001c"
+   ],
+   "js": "Failed to open myuser\u001css@prov.test/live/1.ts.",
+   "py": "Failed to open http://myuser\u001css@prov.test/live/1.ts.",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "why": "R32a'' / D-SINK-34 (accepted cost, U+001D inside the password): the shared class ends the RUN there in both mirrors, so the username and the password's tail print; 0.14.3's helper printed the host for U+FEFF and its model printed it for U+0085 and U+001C..U+001F (each mirror's own \\s), and R32a'' makes both the same",
+   "text": "Failed to open http://myuser:pa\u001dss@prov.test/live/1.ts.",
+   "host": "myuser",
+   "mustNotAppear": [
+    ":pa",
+    "pa\u001d"
+   ],
+   "js": "Failed to open myuser\u001dss@prov.test/live/1.ts.",
+   "py": "Failed to open http://myuser\u001dss@prov.test/live/1.ts.",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "why": "R32a'' / D-SINK-34 (accepted cost, U+001E inside the password): the shared class ends the RUN there in both mirrors, so the username and the password's tail print; 0.14.3's helper printed the host for U+FEFF and its model printed it for U+0085 and U+001C..U+001F (each mirror's own \\s), and R32a'' makes both the same",
+   "text": "Failed to open http://myuser:pa\u001ess@prov.test/live/1.ts.",
+   "host": "myuser",
+   "mustNotAppear": [
+    ":pa",
+    "pa\u001e"
+   ],
+   "js": "Failed to open myuser\u001ess@prov.test/live/1.ts.",
+   "py": "Failed to open http://myuser\u001ess@prov.test/live/1.ts.",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "why": "R32a'' / D-SINK-34 (accepted cost, U+001F inside the password): the shared class ends the RUN there in both mirrors, so the username and the password's tail print; 0.14.3's helper printed the host for U+FEFF and its model printed it for U+0085 and U+001C..U+001F (each mirror's own \\s), and R32a'' makes both the same",
+   "text": "Failed to open http://myuser:pa\u001fss@prov.test/live/1.ts.",
+   "host": "myuser",
+   "mustNotAppear": [
+    ":pa",
+    "pa\u001f"
+   ],
+   "js": "Failed to open myuser\u001fss@prov.test/live/1.ts.",
+   "py": "Failed to open http://myuser\u001fss@prov.test/live/1.ts.",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "why": "R32a'' / D-SINK-34 (accepted cost, U+2028 line separator inside the password): the shared class ends the RUN there in both mirrors, so the username and the password's tail print; 0.14.3's helper printed the host for U+FEFF and its model printed it for U+0085 and U+001C..U+001F (each mirror's own \\s), and R32a'' makes both the same",
+   "text": "Failed to open http://myuser:pa\u2028ss@prov.test/live/1.ts.",
+   "host": "myuser",
+   "mustNotAppear": [
+    ":pa",
+    "pa\u2028"
+   ],
+   "js": "Failed to open myuser\u2028ss@prov.test/live/1.ts.",
+   "py": "Failed to open http://myuser\u2028ss@prov.test/live/1.ts.",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "why": "R32a'' / D-SINK-34 (accepted cost, U+00A0 NBSP inside the password): the shared class ends the RUN there in both mirrors, so the username and the password's tail print; 0.14.3's helper printed the host for U+FEFF and its model printed it for U+0085 and U+001C..U+001F (each mirror's own \\s), and R32a'' makes both the same",
+   "text": "Failed to open http://myuser:pa\u00a0ss@prov.test/live/1.ts.",
+   "host": "myuser",
+   "mustNotAppear": [
+    ":pa",
+    "pa\u00a0"
+   ],
+   "js": "Failed to open myuser\u00a0ss@prov.test/live/1.ts.",
+   "py": "Failed to open http://myuser\u00a0ss@prov.test/live/1.ts.",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "why": "R32a'' / D-SINK-34 (accepted cost, a tab inside the password): the shared class ends the RUN there in both mirrors, so the username and the password's tail print; 0.14.3's helper printed the host for U+FEFF and its model printed it for U+0085 and U+001C..U+001F (each mirror's own \\s), and R32a'' makes both the same",
+   "text": "Failed to open http://myuser:pa\tss@prov.test/live/1.ts.",
+   "host": "myuser",
+   "mustNotAppear": [
+    ":pa",
+    "pa\t"
+   ],
+   "js": "Failed to open myuser\tss@prov.test/live/1.ts.",
+   "py": "Failed to open http://myuser\tss@prov.test/live/1.ts.",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "why": "R32a'' (D-SINK-33): ' inside the password never ends the run; the helper's run ended there until R32a'' and printed the username and the tail `'ss@prov.test/live/1.ts`",
+   "text": "Failed to open http://myuser:pa'ss@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "myuser",
+    "pa'",
+    "'ss",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.test.",
+   "py": "Failed to open http://prov.test."
+  },
+  {
+   "why": "R32a'' (D-SINK-33): \" inside the password never ends the run; the helper's run ended there until R32a'' and printed the username and the tail `\"ss@prov.test/live/1.ts`",
+   "text": "Failed to open http://myuser:pa\"ss@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "myuser",
+    "pa\"",
+    "\"ss",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.test.",
+   "py": "Failed to open http://prov.test."
+  },
+  {
+   "why": "R32a'' (D-SINK-33): < inside the password never ends the run; the helper's run ended there until R32a'' and printed the username and the tail `<ss@prov.test/live/1.ts`",
+   "text": "Failed to open http://myuser:pa<ss@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "myuser",
+    "pa<",
+    "<ss",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.test.",
+   "py": "Failed to open http://prov.test."
+  },
+  {
+   "why": "R32a'' (D-SINK-33): > inside the password never ends the run; the helper's run ended there until R32a'' and printed the username and the tail `>ss@prov.test/live/1.ts`",
+   "text": "Failed to open http://myuser:pa>ss@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "myuser",
+    "pa>",
+    ">ss",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.test.",
+   "py": "Failed to open http://prov.test."
+  },
+  {
+   "why": "D-SINK-34 as the recheck wrote it: a space inside the password splits the run in both mirrors (the letter of R32a': before whitespace)",
+   "text": "Failed to open http://myuser:pa ss@cdn.test/x.",
+   "host": "myuser",
+   "mustNotAppear": [
+    ":pa",
+    "pa "
+   ],
+   "js": "Failed to open myuser ss@cdn.test/x.",
+   "py": "Failed to open http://myuser ss@cdn.test/x.",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "why": "R32a'' (D-SINK-35 narrowed): a DOTTED username before a password holding `/` -- the RFC reading is host `user.name`, port `pa`, and a non-numeric port followed by a later `@` withholds",
+   "text": "http://user.name:pa/ss@h.test/x",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "user.name",
+    "pa/ss",
+    "h.test"
+   ],
+   "rfcHost": "user.name",
+   "displayMustNotAppear": [
+    "pa/ss",
+    "h.test"
+   ]
+  },
+  {
+   "why": "R32a'' (D-SINK-35 narrowed): an email username, so the RFC host is the email's domain with port `pa`; withheld by the second arm",
+   "text": "http://me@mail.test:pa/ss@h.test/x",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "mail.test",
+    "me@",
+    "pa/ss",
+    "h.test"
+   ],
+   "rfcHost": "mail.test",
+   "displayMustNotAppear": [
+    "me@",
+    "pa/ss",
+    "h.test"
+   ]
+  },
+  {
+   "why": "R32a'': the second arm in a sentence, with the port text cut at `&`",
+   "text": "Failed to open http://me@mail.test:pa&x=1/ss@h.test/x.",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "mail.test",
+    "me@",
+    "pa&",
+    "h.test"
+   ],
+   "js": "Failed to open [host withheld].",
+   "py": "Failed to open http://[host withheld]."
+  },
+  {
+   "why": "R32a'': a NUMERIC port is not the second arm, and a dotted host is not the first: an Xtream link with a port and a path `@` prints its server",
+   "text": "http://host.test:25461/playlist/me@mail.test/pw/m3u_plus",
+   "host": "host.test",
+   "mustNotAppear": [
+    "25461",
+    "me@",
+    "mail.test",
+    "pw"
+   ]
+  },
+  {
+   "why": "D-SINK-35 (accepted residual): a dotted username before a DIGITS-ONLY password prefix reads as host and port, and prints user.name; nothing in the authority can tell it from a host",
+   "text": "http://user.name:2024/ab@host/x",
+   "host": "user.name",
+   "mustNotAppear": [
+    "2024",
+    "ab@",
+    "host/x"
+   ],
+   "accepted": "D-SINK-35"
+  },
+  {
+   "why": "R32a'': an empty port is an RFC shape (the fixture's `http://user:/ab@host.test` validates) and is not non-numeric; the dotless first arm withholds this one anyway",
+   "text": "http://user:/ab@host.test/x",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "user",
+    "ab@",
+    "host.test"
+   ],
+   "rfcHost": "user",
+   "displayMustNotAppear": [
+    "ab@",
+    "host.test"
+   ]
+  },
+  {
+   "why": "R32a'': a dotted host with an empty port and a later `@` is neither arm: prints the host",
+   "text": "see http://h.test:/me@x.test/y now",
+   "host": "h.test",
+   "mustNotAppear": [
+    "me@",
+    "x.test"
+   ],
+   "js": "see h.test now",
+   "py": "see http://h.test now"
+  },
+  {
+   "why": "R32a'': sentence punctuation after a URL is put back by BOTH mirrors now (the model dropped a final `.` until R32a''); quotes and angle brackets around a URL are punctuation too",
+   "text": "see 'http://u:p@h.test/x', <http://a.test> and \"http://b.test\".",
+   "host": "h.test",
+   "mustNotAppear": [
+    "u:p",
+    "/x"
+   ],
+   "js": "see 'h.test', <a.test> and \"b.test\".",
+   "py": "see 'http://h.test', <http://a.test> and \"http://b.test\"."
+  },
+  {
+   "why": "R32a'': a run that is nothing but punctuation prints the empty-host token and the punctuation",
+   "text": "x http://. y",
+   "host": "",
+   "mustNotAppear": [],
+   "js": "x [url]. y",
+   "py": "x http://[redacted]. y"
+  },
+  {
+   "why": "R32a'': a bracketed literal keeps its `]` at a sentence end, and the `.` is put back",
+   "text": "x http://[2001:db8::5]. y",
+   "host": "[2001:db8::5]",
+   "mustNotAppear": [],
+   "js": "x [2001:db8::5]. y",
+   "py": "x http://[2001:db8::5]. y"
+  },
+  {
+   "why": "R32a'': the restored `.` on the ordinary case, exact in both mirrors",
+   "text": "Failed to open http://u5er:p4ss@prov.example.test:8080/live/1.ts.",
+   "host": "prov.example.test",
+   "mustNotAppear": [
+    "u5er",
+    "p4ss",
+    "8080",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.example.test.",
+   "py": "Failed to open http://prov.example.test."
   }
  ]
 }

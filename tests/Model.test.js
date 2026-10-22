@@ -3815,6 +3815,65 @@ checkCall("D-SINK-1: every shared vector keeps its host and loses every credenti
     return v.mustNotAppear.some(function (frag) { return out.indexOf(frag) >= 0 })
   }).map(function (v) { return v.why + " -> " + Model.redactUrls(v.text) })
 }, [])
+// ---- R32a'' (D-SINK-32, D-SINK-33): ONE whitespace class, shared ----
+//
+// The run and the authority of a free-text URL end at Model.isUrlSpaceAt,
+// which is the union of JS `\s`, Python `\s` and U+FEFF enumerated in
+// tests/fixtures/url-whitespace.json; the helper's suite holds its
+// URL_SPACE_CHARS to the same file. Every code point of the whole Unicode
+// range is asked, so the class is exactly the list and nothing the engine
+// thinks is whitespace sneaks in or out: lane-bounds-s3's helper had two
+// classes and a password holding U+FEFF printed the username.
+const urlWhitespace = JSON.parse(require("fs").readFileSync(
+  require("path").join(__dirname, "fixtures/url-whitespace.json"), "utf8"))
+checkCall("R32a'': isUrlSpaceAt holds on exactly the fixture's code points over the whole Unicode range, URL_SPACE_CODES lists exactly them, and JS `\\s` is a proper subset (U+0085 and U+001C..U+001F are the Python half)", function () {
+  const want = urlWhitespace.codePoints.map(function (e) { return parseInt(e.code.substring(2), 16) })
+  const wantSet = new Set(want)
+  const wrong = []
+  // modelFn is declared further down (a const); the same shape inline.
+  const isUrlSpaceAt = typeof Model.isUrlSpaceAt === "function" ? Model.isUrlSpaceAt : function () { return "MISSING" }
+  for (let c = 0; c <= 0x10ffff; c++) {
+    const s = String.fromCodePoint(c)
+    if (isUrlSpaceAt(s, 0) !== wantSet.has(c) && wrong.length < 8) wrong.push("U+" + c.toString(16).toUpperCase())
+  }
+  const jsSpace = []
+  for (let c = 0; c <= 0x10ffff; c++) if (/\s/u.test(String.fromCodePoint(c))) jsSpace.push(c)
+  return [want.length, urlWhitespace.unionCount, wrong, (Model.URL_SPACE_CODES || []).slice().sort(function (a, b) { return a - b }).join(",") === want.slice().sort(function (a, b) { return a - b }).join(","),
+          jsSpace.every(function (c) { return wantSet.has(c) }), jsSpace.length < want.length,
+          want.filter(function (c) { return !jsSpace.includes(c) }).map(function (c) { return "U+" + c.toString(16).toUpperCase().padStart(4, "0") }),
+          urlWhitespace.codePoints.filter(function (e) { return e.in.indexOf("js") < 0 && e.in.indexOf("python") < 0 }).map(function (e) { return e.code })]
+}, [30, 30, [], true, true, true, ["U+001C", "U+001D", "U+001E", "U+001F", "U+0085"], []])
+checkCall("R32a'': the run ends at every class member and at nothing else -- a run through each printable ASCII character but whitespace keeps its host", function () {
+  const members = urlWhitespace.codePoints.map(function (e) { return String.fromCodePoint(parseInt(e.code.substring(2), 16)) })
+  const ended = members.filter(function (ch) { return Model.redactUrls("http://u:p@h.test/x" + ch + "SECRET@tail") !== "h.test" + ch + "SECRET@tail" })
+  const kept = []
+  for (let c = 33; c < 127; c++) {
+    const ch = String.fromCharCode(c)
+    if (ch === "@" || ch === "/" || ch === "?" || ch === "#" || ch === "[") continue
+    const out = Model.redactUrls("x http://u:pa" + ch + "ss@h.test/x y")
+    if (out !== "x h.test y") kept.push(ch + " -> " + out)
+  }
+  return [ended, kept]
+}, [[], []])
+checkCall("R32a'': trailingPunctuationLength strips exactly `.,;:!?)]'\"<>` off a run's end, keeps a `]` when the run holds a `[`, and strips nothing else", function () {
+  const f = typeof Model.trailingPunctuationLength === "function" ? Model.trailingPunctuationLength : function () { return "MISSING" }
+  return [f("h.test/x."), f("h.test/x.,;:!?)]'\"<>"), f("[::1]."), f("[::1]]"), f("h.test"), f(""), f("..."), f("h.test/x-"), f("h.test/x}"), f("h.test/x]")]
+}, [1, 12, 1, 0, 0, 0, 3, 0, 0, 1])
+
+// R32a'' (2026-10-22): a vector that carries `js` pins the EXACT output --
+// the restored sentence punctuation, and the accepted costs (D-SINK-34,
+// D-SINK-35) that are seen rather than described. The helper's suite reads
+// `py` the same way.
+checkCall("R32a'': every vector carrying an exact `js` output gets it, and there are vectors for each class member, each quote, both costs and the restored punctuation", function () {
+  const exact = redactionVectors.vectors.filter(function (v) { return v.js !== undefined })
+  return [exact.length >= 20,
+          exact.filter(function (v) { return Model.redactUrls(v.text) !== v.js }).map(function (v) { return v.why + " -> " + JSON.stringify(Model.redactUrls(v.text)) }),
+          ["\ufeff", "\u0085", "\u001c", "\u001d", "\u001e", "\u001f", "\u2028", "\u00a0", "\t", " "].every(function (ch) {
+            return exact.some(function (v) { return v.accepted === "D-SINK-34" && v.text.indexOf("pa" + ch + "ss@") >= 0 }) }),
+          ["'", "\"", "<", ">"].every(function (ch) { return exact.some(function (v) { return v.text.indexOf("pa" + ch + "ss@") >= 0 && v.host === "prov.test" }) }),
+          redactionVectors.vectors.some(function (v) { return v.accepted === "D-SINK-35" && v.host === "user.name" }),
+          exact.some(function (v) { return /\.$/.test(v.text) && /\.$/.test(v.js) && v.js.indexOf("[") < 0 })]
+}, [true, [], true, true, true, true])
 checkCall("D-SINK-1: the fixture is not empty and carries the doubled-at case that started it", function () {
   // A shared fixture that quietly loses its vectors is the failure mode this
   // whole exercise is about, so its size and its key case are asserted.
@@ -3850,7 +3909,7 @@ checkCall("D-SINK-1: sourceLabel and hostOf obey the authority rule too, on ever
 }, [true, []])
 checkCall("R32a': the vectors where the free-text host and the RFC host differ are present, each names both, and the free-text side is always the withheld token -- never a host after a later at-sign", function () {
   const split = redactionVectors.vectors.filter(function (v) { return v.rfcHost !== undefined })
-  return [split.length >= 8, split.filter(function (v) { return v.host !== Model.HOST_WITHHELD }).map(function (v) { return v.text }),
+  return [split.length >= 8, split.filter(function (v) { return v.host !== Model.HOST_WITHHELD && !v.accepted }).map(function (v) { return v.text }),
           split.some(function (v) { return /^http:\/\/user:2024\//.test(v.text) }),
           split.some(function (v) { return /pa#ss@/.test(v.text) }),
           split.some(function (v) { return /nas:8000\/files\/me@/.test(v.text) }),
@@ -3879,25 +3938,37 @@ checkCall("D-SINK-1: the doubled-at URL reads the same host through all three sp
 // or `&` so a neighbouring parameter never prints (D-SINK-23), and WITHHELD
 // as the one token `[host withheld]` when it has no dot and an `@` follows
 // the authority, so a password holding an unencoded `/`, `?` or `#` never
-// leaves its username in the host position (D-SINK-28). It is the thing this
+// leaves its username in the host position (D-SINK-28). R32a'' (2026-10-22)
+// moved it a third time: the run ends at ONE enumerated whitespace class
+// (the union of JS `\s`, Python `\s` and U+FEFF, spelt out here as a class
+// literal, independently of Model.isUrlSpaceAt and of the shared fixture),
+// the sentence punctuation `.,;:!?)]'"<>` on the run's end is put back after
+// the host (a `]` kept when the run holds a `[`), and a NON-NUMERIC port
+// followed by a later `@` withholds too. It is the thing this
 // change is measured against: "the cost is linear" is worth nothing unless
 // "the answer is what the rule says" is checked at the same time, and the
 // only honest way to check that is to run a second, independent statement
 // of the rule. Deliberately a copy rather than an import -- the shipping
 // file must not carry a second redactor for a test's benefit, and a copy
 // that drifts is caught the moment a vector disagrees.
+const URL_RUN_AS_RULED = /[a-z][a-z0-9+.-]*:\/\/([^\t\n\v\f\r\u001c-\u001f \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*)/gi
 function redactUrlsAsShipped(text) {
   return String(text === undefined || text === null ? "" : text)
-    .replace(/[a-z][a-z0-9+.-]*:\/\/([^\s]*)/gi, function (all, run) {
+    .replace(URL_RUN_AS_RULED, function (all, whole) {
+      const cut = whole.match(whole.indexOf("[") >= 0 ? /^([\s\S]*?)([.,;:!?)'"<>]*)$/ : /^([\s\S]*?)([.,;:!?)\]'"<>]*)$/)
+      const run = cut[1]
+      const trailing = cut[2]
       const m = run.match(/^([^\/?#]*)([\s\S]*)$/)
       const hostport = m[1].replace(/^[\s\S]*@/, "")
       if (hostport.charAt(0) === "[") {
         const lit = hostport.match(/^\[[^\]]*\]/)
-        return lit ? lit[0] : "[url]"
+        return (lit ? lit[0] : "[url]") + trailing
       }
       const host = hostport.replace(/[:;=&][\s\S]*$/, "")
-      if (host !== "" && host.indexOf(".") === -1 && m[2].indexOf("@") !== -1) return "[host withheld]"
-      return host !== "" ? host : "[url]"
+      const port = (hostport.match(/^[^:;=&]*:([^;=&]*)/) || ["", ""])[1]
+      const laterAt = m[2].indexOf("@") !== -1
+      if (laterAt && ((host !== "" && host.indexOf(".") === -1) || (port !== "" && !/^[0-9]+$/.test(port)))) return "[host withheld]" + trailing
+      return (host !== "" ? host : "[url]") + trailing
     })
 }
 // The pattern as F-SINK-11 left it, BEFORE D-SINK-23 and R32a: kept to show
@@ -3912,7 +3983,9 @@ function redactUrlsBeforeDSink23(text) {
   // An alphabet that reaches every branch of the scan: scheme characters, the
   // authority delimiters the host class excludes, the `@` D-SINK-1 is about,
   // several kinds of whitespace (`\s` is not just the space), and non-ASCII.
-  const ALPHABET = "ahHt p:/@?#.+-_019\t\n\u00a0\u2028\ufeffx[]%&=,;'\"<>"
+  // R32a'': U+0085 and U+001C are in the class and were not JS whitespace,
+  // so the generator reaches the run ends the base never had.
+  const ALPHABET = "ahHt p:/@?#.+-_019\t\n\u00a0\u2028\ufeff\u0085\u001cx[]%&=,;'\"<>"
   function generated(length, seed) {
     let out = ""
     let x = seed
@@ -3948,7 +4021,15 @@ function redactUrlsBeforeDSink23(text) {
     "http://h.test?u=me@b.test&p=SECRET", "http://h.test#u=me@b.test&p=SECRET",
     "http://u:p@h.test:8080?x=a@b.test", "http://[::1]/x", "http://[::1]:8080/x",
     "http://u:p@[2001:db8::1]:8080/x", "http://[::1", "http://[a/b]", "http://a@[b/x",
-    "http://[a]b/x", "http://[::1]@h/x", "x http://[2001:db8::5]. y"]
+    "http://[a]b/x", "http://[::1]@h/x", "x http://[2001:db8::5]. y",
+    // R32a'': a quote, an angle bracket and each class member inside a
+    // password; the second arm; punctuation to put back, with and without
+    // a bracket; a run of punctuation alone.
+    "http://myuser:pa'ss@prov.test/x", "http://myuser:pa<ss@prov.test/x", "http://myuser:pa\u0085ss@h.test/x",
+    "http://myuser:pa\u001css@h.test/x", "http://myuser:pa\ufeffss@h.test/x", "http://user.name:pa/ss@h.test/x",
+    "http://me@mail.test:pa&x=1/ss@h.test/x", "http://user.name:2024/ab@host/x", "http://h.test:/me@x.test/y",
+    "see 'http://u:p@h.test/x', <http://a.test> and \"http://b.test\".", "http://.", "x http://. y",
+    "http://[::1]].", "http://[::1]:pa/me@x", "http://h.test:80x/a@b", "http://:pa/me@x", "http://h.test:;=&/a@b"]
   for (let i = 0; i < corpus.length; i++) edges.push(corpus[i])
   for (let seed = 1; seed <= 3000; seed++) {
     for (let len = 0; len <= 40; len += 7) edges.push(generated(len, seed))
@@ -3975,16 +4056,21 @@ function redactUrlsBeforeDSink23(text) {
     // the rule 14 shape this whole file is about.
     return [edges.length > 18000, bad]
   }, [true, []])
-  checkCall("R32a' (D-SINK-23, D-SINK-28, D-SINK-29): the base pattern and the rule disagree ONLY where an at-sign follows a `?` or `#` before any `/`, a `&`, `=` or `;` sits in the base's host, the host is bracketed, or a dotless host has an at-sign after its authority", function () {
+  checkCall("R32a' / R32a'' (D-SINK-23, D-SINK-28, D-SINK-29, D-SINK-32..35): the base pattern and the rule disagree ONLY where an at-sign follows a `?` or `#` before any `/`, a `&`, `=` or `;` sits in the base's host, the host is bracketed, a dotless host or a non-numeric port has an at-sign after its authority, a run ends in sentence punctuation, or a run holds a class member JS `\\s` lacks", function () {
     // Every disagreement must carry, inside some URL run (the text after a
     // `://` up to whitespace), an `@` after a `?` or `#` and before any `/`
     // (the base's userinfo search crossed into a pathless query), a `&`, `=`
     // or `;` inside what the base read as the host, a `[` right after the
-    // userinfo, or a dotless host followed by the authority's end and a
-    // later `@` (withheld). An `@` after a `/` alone is NOT a disagreement
-    // any more: the RFC authority never crosses a `/` (D-SINK-29). Anything
-    // else that differs is a change this round did not mean to make.
-    const explained = s => /:\/\/[^\/\s]*[?#][^\/\s]*@|:\/\/(?:[^\/\s]*@)?[^\/\s?#:@]*[&=;]|:\/\/(?:[^\/?#\s]*@)?\[|:\/\/(?:[^\/?#\s]*@)?[^\/?#\s.:;=&@\[]+(?:[:;=&][^\/?#\s]*)?[\/?#][^\s]*@/.test(s)
+    // userinfo, a dotless host followed by the authority's end and a later
+    // `@` (withheld), a `:` after the host whose port text holds a non-digit
+    // before the authority's end and a later `@` (R32a'', the second arm),
+    // a character of `.,;:!?)]'"<>` ending the run (R32a'', put back now), or
+    // U+0085 / U+001C..U+001F inside the run (R32a'', the shared class ends
+    // the run there; JS `\s` did not). An `@` after a `/` alone is NOT a
+    // disagreement any more: the RFC authority never crosses a `/`
+    // (D-SINK-29). Anything else that differs is a change this round did
+    // not mean to make.
+    const explained = s => /:\/\/[^\/\s]*[?#][^\/\s]*@|:\/\/(?:[^\/\s]*@)?[^\/\s?#:@]*[&=;]|:\/\/(?:[^\/?#\s]*@)?\[|:\/\/(?:[^\/?#\s]*@)?[^\/?#\s.:;=&@\[]+(?:[:;=&][^\/?#\s]*)?[\/?#][^\s]*@|:\/\/(?:[^\/?#\s]*@)?[^\/?#\s:@\[]*:[^\/?#\s;=&]*[^0-9\/?#\s;=&][^\/?#\s]*[\/?#][^\s]*@|:\/\/[^\s]*[.,;:!?)\]'"<>](?=\s|$)|:\/\/[^\s]*[\u0085\u001c-\u001f]/.test(s)
     let differ = 0
     const unexplained = []
     for (let i = 0; i < edges.length; i++) {
@@ -5392,7 +5478,7 @@ check("a refused load for D-SINK-16 is a failed play, and it has words for the u
 // ---- the event router (4.8) ----
 check("parsePlayerEvent: start-file", Model.parsePlayerEvent('{"event":"start-file","playlist_entry_id":2}'), { kind: "start-file", entryId: 2 })
 check("parsePlayerEvent: end-file carries the reason and the file error", Model.parsePlayerEvent('{"event":"end-file","reason":"error","playlist_entry_id":2,"file_error":"loading failed"}'), { kind: "end-file", entryId: 2, reason: "error", fileError: "loading failed" })
-check("parsePlayerEvent: log-message text is redacted to its host (S-01/D-QA-01)", Model.parsePlayerEvent('{"event":"log-message","prefix":"stream","level":"error","text":"Failed to open http://u:p@provider.test/live/tok/1.m3u8.\\n"}'), { kind: "log-message", level: "error", prefix: "stream", text: "Failed to open provider.test" })
+check("parsePlayerEvent: log-message text is redacted to its host (S-01/D-QA-01)", Model.parsePlayerEvent('{"event":"log-message","prefix":"stream","level":"error","text":"Failed to open http://u:p@provider.test/live/tok/1.m3u8.\\n"}'), { kind: "log-message", level: "error", prefix: "stream", text: "Failed to open provider.test." })
 check("parsePlayerEvent: idle-active property change", Model.parsePlayerEvent('{"event":"property-change","id":1,"name":"idle-active","data":true}'), { kind: "property-change", name: "idle-active", value: true })
 check("parsePlayerEvent ignores replies, other events, other properties, junk and null", [
   Model.parsePlayerEvent('{"error":"success","data":{"playlist_entry_id":2},"request_id":3}').kind,
@@ -5466,7 +5552,7 @@ const Q = (s) => String.fromCharCode(0x201c) + s + String.fromCharCode(0x201d)  
 check("notifyArgv streamFailed", Model.notifyArgv("streamFailed", { name: "Sky Sports", reason: "HTTP 403" }),
   ["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", tvOff, "-r", "74011", "Stream failed", Q("Sky Sports") + " did not play" + SEP + "HTTP 403"])
 check("notifyArgv streamFailed without reason", Model.notifyArgv("streamFailed", { name: "X" }).slice(-1), [Q("X") + " did not play"])
-check("notifyArgv streamFailed redacts URLs from the reason", Model.notifyArgv("streamFailed", { name: "X", reason: "Failed to open https://u:p@h.test/live/x.m3u8?t=1." }).slice(-1), [Q("X") + " did not play" + SEP + "Failed to open h.test"])
+check("notifyArgv streamFailed redacts URLs from the reason", Model.notifyArgv("streamFailed", { name: "X", reason: "Failed to open https://u:p@h.test/live/x.m3u8?t=1." }).slice(-1), [Q("X") + " did not play" + SEP + "Failed to open h.test."])
 // S-04: the wrapper reads a body matching --urgency=* / --icon=* / -g ... as an option.
 check("notifyArgv body never starts with a dash (S-04)", (() => {
   const out = []
@@ -5491,7 +5577,7 @@ check("sourceLabel https", Model.sourceLabel("HTTPS://Host.Test/x.m3u"), "https:
 check("sourceLabel local", [Model.sourceLabel("/home/x/list.m3u"), Model.sourceLabel("~/l.m3u"), Model.sourceLabel("file:///tmp/x.m3u")], ["local file", "local file", "local file"])
 check("sourceLabel empty / junk", [Model.sourceLabel(""), Model.sourceLabel("ftp"), Model.sourceLabel(null)], ["", "unknown source", ""])
 check("hostOf", [Model.hostOf("http://u:p@h.test/x"), Model.hostOf("/x"), Model.hostOf("")], ["h.test", "local file", ""])
-check("redactUrls replaces every URL by its host (D-QA-01)", Model.redactUrls("Failed to open http://user:pass@tv.example.net:8080/get.php?u=1&p=2."), "Failed to open tv.example.net")
+check("redactUrls replaces every URL by its host (D-QA-01)", Model.redactUrls("Failed to open http://user:pass@tv.example.net:8080/get.php?u=1&p=2."), "Failed to open tv.example.net.")
 check("redactUrls several URLs", Model.redactUrls("open https://a.b/c/d?e=f and rtsp://u:p@h:554/x fine"), "open a.b and h fine")
 check("redactUrls no urls", Model.redactUrls("plain text"), "plain text")
 check("redactUrls empty host", Model.redactUrls("x file:///etc/passwd y"), "x [url] y")
@@ -5841,7 +5927,8 @@ for (const c of fixture) {
 check("R32a': the fixture carries the ruling's own typo example as an INVALID value with the predicate, in all three spellings, and dotted or at-sign-less invalid values without it", [
   fixture.filter(c => !c.ok && c.warn === true).map(c => c.input).sort(),
   fixture.filter(c => !c.ok && c.warn === false).length >= 3
-], [["http://myuser:pa#ss@cdn.test/x", "http://myuser:pa#ss@cdn.test/x", "http://myuser:pa/ss@cdn.test/x", "http://myuser:pa?ss@cdn.test/x"], true])
+], [["http://h.test:8080x/me@x.test/y", "http://h.test:pa/me@x.test/y", "http://me@mail.test:pa/ss@h.test/x", "http://myuser:pa#ss@cdn.test/x", "http://myuser:pa#ss@cdn.test/x",
+     "http://myuser:pa/ss@cdn.test/x", "http://myuser:pa?ss@cdn.test/x", "http://user.name:pa/ss@h.test/x"], true])
 check("R32a: the fixture carries the typo shapes that warn and the Xtream and WebDAV shapes that do not", [
   fixture.filter(c => c.warn === true).length >= 7,
   fixture.filter(c => c.warn === false).length >= 12,
@@ -14479,27 +14566,48 @@ checkCall("R32a' (D-SINK-29, the P1): an at-sign inside a PATH or QUERY credenti
   ["Failed to open http://prov.test/live/U5ER/P4@SSW0RD/1.ts.", "playlist: http://host.test:25461/get.php?username=me@mail.test&password=p@ssw0rd&type=m3u_plus",
    "http://host.test/get.php?username=me@mail.test&password=p@ssw0rd", "http://h.test?u=me@b.test&p=SECRET", "http://h.test#u=me@b.test", "http://host.test:25461/playlist/me@mail.test/pw/m3u_plus"]
     .map(Model.redactUrls),
-  ["Failed to open prov.test", "playlist: host.test", "host.test", "h.test", "h.test", "host.test"])
+  ["Failed to open prov.test.", "playlist: host.test", "host.test", "h.test", "h.test", "host.test"])
 checkCall("R32a' (D-SINK-28): a dotless RFC host with an at-sign after the authority is WITHHELD as the one token -- never the username, never the host after the later at-sign; a bracketed, dotted or at-sign-less host prints; `localhost` gets no exemption", () =>
   ["Failed to open http://myuser:pa#ss@cdn.test/x.", "http://myuser:pa?ss@cdn.test/x", "http://myuser:pa/ss@cdn.test/x", "http://user:2024/ab@host.test/list.m3u",
    "http://nas:8000/files/me@home/x", "http://localhost:8080/me@mail.test/x", "http://nas:8080?u=me@b.test", "http://u:p@nas:8080/me@x",
    "http://u:p@nas/x", "http://host?password=x", "http://[2001:db8::7]/live/me@mail.test/1.ts", "http://h.test;sid=SECRET", "http://a@b@c@h.test/me@x"]
     .map(Model.redactUrls),
-  ["Failed to open " + Model.HOST_WITHHELD, Model.HOST_WITHHELD, Model.HOST_WITHHELD, Model.HOST_WITHHELD,
+  ["Failed to open " + Model.HOST_WITHHELD + ".", Model.HOST_WITHHELD, Model.HOST_WITHHELD, Model.HOST_WITHHELD,
    Model.HOST_WITHHELD, Model.HOST_WITHHELD, Model.HOST_WITHHELD, Model.HOST_WITHHELD,
    "nas", "host", "[2001:db8::7]", "h.test", "h.test"])
 check("R32a': the withheld token is one fixed word with no URL characters a redactor could be fooled by, and it is what the helper's HOST_WITHHELD mirrors (the shared fixture holds both)", [Model.HOST_WITHHELD, /^\[[a-z ]+\]$/.test(Model.HOST_WITHHELD)], ["[host withheld]", true])
 checkCall("R32a': urlHostWithheld is the ONE predicate, computed independently of validation -- it holds on the ruling's own invalid example (port `pa`), on the valid typo shape and on a LAN name, and not on a dotted host, a bracketed literal, a userinfo-only at-sign, a value with no `://`, or an empty value", () =>
   ["http://myuser:pa#ss@cdn.test/x", "http://myuser:pa?ss@cdn.test/x", "http://myuser:pa/ss@cdn.test/x", "http://user:2024/ab@host.test/list.m3u", "http://nas:8000/files/me@home/x",
    "http://localhost/me@x", "http://user:2024#ab@host.test", "http://u:p@nas:8080/me@x", "http://nas:8080?u=me@b.test", "see http://nas/me@x now",
-   "http://h.test:pa/me@x.test/y", "http://[2001:db8::1]:8080/me@mail.test", "http://[2001:db8::1:x/me@mail.test", "http://u:p@nas", "http://u:p@nas/x?a=1#f", "http://host.test:25461/playlist/me@mail.test/pw/m3u_plus",
+   "http://[2001:db8::1]:8080/me@mail.test", "http://[2001:db8::1:x/me@mail.test", "http://u:p@nas", "http://u:p@nas/x?a=1#f", "http://host.test:25461/playlist/me@mail.test/pw/m3u_plus",
    "http://nas", "http://nas/x", "nas/me@x", "", null, "http://h .test/me@x", "http:///me@x", "http://:8080/me@x"]
     .map(modelFn("urlHostWithheld")),
   [true, true, true, true, true, true, true, true, true, true,
-   false, false, false, false, false, false, false, false, false, false, false, false, false, false])
+   false, false, false, false, false, false, false, false, false, false, false, false, false])
+// R32a'' (2026-10-22): the predicate's SECOND arm -- a non-numeric port
+// (`:` after the authority's last `@`, its text to the next `;`, `=` or
+// `&` non-empty and not all digits) with a later `@` -- in free text and
+// in the form alike; a numeric port, an empty port and a bracketed literal
+// are not it. `http://h.test:pa/me@x.test/y` moved from the list above
+// (false under R32a') to here.
+checkCall("R32a'' (D-SINK-35): the second arm of the predicate -- a NON-NUMERIC port followed by a later at-sign withholds, dotted host or not; a numeric or empty port, a port cut at `;=&`, a bracketed literal and a value with no later at-sign do not", () =>
+  ["http://user.name:pa/ss@h.test/x", "http://me@mail.test:pa/ss@h.test/x", "http://h.test:pa/me@x.test/y", "http://h.test:8080x/me@x.test/y",
+   "http://h.test:p?me@x", "http://h.test:p#me@x", "http://me@mail.test:pa&x=1/ss@h.test/x", "http://:pa/me@x", "http://h.test:pa;x=1/me@x",
+   "http://user.name:2024/ab@host/x", "http://h.test:/me@x.test/y", "http://[::1]:pa/me@x", "http://h.test:pa/ss", "http://h.test:;=&/a@b",
+   "http://me@mail.test:pa/ss y@z", "http://user.name:2024&p=x/a@b"]
+    .map(modelFn("urlHostWithheld")),
+  [true, true, true, true, true, true, true, true, true,
+   false, false, false, false, false, false, false])
+checkCall("R32a'' (D-SINK-35): the second arm reaches the free-text redactor, the form's refusal and the warning the same way as the first", () => {
+  const dotted = "http://user.name:pa/ss@h.test/x", email = "http://me@mail.test:pa/ss@h.test/x", moved = "http://h.test:pa/me@x.test/y"
+  const tail = ". " + Model.ENCODE_SENTENCE
+  return [[dotted, email, moved].map(Model.redactUrls), [dotted, email, moved].map(u => Model.validateSourceUrl(u).message === Model.sourceErrorMessage("invalid") + tail),
+          [dotted, email, moved].map(Model.sourceUrlWarning), Model.xtreamUrls("http://user.name:pa/ss@h.test", "u", "p").message === Model.sourceErrorMessage("invalid") + tail,
+          Model.redactUrls("http://user.name:2024/ab@host/x"), Model.validateSourceUrl("http://user.name:2024/ab@host.test/x").ok, Model.sourceUrlWarning("http://user.name:2024/ab@host.test/x")]
+}, [[Model.HOST_WITHHELD, Model.HOST_WITHHELD, Model.HOST_WITHHELD], [true, true, true], ["", "", ""], true, "user.name", true, ""])
 checkCall("R32a' (the recheck's P2): the INVALID refusal of a value with the predicate carries the encoding sentence after the invalid-URL sentence -- for the playlist, the EPG field and the Xtream server -- and the warning line stays empty for it; a plain invalid value gets the bare refusal", () => {
   const typo = "http://myuser:pa#ss@cdn.test/x"
-  const pv = Model.validateSourceUrl(typo), ev = Model.validateSourceUrl(typo, { kind: "epg" }), plain = Model.validateSourceUrl("http://h.test:pa/me@x.test/y")
+  const pv = Model.validateSourceUrl(typo), ev = Model.validateSourceUrl(typo, { kind: "epg" }), plain = Model.validateSourceUrl("http://h.test:pa/ss")
   const form = Model.validateUrlForm({ label: "", playlist: typo, epg: "" }, [], "")
   const xt = Model.xtreamUrls("http://myuser:pa#ss@cdn.test", "u", "p")
   const tail = ". " + Model.ENCODE_SENTENCE
@@ -14522,7 +14630,7 @@ checkCall("R32a' (D-SINK-29), THE SINK PATH: a play refusal whose error text car
     message: "Failed to open http://prov.test/live/U5ER/P4@SSW0RD/1.ts and http://myuser:pa#ss@cdn.test/x." } }) + "\n")
   const lines = h.warnings.filter(w => /play failed:/.test(w))
   return [lines.length, lines[0], h.root.lastError, lines.concat([h.root.lastError]).some(l => /SSW0RD|ssw0rd|U5ER|myuser|pa#ss|cdn\.test/.test(l))]
-}, [1, "omarchy-iptv: play failed: Failed to open prov.test and " + Model.HOST_WITHHELD, "Failed to open prov.test and " + Model.HOST_WITHHELD, false])
+}, [1, "omarchy-iptv: play failed: Failed to open prov.test and " + Model.HOST_WITHHELD + ".", "Failed to open prov.test and " + Model.HOST_WITHHELD + ".", false])
 checkCall("R32a' (D-SINK-29), THE SINK PATH, the notification: the stream-failure toast Service.raiseStreamFailure raises carries the host and no tail of the credential, whether the reason arrives redacted by the helper (the shipping shape) or raw", () => {
   const H = require("./service-harness.js")
   const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
@@ -14534,7 +14642,7 @@ checkCall("R32a' (D-SINK-29), THE SINK PATH, the notification: the stream-failur
     return [argv.length, argv[0] ? argv[0][argv[0].length - 1] : "", argv.some(a => /SSW0RD|ssw0rd|U5ER|myuser|pa#ss/.test(a.join(" ")))]
   }
   return [run("Failed to open http://prov.test/live/U5ER/P4@SSW0RD/1.ts."), run("Failed to open http://myuser:pa#ss@cdn.test/x.")]
-}, [[1, "\u201cX\u201d did not play" + Model.SEP + "Failed to open prov.test", false], [1, "\u201cX\u201d did not play" + Model.SEP + "Failed to open " + Model.HOST_WITHHELD, false]])
+}, [[1, "\u201cX\u201d did not play" + Model.SEP + "Failed to open prov.test.", false], [1, "\u201cX\u201d did not play" + Model.SEP + "Failed to open " + Model.HOST_WITHHELD + ".", false]])
 
 // ---- D-PERF-11 (R30g): maskUrl without the two adjacent runs ----
 //

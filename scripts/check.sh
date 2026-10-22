@@ -46,6 +46,12 @@
 #                                trailing-whitespace pattern that is quadratic
 #                                in a run, and no trimEnd/trimStart, which
 #                                Qt 6.11.2's V4 does not have; D-PERF-3)
+#  14. model regex guard         (scripts/check-model-regex.py: no regex in
+#                                the model or the shipped QML with two
+#                                unbounded repeats over overlapping classes
+#                                and nothing mandatory between them, the
+#                                shape maskUrl shipped and two reviews
+#                                cleared; D-PERF-11, lane H2's grader)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
@@ -171,7 +177,8 @@ fail=0
 # they are correct only until the next test is written.
 # 78 -> 79 on 2026-10-22 (lane-bounds-s2): test_r32a_urlAuthority, the
 # R32a/R32b functions under Qt's own engine; red on 2ffde4c.
-QML_SPEC_MIN=${QML_SPEC_MIN:-79}
+# 79 -> 80 on 2026-10-22 (lane-bounds-s4): test_r32a2_urlWhitespaceAndPunctuation.
+QML_SPEC_MIN=${QML_SPEC_MIN:-80}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -313,7 +320,13 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-79}
 # name checks and the D-PERF-11 maskUrl oracle. Red on the merge commit
 # 0c59eab: see the lane report's counts; the rest on a mutation of the
 # shipping decision.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2878}
+# 2878 -> 2902 on 2026-10-22 (lane-bounds-s4, R32a''): the shared whitespace
+# class over the whole Unicode range, the run ends and the trailing
+# punctuation, the exact `js` outputs of the shared vectors (the restored
+# `.`, the D-SINK-34 and D-SINK-35 costs), the second arm of the predicate
+# in free text and in the form. Red on the merge commit 12228f1: see the
+# lane report's counts.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2902}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -481,7 +494,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2878}
 # `player start` reply's reason, D-SINK-31's `Stream` fallback through
 # player_target, R32b''s non-option-shaped names as <token>). The R32a'
 # host test and test_e of the regex guard are changed in place.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1466}
+# 1466 -> 1476 on 2026-10-22 (lane-bounds-s4, R32a''): test_helper (+3: the
+# exact `py` outputs, the one whitespace class against the fixture over the
+# whole range, the second arm), test_model_regex_guard (+7, the D-PERF-11
+# guard's own tests).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1476}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -577,6 +594,10 @@ OPEN_PREFLIGHT_MIN=${OPEN_PREFLIGHT_MIN:-19}
 # the 18 parts and the 3 shipped .qml files; fewer means it stopped reading
 # some of them.
 TRIM_GUARD_FILES_MIN=${TRIM_GUARD_FILES_MIN:-22}
+# D-PERF-11 (2026-10-22, lane-bounds-s4): the model regex guard reads the same
+# 22 files and every regex literal the trim guard reads (68 on this tree);
+# fewer literals means its scanner stopped seeing some of them.
+MODEL_REGEX_LITERALS_MIN=${MODEL_REGEX_LITERALS_MIN:-60}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -1358,6 +1379,27 @@ if python3 "$ROOT/scripts/check-trim-shapes.py" >"$trim_log" 2>&1; then
   fi
 else
   cat "$trim_log"; bad "trim shape guard"
+fi
+
+step "model regex guard (no two adjacent unbounded runs over overlapping classes)"
+# D-PERF-11, R32a'' round 5 (2026-10-22): maskUrl's `([^\/?#]*)([^?#]*)` was
+# two adjacent unbounded runs over overlapping classes, quadratic when the
+# tail failed, and two hand reviews of every regex in model/** cleared it;
+# lane H2's helper guard grades that shape by structure, and this is the same
+# grader (imported, not copied) over the model and the shipped QML. A guard
+# against one known-bad shape, not an acceptance criterion.
+model_regex_log=$CHECK_TMP/model-regex.log
+if python3 "$ROOT/scripts/check-model-regex.py" >"$model_regex_log" 2>&1; then
+  model_regex_n=$(grep -oE '^model regex guard: [0-9]+ file\(s\), [0-9]+ regex literal' "$model_regex_log" | head -1 | grep -oE '[0-9]+ regex' | grep -oE '[0-9]+')
+  if [[ -z $model_regex_n ]]; then
+    cat "$model_regex_log"; bad "model regex guard printed no literal count at all"
+  elif (( model_regex_n < MODEL_REGEX_LITERALS_MIN )); then
+    cat "$model_regex_log"; bad "model regex guard read $model_regex_n regex literal(s), expected at least $MODEL_REGEX_LITERALS_MIN"
+  else
+    ok "$(tail -1 "$model_regex_log")"
+  fi
+else
+  cat "$model_regex_log"; bad "model regex guard"
 fi
 
 if (( fail )); then echo "check.sh: FAILED"; exit 1; fi
