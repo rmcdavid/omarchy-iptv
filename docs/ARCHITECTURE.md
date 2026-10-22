@@ -3285,12 +3285,18 @@ Performance budget (10k channels):
     near the limit wrote its status under it. Observed in a real helper
     process at every file it opens and every line it prints
     (`tests/test_reply_bounds.py`), red against the code before.
-16. Every reply the shell collects whole is bounded by a constant
-    (D-SRC-13 and its rule-15 sweep, 2026-10-21). Each helper Process in
+16. Every reply the shell collects whole is bounded -- by a constant, or,
+    for the two verbs named at the end of this item, by a file the plugin
+    owns (D-SRC-13 and its rule-15 sweep, 2026-10-21; the heading said "by
+    a constant" for all of them until the round-1 recheck of
+    lane-bounds-p). Each helper Process in
     `Service.qml` reads its stdout through a `StdioCollector` with
     `waitForEnd`, so a reply is held in the shell in one piece; a list or a
     string in it whose size is the provider's is held to a cap, and what
-    the cap leaves out is COUNTED rather than dropped in silence. The
+    the cap leaves out is COUNTED rather than dropped in silence. One
+    exception is filed and open: a fetch error's message carries the
+    server's HTTP status line, bounded only by `http.client`'s 64 KiB line
+    limit (D-SRC-59). The
     playlist status line (`playlist`, and the source probe, which is the
     same verb): at most `M3U_MAX_CHANNEL_WARNINGS` per-channel warnings,
     each a fixed phrase and a name held to `M3U_MAX_NAME`, and at most
@@ -3303,8 +3309,13 @@ Performance budget (10k channels):
     to `FIRST_LOAD_REASON_MAX`. main()'s answer to a bug, which any verb
     can end in: the message cut to `INTERNAL_MESSAGE_MAX` and the
     traceback to the first and last halves of `INTERNAL_TRACE_MAX`, the
-    middle counted. Every cut is made after the redaction, so it can never
-    leave half a URL behind it. Bounded without a new cap, and why:
+    middle counted. Every cut is made after the redaction, so the redactor
+    always sees a whole URL: a cut can shorten a redacted `scheme://host`,
+    but it never leaves part of a userinfo, a path or a query behind it
+    (pinned with caps that fall inside the userinfo, red with the order
+    reversed; at the caps the first tests used, both orders gave the same
+    answer). The counted line reads for one as well as for many
+    (`[1 character not shown]`). Bounded without a new cap, and why:
     `epg` (fixed fields and at most five counted sentences; a cached
     window's warnings are the helper's own); `clipboard`
     (`MAX_CLIPBOARD_CHARS`, D-CLIP-1); `config shield` (modes, a verdict
@@ -3335,13 +3346,27 @@ Performance budget (10k channels):
     start, a missing stop from the next strictly later start or
     `EPG_DEFAULT_DURATION`, skip a stop not after its start, drop a repeat of
     the last record kept, keep the first `EPG_MAX_PER_CHANNEL` -- with the
-    next later start found by a forward pointer instead of a rescan from
-    every stopless programme (the same answer; the rescan was quadratic in
-    programmes sharing a start). Each channel's bytes are released as its
-    record string is made. No per-channel heap and no total cap were added:
-    neither lowers the worst case, which is many channels of few programmes
-    each and is bounded by the input, so the bound is this layout's cost
-    times what 64 MiB can hold, and nothing is ever dropped.
+    next later start of every position written by ONE backward pass over
+    the sorted starts (D-EPG-9, ruling R30h; the rescan from every stopless
+    programme it replaces was quadratic in programmes sharing a start, and
+    this branch's first repair was a forward pointer). `_retained_start`
+    runs twice a programme, for the sort and for that pass, whatever the
+    input, counted by `EncodeLinearityTest` (red with the rescan restored);
+    the output equals the forward pointer's byte for byte
+    (`EncodeDifferentialTest`, 9,000 small channels and 80 seeded guides
+    against lane-bounds-int). The duplicate check's STOP half is pinned by
+    `DuplicateKeyStopTest`, red with the key reduced to (start, texts),
+    which every earlier EPG test passed. Rule 15 over the same shape -- a
+    membership scan repeated per item -- found three more on provider text,
+    each now one pass and held to lane-bounds-int's output
+    (`LinearSiblingsTest`): `split_groups`, which a persistent `#EXTGRP` of
+    up to 256 parts sent through about 32,000 comparisons for every channel
+    after it; `build_alias`'s bare-name owner lists, k*k/2 for k rows sharing
+    a name; and `addrNameConflicts`' set difference, a copy of the guide's
+    declarations per row. Each channel's bytes are released
+    as its record string is made. No per-channel heap and no programme cap
+    were added: neither lowers the per-programme worst case. The channel
+    count IS capped where nothing else caps it, below (D-EPG-10).
 
     Measured on ordinary small guides (2,000 vs 4,000 programmes over 50
     channels, `parse_xmltv`'s marginal traced peak; `RetainedCostTest` pins
@@ -3354,34 +3379,100 @@ Performance budget (10k channels):
     72 + t bytes and one with a stop (twelve digits at most) 84 + t, where t
     is its texts' UTF-8 length; its XML is at least 67 + t and 83 + t
     (`<programme start="YYYYMMDD" channel="a">`, a title element, the stop
-    attribute when there is one). So the parse retains at most about 1.08
-    bytes a byte of guide, **69 MiB at the 64 MiB cap** (986,895 title-only
-    programmes of 68 bytes is the most it can hold), except where URL
-    redaction lengthens a description -- `a://@` becomes `a://[redacted]`,
-    2.8 times the token, never past the field's 400 code points -- which
-    caps it at about 2 bytes a byte, **128 MiB**. Before: 144 bytes per
-    title-only programme measured with every start shared across 50
-    channels, about 136 MiB over the 986,895 the cap can hold, with the time
-    memo below on top of it when the starts are not shared.
+    attribute when there is one). So the PROGRAMMES the parse retains are
+    at most about 1.08 bytes a byte of guide, **69 MiB at the 64 MiB cap**
+    (986,895 title-only programmes of 68 bytes is the most it can hold),
+    except where URL redaction lengthens a description -- `a://@` becomes
+    `a://[redacted]`, 2.8 times the token, never past the field's 400 code
+    points -- which caps them at about 2 bytes a byte, **128 MiB**. Before:
+    144 bytes per title-only programme measured with every start shared
+    across 50 channels, about 136 MiB over the 986,895 the cap can hold,
+    with the time memo below on top of it when the starts are not shared.
+
+    That is one of TWO terms, and the first version of this section stated
+    it as the whole bound (D-EPG-10, found by the round-1 recheck of
+    lane-bounds-l). A programme is kept under a CHANNEL, and a channel costs
+    its programme list, its key, a claim tuple holding the guide's own id,
+    and a slot in three tables. Measured on ordinary guides (1,000 vs 2,000
+    channels of one title-only programme each, fourteen-character ids,
+    `parse_xmltv`'s marginal traced peak, 2026-10-21, the same with a
+    playlist index and without, and the same on lane-bounds-int): **380
+    bytes per channel and its programme** against 216 bytes of XML; the
+    programme is 58 of it and the id's str 63, so a channel costs about 260
+    bytes plus its id.
+    - **With a playlist index** every key is a playlist tvg-id, so there are
+      at most `MAX_CHANNELS` claims: 50,000 x 260 = **12.4 MiB**, plus the
+      guide ids the claims keep, which the bytes of the attributes they
+      came from bound.
+    - **Without one** (no readable `channels.json` when the guide is
+      fetched, which a first start meets whenever the playlist fetch, run
+      beside it, has not landed) the parse kept EVERY guide channel under
+      its own id, bounded only by the input: a minimal programme for a new
+      channel is about 72 bytes of XML, so about 930,000 channels at the
+      cap and about **340 MiB** (arithmetic, the recheck's figure), all of
+      which reached `epg-now.json` and the shell. Ruling R30d: it now admits
+      at most `MAX_CHANNELS` distinct guide channels -- the first ones the
+      guide's programmes name -- and no id longer than `EPG_MAX_GUIDE_ID`
+      (256, `M3U_MAX_TVG_ID`, so no id a playlist tvg-id could never equal),
+      and counts the programmes it refuses in one sentence each, for one and
+      for many. Counted by programme because counting refused CHANNELS
+      would need the set this bound exists to stop. So at most 50,000 x
+      (260 + 1,100 for a 256-character id of astral characters) =
+      **65 MiB**, and 50,000 x 330 = 16 MiB with ordinary twenty-character
+      ids. With an index nothing changes.
+    Both are arithmetic at the cap and UNVERIFIED at that size by design;
+    `GuideChannelCapTest` pins the cap with `MAX_CHANNELS` lowered to 3 and
+    2, through the parse and through the verb into `epg-now.json`, red on
+    lane-bounds-int.
 
     Its neighbours, found under rule 15 and stated with the same care:
 
     | Held during the parse | Bound | Changed |
     |---|---|---|
     | programmes (`pending`) | 1.08 x the guide's programme bytes, 2 x with redaction growth: 69-128 MiB | compact form, above |
-    | the time memo (`parse_xmltv_time`) | `EPG_TIME_CACHE_MAX` 16,384 keys of at most `EPG_TIME_CACHE_KEY_MAX` 64 characters, about 3 MiB | was one key per distinct start or stop, a junk value of any length kept whole |
-    | the download | 64 MiB (`MAX_SOURCE_BYTES`; a gzip stream is inflated in chunks) | now released once parsed, before the window is encoded and written |
+    | channels (`pending`'s lists, `claim`, `seen_ids`, the keys) | about 260 bytes a channel plus its id: 12.4 MiB with a playlist index; without one at most `MAX_CHANNELS` ids of at most 256 code points, 65 MiB (16 MiB with ordinary ids) | without an index it was every guide channel, about 340 MiB at the cap (D-EPG-10, R30d) |
+    | the time memo (`parse_xmltv_time`) | `EPG_TIME_CACHE_MAX` 16,384 ASCII keys of at most `EPG_TIME_CACHE_KEY_MAX` 64 characters: 16,384 x (105 + 32 + about 40) bytes, about 2.8 MiB | was one key per distinct start or stop, a junk value of any length kept whole; then a non-ASCII key of 64 astral characters (316 bytes) put the "about 3 MiB" this row said near 6, so only an ASCII key is kept now (a non-ASCII time is still parsed) |
+    | the download | 64 MiB (`MAX_SOURCE_BYTES`; a gzip stream is inflated in chunks) | released when `parse_xmltv` returns: alive through the parse and the per-channel encoding at its end, released before the window's lines are built and written (this row said "once parsed, before the window is encoded" until the recheck read the order) |
     | the playlist cache (`channels.json` as Python objects) | the whole playlist, for the whole parse | now only each row's `tvgId` (what `match_counts` reads) is kept; the document is released before the parse |
     | guide-side name tables (`guide_names`, `bare_guide`) | 355 bytes per ordinary declaration whose name the playlist claims (measured, 112-byte declarations, both trees alike), so at most 50,000 x 355 = 17 MiB for distinct names; about 100 bytes per further declaration colliding on a claimed name (the existing measurement in `parse_xmltv`'s docstring), so at most about 1.7 x the guide's declaration bytes | not changed |
     | the playlist index (`build_alias`) | 178.8 MiB traced at the playlist caps, measured when `EPG_ADDR_MAX_TOKENS` was set | not changed |
 
     A byte of guide is either a programme or a declaration, so the parse's
-    own tables hold at most about 2 x 64 MiB plus 17 MiB; with the download,
-    the index at the playlist caps and the interpreter, the sum of every
-    worst case at once is about 64 + 145 + 179 + 3 + 20 = 411 MiB, under the
-    512 MiB limit, and a run over it is refused as `too_large` with the old
-    guide kept. The playlist index is now the largest single term; it is
-    the next one to shrink, not this round's.
+    programme and name tables hold at most about 2 x 64 MiB plus 17 MiB.
+    With a playlist index, adding the channels, the download, the index at
+    the playlist caps, the memo and the interpreter, the sum of every worst
+    case at once is about 64 + 145 + 12 + 179 + 3 + 20 = 423 MiB; without
+    one there is no index and no name table, and it is about 64 + 128 + 65
+    + 3 + 20 = 280 MiB. Both are under the 512 MiB limit, and a run over it
+    is refused as `too_large` with the old guide kept. The playlist index
+    is the largest single term; it is the next one to shrink, not this
+    round's.
+
+    **What a guide name costs to key, and every regex's cost (D-EPG-8,
+    ruling R30g, 2026-10-21).** The bare-name key stripped a trailing
+    qualifier with `\s*\([^()]*\)\s*$` under `.sub()`, on `<display-name>`
+    text nothing folded or capped: no literal prefix, so the engine tried
+    every position, and inside a whitespace run of k each one scanned the
+    rest of the run and backed off -- about k*k/2 steps for one run
+    (arithmetic; under the sweep's input rule nothing was built to time it).
+    `strip_trailing_qualifier` gives the same answer with three linear
+    scans, held equal to the old pattern, run as an oracle, on 20,000
+    generated names and every code point's whitespace class; and every
+    display-name is folded (`_CONTROL_WS`) and cut to `EPG_MAX_DISPLAY_NAME`
+    (`M3U_MAX_NAME`, 512) before either key is made, pinned with the cap
+    lowered. Rule 15 over every regex the helper compiles, 34 calls, is now
+    a table the gate holds them to (`scripts/check-helper-regex.py`): each
+    pattern with what it reads (provider text, user text, or the plugin's
+    own data) and why its cost is linear, and a new or changed pattern is
+    red until its review is written. The search found one more quadratic
+    pattern and fixed it -- `_IPV6_LITERAL`'s two adjacent runs over one
+    class, on a source URL already capped at 2,048 characters -- and one it
+    leaves OPEN, because the function is another lane's this round: the URL
+    redactor's scheme-run search, `[A-Za-z0-9+.\-]*\Z` under `search()`,
+    tries every start in its window, so a scheme-legal run broken once
+    inside the window costs about r*r/2 for a run of r (arithmetic,
+    UNVERIFIED by run); the guard prints it on every run until it is
+    closed.
 
     After the parse, UNVERIFIED and stated: a channel's record string is a
     Python str, which one astral character (an emoji) in any of its records
@@ -3413,8 +3504,12 @@ Performance budget (10k channels):
     matched channels with a description, category and episode on now and
     next: 529 bytes of JSON a channel, and 6.85-7.03 KiB of resident memory
     a channel, twice each (71.7 MiB with one channel, 85.1 and 98.8 MiB at
-    2,000 and 4,000). Entries are bounded by the playlist's distinct tvg-ids,
-    at most `MAX_CHANNELS` = 50,000, and an ordinary guide of 50,000 matched
+    2,000 and 4,000). Entries are at most `MAX_CHANNELS` = 50,000: the
+    playlist's distinct tvg-ids with a playlist index, and, without one,
+    the first 50,000 guide channels, each key at most 256 code points (this
+    said "the playlist's distinct tvg-ids" alone while a guide fetched
+    without an index wrote every guide channel; D-EPG-10, R30d). An
+    ordinary guide of 50,000 matched
     channels with two programmes each in the window is about 33 MB of XML,
     inside the input cap. So the shell can hold about **340 MiB** for the
     guide's now/next at `MAX_CHANNELS` (UNVERIFIED at that size; about 67 MiB

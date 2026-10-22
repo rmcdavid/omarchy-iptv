@@ -333,13 +333,16 @@ def clean_header_value(value: str) -> str:
 
 
 def split_groups(value: str) -> list[str]:
-    """`A;B;C` -> ["A", "B", "C"] (trimmed, empties and repeats dropped)."""
-    groups: list[str] = []
-    for part in value.split(";"):
-        name = part.strip()
-        if name and name not in groups:
-            groups.append(name)
-    return groups
+    """`A;B;C` -> ["A", "B", "C"] (trimmed, empties and repeats dropped, the
+    first of each kept in order).
+
+    Linear (rule 15 over R30h, lane-bounds-h): a `name not in groups` test
+    per part scanned the list, k*k/2 comparisons for k parts, and a
+    persistent `#EXTGRP` of up to M3U_MAX_GROUP_TEXT characters -- up to 256
+    one-character parts -- is split again for every channel after it, so a
+    50,000-channel list paid about 32,000 comparisons a channel. Same list,
+    one pass."""
+    return list(dict.fromkeys(name for name in (part.strip() for part in value.split(";")) if name))
 
 
 def channel_number(attrs: dict[str, str]) -> str:

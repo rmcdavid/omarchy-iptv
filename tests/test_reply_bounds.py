@@ -430,11 +430,17 @@ class TrackReplyBoundTest(unittest.TestCase):
         self.assertEqual((track["title"], track["lang"], track["codec"]), ("a title", "eng", "a cod"))
 
     def test_the_cut_comes_after_the_redaction(self):
+        """The cap falls INSIDE the userinfo (15 characters is
+        `http://user:SEC`), which is the only place the order shows: cut
+        first and the redactor reads `user` as the host and publishes it
+        (the round-1 recheck of lane-bounds-p found this test cut at 30,
+        where both orders give the same answer, so it could not go red).
+        Seen red with track_text reversed to redact_urls(value[:limit])."""
         row = {"id": 1, "type": "audio", "title": "http://user:SECRETPW@h.test/path/to/a/stream"}
-        with mock.patch.object(helper, "TRACK_MAX_TITLE", 30):
+        with mock.patch.object(helper, "TRACK_MAX_TITLE", 15):
             payload = self.tracks_reply([row])
-        self.assertNotIn("SECRET", payload["tracks"][0]["title"])
         self.assertEqual(payload["tracks"][0]["title"], "http://h.test")
+        self.assertNotIn("user", payload["tracks"][0]["title"])
 
 
 class FirstLoadReasonBoundTest(unittest.TestCase):
@@ -494,11 +500,29 @@ class InternalErrorBoundTest(unittest.TestCase):
         self.assertNotIn("characters not shown", stderr)
 
     def test_the_cut_comes_after_the_redaction(self):
+        """As the track test: 26 characters of `ValueError: http://user:...`
+        end inside the userinfo, so cutting first leaves `http://user` for
+        the redactor to publish as a host. The traceback is cut at a cap
+        inside the userinfo too. Seen red with both lines of main()
+        reversed to redact_urls(bounded_text(...))."""
         text = "http://user:SECRETPW@h.test/" + "p" * 100
         with mock.patch.object(helper, "cmd_clipboard", side_effect=ValueError(text)), \
-                mock.patch.object(helper, "INTERNAL_MESSAGE_MAX", 30):
+                mock.patch.object(helper, "INTERNAL_MESSAGE_MAX", 26), \
+                mock.patch.object(helper, "INTERNAL_TRACE_MAX", 52):
             _, payload, _, stderr = run_main(["clipboard"])
+        self.assertEqual(payload["error"]["message"], "ValueError: http://h.test")
+        self.assertNotIn("http://user", payload["error"]["message"] + stderr)
         self.assertNotIn("SECRET", payload["error"]["message"] + stderr)
+        # The traceback's tail is the exception line, redacted whole.
+        self.assertTrue(stderr.rstrip().endswith("ValueError: http://h.test"), stderr)
+
+    def test_the_counted_line_reads_right_for_one(self):
+        """The round-1 recheck of lane-bounds-p: "[1 characters not shown]"."""
+        self.assertEqual(helper.bounded_text("a" * 17, 16, keep_tail=True),
+                         "aaaaaaaa\n[1 character not shown]\naaaaaaaa")
+        self.assertEqual(helper.bounded_text("a" * 19, 16, keep_tail=True),
+                         "aaaaaaaa\n[3 characters not shown]\naaaaaaaa")
+        self.assertEqual(helper.bounded_text("a" * 17, 16), "a" * 16)
 
 
 if __name__ == "__main__":
