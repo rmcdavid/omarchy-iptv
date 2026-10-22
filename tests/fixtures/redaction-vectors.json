@@ -476,12 +476,12 @@
   },
   {
    "why": "R32a''' (D-SINK-36): U+FEFF, the byte-order mark inside the password is URL TEXT, not a delimiter -- the run and the authority end at ASCII whitespace only, so the host prints and nothing of the credential does. Under R32a'' the 30-point union ended the run here and both mirrors printed the username and the tail (`myuser<ws>ss@prov.test/live/1.ts`); 0.14.3's helper (the model printed the split) printed the host",
-   "text": "Failed to open http://myuser:pa﻿ss@prov.test/live/1.ts.",
+   "text": "Failed to open http://myuser:pa\ufeffss@prov.test/live/1.ts.",
    "host": "prov.test",
    "mustNotAppear": [
     "myuser",
-    "pa﻿",
-    "﻿ss",
+    "pa\ufeff",
+    "\ufeffss",
     "live/1.ts"
    ],
    "js": "Failed to open prov.test.",
@@ -489,12 +489,12 @@
   },
   {
    "why": "R32a''' (D-SINK-36): U+0085 NEL (Python whitespace, not JS) inside the password is URL TEXT, not a delimiter -- the run and the authority end at ASCII whitespace only, so the host prints and nothing of the credential does. Under R32a'' the 30-point union ended the run here and both mirrors printed the username and the tail (`myuser<ws>ss@prov.test/live/1.ts`); 0.14.3's model (the helper printed the split) printed the host",
-   "text": "Failed to open http://myuser:pass@prov.test/live/1.ts.",
+   "text": "Failed to open http://myuser:pa\u0085ss@prov.test/live/1.ts.",
    "host": "prov.test",
    "mustNotAppear": [
     "myuser",
-    "pa",
-    "ss",
+    "pa\u0085",
+    "\u0085ss",
     "live/1.ts"
    ],
    "js": "Failed to open prov.test.",
@@ -554,12 +554,12 @@
   },
   {
    "why": "R32a''' (D-SINK-36): U+2028 line separator inside the password is URL TEXT, not a delimiter -- the run and the authority end at ASCII whitespace only, so the host prints and nothing of the credential does. Under R32a'' the 30-point union ended the run here and both mirrors printed the username and the tail (`myuser<ws>ss@prov.test/live/1.ts`); 0.14.3's neither: both printed the split printed the host",
-   "text": "Failed to open http://myuser:pa ss@prov.test/live/1.ts.",
+   "text": "Failed to open http://myuser:pa\u2028ss@prov.test/live/1.ts.",
    "host": "prov.test",
    "mustNotAppear": [
     "myuser",
-    "pa ",
-    " ss",
+    "pa\u2028",
+    "\u2028ss",
     "live/1.ts"
    ],
    "js": "Failed to open prov.test.",
@@ -567,12 +567,12 @@
   },
   {
    "why": "R32a''' (D-SINK-36): U+00A0 NBSP inside the password is URL TEXT, not a delimiter -- the run and the authority end at ASCII whitespace only, so the host prints and nothing of the credential does. Under R32a'' the 30-point union ended the run here and both mirrors printed the username and the tail (`myuser<ws>ss@prov.test/live/1.ts`); 0.14.3's neither: both printed the split printed the host",
-   "text": "Failed to open http://myuser:pa ss@prov.test/live/1.ts.",
+   "text": "Failed to open http://myuser:pa\u00a0ss@prov.test/live/1.ts.",
    "host": "prov.test",
    "mustNotAppear": [
     "myuser",
-    "pa ",
-    " ss",
+    "pa\u00a0",
+    "\u00a0ss",
     "live/1.ts"
    ],
    "js": "Failed to open prov.test.",

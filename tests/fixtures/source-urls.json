@@ -151,22 +151,22 @@
   "note": "space inside the URL"
  },
  {
-  "input": "http://h.test/a b",
+  "input": "http://h.test/a\u2028b",
   "ok": false,
   "code": "invalid",
   "note": "D-SRC-06: a line separator inside an http URL is whitespace (invalid), not a missing scheme"
  },
  {
-  "input": "http://Bücher.EXAMPLE/list.m3u",
+  "input": "http://B\u00fccher.EXAMPLE/list.m3u",
   "ok": true,
   "kind": "http",
-  "url": "http://bücher.example/list.m3u",
-  "host": "bücher.example",
+  "url": "http://b\u00fccher.example/list.m3u",
+  "host": "b\u00fccher.example",
   "key": "df395abc",
   "note": "IDN host lowercased, kept as Unicode"
  },
  {
-  "input": " http://h.test/x ",
+  "input": "\u00a0http://h.test/x\u00a0",
   "ok": true,
   "kind": "http",
   "url": "http://h.test/x",
@@ -325,7 +325,7 @@
   "code": "empty"
  },
  {
-  "input": " ",
+  "input": "\u00a0",
   "ok": false,
   "code": "empty"
  },
@@ -453,19 +453,19 @@
   "note": "SR15: non-hex in a bracket literal"
  },
  {
-  "input": "http://h​.test/x",
+  "input": "http://h\u200b.test/x",
   "ok": false,
   "code": "invalid",
   "note": "SR15: zero-width space in the host"
  },
  {
-  "input": "http://h.test⁠:8080/x",
+  "input": "http://h.test\u2060:8080/x",
   "ok": false,
   "code": "invalid",
   "note": "SR15: word joiner in the authority"
  },
  {
-  "input": "http://h.test﻿/x",
+  "input": "http://h.test\ufeff/x",
   "ok": false,
   "code": "invalid",
   "note": "SR15: BOM inside the authority"
@@ -477,7 +477,7 @@
   "note": "SR15: backslash in the authority"
  },
  {
-  "input": "﻿http://h.test/x",
+  "input": "\ufeffhttp://h.test/x",
   "ok": true,
   "kind": "http",
   "url": "http://h.test/x",
@@ -1064,7 +1064,7 @@
   "warn": false
  },
  {
-  "input": "http://u:pass@h.test/x",
+  "input": "http://u:pa\u0085ss@h.test/x",
   "ok": false,
   "code": "invalid",
   "note": "D-SRC-63: U+0085 NEL inside the password, refused, never deleted",
@@ -1130,7 +1130,7 @@
   "note": "a space inside a PATH is legal and kept (unchanged by D-SRC-63; only control characters are refused in a path)"
  },
  {
-  "input": "http://h.test/a b",
+  "input": "http://h.test/a\u2029b",
   "ok": false,
   "code": "invalid",
   "note": "a paragraph separator inside an http URL is whitespace (the union class a reader refuses), as D-SRC-06's line separator is"

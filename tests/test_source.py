@@ -304,8 +304,8 @@ class ResolveSourceTest(unittest.TestCase):
         character as such, in a path, a file URL and an http URL alike. The
         shared source-urls fixture pins the same shapes in the model."""
         self.assertEqual(helper._sanitize_url_input(" \t\r\nhttp://h.test/a\tb\x07c\n\xa0 ", 100), "http://h.test/a\tb\x07c")
-        self.assertEqual(helper._sanitize_url_input("﻿﻿http://h.test/x", 100), "﻿http://h.test/x")
-        self.assertEqual(helper._sanitize_url_input("　http://h.test/x ", 100), "　http://h.test/x ")
+        self.assertEqual(helper._sanitize_url_input("\ufeff\ufeffhttp://h.test/x", 100), "\ufeffhttp://h.test/x")
+        self.assertEqual(helper._sanitize_url_input("\u3000http://h.test/x\u2028", 100), "\u3000http://h.test/x\u2028")
         self.assertEqual(helper._sanitize_url_input("abcdef", 3), "abc")
         self.assertEqual(helper._sanitize_url_input(None, 3), "")
         for text, message in [("http://u:pa\tss@h.test/x", "URL contains whitespace"),

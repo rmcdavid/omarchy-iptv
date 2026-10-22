@@ -63,7 +63,7 @@ def _sanitize_url_input(value: Any, limit: int) -> str:
     ENDS (a trailing newline, a tab-indented line); then the cap in UTF-16
     units. The shared source-urls fixture holds both mirrors to it."""
     text = "" if value is None else str(value)
-    if text.startswith("﻿"):
+    if text.startswith("\ufeff"):
         text = text[1:]
     return truncate_utf16(text.strip(_URL_EDGE_SPACE), limit)
 
