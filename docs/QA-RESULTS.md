@@ -13315,6 +13315,12 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### The bounds sweep, round 5 (2026-10-22): lane S4 under R32a'', MERGEABLE, and what the union cost
+
+**Lane S4 (`lane-bounds-s4`, `12228f1`, `dc79694`, `1f67c85`)** merged lane-bounds-s3 (conflict-free, gated first) and implemented R32a'': `URL_SPACE_CODES` / `URL_SPACE_CHARS`, the one enumerated class ending the run and the authority in both mirrors, the helper's two patterns built from the same list so they cannot drift, `tests/fixtures/url-whitespace.json` scanned over the whole Unicode range by both suites; `'"<>` never end a run and are restored with the sentence punctuation in both mirrors; the non-numeric-port arm (`http://user.name:pa/ss@h.test/x` -> `[host withheld]`, D-SINK-35 narrowed); the model regex guard `scripts/check-model-regex.py` (red on `dev`'s old `maskUrl` and `IPV6_LITERAL_RE`, green on the tip; D-PERF-11 closed). Gate on the tip: 2,902 node checks, 1,476 python, the helper regex guard 38 calls / 0 open, the model guard 68 literals / 0 problems. Its recheck: MERGEABLE, no P1 or P2, 187 shapes equal across the mirrors, 16 of 18 mutations red and the two survivors measured equivalences; four P3s, two of them rows (**F-HARNESS-42**, **F-GATE-9**) and one for the form's input sanitiser (**D-SRC-63**).
+
+**What the lane raised against its own ruling**: unifying to the union made each mirror take the other's worse case, and for U+FEFF inside a password the helper that printed the host on 0.14.3 now prints the username and the tail (**D-SINK-36**, on the sweep branch only). The ruling R32a''' answers it by delimiting at ASCII whitespace only; round 6 carries it. The merge onto `dev` met ten conflicts with the D-EPG-11 integration's relink and goes through an integration lane.
+
 ### D-EPG-11 (2026-10-22): the shell keeps the guide's now/next as text and an index, and parses one entry when a row asks
 
 **On the owner's word of 2026-10-21 ("Take on D-EPG-11 after this round").**
