@@ -107,7 +107,6 @@ var MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oc
 // ---- input hygiene (ARCHITECTURE-SOURCES 3.1 / 6.1)
 
 var CONTROL_RE = /[\u0000-\u001f\u007f-\u009f]/g
-var EDGE_SPACE_RE = /^[ \u00a0]+|[ \u00a0]+$/g
 
 function capLength(text, limit) {
   var max = Number(limit) > 0 ? Math.floor(Number(limit)) : MAX_SOURCE_URL
@@ -120,7 +119,23 @@ function capLength(text, limit) {
 // submit, and again inside the validators.
 function sanitizeInput(text, limit) {
   // SR15: a leading byte-order mark (a common paste artefact) is dropped.
-  return capLength(str(text).replace(/^\ufeff/, "").replace(CONTROL_RE, "").replace(EDGE_SPACE_RE, ""), limit)
+  return capLength(trimEdgeSpace(str(text).replace(/^\ufeff/, "").replace(CONTROL_RE, "")), limit)
+}
+
+// D-PERF-3 (R30g). ASCII space and NBSP off both ends, and nothing else --
+// NOT String.prototype.trim, which takes every Unicode space and the line
+// terminators, where this rule has only ever taken these two (SR15, and the
+// helper's `strip(" \u00a0")`). It was `/^[ \u00a0]+|[ \u00a0]+$/g`, whose
+// second half tries `+$` from every position of a run and backs out of the
+// rest of it: quadratic in a run of spaces, and it ran BEFORE the cap, on a
+// playlist's `url-tvg` hint (epgHintUrl) as on a paste. Two index walks now.
+function trimEdgeSpace(text) {
+  var s = str(text)
+  var a = 0
+  var b = s.length
+  while (a < b && (s.charCodeAt(a) === 32 || s.charCodeAt(a) === 160)) a++
+  while (b > a && (s.charCodeAt(b - 1) === 32 || s.charCodeAt(b - 1) === 160)) b--
+  return a === 0 && b === s.length ? s : s.substring(a, b)
 }
 
 // Unicode code points, not UTF-16 units (SR22: the label cap counts code
@@ -270,7 +285,103 @@ function refusalMessage(code, blocked, kind) {
 // literals that are not IPv6 (SR15). `opts.kind === "epg"` makes an empty
 // value ok (the EPG is optional) and prefixes the messages with `EPG:`.
 var ZERO_WIDTH_RE = /[\u200b-\u200d\u2060\ufeff]/
-var IPV6_LITERAL_RE = /^\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(?:%25[A-Za-z0-9._~-]+)?\]$/
+// D-PERF-3 (R30g). An IPv6 literal is `[`, hex digits, `:` and `.` with at
+// least one `:`, an optional `%25` zone, and `]`. The pattern used to say
+// "at least one colon" as `[...]*:[...]*`, two runs over one class around a
+// literal that class also matches, which backtracks quadratically over a
+// run of colons before a failing tail; on a playlist's `url-tvg` hint that
+// is provider text. The class run is now one run and the colon is asked for
+// with indexOf (isIpv6Literal), which is the same set of strings.
+var IPV6_LITERAL_RE = /^\[([0-9A-Fa-f:.]*)(?:%25[A-Za-z0-9._~-]+)?\]$/
+// D-SINK-25: what passwordReadAsPort takes for the host the user meant. The
+// first class has no `.`, so the dot it asks for is one fixed position, and
+// no class holds `:`: linear (R30g).
+var LATER_HOST_RE = /^(?:[A-Za-z0-9-]*\.[A-Za-z0-9.-]*|\[[0-9A-Fa-f:.]*\])(?::[0-9]*)?$/
+
+function isIpv6Literal(text) {
+  var m = IPV6_LITERAL_RE.exec(str(text))
+  return m !== null && m[1].indexOf(":") !== -1
+}
+
+// D-PERF-3 (R30g). `text.replace(/[?#].*$/, "")`, which is what the file
+// branch below did, without the regex: `.` stops at a line terminator and `$`
+// is the end of the text, so the match was the first `?` or `#` AFTER the
+// last line terminator -- and finding it by retrying `.*$` from every `?` or
+// `#` before one was quadratic. Two index walks give the same cut.
+function cutQueryAndFragment(text) {
+  var s = str(text)
+  var from = 0
+  for (var i = s.length - 1; i >= 0; i--) {
+    var c = s.charCodeAt(i)
+    if (c === 10 || c === 13 || c === 0x2028 || c === 0x2029) { from = i + 1; break }
+  }
+  for (var j = from; j < s.length; j++) {
+    var d = s.charCodeAt(j)
+    if (d === 63 || d === 35) return s.substring(0, j)
+  }
+  return s
+}
+
+// D-SINK-25. The RFC reading of a URL ends the authority at the first `/`,
+// `?` or `#`, and a password may hold any of them unencoded. Then
+// `http://user:2024/ab@host.test/list.m3u` (password `2024/ab`) reads as host
+// `user`, port 2024 -- and both mirrors used to ACCEPT it, label it
+// `user:2024` and show `user` as its host: the username and the first
+// characters of the password, on the Sources row, in the guide's host line
+// and in the IPC status. Both standard parsers read the string that way, so
+// the reading is not wrong; it is ambiguous, and an ambiguous credential URL
+// is refused (validateSourceUrl, `invalid`, the existing sentence) rather
+// than guessed at.
+//
+// THE SHAPE, and why it is this narrow. Refusing more would refuse ordinary
+// URLs -- an Xtream `get.php?username=me@mail.test` is one -- and the helper
+// DROPS a stored source whose URL stops validating, so a wider rule deletes
+// a user's working source on the upgrade. So this answers non-"" only when
+// all of these hold:
+//   1. the RFC authority ends early, at a `/`, `?` or `#`;
+//   2. its host part (after its own last at-sign, if any) is not a bracketed
+//      literal and holds a `:` -- something the RFC reading takes for a port,
+//      which is exactly "a password prefix read as a port";
+//   3. an at-sign follows in the rest of the URL BEFORE the first `=` or `&`
+//      (an at-sign inside a query parameter's value is a value, not a
+//      delimiter), and the LAST such at-sign is followed, up to the next
+//      `/`, `?`, `#` or the end, by something shaped like a host -- a name
+//      with a dot in it, or a bracketed literal -- with an optional port.
+// Then it returns that later host[:port], which is the one the user meant.
+// What it does NOT catch, recorded rather than guessed: a password whose
+// unencoded part holds `=` or `&` before its at-sign, and a later at-sign
+// followed by a single-label name. Those still read the RFC way.
+// What it refuses that is not a typo: a URL with an explicit port whose path
+// or query (before any `=` or `&`) holds an at-sign followed by a dotted
+// name, e.g. `http://h.test:8080/me@mail.test`. Percent-encode the at-sign.
+function passwordReadAsPort(body) {
+  var b = str(body)
+  var cut = b.search(/[\/?#]/)
+  if (cut === -1) return ""
+  var authority = b.substring(0, cut)
+  var hostport = authority.substring(authority.lastIndexOf("@") + 1)
+  if (hostport.charAt(0) === "[" || hostport.indexOf(":") === -1) return ""
+  var rest = b.substring(cut)
+  var stop = rest.search(/[=&]/)
+  if (stop === -1) stop = rest.length
+  var at = rest.lastIndexOf("@", stop - 1)
+  if (at < 1) return ""
+  var end = at + 1
+  while (end < rest.length && "/?#".indexOf(rest.charAt(end)) === -1) end++
+  var later = rest.substring(at + 1, end)
+  return LATER_HOST_RE.test(later) ? later : ""
+}
+
+// The host of a `host[:port]` or `[literal][:port]`, lower-cased.
+function authorityHost(hostport) {
+  var hp = str(hostport)
+  if (hp.charAt(0) === "[") {
+    var close = hp.indexOf("]")
+    return (close === -1 ? hp : hp.substring(0, close + 1)).toLowerCase()
+  }
+  var colon = hp.indexOf(":")
+  return (colon === -1 ? hp : hp.substring(0, colon)).toLowerCase()
+}
 
 // SR12: a "." or ":" before the first "/" reads as a host.
 function looksLikeHost(text) {
@@ -306,7 +417,7 @@ function validateSourceUrl(text, opts) {
   var rest = m[2]
   if (scheme === "file") {
     if (rest.indexOf("//") !== 0) return fail("invalid")
-    var after = rest.substring(2).replace(/[?#].*$/, "")
+    var after = cutQueryAndFragment(rest.substring(2))
     var slash = after.indexOf("/")
     if (slash === -1) return fail("invalid")
     var decoded
@@ -318,6 +429,8 @@ function validateSourceUrl(text, opts) {
   if (rest.indexOf("//") !== 0) return fail("invalid")
   if (/\s/.test(rest)) return fail("invalid")
   var body = rest.substring(2)
+  // D-SINK-25: a password prefix the RFC reading would take for a port.
+  if (passwordReadAsPort(body) !== "") return fail("invalid")
   var cut = body.search(/[\/?#]/)
   var authority = cut === -1 ? body : body.substring(0, cut)
   var tail = cut === -1 ? "" : body.substring(cut)
@@ -335,7 +448,7 @@ function validateSourceUrl(text, opts) {
     var close = hostport.indexOf("]")
     if (close === -1) return fail("invalid")
     host = hostport.substring(0, close + 1)
-    if (!IPV6_LITERAL_RE.test(host)) return fail("invalid")
+    if (!isIpv6Literal(host)) return fail("invalid")
     var afterHost = hostport.substring(close + 1)
     if (afterHost !== "") {
       if (afterHost.charAt(0) !== ":") return fail("invalid")
@@ -516,19 +629,27 @@ function sourceCacheDir(cacheDir, key) {
 //
 // Do NOT read that as "the neighbours are all already safe", which an earlier
 // version of this comment implied and a review refuted by calling them.
-// `redactUrls` and `sourceLabel` bound the userinfo scan at `/` and whitespace
-// only, never at `?` or `#`, so on a URL with no path an at-sign in the QUERY
-// is taken as the delimiter: `redactUrls("http://h.test?a=b@c")` returns `"c"`.
-// They never UNDER-redact -- whatever they emit starts after an at-sign, so no
-// userinfo survives -- and anything that has been through `validateSourceUrl`
-// always carries a path of at least `/`, which is why the Sources path is
-// closed. `url_host` in the helper is a third shape again: it hands the string
-// to a real parser. Three implementations, three bounds; that spread is the
-// condition D-SINK-17 grew in, and it is recorded rather than tidied because
-// tidying it is a change with its own measurements to take.
+// `redactUrls` and `sourceLabel` bounded the userinfo scan at `/` and
+// whitespace only, never at `?` or `#`, so on a URL with no path an at-sign
+// in the QUERY was taken as the delimiter. This comment then said they "never
+// UNDER-redact -- whatever they emit starts after an at-sign". That was
+// FALSE, and the example it rested on, `http://h.test?a=b@c` -> `c`, had
+// nothing after the at-sign to show it: `http://h.test?u=me@b.test&p=SECRET`
+// gave `b.test&p=SECRET`, the password with it (D-SINK-23, the bounds sweep's
+// sinks review). Both now end the authority at the first `/`, `?` or `#`, as
+// this function and validateSourceUrl do, and the helper's urllib does; the
+// shared redaction fixture holds the JavaScript and the Python to it.
+//
+// D-SINK-25: a stored URL whose password prefix the RFC reading takes for a
+// port (passwordReadAsPort) is shown by the host after its later at-sign.
+// validateSourceUrl refuses such a URL now, so only a record written before
+// that, or by hand, can reach here with one -- and the JavaScript reader keeps
+// a record's url as written, where the helper's drops it.
 function hostPortOf(url) {
   var m = str(url).match(/^[a-z][a-z0-9+.-]*:\/\/([^\/?#]*)/i)
   if (!m) return ""
+  var later = passwordReadAsPort(str(url).substring(str(url).indexOf("://") + 3))
+  if (later !== "") return later.toLowerCase()
   var authority = m[1]
   var at = authority.lastIndexOf("@")
   var hostport = at === -1 ? authority : authority.substring(at + 1)
@@ -946,21 +1067,22 @@ export {
   MAX_XTREAM_FIELD, SOURCES_DIR, MASK, MASK_CLEAR_PARAMS, LIMITS, PAUSE_KEY,
   TRACKS_KEY, DETAIL_KEY, REWIND_KEY, FORWARD_KEY, LIVE_KEY, REWIND_STEP_S,
   BEHIND_LIVE_SHOW_S, HELP_KEY, SOURCE_KEYS, SOURCE_KEY_RE, SOURCE_ORIGINS,
-  URL_FIELDS, FORM_LIMITS, MONTHS, CONTROL_RE, EDGE_SPACE_RE, capLength,
-  sanitizeInput, codePoints, codePointLength, capCodePoints, sanitizeTyping,
+  URL_FIELDS, FORM_LIMITS, MONTHS, CONTROL_RE, capLength, sanitizeInput,
+  trimEdgeSpace, codePoints, codePointLength, capCodePoints, sanitizeTyping,
   lowerFirst, sourceErrorMessage, sourceReason, PERSIST_FAILURE_REASONS,
   persistFailureMessage, refusalMessage, ZERO_WIDTH_RE, IPV6_LITERAL_RE,
-  looksLikeHost, validateSourceUrl, normalizeSourceUrl, EPG_ORIGIN_NONE,
-  EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST, epgHintUrl, resolveEpgUrl,
-  EPG_HINT_NOTICE, epgOriginNotice, isUrlField, sourceKey, isSourceKey,
-  findSource, findSourceByUrl, allocateSourceKey, sourceCacheDir, hostPortOf,
-  deriveLabel, labelKey, labelTaken, uniqueLabel, defaultSourceLabel,
-  validateLabel, maskQuery, maskUrl, encodeQueryValue, xtreamUrls,
-  validateXtream, pluralGroups, countsLine, sameDay, formatLastUsed,
-  formatAgo, sourceView, sourceViews, sourceRows, EPG_HINT_ROW_TEXT,
-  sourceDetail, sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
-  sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
-  fetchingLine, PROBE_LOCAL_REFUSALS, probeFailureLine, sourceTransient,
-  CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
-  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
+  LATER_HOST_RE, isIpv6Literal, cutQueryAndFragment, passwordReadAsPort,
+  authorityHost, looksLikeHost, validateSourceUrl, normalizeSourceUrl,
+  EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST, epgHintUrl,
+  resolveEpgUrl, EPG_HINT_NOTICE, epgOriginNotice, isUrlField, sourceKey,
+  isSourceKey, findSource, findSourceByUrl, allocateSourceKey, sourceCacheDir,
+  hostPortOf, deriveLabel, labelKey, labelTaken, uniqueLabel,
+  defaultSourceLabel, validateLabel, maskQuery, maskUrl, encodeQueryValue,
+  xtreamUrls, validateXtream, pluralGroups, countsLine, sameDay,
+  formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
+  EPG_HINT_ROW_TEXT, sourceDetail, sourceAccessibleName, sourcesHeaderCount,
+  sourcesHeaderRight, sourcesRowAccessibleName, confirmLogosMessage,
+  confirmRemoveMessage, fetchingLine, PROBE_LOCAL_REFUSALS, probeFailureLine,
+  sourceTransient, CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS,
+  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
 }

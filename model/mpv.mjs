@@ -15,7 +15,7 @@ import {
   PIP_CLASS
 } from "./pip.mjs"
 import {
-  scrubUrls
+  redactUrls, scrubUrls
 } from "./privacy.mjs"
 
 // ------------------------------------------------------------ mpv
@@ -138,6 +138,29 @@ function splitMpvArgs(text) {
     else args.push(token)
   }
   return { args: args, rejected: rejected, warnings: mpvArgWarnings(args) }
+}
+
+// D-SINK-24. The journal line for the tokens splitMpvArgs refused, or "".
+// It printed them WHOLE, and a refused token is exactly where a credential
+// goes: `--stream-lavf-o=http_proxy=http://user:pw@proxy:3128` (reserved
+// since D-SINK-15) and the value half of `--http-proxy http://user:pw@proxy`
+// (split off by the whitespace split, refused as not an option) both reached
+// the user journal verbatim on every player start and restart. The console is
+// a sink rule 5 names. So the line carries each token's option NAME only --
+// the helper's own mirror of this refusal prints `token.split("=", 1)[0]` --
+// and goes through redactUrls as well, because a token that is not an option
+// at all (that bare proxy URL) has no `=` to cut at and IS its name.
+function mpvRejectedLine(rejected) {
+  var list = asList(rejected)
+  var names = []
+  for (var i = 0; i < list.length; i++) {
+    var token = str(list[i])
+    if (token === "") continue
+    var eq = token.indexOf("=")
+    names.push(eq === -1 ? token : token.substring(0, eq))
+  }
+  if (names.length === 0) return ""
+  return "omarchy-iptv: ignoring mpvArgs tokens: " + redactUrls(names.join(" "))
 }
 
 // Per-channel HTTP headers as mpv argv items. `-append` list form so header
@@ -499,7 +522,7 @@ var LANG_NAMES = {
 }
 
 function trackLanguage(code) {
-  var key = str(code).toLowerCase().replace(/^\s+|\s+$/g, "")
+  var key = str(code).toLowerCase().trim()
   if (key === "") return ""
   if (LANG_NAMES.hasOwnProperty(key)) return LANG_NAMES[key]
   return key.toUpperCase()
@@ -676,10 +699,10 @@ function trackAccessibleName(rows, index) {
 export {
   MPV_HANDOFF, MPV_HANDOFF_SCRIPT_OPTS, MPV_YTDL_OFF, MPV_HANDOFF_TEXT,
   MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase, mpvHandoffName, mpvDiskName,
-  mpvArgWarning, mpvArgWarnings, splitMpvArgs, headerArgs, MPV_RAW_PREFIX,
-  mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv, helperArgv,
-  playlistFetchArgv, fetchStateDir, playlistProbeArgv, epgFetchArgv,
-  FETCH_URL_ENV, fetchEnvironment, failedArgv, logoFetchArgv,
+  mpvArgWarning, mpvArgWarnings, splitMpvArgs, mpvRejectedLine, headerArgs,
+  MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv,
+  helperArgv, playlistFetchArgv, fetchStateDir, playlistProbeArgv,
+  epgFetchArgv, FETCH_URL_ENV, fetchEnvironment, failedArgv, logoFetchArgv,
   playerTracksArgv, trackChoice, parseTracks, LANG_NAMES, trackLanguage,
   trackLabel, trackDetail, trackRows, trackCursorHome, moveTrackCursor,
   TRACKS_RECOVERY_MAX, shouldRefreshTracks, trackPanelMessage,

@@ -5,7 +5,7 @@ import {
   PLAYER_LOG_TAIL, PLAYER_ENTRY_OWNERS
 } from "./build.mjs"
 import {
-  str, asList
+  str, asList, keyedMap, ownKeyValue, trimEndSpace
 } from "./text.mjs"
 import {
   parseJsonObject
@@ -400,7 +400,7 @@ function parsePlayerEvent(line) {
     return { kind: "end-file", entryId: playerEntryId(doc.playlist_entry_id), reason: str(doc.reason), fileError: str(doc.file_error) }
   }
   if (event === "log-message") {
-    return { kind: "log-message", level: str(doc.level), prefix: str(doc.prefix), text: redactUrls(str(doc.text)).replace(/\s+$/, "") }
+    return { kind: "log-message", level: str(doc.level), prefix: str(doc.prefix), text: trimEndSpace(redactUrls(str(doc.text))) }
   }
   if (event === "property-change" && str(doc.name) === "idle-active") {
     return { kind: "property-change", name: "idle-active", value: doc.data === true }
@@ -425,7 +425,7 @@ function endedVerdict(lastEndFile, userStopped, stopping) {
   // An intermediate .m3u8 master resolution: never terminal, never a verdict.
   if (reason === "redirect") return { notify: false, reason: "", kind: "ignored" }
   if (reason === "quit" || reason === "eof") return { notify: false, reason: "", kind: "silent" }
-  var detail = redactUrls(str(end.fileError || end.file_error)).replace(/^\s+|\s+$/g, "")
+  var detail = redactUrls(str(end.fileError || end.file_error)).trim()
   return { notify: true, reason: detail !== "" ? detail : PLAYER_GENERIC_FAILURE, kind: "failed" }
 }
 
@@ -521,7 +521,7 @@ function playerRouterState(state) {
 // when the line adds nothing, so a caller can skip the property write.
 function pushPlayerLog(tail, line) {
   var rows = asList(tail)
-  var clean = redactUrls(str(line).replace(/\s+$/, ""))
+  var clean = redactUrls(trimEndSpace(line))
   if (clean === "") return rows
   var out = rows.slice()
   out.push(clean)
@@ -562,7 +562,7 @@ function rememberEntryOwner(owners, entryId, target) {
   var map = owners && typeof owners === "object" ? owners : {}
   var id = playerEntryId(entryId)
   if (id === null || !target) return map
-  var out = {}
+  var out = keyedMap()
   var keys = Object.keys(map)
   for (var i = Math.max(0, keys.length - (PLAYER_ENTRY_OWNERS - 1)); i < keys.length; i++) out[keys[i]] = map[keys[i]]
   out[String(id)] = { id: str(target.id), name: str(target.name) }
@@ -575,7 +575,7 @@ function rememberEntryOwner(owners, entryId, target) {
 function channelForEnd(owners, end, current) {
   var map = owners && typeof owners === "object" ? owners : {}
   if (end && end.entryId) {
-    var owner = map[String(end.entryId)]
+    var owner = ownKeyValue(map, String(end.entryId))
     if (owner) return owner
   }
   return current ? { id: str(current.id), name: str(current.name) } : null

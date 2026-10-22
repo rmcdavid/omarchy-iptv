@@ -481,7 +481,11 @@ function bootService(serviceText, Model, o) {
   const props = rootProperties(serviceText)
   const values = {}
   const root = {}
-  const quiet = { log() {}, info() {}, error() {}, warn(m) { h.warnings.push(String(m)) } }
+  // D-SINK-24 (rule 10): EVERY argument, joined by a space, as the real
+  // console prints them. This kept the first argument only, so a line such
+  // as `console.warn("...tokens:", rejected.join(" "))` reached the journal
+  // with the credential and reached every leak check here without it.
+  const quiet = { log() {}, info() {}, error() {}, warn(...a) { h.warnings.push(a.map(String).join(" ")) } }
   class FakeDate extends Date {
     constructor(...a) { if (a.length === 0) super(h.clock); else super(...a) }
     static now() { return h.clock }

@@ -3851,7 +3851,14 @@ checkCall("D-SINK-1: the doubled-at URL reads the same host through all three sp
 
 // ---- F-SINK-11: redaction is linear, and says the same thing it said ----
 //
-// The pattern redactUrls used to be, kept here and ONLY here as the oracle.
+// The pattern redactUrls used to be, kept here and ONLY here as the oracle --
+// with D-SINK-23's two changes to it and nothing else: the userinfo and host
+// classes stop at `?` and `#` as well as `/` (the authority ends at the first
+// of the three, RFC 3986), and a bracketed IPv6 host is one host. So this
+// still pins the linear scan to a pattern, character for character; what the
+// pattern SAYS moved on purpose, on exactly the inputs where an at-sign sat in
+// a pathless query or fragment (`http://h.test?a@b` read as host `b`) or the
+// host was an IPv6 literal (`http://[::1]/x` read as `[`).
 // It is the thing this change is measured against: "the cost is linear" is
 // worth nothing unless "the answer is unchanged" is checked at the same time,
 // and the only honest way to check that is to run the code that shipped.
@@ -3859,6 +3866,14 @@ checkCall("D-SINK-1: the doubled-at URL reads the same host through all three sp
 // carry a second redactor for a test's benefit, and a copy that drifts is
 // caught the moment a vector disagrees.
 function redactUrlsAsShipped(text) {
+  return String(text === undefined || text === null ? "" : text)
+    .replace(/[a-z][a-z0-9+.-]*:\/\/(?:[^\/?#\s]*@)?(\[[^\/?#\s\]]*\]|(?!\[)[^\/\s?#:@]*|)[^\s]*/gi, function (all, host) {
+      return host !== "" ? host : "[url]"
+    })
+}
+// The pattern as F-SINK-11 left it, BEFORE D-SINK-23: kept to show the two
+// differ exactly where D-SINK-23 says they should, and nowhere else.
+function redactUrlsBeforeDSink23(text) {
   return String(text === undefined || text === null ? "" : text)
     .replace(/[a-z][a-z0-9+.-]*:\/\/(?:[^\/\s]*@)?([^\/\s?#:@]*)[^\s]*/gi, function (all, host) {
       return host !== "" ? host : "[url]"
@@ -3898,7 +3913,13 @@ function redactUrlsAsShipped(text) {
     // at the first `/`, so the host here is `h.test` and not `b`; letting the
     // userinfo search cross that `/` moves the host to a path segment, which
     // is the same class of mistake as D-SINK-1 pointing the other way.
-    "http://h.test/a@b/c", "http://u:p@h.test/a@b/c", "http://h.test?a@b"]
+    "http://h.test/a@b/c", "http://u:p@h.test/a@b/c", "http://h.test?a@b",
+    // D-SINK-23: the authority ends at `?` and `#` too, and an IPv6 host is
+    // one host -- with its port, without, unclosed, closed after a `/`.
+    "http://h.test?u=me@b.test&p=SECRET", "http://h.test#u=me@b.test&p=SECRET",
+    "http://u:p@h.test:8080?x=a@b.test", "http://[::1]/x", "http://[::1]:8080/x",
+    "http://u:p@[2001:db8::1]:8080/x", "http://[::1", "http://[a/b]", "http://a@[b/x",
+    "http://[a]b/x", "http://[::1]@h/x", "x http://[2001:db8::5]. y"]
   for (let i = 0; i < corpus.length; i++) edges.push(corpus[i])
   for (let seed = 1; seed <= 3000; seed++) {
     for (let len = 0; len <= 40; len += 7) edges.push(generated(len, seed))
@@ -3924,6 +3945,21 @@ function redactUrlsAsShipped(text) {
     // nothing would make this check pass by testing no input at all, which is
     // the rule 14 shape this whole file is about.
     return [edges.length > 18000, bad]
+  }, [true, []])
+  checkCall("D-SINK-23: the old pattern and the new disagree ONLY where an at-sign or a `[` follows a `?` or `#` before any `/`, or the host is bracketed", function () {
+    // Every disagreement must carry, inside some URL's authority region (the
+    // text after a `://`, up to the first `/` or whitespace), a `?` or `#`
+    // followed by an `@`, or a `[` right after the userinfo. Anything else
+    // that differs is a change this round did not mean to make.
+    const explained = s => /:\/\/[^\/\s]*[?#][^\/\s]*@|:\/\/(?:[^\/\s]*@)?\[/.test(s)
+    let differ = 0
+    const unexplained = []
+    for (let i = 0; i < edges.length; i++) {
+      if (redactUrlsAsShipped(edges[i]) === redactUrlsBeforeDSink23(edges[i])) continue
+      differ++
+      if (!explained(edges[i]) && unexplained.length < 4) unexplained.push(JSON.stringify(edges[i]))
+    }
+    return [differ > 0, unexplained]
   }, [true, []])
 })()
 // The pathological inputs, with their OUTPUT pinned rather than only their
@@ -14164,6 +14200,200 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
             run(JSON.stringify({ ok: false, kind: "status", error: { code: "ipc_error", message: "x" } }) + "\n")]
   }, [[1, 0], [1, 0], [2, 1]])
 })()
+
+// ============================================================ the bounds sweep, lane S (2026-10-21)
+
+// ---- D-SG-3 (ruling R30f): a name Object.prototype answers to is a name like any other ----
+//
+// A playlist group named `__proto__` made `seen[name]` Object.prototype inside
+// groupChannels, and `.count++` put an enumerable `count: NaN` on every object
+// in the engine the shell shares with the host and every plugin: state.json
+// and the host's shell.json then carried "count":null, and groups named
+// `__proto__`, `constructor` and the like were never listed. Every map keyed
+// by a provider's or a user's string is null-prototype now (Model.keyedMap),
+// or read through Model.hasOwnKey.
+//
+// Observed in a CHILD process (tests/proto-run.mjs), because what it looks
+// for is a pollution that would otherwise reach every later check of this
+// suite; with IPTV_MODEL set it runs that tree's model and the Service.qml
+// beside it, which is how the red count against lane-bounds-int is taken.
+// tests/test_proto_v4.py runs the same probe in Qt's V4 against the same
+// expectation (tests/fixtures/proto-paths.json).
+;(function () {
+  const run = require("child_process").spawnSync(process.execPath,
+    [path.join(__dirname, "proto-run.mjs")].concat(process.env.IPTV_MODEL ? [path.resolve(process.env.IPTV_MODEL)] : []),
+    { encoding: "utf8", timeout: 60000 })
+  let result = null
+  try { result = JSON.parse(String(run.stdout).trim().split("\n").pop()) } catch (e) { result = null }
+  const expected = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/proto-paths.json"), "utf8")).expected
+  check("D-SG-3: the probe ran to the end in its own process", [run.status, result !== null], [0, true])
+  const r = result || { out: {}, errors: ["no result"], service: {} }
+  check("D-SG-3: no browse or apply path throws on a name Object.prototype answers to", r.errors, [])
+  check("D-SG-3: Object.prototype is exactly as it was after every path, nothing enumerable on it", [r.prototypeUnchanged, r.prototypeAfter ? r.prototypeAfter.enumerable : null], [true, []])
+  Object.keys(expected).forEach(function (field) {
+    check("D-SG-3 path `" + field + "` answers as tests/fixtures/proto-paths.json says (V4 is held to the same file)", r.out[field], expected[field])
+  })
+  check("D-SG-3: the expectation covers every path the probe takes", Object.keys(r.out).sort(), Object.keys(expected).sort())
+  const s = r.service || {}
+  check("D-SG-3: the SERVICE's channel index and failure marks answer nothing for those names before a load (a plain `({})` gave the Object function to IPC `play(\"constructor\")`)",
+        [s.indexBefore, s.failedBefore], [[true, true, true, true, true], [true, true, true, true, true]])
+  check("D-SG-3: Service.applyChannels over those names: every group listed, every channel indexed by its own id and by nothing else, and Object.prototype untouched",
+        [s.errors, s.groups, s.indexIds, s.indexAfter, s.prototypeUnchanged],
+        [[], ["News", "__proto__", "constructor", "hasOwnProperty", "toString", "valueOf"],
+         ["__proto__", "constructor", "hasOwnProperty", "toString", "valueOf"], [true, true, true, true, true], true])
+  check("D-SG-3: Service.withKey keeps a key spelled `__proto__` as a key", s.withKey, ["__proto__"])
+})()
+checkCall("D-SG-3: keyedMap has no prototype, hasOwnKey answers for both kinds of object, ownKeyValue never finds an inherited member", () => {
+  const m = Model.keyedMap()
+  m["__proto__"] = 1
+  const plain = { a: 1 }
+  return [Object.getPrototypeOf(m), Object.keys(m), Model.hasOwnKey(m, "__proto__"), Model.hasOwnKey(m, "constructor"),
+          Model.hasOwnKey(plain, "a"), Model.hasOwnKey(plain, "toString"), Model.hasOwnKey(null, "a"),
+          Model.ownKeyValue(plain, "constructor"), Model.ownKeyValue(plain, "a"), Model.ownKeyValue(undefined, "a")]
+}, [null, ["__proto__"], true, false, true, false, false, undefined, 1, undefined])
+checkCall("D-SG-3: epgEntry reads only an OWN tvg-id of the parsed epg-now map (a plain lookup of `constructor` handed epgFields the Object function)", () => {
+  // Written as JSON text: in an object LITERAL `"__proto__": x` sets the
+  // prototype, and the file's own key would never reach the parser.
+  const map = Model.parseEpgNow('{"channels":{"a":{"now":{"title":"T","start":1,"stop":2}},"__proto__":{"now":{"title":"P","start":1,"stop":2}}}}').channels
+  return [Model.epgEntry(map, "a").now.title, Model.epgEntry(map, "__proto__").now.title, Model.epgEntry(map, "constructor"),
+          Model.epgEntry(map, "toString"), Model.epgEntry(map, ""), Model.epgEntry(null, "a"), Model.epgEntry(map, "missing")]
+}, ["T", "P", null, null, null, null, null])
+checkCall("D-SG-3: parseChannels and parseEpgNow keep a file's own `__proto__` key as a key, never as the meta object's prototype", () => {
+  const meta = Model.parseChannels('{"channels":[],"__proto__":{"x":1},"generatedAt":5}').meta
+  return [Object.getPrototypeOf(meta), Object.keys(meta).sort(), meta.x]
+}, [null, ["__proto__", "generatedAt"], undefined])
+checkCall("D-SG-3: entryWith and cloneState copy OWN keys only, never an inherited one and never `__proto__`", () => {
+  const proto = { inherited: 1 }
+  const src = Object.create(proto)
+  src.id = "x"; src.mpvArgs = "--y"
+  const e = Model.entryWith(src, Object.assign(Object.create(proto), { sourceKey: "k" }))
+  const patch = JSON.parse('{"__proto__":{"evil":1},"favorites":["t:a"]}')
+  const st = Model.cloneState(Model.emptyState(), patch)
+  return [JSON.stringify(e), Object.getPrototypeOf(st) === Object.prototype, st.evil, st.favorites]
+}, ['{"id":"x","mpvArgs":"--y","sourceKey":"k"}', true, undefined, ["t:a"]])
+checkCall("D-SG-3: player entry owners and failure marks answer nothing for an id spelled like a prototype member", () => {
+  // `=== null` and typeof, not the value: the runner's JSON rendering shows
+  // a FUNCTION in an array as null, which is exactly what this looks for.
+  const owners = Model.rememberEntryOwner({}, 7, { id: "t:a", name: "A" })
+  const odd = Model.channelForEnd(owners, { entryId: "constructor" }, null)
+  const marks = { a: 1 }
+  return [odd === null, typeof odd, Model.channelForEnd(owners, { entryId: 7 }, null),
+          Model.failedAfterHealthy(marks, "agree", { id: "constructor" }) === marks, Object.keys(Model.withoutFailed({ a: 1, b: 2 }, "a"))]
+}, [true, "object", { id: "t:a", name: "A" }, true, ["b"]])
+
+// ---- D-PERF-3 (ruling R30g): no quadratic pattern on provider text, in the model ----
+//
+// The trailing-whitespace patterns (`/\s+$/`, `/^\s+|\s+$/g`, the edge-space
+// `/^[ \u00a0]+|[ \u00a0]+$/g`), the IPv6 literal's `[...]*:[...]*` and the
+// file branch's `/[?#].*$/` are gone from the model. The bound is by
+// construction (index walks and the engine's own trim, each a constant amount
+// of work per character) and by the arithmetic in docs/ARCHITECTURE.md, never
+// by a long input here (the round's input rule). What is checked is that the
+// replacements say what the patterns said, on ordinary strings: the old
+// pattern is the oracle, run beside the shipping function.
+;(function () {
+  const ws = ["\t", "\n", "\u000b", "\f", "\r", " ", "\u0085", "\u00a0", "\u1680", "\u2000", "\u200a",
+              "\u2028", "\u2029", "\u202f", "\u205f", "\u3000", "\ufeff", "x", "-", "", "ab", "a b"]
+  const inputs = []
+  for (const a of ws) for (const b of ws) inputs.push(a + "a" + b, a + b + "a  b" + b + a, a + b, "  " + a + b + "\u00a0")
+  checkCall("D-PERF-3: trimEndSpace is `replace(/\\s+$/, \"\")` on " + inputs.length + " ordinary strings", () =>
+    inputs.filter(s => Model.trimEndSpace(s) !== s.replace(/\s+$/, "")).map(JSON.stringify), [])
+  checkCall("D-PERF-3: trimEdgeSpace is `replace(/^[ \\u00a0]+|[ \\u00a0]+$/g, \"\")`, and sanitizeInput still is what it was", () =>
+    inputs.filter(s => Model.trimEdgeSpace(s) !== s.replace(/^[ \u00a0]+|[ \u00a0]+$/g, "")
+                    || Model.sanitizeInput(s, 100) !== s.replace(/^\ufeff/, "").replace(/[\u0000-\u001f\u007f-\u009f]/g, "").replace(/^[ \u00a0]+|[ \u00a0]+$/g, "").substring(0, 100))
+      .map(JSON.stringify), [])
+  checkCall("D-PERF-3: in node the native trim is `replace(/^\\s+|\\s+$/g, \"\")` exactly (V4 also takes U+0085: tests/test_proto_v4.py)", () =>
+    inputs.filter(s => s.trim() !== s.replace(/^\s+|\s+$/g, "")).map(JSON.stringify), [])
+  checkCall("D-PERF-3: a channel's name, group and the guide's parsed files read as they did", () => {
+    const bad = []
+    for (const s of inputs) {
+      const oldName = s.replace(/^[\s-]+/, "").replace(/\s+$/, "")
+      if (Model.displayName({ name: s }, 3) !== (oldName !== "" && !/^[a-z][a-z0-9+.-]*:\/\//i.test(oldName) ? oldName : "Channel 3")) bad.push("name " + JSON.stringify(s))
+      const oldGroup = s.split(";")[0].replace(/^\s+|\s+$/g, "")
+      if (Model.primaryGroup({ group: s }) !== (oldGroup === "" ? Model.UNGROUPED : oldGroup)) bad.push("group " + JSON.stringify(s))
+      const text = s + '{"a":1}' + s
+      let old = null
+      try { const raw = text.replace(/^\s+|\s+$/g, ""); old = raw === "" ? null : JSON.parse(raw) } catch (e) { old = null }
+      if (JSON.stringify(Model.parseJsonObject(text)) !== JSON.stringify(old)) bad.push("json " + JSON.stringify(s))
+    }
+    return bad
+  }, [])
+  checkCall("D-PERF-3: parseJsonObject still reads a state.json behind a byte-order mark or a no-break space (JSON.parse alone would not)", () =>
+    [Model.parseJsonObject("\ufeff{\"a\":1}").a, Model.parseJsonObject("\u00a0{\"a\":2}\u00a0\n").a, Model.parseJsonObject(" \n\t "), Model.parseJsonObject("[1]")],
+    [1, 2, null, null])
+  const hosts = ["[::1]", "[2001:db8::1]", "[::]", "[1.2.3.4]", "[::ffff:1.2.3.4]", "[fe80::1%25eth0]", "[fe80::1%25]",
+                 "[fe80::1%eth0]", "[]", "[:]", "[x::1]", "[2001:db8::1", "2001:db8::1]", "[::1]x", "[::1]]", "[.]", "[0:0]"]
+  checkCall("D-PERF-3: isIpv6Literal is the two-run pattern it replaced, on every literal shape", () =>
+    hosts.filter(h => Model.isIpv6Literal(h) !== /^\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(?:%25[A-Za-z0-9._~-]+)?\]$/.test(h)), [])
+  const cuts = ["/a/b", "/a?b", "/a#b", "/a?b#c", "?", "#", "/a\u2028?b", "/a?b\u2028c", "/a?b\u2028c#d", "/a\u2029b?c",
+                "/a\nb?c", "/a?b\rc", "", "/a/b/c.m3u", "?#?", "/x?\n?y"]
+  checkCall("D-PERF-3: cutQueryAndFragment is `replace(/[?#].*$/, \"\")`, line terminators included", () =>
+    cuts.filter(c => Model.cutQueryAndFragment(c) !== c.replace(/[?#].*$/, "")).map(JSON.stringify), [])
+})()
+
+// ---- D-SINK-25: a password prefix is never read as a port ----
+//
+// The shared tests/fixtures/source-urls.json carries the refusals and the
+// URLs that must stay accepted (both mirrors run it). What only the model
+// can meet: a record written BEFORE the refusal, which the JavaScript state
+// reader keeps as written (the helper's drops it), shown by the host after
+// its later at-sign and never by its username or the password's prefix.
+checkCall("D-SINK-25: a stored URL whose password prefix reads as a port is labelled and shown by the host the user meant", () => {
+  const u = "http://user:2024/ab@host.test/list.m3u"
+  const st = Model.parseState(JSON.stringify({ version: 2, cacheLayout: 2, activeKey: "abcdef12",
+    sources: [{ key: "abcdef12", url: u, epgUrl: "", kind: "http", label: "", labelCustom: false, origin: "guide" }] }))
+  const view = Model.sourceViews(st, "abcdef12", 10, {}, false)[0]
+  return [Model.validateSourceUrl(u).code, Model.deriveLabel(u), Model.hostOf(u), Model.sourceLabel(u),
+          st.sources[0].label, view.host, view.label]
+}, ["invalid", "host.test", "host.test", "http://host.test", "host.test", "host.test", "host.test"])
+checkCall("D-SINK-25: passwordReadAsPort answers only for the shape, never for a query value or a path without a port", () =>
+  ["user:2024/ab@host.test/x", "u:1234?x@host.test/get.php", "user:/a@h.test", "me@mail.test:20/24@host.test/x",
+   "h.test:8080/get.php?username=me@mail.test", "h.test/live/me@mail.test/1.ts", "[::1]:80/a@b.test", "h.test:80?u=a@b.test",
+   "user:2024/ab@single", "user:2024", ""].map(Model.passwordReadAsPort),
+  ["host.test", "host.test", "h.test", "host.test", "", "", "", "", "", "", ""])
+
+// ---- D-SINK-24: a refused mpvArgs token reaches the journal by its NAME, redacted ----
+checkCall("D-SINK-24: mpvRejectedLine names the refused options and nothing of their values", () => {
+  const r = Model.splitMpvArgs("--ytdl=yes --stream-lavf-o=http_proxy=http://user:pw@proxy.example.test:3128 --http-proxy http://user:pw@proxy.example.test --vo=gpu")
+  return [r.rejected.length, Model.mpvRejectedLine(r.rejected), Model.mpvRejectedLine([]), Model.mpvRejectedLine(null)]
+}, [2, "omarchy-iptv: ignoring mpvArgs tokens: --stream-lavf-o proxy.example.test", "", ""])
+checkCall("D-SINK-24: Service.issuePlayerSession's journal line (the harness's console keeps every argument, as the real one does) carries no credential", () => {
+  const H = require("./service-harness.js")
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false,
+    mpvArgs: "--stream-lavf-o=http_proxy=http://user:pw@proxy.example.test:3128 --http-proxy http://user:pw@proxy.example.test" }, stateText: "", host: "lag" })
+  h.warnings.length = 0
+  // The harness has no player socket timer; the journal line is written
+  // before the function reaches it, and the line is all this asks about.
+  try { h.root.issuePlayerSession("start", { id: "t:x", name: "X" }, "") } catch (e) { /* see above */ }
+  const lines = h.warnings.filter(w => /ignoring mpvArgs tokens/.test(w))
+  return [lines.length, lines.some(w => /user|pw@|:3128|http_proxy/.test(w))]
+}, [1, false])
+
+// ---- D-PERF-4: one prepared copy per source ----
+checkCall("D-PERF-4: preparedLruNext puts the new entry first and drops its own source's older entry, keeping the other source's", () => {
+  const a1 = { source: "/c/a", text: "1" }, a2 = { source: "/c/a", text: "2" }, b1 = { source: "/c/b", text: "1" }
+  return [Model.preparedLruNext([a1], a2, 2), Model.preparedLruNext([b1, a1], a2, 2), Model.preparedLruNext([a1, b1], a1, 2),
+          Model.preparedLruNext([], a1, 2), Model.preparedLruNext([b1, a1], a2, 1),
+          Model.preparedLruFind([a1, b1], "1", "/c/b") === b1, Model.preparedLruFind([a1], "1", "/c/b"), Model.preparedLruFind(null, "1", "")]
+}, [[{ source: "/c/a", text: "2" }], [{ source: "/c/a", text: "2" }, { source: "/c/b", text: "1" }],
+    [{ source: "/c/a", text: "1" }, { source: "/c/b", text: "1" }], [{ source: "/c/a", text: "1" }],
+    [{ source: "/c/a", text: "2" }], true, null, null])
+checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one source hold ONE prepared list; a second source shares the LRU; going back to the first hits", () => {
+  const H = require("./service-harness.js")
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+  const doc = n => JSON.stringify({ version: 1, generatedAt: n, channels: [{ name: "A", group: "G", tvgId: "a", url: "http://c.example.test/a.ts" }] })
+  const stamps = () => h.root.preparedLru.map(e => JSON.parse(e.text).generatedAt)
+  const A = "/cache/sources/aaaaaaaa", B = "/cache/sources/bbbbbbbb"
+  h.root.applyChannels(doc(1000), A); h.root.applyChannels(doc(4600), A); h.root.applyChannels(doc(8200), A)
+  const refreshed = stamps()
+  h.root.applyChannels(doc(1), B)
+  const switched = stamps()
+  const head = h.root.preparedLru[1]
+  h.root.applyChannels(doc(8200), A)
+  return [refreshed, switched, stamps(), h.root.preparedLru[0] === head, h.compileErrors]
+}, [[8200], [1, 8200], [8200, 1], true, []])
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
