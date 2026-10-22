@@ -35,23 +35,36 @@ from helper_loader import load_helper
 helper = load_helper()
 
 # The pattern as it shipped, kept here and ONLY here. The HOST it prints is
-# R32a's free-text rule (2026-10-21), stated independently of the helper so a
-# drift in run_host is caught: the segment after the LAST '@' of the run,
-# ended at '/', '?', '#', ':', '&', '=' or ';', a bracketed literal to its ']'.
+# R32a' (2026-10-22, D-SINK-29), stated independently of the helper so a
+# drift in run_host_parts is caught: the RFC authority (up to the first '/',
+# '?', '#' or whitespace), its userinfo to the LAST '@' within it, the host
+# cut at ':', ';', '=' or '&', a bracketed literal to its ']'; and WITHHELD as
+# the one token when that host has no dot and an '@' follows the authority.
 # It was helper.url_host (urllib's RFC reading) until R32a, which printed the
-# username for a password holding an unencoded '/', '?' or '#' (D-SINK-28).
+# username for a password holding an unencoded '/', '?' or '#' (D-SINK-28);
+# R32a's last-'@'-of-the-run scan (round 3, never shipped) printed a password
+# TAIL for an '@' inside a path credential (D-SINK-29).
 _AS_SHIPPED = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*)://[^\s'\"<>]+")
-_HOST_END_AS_RULED = re.compile(r"[/?#:&=;]")
+_AUTHORITY_END_AS_RULED = re.compile(r"[/?#\s\ufeff]")
+_HOST_END_AS_RULED = re.compile(r"[:;=&]")
+HOST_WITHHELD = "[host withheld]"
 
 
 def host_as_ruled(raw):
-    rest = raw[raw.find("://") + 3:]
-    rest = rest[rest.rfind("@") + 1:]
-    if rest.startswith("["):
-        close = rest.find("]")
-        return rest[:close + 1].lower() if close != -1 else ""
-    cut = _HOST_END_AS_RULED.search(rest)
-    return (rest if cut is None else rest[:cut.start()]).lower()
+    body = raw[raw.find("://") + 3:]
+    cut = _AUTHORITY_END_AS_RULED.search(body)
+    authority = body if cut is None else body[:cut.start()]
+    rest = "" if cut is None else body[cut.start():]
+    rest = rest.split()[0] if rest.split() else rest
+    hostport = authority[authority.rfind("@") + 1:]
+    if hostport.startswith("["):
+        close = hostport.find("]")
+        return hostport[:close + 1].lower() if close != -1 else ""
+    end = _HOST_END_AS_RULED.search(hostport)
+    host = hostport if end is None else hostport[:end.start()]
+    if host and "." not in host and "@" in rest:
+        return HOST_WITHHELD
+    return host.lower()
 
 
 def redact_urls_as_shipped(text):
@@ -116,6 +129,10 @@ EDGES = [
     # An `@` in the PATH is not userinfo: the authority ends at the first `/`,
     # so the host is `h.test` and not `b`.
     "http://h.test/a@b/c", "http://u:p@h.test/a@b/c", "http://h.test?a@b",
+    # R32a': the withheld shapes, and the dotless hosts that are not.
+    "http://myuser:pa#ss@cdn.test/x", "http://myuser:pa/ss@cdn.test/x", "http://nas:8000/me@h/x",
+    "http://nas:8080?u=me@b", "http://u:p@nas/x", "http://nas", "http://nas/x", "http://[::1]/me@x",
+    "http://h.test=p&x=1/y", "http://h.test;s=p", "x http://nas/a@b. y", "http://nas/a@b\u2028c",
 ]
 
 
@@ -187,27 +204,55 @@ class RedactionIsUnchangedTests(unittest.TestCase):
                 j = text.find("://", j + 1)
         self.assertGreater(checked, 2000)
 
-    def test_r32a_the_free_text_host_is_the_segment_after_the_last_at_sign(self):
-        """R32a (D-SINK-28, D-SINK-23): the typo shapes print the host after
-        the last '@', a pathless query stops at '&', a path '@' prints the
-        segment after it (the stated cost), an unclosed '[' prints nothing."""
+    def test_r32a_the_free_text_host_is_the_rfc_host_or_withheld(self):
+        """R32a' (D-SINK-29, D-SINK-28, D-SINK-23): the P1's path and query
+        credentials print the HOST (round 3 printed `ssw0rd`); the typo
+        shapes withhold it (round 2 printed the username, round 3 the host
+        after the later '@'); a pathless query stops at the authority; a
+        LAN name with a path '@' is withheld (the stated cost, `localhost`
+        too); an unclosed '[' prints nothing."""
         cases = [
-            ("Failed to open http://myuser:pa#ss@cdn.test/live/1.ts.", "Failed to open http://cdn.test."),
-            ("Failed to open http://myuser:pa?ss@cdn.test/live/1.ts.", "Failed to open http://cdn.test."),
-            ("Failed to open http://myuser:pa/ss@cdn.test/live/1.ts.", "Failed to open http://cdn.test."),
+            ("Failed to open http://prov.test/live/U5ER/P4@SSW0RD/1.ts.", "Failed to open http://prov.test."),
+            ("see http://host.test:25461/get.php?username=me@mail.test&password=p@ssw0rd now.", "see http://host.test now."),
+            ("Failed to open http://myuser:pa#ss@cdn.test/live/1.ts.", "Failed to open http://[host withheld]."),
+            ("Failed to open http://myuser:pa?ss@cdn.test/live/1.ts.", "Failed to open http://[host withheld]."),
+            ("Failed to open http://myuser:pa/ss@cdn.test/live/1.ts.", "Failed to open http://[host withheld]."),
+            ("http://user:2024/ab@host.test/list.m3u", "http://[host withheld]"),
             ("http://host?password=x", "http://host"),
-            ("http://h.test?u=me@b.test&p=SECRET", "http://b.test"),
-            ("http://host.test:25461/playlist/me@mail.test/pw/m3u_plus", "http://mail.test"),
+            ("http://h.test?u=me@b.test&p=SECRET", "http://h.test"),
+            ("http://h.test;sid=SECRET", "http://h.test"),
+            ("http://host.test:25461/playlist/me@mail.test/pw/m3u_plus", "http://host.test"),
+            ("http://nas:8000/files/me@home/x", "http://[host withheld]"),
+            ("http://localhost:8080/me@mail.test/x", "http://[host withheld]"),
+            ("http://u:p@nas/x", "http://nas"),
             ("open http://[2001:db8::5 now", "open http://[redacted] now"),
             ("x http://[2001:db8::5]. y", "x http://[2001:db8::5]. y"),
-            ("http://a@b@c@h.test/x", "http://h.test"),
+            ("http://[2001:db8::7]/live/me@mail.test/1.ts", "http://[2001:db8::7]"),
+            ("http://a@b@c@h.test/me@x", "http://h.test"),
         ]
         for text, want in cases:
             self.assertEqual(helper.redact_urls(text), want, text)
-        # The display sinks keep the RFC reading: that is the two-rule shape
-        # R32a decides, not a drift.
+        # The display sinks keep the RFC reading unconditionally: that is the
+        # two-rule shape R32a' decides, not a drift.
         self.assertEqual(helper.url_host("http://myuser:pa#ss@cdn.test/live/1.ts"), "myuser")
-        self.assertEqual(helper.run_host("http://myuser:pa#ss@cdn.test/live/1.ts"), "cdn.test")
+        self.assertEqual(helper.run_host("http://myuser:pa#ss@cdn.test/live/1.ts"), helper.HOST_WITHHELD)
+        self.assertEqual(helper.HOST_WITHHELD, HOST_WITHHELD)
+
+    def test_r32a_host_withheld_is_the_one_predicate_and_the_token_is_fixed(self):
+        """R32a': the predicate the form warns with (Model.urlHostWithheld),
+        mirrored, over the shapes the node suite pins; the shared source-urls
+        fixture runs it in tests/test_source.py."""
+        for url, want in [("http://myuser:pa#ss@cdn.test/x", True), ("http://user:2024/ab@host.test/list.m3u", True),
+                          ("http://nas:8000/files/me@home/x", True), ("http://localhost/me@x", True), ("http://nas:8080?u=me@b.test", True),
+                          ("http://u:p@nas:8080/me@x", True), ("see http://nas/me@x now", True),
+                          ("http://h.test:pa/me@x.test/y", False), ("http://[2001:db8::1]:8080/me@mail.test", False),
+                          ("http://[2001:db8::1:x/me@mail.test", False), ("http://u:p@nas", False), ("http://u:p@nas/x?a=1#f", False),
+                          ("http://host.test:25461/playlist/me@mail.test/pw/m3u_plus", False), ("http://nas", False),
+                          ("nas/me@x", False), ("", False), ("http://h .test/me@x", False), ("http:///me@x", False), ("http://:8080/me@x", False)]:
+            self.assertEqual(helper.host_withheld(url), want, url)
+        self.assertEqual(helper.run_host_parts("myuser:pa#ss@cdn.test/x"), ("myuser", True))
+        self.assertEqual(helper.run_host_parts("u:p@h.test:8080/x"), ("h.test", False))
+        self.assertEqual(helper.run_host_parts("[2001:db8::7]:8080/me@x"), ("[2001:db8::7]", False))
 
     def test_none_and_non_strings_are_unchanged_too(self):
         for value in (None, 42, True, 1.5, [], {}):

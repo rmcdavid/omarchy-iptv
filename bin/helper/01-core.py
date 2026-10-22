@@ -560,9 +560,13 @@ _WORD_CHAR_RE = re.compile(r"\w")
 # the generated corpus (the redaction-cost suite on the dev branch); the
 # bound is arithmetic, UNVERIFIED by run under the round's input rule.
 _SCHEME_RUN_RE = re.compile(r"(?:.*[^A-Za-z0-9+.\-])?", re.S)
-# run_host's host end: R32a's `/`, `?`, `#`, the port's `:`, and the query and
-# parameter delimiters `&`, `=`, `;` (a neighbouring parameter never prints).
-_RUN_HOST_END = re.compile(r"[/?#:&=;]")
+# run_host_parts' host end inside the authority (which _AUTHORITY_END has
+# already cut at `/`, `?` or `#`): the port's `:` and the parameter
+# delimiters `;`, `=`, `&`, so a neighbouring parameter never prints (R32a').
+_RUN_HOST_END = re.compile(r"[:;=&]")
+# The token a free-text redactor prints in place of a withheld host (R32a').
+# Model.HOST_WITHHELD owns it; the shared redaction fixture holds both to it.
+HOST_WITHHELD = "[host withheld]"
 _LEADING_DASHES = re.compile(r"^[\s\-]+")
 # make_channel's last-resort display name, and the pattern that recognises one
 # after normalize_text. Built from the same constant so the two cannot drift:
@@ -827,30 +831,57 @@ def source_host(url: str) -> str:
     return "local file"
 
 
-def run_host(raw: str) -> str:
-    """The host a FREE-TEXT redactor prints for one `scheme://...` run, the
-    mirror of the scan inside Model.redactUrls (ruling R32a, 2026-10-21).
+def run_host_parts(body: str) -> tuple[str, bool]:
+    """Mirror of Model.runHostParts (R32a', D-SINK-29, 2026-10-22): for the
+    text after one `scheme://`, the RFC host a FREE-TEXT redactor prints and
+    whether it is WITHHELD.
 
-    Not url_host: that is urllib's RFC reading, right for a display sink and
-    for validation (source_host, validate_source_url), and wrong here, where
-    a username IS the RFC host whenever a password holds an unencoded `/`,
-    `?` or `#` -- `http://myuser:pa#ss@cdn.test/x` printed `http://myuser`
-    (D-SINK-28). So the userinfo runs to the LAST `@` of the whole run, and
-    the host is what follows it, ended at the first `/`, `?`, `#` or `:` and
-    at the first `&`, `=` or `;` (a neighbouring query parameter never
-    prints, D-SINK-23); a bracketed literal is the host up to its `]`, or
-    nothing. The cost, stated in ARCHITECTURE-SOURCES 3.1: an `@` in a path
-    or query moves the printed host to the segment after it (an Xtream
-    `/playlist/me@mail.test/pw/...` prints `mail.test`) -- over-redaction,
-    never a credential. No host-shape rule is applied. The shared redaction
-    fixture (dev branch) holds both mirrors to this."""
-    rest = raw[raw.find("://") + 3:]
-    rest = rest[rest.rfind("@") + 1:]
-    if rest.startswith("["):
-        close = rest.find("]")
-        return rest[:close + 1].lower() if close != -1 else ""
-    cut = _RUN_HOST_END.search(rest)
-    return (rest if cut is None else rest[:cut.start()]).lower()
+    The authority ends at the first `/`, `?`, `#` or whitespace after the
+    scheme, its userinfo at the LAST `@` within it (D-SINK-1), and the host
+    is what follows that `@`, cut at the first `:` (a port), `;`, `=` or `&`
+    (a parameter delimiter, so a neighbouring parameter never prints,
+    D-SINK-23); a bracketed literal is the host up to its `]`, or nothing.
+    `withheld` is the one predicate the Sources form warns with
+    (Model.urlHostWithheld): the host is not bracketed, has no dot, and an
+    `@` follows the authority -- a dotless "host" with a later `@` is most
+    likely a username in front of a password holding an unencoded `/`, `?`
+    or `#`, and printing it printed the username (`http://myuser:pa#ss@...`
+    -> `http://myuser`, D-SINK-28). Not url_host: urllib's RFC reading is
+    right for a display sink and for validation (source_host,
+    validate_source_url) and prints that username. Not round 3's last-`@`-
+    of-the-run scan either (never shipped): crossing the `/` put a password
+    TAIL in the host position (`/live/U5ER/P4@SSW0RD/1.ts` -> `ssw0rd`,
+    D-SINK-29) on mpv's error line into the journal and the notification.
+    The cost, stated in ARCHITECTURE-SOURCES 3.1: a dotless intranet URL with
+    a path `@` withholds its host, `localhost` included. One pass over the
+    run: one search per class, no retry; the shared redaction fixture (dev
+    branch) holds both mirrors to it."""
+    space = _URL_SPACE.search(body)
+    if space is not None:
+        body = body[:space.start()]
+    cut = _AUTHORITY_END.search(body)
+    authority = body if cut is None else body[:cut.start()]
+    rest = "" if cut is None else body[cut.start():]
+    hostport = authority[authority.rfind("@") + 1:]
+    if hostport.startswith("["):
+        close = hostport.find("]")
+        return (hostport[:close + 1].lower() if close != -1 else ""), False
+    end = _RUN_HOST_END.search(hostport)
+    host = hostport if end is None else hostport[:end.start()]
+    return host.lower(), (host != "" and "." not in host and "@" in rest)
+
+
+def host_withheld(url: str) -> bool:
+    """R32a': the predicate alone, over a whole URL (or any text holding one)."""
+    j = url.find("://")
+    return j != -1 and run_host_parts(url[j + 3:])[1]
+
+
+def run_host(raw: str) -> str:
+    """What redact_urls prints for one `scheme://...` run: the RFC host, or
+    HOST_WITHHELD."""
+    host, withheld = run_host_parts(raw[raw.find("://") + 3:])
+    return HOST_WITHHELD if withheld else host
 
 
 def redact_urls(text: Any) -> str:

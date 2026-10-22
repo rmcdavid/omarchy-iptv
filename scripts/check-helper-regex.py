@@ -94,9 +94,9 @@ REVIEWED = [
      "`.*` runs to j once and backs off once to the LAST non-scheme character, so an attempt costs at "
      "most 2*(j - lo), and the doubling windows sum to under 8R + 128 steps for a run of R -- "
      "independent of the text before it (_SCHEME_RUN_RE, redact_urls)"),
-    (r"[/?#:&=;]", "provider",
-     "linear: one character class, no quantifier (_RUN_HOST_END, run_host: the delimiters that end a "
-     "free-text host, R32a)"),
+    (r"[:;=&]", "provider",
+     "linear: one character class, no quantifier (_RUN_HOST_END, run_host_parts: the port and "
+     "parameter delimiters that end a free-text host inside an authority, R32a')"),
     (r"^[\s\-]+", "provider",
      "linear: anchored at the start, one run and nothing after it (_LEADING_DASHES, clean_name)"),
     ("'^' + GENERATED_NAME_WORD.lower() + ' [0-9]+$'", "provider",
@@ -108,7 +108,9 @@ REVIEWED = [
     (r"^([A-Za-z][A-Za-z0-9+.\-]*):(.*)$", "user",
      "linear: anchored; the scheme run cannot hold ':' so it backs off at most once over its length, "
      "and (.*)$ under DOTALL reaches the end at once (_SCHEME_RE, _SOURCE_SCHEME_RE)"),
-    (r"[/?#]", "user", "linear: one character class (_AUTHORITY_END)"),
+    (r"[/?#]", "provider",
+     "linear: one character class (_AUTHORITY_END: validate_source_url's user text, and since R32a' "
+     "run_host_parts' provider text, the end of a free-text URL's authority)"),
     (r"[:\[\]]", "user", "linear: one character class (_BARE_HOST_CHARS)"),
     (r"^[0-9]+$", "user", "linear: anchored, one run then $ (_ASCII_DIGITS)"),
     ("[\u200b-\u200d\u2060\ufeff]", "user", "linear: one character class (_ZERO_WIDTH)"),
@@ -116,7 +118,8 @@ REVIEWED = [
      "linear: fixed by lane-bounds-h (was two adjacent runs over one class, k*k): a lookahead over the "
      "class without ':' and ONE run, which nothing after it can make back off more than once a "
      "character (_IPV6_LITERAL)"),
-    ("[\\s\ufeff]", "user", "linear: one character class (_URL_SPACE)"),
+    ("[\\s\ufeff]", "provider", "linear: one character class (_URL_SPACE: validate_source_url's user text, and "
+     "since R32a' run_host_parts' provider text)"),
     (r"%(?![0-9A-Fa-f]{2})", "user",
      "linear: literal prefix '%', fixed-width lookahead (_BAD_ESCAPE)"),
     (r"^(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?\s*(?:([+-])(\d{2})(\d{2})|Z)?$", "provider",

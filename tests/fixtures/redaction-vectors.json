@@ -1,5 +1,5 @@
 {
- "note": "Shared redaction vectors. CLAUDE.md: a rule implemented in both JavaScript and Python gets ONE fixture that both implementations run. Before this file existed they were pinned by two DISJOINT hand-written lists, every vector in each carrying exactly one '@' -- so D-SINK-1 (a password tail surviving into the host position when the password contains an un-encoded '@') was invisible to both. The two renderings differ on purpose: the helper emits scheme://host, Model emits the bare host. So a vector pins the PROPERTY, not the formatting: the host must appear, and no fragment listed in mustNotAppear may. R32a (2026-10-21): the FREE-TEXT rule prints what follows the LAST '@' of the run, ended at the first '/', '?', '#', ':', '&', '=' or ';'; a DISPLAY sink (sourceLabel, hostOf) prints the RFC host. Where the two differ a vector carries `rfcHost` (and `displayMustNotAppear`) for the display check; `host` is always what the free-text redactors print, and an empty `host` requires no host at all.",
+ "note": "Shared redaction vectors. CLAUDE.md: a rule implemented in both JavaScript and Python gets ONE fixture that both implementations run. Before this file existed they were pinned by two DISJOINT hand-written lists, every vector in each carrying exactly one '@' -- so D-SINK-1 (a password tail surviving into the host position when the password contains an un-encoded '@') was invisible to both. The two renderings differ on purpose: the helper emits scheme://host, Model emits the bare host. So a vector pins the PROPERTY, not the formatting: the host must appear, and no fragment listed in mustNotAppear may. R32a' (2026-10-22, D-SINK-29): the FREE-TEXT rule prints the RFC host -- the authority ends at the first '/', '?', '#' or whitespace, its userinfo at the LAST '@' within it, and the printed host is cut at the first ':', ';', '=' or '&' -- and WITHHOLDS it, as the one token `[host withheld]`, when that host has no dot and an '@' follows the authority. A DISPLAY sink (sourceLabel, hostOf) prints the RFC host unconditionally. Where the two differ a vector carries `rfcHost` (and `displayMustNotAppear`) for the display check; `host` is always what the free-text redactors print, and an empty `host` requires no host at all.",
  "credentialsAreFake": "Every credential here is invented and every host is under the reserved .test TLD. Never put a real provider value in this file.",
  "vectors": [
   {
@@ -84,54 +84,82 @@
    ]
   },
   {
-   "why": "D-SINK-23 under R32a: a query password on a URL with NO PATH. The round-1 model printed the at-sign's tail WITH the password (`mail.example.test&password=P4SSW0RD`); the free-text rule prints the segment after the last '@' and stops at the '&', so the email's domain prints and the password never does -- the stated over-redaction",
+   "why": "D-SINK-29 (R32a'), THE P1: an '@' inside a PATH credential -- the Xtream /live/<user>/<pass>/ shape with a password holding '@'. Round 3's last-'@'-of-the-run scan printed the password TAIL (`SSW0RD`) here; the RFC authority never crosses the '/', so the host prints and nothing of the credential does",
+   "text": "Failed to open http://prov.example.test/live/U5ER/P4@SSW0RD/1.ts.",
+   "host": "prov.example.test",
+   "mustNotAppear": [
+    "U5ER",
+    "P4@",
+    "SSW0RD",
+    "ssw0rd",
+    "live",
+    "1.ts"
+   ]
+  },
+  {
+   "why": "D-SINK-29 (R32a'), the P1's other shape: a pasted Xtream query whose password holds '@' and whose username is an email -- the server prints, never the email's domain and never the password's tail",
+   "text": "playlist: http://host.example.test:25461/get.php?username=me@mail.example.test&password=p@ssw0rd&type=m3u_plus",
+   "host": "host.example.test",
+   "mustNotAppear": [
+    "ssw0rd",
+    "p@",
+    "me@",
+    "mail.example.test",
+    "25461",
+    "username",
+    "password"
+   ]
+  },
+  {
+   "why": "D-SINK-23 under R32a': a query password on a URL with NO PATH. The round-1 model printed the at-sign's tail WITH the password (`mail.example.test&password=P4SSW0RD`); the RFC authority ends at the '?', so the server prints and the query never does",
    "text": "Failed to open http://h.example.test:8080?username=me@mail.example.test&password=P4SSW0RD.",
-   "host": "mail.example.test",
+   "host": "h.example.test",
    "mustNotAppear": [
     "P4SSW0RD",
     "username",
     "8080",
     "password",
-    "me@"
+    "me@",
+    "mail.example.test"
    ]
   },
   {
-   "why": "D-SINK-23 under R32a, as a bare URL: the free-text redactors print `b.example.test` (the segment after the last '@'), the display sinks the RFC host `h.example.test`",
+   "why": "D-SINK-23 under R32a', as a bare URL: the free-text redactors and the display sinks both print the RFC host",
    "text": "http://h.example.test?u=me@b.example.test&p=P4SSW0RD",
-   "host": "b.example.test",
+   "host": "h.example.test",
    "mustNotAppear": [
     "P4SSW0RD",
     "me@",
     "p=",
-    "u="
-   ],
-   "rfcHost": "h.example.test"
+    "u=",
+    "b.example.test"
+   ]
   },
   {
-   "why": "D-SINK-23 under R32a: an at-sign in a FRAGMENT -- the free-text rule prints `b.example.test`, the display sinks drop the fragment and print `h.example.test`",
+   "why": "D-SINK-23 under R32a': an at-sign in a FRAGMENT changes nothing; the host before the '#' prints",
    "text": "http://h.example.test#u=me@b.example.test&p=P4SSW0RD",
-   "host": "b.example.test",
+   "host": "h.example.test",
    "mustNotAppear": [
     "P4SSW0RD",
     "me@",
-    "p="
-   ],
-   "rfcHost": "h.example.test"
+    "p=",
+    "b.example.test"
+   ]
   },
   {
-   "why": "D-SINK-23 under R32a: real userinfo AND an at-sign in a pathless query -- the LAST '@' wins in free text (`b.example.test`), the authority's last '@' in a display sink (`h.example.test`); the userinfo prints in neither",
+   "why": "D-SINK-23 under R32a': real userinfo AND an at-sign in a pathless query -- the authority's last '@' ends the userinfo, the one after the '?' is query",
    "text": "http://u5er:p4ss@h.example.test?x=a@b.example.test",
-   "host": "b.example.test",
+   "host": "h.example.test",
    "mustNotAppear": [
     "u5er",
     "p4ss",
     "x=",
-    "a@"
-   ],
-   "rfcHost": "h.example.test"
+    "a@",
+    "b.example.test"
+   ]
   },
   {
-   "why": "an IPv6 host behind a doubled-at userinfo, with a port and a path (free text, so the bare-URL check leaves it to redactUrls: the model shows the literal in its brackets, the helper without)",
+   "why": "an IPv6 host behind a doubled-at userinfo, with a port and a path (free text, so the bare-URL check leaves it to redactUrls: the model shows the literal in its brackets, the helper too)",
    "text": "open http://u5er:p4@ss@[2001:db8::7]:8080/live/1.ts now",
    "host": "2001:db8::7",
    "mustNotAppear": [
@@ -151,47 +179,99 @@
    ]
   },
   {
-   "why": "D-SINK-28 (R32a): a password holding an unencoded '#'. The RFC reading makes the USERNAME the host, and round 2's redactors printed it; the free-text rule prints the host after the last '@'",
-   "text": "Failed to open http://myuser:pa#ss@cdn.example.test/live/1.ts.",
-   "host": "cdn.example.test",
-   "rfcHost": "myuser",
-   "displayMustNotAppear": [
-    "pa#ss",
-    "ss@",
-    "1.ts"
-   ],
+   "why": "R32a': an IPv6 host with a path '@' -- a bracketed literal is a host and is never withheld",
+   "text": "retry http://[2001:db8::9]/live/me@mail.example.test/1.ts later",
+   "host": "2001:db8::9",
    "mustNotAppear": [
-    "myuser",
-    "pa#ss",
-    "ss@",
+    "me@",
+    "mail.example.test",
     "live",
     "1.ts"
    ]
   },
   {
-   "why": "D-SINK-28 (R32a): the same with '?' in the password",
-   "text": "Failed to open http://myuser:pa?ss@cdn.example.test/live/1.ts.",
-   "host": "cdn.example.test",
+   "why": "R32a': an IPv6 host without a port (free text: the model shows the literal in its brackets, the helper too)",
+   "text": "retry http://[2001:db8::8]/x later",
+   "host": "2001:db8::8",
+   "mustNotAppear": [
+    "/x"
+   ]
+  },
+  {
+   "why": "D-SINK-28 (R32a'): a password holding an unencoded '#'. The RFC reading makes the USERNAME the host and round 2's redactors printed it; the host is dotless with an '@' after the authority, so free text WITHHOLDS it -- the one token, never `myuser`, and never the host after the later '@' either (round 3 printed `cdn.example.test`, and on the P1's shape that same scan printed a password tail)",
+   "text": "Failed to open http://myuser:pa#ss@cdn.example.test/live/1.ts.",
+   "host": "[host withheld]",
    "mustNotAppear": [
     "myuser",
+    "pa#ss",
+    "ss@",
+    "cdn.example.test",
+    "live",
+    "1.ts"
+   ],
+   "rfcHost": "myuser",
+   "displayMustNotAppear": [
+    "pa#ss",
+    "ss@",
+    "1.ts"
+   ]
+  },
+  {
+   "why": "D-SINK-28 (R32a'): the same with '?' in the password",
+   "text": "Failed to open http://myuser:pa?ss@cdn.example.test/live/1.ts.",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "myuser",
+    "pa?ss",
+    "ss@",
+    "cdn.example.test",
+    "live"
+   ],
+   "rfcHost": "myuser",
+   "displayMustNotAppear": [
     "pa?ss",
     "ss@",
     "live"
    ]
   },
   {
-   "why": "D-SINK-28 (R32a): the same with '/' in the password -- the typo shape D-SINK-25 was filed for; the base printed the username here in BOTH mirrors",
+   "why": "D-SINK-28 (R32a'): the same with '/' in the password -- the typo shape D-SINK-25 was filed for; the base printed the username here in BOTH mirrors",
    "text": "Failed to open http://myuser:pa/ss@cdn.example.test/live/1.ts.",
-   "host": "cdn.example.test",
+   "host": "[host withheld]",
    "mustNotAppear": [
     "myuser",
+    "pa/ss",
+    "ss@",
+    "cdn.example.test",
+    "live"
+   ],
+   "rfcHost": "myuser",
+   "displayMustNotAppear": [
     "pa/ss",
     "ss@",
     "live"
    ]
   },
   {
-   "why": "R32a: three at-signs in the userinfo; the last one ends it in both the free-text and the display reading",
+   "why": "R32a': the typo shape as a bare URL -- free text withholds, the display sinks print the RFC host, which is the username (sourceLabel `http://user`): that is why the FORM warns on it",
+   "text": "http://user:2024/ab@host.example.test/list.m3u",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "user",
+    "2024",
+    "ab@",
+    "host.example.test",
+    "list.m3u"
+   ],
+   "rfcHost": "user",
+   "displayMustNotAppear": [
+    "2024",
+    "ab@",
+    "list.m3u"
+   ]
+  },
+  {
+   "why": "R32a': three at-signs in the userinfo; the last one within the authority ends it in both the free-text and the display reading",
    "text": "http://a1@b2@c3@host.example.test/a.ts",
    "host": "host.example.test",
    "mustNotAppear": [
@@ -202,7 +282,20 @@
    ]
   },
   {
-   "why": "R32a: an IPv6 host with a port and a path, no userinfo (the model shows the literal in its brackets, the helper too)",
+   "why": "R32a': userinfo with several at-signs AND a path at-sign: the authority's last '@' ends the userinfo, the path one is path",
+   "text": "http://a1@b2@c3@host.example.test/me@mail.example.test/a.ts",
+   "host": "host.example.test",
+   "mustNotAppear": [
+    "a1",
+    "b2",
+    "c3",
+    "me@",
+    "mail.example.test",
+    "a.ts"
+   ]
+  },
+  {
+   "why": "R32a': an IPv6 host with a port and a path, no userinfo (the model shows the literal in its brackets, the helper too)",
    "text": "retry http://[2001:db8::9]:8080/live/1.ts later",
    "host": "2001:db8::9",
    "mustNotAppear": [
@@ -212,61 +305,119 @@
    ]
   },
   {
-   "why": "R32a, THE STATED COST (ARCHITECTURE-SOURCES 3.1): an Xtream /playlist/<email>/<pass>/m3u_plus link -- the at-sign is in the PATH, so the free-text rule prints the segment after it (the email's domain) and not the server; the password never prints. The display sinks show the server (rfcHost)",
+   "why": "R32a' (D-SINK-27): an Xtream /playlist/<email>/<pass>/m3u_plus link -- the at-sign is in the PATH, so the server prints; round 3 printed the email's domain (`mail.example.test`) here",
    "text": "probe http://host.example.test:25461/playlist/me@mail.example.test/P4SSW0RD/m3u_plus done",
-   "host": "mail.example.test",
-   "rfcHost": "host.example.test",
+   "host": "host.example.test",
    "mustNotAppear": [
     "P4SSW0RD",
     "me@",
+    "mail.example.test",
     "25461",
     "m3u_plus"
    ]
   },
   {
-   "why": "R32a, the same cost on a WebDAV link on a non-default port",
+   "why": "R32a' (D-SINK-27): the same on a WebDAV link on a non-default port",
    "text": "https://cloud.example.test:8443/remote.php/dav/files/me@mail.example.test/iptv.m3u",
-   "host": "mail.example.test",
-   "rfcHost": "cloud.example.test",
+   "host": "cloud.example.test",
    "mustNotAppear": [
     "8443",
     "remote.php",
     "me@",
+    "mail.example.test",
     "iptv.m3u"
    ]
   },
   {
-   "why": "R32a, the cost's sharpest edge, pinned so it is seen rather than discovered: an at-sign INSIDE a path credential prints that credential's tail (`SS`) up to the next '/', never the whole and never the host before it. The base printed the host here; a redactor that printed nothing for an at-sign after the authority would close this and is the open question in the lane report",
-   "text": "http://prov.example.test/live/U5ER/P4@SS/1.ts",
-   "host": "",
-   "rfcHost": "prov.example.test",
+   "why": "R32a', THE STATED COST: a dotless intranet host with a path '@' is withheld -- `nas` could be a username, and nothing tells the redactor it is not",
+   "text": "http://nas:8000/files/me@home/list.m3u",
+   "host": "[host withheld]",
    "mustNotAppear": [
-    "U5ER",
-    "P4@SS",
-    "P4@",
-    "live",
-    "1.ts"
-   ]
-  },
-  {
-   "why": "R32a: the typo shape as a bare URL -- free text prints the host after the last '@', the display sinks print the RFC host, which is the username (sourceLabel `http://user`): that is why the FORM warns on it",
-   "text": "http://user:2024/ab@host.example.test/list.m3u",
-   "host": "host.example.test",
-   "rfcHost": "user",
-   "displayMustNotAppear": [
-    "2024",
-    "ab@",
+    "nas",
+    "8000",
+    "me@",
+    "home",
     "list.m3u"
    ],
-   "mustNotAppear": [
-    "user",
-    "2024",
-    "ab@",
+   "rfcHost": "nas",
+   "displayMustNotAppear": [
+    "8000",
+    "me@",
     "list.m3u"
    ]
   },
   {
-   "why": "R32a: a '[' in the authority that never closes -- there is no host to print and nothing of the literal prints either (the model says [url], the helper [redacted])",
+   "why": "R32a', the cost again: `localhost` gets no exemption (the lead's answer)",
+   "text": "Failed to open http://localhost:8080/me@mail.example.test/x.",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "localhost",
+    "8080",
+    "me@",
+    "mail.example.test"
+   ],
+   "rfcHost": "localhost",
+   "displayMustNotAppear": [
+    "8080",
+    "me@"
+   ]
+  },
+  {
+   "why": "R32a': a dotless host whose later '@' is in a pathless QUERY is withheld too",
+   "text": "http://nas:8080?u=me@b.example.test",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "nas",
+    "8080",
+    "me@",
+    "b.example.test"
+   ],
+   "rfcHost": "nas",
+   "displayMustNotAppear": [
+    "8080",
+    "me@"
+   ]
+  },
+  {
+   "why": "R32a': a dotless host WITH userinfo and no later '@' -- the only '@' is the userinfo delimiter inside the authority, so the host prints (the form draws no warning here either)",
+   "text": "http://u5er:p4ss@nas/list.m3u",
+   "host": "nas",
+   "mustNotAppear": [
+    "u5er",
+    "p4ss",
+    "list.m3u"
+   ]
+  },
+  {
+   "why": "R32a': a dotless host with userinfo AND a later '@' is withheld",
+   "text": "http://u5er:p4ss@nas:8080/me@x",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "u5er",
+    "p4ss",
+    "nas",
+    "8080",
+    "me@"
+   ],
+   "rfcHost": "nas",
+   "displayMustNotAppear": [
+    "u5er",
+    "p4ss",
+    "8080",
+    "me@"
+   ]
+  },
+  {
+   "why": "R32a': a dotless host with a query password and no '@' anywhere prints (D-SINK-23's bare shape)",
+   "text": "http://host?password=P4SSW0RD",
+   "host": "host",
+   "mustNotAppear": [
+    "P4SSW0RD",
+    "password"
+   ]
+  },
+  {
+   "why": "R32a': a '[' in the authority that never closes -- there is no host to print and nothing of the literal prints either (the model says [url], the helper [redacted])",
    "text": "open http://[2001:db8::5 now",
    "host": "",
    "mustNotAppear": [
@@ -276,7 +427,7 @@
    ]
   },
   {
-   "why": "R32a: a bracketed host at the end of a sentence; the model keeps the literal, the helper keeps the ']' (it used to strip it as sentence punctuation and show no host) and puts the '.' back",
+   "why": "R32a': a bracketed host at the end of a sentence; the model keeps the literal, the helper keeps the ']' (it used to strip it as sentence punctuation and show no host) and puts the '.' back",
    "text": "x http://[2001:db8::5]. y",
    "host": "2001:db8::5",
    "mustNotAppear": [
@@ -285,7 +436,7 @@
    ]
   },
   {
-   "why": "R32a: a ';' after the host ends it in free text -- a parameter never prints (free text on purpose: a display sink reads the RFC host, and RFC 3986's reg-name admits ';' and '=', so this shape is not a display vector)",
+   "why": "R32a': a ';' after the host ends it in free text -- a parameter never prints (free text on purpose: a display sink reads the RFC host, and RFC 3986's reg-name admits ';' and '=', so this shape is not a display vector)",
    "text": "fetch http://h.example.test;sid=P4SSW0RD failed",
    "host": "h.example.test",
    "mustNotAppear": [
@@ -294,16 +445,25 @@
    ]
   },
   {
-   "why": "R32a: '=' ends the printed segment, so a key=value whose VALUE holds the last '@' prints the value's tail only up to the next delimiter and never its neighbour",
+   "why": "R32a': '=' ends the printed host in free text, so a key=value authority never prints its value or its neighbour (free text on purpose: a display sink reads the RFC reg-name, which admits '=', D-SINK-30)",
+   "text": "fetch http://h.example.test=P4SSW0RD&x=1/y failed",
+   "host": "h.example.test",
+   "mustNotAppear": [
+    "P4SSW0RD",
+    "x=1"
+   ]
+  },
+  {
+   "why": "R32a': a query whose VALUE holds an '@' and a '=' is query, never a host",
    "text": "http://h.example.test?token=a@b.example.test=P4SSW0RD&x=1",
-   "host": "b.example.test",
+   "host": "h.example.test",
    "mustNotAppear": [
     "P4SSW0RD",
     "token",
     "x=1",
-    "a@"
-   ],
-   "rfcHost": "h.example.test"
+    "a@",
+    "b.example.test"
+   ]
   }
  ]
 }

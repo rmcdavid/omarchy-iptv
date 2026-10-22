@@ -339,20 +339,68 @@ function cutQueryAndFragment(text) {
 // %2F, `?` as %3F, `#` as %23). A bracketed literal and a dotted name are
 // hosts and draw no warning; `http://nas:8000/files/me@home/x` warns too,
 // which is the warning's cost: a sentence, not a refusal.
-var WARN_AT_AFTER_AUTHORITY = "The host before the first / has no dot and an @ follows it. If that is a password holding /, ? or #, write them as %2F, %3F and %23."
+//
+// R32a' (D-SINK-29, 2026-10-22): that question -- "is this dotless RFC host
+// a username, with the real host after a later `@`?" -- is ONE predicate,
+// `urlHostWithheld`, computed from the typed text and independently of
+// validation, and it has three customers: the form's warning below (a value
+// that validates), the form's `invalid` error (a value that does not: the
+// `#` typo reads as port `pa` and is refused, and the refusal now carries
+// the encoding sentence, so the user who typed the ruling's own example is
+// told how to fix it), and the FREE-TEXT redactors (`redactUrls`, the
+// helper's `redact_urls`), which WITHHOLD the host when it holds rather
+// than print the username (D-SINK-28) or cross the `/` to the next `@`
+// (D-SINK-29, a password tail). The helper mirrors it as `host_withheld`.
+var ENCODE_SENTENCE = "If a password holds /, ? or #, write them as %2F, %3F and %23."
+var WARN_AT_AFTER_AUTHORITY = "The host before the first / has no dot and an @ follows it. " + ENCODE_SENTENCE
+// The token a free-text redactor prints in place of a withheld host. Owned
+// here; the helper's HOST_WITHHELD is its mirror and the shared redaction
+// fixture holds both to it.
+var HOST_WITHHELD = "[host withheld]"
 
+// R32a'. The RFC authority of the text after one `scheme://` and what a
+// free-text redactor prints for it: `host` is what follows the authority's
+// LAST `@` (D-SINK-1: the userinfo ends there), cut at the authority's end
+// (the first `/`, `?`, `#` or whitespace) and at the first `:` (a port),
+// `;`, `=` or `&` (a parameter delimiter, so a neighbouring parameter never
+// prints, D-SINK-23); a bracketed literal is the host up to its `]`, or
+// nothing. `withheld` is the predicate: the host is not bracketed, has no
+// dot, and an `@` follows the authority before whitespace. Every scan is one
+// index walk or one single-class search; nothing here is retried.
+// The helper's `run_host_parts` is the mirror.
+function runHostParts(body) {
+  var s = str(body)
+  var sp = s.search(/\s/)
+  if (sp !== -1) s = s.substring(0, sp)
+  var cut = s.search(/[\/?#]/)
+  var authority = cut === -1 ? s : s.substring(0, cut)
+  var rest = cut === -1 ? "" : s.substring(cut)
+  var hostport = authority.substring(authority.lastIndexOf("@") + 1)
+  if (hostport.charAt(0) === "[") {
+    var close = hostport.indexOf("]")
+    return { host: close === -1 ? "" : hostport.substring(0, close + 1), withheld: false }
+  }
+  var end = hostport.search(/[:;=&]/)
+  var host = end === -1 ? hostport : hostport.substring(0, end)
+  return { host: host, withheld: host !== "" && host.indexOf(".") === -1 && rest.indexOf("@") !== -1 }
+}
+
+// R32a': the predicate alone, over a whole URL (or any text holding one).
+function urlHostWithheld(text) {
+  var s = str(text)
+  var j = s.indexOf("://")
+  return j !== -1 && runHostParts(s.substring(j + 3)).withheld
+}
+
+// The form's warning for a value that VALIDATES as http(s): the predicate
+// over the TYPED text, not the normalized URL (validateSourceUrl drops the
+// fragment, and `http://user:2024#ab@host.test` is the `#` typo). A value
+// that does not validate draws the error line instead, and that line
+// carries the encoding sentence when the predicate holds (validateSourceUrl).
 function sourceUrlWarning(text) {
   var v = validateSourceUrl(text)
   if (!v.ok || v.kind !== "http") return ""
-  var host = str(v.host)
-  if (host === "" || host.charAt(0) === "[" || host.indexOf(".") !== -1) return ""
-  // The TYPED text, not the normalized URL: validateSourceUrl drops the
-  // fragment, and `http://user:2024#ab@host.test` is the `#` typo.
-  var typed = sanitizeInput(text, MAX_SOURCE_URL + 1)
-  var body = typed.substring(typed.indexOf("://") + 3)
-  var cut = body.search(/[\/?#]/)
-  if (cut === -1) return ""
-  return body.indexOf("@", cut) === -1 ? "" : WARN_AT_AFTER_AUTHORITY
+  return urlHostWithheld(sanitizeInput(text, MAX_SOURCE_URL + 1)) ? WARN_AT_AFTER_AUTHORITY : ""
 }
 
 // The form's warning line: the first URL field (playlist, EPG, Xtream server)
@@ -388,6 +436,15 @@ function validateSourceUrl(text, opts) {
     return pass("file", path, "")
   }
   var s = sanitizeInput(text, MAX_SOURCE_URL + 1)
+  // R32a': an `invalid` refusal of a value that reads as a dotless host with
+  // a later `@` -- `http://myuser:pa#ss@cdn.test/x`, port `pa` -- says how
+  // to encode the password, so the typo the warning exists for is told on
+  // the error line that wins over it (the recheck's P2 on lane-bounds-s2).
+  function invalid() {
+    var r = fail("invalid")
+    if (urlHostWithheld(s)) r.message = r.message + ". " + ENCODE_SENTENCE
+    return r
+  }
   if (s === "") return field === "epg" ? pass("", "", "") : fail("empty")
   if (s.length > MAX_SOURCE_URL) return fail("too_long")
   if (s.indexOf("//") === 0) return fail("scheme")
@@ -401,23 +458,23 @@ function validateSourceUrl(text, opts) {
   var scheme = m[1].toLowerCase()
   var rest = m[2]
   if (scheme === "file") {
-    if (rest.indexOf("//") !== 0) return fail("invalid")
+    if (rest.indexOf("//") !== 0) return invalid()
     var after = cutQueryAndFragment(rest.substring(2))
     var slash = after.indexOf("/")
-    if (slash === -1) return fail("invalid")
+    if (slash === -1) return invalid()
     var decoded
-    try { decoded = decodeURIComponent(after.substring(slash)) } catch (e) { return fail("invalid") }
-    if (decoded.charAt(0) !== "/") return fail("invalid")
+    try { decoded = decodeURIComponent(after.substring(slash)) } catch (e) { return invalid() }
+    if (decoded.charAt(0) !== "/") return invalid()
     return filePath(decoded)
   }
   if (scheme !== "http" && scheme !== "https") return fail("scheme")
-  if (rest.indexOf("//") !== 0) return fail("invalid")
-  if (/\s/.test(rest)) return fail("invalid")
+  if (rest.indexOf("//") !== 0) return invalid()
+  if (/\s/.test(rest)) return invalid()
   var body = rest.substring(2)
   var cut = body.search(/[\/?#]/)
   var authority = cut === -1 ? body : body.substring(0, cut)
   var tail = cut === -1 ? "" : body.substring(cut)
-  if (authority.indexOf("\\") !== -1 || ZERO_WIDTH_RE.test(authority)) return fail("invalid")
+  if (authority.indexOf("\\") !== -1 || ZERO_WIDTH_RE.test(authority)) return invalid()
   var userinfo = ""
   var hostport = authority
   var at = authority.lastIndexOf("@")
@@ -429,26 +486,26 @@ function validateSourceUrl(text, opts) {
   var port = ""
   if (hostport.charAt(0) === "[") {
     var close = hostport.indexOf("]")
-    if (close === -1) return fail("invalid")
+    if (close === -1) return invalid()
     host = hostport.substring(0, close + 1)
-    if (!isIpv6Literal(host)) return fail("invalid")
+    if (!isIpv6Literal(host)) return invalid()
     var afterHost = hostport.substring(close + 1)
     if (afterHost !== "") {
-      if (afterHost.charAt(0) !== ":") return fail("invalid")
+      if (afterHost.charAt(0) !== ":") return invalid()
       port = afterHost.substring(1)
     }
   } else {
     var colon = hostport.lastIndexOf(":")
     host = colon === -1 ? hostport : hostport.substring(0, colon)
     port = colon === -1 ? "" : hostport.substring(colon + 1)
-    if (/[:\[\]]/.test(host)) return fail("invalid")
+    if (/[:\[\]]/.test(host)) return invalid()
   }
-  if (host === "") return fail("invalid")
+  if (host === "") return invalid()
   host = host.toLowerCase()
   if (port !== "") {
-    if (!/^[0-9]+$/.test(port)) return fail("invalid")
+    if (!/^[0-9]+$/.test(port)) return invalid()
     port = port.replace(/^0+(?=[0-9])/, "")
-    if (Number(port) > 65535) return fail("invalid")
+    if (Number(port) > 65535) return invalid()
   }
   if ((scheme === "http" && port === "80") || (scheme === "https" && port === "443")) port = ""
   var hash = tail.indexOf("#")
@@ -728,17 +785,45 @@ function maskQuery(query) {
 // `output`, never secrets) and the fragment; scheme, host, port, path and
 // query keys stay. Paths and anything that is not a URL come back unchanged,
 // so `maskUrl(v) === v` means "nothing to mask" (no eye button, Ctrl+R no-op).
+//
+// D-PERF-11 (R30g, 2026-10-22). This was one pattern,
+// `^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^\/?#]*)([^?#]*)(\?[^#]*)?(#.*)?$`,
+// whose second and third groups are two unbounded runs over OVERLAPPING
+// classes with nothing between them that the first could not take: when the
+// tail failed -- and it fails exactly when a line terminator follows the
+// `#`, because `.` stops there and `$` is the end of the text -- the engine
+// retried every split of the authority and the path, about k*k/2 steps for
+// k characters of user text. The three index walks below are the same
+// parse: the authority ends at the first `/`, `?` or `#`, the path at the
+// first `?` or `#`, the query at the first `#`, and a fragment holding a line
+// terminator is the one shape the old pattern did not match, so that text
+// comes back unchanged as it always did. Held equal to the old pattern by
+// an oracle in the node suite (dev branch) over the fixtures and seeded
+// ordinary URLs with line breaks before and after a `#`.
 function maskUrl(url) {
   var text = str(url)
-  var m = text.match(/^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^\/?#]*)([^?#]*)(\?[^#]*)?(#.*)?$/)
+  var m = text.match(/^([A-Za-z][A-Za-z0-9+.-]*):\/\//)
   if (!m) return text
   if (m[1].toLowerCase() === "file") return text
-  var authority = m[2]
+  var body = text.substring(m[0].length)
+  var hash = body.indexOf("#")
+  if (hash !== -1 && /[\n\r\u2028\u2029]/.test(body.substring(hash))) return text
+  var cut = body.search(/[\/?#]/)
+  var authority = cut === -1 ? body : body.substring(0, cut)
+  var rest = cut === -1 ? "" : body.substring(cut)
   var at = authority.lastIndexOf("@")
   if (at !== -1) authority = MASK + "@" + authority.substring(at + 1)
-  var query = m[4] !== undefined ? "?" + maskQuery(m[4].substring(1)) : ""
-  var fragment = m[5] !== undefined ? "#" + MASK : ""
-  return m[1] + "://" + authority + m[3] + query + fragment
+  var q = rest.search(/[?#]/)
+  var path = q === -1 ? rest : rest.substring(0, q)
+  var after = q === -1 ? "" : rest.substring(q)
+  var query = ""
+  if (after.charAt(0) === "?") {
+    var h = after.indexOf("#")
+    query = "?" + maskQuery((h === -1 ? after : after.substring(0, h)).substring(1))
+    after = h === -1 ? "" : after.substring(h)
+  }
+  var fragment = after.charAt(0) === "#" ? "#" + MASK : ""
+  return m[1] + "://" + authority + path + query + fragment
 }
 
 // ---- Xtream Codes (ARCHITECTURE-SOURCES 3.4 / D10, UX-SOURCES 1.8, 5.4)
@@ -765,7 +850,15 @@ function xtreamUrls(server, username, password) {
   if (srv.length > MAX_XTREAM_SERVER) return fail("server_too_long", "server")
   if (!/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(srv)) return fail("server_scheme", "server")
   var v = validateSourceUrl(srv)
-  if (!v.ok) return fail(v.code === "scheme" ? "server_scheme" : "invalid", "server")
+  if (!v.ok) {
+    if (v.code === "scheme") return fail("server_scheme", "server")
+    // R32a': the validator's own `invalid` sentence, which carries the
+    // encoding advice when the server reads as a dotless host with a later
+    // `@` (`http://myuser:pa#ss@cdn.test`); the same text otherwise.
+    var bad = fail("invalid", "server")
+    bad.message = v.message
+    return bad
+  }
   if (v.kind !== "http") return fail("server_scheme", "server")
   var m = v.url.match(/^(https?:\/\/[^\/?#@]+)\/?$/)
   // The validator drops a fragment from the normalized URL; on a server it
@@ -1053,7 +1146,8 @@ export {
   trimEdgeSpace, codePoints, codePointLength, capCodePoints, sanitizeTyping,
   lowerFirst, sourceErrorMessage, sourceReason, PERSIST_FAILURE_REASONS,
   persistFailureMessage, refusalMessage, ZERO_WIDTH_RE, IPV6_LITERAL_RE,
-  isIpv6Literal, cutQueryAndFragment, WARN_AT_AFTER_AUTHORITY,
+  isIpv6Literal, cutQueryAndFragment, ENCODE_SENTENCE,
+  WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts, urlHostWithheld,
   sourceUrlWarning, formWarningLine, looksLikeHost, validateSourceUrl,
   normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST,
   epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE, epgOriginNotice, isUrlField,

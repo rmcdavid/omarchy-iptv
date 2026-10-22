@@ -939,5 +939,75 @@
   "key": "67d394e8",
   "warn": false,
   "note": "R32a: a dotless LAN host WITH userinfo and no later at-sign -- the only '@' is the userinfo delimiter inside the authority, so no warning (the warning looks after the authority)"
+ },
+ {
+  "input": "http://myuser:pa#ss@cdn.test/x",
+  "ok": false,
+  "code": "invalid",
+  "warn": true,
+  "note": "R32a' (D-SINK-28, the recheck's P2): the ruling's own example reads as host `myuser`, port `pa`, which is not a port -- refused as invalid, and because the predicate holds (dotless host, later '@') the refusal carries the encoding sentence"
+ },
+ {
+  "input": "http://myuser:pa?ss@cdn.test/x",
+  "ok": false,
+  "code": "invalid",
+  "warn": true,
+  "note": "R32a': the same with '?' in the password; invalid (port `pa`) with the encoding sentence"
+ },
+ {
+  "input": "http://myuser:pa/ss@cdn.test/x",
+  "ok": false,
+  "code": "invalid",
+  "warn": true,
+  "note": "R32a': the same with '/' in the password; invalid (port `pa`) with the encoding sentence"
+ },
+ {
+  "input": "http://myuser:pa#ss@cdn.test/x",
+  "ok": false,
+  "code": "invalid",
+  "warn": true,
+  "origin": "cli",
+  "note": "R32a': the CLI reads it the same way"
+ },
+ {
+  "input": "http://h.test:pa/me@x.test/y",
+  "ok": false,
+  "code": "invalid",
+  "warn": false,
+  "note": "R32a': a DOTTED host with a bad port and a later '@' is plain invalid -- no encoding sentence, the predicate needs a dotless host"
+ },
+ {
+  "input": "http://nas:pa/list.m3u",
+  "ok": false,
+  "code": "invalid",
+  "warn": false,
+  "note": "R32a': a dotless host with a bad port and NO later '@' is plain invalid"
+ },
+ {
+  "input": "http://[2001:db8::1:x/me@mail.test",
+  "ok": false,
+  "code": "invalid",
+  "warn": false,
+  "note": "R32a': a bracket literal never carries the sentence"
+ },
+ {
+  "input": "http://nas:8080?u=me@b.test",
+  "ok": true,
+  "kind": "http",
+  "url": "http://nas:8080/?u=me@b.test",
+  "host": "nas",
+  "key": "2c5dc3c7",
+  "warn": true,
+  "note": "R32a': a dotless host whose later '@' sits in a pathless query warns (the free-text redactors withhold it)"
+ },
+ {
+  "input": "http://u:p@nas:8080/me@x",
+  "ok": true,
+  "kind": "http",
+  "url": "http://u:p@nas:8080/me@x",
+  "host": "nas",
+  "key": "f5284733",
+  "warn": true,
+  "note": "R32a': a dotless host with userinfo AND a later '@' warns"
  }
 ]

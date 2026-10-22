@@ -3848,12 +3848,15 @@ checkCall("D-SINK-1: sourceLabel and hostOf obey the authority rule too, on ever
     return (v.displayMustNotAppear || v.mustNotAppear).some(function (frag) { return label.indexOf(frag) >= 0 || host.indexOf(frag) >= 0 })
   }).map(function (v) { return v.why + " -> " + Model.sourceLabel(v.text) })]
 }, [true, []])
-checkCall("R32a: the vectors where the free-text host and the RFC host differ are present, and each names both", function () {
+checkCall("R32a': the vectors where the free-text host and the RFC host differ are present, each names both, and the free-text side is always the withheld token -- never a host after a later at-sign", function () {
   const split = redactionVectors.vectors.filter(function (v) { return v.rfcHost !== undefined })
-  return [split.length >= 6, split.filter(function (v) { return v.rfcHost === v.host }).length,
+  return [split.length >= 8, split.filter(function (v) { return v.host !== Model.HOST_WITHHELD }).map(function (v) { return v.text }),
           split.some(function (v) { return /^http:\/\/user:2024\//.test(v.text) }),
-          split.some(function (v) { return /playlist\/me@/.test(v.text) })]
-}, [true, 0, true, true])
+          split.some(function (v) { return /pa#ss@/.test(v.text) }),
+          split.some(function (v) { return /nas:8000\/files\/me@/.test(v.text) }),
+          // D-SINK-29's two shapes are NOT split: the host prints in both readings.
+          redactionVectors.vectors.filter(function (v) { return /P4@SSW0RD|password=p@ssw0rd/.test(v.text) }).map(function (v) { return [v.rfcHost === undefined, v.host] })]
+}, [true, [], true, true, true, [[true, "prov.example.test"], [true, "host.example.test"]]])
 checkCall("D-SINK-1: the doubled-at URL reads the same host through all three spellings", function () {
   const u = "http://user:p@ss@host.example.test/live"
   return [Model.sourceLabel(u), Model.hostOf(u), Model.redactUrls(u),
@@ -3868,20 +3871,32 @@ checkCall("D-SINK-1: the doubled-at URL reads the same host through all three sp
 // literal to its `]` or the run up to the first `/`, `?`, `#`, `:`, `&`, `=`
 // or `;`, and nothing else of the run survives. So this still pins the
 // linear scan to a pattern, character for character; what the pattern SAYS
-// moved on purpose (R32a, 2026-10-21): an at-sign anywhere in the run ends
-// the userinfo, so a password holding an unencoded `/`, `?` or `#` never
-// leaves its username in the host position (D-SINK-28), and a `&`, `=` or
-// `;` ends the host so a neighbouring query parameter never prints
-// (D-SINK-23). It is the thing this change is measured against: "the cost is
-// linear" is worth nothing unless "the answer is what the rule says" is
-// checked at the same time, and the only honest way to check that is to run
-// a second, independent statement of the rule. Deliberately a copy rather
-// than an import -- the shipping file must not carry a second redactor for a
-// test's benefit, and a copy that drifts is caught the moment a vector
-// disagrees.
+// moved on purpose, twice. R32a (2026-10-21) ran the userinfo to the last
+// at-sign of the RUN, which printed a password TAIL for an at-sign inside a
+// path credential (D-SINK-29, never shipped). R32a' (2026-10-22) is the RFC
+// authority again -- it ends at the first `/`, `?`, `#` or whitespace, its
+// userinfo at the LAST `@` within it -- with the host cut at `:`, `;`, `=`
+// or `&` so a neighbouring parameter never prints (D-SINK-23), and WITHHELD
+// as the one token `[host withheld]` when it has no dot and an `@` follows
+// the authority, so a password holding an unencoded `/`, `?` or `#` never
+// leaves its username in the host position (D-SINK-28). It is the thing this
+// change is measured against: "the cost is linear" is worth nothing unless
+// "the answer is what the rule says" is checked at the same time, and the
+// only honest way to check that is to run a second, independent statement
+// of the rule. Deliberately a copy rather than an import -- the shipping
+// file must not carry a second redactor for a test's benefit, and a copy
+// that drifts is caught the moment a vector disagrees.
 function redactUrlsAsShipped(text) {
   return String(text === undefined || text === null ? "" : text)
-    .replace(/[a-z][a-z0-9+.-]*:\/\/(?:[^\s]*@)?(\[[^\s\]]*\]|(?!\[)[^\/\s?#:@&=;]*|)[^\s]*/gi, function (all, host) {
+    .replace(/[a-z][a-z0-9+.-]*:\/\/([^\s]*)/gi, function (all, run) {
+      const m = run.match(/^([^\/?#]*)([\s\S]*)$/)
+      const hostport = m[1].replace(/^[\s\S]*@/, "")
+      if (hostport.charAt(0) === "[") {
+        const lit = hostport.match(/^\[[^\]]*\]/)
+        return lit ? lit[0] : "[url]"
+      }
+      const host = hostport.replace(/[:;=&][\s\S]*$/, "")
+      if (host !== "" && host.indexOf(".") === -1 && m[2].indexOf("@") !== -1) return "[host withheld]"
       return host !== "" ? host : "[url]"
     })
 }
@@ -3960,13 +3975,16 @@ function redactUrlsBeforeDSink23(text) {
     // the rule 14 shape this whole file is about.
     return [edges.length > 18000, bad]
   }, [true, []])
-  checkCall("R32a (D-SINK-23, D-SINK-28): the base pattern and the rule disagree ONLY where an at-sign follows a `/` in the run, a `&`, `=` or `;` sits in the base's host, or the host is bracketed", function () {
+  checkCall("R32a' (D-SINK-23, D-SINK-28, D-SINK-29): the base pattern and the rule disagree ONLY where an at-sign follows a `?` or `#` before any `/`, a `&`, `=` or `;` sits in the base's host, the host is bracketed, or a dotless host has an at-sign after its authority", function () {
     // Every disagreement must carry, inside some URL run (the text after a
-    // `://` up to whitespace), an `@` after a `/` (the userinfo now runs to
-    // the LAST `@` of the run), a `&`, `=` or `;` inside what the base read
-    // as the host, or a `[` right after the userinfo. Anything else that
-    // differs is a change this round did not mean to make.
-    const explained = s => /:\/\/[^\s]*\/[^\s]*@|:\/\/(?:[^\/\s]*@)?[^\/\s?#:@]*[&=;]|:\/\/(?:[^\s]*@)?\[/.test(s)
+    // `://` up to whitespace), an `@` after a `?` or `#` and before any `/`
+    // (the base's userinfo search crossed into a pathless query), a `&`, `=`
+    // or `;` inside what the base read as the host, a `[` right after the
+    // userinfo, or a dotless host followed by the authority's end and a
+    // later `@` (withheld). An `@` after a `/` alone is NOT a disagreement
+    // any more: the RFC authority never crosses a `/` (D-SINK-29). Anything
+    // else that differs is a change this round did not mean to make.
+    const explained = s => /:\/\/[^\/\s]*[?#][^\/\s]*@|:\/\/(?:[^\/\s]*@)?[^\/\s?#:@]*[&=;]|:\/\/(?:[^\/?#\s]*@)?\[|:\/\/(?:[^\/?#\s]*@)?[^\/?#\s.:;=&@\[]+(?:[:;=&][^\/?#\s]*)?[\/?#][^\s]*@/.test(s)
     let differ = 0
     const unexplained = []
     for (let i = 0; i < edges.length; i++) {
@@ -5801,10 +5819,23 @@ for (const c of fixture) {
   const name = "fixture " + JSON.stringify(c.input.length > 48 ? c.input.slice(0, 45) + "..." : c.input) + (c.origin ? " [" + c.origin + "]" : "") + (c.note ? " (" + c.note + ")" : "")
   if (c.ok) check(name, [r.ok, r.kind, r.url, r.host, Model.sourceKey(r.url)], [true, c.kind, c.url, c.host, c.key])
   else check(name, [r.ok, r.code], [false, c.code])
-  // R32a: the form's warning is JS-only (the helper has no form), so the
-  // fixture's `warn` is read here and by the QML spec, not by python.
-  if (c.warn !== undefined) check(name + " -- warns: " + c.warn, Model.sourceUrlWarning(c.input) !== "", c.warn)
+  // R32a': `warn` is the ONE predicate (urlHostWithheld: a dotless RFC host
+  // with an at-sign after its authority), which the python mirror runs as
+  // host_withheld over this same fixture. For a value that validates it is
+  // the form's warning line; for an `invalid` one it is the encoding
+  // sentence appended to the error (the recheck's P2: the ruling's own
+  // example, port `pa`, used to get the bare refusal and no advice).
+  if (c.warn !== undefined) {
+    check(name + " -- predicate: " + c.warn, Model.urlHostWithheld(c.input), c.warn)
+    if (c.ok) check(name + " -- warns: " + c.warn, Model.sourceUrlWarning(c.input) !== "", c.warn)
+    else check(name + " -- the refusal carries the encoding sentence: " + c.warn,
+               [r.message.indexOf(Model.ENCODE_SENTENCE) !== -1, r.message.indexOf("Invalid URL") === 0, Model.sourceUrlWarning(c.input)], [c.warn, true, ""])
+  }
 }
+check("R32a': the fixture carries the ruling's own typo example as an INVALID value with the predicate, in all three spellings, and dotted or at-sign-less invalid values without it", [
+  fixture.filter(c => !c.ok && c.warn === true).map(c => c.input).sort(),
+  fixture.filter(c => !c.ok && c.warn === false).length >= 3
+], [["http://myuser:pa#ss@cdn.test/x", "http://myuser:pa#ss@cdn.test/x", "http://myuser:pa/ss@cdn.test/x", "http://myuser:pa?ss@cdn.test/x"], true])
 check("R32a: the fixture carries the typo shapes that warn and the Xtream and WebDAV shapes that do not", [
   fixture.filter(c => c.warn === true).length >= 7,
   fixture.filter(c => c.warn === false).length >= 12,
@@ -14408,8 +14439,8 @@ checkCall("R32a (D-SINK-25): the typo shape READS the RFC way in every display s
   const u = "http://user:2024/ab@host.test/list.m3u"
   const v = Model.validateSourceUrl(u)
   return [v.ok, v.host, v.url, Model.deriveLabel(u), Model.hostOf(u), Model.sourceLabel(u),
-          Model.sourceUrlWarning(u) === Model.WARN_AT_AFTER_AUTHORITY, Model.redactUrls(u)]
-}, [true, "user", "http://user:2024/ab@host.test/list.m3u", "user:2024", "user", "http://user", true, "host.test"])
+          Model.sourceUrlWarning(u) === Model.WARN_AT_AFTER_AUTHORITY, Model.redactUrls(u) === Model.HOST_WITHHELD]
+}, [true, "user", "http://user:2024/ab@host.test/list.m3u", "user:2024", "user", "http://user", true, true])
 checkCall("R32a: sourceUrlWarning keys on a dotless RFC host with an at-sign after the authority, reads the typed text (a fragment counts), and is silent for a dotted or bracketed host, an encoded password, a file, an empty or invalid value", () =>
   ["http://user:2024/ab@host.test/list.m3u", "http://u:1234?x@host.test/get.php", "http://user:2024#ab@host.test/list.m3u",
    "http://user:/ab@host.test/x", "http://nas:8000/files/me@home/list.m3u", "http://localhost/me@x",
@@ -14434,6 +14465,119 @@ checkCall("R32a: the warning is advice -- validateUrlForm still accepts the typo
   return [r.ok, r.error, r.host, r.playlistUrl]
 }, [true, null, "user", "http://user:2024/ab@host.test/list.m3u"])
 
+// ---- R32a' (D-SINK-29, 2026-10-22): the free-text redactors use the RFC ----
+// authority and WITHHOLD a dotless host with a later at-sign; the predicate is
+// one function with three customers (the warning, the invalid error, the
+// redactors); and the SINK PATH is pinned, not only the function.
+checkCall("R32a' (D-SINK-29, the P1): an at-sign inside a PATH or QUERY credential never moves the printed host -- the RFC authority stops at the first `/`, `?` or `#`, so the host prints and no tail of the credential does", () =>
+  ["Failed to open http://prov.test/live/U5ER/P4@SSW0RD/1.ts.", "playlist: http://host.test:25461/get.php?username=me@mail.test&password=p@ssw0rd&type=m3u_plus",
+   "http://host.test/get.php?username=me@mail.test&password=p@ssw0rd", "http://h.test?u=me@b.test&p=SECRET", "http://h.test#u=me@b.test", "http://host.test:25461/playlist/me@mail.test/pw/m3u_plus"]
+    .map(Model.redactUrls),
+  ["Failed to open prov.test", "playlist: host.test", "host.test", "h.test", "h.test", "host.test"])
+checkCall("R32a' (D-SINK-28): a dotless RFC host with an at-sign after the authority is WITHHELD as the one token -- never the username, never the host after the later at-sign; a bracketed, dotted or at-sign-less host prints; `localhost` gets no exemption", () =>
+  ["Failed to open http://myuser:pa#ss@cdn.test/x.", "http://myuser:pa?ss@cdn.test/x", "http://myuser:pa/ss@cdn.test/x", "http://user:2024/ab@host.test/list.m3u",
+   "http://nas:8000/files/me@home/x", "http://localhost:8080/me@mail.test/x", "http://nas:8080?u=me@b.test", "http://u:p@nas:8080/me@x",
+   "http://u:p@nas/x", "http://host?password=x", "http://[2001:db8::7]/live/me@mail.test/1.ts", "http://h.test;sid=SECRET", "http://a@b@c@h.test/me@x"]
+    .map(Model.redactUrls),
+  ["Failed to open " + Model.HOST_WITHHELD, Model.HOST_WITHHELD, Model.HOST_WITHHELD, Model.HOST_WITHHELD,
+   Model.HOST_WITHHELD, Model.HOST_WITHHELD, Model.HOST_WITHHELD, Model.HOST_WITHHELD,
+   "nas", "host", "[2001:db8::7]", "h.test", "h.test"])
+check("R32a': the withheld token is one fixed word with no URL characters a redactor could be fooled by, and it is what the helper's HOST_WITHHELD mirrors (the shared fixture holds both)", [Model.HOST_WITHHELD, /^\[[a-z ]+\]$/.test(Model.HOST_WITHHELD)], ["[host withheld]", true])
+checkCall("R32a': urlHostWithheld is the ONE predicate, computed independently of validation -- it holds on the ruling's own invalid example (port `pa`), on the valid typo shape and on a LAN name, and not on a dotted host, a bracketed literal, a userinfo-only at-sign, a value with no `://`, or an empty value", () =>
+  ["http://myuser:pa#ss@cdn.test/x", "http://myuser:pa?ss@cdn.test/x", "http://myuser:pa/ss@cdn.test/x", "http://user:2024/ab@host.test/list.m3u", "http://nas:8000/files/me@home/x",
+   "http://localhost/me@x", "http://user:2024#ab@host.test", "http://u:p@nas:8080/me@x", "http://nas:8080?u=me@b.test", "see http://nas/me@x now",
+   "http://h.test:pa/me@x.test/y", "http://[2001:db8::1]:8080/me@mail.test", "http://[2001:db8::1:x/me@mail.test", "http://u:p@nas", "http://u:p@nas/x?a=1#f", "http://host.test:25461/playlist/me@mail.test/pw/m3u_plus",
+   "http://nas", "http://nas/x", "nas/me@x", "", null, "http://h .test/me@x", "http:///me@x", "http://:8080/me@x"]
+    .map(Model.urlHostWithheld),
+  [true, true, true, true, true, true, true, true, true, true,
+   false, false, false, false, false, false, false, false, false, false, false, false, false, false])
+checkCall("R32a' (the recheck's P2): the INVALID refusal of a value with the predicate carries the encoding sentence after the invalid-URL sentence -- for the playlist, the EPG field and the Xtream server -- and the warning line stays empty for it; a plain invalid value gets the bare refusal", () => {
+  const typo = "http://myuser:pa#ss@cdn.test/x"
+  const pv = Model.validateSourceUrl(typo), ev = Model.validateSourceUrl(typo, { kind: "epg" }), plain = Model.validateSourceUrl("http://h.test:pa/me@x.test/y")
+  const form = Model.validateUrlForm({ label: "", playlist: typo, epg: "" }, [], "")
+  const xt = Model.xtreamUrls("http://myuser:pa#ss@cdn.test", "u", "p")
+  const tail = ". " + Model.ENCODE_SENTENCE
+  return [pv.ok, pv.code, pv.message === Model.sourceErrorMessage("invalid") + tail, ev.message === Model.sourceErrorMessage("invalid", { field: "epg" }) + tail,
+          form.ok, form.error.field, form.error.message === pv.message, xt.ok, xt.field, xt.message === pv.message,
+          plain.message === Model.sourceErrorMessage("invalid"), Model.sourceUrlWarning(typo), Model.formWarningLine({ kind: "url", values: { label: "", playlist: typo, epg: "" } }),
+          /%2F/.test(Model.ENCODE_SENTENCE) && /%3F/.test(Model.ENCODE_SENTENCE) && /%23/.test(Model.ENCODE_SENTENCE), Model.WARN_AT_AFTER_AUTHORITY.indexOf(Model.ENCODE_SENTENCE) !== -1,
+          /:\/\//.test(pv.message), pv.message.length < 160]
+}, [false, "invalid", true, true, false, "playlist", true, false, "server", true, true, "", "", true, true, false, true])
+checkCall("R32a' (D-SINK-29), THE SINK PATH: a play refusal whose error text carries the P1's shape reaches the `play failed:` journal line through Service.handleControlResult with the host and no tail of the credential", () => {
+  const H = require("./service-harness.js")
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+  h.root.playerUp = true
+  h.root.nowPlaying = { id: "t:x", name: "X", group: "", launchedFrom: "", since: 1 }
+  h.root.previousPlaying = null
+  h.warnings.length = 0
+  h.root.controlKind = "play"
+  h.root.handleControlResult(JSON.stringify({ ok: false, kind: "play", error: { code: "load_failed",
+    message: "Failed to open http://prov.test/live/U5ER/P4@SSW0RD/1.ts and http://myuser:pa#ss@cdn.test/x." } }) + "\n")
+  const lines = h.warnings.filter(w => /play failed:/.test(w))
+  return [lines.length, lines[0], h.root.lastError, lines.concat([h.root.lastError]).some(l => /SSW0RD|ssw0rd|U5ER|myuser|pa#ss|cdn\.test/.test(l))]
+}, [1, "omarchy-iptv: play failed: Failed to open prov.test and " + Model.HOST_WITHHELD, "Failed to open prov.test and " + Model.HOST_WITHHELD, false])
+checkCall("R32a' (D-SINK-29), THE SINK PATH, the notification: the stream-failure toast Service.raiseStreamFailure raises carries the host and no tail of the credential, whether the reason arrives redacted by the helper (the shipping shape) or raw", () => {
+  const H = require("./service-harness.js")
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const run = reason => {
+    const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+    h.detached.length = 0
+    h.root.raiseStreamFailure({ id: "t:x", name: "X" }, reason)
+    const argv = h.detached.filter(a => a.join(" ").indexOf("did not play") !== -1)
+    return [argv.length, argv[0] ? argv[0][argv[0].length - 1] : "", argv.some(a => /SSW0RD|ssw0rd|U5ER|myuser|pa#ss/.test(a.join(" ")))]
+  }
+  return [run("Failed to open http://prov.test/live/U5ER/P4@SSW0RD/1.ts."), run("Failed to open http://myuser:pa#ss@cdn.test/x.")]
+}, [[1, "\u201cX\u201d did not play" + Model.SEP + "Failed to open prov.test", false], [1, "\u201cX\u201d did not play" + Model.SEP + "Failed to open " + Model.HOST_WITHHELD, false]])
+
+// ---- D-PERF-11 (R30g): maskUrl without the two adjacent runs ----
+//
+// The pattern as it shipped, kept here and ONLY here as the oracle. Its
+// `([^\/?#]*)([^?#]*)` are two unbounded runs over overlapping classes with
+// nothing between them, retried from every split when the tail failed --
+// and the tail fails exactly when a line terminator follows the `#`. Short
+// ordinary strings only, by the input rule.
+function maskUrlAsShipped(url) {
+  const MASK = "****"
+  const text = String(url === undefined || url === null ? "" : url)
+  const m = text.match(/^([A-Za-z][A-Za-z0-9+.-]*):\/\/([^\/?#]*)([^?#]*)(\?[^#]*)?(#.*)?$/)
+  if (!m) return text
+  if (m[1].toLowerCase() === "file") return text
+  let authority = m[2]
+  const at = authority.lastIndexOf("@")
+  if (at !== -1) authority = MASK + "@" + authority.substring(at + 1)
+  const maskQuery = q => q.split("&").map(part => {
+    const eq = part.indexOf("=")
+    if (eq === -1) return part
+    const name = part.substring(0, eq)
+    return ["type", "output"].indexOf(name.toLowerCase()) !== -1 ? part : name + "=" + MASK
+  }).join("&")
+  const query = m[4] !== undefined ? "?" + maskQuery(m[4].substring(1)) : ""
+  const fragment = m[5] !== undefined ? "#" + MASK : ""
+  return m[1] + "://" + authority + m[3] + query + fragment
+}
+checkCall("D-PERF-11: maskUrl's index walks answer exactly what the old two-run pattern answered, over the fixtures and seeded ordinary URLs with line breaks before and after a `#`", () => {
+  const corpus = fixture.map(c => c.input).concat(redactionVectors.vectors.map(v => v.text))
+  const parts = ["http://", "https://", "file://", "HTTP://", "ftp://", "", "u:p@", "u@p@", "h.test", "nas", "[::1]", ":8080", "/", "/a/b", "?", "?x=1", "&type=m3u", "&password=p", "=", "#", "#f", "\n", "\r", "\u2028", "\u2029", " ", "@", "\u00a0", "a"]
+  let x = 7
+  for (let seed = 0; seed < 1500; seed++) {
+    let u = ""
+    const n = 1 + (seed % 9)
+    for (let i = 0; i < n; i++) { x = (x * 1103515245 + 12345) & 0x7fffffff; u += parts[x % parts.length] }
+    corpus.push(u)
+    corpus.push("http://u:p@h.test/a#f" + u)
+    corpus.push("http://u:p@h.test/" + u + "#" + u)
+    corpus.push("http://u:p@h.test/" + u + "#f")
+  }
+  const bad = corpus.filter(u => Model.maskUrl(u) !== maskUrlAsShipped(u)).slice(0, 4).map(u => JSON.stringify(u))
+  const withBreakAfterHash = corpus.filter(u => /#[\s\S]*[\n\r\u2028\u2029]/.test(u) && /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(u)).length
+  const withBreakBeforeHash = corpus.filter(u => /^[A-Za-z][A-Za-z0-9+.-]*:\/\/[^#]*[\n\r\u2028\u2029][^#]*#[^\n\r\u2028\u2029]*$/.test(u)).length
+  return [corpus.length > 4500, withBreakAfterHash > 100, withBreakBeforeHash > 20, bad]
+}, [true, true, true, []])
+check("D-PERF-11: a fragment holding a line terminator is the one shape the old pattern did not match, and that text still comes back unchanged; one before the `#` masks as before", [
+  Model.maskUrl("http://u:p@h.test/a#fr\nag"), Model.maskUrl("http://u:p@h.test/a#f\u2028"), Model.maskUrl("http://u:p@h.test/a\nb?x=1#f"), Model.maskUrl("http://u:p@h.test/a\nb?x=1")
+], ["http://u:p@h.test/a#fr\nag", "http://u:p@h.test/a#f\u2028", "http://****@h.test/a\nb?x=****#****", "http://****@h.test/a\nb?x=****"])
+
 // ---- D-SINK-24: a refused mpvArgs token reaches the journal by its NAME, redacted ----
 checkCall("D-SINK-24 (R32b): mpvRejectedLine names a refused option and prints the word <token> for anything else -- never a value, never a bare token", () => {
   const r = Model.splitMpvArgs("--ytdl=yes --stream-lavf-o=http_proxy=http://user:pw@proxy.example.test:3128 --http-proxy http://user:pw@proxy.example.test --vo=gpu")
@@ -14446,9 +14590,13 @@ checkCall("D-SINK-24 (R32b): the recheck's shapes -- a bearer value, a basic-aut
   return [lines, lines.some(l => /SECRET|dXNl|user|pw@|3128|rm/.test(l))]
 }, [["omarchy-iptv: ignoring mpvArgs tokens: <token> <token>", "omarchy-iptv: ignoring mpvArgs tokens: <token> <token>", "omarchy-iptv: ignoring mpvArgs tokens: <token>",
      "omarchy-iptv: ignoring mpvArgs tokens: <token>", "omarchy-iptv: ignoring mpvArgs tokens: <token> <token> <token> <token>"], false])
-checkCall("D-SINK-24 (R32b): mpvRejectedName is the text before `=` for a `--` token, the whole `--` token without one, and <token> otherwise", () =>
-  ["--stream-lavf-o=http_proxy=x", "--no-tls-verify", "--a://u:p@h", "-x", "x=y", "", "--"].map(Model.mpvRejectedName),
-  ["--stream-lavf-o", "--no-tls-verify", "--a://u:p@h", "<token>", "<token>", "<token>", "--"])
+checkCall("D-SINK-24 (R32b'): mpvRejectedName is the text before `=` ONLY when that name is option-shaped (`^--[a-z0-9][a-z0-9-]*$`), and <token> otherwise -- a token refused BECAUSE its name is not option-shaped is exactly the one whose name can carry anything", () =>
+  ["--stream-lavf-o=http_proxy=x", "--no-tls-verify", "--a://u:p@h", "-x", "x=y", "", "--", "--u:pw@h=1", "--Authorization:Bearer-SECRET=1", "--Profile=x", "--a b=1", "--x=", "--9x", "---x"].map(Model.mpvRejectedName),
+  ["--stream-lavf-o", "--no-tls-verify", "<token>", "<token>", "<token>", "<token>", "<token>", "<token>", "<token>", "<token>", "<token>", "--x", "--9x", "<token>"])
+checkCall("D-SINK-24 (R32b'): the recheck's `--u:pw@h=1` shape through splitMpvArgs and the line -- R32b printed `--u:pw@h`", () => {
+  const line = Model.mpvRejectedLine(Model.splitMpvArgs("--u:pw@h=1 --Authorization:Bearer-SECRET=1 --vo=gpu").rejected)
+  return [line, /pw|SECRET|Bearer|Authorization/.test(line)]
+}, ["omarchy-iptv: ignoring mpvArgs tokens: <token> <token>", false])
 checkCall("D-SINK-24: Service.issuePlayerSession's journal line (the harness's console keeps every argument, as the real one does) carries no credential", () => {
   const H = require("./service-harness.js")
   const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")

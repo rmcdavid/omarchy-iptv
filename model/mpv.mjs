@@ -168,12 +168,18 @@ function mpvRejectedLine(rejected) {
   return "omarchy-iptv: ignoring mpvArgs tokens: " + redactUrls(names.join(" "))
 }
 
-// R32b: what a refused token is journaled as.
+// R32b' (D-SINK-24, 2026-10-22): what a refused token is journaled as. Its
+// NAME, the text before `=`, only when that name is option-shaped,
+// `^--[a-z0-9][a-z0-9-]*$` (MPV_ARG_RE's name half); else the fixed word
+// `<token>`. R32b printed the name of any `--` token, and a token refused
+// BECAUSE its name is not option-shaped is exactly the one whose name can
+// carry anything: `--u:pw@h=1` printed `--u:pw@h`. The helper's `dropped
+// mpvArg` line is the same rule through its MPV_ARG_RE.
 function mpvRejectedName(token) {
   var t = str(token)
-  if (t.indexOf("--") !== 0) return "<token>"
   var eq = t.indexOf("=")
-  return eq === -1 ? t : t.substring(0, eq)
+  var name = eq === -1 ? t : t.substring(0, eq)
+  return /^--[a-z0-9][a-z0-9-]*$/.test(name) ? name : "<token>"
 }
 
 // Per-channel HTTP headers as mpv argv items. `-append` list form so header

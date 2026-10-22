@@ -191,7 +191,18 @@ class ValidateSourceUrlTest(unittest.TestCase):
                     self.assertEqual(helper.source_cache_key(case["url"]), case["key"], repr(case["input"][:60]))
             else:
                 self.check(case["input"], False, case["code"], "", "", origin)
+            # R32a' (2026-10-22): `warn` is the ONE predicate (a dotless RFC
+            # host with an '@' after its authority), which the model computes
+            # as urlHostWithheld for the form's warning and its invalid
+            # error, and this helper as host_withheld for the free-text
+            # redactors and the nameless-channel fallback. Both mirrors run
+            # it over this fixture.
+            if "warn" in case:
+                self.assertEqual(helper.host_withheld(case["input"]), case["warn"], repr(case["input"][:60]))
         self.assertEqual(origins, {"form", "cli"})
+        self.assertGreaterEqual(sum(1 for c in cases if c.get("warn") is True and not c["ok"]), 3)
+        self.assertGreaterEqual(sum(1 for c in cases if c.get("warn") is True and c["ok"]), 7)
+        self.assertGreaterEqual(sum(1 for c in cases if c.get("warn") is False), 15)
 
     def test_tilde_depends_on_origin(self):
         # SR11: the CLI path keeps accepting ~ (verbatim; the reader expands

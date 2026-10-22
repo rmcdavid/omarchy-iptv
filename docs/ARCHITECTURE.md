@@ -790,12 +790,17 @@ local used everywhere the argument was; `playlist` with neither is a
 service cannot switch on a usage exit. `--url` stays for a human running the
 helper by hand, in their own shell and their own argv. Redaction is
 unchanged: the helper prints neither the variable nor any URL beyond scheme
-and host -- where, in FREE TEXT, "host" is the segment after the LAST `@`
-of the run (ruling R32a, 2026-10-21; `run_host` in the helper,
-`Model.redactUrls` in the model), never the RFC host, because the RFC host
-of a password holding an unencoded `/`, `?` or `#` is the username
-(D-SINK-28). A display sink and validation read the RFC host. Both rules,
-the accepted side of the free-text one and the shared fixture are in
+and host -- where "host" is the RFC host in every sink (ruling R32a',
+2026-10-22; `run_host_parts` in the helper, `Model.runHostParts` in the
+model): the authority ends at the first `/`, `?`, `#` or whitespace, its
+userinfo at the last `@` within it, and a FREE-TEXT sink cuts the host at
+the first `:`, `;`, `=` or `&` and WITHHOLDS it, as the one token
+`[host withheld]`, when it has no dot and an `@` follows the authority --
+because the RFC host of a password holding an unencoded `/`, `?` or `#` is
+the username (D-SINK-28), and a scan that crossed the `/` to the run's last
+`@` printed a password tail instead (D-SINK-29, round 3, never shipped). A
+display sink and validation read the RFC host unconditionally. Both rules,
+the cost of the withholding and the shared fixture are in
 `ARCHITECTURE-SOURCES.md` 3.1.
 
 Why environ is the route. `/proc/<pid>/cmdline` is readable by every uid on

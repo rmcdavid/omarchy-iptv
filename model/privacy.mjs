@@ -27,7 +27,8 @@ import {
   rowDetail, rowAccessibleName
 } from "./contrast.mjs"
 import {
-  validateSourceUrl, resolveEpgUrl, sourceKey
+  HOST_WITHHELD, runHostParts, urlHostWithheld, validateSourceUrl,
+  resolveEpgUrl, sourceKey
 } from "./sources.mjs"
 import {
   removeSource, entryWith
@@ -442,50 +443,39 @@ function redactUrls(text) {
     }
     var end = j + 3                    // the old `[^\s]*` tail
     while (end < n && !isSpaceAt(s, end)) end++
-    // R32a (D-SINK-23, D-SINK-28; the free-text rule, 2026-10-21). This is a
+    // R32a' (D-SINK-29, 2026-10-22; D-SINK-23, D-SINK-28). This is a
     // FREE-TEXT redactor, not a parser: the string is an mpv error, a helper
     // line, a notification body, and the one job here is that NOTHING of a
-    // credential survives, with the host as a courtesy. So the userinfo runs
-    // to the LAST `@` of the whole run -- up to whitespace, crossing `/`, `?`
-    // and `#` -- and the host is what follows it, ended at the first `/`,
-    // `?`, `#` or `:` (a port) and at the first `&`, `=` or `;` (a query or
-    // parameter delimiter, so a NEIGHBOURING parameter never prints). Two
+    // credential survives, with the host as a courtesy. The host is the RFC
+    // one -- the authority ends at the first `/`, `?`, `#` or whitespace, its
+    // userinfo at the LAST `@` WITHIN it (D-SINK-1), and the printed host is
+    // cut at the first `:`, `;`, `=` or `&` so a neighbouring parameter never
+    // prints (D-SINK-23: `http://h.test?u=me@b.test&p=SECRET` -> `h.test`) --
+    // and it is WITHHELD, as the one token `[host withheld]`, when that host
+    // has no dot and an `@` follows the authority: a dotless "host" with a
+    // later `@` is most likely a username in front of a password holding an
+    // unencoded `/`, `?` or `#`, and printing it printed the username
+    // (`http://myuser:pa#ss@cdn.test/x` -> `myuser`, D-SINK-28). Two
     // readings were tried and withdrawn, and both are kept here as the
     // reason this one is not "tidied" back:
-    //   - the RFC authority (userinfo before the first `/`, `?` or `#`),
-    //     which is right for a parser and is what validateSourceUrl and
-    //     sourceLabel use: here it printed the USERNAME for a password that
-    //     holds an unencoded `/`, `?` or `#` (`http://myuser:pa#ss@cdn.test/x`
-    //     -> `myuser`, D-SINK-28), because a username IS the RFC host then.
     //   - the authority ended at the first `/` alone (the pattern F-SINK-11
-    //     transcribed): on a URL with no path the at-sign search ran on into
-    //     the query and `http://h.test?u=me@b.test&p=SECRET` printed
-    //     `b.test&p=SECRET`, the password with it (D-SINK-23).
-    // What this reading costs, stated rather than hidden (ARCHITECTURE-SOURCES
-    // 3.1): an `@` in a PATH or QUERY moves the printed host to the segment
-    // after it, so `http://host.test:25461/playlist/me@mail.test/pw/m3u_plus`
-    // prints `mail.test` and not `host.test` -- an over-redaction, never a
-    // credential. No port-shape or host-shape rule is applied (R32a; the
-    // round-2 port-shape reading is withdrawn): the segment after the last
-    // `@` prints whatever it is. The helper's redact_urls (run_host) is the
-    // same rule, and the shared fixture holds both to it.
-    var h0 = j + 3
-    for (var k = j + 3; k < end; k++) if (s.charCodeAt(k) === 64) h0 = k + 1
-    var h1 = h0
-    if (h0 < end && s.charCodeAt(h0) === 91) {
-      // A bracketed IPv6 host is the host up to its `]`, as urllib reads it
-      // (D-SINK-23; the scan below stopped at its first `:` and gave `[`).
-      // With no `]` in the run there is no host to show.
-      var close = s.indexOf("]", h0)
-      h1 = close !== -1 && close < end ? close + 1 : h0
-    } else {
-      while (h1 < end) {
-        var c = s.charCodeAt(h1)
-        if (c === 47 || c === 63 || c === 35 || c === 58 || c === 38 || c === 61 || c === 59) break
-        h1++
-      }
-    }
-    var host = s.substring(h0, h1)
+    //     transcribed, 0.14.3): on a URL with no path the at-sign search ran
+    //     on into the query and printed `b.test&p=SECRET`, the password with
+    //     it (D-SINK-23).
+    //   - the userinfo run to the LAST `@` of the whole run, crossing `/`
+    //     (round 3, lane-bounds-s2, never shipped): an `@` INSIDE a path or
+    //     query credential moved the printed "host" onto the credential, so
+    //     `http://prov.test/live/U5ER/P4@SSW0RD/1.ts` printed `SSW0RD` -- a
+    //     password tail, on mpv's error line into the journal and the
+    //     notification (D-SINK-29). The RFC authority never crosses a `/`.
+    // The cost, stated (ARCHITECTURE-SOURCES 3.1): a dotless intranet URL
+    // with a path `@` (`http://nas:8000/files/me@home/x`) withholds `nas`;
+    // `localhost` gets no exemption. The predicate is Model.urlHostWithheld,
+    // the same one the Sources form warns with, and the helper's
+    // redact_urls (run_host) is the same rule; the shared fixture holds both
+    // to it. runHostParts is one pass over the run.
+    var parts = runHostParts(s.substring(j + 3, end))
+    var host = parts.withheld ? HOST_WITHHELD : parts.host
     out += s.substring(copied, p) + (host !== "" ? host : "[url]")
     copied = end
     resume = end

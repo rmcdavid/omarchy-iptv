@@ -413,42 +413,76 @@ again inside `validateSourceUrl`.
    `http://host.test:25461/playlist/me@mail.test/pw/m3u_plus` resolves,
    normalizes and labels as `host.test:25461` exactly as before -- and the
    typo shape labels as its username, which is why the FORM WARNS rather
-   than guesses: `Model.sourceUrlWarning(text)` answers one sentence
-   (`WARN_AT_AFTER_AUTHORITY`: "The host before the first / has no dot and an
-   @ follows it. If that is a password holding /, ? or #, write them as %2F,
-   %3F and %23.") when the value validates as http(s), its RFC host has no
-   dot and is not a bracketed literal, and an `@` follows the authority in
-   the TYPED text (a fragment counts: normalization drops it). The form's
-   result line renders `Model.formWarningLine(form)` over the playlist, then
-   the EPG field, or the Xtream server, while the value warrants it
-   (UX-SOURCES 4.3, 5.4); submit proceeds. A LAN name draws it too
-   (`http://nas:8000/files/me@home/x`): a sentence, not a refusal. The shared
-   fixture carries the readings for both mirrors and a `warn` flag the node
-   suite and the QML spec read (the helper has no form).
+   than guesses. **R32a' (2026-10-22, round 4)**: the question "is this
+   dotless RFC host a username, with the real host after a later `@`?" is
+   ONE predicate, `Model.urlHostWithheld(text)` (the helper's
+   `host_withheld`): the RFC host, read from the TYPED text (a fragment
+   counts: normalization drops it), is not a bracketed literal and has no
+   dot, and an `@` follows the authority before any whitespace. It is
+   computed independently of validation and has three customers:
+   - a value that VALIDATES as http(s) draws the warning line,
+     `Model.sourceUrlWarning(text)` -> `WARN_AT_AFTER_AUTHORITY` ("The host
+     before the first / has no dot and an @ follows it. If a password holds
+     /, ? or #, write them as %2F, %3F and %23."), rendered by
+     `Model.formWarningLine(form)` over the playlist, then the EPG field, or
+     the Xtream server, while the value warrants it (UX-SOURCES 4.3, 5.4);
+     submit proceeds. A LAN name draws it too (`http://nas:8000/files/me@home/x`),
+     and `localhost` gets no exemption: a sentence, not a refusal;
+   - a value that does NOT validate and holds the predicate -- the ruling's
+     own example `http://myuser:pa#ss@cdn.test/x`, which reads as port `pa`
+     and is refused `invalid` -- gets the refusal WITH the encoding sentence
+     appended (`Model.ENCODE_SENTENCE`: "Invalid URL - check the host. If a
+     password holds /, ? or #, write them as %2F, %3F and %23."), for the
+     playlist, the EPG field and the Xtream server alike, so the user who
+     typed the typo the warning exists for is told how to fix it on the
+     error line that wins over the warning (lane-bounds-s2's recheck P2);
+   - the free-text redactors WITHHOLD the host when it holds (below).
+   The shared fixture carries the readings for both mirrors and a `warn`
+   flag that is the predicate: node reads it as the warning (a value that
+   validates) or the appended sentence (one that does not), the QML spec the
+   same, and the python mirror runs `host_withheld` over every flagged case.
 
-   **Free-text redaction under R32a** (`Model.redactUrls`, the helper's
-   `redact_urls` through `run_host`; the display rule above does NOT apply).
-   A free-text sink -- an mpv error, a helper line, a notification body --
-   must never carry a credential, and the host is a courtesy. There the
-   userinfo runs to the LAST `@` of the whole run (up to whitespace, crossing
-   `/`, `?` and `#`), and the host is what follows it, ended at the first
-   `/`, `?`, `#` or `:` and at the first `&`, `=` or `;` (a neighbouring
-   query parameter never prints, D-SINK-23); a bracketed literal is the host
-   up to its `]`, or nothing. So `http://myuser:pa#ss@cdn.test/x` redacts
-   to `cdn.test` -- the RFC reading printed `myuser`, the username, and that
-   was D-SINK-28 -- and `http://host?password=x` to `host`. No port-shape
-   or host-shape rule is applied. THE ACCEPTED SIDE, stated: an `@` in a
-   path or query moves the printed host to the segment after it, so the
-   Xtream link above redacts to `mail.test` and not `host.test`, a WebDAV
-   link to the email's domain, and an `@` INSIDE a path or query credential
-   prints that credential's tail up to the next delimiter
-   (`/live/U5ER/P4@SS/1.ts` prints `SS`; the base printed `prov.test` there).
-   That last shape is pinned in the fixture so it is seen rather than
-   discovered, and the lane report raises printing nothing for an `@` after
-   the authority as the alternative. One shared fixture,
+   **Free-text redaction under R32a'** (`Model.redactUrls` through
+   `Model.runHostParts`, the helper's `redact_urls` through
+   `run_host_parts`). A free-text sink -- an mpv error, a helper line, a
+   notification body -- must never carry a credential, and the host is a
+   courtesy. The host is the RFC one, exactly as validation reads it: the
+   authority ends at the first `/`, `?`, `#` or whitespace, its userinfo at
+   the LAST `@` within it (D-SINK-1), and the printed host is cut at the
+   first `:` (a port), `;`, `=` or `&` (a parameter delimiter, so a
+   neighbouring query parameter never prints, D-SINK-23:
+   `http://h.test?u=me@b.test&p=SECRET` prints `h.test`); a bracketed
+   literal is the host up to its `]`, or nothing. When the predicate above
+   holds -- a dotless host with an `@` after the authority -- the host is
+   WITHHELD and the one token `[host withheld]` prints in its place
+   (`Model.HOST_WITHHELD`, the helper's `HOST_WITHHELD`; the model prints the
+   bare token as it prints a bare host, the helper `scheme://[host withheld]`
+   as it prints `scheme://host`). So `http://myuser:pa#ss@cdn.test/x` redacts
+   to `[host withheld]`: never `myuser`, the username the RFC reading prints
+   (D-SINK-28, round 2), and never `cdn.test`, the host after the later `@`
+   that round 3's last-`@`-of-the-run scan printed -- because that same scan,
+   on an `@` INSIDE a path or query credential, printed a password TAIL where
+   0.14.3 printed the host: `http://prov.test/live/U5ER/P4@SSW0RD/1.ts` ->
+   `SSW0RD`, `get.php?username=me@mail.test&password=p@ssw0rd` -> `ssw0rd`,
+   on mpv's error line into the journal and the notification (D-SINK-29, the
+   lead's ruling misreading the base; never shipped). Under R32a' both print
+   the host, `prov.test` and `host.test`, and an Xtream
+   `/playlist/<email>/<pass>/m3u_plus` link prints its server, not the
+   email's domain. THE COST, stated: a dotless intranet URL with a path `@`
+   (`http://nas:8000/files/me@home/x`) and a `localhost` URL with one are
+   withheld, in free text only; the Sources row, the label and validation
+   still show `nas` and `localhost`. The nameless-channel fallback in the
+   helper's play path (`fallback_channel_name`, D-SINK-31) uses the same
+   predicate and names such a channel `Stream`. One shared fixture,
    `tests/fixtures/redaction-vectors.json`, holds both mirrors to the
-   free-text rule (`host`) and the display sinks to the RFC host (`rfcHost`,
-   `displayMustNotAppear`) where the two differ.
+   free-text rule (`host`, the token included) and the display sinks to the
+   RFC host (`rfcHost`, `displayMustNotAppear`) where the two differ -- and
+   under R32a' they differ ONLY by withholding, which the node suite asserts.
+   The sink path is pinned as well as the function: the helper's player
+   suite drives mpv's error line for the P1's URL into the `player start`
+   reply's reason, and the node suite drives that reason shape through
+   `Service.handleControlResult` to the `play failed:` journal line and
+   through `Service.raiseStreamFailure` to the notification argv.
 6. Anything else (`ftp:`, `data:`, `javascript:`, `rtsp:`) -> `unsupported_scheme`.
 
 Vectors (in `tests/fixtures/source-urls.json`, consumed by node, the QML

@@ -302,7 +302,18 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-79}
 # 2026-10-22, lane-bounds-s3: the merge of lane-bounds-s2 (2813) into the
 # bounds integration (2702); the larger side's floor taken at the merge, the
 # merged tree's own count re-levelled below once the lane's work is in.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2813}
+# 2813 / 2816 -> 2878 on 2026-10-22 (lane-bounds-s3, R32a', R32b', D-PERF-11,
+# D-SINK-29/31): the merge of lane-bounds-s2 into the integration counts 2816;
+# the lane adds the redaction fixture's restated vectors (38, the P1's two
+# shapes, the withheld shapes and the stated cost), the source-urls fixture's
+# predicate checks over every `warn` case and its four invalid typo cases
+# (the sentence on the refusal), the R32a' pins (the P1, the withheld token,
+# the one predicate, the error sentence, the two SINK-PATH pins through
+# Service.handleControlResult and Service.raiseStreamFailure), the R32b'
+# name checks and the D-PERF-11 maskUrl oracle. Red on the merge commit
+# 0c59eab: see the lane report's counts; the rest on a mutation of the
+# shipping decision.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2878}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -464,7 +475,13 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2813}
 # existing tests the shared fixtures turn red there.
 # 2026-10-22, lane-bounds-s3: the merge of lane-bounds-s2 (1409) into the
 # bounds integration (1443); the larger side's floor taken at the merge.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1443}
+# 1443 / 1462 -> 1466 on 2026-10-22 (lane-bounds-s3): the merge counts 1462;
+# test_redaction_cost (+1: the one predicate, host_withheld, and its token),
+# test_player (+3: the P1's URL through the stub mpv's error line into the
+# `player start` reply's reason, D-SINK-31's `Stream` fallback through
+# player_target, R32b''s non-option-shaped names as <token>). The R32a'
+# host test and test_e of the regex guard are changed in place.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1466}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

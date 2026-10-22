@@ -545,6 +545,31 @@ class StartTest(PlayerTestCase):
         self.assertIn("--force-media-title=IPTV", argv)
         self.assertEqual(argv, helper.mpv_launch_argv(self.sock, [])[1:])
 
+    def test_first_load_failure_names_the_host_and_never_a_path_credentials_tail(self):
+        """R32a' (D-SINK-29), the SINK PATH: mpv's error-level log line names
+        the stream URL, and the one this provider's Xtream path carries holds
+        a password with an `@` in it. The reason the reply carries is what
+        redact_urls makes of that line, inside python, before the shell sees
+        it: the host, and no tail of the credential (round 3's scan printed
+        `ssw0rd` here, never shipped). The node suite carries the same reason
+        shape on into the shell's journal line and notification."""
+        playlist = os.path.join(self.dir, "p1.m3u")
+        pathlib.Path(playlist).write_text(
+            "#EXTM3U\n#EXTINF:-1 tvg-id=\"p1.uk\",P1\nhttp://prov.test/live/U5ER/P4@SSW0RD/1.ts\n"
+            "#EXTINF:-1 tvg-id=\"p2.uk\",P2\nhttp://myuser:pa%2Fss@cdn.test/x\n", encoding="utf-8")
+        cache = os.path.join(self.dir, "cache-p1")
+        code, _, _, stderr = run("playlist", "--url", playlist, "--cache-dir", cache)
+        self.assertEqual(code, 0, stderr)
+        self.env(STUB_MPV_LOAD="fail")
+        code, payload, stdout, stderr = run("player", "start", "--socket", self.sock, "--cache-dir", cache,
+                                            "--id", "t:p1.uk", "--seq", "1", "--ipc-timeout", "1",
+                                            "--lock-timeout", "1", "--spawn-timeout", "4", "--first-load-timeout", "3")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["firstLoad"]["state"], "failed")
+        self.assertEqual(payload["firstLoad"]["reason"], "Failed to open http://prov.test.")
+        for secret in ("SSW0RD", "ssw0rd", "U5ER", "P4@", "/live/"):
+            self.assertNotIn(secret, json.dumps(payload) + stdout + stderr, secret)
+
     def test_first_load_failure_is_reported_by_start_itself(self):
         # F3: a first channel that dies before any QML subscriber could exist
         # (an expired subscription, the commonest real failure) is not silent.
@@ -569,6 +594,19 @@ class StartTest(PlayerTestCase):
         # D-SINK-24 (R32b): a token that is not an option is journaled as the
         # word `<token>`, never as itself.
         self.assertEqual(payload["warnings"], ["dropped mpvArg --log-file", "dropped mpvArg --input-ipc-server", "dropped mpvArg <token>"])
+
+    def test_a_refused_token_whose_name_is_not_option_shaped_is_journaled_as_token(self):
+        """D-SINK-24 (R32b', 2026-10-22): R32b printed the name of any `--`
+        token, and a token refused BECAUSE its name is not option-shaped is
+        exactly the one whose name can carry anything: `--u:pw@h=1` printed
+        `--u:pw@h`. The name prints only when MPV_ARG_RE's name half matches."""
+        code, payload, _, stderr = self.player_start(
+            "--mpv-arg=--u:pw@h=1", "--mpv-arg=--Authorization:Bearer-SECRET=1", "--mpv-arg=--", "--mpv-arg=---x",
+            "--mpv-arg=--a://u:p@h", "--mpv-arg=--watch-later-dir=/home/x", "--mpv-arg=--watch-later-dir")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["warnings"], ["dropped mpvArg <token>"] * 5 + ["dropped mpvArg --watch-later-dir"] * 2)
+        for secret in ("pw@h", "SECRET", "Bearer", "u:p@h", "/home/x"):
+            self.assertNotIn(secret, json.dumps(payload) + stderr, secret)
 
     def test_a_refused_token_that_is_a_value_is_journaled_as_token_and_never_as_itself(self):
         """D-SINK-24 (R32b), the recheck's shapes: a bearer value, a basic-auth
@@ -667,6 +705,26 @@ class StartTest(PlayerTestCase):
         client.connect()
         self.addCleanup(client.close)
         self.assertEqual(client.command("get_property", helper.USER_DATA_STASH)["sourceKey"], key)
+
+    def test_a_nameless_channel_is_named_by_its_host_or_the_word_stream(self):
+        """D-SINK-31 (R32a'): player_target names a channel with no name by
+        url_host, and under the RFC reading a typo-shaped stream URL's host is
+        its USERNAME. The one predicate the free-text redactors withhold with
+        names it `Stream` instead; a dotted host still names it. Through
+        player_target over a cache written by the parser (a nameless row gets
+        the generated `Channel N`, so the fallback is reached through the
+        raw-URL path and through a row whose name is cleared in place)."""
+        channels = helper.load_channels(helper.cache_dir(self.cache))
+        self.assertEqual(helper.fallback_channel_name("http://myuser:pa/ss@cdn.test/x", "channel"), "Stream")
+        self.assertEqual(helper.fallback_channel_name("http://nas:8000/me@home/x", "channel"), "Stream")
+        self.assertEqual(helper.fallback_channel_name("http://u:p@cdn.test/live/me@x/1.ts", "channel"), "cdn.test")
+        self.assertEqual(helper.fallback_channel_name("http://u:p@nas/x", "channel"), "nas")
+        self.assertEqual(helper.fallback_channel_name("", "stream"), "stream")
+        target = helper.player_target("", "http://myuser:pa/ss@cdn.test/x", self.cache)
+        self.assertEqual(target["name"], "Stream")
+        target = helper.player_target("", "http://prov.test/live/U5ER/P4@SSW0RD/1.ts", self.cache)
+        self.assertEqual(target["name"], "prov.test")
+        self.assertTrue(channels)
 
     def test_unknown_channel_and_missing_cache_never_spawn(self):
         code, payload, _, _ = run("player", "start", "--socket", self.sock, "--cache-dir", self.cache,
