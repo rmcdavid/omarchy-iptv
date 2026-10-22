@@ -14747,9 +14747,17 @@ checkCall("D-SG-3: epgMapEntry reads only an OWN tvg-id of the parsed epg-now ma
   // (epgMapEntry since the merge into D-EPG-11: the store reader epgEntry
   // answers null for a plain map by E2-3, so the map reader has its own name.)
   const map = Model.parseEpgNow('{"channels":{"a":{"now":{"title":"T","start":1,"stop":2}},"__proto__":{"now":{"title":"P","start":1,"stop":2}}}}').channels
+  // The discriminating id is `__proto__` when the file does NOT carry it: a
+  // bare lookup answers Object.prototype, an object, and the typeof guard
+  // keeps it (the own-key cases above pass a bare lookup too: an own
+  // `__proto__` shadows the accessor, and `constructor` is a function). The
+  // legacy store's branch is the same seam through the shipping parser.
+  const bare = Model.parseEpgNow('{"channels":{"a":{"now":{"title":"T","start":1,"stop":2}}}}').channels
+  const legacy = Model.parseEpgNowStore('{"version":1,"channels":{"a":{"now":{"title":"T","start":1,"stop":2}}}}')
   return [Model.epgMapEntry(map, "a").now.title, Model.epgMapEntry(map, "__proto__").now.title, Model.epgMapEntry(map, "constructor"),
-          Model.epgMapEntry(map, "toString"), Model.epgMapEntry(map, ""), Model.epgMapEntry(null, "a"), Model.epgMapEntry(map, "missing")]
-}, ["T", "P", null, null, null, null, null])
+          Model.epgMapEntry(map, "toString"), Model.epgMapEntry(map, ""), Model.epgMapEntry(null, "a"), Model.epgMapEntry(map, "missing"),
+          Model.epgMapEntry(bare, "__proto__"), legacy.legacy, Model.epgEntry(legacy, "a").now.title, Model.epgEntry(legacy, "__proto__")]
+}, ["T", "P", null, null, null, null, null, null, true, "T", null])
 checkCall("D-SG-3: parseChannels and parseEpgNow keep a file's own `__proto__` key as a key, never as the meta object's prototype", () => {
   const meta = Model.parseChannels('{"channels":[],"__proto__":{"x":1},"generatedAt":5}').meta
   return [Object.getPrototypeOf(meta), Object.keys(meta).sort(), meta.x]
