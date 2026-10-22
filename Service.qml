@@ -4966,10 +4966,22 @@ Item {
   }
 
   // Section 4.4 step 7: once per start, drop orphan directories and age the
-  // EPG files of inactive sources.
+  // EPG files and logo folders of inactive sources.
   function schedulePrune() {
     if (root.pruned) return
     root.pruned = true
+    root.queuePrune()
+  }
+
+  // D-LOGO-20 (R32f): the same prune again at every source switch
+  // (onActiveCacheDirChanged, once the start-up one has been queued), so the
+  // install-wide logo bound ARCHITECTURE section 8 item 17 states -- 1.22 GiB
+  // for the active source plus 1.22 GiB for each source given logos within
+  // the day -- holds at every moment of a session and not only after a
+  // restart: a session that switched through fifty sources with logos on
+  // used to keep all fifty folders until the next start. Keys only; the
+  // helper skips a folder a running fetch holds and says so once.
+  function queuePrune() {
     var args = ["prune", "--keep"]
     var sources = root.userState.sources
     for (var i = 0; i < sources.length; i++) args.push(sources[i].key)
@@ -5195,6 +5207,12 @@ Item {
     root.clearSourceData()
     root.pendingFreshness = root.activeCacheDir !== ""
     if (root.activeCacheDir === "") root.finishSwitch()
+    // D-LOGO-20 (R32f): a source became active -- a switch, or the first
+    // source added -- so the folders of the sources left behind are aged
+    // now, not at the next start. `pruned` is set by the start-up prune
+    // (schedulePrune), which this directory's FIRST value, at start, must
+    // not double; the start-up one is queued in the same turn it is set.
+    if (root.pruned && root.activeCacheDir !== "") root.queuePrune()
   }
 
   Component.onCompleted: {

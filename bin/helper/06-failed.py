@@ -151,7 +151,46 @@ def lock_logo_dir(logo_dir: str, needed: bool) -> int | None:
         raise LogoFolderBusy() from None
     except OSError as error:
         log("logos: could not lock the logo folder (%s); this run is not exclusive" % type(error).__name__)
+    # R32f: the folder is marked when a run STARTS as well as when it ends
+    # (cmd_logos), through the descriptor, so "a day since a fetch last ran
+    # for it" (README; cache_prune, age_logo_folder) is true of a run the
+    # shell stopped with SIGTERM -- a source switch, the setting turned off,
+    # its watchdog -- which runs no `finally`. Such a run that wrote nothing
+    # kept the folder's older time and could be aged at the next prune a
+    # few hours after a fetch ran in it; erring toward deleting, but the
+    # sentence was stronger than the code (the round-2 recheck).
+    try:
+        os.utime(fd)
+    except OSError:
+        pass
     return fd
+
+
+def present_logo_names(channels: list[Any], logo_dir: str) -> list[str]:
+    """D-LOGO-23 (R32f): what a run that does NOT hold the folder's lock may
+    announce -- the cached file of every logo the playlist names that passes
+    the cached-file check as it stands (header within bounds, a PNG already
+    canonical), each as a progress line as it is found, in channel order and
+    once per URL. Read-only by construction: `canonical_logo_file` with
+    `rewrite` False never writes, nothing here unlinks, and a file that fails
+    the check is simply not named; the holder's run rewrites or sweeps it.
+    What this cannot promise, stated: the holder may unlink a file after it
+    was named here (its sweep, or its ceiling's sweep of unnamed files), and
+    the guide then logs one `Cannot open` for it until the holder's own
+    summary replaces the set."""
+    names: list[str] = []
+    seen: set[str] = set()
+    for channel in channels:
+        url = channel.get("logo") if isinstance(channel, dict) else None
+        if not isinstance(url, str) or not url or url in seen:
+            continue
+        seen.add(url)
+        name = logo_filename(url)
+        path = os.path.join(logo_dir, name)
+        if os.path.exists(path) and logo_file_within_bounds(path) and canonical_logo_file(path, rewrite=False):
+            names.append(name)
+            emit({"ok": True, "kind": "logo", "name": name})
+    return names
 
 
 def sweep_unnamed_logos(logo_dir: str, named: set[str]) -> int:
@@ -204,11 +243,20 @@ def cmd_logos(args: argparse.Namespace) -> int:
     try:
         lock = lock_logo_dir(logo_dir, survey["wouldContact"] > 0)
     except LogoFolderBusy:
-        # Counted and said, and NO `names`: the shell keeps the set it has
-        # (Model.logoSummaryNames answers null) and writes one journal line
-        # for `busy` (Model.logoSummaryNotice).
+        # D-LOGO-23 (R32f): counted and said, and the names already on disk
+        # that pass the cached-file check are ANNOUNCED, read-only -- so a
+        # shell that restarts while a fetch is still running (the case the
+        # lock exists for) draws the logos it has rather than blank rows
+        # until the next run. The first version answered no `names` at all,
+        # which kept the old shell's set and gave a new shell nothing.
+        # `busy` stays true, so the shell's one journal line stays
+        # (Model.logoSummaryNotice), and nothing is written: no rewrite of a
+        # non-canonical PNG, no sweep of a file that fails the check, no
+        # temporary swept, no folder marked. That is the holder's work.
         log("logos: another logo fetch is running for this source; this one fetched nothing")
-        emit(dict(survey, ok=True, kind="logos", action="fetch", busy=True, fetched=0))
+        names = present_logo_names(channels, logo_dir)
+        emit(dict(survey, ok=True, kind="logos", action="fetch", busy=True, fetched=0,
+                  cached=len(names), names=names))
         return 0
     # D-LOGO-15 (R30e): bounded like the playlist and epg verbs (D-M3U-1),
     # before anything is fetched, and lifted before the summary is composed
@@ -227,9 +275,10 @@ def cmd_logos(args: argparse.Namespace) -> int:
     finally:
         if lock is not None:
             # The folder's modification time is when a run for this source
-            # last ended, which `cache prune` ages the folder by (D-LOGO-17,
-            # R30a): a run that fetched nothing new still marks it. Through
-            # the descriptor, so it is the folder that was locked.
+            # last started (lock_logo_dir) or ended, which `cache prune`
+            # ages the folder by (D-LOGO-17, R30a): a run that fetched
+            # nothing new still marks it. Through the descriptor, so it is
+            # the folder that was locked.
             try:
                 os.utime(lock)
             except OSError:
@@ -298,6 +347,14 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
         # review found the comment beside the sweep claiming the branch was
         # not bounded by the cap, which was true only while fetched < 5000.
         url = channel.get("logo") if isinstance(channel, dict) else None
+        # `seen` is the run's memory of every URL it has looked at, failed
+        # ones included (D-LOGO-22, R32f): a URL two channels name is
+        # fetched once a run, and one that timed out, was refused or
+        # answered 404 is not tried again WITHIN the run. Across runs it is
+        # tried again, as before: nothing records a failure on disk, so a
+        # host that was down is given another chance at the next refresh,
+        # and the run's own deadline (LOGO_RUN_DEADLINE) bounds what a dead
+        # host costs a run. Stated rather than changed.
         if not isinstance(url, str) or not url or url in seen:
             continue
         seen.add(url)

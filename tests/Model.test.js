@@ -12461,6 +12461,40 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     }, { one: [true, true, 1], two: [false, false, 2], three: [true, true, 3], afterRestart: true })
   }
 
+  // ---- D-LOGO-20 (R32f): `cache prune` at every source switch, not only at start ----
+  //
+  // The start-up prune (schedulePrune, once) and the switch prune
+  // (onActiveCacheDirChanged -> queuePrune) both run here as cache jobs:
+  // the harness fires the directory's change handler from its own text
+  // whenever the binding moves, and records every cache command. Red on
+  // lane-bounds-int e8d2b35 (one prune, at start, however many switches).
+  checkCall("D-LOGO-20: the start-up prune runs once; every switch queues a prune naming the NEW active key and keeping every source; the same key again is no switch", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), "lag")
+    const prunes = () => h.cacheRuns.filter(c => c.indexOf("prune") !== -1)
+    const actives = () => prunes().map(c => c[c.indexOf("--active") + 1])
+    const atStart = actives()
+    sw(h, KB); h.drain()
+    const afterOne = actives()
+    sw(h, KA); h.drain()
+    const afterTwo = actives()
+    h.root.switchSource(KA); h.drain()
+    const sameKey = actives()
+    const keeps = prunes().every(c => c[0] === "python3" && c.indexOf("--keep") !== -1 && c.indexOf(KA) !== -1 && c.indexOf(KB) !== -1 && c.indexOf("--epg-max-age") !== -1)
+    const noUrl = prunes().every(c => c.join(" ").indexOf("://") === -1)
+    return { atStart, afterOne, afterTwo, sameKey, keeps, noUrl }
+  }, { atStart: [KA], afterOne: [KA, KB], afterTwo: [KA, KB, KA], sameKey: [KA, KB, KA], keeps: true, noUrl: true })
+  checkCall("D-LOGO-20: a restart prunes once at start and again at its first switch; removing the active source (no directory) queues no prune", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), "lag")
+    const next = restart(h)
+    const actives = () => next.cacheRuns.filter(c => c.indexOf("prune") !== -1).map(c => c[c.indexOf("--active") + 1])
+    const atStart = actives()
+    sw(next, KB); next.drain()
+    const afterSwitch = actives()
+    next.root.removeSource(KB); next.drain()
+    const afterRemoval = actives()
+    return { atStart, afterSwitch, afterRemoval, activeDir: next.root.activeCacheDir === "" ? "" : "set" }
+  }, { atStart: [KA], afterSwitch: [KA, KB], afterRemoval: [KA, KB], activeDir: "" })
+
   // ---- R21e (D-SINK-19 round 11): THE MIGRATION, through Service.qml ----
   //
   // Every pin here runs the shipping functions over a 0.13.5-shaped install:
