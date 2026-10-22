@@ -3,7 +3,7 @@ import {
   SEP, SETTING_RANGES
 } from "./build.mjs"
 import {
-  str, asList
+  str, asList, keyedMap, hasOwnKey
 } from "./text.mjs"
 import {
   channelOrderOf
@@ -18,7 +18,8 @@ import {
   redactUrls, scrubUrls
 } from "./privacy.mjs"
 import {
-  MAX_SOURCES, MAX_SOURCE_URL, sanitizeInput, validateSourceUrl, sourceKey
+  MAX_SOURCES, MAX_SOURCE_URL, sanitizeInput, sanitizeUrlInput,
+  validateSourceUrl, sourceKey
 } from "./sources.mjs"
 import {
   activeKeyText
@@ -27,7 +28,15 @@ import {
 // ------------------------------------------------------------ caches
 
 function parseJsonObject(text) {
-  var raw = str(text).replace(/^\s+|\s+$/g, "")
+  // D-PERF-3 (R30g). This trimmed the WHOLE file -- channels.json at up to
+  // 64 MiB, epg-now.json, every helper reply -- with `/^\s+|\s+$/g`, which is
+  // quadratic in a whitespace run, and the helper keeps interior runs in
+  // names, groups, tvg-ids and stream URLs. JSON.parse would accept the JSON
+  // whitespace around a document by itself (space, tab, CR, LF), but NOT a
+  // byte-order mark or a no-break space, which this trim has always let a
+  // hand-edited state.json carry; so the trim stays, as the engine's own,
+  // linear in the length of the text.
+  var raw = str(text).trim()
   if (raw === "") return null
   try {
     var parsed = JSON.parse(raw)
@@ -42,9 +51,45 @@ function parseChannels(text) {
   var doc = parseJsonObject(text)
   if (!doc) return { ok: false, channels: [], meta: {}, error: "channels cache is empty or not JSON" }
   if (!Array.isArray(doc.channels)) return { ok: false, channels: [], meta: {}, error: "channels cache has no channels array" }
-  var meta = {}
-  for (var key in doc) if (key !== "channels") meta[key] = doc[key]
+  // D-SG-3: the file's own top-level keys, so null-prototype.
+  var meta = keyedMap()
+  for (var key in doc) if (key !== "channels" && hasOwnKey(doc, key)) meta[key] = doc[key]
   return { ok: true, channels: doc.channels, meta: meta, error: "" }
+}
+
+// D-PERF-4. The service's prepared-channels LRU (Service.applyChannels): a
+// parsed, prepared channels.json per entry, so a switch back to a source
+// the shell has just shown costs no parse (ARCHITECTURE-SOURCES 4.5). It was
+// keyed by the file's TEXT alone, and every helper run writes a new
+// `generatedAt`, so a refresh of the source on screen never hit: the new list
+// went in front and the old one stayed behind it, unreachable -- one source
+// in use, two prepared copies of it held for the session, until a switch to
+// a second source displaced the stale one. An entry now carries the SOURCE
+// it was read from (the cache directory), a hit needs the same source and
+// the same text, and a new entry REPLACES its own source's slot.
+function preparedLruFind(lru, text, source) {
+  var list = asList(lru)
+  var src = str(source)
+  for (var i = 0; i < list.length; i++) {
+    var e = list[i]
+    if (e && e.text === text && str(e.source) === src) return e
+  }
+  return null
+}
+
+// The LRU after `prepared` lands: it first, then the other SOURCES' entries
+// in their order, at most `size` in all. Never two entries for one source.
+function preparedLruNext(lru, prepared, size) {
+  var list = asList(lru)
+  var max = Math.max(1, Math.floor(Number(size)) || 1)
+  var src = str(prepared && prepared.source)
+  var next = [prepared]
+  for (var i = 0; i < list.length && next.length < max; i++) {
+    var e = list[i]
+    if (!e || e === prepared || str(e.source) === src) continue
+    next.push(e)
+  }
+  return next
 }
 
 // epg-now.json -> { channels: {tvgId: {now, next}}, meta }
@@ -61,8 +106,12 @@ function parseChannels(text) {
 function parseEpgNow(text) {
   var doc = parseJsonObject(text)
   if (!doc || !doc.channels || typeof doc.channels !== "object" || Array.isArray(doc.channels)) return { ok: false, channels: {}, meta: {} }
-  var meta = {}
-  for (var key in doc) if (key !== "channels") meta[key] = doc[key]
+  var meta = keyedMap()
+  for (var key in doc) if (key !== "channels" && hasOwnKey(doc, key)) meta[key] = doc[key]
+  // `channels` stays the parsed object, by reference (above): it is keyed by
+  // the provider's tvg-ids and is an ORDINARY object, so every read of it
+  // goes through Model.epgMapEntry (the store reader epgEntry reads a
+  // legacy store through it too), never `map[tvgId]` (D-SG-3).
   return { ok: true, channels: doc.channels, meta: meta }
 }
 
@@ -341,7 +390,7 @@ function statusWarnings(status) {
   var list = asList(status.warnings)
   var out = []
   for (var i = 0; i < list.length; i++) {
-    var text = redactUrls(str(list[i])).replace(/^\s+|\s+$/g, "")
+    var text = redactUrls(str(list[i])).trim()
     if (text !== "") out.push(text)
   }
   return out
@@ -511,8 +560,9 @@ function settingsFrom(entry) {
 //                   service's snapshots are taken from `settings`, which is
 //                   this; a raw published value becomes this before anything
 //                   compares it.
-//   entryInputForm  then what adoption does with it: sanitizeInput (control
-//                   characters out, the space / NBSP edges, the cap), then
+//   entryInputForm  then what adoption does with it: sanitizeUrlInput (the
+//                   leading BOM, the ASCII-whitespace / NBSP edges, the cap;
+//                   nothing inside deleted, D-SRC-63), then
 //                   validateSourceUrl as a CLI value of that kind. `form` is
 //                   the validated URL when it passes (what a record stores
 //                   and what findSourceByUrl compares) and the sanitized text
@@ -527,12 +577,17 @@ function settingsFrom(entry) {
 // Two forms are the same input exactly when their `form`s are equal
 // (sameEntryInput). Nothing here is a URL the caller did not already hold.
 function entryInputText(value) {
-  return str(value).replace(/^\s+|\s+$/g, "")
+  return str(value).trim()
 }
 
 function entryInputForm(name, value) {
-  var text = sanitizeInput(entryInputText(value), MAX_SOURCE_URL + 1)
-  if (text === "") return { text: "", ok: false, url: "", form: "" }
+  // "No input" is still judged by sanitizeInput's emptiness (R4, R18a: a
+  // value of whitespace or control characters alone is an absent key), but
+  // the value that is validated is the URL boundary's (D-SRC-63): nothing
+  // inside it deleted, so `http://u:pa<TAB>ss@h.test/x` set with
+  // `omarchy bar set` is refused as invalid rather than adopted as `pass`.
+  if (sanitizeInput(entryInputText(value), MAX_SOURCE_URL + 1) === "") return { text: "", ok: false, url: "", form: "" }
+  var text = sanitizeUrlInput(entryInputText(value), MAX_SOURCE_URL + 1)
   var v = validateSourceUrl(text, name === "epgUrl" ? { kind: "epg", origin: "cli" } : { origin: "cli" })
   var ok = v.ok === true && str(v.url) !== ""
   return { text: text, ok: ok, url: ok ? str(v.url) : "", form: ok ? str(v.url) : text }
@@ -589,7 +644,9 @@ function settingsWithOwnWrite(hostSettings, ownWrite) {
   var host = hostSettings || {}
   if (!ownWriteInForce(host, ownWrite)) return host
   var out = {}
-  for (var k in host) out[k] = host[k]
+  // D-SG-3: own keys only, never `__proto__` (the host's entry is the user's
+  // file, parsed by the host).
+  for (var k in host) if (k !== "__proto__" && hasOwnKey(host, k)) out[k] = host[k]
   for (var w in ownWrite.value) {
     if (Object.prototype.hasOwnProperty.call(ownWrite.value, w)) out[w] = ownWrite.value[w]
   }
@@ -1011,15 +1068,16 @@ function sameOwnWrite(a, b) {
   return same(ao.base, bo.base) && same(ao.value, bo.value)
 }
 export {
-  parseJsonObject, parseChannels, parseEpgNow, EPG_CHANNELS_OPEN,
-  EPG_STORE_KIND, emptyEpgStore, parseEpgNowStore, epgNowIndex,
-  parseHelperStatus, HTTP_REASONS, HELPER_PART_RE, helperDamagedReason,
-  statusReason, statusHost, statusHealthy, statusWarnings, WARNING_PREFIX,
-  warningLabel, labelWarning, labelWarnings, warningLine, footerWarning,
-  findBarEntry, settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
-  entryInputText, entryInputForm, sameEntryInput, ownWriteInForce,
-  settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
-  MAX_SEEN_INPUTS, entryInputSeen, entryInputLast, entryInputsSeenAfter,
-  entryInputNotice, ownedEntryPatch, barEntryWritable, entryFlushDisposition,
-  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, sameOwnWrite
+  parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
+  parseEpgNow, EPG_CHANNELS_OPEN, EPG_STORE_KIND, emptyEpgStore,
+  parseEpgNowStore, epgNowIndex, parseHelperStatus, HTTP_REASONS,
+  HELPER_PART_RE, helperDamagedReason, statusReason, statusHost,
+  statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel, labelWarning,
+  labelWarnings, warningLine, footerWarning, findBarEntry, settingOf,
+  boolSetting, clampInt, clampSetting, settingsFrom, entryInputText,
+  entryInputForm, sameEntryInput, ownWriteInForce, settingsWithOwnWrite,
+  ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS, MAX_SEEN_INPUTS,
+  entryInputSeen, entryInputLast, entryInputsSeenAfter, entryInputNotice,
+  ownedEntryPatch, barEntryWritable, entryFlushDisposition, owedMirrorAction,
+  ownedWriteMode, retiredInputsToKeep, sameOwnWrite
 }

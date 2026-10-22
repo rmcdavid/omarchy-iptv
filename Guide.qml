@@ -117,6 +117,8 @@ Item {
     var ch = root.rowAt(root.cursorIndex)
     if (!ch) return null
     var id = ch.tvgId !== undefined ? String(ch.tvgId) : ""
+    // D-SG-3 (lane S): never a bare `map[id]` -- the store reader answers
+    // an OWN tvg-id only, so `constructor` never finds Object.
     return { channel: ch, entry: id !== "" ? Model.epgEntry(root.epgStore, id) : null, nowSec: root.nowSec }
   }
   // What the open panel renders. Recomputed on the 30 s clock tick as well as
@@ -681,7 +683,7 @@ Item {
   // rows pay for them and a favorite toggle, a zap or the 30 s EPG tick
   // never rebuilds the list (D-LIVE-01).
   readonly property var favoriteSet: Model.favoriteSet(root.serviceReady ? root.service.userState.favorites : [])
-  readonly property var failedMap: root.serviceReady && root.service.failedAt ? root.service.failedAt : ({})
+  readonly property var failedMap: root.serviceReady && root.service.failedAt ? root.service.failedAt : Model.keyedMap()
   // D-EPG-11 (R31a): the guide-data STORE, not a map -- the file's text and
   // an index into it. A row reads its entry through Model.epgEntry(store,
   // id), one small JSON.parse per realised row per tick, and the coverage
@@ -2725,7 +2727,10 @@ Item {
       ? Model.editRangeFor(root.fieldMasked(id), value, item.cursorPosition, item.selectionStart, item.selectionEnd)
       : Model.editRangeFor(true, value, 0, 0, 0)
     var cap = Model.formCapacity(id)
-    var edit = Model.editInsert(value, range.start, range.end, Model.sanitizeInput(text, cap), cap)
+    // D-SRC-63: the boundary rule is the FIELD's. A URL field keeps what
+    // is inside the pasted text (a tab in a password is refused by the
+    // validator, never deleted into `pass`); a name field strips controls.
+    var edit = Model.editInsert(value, range.start, range.end, Model.sanitizeFieldInput(id, text, cap), cap)
     if (!edit.changed) return
     root.guide = Model.withFormValue(root.guide, id, edit.value, { typed: false })
     if (item) item.cursorPosition = edit.caret
@@ -4925,10 +4930,17 @@ Item {
               radius: root.cornerRadius
 
               readonly property bool isError: root.formError !== null
+              // R32a (D-SINK-25): the model's one warning for a URL whose
+              // RFC host has no dot and an `@` follows later -- most likely
+              // a password with an unencoded `/`, `?` or `#`. Advice, shown
+              // once per value on this line while the field holds it; it
+              // never blocks submit and the error and fetching lines win.
+              readonly property string warningText: !isError && !root.formProbing && root.form ? Model.formWarningLine(root.form) : ""
+              readonly property bool isWarning: warningText !== ""
               readonly property string lineText: {
                 if (root.formError) return String(root.formError.message)
                 if (root.formProbing && root.form) return Model.fetchingLine(root.form.probeHost, root.form.probeKind)
-                return ""
+                return warningText
               }
 
               opacity: lineText !== "" ? 1 : 0
@@ -4946,7 +4958,7 @@ Item {
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
                   textFormat: Text.PlainText
-                  text: resultLine.isError ? Model.GLYPHS.alert : Model.GLYPHS.loading
+                  text: resultLine.isError || resultLine.isWarning ? Model.GLYPHS.alert : Model.GLYPHS.loading
                   color: resultLine.isError ? root.urgent : root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.icon

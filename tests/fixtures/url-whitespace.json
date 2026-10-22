@@ -1,0 +1,270 @@
+{
+ "note": "TWO whitespace classes for two purposes (R32a''', 2026-10-22, D-SINK-36; R32a'' before it, D-SINK-32, D-SINK-33). `codePoints` is the READER's class: the union of JavaScript's \\s (as node and Qt's V4 read it), Python's \\s (str.isspace) and U+FEFF, enumerated code point by code point, which the two URL validators REFUSE (Model.validateSourceUrl through Model.isUrlSpaceAt / URL_SPACE_CODES, the helper's validate_source_url through _URL_SPACE over URL_SPACE_CHARS) so that neither engine's own notion is ever consulted. `delimiters` is the REDACTOR's class: the six ASCII whitespace characters, and nothing else, end a free-text URL's RUN and its AUTHORITY in both redactors (Model.redactUrls / runHostParts through Model.isUrlDelimiterAt / URL_DELIMITER_CODES, the helper's redact_urls / run_host_parts through _URL_TAIL_RE and _URL_DELIMITER over URL_DELIMITER_CHARS). A reader refuses, a redactor delimits: under R32a'' both redactors ended the run at the union and each mirror took the other's worse case -- the helper printed the username and the password's tail for U+FEFF where 0.14.3 printed the host (D-SINK-36). Both suites (tests/Model.test.js under 'R32a'''', tests/test_helper.py under the same name) read this file and assert, for EVERY code point of the whole Unicode range, that each mirror's two classes hold exactly these lists; each also asserts its own engine's \\s is a proper subset of the union and a proper superset of the delimiters, so a change in either engine is seen rather than absorbed. `'`, `\"`, `<` and `>` are in neither on purpose: they ended the helper's run until R32a'' (D-SINK-33) and are trailing punctuation now (tests/fixtures/redaction-vectors.json).",
+ "codePoints": [
+  {
+   "code": "U+0009",
+   "name": "CHARACTER TABULATION",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+000A",
+   "name": "LINE FEED",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+000B",
+   "name": "LINE TABULATION",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+000C",
+   "name": "FORM FEED",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+000D",
+   "name": "CARRIAGE RETURN",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+001C",
+   "name": "INFORMATION SEPARATOR FOUR",
+   "in": [
+    "python"
+   ]
+  },
+  {
+   "code": "U+001D",
+   "name": "INFORMATION SEPARATOR THREE",
+   "in": [
+    "python"
+   ]
+  },
+  {
+   "code": "U+001E",
+   "name": "INFORMATION SEPARATOR TWO",
+   "in": [
+    "python"
+   ]
+  },
+  {
+   "code": "U+001F",
+   "name": "INFORMATION SEPARATOR ONE",
+   "in": [
+    "python"
+   ]
+  },
+  {
+   "code": "U+0020",
+   "name": "SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+0085",
+   "name": "NEXT LINE",
+   "in": [
+    "python"
+   ]
+  },
+  {
+   "code": "U+00A0",
+   "name": "NO-BREAK SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+1680",
+   "name": "OGHAM SPACE MARK",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2000",
+   "name": "EN QUAD",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2001",
+   "name": "EM QUAD",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2002",
+   "name": "EN SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2003",
+   "name": "EM SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2004",
+   "name": "THREE-PER-EM SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2005",
+   "name": "FOUR-PER-EM SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2006",
+   "name": "SIX-PER-EM SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2007",
+   "name": "FIGURE SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2008",
+   "name": "PUNCTUATION SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2009",
+   "name": "THIN SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+200A",
+   "name": "HAIR SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2028",
+   "name": "LINE SEPARATOR",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2029",
+   "name": "PARAGRAPH SEPARATOR",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+202F",
+   "name": "NARROW NO-BREAK SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+205F",
+   "name": "MEDIUM MATHEMATICAL SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+3000",
+   "name": "IDEOGRAPHIC SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+FEFF",
+   "name": "ZERO WIDTH NO-BREAK SPACE (the byte-order mark)",
+   "in": [
+    "js",
+    "extra"
+   ]
+  }
+ ],
+ "jsCount": 25,
+ "pythonCount": 29,
+ "unionCount": 30,
+ "delimiters": [
+  {
+   "code": "U+0009",
+   "name": "CHARACTER TABULATION"
+  },
+  {
+   "code": "U+000A",
+   "name": "LINE FEED"
+  },
+  {
+   "code": "U+000B",
+   "name": "LINE TABULATION"
+  },
+  {
+   "code": "U+000C",
+   "name": "FORM FEED"
+  },
+  {
+   "code": "U+000D",
+   "name": "CARRIAGE RETURN"
+  },
+  {
+   "code": "U+0020",
+   "name": "SPACE"
+  }
+ ],
+ "delimiterCount": 6
+}

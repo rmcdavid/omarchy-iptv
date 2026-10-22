@@ -361,16 +361,43 @@ Constants: `STATE_VERSION = 2`, `CACHE_LAYOUT = 2`, `MAX_SOURCES = 50`,
 
 ### 3.1 `sanitizeInput(text, max)` and `validateSourceUrl(text)`
 
-`sanitizeInput(text, max)`: `str(text)` with every character in
+`sanitizeInput(text, max)`, the boundary rule for a NAME (the label, the
+Xtream username and password): `str(text)` with every character in
 `[\u0000-\u001f\u007f-\u009f]` removed (CR, LF, TAB included), leading and
 trailing ASCII space and NBSP (`\u00a0`) trimmed, then truncated to `max`
-UTF-16 units. Applied at the field boundary (paste, typing, the harness) and
-again inside `validateSourceUrl`.
+UTF-16 units. Applied at a name field's boundary (paste, submit) and inside
+`validateLabel` and `xtreamUrls` (for the username and password).
+
+`sanitizeUrlInput(text, max)`, the boundary rule for a URL (the playlist,
+the EPG, the Xtream server; **D-SRC-63, R32a''', 2026-10-22**): one leading
+byte-order mark dropped (SR15), the six ASCII whitespace characters and
+NBSP trimmed off both ENDS (a trailing newline from `wl-copy`, a
+tab-indented line), then truncated to `max` UTF-16 units -- and NOTHING
+inside the text deleted, because a URL reader REFUSES what the name rule
+deleted: `sanitizeInput` served the URL fields until R32a''' and rewrote
+them, so `http://u:pa<TAB>ss@h.test/x` validated as the password `pass`
+in both mirrors and the user learned of it only as a wrong-password
+failure, and `http://h.test/x<LF>http://evil.test/` validated as ONE url,
+`http://h.test/xhttp://evil.test/`, which nobody typed. Chosen per field
+by `Model.sanitizeFieldInput(field, text, max)` on a paste
+(`Guide.qml`'s `pasteFromProcess`) and on submit (`formSubmitValues`);
+applied inside `validateSourceUrl`, `sourceUrlWarning`, `xtreamUrls` (the
+server) and on the CLI path (`entryInputForm`, `reconcileSources`, where
+"no input" -- a value of whitespace or control characters alone, R18a --
+is still judged by `sanitizeInput`'s emptiness). `editInsert` inserts
+text as given: typed text has been through `typedText` (Qt's own
+acceptance rule, no control character ever types) and a paste through
+`sanitizeFieldInput`. The helper's `_sanitize_url_input` is the mirror.
 
 `validateSourceUrl(text)` -> `{ ok, code, message, kind, url, host }`:
 
-1. `s = sanitizeInput(text, MAX_SOURCE_URL + 1)`; `""` -> `empty`;
-   length > 2048 -> `too_long`.
+1. `s = sanitizeUrlInput(text, MAX_SOURCE_URL + 1)`; `""` -> `empty`;
+   length > 2048 -> `too_long`; any control character
+   (`[\u0000-\u001f\u007f-\u009f]`) anywhere in `s` -> `bad_url`
+   (D-SRC-63: refused, never deleted; both state readers drop a record
+   whose url holds one, so accepting it would store a source the next load
+   discards). A decoded `file:` path is checked again in step 2
+   (`file:///a%09b` decodes to a tab).
 2. `s` starts with `/` or `~` -> `kind: "file"`, `url: s` (no `~`
    expansion, no slash collapsing: the CLI and the screen store the same
    string; the helper expands `~` when it reads). A prefix of `/proc/`,
@@ -395,8 +422,154 @@ again inside `validateSourceUrl`.
    path `""` -> `/`, otherwise verbatim (no re-encoding, no dot-segment
    removal); query verbatim (order, case and encoding preserved -- provider
    tokens are case-sensitive), a bare `?` dropped; fragment dropped
-   (never sent). Whitespace anywhere in the rest -> `bad_url`.
+   (never sent). Whitespace anywhere in the rest -> `bad_url`, where
+   "whitespace" is the READER's class: the union of JS `\s`, Python `\s`
+   and U+FEFF (`Model.URL_SPACE_CODES`, the helper's `URL_SPACE_CHARS`, 30
+   code points pinned by `tests/fixtures/url-whitespace.json`), every
+   member of which now reaches this check (D-SRC-63: the boundary deletes
+   none of them), so a tab, a line break, an information separator or
+   U+0085 inside a password is `bad_url` and not a rewritten password.
    `url = scheme://[userinfo@]host[:port]path[?query]`, `host` as computed.
+   **D-SINK-25 / D-SINK-27, ruling R32a (2026-10-21, round 3).** No URL is
+   refused for an `@` after its authority, in either mirror. A password
+   holding an unencoded `/`, `?` or `#` ends the authority early, and the
+   string then READS as host = the username, port = the password's prefix:
+   `http://user:2024/ab@host.test/list.m3u` is accepted as host `user`, port
+   2024, labelled `user:2024` -- the RFC reading, which every standard parser
+   gives and which is where a fetch goes. Round 2's refusal of that shape
+   (`passwordReadAsPort`, lane-bounds-s, never shipped) also refused an
+   Xtream `/playlist/<email>/<pass>/m3u_plus` link and a WebDAV link on a
+   non-default port, both stored and working, and the helper dropped such a
+   source on the first normalize after the upgrade (D-SINK-27); it is
+   withdrawn. The display sinks (`hostPortOf`, `deriveLabel`, `sourceLabel`,
+   `hostOf`) and validation show and use the RFC host, so a stored
+   `http://host.test:25461/playlist/me@mail.test/pw/m3u_plus` resolves,
+   normalizes and labels as `host.test:25461` exactly as before -- and the
+   typo shape labels as its username, which is why the FORM WARNS rather
+   than guesses. **R32a' (2026-10-22, round 4)**: the question "is this
+   dotless RFC host a username, with the real host after a later `@`?" is
+   ONE predicate, `Model.urlHostWithheld(text)` (the helper's
+   `host_withheld`): the RFC host, read from the TYPED text (a fragment
+   counts: normalization drops it), is not a bracketed literal and has no
+   dot, and an `@` follows the authority before any URL whitespace.
+   **R32a'' (2026-10-22, round 5)** gives it a second arm, under the same
+   later-`@` condition: the authority carries a NON-NUMERIC port -- a `:`
+   after its last `@` whose text, up to the next `;`, `=` or `&`, is
+   non-empty and not all digits -- so `http://user.name:pa/ss@h.test/x`
+   (a dotted username, which the first arm cannot see, D-SINK-35) and
+   `http://me@mail.test:pa/ss@h.test/x` hold it, and so does a dotted host
+   with a bad port and a later `@` (`http://h.test:pa/me@x.test/y`), which
+   was the one invalid shape that drew the bare refusal under R32a'. A
+   numeric port is not it (`http://user.name:2024/ab@host.test/x` reads as
+   host `user.name`, port 2024, validates and prints `user.name`: the
+   residual, stated); an EMPTY port is an RFC shape (`http://user:/ab@host.test`
+   validates) and is not non-numeric; a bracketed literal is never withheld.
+   It is computed independently of validation and has three customers:
+   - a value that VALIDATES as http(s) draws the warning line,
+     `Model.sourceUrlWarning(text)` -> `WARN_AT_AFTER_AUTHORITY` ("The host
+     before the first / has no dot and an @ follows it. If a password holds
+     /, ? or #, write them as %2F, %3F and %23."), rendered by
+     `Model.formWarningLine(form)` over the playlist, then the EPG field, or
+     the Xtream server, while the value warrants it (UX-SOURCES 4.3, 5.4);
+     submit proceeds. A LAN name draws it too (`http://nas:8000/files/me@home/x`),
+     and `localhost` gets no exemption: a sentence, not a refusal;
+   - a value that does NOT validate and holds the predicate -- the ruling's
+     own example `http://myuser:pa#ss@cdn.test/x`, which reads as port `pa`
+     and is refused `invalid` -- gets the refusal WITH the encoding sentence
+     appended (`Model.ENCODE_SENTENCE`: "Invalid URL - check the host. If a
+     password holds /, ? or #, write them as %2F, %3F and %23."), for the
+     playlist, the EPG field and the Xtream server alike, so the user who
+     typed the typo the warning exists for is told how to fix it on the
+     error line that wins over the warning (lane-bounds-s2's recheck P2);
+   - the free-text redactors WITHHOLD the host when it holds (below).
+   The shared fixture carries the readings for both mirrors and a `warn`
+   flag that is the predicate: node reads it as the warning (a value that
+   validates) or the appended sentence (one that does not), the QML spec the
+   same, and the python mirror runs `host_withheld` over every flagged case.
+
+   **Free-text redaction under R32a'** (`Model.redactUrls` through
+   `Model.runHostParts`, the helper's `redact_urls` through
+   `run_host_parts`). A free-text sink -- an mpv error, a helper line, a
+   notification body -- must never carry a credential, and the host is a
+   courtesy. The host is the RFC one, exactly as validation reads it: the
+   authority ends at the first `/`, `?`, `#` or URL whitespace, its userinfo
+   at the LAST `@` within it (D-SINK-1), and the printed host is cut at the
+   first `:` (a port), `;`, `=` or `&` (a parameter delimiter, so a
+   neighbouring query parameter never prints, D-SINK-23:
+   `http://h.test?u=me@b.test&p=SECRET` prints `h.test`); a bracketed
+   literal is the host up to its `]`, or nothing. **The RUN** -- where the
+   URL stops inside the text -- and the authority end at the SAME class in
+   both mirrors, and that class is the six ASCII DELIMITERS: space, tab,
+   LF, CR, FF, VT (`Model.URL_DELIMITER_CODES` / `isUrlDelimiterAt`, the
+   helper's `URL_DELIMITER_CHARS`; **R32a''', 2026-10-22, D-SINK-36**).
+   Every other whitespace or control code point is URL text: a password
+   holding U+FEFF, NBSP, U+2028, U+0085 or U+001C..U+001F stays inside the
+   run, its authority ends at the `@`, and the HOST prints. A reader
+   refuses, a redactor delimits: the union of JS `\s`, Python `\s` and
+   U+FEFF (30 code points, `Model.URL_SPACE_CODES`, the helper's
+   `URL_SPACE_CHARS`) is what validation REFUSES, and both lists are pinned
+   by `tests/fixtures/url-whitespace.json` over the whole Unicode range in
+   both suites, each asserting its engine's `\s` sits strictly between
+   them. Until R32a'' the helper ended the run at Python `\s` plus `'"<>`
+   and the authority at Python `\s` plus U+FEFF, and the model ended its
+   run at JS `\s`: three classes, so a password holding U+FEFF printed the
+   username in the helper (D-SINK-32), and one holding `'` printed the
+   username AND the tail `'ss@prov.test/...` (D-SINK-33). R32a'' ended
+   both at the union, and each mirror then took the other's worse case: the
+   helper printed `http://myuser<U+FEFF>ss@prov.test/live/1.ts` where
+   0.14.3 printed the host (D-SINK-36) -- the wider the class that ends the
+   run, the more of a password a redactor copies through, which is why the
+   redactor's class is the narrowest one that still ends a URL at a word
+   boundary in an error line. `'`, `"`, `<` and `>` never end a run; they
+   are sentence punctuation, and both
+   mirrors strip `.,;:!?)]'"<>` off the run's end and put it back after the
+   host (a `]` is kept when the run holds a `[`), so the model prints
+   `Failed to open h.test.` where it used to drop the `.` and the helper
+   prints `'http://h.test'` for a quoted URL. When the predicate above
+   holds -- a dotless host, or a non-numeric port, with an `@` after the
+   authority -- the host is
+   WITHHELD and the one token `[host withheld]` prints in its place
+   (`Model.HOST_WITHHELD`, the helper's `HOST_WITHHELD`; the model prints the
+   bare token as it prints a bare host, the helper `scheme://[host withheld]`
+   as it prints `scheme://host`). So `http://myuser:pa#ss@cdn.test/x` redacts
+   to `[host withheld]`: never `myuser`, the username the RFC reading prints
+   (D-SINK-28, round 2), and never `cdn.test`, the host after the later `@`
+   that round 3's last-`@`-of-the-run scan printed -- because that same scan,
+   on an `@` INSIDE a path or query credential, printed a password TAIL where
+   0.14.3 printed the host: `http://prov.test/live/U5ER/P4@SSW0RD/1.ts` ->
+   `SSW0RD`, `get.php?username=me@mail.test&password=p@ssw0rd` -> `ssw0rd`,
+   on mpv's error line into the journal and the notification (D-SINK-29, the
+   lead's ruling misreading the base; never shipped). Under R32a' both print
+   the host, `prov.test` and `host.test`, and an Xtream
+   `/playlist/<email>/<pass>/m3u_plus` link prints its server, not the
+   email's domain. THE COSTS, stated: a dotless intranet URL with a path `@`
+   (`http://nas:8000/files/me@home/x`) and a `localhost` URL with one are
+   withheld, in free text only; the Sources row, the label and validation
+   still show `nas` and `localhost`. One of the six DELIMITERS inside a
+   password ends the run, so `http://myuser:pa ss@cdn.test/x` prints
+   `myuser ss@cdn.test/x` in both mirrors -- the username and the
+   password's tail -- and so does a tab, LF, CR, FF or VT in the same place
+   (D-SINK-34, accepted and confined to those six by R32a'''); U+FEFF,
+   U+0085, U+001C..U+001F, U+2028 or NBSP in the same place prints the host
+   in both mirrors (under R32a'' they split the run too, and under 0.14.3
+   each mirror split at its own `\s` and printed the host for the other's).
+   A dotted username before a digits-only password prefix prints as the
+   host (`http://user.name:2024/ab@host/x` -> `user.name`, D-SINK-35's
+   residual). The fixture pins every one of these outputs exactly (`js`,
+   `py`, `accepted`), so the cost is seen on every run rather than
+   described. The nameless-channel fallback in the
+   helper's play path (`fallback_channel_name`, D-SINK-31) uses the same
+   predicate and names such a channel `Stream`. One shared fixture,
+   `tests/fixtures/redaction-vectors.json`, holds both mirrors to the
+   free-text rule (`host`, the token included) and the display sinks to the
+   RFC host (`rfcHost`, `displayMustNotAppear`) where the two differ -- and
+   under R32a' they differ ONLY by withholding or by an accepted cost,
+   which the node suite asserts.
+   The sink path is pinned as well as the function: the helper's player
+   suite drives mpv's error line for the P1's URL into the `player start`
+   reply's reason, and the node suite drives that reason shape through
+   `Service.handleControlResult` to the `play failed:` journal line and
+   through `Service.raiseStreamFailure` to the notification argv.
 6. Anything else (`ftp:`, `data:`, `javascript:`, `rtsp:`) -> `unsupported_scheme`.
 
 Vectors (in `tests/fixtures/source-urls.json`, consumed by node, the QML
@@ -411,9 +584,13 @@ spec and `tests/test_source.py`; `expect.url` is the normalized form):
 "FILE:///srv/tv/local.m3u"                                          -> ok file "/srv/tv/local.m3u"
 "file://host/srv/tv/a%20b.m3u"                                      -> ok file "/srv/tv/a b.m3u"
 "~/tv/list.m3u"                                                     -> ok file "~/tv/list.m3u"
-"/srv/tv/local.m3u" + LF                                            -> ok file "/srv/tv/local.m3u"   (newline stripped)
-"http://h.test/a" + NUL + "b"                                       -> ok http "http://h.test/ab"    (control char stripped)
-""  /  "   "                                                        -> empty
+"/srv/tv/local.m3u" + LF                                            -> ok file "/srv/tv/local.m3u"   (a trailing line break is an edge, trimmed)
+TAB + "http://h.test/x" + CR LF                                     -> ok http "http://h.test/x"     (the six ASCII whitespace characters and NBSP are trimmed off both ends)
+"http://h.test/a" + NUL + "b"                                       -> bad_url                       (D-SRC-63: a control character INSIDE is refused, never deleted; it read "http://h.test/ab" until R32a''')
+"http://u:pa" + TAB + "ss@h.test/x"                                 -> bad_url                       (D-SRC-63: it validated as the password "pass")
+"http://h.test/x" + LF + "http://evil.test/"                        -> bad_url                       (D-SRC-63: it collapsed to ONE url, "http://h.test/xhttp://evil.test/")
+"/srv/tv/a" + TAB + "b.m3u" / "file:///srv/a%09b.m3u"               -> bad_url                       (a control character in a path, raw or decoded)
+""  /  "   "  /  LF TAB                                             -> empty
 "provider.test/list.m3u"                                            -> unsupported_scheme
 "ftp://h.test/x" / "javascript:alert(1)" / "data:text/plain,x"      -> unsupported_scheme
 "http:///x" / "http://h .test/" / "http://:80/" / "http://h.test:abc/" -> bad_url
@@ -1201,10 +1378,18 @@ edit the control's copy and the next bound write would overwrite it.
 
 ## 6. Security and privacy rules for the input surface
 
-1. Clipboard and typed text are data. `Model.sanitizeInput` strips
+1. Clipboard and typed text are data. For a NAME field (the label, the
+   Xtream username and password) `Model.sanitizeInput` strips
    `[\u0000-\u001f\u007f-\u009f]` (so a multi-line paste collapses to one
-   line), trims, and caps (URL 2,048; label 64; Xtream server 512, user and
-   password 256). `TextField.maximumLength` mirrors the caps so a 16 KB paste
+   line), trims, and caps (label 64; user and password 256). For a URL
+   field (the playlist, the EPG, the Xtream server) `Model.sanitizeUrlInput`
+   trims the six ASCII whitespace characters and NBSP off the ends, caps
+   (URL 2,048; server 512), and deletes NOTHING inside: a control character
+   or whitespace inside a URL is refused by `validateSourceUrl`, never
+   deleted into a different URL (**D-SRC-63, R32a''', 2026-10-22**: a tab
+   in a password became the password `pass`, and a two-line paste became
+   one URL nobody typed). `Model.sanitizeFieldInput` picks the rule by
+   field (3.1). `TextField.maximumLength` mirrors the caps so a 16 KB paste
    never allocates a 16 KB string in a binding. Text is `Text.PlainText`
    everywhere it is rendered (coding standard; `StyledText` stays reserved
    for the plugin's own hint strings, `Guide.qml:1281`). **[Amended

@@ -1,87 +1,839 @@
 {
-  "note": "Shared redaction vectors. CLAUDE.md: a rule implemented in both JavaScript and Python gets ONE fixture that both implementations run. Before this file existed they were pinned by two DISJOINT hand-written lists, every vector in each carrying exactly one '@' -- so D-SINK-1 (a password tail surviving into the host position when the password contains an un-encoded '@') was invisible to both. The two renderings differ on purpose: the helper emits scheme://host, Model emits the bare host. So a vector pins the PROPERTY, not the formatting: the host must appear, and no fragment listed in mustNotAppear may.",
-  "credentialsAreFake": "Every credential here is invented and every host is under the reserved .test TLD. Never put a real provider value in this file.",
-  "vectors": [
-    {
-      "why": "the ordinary case both suites already had",
-      "text": "Failed to open http://u5er:p4ss@prov.example.test:8080/live/1.ts.",
-      "host": "prov.example.test",
-      "mustNotAppear": [
-        "u5er",
-        "p4ss",
-        "8080",
-        "live/1.ts"
-      ]
-    },
-    {
-      "why": "D-SINK-1: an un-encoded '@' inside the password",
-      "text": "Failed to open http://qa-user:qa@pass-SENTINEL@prov.example.test:8080/live/1.ts.",
-      "host": "prov.example.test",
-      "mustNotAppear": [
-        "qa-user",
-        "qa@pass",
-        "SENTINEL"
-      ]
-    },
-    {
-      "why": "two '@' and no password, which is still userinfo",
-      "text": "http://name@sub@host.example.test/a.ts",
-      "host": "host.example.test",
-      "mustNotAppear": [
-        "name@sub",
-        "name",
-        "sub@"
-      ]
-    },
-    {
-      "why": "credentials in the query string, the Xtream shape",
-      "text": "probe http://prov.example.test/get.php?username=U5ER&password=P4SSW0RD&type=m3u_plus done",
-      "host": "prov.example.test",
-      "mustNotAppear": [
-        "U5ER",
-        "P4SSW0RD",
-        "get.php",
-        "username="
-      ]
-    },
-    {
-      "why": "credentials in the path, the other Xtream shape",
-      "text": "http://prov.example.test/live/U5ER/P4SSW0RD/1.ts",
-      "host": "prov.example.test",
-      "mustNotAppear": [
-        "U5ER",
-        "P4SSW0RD"
-      ]
-    },
-    {
-      "why": "no userinfo at all must survive unharmed",
-      "text": "no userinfo http://plain.example.test:8080/a.ts here",
-      "host": "plain.example.test",
-      "mustNotAppear": [
-        "8080",
-        "a.ts"
-      ]
-    },
-    {
-      "why": "two URLs in one line, the second carrying the doubled '@'",
-      "text": "first http://a5:b6@one.example.test/1 then http://c7:d8@e9@two.example.test/2",
-      "host": "two.example.test",
-      "mustNotAppear": [
-        "a5",
-        "b6",
-        "c7",
-        "d8",
-        "e9"
-      ]
-    },
-    {
-      "why": "an unknown scheme is still a URL and still redacts",
-      "text": "httpx://u5er:p4ss@odd.example.test/x",
-      "host": "odd.example.test",
-      "mustNotAppear": [
-        "u5er",
-        "p4ss"
-      ]
-    }
-  ]
+ "note": "Shared redaction vectors. CLAUDE.md: a rule implemented in both JavaScript and Python gets ONE fixture that both implementations run. Before this file existed they were pinned by two DISJOINT hand-written lists, every vector in each carrying exactly one '@' -- so D-SINK-1 (a password tail surviving into the host position when the password contains an un-encoded '@') was invisible to both. The two renderings differ on purpose: the helper emits scheme://host, Model emits the bare host. So a vector pins the PROPERTY, not the formatting: the host must appear, and no fragment listed in mustNotAppear may. R32a' (2026-10-22, D-SINK-29): the FREE-TEXT rule prints the RFC host -- the authority ends at the first '/', '?', '#' or whitespace, its userinfo at the LAST '@' within it, and the printed host is cut at the first ':', ';', '=' or '&' -- and WITHHOLDS it, as the one token `[host withheld]`, when that host has no dot and an '@' follows the authority. A DISPLAY sink (sourceLabel, hostOf) prints the RFC host unconditionally. Where the two differ a vector carries `rfcHost` (and `displayMustNotAppear`) for the display check; `host` is always what the free-text redactors print, and an empty `host` requires no host at all. R32a''' (2026-10-22, D-SINK-36; R32a'' before it, D-SINK-32, D-SINK-33): the run and the authority end at the six ASCII delimiters -- space, tab, LF, CR, FF, VT (`delimiters` in tests/fixtures/url-whitespace.json) -- in both mirrors and at NOTHING else: every other whitespace or control code point is URL text, so a password holding U+FEFF, NBSP, U+2028, U+0085 or an information separator redacts to the HOST (under R32a'' the run ended at the 30-point union the READERS refuse, and each mirror took the other's worse case); `'`, `\"`, `<` and `>` never end a run and are trailing punctuation (`.,;:!?)]'\"<>`), which both mirrors strip off the run's end and put back after the host, so the model restores a sentence's final `.` as the helper always did; and the predicate's second arm withholds a NON-NUMERIC port followed by a later `@`. A vector may carry `js` and `py`, the EXACT output of Model.redactUrls and of the helper's redact_urls, where the formatting is the point (the restored punctuation) or the output is an accepted cost that must be seen rather than described: `accepted` names the board id. D-SINK-34 is that cost, confined to the six delimiters -- a space, a tab or a line break INSIDE a password ends the run, so the username and the password's tail print, in both mirrors, one vector per delimiter; and one vector per non-ASCII union member asserts the HOST and never the username; D-SINK-35 is the other -- a dotted username before a digits-only password prefix reads as host and port.",
+ "credentialsAreFake": "Every credential here is invented and every host is under the reserved .test TLD. Never put a real provider value in this file.",
+ "vectors": [
+  {
+   "why": "the ordinary case both suites already had",
+   "text": "Failed to open http://u5er:p4ss@prov.example.test:8080/live/1.ts.",
+   "host": "prov.example.test",
+   "mustNotAppear": [
+    "u5er",
+    "p4ss",
+    "8080",
+    "live/1.ts"
+   ]
+  },
+  {
+   "why": "D-SINK-1: an un-encoded '@' inside the password",
+   "text": "Failed to open http://qa-user:qa@pass-SENTINEL@prov.example.test:8080/live/1.ts.",
+   "host": "prov.example.test",
+   "mustNotAppear": [
+    "qa-user",
+    "qa@pass",
+    "SENTINEL"
+   ]
+  },
+  {
+   "why": "two '@' and no password, which is still userinfo",
+   "text": "http://name@sub@host.example.test/a.ts",
+   "host": "host.example.test",
+   "mustNotAppear": [
+    "name@sub",
+    "name",
+    "sub@"
+   ]
+  },
+  {
+   "why": "credentials in the query string, the Xtream shape",
+   "text": "probe http://prov.example.test/get.php?username=U5ER&password=P4SSW0RD&type=m3u_plus done",
+   "host": "prov.example.test",
+   "mustNotAppear": [
+    "U5ER",
+    "P4SSW0RD",
+    "get.php",
+    "username="
+   ]
+  },
+  {
+   "why": "credentials in the path, the other Xtream shape",
+   "text": "http://prov.example.test/live/U5ER/P4SSW0RD/1.ts",
+   "host": "prov.example.test",
+   "mustNotAppear": [
+    "U5ER",
+    "P4SSW0RD"
+   ]
+  },
+  {
+   "why": "no userinfo at all must survive unharmed",
+   "text": "no userinfo http://plain.example.test:8080/a.ts here",
+   "host": "plain.example.test",
+   "mustNotAppear": [
+    "8080",
+    "a.ts"
+   ]
+  },
+  {
+   "why": "two URLs in one line, the second carrying the doubled '@'",
+   "text": "first http://a5:b6@one.example.test/1 then http://c7:d8@e9@two.example.test/2",
+   "host": "two.example.test",
+   "mustNotAppear": [
+    "a5",
+    "b6",
+    "c7",
+    "d8",
+    "e9"
+   ]
+  },
+  {
+   "why": "an unknown scheme is still a URL and still redacts",
+   "text": "httpx://u5er:p4ss@odd.example.test/x",
+   "host": "odd.example.test",
+   "mustNotAppear": [
+    "u5er",
+    "p4ss"
+   ]
+  },
+  {
+   "why": "D-SINK-29 (R32a'), THE P1: an '@' inside a PATH credential -- the Xtream /live/<user>/<pass>/ shape with a password holding '@'. Round 3's last-'@'-of-the-run scan printed the password TAIL (`SSW0RD`) here; the RFC authority never crosses the '/', so the host prints and nothing of the credential does",
+   "text": "Failed to open http://prov.example.test/live/U5ER/P4@SSW0RD/1.ts.",
+   "host": "prov.example.test",
+   "mustNotAppear": [
+    "U5ER",
+    "P4@",
+    "SSW0RD",
+    "ssw0rd",
+    "live",
+    "1.ts"
+   ]
+  },
+  {
+   "why": "D-SINK-29 (R32a'), the P1's other shape: a pasted Xtream query whose password holds '@' and whose username is an email -- the server prints, never the email's domain and never the password's tail",
+   "text": "playlist: http://host.example.test:25461/get.php?username=me@mail.example.test&password=p@ssw0rd&type=m3u_plus",
+   "host": "host.example.test",
+   "mustNotAppear": [
+    "ssw0rd",
+    "p@",
+    "me@",
+    "mail.example.test",
+    "25461",
+    "username",
+    "password"
+   ]
+  },
+  {
+   "why": "D-SINK-23 under R32a': a query password on a URL with NO PATH. The round-1 model printed the at-sign's tail WITH the password (`mail.example.test&password=P4SSW0RD`); the RFC authority ends at the '?', so the server prints and the query never does",
+   "text": "Failed to open http://h.example.test:8080?username=me@mail.example.test&password=P4SSW0RD.",
+   "host": "h.example.test",
+   "mustNotAppear": [
+    "P4SSW0RD",
+    "username",
+    "8080",
+    "password",
+    "me@",
+    "mail.example.test"
+   ]
+  },
+  {
+   "why": "D-SINK-23 under R32a', as a bare URL: the free-text redactors and the display sinks both print the RFC host",
+   "text": "http://h.example.test?u=me@b.example.test&p=P4SSW0RD",
+   "host": "h.example.test",
+   "mustNotAppear": [
+    "P4SSW0RD",
+    "me@",
+    "p=",
+    "u=",
+    "b.example.test"
+   ]
+  },
+  {
+   "why": "D-SINK-23 under R32a': an at-sign in a FRAGMENT changes nothing; the host before the '#' prints",
+   "text": "http://h.example.test#u=me@b.example.test&p=P4SSW0RD",
+   "host": "h.example.test",
+   "mustNotAppear": [
+    "P4SSW0RD",
+    "me@",
+    "p=",
+    "b.example.test"
+   ]
+  },
+  {
+   "why": "D-SINK-23 under R32a': real userinfo AND an at-sign in a pathless query -- the authority's last '@' ends the userinfo, the one after the '?' is query",
+   "text": "http://u5er:p4ss@h.example.test?x=a@b.example.test",
+   "host": "h.example.test",
+   "mustNotAppear": [
+    "u5er",
+    "p4ss",
+    "x=",
+    "a@",
+    "b.example.test"
+   ]
+  },
+  {
+   "why": "an IPv6 host behind a doubled-at userinfo, with a port and a path (free text, so the bare-URL check leaves it to redactUrls: the model shows the literal in its brackets, the helper too)",
+   "text": "open http://u5er:p4@ss@[2001:db8::7]:8080/live/1.ts now",
+   "host": "2001:db8::7",
+   "mustNotAppear": [
+    "u5er",
+    "p4@ss",
+    "8080",
+    "live"
+   ]
+  },
+  {
+   "why": "D-SINK-23: an IPv6 host with no path and a password in the query",
+   "text": "open http://[2001:db8::6]?password=P4SSW0RD now",
+   "host": "2001:db8::6",
+   "mustNotAppear": [
+    "P4SSW0RD",
+    "password"
+   ]
+  },
+  {
+   "why": "R32a': an IPv6 host with a path '@' -- a bracketed literal is a host and is never withheld",
+   "text": "retry http://[2001:db8::9]/live/me@mail.example.test/1.ts later",
+   "host": "2001:db8::9",
+   "mustNotAppear": [
+    "me@",
+    "mail.example.test",
+    "live",
+    "1.ts"
+   ]
+  },
+  {
+   "why": "R32a': an IPv6 host without a port (free text: the model shows the literal in its brackets, the helper too)",
+   "text": "retry http://[2001:db8::8]/x later",
+   "host": "2001:db8::8",
+   "mustNotAppear": [
+    "/x"
+   ]
+  },
+  {
+   "why": "D-SINK-28 (R32a'): a password holding an unencoded '#'. The RFC reading makes the USERNAME the host and round 2's redactors printed it; the host is dotless with an '@' after the authority, so free text WITHHOLDS it -- the one token, never `myuser`, and never the host after the later '@' either (round 3 printed `cdn.example.test`, and on the P1's shape that same scan printed a password tail)",
+   "text": "Failed to open http://myuser:pa#ss@cdn.example.test/live/1.ts.",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "myuser",
+    "pa#ss",
+    "ss@",
+    "cdn.example.test",
+    "live",
+    "1.ts"
+   ],
+   "rfcHost": "myuser",
+   "displayMustNotAppear": [
+    "pa#ss",
+    "ss@",
+    "1.ts"
+   ]
+  },
+  {
+   "why": "D-SINK-28 (R32a'): the same with '?' in the password",
+   "text": "Failed to open http://myuser:pa?ss@cdn.example.test/live/1.ts.",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "myuser",
+    "pa?ss",
+    "ss@",
+    "cdn.example.test",
+    "live"
+   ],
+   "rfcHost": "myuser",
+   "displayMustNotAppear": [
+    "pa?ss",
+    "ss@",
+    "live"
+   ]
+  },
+  {
+   "why": "D-SINK-28 (R32a'): the same with '/' in the password -- the typo shape D-SINK-25 was filed for; the base printed the username here in BOTH mirrors",
+   "text": "Failed to open http://myuser:pa/ss@cdn.example.test/live/1.ts.",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "myuser",
+    "pa/ss",
+    "ss@",
+    "cdn.example.test",
+    "live"
+   ],
+   "rfcHost": "myuser",
+   "displayMustNotAppear": [
+    "pa/ss",
+    "ss@",
+    "live"
+   ]
+  },
+  {
+   "why": "R32a': the typo shape as a bare URL -- free text withholds, the display sinks print the RFC host, which is the username (sourceLabel `http://user`): that is why the FORM warns on it",
+   "text": "http://user:2024/ab@host.example.test/list.m3u",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "user",
+    "2024",
+    "ab@",
+    "host.example.test",
+    "list.m3u"
+   ],
+   "rfcHost": "user",
+   "displayMustNotAppear": [
+    "2024",
+    "ab@",
+    "list.m3u"
+   ]
+  },
+  {
+   "why": "R32a': three at-signs in the userinfo; the last one within the authority ends it in both the free-text and the display reading",
+   "text": "http://a1@b2@c3@host.example.test/a.ts",
+   "host": "host.example.test",
+   "mustNotAppear": [
+    "a1",
+    "b2",
+    "c3",
+    "@"
+   ]
+  },
+  {
+   "why": "R32a': userinfo with several at-signs AND a path at-sign: the authority's last '@' ends the userinfo, the path one is path",
+   "text": "http://a1@b2@c3@host.example.test/me@mail.example.test/a.ts",
+   "host": "host.example.test",
+   "mustNotAppear": [
+    "a1",
+    "b2",
+    "c3",
+    "me@",
+    "mail.example.test",
+    "a.ts"
+   ]
+  },
+  {
+   "why": "R32a': an IPv6 host with a port and a path, no userinfo (the model shows the literal in its brackets, the helper too)",
+   "text": "retry http://[2001:db8::9]:8080/live/1.ts later",
+   "host": "2001:db8::9",
+   "mustNotAppear": [
+    "8080",
+    "live",
+    "1.ts"
+   ]
+  },
+  {
+   "why": "R32a' (D-SINK-27): an Xtream /playlist/<email>/<pass>/m3u_plus link -- the at-sign is in the PATH, so the server prints; round 3 printed the email's domain (`mail.example.test`) here",
+   "text": "probe http://host.example.test:25461/playlist/me@mail.example.test/P4SSW0RD/m3u_plus done",
+   "host": "host.example.test",
+   "mustNotAppear": [
+    "P4SSW0RD",
+    "me@",
+    "mail.example.test",
+    "25461",
+    "m3u_plus"
+   ]
+  },
+  {
+   "why": "R32a' (D-SINK-27): the same on a WebDAV link on a non-default port",
+   "text": "https://cloud.example.test:8443/remote.php/dav/files/me@mail.example.test/iptv.m3u",
+   "host": "cloud.example.test",
+   "mustNotAppear": [
+    "8443",
+    "remote.php",
+    "me@",
+    "mail.example.test",
+    "iptv.m3u"
+   ]
+  },
+  {
+   "why": "R32a', THE STATED COST: a dotless intranet host with a path '@' is withheld -- `nas` could be a username, and nothing tells the redactor it is not",
+   "text": "http://nas:8000/files/me@home/list.m3u",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "nas",
+    "8000",
+    "me@",
+    "home",
+    "list.m3u"
+   ],
+   "rfcHost": "nas",
+   "displayMustNotAppear": [
+    "8000",
+    "me@",
+    "list.m3u"
+   ]
+  },
+  {
+   "why": "R32a', the cost again: `localhost` gets no exemption (the lead's answer)",
+   "text": "Failed to open http://localhost:8080/me@mail.example.test/x.",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "localhost",
+    "8080",
+    "me@",
+    "mail.example.test"
+   ],
+   "rfcHost": "localhost",
+   "displayMustNotAppear": [
+    "8080",
+    "me@"
+   ]
+  },
+  {
+   "why": "R32a': a dotless host whose later '@' is in a pathless QUERY is withheld too",
+   "text": "http://nas:8080?u=me@b.example.test",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "nas",
+    "8080",
+    "me@",
+    "b.example.test"
+   ],
+   "rfcHost": "nas",
+   "displayMustNotAppear": [
+    "8080",
+    "me@"
+   ]
+  },
+  {
+   "why": "R32a': a dotless host WITH userinfo and no later '@' -- the only '@' is the userinfo delimiter inside the authority, so the host prints (the form draws no warning here either)",
+   "text": "http://u5er:p4ss@nas/list.m3u",
+   "host": "nas",
+   "mustNotAppear": [
+    "u5er",
+    "p4ss",
+    "list.m3u"
+   ]
+  },
+  {
+   "why": "R32a': a dotless host with userinfo AND a later '@' is withheld",
+   "text": "http://u5er:p4ss@nas:8080/me@x",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "u5er",
+    "p4ss",
+    "nas",
+    "8080",
+    "me@"
+   ],
+   "rfcHost": "nas",
+   "displayMustNotAppear": [
+    "u5er",
+    "p4ss",
+    "8080",
+    "me@"
+   ]
+  },
+  {
+   "why": "R32a': a dotless host with a query password and no '@' anywhere prints (D-SINK-23's bare shape)",
+   "text": "http://host?password=P4SSW0RD",
+   "host": "host",
+   "mustNotAppear": [
+    "P4SSW0RD",
+    "password"
+   ]
+  },
+  {
+   "why": "R32a': a '[' in the authority that never closes -- there is no host to print and nothing of the literal prints either (the model says [url], the helper [redacted])",
+   "text": "open http://[2001:db8::5 now",
+   "host": "",
+   "mustNotAppear": [
+    "2001",
+    "db8",
+    "::5"
+   ]
+  },
+  {
+   "why": "R32a': a bracketed host at the end of a sentence; the model keeps the literal, the helper keeps the ']' (it used to strip it as sentence punctuation and show no host) and puts the '.' back",
+   "text": "x http://[2001:db8::5]. y",
+   "host": "2001:db8::5",
+   "mustNotAppear": [
+    "[redacted]",
+    "[url]"
+   ]
+  },
+  {
+   "why": "R32a': a ';' after the host ends it in free text -- a parameter never prints (free text on purpose: a display sink reads the RFC host, and RFC 3986's reg-name admits ';' and '=', so this shape is not a display vector)",
+   "text": "fetch http://h.example.test;sid=P4SSW0RD failed",
+   "host": "h.example.test",
+   "mustNotAppear": [
+    "sid",
+    "P4SSW0RD"
+   ]
+  },
+  {
+   "why": "R32a': '=' ends the printed host in free text, so a key=value authority never prints its value or its neighbour (free text on purpose: a display sink reads the RFC reg-name, which admits '=', D-SINK-30)",
+   "text": "fetch http://h.example.test=P4SSW0RD&x=1/y failed",
+   "host": "h.example.test",
+   "mustNotAppear": [
+    "P4SSW0RD",
+    "x=1"
+   ]
+  },
+  {
+   "why": "R32a': a query whose VALUE holds an '@' and a '=' is query, never a host",
+   "text": "http://h.example.test?token=a@b.example.test=P4SSW0RD&x=1",
+   "host": "h.example.test",
+   "mustNotAppear": [
+    "P4SSW0RD",
+    "token",
+    "x=1",
+    "a@",
+    "b.example.test"
+   ]
+  },
+  {
+   "why": "R32a': '&' ends the printed host too (RFC reg-name admits it), so a parameter glued to the host never prints -- free text on purpose, as the ';' and '=' vectors",
+   "text": "fetch http://h.example.test&password=P4SSW0RD/x failed",
+   "host": "h.example.test",
+   "mustNotAppear": [
+    "password",
+    "P4SSW0RD"
+   ]
+  },
+  {
+   "why": "R32a''' (D-SINK-36): U+FEFF, the byte-order mark inside the password is URL TEXT, not a delimiter -- the run and the authority end at ASCII whitespace only, so the host prints and nothing of the credential does. Under R32a'' the 30-point union ended the run here and both mirrors printed the username and the tail (`myuser<ws>ss@prov.test/live/1.ts`); 0.14.3's helper (the model printed the split) printed the host",
+   "text": "Failed to open http://myuser:pa\ufeffss@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "myuser",
+    "pa\ufeff",
+    "\ufeffss",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.test.",
+   "py": "Failed to open http://prov.test."
+  },
+  {
+   "why": "R32a''' (D-SINK-36): U+0085 NEL (Python whitespace, not JS) inside the password is URL TEXT, not a delimiter -- the run and the authority end at ASCII whitespace only, so the host prints and nothing of the credential does. Under R32a'' the 30-point union ended the run here and both mirrors printed the username and the tail (`myuser<ws>ss@prov.test/live/1.ts`); 0.14.3's model (the helper printed the split) printed the host",
+   "text": "Failed to open http://myuser:pa\u0085ss@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "myuser",
+    "pa\u0085",
+    "\u0085ss",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.test.",
+   "py": "Failed to open http://prov.test."
+  },
+  {
+   "why": "R32a''' (D-SINK-36): U+001C (information separator four; Python whitespace, not JS) inside the password is URL TEXT, not a delimiter -- the run and the authority end at ASCII whitespace only, so the host prints and nothing of the credential does. Under R32a'' the 30-point union ended the run here and both mirrors printed the username and the tail (`myuser<ws>ss@prov.test/live/1.ts`); 0.14.3's model (the helper printed the split) printed the host",
+   "text": "Failed to open http://myuser:pa\u001css@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "myuser",
+    "pa\u001c",
+    "\u001css",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.test.",
+   "py": "Failed to open http://prov.test."
+  },
+  {
+   "why": "R32a''' (D-SINK-36): U+001D (information separator three) inside the password is URL TEXT, not a delimiter -- the run and the authority end at ASCII whitespace only, so the host prints and nothing of the credential does. Under R32a'' the 30-point union ended the run here and both mirrors printed the username and the tail (`myuser<ws>ss@prov.test/live/1.ts`); 0.14.3's model (the helper printed the split) printed the host",
+   "text": "Failed to open http://myuser:pa\u001dss@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "myuser",
+    "pa\u001d",
+    "\u001dss",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.test.",
+   "py": "Failed to open http://prov.test."
+  },
+  {
+   "why": "R32a''' (D-SINK-36): U+001E (information separator two) inside the password is URL TEXT, not a delimiter -- the run and the authority end at ASCII whitespace only, so the host prints and nothing of the credential does. Under R32a'' the 30-point union ended the run here and both mirrors printed the username and the tail (`myuser<ws>ss@prov.test/live/1.ts`); 0.14.3's model (the helper printed the split) printed the host",
+   "text": "Failed to open http://myuser:pa\u001ess@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "myuser",
+    "pa\u001e",
+    "\u001ess",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.test.",
+   "py": "Failed to open http://prov.test."
+  },
+  {
+   "why": "R32a''' (D-SINK-36): U+001F (information separator one) inside the password is URL TEXT, not a delimiter -- the run and the authority end at ASCII whitespace only, so the host prints and nothing of the credential does. Under R32a'' the 30-point union ended the run here and both mirrors printed the username and the tail (`myuser<ws>ss@prov.test/live/1.ts`); 0.14.3's model (the helper printed the split) printed the host",
+   "text": "Failed to open http://myuser:pa\u001fss@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "myuser",
+    "pa\u001f",
+    "\u001fss",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.test.",
+   "py": "Failed to open http://prov.test."
+  },
+  {
+   "why": "R32a''' (D-SINK-36): U+2028 line separator inside the password is URL TEXT, not a delimiter -- the run and the authority end at ASCII whitespace only, so the host prints and nothing of the credential does. Under R32a'' the 30-point union ended the run here and both mirrors printed the username and the tail (`myuser<ws>ss@prov.test/live/1.ts`); 0.14.3's neither: both printed the split printed the host",
+   "text": "Failed to open http://myuser:pa\u2028ss@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "myuser",
+    "pa\u2028",
+    "\u2028ss",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.test.",
+   "py": "Failed to open http://prov.test."
+  },
+  {
+   "why": "R32a''' (D-SINK-36): U+00A0 NBSP inside the password is URL TEXT, not a delimiter -- the run and the authority end at ASCII whitespace only, so the host prints and nothing of the credential does. Under R32a'' the 30-point union ended the run here and both mirrors printed the username and the tail (`myuser<ws>ss@prov.test/live/1.ts`); 0.14.3's neither: both printed the split printed the host",
+   "text": "Failed to open http://myuser:pa\u00a0ss@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "myuser",
+    "pa\u00a0",
+    "\u00a0ss",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.test.",
+   "py": "Failed to open http://prov.test."
+  },
+  {
+   "why": "R32a''' / D-SINK-34 (accepted cost, confined to the six ASCII delimiters: a tab inside the password): the delimiter ends the RUN there in both mirrors, so the username and the password's tail print; under R32a'' every union member did this, and now only the six do",
+   "text": "Failed to open http://myuser:pa\tss@prov.test/live/1.ts.",
+   "host": "myuser",
+   "mustNotAppear": [
+    ":pa",
+    "pa\t"
+   ],
+   "js": "Failed to open myuser\tss@prov.test/live/1.ts.",
+   "py": "Failed to open http://myuser\tss@prov.test/live/1.ts.",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "why": "R32a'' (D-SINK-33): ' inside the password never ends the run; the helper's run ended there until R32a'' and printed the username and the tail `'ss@prov.test/live/1.ts`",
+   "text": "Failed to open http://myuser:pa'ss@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "myuser",
+    "pa'",
+    "'ss",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.test.",
+   "py": "Failed to open http://prov.test."
+  },
+  {
+   "why": "R32a'' (D-SINK-33): \" inside the password never ends the run; the helper's run ended there until R32a'' and printed the username and the tail `\"ss@prov.test/live/1.ts`",
+   "text": "Failed to open http://myuser:pa\"ss@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "myuser",
+    "pa\"",
+    "\"ss",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.test.",
+   "py": "Failed to open http://prov.test."
+  },
+  {
+   "why": "R32a'' (D-SINK-33): < inside the password never ends the run; the helper's run ended there until R32a'' and printed the username and the tail `<ss@prov.test/live/1.ts`",
+   "text": "Failed to open http://myuser:pa<ss@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "myuser",
+    "pa<",
+    "<ss",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.test.",
+   "py": "Failed to open http://prov.test."
+  },
+  {
+   "why": "R32a'' (D-SINK-33): > inside the password never ends the run; the helper's run ended there until R32a'' and printed the username and the tail `>ss@prov.test/live/1.ts`",
+   "text": "Failed to open http://myuser:pa>ss@prov.test/live/1.ts.",
+   "host": "prov.test",
+   "mustNotAppear": [
+    "myuser",
+    "pa>",
+    ">ss",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.test.",
+   "py": "Failed to open http://prov.test."
+  },
+  {
+   "why": "D-SINK-34 as the recheck wrote it: a space inside the password splits the run in both mirrors (the letter of R32a': before whitespace)",
+   "text": "Failed to open http://myuser:pa ss@cdn.test/x.",
+   "host": "myuser",
+   "mustNotAppear": [
+    ":pa",
+    "pa "
+   ],
+   "js": "Failed to open myuser ss@cdn.test/x.",
+   "py": "Failed to open http://myuser ss@cdn.test/x.",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "why": "R32a'' (D-SINK-35 narrowed): a DOTTED username before a password holding `/` -- the RFC reading is host `user.name`, port `pa`, and a non-numeric port followed by a later `@` withholds",
+   "text": "http://user.name:pa/ss@h.test/x",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "user.name",
+    "pa/ss",
+    "h.test"
+   ],
+   "rfcHost": "user.name",
+   "displayMustNotAppear": [
+    "pa/ss",
+    "h.test"
+   ]
+  },
+  {
+   "why": "R32a'' (D-SINK-35 narrowed): an email username, so the RFC host is the email's domain with port `pa`; withheld by the second arm",
+   "text": "http://me@mail.test:pa/ss@h.test/x",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "mail.test",
+    "me@",
+    "pa/ss",
+    "h.test"
+   ],
+   "rfcHost": "mail.test",
+   "displayMustNotAppear": [
+    "me@",
+    "pa/ss",
+    "h.test"
+   ]
+  },
+  {
+   "why": "R32a'': the second arm in a sentence, with the port text cut at `&`",
+   "text": "Failed to open http://me@mail.test:pa&x=1/ss@h.test/x.",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "mail.test",
+    "me@",
+    "pa&",
+    "h.test"
+   ],
+   "js": "Failed to open [host withheld].",
+   "py": "Failed to open http://[host withheld]."
+  },
+  {
+   "why": "R32a'': a NUMERIC port is not the second arm, and a dotted host is not the first: an Xtream link with a port and a path `@` prints its server",
+   "text": "http://host.test:25461/playlist/me@mail.test/pw/m3u_plus",
+   "host": "host.test",
+   "mustNotAppear": [
+    "25461",
+    "me@",
+    "mail.test",
+    "pw"
+   ]
+  },
+  {
+   "why": "D-SINK-35 (accepted residual): a dotted username before a DIGITS-ONLY password prefix reads as host and port, and prints user.name; nothing in the authority can tell it from a host",
+   "text": "http://user.name:2024/ab@host/x",
+   "host": "user.name",
+   "mustNotAppear": [
+    "2024",
+    "ab@",
+    "host/x"
+   ],
+   "accepted": "D-SINK-35"
+  },
+  {
+   "why": "R32a'': an empty port is an RFC shape (the fixture's `http://user:/ab@host.test` validates) and is not non-numeric; the dotless first arm withholds this one anyway",
+   "text": "http://user:/ab@host.test/x",
+   "host": "[host withheld]",
+   "mustNotAppear": [
+    "user",
+    "ab@",
+    "host.test"
+   ],
+   "rfcHost": "user",
+   "displayMustNotAppear": [
+    "ab@",
+    "host.test"
+   ]
+  },
+  {
+   "why": "R32a'': a dotted host with an empty port and a later `@` is neither arm: prints the host",
+   "text": "see http://h.test:/me@x.test/y now",
+   "host": "h.test",
+   "mustNotAppear": [
+    "me@",
+    "x.test"
+   ],
+   "js": "see h.test now",
+   "py": "see http://h.test now"
+  },
+  {
+   "why": "R32a'': sentence punctuation after a URL is put back by BOTH mirrors now (the model dropped a final `.` until R32a''); quotes and angle brackets around a URL are punctuation too",
+   "text": "see 'http://u:p@h.test/x', <http://a.test> and \"http://b.test\".",
+   "host": "h.test",
+   "mustNotAppear": [
+    "u:p",
+    "/x"
+   ],
+   "js": "see 'h.test', <a.test> and \"b.test\".",
+   "py": "see 'http://h.test', <http://a.test> and \"http://b.test\"."
+  },
+  {
+   "why": "R32a'': a run that is nothing but punctuation prints the empty-host token and the punctuation",
+   "text": "x http://. y",
+   "host": "",
+   "mustNotAppear": [],
+   "js": "x [url]. y",
+   "py": "x http://[redacted]. y"
+  },
+  {
+   "why": "R32a'': a bracketed literal keeps its `]` at a sentence end, and the `.` is put back",
+   "text": "x http://[2001:db8::5]. y",
+   "host": "[2001:db8::5]",
+   "mustNotAppear": [],
+   "js": "x [2001:db8::5]. y",
+   "py": "x http://[2001:db8::5]. y"
+  },
+  {
+   "why": "R32a'': the restored `.` on the ordinary case, exact in both mirrors",
+   "text": "Failed to open http://u5er:p4ss@prov.example.test:8080/live/1.ts.",
+   "host": "prov.example.test",
+   "mustNotAppear": [
+    "u5er",
+    "p4ss",
+    "8080",
+    "live/1.ts"
+   ],
+   "js": "Failed to open prov.example.test.",
+   "py": "Failed to open http://prov.example.test."
+  },
+  {
+   "why": "R32a''' / D-SINK-34 (accepted cost, confined to the six ASCII delimiters: a line feed inside the password): the delimiter ends the RUN there in both mirrors, so the username and the password's tail print; the fixture pins that output so the cost is seen, and the host for every whitespace code point outside the six",
+   "text": "Failed to open http://myuser:pa\nss@prov.test/live/1.ts.",
+   "host": "myuser",
+   "mustNotAppear": [
+    ":pa",
+    "pa\n"
+   ],
+   "js": "Failed to open myuser\nss@prov.test/live/1.ts.",
+   "py": "Failed to open http://myuser\nss@prov.test/live/1.ts.",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "why": "R32a''' / D-SINK-34 (accepted cost, confined to the six ASCII delimiters: a vertical tab inside the password): the delimiter ends the RUN there in both mirrors, so the username and the password's tail print; the fixture pins that output so the cost is seen, and the host for every whitespace code point outside the six",
+   "text": "Failed to open http://myuser:pa\u000bss@prov.test/live/1.ts.",
+   "host": "myuser",
+   "mustNotAppear": [
+    ":pa",
+    "pa\u000b"
+   ],
+   "js": "Failed to open myuser\u000bss@prov.test/live/1.ts.",
+   "py": "Failed to open http://myuser\u000bss@prov.test/live/1.ts.",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "why": "R32a''' / D-SINK-34 (accepted cost, confined to the six ASCII delimiters: a form feed inside the password): the delimiter ends the RUN there in both mirrors, so the username and the password's tail print; the fixture pins that output so the cost is seen, and the host for every whitespace code point outside the six",
+   "text": "Failed to open http://myuser:pa\fss@prov.test/live/1.ts.",
+   "host": "myuser",
+   "mustNotAppear": [
+    ":pa",
+    "pa\f"
+   ],
+   "js": "Failed to open myuser\fss@prov.test/live/1.ts.",
+   "py": "Failed to open http://myuser\fss@prov.test/live/1.ts.",
+   "accepted": "D-SINK-34"
+  },
+  {
+   "why": "R32a''' / D-SINK-34 (accepted cost, confined to the six ASCII delimiters: a carriage return inside the password): the delimiter ends the RUN there in both mirrors, so the username and the password's tail print; the fixture pins that output so the cost is seen, and the host for every whitespace code point outside the six",
+   "text": "Failed to open http://myuser:pa\rss@prov.test/live/1.ts.",
+   "host": "myuser",
+   "mustNotAppear": [
+    ":pa",
+    "pa\r"
+   ],
+   "js": "Failed to open myuser\rss@prov.test/live/1.ts.",
+   "py": "Failed to open http://myuser\rss@prov.test/live/1.ts.",
+   "accepted": "D-SINK-34"
+  }
+ ]
 }

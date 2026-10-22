@@ -816,7 +816,46 @@ local used everywhere the argument was; `playlist` with neither is a
 service cannot switch on a usage exit. `--url` stays for a human running the
 helper by hand, in their own shell and their own argv. Redaction is
 unchanged: the helper prints neither the variable nor any URL beyond scheme
-and host.
+and host -- where "host" is the RFC host in every sink (rulings R32a' and
+R32a'', 2026-10-22; `run_host_parts` in the helper, `Model.runHostParts`
+in the model): the authority ends at the first `/`, `?`, `#` or URL
+whitespace, its userinfo at the last `@` within it, and a FREE-TEXT sink
+cuts the host at the first `:`, `;`, `=` or `&` and WITHHOLDS it, as the
+one token `[host withheld]`, when an `@` follows the authority and either
+the host has no dot or the port after it is non-numeric -- because the RFC
+host of a password holding an unencoded `/`, `?` or `#` is the username
+(D-SINK-28), a dotted username reads as a host with a port that is the
+password's prefix (D-SINK-35), and a scan that crossed the `/` to the run's
+last `@` printed a password tail instead (D-SINK-29, round 3, never
+shipped). "URL whitespace" is TWO classes for two purposes (R32a''',
+2026-10-22, D-SINK-36), each enumerated code point by code point, shared
+by both mirrors and pinned by `tests/fixtures/url-whitespace.json` over
+the whole Unicode range in both suites. A READER REFUSES THE UNION:
+`Model.validateSourceUrl` and the helper's `validate_source_url` refuse a
+URL holding any member of the union of JS `\s`, Python `\s` and U+FEFF
+(30 code points, `Model.URL_SPACE_CODES`, the helper's `URL_SPACE_CHARS`).
+A FREE-TEXT REDACTOR DELIMITS AT ASCII: the run and the authority end at
+space, tab, LF, CR, FF, VT -- six code points, `Model.URL_DELIMITER_CODES`,
+the helper's `URL_DELIMITER_CHARS` -- and at nothing else, so a password
+holding U+FEFF, NBSP, U+2028, U+0085 or an information separator is URL
+text and redacts to the host in both mirrors. The helper once ended the run
+and the authority at two different classes and a password holding U+FEFF
+printed the username (D-SINK-32); the round that unified them ended both
+at the union, and each mirror then took the other's worse case -- the
+helper printed the username and the password's tail for U+FEFF where
+0.14.3 printed the host (D-SINK-36). `'`, `"`, `<` and `>` never end a run
+-- they ended the helper's until R32a'' (D-SINK-33) and are sentence
+punctuation now, stripped off the run's end and put back after the host by
+both mirrors (`.,;:!?)]'"<>`; a `]` kept when the run holds a `[`), so
+`Failed to open http://u:p@h.test/x.` prints `Failed to open h.test.` in
+the journal and `... http://h.test.` from the helper. The cost that
+remains, accepted as D-SINK-34 and confined to the six delimiters: a space,
+a tab or a line break INSIDE a password ends the run, so the username and
+the password's tail print, in both mirrors, and the shared fixture pins
+that output for each of the six and the HOST for every other member of
+the union. A display sink and validation read the RFC host unconditionally.
+Both rules, the costs and the shared fixture are in
+`ARCHITECTURE-SOURCES.md` 3.1.
 
 Why environ is the route. `/proc/<pid>/cmdline` is readable by every uid on
 an ordinary proc mount; that was the exposure. `/proc/<pid>/environ` is
@@ -3921,6 +3960,53 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
   anyway.
 - Never mutate inputs; return new arrays/objects.
 - Every function tolerates `null`/`undefined`.
+- **A map keyed by a string a provider or a user chose is null-prototype**
+  (D-SG-3, ruling R30f, 2026-10-21). Group names, channel names, tvg-ids,
+  ids read from state.json, saved-search terms, hidden groups, source labels,
+  logo hosts, IPC arguments: build the map with `Model.keyedMap()`
+  (`Object.create(null)`), or read it with `Model.hasOwnKey` /
+  `Model.ownKeyValue`, and `key in obj` is the same read. A plain `{}` is not
+  a map in the shell's engine, which the host and every plugin share:
+  `seen["__proto__"]` is Object.prototype, so a playlist group named
+  `__proto__` put an enumerable `count: NaN` on every object in the process
+  and the plugin wrote `"count":null` into state.json and the host's
+  shell.json; `index["constructor"]` is the Object function, so IPC
+  `play("constructor")` found a "channel". A map that arrives from JSON.parse
+  (epg-now.json's channels) is an ordinary object and is read through
+  `Model.epgMapEntry` / `hasOwnKey` (the guide-data store's reader,
+  `Model.epgEntry`, reads a legacy store through it). An object handed to
+  the HOST stays
+  ordinary (host code may call its methods); its copies take own keys only
+  and never `__proto__` (`entryWith`, `settingsWithOwnWrite`, `cloneState`).
+  Observed in both engines by `tests/proto-paths.mjs`: node in a child
+  process, Qt's V4 offscreen in `tests/test_proto_v4.py`, one expectation.
+- **No pattern whose cost is super-linear in its input runs on provider
+  text** (D-PERF-3, ruling R30g). An unanchored `\s+$` (and `/^\s+|\s+$/g`'s
+  second half, and the edge-space `[ \u00a0]+$`) is retried from every
+  position of a whitespace run and backs out of the rest of it: about k^2/2
+  steps for a run of k, and the helper keeps interior runs in names, groups,
+  tvg-ids and stream URLs. Trims are the engine's `trim()`, or
+  `Model.trimEndSpace` / `Model.trimEdgeSpace` (index walks) -- never
+  `trimEnd` or `trimStart`, which **Qt 6.11.2's V4 does not have** (node
+  does; the node suite passed while every guide open would have thrown).
+  V4's `trim()` also takes U+0085, which `\s` does not. What the helper
+  writes, measured on ordinary input rather than claimed (round 3; the
+  earlier sentence here, "nothing the helper writes carries a C1 control",
+  was false): an INTERIOR U+0085 in a name, group or tvg-id is kept verbatim
+  in channels.json (`clean_name` only strips), one at the EDGES is taken by
+  `str.strip()` (NEL is whitespace to Python), and the guide's fields fold
+  any NEL to a space (`clean_field`, `\s` in a str pattern) -- so the edges
+  `trim()` and the old pattern see are the same, and an interior NEL is
+  trimmed by neither. `scripts/check-trim-shapes.py` (the gate's
+  "trim shape guard") refuses both known-bad shapes; it is a guard, not the
+  proof. The bound, UNVERIFIED at size by the round's input rule and stated
+  as arithmetic: the old whole-file trim of channels.json was about
+  4,094^2/2 = 8.4e6 steps per URL-length run (M3U_MAX_URL 4096), times the
+  entries a 64 MiB file can hold; the replacements do a constant amount of
+  work per character, so the same file costs one pass. Every other regex in
+  model/, Service.qml and Guide.qml was read for the shape in the same
+  round (the bounds sweep's lane S report lists each with its verdict): single-position
+  anchors, global character-class replaces and `split(/\s+/)` are linear.
 - Any text-normalization or id change is made in the helper and in the model
   together, with the shared vectors in both test suites updated.
 - Every shipped file stays at or under 448 KiB: `release.py check` enforces

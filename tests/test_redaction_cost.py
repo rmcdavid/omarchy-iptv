@@ -34,21 +34,76 @@ from helper_loader import load_helper
 
 helper = load_helper()
 
-# The pattern as it shipped, kept here and ONLY here.
-_AS_SHIPPED = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*)://[^\s'\"<>]+")
+# The pattern as it shipped, kept here and ONLY here. The HOST it prints is
+# R32a' (2026-10-22, D-SINK-29), stated independently of the helper so a
+# drift in run_host_parts is caught: the RFC authority (up to the first '/',
+# '?', '#' or whitespace), its userinfo to the LAST '@' within it, the host
+# cut at ':', ';', '=' or '&', a bracketed literal to its ']'; and WITHHELD as
+# the one token when that host has no dot and an '@' follows the authority.
+# It was helper.url_host (urllib's RFC reading) until R32a, which printed the
+# username for a password holding an unencoded '/', '?' or '#' (D-SINK-28);
+# R32a's last-'@'-of-the-run scan (round 3, never shipped) printed a password
+# TAIL for an '@' inside a path credential (D-SINK-29). R32a'' (D-SINK-32,
+# D-SINK-33): `'"<>` are sentence punctuation put back after the host, and a
+# NON-NUMERIC port followed by a later '@' withholds too (the second arm,
+# D-SINK-35). R32a''' (D-SINK-36): the run and the authority end at the SIX
+# ASCII delimiters -- space, tab, LF, CR, FF, VT, spelt out here as a class
+# literal independently of the helper's URL_DELIMITER_CHARS -- and at
+# nothing else: U+FEFF, NBSP, U+2028, U+0085 and the information separators
+# are URL text, and a password holding one redacts to the host (the union
+# of JS \\s, Python \\s and U+FEFF is what a READER refuses, not what a
+# redactor delimits at; under R32a'' it ended the run here and the helper
+# printed the username and the tail for U+FEFF where 0.14.3 printed the
+# host).
+_WS = "\t\n\x0b\x0c\r "
+_AS_SHIPPED = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*)://[^" + _WS + "]+")
+_AUTHORITY_END_AS_RULED = re.compile("[/?#" + _WS + "]")
+_HOST_END_AS_RULED = re.compile(r"[:;=&]")
+_PORT_AS_RULED = re.compile(r"^[^:;=&]*:([^;=&]*)")
+HOST_WITHHELD = "[host withheld]"
+
+
+def host_as_ruled(raw):
+    body = raw[raw.find("://") + 3:]
+    cut = _AUTHORITY_END_AS_RULED.search(body)
+    authority = body if cut is None else body[:cut.start()]
+    rest = "" if cut is None else body[cut.start():]
+    # The rest up to the first DELIMITER (not str.split, whose class is
+    # Python's own whitespace: R32a''').
+    rest = re.split("[" + _WS + "]", rest, 1)[0]
+    hostport = authority[authority.rfind("@") + 1:]
+    if hostport.startswith("["):
+        close = hostport.find("]")
+        return hostport[:close + 1].lower() if close != -1 else ""
+    end = _HOST_END_AS_RULED.search(hostport)
+    host = hostport if end is None else hostport[:end.start()]
+    port = _PORT_AS_RULED.match(hostport)
+    port = port.group(1) if port else ""
+    if "@" in rest and ((host and "." not in host) or (port and not port.isdigit())):
+        return HOST_WITHHELD
+    return host.lower()
 
 
 def redact_urls_as_shipped(text):
     def replace(match):
         raw = match.group(0)
+        bracket = "[" in raw
         trailing = ""
-        while raw and raw[-1] in ".,;:!?)]":
+        while raw and raw[-1] in ".,;:!?)]'\"<>" and not (bracket and raw[-1] == "]"):
             trailing = raw[-1] + trailing
             raw = raw[:-1]
-        host = helper.url_host(raw)
+        host = host_as_ruled(raw)
         return "%s://%s%s" % (match.group(1).lower(), host or "[redacted]", trailing)
 
     return _AS_SHIPPED.sub(replace, "" if text is None else str(text))
+
+
+# D-PERF-6 (R32e): the scheme-run search as it shipped before, kept as the
+# oracle for the anchored match that replaced it. `search(s, lo, j)` with
+# `\Z` at j: the leftmost start whose run reaches j. Quadratic in a window
+# (no literal prefix), which is why it is only ever run here, on short
+# ordinary strings.
+_SCHEME_RUN_BEFORE = re.compile(r"[A-Za-z0-9+.\-]*\Z")
 
 
 # Reaches every branch of the scan: scheme characters, the authority
@@ -56,7 +111,7 @@ def redact_urls_as_shipped(text):
 # class excludes, several kinds of whitespace, and non-ASCII (`\w` and `\s` are
 # both Unicode-aware here, which is why the scan asks the engine rather than
 # guessing).
-ALPHABET = "ahHt p:/@?#.+-_019\t\n\xa0\u2028\ufeffx[]%&=,;'\"<>"
+ALPHABET = "ahHt p:/@?#.+-_019\t\n\xa0\u2028\ufeff\x85\x1cx[]%&=,;'\"<>"
 
 
 def generated(length, seed):
@@ -82,8 +137,13 @@ EDGES = [
     "a://b c://d", "file:///etc/x", "see http://h.test, then https://i.test.",
     "\xa0http://h.test\xa0y", "aaa://\u2028x", "no urls here", "http://",
     "http://?x",
-    # The tail class excludes these three, so the URL stops at them.
-    "'http://h.test'", "<http://h.test>", "\"http://h.test\"",
+    # Quotes and angle brackets around a URL: trailing punctuation since
+    # R32a'' (they ended the run until then), and inside a password.
+    "'http://h.test'", "<http://h.test>", "\"http://h.test\"", "http://myuser:pa'ss@prov.test/x",
+    "http://myuser:pa<ss@prov.test/x", "http://myuser:pa\x85ss@h.test/x", "http://myuser:pa\x1css@h.test/x",
+    "http://myuser:pa\ufeffss@h.test/x", "http://user.name:pa/ss@h.test/x", "http://me@mail.test:pa&x=1/ss@h.test/x",
+    "http://user.name:2024/ab@host/x", "http://h.test:/me@x.test/y", "see 'http://u:p@h.test/x', <http://a.test> and \"http://b.test\".",
+    "http://.", "x http://. y", "http://[::1]].", "http://[::1]:pa/me@x", "http://h.test:80x/a@b", "http://:pa/me@x", "http://h.test:;=&/a@b",
     # A "://" the pattern cannot match followed by one it can: the scan has to
     # keep looking past the first, and stopping there leaves a live credential.
     "://x http://u:p@h.test/a", "1://x http://u:p@h.test/a",
@@ -91,6 +151,10 @@ EDGES = [
     # An `@` in the PATH is not userinfo: the authority ends at the first `/`,
     # so the host is `h.test` and not `b`.
     "http://h.test/a@b/c", "http://u:p@h.test/a@b/c", "http://h.test?a@b",
+    # R32a': the withheld shapes, and the dotless hosts that are not.
+    "http://myuser:pa#ss@cdn.test/x", "http://myuser:pa/ss@cdn.test/x", "http://nas:8000/me@h/x",
+    "http://nas:8080?u=me@b", "http://u:p@nas/x", "http://nas", "http://nas/x", "http://[::1]/me@x",
+    "http://h.test=p&x=1/y", "http://h.test;s=p", "x http://nas/a@b. y", "http://nas/a@b\u2028c",
 ]
 
 
@@ -139,6 +203,79 @@ class RedactionIsUnchangedTests(unittest.TestCase):
         mismatches = [text for text in corpus
                       if helper.redact_urls(text) != redact_urls_as_shipped(text)]
         self.assertEqual([repr(t) for t in mismatches[:4]], [])
+
+    def test_d_perf_6_the_anchored_scheme_run_match_starts_where_the_old_search_did(self):
+        """R32e: on every window of every ordinary string here, the match's
+        end is the old search's start -- the run's first character, or lo
+        when the window is all scheme characters."""
+        texts = ["http://h.test/x", "aaa!aaa://x", "a.b+c-d://h", "!://", "://", "ab cd://x",
+                 "x\ny://h", "aa!aa!aa://h", "\u00e9://h", "+.-://h", "a" * 70 + "://h"]
+        for seed in range(1, 300):
+            texts.append(generated(40, seed))
+            texts.append(generated(24, seed) + "://" + generated(8, seed + 1))
+            texts.append(generated(9, seed) + "://" + generated(9, seed + 2) + "://x")
+        checked = 0
+        for text in texts:
+            j = text.find("://")
+            while j >= 0:
+                for lo in range(0, j + 1):
+                    before = _SCHEME_RUN_BEFORE.search(text, lo, j).start()
+                    after = helper._SCHEME_RUN_RE.match(text, lo, j).end()
+                    self.assertEqual(after, before, (repr(text), lo, j))
+                    checked += 1
+                j = text.find("://", j + 1)
+        self.assertGreater(checked, 2000)
+
+    def test_r32a_the_free_text_host_is_the_rfc_host_or_withheld(self):
+        """R32a' (D-SINK-29, D-SINK-28, D-SINK-23): the P1's path and query
+        credentials print the HOST (round 3 printed `ssw0rd`); the typo
+        shapes withhold it (round 2 printed the username, round 3 the host
+        after the later '@'); a pathless query stops at the authority; a
+        LAN name with a path '@' is withheld (the stated cost, `localhost`
+        too); an unclosed '[' prints nothing."""
+        cases = [
+            ("Failed to open http://prov.test/live/U5ER/P4@SSW0RD/1.ts.", "Failed to open http://prov.test."),
+            ("see http://host.test:25461/get.php?username=me@mail.test&password=p@ssw0rd now.", "see http://host.test now."),
+            ("Failed to open http://myuser:pa#ss@cdn.test/live/1.ts.", "Failed to open http://[host withheld]."),
+            ("Failed to open http://myuser:pa?ss@cdn.test/live/1.ts.", "Failed to open http://[host withheld]."),
+            ("Failed to open http://myuser:pa/ss@cdn.test/live/1.ts.", "Failed to open http://[host withheld]."),
+            ("http://user:2024/ab@host.test/list.m3u", "http://[host withheld]"),
+            ("http://host?password=x", "http://host"),
+            ("http://h.test?u=me@b.test&p=SECRET", "http://h.test"),
+            ("http://h.test;sid=SECRET", "http://h.test"),
+            ("http://host.test:25461/playlist/me@mail.test/pw/m3u_plus", "http://host.test"),
+            ("http://nas:8000/files/me@home/x", "http://[host withheld]"),
+            ("http://localhost:8080/me@mail.test/x", "http://[host withheld]"),
+            ("http://u:p@nas/x", "http://nas"),
+            ("open http://[2001:db8::5 now", "open http://[redacted] now"),
+            ("x http://[2001:db8::5]. y", "x http://[2001:db8::5]. y"),
+            ("http://[2001:db8::7]/live/me@mail.test/1.ts", "http://[2001:db8::7]"),
+            ("http://a@b@c@h.test/me@x", "http://h.test"),
+        ]
+        for text, want in cases:
+            self.assertEqual(helper.redact_urls(text), want, text)
+        # The display sinks keep the RFC reading unconditionally: that is the
+        # two-rule shape R32a' decides, not a drift.
+        self.assertEqual(helper.url_host("http://myuser:pa#ss@cdn.test/live/1.ts"), "myuser")
+        self.assertEqual(helper.run_host("http://myuser:pa#ss@cdn.test/live/1.ts"), helper.HOST_WITHHELD)
+        self.assertEqual(helper.HOST_WITHHELD, HOST_WITHHELD)
+
+    def test_r32a_host_withheld_is_the_one_predicate_and_the_token_is_fixed(self):
+        """R32a': the predicate the form warns with (Model.urlHostWithheld),
+        mirrored, over the shapes the node suite pins; the shared source-urls
+        fixture runs it in tests/test_source.py."""
+        for url, want in [("http://myuser:pa#ss@cdn.test/x", True), ("http://user:2024/ab@host.test/list.m3u", True),
+                          ("http://nas:8000/files/me@home/x", True), ("http://localhost/me@x", True), ("http://nas:8080?u=me@b.test", True),
+                          ("http://u:p@nas:8080/me@x", True), ("see http://nas/me@x now", True),
+                          # R32a'': a dotted host with a NON-NUMERIC port and a later '@' is the second arm
+                          ("http://h.test:pa/me@x.test/y", True), ("http://[2001:db8::1]:8080/me@mail.test", False),
+                          ("http://[2001:db8::1:x/me@mail.test", False), ("http://u:p@nas", False), ("http://u:p@nas/x?a=1#f", False),
+                          ("http://host.test:25461/playlist/me@mail.test/pw/m3u_plus", False), ("http://nas", False),
+                          ("nas/me@x", False), ("", False), ("http://h .test/me@x", False), ("http:///me@x", False), ("http://:8080/me@x", False)]:
+            self.assertEqual(helper.host_withheld(url), want, url)
+        self.assertEqual(helper.run_host_parts("myuser:pa#ss@cdn.test/x"), ("myuser", True))
+        self.assertEqual(helper.run_host_parts("u:p@h.test:8080/x"), ("h.test", False))
+        self.assertEqual(helper.run_host_parts("[2001:db8::7]:8080/me@x"), ("[2001:db8::7]", False))
 
     def test_none_and_non_strings_are_unchanged_too(self):
         for value in (None, 42, True, 1.5, [], {}):

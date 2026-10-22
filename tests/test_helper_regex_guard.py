@@ -112,9 +112,27 @@ class HelperRegexGuardTest(unittest.TestCase):
         self.assertIn("`import re as _re` hides a regex call", report)
 
     def test_e_an_open_verdict_is_reported_and_does_not_fail(self):
+        # The tree carried an `open` verdict (D-PERF-6) when this test was
+        # written and this ran the guard as shipped; R32e closed it on
+        # lane-bounds-s3 (2026-10-22), so the OPEN path is driven through a
+        # COPY of the guard with one verdict rewritten, and the shipping
+        # guard is held to reporting none.
+        work = pathlib.Path(tempfile.mkdtemp())
+        self.addCleanup(shutil.rmtree, work, True)
+        text = GUARD.read_text(encoding="utf-8")
+        marker = '"linear: one character class, no quantifier (_RUN_HOST_END'
+        self.assertIn(marker, text)
+        copy = work / "check-helper-regex.py"
+        copy.write_text(text.replace(marker, '"open: test only -- the verdict a reader must see (_RUN_HOST_END', 1), encoding="utf-8")
+        done = subprocess.run([sys.executable, str(copy), "--helper-dir", str(PARTS)], capture_output=True, text=True, timeout=60)
+        report = done.stdout + done.stderr
+        self.assertEqual(done.returncode, 0, report)
+        self.assertIn("OPEN on provider text", report)
+        self.assertIn("1 open", report)
         code, report = run_guard()
         self.assertEqual(code, 0, report)
-        self.assertIn("OPEN on provider text", report)
+        self.assertNotIn("OPEN on", report)
+        self.assertIn(" 0 open, 0 problem(s)", report)
 
     def test_f_the_helper_on_lane_bounds_int_is_refused_by_name(self):
         if shutil.which("git") is None:

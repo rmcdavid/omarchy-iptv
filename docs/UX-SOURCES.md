@@ -94,8 +94,11 @@ the shipped wireframe.]**
    clicking it still copies, as shipped). [Round 11, R21: the caption line is
    deleted; the form ends at `Load`.]
 2. The user pastes (`Ctrl+V`, `Shift+Insert`, middle click) or types. Every
-   arrival is sanitized (2.3): trimmed, newlines and control characters
-   removed, capped at `LIMITS.url`. A pasted value that has a query string or
+   arrival is sanitized (2.3): trimmed and capped at `LIMITS.url` -- and,
+   since D-SRC-63 (2026-10-22), NOT rewritten: a line break, a tab or any
+   other control character INSIDE a pasted URL stays in the field and the
+   result line refuses it (`Invalid URL - check the host`, 5.4) rather than
+   the value being quietly turned into a different URL. A pasted value that has a query string or
    userinfo is shown masked immediately (4.4); text the user types is never
    masked while they type it. **[Amended 2026-10-11, D-CLIP-1: `Ctrl+V` and
    `Shift+Insert` only, through the plugin's `wl-paste` process; middle click
@@ -508,10 +511,20 @@ Sanitize (Model.js `sanitizeInput(text, limit)`, applied in
 **[overturned 2026-10-11, D-CLIP-1: there is no `onTextChanged` and no
 native paste path; sanitize runs in `pasteFromProcess` on the `wl-paste`
 text, and typed text goes through `Model.typedText` and `editInsert`]**):
-strip `\r`, `\n` and other C0/C1 control characters; cap at the field's
-limit (`LIMITS.url` 2048, `LIMITS.label` 40, `LIMITS.server` 256,
-`LIMITS.user` / `LIMITS.pass` 128). URL fields are also trimmed on paste;
-every field is trimmed on submit (so a label can be typed with spaces).
+for the label, username and password, strip `\r`, `\n` and other C0/C1
+control characters (`sanitizeInput`); for the Playlist, EPG and Server
+fields, strip NOTHING inside the text (`sanitizeUrlInput`, chosen by
+`Model.sanitizeFieldInput`; **D-SRC-63, 2026-10-22**: a tab inside a pasted
+password used to be deleted and the password submitted as `pass`, learned
+of only as a wrong-password failure; now the validator refuses the value
+on the result line and the user sees why). Typed text never carries a
+control character (Qt's own acceptance rule, mirrored by `typedText`), so
+only a paste can. Cap at the field's limit (`LIMITS.url` 2048,
+`LIMITS.label` 40, `LIMITS.server` 256, `LIMITS.user` / `LIMITS.pass`
+128). URL fields are also trimmed on paste (the six ASCII whitespace
+characters and NBSP off both ends: a trailing newline from `wl-copy` never
+reaches the validator); every field is trimmed on submit (so a label can
+be typed with spaces).
 
 Esc, by origin:
 
@@ -1215,6 +1228,16 @@ The form's result line is the shipped banner's inner row (glyph +
 promoted to the guide banner. The guide banner stays reserved for the
 active source's refresh / EPG problems.
 
+The same line carries the form's ONE warning (R32a, 2026-10-21; R32a',
+2026-10-22): the alert glyph in the normal fill (not the urgent one), with
+the model's sentence from `Model.formWarningLine(form)`, while a URL field
+holds a value that VALIDATES and whose host before the first `/` has no dot
+and an `@` follows later (5.4). It is advice, not an error: it never blocks
+submit, moves no focus, and the error line and the fetching line replace
+it. When the same shape does NOT validate (the typo `http://myuser:pa#ss@...`
+reads as port `pa`), the error line wins and carries the warning's encoding
+sentence itself, so the advice is never lost behind the refusal.
+
 ### 4.4 Masked URL rendering
 
 ```
@@ -1379,7 +1402,8 @@ Key names at opacity 0.7, verbs at 0.45, as shipped.
 |---|---|---|---|
 | `empty` | nothing after trim | `Enter a playlist URL or path` | (EPG is optional; no error) |
 | `scheme` | `ftp://`, `rtmp://`, `mailto:`, `javascript:`, a bare host, anything not `http(s)://` or `/` | `Start with http://, https://, or / for a local file` | `EPG: start with http://, https://, or / for a local file` |
-| `invalid` | scheme present but no host, spaces or illegal characters, unparsable | `Invalid URL - check the host` | `EPG: invalid URL - check the host` |
+| `invalid` | scheme present but no host, spaces or illegal characters, unparsable; since D-SRC-63 (2026-10-22) also a tab, a line break or any control character INSIDE the value, in a path too (`http://u:pa<TAB>ss@h.test/x`, which used to submit as the password `pass`; `http://h.test/x<LF>http://evil.test/`, which used to submit as one URL) | `Invalid URL - check the host` | `EPG: invalid URL - check the host` |
+| `invalid`, with the predicate (R32a', R32a'') | an `@` follows the first `/` and either the host before it has no dot (`http://myuser:pa#ss@cdn.test/x`, `pa?ss`, `pa/ss`: port `pa`) or the port after it is not a number (`http://user.name:pa/ss@h.test/x`, `http://h.test:pa/me@x.test/y`), and the value does not validate | `Invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` | `EPG: invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` (the Server field the same, without the prefix) |
 | `relative_path` | starts with `~`, `./` or a name | `Use an absolute path (starts with /, not ~)` | `EPG: use an absolute path (starts with /, not ~)` |
 | `too_long` | over `LIMITS.url` | `Too long - max 2,048 characters` | `EPG: too long - max 2,048 characters` |
 | `duplicate` | same playlist URL as another source (exact after trim) | `Already in Sources as "Provider"` | -- |
@@ -1393,6 +1417,32 @@ Key names at opacity 0.7, verbs at 0.45, as shipped.
 
 One error at a time, first failing field in form order; focus moves to it.
 No `https://` auto-prefix and no Xtream URL auto-parse (8).
+
+**Warning (R32a, 2026-10-21; R32a' and R32a'', 2026-10-22; not an error,
+never refuses).** When the Playlist, EPG or Server value validates but its
+host before the first `/` has no dot (and is not a bracketed literal) and an
+`@` follows later in the typed value -- most likely a password with an
+unencoded `/`, `?` or `#`, which the URL then reads as the host and port --
+the result line shows, once, while the value warrants it. The predicate's
+second arm (a non-numeric port with a later `@`) never validates, so it is
+only ever seen on the error line. Which shapes draw which line:
+
+| Shape | Validates? | Line |
+|---|---|---|
+| dotless host, later `@`, digits-only password prefix (`http://user:2024/ab@host.test/x`) | yes (host `user`, port 2024) | warning: `The host before the first / has no dot and an @ follows it. If a password holds /, ? or #, write them as %2F, %3F and %23.` |
+| dotless host, later `@`, any other prefix (`http://myuser:pa#ss@cdn.test/x`, `pa?ss`, `pa/ss`) | no (port `pa`) | error: `Invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` |
+| LAN name with a path `@` (`http://nas:8000/files/me@home/x`, `http://localhost:8080/me@x.test/y`) | yes | the warning; a sentence, not a refusal |
+| dotted host with a later `@` (an Xtream `/playlist/<email>/<pass>/m3u_plus` link), a bracketed literal, an encoded password (`pa%2Fss`), a userinfo `@` with no later one (`http://u:p@nas/x`) | yes | nothing |
+| a NON-NUMERIC port and a later `@`, dotted host or not (`http://user.name:pa/ss@h.test/x`, `http://me@mail.test:pa/ss@h.test/x`, `http://h.test:pa/me@x.test/y`, `http://h.test:8080x/me@x.test/y`) | no (port `pa`, `8080x`) | error: `Invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` (R32a''; under R32a' the dotted-host case drew the bare refusal) |
+| a dotted username before a digits-only password prefix (`http://user.name:2024/ab@host.test/x`) | yes (host `user.name`, port 2024) | nothing: the first arm needs a dotless host and the second a non-numeric port (D-SINK-35's residual, stated) |
+| a dotted host with an EMPTY port and a later `@` (`http://h.test:/me@x.test/y`) | yes | nothing: an empty port is an RFC shape, not a non-numeric one |
+| a non-numeric port with no later `@` (`http://h.test:pa/ss`) | no | the bare `Invalid URL - check the host` |
+
+Submit proceeds on every row that validates. The sentences are
+`Model.WARN_AT_AFTER_AUTHORITY` and `Model.ENCODE_SENTENCE` (its second
+half), the predicate is `Model.urlHostWithheld(text)`, the warning is
+`Model.sourceUrlWarning(text)` placed by `Model.formWarningLine(form)`, and
+the appended error sentence is `Model.validateSourceUrl`'s own.
 
 ### 5.5 Fetch results (asynchronous, same line)
 
