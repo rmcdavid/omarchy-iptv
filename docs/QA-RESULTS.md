@@ -13315,6 +13315,16 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### The bounds sweep, round 3 (2026-10-22): H2 and G2 merged, S2 held on the lead's own ruling
+
+**Lane H2 (`lane-bounds-h2`, `97ba41f`)**: D-EPG-12 (R32d), one fold (`epg_name_text`) inside both key functions so `build_alias` and `parse_xmltv` key a DEL, tab or C0 name identically (the base keyed `alpha\x7fone` against `alpha one`), the guide caps pinned at their exact boundary, the README's cap sentence made true, the regex guard grading the adjacent-overlapping-runs shape by structure (`super_linear_pairs`) and red on a copy of the old pattern. Its recheck: MERGEABLE, two P3s (**F-GATE-6** among them), its own 7.2M-string enumeration equal. Under rule 15 it reported **D-PERF-11** for the model lane and cleared the JS for any name-key mirror.
+
+**Lane G2 (`lane-bounds-g2`, `2d8c84a`)**: F-HARNESS-36, D-LOGO-23, D-LOGO-20 (prune at every change of the active directory), D-LOGO-21, D-LOGO-22 narrowed, the three unpinned decisions pinned, the README sentences; and **F-HARNESS-40**, a harness scanner defect invisible to 2,699 checks. Its recheck: MERGEABLE (6 tests / 12 subtests red on the base; 11 mutations each red), three P3s including **F-HARNESS-41**, a timing flake under load.
+
+**Lane S2 (`lane-bounds-s2`, `cb43094`)**: implemented R32a-c and R32e as written and raised, as its first open question, that the free-text rule prints a password tail on an Xtream-shaped path credential. Its recheck proved it on the shipping path (**D-SINK-29**, P1, the lead's ruling, not the lane's work), found the warning unimplemented for a non-digit password prefix (P2), and three P3s. The lane also fixed D-SINK-26 and reported **D-SINK-30** and **D-SINK-31**. NOT MERGEABLE until R32a' (the decisions log) is implemented: round 4.
+
+Both merges were resealed and gated: `84cf2d1`, 1,443 python tests, 2,702 node checks, the helper regex guard at 36 reviewed calls with D-PERF-6 printed OPEN until lane S2's search lands.
+
 ### The bounds sweep, round 2 (2026-10-21): three lanes off the round-1 integration, and the rulings R32
 
 **Lane H (`lane-bounds-h`, `8a3a0de`)**: D-EPG-10 (without an index the parse admits at most MAX_CHANNELS guide channels and refuses ids over 256 characters, counted by programme), D-EPG-8 (the qualifier strip without a regex, equal to the old pattern on 20,000 seeded names; display-names folded and cut first; every helper regex graded in a new gate step, `scripts/check-helper-regex.py`), D-EPG-9 (one backward pass, byte-identical output), the EPG counted sentences, and the round-1 rechecks' items; under rule 15 it fixed **D-PERF-7**, **D-PERF-8**, **D-PERF-9** and **D-PERF-10** and found **D-PERF-6** open. Its recheck: NOT MERGEABLE, one P1 -- `_EPG_NAME_NOISE` is still quadratic and the guard calls it linear (**D-EPG-12**) -- and three P3s.

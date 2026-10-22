@@ -419,7 +419,8 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2702}
 # red on lane-bounds-int e8d2b35 (and the busy-run test changed in place),
 # the other 4 on a mutation of the shipping line (scratchpad g2-red).
 # the two sides' larger floor, the bounds integration, 2026-10-22
-PY_TESTS_MIN=${PY_TESTS_MIN:-1434}
+# 1434 -> 1443 on 2026-10-22: the H2 and G2 merges together (lane-bounds-int 84cf2d1).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1443}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
