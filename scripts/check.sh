@@ -355,7 +355,16 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-80}
 # D-SRC-63 boundary checks (sanitizeUrlInput, sanitizeFieldInput, the
 # submit path, the CLI path, every other URL reader, the composition pin)
 # and the 12 new source-urls fixture cases.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2943}
+# 2026-10-22, lane-r7-code (round 7: D-SRC-64, D-SINK-38, D-SRC-65, R33a-d):
+# 2943 -> 2984 -- the parked pair in the model (8: the reader, the writer,
+# cloneState and parseState, the hold, the parked input, the pair/marker
+# invariant, the merge, the keep rule), the four D-SRC-64 harness pins and
+# the D-SINK-38 pin on both hosts and both echo modes (20), the R33a paste
+# join and its structural pin (2), the R33b/R33c sentence pins (2), the
+# state-keys fixture's nine parked cases and its `pending` group (10, one
+# re-counted); 61 red on fe40b2c, every shipping decision red on a mutation
+# (the lane report).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2984}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -541,7 +550,12 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2943}
 # 2026-10-22, lane-bounds-s5 (round 6): 1481 -> 1485 -- test_source's
 # D-SRC-63 reader test (+1), test_model_regex_guard's three F-GATE-9 tests
 # (+3); test_helper's class test and exact-`py` test rewritten in place.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1485}
+# 2026-10-22, lane-r7-code (round 7: D-SRC-64, D-SINK-38, D-SRC-65, R33a-d):
+# 1485 -> 1487 -- test_state's D-SRC-64 test (+1: a hand-run `state` verb
+# keeps the parked pair and prints its hosts only), test_model_regex_guard's
+# R33d test (+1: `globalThis.RegExp(` and `window.RegExp(`); both red on
+# fe40b2c (the lane report).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1487}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

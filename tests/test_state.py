@@ -601,7 +601,7 @@ class SessionKeyTest(unittest.TestCase):
         fixture = self._state_keys_fixture()
         for case in fixture["cases"]:
             state = helper.normalize_state(json.loads(json.dumps(case["input"])))
-            got = {"entryMigrated": state.get("entryMigrated")}
+            got = {"entryMigrated": state.get("entryMigrated"), "migrationPending": state.get("migrationPending")}
             if "dropped" in case["expect"]:
                 gone = {"pendingEpg", "entryInputs"} - set(state)
                 if not any("epgSetAt" in r for r in state["sources"]):
@@ -622,8 +622,41 @@ class SessionKeyTest(unittest.TestCase):
         self.assertEqual(sorted({k for r in state["sources"] for k in r}), want("source"))
         self.assertEqual(sorted({k for r in played for k in r}), want("played"))
         self.assertEqual(sorted({k for r in state["savedSearches"] for k in r}), want("savedSearch"))
+        self.assertEqual(sorted(state["migrationPending"]), want("pending"))
         # Kept, not merely present: the marker comes back as written.
         self.assertIs(state["entryMigrated"], True)
+        # D-SRC-64: and the parked pair, as written.
+        self.assertEqual(state["migrationPending"], fixture["document"]["migrationPending"])
+
+    def test_d_src_64_a_helper_write_keeps_the_parked_pair_and_prints_its_hosts_only(self):
+        """D-SRC-64 (round 7): the pair a migration held at the cap parks in
+        state.json is the ONLY copy of that credential once the bar entry is
+        stripped, so (a) every hand-run `state` verb keeps it (the whitelist
+        trap: normalize_state must be taught it), and (b) every verb's reply,
+        which prints the whole state, carries its HOSTS and never the URLs
+        (rule 5: stdout is a sink; `public_state` copies every top-level key).
+        Seen red on fe40b2c: (a) the first write dropped the key, and with the
+        reader taught alone (b) printed both URLs."""
+        fixture = self._state_keys_fixture()
+        document = json.loads(json.dumps(fixture["document"]))
+        document.pop("entryMigrated")
+        document["migrationPending"] = {"playlistUrl": "http://u:zpass@held.example.test/get.php?password=zpass",
+                                        "epgUrl": "/srv/guide/held.xml"}
+        os.makedirs(self.dir, exist_ok=True)
+        self.path.write_text(json.dumps(document), encoding="utf-8")
+        for args in (("favorite", "add", "t:itv.uk"), ("clear-recents",),
+                     ("source", "update", document["sources"][1]["key"], "--label", "Second")):
+            code, payload, err = self.state(*args)
+            self.assertEqual(code, 0, args)
+            written = json.loads(self.path.read_text(encoding="utf-8"))
+            self.assertEqual(written.get("migrationPending"), document["migrationPending"], args)
+            self.assertNotIn("entryMigrated", written, args)
+            self.assertEqual(payload["state"]["migrationPending"], {"host": "held.example.test", "epgHost": "local file"}, args)
+            self.assertNotIn("zpass", json.dumps(payload) + err, args)
+        self.assertEqual(helper.public_state(helper.normalize_state(document))["migrationPending"],
+                         {"host": "held.example.test", "epgHost": "local file"})
+        self.assertEqual(helper.public_state(helper.normalize_state({"version": 2, "migrationPending": {"playlistUrl": "http://h.test/x"}}))["migrationPending"],
+                         {"host": "h.test", "epgHost": ""})
 
     def test_r21a_a_helper_write_keeps_the_migration_marker(self):
         """R21a's preserved-keys half, at the helper's own sink: `state

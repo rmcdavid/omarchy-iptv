@@ -16,7 +16,12 @@
     "Round 11 (R21) withdrew the three keys rounds 9 and 10 added (pendingEpg, every",
     "record's epgSetAt, entryInputs) with the machinery that wrote them, and added one:",
     "`entryMigrated`, the migration marker, a boolean present only when exactly true.",
-    "`cases` pin it value by value through both readers: validated, never invented."
+    "`cases` pin it value by value through both readers: validated, never invented.",
+    "",
+    "Round 7 (D-SRC-64, 2026-10-22) added `migrationPending`: the pair a migration held at the",
+    "MAX_SOURCES cap has parked, `{ playlistUrl, epgUrl }` (group `pending`), present only when",
+    "it reads as a pair. The only copy of that credential while the hold lasts; a reader not",
+    "taught it would erase it. `cases` pin its reading through both readers like the marker's."
   ],
   "keys": {
     "top": [
@@ -30,7 +35,8 @@
       "savedSearches",
       "hiddenGroups",
       "activeKey",
-      "entryMigrated"
+      "entryMigrated",
+      "migrationPending"
     ],
     "source": [
       "key",
@@ -54,6 +60,10 @@
     "savedSearch": [
       "query",
       "at"
+    ],
+    "pending": [
+      "playlistUrl",
+      "epgUrl"
     ]
   },
   "serviceOnly": {},
@@ -121,7 +131,11 @@
       "Adult"
     ],
     "activeKey": "12e22d28",
-    "entryMigrated": true
+    "entryMigrated": true,
+    "migrationPending": {
+      "playlistUrl": "http://held.example.test/get.php?username=u&password=p",
+      "epgUrl": "http://held.example.test/xmltv.php?username=u&password=p"
+    }
   },
   "cases": [
     {
@@ -148,7 +162,8 @@
         "entryMigrated": true
       },
       "expect": {
-        "entryMigrated": true
+        "entryMigrated": true,
+        "migrationPending": null
       }
     },
     {
@@ -174,7 +189,8 @@
         "activeKey": "12e22d28"
       },
       "expect": {
-        "entryMigrated": null
+        "entryMigrated": null,
+        "migrationPending": null
       }
     },
     {
@@ -201,7 +217,8 @@
         "entryMigrated": false
       },
       "expect": {
-        "entryMigrated": null
+        "entryMigrated": null,
+        "migrationPending": null
       }
     },
     {
@@ -228,7 +245,8 @@
         "entryMigrated": "true"
       },
       "expect": {
-        "entryMigrated": null
+        "entryMigrated": null,
+        "migrationPending": null
       }
     },
     {
@@ -255,7 +273,8 @@
         "entryMigrated": 1
       },
       "expect": {
-        "entryMigrated": null
+        "entryMigrated": null,
+        "migrationPending": null
       }
     },
     {
@@ -282,7 +301,8 @@
         "entryMigrated": null
       },
       "expect": {
-        "entryMigrated": null
+        "entryMigrated": null,
+        "migrationPending": null
       }
     },
     {
@@ -311,7 +331,8 @@
         ]
       },
       "expect": {
-        "entryMigrated": null
+        "entryMigrated": null,
+        "migrationPending": null
       }
     },
     {
@@ -340,7 +361,8 @@
         }
       },
       "expect": {
-        "entryMigrated": null
+        "entryMigrated": null,
+        "migrationPending": null
       }
     },
     {
@@ -378,11 +400,291 @@
       },
       "expect": {
         "entryMigrated": null,
+        "migrationPending": null,
         "dropped": [
           "entryInputs",
           "epgSetAt",
           "pendingEpg"
         ]
+      }
+    },
+    {
+      "name": "migrationPending a pair is kept as written (D-SRC-64)",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "migrationPending": {
+          "playlistUrl": "http://held.example.test/get.php?username=u&password=p",
+          "epgUrl": "http://held.example.test/xmltv.php?username=u&password=p"
+        }
+      },
+      "expect": {
+        "entryMigrated": null,
+        "migrationPending": {
+          "playlistUrl": "http://held.example.test/get.php?username=u&password=p",
+          "epgUrl": "http://held.example.test/xmltv.php?username=u&password=p"
+        }
+      }
+    },
+    {
+      "name": "migrationPending a playlist alone reads with an empty epgUrl",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "migrationPending": {
+          "playlistUrl": "http://held.example.test/get.php?username=u&password=p"
+        }
+      },
+      "expect": {
+        "entryMigrated": null,
+        "migrationPending": {
+          "playlistUrl": "http://held.example.test/get.php?username=u&password=p",
+          "epgUrl": ""
+        }
+      }
+    },
+    {
+      "name": "migrationPending an epgUrl that is not a string reads as empty",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "migrationPending": {
+          "playlistUrl": "http://held.example.test/get.php?username=u&password=p",
+          "epgUrl": 7
+        }
+      },
+      "expect": {
+        "entryMigrated": null,
+        "migrationPending": {
+          "playlistUrl": "http://held.example.test/get.php?username=u&password=p",
+          "epgUrl": ""
+        }
+      }
+    },
+    {
+      "name": "migrationPending with an EMPTY playlistUrl is no pair",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "migrationPending": {
+          "playlistUrl": "",
+          "epgUrl": "http://held.example.test/xmltv.php?username=u&password=p"
+        }
+      },
+      "expect": {
+        "entryMigrated": null,
+        "migrationPending": null
+      }
+    },
+    {
+      "name": "migrationPending with a non-string playlistUrl is no pair",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "migrationPending": {
+          "playlistUrl": [
+            "x"
+          ],
+          "epgUrl": "http://held.example.test/xmltv.php?username=u&password=p"
+        }
+      },
+      "expect": {
+        "entryMigrated": null,
+        "migrationPending": null
+      }
+    },
+    {
+      "name": "migrationPending a string is no pair",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "migrationPending": "http://held.example.test/get.php?username=u&password=p"
+      },
+      "expect": {
+        "entryMigrated": null,
+        "migrationPending": null
+      }
+    },
+    {
+      "name": "migrationPending a list is no pair",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "migrationPending": [
+          "http://held.example.test/get.php?username=u&password=p",
+          "http://held.example.test/xmltv.php?username=u&password=p"
+        ]
+      },
+      "expect": {
+        "entryMigrated": null,
+        "migrationPending": null
+      }
+    },
+    {
+      "name": "migrationPending null is absent",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28",
+        "migrationPending": null
+      },
+      "expect": {
+        "entryMigrated": null,
+        "migrationPending": null
+      }
+    },
+    {
+      "name": "migrationPending absent is absent",
+      "input": {
+        "version": 2,
+        "sources": [
+          {
+            "key": "12e22d28",
+            "url": "http://a.example.test/list.m3u",
+            "epgUrl": "",
+            "kind": "http",
+            "label": "a.example.test",
+            "labelCustom": false,
+            "origin": "cli",
+            "addedAt": 10,
+            "lastUsed": 20,
+            "fetchedAt": 30,
+            "channelCount": 9,
+            "groupCount": 2
+          }
+        ],
+        "activeKey": "12e22d28"
+      },
+      "expect": {
+        "entryMigrated": null,
+        "migrationPending": null
       }
     }
   ]

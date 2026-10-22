@@ -161,8 +161,10 @@ obvious when it happens to you:
   notification of its own, as having no source to guide, beside the
   playlist's.) If Sources already
   holds 50 sources and the playlist is not one of them, nothing is moved and no source is removed to
-  make room: the playlist stays on the entry, and so does a guide-data URL
-  set beside it -- neither is attached to any of your sources -- nothing is
+  make room: the playlist, and a guide-data URL set beside it, are kept in
+  the plugin's own `state.json` (readable by you alone) and taken off the
+  bar entry as soon as that is written -- neither is attached to any of your
+  sources, neither counts as one, and neither is shown as one -- nothing is
   marked as done, and a notification titled **Sources is full** says `The
   playlist set on the bar, and its guide URL if one is set, were not moved
   into Sources: Sources already holds 50 sources, the most it can. Remove
@@ -174,10 +176,17 @@ obvious when it happens to you:
   over whichever source was active. If another program fills the freed
   place first -- a hand-run `state source add` in the moment before the
   plugin's save has read the file -- the move does not happen: both URLs
-  stay on the entry, nothing new is told, and the next removal tries again.
-  (Builds of this change that never shipped took both off the entry in that
-  case with neither in any source, saying only that a source "added here"
-  was not kept.) Up to and including 0.14.3 the least
+  stay kept in `state.json`, nothing new is told, and the next removal tries
+  again; and if that other program added the same playlist itself, the
+  guide-data URL joins that source and the wait ends. If the plugin cannot
+  write `state.json` when the hold begins, the two stay on the bar entry
+  until it can, and the next start picks them up from there. (Builds of this
+  change that never shipped took both off the entry in that case with
+  neither in any source, saying only that a source "added here" was not
+  kept; the builds between 0.14.3 and this one kept both on the bar entry
+  for as long as the wait lasted, which is the shell's settings file, read
+  by anything that reads your settings and copied by `omarchy refresh
+  shell`.) Up to and including 0.14.3 the least
   recently used source was removed to make room, with only a journal line,
   and its URL went with it. An install updated from 0.13.6 records no
   active source, so until you pick one, or a source is removed, the guide
