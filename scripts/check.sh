@@ -263,15 +263,16 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # 2678 -> 2679 on 2026-10-21 (lane-bounds-l, D-SRC-45 / D-LOGO-12): the
 # shell's reading of the logos verb's no_cache refusal and of a summary at
 # the ceiling (seen red on a mutation of Model.logoSummaryNames).
-# 2679 -> 2746 on 2026-10-21 (lane-bounds-s), +67: D-SG-3's probe in a
+# 2679 -> 2747 on 2026-10-21 (lane-bounds-s), +68: D-SG-3's probe in a
 # child process over every browse and apply path and the service's (30) and
 # in process (5), the shared channel-ids vector a prototype-named tvg-id adds
-# (5), the shared source-urls cases for D-SINK-25 (13), the D-SINK-23 oracle
+# (5), the shared source-urls cases for D-SINK-25 (14), the D-SINK-23 oracle
 # check (1), D-PERF-3's equivalences (7), D-SINK-25's display (2), D-SINK-24's
 # journal line (2) and D-PERF-4's LRU (2). 48 of them red on lane-bounds-int,
-# with 3 existing checks the new shared vectors turn red there; the other 19
-# pin what stayed the same (an accepted URL, a path the bug never reached).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2746}
+# with 3 existing checks the new shared vectors turn red there; the other 20
+# pin what stayed the same (an accepted URL, a path the bug never reached);
+# the lane's 22 mutations of the new code are each red (lane report).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2747}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity

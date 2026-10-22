@@ -109,5 +109,6 @@
   {"input":"http://u:p@h.test:8080/get.php?username=me@mail.test&password=p","ok":true,"kind":"http","url":"http://u:p@h.test:8080/get.php?username=me@mail.test&password=p","host":"h.test","key":"251a0d1a","note":"D-SINK-25: and with userinfo as well"},
   {"input":"http://h.test/live/me@mail.test/pw/1.m3u","ok":true,"kind":"http","url":"http://h.test/live/me@mail.test/pw/1.m3u","host":"h.test","key":"d489f069","note":"D-SINK-25: an at-sign in the path with no port to misread is not the shape"},
   {"input":"http://h.test:8080?u=me@mail.test","ok":true,"kind":"http","url":"http://h.test:8080/?u=me@mail.test","host":"h.test","key":"fe18c104","note":"D-SINK-25: a pathless query whose at-sign follows an '='"},
-  {"input":"http://[2001:db8::1]:8080/me@mail.test","ok":true,"kind":"http","url":"http://[2001:db8::1]:8080/me@mail.test","host":"[2001:db8::1]","key":"dbce0b8d","note":"D-SINK-25: a bracketed host is never a username"}
+  {"input":"http://[2001:db8::1]:8080/me@mail.test","ok":true,"kind":"http","url":"http://[2001:db8::1]:8080/me@mail.test","host":"[2001:db8::1]","key":"dbce0b8d","note":"D-SINK-25: a bracketed host is never a username"},
+  {"input":"http://nas:8000/files/me@home/list.m3u","ok":true,"kind":"http","url":"http://nas:8000/files/me@home/list.m3u","host":"nas","key":"5c7d08ab","note":"D-SINK-25: a port and an at-sign in the path whose next segment is not a dotted name (a LAN share, `home`) is not the shape: what follows the at-sign must look like a host"}
 ]
