@@ -408,7 +408,7 @@ function isSpaceAt(s, i) {
 // ends a free-text URL's RUN (redactUrls) and its AUTHORITY (runHostParts),
 // and the whitespace validateSourceUrl refuses -- shared with the helper's
 // URL_SPACE_CHARS and pinned code point by code point by
-// tests/fixtures/url-whitespace.json in both suites. It is NOT `\s`, on
+// the shared url-whitespace fixture (dev branch) in both suites. It is NOT `\s`, on
 // purpose: lane-bounds-s3's helper ended the run at Python's `\s` plus
 // `'"<>` and the authority at Python's `\s` plus U+FEFF, two classes, so a
 // password holding U+FEFF printed the username; and the JS run ended at

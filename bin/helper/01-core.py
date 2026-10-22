@@ -541,7 +541,7 @@ _LATIN_MARKS = re.compile("([a-z])[\u0300-\u036f]+")
 # ends a free-text URL's RUN (_URL_TAIL_RE, redact_urls) and its AUTHORITY
 # (_URL_SPACE, run_host_parts), and the whitespace validate_source_url
 # refuses -- shared with Model.isUrlSpaceAt and pinned code point by code
-# point by tests/fixtures/url-whitespace.json in both suites. It is NOT `\s`,
+# point by the shared url-whitespace fixture (dev branch) in both suites. It is NOT `\s`,
 # on purpose: lane-bounds-s3 ended the run at Python's `\s` plus `'"<>`
 # (_URL_TAIL_RE as 0.14.3 shipped it) and the authority at Python's `\s` plus
 # U+FEFF, two classes, so a password holding U+FEFF printed the username; and
