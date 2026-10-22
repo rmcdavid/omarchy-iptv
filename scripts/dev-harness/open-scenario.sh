@@ -381,7 +381,7 @@ else
   mkdir -p "$SCRATCH/bin" && ln -sfn "$HERE/stub-hyprctl.py" "$SCRATCH/bin/hyprctl"
   cage_start 1700
   h reap >/dev/null 2>&1
-  echo "== shell arm: $CHANNELS channels, $COLD cold shells and $WARM warm opens per view, floating window, cage $NESTED, guide data ${EPG_FIX:+for every channel (OPEN_EPG=1)}${EPG_FIX:-none}, load $(cut -d' ' -f1-3 /proc/loadavg)"
+  echo "== shell arm: $CHANNELS channels, $COLD cold shells and $WARM warm opens per view, floating window, cage $NESTED, guide data $([[ -n $EPG_FIX ]] && echo "for every channel (OPEN_EPG=1)" || echo none), load $(cut -d' ' -f1-3 /proc/loadavg)"
   for view in list wall; do
     [[ $view == wall ]] && want=channelWall || want=resultList
     L=${view:0:1}; L=${L^^}
