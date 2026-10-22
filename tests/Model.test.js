@@ -5951,8 +5951,11 @@ for (const c of fixture) {
   if (c.warn !== undefined) {
     check(name + " -- predicate: " + c.warn, modelFn("urlHostWithheld")(c.input), c.warn)
     if (c.ok) check(name + " -- warns: " + c.warn, Model.sourceUrlWarning(c.input) !== "", c.warn)
+    // R33b (round 7): a refusal for whitespace or a control character INSIDE
+    // the value carries the sentence that names it (`url_control`) instead of
+    // "Invalid URL - check the host", and never the encoding sentence.
     else check(name + " -- the refusal carries the encoding sentence: " + c.warn,
-               [r.message.indexOf(Model.ENCODE_SENTENCE) !== -1, r.message.indexOf("Invalid URL") === 0, Model.sourceUrlWarning(c.input)], [c.warn, true, ""])
+               [r.message.indexOf(Model.ENCODE_SENTENCE) !== -1, r.message.indexOf("Invalid URL") === 0 || r.message === Model.sourceErrorMessage("url_control"), Model.sourceUrlWarning(c.input)], [c.warn, true, ""])
   }
 }
 check("R32a': the fixture carries the ruling's own typo example as an INVALID value with the predicate, in all three spellings, and dotted or at-sign-less invalid values without it", [
@@ -6003,7 +6006,7 @@ checkCall("D-SRC-63: the form's submit keeps a tab inside a URL field and valida
   const values = Model.formSubmitValues(g.form)
   const v = Model.validateUrlForm(values, [], "")
   return [values, v.ok, v.error && v.error.field, v.error && v.error.code, v.error && v.error.message]
-}, [{ label: "NAS", playlist: "http://u:pa\tss@h.test/x", epg: "" }, false, "playlist", "invalid", Model.sourceErrorMessage("invalid")])
+}, [{ label: "NAS", playlist: "http://u:pa\tss@h.test/x", epg: "" }, false, "playlist", "invalid", Model.sourceErrorMessage("url_control")])
 checkCall("D-SRC-63: typedText still strips every control character (Qt's own acceptance rule), so only a paste can carry one into a field", function () {
   return [Model.typedText("x\ty\u0007", false), Model.typedText("\u001c", false)]
 }, ["xy", ""])
@@ -6015,10 +6018,11 @@ checkCall("D-SRC-63 on the CLI path: entryInputForm validates the URL boundary's
   return [Model.entryInputForm("playlistUrl", "  " + tab + "\n"), Model.entryInputForm("epgUrl", "\u0007"),
           r.changed, r.added, r.invalid && r.invalid.code, r.state.sources.length, none.changed, none.invalid]
 }, [{ text: "http://u:pa\tss@h.test/x", ok: false, url: "", form: "http://u:pa\tss@h.test/x" }, { text: "", ok: false, url: "", form: "" }, false, "", "invalid", 0, false, null])
-checkCall("D-SRC-63 reaches every other URL reader: a playlist's url-tvg hint with a tab resolves to no guide URL, and an Xtream server with one is invalid (its username and password keep the name rule, stated beside xtreamUrls)", function () {
+checkCall("D-SRC-63 reaches every other URL reader: a playlist's url-tvg hint with a tab resolves to no guide URL, and an Xtream server with one is invalid; since D-SRC-65 (R33c, round 7) its username and password REFUSE one too, each with its own code, instead of deleting it into a different credential", function () {
   return [Model.epgHintUrl({ epgUrlHint: "http://e.test/x\tmltv.php" }), Model.epgHintUrl({ epgUrlHint: "\thttp://e.test/xmltv.php\n" }),
-          Model.xtreamUrls("http://h.te\tst:8080", "u", "p").code, Model.xtreamUrls("http://h.test:8080", "u\tv", "p\u0007w").playlistUrl]
-}, ["", "http://e.test/xmltv.php", "invalid", "http://h.test:8080/get.php?username=uv&password=pw&type=m3u_plus&output=ts"])
+          Model.xtreamUrls("http://h.te\tst:8080", "u", "p").code, Model.xtreamUrls("http://h.test:8080", "u\tv", "pw").code, Model.xtreamUrls("http://h.test:8080", "uv", "p\u0007w").code,
+          Model.xtreamUrls("http://h.test:8080", "u\tv", "p\u0007w").playlistUrl]
+}, ["", "http://e.test/xmltv.php", "invalid", "user_control", "pass_control", ""])
 checkCall("D-SRC-63 meets R32a''': the predicate's authority cut at the six delimiters is observable by composition now -- `http://my:pa<TAB>/ss@h.test/x` ends its authority at the tab, so the later `@` is not seen and the refusal carries NO encoding sentence, where the same value without the tab carries it", function () {
   const withTab = Model.validateSourceUrl("http://my:pa\t/ss@h.test/x")
   const without = Model.validateSourceUrl("http://my:pa/ss@h.test/x")
@@ -6032,7 +6036,7 @@ check("validateSourceUrl result shape", Object.keys(Model.validateSourceUrl("htt
 check("validateSourceUrl message is the UX copy", Model.validateSourceUrl("provider.test/x").message, "Start with http://, https://, or / for a local file")
 check("validateSourceUrl too_long quotes LIMITS.url", Model.validateSourceUrl("/" + "x".repeat(2100)).message, "Too long" + SEP + "max 2,048 characters")
 check("validateSourceUrl epg: empty is fine (optional)", Model.validateSourceUrl("   ", { kind: "epg" }), { ok: true, code: "ok", message: "", field: "epg", kind: "", url: "", host: "" })
-check("validateSourceUrl epg: errors carry the EPG prefix", [Model.validateSourceUrl("x.test/e.xml", { kind: "epg" }).message, Model.validateSourceUrl("http://h .test/", { kind: "epg" }).message, Model.validateSourceUrl("~/e.xml", { kind: "epg" }).message], ["EPG: start with http://, https://, or / for a local file", "EPG: invalid URL" + SEP + "check the host", "EPG: use an absolute path (starts with /, not ~)"])
+check("validateSourceUrl epg: errors carry the EPG prefix", [Model.validateSourceUrl("x.test/e.xml", { kind: "epg" }).message, Model.validateSourceUrl("http://h .test/", { kind: "epg" }).message, Model.validateSourceUrl("~/e.xml", { kind: "epg" }).message], ["EPG: start with http://, https://, or / for a local file", "EPG: remove the space, tab, line break or control character inside the URL", "EPG: use an absolute path (starts with /, not ~)"])
 check("validateSourceUrl null", Model.validateSourceUrl(null).code, "empty")
 check("normalizeSourceUrl", [Model.normalizeSourceUrl(" HTTP://H.test:80/x#f "), Model.normalizeSourceUrl("ftp://x"), Model.normalizeSourceUrl("file:///a/b.m3u")], ["http://h.test/x", "", "/a/b.m3u"])
 check("isUrlField", [Model.isUrlField("playlist"), Model.isUrlField("epg"), Model.isUrlField("label"), Model.isUrlField("server")], [true, true, false, false])
@@ -6102,7 +6106,29 @@ check("xtreamUrls invalid host / server_userinfo (SR17)", [Model.xtreamUrls("htt
 check("xtreamUrls credential codes", [Model.xtreamUrls("http://h.test", "", "p").code, Model.xtreamUrls("http://h.test", "u", "  ").code, Model.xtreamUrls("http://h.test", "u".repeat(257), "p").code, Model.xtreamUrls("http://h.test", "u", "p".repeat(257)).code, Model.xtreamUrls("http://" + "h".repeat(520), "u", "p").code], ["user_empty", "pass_empty", "user_too_long", "pass_too_long", "server_too_long"])
 check("xtreamUrls failure names the field and carries the copy", Model.xtreamUrls("http://h.test", "u", "").field + "|" + Model.xtreamUrls("http://h.test", "u", "").message, "password|Enter the password")
 check("xtreamUrls failure carries no URL fields", (() => { const r = Model.xtreamUrls("http://h.test/x", "u", "p"); return [r.playlistUrl, r.epgUrl, r.base, r.host] })(), ["", "", "", ""])
-check("xtreamUrls strips control characters from every field", Model.xtreamUrls("http://h.test\n", "u\ru", "p\tp").playlistUrl, "http://h.test/get.php?username=uu&password=pp&type=m3u_plus&output=ts")
+// D-SRC-65 (R33c, round 7, 2026-10-22). This check used to read "xtreamUrls
+// strips control characters from every field" and pinned `u\ru` becoming the
+// username `uu`: the silent rewrite D-SRC-63 closed for URLs, one layer down.
+// Seen red on fe40b2c (the counts are in the lane report).
+checkCall("D-SRC-65 (R33c): xtreamUrls -- edge whitespace on the server is trimmed (the URL boundary), and a control character inside OR at an edge of the username or password is REFUSED with its own code, its field and the sentence that names it, never deleted into a different credential; a space inside either is still allowed and encoded", () => {
+  const u = Model.xtreamUrls("http://h.test\n", "u\ru", "pp"), p = Model.xtreamUrls("http://h.test", "uu", "p\tp"), edge = Model.xtreamUrls("http://h.test", "\u0007uu", "pp\u007f")
+  const ok = Model.xtreamUrls("http://h.test\n", "u u", "p p")
+  return [u.code, u.field, u.message, u.playlistUrl + u.epgUrl, p.code, p.field, p.message, p.playlistUrl + p.epgUrl, edge.code, Model.xtreamUrls("http://h.test", "uu", "pp\u007f").code,
+          ok.ok, ok.playlistUrl]
+}, ["user_control", "username", "Remove the tab, line break or control character inside the username", "", "pass_control", "password", "Remove the tab, line break or control character inside the password", "",
+    "user_control", "pass_control", true, "http://h.test/get.php?username=u%20u&password=p%20p&type=m3u_plus&output=ts"])
+checkCall("R33b / R33c: ONE sentence shape for the three refusals -- the URL's names the space as well (a URL refuses one, a name does not), the username's and the password's swap the noun; the EPG field gets its prefix; and the URL refusal keeps the code `invalid` (every caller that switches on the code is unchanged) with the named sentence, where the predicate case keeps \"Invalid URL\" plus the encoding advice", () => {
+  const url = Model.sourceErrorMessage("url_control"), user = Model.sourceErrorMessage("user_control"), pass = Model.sourceErrorMessage("pass_control")
+  const tab = Model.validateSourceUrl("http://u:pa\tss@h.test/x"), space = Model.validateSourceUrl("http://h .test/"), lf = Model.validateSourceUrl("http://h.test/a\nb", { kind: "epg" }), path = Model.validateSourceUrl("/srv/a\tb.m3u")
+  const typo = Model.validateSourceUrl("http://myuser:pa#ss@cdn.test/x")
+  return [url, user === url.replace("space, ", "").replace("the URL", "the username"), pass === url.replace("space, ", "").replace("the URL", "the password"),
+          [tab.code, tab.message], [space.code, space.message], [lf.code, lf.message], [path.code, path.message],
+          [typo.code, typo.message.indexOf("Invalid URL") === 0, typo.message.indexOf(Model.ENCODE_SENTENCE) !== -1],
+          Model.xtreamUrls("http://h.te st", "u", "p").message, /^[\x20-\x7e]*$/.test(url + user + pass)]
+}, ["Remove the space, tab, line break or control character inside the URL", true, true,
+    ["invalid", "Remove the space, tab, line break or control character inside the URL"], ["invalid", "Remove the space, tab, line break or control character inside the URL"],
+    ["invalid", "EPG: remove the space, tab, line break or control character inside the URL"], ["invalid", "Remove the space, tab, line break or control character inside the URL"],
+    ["invalid", true, true], "Remove the space, tab, line break or control character inside the URL", true])
 check("validateXtream is the UX name for the same check", [Model.validateXtream({ server: "x", username: "u", password: "p" }).code, Model.validateXtream(null).code, Model.validateXtream({ server: "http://h.test", username: "u", password: "p" }).ok], ["server_scheme", "server_empty", true])
 
 // ---- formatting (UX 5.2) ----
@@ -6856,9 +6882,11 @@ checkCall("R28b: adoptActiveSource MIGRATING at the cap with an unknown playlist
   const out = Model.adoptActiveSource(st, entry, 999, "", { adoptUrl: true, adoptEpg: true, migrating: true })
   const none = Model.adoptActiveSource(full50, entry, 999, "", { adoptUrl: true, adoptEpg: true, migrating: true })
   const bare = Model.adoptActiveSource(st, { playlistUrl: "http://new.test/", epgUrl: "", sourceKey: "" }, 999, "", { adoptUrl: true, adoptEpg: true, migrating: true })
+  // D-SRC-64 (round 7): `changed` is TRUE now -- the hold parks the pair in
+  // the state returned (the pins under "D-SRC-64" below say what it holds).
   return [out.full, out.heldEpg, out.adoptedEpg, out.refusedEpg, out.noSourceEpg, Model.findSource(out.state.sources, full50.sources[2].key).epgUrl === own, out.changed, out.writeEntry,
           [none.full, none.heldEpg, none.noSourceEpg], [bare.full, bare.heldEpg]]
-}, [true, true, false, false, false, true, false, true, [true, true, false], [true, false]])
+}, [true, true, false, false, false, true, true, true, [true, true, false], [true, false]])
 check("R28b: reconcileAction -- `heldFull` makes the guide URL fresh with the playlist, so the retry after a removal adopts BOTH; without it the guide URL seen last is not re-adopted", [
   (() => { const seen = Model.entryInputsSeenAfter([], { playlistUrl: "http://new.test/", epgUrl: "http://bar.example.test/g.xml" }); const a = Model.reconcileAction({ migrating: true, playlist: "http://new.test/", epg: "http://bar.example.test/g.xml", seen, heldFull: true }); return [a.adoptUrl, a.adoptEpg] })(),
   (() => { const seen = Model.entryInputsSeenAfter([], { playlistUrl: "http://new.test/", epgUrl: "http://bar.example.test/g.xml" }); const a = Model.reconcileAction({ migrating: true, playlist: "http://new.test/", epg: "http://bar.example.test/g.xml", seen }); return [a.adoptUrl, a.adoptEpg] })()],
@@ -6910,9 +6938,150 @@ checkCall("F1: mergeForeignState -- the migration's record dropped at the cap: n
            kept: [Model.entryMigratedOf(kept.state), Model.findSource(kept.state.sources, mig.key) !== null, kept.migrationHeld],
            same: [Model.entryMigratedOf(same.state), Model.findSource(same.state.sources, mig.key).epgUrl, same.state.activeKey === mig.key, same.dropped.sources, same.migrationHeld, same.conflicts.length],
            removedHere: [Model.entryMigratedOf(removedHere.state), Model.findSource(removedHere.state.sources, mig.key) !== null, removedHere.migrationHeld],
-           line: [line.indexOf("://") === -1, line.indexOf("50 sources") !== -1, /^[\x20-\x7e]*$/.test(line + changedLine), changedLine !== line, Model.migrationHeldAgainLine() === line] }
+           // Round 8 (2026-10-22, the round 7 recheck's P2 #2): the "full" line
+           // names state.json, where the merge re-parks the pair (D-SRC-64),
+           // and no longer says the playlist "stays on the bar entry".
+           line: [line.indexOf("://") === -1, line.indexOf("50 sources") !== -1, /^[\x20-\x7e]*$/.test(line + changedLine), changedLine !== line, Model.migrationHeldAgainLine() === line,
+                  line.indexOf("state.json") !== -1, line.indexOf("guide-data URL") !== -1, /bar entry|on the entry/.test(line + changedLine)] }
 }, { held: [false, true, 50, false, [], "full"], both: [false, ["0abc0002"], "full"], noKey: [true, ["0abc0001"], ""], theirsMarked: [true, ""], kept: [true, true, ""],
-     same: [false, "", true, [], "changed", 1], removedHere: [true, false, ""], line: [true, true, true, true, true] })
+     same: [false, "", true, [], "changed", 1], removedHere: [true, false, ""], line: [true, true, true, true, true, true, true, false] })
+
+// ---- D-SRC-64 (round 7, 2026-10-22, the owner's decision): THE PARKED PAIR ----
+// A migration held at the cap parks both bar URLs in state.json under
+// `migrationPending` and the entry is stripped; the pair is the migration's
+// input until it lands. Every check below is red on fe40b2c (the new names
+// do not exist there) and each shipping decision was mutated in turn (the
+// counts are in the lane report).
+;(function () {
+  const PL = "http://new.test/get.php?username=u&password=zpass", EP = "http://e.test/xmltv.php?username=u&password=zpass"
+  const PAIR = { playlistUrl: PL, epgUrl: EP }
+  checkCall("D-SRC-64: migrationPendingOf reads exactly a pair -- an object with a non-empty string playlistUrl, epgUrl the string beside it or \"\" -- and nothing else (a string, a list, an empty or non-string playlistUrl, a null, a missing key, a non-object state)", () => [
+    Model.migrationPendingOf({ migrationPending: PAIR }), Model.migrationPendingOf({ migrationPending: { playlistUrl: PL } }), Model.migrationPendingOf({ migrationPending: { playlistUrl: PL, epgUrl: 7 } }),
+    Model.migrationPendingOf({ migrationPending: { playlistUrl: "", epgUrl: EP } }), Model.migrationPendingOf({ migrationPending: { playlistUrl: [PL], epgUrl: EP } }), Model.migrationPendingOf({ migrationPending: PL }),
+    Model.migrationPendingOf({ migrationPending: [PL, EP] }), Model.migrationPendingOf({ migrationPending: null }), Model.migrationPendingOf({}), Model.migrationPendingOf(null), Model.migrationPendingOf("x")
+  ], [PAIR, { playlistUrl: PL, epgUrl: "" }, { playlistUrl: PL, epgUrl: "" }, null, null, null, null, null, null, null, null])
+  checkCall("D-SRC-64: withMigrationPending sets the pair, returns the SAME object when the state already holds exactly it or when there is none to drop, drops it on null, and never carries anything but the two strings", () => {
+    const st = Model.emptyState()
+    const parked = Model.withMigrationPending(st, PAIR)
+    const again = Model.withMigrationPending(parked, { playlistUrl: PL, epgUrl: EP, extra: "x" })
+    const moved = Model.withMigrationPending(parked, { playlistUrl: PL, epgUrl: "" })
+    const dropped = Model.withMigrationPending(parked, null)
+    return [Model.migrationPendingOf(parked), Object.keys(parked.migrationPending).sort(), again === parked, moved !== parked, Model.migrationPendingOf(moved), "migrationPending" in dropped,
+            Model.withMigrationPending(st, null) === st, Model.withMigrationPending(st, { playlistUrl: "" }) === st, st.migrationPending === undefined]
+  }, [PAIR, ["epgUrl", "playlistUrl"], true, true, { playlistUrl: PL, epgUrl: "" }, false, true, true, true])
+  checkCall("D-SRC-64: cloneState carries the pair through every reducer (the seventh whitelist key) and parseState reads it back; a state without one serializes exactly as before", () => {
+    const parked = Model.withMigrationPending(Model.parseState(JSON.stringify(full50)), PAIR)
+    const through = [Model.withFavorites(parked, ["a"]), Model.toggleHiddenGroup(parked, "Kids"), Model.withActiveKey(parked, full50.sources[1].key), Model.recordPlayed(parked, { id: "t:x", name: "X" }, 10, 100), Model.withSavedSearch(parked, "news", 100).state]
+    const back = Model.parseState(JSON.stringify(parked))
+    return [through.map(st => JSON.stringify(Model.migrationPendingOf(st)) === JSON.stringify(PAIR)), Model.migrationPendingOf(back), JSON.stringify(Model.cloneState(full50)).indexOf("migrationPending"),
+            JSON.stringify(Model.parseState(JSON.stringify(Object.assign({}, full50, { migrationPending: "junk" })))).indexOf("migrationPending")]
+  }, [[true, true, true, true, true], PAIR, -1, -1])
+  checkCall("D-SRC-64: adoptActiveSource MIGRATING at the cap PARKS the pair (`parked`, `changed`, `full`, no marker, the active key stands, 50 records); the same hold over a state already holding that pair changes nothing; a guide URL alone beside the playlist is parked with it (heldEpg) and one of whitespace parks as empty", () => {
+    const st = Model.withActiveKey(full50, full50.sources[2].key)
+    const out = Model.adoptActiveSource(st, { playlistUrl: " " + PL + "\t", epgUrl: EP, sourceKey: "" }, 999, "", { adoptUrl: true, adoptEpg: true, migrating: true })
+    const same = Model.adoptActiveSource(out.state, { playlistUrl: PL, epgUrl: EP, sourceKey: "" }, 999, "", { adoptUrl: true, adoptEpg: true, migrating: true })
+    const bare = Model.adoptActiveSource(st, { playlistUrl: PL, epgUrl: "  ", sourceKey: "" }, 999, "", { adoptUrl: true, adoptEpg: true, migrating: true })
+    return [out.full, out.parked, out.changed, out.marked, Model.entryMigratedOf(out.state), out.key === full50.sources[2].key, out.state.sources.length, Model.migrationPendingOf(out.state), out.heldEpg, out.writeEntry,
+            [same.full, same.parked, same.changed, same.state === out.state], [bare.full, bare.heldEpg, Model.migrationPendingOf(bare.state)]]
+  }, [true, true, true, false, false, true, 50, PAIR, true, true, [true, true, false, true], [true, false, { playlistUrl: PL, epgUrl: "" }]])
+  checkCall("D-SRC-64: the parked pair is the migration's INPUT when the entry carries no playlist URL -- reconcileAction answers `adopt` with `parked` (and adoptEpg for a parked guide URL) whatever `seen` says, and adoptActiveSource then lands it once there is room: the record carries the parked guide URL, the marker is set, the pair dropped, the entry (empty) still to be mirrored; without room it is `full` again and unchanged; a playlist URL ON the entry wins over the pair", () => {
+    const parked = Model.withMigrationPending(Model.withActiveKey(full50, full50.sources[2].key), PAIR)
+    const seen = Model.entryInputsSeenAfter([], { playlistUrl: PL, epgUrl: EP })
+    const plan = Model.reconcileAction({ migrating: true, playlist: "", epg: "", seen, parked: Model.migrationPendingOf(parked) })
+    const planEntry = Model.reconcileAction({ migrating: true, playlist: "http://other.test/l.m3u", epg: "", seen: [], parked: Model.migrationPendingOf(parked) })
+    const planNone = Model.reconcileAction({ migrating: true, playlist: "", epg: "", seen, parked: null, first: true })
+    const planMigrated = Model.reconcileAction({ migrating: false, playlist: "", epg: "", seen, parked: Model.migrationPendingOf(parked), first: true })
+    const room = Model.cloneState(parked, { sources: parked.sources.slice(1) })
+    const landed = Model.adoptActiveSource(room, { playlistUrl: "", epgUrl: "", sourceKey: full50.sources[2].key }, 999, "", { adoptUrl: plan.adoptUrl, adoptEpg: plan.adoptEpg, migrating: true })
+    const rec = Model.findSourceByUrl(landed.state.sources, Model.normalizeSourceUrl(PL, { origin: "cli" }))
+    const still = Model.adoptActiveSource(parked, { playlistUrl: "", epgUrl: "", sourceKey: full50.sources[2].key }, 999, "", { adoptUrl: true, adoptEpg: true, migrating: true })
+    const entryWins = Model.adoptActiveSource(Model.cloneState(parked, { sources: parked.sources.slice(1) }), { playlistUrl: "http://other.test/l.m3u", epgUrl: "", sourceKey: "" }, 999, "", { adoptUrl: true, adoptEpg: false, migrating: true })
+    return [[plan.act, plan.adoptUrl, plan.adoptEpg, plan.parked], [planEntry.act, planEntry.parked], [planNone.act, planNone.adoptUrl, planNone.parked], [planMigrated.act, planMigrated.adoptUrl, planMigrated.parked],
+            [landed.adoptedUrl, landed.marked, Model.entryMigratedOf(landed.state), Model.migrationPendingOf(landed.state), rec !== null && rec.epgUrl === EP, landed.key === (rec && rec.key), landed.state.sources.length, landed.writeEntry, landed.parked],
+            [still.full, still.parked, still.changed, still.key === full50.sources[2].key, Model.migrationPendingOf(still.state), still.writeEntry],
+            [entryWins.adoptedUrl, Model.findSourceByUrl(entryWins.state.sources, "http://other.test/l.m3u") !== null, Model.migrationPendingOf(entryWins.state)]]
+  }, [["adopt", true, true, true], ["adopt", false], ["migrate", false, false], ["migrate", false, false],
+      [true, true, true, null, true, true, 50, true, false], [true, true, false, true, PAIR, false],
+      [true, true, null]])
+  checkCall("D-SRC-64: the pair and the marker never coexist -- a parked pair whose playlist turns out unusable at the retry is refused, reported as invalid, the marker set and the pair DROPPED (never silently kept); a non-migrating call over a state that somehow holds both drops the pair", () => {
+    const junk = Model.withMigrationPending(Model.cloneState(full50, { sources: full50.sources.slice(1), activeKey: full50.sources[2].key }), { playlistUrl: "ftp://u:zpass@h.test/x", epgUrl: EP })
+    const out = Model.adoptActiveSource(junk, { playlistUrl: "", epgUrl: "", sourceKey: "" }, 999, "", { adoptUrl: true, adoptEpg: true, migrating: true })
+    const both = Model.cloneState(Model.withEntryMigrated(full50), { migrationPending: PAIR })
+    const over = Model.adoptActiveSource(both, { playlistUrl: "", epgUrl: "", sourceKey: "" }, 999, "", { migrating: false })
+    return [out.invalid && out.invalid.code, out.epgWithInvalid, out.marked, Model.entryMigratedOf(out.state), Model.migrationPendingOf(out.state), out.key === full50.sources[2].key,
+            Model.migrationPendingOf(both) !== null, Model.migrationPendingOf(over.state), over.changed]
+  }, ["scheme", true, true, true, null, true, true, null, true])
+  checkCall("D-SRC-64: mergeForeignState -- ours' pair stands over theirs and the base; the migration held AGAIN (\"full\" or \"changed\") re-parks the pair from the record it dropped (its url and epgUrl), so the retry has an input although the entry is empty; a pair ours dropped because it LANDED is gone though base and theirs still carry it; theirs' pair is kept only when the base had none", () => {
+    const base = Model.cloneState(full50, { sources: full50.sources.slice(1), activeKey: full50.sources[3].key })
+    const mig = { key: "0abc0001", url: PL, epgUrl: EP, kind: "http", label: "new", labelCustom: false, origin: "cli", addedAt: 9, lastUsed: 9, fetchedAt: 0, channelCount: 0, groupCount: 0 }
+    const other = Object.assign({}, mig, { key: "0abc0003", url: "http://other.test/", epgUrl: "", label: "other" })
+    const baseParked = Model.withMigrationPending(base, PAIR)
+    const ours = Model.withEntryMigrated(Model.cloneState(base, { sources: base.sources.concat([mig]), activeKey: mig.key }))
+    const theirsParked = Model.cloneState(baseParked, { sources: base.sources.concat([other]) })
+    const theirsBare = Model.cloneState(base, { sources: base.sources.concat([other]) })
+    const heldFromParked = Model.mergeForeignState(baseParked, ours, theirsParked, { migrationKey: mig.key })
+    const heldFromBare = Model.mergeForeignState(baseParked, ours, theirsBare, { migrationKey: mig.key })
+    const changed = Model.mergeForeignState(baseParked, ours, Model.cloneState(baseParked, { sources: base.sources.concat([Object.assign({}, mig, { epgUrl: "", label: "theirs" })]) }), { migrationKey: mig.key })
+    const landedOurs = Model.mergeForeignState(baseParked, ours, baseParked, { migrationKey: mig.key })
+    const oursStill = Model.mergeForeignState(base, baseParked, theirsBare, {})
+    const theirsNew = Model.mergeForeignState(base, base, theirsParked, {})
+    const theirsDropped = Model.mergeForeignState(baseParked, baseParked, theirsBare, {})
+    return [[heldFromParked.migrationHeld, Model.migrationPendingOf(heldFromParked.state), Model.entryMigratedOf(heldFromParked.state)],
+            [heldFromBare.migrationHeld, Model.migrationPendingOf(heldFromBare.state)],
+            [changed.migrationHeld, Model.migrationPendingOf(changed.state)],
+            [landedOurs.migrationHeld, Model.migrationPendingOf(landedOurs.state), Model.entryMigratedOf(landedOurs.state), Model.findSource(landedOurs.state.sources, mig.key) !== null],
+            [oursStill.migrationHeld, Model.migrationPendingOf(oursStill.state)], [Model.migrationPendingOf(theirsNew.state)], [Model.migrationPendingOf(theirsDropped.state)]]
+  }, [["full", PAIR, false], ["full", PAIR], ["changed", PAIR], ["", null, true, true], ["", PAIR], [PAIR], [PAIR]])
+  checkCall("D-SRC-64: retiredInputsToKeep over a parked pair -- the entry's copy of a parked value is stripped key by key (through entryInputForm), a value that differs is kept, and nothing changes for a caller that passes no pair", () => {
+    const e = { playlistUrl: " " + PL, epgUrl: EP + "\t" }
+    return [Model.retiredInputsToKeep(e, false, PAIR), Model.retiredInputsToKeep({ playlistUrl: PL, epgUrl: "http://g.test/x.xml" }, false, PAIR), Model.retiredInputsToKeep({ playlistUrl: "http://g.test/l.m3u", epgUrl: EP }, false, PAIR),
+            Model.retiredInputsToKeep(e, false), Model.retiredInputsToKeep(e, false, null), Model.retiredInputsToKeep(e, false, { playlistUrl: "" }), Model.retiredInputsToKeep(e, true, PAIR)]
+  }, [[], ["epgUrl"], ["playlistUrl"], ["playlistUrl", "epgUrl"], ["playlistUrl", "epgUrl"], ["playlistUrl", "epgUrl"], []])
+  // Round 8 (2026-10-22, the round 7 recheck's P2 #1). Red on the round 7
+  // merge (4cf8910): the re-park wrote `{ OTHER, "" }` and the landing put
+  // no guide URL on the record.
+  const OTHER = "http://other.test/get.php?username=o&password=zpass"
+  checkCall("round 8, the round 7 recheck's P2 #1: a playlist the ENTRY brings during a hold (a hand `omarchy bar set playlistUrl`) carries the PARKED guide URL when the entry has none -- the re-park at the cap keeps it beside the entry's playlist (heldEpg), a landing puts it on the entry playlist's record, the same playlist re-parks the same pair (unchanged, no write), an entry guide URL beside it wins, and reconcileAction's plan says adoptEpg for the parked guide URL on that path too", () => {
+    const parked = Model.withMigrationPending(Model.withActiveKey(full50, full50.sources[2].key), PAIR)
+    const plan = Model.reconcileAction({ migrating: true, playlist: OTHER, epg: "", seen: [], parked: Model.migrationPendingOf(parked), heldFull: true })
+    const planWithEpg = Model.reconcileAction({ migrating: true, playlist: OTHER, epg: "http://g.test/x.xml", seen: [], parked: Model.migrationPendingOf(parked), heldFull: true })
+    const opts = { adoptUrl: plan.adoptUrl, adoptEpg: plan.adoptEpg, migrating: true }
+    const repark = Model.adoptActiveSource(parked, { playlistUrl: OTHER, epgUrl: "", sourceKey: "" }, 999, "", opts)
+    const same = Model.adoptActiveSource(parked, { playlistUrl: " " + PL, epgUrl: "", sourceKey: "" }, 999, "", opts)
+    const entryEpg = Model.adoptActiveSource(parked, { playlistUrl: OTHER, epgUrl: "http://g.test/x.xml", sourceKey: "" }, 999, "", { adoptUrl: true, adoptEpg: planWithEpg.adoptEpg, migrating: true })
+    const room = Model.cloneState(parked, { sources: parked.sources.slice(1) })
+    const landed = Model.adoptActiveSource(room, { playlistUrl: OTHER, epgUrl: "", sourceKey: "" }, 999, "", opts)
+    const rec = Model.findSourceByUrl(landed.state.sources, Model.normalizeSourceUrl(OTHER, { origin: "cli" }))
+    return { plan: [plan.act, plan.adoptUrl, plan.adoptEpg, plan.parked], planWithEpg: [planWithEpg.adoptEpg, planWithEpg.parked],
+             repark: [repark.full, repark.parked, repark.changed, repark.heldEpg, Model.migrationPendingOf(repark.state)],
+             same: [same.full, same.parked, same.changed, Model.migrationPendingOf(same.state)],
+             entryEpg: [entryEpg.full, Model.migrationPendingOf(entryEpg.state)],
+             landed: [landed.adoptedUrl, landed.marked, Model.migrationPendingOf(landed.state), rec !== null && rec.epgUrl === EP, landed.key === (rec && rec.key)] }
+  }, { plan: ["adopt", true, true, false], planWithEpg: [true, false],
+       repark: [true, true, true, true, { playlistUrl: OTHER, epgUrl: EP }],
+       same: [true, true, false, PAIR],
+       entryEpg: [true, { playlistUrl: OTHER, epgUrl: "http://g.test/x.xml" }],
+       landed: [true, true, null, true, true] })
+})()
+
+// ---- R33a (round 7, 2026-10-22): A PASTE INTO A URL FIELD JOINS ITS LINES ----
+checkCall("R33a: sanitizePasteInput -- a URL wrapped onto two lines by a mail client (CRLF and LF) pastes as ONE URL into the playlist, EPG and server fields, and that value validates; a TAB inside the same paste is kept and then refused by the validator with the sentence that names it (the one exception is CR and LF, nothing else); a name field strips every control character as before; the field rule's own edge trim still applies", () => {
+  const wrapped = "http://h.test/get.php?username=u&\r\npassword=zpass&type=m3u_plus\n"
+  const joined = "http://h.test/get.php?username=u&password=zpass&type=m3u_plus"
+  const tabbed = "http://u:pa\tss@h.test/x\n"
+  return [Model.sanitizePasteInput("playlist", wrapped, 4096), Model.sanitizePasteInput("epg", wrapped, 4096), Model.sanitizePasteInput("server", "http://h.test\n:8080", 4096),
+          Model.validateSourceUrl(Model.sanitizePasteInput("playlist", wrapped, 4096)).ok,
+          Model.sanitizePasteInput("playlist", tabbed, 4096), Model.validateSourceUrl(Model.sanitizePasteInput("playlist", tabbed, 4096)).message,
+          Model.sanitizePasteInput("playlist", "http://h.test/a\u0085b", 4096) === "http://h.test/a\u0085b", Model.sanitizePasteInput("playlist", "http://h.test/a\u2028b", 4096) === "http://h.test/a\u2028b",
+          Model.sanitizePasteInput("label", "Pro\r\nvider\t", 64), Model.sanitizePasteInput("username", "u\nser", 64), Model.sanitizePasteInput("playlist", "  " + joined + "  ", 4096),
+          Model.sanitizeFieldInput("playlist", wrapped, 4096) === wrapped.replace(/\n$/, "")]
+}, ["http://h.test/get.php?username=u&password=zpass&type=m3u_plus", "http://h.test/get.php?username=u&password=zpass&type=m3u_plus", "http://h.test:8080", true, "http://u:pa\tss@h.test/x", Model.sourceErrorMessage("url_control"), true, true, "Provider", "user", "http://h.test/get.php?username=u&password=zpass&type=m3u_plus", true])
+checkCall("R33a (structural): the guide's paste path hands the clipboard text to Model.sanitizePasteInput (the join), and the submit path keeps sanitizeFieldInput (no join: a value in the field cannot hold a line break)", () => {
+  const guide = fs.readFileSync(path.join(__dirname, "../Guide.qml"), "utf8")
+  const paste = (guide.match(/function pasteFromProcess\(text\) \{[\s\S]*?\n  \}/) || [""])[0]
+  return [paste.indexOf("Model.sanitizePasteInput(id, text, cap)") !== -1, paste.indexOf("Model.sanitizeFieldInput(") === -1,
+          String(Model.formSubmitValues).indexOf("sanitizeFieldInput(") !== -1, String(Model.formSubmitValues).indexOf("sanitizePasteInput(") === -1]
+}, [true, true, true, true])
 check("reconcileSources does not mutate the input", twoState.sources.length, 2)
 // SR11: the settings path is the CLI path. `omarchy bar set ... playlistUrl ~/list.m3u`
 // reconciles into the history and becomes active; the forms keep refusing `~`.
@@ -7093,7 +7262,7 @@ const LSEP = String.fromCharCode(0x2028)
 const PSEP = String.fromCharCode(0x2029)
 const NUL = String.fromCharCode(0)
 const NEL = String.fromCharCode(0x85)
-check("D-SRC-06: a line separator inside an http URL is `invalid`, never `scheme` (both fields)", [Model.validateSourceUrl("http://h.test/a" + LSEP + "b").code, Model.validateSourceUrl("http://h.test/a" + PSEP + "b", { kind: "epg" }).code, Model.validateSourceUrl("http://h.test/a" + PSEP + "b", { kind: "epg" }).message.indexOf("EPG: invalid URL")], ["invalid", "invalid", 0])
+check("D-SRC-06: a line separator inside an http URL is `invalid`, never `scheme` (both fields)", [Model.validateSourceUrl("http://h.test/a" + LSEP + "b").code, Model.validateSourceUrl("http://h.test/a" + PSEP + "b", { kind: "epg" }).code, Model.validateSourceUrl("http://h.test/a" + PSEP + "b", { kind: "epg" }).message], ["invalid", "invalid", Model.sourceErrorMessage("url_control", { field: "epg" })])
 check("D-SRC-06: the error-state hint drops `r` when the configured value cannot be retried", [Model.footerHints({ empty: "error", sourcesExist: true, retry: false }), Model.footerHints({ empty: "error", sourcesExist: false, retry: false }), Model.footerHints({ empty: "error", sourcesExist: true, retry: true })], [[["o", "sources"], ["Esc", "close"]], [["Esc", "close"]], [["r", "retry"], ["o", "sources"], ["Esc", "close"]]])
 check("D-SRC-08: an Xtream server with a fragment is server_path (xtream-expect E05), credentials still win", [Model.xtreamUrls("http://h.test/#frag", "u", "p").code, Model.xtreamUrls("http://h.test#frag", "u", "p").code, Model.xtreamUrls("http://h.test/?x=1#f", "u", "p").code, Model.xtreamUrls("http://u:p@h.test/#frag", "u", "p").code, Model.xtreamUrls("http://h.test/", "u", "p").ok], ["server_path", "server_path", "server_path", "server_userinfo", true])
 check("D-SRC-08: a refused fragment carries no URL fields", (() => { const r = Model.xtreamUrls("http://h.test/#frag", "u", "p"); return [r.playlistUrl, r.epgUrl, r.base, r.host, r.field] })(), ["", "", "", "", "server"])
@@ -7620,7 +7789,7 @@ checkCall("R21a: the migration marker -- entryMigratedOf is exactly `=== true`, 
           Model.entryMigratedOf(Model.cloneState({ entryMigrated: "true" })), Model.entryMigratedOf(null), Model.entryMigratedOf(Model.withEntryMigrated(null))]
 }, [false, false, true, true, true, [true, false, false, false, false, false, false], false, false, true])
 checkCall("R21a / R21b: retiredInputsToKeep over every `retiredKeep` case of the shared fixture -- every retired key while the marker has not landed, none once it has", () => {
-  return activeKeyFixture.retiredKeep.map(c => c.name + ": " + JSON.stringify(Model.retiredInputsToKeep(c.entry, c.landed)))
+  return activeKeyFixture.retiredKeep.map(c => c.name + ": " + JSON.stringify(Model.retiredInputsToKeep(c.entry, c.landed, c.parked)))
 }, activeKeyFixture.retiredKeep.map(c => c.name + ": " + JSON.stringify(c.want)))
 checkCall("R21a / R21b: retiredInputsToKeep returns a NEW array, keeps exactly the retired keys the entry has, and nothing that is not one", () => {
   const e = { playlistUrl: "http://a.test/l.m3u", epgUrl: "http://e.test/x.xml", showLogos: true, sourceKey: "d990c2e4", mpvArgs: "--x" }
@@ -8320,7 +8489,7 @@ checkCall("R16 / R21 / R22a (structural): setShowLogos asks Model.ownedWriteMode
     // R21: ONE keep decision for every owned write, over the landed marker; the
     // fourth argument no longer chooses it
     funnelKeeps: funnel.indexOf("var published = Model.findBarEntry(root.shell.barConfig, root.pluginId)") !== -1
-      && /\n    var keep = Model\.retiredInputsToKeep\(published, Model\.entryMigratedOf\(root\.landedState\)\)\n/.test(funnel)
+      && /\n    var keep = Model\.retiredInputsToKeep\(published, Model\.entryMigratedOf\(root\.landedState\), Model\.migrationPendingOf\(root\.landedState\)\)\n/.test(funnel)
       && funnel.indexOf("Model.entryWith(published, patch, { keep: keep })") !== -1
       && !/var keep = [^\n]*patchOnly/.test(funnel),
     // rule 9: the own-write record is made for EVERY write through the funnel, the patch-only one included,
@@ -12572,7 +12741,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   fx.cases.forEach(function (c) {
     checkCall("R20a (shared fixture, both readers): " + c.name, function () {
       const st = Model.parseState(JSON.stringify(c.input))
-      const got = { entryMigrated: st.entryMigrated === undefined ? null : st.entryMigrated }
+      const got = { entryMigrated: st.entryMigrated === undefined ? null : st.entryMigrated,
+                    migrationPending: st.migrationPending === undefined ? null : st.migrationPending }
       if (c.expect.dropped) {
         const text = JSON.stringify(Model.cloneState(st))
         got.dropped = ["entryInputs", "epgSetAt", "pendingEpg"].filter(k => text.indexOf('"' + k + '"') === -1)
@@ -12594,7 +12764,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     isFavorite: "a boolean", isGroupHidden: "a boolean", sourceForEdit: "the edit form's values",
     sourceViews: "the Sources rows", sourcesSummary: "the IPC summary", deadSessionVerdict: "a verdict; its state is driven below",
     sameState: "a boolean (R25a: whether memory is the base)",
-    sourcesFull: "a boolean (R27c: the cap, at the probe commit)"
+    sourcesFull: "a boolean (R27c: the cap, at the probe commit)",
+    migrationPendingOf: "the parked pair of a held migration, or null (D-SRC-64; its state is driven below, at the cap)"
   }
   const doc = fx.document
   const S = Model.parseState(JSON.stringify(doc))
@@ -12628,15 +12799,20 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       Model.adoptActiveSource(Model.parseState(JSON.stringify(Object.assign({}, doc, { entryMigrated: undefined }))),
                               { playlistUrl: "", epgUrl: "", sourceKey: "" }, 100, "", { migrating: true }).state,
       Model.adoptActiveSource(noActive, { playlistUrl: "", epgUrl: "http://q.example.test/g.xml", sourceKey: "" }, 100, "", { adoptEpg: true }).state],
-    withEntryMigrated: () => [Model.withEntryMigrated(S), Model.withEntryMigrated(Model.emptyState())]
+    withEntryMigrated: () => [Model.withEntryMigrated(S), Model.withEntryMigrated(Model.emptyState())],
+    // D-SRC-64: the hold at the cap parks the pair (the seventh top key) --
+    // driven here so the key the service can serialise is in the set, and
+    // so a reader not taught it goes red on this side.
+    withMigrationPending: () => [Model.withMigrationPending(Model.parseState(JSON.stringify(Object.assign({}, doc, { entryMigrated: undefined }))), { playlistUrl: "http://n.example.test/l.m3u", epgUrl: "http://n.example.test/g.xml" })]
   }
   checkCall("R20a: every Model call Service.qml hands the state to is either driven by the key check or named as a reader", () => {
     return [...handed].filter(n => !(n in DRIVE) && !(n in READERS)).sort()
   }, [])
   const want = k => fx.keys[k].concat(Object.keys((fx.serviceOnly || {})[k] || {})).slice().sort()
-  const seen = { top: new Set(), source: new Set(), played: new Set(), savedSearch: new Set() }
+  const seen = { top: new Set(), source: new Set(), played: new Set(), savedSearch: new Set(), pending: new Set() }
   const collect = st => {
     Object.keys(st).forEach(k => seen.top.add(k))
+    if (st.migrationPending) Object.keys(st.migrationPending).forEach(k => seen.pending.add(k))
     ;(st.sources || []).forEach(r => Object.keys(r).forEach(k => seen.source.add(k)))
     ;(st.recents || []).concat([st.lastPlayed, st.session]).filter(Boolean).forEach(r => Object.keys(r).forEach(k => seen.played.add(k)))
     ;(st.savedSearches || []).forEach(r => Object.keys(r).forEach(k => seen.savedSearch.add(k)))
@@ -12651,8 +12827,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   // own reader and serialiser it comes back key for key.
   checkCall("R20a: the fixture's document carries every listed key, and parseState plus the service's serialiser keep every one of them", () => {
     const back = JSON.parse(JSON.stringify(S, null, 2))
-    return { top: Object.keys(back).sort(), source: Object.keys(back.sources[0]).sort(), marker: back.entryMigrated }
-  }, { top: fx.keys.top.slice().sort(), source: fx.keys.source.slice().sort(), marker: true })
+    return { top: Object.keys(back).sort(), source: Object.keys(back.sources[0]).sort(), marker: back.entryMigrated, pending: Object.keys(back.migrationPending).sort() }
+  }, { top: fx.keys.top.slice().sort(), source: fx.keys.source.slice().sort(), marker: true, pending: fx.keys.pending.slice().sort() })
 })()
 
 // ---- R20d (D-SINK-19 round 10): BEHAVIOURAL OBSERVERS FOR THE FUNNEL ----
@@ -14258,17 +14434,20 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           const next = restart(h)
           return { result: probed(h).map(r => r.ok), restart: [next.file().sources.length, M.findSource(next.file().sources, KZ) !== null, M.findSource(next.file().sources, KH) !== null] }
         }, { result: [true], restart: [50, true, true] })
-        checkCall("R27d (" + tag + "): D-SRC-44 -- a 0.13.6 install with 50 sources and an entry URL not among them: the one-time migration does NOT run -- no record evicted, none added, no marker, the entry keeps its URL -- and the user is told ONCE (\"Sources is full\", no URL, no label); a restart holds the same (before R27: the least recently used source evicted, its URL with it)", () => {
+        // D-SRC-64 (round 7, 2026-10-22) re-levelled `entry` and the restart:
+        // the hold parks the URL in state.json and the entry is stripped once
+        // that write has landed; until then it read `entry: true` here.
+        checkCall("R27d (" + tag + "): D-SRC-44 -- a 0.13.6 install with 50 sources and an entry URL not among them: the one-time migration does NOT run -- no record evicted, none added, no marker; the URL is PARKED in state.json and taken off the entry (D-SRC-64) -- and the user is told ONCE (\"Sources is full\", no URL, no label); a restart holds the same, the pair read from the state (before R27: the least recently used source evicted, its URL with it)", () => {
           const fifty = [rec(A), rec(B)].concat(many(48))
           const h = boot({ playlistUrl: NEW, showLogos: false }, oldText(fifty), mode, { ownEcho })
           h.root.reconcile(false); h.drain()
           const keys = st => st.sources.map(r => r.key).sort().join(",")
           const next = restart(h)
-          return { file: [h.file().sources.length, keys(h.file()) === keys({ sources: fifty }), M.findSource(h.file().sources, KNEW) !== null, marked(h)],
-                   entry: h.storedEntry().playlistUrl === NEW, told: fullTold(h).length, body: fullTold(h).map(a => a[a.length - 1])[0] === M.entryInputNotice("playlistUrl", "full").body,
+          return { file: [h.file().sources.length, keys(h.file()) === keys({ sources: fifty }), M.findSource(h.file().sources, KNEW) !== null, marked(h), M.migrationPendingOf(h.file())],
+                   entry: retired(h.storedEntry()), told: fullTold(h).length, body: fullTold(h).map(a => a[a.length - 1])[0] === M.entryInputNotice("playlistUrl", "full").body,
                    reports: reports(h), clean: clean(h) && !leaks(h), cacheRemoves: h.cacheRuns.filter(c => c.indexOf("remove") !== -1).length,
-                   restart: [next.file().sources.length, marked(next), next.storedEntry().playlistUrl === NEW, fullTold(next).length] }
-        }, { file: [50, true, false, false], entry: true, told: 1, body: true, reports: ["playlistUrl:full"], clean: true, cacheRemoves: 0, restart: [50, false, true, 1] })
+                   restart: [next.file().sources.length, marked(next), retired(next.storedEntry()), M.migrationPendingOf(next.file()), fullTold(next).length] }
+        }, { file: [50, true, false, false, { playlistUrl: NEW, epgUrl: "" }], entry: [], told: 1, body: true, reports: ["playlistUrl:full"], clean: true, cacheRemoves: 0, restart: [50, false, [], { playlistUrl: NEW, epgUrl: "" }, 1] })
         checkCall("R27d (" + tag + "): D-SRC-44 -- held full, then ONE source removed in Sources: the next reconcile migrates -- the entry's URL ends in a record (the R21 oracle), active, the marker lands and the entry is stripped; 50 records, nothing else lost", () => {
           const fifty = [rec(A), rec(B)].concat(many(48))
           const h = boot({ playlistUrl: NEW, showLogos: false }, oldText(fifty), mode, { ownEcho })
@@ -14287,30 +14466,33 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         // no guide URL and stripped the bar's.
         const OWN = "http://own.example.test/a.xml"
         const allTold = h => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74016") !== -1).map(a => a[a.length - 2])
-        checkCall("R28b (" + tag + "): a 0.13.6 install with 50 sources and the bar's playlist AND guide URL not among them -- held TOGETHER: both stay on the entry, no record's guide URL changes, ONE card (\"Sources is full\", never \"Bar setting removed\"); a source the user picks keeps its OWN guide URL across a restart; then \"Remove one\" moves both in together -- the new record carries the bar's guide URL, the entry is stripped of both, and nothing else is lost", () => {
+        // D-SRC-64 re-levelled `entry` at the hold and after the pick: the
+        // pair is parked in state.json and the entry stripped (it read
+        // [true, true] twice here); `parked` says where the two rest.
+        checkCall("R28b (" + tag + "): a 0.13.6 install with 50 sources and the bar's playlist AND guide URL not among them -- held TOGETHER: both parked in state.json and off the entry (D-SRC-64), no record's guide URL changes, ONE card (\"Sources is full\", never \"Bar setting removed\"); a source the user picks keeps its OWN guide URL across a restart, the pair still parked; then \"Remove one\" moves both in together -- the new record carries the bar's guide URL, the pair is dropped, and nothing else is lost", () => {
           const fifty = [rec(A, { epgUrl: OWN }), rec(B)].concat(many(48))
           const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
           h.drain()
-          const held = { entry: [h.storedEntry().playlistUrl === NEW, h.storedEntry().epgUrl === E], aEpg: name(epgOf(h.file(), KA)), reports: reports(h), told: allTold(h) }
+          const held = { entry: retired(h.storedEntry()), parked: M.migrationPendingOf(h.file()), aEpg: name(epgOf(h.file(), KA)), reports: reports(h), told: allTold(h) }
           sw(h, KA); h.drain()
           const r1 = restart(h); r1.drain()
-          const picked = { active: r1.root.activeSourceKey === KA, aEpg: name(epgOf(r1.file(), KA)), entry: [r1.storedEntry().playlistUrl === NEW, r1.storedEntry().epgUrl === E], told: allTold(r1) }
+          const picked = { active: r1.root.activeSourceKey === KA, aEpg: name(epgOf(r1.file(), KA)), entry: retired(r1.storedEntry()), parked: M.migrationPendingOf(r1.file()), told: allTold(r1) }
           const gone = keyOf("http://m0.example.test/l.m3u")
           const rm = r1.root.removeSource(gone); r1.drain()
           const r2 = restart(r1)
-          return { held, picked, removed: { rm: rm.ok, newEpg: name(epgOf(r1.file(), KNEW)), active: r1.root.activeSourceKey === KNEW, marked: marked(r1), entry: retired(r1.storedEntry()),
-                                           aEpg: name(epgOf(r1.file(), KA)), count: r1.file().sources.length, restart: [name(epgOf(r2.file(), KNEW)), name(epgOf(r2.file(), KA)), r2.file().sources.length] },
+          return { held, picked, removed: { rm: rm.ok, newEpg: name(epgOf(r1.file(), KNEW)), active: r1.root.activeSourceKey === KNEW, marked: marked(r1), entry: retired(r1.storedEntry()), parked: M.migrationPendingOf(r1.file()),
+                                           aEpg: name(epgOf(r1.file(), KA)), count: r1.file().sources.length, restart: [name(epgOf(r2.file(), KNEW)), name(epgOf(r2.file(), KA)), r2.file().sources.length, M.migrationPendingOf(r2.file())] },
                    clean: clean(h) && clean(r1) && !leaks(r1) }
-        }, { held: { entry: [true, true], aEpg: OWN, reports: ["playlistUrl:full"], told: ["Sources is full"] },
-             picked: { active: true, aEpg: OWN, entry: [true, true], told: ["Sources is full"] },
-             removed: { rm: true, newEpg: "E", active: true, marked: true, entry: [], aEpg: OWN, count: 50, restart: ["E", OWN, 50] }, clean: true })
-        checkCall("R28b (" + tag + "): the first start of an install whose state names A active but carries no migration marker, at 50 sources, with the bar's playlist and guide URL not among them -- A keeps its OWN guide URL (on lane-sweep-c1 the bar's replaced it, the only copy), the guide URL stays on the entry, and one card", () => {
+        }, { held: { entry: [], parked: { playlistUrl: NEW, epgUrl: E }, aEpg: OWN, reports: ["playlistUrl:full"], told: ["Sources is full"] },
+             picked: { active: true, aEpg: OWN, entry: [], parked: { playlistUrl: NEW, epgUrl: E }, told: ["Sources is full"] },
+             removed: { rm: true, newEpg: "E", active: true, marked: true, entry: [], parked: null, aEpg: OWN, count: 50, restart: ["E", OWN, 50, null] }, clean: true })
+        checkCall("R28b (" + tag + "): the first start of an install whose state names A active but carries no migration marker, at 50 sources, with the bar's playlist and guide URL not among them -- A keeps its OWN guide URL (on lane-sweep-c1 the bar's replaced it, the only copy), the guide URL is parked with its playlist and off the entry (D-SRC-64), and one card", () => {
           const fifty = [rec(A, { epgUrl: OWN }), rec(B)].concat(many(48))
           const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, stateText(fifty, KA), mode, { ownEcho })
           h.drain()
           const next = restart(h)
-          return { active: h.root.activeSourceKey === KA, aEpg: name(epgOf(h.file(), KA)), entry: h.storedEntry().epgUrl === E, reports: reports(h), told: allTold(h), restart: name(epgOf(next.file(), KA)) }
-        }, { active: true, aEpg: OWN, entry: true, reports: ["playlistUrl:full"], told: ["Sources is full"], restart: OWN })
+          return { active: h.root.activeSourceKey === KA, aEpg: name(epgOf(h.file(), KA)), entry: retired(h.storedEntry()), parked: M.migrationPendingOf(h.file()), reports: reports(h), told: allTold(h), restart: name(epgOf(next.file(), KA)) }
+        }, { active: true, aEpg: OWN, entry: [], parked: { playlistUrl: NEW, epgUrl: E }, reports: ["playlistUrl:full"], told: ["Sources is full"], restart: OWN })
         // R29d (2026-10-20, the lead's ruling on round 2's P3): the R28b
         // sibling. The bar's playlist is NOT A USABLE URL and a guide URL is
         // set beside it, at a 0.13.6 start whose state names A active (A
@@ -14368,18 +14550,23 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           return () => fired
         }
         const dropTold = h => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74018") !== -1).length
-        // The R21 oracle: each entry URL is in a record, still on the entry, or reported.
-        const oracle = h => { const st = h.file(), e = h.storedEntry(), rs = reports(h)
-          return [M.findSource(st.sources, KNEW) !== null || e.playlistUrl === NEW || rs.indexOf("playlistUrl:full") === -1 && rs.length > 0,
-                  st.sources.some(r => r.epgUrl === E) || e.epgUrl === E] }
+        // The R21 oracle: each entry URL is in a record, still on the entry,
+        // parked in the state (D-SRC-64), or reported.
+        const pendingOf = st => M.migrationPendingOf(st)
+        const oracle = h => { const st = h.file(), e = h.storedEntry(), rs = reports(h), pk = pendingOf(st) || { playlistUrl: "", epgUrl: "" }
+          return [M.findSource(st.sources, KNEW) !== null || e.playlistUrl === NEW || pk.playlistUrl === NEW || rs.indexOf("playlistUrl:full") === -1 && rs.length > 0,
+                  st.sources.some(r => r.epgUrl === E) || e.epgUrl === E || pk.epgUrl === E] }
+        // D-SRC-64 re-levelled the race's `file` (the pair is PARKED again by
+        // the merge, rebuilt from the record it dropped: `parked`) and
+        // `entry` (stripped at the hold; it read [true, true] here).
         const raced = (h, free) => {
           const fired = refillBeforeRead(h)
           free(h); h.drain(); h.elapse(3000); h.drain()
-          return { fired: fired(), file: [h.file().sources.length, M.findSource(h.file().sources, KNEW) !== null, h.stateFile.disk.indexOf("e.example.test"), marked(h)],
-                   entry: [h.storedEntry().playlistUrl === NEW, h.storedEntry().epgUrl === E], held: h.root.migrationHeldFull, oracle: oracle(h),
+          return { fired: fired(), file: [h.file().sources.length, M.findSource(h.file().sources, KNEW) !== null, pendingOf(h.file()), marked(h)],
+                   entry: retired(h.storedEntry()), held: h.root.migrationHeldFull, oracle: oracle(h),
                    reports: reports(h), told: allTold(h), dropTold: dropTold(h), clean: clean(h) && !leaks(h) }
         }
-        const afterRace = { fired: true, file: [50, false, -1, false], entry: [true, true], held: true, oracle: [true, true],
+        const afterRace = { fired: true, file: [50, false, { playlistUrl: NEW, epgUrl: E }, false], entry: [], held: true, oracle: [true, true],
                             reports: ["playlistUrl:full"], told: ["Sources is full"], dropTold: 0, clean: true }
         const thenRemoveOne = (h, gone) => {
           const rm = h.root.removeSource(gone); h.drain(); h.elapse(3000); h.drain()
@@ -14388,7 +14575,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
                    held: h.root.migrationHeldFull, restart: [next.file().sources.length, name(epgOf(next.file(), KNEW)), next.root.activeSourceKey === KNEW, reports(next)] }
         }
         const migrated = { rm: true, file: [50, "E", true, true], entry: [], held: false, restart: [50, "E", true, []] }
-        checkCall("F1 (" + tag + "): held full, a HAND-RUN `state source remove` frees a place, and another program fills it before the retry's save has read the file -- the migration stays HELD: no marker, both URLs on the entry, the one \"Sources is full\" card and no \"not kept\" card; then \"Remove one\" moves both in", () => {
+        checkCall("F1 (" + tag + "): held full, a HAND-RUN `state source remove` frees a place, and another program fills it before the retry's save has read the file -- the migration stays HELD: no marker, both URLs parked again (rebuilt by the merge from the record it dropped, D-SRC-64), the entry empty, the one \"Sources is full\" card and no \"not kept\" card; then \"Remove one\" moves both in", () => {
           const fifty = [rec(A), rec(B)].concat(many(48))
           const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
           h.drain()
@@ -14408,6 +14595,170 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           return { fired, file: [h.file().sources.length, name(epgOf(h.file(), KNEW)), marked(h), M.activeKeyOf(h.file()) === KNEW], entry: retired(h.storedEntry()), held: h.root.migrationHeldFull,
                    reports: reports(h), told: allTold(h), dropTold: dropTold(h), clean: clean(h) && !leaks(h), restart: [name(epgOf(next.file(), KNEW)), next.root.activeSourceKey === KNEW] }
         }, { fired: true, file: [50, "E", true, true], entry: [], held: false, reports: ["playlistUrl:full"], told: ["Sources is full"], dropTold: 0, clean: true, restart: ["E", true] })
+        // ---- D-SRC-64 (round 7, 2026-10-22, the owner's decision): A HELD
+        // MIGRATION PARKS BOTH URLS IN STATE.JSON. The #14748 review's plugin
+        // lens measured, through this harness (`Q4 heldExposed`), a held
+        // migration handing the host three URL-bearing entries at start and
+        // another on a logo toggle with the shield reporting the file EXPOSED
+        // and zero refusals: the decision was taken over the patch and the
+        // funnel re-attached the kept keys afterwards. Now the hold writes the
+        // pair into state.json (0600) under a key of its own, the owned write
+        // after that save lands takes both off the entry, and the pair is the
+        // migration's input until it lands. Seen red on fe40b2c (the counts
+        // are in the lane report): there `urlWrites` is 3 and the entry keeps
+        // both URLs in every pin below.
+        const PAIR = { playlistUrl: NEW, epgUrl: E }
+        const urlWrites = h => h.host.writes.filter(w => has(w, "playlistUrl") || has(w, "epgUrl")).length
+        const parkedLine = h => h.warnings.filter(w => /kept in state\.json until a source is removed/.test(w)).length
+        checkCall("D-SRC-64 (" + tag + "): a 0.13.6 install with 50 sources and the bar's playlist AND guide URL not among them -- the hold PARKS both in state.json (no record, no marker, 50 records) and the entry is stripped of both in the turn the hold begins (once its write has landed); no owned write carries a URL, then or on a logo toggle while held; a restart mid-hold reads the pair from the state (entry still empty, one card again); then \"Remove one\" moves both in together, the pair dropped as the marker lands, nothing else lost", () => {
+          const fifty = [rec(A, { epgUrl: OWN }), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.drain()
+          const held = { parked: pendingOf(h.file()), memory: pendingOf(h.root.userState), entry: retired(h.storedEntry()), marked: marked(h), count: h.file().sources.length,
+                         inRecords: M.findSource(h.file().sources, KNEW) !== null, urlWrites: urlWrites(h), written: h.host.writes.length > 0, heldFull: h.root.migrationHeldFull,
+                         reports: reports(h), told: allTold(h), journal: parkedLine(h) }
+          h.root.setShowLogos(true); h.drain()
+          const toggle = { urlWrites: urlWrites(h), entry: retired(h.storedEntry()), parked: pendingOf(h.file()), logos: h.storedEntry().showLogos === true }
+          const r1 = restart(h); r1.drain()
+          const again = { parked: pendingOf(r1.file()), entry: retired(r1.storedEntry()), heldFull: r1.root.migrationHeldFull, told: allTold(r1), urlWrites: urlWrites(r1), marked: marked(r1), journal: parkedLine(r1) }
+          const rm = r1.root.removeSource(keyOf("http://m0.example.test/l.m3u")); r1.drain()
+          const r2 = restart(r1)
+          return { held, toggle, again,
+                   removed: { rm: rm.ok, parked: pendingOf(r1.file()), newEpg: name(epgOf(r1.file(), KNEW)), active: r1.root.activeSourceKey === KNEW, marked: marked(r1), entry: retired(r1.storedEntry()),
+                              count: r1.file().sources.length, aEpg: name(epgOf(r1.file(), KA)), heldFull: r1.root.migrationHeldFull, urlWrites: urlWrites(r1),
+                              restart: [pendingOf(r2.file()), name(epgOf(r2.file(), KNEW)), r2.root.activeSourceKey === KNEW, allTold(r2).length] },
+                   clean: clean(h) && clean(r1) && !leaks(h) && !leaks(r1) }
+        }, { held: { parked: PAIR, memory: PAIR, entry: [], marked: false, count: 50, inRecords: false, urlWrites: 0, written: true, heldFull: true, reports: ["playlistUrl:full"], told: ["Sources is full"], journal: 1 },
+             toggle: { urlWrites: 0, entry: [], parked: PAIR, logos: true },
+             again: { parked: PAIR, entry: [], heldFull: true, told: ["Sources is full"], urlWrites: 0, marked: false, journal: 0 },
+             removed: { rm: true, parked: null, newEpg: "E", active: true, marked: true, entry: [], count: 50, aEpg: OWN, heldFull: false, urlWrites: 0, restart: [null, "E", true, 0] }, clean: true })
+        checkCall("D-SRC-64 (" + tag + "), the review's Q4 heldExposed: the start-up chmod FAILED (hostConfigShield exposed) and the migration is held at 50 -- ZERO URL-bearing hand-overs at start and on a logo toggle (three, then one more, on fe40b2c) and zero refusals, because no write carries a URL: both rest in state.json and the entry is stripped; the gate still REFUSES a write that would carry one", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho, beforeLoad: x => { x.root.hostConfigShield = M.CONFIG_SHIELD_EXPOSED } })
+          h.drain()
+          const start = { urlWrites: urlWrites(h), written: h.host.writes.length > 0, refused: h.warnings.filter(w => /refusing to save a source URL/.test(w)).length, entry: retired(h.storedEntry()), parked: pendingOf(h.file()) }
+          h.root.setShowLogos(true); h.drain()
+          return { state: h.root.hostConfigShield, start, toggle: { urlWrites: urlWrites(h), entry: retired(h.storedEntry()), logos: h.storedEntry().showLogos === true },
+                   refusals: h.signals.filter(s => s[0] === "sourcesPersistFailed" && s[1] === "config_unsafe").length,
+                   gate: M.entryShieldDecision(h.root.hostConfigShield, { sourceKey: KNEW, showLogos: false, playlistUrl: NEW }), clean: clean(h) && !leaks(h) }
+        }, { state: M.CONFIG_SHIELD_EXPOSED, start: { urlWrites: 0, written: true, refused: 0, entry: [], parked: PAIR }, toggle: { urlWrites: 0, entry: [], logos: true }, refusals: 0, gate: M.CONFIG_REFUSE, clean: true })
+        checkCall("D-SRC-64 (" + tag + "), R21e's shape: the hold's state write FAILS -- the entry KEEPS both URLs (nothing on disk holds them), the failure is told as the state write's own, no owned write carries a URL; the disk recovers and the next save (a favourite) lands the pair, and the mirror the failed save left owing (R19d) strips the entry; a restart holds, the pair read from the state; then \"Remove one\" moves both in", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho, beforeLoad: x => { x.stateFile.writeFails = true } })
+          h.drain()
+          const failed = { entry: retired(h.storedEntry()), parked: pendingOf(h.file()), memory: pendingOf(h.root.userState), failure: h.signals.filter(s => s[0] === "sourcesPersistFailed").map(s => s[1]), urlWrites: urlWrites(h), heldFull: h.root.migrationHeldFull }
+          h.stateFile.writeFails = false
+          h.root.toggleFavorite("t:x"); h.drain()
+          const landed = { parked: pendingOf(h.file()), fav: h.file().favorites.indexOf("t:x") !== -1, urlWrites: urlWrites(h), entry: retired(h.storedEntry()) }
+          const next = restart(h); next.drain()
+          const again = { entry: retired(next.storedEntry()), parked: pendingOf(next.file()), heldFull: next.root.migrationHeldFull, urlWrites: urlWrites(next), inRecords: M.findSource(next.file().sources, KNEW) !== null }
+          const rm = next.root.removeSource(keyOf("http://m0.example.test/l.m3u")); next.drain()
+          return { failed, landed, restart: again,
+                   removed: { rm: rm.ok, parked: pendingOf(next.file()), newEpg: name(epgOf(next.file(), KNEW)), active: next.root.activeSourceKey === KNEW, marked: marked(next), entry: retired(next.storedEntry()) },
+                   clean: clean(h) && clean(next) && !leaks(h) && !leaks(next) }
+        }, { failed: { entry: ["playlistUrl", "epgUrl"], parked: null, memory: PAIR, failure: ["state_write_failed"], urlWrites: 0, heldFull: true },
+             landed: { parked: PAIR, fav: true, urlWrites: 0, entry: [] }, restart: { entry: [], parked: PAIR, heldFull: true, urlWrites: 0, inRecords: false },
+             removed: { rm: true, parked: null, newEpg: "E", active: true, marked: true, entry: [] }, clean: true })
+        checkCall("D-SRC-64 (" + tag + "): held (the pair parked, the entry empty), then ONE foreign write both removes a source and adds the parked playlist itself (a hand-run `state source remove` and `state source add` before the shell reloads) -- the pair is redundant: the retry lands onto THAT record, which takes the parked guide URL, the marker lands, the pair is dropped, nothing told but the one full card", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.drain()
+          const before = { parked: pendingOf(h.file()), entry: retired(h.storedEntry()) }
+          h.foreign(sf => { const st = JSON.parse(sf.disk); st.sources = st.sources.filter(r => r.url !== "http://m1.example.test/l.m3u"); st.sources.push(rec(NEW, { label: "theirs", labelCustom: true })); sf.disk = JSON.stringify(st) + "\n" }); h.drain()
+          const next = restart(h)
+          return { before, file: [h.file().sources.length, name(epgOf(h.file(), KNEW)), marked(h), M.activeKeyOf(h.file()) === KNEW, pendingOf(h.file())], label: M.findSource(h.file().sources, KNEW).label,
+                   entry: retired(h.storedEntry()), held: h.root.migrationHeldFull, reports: reports(h), told: allTold(h), dropTold: dropTold(h),
+                   restart: [pendingOf(next.file()), name(epgOf(next.file(), KNEW)), next.root.activeSourceKey === KNEW, reports(next)], clean: clean(h) && !leaks(h) }
+        }, { before: { parked: PAIR, entry: [] }, file: [50, "E", true, true, null], label: "theirs", entry: [], held: false, reports: ["playlistUrl:full"], told: ["Sources is full"], dropTold: 0, restart: [null, "E", true, []], clean: true })
+        // ---- Round 8 (2026-10-22, the round 7 recheck's P2 #1): a hand
+        // `omarchy bar set playlistUrl <any>` DURING the hold. Red on the
+        // round 7 merge (4cf8910): the re-park was `{ Z, "" }` and E -- the
+        // only copy -- was nowhere (disk, entry, memory) with nothing told;
+        // fe40b2c had kept it on the entry beside the new playlist.
+        checkCall("round 8, the round 7 recheck's P2 #1 (" + tag + "): held (the pair parked, the entry empty), then a hand `omarchy bar set playlistUrl` of ANOTHER playlist -- the re-park keeps the parked guide URL beside the entry's playlist (one journal line naming both, no URL), the entry is stripped again, E is in the file and in memory (the R21 oracle holds for E); the SAME playlist set again changes nothing and prints nothing; a guide URL set on the entry wins over the parked one; then \"Remove one\" lands the entry's playlist WITH the parked guide URL", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.drain()
+          const j0 = parkedLine(h), w0 = h.warnings.length
+          h.host.externalSet("playlistUrl", Z); h.drain()
+          const other = { parked: pendingOf(h.file()), memory: pendingOf(h.root.userState), entry: retired(h.storedEntry()), oracleE: oracle(h)[1], journal: parkedLine(h) - j0,
+                          both: h.warnings.slice(w0).filter(w => /playlist and guide URL are kept in state\.json/.test(w)).length, urlWrites: urlWrites(h), told: allTold(h), heldFull: h.root.migrationHeldFull }
+          const j1 = parkedLine(h)
+          h.host.externalSet("playlistUrl", Z); h.drain()
+          const again = { parked: pendingOf(h.file()), entry: retired(h.storedEntry()), journal: parkedLine(h) - j1, urlWrites: urlWrites(h) }
+          h.host.externalSet("epgUrl", F); h.drain()
+          const entryWins = { parked: pendingOf(h.file()), entry: retired(h.storedEntry()), urlWrites: urlWrites(h) }
+          const g = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          g.drain(); g.host.externalSet("playlistUrl", Z); g.drain()
+          const rm = g.root.removeSource(keyOf("http://m0.example.test/l.m3u")); g.drain()
+          const next = restart(g)
+          return { other, again, entryWins,
+                   landed: { rm: rm.ok, parked: pendingOf(g.file()), zEpg: name(epgOf(g.file(), KZ)), newInRecords: M.findSource(g.file().sources, KNEW) !== null, active: g.root.activeSourceKey === KZ, marked: marked(g), entry: retired(g.storedEntry()), count: g.file().sources.length,
+                             restart: [pendingOf(next.file()), name(epgOf(next.file(), KZ)), next.root.activeSourceKey === KZ] },
+                   clean: clean(h) && clean(g) && clean(next) && !leaks(h) && !leaks(g) }
+        }, { other: { parked: { playlistUrl: Z, epgUrl: E }, memory: { playlistUrl: Z, epgUrl: E }, entry: [], oracleE: true, journal: 1, both: 1, urlWrites: 0, told: ["Sources is full"], heldFull: true },
+             again: { parked: { playlistUrl: Z, epgUrl: E }, entry: [], journal: 0, urlWrites: 0 },
+             entryWins: { parked: { playlistUrl: Z, epgUrl: F }, entry: [], urlWrites: 0 },
+             landed: { rm: true, parked: null, zEpg: "E", newInRecords: false, active: true, marked: true, entry: [], count: 50, restart: [null, "E", true] }, clean: true })
+        // ---- Round 8 (2026-10-22, the round 7 recheck's P2 #2 and the lead's
+        // answer on F1's re-hold): the ONE journal line a re-park by a merge
+        // prints says where the pair rests. Red on the round 7 merge
+        // (4cf8910): the line said the playlist "stays on the bar entry".
+        checkCall("round 8, the round 7 recheck's P2 #2 (" + tag + "): F1's held-again merge (the freed place refilled before the retry's read) prints exactly ONE journal line about the re-parked pair -- Model.migrationHeldAgainLine(\"full\") -- and it names state.json, not the bar entry, and carries no URL; the service's own \"kept in state.json\" line does not print again (the retry finds the pair already parked, nothing changed)", () => {
+          const fifty = [rec(A), rec(B)].concat(many(48))
+          const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
+          h.drain()
+          const w0 = h.warnings.length, j0 = parkedLine(h)
+          raced(h, x => x.foreign(sf => { const st = JSON.parse(sf.disk); st.sources = st.sources.filter(r => r.url !== "http://m7.example.test/l.m3u"); sf.disk = JSON.stringify(st) + "\n" }))
+          const since = h.warnings.slice(w0)
+          const heldAgain = since.filter(w => /full again/.test(w))
+          return { lines: heldAgain.length, exact: heldAgain.map(w => w === "omarchy-iptv: " + M.migrationHeldAgainLine("full")),
+                   says: heldAgain.map(w => [w.indexOf("state.json") !== -1, /bar entry|on the entry/.test(w), w.indexOf("://") === -1]),
+                   parkedAgain: parkedLine(h) - j0, pair: pendingOf(h.file()), entry: retired(h.storedEntry()), clean: clean(h) && !leaks(h) }
+        }, { lines: 1, exact: [true], says: [[true, false, true]], parkedAgain: 0, pair: { playlistUrl: NEW, epgUrl: E }, entry: [], clean: true })
+        // ---- D-SINK-38 (round 7, the owner's decision): THE SHIELD RE-ARMS
+        // ON EVERY HOST PUBLISH, through its debounce. The review's Q1
+        // measured 0 shield runs for a republish of unchanged content and for
+        // the file replaced by the package default (what reinstall-configs,
+        // refresh-config and the quattro copy leave): the shield ran on the
+        // service's own events only. Timers do not run here; a restart() is
+        // counted, and the exit handler is the shipping one.
+        // Round 8 (2026-10-22, the lead's answer to round 7's open question):
+        // the re-arm moved from onSettingsChanged to onHostSettingsChanged,
+        // one per HOST publish and none for the plugin's own ownWrite
+        // reassignment. The `owned` arm pins that: an owned write (the logo
+        // toggle) arms the debounce exactly as many times as the host
+        // publishes (once: the host publishes every write, one behind on the
+        // lagging host) beside the funnel's own run; on the round 7 merge
+        // (4cf8910) it armed it twice (lag) and three times (echo) for that
+        // one publish.
+        checkCall("D-SINK-38 (" + tag + "): a host republish of UNCHANGED content arms the shield's debounce once and writes nothing; the host's file replaced by the package default (our entry gone) arms it once more and writes nothing; an OWNED write arms it once per host publish (round 8: not for the plugin's own ownWrite reassignment) beside the funnel's run; a shield exit that found the file private raises no publish, no owned write and no re-arm (no loop); after an EXPOSED answer the gate refuses a URL-bearing write and still passes the key-only one that takes a URL out", () => {
+          const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), mode, { ownEcho })
+          const t = h.ids.configShieldDebounce
+          let publishes = 0, funnelRuns = 0
+          const publish0 = h.publish
+          h.publish = () => { publishes++; publish0() }
+          h.root.runConfigShield = () => { funnelRuns++ }
+          const r0 = t.restarts, w0 = h.host.writes.length
+          h.publish(); h.drain()
+          const same = { restarts: t.restarts - r0, writes: h.host.writes.length - w0 }
+          h.host.stored.bar.layout.right = []; h.host.published = JSON.parse(JSON.stringify(h.host.stored.bar)); h.publish(); h.drain()
+          const gone = { restarts: t.restarts - r0, writes: h.host.writes.length - w0, warn: h.warnings.filter(w => /no writable bar entry/.test(w)).length }
+          h.host.stored.bar.layout.right = [{ id: "io.github.rmcdavid.iptv", sourceKey: KA, showLogos: false }]; h.host.published = JSON.parse(JSON.stringify(h.host.stored.bar)); h.publish(); h.drain()
+          const rO = t.restarts, wO = h.host.writes.length, pO = publishes, fO = funnelRuns
+          h.root.setShowLogos(true); h.drain()
+          const owned = { restarts: t.restarts - rO, publishes: publishes - pO, funnelRuns: funnelRuns - fO, writes: h.host.writes.length - wO, logos: h.storedEntry().showLogos === true }
+          const r1 = t.restarts, w1 = h.host.writes.length
+          h.root.onConfigShieldExit(JSON.stringify({ ok: true, kind: "config", action: "shield", verdict: "private", private: true, changed: false, modeBefore: "0600", modeAfter: "0600" }) + "\n"); h.drain()
+          const exit = { restarts: t.restarts - r1, writes: h.host.writes.length - w1, state: h.root.hostConfigShield, pending: h.root.pendingPersist }
+          h.root.onConfigShieldExit(JSON.stringify({ ok: true, kind: "config", action: "shield", verdict: "exposed", private: false, changed: false, modeBefore: "0644", modeAfter: "0644" }) + "\n"); h.drain()
+          const exposed = { state: h.root.hostConfigShield, url: M.entryShieldDecision(h.root.hostConfigShield, { sourceKey: KA, showLogos: false, playlistUrl: NEW }), keyOnly: M.entryShieldDecision(h.root.hostConfigShield, M.ownedEntryPatch(h.root.settings, { sourceKey: KA })) }
+          return { same, gone, owned, exit, exposed,
+                   handler: [/^  onSettingsChanged: root\.reconcile\(\)$/m.test(svcText),
+                             /^  onHostSettingsChanged: \{ if \(root\.ownWrite && !Model\.ownWriteInForce\(root\.hostSettings, root\.ownWrite\)\) root\.ownWrite = null; configShieldDebounce\.restart\(\) \}$/m.test(svcText)] }
+        }, { same: { restarts: 1, writes: 0 }, gone: { restarts: 2, writes: 0, warn: 0 }, owned: { restarts: 1, publishes: 1, funnelRuns: 1, writes: 1, logos: true },
+             exit: { restarts: 0, writes: 0, state: M.CONFIG_SHIELD_PRIVATE, pending: null },
+             exposed: { state: M.CONFIG_SHIELD_EXPOSED, url: M.CONFIG_REFUSE, keyOnly: M.CONFIG_PERSIST }, handler: [true, true] })
       }
     }
   }

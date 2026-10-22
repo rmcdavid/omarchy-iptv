@@ -817,7 +817,8 @@ function entryInputNotice(name, reason) {
              body: setting + " in the bar settings was not a usable URL and was removed. Add or edit sources in " + where + "." }
   }
   // R27d (D-SRC-44): the migration did not run because Sources is full. The
-  // URL stays on the bar entry; nothing names it or the entry's label.
+  // URL rests in state.json's parked pair since D-SRC-64 (on the bar entry
+  // before it); nothing names it or the entry's label.
   // R28b: and the guide URL set beside it is held with it, so the sentence
   // names both -- they move in together once a source is removed.
   // R29e (2026-10-20, round 2's P3): and it says which source is active
@@ -1008,13 +1009,32 @@ function ownedWriteMode(flags) {
 // moment the migration runs, and a write that fails leaves the disk without
 // it. A caller that does not know answers false and keeps them, which is the
 // write that cannot lose a record.
+//
+// D-SRC-64 (round 7, 2026-10-22): a THIRD input, `parked`, the pair a
+// migration held at the cap has parked in the state AS LAST CONFIRMED ON
+// DISK (Model.migrationPendingOf over Service.landedState, never memory, for
+// the same reason as `landed`). A retired key whose value is the parked one
+// -- the entry's value through Model.entryInputForm, the pair's as written
+// by the hold, compared key by key -- is redundant and is stripped: the
+// state holds that copy now. One that differs (a guide URL set after the
+// hold, say) is kept until the hold re-parks it. Until D-SRC-64 a held
+// migration kept both URLs on the entry for as long as the hold lasted, and
+// every owned write re-carried them, the shield's verdict notwithstanding
+// (the #14748 review, `Q4 heldExposed`).
 // -> a NEW array of the retired key names to keep.
-function retiredInputsToKeep(entry, landed) {
+function retiredInputsToKeep(entry, landed, parked) {
   var e = entry && typeof entry === "object" ? entry : {}
+  var p = parked && typeof parked === "object" && typeof parked.playlistUrl === "string" && parked.playlistUrl !== "" ? parked : null
   var keep = []
   if (landed === true) return keep
   for (var i = 0; i < RETIRED_SETTINGS.length; i++) {
-    if (Object.prototype.hasOwnProperty.call(e, RETIRED_SETTINGS[i])) keep.push(RETIRED_SETTINGS[i])
+    var name = RETIRED_SETTINGS[i]
+    if (!Object.prototype.hasOwnProperty.call(e, name)) continue
+    if (p !== null) {
+      var text = entryInputForm(name, e[name]).text
+      if (text !== "" && text === str(p[name])) continue
+    }
+    keep.push(name)
   }
   return keep
 }

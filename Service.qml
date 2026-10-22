@@ -744,6 +744,8 @@ Item {
   // schedule, re-reads and notice, are withdrawn (finishStateVerify).
   // R27d (D-SRC-44): this session's one-time migration found Sources full
   // and did not run (it never evicts); told once. Booleans, never a URL.
+  // D-SRC-64: the held pair itself rests in the state (`migrationPending`,
+  // Model.migrationPendingOf), never in a property here.
   property bool migrationHeldFull: false
   property bool migrationFullTold: false
   // F1: the key of the record this session's migration added ("" when it
@@ -2519,8 +2521,9 @@ Item {
     for (var i = 0; i < merged.conflicts.length; i++) console.warn("omarchy-iptv: " + Model.mergeConflictLine(merged.conflicts[i]))
     // F1: the record this session's migration added did not land as ours --
     // another program took the place it used ("full"), or added the same
-    // playlist itself ("changed"). No marker was carried, so the entry keeps
-    // both URLs, and the migration is HELD: the reconcile below retries it
+    // playlist itself ("changed"). No marker was carried; the merge re-parked
+    // the pair from the record it dropped (D-SRC-64; the entry is empty by
+    // now), and the migration is HELD: the reconcile below retries it
     // at once (Model.reconcileAction's `heldFull`), which over "changed"
     // finds the record and migrates, and over "full" holds it under the one
     // "Sources is full" card (adoptActive tells it, once) until a removal.
@@ -4103,8 +4106,11 @@ Item {
     // every owned write strips them, whatever they are. R17a's held/consumed
     // rule and R20c's landed-state rule for the patch are withdrawn: the
     // only question left is the marker's.
+    // D-SRC-64: and a retired key whose value the LANDED state holds as a
+    // held migration's parked pair is redundant and stripped too, so the
+    // entry carries a URL only until the hold's own state write lands.
     var published = Model.findBarEntry(root.shell.barConfig, root.pluginId)
-    var keep = Model.retiredInputsToKeep(published, Model.entryMigratedOf(root.landedState))
+    var keep = Model.retiredInputsToKeep(published, Model.entryMigratedOf(root.landedState), Model.migrationPendingOf(root.landedState))
     var entry = Model.entryWith(published, patch, { keep: keep })
     // R19a (round 9): NO SKIP ON AN ESTIMATE. Every owned write is handed to
     // the host, and updateEntryInline's own answer is the dirty check: `false`
@@ -4164,8 +4170,9 @@ Item {
     //   - the gap from that run's exit to the next persist, which is however
     //     long the user goes between source edits and is therefore UNBOUNDED
     //     in time. It is bounded in EVENTS: the answer is at most one shield
-    //     run old, and a run follows service start, every persist and every
-    //     logo toggle.
+    //     run old, and a run follows service start, every persist, every
+    //     logo toggle and, since D-SINK-38, every host publish of the file
+    //     (onHostSettingsChanged), which is the event a recreation raises.
     // What closes the second window is making every persist wait for its own
     // fresh answer -- the defer machinery already exists, so it is a one-line
     // change from "consult the cached state" to "always defer" -- at the cost
@@ -4802,10 +4809,15 @@ Item {
     var s = root.settings
     var playlist = String(s.playlistUrl || "")
     var epg = String(s.epgUrl || "")
+    // D-SRC-64: `parked` is the pair a held migration has parked in the
+    // state (memory: the hold is this session's), the migration's input
+    // whenever the entry carries no playlist URL -- after the hold's strip,
+    // at a restart mid-hold, and at the retry a removal asks for.
     var plan = Model.reconcileAction({ first: !root.reconciled, force: force === true,
                                        migrating: !Model.entryMigratedOf(root.landedState),
                                        playlist: playlist, epg: epg, seen: root.entryInputsSeen,
-                                       heldFull: root.migrationHeldFull })
+                                       heldFull: root.migrationHeldFull,
+                                       parked: Model.migrationPendingOf(root.userState) })
     root.reconciled = true
     // Every value this reconcile looked at is handled from here on: adopted
     // below, or refused and reported here. The host's stale publish of it
@@ -4881,11 +4893,21 @@ Item {
     if (out.marked) console.warn("omarchy-iptv: migrating the bar entry: its URLs are read this once, and the Sources screen is where sources are kept from now on")
     if (out.marked) root.migrationAddedKey = out.added
     // R27d (D-SRC-44): the migration did not run -- Sources is full and it
-    // never evicts. The entry keeps its URL (no marker, so the funnel keeps
-    // it), the user is told ONCE (Model.entryInputNotice "full": no URL, no
-    // label), and the next reconcile after a removal tries again.
+    // never evicts. The user is told ONCE (Model.entryInputNotice "full": no
+    // URL, no label), and the next reconcile after a removal tries again.
+    // D-SRC-64 (round 7, the owner's decision): the pair is PARKED in the
+    // state (Model.adoptActiveSource wrote `migrationPending` into
+    // `out.state`; `out.changed` says the write is new), the save below
+    // carries it into state.json (0600), and the owned write persistActive
+    // asks for -- which waits for that save to LAND (R13) -- takes both
+    // URLs off the bar entry (Model.retiredInputsToKeep over the landed
+    // pair). No marker: the migration is still to run. A save that FAILS
+    // leaves the entry as it is (the keep rule reads the LANDED state), so
+    // the entry stays the backup until a later save lands or the next start
+    // re-adopts it (R21e's shape). The journal says so, without a URL.
     if (out.full) {
       root.migrationHeldFull = true
+      if (out.parked && out.changed) console.warn("omarchy-iptv: the bar entry's playlist" + (out.heldEpg ? " and guide URL are" : " is") + " kept in state.json until a source is removed; the entry is cleared once that write has landed")
       if (!root.migrationFullTold) {
         root.migrationFullTold = true
         root.reportEntryInput("playlistUrl", "full")
@@ -5132,6 +5154,26 @@ Item {
   // `settings` object itself and resets the per-source status when the
   // playlist changed (the derived playlistUrl / epgUrl bindings may still
   // hold the previous values inside this handler).
+  // D-SINK-38 (round 7, 2026-10-22, the owner's decision): and the shield is
+  // asked again on every HOST publish of shell.json, through its debounce
+  // -- from onHostSettingsChanged below, not from here (round 8, the lead's
+  // answer to round 7's open question): `settings` also re-evaluates on the
+  // plugin's own ownWrite reassignment, so a re-arm here cost an owned
+  // write the funnel's run plus one or two debounce runs; the host's signal
+  // fires once per publish and never for the override.
+  // The host's reset commands (omarchy-reinstall-configs, the quattro
+  // upgrade's copy, omarchy-refresh-config on a missing file) can re-create
+  // the file 0644 mid-session, and until now the shield ran only on the
+  // service's own events (start, an owned write, a refusal, the deferred
+  // path), so a recreated file stayed 0644 until the next start whenever
+  // the plugin had no write to make (the no-write states, R22a and R21e,
+  // with a URL on the entry). One ~200 ms helper run per publish, folded
+  // into one re-run while one is in flight (runConfigShield). No loop: the
+  // verb chmods only a file that is not yet private and does nothing
+  // otherwise (`changed: false`, the helper's own idempotence test), so the
+  // one publish a chmod can raise through the host's file watch meets a run
+  // that changes nothing; and sameOwnWrite already bounds the lagging
+  // host's publish cycle. Pinned through the service harness.
   onSettingsChanged: root.reconcile()
   // Our own write stands in for the host's value only until the host
   // reports something else -- its (late) echo of our own value, or a
@@ -5142,7 +5184,13 @@ Item {
   // `settings` re-evaluates is what a QML change handler does by
   // construction (it runs before the bindings that depend on the same
   // property), which is also the host behaviour this works around.
-  onHostSettingsChanged: if (root.ownWrite && !Model.ownWriteInForce(root.hostSettings, root.ownWrite)) root.ownWrite = null
+  // D-SINK-38 (round 8): and the shield's debounce is re-armed here, once
+  // per host publish -- the republish of unchanged content, the file replaced
+  // by the package default, the lagging host's late echo of an owned write.
+  // The verb chmods only a file that is not yet private (`changed: false`
+  // otherwise), so the one publish a chmod can raise meets a run that
+  // changes nothing; a shield exit re-arms nothing by itself.
+  onHostSettingsChanged: { if (root.ownWrite && !Model.ownWriteInForce(root.hostSettings, root.ownWrite)) root.ownWrite = null; configShieldDebounce.restart() }
   // D-LIVE-19, and D-SINK-19 changed what reaches it. The active source's
   // in-memory data goes with the active key, so the channel list, the group
   // column and the counts are gone by the time the guide draws its setup

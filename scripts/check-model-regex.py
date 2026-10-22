@@ -27,24 +27,29 @@ are both that.
 
 WHAT IT READS AS A PATTERN: a regex literal; a `RegExp(...)` call, with
 or without `new` (F-GATE-9: the two build the same object, and `RegExp("...")`
-was a one-token evasion of a guard that looked for `new`); and a string
-literal handed to `.match(`, `.search(` or `.matchAll(`, which the
-language converts to a RegExp (F-GATE-9 again). A `.replace(` or `.split(`
-with a string takes it LITERALLY and builds no pattern, so those are not
-read. A `RegExp` call or a `.match`/`.search`/`.matchAll` whose argument is
-a template literal is a problem (unreadable), and a `RegExp` call whose
-argument is any other expression is listed in BUILT below with the reason it
-is linear, or it is a problem; an expression nobody listed is a pattern
-nobody read.
+was a one-token evasion of a guard that looked for `new`), spelled bare or
+as `globalThis.RegExp(` / `window.RegExp(` (R33d, round 7: the same
+constructor through the global object, which a guard that refused every
+member call read as somebody else's `RegExp`); and a string literal handed
+to `.match(`, `.search(` or `.matchAll(`, which the language converts to a
+RegExp (F-GATE-9 again). A `.replace(` or `.split(` with a string takes it
+LITERALLY and builds no pattern, so those are not read. A `RegExp` call or
+a `.match`/`.search`/`.matchAll` whose argument is a template literal is a
+problem (unreadable), and a `RegExp` call whose argument is any other
+expression is listed in BUILT below with the reason it is linear, or it is
+a problem; an expression nobody listed is a pattern nobody read.
 
 WHAT IT DOES NOT SEE, as the helper guard says of itself: a run with no
 literal prefix searched from every position (D-EPG-8, F-SINK-11, D-PERF-6),
 a nested unbounded repeat (`(a+)+`), a run hidden at the START of an optional
 group (the walk looks at one sequence at a time), a string VARIABLE handed
-to `.match`/`.search`/`.matchAll` (its value is read where it is built, if
-it is a literal there, and not at all if it is composed), and a pattern
-reaching a RegExp through any other call (`Reflect.construct`, a wrapper
-function). The JavaScript pattern is read by Python's `re` parser after a
+to `.match`/`.search`/`.matchAll` or to `RegExp(` (NOT read: this guard
+reads the call's argument and nothing it resolves to, so a pattern built
+into a variable elsewhere is a pattern nobody read -- R33d withdrew the
+sentence that said its value was read where it was built), any other
+member spelling of the constructor (`obj.RegExp(`, `this.RegExp(`), and a
+pattern reaching a RegExp through any other call (`Reflect.construct`, a
+wrapper function). The JavaScript pattern is read by Python's `re` parser after a
 small translation (named groups, `[^]`, `\\/`, `\\u{...}`, the `i`/`s`/`m`
 flags); the two engines' `\\s` differ by five code points, which cannot turn
 a non-overlap into an overlap for the classes the model uses, and a pattern
@@ -88,9 +93,11 @@ BUILT = {
         "linear: anchored, a literal prefix, one digit run then $ (GENERATED_NAME_RE, text.mjs)",
 }
 
-# `RegExp(` with or without `new`, and not `.RegExp(` (a member) or
-# `myRegExp(` (another name): F-GATE-9.
-NEW_REGEXP = re.compile(r"(?<![\w$.])(?:new\s+)?RegExp\s*\(")
+# `RegExp(` with or without `new`, bare or through the global object
+# (`globalThis.RegExp(`, `window.RegExp(`: R33d), and not any other
+# `.RegExp(` (a member of something else) or `myRegExp(` (another name):
+# F-GATE-9.
+NEW_REGEXP = re.compile(r"(?<![\w$.])(?:new\s+)?(?:(?:globalThis|window)\s*\.\s*)?RegExp\s*\(")
 # A string handed to the three String methods that build a RegExp from it.
 STRING_PATTERN_CALL = re.compile(r"\.(match|search|matchAll)\s*\(")
 FLAG_BITS = {"i": re.IGNORECASE, "s": re.DOTALL, "m": re.MULTILINE}

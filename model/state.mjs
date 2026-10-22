@@ -378,6 +378,59 @@ function withEntryMigrated(state) {
   return cloneState(st, { entryMigrated: true })
 }
 
+// D-SRC-64 (round 7, 2026-10-22, the owner's decision). THE PARKED PAIR.
+//
+// A migration HELD at the MAX_SOURCES cap used to leave both bar URLs on the
+// bar entry until a removal freed a place -- unbounded in time, re-carried by
+// every owned write, and re-carried even when the D-SINK-18 shield reported
+// the file EXPOSED, because the refusal decides over the patch and the funnel
+// re-attached the kept keys afterwards (the #14748 review's plugin lens,
+// `Q4 heldExposed`: three URL-bearing hand-overs, zero refusals). Now the
+// hold parks them HERE, in state.json (the plugin's own 0600 file), under a
+// key of the migration's own: `migrationPending: { playlistUrl, epgUrl }`.
+// Not a source record (never counted against the cap, never a Sources row),
+// and not a marker: the pair and the marker never coexist, because the
+// marker says the migration ran and the pair says it is still to run.
+// Model.adoptActiveSource writes it when step 1 finds Sources full and drops
+// it the moment the pair lands (a new record after a removal, or the record
+// another program added for the same playlist meanwhile) or is refused as
+// invalid; the funnel strips the entry's copy once the state write that
+// carries the pair has LANDED (Model.retiredInputsToKeep's third input), so
+// the entry carries a URL only until that write lands, and a write that
+// FAILED leaves the entry as it is (R21e's shape: the entry is the backup
+// until the state holds it). The helper's normalize_state mirrors the
+// reader (10-state.py), under the shared state-keys fixture, so a hand-run
+// `state` verb keeps it; an OLDER build's helper drops it as it drops the
+// marker, and that is the downgrade the ruling accepts.
+//
+// The reader: an object whose `playlistUrl` is a non-empty string; `epgUrl`
+// the string beside it, "" otherwise. Nothing is rewritten or validated
+// here -- the pair is what the migration read off the entry (the URL
+// boundary's text), and it is validated when it lands, exactly as the entry
+// value was. Present only when it is a pair, so a state without one
+// serializes as before (the activeKey / entryMigrated precedent).
+function migrationPendingOf(state) {
+  var raw = state && typeof state === "object" ? state.migrationPending : null
+  if (!raw || typeof raw !== "object" || Object.prototype.toString.call(raw) !== "[object Object]") return null
+  if (typeof raw.playlistUrl !== "string" || raw.playlistUrl === "") return null
+  return { playlistUrl: raw.playlistUrl, epgUrl: typeof raw.epgUrl === "string" ? raw.epgUrl : "" }
+}
+
+// The state with the pair set (`pending` as migrationPendingOf reads it) or
+// dropped (`pending` null); the SAME object when nothing moves, so "did the
+// state move" stays an identity test.
+function withMigrationPending(state, pending) {
+  var st = state || emptyState()
+  var want = migrationPendingOf({ migrationPending: pending })
+  var have = migrationPendingOf(st)
+  if (want === null && have === null) return st
+  if (want !== null && have !== null && want.playlistUrl === have.playlistUrl && want.epgUrl === have.epgUrl) return st
+  var out = cloneState(st)
+  if (want === null) delete out.migrationPending
+  else out.migrationPending = want
+  return out
+}
+
 // One `{id, name, at}` record: the shape a `recents` entry, `lastPlayed`
 // and `session` all share (python mirror: `normalize_played`). A value
 // without an `id` is dropped, which is also how a state file written
@@ -430,6 +483,13 @@ function cloneState(state, patch) {
   // the day it is added. Carried only when it is exactly true, so a state
   // that has not migrated clones to exactly the shape it had before.
   if (st.entryMigrated === true) out.entryMigrated = true
+  // D-SRC-64 (round 7): the SEVENTH, the parked pair of a migration held at
+  // the cap. Carried only when it reads as a pair (migrationPendingOf), so a
+  // state without one clones to exactly the shape it had before. The only
+  // copy of a credential while it is held; a reducer that dropped it would
+  // lose it between the hold and the removal that lands it.
+  var pending = migrationPendingOf(st)
+  if (pending !== null) out.migrationPending = pending
   var p = patch || {}
   // D-SG-3: own keys only, so nothing inherited is ever written to state.json.
   for (var key in p) if (key !== "version" && key !== "__proto__" && hasOwnKey(p, key)) out[key] = p[key]
@@ -505,6 +565,11 @@ function parseState(text) {
   // D-SINK-19 round 11, R21a: the migration marker. Absent unless exactly
   // true (entryMigratedOf).
   if (parsed.entryMigrated === true) state.entryMigrated = true
+  // D-SRC-64 (round 7): the parked pair of a held migration, absent unless
+  // it reads as one (migrationPendingOf); the helper's normalize_state reads
+  // it the same way, under the shared state-keys fixture.
+  var pending = migrationPendingOf(parsed)
+  if (pending !== null) state.migrationPending = pending
   var recs = asList(parsed.recents)
   for (var r = 0; r < recs.length; r++) {
     var entry = playedRecord(recs[r])
@@ -1310,8 +1375,8 @@ var MERGE_WHOLE_FIELDS = ["recents", "activeKey", "lastPlayed", "session", "cach
 // one-time migration added (Service's migrationAddedKey; "" when it added
 // none). When the marker is OURS ALONE -- the migration ran since the base
 // and theirs does not carry it -- and the cap drops that record, the
-// migration did not happen: the marker is NOT carried (the entry keeps both
-// URLs: the funnel keeps a retired key until the marker has landed), the
+// migration did not happen: the marker is NOT carried (the entry kept both
+// URLs under F1; since D-SRC-64 the pair is re-parked, below), the
 // active key it set goes back to theirs, the record is not counted among
 // `dropped.sources` (the user added nothing, and "make room, then add it
 // again" names a URL the entry still holds), and `migrationHeld` is "full":
@@ -1325,6 +1390,20 @@ var MERGE_WHOLE_FIELDS = ["recents", "activeKey", "lastPlayed", "session", "cach
 // retry the caller runs at once finds the record and adopts the guide URL
 // onto it -- the outcome the other order (their add first) has always had.
 // "" when the migration's record landed as ours.
+// D-SRC-64 (round 7, 2026-10-22): THE PARKED PAIR RIDES THE HOLD. Since the
+// hold parks both bar URLs in the state (`migrationPending`) and the entry
+// is stripped once that write has landed, a merge is the one place the pair
+// could go missing with the entry already empty. So: ours' pair stands when
+// ours holds one (the hold is this session's, and memory is the only place
+// its credential is sure to be); when ours holds none and the migration is
+// held AGAIN by this merge ("full" or "changed"), the pair is rebuilt from
+// the record the migration had added -- its url and epgUrl ARE the pair --
+// so the retry the caller runs at once has an input although the entry no
+// longer carries one; otherwise theirs' pair is kept only when the base had
+// none (a pair another program parked; nothing here knows better), because
+// a pair in base and theirs that ours dropped is one ours LANDED. A conflict
+// goes to theirs everywhere else; here the only copy of a credential goes
+// to whoever still holds it.
 // -> { state, conflicts, dropped, migrationHeld }
 function mergeForeignState(base, ours, theirs, opts) {
   var b = parseState(JSON.stringify(base || emptyState()))
@@ -1403,6 +1482,15 @@ function mergeForeignState(base, ours, theirs, opts) {
   }
   if (migrationHeld === "" && (entryMigratedOf(o) || entryMigratedOf(t))) out.entryMigrated = true
   else delete out.entryMigrated
+  // D-SRC-64: the parked pair (the rule in the header above).
+  var pending = migrationPendingOf(o)
+  if (pending === null && migrationHeld !== "") {
+    var added = mo[migrationKey]
+    pending = { playlistUrl: str(added.url), epgUrl: str(added.epgUrl) }
+  }
+  if (pending === null && migrationPendingOf(b) === null) pending = migrationPendingOf(t)
+  if (pending !== null && pending.playlistUrl !== "") out.migrationPending = pending
+  else delete out.migrationPending
   return { state: parseState(JSON.stringify(out)), conflicts: conflicts, dropped: dropped, migrationHeld: migrationHeld }
 }
 
@@ -1446,14 +1534,20 @@ function mergeDropLines(dropped) {
 }
 
 // F1. The journal line for a merge that held the migration again, by the
-// reason mergeForeignState gave: no key, no URL -- the bar entry still holds
-// what the record would have carried.
+// reason mergeForeignState gave: no key, no URL. Round 8 (2026-10-22, the
+// round 7 recheck's P2 #2): the "full" line says where the held playlist
+// rests -- state.json, the plugin's own file, where the merge re-parked
+// the pair (D-SRC-64) -- and no longer "on the bar entry", which D-SRC-64
+// made false (the entry is empty by then). It is the ONE journal line a
+// re-park by a merge prints: the retry that follows finds the state already
+// holding exactly that pair, so adoptActiveSource's `changed` is false and
+// the service's own "kept in state.json" line does not print again.
 function migrationHeldAgainLine(why) {
   if (str(why) === "changed") {
     return MERGE_LINE_HEAD + "another program added the bar's playlist itself, so it is moved into Sources again over that record"
   }
   return MERGE_LINE_HEAD + "the bar's playlist could not be moved into Sources, which is full again (the limit is " + MAX_SOURCES +
-    " sources); it stays on the bar entry, with its guide-data URL, until a source is removed"
+    " sources); it is kept, with its guide-data URL, in state.json (the plugin's own file) until a source is removed"
 }
 
 // R25b. What the user is told, ONCE per merge that dropped anything: how
@@ -1791,22 +1885,22 @@ export {
   favoriteOrigin, favoriteRemovalNotice, hideNotice, scopeEntryAccessibleName,
   savedSearchRows, savedSearchArrivals, savedSearchDepartures,
   savedSearchFooter, withSavedSearch, withoutSavedSearch, savedSearchRecord,
-  emptyState, entryMigratedOf, withEntryMigrated, playedRecord, cloneState,
-  withCacheLayout, parseState, pushPlayedRecord, stateOnLoad, isFavorite,
-  toggleFavorite, pushRecent, recordPlayed, clearSession, stateSession,
-  deadSessionVerdict, PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES,
-  sessionAfterOutcome, withFavorites, hiddenGroupList, hiddenGroupSet,
-  isGroupHidden, toggleHiddenGroup, browsableChannels, hideAction, hideVerb,
-  removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed,
-  normalizeFailed, prunedFailed, knownIdSet, failedIndex, failedDocument,
-  failedWhen, withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
-  countReload, reloadDisposition, sortedKeys, stateCanonical, sameState,
-  canonValue, mergeSetField, recordFieldsDiffering, MERGE_WHOLE_FIELDS,
-  mergeForeignState, MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount,
-  mergeDropLines, migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS,
-  stateLoadKind, stateInitFound, stateLoadDecision, stateWriteGate,
-  stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
-  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
-  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
-  stateBlockedHeader
+  emptyState, entryMigratedOf, withEntryMigrated, migrationPendingOf,
+  withMigrationPending, playedRecord, cloneState, withCacheLayout, parseState,
+  pushPlayedRecord, stateOnLoad, isFavorite, toggleFavorite, pushRecent,
+  recordPlayed, clearSession, stateSession, deadSessionVerdict,
+  PLAYER_OUTCOME_SURVIVES, PLAYER_OUTCOMES, sessionAfterOutcome,
+  withFavorites, hiddenGroupList, hiddenGroupSet, isGroupHidden,
+  toggleHiddenGroup, browsableChannels, hideAction, hideVerb, removeRecent,
+  trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed,
+  prunedFailed, knownIdSet, failedIndex, failedDocument, failedWhen,
+  withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
+  reloadDisposition, sortedKeys, stateCanonical, sameState, canonValue,
+  mergeSetField, recordFieldsDiffering, MERGE_WHOLE_FIELDS, mergeForeignState,
+  MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount, mergeDropLines,
+  migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
+  stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
+  stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
+  STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
+  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
 }

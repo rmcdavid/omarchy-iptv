@@ -735,9 +735,11 @@ bar entry, read by the service through `shell.barConfig`.
 
 Credentials caveat: Xtream-style URLs embed username/password. They live in
 `shell.json` (mode 0600 only because the plugin now makes it so before it
-writes one: the packaged default is 0644 and the host's writer keeps whatever
+writes one: the packaged default is 0644 and the shell's FileView writer, the
+one behind plugin settings and `omarchy bar set`, keeps whatever
 mode it finds, which is D-SINK-18 below -- this line said 0600 flatly for the
-life of the project and was describing one machine), in `state.json`
+life of the project and was describing one machine; the host's CLI writer,
+`omarchy-shell-config commit()`, rewrites it 0600, D-DOC-23), in `state.json`
 (mode 0600; the Sources history
 keeps each source's URLs, D-SINK-6) and, for the life of a fetch, in the
 helper's environment as `OMARCHY_IPTV_URL` -- readable through
@@ -1066,7 +1068,8 @@ previous one** (against the shipped 0.13.2, eb7fdff,
 omacom/omarchy-plugin-marketplace#10735): adding or switching a source stores
 the playlist and EPG URLs in `~/.config/omarchy/shell.json` through
 `persistActive` -> `updateEntryInline`, the supported upgrade path can create
-that file 0644, and the host's atomic writer preserves whatever mode it finds,
+that file 0644, and the shell's FileView writer (the one behind plugin
+settings and `omarchy bar set`) preserves whatever mode it finds,
 so a provider credential comes to rest in a file other local accounts can read
 whenever the directories above it are searchable. He was right.
 **A new class again, and naming it is the point: this is not a sink but a
@@ -1188,7 +1191,13 @@ at, reports or acts on the mode of `~/.config` or `~/.config/omarchy`. A 0600
 file is sufficient whatever the directory modes are; `~/.config` is shared
 with everything on the system and tightening it is not this plugin's to do;
 and the verb reports no directory mode either, because a number in the output
-is an invitation to act on it. `O_NOFOLLOW` covers the last component only --
+is an invitation to act on it. The one path is the file's own, and nothing
+beside it: not the backup copies the host's reset commands leave next to it
+(residual 4 below), which the owner decided on 2026-10-22 (D-SINK-37) are
+DOCUMENTED and not shielded -- a verb that walked `shell.json`'s neighbours
+by name pattern would be the glob-and-chmod capability the current verb is
+valued for lacking, and the README names the copies and the one-line `chmod`
+instead. `O_NOFOLLOW` covers the last component only --
 a symlinked `~/.config`, which is what every dotfile manager builds, is
 followed on purpose, since refusing it would break ordinary installs. The
 bound on that is the operation itself: this only ever SUBTRACTS group and
@@ -1213,15 +1222,56 @@ measurement this lane could take:
    happened: there is no watcher on the file's mode, by choice. The cost is
    named rather than minimised -- the credential stays readable by other local
    accounts until the next persist or the next shell start re-runs the shield.
-   The containing fact, and it is a real one, is that the supported command
-   which can produce a 0644 `shell.json` produces it by CREATING the file, and
-   a newly created file carries the package default contents and therefore no
-   URL (`cp -f` onto an existing file keeps that file's mode); what remains is
-   a mode changed by hand, or by a tool nobody here has enumerated. The
+   The containing fact, and it is a real one, is that every supported
+   command which can leave a 0644 `shell.json` writes the PACKAGE DEFAULT
+   contents into it, and therefore no URL. Four paths, enumerated on
+   2026-10-22 by the #14748 review and each re-run here on scratch copies
+   under umask 022 and 077 (D-DOC-23; the first version of this item said
+   "by CREATING the file" and "a tool nobody here has enumerated", and the
+   first was false for the third path): `useradd -m` seeding a new home from
+   `/etc/skel`, whose copy is 0644 root-owned -- INFERRED, not measured:
+   `useradd` was not run here, its copy routine was read in shadow's source,
+   and `cp -a` of skel gives 0644 under both umasks (the home itself is 0700
+   by `HOME_MODE` in `/etc/login.defs`, read);
+   `omarchy-refresh-config omarchy/shell.json` on a MISSING file
+   (`omarchy-refresh-config:42` -- every script here is under
+   `/usr/share/omarchy/bin` -- `cp -f`, the umask:
+   0644 under 022, 0600 under 077; onto an EXISTING file
+   (`omarchy-refresh-config:33`) it keeps
+   that file's mode and inode, 0600 stays 0600); `omarchy-reinstall-configs`
+   (`omarchy-reinstall-configs:19`, `cp -af /etc/skel/. ~/`), the one path
+   that LOOSENS an existing file IN PLACE -- a 0600 file becomes 0644 on the
+   same inode under either umask, because `-a` carries skel's mode -- with
+   skel's contents; and the Omarchy 4 upgrade's `copy_config_default`
+   (`omarchy-upgrade-to-quattro:1727,1730,1731,1735`: `cmp`, a backup,
+   `rm -f`, then `cp -P` at the umask, 0644 under 022), which then ends with
+   `omarchy-bar defaults` (`omarchy-upgrade-to-quattro:2373`), so its 0644 is
+   an intermediate state and the upgrade ends at 0600 when that step
+   succeeds -- as does `omarchy-refresh-shell`, which is refresh-config then
+   `omarchy-bar defaults`; the paths that END at 0644 are the skel seed,
+   `omarchy-reinstall-configs` and a bare `omarchy-refresh-config
+   omarchy/shell.json`. What remains
+   is a mode changed by
+   hand. The host's OTHER writer closes the loop from the other side:
+   `omarchy-shell-config commit()` (`omarchy-shell-config:57-59`, `mktemp`
+   then `mv`) rewrites the file 0600 whatever it was and whatever the umask
+   (measured, 0644 -> 0600 under 022 and 077, the temp file 0600 at
+   creation), and it is what `omarchy bar defaults|use|reset|position|
+   transparent`, `omarchy-refresh-shell` and the upgrade's last step run; so
+   "the host's writer keeps whatever mode it finds" is true of the shell's
+   FileView writer alone (plugin settings, `omarchy bar set`, plugin enable),
+   which is the writer that carries a URL. The
    mitigation is the re-arm: the shield runs again after every successful
    write and after the logo toggle's write, so the gate in front of the next
    persist is answering about the file as it is now rather than as it was at
-   login.
+   login -- and, since D-SINK-38 (round 7 of the bounds sweep, 2026-10-22,
+   the owner's decision), on every host publish of the file as well
+   (`onHostSettingsChanged`, one debounced run per publish; moved there
+   from `onSettingsChanged` in round 8 so the plugin's own override
+   reassignment arms nothing), which is the event each of the reset paths
+   above raises through the shell's file watch. Pinned through the service
+   harness on both hosts; whether the shell's FileView publishes a
+   recreation and the plugin's own fchmod is UNVERIFIED on a running shell.
 3. *Installs that are already exposed.* The shield runs on the startup path
    unconditionally, independent of `mkdirProc`'s chain and independent of
    whether any persist happens, so an install whose `shell.json` is 0644 with
@@ -1230,6 +1280,44 @@ measurement this lane could take:
    only the path that writes new secrets would have left every affected
    install exposed indefinitely, and the artifact needs the fix as much as the
    derivation does.
+4. *The host's backup copies* (D-SINK-37, found 2026-10-22 by the #14748
+   review; the owner's decision the same day: document, do not shield).
+   Two of the reset paths in residual 2 copy the OLD file beside the new one
+   before replacing it: `omarchy-refresh-config` writes
+   `shell.json.bak.<epoch>` (`omarchy-refresh-config:32`, `cp -f`, kept
+   unless the file was already the default: `omarchy-refresh-config:36`,
+   `rm` after a `cmp -s`), and the Omarchy 4
+   upgrade's `backup_config_file` writes
+   `shell.json.omarchy-upgrade-to-quattro.<suffix>.bak`
+   (`omarchy-upgrade-to-quattro:1654`, `cp -af`, the suffix a timestamp set
+   at `omarchy-upgrade-to-quattro:390`). Each holds the plugin's entry as it
+   was, URLs included, for
+   ever, and the shield never opens either: it opens exactly
+   `$HOME/.config/omarchy/shell.json` (the paragraph above). Their mode,
+   measured on scratch copies under umask 022 and 077 on 2026-10-22: `cp -f`
+   gives the backup the SOURCE file's mode masked by the umask, not the umask
+   alone -- a 0600 `shell.json` gives a 0600 backup under both, a 0644 one a
+   0644 backup under 022 and 0600 under 077; `cp -af` keeps the original's
+   mode exactly (0600 -> 0600, 0644 -> 0644, both umasks). So a backup is
+   readable by other accounts only when the file it copied was, and the
+   shield decides that for the file: the population is an install from
+   before 0.13.3 (no shield; the URL on the entry by design) whose 0644 file
+   met `omarchy refresh shell`, `omarchy-refresh-config omarchy/shell.json`
+   or the upgrade, plus a file `omarchy-reinstall-configs` had reset to 0644
+   (skel's contents: no plugin entry), `omarchy plugin enable` had put the
+   entry back (the shell's `enablePlugin`, the FileView writer, 0644 kept;
+   a kept service instance is not recreated on re-enable, `keepLoaded`, so
+   no start-up shield runs) and `omarchy bar set` had given a URL, all
+   before the plugin's next owned write -- on a migrated install that write
+   strips the URL (R21b) and re-arms the shield, and since D-SINK-38 every
+   host publish re-arms it too, so the window is the one reconcile; "until
+   the plugin's next start" only in a no-write state (R22a, R21e). On
+   this machine both backups are 0600 (stat only; a 0600 source each time),
+   and `cp -f` onto a 0600 file keeps it 0600 (residual 2), so a shielded
+   install's backups are private. The README's Settings and Troubleshooting
+   name both copies, the `ls -l ~/.config/omarchy/shell.json*` and the
+   `chmod 600`, the shape it already uses for a `state.json` created at the
+   umask; the contract records the names beside `omarchy-refresh-shell`.
 **The siblings, asked before closing (engineering rule 15).** What else does
 this plugin put into a container it does not own? Swept over the tree at
 982b693 and stated as cleared or not:
@@ -1316,7 +1404,8 @@ know which source was playing: at 65ec1b8, the last tree before the change,
 key by matching that URL against the records in `state.json`, and `state.json`
 had no `activeKey` of its own. The host persists that entry into
 `~/.config/omarchy/shell.json`, whose packaged default is 0644 and whose
-writer preserves whatever mode it finds. Every source reached it, not only
+FileView writer (the shell's own, the one behind plugin settings and
+`omarchy bar set`) preserves whatever mode it finds. Every source reached it, not only
 Xtream: a `https://user:pass@host/list.m3u`, a provider URL carrying the
 credential as a path token, and a `get.php?username=U&password=P` alike.
 
@@ -1392,7 +1481,8 @@ now, with each decision lifted into `Model.js` so node can call it (rule 12):
   is told once (`Sources is full`); the next reconcile after a removal
   migrates] [2026-10-20, R28b: the entry's `epgUrl` is held with it, not
   attached to the step-2 record, and the migration after a removal takes
-  both]), invalid is reported and
+  both] [2026-10-22, D-SRC-64: both rest in `state.json`'s parked pair and
+  the entry is stripped once that write has landed]), invalid is reported and
   the key is left exactly as it was [2026-10-20, R29d: and the entry's
   `epgUrl` beside an invalid playlist is not attached to the step-2 record
   either -- until R29d it replaced that record's own guide URL -- but
@@ -3156,7 +3246,10 @@ Performance budget (10k channels):
 11. A secret goes only into a container this plugin has made private, and that
     includes a container it does not own. Standard 5 covers the plugin's own
     files; D-SINK-18 is what happens when the same credential goes into the
-    host's `shell.json`, whose packaged default is 0644 and whose writer keeps
+    host's `shell.json`, whose packaged default is 0644 and whose FileView
+    writer (the shell's own, the one behind plugin settings and `omarchy bar
+    set`; the host's CLI writer `omarchy-shell-config commit()` rewrites it
+    0600 instead, D-DOC-23) keeps
     whatever mode it finds. Since D-SINK-19 the plugin writes NO secret into
     that container -- the entry carries the active source's key -- and this
     standard is kept in full for the two routes a URL still takes into it

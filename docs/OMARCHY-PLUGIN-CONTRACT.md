@@ -27,7 +27,38 @@ re-read them. `$OMARCHY_PATH` = `/usr/share/omarchy` and is READ-ONLY.
   `/usr/share/omarchy/shell/plugins/bar/README.md`.
 - User plugins: `~/.config/omarchy/plugins/<plugin-id>/` (git checkout; saving any
   file there hot-reloads plugin code; `omarchy-shell shell rescanPlugins` forces it).
-- Config: `~/.config/omarchy/shell.json` (mode 0600). Plugin settings live inline
+- Config: `~/.config/omarchy/shell.json`. Its mode is NOT a host constant
+  (this line stated mode 0600 flatly until 2026-10-22, D-DOC-22, describing
+  this machine after the plugin's own shield had run). Verified 2026-10-22 on
+  omarchy 4.0.4-1 by reading the scripts (every `script:line` below is under
+  `/usr/share/omarchy/bin`, `shell.qml` under `/usr/share/omarchy/shell`) and
+  re-running their copy lines on
+  scratch files under umask 022 and 077: shipped and seeded at 0644
+  (`/usr/share/omarchy/config/omarchy/shell.json` and
+  `/etc/skel/.config/omarchy/shell.json`, both 0644 root, byte-identical);
+  created under the user's umask by `omarchy-refresh-config` on a missing
+  file (`omarchy-refresh-config:42`, `cp -f`: 0644
+  under 022, 0600 under 077; onto an existing file,
+  `omarchy-refresh-config:33`, the file's own
+  mode and inode are kept) and by the Omarchy 4 upgrade's `cp -P`
+  (`omarchy-upgrade-to-quattro:1731,1735`, `rm -f` then the copy;
+  `omarchy-upgrade-to-quattro:1750` for a
+  missing file), so usually 0644; reset to 0644 IN PLACE by
+  `omarchy-reinstall-configs` (`omarchy-reinstall-configs:19`,
+  `cp -af /etc/skel/. ~/`: a 0600 file becomes 0644 on the same inode under
+  either umask, with skel's contents); left 0600 by `omarchy-shell-config`'s
+  `commit()` (`omarchy-shell-config:57-59`, `mktemp` then `mv`: 0600 whatever
+  the start mode or umask), which is what `omarchy bar defaults` and the
+  layout commands (`omarchy-bar:152,154,176,203,213,216`),
+  `omarchy-refresh-shell:9` and the upgrade's last step
+  (`omarchy-upgrade-to-quattro:2373`) run, and by this plugin's `config
+  shield`. The shell's FileView writer (`shell.qml:136-138`, `atomicWrites:
+  true`), the one behind plugin settings, `omarchy bar set`
+  (`omarchy-bar:361` -> `omarchy-shell shell setBarWidget`) and
+  `omarchy-plugin-enable:85`, keeps whatever mode it finds (D-SINK-18,
+  measured 2026-10-09; omacom/omarchy#14748). `tests/test_doc_host_mode.py`
+  pins each script citation above to the command at that line on this
+  machine. Plugin settings live inline
   on the plugin's entry: bar widgets under `bar.layout.<section>[]`, other kinds
   under `plugins[]`. Third-party enabled ⇔ id present in shell.json.
 - Menu extension: `~/.config/omarchy/extensions/omarchy-menu.jsonc` (hot reload).
@@ -477,6 +508,27 @@ configuration, and for a plugin whose settings live in `shell.json` it destroys
 exactly the thing the plugin is configured by. Restoring the snapshot and
 waiting a few seconds was enough: the running shell re-read the file and the
 plugin came back reporting its channels and EPG, with no second restart.
+
+**It also leaves a copy of the old file beside the new one, and so does the
+Omarchy 4 upgrade (verified 2026-10-22, D-SINK-37).** `omarchy-refresh-config`
+copies the existing file to `shell.json.bak.<epoch>` before replacing it
+(`omarchy-refresh-config:22,32`, `cp -f`; removed again,
+`omarchy-refresh-config:36`, only when the file was already the default),
+and the upgrade's `backup_config_file`
+copies it to `shell.json.omarchy-upgrade-to-quattro.<suffix>.bak`
+(`omarchy-upgrade-to-quattro:1654`, `cp -af`; the suffix is a `date
++%Y%m%d%H%M%S` set at `omarchy-upgrade-to-quattro:390`) before `rm -f` and
+`cp -P`. Each holds the
+plugin's entry as it was, URLs included, and nothing rewrites it afterwards.
+Mode, measured on scratch copies under umask 022 and 077: `cp -f` gives the
+backup the source's mode masked by the umask (0600 -> 0600 under both; 0644
+-> 0644 under 022, 0600 under 077), `cp -af` the original's mode exactly. The
+backup this machine's 2026-10-07 `omarchy-refresh-shell` run left,
+`~/.config/omarchy/shell.json.bak.1791373986`, is 0600 because the file was
+0600 then (stat only). The plugin's `config shield` opens `shell.json` and
+nothing beside it, by decision (D-SINK-37: documented in the README, not
+shielded); `tests/test_doc_host_mode.py` pins the two names the README gives
+to the scripts' own name templates.
 
 The neighbouring commands, by their own summary lines:
 

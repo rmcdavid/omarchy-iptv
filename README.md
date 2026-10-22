@@ -109,7 +109,9 @@ The guide, the bar widget, and the service all read that one entry. Playlist
 and guide-data URLs from paid providers embed credentials. Where they rest,
 counted: **two files, both the plugin's own, readable only by you** —
 `~/.local/state/omarchy-iptv/state.json`, which keeps your source list, each
-source's URLs and which source is active, and the channel cache under
+source's URLs and which source is active (and, while a playlist from the bar
+waits for a free place in Sources, that playlist and its guide-data URL,
+under the next heading), and the channel cache under
 `~/.cache/omarchy-iptv/sources/<key>/`, whose `channels.json` carries the
 stream addresses — each created mode 0600 inside a directory only you can
 enter (one exception, two narrow windows -- one of a few milliseconds, one
@@ -123,13 +125,43 @@ code naming the active source, and the plugin never writes a URL into that
 file. A URL still passes through it in two cases, both covered under the next
 heading: the one an install updated from 0.13.6 or earlier still has in it
 until the plugin moves it into Sources and takes it out -- at the first shell
-start on this version, at a later one if that start cannot save the move, or,
-while Sources already holds 50 sources, only once one is removed -- and one you
-put there yourself with `omarchy bar set`, which the plugin
+start on this version, or at a later one if that start cannot save the move;
+while Sources already holds 50 sources the playlist and its guide URL are
+parked in `state.json`, not left on the entry, until one is removed -- and one
+you put there yourself with `omarchy bar set`, which the plugin
 does not read and removes on its next write. This paragraph has been wrong before — two
 sentences once said two files when there were three — so the count here is
 re-derived for this version rather than copied: two the plugin owns and keeps
 a URL in, and one it does not own that a URL only passes through.
+
+One more place a URL can rest, made by the host and not the plugin, and
+not counted above because it holds only what the shell's file held when the
+copy was taken: `omarchy refresh shell` and
+`omarchy-refresh-config omarchy/shell.json` save the old `shell.json` beside
+the new one as `shell.json.bak.<number>` (the number is the time of the copy;
+removed again at once when your file already equalled the shipped one, so
+you may find none), and the Omarchy 4 upgrade saves it as
+`shell.json.omarchy-upgrade-to-quattro.<suffix>.bak`. Each holds this
+plugin's entry as it was then, URL included if one was on it, and keeps the
+permissions `shell.json` itself had at the time, never wider: a private
+(0600) file gives a private backup, a readable (0644) one gives a readable
+backup under the usual umask 022 (the refresh copy is narrowed by a stricter
+umask; the upgrade's keeps the mode exactly), measured on this version's
+Omarchy. So a backup is readable by other accounts only if the
+file it copied already was -- an install from before 0.13.3, which had no
+permission check and kept the URL on the entry, that ran one of those
+commands; or a file `omarchy-reinstall-configs` had just made readable again
+(with the shipped contents, so this plugin's entry gone with the rest), then
+`omarchy plugin enable` had put the entry back and `omarchy bar set` a URL
+on it, and one of those commands ran before the plugin's next own write --
+on an install that has already moved its URLs into Sources that write takes
+a URL it does not read off the entry and makes the file private again, and
+since this version the permission check also runs again after every change
+the shell publishes, so the window is that one reconcile. The
+plugin never touches those copies: its permission check reaches
+`shell.json` and nothing beside it. `ls -l ~/.config/omarchy/shell.json*`
+shows them; `chmod 600` or remove any you do not need (Troubleshooting has
+the same one-liner).
 
 **What the plugin stores, and three things to know about it.** Moving your URL
 out of the shell's settings file costs three things, and none of them is
@@ -161,8 +193,10 @@ obvious when it happens to you:
   notification of its own, as having no source to guide, beside the
   playlist's.) If Sources already
   holds 50 sources and the playlist is not one of them, nothing is moved and no source is removed to
-  make room: the playlist stays on the entry, and so does a guide-data URL
-  set beside it -- neither is attached to any of your sources -- nothing is
+  make room: the playlist, and a guide-data URL set beside it, are kept in
+  the plugin's own `state.json` (readable by you alone) and taken off the
+  bar entry as soon as that is written -- neither is attached to any of your
+  sources, neither counts as one, and neither is shown as one -- nothing is
   marked as done, and a notification titled **Sources is full** says `The
   playlist set on the bar, and its guide URL if one is set, were not moved
   into Sources: Sources already holds 50 sources, the most it can. Remove
@@ -171,13 +205,24 @@ obvious when it happens to you:
   (once a session, and again at each shell start while it lasts). Remove
   one -- in Sources, or with the helper's `state source remove` -- and the
   playlist is added with its guide-data URL and becomes the active source,
-  over whichever source was active. If another program fills the freed
+  over whichever source was active. A playlist set on the bar with
+  `omarchy bar set` while the wait lasts takes the waiting playlist's place
+  and keeps the waiting guide-data URL beside it (a guide-data URL set the
+  same way replaces that one): nothing waiting is dropped without being
+  told. If another program fills the freed
   place first -- a hand-run `state source add` in the moment before the
   plugin's save has read the file -- the move does not happen: both URLs
-  stay on the entry, nothing new is told, and the next removal tries again.
-  (Builds of this change that never shipped took both off the entry in that
-  case with neither in any source, saying only that a source "added here"
-  was not kept.) Up to and including 0.14.3 the least
+  stay kept in `state.json`, nothing new is told, and the next removal tries
+  again; and if that other program added the same playlist itself, the
+  guide-data URL joins that source and the wait ends. If the plugin cannot
+  write `state.json` when the hold begins, the two stay on the bar entry
+  until it can, and the next start picks them up from there. (Builds of this
+  change that never shipped took both off the entry in that case with
+  neither in any source, saying only that a source "added here" was not
+  kept; the builds between 0.14.3 and this one kept both on the bar entry
+  for as long as the wait lasted, which is the shell's settings file, read
+  by anything that reads your settings and copied by `omarchy refresh
+  shell`.) Up to and including 0.14.3 the least
   recently used source was removed to make room, with only a journal line,
   and its URL went with it. An install updated from 0.13.6 records no
   active source, so until you pick one, or a source is removed, the guide
@@ -239,18 +284,26 @@ permission change in the next paragraph stays.
 **One permission the plugin changes on a file that is not its own.**
 `shell.json` is the shell's settings file, shared by every bar widget you
 have, and it does not always arrive private. The copy Omarchy ships is
-readable by everyone on the machine; a `shell.json` created from it keeps
-whatever your umask gives it, which is usually readable by everyone too, and
-rewriting a file that already exists leaves its permissions alone — so a
-machine that started out readable stays readable. The plugin no longer puts
+readable by everyone on the machine; a `shell.json` created from it gets
+whatever your umask gives it, which is usually readable by everyone too. The
+shell's own writes — your settings, `omarchy bar set`, enabling a plugin —
+keep whatever permissions the file has, so a file that arrived readable stays
+readable through them; `omarchy bar defaults` and the other `omarchy bar`
+layout commands rewrite it private (0600) whatever it was; and
+`omarchy-reinstall-configs` copies the shipped file over yours and makes it
+readable again, with the shipped contents, so your entry and anything on it
+are gone rather than exposed. The plugin no longer puts
 your provider URL in that file, but one can still get in: an install updated
 from 0.13.6 or earlier has one in it until the plugin moves it into Sources and
-takes it out (at the first shell start on this version, at a later one if that
-start cannot save the move, or, while Sources already holds 50 sources, only
-once one is removed), and you can still put one there
+takes it out (at the first shell start on this version, or at a later one if
+that start cannot save the move; while Sources already holds 50 sources the
+URL is parked in `state.json`, not left on the entry, until one is removed),
+and you can still put one there
 yourself with `omarchy bar set`, which the plugin does not read and removes on
 its next write. So the plugin still takes group and other access away from that single
-file — at every shell start, and again after each of its own writes: on an
+file — at every shell start, again after each of its own writes, and, since
+this version, again after every change to the file the shell reports to it
+(whoever made it): on an
 ordinary 644 file that leaves it 600, which is what
 `chmod 600 ~/.config/omarchy/shell.json` would do. Your own access is
 not changed.
@@ -268,11 +321,21 @@ refusal is kept for the write that would. What the check cannot cover either
 way is `omarchy bar set`: that write is the shell's, not the plugin's, and it
 lands whatever the permissions are, for as long as it takes the plugin to
 notice and remove it. This is
-not a one-off repair: the file can be recreated readable again later, by
-`omarchy-refresh-config` among other things, and nothing tells a plugin when
-that happens, so the check runs at every shell start and again before each
-write. Between those moments the plugin is not watching, and a URL already in
-the file would stay readable until the next one.
+not a one-off repair: the file can be made readable again later —
+`omarchy-reinstall-configs` copies the shipped file over yours at its shipped
+permissions, and `omarchy-refresh-config` or the Omarchy upgrade create a
+missing one at your umask's — and nothing tells a plugin that it is about
+to happen, so the check runs at every shell start, again before each write,
+and again each time the shell reports a change to the file, which it does
+for its own commands' rewrites as it does for yours (this last run is
+pinned through the plugin's test harness, not yet watched on a running
+shell). Between a change and that run the plugin is not watching -- a
+helper process it starts about a fifth of a second after the report on an
+idle machine, longer under load -- and a URL already in the file would stay
+readable for that long. The check also does not
+reach the backup copies the host makes of the file (`shell.json.bak.<number>`
+and `shell.json.omarchy-upgrade-to-quattro.<suffix>.bak`, under Settings
+above): each keeps the permissions `shell.json` had when it was copied.
 
 One place they can escape that, worth knowing, and one that used to:
 
@@ -306,7 +369,7 @@ One place they can escape that, worth knowing, and one that used to:
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `playlistUrl` | string | `""` | **Not a setting any more**. Read once, at the first shell start on this version, to move a playlist an earlier version was given this way into Sources (while Sources already holds 50 sources it is left on the entry, and moved when one is removed); after that a value set here adds nothing and switches nothing: it is removed from the entry on the plugin's next write, with one `Bar setting ignored` notification. Add, switch and remove playlists on the Sources screen |
+| `playlistUrl` | string | `""` | **Not a setting any more**. Read once, at the first shell start on this version, to move a playlist an earlier version was given this way into Sources (while Sources already holds 50 sources it is kept in the plugin's own `state.json`, taken off the entry, and moved in when one is removed); after that a value set here adds nothing and switches nothing: it is removed from the entry on the plugin's next write, with one `Bar setting ignored` notification. Add, switch and remove playlists on the Sources screen |
 | `epgUrl` | string | `""` | **Not a setting any more**, on the same terms as `playlistUrl`: read once, at the first start on this version, and attached to the source that becomes active then (removed, with a `Bar setting removed` notification, when there is none); ignored and removed after that. A source's guide-data URL is set in the add or edit form on the Sources screen (`a`, `e`), and cleared there |
 | `sourceKey` | string | `""` | written by the plugin, not by you: the short code naming the active source, the one that names its cache directory under `~/.cache/omarchy-iptv/sources/`. The plugin's own `state.json` is the authority; this is a mirror it falls back to only when that file names no source, and a code that names none of your sources is ignored. It is not among the plugin's declared settings, so `omarchy bar set` shows no help for it, though it writes it like any other key |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
@@ -765,8 +828,10 @@ itself unavailable rather than half working.
   first start.
 - `~/.local/state/omarchy-iptv/state.json` : favorites, recents, last
   played, your saved searches, the groups you have hidden, the player
-  session record, which source is active, and the Sources history including
-  their URLs (mode 0600; a file you put there yourself -- a `mv` of an
+  session record, which source is active, the Sources history including
+  their URLs, and -- while a playlist from the bar waits for a free place in
+  Sources (Settings above) -- that playlist and its guide-data URL (mode
+  0600; a file you put there yourself -- a `mv` of an
   edited copy, or `rm` and `cp` -- keeps the mode it came with, 0644 say,
   through the plugin's saves until the next shell start makes it 0600).
   **This is the only copy of your source list and of
@@ -1222,6 +1287,21 @@ Nothing inside the plugin directory is written at runtime.
   regular file, `chmod 600 ~/.config/omarchy/shell.json` and add the source
   again. If it belongs to another account or is a symlink, the plugin refuses
   to change it rather than guess, and that is yours to sort out.
+- Backup copies of `shell.json` beside it: `omarchy refresh shell` and
+  `omarchy-refresh-config omarchy/shell.json` leave the old file as
+  `shell.json.bak.<number>` (unless it already equalled the shipped file,
+  in which case that copy is removed again at once), and the Omarchy 4
+  upgrade as
+  `shell.json.omarchy-upgrade-to-quattro.<suffix>.bak`. Each holds the
+  plugin's settings as they were, a playlist URL included if one was on the
+  entry then, with the permissions `shell.json` had at the time, never wider
+  (a 0600 file gives a 0600 copy, a 0644 one a 0644 copy under the usual
+  umask 022); the plugin's permission check
+  never touches them. `ls -l ~/.config/omarchy/shell.json*` to see them, then
+  `chmod 600 ~/.config/omarchy/shell.json.bak.*` (and the upgrade's `*.bak`)
+  or remove the ones you do not need. The permission check reaches
+  `shell.json` alone, on purpose: a check that walked its neighbours would be
+  changing files the plugin has no business in.
 - The guide's status line shows the helper's own error text (host name only,
   never the URL). To see the same JSON in a terminal, for a free list:
   `python3 ~/.config/omarchy/plugins/io.github.rmcdavid.iptv/bin/omarchy-iptv playlist --url <url>`.

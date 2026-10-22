@@ -206,6 +206,16 @@ function lowerFirst(text) {
 // ...) map onto the same sentences so any action result can be shown.
 // `opts.field === "epg"` yields the `EPG: ...` variant; `opts.label` fills
 // the duplicate / label_taken sentences.
+
+// R33b / R33c: THE ONE SENTENCE for a value refused because of what is
+// inside it, built the same way for a URL and for a name, so the Xtream
+// fields' refusal (D-SRC-65) and the URL fields' are one rule with the
+// noun swapped. `withSpace` names the space, which a URL refuses and a name
+// does not. The sentence names what to remove, never the value.
+function innerCharSentence(noun, withSpace) {
+  return "Remove the " + (withSpace ? "space, " : "") + "tab, line break or control character inside the " + noun
+}
+
 function sourceErrorMessage(code, opts) {
   var o = opts || {}
   var c = str(code)
@@ -219,6 +229,19 @@ function sourceErrorMessage(code, opts) {
     unsupported_scheme: schemeText,
     invalid: invalidText,
     bad_url: invalidText,
+    // R33b / R33c (round 7, 2026-10-22): the refusal for whitespace or a
+    // control character INSIDE a value names it, in one sentence shape for
+    // the three places that refuse rather than delete (D-SRC-63, D-SRC-65):
+    // a URL (the playlist, the EPG, the Xtream server -- `url_control`,
+    // carried by validateSourceUrl under the code `invalid`, so every
+    // caller that switches on the code is unchanged) and the Xtream
+    // username and password (`user_control`, `pass_control`, their own
+    // codes like user_empty). A URL refuses a space as well; a name does not
+    // (a username may hold one, encoded into the query), so the URL's
+    // sentence names it and the names' do not.
+    url_control: innerCharSentence("URL", true),
+    user_control: innerCharSentence("username", false),
+    pass_control: innerCharSentence("password", false),
     relative_path: "Use an absolute path (starts with /, not ~)",
     unsafe_path: "Path not allowed",
     too_long: "Too long" + SEP + "max " + formatCount(MAX_SOURCE_URL) + " characters",
@@ -504,12 +527,23 @@ function validateSourceUrl(text, opts) {
   function pass(kind, url, host) {
     return { ok: true, code: "ok", message: "", field: field, kind: kind, url: url, host: host }
   }
+  // R33b (round 7, 2026-10-22): a refusal for whitespace or a control
+  // character INSIDE the value keeps the code `invalid` (every caller that
+  // switches on the code, D16's status and the shared fixture among them,
+  // is unchanged) and carries the sentence that names it (`url_control`):
+  // "check the host" sent the user to the wrong place for a tab in a
+  // password or a line break inside a wrapped URL.
+  function innerChar() {
+    var r = fail("invalid")
+    r.message = sourceErrorMessage("url_control", { field: field })
+    return r
+  }
   function filePath(path) {
     // D-SRC-63: a decoded `file:` path may carry what the raw text did not
     // (`file:///a%09b`); a control character in a path is refused here as
     // it is below, because the state readers (parseState, the helper's
     // normalize_state) drop a record whose url holds one.
-    if (hasControlChar(path)) return fail("invalid")
+    if (hasControlChar(path)) return innerChar()
     if (/^\/(proc|sys|dev)(\/|$)/.test(path)) return fail("unsafe_path")
     return pass("file", path, "")
   }
@@ -533,8 +567,8 @@ function validateSourceUrl(text, opts) {
   // `http://u:pa<TAB>ss@h.test/x` validated as the password `pass`). Both
   // state readers drop a record whose url holds one, so accepting it would
   // store a source the next load discards. The helper's validate_source_url
-  // refuses the same text.
-  if (hasControlChar(s)) return invalid()
+  // refuses the same text. R33b: told by the sentence that names it.
+  if (hasControlChar(s)) return innerChar()
   if (s.indexOf("//") === 0) return fail("scheme")
   if (s.charAt(0) === "/") return filePath(s)
   if (s.charAt(0) === "~") return cli ? pass("file", s, "") : fail("relative_path")
@@ -563,7 +597,7 @@ function validateSourceUrl(text, opts) {
   // (sanitizeUrlInput deletes nothing inside the text; the control members
   // were already refused above), so a tab in a password is `invalid` here
   // and not the password `pass`.
-  if (urlSpaceIndex(rest) !== -1) return invalid()
+  if (urlSpaceIndex(rest) !== -1) return innerChar()
   var body = rest.substring(2)
   var cut = body.search(/[\/?#]/)
   var authority = cut === -1 ? body : body.substring(0, cut)
@@ -941,12 +975,12 @@ function xtreamUrls(server, username, password) {
   }
   // D-SRC-63: the server is a URL, so nothing inside it is deleted; a
   // control character or whitespace inside it is refused by the validator
-  // below. The username and password stay on sanitizeInput: they are
-  // encoded into the query by encodeQueryValue, so a control character
-  // in one could be carried, and dropping it is the same silent rewrite
-  // one layer down -- recorded for the lead, not changed here, because a
-  // Qt TextInput never delivers one from a key and the paste path strips
-  // it for a name field (sanitizeFieldInput).
+  // below. The username and password used to stay on sanitizeInput, which
+  // deleted a control character into a different credential; since
+  // D-SRC-65 (R33c) they refuse it first (below). The paste path strips it
+  // for a name field (sanitizeFieldInput) and a Qt TextInput never delivers
+  // one from a key, so the refusal is reached by the service call shape
+  // (Service.buildXtreamSource, a caller handing values straight in).
   var srv = sanitizeUrlInput(o.server, MAX_XTREAM_SERVER + 1)
   if (srv === "") return fail("server_empty", "server")
   if (srv.length > MAX_XTREAM_SERVER) return fail("server_too_long", "server")
@@ -972,9 +1006,20 @@ function xtreamUrls(server, username, password) {
     return fail(hasUserinfo ? "server_userinfo" : "server_path", "server")
   }
   var base = m[1]
+  // D-SRC-65 (R33c, round 7, 2026-10-22): the username and password REFUSE
+  // a control character rather than delete it -- the URL rule one layer
+  // down. sanitizeInput ran first and deleted it, so `pa<TAB>ss` reached
+  // the provider as `pass`, encoded into the query, and the user learned
+  // of it as a wrong-password failure: D-SRC-63's shape in the two fields
+  // it left on the name rule. Refused BEFORE the name rule trims and caps,
+  // on the raw value, so a control character at either edge is refused
+  // too; the sentence is the URL refusal's, with the noun swapped
+  // (innerCharSentence). A space inside stays allowed and encoded.
+  if (hasControlChar(o.username)) return fail("user_control", "username")
   var user = sanitizeInput(o.username, MAX_XTREAM_FIELD + 1)
   if (user === "") return fail("user_empty", "username")
   if (user.length > MAX_XTREAM_FIELD) return fail("user_too_long", "username")
+  if (hasControlChar(o.password)) return fail("pass_control", "password")
   var pass = sanitizeInput(o.password, MAX_XTREAM_FIELD + 1)
   if (pass === "") return fail("pass_empty", "password")
   if (pass.length > MAX_XTREAM_FIELD) return fail("pass_too_long", "password")
@@ -1247,21 +1292,22 @@ export {
   URL_FIELDS, FORM_LIMITS, MONTHS, CONTROL_RE, capLength, sanitizeInput,
   sanitizeUrlInput, isUrlEdgeSpace, hasControlChar, trimEdgeSpace, codePoints,
   codePointLength, capCodePoints, sanitizeTyping, lowerFirst,
-  sourceErrorMessage, sourceReason, PERSIST_FAILURE_REASONS,
-  persistFailureMessage, refusalMessage, ZERO_WIDTH_RE, IPV6_LITERAL_RE,
-  isIpv6Literal, cutQueryAndFragment, ENCODE_SENTENCE,
-  WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts, urlHostWithheld,
-  sourceUrlWarning, formWarningLine, looksLikeHost, validateSourceUrl,
-  normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST,
-  epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE, epgOriginNotice, isUrlField,
-  sourceKey, isSourceKey, findSource, findSourceByUrl, allocateSourceKey,
-  sourceCacheDir, hostPortOf, deriveLabel, labelKey, labelTaken, uniqueLabel,
-  defaultSourceLabel, validateLabel, maskQuery, maskUrl, encodeQueryValue,
-  xtreamUrls, validateXtream, pluralGroups, countsLine, sameDay,
-  formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
-  EPG_HINT_ROW_TEXT, sourceDetail, sourceAccessibleName, sourcesHeaderCount,
-  sourcesHeaderRight, sourcesRowAccessibleName, confirmLogosMessage,
-  confirmRemoveMessage, fetchingLine, PROBE_LOCAL_REFUSALS, probeFailureLine,
-  sourceTransient, CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS,
-  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
+  innerCharSentence, sourceErrorMessage, sourceReason,
+  PERSIST_FAILURE_REASONS, persistFailureMessage, refusalMessage,
+  ZERO_WIDTH_RE, IPV6_LITERAL_RE, isIpv6Literal, cutQueryAndFragment,
+  ENCODE_SENTENCE, WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts,
+  urlHostWithheld, sourceUrlWarning, formWarningLine, looksLikeHost,
+  validateSourceUrl, normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
+  EPG_ORIGIN_PLAYLIST, epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE,
+  epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
+  findSourceByUrl, allocateSourceKey, sourceCacheDir, hostPortOf, deriveLabel,
+  labelKey, labelTaken, uniqueLabel, defaultSourceLabel, validateLabel,
+  maskQuery, maskUrl, encodeQueryValue, xtreamUrls, validateXtream,
+  pluralGroups, countsLine, sameDay, formatLastUsed, formatAgo, sourceView,
+  sourceViews, sourceRows, EPG_HINT_ROW_TEXT, sourceDetail,
+  sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
+  sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
+  fetchingLine, PROBE_LOCAL_REFUSALS, probeFailureLine, sourceTransient,
+  CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
+  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
 }

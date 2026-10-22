@@ -284,6 +284,27 @@ function sanitizeFieldInput(field, text, limit) {
   return URL_INPUT_FIELDS.indexOf(str(field)) !== -1 ? sanitizeUrlInput(text, limit) : sanitizeInput(text, limit)
 }
 
+// The boundary rule for a PASTE, and the one stated exception to "nothing
+// inside a URL is deleted" (R33a, round 7, 2026-10-22): a paste into a URL
+// field JOINS ITS LINES first -- CR and LF removed, nothing else -- and then
+// takes the field's rule above. A URL wrapped by a mail client or a chat
+// window is a paste the form must take, and under D-SRC-63 alone it was
+// refused as a URL with a line break inside it, which is true and useless.
+// Only CR and LF: a tab, U+0085, U+2028 or an information separator inside
+// the pasted text still reaches validateSourceUrl and is refused there,
+// with the sentence that names it (R33b). A name field keeps sanitizeInput,
+// which removes every control character anyway (6.1: a multi-line paste
+// into a name collapses to one line). Typing cannot insert CR or LF (Qt's
+// own acceptance rule, typedText), and the submit path reads a value this
+// has already joined, so the paste is the one place the join is made.
+var PASTE_LINE_BREAK_RE = /[\r\n]/g
+
+function sanitizePasteInput(field, text, limit) {
+  var t = str(text)
+  if (URL_INPUT_FIELDS.indexOf(str(field)) !== -1) t = t.replace(PASTE_LINE_BREAK_RE, "")
+  return sanitizeFieldInput(field, t, limit)
+}
+
 // Values as submitted: every field trimmed (UX 2.3), by its own rule.
 function formSubmitValues(form) {
   var f = copyForm(form)
@@ -446,8 +467,9 @@ export {
   editRange, fullRange, editRangeFor, cutApplies, orderedRange, wordBoundary,
   isHighSurrogate, isLowSurrogate, codePointStart, codePointEnd, typedText,
   editInsert, editDelete, withFormError, withFormProbing, URL_INPUT_FIELDS,
-  sanitizeFieldInput, formSubmitValues, validateUrlForm, sourcesAddRows,
-  sourcesRowCount, sourcesRowKind, sourcesAddAllowed, sourcesInitialCursor,
-  cursorAfterRemove, openSources, closeSources, withSourceCursor, startRemove,
-  startLogosConsent, afterRemove, afterSwitch
+  sanitizeFieldInput, PASTE_LINE_BREAK_RE, sanitizePasteInput,
+  formSubmitValues, validateUrlForm, sourcesAddRows, sourcesRowCount,
+  sourcesRowKind, sourcesAddAllowed, sourcesInitialCursor, cursorAfterRemove,
+  openSources, closeSources, withSourceCursor, startRemove, startLogosConsent,
+  afterRemove, afterSwitch
 }
