@@ -3962,7 +3962,9 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
   shell.json; `index["constructor"]` is the Object function, so IPC
   `play("constructor")` found a "channel". A map that arrives from JSON.parse
   (epg-now.json's channels) is an ordinary object and is read through
-  `Model.epgEntry` / `hasOwnKey`. An object handed to the HOST stays
+  `Model.epgMapEntry` / `hasOwnKey` (the guide-data store's reader,
+  `Model.epgEntry`, reads a legacy store through it). An object handed to
+  the HOST stays
   ordinary (host code may call its methods); its copies take own keys only
   and never `__proto__` (`entryWith`, `settingsWithOwnWrite`, `cloneState`).
   Observed in both engines by `tests/proto-paths.mjs`: node in a child
