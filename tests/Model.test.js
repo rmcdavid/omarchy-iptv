@@ -5764,6 +5764,12 @@ check("sanitizeTyping still caps and strips controls", Model.sanitizeTyping("a\u
 
 // ---- validateSourceUrl: every case of the shared fixture (SR6) ----
 const fixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-urls.json"), "utf8"))
+// A model name this tree may lack (the red proof runs these checks on a base
+// that predates it): a missing function answers a string no expectation
+// equals, so every pin counts as ONE failure instead of a thrown TypeError
+// stopping the file -- the shape lane-bounds-s2's recheck found
+// unreproducible from the committed tests.
+const modelFn = name => typeof Model[name] === "function" ? Model[name] : () => "MISSING " + name
 
 // D-SINK-17. The Sources row's HOST and its DEFAULT LABEL, which are the two
 // things hostPortOf feeds. They are pinned by their own shared fixture, run by
@@ -5826,7 +5832,7 @@ for (const c of fixture) {
   // sentence appended to the error (the recheck's P2: the ruling's own
   // example, port `pa`, used to get the bare refusal and no advice).
   if (c.warn !== undefined) {
-    check(name + " -- predicate: " + c.warn, Model.urlHostWithheld(c.input), c.warn)
+    check(name + " -- predicate: " + c.warn, modelFn("urlHostWithheld")(c.input), c.warn)
     if (c.ok) check(name + " -- warns: " + c.warn, Model.sourceUrlWarning(c.input) !== "", c.warn)
     else check(name + " -- the refusal carries the encoding sentence: " + c.warn,
                [r.message.indexOf(Model.ENCODE_SENTENCE) !== -1, r.message.indexOf("Invalid URL") === 0, Model.sourceUrlWarning(c.input)], [c.warn, true, ""])
@@ -14488,7 +14494,7 @@ checkCall("R32a': urlHostWithheld is the ONE predicate, computed independently o
    "http://localhost/me@x", "http://user:2024#ab@host.test", "http://u:p@nas:8080/me@x", "http://nas:8080?u=me@b.test", "see http://nas/me@x now",
    "http://h.test:pa/me@x.test/y", "http://[2001:db8::1]:8080/me@mail.test", "http://[2001:db8::1:x/me@mail.test", "http://u:p@nas", "http://u:p@nas/x?a=1#f", "http://host.test:25461/playlist/me@mail.test/pw/m3u_plus",
    "http://nas", "http://nas/x", "nas/me@x", "", null, "http://h .test/me@x", "http:///me@x", "http://:8080/me@x"]
-    .map(Model.urlHostWithheld),
+    .map(modelFn("urlHostWithheld")),
   [true, true, true, true, true, true, true, true, true, true,
    false, false, false, false, false, false, false, false, false, false, false, false, false, false])
 checkCall("R32a' (the recheck's P2): the INVALID refusal of a value with the predicate carries the encoding sentence after the invalid-URL sentence -- for the playlist, the EPG field and the Xtream server -- and the warning line stays empty for it; a plain invalid value gets the bare refusal", () => {
