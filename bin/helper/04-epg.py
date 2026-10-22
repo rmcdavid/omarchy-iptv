@@ -1060,26 +1060,66 @@ def cmd_epg(args: argparse.Namespace) -> int:
     started = time.monotonic()
     previous = read_json(status_path) or {}
     window = None
+    error: HelperError | None = None
+    cached = False
+    refresh_error: OSError | None = None
+    from_cache = False
+    valid_until = now_count = 0
     # D-M3U-1: bounded before the cached window is read or a guide fetched.
     held = limit_memory(EPG_PRELOAD)
     try:
-        window = load_window(window_path)
-        if args.now_only:
-            if window is None:
-                raise HelperError("no_cache", "no cached EPG window yet; fetch the EPG first")
-            from_cache = True
-            reason = ""
-        else:
-            if not url:
-                raise HelperError("no_source", "no EPG URL configured")
-            reason = "forced" if args.force else ("no cache" if window is None else needs_refetch(window, url, now, args.ttl, channels_path))
-            if reason:
-                window = fetch_window(url, args.timeout, now, directory)
-                from_cache = False
-            else:
-                from_cache = True
+        try:
+            try:
+                window = load_window(window_path)
+                if args.now_only:
+                    if window is None:
+                        raise HelperError("no_cache", "no cached EPG window yet; fetch the EPG first")
+                    from_cache = True
+                else:
+                    if not url:
+                        raise HelperError("no_source", "no EPG URL configured")
+                    reason = "forced" if args.force else ("no cache" if window is None else needs_refetch(window, url, now, args.ttl, channels_path))
+                    if reason:
+                        window = fetch_window(url, args.timeout, now, directory)
+                        from_cache = False
+                    else:
+                        from_cache = True
+                assert window is not None
+                valid_until, now_count = write_epg_now(directory, window, now)
+            except HelperError as caught:
+                error = caught
+                cached = window is not None
+                if window is not None:
+                    # The window that is still good -- the cached one, when a
+                    # refetch was refused -- keeps epg-now.json current. Data,
+                    # not the status, so it is written under the limit like
+                    # every other derivation of the window; a MemoryError here
+                    # is the memory refusal below. Its failure is spoken of
+                    # once the limit is lifted.
+                    try:
+                        write_epg_now(directory, window, now)
+                    except OSError as io_error:
+                        refresh_error = io_error
+        finally:
+            # D-M3U-3, as in cmd_playlist: the limit covers reading or fetching
+            # the window and deriving epg-now.json from it, and NOTHING after
+            # them. Lifted here, on every way out -- success, a refusal, the
+            # memory refusal, a bug -- so no status is composed, written or
+            # printed under it.
+            release_memory_limit(held)
+    except MemoryError:
+        # D-M3U-1, as in cmd_playlist: the limit is lifted (above), release,
+        # then speak. The window is dropped whichever one it was -- the cached
+        # one, or a fetched one whose epg-now.json may be the step that ran
+        # out -- so nothing is recomputed on the way out. Both files are
+        # written atomically: what is on disk is the previous run's, or
+        # nothing, and `stale` says whether a previous window is there.
+        window = None
+        refresh_error = None
+        error = memory_refusal("EPG", source_host(url) if url else "", held)
+        cached = os.path.isfile(window_path)
+    if error is None:
         assert window is not None
-        valid_until, now_count = write_epg_now(directory, window, now)
         fetched_at = int(window.get("fetchedAt") or 0)
         status = {
             "ok": True,
@@ -1117,25 +1157,8 @@ def cmd_epg(args: argparse.Namespace) -> int:
         write_json_atomic(status_path, status)
         emit(status)
         return EXIT_OK
-    except HelperError as caught:
-        error = caught
-        cached = window is not None
-    except MemoryError:
-        # D-M3U-1, as in cmd_playlist: release, lift the limit, then speak.
-        # The window is dropped whichever one it was -- the cached one, or a
-        # fetched one whose epg-now.json may be the step that ran out -- so
-        # nothing is recomputed on the way out. Both files are written
-        # atomically: what is on disk is the previous run's, or nothing, and
-        # `stale` says whether a previous window is there.
-        window = None
-        release_memory_limit(held)
-        error = memory_refusal("EPG", source_host(url) if url else "", held)
-        cached = os.path.isfile(window_path)
-    if window is not None:
-        try:
-            write_epg_now(directory, window, now)
-        except OSError as io_error:
-            log("could not refresh %s: %s" % (EPG_NOW_FILE, io_error))
+    if refresh_error is not None:
+        log("could not refresh %s: %s" % (EPG_NOW_FILE, refresh_error))
     host = source_host(url) if url else (window.get("sourceHost", "") if window else "")
     status = error_payload(
         "epg", error,

@@ -138,7 +138,7 @@ class ParseM3uTest(unittest.TestCase):
         self.assertEqual(channels[4]["id"], "n:64c19bb0")
         self.assertEqual(channels[3]["url"], channels[4]["url"])
         self.assertIn("3 entries skipped: unsupported URL scheme", result["warnings"])
-        self.assertIn("1 URL lines without #EXTINF skipped", result["warnings"])
+        self.assertIn("1 URL line without #EXTINF skipped", result["warnings"])
 
     def test_crlf_and_bom(self):
         text = "\ufeff#EXTM3U\r\n#EXTINF:-1 group-title=\"A\",One\r\nhttp://x.test/1\r\n"
@@ -275,7 +275,7 @@ class HardeningTest(unittest.TestCase):
         # VLC semantics: the first non-comment line is the entry's location.
         result = self.parse("#EXTM3U\n#EXTINF:-1,A\nNote: this is not a url\n   \n\t\nhttp://x.test/a\n#EXTINF:-1,B\nhttp://x.test/b\n")
         self.assertEqual([c["name"] for c in result["channels"]], ["B"])
-        self.assertEqual(sorted(result["warnings"]), ["1 URL lines without #EXTINF skipped", "1 entries skipped: unsupported URL scheme"])
+        self.assertEqual(sorted(result["warnings"]), ["1 URL line without #EXTINF skipped", "1 entry skipped: unsupported URL scheme"])
 
     def test_extinf_without_url_is_counted(self):
         result = self.parse("#EXTM3U\n#EXTINF:-1,A\n#EXTINF:-1,B\nhttp://x.test/b\n#EXTINF:-1,C\n")
@@ -293,7 +293,7 @@ class HardeningTest(unittest.TestCase):
     def test_urls_without_a_host_are_skipped(self):
         result = self.parse("#EXTM3U\n#EXTINF:-1,No host\nhttp://\n#EXTINF:-1,Multicast\nudp://@239.0.0.1:1234\n#EXTINF:-1,Ok\nhttps://x.test/a\n")
         self.assertEqual([c["name"] for c in result["channels"]], ["Multicast", "Ok"])
-        self.assertEqual(result["warnings"], ["1 entries skipped: unsupported URL scheme"])
+        self.assertEqual(result["warnings"], ["1 entry skipped: unsupported URL scheme"])
 
     def test_hls_tags_and_unknown_comments_are_ignored(self):
         result = self.parse("#EXTM3U\n#EXT-X-VERSION:3\n#PLAYLIST:Mine\n#EXTINF:-1,A\n#EXT-X-DISCONTINUITY\nhttp://x.test/a\n")
@@ -719,7 +719,7 @@ class QaFixtureTest(unittest.TestCase):
         self.assertEqual(channels[20]["group"], "Tabbed")
         self.assertTrue(channels[21]["name"].startswith("Long Title word00"))
         self.assertGreater(len(channels[21]["name"]), 250)
-        self.assertEqual(result["warnings"], ["1 #EXTINF entries without a URL skipped"])
+        self.assertEqual(result["warnings"], ["1 #EXTINF entry without a URL skipped"])
 
     def test_qa_headers(self):
         result = self.parse("qa-headers.m3u")
@@ -728,7 +728,7 @@ class QaFixtureTest(unittest.TestCase):
         self.assertEqual(sorted(result["warnings"]), sorted([
             "dropped header with unsafe name for KODIPROP Percent Encoded CRLF And Bad Name",
             "dropped option-looking key for Option Looking VLCOPT Key",
-            "1 entries skipped: unsupported URL scheme",
+            "1 entry skipped: unsupported URL scheme",
         ]))
         self.assertEqual(channels["vlc.test"]["headers"], {"User-Agent": "Mozilla/5.0 (QA) VLC/3.0.20", "Referer": "https://ref.example.test/player"})
         self.assertEqual(channels["vlc.test"]["options"], {"vlc:network-caching": "1500"})

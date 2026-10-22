@@ -644,32 +644,59 @@ def cmd_playlist(args: argparse.Namespace) -> int:
     previous = read_json(status_path) or {}
     url = url_from(args)
     started = time.monotonic()
-    text = parsed = document = groups = None
+    text = parsed = document = None
+    error: HelperError | None = None
+    now = 0
     # D-M3U-1: bounded before anything is fetched or parsed. The refresh
     # and the source probe are both this verb.
     held = limit_memory()
     try:
-        if not url:
-            # A status the service can switch on, not an argparse usage exit:
-            # the verb has no required argument any more, because the shell
-            # never passes one.
-            raise HelperError("bad_url", "no playlist URL: pass --url or set $%s" % URL_ENV)
-        text = fetch_bytes(url, args.timeout, "playlist")
-        parsed = parse_m3u(playlist_lines(text))
-        if not parsed["channels"]:
-            if not parsed["isPlaylist"]:
-                raise HelperError("not_a_playlist", "source from %s is not an M3U playlist (no #EXTM3U or #EXTINF lines)" % source_host(url))
-            raise HelperError("empty_playlist", "no playable channels found in playlist from %s" % source_host(url))
-        now = int(time.time())
-        document = {
-            "version": 1,
-            "generatedAt": now,
-            "sourceHost": source_host(url),
-            "epgUrlHint": parsed["epgUrlHint"],
-            "count": len(parsed["channels"]),
-            "channels": parsed["channels"],
-        }
-        write_json_atomic(channels_path, document)
+        try:
+            if not url:
+                # A status the service can switch on, not an argparse usage exit:
+                # the verb has no required argument any more, because the shell
+                # never passes one.
+                raise HelperError("bad_url", "no playlist URL: pass --url or set $%s" % URL_ENV)
+            text = fetch_bytes(url, args.timeout, "playlist")
+            parsed = parse_m3u(playlist_lines(text))
+            text = None
+            if not parsed["channels"]:
+                if not parsed["isPlaylist"]:
+                    raise HelperError("not_a_playlist", "source from %s is not an M3U playlist (no #EXTM3U or #EXTINF lines)" % source_host(url))
+                raise HelperError("empty_playlist", "no playable channels found in playlist from %s" % source_host(url))
+            now = int(time.time())
+            document = {
+                "version": 1,
+                "generatedAt": now,
+                "sourceHost": source_host(url),
+                "epgUrlHint": parsed["epgUrlHint"],
+                "count": len(parsed["channels"]),
+                "channels": parsed["channels"],
+            }
+            write_json_atomic(channels_path, document)
+            document = None
+        finally:
+            # D-M3U-3: the limit covers the fetch, the parse and channels.json
+            # and NOTHING after them. Lifted here, on every way out of the
+            # block -- success, a refusal, the memory refusal, a bug -- so no
+            # status is composed, written or printed under it. It used to be
+            # lifted on MemoryError alone, so a refusal raised near the limit
+            # wrote its status under it and, when that write ran out, reached
+            # main()'s fallback with no status file rewritten.
+            release_memory_limit(held)
+    except HelperError as caught:
+        error = caught
+    except MemoryError:
+        # D-M3U-1. Release before speaking: the text, the channel list and
+        # the document are dropped here and the frames the traceback held go
+        # with this clause (the limit is already lifted, above). Nothing was
+        # half-written: write_json_atomic composes the document before it
+        # opens the temporary file, and removes the file when a write fails,
+        # so channels.json is the previous run's or absent.
+        text = parsed = document = None
+        error = memory_refusal("playlist", source_host(url) if url else "", held)
+    if error is None:
+        assert parsed is not None
         groups = {channel["group"] for channel in parsed["channels"]}
         status = {
             "ok": True,
@@ -706,22 +733,10 @@ def cmd_playlist(args: argparse.Namespace) -> int:
                 moved = remap_state_file(os.path.join(state_dir(args.state_dir), STATE_FILE), parsed["channels"])
                 if moved:
                     log("playlist: moved %d saved channel reference(s) onto id scheme %d" % (moved, CHANNEL_ID_SCHEME))
-            except OSError as error:
-                log("playlist: could not update saved channel references (%s)" % type(error).__name__)
+            except OSError as io_error:
+                log("playlist: could not update saved channel references (%s)" % type(io_error).__name__)
         emit(status)
         return EXIT_OK
-    except HelperError as caught:
-        error = caught
-    except MemoryError:
-        # D-M3U-1. Release before speaking: the text, the channel list and
-        # the document are dropped here and the frames the traceback held go
-        # with this clause, then the limit is lifted for the few lines left.
-        # Nothing was half-written: write_json_atomic composes the document
-        # before it opens the temporary file, and removes the file when a
-        # write fails, so channels.json is the previous run's or absent.
-        text = parsed = document = groups = None
-        release_memory_limit(held)
-        error = memory_refusal("playlist", source_host(url) if url else "", held)
     stale = os.path.isfile(channels_path)
     status = error_payload(
         "playlist", error,
