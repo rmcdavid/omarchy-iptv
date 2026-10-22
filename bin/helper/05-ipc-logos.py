@@ -906,13 +906,19 @@ def canonical_png(data: bytes) -> bytes | None:
     return None
 
 
-def canonical_logo_file(path: str) -> str:
+def canonical_logo_file(path: str, rewrite: bool = True) -> str:
     """D-LOGO-13 for a file already in the cache, which every version before
     0.14.1 wrote verbatim. -> "as-is" when it may be announced as it stands
     (a canonical PNG, or another type), "rewritten" when it was a PNG with
     other chunks and now holds the canonical form (atomically, 0600), or ""
     when it may not be announced at all. Read under the byte cap plus one, so
     a PNG longer than that cannot end in IEND inside the read and is refused.
+
+    `rewrite` False (D-LOGO-23, R32f): a READ-ONLY check, for a run that
+    does not hold the folder's lock. A PNG that would need rewriting is then
+    "" -- not announced, and left exactly as it is for the run that holds
+    the lock -- because the guide may only ever be pointed at a canonical
+    file, and this run may write nothing.
     """
     data = _read_logo_prefix(path, MAX_LOGO_BYTES + 1)
     if not data:
@@ -924,6 +930,8 @@ def canonical_logo_file(path: str) -> str:
         return ""
     if canon == data:
         return "as-is"
+    if not rewrite:
+        return ""
     try:
         write_bytes_atomic(path, canon)
     except OSError:

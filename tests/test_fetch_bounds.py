@@ -200,6 +200,33 @@ class WholeDownloadDeadlineTest(LoweredDeadline):
         with mock.patch.dict(os.environ, {helper.HTTP_DEADLINE_ENV: "0.25"}):
             self.assertEqual(helper.http_deadline(20), 0.25)
 
+    def test_off_the_main_thread_trailers_past_the_deadline_still_refuse_the_download(self):
+        # The round-2 recheck's M1: the check AFTER the read loop served only
+        # a caller off the main thread, where no SIGALRM handler can be
+        # installed, and nothing called from one. This does. The body is
+        # whole at once; the trailer's end comes LATE, inside the last read1,
+        # and with the post-loop check removed the download is accepted.
+        import threading
+        head = response("200 OK", (("Transfer-Encoding", "chunked"),))
+        body = b"%x\r\n%s\r\n0\r\n" % (len(PLAYLIST), PLAYLIST)
+        server = self.serve({"/list.m3u": (head + body, LATE, b"\r\n")})
+        outcome = {}
+
+        def fetch():
+            try:
+                outcome["data"] = helper.read_http_source(server.url("/list.m3u"), 5, "playlist")
+            except helper.HelperError as error:
+                outcome["code"] = error.code
+            except BaseException as error:            # a FetchExpired here would be the alarm, which must be absent
+                outcome["raised"] = type(error).__name__
+            outcome["alarm"] = signal.getitimer(signal.ITIMER_REAL)
+        worker = threading.Thread(target=fetch)
+        worker.start()
+        worker.join(timeout=10)
+        self.assertFalse(worker.is_alive(), "the download never ended")
+        self.assertEqual(outcome.get("alarm"), (0.0, 0.0), outcome)
+        self.assertEqual(outcome.get("code"), "timeout", outcome)
+
 
 class StatusLineDetailTest(LoweredDeadline):
     """D-SRC-59: a server's first line, when it is not a status line, reaches
@@ -291,6 +318,19 @@ class StaleTemporarySweepTest(unittest.TestCase):
         helper.write_text_atomic(str(self.dir / "state.json"), "{}\n", private_dir=False)
         self.assertEqual(self.names(), [".tmp-notes.txt-0123abcd", "state.json"])
 
+    def test_a_temporary_owned_by_another_user_is_left_alone(self):
+        # The round-2 recheck's M4: the owner check could not be seen to
+        # matter without a file of another uid, which no test can make. The
+        # sweep asks os.geteuid for ITS uid, so the shipping sweep is run
+        # against a uid that is not the file's -- and must leave it; the
+        # same file under the real uid goes.
+        self.plant(".tmp-channels.json-0123abcd", 120)
+        with mock.patch.object(os, "geteuid", return_value=os.geteuid() + 1):
+            self.assertEqual(helper.sweep_stale_temps(str(self.dir)), 0)
+        self.assertEqual(self.names(), [".tmp-channels.json-0123abcd"])
+        self.assertEqual(helper.sweep_stale_temps(str(self.dir)), 1)
+        self.assertEqual(self.names(), [])
+
     def test_the_binary_writer_sweeps_too(self):
         logos = self.dir / "logos"
         logos.mkdir(mode=0o700)
@@ -308,6 +348,29 @@ class StaleTemporarySweepTest(unittest.TestCase):
         code, payload, stderr = run("playlist", "--url", str(FIXTURES / "basic.m3u"), "--cache-dir", str(self.dir))
         self.assertEqual(code, 0, stderr)
         self.assertNotIn(".tmp-playlist-status.json-0123abcd", self.names())
+
+
+class EnvironmentLeverTest(unittest.TestCase):
+    """F-HARNESS-36 (R32f), rule 15 over every environment variable the
+    helper reads that touches a stated bound: each exists so a test can
+    shrink the bound, and none may raise it. The helper's other variables
+    (OMARCHY_IPTV_URL, $HOME and the four $XDG_* paths) carry no bound."""
+
+    def test_every_lever_on_a_bound_can_only_lower_it(self):
+        levers = (
+            (helper.HTTP_DEADLINE_ENV, lambda: helper.http_deadline(20), 60.0, "0.25", 0.25),
+            (helper.CLIPBOARD_TIMEOUT_ENV, helper.clipboard_deadline, helper.CLIPBOARD_TIMEOUT, "0.25", 0.25),
+            (helper.MEMORY_LIMIT_ENV, helper.memory_limit_bytes, helper.MEMORY_LIMIT_MIB * 1024 * 1024, "16", 16 * 1024 * 1024),
+        )
+        for name, read, ceiling, lower, lowered in levers:
+            for raised in ("600", "99999", "inf", "nan", "soon", ""):
+                with self.subTest(name=name, value=raised), mock.patch.dict(os.environ, {name: raised}):
+                    self.assertEqual(read(), ceiling)
+            with self.subTest(name=name, value=lower), mock.patch.dict(os.environ, {name: lower}):
+                self.assertEqual(read(), lowered)
+            with self.subTest(name=name, value="unset"), mock.patch.dict(os.environ):
+                os.environ.pop(name, None)
+                self.assertEqual(read(), ceiling)
 
 
 if __name__ == "__main__":

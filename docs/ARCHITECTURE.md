@@ -2645,7 +2645,8 @@ reads at most `MAX_CLIPBOARD_BYTES` = 32,768 bytes from it (8,192 UTF-16
 units, `Model.LIMITS.url * 4`, times the 4 bytes a UTF-8 character can
 need), terminates the child the moment the cap, EOF or its 5 s deadline
 (`CLIPBOARD_TIMEOUT`, `Model.CLIPBOARD_TIMEOUT_MS`, one shared fixture
-`tests/fixtures/clipboard.json`) is reached -- SIGTERM, a 1 s grace,
+`tests/fixtures/clipboard.json`; the test-only
+`OMARCHY_IPTV_CLIPBOARD_DEADLINE` can only lower it, F-HARNESS-36) is reached -- SIGTERM, a 1 s grace,
 SIGKILL -- and prints ONE JSON line, nothing on stderr, with the text cut at
 a character boundary to at most 8,192 units; a timeout, a failed or a
 missing `wl-paste` is `{"ok": false, "code": ...}` with no text, and no
@@ -3486,7 +3487,16 @@ Performance budget (10k channels):
     own poll after a signal, so a host-name lookup ends on the system
     resolver's timeout and the handler runs then (UNVERIFIED by run). The
     test-only `OMARCHY_IPTV_HTTP_DEADLINE` now only LOWERS the budget, as
-    `OMARCHY_IPTV_MEMORY_LIMIT_MB` does; it used to take any figure.
+    `OMARCHY_IPTV_MEMORY_LIMIT_MB` does; it used to take any figure. So
+    does `OMARCHY_IPTV_CLIPBOARD_DEADLINE` since F-HARNESS-36 (R32f), the
+    rule-15 sibling the round-2 search missed: it, too, took any figure
+    over 0.05 and could lift the clipboard read's 5 s. Those three are
+    every environment variable the helper reads that touches a bound, and
+    each is pinned lower-only by `tests/test_fetch_bounds.py`
+    (`EnvironmentLeverTest`); the rest -- `OMARCHY_IPTV_URL`, `$HOME` and
+    the four `$XDG_*` paths -- carry no bound (and urllib's own
+    `http_proxy` family, read by the stdlib's `ProxyHandler`, routes a
+    fetch and bounds nothing).
 
     **Redirect bodies are never read (R30e: D-LOGO-15, D-SRC-58).** The
     stdlib's `HTTPRedirectHandler.http_error_302` composes the next request,
@@ -3510,10 +3520,23 @@ Performance budget (10k channels):
     the limit. The run takes an exclusive non-blocking `flock` on the
     source's logo folder for its whole length (`lock_logo_dir`): a second
     run on the same source -- from a terminal, or left behind by a shell
-    restart -- answers `busy: true` with the survey's counts and NO `names`
-    (the shell keeps the set it has), fetches nothing and exits 0, so two
-    runs can no longer each count the folder at their start and together
-    pass the ceiling (D-LOGO-18). The folder is created for the lock only
+    restart -- answers `busy: true` with the survey's counts, fetches
+    nothing and exits 0, so two runs can no longer each count the folder
+    at their start and together pass the ceiling (D-LOGO-18). Since
+    D-LOGO-23 (R32f) the busy reply also carries `names`: the cached files
+    the playlist names that pass the cached-file check AS THEY STAND
+    (`present_logo_names`: header within bounds, a PNG already canonical),
+    each as a progress line too, so a shell that restarted while a fetch
+    was running draws the logos it has rather than blank rows until the
+    next run -- the first version answered no `names`, which kept the old
+    shell's set and gave a new shell nothing. Read-only by construction:
+    `canonical_logo_file(path, rewrite=False)` never writes, a PNG that
+    would need rewriting and a file that fails the check are simply not
+    named, nothing is unlinked, no temporary is swept and the folder is not
+    marked; that is the holder's work, and the holder may unlink a file
+    after the busy run named it (one `Cannot open` in the journal until the
+    holder's summary replaces the set). The shell's one journal line for
+    `busy` stays. The folder is created for the lock only
     when the run could fetch something; one that cannot be made or opened
     leaves the run unlocked, as nothing can be written there either. At the
     ceiling, before a URL is counted as held back, the run removes once the
@@ -3523,26 +3546,47 @@ Performance budget (10k channels):
     reported as `unnamed`. They are a cache: a channel that names one again
     gets it fetched again.
 
-    **The install-wide bound (R30a, D-LOGO-17).** A run marks its folder's
-    modification time when it ends, a run that fetched nothing included, and
-    runs happen only for the active source with logos on; `cache prune`,
-    which the service runs once at every start, removes the logo folder of a
+    **The install-wide bound (R30a, D-LOGO-17; D-LOGO-20, R32f).** A run
+    marks its folder's modification time when it starts (`lock_logo_dir`,
+    through the locked descriptor) and when it ends (`cmd_logos`), a run
+    that fetched nothing included -- the start mark is R32f's, because a
+    run the shell stops with SIGTERM (a switch, the setting turned off, the
+    watchdog) reaches no `finally`, and one that wrote nothing left the
+    folder's older time, so the README's "since a fetch last ran for it"
+    was stronger than the code. Runs happen, from the shell, only for the
+    active source with logos on. `cache prune` removes the logo folder of a
     kept source that is not active once that mark is `--epg-max-age` old
     (`DEFAULT_EPG_MAX_AGE`, a day), as it already aged those sources' EPG
     files (`agedLogos` in its reply; a link at `logos/` is never followed,
-    the removal being `remove_cache_subdir`'s). One folder holds at most
-    1,310,720,000 bytes (1.22 GiB, D-LOGO-12). So after a start the install
-    holds the active source's folder and those of sources whose last fetch
-    ended within the day before it, and during a session each other source
-    switched to with logos on adds its own: **1.22 GiB x (1 + the sources
-    given logos in the day before the last start + those switched to
-    since)**. `MAX_SOURCES` x 1.22 GiB, 65.5 GB, is still reachable, but
-    only by a session in which every one of fifty sources was used with
-    logos on and filled to its ceiling within a day of the start; it used to
-    be the standing figure for any install that had ever used fifty.
-    UNVERIFIED at size; arithmetic over the code. The cost, by the ruling:
-    switching back to a source whose folder was aged fetches its logos
-    again, which contacts those hosts again.
+    the removal being `remove_cache_subdir`'s) -- and the service runs it
+    once at every start (`schedulePrune`) AND at every source switch
+    (`onActiveCacheDirChanged` -> `queuePrune`, D-LOGO-20), where before it
+    ran at start only, so one session that switched through fifty sources
+    kept fifty folders until the next start. One folder holds at most
+    1,310,720,000 bytes (1.22 GiB, D-LOGO-12), and a folder grows only
+    while its source is active, which ends in a switch. So at every moment
+    of a session, not only after a restart, the install holds the active
+    source's folder and those of sources whose last fetch started or ended
+    within the past day: **1.22 GiB x (1 + the sources given logos in the
+    day before the last start or switch)**. `MAX_SOURCES` x 1.22 GiB,
+    65.5 GB, is reachable only by switching through all fifty with logos
+    on inside one day and filling each to its ceiling. UNVERIFIED at size;
+    arithmetic over the code; the switch prune is pinned through
+    `tests/service-harness.js`, which runs the directory's change handler
+    from its own text. The removal takes the folder's flock, non-blocking,
+    on a descriptor opened `O_NOFOLLOW` and held across it (D-LOGO-21,
+    R32f): a folder a running fetch holds -- a `logos --fetch` from a
+    terminal on a non-active source, which the shell never starts -- is
+    skipped, named in `busyLogos`, said once on stderr for however many,
+    and aged by the next prune; before, such a run could lose its folder
+    mid-run and `write_logo` then recreated an unlocked, uncounted one.
+    What stays as it was, stated (D-LOGO-22): a logo URL that failed --
+    timeout, refusal, 404 -- is tried once per run (the run's `seen` set
+    remembers every URL it looked at, pinned) and again at the next run;
+    nothing records a failure on disk, and `LOGO_RUN_DEADLINE` bounds what
+    a dead host costs a run. The cost, by the ruling: switching back to a
+    source whose folder was aged fetches its logos again, which contacts
+    those hosts again.
 
     **Leftovers of a killed write (D-SRC-60).** The atomic writers remove
     their temporary on every exit Python sees, and a SIGTERM is not one: the

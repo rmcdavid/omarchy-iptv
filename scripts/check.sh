@@ -265,7 +265,11 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # interval and onTriggered, logoFetchProc's onRunningChanged and onExited, and
 # onLogoLine's journal line, compiled against fakes (5). All 20 red against
 # lane-bounds-int's Service.qml and model (17a2407).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2699}
+# 2026-10-22, lane-bounds-g2 (R32f): 2699 -> 2702. D-LOGO-20's two harness
+# pins (the start-up prune once, a prune at every switch naming the new
+# active key; a restart's first switch) and the fixture's busy-with-names
+# notice (D-LOGO-23). Both pins red on lane-bounds-int e8d2b35.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2702}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -373,7 +377,18 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2699}
 # sweep of unnamed files and of a stale temporary (3), the folder's age and
 # its mark (3), the shared fixture (2). 29 red on lane-bounds-int (17a2407),
 # the other 2 on a mutation of the shipping decision.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1390}
+# 2026-10-22, lane-bounds-g2 (R32f): 1390 -> 1399. tests/test_logo_run.py
+# (5): a busy run announces the present names read-only (D-LOGO-23), a
+# failed URL tried once a run (D-LOGO-22, pinned as it stands), a logo's
+# budget never more than what is left of the run (recheck M8), the folder
+# marked before the first fetch, a held folder left by prune and said once
+# (D-LOGO-21); tests/test_fetch_bounds.py (3): trailers past the deadline
+# refused off the main thread (recheck M1), another uid's temporary left
+# (M4), every env lever on a bound lower-only (F-HARNESS-36);
+# tests/test_clipboard.py (1): the clipboard variable lower-only. 5 of the 9
+# red on lane-bounds-int e8d2b35 (and the busy-run test changed in place),
+# the other 4 on a mutation of the shipping line (scratchpad g2-red).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1399}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

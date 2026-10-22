@@ -195,14 +195,21 @@ def cmd_config(args: argparse.Namespace) -> int:
 # ----------------------------------------------------------- clipboard (R8)
 
 def clipboard_deadline() -> float:
-    """Seconds the clipboard read may take (CLIPBOARD_TIMEOUT unless a test
-    shrinks it through CLIPBOARD_TIMEOUT_ENV)."""
+    """Seconds the clipboard read may take: CLIPBOARD_TIMEOUT, or LESS when a
+    test shrinks it through CLIPBOARD_TIMEOUT_ENV. The variable can only
+    lower the bound (F-HARNESS-36, R32f), like HTTP_DEADLINE_ENV and
+    MEMORY_LIMIT_ENV: it used to take any figure over 0.05, so the variable
+    that exists for tests could lift the 5 s the engineering rules (rule 5,
+    D-CLIP-1) and ARCHITECTURE state. The shell's clipboardWatchdog was the
+    outer bound either way."""
     override = os.environ.get(CLIPBOARD_TIMEOUT_ENV, "")
     if override:
         try:
-            return max(0.05, float(override))
+            wanted = float(override)
         except ValueError:
-            pass
+            return CLIPBOARD_TIMEOUT
+        if wanted == wanted:              # not NaN
+            return min(CLIPBOARD_TIMEOUT, max(0.05, wanted))
     return CLIPBOARD_TIMEOUT
 
 

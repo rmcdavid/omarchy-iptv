@@ -25,6 +25,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 import helper_loader
 from helper_loader import load_helper
@@ -248,6 +249,15 @@ class ClipboardVerbTestCase(unittest.TestCase):
             os.environ.pop(helper.CLIPBOARD_TIMEOUT_ENV, None)
             if saved is not None:
                 os.environ[helper.CLIPBOARD_TIMEOUT_ENV] = saved
+
+    def test_the_variable_can_only_lower_the_deadline(self):
+        """F-HARNESS-36 (R32f): the test-only variable used to take any
+        figure over 0.05, so it could RAISE the 5 s the documents state."""
+        for raised in ("600", "5.5", "inf", "nan"):
+            with self.subTest(value=raised), mock.patch.dict(os.environ, {helper.CLIPBOARD_TIMEOUT_ENV: raised}):
+                self.assertEqual(helper.clipboard_deadline(), CLIP["timeoutMs"] / 1000)
+        with mock.patch.dict(os.environ, {helper.CLIPBOARD_TIMEOUT_ENV: "4.5"}):
+            self.assertEqual(helper.clipboard_deadline(), 4.5)
 
     def test_utf16_cut_counts_the_units_the_shell_counts(self):
         astral = "\U0001F600"
