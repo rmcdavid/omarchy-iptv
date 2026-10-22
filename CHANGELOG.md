@@ -3,6 +3,216 @@
 All notable changes to Omarchy IPTV. Versions follow semver; the plugin
 version lives in `manifest.json`.
 
+## 0.15.0 (2026-10-22)
+
+**Bounds and privacy.** 0.14.3 is the marketplace's verified snapshot.
+This release is what `dev` built on top of it: a sweep of the plugin's
+own board for inputs that cost far more than their size, the shape of the
+maintainer's last findings; the no-write-without-a-read work that 0.14.3
+shipped without; and the answer to the plugin's own report about the
+permissions of the desktop shell's settings file (omacom/omarchy#14748).
+Nothing here needs anything from you except a shell restart.
+
+### Changed
+
+- **The guide-data file `epg-now.json` changed shape, and the shell holds
+  far less of it.** It is still JSON, now with one channel per line, so
+  `jq` and any other reader still read it. The shell keeps the file's text
+  and an index and parses one channel's entry when a row or the panel asks
+  for it, instead of parsing the whole file into objects: about 2.5-2.6 KiB
+  a channel of guide data held instead of about 7.1-7.4, measured at
+  2,000-4,000 channels; with 10,000 channels carrying a description,
+  category and episode on now and next, about 25 MiB held for the guide
+  where the old shape held about 71. The five-minute recompute costs the
+  shell about 170 ms less at 10,000 channels, and each 30-second tick about
+  0.3 ms more. A file written by 0.14.3 (one line) is read once the old way
+  and rewritten in the new shape by the next recompute, with no fetch.
+  (D-EPG-11)
+- **A playlist that cannot move into Sources because Sources already holds
+  50 waits in the plugin's own `state.json`.** The first shell start after
+  an update from 0.13.6 or earlier moves the bar entry's playlist and
+  guide-data URL into Sources. When Sources is full, both are now parked in
+  `state.json` (readable by you alone) and taken off the bar entry as soon
+  as that is written, and a notification titled **Sources is full** says
+  so, once a session and again at each shell start while it lasts. Remove
+  a source and they move in together, the playlist becoming the active
+  source. 0.14.3 and earlier removed the least recently used source to make
+  room instead, with only a journal line, and its URL went with it
+  (D-SRC-44). A playlist set on the bar with `omarchy bar set` during the
+  wait takes the waiting playlist's place and keeps the waiting guide-data
+  URL beside it (D-SRC-66); if another program fills the freed place
+  first, both stay parked and the next removal tries again (D-SRC-53); if
+  the plugin cannot write `state.json` when the wait begins, the two stay
+  on the bar entry until it can (D-SRC-64). The notification names
+  `state.json`, not the bar entry (D-DOC-25).
+- **The permission check on `shell.json` runs again after every change the
+  shell publishes**, not only at the shell's start and after the plugin's
+  own writes, so a file a host command re-created readable in the middle
+  of a session is made private again at that one reconcile rather than at
+  the next shell start (D-SINK-38). This last run is pinned through the
+  plugin's test harness, not yet watched on a running shell, and the README
+  says so. The backup copies the host makes of that file are documented
+  with their modes: `omarchy refresh shell` and `omarchy-refresh-config
+  omarchy/shell.json` leave the old file as `shell.json.bak.<number>`, and
+  the Omarchy 4 upgrade as
+  `shell.json.omarchy-upgrade-to-quattro.<suffix>.bak`; each holds the
+  plugin's entry as it was, a playlist URL included if one was on it then,
+  with the permissions `shell.json` had at the time, never wider (a 0600
+  file gives a 0600 copy, a 0644 one a 0644 copy under the usual umask
+  022). The plugin's check never touches them; `ls -l
+  ~/.config/omarchy/shell.json*` shows them and Settings and
+  Troubleshooting give the `chmod 600` one-liner (D-SINK-37). The plugin
+  contract (`docs/OMARCHY-PLUGIN-CONTRACT.md` on the `dev` branch) now
+  says what the host's own scripts do to the file's mode, each line cited
+  to the script and pinned by a test (D-DOC-22), and the README sentences
+  that said the host's writer keeps whatever mode it finds are corrected:
+  four host paths create the file at 0644, and the host's own settings
+  writer leaves it 0600 (D-DOC-23). The thread is omacom/omarchy#14748.
+
+### Fixed
+
+- **The shell's URL redactor and the helper's follow one rule, in both
+  languages.** Wherever a URL is printed in free text -- a notification,
+  the journal, the player's error line, the status line -- its authority
+  is read as the RFC reads it: it ends at the first `/`, `?` or `#` after
+  `//`, its userinfo ends at the last `@` within it, and the printed host
+  is cut at the first `:`, `;`, `=` or `&`. A password holding an
+  unencoded `/`, `?` or `#` makes the URL's host read as the username, so
+  a host with no dot followed by a later `@`, or a non-numeric port
+  followed by a later `@`, prints as `[host withheld]` rather than as a
+  username (D-SINK-25, D-SINK-35), and a query-string password on a URL
+  with no path is redacted as well (D-SINK-23). A URL run, and its
+  authority, end at the six ASCII whitespace characters (space, tab, line
+  feed, carriage return, form feed, vertical tab), the same six in both
+  languages; every other whitespace or control character inside a
+  password is URL text and the host prints. 0.14.3's helper ended a run
+  at `'`, `"`, `<`, `>` and Python-only whitespace, where the shell's did
+  not, so a password holding a quote made the helper print the username
+  and the password's tail (D-SINK-33). An IPv6 address at the end of a
+  sentence no longer redacts to `[redacted]` (D-SINK-26), and a nameless
+  channel on a withheld URL is called `Stream` instead of by that
+  username (D-SINK-31).
+- **The Sources form says what is wrong with a URL instead of rewriting
+  it.** It warns, once, when the host before the first `/` has no dot and
+  an `@` follows (`The host before the first / has no dot and an @ follows
+  it. If a password holds /, ? or #, write them as %2F, %3F and %23.`),
+  and never refuses for that alone. A space, tab, line break or any other
+  control character inside a typed URL is refused with a sentence naming
+  it, where 0.14.3 silently deleted a tab or a C0 separator and sent the
+  rewritten password to the provider (D-SRC-63); the Xtream username and
+  password fields refuse the same instead of deleting it (D-SRC-65). The
+  one exception: a paste into a URL field joins its lines -- carriage
+  returns and line feeds removed, nothing else -- so a URL wrapped by a
+  mail client pastes whole (R33a).
+- **A refused `mpvArgs` option is written to the shell's journal by its
+  name only** (`--tls-verify`), or as `<token>` when it is not shaped like
+  an option; 0.14.3 wrote the token in full, a stream address in it
+  included (D-SINK-24).
+- **Every download runs under one wall clock.** A playlist or guide-data
+  fetch has 60 seconds in all, from opening the connection to the last
+  byte, redirects included, where 0.14.3 counted the deadline only between
+  body reads (D-SRC-58); the body of a redirect is never read, for a
+  playlist, guide data or a logo (D-LOGO-15). A logo has 30 seconds in
+  all, a logo run starts no new download after an hour, the run is held
+  to the helper's 512 MiB memory limit, and the shell stops a run that is
+  still going 90 seconds past that (D-LOGO-16). One source keeps at most
+  5,000 logo files, about 1.3 GB at the 256 KiB cap: a fetch counts what
+  is there first, at the ceiling deletes the files no channel of your
+  playlist names any more, and stops if the folder is still full; only
+  one fetch runs for a source at a time, and a second one started
+  meanwhile announces the logos already there (D-LOGO-12, D-LOGO-18,
+  D-LOGO-21, D-LOGO-23). The logo folder of any saved source other than
+  the active one is deleted a day after a fetch last ran for it, at shell
+  start and again at every source switch (D-LOGO-17, D-LOGO-20); a logo
+  address that failed is not tried again within the same fetch
+  (D-LOGO-22). A temporary file left behind by a write the shell stopped
+  is swept (D-SRC-60), the server's own HTTP status line no longer reaches
+  the status the shell reads word for word (D-SRC-59), and `logos` over a
+  source with no channel list answers `no_cache` instead of an internal
+  error (D-SRC-45).
+- **The helper's parsers cost what their input is.** Guide data read while
+  the source has no channel list yet keeps the first 50,000 distinct
+  channel ids its programmes name and leaves out an id over 256
+  characters, counting what it left out in a `Guide data warning:` line
+  (D-EPG-10). Every regular expression in the helper and in the shell's
+  model is linear, and a gate check grades each by its structure
+  (D-EPG-8, D-EPG-12, D-PERF-6, D-PERF-11); a programme without a stop no
+  longer scans forward once per programme (D-EPG-9), and each programme
+  kept during the parse is one bytes object (D-EPG-7). The playlist and
+  guide verbs lift their memory limit on every exit, so an error near the
+  limit is reported with its host and status rather than as a crash
+  (D-M3U-3). Every reply the shell collects whole is bounded, the player's
+  track list and the first-load reason among them. A playlist group named
+  `__proto__` is harmless: the shell's group maps have no prototype, where
+  0.14.3 let such a group put a `count` property on every object in the
+  shell (D-SG-3, D-SG-4). The shell's trims no longer backtrack over a run
+  of whitespace (D-PERF-3), the previous refresh of the same source is no
+  longer kept in memory beside the new one (D-PERF-4), and a counted
+  warning reads right for one (`1 channel name cut`, not `names`)
+  (D-M3U-4).
+- **No state write without a read.** A save asked for while the plugin's
+  previous save is still being written now waits for that write to land
+  and then reads `state.json`, where 0.14.3 wrote without reading; the
+  wait is never longer than 4 seconds (R27a, closing one of D-SINK-22's
+  three windows). A source added in the guide while another program takes
+  the 50th place is refused when its check ends, with `Sources is full
+  (50) · remove one first`, where 0.14.3 kept it for the session and the
+  next shell start dropped it without a word (D-SRC-41). A no-write block
+  that begins while the shell is running is titled **Saving has stopped**,
+  not "Saved sources not loaded" over sources that did load (D-SRC-42);
+  for a re-pointed link its advice is to point the link back at the folder
+  or file that holds the state (D-SRC-50); and it says which way back keeps
+  the changes made meanwhile and which drops them (D-SRC-51). A guide-data
+  URL set on the bar beside a playlist that was not a usable URL is removed
+  with it and reported, where 0.14.3 put it on the active source in place
+  of that source's own guide-data URL (D-SRC-57).
+
+### Worth knowing
+
+- **Two of D-SINK-22's windows remain**: a link re-pointed between a
+  save's read and its write, and a read that does not answer within
+  2 seconds, after which the save goes ahead without it and the journal
+  says `saving without the read`. In each a replacement is written over,
+  and a link re-pointed at a place with no `state.json` gets one created
+  there at 0644 under the usual umask 022, so check the new place with
+  `ls -l`. Builds between 0.14.3 and this one that tried to hold the change
+  past the read's 2 seconds instead each lost a change in a new way, and
+  never shipped (R29). A change another program writes in the same instant
+  as a save of the plugin's can still be lost, as on every earlier version:
+  one re-read after the save was measured recovering nothing in 608 trials
+  and is not added (D-SRC-48). A run of nine saves, each held by the file
+  view past 4 seconds, can still fill the plugin's record of its own
+  writes so that its own echo undoes the last change made in the guide
+  (D-SRC-47).
+- **The first guide open of a session takes about half a second or more;
+  every later one well under 150 ms.** Measured in the test cage at 10,000
+  channels with no guide data: about 548 ms cold, about 440 ms of it the
+  window's first show whatever the channel count, and about 33 ms warm;
+  with a 10,000-channel guide held, 750-915 ms cold and 36-54 ms warm. The
+  150 ms budget is met by every open but the first (D-PERF-2).
+- **What the redaction rule leaves, by design.** A space inside a password
+  still splits a printed URL at that space (`http://myuser:pa ss@cdn.test/x`
+  prints `myuser ss@cdn.test/x`), exactly as 0.14.3 did, for the six
+  delimiters only (D-SINK-34). A dotted username before a numeric port and
+  an unencoded `/` (`http://user.name:2024/ab@host/x`) prints `user.name`
+  as the host (D-SINK-35). A stored URL whose host carries `;` or `=`
+  (`http://h.test;sid=SECRET`) is labelled by what you typed (D-SINK-30).
+  The shell's own state reader does not yet rewrite a stored URL into the
+  one form the helper would redact identically (D-SINK-23's other half).
+- **Also open and visible**: the host-name lookup of a fetch runs past
+  every deadline to the system resolver's own timeout (D-SRC-62); a failed
+  logo address is tried again by the next fetch (D-LOGO-22); a cached logo
+  that passes every check but cannot be decoded writes four journal lines
+  on every load (D-LOGO-19); an `#EXTGRP` group's text is kept per channel
+  and is bounded per channel, not in total (D-M3U-5); and an update writes
+  the shell's files before the helper's, so a new shell can briefly call
+  the old helper (D-REL-9).
+- For anyone running the helper by hand: `state show` prints a parked
+  playlist and guide-data URL as hosts only.
+- **Restart the shell after this update** (`omarchy-restart-shell`, not
+  `omarchy-refresh-shell`, which resets your shell configuration): the
+  guide-data and saving changes are in the shell's own files.
+
 ## 0.14.3 (2026-10-21)
 
 **Security.** A finding the marketplace maintainer raised against 0.14.2.
