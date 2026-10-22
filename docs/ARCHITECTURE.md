@@ -2181,15 +2181,22 @@ BELOW the cached-file branch and `continue`s rather than breaking: a cached
 file past the cap is validated and announced, a URL past it is not fetched
 this run and is counted in a new summary field, `deferred`, so a run that
 stopped short says so. The shell reads only `names` from the summary
-(`logoSummaryNames` in the model), so the field is inert there. Proved by
-`LogoFetchCapTest` in `tests/test_logo_dimensions.py`, at the real cap with
-a double standing in for the network only: 5,000 new URLs, three files
-planted past the cap (two sound, one bomb) and two more URLs after them;
-`fetched` 5,000 and exactly the first 5,000 URLs served, `cached` 2 with
-both sound names announced, the bomb swept and off disk, `deferred` 3,
-5,002 names; then the real helper as a subprocess over the cache that run
-left, `cached` 5,002 and the same names. Red against the 995c6be helper
-(that one test fails; 85 of 85 green on the fix across tests.test_logo_dimensions and tests.test_logos together, lane commit ddc0a7b; the dimension file alone is 38 at integration).
+(`logoSummaryNames` in the model), so the field is inert there; since R30c
+the shell writes one journal line from it (`logoSummaryNotice`, below).
+Proved at the time by `LogoFetchCapTest` in `tests/test_logo_dimensions.py`
+at the real cap (5,000 new URLs beside three planted files; red against the
+995c6be helper, lane commit ddc0a7b). D-LOGO-12 then forbade that
+construction -- 5,003 files on disk is the state the ceiling exists to
+prevent -- so the test as it stands runs with the cap LOWERED to 5, a double
+standing in for the network only: five new URLs, then three planted files
+(two sound, and in place of the bomb an ordinary unreadable file, a PNG
+signature with nothing after it, which takes the same sweep branch; the
+dimension sweep itself is `LogoCacheSweepTest`'s), then two more URLs. It
+asserts the two sound files validated and announced past the ceiling, the
+unreadable one swept and its slot taken by its own URL, `fetched` 3,
+`deferred` 5, the directory at the cap and never past it, and then the real
+helper as a subprocess over that cache: `cached` 5, the same names, the five
+held-back URLs failing against the dead host.
 **D-LOGO-12 (2026-10-21): the cap is now a ceiling on what is ON DISK.**
 Until then it bounded fetches per run, and `fetched` counts this run's
 downloads, so the directory grew by up to the cap on every run -- 2, 4, 6, 7
@@ -2207,13 +2214,14 @@ once, counted, with no URL. So ONE source's logos hold at most 5,000 files
 of at most 256 KiB, 1,310,720,000 bytes (1.22 GiB). Two things the ceiling
 does not do, stated: a directory an older version left fuller is announced
 and never grown, and stays that size until `cache logos-clear` or the
-source's removal; and a file whose URL has left the playlist still holds its
-slot, so a playlist whose logos churn reaches the ceiling and stops getting
-new ones until the same verb runs (a prune of such files is a separate
-decision). The ceiling is per source: the history keeps up to `MAX_SOURCES`
-(50) sources with a directory each, so every source together is bounded by
-50 x 1.22 GiB, 65.5 GB, which is a figure and not a budget; a cross-source
-bound is proposed to the lead, not built. Proved by
+source's removal; and a file whose URL has left the playlist still held its
+slot, so a playlist whose logos churn reached the ceiling and stopped getting
+new ones until the same verb ran -- since R30b (D-LOGO-18) the run sweeps
+such files at the ceiling, item 17 of section 8. The ceiling is per source:
+the history keeps up to `MAX_SOURCES` (50) sources with a directory each,
+which made every source together 50 x 1.22 GiB, 65.5 GB; since R30a
+(D-LOGO-17) `cache prune` ages a kept source's folder, and item 17 states
+the install-wide bound that leaves. Proved by
 `tests/test_logo_ceiling.py` with the cap lowered to 2 or 3 over a real
 local TLS server, the GETs counted by the server and the directory counted by
 the test: 2, 2, 2, 2 over four runs with two GETs in all (red on f55a32f, 4
@@ -3303,7 +3311,15 @@ Performance budget (10k channels):
     to `FIRST_LOAD_REASON_MAX`. main()'s answer to a bug, which any verb
     can end in: the message cut to `INTERNAL_MESSAGE_MAX` and the
     traceback to the first and last halves of `INTERNAL_TRACE_MAX`, the
-    middle counted. Every cut is made after the redaction, so it can never
+    middle counted. The library text in a `network` refusal of `playlist`,
+    the probe and `epg` (`could not reach <host>: ...`): cut to
+    `NETWORK_DETAIL_MAX` = 200 characters and three dots, its control
+    characters folded to spaces (D-SRC-59, 2026-10-21) -- for
+    `http.client.BadStatusLine` that text is the server's own first line,
+    which `readline` admits up to 65,536 characters of and which reached the
+    reply, both status files and the stderr line whole; the line is decoded
+    ISO-8859-1, so the detail is at most (200 + 3) x 2 = 406 bytes of JSON.
+    Every cut is made after the redaction, so it can never
     leave half a URL behind it. Bounded without a new cap, and why:
     `epg` (fixed fields and at most five counted sentences; a cached
     window's warnings are the helper's own); `clipboard`
@@ -3425,6 +3441,146 @@ Performance budget (10k channels):
     entry kept as text and parsed when a row asks, about 1 KiB a channel by
     the same arithmetic), or descriptions fetched on demand, both changes to
     the guide's data path and its 150 ms open budget, proposed for a ruling.
+
+17. Every fetch the helper makes runs under ONE wall-clock deadline, and
+    what a fetch leaves on disk is bounded (R30, the bounds sweep's round 2,
+    2026-10-21).
+
+    **The deadline (R30e: D-SRC-58, D-LOGO-16).** `--timeout` is a
+    per-socket-operation timeout and bounds each connect and each read,
+    never their sum. S-05's wall clock was checked only between body reads,
+    after `open()` had returned, so the connect, the TLS handshake, the
+    status line, up to 100 header lines of 65,536 bytes, and every redirect
+    ran outside it, bounded in the service only by the 180 s watchdogs; and
+    a chunked body's trailer lines, which `http.client` reads inside the
+    `read1` that ends the body, could end a download that had overrun and
+    have it ACCEPTED. The logo fetch had no wall clock at all: `response.read`
+    loops on `recv` until the cap or the end, so a host sending a byte inside
+    every 10 s held one logo for up to 262,145 x 10 s (about 30 days), the
+    run fetches one logo at a time, and `logoFetchProc` was the one
+    network-facing Process in `Service.qml` without a watchdog. Now
+    `FetchDeadline` arms `ITIMER_REAL` for the budget with a `SIGALRM`
+    handler that raises `FetchExpired` (a `BaseException`, so no
+    `except OSError` in urllib can take it for a network error), around the
+    whole of `read_http_source` (the playlist, the probe and the guide:
+    `http_deadline`, 60 s, code `timeout`) and of `fetch_logo`
+    (`LOGO_DEADLINE`, 30 s, code `logo_timeout`). CPython re-runs a socket
+    call interrupted by a signal only after running the handler (PEP 475),
+    so the handler's exception ends the call wherever it waits; the read
+    loop's monotonic check stays for a caller off the main thread, where no
+    handler can be installed, and is made once more after the loop for the
+    trailers. A logo run starts no fetch after `LOGO_RUN_DEADLINE`, 3,600 s
+    -- about three times the quarter of an hour D-LOGO-8 measured for a
+    first enable of 1,436 logos -- and gives each logo the lesser of its
+    own deadline and what is left of the run's, so the run ends by that mark
+    plus the host-name lookup; what it held back is `postponed` and
+    `runExpired` in the summary, and the next run fetches it, because a file
+    on disk is never fetched again. The shell's `logoFetchWatchdog` is the
+    outer bound, `Model.LOGO_FETCH_WATCHDOG_MS` = the run's deadline + one
+    logo's + 60 s (3,690 s) for the cached-file pass (about 45 us a file),
+    the interpreter's start and the lookup, armed and stopped by the
+    Process's own `running` state; it TERMs the helper and logs no URL. The
+    three numbers are one shared fixture, `tests/fixtures/logo-deadlines.json`,
+    which both suites read. What no signal cuts short, stated rather than
+    rounded away: `getaddrinfo`, which runs in the C library and retries its
+    own poll after a signal, so a host-name lookup ends on the system
+    resolver's timeout and the handler runs then (UNVERIFIED by run). The
+    test-only `OMARCHY_IPTV_HTTP_DEADLINE` now only LOWERS the budget, as
+    `OMARCHY_IPTV_MEMORY_LIMIT_MB` does; it used to take any figure.
+
+    **Redirect bodies are never read (R30e: D-LOGO-15, D-SRC-58).** The
+    stdlib's `HTTPRedirectHandler.http_error_302` composes the next request,
+    checks for a loop and then runs `fp.read(); fp.close()` on the 3xx
+    response before following it -- an uncapped read of whatever body the
+    server attaches, up to `max_redirections` (10) times a fetch -- and
+    `http_error_301`, `303`, `307` and `308` are the same function, bound by
+    name in that class's body. Both openers overrode `redirect_request` only,
+    so `MAX_SOURCE_BYTES` and `MAX_LOGO_BYTES` bounded the FINAL response and
+    nothing bounded a hop. `unread_redirect_handler` overrides all five: each
+    closes the response at once and hands the stdlib method an `UnreadBody`
+    whose `read` answers nothing, so every decision the stdlib makes -- the
+    Location header, its scheme check, the loop check, the subclass's
+    `redirect_request` -- is still its own, and only the read is gone.
+    `make_opener` (S-06) and `logo_opener` (D-LOGO-1) both build on it.
+
+    **The logo run's memory, lock and ceiling (R30e, R30b).** `logos
+    --fetch` runs under `limit_memory` like the playlist and epg verbs and
+    lifts it before its summary (D-M3U-3); its opener uses the TLS context
+    `limit_memory` prepared, so the CA store is loaded once a run, before
+    the limit. The run takes an exclusive non-blocking `flock` on the
+    source's logo folder for its whole length (`lock_logo_dir`): a second
+    run on the same source -- from a terminal, or left behind by a shell
+    restart -- answers `busy: true` with the survey's counts and NO `names`
+    (the shell keeps the set it has), fetches nothing and exits 0, so two
+    runs can no longer each count the folder at their start and together
+    pass the ceiling (D-LOGO-18). The folder is created for the lock only
+    when the run could fetch something; one that cannot be made or opened
+    leaves the run unlocked, as nothing can be written there either. At the
+    ceiling, before a URL is counted as held back, the run removes once the
+    logo files no channel of the current playlist names
+    (`sweep_unnamed_logos`: only names of a logo's own shape, eight hex
+    digits, and only regular files; anything else stays and still counts),
+    reported as `unnamed`. They are a cache: a channel that names one again
+    gets it fetched again.
+
+    **The install-wide bound (R30a, D-LOGO-17).** A run marks its folder's
+    modification time when it ends, a run that fetched nothing included, and
+    runs happen only for the active source with logos on; `cache prune`,
+    which the service runs once at every start, removes the logo folder of a
+    kept source that is not active once that mark is `--epg-max-age` old
+    (`DEFAULT_EPG_MAX_AGE`, a day), as it already aged those sources' EPG
+    files (`agedLogos` in its reply; a link at `logos/` is never followed,
+    the removal being `remove_cache_subdir`'s). One folder holds at most
+    1,310,720,000 bytes (1.22 GiB, D-LOGO-12). So after a start the install
+    holds the active source's folder and those of sources whose last fetch
+    ended within the day before it, and during a session each other source
+    switched to with logos on adds its own: **1.22 GiB x (1 + the sources
+    given logos in the day before the last start + those switched to
+    since)**. `MAX_SOURCES` x 1.22 GiB, 65.5 GB, is still reachable, but
+    only by a session in which every one of fifty sources was used with
+    logos on and filled to its ceiling within a day of the start; it used to
+    be the standing figure for any install that had ever used fifty.
+    UNVERIFIED at size; arithmetic over the code. The cost, by the ruling:
+    switching back to a source whose folder was aged fetches its logos
+    again, which contacts those hosts again.
+
+    **Leftovers of a killed write (D-SRC-60).** The atomic writers remove
+    their temporary on every exit Python sees, and a SIGTERM is not one: the
+    service sends it from the playlist, guide and probe watchdogs, a probe's
+    cancel and the logo fetch's stop, and each kill inside a write can leave
+    one `.tmp-<name>-<8 hex>`, no larger than its target, 0600 in a 0700
+    folder. Nothing swept one in a kept or active source's folder, its
+    `logos/` -- where it held a slot under the ceiling -- or the state
+    folder. The first atomic write a process makes into a folder now removes
+    the leftovers there (`sweep_stale_temps`): exactly the writers' own name
+    shape, regular files only (never followed), owned by this user, and
+    last modified at least `STALE_TEMP_AGE` ago, a day. A writer writes its
+    temporary in one call and renames it straight after, so one a live
+    writer holds was modified moments ago; a day is about 23 times the
+    longest watchdog (the logo fetch's, 3,690 s). In a folder that is not
+    the plugin's (the target of a `state.json` link) only the target's own
+    leftovers go. The logo run sweeps its folder before counting it
+    (`staleTemps` in its summary), and `cache prune` sweeps the folders of
+    kept sources that are not active.
+
+    **The one line the shell writes (R30c).** A run that stopped at the
+    ceiling or at its deadline, or found the folder busy, exits 0, and its
+    counted stderr line went to a Process with no stderr reader. The
+    summary handler now writes one console line to the shell's journal,
+    composed by `Model.logoSummaryNotice` from the summary's numbers and
+    fixed words only, never a host, a name or a URL.
+
+    Proved by `tests/test_fetch_bounds.py` and `tests/test_logo_run.py` over
+    `tests/scripted_server.py`, a local server whose every response is an
+    ordinary small one sent a fixed fraction of a second after the deadline
+    the test lowers (TLS with a throwaway certificate for the logos), with
+    the deadline, the age, the cap and the detail cap LOWERED and never a
+    large or endless input; the redirect methods are also called directly
+    with a fake response that records whether it was read. 29 of their 31
+    tests are red on lane-bounds-int (17a2407); the other two, and the
+    node checks that run `Service.qml`'s own watchdog, `onRunningChanged`,
+    `onExited` and `onLogoLine` text against fakes, were seen red on
+    mutations of the shipping decision.
 
 ## 9. Coding standards
 
@@ -3847,7 +4003,10 @@ Applied in fix round 1 against `docs/SECURITY-REVIEW.md`:
   is wrapped in curly quotes so it can never parse as a flag.
 - S-05: HTTP reads run under a wall-clock deadline of `max(60 s, 3 x
   --timeout)` (code `timeout`); `Service.qml` watchdogs kill a helper that
-  exceeds 180 s and report `helper_timeout` without a URL.
+  exceeds 180 s and report `helper_timeout` without a URL. [2026-10-21,
+  R30e (D-SRC-58): the deadline was checked only between body reads, so
+  connect, TLS, the headers and every redirect ran outside it; it now covers
+  the whole fetch, the logo fetch included, section 8 item 17.]
 - S-06: redirects to non-http(s) targets are refused (`unsafe_redirect`);
   `Authorization` and `Cookie` are dropped when scheme, host, or port change.
 - S-07: `MAX_CHANNELS = 50000`, `MAX_GROUPS = 2000` in the helper, mirrored

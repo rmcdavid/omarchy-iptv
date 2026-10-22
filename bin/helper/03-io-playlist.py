@@ -94,16 +94,173 @@ def request_origin(url: str) -> tuple[str, str, int | None]:
         return "", "", None
 
 
+def close_quietly(stream: Any) -> None:
+    try:
+        stream.close()
+    except (OSError, ValueError, AttributeError):
+        pass
+
+
+class UnreadBody:
+    """What the stdlib's redirect method is handed in place of a 3xx
+    response (D-LOGO-15, D-SRC-58): `read` answers nothing and touches
+    nothing, `close` closes the real response, anything else is the
+    response's own. See unread_redirect_handler."""
+
+    def __init__(self, response: Any) -> None:
+        self._response = response
+
+    def read(self, *_: Any) -> bytes:
+        return b""
+
+    def close(self) -> None:
+        close_quietly(self._response)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._response, name)
+
+
+def unread_redirect_handler() -> Any:
+    """urllib.request.HTTPRedirectHandler with its five redirect methods
+    overridden so that a redirect's BODY is never read (D-LOGO-15, D-SRC-58).
+
+    The stdlib's HTTPRedirectHandler.http_error_302 (CPython 3.14,
+    urllib/request.py) composes the next request, checks for a loop, and
+    then runs `fp.read(); fp.close()` on the 3xx response before following
+    it: an unbounded read of whatever body the server attaches, up to
+    max_redirections (10) times a fetch, with no byte cap -- MAX_SOURCE_BYTES
+    and MAX_LOGO_BYTES apply to the FINAL response only. http_error_301,
+    http_error_303, http_error_307 and http_error_308 are the same function,
+    bound by name in that class's body (`http_error_301 = http_error_303 =
+    ... = http_error_302`), so a subclass that overrides http_error_302
+    alone leaves the other four reading; all five are overridden here. Each
+    closes the response at once, which drops the connection and whatever
+    the server was still sending, and hands the stdlib method an UnreadBody
+    in its place, so the stdlib's decisions -- the Location header, the
+    scheme check, the loop check, the subclass's redirect_request -- are
+    the stdlib's own and only the read is gone. Nothing needs the body: a
+    redirect is followed or refused on its headers."""
+    import urllib.request
+
+    class UnreadRedirectHandler(urllib.request.HTTPRedirectHandler):
+        def http_error_302(self, req: Any, fp: Any, code: int, msg: str, headers: Any) -> Any:
+            close_quietly(fp)
+            return super().http_error_302(req, UnreadBody(fp), code, msg, headers)
+
+        http_error_301 = http_error_303 = http_error_307 = http_error_308 = http_error_302
+
+    return UnreadRedirectHandler
+
+
+class FetchExpired(BaseException):
+    """Raised by FetchDeadline's alarm. A BaseException so no `except
+    OSError` or `except Exception` on the way out of urllib can mistake it
+    for a network error or swallow it; the fetch that armed the deadline
+    turns it into its own `timeout` refusal."""
+
+
+class FetchDeadline:
+    """`with FetchDeadline(seconds):` -- the whole body runs under ONE
+    wall-clock deadline (R30e: D-SRC-58, D-LOGO-16).
+
+    A per-socket timeout bounds each read and each connect, never their sum:
+    a server that sends one byte inside every timeout keeps a fetch alive
+    for as long as it likes, in the connect, the TLS handshake, the status
+    line, the headers (http.client allows 100 lines of 65,536 bytes), any
+    redirect, and the body. The deadline the helper had (S-05) was checked
+    only between body reads, after `open()` had returned. This arms
+    ITIMER_REAL for the budget with a SIGALRM handler that raises
+    FetchExpired, so the fetch is interrupted wherever it is waiting:
+    CPython retries a socket call interrupted by a signal only after running
+    the handler (PEP 475), and the handler's exception ends the call.
+
+    What it cannot cut short, stated rather than rounded away: a call that
+    does not return to the interpreter until it is done. The one on this
+    path is the host-name lookup -- getaddrinfo runs in the C library, which
+    retries its own poll after a signal -- so a lookup ends on the system
+    resolver's timeout and the handler runs then. UNVERIFIED by run.
+
+    Only the main thread may install a signal handler. Anywhere else (a test
+    calling from a thread) the body runs without the alarm and the read
+    loop's own monotonic check is the only bound, as before. A timer already
+    armed (none is, on any path that fetches) is put back with what remained
+    of it. The helper starts no thread and arms no other timer while a
+    fetch runs."""
+
+    def __init__(self, seconds: float) -> None:
+        self.seconds = max(0.001, float(seconds))
+        self.armed = False
+        self.installed = False
+        self.previous: Any = None
+        self.prior: tuple[float, float] = (0.0, 0.0)
+        self.started = 0.0
+
+    def expire(self, *_: Any) -> None:
+        if self.armed:
+            self.armed = False
+            raise FetchExpired()
+
+    def __enter__(self) -> FetchDeadline:
+        try:
+            self.previous = signal.signal(signal.SIGALRM, self.expire)
+        except (ValueError, OSError, AttributeError):
+            return self
+        self.installed = True
+        self.armed = True
+        self.started = time.monotonic()
+        self.prior = signal.setitimer(signal.ITIMER_REAL, self.seconds)
+        return self
+
+    def __exit__(self, *_: Any) -> bool:
+        if not self.installed:
+            return False
+        try:
+            signal.setitimer(signal.ITIMER_REAL, 0)
+        finally:
+            # A SIGALRM already pending when the timer is cancelled runs the
+            # handler right here; the caller's `except FetchExpired` sits
+            # outside this block and answers it as the timeout it is.
+            self.armed = False
+            signal.signal(signal.SIGALRM, self.previous if self.previous is not None else signal.SIG_DFL)
+            if self.prior[0] > 0:
+                left = self.prior[0] - (time.monotonic() - self.started)
+                signal.setitimer(signal.ITIMER_REAL, max(left, 0.001), self.prior[1])
+        return False
+
+
+# D-SRC-59: the most of a library error's text a network refusal carries.
+# For http.client.BadStatusLine (a server whose first line is not a status
+# line) and UnknownProtocol (one whose first word is not a known HTTP
+# version), str(error) is the provider's own first line, read with
+# readline(_MAXLINE + 1): up to 65,536 characters, which reached the
+# playlist, probe and guide replies, both status files and the stderr line.
+# Redacted FIRST and cut after, so a cut can never leave the userinfo of a
+# URL that the redaction would have removed; control characters are folded
+# to spaces (a raw line carries its CR LF, and a C0 character escapes to six
+# bytes of JSON). The status line is decoded ISO-8859-1, so every character
+# left is at most two bytes of UTF-8 and the detail at most
+# (200 + 3) x 2 = 406 bytes of a reply.
+NETWORK_DETAIL_MAX = 200
+
+
+def network_detail(error: Any) -> str:
+    text = redact_urls(error)
+    if len(text) > NETWORK_DETAIL_MAX:
+        text = text[:NETWORK_DETAIL_MAX].rstrip() + "..."
+    return _CONTROL_CHARS.sub(" ", text).strip()
+
+
 def make_opener(label: str, host: str) -> Any:
     """urlopen replacement whose redirect handler (S-06) refuses non-http(s)
     targets (urllib's default happily follows a 302 to ftp://) and drops
     Authorization / Cookie when the origin (scheme, host, port) changes, so
     a provider that bounces to a third party never receives the user's
     credentials. urllib itself refuses file:/data: targets and loops with a
-    3xx HTTPError, which read_http_source maps to the same error code."""
+    3xx HTTPError, which read_http_source maps to the same error code. A
+    redirect's body is never read (unread_redirect_handler)."""
     import urllib.request
 
-    class SafeRedirectHandler(urllib.request.HTTPRedirectHandler):
+    class SafeRedirectHandler(unread_redirect_handler()):
         def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
             scheme = stream_scheme(newurl)
             if scheme not in ("http", "https"):
@@ -126,14 +283,20 @@ def make_opener(label: str, host: str) -> Any:
 
 
 def http_deadline(timeout: float) -> float:
-    """Wall-clock budget in seconds for one download (see HTTP_DEADLINE_MIN)."""
+    """Wall-clock budget in seconds for one download (see HTTP_DEADLINE_MIN).
+    HTTP_DEADLINE_ENV can only LOWER it, like MEMORY_LIMIT_ENV: it used to
+    take any figure over 0.05, so the variable that exists for tests could
+    lift the bound the README states."""
+    budget = max(HTTP_DEADLINE_MIN, 3.0 * float(timeout))
     override = os.environ.get(HTTP_DEADLINE_ENV, "")
     if override:
         try:
-            return max(0.05, float(override))
+            wanted = float(override)
         except ValueError:
-            pass
-    return max(HTTP_DEADLINE_MIN, 3.0 * float(timeout))
+            return budget
+        if wanted == wanted:              # not NaN
+            return min(budget, max(0.05, wanted))
+    return budget
 
 
 # What limit_memory set in this process (see there). A dict changed in
@@ -290,20 +453,43 @@ def memory_refusal(label: str, host: str, held: dict[str, Any]) -> HelperError:
     return HelperError("too_large", "%s from %s needs more than %s" % (label, host or "the source", bound))
 
 
+def download_timeout(label: str, host: str) -> HelperError:
+    # No seconds in the message: the guide renders the code as "Timed out"
+    # and the README states the deadline, so a number here could only
+    # disagree with them (D-LIVE-11).
+    return HelperError("timeout", "%s download from %s exceeded its deadline" % (label, host))
+
+
 def read_http_source(url: str, timeout: float, label: str = "playlist") -> bytes:
-    import base64
-    import http.client
-    import urllib.error
+    """The playlist's, the guide's and the source probe's one download, under
+    ONE wall-clock deadline of http_deadline(timeout) seconds from before
+    the connection is opened to the last byte, redirects included (R30e,
+    D-SRC-58): FetchDeadline interrupts the connect, the TLS handshake, the
+    headers and the body wherever they wait, and the monotonic check in the
+    read loop -- and once more after it, for the chunked trailers http.client
+    reads inside the last read1 -- stays for a caller off the main thread.
+    No redirect body is read (make_opener)."""
     import urllib.request
     host = source_host(url)
     target, auth = split_userinfo(url)
     headers = {"User-Agent": USER_AGENT, "Accept": "*/*"}
     if auth:
+        import base64
         headers["Authorization"] = "Basic " + base64.b64encode(auth.encode("utf-8")).decode("ascii")
     request = urllib.request.Request(target, headers=headers)
     opener = make_opener(label, host)
     budget = http_deadline(timeout)
     deadline = time.monotonic() + budget
+    try:
+        with FetchDeadline(budget):
+            return read_http_response(opener, request, timeout, label, host, deadline)
+    except FetchExpired:
+        raise download_timeout(label, host) from None
+
+
+def read_http_response(opener: Any, request: Any, timeout: float, label: str, host: str, deadline: float) -> bytes:
+    import http.client
+    import urllib.error
     chunks: list[bytes] = []
     total = 0
     try:
@@ -312,15 +498,17 @@ def read_http_source(url: str, timeout: float, label: str = "playlist") -> bytes
             # cannot park us inside read() past the deadline check.
             while total <= MAX_SOURCE_BYTES:
                 if time.monotonic() >= deadline:
-                    # No seconds in the message: the guide renders the code as
-                    # "Timed out" and the README states the deadline, so a
-                    # number here could only disagree with them (D-LIVE-11).
-                    raise HelperError("timeout", "%s download from %s exceeded its deadline" % (label, host))
+                    raise download_timeout(label, host)
                 chunk = response.read1(HTTP_CHUNK)
                 if not chunk:
                     break
                 chunks.append(chunk)
                 total += len(chunk)
+        if time.monotonic() >= deadline:
+            # The last read1 of a chunked body reads the trailer lines
+            # inside itself; a download that ran past its deadline there is
+            # refused, not accepted (the time-and-disk review, 2026-10-21).
+            raise download_timeout(label, host)
     except HelperError:
         raise
     except urllib.error.HTTPError as error:
@@ -331,9 +519,9 @@ def read_http_source(url: str, timeout: float, label: str = "playlist") -> bytes
         raise HelperError("http_%d" % error.code, "HTTP %d from %s" % (error.code, host))
     except urllib.error.URLError as error:
         reason = getattr(error, "reason", error)
-        raise HelperError("network", "could not reach %s: %s" % (host, redact_urls(reason)))
+        raise HelperError("network", "could not reach %s: %s" % (host, network_detail(reason)))
     except (TimeoutError, OSError, ValueError, http.client.HTTPException) as error:
-        raise HelperError("network", "could not reach %s: %s" % (host, redact_urls(error)))
+        raise HelperError("network", "could not reach %s: %s" % (host, network_detail(error)))
     if total > MAX_SOURCE_BYTES:
         raise HelperError("too_large", "%s from %s exceeds %d MB" % (label, host, MAX_SOURCE_BYTES // (1024 * 1024)))
     return b"".join(chunks)
@@ -457,16 +645,88 @@ def open_xml_stream(data: bytes) -> Any:
     return io.BytesIO(data)
 
 
+# D-SRC-60. The atomic writers' `except BaseException` removes their
+# temporary on every exit Python sees, and a SIGTERM is not one: the default
+# disposition ends the process inside the write, and the service sends it
+# from the playlist, guide and probe watchdogs, from a probe's cancel and
+# from the logo fetch's stop (a source switch, the setting turned off, its
+# watchdog). Each such kill can leave one `.tmp-<name>-<8 hex>` beside its
+# target, no larger than the target, 0600 in a 0700 folder, and nothing
+# swept one in a kept or active source's folder, its logos/ or the state
+# folder. So the first atomic write a process makes into a folder first
+# removes the leftovers there (sweep_stale_temps).
+#
+# Which ones: exactly the names these two writers make -- `.tmp-`, a name,
+# `-`, eight lowercase hex digits -- that are regular files (never followed),
+# owned by this user, and last modified at least STALE_TEMP_AGE ago. A
+# writer owns its temporary from the O_EXCL create to the rename, and both
+# writers write it in one call and rename it straight after, so a temporary
+# a live writer holds was modified moments ago; a day is about 23 times the
+# longest watchdog in the service (the logo fetch's, LOGO_RUN_DEADLINE plus
+# margins, 3,690 s) and 480 times the playlist's. The one writer this could
+# wrong is a process stopped (SIGSTOP, a hung filesystem) inside a write for
+# a day, whose rename then fails as an OSError the caller already answers.
+# In a folder that is not the plugin's (`private_dir` False: the target of a
+# state.json link) only the target's OWN leftovers are swept, never another
+# name's. Once per folder per process, so the logo fetch's thousands of
+# writes into one folder list it once.
+STALE_TEMP_AGE = 86400
+_TEMP_SUFFIX = re.compile(r"-[0-9a-f]{8}\Z")
+SWEPT_TEMP_DIRS: set[tuple[str, str]] = set()
+
+
+def is_stale_temp_name(name: str, target: str = "") -> bool:
+    """Is `name` one the atomic writers make (for `target`, when given)?"""
+    prefix = TEMP_PREFIX + target + "-" if target else TEMP_PREFIX
+    if not name.startswith(prefix) or not _TEMP_SUFFIX.search(name):
+        return False
+    return len(name) == len(prefix) + 8 if target else len(name) > len(prefix) + 9
+
+
+def sweep_stale_temps(directory: str, target: str = "", now: float | None = None) -> int:
+    """Remove the stale temporaries in `directory` (all of them, or `target`'s
+    only); -> how many. Never raises: a leftover is not worth a refusal."""
+    now = time.time() if now is None else now
+    removed = 0
+    uid = os.geteuid()
+    try:
+        with os.scandir(directory) as entries:
+            for entry in entries:
+                if not is_stale_temp_name(entry.name, target):
+                    continue
+                try:
+                    st = entry.stat(follow_symlinks=False)
+                    if (stat.S_ISREG(st.st_mode) and st.st_uid == uid
+                            and now - st.st_mtime >= STALE_TEMP_AGE):
+                        os.unlink(entry.path)
+                        removed += 1
+                except OSError:
+                    continue
+    except OSError:
+        return removed
+    return removed
+
+
+def sweep_stale_temps_once(directory: str, target: str = "") -> int:
+    key = (os.path.abspath(directory), target)
+    if key in SWEPT_TEMP_DIRS:
+        return 0
+    SWEPT_TEMP_DIRS.add(key)
+    return sweep_stale_temps(directory, target)
+
+
 def write_text_atomic(path: str, text: str, private_dir: bool = True) -> None:
     """Temp file in the same (0700) directory, mode 0600, rename over `path`.
 
     `private_dir` False (R24b, round 14): the directory is not the plugin's
     -- the target of a state.json symlink, a dotfiles folder -- so it is
     neither created nor chmod-ed; the temporary file is still 0600 and
-    O_EXCL, and the rename still replaces `path` atomically."""
+    O_EXCL, and the rename still replaces `path` atomically. Leftovers of a
+    killed write are swept first (D-SRC-60, above)."""
     directory = os.path.dirname(path)
     if private_dir:
         ensure_private_dir(directory)
+    sweep_stale_temps_once(directory, "" if private_dir else os.path.basename(path))
     tmp = os.path.join(directory, ".tmp-%s-%s" % (os.path.basename(path), os.urandom(4).hex()))
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:
@@ -490,6 +750,7 @@ def write_bytes_atomic(path: str, data: bytes) -> None:
     """
     directory = os.path.dirname(path)
     ensure_private_dir(directory)
+    sweep_stale_temps_once(directory)
     tmp = os.path.join(directory, ".tmp-%s-%s" % (os.path.basename(path), os.urandom(4).hex()))
     fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     try:

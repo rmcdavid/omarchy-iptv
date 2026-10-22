@@ -2583,6 +2583,112 @@ checkCall("D-SRC-45 / D-LOGO-12: the no_cache refusal names nothing, and a summa
           Model.logoSummaryNames(ceiling), Model.logoStreamName(ceiling)]
 }, [null, "", ["ab12cd34", "ff00ff00"], ""])
 
+// ---- R30c / R30e (D-LOGO-16): the logo fetch's bounds and its one journal line ----
+//
+// tests/fixtures/logo-deadlines.json is shared: tests/test_logo_run.py pins
+// the helper's LOGO_DEADLINE and LOGO_RUN_DEADLINE to the same numbers and
+// finds every `summaryFields` name in what the real verb prints. The service
+// half runs Service.qml's OWN text -- the watchdog Timer's interval and
+// onTriggered, the logoFetchProc Connections' onRunningChanged and onExited,
+// and onLogoLine -- compiled against fakes, the way
+// tests/service-harness.js compiles the root's functions. IPTV_SERVICE_QML and
+// IPTV_MODEL point it at another tree, as that harness's cases do.
+;(function () {
+  const fs = require("fs"), path = require("path")
+  const H = require("./service-harness.js")
+  const fx = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/logo-deadlines.json"), "utf8"))
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
+
+  checkCall("R30e: the logo deadlines are the shared fixture's", function () {
+    return [M.LOGO_DEADLINE_MS, M.LOGO_RUN_DEADLINE_MS, M.LOGO_FETCH_WATCHDOG_MS]
+  }, [fx.logoMs, fx.runMs, fx.watchdogMs])
+  checkCall("R30e: the shell's watchdog is the OUTER bound, past the run's deadline and one logo's", function () {
+    return M.LOGO_FETCH_WATCHDOG_MS > M.LOGO_RUN_DEADLINE_MS + M.LOGO_DEADLINE_MS
+  }, true)
+  fx.notices.forEach(function (c) {
+    checkCall("R30c: logoSummaryNotice: " + c.why, function () { return M.logoSummaryNotice(c.line) }, c.expect)
+  })
+
+  // The text of one block of Service.qml: the brace after `anchor`, found
+  // after `from`. null when either is missing, which every check reads red.
+  function block(from, anchor) {
+    const start = svcText.indexOf(from)
+    if (start === -1) return null
+    const at = svcText.indexOf(anchor, start)
+    if (at === -1) return null
+    const open = svcText.indexOf("{", at + anchor.length - 1)
+    const close = H.matchBrace(svcText, open)
+    return close === -1 ? null : svcText.slice(open + 1, close)
+  }
+  function compiled(body, scope) {
+    if (body === null) return null
+    return new Function("scope", "with (scope) { return function () {" + body + "\n} }")(scope)
+  }
+  function fakes() {
+    const log = []
+    const timer = { restarts: 0, stops: 0, restart() { this.restarts++ }, stop() { this.stops++ } }
+    const proc = { running: false, signals: [], signal(n) { this.signals.push(n) } }
+    const konsole = { log() { log.push(["log", [].slice.call(arguments).join(" ")]) },
+                      warn() { log.push(["warn", [].slice.call(arguments).join(" ")]) } }
+    return { log, timer, proc, scope: { Model: M, logoFetchWatchdog: timer, logoFetchProc: proc, console: konsole, Math } }
+  }
+  const timerText = block("id: logoFetchWatchdog", "onTriggered: {")
+  const intervalLine = (function () {
+    const at = svcText.indexOf("id: logoFetchWatchdog")
+    if (at === -1) return null
+    const m = svcText.slice(at, at + 400).match(/\n\s*interval: (.*)\n/)
+    return m ? m[1] : null
+  })()
+
+  checkCall("R30e: Service.qml's logoFetchWatchdog fires at Model.LOGO_FETCH_WATCHDOG_MS", function () {
+    if (intervalLine === null) return "no logoFetchWatchdog"
+    return new Function("Model", "return (" + intervalLine + ")")(M)
+  }, fx.watchdogMs)
+  checkCall("R30e: the watchdog TERMs a logo fetch still running, logs no URL, and leaves a finished one alone", function () {
+    const f = fakes()
+    const fire = compiled(timerText, f.scope)
+    if (fire === null) return "no logoFetchWatchdog"
+    fire()
+    const idle = f.proc.signals.slice()
+    f.proc.running = true
+    fire()
+    return [idle, f.proc.signals, f.log.length, f.log.every(function (l) { return l[1].indexOf("://") === -1 })]
+  }, [[], [15], 1, true])
+  checkCall("R30e: the watchdog runs exactly while logoFetchProc does", function () {
+    const f = fakes()
+    const changed = compiled(block("target: logoFetchProc", "function onRunningChanged() {"), f.scope)
+    if (changed === null) return "no onRunningChanged"
+    f.proc.running = true
+    changed()
+    f.proc.running = false
+    changed()
+    return [f.timer.restarts, f.timer.stops]
+  }, [1, 1])
+  checkCall("R30e: the exit handler stops the watchdog too", function () {
+    const f = fakes()
+    const body = block("target: logoFetchProc", "function onExited(exitCode, exitStatus) {")
+    if (body === null) return "no onExited"
+    const scope = Object.assign({}, f.scope, { root: { showLogos: false, logoPending: ["x"], logoFetchAgain: false },
+                                               logoRerunDebounce: { restart() {} } })
+    new Function("scope", "with (scope) { return function (exitCode, exitStatus) {" + body + "\n} }")(scope)(0, 0)
+    return [f.timer.stops, scope.root.logoPending]
+  }, [1, []])
+  checkCall("R30c: onLogoLine writes the summary's one journal line, and none for a progress line", function () {
+    const f = fakes()
+    const fn = H.rootFunctions(svcText).onLogoLine
+    if (!fn) return "no onLogoLine"
+    const root = { logoPending: [], logoHave: {}, logoFetchSeq: 0, logoFetchDir: "/c/logos" }
+    const scope = Object.assign({}, f.scope, { root, logoFlushTimer: { restart() {} } })
+    const call = new Function("scope", "with (scope) { return function (" + fn.args + ") {" + fn.body + "\n} }")(scope)
+    call(JSON.stringify({ ok: true, kind: "logo", name: "ab12cd34" }))
+    call(fx.notices[1].line)
+    call(fx.notices[5].line)
+    call(fx.notices[0].line)
+    return f.log
+  }, [["log", fx.notices[1].expect], ["log", fx.notices[5].expect]])
+})()
+
 checkCall("D-LOGO-11 blocker (d): a fetch running for another directory restarts, for the same one it is skipped", function () {
   return [Model.logoFetchPlan({ showLogos: true, wantDir: "/B", running: true, runningDir: "/A" }),
           Model.logoFetchPlan({ showLogos: true, wantDir: "/A", running: true, runningDir: "/A" }),
