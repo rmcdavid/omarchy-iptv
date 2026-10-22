@@ -7,9 +7,9 @@ favorites, source management, and mpv playback. One plugin id,
 Quickshell process. Released through v0.14.3 (2026-10-21, D-M3U-1 and the helper split). Four of the last releases were cut for a finding
 the marketplace maintainer raised -- D-SINK-8, D-TEXT-1, D-SINK-13, and then
 D-SINK-16 against the release that fixed D-SINK-13, on the verification
-request for that very commit; the
-verified snapshot is STILL v0.12.0 (f89f748, approved 2026-10-04), five
-releases behind, and that is worth knowing rather than assuming: the catalog
+request for that very commit; until
+2026-10-22 the verified snapshot was STILL v0.12.0 (f89f748, approved
+2026-10-04), five releases behind, and that is worth knowing rather than assuming: the catalog
 read on 2026-10-09 gives `verificationCommit f89f748`,
 `verificationCheckedAt 2026-10-04T17:51:07Z`, beside `version 0.13.1`, so the
 two fields do not mean the same thing. The requests for 0.12.1, 0.13.0,
@@ -33,6 +33,19 @@ lead's memory said a fresh install got the verified 0.12.0 until the 0.13.6
 pre-cut review measured otherwise on 2026-10-12, and 0.13.6's first draft
 of release notes repeated it. Re-read the catalog before repeating any of this;
 the twelve days it sat on v0.7.1 are explained in the decisions log.
+
+**Since 2026-10-22T03:45:56Z the verified snapshot is 0.14.3 (205ee12):**
+#12474 closed `approved-and-verified` by the marketplace's automated
+publication ("Updated and verified IPTV ... Verification method:
+`automated`"), the first approval since 0.12.0. The catalog read at 06:50 CDT
+that day carries `listingValidatedCommit 205ee12…`, `listingValidatedAt
+2026-10-22T03:42:09Z`, `listingValidatedBranch main` and an
+`automatedSecurityBaseline` block at the same commit with `outcome passed`;
+the `verificationCommit` / `verificationCheckedAt` fields the paragraph above
+cites are no longer in the catalog's shape, so re-read it before quoting
+either name. The live install was already on 0.14.3. Everything on `dev`
+since -- the bounds sweep, D-EPG-11, round 7 -- is unreleased and `main` is
+205ee12 still.
 
 ## Branches: `dev` is the tree, `main` is the artifact
 
@@ -127,6 +140,9 @@ Consequences you must respect:
   finding on it), for the same reason. `dev` moves freely -- the P3 sweep
   (`f55a32f`) and the bounds sweep wait on it, unreleased. A finding on
   #12474 is fixed and released at once, carrying what `dev` holds.
+  **This hold ended at 2026-10-22T03:45:56Z**, when #12474 closed
+  `approved-and-verified`; the standing rule applies again, and a release
+  still waits for the owner's word.
 
 ## Where the truth lives
 
