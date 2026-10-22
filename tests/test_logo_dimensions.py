@@ -945,7 +945,7 @@ class LogoFetchCapTest(unittest.TestCase):
 
         served = []
 
-        def network_double(url, timeout):
+        def network_double(url, timeout, budget=None):
             served.append(url)
             return BY_ID["webp-small-vp8l"]["bytes"], "image/webp"
 

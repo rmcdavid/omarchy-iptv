@@ -259,7 +259,13 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # 2678 -> 2679 on 2026-10-21 (lane-bounds-l, D-SRC-45 / D-LOGO-12): the
 # shell's reading of the logos verb's no_cache refusal and of a summary at
 # the ceiling (seen red on a mutation of Model.logoSummaryNames).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2679}
+# 2679 -> 2699 on 2026-10-21 (lane-bounds-g, R30c / R30e): the shared
+# logo-deadlines fixture's three numbers (2) and its thirteen summary lines
+# through Model.logoSummaryNotice (13), and Service.qml's own logoFetchWatchdog
+# interval and onTriggered, logoFetchProc's onRunningChanged and onExited, and
+# onLogoLine's journal line, compiled against fakes (5). All 20 red against
+# lane-bounds-int's Service.qml and model (17a2407).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2699}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -356,7 +362,18 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2679}
 # which compare against f55a32f itself and were seen red on four mutations.
 # LogoFetchCapTest was rewritten for the ceiling in place, not added.
 # 1342 / 1338 -> 1359 on 2026-10-21, the two lanes together (lane-bounds-int).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1359}
+# 1359 -> 1390 on 2026-10-21 (lane-bounds-g, R30a-c / R30e, D-SRC-59,
+# D-SRC-60): tests/test_fetch_bounds.py (16) -- the five redirect methods of
+# both openers closing a 3xx body unread (2), the whole download held to one
+# deadline over a local scripted server with the deadline lowered (7), the
+# status line's text redacted then cut (3), stale temporaries swept by the
+# first write into a folder (4); tests/test_logo_run.py (15) -- one logo's
+# and the run's deadline and a redirect body over TLS (3), the memory limit
+# observed in a real helper process (1), the folder lock (3), the ceiling's
+# sweep of unnamed files and of a stale temporary (3), the folder's age and
+# its mark (3), the shared fixture (2). 29 red on lane-bounds-int (17a2407),
+# the other 2 on a mutation of the shipping decision.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1390}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

@@ -1,0 +1,47 @@
+{
+  "comment": [
+    "The logo fetch's time bounds and its one journal line (D-LOGO-16, R30e; R30c), run by BOTH",
+    "tests/Model.test.js and tests/test_logo_run.py. A number implemented in two languages gets one",
+    "fixture (engineering rule, dev branch).",
+    "",
+    "`logoMs` is one logo's whole-fetch deadline: the helper's LOGO_DEADLINE (seconds,",
+    "05-ipc-logos.py) and Model.LOGO_DEADLINE_MS. `runMs` is the run's: LOGO_RUN_DEADLINE",
+    "(06-failed.py) and Model.LOGO_RUN_DEADLINE_MS; after it the run starts no fetch, so it ends one",
+    "logo deadline later at the latest. `watchdogMs` is the shell's outer bound,",
+    "Model.LOGO_FETCH_WATCHDOG_MS, run + logo + `marginMs`.",
+    "",
+    "`summaryFields` are the names of the summary's fields that Model.logoSummaryNotice reads: the",
+    "python side runs the real verb and finds each of them in what it prints, of the type given, so",
+    "the join between the helper's line and the shell's reading of it is made by a call and not by",
+    "a name (engineering rule 13). `notices` are summary lines and the line the shell writes for",
+    "each (\"\" for none); node runs them."
+  ],
+  "logoMs": 30000,
+  "runMs": 3600000,
+  "marginMs": 60000,
+  "watchdogMs": 3690000,
+  "summaryFields": {
+    "busy": "boolean",
+    "atCeiling": "boolean",
+    "files": "number",
+    "cap": "number",
+    "deferred": "number",
+    "runExpired": "boolean",
+    "postponed": "number"
+  },
+  "notices": [
+    { "why": "an ordinary run writes nothing", "line": "{\"ok\": true, \"kind\": \"logos\", \"action\": \"fetch\", \"busy\": false, \"names\": [\"ab12cd34\"], \"atCeiling\": false, \"files\": 1, \"cap\": 5000, \"deferred\": 0, \"runExpired\": false, \"postponed\": 0}", "expect": "" },
+    { "why": "at the ceiling, counted", "line": "{\"ok\": true, \"kind\": \"logos\", \"action\": \"fetch\", \"busy\": false, \"names\": [], \"atCeiling\": true, \"files\": 5000, \"cap\": 5000, \"deferred\": 7, \"runExpired\": false, \"postponed\": 0}", "expect": "[iptv] logo fetch: the logo folder is full (5000 files, ceiling 5000); 7 logos were not fetched" },
+    { "why": "one logo held back reads as one", "line": "{\"kind\": \"logos\", \"atCeiling\": true, \"files\": 3, \"cap\": 3, \"deferred\": 1}", "expect": "[iptv] logo fetch: the logo folder is full (3 files, ceiling 3); 1 logo was not fetched" },
+    { "why": "the run's time limit, counted", "line": "{\"kind\": \"logos\", \"atCeiling\": false, \"runExpired\": true, \"postponed\": 12}", "expect": "[iptv] logo fetch: the run reached its time limit; 12 logos were left for the next run" },
+    { "why": "both in one line", "line": "{\"kind\": \"logos\", \"atCeiling\": true, \"files\": 2, \"cap\": 2, \"deferred\": 2, \"runExpired\": true, \"postponed\": 1}", "expect": "[iptv] logo fetch: the logo folder is full (2 files, ceiling 2); 2 logos were not fetched; the run reached its time limit; 1 logo was left for the next run" },
+    { "why": "busy", "line": "{\"ok\": true, \"kind\": \"logos\", \"action\": \"fetch\", \"busy\": true, \"fetched\": 0}", "expect": "[iptv] logo fetch skipped: another fetch is running for this source" },
+    { "why": "a number that is not a whole number reads as 0, and no string reaches the line", "line": "{\"kind\": \"logos\", \"atCeiling\": true, \"files\": \"https://u:p@h.test/x\", \"cap\": -1, \"deferred\": \"9\"}", "expect": "[iptv] logo fetch: the logo folder is full (0 files, ceiling 0); 0 logos were not fetched" },
+    { "why": "only the boolean true counts", "line": "{\"kind\": \"logos\", \"atCeiling\": \"true\", \"busy\": 1, \"runExpired\": \"yes\"}", "expect": "" },
+    { "why": "a progress line writes nothing", "line": "{\"ok\": true, \"kind\": \"logo\", \"name\": \"ab12cd34\"}", "expect": "" },
+    { "why": "the no_cache refusal writes nothing (onExited logs its exit)", "line": "{\"ok\": false, \"kind\": \"logos\", \"error\": {\"code\": \"no_cache\", \"message\": \"x\"}, \"action\": \"fetch\"}", "expect": "" },
+    { "why": "junk writes nothing", "line": "not json at all", "expect": "" },
+    { "why": "an array writes nothing", "line": "[{\"kind\": \"logos\", \"busy\": true}]", "expect": "" },
+    { "why": "an empty line writes nothing", "line": "", "expect": "" }
+  ]
+}

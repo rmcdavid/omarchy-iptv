@@ -62,7 +62,9 @@ def remove_regular(path: str) -> bool:
 # the channels that source carried (D-LOGO-4). That directory holds at most
 # MAX_LOGO_FILES entries of at most MAX_LOGO_BYTES each, 1.22 GiB, since
 # D-LOGO-12 made the cap a ceiling on what is there; before it, the cap
-# bounded one run's downloads and the directory had no ceiling at all.
+# bounded one run's downloads and the directory had no ceiling at all. A
+# kept source's folder is aged by `cache prune` since D-LOGO-17 (see
+# cache_prune for the install-wide figure).
 CACHE_SUBDIRS = (LOGO_SUBDIR,)
 
 
@@ -275,10 +277,10 @@ def cache_logos_clear(directory: str, key: str) -> dict[str, Any]:
     directory fuller than that -- its cap counted one run's downloads, and
     the directory grew by up to 5,000 a run -- and this version never adds to
     one; this verb is what empties it. The ceiling is PER SOURCE: the history
-    keeps up to MAX_SOURCES (50) sources, each with its own directory, so
-    every source together is bounded only by 50 times that, 65.5 GB, which
-    is a figure and not a budget anyone would accept; a cross-source bound
-    is a separate decision (D-LOGO-12's rule-15 axis).
+    keeps up to MAX_SOURCES (50) sources, each with its own directory. What
+    bounds them together is `cache prune`, which since D-LOGO-17 (R30a)
+    removes the logo folder of a kept source that is not active once no
+    fetch has ended in it for a day; cache_prune states the figure.
 
     The playlist half of the cache is untouched: the source is still there,
     only its pictures are gone. Deletion is remove_cache_subdir's, so it is
@@ -315,12 +317,50 @@ def cache_logos_clear(directory: str, key: str) -> dict[str, Any]:
     }
 
 
+def age_logo_folder(source_path: str, now: float, max_age: float) -> bool:
+    """D-LOGO-17 (R30a): remove a kept, non-active source's logo folder once
+    no fetch run has ended in it for `max_age` seconds. -> True when removed.
+
+    The folder's own modification time is the clock: every `logos --fetch`
+    run marks it when it ends (cmd_logos), a run that fetched nothing new
+    included, and runs happen only for the ACTIVE source with logos on. So
+    a folder older than `max_age` belongs to a source nobody has had logos
+    for in that long. lstat, never followed: a link at logos/ is left alone,
+    as remove_cache_subdir would leave it. The removal is that function's,
+    one level deep, so a nested directory keeps the folder and answers
+    False."""
+    path = os.path.join(source_path, LOGO_SUBDIR)
+    try:
+        st = os.lstat(path)
+    except OSError:
+        return False
+    if not stat.S_ISDIR(st.st_mode) or now - st.st_mtime < max_age:
+        return False
+    return remove_cache_subdir(path)
+
+
 def cache_prune(directory: str, keep: list[str], active: str | None, epg_max_age: float) -> dict[str, Any]:
-    """Delete every sources/<key> not in `keep`; age the EPG files of kept,
-    non-active keys older than `epg_max_age` seconds. The `active` key is
-    implicitly kept (D-SRC-07): the active source's directory is never
-    removed, listed under `keep` or not. Names that are not keys (and
-    symlinks) are skipped, never touched."""
+    """Delete every sources/<key> not in `keep`; age the EPG files AND the
+    logo folder (D-LOGO-17, age_logo_folder) of kept, non-active keys older
+    than `epg_max_age` seconds, and sweep the leftovers of killed writes
+    there (D-SRC-60, sweep_stale_temps). The `active` key is implicitly kept
+    (D-SRC-07): the active source's directory is never removed or touched,
+    listed under `keep` or not. Names that are not keys (and symlinks) are
+    skipped, never touched.
+
+    What that bounds, install-wide (R30a): the service runs this once at
+    every start, with the active source and the history's keys. Each
+    source's logo folder holds at most MAX_LOGO_FILES x MAX_LOGO_BYTES
+    (1,310,720,000 bytes, 1.22 GiB, D-LOGO-12), and after a start only the
+    active source's folder and those of sources whose last logo fetch ended
+    within `epg_max_age` (a day, DEFAULT_EPG_MAX_AGE) before it are left;
+    during a session each other source made active with logos on adds its
+    own. So the install holds 1.22 GiB x (1 + the sources given logos in the
+    day before the last start + those switched to since), and the history's
+    MAX_SOURCES (50) times that, 65.5 GB, only for a session in which every
+    one of fifty sources was used with logos on within a day of the start
+    and filled to its ceiling. UNVERIFIED at size; arithmetic over this
+    code."""
     keep_set = {check_source_key(item) for item in keep}
     if active:
         keep_set.add(check_source_key(active))
@@ -328,6 +368,8 @@ def cache_prune(directory: str, keep: list[str], active: str | None, epg_max_age
     ensure_private_dir(root)
     removed: list[str] = []
     aged: list[str] = []
+    aged_logos: list[str] = []
+    stale = 0
     skipped: list[str] = []
     kept_dirs: list[str] = []
     now = time.time()
@@ -354,7 +396,14 @@ def cache_prune(directory: str, keep: list[str], active: str | None, epg_max_age
                 touched = True
         if touched:
             aged.append(name)
-    return {"removed": removed, "agedEpg": aged, "skipped": skipped, "kept": kept_dirs}
+        if age_logo_folder(entry.path, now, epg_max_age):
+            aged_logos.append(name)
+        stale += sweep_stale_temps(entry.path, now=now)
+        logo_path = os.path.join(entry.path, LOGO_SUBDIR)
+        if not os.path.islink(logo_path) and os.path.isdir(logo_path):
+            stale += sweep_stale_temps(logo_path, now=now)
+    return {"removed": removed, "agedEpg": aged, "agedLogos": aged_logos, "staleTemps": stale,
+            "skipped": skipped, "kept": kept_dirs}
 
 
 def cmd_cache(args: argparse.Namespace) -> int:

@@ -94,6 +94,91 @@ def cmd_failed(args: argparse.Namespace) -> int:
     return 0
 
 
+# D-LOGO-16 (R30e): the most one `logos --fetch` run may spend STARTING
+# downloads, in seconds. Before it the run had no wall-clock bound at all: it
+# fetches one logo at a time, failed hosts are retried on every run, and
+# MAX_LOGO_FILES counts files, not requests, so a playlist of unroutable logo
+# hosts cost at least the 10 s connect timeout per distinct URL -- 50,000 x
+# 10 s, about 5.8 days, by arithmetic. An hour is about three times the
+# quarter of an hour D-LOGO-8 measured for a first enable of 1,436 logos;
+# what a run leaves is fetched by the next one (the service starts one after
+# every refresh), because a file already on disk is never fetched again. Each
+# logo gets LOGO_DEADLINE or what is left of this, whichever is less, so the
+# run stops starting fetches at this mark and ends one logo deadline after
+# it at the latest. Mirrored by Model.LOGO_RUN_DEADLINE_MS through the shared
+# logo-deadlines fixture; the shell's watchdog (Service.qml
+# logoFetchWatchdog, Model.LOGO_FETCH_WATCHDOG_MS) sits past both.
+LOGO_RUN_DEADLINE = 3600.0
+# A logo's file name: fnv1a32 of its URL, eight lowercase hex digits
+# (logo_filename). The ceiling's sweep removes only names of this shape.
+_LOGO_NAME = re.compile(r"[0-9a-f]{8}\Z")
+
+
+class LogoFolderBusy(Exception):
+    """Another `logos --fetch` holds this source's logo folder (D-LOGO-18)."""
+
+
+def lock_logo_dir(logo_dir: str, needed: bool) -> int | None:
+    """An exclusive, non-blocking flock on the source's logo folder, held by
+    the returned descriptor for the whole run (D-LOGO-18, R30b). -> None when
+    there is nothing to hold: no folder and nothing this run could fetch,
+    which is when it can write nothing either. Raises LogoFolderBusy when
+    another run holds it.
+
+    Two runs on one source each counted the folder at their start and could
+    together pass the ceiling; the shell runs one at a time, but a run from
+    a terminal beside it, or one left behind by a shell restart, did not
+    know. The folder is created here when a fetch may need it (0700, as
+    write_logo would), and opened through a link the way write_logo writes
+    through one (D-SRC-32), so the lock is on the folder the files go to. A
+    filesystem without flock answers an error other than EWOULDBLOCK; the run
+    goes on unlocked then, as before, and says so. So does a run whose folder
+    cannot be made or opened -- a file or a dangling link where it should be:
+    it has nothing to guard, because nothing can be written there, and
+    logo_dir_entries counts such a folder as full, so it fetches nothing."""
+    if not needed and not os.path.isdir(logo_dir):
+        return None
+    try:
+        ensure_private_dir(logo_dir)
+        fd = os.open(logo_dir, os.O_RDONLY | os.O_DIRECTORY | os.O_CLOEXEC)
+    except OSError as error:
+        log("logos: the logo folder cannot be used (%s); nothing will be fetched" % type(error).__name__)
+        return None
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        os.close(fd)
+        raise LogoFolderBusy() from None
+    except OSError as error:
+        log("logos: could not lock the logo folder (%s); this run is not exclusive" % type(error).__name__)
+    return fd
+
+
+def sweep_unnamed_logos(logo_dir: str, named: set[str]) -> int:
+    """At the ceiling (D-LOGO-18, R30b): remove the logo files no channel of
+    the current playlist names. -> how many. They are a cache -- a channel
+    that names one again gets it fetched again -- and until this a playlist
+    whose logos changed over time filled the folder with files nothing drew
+    and then fetched nothing new until `cache logos-clear`. Only names of a
+    logo's own shape, only regular files (never followed); anything else in
+    the folder stays and still counts toward the ceiling."""
+    removed = 0
+    try:
+        with os.scandir(logo_dir) as entries:
+            for entry in entries:
+                if not _LOGO_NAME.match(entry.name) or entry.name in named:
+                    continue
+                try:
+                    if entry.is_file(follow_symlinks=False):
+                        os.unlink(entry.path)
+                        removed += 1
+                except OSError:
+                    continue
+    except OSError:
+        return removed
+    return removed
+
+
 def cmd_logos(args: argparse.Namespace) -> int:
     directory = cache_dir(args.cache_dir)
     try:
@@ -116,6 +201,71 @@ def cmd_logos(args: argparse.Namespace) -> int:
     # ruling's first line) and this flag is off by default here, so nothing
     # contacts anyone because a command was run without reading it.
     logo_dir = os.path.join(directory, LOGO_SUBDIR)
+    try:
+        lock = lock_logo_dir(logo_dir, survey["wouldContact"] > 0)
+    except LogoFolderBusy:
+        # Counted and said, and NO `names`: the shell keeps the set it has
+        # (Model.logoSummaryNames answers null) and writes one journal line
+        # for `busy` (Model.logoSummaryNotice).
+        log("logos: another logo fetch is running for this source; this one fetched nothing")
+        emit(dict(survey, ok=True, kind="logos", action="fetch", busy=True, fetched=0))
+        return 0
+    # D-LOGO-15 (R30e): bounded like the playlist and epg verbs (D-M3U-1),
+    # before anything is fetched, and lifted before the summary is composed
+    # (D-M3U-3). What a logo costs is bounded by MAX_LOGO_BYTES and the
+    # headers' own limits, and no redirect body is read any more; this is
+    # what holds when that arithmetic is wrong.
+    held = limit_memory()
+    result: dict[str, Any] | None = None
+    try:
+        try:
+            result = fetch_logo_run(channels, logo_dir, args.timeout)
+        finally:
+            release_memory_limit(held)
+    except MemoryError:
+        result = None
+    finally:
+        if lock is not None:
+            # The folder's modification time is when a run for this source
+            # last ended, which `cache prune` ages the folder by (D-LOGO-17,
+            # R30a): a run that fetched nothing new still marks it. Through
+            # the descriptor, so it is the folder that was locked.
+            try:
+                os.utime(lock)
+            except OSError:
+                pass
+            os.close(lock)
+    if result is None:
+        error = memory_refusal("logo fetch", "this source", held)
+        log("logos: %s" % error.message)
+        emit(error_payload("logos", error, action="fetch"))
+        return EXIT_ERROR
+    # Said ONCE on stderr as well, counted, because a ceiling that stops
+    # fetches in silence reads as a provider being down; the shell, which
+    # reads no stderr from this process, writes its own journal line from
+    # the summary (Model.logoSummaryNotice, R30c).
+    if result["atCeiling"]:
+        log("logos: the logo folder holds %d files, its ceiling is %d; %s"
+            % (result["files"], MAX_LOGO_FILES,
+               counted_sentence(result["deferred"], "%d logo was not fetched", "%d logos were not fetched")))
+    if result["runExpired"]:
+        log("logos: this run reached its %d s limit; %s"
+            % (int(LOGO_RUN_DEADLINE),
+               counted_sentence(result["postponed"], "%d logo was left for the next run",
+                                "%d logos were left for the next run")))
+    emit(dict(survey, ok=True, kind="logos", action="fetch", busy=False, **result,
+              cap=MAX_LOGO_FILES, maxBytes=MAX_LOGO_BYTES, maxSide=MAX_LOGO_SIDE, maxPixels=MAX_LOGO_PIXELS))
+    return 0
+
+
+def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[str, Any]:
+    """The run itself, under the lock and the memory limit: every cached
+    logo validated and announced, every missing one fetched while the
+    ceiling and the run's deadline allow. -> the summary's counts."""
+    # D-SRC-60: a temporary a killed write left here is swept before the
+    # folder is counted, so a leftover does not hold a slot under the
+    # ceiling (sweep_stale_temps; once per folder per process).
+    stale = sweep_stale_temps_once(logo_dir)
     # D-LOGO-12: MAX_LOGO_FILES is a ceiling on what the logo directory
     # HOLDS, not on what one run downloads. It used to be compared with
     # `fetched` alone, which counts this run's downloads, so the directory
@@ -125,11 +275,16 @@ def cmd_logos(args: argparse.Namespace) -> int:
     # counts what is there before it starts -- every entry, whatever it is,
     # because the claim is about the directory -- and fetches only while
     # `present + fetched < MAX_LOGO_FILES`. `present` falls by one for each
-    # file the sweep below unlinks, and rises with nothing else: a fetch is
+    # file a sweep below unlinks, and rises with nothing else: a fetch is
     # only ever made for a name that is not on disk (or whose unlink failed,
-    # which then counts twice and errs on the side of the ceiling).
+    # which then counts twice and errs on the side of the ceiling). Since
+    # D-LOGO-18 the count is also exact against other runs: this one holds
+    # the folder's lock (lock_logo_dir).
     present = logo_dir_entries(logo_dir)
+    run_deadline = time.monotonic() + LOGO_RUN_DEADLINE
     fetched, cached, refused, failed, swept, deferred, rewritten = 0, 0, 0, 0, 0, 0, 0
+    postponed, unnamed = 0, 0
+    unnamed_checked = False
     reasons: dict[str, int] = {}
     seen: set[str] = set()
     names: list[str] = []
@@ -167,11 +322,11 @@ def cmd_logos(args: argparse.Namespace) -> int:
             # subprocess went from a median 375 ms to 601 ms, so the check
             # costs about 45 us per cached file end to end (22 us per call in
             # isolation, 37 us on 44 KB files). This branch is not held back
-            # by the ceiling below, at any count: it reads files already on
-            # disk, and since D-LOGO-12 the ceiling bounds what is on disk, so
-            # this validates at most MAX_LOGO_FILES files per run -- unless an
-            # earlier version left more, which this run validates too and
-            # never adds to.
+            # by the ceiling below, at any count, nor by the run's deadline:
+            # it reads files already on disk, and since D-LOGO-12 the ceiling
+            # bounds what is on disk, so this validates at most MAX_LOGO_FILES
+            # files per run -- unless an earlier version left more, which this
+            # run validates too and never adds to.
             # D-LOGO-13: a PNG is announced only in its canonical form, so a
             # file an earlier version cached verbatim is rewritten in place
             # first, and one whose chunks cannot be walked is swept below.
@@ -196,6 +351,17 @@ def cmd_logos(args: argparse.Namespace) -> int:
                 present -= 1
             except OSError:
                 pass
+        if present + fetched >= MAX_LOGO_FILES and not unnamed_checked:
+            # D-LOGO-18 (R30b): at the ceiling, before a URL is counted as
+            # held back, the files no current channel names are swept, once a
+            # run. Named from every channel, not only the ones this loop has
+            # reached, so a file a later channel names is kept.
+            unnamed_checked = True
+            named = {logo_filename(c["logo"]) for c in channels
+                     if isinstance(c, dict) and isinstance(c.get("logo"), str) and c["logo"]}
+            gone = sweep_unnamed_logos(logo_dir, named)
+            unnamed += gone
+            present -= gone
         if present + fetched >= MAX_LOGO_FILES:
             # The CEILING (D-LOGO-12): the directory holds MAX_LOGO_FILES
             # entries and no fetch may add one. A cached file was validated
@@ -207,8 +373,15 @@ def cmd_logos(args: argparse.Namespace) -> int:
             # that has room to fetch it.
             deferred += 1
             continue
+        remaining = run_deadline - time.monotonic()
+        if remaining <= 0:
+            # D-LOGO-16: the run's own deadline. Counted, never fetched; the
+            # next run starts where this one stopped, because what it fetched
+            # is on disk.
+            postponed += 1
+            continue
         try:
-            data, ctype = fetch_logo(url, args.timeout)
+            data, ctype = fetch_logo(url, timeout, min(LOGO_DEADLINE, remaining))
             names.append(write_logo(logo_dir, url, data, ctype))
             fetched += 1
             # D-LOGO-8: announce each file AS IT LANDS, not only in the summary.
@@ -245,27 +418,25 @@ def cmd_logos(args: argparse.Namespace) -> int:
     # cache (D-LOGO-11, R5). It is reported because a removal that appeared in
     # no number at all would be invisible whenever the refetch then succeeded,
     # and because `cached` had to stop counting those files to stay true.
-    # `deferred` is the number of URLs the per-run cap held back from a fetch;
-    # the cached-file branch above is never held back, so a cached logo past
-    # the cap is in `names` and a cached bomb past it is in `swept`.
     # `rewritten` counts the cached PNGs made canonical this run (D-LOGO-13);
     # they are in `cached` too, and a file that could not be is in `swept`.
     # `deferred` is the number of logos the ceiling held back from a fetch
-    # (D-LOGO-12), `atCeiling` says the run stopped there, and `files` is
+    # (D-LOGO-12) -- the cached-file branch above is never held back, so a
+    # cached logo past the ceiling is in `names` and a cached bomb past it is
+    # in `swept` -- `atCeiling` says the run stopped there, and `files` is
     # what the directory holds by this run's own count -- never more than
     # `cap` unless an earlier version left it fuller, which this version
-    # never grows further. Said ONCE on stderr as well, counted, because a
-    # ceiling that stops fetches in silence reads as a provider being down.
-    at_ceiling = deferred > 0
-    if at_ceiling:
-        log("logos: the logo folder holds %d files, its ceiling is %d; %d logos were not fetched"
-            % (present + fetched, MAX_LOGO_FILES, deferred))
-    emit(dict(survey, ok=True, kind="logos", action="fetch", fetched=fetched,
-              cached=cached, refusedOnPolicy=refused, failed=failed, reasons=reasons,
-              names=names, swept=swept, rewritten=rewritten, deferred=deferred, cap=MAX_LOGO_FILES,
-              atCeiling=at_ceiling, files=present + fetched,
-              maxBytes=MAX_LOGO_BYTES, maxSide=MAX_LOGO_SIDE, maxPixels=MAX_LOGO_PIXELS))
-    return 0
+    # never grows further. `unnamed` is how many files the ceiling's sweep
+    # removed because no channel names them (D-LOGO-18). `postponed` is how
+    # many logos the run's deadline left for the next run, and `runExpired`
+    # says it was reached (D-LOGO-16); a logo whose own deadline passed is a
+    # failure, reason `logo_timeout`. `staleTemps` is how many leftovers of a
+    # killed write were swept (D-SRC-60).
+    return {"fetched": fetched, "cached": cached, "refusedOnPolicy": refused, "failed": failed,
+            "reasons": reasons, "names": names, "swept": swept, "rewritten": rewritten,
+            "deferred": deferred, "atCeiling": deferred > 0, "files": present + fetched,
+            "unnamed": unnamed, "postponed": postponed, "runExpired": postponed > 0,
+            "staleTemps": stale}
 
 
 def logo_dir_entries(logo_dir: str) -> int:

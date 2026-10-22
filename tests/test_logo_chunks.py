@@ -477,7 +477,7 @@ class LogoFetchCanonicalTest(unittest.TestCase):
                  "url": "http://127.0.0.1/%d" % i, "logo": url} for i, url in enumerate(urls)]},
                 handle)
         real = helper.fetch_logo
-        helper.fetch_logo = lambda url, timeout: (served[url], "image/png")
+        helper.fetch_logo = lambda url, timeout, budget=None: (served[url], "image/png")
         try:
             out = io.StringIO()
             with contextlib.redirect_stdout(out):
