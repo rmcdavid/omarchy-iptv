@@ -165,7 +165,9 @@ fail=0
 # prevented by a sentence. The honest statement is the one above -- the
 # numbers below are the measured counts on this tree, with zero margin, and
 # they are correct only until the next test is written.
-QML_SPEC_MIN=${QML_SPEC_MIN:-78}
+# 78 -> 79 on 2026-10-22 (lane-bounds-s2): test_r32a_urlAuthority, the
+# R32a/R32b functions under Qt's own engine; red on 2ffde4c.
+QML_SPEC_MIN=${QML_SPEC_MIN:-79}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -279,9 +281,17 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # pin what stayed the same (an accepted URL, a path the bug never reached);
 # the lane's 22 mutations of the new code are each red (lane report).
 # Merged 2026-10-21 (lane-bounds-s2): the larger of the two sides' figures
-# taken at the merge of lane-bounds-s into lane-bounds-int; re-levelled to
-# the count on the tree below.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2747}
+# taken at the merge of lane-bounds-s into lane-bounds-int gave 2747; the
+# merged tree counts 2767 (both lanes' checks are additive).
+# 2767 -> 2813 on 2026-10-22 (lane-bounds-s2, R32a-c, D-SINK-27/28,
+# D-SINK-24, F-HARNESS-39): the source-urls fixture's eleven new readings
+# and its `warn` flags (18 fixture checks), the R32a display and warning
+# checks (7), the R32b journal checks (3), the F-HARNESS-39 pins (2), the
+# redaction fixture's split-host check (1); 33 of the lane's checks red on
+# the merge commit 2ffde4c, the rest green there by design (accepted
+# readings, a vector the base already met); every shipping decision red on
+# a mutation (lane report).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2813}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -394,9 +404,15 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2747}
 # prlimit, all 11 red on lane-bounds-int; tests/test_trim_guard.py (5), the
 # guard below, its whole-tree case red on lane-bounds-int (26 sites).
 # Merged 2026-10-21 (lane-bounds-s2): the larger of the two sides' figures
-# taken at the merge of lane-bounds-s into lane-bounds-int; re-levelled to
-# the count on the tree below.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1390}
+# taken at the merge of lane-bounds-s into lane-bounds-int gave 1390; the
+# merged tree counts 1406.
+# 1406 -> 1409 on 2026-10-22 (lane-bounds-s2): tests/test_redaction_cost.py
+# (2) -- D-PERF-6's anchored scheme-run match against the old search on
+# every window of 900 ordinary strings, and R32a's free-text host rule --
+# and tests/test_player.py (1), R32b's `<token>` placeholder for a bearer,
+# basic-auth and scheme-less proxy value. All 3 red on 2ffde4c, with 5
+# existing tests the shared fixtures turn red there.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1409}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

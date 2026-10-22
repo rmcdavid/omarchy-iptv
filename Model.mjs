@@ -76,13 +76,13 @@ export {
   MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed, prunedFailed,
   knownIdSet, failedIndex, failedDocument, failedWhen, withFailed,
   failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
-  reloadDisposition, stateCanonical, sameState, mergeForeignState,
-  mergeConflictLine, mergeDropLines, migrationHeldAgainLine, mergeDropNotice,
-  STATE_LOAD_ERRORS, stateLoadKind, stateInitFound, stateLoadDecision,
-  stateWriteGate, stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
-  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
-  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
-  stateBlockedHeader
+  reloadDisposition, stateCanonical, sameState, mergeSetField,
+  mergeForeignState, mergeConflictLine, mergeDropLines,
+  migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
+  stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
+  stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
+  STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
+  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
 } from "./model/state.mjs"
 export {
   parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
@@ -117,13 +117,14 @@ export {
 export {
   MPV_HANDOFF_TEXT, MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase,
   mpvHandoffName, mpvDiskName, mpvArgWarning, mpvArgWarnings, splitMpvArgs,
-  mpvRejectedLine, headerArgs, MPV_RAW_PREFIX, mpvWindowTitle, playerDirs,
-  dirnameOf, buildMpvArgv, helperArgv, playlistFetchArgv, fetchStateDir,
-  playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,
-  failedArgv, logoFetchArgv, playerTracksArgv, trackChoice, parseTracks,
-  trackLanguage, trackLabel, trackDetail, trackRows, trackCursorHome,
-  moveTrackCursor, TRACKS_RECOVERY_MAX, shouldRefreshTracks,
-  trackPanelMessage, trackAccessibleName
+  mpvRejectedLine, mpvRejectedName, headerArgs, MPV_RAW_PREFIX,
+  mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv, helperArgv,
+  playlistFetchArgv, fetchStateDir, playlistProbeArgv, epgFetchArgv,
+  FETCH_URL_ENV, fetchEnvironment, failedArgv, logoFetchArgv,
+  playerTracksArgv, trackChoice, parseTracks, trackLanguage, trackLabel,
+  trackDetail, trackRows, trackCursorHome, moveTrackCursor,
+  TRACKS_RECOVERY_MAX, shouldRefreshTracks, trackPanelMessage,
+  trackAccessibleName
 } from "./model/mpv.mjs"
 export {
   SEEK_FLOOR_MARGIN_S, SEEK_EDGE_MARGIN_S, SEEK_MOVED_THRESHOLD_S, SEEK_MAX_S,
@@ -181,18 +182,19 @@ export {
   trimEdgeSpace, codePointLength, capCodePoints, sanitizeTyping,
   sourceErrorMessage, sourceReason, PERSIST_FAILURE_REASONS,
   persistFailureMessage, refusalMessage, isIpv6Literal, cutQueryAndFragment,
-  passwordReadAsPort, looksLikeHost, validateSourceUrl, normalizeSourceUrl,
-  EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST, epgHintUrl,
-  resolveEpgUrl, EPG_HINT_NOTICE, epgOriginNotice, isUrlField, sourceKey,
-  isSourceKey, findSource, findSourceByUrl, allocateSourceKey, sourceCacheDir,
-  deriveLabel, labelTaken, uniqueLabel, defaultSourceLabel, validateLabel,
-  maskUrl, encodeQueryValue, xtreamUrls, validateXtream, pluralGroups,
-  countsLine, formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
-  EPG_HINT_ROW_TEXT, sourceDetail, sourceAccessibleName, sourcesHeaderCount,
-  sourcesHeaderRight, sourcesRowAccessibleName, confirmLogosMessage,
-  confirmRemoveMessage, fetchingLine, probeFailureLine, sourceTransient,
-  CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
-  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
+  WARN_AT_AFTER_AUTHORITY, sourceUrlWarning, formWarningLine, looksLikeHost,
+  validateSourceUrl, normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
+  EPG_ORIGIN_PLAYLIST, epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE,
+  epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
+  findSourceByUrl, allocateSourceKey, sourceCacheDir, deriveLabel, labelTaken,
+  uniqueLabel, defaultSourceLabel, validateLabel, maskUrl, encodeQueryValue,
+  xtreamUrls, validateXtream, pluralGroups, countsLine, formatLastUsed,
+  formatAgo, sourceView, sourceViews, sourceRows, EPG_HINT_ROW_TEXT,
+  sourceDetail, sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
+  sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
+  fetchingLine, probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
+  CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS,
+  CLIPBOARD_MAX_BYTES
 } from "./model/sources.mjs"
 export {
   hasControlChars, normalizeSourceRecord, sourcesFull, addSource,

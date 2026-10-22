@@ -27,7 +27,7 @@ import {
   rowDetail, rowAccessibleName
 } from "./contrast.mjs"
 import {
-  passwordReadAsPort, authorityHost, resolveEpgUrl, sourceKey
+  validateSourceUrl, resolveEpgUrl, sourceKey
 } from "./sources.mjs"
 import {
   removeSource, entryWith
@@ -308,9 +308,10 @@ function notifyArgv(event, params) {
 // the host: `http://h.test?u=me@b.test&p=SECRET` gave `b.test&p=SECRET`,
 // while the helper's url_host (urllib) gave `h.test`. A bracketed IPv6 host
 // is kept whole (it used to stop at its first `:` and read as `[`).
-// D-SINK-25: a URL whose password prefix the RFC reading takes for a port is
-// labelled by the host after its later at-sign (passwordReadAsPort), never
-// by the username.
+// R32a (D-SINK-27): this is a DISPLAY sink and shows the RFC host, the one
+// validateSourceUrl and the helper's urllib read; the round-2 reading that
+// showed the host after a later at-sign is withdrawn. The free-text
+// redactor below reads differently, on purpose, and says why.
 function sourceLabel(url) {
   var text = str(url).trim()
   if (text === "") return ""
@@ -327,8 +328,6 @@ function sourceLabel(url) {
   if (m) {
     var scheme = m[1].toLowerCase()
     if (scheme === "file") return "local file"
-    var later = passwordReadAsPort(text.substring(m[1].length + 3))
-    if (later !== "") return scheme + "://" + authorityHost(later)
     return scheme + "://" + m[2]
   }
   if (text.charAt(0) === "/" || text.charAt(0) === "~") return "local file"
@@ -381,14 +380,12 @@ function hostOf(url) {
 // run always ended EXACTLY at that `://`: there was never a shorter candidate
 // to backtrack to. So "walk back from each `://` over the scheme-legal run,
 // then forward to the first letter in it" picks the same leftmost start the
-// engine picked, and the authority rules below (userinfo to the LAST `@`
-// before the first `/`, host excluding `@`) were the old groups transcribed
-// (D-SINK-23 since moved the authority's end to the first `/`, `?` or `#`,
-// so the oracle in the node suite is that pattern with `?#` added)
-// character class by character class. The node suite (dev branch) drives the
-// OLD pattern as an oracle over the shared fixture and thousands of generated
-// strings and asserts the two agree character for character, so the claim is
-// checked rather than argued.
+// engine picked, and the host rule below was the old groups transcribed
+// character class by character class -- until R32a moved what the rule SAYS
+// (the paragraph on the scan itself, below). The node suite (dev branch)
+// drives a pattern that states the R32a rule as an oracle over the shared
+// fixture and thousands of generated strings and asserts the two agree
+// character for character, so the claim is checked rather than argued.
 //
 // This makes the caps that currently stand in front of every sink CHEAP, not
 // unnecessary. The caps are still the reason a 64 MiB description cannot
@@ -445,42 +442,46 @@ function redactUrls(text) {
     }
     var end = j + 3                    // the old `[^\s]*` tail
     while (end < n && !isSpaceAt(s, end)) end++
-    // D-SINK-23. The authority ends at the first `/`, `?` or `#` (RFC 3986).
-    // It used to end at `/` alone -- the old pattern's `[^\/\s]*` -- so on a
-    // URL with no path the at-sign search below ran on into the QUERY, and
-    // `http://h.test?u=me@b.test&p=SECRET` redacted to `b.test&p=SECRET`,
-    // the password included, where the helper's redact_urls (urllib) says
-    // `h.test`. The two mirrors now cut the authority at the same place, and
-    // the shared fixture (redaction-vectors.json) holds both of them to it.
-    var slash = j + 3
-    while (slash < end) {
-      var d = s.charCodeAt(slash)
-      if (d === 47 || d === 63 || d === 35) break
-      slash++
-    }
-    // D-SINK-1: userinfo runs to the LAST `@` of the authority (RFC 3986).
+    // R32a (D-SINK-23, D-SINK-28; the free-text rule, 2026-10-21). This is a
+    // FREE-TEXT redactor, not a parser: the string is an mpv error, a helper
+    // line, a notification body, and the one job here is that NOTHING of a
+    // credential survives, with the host as a courtesy. So the userinfo runs
+    // to the LAST `@` of the whole run -- up to whitespace, crossing `/`, `?`
+    // and `#` -- and the host is what follows it, ended at the first `/`,
+    // `?`, `#` or `:` (a port) and at the first `&`, `=` or `;` (a query or
+    // parameter delimiter, so a NEIGHBOURING parameter never prints). Two
+    // readings were tried and withdrawn, and both are kept here as the
+    // reason this one is not "tidied" back:
+    //   - the RFC authority (userinfo before the first `/`, `?` or `#`),
+    //     which is right for a parser and is what validateSourceUrl and
+    //     sourceLabel use: here it printed the USERNAME for a password that
+    //     holds an unencoded `/`, `?` or `#` (`http://myuser:pa#ss@cdn.test/x`
+    //     -> `myuser`, D-SINK-28), because a username IS the RFC host then.
+    //   - the authority ended at the first `/` alone (the pattern F-SINK-11
+    //     transcribed): on a URL with no path the at-sign search ran on into
+    //     the query and `http://h.test?u=me@b.test&p=SECRET` printed
+    //     `b.test&p=SECRET`, the password with it (D-SINK-23).
+    // What this reading costs, stated rather than hidden (ARCHITECTURE-SOURCES
+    // 3.1): an `@` in a PATH or QUERY moves the printed host to the segment
+    // after it, so `http://host.test:25461/playlist/me@mail.test/pw/m3u_plus`
+    // prints `mail.test` and not `host.test` -- an over-redaction, never a
+    // credential. No port-shape or host-shape rule is applied (R32a; the
+    // round-2 port-shape reading is withdrawn): the segment after the last
+    // `@` prints whatever it is. The helper's redact_urls (run_host) is the
+    // same rule, and the shared fixture holds both to it.
     var h0 = j + 3
-    for (var k = j + 3; k < slash; k++) if (s.charCodeAt(k) === 64) h0 = k + 1
-    // `([^\/\s?#:@]*)`. The `@` in that class was half of D-SINK-1 and it is
-    // REDUNDANT here, deliberately: `h0` is already past the last `@` before
-    // the first `/` and the scan stops at that `/`, so nothing in range can be
-    // one. It stayed because the class is the old group transcribed and
-    // because a redactor is the wrong place to shave a branch -- but it cannot
-    // be observed, so no test can go red for it (rule 14) and the line above
-    // is what actually carries the rule. A mutation that breaks `h0` is caught;
-    // a mutation that drops `c === 64` is not, and that is a fact about this
-    // code rather than a gap in the suite.
+    for (var k = j + 3; k < end; k++) if (s.charCodeAt(k) === 64) h0 = k + 1
     var h1 = h0
-    if (h0 < slash && s.charCodeAt(h0) === 91) {
-      // D-SINK-23: a bracketed IPv6 host is the host up to its `]`, as
-      // urllib reads it; the scan below stopped at its first `:` and gave
-      // `[`. With no `]` inside the authority there is no host to show.
+    if (h0 < end && s.charCodeAt(h0) === 91) {
+      // A bracketed IPv6 host is the host up to its `]`, as urllib reads it
+      // (D-SINK-23; the scan below stopped at its first `:` and gave `[`).
+      // With no `]` in the run there is no host to show.
       var close = s.indexOf("]", h0)
-      h1 = close !== -1 && close < slash ? close + 1 : h0
+      h1 = close !== -1 && close < end ? close + 1 : h0
     } else {
       while (h1 < end) {
         var c = s.charCodeAt(h1)
-        if (c === 47 || c === 63 || c === 35 || c === 58 || c === 64) break
+        if (c === 47 || c === 63 || c === 35 || c === 58 || c === 38 || c === 61 || c === 59) break
         h1++
       }
     }

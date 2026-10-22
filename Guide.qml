@@ -4918,10 +4918,17 @@ Item {
               radius: root.cornerRadius
 
               readonly property bool isError: root.formError !== null
+              // R32a (D-SINK-25): the model's one warning for a URL whose
+              // RFC host has no dot and an `@` follows later -- most likely
+              // a password with an unencoded `/`, `?` or `#`. Advice, shown
+              // once per value on this line while the field holds it; it
+              // never blocks submit and the error and fetching lines win.
+              readonly property string warningText: !isError && !root.formProbing && root.form ? Model.formWarningLine(root.form) : ""
+              readonly property bool isWarning: warningText !== ""
               readonly property string lineText: {
                 if (root.formError) return String(root.formError.message)
                 if (root.formProbing && root.form) return Model.fetchingLine(root.form.probeHost, root.form.probeKind)
-                return ""
+                return warningText
               }
 
               opacity: lineText !== "" ? 1 : 0
@@ -4939,7 +4946,7 @@ Item {
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
                   textFormat: Text.PlainText
-                  text: resultLine.isError ? Model.GLYPHS.alert : Model.GLYPHS.loading
+                  text: resultLine.isError || resultLine.isWarning ? Model.GLYPHS.alert : Model.GLYPHS.loading
                   color: resultLine.isError ? root.urgent : root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.icon

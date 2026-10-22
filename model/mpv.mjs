@@ -140,27 +140,40 @@ function splitMpvArgs(text) {
   return { args: args, rejected: rejected, warnings: mpvArgWarnings(args) }
 }
 
-// D-SINK-24. The journal line for the tokens splitMpvArgs refused, or "".
-// It printed them WHOLE, and a refused token is exactly where a credential
-// goes: `--stream-lavf-o=http_proxy=http://user:pw@proxy:3128` (reserved
-// since D-SINK-15) and the value half of `--http-proxy http://user:pw@proxy`
-// (split off by the whitespace split, refused as not an option) both reached
-// the user journal verbatim on every player start and restart. The console is
-// a sink rule 5 names. So the line carries each token's option NAME only --
-// the helper's own mirror of this refusal prints `token.split("=", 1)[0]` --
-// and goes through redactUrls as well, because a token that is not an option
-// at all (that bare proxy URL) has no `=` to cut at and IS its name.
+// D-SINK-24 (ruling R32b). The journal line for the tokens splitMpvArgs
+// refused, or "". It printed them WHOLE, and a refused token is exactly where
+// a credential goes: `--stream-lavf-o=http_proxy=http://user:pw@proxy:3128`
+// (reserved since D-SINK-15), the value half of `--http-proxy http://u:pw@p`
+// split off by the whitespace split, a `Bearer eyJ...` or `Basic dXNl...`
+// split off a `--http-header-fields=Authorization: ...`, and a scheme-less
+// `user:pw@proxy:3128` -- all reached the user journal verbatim on every
+// player start and restart. The console is a sink rule 5 names. So a token
+// is journaled by its option NAME only: the text before `=` when it starts
+// with `--`, else the fixed word `<token>` -- never a value, never a bare
+// token. The round-2 line cut at `=` and redacted URLs, which still printed
+// a bearer value whole (the recheck's P2): a token that is not an option has
+// no name to print, so it gets a placeholder. The helper's own refusal line
+// (`dropped mpvArg ...`, 08-player-verbs.py) is the same rule, pinned by
+// the player suite on the dev branch. redactUrls still runs over the joined names, a
+// second layer for a `--` token that carries `://` without an `=`.
 function mpvRejectedLine(rejected) {
   var list = asList(rejected)
   var names = []
   for (var i = 0; i < list.length; i++) {
     var token = str(list[i])
     if (token === "") continue
-    var eq = token.indexOf("=")
-    names.push(eq === -1 ? token : token.substring(0, eq))
+    names.push(mpvRejectedName(token))
   }
   if (names.length === 0) return ""
   return "omarchy-iptv: ignoring mpvArgs tokens: " + redactUrls(names.join(" "))
+}
+
+// R32b: what a refused token is journaled as.
+function mpvRejectedName(token) {
+  var t = str(token)
+  if (t.indexOf("--") !== 0) return "<token>"
+  var eq = t.indexOf("=")
+  return eq === -1 ? t : t.substring(0, eq)
 }
 
 // Per-channel HTTP headers as mpv argv items. `-append` list form so header
@@ -699,12 +712,12 @@ function trackAccessibleName(rows, index) {
 export {
   MPV_HANDOFF, MPV_HANDOFF_SCRIPT_OPTS, MPV_YTDL_OFF, MPV_HANDOFF_TEXT,
   MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase, mpvHandoffName, mpvDiskName,
-  mpvArgWarning, mpvArgWarnings, splitMpvArgs, mpvRejectedLine, headerArgs,
-  MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv,
-  helperArgv, playlistFetchArgv, fetchStateDir, playlistProbeArgv,
-  epgFetchArgv, FETCH_URL_ENV, fetchEnvironment, failedArgv, logoFetchArgv,
-  playerTracksArgv, trackChoice, parseTracks, LANG_NAMES, trackLanguage,
-  trackLabel, trackDetail, trackRows, trackCursorHome, moveTrackCursor,
-  TRACKS_RECOVERY_MAX, shouldRefreshTracks, trackPanelMessage,
-  trackAccessibleName
+  mpvArgWarning, mpvArgWarnings, splitMpvArgs, mpvRejectedLine,
+  mpvRejectedName, headerArgs, MPV_RAW_PREFIX, mpvWindowTitle, playerDirs,
+  dirnameOf, buildMpvArgv, helperArgv, playlistFetchArgv, fetchStateDir,
+  playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,
+  failedArgv, logoFetchArgv, playerTracksArgv, trackChoice, parseTracks,
+  LANG_NAMES, trackLanguage, trackLabel, trackDetail, trackRows,
+  trackCursorHome, moveTrackCursor, TRACKS_RECOVERY_MAX, shouldRefreshTracks,
+  trackPanelMessage, trackAccessibleName
 }

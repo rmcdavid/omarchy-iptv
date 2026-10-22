@@ -469,7 +469,12 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
     warnings: list[str] = []
     mpv_args, rejected = filter_mpv_args(list(args.mpv_arg or []))
     for token in rejected:
-        warnings.append("dropped mpvArg %s" % token.split("=", 1)[0])
+        # D-SINK-24 (R32b): the option NAME only -- the text before "=" when
+        # the token starts with "--", else the fixed word "<token>" -- never a
+        # value and never a bare token (a bearer or basic-auth value split off
+        # a header option, a scheme-less user:pw@proxy). Mirrors
+        # Model.mpvRejectedName; the reply's warnings reach the journal.
+        warnings.append("dropped mpvArg %s" % (token.split("=", 1)[0] if token.startswith("--") else "<token>"))
     # PO-10: kept, not dropped - and said out loud. The service shows the
     # same line the guide already has; this one is for the CLI and the log.
     warnings.extend(mpv_arg_warnings(mpv_args))

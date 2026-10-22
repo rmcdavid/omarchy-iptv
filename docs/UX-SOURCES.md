@@ -1215,6 +1215,13 @@ The form's result line is the shipped banner's inner row (glyph +
 promoted to the guide banner. The guide banner stays reserved for the
 active source's refresh / EPG problems.
 
+The same line carries the form's ONE warning (R32a, 2026-10-21): the alert
+glyph in the normal fill (not the urgent one), with the model's sentence
+from `Model.formWarningLine(form)`, while a URL field holds a value whose
+host before the first `/` has no dot and an `@` follows later (5.4). It is
+advice, not an error: it never blocks submit, moves no focus, and the error
+line and the fetching line replace it.
+
 ### 4.4 Masked URL rendering
 
 ```
@@ -1393,6 +1400,22 @@ Key names at opacity 0.7, verbs at 0.45, as shipped.
 
 One error at a time, first failing field in form order; focus moves to it.
 No `https://` auto-prefix and no Xtream URL auto-parse (8).
+
+**Warning (R32a, 2026-10-21; not an error, never refuses).** When the
+Playlist, EPG or Server value validates but its host before the first `/`
+has no dot (and is not a bracketed literal) and an `@` follows later in the
+typed value -- most likely a password with an unencoded `/`, `?` or `#`,
+which the URL then reads as the host and port -- the result line shows,
+once, while the value warrants it:
+
+| Trigger | Line |
+|---|---|
+| dotless host, later `@` (`http://user:2024/ab@host.test/x`) | `The host before the first / has no dot and an @ follows it. If that is a password holding /, ? or #, write them as %2F, %3F and %23.` |
+
+A LAN name with an `@` in the path (`http://nas:8000/files/me@home/x`)
+draws it too; that is a sentence, not a refusal, and submit proceeds either
+way. The sentence is `Model.WARN_AT_AFTER_AUTHORITY`, computed by
+`Model.sourceUrlWarning(text)` and placed by `Model.formWarningLine(form)`.
 
 ### 5.5 Fetch results (asynchronous, same line)
 

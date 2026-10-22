@@ -293,11 +293,6 @@ var ZERO_WIDTH_RE = /[\u200b-\u200d\u2060\ufeff]/
 // is provider text. The class run is now one run and the colon is asked for
 // with indexOf (isIpv6Literal), which is the same set of strings.
 var IPV6_LITERAL_RE = /^\[([0-9A-Fa-f:.]*)(?:%25[A-Za-z0-9._~-]+)?\]$/
-// D-SINK-25: what passwordReadAsPort takes for the host the user meant. The
-// first class has no `.`, so the dot it asks for is one fixed position, and
-// no class holds `:`: linear (R30g).
-var LATER_HOST_RE = /^(?:[A-Za-z0-9-]*\.[A-Za-z0-9.-]*|\[[0-9A-Fa-f:.]*\])(?::[0-9]*)?$/
-
 function isIpv6Literal(text) {
   var m = IPV6_LITERAL_RE.exec(str(text))
   return m !== null && m[1].indexOf(":") !== -1
@@ -322,65 +317,55 @@ function cutQueryAndFragment(text) {
   return s
 }
 
-// D-SINK-25. The RFC reading of a URL ends the authority at the first `/`,
-// `?` or `#`, and a password may hold any of them unencoded. Then
-// `http://user:2024/ab@host.test/list.m3u` (password `2024/ab`) reads as host
-// `user`, port 2024 -- and both mirrors used to ACCEPT it, label it
-// `user:2024` and show `user` as its host: the username and the first
-// characters of the password, on the Sources row, in the guide's host line
-// and in the IPC status. Both standard parsers read the string that way, so
-// the reading is not wrong; it is ambiguous, and an ambiguous credential URL
-// is refused (validateSourceUrl, `invalid`, the existing sentence) rather
-// than guessed at.
+// D-SINK-25 / D-SINK-27, ruling R32a (2026-10-21). A URL's authority ends at
+// the first `/`, `?` or `#` after `//` and its userinfo at the LAST `@`
+// WITHIN that authority (D-SINK-1 kept); an `@` after the authority is path
+// or query, never a credential marker. So `http://user:2024/ab@host.test/x`
+// -- a password holding an unencoded `/` -- READS as host `user`, port 2024,
+// in both mirrors, and is accepted, resolved, normalized and labelled that
+// way, because that is what the string says and every standard parser
+// agrees. The round-2 rule that refused it (`passwordReadAsPort`, lane
+// bounds-s) is WITHDRAWN: it also refused an Xtream
+// `/playlist/<email>/<pass>/m3u_plus` link and a WebDAV link on a
+// non-default port, both stored and working, and the helper dropped them on
+// the next normalize after the upgrade (D-SINK-27). No URL is refused for an
+// `@` after its authority, in either mirror. What the form does instead is
+// WARN (sourceUrlWarning, below), once, and never refuse.
 //
-// THE SHAPE, and why it is this narrow. Refusing more would refuse ordinary
-// URLs -- an Xtream `get.php?username=me@mail.test` is one -- and the helper
-// DROPS a stored source whose URL stops validating, so a wider rule deletes
-// a user's working source on the upgrade. So this answers non-"" only when
-// all of these hold:
-//   1. the RFC authority ends early, at a `/`, `?` or `#`;
-//   2. its host part (after its own last at-sign, if any) is not a bracketed
-//      literal and holds a `:` -- something the RFC reading takes for a port,
-//      which is exactly "a password prefix read as a port";
-//   3. an at-sign follows in the rest of the URL BEFORE the first `=` or `&`
-//      (an at-sign inside a query parameter's value is a value, not a
-//      delimiter), and the LAST such at-sign is followed, up to the next
-//      `/`, `?`, `#` or the end, by something shaped like a host -- a name
-//      with a dot in it, or a bracketed literal -- with an optional port.
-// Then it returns that later host[:port], which is the one the user meant.
-// What it does NOT catch, recorded rather than guessed: a password whose
-// unencoded part holds `=` or `&` before its at-sign, and a later at-sign
-// followed by a single-label name. Those still read the RFC way.
-// What it refuses that is not a typo: a URL with an explicit port whose path
-// or query (before any `=` or `&`) holds an at-sign followed by a dotted
-// name, e.g. `http://h.test:8080/me@mail.test`. Percent-encode the at-sign.
-function passwordReadAsPort(body) {
-  var b = str(body)
-  var cut = b.search(/[\/?#]/)
+// Where the ambiguity is told: the Sources form warns when the RFC host has
+// no dot and an `@` follows later in the URL -- a bare-word "host" that is
+// most likely a username, followed by what is most likely the real host --
+// and says how to encode the three characters that end an authority (`/` as
+// %2F, `?` as %3F, `#` as %23). A bracketed literal and a dotted name are
+// hosts and draw no warning; `http://nas:8000/files/me@home/x` warns too,
+// which is the warning's cost: a sentence, not a refusal.
+var WARN_AT_AFTER_AUTHORITY = "The host before the first / has no dot and an @ follows it. If that is a password holding /, ? or #, write them as %2F, %3F and %23."
+
+function sourceUrlWarning(text) {
+  var v = validateSourceUrl(text)
+  if (!v.ok || v.kind !== "http") return ""
+  var host = str(v.host)
+  if (host === "" || host.charAt(0) === "[" || host.indexOf(".") !== -1) return ""
+  // The TYPED text, not the normalized URL: validateSourceUrl drops the
+  // fragment, and `http://user:2024#ab@host.test` is the `#` typo.
+  var typed = sanitizeInput(text, MAX_SOURCE_URL + 1)
+  var body = typed.substring(typed.indexOf("://") + 3)
+  var cut = body.search(/[\/?#]/)
   if (cut === -1) return ""
-  var authority = b.substring(0, cut)
-  var hostport = authority.substring(authority.lastIndexOf("@") + 1)
-  if (hostport.charAt(0) === "[" || hostport.indexOf(":") === -1) return ""
-  var rest = b.substring(cut)
-  var stop = rest.search(/[=&]/)
-  if (stop === -1) stop = rest.length
-  var at = rest.lastIndexOf("@", stop - 1)
-  if (at < 1) return ""
-  var end = at + 1
-  while (end < rest.length && "/?#".indexOf(rest.charAt(end)) === -1) end++
-  var later = rest.substring(at + 1, end)
-  return LATER_HOST_RE.test(later) ? later : ""
+  return body.indexOf("@", cut) === -1 ? "" : WARN_AT_AFTER_AUTHORITY
 }
 
-// The host of a `host[:port]` or `[literal][:port]`, lower-cased.
-function authorityHost(hostport) {
-  var hp = str(hostport)
-  if (hp.charAt(0) === "[") {
-    var close = hp.indexOf("]")
-    return (close === -1 ? hp : hp.substring(0, close + 1)).toLowerCase()
+// The form's warning line: the first URL field (playlist, EPG, Xtream server)
+// whose value draws sourceUrlWarning, or "". Advice beside the result line,
+// shown while the field holds such a value (UX-SOURCES 5.4); submit proceeds.
+function formWarningLine(form) {
+  if (!form || typeof form !== "object" || !form.values || typeof form.values !== "object") return ""
+  var fields = form.kind === "xtream" ? ["server"] : ["playlist", "epg"]
+  for (var i = 0; i < fields.length; i++) {
+    var w = sourceUrlWarning(form.values[fields[i]])
+    if (w !== "") return w
   }
-  var colon = hp.indexOf(":")
-  return (colon === -1 ? hp : hp.substring(0, colon)).toLowerCase()
+  return ""
 }
 
 // SR12: a "." or ":" before the first "/" reads as a host.
@@ -429,8 +414,6 @@ function validateSourceUrl(text, opts) {
   if (rest.indexOf("//") !== 0) return fail("invalid")
   if (/\s/.test(rest)) return fail("invalid")
   var body = rest.substring(2)
-  // D-SINK-25: a password prefix the RFC reading would take for a port.
-  if (passwordReadAsPort(body) !== "") return fail("invalid")
   var cut = body.search(/[\/?#]/)
   var authority = cut === -1 ? body : body.substring(0, cut)
   var tail = cut === -1 ? "" : body.substring(cut)
@@ -640,16 +623,15 @@ function sourceCacheDir(cacheDir, key) {
 // this function and validateSourceUrl do, and the helper's urllib does; the
 // shared redaction fixture holds the JavaScript and the Python to it.
 //
-// D-SINK-25: a stored URL whose password prefix the RFC reading takes for a
-// port (passwordReadAsPort) is shown by the host after its later at-sign.
-// validateSourceUrl refuses such a URL now, so only a record written before
-// that, or by hand, can reach here with one -- and the JavaScript reader keeps
-// a record's url as written, where the helper's drops it.
+// R32a (D-SINK-27): the RFC host, exactly as validateSourceUrl reads it --
+// the authority up to the first `/`, `?` or `#`, after its last `@`. The
+// round-2 reading that showed the host after a LATER at-sign is withdrawn:
+// it put an email username's domain on the Sources row of an Xtream
+// `/playlist/<email>/<pass>/m3u_plus` link. The form's warning
+// (sourceUrlWarning) is where the typo shape is told.
 function hostPortOf(url) {
   var m = str(url).match(/^[a-z][a-z0-9+.-]*:\/\/([^\/?#]*)/i)
   if (!m) return ""
-  var later = passwordReadAsPort(str(url).substring(str(url).indexOf("://") + 3))
-  if (later !== "") return later.toLowerCase()
   var authority = m[1]
   var at = authority.lastIndexOf("@")
   var hostport = at === -1 ? authority : authority.substring(at + 1)
@@ -1071,12 +1053,12 @@ export {
   trimEdgeSpace, codePoints, codePointLength, capCodePoints, sanitizeTyping,
   lowerFirst, sourceErrorMessage, sourceReason, PERSIST_FAILURE_REASONS,
   persistFailureMessage, refusalMessage, ZERO_WIDTH_RE, IPV6_LITERAL_RE,
-  LATER_HOST_RE, isIpv6Literal, cutQueryAndFragment, passwordReadAsPort,
-  authorityHost, looksLikeHost, validateSourceUrl, normalizeSourceUrl,
-  EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST, epgHintUrl,
-  resolveEpgUrl, EPG_HINT_NOTICE, epgOriginNotice, isUrlField, sourceKey,
-  isSourceKey, findSource, findSourceByUrl, allocateSourceKey, sourceCacheDir,
-  hostPortOf, deriveLabel, labelKey, labelTaken, uniqueLabel,
+  isIpv6Literal, cutQueryAndFragment, WARN_AT_AFTER_AUTHORITY,
+  sourceUrlWarning, formWarningLine, looksLikeHost, validateSourceUrl,
+  normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST,
+  epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE, epgOriginNotice, isUrlField,
+  sourceKey, isSourceKey, findSource, findSourceByUrl, allocateSourceKey,
+  sourceCacheDir, hostPortOf, deriveLabel, labelKey, labelTaken, uniqueLabel,
   defaultSourceLabel, validateLabel, maskQuery, maskUrl, encodeQueryValue,
   xtreamUrls, validateXtream, pluralGroups, countsLine, sameDay,
   formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,

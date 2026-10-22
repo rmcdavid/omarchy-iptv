@@ -38,6 +38,13 @@ function warnState(message) {
 // A record whose `url` carries a control character (NUL, CR, ...) is
 // dropped: it would reach the helper's argv and can never match a key
 // (D-SRC-09). A control character in `epgUrl` clears that field only.
+// D-SINK-23, second half, OPEN: this reader keeps a stored `url` AS WRITTEN,
+// where the helper's normalize_source validates it (validate_source_url) and
+// drops one that fails. Every display sink is safe for a pathless or
+// ambiguous URL since round 2, but the two readers still disagree about
+// which records exist. Not adopted in round 3 (the lead's answer to lane S's
+// question): dropping records in the shell's reader is a state-write change
+// in R27 territory, and it waits for its own round.
 function normalizeSourceRecord(raw) {
   if (!raw || typeof raw !== "object") return null
   var key = str(raw.key)

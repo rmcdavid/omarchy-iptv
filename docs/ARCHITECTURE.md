@@ -790,7 +790,13 @@ local used everywhere the argument was; `playlist` with neither is a
 service cannot switch on a usage exit. `--url` stays for a human running the
 helper by hand, in their own shell and their own argv. Redaction is
 unchanged: the helper prints neither the variable nor any URL beyond scheme
-and host.
+and host -- where, in FREE TEXT, "host" is the segment after the LAST `@`
+of the run (ruling R32a, 2026-10-21; `run_host` in the helper,
+`Model.redactUrls` in the model), never the RFC host, because the RFC host
+of a password holding an unencoded `/`, `?` or `#` is the username
+(D-SINK-28). A display sink and validation read the RFC host. Both rules,
+the accepted side of the free-text one and the shared fixture are in
+`ARCHITECTURE-SOURCES.md` 3.1.
 
 Why environ is the route. `/proc/<pid>/cmdline` is readable by every uid on
 an ordinary proc mount; that was the exposure. `/proc/<pid>/environ` is
@@ -3687,8 +3693,15 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
   `Model.trimEndSpace` / `Model.trimEdgeSpace` (index walks) -- never
   `trimEnd` or `trimStart`, which **Qt 6.11.2's V4 does not have** (node
   does; the node suite passed while every guide open would have thrown).
-  V4's `trim()` also takes U+0085, which `\s` does not; nothing the helper
-  writes carries a C1 control. `scripts/check-trim-shapes.py` (the gate's
+  V4's `trim()` also takes U+0085, which `\s` does not. What the helper
+  writes, measured on ordinary input rather than claimed (round 3; the
+  earlier sentence here, "nothing the helper writes carries a C1 control",
+  was false): an INTERIOR U+0085 in a name, group or tvg-id is kept verbatim
+  in channels.json (`clean_name` only strips), one at the EDGES is taken by
+  `str.strip()` (NEL is whitespace to Python), and the guide's fields fold
+  any NEL to a space (`clean_field`, `\s` in a str pattern) -- so the edges
+  `trim()` and the old pattern see are the same, and an interior NEL is
+  trimmed by neither. `scripts/check-trim-shapes.py` (the gate's
   "trim shape guard") refuses both known-bad shapes; it is a guard, not the
   proof. The bound, UNVERIFIED at size by the round's input rule and stated
   as arithmetic: the old whole-file trim of channels.json was about

@@ -193,8 +193,13 @@ class WhitespaceV4Test(unittest.TestCase):
         # Measured, and stated: V4's String.prototype.trim also takes U+0085
         # (NEL), which `\s` does not match; node's does not. Every disagreeing
         # input holds a NEL, and with the NELs taken out nothing disagrees.
-        # The helper strips C1 controls from what it writes, so no name or
-        # group it hands the shell carries one.
+        # What the helper does with a NEL, measured on ordinary input rather
+        # than claimed (the recheck's P3): clean_name and the group cut keep
+        # an INTERIOR U+0085 verbatim in channels.json (`Name\x85 One` is
+        # written as typed), str.strip() takes one at the EDGES (NEL is
+        # whitespace to Python), and clean_field folds any NEL to a space in
+        # the guide's fields. So the edges V4's trim() and the old pattern
+        # see are the same, and an interior NEL is trimmed by neither.
         self.assertNotEqual(self.result["bad"]["trim"], [])
         for shown in self.result["bad"]["trim"]:
             self.assertIn("\u0085", json.loads(shown))

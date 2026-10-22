@@ -949,6 +949,28 @@ TestCase {
     compare(Model.hostOf("/home/x/list.m3u"), "local file")
   }
 
+  // R32a / R32b (2026-10-21) in Qt's own engine: the free-text redactor's
+  // last-at-sign rule, the display sinks' RFC host, the form's warning and
+  // the journal line's placeholder. The node suite runs the shared fixtures;
+  // this pins that the same functions answer the same under V4.
+  function test_r32a_urlAuthority() {
+    var typo = "http://user:2024/ab@host.test/list.m3u"
+    compare(Model.redactUrls("Failed to open http://myuser:pa#ss@cdn.test/live/1.ts."), "Failed to open cdn.test")
+    compare(Model.redactUrls(typo), "host.test")
+    compare(Model.redactUrls("http://h.test?u=me@b.test&p=SECRET"), "b.test")
+    compare(Model.redactUrls("open http://[2001:db8::5 now"), "open [url] now")
+    compare(Model.sourceLabel(typo), "http://user")
+    compare(Model.validateSourceUrl(typo).host, "user")
+    compare(Model.validateSourceUrl("http://host.test:25461/playlist/me@mail.test/pw/m3u_plus").ok, true)
+    compare(Model.deriveLabel("http://host.test:25461/playlist/me@mail.test/pw/m3u_plus"), "host.test:25461")
+    compare(Model.sourceUrlWarning(typo), Model.WARN_AT_AFTER_AUTHORITY)
+    compare(Model.sourceUrlWarning("http://host.test:25461/playlist/me@mail.test/pw/m3u_plus"), "")
+    compare(Model.formWarningLine({ kind: "url", values: { label: "", playlist: typo, epg: "" } }), Model.WARN_AT_AFTER_AUTHORITY)
+    compare(Model.formWarningLine({ kind: "url", values: { label: "", playlist: "http://h.test/x", epg: "" } }), "")
+    compare(Model.mpvRejectedLine(Model.splitMpvArgs("--http-proxy user:pw@proxy.test:3128 --stream-lavf-o=tls_verify=0").rejected),
+            "omarchy-iptv: ignoring mpvArgs tokens: <token> --stream-lavf-o")
+  }
+
   function test_columnAnchor() {
     // D-LIVE-16: pinned entries show the column from the top; groups are contained.
     var entries = Model.scopeEntries(channels, userState)

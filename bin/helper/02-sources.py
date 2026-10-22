@@ -126,34 +126,12 @@ def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
     at = authority.rfind("@")
     userinfo = authority[:at] if at != -1 else ""
     hostport = authority[at + 1:] if at != -1 else authority
-    # D-SINK-25, the mirror of Model.passwordReadAsPort (model/sources.mjs,
-    # where the shape and its limits are written out): a password holding an
-    # unencoded "/", "?" or "#" ends the RFC authority early, and the RFC
-    # reading then takes the username for the host and the password's prefix
-    # for its port -- `http://user:2024/ab@host.test/list.m3u` was ACCEPTED as
-    # host "user", port 2024, and labelled "user:2024". Refused when the host
-    # part holds a ":", is not a bracketed literal, and the rest of the URL
-    # holds an "@" before its first "=" or "&" whose LAST occurrence is
-    # followed (up to the next "/", "?", "#" or the end) by a dotted name or a
-    # bracketed literal with an optional port. Narrow on purpose: a stored
-    # source whose URL stops validating is DROPPED by normalize_source, so a
-    # wider rule would delete working sources on the upgrade. Same cases as
-    # the model, in the shared source-urls fixture (dev branch).
-    if cut is not None and not hostport.startswith("[") and ":" in hostport:
-        later = tail
-        stop = len(later)
-        for index, char in enumerate(later):
-            if char in "=&":
-                stop = index
-                break
-        later_at = later.rfind("@", 0, stop)
-        if later_at >= 1:
-            end = later_at + 1
-            while end < len(later) and later[end] not in "/?#":
-                end += 1
-            if re.fullmatch(r"(?:[A-Za-z0-9-]*\.[A-Za-z0-9.-]*|\[[0-9A-Fa-f:.]*\])(?::[0-9]*)?",
-                            later[later_at + 1:end]):
-                return _validation(False, "invalid", "URL has an @ after its host: percent-encode the password (%40 for @, %2F for /)")
+    # R32a (D-SINK-27, 2026-10-21): the authority ends at the first "/", "?"
+    # or "#" and its userinfo at the LAST "@" within it; an "@" after the
+    # authority is path or query and refuses nothing. The round-2 refusal
+    # that stood here (the mirror of passwordReadAsPort) dropped a stored
+    # Xtream /playlist/<email>/<pass>/m3u_plus link on the first normalize
+    # after the upgrade, and is withdrawn. Mirrors Model.validateSourceUrl.
     port = ""
     if hostport.startswith("["):
         close = hostport.find("]")
