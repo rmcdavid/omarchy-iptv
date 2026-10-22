@@ -2,6 +2,9 @@
 import {
   cloneState
 } from "./state.mjs"
+import {
+  isSpaceAt
+} from "./privacy.mjs"
 
 // ------------------------------------------------------------ normalization
 
@@ -28,7 +31,10 @@ var FOLD_GROUPS = [
 ]
 
 var FOLD = (function() {
-  var map = {}
+  // D-SG-3: read with one provider character at a time; no one-character
+  // name lives on Object.prototype, so this was never reachable, and it is
+  // null-prototype anyway so the rule has no exceptions to remember.
+  var map = Object.create(null)
   for (var g = 0; g < FOLD_GROUPS.length; g++) {
     var chars = FOLD_GROUPS[g][0]
     for (var i = 0; i < chars.length; i++) map[chars.charAt(i)] = FOLD_GROUPS[g][1]
@@ -71,6 +77,55 @@ function asList(value) {
     return out
   }
   return []
+}
+
+// D-SG-3, ruling R30f. A map keyed by a string a provider or a user chose --
+// a group name, a channel name, a tvg-id, an id read from state.json, a
+// source label, an IPC argument -- is a NULL-PROTOTYPE object, or every read
+// of it goes through hasOwnKey. A plain `{}` keyed that way is not a map: in
+// the one engine the desktop shell runs for the host and every plugin,
+// `seen["__proto__"]` IS Object.prototype, so `seen[name].count++` put an
+// enumerable `count: NaN` on every object in the process (measured on Qt
+// 6.11.2's V4 and in node), and `seen["constructor"]` is the Object function,
+// so a group of that name was never listed. A read of an ordinary object
+// answers the same way: `index["toString"]` is a function, not "absent".
+//
+// keyedMap() is the object every such map is built as. Object.create(null)
+// has no prototype, so `__proto__` is an ordinary own key on it (the accessor
+// lives on Object.prototype, which it does not inherit), and nothing is
+// inherited for a read to find. JSON.stringify, Object.keys and for-in treat
+// it as any object; it has no METHODS, so nobody calls `.hasOwnProperty` on
+// one -- hasOwnKey below is the spelling for that, and it answers for an
+// ordinary object too, which is what the maps that arrive from JSON.parse
+// (epg-now.json's channels, failed.json, a QML property's `({})`) need.
+function keyedMap() {
+  return Object.create(null)
+}
+
+function hasOwnKey(map, key) {
+  return !!map && typeof map === "object" && Object.prototype.hasOwnProperty.call(map, key)
+}
+
+// map[key] when the key is the map's OWN, undefined otherwise.
+function ownKeyValue(map, key) {
+  return hasOwnKey(map, key) ? map[key] : undefined
+}
+
+// D-PERF-3 (R30g). `text.replace(/\s+$/, "")`, linear. That pattern retries
+// `\s+$` from every position of a trailing-or-interior whitespace run and backs
+// out of the rest of the run each time: quadratic in the run, and the helper
+// keeps interior runs in names, groups, tvg-ids and stream URLs. Not
+// String.prototype.trimEnd: Qt 6.11.2's V4, the engine the shell runs, HAS
+// NO trimEnd or trimStart (measured offscreen: typeof "".trimEnd is
+// "undefined"; node has both, and the node suite passed while every guide
+// open would have thrown -- rule 10's lesson, met again). `\s` exactly as the
+// pattern read it, through privacy.mjs's isSpaceAt, so the answer is the
+// same string in both engines.
+function trimEndSpace(text) {
+  var s = str(text)
+  var b = s.length
+  while (b > 0 && isSpaceAt(s, b - 1)) b--
+  return b === s.length ? s : s.substring(0, b)
 }
 
 // Combining marks U+0300..U+036F are stripped after NFD, but only behind a
@@ -189,7 +244,7 @@ function nameIdKey(name) {
 
 // `#2`, `#3`... on a repeated base so every row stays addressable.
 function suffixIds(bases) {
-  var seen = {}
+  var seen = keyedMap()
   var out = []
   for (var i = 0; i < bases.length; i++) {
     var count = (seen[bases[i]] || 0) + 1
@@ -242,7 +297,7 @@ function channelIds(channels, scheme) {
 // Scheme 1, and the base every scheme-2 id is built from.
 function legacyChannelIds(channels) {
   var list = asList(channels)
-  var tvgCounts = {}
+  var tvgCounts = keyedMap()
   var bases = []
   var i, tvg
   for (i = 0; i < list.length; i++) {
@@ -261,7 +316,7 @@ function legacyChannelIds(channels) {
 function substituteNameIds(channels, legacy) {
   var list = asList(channels)
   var nameKeys = []
-  var nameCounts = {}
+  var nameCounts = keyedMap()
   var i
   for (i = 0; i < list.length; i++) {
     var key = nameIdKey(list[i] && list[i].name)
@@ -287,7 +342,7 @@ function substituteNameIds(channels, legacy) {
 function channelIdRemap(channels) {
   var old = legacyChannelIds(channels)
   var fresh = substituteNameIds(channels, old)
-  var remap = {}
+  var remap = keyedMap()
   for (var i = 0; i < old.length; i++) if (old[i] !== fresh[i]) remap[old[i]] = fresh[i]
   return remap
 }
@@ -306,7 +361,10 @@ function remapStateIds(state, remap) {
   if (!remap) return { state: st, moved: 0 }
   var favorites = []
   for (i = 0; i < st.favorites.length; i++) {
-    target = remap[st.favorites[i]] !== undefined ? remap[st.favorites[i]] : st.favorites[i]
+    // D-SG-3: `remap` may be any object a caller hands in, and a favorite
+    // id is read from state.json, so an id spelled `constructor` must not
+    // find the Object function on a plain `{}`.
+    target = hasOwnKey(remap, st.favorites[i]) ? remap[st.favorites[i]] : st.favorites[i]
     if (target !== st.favorites[i]) moved++
     if (favorites.indexOf(target) === -1) favorites.push(target)
   }
@@ -317,11 +375,11 @@ function remapStateIds(state, remap) {
   // twice. This was the asymmetry review found -- favorites merged, recents
   // did not.
   var recents = []
-  var seenRecent = {}
+  var seenRecent = keyedMap()
   for (i = 0; i < st.recents.length; i++) {
     var entry = st.recents[i]
     if (!entry) continue
-    target = remap[str(entry.id)]
+    target = ownKeyValue(remap, str(entry.id))
     if (target === undefined) target = str(entry.id)
     else moved++
     if (seenRecent[target] === true) continue
@@ -332,7 +390,7 @@ function remapStateIds(state, remap) {
   var records = ["lastPlayed", "session"]
   for (i = 0; i < records.length; i++) {
     var played = st[records[i]]
-    target = played ? remap[str(played.id)] : undefined
+    target = played ? ownKeyValue(remap, str(played.id)) : undefined
     if (target === undefined) continue
     moved++
     st[records[i]] = { id: target, name: str(played.name), at: played.at }
@@ -359,7 +417,7 @@ function channelId(channel) {
 }
 
 function indexById(channels) {
-  var index = {}
+  var index = keyedMap()
   var list = asList(channels)
   for (var i = 0; i < list.length; i++) {
     var id = channelId(list[i])
@@ -376,9 +434,10 @@ function findByUrl(channels, url) {
   return null
 }
 export {
-  FOLD_GROUPS, FOLD, PUNCT_RE, ID_PUNCT_RE, str, asList, LATIN_COMBINING_RE,
-  decompose, normalizeText, normalizeIdText, foldText, searchKey, tokenize,
-  fnv1a32, CHANNEL_ID_SCHEME_LEGACY, CHANNEL_ID_SCHEME, GENERATED_NAME_WORD,
+  FOLD_GROUPS, FOLD, PUNCT_RE, ID_PUNCT_RE, str, asList, keyedMap, hasOwnKey,
+  ownKeyValue, trimEndSpace, LATIN_COMBINING_RE, decompose, normalizeText,
+  normalizeIdText, foldText, searchKey, tokenize, fnv1a32,
+  CHANNEL_ID_SCHEME_LEGACY, CHANNEL_ID_SCHEME, GENERATED_NAME_WORD,
   GENERATED_NAME_RE, nameIdKey, suffixIds, channelIds, legacyChannelIds,
   substituteNameIds, channelIdRemap, remapStateIds, remapChannelIds,
   channelId, indexById, findByUrl

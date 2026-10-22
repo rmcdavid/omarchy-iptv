@@ -3,7 +3,7 @@ import {
   ELLIPSIS, SEP
 } from "./build.mjs"
 import {
-  str, asList
+  str, asList, ownKeyValue, trimEndSpace
 } from "./text.mjs"
 import {
   cleanName
@@ -73,6 +73,23 @@ function epgNowStale(meta, nowSec) {
 // title straight to them; this makes the FIELD clean, they make the SINK
 // clean, and neither relies on the other. The cost is one indexOf per title
 // per row (sinkText's exit), measured at the 10,000 channel budget.
+// D-SG-3. One entry out of a plain tvg-id MAP, or null. epg-now.json's
+// `channels` is the parsed object itself, an ORDINARY object keyed by the
+// provider's tvg-ids, so `map[tvgId]` handed a channel whose tvg-id is
+// `constructor` the Object function and one whose tvg-id is `__proto__`
+// Object.prototype. Only an OWN key is an entry. This is the map reader;
+// the guide reads the STORE through epgEntry below (D-EPG-11), whose legacy
+// branch and epgCoverage's map branch both come here, so one function
+// decides what an own key is. (Named epgMapEntry at the merge of lane S4
+// into D-EPG-11: both named their reader epgEntry, and the store reader
+// answers null for a plain map by its own pinned rule, E2-3.)
+function epgMapEntry(epgMap, tvgId) {
+  var id = str(tvgId)
+  if (id === "") return null
+  var entry = ownKeyValue(epgMap, id)
+  return entry && typeof entry === "object" ? entry : null
+}
+
 function epgFields(entry, nowSec) {
   var out = { nowTitle: "", nowStart: 0, nowStop: 0, nextTitle: "", nextStart: 0, until: "", fraction: 0 }
   if (!entry || typeof entry !== "object") return out
@@ -155,9 +172,8 @@ function epgCoverage(channels, epgStore) {
       if (Object.prototype.hasOwnProperty.call(index, id)) out.matched++
       continue
     }
-    if (!Object.prototype.hasOwnProperty.call(map, id)) continue
-    var entry = map[id]
-    if (!entry || typeof entry !== "object") continue
+    var entry = epgMapEntry(map, id)
+    if (entry === null) continue
     if ((entry.now && str(entry.now.title) !== "") || (entry.next && str(entry.next.title) !== "")) out.matched++
   }
   out.carries = out.matched > 0
@@ -179,9 +195,8 @@ function epgEntry(epgStore, id) {
   var key = str(id)
   if (key === "") return null
   if (epgStore.map && typeof epgStore.map === "object") {
-    if (!Object.prototype.hasOwnProperty.call(epgStore.map, key)) return null
-    var held = epgStore.map[key]
-    return held && typeof held === "object" && !Array.isArray(held) ? held : null
+    var held = epgMapEntry(epgStore.map, key)
+    return held !== null && !Array.isArray(held) ? held : null
   }
   var index = epgStore.index
   if (!index || typeof index !== "object" || !Object.prototype.hasOwnProperty.call(index, key)) return null
@@ -272,7 +287,7 @@ function programmeFieldText(programme, keys) {
 function epgEpisodeText(value) {
   if (value === undefined || value === null) return ""
   if (typeof value === "number") return isFinite(value) ? String(Math.floor(value)) : ""
-  if (typeof value === "string") return value.replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "")
+  if (typeof value === "string") return value.replace(/\s+/g, " ").trim()
   if (typeof value === "object" && !Array.isArray(value)) {
     var season = Number(value.season)
     var episode = Number(value.episode)
@@ -342,12 +357,12 @@ function epgDetailText(value, cap) {
   // sinkText is the same guarded redaction, in one place, so this function
   // and the row sinks cannot drift about what the exit is (F-SINK-10).
   var s = sinkText(value)
-  s = s.replace(/\s+/g, " ").replace(/^\s+|\s+$/g, "")
+  s = s.replace(/\s+/g, " ").trim()
   var max = Math.max(1, Math.floor(Number(cap) || EPG_DETAIL_MAX))
   // The ellipsis counts toward the cap, so the result is never longer than
   // `max`: a caller sizing a panel from EPG_DETAIL_MAX would otherwise be
   // one character out, and one character out is how a line wraps.
-  if (s.length > max) s = s.substring(0, max - 1).replace(/\s+$/, "") + ELLIPSIS
+  if (s.length > max) s = trimEndSpace(s.substring(0, max - 1)) + ELLIPSIS
   return s
 }
 
@@ -506,8 +521,8 @@ function rowMeta(opts) {
 }
 export {
   pad2, formatClock, formatCount, pluralChannels, epgFraction, epgNowStale,
-  epgFields, isEpgStore, epgCoverage, epgEntry, formatEpgLine, joinParts,
-  EPG_DETAIL_FIELDS, programmeFieldText, epgEpisodeText, EPG_DETAIL_MAX,
-  epgDetailText, formatTimeRange, programmeDetail, failedNotice,
-  rowFailedMeta, rowMeta
+  epgMapEntry, epgFields, isEpgStore, epgCoverage, epgEntry, formatEpgLine,
+  joinParts, EPG_DETAIL_FIELDS, programmeFieldText, epgEpisodeText,
+  EPG_DETAIL_MAX, epgDetailText, formatTimeRange, programmeDetail,
+  failedNotice, rowFailedMeta, rowMeta
 }

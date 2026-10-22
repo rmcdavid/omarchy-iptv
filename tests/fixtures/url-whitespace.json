@@ -1,0 +1,243 @@
+{
+ "note": "R32a'' (2026-10-22, D-SINK-32, D-SINK-33). The ONE whitespace class that ends a free-text URL's RUN and its AUTHORITY in both redactors (Model.redactUrls / runHostParts through Model.isUrlSpaceAt, the helper's redact_urls / run_host_parts through _URL_SPACE and _URL_TAIL_RE, both built from URL_SPACE_CHARS), and the whitespace the two URL validators refuse. It is the union of JavaScript's \\s (as node and Qt's V4 read it), Python's \\s (str.isspace) and U+FEFF, enumerated code point by code point so that neither engine's own notion is ever consulted again: lane-bounds-s3's helper ended the run at Python \\s plus quotes and the authority at Python \\s plus U+FEFF, two classes, and a password holding U+FEFF printed the username. Both suites (tests/Model.test.js under 'R32a''', tests/test_helper.py under the same name) read this file and assert, for EVERY code point of the whole Unicode range, that the mirror's class holds exactly these; each also asserts its own engine's \\s is a subset, so a change in either engine is seen rather than absorbed. `'`, `\"`, `<` and `>` are NOT here on purpose: they ended the helper's run until R32a'' (D-SINK-33) and are trailing punctuation now (tests/fixtures/redaction-vectors.json).",
+ "codePoints": [
+  {
+   "code": "U+0009",
+   "name": "CHARACTER TABULATION",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+000A",
+   "name": "LINE FEED",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+000B",
+   "name": "LINE TABULATION",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+000C",
+   "name": "FORM FEED",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+000D",
+   "name": "CARRIAGE RETURN",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+001C",
+   "name": "INFORMATION SEPARATOR FOUR",
+   "in": [
+    "python"
+   ]
+  },
+  {
+   "code": "U+001D",
+   "name": "INFORMATION SEPARATOR THREE",
+   "in": [
+    "python"
+   ]
+  },
+  {
+   "code": "U+001E",
+   "name": "INFORMATION SEPARATOR TWO",
+   "in": [
+    "python"
+   ]
+  },
+  {
+   "code": "U+001F",
+   "name": "INFORMATION SEPARATOR ONE",
+   "in": [
+    "python"
+   ]
+  },
+  {
+   "code": "U+0020",
+   "name": "SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+0085",
+   "name": "NEXT LINE",
+   "in": [
+    "python"
+   ]
+  },
+  {
+   "code": "U+00A0",
+   "name": "NO-BREAK SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+1680",
+   "name": "OGHAM SPACE MARK",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2000",
+   "name": "EN QUAD",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2001",
+   "name": "EM QUAD",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2002",
+   "name": "EN SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2003",
+   "name": "EM SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2004",
+   "name": "THREE-PER-EM SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2005",
+   "name": "FOUR-PER-EM SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2006",
+   "name": "SIX-PER-EM SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2007",
+   "name": "FIGURE SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2008",
+   "name": "PUNCTUATION SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2009",
+   "name": "THIN SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+200A",
+   "name": "HAIR SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2028",
+   "name": "LINE SEPARATOR",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+2029",
+   "name": "PARAGRAPH SEPARATOR",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+202F",
+   "name": "NARROW NO-BREAK SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+205F",
+   "name": "MEDIUM MATHEMATICAL SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+3000",
+   "name": "IDEOGRAPHIC SPACE",
+   "in": [
+    "js",
+    "python"
+   ]
+  },
+  {
+   "code": "U+FEFF",
+   "name": "ZERO WIDTH NO-BREAK SPACE (the byte-order mark)",
+   "in": [
+    "js",
+    "extra"
+   ]
+  }
+ ],
+ "jsCount": 25,
+ "pythonCount": 29,
+ "unionCount": 30
+}

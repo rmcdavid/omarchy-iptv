@@ -7,6 +7,7 @@ import gzip
 import http.server
 import json
 import os
+import re
 import pathlib
 import socket
 import subprocess
@@ -456,6 +457,76 @@ class SharedRedactionVectors(unittest.TestCase):
                 if frag in out:
                     bad.append("%s -> leaked %r: %s" % (v["why"], frag, out))
         self.assertEqual([], bad)
+
+    def test_r32a2_every_vector_with_an_exact_py_output_gets_it(self):
+        """R32a'' (2026-10-22): a vector carrying `py` pins the EXACT helper
+        output -- the restored sentence punctuation (`'`, `"`, `<`, `>`
+        included, D-SINK-33) and the accepted costs (D-SINK-34: a class
+        member inside a password ends the run; D-SINK-35) that are seen
+        rather than described. The node suite reads `js` the same way."""
+        exact = [v for v in self.vectors() if "py" in v]
+        self.assertGreaterEqual(len(exact), 20)
+        bad = ["%s -> %r" % (v["why"], helper.redact_urls(v["text"])) for v in exact
+               if helper.redact_urls(v["text"]) != v["py"]]
+        self.assertEqual([], bad)
+        for ch in ["\ufeff", "\x85", "\x1c", "\x1d", "\x1e", "\x1f", "\u2028", "\xa0", "\t", " "]:
+            self.assertTrue(any(v.get("accepted") == "D-SINK-34" and "pa" + ch + "ss@" in v["text"] for v in exact), repr(ch))
+        for ch in ["'", '"', "<", ">"]:
+            self.assertTrue(any("pa" + ch + "ss@" in v["text"] and v["host"] == "prov.test" for v in exact), ch)
+        self.assertTrue(any(v.get("accepted") == "D-SINK-35" and v["host"] == "user.name" for v in self.vectors()))
+
+    def test_r32a2_one_whitespace_class_shared_with_the_model(self):
+        """R32a'' (D-SINK-32, D-SINK-33): the run (_URL_TAIL_RE) and the
+        authority (_URL_SPACE) of a free-text URL end at URL_SPACE_CHARS,
+        the union of JS \\s, Python \\s and U+FEFF enumerated in
+        tests/fixtures/url-whitespace.json; the node suite holds
+        Model.isUrlSpaceAt to the same file. Every code point of the whole
+        range is asked, so the class is exactly the list. Lane-bounds-s3's
+        helper had TWO classes (Python \\s plus quotes for the run, Python
+        \\s plus U+FEFF for the authority) and a password holding U+FEFF
+        printed the username."""
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "fixtures", "url-whitespace.json"), encoding="utf-8") as fh:
+            doc = json.load(fh)
+        want = {int(e["code"][2:], 16) for e in doc["codePoints"]}
+        self.assertEqual(len(want), doc["unionCount"])
+        self.assertEqual(sorted(ord(c) for c in helper.URL_SPACE_CHARS), sorted(want))
+        wrong = [hex(c) for c in range(0x110000)
+                 if (helper._URL_SPACE.match(chr(c)) is not None) != (c in want)]
+        self.assertEqual([], wrong[:8])
+        # The run's class is the exact complement.
+        tail_wrong = [hex(c) for c in range(0x110000)
+                      if (helper._URL_TAIL_RE.match(chr(c)) is not None) == (c in want)]
+        self.assertEqual([], tail_wrong[:8])
+        py_space = {c for c in range(0x110000) if re.match(r"\s", chr(c))}
+        self.assertTrue(py_space < want)
+        self.assertEqual(sorted(want - py_space), [0xFEFF])
+        # Quotes and angle brackets are trailing punctuation, not run ends.
+        self.assertEqual(helper._TRAILING_PUNCTUATION, ".,;:!?)]'\"<>")
+        for ch in "'\"<>":
+            self.assertNotIn(ch, helper.URL_SPACE_CHARS)
+            self.assertEqual(helper.redact_urls("x http://u:pa%sss@h.test/x y" % ch), "x http://h.test y", ch)
+        for ch in "'\"<>.":
+            self.assertEqual(helper.redact_urls("%shttp://u:p@h.test/x%s" % (ch, ch)), "%shttp://h.test%s" % (ch, ch), ch)
+
+    def test_r32a2_the_second_arm_of_the_predicate(self):
+        """R32a'' (D-SINK-35 narrowed): a NON-NUMERIC port -- a `:` after the
+        authority's last `@` whose text, up to `;`, `=` or `&`, is non-empty
+        and not all digits -- followed by a later `@` withholds, dotted host
+        or not; a numeric or empty port, a bracketed literal and a value
+        with no later `@` do not. The residual, stated: a dotted username
+        before a digits-only password prefix prints as the host."""
+        for url in ["http://user.name:pa/ss@h.test/x", "http://me@mail.test:pa/ss@h.test/x", "http://h.test:pa/me@x.test/y",
+                    "http://h.test:8080x/me@x.test/y", "http://h.test:p?me@x", "http://me@mail.test:pa&x=1/ss@h.test/x",
+                    "http://:pa/me@x", "http://h.test:pa;x=1/me@x"]:
+            self.assertTrue(helper.host_withheld(url), url)
+            self.assertEqual(helper.redact_urls(url), "http://" + helper.HOST_WITHHELD, url)
+        for url in ["http://user.name:2024/ab@host/x", "http://h.test:/me@x.test/y", "http://[::1]:pa/me@x", "http://h.test:pa/ss",
+                    "http://h.test:;=&/a@b", "http://me@mail.test:pa/ss y@z", "http://user.name:2024&p=x/a@b"]:
+            self.assertFalse(helper.host_withheld(url), url)
+        self.assertEqual(helper.redact_urls("http://user.name:2024/ab@host/x"), "http://user.name")
+        self.assertEqual(helper.fallback_channel_name("http://user.name:pa/ss@h.test/x", "channel"), "Stream")
+        self.assertEqual(helper.validate_source_url("http://h.test:pa/me@x.test/y")["code"], "invalid")
 
     def test_the_shared_fixture_still_carries_the_case_that_started_it(self):
         texts = [v["text"] for v in self.vectors()]

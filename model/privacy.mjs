@@ -20,6 +20,9 @@ import {
 import {
   formatCount, pluralChannels
 } from "./epg.mjs"
+import {
+  HOST_WITHHELD, runHostParts
+} from "./sources.mjs"
 
 // ---- D-SINK-18: the container the host settings file is, before a URL goes
 // into it.
@@ -288,8 +291,20 @@ function notifyArgv(event, params) {
 
 // "scheme://host" for http(s) URLs, "local file" for paths, "" otherwise.
 // Never returns path, query or userinfo (credentials live there).
+//
+// D-SINK-23. The userinfo is searched for INSIDE THE AUTHORITY, which ends at
+// the first `/`, `?` or `#` (RFC 3986), and not at the first `/` alone. On a
+// URL with no path the old `(?:[^\/\s]*@)?` crossed into the query, took an
+// at-sign THERE as the end of the userinfo, and printed what followed it as
+// the host: `http://h.test?u=me@b.test&p=SECRET` gave `b.test&p=SECRET`,
+// while the helper's url_host (urllib) gave `h.test`. A bracketed IPv6 host
+// is kept whole (it used to stop at its first `:` and read as `[`).
+// R32a (D-SINK-27): this is a DISPLAY sink and shows the RFC host, the one
+// validateSourceUrl and the helper's urllib read; the round-2 reading that
+// showed the host after a later at-sign is withdrawn. The free-text
+// redactor below reads differently, on purpose, and says why.
 function sourceLabel(url) {
-  var text = str(url).replace(/^\s+|\s+$/g, "")
+  var text = str(url).trim()
   if (text === "") return ""
   if (/^file:/i.test(text)) return "local file"
   // D-SINK-1's authority rule, which this spelling did not get when
@@ -300,7 +315,7 @@ function sourceLabel(url) {
   // is the defect redactUrls was fixed for. Both halves are needed: either
   // alone still leaks. M4-01 made this reachable from a remote party, because
   // resolveEpgUrl publishes `hostOf` over a `url-tvg` the PLAYLIST declared.
-  var m = text.match(/^([a-z][a-z0-9+.-]*):\/\/(?:[^\/\s]*@)?([^\/\s?#:@]+)(?::\d+)?/i)
+  var m = text.match(/^([a-z][a-z0-9+.-]*):\/\/(?:[^\/?#\s]*@)?(\[[^\/?#\s\]]*\]|[^\/\s?#:@\[]+)(?::\d+)?/i)
   if (m) {
     var scheme = m[1].toLowerCase()
     if (scheme === "file") return "local file"
@@ -356,12 +371,12 @@ function hostOf(url) {
 // run always ended EXACTLY at that `://`: there was never a shorter candidate
 // to backtrack to. So "walk back from each `://` over the scheme-legal run,
 // then forward to the first letter in it" picks the same leftmost start the
-// engine picked, and the authority rules below (userinfo to the LAST `@`
-// before the first `/`, host excluding `@`) are the old groups transcribed
-// character class by character class. The node suite (dev branch) drives the
-// OLD pattern as an oracle over the shared fixture and thousands of generated
-// strings and asserts the two agree character for character, so the claim is
-// checked rather than argued.
+// engine picked, and the host rule below was the old groups transcribed
+// character class by character class -- until R32a moved what the rule SAYS
+// (the paragraph on the scan itself, below). The node suite (dev branch)
+// drives a pattern that states the R32a rule as an oracle over the shared
+// fixture and thousands of generated strings and asserts the two agree
+// character for character, so the claim is checked rather than argued.
 //
 // This makes the caps that currently stand in front of every sink CHEAP, not
 // unnecessary. The caps are still the reason a 64 MiB description cannot
@@ -377,6 +392,64 @@ function isSpaceAt(s, i) {
   if (c === 32 || (c >= 9 && c <= 13)) return true
   if (c < 128) return false
   return SPACE_RE.test(s.charAt(i))
+}
+
+// R32a'' (2026-10-22, D-SINK-32, D-SINK-33). The ONE whitespace class that
+// ends a free-text URL's RUN (redactUrls) and its AUTHORITY (runHostParts),
+// and the whitespace validateSourceUrl refuses -- shared with the helper's
+// URL_SPACE_CHARS and pinned code point by code point by
+// the shared url-whitespace fixture (dev branch) in both suites. It is NOT `\s`, on
+// purpose: lane-bounds-s3's helper ended the run at Python's `\s` plus
+// `'"<>` and the authority at Python's `\s` plus U+FEFF, two classes, so a
+// password holding U+FEFF printed the username; and the JS run ended at
+// JS `\s`, a third class. This is the union of JS `\s`, Python `\s` and
+// U+FEFF, every member listed:
+//   U+0009 tab, U+000A LF, U+000B VT, U+000C FF, U+000D CR,
+//   U+001C U+001D U+001E U+001F (the information separators: Python's `\s`,
+//     not JS's),
+//   U+0020 space, U+0085 NEL (Python's, not JS's), U+00A0 NBSP,
+//   U+1680 ogham space, U+2000..U+200A (en quad .. hair space),
+//   U+2028 line separator, U+2029 paragraph separator,
+//   U+202F narrow NBSP, U+205F medium mathematical space,
+//   U+3000 ideographic space, U+FEFF (JS's `\s`, not Python's).
+// `'`, `"`, `<` and `>` are NOT whitespace: they ended the helper's run
+// until R32a'' (D-SINK-33, a password holding `'` printed the username and
+// the tail) and are trailing punctuation now, stripped off the run's end
+// and put back (redactUrls). isSpaceAt above stays JS `\s` for trimEndSpace.
+var URL_SPACE_CODES = [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x85, 0xa0,
+  0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009,
+  0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff]
+
+function isUrlSpaceAt(s, i) {
+  var c = s.charCodeAt(i)
+  if (c === 0x20 || (c >= 0x09 && c <= 0x0d) || (c >= 0x1c && c <= 0x1f)) return true
+  if (c < 0x85) return false
+  return c === 0x85 || c === 0xa0 || c === 0x1680 || (c >= 0x2000 && c <= 0x200a)
+    || c === 0x2028 || c === 0x2029 || c === 0x202f || c === 0x205f || c === 0x3000 || c === 0xfeff
+}
+
+// The index of the first URL whitespace in `s`, or -1 (runHostParts,
+// validateSourceUrl): one index walk, nothing retried.
+function urlSpaceIndex(s) {
+  for (var i = 0; i < s.length; i++) if (isUrlSpaceAt(s, i)) return i
+  return -1
+}
+
+// R32a''. The sentence punctuation a free-text redactor strips off the end
+// of a URL run and puts back after the host, both mirrors alike (the
+// helper's redact_urls has the same set): the helper always restored
+// `.,;:!?)]`, the model never did, and `'"<>` ended the helper's run
+// (D-SINK-33). A `]` is kept when the run holds a `[`: it closes an IPv6
+// literal. Returns the number of characters to put back.
+function trailingPunctuationLength(run) {
+  var bracket = run.indexOf("[") !== -1
+  var k = run.length
+  while (k > 0) {
+    var ch = run.charAt(k - 1)
+    if (".,;:!?)]'\"<>".indexOf(ch) === -1 || (bracket && ch === "]")) break
+    k--
+  }
+  return run.length - k
 }
 
 // `[a-z0-9+.-]` under the `i` flag.
@@ -416,31 +489,57 @@ function redactUrls(text) {
       j = s.indexOf("://", j + 1)
       continue
     }
-    var end = j + 3                    // the old `[^\s]*` tail
-    while (end < n && !isSpaceAt(s, end)) end++
-    var slash = j + 3                  // `[^\/\s]*` stops at the first `/`
-    while (slash < end && s.charCodeAt(slash) !== 47) slash++
-    // D-SINK-1: userinfo runs to the LAST `@` of the authority (RFC 3986),
-    // which is what the old `(?:[^\/\s]*@)?` resolved to by backtracking.
-    var h0 = j + 3
-    for (var k = j + 3; k < slash; k++) if (s.charCodeAt(k) === 64) h0 = k + 1
-    // `([^\/\s?#:@]*)`. The `@` in that class was half of D-SINK-1 and it is
-    // REDUNDANT here, deliberately: `h0` is already past the last `@` before
-    // the first `/` and the scan stops at that `/`, so nothing in range can be
-    // one. It stayed because the class is the old group transcribed and
-    // because a redactor is the wrong place to shave a branch -- but it cannot
-    // be observed, so no test can go red for it (rule 14) and the line above
-    // is what actually carries the rule. A mutation that breaks `h0` is caught;
-    // a mutation that drops `c === 64` is not, and that is a fact about this
-    // code rather than a gap in the suite.
-    var h1 = h0
-    while (h1 < end) {
-      var c = s.charCodeAt(h1)
-      if (c === 47 || c === 63 || c === 35 || c === 58 || c === 64) break
-      h1++
-    }
-    var host = s.substring(h0, h1)
-    out += s.substring(copied, p) + (host !== "" ? host : "[url]")
+    // The run: to the first URL whitespace (R32a'', the shared class; it
+    // was the old `[^\s]*` tail, JS `\s`, until 2026-10-22), then the
+    // sentence punctuation stripped off its end and put back after the
+    // host, so `... http://h.test/x.` prints `h.test.` as the helper does.
+    var end = j + 3
+    while (end < n && !isUrlSpaceAt(s, end)) end++
+    var put = trailingPunctuationLength(s.substring(j + 3, end))
+    var runEnd = end - put
+    // R32a' (D-SINK-29, 2026-10-22; D-SINK-23, D-SINK-28). This is a
+    // FREE-TEXT redactor, not a parser: the string is an mpv error, a helper
+    // line, a notification body, and the one job here is that NOTHING of a
+    // credential survives, with the host as a courtesy. The host is the RFC
+    // one -- the authority ends at the first `/`, `?`, `#` or whitespace, its
+    // userinfo at the LAST `@` WITHIN it (D-SINK-1), and the printed host is
+    // cut at the first `:`, `;`, `=` or `&` so a neighbouring parameter never
+    // prints (D-SINK-23: `http://h.test?u=me@b.test&p=SECRET` -> `h.test`) --
+    // and it is WITHHELD, as the one token `[host withheld]`, when that host
+    // has no dot and an `@` follows the authority: a dotless "host" with a
+    // later `@` is most likely a username in front of a password holding an
+    // unencoded `/`, `?` or `#`, and printing it printed the username
+    // (`http://myuser:pa#ss@cdn.test/x` -> `myuser`, D-SINK-28). Two
+    // readings were tried and withdrawn, and both are kept here as the
+    // reason this one is not "tidied" back:
+    //   - the authority ended at the first `/` alone (the pattern F-SINK-11
+    //     transcribed, 0.14.3): on a URL with no path the at-sign search ran
+    //     on into the query and printed `b.test&p=SECRET`, the password with
+    //     it (D-SINK-23).
+    //   - the userinfo run to the LAST `@` of the whole run, crossing `/`
+    //     (round 3, lane-bounds-s2, never shipped): an `@` INSIDE a path or
+    //     query credential moved the printed "host" onto the credential, so
+    //     `http://prov.test/live/U5ER/P4@SSW0RD/1.ts` printed `SSW0RD` -- a
+    //     password tail, on mpv's error line into the journal and the
+    //     notification (D-SINK-29). The RFC authority never crosses a `/`.
+    // The cost, stated (ARCHITECTURE-SOURCES 3.1): a dotless intranet URL
+    // with a path `@` (`http://nas:8000/files/me@home/x`) withholds `nas`;
+    // `localhost` gets no exemption. The predicate is Model.urlHostWithheld,
+    // the same one the Sources form warns with, and the helper's
+    // redact_urls (run_host) is the same rule; the shared fixture holds both
+    // to it. runHostParts is one pass over the run.
+    // R32a'' (2026-10-22, D-SINK-32, D-SINK-33): the run and the authority
+    // end at ONE enumerated whitespace class (isUrlSpaceAt) in both
+    // mirrors; `'"<>` never end a run (a password may hold them) and are
+    // trailing punctuation instead; and the predicate has a second arm, a
+    // NON-NUMERIC port followed by a later `@` (`http://user.name:pa/ss@h.test/x`
+    // is a dotted username and a password, withheld; D-SINK-35). The cost
+    // this adds, accepted as D-SINK-34: a whitespace character INSIDE a
+    // password splits the run, so `http://myuser:pa ss@cdn.test/x` prints
+    // `myuser ss@cdn.test/x` -- the fixture pins that output, per character.
+    var parts = runHostParts(s.substring(j + 3, runEnd))
+    var host = parts.withheld ? HOST_WITHHELD : parts.host
+    out += s.substring(copied, p) + (host !== "" ? host : "[url]") + s.substring(runEnd, end)
     copied = end
     resume = end
     j = s.indexOf("://", resume)
@@ -488,5 +587,6 @@ export {
   configShieldDecision, entryShieldDecision, seqArg, mpvArgArgv,
   playerSessionArgv, playerStartArgv, playerStopArgv, playerRestartArgv,
   playerPauseArgv, notifyArgv, sourceLabel, hostOf, SPACE_RE, isSpaceAt,
+  URL_SPACE_CODES, isUrlSpaceAt, urlSpaceIndex, trailingPunctuationLength,
   isSchemeRestCode, isLetterCode, redactUrls, scrubUrls, sinkText
 }

@@ -179,6 +179,22 @@
       "remap": { "u:54f81d29": "n:5d8b6dab" },
       "survivesScheme1": 0,
       "survivesScheme2": 1
+    },
+    {
+      "name": "D-SG-3: a tvg-id spelled like a member of Object.prototype is a unique tvg-id like any other",
+      "comment": ["The model counted tvg-ids in a plain object, so `__proto__` and", "`constructor` read as already seen and these rows took URL ids in the", "shell where the helper gives them `t:` ids: the shell's remap moved", "five favourites the helper never would. Null-prototype since D-SG-3."],
+      "channels": [
+        { "name": "Chan A", "tvgId": "__proto__", "url": "http://line.example.test/u5er/p4ssw0rd/201" },
+        { "name": "Chan B", "tvgId": "constructor", "url": "http://line.example.test/u5er/p4ssw0rd/202" },
+        { "name": "Chan C", "tvgId": "hasOwnProperty", "url": "http://line.example.test/u5er/p4ssw0rd/203" },
+        { "name": "Chan D", "tvgId": "toString", "url": "http://line.example.test/u5er/p4ssw0rd/204" },
+        { "name": "Chan E", "tvgId": "valueOf", "url": "http://line.example.test/u5er/p4ssw0rd/205" }
+      ],
+      "scheme1": ["t:__proto__", "t:constructor", "t:hasOwnProperty", "t:toString", "t:valueOf"],
+      "scheme2": ["t:__proto__", "t:constructor", "t:hasOwnProperty", "t:toString", "t:valueOf"],
+      "remap": {},
+      "survivesScheme1": 5,
+      "survivesScheme2": 5
     }
   ],
   "states": [

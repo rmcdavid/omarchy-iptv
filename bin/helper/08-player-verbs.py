@@ -4,18 +4,30 @@
 from __future__ import annotations
 # ------------------------------------------------------------- the channel
 
+def fallback_channel_name(url: str, default: str) -> str:
+    """The name of a channel that has none: its host, which is the title mpv
+    shows and the name a notification quotes. D-SINK-31 (R32a', 2026-10-22):
+    when the URL's RFC host has no dot and an `@` follows it -- the typo
+    shape, where that host is most likely a username -- the name is the word
+    `Stream`, through the one predicate the free-text redactors withhold
+    with (host_withheld); a dotted host (every Xtream link) still names it."""
+    if host_withheld(url):
+        return "Stream"
+    return url_host(url) or default
+
+
 def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, Any]:
     """Resolve the channel the helper will play. The URL is read from the
     0600 cache by the helper itself and never crosses a process boundary."""
     if channel_id:
         channel = find_channel(load_channels(cache_dir(directory)), channel_id)
         url = str(channel.get("url") or "")
-        name = str(channel.get("name") or "") or url_host(url) or "channel"
+        name = str(channel.get("name") or "") or fallback_channel_name(url, "channel")
         headers = channel.get("headers") if isinstance(channel.get("headers"), dict) else {}
         group = str(channel.get("group") or "")
     else:
         url = (raw_url or "").strip()
-        name = url_host(url) or "stream"
+        name = fallback_channel_name(url, "stream")
         headers = {}
         group = ""
     if not is_stream_url(url):
@@ -469,7 +481,14 @@ def player_start(args: argparse.Namespace, verb: str = "start") -> int:
     warnings: list[str] = []
     mpv_args, rejected = filter_mpv_args(list(args.mpv_arg or []))
     for token in rejected:
-        warnings.append("dropped mpvArg %s" % token.split("=", 1)[0])
+        # D-SINK-24 (R32b', 2026-10-22): the option NAME only -- the text
+        # before "=" -- and only when the token is option-shaped (MPV_ARG_RE,
+        # `^--[a-z0-9][a-z0-9-]*(=.*)?$`), so a token refused BECAUSE its name
+        # is not (`--u:pw@h=1`) prints the fixed word "<token>", as does a
+        # value (a bearer or basic-auth value split off a header option, a
+        # scheme-less user:pw@proxy). Never a value, never a bare token.
+        # Mirrors Model.mpvRejectedName; the reply's warnings reach the journal.
+        warnings.append("dropped mpvArg %s" % (token.split("=", 1)[0] if MPV_ARG_RE.match(token) else "<token>"))
     # PO-10: kept, not dropped - and said out loud. The service shows the
     # same line the guide already has; this one is for the CLI and the log.
     warnings.extend(mpv_arg_warnings(mpv_args))

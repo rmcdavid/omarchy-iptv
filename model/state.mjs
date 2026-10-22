@@ -3,7 +3,8 @@ import {
   STATE_VERSION, SCOPE_RECENT, SCOPE_FAVORITES, MAX_HIDDEN_GROUPS, SEP
 } from "./build.mjs"
 import {
-  str, asList, normalizeText, searchKey, tokenize, channelId
+  str, asList, keyedMap, hasOwnKey, normalizeText, searchKey, tokenize,
+  channelId
 } from "./text.mjs"
 import {
   primaryGroup
@@ -85,7 +86,7 @@ function savedSearchCount(channels, query) {
   // one more row than Favourites actually gains. Found by putting a real
   // duplicate in the fixture.
   var list = asList(channels)
-  var seen = {}
+  var seen = keyedMap()
   var n = 0
   for (var i = 0; i < list.length; i++) {
     if (!savedSearchHit(list[i], tokens)) continue
@@ -113,7 +114,7 @@ function savedSearchChannels(channels, saved) {
   }
   if (terms.length === 0) return []
   var out = []
-  var seen = {}
+  var seen = keyedMap()
   for (var i = 0; i < list.length; i++) {
     var channel = list[i]
     if (!channel) continue
@@ -291,7 +292,7 @@ function savedSearchFooter(state, channels) {
   // them -- which is exactly the shape countFavorites has.
   var rows = 0
   var favRows = channelsForScope(channels, SCOPE_FAVORITES, st)
-  var starred = {}
+  var starred = keyedMap()
   for (var f = 0; f < st.favorites.length; f++) starred[str(st.favorites[f])] = true
   for (var r = 0; r < favRows.length; r++) if (starred[channelId(favRows[r])] !== true) rows++
   return formatCount(saved.length) + (saved.length === 1 ? " saved search" : " saved searches") +
@@ -430,7 +431,8 @@ function cloneState(state, patch) {
   // that has not migrated clones to exactly the shape it had before.
   if (st.entryMigrated === true) out.entryMigrated = true
   var p = patch || {}
-  for (var key in p) if (key !== "version") out[key] = p[key]
+  // D-SG-3: own keys only, so nothing inherited is ever written to state.json.
+  for (var key in p) if (key !== "version" && key !== "__proto__" && hasOwnKey(p, key)) out[key] = p[key]
   return out
 }
 
@@ -447,8 +449,11 @@ function parseState(text) {
   if (!parsed) return state
   state.cacheLayout = Number(parsed.cacheLayout) === CACHE_LAYOUT ? CACHE_LAYOUT : 0
   var srcs = asList(parsed.sources)
-  var seenUrl = {}
-  var seenKey = {}
+  // D-SG-3: a hand-edited or foreign state.json chooses these strings (the
+  // JS reader keeps a record's url as written), and a url spelled
+  // `constructor` read as already seen on a plain `{}`.
+  var seenUrl = keyedMap()
+  var seenKey = keyedMap()
   for (var s = 0; s < srcs.length && state.sources.length < MAX_SOURCES; s++) {
     var rec = normalizeSourceRecord(srcs[s])
     if (!rec) {
@@ -512,7 +517,9 @@ function parseState(text) {
   // on the folded terms, not on the raw string, so `BBC ` and `bbc` are one
   // saved search and not two.
   var saves = asList(parsed.savedSearches)
-  var seenTerms = {}
+  // D-SG-3: a saved search whose folded terms are `constructor` was dropped
+  // on every load as a duplicate of the Object function.
+  var seenTerms = keyedMap()
   for (var v = 0; v < saves.length && state.savedSearches.length < MAX_SAVED_SEARCHES; v++) {
     var rec2 = savedSearchRecord(saves[v])
     if (!rec2) continue
@@ -786,10 +793,10 @@ function withFavorites(state, favorites) {
 function hiddenGroupList(raw) {
   var list = asList(raw)
   var out = []
-  var seen = {}
+  var seen = keyedMap()
   for (var i = 0; i < list.length && out.length < MAX_HIDDEN_GROUPS; i++) {
     if (typeof list[i] !== "string") continue
-    var name = list[i].replace(/^\s+|\s+$/g, "")
+    var name = list[i].trim()
     if (name === "" || seen[name] === true) continue
     seen[name] = true
     out.push(name)
@@ -800,7 +807,10 @@ function hiddenGroupList(raw) {
 function hiddenGroupSet(state) {
   var st = state || emptyState()
   var list = asList(st.hiddenGroups)
-  var out = {}
+  // D-SG-3: a group the provider named `__proto__` could not be hidden --
+  // `out["__proto__"] = true` hits Object.prototype's setter and stores
+  // nothing -- so it is null-prototype, like every map keyed by a group.
+  var out = keyedMap()
   for (var i = 0; i < list.length; i++) if (typeof list[i] === "string" && list[i] !== "") out[list[i]] = true
   return out
 }
@@ -815,7 +825,7 @@ function isGroupHidden(state, name) {
 // "nothing changed" from "changed" without a second call.
 function toggleHiddenGroup(state, name) {
   var st = state || emptyState()
-  var key = str(name).replace(/^\s+|\s+$/g, "")
+  var key = str(name).trim()
   if (key === "") return st
   var list = hiddenGroupList(st.hiddenGroups)
   var at = list.indexOf(key)
@@ -927,7 +937,7 @@ function parseFailed(text) {
 function normalizeFailed(list) {
   var rows = asList(list)
   var out = []
-  var seen = {}
+  var seen = keyedMap()
   for (var i = 0; i < rows.length; i++) {
     var r = rows[i]
     if (!r || typeof r !== "object") continue
@@ -965,7 +975,7 @@ function prunedFailed(list, nowSec, knownIds) {
 // { id: true } for prunedFailed, from whatever channel list the caller holds.
 function knownIdSet(channels) {
   var list = asList(channels)
-  var out = {}
+  var out = keyedMap()
   for (var i = 0; i < list.length; i++) {
     var id = channelId(list[i])
     if (id !== "") out[id] = true
@@ -977,7 +987,7 @@ function knownIdSet(channels) {
 // still asks by id, so this is the shape the render path keeps.
 function failedIndex(list) {
   var rows = normalizeFailed(list)
-  var out = {}
+  var out = keyedMap()
   for (var i = 0; i < rows.length; i++) out[rows[i].id] = rows[i].at
   return out
 }
@@ -1014,9 +1024,9 @@ function failedWhen(atSec, nowSec) {
 // disk and strings from this turn, and the two would format identically right
 // up until something compared them.
 function withFailed(failed, id, at) {
-  var out = {}
+  var out = keyedMap()
   var src = failed && typeof failed === "object" ? failed : {}
-  for (var k in src) out[k] = src[k]
+  for (var k in src) if (hasOwnKey(src, k)) out[k] = src[k]
   if (str(id) !== "") out[str(id)] = typeof at === "number" ? at : str(at)
   return out
 }
@@ -1042,14 +1052,14 @@ function failedAfterHealthy(failed, verdictState, nowPlaying) {
   var src = failed && typeof failed === "object" ? failed : {}
   if (str(verdictState) !== "agree" || !nowPlaying) return src
   var id = str(nowPlaying.id)
-  if (id === "" || src[id] === undefined) return src
+  if (id === "" || !hasOwnKey(src, id)) return src
   return withoutFailed(src, id)
 }
 
 function withoutFailed(failed, id) {
-  var out = {}
+  var out = keyedMap()
   var src = failed && typeof failed === "object" ? failed : {}
-  for (var k in src) if (k !== str(id)) out[k] = src[k]
+  for (var k in src) if (k !== str(id) && hasOwnKey(src, k)) out[k] = src[k]
   return out
 }
 
@@ -1183,7 +1193,9 @@ function reloadDisposition(ctx) {
 function sortedKeys(value) {
   if (Array.isArray(value)) return value.map(sortedKeys)
   if (!value || typeof value !== "object") return value
-  var out = {}
+  // D-SG-3: the keys are whatever the file held; an own `__proto__` from
+  // JSON.parse is a key here, not a prototype to adopt.
+  var out = keyedMap()
   var keys = Object.keys(value).sort()
   for (var i = 0; i < keys.length; i++) out[keys[i]] = sortedKeys(value[keys[i]])
   return out
@@ -1213,7 +1225,8 @@ function canonValue(v) {
 // additions after. With ours equal to the base this IS theirs, element for
 // element and in order (R24a's identity). `id` names an element.
 function mergeSetField(base, ours, theirs, id) {
-  var inBase = {}, inOurs = {}, inTheirs = {}, seen = {}
+  // D-SG-3: named by a favorite id, a group name or a saved search's terms.
+  var inBase = keyedMap(), inOurs = keyedMap(), inTheirs = keyedMap(), seen = keyedMap()
   var b = asList(base), o = asList(ours), t = asList(theirs)
   var i, k
   for (i = 0; i < b.length; i++) inBase[id(b[i])] = true
@@ -1240,7 +1253,7 @@ function mergeSetField(base, ours, theirs, id) {
 // line names (never a value -- a source record carries a credentialed URL).
 function recordFieldsDiffering(a, b) {
   var x = a && typeof a === "object" ? a : {}, y = b && typeof b === "object" ? b : {}
-  var names = {}, k
+  var names = keyedMap(), k
   for (k in x) names[k] = true
   for (k in y) names[k] = true
   var out = []
@@ -1332,7 +1345,7 @@ function mergeForeignState(base, ours, theirs, opts) {
     dropped.savedSearches = out.savedSearches.length - MAX_SAVED_SEARCHES
     out.savedSearches = out.savedSearches.slice(0, MAX_SAVED_SEARCHES)
   }
-  var byKey = function (list) { var m = {}; for (var i = 0; i < list.length; i++) m[list[i].key] = list[i]; return m }
+  var byKey = function (list) { var m = keyedMap(); for (var i = 0; i < list.length; i++) m[list[i].key] = list[i]; return m }
   var mb = byKey(b.sources), mo = byKey(o.sources), mt = byKey(t.sources)
   var sources = [], i, r, k
   for (i = 0; i < t.sources.length; i++) {
