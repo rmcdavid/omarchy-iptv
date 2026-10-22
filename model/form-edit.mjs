@@ -9,16 +9,11 @@ import {
   helperArgv
 } from "./mpv.mjs"
 import {
-  firstRunAllowed
-} from "./view.mjs"
-import {
   MAX_SOURCE_URL, CONTROL_RE, sanitizeInput, sourceErrorMessage,
-  refusalMessage, validateSourceUrl, normalizeSourceUrl, validateLabel,
-  CLIPBOARD_MAX_CHARS
+  validateSourceUrl, normalizeSourceUrl, validateLabel, CLIPBOARD_MAX_CHARS
 } from "./sources.mjs"
 import {
-  isFormField, formCapacity, copyForm, openFirstRun, withFormValue,
-  withFormFocus
+  isFormField, formCapacity, copyForm, openFirstRun, withFormFocus
 } from "./source-records.mjs"
 
 // ---- form editing (D-CLIP-1) ----

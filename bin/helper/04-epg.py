@@ -1266,6 +1266,13 @@ def programme_json(record: str) -> str:
     return '{"title":' + record[22:] + ',"start":' + start + ',"stop":' + stop + "}"
 
 
+def _untitled(record: str) -> bool:
+    """Is the record's title the empty string? The title's JSON value sits
+    at index 22 (EPG_RECORD_SEP's contract), bare, so an empty one is `""`
+    followed by the end of the record or by the first detail member."""
+    return record[22:24] == '""' and (len(record) == 24 or record[24] == ",")
+
+
 def compute_now_next(window: dict[str, Any], now: int) -> tuple[list[str], int, int]:
     """-> (JSON fragments `"id":{"now":...,"next":...}`, validUntil, channels with a `now`).
 
@@ -1298,6 +1305,16 @@ def compute_now_next(window: dict[str, Any], now: int) -> tuple[list[str], int, 
                 break
             probe -= 1
         following = records[index] if index < len(records) else None
+        # R31c (D-EPG-11): an entry is written only with a TITLED now or
+        # next, because the shell counts an id as covered by its presence in
+        # the file's index and never reads the titles to decide. parse_xmltv
+        # already skips a programme without a title (`noTitle`), so on a
+        # window it wrote this drops nothing; it holds the invariant at the
+        # one place entries are made, for a window any writer built.
+        if current is not None and _untitled(current):
+            current = None
+        if following is not None and _untitled(following):
+            following = None
         if current is None and following is None:
             continue
         parts: list[str] = []
@@ -1323,7 +1340,16 @@ def write_epg_now(directory: str, window: dict[str, Any], now: int) -> tuple[int
         "fetchedAt": window.get("fetchedAt"),
         "sourceHost": window.get("sourceHost", ""),
     }, ensure_ascii=False, separators=(",", ":"))
-    text = head[:-1] + ',"channels":{' + ",".join(fragments) + "}}\n"
+    # R31b (D-EPG-11): one channel fragment per LINE. The file is the same
+    # JSON document it always was -- `json.load`, `jq` and the old whole-parse
+    # read it unchanged -- but the shell no longer parses it whole: it indexes
+    # the lines (Model.parseEpgNowStore) and parses one entry when a row asks.
+    # The header line ends with `,"channels":{`, each fragment line carries a
+    # trailing comma except the last, and the closing line is `}}`. A
+    # fragment never holds a raw newline: ids are folded of control
+    # characters at the parse and every value is JSON-encoded.
+    body = ",\n".join(fragments)
+    text = head[:-1] + ',"channels":{\n' + (body + "\n" if body else "") + "}}\n"
     write_text_atomic(os.path.join(directory, EPG_NOW_FILE), text)
     return valid_until, now_count
 

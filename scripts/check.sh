@@ -273,7 +273,26 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # pins (the start-up prune once, a prune at every switch naming the new
 # active key; a restart's first switch) and the fixture's busy-with-names
 # notice (D-LOGO-23). Both pins red on lane-bounds-int e8d2b35.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2702}
+# 2026-10-22, lane-epg11 (D-EPG-11, R31a-h): 2702 -> 2711. The guide-data
+# store: the old-vs-new differential over helper-written files (R31d), the
+# line shape (R31b), the null-prototype index (R31a/R31f/R31g), epgEntry,
+# the legacy path, index-counted coverage (R31c), Service.qml's applyEpgNow
+# over both shapes (service-harness), the reader seams, and the slice an
+# entry is parsed from (R31h). All 9 red on 2bb05c6 (2711 checks, 9
+# failures there); each of 7 mutations of the shipping decisions reddens at
+# least one of them (the lane's report).
+# 2026-10-22, lane-epg11-f (the D-EPG-11 round's follow-ups): 2711 -> 2713.
+# "D-EPG-11 E2-3" (the store is told from a plain map by the tag its parser
+# sets, never by a key a provider can spell) and "D-EPG-11 E2-5" (count is
+# distinct ids on both paths). Both red on lane-epg11's tip 40c0006 (2713
+# checks, 4 failures there: these two and the two pins that now carry `kind`).
+# 2026-10-22, lane-epg11-f (the round's recheck, blocker 1, rule 11): 2713 ->
+# 2714. epgEntry's OWN tag gate: over an untagged map whose provider id `map`
+# carries now/next, the ids `now` and `next` answer null. The E2-3 check
+# stayed green with that gate reverted to the old presence guard, so nothing
+# pinned it; this one is red on a 3d03526 export carrying that guard (2714
+# checks, 1 failure: the programme records handed back).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2714}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -420,7 +439,16 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2702}
 # the other 4 on a mutation of the shipping line (scratchpad g2-red).
 # the two sides' larger floor, the bounds integration, 2026-10-22
 # 1434 -> 1443 on 2026-10-22: the H2 and G2 merges together (lane-bounds-int 84cf2d1).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1443}
+# 2026-10-22, lane-epg11 (D-EPG-11): 1443 -> 1447. tests/test_epg.py
+# EpgNowLineShapeTest (4): one channel fragment per line (R31b), the empty
+# map's shape, an untitled programme never written (R31c), a legacy
+# single-line file rewritten by the recompute. All 4 red on 2bb05c6.
+# 2026-10-22, lane-epg11-f (F-GATE-8): 1447 -> 1448. tests/test_split_model.py
+# test_a_name_mentioned_only_in_a_comment_or_a_literal_is_not_an_import: the
+# relinker reads a part's CODE for cross-part references, not its comments or
+# literals. Red on lane-epg11's tip 40c0006 (one.mjs imported `g, C` out of a
+# comment and a string there).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1448}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

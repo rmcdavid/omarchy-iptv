@@ -116,7 +116,7 @@ HELPER_PARTS = (
     ("01-core.py", 67959, 0x90cac457),
     ("02-sources.py", 46515, 0xbb0f956f),
     ("03-io-playlist.py", 47518, 0x6a75ce06),
-    ("04-epg.py", 74488, 0x782593ac),
+    ("04-epg.py", 76077, 0xe0011d0f),
     ("05-ipc-logos.py", 45341, 0xeb2f7f76),
     ("06-failed.py", 36071, 0x61686f3d),
     ("07-player.py", 45346, 0xd88b22ed),

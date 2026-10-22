@@ -14199,6 +14199,313 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   }, [[1, 0], [1, 0], [2, 1]])
 })()
 
+// ------------------------------------------------------------------ D-EPG-11
+// The guide-data store (R31a-h, 2026-10-22). The shell used to JSON.parse
+// epg-now.json whole and hold doc.channels by reference, 6.85-7.03 KiB of
+// resident memory a channel; it now holds the file's text and an index into
+// it, and parses one entry when a row asks. These checks run BOTH parsers
+// over files the SHIPPING HELPER wrote (R31d: never a hand-made fixture of
+// the shape the parser was written to read), and pin the store's shape
+// (R31a, R31f), the legacy path (R31b) and the service's handling of both.
+;(function () {
+  const fs = require("fs")
+  const os = require("os")
+  const path = require("path")
+  const cp = require("child_process")
+  const HELPER = path.join(__dirname, "../bin/omarchy-iptv")
+  const NOW = 1767247200   // 2026-01-01 06:00:00 UTC
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "omarchy-iptv-epg11-"))
+  fs.chmodSync(work, 0o700)
+  const stamp = (sec) => {
+    const d = new Date(sec * 1000)
+    const p = (n) => (n < 10 ? "0" : "") + n
+    return "" + d.getUTCFullYear() + p(d.getUTCMonth() + 1) + p(d.getUTCDate()) + p(d.getUTCHours()) + p(d.getUTCMinutes()) + p(d.getUTCSeconds()) + " +0000"
+  }
+  const xmlAttr = (t) => String(t).replace(/&/g, "&amp;").replace(/"/g, "&quot;").replace(/</g, "&lt;")
+  const xmlText = (t) => String(t).replace(/&/g, "&amp;").replace(/</g, "&lt;")
+  // [channel id, start offset, stop offset, title, {desc, category, episode}]
+  const guide = (name, rows) => {
+    const file = path.join(work, name + ".xml")
+    const body = rows.map((r) => {
+      const extra = r[4] || {}
+      return '<programme channel="' + xmlAttr(r[0]) + '" start="' + stamp(NOW + r[1]) + '" stop="' + stamp(NOW + r[2]) + '">'
+        + "<title>" + xmlText(r[3]) + "</title>"
+        + (extra.desc ? "<desc>" + xmlText(extra.desc) + "</desc>" : "")
+        + (extra.category ? "<category>" + xmlText(extra.category) + "</category>" : "")
+        + (extra.episode ? '<episode-num system="onscreen">' + xmlText(extra.episode) + "</episode-num>" : "")
+        + "</programme>"
+    }).join("\n")
+    fs.writeFileSync(file, "<tv>\n" + body + "\n</tv>\n")
+    return file
+  }
+  // The shipping helper's `epg` verb over the guide, no playlist index (so
+  // every guide channel is written, D-EPG-10), and the file it wrote.
+  const helperWrite = (name, rows) => {
+    const cache = path.join(work, name)
+    fs.mkdirSync(cache, { mode: 0o700 })
+    const out = cp.spawnSync("python3", [HELPER, "epg", "--url", guide(name, rows), "--cache-dir", cache, "--now", String(NOW)], { encoding: "utf8" })
+    if (out.status !== 0) throw new Error("helper epg failed on " + name + ": " + out.stdout + out.stderr)
+    return fs.readFileSync(path.join(cache, "epg-now.json"), "utf8")
+  }
+  const tricky = helperWrite("tricky", [
+    ['a"b', 0, 3600, "Quote", { desc: "A quoted id" }],
+    ['a"b', 3600, 7200, "Quote Next"],
+    ["back\\slash", 0, 3600, "Back", { category: "Drama" }],
+    ["caf\u00e9.fr", 0, 3600, "Caf\u00e9 \u2603", { desc: "Unicode in the id, the title and here: \u00fc\u00f1" }],
+    ["__proto__", 0, 3600, "Proto", { episode: "S1E1" }],
+    ["constructor", 2700, 5400, "Ctor"],
+    ["hasOwnProperty", 0, 3600, "Own"],
+    ["last.one", 0, 3600, "Last", { desc: "The last line carries no trailing comma" }]
+  ])
+  const one = helperWrite("one", [["only", 0, 3600, "Only"]])
+  // Every programme a year outside the window: an empty channels map.
+  const none = helperWrite("none", [["gone", -365 * 86400, -365 * 86400 + 3600, "Old"]])
+  const variants = (text) => [
+    ["lf", text], ["crlf", text.replace(/\n/g, "\r\n")],
+    ["no trailing newline", text.replace(/\n$/, "")], ["crlf, no trailing newline", text.replace(/\n/g, "\r\n").replace(/\r\n$/, "")]
+  ]
+  const nowSecs = [NOW + 10, NOW + 3000, NOW + 4000, NOW + 90000]
+
+  // R31d. For every file, every text variant and every id the OLD parser
+  // finds: the entry, its row fields at four clocks, its panel and the
+  // coverage verdict are the same through the store. The result is the list
+  // of differences, so a red run names the id and the clock.
+  checkCall("D-EPG-11 R31d: epgEntry / epgFields / programmeDetail / epgCoverage over the store equal the old map on helper-written files (ids with quotes, backslashes, unicode, __proto__, one channel, the last channel, an empty map, CRLF, trailing newline or none)", () => {
+    const diffs = []
+    const files = [["tricky", tricky], ["one", one], ["none", none]]
+    for (const [fileName, text] of files) {
+      for (const [variantName, v] of variants(text)) {
+        const old = Model.parseEpgNow(v)
+        const st = Model.parseEpgNowStore(v)
+        const ids = Object.keys(old.channels)
+        const where = fileName + "/" + variantName
+        if (!old.ok || !st.ok) diffs.push(where + ": ok " + old.ok + " vs " + st.ok)
+        if (st.legacy !== false) diffs.push(where + ": legacy " + st.legacy)
+        if (st.count !== ids.length) diffs.push(where + ": count " + st.count + " vs " + ids.length)
+        if (show(st.meta) !== show(old.meta)) diffs.push(where + ": meta")
+        const channels = Model.prepareChannels(ids.map((id, i) => ({ id: "c" + i, name: "Channel " + i, tvgId: id })).concat([{ id: "x", name: "No Id" }, { id: "y", name: "Unmatched", tvgId: "nobody.test" }]))
+        if (show(Model.epgCoverage(channels, st)) !== show(Model.epgCoverage(channels, old.channels))) diffs.push(where + ": coverage")
+        for (const id of ids) {
+          const a = Model.epgEntry(st, id)
+          const b = old.channels[id]
+          if (show(a) !== show(b)) diffs.push(where + " " + JSON.stringify(id) + ": entry")
+          for (const t of nowSecs) {
+            if (show(Model.epgFields(a, t)) !== show(Model.epgFields(b, t))) diffs.push(where + " " + JSON.stringify(id) + " @" + t + ": fields")
+            if (show(Model.programmeDetail({ channel: { name: "Ch" }, entry: a, nowSec: t })) !== show(Model.programmeDetail({ channel: { name: "Ch" }, entry: b, nowSec: t }))) diffs.push(where + " " + JSON.stringify(id) + " @" + t + ": detail")
+          }
+        }
+      }
+    }
+    return [diffs, Object.keys(Model.parseEpgNow(tricky).channels).length, Object.keys(Model.parseEpgNow(one).channels).length, Object.keys(Model.parseEpgNow(none).channels).length]
+  }, [[], 7, 1, 0])
+
+  // R31b. The file is the same JSON document for every other reader, and
+  // its lines are the shape the store indexes: the header ends in
+  // `,"channels":{`, one fragment a line with a trailing comma on all but
+  // the last, then `}}`, then nothing. An empty map is the header and the
+  // close alone.
+  checkCall("D-EPG-11 R31b: the helper writes valid JSON, one channel fragment per line, a trailing comma on every line but the last, the close on its own line", () => {
+    const shape = (text) => {
+      const doc = JSON.parse(text)
+      const lines = text.split("\n")
+      const middle = lines.slice(1, -2)
+      return [
+        lines[0].endsWith(',"channels":{'), lines[lines.length - 2], lines[lines.length - 1],
+        middle.length, Object.keys(doc.channels).length,
+        middle.every((l, i) => l.charAt(0) === '"' && (i === middle.length - 1 ? !l.endsWith(",") : l.endsWith(",")))
+      ]
+    }
+    return [shape(tricky), shape(one), shape(none), none.split("\n").length]
+  }, [[true, "}}", "", 7, 7, true], [true, "}}", "", 1, 1, true], [true, "}}", "", 0, 0, true], 3])
+
+  // R31a, R31f, R31g. The store: a null-prototype index of ids to
+  // [offset, length] and nothing else -- `__proto__`, `constructor` and
+  // `hasOwnProperty` are plain ids on it -- the text as it came, and
+  // Object.prototype untouched by the parse (D-SG-3).
+  checkCall("D-EPG-11 R31a/R31f/R31g: the index is a null-prototype object of ids to [offset, length], provider ids that spell inherited names are plain keys, the text is the file's, Object.prototype is untouched", () => {
+    const st = Model.parseEpgNowStore(tricky)
+    const keys = Object.keys(st.index).sort()
+    const shapes = keys.map((k) => Array.isArray(st.index[k]) && st.index[k].length === 2 && typeof st.index[k][0] === "number" && typeof st.index[k][1] === "number")
+    const own = (k) => Object.prototype.hasOwnProperty.call(st.index, k)
+    return [
+      Object.getPrototypeOf(st.index) === null, keys, shapes.every((x) => x), st.text === tricky,
+      own("__proto__") && own("constructor") && own("hasOwnProperty"),
+      Model.epgEntry(st, "__proto__").now.title, Model.epgEntry(st, "constructor").next.title, Model.epgEntry(st, "hasOwnProperty").now.title,
+      Object.getPrototypeOf({}) === Object.prototype, ({}).now === undefined, Object.keys(Object.prototype).length,
+      Object.keys(st).sort()
+    ]
+  }, [true, ['__proto__', 'a"b', "back\\slash", "caf\u00e9.fr", "constructor", "hasOwnProperty", "last.one"], true, true, true, "Proto", "Ctor", "Own", true, true, 0,
+      ["count", "index", "kind", "legacy", "map", "meta", "ok", "text"]])
+
+  checkCall("D-EPG-11 R31a: epgEntry answers a fresh object each call, null for an unknown, empty or missing id and for no store; emptyEpgStore is a fresh empty store", () => {
+    const st = Model.parseEpgNowStore(tricky)
+    const a = Model.epgEntry(st, "last.one")
+    const e1 = Model.emptyEpgStore(), e2 = Model.emptyEpgStore()
+    return [
+      a !== Model.epgEntry(st, "last.one"), show(a) === show(Model.epgEntry(st, "last.one")),
+      Model.epgEntry(st, "nobody"), Model.epgEntry(st, ""), Model.epgEntry(st, null), Model.epgEntry(null, "last.one"), Model.epgEntry({}, "last.one"),
+      Model.epgEntry(Model.emptyEpgStore(), "last.one"),
+      e1 !== e2, e1.index !== e2.index, Object.getPrototypeOf(e1.index) === null, show(e1),
+      show(Model.parseEpgNowStore("")), show(Model.parseEpgNowStore(null)), Model.parseEpgNowStore("[]").ok, Model.parseEpgNowStore("{\"channels\":[]}").ok
+    ]
+  }, [true, true, null, null, null, null, null, null, true, true, true, '{"kind":"epg-store","ok":false,"meta":{},"index":{},"text":"","count":0,"legacy":false,"map":null}',
+      '{"kind":"epg-store","ok":false,"meta":{},"index":{},"text":"","count":0,"legacy":false,"map":null}', '{"kind":"epg-store","ok":false,"meta":{},"index":{},"text":"","count":0,"legacy":false,"map":null}', false, false])
+
+  // R31b, the legacy half: a single-line file (0.14.3's helper during an
+  // update window) goes through the old whole parse ONCE and is marked. Its
+  // index is the old coverage rule (a titled now or next), so epgCoverage
+  // over it answers what it answered over the map. A text in the new
+  // header shape whose lines are NOT fragments, but which is JSON whole,
+  // is never blank: it takes the same path. Garbage behind the header is
+  // not ok.
+  checkCall("D-EPG-11 R31b: a legacy single-line file is accepted once through the old path and marked legacy; an unindexable but valid document takes that path too; garbage behind a new-shape header is not ok", () => {
+    // Built as TEXT: an object literal with a "__proto__" key sets the
+    // prototype instead of an own key, and JSON.parse makes an own key.
+    const legacyText = '{"version":1,"generatedAt":' + NOW + ',"validUntil":' + (NOW + 300) + ',"sourceHost":"h","channels":{'
+      + '"x.tv":{"now":{"title":"T","start":' + (NOW - 60) + ',"stop":' + (NOW + 60) + '}},"y.tv":{"now":{"title":""}},'
+      + '"__proto__":{"next":{"title":"P","start":' + (NOW + 60) + '}},"z.tv":null}}'
+    const doc = JSON.parse(legacyText)
+    const legacy = Model.parseEpgNowStore(legacyText)
+    const pretty = Model.parseEpgNowStore(JSON.stringify(doc, null, 1).replace(/^\{\n\s*"version"/, '{"version"'))
+    const prettyNew = Model.parseEpgNowStore('{"version":1,"validUntil":5,"channels":{\n "x.tv": {"now": {"title": "T"}}\n}}\n')
+    const garbage = Model.parseEpgNowStore('{"version":1,"validUntil":5,"channels":{\n"x.tv":{"now":{"title":"T"}},\nnot json\n}}\n')
+    const chans = Model.prepareChannels([{ id: "1", name: "X", tvgId: "x.tv" }, { id: "2", name: "Y", tvgId: "y.tv" }, { id: "3", name: "P", tvgId: "__proto__" }, { id: "4", name: "Z", tvgId: "z.tv" }])
+    return [
+      legacy.ok, legacy.legacy, legacy.count, Object.keys(legacy.index).sort(), legacy.index["x.tv"], legacy.text, legacy.map !== null, show(legacy.meta),
+      show(Model.epgEntry(legacy, "x.tv")), show(Model.epgEntry(legacy, "y.tv")), show(Model.epgEntry(legacy, "__proto__")), Model.epgEntry(legacy, "z.tv"),
+      show(Model.epgCoverage(chans, legacy)), show(Model.epgCoverage(chans, doc.channels)),
+      pretty.ok, pretty.legacy, prettyNew.ok, prettyNew.legacy, show(Model.epgEntry(prettyNew, "x.tv")),
+      garbage.ok, garbage.legacy
+    ]
+  }, [true, true, 2, ["__proto__", "x.tv"], null, "", true, '{"version":1,"generatedAt":1767247200,"validUntil":1767247500,"sourceHost":"h"}',
+      '{"now":{"title":"T","start":1767247140,"stop":1767247260}}', '{"now":{"title":""}}', '{"next":{"title":"P","start":1767247260}}', null,
+      '{"total":4,"withId":4,"matched":2,"carries":true}', '{"total":4,"withId":4,"matched":2,"carries":true}',
+      true, true, true, true, '{"now":{"title":"T"}}', false, false])
+
+  // R31c, the node half: coverage over the store counts the index, and
+  // the index is what the helper wrote. A store whose index names an id
+  // counts it without reading the text (the rule), which is only right
+  // because the helper never writes an untitled entry (the python pin).
+  checkCall("D-EPG-11 R31c: epgCoverage over an indexed store counts index presence, one own-property check per row, and ignores inherited names", () => {
+    const st = Model.parseEpgNowStore(one)
+    const chans = Model.prepareChannels([{ id: "1", name: "A", tvgId: "only" }, { id: "2", name: "B", tvgId: "constructor" }, { id: "3", name: "C" }, { id: "4", name: "D", tvgId: "toString" }])
+    const bare = { kind: "epg-store", ok: true, meta: {}, index: Object.create(null), text: "", count: 1, legacy: false, map: null }
+    bare.index["only"] = [0, 0]
+    return [show(Model.epgCoverage(chans, st)), show(Model.epgCoverage(chans, bare)), show(Model.epgCoverage(chans, Model.emptyEpgStore())), show(Model.epgCoverage(chans, Model.parseEpgNowStore(none)))]
+  }, ['{"total":4,"withId":3,"matched":1,"carries":true}', '{"total":4,"withId":3,"matched":1,"carries":true}', '{"total":4,"withId":3,"matched":0,"carries":false}', '{"total":4,"withId":3,"matched":0,"carries":false}'])
+
+  // The correctness lens's P3 on the first cut (E2-3): the store is told
+  // from a plain map by the TAG the parser sets (`kind: "epg-store"`),
+  // never by `store.index` being an object -- on a plain map `index` is a
+  // provider's tvg-id like any other. A map with ids `index`, `map` and
+  // `kind` grades as a map (the base 2bb05c6 answered matched 4 for it;
+  // the first cut answered 1, having taken the `index` entry's now/next as
+  // the index); epgEntry over such a map reads nothing through those keys;
+  // and a store-shaped object WITHOUT the tag is a map too (matched 0: its
+  // keys are not ids), as is one whose `kind` is an ENTRY rather than the
+  // tag (matched 1: the provider id `kind` carries a titled programme). The
+  // tag itself is not a provider's to set: a map's value under `kind` is an
+  // entry object, never the string.
+  checkCall("D-EPG-11 E2-3: a plain map whose provider ids are `index`, `map` and `kind` grades as a map (matched 4), epgEntry answers null through it, and a store-shaped object without the tag, or with an entry where the tag goes, is graded as a map", () => {
+    const map = { index: { now: { title: "I" } }, map: { next: { title: "M", start: NOW + 60 } }, kind: { now: { title: "K" } }, "a.tv": { now: { title: "A" } } }
+    const chans = Model.prepareChannels([{ id: "1", name: "I", tvgId: "index" }, { id: "2", name: "M", tvgId: "map" }, { id: "3", name: "K", tvgId: "kind" }, { id: "4", name: "A", tvgId: "a.tv" }, { id: "5", name: "N", tvgId: "nobody" }])
+    const untagged = { ok: true, meta: {}, index: Object.create(null), text: "", count: 1, legacy: false, map: null }
+    untagged.index["a.tv"] = [0, 0]
+    const spelt = { ok: true, meta: {}, index: Object.create(null), text: "", count: 1, legacy: false, map: null, kind: { now: { title: "K" } } }
+    spelt.index["a.tv"] = [0, 0]
+    return [
+      show(Model.epgCoverage(chans, map)),
+      Model.epgEntry(map, "index"), Model.epgEntry(map, "map"), Model.epgEntry(map, "a.tv"),
+      show(Model.epgCoverage(chans, untagged)), show(Model.epgCoverage(chans, spelt)),
+      Model.epgEntry(untagged, "a.tv"), Model.epgEntry(spelt, "a.tv"),
+      Model.parseEpgNowStore(one).kind, Model.parseEpgNowStore('{"version":1,"channels":{"x.tv":{"now":{"title":"T"}}}}').kind, Model.emptyEpgStore().kind
+    ]
+  }, ['{"total":5,"withId":5,"matched":4,"carries":true}', null, null, null,
+      '{"total":5,"withId":5,"matched":0,"carries":false}', '{"total":5,"withId":5,"matched":1,"carries":true}', null, null,
+      "epg-store", "epg-store", "epg-store"])
+
+  // epgEntry's own tag gate, pinned on its own (the round's recheck, rule
+  // 11): the check above stays green with the gate reverted to the old
+  // presence guard (`epgStore && typeof epgStore === "object"`), because
+  // under that guard the map's `map` entry is read AS the legacy map and the
+  // ids looked up are simply not that entry's keys. The ids that ARE its
+  // keys tell the two apart: `now` and `next`. Through the old guard
+  // epgEntry(plain, "now") answered the programme record `{ title: "N" }`
+  // out of the provider entry filed under the tvg-id `map`; through the tag
+  // gate a plain map is never read, so every id answers null, its real one
+  // included.
+  checkCall("D-EPG-11 E2-3: epgEntry over an untagged map whose provider id `map` carries now/next answers null for `now` and `next` (the old presence guard read that entry as the legacy map and handed back the programme) and for the map's real id", () => {
+    const plain = { map: { now: { title: "N", start: NOW - 60, stop: NOW + 60 }, next: { title: "X", start: NOW + 60 } }, "a.tv": { now: { title: "A" } } }
+    return [Model.epgEntry(plain, "now"), Model.epgEntry(plain, "next"), Model.epgEntry(plain, "a.tv")]
+  }, [null, null, null])
+
+  // E2-5 (the lens's remark): `count` is the number of DISTINCT ids on both
+  // paths. The helper cannot write an id twice, but a hand-built file can;
+  // the line walk keeps the LAST line for the id, as JSON.parse keeps the
+  // last key, and counts it once; the legacy path's JSON.parse has already
+  // folded the duplicate.
+  checkCall("D-EPG-11 E2-5: store.count is distinct ids on the line path and the legacy path; a duplicated id is indexed once, the last line winning as JSON.parse's last key does", () => {
+    const header = '{"version":1,"generatedAt":' + NOW + ',"validUntil":' + (NOW + 300) + ',"channels":{'
+    const lines = Model.parseEpgNowStore(header + '\n"a.tv":{"now":{"title":"First"}},\n"b.tv":{"now":{"title":"B"}},\n"a.tv":{"now":{"title":"Second"}}\n}}\n')
+    const legacy = Model.parseEpgNowStore(header + '"a.tv":{"now":{"title":"First"}},"b.tv":{"now":{"title":"B"}},"a.tv":{"now":{"title":"Second"}}}}')
+    return [
+      lines.ok, lines.legacy, lines.count, Object.keys(lines.index).sort(), Model.epgEntry(lines, "a.tv").now.title, Model.epgEntry(lines, "b.tv").now.title,
+      legacy.ok, legacy.legacy, legacy.count, Object.keys(legacy.index).sort(), Model.epgEntry(legacy, "a.tv").now.title
+    ]
+  }, [true, false, 2, ["a.tv", "b.tv"], "Second", "B", true, true, 2, ["a.tv", "b.tv"], "Second"])
+
+  // The service, run for real (service-harness): both shapes load, the
+  // legacy one is marked, a load starts no fetch (the debounce is not
+  // restarted by the shape), and the resets hand back an empty store.
+  checkCall("D-EPG-11 R31b: Service.qml's applyEpgNow loads the new shape unmarked and a legacy file marked, starts no fetch for either, and empties to an empty store", () => {
+    const H = require("./service-harness.js")
+    const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+    const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false }, stateText: "", host: "lag" })
+    const initial = h.root.epgNow
+    const before = h.ids.epgDebounce.restarts
+    h.root.applyEpgNow(tricky)
+    const fresh = [h.root.epgLoaded, h.root.epgNow.legacy, h.root.epgNow.count, h.root.epgMeta.generatedAt, h.ids.epgDebounce.restarts - before, h.ids.epgProc.running]
+    h.root.applyEpgNow(JSON.stringify({ version: 1, generatedAt: NOW, validUntil: NOW + 300, channels: { "x.tv": { now: { title: "T" } } } }))
+    const legacy = [h.root.epgLoaded, h.root.epgNow.legacy, h.root.epgNow.count, h.ids.epgDebounce.restarts - before, h.ids.epgProc.running]
+    h.root.applyEpgNow("")
+    const cleared = [h.root.epgLoaded, h.root.epgNow.ok, Object.keys(h.root.epgNow.index).length, Object.getPrototypeOf(h.root.epgNow.index) === null]
+    return [initial && initial.ok === false && Object.getPrototypeOf(initial.index) === null && initial.map === null, fresh, legacy, cleared, h.compileErrors]
+  }, [true, [true, false, 7, NOW, 0, false], [true, true, 1, 0, false], [false, false, 0, true], []])
+
+  // The seams, joined by name (rule 13): the three readers in Guide.qml go
+  // through Model.epgEntry over root.epgStore, the coverage pass reads the
+  // store, Service.qml's two resets use Model.emptyEpgStore(), and no reader
+  // anywhere -- the dev harness's state snapshot included -- indexes a map.
+  check("D-EPG-11: Guide.qml's three readers, Service.qml's resets and the harness snapshot go through the store; no `epgMap[` remains", [
+    (guideSource.match(/Model\.epgEntry\(root\.epgStore, /g) || []).length,
+    /readonly property var epgStore: root\.serviceReady && root\.epgLoaded \? root\.service\.epgNow : Model\.emptyEpgStore\(\)/.test(guideSource),
+    /entry: id !== "" \? Model\.epgEntry\(root\.epgStore, id\) : null, nowSec: root\.nowSec/.test(guideSource),
+    /readonly property var epg: Model\.epgFields\(row\.tvgId !== "" \? Model\.epgEntry\(root\.epgStore, row\.tvgId\) : null, root\.nowSec\)/.test(guideSource),
+    /Model\.epgCoverage\(root\.service\.channels, root\.epgStore\)\.carries/.test(qmlFunction("measureEpgRows")),
+    (serviceSource.match(/root\.epgNow = Model\.emptyEpgStore\(\)/g) || []).length,
+    /property var epgNow: Model\.emptyEpgStore\(\)/.test(serviceSource),
+    /var store = Model\.parseEpgNowStore\(text\)\n    root\.epgNow = store\n    root\.epgMeta = store\.meta\n    root\.epgLoaded = store\.ok/.test(serviceSource),
+    (guideSource + serviceSource).indexOf("epgMap[") === -1,
+    (fs.readFileSync(path.join(__dirname, "../scripts/dev-harness/shell.qml"), "utf8").match(/typeof Model\.epgEntry === "function"\) return Model\.epgEntry\(g\.epgStore, id\)|typeof Model\.epgEntry === "function" \? Model\.epgEntry\(g\.epgStore, id\)/g) || []).length
+  ], [2, true, true, true, true, 2, true, true, true, 3])
+
+  // R31h: the tick's cost named -- a realised row parses one slice. Pinned
+  // by size rather than time: the slice an entry is parsed from is the
+  // entry's own line, not the file.
+  checkCall("D-EPG-11 R31h: an entry is parsed from its own line's slice, never from more of the text", () => {
+    const st = Model.parseEpgNowStore(tricky)
+    const lines = tricky.split("\n")
+    return Object.keys(st.index).sort().map((id) => {
+      const at = st.index[id]
+      const slice = st.text.substr(at[0], at[1])
+      const line = lines.find((l) => l.startsWith(JSON.stringify(id) + ":")) || ""
+      return [line.endsWith(",") ? line.slice(0, -1) : line].indexOf(JSON.stringify(id) + ":" + slice) === 0 && slice.length < tricky.length / 4
+    })
+  }, [true, true, true, true, true, true, true])
+
+  try { fs.rmSync(work, { recursive: true, force: true }) } catch (e) { /* a leftover in tmp is not a failure */ }
+})()
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All model tests passed.")

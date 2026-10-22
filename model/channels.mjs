@@ -4,12 +4,8 @@ import {
   MAX_CHNO_LABEL, CHNO_SEPARATORS, CHNO_ENTRY_SEP, CHNO_FIELDS
 } from "./build.mjs"
 import {
-  str, asList, normalizeText, searchKey, GENERATED_NAME_WORD, channelId,
-  indexById
+  str, asList, normalizeText, searchKey, GENERATED_NAME_WORD, channelId
 } from "./text.mjs"
-import {
-  sanitizeInput
-} from "./sources.mjs"
 
 // ------------------------------------------------------------ channels
 

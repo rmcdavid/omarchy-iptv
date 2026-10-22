@@ -430,7 +430,17 @@ channels = {
     "arte.de": {"now": prog("Karambolage", now - 200, now + 1000), "next": prog("Tracks", now + 1000, now + 2800)},
     "expired.uk": {"now": prog("Already Over", now - 7200, now - 3600), "next": prog("Something Later", now + 100, now + 200)},
 }
-json.dump({"version": 1, "generatedAt": now, "validUntil": now + 300, "sourceHost": "harness", "channels": channels}, open(path, "w"))
+# The shape the helper's write_epg_now writes (D-EPG-11, R31b): the header
+# line ending in ,"channels":{ then ONE channel fragment per line with a
+# trailing comma except the last, then }}. Valid JSON as before; the shell
+# indexes it by line and parses one entry when a row asks. A fake in the old
+# one-line shape would still load, through the legacy path, and so would
+# prove nothing about the shipping one.
+meta = {"version": 1, "generatedAt": now, "validUntil": now + 300, "sourceHost": "harness"}
+head = json.dumps(meta, separators=(",", ":"))[:-1] + ',"channels":{\n'
+lines = [json.dumps(cid) + ":" + json.dumps(entry, separators=(",", ":")) for cid, entry in channels.items()]
+with open(path, "w") as fh:
+    fh.write(head + ",\n".join(lines) + "\n}}\n")
 os.chmod(path, 0o600)
 PY
 }

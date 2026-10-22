@@ -3,26 +3,20 @@ import {
   ELLIPSIS, QUOTE_OPEN, QUOTE_CLOSE, SEP
 } from "./build.mjs"
 import {
-  str, asList, tokenize, fnv1a32
+  str, asList, fnv1a32
 } from "./text.mjs"
 import {
-  emptyState, stateUnreadableNotice, stateBlockedHeader
+  emptyState, stateBlockedHeader
 } from "./state.mjs"
 import {
-  logoConsentLines, WALL_KEY
+  logoConsentLines
 } from "./logos.mjs"
 import {
-  sourceLabel, hostOf, redactUrls
+  hostOf, redactUrls
 } from "./privacy.mjs"
 import {
   formatClock, formatCount, pluralChannels, joinParts
 } from "./epg.mjs"
-import {
-  footerHints, keyboardMap
-} from "./view.mjs"
-import {
-  sourceForEdit
-} from "./source-records.mjs"
 
 // ------------------------------------------------------------ sources (M2-01)
 //

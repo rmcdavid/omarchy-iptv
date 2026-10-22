@@ -9,27 +9,19 @@ import {
   channelOrderOf
 } from "./channels.mjs"
 import {
-  emptyState, entryMigratedOf
-} from "./state.mjs"
-import {
   optInSetting
 } from "./logos.mjs"
 import {
   pipOptions
 } from "./pip.mjs"
 import {
-  configShieldState, redactUrls, scrubUrls
+  redactUrls, scrubUrls
 } from "./privacy.mjs"
 import {
-  EPG_DETAIL_FIELDS, programmeDetail
-} from "./epg.mjs"
-import {
-  MAX_SOURCES, MAX_SOURCE_URL, sanitizeInput, validateSourceUrl, sourceKey,
-  findSourceByUrl
+  MAX_SOURCES, MAX_SOURCE_URL, sanitizeInput, validateSourceUrl, sourceKey
 } from "./sources.mjs"
 import {
-  activeKeyText, activeKeyOf, withActiveKey, reconcileAction,
-  adoptActiveSource, pointerWritePlan, reconcileSources, entryWith
+  activeKeyText
 } from "./source-records.mjs"
 
 // ------------------------------------------------------------ caches
@@ -72,6 +64,148 @@ function parseEpgNow(text) {
   var meta = {}
   for (var key in doc) if (key !== "channels") meta[key] = doc[key]
   return { ok: true, channels: doc.channels, meta: meta }
+}
+
+// epg-now.json -> the guide-data STORE the shell holds (D-EPG-11, R31a).
+//
+//   { kind: "epg-store", ok, meta, index, text, count, legacy, map }
+//
+// `kind` is the TAG that says "this is a store": the two functions that read
+// one (epgCoverage, epgEntry) still accept the plain map the old whole parse
+// gave, and they tell the two apart by this tag, never by the presence of a
+// key such as `index` or `map` -- on a plain map every key is a provider's
+// tvg-id, so a provider id spelt `index` would otherwise flip the reader
+// into store mode and grade that entry's `now`/`next` as the index
+// (R30f's shape one layer up, the correctness lens's finding on the first
+// cut). A map's values are entry objects, so no provider text can make
+// `kind === "epg-store"` true. `count` is the number of DISTINCT ids in the
+// index on both paths: the helper cannot write an id twice (it iterates a
+// dict), but a hand-built file can, and the index keeps the last line as
+// JSON.parse keeps the last key.
+//
+// The shell used to JSON.parse the whole file and keep `doc.channels` by
+// reference: measured at 6.85-7.03 KiB of resident memory a channel for 529
+// bytes of JSON, about 67 MiB at 10,000 channels and about 340 MiB at
+// MAX_CHANNELS (UNVERIFIED at that size), rebuilt on every 5-minute
+// recompute. The store instead keeps ONE text -- the file the FileView
+// already holds -- and a null-prototype `index` from tvg-id to
+// [offset, length] into it, and parses ONE entry when a row asks
+// (epgEntry). Nothing here parses the document whole.
+//
+// THE SHAPE INDEXED (R31b, written by the helper's write_epg_now): the
+// header line, ending in `,"channels":{`; then one channel fragment per
+// line, `"<json id>":{...}` with a trailing comma on every line but the
+// last; then `}}`. The whole is the same valid JSON document it always was,
+// so every other reader (json.load, jq, the old parseEpgNow) is unchanged.
+// A line's key is the JSON string literal up to the unescaped closing quote
+// -- an id may hold quotes, backslashes, non-ASCII and `__proto__`, and is
+// at most 256 code points -- decoded with JSON.parse of that literal; the
+// entry slice runs from after `":` to the end of the line minus the
+// trailing comma and a CR. The text is kept as it came: offsets are into
+// it, trailing newline or none, CRLF or LF.
+//
+// A LEGACY file (one line, 0.14.3's helper during an update window,
+// D-REL-9) or any text the line walk cannot index is accepted ONCE through
+// the old whole-parse path and marked `legacy: true`: `map` holds the parsed
+// channels, `index` holds the ids whose entry carries a titled programme
+// (the old coverage rule), and the next `epg --now-only` recompute (5 min)
+// rewrites the file in the new shape. The shape alone triggers no fetch.
+//
+// R31f (D-SG-3): the index is a null-prototype object, so `__proto__`,
+// `constructor` and `hasOwnProperty` are plain tvg-ids on it, and nothing
+// here keys a plain object by provider text. R31g: the index holds ids and
+// numbers only; an entry's text leaves through epgFields / programmeDetail
+// -> sinkText exactly as before.
+var EPG_CHANNELS_OPEN = ',"channels":{'
+var EPG_STORE_KIND = "epg-store"
+
+function emptyEpgStore() {
+  return { kind: EPG_STORE_KIND, ok: false, meta: {}, index: Object.create(null), text: "", count: 0, legacy: false, map: null }
+}
+
+function parseEpgNowStore(text) {
+  var raw = str(text)
+  var store = emptyEpgStore()
+  if (raw === "") return store
+  var nl = raw.indexOf("\n")
+  var header = nl === -1 ? raw : raw.slice(0, nl)
+  if (header.charCodeAt(header.length - 1) === 13) header = header.slice(0, -1)
+  var indexed = nl !== -1 && header.length > EPG_CHANNELS_OPEN.length
+    && header.slice(header.length - EPG_CHANNELS_OPEN.length) === EPG_CHANNELS_OPEN
+    ? epgNowIndex(raw, header, nl + 1) : null
+  if (indexed) return indexed
+  // The old path, once: a single-line file, or a shape the walk refused.
+  var doc = parseEpgNow(raw)
+  if (!doc.ok) return store
+  store.ok = true
+  store.meta = doc.meta
+  store.map = doc.channels
+  store.legacy = true
+  for (var id in doc.channels) {
+    if (!Object.prototype.hasOwnProperty.call(doc.channels, id)) continue
+    var entry = doc.channels[id]
+    if (!entry || typeof entry !== "object") continue
+    if ((entry.now && str(entry.now.title) !== "") || (entry.next && str(entry.next.title) !== "")) {
+      store.index[id] = null
+      store.count++
+    }
+  }
+  return store
+}
+
+// The line walk. -> a store, or null when a line is not a fragment (the
+// caller then takes the old path, so a file this cannot index is never
+// blank, only costly, exactly as today). `from` is the offset of the first
+// fragment line; `header` is the first line without its CR.
+//
+// It walks the text by OFFSET and never slices a line out of it: a slice
+// per channel is a second UTF-16 copy of the file left for the collector,
+// and it was measured in the held RSS (about 1.3 KiB a channel of the
+// store's first cut, which read 3.7-4.0 KiB a channel against the text's
+// 1.9). The only strings made here are each key's literal and its decoded
+// id, which the index keeps.
+function epgNowIndex(raw, header, from) {
+  var meta = parseJsonObject(header.slice(0, header.length - EPG_CHANNELS_OPEN.length) + "}")
+  if (!meta) return null
+  var index = Object.create(null)
+  var count = 0
+  var pos = from
+  var length = raw.length
+  var closed = false
+  while (pos < length) {
+    var end = raw.indexOf("\n", pos)
+    if (end === -1) end = length
+    var stop = end
+    if (stop > pos && raw.charCodeAt(stop - 1) === 13) stop--
+    if (stop === pos) { pos = end + 1; continue }
+    // `}}` on its own line closes the map; anything after it is not a shape
+    // this knows.
+    if (stop - pos === 2 && raw.charCodeAt(pos) === 125 && raw.charCodeAt(pos + 1) === 125) { closed = true; pos = end + 1; continue }
+    if (closed || raw.charCodeAt(pos) !== 34) return null
+    // The key: to the first quote not escaped by an odd run of backslashes,
+    // within this line.
+    var q = pos + 1
+    for (;;) {
+      q = raw.indexOf('"', q)
+      if (q === -1 || q >= stop) return null
+      var slashes = 0
+      for (var b = q - 1; b > pos && raw.charCodeAt(b) === 92; b--) slashes++
+      if (slashes % 2 === 0) break
+      q++
+    }
+    if (raw.charCodeAt(q + 1) !== 58) return null
+    var id
+    try { id = JSON.parse(raw.slice(pos, q + 1)) } catch (e) { return null }
+    if (typeof id !== "string") return null
+    var entryEnd = stop
+    if (raw.charCodeAt(entryEnd - 1) === 44) entryEnd--
+    if (entryEnd <= q + 2) return null
+    if (!(id in index)) count++
+    index[id] = [q + 2, entryEnd - (q + 2)]
+    pos = end + 1
+  }
+  if (!closed) return null
+  return { kind: EPG_STORE_KIND, ok: true, meta: meta, index: index, text: raw, count: count, legacy: false, map: null }
 }
 
 // Helper status JSON -> normalized object the UI can render directly.
@@ -877,14 +1011,15 @@ function sameOwnWrite(a, b) {
   return same(ao.base, bo.base) && same(ao.value, bo.value)
 }
 export {
-  parseJsonObject, parseChannels, parseEpgNow, parseHelperStatus,
-  HTTP_REASONS, HELPER_PART_RE, helperDamagedReason, statusReason, statusHost,
-  statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel, labelWarning,
-  labelWarnings, warningLine, footerWarning, findBarEntry, settingOf,
-  boolSetting, clampInt, clampSetting, settingsFrom, entryInputText,
-  entryInputForm, sameEntryInput, ownWriteInForce, settingsWithOwnWrite,
-  ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS, MAX_SEEN_INPUTS,
-  entryInputSeen, entryInputLast, entryInputsSeenAfter, entryInputNotice,
-  ownedEntryPatch, barEntryWritable, entryFlushDisposition, owedMirrorAction,
-  ownedWriteMode, retiredInputsToKeep, sameOwnWrite
+  parseJsonObject, parseChannels, parseEpgNow, EPG_CHANNELS_OPEN,
+  EPG_STORE_KIND, emptyEpgStore, parseEpgNowStore, epgNowIndex,
+  parseHelperStatus, HTTP_REASONS, HELPER_PART_RE, helperDamagedReason,
+  statusReason, statusHost, statusHealthy, statusWarnings, WARNING_PREFIX,
+  warningLabel, labelWarning, labelWarnings, warningLine, footerWarning,
+  findBarEntry, settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
+  entryInputText, entryInputForm, sameEntryInput, ownWriteInForce,
+  settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
+  MAX_SEEN_INPUTS, entryInputSeen, entryInputLast, entryInputsSeenAfter,
+  entryInputNotice, ownedEntryPatch, barEntryWritable, entryFlushDisposition,
+  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, sameOwnWrite
 }

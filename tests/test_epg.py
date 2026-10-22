@@ -724,5 +724,113 @@ class EpgPerformanceTest(unittest.TestCase):
                                "a stop in the future must not read as one in the past")
 
 
+class EpgNowLineShapeTest(unittest.TestCase):
+    """D-EPG-11 (R31b, R31c): the shape write_epg_now writes, and the one
+    invariant the shell's coverage count relies on.
+
+    The shell no longer parses epg-now.json whole: it indexes the file by
+    LINE (Model.parseEpgNowStore) and counts a channel as covered when the
+    index holds its id (Model.epgCoverage). Both are true only if the
+    helper writes the header line, then one channel fragment per line, then
+    `}}`, and never writes an entry without a titled now or next. Every
+    other reader (json.load, jq, the old parse) sees the same document.
+    """
+
+    def write(self, tmp, channels, now=NOW):
+        meta = {"version": 1, "fetchedAt": NOW, "sourceHost": "epg.example.test", "sourceKey": "x",
+                "channelsMtime": None, "windowStart": NOW - 2 * H, "windowEnd": NOW + 12 * H,
+                "restricted": False, "channelTotal": None, "matched": None, "epgChannels": len(channels),
+                "programmeCount": 0, "warnings": []}
+        helper.write_window(os.path.join(tmp, helper.EPG_WINDOW_FILE), meta, channels)
+        valid_until, now_count = helper.write_epg_now(tmp, helper.load_window(os.path.join(tmp, helper.EPG_WINDOW_FILE)), now)
+        with open(os.path.join(tmp, "epg-now.json"), encoding="utf-8") as fh:
+            return fh.read(), now_count
+
+    def records(self, *items):
+        return helper.EPG_RECORD_SEP.join(helper.encode_record(*item) for item in items)
+
+    def test_one_channel_fragment_per_line(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            text, now_count = self.write(tmp, {
+                "a.tv": self.records((NOW - 600, NOW + 600, "Now A", {"desc": "d"}), (NOW + 600, NOW + 1200, "Next A")),
+                'q"uote': self.records((NOW - 600, NOW + 600, "Quoted")),
+                "last\\one": self.records((NOW + 60, NOW + 660, "Only Next")),
+            })
+            lines = text.split("\n")
+            self.assertTrue(lines[0].endswith(',"channels":{'), lines[0])
+            self.assertEqual(lines[-2:], ["}}", ""], "the close on its own line, then the final newline")
+            middle = lines[1:-2]
+            self.assertEqual(len(middle), 3, "one line a channel")
+            for i, line in enumerate(middle):
+                self.assertTrue(line.startswith('"'), line)
+                self.assertEqual(line.endswith(","), i < len(middle) - 1, "a trailing comma on every line but the last: %r" % line)
+            doc = json.loads(text)
+            self.assertEqual(sorted(doc["channels"]), ["a.tv", "last\\one", 'q"uote'])
+            # Each line parses on its own as the one-entry object the shell
+            # slices out of it, and the lines together ARE the document.
+            rebuilt = {}
+            for line in middle:
+                rebuilt.update(json.loads("{" + line.rstrip(",") + "}"))
+            self.assertEqual(rebuilt, doc["channels"])
+            self.assertEqual(now_count, 2)
+
+    def test_an_empty_channels_map_is_the_header_and_the_close(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            text, now_count = self.write(tmp, {})
+            self.assertEqual(text.split("\n")[1:], ["}}", ""])
+            self.assertEqual(json.loads(text)["channels"], {})
+            self.assertEqual(now_count, 0)
+
+    def test_an_untitled_programme_is_never_written(self):
+        """R31c. The window format can hold a record whose title is "" (the
+        parse skips those as noTitle, but encode_record does not refuse
+        them), and the old writer passed it through as "title":"" -- an
+        entry the shell's index would count as coverage and the row would
+        draw as nothing. compute_now_next drops the untitled half, and the
+        entry when both halves are gone."""
+        with tempfile.TemporaryDirectory() as tmp:
+            text, now_count = self.write(tmp, {
+                "next-only": self.records((NOW - 600, NOW + 600, ""), (NOW + 600, NOW + 1200, "Titled Next")),
+                "nothing": self.records((NOW - 600, NOW + 600, ""), (NOW + 600, NOW + 1200, "")),
+                "now-only": self.records((NOW - 600, NOW + 600, "Titled Now", {"desc": "d"}), (NOW + 600, NOW + 1200, "")),
+                "both": self.records((NOW - 600, NOW + 600, "N"), (NOW + 600, NOW + 1200, "X")),
+                "quoted-empty": self.records((NOW - 600, NOW + 600, '""')),
+            })
+            channels = json.loads(text)["channels"]
+            self.assertEqual(sorted(channels), ["both", "next-only", "now-only", "quoted-empty"])
+            self.assertEqual(channels["next-only"], {"next": {"title": "Titled Next", "start": NOW + 600, "stop": NOW + 1200}})
+            self.assertEqual(channels["now-only"], {"now": {"title": "Titled Now", "desc": "d", "start": NOW - 600, "stop": NOW + 600}})
+            self.assertEqual(channels["quoted-empty"]["now"]["title"], '""', "a title that IS two quote characters is a title")
+            for entry in channels.values():
+                self.assertTrue(any(entry.get(k, {}).get("title") for k in ("now", "next")), entry)
+            self.assertEqual(now_count, 3, "the untitled now is not a now")
+
+    def test_a_legacy_single_line_file_is_rewritten_by_the_recompute(self):
+        """R31b, the helper's half: 0.14.3's helper wrote the document on
+        one line, and a shell updated under it reads that file once through
+        its old path; the next `epg --now-only` (the 5-minute recompute,
+        which reads the window and never the file) leaves the new shape."""
+        with tempfile.TemporaryDirectory() as tmp:
+            self.write(tmp, {"a.tv": self.records((NOW - 600, NOW + 600, "Now A"), (NOW + 600, NOW + 1200, "Next A"))})
+            path = os.path.join(tmp, "epg-now.json")
+            with open(path, encoding="utf-8") as fh:
+                doc = json.load(fh)
+            with open(path, "w", encoding="utf-8") as fh:
+                fh.write(json.dumps(doc, separators=(",", ":")) + "\n")
+            with open(path, encoding="utf-8") as fh:
+                self.assertEqual(len(fh.read().split("\n")), 2, "the legacy shape: one line")
+            code, status, stderr = run("epg", "--now-only", "--cache-dir", tmp, "--now", str(NOW + 30))
+            self.assertEqual(code, 0, stderr)
+            self.assertTrue(status["ok"], status)
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            lines = text.split("\n")
+            self.assertEqual(len(lines), 4, text)
+            self.assertTrue(lines[0].endswith(',"channels":{'))
+            self.assertTrue(lines[1].startswith('"a.tv":{'))
+            self.assertEqual(lines[2:], ["}}", ""])
+            self.assertEqual(json.loads(text)["channels"], doc["channels"])
+
+
 if __name__ == "__main__":
     unittest.main()
