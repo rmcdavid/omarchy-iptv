@@ -5,6 +5,12 @@
 #   open-scenario.sh check-tree               the instrument arm ONLY; run by check.sh
 #   open-scenario.sh [live] [--tree DIR]      the instrument arm, then the shell arm
 #   open-scenario.sh [live] --baseline REF    the same over an export of REF
+#   OPEN_EPG=1 open-scenario.sh live ...      the shell arm WITH guide data: every
+#                                             channel carries a tvg-id, gen-playlist
+#                                             writes the matching XMLTV, the shell's
+#                                             own helper run writes the 10,000-channel
+#                                             epg-now.json, and every open waits for
+#                                             it to be loaded first (D-EPG-11, R31e)
 #
 # THE DEFECT. `openMs` (shell.qml) force-lays-out the channel view in the
 # SAME turn as the summon and stops its clock there, so the view is not laid
@@ -252,11 +258,24 @@ cage_stop() {
 # A detached shell over the 10k fixture, in the floating window, settled
 # (state loaded, cache ready, every channel in memory). Bounded 60 s.
 start_shell() {
-  h --detach --timeout 0 --playlist "$FIX" --window floating >"$WORK/start.log" 2>&1
+  if [[ -n $EPG_FIX ]]; then h --detach --timeout 0 --playlist "$FIX" --epg "$EPG_FIX" --window floating >"$WORK/start.log" 2>&1
+  else h --detach --timeout 0 --playlist "$FIX" --window floating >"$WORK/start.log" 2>&1; fi
   SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
   local i
   for ((i = 0; i < 600; i++)); do
-    [[ $(svc "['channels']") == "$CHANNELS" ]] && return 0
+    if [[ $(svc "['channels']") == "$CHANNELS" ]]; then
+      [[ -z $EPG_FIX ]] && return 0
+      # OPEN_EPG: the guide data must be HELD before an open is timed, or
+      # the cold open would be measured over an empty store. The helper's
+      # fetch over the 10k XMLTV runs inside the shell's own 180 s watchdog.
+      local j
+      for ((j = 0; j < 1800; j++)); do
+        [[ $(svc "['epg']['loaded']") == true ]] && return 0
+        sleep 0.1
+      done
+      echo "   the shell (pid $SHELL_PID) did not load the guide data within 180 s: $(svc "['epg']")"
+      return 1
+    fi
     sleep 0.1
   done
   echo "   the shell (pid $SHELL_PID) did not hold $CHANNELS channels within 60 s: $(svc "['channels']")"
@@ -344,13 +363,25 @@ else
   COLD=${OPEN_COLD:-3}
   WARM=${OPEN_WARM:-8}
   FIX="$WORK/fixtures/gen-10k.m3u"
+  EPG_FIX=""
   mkdir -p "$WORK/fixtures"
-  python3 "$ROOT/scripts/gen-playlist.py" --channels "$CHANNELS" --groups 400 --seed 1 --out "$FIX" >/dev/null || { echo "gen-playlist failed" >&2; exit 2; }
+  if [[ ${OPEN_EPG:-0} == 1 ]]; then
+    # D-EPG-11 (R31e): the open budget with the guide's now/next held for
+    # every channel. `--epg-ids 1.0` gives every channel a tvg-id (the
+    # default 0.6 would leave 4,000 rows without guide data); the XMLTV is
+    # the matching guide, and the SHELL's own `epg` helper run writes the
+    # epg-now.json it then holds -- the shipping path, not a file dropped
+    # into the cache. start_shell waits for it to be loaded.
+    EPG_FIX="$WORK/fixtures/gen-10k.xml"
+    python3 "$ROOT/scripts/gen-playlist.py" --channels "$CHANNELS" --groups 400 --seed 1 --epg-ids 1.0 --out "$FIX" --xmltv "$EPG_FIX" >/dev/null || { echo "gen-playlist failed" >&2; exit 2; }
+  else
+    python3 "$ROOT/scripts/gen-playlist.py" --channels "$CHANNELS" --groups 400 --seed 1 --out "$FIX" >/dev/null || { echo "gen-playlist failed" >&2; exit 2; }
+  fi
   export OMARCHY_IPTV_PLUGIN_ROOT=$PLUGIN_ROOT
   mkdir -p "$SCRATCH/bin" && ln -sfn "$HERE/stub-hyprctl.py" "$SCRATCH/bin/hyprctl"
   cage_start 1700
   h reap >/dev/null 2>&1
-  echo "== shell arm: $CHANNELS channels, $COLD cold shells and $WARM warm opens per view, floating window, cage $NESTED, load $(cut -d' ' -f1-3 /proc/loadavg)"
+  echo "== shell arm: $CHANNELS channels, $COLD cold shells and $WARM warm opens per view, floating window, cage $NESTED, guide data ${EPG_FIX:+for every channel (OPEN_EPG=1)}${EPG_FIX:-none}, load $(cut -d' ' -f1-3 /proc/loadavg)"
   for view in list wall; do
     [[ $view == wall ]] && want=channelWall || want=resultList
     L=${view:0:1}; L=${L^^}

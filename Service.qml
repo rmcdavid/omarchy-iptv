@@ -380,7 +380,13 @@ Item {
   // head: an empty or failed load is never stored there.
   property var preparedActive: null
   property var channelsMeta: ({})
-  property var epgNow: ({})                 // tvg-id -> { now, next }
+  // The guide-data store (D-EPG-11, R31a): the file's text and a
+  // null-prototype index tvg-id -> [offset, length] into it, never a parsed
+  // map of every channel. Model.epgEntry(store, id) parses one entry when
+  // a row asks; Model.epgCoverage counts the index. `Model.emptyEpgStore()`
+  // is the reset, never `({})`: a plain object has no index and reads as
+  // "no guide data" either way, but one spelling keeps the shape one thing.
+  property var epgNow: Model.emptyEpgStore()
   property var epgMeta: ({})
   // Named userState: `state` would shadow QQuickItem.state. v2 shape
   // (ARCHITECTURE-SOURCES 2.1); every reducer goes through Model.cloneState.
@@ -2677,11 +2683,18 @@ Item {
     if (status && status.ok === true) root.epgWarnings = Model.statusWarnings(status)
   }
 
+  // epg-now.json -> the store. The text is the FileView's own; the store
+  // indexes its lines (one channel a line, R31b) and parses nothing whole. A
+  // legacy single-line file -- 0.14.3's helper during an update window
+  // (D-REL-9) -- is accepted once through the old whole parse and marked
+  // `legacy`; the next `epg --now-only` recompute (epgRecomputeTimer, 5 min)
+  // rewrites it in the new shape. The shape alone starts no fetch: a fetch
+  // is decided by epgNowStale over the meta, as before.
   function applyEpgNow(text) {
-    var parsed = Model.parseEpgNow(text)
-    root.epgNow = parsed.channels
-    root.epgMeta = parsed.meta
-    root.epgLoaded = parsed.ok
+    var store = Model.parseEpgNowStore(text)
+    root.epgNow = store
+    root.epgMeta = store.meta
+    root.epgLoaded = store.ok
   }
 
   // Status JSON for a helper the watchdog killed (S-05): fixed text, host
@@ -5046,7 +5059,7 @@ Item {
     root.playlistStatus = ({ ok: false, kind: "playlist", stale: false, error: null })
     root.playlistLoadWarnings = []
     root.playlistAttempted = false
-    root.epgNow = ({})
+    root.epgNow = Model.emptyEpgStore()
     root.epgMeta = ({})
     root.epgLoaded = false
     root.epgAttempted = false
@@ -5152,7 +5165,7 @@ Item {
     if (root.activeEpgUrl === "") {
       root.epgLoaded = false
       root.epgAttempted = false
-      root.epgNow = ({})
+      root.epgNow = Model.emptyEpgStore()
       root.epgStatus = ({ ok: false, kind: "epg", stale: false, error: null })
       root.epgWarnings = []
       // M2-09 GS11 / D-GS-4: the cache the URL produced goes with the setting.

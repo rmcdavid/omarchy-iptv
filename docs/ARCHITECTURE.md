@@ -35,7 +35,7 @@ library (`json`, `re`, `urllib`, `gzip`, `socket`, `xml.etree`).
 | 2 | How mpv is launched | `Quickshell.execDetached` (fire-and-forget), `Process.startDetached()`, `Process` (attached) | **`Process` attached to the service** | Only `Process` gives `onExited(exitCode, exitStatus)` and stderr, which is how stream failures become "Could not play <channel>" notifications (US3) and how the bar knows playback ended. Single instance falls out of `mpvProc.running`. Cost: mpv dies with the service, i.e. on `omarchy restart shell` (accepted; `keepLoaded: true` keeps the service alive across plugin hot-reloads, `unloadPluginServices` lines 1033-1050). `startDetached` is the M2 escape hatch if "survive shell restart" is ever wanted. |
 | 3 | How the overlay is summoned | IPC target on the overlay; `shell summon`; widget-local popup | **Everything goes through `omarchy-shell shell toggle io.github.rmcdavid.iptv`** | For a plugin that is both `bar-widget` and `overlay`, `isBarWidgetPanelPlugin` returns false (lines 1138-1150), so `summon/hide/toggle` route to the overlay `Loader` (lines 1152-1225, 1322-1366). Keybinding and menu entry call that command; the bar widget calls `bar.shell.toggle(moduleName, "{}")`, allowed because `pluginOwnsTarget` matches our own id (lines 385-389, 638-642). The overlay dismisses with `shell.hide(manifest.id)` so `openPanelIds` stays in sync (Emojis.qml pattern). |
 | 4 | Search over 10k channels | substring; token AND; fuzzy; QML `SortFilterProxyModel` | **Helper precomputes `searchKey` (lowercase, diacritics folded, ASCII punctuation -> space); QML tokenizes the query, AND-matches every token as a substring, ranks prefix > word-start > substring, and materializes at most 300 rows** | **Measured 2026-09-23 and this reasoning was backwards (F-PERF-1).** Scanning 10k short strings costs **159-212 ms** in the QML JS engine, not a few ms -- five to seven times the 30 ms keystroke budget. The cost was not `ListModel.append` and not the ranker (2.9 ms over all 10,000): it was a SECOND fold the ranker needs, the name alone, which was never precomputed the way `searchKey` is, so the guide folded 10,000 strings on every keystroke. With `nameKey` emitted by the helper the same calls are 11-64 ms. Rows are still bounded, which remains right; it was simply never the part that hurt. No fuzzy matching: it surprises on channel lists ("bbc" must not match "bbcasino" first). Non-Latin scripts are kept intact so Cyrillic/Arabic lists stay searchable. |
-| 5 | EPG | QML parses XMLTV; helper emits full schedule; helper emits now/next | **Helper parses XMLTV (plain or gzip) into `epg-now.json` (now/next per tvg-id); a 5-minute timer re-runs the cheap `epg --now-only` recompute from the cached programme window; downloads honor a TTL** | The overlay never touches XML (US6, "never blocks on EPG"). The file stays small (~100 bytes per channel) even for 10k channels. |
+| 5 | EPG | QML parses XMLTV; helper emits full schedule; helper emits now/next | **Helper parses XMLTV (plain or gzip) into `epg-now.json` (now/next per tvg-id); a 5-minute timer re-runs the cheap `epg --now-only` recompute from the cached programme window; downloads honor a TTL** | The overlay never touches XML (US6, "never blocks on EPG"). The file stays small: measured at about 190 bytes a channel with titles alone and about 650 with a description, category and episode on now and next (D-EPG-11, 2026-10-22), so 1.9-6.4 MB at 10k channels; the shell indexes it by line and parses one entry when a row asks, never the document whole. |
 | 6 | Favorites/recents identity | tvg-id; URL; name; hash of both | **`t:<tvg-id>` when that tvg-id is unique in the playlist, else `u:<fnv1a32(url)>`, `#n` suffix for exact duplicates** | tvg-id survives URL/token rotation (Xtream providers), but HD/SD variants often share one tvg-id, so uniqueness is checked per playlist and the URL hash is the fallback. Ids are assigned by the helper (it sees the whole list); `Model.channelId` mirrors the per-row rule. FNV-1a is trivial in both languages and pinned by shared test vectors. |
 | 7 | Settings propagation | widget pushes `settings` into the service; service reads `shell.barConfig`; helper reads shell.json | **Service derives its settings from `shell.barConfig` (`Model.findBarEntry`)** | The host refreshes every scoped api's `barConfig` on each shell.json change (`syncPluginApis`, lines 875-881, triggered by `onShellConfigChanged`, lines 67-71), so `omarchy bar set` propagates without a widget instance and regardless of which bar hosts us. Bindings on `playlistUrl`/`epgUrl` re-run the helper (debounced); `refreshMinutes` re-arms the timer; `mpvArgs` applies on next launch. The widget reads only its view-side keys (`showChannelName`) from injected `settings`. |
 | 8 | `keepLoaded` | on / off | **on (manifest-wide flag)** | Overlay: window mounted between summons -> open under 150 ms (clipboard/emojis do this). Service: survives `rescanPlugins`, so installing another plugin does not kill playback. Cost: `Service.qml` edits need `omarchy restart shell` (README says so). |
@@ -220,7 +220,33 @@ than the 512 MiB of memory this helper allows itself"), `http_<status>`,
 ```
 
 Keyed by tvg-id; times are epoch seconds (XMLTV offsets applied by the
-helper). `epg-status.json` mirrors the playlist status shape with
+helper). **The LINE SHAPE is part of the contract (D-EPG-11, R31b,
+2026-10-22).** The helper writes the header line, ending in
+`,"channels":{`; then ONE channel fragment per line, `"<json id>":{...}`,
+with a trailing comma on every line but the last; then `}}` on its own
+line, and a final newline:
+
+```
+{"version":1,"generatedAt":1757700000,"validUntil":1757700300,"fetchedAt":1757700000,"sourceHost":"provider.example.test","channels":{
+"bbc1.uk":{"now":{"title":"News at Six","start":1757698200,"stop":1757700000},"next":{"title":"Regional News","start":1757700000,"stop":1757700600}},
+"bbc2.uk":{"now":{"title":"Gardeners' World","start":1757697000,"stop":1757700300}}
+}}
+```
+
+The whole is the same valid JSON document, so `json.load`, `jq` and the
+old whole parse read it unchanged. The shell does NOT parse it whole: the
+service holds the file's text and a null-prototype index from tvg-id to
+`[offset, length]` into it (`Model.parseEpgNowStore`), and a row parses
+its own entry when it asks (`Model.epgEntry`). An id may hold quotes,
+backslashes, non-ASCII and `__proto__` (its key is the JSON literal up to
+the unescaped closing quote); a fragment never holds a raw newline (ids are
+folded of control characters at the parse, every value is JSON-encoded).
+An entry is written only with a titled `now` or `next`
+(`compute_now_next` drops an untitled half; R31c), which is what lets the
+shell count a channel as covered by the index alone. A single-line file --
+0.14.3's helper during an update window -- is accepted once through the
+old whole parse and marked `legacy`; the next `epg --now-only` recompute
+rewrites it in this shape. `epg-status.json` mirrors the playlist status shape with
 `"kind": "epg"`. A feed that declares an XML entity is refused as
 `bad_xml` with one sentence and no URL, before ElementTree reads a byte of
 it (D-EPG-6, security standard 2); a `<!DOCTYPE tv SYSTEM "xmltv.dtd">`
@@ -2967,7 +2993,7 @@ Performance budget (10k channels):
 | Helper `playlist` | < 1.5 s for 10k entries on this machine (excluding network) | single pass regex parser, no DOM |
 | Helper `epg` | < 4 s for a 50 MB XMLTV | `xml.etree.iterparse`, programmes outside a +-24 h window dropped, gzip streamed |
 | `channels.json` | ~2 MB at 10k | omit empty keys, compact separators |
-| `epg-now.json` | < 1 MB at 10k | now/next only |
+| `epg-now.json` | about 1.9 MB at 10k with titles alone, 6.3 MB with a description, category and episode on now and next (measured 2026-10-22 over files the helper wrote from generated guides; the "< 1 MB" this row gave before was never measured) | now/next only; the shell holds the text and an index, about 2.6 KiB a channel at 10k, and parses one entry per realised row (D-EPG-11) |
 | JSON.parse of channels in QML | ~50 ms, off the open path | happens on file load, not on summon |
 | Helper `logos --fetch`, cached-file check | ~45 us per cached file; the whole subprocess 375 -> 601 ms median over 5,000 cached logos, page cache warm (D-LOGO-11, helper lane) | one `LOGO_HEADER_BYTES` read per file, no decode, in the helper; cold cache unmeasured |
 
@@ -3548,32 +3574,67 @@ Performance budget (10k channels):
     check blind to the texts, window lines reversed).
 
     **What the long-running shell holds from the guide data (D-EPG-7, rule
-    15), which has no memory limit.** The shell never reads
-    `epg-window.txt`; it reads `epg-now.json` through a `FileView`, trims
-    the text, `JSON.parse`s it and keeps `doc.channels` by reference
-    (`Model.parseEpgNow`, `Service.qml` `applyEpgNow`). Measured with a
-    probe that does exactly that on Qt 6.11.2 offscreen (an XHR read in
-    place of the `FileView`, which holds the file's text besides), over
-    files the shipping helper wrote from ordinary guides of 2,000 and 4,000
-    matched channels with a description, category and episode on now and
-    next: 529 bytes of JSON a channel, and 6.85-7.03 KiB of resident memory
-    a channel, twice each (71.7 MiB with one channel, 85.1 and 98.8 MiB at
-    2,000 and 4,000). Entries are at most `MAX_CHANNELS` = 50,000: the
+    15), which has no memory limit; bounded by D-EPG-11, R31a-h,
+    2026-10-22.** The shell never reads `epg-window.txt`. Until D-EPG-11 it
+    read `epg-now.json` through a `FileView`, `JSON.parse`d the text whole
+    and kept `doc.channels` by reference (`Model.parseEpgNow`, `Service.qml`
+    `applyEpgNow`), rebuilt on every 5-minute recompute and every fetch.
+    Measured on Qt 6.11.2 offscreen with a probe that does exactly that
+    (an XHR read in place of the `FileView`, which holds the file's text
+    besides; the probe and its runner are in the D-EPG-11 round's record
+    in QA-RESULTS, lane-bounds-l's before it), over files the shipping helper
+    wrote from ordinary generated guides whose every programme carries a
+    description, category and episode, so now AND next do: 654 bytes of
+    JSON a channel (lane-bounds-l's files read 529), and, resident over the
+    one-channel baseline, **1.9 KiB a channel for the text alone, 7.0-7.2
+    KiB for the text plus the parsed map** (the slopes between 2,000 and
+    4,000 channels, two passes each: 1.83-2.02 and 7.13-7.24; at 10,000
+    channels 93.0 MiB and 146.7 MiB against a 74.3 MiB baseline, so about
+    7.4 KiB a channel). Entries are at most `MAX_CHANNELS` = 50,000: the
     playlist's distinct tvg-ids with a playlist index, and, without one,
     the first 50,000 guide channels, each key at most 256 code points (this
     said "the playlist's distinct tvg-ids" alone while a guide fetched
     without an index wrote every guide channel; D-EPG-10, R30d). An
-    ordinary guide of 50,000 matched
-    channels with two programmes each in the window is about 33 MB of XML,
-    inside the input cap. So the shell can hold about **340 MiB** for the
-    guide's now/next at `MAX_CHANNELS` (UNVERIFIED at that size; about 67 MiB
-    at 10,000), and more with every detail field at its cap (11.6 MiB of
-    JSON at 10,000 channels, about 2.3 times this probe's per-channel JSON).
-    That is not small, and it is not bounded by this change: bounding it
-    means a different shape for `epg-now.json` in the shell (each channel's
-    entry kept as text and parsed when a row asks, about 1 KiB a channel by
-    the same arithmetic), or descriptions fetched on demand, both changes to
-    the guide's data path and its 150 ms open budget, proposed for a ruling.
+    ordinary guide of 50,000 matched channels with two programmes each in
+    the window is about 33 MB of XML, inside the input cap. So the old
+    shape held about **340 MiB** at `MAX_CHANNELS` (UNVERIFIED at that
+    size, by linear extrapolation; about 67 MiB at 10,000).
+
+    What the shell holds NOW is the file's text and an index into it
+    (R31a): `Model.parseEpgNowStore(text)` -> `{ ok, meta, index, text,
+    count, legacy, map }`, the index a null-prototype object (R31f, D-SG-3)
+    from tvg-id to `[offset, length]`, built by walking the file's lines
+    (the shape in section 5) by offset, never slicing a line out and never
+    parsing the document; `Model.epgEntry(store, id)` parses ONE entry's
+    slice when a row asks, and answers the object `epgMap[id]` used to.
+    `Guide.qml`'s three readers (the detail row, the row delegate's
+    `epg` property, `measureEpgRows`) and the dev harness's state snapshot
+    go through it; `epgCoverage` counts an id as matched when the index
+    holds it (R31c), which is right because the helper never writes an
+    entry without a titled now or next (pinned in Python). Measured the
+    same way on the same files: **2.0-2.6 KiB a channel for the text plus
+    the store** (slopes 2.02-2.56; 99.9 MiB at 10,000 channels, about 2.6
+    KiB a channel, the index about 0.7 KiB of it), so about **125 MiB at
+    `MAX_CHANNELS`** (UNVERIFIED at that size, by the same extrapolation;
+    about 25 MiB at 10,000) in place of 340, and the recompute no longer
+    rebuilds a graph: `parseEpgNowStore` over the 10,000-channel file is
+    25.5-27.7 ms a call (10 calls, three passes) against 188-212 ms for the
+    whole parse, both under a one-minute load average of 2.7-2.9. The tick
+    (R31h): 13 realised rows through `epgEntry` + `epgFields` and the open
+    panel through `programmeDetail`, 575-587 us per 30 s tick at 10,000
+    channels (2,000 ticks, three passes), each a JSON.parse of one line of
+    about 650 bytes, so about 14 small objects of garbage per tick. The
+    first cut of the walker sliced a `line` string per channel and the
+    store read 3.7-4.0 KiB a channel, the slices' UTF-16 copies sitting in
+    the held RSS; walking by offset is what brought it to 2.0-2.6. The
+    legacy single-line file (0.14.3's helper during an update window,
+    D-REL-9) is accepted once through the old whole parse, marked
+    `legacy`, and rewritten by the next recompute (R31b); the open budget
+    with a 10,000-channel guide held is in QA-RESULTS under this round. No
+    new sink (R31g): the store's text is the file the `FileView` already
+    holds, and an entry's strings leave through `epgFields` /
+    `programmeDetail` -> `sinkText` as before. Descriptions fetched on
+    demand, the other shape the ruling weighed, were not built.
 
 17. Every fetch the helper makes runs under ONE wall-clock deadline, and
     what a fetch leaves on disk is bounded (R30, the bounds sweep's round 2,

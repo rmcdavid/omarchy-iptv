@@ -1575,7 +1575,8 @@ ShellRoot {
             var c = g.currentRows[g.cursorIndex]
             var id = Model.channelId(c)
             // The guide fields come from the same lookup the delegate makes
-            // (Guide.qml: `Model.epgFields(epgMap[row.tvgId], nowSec)`).
+            // (Guide.qml: `Model.epgFields(Model.epgEntry(epgStore, row.tvgId), nowSec)`,
+            // D-EPG-11: the entry is parsed out of the store, not read off a map).
             // They were hard-coded to "" here until 2026-10-03, which made
             // this snapshot unable to show guide data AT ALL -- in the one
             // instrument whose own comment says it exists so a scenario can
@@ -1584,7 +1585,7 @@ ShellRoot {
             // it is why D-EPG-2 (the guide matched nothing for the life of
             // the project) could not be seen from here: a blank row read the
             // same whether the data was missing or merely never looked up.
-            var epg = Model.epgFields(c && String(c.tvgId || "") !== "" ? g.epgMap[c.tvgId] : null, g.nowSec)
+            var epg = Model.epgFields(c && String(c.tvgId || "") !== "" ? Model.epgEntry(g.epgStore, c.tvgId) : null, g.nowSec)
             return Model.rowDetail({
               showGroup: typeof Model.rowShowsGroup === "function" ? Model.rowShowsGroup({ scopeIsGroup: g.scopeIsGroup, groupsNarrow: g.groupAxis.narrows }) : false,
               group: Model.primaryGroup(c),
@@ -1608,7 +1609,7 @@ ShellRoot {
             if (!(g.currentRows.length > g.cursorIndex && g.cursorIndex >= 0)) return null
             var c = g.currentRows[g.cursorIndex]
             var id = c ? String(c.tvgId || "") : ""
-            return typeof Model.programmeDetail === "function" ? Model.programmeDetail({ channel: c, entry: id !== "" ? g.epgMap[id] : null, nowSec: g.nowSec }) : null
+            return typeof Model.programmeDetail === "function" ? Model.programmeDetail({ channel: c, entry: id !== "" ? Model.epgEntry(g.epgStore, id) : null, nowSec: g.nowSec }) : null
           })(),
           // The panel's fields as it draws them. The model's `fields` array
           // was removed when the review found the panel hardcoding the order
@@ -1620,7 +1621,7 @@ ShellRoot {
             if (g.currentRows.length > g.cursorIndex && g.cursorIndex >= 0) {
               var c = g.currentRows[g.cursorIndex]
               var id = c ? String(c.tvgId || "") : ""
-              d = typeof Model.programmeDetail === "function" ? Model.programmeDetail({ channel: c, entry: id !== "" ? g.epgMap[id] : null, nowSec: g.nowSec }) : null
+              d = typeof Model.programmeDetail === "function" ? Model.programmeDetail({ channel: c, entry: id !== "" ? Model.epgEntry(g.epgStore, id) : null, nowSec: g.nowSec }) : null
             }
             if (!d) return []
             var out = []

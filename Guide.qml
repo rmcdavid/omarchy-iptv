@@ -107,15 +107,17 @@ Item {
   // The one argument Model.programmeDetail takes. The lane contract calls it
   // `row`, and the row THE GUIDE DRAWS is a channel plus the guide entry it
   // matched: the description, category and episode fields exist only on the
-  // epg-now record (Model.parseEpgNow), so a channel row on its own cannot
-  // answer this question. `entry` is undefined for a channel with no tvg-id
-  // and for one whose id matched nothing, which is 1,453 of 1,453 channels on
-  // the owner's own install until M4-01 lands (D-EPG-2).
+  // epg-now record (Model.parseEpgNowStore / Model.epgEntry), so a channel
+  // row on its own cannot answer this question. `entry` is null for a channel
+  // with no tvg-id and for one whose id matched nothing, which is 1,453 of
+  // 1,453 channels on the owner's own install until M4-01 lands (D-EPG-2).
+  // D-EPG-11: the entry is parsed out of the store here, for the one row the
+  // cursor is on, rather than looked up in a map of every channel.
   readonly property var detailRow: {
     var ch = root.rowAt(root.cursorIndex)
     if (!ch) return null
     var id = ch.tvgId !== undefined ? String(ch.tvgId) : ""
-    return { channel: ch, entry: id !== "" ? root.epgMap[id] : null, nowSec: root.nowSec }
+    return { channel: ch, entry: id !== "" ? Model.epgEntry(root.epgStore, id) : null, nowSec: root.nowSec }
   }
   // What the open panel renders. Recomputed on the 30 s clock tick as well as
   // on the cursor, so an open panel follows the programme over a boundary
@@ -680,7 +682,12 @@ Item {
   // never rebuilds the list (D-LIVE-01).
   readonly property var favoriteSet: Model.favoriteSet(root.serviceReady ? root.service.userState.favorites : [])
   readonly property var failedMap: root.serviceReady && root.service.failedAt ? root.service.failedAt : ({})
-  readonly property var epgMap: root.serviceReady && root.epgLoaded ? root.service.epgNow : ({})
+  // D-EPG-11 (R31a): the guide-data STORE, not a map -- the file's text and
+  // an index into it. A row reads its entry through Model.epgEntry(store,
+  // id), one small JSON.parse per realised row per tick, and the coverage
+  // count below reads the index. Model.emptyEpgStore() while nothing is
+  // loaded, so every reader sees one shape.
+  readonly property var epgStore: root.serviceReady && root.epgLoaded ? root.service.epgNow : Model.emptyEpgStore()
   // Two-line rows whenever the detail line can have content for this list
   // (UX 2.4): a mixed list shows the group, EPG adds now/next.
   //
@@ -716,7 +723,7 @@ Item {
   // in a different costume.
   //
   // NOT a binding, deliberately, and this is R-C rather than an optimisation.
-  // `epgMap` is replaced when the EPG fetch lands, when a refresh rewrites the
+  // `epgStore` is replaced when the EPG fetch lands, when a refresh rewrites the
   // window and when a programme window expires, and every one of those can
   // happen while the card is on screen -- a binding here would re-height 3,335
   // rows under the cursor with no user action, which is the hazard D4 deleted
@@ -733,7 +740,7 @@ Item {
   property bool epgCarriesRows: false
 
   function measureEpgRows() {
-    root.epgCarriesRows = root.serviceReady && Model.epgCoverage(root.service.channels, root.epgMap).carries
+    root.epgCarriesRows = root.serviceReady && Model.epgCoverage(root.service.channels, root.epgStore).carries
   }
 
   // The whole body decision in one object (Model.guideSurface, D-LIVE-19):
@@ -3868,7 +3875,9 @@ Item {
                   // bug.
                   readonly property string failedAt: row.channelId !== ""
                     ? Model.failedWhen(root.failedMap[row.channelId], root.nowSec) : ""
-                  readonly property var epg: Model.epgFields(row.tvgId !== "" ? root.epgMap[row.tvgId] : null, root.nowSec)
+                  // D-EPG-11: one entry parsed out of the store for this row,
+                  // re-evaluated on the 30 s tick like everything on this line.
+                  readonly property var epg: Model.epgFields(row.tvgId !== "" ? Model.epgEntry(root.epgStore, row.tvgId) : null, root.nowSec)
                   readonly property string nowTitle: row.epg.nowTitle
                   readonly property string nextTitle: row.epg.nextTitle
                   readonly property int nowStart: row.epg.nowStart

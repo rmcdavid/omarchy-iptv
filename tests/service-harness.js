@@ -97,6 +97,15 @@ function makeIds(h) {
     // reply from a damaged helper. Counted like every timer, never run.
     controlWatchdog: timer("controlWatchdog"),
     configShieldDebounce: timer("configShieldDebounce"),
+    // D-EPG-11 (R31b): the guide-data load is observed -- applyEpgNow runs
+    // for real over both file shapes -- and these three are what a fetch
+    // decided by it would touch (refreshEpg restarts the debounce; the run
+    // itself would set the process running). Counted, never run, like every
+    // other timer and process here.
+    epgProc: proc("epgProc"),
+    epgDebounce: timer("epgDebounce"),
+    epgWatchdog: timer("epgWatchdog"),
+    epgFile: view("epgFile"),
     channelsFile: view("channelsFile"),
     playlistStatusFile: view("playlistStatusFile"),
     // execDetached is the notification sink (Service.notify): recorded as the

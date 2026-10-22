@@ -122,15 +122,29 @@ function epgFields(entry, nowSec) {
 // list under the cursor. The trap the earlier round of this work named.
 //
 // One pass, one own-property lookup per row with a `tvg-id`, no clock.
-function epgCoverage(channels, epgMap) {
+//
+// D-EPG-11 (R31c): over the guide-data STORE, an id is matched when the
+// store's index holds it. That is the same answer as before because the
+// helper never writes an entry without a titled `now` or `next`
+// (compute_now_next drops an untitled half, pinned in tests/test_epg.py),
+// and a legacy store's index was built by the old rule. A plain map (the
+// old `doc.channels`, which verify.js and the older checks still pass) is
+// graded by the old rule, so the two can be compared on the same input.
+function epgCoverage(channels, epgStore) {
   var list = asList(channels)
-  var map = epgMap && typeof epgMap === "object" ? epgMap : {}
+  var store = epgStore && typeof epgStore === "object" ? epgStore : {}
+  var index = store.index && typeof store.index === "object" ? store.index : null
+  var map = index ? null : store
   var out = { total: list.length, withId: 0, matched: 0, carries: false }
   for (var i = 0; i < list.length; i++) {
     var row = list[i]
     var id = row ? str(row.tvgId) : ""
     if (id === "") continue
     out.withId++
+    if (index) {
+      if (Object.prototype.hasOwnProperty.call(index, id)) out.matched++
+      continue
+    }
     if (!Object.prototype.hasOwnProperty.call(map, id)) continue
     var entry = map[id]
     if (!entry || typeof entry !== "object") continue
@@ -138,6 +152,32 @@ function epgCoverage(channels, epgMap) {
   }
   out.carries = out.matched > 0
   return out
+}
+
+// One channel's guide entry out of the store (D-EPG-11, R31a): the same
+// object `epgMap[id]` used to give -- { now, next } with the programme
+// records as the file carries them -- or null. Over an indexed store this is
+// ONE JSON.parse of one line's slice, which is what a realised row pays on
+// the 30 s tick and the panel pays on the cursor; over a legacy store it is
+// the map lookup it always was. An id the index does not hold, an empty id,
+// no store, or a slice that does not parse to an object all answer null,
+// and epgFields / programmeDetail take null as "no guide data" already.
+function epgEntry(epgStore, id) {
+  if (!epgStore || typeof epgStore !== "object") return null
+  var key = str(id)
+  if (key === "") return null
+  if (epgStore.map && typeof epgStore.map === "object") {
+    if (!Object.prototype.hasOwnProperty.call(epgStore.map, key)) return null
+    var held = epgStore.map[key]
+    return held && typeof held === "object" && !Array.isArray(held) ? held : null
+  }
+  var index = epgStore.index
+  if (!index || typeof index !== "object" || !Object.prototype.hasOwnProperty.call(index, key)) return null
+  var at = index[key]
+  if (!at || typeof epgStore.text !== "string") return null
+  var parsed
+  try { parsed = JSON.parse(epgStore.text.substr(at[0], at[1])) } catch (e) { return null }
+  return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed : null
 }
 
 // Backwards-compatible strings for callers that only want text. Both lines
@@ -454,7 +494,8 @@ function rowMeta(opts) {
 }
 export {
   pad2, formatClock, formatCount, pluralChannels, epgFraction, epgNowStale,
-  epgFields, epgCoverage, formatEpgLine, joinParts, EPG_DETAIL_FIELDS,
-  programmeFieldText, epgEpisodeText, EPG_DETAIL_MAX, epgDetailText,
-  formatTimeRange, programmeDetail, failedNotice, rowFailedMeta, rowMeta
+  epgFields, epgCoverage, epgEntry, formatEpgLine, joinParts,
+  EPG_DETAIL_FIELDS, programmeFieldText, epgEpisodeText, EPG_DETAIL_MAX,
+  epgDetailText, formatTimeRange, programmeDetail, failedNotice,
+  rowFailedMeta, rowMeta
 }

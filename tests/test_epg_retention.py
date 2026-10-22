@@ -268,7 +268,12 @@ class RetentionDifferentialTest(unittest.TestCase):
                     now_doc = handle.read()
                 outputs.append((window, now_doc, status))
             self.assertEqual(outputs[1][0], outputs[0][0], "epg-window.txt, seed %d" % seed)
-            self.assertEqual(outputs[1][1], outputs[0][1], "epg-now.json, seed %d" % seed)
+            # epg-now.json is the same DOCUMENT, no longer the same bytes:
+            # D-EPG-11 (R31b) writes one channel fragment per line so the
+            # shell can index it without parsing it whole. The window file
+            # above is still byte for byte; this one is compared as JSON,
+            # which is the equality the ruling promises every other reader.
+            self.assertEqual(json.loads(outputs[1][1]), json.loads(outputs[0][1]), "epg-now.json, seed %d" % seed)
             self.assertEqual(outputs[1][2], outputs[0][2], "status, seed %d" % seed)
             self.assertGreater(outputs[1][2]["programmeCount"], 0)
 
