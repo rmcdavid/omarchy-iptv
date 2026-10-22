@@ -40,7 +40,11 @@ VECTORS = [
     ("FILE:///srv/tv/local.m3u", True, "file", "/srv/tv/local.m3u", ""),
     ("file://host/srv/tv/a%20b.m3u", True, "file", "/srv/tv/a b.m3u", ""),
     ("/srv/tv/local.m3u\n", True, "file", "/srv/tv/local.m3u", ""),
-    ("http://h.test/a\x00b", True, "http", "http://h.test/ab", "h.test"),
+    # D-SRC-63 (R32a'''): a control character inside a URL is refused, never
+    # deleted (this read `http://h.test/ab` until then).
+    ("http://h.test/a\x00b", False, "invalid", "", ""),
+    ("http://u:pa\tss@h.test/x", False, "invalid", "", ""),
+    ("\thttp://h.test/x\r\n", True, "http", "http://h.test/x", "h.test"),
     ("", False, "empty", "", ""),
     ("   ", False, "empty", "", ""),
     ("\u00a0\t", False, "empty", "", ""),
@@ -279,7 +283,49 @@ class ResolveSourceTest(unittest.TestCase):
             helper.resolve_source("http://h.test/" + "a" * 2048)
         self.assertEqual(caught.exception.code, "too_long")
         self.assertNotIn("aaaa", caught.exception.message)
-        self.assertEqual(helper.resolve_source("http://h.test/a\x00b\n"), ("http", "http://h.test/ab"))
+        # D-SRC-63: a control character inside the URL is refused (it used to
+        # resolve as `http://h.test/ab`); one at the end is an edge, trimmed.
+        with self.assertRaises(helper.HelperError) as caught:
+            helper.resolve_source("http://h.test/a\x00b\n")
+        self.assertEqual(caught.exception.code, "bad_url")
+        self.assertNotIn("h.test", caught.exception.message)
+        self.assertEqual(helper.resolve_source("http://h.test/ab\n"), ("http", "http://h.test/ab"))
+
+    def test_d_src_63_a_url_reader_refuses_what_the_name_boundary_deleted(self):
+        """D-SRC-63 (R32a''', 2026-10-22): validate_source_url no longer
+        rewrites a URL. sanitize_input (the NAME boundary) deleted every
+        control character, so `http://u:pa<TAB>ss@h.test/x` validated as the
+        password `pass` -- in this helper as in the model, whatever the board
+        row said -- and the user learned of it only as a wrong-password
+        failure. The URL boundary (_sanitize_url_input) takes a leading BOM
+        and the six ASCII whitespace characters plus NBSP off the ENDS and
+        deletes nothing inside; the reader refuses a tab, a line break, an
+        information separator or U+0085 as whitespace and any other control
+        character as such, in a path, a file URL and an http URL alike. The
+        shared source-urls fixture pins the same shapes in the model."""
+        self.assertEqual(helper._sanitize_url_input(" \t\r\nhttp://h.test/a\tb\x07c\n\xa0 ", 100), "http://h.test/a\tb\x07c")
+        self.assertEqual(helper._sanitize_url_input("﻿﻿http://h.test/x", 100), "﻿http://h.test/x")
+        self.assertEqual(helper._sanitize_url_input("　http://h.test/x ", 100), "　http://h.test/x ")
+        self.assertEqual(helper._sanitize_url_input("abcdef", 3), "abc")
+        self.assertEqual(helper._sanitize_url_input(None, 3), "")
+        for text, message in [("http://u:pa\tss@h.test/x", "URL contains whitespace"),
+                              ("http://u:pa\x1css@h.test/x", "URL contains whitespace"),
+                              ("http://u:pa\x85ss@h.test/x", "URL contains whitespace"),
+                              ("http://h.test/x\nhttp://evil.test/", "URL contains whitespace"),
+                              ("http://h.test/a\x00b", "URL contains a control character"),
+                              ("/srv/tv/a\tb.m3u", "URL contains whitespace"),
+                              ("file:///srv/a%09b.m3u", "path contains a control character"),
+                              ("\x07", "URL contains a control character")]:
+            result = helper.validate_source_url(text)
+            self.assertEqual((result["ok"], result["code"], result["message"]), (False, "invalid", message), repr(text))
+        for text, url in [("http://h.test/x\r\n", "http://h.test/x"), ("\thttp://h.test/x\n", "http://h.test/x"),
+                          ("/srv/tv/local.m3u\n", "/srv/tv/local.m3u"), ("/srv/tv/my list.m3u", "/srv/tv/my list.m3u")]:
+            self.assertEqual(helper.validate_source_url(text)["url"], url, repr(text))
+        self.assertEqual(helper.validate_source_url("\n\t")["code"], "empty")
+        # The predicate's authority ends at the tab (R32a'''), so the later
+        # `@` is not seen: host_withheld is false where it is true without it.
+        self.assertFalse(helper.host_withheld("http://my:pa\t/ss@h.test/x"))
+        self.assertTrue(helper.host_withheld("http://my:pa/ss@h.test/x"))
 
     def test_code_mapping(self):
         # SR12: `provider.test/x` reads as a host without a scheme, `relative/x.m3u` as a relative path.

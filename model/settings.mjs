@@ -18,7 +18,8 @@ import {
   redactUrls, scrubUrls
 } from "./privacy.mjs"
 import {
-  MAX_SOURCES, MAX_SOURCE_URL, sanitizeInput, validateSourceUrl, sourceKey
+  MAX_SOURCES, MAX_SOURCE_URL, sanitizeInput, sanitizeUrlInput,
+  validateSourceUrl, sourceKey
 } from "./sources.mjs"
 import {
   activeKeyText
@@ -559,8 +560,9 @@ function settingsFrom(entry) {
 //                   service's snapshots are taken from `settings`, which is
 //                   this; a raw published value becomes this before anything
 //                   compares it.
-//   entryInputForm  then what adoption does with it: sanitizeInput (control
-//                   characters out, the space / NBSP edges, the cap), then
+//   entryInputForm  then what adoption does with it: sanitizeUrlInput (the
+//                   leading BOM, the ASCII-whitespace / NBSP edges, the cap;
+//                   nothing inside deleted, D-SRC-63), then
 //                   validateSourceUrl as a CLI value of that kind. `form` is
 //                   the validated URL when it passes (what a record stores
 //                   and what findSourceByUrl compares) and the sanitized text
@@ -579,8 +581,13 @@ function entryInputText(value) {
 }
 
 function entryInputForm(name, value) {
-  var text = sanitizeInput(entryInputText(value), MAX_SOURCE_URL + 1)
-  if (text === "") return { text: "", ok: false, url: "", form: "" }
+  // "No input" is still judged by sanitizeInput's emptiness (R4, R18a: a
+  // value of whitespace or control characters alone is an absent key), but
+  // the value that is validated is the URL boundary's (D-SRC-63): nothing
+  // inside it deleted, so `http://u:pa<TAB>ss@h.test/x` set with
+  // `omarchy bar set` is refused as invalid rather than adopted as `pass`.
+  if (sanitizeInput(entryInputText(value), MAX_SOURCE_URL + 1) === "") return { text: "", ok: false, url: "", form: "" }
+  var text = sanitizeUrlInput(entryInputText(value), MAX_SOURCE_URL + 1)
   var v = validateSourceUrl(text, name === "epgUrl" ? { kind: "epg", origin: "cli" } : { origin: "cli" })
   var ok = v.ok === true && str(v.url) !== ""
   return { text: text, ok: ok, url: ok ? str(v.url) : "", form: ok ? str(v.url) : text }

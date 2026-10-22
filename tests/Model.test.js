@@ -3815,37 +3815,56 @@ checkCall("D-SINK-1: every shared vector keeps its host and loses every credenti
     return v.mustNotAppear.some(function (frag) { return out.indexOf(frag) >= 0 })
   }).map(function (v) { return v.why + " -> " + Model.redactUrls(v.text) })
 }, [])
-// ---- R32a'' (D-SINK-32, D-SINK-33): ONE whitespace class, shared ----
+// ---- R32a''' (D-SINK-36; R32a'' before it, D-SINK-32, D-SINK-33): TWO
+// whitespace classes for two purposes ----
 //
-// The run and the authority of a free-text URL end at Model.isUrlSpaceAt,
-// which is the union of JS `\s`, Python `\s` and U+FEFF enumerated in
-// tests/fixtures/url-whitespace.json; the helper's suite holds its
-// URL_SPACE_CHARS to the same file. Every code point of the whole Unicode
-// range is asked, so the class is exactly the list and nothing the engine
-// thinks is whitespace sneaks in or out: lane-bounds-s3's helper had two
-// classes and a password holding U+FEFF printed the username.
+// A READER REFUSES THE UNION: Model.validateSourceUrl refuses every member
+// of Model.URL_SPACE_CODES (Model.isUrlSpaceAt), the union of JS `\s`,
+// Python `\s` and U+FEFF enumerated in tests/fixtures/url-whitespace.json.
+// A REDACTOR DELIMITS AT ASCII: the run and the authority of a free-text
+// URL end at Model.URL_DELIMITER_CODES (Model.isUrlDelimiterAt), the six
+// ASCII whitespace characters in the same file, and at nothing else -- a
+// password holding U+FEFF, NBSP, U+2028 or U+0085 redacts to the HOST
+// (under R32a'' the union ended the run and each mirror took the other's
+// worse case, D-SINK-36). The helper's suite holds URL_SPACE_CHARS and
+// URL_DELIMITER_CHARS to the same file. Every code point of the whole
+// Unicode range is asked, so each class is exactly its list and nothing the
+// engine thinks is whitespace sneaks in or out.
 const urlWhitespace = JSON.parse(require("fs").readFileSync(
   require("path").join(__dirname, "fixtures/url-whitespace.json"), "utf8"))
-checkCall("R32a'': isUrlSpaceAt holds on exactly the fixture's code points over the whole Unicode range, URL_SPACE_CODES lists exactly them, and JS `\\s` is a proper subset (U+0085 and U+001C..U+001F are the Python half)", function () {
+checkCall("R32a''': over the whole Unicode range isUrlSpaceAt holds on exactly the fixture's union and isUrlDelimiterAt on exactly its six delimiters; URL_SPACE_CODES and URL_DELIMITER_CODES list exactly them; the delimiters are a proper subset of JS `\\s`, which is a proper subset of the union (U+0085 and U+001C..U+001F are the Python half)", function () {
   const want = urlWhitespace.codePoints.map(function (e) { return parseInt(e.code.substring(2), 16) })
   const wantSet = new Set(want)
+  const delims = urlWhitespace.delimiters.map(function (e) { return parseInt(e.code.substring(2), 16) })
+  const delimSet = new Set(delims)
   const wrong = []
+  const wrongDelim = []
   // modelFn is declared further down (a const); the same shape inline.
   const isUrlSpaceAt = typeof Model.isUrlSpaceAt === "function" ? Model.isUrlSpaceAt : function () { return "MISSING" }
+  const isUrlDelimiterAt = typeof Model.isUrlDelimiterAt === "function" ? Model.isUrlDelimiterAt : function () { return "MISSING" }
   for (let c = 0; c <= 0x10ffff; c++) {
     const s = String.fromCodePoint(c)
     if (isUrlSpaceAt(s, 0) !== wantSet.has(c) && wrong.length < 8) wrong.push("U+" + c.toString(16).toUpperCase())
+    if (isUrlDelimiterAt(s, 0) !== delimSet.has(c) && wrongDelim.length < 8) wrongDelim.push("U+" + c.toString(16).toUpperCase())
   }
   const jsSpace = []
   for (let c = 0; c <= 0x10ffff; c++) if (/\s/u.test(String.fromCodePoint(c))) jsSpace.push(c)
-  return [want.length, urlWhitespace.unionCount, wrong, (Model.URL_SPACE_CODES || []).slice().sort(function (a, b) { return a - b }).join(",") === want.slice().sort(function (a, b) { return a - b }).join(","),
+  const sorted = function (a) { return a.slice().sort(function (x, y) { return x - y }).join(",") }
+  return [want.length, urlWhitespace.unionCount, delims.length, urlWhitespace.delimiterCount, wrong, wrongDelim,
+          sorted(Model.URL_SPACE_CODES || []) === sorted(want), sorted(Model.URL_DELIMITER_CODES || []) === sorted(delims),
+          delims.every(function (c) { return jsSpace.includes(c) }), delims.length < jsSpace.length,
           jsSpace.every(function (c) { return wantSet.has(c) }), jsSpace.length < want.length,
           want.filter(function (c) { return !jsSpace.includes(c) }).map(function (c) { return "U+" + c.toString(16).toUpperCase().padStart(4, "0") }),
-          urlWhitespace.codePoints.filter(function (e) { return e.in.indexOf("js") < 0 && e.in.indexOf("python") < 0 }).map(function (e) { return e.code })]
-}, [30, 30, [], true, true, true, ["U+001C", "U+001D", "U+001E", "U+001F", "U+0085"], []])
-checkCall("R32a'': the run ends at every class member and at nothing else -- a run through each printable ASCII character but whitespace keeps its host", function () {
-  const members = urlWhitespace.codePoints.map(function (e) { return String.fromCodePoint(parseInt(e.code.substring(2), 16)) })
-  const ended = members.filter(function (ch) { return Model.redactUrls("http://u:p@h.test/x" + ch + "SECRET@tail") !== "h.test" + ch + "SECRET@tail" })
+          urlWhitespace.codePoints.filter(function (e) { return e.in.indexOf("js") < 0 && e.in.indexOf("python") < 0 }).map(function (e) { return e.code }),
+          delims.every(function (c) { return c < 0x80 })]
+}, [30, 30, 6, 6, [], [], true, true, true, true, true, true, ["U+001C", "U+001D", "U+001E", "U+001F", "U+0085"], [], true])
+checkCall("R32a''': the run ends at each of the six delimiters and at NOTHING else -- every other union member inside a password keeps the host (D-SINK-36), as does every printable ASCII character but the delimiters", function () {
+  const delims = urlWhitespace.delimiters.map(function (e) { return String.fromCodePoint(parseInt(e.code.substring(2), 16)) })
+  const others = urlWhitespace.codePoints.map(function (e) { return String.fromCodePoint(parseInt(e.code.substring(2), 16)) })
+    .filter(function (ch) { return delims.indexOf(ch) === -1 })
+  const notEnded = delims.filter(function (ch) { return Model.redactUrls("http://u:p@h.test/x" + ch + "SECRET@tail") !== "h.test" + ch + "SECRET@tail" })
+  const split = others.filter(function (ch) { return Model.redactUrls("x http://myuser:pa" + ch + "ss@h.test/x y") !== "x h.test y" })
+    .map(function (ch) { return "U+" + ch.codePointAt(0).toString(16).toUpperCase() })
   const kept = []
   for (let c = 33; c < 127; c++) {
     const ch = String.fromCharCode(c)
@@ -3853,8 +3872,8 @@ checkCall("R32a'': the run ends at every class member and at nothing else -- a r
     const out = Model.redactUrls("x http://u:pa" + ch + "ss@h.test/x y")
     if (out !== "x h.test y") kept.push(ch + " -> " + out)
   }
-  return [ended, kept]
-}, [[], []])
+  return [others.length, notEnded, split, kept]
+}, [24, [], [], []])
 checkCall("R32a'': trailingPunctuationLength strips exactly `.,;:!?)]'\"<>` off a run's end, keeps a `]` when the run holds a `[`, and strips nothing else", function () {
   const f = typeof Model.trailingPunctuationLength === "function" ? Model.trailingPunctuationLength : function () { return "MISSING" }
   return [f("h.test/x."), f("h.test/x.,;:!?)]'\"<>"), f("[::1]."), f("[::1]]"), f("h.test"), f(""), f("..."), f("h.test/x-"), f("h.test/x}"), f("h.test/x]")]
@@ -3864,16 +3883,20 @@ checkCall("R32a'': trailingPunctuationLength strips exactly `.,;:!?)]'\"<>` off 
 // the restored sentence punctuation, and the accepted costs (D-SINK-34,
 // D-SINK-35) that are seen rather than described. The helper's suite reads
 // `py` the same way.
-checkCall("R32a'': every vector carrying an exact `js` output gets it, and there are vectors for each class member, each quote, both costs and the restored punctuation", function () {
+checkCall("R32a''': every vector carrying an exact `js` output gets it; there is a D-SINK-34 split vector for each of the six delimiters and NO other, a host vector (`prov.test`, never `myuser`) for U+FEFF, U+0085, U+001C..U+001F, U+2028 and NBSP inside a password, one per quote, the D-SINK-35 residual and the restored punctuation", function () {
   const exact = redactionVectors.vectors.filter(function (v) { return v.js !== undefined })
+  const inPassword = function (v, ch) { return v.text.indexOf("pa" + ch + "ss@") >= 0 }
   return [exact.length >= 20,
           exact.filter(function (v) { return Model.redactUrls(v.text) !== v.js }).map(function (v) { return v.why + " -> " + JSON.stringify(Model.redactUrls(v.text)) }),
-          ["\ufeff", "\u0085", "\u001c", "\u001d", "\u001e", "\u001f", "\u2028", "\u00a0", "\t", " "].every(function (ch) {
-            return exact.some(function (v) { return v.accepted === "D-SINK-34" && v.text.indexOf("pa" + ch + "ss@") >= 0 }) }),
+          ["\t", "\n", "\u000b", "\u000c", "\r", " "].every(function (ch) {
+            return exact.some(function (v) { return v.accepted === "D-SINK-34" && inPassword(v, ch) && v.host === "myuser" }) }),
+          exact.filter(function (v) { return v.accepted === "D-SINK-34" }).length === 6,
+          ["\ufeff", "\u0085", "\u001c", "\u001d", "\u001e", "\u001f", "\u2028", "\u00a0"].every(function (ch) {
+            return exact.some(function (v) { return v.accepted === undefined && inPassword(v, ch) && v.host === "prov.test" && v.js === "Failed to open prov.test." && v.mustNotAppear.indexOf("myuser") >= 0 }) }),
           ["'", "\"", "<", ">"].every(function (ch) { return exact.some(function (v) { return v.text.indexOf("pa" + ch + "ss@") >= 0 && v.host === "prov.test" }) }),
           redactionVectors.vectors.some(function (v) { return v.accepted === "D-SINK-35" && v.host === "user.name" }),
           exact.some(function (v) { return /\.$/.test(v.text) && /\.$/.test(v.js) && v.js.indexOf("[") < 0 })]
-}, [true, [], true, true, true, true])
+}, [true, [], true, true, true, true, true, true])
 checkCall("D-SINK-1: the fixture is not empty and carries the doubled-at case that started it", function () {
   // A shared fixture that quietly loses its vectors is the failure mode this
   // whole exercise is about, so its size and its key case are asserted.
@@ -3939,19 +3962,24 @@ checkCall("D-SINK-1: the doubled-at URL reads the same host through all three sp
 // as the one token `[host withheld]` when it has no dot and an `@` follows
 // the authority, so a password holding an unencoded `/`, `?` or `#` never
 // leaves its username in the host position (D-SINK-28). R32a'' (2026-10-22)
-// moved it a third time: the run ends at ONE enumerated whitespace class
-// (the union of JS `\s`, Python `\s` and U+FEFF, spelt out here as a class
-// literal, independently of Model.isUrlSpaceAt and of the shared fixture),
+// moved it a third time: the run ends at ONE enumerated whitespace class,
 // the sentence punctuation `.,;:!?)]'"<>` on the run's end is put back after
 // the host (a `]` kept when the run holds a `[`), and a NON-NUMERIC port
-// followed by a later `@` withholds too. It is the thing this
+// followed by a later `@` withholds too. R32a''' (2026-10-22, D-SINK-36)
+// moved the class: the run and the authority end at the SIX ASCII
+// delimiters -- space, tab, LF, CR, FF, VT, spelt out here as a class
+// literal independently of Model.isUrlDelimiterAt and of the shared
+// fixture -- and at nothing else, so U+FEFF, NBSP, U+2028 and U+0085 are
+// URL text and a password holding one redacts to the host (the union of
+// JS `\s`, Python `\s` and U+FEFF is what a READER refuses, not what a
+// redactor delimits at). It is the thing this
 // change is measured against: "the cost is linear" is worth nothing unless
 // "the answer is what the rule says" is checked at the same time, and the
 // only honest way to check that is to run a second, independent statement
 // of the rule. Deliberately a copy rather than an import -- the shipping
 // file must not carry a second redactor for a test's benefit, and a copy
 // that drifts is caught the moment a vector disagrees.
-const URL_RUN_AS_RULED = /[a-z][a-z0-9+.-]*:\/\/([^\t\n\v\f\r\u001c-\u001f \u0085\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]*)/gi
+const URL_RUN_AS_RULED = /[a-z][a-z0-9+.-]*:\/\/([^\t\n\v\f\r ]*)/gi
 function redactUrlsAsShipped(text) {
   return String(text === undefined || text === null ? "" : text)
     .replace(URL_RUN_AS_RULED, function (all, whole) {
@@ -3983,8 +4011,9 @@ function redactUrlsBeforeDSink23(text) {
   // An alphabet that reaches every branch of the scan: scheme characters, the
   // authority delimiters the host class excludes, the `@` D-SINK-1 is about,
   // several kinds of whitespace (`\s` is not just the space), and non-ASCII.
-  // R32a'': U+0085 and U+001C are in the class and were not JS whitespace,
-  // so the generator reaches the run ends the base never had.
+  // R32a''': U+00A0, U+2028 and U+FEFF are JS whitespace and NOT delimiters
+  // any more, and U+0085 and U+001C never were either, so the generator
+  // reaches runs the base ended and the rule continues through.
   const ALPHABET = "ahHt p:/@?#.+-_019\t\n\u00a0\u2028\ufeff\u0085\u001cx[]%&=,;'\"<>"
   function generated(length, seed) {
     let out = ""
@@ -4056,7 +4085,7 @@ function redactUrlsBeforeDSink23(text) {
     // the rule 14 shape this whole file is about.
     return [edges.length > 18000, bad]
   }, [true, []])
-  checkCall("R32a' / R32a'' (D-SINK-23, D-SINK-28, D-SINK-29, D-SINK-32..35): the base pattern and the rule disagree ONLY where an at-sign follows a `?` or `#` before any `/`, a `&`, `=` or `;` sits in the base's host, the host is bracketed, a dotless host or a non-numeric port has an at-sign after its authority, a run ends in sentence punctuation, or a run holds a class member JS `\\s` lacks", function () {
+  checkCall("R32a' / R32a'' / R32a''' (D-SINK-23, D-SINK-28, D-SINK-29, D-SINK-32..36): the base pattern and the rule disagree ONLY where an at-sign follows a `?` or `#` before any `/`, a `&`, `=` or `;` sits in the base's host, the host is bracketed, a dotless host or a non-numeric port has an at-sign after its authority, a run ends in sentence punctuation, or a run holds a JS `\\s` member that is not one of the six ASCII delimiters", function () {
     // Every disagreement must carry, inside some URL run (the text after a
     // `://` up to whitespace), an `@` after a `?` or `#` and before any `/`
     // (the base's userinfo search crossed into a pathless query), a `&`, `=`
@@ -4065,12 +4094,14 @@ function redactUrlsBeforeDSink23(text) {
     // `@` (withheld), a `:` after the host whose port text holds a non-digit
     // before the authority's end and a later `@` (R32a'', the second arm),
     // a character of `.,;:!?)]'"<>` ending the run (R32a'', put back now), or
-    // U+0085 / U+001C..U+001F inside the run (R32a'', the shared class ends
-    // the run there; JS `\s` did not). An `@` after a `/` alone is NOT a
-    // disagreement any more: the RFC authority never crosses a `/`
-    // (D-SINK-29). Anything else that differs is a change this round did
-    // not mean to make.
-    const explained = s => /:\/\/[^\/\s]*[?#][^\/\s]*@|:\/\/(?:[^\/\s]*@)?[^\/\s?#:@]*[&=;]|:\/\/(?:[^\/?#\s]*@)?\[|:\/\/(?:[^\/?#\s]*@)?[^\/?#\s.:;=&@\[]+(?:[:;=&][^\/?#\s]*)?[\/?#][^\s]*@|:\/\/(?:[^\/?#\s]*@)?[^\/?#\s:@\[]*:[^\/?#\s;=&]*[^0-9\/?#\s;=&][^\/?#\s]*[\/?#][^\s]*@|:\/\/[^\s]*[.,;:!?)\]'"<>](?=\s|$)|:\/\/[^\s]*[\u0085\u001c-\u001f]/.test(s)
+    // a JS `\s` member that is NOT one of the six ASCII delimiters inside
+    // the run as the rule reads it (R32a''': the base's `[^\s]*` tail ended
+    // the run at NBSP, U+2028 or U+FEFF; the rule runs through them). An
+    // `@` after a `/` alone is NOT a disagreement any more: the RFC
+    // authority never crosses a `/` (D-SINK-29). Anything else that differs
+    // is a change this round did not mean to make. Every `\s` below is the
+    // base's own class, which is what the base's run ended at.
+    const explained = s => /:\/\/[^\/\s]*[?#][^\/\s]*@|:\/\/(?:[^\/\s]*@)?[^\/\s?#:@]*[&=;]|:\/\/(?:[^\/?#\s]*@)?\[|:\/\/(?:[^\/?#\s]*@)?[^\/?#\s.:;=&@\[]+(?:[:;=&][^\/?#\s]*)?[\/?#][^\s]*@|:\/\/(?:[^\/?#\s]*@)?[^\/?#\s:@\[]*:[^\/?#\s;=&]*[^0-9\/?#\s;=&][^\/?#\s]*[\/?#][^\s]*@|:\/\/[^\s]*[.,;:!?)\]'"<>](?=\s|$)|:\/\/[^\t\n\v\f\r ]*[\u00a0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff]/.test(s)
     let differ = 0
     const unexplained = []
     for (let i = 0; i < edges.length; i++) {
@@ -5947,6 +5978,53 @@ check("validateSourceUrl origin cli accepts ~ verbatim, forms refuse it (SR11)",
 check("looksLikeHost heuristic (SR12)", ["list.m3u", "localhost:8080/x", "provider.test/list.m3u", "playlist", "Videos/list.m3u", ""].map(Model.looksLikeHost), [true, true, true, false, false, false])
 check("validateSourceUrl port normalization and bounds (SR15)", [Model.validateSourceUrl("http://h.test:0080/x").url, Model.validateSourceUrl("http://h.test:0/x").url, Model.validateSourceUrl("http://h.test:65536/x").code, Model.validateSourceUrl("http://[::1]:00443/x").url], ["http://h.test/x", "http://h.test:0/x", "invalid", "http://[::1]:443/x"])
 check("sanitizeInput strips a leading BOM only (SR15)", [Model.sanitizeInput("\ufeffhttp://h.test/x"), Model.sanitizeInput("a\ufeffb")], ["http://h.test/x", "a\ufeffb"])
+// ---- D-SRC-63 (R32a''', 2026-10-22): a URL field's boundary deletes nothing ----
+//
+// sanitizeInput served the URL fields too, and rewrote them: a tab in the
+// password became the password `pass`, a multi-line paste became one URL
+// nobody typed. The URL boundary (sanitizeUrlInput) takes a leading BOM and
+// the six ASCII whitespace characters plus NBSP off the ENDS, and the reader
+// (validateSourceUrl) REFUSES what is inside. A name field keeps
+// sanitizeInput. The shared source-urls fixture pins the validator in both
+// mirrors; these pin the boundary and every caller that chooses it.
+checkCall("D-SRC-63: sanitizeUrlInput takes one leading BOM and the six ASCII whitespace characters plus NBSP off both ends, deletes NOTHING inside, and caps", function () {
+  return [Model.sanitizeUrlInput(" \t\r\n\u000b\u000chttp://h.test/a\tb\u0007c\u001cd\u0085e\u0000f\n\u00a0 ", 100),
+          Model.sanitizeUrlInput("\ufeffhttp://h.test/x", 100), Model.sanitizeUrlInput("\ufeff\ufeffhttp://h.test/x", 100),
+          Model.sanitizeUrlInput("\u3000http://h.test/x\u2028", 100), Model.sanitizeUrlInput("abcdef", 3), Model.sanitizeUrlInput(null, 10), Model.sanitizeUrlInput("\n\t", 10)]
+}, ["http://h.test/a\tb\u0007c\u001cd\u0085e\u0000f", "http://h.test/x", "\ufeffhttp://h.test/x", "\u3000http://h.test/x\u2028", "abc", "", ""])
+checkCall("D-SRC-63: sanitizeFieldInput is the URL boundary for the playlist, EPG and Xtream server fields and sanitizeInput for the label, username and password -- a tab survives into a URL field and is deleted from a name field", function () {
+  const t = " http://u:pa\tss@h.test/x\n"
+  return [Model.sanitizeFieldInput("playlist", t, 100), Model.sanitizeFieldInput("epg", t, 100), Model.sanitizeFieldInput("server", t, 100),
+          Model.sanitizeFieldInput("label", " a\tb\u0007 ", 100), Model.sanitizeFieldInput("username", "u\ts", 100), Model.sanitizeFieldInput("password", "p\u0007w", 100),
+          Model.sanitizeFieldInput("label", "\u0007", 100)]
+}, ["http://u:pa\tss@h.test/x", "http://u:pa\tss@h.test/x", "http://u:pa\tss@h.test/x", "ab", "us", "pw", ""])
+checkCall("D-SRC-63: the form's submit keeps a tab inside a URL field and validateUrlForm then REFUSES it as invalid on that field (it submitted the password `pass` until R32a'''), while a tab in the label is dropped", function () {
+  const g = Model.withFormValue(Model.withFormValue(Model.openAddForm(Model.guideState("all")), "playlist", "http://u:pa\tss@h.test/x", { typed: false }), "label", "N\tAS", { typed: true })
+  const values = Model.formSubmitValues(g.form)
+  const v = Model.validateUrlForm(values, [], "")
+  return [values, v.ok, v.error && v.error.field, v.error && v.error.code, v.error && v.error.message]
+}, [{ label: "NAS", playlist: "http://u:pa\tss@h.test/x", epg: "" }, false, "playlist", "invalid", Model.sourceErrorMessage("invalid")])
+checkCall("D-SRC-63: typedText still strips every control character (Qt's own acceptance rule), so only a paste can carry one into a field", function () {
+  return [Model.typedText("x\ty\u0007", false), Model.typedText("\u001c", false)]
+}, ["xy", ""])
+checkCall("D-SRC-63 on the CLI path: entryInputForm validates the URL boundary's text, so a tab inside a bar-setting URL is a REFUSED input (not adopted as `pass`); a control-only value is still NO input (R18a); reconcileSources refuses the tab and adds nothing, and ignores the control-only value", function () {
+  const tab = "http://u:pa\tss@h.test/x"
+  const st = Model.emptyState()
+  const r = Model.reconcileSources(st, tab, "", "", 1000, "cli")
+  const none = Model.reconcileSources(st, "\u0007\u0007", "", "", 1000, "cli")
+  return [Model.entryInputForm("playlistUrl", "  " + tab + "\n"), Model.entryInputForm("epgUrl", "\u0007"),
+          r.changed, r.added, r.invalid && r.invalid.code, r.state.sources.length, none.changed, none.invalid]
+}, [{ text: "http://u:pa\tss@h.test/x", ok: false, url: "", form: "http://u:pa\tss@h.test/x" }, { text: "", ok: false, url: "", form: "" }, false, "", "invalid", 0, false, null])
+checkCall("D-SRC-63 reaches every other URL reader: a playlist's url-tvg hint with a tab resolves to no guide URL, and an Xtream server with one is invalid (its username and password keep the name rule, stated beside xtreamUrls)", function () {
+  return [Model.epgHintUrl({ epgUrlHint: "http://e.test/x\tmltv.php" }), Model.epgHintUrl({ epgUrlHint: "\thttp://e.test/xmltv.php\n" }),
+          Model.xtreamUrls("http://h.te\tst:8080", "u", "p").code, Model.xtreamUrls("http://h.test:8080", "u\tv", "p\u0007w").playlistUrl]
+}, ["", "http://e.test/xmltv.php", "invalid", "http://h.test:8080/get.php?username=uv&password=pw&type=m3u_plus&output=ts"])
+checkCall("D-SRC-63 meets R32a''': the predicate's authority cut at the six delimiters is observable by composition now -- `http://my:pa<TAB>/ss@h.test/x` ends its authority at the tab, so the later `@` is not seen and the refusal carries NO encoding sentence, where the same value without the tab carries it", function () {
+  const withTab = Model.validateSourceUrl("http://my:pa\t/ss@h.test/x")
+  const without = Model.validateSourceUrl("http://my:pa/ss@h.test/x")
+  return [withTab.code, withTab.message.indexOf(Model.ENCODE_SENTENCE) !== -1, without.code, without.message.indexOf(Model.ENCODE_SENTENCE) !== -1,
+          Model.urlHostWithheld("http://my:pa\t/ss@h.test/x"), Model.urlHostWithheld("http://my:pa/ss@h.test/x"), Model.sourceUrlWarning("http://my:pa\t/ss@h.test/x")]
+}, ["invalid", false, "invalid", true, false, true, ""])
 check("statusReason: one spelling for a non-M3U source (SR28)", [Model.statusReason({ ok: false, error: { code: "not_m3u", message: "" } }), Model.statusReason({ ok: false, error: { code: "not_a_playlist", message: "" } })], ["Not an M3U playlist", "Not an M3U playlist"])
 check("codePointLength / capCodePoints count code points, not UTF-16 units (SR22)", [Model.codePointLength("a\ud83d\udce1b"), Model.capCodePoints("a\ud83d\udce1b", 2), Model.validateLabel("\ud83d\udce1".repeat(64), [], "").ok, Model.validateLabel("\ud83d\udce1".repeat(65), [], "").code, Model.uniqueLabel("\ud83d\udce1".repeat(70), []).length], [3, "a\ud83d\udce1", true, "label_too_long", 128])
 check("formCapacity is the cap plus slack so over-cap input is refused, not cut (SR18)", [Model.formCapacity("playlist") > Model.formLimit("playlist"), Model.withFormValue(Model.openFirstRun(Model.guideState("all")), "playlist", "http://h.test/" + "a".repeat(2100)).form.values.playlist.length > 2048, Model.validateUrlForm({ label: "", playlist: "http://h.test/" + "a".repeat(2100), epg: "" }, [], "").error.code], [true, true, "too_long"])
@@ -8370,15 +8448,19 @@ checkCall("R18a / R21b: reconcileAction's 'seen' and entryInputSeen agree for ev
     }
   }
   for (const name of Object.keys(values)) for (const v of values[name]) for (const [a, b] of wraps) judge(name, a + v + b, v)
-  // ... and beyond spacing: what sanitize removes or validation normalises
-  // (scheme and host case, the default port, an embedded control character,
-  // a byte-order mark) is ONE input.
+  // ... and beyond spacing: what the boundary removes or validation
+  // normalises (scheme and host case, the default port, a byte-order mark)
+  // is ONE input. An embedded control character is NOT removed any more
+  // (D-SRC-63: a URL reader refuses it, never deletes it), so a refused
+  // value with one and the same value without it are TWO refused inputs;
+  // each is still one input however it is wrapped.
   for (const [name, value, snap] of [["playlistUrl", "HTTP://Gone.Example.TEST/list.m3u", "http://gone.example.test/list.m3u"],
                                      ["playlistUrl", "http://gone.example.test:80/list.m3u", "http://gone.example.test/list.m3u"],
-                                     ["playlistUrl", "ftp://u:p@h.test/x.m3u\u0007", "ftp://u:p@h.test/x.m3u"],
+                                     ["playlistUrl", "ftp://u:p@h.test/x.m3u\u0007", "  ftp://u:p@h.test/x.m3u\u0007\n"],
                                      ["epgUrl", "\ufeffhttp://epg.example.test/x.xml", "http://EPG.example.test/x.xml"]]) judge(name, value, snap)
-  return { cases: n, disagree }
-}, { cases: 68, disagree: [] })
+  return { cases: n, disagree, twoInputs: Model.sameEntryInput("playlistUrl", "ftp://u:p@h.test/x.m3u\u0007", "ftp://u:p@h.test/x.m3u"),
+           bothRefused: [Model.entryInputForm("playlistUrl", "ftp://u:p@h.test/x.m3u\u0007").ok, Model.entryInputForm("playlistUrl", "ftp://u:p@h.test/x.m3u").ok] }
+}, { cases: 68, disagree: [], twoInputs: false, bothRefused: [false, false] })
 checkCall("R18a, the sibling its search found: a guide URL of control characters alone is NO input -- reconcile neither adopts nor refuses it, and adoptActiveSource never replaces the active record's guide URL with the empty one it used to validate as", () => {
   const st = fixtureState(["d990c2e4", "42839dd5"], "d990c2e4")
   const own = activeKeyFixture.records.d990c2e4.epgUrl

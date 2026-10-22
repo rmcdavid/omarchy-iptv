@@ -827,23 +827,34 @@ host of a password holding an unencoded `/`, `?` or `#` is the username
 (D-SINK-28), a dotted username reads as a host with a port that is the
 password's prefix (D-SINK-35), and a scan that crossed the `/` to the run's
 last `@` printed a password tail instead (D-SINK-29, round 3, never
-shipped). "URL whitespace" is ONE class, enumerated code point by code
-point and shared by both mirrors (`Model.isUrlSpaceAt`, the helper's
-`URL_SPACE_CHARS`; the union of JS `\s`, Python `\s` and U+FEFF, pinned by
-`tests/fixtures/url-whitespace.json` over the whole Unicode range): it ends
-the free-text RUN and the authority alike, in both, because the helper once
-ended them at two different classes and a password holding U+FEFF printed
-the username (D-SINK-32), and `'`, `"`, `<` and `>` never end a run -- they
-ended the helper's until R32a'' (D-SINK-33) and are sentence punctuation
-now, stripped off the run's end and put back after the host by both
-mirrors (`.,;:!?)]'"<>`; a `]` kept when the run holds a `[`), so
+shipped). "URL whitespace" is TWO classes for two purposes (R32a''',
+2026-10-22, D-SINK-36), each enumerated code point by code point, shared
+by both mirrors and pinned by `tests/fixtures/url-whitespace.json` over
+the whole Unicode range in both suites. A READER REFUSES THE UNION:
+`Model.validateSourceUrl` and the helper's `validate_source_url` refuse a
+URL holding any member of the union of JS `\s`, Python `\s` and U+FEFF
+(30 code points, `Model.URL_SPACE_CODES`, the helper's `URL_SPACE_CHARS`).
+A FREE-TEXT REDACTOR DELIMITS AT ASCII: the run and the authority end at
+space, tab, LF, CR, FF, VT -- six code points, `Model.URL_DELIMITER_CODES`,
+the helper's `URL_DELIMITER_CHARS` -- and at nothing else, so a password
+holding U+FEFF, NBSP, U+2028, U+0085 or an information separator is URL
+text and redacts to the host in both mirrors. The helper once ended the run
+and the authority at two different classes and a password holding U+FEFF
+printed the username (D-SINK-32); the round that unified them ended both
+at the union, and each mirror then took the other's worse case -- the
+helper printed the username and the password's tail for U+FEFF where
+0.14.3 printed the host (D-SINK-36). `'`, `"`, `<` and `>` never end a run
+-- they ended the helper's until R32a'' (D-SINK-33) and are sentence
+punctuation now, stripped off the run's end and put back after the host by
+both mirrors (`.,;:!?)]'"<>`; a `]` kept when the run holds a `[`), so
 `Failed to open http://u:p@h.test/x.` prints `Failed to open h.test.` in
-the journal and `... http://h.test.` from the helper. The cost the one
-class carries, accepted as D-SINK-34: a whitespace character INSIDE a
-password ends the run, so the username and the password's tail print, in
-both mirrors, and the shared fixture pins that output for every member the
-ruling names. A display sink and validation read the RFC host
-unconditionally. Both rules, the costs and the shared fixture are in
+the journal and `... http://h.test.` from the helper. The cost that
+remains, accepted as D-SINK-34 and confined to the six delimiters: a space,
+a tab or a line break INSIDE a password ends the run, so the username and
+the password's tail print, in both mirrors, and the shared fixture pins
+that output for each of the six and the HOST for every other member of
+the union. A display sink and validation read the RFC host unconditionally.
+Both rules, the costs and the shared fixture are in
 `ARCHITECTURE-SOURCES.md` 3.1.
 
 Why environ is the route. `/proc/<pid>/cmdline` is readable by every uid on

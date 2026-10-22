@@ -459,52 +459,85 @@ class SharedRedactionVectors(unittest.TestCase):
         self.assertEqual([], bad)
 
     def test_r32a2_every_vector_with_an_exact_py_output_gets_it(self):
-        """R32a'' (2026-10-22): a vector carrying `py` pins the EXACT helper
+        """R32a''' (2026-10-22): a vector carrying `py` pins the EXACT helper
         output -- the restored sentence punctuation (`'`, `"`, `<`, `>`
-        included, D-SINK-33) and the accepted costs (D-SINK-34: a class
-        member inside a password ends the run; D-SINK-35) that are seen
-        rather than described. The node suite reads `js` the same way."""
+        included, D-SINK-33) and the accepted costs that are seen rather
+        than described: D-SINK-34, a DELIMITER inside a password ends the
+        run, one split vector per delimiter and no other; D-SINK-35. Every
+        other union member inside a password has a vector asserting the
+        HOST and never the username (D-SINK-36: under R32a'' this helper
+        printed `http://myuser<U+FEFF>ss@prov.test/live/1.ts`). The node
+        suite reads `js` the same way."""
         exact = [v for v in self.vectors() if "py" in v]
         self.assertGreaterEqual(len(exact), 20)
         bad = ["%s -> %r" % (v["why"], helper.redact_urls(v["text"])) for v in exact
                if helper.redact_urls(v["text"]) != v["py"]]
         self.assertEqual([], bad)
-        for ch in ["\ufeff", "\x85", "\x1c", "\x1d", "\x1e", "\x1f", "\u2028", "\xa0", "\t", " "]:
-            self.assertTrue(any(v.get("accepted") == "D-SINK-34" and "pa" + ch + "ss@" in v["text"] for v in exact), repr(ch))
+        for ch in ["\t", "\n", "\x0b", "\x0c", "\r", " "]:
+            self.assertTrue(any(v.get("accepted") == "D-SINK-34" and "pa" + ch + "ss@" in v["text"] and v["host"] == "myuser"
+                                for v in exact), repr(ch))
+        self.assertEqual(6, sum(1 for v in exact if v.get("accepted") == "D-SINK-34"))
+        for ch in ["\ufeff", "\x85", "\x1c", "\x1d", "\x1e", "\x1f", "\u2028", "\xa0"]:
+            self.assertTrue(any("accepted" not in v and "pa" + ch + "ss@" in v["text"] and v["host"] == "prov.test"
+                                and v["py"] == "Failed to open http://prov.test." and "myuser" in v["mustNotAppear"]
+                                for v in exact), repr(ch))
         for ch in ["'", '"', "<", ">"]:
             self.assertTrue(any("pa" + ch + "ss@" in v["text"] and v["host"] == "prov.test" for v in exact), ch)
         self.assertTrue(any(v.get("accepted") == "D-SINK-35" and v["host"] == "user.name" for v in self.vectors()))
 
     def test_r32a2_one_whitespace_class_shared_with_the_model(self):
-        """R32a'' (D-SINK-32, D-SINK-33): the run (_URL_TAIL_RE) and the
-        authority (_URL_SPACE) of a free-text URL end at URL_SPACE_CHARS,
-        the union of JS \\s, Python \\s and U+FEFF enumerated in
-        tests/fixtures/url-whitespace.json; the node suite holds
-        Model.isUrlSpaceAt to the same file. Every code point of the whole
-        range is asked, so the class is exactly the list. Lane-bounds-s3's
-        helper had TWO classes (Python \\s plus quotes for the run, Python
-        \\s plus U+FEFF for the authority) and a password holding U+FEFF
-        printed the username."""
+        """R32a''' (D-SINK-36; R32a'' before it, D-SINK-32, D-SINK-33): TWO
+        classes for two purposes. A READER refuses the union: _URL_SPACE
+        (validate_source_url) matches exactly URL_SPACE_CHARS, the union of
+        JS \\s, Python \\s and U+FEFF enumerated as `codePoints` in
+        tests/fixtures/url-whitespace.json. A REDACTOR delimits at ASCII:
+        the run (_URL_TAIL_RE) and the authority (_URL_DELIMITER) of a
+        free-text URL end at URL_DELIMITER_CHARS, the six `delimiters` in
+        the same file, and at nothing else. The node suite holds
+        Model.isUrlSpaceAt and Model.isUrlDelimiterAt to the same file.
+        Every code point of the whole range is asked, so each class is
+        exactly its list. Lane-bounds-s3's helper had two classes the
+        wrong way round (a password holding U+FEFF printed the username);
+        lane-bounds-s4's ended the run at the union and printed the
+        username and the tail for U+FEFF where 0.14.3 printed the host."""
         here = os.path.dirname(os.path.abspath(__file__))
         with open(os.path.join(here, "fixtures", "url-whitespace.json"), encoding="utf-8") as fh:
             doc = json.load(fh)
         want = {int(e["code"][2:], 16) for e in doc["codePoints"]}
+        delims = {int(e["code"][2:], 16) for e in doc["delimiters"]}
         self.assertEqual(len(want), doc["unionCount"])
+        self.assertEqual(len(delims), doc["delimiterCount"])
         self.assertEqual(sorted(ord(c) for c in helper.URL_SPACE_CHARS), sorted(want))
+        self.assertEqual(sorted(ord(c) for c in helper.URL_DELIMITER_CHARS), sorted(delims))
+        self.assertTrue(all(c < 0x80 for c in delims))
         wrong = [hex(c) for c in range(0x110000)
                  if (helper._URL_SPACE.match(chr(c)) is not None) != (c in want)]
         self.assertEqual([], wrong[:8])
-        # The run's class is the exact complement.
+        delim_wrong = [hex(c) for c in range(0x110000)
+                       if (helper._URL_DELIMITER.match(chr(c)) is not None) != (c in delims)]
+        self.assertEqual([], delim_wrong[:8])
+        # The run's class is the exact complement of the delimiters.
         tail_wrong = [hex(c) for c in range(0x110000)
-                      if (helper._URL_TAIL_RE.match(chr(c)) is not None) == (c in want)]
+                      if (helper._URL_TAIL_RE.match(chr(c)) is not None) == (c in delims)]
         self.assertEqual([], tail_wrong[:8])
         py_space = {c for c in range(0x110000) if re.match(r"\s", chr(c))}
-        self.assertTrue(py_space < want)
+        self.assertTrue(delims < py_space < want)
         self.assertEqual(sorted(want - py_space), [0xFEFF])
+        # Every union member that is not a delimiter is URL text: inside a
+        # password the host prints; after a URL it is copied through.
+        split = [hex(c) for c in sorted(want - delims)
+                 if helper.redact_urls("x http://myuser:pa%sss@h.test/x y" % chr(c)) != "x http://h.test y"]
+        self.assertEqual([], split)
+        swallowed = [hex(c) for c in sorted(want - delims)
+                     if helper.redact_urls("see http://h.test%snext" % chr(c)) != "see http://h.test%snext" % chr(c)]
+        self.assertEqual([], swallowed)
+        for c in sorted(delims):
+            self.assertEqual(helper.redact_urls("http://u:p@h.test/x%sSECRET@tail" % chr(c)), "http://h.test%sSECRET@tail" % chr(c), hex(c))
         # Quotes and angle brackets are trailing punctuation, not run ends.
         self.assertEqual(helper._TRAILING_PUNCTUATION, ".,;:!?)]'\"<>")
         for ch in "'\"<>":
             self.assertNotIn(ch, helper.URL_SPACE_CHARS)
+            self.assertNotIn(ch, helper.URL_DELIMITER_CHARS)
             self.assertEqual(helper.redact_urls("x http://u:pa%sss@h.test/x y" % ch), "x http://h.test y", ch)
         for ch in "'\"<>.":
             self.assertEqual(helper.redact_urls("%shttp://u:p@h.test/x%s" % (ch, ch)), "%shttp://h.test%s" % (ch, ch), ch)

@@ -2727,7 +2727,10 @@ Item {
       ? Model.editRangeFor(root.fieldMasked(id), value, item.cursorPosition, item.selectionStart, item.selectionEnd)
       : Model.editRangeFor(true, value, 0, 0, 0)
     var cap = Model.formCapacity(id)
-    var edit = Model.editInsert(value, range.start, range.end, Model.sanitizeInput(text, cap), cap)
+    // D-SRC-63: the boundary rule is the FIELD's. A URL field keeps what
+    // is inside the pasted text (a tab in a password is refused by the
+    // validator, never deleted into `pass`); a name field strips controls.
+    var edit = Model.editInsert(value, range.start, range.end, Model.sanitizeFieldInput(id, text, cap), cap)
     if (!edit.changed) return
     root.guide = Model.withFormValue(root.guide, id, edit.value, { typed: false })
     if (item) item.cursorPosition = edit.caret

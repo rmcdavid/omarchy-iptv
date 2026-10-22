@@ -48,7 +48,32 @@ def _validation(ok: bool, code: str, message: str, kind: str = "", url: str = ""
     return {"ok": ok, "code": code, "message": message, "kind": kind, "url": url, "host": host}
 
 
+_URL_EDGE_SPACE = URL_DELIMITER_CHARS + "\xa0"
+
+
+def _sanitize_url_input(value: Any, limit: int) -> str:
+    """Model.sanitizeUrlInput, the boundary rule for a URL (D-SRC-63,
+    R32a''', 2026-10-22): NOTHING inside the text is deleted. sanitize_input
+    served validate_source_url until then and rewrote the URL --
+    `http://u:pa<TAB>ss@h.test/x` validated as the password `pass`, here as
+    in the model, and a multi-line value collapsed into one URL nobody
+    typed. A reader REFUSES whitespace and control characters, and it can
+    only refuse what reaches it. What is taken off: one leading byte-order
+    mark (SR15), and the six ASCII whitespace characters plus NBSP off both
+    ENDS (a trailing newline, a tab-indented line); then the cap in UTF-16
+    units. The shared source-urls fixture holds both mirrors to it."""
+    text = "" if value is None else str(value)
+    if text.startswith("﻿"):
+        text = text[1:]
+    return truncate_utf16(text.strip(_URL_EDGE_SPACE), limit)
+
+
 def _validate_path(path: str) -> dict[str, Any]:
+    # D-SRC-63: a decoded `file:` path may carry what the raw text did not
+    # (`file:///a%09b`); refused, as normalize_state drops a record whose
+    # url holds a control character.
+    if _CONTROL_CHARS.search(path):
+        return _validation(False, "invalid", "path contains a control character")
     for prefix in UNSAFE_PATH_PREFIXES:
         if path == prefix or path.startswith(prefix + "/"):
             return _validation(False, "unsafe_path", "paths under /proc, /sys and /dev are not allowed")
@@ -72,11 +97,23 @@ def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
     characters, ports above 65535 and bracket literals that are not IPv6
     (SR15). Messages never contain a URL."""
     cli = origin == "cli"
-    value = sanitize_input(text, MAX_SOURCE_URL + 1)
+    # D-SRC-63 (R32a'''): the URL boundary rule deletes nothing inside the
+    # text, so what sanitize_input used to rewrite is refused below instead.
+    value = _sanitize_url_input(text, MAX_SOURCE_URL + 1)
     if value == "":
         return _validation(False, "empty", "no source URL or path given")
     if utf16_length(value) > MAX_SOURCE_URL:
         return _validation(False, "too_long", "source URL longer than %d characters" % MAX_SOURCE_URL)
+    # D-SRC-63: a control character anywhere -- a tab, a line break, an
+    # information separator, U+0085, a NUL -- is REFUSED, never deleted.
+    # Both state readers drop a record whose url holds one, so accepting it
+    # would store a source the next load discards. Mirrors
+    # Model.validateSourceUrl; the tab is whitespace first, so it is named
+    # as whitespace here as the model's union check would.
+    if _CONTROL_CHARS.search(value):
+        if _URL_SPACE.search(value):
+            return _validation(False, "invalid", "URL contains whitespace")
+        return _validation(False, "invalid", "URL contains a control character")
     if value.startswith("//"):
         return _validation(False, "scheme", "scheme-relative URLs are not supported (use http or https)")
     if value.startswith("/"):

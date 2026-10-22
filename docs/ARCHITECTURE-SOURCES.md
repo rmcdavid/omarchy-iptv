@@ -361,16 +361,43 @@ Constants: `STATE_VERSION = 2`, `CACHE_LAYOUT = 2`, `MAX_SOURCES = 50`,
 
 ### 3.1 `sanitizeInput(text, max)` and `validateSourceUrl(text)`
 
-`sanitizeInput(text, max)`: `str(text)` with every character in
+`sanitizeInput(text, max)`, the boundary rule for a NAME (the label, the
+Xtream username and password): `str(text)` with every character in
 `[\u0000-\u001f\u007f-\u009f]` removed (CR, LF, TAB included), leading and
 trailing ASCII space and NBSP (`\u00a0`) trimmed, then truncated to `max`
-UTF-16 units. Applied at the field boundary (paste, typing, the harness) and
-again inside `validateSourceUrl`.
+UTF-16 units. Applied at a name field's boundary (paste, submit) and inside
+`validateLabel` and `xtreamUrls` (for the username and password).
+
+`sanitizeUrlInput(text, max)`, the boundary rule for a URL (the playlist,
+the EPG, the Xtream server; **D-SRC-63, R32a''', 2026-10-22**): one leading
+byte-order mark dropped (SR15), the six ASCII whitespace characters and
+NBSP trimmed off both ENDS (a trailing newline from `wl-copy`, a
+tab-indented line), then truncated to `max` UTF-16 units -- and NOTHING
+inside the text deleted, because a URL reader REFUSES what the name rule
+deleted: `sanitizeInput` served the URL fields until R32a''' and rewrote
+them, so `http://u:pa<TAB>ss@h.test/x` validated as the password `pass`
+in both mirrors and the user learned of it only as a wrong-password
+failure, and `http://h.test/x<LF>http://evil.test/` validated as ONE url,
+`http://h.test/xhttp://evil.test/`, which nobody typed. Chosen per field
+by `Model.sanitizeFieldInput(field, text, max)` on a paste
+(`Guide.qml`'s `pasteFromProcess`) and on submit (`formSubmitValues`);
+applied inside `validateSourceUrl`, `sourceUrlWarning`, `xtreamUrls` (the
+server) and on the CLI path (`entryInputForm`, `reconcileSources`, where
+"no input" -- a value of whitespace or control characters alone, R18a --
+is still judged by `sanitizeInput`'s emptiness). `editInsert` inserts
+text as given: typed text has been through `typedText` (Qt's own
+acceptance rule, no control character ever types) and a paste through
+`sanitizeFieldInput`. The helper's `_sanitize_url_input` is the mirror.
 
 `validateSourceUrl(text)` -> `{ ok, code, message, kind, url, host }`:
 
-1. `s = sanitizeInput(text, MAX_SOURCE_URL + 1)`; `""` -> `empty`;
-   length > 2048 -> `too_long`.
+1. `s = sanitizeUrlInput(text, MAX_SOURCE_URL + 1)`; `""` -> `empty`;
+   length > 2048 -> `too_long`; any control character
+   (`[\u0000-\u001f\u007f-\u009f]`) anywhere in `s` -> `bad_url`
+   (D-SRC-63: refused, never deleted; both state readers drop a record
+   whose url holds one, so accepting it would store a source the next load
+   discards). A decoded `file:` path is checked again in step 2
+   (`file:///a%09b` decodes to a tab).
 2. `s` starts with `/` or `~` -> `kind: "file"`, `url: s` (no `~`
    expansion, no slash collapsing: the CLI and the screen store the same
    string; the helper expands `~` when it reads). A prefix of `/proc/`,
@@ -395,7 +422,13 @@ again inside `validateSourceUrl`.
    path `""` -> `/`, otherwise verbatim (no re-encoding, no dot-segment
    removal); query verbatim (order, case and encoding preserved -- provider
    tokens are case-sensitive), a bare `?` dropped; fragment dropped
-   (never sent). Whitespace anywhere in the rest -> `bad_url`.
+   (never sent). Whitespace anywhere in the rest -> `bad_url`, where
+   "whitespace" is the READER's class: the union of JS `\s`, Python `\s`
+   and U+FEFF (`Model.URL_SPACE_CODES`, the helper's `URL_SPACE_CHARS`, 30
+   code points pinned by `tests/fixtures/url-whitespace.json`), every
+   member of which now reaches this check (D-SRC-63: the boundary deletes
+   none of them), so a tab, a line break, an information separator or
+   U+0085 inside a password is `bad_url` and not a rewritten password.
    `url = scheme://[userinfo@]host[:port]path[?query]`, `host` as computed.
    **D-SINK-25 / D-SINK-27, ruling R32a (2026-10-21, round 3).** No URL is
    refused for an `@` after its authority, in either mirror. A password
@@ -465,17 +498,30 @@ again inside `validateSourceUrl`.
    neighbouring query parameter never prints, D-SINK-23:
    `http://h.test?u=me@b.test&p=SECRET` prints `h.test`); a bracketed
    literal is the host up to its `]`, or nothing. **The RUN** -- where the
-   URL stops inside the text -- ends at the SAME whitespace class as the
-   authority, in both mirrors (R32a'', D-SINK-32, D-SINK-33): ONE class,
-   the union of JS `\s`, Python `\s` and U+FEFF (30 code points, each
-   listed beside `Model.isUrlSpaceAt` and the helper's `URL_SPACE_CHARS`,
-   and pinned by `tests/fixtures/url-whitespace.json` over the whole
-   Unicode range in both suites). Until R32a'' the helper ended the run at
-   Python `\s` plus `'"<>` and the authority at Python `\s` plus U+FEFF,
-   and the model ended its run at JS `\s`: three classes, so a password
-   holding U+FEFF printed the username in the helper, and one holding `'`
-   printed the username AND the tail `'ss@prov.test/...`. `'`, `"`, `<`
-   and `>` never end a run now; they are sentence punctuation, and both
+   URL stops inside the text -- and the authority end at the SAME class in
+   both mirrors, and that class is the six ASCII DELIMITERS: space, tab,
+   LF, CR, FF, VT (`Model.URL_DELIMITER_CODES` / `isUrlDelimiterAt`, the
+   helper's `URL_DELIMITER_CHARS`; **R32a''', 2026-10-22, D-SINK-36**).
+   Every other whitespace or control code point is URL text: a password
+   holding U+FEFF, NBSP, U+2028, U+0085 or U+001C..U+001F stays inside the
+   run, its authority ends at the `@`, and the HOST prints. A reader
+   refuses, a redactor delimits: the union of JS `\s`, Python `\s` and
+   U+FEFF (30 code points, `Model.URL_SPACE_CODES`, the helper's
+   `URL_SPACE_CHARS`) is what validation REFUSES, and both lists are pinned
+   by `tests/fixtures/url-whitespace.json` over the whole Unicode range in
+   both suites, each asserting its engine's `\s` sits strictly between
+   them. Until R32a'' the helper ended the run at Python `\s` plus `'"<>`
+   and the authority at Python `\s` plus U+FEFF, and the model ended its
+   run at JS `\s`: three classes, so a password holding U+FEFF printed the
+   username in the helper (D-SINK-32), and one holding `'` printed the
+   username AND the tail `'ss@prov.test/...` (D-SINK-33). R32a'' ended
+   both at the union, and each mirror then took the other's worse case: the
+   helper printed `http://myuser<U+FEFF>ss@prov.test/live/1.ts` where
+   0.14.3 printed the host (D-SINK-36) -- the wider the class that ends the
+   run, the more of a password a redactor copies through, which is why the
+   redactor's class is the narrowest one that still ends a URL at a word
+   boundary in an error line. `'`, `"`, `<` and `>` never end a run; they
+   are sentence punctuation, and both
    mirrors strip `.,;:!?)]'"<>` off the run's end and put it back after the
    host (a `]` is kept when the run holds a `[`), so the model prints
    `Failed to open h.test.` where it used to drop the `.` and the helper
@@ -499,13 +545,14 @@ again inside `validateSourceUrl`.
    email's domain. THE COSTS, stated: a dotless intranet URL with a path `@`
    (`http://nas:8000/files/me@home/x`) and a `localhost` URL with one are
    withheld, in free text only; the Sources row, the label and validation
-   still show `nas` and `localhost`. A whitespace character INSIDE a
+   still show `nas` and `localhost`. One of the six DELIMITERS inside a
    password ends the run, so `http://myuser:pa ss@cdn.test/x` prints
    `myuser ss@cdn.test/x` in both mirrors -- the username and the
-   password's tail -- and so does U+FEFF, U+0085, U+001C..U+001F, U+2028,
-   NBSP or a tab in the same place (D-SINK-34, accepted; under 0.14.3 the
-   helper printed the host for U+FEFF and the model for U+0085 and
-   U+001C..U+001F, each mirror's own `\s`, and R32a'' makes both the same).
+   password's tail -- and so does a tab, LF, CR, FF or VT in the same place
+   (D-SINK-34, accepted and confined to those six by R32a'''); U+FEFF,
+   U+0085, U+001C..U+001F, U+2028 or NBSP in the same place prints the host
+   in both mirrors (under R32a'' they split the run too, and under 0.14.3
+   each mirror split at its own `\s` and printed the host for the other's).
    A dotted username before a digits-only password prefix prints as the
    host (`http://user.name:2024/ab@host/x` -> `user.name`, D-SINK-35's
    residual). The fixture pins every one of these outputs exactly (`js`,
@@ -537,9 +584,13 @@ spec and `tests/test_source.py`; `expect.url` is the normalized form):
 "FILE:///srv/tv/local.m3u"                                          -> ok file "/srv/tv/local.m3u"
 "file://host/srv/tv/a%20b.m3u"                                      -> ok file "/srv/tv/a b.m3u"
 "~/tv/list.m3u"                                                     -> ok file "~/tv/list.m3u"
-"/srv/tv/local.m3u" + LF                                            -> ok file "/srv/tv/local.m3u"   (newline stripped)
-"http://h.test/a" + NUL + "b"                                       -> ok http "http://h.test/ab"    (control char stripped)
-""  /  "   "                                                        -> empty
+"/srv/tv/local.m3u" + LF                                            -> ok file "/srv/tv/local.m3u"   (a trailing line break is an edge, trimmed)
+TAB + "http://h.test/x" + CR LF                                     -> ok http "http://h.test/x"     (the six ASCII whitespace characters and NBSP are trimmed off both ends)
+"http://h.test/a" + NUL + "b"                                       -> bad_url                       (D-SRC-63: a control character INSIDE is refused, never deleted; it read "http://h.test/ab" until R32a''')
+"http://u:pa" + TAB + "ss@h.test/x"                                 -> bad_url                       (D-SRC-63: it validated as the password "pass")
+"http://h.test/x" + LF + "http://evil.test/"                        -> bad_url                       (D-SRC-63: it collapsed to ONE url, "http://h.test/xhttp://evil.test/")
+"/srv/tv/a" + TAB + "b.m3u" / "file:///srv/a%09b.m3u"               -> bad_url                       (a control character in a path, raw or decoded)
+""  /  "   "  /  LF TAB                                             -> empty
 "provider.test/list.m3u"                                            -> unsupported_scheme
 "ftp://h.test/x" / "javascript:alert(1)" / "data:text/plain,x"      -> unsupported_scheme
 "http:///x" / "http://h .test/" / "http://:80/" / "http://h.test:abc/" -> bad_url
@@ -1327,10 +1378,18 @@ edit the control's copy and the next bound write would overwrite it.
 
 ## 6. Security and privacy rules for the input surface
 
-1. Clipboard and typed text are data. `Model.sanitizeInput` strips
+1. Clipboard and typed text are data. For a NAME field (the label, the
+   Xtream username and password) `Model.sanitizeInput` strips
    `[\u0000-\u001f\u007f-\u009f]` (so a multi-line paste collapses to one
-   line), trims, and caps (URL 2,048; label 64; Xtream server 512, user and
-   password 256). `TextField.maximumLength` mirrors the caps so a 16 KB paste
+   line), trims, and caps (label 64; user and password 256). For a URL
+   field (the playlist, the EPG, the Xtream server) `Model.sanitizeUrlInput`
+   trims the six ASCII whitespace characters and NBSP off the ends, caps
+   (URL 2,048; server 512), and deletes NOTHING inside: a control character
+   or whitespace inside a URL is refused by `validateSourceUrl`, never
+   deleted into a different URL (**D-SRC-63, R32a''', 2026-10-22**: a tab
+   in a password became the password `pass`, and a two-line paste became
+   one URL nobody typed). `Model.sanitizeFieldInput` picks the rule by
+   field (3.1). `TextField.maximumLength` mirrors the caps so a 16 KB paste
    never allocates a 16 KB string in a binding. Text is `Text.PlainText`
    everywhere it is rendered (coding standard; `StyledText` stays reserved
    for the plugin's own hint strings, `Guide.qml:1281`). **[Amended

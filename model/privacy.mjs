@@ -394,16 +394,34 @@ function isSpaceAt(s, i) {
   return SPACE_RE.test(s.charAt(i))
 }
 
-// R32a'' (2026-10-22, D-SINK-32, D-SINK-33). The ONE whitespace class that
-// ends a free-text URL's RUN (redactUrls) and its AUTHORITY (runHostParts),
-// and the whitespace validateSourceUrl refuses -- shared with the helper's
-// URL_SPACE_CHARS and pinned code point by code point by
-// the shared url-whitespace fixture (dev branch) in both suites. It is NOT `\s`, on
-// purpose: lane-bounds-s3's helper ended the run at Python's `\s` plus
-// `'"<>` and the authority at Python's `\s` plus U+FEFF, two classes, so a
-// password holding U+FEFF printed the username; and the JS run ended at
-// JS `\s`, a third class. This is the union of JS `\s`, Python `\s` and
-// U+FEFF, every member listed:
+// TWO whitespace classes for two purposes, and the difference is the rule
+// (R32a''', 2026-10-22, D-SINK-36; R32a'' before it, D-SINK-32, D-SINK-33):
+//
+//   A URL READER REFUSES THE UNION. validateSourceUrl (and the helper's
+//   validate_source_url over URL_SPACE_CHARS) refuses a typed or stored URL
+//   holding ANY member of URL_SPACE_CODES, the union of JS `\s`, Python
+//   `\s` and U+FEFF, so that no engine's own notion of whitespace is ever
+//   consulted and a URL one mirror accepts is never one the other splits.
+//
+//   A FREE-TEXT REDACTOR DELIMITS AT ASCII. redactUrls ends a URL run, and
+//   runHostParts ends its authority, at URL_DELIMITER_CODES ONLY: space,
+//   tab, LF, CR, FF, VT -- six code points, the helper's URL_DELIMITER_CHARS
+//   the same six. Every other whitespace or control code point is URL TEXT:
+//   a password holding U+FEFF, NBSP, U+2028, U+0085 or an information
+//   separator stays inside the run, its authority ends at the `@`, and the
+//   HOST prints. Under R32a'' both redactors ended the run at the union, and
+//   each mirror took the other's worse case: the helper printed
+//   `http://myuser<U+FEFF>ss@prov.test/live/1.ts` -- the username and the
+//   tail -- where 0.14.3 printed the host (D-SINK-36). A redactor's job is
+//   that nothing of a credential survives; the wider the class that ends
+//   the run, the more of a password it copies through. The accepted cost
+//   (D-SINK-34) is now confined to the six delimiters: a SPACE or a TAB
+//   inside a password still splits the run, and the shared fixture pins
+//   that output for each of the six and the HOST for every other member.
+//
+// Both lists are pinned code point by code point over the whole Unicode
+// range by the shared url-whitespace fixture (dev branch) in both suites.
+// The union, every member listed:
 //   U+0009 tab, U+000A LF, U+000B VT, U+000C FF, U+000D CR,
 //   U+001C U+001D U+001E U+001F (the information separators: Python's `\s`,
 //     not JS's),
@@ -412,14 +430,15 @@ function isSpaceAt(s, i) {
 //   U+2028 line separator, U+2029 paragraph separator,
 //   U+202F narrow NBSP, U+205F medium mathematical space,
 //   U+3000 ideographic space, U+FEFF (JS's `\s`, not Python's).
-// `'`, `"`, `<` and `>` are NOT whitespace: they ended the helper's run
-// until R32a'' (D-SINK-33, a password holding `'` printed the username and
-// the tail) and are trailing punctuation now, stripped off the run's end
-// and put back (redactUrls). isSpaceAt above stays JS `\s` for trimEndSpace.
+// `'`, `"`, `<` and `>` are in neither: they ended the helper's run until
+// R32a'' (D-SINK-33, a password holding `'` printed the username and the
+// tail) and are trailing punctuation now, stripped off the run's end and
+// put back (redactUrls). isSpaceAt above stays JS `\s` for trimEndSpace.
 var URL_SPACE_CODES = [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x1c, 0x1d, 0x1e, 0x1f, 0x20, 0x85, 0xa0,
   0x1680, 0x2000, 0x2001, 0x2002, 0x2003, 0x2004, 0x2005, 0x2006, 0x2007, 0x2008, 0x2009,
   0x200a, 0x2028, 0x2029, 0x202f, 0x205f, 0x3000, 0xfeff]
 
+// The reader's class: what validateSourceUrl refuses.
 function isUrlSpaceAt(s, i) {
   var c = s.charCodeAt(i)
   if (c === 0x20 || (c >= 0x09 && c <= 0x0d) || (c >= 0x1c && c <= 0x1f)) return true
@@ -428,10 +447,27 @@ function isUrlSpaceAt(s, i) {
     || c === 0x2028 || c === 0x2029 || c === 0x202f || c === 0x205f || c === 0x3000 || c === 0xfeff
 }
 
-// The index of the first URL whitespace in `s`, or -1 (runHostParts,
-// validateSourceUrl): one index walk, nothing retried.
+// The index of the first member of the reader's class in `s`, or -1
+// (validateSourceUrl): one index walk, nothing retried.
 function urlSpaceIndex(s) {
   for (var i = 0; i < s.length; i++) if (isUrlSpaceAt(s, i)) return i
+  return -1
+}
+
+// The redactor's class (R32a'''): the six ASCII delimiters, and nothing
+// else, end a free-text URL run (redactUrls) and its authority
+// (runHostParts). Mirrors the helper's URL_DELIMITER_CHARS.
+var URL_DELIMITER_CODES = [0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x20]
+
+function isUrlDelimiterAt(s, i) {
+  var c = s.charCodeAt(i)
+  return c === 0x20 || (c >= 0x09 && c <= 0x0d)
+}
+
+// The index of the first delimiter in `s`, or -1 (runHostParts): one index
+// walk, nothing retried.
+function urlDelimiterIndex(s) {
+  for (var i = 0; i < s.length; i++) if (isUrlDelimiterAt(s, i)) return i
   return -1
 }
 
@@ -489,12 +525,13 @@ function redactUrls(text) {
       j = s.indexOf("://", j + 1)
       continue
     }
-    // The run: to the first URL whitespace (R32a'', the shared class; it
-    // was the old `[^\s]*` tail, JS `\s`, until 2026-10-22), then the
-    // sentence punctuation stripped off its end and put back after the
-    // host, so `... http://h.test/x.` prints `h.test.` as the helper does.
+    // The run: to the first ASCII delimiter (R32a''', isUrlDelimiterAt: the
+    // six; it was the old `[^\s]*` tail, JS `\s`, until 2026-10-22, and the
+    // 30-point union for one round after that), then the sentence
+    // punctuation stripped off its end and put back after the host, so
+    // `... http://h.test/x.` prints `h.test.` as the helper does.
     var end = j + 3
-    while (end < n && !isUrlSpaceAt(s, end)) end++
+    while (end < n && !isUrlDelimiterAt(s, end)) end++
     var put = trailingPunctuationLength(s.substring(j + 3, end))
     var runEnd = end - put
     // R32a' (D-SINK-29, 2026-10-22; D-SINK-23, D-SINK-28). This is a
@@ -528,15 +565,18 @@ function redactUrls(text) {
     // the same one the Sources form warns with, and the helper's
     // redact_urls (run_host) is the same rule; the shared fixture holds both
     // to it. runHostParts is one pass over the run.
-    // R32a'' (2026-10-22, D-SINK-32, D-SINK-33): the run and the authority
-    // end at ONE enumerated whitespace class (isUrlSpaceAt) in both
-    // mirrors; `'"<>` never end a run (a password may hold them) and are
-    // trailing punctuation instead; and the predicate has a second arm, a
-    // NON-NUMERIC port followed by a later `@` (`http://user.name:pa/ss@h.test/x`
-    // is a dotted username and a password, withheld; D-SINK-35). The cost
-    // this adds, accepted as D-SINK-34: a whitespace character INSIDE a
-    // password splits the run, so `http://myuser:pa ss@cdn.test/x` prints
-    // `myuser ss@cdn.test/x` -- the fixture pins that output, per character.
+    // R32a'' (2026-10-22, D-SINK-32, D-SINK-33): `'"<>` never end a run (a
+    // password may hold them) and are trailing punctuation instead; and
+    // the predicate has a second arm, a NON-NUMERIC port followed by a
+    // later `@` (`http://user.name:pa/ss@h.test/x` is a dotted username and
+    // a password, withheld; D-SINK-35). R32a''' (D-SINK-36): the run and
+    // the authority end at the six ASCII delimiters (isUrlDelimiterAt) in
+    // both mirrors and at NOTHING else, so a password holding U+FEFF, NBSP,
+    // U+2028, U+0085 or U+001C..U+001F redacts to the host. The cost that
+    // remains, accepted as D-SINK-34 and confined to the six: a space or a
+    // tab INSIDE a password splits the run, so `http://myuser:pa ss@cdn.test/x`
+    // prints `myuser ss@cdn.test/x` -- the fixture pins that output for
+    // each delimiter and the host for every other whitespace code point.
     var parts = runHostParts(s.substring(j + 3, runEnd))
     var host = parts.withheld ? HOST_WITHHELD : parts.host
     out += s.substring(copied, p) + (host !== "" ? host : "[url]") + s.substring(runEnd, end)
@@ -587,6 +627,7 @@ export {
   configShieldDecision, entryShieldDecision, seqArg, mpvArgArgv,
   playerSessionArgv, playerStartArgv, playerStopArgv, playerRestartArgv,
   playerPauseArgv, notifyArgv, sourceLabel, hostOf, SPACE_RE, isSpaceAt,
-  URL_SPACE_CODES, isUrlSpaceAt, urlSpaceIndex, trailingPunctuationLength,
+  URL_SPACE_CODES, isUrlSpaceAt, urlSpaceIndex, URL_DELIMITER_CODES,
+  isUrlDelimiterAt, urlDelimiterIndex, trailingPunctuationLength,
   isSchemeRestCode, isLetterCode, redactUrls, scrubUrls, sinkText
 }

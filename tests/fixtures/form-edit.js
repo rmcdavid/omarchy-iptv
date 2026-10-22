@@ -779,7 +779,7 @@ var EDITS = [
     }
   },
   {
-    "why": "control characters never enter (sanitizeTyping's rule)",
+    "why": "D-SRC-63: the text is inserted AS GIVEN -- the boundary rule is the caller's (typedText for a key, sanitizeFieldInput for a paste), so a tab a URL field kept reaches the validator that refuses it; until D-SRC-63 editInsert stripped every control again",
     "op": "insert",
     "value": "ab",
     "sel": [
@@ -789,13 +789,13 @@ var EDITS = [
     "text": "x\ty\n",
     "cap": 10,
     "expect": {
-      "value": "axyb",
-      "caret": 3,
+      "value": "ax\ty\nb",
+      "caret": 5,
       "changed": true
     }
   },
   {
-    "why": "an insert of only controls is no insert",
+    "why": "D-SRC-63: a control character the caller handed in is an insert like any other (a name field's caller strips it first: sanitizeFieldInput)",
     "op": "insert",
     "value": "ab",
     "sel": [
@@ -805,9 +805,9 @@ var EDITS = [
     "text": "\u0007",
     "cap": 10,
     "expect": {
-      "value": "ab",
-      "caret": 1,
-      "changed": false
+      "value": "a\u0007b",
+      "caret": 2,
+      "changed": true
     }
   },
   {

@@ -12,7 +12,7 @@ import {
   logoConsentLines
 } from "./logos.mjs"
 import {
-  hostOf, urlSpaceIndex, redactUrls
+  hostOf, urlSpaceIndex, urlDelimiterIndex, redactUrls
 } from "./privacy.mjs"
 import {
   formatClock, formatCount, pluralChannels, joinParts
@@ -107,13 +107,56 @@ function capLength(text, limit) {
   return text.length > max ? text.substring(0, max) : text
 }
 
-// Field boundary rule: control characters (CR, LF, TAB, the C1 range)
-// removed so a multi-line paste collapses to one line, ASCII space and NBSP
-// trimmed, then capped at `limit` UTF-16 units. Applied to every paste, on
-// submit, and again inside the validators.
+// Field boundary rule for a NAME (the label; the Xtream username and
+// password; see sanitizeUrlInput for why not a URL): control characters
+// (CR, LF, TAB, the C1 range) removed so a multi-line paste collapses to
+// one line, ASCII space and NBSP trimmed, then capped at `limit` UTF-16
+// units. Applied to every paste into such a field, on submit, and inside
+// validateLabel and xtreamUrls.
 function sanitizeInput(text, limit) {
   // SR15: a leading byte-order mark (a common paste artefact) is dropped.
   return capLength(trimEdgeSpace(str(text).replace(/^\ufeff/, "").replace(CONTROL_RE, "")), limit)
+}
+
+// Field boundary rule for a URL (D-SRC-63, R32a''', 2026-10-22): NOTHING
+// inside the text is deleted. sanitizeInput used to serve URL fields too,
+// and it rewrote them: `http://u:pa<TAB>ss@h.test/x` validated as the
+// password `pass`, in both mirrors, and the user learned of it only as a
+// wrong-password failure; `http://h.test/x<LF>http://evil.test/` validated
+// as ONE url, `http://h.test/xhttp://evil.test/`, which nobody typed. A
+// reader REFUSES whitespace (validateSourceUrl, the union class) and a
+// control character, and it can only refuse what reaches it -- so a tab, a
+// line break, an information separator or U+0085 inside a URL is kept here
+// and refused there, with the one `invalid` sentence. What IS taken off:
+// one leading byte-order mark (SR15, a paste artefact), and the six ASCII
+// whitespace characters plus NBSP off both ENDS -- a trailing newline from
+// `wl-copy`, a tab-indented line -- because a URL cannot end in one and the
+// value the user meant is unambiguous. Then capped at `limit` UTF-16
+// units. Applied to every paste into a URL field (Guide.qml through
+// sanitizeFieldInput), on submit, inside validateSourceUrl, and on the CLI
+// path (entryInputForm, reconcileSources). The helper's
+// _sanitize_url_input is the mirror; the shared source-urls fixture holds
+// both to it.
+function sanitizeUrlInput(text, limit) {
+  var s = str(text)
+  if (s.charCodeAt(0) === 0xfeff) s = s.substring(1)
+  var a = 0
+  var b = s.length
+  while (a < b && isUrlEdgeSpace(s.charCodeAt(a))) a++
+  while (b > a && isUrlEdgeSpace(s.charCodeAt(b - 1))) b--
+  return capLength(a === 0 && b === s.length ? s : s.substring(a, b), limit)
+}
+
+// The six ASCII whitespace characters (URL_DELIMITER_CODES) and NBSP.
+function isUrlEdgeSpace(c) {
+  return c === 0x20 || (c >= 0x09 && c <= 0x0d) || c === 0xa0
+}
+
+// Whether `text` holds a C0 control, DEL or a C1 control: what a URL reader
+// refuses rather than deletes (D-SRC-63). `search`, not `test`: CONTROL_RE
+// is global, and a global regex's `test` carries its lastIndex across calls.
+function hasControlChar(text) {
+  return str(text).search(CONTROL_RE) !== -1
 }
 
 // D-PERF-3 (R30g). ASCII space and NBSP off both ends, and nothing else --
@@ -370,13 +413,28 @@ var HOST_WITHHELD = "[host withheld]"
 // password prefix (`http://user.name:2024/ab@host/x` prints `user.name`)
 // reads as host and port and nothing here can tell. An EMPTY port
 // (`http://user:/ab@h.test/x`) validates as an RFC shape and does not count
-// as non-numeric; a bracketed literal is never withheld. Whitespace is the
-// shared URL class (isUrlSpaceAt), the same one that ends the run. Every
-// scan is one index walk or one single-class search; nothing here is
+// as non-numeric; a bracketed literal is never withheld. The authority ends
+// at the six ASCII delimiters (urlDelimiterIndex, R32a''': the same six
+// that end the run) and at no other whitespace: a password holding U+FEFF
+// or NBSP is URL text, and its host prints (D-SINK-36). Where that cut is
+// observable, stated so nobody adds a test that mirrors the code (the
+// recheck of lane-bounds-s4 found two mutations here surviving by
+// composition). Through redactUrls, REMOVING the cut changes nothing: the
+// run handed in was already cut at the same six. Cutting at a WIDER class
+// than the run's does show through it: a run holding U+FEFF would end its
+// authority there and print the username, which is D-SINK-32's shape and
+// is pinned by the shared vectors. And through urlHostWithheld over form
+// or CLI text, since D-SRC-63 (sanitizeUrlInput keeps a tab), removing the
+// cut shows too: `http://my:pa<TAB>/ss@h.test/x` ends its authority at
+// the tab, before the `/`, so the later `@` is not seen and the refusal
+// carries no encoding sentence; without the cut it would. The shared
+// source-urls fixture pins that shape in both mirrors (measured: each
+// mutation goes red, 2026-10-22).
+// Every scan is one index walk or one single-class search; nothing here is
 // retried. The helper's `run_host_parts` is the mirror.
 function runHostParts(body) {
   var s = str(body)
-  var sp = urlSpaceIndex(s)
+  var sp = urlDelimiterIndex(s)
   if (sp !== -1) s = s.substring(0, sp)
   var cut = s.search(/[\/?#]/)
   var authority = cut === -1 ? s : s.substring(0, cut)
@@ -415,7 +473,7 @@ function urlHostWithheld(text) {
 function sourceUrlWarning(text) {
   var v = validateSourceUrl(text)
   if (!v.ok || v.kind !== "http") return ""
-  return urlHostWithheld(sanitizeInput(text, MAX_SOURCE_URL + 1)) ? WARN_AT_AFTER_AUTHORITY : ""
+  return urlHostWithheld(sanitizeUrlInput(text, MAX_SOURCE_URL + 1)) ? WARN_AT_AFTER_AUTHORITY : ""
 }
 
 // The form's warning line: the first URL field (playlist, EPG, Xtream server)
@@ -447,10 +505,17 @@ function validateSourceUrl(text, opts) {
     return { ok: true, code: "ok", message: "", field: field, kind: kind, url: url, host: host }
   }
   function filePath(path) {
+    // D-SRC-63: a decoded `file:` path may carry what the raw text did not
+    // (`file:///a%09b`); a control character in a path is refused here as
+    // it is below, because the state readers (parseState, the helper's
+    // normalize_state) drop a record whose url holds one.
+    if (hasControlChar(path)) return fail("invalid")
     if (/^\/(proc|sys|dev)(\/|$)/.test(path)) return fail("unsafe_path")
     return pass("file", path, "")
   }
-  var s = sanitizeInput(text, MAX_SOURCE_URL + 1)
+  // D-SRC-63 (R32a'''): the URL boundary rule deletes nothing inside the
+  // text, so what sanitizeInput used to rewrite is refused below instead.
+  var s = sanitizeUrlInput(text, MAX_SOURCE_URL + 1)
   // R32a': an `invalid` refusal of a value that reads as a dotless host with
   // a later `@` -- `http://myuser:pa#ss@cdn.test/x`, port `pa` -- says how
   // to encode the password, so the typo the warning exists for is told on
@@ -462,6 +527,14 @@ function validateSourceUrl(text, opts) {
   }
   if (s === "") return field === "epg" ? pass("", "", "") : fail("empty")
   if (s.length > MAX_SOURCE_URL) return fail("too_long")
+  // D-SRC-63: a control character anywhere -- a tab, a line break, an
+  // information separator, U+0085, a NUL -- in a path, a file URL or an
+  // http URL is REFUSED, never deleted (sanitizeInput deleted it, and
+  // `http://u:pa<TAB>ss@h.test/x` validated as the password `pass`). Both
+  // state readers drop a record whose url holds one, so accepting it would
+  // store a source the next load discards. The helper's validate_source_url
+  // refuses the same text.
+  if (hasControlChar(s)) return invalid()
   if (s.indexOf("//") === 0) return fail("scheme")
   if (s.charAt(0) === "/") return filePath(s)
   if (s.charAt(0) === "~") return cli ? pass("file", s, "") : fail("relative_path")
@@ -484,9 +557,12 @@ function validateSourceUrl(text, opts) {
   }
   if (scheme !== "http" && scheme !== "https") return fail("scheme")
   if (rest.indexOf("//") !== 0) return invalid()
-  // R32a'': the shared URL whitespace class, the one the redactors end a
-  // run at. sanitizeInput has dropped U+0085 and U+001C..U+001F already, so
-  // this refuses exactly what `/\s/` refused; one class, one place.
+  // R32a''': a READER refuses the union class (URL_SPACE_CODES: JS `\s`,
+  // Python `\s` and U+FEFF together), where a redactor delimits at the six
+  // ASCII characters only. Since D-SRC-63 every member reaches this line
+  // (sanitizeUrlInput deletes nothing inside the text; the control members
+  // were already refused above), so a tab in a password is `invalid` here
+  // and not the password `pass`.
   if (urlSpaceIndex(rest) !== -1) return invalid()
   var body = rest.substring(2)
   var cut = body.search(/[\/?#]/)
@@ -863,7 +939,15 @@ function xtreamUrls(server, username, password) {
   function fail(code, field) {
     return { ok: false, code: code, field: field, message: sourceErrorMessage(code), playlistUrl: "", epgUrl: "", host: "", base: "" }
   }
-  var srv = sanitizeInput(o.server, MAX_XTREAM_SERVER + 1)
+  // D-SRC-63: the server is a URL, so nothing inside it is deleted; a
+  // control character or whitespace inside it is refused by the validator
+  // below. The username and password stay on sanitizeInput: they are
+  // encoded into the query by encodeQueryValue, so a control character
+  // in one could be carried, and dropping it is the same silent rewrite
+  // one layer down -- recorded for the lead, not changed here, because a
+  // Qt TextInput never delivers one from a key and the paste path strips
+  // it for a name field (sanitizeFieldInput).
+  var srv = sanitizeUrlInput(o.server, MAX_XTREAM_SERVER + 1)
   if (srv === "") return fail("server_empty", "server")
   if (srv.length > MAX_XTREAM_SERVER) return fail("server_too_long", "server")
   if (!/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(srv)) return fail("server_scheme", "server")
@@ -1161,8 +1245,9 @@ export {
   TRACKS_KEY, DETAIL_KEY, REWIND_KEY, FORWARD_KEY, LIVE_KEY, REWIND_STEP_S,
   BEHIND_LIVE_SHOW_S, HELP_KEY, SOURCE_KEYS, SOURCE_KEY_RE, SOURCE_ORIGINS,
   URL_FIELDS, FORM_LIMITS, MONTHS, CONTROL_RE, capLength, sanitizeInput,
-  trimEdgeSpace, codePoints, codePointLength, capCodePoints, sanitizeTyping,
-  lowerFirst, sourceErrorMessage, sourceReason, PERSIST_FAILURE_REASONS,
+  sanitizeUrlInput, isUrlEdgeSpace, hasControlChar, trimEdgeSpace, codePoints,
+  codePointLength, capCodePoints, sanitizeTyping, lowerFirst,
+  sourceErrorMessage, sourceReason, PERSIST_FAILURE_REASONS,
   persistFailureMessage, refusalMessage, ZERO_WIDTH_RE, IPV6_LITERAL_RE,
   isIpv6Literal, cutQueryAndFragment, ENCODE_SENTENCE,
   WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts, urlHostWithheld,

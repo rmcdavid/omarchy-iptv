@@ -987,23 +987,36 @@ TestCase {
     compare(Model.mpvRejectedLine(Model.splitMpvArgs("--http-proxy user:pw@proxy.test:3128 --stream-lavf-o=tls_verify=0").rejected),
             "omarchy-iptv: ignoring mpvArgs tokens: <token> --stream-lavf-o")
   }
-  // R32a'' (2026-10-22, D-SINK-32..35) under V4: the one enumerated
-  // whitespace class ends the run and the authority (U+FEFF, U+0085 and
-  // U+001C each split the run, the accepted D-SINK-34 cost; `'"<>` never
-  // do), sentence punctuation is put back, and a non-numeric port followed
-  // by a later `@` withholds. The node suite runs the shared fixtures over
-  // the whole Unicode range; this pins the same functions in Qt's engine.
+  // R32a''' (2026-10-22, D-SINK-36; R32a'' before it, D-SINK-32..35)
+  // under V4: a READER refuses the 30-point union (validateSourceUrl), a
+  // REDACTOR delimits at the six ASCII whitespace characters only -- so
+  // U+FEFF, U+0085 and U+001C inside a password redact to the HOST where
+  // a tab still splits the run (D-SINK-34, confined to the six); `'"<>`
+  // never end a run; sentence punctuation is put back; a non-numeric port
+  // followed by a later `@` withholds. The node suite runs the shared
+  // fixtures over the whole Unicode range; this pins the same functions in
+  // Qt's engine.
   function test_r32a2_urlWhitespaceAndPunctuation() {
     compare(Model.URL_SPACE_CODES.length, 30)
+    compare(Model.URL_DELIMITER_CODES.length, 6)
     compare(Model.isUrlSpaceAt("\ufeff", 0), true)
     compare(Model.isUrlSpaceAt("\u0085", 0), true)
     compare(Model.isUrlSpaceAt("\u001c", 0), true)
     compare(Model.isUrlSpaceAt("'", 0), false)
     compare(Model.isUrlSpaceAt("<", 0), false)
+    compare(Model.isUrlDelimiterAt("\ufeff", 0), false)
+    compare(Model.isUrlDelimiterAt("\u00a0", 0), false)
+    compare(Model.isUrlDelimiterAt("\u0085", 0), false)
+    compare(Model.isUrlDelimiterAt("\t", 0), true)
+    compare(Model.isUrlDelimiterAt(" ", 0), true)
     compare(Model.redactUrls("Failed to open http://myuser:pa'ss@prov.test/live/1.ts."), "Failed to open prov.test.")
     compare(Model.redactUrls("x http://myuser:pa<ss@prov.test/x> y"), "x prov.test> y")
-    compare(Model.redactUrls("Failed to open http://myuser:pa\ufeffss@prov.test/live/1.ts."), "Failed to open myuser\ufeffss@prov.test/live/1.ts.")
-    compare(Model.redactUrls("http://myuser:pa\u0085ss@h.test/x"), "myuser\u0085ss@h.test/x")
+    compare(Model.redactUrls("Failed to open http://myuser:pa\ufeffss@prov.test/live/1.ts."), "Failed to open prov.test.")
+    compare(Model.redactUrls("http://myuser:pa\u0085ss@h.test/x"), "h.test")
+    compare(Model.redactUrls("x http://myuser:pa\u00a0ss@h.test/x y"), "x h.test y")
+    compare(Model.redactUrls("http://myuser:pa\u2028ss@h.test/x"), "h.test")
+    compare(Model.redactUrls("http://myuser:pa\tss@h.test/x"), "myuser\tss@h.test/x")
+    compare(Model.redactUrls("see http://h.test\u2028next"), "see h.test\u2028next")
     compare(Model.redactUrls("see 'http://u:p@h.test/x', <http://a.test> and \"http://b.test\"."), "see 'h.test', <a.test> and \"b.test\".")
     compare(Model.redactUrls("x http://[2001:db8::5]. y"), "x [2001:db8::5]. y")
     compare(Model.trailingPunctuationLength("h.test/x.,;:!?)]'\"<>"), 12)
@@ -1088,7 +1101,17 @@ TestCase {
     compare(Model.validateSourceUrl("file://host/srv/tv/a%20b.m3u").url, "/srv/tv/a b.m3u")
     compare(Model.validateSourceUrl("FILE:///srv/tv/local.m3u").kind, "file")
     compare(Model.validateSourceUrl("/srv/tv/local.m3u\n").url, "/srv/tv/local.m3u")
-    compare(Model.validateSourceUrl("http://h.test/a\u0000b").url, "http://h.test/ab")
+    // D-SRC-63 (R32a'''): a control character or whitespace INSIDE a URL is
+    // refused, never deleted -- `http://h.test/ab` was what this read until
+    // then, and a tab in a password became the password `pass`.
+    compare(Model.validateSourceUrl("http://h.test/a\u0000b").code, "invalid")
+    compare(Model.validateSourceUrl("http://u:pa\tss@h.test/x").code, "invalid")
+    compare(Model.validateSourceUrl("http://u:pa\u0085ss@h.test/x").code, "invalid")
+    compare(Model.validateSourceUrl("\thttp://h.test/x\r\n").url, "http://h.test/x")
+    compare(Model.sanitizeUrlInput(" http://h.test/a\tb\n", 100), "http://h.test/a\tb")
+    compare(Model.sanitizeFieldInput("playlist", "http://h.test/a\tb", 100), "http://h.test/a\tb")
+    compare(Model.sanitizeFieldInput("label", "a\tb", 100), "ab")
+    compare(Model.editInsert("ab", 1, 1, "x\ty", 10).value, "ax\tyb")
     compare(Model.validateSourceUrl("").code, "empty")
     compare(Model.validateSourceUrl("provider.test/list.m3u").code, "scheme")
     compare(Model.validateSourceUrl("javascript:alert(1)").code, "scheme")

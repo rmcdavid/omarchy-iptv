@@ -537,17 +537,35 @@ _SAFE_OPTION = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.\-]*$")   # never option-loo
 # decomposed Latin accent. Marks on other scripts stay (Cyrillic breve in
 # "\u0439" must not fold to "\u0438").
 _LATIN_MARKS = re.compile("([a-z])[\u0300-\u036f]+")
-# R32a'' (2026-10-22, D-SINK-32, D-SINK-33). The ONE whitespace class that
-# ends a free-text URL's RUN (_URL_TAIL_RE, redact_urls) and its AUTHORITY
-# (_URL_SPACE, run_host_parts), and the whitespace validate_source_url
-# refuses -- shared with Model.isUrlSpaceAt and pinned code point by code
-# point by the shared url-whitespace fixture (dev branch) in both suites. It is NOT `\s`,
-# on purpose: lane-bounds-s3 ended the run at Python's `\s` plus `'"<>`
-# (_URL_TAIL_RE as 0.14.3 shipped it) and the authority at Python's `\s` plus
-# U+FEFF, two classes, so a password holding U+FEFF printed the username; and
-# the model's run ended at JS `\s`, a third. This is the union of JS `\s`,
-# Python `\s` and U+FEFF, every member listed, none a regex metacharacter
-# inside a class:
+# TWO whitespace classes for two purposes, and the difference is the rule
+# (R32a''', 2026-10-22, D-SINK-36; R32a'' before it, D-SINK-32, D-SINK-33):
+#
+#   A URL READER REFUSES THE UNION. validate_source_url (and
+#   Model.validateSourceUrl over URL_SPACE_CODES) refuses a typed or stored
+#   URL holding ANY member of URL_SPACE_CHARS, the union of JS `\s`, Python
+#   `\s` and U+FEFF, so that no engine's own notion of whitespace is ever
+#   consulted and a URL one mirror accepts is never one the other splits.
+#
+#   A FREE-TEXT REDACTOR DELIMITS AT ASCII. redact_urls ends a URL run
+#   (_URL_TAIL_RE), and run_host_parts ends its authority (_URL_DELIMITER),
+#   at URL_DELIMITER_CHARS ONLY: space, tab, LF, CR, FF, VT -- six code
+#   points, Model.URL_DELIMITER_CODES the same six. Every other whitespace
+#   or control code point is URL TEXT: a password holding U+FEFF, NBSP,
+#   U+2028, U+0085 or an information separator stays inside the run, its
+#   authority ends at the `@`, and the HOST prints. Under R32a'' both
+#   redactors ended the run at the union, and each mirror took the other's
+#   worse case: this helper printed `http://myuser<U+FEFF>ss@prov.test/live/1.ts`
+#   -- the username and the tail -- where 0.14.3 printed the host
+#   (D-SINK-36). A redactor's job is that nothing of a credential survives;
+#   the wider the class that ends the run, the more of a password it copies
+#   through. The accepted cost (D-SINK-34) is now confined to the six
+#   delimiters: a SPACE or a TAB inside a password still splits the run,
+#   and the shared fixture pins that output for each of the six and the
+#   HOST for every other member.
+#
+# Both lists are pinned code point by code point over the whole Unicode
+# range by the shared url-whitespace fixture (dev branch) in both suites.
+# The union, every member listed, none a regex metacharacter inside a class:
 #   U+0009 tab, U+000A LF, U+000B VT, U+000C FF, U+000D CR,
 #   U+001C U+001D U+001E U+001F (the information separators: Python's `\s`,
 #     not JS's),
@@ -556,21 +574,27 @@ _LATIN_MARKS = re.compile("([a-z])[\u0300-\u036f]+")
 #   U+2028 line separator, U+2029 paragraph separator,
 #   U+202F narrow NBSP, U+205F medium mathematical space,
 #   U+3000 ideographic space, U+FEFF (JS's `\s`, not Python's).
-# `'`, `"`, `<` and `>` are NOT whitespace: a password may hold them, so they
-# are trailing punctuation now (_TRAILING_PUNCTUATION), stripped off the
-# run's end and put back.
+# `'`, `"`, `<` and `>` are in neither: a password may hold them, so they
+# are trailing punctuation (_TRAILING_PUNCTUATION), stripped off the run's
+# end and put back.
 URL_SPACE_CHARS = ("\t\n\x0b\x0c\r\x1c\x1d\x1e\x1f \x85\xa0\u1680"
                    "\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a"
                    "\u2028\u2029\u202f\u205f\u3000\ufeff")
+# The reader's class: what validate_source_url refuses.
 _URL_SPACE = re.compile("[" + URL_SPACE_CHARS + "]")
+# The redactor's class (R32a'''): the six ASCII delimiters, and nothing
+# else, end a free-text URL run and its authority.
+URL_DELIMITER_CHARS = "\t\n\x0b\x0c\r "
+_URL_DELIMITER = re.compile("[" + URL_DELIMITER_CHARS + "]")
 # redact_urls' pieces (F-SINK-11). It used to be one pattern,
 # `\b([A-Za-z][A-Za-z0-9+.\-]*)://[^\s'\"<>]+`, whose scheme run the engine
 # re-read from every word boundary; the scan is anchored on "://" now and these
-# are the parts of that pattern it still needs. The tail ends at the shared
-# class alone (R32a''; it was that pattern's `[^\s'"<>]+` until 2026-10-22).
-# `\w` is asked rather than guessed, so the word-boundary rule stays Python's
-# own outside ASCII.
-_URL_TAIL_RE = re.compile("[^" + URL_SPACE_CHARS + "]+")
+# are the parts of that pattern it still needs. The tail ends at the six
+# delimiters alone (R32a'''; it was that pattern's `[^\s'"<>]+` until
+# 2026-10-22, and the 30-point union for one round after that). `\w` is
+# asked rather than guessed, so the word-boundary rule stays Python's own
+# outside ASCII.
+_URL_TAIL_RE = re.compile("[^" + URL_DELIMITER_CHARS + "]+")
 # The sentence punctuation redact_urls strips off a run's end and puts back
 # after the host; Model.trailingPunctuationLength has the same set. A `]` is
 # kept when the run holds a `[` (an IPv6 literal).
@@ -887,9 +911,20 @@ def run_host_parts(body: str) -> tuple[str, bool]:
     remains, stated: a dotted username before a digits-only password
     prefix (`http://user.name:2024/ab@host/x` -> `user.name`) reads as host
     and port. An empty port validates as an RFC shape and does not count;
-    a bracketed literal is never withheld. Whitespace here is the shared
-    class URL_SPACE_CHARS, the one that ends the run (the authority and the
-    run were cut at two classes until R32a'', D-SINK-32). Not url_host:
+    a bracketed literal is never withheld. The authority ends at the six
+    ASCII delimiters (_URL_DELIMITER, R32a''': the same six that end the
+    run; the authority and the run were cut at two classes until R32a'',
+    D-SINK-32, and at the 30-point union for one round after it,
+    D-SINK-36) and at no other whitespace: a password holding U+FEFF or
+    NBSP is URL text, and its host prints. Where that cut is observable,
+    stated: through redact_urls REMOVING it changes nothing (the run
+    handed in was already cut at the same six), while cutting at a WIDER
+    class shows (a run holding U+FEFF would print the username, D-SINK-32's
+    shape, pinned by the shared vectors); through host_withheld over
+    validate_source_url's text, removing it shows since D-SRC-63 (a tab is
+    kept there): `http://my:pa<TAB>/ss@h.test/x` ends its authority at the
+    tab, before the `/`, so the later `@` is not seen (pinned by the
+    source tests; each mutation measured red, 2026-10-22). Not url_host:
     urllib's RFC reading is
     right for a display sink and for validation (source_host,
     validate_source_url) and prints that username. Not round 3's last-`@`-
@@ -900,7 +935,7 @@ def run_host_parts(body: str) -> tuple[str, bool]:
     a path `@` withholds its host, `localhost` included. One pass over the
     run: one search per class, no retry; the shared redaction fixture (dev
     branch) holds both mirrors to it."""
-    space = _URL_SPACE.search(body)
+    space = _URL_DELIMITER.search(body)
     if space is not None:
         body = body[:space.start()]
     cut = _AUTHORITY_END.search(body)

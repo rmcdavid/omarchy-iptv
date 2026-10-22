@@ -1,5 +1,5 @@
 {
- "note": "R32a'' (2026-10-22, D-SINK-32, D-SINK-33). The ONE whitespace class that ends a free-text URL's RUN and its AUTHORITY in both redactors (Model.redactUrls / runHostParts through Model.isUrlSpaceAt, the helper's redact_urls / run_host_parts through _URL_SPACE and _URL_TAIL_RE, both built from URL_SPACE_CHARS), and the whitespace the two URL validators refuse. It is the union of JavaScript's \\s (as node and Qt's V4 read it), Python's \\s (str.isspace) and U+FEFF, enumerated code point by code point so that neither engine's own notion is ever consulted again: lane-bounds-s3's helper ended the run at Python \\s plus quotes and the authority at Python \\s plus U+FEFF, two classes, and a password holding U+FEFF printed the username. Both suites (tests/Model.test.js under 'R32a''', tests/test_helper.py under the same name) read this file and assert, for EVERY code point of the whole Unicode range, that the mirror's class holds exactly these; each also asserts its own engine's \\s is a subset, so a change in either engine is seen rather than absorbed. `'`, `\"`, `<` and `>` are NOT here on purpose: they ended the helper's run until R32a'' (D-SINK-33) and are trailing punctuation now (tests/fixtures/redaction-vectors.json).",
+ "note": "TWO whitespace classes for two purposes (R32a''', 2026-10-22, D-SINK-36; R32a'' before it, D-SINK-32, D-SINK-33). `codePoints` is the READER's class: the union of JavaScript's \\s (as node and Qt's V4 read it), Python's \\s (str.isspace) and U+FEFF, enumerated code point by code point, which the two URL validators REFUSE (Model.validateSourceUrl through Model.isUrlSpaceAt / URL_SPACE_CODES, the helper's validate_source_url through _URL_SPACE over URL_SPACE_CHARS) so that neither engine's own notion is ever consulted. `delimiters` is the REDACTOR's class: the six ASCII whitespace characters, and nothing else, end a free-text URL's RUN and its AUTHORITY in both redactors (Model.redactUrls / runHostParts through Model.isUrlDelimiterAt / URL_DELIMITER_CODES, the helper's redact_urls / run_host_parts through _URL_TAIL_RE and _URL_DELIMITER over URL_DELIMITER_CHARS). A reader refuses, a redactor delimits: under R32a'' both redactors ended the run at the union and each mirror took the other's worse case -- the helper printed the username and the password's tail for U+FEFF where 0.14.3 printed the host (D-SINK-36). Both suites (tests/Model.test.js under 'R32a'''', tests/test_helper.py under the same name) read this file and assert, for EVERY code point of the whole Unicode range, that each mirror's two classes hold exactly these lists; each also asserts its own engine's \\s is a proper subset of the union and a proper superset of the delimiters, so a change in either engine is seen rather than absorbed. `'`, `\"`, `<` and `>` are in neither on purpose: they ended the helper's run until R32a'' (D-SINK-33) and are trailing punctuation now (tests/fixtures/redaction-vectors.json).",
  "codePoints": [
   {
    "code": "U+0009",
@@ -239,5 +239,32 @@
  ],
  "jsCount": 25,
  "pythonCount": 29,
- "unionCount": 30
+ "unionCount": 30,
+ "delimiters": [
+  {
+   "code": "U+0009",
+   "name": "CHARACTER TABULATION"
+  },
+  {
+   "code": "U+000A",
+   "name": "LINE FEED"
+  },
+  {
+   "code": "U+000B",
+   "name": "LINE TABULATION"
+  },
+  {
+   "code": "U+000C",
+   "name": "FORM FEED"
+  },
+  {
+   "code": "U+000D",
+   "name": "CARRIAGE RETURN"
+  },
+  {
+   "code": "U+0020",
+   "name": "SPACE"
+  }
+ ],
+ "delimiterCount": 6
 }

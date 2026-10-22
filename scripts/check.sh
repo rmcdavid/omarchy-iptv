@@ -349,7 +349,13 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-80}
 # b05c927 (2714, D-EPG-11). The larger side's floor taken at the merge; the
 # merged tree counts 2914 (both sides' checks are additive; S4's map-reader
 # check now names Model.epgMapEntry, the store reader keeping epgEntry).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2914}
+# 2026-10-22, lane-bounds-s5 (round 6: R32a''', D-SINK-36, D-SRC-63,
+# F-GATE-9): 2914 -> 2943 -- the two-class whole-range check, the run-end
+# check over the 24 non-delimiters, the exact-`js` vector check, the
+# D-SRC-63 boundary checks (sanitizeUrlInput, sanitizeFieldInput, the
+# submit path, the CLI path, every other URL reader, the composition pin)
+# and the 12 new source-urls fixture cases.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2943}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -532,7 +538,10 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2914}
 # guard's own tests).
 # 2026-10-22, lane-bounds-i: the merge of lane-bounds-s4 (1476) into dev at
 # b05c927 (1448); the merged tree counts 1481 (additive).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1481}
+# 2026-10-22, lane-bounds-s5 (round 6): 1481 -> 1485 -- test_source's
+# D-SRC-63 reader test (+1), test_model_regex_guard's three F-GATE-9 tests
+# (+3); test_helper's class test and exact-`py` test rewritten in place.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1485}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

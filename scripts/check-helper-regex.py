@@ -82,13 +82,15 @@ REVIEWED = [
     ("([a-z])[\u0300-\u036f]+", "provider",
      "linear: a run of marks is entered only from the letter before it; every position inside the run "
      "is not a letter and fails at once (_LATIN_MARKS, fold_text)"),
-    ("'[^' + URL_SPACE_CHARS + ']+'", "provider",
+    ("'[^' + URL_DELIMITER_CHARS + ']+'", "provider",
      "linear: matched at one given position, one class run and nothing after it; the class is the "
-     "enumerated URL whitespace, R32a'' (_URL_TAIL_RE, redact_urls)"),
+     "six ASCII delimiters, R32a''' (_URL_TAIL_RE, redact_urls)"),
+    ("'[' + URL_DELIMITER_CHARS + ']'", "provider",
+     "linear: one character class, no quantifier; the six ASCII delimiters, R32a''' (_URL_DELIMITER: "
+     "run_host_parts' provider text, the class that ends a free-text URL's authority)"),
     ("'[' + URL_SPACE_CHARS + ']'", "provider",
-     "linear: one character class, no quantifier; the enumerated URL whitespace, R32a'' (_URL_SPACE: "
-     "validate_source_url's user text and run_host_parts' provider text, the one class that ends "
-     "a free-text URL's run and its authority)"),
+     "linear: one character class, no quantifier; the enumerated URL whitespace union, R32a'' "
+     "(_URL_SPACE: validate_source_url's user text, the class a READER refuses)"),
     (r"\w", "provider",
      "constant: one character at one given position (_WORD_CHAR_RE, redact_urls)"),
     (r"(?:.*[^A-Za-z0-9+.\-])?", "provider",

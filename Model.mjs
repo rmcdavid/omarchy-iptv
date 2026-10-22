@@ -152,8 +152,8 @@ export {
   configShieldArgv, configShieldState, persistCarriesSecret,
   configShieldDecision, entryShieldDecision, playerStartArgv, playerStopArgv,
   playerRestartArgv, playerPauseArgv, notifyArgv, sourceLabel, hostOf,
-  URL_SPACE_CODES, isUrlSpaceAt, trailingPunctuationLength, redactUrls,
-  scrubUrls, sinkText
+  URL_SPACE_CODES, isUrlSpaceAt, URL_DELIMITER_CODES, isUrlDelimiterAt,
+  trailingPunctuationLength, redactUrls, scrubUrls, sinkText
 } from "./model/privacy.mjs"
 export {
   formatClock, formatCount, pluralChannels, epgFraction, epgNowStale,
@@ -181,8 +181,8 @@ export {
   MAX_XTREAM_FIELD, SOURCES_DIR, MASK, MASK_CLEAR_PARAMS, LIMITS, PAUSE_KEY,
   TRACKS_KEY, DETAIL_KEY, REWIND_KEY, FORWARD_KEY, LIVE_KEY, REWIND_STEP_S,
   BEHIND_LIVE_SHOW_S, HELP_KEY, SOURCE_KEYS, SOURCE_KEY_RE, sanitizeInput,
-  trimEdgeSpace, codePointLength, capCodePoints, sanitizeTyping,
-  sourceErrorMessage, sourceReason, PERSIST_FAILURE_REASONS,
+  sanitizeUrlInput, trimEdgeSpace, codePointLength, capCodePoints,
+  sanitizeTyping, sourceErrorMessage, sourceReason, PERSIST_FAILURE_REASONS,
   persistFailureMessage, refusalMessage, isIpv6Literal, cutQueryAndFragment,
   ENCODE_SENTENCE, WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts,
   urlHostWithheld, sourceUrlWarning, formWarningLine, looksLikeHost,
@@ -214,8 +214,8 @@ export {
 export {
   clipboardArgv, clipboardCut, parseClipboardReply, editRange, fullRange,
   editRangeFor, cutApplies, wordBoundary, typedText, editInsert, editDelete,
-  withFormError, withFormProbing, formSubmitValues, validateUrlForm,
-  sourcesRowCount, sourcesRowKind, sourcesAddAllowed, sourcesInitialCursor,
-  cursorAfterRemove, openSources, closeSources, withSourceCursor, startRemove,
-  startLogosConsent, afterRemove, afterSwitch
+  withFormError, withFormProbing, sanitizeFieldInput, formSubmitValues,
+  validateUrlForm, sourcesRowCount, sourcesRowKind, sourcesAddAllowed,
+  sourcesInitialCursor, cursorAfterRemove, openSources, closeSources,
+  withSourceCursor, startRemove, startLogosConsent, afterRemove, afterSwitch
 } from "./model/form-edit.mjs"

@@ -7,10 +7,14 @@ shape it names -- maskUrl's old `([^\\/?#]*)([^?#]*)` and the D-EPG-12
 `\\s*(?:[-/]\\s*)?\\s*` -- in a regex literal and in a `new RegExp` string,
 stay green for the linear shapes the model uses, read JavaScript's own
 syntax, not read comments or strings as code, and refuse a `new RegExp`
-built from an expression nobody listed. MODEL_REGEX_GUARD_ROOT points the
-whole-tree case at another tree, which is how it is seen red against the
-code before the change (dev 9739a3e carries the old maskUrl pattern at
-model/sources.mjs:630).
+built from an expression nobody listed. F-GATE-9 (round 6, R32a'''): it
+must also read `RegExp(` WITHOUT `new` and a string literal handed to
+`.match(`, `.search(` or `.matchAll(`, which the language converts to a
+RegExp -- two one-token evasions the round-5 guard let through -- while a
+string handed to `.replace(` or `.split(` is taken literally and is not a
+pattern. MODEL_REGEX_GUARD_ROOT points the whole-tree case at another tree,
+which is how it is seen red against the code before the change (dev
+9739a3e carries the old maskUrl pattern at model/sources.mjs:630).
 """
 import os
 import shutil
@@ -93,6 +97,47 @@ class ModelRegexGuardTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stdout)
         self.assertIn("0 problem(s)", done.stdout)
         self.assertIn("2 built", done.stdout)
+
+    def test_f_gate_9_regexp_without_new_and_a_string_handed_to_match_search_matchall_are_read(self):
+        # Each of these built the maskUrl shape past the round-5 guard; the
+        # last two vary the quote and the spacing so a guard that matched
+        # one spelling could not pass by accident.
+        for line in ['var F = RegExp("([^\\\\/?#]*)([^?#]*)(\\\\?[^#]*)?(#.*)?$")',
+                     'var G = RegExp("[ab]*[BC]*d", "i")',
+                     'var S = s.match("([^/?#]*)([^?#]*)$")',
+                     'var T = s.search("([^/?#]*)([^?#]*)$")',
+                     'var U = s.matchAll("([^/?#]*)([^?#]*)$")',
+                     "var V = s.match('([^/?#]*)([^?#]*)$')",
+                     'var W = s.match( "([^/?#]*)([^?#]*)$" )']:
+            with self.subTest(line):
+                done = run(self.file_with(line + "\n"))
+                self.assertEqual(done.returncode, 1, done.stdout)
+                self.assertIn("super-linear shape", done.stdout)
+                self.assertIn("1 built", done.stdout)
+
+    def test_f_gate_9_a_literal_string_to_replace_or_split_and_a_variable_to_match_are_not_patterns(self):
+        text = "\n".join([
+            'var a = s.replace("([^/?#]*)([^?#]*)$", "")',
+            'var b = s.split("([^/?#]*)([^?#]*)$")',
+            'var c = s.match(pattern)',
+            'var d = s.search(someRe)',
+            'var e = myRegExp("([^/?#]*)([^?#]*)$")',
+            'var f = obj.RegExp("([^/?#]*)([^?#]*)$")',
+            'var g = s.match(/[\\/?#]/)',
+            'var h = RegExp("^[a-z]+$")',
+            'var i = s.match("^[a-z]+$")',
+        ]) + "\n"
+        done = run(self.file_with(text))
+        self.assertEqual(done.returncode, 0, done.stdout)
+        self.assertIn("0 problem(s)", done.stdout)
+        self.assertIn("1 regex literal(s), 2 built", done.stdout)
+
+    def test_f_gate_9_a_template_literal_handed_to_match_or_regexp_is_a_problem(self):
+        for line in ['var r = RegExp(`[a-z]+`)', 'var r = s.match(`[a-z]+`)', 'var r = new RegExp(`[a-z]+`)']:
+            with self.subTest(line):
+                done = run(self.file_with(line + "\n"))
+                self.assertEqual(done.returncode, 1, done.stdout)
+                self.assertIn("cannot read", done.stdout)
 
     def test_a_built_pattern_nobody_listed_is_a_problem(self):
         done = run(self.file_with('var r = new RegExp(prefix + "[0-9]+")\n'))

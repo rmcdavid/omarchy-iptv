@@ -14,10 +14,10 @@ import {
 } from "./settings.mjs"
 import {
   CACHE_LAYOUT, MAX_SOURCES, MAX_SOURCE_URL, MAX_LABEL, SOURCE_ORIGINS,
-  FORM_LIMITS, CONTROL_RE, capLength, sanitizeInput, capCodePoints,
-  sourceErrorMessage, validateSourceUrl, isUrlField, isSourceKey, findSource,
-  findSourceByUrl, allocateSourceKey, deriveLabel, uniqueLabel, validateLabel,
-  maskUrl, sourceView, sourceViews
+  FORM_LIMITS, CONTROL_RE, capLength, sanitizeInput, sanitizeUrlInput,
+  capCodePoints, sourceErrorMessage, validateSourceUrl, isUrlField,
+  isSourceKey, findSource, findSourceByUrl, allocateSourceKey, deriveLabel,
+  uniqueLabel, validateLabel, maskUrl, sourceView, sourceViews
 } from "./sources.mjs"
 
 // ---- state records and reducers (ARCHITECTURE-SOURCES 2.1, 3.5)
@@ -494,7 +494,7 @@ function reconcileAction(input) {
 function entryPlaylistUnusable(raw) {
   var text = entryInputForm("playlistUrl", raw).text
   if (text === "") return false
-  return !validateSourceUrl(sanitizeInput(text, MAX_SOURCE_URL + 1), { origin: "cli" }).ok
+  return !validateSourceUrl(text, { origin: "cli" }).ok
 }
 
 function adoptActiveSource(state, entry, nowSec, origin, opts) {
@@ -695,8 +695,12 @@ function pointerWritePlan(input) {
 function reconcileSources(state, playlistUrl, epgUrl, previousActiveKey, nowSec, origin, opts) {
   var st = cloneState(state)
   var out = { state: st, changed: false, activeKey: "", added: "", full: false, invalid: null }
-  var raw = sanitizeInput(playlistUrl, MAX_SOURCE_URL + 1)
-  if (raw === "") return out
+  // No input (R18a: whitespace or control characters alone) is judged by
+  // sanitizeInput's emptiness; the value validated is the URL boundary's,
+  // nothing inside it deleted (D-SRC-63), so a tab inside a CLI value is
+  // `invalid` here and never adopted as a rewritten URL.
+  if (sanitizeInput(playlistUrl, MAX_SOURCE_URL + 1) === "") return out
+  var raw = sanitizeUrlInput(playlistUrl, MAX_SOURCE_URL + 1)
   // The settings are the CLI path: `~` paths stay accepted here (SR11,
   // no 0.1.0 regression) while the forms keep refusing them.
   var pv = validateSourceUrl(raw, { origin: "cli" })

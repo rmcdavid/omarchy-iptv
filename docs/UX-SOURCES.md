@@ -94,8 +94,11 @@ the shipped wireframe.]**
    clicking it still copies, as shipped). [Round 11, R21: the caption line is
    deleted; the form ends at `Load`.]
 2. The user pastes (`Ctrl+V`, `Shift+Insert`, middle click) or types. Every
-   arrival is sanitized (2.3): trimmed, newlines and control characters
-   removed, capped at `LIMITS.url`. A pasted value that has a query string or
+   arrival is sanitized (2.3): trimmed and capped at `LIMITS.url` -- and,
+   since D-SRC-63 (2026-10-22), NOT rewritten: a line break, a tab or any
+   other control character INSIDE a pasted URL stays in the field and the
+   result line refuses it (`Invalid URL - check the host`, 5.4) rather than
+   the value being quietly turned into a different URL. A pasted value that has a query string or
    userinfo is shown masked immediately (4.4); text the user types is never
    masked while they type it. **[Amended 2026-10-11, D-CLIP-1: `Ctrl+V` and
    `Shift+Insert` only, through the plugin's `wl-paste` process; middle click
@@ -508,10 +511,20 @@ Sanitize (Model.js `sanitizeInput(text, limit)`, applied in
 **[overturned 2026-10-11, D-CLIP-1: there is no `onTextChanged` and no
 native paste path; sanitize runs in `pasteFromProcess` on the `wl-paste`
 text, and typed text goes through `Model.typedText` and `editInsert`]**):
-strip `\r`, `\n` and other C0/C1 control characters; cap at the field's
-limit (`LIMITS.url` 2048, `LIMITS.label` 40, `LIMITS.server` 256,
-`LIMITS.user` / `LIMITS.pass` 128). URL fields are also trimmed on paste;
-every field is trimmed on submit (so a label can be typed with spaces).
+for the label, username and password, strip `\r`, `\n` and other C0/C1
+control characters (`sanitizeInput`); for the Playlist, EPG and Server
+fields, strip NOTHING inside the text (`sanitizeUrlInput`, chosen by
+`Model.sanitizeFieldInput`; **D-SRC-63, 2026-10-22**: a tab inside a pasted
+password used to be deleted and the password submitted as `pass`, learned
+of only as a wrong-password failure; now the validator refuses the value
+on the result line and the user sees why). Typed text never carries a
+control character (Qt's own acceptance rule, mirrored by `typedText`), so
+only a paste can. Cap at the field's limit (`LIMITS.url` 2048,
+`LIMITS.label` 40, `LIMITS.server` 256, `LIMITS.user` / `LIMITS.pass`
+128). URL fields are also trimmed on paste (the six ASCII whitespace
+characters and NBSP off both ends: a trailing newline from `wl-copy` never
+reaches the validator); every field is trimmed on submit (so a label can
+be typed with spaces).
 
 Esc, by origin:
 
@@ -1389,7 +1402,7 @@ Key names at opacity 0.7, verbs at 0.45, as shipped.
 |---|---|---|---|
 | `empty` | nothing after trim | `Enter a playlist URL or path` | (EPG is optional; no error) |
 | `scheme` | `ftp://`, `rtmp://`, `mailto:`, `javascript:`, a bare host, anything not `http(s)://` or `/` | `Start with http://, https://, or / for a local file` | `EPG: start with http://, https://, or / for a local file` |
-| `invalid` | scheme present but no host, spaces or illegal characters, unparsable | `Invalid URL - check the host` | `EPG: invalid URL - check the host` |
+| `invalid` | scheme present but no host, spaces or illegal characters, unparsable; since D-SRC-63 (2026-10-22) also a tab, a line break or any control character INSIDE the value, in a path too (`http://u:pa<TAB>ss@h.test/x`, which used to submit as the password `pass`; `http://h.test/x<LF>http://evil.test/`, which used to submit as one URL) | `Invalid URL - check the host` | `EPG: invalid URL - check the host` |
 | `invalid`, with the predicate (R32a', R32a'') | an `@` follows the first `/` and either the host before it has no dot (`http://myuser:pa#ss@cdn.test/x`, `pa?ss`, `pa/ss`: port `pa`) or the port after it is not a number (`http://user.name:pa/ss@h.test/x`, `http://h.test:pa/me@x.test/y`), and the value does not validate | `Invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` | `EPG: invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` (the Server field the same, without the prefix) |
 | `relative_path` | starts with `~`, `./` or a name | `Use an absolute path (starts with /, not ~)` | `EPG: use an absolute path (starts with /, not ~)` |
 | `too_long` | over `LIMITS.url` | `Too long - max 2,048 characters` | `EPG: too long - max 2,048 characters` |

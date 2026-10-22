@@ -151,22 +151,22 @@
   "note": "space inside the URL"
  },
  {
-  "input": "http://h.test/a\u2028b",
+  "input": "http://h.test/a b",
   "ok": false,
   "code": "invalid",
   "note": "D-SRC-06: a line separator inside an http URL is whitespace (invalid), not a missing scheme"
  },
  {
-  "input": "http://B\u00fccher.EXAMPLE/list.m3u",
+  "input": "http://Bücher.EXAMPLE/list.m3u",
   "ok": true,
   "kind": "http",
-  "url": "http://b\u00fccher.example/list.m3u",
-  "host": "b\u00fccher.example",
+  "url": "http://bücher.example/list.m3u",
+  "host": "bücher.example",
   "key": "df395abc",
   "note": "IDN host lowercased, kept as Unicode"
  },
  {
-  "input": "\u00a0http://h.test/x\u00a0",
+  "input": " http://h.test/x ",
   "ok": true,
   "kind": "http",
   "url": "http://h.test/x",
@@ -176,12 +176,9 @@
  },
  {
   "input": "http://h.test/a\u0000b",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h.test/ab",
-  "host": "h.test",
-  "key": "002bb14d",
-  "note": "control character stripped"
+  "ok": false,
+  "note": "D-SRC-63: a control character inside a URL is REFUSED, never deleted (it validated as `http://h.test/ab` until R32a''')",
+  "code": "invalid"
  },
  {
   "input": "http://h.test/x\r\n",
@@ -194,21 +191,15 @@
  },
  {
   "input": "http://h.test/x\nhttp://evil.test/",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h.test/xhttp://evil.test/",
-  "host": "h.test",
-  "key": "789267af",
-  "note": "a multi-line paste collapses to one line"
+  "ok": false,
+  "note": "D-SRC-63: a multi-line value is refused as whitespace -- it used to collapse to ONE url, `http://h.test/xhttp://evil.test/`, which nobody typed",
+  "code": "invalid"
  },
  {
   "input": "http://h.test/a\tb",
-  "ok": true,
-  "kind": "http",
-  "url": "http://h.test/ab",
-  "host": "h.test",
-  "key": "002bb14d",
-  "note": "tab stripped"
+  "ok": false,
+  "note": "D-SRC-63: a tab inside a URL is whitespace, refused (it was deleted until R32a''')",
+  "code": "invalid"
  },
  {
   "input": "HtTpS://H.TEST/Path/Case",
@@ -334,7 +325,7 @@
   "code": "empty"
  },
  {
-  "input": "\u00a0",
+  "input": " ",
   "ok": false,
   "code": "empty"
  },
@@ -462,19 +453,19 @@
   "note": "SR15: non-hex in a bracket literal"
  },
  {
-  "input": "http://h\u200b.test/x",
+  "input": "http://h​.test/x",
   "ok": false,
   "code": "invalid",
   "note": "SR15: zero-width space in the host"
  },
  {
-  "input": "http://h.test\u2060:8080/x",
+  "input": "http://h.test⁠:8080/x",
   "ok": false,
   "code": "invalid",
   "note": "SR15: word joiner in the authority"
  },
  {
-  "input": "http://h.test\ufeff/x",
+  "input": "http://h.test﻿/x",
   "ok": false,
   "code": "invalid",
   "note": "SR15: BOM inside the authority"
@@ -486,7 +477,7 @@
   "note": "SR15: backslash in the authority"
  },
  {
-  "input": "\ufeffhttp://h.test/x",
+  "input": "﻿http://h.test/x",
   "ok": true,
   "kind": "http",
   "url": "http://h.test/x",
@@ -1057,5 +1048,91 @@
   "key": "7e3572fe",
   "warn": false,
   "note": "R32a'': an empty port is an RFC shape and not non-numeric; a dotted host with one and a later '@' is neither arm, no warning"
+ },
+ {
+  "input": "http://u:pa\tss@h.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SRC-63, THE SHAPE: a tab inside the password is refused as whitespace in both mirrors -- sanitizeInput used to delete it and the value validated as the password `pass`, learned of only as a wrong-password failure",
+  "warn": false
+ },
+ {
+  "input": "http://u:pa\u001css@h.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SRC-63: an information separator (U+001C, Python whitespace) inside the password, refused, never deleted",
+  "warn": false
+ },
+ {
+  "input": "http://u:pass@h.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SRC-63: U+0085 NEL inside the password, refused, never deleted",
+  "warn": false
+ },
+ {
+  "input": "http://u:pa\rss@h.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SRC-63: a carriage return inside the password, refused (it used to collapse to `pass`)",
+  "warn": false
+ },
+ {
+  "input": "http://my:pa\t/ss@h.test/x",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SRC-63 meets R32a''': the predicate's authority ends at the tab, before the `/`, so the later `@` is not seen and the refusal carries NO encoding sentence (warn false) -- the one place the authority cut is observable by composition; the user removes the tab, resubmits and is then told how to encode the `/`",
+  "warn": false
+ },
+ {
+  "input": "/srv/tv/a\tb.m3u",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SRC-63: a control character in a PATH is refused too: both state readers drop a record whose url holds one, so accepting it would store a source the next load discards"
+ },
+ {
+  "input": "file:///srv/a%09b.m3u",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SRC-63: a percent-encoded tab decodes into the stored path and is refused there for the same reason"
+ },
+ {
+  "input": "\u0007",
+  "ok": false,
+  "code": "invalid",
+  "note": "D-SRC-63: a control character alone is not empty (sanitizeInput's emptiness still decides `no input` on the CLI path) and is refused as invalid"
+ },
+ {
+  "input": "\thttp://h.test/x\n",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h.test/x",
+  "host": "h.test",
+  "key": "b878d902",
+  "note": "D-SRC-63: the six ASCII whitespace characters are trimmed off both ENDS of a URL (a tab-indented line, a trailing newline from wl-copy): a URL cannot end in one, so the value meant is unambiguous"
+ },
+ {
+  "input": "http://h.test/x\u000b",
+  "ok": true,
+  "kind": "http",
+  "url": "http://h.test/x",
+  "host": "h.test",
+  "key": "b878d902",
+  "note": "D-SRC-63: a vertical tab at the end is an edge, trimmed"
+ },
+ {
+  "input": "/srv/tv/my list.m3u",
+  "ok": true,
+  "kind": "file",
+  "url": "/srv/tv/my list.m3u",
+  "host": "",
+  "key": "d371c9ea",
+  "note": "a space inside a PATH is legal and kept (unchanged by D-SRC-63; only control characters are refused in a path)"
+ },
+ {
+  "input": "http://h.test/a b",
+  "ok": false,
+  "code": "invalid",
+  "note": "a paragraph separator inside an http URL is whitespace (the union class a reader refuses), as D-SRC-06's line separator is"
  }
 ]

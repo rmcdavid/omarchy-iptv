@@ -44,12 +44,18 @@ helper = load_helper()
 # username for a password holding an unencoded '/', '?' or '#' (D-SINK-28);
 # R32a's last-'@'-of-the-run scan (round 3, never shipped) printed a password
 # TAIL for an '@' inside a path credential (D-SINK-29). R32a'' (D-SINK-32,
-# D-SINK-33): the run and the authority end at ONE enumerated whitespace
-# class -- the union of JS \\s, Python \\s and U+FEFF, spelt out here as a
-# class literal independently of the helper's URL_SPACE_CHARS -- `'"<>`
-# are sentence punctuation put back after the host, and a NON-NUMERIC port
-# followed by a later '@' withholds too (the second arm, D-SINK-35).
-_WS = "\t\n\x0b\x0c\r\x1c\x1d\x1e\x1f \x85\xa0\u1680\u2000-\u200a\u2028\u2029\u202f\u205f\u3000\ufeff"
+# D-SINK-33): `'"<>` are sentence punctuation put back after the host, and a
+# NON-NUMERIC port followed by a later '@' withholds too (the second arm,
+# D-SINK-35). R32a''' (D-SINK-36): the run and the authority end at the SIX
+# ASCII delimiters -- space, tab, LF, CR, FF, VT, spelt out here as a class
+# literal independently of the helper's URL_DELIMITER_CHARS -- and at
+# nothing else: U+FEFF, NBSP, U+2028, U+0085 and the information separators
+# are URL text, and a password holding one redacts to the host (the union
+# of JS \\s, Python \\s and U+FEFF is what a READER refuses, not what a
+# redactor delimits at; under R32a'' it ended the run here and the helper
+# printed the username and the tail for U+FEFF where 0.14.3 printed the
+# host).
+_WS = "\t\n\x0b\x0c\r "
 _AS_SHIPPED = re.compile(r"\b([A-Za-z][A-Za-z0-9+.\-]*)://[^" + _WS + "]+")
 _AUTHORITY_END_AS_RULED = re.compile("[/?#" + _WS + "]")
 _HOST_END_AS_RULED = re.compile(r"[:;=&]")
@@ -62,7 +68,9 @@ def host_as_ruled(raw):
     cut = _AUTHORITY_END_AS_RULED.search(body)
     authority = body if cut is None else body[:cut.start()]
     rest = "" if cut is None else body[cut.start():]
-    rest = rest.split()[0] if rest.split() else rest
+    # The rest up to the first DELIMITER (not str.split, whose class is
+    # Python's own whitespace: R32a''').
+    rest = re.split("[" + _WS + "]", rest, 1)[0]
     hostport = authority[authority.rfind("@") + 1:]
     if hostport.startswith("["):
         close = hostport.find("]")

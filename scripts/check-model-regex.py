@@ -25,14 +25,26 @@ repeats that may match nothing, or single characters the first class also
 matches). The D-EPG-12 shape (`\\s*(?:[-/]\\s*)?\\s*`) and the maskUrl shape
 are both that.
 
+WHAT IT READS AS A PATTERN: a regex literal; a `RegExp(...)` call, with
+or without `new` (F-GATE-9: the two build the same object, and `RegExp("...")`
+was a one-token evasion of a guard that looked for `new`); and a string
+literal handed to `.match(`, `.search(` or `.matchAll(`, which the
+language converts to a RegExp (F-GATE-9 again). A `.replace(` or `.split(`
+with a string takes it LITERALLY and builds no pattern, so those are not
+read. A `RegExp` call or a `.match`/`.search`/`.matchAll` whose argument is
+a template literal is a problem (unreadable), and a `RegExp` call whose
+argument is any other expression is listed in BUILT below with the reason it
+is linear, or it is a problem; an expression nobody listed is a pattern
+nobody read.
+
 WHAT IT DOES NOT SEE, as the helper guard says of itself: a run with no
 literal prefix searched from every position (D-EPG-8, F-SINK-11, D-PERF-6),
 a nested unbounded repeat (`(a+)+`), a run hidden at the START of an optional
-group (the walk looks at one sequence at a time), and anything that is not a
-regex literal or a `new RegExp` with a string-literal pattern. A `new RegExp`
-whose pattern is an expression is listed in BUILT below with the reason it
-is linear, or it is a problem; an expression nobody listed is a pattern
-nobody read. The JavaScript pattern is read by Python's `re` parser after a
+group (the walk looks at one sequence at a time), a string VARIABLE handed
+to `.match`/`.search`/`.matchAll` (its value is read where it is built, if
+it is a literal there, and not at all if it is composed), and a pattern
+reaching a RegExp through any other call (`Reflect.construct`, a wrapper
+function). The JavaScript pattern is read by Python's `re` parser after a
 small translation (named groups, `[^]`, `\\/`, `\\u{...}`, the `i`/`s`/`m`
 flags); the two engines' `\\s` differ by five code points, which cannot turn
 a non-overlap into an overlap for the classes the model uses, and a pattern
@@ -46,8 +58,9 @@ not code and are not read. `--root DIR` scans another tree (the red run
 against the code before D-PERF-11); FILE arguments scan exactly those files.
 
 Exit 0 and one summary line ("model regex guard: N file(s), M regex
-literal(s), B built, 0 problem(s)") when clean; exit 1 with file:line: reason
-for each problem otherwise. ASCII only (CLAUDE.md rule 8). Not shipped.
+literal(s), B built, 0 problem(s)") when clean -- B counts every `RegExp`
+call and every string handed to `.match`/`.search`/`.matchAll` -- and exit 1
+with file:line: reason for each problem otherwise. ASCII only (CLAUDE.md rule 8). Not shipped.
 """
 import importlib.util
 import os
@@ -75,7 +88,11 @@ BUILT = {
         "linear: anchored, a literal prefix, one digit run then $ (GENERATED_NAME_RE, text.mjs)",
 }
 
-NEW_REGEXP = re.compile(r"new\s+RegExp\s*\(")
+# `RegExp(` with or without `new`, and not `.RegExp(` (a member) or
+# `myRegExp(` (another name): F-GATE-9.
+NEW_REGEXP = re.compile(r"(?<![\w$.])(?:new\s+)?RegExp\s*\(")
+# A string handed to the three String methods that build a RegExp from it.
+STRING_PATTERN_CALL = re.compile(r"\.(match|search|matchAll)\s*\(")
 FLAG_BITS = {"i": re.IGNORECASE, "s": re.DOTALL, "m": re.MULTILINE}
 
 
@@ -148,11 +165,14 @@ def argument_source(text, i):
 
 
 def built_regexps(line):
-    """Every `new RegExp(...)` on a code line: (pattern or None, flags,
-    source of the first argument)."""
+    """Every `RegExp(...)` (with or without `new`) on a code line, and every
+    `.match(`, `.search(` or `.matchAll(` handed a string or template
+    literal: (pattern or None, flags, source of the first argument)."""
     out = []
     for m in NEW_REGEXP.finditer(line):
         i = m.end()
+        while i < len(line) and line[i] in " \t":
+            i += 1
         lit = js_string_literal(line, i)
         if lit is None:
             out.append((None, "", argument_source(line, i)))
@@ -164,6 +184,20 @@ def built_regexps(line):
         if fm:
             flags = fm.group(2)
         out.append((pattern, flags, line[i:j]))
+    for m in STRING_PATTERN_CALL.finditer(line):
+        i = m.end()
+        while i < len(line) and line[i] in " \t":
+            i += 1
+        if i >= len(line) or line[i] not in "\"'`":
+            # A regex literal is read by the literal scanner; any other
+            # expression (a variable, a call) is outside what this reads.
+            continue
+        lit = js_string_literal(line, i)
+        if lit is None:
+            out.append((None, "", argument_source(line, i)))
+            continue
+        pattern, j = lit
+        out.append((pattern, "", line[i:j]))
     return out
 
 
@@ -235,13 +269,14 @@ def scan(files):
                 built += 1
                 if pattern is None:
                     if source not in BUILT:
-                        problems.append("%s:%d: new RegExp(%s) builds a pattern this guard cannot read; list the "
-                                        "expression in BUILT in scripts/check-model-regex.py with why it is linear"
+                        problems.append("%s:%d: RegExp(%s) (or a .match/.search/.matchAll of it) builds a pattern "
+                                        "this guard cannot read; write it as a string literal, or list the expression "
+                                        "in BUILT in scripts/check-model-regex.py with why it is linear"
                                         % (path, number, source))
                     continue
                 problem = grade(pattern, flags)
                 if problem:
-                    problems.append("%s:%d: new RegExp: %s" % (path, number, problem))
+                    problems.append("%s:%d: built pattern: %s" % (path, number, problem))
     return problems, literals, built
 
 
