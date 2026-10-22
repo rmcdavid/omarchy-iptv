@@ -38,6 +38,10 @@
 #                                or Text.StyledText under a MARKUP-EXCEPTION
 #                                comment -- a missing line is AutoText, which
 #                                fetches an <img> out of a channel name)
+#  12. helper regex guard        (scripts/check-helper-regex.py: every regex the
+#                                helper compiles has a reviewed verdict on its
+#                                cost -- R30g, D-EPG-8 -- and an `open` one is
+#                                printed on every run)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
@@ -373,7 +377,33 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2699}
 # sweep of unnamed files and of a stale temporary (3), the folder's age and
 # its mark (3), the shared fixture (2). 29 red on lane-bounds-int (17a2407),
 # the other 2 on a mutation of the shipping decision.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1390}
+# 1359 -> 1391 on 2026-10-21 (lane-bounds-h, the bounds sweep's round 2):
+# tests/test_epg_parse_bounds.py (24) -- D-EPG-10's guide-channel cap with
+# MAX_CHANNELS and EPG_MAX_GUIDE_ID lowered, through the parse and the verb
+# (6); every EPG counted sentence for one and for many (2); D-EPG-8's
+# qualifier strip held equal to the old pattern as an oracle, the display
+# name folded and cut before keying, _IPV6_LITERAL held equal to its old
+# form (6); D-EPG-9's backward pass read-counted and differential against
+# lane-bounds-int (4); the duplicate key's stop half (3); the ASCII-only
+# time memo (1). tests/test_helper_regex_guard.py (7), the R30g regex
+# review guard over copies of the parts and over lane-bounds-int's helper.
+# test_reply_bounds (1): "[1 character not shown]". And two more in
+# test_epg_parse_bounds (LinearSiblingsTest): split_groups, build_alias's
+# bare lists and addrNameConflicts, one pass each, held to lane-bounds-int.
+# 15 seen red on lane-bounds-int, the rest on a mutation of the shipping
+# decision.
+# 1390 / 1391 -> 1422 on 2026-10-21 (lane-bounds-h2): the merge of
+# lane-bounds-h onto the integration branch that holds lane-bounds-g, the
+# two lanes' suites together, counted by the gate on the merge commit.
+# 1422 -> 1434 on 2026-10-21 (lane-bounds-h2, R32d, D-EPG-12):
+# tests/test_epg_parse_bounds.py (9) -- _EPG_NAME_NOISE's rewritten
+# alternative held equal to the old pattern as an oracle (2, red on two
+# mutations of the new one), the one fold both sides of the name key take
+# (4, red on the base), the two guide caps at their boundary (3, red on
+# the off-by-one mutations); tests/test_helper_regex_guard.py (3) -- the
+# guard over a copy of the parts carrying the old pattern, the grader on
+# named shapes, flags it cannot read refused (all red on the base's guard).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1434}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -398,6 +428,12 @@ MARKETPLACE_FILES_MIN=${MARKETPLACE_FILES_MIN:-35}
 # form's terminal caption) are gone with the route; every remaining one still
 # declares its format.
 TEXT_BLOCKS_MIN=${TEXT_BLOCKS_MIN:-58}
+# The helper regex guard: 34 regex calls across the eleven helper parts when
+# it landed (2026-10-21, lane-bounds-h, R30g). A floor for the text format
+# guard's reason -- a scan that finds nothing has reviewed nothing. 36 once
+# lane-bounds-g's two file-name patterns (_TEMP_SUFFIX, _LOGO_NAME) were
+# merged beside it (2026-10-21, lane-bounds-h2).
+HELPER_REGEX_SITES_MIN=${HELPER_REGEX_SITES_MIN:-36}
 # The player stub's self-test (M5-01): 14 cases when wired in, 16 with F-RWD-15, 17 with the ordering cases, 19 with the F-MPV-1 broadcast pair.
 # 19 -> 26 on 2026-10-07: the stub learned tls-verify and stream-lavf-o for
 # D-SINK-16. The lane that grew it reported there was no floor on this step;
@@ -1196,6 +1232,28 @@ if python3 "$ROOT/scripts/check-text-format.py" >"$textfmt_log" 2>&1; then
   fi
 else
   cat "$textfmt_log"; bad "text format guard"
+fi
+
+step "helper regex guard (every helper regex has a reviewed cost)"
+# R30g, D-EPG-8 (2026-10-21): a pattern quadratic in a whitespace run read
+# guide display-names nobody capped, a month after F-SINK-11 fixed the same
+# shape in the URL redactor only. A review one pattern at a time is the one
+# rule 15 forbids, so the review is a table the gate holds every pattern to:
+# a new or changed pattern is unreviewed and red; an `open` verdict is
+# printed on every run and is the board's business, not the gate's.
+regex_log=$CHECK_TMP/helper-regex.log
+if python3 "$ROOT/scripts/check-helper-regex.py" >"$regex_log" 2>&1; then
+  regex_n=$(grep -oE '^helper regex guard: [0-9]+ regex call' "$regex_log" | head -1 | grep -oE '[0-9]+')
+  if [[ -z $regex_n ]]; then
+    cat "$regex_log"; bad "helper regex guard printed no call count at all"
+  elif (( regex_n < HELPER_REGEX_SITES_MIN )); then
+    cat "$regex_log"; bad "helper regex guard found $regex_n regex call(s), expected at least $HELPER_REGEX_SITES_MIN"
+  else
+    grep -E '^helper regex guard: OPEN' "$regex_log" || true
+    ok "helper regex guard ($regex_n regex calls reviewed)"
+  fi
+else
+  cat "$regex_log"; bad "helper regex guard"
 fi
 
 if (( fail )); then echo "check.sh: FAILED"; exit 1; fi

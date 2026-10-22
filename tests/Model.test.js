@@ -5600,7 +5600,7 @@ check("footerStatus no warning keeps the counts line", Model.footerStatus({ coun
 // purpose: merging lower rungs first leaves the higher rung's value in place,
 // which is exactly what footerWarning does when both helpers warn at once.
 const ladderBase = { configured: true, count: 8, lastUpdated: "22:49" }
-const epgWarnText = "1 programmes for channels not in the playlist dropped"
+const epgWarnText = "1 programme for a channel not in the playlist dropped"
 const warnBoth = Model.footerWarning(["truncated to 50,000 channels"], [epgWarnText])
 const warnEpgOnly = Model.footerWarning([], [epgWarnText])
 const cachedLine = "8 channels" + SEP + "cached 22:49" + SEP + "offline"

@@ -540,20 +540,26 @@ def build_parser() -> argparse.ArgumentParser:
 # its length -- so the structured message keeps its first
 # INTERNAL_MESSAGE_MAX characters and the traceback its first and last
 # INTERNAL_TRACE_MAX / 2, the middle counted. Both are cut AFTER the
-# redaction, so a cut can never leave half a URL unredacted.
+# redaction, so the redactor always sees a whole URL: a cut can shorten a
+# redacted `scheme://host`, never leave part of a userinfo, path or query
+# behind it (pinned with a cap that falls inside the userinfo).
 INTERNAL_MESSAGE_MAX = 1024
 INTERNAL_TRACE_MAX = 16384
 
 
 def bounded_text(text: str, limit: int, keep_tail: bool = False) -> str:
     """`text` when it fits; else its first `limit` characters, or with
-    keep_tail its first and last limit // 2 and a counted line between."""
+    keep_tail its first and last limit // 2 and a counted line between,
+    read for one as well as for many (the round-1 recheck of lane-bounds-p:
+    "[1 characters not shown]" was the D-M3U-4 sibling this function
+    introduced)."""
     if len(text) <= limit:
         return text
     if not keep_tail:
         return text[:limit]
     half = limit // 2
-    return "%s\n[%d characters not shown]\n%s" % (text[:half], len(text) - 2 * half, text[-half:])
+    hidden = counted_sentence(len(text) - 2 * half, "[%d character not shown]", "[%d characters not shown]")
+    return "%s\n%s\n%s" % (text[:half], hidden, text[-half:])
 
 
 def main(argv: list[str] | None = None) -> int:
