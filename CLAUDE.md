@@ -122,6 +122,11 @@ Consequences you must respect:
   it, unreleased. If the maintainer raises a finding, its fix ships at once
   in a new release, which then carries what `dev` holds. **This hold ended
   at 2026-10-20T18:47Z**, when the maintainer raised D-M3U-1 on #11935.
+- **And a third time, decided by the owner on 2026-10-21: `main` is HELD at
+  0.14.3 until a maintainer actions #12474** (approves it or raises a
+  finding on it), for the same reason. `dev` moves freely -- the P3 sweep
+  (`f55a32f`) and the bounds sweep wait on it, unreleased. A finding on
+  #12474 is fixed and released at once, carrying what `dev` holds.
 
 ## Where the truth lives
 
