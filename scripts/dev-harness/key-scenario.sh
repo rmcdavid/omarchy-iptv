@@ -1005,6 +1005,31 @@ published_has() { qa_json_field "'yes' if '$1' in d['publishedKeys'] else 'no'" 
 # R21. Is the migration marker in the state the service last saw LAND
 # (pointerState's derived `landedMigrated`; NOFIELD on a tree without one)?
 landed() { pf "['landedMigrated']"; }
+# D-SRC-64 (round 7, 2026-10-22): the pair a migration HELD at the cap parks
+# in the state, `migrationPending: { playlistUrl, epgUrl }`, which is where
+# the entry's URL goes when the hold's own write strips the entry (the R21
+# oracle: an entry URL ends in a record, in the parked pair, or is reported).
+# Read two ways and folded into one answer, URL never printed (rule 5):
+# the helper's `state show` over THIS run's scratch state folder -- the
+# shipping read, whose public_state prints the pair as hosts only, so a
+# fixture path reads "local file" there and cannot tell D's URL from any
+# other path -- and the file itself through sj, COMPARED with the URL the
+# check hands in. `yes` when the helper names a host for $1 and the file
+# holds exactly $2 in it; NOFIELD when neither side has a pair (the key is
+# absent, which is the want once the migration has landed: the pair is
+# dropped in the write that sets the marker, and the two never coexist);
+# otherwise what each side said, `<host-or-NOFIELD>|<yes|no|NOFIELD>`, so
+# a red names the side. A want of `yes` cannot be met by a missing pair.
+# $1 is playlistUrl or epgUrl; $2 the URL or path it must hold.
+parked_is() {
+  local field=$1 url=$2 hostkey host disk
+  [[ $field == epgUrl ]] && hostkey=epgHost || hostkey=host
+  host=$(qa_json_field "d['state']['migrationPending']['$hostkey'] or 'NOFIELD'" "$(python3 "$PLUGIN_ROOT/bin/omarchy-iptv" state --state-dir "$(dirname "$STATE")" show 2>/dev/null)")
+  disk=$(sj "'yes' if d['migrationPending']['$field'] == '$url' else 'no'")
+  if [[ $host != NOFIELD && $host != NOSTATE && $disk == yes ]]; then echo yes
+  elif [[ $host == NOFIELD && $disk == NOFIELD ]]; then echo NOFIELD
+  else echo "$host|$disk"; fi
+}
 # What the session REPORTED off the bar entry, as setting:reason pairs in
 # order ("-" for none), and how many: names and reasons only, never a value
 # (HarnessLib.pointerStateOf's entryInputReports; NOFIELD on a tree without).
@@ -2794,9 +2819,17 @@ print(json.dumps(d))' "$1" "$KA" "$2" "$3"
   # install: 50 records, no migration marker, and the bar entry naming D,
   # which is not among them. Before R27 the migration evicted the least
   # recently used record -- the only copy of its URL -- with a journal line;
-  # now it does not run: nothing evicted or added, no marker, the entry
-  # keeps D's URL, the user told once. Then one record removed in Sources:
-  # the next reconcile migrates D into the place it left.
+  # now it does not run: nothing evicted or added, no marker, the user told
+  # once. D-SRC-64 (round 7, 2026-10-22, the owner's decision): D's URL is
+  # PARKED in state.json (`migrationPending`) and the entry is stripped in
+  # the hold's own write, once the save carrying the pair has landed; until
+  # D-SRC-64 the entry kept D's URL for the hold's life, every owned write
+  # re-carried it, and B35 wanted `entry:yes` -- red on 7c1d37f (the 0.15.0
+  # pre-cut live run, 136 / 2, 2026-10-22) once the hold parked instead.
+  # `parked:yes` is the proof the URL moved rather than vanished (the R21
+  # oracle). Then one record removed in Sources: the next reconcile reads
+  # the parked pair (the entry carries nothing) and migrates D into the
+  # place it left, dropping the pair in the write that sets the marker.
   seed50() {
     seed "$KA"
     python3 -c 'import json, sys
@@ -2813,15 +2846,18 @@ json.dump(d, open(sys.argv[1], "w"))' "$STATE"
   keys50=$(sj "','.join(sorted(s['key'] for s in d['sources']))")
   start_shell --playlist "$D" || true
   sleep 3
-  ck "B35 R27d (D-SRC-44): at 50 sources with the entry's URL not among them the migration does NOT run -- the 50 kept (none evicted, none added), no marker, the entry keeps its URL, told ONCE (\"Sources is full\", no URL), reported as playlistUrl:full" \
-     "records:$(sj "len(d['sources'])") same:$([[ $(sj "','.join(sorted(s['key'] for s in d['sources']))") == "$keys50" ]] && echo yes || echo no) d:$(sj "'$KD' in [s['key'] for s in d['sources']]") marker:$(sj "d.get('entryMigrated', False)") entry:$(stored_has playlistUrl) told:$(qa_count ' 74016 Sources is full ' "$NOTIFY_LOG") url-in-notice:$(qa_count '://|/srv/|fixtures' "$NOTIFY_LOG") reports:$(reports)" \
-     "records:50 same:yes d:false marker:false entry:yes told:1 url-in-notice:0 reports:playlistUrl:full"
+  # The strip waits for the save carrying the pair to LAND (R13); bounded,
+  # and the check reads whatever is there when it gives up.
+  wait_for no 10 stored_has playlistUrl >/dev/null 2>&1
+  ck "B35 R27d (D-SRC-44), D-SRC-64: at 50 sources with the entry's URL not among them the migration does NOT run -- the 50 kept (none evicted, none added), no marker, the entry STRIPPED and its URL parked in state.json (migrationPending holds D's URL exactly), told ONCE (\"Sources is full\", no URL), reported as playlistUrl:full" \
+     "records:$(sj "len(d['sources'])") same:$([[ $(sj "','.join(sorted(s['key'] for s in d['sources']))") == "$keys50" ]] && echo yes || echo no) d:$(sj "'$KD' in [s['key'] for s in d['sources']]") marker:$(sj "d.get('entryMigrated', False)") entry:$(stored_has playlistUrl) parked:$(parked_is playlistUrl "$D") told:$(qa_count ' 74016 Sources is full ' "$NOTIFY_LOG") url-in-notice:$(qa_count '://|/srv/|fixtures' "$NOTIFY_LOG") reports:$(reports)" \
+     "records:50 same:yes d:false marker:false entry:no parked:yes told:1 url-in-notice:0 reports:playlistUrl:full"
   res=$(ipc removeSource 10000007)
   wait_for "$KD" 15 svc "['activeSourceKey']" >/dev/null || true
   wait_for true 10 landed >/dev/null 2>&1; wait_for no 10 stored_has playlistUrl >/dev/null 2>&1; sleep 0.5
-  ck "B36 R27d: ONE record removed in Sources, and the next reconcile migrates the entry's URL into the place it left -- 50 records, D active, the marker landed, the entry stripped; told once in all" \
-     "remove:$(okf "$res") records:$(sj "len(d['sources'])") d:$(sj "'$KD' in [s['key'] for s in d['sources']]") active:$([[ $(svc "['activeSourceKey']") == "$KD" ]] && echo D || echo other) marker:$(sj "d.get('entryMigrated', False)") entry:$(stored_has playlistUrl) told:$(qa_count ' 74016 Sources is full ' "$NOTIFY_LOG")" \
-     "remove:true records:50 d:true active:D marker:true entry:no told:1"
+  ck "B36 R27d: ONE record removed in Sources, and the next reconcile migrates the parked URL into the place it left -- 50 records, D active, the marker landed, the entry stripped, the pair gone from state.json (dropped in the marker's write); told once in all" \
+     "remove:$(okf "$res") records:$(sj "len(d['sources'])") d:$(sj "'$KD' in [s['key'] for s in d['sources']]") active:$([[ $(svc "['activeSourceKey']") == "$KD" ]] && echo D || echo other) marker:$(sj "d.get('entryMigrated', False)") entry:$(stored_has playlistUrl) parked:$(parked_is playlistUrl "$D") told:$(qa_count ' 74016 Sources is full ' "$NOTIFY_LOG")" \
+     "remove:true records:50 d:true active:D marker:true entry:no parked:NOFIELD told:1"
   stop_shell
 
   # B38, B39: R28b (2026-10-20) -- A HELD MIGRATION HOLDS BOTH URLS. The same
@@ -2834,6 +2870,14 @@ json.dump(d, open(sys.argv[1], "w"))' "$STATE"
   # record removed: D moves in WITH the bar's guide URL (on c1 it got none,
   # and the strip took it off the entry). On 6f1d176 the migration evicted
   # and ran at the first start, so the entry no longer carries either.
+  # D-SRC-64 (round 7, 2026-10-22): the pair is parked in state.json as ONE
+  # pair and both URLs leave the entry in the hold's own write, at the first
+  # start and again after the restart (the entry start_shell writes carries
+  # both again; the hold re-parks the same pair, no new write, and the keep
+  # rule over the landed pair strips it). B38 wanted `entry:yes/yes` until
+  # then -- red on 7c1d37f (136 / 2, 2026-10-22); `parked:yes/yes` is what
+  # says both moved rather than vanished, and B39's `parked:NOFIELD/NOFIELD`
+  # that the pair went in the write that set the marker.
   AOWN=/srv/none/a-own.xml
   : >"$NOTIFY_LOG"
   seed50
@@ -2853,15 +2897,16 @@ json.dump(d, open(sys.argv[1], "w"))' "$STATE" "$KA" "$AOWN"
   stop_shell
   start_shell --playlist "$D" --epg "$EPG" --source-key "$KA" || true
   sleep 3
-  ck "B38 R28b: at 50 sources the bar's playlist AND guide URL are held TOGETHER -- the entry keeps both, a source the user picked keeps its OWN guide URL across a restart, and the one card each start is \"Sources is full\" (never \"Bar setting removed\")" \
-     "a-epg:$(epg_of "$KA") active:$([[ $(svc "['activeSourceKey']") == "$KA" ]] && echo A || echo other) entry:$(stored_has playlistUrl)/$(stored_has epgUrl) removed-card:$(qa_count ' 74016 Bar setting removed ' "$NOTIFY_LOG") full-card:$(qa_count ' 74016 Sources is full ' "$NOTIFY_LOG") reports:$(reports)" \
-     "a-epg:own active:A entry:yes/yes removed-card:0 full-card:2 reports:playlistUrl:full"
+  wait_for no 10 stored_has epgUrl >/dev/null 2>&1
+  ck "B38 R28b, D-SRC-64: at 50 sources the bar's playlist AND guide URL are held TOGETHER -- parked as one pair in state.json and both stripped from the entry, a source the user picked keeps its OWN guide URL across a restart, and the one card each start is \"Sources is full\" (never \"Bar setting removed\")" \
+     "a-epg:$(epg_of "$KA") active:$([[ $(svc "['activeSourceKey']") == "$KA" ]] && echo A || echo other) entry:$(stored_has playlistUrl)/$(stored_has epgUrl) parked:$(parked_is playlistUrl "$D")/$(parked_is epgUrl "$EPG") removed-card:$(qa_count ' 74016 Bar setting removed ' "$NOTIFY_LOG") full-card:$(qa_count ' 74016 Sources is full ' "$NOTIFY_LOG") reports:$(reports)" \
+     "a-epg:own active:A entry:no/no parked:yes/yes removed-card:0 full-card:2 reports:playlistUrl:full"
   res=$(ipc removeSource 10000007)
   wait_for "$KD" 15 svc "['activeSourceKey']" >/dev/null || true
   wait_for true 10 landed >/dev/null 2>&1; wait_for no 10 stored_has epgUrl >/dev/null 2>&1; sleep 0.5
-  ck "B39 R28b: then ONE record removed, and D moves in WITH the bar's guide URL -- D active, its guide URL the bar's, the entry stripped of both, A's own guide URL kept, 50 records" \
-     "remove:$(okf "$res") d-epg:$(epg_of "$KD") active:$([[ $(svc "['activeSourceKey']") == "$KD" ]] && echo D || echo other) entry:$(stored_has playlistUrl)/$(stored_has epgUrl) a-epg:$(epg_of "$KA") records:$(sj "len(d['sources'])")" \
-     "remove:true d-epg:bar active:D entry:no/no a-epg:own records:50"
+  ck "B39 R28b: then ONE record removed, and D moves in WITH the bar's guide URL -- D active, its guide URL the bar's, the entry stripped of both, the pair gone from state.json, A's own guide URL kept, 50 records" \
+     "remove:$(okf "$res") d-epg:$(epg_of "$KD") active:$([[ $(svc "['activeSourceKey']") == "$KD" ]] && echo D || echo other) entry:$(stored_has playlistUrl)/$(stored_has epgUrl) parked:$(parked_is playlistUrl "$D")/$(parked_is epgUrl "$EPG") a-epg:$(epg_of "$KA") records:$(sj "len(d['sources'])")" \
+     "remove:true d-epg:bar active:D entry:no/no parked:NOFIELD/NOFIELD a-epg:own records:50"
   stop_shell
 
   # B40: R29d (2026-10-20) -- R28b's sibling. A 0.13.6 install whose state

@@ -178,6 +178,8 @@ fail=0
 # 78 -> 79 on 2026-10-22 (lane-bounds-s2): test_r32a_urlAuthority, the
 # R32a/R32b functions under Qt's own engine; red on 2ffde4c.
 # 79 -> 80 on 2026-10-22 (lane-bounds-s4): test_r32a2_urlWhitespaceAndPunctuation.
+# 0.15.0 cut, 2026-10-22: re-levelled on lane-rel-0150 (7c1d37f plus the
+# version bump and the notes); the spec runs 80 and the floor stays 80.
 QML_SPEC_MIN=${QML_SPEC_MIN:-80}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
@@ -370,6 +372,9 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-80}
 # harness; the F1 model check re-levelled in place), the D-SINK-38 pin
 # re-levelled in place for the onHostSettingsChanged re-arm; 14 red on the
 # round 7 merge 4cf8910 (the lane report).
+# 0.15.0 cut, 2026-10-22: re-levelled on lane-rel-0150 (7c1d37f plus the
+# version bump and the notes); the suite runs 2993 checks in both own-echo
+# modes and the floor stays 2993.
 NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2993}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
@@ -572,6 +577,8 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2993}
 # 2026-10-22, lane-r8 (round 8): 1494 -> 1496 -- test_doc_host_mode's
 # PinReachedCase (+1: every EXPECT pin is reached by a backticked citation)
 # and the UX-SOURCES 5.4 cap test (+1); both red on 4cf8910's documents.
+# 0.15.0 cut, 2026-10-22: re-levelled on lane-rel-0150 (7c1d37f plus the
+# version bump and the notes); the suite runs 1496 and the floor stays 1496.
 PY_TESTS_MIN=${PY_TESTS_MIN:-1496}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
