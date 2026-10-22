@@ -190,7 +190,45 @@ with it after the removal. The round-18 rulings] [round 19, 2026-10-20,
 R29d: and a guide URL beside a playlist that does not validate is attached
 to no record either -- it used to replace the active record's own -- but
 reported with it in one notice (`invalid-pair`) and stripped with it. The
-round-19 rulings]. The
+round-19 rulings] [round 7 of the bounds sweep, 2026-10-22, D-SRC-64, the
+owner's decision: WHERE THE HELD URLS REST. A migration held at the cap no
+longer keeps them on the bar entry. The hold writes both -- the playlist and
+the guide URL beside it -- into `state.json` (the plugin's own 0600 file)
+under a key of the migration's own, `migrationPending: { playlistUrl,
+epgUrl }` (`Model.migrationPendingOf`, `Model.withMigrationPending`, the
+helper's `normalize_migration_pending`; the shared state-keys fixture holds
+both readers to it, and every `state` verb prints it as hosts only): not a
+source record, never counted against the cap, never a Sources row, and never
+beside the marker (the pair says the migration is still to run, the marker
+that it ran). The owned write that follows that state write's LANDING takes
+both off the entry (`Model.retiredInputsToKeep`'s third input, the landed
+pair: a retired key whose value is the parked one is redundant), so the entry
+carries a URL only until the hold's own write lands -- not for the life of
+the hold, and not re-carried by every owned write whatever the D-SINK-18
+shield answered, which is what the #14748 review measured (`Q4 heldExposed`:
+three URL-bearing hand-overs under an exposed verdict, zero refusals; now
+zero hand-overs carry one). The pair is the migration's input whenever the
+entry carries no playlist URL (`Model.reconcileAction`'s `parked`): the retry
+a removal asks for, a foreign load, a restart mid-hold. It lands exactly as
+the entry's copy did -- into a new record once a place is free, or onto a
+record another program added for the same playlist meanwhile (a hand-run
+`state source add`; that record then takes the parked guide URL as its own
+when it differs, R4) -- and is dropped in the same state write that sets the
+marker; it is also dropped when the retry refuses the playlist as invalid
+(reported, marker set, as the entry's copy was); it is never dropped
+otherwise, because a drop without a landing would lose the only copy. A hold
+whose state write FAILED leaves the entry as it is (the keep rule reads the
+landed state): the entry is the backup until a later save lands the pair
+(after which the mirror the failed save left owing, R19d, strips it) or the
+next start re-adopts it, R21e's shape. A merge that holds the migration
+again (F1's "full" and "changed") re-parks the pair from the record it
+dropped, so the retry has an input although the entry is empty; ours' pair
+stands over theirs' in a merge, because memory is the only place the
+credential is sure to be. F1's card and sentence stay true: both move in
+together after a removal. An OLDER build's helper drops the key with the
+marker, the downgrade the D-SINK-19 ruling accepts. Pinned through
+`tests/service-harness.js` on both hosts and both echo modes, the review's
+`Q4 heldExposed` sequence among them, and in the model; red on fe40b2c]. The
 first version of this paragraph said the step "creates no record and deletes
 none"; that was false against the code and is withdrawn. "Must not lose a
 source" (SR38) is graded as "keeps the count it went in with" over a two-source
@@ -1388,7 +1426,18 @@ edit the control's copy and the next bound write would overwrite it.
    or whitespace inside a URL is refused by `validateSourceUrl`, never
    deleted into a different URL (**D-SRC-63, R32a''', 2026-10-22**: a tab
    in a password became the password `pass`, and a two-line paste became
-   one URL nobody typed). `Model.sanitizeFieldInput` picks the rule by
+   one URL nobody typed), with the ONE stated exception of **R33a (round 7,
+   2026-10-22)**: a PASTE into a URL field joins its lines first -- CR and
+   LF removed, nothing else -- before that rule, because a URL wrapped by a
+   mail client is a paste the form must take (`Model.sanitizePasteInput`,
+   the guide's `pasteFromProcess`; a tab, U+0085 or U+2028 inside the paste
+   still reaches the validator and is refused there, with the sentence that
+   names it, R33b). So "a multi-line paste collapses to one line" is true
+   again of a URL field's paste and false of nothing else: the submit path
+   joins nothing (a value in the field cannot hold a line break). The Xtream
+   username and password refuse a control character the same way since
+   **D-SRC-65 (R33c)**, never delete it (`xtreamUrls`, codes `user_control`
+   and `pass_control`). `Model.sanitizeFieldInput` picks the rule by
    field (3.1). `TextField.maximumLength` mirrors the caps so a 16 KB paste
    never allocates a 16 KB string in a binding. Text is `Text.PlainText`
    everywhere it is rendered (coding standard; `StyledText` stays reserved

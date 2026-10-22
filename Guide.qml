@@ -2730,7 +2730,10 @@ Item {
     // D-SRC-63: the boundary rule is the FIELD's. A URL field keeps what
     // is inside the pasted text (a tab in a password is refused by the
     // validator, never deleted into `pass`); a name field strips controls.
-    var edit = Model.editInsert(value, range.start, range.end, Model.sanitizeFieldInput(id, text, cap), cap)
+    // R33a: with the one stated exception -- a paste into a URL field joins
+    // its lines first (CR and LF removed, nothing else), so a URL a mail
+    // client wrapped is taken (Model.sanitizePasteInput).
+    var edit = Model.editInsert(value, range.start, range.end, Model.sanitizePasteInput(id, text, cap), cap)
     if (!edit.changed) return
     root.guide = Model.withFormValue(root.guide, id, edit.value, { typed: false })
     if (item) item.cursorPosition = edit.caret

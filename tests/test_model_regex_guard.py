@@ -122,7 +122,6 @@ class ModelRegexGuardTest(unittest.TestCase):
             'var c = s.match(pattern)',
             'var d = s.search(someRe)',
             'var e = myRegExp("([^/?#]*)([^?#]*)$")',
-            'var f = obj.RegExp("([^/?#]*)([^?#]*)$")',
             'var g = s.match(/[\\/?#]/)',
             'var h = RegExp("^[a-z]+$")',
             'var i = s.match("^[a-z]+$")',
@@ -131,6 +130,27 @@ class ModelRegexGuardTest(unittest.TestCase):
         self.assertEqual(done.returncode, 0, done.stdout)
         self.assertIn("0 problem(s)", done.stdout)
         self.assertIn("1 regex literal(s), 2 built", done.stdout)
+
+    def test_r33d_the_constructor_through_the_global_object_is_read(self):
+        # R33d (round 7): `globalThis.RegExp(` and `window.RegExp(` build the
+        # same object as a bare `RegExp(`; the round-6 guard refused every
+        # member spelling and so read these as somebody else's RegExp. With
+        # and without `new`, with spaces around the dot, and a string handed
+        # to `.match` of the result, each carrying the maskUrl shape.
+        for line in ['var A = globalThis.RegExp("([^\\/?#]*)([^?#]*)$")',
+                     'var B = new globalThis.RegExp("[ab]*[BC]*d", "i")',
+                     'var C = window.RegExp("([^/?#]*)([^?#]*)$")',
+                     'var D = new window.RegExp("([^/?#]*)([^?#]*)$")',
+                     'var E = globalThis . RegExp("([^/?#]*)([^?#]*)$")']:
+            with self.subTest(line):
+                done = run(self.file_with(line + "\n"))
+                self.assertEqual(done.returncode, 1, done.stdout)
+                self.assertIn("super-linear shape", done.stdout)
+                self.assertIn("1 built", done.stdout)
+        # And the linear shapes through the same spellings pass, counted as built.
+        done = run(self.file_with('var F = globalThis.RegExp("^[a-z]+$")\nvar G = new window.RegExp("^[0-9]+$")\n'))
+        self.assertEqual(done.returncode, 0, done.stdout)
+        self.assertIn("0 regex literal(s), 2 built, 0 problem(s)", done.stdout)
 
     def test_f_gate_9_a_template_literal_handed_to_match_or_regexp_is_a_problem(self):
         for line in ['var r = RegExp(`[a-z]+`)', 'var r = s.match(`[a-z]+`)', 'var r = new RegExp(`[a-z]+`)']:

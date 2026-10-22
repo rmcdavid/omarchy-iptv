@@ -168,6 +168,27 @@ def normalize_entry_migrated(raw: Any) -> bool:
     return raw is True
 
 
+def normalize_migration_pending(raw: Any) -> dict[str, Any] | None:
+    """Mirror of Model.migrationPendingOf (D-SRC-64, round 7, 2026-10-22):
+    the pair a migration held at the MAX_SOURCES cap has parked in the state
+    -- `{"playlistUrl": <non-empty str>, "epgUrl": <str>}` -- or None. Not a
+    source record (never counted against the cap, never listed), never
+    rewritten or validated here: the shell validates it when it lands, as it
+    validated the bar entry's value it was read from. A reader not taught it
+    would ERASE it on the next hand-run `state` verb, and it is the ONLY copy
+    of that credential while the hold lasts (the bar entry is stripped once
+    the state write carrying it has landed), which is the savedSearches
+    trap with a worse loss. Anything that is not that shape reads as none,
+    exactly as the model reads it (the shared state-keys fixture)."""
+    if not isinstance(raw, dict):
+        return None
+    playlist = raw.get("playlistUrl")
+    if not isinstance(playlist, str) or playlist == "":
+        return None
+    epg = raw.get("epgUrl")
+    return {"playlistUrl": playlist, "epgUrl": epg if isinstance(epg, str) else ""}
+
+
 def normalize_source(raw: Any) -> dict[str, Any] | None:
     """One history record per the section 2.1 field rules; None drops it.
     A `url` with a control character (NUL, CR, ...) drops the record with a
@@ -275,6 +296,12 @@ def normalize_state(raw: Any) -> dict[str, Any]:
     # read the bar entry's URLs as migration inputs again.
     if normalize_entry_migrated(raw.get("entryMigrated")):
         state["entryMigrated"] = True
+    # D-SRC-64: the parked pair of a migration held at the cap, absent unless
+    # it reads as one; the same whitelist trap, and the only copy of a
+    # credential while it is held.
+    pending = normalize_migration_pending(raw.get("migrationPending"))
+    if pending is not None:
+        state["migrationPending"] = pending
     state["cacheLayout"] = CACHE_LAYOUT if raw.get("cacheLayout") == CACHE_LAYOUT else 0
     sources = raw.get("sources")
     if isinstance(sources, list):
@@ -327,6 +354,19 @@ def public_state(state: dict[str, Any]) -> dict[str, Any]:
     and it is the identifier every other field here is keyed by."""
     out = dict(state)
     out["sources"] = [public_source(record) for record in state.get("sources", [])]
+    # D-SRC-64: the parked pair of a held migration is two URLs, printed as
+    # their hosts exactly as a record's are (rule 5; found by reading this
+    # function while teaching the reader the key, rule 15: `dict(state)`
+    # copies every top-level key, so a URL-bearing key is on stdout the day
+    # it is added unless it is treated here).
+    pending = state.get("migrationPending")
+    if isinstance(pending, dict):
+        playlist = str(pending.get("playlistUrl", ""))
+        epg = str(pending.get("epgUrl", ""))
+        out["migrationPending"] = {
+            "host": "local file" if playlist.startswith("/") else source_host(playlist),
+            "epgHost": "" if not epg else ("local file" if epg.startswith("/") else source_host(epg)),
+        }
     return out
 
 

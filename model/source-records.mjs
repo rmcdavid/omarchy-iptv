@@ -6,7 +6,8 @@ import {
   copyGuide, withQuery, withMode
 } from "./browse.mjs"
 import {
-  emptyState, withEntryMigrated, cloneState
+  emptyState, entryMigratedOf, withEntryMigrated, migrationPendingOf,
+  withMigrationPending, cloneState
 } from "./state.mjs"
 import {
   clampSetting, entryInputForm, RETIRED_SETTINGS, entryInputSeen,
@@ -385,11 +386,22 @@ function invalidInputBlocks(invalid, activeKey) {
 // (adoptActiveSource), so the retry adopts both together (R21); before R28b
 // the guide URL read as seen on the retry and the migrated record got none,
 // while the strip that followed took it off the entry.
+// D-SRC-64 (round 7, 2026-10-22): `parked` -- the pair a held migration has
+// parked in the state (Model.migrationPendingOf over the service's memory).
+// MIGRATING, with NO playlist URL on the entry (the hold stripped it) and a
+// parked pair, the pair is the migration's input: `adoptUrl` (and `adoptEpg`
+// when the pair carries a guide URL), `parked` true, `act` "adopt". It is
+// never judged by `seen`: `seen` tells a host publish from its stale echo,
+// and the pair is the state's own record, fresh at every reconcile until it
+// lands (adoptActiveSource reads the pair itself; the retry a removal asks
+// for, a foreign load, a restart mid-hold and every settings publish during
+// the hold all come through here). A playlist URL ON the entry wins over
+// the pair, as before: the entry is read until the marker lands (R21).
 function reconcileAction(input) {
   var it = input || {}
   var migrating = it.migrating === true
   var values = { playlistUrl: it.playlist, epgUrl: it.epg }
-  var out = { act: "ignore", adoptUrl: false, adoptEpg: false, refused: [], report: [], migrating: migrating }
+  var out = { act: "ignore", adoptUrl: false, adoptEpg: false, refused: [], report: [], migrating: migrating, parked: false }
   for (var i = 0; i < RETIRED_SETTINGS.length; i++) {
     var name = RETIRED_SETTINGS[i]
     if (entryInputForm(name, values[name]).text === "") continue
@@ -402,6 +414,12 @@ function reconcileAction(input) {
       out.refused.push(name)
       if (!entryInputSeen(it.seen, name, values[name])) out.report.push(name)
     }
+  }
+  var parked = migrationPendingOf({ migrationPending: it.parked })
+  if (migrating && parked !== null && entryInputForm("playlistUrl", values.playlistUrl).text === "") {
+    out.adoptUrl = true
+    out.parked = true
+    if (parked.epgUrl !== "") out.adoptEpg = true
   }
   if (out.adoptUrl) out.act = "adopt"
   else if (it.first === true || it.force === true) out.act = "migrate"
@@ -497,6 +515,28 @@ function entryPlaylistUnusable(raw) {
   return !validateSourceUrl(text, { origin: "cli" }).ok
 }
 
+// D-SRC-64 (round 7, 2026-10-22, the owner's decision): A HELD MIGRATION
+// PARKS BOTH URLS IN THE STATE. With step 1 `full`, the pair step 1 read --
+// the playlist's text and the guide URL's form text, which R28b holds
+// together -- is written into the state returned as `migrationPending`
+// (Model.withMigrationPending; `parked` true), so the state write the
+// service makes for it carries the pair into state.json (0600) and the
+// owned write that follows that write's landing takes both off the bar
+// entry (Model.retiredInputsToKeep over the landed pair). Until D-SRC-64
+// the entry kept them for as long as the hold lasted, every owned write
+// re-carried them, and under an exposed shield verdict they went to the host
+// with zero refusals (the #14748 review's `Q4 heldExposed`). The pair is the
+// migration's INPUT whenever the entry carries no playlist URL (the retry
+// after a removal, a foreign load, a restart mid-hold: reconcileAction's
+// `parked`), read here from the state itself; a playlist URL on the entry
+// wins, as the entry is read until the marker lands (R21), and a hold over
+// it re-parks what the entry carries. The pair is DROPPED in the same state
+// write that sets the marker -- it landed (a new record, or the record
+// another program added for the same playlist meanwhile, which then takes
+// the parked guide URL as its own if it differs, R4), or it was refused as
+// invalid and reported (the `invalid` branch sets the marker as before) --
+// and it is never dropped otherwise: a drop without a landing would lose the
+// only copy. The pair and the marker never coexist.
 function adoptActiveSource(state, entry, nowSec, origin, opts) {
   var st = state || emptyState()
   var e = entry || {}
@@ -506,12 +546,18 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
   var before = activeKeyOf(st)
   var out = { state: st, key: "", changed: false, moved: false, adoptedUrl: false, adoptedEpg: false,
               refusedEpg: false, noSourceEpg: false, invalid: null, added: "", full: false, heldEpg: false,
-              epgWithInvalid: false, marked: false, writeEntry: false }
+              epgWithInvalid: false, marked: false, writeEntry: false, parked: false }
   // R18a: the one normaliser (entryInputForm). `url` is the sanitized text
   // reconcileSources validates; `epg` is the whole form, so a guide URL of
   // whitespace or control characters alone is NO input (R4's no-op).
-  var url = adoptUrl ? entryInputForm("playlistUrl", e.playlistUrl).text : ""
+  // D-SRC-64: with no playlist URL on the entry, the parked pair is the
+  // input -- its playlist, and its guide URL unless the entry carries one.
+  var parked = adoptUrl ? migrationPendingOf(st) : null
+  var entryUrl = adoptUrl ? entryInputForm("playlistUrl", e.playlistUrl).text : ""
+  var fromParked = adoptUrl && entryUrl === "" && parked !== null
+  var url = fromParked ? entryInputForm("playlistUrl", parked.playlistUrl).text : entryUrl
   var epg = adoptEpg ? entryInputForm("epgUrl", e.epgUrl) : entryInputForm("epgUrl", "")
+  if (fromParked && epg.text === "") epg = entryInputForm("epgUrl", parked.epgUrl)
   var resolved = false
   if (url !== "") {
     // Step 1. The guide URL is NOT handed to reconcileSources here: the R4
@@ -522,6 +568,10 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
       out.invalid = rec.invalid
     } else if (rec.full) {
       out.full = true
+      // D-SRC-64: park the pair (the state is the same object when it
+      // already holds exactly this pair, so `changed` stays honest).
+      out.state = withMigrationPending(st, { playlistUrl: url, epgUrl: epg.text })
+      out.parked = true
     } else {
       // The original object when nothing moved, so `changed` below stays an
       // honest "must this be written" and a consumed re-run saves nothing.
@@ -537,7 +587,9 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
     var stateKey = activeKeyOf(st)
     var entryKey = activeKeyText(e.sourceKey)
     var want = stateKey !== "" ? stateKey : (findSource(st.sources, entryKey) ? entryKey : "")
-    out.state = withActiveKey(st, want)
+    // Over `out.state`, not `st`: the `full` branch has parked the pair in
+    // it (D-SRC-64), and a key written over `st` would drop the park.
+    out.state = withActiveKey(out.state, want)
   }
   out.key = activeKeyOf(out.state)
   // R4: a guide URL input reaches the ACTIVE record on any path -- the record
@@ -567,6 +619,10 @@ function adoptActiveSource(state, entry, nowSec, origin, opts) {
     out.marked = markedState !== out.state
     out.state = markedState
   }
+  // D-SRC-64: the pair and the marker never coexist -- a state that carries
+  // the marker (set here, or landed before) holds no parked pair. The same
+  // object when there is none to drop, so `changed` stays honest.
+  if (entryMigratedOf(out.state)) out.state = withMigrationPending(out.state, null)
   out.changed = out.state !== st
   out.moved = out.key !== before
   var carries = false
