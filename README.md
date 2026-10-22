@@ -3,7 +3,7 @@
 Live TV that feels like it shipped with Omarchy: one keystroke opens a
 theme-native channel guide, type to find a channel, Enter plays it in mpv.
 
-Status: v0.14.3. Shipped so far: the MVP guide, Sources, the detached player
+Status: v0.15.0. Shipped so far: the MVP guide, Sources, the detached player
 that keeps playing across a shell restart, channel numbers with numeric
 tuning, picture in picture, pausing live TV and winding it back a few
 minutes, a guide that remembers which
@@ -18,8 +18,11 @@ screen, saved searches and channel logos. 0.14.0 takes your provider URLs
 out of the desktop shell's settings file and keeps them in the plugin's own,
 0.14.1 stores PNG channel logos with only what drawing them needs,
 0.14.2 reads `state.json` before every save and closes two findings about
-GIF logos and guide-data files, and 0.14.3 bounds every playlist field a
-channel keeps and splits the background helper into several files.
+GIF logos and guide-data files, 0.14.3 bounds every playlist field a
+channel keeps and splits the background helper into several files, and
+0.15.0 holds far less guide data in the shell, parks a playlist that
+cannot move into Sources in `state.json`, and bounds every download and
+every parse by time and memory.
 `CHANGELOG.md` has the release notes.
 
 This branch is the install artifact and nothing else: what `omarchy plugin
