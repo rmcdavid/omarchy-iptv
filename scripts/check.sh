@@ -256,7 +256,10 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # +4 F1 race and +4 F1 same-playlist sibling through the service harness
 # (both hosts, both own-echo modes), +1 F1 model, +1 F4 (R29d's CLI origin),
 # +4 F2 (window (c) decided by when the other program writes).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2678}
+# 2678 -> 2679 on 2026-10-21 (lane-bounds-l, D-SRC-45 / D-LOGO-12): the
+# shell's reading of the logos verb's no_cache refusal and of a summary at
+# the ceiling (seen red on a mutation of Model.logoSummaryNames).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2679}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -333,7 +336,16 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2678}
 # local source no longer reserving the input cap (7), and
 # the TLS context built ahead of the limit, verifying (2). 25 of them seen
 # red against 0.14.2 (85206f2); the other three pin what did not change.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1321}
+# 1321 -> 1338 on 2026-10-21 (lane-bounds-l): tests/test_logo_ceiling.py (7),
+# D-LOGO-12's ceiling on what a source's logo folder holds, over a real
+# local TLS server with the cap lowered, and D-SRC-45's no_cache answer;
+# test_failed_marks's MissingIdTest (1), the rule-15 sibling; and
+# tests/test_epg_retention.py (9), D-EPG-7's compact retention held
+# byte-identical to f55a32f's output, its measured cost, and the bounded
+# time memo. All seen red on f55a32f except the three differential cases,
+# which compare against f55a32f itself and were seen red on four mutations.
+# LogoFetchCapTest was rewritten for the ceiling in place, not added.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1338}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

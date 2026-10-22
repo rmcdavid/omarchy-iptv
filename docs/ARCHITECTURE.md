@@ -3277,6 +3277,113 @@ Performance budget (10k channels):
     loads (10,000 channels, 120 groups), and with the test variable at 24
     the service reports `Source too large`.
 
+    **What the EPG parse retains is bounded during the parse (D-EPG-7,
+    2026-10-21).** `parse_xmltv` kept every in-window programme of every
+    matched channel until the parse ended as a 4-tuple (start, stop, title,
+    detail dict) -- five or six objects a programme, every str widened to
+    four bytes a character by one emoji -- and `EPG_MAX_PER_CHANNEL` was
+    applied only afterwards. It now keeps ONE bytes object a programme
+    (`retain_programme`): the start and the raw stop in decimal, then the
+    title, description, category and episode as the cleaners left them,
+    UTF-8, separated by `\x1f` (every text has been through `_CONTROL_WS`,
+    so neither separator can occur in one, and one that did would be folded
+    rather than move a boundary). JSON is made by `record_body` for the
+    records actually written, as before. `encode_retained` makes every
+    decision `encode_records` made, in the same order -- stable sort by
+    start, a missing stop from the next strictly later start or
+    `EPG_DEFAULT_DURATION`, skip a stop not after its start, drop a repeat of
+    the last record kept, keep the first `EPG_MAX_PER_CHANNEL` -- with the
+    next later start found by a forward pointer instead of a rescan from
+    every stopless programme (the same answer; the rescan was quadratic in
+    programmes sharing a start). Each channel's bytes are released as its
+    record string is made. No per-channel heap and no total cap were added:
+    neither lowers the worst case, which is many channels of few programmes
+    each and is bounded by the input, so the bound is this layout's cost
+    times what 64 MiB can hold, and nothing is ever dropped.
+
+    Measured on ordinary small guides (2,000 vs 4,000 programmes over 50
+    channels, `parse_xmltv`'s marginal traced peak; `RetainedCostTest` pins
+    it, red on f55a32f): 724 bytes a programme on f55a32f against 213 now
+    with a 120-character description, category and episode on each; 144
+    against 58 title-only (inside the unittest run, 801-879 against
+    215-217, and 151-156 against 65-71). The bound at the cap, by arithmetic:
+    a bytes object is 33 bytes of header plus its length, rounded up to 16,
+    plus an 8-byte list slot, so a programme with no stop costs at most
+    72 + t bytes and one with a stop (twelve digits at most) 84 + t, where t
+    is its texts' UTF-8 length; its XML is at least 67 + t and 83 + t
+    (`<programme start="YYYYMMDD" channel="a">`, a title element, the stop
+    attribute when there is one). So the parse retains at most about 1.08
+    bytes a byte of guide, **69 MiB at the 64 MiB cap** (986,895 title-only
+    programmes of 68 bytes is the most it can hold), except where URL
+    redaction lengthens a description -- `a://@` becomes `a://[redacted]`,
+    2.8 times the token, never past the field's 400 code points -- which
+    caps it at about 2 bytes a byte, **128 MiB**. Before: 144 bytes per
+    title-only programme measured with every start shared across 50
+    channels, about 136 MiB over the 986,895 the cap can hold, with the time
+    memo below on top of it when the starts are not shared.
+
+    Its neighbours, found under rule 15 and stated with the same care:
+
+    | Held during the parse | Bound | Changed |
+    |---|---|---|
+    | programmes (`pending`) | 1.08 x the guide's programme bytes, 2 x with redaction growth: 69-128 MiB | compact form, above |
+    | the time memo (`parse_xmltv_time`) | `EPG_TIME_CACHE_MAX` 16,384 keys of at most `EPG_TIME_CACHE_KEY_MAX` 64 characters, about 3 MiB | was one key per distinct start or stop, a junk value of any length kept whole |
+    | the download | 64 MiB (`MAX_SOURCE_BYTES`; a gzip stream is inflated in chunks) | now released once parsed, before the window is encoded and written |
+    | the playlist cache (`channels.json` as Python objects) | the whole playlist, for the whole parse | now only each row's `tvgId` (what `match_counts` reads) is kept; the document is released before the parse |
+    | guide-side name tables (`guide_names`, `bare_guide`) | 355 bytes per ordinary declaration whose name the playlist claims (measured, 112-byte declarations, both trees alike), so at most 50,000 x 355 = 17 MiB for distinct names; about 100 bytes per further declaration colliding on a claimed name (the existing measurement in `parse_xmltv`'s docstring), so at most about 1.7 x the guide's declaration bytes | not changed |
+    | the playlist index (`build_alias`) | 178.8 MiB traced at the playlist caps, measured when `EPG_ADDR_MAX_TOKENS` was set | not changed |
+
+    A byte of guide is either a programme or a declaration, so the parse's
+    own tables hold at most about 2 x 64 MiB plus 17 MiB; with the download,
+    the index at the playlist caps and the interpreter, the sum of every
+    worst case at once is about 64 + 145 + 179 + 3 + 20 = 411 MiB, under the
+    512 MiB limit, and a run over it is refused as `too_large` with the old
+    guide kept. The playlist index is now the largest single term; it is
+    the next one to shrink, not this round's.
+
+    After the parse, UNVERIFIED and stated: a channel's record string is a
+    Python str, which one astral character (an emoji) in any of its records
+    widens to four bytes a character, so the encoded window can cost up to
+    four times the retained bytes in a guide built for it -- titles of one
+    emoji and 199 double quotes, each quote two characters once escaped. The
+    lines are now made once and the same list is written and returned (they
+    were made twice, with the channel strings held throughout, three copies
+    at the write); one copy is written. Keeping the window as UTF-8 bytes
+    end to end would remove the widening and is proposed, not built: it
+    changes `fetch_window`, `compute_now_next` and the tests that read the
+    window as text. `RetentionDifferentialTest` holds this tree to f55a32f's
+    output on 60 seeded small guides (shuffled, repeated programmes, missing
+    stops, stops not after their start, twelve-digit stops, shared starts,
+    quotes, backslashes, astral characters, with and without a playlist, the
+    per-channel cap at 400 and lowered to 3) and byte for byte on the files
+    `epg` writes; it went red for four mutations of the shipping decisions
+    (sort by the whole item, an equal start taken as the next, a duplicate
+    check blind to the texts, window lines reversed).
+
+    **What the long-running shell holds from the guide data (D-EPG-7, rule
+    15), which has no memory limit.** The shell never reads
+    `epg-window.txt`; it reads `epg-now.json` through a `FileView`, trims
+    the text, `JSON.parse`s it and keeps `doc.channels` by reference
+    (`Model.parseEpgNow`, `Service.qml` `applyEpgNow`). Measured with a
+    probe that does exactly that on Qt 6.11.2 offscreen (an XHR read in
+    place of the `FileView`, which holds the file's text besides), over
+    files the shipping helper wrote from ordinary guides of 2,000 and 4,000
+    matched channels with a description, category and episode on now and
+    next: 529 bytes of JSON a channel, and 6.85-7.03 KiB of resident memory
+    a channel, twice each (71.7 MiB with one channel, 85.1 and 98.8 MiB at
+    2,000 and 4,000). Entries are bounded by the playlist's distinct tvg-ids,
+    at most `MAX_CHANNELS` = 50,000, and an ordinary guide of 50,000 matched
+    channels with two programmes each in the window is about 33 MB of XML,
+    inside the input cap. So the shell can hold about **340 MiB** for the
+    guide's now/next at `MAX_CHANNELS` (UNVERIFIED at that size; about 67 MiB
+    at 10,000), and more with every detail field at its cap (11.6 MiB of
+    JSON at 10,000 channels, about 2.3 times this probe's per-channel JSON).
+    That is not small, and it is not bounded by this change: bounding it
+    means a different shape for `epg-now.json` in the shell (each channel's
+    entry kept as text and parsed when a row asks, about 1 KiB a channel by
+    the same arithmetic), or descriptions fetched on demand, both changes to
+    the guide's data path and its 150 ms open budget, proposed for a ruling.
+
 ## 9. Coding standards
 
 QML (mirror first-party plugins; see clipboard/emojis, tailscale, dropbox):
