@@ -1215,6 +1215,16 @@ The form's result line is the shipped banner's inner row (glyph +
 promoted to the guide banner. The guide banner stays reserved for the
 active source's refresh / EPG problems.
 
+The same line carries the form's ONE warning (R32a, 2026-10-21; R32a',
+2026-10-22): the alert glyph in the normal fill (not the urgent one), with
+the model's sentence from `Model.formWarningLine(form)`, while a URL field
+holds a value that VALIDATES and whose host before the first `/` has no dot
+and an `@` follows later (5.4). It is advice, not an error: it never blocks
+submit, moves no focus, and the error line and the fetching line replace
+it. When the same shape does NOT validate (the typo `http://myuser:pa#ss@...`
+reads as port `pa`), the error line wins and carries the warning's encoding
+sentence itself, so the advice is never lost behind the refusal.
+
 ### 4.4 Masked URL rendering
 
 ```
@@ -1380,6 +1390,7 @@ Key names at opacity 0.7, verbs at 0.45, as shipped.
 | `empty` | nothing after trim | `Enter a playlist URL or path` | (EPG is optional; no error) |
 | `scheme` | `ftp://`, `rtmp://`, `mailto:`, `javascript:`, a bare host, anything not `http(s)://` or `/` | `Start with http://, https://, or / for a local file` | `EPG: start with http://, https://, or / for a local file` |
 | `invalid` | scheme present but no host, spaces or illegal characters, unparsable | `Invalid URL - check the host` | `EPG: invalid URL - check the host` |
+| `invalid`, with the predicate (R32a') | the host before the first `/` has no dot and an `@` follows later, and the value does not validate: `http://myuser:pa#ss@cdn.test/x`, `pa?ss`, `pa/ss` (port `pa`) | `Invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` | `EPG: invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` (the Server field the same, without the prefix) |
 | `relative_path` | starts with `~`, `./` or a name | `Use an absolute path (starts with /, not ~)` | `EPG: use an absolute path (starts with /, not ~)` |
 | `too_long` | over `LIMITS.url` | `Too long - max 2,048 characters` | `EPG: too long - max 2,048 characters` |
 | `duplicate` | same playlist URL as another source (exact after trim) | `Already in Sources as "Provider"` | -- |
@@ -1393,6 +1404,27 @@ Key names at opacity 0.7, verbs at 0.45, as shipped.
 
 One error at a time, first failing field in form order; focus moves to it.
 No `https://` auto-prefix and no Xtream URL auto-parse (8).
+
+**Warning (R32a, 2026-10-21; R32a', 2026-10-22; not an error, never
+refuses).** When the Playlist, EPG or Server value validates but its host
+before the first `/` has no dot (and is not a bracketed literal) and an `@`
+follows later in the typed value -- most likely a password with an unencoded
+`/`, `?` or `#`, which the URL then reads as the host and port -- the result
+line shows, once, while the value warrants it. Which shapes draw which line:
+
+| Shape | Validates? | Line |
+|---|---|---|
+| dotless host, later `@`, digits-only password prefix (`http://user:2024/ab@host.test/x`) | yes (host `user`, port 2024) | warning: `The host before the first / has no dot and an @ follows it. If a password holds /, ? or #, write them as %2F, %3F and %23.` |
+| dotless host, later `@`, any other prefix (`http://myuser:pa#ss@cdn.test/x`, `pa?ss`, `pa/ss`) | no (port `pa`) | error: `Invalid URL - check the host. If a password holds /, ? or #, write them as %2F, %3F and %23.` |
+| LAN name with a path `@` (`http://nas:8000/files/me@home/x`, `http://localhost:8080/me@x.test/y`) | yes | the warning; a sentence, not a refusal |
+| dotted host with a later `@` (an Xtream `/playlist/<email>/<pass>/m3u_plus` link), a bracketed literal, an encoded password (`pa%2Fss`), a userinfo `@` with no later one (`http://u:p@nas/x`) | yes | nothing |
+| dotted host with a bad port and a later `@` (`http://h.test:pa/me@x.test/y`) | no | the bare `Invalid URL - check the host` |
+
+Submit proceeds on every row that validates. The sentences are
+`Model.WARN_AT_AFTER_AUTHORITY` and `Model.ENCODE_SENTENCE` (its second
+half), the predicate is `Model.urlHostWithheld(text)`, the warning is
+`Model.sourceUrlWarning(text)` placed by `Model.formWarningLine(form)`, and
+the appended error sentence is `Model.validateSourceUrl`'s own.
 
 ### 5.5 Fetch results (asynchronous, same line)
 

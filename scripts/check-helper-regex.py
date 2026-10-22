@@ -86,12 +86,17 @@ REVIEWED = [
      "linear: matched at one given position, one run and nothing after it (_URL_TAIL_RE, redact_urls)"),
     (r"\w", "provider",
      "constant: one character at one given position (_WORD_CHAR_RE, redact_urls)"),
-    (r"[A-Za-z0-9+.\-]*\Z", "provider",
-     "open: D-PERF-6. search() has no literal prefix (minimum width 0), so it tries every start of "
-     "redact_urls' window, and a start that fails costs the distance to the next non-scheme "
-     "character; a scheme-legal run broken once inside the window costs about r*r/2 for a run of r. "
-     "Found by lane-bounds-h; ruled R32e, fixed by the lane that owns redact_urls with a "
-     "literal-anchored search, whose new pattern replaces this entry (_SCHEME_RUN_RE)"),
+    (r"(?:.*[^A-Za-z0-9+.\-])?", "provider",
+     "linear: D-PERF-6 (R32e), fixed by lane-bounds-s2. The old `[A-Za-z0-9+.\\-]*\\Z` under search() "
+     "had no literal prefix, so it tried every start of redact_urls' window and a failed start cost "
+     "the distance to the next non-scheme character, about r*r/2 for a scheme-legal run broken once "
+     "inside the window (found by lane-bounds-h). This one is used with match(s, lo, j) under DOTALL: "
+     "`.*` runs to j once and backs off once to the LAST non-scheme character, so an attempt costs at "
+     "most 2*(j - lo), and the doubling windows sum to under 8R + 128 steps for a run of R -- "
+     "independent of the text before it (_SCHEME_RUN_RE, redact_urls)"),
+    (r"[:;=&]", "provider",
+     "linear: one character class, no quantifier (_RUN_HOST_END, run_host_parts: the port and "
+     "parameter delimiters that end a free-text host inside an authority, R32a')"),
     (r"^[\s\-]+", "provider",
      "linear: anchored at the start, one run and nothing after it (_LEADING_DASHES, clean_name)"),
     ("'^' + GENERATED_NAME_WORD.lower() + ' [0-9]+$'", "provider",
@@ -103,7 +108,9 @@ REVIEWED = [
     (r"^([A-Za-z][A-Za-z0-9+.\-]*):(.*)$", "user",
      "linear: anchored; the scheme run cannot hold ':' so it backs off at most once over its length, "
      "and (.*)$ under DOTALL reaches the end at once (_SCHEME_RE, _SOURCE_SCHEME_RE)"),
-    (r"[/?#]", "user", "linear: one character class (_AUTHORITY_END)"),
+    (r"[/?#]", "provider",
+     "linear: one character class (_AUTHORITY_END: validate_source_url's user text, and since R32a' "
+     "run_host_parts' provider text, the end of a free-text URL's authority)"),
     (r"[:\[\]]", "user", "linear: one character class (_BARE_HOST_CHARS)"),
     (r"^[0-9]+$", "user", "linear: anchored, one run then $ (_ASCII_DIGITS)"),
     ("[\u200b-\u200d\u2060\ufeff]", "user", "linear: one character class (_ZERO_WIDTH)"),
@@ -111,7 +118,8 @@ REVIEWED = [
      "linear: fixed by lane-bounds-h (was two adjacent runs over one class, k*k): a lookahead over the "
      "class without ':' and ONE run, which nothing after it can make back off more than once a "
      "character (_IPV6_LITERAL)"),
-    ("[\\s\ufeff]", "user", "linear: one character class (_URL_SPACE)"),
+    ("[\\s\ufeff]", "provider", "linear: one character class (_URL_SPACE: validate_source_url's user text, and "
+     "since R32a' run_host_parts' provider text)"),
     (r"%(?![0-9A-Fa-f]{2})", "user",
      "linear: literal prefix '%', fixed-width lookahead (_BAD_ESCAPE)"),
     (r"^(\d{4})(\d{2})(\d{2})(\d{2})?(\d{2})?(\d{2})?\s*(?:([+-])(\d{2})(\d{2})|Z)?$", "provider",

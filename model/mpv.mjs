@@ -15,7 +15,7 @@ import {
   PIP_CLASS
 } from "./pip.mjs"
 import {
-  scrubUrls
+  redactUrls, scrubUrls
 } from "./privacy.mjs"
 
 // ------------------------------------------------------------ mpv
@@ -138,6 +138,48 @@ function splitMpvArgs(text) {
     else args.push(token)
   }
   return { args: args, rejected: rejected, warnings: mpvArgWarnings(args) }
+}
+
+// D-SINK-24 (ruling R32b). The journal line for the tokens splitMpvArgs
+// refused, or "". It printed them WHOLE, and a refused token is exactly where
+// a credential goes: `--stream-lavf-o=http_proxy=http://user:pw@proxy:3128`
+// (reserved since D-SINK-15), the value half of `--http-proxy http://u:pw@p`
+// split off by the whitespace split, a `Bearer eyJ...` or `Basic dXNl...`
+// split off a `--http-header-fields=Authorization: ...`, and a scheme-less
+// `user:pw@proxy:3128` -- all reached the user journal verbatim on every
+// player start and restart. The console is a sink rule 5 names. So a token
+// is journaled by its option NAME only: the text before `=` when it starts
+// with `--`, else the fixed word `<token>` -- never a value, never a bare
+// token. The round-2 line cut at `=` and redacted URLs, which still printed
+// a bearer value whole (the recheck's P2): a token that is not an option has
+// no name to print, so it gets a placeholder. The helper's own refusal line
+// (`dropped mpvArg ...`, 08-player-verbs.py) is the same rule, pinned by
+// the player suite on the dev branch. redactUrls still runs over the joined names, a
+// second layer for a `--` token that carries `://` without an `=`.
+function mpvRejectedLine(rejected) {
+  var list = asList(rejected)
+  var names = []
+  for (var i = 0; i < list.length; i++) {
+    var token = str(list[i])
+    if (token === "") continue
+    names.push(mpvRejectedName(token))
+  }
+  if (names.length === 0) return ""
+  return "omarchy-iptv: ignoring mpvArgs tokens: " + redactUrls(names.join(" "))
+}
+
+// R32b' (D-SINK-24, 2026-10-22): what a refused token is journaled as. Its
+// NAME, the text before `=`, only when that name is option-shaped,
+// `^--[a-z0-9][a-z0-9-]*$` (MPV_ARG_RE's name half); else the fixed word
+// `<token>`. R32b printed the name of any `--` token, and a token refused
+// BECAUSE its name is not option-shaped is exactly the one whose name can
+// carry anything: `--u:pw@h=1` printed `--u:pw@h`. The helper's `dropped
+// mpvArg` line is the same rule through its MPV_ARG_RE.
+function mpvRejectedName(token) {
+  var t = str(token)
+  var eq = t.indexOf("=")
+  var name = eq === -1 ? t : t.substring(0, eq)
+  return /^--[a-z0-9][a-z0-9-]*$/.test(name) ? name : "<token>"
 }
 
 // Per-channel HTTP headers as mpv argv items. `-append` list form so header
@@ -499,7 +541,7 @@ var LANG_NAMES = {
 }
 
 function trackLanguage(code) {
-  var key = str(code).toLowerCase().replace(/^\s+|\s+$/g, "")
+  var key = str(code).toLowerCase().trim()
   if (key === "") return ""
   if (LANG_NAMES.hasOwnProperty(key)) return LANG_NAMES[key]
   return key.toUpperCase()
@@ -676,12 +718,12 @@ function trackAccessibleName(rows, index) {
 export {
   MPV_HANDOFF, MPV_HANDOFF_SCRIPT_OPTS, MPV_YTDL_OFF, MPV_HANDOFF_TEXT,
   MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase, mpvHandoffName, mpvDiskName,
-  mpvArgWarning, mpvArgWarnings, splitMpvArgs, headerArgs, MPV_RAW_PREFIX,
-  mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv, helperArgv,
-  playlistFetchArgv, fetchStateDir, playlistProbeArgv, epgFetchArgv,
-  FETCH_URL_ENV, fetchEnvironment, failedArgv, logoFetchArgv,
-  playerTracksArgv, trackChoice, parseTracks, LANG_NAMES, trackLanguage,
-  trackLabel, trackDetail, trackRows, trackCursorHome, moveTrackCursor,
-  TRACKS_RECOVERY_MAX, shouldRefreshTracks, trackPanelMessage,
-  trackAccessibleName
+  mpvArgWarning, mpvArgWarnings, splitMpvArgs, mpvRejectedLine,
+  mpvRejectedName, headerArgs, MPV_RAW_PREFIX, mpvWindowTitle, playerDirs,
+  dirnameOf, buildMpvArgv, helperArgv, playlistFetchArgv, fetchStateDir,
+  playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,
+  failedArgv, logoFetchArgv, playerTracksArgv, trackChoice, parseTracks,
+  LANG_NAMES, trackLanguage, trackLabel, trackDetail, trackRows,
+  trackCursorHome, moveTrackCursor, TRACKS_RECOVERY_MAX, shouldRefreshTracks,
+  trackPanelMessage, trackAccessibleName
 }

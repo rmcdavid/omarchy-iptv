@@ -4,8 +4,8 @@ import {
   MAX_CHNO_LABEL, CHNO_SEPARATORS, CHNO_ENTRY_SEP, CHNO_FIELDS
 } from "./build.mjs"
 import {
-  str, asList, normalizeText, searchKey, GENERATED_NAME_WORD, channelId,
-  indexById
+  str, asList, keyedMap, hasOwnKey, trimEndSpace, normalizeText, searchKey,
+  GENERATED_NAME_WORD, channelId, indexById
 } from "./text.mjs"
 import {
   sanitizeInput
@@ -16,7 +16,15 @@ import {
 // R5: a channel with `group-title="A;B;C"` is listed under its FIRST group.
 function primaryGroup(channel) {
   var raw = channel && channel.group !== undefined && channel.group !== null ? str(channel.group) : ""
-  var first = raw.split(";")[0].replace(/^\s+|\s+$/g, "")
+  // D-PERF-3 (R30g): the engine's own trim, which is linear. The pattern
+  // that was here, `/^\s+|\s+$/g`, tries `\s+$` from EVERY position of a
+  // whitespace run and backs out of the rest of it each time -- quadratic in
+  // the run, on every row, on every browse pass, on the shell's main thread.
+  // The helper keeps interior runs in a group verbatim. Same answer on every
+  // input in node; on Qt's V4 the native trim also drops U+0085, which `\s`
+  // does not match (measured; the helper strips C1 controls from the text it
+  // writes, so a group cannot carry one).
+  var first = raw.split(";")[0].trim()
   return first === "" ? UNGROUPED : first
 }
 
@@ -32,7 +40,9 @@ function looksLikeUrl(text) {
 // toast. Leading dashes and whitespace are dropped; an all-dash name falls
 // through to the next candidate. Mirrors the helper's clean_name.
 function cleanName(text) {
-  return str(text).replace(/^[\s-]+/, "").replace(/\s+$/, "")
+  // D-PERF-3: `^[\s-]+` is anchored and linear; the trailing `\s+$` was the
+  // quadratic shape (see primaryGroup), so it is Model.trimEndSpace.
+  return trimEndSpace(str(text).replace(/^[\s-]+/, ""))
 }
 
 function displayName(channel, position) {
@@ -49,12 +59,16 @@ function displayName(channel, position) {
 function prepareChannels(channels) {
   var list = asList(channels)
   var out = []
-  var groupKeys = {}
+  // D-SG-3: keyed by the provider's group; on a plain `{}` a group named
+  // `__proto__` read Object.prototype back as its normalized key.
+  var groupKeys = keyedMap()
   for (var i = 0; i < list.length && out.length < MAX_CHANNELS; i++) {
     var src = list[i]
     if (!src || typeof src !== "object") continue
     var row = {}
-    for (var key in src) row[key] = src[key]
+    // D-SG-3: `__proto__` as a cache row's own key (JSON.parse makes it one)
+    // would SET this row's prototype here rather than copy a field.
+    for (var key in src) if (key !== "__proto__" && hasOwnKey(src, key)) row[key] = src[key]
     row.id = channelId(src)
     row.name = displayName(src, out.length + 1)
     row.group = str(src.group)
@@ -215,8 +229,8 @@ function chnoOf(channel) {
 // hasNumbers false; every consumer must tolerate it.
 function buildChnoIndex(channels) {
   var list = asList(channels)
-  var byKey = {}
-  var ids = {}
+  var byKey = keyedMap()
+  var ids = keyedMap()
   var numbered = []
   var maxLabelLen = 0
   for (var i = 0; i < list.length; i++) {
@@ -388,7 +402,7 @@ function channelByNumber(channels, index, text) {
 // silently means the safe default, because this setting reorders the whole
 // guide and a typo must not be able to do that.
 function channelOrderOf(value) {
-  return str(value).replace(/^\s+|\s+$/g, "").toLowerCase() === "number" ? "number" : "playlist"
+  return str(value).trim().toLowerCase() === "number" ? "number" : "playlist"
 }
 
 // M2-03 5.2. An O(n) gather, never a second sort: chnoIndex.order is already
@@ -419,7 +433,7 @@ function orderChannels(channels, order, index) {
 var NUMERIC_QUERY_RE = /^[0-9]{1,5}([.,][0-9]{1,3})?$/
 
 function isNumericQuery(text) {
-  return NUMERIC_QUERY_RE.test(str(text).replace(/^\s+|\s+$/g, ""))
+  return NUMERIC_QUERY_RE.test(str(text).trim())
 }
 
 // M2-03 2.9: which keys the entry buffer owns, so the guide's textKey

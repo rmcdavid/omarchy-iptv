@@ -115,7 +115,9 @@ Item {
     var ch = root.rowAt(root.cursorIndex)
     if (!ch) return null
     var id = ch.tvgId !== undefined ? String(ch.tvgId) : ""
-    return { channel: ch, entry: id !== "" ? root.epgMap[id] : null, nowSec: root.nowSec }
+    // D-SG-3: Model.epgEntry, never `root.epgMap[id]` -- the map is keyed by
+    // the provider's tvg-ids and a plain lookup of `constructor` finds Object.
+    return { channel: ch, entry: Model.epgEntry(root.epgMap, id), nowSec: root.nowSec }
   }
   // What the open panel renders. Recomputed on the 30 s clock tick as well as
   // on the cursor, so an open panel follows the programme over a boundary
@@ -679,7 +681,7 @@ Item {
   // rows pay for them and a favorite toggle, a zap or the 30 s EPG tick
   // never rebuilds the list (D-LIVE-01).
   readonly property var favoriteSet: Model.favoriteSet(root.serviceReady ? root.service.userState.favorites : [])
-  readonly property var failedMap: root.serviceReady && root.service.failedAt ? root.service.failedAt : ({})
+  readonly property var failedMap: root.serviceReady && root.service.failedAt ? root.service.failedAt : Model.keyedMap()
   readonly property var epgMap: root.serviceReady && root.epgLoaded ? root.service.epgNow : ({})
   // Two-line rows whenever the detail line can have content for this list
   // (UX 2.4): a mixed list shows the group, EPG adds now/next.
@@ -3868,7 +3870,7 @@ Item {
                   // bug.
                   readonly property string failedAt: row.channelId !== ""
                     ? Model.failedWhen(root.failedMap[row.channelId], root.nowSec) : ""
-                  readonly property var epg: Model.epgFields(row.tvgId !== "" ? root.epgMap[row.tvgId] : null, root.nowSec)
+                  readonly property var epg: Model.epgFields(Model.epgEntry(root.epgMap, row.tvgId), root.nowSec)
                   readonly property string nowTitle: row.epg.nowTitle
                   readonly property string nextTitle: row.epg.nextTitle
                   readonly property int nowStart: row.epg.nowStart
@@ -4916,10 +4918,17 @@ Item {
               radius: root.cornerRadius
 
               readonly property bool isError: root.formError !== null
+              // R32a (D-SINK-25): the model's one warning for a URL whose
+              // RFC host has no dot and an `@` follows later -- most likely
+              // a password with an unencoded `/`, `?` or `#`. Advice, shown
+              // once per value on this line while the field holds it; it
+              // never blocks submit and the error and fetching lines win.
+              readonly property string warningText: !isError && !root.formProbing && root.form ? Model.formWarningLine(root.form) : ""
+              readonly property bool isWarning: warningText !== ""
               readonly property string lineText: {
                 if (root.formError) return String(root.formError.message)
                 if (root.formProbing && root.form) return Model.fetchingLine(root.form.probeHost, root.form.probeKind)
-                return ""
+                return warningText
               }
 
               opacity: lineText !== "" ? 1 : 0
@@ -4937,7 +4946,7 @@ Item {
                 Text {
                   anchors.verticalCenter: parent.verticalCenter
                   textFormat: Text.PlainText
-                  text: resultLine.isError ? Model.GLYPHS.alert : Model.GLYPHS.loading
+                  text: resultLine.isError || resultLine.isWarning ? Model.GLYPHS.alert : Model.GLYPHS.loading
                   color: resultLine.isError ? root.urgent : root.foreground
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.icon

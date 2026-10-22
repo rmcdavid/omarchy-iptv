@@ -63,8 +63,9 @@ as a way to hand the plugin a playlist. This version does not read either
 setting any more, with one exception: if you set one up that way on 0.13.6 or
 earlier, the first shell start on this version moves it into your Sources
 list once, makes it the active source, and takes the URL out of the shell's
-settings file. You do not need to do anything, and you do not need your URL
-again. After that, a `playlistUrl` or `epgUrl` set with `omarchy bar set` is
+settings file -- unless Sources already holds 50 sources, in which case the URL
+stays where it is until you remove one (see below). You do not need to do
+anything else, and you do not need your URL again. After that, a `playlistUrl` or `epgUrl` set with `omarchy bar set` is
 ignored and removed, and a notification says so — see **Bar setting
 ignored** under Troubleshooting.
 
@@ -121,8 +122,10 @@ and the third was a file the plugin does not own; now the entry carries a short
 code naming the active source, and the plugin never writes a URL into that
 file. A URL still passes through it in two cases, both covered under the next
 heading: the one an install updated from 0.13.6 or earlier still has in it
-until the first shell start on this version moves it into Sources and takes it
-out, and one you put there yourself with `omarchy bar set`, which the plugin
+until the plugin moves it into Sources and takes it out -- at the first shell
+start on this version, at a later one if that start cannot save the move, or,
+while Sources already holds 50 sources, only once one is removed -- and one you
+put there yourself with `omarchy bar set`, which the plugin
 does not read and removes on its next write. This paragraph has been wrong before — two
 sentences once said two files when there were three — so the count here is
 re-derived for this version rather than copied: two the plugin owns and keeps
@@ -241,8 +244,10 @@ whatever your umask gives it, which is usually readable by everyone too, and
 rewriting a file that already exists leaves its permissions alone — so a
 machine that started out readable stays readable. The plugin no longer puts
 your provider URL in that file, but one can still get in: an install updated
-from 0.13.6 or earlier has one in it until the first shell start on this
-version moves it into Sources and takes it out, and you can still put one there
+from 0.13.6 or earlier has one in it until the plugin moves it into Sources and
+takes it out (at the first shell start on this version, at a later one if that
+start cannot save the move, or, while Sources already holds 50 sources, only
+once one is removed), and you can still put one there
 yourself with `omarchy bar set`, which the plugin does not read and removes on
 its next write. So the plugin still takes group and other access away from that single
 file — at every shell start, and again after each of its own writes: on an
@@ -301,7 +306,7 @@ One place they can escape that, worth knowing, and one that used to:
 
 | Key | Type | Default | Meaning |
 |---|---|---|---|
-| `playlistUrl` | string | `""` | **Not a setting any more**. Read once, at the first shell start on this version, to move a playlist an earlier version was given this way into Sources; after that a value set here adds nothing and switches nothing: it is removed from the entry on the plugin's next write, with one `Bar setting ignored` notification. Add, switch and remove playlists on the Sources screen |
+| `playlistUrl` | string | `""` | **Not a setting any more**. Read once, at the first shell start on this version, to move a playlist an earlier version was given this way into Sources (while Sources already holds 50 sources it is left on the entry, and moved when one is removed); after that a value set here adds nothing and switches nothing: it is removed from the entry on the plugin's next write, with one `Bar setting ignored` notification. Add, switch and remove playlists on the Sources screen |
 | `epgUrl` | string | `""` | **Not a setting any more**, on the same terms as `playlistUrl`: read once, at the first start on this version, and attached to the source that becomes active then (removed, with a `Bar setting removed` notification, when there is none); ignored and removed after that. A source's guide-data URL is set in the add or edit form on the Sources screen (`a`, `e`), and cleared there |
 | `sourceKey` | string | `""` | written by the plugin, not by you: the short code naming the active source, the one that names its cache directory under `~/.cache/omarchy-iptv/sources/`. The plugin's own `state.json` is the authority; this is a mirror it falls back to only when that file names no source, and a code that names none of your sources is ignored. It is not among the plugin's declared settings, so `omarchy bar set` shows no help for it, though it writes it like any other key |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
@@ -586,7 +591,8 @@ unaffected, and pasting carries any character.
 The Sources screen is the only place a source is added, switched, edited or
 removed. `omarchy bar set ... playlistUrl` and `... epgUrl` no longer reach
 it: a playlist an earlier version was given that way is moved into this list
-once, at the first shell start on this version, and after that a value set
+once, at the first shell start on this version (or, if this list already
+holds 50 sources then, when one is removed), and after that a value set
 that way is removed from the shell's settings file with a `Bar setting
 ignored` notification and changes nothing here (Settings above has the
 detail). A guide-data URL belongs to its source: set it in the add form, or
@@ -829,8 +835,10 @@ One file in this list is not the plugin's:
   read it. Your playlist and guide-data URLs are no longer stored there (the
   entry carries a short code for the active source instead), so that
   permission change is now a guard for a URL arriving by another route — an
-  install updated from an older version until its first start moves the URL
-  into Sources, or your own `omarchy bar set`, which the plugin removes on its
+  install updated from an older version until the plugin moves the URL into
+  Sources (at its first start, at a later one if that start cannot save the
+  move, or, while Sources already holds 50 sources, only once one is
+  removed), or your own `omarchy bar set`, which the plugin removes on its
   next write — rather than for the plugin's own writing. Not the contents beyond its own entry,
   and not the directories around it. See Settings above for what happens when
   that cannot be done.

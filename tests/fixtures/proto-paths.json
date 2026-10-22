@@ -1,0 +1,234 @@
+{
+  "note": "D-SG-3 (ruling R30f). What tests/proto-paths.mjs must return, in BOTH engines: tests/Model.test.js runs it in node (V8) through tests/proto-run.mjs in a child process, tests/test_proto_v4.py runs it in Qt 6's own V4 offscreen. One expectation, two engines, because the shell runs V4 and node was found more forgiving than it (V4 has no String.prototype.trimEnd). Every playlist group, name and tvg-id, and every state favourite, hidden group, saved search and source label, is a name Object.prototype answers to; the verdict besides these fields is errors [] and prototypeUnchanged true.",
+  "expected": {
+    "groups": [
+      [
+        "News",
+        1
+      ],
+      [
+        "__proto__",
+        1
+      ],
+      [
+        "constructor",
+        1
+      ],
+      [
+        "hasOwnProperty",
+        1
+      ],
+      [
+        "toString",
+        1
+      ],
+      [
+        "valueOf",
+        1
+      ]
+    ],
+    "surface": [
+      6,
+      [
+        [
+          "News",
+          1
+        ],
+        [
+          "__proto__",
+          1
+        ],
+        [
+          "constructor",
+          1
+        ],
+        [
+          "hasOwnProperty",
+          1
+        ],
+        [
+          "toString",
+          1
+        ],
+        [
+          "valueOf",
+          1
+        ]
+      ]
+    ],
+    "scopes": [
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "primaryGroups": [
+      "News",
+      "__proto__",
+      "constructor",
+      "hasOwnProperty",
+      "toString",
+      "valueOf"
+    ],
+    "names": [
+      "News One",
+      "__proto__",
+      "constructor",
+      "hasOwnProperty",
+      "toString",
+      "valueOf"
+    ],
+    "ids": [
+      "t:news1",
+      "t:__proto__",
+      "t:constructor",
+      "t:hasOwnProperty",
+      "t:toString",
+      "t:valueOf"
+    ],
+    "schemeOneIds": [
+      "t:news1",
+      "t:__proto__",
+      "t:constructor",
+      "t:hasOwnProperty",
+      "t:toString",
+      "t:valueOf"
+    ],
+    "remap": 0,
+    "remapState": [
+      0,
+      [
+        "__proto__",
+        "constructor",
+        "hasOwnProperty",
+        "toString",
+        "valueOf",
+        "t:__proto__",
+        "t:constructor",
+        "t:hasOwnProperty",
+        "t:toString",
+        "t:valueOf"
+      ],
+      [
+        "__proto__",
+        "constructor",
+        "hasOwnProperty",
+        "toString",
+        "valueOf",
+        "t:__proto__",
+        "t:constructor",
+        "t:hasOwnProperty",
+        "t:toString",
+        "t:valueOf"
+      ]
+    ],
+    "index": [
+      true,
+      true,
+      true,
+      true,
+      true
+    ],
+    "chno": 0,
+    "search": [
+      1,
+      1,
+      1,
+      1,
+      1
+    ],
+    "saved": [
+      5,
+      5,
+      5
+    ],
+    "favorites": [
+      "__proto__",
+      "constructor",
+      "hasOwnProperty",
+      "toString",
+      "valueOf",
+      "t:__proto__",
+      "t:constructor",
+      "t:hasOwnProperty",
+      "t:toString",
+      "t:valueOf"
+    ],
+    "recentScope": 5,
+    "hide": [
+      [
+        true,
+        true,
+        true,
+        true,
+        true
+      ],
+      [
+        "__proto__",
+        "constructor",
+        "hasOwnProperty",
+        "toString",
+        "valueOf"
+      ],
+      1,
+      1,
+      5
+    ],
+    "labels": [
+      "__proto__",
+      "valueOf",
+      "toString",
+      "hasOwnProperty",
+      "constructor"
+    ],
+    "uniqueLabel": [
+      "__proto__ 2",
+      "constructor 2",
+      "hasOwnProperty 2",
+      "toString 2",
+      "valueOf 2"
+    ],
+    "logoSurvey": [
+      6,
+      6,
+      "number"
+    ],
+    "epg": [
+      1,
+      [
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    ],
+    "failed": [
+      5,
+      5,
+      4,
+      true
+    ],
+    "merge": [
+      10,
+      5,
+      0
+    ],
+    "written": [
+      [
+        "activeKey",
+        "cacheLayout",
+        "favorites",
+        "hiddenGroups",
+        "lastPlayed",
+        "recents",
+        "savedSearches",
+        "session",
+        "sources",
+        "version"
+      ],
+      "{\"id\":\"x\",\"sourceKey\":\"k\"}"
+    ]
+  }
+}

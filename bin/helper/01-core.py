@@ -545,15 +545,28 @@ _LATIN_MARKS = re.compile("([a-z])[\u0300-\u036f]+")
 # outside ASCII.
 _URL_TAIL_RE = re.compile(r"[^\s'\"<>]+")
 _WORD_CHAR_RE = re.compile(r"\w")
-# The scheme-legal run that ENDS at a given position: `search(s, lo, j)` leaves
-# `$`/`\Z` at `j`, so the leftmost match starts the maximal run reaching `j`.
-# One native search rather than a python character loop walking back over the
-# same set -- the loop was correct and measurably slower, 168.5 ms against
-# 1 MiB of letters followed by a URL where this is 54.4 ms (3.810 ms against
-# 40,000 where this is 0.363), and the whole point of F-SINK-11 is that the
-# size is the provider's to choose. Both are linear; this one has the smaller
-# constant and neither copies a slice.
-_SCHEME_RUN_RE = re.compile(r"[A-Za-z0-9+.\-]*\Z")
+# The scheme-legal run that ENDS at a given position. D-PERF-6 (R32e): it
+# was `[A-Za-z0-9+.\-]*\Z` under search(s, lo, j), which has NO literal
+# prefix, so the engine tried every start in the window and a failed start
+# cost the distance to the next non-scheme character: about K*K/2 steps on
+# `'a'*K + '!' + 'a'*K + '://x'`, reached on uncapped text (track titles,
+# main()'s message and traceback, a fetch error's status line). Now one
+# anchored match on [lo, j): `.*` under DOTALL runs to j and backs off to the
+# LAST non-scheme character, so the match's end is the run's start, or lo
+# when the window is all scheme characters -- the same b, found in one pass
+# over the window. A python character loop walking back was measured slower
+# (168.5 ms against 54.4 at 1 MiB, F-SINK-11), which is why this stays a
+# native match rather than a loop. Equal output on the shared fixture and on
+# the generated corpus (the redaction-cost suite on the dev branch); the
+# bound is arithmetic, UNVERIFIED by run under the round's input rule.
+_SCHEME_RUN_RE = re.compile(r"(?:.*[^A-Za-z0-9+.\-])?", re.S)
+# run_host_parts' host end inside the authority (which _AUTHORITY_END has
+# already cut at `/`, `?` or `#`): the port's `:` and the parameter
+# delimiters `;`, `=`, `&`, so a neighbouring parameter never prints (R32a').
+_RUN_HOST_END = re.compile(r"[:;=&]")
+# The token a free-text redactor prints in place of a withheld host (R32a').
+# Model.HOST_WITHHELD owns it; the shared redaction fixture holds both to it.
+HOST_WITHHELD = "[host withheld]"
 _LEADING_DASHES = re.compile(r"^[\s\-]+")
 # make_channel's last-resort display name, and the pattern that recognises one
 # after normalize_text. Built from the same constant so the two cannot drift:
@@ -818,6 +831,59 @@ def source_host(url: str) -> str:
     return "local file"
 
 
+def run_host_parts(body: str) -> tuple[str, bool]:
+    """Mirror of Model.runHostParts (R32a', D-SINK-29, 2026-10-22): for the
+    text after one `scheme://`, the RFC host a FREE-TEXT redactor prints and
+    whether it is WITHHELD.
+
+    The authority ends at the first `/`, `?`, `#` or whitespace after the
+    scheme, its userinfo at the LAST `@` within it (D-SINK-1), and the host
+    is what follows that `@`, cut at the first `:` (a port), `;`, `=` or `&`
+    (a parameter delimiter, so a neighbouring parameter never prints,
+    D-SINK-23); a bracketed literal is the host up to its `]`, or nothing.
+    `withheld` is the one predicate the Sources form warns with
+    (Model.urlHostWithheld): the host is not bracketed, has no dot, and an
+    `@` follows the authority -- a dotless "host" with a later `@` is most
+    likely a username in front of a password holding an unencoded `/`, `?`
+    or `#`, and printing it printed the username (`http://myuser:pa#ss@...`
+    -> `http://myuser`, D-SINK-28). Not url_host: urllib's RFC reading is
+    right for a display sink and for validation (source_host,
+    validate_source_url) and prints that username. Not round 3's last-`@`-
+    of-the-run scan either (never shipped): crossing the `/` put a password
+    TAIL in the host position (`/live/U5ER/P4@SSW0RD/1.ts` -> `ssw0rd`,
+    D-SINK-29) on mpv's error line into the journal and the notification.
+    The cost, stated in ARCHITECTURE-SOURCES 3.1: a dotless intranet URL with
+    a path `@` withholds its host, `localhost` included. One pass over the
+    run: one search per class, no retry; the shared redaction fixture (dev
+    branch) holds both mirrors to it."""
+    space = _URL_SPACE.search(body)
+    if space is not None:
+        body = body[:space.start()]
+    cut = _AUTHORITY_END.search(body)
+    authority = body if cut is None else body[:cut.start()]
+    rest = "" if cut is None else body[cut.start():]
+    hostport = authority[authority.rfind("@") + 1:]
+    if hostport.startswith("["):
+        close = hostport.find("]")
+        return (hostport[:close + 1].lower() if close != -1 else ""), False
+    end = _RUN_HOST_END.search(hostport)
+    host = hostport if end is None else hostport[:end.start()]
+    return host.lower(), (host != "" and "." not in host and "@" in rest)
+
+
+def host_withheld(url: str) -> bool:
+    """R32a': the predicate alone, over a whole URL (or any text holding one)."""
+    j = url.find("://")
+    return j != -1 and run_host_parts(url[j + 3:])[1]
+
+
+def run_host(raw: str) -> str:
+    """What redact_urls prints for one `scheme://...` run: the RFC host, or
+    HOST_WITHHELD."""
+    host, withheld = run_host_parts(raw[raw.find("://") + 3:])
+    return HOST_WITHHELD if withheld else host
+
+
 def redact_urls(text: Any) -> str:
     """Replace every URL inside `text` with scheme://host (R12).
 
@@ -882,7 +948,7 @@ def redact_urls(text: Any) -> str:
             lo = j - window
             if lo < resume:
                 lo = resume
-            b = _SCHEME_RUN_RE.search(s, lo, j).start()
+            b = _SCHEME_RUN_RE.match(s, lo, j).end()
             if b > lo or lo == resume:
                 break
             window *= 2
@@ -912,11 +978,16 @@ def redact_urls(text: Any) -> str:
             continue
         end = tail.end()
         raw = s[start:end]
+        # Sentence punctuation after a URL is put back. A `]` is kept when the
+        # run holds a `[`: it closes an IPv6 literal, and stripping it left
+        # `http://[2001:db8::5].` with no host to show (R32a; a D-SINK-23
+        # sibling lane S recorded).
+        bracket = "[" in raw
         trailing = ""
-        while raw and raw[-1] in ".,;:!?)]":
+        while raw and raw[-1] in ".,;:!?)]" and not (bracket and raw[-1] == "]"):
             trailing = raw[-1] + trailing
             raw = raw[:-1]
-        host = url_host(raw)
+        host = run_host(raw)
         out.append(s[copied:start])
         out.append("%s://%s%s" % (s[start:j].lower(), host or "[redacted]", trailing))
         copied = end

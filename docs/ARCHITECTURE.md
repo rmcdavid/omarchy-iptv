@@ -790,7 +790,18 @@ local used everywhere the argument was; `playlist` with neither is a
 service cannot switch on a usage exit. `--url` stays for a human running the
 helper by hand, in their own shell and their own argv. Redaction is
 unchanged: the helper prints neither the variable nor any URL beyond scheme
-and host.
+and host -- where "host" is the RFC host in every sink (ruling R32a',
+2026-10-22; `run_host_parts` in the helper, `Model.runHostParts` in the
+model): the authority ends at the first `/`, `?`, `#` or whitespace, its
+userinfo at the last `@` within it, and a FREE-TEXT sink cuts the host at
+the first `:`, `;`, `=` or `&` and WITHHOLDS it, as the one token
+`[host withheld]`, when it has no dot and an `@` follows the authority --
+because the RFC host of a password holding an unencoded `/`, `?` or `#` is
+the username (D-SINK-28), and a scan that crossed the `/` to the run's last
+`@` printed a password tail instead (D-SINK-29, round 3, never shipped). A
+display sink and validation read the RFC host unconditionally. Both rules,
+the cost of the withholding and the shared fixture are in
+`ARCHITECTURE-SOURCES.md` 3.1.
 
 Why environ is the route. `/proc/<pid>/cmdline` is readable by every uid on
 an ordinary proc mount; that was the exposure. `/proc/<pid>/environ` is
@@ -3836,6 +3847,51 @@ The model, `Model.mjs` and `model/*.mjs` (ES modules since D-REL-5,
   anyway.
 - Never mutate inputs; return new arrays/objects.
 - Every function tolerates `null`/`undefined`.
+- **A map keyed by a string a provider or a user chose is null-prototype**
+  (D-SG-3, ruling R30f, 2026-10-21). Group names, channel names, tvg-ids,
+  ids read from state.json, saved-search terms, hidden groups, source labels,
+  logo hosts, IPC arguments: build the map with `Model.keyedMap()`
+  (`Object.create(null)`), or read it with `Model.hasOwnKey` /
+  `Model.ownKeyValue`, and `key in obj` is the same read. A plain `{}` is not
+  a map in the shell's engine, which the host and every plugin share:
+  `seen["__proto__"]` is Object.prototype, so a playlist group named
+  `__proto__` put an enumerable `count: NaN` on every object in the process
+  and the plugin wrote `"count":null` into state.json and the host's
+  shell.json; `index["constructor"]` is the Object function, so IPC
+  `play("constructor")` found a "channel". A map that arrives from JSON.parse
+  (epg-now.json's channels) is an ordinary object and is read through
+  `Model.epgEntry` / `hasOwnKey`. An object handed to the HOST stays
+  ordinary (host code may call its methods); its copies take own keys only
+  and never `__proto__` (`entryWith`, `settingsWithOwnWrite`, `cloneState`).
+  Observed in both engines by `tests/proto-paths.mjs`: node in a child
+  process, Qt's V4 offscreen in `tests/test_proto_v4.py`, one expectation.
+- **No pattern whose cost is super-linear in its input runs on provider
+  text** (D-PERF-3, ruling R30g). An unanchored `\s+$` (and `/^\s+|\s+$/g`'s
+  second half, and the edge-space `[ \u00a0]+$`) is retried from every
+  position of a whitespace run and backs out of the rest of it: about k^2/2
+  steps for a run of k, and the helper keeps interior runs in names, groups,
+  tvg-ids and stream URLs. Trims are the engine's `trim()`, or
+  `Model.trimEndSpace` / `Model.trimEdgeSpace` (index walks) -- never
+  `trimEnd` or `trimStart`, which **Qt 6.11.2's V4 does not have** (node
+  does; the node suite passed while every guide open would have thrown).
+  V4's `trim()` also takes U+0085, which `\s` does not. What the helper
+  writes, measured on ordinary input rather than claimed (round 3; the
+  earlier sentence here, "nothing the helper writes carries a C1 control",
+  was false): an INTERIOR U+0085 in a name, group or tvg-id is kept verbatim
+  in channels.json (`clean_name` only strips), one at the EDGES is taken by
+  `str.strip()` (NEL is whitespace to Python), and the guide's fields fold
+  any NEL to a space (`clean_field`, `\s` in a str pattern) -- so the edges
+  `trim()` and the old pattern see are the same, and an interior NEL is
+  trimmed by neither. `scripts/check-trim-shapes.py` (the gate's
+  "trim shape guard") refuses both known-bad shapes; it is a guard, not the
+  proof. The bound, UNVERIFIED at size by the round's input rule and stated
+  as arithmetic: the old whole-file trim of channels.json was about
+  4,094^2/2 = 8.4e6 steps per URL-length run (M3U_MAX_URL 4096), times the
+  entries a 64 MiB file can hold; the replacements do a constant amount of
+  work per character, so the same file costs one pass. Every other regex in
+  model/, Service.qml and Guide.qml was read for the shape in the same
+  round (the bounds sweep's lane S report lists each with its verdict): single-position
+  anchors, global character-class replaces and `split(/\s+/)` are linear.
 - Any text-normalization or id change is made in the helper and in the model
   together, with the shared vectors in both test suites updated.
 - Every shipped file stays at or under 448 KiB: `release.py check` enforces
