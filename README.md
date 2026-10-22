@@ -698,11 +698,13 @@ carry channel ids — most do — are not affected at all.
 - Guide data is held to the same limits. A channel name in the guide is
   cut at 512 characters before it is matched. Guide data read while the
   source has no channel list yet (the first load, before the playlist has
-  arrived) keeps the first 50,000 channels it lists, and leaves out a
-  channel whose id is over 256 characters, which no playlist `tvg-id` can
-  match. The programmes left out either way are counted in a `Guide data
-  warning:` line. Once the channel list is there, the next guide refresh
-  matches the guide against it and these two limits no longer apply.
+  arrived) keeps the first 50,000 distinct channel ids its programmes
+  name, in the order the programmes appear (a channel declared but given
+  no programme takes no place), and leaves out a channel whose id is over
+  256 characters, which no playlist `tvg-id` can match. The programmes
+  left out either way are counted in a `Guide data warning:` line. Once
+  the channel list is there, the next guide refresh matches the guide
+  against it and these two limits no longer apply.
 - Reading a playlist or guide data runs in a background helper that is
   allowed 512 MiB of memory. One that would need more stops there and shows
   `Source too large`, and the channels or guide data you already had stay.

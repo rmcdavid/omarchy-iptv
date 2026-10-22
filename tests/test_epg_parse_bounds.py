@@ -30,6 +30,23 @@ What each class holds, and what it was seen red against (rule 11):
 * TimeMemoAsciiTest -- that recheck's P3 (d): the memo keeps ASCII keys only,
   so its stated bound is true.
 
+Round 3 (lane-bounds-h2, ruling R32d, D-EPG-12):
+
+* NoiseEquivalenceTest -- _EPG_NAME_NOISE's `[not 24/7]` alternative had two
+  unbounded `\\s*` runs with only an optional atom between them (quadratic in
+  a whitespace run; the round-2 guard had graded it linear for a false
+  reason). Rewritten with the second run behind the separator; held EQUAL to
+  the old pattern, run as the oracle, on generated spellings of the marker
+  and on ordinary names. Green on the base by construction (the oracle IS
+  the base's pattern), so it was seen red on mutations of the new one.
+* OneFoldTest -- the recheck's P3 (c): the guide side folded a display-name
+  (DEL and C0 controls to a space) before keying and the playlist side keyed
+  the raw name, so the same name with a DEL on both sides did not match.
+  One fold, epg_name_text, inside the key functions. Red on the base.
+* GuideIdCapBoundaryTest -- the recheck's P3 (b): exactly EPG_MAX_GUIDE_ID
+  accepted and one more refused; exactly MAX_CHANNELS admitted with nothing
+  refused and the next refused. Red on the off-by-one mutations.
+
 Nothing here is large, and nothing is timed: under the sweep's input rule a
 bound is shown by arithmetic, by one ordinary record, by lowered caps and by
 equivalence, never by an input built to cost.
@@ -339,6 +356,159 @@ class DisplayNameKeyTest(unittest.TestCase):
         self.assertEqual(result["seenIds"], {"other.us"})
         _, result = self.keyed(512, "Alpha (US) and a great deal more")
         self.assertEqual(result["seenIds"], set())
+
+
+# _EPG_NAME_NOISE as it stood before D-EPG-12 (lane-bounds-h, 8a3a0de): the
+# oracle the rewritten pattern is held equal to.
+OLD_NOISE = re.compile(
+    r"\((?:\d{3,4}p|sd|hd|fhd|uhd|4k|h\.?26[45])\)"
+    r"|\[\s*not\s*24\s*[-/]?\s*7\s*\]"
+    r"|\[\s*geo[\s-]*blocked\s*\]", re.IGNORECASE)
+
+
+def marker_spellings(seed, count):
+    """Short strings over the characters the `[not 24/7]` alternative
+    decides on: the bracket, the words, the two separators, short whitespace
+    runs (a tab, an NBSP) and a few letters, so every way of splitting a
+    whitespace run across the optional separator is generated."""
+    rng = random.Random(seed)
+    pieces = ["[", "]", "not", "NOT", "24", "7", "-", "/", " ", "  ", "\t", "\u00a0", "x", "Alpha",
+              "(1080p)", "(HD)", "geo", "blocked", "[not 24/7]", "[Not 24-7]", "[geo-blocked]"]
+    for _ in range(count):
+        yield "".join(rng.choice(pieces) for _ in range(rng.randint(0, 9)))
+
+
+class NoiseEquivalenceTest(unittest.TestCase):
+    """D-EPG-12 (R32d): the rewritten `[not 24/7]` alternative of
+    _EPG_NAME_NOISE matches exactly what the old one matched, so every name
+    keys as before. Seen red on mutations of the new alternative (the run
+    inside the separator group dropped; the group made mandatory)."""
+
+    NAMED = ["[not 24/7]", "[Not 24-7]", "[NOT 24 / 7]", "[ not 24 / 7 ]", "[not 24 7]", "[not 24- 7]",
+             "[not 24 -7]", "[not 24  /  7]", "[not 24 x]", "[not 24   ]", "[not 247]", "[not24/7]",
+             "[not 24//7]", "[not 24 / /7]", "[not 24/-7]", "[not\t24/7]", "[not 24\u00a07]",
+             "[NOT 24/7] Alpha", "Alpha [not 24/7] (1080p)", "Alpha (1080p) [geo-blocked]",
+             "[geo blocked]", "[geo--blocked]", "[[not 24/7]]", "[not 24/7", "not 24/7]", ""]
+
+    def test_equal_to_the_old_pattern_on_generated_and_named_inputs(self):
+        matched = 0
+        for text in self.NAMED + list(marker_spellings(5, 20000)):
+            self.assertEqual(helper._EPG_NAME_NOISE.sub(" ", text), OLD_NOISE.sub(" ", text), repr(text))
+            matched += OLD_NOISE.search(text) is not None
+        self.assertGreater(matched, 1000)
+
+    def test_the_name_key_is_unchanged_on_ordinary_names(self):
+        """The whole key, old pattern against new, over names that carry no
+        control character (those are the D-EPG-12 fold's own change, pinned
+        by OneFoldTest)."""
+        for text in self.NAMED + list(marker_spellings(6, 5000)) + list(ordinary_names(8, 5000)):
+            self.assertEqual(helper.epg_name_key(text),
+                             helper.normalize_id_text(OLD_NOISE.sub(" ", helper.epg_name_text(text))), repr(text))
+
+
+class OneFoldTest(unittest.TestCase):
+    """D-EPG-12 (R32d), the round-2 recheck's P3 (c): the playlist side and
+    the guide side of the name key take ONE fold, epg_name_text, so a name
+    carrying a DEL, a tab or a C0 control keys the same from either side.
+    Red on the base: build_alias keyed the raw name ("alpha\\x7fone") while
+    parse_xmltv keyed the folded one ("alpha one")."""
+
+    # A DEL and a tab are legal XML 1.0 characters, so a guide can carry
+    # them; the other C0 controls are not (expat refuses them), so only a
+    # playlist can, and those are keyed below without a parse.
+    XML_NAMES = ["Alpha\x7fOne", "Beta\tTwo", "Delta \x7f Four", "Eps\x7f\x7f  ilon", "Eta\x7f(US)"]
+    NAMES = XML_NAMES + ["Gamma\x01Three", "Zeta\x1fSix"]
+
+    def test_a_name_with_a_control_character_keys_the_same_from_either_side(self):
+        for name in self.NAMES:
+            playlist_side = helper.epg_name_key(name)
+            guide_side = helper.epg_name_key(helper.epg_name_text(name))
+            self.assertEqual(playlist_side, guide_side, repr(name))
+            self.assertNotIn("\x7f", playlist_side, repr(name))
+            self.assertNotIn("\x01", playlist_side, repr(name))
+            self.assertEqual(helper.bare_name_key(name + " (US)"),
+                             helper.bare_name_key(helper.epg_name_text(name + " (US)")), repr(name))
+        # The fold comes BEFORE the strip, as the guide side has always
+        # ordered it: a DEL after the closing parenthesis is a space the
+        # strip then removes, from the playlist side too.
+        self.assertEqual(helper.bare_name_key("Eta (US)\x7f"), helper.epg_name_key("Eta"))
+        self.assertEqual(helper.bare_name_key("Eta (US)\x7f"), helper.bare_name_key(helper.epg_name_text("Eta (US)\x7f")))
+
+    def test_the_fold_is_the_same_text_both_sides_see(self):
+        self.assertEqual(helper.epg_name_text("  Alpha\x7f\x7f One\t"), "Alpha One")
+        self.assertEqual(helper.epg_name_text(None), "")
+        self.assertEqual(helper.epg_name_text(101), "101")
+        self.assertEqual(helper.epg_name_text(helper.epg_name_text("A\x01 \x7fB")), helper.epg_name_text("A\x01 \x7fB"))
+        with mock.patch.object(helper, "EPG_MAX_DISPLAY_NAME", 5):
+            self.assertEqual(helper.epg_name_text("Alphabet"), "Alpha")
+
+    def test_the_same_name_on_both_sides_matches_through_the_real_parse(self):
+        names = self.XML_NAMES
+        doc = {"version": 1, "count": len(names), "channels": [
+            {"id": "p%d" % i, "tvgId": "row%d" % i, "name": name, "group": "G", "url": "http://h.test/%d" % i}
+            for i, name in enumerate(names)]}
+        index = helper.build_alias(doc)[0]
+        xml = ["<tv>"]
+        for i, name in enumerate(names):
+            xml.append('<channel id="g%d"><display-name>%s</display-name></channel>' % (i, name))
+        for i in range(len(names)):
+            xml.append('<programme start="%s" stop="%s" channel="g%d"><title>Show</title></programme>'
+                       % (xmltv_time(NOW - 600), xmltv_time(NOW + 600), i))
+        xml.append("</tv>")
+        result = parse("".join(xml).encode("utf-8"), index)
+        self.assertEqual(sorted(result["seenIds"]), sorted("row%d" % i for i in range(len(names))))
+        self.assertEqual(result["warnings"], [])
+
+    def test_a_control_character_reads_as_the_space_it_is_folded_to_on_either_side(self):
+        """The guide has always read a DEL as a space; now the playlist does
+        too, so "Alpha One" on one side pairs with "Alpha\\x7fOne" on the
+        other whichever side carries the DEL."""
+        self.assertEqual(helper.epg_name_key("Alpha\x7fOne"), helper.epg_name_key("Alpha One"))
+        self.assertNotEqual(helper.epg_name_key("Alpha\x7fOne"), helper.epg_name_key("AlphaOne"))
+
+
+class GuideIdCapBoundaryTest(unittest.TestCase):
+    """D-EPG-10's two caps at their boundary (the round-2 recheck's P3 (b)):
+    `len(key) > EPG_MAX_GUIDE_ID + 1` and `len(claim) > MAX_CHANNELS` each
+    passed every earlier case. Red on both."""
+
+    def test_an_id_of_exactly_the_cap_is_admitted_and_one_more_is_not(self):
+        with mock.patch.object(helper, "EPG_MAX_GUIDE_ID", 4):
+            result = parse(guide(["abcd", "abcde"]))
+        self.assertEqual(list(result["channels"]), ["abcd"])
+        self.assertEqual(result["warnings"], [
+            "2 programmes dropped: their channel id is longer than 4 characters"])
+        with mock.patch.object(helper, "EPG_MAX_GUIDE_ID", 5):
+            result = parse(guide(["abcd", "abcde"]))
+        self.assertEqual(list(result["channels"]), ["abcd", "abcde"])
+        self.assertEqual(result["warnings"], [])
+
+    def test_exactly_the_cap_of_channels_is_admitted_with_nothing_refused_and_the_next_is(self):
+        with mock.patch.object(helper, "MAX_CHANNELS", 3):
+            result = parse(guide(["a.tv", "b.tv", "c.tv"]))
+        self.assertEqual(list(result["channels"]), ["a.tv", "b.tv", "c.tv"])
+        self.assertEqual(result["warnings"], [])
+        with mock.patch.object(helper, "MAX_CHANNELS", 3):
+            result = parse(guide(["a.tv", "b.tv", "c.tv", "d.tv"]))
+        self.assertEqual(list(result["channels"]), ["a.tv", "b.tv", "c.tv"])
+        self.assertEqual(result["warnings"], [
+            "2 programmes dropped: the guide lists more than 3 channels"
+            " and no playlist was loaded to choose among them"])
+
+    def test_the_channels_kept_are_the_first_the_programmes_name_not_the_declarations(self):
+        """What the README says: a <channel> declaration plays no part
+        without an index; the first MAX_CHANNELS distinct ids the PROGRAMMES
+        name, in document order, are the ones kept."""
+        data = guide(["a.tv", "b.tv", "c.tv"], per_channel=0).replace(b"</tv>", b"") + "".join(
+            '<programme start="%s" stop="%s" channel="%s"><title>S</title></programme>'
+            % (xmltv_time(NOW - 600), xmltv_time(NOW + 600), cid)
+            for cid in ["c.tv", "z.tv", "a.tv", "b.tv"]).encode() + b"</tv>"
+        with mock.patch.object(helper, "MAX_CHANNELS", 2):
+            result = parse(data)
+        self.assertEqual(list(result["channels"]), ["c.tv", "z.tv"])
+        self.assertEqual(result["warnings"], [
+            "2 programmes dropped: the guide lists more than 2 channels"
+            " and no playlist was loaded to choose among them"])
 
 
 OLD_IPV6 = re.compile(r"^\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(?:%25[A-Za-z0-9._~\-]+)?\]$")

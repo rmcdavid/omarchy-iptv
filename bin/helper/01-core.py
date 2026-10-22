@@ -267,7 +267,9 @@ EPG_TIME_CACHE_KEY_MAX = 64
 # D-EPG-8 (R30g): a guide <display-name> is folded (_CONTROL_WS) and cut to
 # this many code points before either name key is made, the playlist's own
 # cap on a channel name, so a name key costs at most what a playlist name
-# can. A longer name could never equal a playlist name anyway.
+# can. A longer name could never equal a playlist name anyway. Since
+# D-EPG-12 (R32d) the fold is epg_name_text, inside the key functions, so
+# the playlist side takes the same one.
 EPG_MAX_DISPLAY_NAME = M3U_MAX_NAME
 # D-EPG-10 (R30d): WITHOUT a playlist index (no readable channels.json when
 # the guide is fetched) the parse keeps every guide channel under its own
@@ -1079,8 +1081,47 @@ _EPG_NAME_NOISE = re.compile(
     # of this narrowing matched the two byte-for-byte and lost all 142 rows
     # to any of those, which is a provider changing its own punctuation
     # between fetches, not a different provider.
-    r"|\[\s*not\s*24\s*[-/]?\s*7\s*\]"
+    #
+    # D-EPG-12 (ruling R32d, 2026-10-21): this alternative used to read
+    # `24\s*[-/]?\s*7`, two unbounded `\s*` runs with only an OPTIONAL atom
+    # between them, so the two were adjacent repeats over one class: after
+    # `[not 24` a whitespace run of k not followed by `7` was retried at
+    # every split of the run, about k*k/2 steps, and build_alias reached it
+    # twice per playlist row on the unfolded name. The guard the round before
+    # had certified it linear because "its runs are separated by literals",
+    # which the optional `[-/]?` is not. Now the second run exists only
+    # behind the separator, `(?:[-/]\s*)?`, which whitespace cannot open, so
+    # each run backs off at most once over its own length. Same language:
+    # held equal to the old pattern on generated inputs, and the helper
+    # regex guard on the dev branch grades the old shape super-linear by
+    # structure, not by the table alone.
+    r"|\[\s*not\s*24\s*(?:[-/]\s*)?7\s*\]"
     r"|\[\s*geo[\s-]*blocked\s*\]", re.IGNORECASE)
+
+
+def epg_name_text(value: Any) -> str:
+    """The ONE fold a channel name takes before it is keyed, on BOTH sides
+    of the match: every run of whitespace and control characters to one
+    space, the ends trimmed, cut to EPG_MAX_DISPLAY_NAME code points.
+
+    D-EPG-12, ruling R32d (2026-10-21). The guide side folded a
+    <display-name> through clean_field before keying (D-EPG-8), and the
+    playlist side keyed the raw channels.json name, which the M3U parse
+    leaves holding a DEL or a C0 control (sanitize_input runs on user
+    input, not on playlist text). _ID_PUNCT folds `\\s`, so a tab keyed
+    the same from either side, but `\\x7f` and `\\x00-\\x1b` are not `\\s`:
+    a row and a display-name that both carried U+007F keyed differently
+    and did not match, and a DEL on one side only matched a name without
+    it on the other. Folding inside the key functions, so every caller
+    keys the same whatever it passes, is what makes the two sides one.
+    An ordinary name is unchanged by it: the key already folded its
+    whitespace, and a playlist name is at most M3U_MAX_NAME, which is the
+    cap here. Idempotent, so the guide side may fold once more to look at
+    the text itself (parse_xmltv's trailing-parenthesis test) at no change.
+    """
+    if not value:
+        return ""
+    return _CONTROL_WS.sub(" ", str(value)).strip()[:EPG_MAX_DISPLAY_NAME]
 
 
 def epg_name_key(value: Any) -> str:
@@ -1100,8 +1141,11 @@ def epg_name_key(value: Any) -> str:
     227 -> 226, and the one pair lost is the wrong one; nameIndexed 1,443 ->
     1,453 and nameDroppedPlaylist 10 -> 0, so the repair costs one bad pair
     and returns ten channels to the index. No confirmed pair moved.
+
+    Folds through epg_name_text first (D-EPG-12): the playlist side and the
+    guide side of the match key the same text the same way.
     """
-    return normalize_id_text(_EPG_NAME_NOISE.sub(" ", str(value or "")))
+    return normalize_id_text(_EPG_NAME_NOISE.sub(" ", epg_name_text(value)))
 
 
 def strip_trailing_qualifier(text: str) -> str:
@@ -1166,8 +1210,12 @@ def bare_name_key(value: Any) -> str:
     that the case is now COUNTED instead of invisible: `addrNameConflicts` is
     1 on the frozen inputs, and a reader who sees it rise knows a second one
     exists without having to run an audit nobody scheduled.
+
+    The fold (epg_name_text) comes BEFORE the strip, as the guide side has
+    always ordered it, so the playlist side gives the same key for the same
+    text (D-EPG-12); epg_name_key folds once more, which changes nothing.
     """
-    return epg_name_key(strip_trailing_qualifier(str(value or "")))
+    return epg_name_key(strip_trailing_qualifier(epg_name_text(value)))
 
 
 def normalize_text(value: Any) -> str:

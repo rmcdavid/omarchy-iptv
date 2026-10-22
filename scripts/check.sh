@@ -392,10 +392,18 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2699}
 # bare lists and addrNameConflicts, one pass each, held to lane-bounds-int.
 # 15 seen red on lane-bounds-int, the rest on a mutation of the shipping
 # decision.
-# 1390 / 1391 -> 1391 on 2026-10-21 (lane-bounds-h2, the merge of lane-bounds-h
-# onto the integration branch that holds lane-bounds-g; re-levelled below
-# once the merged tree was counted).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1391}
+# 1390 / 1391 -> 1422 on 2026-10-21 (lane-bounds-h2): the merge of
+# lane-bounds-h onto the integration branch that holds lane-bounds-g, the
+# two lanes' suites together, counted by the gate on the merge commit.
+# 1422 -> 1434 on 2026-10-21 (lane-bounds-h2, R32d, D-EPG-12):
+# tests/test_epg_parse_bounds.py (9) -- _EPG_NAME_NOISE's rewritten
+# alternative held equal to the old pattern as an oracle (2, red on two
+# mutations of the new one), the one fold both sides of the name key take
+# (4, red on the base), the two guide caps at their boundary (3, red on
+# the off-by-one mutations); tests/test_helper_regex_guard.py (3) -- the
+# guard over a copy of the parts carrying the old pattern, the grader on
+# named shapes, flags it cannot read refused (all red on the base's guard).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1434}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

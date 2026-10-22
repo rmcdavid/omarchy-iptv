@@ -368,6 +368,11 @@ def build_alias(channels_doc: Any) -> tuple[dict[str, Any] | None, int]:
         # list, so k rows sharing one bare name cost k*k/2 comparisons, and
         # a playlist decides k up to MAX_CHANNELS. Same lists, same order
         # (the first occurrence of each tvg-id), linear.
+        #
+        # Both keys below fold the name through epg_name_text themselves
+        # (D-EPG-12, R32d), the same fold parse_xmltv gives a display-name,
+        # so a name carrying a DEL, a tab or a C0 control keys the same
+        # from this side as from the guide's.
         bare = bare_name_key(channel.get("name"))
         if bare:
             bares.setdefault(bare, []).append(tvg)
@@ -880,7 +885,13 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
                     # strategy revokes), so its size is the number of
                     # channels admitted. Counted by programme: counting the
                     # refused CHANNELS would need the set this bound exists
-                    # to keep from growing.
+                    # to keep from growing. Both choices -- programmes
+                    # counted, not channels, and the EPG_MAX_GUIDE_ID cap on
+                    # an id without an index -- were put to the owner and
+                    # stand (R32e, 2026-10-21). What the channel cap keeps
+                    # is the first MAX_CHANNELS DISTINCT ids the guide's
+                    # PROGRAMMES name, in document order: a <channel>
+                    # declaration plays no part without an index.
                     if len(key) > EPG_MAX_GUIDE_ID:
                         long_id += 1
                     else:
@@ -932,7 +943,13 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
                         # keys fold whitespace runs to one space anyway, so
                         # an ordinary name keys exactly as before (pinned by
                         # a differential against lane-bounds-int).
-                        text = clean_field(child.text, EPG_MAX_DISPLAY_NAME)
+                        # D-EPG-12 (R32d): the fold is epg_name_text, the
+                        # one the key functions apply themselves, so the
+                        # playlist side (build_alias) keys the same text the
+                        # same way; it is taken here as well only so the
+                        # trailing-parenthesis test below reads the folded
+                        # text, and folding twice changes nothing.
+                        text = epg_name_text(child.text)
                         candidate = epg_name_key(text)
                         if candidate and candidate in playlist_names and not name:
                             name = candidate

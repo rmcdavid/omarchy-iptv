@@ -3477,19 +3477,55 @@ Performance budget (10k channels):
     generated names and every code point's whitespace class; and every
     display-name is folded (`_CONTROL_WS`) and cut to `EPG_MAX_DISPLAY_NAME`
     (`M3U_MAX_NAME`, 512) before either key is made, pinned with the cap
-    lowered. Rule 15 over every regex the helper compiles, 34 calls, is now
+    lowered. Rule 15 over every regex the helper compiles, 36 calls, is now
     a table the gate holds them to (`scripts/check-helper-regex.py`): each
     pattern with what it reads (provider text, user text, or the plugin's
     own data) and why its cost is linear, and a new or changed pattern is
     red until its review is written. The search found one more quadratic
     pattern and fixed it -- `_IPV6_LITERAL`'s two adjacent runs over one
-    class, on a source URL already capped at 2,048 characters -- and one it
-    leaves OPEN, because the function is another lane's this round: the URL
-    redactor's scheme-run search, `[A-Za-z0-9+.\-]*\Z` under `search()`,
-    tries every start in its window, so a scheme-legal run broken once
-    inside the window costs about r*r/2 for a run of r (arithmetic,
-    UNVERIFIED by run); the guard prints it on every run until it is
+    class, on a source URL already capped at 2,048 characters (D-PERF-7)
+    -- and one it left OPEN, because the function is another lane's: the
+    URL redactor's scheme-run search, `[A-Za-z0-9+.\-]*\Z` under
+    `search()`, tries every start in its window, so a scheme-legal run
+    broken once inside the window costs about r*r/2 for a run of r
+    (arithmetic, UNVERIFIED by run; D-PERF-6, ruled R32e to be fixed with a
+    literal-anchored search); the guard prints it on every run until it is
     closed.
+
+    **The table's own false verdict, and what grades the shape now
+    (D-EPG-12, ruling R32d, 2026-10-21).** That first table certified
+    `_EPG_NAME_NOISE`'s `[not 24/7]` alternative,
+    `\[\s*not\s*24\s*[-/]?\s*7\s*\]`, linear because "its `\s*` runs are
+    separated by literals they cannot hold" -- and `[-/]?` is OPTIONAL, so
+    the third and fourth runs were adjacent repeats over one class: after
+    `[not 24` a whitespace run of k not followed by `7` was retried at every
+    split, about k*k/2 steps, and `build_alias` reached it twice per
+    playlist row on the UNFOLDED name (the guide side had been folded by
+    D-EPG-8; the playlist side had not). Found by the round-2 recheck. The
+    alternative now reads `\[\s*not\s*24\s*(?:[-/]\s*)?7\s*\]`: the fourth
+    run exists only behind the separator, which whitespace cannot open, so
+    each run backs off at most once over its length; held EQUAL to the old
+    pattern, run as the oracle, on 20,000 generated spellings of the marker
+    and on ordinary names. And the guard no longer takes a human's word
+    for this shape: it walks each compiled pattern (`super_linear_pairs`)
+    and reports two unbounded repeats over overlapping character classes
+    with nothing between them the first run could not have taken --
+    anchors, assertions, groups and repeats that may match nothing, or
+    single characters the first class also matches, which is the old
+    `_IPV6_LITERAL` shape as well -- as super-linear, red whatever the
+    table says; proved by running it over a copy of the parts carrying the
+    old pattern. What it does NOT grade is stated in the script: a run with
+    no literal prefix searched from every position (D-EPG-8, F-SINK-11,
+    D-PERF-6) and a nested unbounded repeat stay a person's review, and
+    the walk reads one sequence at a time. The same ruling made the fold
+    ONE function, `epg_name_text`, inside both key functions, so the
+    playlist side and the guide side key the same text the same way: a
+    name carrying a DEL or a C0 control (legal in a playlist; a DEL and a
+    tab are legal XML too) used to key as `alpha\x7fone` from the playlist
+    and `alpha one` from the guide, and the same name on both sides did
+    not match. An ordinary name is unchanged, because the key already
+    folded its whitespace; pinned through the real `build_alias` and
+    `parse_xmltv`.
 
     After the parse, UNVERIFIED and stated: a channel's record string is a
     Python str, which one astral character (an emoji) in any of its records

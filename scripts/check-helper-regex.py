@@ -30,11 +30,37 @@ The key is the pattern's own text when it is a string literal, and the
 source of the expression (ast.unparse) when it is built, as two are. An
 `open` verdict is reported on every run and does not fail the gate: it is a
 defect, the board holds defects, and the gate is not the board. Nothing here
-runs a pattern on any input.
+runs a pattern on any input longer than one character.
+
+THE SHAPE THE TABLE MISSED (D-EPG-12, ruling R32d, 2026-10-21). The first
+table certified `\\[\\s*not\\s*24\\s*[-/]?\\s*7\\s*\\]` linear because "its
+`\\s*` runs are separated by literals they cannot hold", and `[-/]?` is not a
+literal they cannot hold: it is OPTIONAL, so the two runs were adjacent
+repeats over one class and a whitespace run after `[not 24` was retried at
+every split, about k*k/2 steps. A verdict a human writes can be wrong for a
+reason that reads well, so the shape is now graded by STRUCTURE as well
+(`super_linear_pairs`): the parsed pattern is walked, and two unbounded
+repeats over single-character atoms whose character sets overlap, with
+nothing between them the first run could not have taken (anchors,
+assertions, groups and repeats that may match nothing, or single characters
+the first class also matches), are reported as super-linear and fail the
+gate whatever the table says. That is the D-EPG-12 shape and the old
+`_IPV6_LITERAL` shape (`[..]*:[..]*`, the separator inside both classes);
+it is NOT every super-linear shape -- a run with no literal prefix searched
+from every position (D-EPG-8, F-SINK-11, D-PERF-6) and a nested unbounded
+repeat (`(a+)+`) are read by a person and recorded in the table -- and the
+walk looks at one sequence at a time, so a run hidden at the START of an
+optional group is not paired with the run before the group. Each atom's
+character set is read by compiling that atom alone and matching it against
+one sample character at a time (the Latin-1 range plus a few others), under
+the flags the call names, so IGNORECASE and DOTALL count.
 """
 import argparse
 import ast
 import os
+import re
+import re._compiler
+import re._parser
 import sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -61,11 +87,11 @@ REVIEWED = [
     (r"\w", "provider",
      "constant: one character at one given position (_WORD_CHAR_RE, redact_urls)"),
     (r"[A-Za-z0-9+.\-]*\Z", "provider",
-     "open: search() has no literal prefix (minimum width 0), so it tries every start of redact_urls' "
-     "window, and a start that fails costs the distance to the next non-scheme character; a "
-     "scheme-legal run broken once inside the window costs about r*r/2 for a run of r. Reported by "
-     "lane-bounds-h for the board to number (redact_urls is lane S's function this round); put the "
-     "id here when it has one (_SCHEME_RUN_RE)"),
+     "open: D-PERF-6. search() has no literal prefix (minimum width 0), so it tries every start of "
+     "redact_urls' window, and a start that fails costs the distance to the next non-scheme "
+     "character; a scheme-legal run broken once inside the window costs about r*r/2 for a run of r. "
+     "Found by lane-bounds-h; ruled R32e, fixed by the lane that owns redact_urls with a "
+     "literal-anchored search, whose new pattern replaces this entry (_SCHEME_RUN_RE)"),
     (r"^[\s\-]+", "provider",
      "linear: anchored at the start, one run and nothing after it (_LEADING_DASHES, clean_name)"),
     ("'^' + GENERATED_NAME_WORD.lower() + ' [0-9]+$'", "provider",
@@ -97,12 +123,14 @@ REVIEWED = [
     (r"[\s!-)\,-/:-@\[-`{-~]+", "provider",
      "linear: one class run and nothing after it (_ID_PUNCT, the id and EPG name keys)"),
     (r"\((?:\d{3,4}p|sd|hd|fhd|uhd|4k|h\.?26[45])\)"
-     r"|\[\s*not\s*24\s*[-/]?\s*7\s*\]"
+     r"|\[\s*not\s*24\s*(?:[-/]\s*)?7\s*\]"
      r"|\[\s*geo[\s-]*blocked\s*\]", "provider",
-     "linear: every alternative opens with a literal '(' or '['; its \\s* runs are separated by "
-     "literals they cannot hold, so each backs off at most once over its own length, and a "
-     "whitespace run follows only one bracket start; the text is a name already cut to "
-     "M3U_MAX_NAME or EPG_MAX_DISPLAY_NAME (_EPG_NAME_NOISE)"),
+     "linear: every alternative opens with a literal '(' or '['; every two \\s* runs have a "
+     "MANDATORY character between them that whitespace cannot be -- `not`, `24`, `7`, `geo`, "
+     "`blocked`, or the `[-/]` that opens the optional group the fourth run lives in (D-EPG-12: it "
+     "used to be `[-/]?\\s*`, an optional atom between two runs, which this guard now grades "
+     "super-linear by structure) -- so each run backs off at most once over its own length, and the "
+     "text is a name folded and cut to EPG_MAX_DISPLAY_NAME by epg_name_text (_EPG_NAME_NOISE)"),
     (r'\s*([A-Za-z0-9_.\-]+)="([^"]*)"', "provider",
      "linear: matched at parse_attrs' position only, which moves past each match and stops at the "
      "first failure; the key run cannot hold '=' and the value run cannot hold '\"' (_ATTR_QUOTED)"),
@@ -139,6 +167,160 @@ def pattern_key(node):
     return ast.unparse(node)
 
 
+# Where each re.<call> takes its flags positionally: compile(pattern, flags),
+# search/match/fullmatch/findall/finditer(pattern, string, flags),
+# split(pattern, string, maxsplit, flags), sub/subn(pattern, repl, string,
+# count, flags).
+FLAGS_AT = {"compile": 1, "search": 2, "match": 2, "fullmatch": 2, "findall": 2, "finditer": 2,
+            "split": 3, "sub": 4, "subn": 4}
+
+
+def call_flags(node):
+    """The re.X flags a call names, positionally (FLAGS_AT) or as `flags=`,
+    as an int; 0 when it names none, None when it is an expression this
+    reader cannot evaluate (which the guard reports, so the walk never runs
+    under the wrong flags in silence)."""
+    expr = None
+    at = FLAGS_AT[node.func.attr]
+    if len(node.args) > at:
+        expr = node.args[at]
+    for keyword in node.keywords:
+        if keyword.arg == "flags":
+            expr = keyword.value
+    if expr is None:
+        return 0
+
+    def value(e):
+        if isinstance(e, ast.Attribute) and isinstance(e.value, ast.Name) and e.value.id == "re":
+            flag = getattr(re, e.attr, None)
+            return int(flag) if isinstance(flag, re.RegexFlag) else None
+        if isinstance(e, ast.BinOp) and isinstance(e.op, ast.BitOr):
+            left, right = value(e.left), value(e.right)
+            return None if left is None or right is None else left | right
+        if isinstance(e, ast.Constant) and isinstance(e.value, int):
+            return e.value
+        return None
+
+    return value(expr)
+
+
+# One sample character at a time is the only input a pattern is ever run on
+# here: the Latin-1 range, and a few beyond it that `\s`, `\w` and a
+# case fold treat differently from ASCII.
+_SAMPLE = [chr(code) for code in range(0x100)] + list("\u0085\u2003\u2028\u2029\u3000\uff12\u0301\U0001f600")
+_REPEATS = (re._parser.MAX_REPEAT, re._parser.MIN_REPEAT, re._parser.POSSESSIVE_REPEAT)
+_SINGLE = (re._parser.LITERAL, re._parser.NOT_LITERAL, re._parser.IN, re._parser.ANY, re._parser.CATEGORY)
+
+
+def _unwrap(item):
+    """A group holding exactly one item stands for that item."""
+    op, av = item
+    while op == re._parser.SUBPATTERN and len(av[3]) == 1:
+        op, av = av[3][0]
+    return op, av
+
+
+def _matched(state, flags, item):
+    """The sample characters one single-character atom matches, read by
+    compiling that atom alone under the pattern's flags."""
+    compiled = re._compiler.compile(re._parser.SubPattern(state, [item]), flags)
+    return frozenset(ch for ch in _SAMPLE if compiled.match(ch))
+
+
+def _unbounded_class(state, flags, item):
+    """The character set of an unbounded repeat over one single-character
+    atom, else None."""
+    op, av = _unwrap(item)
+    if op not in _REPEATS or av[1] != re._parser.MAXREPEAT or len(av[2]) != 1:
+        return None
+    body = _unwrap(av[2][0])
+    if body[0] not in _SINGLE:
+        return None
+    return _matched(state, flags, body)
+
+
+def _sequences(seq):
+    """Every sequence inside a parsed pattern, the top one included."""
+    yield seq
+    for op, av in seq:
+        if op == re._parser.SUBPATTERN:
+            yield from _sequences(av[3])
+        elif op in _REPEATS:
+            yield from _sequences(av[2])
+        elif op == re._parser.BRANCH:
+            for alternative in av[1]:
+                yield from _sequences(alternative)
+        elif op in (re._parser.ASSERT, re._parser.ASSERT_NOT):
+            yield from _sequences(av[1])
+        elif op == re._parser.ATOMIC_GROUP:
+            yield from _sequences(av)
+        elif op == re._parser.GROUPREF_EXISTS:
+            for alternative in av[1:]:
+                if alternative is not None:
+                    yield from _sequences(alternative)
+
+
+def _absorbable(state, flags, item, first):
+    """Could the FIRST run have taken this item's text? Yes for anything
+    that may match nothing (an anchor, an assertion, a group or a repeat
+    with minimum width 0) and for one character the first class matches."""
+    op, av = _unwrap(item)
+    if re._parser.SubPattern(state, [(op, av)]).getwidth()[0] == 0:
+        return True
+    if op in _SINGLE:
+        return bool(_matched(state, flags, (op, av)) & first)
+    return False
+
+
+def super_linear_pairs(pattern, flags=0):
+    """The super-linear pairs in `pattern`: two unbounded repeats over
+    overlapping single-character classes with nothing between them the first
+    run could not have taken. Each is (the first atom's source text, the
+    second's). Empty for a pattern this shape is absent from; see the module
+    docstring for what that does and does not say."""
+    parsed = re._parser.parse(pattern, flags)
+    flags |= parsed.state.flags
+    state = parsed.state
+    found = []
+    for seq in _sequences(parsed):
+        items = list(seq)
+        for i, item in enumerate(items):
+            first = _unbounded_class(state, flags, item)
+            if first is None:
+                continue
+            for j in range(i + 1, len(items)):
+                second = _unbounded_class(state, flags, items[j])
+                if second is not None:
+                    if first & second:
+                        found.append((_atom_text(items[i]), _atom_text(items[j])))
+                    break
+                if not _absorbable(state, flags, items[j], first):
+                    break
+    return found
+
+
+_CATEGORY_TEXT = {re._parser.CATEGORY_SPACE: "\\s", re._parser.CATEGORY_NOT_SPACE: "\\S",
+                  re._parser.CATEGORY_DIGIT: "\\d", re._parser.CATEGORY_NOT_DIGIT: "\\D",
+                  re._parser.CATEGORY_WORD: "\\w", re._parser.CATEGORY_NOT_WORD: "\\W"}
+
+
+def _atom_text(item):
+    """A short spelling of one unbounded class repeat, for the report."""
+    op, av = _unwrap(item)
+    kind, body = av[0], _unwrap(av[2][0])
+    if body[0] == re._parser.LITERAL:
+        text = chr(body[1])
+    elif body[0] == re._parser.ANY:
+        text = "."
+    elif body[0] == re._parser.IN and len(body[1]) == 1 and body[1][0][0] == re._parser.CATEGORY:
+        text = _CATEGORY_TEXT.get(body[1][0][1], str(body[1][0][1]))
+    elif body[0] == re._parser.CATEGORY:
+        text = _CATEGORY_TEXT.get(body[1], str(body[1]))
+    else:
+        text = "[" + " ".join(str(part) for part in body[1]) + "]" if body[0] == re._parser.IN else str(body)
+    return "%s{%d,}" % (text, kind)
+
+
 def scan(paths):
     """-> (sites, problems): every regex call as (path, line, key)."""
     sites, problems = [], []
@@ -161,7 +343,25 @@ def scan(paths):
                 if not node.args:
                     problems.append("%s:%d: re.%s with no positional pattern" % (rel, node.lineno, node.func.attr))
                     continue
-                sites.append((rel, node.lineno, pattern_key(node.args[0])))
+                key = pattern_key(node.args[0])
+                sites.append((rel, node.lineno, key))
+                if isinstance(node.args[0], ast.Constant) and isinstance(node.args[0].value, str):
+                    flags = call_flags(node)
+                    if flags is None:
+                        problems.append("%s:%d: flags this guard cannot read; name them as re.X or re.X | re.Y"
+                                        % (rel, node.lineno))
+                        continue
+                    try:
+                        pairs = super_linear_pairs(key, flags)
+                    except (re.error, ValueError, TypeError, AttributeError, IndexError) as error:
+                        problems.append("%s:%d: the guard could not walk %r (%s)" % (rel, node.lineno, key, error))
+                        continue
+                    for first, second in pairs:
+                        problems.append("%s:%d: super-linear shape in %r: %s and %s are two unbounded repeats "
+                                        "over overlapping classes with nothing between them the first could not "
+                                        "take, so a run of k costs about k*k/2 (D-EPG-12); put a mandatory "
+                                        "character the first class cannot hold between them"
+                                        % (rel, node.lineno, key, first, second))
     return sites, problems
 
 

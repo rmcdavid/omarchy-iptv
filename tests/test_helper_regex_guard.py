@@ -8,10 +8,20 @@ nothing here re-implements the scan.
 
 The case that matters most is (f): the helper as it stood on lane-bounds-int,
 whose quadratic qualifier pattern is the finding, must be refused by name.
+
+Round 3 (D-EPG-12, ruling R32d): the table alone certified
+`\\[\\s*not\\s*24\\s*[-/]?\\s*7\\s*\\]` linear for a false reason, so the guard
+now grades that shape by STRUCTURE too. (h) runs the real guard over a copy
+of the parts carrying the old pattern and reads the super-linear line; (i)
+calls the grader on named patterns it must flag and must clear; (j) a
+flags argument the guard cannot read is refused rather than walked under
+the wrong flags.
 """
+import importlib.util
 import io
 import os
 import pathlib
+import re
 import shutil
 import subprocess
 import sys
@@ -23,6 +33,19 @@ ROOT = pathlib.Path(__file__).resolve().parent.parent
 GUARD = ROOT / "scripts" / "check-helper-regex.py"
 PARTS = ROOT / "bin" / "helper"
 INT_BASE = "17a2407"
+
+# The `[not 24/7]` alternative of _EPG_NAME_NOISE before and after D-EPG-12,
+# as the source spells it.
+NEW_NOISE_LINE = 'r"|\\[\\s*not\\s*24\\s*(?:[-/]\\s*)?7\\s*\\]"'
+OLD_NOISE_LINE = 'r"|\\[\\s*not\\s*24\\s*[-/]?\\s*7\\s*\\]"'
+
+
+def load_guard():
+    """The guard as a module, so (i) calls the shipping grader (rule 12)."""
+    spec = importlib.util.spec_from_file_location("check_helper_regex", GUARD)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 def run_guard(helper_dir=None):
@@ -120,6 +143,66 @@ class HelperRegexGuardTest(unittest.TestCase):
         # Refused for being empty, not merely for the reviewed patterns it
         # no longer finds (which would also fail, for a different reason).
         self.assertIn("no helper parts under", report)
+
+    def test_h_the_old_noise_pattern_is_graded_super_linear_by_structure(self):
+        """D-EPG-12, rule 11: the guard against a copy of the old pattern.
+        The unreviewed line would be there anyway (the text changed); the
+        line that matters is the one the table could not write."""
+        parts = self.copy_parts()
+        self.edit(parts / "01-core.py", NEW_NOISE_LINE, OLD_NOISE_LINE)
+        code, report = run_guard(parts)
+        self.assertEqual(code, 1, report)
+        lines = [line for line in report.splitlines() if "super-linear shape in" in line]
+        self.assertEqual(len(lines), 1, report)
+        self.assertIn("01-core.py", lines[0])
+        self.assertIn("not\\\\s*24\\\\s*[-/]?\\\\s*7", lines[0])
+        self.assertIn("\\s{0,} and \\s{0,}", lines[0])
+        self.assertIn("D-EPG-12", lines[0])
+        # And the shipping pattern draws no such line.
+        code, report = run_guard()
+        self.assertEqual(code, 0, report)
+        self.assertNotIn("super-linear shape", report)
+
+    def test_i_the_grader_flags_the_shape_and_clears_its_neighbours(self):
+        guard = load_guard()
+        flagged = [
+            (OLD_NOISE_LINE[3:-1].lstrip("|"), re.IGNORECASE),
+            (r"^\[[0-9A-Fa-f:.]*:[0-9A-Fa-f:.]*(?:%25[A-Za-z0-9._~\-]+)?\]$", 0),   # the old _IPV6_LITERAL
+            (r"\s*\s*", 0), (r"\s*x?\s*", 0), (r"\s*(?:x)?\s*", 0), (r"\s*(?=x)\s*", 0),
+            (r"[a-]*-[a-]*", 0), (r".*\n.*", re.DOTALL), (r"[a-z]*A*", re.IGNORECASE),
+            (r"(\s*)(\s*)", 0), (r"\s*?\s*", 0), (r"\s+\s+", 0), (r"\s*[^a]*", 0), (r"\d*\w*", 0),
+            (r"(?i)[a-z]*A*", 0),
+        ]
+        for pattern, flags in flagged:
+            self.assertTrue(guard.super_linear_pairs(pattern, flags), pattern)
+        cleared = [
+            (NEW_NOISE_LINE[3:-1].lstrip("|"), re.IGNORECASE),
+            (r"^\[(?=[0-9A-Fa-f.]*:)[0-9A-Fa-f:.]*(?:%25[A-Za-z0-9._~\-]+)?\]$", 0),   # the new one
+            (r"\s*not\s*", 0), (r"a*b*", 0), (r"[ab]*:[bc]*", 0), (r".*\n.*", 0), (r"[a-z]*A*", 0),
+            (r"\s*x\s*", 0), (r"\s*(?:x)\s*", 0), (r"\s{0,8}\s*", 0), (r"[-/]?\s*7", 0),
+            # A different super-linear shape, read by a person and recorded
+            # in the table (D-EPG-8's, F-SINK-11's): not this grader's.
+            (r"\s*\([^()]*\)\s*$", 0), (r"(a+)+$", 0),
+        ]
+        for pattern, flags in cleared:
+            self.assertEqual(guard.super_linear_pairs(pattern, flags), [], pattern)
+
+    def test_j_flags_the_guard_cannot_read_are_refused(self):
+        parts = self.copy_parts()
+        self.edit(parts / "04-epg.py", "def clean_title(text: str | None) -> str:\n",
+                  "_F = 0\n_NEW = re.compile(r\"[0-9]+\", _F)\n\n\ndef clean_title(text: str | None) -> str:\n")
+        code, report = run_guard(parts)
+        self.assertEqual(code, 1, report)
+        self.assertIn("flags this guard cannot read", report)
+        # Named flags are read, in both positions a call can carry them.
+        guard = load_guard()
+        import ast
+        call = ast.parse('re.sub(r"a", "", s, 0, re.I | re.S)').body[0].value
+        self.assertEqual(guard.call_flags(call), int(re.I | re.S))
+        call = ast.parse('re.compile(r"a", flags=re.IGNORECASE)').body[0].value
+        self.assertEqual(guard.call_flags(call), int(re.IGNORECASE))
+        call = ast.parse('re.search(r"a", s)').body[0].value
+        self.assertEqual(guard.call_flags(call), 0)
 
 
 if __name__ == "__main__":
