@@ -6,20 +6,14 @@ import {
   str, asList
 } from "./text.mjs"
 import {
-  cleanName, prepareChannels
+  cleanName
 } from "./channels.mjs"
 import {
-  filterChannels
-} from "./browse.mjs"
-import {
-  parseEpgNow
+  EPG_STORE_KIND
 } from "./settings.mjs"
 import {
-  redactUrls, sinkText
+  sinkText
 } from "./privacy.mjs"
-import {
-  rowDetail, rowsHaveDetail, rowAccessibleName, elide
-} from "./contrast.mjs"
 
 // ------------------------------------------------------------ formatting
 
@@ -103,6 +97,16 @@ function epgFields(entry, nowSec) {
   return out
 }
 
+// Is this the guide-data store (D-EPG-11) and not the plain map the old
+// whole parse gave? The store is recognised by the tag its PARSER sets,
+// `kind === EPG_STORE_KIND`, and by nothing a provider can spell: on a plain
+// map every key is a tvg-id and every value an entry object, so neither
+// `index` nor `map` nor `kind` being present says anything about the shape
+// (a provider id named `index` once flipped epgCoverage into store mode).
+function isEpgStore(value) {
+  return !!value && typeof value === "object" && value.kind === EPG_STORE_KIND
+}
+
 // M2-09 GS9 / D-GS-2. Does guide data actually reach these rows?
 //
 // The rule this lane established for the second line is that it exists when it
@@ -131,10 +135,15 @@ function epgFields(entry, nowSec) {
 // and a legacy store's index was built by the old rule. A plain map (the
 // old `doc.channels`, which verify.js and the older checks still pass) is
 // graded by the old rule, so the two can be compared on the same input.
+// Which of the two it was handed is decided by the store's TAG, which the
+// parser sets and no provider key can spell (isEpgStore) -- never by
+// whether `store.index` is an object, because on a plain map `index` is a
+// tvg-id like any other, and an entry under it would have been graded as
+// the index.
 function epgCoverage(channels, epgStore) {
   var list = asList(channels)
   var store = epgStore && typeof epgStore === "object" ? epgStore : {}
-  var index = store.index && typeof store.index === "object" ? store.index : null
+  var index = isEpgStore(store) && store.index && typeof store.index === "object" ? store.index : null
   var map = index ? null : store
   var out = { total: list.length, withId: 0, matched: 0, carries: false }
   for (var i = 0; i < list.length; i++) {
@@ -163,8 +172,10 @@ function epgCoverage(channels, epgStore) {
 // the map lookup it always was. An id the index does not hold, an empty id,
 // no store, or a slice that does not parse to an object all answer null,
 // and epgFields / programmeDetail take null as "no guide data" already.
+// So does anything that is not a tagged store: a plain map handed here is
+// never read through its `map` or `index` keys, which on a map are ids.
 function epgEntry(epgStore, id) {
-  if (!epgStore || typeof epgStore !== "object") return null
+  if (!isEpgStore(epgStore)) return null
   var key = str(id)
   if (key === "") return null
   if (epgStore.map && typeof epgStore.map === "object") {
@@ -495,7 +506,7 @@ function rowMeta(opts) {
 }
 export {
   pad2, formatClock, formatCount, pluralChannels, epgFraction, epgNowStale,
-  epgFields, epgCoverage, epgEntry, formatEpgLine, joinParts,
+  epgFields, isEpgStore, epgCoverage, epgEntry, formatEpgLine, joinParts,
   EPG_DETAIL_FIELDS, programmeFieldText, epgEpisodeText, EPG_DETAIL_MAX,
   epgDetailText, formatTimeRange, programmeDetail, failedNotice,
   rowFailedMeta, rowMeta

@@ -2,18 +2,6 @@
 import {
   str
 } from "./text.mjs"
-import {
-  prepareChannels
-} from "./channels.mjs"
-import {
-  parseState, mergeDropNotice, stateUnreadableNotice
-} from "./state.mjs"
-import {
-  MPV_DISK_WARN, mpvOptionBase, buildMpvArgv
-} from "./mpv.mjs"
-import {
-  PIP_CLASS
-} from "./pip.mjs"
 var MAX_ROWS_DEFAULT = 200
 // Helper-side cap on channels.json (the helper's MAX_CHANNELS, S-07);
 // prepareChannels re-applies it so a hand-edited cache stays bounded too.

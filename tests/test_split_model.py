@@ -352,6 +352,41 @@ class SplitModel(unittest.TestCase):
         self.assertEqual(code, 0, out)
         self.assertEqual(self.read('model/one.mjs'), one)
 
+    def test_a_name_mentioned_only_in_a_comment_or_a_literal_is_not_an_import(self):
+        # F-GATE-8 (2026-10-22): the relinker read identifiers out of the
+        # part's RAW text, so a comment that named another part's export
+        # created a cross-part import of it (three were found in
+        # model/settings.mjs by the D-EPG-11 round's correctness lens; the
+        # fix found dozens across 16 parts). Here `f` no longer calls g and
+        # names it only in a line comment, a block comment, a string and a
+        # regex; part one must import nothing from part two, and the
+        # genuine reference the other way (C's initializer calls g, in the
+        # same part) is untouched. On the relinker before the fix, one.mjs
+        # carried `import { g } from "./two.mjs"`.
+        mono = MONOLITH.replace(
+            'function f(x) {\n  return x + B + g()\n}\n',
+            'function f(x) {\n'
+            '  // g() is not called here; see g in part two\n'
+            '  /* nor here: g, C */\n'
+            '  var s = "g()" + \'C\'\n'
+            '  var r = /g|C/.test(s)\n'
+            '  return x + B + (r ? 1 : 0)\n'
+            '}\n')
+        code, out = self.run_script('write', monolith=mono)
+        self.assertEqual(code, 0, out)
+        one = self.read('model/one.mjs')
+        self.assertNotIn('from "./two.mjs"', one, one)
+        self.assertNotIn('import {', one, one)
+        self.assertIn('model/one.mjs', out)
+        self.assertRegex(out, r'model/one\.mjs .* imports -\n', 'the report must show part one importing nothing')
+        self.assertEqual(self.node_eval('M.f(1)'), 1 + 2 + 1)
+        # and a real call across parts still imports (the control)
+        mono2 = mono.replace('  return x + B + (r ? 1 : 0)\n', '  return x + B + (r ? 1 : 0) + g()\n')
+        code, out = self.run_script('write', monolith=mono2)
+        self.assertEqual(code, 0, out)
+        self.assertIn('import {\n  g\n} from "./two.mjs"\n', self.read('model/one.mjs'))
+        self.assertEqual(self.node_eval('M.f(1)'), 1 + 2 + 1 + 2)
+
     def test_check_applies_init_locality_to_an_edited_part(self):
         self.assertEqual(self.run_script('write')[0], 0)
         two = self.read('model/two.mjs')

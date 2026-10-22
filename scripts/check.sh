@@ -281,7 +281,12 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-78}
 # entry is parsed from (R31h). All 9 red on 2bb05c6 (2711 checks, 9
 # failures there); each of 7 mutations of the shipping decisions reddens at
 # least one of them (the lane's report).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2711}
+# 2026-10-22, lane-epg11-f (the D-EPG-11 round's follow-ups): 2711 -> 2713.
+# "D-EPG-11 E2-3" (the store is told from a plain map by the tag its parser
+# sets, never by a key a provider can spell) and "D-EPG-11 E2-5" (count is
+# distinct ids on both paths). Both red on lane-epg11's tip 40c0006 (2713
+# checks, 4 failures there: these two and the two pins that now carry `kind`).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2713}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -432,7 +437,12 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2711}
 # EpgNowLineShapeTest (4): one channel fragment per line (R31b), the empty
 # map's shape, an untitled programme never written (R31c), a legacy
 # single-line file rewritten by the recompute. All 4 red on 2bb05c6.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1447}
+# 2026-10-22, lane-epg11-f (F-GATE-8): 1447 -> 1448. tests/test_split_model.py
+# test_a_name_mentioned_only_in_a_comment_or_a_literal_is_not_an_import: the
+# relinker reads a part's CODE for cross-part references, not its comments or
+# literals. Red on lane-epg11's tip 40c0006 (one.mjs imported `g, C` out of a
+# comment and a string there).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1448}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

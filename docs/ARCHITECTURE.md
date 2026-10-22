@@ -2993,7 +2993,7 @@ Performance budget (10k channels):
 | Helper `playlist` | < 1.5 s for 10k entries on this machine (excluding network) | single pass regex parser, no DOM |
 | Helper `epg` | < 4 s for a 50 MB XMLTV | `xml.etree.iterparse`, programmes outside a +-24 h window dropped, gzip streamed |
 | `channels.json` | ~2 MB at 10k | omit empty keys, compact separators |
-| `epg-now.json` | about 1.9 MB at 10k with titles alone, 6.3 MB with a description, category and episode on now and next (measured 2026-10-22 over files the helper wrote from generated guides; the "< 1 MB" this row gave before was never measured) | now/next only; the shell holds the text and an index, about 2.6 KiB a channel at 10k, and parses one entry per realised row (D-EPG-11) |
+| `epg-now.json` | about 1.9 MB at 10k with titles alone (1,858,336 bytes, 9,724 entries), 6.3 MB with a description, category and episode on now and next (6,347,940 bytes, 9,708 entries; measured 2026-10-22 over files the helper wrote from generated guides, the `epg11-store` spike on the dev branch; the "< 1 MB" this row gave before was never measured, D-DOC-21) | now/next only; the shell holds the text and an index, about 2.6 KiB a channel at 10k on the detail-bearing file (99.9 MiB resident against 93.0 for the text alone and 146.8 for the old parsed map, over a 74.3 MiB empty baseline), and parses one entry per realised row (D-EPG-11) |
 | JSON.parse of channels in QML | ~50 ms, off the open path | happens on file load, not on summon |
 | Helper `logos --fetch`, cached-file check | ~45 us per cached file; the whole subprocess 375 -> 601 ms median over 5,000 cached logos, page cache warm (D-LOGO-11, helper lane) | one `LOGO_HEADER_BYTES` read per file, no decode, in the helper; cold cache unmeasured |
 
@@ -3581,8 +3581,12 @@ Performance budget (10k channels):
     `applyEpgNow`), rebuilt on every 5-minute recompute and every fetch.
     Measured on Qt 6.11.2 offscreen with a probe that does exactly that
     (an XHR read in place of the `FileView`, which holds the file's text
-    besides; the probe and its runner are in the D-EPG-11 round's record
-    in QA-RESULTS, lane-bounds-l's before it), over files the shipping helper
+    besides; the probe, its prlimit runner and the post-pass that gives a
+    generated guide its detail are the spike
+    `scripts/dev-harness/spikes/epg11-store/` on the dev branch, whose
+    README states the inputs, the invocation, the figures and a re-run
+    check, as the logo and text spikes do; lane-bounds-l's measurement
+    before it is in QA-RESULTS), over files the shipping helper
     wrote from ordinary generated guides whose every programme carries a
     description, category and episode, so now AND next do: 654 bytes of
     JSON a channel (lane-bounds-l's files read 529), and, resident over the
@@ -3601,12 +3605,21 @@ Performance budget (10k channels):
     size, by linear extrapolation; about 67 MiB at 10,000).
 
     What the shell holds NOW is the file's text and an index into it
-    (R31a): `Model.parseEpgNowStore(text)` -> `{ ok, meta, index, text,
-    count, legacy, map }`, the index a null-prototype object (R31f, D-SG-3)
-    from tvg-id to `[offset, length]`, built by walking the file's lines
-    (the shape in section 5) by offset, never slicing a line out and never
-    parsing the document; `Model.epgEntry(store, id)` parses ONE entry's
+    (R31a): `Model.parseEpgNowStore(text)` -> `{ kind: "epg-store", ok,
+    meta, index, text, count, legacy, map }`, the index a null-prototype
+    object (R31f, D-SG-3) from tvg-id to `[offset, length]`, built by
+    walking the file's lines (the shape in section 5) by offset, never
+    slicing a line out and never parsing the document, `count` the number
+    of distinct ids in it; `Model.epgEntry(store, id)` parses ONE entry's
     slice when a row asks, and answers the object `epgMap[id]` used to.
+    `kind` is the tag the parser sets, and it is how `epgCoverage` and
+    `epgEntry` tell a store from the plain map the old whole parse gave
+    (which the older checks still hand them): never by `store.index` being
+    an object, because on a plain map every key is a provider's tvg-id and
+    one spelt `index` flipped the first cut's `epgCoverage` into store mode
+    (the round's correctness lens; fixed before the merge, pinned in the
+    node suite under "D-EPG-11 E2-3"). A map's values are entry objects, so
+    no provider text can spell the tag.
     `Guide.qml`'s three readers (the detail row, the row delegate's
     `epg` property, `measureEpgRows`) and the dev harness's state snapshot
     go through it; `epgCoverage` counts an id as matched when the index
@@ -3622,8 +3635,19 @@ Performance budget (10k channels):
     whole parse, both under a one-minute load average of 2.7-2.9. The tick
     (R31h): 13 realised rows through `epgEntry` + `epgFields` and the open
     panel through `programmeDetail`, 575-587 us per 30 s tick at 10,000
-    channels (2,000 ticks, three passes), each a JSON.parse of one line of
-    about 650 bytes, so about 14 small objects of garbage per tick. The
+    channels (2,000 ticks, three passes), against 270-280 us for the same
+    tick over the old parsed map: 2.1x the base's, about 0.3 ms moved onto
+    each 30 s tick. Each `epgEntry` is a JSON.parse of one line of about
+    650 bytes, and it MATERIALISES the ~7 KiB of objects the old map held
+    for that entry (the parse slope, 7.2-7.4 KiB an entry) plus a UTF-16
+    slice of the line, so a tick is about 110-120 KiB of garbage -- measured
+    NOT retained: the held RSS after 8,000 ticks (gc before the hold) is
+    V4's collector high-water, non-monotonic over 200 / 500 / 2,000 / 8,000
+    ticks, and the old map path reaches the same figure after 8,000 ticks
+    of its own (the round's performance lens, rev-perf/timing.log). A
+    scroll that realises every one of the 9,708 rows once pays that parse
+    per row: 345-348 ms spread over the whole-list scroll against 134-145
+    ms through the map. The
     first cut of the walker sliced a `line` string per channel and the
     store read 3.7-4.0 KiB a channel, the slices' UTF-16 copies sitting in
     the held RSS; walking by offset is what brought it to 2.0-2.6. The

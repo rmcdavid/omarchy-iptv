@@ -6,20 +6,8 @@ import {
   str, asList, fnv1a32
 } from "./text.mjs"
 import {
-  moveCursor
-} from "./browse.mjs"
-import {
-  boolSetting
-} from "./settings.mjs"
-import {
   formatCount, pluralChannels
 } from "./epg.mjs"
-import {
-  elide
-} from "./contrast.mjs"
-import {
-  footerHints
-} from "./view.mjs"
 
 // ------------------------------------------------------------ logos (M2-04)
 //

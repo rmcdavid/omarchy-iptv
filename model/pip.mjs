@@ -9,12 +9,6 @@ import {
   settingOf, clampSetting
 } from "./settings.mjs"
 import {
-  buildMpvArgv
-} from "./mpv.mjs"
-import {
-  footerHints
-} from "./view.mjs"
-import {
   PAUSE_KEY, TRACKS_KEY, DETAIL_KEY, REWIND_KEY, FORWARD_KEY, LIVE_KEY,
   HELP_KEY, SOURCE_KEYS
 } from "./sources.mjs"

@@ -9,9 +9,6 @@ import {
   cleanName
 } from "./channels.mjs"
 import {
-  moveScope
-} from "./browse.mjs"
-import {
   PIP_CLASS
 } from "./pip.mjs"
 import {

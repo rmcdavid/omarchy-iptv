@@ -6,11 +6,10 @@ import {
   str, asList, normalizeText, searchKey, tokenize, channelId
 } from "./text.mjs"
 import {
-  primaryGroup, prepareChannels
+  primaryGroup
 } from "./channels.mjs"
 import {
-  matchRank, filterChannels, countFavorites, scopeSurface, channelsForScope,
-  effectiveScope, launchScope
+  matchRank, channelsForScope, effectiveScope
 } from "./browse.mjs"
 import {
   parseJsonObject
@@ -19,24 +18,17 @@ import {
   WALL_KEY
 } from "./logos.mjs"
 import {
-  reconcileVerdict
-} from "./player.mjs"
-import {
-  redactUrls, scrubUrls
+  scrubUrls
 } from "./privacy.mjs"
 import {
   formatClock, formatCount, pluralChannels
 } from "./epg.mjs"
 import {
-  guideSurface, footerStatus
-} from "./view.mjs"
-import {
-  CACHE_LAYOUT, MAX_SOURCES, MAX_LABEL, MONTHS, isSourceKey, deriveLabel,
-  uniqueLabel, sameDay, formatLastUsed
+  CACHE_LAYOUT, MAX_SOURCES, MONTHS, isSourceKey, deriveLabel, uniqueLabel,
+  sameDay
 } from "./sources.mjs"
 import {
-  warnState, normalizeSourceRecord, activeKeyText, activeKeyOf,
-  adoptActiveSource
+  warnState, normalizeSourceRecord, activeKeyText
 } from "./source-records.mjs"
 
 // ------------------------------------------------------------ state

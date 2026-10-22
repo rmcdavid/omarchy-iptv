@@ -3,7 +3,7 @@ import {
   QUOTE_OPEN, QUOTE_CLOSE, SEP, GLYPHS, NOTIFY_IDS
 } from "./build.mjs"
 import {
-  str, asList, fnv1a32
+  str, asList
 } from "./text.mjs"
 import {
   cleanName
@@ -12,26 +12,14 @@ import {
   mergeDropNotice, stateUnreadableNotice
 } from "./state.mjs"
 import {
-  parseHelperStatus, entryInputNotice, ownedEntryPatch
+  parseHelperStatus, entryInputNotice
 } from "./settings.mjs"
 import {
   helperArgv
 } from "./mpv.mjs"
 import {
-  playerSeekArgv
-} from "./rewind.mjs"
-import {
-  formatCount, pluralChannels, epgFields, formatEpgLine
+  formatCount, pluralChannels
 } from "./epg.mjs"
-import {
-  rowDetail, rowAccessibleName
-} from "./contrast.mjs"
-import {
-  resolveEpgUrl, sourceKey
-} from "./sources.mjs"
-import {
-  removeSource, entryWith
-} from "./source-records.mjs"
 
 // ---- D-SINK-18: the container the host settings file is, before a URL goes
 // into it.

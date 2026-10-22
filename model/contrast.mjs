@@ -12,8 +12,7 @@ import {
   sinkText
 } from "./privacy.mjs"
 import {
-  formatCount, epgFields, epgCoverage, joinParts, programmeDetail,
-  failedNotice
+  formatCount, joinParts, failedNotice
 } from "./epg.mjs"
 
 // M2-09 GS8. The opacity rung a row's secondary text carries, lifted out of

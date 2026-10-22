@@ -14335,7 +14335,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       Object.keys(st).sort()
     ]
   }, [true, ['__proto__', 'a"b', "back\\slash", "caf\u00e9.fr", "constructor", "hasOwnProperty", "last.one"], true, true, true, "Proto", "Ctor", "Own", true, true, 0,
-      ["count", "index", "legacy", "map", "meta", "ok", "text"]])
+      ["count", "index", "kind", "legacy", "map", "meta", "ok", "text"]])
 
   checkCall("D-EPG-11 R31a: epgEntry answers a fresh object each call, null for an unknown, empty or missing id and for no store; emptyEpgStore is a fresh empty store", () => {
     const st = Model.parseEpgNowStore(tricky)
@@ -14348,8 +14348,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       e1 !== e2, e1.index !== e2.index, Object.getPrototypeOf(e1.index) === null, show(e1),
       show(Model.parseEpgNowStore("")), show(Model.parseEpgNowStore(null)), Model.parseEpgNowStore("[]").ok, Model.parseEpgNowStore("{\"channels\":[]}").ok
     ]
-  }, [true, true, null, null, null, null, null, null, true, true, true, '{"ok":false,"meta":{},"index":{},"text":"","count":0,"legacy":false,"map":null}',
-      '{"ok":false,"meta":{},"index":{},"text":"","count":0,"legacy":false,"map":null}', '{"ok":false,"meta":{},"index":{},"text":"","count":0,"legacy":false,"map":null}', false, false])
+  }, [true, true, null, null, null, null, null, null, true, true, true, '{"kind":"epg-store","ok":false,"meta":{},"index":{},"text":"","count":0,"legacy":false,"map":null}',
+      '{"kind":"epg-store","ok":false,"meta":{},"index":{},"text":"","count":0,"legacy":false,"map":null}', '{"kind":"epg-store","ok":false,"meta":{},"index":{},"text":"","count":0,"legacy":false,"map":null}', false, false])
 
   // R31b, the legacy half: a single-line file (0.14.3's helper during an
   // update window) goes through the old whole parse ONCE and is marked. Its
@@ -14389,10 +14389,55 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   checkCall("D-EPG-11 R31c: epgCoverage over an indexed store counts index presence, one own-property check per row, and ignores inherited names", () => {
     const st = Model.parseEpgNowStore(one)
     const chans = Model.prepareChannels([{ id: "1", name: "A", tvgId: "only" }, { id: "2", name: "B", tvgId: "constructor" }, { id: "3", name: "C" }, { id: "4", name: "D", tvgId: "toString" }])
-    const bare = { ok: true, meta: {}, index: Object.create(null), text: "", count: 1, legacy: false, map: null }
+    const bare = { kind: "epg-store", ok: true, meta: {}, index: Object.create(null), text: "", count: 1, legacy: false, map: null }
     bare.index["only"] = [0, 0]
     return [show(Model.epgCoverage(chans, st)), show(Model.epgCoverage(chans, bare)), show(Model.epgCoverage(chans, Model.emptyEpgStore())), show(Model.epgCoverage(chans, Model.parseEpgNowStore(none)))]
   }, ['{"total":4,"withId":3,"matched":1,"carries":true}', '{"total":4,"withId":3,"matched":1,"carries":true}', '{"total":4,"withId":3,"matched":0,"carries":false}', '{"total":4,"withId":3,"matched":0,"carries":false}'])
+
+  // The correctness lens's P3 on the first cut (E2-3): the store is told
+  // from a plain map by the TAG the parser sets (`kind: "epg-store"`),
+  // never by `store.index` being an object -- on a plain map `index` is a
+  // provider's tvg-id like any other. A map with ids `index`, `map` and
+  // `kind` grades as a map (the base 2bb05c6 answered matched 4 for it;
+  // the first cut answered 1, having taken the `index` entry's now/next as
+  // the index); epgEntry over such a map reads nothing through those keys;
+  // and a store-shaped object WITHOUT the tag is a map too (matched 0: its
+  // keys are not ids), as is one whose `kind` is an ENTRY rather than the
+  // tag (matched 1: the provider id `kind` carries a titled programme). The
+  // tag itself is not a provider's to set: a map's value under `kind` is an
+  // entry object, never the string.
+  checkCall("D-EPG-11 E2-3: a plain map whose provider ids are `index`, `map` and `kind` grades as a map (matched 4), epgEntry answers null through it, and a store-shaped object without the tag, or with an entry where the tag goes, is graded as a map", () => {
+    const map = { index: { now: { title: "I" } }, map: { next: { title: "M", start: NOW + 60 } }, kind: { now: { title: "K" } }, "a.tv": { now: { title: "A" } } }
+    const chans = Model.prepareChannels([{ id: "1", name: "I", tvgId: "index" }, { id: "2", name: "M", tvgId: "map" }, { id: "3", name: "K", tvgId: "kind" }, { id: "4", name: "A", tvgId: "a.tv" }, { id: "5", name: "N", tvgId: "nobody" }])
+    const untagged = { ok: true, meta: {}, index: Object.create(null), text: "", count: 1, legacy: false, map: null }
+    untagged.index["a.tv"] = [0, 0]
+    const spelt = { ok: true, meta: {}, index: Object.create(null), text: "", count: 1, legacy: false, map: null, kind: { now: { title: "K" } } }
+    spelt.index["a.tv"] = [0, 0]
+    return [
+      show(Model.epgCoverage(chans, map)),
+      Model.epgEntry(map, "index"), Model.epgEntry(map, "map"), Model.epgEntry(map, "a.tv"),
+      show(Model.epgCoverage(chans, untagged)), show(Model.epgCoverage(chans, spelt)),
+      Model.epgEntry(untagged, "a.tv"), Model.epgEntry(spelt, "a.tv"),
+      Model.parseEpgNowStore(one).kind, Model.parseEpgNowStore('{"version":1,"channels":{"x.tv":{"now":{"title":"T"}}}}').kind, Model.emptyEpgStore().kind
+    ]
+  }, ['{"total":5,"withId":5,"matched":4,"carries":true}', null, null, null,
+      '{"total":5,"withId":5,"matched":0,"carries":false}', '{"total":5,"withId":5,"matched":1,"carries":true}', null, null,
+      "epg-store", "epg-store", "epg-store"])
+
+  // E2-5 (the lens's remark): `count` is the number of DISTINCT ids on both
+  // paths. The helper cannot write an id twice, but a hand-built file can;
+  // the line walk keeps the LAST line for the id, as JSON.parse keeps the
+  // last key, and counts it once; the legacy path's JSON.parse has already
+  // folded the duplicate.
+  checkCall("D-EPG-11 E2-5: store.count is distinct ids on the line path and the legacy path; a duplicated id is indexed once, the last line winning as JSON.parse's last key does", () => {
+    const header = '{"version":1,"generatedAt":' + NOW + ',"validUntil":' + (NOW + 300) + ',"channels":{'
+    const lines = Model.parseEpgNowStore(header + '\n"a.tv":{"now":{"title":"First"}},\n"b.tv":{"now":{"title":"B"}},\n"a.tv":{"now":{"title":"Second"}}\n}}\n')
+    const legacy = Model.parseEpgNowStore(header + '"a.tv":{"now":{"title":"First"}},"b.tv":{"now":{"title":"B"}},"a.tv":{"now":{"title":"Second"}}}}')
+    return [
+      lines.ok, lines.legacy, lines.count, Object.keys(lines.index).sort(), Model.epgEntry(lines, "a.tv").now.title, Model.epgEntry(lines, "b.tv").now.title,
+      legacy.ok, legacy.legacy, legacy.count, Object.keys(legacy.index).sort(), Model.epgEntry(legacy, "a.tv").now.title
+    ]
+  }, [true, false, 2, ["a.tv", "b.tv"], "Second", "B", true, true, 2, ["a.tv", "b.tv"], "Second"])
 
   // The service, run for real (service-harness): both shapes load, the
   // legacy one is marked, a load starts no fetch (the debounce is not
