@@ -56,10 +56,13 @@ def remove_regular(path: str) -> bool:
 # existed, and it exposed that clear_source_dir could not remove a directory
 # at all: remove_regular returns False for one, so it always landed in `kept`,
 # the `if not kept` rmdir never fired, and `cache prune` classified the whole
-# source key as kept rather than removed. A removed source left up to
-# MAX_LOGO_FILES * MAX_LOGO_BYTES on disk permanently, and no later prune
-# could ever collect it -- with filenames that are fnv1a32 of the logo URLs,
-# so the leftovers identify the channels that source carried (D-LOGO-4).
+# source key as kept rather than removed. A removed source left its whole logo
+# directory on disk permanently, and no later prune could ever collect it --
+# with filenames that are fnv1a32 of the logo URLs, so the leftovers identify
+# the channels that source carried (D-LOGO-4). That directory holds at most
+# MAX_LOGO_FILES entries of at most MAX_LOGO_BYTES each, 1.22 GiB, since
+# D-LOGO-12 made the cap a ceiling on what is there; before it, the cap
+# bounded one run's downloads and the directory had no ceiling at all.
 CACHE_SUBDIRS = (LOGO_SUBDIR,)
 
 
@@ -262,10 +265,20 @@ def cache_logos_clear(directory: str, key: str) -> dict[str, Any]:
     The twin of cache_epg_clear, and filed for the same reason GS11 gave for
     that one: the part of the cache an input produced has to be reclaimable
     when the user withdraws the input. Turning showLogos off stops the fetch
-    and blanks the rows, and until this verb existed it reclaimed nothing --
-    with a documented ceiling of MAX_LOGO_FILES * MAX_LOGO_BYTES, 1.28 GB for
-    a single source, that no prune could ever collect, because prune only
-    clears keys that are NOT kept.
+    and blanks the rows, and until this verb existed it reclaimed nothing,
+    because prune only clears keys that are NOT kept.
+
+    What it reclaims, as a ceiling that holds (D-LOGO-12): a fetch adds a
+    file only while the directory holds fewer than MAX_LOGO_FILES entries,
+    so one source's logos are at most 5,000 files of at most 256 KiB,
+    1,310,720,000 bytes (1.22 GiB). An earlier version could leave a
+    directory fuller than that -- its cap counted one run's downloads, and
+    the directory grew by up to 5,000 a run -- and this version never adds to
+    one; this verb is what empties it. The ceiling is PER SOURCE: the history
+    keeps up to MAX_SOURCES (50) sources, each with its own directory, so
+    every source together is bounded only by 50 times that, 65.5 GB, which
+    is a figure and not a budget anyone would accept; a cross-source bound
+    is a separate decision (D-LOGO-12's rule-15 axis).
 
     The playlist half of the cache is untouched: the source is still there,
     only its pictures are gone. Deletion is remove_cache_subdir's, so it is

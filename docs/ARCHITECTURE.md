@@ -2190,8 +2190,38 @@ both sound names announced, the bomb swept and off disk, `deferred` 3,
 5,002 names; then the real helper as a subprocess over the cache that run
 left, `cached` 5,002 and the same names. Red against the 995c6be helper
 (that one test fails; 85 of 85 green on the fix across tests.test_logo_dimensions and tests.test_logos together, lane commit ddc0a7b; the dimension file alone is 38 at integration).
-D-LOGO-12 stays open: the cap bounds fetches per run and nothing yet bounds
-what is ON DISK.
+**D-LOGO-12 (2026-10-21): the cap is now a ceiling on what is ON DISK.**
+Until then it bounded fetches per run, and `fetched` counts this run's
+downloads, so the directory grew by up to the cap on every run -- 2, 4, 6, 7
+over four runs with the cap lowered to 2 against seven ordinary logos over a
+local TLS server, rerun on f55a32f with the new test's own rig -- and a
+`MAX_CHANNELS` playlist reached 50,000 files over ten service starts while
+the comments called 5,000 a ceiling. A run now counts every entry in the
+logo directory before it starts (`logo_dir_entries`: any kind, a leftover
+`.tmp-` file and a stray folder included, a link at the path followed
+because that is where `write_logo` writes, a directory that cannot be listed
+counted as full) and fetches only while `present + fetched < MAX_LOGO_FILES`;
+a file the sweep unlinks frees its slot. What the ceiling held back is
+`deferred`, the summary says `atCeiling` and `files`, and stderr says it
+once, counted, with no URL. So ONE source's logos hold at most 5,000 files
+of at most 256 KiB, 1,310,720,000 bytes (1.22 GiB). Two things the ceiling
+does not do, stated: a directory an older version left fuller is announced
+and never grown, and stays that size until `cache logos-clear` or the
+source's removal; and a file whose URL has left the playlist still holds its
+slot, so a playlist whose logos churn reaches the ceiling and stops getting
+new ones until the same verb runs (a prune of such files is a separate
+decision). The ceiling is per source: the history keeps up to `MAX_SOURCES`
+(50) sources with a directory each, so every source together is bounded by
+50 x 1.22 GiB, 65.5 GB, which is a figure and not a budget; a cross-source
+bound is proposed to the lead, not built. Proved by
+`tests/test_logo_ceiling.py` with the cap lowered to 2 or 3 over a real
+local TLS server, the GETs counted by the server and the directory counted by
+the test: 2, 2, 2, 2 over four runs with two GETs in all (red on f55a32f, 4
+failed and 3 errored of 7), a swept file freeing its slot, an older fuller
+directory never grown, every entry counted, an unlistable one contacting
+nobody. `LogoFetchCapTest` was rewritten for the ceiling with the cap
+lowered to 5 (its old construction, 5,000 downloads beside three cached
+files, is the state the fix forbids), red on f55a32f.
 **What the fix rests on in the guide, and the blocker the review found
 there.** The sweep protects a user only because nothing in the shell decodes
 a cache file the helper did not announce -- and at 995c6be the announced set
@@ -2287,10 +2317,11 @@ Details and the mutation table are `docs/QA.md` section 3.2.
   no limit near this size holds; what this machine (`vm.overcommit_memory=0`,
   7.8 GB RAM, 15.4 GB swap) would do with it uncapped is reasoning, not
   measurement.
-- `MAX_LOGO_FILES` bounds fetches per run and not the cache. The sweep is no
-  longer bounded by it (above), so every cached file for a URL in the current playlist is validated on every
-  run; what remains open is the cache's size on disk, which nothing bounds
-  (D-LOGO-12, open).
+- `MAX_LOGO_FILES` bounded fetches per run and not the cache until D-LOGO-12
+  (above) made it a ceiling on the entries one source's logo directory
+  holds. The sweep is not held back by it, so every cached file for a URL in
+  the current playlist is validated on every run. What stays unbounded is the
+  sum over sources (up to 50 x 1.22 GiB), proposed rather than built.
 - The windows `LOGO_HEADER_BYTES` and the byte cap leave, stated exactly
   (called on the lane-R2 helper, 2026-10-11). A JPEG whose frame header sits
   past the first 128 KiB costs a second read, not a wrong answer, and the
@@ -3287,6 +3318,113 @@ Performance budget (10k channels):
     rather than by a constant: `state init` echoes `state.json`, which the
     shell already reads whole; the `cache` verbs list names inside the
     plugin's own 0700 cache directories.
+
+    **What the EPG parse retains is bounded during the parse (D-EPG-7,
+    2026-10-21).** `parse_xmltv` kept every in-window programme of every
+    matched channel until the parse ended as a 4-tuple (start, stop, title,
+    detail dict) -- five or six objects a programme, every str widened to
+    four bytes a character by one emoji -- and `EPG_MAX_PER_CHANNEL` was
+    applied only afterwards. It now keeps ONE bytes object a programme
+    (`retain_programme`): the start and the raw stop in decimal, then the
+    title, description, category and episode as the cleaners left them,
+    UTF-8, separated by `\x1f` (every text has been through `_CONTROL_WS`,
+    so neither separator can occur in one, and one that did would be folded
+    rather than move a boundary). JSON is made by `record_body` for the
+    records actually written, as before. `encode_retained` makes every
+    decision `encode_records` made, in the same order -- stable sort by
+    start, a missing stop from the next strictly later start or
+    `EPG_DEFAULT_DURATION`, skip a stop not after its start, drop a repeat of
+    the last record kept, keep the first `EPG_MAX_PER_CHANNEL` -- with the
+    next later start found by a forward pointer instead of a rescan from
+    every stopless programme (the same answer; the rescan was quadratic in
+    programmes sharing a start). Each channel's bytes are released as its
+    record string is made. No per-channel heap and no total cap were added:
+    neither lowers the worst case, which is many channels of few programmes
+    each and is bounded by the input, so the bound is this layout's cost
+    times what 64 MiB can hold, and nothing is ever dropped.
+
+    Measured on ordinary small guides (2,000 vs 4,000 programmes over 50
+    channels, `parse_xmltv`'s marginal traced peak; `RetainedCostTest` pins
+    it, red on f55a32f): 724 bytes a programme on f55a32f against 213 now
+    with a 120-character description, category and episode on each; 144
+    against 58 title-only (inside the unittest run, 801-879 against
+    215-217, and 151-156 against 65-71). The bound at the cap, by arithmetic:
+    a bytes object is 33 bytes of header plus its length, rounded up to 16,
+    plus an 8-byte list slot, so a programme with no stop costs at most
+    72 + t bytes and one with a stop (twelve digits at most) 84 + t, where t
+    is its texts' UTF-8 length; its XML is at least 67 + t and 83 + t
+    (`<programme start="YYYYMMDD" channel="a">`, a title element, the stop
+    attribute when there is one). So the parse retains at most about 1.08
+    bytes a byte of guide, **69 MiB at the 64 MiB cap** (986,895 title-only
+    programmes of 68 bytes is the most it can hold), except where URL
+    redaction lengthens a description -- `a://@` becomes `a://[redacted]`,
+    2.8 times the token, never past the field's 400 code points -- which
+    caps it at about 2 bytes a byte, **128 MiB**. Before: 144 bytes per
+    title-only programme measured with every start shared across 50
+    channels, about 136 MiB over the 986,895 the cap can hold, with the time
+    memo below on top of it when the starts are not shared.
+
+    Its neighbours, found under rule 15 and stated with the same care:
+
+    | Held during the parse | Bound | Changed |
+    |---|---|---|
+    | programmes (`pending`) | 1.08 x the guide's programme bytes, 2 x with redaction growth: 69-128 MiB | compact form, above |
+    | the time memo (`parse_xmltv_time`) | `EPG_TIME_CACHE_MAX` 16,384 keys of at most `EPG_TIME_CACHE_KEY_MAX` 64 characters, about 3 MiB | was one key per distinct start or stop, a junk value of any length kept whole |
+    | the download | 64 MiB (`MAX_SOURCE_BYTES`; a gzip stream is inflated in chunks) | now released once parsed, before the window is encoded and written |
+    | the playlist cache (`channels.json` as Python objects) | the whole playlist, for the whole parse | now only each row's `tvgId` (what `match_counts` reads) is kept; the document is released before the parse |
+    | guide-side name tables (`guide_names`, `bare_guide`) | 355 bytes per ordinary declaration whose name the playlist claims (measured, 112-byte declarations, both trees alike), so at most 50,000 x 355 = 17 MiB for distinct names; about 100 bytes per further declaration colliding on a claimed name (the existing measurement in `parse_xmltv`'s docstring), so at most about 1.7 x the guide's declaration bytes | not changed |
+    | the playlist index (`build_alias`) | 178.8 MiB traced at the playlist caps, measured when `EPG_ADDR_MAX_TOKENS` was set | not changed |
+
+    A byte of guide is either a programme or a declaration, so the parse's
+    own tables hold at most about 2 x 64 MiB plus 17 MiB; with the download,
+    the index at the playlist caps and the interpreter, the sum of every
+    worst case at once is about 64 + 145 + 179 + 3 + 20 = 411 MiB, under the
+    512 MiB limit, and a run over it is refused as `too_large` with the old
+    guide kept. The playlist index is now the largest single term; it is
+    the next one to shrink, not this round's.
+
+    After the parse, UNVERIFIED and stated: a channel's record string is a
+    Python str, which one astral character (an emoji) in any of its records
+    widens to four bytes a character, so the encoded window can cost up to
+    four times the retained bytes in a guide built for it -- titles of one
+    emoji and 199 double quotes, each quote two characters once escaped. The
+    lines are now made once and the same list is written and returned (they
+    were made twice, with the channel strings held throughout, three copies
+    at the write); one copy is written. Keeping the window as UTF-8 bytes
+    end to end would remove the widening and is proposed, not built: it
+    changes `fetch_window`, `compute_now_next` and the tests that read the
+    window as text. `RetentionDifferentialTest` holds this tree to f55a32f's
+    output on 60 seeded small guides (shuffled, repeated programmes, missing
+    stops, stops not after their start, twelve-digit stops, shared starts,
+    quotes, backslashes, astral characters, with and without a playlist, the
+    per-channel cap at 400 and lowered to 3) and byte for byte on the files
+    `epg` writes; it went red for four mutations of the shipping decisions
+    (sort by the whole item, an equal start taken as the next, a duplicate
+    check blind to the texts, window lines reversed).
+
+    **What the long-running shell holds from the guide data (D-EPG-7, rule
+    15), which has no memory limit.** The shell never reads
+    `epg-window.txt`; it reads `epg-now.json` through a `FileView`, trims
+    the text, `JSON.parse`s it and keeps `doc.channels` by reference
+    (`Model.parseEpgNow`, `Service.qml` `applyEpgNow`). Measured with a
+    probe that does exactly that on Qt 6.11.2 offscreen (an XHR read in
+    place of the `FileView`, which holds the file's text besides), over
+    files the shipping helper wrote from ordinary guides of 2,000 and 4,000
+    matched channels with a description, category and episode on now and
+    next: 529 bytes of JSON a channel, and 6.85-7.03 KiB of resident memory
+    a channel, twice each (71.7 MiB with one channel, 85.1 and 98.8 MiB at
+    2,000 and 4,000). Entries are bounded by the playlist's distinct tvg-ids,
+    at most `MAX_CHANNELS` = 50,000, and an ordinary guide of 50,000 matched
+    channels with two programmes each in the window is about 33 MB of XML,
+    inside the input cap. So the shell can hold about **340 MiB** for the
+    guide's now/next at `MAX_CHANNELS` (UNVERIFIED at that size; about 67 MiB
+    at 10,000), and more with every detail field at its cap (11.6 MiB of
+    JSON at 10,000 channels, about 2.3 times this probe's per-channel JSON).
+    That is not small, and it is not bounded by this change: bounding it
+    means a different shape for `epg-now.json` in the shell (each channel's
+    entry kept as text and parsed when a row asks, about 1 KiB a channel by
+    the same arithmetic), or descriptions fetched on demand, both changes to
+    the guide's data path and its 150 ms open budget, proposed for a ruling.
 
 ## 9. Coding standards
 

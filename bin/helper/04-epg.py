@@ -15,21 +15,38 @@ def parse_xmltv_time(raw: str | None, cache: dict[str, int | None]) -> int | Non
         return None
     if raw in cache:
         return cache[raw]
+    ts = _xmltv_time_value(raw)
+    # D-EPG-7: the cache is a memo, so bounding it changes no answer. It was
+    # unbounded, and it is the one table here keyed by a string the feed
+    # chooses per PROGRAMME: a guide giving every programme its own start
+    # kept one entry per programme for the whole parse, and a junk value of
+    # any length was kept whole as a key. Now a value longer than any
+    # well-formed XMLTV time is never stored, and the table is emptied when
+    # it reaches EPG_TIME_CACHE_MAX, so it holds at most that many keys of at
+    # most EPG_TIME_CACHE_KEY_MAX characters (arithmetic beside the
+    # constants). An ordinary feed repeats a few thousand boundaries and
+    # never reaches the cap.
+    if len(raw) <= EPG_TIME_CACHE_KEY_MAX:
+        if len(cache) >= EPG_TIME_CACHE_MAX:
+            cache.clear()
+        cache[raw] = ts
+    return ts
+
+
+def _xmltv_time_value(raw: str) -> int | None:
+    """parse_xmltv_time without the memo."""
     match = _XMLTV_TIME.match(raw.strip())
     if not match:
-        cache[raw] = None
         return None
     import calendar
     year, month, day, hour, minute, second = (int(match.group(index) or 0) for index in range(1, 7))
     try:
         ts = calendar.timegm((year, month, day, hour, minute, second, 0, 0, 0))
     except (ValueError, OverflowError):
-        cache[raw] = None
         return None
     if match.group(7):
         offset = int(match.group(8)) * 3600 + int(match.group(9)) * 60
         ts -= offset if match.group(7) == "+" else -offset
-    cache[raw] = ts
     return ts
 
 
@@ -515,8 +532,15 @@ def encode_record(start: int, stop: int, title: str, detail: dict[str, str] | No
     EPG_DETAIL_KEYS are ignored and an empty value is omitted, which is why a
     programme with no detail produces exactly the record it always did.
     """
-    start = 0 if start < 0 else min(start, EPG_MAX_EPOCH)
-    stop = 0 if stop < 0 else min(stop, EPG_MAX_EPOCH)
+    return _format_record(start, stop, record_body(title, detail))
+
+
+def record_body(title: str, detail: dict[str, str] | None = None) -> str:
+    """The record's tail from index 22: the title's JSON value, then the
+    detail members in EPG_DETAIL_KEYS order. A pure function of (title, the
+    non-empty detail values), and one-to-one with them -- JSON encoding is,
+    and the keys come in a fixed order. Made for the records written, never
+    for what the parse retains (retain_programme, D-EPG-7)."""
     # The title stays the FIRST thing at index 22, bare, exactly as it was
     # before M4-02: the detail members are appended after it, so a reader
     # that prepends '{"title":' gets a whole object and a detail-free record
@@ -527,39 +551,134 @@ def encode_record(start: int, stop: int, title: str, detail: dict[str, str] | No
             value = detail.get(key)
             if value:
                 body += ',"%s":%s' % (key, json.dumps(value, ensure_ascii=False))
+    return body
+
+
+def _format_record(start: int, stop: int, body: str) -> str:
+    start = 0 if start < 0 else min(start, EPG_MAX_EPOCH)
+    stop = 0 if stop < 0 else min(stop, EPG_MAX_EPOCH)
     return "%010d %010d %s" % (start, stop, body)
 
 
-def encode_records(items: list[tuple[int, int | None, str, dict[str, str]]]) -> tuple[str, int]:
-    """Sort, infer missing stops, drop duplicates, cap, and pack a channel's
-    programmes into the record string described at EPG_RECORD_SEP.
+# D-EPG-7: what the parse KEEPS of one in-window programme until the parse
+# ends. It used to keep a 4-tuple holding an int, an int or None, the title
+# str and a detail dict of up to three strs -- five or six objects, each with
+# its own header, and every str widened to four bytes a character by one
+# emoji. It now keeps ONE bytes object:
+#
+#     b"<start> <stop or nothing>\x00<title>\x1f<desc>\x1f<category>\x1f<episode>"
+#
+# in UTF-8 (surrogatepass both ways, so the round trip is exact for any str).
+# The start and the RAW stop are decimal, unclamped and unpadded, because the
+# encoder decides on raw values exactly as it did: a stop of 10**11 and one of
+# 10**12 are different programmes to the duplicate check although both clamp
+# to the same record. The four texts are kept as the cleaners left them, NOT
+# as JSON, so a programme costs its own characters and nothing an escape adds
+# (a title of 200 double quotes is 400 bytes of JSON and 200 here); the JSON
+# is made by record_body for the records actually written, as it always was.
+# The separators are safe: every text has been through _CONTROL_WS, which
+# folds \x00-\x1f to a space, so neither NUL nor \x1f can occur in one -- and
+# should a later cleaner ever let one through, it is folded here rather than
+# allowed to move a field boundary. An absent detail value and an empty one
+# are the same (record_body omits both), and programme_detail never stores an
+# empty one, so (title, detail) and this payload are one-to-one.
+#
+# What it costs, measured on an ordinary small guide (2,000 vs 4,000
+# programmes over 50 channels with a 120-character description, category and
+# episode on each, parse_xmltv's marginal traced peak, 2026-10-21): 724 bytes
+# a programme on f55a32f and 213 here; on a title-only guide, 144 and 58.
+# The bound at the input cap is arithmetic over this layout (the architecture
+# document's D-EPG-7 section, dev branch): a bytes object is 33 bytes of
+# header plus its length, rounded up to 16, and one 8-byte list slot holds
+# it, so a programme without a stop costs at most 72 bytes plus its texts
+# and one with a stop (at most twelve digits) at most 84, while its XML is
+# at least 67 and 83 bytes plus the same texts. So what the parse retains is
+# at most about 1.08 bytes per byte of guide -- 69 MiB at the 64 MiB cap --
+# except where URL redaction lengthens a description (at most 2.8 times the
+# token it replaces, never past the field's cap), which bounds it by 2 bytes
+# per byte, 128 MiB. RetainedCostTest pins the measured figure.
+_FIELD_SEP = "\x1f"
 
-    An item is (start, stop or None, title, detail); the detail dict takes
-    part in the duplicate check, so the same programme listed twice with and
-    without a description keeps both -- the records differ, and choosing
-    between them is not this function's decision to make.
+
+def retain_programme(start: int, stop: int | None, title: str, detail: dict[str, str] | None) -> bytes:
+    detail = detail or {}
+    fields = [title] + [detail.get(key) or "" for key in EPG_DETAIL_KEYS]
+    payload = _FIELD_SEP.join(_CONTROL_WS.sub(" ", text) if (_FIELD_SEP in text or "\x00" in text) else text
+                              for text in fields)
+    head = "%d %s\x00" % (start, "" if stop is None else "%d" % stop)
+    return (head + payload).encode("utf-8", "surrogatepass")
+
+
+def _retained_start(item: bytes) -> int:
+    return int(item[:item.index(b" ")])
+
+
+def _retained_body(payload: bytes) -> str:
+    fields = payload.decode("utf-8", "surrogatepass").split(_FIELD_SEP)
+    detail = {key: value for key, value in zip(EPG_DETAIL_KEYS, fields[1:]) if value}
+    return record_body(fields[0], detail)
+
+
+def encode_retained(items: list[bytes]) -> tuple[str, int]:
+    """Sort, infer missing stops, drop duplicates, cap, and pack a channel's
+    retained programmes (retain_programme) into the record string described
+    at EPG_RECORD_SEP.
+
+    The same decisions in the same order as ever: a stable sort by start, so
+    programmes sharing a start keep document order; a missing stop becomes
+    the next STRICTLY later start in that order, or start plus
+    EPG_DEFAULT_DURATION when there is none; a programme whose stop is not
+    after its start (or whose start is negative) is skipped; one equal to the
+    last record KEPT -- start, derived stop, title and detail -- is dropped;
+    and the first EPG_MAX_PER_CHANNEL records are kept. A programme's detail
+    takes part in the duplicate check, so the same programme listed with and
+    without a description keeps both -- choosing between them is not this
+    function's decision to make.
+
+    One thing is different, and it is the cost: the next later start is
+    found by a pointer that only moves forward, where it used to be searched
+    afresh from every programme without a stop -- the same answer, in one
+    pass instead of one pass per programme sharing a start.
     """
-    items.sort(key=lambda item: item[0])
+    items.sort(key=_retained_start)
     records: list[str] = []
-    last: tuple[int, int, str, dict[str, str]] | None = None
+    last: tuple[int, int, bytes] | None = None
     count = len(items)
-    for index, (start, stop, title, detail) in enumerate(items):
-        if stop is None:
-            stop = start + EPG_DEFAULT_DURATION
-            for later in range(index + 1, count):
-                if items[later][0] > start:
-                    stop = items[later][0]
-                    break
+    ahead = 0
+    for index, item in enumerate(items):
+        space = item.index(b" ")
+        nul = item.index(b"\x00", space)
+        start = int(item[:space])
+        if nul > space + 1:
+            stop = int(item[space + 1:nul])
+        else:
+            if ahead <= index:
+                ahead = index + 1
+            while ahead < count and _retained_start(items[ahead]) <= start:
+                ahead += 1
+            stop = _retained_start(items[ahead]) if ahead < count else start + EPG_DEFAULT_DURATION
         if stop <= start or start < 0:
             continue
-        current = (start, stop, title, detail)
+        payload = item[nul + 1:]
+        current = (start, stop, payload)
         if current == last:
             continue
         last = current
-        records.append(encode_record(start, stop, title, detail))
+        records.append(_format_record(start, stop, _retained_body(payload)))
         if len(records) >= EPG_MAX_PER_CHANNEL:
             break
     return EPG_RECORD_SEP.join(records), len(records)
+
+
+def encode_records(items: list[tuple[int, int | None, str, dict[str, str]]]) -> tuple[str, int]:
+    """encode_retained over (start, stop or None, title, detail) tuples.
+
+    Kept as the tuple-shaped entry the tests and diagnostics call; the parse
+    itself never builds the tuples (D-EPG-7). A detail of None and of {}
+    are the same programme here, as they are to record_body.
+    """
+    return encode_retained([retain_programme(start, stop, title, detail)
+                            for start, stop, title, detail in items])
 
 
 def claim_channel(claim: dict[str, tuple[int, str]], pending: dict[str, list[Any]],
@@ -630,7 +749,10 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
     window_start = now - EPG_PAST_SECONDS
     window_end = now + EPG_FUTURE_SECONDS
     time_cache: dict[str, int | None] = {}
-    pending: dict[str, list[tuple[int, int | None, str, dict[str, str]]]] = {}
+    # playlist key -> its in-window programmes, each ONE bytes object
+    # (retain_programme, D-EPG-7). Everything the encoder needs and nothing
+    # else: the parse keeps no tuple, no dict and no str per programme.
+    pending: dict[str, list[bytes]] = {}
     seen_ids: set[str] = set()
     # playlist key -> (strategy rank, the guide channel id that owns it).
     claim: dict[str, tuple[int, str]] = {}
@@ -683,7 +805,7 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
                             title = clean_title(element_text(title_elem))
                             if title:
                                 pending.setdefault(key, []).append(
-                                    (start, stop, title, programme_detail(elem)))
+                                    retain_programme(start, stop, title, programme_detail(elem)))
                             else:
                                 no_title += 1
             elif tag == "channel":
@@ -788,8 +910,11 @@ def parse_xmltv(stream: BinaryIO, now: int, index: dict[str, Any] | None) -> dic
 
     channels: dict[str, str] = {}
     kept = 0
-    for key, items in pending.items():
-        blob, count = encode_records(items)
+    # Each channel's programmes are released as its record string is made,
+    # so the retained bytes shrink while the output grows and the two are
+    # never both whole (D-EPG-7). Same order as iterating the dict.
+    for key in list(pending):
+        blob, count = encode_retained(pending.pop(key))
         if count:
             channels[key] = blob
             kept += count
@@ -860,15 +985,24 @@ def channels_mtime(path: str) -> int | None:
         return None
 
 
+def window_line(cid: str, blob: str) -> str:
+    """'"<id>"\t<records>'; the id is stored JSON-encoded."""
+    return "%s\t%s" % (json_string(cid), blob)
+
+
 def window_lines(channels: dict[str, str]) -> list[str]:
-    """'"<id>"\t<records>' per channel; the id is stored JSON-encoded."""
-    return ["%s\t%s" % (json_string(cid), blob) for cid, blob in channels.items()]
+    return [window_line(cid, blob) for cid, blob in channels.items()]
 
 
 def write_window(path: str, meta: dict[str, Any], channels: dict[str, str]) -> None:
-    lines = [json.dumps(meta, ensure_ascii=False, separators=(",", ":"))]
-    lines.extend(window_lines(channels))
-    write_text_atomic(path, "\n".join(lines) + "\n")
+    write_window_lines(path, meta, window_lines(channels))
+
+
+def write_window_lines(path: str, meta: dict[str, Any], lines: list[str]) -> None:
+    # One join over references: the text is the only new copy of the lines.
+    # The trailing "" is the final newline.
+    head = json.dumps(meta, ensure_ascii=False, separators=(",", ":"))
+    write_text_atomic(path, "\n".join([head, *lines, ""]))
 
 
 def load_window(path: str) -> dict[str, Any] | None:
@@ -919,8 +1053,19 @@ def fetch_window(url: str, timeout: float, now: int, directory: str) -> dict[str
     channels_doc = read_json(channels_path)
     mtime = channels_mtime(channels_path)
     index, channel_total = build_alias(channels_doc)
+    # D-EPG-7 (rule 15, the parse's neighbours). The whole playlist cache was
+    # held as Python objects for the length of the parse -- every channel's
+    # name, address, group and headers -- because match_counts reads it
+    # afterwards; match_counts reads one field, so only that field is kept,
+    # and the document is released before the parse starts. The download is
+    # released as soon as the parse has read it, before the window is
+    # encoded and written. Neither changes an answer.
+    tvg_doc = {"channels": [{"tvgId": channel.get("tvgId")} for channel in channels_doc["channels"]
+                            if isinstance(channel, dict)]} if index is not None else None
+    del channels_doc
     parsed = parse_xmltv(open_xml_stream(data), now, index)
-    counts = match_counts(channels_doc, parsed["seenIds"], parsed["strategyOf"]) if index is not None else {}
+    del data
+    counts = match_counts(tvg_doc, parsed["seenIds"], parsed["strategyOf"]) if tvg_doc is not None else {}
     matched = counts.get("matched") if index is not None else None
     warnings = list(parsed["warnings"])
     if index is not None and matched == 0:
@@ -957,9 +1102,17 @@ def fetch_window(url: str, timeout: float, now: int, directory: str) -> dict[str
         "programmeCount": parsed["programmeCount"],
         "warnings": warnings,
     }
-    write_window(os.path.join(directory, EPG_WINDOW_FILE), meta, parsed["channels"])
+    # The lines are made ONCE, releasing each channel's string as its line is
+    # made, and the same list is written and returned. They used to be made
+    # twice -- once to write, once to return -- with the channel strings held
+    # throughout, so three copies of the window were alive at the write.
+    channels = parsed.pop("channels")
+    lines = []
+    for cid in list(channels):
+        lines.append(window_line(cid, channels.pop(cid)))
+    write_window_lines(os.path.join(directory, EPG_WINDOW_FILE), meta, lines)
     window = dict(meta)
-    window["lines"] = window_lines(parsed["channels"])
+    window["lines"] = lines
     return window
 
 

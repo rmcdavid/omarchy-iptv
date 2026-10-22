@@ -249,6 +249,13 @@ EPG_REFETCH_MARGIN = 2 * 3600     # re-download when the window ends sooner than
 EPG_VALID_MAX = 300               # epg-now.json is never declared valid longer than this
 EPG_MAX_TITLE = 200
 EPG_MAX_PER_CHANNEL = 400
+# D-EPG-7: the time memo's bounds (parse_xmltv_time). A well-formed XMLTV
+# time is at most 20 characters ("YYYYMMDDHHMMSS +HHMM"); 64 leaves room for
+# padding whitespace and refuses only junk. At the cap the memo holds 16,384
+# keys of at most 64 characters: 16,384 x (64 + 49 str header + 32 int +
+# about 40 of table) is about 3 MiB, whatever the feed.
+EPG_TIME_CACHE_MAX = 16384
+EPG_TIME_CACHE_KEY_MAX = 64
 EPG_DEFAULT_DURATION = 3600       # for a programme without a stop and no successor
 # M4-02 detail caps, in code points, applied when the whitespace is folded
 # and again after the URLs are redacted (see clean_detail). A longer value is

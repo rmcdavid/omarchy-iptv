@@ -120,6 +120,30 @@ class WriteTest(unittest.TestCase):
         self.assertEqual(len(got["failed"]), 2)
 
 
+class MissingIdTest(unittest.TestCase):
+    """D-SRC-45's sibling, found by its rule-15 sweep: `failed mark` with no
+    id raised past the verb to main's catch-all, which answered
+    `code: internal`, "HelperError: ..." and a traceback. Run as the plugin
+    runs it, a subprocess of the real helper, because the catch-all is what
+    turned a refusal into a crash and an in-process call would not reach it."""
+
+    def test_mark_without_an_id_is_a_bad_id_refusal_not_a_crash(self):
+        import subprocess
+        import sys
+        d = cache_with(["t:a"])
+        helper_bin = pathlib.Path(__file__).resolve().parent.parent / "bin" / "omarchy-iptv"
+        for extra in ([], ["--id", "  "]):
+            done = subprocess.run([sys.executable, str(helper_bin), "failed", "--cache-dir", d, "mark", *extra],
+                                  capture_output=True, text=True, timeout=60)
+            payload = json.loads(done.stdout.strip().splitlines()[-1])
+            self.assertEqual(done.returncode, 1, extra)
+            self.assertEqual(payload["kind"], "failed")
+            self.assertEqual(payload["error"]["code"], "bad_id", payload)
+            self.assertNotIn("HelperError", payload["error"]["message"])
+            self.assertNotIn("Traceback", done.stderr)
+            self.assertFalse(os.path.exists(os.path.join(d, helper.FAILED_FILE)), "a refusal writes nothing")
+
+
 class RemovalTest(unittest.TestCase):
     def test_removing_the_source_takes_the_marks_with_it(self):
         """D-LOGO-4's lesson applied before the defect rather than after it."""
