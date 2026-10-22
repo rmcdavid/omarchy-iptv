@@ -126,7 +126,8 @@ function epgFields(entry, nowSec) {
 // D-EPG-11 (R31c): over the guide-data STORE, an id is matched when the
 // store's index holds it. That is the same answer as before because the
 // helper never writes an entry without a titled `now` or `next`
-// (compute_now_next drops an untitled half, pinned in tests/test_epg.py),
+// (compute_now_next drops an untitled half, pinned by EpgNowLineShapeTest
+// in the helper's EPG tests on the dev branch),
 // and a legacy store's index was built by the old rule. A plain map (the
 // old `doc.channels`, which verify.js and the older checks still pass) is
 // graded by the old rule, so the two can be compared on the same input.

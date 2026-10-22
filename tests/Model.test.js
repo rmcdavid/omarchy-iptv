@@ -14251,7 +14251,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     ['a"b', 0, 3600, "Quote", { desc: "A quoted id" }],
     ['a"b', 3600, 7200, "Quote Next"],
     ["back\\slash", 0, 3600, "Back", { category: "Drama" }],
-    ["café.fr", 0, 3600, "Café ☃", { desc: "Unicode in the id, the title and here: üñ" }],
+    ["caf\u00e9.fr", 0, 3600, "Caf\u00e9 \u2603", { desc: "Unicode in the id, the title and here: \u00fc\u00f1" }],
     ["__proto__", 0, 3600, "Proto", { episode: "S1E1" }],
     ["constructor", 2700, 5400, "Ctor"],
     ["hasOwnProperty", 0, 3600, "Own"],
@@ -14334,7 +14334,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       Object.getPrototypeOf({}) === Object.prototype, ({}).now === undefined, Object.keys(Object.prototype).length,
       Object.keys(st).sort()
     ]
-  }, [true, ['__proto__', 'a"b', "back\\slash", "café.fr", "constructor", "hasOwnProperty", "last.one"], true, true, true, "Proto", "Ctor", "Own", true, true, 0,
+  }, [true, ['__proto__', 'a"b', "back\\slash", "caf\u00e9.fr", "constructor", "hasOwnProperty", "last.one"], true, true, true, "Proto", "Ctor", "Own", true, true, 0,
       ["count", "index", "legacy", "map", "meta", "ok", "text"]])
 
   checkCall("D-EPG-11 R31a: epgEntry answers a fresh object each call, null for an unknown, empty or missing id and for no store; emptyEpgStore is a fresh empty store", () => {
@@ -14425,8 +14425,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     (serviceSource.match(/root\.epgNow = Model\.emptyEpgStore\(\)/g) || []).length,
     /property var epgNow: Model\.emptyEpgStore\(\)/.test(serviceSource),
     /var store = Model\.parseEpgNowStore\(text\)\n    root\.epgNow = store\n    root\.epgMeta = store\.meta\n    root\.epgLoaded = store\.ok/.test(serviceSource),
-    (guideSource + serviceSource + fs.readFileSync(path.join(__dirname, "../scripts/dev-harness/shell.qml"), "utf8")).indexOf("epgMap[") === -1,
-    (fs.readFileSync(path.join(__dirname, "../scripts/dev-harness/shell.qml"), "utf8").match(/Model\.epgEntry\(g\.epgStore, /g) || []).length
+    (guideSource + serviceSource).indexOf("epgMap[") === -1,
+    (fs.readFileSync(path.join(__dirname, "../scripts/dev-harness/shell.qml"), "utf8").match(/typeof Model\.epgEntry === "function"\) return Model\.epgEntry\(g\.epgStore, id\)|typeof Model\.epgEntry === "function" \? Model\.epgEntry\(g\.epgStore, id\)/g) || []).length
   ], [2, true, true, true, true, 2, true, true, true, 3])
 
   // R31h: the tick's cost named -- a realised row parses one slice. Pinned

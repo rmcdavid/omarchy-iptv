@@ -1585,7 +1585,14 @@ ShellRoot {
             // it is why D-EPG-2 (the guide matched nothing for the life of
             // the project) could not be seen from here: a blank row read the
             // same whether the data was missing or merely never looked up.
-            var epg = Model.epgFields(c && String(c.tvgId || "") !== "" ? Model.epgEntry(g.epgStore, c.tvgId) : null, g.nowSec)
+            // Asked for first: a staged tree before D-EPG-11 lacks epgEntry
+            // and holds its map as g.epgMap, which the fallback reads so the
+            // instrument stays true on a --baseline run too.
+            var entryOf = function (id) {
+              if (typeof Model.epgEntry === "function") return Model.epgEntry(g.epgStore, id)
+              return g.epgMap ? g.epgMap[id] : null
+            }
+            var epg = Model.epgFields(c && String(c.tvgId || "") !== "" ? entryOf(c.tvgId) : null, g.nowSec)
             return Model.rowDetail({
               showGroup: typeof Model.rowShowsGroup === "function" ? Model.rowShowsGroup({ scopeIsGroup: g.scopeIsGroup, groupsNarrow: g.groupAxis.narrows }) : false,
               group: Model.primaryGroup(c),
@@ -1609,7 +1616,8 @@ ShellRoot {
             if (!(g.currentRows.length > g.cursorIndex && g.cursorIndex >= 0)) return null
             var c = g.currentRows[g.cursorIndex]
             var id = c ? String(c.tvgId || "") : ""
-            return typeof Model.programmeDetail === "function" ? Model.programmeDetail({ channel: c, entry: id !== "" ? Model.epgEntry(g.epgStore, id) : null, nowSec: g.nowSec }) : null
+            var entry = id === "" ? null : (typeof Model.epgEntry === "function" ? Model.epgEntry(g.epgStore, id) : (g.epgMap ? g.epgMap[id] : null))
+            return typeof Model.programmeDetail === "function" ? Model.programmeDetail({ channel: c, entry: entry, nowSec: g.nowSec }) : null
           })(),
           // The panel's fields as it draws them. The model's `fields` array
           // was removed when the review found the panel hardcoding the order
@@ -1621,7 +1629,8 @@ ShellRoot {
             if (g.currentRows.length > g.cursorIndex && g.cursorIndex >= 0) {
               var c = g.currentRows[g.cursorIndex]
               var id = c ? String(c.tvgId || "") : ""
-              d = typeof Model.programmeDetail === "function" ? Model.programmeDetail({ channel: c, entry: id !== "" ? Model.epgEntry(g.epgStore, id) : null, nowSec: g.nowSec }) : null
+              var entry = id === "" ? null : (typeof Model.epgEntry === "function" ? Model.epgEntry(g.epgStore, id) : (g.epgMap ? g.epgMap[id] : null))
+              d = typeof Model.programmeDetail === "function" ? Model.programmeDetail({ channel: c, entry: entry, nowSec: g.nowSec }) : null
             }
             if (!d) return []
             var out = []
