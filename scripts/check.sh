@@ -588,12 +588,17 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2993}
 # and the UX-SOURCES 5.4 cap test (+1); both red on 4cf8910's documents.
 # 0.15.0 cut, 2026-10-22: re-levelled on lane-rel-0150 (7c1d37f plus the
 # version bump and the notes); the suite runs 1496 and the floor stays 1496.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1496}
-# 2026-10-24, lane-p23-docs: 1496 -> 1518 -- tests/test_check_sr_register.py
-# (+10, F-M3-20; red on a9d20f9: SR27, SR29, SR34 uncited) and
-# tests/test_check_readme_notices.py (+12, F-HARNESS-35; red on a9d20f9:
-# README.md:767 and :776). Both run the shipping checker, never a copy.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1518}
+# 2026-10-24, lane-p23-docs: 1496 -> 1521 -- tests/test_check_sr_register.py
+# (+13, F-M3-20; red on a9d20f9: three register rows cited nowhere outside
+# the register -- their ids are NOT written here, this file is in the
+# corpus that checker scans) and tests/test_check_readme_notices.py (+12,
+# F-HARNESS-35; red on a9d20f9: README.md:767 and :776). Both run the
+# shipping checker, never a copy. The first version of this raise was a
+# SECOND `${PY_TESTS_MIN:-1518}` line left below the old `:-1496` one; a
+# `${X:-n}` default binds only while X is unset, so the first line won and
+# the gate's floor stayed 1496 with both new test files deletable (P23
+# recheck, 2026-10-24). One assignment per floor, edited in place.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1521}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
