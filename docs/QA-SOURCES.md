@@ -955,7 +955,7 @@ groups`, header `1 source`; footer without a label prefix.
 re-verified live with their original repros** (QA-RESULTS "P1 fix
 verification on 845d445"), so every step below is an expectation again. The
 [v0.4] warning that switching and add-activation fail on a real shell is
-withdrawn. Keep the timings in mind when you script it: add makes the new
+**WITHDRAWN (v0.5, 2026-09-13, `845d445`)**. Keep the timings in mind when you script it: add makes the new
 source active in ~0.5-0.8 s, an `Enter` switch lands in ~150 ms on a small
 list and ~240 ms at 1,474 channels, and removing the active source reaches
 `configured false` in ~0.8 s - poll `status` rather than sleeping.

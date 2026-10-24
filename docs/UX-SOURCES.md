@@ -1826,10 +1826,10 @@ something that is not a regular file, a file where its FOLDER should be
 (round 14), a symbolic link AT its folder that leads nowhere or to
 something that is not a folder (round 15), an I/O error -- or does not parse as a state (an empty file
 included, settled by the lead on 2026-10-13), or when the start-up check of
-it does not answer (round 13), or, mid-session, the read before a save
-does not answer twice (round 17, R27a; withdrawn by round 18, R28a, and
+it does not answer (round 13), or, ~~mid-session, the read before a save
+does not answer twice (round 17, R27a)~~ **WITHDRAWN 2026-10-20 (round 18, R28a, and
 kept withdrawn by round 19, R29a: a read that does not answer is NOT this
-mode -- its save goes ahead without it after 2 s, item 9), the plugin WRITES NOTHING to it for the rest
+mode -- its save goes ahead without it after 2 s, item 9)**, the plugin WRITES NOTHING to it for the rest
 of the session [round 16 and 17: until a read finds it readable again, item 5] -- and since round 14 (R24e) neither does the helper the
 service starts, because the playlist fetch is handed no state directory. Until round 12 it read such a file as an
 empty state and saved that over it at the start, which erased every source,
