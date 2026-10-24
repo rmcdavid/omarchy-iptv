@@ -97,6 +97,9 @@ function makeIds(h) {
     configShieldWatchdog: timer("configShieldWatchdog"),
     whichWatchdog: timer("whichWatchdog"),
     pipProbeWatchdog: timer("pipProbeWatchdog"),
+    stateModeWatchdog: timer("stateModeWatchdog"),
+    // D-REL-8: the one re-run of the start-up init, driven from its block.
+    stateInitRetry: timer("stateInitRetry"),
     // R23c: the init's watchdog and its kill grace. Timers do not run here;
     // a test that times the init out calls h.initExit({ timeout: true }),
     // which runs the watchdog's OWN onTriggered and then the exit handler.
@@ -142,8 +145,12 @@ const STUBBED = {
   // schedulePrune and queuePrune RUN since D-LOGO-20 (R32f): a prune is a
   // cache job, recorded in h.cacheRuns like migrate and remove, so a pin can
   // see the start-up prune once and the switch prune on every switch.
+  // clearSourceData RUNS since F-M3-18 (a) (2026-10-24): it is the reset of
+  // every per-source property on a switch, and the no-op that stood here is
+  // why the node suite stayed green while the logo slots blanked (the three
+  // Service.qml-only decisions of D-LOGO-11's review had nothing that could
+  // redden off-display).
   fetchLogos: "starts the logo fetch",
-  clearSourceData: "unbinds the channel and EPG data of the previous source",
   pruneFailed: "dead-channel memory"
 }
 
@@ -484,7 +491,12 @@ class StateFile {
 const HELPER_EMPTY_STATE = '{"version":2,"cacheLayout":0,"favorites":[],"recents":[],"lastPlayed":null,"session":null,"sources":[],"savedSearches":[],"hiddenGroups":[],"activeKey":""}\n'
 //   a non-zero exit  nothing printed and nothing changed (the init that
 //                   could not make the directory, say)
-function helperInit(file, code) {
+//   `empty` (D-REL-8) exit 0, nothing printed, nothing changed: the EMPTY
+//                   stub git leaves for milliseconds mid-update (measured
+//                   with inotify, 2026-10-17; the rewrite is delete, create,
+//                   write in place)
+function helperInit(file, code, empty) {
+  if (empty === true) return { reply: "", raises: false }
   if (code !== undefined && code !== 0) return { reply: "", raises: false }
   let found, raises = false
   if (file.fault === "dir-0000") { found = "unreadable"; file.fault = null }
@@ -610,7 +622,6 @@ function bootService(serviceText, Model, o) {
   root.noteSessionOutcome = () => {}
   root.markDeadSession = () => {}
   root.fetchLogos = () => {}
-  root.clearSourceData = () => {}
   root.pruneFailed = () => {}
   // D-LOGO-20 (R32f): onActiveCacheDirChanged from its own text, fired by
   // the property setters above whenever the binding's value moved (""
@@ -767,7 +778,7 @@ function bootService(serviceText, Model, o) {
     return [t, fire]
   }
   h.timed = [[vw, onVerifyWatchdog], [ww, onWriteWaitWatchdog]]
-  for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog", "stateModeWatchdog"]) h.timed.push(treeTimer(id))
+  for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog", "stateModeWatchdog", "stateInitRetry"]) h.timed.push(treeTimer(id))
   // D-SRC-49: the `state mode` run's exit, with the REAL helper's reply for
   // the file as the double holds it (rule 10: the verb chmods a regular
   // file that is not 0600 and nothing else; the fake's mode moves with it),
@@ -805,8 +816,8 @@ function bootService(serviceText, Model, o) {
     h.clock = end
   }
   // The start-up init's exit, with the double's reply and side effects.
-  h.helperInit = (code) => {
-    const out = helperInit(h.stateFile, code)
+  h.helperInit = (code, empty) => {
+    const out = helperInit(h.stateFile, code, empty)
     h.stateInitStdout.text = out.reply
     return out
   }
@@ -932,7 +943,7 @@ function bootService(serviceText, Model, o) {
     return "hung (the kill was not sent)"
   }
   h.initExit = (o2) => {
-    const io = Object.assign({ code: opts.initCode || 0, order: opts.initOrder || "reload-first", timeout: opts.initTimeout === true }, o2 || {})
+    const io = Object.assign({ code: opts.initCode || 0, order: opts.initOrder || "reload-first", timeout: opts.initTimeout === true, empty: false }, o2 || {})
     h.ignoreTerm = io.ignoreTerm === true
     if (io.timeout && io.hangAt === "mkdir") {
       // The mkdir itself hangs (a hung filesystem): the init is never reached.
@@ -950,7 +961,7 @@ function bootService(serviceText, Model, o) {
       h.hang = hangOut(ids.stateInitProc, (sig) => { onInitExited(sig, 1); h.runLater() })
       return
     }
-    const out = h.helperInit(io.code)
+    const out = h.helperInit(io.code, io.empty === true)
     ids.stateInitProc.running = false
     if (out.raises && io.order === "reload-first") { h.loadState(); h.runLater() }
     onInitExited(io.code, 0)

@@ -7866,18 +7866,24 @@ check("R22a: stateInitFound -- only the init's own `absent` is absent; a file, a
    ['{"ok":true,"kind":"state","action":"init","created":true}', 0], ['{"ok":true,"kind":"state","action":"init","found":"ABSENT"}', 0],
    ["warning\n" + '{"ok":true,"kind":"state","action":"init","found":"absent"}', 0], ["not json", 0]].map(a => Model.stateInitFound(a[0], a[1])),
   ["absent", "present", "present", "present", "unknown", "unknown", "unknown", "unknown", "unknown", "absent", "unknown"])
-check("R22a: stateLoadDecision -- a state applies; mid-session anything else blocks at once; at a start it waits for the init, is fresh ONLY when the load and the helper both say absent, and is otherwise re-read once and then blocks",
+// D-REL-8 (2026-10-24): an init that answered nothing readable ("unknown")
+// is RE-RUN once before the file is re-read (the `initRetried: true` cases
+// are the table as it stood, one re-run later).
+check("R22a: stateLoadDecision -- a state applies; mid-session anything else blocks at once; at a start it waits for the init, is fresh ONLY when the load and the helper both say absent, re-runs an init that answered nothing readable once (D-REL-8), and is otherwise re-read once and then blocks",
   [{ kind: "loaded" }, { kind: "loaded", loadedBefore: true }, { kind: "" },
    { kind: "permission", loadedBefore: true }, { kind: "absent", loadedBefore: true, initFound: "absent" }, { kind: "unparsed", loadedBefore: true },
    { kind: "absent" }, { kind: "absent", initFound: "absent" }, { kind: "absent", initFound: "present" }, { kind: "absent", initFound: "present", retried: true },
-   { kind: "absent", initFound: "unknown" }, { kind: "absent", initFound: "unknown", retried: true },
+   { kind: "absent", initFound: "unknown", initRetried: true }, { kind: "absent", initFound: "unknown", retried: true, initRetried: true },
    { kind: "permission", initFound: "absent" }, { kind: "permission", initFound: "present", retried: true },
    { kind: "unparsed", initFound: "present" }, { kind: "unparsed", initFound: "present", retried: true },
-   { kind: "not-a-file", initFound: "present", retried: true }, { kind: "io-error", initFound: "present", retried: true }, null
+   { kind: "not-a-file", initFound: "present", retried: true }, { kind: "io-error", initFound: "present", retried: true }, null,
+   { kind: "absent", initFound: "unknown" }, { kind: "permission", initFound: "unknown" }, { kind: "absent", initFound: "unknown", retried: true },
+   { kind: "absent", initFound: "timeout" }, { kind: "absent", initFound: "timeout", initRetried: true }, { kind: "absent", initFound: "absent", initRetried: true }
   ].map(c => { const d = Model.stateLoadDecision(c); return d.act + "/" + d.reason }),
   ["apply/loaded", "apply/loaded", "wait/no-load", "block/permission", "block/absent", "block/unparsed",
    "wait/init", "fresh/absent", "retry/absent", "block/absent-unconfirmed", "retry/absent", "block/absent",
-   "retry/permission", "block/permission", "retry/unparsed", "block/unparsed", "block/not-a-file", "block/io-error", "wait/no-load"])
+   "retry/permission", "block/permission", "retry/unparsed", "block/unparsed", "block/not-a-file", "block/io-error", "wait/no-load",
+   "reinit/absent", "reinit/permission", "reinit/absent", "block/init-timeout", "block/init-timeout", "fresh/absent"])
 check("R22a: stateWriteGate -- the no-write mode refuses whatever else is true; before any state has loaded or before the dirs are ready a save PARKS; it writes only when loaded, ready and not blocked",
   [{ blocked: "permission", loaded: true, dirsReady: true }, { blocked: "unparsed" }, { loaded: false, dirsReady: true }, { loaded: true, dirsReady: false },
    { loaded: true, dirsReady: true }, { loaded: "true", dirsReady: true }, { blocked: "", loaded: true, dirsReady: true }, null].map(c => Model.stateWriteGate(c)),
@@ -13569,10 +13575,15 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         const migrate = h.cacheRuns.filter(c => c.indexOf("migrate") !== -1).length
         return [h.root.stateWriteBlocked, h.root.activeSourceKey === KNEW, summary(h.stateFile.disk), h.file().cacheLayout, migrate, told(h)]
       }, ["", true, { records: 1, favorites: 0, marker: true }, 2, 1, 0])
-      checkCall("R22a (" + mode + " host): nothing at the path but the helper's init FAILED (no witness) -- not a fresh install: re-read once, then the no-write mode; the CLI-only entry keeps its URL", () => {
+      // D-REL-8: a failed init is re-run once after a second; this is the
+      // path when the re-run fails too.
+      checkCall("R22a (" + mode + " host): nothing at the path but the helper's init FAILED (no witness), and failed again when re-run (D-REL-8) -- not a fresh install: re-read once, then the no-write mode; the CLI-only entry keeps its URL", () => {
         const h = boot({ playlistUrl: NEW, showLogos: false }, "", mode, { initCode: 1 })
-        return [h.root.stateWriteBlocked, h.root.stateLoaded, h.storedEntry().playlistUrl === NEW, h.stateFile.events.length, told(h)]
-      }, ["absent", false, true, 0, 1])
+        const afterFirst = [h.root.stateWriteBlocked, h.ids.stateInitRetry.running]
+        h.elapse(1000)
+        h.initExit({ code: 1 })
+        return [afterFirst, h.root.stateWriteBlocked, h.root.stateLoaded, h.storedEntry().playlistUrl === NEW, h.stateFile.events.length, told(h)]
+      }, [["", true], "absent", false, true, 0, 1])
       // R22b's other half: the dir-0000 start reaches the cache layout. On
       // lane-key-m2 the failed load was applied as an empty state with
       // cacheLayout 0, `cache migrate` ran and its save wrote the empty
@@ -15759,6 +15770,91 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     return [conflict.map(n => n[0]), conflict.length === 1 && /"field":"sources","key":"[0-9a-f]{8}","fields":\["label"(,"labelCustom")?\]/.test(conflict[0][1]), /Theirs|Mine|http/.test(conflict.map(n => n[1]).join()),
             notified.length, h.compileErrors]
   }, [["mergeConflict"], true, false, 1, []])
+
+  // D-SRC-49 / D-SINK-22 (b)(c): `state mode` after every landed save.
+  checkCall("D-SRC-49: Model.stateModeArgv is argv only (no URL, the state dir and the verb); Model.stateModeReply reads the verb's one line and nothing else", () => {
+    return [M.stateModeArgv("/p/bin/omarchy-iptv", "/s"), M.stateModeReply('{"ok": true, "kind": "state", "action": "mode", "folder": "kept", "file": "changed"}\n'),
+            M.stateModeReply(""), M.stateModeReply('{"ok": true, "kind": "state", "action": "init", "found": "absent"}\n'), M.stateModeReply('{"ok": false, "kind": "state", "action": "mode"}')]
+  }, [["python3", "/p/bin/omarchy-iptv", "state", "--state-dir", "/s", "mode"], { folder: "kept", file: "changed" }, null, null, null])
+  checkCall("D-SRC-49: through Service -- a LANDED save starts `state mode` on its own Process (never cacheProc) from a turn of its own, with the helper argv; a second landed save while it runs is folded into one re-run; a save that FAILED starts none; the steady-state reply is silent", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    const p = h.ids.stateModeProc
+    const runsAtBoot = h.root.stateModeRuns
+    const cacheBefore = h.cacheRuns.length
+    h.root.toggleFavorite("t:one.uk"); h.runLater()
+    const beforeLanding = [p.running, h.root.stateModeRuns - runsAtBoot]
+    h.deliverOne({ noLater: true })
+    const insideHandler = [p.running, h.later.some(e => e.fn === h.root.requestStateMode)]
+    h.runLater()
+    const started = [p.running, p.command, h.root.stateModeRuns - runsAtBoot, h.ids.stateModeWatchdog.running, h.cacheRuns.length - cacheBefore]
+    h.root.toggleFavorite("t:two.uk"); h.drain()
+    const folded = [h.root.stateModeRerun, h.root.stateModeRuns - runsAtBoot]
+    h.stateModeExit()
+    const rerun = [h.root.stateModeRerun, h.root.stateModeRuns - runsAtBoot, p.running]
+    h.stateModeExit()
+    const quiet = h.warnings.filter(w => /state mode|state.json's mode/.test(w)).length
+    h.stateFile.writeFails = true
+    h.root.toggleFavorite("t:three.uk"); h.drain()
+    return [beforeLanding, insideHandler, started, folded, rerun, quiet, [p.running, h.root.stateModeRuns - runsAtBoot], h.compileErrors]
+  }, [[false, 0], [false, true], [true, ["python3", "bin/omarchy-iptv", "state", "--state-dir", "/.local/state/omarchy-iptv", "mode"], 1, true, 0], [true, 1], [false, 2, true], 0, [false, 2], []])
+  checkCall("D-SINK-22 (b): the state FOLDER link re-pointed at an empty folder BETWEEN a save's read and the write it allowed -- the write CREATES state.json at the umask's 0644 (the window stays), and the repair the landing asks for makes it 0600 within the helper's start, told once; before: 0644 until the next shell start", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.root.toggleFavorite("t:one.uk"); h.drain()
+    while (h.stateModeExit()) {}
+    h.root.toggleFavorite("t:two.uk")   // the save reads first (R26a): the load is deferred
+    const load = h.later.shift(); load.fn.apply(null, load.args)   // the read answers; the write is decided, deferred (R26b)
+    h.replace(sf => { sf.exists = false; sf.disk = ""; sf.mode = null })   // the re-point lands in that window
+    h.drain()                            // the write creates the file
+    const created = [h.stateFile.exists, (h.stateFile.mode || 0).toString(8), h.ids.stateModeProc.running]
+    h.stateModeExit()
+    return [created, (h.stateFile.mode || 0).toString(8), h.warnings.filter(w => /state.json's mode was repaired after a save \(file changed, folder kept\)/.test(w)).length, h.file().favorites]
+  }, [[true, "644", true], "600", 1, ["t:one.uk", "t:two.uk"]])
+  checkCall("D-SRC-49 / D-SRC-37 (c): a `state mode` that never answers is TERMed at helperTimeoutMs; its exit stops the watchdog, a non-zero exit with no reply gets one line, and the folded re-run still goes", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.root.toggleFavorite("t:one.uk"); h.drain()
+    const p = h.ids.stateModeProc, wd = h.ids.stateModeWatchdog
+    const armed = [p.running, wd.running]
+    h.root.toggleFavorite("t:two.uk"); h.drain()
+    h.elapse(h.root.helperTimeoutMs)
+    const fired = [p.signals.slice(), h.warnings.filter(w => /state mode exceeded 180 s, terminating it/.test(w)).length]
+    h.stateModeExit({ code: 15, reply: "" })
+    return [armed, fired, wd.running || h.ids.stateModeWatchdog.restarts === 1, h.warnings.filter(w => /state mode exited 15/.test(w)).length, p.running, h.root.stateModeRerun, h.compileErrors]
+  }, [[true, true], [[15], 1], true, 1, true, false, []])
+
+  // D-REL-8: the start-up init that answered nothing readable is run once more.
+  checkCall("D-REL-8: through Service -- the first `state init` meets the EMPTY stub git leaves mid-update (exit 0, nothing printed): the load is held, the init is re-run after 1 s under the start-up bound, the re-run answers absent, the session is a fresh install and WRITES; before: the no-write mode for the session, told once", () => {
+    const h = boot({ sourceKey: "", showLogos: false }, "", { dirsLater: true, dirPresent: true })
+    h.initExit({ empty: true })
+    const afterEmpty = [h.root.stateWriteBlocked, h.root.stateInitRetried, h.ids.stateInitRetry.running, h.ids.stateInitProc.running, h.root.stateInitFound]
+    h.elapse(999)
+    const at999 = h.ids.stateInitProc.running
+    h.elapse(1)
+    const rerun = [h.ids.stateInitProc.running, h.ids.stateInitWatchdog.restarts, h.warnings.filter(w => /state init answered nothing readable; running it once more/.test(w)).length]
+    h.initExit()
+    h.drain()
+    const decided = [h.root.stateWriteBlocked, h.root.stateLoaded, h.root.stateInitFound]
+    h.root.toggleFavorite("t:one.uk"); h.drain()
+    return [afterEmpty, at999, rerun, decided, h.file().favorites, h.detached.filter(a => a.indexOf("74017") !== -1).length, h.compileErrors]
+  }, [["", true, true, false, "unknown"], false, [true, 2, 1], ["", true, "absent"], ["t:one.uk"], 0, []])
+  checkCall("D-REL-8: a TIMED-OUT init is never re-run (R23c): the held load decides as the no-write mode at once, and the retry Timer is not armed", () => {
+    const h = boot({ sourceKey: "", showLogos: false }, "", { dirsLater: true, dirPresent: true })
+    h.initExit({ timeout: true })
+    return [h.hang, h.root.stateWriteBlocked, h.ids.stateInitRetry.running, h.root.stateInitRetried]
+  }, ["terminated", "init-timeout", false, false])
+
+  // F-M3-18 (a): clearSourceData runs for real in the harness (the stub is gone).
+  checkCall("F-M3-18 (a): through Service -- a switch runs the REAL clearSourceData: the announced logo set is emptied, the channel-number index rebuilt, the previous source's channels, status and EPG dropped; the no-op stub the harness carried could not see any of it", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A), rec(B)], KA))
+    const r = h.root
+    r.logoHave = { "x.png": true, dir: "/cache/sources/" + KA }
+    r.chnoIndex = { marker: "stale" }
+    r.channels = [{ id: "t:a.uk", name: "A" }]
+    r.epgLoaded = true
+    r.lastError = "stale"
+    const stubbed = Object.keys(h.STUBBED).indexOf("clearSourceData") !== -1
+    r.switchSource(KB); r.finishSwitch(); h.drain()
+    return [stubbed, r.activeSourceKey === KB, r.logoHave, "marker" in r.chnoIndex, typeof r.chnoIndex, r.channels.length, r.epgLoaded, r.lastError, r.playlistStatus.ok, h.compileErrors]
+  }, [false, true, {}, false, "object", 0, false, "", false, []])
 
   // D-SRC-52: a good playlist status clears the sentence a failed one left
   // in lastError, and nothing else.

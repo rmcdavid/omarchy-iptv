@@ -694,6 +694,7 @@ Item {
   property string stateLoadKind: ""
   property string stateInitFound: ""
   property bool stateLoadRetried: false
+  property bool stateInitRetried: false   // D-REL-8: the one re-run of the init has been spent
   property string stateWriteBlocked: ""
   property bool stateBlockTold: false
   // R23c: set by stateInitWatchdog when it terminates the init; read once,
@@ -2382,7 +2383,8 @@ Item {
   function decideStateLoad() {
     if (root.stateLoadKind === "" || root.stateLoadKind === "loaded") return
     var d = Model.stateLoadDecision({ kind: root.stateLoadKind, loadedBefore: root.stateLoaded,
-                                      initFound: root.stateInitFound, retried: root.stateLoadRetried })
+                                      initFound: root.stateInitFound, retried: root.stateLoadRetried,
+                                      initRetried: root.stateInitRetried })
     if (d.act === "fresh") {
       // The one load failure that is a fresh install: FileNotFound, AND the
       // helper found nothing there before it created the file.
@@ -2401,6 +2403,13 @@ Item {
       // true, so with a save of ours held it is ignored as the base, and
       // with none it is applied over an equal memory.
       stateFile.reload()
+    } else if (d.act === "reinit") {
+      // D-REL-8: the init answered nothing readable (an empty or partial stub
+      // mid-update, a stub refusing its parts): run it once more, after a
+      // moment, under the start-up bound again. Its exit lands here again
+      // with a verdict, or with "unknown" a second time and today's path.
+      root.stateInitRetried = true
+      stateInitRetry.restart()
     } else if (d.act === "retry") {
       root.stateLoadRetried = true
       stateFile.reload()
@@ -5801,6 +5810,23 @@ Item {
       root.stateInitTimedOut = true
       proc.signal(15)
       stateInitKill.restart()
+    }
+  }
+
+  Timer {
+    // D-REL-8: the one re-run of a start-up init that answered nothing
+    // readable (decideStateLoad's `reinit`), a second after its exit -- long
+    // enough for git to have finished rewriting the stub in place (measured
+    // in milliseconds), short enough that a start inside that window is not
+    // a session without writes. Armed under the start-up watchdog again.
+    id: stateInitRetry
+    interval: 1000
+    repeat: false
+    onTriggered: {
+      console.warn("omarchy-iptv: state init answered nothing readable; running it once more")
+      root.stateInitTimedOut = false
+      root.startStateInit()
+      stateInitWatchdog.restart()
     }
   }
 

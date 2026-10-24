@@ -1745,10 +1745,21 @@ function stateInitFound(text, exitCode, timedOut) {
 //   ctx.loadedBefore a state has been applied this session
 //   ctx.initFound    Model.stateInitFound, "" until the start-up init exits
 //   ctx.retried      the one re-read after the init has been spent
+//   ctx.initRetried  the one re-run of the INIT has been spent (D-REL-8)
 // -> { act, reason }
 //   apply  the load is a state: apply it (and lift any no-write mode)
 //   fresh  nothing exists at the path: an empty state, the migration may run
 //   wait   the start-up init has not answered; nothing is applied or written
+//   reinit D-REL-8 (2026-10-24): the init answered NOTHING it could be read
+//          by -- exit 0 with no `state init` line (an EMPTY stub, mid-update:
+//          git rewrites bin/omarchy-iptv in place after the parts), or a
+//          non-zero exit (a partial stub's SyntaxError, the old stub refusing
+//          new parts with helper_damaged, D-REL-12) -- so run `state init`
+//          once more after about a second. The window is milliseconds and
+//          the outcome without this was a whole session in the no-write mode
+//          for a shell that started inside it. A second "unknown" falls
+//          through to today's path. R23c stands: a TIMED-OUT init is never
+//          re-run (the filesystem that held it would hold the re-run).
 //   retry  re-read once: the init restores the modes of the directory and
 //          file it finds, so the file may be readable now (it is, for both
 //          chmod 0000 cases; a 0000 file also raises its own reload)
@@ -1770,6 +1781,7 @@ function stateLoadDecision(ctx) {
   // there is no witness and nothing a re-read could fix: the load that was
   // waiting on it decides as the no-write mode, with that reason.
   if (found === "timeout") return { act: "block", reason: "init-timeout" }
+  if (found === "unknown" && c.initRetried !== true) return { act: "reinit", reason: kind }
   if (kind === "absent" && found === "absent") return { act: "fresh", reason: "absent" }
   if (c.retried !== true) return { act: "retry", reason: kind }
   // R24b: the helper named what is at the path, and that is the reason --
