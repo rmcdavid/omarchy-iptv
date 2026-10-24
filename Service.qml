@@ -2649,12 +2649,16 @@ Item {
   }
 
   function applyPlaylistStatus(text) {
+    // D-SRC-52: the reason the status being replaced composed, read BEFORE
+    // the reassignment (statusReason is a binding over playlistStatus), so a
+    // good status clears exactly the sentence a failed one left in lastError
+    // and never a play failure's (Model.lastErrorAfterStatus).
+    var previousReason = root.statusReason
     root.playlistStatus = Model.parseHelperStatus(text, "playlist")
+    root.lastError = Model.lastErrorAfterStatus(root.lastError, previousReason, root.playlistStatus)
     if (root.playlistStatus.ok === true) {
       root.playlistLoadWarnings = Model.statusWarnings(root.playlistStatus)
       root.adoptSourceStats(root.playlistStatus)
-    } else {
-      root.lastError = root.statusReason
     }
   }
 

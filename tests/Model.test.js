@@ -15523,6 +15523,45 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
   return [refreshed, switched, stamps(), h.root.preparedLru[0] === head, h.compileErrors]
 }, [[8200], [1, 8200], [8200, 1], true, []])
 
+// ---- P23 lane A (2026-10-24): the service's state and save paths.
+// Every check here runs against IPTV_SERVICE_QML / IPTV_MODEL when set, so
+// the red proof on a9d20f9 is one command (rule 11): point both at a
+// checkout of that commit and the rows below go red for the defects they
+// pin; nothing else in this section depends on a function that commit lacks
+// (checkCall turns a missing export into one ordinary failure).
+{
+  const H = require("./service-harness.js")
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
+  const A = "http://a.example.test/list.m3u", B = "http://b.example.test/list.m3u", NEW = "http://new.example.test/get.php?username=u&password=p"
+  const keyOf = url => M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
+  const KA = keyOf(A), KB = keyOf(B), KNEW = keyOf(NEW)
+  const rec = (url, extra) => Object.assign({ key: keyOf(url), url, epgUrl: "", kind: "http", label: url.split("/")[2], labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }, extra || {})
+  const stateText = (sources, activeKey, extra) => JSON.stringify(Object.assign({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources, activeKey, entryMigrated: true }, extra || {})) + "\n"
+  const boot = (entry, text, o) => H.bootService(svcText, M, Object.assign({ entry, stateText: text, host: "lag" }, o || {}))
+  const okStatus = JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })
+  const failedStatus = JSON.stringify({ ok: false, kind: "playlist", error: { code: "helper_damaged", part: "05-ipc-logos.py", message: "part missing" } })
+
+  // D-SRC-52: a good playlist status clears the sentence a failed one left
+  // in lastError, and nothing else.
+  checkCall("D-SRC-52: Model.lastErrorAfterStatus -- a good status clears exactly the previous status's reason; a different sentence (a play failure's) stands; a failed status writes its own reason; an empty lastError stays empty", () => {
+    const failed = M.parseHelperStatus(failedStatus, "playlist"), ok = M.parseHelperStatus(okStatus, "playlist")
+    const reason = M.statusReason(failed)
+    return [reason !== "", M.lastErrorAfterStatus(reason, reason, ok), M.lastErrorAfterStatus("play failed: x", reason, ok),
+            M.lastErrorAfterStatus("", reason, ok), M.lastErrorAfterStatus("", "", failed) === reason, M.lastErrorAfterStatus("play failed: x", "", failed) === reason]
+  }, [true, "", "play failed: x", "", true, true])
+  checkCall("D-SRC-52: through Service.applyPlaylistStatus -- the damaged-files reason of a failed status is in lastError until the next good status, which clears it; a play failure's sentence survives the same good status", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.root.applyPlaylistStatus(failedStatus)
+    const during = h.root.lastError
+    h.root.applyPlaylistStatus(okStatus)
+    const after = h.root.lastError
+    h.root.lastError = "play failed: x"
+    h.root.applyPlaylistStatus(okStatus)
+    return [during === M.statusReason(M.parseHelperStatus(failedStatus, "playlist")), during !== "", after, h.root.lastError, h.compileErrors]
+  }, [true, true, "", "play failed: x", []])
+}
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All model tests passed.")

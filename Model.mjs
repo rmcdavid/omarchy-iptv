@@ -87,15 +87,15 @@ export {
 export {
   parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
   parseEpgNow, emptyEpgStore, parseEpgNowStore, parseHelperStatus,
-  helperDamagedReason, statusReason, statusHost, statusHealthy,
-  statusWarnings, WARNING_PREFIX, warningLabel, labelWarning, labelWarnings,
-  warningLine, footerWarning, findBarEntry, settingOf, boolSetting, clampInt,
-  clampSetting, settingsFrom, entryInputText, entryInputForm, sameEntryInput,
-  ownWriteInForce, settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS,
-  RETIRED_SETTINGS, MAX_SEEN_INPUTS, entryInputSeen, entryInputLast,
-  entryInputsSeenAfter, entryInputNotice, ownedEntryPatch, barEntryWritable,
-  entryFlushDisposition, owedMirrorAction, ownedWriteMode,
-  retiredInputsToKeep, sameOwnWrite
+  helperDamagedReason, statusReason, lastErrorAfterStatus, statusHost,
+  statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel, labelWarning,
+  labelWarnings, warningLine, footerWarning, findBarEntry, settingOf,
+  boolSetting, clampInt, clampSetting, settingsFrom, entryInputText,
+  entryInputForm, sameEntryInput, ownWriteInForce, settingsWithOwnWrite,
+  ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS, MAX_SEEN_INPUTS,
+  entryInputSeen, entryInputLast, entryInputsSeenAfter, entryInputNotice,
+  ownedEntryPatch, barEntryWritable, entryFlushDisposition, owedMirrorAction,
+  ownedWriteMode, retiredInputsToKeep, sameOwnWrite
 } from "./model/settings.mjs"
 export {
   optInSetting, logoSurvey, splitLogoUrl, logoConsentLines, logoFile,
