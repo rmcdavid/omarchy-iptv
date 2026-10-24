@@ -3941,16 +3941,35 @@ Performance budget (10k channels):
     ran at start only, so one session that switched through fifty sources
     kept fifty folders until the next start. One folder holds at most
     1,310,720,000 bytes (1.22 GiB, D-LOGO-12), and a folder grows only
-    while its source is active, which ends in a switch. So at every moment
-    of a session, not only after a restart, the install holds the active
-    source's folder and those of sources whose last fetch started or ended
-    within the past day: **1.22 GiB x (1 + the sources given logos in the
-    day before the last start or switch)**. `MAX_SOURCES` x 1.22 GiB,
-    65.5 GB, is reachable only by switching through all fifty with logos
-    on inside one day and filling each to its ceiling. UNVERIFIED at size;
-    arithmetic over the code; the switch prune is pinned through
-    `tests/service-harness.js`, which runs the directory's change handler
-    from its own text. The removal takes the folder's flock, non-blocking,
+    while its source is active, which ends in a switch. **The count cap
+    (D-LOGO-17's remainder, the lead's ruling of 2026-10-24, K = 2):**
+    `cache prune` keeps the day rule for the `LOGO_KEPT_FOLDERS` (2) kept,
+    non-active sources whose folder was most recently marked by a fetch
+    run -- ranked by that mark, the clock `age_logo_folder` reads, equal
+    marks by name -- and removes every other kept, non-active folder at
+    once, whatever its age (`age_logo_folder` with `LOGO_AGE_ANY`, so the
+    flock and the `busy` answer hold as they do under the day rule; a held
+    folder in a kept slot occupies it, a held one in the surplus is left
+    for the next prune). So at every moment of a session, not only after
+    a restart, the install holds at most three folders: **1.22 GiB x
+    (1 + 2) = 3.66 GiB**. The figure this replaces was 1.22 GiB x (1 + the
+    sources given logos in the day before the last start or switch), and
+    `MAX_SOURCES` x 1.22 GiB, 65.5 GB, was reachable by switching through
+    all fifty with logos on inside one day; the third-most-recent folder
+    now goes at the switch that makes it third. The cost, by the ruling: a
+    user rotating through four or more sources with logos on re-fetches a
+    source's logos at each switch that cycles back to it, which contacts
+    that source's logo hosts again (the disclosure R5 bounds), where the
+    day rule alone re-fetched only after a day away. What the prune does
+    NOT age, the rule-15 sibling by shape (a per-source cap times
+    `MAX_SOURCES`): a kept source's `channels.json`, at most
+    `MAX_SOURCE_BYTES` (64 MiB) each, 50 x 64 MiB = 3.2 GB across the
+    history by arithmetic; deliberate, because a kept source switches back
+    without a fetch and only `cache remove` takes its list. UNVERIFIED at
+    size; arithmetic over the code; the count cap is pinned by
+    `tests/test_logo_run.py` (`LogoFolderAgeTest`, two cases red on
+    a9d20f9) and the switch prune through `tests/service-harness.js`,
+    which runs the directory's change handler from its own text. The removal takes the folder's flock, non-blocking,
     on a descriptor opened `O_NOFOLLOW` and held across it (D-LOGO-21,
     R32f): a folder a running fetch holds -- a `logos --fetch` from a
     terminal on a non-active source, which the shell never starts -- is

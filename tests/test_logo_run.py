@@ -496,6 +496,56 @@ class LogoFolderAgeTest(LogoRunCase):
         self.assertTrue((active / helper.LOGO_SUBDIR / "0000aaaa").exists())
         self.assertTrue((young / helper.LOGO_SUBDIR / "0000aaaa").exists())
 
+    def test_prune_keeps_at_most_two_young_folders_beside_the_active(self):
+        # D-LOGO-17, the count cap (K = 2, the lead's ruling of 2026-10-24):
+        # four kept, non-active sources all fetched for within the hour,
+        # every folder younger than the day rule's 60 s here. The two most
+        # recently marked keep their folders; the other two are removed at
+        # this prune whatever their age, so the install holds at most the
+        # active folder and two more. Red on a9d20f9: all four survived.
+        active = self.seed("11111111", logo_age=5)
+        newest = self.seed("22222222", logo_age=10)
+        second = self.seed("33333333", logo_age=20)
+        third = self.seed("44444444", logo_age=30)
+        fourth = self.seed("55555555", logo_age=40)
+        code, payload = self.prune("prune", "--keep", "22222222", "33333333", "44444444", "55555555",
+                                   "--active", "11111111", "--epg-max-age", "60")
+        self.assertEqual(code, 0, payload)
+        self.assertEqual((payload.get("agedLogos"), payload.get("busyLogos")), (["44444444", "55555555"], []), payload)
+        for folder in (active, newest, second):
+            self.assertTrue((folder / helper.LOGO_SUBDIR / "0000aaaa").exists(), folder.name)
+        for folder in (third, fourth):
+            self.assertFalse((folder / helper.LOGO_SUBDIR).exists(), folder.name)
+            self.assertTrue((folder / helper.CHANNELS_FILE).exists(), "the source itself was touched")
+        self.assertEqual(helper.LOGO_KEPT_FOLDERS, 2)
+
+    def test_a_held_folder_takes_a_kept_slot_and_a_held_surplus_one_is_left_busy(self):
+        # The flock (D-LOGO-21) meets the count cap: a held folder among the
+        # two most recent occupies its slot, so the third-most-recent is
+        # still aged; a held folder in the surplus is skipped and answered
+        # busy, as the day rule answers it, and aged by the next prune.
+        held_recent = self.seed("22222222", logo_age=10)
+        self.seed("33333333", logo_age=20)
+        held_surplus = self.seed("44444444", logo_age=30)
+        oldest = self.seed("55555555", logo_age=40)
+        holders = []
+        for folder in (held_recent, held_surplus):
+            fd = os.open(folder / helper.LOGO_SUBDIR, os.O_RDONLY | os.O_DIRECTORY)
+            self.addCleanup(os.close, fd)
+            fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            holders.append(fd)
+        code, payload = self.prune("prune", "--keep", "22222222", "33333333", "44444444", "55555555",
+                                   "--epg-max-age", "60")
+        self.assertEqual(code, 0, payload)
+        self.assertEqual((payload.get("agedLogos"), payload.get("busyLogos")), (["55555555"], ["44444444"]), payload)
+        self.assertTrue((held_surplus / helper.LOGO_SUBDIR / "0000aaaa").exists(), "a held folder was aged")
+        self.assertFalse((oldest / helper.LOGO_SUBDIR).exists())
+        for fd in holders:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        code, payload = self.prune("prune", "--keep", "22222222", "33333333", "44444444", "55555555",
+                                   "--epg-max-age", "60")
+        self.assertEqual((payload.get("agedLogos"), payload.get("busyLogos")), (["44444444"], []), payload)
+
     def test_prune_sweeps_stale_temporaries_of_kept_inactive_sources(self):
         folder = self.seed("22222222", logo_age=10)
         for path in (folder / ".tmp-channels.json-0123abcd", folder / helper.LOGO_SUBDIR / ".tmp-0000aaaa-0123abcd"):

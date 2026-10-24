@@ -66,6 +66,17 @@ def remove_regular(path: str) -> bool:
 # kept source's folder is aged by `cache prune` since D-LOGO-17 (see
 # cache_prune for the install-wide figure).
 CACHE_SUBDIRS = (LOGO_SUBDIR,)
+# D-LOGO-17 (the lead's ruling of 2026-10-24, K = 2): how many kept,
+# non-active sources keep their logo folder past a prune whatever its age
+# -- the two most recently fetched for -- so the install holds at most
+# 1 + LOGO_KEPT_FOLDERS folders after every start and switch. The day rule
+# still ages those two; this is the bound on the count, which the day
+# rule alone never gave (fifty sources switched through in a day kept
+# fifty folders). cache_prune states the figures.
+LOGO_KEPT_FOLDERS = 2
+# The age that makes age_logo_folder remove a folder whatever its mtime,
+# a future one included: no `now - mtime` is below it.
+LOGO_AGE_ANY = float("-inf")
 
 
 def remove_cache_subdir(path: str) -> bool:
@@ -280,7 +291,8 @@ def cache_logos_clear(directory: str, key: str) -> dict[str, Any]:
     keeps up to MAX_SOURCES (50) sources, each with its own directory. What
     bounds them together is `cache prune`, which since D-LOGO-17 (R30a)
     removes the logo folder of a kept source that is not active once no
-    fetch has ended in it for a day; cache_prune states the figure.
+    fetch has ended in it for a day, and since the count cap keeps at most
+    LOGO_KEPT_FOLDERS such folders at all; cache_prune states the figure.
 
     The playlist half of the cache is untouched: the source is still there,
     only its pictures are gone. Deletion is remove_cache_subdir's, so it is
@@ -366,31 +378,61 @@ def age_logo_folder(source_path: str, now: float, max_age: float) -> str:
         os.close(fd)
 
 
+def logo_folder_mtime(source_path: str) -> float | None:
+    """The modification time of a source's logo folder, the clock
+    age_logo_folder reads (lstat, never followed; a link or a file at
+    logos/ is no folder). None when there is none."""
+    try:
+        st = os.lstat(os.path.join(source_path, LOGO_SUBDIR))
+    except OSError:
+        return None
+    return st.st_mtime if stat.S_ISDIR(st.st_mode) else None
+
+
 def cache_prune(directory: str, keep: list[str], active: str | None, epg_max_age: float) -> dict[str, Any]:
     """Delete every sources/<key> not in `keep`; age the EPG files AND the
     logo folder (D-LOGO-17, age_logo_folder) of kept, non-active keys older
-    than `epg_max_age` seconds, and sweep the leftovers of killed writes
-    there (D-SRC-60, sweep_stale_temps). The `active` key is implicitly kept
+    than `epg_max_age` seconds; remove the logo folder of every kept,
+    non-active key but the LOGO_KEPT_FOLDERS most recently fetched for,
+    whatever its age; and sweep the leftovers of killed writes there
+    (D-SRC-60, sweep_stale_temps). The `active` key is implicitly kept
     (D-SRC-07): the active source's directory is never removed or touched,
     listed under `keep` or not. Names that are not keys (and symlinks) are
     skipped, never touched.
 
-    What that bounds, install-wide (R30a; D-LOGO-20, R32f): the service
-    runs this once at every start AND at every source switch (Service.qml
-    schedulePrune / queuePrune), with the active source and the history's
-    keys. Each source's logo folder holds at most MAX_LOGO_FILES x
-    MAX_LOGO_BYTES (1,310,720,000 bytes, 1.22 GiB, D-LOGO-12); a folder is
-    only ever written by a run for the ACTIVE source (from the shell), and
-    leaving a source is a switch, which runs this. So after any start or
-    switch the install holds the active source's folder and those of
-    sources whose last logo fetch started or ended within `epg_max_age` (a
-    day, DEFAULT_EPG_MAX_AGE): 1.22 GiB x (1 + the sources given logos in
-    the day before the last start or switch), at every moment of a session
-    and not only after a restart. The history's MAX_SOURCES (50) times
-    that, 65.5 GB, is reachable only by switching through all fifty with
-    logos on inside one day and filling each to its ceiling. UNVERIFIED at
-    size; arithmetic over this code. A folder a run holds (its flock) is
-    skipped, answered in `busyLogos` and said once on stderr (D-LOGO-21)."""
+    What that bounds, install-wide (R30a; D-LOGO-20, R32f; the count cap,
+    2026-10-24): the service runs this once at every start AND at every
+    source switch (Service.qml schedulePrune / queuePrune), with the active
+    source and the history's keys. Each source's logo folder holds at most
+    MAX_LOGO_FILES x MAX_LOGO_BYTES (1,310,720,000 bytes, 1.22 GiB,
+    D-LOGO-12); a folder is only ever written by a run for the ACTIVE
+    source (from the shell), and leaving a source is a switch, which runs
+    this. So after any start or switch the install holds the active
+    source's folder and at most LOGO_KEPT_FOLDERS (2) others -- the kept
+    sources whose folder was most recently marked by a fetch run, ranked by
+    that mark, the clock age_logo_folder reads -- and those two only while
+    their mark is younger than `epg_max_age` (a day, DEFAULT_EPG_MAX_AGE):
+    **1.22 GiB x (1 + 2), 3.66 GiB**, at every moment of a session and not
+    only after a restart. Before the count cap the figure was 1.22 GiB x
+    (1 + the sources given logos in the day before the last start or
+    switch), and MAX_SOURCES (50) times 1.22 GiB, 65.5 GB, was reachable by
+    switching through all fifty with logos on inside one day; now the
+    third-most-recent folder is removed at the switch that makes it third,
+    whatever its age. The cost, by the ruling: a user rotating through four
+    sources with logos on re-fetches one source's logos at each switch
+    that cycles back, which contacts that source's logo hosts again (the
+    disclosure R5 bounds), where the day rule alone re-fetched only after a
+    day away. UNVERIFIED at size; arithmetic over this code. A folder a run
+    holds (its flock) is skipped, answered in `busyLogos` and said once on
+    stderr (D-LOGO-21); it occupies one of the two kept slots when its mark
+    ranks it there, and is left for the next prune when it does not.
+
+    What this does NOT age, stated beside the bound (rule 15, the same
+    shape -- a per-source cap times MAX_SOURCES, never aged): a kept
+    source's channels.json, at most MAX_SOURCE_BYTES (64 MiB) each, so up
+    to 50 x 64 MiB = 3.2 GB across the history by arithmetic. Deliberate: a
+    kept source switches back without a fetch (the SR rulings), and the
+    list is what makes it a source; only `cache remove` takes it."""
     keep_set = {check_source_key(item) for item in keep}
     if active:
         keep_set.add(check_source_key(active))
@@ -403,6 +445,7 @@ def cache_prune(directory: str, keep: list[str], active: str | None, epg_max_age
     stale = 0
     skipped: list[str] = []
     kept_dirs: list[str] = []
+    kept_entries: list[Any] = []
     now = time.time()
     for entry in sorted(os.scandir(root), key=lambda item: item.name):
         name = entry.name
@@ -415,6 +458,18 @@ def cache_prune(directory: str, keep: list[str], active: str | None, epg_max_age
             continue
         if name == active:
             continue
+        kept_entries.append(entry)
+    # The count cap: the LOGO_KEPT_FOLDERS most recently marked folders keep
+    # the day rule; every other kept, non-active folder is aged whatever
+    # its mark. Ranked by the mark alone, the newest first; two equal marks
+    # rank by name, so the choice is a function of the tree and not of
+    # scandir's order.
+    marked = sorted(((mtime, entry.name) for entry in kept_entries
+                     if (mtime := logo_folder_mtime(entry.path)) is not None),
+                    key=lambda item: (-item[0], item[1]))
+    recent = {name for _, name in marked[:LOGO_KEPT_FOLDERS]}
+    for entry in kept_entries:
+        name = entry.name
         touched = False
         for file_name in EPG_CACHE_FILES:
             path = os.path.join(entry.path, file_name)
@@ -427,7 +482,7 @@ def cache_prune(directory: str, keep: list[str], active: str | None, epg_max_age
                 touched = True
         if touched:
             aged.append(name)
-        verdict = age_logo_folder(entry.path, now, epg_max_age)
+        verdict = age_logo_folder(entry.path, now, epg_max_age if name in recent else LOGO_AGE_ANY)
         if verdict == "aged":
             aged_logos.append(name)
         elif verdict == "busy":
