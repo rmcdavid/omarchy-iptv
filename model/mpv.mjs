@@ -151,10 +151,14 @@ function mpvRefusedWarnings(rejected) {
 
 // mpvArgs is one string of whitespace-separated `--key[=value]` tokens.
 // Anything else (including reserved options) is rejected, never guessed.
-// `warnings` covers the tokens that are KEPT (what the option does, PO-10)
-// and then, since F-UX-7, the tokens that were REFUSED, by name only; the
+// `warnings` covers the tokens that were REFUSED (since F-UX-7, by name
+// only) and then the tokens that are KEPT (what the option does, PO-10); the
 // footer shows the list where the kept ones were already shown
-// (Service.playerArgWarnings).
+// (Service.playerArgWarnings). The refused lines come FIRST because the
+// footer's one line (Model.footerWarning -> warningLine) prints the first
+// warning and counts the rest as `(+N more)`: with the kept lines first, a
+// refused option beside any kept-option warning was named nowhere the user
+// looks, and the README said it was (the recheck's P2 on fda0d52).
 function splitMpvArgs(text) {
   var args = []
   var rejected = []
@@ -172,7 +176,7 @@ function splitMpvArgs(text) {
                                            || MPV_RESERVED[mpvOptionBase("--" + name.substring(5))] === true)) rejected.push(token)
     else args.push(token)
   }
-  return { args: args, rejected: rejected, warnings: mpvArgWarnings(args).concat(mpvRefusedWarnings(rejected)) }
+  return { args: args, rejected: rejected, warnings: mpvRefusedWarnings(rejected).concat(mpvArgWarnings(args)) }
 }
 
 // D-SINK-24 (ruling R32b). The journal line for the tokens splitMpvArgs

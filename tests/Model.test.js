@@ -5174,7 +5174,7 @@ check("M5-01: --demuxer-cache-unlink-files is reserved and --cache-on-disk is no
   [Model.MPV_RESERVED["--demuxer-cache-unlink-files"], Model.MPV_RESERVED["--cache-on-disk"], Model.MPV_DISK_WARN["--cache-on-disk"]], [true, undefined, true])
 check("M5-01: every spelling of the unlink switch is rejected, and the disk cache itself is kept and warned",
   Model.splitMpvArgs("--demuxer-cache-unlink-files=no --no-demuxer-cache-unlink-files --demuxer-cache-unlink-files=whendone --cache-on-disk"),
-  { args: ["--cache-on-disk"], rejected: ["--demuxer-cache-unlink-files=no", "--no-demuxer-cache-unlink-files", "--demuxer-cache-unlink-files=whendone"], warnings: ["mpvArg --cache-on-disk" + Model.MPV_DISK_TEXT, "mpvArg --demuxer-cache-unlink-files refused: reserved by the plugin", "mpvArg --no-demuxer-cache-unlink-files refused: reserved by the plugin"] })
+  { args: ["--cache-on-disk"], rejected: ["--demuxer-cache-unlink-files=no", "--no-demuxer-cache-unlink-files", "--demuxer-cache-unlink-files=whendone"], warnings: ["mpvArg --demuxer-cache-unlink-files refused: reserved by the plugin", "mpvArg --no-demuxer-cache-unlink-files refused: reserved by the plugin", "mpvArg --cache-on-disk" + Model.MPV_DISK_TEXT] })
 
 checkCall("D-SINK-4: --load-scripts is RESERVED, not merely defaulted off", function () {
   // The base argv says --load-scripts=no, but user tokens are concatenated
@@ -5226,10 +5226,11 @@ checkCall("splitMpvArgs carries the warning for the tokens it KEEPS", () => Mode
   { args: ["--ytdl=yes", "--hwdec=auto"], rejected: [], warnings: ["mpvArg --ytdl" + HANDOFF_TEXT] })
 // F-UX-7 (2026-10-24): a REJECTED token never reaches mpv, so it draws no
 // HANDOFF sentence -- but it is no longer silent: it is named, by option
-// name, with the refused sentence, after the kept tokens' lines.
-checkCall("a REJECTED token draws no handoff warning (it never reaches mpv) but is named as refused (--script is reserved)",
+// name, with the refused sentence, BEFORE the kept tokens' lines (the
+// footer prints the first line and counts the rest).
+checkCall("a REJECTED token draws no handoff warning (it never reaches mpv) but is named as refused (--script is reserved), ahead of the kept token's line",
   () => Model.splitMpvArgs("--script=/tmp/ytdl_hook.lua --script-opts=ytdl_hook-ytdl_path=/tmp/x").warnings,
-  ["mpvArg --script-opts" + HANDOFF_TEXT, "mpvArg --script" + Model.MPV_REFUSED_TEXT])
+  ["mpvArg --script" + Model.MPV_REFUSED_TEXT, "mpvArg --script-opts" + HANDOFF_TEXT])
 checkCall("the warning names the option and never its value (a proxy URL stays out of the sink)", () => {
   const w = Model.splitMpvArgs("--ytdl-raw-options=proxy=http://u:pw@prox.test:8080").warnings
   return [w.length, w[0].indexOf("prox.test") !== -1, w[0].indexOf("pw") !== -1, w[0]]
@@ -15614,12 +15615,24 @@ checkCall("D-SINK-14: the `@`-typo warning outranks the http sentence on one lin
 // Service.playerArgWarnings is built from splitMpvArgs(...).warnings, which
 // covered KEPT tokens only; the refused list went to the journal (D-SINK-24,
 // names only) and nowhere the user looks. Now `warnings` names the refused
-// tokens too, by the same name rule, so the footer carries them.
-checkCall("F-UX-7: splitMpvArgs names a refused token in `warnings` by its option name, never its value, one line per distinct name, after the kept tokens' lines", () => {
+// tokens too, by the same name rule, so the footer carries them -- FIRST,
+// because the footer's one line (footerWarning -> warningLine) prints the
+// first warning and counts the rest as `(+N more)`: with the kept lines
+// first, a refused option beside a kept-option warning was named nowhere the
+// user looks, while the README said it was (the recheck's P2 on fda0d52).
+checkCall("F-UX-7: splitMpvArgs names a refused token in `warnings` by its option name, never its value, one line per distinct name, BEFORE the kept tokens' lines", () => {
   const r = Model.splitMpvArgs("--tls-verify=no --volume=50 --no-tls-verify --tls-verify=yes --ytdl=yes")
   return [r.warnings, r.args, r.warnings.some(w => w.indexOf("=no") !== -1 || w.indexOf("=yes") !== -1 || w.indexOf("50") !== -1)]
-}, [["mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT, "mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT, "mpvArg --no-tls-verify" + Model.MPV_REFUSED_TEXT],
+}, [["mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT, "mpvArg --no-tls-verify" + Model.MPV_REFUSED_TEXT, "mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT],
     ["--volume=50", "--ytdl=yes"], false])
+checkCall("F-UX-7: the footer's ONE line, over a kept-option warning AND a refused option, names the refused option and counts the kept one -- the README sentence, made true by the composer", () => {
+  const warnings = Model.splitMpvArgs("--ytdl=yes --tls-verify=no").warnings
+  return [Model.footerWarning(Model.labelWarnings(warnings, "player"), []),
+          Model.footerWarning(Model.labelWarnings(Model.splitMpvArgs("--tls-verify=no").warnings, "player"), []),
+          Model.footerWarning(Model.labelWarnings(Model.splitMpvArgs("--ytdl=yes").warnings, "player"), [])]
+}, ["Player warning: mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT + " (+1 more)",
+    "Player warning: mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT,
+    "Player warning: mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT])
 checkCall("F-UX-7 is a sink (rule 5): a credential-shaped refused token yields its name and nothing after the `=`; a bare credential-shaped token yields `<token>`", () => {
   const r = Model.splitMpvArgs("--stream-lavf-o=http_proxy=http://u:pw@p.test:3128 user:pw@proxy:3128 --http-header-fields=Authorization: Bearer eyJabc --u:pw@h=1")
   const joined = r.warnings.join("\n")
@@ -15633,7 +15646,7 @@ checkCall("F-UX-7: through Service.playerArgWarnings -- the footer list the guid
   const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
   const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false, mpvArgs: "--tls-verify=no --ytdl=yes" }, stateText: "", host: "lag" })
   return [h.root.playerArgWarnings, h.compileErrors]
-}, [["Player warning: mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT, "Player warning: mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT], []])
+}, [["Player warning: mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT, "Player warning: mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT], []])
 
 // ---- D-LOGO-19: a cached logo Qt cannot decode is tried once, not on every realisation ----
 // The shell is the only place that knows a file failed the decoder, and it
