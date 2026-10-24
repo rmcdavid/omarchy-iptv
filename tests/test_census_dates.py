@@ -103,6 +103,18 @@ def first_line(block):
     return block.splitlines()[0].strip()
 
 
+def open_entries(rel, block, entries=None):
+    """EVERY entry of `entries` (OPEN by default) that `block` in file `rel`
+    discharges, sorted. All of them, not the first the set happens to
+    iterate to: the first version took one per block with `next()` over
+    the set, and the docstring block at 04-epg.py ~296 carries the phrases
+    of two entries, so under 5 of 8 hash seeds the other read as stale and
+    the committed gate was red (the round-2 recheck's P1, 2026-10-24). A
+    sorted list has no order to be lucky with."""
+    pool = OPEN if entries is None else entries
+    return sorted(e for e in pool if e[0] == rel and e[1] in block)
+
+
 class CensusDateTest(unittest.TestCase):
     def test_every_census_figure_in_a_shipped_comment_sits_in_a_dated_block(self):
         found = set()
@@ -111,14 +123,34 @@ class CensusDateTest(unittest.TestCase):
             rel = str(path.relative_to(ROOT))
             for line, block in undated_blocks(path.read_text(encoding="utf-8")):
                 head = first_line(block)
-                entry = next((e for e in OPEN if e[0] == rel and e[1] in block), None)
-                if entry is None:
+                entries = open_entries(rel, block)
+                if not entries:
                     problems.append("%s:%d: %s" % (rel, line, head))
                 else:
-                    found.add(entry)
+                    found.update(entries)
         self.assertEqual(problems, [], "a census figure in an undated comment block:\n" + "\n".join(problems))
         stale = sorted(OPEN - found)
         self.assertEqual(stale, [], "OPEN names a block that is dated or gone; delete the entry: %r" % stale)
+
+    def test_a_block_carrying_two_open_phrases_discharges_both_entries(self):
+        # The round-2 recheck's P1, pinned on the shipping matcher: a block
+        # that names two entries' phrases discharges BOTH, whatever order
+        # the set iterates in, and an entry for another file is not taken.
+        # Red on the `next()` version (one entry per block).
+        entries = {("a.py", "the second phrase"), ("a.py", "the first phrase"), ("b.py", "the first phrase")}
+        block = "# the first phrase, 1,453 rows\n# and the second phrase in the same block"
+        self.assertEqual(open_entries("a.py", block, entries),
+                         [("a.py", "the first phrase"), ("a.py", "the second phrase")])
+        self.assertEqual(open_entries("b.py", block, entries), [("b.py", "the first phrase")])
+        self.assertEqual(open_entries("c.py", block, entries), [])
+        # And the shipped list itself: every OPEN entry is discharged by
+        # some undated block, under THIS process's seed, counted whole.
+        discharged = set()
+        for path in shipped_sources():
+            rel = str(path.relative_to(ROOT))
+            for _, block in undated_blocks(path.read_text(encoding="utf-8")):
+                discharged.update(open_entries(rel, block))
+        self.assertEqual(sorted(OPEN - discharged), [])
 
     def test_the_sites_this_round_dated_are_graded_by_the_block_not_the_line(self):
         # 01-core.py's census paragraph (8d40c70) carries its date on its
