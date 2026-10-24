@@ -49,7 +49,7 @@ REAL_CACHE_STATE = {
     "underrun": False,
 }
 SCHEMA_KEYS = ["ok", "kind", "running", "mode", "requested", "applied", "clamped", "clampedTo",
-               "refused", "atFloor", "atEdge", "rewind"]
+               "refused", "atFloor", "atEdge", "rewind", "settled"]
 REWIND_KEYS = ["position", "floor", "ceiling", "history", "ahead", "behindLive", "zeroed",
                "paused", "pausedForCache", "entryId"]
 
@@ -222,8 +222,9 @@ class RewindPlayerTestCase(PlayerTestCase):
         # position here, as it did once in twelve on the real player.
         seek_lag_s = kwargs.pop("seek_lag_s", 0.005)
         seek_silent = kwargs.pop("seek_silent", False)
+        landing = {key: kwargs.pop(key) for key in ("landing_offset", "restart_lag_s", "restart_silent") if key in kwargs}
         return self.start(props=self.props(**kwargs), user_data=data, seek_moves=seek_moves,
-                          seek_lag_s=seek_lag_s, seek_silent=seek_silent)
+                          seek_lag_s=seek_lag_s, seek_silent=seek_silent, **landing)
 
     def read_after_seek_s(self):
         """Seconds between the `seek` command and the next `time-pos` read
@@ -252,7 +253,7 @@ class SeekVerbTest(RewindPlayerTestCase):
         self.assertEqual(code, 0)
         self.assertEqual(payload, {"ok": True, "kind": "seek", "running": False, "mode": "by", "requested": -10,
                                    "applied": 0, "clamped": False, "clampedTo": None, "refused": True,
-                                   "atFloor": False, "atEdge": False, "rewind": None})
+                                   "atFloor": False, "atEdge": False, "rewind": None, "settled": False})
         self.assertFalse(os.path.exists(self.sock))
 
     def test_the_reply_is_the_design_schema_and_nothing_in_it_is_a_string_from_the_stream(self):
@@ -320,6 +321,42 @@ class SeekVerbTest(RewindPlayerTestCase):
         self.assertIsNotNone(gap)
         self.assertGreaterEqual(gap, 0.05)
         self.assertLess(gap, helper.SEEK_EVENT_BOUND_S)
+
+    def test_the_deciding_read_waits_for_the_decoded_landing_not_the_echoed_target(self):
+        # F-RWD-8. The fake executes the seek 20 ms after answering (the
+        # `seek` event, time-pos at the target, as on mpv 12 of 12) and
+        # lands the decoder 20 ms after THAT, 1.5 s past the target on the
+        # keyframe it could reach (`playback-restart`, time-pos moved). The
+        # read must follow the restart: `applied` is -8.5, the OSD line is
+        # composed from it, and the reply says the landing was seen. Red on
+        # a9d20f9: applied -10.0, the request as echoed.
+        server = self.playing(seek_lag_s=0.02, landing_offset=1.5, restart_lag_s=0.02)
+        code, payload, _, stderr = self.seek("--by", "-10")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["applied"], -8.5, "the read echoed the target, not the decoded landing")
+        self.assertEqual((payload["refused"], payload["settled"], payload["applied"], payload["rewind"]["position"]),
+                         (False, True, -8.5, 392.117))
+        self.assertEqual(payload["rewind"]["behindLive"], 8.5)
+        self.assertEqual(server.osd, [[helper.rewind_osd_text(payload), 3000]])
+        self.assertIn("0:08", server.osd[0][0])
+        gap = self.read_after_seek_s()
+        self.assertIsNotNone(gap)
+        self.assertGreaterEqual(gap, 0.04, "the read came before the restart")
+        self.assertLess(gap, helper.SEEK_EVENT_BOUND_S)
+
+    def test_a_seek_whose_restart_never_comes_pays_the_bound_and_says_it_is_unsettled(self):
+        # The other half of the bound: `seek` seen, no `playback-restart`
+        # by SEEK_EVENT_BOUND_S. The read still decides (moved, by the
+        # echoed target), and `settled` False says the number is the
+        # request, so the status tick stays the truth.
+        server = self.playing(restart_silent=True)
+        code, payload, _, stderr = self.seek("--by", "-10")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((payload["refused"], payload["settled"], payload["applied"]), (False, False, -10.0))
+        gap = self.read_after_seek_s()
+        self.assertIsNotNone(gap)
+        self.assertGreaterEqual(gap, helper.SEEK_EVENT_BOUND_S)
+        self.assertEqual(server.osd, [["-0:10 behind live", 3000]])
 
     def test_a_refusal_is_known_from_the_line_without_paying_the_bound(self):
         # The dropped seek's refusal line arrives after the lag; the helper

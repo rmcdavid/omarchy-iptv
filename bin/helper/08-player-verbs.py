@@ -1302,42 +1302,63 @@ def read_rewind(client: MpvIpc, stash: Any = None, paused: Any = None, write: bo
     return rewind_view(position, cache, zero, paused, paused_for_cache, entry_id, wall)
 
 
-def await_seek_outcome(client: MpvIpc, deadline: float) -> str | None:
-    """After the reply to `seek`: "landed" when the `seek` event arrives
-    (mpv executed it), "refused" when the error-level refusal line arrives
-    (mpv dropped it), None when neither did by `deadline`. The caller must
-    have subscribed with `request_log_messages error`. The line's text is
-    matched, never printed: it is mpv's own sentence, but the rule for this
-    sink is nothing from the player reaches stdout unexamined.
+def await_seek_outcome(client: MpvIpc, deadline: float) -> tuple[str | None, bool]:
+    """After the reply to `seek`: ("landed", settled) once the `seek` event
+    has arrived (mpv executed it), ("refused", False) when the error-level
+    refusal line arrives (mpv dropped it), (None, False) when neither did
+    by `deadline`. `settled` is True when the `playback-restart` event
+    followed the `seek` event before `deadline`: mpv's "the decoder is
+    producing frames at the new position", which is the DECODED landing
+    (F-RWD-8). The `seek` event alone is the request echoed -- the
+    F-RWD-15 probe read time-pos after it and saw the target 12 of 12,
+    with `playback-restart` 26-40 ms later and the picture up to 5.1 s
+    past the target on the next keyframe -- so a read taken on `seek`
+    reports what was asked, not where the player is, and the OSD line
+    composed from it drew the wrong number for up to a status tick. The
+    wait for the restart costs those 26-40 ms against SEEK_EVENT_BOUND_S
+    and the 300 ms per-press budget; a `seek` with no restart by the bound
+    is still "landed" (the read decides, as before), with `settled` False
+    so the reply says which it got and the status tick stays the truth.
+    The caller must have subscribed with `request_log_messages error`. The
+    line's text is matched, never printed: it is mpv's own sentence, but
+    the rule for this sink is nothing from the player reaches stdout
+    unexamined.
 
     A `seek` event carries no origin, so one raised by a seek that is not
     ours -- the user's own arrow key in the player window at the same
-    instant -- ends the wait early (review nit, accepted): the read that
-    follows still decides by the threshold, and the status tick re-syncs."""
+    instant -- counts as ours (review nit, accepted): the read that
+    follows still decides by the threshold, and the status tick re-syncs.
+    A `playback-restart` is counted only after a `seek` was seen."""
+    landed = False
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return None
+            return ("landed" if landed else None), False
         events = client.drain_events(deadline)
         if events is None:
-            return None
+            return ("landed" if landed else None), False
         for event in events:
             name = event.get("event")
             if name == "seek":
-                return "landed"
-            if name == "log-message" and SEEK_REFUSAL_TEXT in str(event.get("text", "")):
-                return "refused"
+                landed = True
+            elif name == "playback-restart" and landed:
+                return "landed", True
+            elif name == "log-message" and SEEK_REFUSAL_TEXT in str(event.get("text", "")):
+                return "refused", False
 
 
 def player_seek(args: argparse.Namespace) -> int:
     """`player seek --by N` (signed seconds, negative is back) or `--live`.
 
     One run: read time-pos and the cache state, clamp (clamp_seek), issue ONE
-    absolute seek, wait for the `seek` event or the refusal line (bounded,
-    F-RWD-15), read time-pos again, decide moved or refused by the
+    absolute seek, wait for the `seek` event and then the `playback-restart`
+    that says the decoder landed, or the refusal line (bounded, F-RWD-15,
+    F-RWD-8), read time-pos again, decide moved or refused by the
     not-moved threshold, take the zero point if none exists, put one
-    numbers-only line on the OSD when the request was honoured, and reply.
-    Side-effect-free when no player is there, like `pause`.
+    numbers-only line on the OSD when the request was honoured, and reply;
+    `settled` in the reply says whether the restart was seen, so `applied`
+    is the decoded landing when it is True and the request as echoed when
+    it is False. Side-effect-free when no player is there, like `pause`.
     """
     sock = socket_path(args.socket)
     mode = "live" if args.live else "by"
@@ -1346,7 +1367,7 @@ def player_seek(args: argparse.Namespace) -> int:
         "ok": True, "kind": "seek", "running": False, "mode": mode,
         "requested": by if mode == "by" else None, "applied": 0,
         "clamped": False, "clampedTo": None, "refused": True,
-        "atFloor": False, "atEdge": False, "rewind": None,
+        "atFloor": False, "atEdge": False, "rewind": None, "settled": False,
     }
     if not find_player(sock):
         emit(payload)
@@ -1395,7 +1416,8 @@ def player_seek(args: argparse.Namespace) -> int:
         else:
             # The reply to `seek` means queued, not executed (F-RWD-15): the
             # read that decides moved-or-refused waits for the event that
-            # says it ran, or the line that says it was dropped, or the
+            # says it ran AND the restart that says the decoder landed
+            # (F-RWD-8), or the line that says it was dropped, or the
             # bound. The outcome decides only WHEN to read; the verdict is
             # the read against the threshold, as measured (12.2) -- a
             # `refused` clause on the outcome was an equivalent mutant,
@@ -1404,7 +1426,7 @@ def player_seek(args: argparse.Namespace) -> int:
             client.try_command("request_log_messages", "error")
             sent, _ = client.try_command("seek", plan["target"], "absolute")
             if sent:
-                await_seek_outcome(client, time.monotonic() + SEEK_EVENT_BOUND_S)
+                _, payload["settled"] = await_seek_outcome(client, time.monotonic() + SEEK_EVENT_BOUND_S)
             ok, pos = client.try_command("get_property", "time-pos")
             after = _finite(pos) if ok else None
             if not sent or after is None or before is None or abs(after - before) < SEEK_MOVED_THRESHOLD_S:
