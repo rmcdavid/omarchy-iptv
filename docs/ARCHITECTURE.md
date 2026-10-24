@@ -1271,7 +1271,13 @@ measurement this lane could take:
    reassignment arms nothing), which is the event each of the reset paths
    above raises through the shell's file watch. Pinned through the service
    harness on both hosts; whether the shell's FileView publishes a
-   recreation and the plugin's own fchmod is UNVERIFIED on a running shell.
+   recreation and the plugin's own fchmod was UNVERIFIED on a running shell
+   until 2026-10-23, when the live arm observed both on the owner's desktop
+   (QA-RESULTS "Live observation on the owner's desktop"): a bare `chmod 644`
+   was back to 0600 by itself within 427 ms with the inode and mtime
+   unchanged, the shield's own fchmod raised exactly one more publish and
+   one silent run, and nothing followed in 200 s -- no loop; the host's own
+   rewrites by rename (`omarchy bar set`) raised one silent run each.
 3. *Installs that are already exposed.* The shield runs on the startup path
    unconditionally, independent of `mkdirProc`'s chain and independent of
    whether any persist happens, so an install whose `shell.json` is 0644 with
