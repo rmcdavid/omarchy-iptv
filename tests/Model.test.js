@@ -15564,6 +15564,31 @@ check("D-SINK-23 parity: the fixture carries both halves of the cost -- rows the
   stateReaderFixture.cases.every(c => c.kept === (c.outUrl !== ""))
 ], [true, true, true, true])
 
+// ---- D-SINK-14: the plain-http disclosure, where the URL is typed ----
+// A LOGO must be https by ruling, and nothing said that an http:// playlist
+// or Xtream server sends the credentials in cleartext. PO-10 treatment, not
+// a refusal: one sentence on the form's advice line while a URL field holds
+// an http:// value, the `@`-typo warning winning when both hold.
+checkCall("D-SINK-14: formAdviceLine shows the owner's http sentence for an http:// playlist, EPG or Xtream server, and nothing for their https twins", () => {
+  const url = (p, e) => ({ kind: "url", values: { label: "", playlist: p, epg: e } })
+  const xt = s => ({ kind: "xtream", values: { server: s, username: "u", password: "p" } })
+  return [Model.WARN_PLAIN_HTTP, Model.formAdviceLine(xt("http://panel.test:8080")), Model.formAdviceLine(xt("https://panel.test:8080")),
+          Model.formAdviceLine(url("http://h.test/x", "")), Model.formAdviceLine(url("https://h.test/x", "")),
+          Model.formAdviceLine(url("https://h.test/x", "http://epg.test/g.xml")), Model.formAdviceLine(url("HTTP://H.test/x", "")),
+          Model.formAdviceLine(url("/srv/tv/list.m3u", "")), Model.formAdviceLine(url("http://h .test/x", "")),
+          Model.formAdviceLine(null), Model.formAdviceLine({}), Model.formAdviceLine({ values: null })]
+}, ["http:// sends the address and any password in it unencrypted; https:// does not",
+    "http:// sends the address and any password in it unencrypted; https:// does not", "",
+    "http:// sends the address and any password in it unencrypted; https:// does not", "",
+    "http:// sends the address and any password in it unencrypted; https:// does not",
+    "http:// sends the address and any password in it unencrypted; https:// does not", "", "", "", "", ""])
+checkCall("D-SINK-14: the `@`-typo warning outranks the http sentence on one line, and formWarningLine itself is unchanged", () => {
+  const typo = "http://user:2024/ab@host.test/x"
+  return [Model.formAdviceLine({ kind: "url", values: { label: "", playlist: typo, epg: "" } }) === Model.WARN_AT_AFTER_AUTHORITY,
+          Model.formWarningLine({ kind: "url", values: { label: "", playlist: "http://h.test/x", epg: "" } }),
+          Model.formAdviceLine({ kind: "url", values: { label: "", playlist: "https://h.test/x", epg: typo } }) === Model.WARN_AT_AFTER_AUTHORITY]
+}, [true, "", true])
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All model tests passed.")

@@ -512,6 +512,40 @@ function formWarningLine(form) {
   return ""
 }
 
+// D-SINK-14 (2026-10-24). The DISCLOSURE for plain http, which nothing in
+// the product said while a LOGO must be https by ruling: an `http://`
+// playlist, guide or Xtream server sends the address -- and an Xtream
+// username and password travel IN it, as a query string -- in cleartext to
+// anyone on the path. Not a refusal (PO-5: a large share of real providers
+// are http-only, and the user is choosing their own exposure) but the PO-10
+// treatment, one sentence where the URL is typed. The sentence is the
+// owner's wording; the README's Sources section carries the same fact.
+var WARN_PLAIN_HTTP = "http:// sends the address and any password in it unencrypted; https:// does not"
+
+// The sentence when any URL field of the form (playlist, EPG, Xtream server)
+// VALIDATES as an `http://` URL, else "". Read off the validated URL, so a
+// `HTTP://` spelling counts and a value that does not validate (the error
+// line's business) does not.
+function plainHttpLine(form) {
+  if (!form || typeof form !== "object" || !form.values || typeof form.values !== "object") return ""
+  var fields = form.kind === "xtream" ? ["server"] : ["playlist", "epg"]
+  for (var i = 0; i < fields.length; i++) {
+    var v = validateSourceUrl(form.values[fields[i]], { kind: fields[i] === "epg" ? "epg" : "playlist" })
+    if (v.ok && v.kind === "http" && v.url.indexOf("http://") === 0) return WARN_PLAIN_HTTP
+  }
+  return ""
+}
+
+// What the form's one advice line shows (Guide.qml, the sourceEdit and
+// sourceXtream result line): the `@`-typo warning first -- it is about a
+// password being read as a host, which outranks a disclosure about where
+// the same password travels -- else the plain-http sentence, else "". One
+// line, so the priority is decided here and not in QML.
+function formAdviceLine(form) {
+  var w = formWarningLine(form)
+  return w !== "" ? w : plainHttpLine(form)
+}
+
 // SR12: a "." or ":" before the first "/" reads as a host.
 function looksLikeHost(text) {
   return /[.:]/.test(str(text).split("/")[0])
@@ -1308,18 +1342,18 @@ export {
   PERSIST_FAILURE_REASONS, persistFailureMessage, refusalMessage,
   ZERO_WIDTH_RE, IPV6_LITERAL_RE, isIpv6Literal, cutQueryAndFragment,
   ENCODE_SENTENCE, WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts,
-  urlHostWithheld, sourceUrlWarning, formWarningLine, looksLikeHost,
-  validateSourceUrl, normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
-  EPG_ORIGIN_PLAYLIST, epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE,
-  epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
-  findSourceByUrl, allocateSourceKey, sourceCacheDir, hostPortOf, deriveLabel,
-  labelKey, labelTaken, uniqueLabel, defaultSourceLabel, validateLabel,
-  maskQuery, maskUrl, encodeQueryValue, xtreamUrls, validateXtream,
-  pluralGroups, countsLine, sameDay, formatLastUsed, formatAgo, sourceView,
-  sourceViews, sourceRows, EPG_HINT_ROW_TEXT, sourceDetail,
-  sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
-  sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
-  fetchingLine, PROBE_LOCAL_REFUSALS, probeFailureLine, sourceTransient,
-  CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
-  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
+  urlHostWithheld, sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP,
+  plainHttpLine, formAdviceLine, looksLikeHost, validateSourceUrl,
+  normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST,
+  epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE, epgOriginNotice, isUrlField,
+  sourceKey, isSourceKey, findSource, findSourceByUrl, allocateSourceKey,
+  sourceCacheDir, hostPortOf, deriveLabel, labelKey, labelTaken, uniqueLabel,
+  defaultSourceLabel, validateLabel, maskQuery, maskUrl, encodeQueryValue,
+  xtreamUrls, validateXtream, pluralGroups, countsLine, sameDay,
+  formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
+  EPG_HINT_ROW_TEXT, sourceDetail, sourceAccessibleName, sourcesHeaderCount,
+  sourcesHeaderRight, sourcesRowAccessibleName, confirmLogosMessage,
+  confirmRemoveMessage, fetchingLine, PROBE_LOCAL_REFUSALS, probeFailureLine,
+  sourceTransient, CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS,
+  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
 }

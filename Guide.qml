@@ -4938,7 +4938,10 @@ Item {
               // a password with an unencoded `/`, `?` or `#`. Advice, shown
               // once per value on this line while the field holds it; it
               // never blocks submit and the error and fetching lines win.
-              readonly property string warningText: !isError && !root.formProbing && root.form ? Model.formWarningLine(root.form) : ""
+              // D-SINK-14: the same line carries the plain-http disclosure
+              // while a URL field holds an `http://` value; the model
+              // decides which of the two shows (Model.formAdviceLine).
+              readonly property string warningText: !isError && !root.formProbing && root.form ? Model.formAdviceLine(root.form) : ""
               readonly property bool isWarning: warningText !== ""
               readonly property string lineText: {
                 if (root.formError) return String(root.formError.message)

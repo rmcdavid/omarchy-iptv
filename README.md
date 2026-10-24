@@ -622,7 +622,12 @@ In a form: `Tab` moves between fields, `Ctrl+V` or `Shift+Insert` pastes,
 `Ctrl+U` clears the field, `Enter` saves, `Esc` cancels. Saved URLs are shown
 masked (`password=****`); press `Ctrl+R` or the eye button to reveal one
 while editing. Only `http://`, `https://`, and absolute paths are accepted,
-and no prefix is guessed.
+and no prefix is guessed. One thing to know before you choose: `http://`
+sends the address and any password in it unencrypted, to anyone on the path
+between you and the provider, and `https://` does not. An Xtream username and
+password travel inside that address. The form says so on its own line while
+you edit an `http://` value; it is a fact, not a refusal, because many
+providers offer nothing else.
 
 **How these fields take input, and why.** They look like the shell's own
 text boxes, but Qt does not edit them: the plugin handles every keystroke
