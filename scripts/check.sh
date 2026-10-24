@@ -380,7 +380,12 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-80}
 # among them), D-SRC-39 (+2), D-SRC-43 (+2), D-SRC-33 (+2), D-SRC-49 /
 # D-SINK-22 (b)(c) (+4), D-REL-8 (+2), F-M3-18 (a) (+1); every one seen red
 # on a9d20f9 or on the stub put back (the lane report).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3017}
+# 3017 -> 3019 on 2026-10-24, P23 lane A2 (lane-p23-state, the recheck's
+# blockers): D-SRC-33's notifyArgv join (+1, red on the lane's first tip:
+# the argv was null) and the lastPersistFailure-removal pin (+1, red before
+# the removal; P23 lane A's second finding, its board row names the property). The D-SRC-33 harness check and the D-SRC-39 harness
+# check gained assertions, not checks.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3019}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
