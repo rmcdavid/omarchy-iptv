@@ -1744,6 +1744,43 @@ is "a steal after the front check refuses with 3 and types nothing" "$(fg_run ty
 ck "and the diagnosis is the guard's, not the two-attempt message" \
    'grep -q "type REFUSED" "$FG/out" && ! grep -q "did not arrive after two attempts" "$FG/out"'
 
+# F-HARNESS-12: `shot` asks the same question `key` does, and refuses the same
+# way. The capture itself is stubbed -- `hyprctl monitors -j` answers one
+# focused output, `grim` records its argv and writes the file -- so what is
+# observed is run.sh's DECISION and whether a file appeared, never a pixel.
+# Seen red on a9d20f9's run.sh: a closed guide was captured (exit 0, a file).
+cat >"$FG/bin/hyprctl" <<'FG_HYPR'
+#!/bin/bash
+echo '[{"name":"STUB-OUT","focused":true},{"name":"STUB-OTHER","focused":false}]'
+FG_HYPR
+cat >"$FG/bin/grim" <<'FG_GRIM'
+#!/bin/bash
+echo "$@" >>"$GRIM_LOG"
+: >"${@: -1}"
+FG_GRIM
+chmod +x "$FG/bin/hyprctl" "$FG/bin/grim"
+export GRIM_LOG="$FG/grim.log"
+fg_shot() { : >"$GRIM_LOG"; rm -rf "$FG/h/shots"; fg_run "$@" | cut -d' ' -f1; printf '%s %s\n' "$(wc -l <"$GRIM_LOG" | tr -d ' ')" "$([[ -e $FG/h/shots/${2:-guide}.png || -e $FG/h/shots/${3:-guide}.png ]] && echo file || echo nofile)"; }
+fg_stub "${FG_OPEN/\"open\":true/\"open\":false}" "" 0
+is "shot refuses with 3 while the guide is CLOSED: no grim call, no file" "$(fg_shot shot guide | tr '\n' ' ')" "3 0 nofile "
+ck "and the refusal is worded as key's is" 'grep -q "shot REFUSED: the guide is CLOSED" "$FG/out"'
+fg_stub "${FG_OPEN/\"keyboard\":true/\"keyboard\":false}" "" 0
+is "and while ANOTHER SURFACE holds the keyboard" "$(fg_shot shot guide | tr '\n' ' ')" "3 0 nofile "
+fg_stub "$FG_OPEN" "" 0
+is "a focused guide is captured, once, and the path is printed" "$(fg_shot shot guide | tr '\n' ' ') $(grep -c "^$FG/h/shots/guide.png$" "$FG/out")" "0 1 file  1"
+is "on the FOCUSED output" "$(tail -1 "$GRIM_LOG")" "-o STUB-OUT $FG/h/shots/guide.png"
+fg_stub "${FG_OPEN/\"open\":true/\"open\":false}" "" 0
+is "--any-surface is the deliberate shot of whatever is up, guide closed" "$(fg_shot shot --any-surface player | tr '\n' ' ')" "0 1 file "
+ck "and says the guard was skipped" 'grep -q "shot --any-surface: focus guard SKIPPED" "$FG/out"'
+is "--any-surface AFTER the name is a name, not a flag" "$(fg_shot shot guide --any-surface | tr '\n' ' ')" "3 0 nofile "
+ck "and no shot ever primes the shell (a shot is not a keystroke)" '[[ ! -f $FG/h/primed ]]'
+# The one caller: m3-scenario.sh used to send both of `shot`'s streams to
+# /dev/null and force its status to 0, so a refusal would have been as
+# invisible as the wrong surface. Its wrapper now turns exit 3 into a FAIL
+# line. Bookkeeping by shape (rule 14 says so): the live run is the proof.
+is "m3-scenario.sh's shot wrapper counts a refusal as a FAIL rather than hiding it" \
+   "$(awk '/^shot\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/m3-scenario.sh" | grep -c 'rc == 3.*fail "shot')" "1"
+
 # ============ shell.qml focusWalk: the two bounds, driven for real (F-M3-1 a)
 
 section "shell.qml focusWalk: a bound that gives up says so"

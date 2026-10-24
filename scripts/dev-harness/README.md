@@ -338,7 +338,9 @@ $H key -k Tab             # real key events via wtype -- REFUSES unless the guid
 $H key j j f              # e.g. list mode: down, down, favorite
 $H key --to-compositor -k F13   # a chord for the COMPOSITOR: skips the focus check (not the lock one)
 $H type sky               # type text and prove it arrived, by reading the query back
-$H shot search            # grim screenshot -> shots/search.png
+$H shot search            # grim screenshot -> shots/search.png -- REFUSES unless the guide
+                          #   has the keyboard (F-HARNESS-12); `shot --any-surface player`
+                          #   is the deliberate shot of whatever is up (the flag comes first)
 ```
 
 ### `key` and `type` refuse rather than type blind (F-M3-1 half (a))
@@ -376,6 +378,30 @@ swallowed (1 fresh shell in 4), so `key` sends one Shift press per shell
 before the first real key, and `type` asserts the query it read back and
 retries once. A steal *after* the front check ends on the guard's verdict too
 -- exit 3, nothing typed -- not on a two-attempt failure message.
+
+`shot` asks the same question (F-HARNESS-12). It grades PIXELS, and a human
+reads its file as proof, so a capture of a surface that is not the guide's
+was the one failure the verb could not see -- the keystroke class, on the
+verb whose output is read as evidence. It refuses with exit 3 and `key`'s
+wording unless `ipc focusState` says the guide holds the keyboard;
+`shot --any-surface <name>`, flag first, is the deliberate shot of whatever
+is up (the player window). No lock refusal: nothing is typed. Which OUTPUT
+the guide is on is not asserted (`focusState` carries no output name; the
+focused monitor is captured, as before). `m3-scenario.sh`, its one caller,
+prints a refusal as a FAIL line instead of discarding both streams.
+`scripts/qa-lib-test.sh` drives the decision with `qs`, `hyprctl` and `grim`
+stubbed; it was red on the run.sh before this (a closed guide captured).
+
+`type` and `--to-compositor` are **prompt-and-gate-only** (F-HARNESS-6): no
+scenario calls either, because no scenario enters text through the keyboard
+(m3's search check is driven over `ipc query`, and its `key` calls are
+command keys), and `--to-compositor` has no caller by construction. Both are
+pinned by `qa-lib-test.sh`'s decision table (`type` refuses before its retry
+loop and ends on the guard's verdict after a mid-type steal; the hatch is
+positional and skips the primer). A caller would be an ADDED segment, not a
+replacement: a display lane giving m3 an H3c that enters search by keystroke
+and `type`s the query is the one check that reddens when `type` stops
+proving arrival.
 
 Operationally: `OMARCHY_IPTV_FOCUS_TIMEOUT` (default 5 s) bounds the wait for
 the reply and a timeout refuses rather than typing blind; a harness started

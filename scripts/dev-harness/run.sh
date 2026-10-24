@@ -7,7 +7,11 @@
 #                                    (target io.github.rmcdavid.iptv): toggle, stop, next,
 #                                    previous, refresh, play, channel, pip, pause, back,
 #                                    forward, live -- the verbs a user binds (F-RWD-14)
-#   run.sh shot [name]               screenshot the focused output into the scratch dir
+#   run.sh shot [--any-surface] [name]
+#                                    screenshot the focused output into the scratch dir.
+#                                    REFUSES, exit 3, unless the harness guide holds the
+#                                    keyboard (F-HARNESS-12); --any-surface, first, is the
+#                                    deliberate shot of whatever is up (the player window)
 #   run.sh key [--to-compositor] <wtype args...>
 #                                    send keys to the guide (wtype). REFUSES, exit 3,
 #                                    unless the harness guide holds the keyboard, and
@@ -614,7 +618,26 @@ case $cmd in
     exec qs ipc -p "$(qs_root)" call "$target" "$@"
     ;;
   shot)
-    name=${2:-guide}
+    shift
+    # F-HARNESS-12. `shot` grades PIXELS, and a human reads its file as
+    # proof, so a capture of a surface that is not the guide's was the one
+    # failure the verb could not see -- the same class F-M3-1 closed for
+    # keystrokes. It asks the same question `key` asks, over `ipc
+    # focusState`, and refuses with the same exit 3 and the same wording
+    # (scripts/qa-lib-test.sh drives the decision). `--any-surface` is the
+    # deliberate shot of whatever is up -- the player window, the
+    # compositor -- and must come first, like `--to-compositor`. No lock
+    # refusal: nothing is typed. The monitor is the focused one, as before;
+    # `focusState` carries no output name, so which OUTPUT the guide is on
+    # is not asserted here (recorded rather than invented).
+    ANY_SURFACE=0
+    while (( $# > 0 )) && [[ $1 == --any-surface ]]; do ANY_SURFACE=1; shift; done
+    name=${1:-guide}
+    if (( ANY_SURFACE )); then
+      echo "[run.sh] shot --any-surface: focus guard SKIPPED; this captures whatever is on the focused output, guide or not" >&2
+    else
+      require_guide_focus shot || exit 3
+    fi
     out=$(hyprctl monitors -j | python3 -c 'import json,sys; ms=json.load(sys.stdin); print(next((m["name"] for m in ms if m.get("focused")), ms[0]["name"]))')
     mkdir -p "$SCRATCH/shots"
     grim -o "$out" "$SCRATCH/shots/$name.png" && echo "$SCRATCH/shots/$name.png"

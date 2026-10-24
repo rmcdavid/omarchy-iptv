@@ -69,7 +69,20 @@ except Exception as e: print("NOSTATE")' "$1" "$(ipc state)"; }
 # wait_gf <expr> <json-expected> <tries>: bounded poll, 0.25 s apart.
 wait_gf() { local i; for ((i=0;i<$3;i++)); do [[ $(gf "$1") == "$2" ]] && return 0; sleep 0.25; done; return 1; }
 wait_sf() { local i; for ((i=0;i<$3;i++)); do [[ $(sf "$1") == "$2" ]] && return 0; sleep 0.25; done; return 1; }
-shot() { (( SHOTS )) && "$RUN" shot "$1" >/dev/null 2>&1; true; }
+# F-HARNESS-12: a refused shot is PRINTED and COUNTED. `shot` grades pixels a
+# human reads as proof, and this wrapper used to send both streams to
+# /dev/null and force the status to 0, so the guard's refusal (exit 3, the
+# guide not holding the keyboard) would have been as invisible as the wrong
+# surface it refuses to capture.
+shot() {
+  (( SHOTS )) || return 0
+  local out rc
+  out=$("$RUN" shot "$1" 2>&1); rc=$?
+  if (( rc == 3 )); then fail "shot $1" "refused: $(printf '%s\n' "$out" | grep -m1 'REFUSED')"
+  elif (( rc != 0 )); then fail "shot $1" "run.sh shot exited $rc"
+  fi
+  return 0
+}
 cleanup() {
   "$RUN" reap >/dev/null 2>&1
   # A --baseline run starts its player from the EXPORTED helper, and the reap
