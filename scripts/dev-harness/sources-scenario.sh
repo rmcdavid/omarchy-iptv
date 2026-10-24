@@ -66,6 +66,12 @@ cleanup() {
   return 0
 }
 trap cleanup EXIT
+# A signal while this shell waits on a foreground child runs no EXIT trap;
+# an exit does. These two lines turn INT and TERM into exits (the clip-scenario
+# shape, F-HARNESS-18), so a `timeout -s TERM` or a Ctrl-C mid-run reaps what
+# cleanup reaps instead of stranding the shell, the server or the cage.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 # Wait until `cmd` prints `want` (or up to `secs` seconds).
 wait_for() {
