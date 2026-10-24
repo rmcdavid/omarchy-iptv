@@ -15739,10 +15739,10 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
     h.stateFile.writeFails = true
     h.root.updateSource(KA, { label: "Mine" }); h.drain()
-    const failed = [h.root.stateSaveFailed, h.root.lastPersistFailure]
+    const failed = [h.root.stateSaveFailed]   // lastPersistFailure, read here alone, is gone (lane A2, 2026-10-24)
     h.stateFile.writeFails = false
     h.foreign(sf => { sf.disk = stateText([rec(A, { label: "Theirs", labelCustom: true })], KA) })
-    const conflict = [h.root.stateSaveFailed, h.root.lastPersistFailure, h.root.recentSaves.length, h.root.stateSavePending, h.root.stateSavesInFlight,
+    const conflict = [h.root.stateSaveFailed, h.root.recentSaves.length, h.root.stateSavePending, h.root.stateSavesInFlight,
                       M.sameState(h.file(), h.root.userState), h.root.userState.sources[0].label]
     // The other shape: a foreign FAVOURITE lands while ours (a failed label edit) is still unsaved -- the flag stays until the merge's own save lands.
     const g = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
@@ -15753,7 +15753,29 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     const kept = [g.root.stateSaveFailed, g.root.stateSavePending || g.root.stateSavesInFlight > 0]
     g.drain()
     return [failed, conflict, kept, [g.root.stateSaveFailed, g.root.userState.sources[0].label, g.file().sources[0].label], h.compileErrors]
-  }, [[true, "state_write_failed"], [false, "persist_failed", 0, false, 0, true, "Theirs"], [true, true], [false, "Mine", "Mine"], []])
+  }, [[true], [false, 0, false, 0, true, "Theirs"], [true, true], [false, "Mine", "Mine"], []])
+  // P23 lane A's second finding (2026-10-24, removed by lane A2 the same day;
+  // its board row names the property): `Service.lastPersistFailure` was set
+  // in four places and read in none -- not Guide.qml, not the model, not the
+  // IPC summary; its one reader was the D-SRC-43 check above, written to the
+  // row's words. A property with writers and no reader looks like a surface
+  // (ARCHITECTURE-SOURCES called it "the one record of the LAST failure for
+  // the harness") and is not one, so it is removed with its writers. This
+  // pin is a grep over the TREE's shipped sources (not IPTV_SERVICE_QML: the
+  // sibling pins at the top of this file read the tree too), which is the
+  // one job a grep is good at (rule 15): where else does this name live.
+  // Red on the lane's first tip (four writers and the declaration), green
+  // once they are gone.
+  checkCall("lastPersistFailure removed (P23 lane A's second finding): no shipped source names it -- not Service.qml, not Guide.qml, not Model.mjs or any model part (a write-only property is not a surface)", () => {
+    const modelDir = path.join(__dirname, "../model")
+    const parts = fs.readdirSync(modelDir).filter(f => /\.mjs$/.test(f)).map(f => fs.readFileSync(path.join(modelDir, f), "utf8"))
+    const named = []
+    if (/lastPersistFailure/.test(serviceSource)) named.push("Service.qml")
+    if (/lastPersistFailure/.test(guideSource)) named.push("Guide.qml")
+    if (/lastPersistFailure/.test(fs.readFileSync(path.join(__dirname, "../Model.mjs"), "utf8"))) named.push("Model.mjs")
+    parts.forEach((text, i) => { if (/lastPersistFailure/.test(text)) named.push("model/" + i) })
+    return [parts.length >= 18, named, (serviceSource.match(/sourcesPersistFailed\(/g) || []).length >= 3]
+  }, [true, [], true])
 
   // D-SRC-33: the merge's "theirs was kept" told on screen, not only in the journal.
   checkCall("D-SRC-33: Model.mergeConflictNotice -- one sentence per conflict (a source by key and field names; a field by its name; the fallen-back pointer by why), the lead's title, no URL or value; null for no conflicts; the replace id is reserved beside the others", () => {

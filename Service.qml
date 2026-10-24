@@ -784,17 +784,15 @@ Item {
   // is what the harness and the IPC status read.
   property bool stateModeRerun: false
   property int stateModeRuns: 0
-  // Which persist failure happened last. Since R13 no source call returns
-  // it (a refused entry mirror is logged, not reported, SR25 as amended
-  // 2026-10-12); it is kept as the one record of the LAST failure for the
-  // harness and for a reader of the log: "persist_failed" (no writable bar
-  // entry), "config_unsafe" (the host settings file could not be made
-  // private, D-SINK-18) or "state_write_failed" (the plugin's own state.json
-  // could not be written, which is the failure the guide now reports).
-  // The distinction is worth carrying because the sentences give opposite
-  // advice -- persist_failed sends the user to `omarchy bar set`, which is
-  // precisely what must not happen with a credentialed URL.
-  property string lastPersistFailure: "persist_failed"
+  // A string property holding the LAST persist failure's code USED TO BE
+  // HERE (P23 lane A's second finding, 2026-10-24, removed by lane A2 the
+  // same day; its board row names the property): set by the three failure sites and
+  // the D-SRC-43 clear, and READ BY NOTHING -- not the guide, not the model,
+  // not the IPC summary. The reason a failure is reported with is the
+  // sourcesPersistFailed(reason) signal's argument, carried to the guide's
+  // sentence by Model.persistFailureMessage; a property set in four places
+  // and read in none looked like a surface and was not one. A node check
+  // pins that no shipped source names it, this comment included.
   // D-LIVE-15: a `play` over IPC that finds no socket (player just
   // relaunched) or no answer is retried with backoff.
   property int playRetries: 0
@@ -2563,14 +2561,12 @@ Item {
     // D-SRC-43: the merge equals the other program's file and nothing of
     // ours is in the air -- the disk holds memory, so a failure flag the
     // save that never landed raised has nothing left to be about: cleared
-    // here, with the burst record (no echo of ours is coming) and the
-    // failure reason. The owed entry mirror (R19d) is NOT paid here; it is
-    // paid by the next landed save, as before -- owedMirrorAction is asked
-    // only from onSaved.
+    // here, with the burst record (no echo of ours is coming). The owed
+    // entry mirror (R19d) is NOT paid here; it is paid by the next landed
+    // save, as before -- owedMirrorAction is asked only from onSaved.
     if (Model.mergeLeavesNothingUnsaved(merged.state, theirs, { savesInFlight: root.stateSavesInFlight })) {
       if (root.stateSaveFailed) console.warn("omarchy-iptv: the other program's write holds everything this session has; the earlier failed save is no longer pending")
       root.stateSaveFailed = false
-      root.lastPersistFailure = "persist_failed"
       root.recentSaves = []
     }
     var behind = !Model.sameState(merged.state, theirs)
@@ -4048,7 +4044,6 @@ Item {
   // writes no URL into the host's file. It is kept, and kept reachable
   // through Model.entryShieldDecision, for the write that would.
   function refuseUnsafePersist() {
-    root.lastPersistFailure = "config_unsafe"
     console.warn("omarchy-iptv: refusing to save a source URL into settings other users can read; see the config shield warning above")
     root.sourcesPersistFailed("config_unsafe")
   }
@@ -4128,10 +4123,7 @@ Item {
     if (!root.shell || typeof root.shell.updateEntryInline !== "function"
         || !Model.barEntryWritable(root.shell.barConfig, root.pluginId)) {
       console.warn("omarchy-iptv: no writable bar entry for the " + what)
-      if (announce !== false) {
-        root.lastPersistFailure = "persist_failed"
-        root.sourcesPersistFailed("persist_failed")
-      }
+      if (announce !== false) root.sourcesPersistFailed("persist_failed")
       return false
     }
     var patch = Model.ownedEntryPatch(root.settings, overrides)
@@ -5610,7 +5602,6 @@ Item {
         // a later write lands -- because one switch issues two writes (the
         // touch, then the key move) and the guide would show the line twice.
         if (!root.stateSaveFailed) {
-          root.lastPersistFailure = "state_write_failed"
           root.sourcesPersistFailed("state_write_failed")
         }
         root.stateSaveFailed = true

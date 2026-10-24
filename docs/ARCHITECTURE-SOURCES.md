@@ -837,7 +837,14 @@ source.
   writable bar entry) is logged by the one writer and repaired on the next
   start, never signalled, and both callers of that writer on lane-key-t1
   pass `announce` false (the logo toggle reports through its return value).
-  `Service.lastPersistFailure` keeps the last code for the harness.
+  `Service.lastPersistFailure` used to keep the last code "for the harness";
+  it was REMOVED on 2026-10-24 (P23 lane A's second finding, removed by
+  lane A2; its board row names the property): set at the three
+  failure sites and cleared by D-SRC-43, read by nothing -- not the guide,
+  not the model, not the IPC summary, and by the harness only in the one
+  check written to the D-SRC-43 row's words. The reason travels as the
+  signal's argument and nowhere else; a node check pins that no shipped
+  source names the property.
   **Round 5 (2026-10-12, R16, lane-key-u1):** the guide renders the
   sentence for THE reason it is handed -- `Model.persistFailureMessage` over
   `Model.PERSIST_FAILURE_REASONS`, an unknown reason

@@ -1,9 +1,8 @@
 diff --git a/Service.qml b/Service.qml
-index 8114630..d3e460a 100644
 --- a/Service.qml
 +++ b/Service.qml
-@@ -2573,8 +2573,8 @@ Item {
-       root.lastPersistFailure = "persist_failed"
+@@ -2568,8 +2568,8 @@ Item {
+       root.stateSaveFailed = false
        root.recentSaves = []
      }
 +    // MUTATION (lane A, round 15): a7 -- the in-flight half of the re-save decision deleted
