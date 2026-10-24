@@ -53,7 +53,7 @@ import sys
 SPAN = re.compile(r"`([^`\n]+)`")
 CHORD = re.compile(r"^[A-Z][A-Za-z0-9]*( \+ [A-Za-z0-9]+)+$")
 ENV_COMMAND = re.compile(r"^[A-Z][A-Z0-9_]*=")
-ELLIPSIS = ("...", "…")
+ELLIPSIS = ("...", "\u2026")
 
 
 def repo_root():

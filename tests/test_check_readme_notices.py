@@ -134,7 +134,7 @@ class SyntheticTree(unittest.TestCase):
         self.assertIn('README.md:4: `Player warning: ...` elided, and nothing shipped starts with `Player warning:`', out)
 
     def test_a_unicode_ellipsis_elides_too(self):
-        self.write('README.md', README.replace('`Playlist warning: ...`', '`Playlist warning: …`'))
+        self.write('README.md', README.replace('`Playlist warning: ...`', '`Playlist warning: \u2026`'))
         rc, out = self.run_checker()
         self.assertEqual(rc, 0, out)
 
@@ -150,8 +150,8 @@ class SyntheticTree(unittest.TestCase):
 
     def test_a_decoded_escape_joins_the_readme_glyph(self):
         # VIEW composes nothing (no Model.mjs here), but its SEP literal
-        # decodes · to the middle dot the README writes.
-        self.write('README.md', README + 'Another: `Sources is full`; the separator literal is ` · `.\n')
+        # decodes \u00b7 to the middle dot the README writes.
+        self.write('README.md', README + 'Another: `Sources is full`; the separator literal is ` \u00b7 `.\n')
         rc, out = self.run_checker()
         self.assertEqual(rc, 0, out)
 
@@ -185,10 +185,10 @@ class RealTree(unittest.TestCase):
         self.addCleanup(shutil.rmtree, scratch, True)
         path = os.path.join(scratch, 'README.md')
         with io.open(path, 'w', encoding='utf-8') as fh:
-            fh.write('# x\n\nSays `Sources is full (51) · remove one first` and `Sources is full (50) · remove one first`.\n')
+            fh.write('# x\n\nSays `Sources is full (51) \u00b7 remove one first` and `Sources is full (50) \u00b7 remove one first`.\n')
         rc, out = self.run_checker(path)
         self.assertEqual(rc, 1, out)
-        self.assertIn('`Sources is full (51) · remove one first` matches no shipped string', out)
+        self.assertIn('`Sources is full (51) \u00b7 remove one first` matches no shipped string', out)
         self.assertIn('1 problem(s)', out)
         self.assertIn('1 composed, ', out)
 
