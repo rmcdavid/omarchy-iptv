@@ -3976,13 +3976,39 @@ Performance budget (10k channels):
     skipped, named in `busyLogos`, said once on stderr for however many,
     and aged by the next prune; before, such a run could lose its folder
     mid-run and `write_logo` then recreated an unlocked, uncounted one.
-    What stays as it was, stated (D-LOGO-22): a logo URL that failed --
-    timeout, refusal, 404 -- is tried once per run (the run's `seen` set
-    remembers every URL it looked at, pinned) and again at the next run;
-    nothing records a failure on disk, and `LOGO_RUN_DEADLINE` bounds what
-    a dead host costs a run. The cost, by the ruling: switching back to a
-    source whose folder was aged fetches its logos again, which contacts
-    those hosts again.
+    **The failure memo (D-LOGO-22, the lead's ruling of 2026-10-24).** A
+    logo URL that failed -- timeout, a refusal at the gate, an HTTP or
+    network error -- used to be tried once per run (the run's `seen` set)
+    and again at every next run, and the row's unnamed half was worse than
+    a retry: after `LOGO_RUN_DEADLINE` every later URL is `postponed`, and
+    the next run walked `channels` from the top with a fresh `seen`, so a
+    head of dead addresses (each up to min(`LOGO_DEADLINE`, what was left))
+    ate the same hour every run and the live logos behind it were never
+    reached; "the next run starts where this one stopped" was true of files
+    that landed and of nothing else. Now `fetch_logo_run` keeps
+    `logo-failed.json` beside the folder, in the source's directory (never
+    inside `logos/`, whose census counts entries; in `CACHE_FILES`, so
+    `cache remove` and the prune of an unkept key take it along): a map of
+    logo file name (the URL's fnv1a32, the name the folder already uses)
+    to `{at, reason}`, the reason one of the helper's own codes, never a
+    URL (rule 5), 0600, written atomically. One TTL, `LOGO_FAILED_TTL` =
+    `DEFAULT_EPG_MAX_AGE` (a day), so a host that was down is tried again
+    tomorrow; at most `LOGO_FAILED_MAX` (5,000, `MAX_LOGO_FILES`' figure)
+    entries, a full memo recording nothing new until one expires. It is
+    consulted after the on-disk check (a file on disk is announced
+    whatever the memo says) and before the ceiling and the deadline, and
+    a memoised address counts in the summary's `skippedFailed` and nowhere
+    else. It is written when the run's deadline is first seen past, not
+    only at the run's end, because a run the shell SIGTERMs (a switch, the
+    setting off) reaches no `finally`; `cache logos-clear` removes it with
+    the folder, so the user's reset is a reset. Pinned by
+    `tests/test_logo_run.py` `LogoFailureMemoTest` and the re-pinned
+    `seen` case (eight cases red on a9d20f9, the starvation case among
+    them: with the run's deadline lowered to one failed fetch's worth, two
+    dead addresses ahead of a live one left it postponed on every run) and
+    `tests/test_cache.py` (a removed source takes its memo along). The cost
+    of the day rule, by the ruling: switching back to a source whose folder
+    was aged fetches its logos again, which contacts those hosts again.
 
     **Leftovers of a killed write (D-SRC-60).** The atomic writers remove
     their temporary on every exit Python sees, and a SIGTERM is not one: the

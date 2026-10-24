@@ -292,11 +292,14 @@ class LogoFolderLockTest(LogoRunCase):
         self.assertEqual(sorted(summary["names"]), sorted([good, helper.logo_filename(urls[1]),
                                                            helper.logo_filename(urls[2]), helper.logo_filename(urls[3])]))
 
-    def test_a_url_that_failed_is_not_tried_again_within_the_run(self):
-        # D-LOGO-22 (R32f): the run's `seen` set is its memory of every URL,
-        # failed ones included -- a URL named by two channels that times out,
-        # is refused or answers 404 is tried once a run. ACROSS runs it is
-        # tried again, as before, and that is pinned here as it stands.
+    def test_a_url_that_failed_is_not_tried_again_within_the_run_nor_for_a_day(self):
+        # D-LOGO-22 (R32f, then the memo of 2026-10-24): the run's `seen`
+        # set is its memory of every URL, failed ones included -- a URL
+        # named by two channels that times out, is refused or answers 404
+        # is tried once a run. ACROSS runs the memo beside the folder is the
+        # memory: the next run tries neither dead address and says how many
+        # it skipped. (This used to pin the retry across runs as it stood;
+        # red on a9d20f9, where run 2 called the fetcher for both.)
         dead = ["https://dead.example.test/a.png", "https://dead.example.test/b.png"]
         live = "https://logos.example.test/c.png"
         self.write_channels([dead[0], dead[1], dead[0], dead[1], live, dead[0]])
@@ -309,10 +312,12 @@ class LogoFolderLockTest(LogoRunCase):
             return PNG, "image/png"
         code, summary, _, _ = self.run_fetch(fetcher)
         self.assertEqual((code, calls), (0, [dead[0], dead[1], live]))
-        self.assertEqual((summary["failed"], summary["fetched"], summary["reasons"]), (2, 1, {"logo_fetch": 2}), summary)
+        self.assertEqual((summary["failed"], summary["fetched"], summary["reasons"], summary["skippedFailed"]),
+                         (2, 1, {"logo_fetch": 2}, 0), summary)
         del calls[:]
-        self.run_fetch(fetcher)
-        self.assertEqual(calls, [dead[0], dead[1]], "across runs a failed URL is tried again (stated, not changed)")
+        code, summary, _, _ = self.run_fetch(fetcher)
+        self.assertEqual((code, calls), (0, []), "across runs a failed URL was tried again")
+        self.assertEqual((summary["failed"], summary["cached"], summary["skippedFailed"]), (0, 1, 2), summary)
 
     def test_a_logo_gets_no_more_than_what_is_left_of_the_run(self):
         # The round-2 recheck's M8: `min(LOGO_DEADLINE, remaining)` replaced
@@ -556,6 +561,167 @@ class LogoFolderAgeTest(LogoRunCase):
         self.assertEqual(payload.get("staleTemps"), 2, payload)
         self.assertEqual(sorted(os.listdir(folder)), [helper.CHANNELS_FILE, helper.LOGO_SUBDIR])
         self.assertEqual(os.listdir(folder / helper.LOGO_SUBDIR), ["0000aaaa"])
+
+
+class LogoFailureMemoTest(LogoRunCase):
+    """D-LOGO-22: logo-failed.json beside the folder, the run's memory of
+    failed addresses across runs, with one TTL of a day."""
+
+    DEAD = ["https://dead.example.test/a.png", "https://dead.example.test/b.png"]
+    LIVE = "https://logos.example.test/c.png"
+
+    def memo_path(self):
+        return self.cache / helper.LOGO_FAILED_FILE
+
+    def memo(self):
+        return json.loads(self.memo_path().read_text(encoding="utf-8"))
+
+    def fetcher(self, calls, dead=None, delay=0.0):
+        dead = self.DEAD if dead is None else dead
+
+        def fetch(url, timeout, budget=None):
+            calls.append(url)
+            if delay:
+                time.sleep(delay)
+            if url in dead:
+                raise helper.HelperError("logo_fetch", "could not fetch a logo from dead.example.test: TimeoutError")
+            return PNG, "image/png"
+        return fetch
+
+    def test_a_dead_head_no_longer_starves_the_live_logos_behind_it(self):
+        # The row's unnamed half: with the run's deadline lowered to about
+        # one failed fetch's worth, two dead addresses ahead of a live one
+        # ate the whole run, and the next run walked the same head again,
+        # so the live logo never landed. With the memo, run 2 skips the
+        # head and fetches it. Red on a9d20f9: postponed on every run.
+        self.write_channels([self.DEAD[0], self.DEAD[1], self.LIVE])
+        calls = []
+        fetch = self.fetcher(calls, delay=0.2)
+        with mock.patch.object(helper, "LOGO_RUN_DEADLINE", 0.3, create=True):
+            code, first, _, _ = self.run_fetch(fetch)
+            self.assertEqual((code, first["failed"], first["postponed"], first["runExpired"]), (0, 2, 1, True), first)
+            self.assertEqual(calls, self.DEAD)
+            del calls[:]
+            code, second, announced, _ = self.run_fetch(fetch)
+        self.assertEqual((code, calls), (0, [self.LIVE]), "the dead head was walked again")
+        self.assertEqual((second["fetched"], second["skippedFailed"], second["postponed"]), (1, 2, 0), second)
+        self.assertEqual(announced, [helper.logo_filename(self.LIVE)])
+        self.assertEqual(self.on_disk(), [helper.logo_filename(self.LIVE)])
+
+    def test_an_entry_expires_after_a_day_and_a_fresh_one_holds(self):
+        self.write_channels(self.DEAD)
+        now = int(time.time())
+        self.memo_path().write_text(json.dumps({"version": 1, "failed": {
+            helper.logo_filename(self.DEAD[0]): {"at": now - helper.LOGO_FAILED_TTL - 1, "reason": "logo_fetch"},
+            helper.logo_filename(self.DEAD[1]): {"at": now - 60, "reason": "logo_fetch"}}}), encoding="utf-8")
+        calls = []
+        code, summary, _, _ = self.run_fetch(self.fetcher(calls))
+        self.assertEqual((code, calls), (0, [self.DEAD[0]]), "an expired entry held, or a fresh one did not")
+        self.assertEqual((summary["failed"], summary["skippedFailed"]), (1, 1), summary)
+        self.assertEqual(helper.LOGO_FAILED_TTL, helper.DEFAULT_EPG_MAX_AGE)
+        # Tried again and failed again: its entry is refreshed, the fresh
+        # one kept, and the file still names nothing but hashes and codes.
+        entries = self.memo()["failed"]
+        self.assertEqual(sorted(entries), sorted(helper.logo_filename(u) for u in self.DEAD))
+        self.assertGreaterEqual(entries[helper.logo_filename(self.DEAD[0])]["at"], now)
+
+    def test_a_refusal_at_the_gate_is_remembered_like_a_timeout(self):
+        # write_logo's refusals (here: bytes that are not the type claimed)
+        # re-fetched every run too; the memo covers every HelperError alike.
+        self.write_channels([self.DEAD[0], self.LIVE])
+        calls = []
+
+        def fetch(url, timeout, budget=None):
+            calls.append(url)
+            return (b"not a png at all" if url == self.DEAD[0] else PNG), "image/png"
+        code, first, _, _ = self.run_fetch(fetch)
+        self.assertEqual((code, first["refusedOnPolicy"], first["reasons"]), (0, 1, {"logo_bytes": 1}), first)
+        self.assertEqual(self.memo()["failed"][helper.logo_filename(self.DEAD[0])]["reason"], "logo_bytes")
+        del calls[:]
+        code, second, _, _ = self.run_fetch(fetch)
+        self.assertEqual((code, calls, second["refusedOnPolicy"], second["skippedFailed"]), (0, [], 0, 1), second)
+
+    def test_the_memo_is_private_bounded_and_names_no_address(self):
+        urls = ["https://dead.example.test/%d.png" % i for i in range(3)]
+        self.write_channels(urls)
+        calls = []
+        with mock.patch.object(helper, "LOGO_FAILED_MAX", 2, create=True):
+            code, summary, _, _ = self.run_fetch(self.fetcher(calls, dead=urls))
+        self.assertEqual((code, summary["failed"]), (0, 3), summary)
+        path = self.memo_path()
+        self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+        text = path.read_text(encoding="utf-8")
+        for leak in ("dead.example.test", "https", "/0.png", "/", "example"):
+            self.assertNotIn(leak, text, leak)
+        entries = self.memo()["failed"]
+        self.assertEqual(len(entries), 2, "a full memo recorded a third entry")
+        self.assertEqual(sorted(entries), sorted(helper.logo_filename(u) for u in urls[:2]))
+        for name, entry in entries.items():
+            self.assertRegex(name, r"^[0-9a-f]{8}$")
+            self.assertEqual(sorted(entry), ["at", "reason"])
+            self.assertIsInstance(entry["at"], int)
+            self.assertEqual(entry["reason"], "logo_fetch")
+        # The third, unrecorded address is tried again; the two held are not.
+        del calls[:]
+        with mock.patch.object(helper, "LOGO_FAILED_MAX", 2, create=True):
+            code, summary, _, _ = self.run_fetch(self.fetcher(calls, dead=urls))
+        self.assertEqual((calls, summary["skippedFailed"]), ([urls[2]], 2), summary)
+        self.assertEqual(helper.LOGO_FAILED_MAX, 5000)
+
+    def test_a_memo_that_is_not_ours_is_an_empty_memo_and_is_rewritten_clean(self):
+        self.write_channels([self.DEAD[0]])
+        self.memo_path().write_text(json.dumps({"version": 1, "failed": {
+            "../x": {"at": 1, "reason": "r"}, "0000aaaa": {"at": "soon", "reason": "r"},
+            "0000bbbb": {"at": 9e18, "reason": "https://u:p@h/x"}, "0000cccc": "no"}}), encoding="utf-8")
+        calls = []
+        code, summary, _, _ = self.run_fetch(self.fetcher(calls))
+        self.assertEqual((code, calls, summary["skippedFailed"]), (0, [self.DEAD[0]], 0), summary)
+        entries = self.memo()["failed"]
+        # The future-dated entry reads as now and keeps a one-word reason;
+        # the malformed ones are gone.
+        self.assertEqual(sorted(entries), ["0000bbbb", helper.logo_filename(self.DEAD[0])])
+        self.assertEqual(entries["0000bbbb"]["reason"], "failed")
+        self.assertLessEqual(entries["0000bbbb"]["at"], int(time.time()))
+
+    def test_the_memo_is_written_when_the_deadline_passes_not_only_at_the_end(self):
+        # A run the shell SIGTERMs reaches no `finally`: the memo must be on
+        # disk by the time the deadline is first seen past. The kill is
+        # played by a logo_filename that raises on the channel AFTER the
+        # first postponed one -- nothing of the run's end runs after it.
+        self.write_channels([self.DEAD[0], self.LIVE, "https://logos.example.test/d.png"])
+        real = helper.logo_filename
+        names = []
+
+        class Killed(BaseException):
+            pass
+
+        def naming(url):
+            names.append(url)
+            if len(names) == 3:
+                raise Killed()
+            return real(url)
+        calls = []
+        with mock.patch.object(helper, "LOGO_RUN_DEADLINE", 0.3, create=True), \
+                mock.patch.object(helper, "logo_filename", naming):
+            with self.assertRaises(Killed):
+                self.run_fetch(self.fetcher(calls, delay=0.35))
+        self.assertEqual(calls, [self.DEAD[0]])
+        self.assertEqual(sorted(self.memo()["failed"]), [real(self.DEAD[0])], "the memo was not written at the deadline")
+
+    def test_logos_clear_drops_the_memo_with_the_folder(self):
+        self.write_channels([self.DEAD[0], self.LIVE])
+        calls = []
+        self.run_fetch(self.fetcher(calls))
+        self.assertTrue(self.memo_path().exists())
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):
+            code = helper.main(["cache", "--cache-dir", str(self.root), "logos-clear", "--key", self.cache.name])
+        self.assertEqual(code, 0, out.getvalue())
+        self.assertFalse(self.memo_path().exists(), "the memo survived the user's reset")
+        self.assertFalse(self.logo_dir.exists())
+        del calls[:]
+        self.run_fetch(self.fetcher(calls))
+        self.assertEqual(calls, [self.DEAD[0], self.LIVE], "after the reset every address is tried again")
 
 
 class SharedFixtureTest(LogoRunCase):

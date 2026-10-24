@@ -310,10 +310,15 @@ def cache_logos_clear(directory: str, key: str) -> dict[str, Any]:
     exposure D-LOGO-4 found in the leftovers themselves, which there is no
     reason to recreate on stdout (rule 5).
     """
-    path = os.path.join(source_dir(directory, key), LOGO_SUBDIR)
+    source = source_dir(directory, key)
+    path = os.path.join(source, LOGO_SUBDIR)
     before = subdir_census(path)
     removed = remove_cache_subdir(path)
     after = subdir_census(path)
+    # D-LOGO-22: the failure memo goes with the folder, so the user's reset
+    # is a reset -- every address, the ones that failed included, is tried
+    # again by the next fetch. Not counted: it is no logo.
+    remove_regular(os.path.join(source, LOGO_FAILED_FILE))
     # `files` and `bytes` are the BEFORE counts, not before-minus-after, and
     # deliberately so: remove_cache_subdir unlinks every regular entry or
     # raises, so after[0] and after[1] are always zero and a subtraction is a

@@ -132,6 +132,17 @@ class RemoveTest(CacheTestCase):
         self.assertFalse((self.sources / KEY).exists())
         self.assertEqual(self.names(self.sources / OTHER), ["channels.json"])   # untouched
 
+    def test_the_logo_failure_memo_goes_with_the_source(self):
+        # D-LOGO-22: logo-failed.json is a known name, so a removed source
+        # takes its memo along and the directory is emptied; before, the
+        # memo kept the directory as an unknown file would.
+        self.seed(self.sources / KEY, (*FILES, "logo-failed.json"))
+        code, payload, _ = self.cache_cmd("remove", "--key", KEY)
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["removed"], sorted([*FILES, "logo-failed.json"]))
+        self.assertEqual(payload["kept"], [])
+        self.assertFalse((self.sources / KEY).exists())
+
     def test_unknown_files_keep_the_directory(self):
         self.seed(self.sources / KEY, ("channels.json",))
         (self.sources / KEY / "notes.txt").write_text("mine", encoding="utf-8")

@@ -194,8 +194,13 @@ FAILED_FILE = "failed.json"
 # FAILED_FILE is in this tuple deliberately: it is what makes a removed
 # source take its failure marks with it, which is D-LOGO-4's lesson applied
 # before the defect rather than after it.
+# D-LOGO-22: the per-source memo of logo addresses whose fetch failed,
+# beside channels.json and never inside logos/ (whose census counts
+# entries); in CACHE_FILES for FAILED_FILE's reason, so a removed source
+# takes it along and clear_source_dir can still empty the directory.
+LOGO_FAILED_FILE = "logo-failed.json"
 CACHE_FILES = (CHANNELS_FILE, PLAYLIST_STATUS_FILE, EPG_NOW_FILE, EPG_STATUS_FILE, EPG_WINDOW_FILE,
-               FAILED_FILE)
+               FAILED_FILE, LOGO_FAILED_FILE)
 EPG_CACHE_FILES = (EPG_WINDOW_FILE, EPG_NOW_FILE, EPG_STATUS_FILE)
 # The one subdirectory a source owns. Named here rather than spelled in
 # three places, because `cache logos-clear` deletes what `logos --fetch`
@@ -204,6 +209,17 @@ EPG_CACHE_FILES = (EPG_WINDOW_FILE, EPG_NOW_FILE, EPG_STATUS_FILE)
 LOGO_SUBDIR = "logos"
 TEMP_PREFIX = ".tmp-"
 DEFAULT_EPG_MAX_AGE = 86400
+# D-LOGO-22 (the lead's ruling of 2026-10-24): a logo address that failed
+# -- timeout, refusal at the gate, an HTTP error, a header the bounds
+# refused -- is not tried again for a day, the one TTL the memo has
+# (DEFAULT_EPG_MAX_AGE's figure), so a dead host costs one try a day
+# rather than one a run; and the memo holds at most LOGO_FAILED_MAX
+# entries (MAX_LOGO_FILES' figure, 05-ipc-logos.py; the cap on the folder
+# the memo stands beside), a full one recording nothing new until an
+# entry expires. The memo's constants live here because the parts
+# compile in order and 06-failed.py reads them; its code is there.
+LOGO_FAILED_TTL = DEFAULT_EPG_MAX_AGE
+LOGO_FAILED_MAX = 5000
 # Channel id schemes (ARCHITECTURE.md decision 6). Scheme 1 shipped from 0.1
 # to 0.7: `t:<tvg-id>` when unique in the playlist, else `u:<fnv1a32(url)>`.
 # The stream URL of an Xtream provider carries the account password, so every
