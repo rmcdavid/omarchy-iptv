@@ -675,7 +675,7 @@ focused field and the form values in masked form with their lengths; plus
 raw strings), `signals()` (the last 20 signal payloads), and
 `failPersist(bool)`. **[v0.5]** `failPersist true` no longer makes
 `updateEntryInline` return `false`; it takes the function **off the fake shell
-api** entirely, the way a host that cannot rewrite our bar entry leaves it,
+api** entirely (SR34: the fake reproduces the host's plumbing exactly), the way a host that cannot rewrite our bar entry leaves it,
 because a `false` return from a writable entry is the host's `!dirty` branch
 and means "already stored", i.e. success. Two verbs were added with the
 D-LIVE-20 fix: `setStored(key, value)` stores a setting without the user-config
@@ -1111,9 +1111,9 @@ the section 2 commands, never as failures; the rulings are the expectation.
 | SRC-DEC-14 | the 51st source | no `too_many` copy | `too_many` code | a message (`Sources is full - remove one first` or similar) and `Add source` / `a` disabled at the cap |
 | SRC-DEC-15 | persist failure copy and the CLI fallback | no copy | R2: `sourcesPersistFailed`, fallback argv `omarchy bar put` / `set` | a result-line message; the fallback must be off in the harness (a stub `omarchy` on PATH) |
 | SRC-DEC-16 | retry affordance and error marker in rows | 5.2 rows have no error segment; retry = Enter again | `retrySource(id)`, `errorReason` in rows | Enter again is the retry; rows show `not loaded yet` only (no session error text) unless UX adds a segment |
-| SRC-DEC-17 | mask of `type` / `output` | 4.4 example masks them | SR4 keeps them visible | SR4 stands; the UX wireframes 3.1.2 / 3.3.1 need the two values un-masked (docs fix) |
+| SRC-DEC-17 | mask of `type` / `output` | 4.4 example masks them | SR4 keeps them visible | SR4 stands (SR27); the UX wireframes 3.1.2 / 3.3.1 need the two values un-masked (docs fix) |
 | SRC-DEC-18 | `Not an M3U file` vs `Not an M3U playlist` | 5.5 both spellings (URL / path rows) | shipped `statusReason` says `Not an M3U playlist` | one spelling |
-| SRC-DEC-19 | `Model.LIMITS` vs ARCH constant names | SR5 `Model.LIMITS` | 3 `MAX_SOURCE_URL` etc. | both may exist; QA greps for `LIMITS` |
+| SRC-DEC-19 | `Model.LIMITS` vs ARCH constant names | SR5 `Model.LIMITS` | 3 `MAX_SOURCE_URL` etc. | both may exist (SR29: `Model.LIMITS` is canonical, named constants may alias it); QA greps for `LIMITS` |
 | SRC-DEC-20 | live update path | - | 8.5 item 1 `git pull` | the clone's origin is the local repo; decide local `omarchy plugin update` or re-point to GitHub after the push |
 | SRC-DEC-21 | extra harness verbs | - | 8.4 list | add `cancelProbe`, `editMasked(id)`, `signals()`, and `state()` fields for the guide form (masked values + lengths, focus, mode, returnMode); optional `failPersist` |
 | SRC-DEC-22 | list order | wireframe 3.2.1 (no stated rule) | `sourceRows`: active first, then `lastUsed` desc [UX-ASSUMPTION] | state the rule in UX 5.2 |
