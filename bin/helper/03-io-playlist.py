@@ -178,8 +178,8 @@ class FetchDeadline:
     interpreter until it is done. The one on this path was the host-name
     lookup -- getaddrinfo runs in the C library, which retries its own poll
     after a signal -- so a lookup ended on the system resolver's timeout and
-    the handler ran then. MEASURED 2026-10-24 (D-SRC-62,
-    scripts/dev-harness/spikes/resolver-overrun, a user namespace whose
+    the handler ran then. MEASURED 2026-10-24 (D-SRC-62, the
+    resolver-overrun spike on the dev branch, a user namespace whose
     only resolver never answers): with a 0.5 s deadline the `playlist` verb
     answered `timeout` after 1.26-1.28 s under `options timeout:1
     attempts:1` and after 10.29-10.35 s under glibc's defaults, the
@@ -290,7 +290,16 @@ def resolve_within(host: str, port: int, timeout: float) -> list[Any]:
         pass
     try:
         worker = threading.Thread(target=lookup, name="omarchy-iptv-resolve", daemon=True)
-        worker.start()
+        try:
+            worker.start()
+        except RuntimeError as error:
+            # No thread to be had (a memory limit too low for one more
+            # mapping, the D-M3U-1 tests' very-low-limit case; a thread
+            # ceiling): the lookup runs here, under the alarm alone, as it
+            # did before D-SRC-62, and says so once. A verb that is about to
+            # refuse for memory still refuses for memory, not for this.
+            log("host-name lookup: no thread for it (%s); this lookup is not bounded by the deadline" % type(error).__name__)
+            return socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
     finally:
         try:
             threading.stack_size(previous)
