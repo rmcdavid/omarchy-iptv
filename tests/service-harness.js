@@ -87,6 +87,7 @@ function makeIds(h) {
     stateModeProc: proc("stateModeProc"),
     hyprWhichProc: proc("hyprWhichProc"),
     hyprInfoProc: proc("hyprInfoProc"),
+    hyprInfoStdout: { text: "" },
     probeWatchdog: timer("probeWatchdog"),
     // D-SRC-37 (c): the bounds on the four slots that had none. Each is
     // driven from its own Timer block in the tree (interval and onTriggered)

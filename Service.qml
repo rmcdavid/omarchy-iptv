@@ -6460,7 +6460,7 @@ Item {
   }
   Connections {
     target: hyprInfoProc
-    function onExited(exitCode, exitStatus) { root.handlePipInfoExit(exitCode, hyprInfoStdout.text) }
+    function onExited(exitCode, exitStatus) { root.handlePipInfoExit(exitCode) }
   }
 
   // Anything else - an older Hyprland on the hyprlang provider, or a
@@ -6468,9 +6468,9 @@ Item {
   // dispatch language we do not speak. PiP is then hidden rather than
   // broken: `p` says so immediately instead of dispatching strings that
   // cannot parse and calling it `dispatch_failed` fifteen seconds later.
-  function handlePipInfoExit(exitCode, text) {
+  function handlePipInfoExit(exitCode) {
     pipProbeWatchdog.stop()
-    root.pipProvider = /configProvider:\s*lua/i.test(String(text)) ? "lua" : "other"
+    root.pipProvider = /configProvider:\s*lua/i.test(String(hyprInfoStdout.text)) ? "lua" : "other"
     root.pipAvailable = exitCode === 0 && root.pipProvider === "lua"
   }
 

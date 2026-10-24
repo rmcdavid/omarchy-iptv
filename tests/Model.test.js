@@ -15674,7 +15674,7 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     const rearmed = [i.running, wd.running]
     h.elapse(h.root.helperTimeoutMs)
     const firedInfo = [w.signals.length, i.signals.slice()]
-    i.running = false; h.root.handlePipInfoExit(1, "")
+    i.running = false; h.root.handlePipInfoExit(1)
     return [armed, firedWhich, afterWhich, rearmed, firedInfo, wd.running, h.root.pipAvailable, h.compileErrors]
   }, [[true, true], [[15], []], [false, false], [true, true], [1, [15]], false, false, []])
   // The inventory, as a check rather than a grep in a write-up: every
