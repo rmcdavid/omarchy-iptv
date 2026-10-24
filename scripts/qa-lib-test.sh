@@ -858,6 +858,101 @@ is "and asks run.sh to serve one, detached so a restart can be tested" \
 is "no scenario here plays a dead URL and then asserts about the player" \
    "$(qa_count 'ipc play "t:(bbc|itv|sky|dw|arte|zdf|kids|expired)' "$PS5")" "0"
 
+# ================================ qa_stop_pid (F-HARNESS-32)
+
+section "qa_stop_pid / F-HARNESS-32: one recorded pid, TERM then KILL after a bound"
+
+# The qa_reap_players ladder over a single pid, for the processes that were
+# still ended with TERM alone: run.sh's foreground shell and fixture server
+# (its exit cleanup and `reap`, which also carried `pkill -f` patterns), its
+# detached shell (an inline copy of the ladder), and the text, tls and
+# sources scenarios' servers. Driven against a stand-in that ignores TERM,
+# one that honours it, a zombie child, a process that is NOT our child, and
+# the old form.
+sp_deaf_sh="$TMP/sp-deaf.sh"
+printf '#!/bin/bash\ntrap "" TERM\n: >"$1"\nwhile :; do sleep 0.1; done\n' >"$sp_deaf_sh"
+chmod +x "$sp_deaf_sh"
+"$sp_deaf_sh" "$TMP/sp-deaf.ready" >/dev/null 2>&1 & sp_deaf=$!
+qa_wait_nonempty "$TMP/sp-deaf.ready" 50 >/dev/null 2>&1 || sleep 0.5
+# The old form, verbatim from a9d20f9's run.sh cleanup: `kill "$pid"`, done.
+kill "$sp_deaf" 2>/dev/null
+sleep 0.5
+is "old form: TERM alone leaves a TERM-ignoring child running" \
+   "$(kill -0 "$sp_deaf" 2>/dev/null && echo alive || echo gone)" "alive"
+sp_err=$(qa_stop_pid "$sp_deaf" 1 "stand-in" 2>&1 >/dev/null); sp_rc=$?
+is "qa_stop_pid ends it within the grace, by KILL, and reports 0" \
+   "$sp_rc $(kill -0 "$sp_deaf" 2>/dev/null && echo alive || echo gone)" "0 gone"
+is "and names the KILL and the pid on stderr" \
+   "$([[ $sp_err == *"sending KILL"* && $sp_err == *"$sp_deaf"* && $sp_err == *"stand-in"* ]] && echo said || echo "silent: $sp_err")" "said"
+ck "and the zombie is collected (a child that exited is not left for the parent to find)" \
+   '! kill -0 "$sp_deaf" 2>/dev/null'
+bash -c 'while :; do sleep 0.1; done' >/dev/null 2>&1 & sp_kind=$!
+sleep 0.2
+sp_err=$(qa_stop_pid "$sp_kind" 5 2>&1 >/dev/null); sp_rc=$?
+is "a child that honours TERM is gone with no KILL and nothing on stderr" \
+   "$sp_rc $(kill -0 "$sp_kind" 2>/dev/null && echo alive || echo gone) [$sp_err]" "0 gone []"
+# A zombie: a process that has exited and whose parent has not waited for
+# it. `kill -0` on it succeeds, so a ladder polling `kill -0` alone would
+# see it alive forever and report that it survived SIGKILL. bash collects
+# its own background children as they exit, so the zombie is made under a
+# python parent that never waits (and sleeps until it is ended by pid).
+python3 -c 'import subprocess, sys, time
+p = subprocess.Popen(["true"]); time.sleep(0.3); print(p.pid, flush=True); time.sleep(60)' >"$TMP/sp-zombie.pid" 2>/dev/null & sp_zparent=$!
+qa_wait_nonempty "$TMP/sp-zombie.pid" 5 || true
+sp_zombie=$(tr -d ' \n' <"$TMP/sp-zombie.pid")
+is "control: the exited child is a zombie, and kill -0 still answers yes" \
+   "$(awk '{print $3}' "/proc/$sp_zombie/stat" 2>/dev/null) $(kill -0 "$sp_zombie" 2>/dev/null && echo yes || echo no)" "Z yes"
+sp_err=$(qa_stop_pid "$sp_zombie" 1 2>&1 >/dev/null); sp_rc=$?
+is "a zombie counts as gone within one poll, and nothing is sent or said" \
+   "$sp_rc [$sp_err]" "0 []"
+kill -KILL "$sp_zparent" 2>/dev/null; wait "$sp_zparent" 2>/dev/null
+# Not our child: the detached shell `run.sh reap` ends was started by an
+# earlier invocation. A grandchild whose parent has gone is the same shape.
+sp_orphan=$( (bash -c 'while :; do sleep 0.1; done' >/dev/null 2>&1 & echo $!) )
+sleep 0.2
+is "control: the orphan is alive and is not our child" \
+   "$(kill -0 "$sp_orphan" 2>/dev/null && echo alive || echo gone) $(ps -o ppid= -p "$sp_orphan" | tr -d ' ' | awk -v me=$$ '{print ($1 == me) ? "child" : "notchild"}')" "alive notchild"
+sp_err=$(qa_stop_pid "$sp_orphan" 5 2>&1 >/dev/null); sp_rc=$?
+is "a process that is not our child is ended all the same, without a wait" \
+   "$sp_rc $(kill -0 "$sp_orphan" 2>/dev/null && echo alive || echo gone)" "0 gone"
+st "an empty pid is nothing to do, status 0" 0 qa_stop_pid ""
+st "a pid that is not a number is refused with 2" 2 qa_stop_pid "12ab"
+st "a pid that is already gone is 0" 0 qa_stop_pid "$sp_kind"
+# run.sh, DRIVEN: a deaf stand-in whose command line carries this scratch
+# directory's fixture-server pattern, recorded in server.pid the way
+# start_server records the real one; `run.sh reap` on that directory ends it
+# by that pid, says it had to KILL, and a pid file naming a process that is
+# NOT the server (a recycled pid) is left alone. The player half of reap is
+# driven above (F-HARNESS-30).
+sp_scr="$TMP/sp-scratch"; mkdir -p "$sp_scr/fixtures"
+sp_pat="http.server 8765 --bind 127.0.0.1 --directory $sp_scr/fixtures"
+"$sp_deaf_sh" "$TMP/sp-srv.ready" "$sp_pat" >/dev/null 2>&1 & sp_srv=$!
+qa_wait_nonempty "$TMP/sp-srv.ready" 50 >/dev/null 2>&1 || sleep 0.5
+printf '%s\n' "$sp_srv" >"$sp_scr/server.pid"
+sp_err=$(OMARCHY_IPTV_HARNESS_DIR=$sp_scr "$ROOT/scripts/dev-harness/run.sh" reap 2>&1 >/dev/null)
+is "run.sh reap ends the recorded fixture server (KILL behind the TERM), says so, and drops the pid file" \
+   "$(kill -0 "$sp_srv" 2>/dev/null && echo alive || echo gone) $([[ $sp_err == *"sending KILL"* && $sp_err == *"fixture server"* ]] && echo said || echo "silent: $sp_err") $([[ -e $sp_scr/server.pid ]] && echo pidfile || echo nopidfile)" "gone said nopidfile"
+bash -c 'while :; do sleep 0.1; done' >/dev/null 2>&1 & sp_other=$!
+sleep 0.2
+printf '%s\n' "$sp_other" >"$sp_scr/server.pid"
+OMARCHY_IPTV_HARNESS_DIR=$sp_scr "$ROOT/scripts/dev-harness/run.sh" reap >/dev/null 2>&1
+is "a server.pid naming a process that is not the server (a recycled pid) signals nothing" \
+   "$(kill -0 "$sp_other" 2>/dev/null && echo alive || echo gone)" "alive"
+kill -KILL "$sp_other" 2>/dev/null; wait "$sp_other" 2>/dev/null
+# The shapes, as bookkeeping (rule 14: the driven checks above are the
+# proof): no `pkill -f` is left in run.sh, and every scenario server kill
+# goes through the ladder behind its ownership guard.
+is "run.sh ends nothing by a pkill pattern any more (code lines; its comments may say the word)" \
+   "$(qa_count '^ *pkill -f' "$ROOT/scripts/dev-harness/run.sh")" "0"
+is "run.sh's cleanup, detached-shell stop and server stop all go through qa_stop_pid" \
+   "$(awk '/^cleanup\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "') $(awk '/^stop_detached_shell\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "') $(awk '/^stop_recorded_server\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "')" "2 1 1"
+sp_scen=""
+for sc in text tls sources; do
+  sp_scen="$sp_scen$sc:$(qa_count 'kill "\$(SERVER_PID|OWN_CHILD|SILENT_PID)"' "$ROOT/scripts/dev-harness/$sc-scenario.sh"):$(qa_count 'qa_stop_pid "\$(SERVER_PID|OWN_CHILD|SILENT_PID)"' "$ROOT/scripts/dev-harness/$sc-scenario.sh") "
+done
+is "the text, tls and sources scenarios end their servers with the ladder, never a bare kill (TERM-alone sites : ladder sites)" \
+   "$sp_scen" "text:0:3 tls:0:4 sources:0:1 "
+
 section "qa_openms: the open-budget number, and the payload that could not fail"
 
 # The condition that used to make this check pass silently, driven for real.

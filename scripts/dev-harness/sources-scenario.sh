@@ -58,7 +58,10 @@ svc()  { py "d['service']$1" "$(ipc state)"; }
 key_of() { python3 -c 'import json,sys; s=[x for x in json.load(open(sys.argv[1]))["sources"] if x["label"]==sys.argv[2]]; print(s[0]["key"] if s else "")' "$STATE" "$1"; }
 
 cleanup() {
-  [[ -n $SILENT_PID ]] && kill "$SILENT_PID" 2>/dev/null
+  # F-HARNESS-32: the silent listener by TERM, a bound, then KILL
+  # (qa_stop_pid). The harness run.sh is TERMed and WAITED for, not killed:
+  # its own EXIT trap is what ends the shell, the server and the player.
+  [[ -n $SILENT_PID ]] && qa_stop_pid "$SILENT_PID" 5 "silent listener"
   if [[ -n $HARNESS_PID ]]; then kill -TERM "$HARNESS_PID" 2>/dev/null; wait "$HARNESS_PID" 2>/dev/null; fi
   return 0
 }

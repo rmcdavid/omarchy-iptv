@@ -94,6 +94,9 @@
 #   state/    XDG_STATE_HOME  -> state/omarchy-iptv/state.json
 #   runtime/  XDG_RUNTIME_DIR -> runtime/omarchy-iptv/mpv.sock (+ hypr symlink so hyprctl works)
 #   fixtures/ generated playlist / test.ts (MPEG-TS, like a live stream; an MP4 with a trailing moov is not seekable over HTTP)
+#   qs<N>.pid, server.pid  the detached shell's and the fixture server's RECORDED pids: what
+#             `reap` and the EXIT trap end, by pid, with TERM then KILL (F-HARNESS-32);
+#             nothing here is ended by a `pkill -f` pattern
 # Never run against a real network stream from here; the fixture uses 127.0.0.1 only.
 # The playlist/EPG URL is never printed (it may carry credentials); only
 # scheme://host is echoed (S-08). Everything this script starts (fixture
@@ -202,12 +205,36 @@ reap_player() {
   return 0
 }
 
+# F-HARNESS-32. The fixture server's pid, RECORDED when start_server starts
+# it (its own direct child, no setsid, so `$!` is the listener and not a
+# wrapper) in $SCRATCH/server.pid, which is how `reap` in a LATER invocation
+# can end it by pid rather than by the `pkill -f` pattern that used to sit
+# here. The pid is trusted only while its command line still carries this
+# scratch directory's server pattern (qa_cmdline), so a recycled pid is never
+# signalled -- the still_the_player discipline, one process over.
+server_pidfile() { echo "$SCRATCH/server.pid"; }
+stop_recorded_server() {
+  local pidfile pid cmd; pidfile=$(server_pidfile)
+  pid=$(cat "$pidfile" 2>/dev/null)
+  if [[ -n $pid ]] && cmd=$(qa_cmdline "$pid") && [[ $cmd == *"$(fixture_server_pattern)"* ]]; then
+    qa_stop_pid "$pid" 5 "fixture server"
+  fi
+  rm -f "$pidfile"
+  return 0
+}
+
 cleanup() {
-  [[ -n $SERVER_PID ]] && kill "$SERVER_PID" 2>/dev/null
-  [[ -n $QS_PID ]] && kill "$QS_PID" 2>/dev/null
-  # Belt and braces: only processes bound to THIS scratch dir are matched.
-  pkill -f "quickshell -p $SCRATCH/root" 2>/dev/null
-  pkill -f "$(fixture_server_pattern)" 2>/dev/null
+  # F-HARNESS-32: by recorded pid, TERM then KILL after a bound (qa_stop_pid,
+  # scripts/qa-lib.sh), never a `pkill -f` pattern -- what this did not
+  # start it cannot end. The foreground shell sits under `timeout`, so the
+  # quickshell beneath it is found by PARENT and exact name (never `-f`) and
+  # ended too, or a KILL on the wrapper would orphan it.
+  stop_recorded_server
+  if [[ -n $QS_PID ]]; then
+    local inner; inner=$(pgrep -P "$QS_PID" -x quickshell 2>/dev/null | head -1)
+    qa_stop_pid "$QS_PID" 5 "harness shell"
+    [[ -n $inner ]] && qa_stop_pid "$inner" 5 "quickshell under the timeout wrapper"
+  fi
   # --keep-player is for the restart scenario, which must outlive the shell
   # exactly the way the real player does.
   (( KEEP_PLAYER )) || reap_player
@@ -363,16 +390,18 @@ start_detached_shell() {
 # `omarchy restart shell` does to the real one: `quickshell kill` asks it to
 # exit, and nothing is sent to the player.
 stop_detached_shell() {
-  local pidfile pid i; pidfile=$(qs_pidfile)
+  local pidfile pid; pidfile=$(qs_pidfile)
   pid=$(cat "$pidfile" 2>/dev/null)
-  [[ -n $pid ]] || pid=$(pgrep -f "quickshell -p $(qs_root)$" | head -1)
-  [[ -n $pid ]] || return 0
-  kill -TERM "$pid" 2>/dev/null
-  for ((i = 0; i < 50; i++)); do
-    kill -0 "$pid" 2>/dev/null || { rm -f "$pidfile"; return 0; }
-    sleep 0.1
-  done
-  kill -KILL "$pid" 2>/dev/null
+  [[ -n $pid ]] || { rm -f "$pidfile"; return 0; }
+  # F-HARNESS-32: the TERM / bounded wait / KILL ladder that sat inline here
+  # is qa_stop_pid now (scripts/qa-lib.sh), shared with the fixture server
+  # and the foreground shell. The pid is the one start_detached_shell
+  # recorded, and ONLY that: the `pgrep -f` fallback for a shell with no pid
+  # file is gone, because a shell this script did not record is one it
+  # cannot tell from another harness's. The shell is not our child (an
+  # earlier invocation started it), which is why the ladder polls `kill -0`
+  # and never `wait`s.
+  qa_stop_pid "$pid" 5 "detached harness shell"
   rm -f "$pidfile"
   return 0
 }
@@ -456,10 +485,12 @@ start_server() {
     ffmpeg -loglevel error -y -f lavfi -i "testsrc=size=320x240:rate=15" -f lavfi -i "sine=frequency=440:sample_rate=22050" \
       -t 120 -c:v libx264 -preset ultrafast -pix_fmt yuv420p -c:a aac -b:a 32k -f mpegts "$video" || { echo "[run.sh] ffmpeg failed"; exit 1; }
   fi
-  # A previous run killed with SIGKILL could not clean up: reap its server.
-  pkill -f "$(fixture_server_pattern)" 2>/dev/null && sleep 0.2
+  # A previous run killed with SIGKILL could not clean up: end its server by
+  # the pid it recorded (F-HARNESS-32; this was a `pkill -f` pattern).
+  stop_recorded_server
   python3 -m http.server "$SERVE_PORT" --bind 127.0.0.1 --directory "$SCRATCH/fixtures" >/dev/null 2>&1 &
   SERVER_PID=$!
+  printf '%s\n' "$SERVER_PID" >"$(server_pidfile)"
   echo "[run.sh] serving $SCRATCH/fixtures on http://127.0.0.1:$SERVE_PORT (pid $SERVER_PID)"
 }
 
@@ -809,9 +840,11 @@ except Exception: print("<unreadable>")' | tr -d '\n')
     start_detached_shell
     ;;
   reap)
+    # F-HARNESS-32: the detached shell by its pid file, the fixture server by
+    # its pid file, the player by its socket argument -- each with TERM, a
+    # bound and KILL -- and no `pkill -f` pattern anywhere in this script.
     stop_detached_shell
-    pkill -f "quickshell -p $SCRATCH/root" 2>/dev/null
-    pkill -f "$(fixture_server_pattern)" 2>/dev/null
+    stop_recorded_server
     reap_player
     echo "[run.sh] reaped shell, fixture server and player for $SCRATCH"
     ;;

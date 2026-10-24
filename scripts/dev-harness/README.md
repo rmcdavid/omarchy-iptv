@@ -174,6 +174,9 @@ $OMARCHY_IPTV_HARNESS_DIR   (default $XDG_RUNTIME_DIR/omarchy-iptv-harness)
   runtime/   XDG_RUNTIME_DIR -> runtime/omarchy-iptv/mpv.sock (+ hypr -> real hypr dir)
   fixtures/  generated harness.m3u (and test.ts with --serve)
   shots/     screenshots from `run.sh shot`
+  qs.pid, server.pid  the detached shell's and the fixture server's RECORDED pids,
+             which `run.sh reap` and the EXIT trap end by pid -- TERM, a bound,
+             KILL -- never by a `pkill -f` pattern (F-HARNESS-32)
   transcripts/  one 0600 file per scenario run (0700 dir); NOT removed by
                 `run.sh clean`, because it is the run's evidence (F-M3-1)
 ```

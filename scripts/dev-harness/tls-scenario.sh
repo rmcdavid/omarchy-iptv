@@ -357,8 +357,10 @@ OWN_CHILD=""
 ours() { [[ -n ${1-} && $(ps -o ppid= -p "$1" 2>/dev/null | tr -d ' ') == "$$" ]]; }
 cleanup() {
   (( HARNESS_STARTED )) && "$RUN" reap >/dev/null 2>&1
-  (( SERVER_UP )) && ours "$SERVER_PID" && kill "$SERVER_PID" 2>/dev/null
-  ours "$OWN_CHILD" && kill "$OWN_CHILD" 2>/dev/null
+  # F-HARNESS-32: TERM, a bound, then KILL (qa_stop_pid), behind the same
+  # ownership guards -- a pid that is no longer our child is never signalled.
+  (( SERVER_UP )) && ours "$SERVER_PID" && qa_stop_pid "$SERVER_PID" 5 "rig server"
+  ours "$OWN_CHILD" && qa_stop_pid "$OWN_CHILD" 5 "unconfirmed server child"
   [[ -n $EXPORT_DIR && -d $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"
   [[ -n $PRE_DIR && -d $PRE_DIR ]] && rm -rf "$PRE_DIR"
   [[ -n $WORK && -d $WORK ]] && rm -rf "$WORK"
@@ -810,7 +812,7 @@ rig "G10 and the attacker SEES that connection end when the client walks away, w
    "$(closed stagectl)" "1"
 
 if [[ $MODE == rig ]]; then
-  (( SERVER_UP )) && ours "$SERVER_PID" && kill "$SERVER_PID" 2>/dev/null
+  (( SERVER_UP )) && ours "$SERVER_PID" && qa_stop_pid "$SERVER_PID" 5 "rig server"
   wait_port "$PORT_SELF" down 5 || true
   wait_port "$PORT_CA" down 5 || true
   echo "teardown: $(ss -ltn 2>/dev/null | grep -cE ":($PORT_SELF|$PORT_CA) ") of 2 ports still listening"
@@ -1193,7 +1195,7 @@ is "and this run's own transcript carries none either" "$leak_tr" "0"
 
 # ============================================================== teardown, proven
 "$RUN" reap >/dev/null 2>&1
-(( SERVER_UP )) && ours "$SERVER_PID" && kill "$SERVER_PID" 2>/dev/null
+(( SERVER_UP )) && ours "$SERVER_PID" && qa_stop_pid "$SERVER_PID" 5 "rig server"
 wait_port "$PORT_SELF" down 5 || true
 wait_port "$PORT_CA" down 5 || true
 until_eq 0 10 player_count || true

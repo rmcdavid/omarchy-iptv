@@ -133,8 +133,10 @@ OWN_CHILD=""
 ours() { [[ -n $1 && $(ps -o ppid= -p "$1" 2>/dev/null | tr -d ' ') == "$$" ]]; }
 cleanup() {
   "$RUN" reap >/dev/null 2>&1
-  ours "$SERVER_PID" && kill "$SERVER_PID" 2>/dev/null
-  ours "$OWN_CHILD" && kill "$OWN_CHILD" 2>/dev/null
+  # F-HARNESS-32: TERM, a bound, then KILL (qa_stop_pid), behind the same
+  # ownership guard -- a pid that is no longer our child is never signalled.
+  ours "$SERVER_PID" && qa_stop_pid "$SERVER_PID" 5 "fixture server"
+  ours "$OWN_CHILD" && qa_stop_pid "$OWN_CHILD" 5 "unconfirmed server child"
   [[ -n $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"
   rm -rf "$WORK"
 }
@@ -260,7 +262,7 @@ fi
 
 # ---- teardown, proven: the shell is gone and the port is free
 "$RUN" reap >/dev/null 2>&1
-ours "$SERVER_PID" && kill "$SERVER_PID" 2>/dev/null
+ours "$SERVER_PID" && qa_stop_pid "$SERVER_PID" 5 "fixture server"
 for i in $(seq 1 30); do ss -ltn 2>/dev/null | grep -q ":$PORT " || break; sleep 0.1; done
 qs_left=$([[ -f "$SCRATCH/qs${OMARCHY_IPTV_HARNESS_INSTANCE:-}.pid" ]] && echo "pidfile present" || echo "no pidfile")
 port_left=$(ss -ltn 2>/dev/null | grep -q ":$PORT " && echo "port $PORT STILL LISTENING" || echo "port $PORT free")
