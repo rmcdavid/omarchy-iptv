@@ -15711,16 +15711,23 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     h.root.toggleFavorite("t:two.uk"); h.runLater()
     h.elapse(2000); h.elapse(2000)   // the write wait's bound, then the released read's bound: t2 is written
     const issued = h.stateFile.events.length
+    const t2 = h.stateFile.events[1].text
     h.stateFile.failWhen = null      // t2's failure is decided; every later write lands
     h.deliverOne()                    // t1's `saved`, with t1's text, while t2 is out
     const baseAfterT1 = M.parseState(JSON.stringify(h.root.landedState)).favorites
+    // The RECORD after the earlier landing (P23 recheck, 2026-10-24): the
+    // texts after t1 and nothing before it -- onSaved's `root.recentSaves =
+    // outcome.remaining`, which was true of the code and seen by no check
+    // (deleted, 3017 green: the stale t1 text equals the new base either way).
+    const recordAfterT1 = h.root.recentSaves.slice()
     h.deliverOne()                    // t2's `saveFailed`
     const afterFail = [h.root.stateSaveFailed, h.file().favorites, h.root.stateSavesInFlight]
     h.foreign(sf => { sf.disk = pre })   // a backup from before the burst, put back
     const merged = [Object.keys(h.root.stateReloadsByReason).filter(k => /save-failed/.test(k)), h.root.userState.favorites]
     h.drain()
-    return [issued, baseAfterT1, afterFail, merged, h.file().favorites, h.root.stateSaveFailed, M.sameState(h.root.landedState, h.root.userState), h.compileErrors]
-  }, [2, ["t:one.uk"], [true, ["t:one.uk"], 0], [["foreign-save-failed"], ["t:two.uk"]], ["t:two.uk"], false, true, []])
+    return [issued, baseAfterT1, recordAfterT1.length, recordAfterT1.length === 1 && recordAfterT1[0] === t2 && t2 !== t1,
+            afterFail, merged, h.file().favorites, h.root.stateSaveFailed, M.sameState(h.root.landedState, h.root.userState), h.compileErrors]
+  }, [2, ["t:one.uk"], 1, true, [true, ["t:one.uk"], 0], [["foreign-save-failed"], ["t:two.uk"]], ["t:two.uk"], false, true, []])
 
   // D-SRC-43: a failed save's flag after a merge that leaves nothing unsaved.
   checkCall("D-SRC-43: Model.mergeLeavesNothingUnsaved -- true only when the merge IS theirs and no write of ours is in flight", () => {
