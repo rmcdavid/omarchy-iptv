@@ -117,7 +117,8 @@ export {
 } from "./model/player.mjs"
 export {
   MPV_HANDOFF_TEXT, MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase,
-  mpvHandoffName, mpvDiskName, mpvArgWarning, mpvArgWarnings, splitMpvArgs,
+  mpvHandoffName, mpvDiskName, mpvArgWarning, mpvArgWarnings,
+  MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT, mpvRefusedWarnings, splitMpvArgs,
   mpvRejectedLine, mpvRejectedName, headerArgs, MPV_RAW_PREFIX,
   mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv, helperArgv,
   playlistFetchArgv, fetchStateDir, playlistProbeArgv, epgFetchArgv,

@@ -4674,10 +4674,12 @@ check("clampSetting unknown key passthrough", Model.clampSetting("nope", "v"), "
 
 // ---- mpv ----
 check("splitMpvArgs accepts options", Model.splitMpvArgs(" --profile=low-latency --hwdec=auto-safe --no-osc "), { args: ["--profile=low-latency", "--hwdec=auto-safe", "--no-osc"], rejected: [], warnings: [] })
-check("splitMpvArgs rejects reserved and junk", Model.splitMpvArgs("--input-ipc-server=/x --title=y ; rm -rf --no-idle --cache=yes"), { args: ["--cache=yes"], rejected: ["--input-ipc-server=/x", "--title=y", ";", "rm", "-rf", "--no-idle"], warnings: [] })
+check("splitMpvArgs rejects reserved and junk", Model.splitMpvArgs("--input-ipc-server=/x --title=y ; rm -rf --no-idle --cache=yes"), { args: ["--cache=yes"], rejected: ["--input-ipc-server=/x", "--title=y", ";", "rm", "-rf", "--no-idle"],
+  // F-UX-7: the refused ones are named in `warnings` too, by option name, one `<token>` line for the junk
+  warnings: ["mpvArg --input-ipc-server refused: reserved by the plugin", "mpvArg --title refused: reserved by the plugin", "mpvArg <token> refused: not a --option", "mpvArg --no-idle refused: reserved by the plugin"] })
 check("splitMpvArgs rejects --script and --config-dir", Model.splitMpvArgs("--script=/e.lua --config-dir=/x --scripts=/y --input-ipc-client=fd://3").args, [])
 check("splitMpvArgs empty", Model.splitMpvArgs(null), { args: [], rejected: [], warnings: [] })
-check("splitMpvArgs is case-sensitive (D-QA-11)", Model.splitMpvArgs("--Profile=fast --HWDEC=auto --profile=fast"), { args: ["--profile=fast"], rejected: ["--Profile=fast", "--HWDEC=auto"], warnings: [] })
+check("splitMpvArgs is case-sensitive (D-QA-11)", Model.splitMpvArgs("--Profile=fast --HWDEC=auto --profile=fast"), { args: ["--profile=fast"], rejected: ["--Profile=fast", "--HWDEC=auto"], warnings: ["mpvArg <token> refused: not a --option"] })
 check("splitMpvArgs rejects --no- forms of every reserved option", Model.splitMpvArgs("--no-input-ipc-server --no-wayland-app-id --no-title --no-force-media-title --no-idle --no-script --no-scripts --no-config-dir --no-input-ipc-client").args, [])
 check("headerArgs maps UA/referer and appends others", Model.headerArgs({ "User-Agent": "VLC", Referer: "http://r", "X-Token": "a,b" }), ["--user-agent=VLC", "--referrer=http://r", "--http-header-fields-append=X-Token: a,b"])
 check("headerArgs drops unsafe", Model.headerArgs({ "Bad Name": "x", Ok: "line\nbreak" }), [])
@@ -4742,7 +4744,7 @@ checkCall("the working directory is never the home the shell runs in", () => {
 }, [false, false, true])
 checkCall("dirnameOf behaves like os.path.dirname on the paths this plugin uses", () => [Model.dirnameOf("/a/b/c.sock"), Model.dirnameOf("/c.sock"), Model.dirnameOf("c.sock"), Model.dirnameOf("")], ["/a/b", "/", "", ""])
 checkCall("--watch-later-dir stays reserved so a resume record cannot be aimed at $HOME", () => Model.splitMpvArgs("--watch-later-dir=/home/u --screenshot-dir=/home/u/Pictures"),
-  { args: ["--screenshot-dir=/home/u/Pictures"], rejected: ["--watch-later-dir=/home/u"], warnings: [] })
+  { args: ["--screenshot-dir=/home/u/Pictures"], rejected: ["--watch-later-dir=/home/u"], warnings: ["mpvArg --watch-later-dir refused: reserved by the plugin"] })
 checkCall("a user who wants their screenshots elsewhere still wins (last token wins)", () => {
   const a = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: STATE_DIR, extraArgs: ["--screenshot-dir=/home/u/Pictures"] })
   return a.indexOf("--screenshot-dir=" + STATE_DIR + "/screenshots") < a.lastIndexOf("--screenshot-dir=/home/u/Pictures")
@@ -5156,7 +5158,7 @@ check("M5-01: --demuxer-cache-unlink-files is reserved and --cache-on-disk is no
   [Model.MPV_RESERVED["--demuxer-cache-unlink-files"], Model.MPV_RESERVED["--cache-on-disk"], Model.MPV_DISK_WARN["--cache-on-disk"]], [true, undefined, true])
 check("M5-01: every spelling of the unlink switch is rejected, and the disk cache itself is kept and warned",
   Model.splitMpvArgs("--demuxer-cache-unlink-files=no --no-demuxer-cache-unlink-files --demuxer-cache-unlink-files=whendone --cache-on-disk"),
-  { args: ["--cache-on-disk"], rejected: ["--demuxer-cache-unlink-files=no", "--no-demuxer-cache-unlink-files", "--demuxer-cache-unlink-files=whendone"], warnings: ["mpvArg --cache-on-disk" + Model.MPV_DISK_TEXT] })
+  { args: ["--cache-on-disk"], rejected: ["--demuxer-cache-unlink-files=no", "--no-demuxer-cache-unlink-files", "--demuxer-cache-unlink-files=whendone"], warnings: ["mpvArg --cache-on-disk" + Model.MPV_DISK_TEXT, "mpvArg --demuxer-cache-unlink-files refused: reserved by the plugin", "mpvArg --no-demuxer-cache-unlink-files refused: reserved by the plugin"] })
 
 checkCall("D-SINK-4: --load-scripts is RESERVED, not merely defaulted off", function () {
   // The base argv says --load-scripts=no, but user tokens are concatenated
@@ -5206,9 +5208,12 @@ HANDOFF.cases.forEach(vector => {
 })
 checkCall("splitMpvArgs carries the warning for the tokens it KEEPS", () => Model.splitMpvArgs("--ytdl=yes --hwdec=auto"),
   { args: ["--ytdl=yes", "--hwdec=auto"], rejected: [], warnings: ["mpvArg --ytdl" + HANDOFF_TEXT] })
-checkCall("a REJECTED token never warns: it never reaches mpv (--script is reserved)",
+// F-UX-7 (2026-10-24): a REJECTED token never reaches mpv, so it draws no
+// HANDOFF sentence -- but it is no longer silent: it is named, by option
+// name, with the refused sentence, after the kept tokens' lines.
+checkCall("a REJECTED token draws no handoff warning (it never reaches mpv) but is named as refused (--script is reserved)",
   () => Model.splitMpvArgs("--script=/tmp/ytdl_hook.lua --script-opts=ytdl_hook-ytdl_path=/tmp/x").warnings,
-  ["mpvArg --script-opts" + HANDOFF_TEXT])
+  ["mpvArg --script-opts" + HANDOFF_TEXT, "mpvArg --script" + Model.MPV_REFUSED_TEXT])
 checkCall("the warning names the option and never its value (a proxy URL stays out of the sink)", () => {
   const w = Model.splitMpvArgs("--ytdl-raw-options=proxy=http://u:pw@prox.test:8080").warnings
   return [w.length, w[0].indexOf("prox.test") !== -1, w[0].indexOf("pw") !== -1, w[0]]
@@ -15588,6 +15593,31 @@ checkCall("D-SINK-14: the `@`-typo warning outranks the http sentence on one lin
           Model.formWarningLine({ kind: "url", values: { label: "", playlist: "http://h.test/x", epg: "" } }),
           Model.formAdviceLine({ kind: "url", values: { label: "", playlist: "https://h.test/x", epg: typo } }) === Model.WARN_AT_AFTER_AUTHORITY]
 }, [true, "", true])
+
+// ---- F-UX-7: a refused mpvArg is shown where the kept ones are shown ----
+// Service.playerArgWarnings is built from splitMpvArgs(...).warnings, which
+// covered KEPT tokens only; the refused list went to the journal (D-SINK-24,
+// names only) and nowhere the user looks. Now `warnings` names the refused
+// tokens too, by the same name rule, so the footer carries them.
+checkCall("F-UX-7: splitMpvArgs names a refused token in `warnings` by its option name, never its value, one line per distinct name, after the kept tokens' lines", () => {
+  const r = Model.splitMpvArgs("--tls-verify=no --volume=50 --no-tls-verify --tls-verify=yes --ytdl=yes")
+  return [r.warnings, r.args, r.warnings.some(w => w.indexOf("=no") !== -1 || w.indexOf("=yes") !== -1 || w.indexOf("50") !== -1)]
+}, [["mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT, "mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT, "mpvArg --no-tls-verify" + Model.MPV_REFUSED_TEXT],
+    ["--volume=50", "--ytdl=yes"], false])
+checkCall("F-UX-7 is a sink (rule 5): a credential-shaped refused token yields its name and nothing after the `=`; a bare credential-shaped token yields `<token>`", () => {
+  const r = Model.splitMpvArgs("--stream-lavf-o=http_proxy=http://u:pw@p.test:3128 user:pw@proxy:3128 --http-header-fields=Authorization: Bearer eyJabc --u:pw@h=1")
+  const joined = r.warnings.join("\n")
+  return [r.warnings, ["pw", "eyJ", "Bearer", "proxy", "p.test", "u:"].filter(frag => joined.indexOf(frag) !== -1)]
+}, [["mpvArg --stream-lavf-o" + Model.MPV_REFUSED_TEXT, "mpvArg <token>" + Model.MPV_REFUSED_JUNK_TEXT], []])
+checkCall("F-UX-7: the refused name is the journal's name (mpvRejectedName), so the two sinks cannot drift", () =>
+  ["--tls-verify=no", "--no-idle", "--u:pw@h=1", "rm", "--Profile=x"].map(t => [Model.mpvRefusedWarnings([t])[0].indexOf("mpvArg " + Model.mpvRejectedName(t)) === 0]),
+  [[true], [true], [true], [true], [true]])
+checkCall("F-UX-7: through Service.playerArgWarnings -- the footer list the guide reads carries the refused token, labelled as the player's", () => {
+  const H = require("./service-harness.js")
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false, mpvArgs: "--tls-verify=no --ytdl=yes" }, stateText: "", host: "lag" })
+  return [h.root.playerArgWarnings, h.compileErrors]
+}, [["Player warning: mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT, "Player warning: mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT], []])
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)

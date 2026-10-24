@@ -414,9 +414,10 @@ reach, because it configures the media library rather than the player:
 that reason.
 
 `--tls-verify` and `--stream-lavf-o` are refused rather than quietly
-overridden. Be aware of where that refusal goes: it is written to the shell's
-log, not shown to you in the guide, so if a token of yours seems to do nothing,
-that log is where to look.
+overridden, and the refusal is shown to you: the guide's footer names a
+refused option (`mpvArg --tls-verify refused: reserved by the plugin`) in the
+same line that warns about the options it keeps, by name only, never with
+the value you gave it. The shell's log carries the same names.
 
 If a player is already running when you update, the plugin does not leave it
 that way. The first time the new shell picks that player up it turns
