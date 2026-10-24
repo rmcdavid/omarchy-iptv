@@ -256,6 +256,14 @@ def host_port_of(url: str) -> str:
     `redact_urls`; `url_host` and `validate_source_url` have been right all
     along because they hand the string to a real parser or cut at the last
     at-sign, and this now does the same.
+
+    D-SINK-30 (2026-10-24). RFC 3986's reg-name admits `;`, `=` and `&`, so
+    `http://h.test;sid=SECRET/x` validates with host `h.test;sid=secret` and
+    this printed it so, where run_host_parts had cut the free-text host at
+    `:`, `;`, `=` and `&` since R32a'. The printed host[:port] now ends at
+    the first of the three (the `:` port is kept); validation is unchanged
+    (D-SINK-27). A `find` per character rather than a pattern: the helper's
+    regex guard holds every compiled pattern to a reviewed table.
     """
     match = re.match(r"^[A-Za-z][A-Za-z0-9+.\-]*://([^/?#]*)", url)
     if not match:
@@ -263,6 +271,10 @@ def host_port_of(url: str) -> str:
     authority = match.group(1)
     at = authority.rfind("@")
     hostport = authority if at == -1 else authority[at + 1:]
+    for delimiter in ";=&":
+        end = hostport.find(delimiter)
+        if end != -1:
+            hostport = hostport[:end]
     return hostport.lower()
 
 

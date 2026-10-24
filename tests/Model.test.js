@@ -5608,6 +5608,24 @@ check("sourceLabel https", Model.sourceLabel("HTTPS://Host.Test/x.m3u"), "https:
 check("sourceLabel local", [Model.sourceLabel("/home/x/list.m3u"), Model.sourceLabel("~/l.m3u"), Model.sourceLabel("file:///tmp/x.m3u")], ["local file", "local file", "local file"])
 check("sourceLabel empty / junk", [Model.sourceLabel(""), Model.sourceLabel("ftp"), Model.sourceLabel(null)], ["", "unknown source", ""])
 check("hostOf", [Model.hostOf("http://u:p@h.test/x"), Model.hostOf("/x"), Model.hostOf("")], ["h.test", "local file", ""])
+// D-SINK-30 (2026-10-24). RFC 3986's reg-name admits `;`, `=` and `&`, so
+// `http://h.test;sid=SECRET/x` validated with host `h.test;sid=secret` and
+// the DISPLAY sinks printed the parameter: sourceLabel's host group ended at
+// `:` only, and hostPortOf (the Sources row's host and default label, pinned
+// by the shared source-labels fixture above) took the authority whole. The
+// free-text redactor had cut at the four since R32a'. The printed host now
+// ends at the first `;`, `=` or `&`; validation is unchanged (D-SINK-27).
+checkCall("D-SINK-30: sourceLabel and hostOf end the host at `;`, `=` and `&`, keep a port and a bracketed literal", () =>
+  ["http://h.test;sid=SECRET/x", "http://h.test=SECRET/x", "http://h.test&p=SECRET/x", "http://u:p@h.test;sid=SECRET/x",
+   "http://h.test:8080;sid=SECRET/x", "http://[::1]:8080;sid=SECRET/x"].map(u => Model.sourceLabel(u) + " | " + Model.hostOf(u)),
+  ["http://h.test | h.test", "http://h.test | h.test", "http://h.test | h.test", "http://h.test | h.test",
+   "http://h.test | h.test", "http://[::1] | [::1]"])
+checkCall("D-SINK-30: the label fixture carries the parameter-delimiter cases, so it cannot be trimmed to green", () => {
+  const labelFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/source-labels.json"), "utf8"))
+  return [labelFixture.cases.filter(c => /;/.test(c.url)).length >= 2, labelFixture.cases.filter(c => /^[^?]*=/.test(c.url)).length >= 1,
+   labelFixture.cases.filter(c => /^[^?]*&/.test(c.url)).length >= 1,
+   labelFixture.cases.filter(c => /[;=&]/.test(c.hostPort) || /[;=&]/.test(c.label)).length]
+}, [true, true, true, 0])
 check("redactUrls replaces every URL by its host (D-QA-01)", Model.redactUrls("Failed to open http://user:pass@tv.example.net:8080/get.php?u=1&p=2."), "Failed to open tv.example.net.")
 check("redactUrls several URLs", Model.redactUrls("open https://a.b/c/d?e=f and rtsp://u:p@h:554/x fine"), "open a.b and h fine")
 check("redactUrls no urls", Model.redactUrls("plain text"), "plain text")

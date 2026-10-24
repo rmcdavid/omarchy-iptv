@@ -22,6 +22,18 @@
     { "url": "https://user:p@ss@host.example?a=1", "hostPort": "host.example", "label": "host.example",
       "why": "a query ends the authority as surely as a slash does" },
     { "url": "https://user:p@ss@host.example#f", "hostPort": "host.example", "label": "host.example",
-      "why": "and so does a fragment" }
+      "why": "and so does a fragment" },
+    { "url": "http://h.test;sid=SECRET/x", "hostPort": "h.test", "label": "h.test",
+      "why": "D-SINK-30: reg-name admits `;` and `=`, so this validates with host `h.test;sid=secret` and the row printed the parameter; the printed host ends at the first `;`, `=` or `&`, as the free-text redactor's does (R32a')" },
+    { "url": "http://h.test=SECRET/x", "hostPort": "h.test", "label": "h.test",
+      "why": "D-SINK-30: `=` alone" },
+    { "url": "http://h.test&p=SECRET/x", "hostPort": "h.test", "label": "h.test",
+      "why": "D-SINK-30: `&` alone" },
+    { "url": "http://h.test:8080;sid=SECRET/x", "hostPort": "h.test:8080", "label": "h.test:8080",
+      "why": "D-SINK-30: the port survives the cut -- the `:` is kept, the `;` ends it" },
+    { "url": "http://u:p@h.test;sid=SECRET/x", "hostPort": "h.test", "label": "h.test",
+      "why": "D-SINK-30: after the userinfo cut, the parameter cut" },
+    { "url": "http://[::1]:8080;sid=SECRET/x", "hostPort": "[::1]:8080", "label": "[::1]:8080",
+      "why": "D-SINK-30: a bracketed literal is unaffected by the cut after it" }
   ]
 }

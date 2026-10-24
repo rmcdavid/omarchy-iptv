@@ -814,12 +814,24 @@ function sourceCacheDir(cacheDir, key) {
 // it put an email username's domain on the Sources row of an Xtream
 // `/playlist/<email>/<pass>/m3u_plus` link. The form's warning
 // (sourceUrlWarning) is where the typo shape is told.
+//
+// D-SINK-30 (2026-10-24). RFC 3986's reg-name admits `;`, `=` and `&`, so
+// `http://h.test;sid=SECRET/x` validates with host `h.test;sid=secret` and
+// this printed it so -- on the Sources row and in its default label -- while
+// the free-text redactor (runHostParts) had cut the host at `:`, `;`, `=`
+// and `&` since R32a'. No real host carries those three, so the printed
+// host[:port] ends at the first of them; the `:` port is kept, as the row
+// has always shown it. Validation is NOT changed: refusing them in a host
+// would drop a stored link on upgrade (D-SINK-27). The helper's
+// host_port_of is the mirror and the shared source-labels fixture pins both.
 function hostPortOf(url) {
   var m = str(url).match(/^[a-z][a-z0-9+.-]*:\/\/([^\/?#]*)/i)
   if (!m) return ""
   var authority = m[1]
   var at = authority.lastIndexOf("@")
   var hostport = at === -1 ? authority : authority.substring(at + 1)
+  var end = hostport.search(/[;=&]/)
+  if (end !== -1) hostport = hostport.substring(0, end)
   return hostport.toLowerCase()
 }
 

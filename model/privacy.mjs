@@ -315,7 +315,10 @@ function sourceLabel(url) {
   // is the defect redactUrls was fixed for. Both halves are needed: either
   // alone still leaks. M4-01 made this reachable from a remote party, because
   // resolveEpgUrl publishes `hostOf` over a `url-tvg` the PLAYLIST declared.
-  var m = text.match(/^([a-z][a-z0-9+.-]*):\/\/(?:[^\/?#\s]*@)?(\[[^\/?#\s\]]*\]|[^\/\s?#:@\[]+)(?::\d+)?/i)
+  // D-SINK-30: the host group ends at `;`, `=` and `&` too, as runHostParts
+  // cuts the free-text host (reg-name admits them; no real host carries
+  // them), so `http://h.test;sid=SECRET/x` labels as `http://h.test`.
+  var m = text.match(/^([a-z][a-z0-9+.-]*):\/\/(?:[^\/?#\s]*@)?(\[[^\/?#\s\]]*\]|[^\/\s?#:@\[;=&]+)(?::\d+)?/i)
   if (m) {
     var scheme = m[1].toLowerCase()
     if (scheme === "file") return "local file"
