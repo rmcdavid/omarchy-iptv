@@ -323,6 +323,13 @@ M2-08 vertical bar - done when:
    The PO rejects any diff touching an unowned file. Derived from: M2-01
    needed a dedicated ownership table (ARCHITECTURE-SOURCES 8.1) and it is
    the reason the two lanes merged cleanly.
+   A brief that names an INPUT -- a fixture directory, a frozen corpus, a
+   baseline file -- names the command that proves the input is there, and
+   the lead runs that command before sending the brief. Derived from:
+   F-M3-14, a brief that forbade a re-fetch and pointed the lane at a
+   scratch directory already reclaimed (F-EPG-26 is the same event from
+   the data's side); the lane said so instead of restating numbers it had
+   not measured, which is how it was found.
 
 2. ONE LANE HOLDS THE DISPLAY. A lane brief that does not hold the display
    must forbid, by name: `wtype`, `grim`, `hyprctl dispatch|reload|keyword`,
