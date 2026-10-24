@@ -15591,6 +15591,89 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
             line.indexOf("version of activeKey (the source " + KA + " it named is gone, so no source is active)") !== -1, /lenspass|http/.test(line)]
   }, [[{ field: "activeKey", key: KA, fields: ["removed"] }], "", "", ["t:one.uk"], [], KB, ["deadbeef"], "", true, false])
 
+  // D-SRC-37 (c): the four slots that had no bound (and the two PiP
+  // start-up probes rule 15's search found beside whichProc), each driven by
+  // its own Timer block through h.elapse: armed where `running = true` is
+  // set, fires at helperTimeoutMs with a TERM and nothing else, stopped by
+  // the exit handler the service runs.
+  checkCall("D-SRC-37 (c): cacheProc -- a cache job the helper never answers is TERMed at helperTimeoutMs (not a millisecond before), the queued jobs behind it DROPPED with one line, and the exit stops the watchdog", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.cacheHang = true
+    const cp = h.ids.cacheProc, wd = h.ids.cacheWatchdog
+    h.root.queueCacheJob(["remove", "--key", KB], null)
+    h.root.queueCacheJob(["epg-clear", "--key", KA], null)
+    const armed = [cp.running, wd.running, h.root.cacheQueue.length]
+    h.elapse(h.root.helperTimeoutMs - 1)
+    const before = [cp.signals.slice(), h.root.cacheQueue.length]
+    h.elapse(1)
+    const fired = [cp.signals.slice(), h.root.cacheQueue.length, h.warnings.filter(w => /cache remove exceeded 180 s, terminating it; 1 queued cache job\(s\) dropped/.test(w)).length]
+    cp._running = false; h.root.handleCacheExit("")
+    return [armed, before, fired, wd.running, h.root.cacheJob, h.compileErrors]
+  }, [[true, true, 1], [[], 1], [[15], 0, 1], false, null, []])
+  checkCall("D-SRC-37 (c): failedProc -- a mark the helper never writes is TERMed at helperTimeoutMs, the queued mark behind it dropped with one line, and handleFailedExit stops the watchdog", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    const fp = h.ids.failedProc, wd = h.ids.failedWatchdog
+    const ok = [h.root.persistFailed("mark", "t:one.uk"), h.root.persistFailed("mark", "t:two.uk")]
+    const armed = [fp.running, wd.running, h.root.failedQueue.length, fp.command.indexOf("failed") !== -1]
+    h.elapse(h.root.helperTimeoutMs)
+    const fired = [fp.signals.slice(), h.root.failedQueue.length, h.warnings.filter(w => /failed-channel helper exceeded 180 s, terminating it; 1 queued mark\(s\) dropped/.test(w)).length]
+    fp.running = false; h.root.handleFailedExit()
+    return [ok, armed, fired, wd.running, fp.running, h.compileErrors]
+  }, [[true, true], [true, true, 1, true], [[15], 0, 1], false, false, []])
+  checkCall("D-SRC-37 (c): configShieldProc -- a shield run that never answers is TERMed at helperTimeoutMs; its exit with no output stops the watchdog and reads as not private (fails closed), as before", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.unstub("runConfigShield")
+    const cs = h.ids.configShieldProc, wd = h.ids.configShieldWatchdog
+    h.root.runConfigShield()
+    const armed = [cs.running, wd.running]
+    h.elapse(h.root.helperTimeoutMs)
+    const fired = [cs.signals.slice(), h.warnings.filter(w => /config shield exceeded 180 s, terminating it/.test(w)).length]
+    cs.running = false; h.root.onConfigShieldExit("")
+    return [armed, fired, wd.running, h.root.hostConfigShield === M.CONFIG_SHIELD_PRIVATE, h.compileErrors]
+  }, [[true, true], [[15], 1], false, false, []])
+  checkCall("D-SRC-37 (c): whichProc -- `which mpv` that never answers is TERMed at helperTimeoutMs; handleWhichExit stops the watchdog and a non-zero exit reads as no mpv", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    const wp = h.ids.whichProc, wd = h.ids.whichWatchdog
+    h.root.mpvAvailable = true
+    h.root.runWhichMpv()
+    const armed = [wp.running, wd.running]
+    h.elapse(h.root.helperTimeoutMs)
+    const fired = [wp.signals.slice(), h.warnings.filter(w => /which mpv exceeded 180 s, terminating it/.test(w)).length]
+    wp.running = false; h.root.handleWhichExit(1)
+    return [armed, fired, wd.running, h.root.mpvAvailable, h.compileErrors]
+  }, [[true, true], [[15], 1], false, false, []])
+  checkCall("D-SRC-37 (c), rule 15: the PiP start-up pair -- `which hyprctl` then `hyprctl systeminfo` share one watchdog; whichever is running at helperTimeoutMs is TERMed; each exit stops it, and a stopped probe hides PiP", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    const w = h.ids.hyprWhichProc, i = h.ids.hyprInfoProc, wd = h.ids.pipProbeWatchdog
+    h.root.runPipProbe()
+    const armed = [w.running, wd.running]
+    h.elapse(h.root.helperTimeoutMs)
+    const firedWhich = [w.signals.slice(), i.signals.slice()]
+    w.running = false; h.root.handlePipWhichExit(1)
+    const afterWhich = [wd.running, h.root.pipAvailable]
+    // The second half: which answered, systeminfo hangs.
+    h.root.runPipProbe(); w.running = false
+    h.ids.Quickshell.env = () => "sig"
+    h.root.handlePipWhichExit(0)
+    const rearmed = [i.running, wd.running]
+    h.elapse(h.root.helperTimeoutMs)
+    const firedInfo = [w.signals.length, i.signals.slice()]
+    i.running = false; h.root.handlePipInfoExit(1, "")
+    return [armed, firedWhich, afterWhich, rearmed, firedInfo, wd.running, h.root.pipAvailable, h.compileErrors]
+  }, [[true, true], [[15], []], [false, false], [true, true], [1, [15]], false, false, []])
+  // The inventory, as a check rather than a grep in a write-up: every
+  // Process the tree declares is named, by `.signal(`, in some Timer's
+  // onTriggered -- so the next unbounded slot goes red here.
+  checkCall("D-SRC-37 (c), rule 15 inventory: every `id: *Proc` in Service.qml is named by some Timer block that sends `.signal(15)` (directly, or as the one of a pair that is running)", () => {
+    // Both spellings: `id:` on its own line, and the one-line `Process { id: failedProc }`.
+    const procs = [...svcText.matchAll(/^    id: ([A-Za-z]+Proc)$|Process \{ id: ([A-Za-z]+Proc) \}/gm)].map(m => m[1] || m[2])
+    // Each Timer block to its matching brace (the harness's scanner), not to
+    // the first "  }" -- a lazy match spanned into the functions below a block.
+    const timers = [...svcText.matchAll(/^  Timer \{/gm)].map(m => svcText.slice(m.index, H.matchBrace(svcText, m.index + m[0].length - 1) + 1)).filter(t => t.indexOf(".signal(15)") !== -1)
+    const unbounded = procs.filter(id => !timers.some(t => t.indexOf(id + ".running") !== -1))
+    return [procs.length >= 18, unbounded]
+  }, [true, []])
+
   // D-SRC-52: a good playlist status clears the sentence a failed one left
   // in lastError, and nothing else.
   checkCall("D-SRC-52: Model.lastErrorAfterStatus -- a good status clears exactly the previous status's reason; a different sentence (a play failure's) stands; a failed status writes its own reason; an empty lastError stays empty", () => {

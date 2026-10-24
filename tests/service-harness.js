@@ -43,7 +43,10 @@ function makeIds(h) {
   // "current" and so could not see it. Setting `running` queues the helper's
   // answer for the command it was given (h.cacheAnswer), delivered through
   // Service.handleCacheExit, the handler the real exit calls.
-  const cacheProc = { name: "cacheProc", command: [], environment: {}, signal() {}, _running: false }
+  // D-SRC-37 (c): and RECORDS its signals like the other process fakes; with
+  // h.cacheHang true the helper never answers (a stalled cache directory),
+  // which is the run the slot's watchdog exists for.
+  const cacheProc = { name: "cacheProc", command: [], environment: {}, signals: [], signal(n) { this.signals.push(n) }, _running: false }
   Object.defineProperty(cacheProc, "running", {
     get() { return cacheProc._running },
     set(v) {
@@ -51,6 +54,7 @@ function makeIds(h) {
       if (v === true) {
         const command = cacheProc.command.slice()
         h.cacheRuns.push(command)
+        if (h.cacheHang) return
         h.later.push({ fn: () => { cacheProc._running = false; h.root.handleCacheExit(h.cacheAnswer(command)) }, args: [] })
       }
     }
@@ -77,7 +81,19 @@ function makeIds(h) {
     logoFetchProc: proc("logoFetchProc"),
     cacheProc,
     failedProc: proc("failedProc"),
+    whichProc: proc("whichProc"),
+    hyprWhichProc: proc("hyprWhichProc"),
+    hyprInfoProc: proc("hyprInfoProc"),
     probeWatchdog: timer("probeWatchdog"),
+    // D-SRC-37 (c): the bounds on the four slots that had none. Each is
+    // driven from its own Timer block in the tree (interval and onTriggered)
+    // by h.elapse, like the two R26a/R27a watchdogs below; a tree without the
+    // block has a Timer that never fires, which is that tree.
+    cacheWatchdog: timer("cacheWatchdog"),
+    failedWatchdog: timer("failedWatchdog"),
+    configShieldWatchdog: timer("configShieldWatchdog"),
+    whichWatchdog: timer("whichWatchdog"),
+    pipProbeWatchdog: timer("pipProbeWatchdog"),
     // R23c: the init's watchdog and its kill grace. Timers do not run here;
     // a test that times the init out calls h.initExit({ timeout: true }),
     // which runs the watchdog's OWN onTriggered and then the exit handler.
@@ -487,7 +503,7 @@ function helperInit(file, code) {
 
 function bootService(serviceText, Model, o) {
   const opts = o || {}
-  const h = { clock: opts.clock || 1760000000000, later: [], cacheRuns: [], signals: [], warnings: [], detached: [], turns: 0 }
+  const h = { clock: opts.clock || 1760000000000, later: [], cacheRuns: [], signals: [], warnings: [], detached: [], turns: 0, cacheHang: false }
   h.host = new Host(opts.entry, opts.host || "lag")
   h.stateFile = new StateFile(opts.stateText || "", { exists: opts.exists, fault: opts.fault, ownEcho: opts.ownEcho, dirAbsent: opts.dirAbsent, dirPresent: opts.dirPresent, mode: opts.mode, umask: opts.umask })
   h.stateInitStdout = { text: "" }
@@ -578,6 +594,10 @@ function bootService(serviceText, Model, o) {
     if (name in STUBBED) continue
     root[name] = compile(fns[name].args, fns[name].body, name)
   }
+  // D-SRC-37 (c): a test that needs a STUBBED function for real (the config
+  // shield's run, to see its watchdog armed) installs the shipping text of
+  // it; the stub stays for every other test.
+  h.unstub = (name) => { if (!(name in fns)) throw new Error("service-harness: no function " + name); root[name] = compile(fns[name].args, fns[name].body, name) }
   root.runConfigShield = () => {}
   root.noteSessionOutcome = () => {}
   root.markDeadSession = () => {}
@@ -718,13 +738,35 @@ function bootService(serviceText, Model, o) {
   ww.restart = function () { this.restarts++; this.running = true; this.armedAt = h.clock; this.armedInterval = this.interval }
   ww.stop = function () { this.stops++; this.running = false; this.armedAt = null }
   h.writeWaitWatchdog = () => { onWriteWaitWatchdog(); h.runLater() }
+  // D-SRC-37 (c): any other Timer of the tree, by id, driven the same way --
+  // its `interval` (a binding, read at each restart) and its onTriggered
+  // (one line or a block) compiled from its own Timer block. A tree without
+  // the block gets a Timer with a null interval, which never comes due.
+  const treeTimer = (id) => {
+    const t = ids[id]
+    const at = serviceText.indexOf("id: " + id + "\n")
+    const block = at === -1 ? null : serviceText.slice(serviceText.lastIndexOf("  Timer {", at), serviceText.indexOf("\n  }", at))
+    const intervalText = block === null ? null : ((block.match(/^    interval: (.*)$/m) || [])[1] || "1000")
+    const oneLine = block === null ? null : (block.match(/^    onTriggered: (?!\{)(.*)$/m) || [])[1]
+    const body = block === null ? null : (oneLine || handlerBlock(block, "onTriggered: {"))
+    const fire = body ? compile("", body, id + "_onTriggered") : () => {}
+    const interval = intervalText === null ? null : compile("", "return (" + intervalText + ")", id + "_interval")
+    Object.defineProperty(t, "interval", { get() { return interval === null ? null : interval() }, enumerable: true, configurable: true })
+    t.armedAt = null
+    t.armedInterval = null
+    t.restart = function () { this.restarts++; this.running = true; this.armedAt = h.clock; this.armedInterval = this.interval }
+    t.stop = function () { this.stops++; this.running = false; this.armedAt = null }
+    return [t, fire]
+  }
+  h.timed = [[vw, onVerifyWatchdog], [ww, onWriteWaitWatchdog]]
+  for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog"]) h.timed.push(treeTimer(id))
   // Each Timer fires once its restart() is `interval` old, in the order they
   // come due; a handler that re-arms its Timer (R27a's second read) is due
   // again `interval` after the moment it fired.
   h.elapse = (ms) => {
     const end = h.clock + ms
     for (;;) {
-      const due = [[vw, onVerifyWatchdog], [ww, onWriteWaitWatchdog]]
+      const due = h.timed
         .filter(([t]) => t.running && t.armedInterval !== null && t.armedAt + t.armedInterval <= end)
         .sort((a, b) => (a[0].armedAt + a[0].armedInterval) - (b[0].armedAt + b[0].armedInterval))
       if (!due.length) break

@@ -1028,7 +1028,7 @@ Item {
     var channel = root.channelIndex[String(id || "")]
     if (!channel || !channel.url) return false
     if (!root.mpvAvailable) {
-      whichProc.running = true
+      root.runWhichMpv()
       root.notify("mpvMissing", {})
       return false
     }
@@ -3236,7 +3236,7 @@ Item {
     }
     if (code === "mpv_missing") {
       root.mpvAvailable = false
-      whichProc.running = true
+      root.runWhichMpv()
       root.playerWanted = false
       playerSocketTimer.stop()
       root.nowPlaying = null
@@ -4201,13 +4201,16 @@ Item {
       return
     }
     configShieldProc.running = true
+    configShieldWatchdog.restart()   // D-SRC-37 (c)
   }
 
   // The verb's answer. `hostConfigShield` moves from unknown to private or
   // exposed and never back to unknown: Model.configShieldState fails closed,
   // so a helper that did not run, crashed or printed nothing reads as exposed
-  // rather than leaving every future persist deferred for ever.
+  // rather than leaving every future persist deferred for ever -- a run the
+  // watchdog stopped (D-SRC-37 (c)) prints nothing and reads as exposed too.
   function onConfigShieldExit(out) {
+    configShieldWatchdog.stop()
     root.hostConfigShield = Model.configShieldState(out)
     var pending = root.pendingPersist
     root.pendingPersist = null
@@ -4307,16 +4310,21 @@ Item {
   Process { id: failedProc }
   Connections {
     target: failedProc
-    // Drain the queue. Without this a second mark raised while the first was
-    // still being written would sit there for ever -- which is how the kill
-    // this replaced came to exist.
-    function onExited(exitCode, exitStatus) {
-      if (root.failedQueue.length === 0) return
-      var q = root.failedQueue.slice()
-      var next = q.shift()
-      root.failedQueue = q
-      root.runFailedJob(next)
-    }
+    function onExited(exitCode, exitStatus) { root.handleFailedExit() }
+  }
+
+  // Drain the queue. Without this a second mark raised while the first was
+  // still being written would sit there for ever -- which is how the kill
+  // this replaced came to exist. A root function rather than the handler's
+  // body so the harness, which delivers exits by hand, runs the same code
+  // (D-SRC-37 (c): and sees the watchdog stopped here).
+  function handleFailedExit() {
+    failedWatchdog.stop()
+    if (root.failedQueue.length === 0) return
+    var q = root.failedQueue.slice()
+    var next = q.shift()
+    root.failedQueue = q
+    root.runFailedJob(next)
   }
 
   // A one-deep queue rather than a kill. This used to SIGTERM its own
@@ -4343,6 +4351,7 @@ Item {
   function runFailedJob(job) {
     failedProc.command = Model.failedArgv(root.helperPath, job.action, job.id, job.dir)
     failedProc.running = true
+    failedWatchdog.restart()   // D-SRC-37 (c)
   }
 
   function str(v) { return v === undefined || v === null ? "" : String(v) }
@@ -5055,9 +5064,11 @@ Item {
     root.cacheJob = job
     cacheProc.command = ["python3", root.helperPath, "cache", "--cache-dir", root.cacheDir].concat(job.args)
     cacheProc.running = true
+    cacheWatchdog.restart()   // D-SRC-37 (c): every run of the slot is bounded
   }
 
   function handleCacheExit(text) {
+    cacheWatchdog.stop()
     var job = root.cacheJob
     root.cacheJob = null
     var status = Model.parseHelperStatus(text, "cache")
@@ -5303,11 +5314,11 @@ Item {
     // independent of mkdirProc's chain on purpose -- it touches none of the
     // plugin's own directories and must not wait on them.
     root.runConfigShield()
-    whichProc.running = true
+    root.runWhichMpv()
     // M2-05 G-8: is there a compositor to talk to at all, and which dispatch
     // spelling can it parse? Both answers are read once, here, so the `p`
     // key can refuse honestly instead of firing into the dark.
-    hyprWhichProc.running = true
+    root.runPipProbe()
     // Reattach (4.5). Until the probe answers - about 130 ms - the UI shows
     // idle rather than guessing. `--owner-pid` claims a surviving player for
     // this shell, which is what tells the previous shell's orphan-check to
@@ -6251,7 +6262,22 @@ Item {
   }
   Connections {
     target: whichProc
-    function onExited(exitCode, exitStatus) { root.mpvAvailable = exitCode === 0 }
+    function onExited(exitCode, exitStatus) { root.handleWhichExit(exitCode) }
+  }
+
+  // D-SRC-37 (c): `which mpv` is one more process this shell waits on (the
+  // start, a play without mpv, a `mpv_missing` reply), so it is run and read
+  // through one pair the harness can call, and bounded like every helper
+  // slot. A run the watchdog stopped exits non-zero: mpv reads as absent
+  // until the next ask, the answer the exit code gave before.
+  function runWhichMpv() {
+    whichProc.running = true
+    whichWatchdog.restart()
+  }
+
+  function handleWhichExit(exitCode) {
+    whichWatchdog.stop()
+    root.mpvAvailable = exitCode === 0
   }
 
   // ---- picture in picture (M2-05). Six Processes, argv arrays only, no
@@ -6270,13 +6296,28 @@ Item {
   }
   Connections {
     target: hyprWhichProc
-    function onExited(exitCode, exitStatus) {
-      if (exitCode !== 0 || Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") === "") {
-        root.pipAvailable = false
-        return
-      }
-      hyprInfoProc.running = true
+    function onExited(exitCode, exitStatus) { root.handlePipWhichExit(exitCode) }
+  }
+
+  // D-SRC-37 (c), rule 15: the two decide-once compositor probes are the
+  // shape of whichProc (a process the start waits on with no bound), found by
+  // the search for it and bounded by ONE Timer over whichever of the pair is
+  // running, the way stateInitWatchdog covers mkdir and the init. A probe the
+  // watchdog stopped exits non-zero and PiP is hidden, the answer the exit
+  // code gave before. Root functions so the harness runs the same code.
+  function runPipProbe() {
+    hyprWhichProc.running = true
+    pipProbeWatchdog.restart()
+  }
+
+  function handlePipWhichExit(exitCode) {
+    pipProbeWatchdog.stop()
+    if (exitCode !== 0 || Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") === "") {
+      root.pipAvailable = false
+      return
     }
+    hyprInfoProc.running = true
+    pipProbeWatchdog.restart()
   }
 
   Process {
@@ -6299,15 +6340,18 @@ Item {
   }
   Connections {
     target: hyprInfoProc
-    function onExited(exitCode, exitStatus) {
-      // Anything else - an older Hyprland on the hyprlang provider, or a
-      // systeminfo this build does not print - means a compositor whose
-      // dispatch language we do not speak. PiP is then hidden rather than
-      // broken: `p` says so immediately instead of dispatching strings that
-      // cannot parse and calling it `dispatch_failed` fifteen seconds later.
-      root.pipProvider = /configProvider:\s*lua/i.test(String(hyprInfoStdout.text)) ? "lua" : "other"
-      root.pipAvailable = exitCode === 0 && root.pipProvider === "lua"
-    }
+    function onExited(exitCode, exitStatus) { root.handlePipInfoExit(exitCode, hyprInfoStdout.text) }
+  }
+
+  // Anything else - an older Hyprland on the hyprlang provider, or a
+  // systeminfo this build does not print - means a compositor whose
+  // dispatch language we do not speak. PiP is then hidden rather than
+  // broken: `p` says so immediately instead of dispatching strings that
+  // cannot parse and calling it `dispatch_failed` fifteen seconds later.
+  function handlePipInfoExit(exitCode, text) {
+    pipProbeWatchdog.stop()
+    root.pipProvider = /configProvider:\s*lua/i.test(String(text)) ? "lua" : "other"
+    root.pipAvailable = exitCode === 0 && root.pipProvider === "lua"
   }
 
   Process {
@@ -6477,6 +6521,83 @@ Item {
       if (!clipboardProc.running) return
       console.warn("omarchy-iptv: clipboard helper exceeded " + Math.floor(Model.CLIPBOARD_WATCHDOG_MS / 1000) + " s, terminating it")
       clipboardProc.signal(15)
+    }
+  }
+
+  // D-SRC-37 (c), 2026-10-24: ONE shape over the four processes that had no
+  // bound while every other helper slot had one -- cacheProc (the FIFO every
+  // cache job runs through, writing into the cache directory: a stalled
+  // mount there held the queue for the session), failedProc (the same
+  // directory), configShieldProc and whichProc. TERM only, like every
+  // watchdog but the start-up one (R23c has the KILL half because the whole
+  // start waits on that run; nothing waits on these). Each is restarted
+  // where its `running = true` is set and stopped in the exit handler the
+  // harness runs. The bound is helperTimeoutMs, the playlist slot's: a
+  // cache prune over a large directory is the longest of them and is well
+  // inside it; the point is a bound, not a tight one. On fire, cacheProc's
+  // queue is DROPPED with one line -- the jobs are re-derivable (the
+  // start-up prune, a remove, epg-clear; the next start prunes again), and
+  // a queue behind a stalled slot would only stall in turn -- and so is
+  // failedProc's (the in-memory map is already right; a lost mark costs a
+  // mark, as the slot's comment says). The two decide-once processes
+  // (configShield, which) print nothing when stopped, which their exit
+  // handlers already read as "not private" and "no mpv".
+  Timer {
+    id: cacheWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!cacheProc.running) return
+      var job = root.cacheJob
+      console.warn("omarchy-iptv: cache " + (job ? job.args[0] : "?") + " exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it; "
+                   + root.cacheQueue.length + " queued cache job(s) dropped")
+      root.cacheQueue = []
+      cacheProc.signal(15)
+    }
+  }
+  Timer {
+    id: failedWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!failedProc.running) return
+      console.warn("omarchy-iptv: failed-channel helper exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it; "
+                   + root.failedQueue.length + " queued mark(s) dropped")
+      root.failedQueue = []
+      failedProc.signal(15)
+    }
+  }
+  Timer {
+    id: configShieldWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!configShieldProc.running) return
+      console.warn("omarchy-iptv: config shield exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
+      configShieldProc.signal(15)
+    }
+  }
+  Timer {
+    id: whichWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!whichProc.running) return
+      console.warn("omarchy-iptv: which mpv exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
+      whichProc.signal(15)
+    }
+  }
+  Timer {
+    // The PiP start-up pair (runPipProbe): `which hyprctl`, then `hyprctl
+    // systeminfo`; whichever is running is the one stopped.
+    id: pipProbeWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      var proc = hyprWhichProc.running ? hyprWhichProc : hyprInfoProc.running ? hyprInfoProc : null
+      if (proc === null) return
+      console.warn("omarchy-iptv: " + (proc === hyprWhichProc ? "which hyprctl" : "hyprctl systeminfo") + " exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
+      proc.signal(15)
     }
   }
 
