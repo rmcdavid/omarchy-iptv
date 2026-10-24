@@ -15619,6 +15619,44 @@ checkCall("F-UX-7: through Service.playerArgWarnings -- the footer list the guid
   return [h.root.playerArgWarnings, h.compileErrors]
 }, [["Player warning: mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT, "Player warning: mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT], []])
 
+// ---- D-LOGO-19: a cached logo Qt cannot decode is tried once, not on every realisation ----
+// The shell is the only place that knows a file failed the decoder, and it
+// threw that away: both Image slots in Guide.qml bound on Image.Ready and
+// listened for nothing else. Now a failed path is kept for the session and
+// the slots read `have` LESS those names, through the same directory-tagged
+// set logoSlot already refuses anything outside of.
+checkCall("D-LOGO-19: logoFailedPath turns the Image source back into the path the slot named, and nothing else", () =>
+  [Model.logoFailedPath("file:///c/sources/k/logos/abc12345"), Model.logoFailedPath("file://c/x"), Model.logoFailedPath("http://h.test/x.png"),
+   Model.logoFailedPath(""), Model.logoFailedPath(null), Model.logoFailedPath("/c/x")],
+  ["/c/sources/k/logos/abc12345", "", "", "", "", ""])
+checkCall("D-LOGO-19: logoBrokenMark copies, never mutates, and records no empty path", () => {
+  const a = { "/c/logos/one": true }
+  const b = Model.logoBrokenMark(a, "/c/logos/two")
+  const c = Model.logoBrokenMark(b, "")
+  return [a, b, c, Model.logoBrokenMark(null, "/x"), Model.logoBrokenMark({ "/c/stale": false }, "/x")]
+}, [{ "/c/logos/one": true }, { "/c/logos/one": true, "/c/logos/two": true }, { "/c/logos/one": true, "/c/logos/two": true }, { "/x": true }, { "/x": true }])
+checkCall("D-LOGO-19: logoHaveLess drops a name whose file is broken IN THE SET'S DIRECTORY, keeps one broken elsewhere, and leaves a non-set alone", () => {
+  const have = Model.logoHaveSet(["aaa", "bbb"], "/c/sources/k/logos")
+  const broken = { "/c/sources/k/logos/aaa": true, "/c/sources/other/logos/bbb": true }
+  const less = Model.logoHaveLess(have, broken)
+  return [less, Model.logoHaveLess(have, {}), Model.logoHaveLess({}, broken), Model.logoHaveLess(null, broken), Model.logoHaveLess(have, null),
+          // never mutates the set the service binds rows to
+          have.names]
+}, [{ dir: "/c/sources/k/logos", names: { bbb: true } }, { dir: "/c/sources/k/logos", names: { aaa: true, bbb: true } }, {}, null,
+    { dir: "/c/sources/k/logos", names: { aaa: true, bbb: true } }, { aaa: true, bbb: true }])
+checkCall("D-LOGO-19: through logoSlot and wallTile -- the slot a broken file fed answers blank (the wall: the mark) and the other channel's slot still draws, so the join is a call", () => {
+  const dir = "/c/sources/k/logos"
+  const chA = { name: "A", logo: "https://logos.test/a.png" }, chB = { name: "B", logo: "https://logos.test/b.png" }
+  const pathA = Model.logoSlot({ enabled: true, channel: chA, logoDir: dir, have: Model.logoHaveSet([Model.fnv1a32(chA.logo), Model.fnv1a32(chB.logo)], dir) }).path
+  const have = Model.logoHaveSet([Model.fnv1a32(chA.logo), Model.fnv1a32(chB.logo)], dir)
+  const broken = Model.logoBrokenMark({}, Model.logoFailedPath("file://" + pathA))
+  const shown = Model.logoHaveLess(have, broken)
+  return [Model.logoSlot({ enabled: true, channel: chA, logoDir: dir, have: shown }).kind, Model.logoSlot({ enabled: true, channel: chB, logoDir: dir, have: shown }).kind,
+          Model.wallTile({ enabled: true, channel: chA, logoDir: dir, have: shown }).kind, Model.wallTile({ enabled: true, channel: chB, logoDir: dir, have: shown }).kind,
+          // the same name broken in ANOTHER source's directory hides nothing here
+          Model.logoSlot({ enabled: true, channel: chA, logoDir: dir, have: Model.logoHaveLess(have, { ["/c/sources/other/logos/" + Model.fnv1a32(chA.logo)]: true }) }).kind]
+}, ["blank", "image", "mark", "image", "image"])
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All model tests passed.")

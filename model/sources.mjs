@@ -9,7 +9,7 @@ import {
   emptyState, stateBlockedHeader
 } from "./state.mjs"
 import {
-  logoConsentLines
+  logoConsentLines, logoHaveIsSet
 } from "./logos.mjs"
 import {
   hostOf, urlSpaceIndex, urlDelimiterIndex, redactUrls
@@ -1330,6 +1330,66 @@ var CLIPBOARD_KILL_GRACE_MS = 1000
 var CLIPBOARD_WATCHDOG_MS = CLIPBOARD_TIMEOUT_MS + 2 * CLIPBOARD_KILL_GRACE_MS + 2000
 var CLIPBOARD_MAX_CHARS = MAX_SOURCE_URL * 4
 var CLIPBOARD_MAX_BYTES = CLIPBOARD_MAX_CHARS * 4
+// ---- the guide's logo slots: a file Qt cannot decode (D-LOGO-19) ----
+//
+// A cached logo that passes every helper header gate (D-LOGO-11, -13, -14)
+// but fails Qt's decoder was pointed at again by every delegate realisation
+// -- each list scroll, each wall page, each guide open -- and Qt printed its
+// decode warning into the shell's journal each time. The helper cannot
+// decode (stdlib only), so the only place that KNOWS a file is undecodable
+// is the shell, and the shell threw that knowledge away. These three live
+// in this part rather than beside logoSlot (model/logos.mjs) because that
+// part is another lane's this round; moving them is a relink.
+//
+// The shape is logoSlot's own rule inverted: the slot draws only a name the
+// helper announced FOR THIS DIRECTORY (`have`, a directory-tagged set), so
+// the guide keeps the PATHS that failed, for the session, and hands the
+// slots `have` LESS those names -- the path carries its directory, so a
+// name broken in source A's directory is not hidden in source B's, and
+// nothing needs clearing on a source switch. Residual, stated: a transient
+// read error (the fetch's own atomic rename is not one; a disk hiccup is)
+// marks a good file broken until the shell restarts.
+
+// The path of a QML Image `source` that names a local file, "" for
+// anything else (an empty source, a scheme that is not file:).
+function logoFailedPath(source) {
+  var s = str(source)
+  if (s.indexOf("file://") !== 0) return ""
+  var path = s.substring(7)
+  return path.charAt(0) === "/" ? path : ""
+}
+
+// A COPY of the broken set with `path` added; never mutates, because the
+// guide binds through the property and a mutation in place is invisible to
+// the bindings. An empty path is not recorded.
+function logoBrokenMark(broken, path) {
+  var out = {}
+  if (broken && typeof broken === "object") {
+    for (var k in broken) {
+      if (broken[k] === true) out[k] = true
+    }
+  }
+  var p = str(path)
+  if (p !== "") out[p] = true
+  return out
+}
+
+// `have` less every name whose file, in the set's own directory, is in
+// `broken`. Anything that is not a tagged set comes back as it is (logoSlot
+// reads it as nothing announced); a set with no broken name in its directory
+// comes back as a copy with the same names.
+function logoHaveLess(have, broken) {
+  if (!logoHaveIsSet(have)) return have
+  var out = { dir: have.dir, names: {} }
+  var b = broken && typeof broken === "object" ? broken : {}
+  var base = have.dir.replace(/\/+$/, "") + "/"
+  for (var name in have.names) {
+    if (have.names[name] !== true) continue
+    if (b[base + name] === true) continue
+    out.names[name] = true
+  }
+  return out
+}
 export {
   CACHE_LAYOUT, MAX_SOURCES, MAX_SOURCE_URL, MAX_LABEL, MAX_XTREAM_SERVER,
   MAX_XTREAM_FIELD, SOURCES_DIR, MASK, MASK_CLEAR_PARAMS, LIMITS, PAUSE_KEY,
@@ -1355,5 +1415,6 @@ export {
   sourcesHeaderRight, sourcesRowAccessibleName, confirmLogosMessage,
   confirmRemoveMessage, fetchingLine, PROBE_LOCAL_REFUSALS, probeFailureLine,
   sourceTransient, CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS,
-  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
+  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES,
+  logoFailedPath, logoBrokenMark, logoHaveLess
 }

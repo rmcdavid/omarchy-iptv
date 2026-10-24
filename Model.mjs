@@ -198,7 +198,8 @@ export {
   sourcesHeaderRight, sourcesRowAccessibleName, confirmLogosMessage,
   confirmRemoveMessage, fetchingLine, probeFailureLine, sourceTransient,
   CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
-  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
+  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark,
+  logoHaveLess
 } from "./model/sources.mjs"
 export {
   hasControlChars, normalizeSourceRecord, sourcesFull, addSource,

@@ -458,6 +458,20 @@ Item {
   // harmless blank.
   readonly property var logoHave: root.serviceReady && root.service.logoHave !== undefined
     ? root.service.logoHave : ({})
+  // D-LOGO-19. The PATHS of cached logos Qt could not decode, for the
+  // session: a file that passes every helper header gate and still fails
+  // the decoder was pointed at again by every delegate realisation, four
+  // journal lines each time. The slots read `have` LESS those names, so a
+  // broken file is tried once and journaled once; the path carries its
+  // directory, so nothing here needs clearing on a source switch.
+  property var logoBroken: ({})
+  readonly property var logoHaveShown: Model.logoHaveLess(root.logoHave, root.logoBroken)
+  function logoFailed(source) {
+    var path = Model.logoFailedPath(source)
+    if (path === "" || root.logoBroken[path] === true) return
+    console.warn("omarchy-iptv: logo " + path + " could not be decoded; not tried again this session")
+    root.logoBroken = Model.logoBrokenMark(root.logoBroken, path)
+  }
   // The same rule the channel-number column follows (M2-03 4.2): zero width
   // on a list that has none, so those rows draw exactly as they did before
   // the feature existed. Asked of the rows ON SCREEN, so a group holding no
@@ -3719,7 +3733,7 @@ Item {
                     // fetch re-evaluates it: the file may exist now.
                     readonly property var art: root.logoSeq >= 0
                       ? Model.wallTile({ enabled: root.showLogos, channel: tile.channel,
-                                         logoDir: root.logoDir, have: root.logoHave })
+                                         logoDir: root.logoDir, have: root.logoHaveShown })
                       : ({ kind: "mark", path: "", glyph: "" })
 
                     Image {
@@ -3738,6 +3752,9 @@ Item {
                       mipmap: true
                       source: plate.art.kind === "image" ? "file://" + plate.art.path : ""
                       opacity: status === Image.Ready ? 1 : 0
+                      // D-LOGO-19: a file the decoder refuses is recorded
+                      // once and the slots stop pointing at it.
+                      onStatusChanged: if (status === Image.Error) root.logoFailed(String(source))
                       // The name below is the tile's accessible name; a reader
                       // announcing "image" before every channel is noise, not
                       // information (UX 7.2). Same reasoning as the row slot.
@@ -4118,7 +4135,7 @@ Item {
                       // re-evaluates it: the file may exist now.
                       source: {
                         var slot = Model.logoSlot({ enabled: root.showLogos, channel: row.channel,
-                                                    logoDir: root.logoDir, have: root.logoHave })
+                                                    logoDir: root.logoDir, have: root.logoHaveShown })
                         return (root.logoSeq >= 0 && slot.kind === "image") ? "file://" + slot.path : ""
                       }
                       // A logo that is missing, half-written or not an image
@@ -4126,6 +4143,9 @@ Item {
                       // -image glyph. The fetch is best-effort by design: a
                       // host being down is not a reason to mark up the list.
                       opacity: status === Image.Ready ? 1 : 0
+                      // D-LOGO-19: a file the decoder refuses is recorded
+                      // once and the slots stop pointing at it.
+                      onStatusChanged: if (status === Image.Error) root.logoFailed(String(source))
                       // The picture is decoration. The name is already the
                       // accessible name of the row, and a screen reader
                       // announcing "image" before every channel would be

@@ -790,7 +790,10 @@
         "CLIPBOARD_KILL_GRACE_MS",
         "CLIPBOARD_WATCHDOG_MS",
         "CLIPBOARD_MAX_CHARS",
-        "CLIPBOARD_MAX_BYTES"
+        "CLIPBOARD_MAX_BYTES",
+        "logoFailedPath",
+        "logoBrokenMark",
+        "logoHaveLess"
       ]
     },
     {
