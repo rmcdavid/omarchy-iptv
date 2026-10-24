@@ -703,9 +703,12 @@ MODEL_REGEX_LITERALS_MIN=${MODEL_REGEX_LITERALS_MIN:-60}
 # elided; 9 skipped as key chords or a command, each printed). Fewer joined
 # means the extraction stopped seeing quotes, not that the README improved.
 README_NOTICES_MIN=${README_NOTICES_MIN:-19}
-# F-M3-20 (2026-10-24, lane-p23-docs): the SR register holds 40 rows and
-# 402 citations from 35 tracked files; fewer rows means the register table
-# moved out from under the row regex, which is the failure this guards.
+# F-M3-20 (2026-10-24, lane-p23-docs): the SR register holds 40 rows, the
+# one count the gate reads from the checker's summary line (its citation
+# and file counts are printed, never floored, and the first version of
+# this comment quoted two of them that the tree no longer read); fewer
+# rows means the register table moved out from under the row regex,
+# which is the failure this guards.
 SR_REGISTER_ROWS_MIN=${SR_REGISTER_ROWS_MIN:-40}
 
 step() { printf '\n== %s\n' "$*"; }
@@ -1537,13 +1540,19 @@ fi
 
 step "SR ruling register (every cited SRn has a row, every row is cited)"
 # F-M3-20 (2026-10-24). The Sources rulings are `| SRn |` rows in
-# docs/ARCHITECTURE-SOURCES.md and 35 tracked files cite them by id, a join
-# made by a name and verified by nobody -- one register along from the
-# defect ids the ledger check pins. A cited id with no row, a row cited
-# nowhere outside itself and an id with two rows are red; a row whose text
-# says overturned/withdrawn/superseded is printed with its citation count,
-# because an overturned ruling stays cited as history on purpose. Seen red
-# on a9d20f9: SR27, SR29 and SR34 were cited nowhere outside their rows.
+# docs/ARCHITECTURE-SOURCES.md and the tracked files cite them by id, a
+# join made by a name and verified by nobody -- one register along from
+# the defect ids the ledger check pins. A cited id with no row, a row
+# cited nowhere outside the register's table and an id with two rows are
+# red; a row whose text says overturned/withdrawn/superseded is printed
+# with its citation count, because an overturned ruling stays cited as
+# history on purpose. Seen red on a9d20f9: the rows at
+# ARCHITECTURE-SOURCES.md:1761, :1763 and :1776 were cited nowhere outside
+# the register. Their ids are deliberately not written here: this file is
+# in the corpus the checker scans, and the first version of this comment
+# wrote them, which made the comment the citation that kept its own red
+# proof green (P23 recheck). Nothing under scripts/ or tests/ may name a
+# register id as a literal for the same reason; the test composes its.
 sr_log=$CHECK_TMP/sr-register.log
 if python3 "$ROOT/scripts/check-sr-register.py" >"$sr_log" 2>&1; then
   sr_n=$(grep -oE '^sr register: [0-9]+ rows' "$sr_log" | head -1 | grep -oE '[0-9]+')

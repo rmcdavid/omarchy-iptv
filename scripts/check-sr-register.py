@@ -13,9 +13,23 @@ the D-SINK-19 docs lane on 2026-10-11; filed 2026-10-12.
 WHAT IT CHECKS, over every tracked file (`git ls-files`, binaries skipped
 and counted):
   1. every `SRn` cited anywhere resolves to exactly one row of the register;
-  2. every row of the register is cited at least once OUTSIDE its own row
-     (a row that cites another row counts for the other, never for itself);
+  2. every row of the register is cited at least once OUTSIDE the
+     register's table: a citation from another row's text is the register
+     talking to itself, not a document, test or script implementing the
+     ruling, so it counts for check 1 (it must resolve) and never for this
+     one. The first version counted it, and a row cited only by its
+     neighbour read as implemented (P23 recheck, 2026-10-24; one real row
+     was in that state on the tree and is now cited where it is kept);
   3. no id has two rows.
+The citation corpus is every tracked file, so THIS SCRIPT, ITS TEST AND THE
+GATE MUST NOT WRITE A REGISTER ID: a literal in a comment or a docstring is
+a citation, and the first version's gate comment and test docstring named
+the three rows that were its red proof, which kept them cited after their
+real citations were reverted -- the check could not go red for the failure
+it was written to catch. The test composes its ids; the gate comment names
+line numbers. (scripts/check-defect-ledger.py made the same rule for the
+same reason, and refused a whole-file exemption: it would unmark a real
+citation in that file forever.)
 A row whose text says it was overturned, withdrawn or superseded is PRINTED
 with its citation count and is not a problem: an overturned ruling stays
 cited as history on purpose (ARCHITECTURE-SOURCES keeps such rows with a
@@ -90,30 +104,34 @@ def check_register(root, reg, texts):
                             % (reg["file"], n, ident, rows[ident][0]))
             continue
         rows[ident] = (n, line)
-    cites = {}       # id -> list of "file:line"
-    total = 0
+    cites = {}       # id -> list of "file:line" OUTSIDE the register's table
+    in_table = {}    # id -> list of "file:line" inside another row's text
     for rel, text in texts.items():
         if text is None:
             continue
         for n, line in enumerate(text.split("\n"), 1):
+            # A register row defines its own id and may mention others;
+            # neither is a citation (check 2), but a mention of an id with
+            # no row is still a dangling reference (check 1).
+            table_row = rel == reg["file"] and reg["row"].match(line) is not None
             for m in reg["cite"].finditer(line):
                 ident = reg["prefix"] + m.group(1)
-                # A row's own id on its own line defines it, it does not
-                # cite it; everything else on that line (another row's id)
-                # is a citation of that other row.
-                if rel == reg["file"] and ident in rows and rows[ident][0] == n:
+                if table_row:
+                    if not (ident in rows and rows[ident][0] == n):
+                        in_table.setdefault(ident, []).append("%s:%d" % (rel, n))
                     continue
-                total += 1
                 cites.setdefault(ident, []).append("%s:%d" % (rel, n))
-    for ident in sorted(cites, key=lambda s: int(s[len(reg["prefix"]):])):
+    mentioned = set(cites) | set(in_table)
+    for ident in sorted(mentioned, key=lambda s: int(s[len(reg["prefix"]):])):
         if ident not in rows:
-            for where in cites[ident]:
+            for where in cites.get(ident, []) + in_table.get(ident, []):
                 problems.append("%s: cites %s, which has no row in %s"
                                 % (where, ident, reg["file"]))
     for ident in sorted(rows, key=lambda s: int(s[len(reg["prefix"]):])):
         if not cites.get(ident):
-            problems.append("%s:%d: %s is cited nowhere outside its own row"
+            problems.append("%s:%d: %s is cited nowhere outside the register"
                             % (reg["file"], rows[ident][0], ident))
+    total = sum(len(v) for v in cites.values())
     return problems, rows, cites, total
 
 
@@ -136,11 +154,14 @@ def main(argv=None):
         texts[rel] = text
     problems = []
     rows_n = cites_n = over_n = 0
+    citing_files = set()
     for reg in REGISTERS:
         p, rows, cites, total = check_register(root, reg, texts)
         problems.extend(p)
         rows_n += len(rows)
         cites_n += total
+        for sites in cites.values():
+            citing_files.update(where.rsplit(":", 1)[0] for where in sites)
         for ident in sorted(rows, key=lambda s: int(s[len(reg["prefix"]):])):
             n, line = rows[ident]
             if OVERTURNED.search(line):
@@ -148,8 +169,7 @@ def main(argv=None):
                 print("%s register: %s mentions overturned/withdrawn/superseded"
                       " at %s:%d and is cited %d time(s)"
                       % (reg["name"], ident, reg["file"], n, len(cites.get(ident, []))))
-    cited_files = len([rel for rel, t in texts.items()
-                       if t is not None and any(r["cite"].search(t) for r in REGISTERS)])
+    cited_files = len(citing_files)
     for line in problems:
         print(line)
     print("sr register: %d rows, %d citations in %d files, %d overturned,"

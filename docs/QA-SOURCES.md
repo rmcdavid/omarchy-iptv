@@ -677,7 +677,9 @@ raw strings), `signals()` (the last 20 signal payloads), and
 `updateEntryInline` return `false`; it takes the function **off the fake shell
 api** entirely (SR34: the fake reproduces the host's plumbing exactly), the way a host that cannot rewrite our bar entry leaves it,
 because a `false` return from a writable entry is the host's `!dirty` branch
-and means "already stored", i.e. success. Two verbs were added with the
+and means "already stored", i.e. success (SR33: that `false` never surfaces
+as an error; the fake reproduces the branch, so the plugin's handling of it
+is what the scenario observes). Two verbs were added with the
 D-LIVE-20 fix: `setStored(key, value)` stores a setting without the user-config
 re-read (the window in which the host holds a value the plugin has not been
 handed), and `hostEntry()` returns `{"stored": "<key>", "published": "<key>"}`
