@@ -938,7 +938,12 @@ printf '%s\n' "$sp_other" >"$sp_scr/server.pid"
 OMARCHY_IPTV_HARNESS_DIR=$sp_scr "$ROOT/scripts/dev-harness/run.sh" reap >/dev/null 2>&1
 is "a server.pid naming a process that is not the server (a recycled pid) signals nothing" \
    "$(kill -0 "$sp_other" 2>/dev/null && echo alive || echo gone)" "alive"
-kill -KILL "$sp_other" 2>/dev/null; wait "$sp_other" 2>/dev/null
+# Belt and braces for a RED run: every stand-in this section started is
+# ended by its recorded pid here, whatever the checks above found. The
+# first red run against a9d20f9's run.sh left the deaf server stand-in
+# behind (reap did not end it, and nothing else did) for twenty minutes.
+kill -KILL "$sp_deaf" "$sp_kind" "$sp_srv" "$sp_other" "$sp_orphan" 2>/dev/null
+wait "$sp_deaf" "$sp_kind" "$sp_srv" "$sp_other" 2>/dev/null
 # The shapes, as bookkeeping (rule 14: the driven checks above are the
 # proof): no `pkill -f` is left in run.sh, and every scenario server kill
 # goes through the ladder behind its ownership guard.
