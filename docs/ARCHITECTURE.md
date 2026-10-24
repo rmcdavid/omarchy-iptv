@@ -2313,7 +2313,19 @@ not complete without a sweep.** The guide points an `Image` at a cache file
 only when the helper announced that name, FOR THE DIRECTORY IT ANNOUNCED IT
 FOR (`Model.logoSlot`, `Model.wallTile`, `Service.qml` `logoHave`), and
 there are exactly two `Image` elements in the shipped tree, the wall tile
-and the row slot, both fed that way. So the "already on disk" branch of
+and the row slot, both fed that way. Since D-LOGO-19 (2026-10-24) both are
+also fed `have` LESS the paths whose `Image` reported `Image.Error` this
+session (`Guide.logoBroken`, `Model.logoHaveLess`), so a cached file that
+passes every helper header gate and still fails the decoder is tried once
+and journaled once instead of on every delegate realisation. The residual
+is the mechanism, not a corner of it: `Image.Error` is one status for every
+failure to load -- a decoder rejection, a file that cannot be opened, an
+announced file that is no longer there (a cache cleared by hand under a
+running shell; a source removed and re-added gets the same fnv key and so
+the same directory) -- and nothing clears a mark, so a later fetch that
+writes a good file to the same path and announces it stays hidden until the
+shell restarts. Before the fix that file cost a retry on every realisation;
+now it costs one restart. So the "already on disk" branch of
 `logos --fetch` proves each cached file with `logo_file_within_bounds`
 BEFORE announcing it; a file that fails is unlinked, not announced, counted
 as `swept`, and falls through to the fetch, which refuses the same bytes at

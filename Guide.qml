@@ -458,18 +458,27 @@ Item {
   // harmless blank.
   readonly property var logoHave: root.serviceReady && root.service.logoHave !== undefined
     ? root.service.logoHave : ({})
-  // D-LOGO-19. The PATHS of cached logos Qt could not decode, for the
+  // D-LOGO-19. The PATHS of cached logos Qt could not load, for the
   // session: a file that passes every helper header gate and still fails
   // the decoder was pointed at again by every delegate realisation, four
   // journal lines each time. The slots read `have` LESS those names, so a
   // broken file is tried once and journaled once; the path carries its
   // directory, so nothing here needs clearing on a source switch.
+  // The residual is wider than "a transient read error", and it is the
+  // mechanism: Image.Error is ONE status for every failure to load -- a
+  // file the decoder rejects, a file that cannot be opened, an announced
+  // file that is no longer there (the cache cleared by hand under a running
+  // shell; a source removed and re-added gets the same fnv key, so the same
+  // directory) -- and logoFailed cannot tell them apart. Nothing clears a
+  // mark: a later fetch that writes a good file to the same path and
+  // announces it stays hidden until the shell restarts. Before the fix that
+  // file cost a retry on every realisation; now it costs one restart.
   property var logoBroken: ({})
   readonly property var logoHaveShown: Model.logoHaveLess(root.logoHave, root.logoBroken)
   function logoFailed(source) {
     var path = Model.logoFailedPath(source)
     if (path === "" || root.logoBroken[path] === true) return
-    console.warn("omarchy-iptv: logo " + path + " could not be decoded; not tried again this session")
+    console.warn("omarchy-iptv: logo " + path + " could not be loaded; not tried again this session")
     root.logoBroken = Model.logoBrokenMark(root.logoBroken, path)
   }
   // The same rule the channel-number column follows (M2-03 4.2): zero width
