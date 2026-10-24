@@ -396,6 +396,10 @@ class StateFile {
     this.dirAbsent = opts.dirAbsent !== undefined ? opts.dirAbsent === true : (!this.exists && !this.fault && opts.dirPresent !== true)
     this.watchArmed = !this.dirAbsent
     this.disk = text; this.view = text; this.events = []; this.writeFails = false; this.coalesce = false
+    // D-SRC-39 (rule 10): a PER-WRITE failure, `failWhen(text) -> bool`, so a
+    // burst can land its first write and fail a later one; `writeFails`
+    // stays the switch for every write.
+    this.failWhen = null
     this.loader = null
     this.mode = this.exists ? (opts.mode !== undefined ? opts.mode : 0o600) : null
     this.umask = opts.umask !== undefined ? opts.umask : 0o022
@@ -421,7 +425,8 @@ class StateFile {
       || this.fault === "dangling-link-nodir" || this.fault === "not-a-dir" || this.fault === "folder-link"
     // R26c: inside the view's own onLoaded, a write that lands raises nothing.
     if (this.inHandler > 0) this.handlerWrites++
-    const ev = { kind: this.writeFails || blocksWrite ? "saveFailed" : (this.inLoad ? "silent" : "saved"), text }
+    const fails = this.writeFails || blocksWrite || (typeof this.failWhen === "function" && this.failWhen(text) === true)
+    const ev = { kind: fails ? "saveFailed" : (this.inLoad ? "silent" : "saved"), text }
     if (this.coalesce && this.events.length >= 2) this.events[this.events.length - 1] = ev
     else this.events.push(ev)
   }

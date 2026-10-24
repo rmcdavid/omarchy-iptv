@@ -5482,7 +5482,9 @@ Item {
     onSaved: {
       root.stateInHandler = root.stateInHandler + 1
       try {
-        if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) {
+        // D-SRC-39: decided from the burst record, not the last text alone.
+        var outcome = Model.stateSaveOutcome({ viewText: stateFile.text(), lastSaveText: root.lastSaveText, recentSaves: root.recentSaves })
+        if (outcome.last) {
           root.stateSavesInFlight = 0
           root.stateSaveFailed = false
           root.landedState = root.lastSaveState   // R21a: what the disk holds now, the marker included
@@ -5490,6 +5492,13 @@ Item {
           // R27a: a save held for this write now reads, from a turn of its own.
           root.stateWriteWaitExpired = false
           root.endStateWriteWait(false)
+        } else if (outcome.landed) {
+          // D-SRC-39: an EARLIER write of the burst landed -- the disk holds
+          // its text now, whatever the later write does -- so it is the base
+          // from here, and the texts before it are no longer echoes to come.
+          // The later write is still in flight: nothing else moves.
+          root.landedState = outcome.state
+          root.recentSaves = outcome.remaining
         }
         root.settleEntryFlush()
         // R19d (D-SRC-18): a mirror a failed save withheld is paid by the first
@@ -5509,7 +5518,9 @@ Item {
       root.stateInHandler = root.stateInHandler + 1
       try {
         // R27a: and a save held for this write, failed or not, reads first.
-        if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) {
+        // D-SRC-39: the same decision as onSaved's (rule 15); a failed
+        // earlier write of a burst lands nothing, so only `last` is read.
+        if (Model.stateSaveOutcome({ viewText: stateFile.text(), lastSaveText: root.lastSaveText, recentSaves: root.recentSaves }).last) {
           root.stateSavesInFlight = 0
           root.stateWriteWaitExpired = false
           root.endStateWriteWait(false)

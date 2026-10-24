@@ -264,6 +264,7 @@
         "failedAfterHealthy",
         "withoutFailed",
         "stateSaveLanded",
+        "stateSaveOutcome",
         "countReload",
         "reloadDisposition",
         "STATE_LOAD_ERRORS",

@@ -1147,6 +1147,37 @@ function stateSaveLanded(viewText, askedText) {
   return str(viewText) === str(askedText) && str(askedText) !== ""
 }
 
+// D-SRC-39 (2026-10-24). What a `saved` (or `saveFailed`) report means for
+// the BASE, decided from the burst record rather than from the last text
+// alone. stateSaveLanded answers only "is this the LAST text asked for";
+// an earlier write of a burst reports with ITS text, and until now that
+// changed nothing -- so with t1 landed and t2 failed the disk held t1
+// while the base stayed at the file before the burst, a restore of that
+// earlier file then matched the base, was ignored as save-failed, and the
+// next landed save wrote t1's change back over it. The record of the
+// burst (Service.recentSaves, R25a) names every text asked for since the
+// last landing, in order, and writes land in order, so a `saved` whose text
+// is a member of it IS a landing: the base becomes that text and the
+// record is trimmed to the texts after it.
+//   viewText      stateFile.text() as the handler reads it
+//   lastSaveText  the last text asked for
+//   recentSaves   the burst record
+// -> { landed, last, state, remaining }
+//   last       the view's text is the last asked for (stateSaveLanded)
+//   landed     last, or an earlier text of the burst: the file holds it
+//   state      parseState of an earlier landing's text (null otherwise:
+//              the last's state is the caller's lastSaveState)
+//   remaining  the record after this landing
+function stateSaveOutcome(ctx) {
+  var c = ctx || {}
+  var view = str(c.viewText), last = str(c.lastSaveText)
+  var saves = asList(c.recentSaves).map(str)
+  if (stateSaveLanded(view, last)) return { landed: true, last: true, state: null, remaining: [] }
+  var at = view === "" ? -1 : saves.indexOf(view)
+  if (at === -1) return { landed: false, last: false, state: null, remaining: saves }
+  return { landed: true, last: false, state: parseState(view), remaining: saves.slice(at + 1) }
+}
+
 // R15. The reload counter counts BY REASON: one number per reason
 // Model.reloadDisposition can answer, keyed by the reason string itself so
 // the counter cannot name a reason the decision does not (rule 13: joined by
@@ -1911,13 +1942,14 @@ export {
   toggleHiddenGroup, browsableChannels, hideAction, hideVerb, removeRecent,
   trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed,
   prunedFailed, knownIdSet, failedIndex, failedDocument, failedWhen,
-  withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
-  reloadDisposition, sortedKeys, stateCanonical, sameState, canonValue,
-  mergeSetField, recordFieldsDiffering, MERGE_WHOLE_FIELDS, mergeForeignState,
-  MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount, mergeDropLines,
-  migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
-  stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
-  stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
-  STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
-  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
+  withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
+  stateSaveOutcome, countReload, reloadDisposition, sortedKeys,
+  stateCanonical, sameState, canonValue, mergeSetField, recordFieldsDiffering,
+  MERGE_WHOLE_FIELDS, mergeForeignState, MERGE_LINE_HEAD, mergeConflictLine,
+  mergeDropCount, mergeDropLines, migrationHeldAgainLine, mergeDropNotice,
+  STATE_LOAD_ERRORS, stateLoadKind, stateInitFound, stateLoadDecision,
+  stateWriteGate, stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
+  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
+  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
+  stateBlockedHeader
 }

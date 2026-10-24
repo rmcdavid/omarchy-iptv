@@ -8149,14 +8149,18 @@ checkCall("R11 (structural): stateInitProc's exit issues the parked save, THEN s
     // 700: R26b's handler-depth count and its try now wrap the body, the
     // landed branch and the settle unchanged inside it, 2026-10-16;
     // 900 / 1400: R27a's end of the write wait joined both landed branches,
-    // 2026-10-20, the settle unchanged after it)
-    savedSettles: /onSaved: \{[\s\S]{0,900}root\.settleEntryFlush\(\)/.test(serviceSource),
-    saveFailedSettles: /onSaveFailed: \(error\) => \{[\s\S]{0,1400}root\.stateSaveFailed = true[\s\S]{0,100}root\.settleEntryFlush\(\)/.test(serviceSource),
+    // 2026-10-20, the settle unchanged after it;
+    // 1500 / 1600: D-SRC-39's earlier-landing branch joined onSaved and the
+    // outcome call lengthened onSaveFailed's guard, 2026-10-24)
+    savedSettles: /onSaved: \{[\s\S]{0,1500}root\.settleEntryFlush\(\)/.test(serviceSource),
+    saveFailedSettles: /onSaveFailed: \(error\) => \{[\s\S]{0,1600}root\.stateSaveFailed = true[\s\S]{0,100}root\.settleEntryFlush\(\)/.test(serviceSource),
     // R13: the outstanding flag is raised BEFORE setText with the text kept,
     // and cleared on either signal ONLY when the view reports on that text
-    // (Model.stateSaveLanded), never by counting signals.
+    // (Model.stateSaveLanded; since D-SRC-39 through Model.stateSaveOutcome's
+    // `last`, decided from the same text and the burst record), never by
+    // counting signals.
     marksBeforeWrite: /root\.lastSaveText = text\n\s*root\.stateSavesInFlight = 1\n\s*stateFile\.setText\(text\)/.test(serviceSource),
-    landsByContent: (serviceSource.match(/if \(Model\.stateSaveLanded\(stateFile\.text\(\), root\.lastSaveText\)\)[^\n]*\n?[^\n]*root\.stateSavesInFlight = 0/g) || []).length,
+    landsByContent: (serviceSource.match(/Model\.stateSaveOutcome\(\{ viewText: stateFile\.text\(\), lastSaveText: root\.lastSaveText, recentSaves: root\.recentSaves \}\)[\s\S]{0,120}root\.stateSavesInFlight = 0/g) || []).length,
     neverCounts: serviceSource.indexOf("root.stateSavesInFlight - 1") === -1 && serviceSource.indexOf("root.stateSavesInFlight + 1") === -1
   }
 }, { blockFound: true, readsExitCode: true, savesThenSettles: true, exitNeverFlushesDirectly: true, flushSites: 1,
@@ -15673,6 +15677,38 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     const unbounded = procs.filter(id => !timers.some(t => t.indexOf(id + ".running") !== -1))
     return [procs.length >= 18, unbounded]
   }, [true, []])
+
+  // D-SRC-39: a burst whose first write lands and a later one fails.
+  checkCall("D-SRC-39: Model.stateSaveOutcome -- the last text is a landing that clears the record; an EARLIER text of the record is a landing whose state is the base and whose record is the texts after it; a text in neither lands nothing; an empty view lands nothing", () => {
+    const t1 = JSON.stringify({ version: 2, favorites: ["a"] }), t2 = JSON.stringify({ version: 2, favorites: ["a", "b"] }), t3 = JSON.stringify({ version: 2, favorites: ["c"] })
+    const last = M.stateSaveOutcome({ viewText: t3, lastSaveText: t3, recentSaves: [t1, t2, t3] })
+    const earlier = M.stateSaveOutcome({ viewText: t1, lastSaveText: t3, recentSaves: [t1, t2, t3] })
+    const middle = M.stateSaveOutcome({ viewText: t2, lastSaveText: t3, recentSaves: [t1, t2, t3] })
+    const foreign = M.stateSaveOutcome({ viewText: "{}", lastSaveText: t3, recentSaves: [t1, t2, t3] })
+    const empty = M.stateSaveOutcome({ viewText: "", lastSaveText: "", recentSaves: [""] })
+    return [last, [earlier.landed, earlier.last, earlier.state.favorites, earlier.remaining], [middle.landed, middle.state.favorites, middle.remaining],
+            [foreign.landed, foreign.last, foreign.state, foreign.remaining.length], [empty.landed, empty.last]]
+  }, [{ landed: true, last: true, state: null, remaining: [] }, [true, false, ["a"], [JSON.stringify({ version: 2, favorites: ["a", "b"] }), JSON.stringify({ version: 2, favorites: ["c"] })]],
+      [true, ["a", "b"], [JSON.stringify({ version: 2, favorites: ["c"] })]], [false, false, null, 3], [false, false]])
+  checkCall("D-SRC-39: through Service -- t1 lands and t2 fails (past the 2 s write wait, as R27a leaves it): the BASE is t1 when t1's `saved` reports, so a restore of the pre-burst file is FOREIGN and merged (not ignored as save-failed and written over); the merge's save lands and clears the failure", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    const pre = h.stateFile.disk
+    h.root.toggleFavorite("t:one.uk"); h.runLater()
+    const t1 = h.stateFile.events[0].text
+    h.stateFile.failWhen = t => t !== t1
+    h.root.toggleFavorite("t:two.uk"); h.runLater()
+    h.elapse(2000); h.elapse(2000)   // the write wait's bound, then the released read's bound: t2 is written
+    const issued = h.stateFile.events.length
+    h.stateFile.failWhen = null      // t2's failure is decided; every later write lands
+    h.deliverOne()                    // t1's `saved`, with t1's text, while t2 is out
+    const baseAfterT1 = M.parseState(JSON.stringify(h.root.landedState)).favorites
+    h.deliverOne()                    // t2's `saveFailed`
+    const afterFail = [h.root.stateSaveFailed, h.file().favorites, h.root.stateSavesInFlight]
+    h.foreign(sf => { sf.disk = pre })   // a backup from before the burst, put back
+    const merged = [Object.keys(h.root.stateReloadsByReason).filter(k => /save-failed/.test(k)), h.root.userState.favorites]
+    h.drain()
+    return [issued, baseAfterT1, afterFail, merged, h.file().favorites, h.root.stateSaveFailed, M.sameState(h.root.landedState, h.root.userState), h.compileErrors]
+  }, [2, ["t:one.uk"], [true, ["t:one.uk"], 0], [["foreign-save-failed"], ["t:two.uk"]], ["t:two.uk"], false, true, []])
 
   // D-SRC-52: a good playlist status clears the sentence a failed one left
   // in lastError, and nothing else.
