@@ -4748,24 +4748,34 @@ Item {
       }
       st = Model.withSourceStats(st, newKey, status, nowSec)
       st = Model.touchSource(st, newKey, nowSec)
+      // D-SRC-14: decided against the active key as it still is (root.userState
+      // has not moved), BEFORE the state is published. An edit of the active
+      // source folds the pointer into this same state, so no assignment ever
+      // publishes a state with no active source (configured flickered false,
+      // clearSourceData ran, and a key-less save went out before the key's).
+      var plan = Model.probeCommitPlan({ commit: commit, mode: mode, key: key, newKey: newKey, activeKey: root.activeSourceKey })
+      st = Model.probeCommitState(st, plan, newKey)
+      // beginSwitch BEFORE the key moves (switchSource's rule): with the
+      // pointer folded, the assignment below is the move, and it fans out to
+      // onActiveCacheDirChanged, which can call finishSwitch.
+      if (plan.act === "switch") root.beginSwitch()
       root.userState = st
       root.saveState()
-      if (commit) {
-        if (newKey === root.activeSourceKey) {
-          // Already the active directory (a retry of the active source):
-          // the FileViews watch it, but reload deterministically.
-          channelsFile.reload()
-          playlistStatusFile.reload()
-        } else {
-          root.beginSwitch()
-          // D-SINK-19: `newKey`, not `rec.key`. They differ when a colliding
-          // record appeared through the CLI while the probe ran (S5, the
-          // `known` branch above), and the pointer has to name the record the
-          // history actually kept. The URL pair this used to pass hid that:
-          // `rec.url` was right either way, so the bug could not show.
-          if (!root.persistActive(newKey)) {
-            console.warn("omarchy-iptv: adopted source but could not mirror the key into the bar entry")
-          }
+      if (plan.act === "reload") {
+        // Already the active directory (a retry of the active source):
+        // the FileViews watch it, but reload deterministically.
+        channelsFile.reload()
+        playlistStatusFile.reload()
+      } else if (plan.act === "switch") {
+        // D-SINK-19: `newKey`, not `rec.key`. They differ when a colliding
+        // record appeared through the CLI while the probe ran (S5, the
+        // `known` branch above), and the pointer has to name the record the
+        // history actually kept. The URL pair this used to pass hid that:
+        // `rec.url` was right either way, so the bug could not show.
+        // For the folded edit the key is already in memory, so this plans
+        // `write-entry-after-saved`: the one save above, then the mirror.
+        if (!root.persistActive(newKey)) {
+          console.warn("omarchy-iptv: adopted source but could not mirror the key into the bar entry")
         }
       }
       root.sourceProbeFinished({

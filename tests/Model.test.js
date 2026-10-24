@@ -12783,6 +12783,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     touchSource: () => [Model.touchSource(S, KB, 100)],
     withSourceStats: () => [Model.withSourceStats(S, KB, { ok: true, channelCount: 3, groupCount: 1, fetchedAt: 99 }, 100)],
     withActiveKey: () => [Model.withActiveKey(S, KB)],
+    // D-SRC-14: the probe commit's fold of the pointer (a reducer the commit
+    // hands the state to), driven both ways.
+    probeCommitState: () => [Model.probeCommitState(S, { wasActive: true, act: "switch" }, KB), Model.probeCommitState(S, { wasActive: false, act: "switch" }, KB)],
     withCacheLayout: () => [Model.withCacheLayout(S, 2), Model.withCacheLayout(S, 0)],
     withFavorites: () => [Model.withFavorites(S, ["a", "b"])],
     withSavedSearch: () => [Model.withSavedSearch(S, "news", 100).state],
@@ -15541,6 +15544,39 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
   const boot = (entry, text, o) => H.bootService(svcText, M, Object.assign({ entry, stateText: text, host: "lag" }, o || {}))
   const okStatus = JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })
   const failedStatus = JSON.stringify({ ok: false, kind: "playlist", error: { code: "helper_damaged", part: "05-ipc-logos.py", message: "part missing" } })
+
+  // D-SRC-14: editing the active source's URL through the probe commit.
+  checkCall("D-SRC-14: Model.probeCommitPlan -- an edit of the ACTIVE source folds the pointer and still switches; a retry of the active source reloads; an add or a switch to another key switches; nothing without commit; probeCommitState folds only when the plan says so", () => {
+    const edit = M.probeCommitPlan({ commit: true, mode: "edit", key: KA, newKey: KNEW, activeKey: KA })
+    const other = M.probeCommitPlan({ commit: true, mode: "edit", key: KB, newKey: KNEW, activeKey: KA })
+    const retry = M.probeCommitPlan({ commit: true, mode: "retry", key: KA, newKey: KA, activeKey: KA })
+    const add = M.probeCommitPlan({ commit: true, mode: "add", key: KB, newKey: KB, activeKey: KA })
+    const sw = M.probeCommitPlan({ commit: true, mode: "switch", key: KB, newKey: KB, activeKey: KA })
+    const none = M.probeCommitPlan({ commit: false, mode: "edit", key: KA, newKey: KNEW, activeKey: KA })
+    const st = M.parseState(stateText([rec(A), rec(NEW)], ""))
+    return [edit, other, retry, add, sw, none,
+            M.activeKeyOf(M.probeCommitState(st, edit, KNEW)), M.activeKeyOf(M.probeCommitState(st, other, KNEW)), M.probeCommitState(st, null, KNEW) === st]
+  }, [{ wasActive: true, act: "switch" }, { wasActive: false, act: "switch" }, { wasActive: false, act: "reload" },
+      { wasActive: false, act: "switch" }, { wasActive: false, act: "switch" }, { wasActive: true, act: "none" }, KNEW, "", true])
+  checkCall("D-SRC-14: through Service.handleProbeExit -- an edit of the active source's URL publishes NO state without an active source, issues ONE write, opens the switch, mirrors the new key into the bar entry once the save lands, and finishes with sourceSwitched for the new key", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A), rec(B)], KA))
+    const r = h.root
+    // Every value assigned to root.userState during the commit, by its active key.
+    const desc = Object.getOwnPropertyDescriptor(r, "userState")
+    const published = []
+    Object.defineProperty(r, "userState", { get: desc.get, set(v) { published.push(M.activeKeyOf(v)); desc.set.call(r, v) }, enumerable: true, configurable: true })
+    const issuedBefore = r.stateWritesIssued
+    const submitted = r.updateSource(KA, { playlistUrl: NEW, epgUrl: "", label: "a.example.test" })
+    h.runLater()
+    h.probeExit(okStatus)
+    // Two assignments carry the key (the commit's, then persistActive's
+    // re-assignment of the same object); none carries no key.
+    const afterCommit = { published: [...new Set(published)], issued: r.stateWritesIssued - issuedBefore, switching: r.switching, active: r.activeSourceKey === KNEW }
+    h.drain()
+    r.finishSwitch()
+    return [submitted.ok, afterCommit, published.indexOf("") === -1, h.storedEntry().sourceKey === KNEW, h.file().activeKey === KNEW,
+            h.signals.filter(x => x[0] === "sourceSwitched").map(x => x[1] === KNEW), h.compileErrors]
+  }, [true, { published: [KNEW], issued: 1, switching: true, active: true }, true, true, true, [true], []])
 
   // D-SRC-52: a good playlist status clears the sentence a failed one left
   // in lastError, and nothing else.
