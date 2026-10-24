@@ -381,7 +381,12 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-80}
 # mpvArg names in the footer (+4), the decoded-once logo slots (+4), the
 # casefold pin (+1); every one red on a9d20f9 or on a mutation (the lane
 # report).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3008}
+# 2026-10-24, lane-p23-model round 2 (D-SINK-30's logo-host readers, F-UX-7's
+# footer order): 3008 -> 3010 -- the consent dialog's host through
+# confirmLogosMessage (+1) and the footer's one line naming the refused
+# option ahead of a kept-option warning (+1); both red on 2361574 and on the
+# cut or the composer order mutated back.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3010}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -588,7 +593,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3008}
 # 2026-10-24, lane-p23-model: 1496 -> 1498 -- test_helper's state reader
 # parity test (+1, the shared state-reader-urls fixture) and its casefold
 # pin (+1, red with the fixture absent or an entry removed).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1498}
+# 2026-10-24, lane-p23-model round 2: 1498 -> 1499 -- test_logos pins the
+# logo-host cut at `;`, `=` and `&` through logo_host, logo_survey and the
+# refusal line (+1; red on 2361574 and with the cut mutated out of logo_host);
+# the shared logo-survey fixture's new case runs under the existing test.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1499}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
