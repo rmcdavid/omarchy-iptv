@@ -375,7 +375,13 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-80}
 # 0.15.0 cut, 2026-10-22: re-levelled on lane-rel-0150 (7c1d37f plus the
 # version bump and the notes); the suite runs 2993 checks in both own-echo
 # modes and the floor stays 2993.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2993}
+# 2026-10-24, lane-p23-model (D-SINK-30, D-SINK-23 parity, D-SINK-14, F-UX-7,
+# D-LOGO-19, D-SRC-12): 2993 -> 3008 -- the display-host cut (+2), the state
+# reader parity fixture (+2), the plain-http advice line (+2), the refused
+# mpvArg names in the footer (+4), the decoded-once logo slots (+4), the
+# casefold pin (+1); every one red on a9d20f9 or on a mutation (the lane
+# report).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3008}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -579,7 +585,10 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2993}
 # and the UX-SOURCES 5.4 cap test (+1); both red on 4cf8910's documents.
 # 0.15.0 cut, 2026-10-22: re-levelled on lane-rel-0150 (7c1d37f plus the
 # version bump and the notes); the suite runs 1496 and the floor stays 1496.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1496}
+# 2026-10-24, lane-p23-model: 1496 -> 1498 -- test_helper's state reader
+# parity test (+1, the shared state-reader-urls fixture) and its casefold
+# pin (+1, red with the fixture absent or an entry removed).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1498}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
