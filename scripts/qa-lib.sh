@@ -98,12 +98,19 @@ qa_model_count() {
 # that stub alone is the whole helper. Exit 1 (and nothing printed) when the
 # stub is missing, when the block names nothing, or when a named part is not
 # there: a copy that leaves a part behind is a helper that cannot start.
+# F-HARNESS-34: the stub is read with its CRs dropped, because the STUB
+# itself reads its parts that way (each entry's length and CRC-32 are of the
+# text with CRLF read as LF, D-REL-11) and a reader stricter than the thing
+# it reads for is as wrong as one more forgiving (rule 10). Before this, a
+# CRLF checkout's `^HELPER_PARTS = ($` never matched its CR-terminated line,
+# so the split helper read as a one-file one -- exit 0, no parts -- and the
+# slow trees would have staged the stub alone.
 qa_helper_parts() {
   local root=$1 rel
   local -a parts=()
   [[ -f $root/bin/omarchy-iptv ]] || return 1
-  grep -q '^HELPER_PARTS = ($' "$root/bin/omarchy-iptv" || return 0
-  mapfile -t parts < <(sed -n '/^HELPER_PARTS = ($/,/^)$/s/^    ("\([0-9][0-9]-[a-z][a-z0-9-]*\.py\)", [1-9][0-9]*, 0x[0-9a-f]\{8\}),$/\1/p' "$root/bin/omarchy-iptv")
+  tr -d '\r' <"$root/bin/omarchy-iptv" | grep -q '^HELPER_PARTS = ($' || return 0
+  mapfile -t parts < <(tr -d '\r' <"$root/bin/omarchy-iptv" | sed -n '/^HELPER_PARTS = ($/,/^)$/s/^    ("\([0-9][0-9]-[a-z][a-z0-9-]*\.py\)", [1-9][0-9]*, 0x[0-9a-f]\{8\}),$/\1/p')
   (( ${#parts[@]} > 0 )) || return 1
   for rel in "${parts[@]}"; do [[ -f $root/bin/helper/$rel ]] || return 1; done
   for rel in "${parts[@]}"; do printf '%s\n' "$root/bin/helper/$rel"; done

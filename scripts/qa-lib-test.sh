@@ -355,6 +355,38 @@ st "a one-file helper from before the split has no parts, and that is fine" 0 qa
 is "and prints nothing" "$(qa_helper_parts "$HROOT")" ""
 rm "$HROOT/bin/omarchy-iptv"
 st "a root with no helper at all is refused" 1 qa_helper_parts "$HROOT"
+# F-HARNESS-34. A CRLF checkout (core.autocrlf=true before .gitattributes
+# existed) ends every stub line in CR, and the reader's `^HELPER_PARTS = ($`
+# and `/^)$/` never matched one: on this machine's grep (ugrep in grep mode,
+# which lets `$` match before a CR) the block was found and the sed range was
+# not, so the shipped reader REFUSED (exit 1, nothing printed) -- a split
+# helper read as one that cannot start -- and on a grep whose `$` is strict it
+# reads as a ONE-FILE helper, exit 0 and no parts, so a slow tree would stage
+# the stub alone. The stub itself reads its parts with CRLF as LF (D-REL-11),
+# so the reader now does the same. The real tree's stub and parts, copied
+# with CRLF line endings: the same eleven parts in the same order.
+HCRLF="$TMP/helper-crlf"
+mkdir -p "$HCRLF/bin/helper"
+sed 's/$/\r/' "$ROOT/bin/omarchy-iptv" >"$HCRLF/bin/omarchy-iptv"
+for hp in "$ROOT"/bin/helper/*.py; do sed 's/$/\r/' "$hp" >"$HCRLF/bin/helper/${hp##*/}"; done
+is "a CRLF copy of the stub yields the same parts as the LF tree, in order" \
+   "$(qa_helper_parts "$HCRLF" | sed "s#^$HCRLF/##" | tr '\n' ' ')" \
+   "$(qa_helper_parts "$ROOT" | sed "s#^$ROOT/##" | tr '\n' ' ')"
+is "and that is eleven of them, not none" "$(qa_helper_parts "$HCRLF" | wc -l | tr -d ' ')" "11"
+# The old reader, verbatim from a9d20f9's qa-lib.sh, against the same copy:
+# whichever grep is on PATH, it does not answer the eleven parts.
+old_helper_parts() {
+  local root=$1 rel
+  local -a parts=()
+  [[ -f $root/bin/omarchy-iptv ]] || return 1
+  grep -q '^HELPER_PARTS = ($' "$root/bin/omarchy-iptv" || return 0
+  mapfile -t parts < <(sed -n '/^HELPER_PARTS = ($/,/^)$/s/^    ("\([0-9][0-9]-[a-z][a-z0-9-]*\.py\)", [1-9][0-9]*, 0x[0-9a-f]\{8\}),$/\1/p' "$root/bin/omarchy-iptv")
+  (( ${#parts[@]} > 0 )) || return 1
+  for rel in "${parts[@]}"; do [[ -f $root/bin/helper/$rel ]] || return 1; done
+  for rel in "${parts[@]}"; do printf '%s\n' "$root/bin/helper/$rel"; done
+}
+is "the shipped reader answered a CRLF stub with no parts at all (the shape replaced)" \
+   "$(old_helper_parts "$HCRLF" | wc -l | tr -d ' ')" "0"
 
 # ======================================================== qa_tree_count (A2)
 

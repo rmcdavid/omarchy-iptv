@@ -1,0 +1,12 @@
+# dev-only: off the release allowlist in scripts/release.py, so `main` ships
+# none of this (F-HARNESS-34). Every text file is LF in the working tree
+# whatever core.autocrlf says: scripts/check.sh and every scenario start with
+# a shebang a CR breaks (`/bin/bash^M: bad interpreter`), the node pins read
+# QML and helper text byte for byte, and qa_helper_parts reads the stub's
+# HELPER_PARTS block line by line.
+* text=auto eol=lf
+# Two playlist fixtures ARE their CRLF -- the BOM+CRLF and the CRLF-header
+# cases the parser is tested against -- and are never normalised. Pinned by
+# tests/test_crlf_fixtures.py, which goes red if either line is dropped.
+tests/fixtures/qa-headers.m3u -text
+tests/fixtures/qa-nonascii/qa-bom-crlf.m3u -text
