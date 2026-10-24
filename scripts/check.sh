@@ -375,7 +375,12 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-80}
 # 0.15.0 cut, 2026-10-22: re-levelled on lane-rel-0150 (7c1d37f plus the
 # version bump and the notes); the suite runs 2993 checks in both own-echo
 # modes and the floor stays 2993.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2993}
+# 2993 -> 3017 on 2026-10-24, P23 lane A (lane-p23-state): D-SRC-52 (+2),
+# D-SRC-14 (+2), D-SRC-37 (a) (+1) and (c) (+6, the Process inventory
+# among them), D-SRC-39 (+2), D-SRC-43 (+2), D-SRC-33 (+2), D-SRC-49 /
+# D-SINK-22 (b)(c) (+4), D-REL-8 (+2), F-M3-18 (a) (+1); every one seen red
+# on a9d20f9 or on the stub put back (the lane report).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3017}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -579,7 +584,10 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2993}
 # and the UX-SOURCES 5.4 cap test (+1); both red on 4cf8910's documents.
 # 0.15.0 cut, 2026-10-22: re-levelled on lane-rel-0150 (7c1d37f plus the
 # version bump and the notes); the suite runs 1496 and the floor stays 1496.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1496}
+# 2026-10-24, P23 lane A: 1496 -> 1502 -- tests/test_state.py's StateModeTest
+# (+6), the helper's `state mode` verb (D-SRC-49, D-SINK-22 (b)(c)); 5 errors
+# and 1 failure with the module on a9d20f9's tree (no such verb).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1502}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

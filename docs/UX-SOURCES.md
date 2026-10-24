@@ -2248,6 +2248,21 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    merge can leave the active source naming one the other program removed or
    re-keyed, with no line, after which the guide falls back as it does at a
    start, D-SRC-37. Both are filed and not this round's.)
+   [2026-10-24, P23 lane A, both fixed: a merge that kept the other
+   program's version of anything is told ONCE per merge by a notification
+   (`omarchy-notification-send --app-name IPTV -u normal -g <alert glyph> -r
+   74020 <title> <body>`, `Model.mergeConflictNotice`): title `Settings
+   merged`, body one sentence per conflict in the lead's words, `The source
+   1a2b3c4d (label, url) kept the other program's version.` / `The active
+   source kept the other program's version.` / `The recent list kept the
+   other program's version.` -- a field name and a short key, never a URL,
+   a label or a value; the journal keeps its fuller line per conflict. And
+   a merged active source naming a record the other program removed falls
+   back to no active source in the state itself (D-SRC-37 (a)), as a
+   conflict of its own: `The active source (the source 1a2b3c4d it named
+   is gone, so no source is active) kept the other program's version.` The
+   card is UNVERIFIED on a display this round, like the round-15 cards
+   below.]
    [Round 15, R25b (D-SRC-31): **unless together they pass a limit.** Both
    sides' additions are kept up to 50 sources, 20 saved searches and 200
    hidden groups; past a limit the other program's version keeps its place

@@ -762,6 +762,13 @@ by the helper for a syntactic reason; the helper keeps the runtime refusals
 | `mergeForeignState(base, ours, theirs)` | R24a (round 14; `Model.mergeForeignState`): `{ state, conflicts }` [round 15, R25b: `{ state, conflicts, dropped }`], THE three-way merge of a FOREIGN write into a session that holds a change the file does not. Sets (`favorites`, `hiddenGroups`, `savedSearches`) merge; `sources` merge by key; `recents`, `activeKey`, `lastPlayed`, `session`, `cacheLayout` are taken whole; `entryMigrated` is set if either side has it [2026-10-20, F1 (lane-sweep-f4): except when it is OURS ALONE and the record the migration added -- `opts.migrationKey`, `Service.migrationAddedKey` -- did not land as ours: dropped at the cap (`migrationHeld` "full": the record is not counted in `dropped.sources`, and an `activeKey` naming it goes back to theirs) or replaced by theirs' version of the same playlist (`migrationHeld` "changed"). Then the marker is not carried, the entry keeps both URLs, the service logs `Model.migrationHeldAgainLine(why)` (no key, no URL), sets `migrationHeldFull`, and the reconcile the merge runs retries at once: over "changed" it migrates onto theirs' record, the bar's guide URL with it; over "full" it is held under the one `Sources is full` card until a removal. The signature is `mergeForeignState(base, ours, theirs, opts)`, `{ state, conflicts, dropped, migrationHeld }`]; a conflict goes to theirs and is reported as `{ field, key, fields }` with no value. The field table is in the round-14 rulings; the fixture is `tests/fixtures/state-merge.json` [round 15, R25b (D-SRC-31): the caps are applied INSIDE the merge, not left to `parseState`: theirs keeps its place and what goes past `MAX_SOURCES` (50), `MAX_SAVED_SEARCHES` (20) or `MAX_HIDDEN_GROUPS` (200) is always ours' additions, dropped and returned as `dropped` -- `sources` the keys, `savedSearches` and `hiddenGroups` counts; and the sets are built on THEIRS, theirs' order first, which the function's comment now says (D-SRC-37)] |
 | `mergeDropLines(dropped)`, `mergeDropNotice(dropped)` | R25b (round 15; `Model.mergeDropLines`, `Model.mergeDropNotice`): what a merge that dropped anything at a cap tells. The journal: one line per dropped element, `state.json was changed by another program while a change made here was not yet saved; the source <key> added here was not kept (the limit is 50 sources)`, `...; a saved search made here was not kept (the limit is 20 saved searches)`, `...; a group hidden here was not kept (the limit is 200 hidden groups)` -- a source by its key, the others as themselves, never a query or a group name. The user, ONCE per merge (notification, replace id 74018, normal urgency): `Not every change was kept` / `Another program changed state.json while a change made here was not yet saved, and together they went past a limit. The other program's version was kept, and <N> source(s) added here (the limit is 50 sources) [and ...] was/were not kept. Make room, then add it/them again.` -- counts and constants only. `null` and `[]` when nothing was dropped |
 | `mergeConflictLine(conflict)` | R24a (round 14; `Model.mergeConflictLine`): the console line for one conflict, `state.json was changed by another program while a change made here was not yet saved; kept the other program's version of <field>` or `... kept the other program's version of the source <key> (<field names>)` -- never a URL or a value [round 15, D-SRC-36: `version of` added; the line read `kept the other program's the source <key>` until then] |
+| `stateSaveOutcome({ viewText, lastSaveText, recentSaves })` | D-SRC-39 (2026-10-24, P23 lane A; `Model.stateSaveOutcome`): what a `saved` / `saveFailed` report means for the BASE, from the burst record -- `{ landed, last, state, remaining }`; `last` is `stateSaveLanded`, and a `saved` whose text is an EARLIER member of `recentSaves` is a landing whose `state` becomes `landedState` with the record trimmed to the texts after it. Both outcome handlers take it. |
+| `mergeLeavesNothingUnsaved(merged, theirs, { savesInFlight })` | D-SRC-43 (2026-10-24; `Model.mergeLeavesNothingUnsaved`): true when the merge IS theirs and no write of ours is in flight -- `mergeForeignText` then clears `stateSaveFailed`, the failure reason and `recentSaves`. The owed entry mirror is still paid by the next landed save. |
+| `mergeConflictNotice(conflicts)`, `MERGE_CONFLICT_TITLE`, `mergeConflictSentence(conflict)` | D-SRC-33 (2026-10-24; `Model.mergeConflictNotice`): `{ title: "Settings merged", body }` -- one sentence per conflict, `<The source <key> (<fields>) \| The active source \| The recent list \| ...> kept the other program's version.`; a field name and a key, never a value; null for none. Raised once per merge through `Service.notify("mergeConflict", ...)`, `NOTIFY_IDS.mergeConflict` 74020 (the `notifyArgv` branch is integration's: `model/privacy.mjs`). |
+| `probeCommitPlan({ commit, mode, key, newKey, activeKey })`, `probeCommitState(state, plan, newKey)` | D-SRC-14 (2026-10-24; `Model.probeCommitPlan`): `{ wasActive, act: "switch" \| "reload" \| "none" }` decided against the active key BEFORE the probe commit publishes; `probeCommitState` folds the new key into that state when the active source was edited, so no published state lacks an active source. |
+| `stateModeArgv(helperPath, stateDir)`, `stateModeReply(text)` | D-SRC-49 / D-SINK-22 (b)(c) (2026-10-24; `Model.stateModeArgv`): the argv of the helper's `state mode`, run after every landed save on `stateModeProc`; `stateModeReply` reads its one line -> `{ folder, file }` of `changed` \| `kept`, null for anything else. |
+| `lastErrorAfterStatus(lastError, previousReason, nextStatus)` | D-SRC-52 (2026-10-24; `Model.lastErrorAfterStatus`): a good playlist status clears exactly the sentence the replaced status composed (captured before the reassignment) and nothing else; a failed one writes its reason. |
+| `stateLoadDecision(...)`, the `initRetried` input and the `reinit` act | D-REL-8 (2026-10-24; `Model.stateLoadDecision`): an `unknown` init verdict with `initRetried` false answers `{ act: "reinit" }` before any re-read; the service re-runs `state init` once (`stateInitRetry`, 1 s) and sets the flag. `timeout` still blocks at once. |
 | `persistFailureMessage(reason)` | R16 (lane-key-u1; `Model.persistFailureMessage`): the sentence for THE reason `sourcesPersistFailed` carried, over `Model.PERSIST_FAILURE_REASONS` (`state_write_failed`, `config_unsafe`, `persist_failed`); an unknown reason falls back to `persist_failed`'s sentence; what the guide renders on the result line and in the footer |
 | `invalidInputBlocks(invalid, activeKey)` | whether a refused input becomes the guide's error state: only when there is no active source to show instead (D16, narrowed) |
 | `sourceRows(st, activeKey, nowSec, errors)` | UI rows, sorted `active` first then `lastUsed` desc [UX-ASSUMPTION]: `{ key, label, host, kind, active, channelCount, groupCount, lastUsed, lastUsedText, fetched, epgConfigured, origin, errorReason }` -- no URL field, ever |
@@ -1257,7 +1264,14 @@ only because `Model.entryWith` copies them.
    init's verdict and decides a held load (`Model.stateInitFound`,
    `Model.stateLoadDecision`); any other failure gets one re-read after the
    init and then the no-write mode. The FileView measurement and the rest
-   are in the round-12 rulings.]**
+   are in the round-12 rulings.]** **[Amended 2026-10-24, D-REL-8 (P23,
+   lane A): an init that answered NOTHING READABLE -- `unknown`: exit 0 with
+   no `state init` line (the empty stub git leaves for milliseconds
+   mid-update) or a non-zero exit (a partial stub, the old stub refusing new
+   parts) -- is run ONCE MORE, a second later, under the start-up watchdog
+   again (`stateLoadDecision`'s `reinit` act, `initRetried`,
+   `stateInitRetry`); a second `unknown` takes the re-read-then-block path
+   above. A timed-out init is never re-run (R23c).]**
 3. `reconcile()` (also from `onPlaylistUrlChanged`, `onEpgUrlChanged`):
    `Model.reconcileSources(userState, playlistUrl, epgUrl, activeSourceKey, now)`;
    on `changed` assign `userState`, `saveState()`; for each `evicted` key
@@ -1496,7 +1510,14 @@ edit the control's copy and the next bound write would overwrite it.
    only inside the URL string in state.json and shell.json **[since
    D-SINK-19: in state.json only; the plugin writes no URL into shell.json]**.
 5. Files: `state.json` stays 0600 (created by `state init`, S-02; `FileView`
-   keeps an existing mode); `sources/` and every `sources/<key>/` are 0700
+   keeps an existing mode **[and, since 2026-10-24 (D-SRC-49, D-SINK-22
+   windows b and c; P23 lane A), is made 0600 again by the helper's `state
+   mode` after every save that LANDS, from `stateFile.onSaved` on its own
+   bounded Process -- a file the user put at the path at 0644, or one a save
+   created at the umask's mode after a re-point, is private within the
+   stub's start rather than until the next shell start; one interpreter
+   start per landed save, `ARCHITECTURE.md` section 5's 2026-10-24
+   amendment]**); `sources/` and every `sources/<key>/` are 0700
    (`mkdir -p -m 700` and `ensure_private_dir`); every helper write is the
    existing `O_EXCL` temp + `chmod 0600` + `os.replace`. Removal deletes
    known file names only. **The host's `shell.json` is not in that list and
@@ -5515,7 +5536,15 @@ D-DOC-11's double, F-HARNESS-27; a800bd5 and b10b5b6 key-scenario B19-B22;
   minus what theirs removed", in theirs' ORDER. The rest of D-SRC-37 (a merge
   can leave `activeKey` naming a source the other side removed or re-keyed,
   with no conflict line; `failedProc` and `whichProc` unbounded) is filed and
-  not this round's.
+  not this round's. [2026-10-24, P23 lane A: both halves fixed. (a) a merged
+  pointer naming no merged record falls back to no active source IN THE
+  STATE, the way `source remove` and `Model.removeSource` clear it (R3), and
+  the fall-back is a conflict `{ field: "activeKey", key, fields:
+  ["removed"] }` whose journal line says `... version of activeKey (the
+  source <key> it named is gone, so no source is active)`. (c) `failedProc`,
+  `whichProc`, `cacheProc`, `configShieldProc` and the two PiP start-up
+  probes each have a TERM-only watchdog at `helperTimeoutMs`
+  (`ARCHITECTURE.md` section 5's 2026-10-24 amendment).]
 - D-SRC-38. `Model.stateBlockedHeader(reason, path, midSession)`: `Saving has
   stopped` in a block that began after a state loaded, the notice's title
   otherwise; `Model.sourcesHeaderRight` takes the fourth argument and
@@ -7308,7 +7337,12 @@ states are the lead's, and none is cited here).**
   state it (the README, `UX-SOURCES.md` 5.10 item 9, `ARCHITECTURE.md`
   section 5), with HS7's loss measured on this tree as on 6f1d176. It has
   no board id of its own beyond D-SINK-22; if the board closes D-SINK-22
-  on window (a), window (c) needs one.
+  on window (a), window (c) needs one. [2026-10-24, P23 lane A: windows (b)
+  and (c) are NARROWED, not closed -- the save that creates the file at
+  0644 still can, and the repair the landing asks for (`state mode`,
+  D-SRC-49) makes it 0600 within the helper's start; the exposure is those
+  milliseconds, no longer the session. R29a's descope of the stalled-read
+  handling is untouched: nothing here touches a read path or a save path.]
 - (5) The R22 question carried from round 18 (2): a change made in a
   mid-session block is dropped on three ways back, as on 0.14.2. R29a
   removes the stall door into it; a read that answers with a load failure
