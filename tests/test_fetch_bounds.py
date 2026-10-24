@@ -323,6 +323,34 @@ class LookupBoundTest(LoweredDeadline):
         self.assertEqual(caught.exception.code, "logo_timeout")
         self.assertLess(elapsed, BEFORE_LATE, "the logo's lookup overran its deadline (%.2f s)" % elapsed)
 
+    def test_the_worker_blocks_the_alarm_and_the_main_thread_keeps_it(self):
+        # The round-2 recheck's P3: the worker's SIGALRM block was stated
+        # (so the kernel hands a process-directed alarm to the main thread,
+        # whose wait it interrupts at once) and never seen failing, because
+        # slow_lookup blocks the signal ITSELF to model glibc. This double
+        # blocks nothing and reads the mask from inside the lookup, on the
+        # thread the shipping resolve_within runs it on; the main thread's
+        # mask is read after, because a block that leaked back onto it
+        # would silence every FetchDeadline. Red on the mutation that drops
+        # the pthread_sigmask call, and on one that runs the lookup here.
+        # Linux's complete_signal prefers the main thread for a
+        # process-directed signal it does not block, so the DELIVERY cannot
+        # be told apart by a test on this kernel; the mask is the decision.
+        import socket
+        import threading
+        real = socket.getaddrinfo
+        seen = []
+
+        def getaddrinfo(host, port, *args, **kwargs):
+            blocked = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+            seen.append((threading.current_thread() is threading.main_thread(), signal.SIGALRM in blocked))
+            return real(host, port, *args, **kwargs)
+        with mock.patch.object(socket, "getaddrinfo", getaddrinfo):
+            found = helper.resolve_within("127.0.0.1", 80, 1.0)
+        self.assertEqual(seen, [(False, True)], "lookup on the main thread, or with the alarm deliverable to the worker")
+        self.assertTrue(found and found[0][4][0] == "127.0.0.1", found)
+        self.assertNotIn(signal.SIGALRM, signal.pthread_sigmask(signal.SIG_BLOCK, set()), "the block leaked onto the main thread")
+
     def test_off_the_main_thread_the_socket_timeout_bounds_the_lookup(self):
         # No alarm can be installed off the main thread; there the lookup is
         # held to the per-socket timeout as a connect is, and answered as a

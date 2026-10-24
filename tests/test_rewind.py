@@ -222,7 +222,8 @@ class RewindPlayerTestCase(PlayerTestCase):
         # position here, as it did once in twelve on the real player.
         seek_lag_s = kwargs.pop("seek_lag_s", 0.005)
         seek_silent = kwargs.pop("seek_silent", False)
-        landing = {key: kwargs.pop(key) for key in ("landing_offset", "restart_lag_s", "restart_silent") if key in kwargs}
+        landing = {key: kwargs.pop(key) for key in ("landing_offset", "restart_lag_s", "restart_silent", "restart_before_seek")
+                   if key in kwargs}
         return self.start(props=self.props(**kwargs), user_data=data, seek_moves=seek_moves,
                           seek_lag_s=seek_lag_s, seek_silent=seek_silent, **landing)
 
@@ -356,6 +357,39 @@ class SeekVerbTest(RewindPlayerTestCase):
         gap = self.read_after_seek_s()
         self.assertIsNotNone(gap)
         self.assertGreaterEqual(gap, helper.SEEK_EVENT_BOUND_S)
+        self.assertEqual(server.osd, [["-0:10 behind live", 3000]])
+
+    def test_a_restart_before_the_seek_event_is_not_this_seek_s_landing(self):
+        # The round-2 recheck's P3: "a playback-restart counts only after a
+        # seek was seen" was stated and never seen failing. A stray restart
+        # (the player's own, a stall ending) lands before the `seek` event
+        # with time-pos still at the old position; the deciding read must
+        # wait for the restart that FOLLOWS the seek, 1.5 s past the target.
+        # Red on the mutation that counts any restart: the read is taken on
+        # the stray one and reports the echoed target (390.617, applied
+        # -10.0), not the landing.
+        server = self.playing(seek_lag_s=0.02, landing_offset=1.5, restart_lag_s=0.02, restart_before_seek=True)
+        code, payload, _, stderr = self.seek("--by", "-10")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((payload["refused"], payload["settled"], payload["applied"], payload["rewind"]["position"]),
+                         (False, True, -8.5, 392.117), "the read followed a restart that was not this seek's")
+        self.assertEqual(server.osd, [[helper.rewind_osd_text(payload), 3000]])
+        gap = self.read_after_seek_s()
+        self.assertIsNotNone(gap)
+        self.assertGreaterEqual(gap, 0.04, "the read came before the seek's own restart")
+
+    def test_a_restart_before_the_seek_event_does_not_settle_a_seek_whose_own_never_comes(self):
+        # The same decision's other half: the stray restart, then `seek`,
+        # then nothing. `settled` is False and the bound is paid, because
+        # the one restart seen came before the seek and was not its landing.
+        # Red on the mutation: settled True, the bound not paid.
+        server = self.playing(restart_silent=True, restart_before_seek=True)
+        code, payload, _, stderr = self.seek("--by", "-10")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual((payload["refused"], payload["settled"], payload["applied"]), (False, False, -10.0))
+        gap = self.read_after_seek_s()
+        self.assertIsNotNone(gap)
+        self.assertGreaterEqual(gap, helper.SEEK_EVENT_BOUND_S, "a stray restart settled the seek")
         self.assertEqual(server.osd, [["-0:10 behind live", 3000]])
 
     def test_a_refusal_is_known_from_the_line_without_paying_the_bound(self):

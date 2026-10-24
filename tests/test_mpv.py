@@ -108,6 +108,12 @@ class FakeMpv:
     before this knob existed reads byte for byte as it did; a test that
     wants the keyframe sets the offset. `restart_silent=True` is the
     player that executes but never restarts, for the bound on that half.
+    `restart_before_seek=True` emits a STRAY `playback-restart` -- one the
+    player raises for its own reasons, a buffering stall ending at the
+    same instant -- before the `seek` event, with time-pos still at the
+    old position: the helper counts a restart only after a `seek` was
+    seen, and this is the knob that makes that decision visible (the
+    round-2 recheck, 2026-10-24).
     """
 
     REFUSAL_LINE = "Cannot seek in this stream. You can force it with '--force-seekable=yes'.\n"
@@ -118,7 +124,8 @@ class FakeMpv:
 
     def __init__(self, path, props=None, event_first=False, silent=False, refuse=(), close_on_quit=True,
                  entry_ids=True, user_data=None, seek_moves=True, seek_lag_s=0.0, seek_silent=False,
-                 missing=(), landing_offset=0.0, restart_lag_s=0.0, restart_silent=False):
+                 missing=(), landing_offset=0.0, restart_lag_s=0.0, restart_silent=False,
+                 restart_before_seek=False):
         self.path = path
         self.props = dict(self.TLS_DEFAULTS)
         self.props.update(props or {})
@@ -137,6 +144,7 @@ class FakeMpv:
         self.landing_offset = landing_offset
         self.restart_lag_s = restart_lag_s
         self.restart_silent = restart_silent
+        self.restart_before_seek = restart_before_seek
         self.log_conns = set()
         self.command_times = []
         self.seeks = []
@@ -313,6 +321,9 @@ class FakeMpv:
             if self.seek_silent:
                 return
             if landed:
+                if self.restart_before_seek:
+                    # A stray restart, time-pos untouched: not this seek's.
+                    self.inject({"event": "playback-restart"})
                 self.props["time-pos"] = target
                 self.inject({"event": "seek"})
                 if self.restart_silent:
