@@ -53,7 +53,7 @@ function warnState(message) {
 // the shell used to keep (`http://h.test:abc/`, a `./relative` path, a
 // bare host) is dropped by the shell as the helper already dropped it on
 // its next write. `epgUrl` the same way, cleared rather than dropped.
-// Pinned by the shared tests/fixtures/state-reader-urls.json, which
+// Pinned by the shared state-reader-urls fixture on the dev branch, which
 // Model.parseState and the helper's normalize_state both run.
 function normalizeSourceRecord(raw) {
   if (!raw || typeof raw !== "object") return null
