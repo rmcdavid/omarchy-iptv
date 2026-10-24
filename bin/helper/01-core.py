@@ -348,7 +348,9 @@ EPG_DETAIL_KEYS = ("desc", "category", "episode")
 # identifier it used as its ORACLE -- a guide channel id sitting in the
 # playlist row's own stream address -- was reaching 185 rows that the matcher
 # itself never read. Why it ranks where it does, measured on the frozen
-# 1,453-channel list against the frozen Pluto guide (427 declarations):
+# 1,453-channel list against the frozen Pluto guide (427 declarations) --
+# a dated measurement, 2026-10-03, over inputs that no longer exist
+# (F-EPG-24, F-EPG-26: not re-derivable; the live list drifts):
 #
 # EVERY census below counts the STREAM url and nothing else, which is the
 # only field this strategy reads. The round that added ADDR quoted 193 and
@@ -399,8 +401,10 @@ EPG_MATCH_KEYS = ("matchedById", "matchedByAddr", "matchedByFeed", "matchedByNam
 # otherwise claim a row for every address containing that word.
 #
 # What the floor actually buys, re-measured over the 1,453 real STREAM
-# addresses (the field this strategy reads; the figures the round shipped
-# here were taken over stream+logo and are wrong on this field):
+# addresses of the list frozen 2026-10-03 (F-EPG-24: a dated measurement
+# over an input that no longer exists, not re-derivable; the field this
+# strategy reads; the figures the round shipped here were taken over
+# stream+logo and are wrong on this field):
 #
 #   With no floor at all, 626 alphanumeric tokens occur in more than one
 #   row's address and NONE of them is a 24-hex id. The longest is
@@ -493,13 +497,16 @@ _EPG_ADDR_TOKEN = re.compile(r"[A-Za-z0-9]{%d,}" % EPG_ADDR_MIN_TOKEN)
 # not this code.
 #
 # The synthetic shape above is adversarial on purpose. The owner's real
-# 1,453-row list averages 0.7 qualifying tokens per address, so a 50,000-row
-# list in that shape would not come near these figures; the caps are what
+# 1,453-row list (frozen 2026-10-03, F-EPG-24: a dated figure over an input
+# that no longer exists) averaged 0.7 qualifying tokens per address, so a
+# 50,000-row list in that shape would not come near these figures; the caps
+# are what
 # MAX_SOURCE_BYTES and MAX_CHANNELS actually permit, which is the number a
 # bound has to be stated at.
 #
-# Sixteen, and the recall cost on the frozen data is ZERO. Measured over the
-# owner's 1,453 addresses: the most qualifying tokens any one of them holds
+# Sixteen, and the recall cost on the frozen data is ZERO. Measured 2026-10-03
+# over the owner's 1,453 addresses, frozen then and gone since (F-EPG-24; not
+# re-derivable): the most qualifying tokens any one of them holds
 # is SIX, and every one of the 185 declared guide ids the index reaches is
 # the FIRST qualifying token of its row's address (position 0 of the de-duped
 # run). Swept, the index is byte-identical to the uncapped one at every cap
@@ -1312,10 +1319,12 @@ def epg_name_key(value: Any) -> str:
     The project already owned the right rule and the matcher used the other
     one.
 
-    Measured end to end on the frozen inputs when this changed: matched
-    227 -> 226, and the one pair lost is the wrong one; nameIndexed 1,443 ->
-    1,453 and nameDroppedPlaylist 10 -> 0, so the repair costs one bad pair
-    and returns ten channels to the index. No confirmed pair moved.
+    Measured end to end on the frozen inputs (the 1,453-row list and the
+    guide frozen 2026-10-03; gone since, F-EPG-24 and F-EPG-26, so a dated
+    figure and not a current one) when this changed: matched 227 -> 226,
+    and the one pair lost is the wrong one; nameIndexed 1,443 -> 1,453 and
+    nameDroppedPlaylist 10 -> 0, so the repair costs one bad pair and
+    returns ten channels to the index. No confirmed pair moved.
 
     Folds through epg_name_text first (D-EPG-12): the playlist side and the
     guide side of the match key the same text the same way.
