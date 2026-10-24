@@ -3829,7 +3829,7 @@ Performance budget (10k channels):
     -- about three times the quarter of an hour D-LOGO-8 measured for a
     first enable of 1,436 logos -- and gives each logo the lesser of its
     own deadline and what is left of the run's, so the run ends by that mark
-    plus the host-name lookup; what it held back is `postponed` and
+    plus one wait slice of the lookup; what it held back is `postponed` and
     `runExpired` in the summary, and the next run fetches it, because a file
     on disk is never fetched again. The shell's `logoFetchWatchdog` is the
     outer bound, `Model.LOGO_FETCH_WATCHDOG_MS` = the run's deadline + one
@@ -3837,10 +3837,32 @@ Performance budget (10k channels):
     the interpreter's start and the lookup, armed and stopped by the
     Process's own `running` state; it TERMs the helper and logs no URL. The
     three numbers are one shared fixture, `tests/fixtures/logo-deadlines.json`,
-    which both suites read. What no signal cuts short, stated rather than
-    rounded away: `getaddrinfo`, which runs in the C library and retries its
-    own poll after a signal, so a host-name lookup ends on the system
-    resolver's timeout and the handler runs then (UNVERIFIED by run). The
+    which both suites read. What no signal cut short, and was stated as
+    UNVERIFIED until it was measured (D-SRC-62): `getaddrinfo` runs in the
+    C library and retries its own poll after a signal, so a host-name
+    lookup ended on the system resolver's timeout and the handler ran
+    then. Measured 2026-10-24 (`scripts/dev-harness/spikes/resolver-overrun`,
+    a user namespace with its own network, `hosts: files dns` bind-mounted
+    over the host's nsswitch so nss-resolve cannot answer, and a resolver
+    that never does): with a 0.5 s deadline the `playlist` verb answered
+    `timeout` after 1.26-1.28 s under `options timeout:1 attempts:1` and
+    10.29-10.35 s under glibc's defaults, against a bare lookup of
+    1.04-1.09 s and 10.05-10.06 s. So the lookup now runs on a daemon
+    thread the main thread waits for in 50 ms slices (`resolve_within`),
+    which the alarm interrupts as it interrupts a read, and the address it
+    found is the one the socket connects to: `bounded_create_connection`
+    is installed as every connection's `_create_connection` by
+    `bounded_handlers`, which both openers (`make_opener`, `logo_opener`)
+    are built with, so a redirect hop's lookup is bounded like the first.
+    The same rig after the fix: 0.77-0.84 s under both resolver settings,
+    the 0.27-0.34 s over the deadline being the interpreter's start and
+    the parts' compile, which the before-run shows too. Off the main
+    thread, where no alarm can be installed, the lookup is held to the
+    per-socket timeout as a connect is. It is the only thread the helper
+    starts; the FetchDeadline docstring says so, where it used to say none.
+    Pinned by `tests/test_fetch_bounds.py` `LookupBoundTest` with a double
+    of the C library's shape (SIGALRM blocked for the lookup's whole
+    delay), four of whose five cases are red on a9d20f9. The
     test-only `OMARCHY_IPTV_HTTP_DEADLINE` now only LOWERS the budget, as
     `OMARCHY_IPTV_MEMORY_LIMIT_MB` does; it used to take any figure. So
     does `OMARCHY_IPTV_CLIPBOARD_DEADLINE` since F-HARNESS-36 (R32f), the

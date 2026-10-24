@@ -377,10 +377,9 @@ def logo_opener(host: str) -> Any:
     # No FTPHandler: build_opener adds the defaults, and the redirect guard
     # already refuses an ftp target, but a handler that cannot be reached is
     # one fewer thing to reason about.
-    handlers: list[Any] = [LogoRedirectHandler()]
-    context = TLS_CONTEXT.get("https")
-    if context is not None:
-        handlers.append(urllib.request.HTTPSHandler(context=context))
+    # D-SRC-62: the connections are the stdlib's with the host-name lookup
+    # bounded (bounded_handlers), as make_opener's are.
+    handlers: list[Any] = [LogoRedirectHandler(), *bounded_handlers(TLS_CONTEXT.get("https"))]
     opener = urllib.request.build_opener(*handlers)
     opener.handlers = [h for h in opener.handlers
                        if h.__class__.__name__ not in ("FTPHandler", "CacheFTPHandler",
