@@ -579,7 +579,13 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2993}
 # and the UX-SOURCES 5.4 cap test (+1); both red on 4cf8910's documents.
 # 0.15.0 cut, 2026-10-22: re-levelled on lane-rel-0150 (7c1d37f plus the
 # version bump and the notes); the suite runs 1496 and the floor stays 1496.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1496}
+# 2026-10-24, the P2/P3 harness round (lane-p23-harness): 1496 -> 1506 --
+# tests/test_plugin_id.py (+3: every literal copy of the plugin id against
+# manifest.json, F-HARNESS-4), tests/test_crlf_fixtures.py (+4: the two
+# carriage-return fixtures under .gitattributes, F-HARNESS-34) and
+# tests/test_split_model.py (+3: the manifest's name lists as a checked
+# record, F-GATE-10); each seen red on a9d20f9 (the lane report).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1506}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
