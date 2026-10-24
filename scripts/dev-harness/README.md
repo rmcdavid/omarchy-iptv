@@ -2032,6 +2032,23 @@ command line matches (and kills) that shell, so bracket one character of
 the pattern (`quickshell -p .../roo[t]`). The AF_UNIX socket path is limited
 to ~108 bytes: keep `OMARCHY_IPTV_HARNESS_DIR` short.
 
+Two conventions every scenario file keeps, both pinned by `qa-lib-test.sh`
+over the whole population so a seventeenth file cannot be written without
+them. **Refusals above every external command** (F-M3-18 (b)): the file
+resolves its own directory from `BASH_SOURCE` with builtins and checks its
+tools with `command -v` before anything else runs, so with nothing on PATH
+it answers its own `SKIP <name>-scenario: <tool> is not on PATH` and exit 77
+-- what the gate reads as "this machine cannot run it" -- where twelve of
+the sixteen used to die on `dirname: command not found` first (driven:
+`env -i PATH= /bin/bash <scenario>`). **INT and TERM are exits**
+(F-HARNESS-18): `trap 'exit 130' INT` and `trap 'exit 143' TERM` sit beside
+`trap cleanup EXIT`, because a signal while the shell waits on a foreground
+child runs no EXIT trap and an exit does; without them a `timeout -s TERM`
+mid-run stranded the shell, the cage, the server and the work directory
+(measured on clip-scenario, the first to carry them). The qa-lib-test pin is
+the shape; the proof is a display lane's TERM at N s and INT leaving nothing
+behind, recorded per scenario in docs/QA-RESULTS.md.
+
 ## What the fixture contains
 
 `fixtures/harness.m3u.in` has 20 channels in 9 groups, 15 of them

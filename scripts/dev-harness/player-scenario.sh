@@ -45,8 +45,19 @@
 #
 # Output: one PASS/FAIL line per check and a summary. No URL is ever printed.
 set -uo pipefail
+# ---- refusals above EVERY external command (F-M3-18 (b), the clip- and
+# logo-scenario shape): `command -v`, `[[ ]]` and `echo` are builtins, so an
+# empty PATH reaches the SKIP line -- exit 77, what the gate reads as "this
+# machine cannot run it" -- and nothing else. HERE is resolved from
+# BASH_SOURCE with builtins for the same reason: `dirname "$0"` used to run
+# first and an empty PATH died on `dirname: command not found` instead.
+for tool in python3 ffmpeg mpv pgrep mktemp; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "SKIP player-scenario: $tool is not on PATH" >&2; exit 77; }
+done
 
-HERE=$(cd "$(dirname "$0")" && pwd)
+HERE=${BASH_SOURCE[0]%/*}
+[[ $HERE == "${BASH_SOURCE[0]}" ]] && HERE=.
+HERE=$(cd "$HERE" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 RUN="$HERE/run.sh"
 REAL_RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}

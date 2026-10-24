@@ -1292,6 +1292,38 @@ is "and sources qa-lib.sh ABOVE the call, so the call resolves to a function" \
    "${unsourced:-none}" "none"
 is "and in a check-tree scenario the call sits on the live arm only" \
    "${late:-none}" "none"
+# F-HARNESS-18, as bookkeeping by shape (rule 14: the proof is a display
+# lane's TERM at N s and INT leaving no cage, shell, socket or work dir, the
+# clip method). A scenario that traps EXIT and detaches something is
+# stranded by a signal while it waits on a child, because a signal runs no
+# EXIT trap and an exit does; the two lines that turn INT and TERM into
+# exits lived in eight scenarios and not the other eight. This is what goes
+# red when a seventeenth scenario is written without them.
+untrapped=""
+for f in "${SCEN_FILES[@]}"; do
+  [[ $(qa_count '^trap cleanup EXIT$' "$f") == 1 ]] || { untrapped="$untrapped ${f##*/}(no-EXIT-trap)"; continue; }
+  [[ $(qa_count "^trap 'exit 130' INT$" "$f") == 1 && $(qa_count "^trap 'exit 143' TERM$" "$f") == 1 ]] || untrapped="$untrapped ${f##*/}"
+done
+is "every scenario that traps EXIT also turns INT and TERM into exits (F-HARNESS-18)" "${untrapped:-none}" "none"
+# F-M3-18 (b), DRIVEN: with nothing on PATH every scenario reaches its own
+# SKIP line and exit 77 -- `command -v`, `[[ ]]` and `echo` are builtins, and
+# HERE is resolved from BASH_SOURCE with builtins -- rather than dying on
+# `dirname: command not found` before a refusal it could have given. Twelve
+# of sixteen died that way on a9d20f9 (exit 2, the shell's own message).
+# `env -i` empties the environment too, so nothing a scenario reads from it
+# (the harness directory, HOME) can reach a real path before the refusal.
+# Bounded: a scenario that got PAST its preamble with no PATH could not
+# start anything, and `timeout` ends it anyway.
+nopath=""
+for f in "${SCEN_FILES[@]}"; do
+  np_out=$(env -i PATH= /bin/bash "$f" 2>&1); np_rc=$?
+  np_name=${f##*/}; np_name=${np_name%.sh}
+  [[ $np_rc == 77 && $np_out == "SKIP $np_name"* && $np_out == *"is not on PATH"* && $np_out != *"command not found"* ]] \
+    || nopath="$nopath ${f##*/}(rc=$np_rc)"
+done
+is "with an empty PATH every scenario answers its own SKIP line and exit 77, not 'command not found'" "${nopath:-none}" "none"
+is "and no scenario resolves its directory with dirname (a code line; comments may say the word)" \
+   "$(cat "${SCEN_FILES[@]}" | grep -c '^[^#]*dirname "\$0"')" "0"
 # The four the gate runs, named, because those are the ones where a stray
 # transcript would land on every commit. The list is literal and so it
 # drifts: logo-scenario.sh joined the gate on 2026-10-11 and this loop did
@@ -2746,7 +2778,16 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # a one-file helper and no helper at all (8).
 # 513 -> 515 on 2026-10-20, R27f (lane-sweep-a1): the open instrument's two
 # floor joins (its check-tree recipe, and check.sh's OPEN_PREFLIGHT_MIN).
-EXPECTED=515
+# 515 -> 548 on 2026-10-24, the P2/P3 harness round (lane-p23-harness):
+# qa_helper_parts on a CRLF copy of the tree and the old reader beside it
+# (3, F-HARNESS-34); qa_stop_pid against a deaf child, a kind one, a zombie,
+# an orphan, the bad arguments, run.sh reap over a recorded server and a
+# recycled pid, and the run.sh / scenario shapes (17, F-HARNESS-32); run.sh
+# shot's decision table and m3's wrapper (10, F-HARNESS-12); the trap census,
+# the empty-PATH drive over every scenario and the dirname census (3,
+# F-HARNESS-18 and F-M3-18 (b)). 33 in all, and each section seen red
+# against a9d20f9's run.sh, qa-lib.sh or scenarios (the lane report).
+EXPECTED=548
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

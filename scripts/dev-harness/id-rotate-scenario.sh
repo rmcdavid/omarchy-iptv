@@ -66,8 +66,19 @@
 # so it is installed after the clean and before the start, at 0600
 # (CLAUDE.md 6), the mode the helper and the service both keep.
 set -uo pipefail
+# ---- refusals above EVERY external command (F-M3-18 (b), the clip- and
+# logo-scenario shape): `command -v`, `[[ ]]` and `echo` are builtins, so an
+# empty PATH reaches the SKIP line -- exit 77, what the gate reads as "this
+# machine cannot run it" -- and nothing else. HERE is resolved from
+# BASH_SOURCE with builtins for the same reason: `dirname "$0"` used to run
+# first and an empty PATH died on `dirname: command not found` instead.
+for tool in python3; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "SKIP id-rotate-scenario: $tool is not on PATH" >&2; exit 77; }
+done
 
-HERE=$(cd "$(dirname "$0")" && pwd)
+HERE=${BASH_SOURCE[0]%/*}
+[[ $HERE == "${BASH_SOURCE[0]}" ]] && HERE=.
+HERE=$(cd "$HERE" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 RUN="$HERE/run.sh"
 PLUGIN_ROOT=$(cd "${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT}" 2>/dev/null && pwd)

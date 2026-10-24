@@ -71,8 +71,19 @@
 # one -- R6's scans cover the helper replies and the harness log, and they run
 # long before the prints this file has grown since.
 set -uo pipefail
+# ---- refusals above EVERY external command (F-M3-18 (b), the clip- and
+# logo-scenario shape): `command -v`, `[[ ]]` and `echo` are builtins, so an
+# empty PATH reaches the SKIP line -- exit 77, what the gate reads as "this
+# machine cannot run it" -- and nothing else. HERE is resolved from
+# BASH_SOURCE with builtins for the same reason: `dirname "$0"` used to run
+# first and an empty PATH died on `dirname: command not found` instead.
+for tool in python3 ffmpeg mpv wtype pgrep ss mktemp; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "SKIP rewind-scenario: $tool is not on PATH" >&2; exit 77; }
+done
 
-HERE=$(cd "$(dirname "$0")" && pwd)
+HERE=${BASH_SOURCE[0]%/*}
+[[ $HERE == "${BASH_SOURCE[0]}" ]] && HERE=.
+HERE=$(cd "$HERE" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 RUN="$HERE/run.sh"
 PROBE="$HERE/fixtures/rewind-probe.py"
