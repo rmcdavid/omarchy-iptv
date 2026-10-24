@@ -275,6 +275,8 @@
         "stateLoadKind",
         "stateInitFound",
         "stateLoadDecision",
+        "stateModeArgv",
+        "stateModeReply",
         "stateWriteGate",
         "stateUnreadableNotice"
       ]

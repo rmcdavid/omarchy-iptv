@@ -82,6 +82,9 @@ function makeIds(h) {
     cacheProc,
     failedProc: proc("failedProc"),
     whichProc: proc("whichProc"),
+    // D-SRC-49: the `state mode` run after a landed save; its exit is
+    // delivered by the test (h.stateModeExit), with the helper's own reply.
+    stateModeProc: proc("stateModeProc"),
     hyprWhichProc: proc("hyprWhichProc"),
     hyprInfoProc: proc("hyprInfoProc"),
     probeWatchdog: timer("probeWatchdog"),
@@ -764,7 +767,26 @@ function bootService(serviceText, Model, o) {
     return [t, fire]
   }
   h.timed = [[vw, onVerifyWatchdog], [ww, onWriteWaitWatchdog]]
-  for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog"]) h.timed.push(treeTimer(id))
+  for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog", "stateModeWatchdog"]) h.timed.push(treeTimer(id))
+  // D-SRC-49: the `state mode` run's exit, with the REAL helper's reply for
+  // the file as the double holds it (rule 10: the verb chmods a regular
+  // file that is not 0600 and nothing else; the fake's mode moves with it),
+  // or `reply` as given.
+  h.stateModeExit = (o2) => {
+    const io = o2 || {}
+    const p = ids.stateModeProc
+    if (!p.running) return false
+    p.running = false
+    let text = io.reply
+    if (text === undefined) {
+      let file = "kept"
+      if (h.stateFile.exists && !h.stateFile.fault && h.stateFile.mode !== null && h.stateFile.mode !== 0o600) { h.stateFile.mode = 0o600; file = "changed" }
+      text = JSON.stringify({ ok: true, kind: "state", action: "mode", folder: "kept", file }) + "\n"
+    }
+    root.handleStateModeExit(io.code === undefined ? 0 : io.code, text)
+    h.runLater()
+    return true
+  }
   // Each Timer fires once its restart() is `interval` old, in the order they
   // come due; a handler that re-arms its Timer (R27a's second read) is due
   // again `interval` after the moment it fired.

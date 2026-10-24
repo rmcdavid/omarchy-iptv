@@ -1779,6 +1779,31 @@ function stateLoadDecision(ctx) {
   return { act: "block", reason: kind === "absent" && found !== "unknown" ? "absent-unconfirmed" : kind }
 }
 
+// D-SRC-49 / D-SINK-22 (b)(c), 2026-10-24. The argv of the helper's
+// `state mode`, which the service runs after every save that LANDS: the
+// FileView keeps an existing file's mode and creates a missing one at the
+// umask's, so a state.json the user put at the path at 0644, or one a save
+// created after a re-point, is made 0600 (and its folder 0700) within the
+// stub's start rather than at the next shell start. Argv only, no URL.
+function stateModeArgv(helperPath, stateDir) {
+  return ["python3", str(helperPath), "state", "--state-dir", str(stateDir), "mode"]
+}
+
+// The verb's one-line reply -> { folder, file } ("changed" | "kept"), or
+// null for anything that is not that reply (a run the watchdog stopped
+// prints nothing). A `changed` is worth a journal line; `kept` is the
+// steady state and is silent.
+function stateModeReply(text) {
+  var lines = str(text).split("\n")
+  for (var i = lines.length - 1; i >= 0; i--) {
+    var o = parseJsonObject(lines[i])
+    if (!o || o.ok !== true || o.kind !== "state" || o.action !== "mode") continue
+    var pick = function (v) { return str(v) === "changed" ? "changed" : "kept" }
+    return { folder: pick(o.folder), file: pick(o.file) }
+  }
+  return null
+}
+
 // The one gate every state write goes through (Service.saveState).
 //   blocked  the no-write mode's reason, "" when writes are allowed
 //   loaded   a state has been applied this session
@@ -1992,8 +2017,8 @@ export {
   MERGE_CONFLICT_FIELDS, mergeConflictSentence, mergeConflictNotice,
   mergeDropCount, mergeDropLines, migrationHeldAgainLine, mergeDropNotice,
   STATE_LOAD_ERRORS, stateLoadKind, stateInitFound, stateLoadDecision,
-  stateWriteGate, stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
-  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
-  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
-  stateBlockedHeader
+  stateModeArgv, stateModeReply, stateWriteGate, stateSavePlan,
+  stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
+  STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
+  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
 }

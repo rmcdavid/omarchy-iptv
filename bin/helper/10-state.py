@@ -773,17 +773,48 @@ def read_state_strict(path: str) -> dict[str, Any]:
 STATE_INIT_DEADLINE = 30
 
 
+def state_mode_repair(directory: str, path: str) -> dict[str, Any]:
+    """`state mode` (D-SRC-49, D-SINK-22 windows b and c; 2026-10-24): the
+    modes the plugin's own files are meant to have, repaired when they are
+    not -- the state folder 0700 and state.json 0600 -- and nothing else:
+    no directory is created, no file is created or read, no migration runs.
+    The service's FileView keeps an existing file's mode and creates a
+    missing one at the umask's (0644), so a state.json the user `mv`ed in
+    at 0644, or one a save created after a re-point of the folder, was
+    written into at that mode for the rest of the session, provider URLs
+    included; `state init` repaired it only at the next start. The service
+    runs this after every save that LANDS (one interpreter start, the
+    sealed stub, about 30 ms of CPU), so the window is the milliseconds
+    between the save and this repair. Both repairs are chmod_if_kind: an
+    O_PATH descriptor, the KIND checked on the inode (a directory at the
+    file's path, a link to nothing, a FIFO: untouched), and no chmod at all
+    when the mode is already right -- so in the steady state this raises no
+    IN_ATTRIB on the file the shell watches. The one bounded reply says
+    what changed; a chmod that does fire raises one reload of the base
+    text, which the service ignores (Model.reloadDisposition, unchanged)."""
+    return {"folder": "changed" if chmod_if_kind(directory, 0o700, stat.S_ISDIR) else "kept",
+            "file": "changed" if chmod_if_kind(path, 0o600, stat.S_ISREG) else "kept"}
+
+
 def cmd_state(args: argparse.Namespace) -> int:
     action = args.action
-    if action == "init":
+    if action in ("init", "mode"):
         # FIRST, before the path is even named: everything after this can
-        # touch a filesystem that hangs.
+        # touch a filesystem that hangs. `mode` runs after every landed save
+        # against the same path, so it has the same bound.
         signal.alarm(STATE_INIT_DEADLINE)
     directory = state_dir(args.state_dir)
     path = os.path.join(directory, STATE_FILE)
     extra: dict[str, Any] = {}
     if action == "source":
         extra["op"] = args.op
+    if action == "mode":
+        # Before the folder-link check: a folder that is a link to nothing
+        # is simply not a directory, so both repairs answer "kept".
+        payload_mode: dict[str, Any] = {"ok": True, "kind": "state", "action": action}
+        payload_mode.update(state_mode_repair(directory, path))
+        emit(payload_mode)
+        return EXIT_OK
     try:
         # R25c (D-SRC-32): a link at the state folder, or above it, that leads
         # nowhere. Every verb used to read it as a fresh state -- `show` and

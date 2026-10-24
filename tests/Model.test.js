@@ -8150,9 +8150,10 @@ checkCall("R11 (structural): stateInitProc's exit issues the parked save, THEN s
     // landed branch and the settle unchanged inside it, 2026-10-16;
     // 900 / 1400: R27a's end of the write wait joined both landed branches,
     // 2026-10-20, the settle unchanged after it;
-    // 1500 / 1600: D-SRC-39's earlier-landing branch joined onSaved and the
-    // outcome call lengthened onSaveFailed's guard, 2026-10-24)
-    savedSettles: /onSaved: \{[\s\S]{0,1500}root\.settleEntryFlush\(\)/.test(serviceSource),
+    // 2100 / 1600: D-SRC-39's earlier-landing branch and D-SRC-49's mode
+    // repair joined onSaved and the outcome call lengthened onSaveFailed's
+    // guard, 2026-10-24)
+    savedSettles: /onSaved: \{[\s\S]{0,2100}root\.settleEntryFlush\(\)/.test(serviceSource),
     saveFailedSettles: /onSaveFailed: \(error\) => \{[\s\S]{0,1600}root\.stateSaveFailed = true[\s\S]{0,100}root\.settleEntryFlush\(\)/.test(serviceSource),
     // R13: the outstanding flag is raised BEFORE setText with the text kept,
     // and cleared on either signal ONLY when the view reports on that text

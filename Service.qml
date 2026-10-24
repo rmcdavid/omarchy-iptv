@@ -778,6 +778,11 @@ Item {
   // already moved off. { playlistUrl, epgUrl } or null.
   property var pendingPersist: null
   property bool configShieldRerun: false
+  // D-SRC-49 / D-SINK-22 (b)(c): a `state mode` asked while one runs is
+  // folded into one re-run on exit (the configShieldRerun shape); the count
+  // is what the harness and the IPC status read.
+  property bool stateModeRerun: false
+  property int stateModeRuns: 0
   // Which persist failure happened last. Since R13 no source call returns
   // it (a refused entry mirror is logged, not reported, SR25 as amended
   // 2026-10-12); it is kept as the one record of the LAST failure for the
@@ -4223,6 +4228,41 @@ Item {
     configShieldWatchdog.restart()   // D-SRC-37 (c)
   }
 
+  // D-SRC-49 / D-SINK-22 (b)(c). Start `state mode`, or remember to start it
+  // again: `running = true` on a running Process is not a queue, so a second
+  // landed save while one runs is folded into one re-run on exit -- the same
+  // shape as runConfigShield. Never through cacheProc: that slot's command is
+  // `cache --cache-dir`, and a state-file repair on the cache verb is the join
+  // D-ID-1 keeps apart. Bounded by its own TERM-only watchdog (D-SRC-37 (c)).
+  function requestStateMode() {
+    if (root.stateWriteBlocked !== "") return
+    if (stateModeProc.running) {
+      root.stateModeRerun = true
+      return
+    }
+    stateModeProc.command = Model.stateModeArgv(root.helperPath, root.stateDir)
+    root.stateModeRuns = root.stateModeRuns + 1
+    stateModeProc.running = true
+    stateModeWatchdog.restart()
+  }
+
+  // The verb's answer: a `changed` is a mode this plugin repaired on its own
+  // file, worth a line the user can find afterwards; `kept` is the steady
+  // state and silent. A stopped run prints nothing and changes nothing.
+  function handleStateModeExit(exitCode, text) {
+    stateModeWatchdog.stop()
+    var reply = Model.stateModeReply(text)
+    if (reply && (reply.file === "changed" || reply.folder === "changed")) {
+      console.warn("omarchy-iptv: state.json's mode was repaired after a save (file " + reply.file + ", folder " + reply.folder + ")")
+    } else if (!reply && exitCode !== 0) {
+      console.warn("omarchy-iptv: state mode exited " + exitCode + "; state.json keeps whatever mode it has until the next save or start")
+    }
+    if (root.stateModeRerun) {
+      root.stateModeRerun = false
+      Qt.callLater(root.requestStateMode)
+    }
+  }
+
   // The verb's answer. `hostConfigShield` moves from unknown to private or
   // exposed and never back to unknown: Model.configShieldState fails closed,
   // so a helper that did not run, crashed or printed nothing reads as exposed
@@ -5519,6 +5559,13 @@ Item {
           root.landedState = outcome.state
           root.recentSaves = outcome.remaining
         }
+        // D-SRC-49 / D-SINK-22 (b)(c): the landed save was the last asked for
+        // and nothing is in flight -- the file at the path is ours now, with
+        // whatever mode it had or was created with -- so the helper's `state
+        // mode` repairs it, from a turn of its own (never from inside the
+        // FileView's handler, R26b), on its own Process. Coalesced in
+        // requestStateMode; nothing here waits on it.
+        if (outcome.last) Qt.callLater(root.requestStateMode)
         root.settleEntryFlush()
         // R19d (D-SRC-18): a mirror a failed save withheld is paid by the first
         // save that lands with nothing else outstanding -- deferred, never from
@@ -6043,6 +6090,23 @@ Item {
   Connections {
     target: stateInitProc
     function onExited(exitCode, exitStatus) { root.stateInitExited(exitCode) }
+  }
+
+  Process {
+    // D-SRC-49 / D-SINK-22 (b)(c): the helper's `state mode` after every
+    // landed save (requestStateMode). Argv only; the one JSON line is read at
+    // the exit and otherwise discarded. Its stderr is redacted like every
+    // other helper channel although the verb prints no URL.
+    id: stateModeProc
+    stdout: StdioCollector { id: stateModeStdout; waitForEnd: true }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv state mode:", Model.redactUrls(text.trim()))
+    }
+  }
+  Connections {
+    target: stateModeProc
+    function onExited(exitCode, exitStatus) { root.handleStateModeExit(exitCode, stateModeStdout.text) }
   }
 
   Process {
@@ -6605,6 +6669,16 @@ Item {
       if (!configShieldProc.running) return
       console.warn("omarchy-iptv: config shield exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
       configShieldProc.signal(15)
+    }
+  }
+  Timer {
+    id: stateModeWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!stateModeProc.running) return
+      console.warn("omarchy-iptv: state mode exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
+      stateModeProc.signal(15)
     }
   }
   Timer {

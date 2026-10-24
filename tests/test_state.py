@@ -248,6 +248,94 @@ class StateCommandTest(unittest.TestCase):
                 os.environ["XDG_STATE_HOME"] = original
 
 
+class StateModeTest(unittest.TestCase):
+    """`state mode` (D-SRC-49, D-SINK-22 windows b and c): the repair the
+    service runs after every landed save. Reads nothing, creates nothing,
+    chmods only a regular file that is not 0600 and only a folder that is
+    not 0700, and prints one line saying which it changed."""
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmp.cleanup)
+        self.dir = os.path.join(self.tmp.name, "state")
+        self.path = pathlib.Path(self.dir) / "state.json"
+
+    def state(self, *args):
+        return run("state", "--state-dir", self.dir, *args)
+
+    def test_a_0644_file_the_user_put_at_the_path_is_made_0600_and_says_so(self):
+        self.path.parent.mkdir(parents=True)
+        os.chmod(self.dir, 0o755)
+        content = json.dumps(v2(favorites=["t:keep"])) + "\n"
+        self.path.write_text(content, encoding="utf-8")
+        os.chmod(self.path, 0o644)
+        code, payload, err = self.state("mode")
+        self.assertEqual(code, 0)
+        self.assertEqual(payload, {"ok": True, "kind": "state", "action": "mode", "folder": "changed", "file": "changed"})
+        self.assertEqual(err, "")
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(pathlib.Path(self.dir).stat().st_mode & 0o777, 0o700)
+        self.assertEqual(self.path.read_text(encoding="utf-8"), content)   # not rewritten, not read as JSON
+
+    def test_a_0600_file_in_a_0700_folder_is_not_chmoded_at_all(self):
+        # The steady state: no chmod means no IN_ATTRIB on the file the shell
+        # watches, so a landed save's repair raises no reload.
+        from unittest import mock
+        self.path.parent.mkdir(parents=True)
+        os.chmod(self.dir, 0o700)
+        self.path.write_text("not even json", encoding="utf-8")
+        os.chmod(self.path, 0o600)
+        with mock.patch("os.chmod") as chmod:
+            code, payload, _ = self.state("mode")
+        self.assertEqual(code, 0)
+        self.assertEqual(payload, {"ok": True, "kind": "state", "action": "mode", "folder": "kept", "file": "kept"})
+        chmod.assert_not_called()
+        self.assertEqual(self.path.read_text(encoding="utf-8"), "not even json")
+
+    def test_nothing_at_the_path_creates_nothing(self):
+        code, payload, _ = self.state("mode")
+        self.assertEqual(code, 0)
+        self.assertEqual(payload["folder"], "kept")
+        self.assertEqual(payload["file"], "kept")
+        self.assertFalse(os.path.exists(self.dir))
+
+    def test_only_a_regular_file_is_repaired(self):
+        # R23d's rule holds here too: a directory at the file's path is the
+        # user's and stays searchable; a dangling link is left a link.
+        self.path.parent.mkdir(parents=True)
+        self.path.mkdir()
+        os.chmod(self.path, 0o755)
+        code, payload, _ = self.state("mode")
+        self.assertEqual((code, payload["file"]), (0, "kept"))
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o755)
+        self.path.rmdir()
+        self.path.symlink_to(pathlib.Path(self.tmp.name) / "gone")
+        code, payload, _ = self.state("mode")
+        self.assertEqual((code, payload["file"]), (0, "kept"))
+        self.assertTrue(self.path.is_symlink())
+
+    def test_a_folder_that_is_a_link_to_nothing_is_kept_without_a_traceback(self):
+        os.symlink(os.path.join(self.tmp.name, "gone"), self.dir)
+        code, payload, err = self.state("mode")
+        self.assertEqual(code, 0)
+        self.assertEqual((payload["folder"], payload["file"]), ("kept", "kept"))
+        self.assertEqual(err, "")
+
+    def test_the_verb_as_the_service_runs_it(self):
+        # The subprocess, with the argv Model.stateModeArgv builds, on the
+        # 0644 file a save created after a re-point (D-SINK-22 window b).
+        import subprocess, sys
+        self.path.parent.mkdir(parents=True)
+        self.path.write_text(json.dumps(v2()) + "\n", encoding="utf-8")
+        os.chmod(self.path, 0o644)
+        proc = subprocess.run([sys.executable, "-I", str(HELPER_PATH), "state", "--state-dir", self.dir, "mode"],
+                              capture_output=True, text=True, timeout=30)
+        self.assertEqual(proc.returncode, 0, proc.stderr)
+        self.assertEqual(json.loads(proc.stdout.strip().splitlines()[-1])["file"], "changed")
+        self.assertEqual(self.path.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(proc.stderr, "")
+
+
 class SessionKeyTest(unittest.TestCase):
     """state.json `session` (ARCHITECTURE-PLAYER.md 4.6, section 8, PO-3).
 

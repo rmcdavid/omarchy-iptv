@@ -480,6 +480,7 @@ def build_parser() -> argparse.ArgumentParser:
     actions = state.add_subparsers(dest="action", required=True)
     actions.add_parser("show", parents=[common], help="print the current state")
     actions.add_parser("init", parents=[common], help="create state.json with mode 0600 when missing (the service runs this before its first write)")
+    actions.add_parser("mode", parents=[common], help="make state.json 0600 and its folder 0700 when they are not; creates and reads nothing (the service runs this after each save lands)")
     favorite = actions.add_parser("favorite", parents=[common], help="add or remove a favorite")
     favorite.add_argument("op", choices=["add", "remove"])
     favorite.add_argument("id", help="channel id from channels.json")
