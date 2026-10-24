@@ -42,7 +42,6 @@ to read (default README.md under the root). ASCII only (CLAUDE.md rule 8).
 Not shipped.
 """
 import ast
-import glob
 import io
 import json
 import os
