@@ -398,7 +398,7 @@ non-text rule at 5.29:1) that no opacity arithmetic can produce.
    differently and that tolerance must therefore be drawn per environment, on
    the strength of a -0.376 against -0.048 split. That split was confounded with
    size class, and the rows underneath it were a different BUILD, not a different
-   environment (F-CAL-3 withdrawn, F-CAL-4). What stands:
+   environment (F-CAL-3 **withdrawn 2026-09-22**, F-CAL-4). What stands:
    - A row records the **build** that rendered it, not only the environment. The
      variable that broke this was which component the process had loaded, and a
      correct-looking `env` did not catch it.
@@ -582,7 +582,7 @@ wants route B, so shipping it now avoids a second unseen contrast change later.
 forced.* At 0.8 the number is under 4.5:1 in 16 of 23 themes with the raw accent
 and still 16 of 23 with the mixed ink, and three themes cannot be rescued by any
 ink. Cost: `docs/M2-03-CHANNEL-NUMBERS.md:677`'s promise that the number is
-dimmer than the name on the cursor row is withdrawn; subordination is carried by
+dimmer than the name on the cursor row is **withdrawn (2026-09-15)**; subordination is carried by
 the right-aligned digit column, by being digits, and by weight on a playing row.
 
 **5. D-RUNG-2, the 0.52 rung: refuse the per-theme floor.** *Recommend: refuse,
@@ -666,7 +666,7 @@ thing was not, and returned nothing, and was read as evidence of absence.
 
 Every threshold claim drawn from `menu-contrast.json` is valid for the MENU
 surface and unproven for any other. D-RUNG-1 and D-RUNG-2 are menu-surface
-claims and stand. D-RUNG-3's bar claim did not and is withdrawn. Before the
+claims and stand. D-RUNG-3's bar claim did not and is **withdrawn (2026-09-15)**. Before the
 next contrast decision on a surface that is not the guide's own rows, build a
 fixture for that surface by measuring it, not by deriving it.
 
