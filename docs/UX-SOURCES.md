@@ -2251,7 +2251,11 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    [2026-10-24, P23 lane A, both fixed: a merge that kept the other
    program's version of anything is told ONCE per merge by a notification
    (`omarchy-notification-send --app-name IPTV -u normal -g <alert glyph> -r
-   74020 <title> <body>`, `Model.mergeConflictNotice`): title `Settings
+   74020 <title> <body>`, `Model.mergeConflictNotice` through the
+   `mergeConflict` branch of `Model.notifyArgv` -- the branch the lane's first
+   tip lacked, so that for one tip this sentence named a card the shell never
+   sent; a node check calls the branch and one reads the argv off the fake
+   notifier, both red before it, P23 lane A2, 2026-10-24): title `Settings
    merged`, body one sentence per conflict in the lead's words, `The source
    1a2b3c4d (label, url) kept the other program's version.` / `The active
    source kept the other program's version.` / `The recent list kept the

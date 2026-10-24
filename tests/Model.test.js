@@ -15756,20 +15756,38 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
             M.NOTIFY_IDS.mergeConflict, ids.length === new Set(ids).size, ids.indexOf(74019)]
   }, ["Settings merged", "The source " + KA + " (label, url) kept the other program's version. The recent list kept the other program's version. The active source (the source " + KB + " it named is gone, so no source is active) kept the other program's version.",
       false, null, null, "The active source kept the other program's version.", 74020, true, -1])
-  checkCall("D-SRC-33: through Service.mergeForeignText -- an in-app label edit held unsaved (its save failed) and a foreign write that changed the same label: ONE mergeConflict notice is raised through root.notify, carrying the conflicts and no value; a merge without conflicts raises none", () => {
+  // Rule 13: the event name, the id 74020 and the notifyArgv branch are joined
+  // by a CALL here. On the lane's first tip Service raised the event and the
+  // id was reserved while notifyArgv had no branch for it, so the sink got
+  // null and the user nothing -- the state the row was filed against; this
+  // check was red there (P23 recheck, 2026-10-24).
+  checkCall("D-SRC-33: Model.notifyArgv joins the mergeConflict event to the notice -- the 74020 argv at normal urgency, the lead's title, Model.mergeConflictNotice's body (a key and a field name, no value or URL); null for no conflicts and for no params", () => {
+    const a = M.notifyArgv("mergeConflict", { conflicts: [{ field: "sources", key: KA, fields: ["label"] }] })
+    return [a === null ? null : a[0], a === null ? null : a[a.indexOf("-r") + 1], a === null ? null : a[a.indexOf("-u") + 1],
+            a === null ? null : a[a.length - 2], a === null ? null : a[a.length - 1], /http|lenspass|example/.test(JSON.stringify(a)),
+            M.notifyArgv("mergeConflict", { conflicts: [] }), M.notifyArgv("mergeConflict", {})]
+  }, ["omarchy-notification-send", "74020", "normal", "Settings merged", "The source " + KA + " (label) kept the other program's version.", false, null, null])
+  checkCall("D-SRC-33: through Service.mergeForeignText -- an in-app label edit held unsaved (its save failed) and a foreign write that changed the same label: ONE notification reaches the sink (Quickshell.execDetached: the 74020 argv, `Settings merged`, the source's key and the field name, no value or URL), raised through root.notify with the conflicts; a merge without conflicts sends none", () => {
     const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
     const notified = []
     const notify = h.root.notify
     h.root.notify = (event, params) => { notified.push([event, JSON.stringify(params)]); return notify(event, params) }
+    // The SINK, not the event: what the shell would run (the harness records
+    // execDetached's argv and runs nothing). The first version of this check
+    // wrapped root.notify alone and was green while the sink returned null.
+    const sent = () => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74020") !== -1)
     h.stateFile.writeFails = true
     h.root.updateSource(KA, { label: "Mine" }); h.drain()
     h.stateFile.writeFails = false
     h.foreign(sf => { sf.disk = stateText([rec(A, { label: "Theirs", labelCustom: true })], KA) })
+    const card = sent().map(a => [a[a.indexOf("-u") + 1], a[a.length - 2], a[a.length - 1]])
     const conflict = notified.slice()
     h.foreign(sf => { sf.disk = stateText([rec(A, { label: "Theirs", labelCustom: true })], KA, { favorites: ["t:x.uk"] }) })
-    return [conflict.map(n => n[0]), conflict.length === 1 && /"field":"sources","key":"[0-9a-f]{8}","fields":\["label"(,"labelCustom")?\]/.test(conflict[0][1]), /Theirs|Mine|http/.test(conflict.map(n => n[1]).join()),
-            notified.length, h.compileErrors]
-  }, [["mergeConflict"], true, false, 1, []])
+    return [card.length, card.length === 1 ? card[0].slice(0, 2) : card, card.length === 1 && /^The source [0-9a-f]{8} \(label(, labelCustom)?\) kept the other program's version\.$/.test(card[0][2]),
+            /Theirs|Mine|http|lenspass/.test(JSON.stringify(h.detached)),
+            conflict.map(n => n[0]), conflict.length === 1 && /"field":"sources","key":"[0-9a-f]{8}","fields":\["label"(,"labelCustom")?\]/.test(conflict[0][1]), /Theirs|Mine|http/.test(conflict.map(n => n[1]).join()),
+            sent().length, notified.length, h.compileErrors]
+  }, [1, ["normal", "Settings merged"], true, false, ["mergeConflict"], true, false, 1, 1, []])
 
   // D-SRC-49 / D-SINK-22 (b)(c): `state mode` after every landed save.
   checkCall("D-SRC-49: Model.stateModeArgv is argv only (no URL, the state dir and the verb); Model.stateModeReply reads the verb's one line and nothing else", () => {
