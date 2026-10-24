@@ -274,6 +274,20 @@ def sleeper(token, ignore_term=False):
     code += "time.sleep(30)\n"
     process = subprocess.Popen(["python3", "-c", code, token],
                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # F-HARNESS-41. Popen returns when the child's exec has SUCCEEDED (the
+    # CLOEXEC error pipe closes), and that is earlier than its command line
+    # exists: the kernel runs close-on-exec in begin_new_exec and sets
+    # mm->arg_start/arg_end in the ELF loader afterwards, so between the two
+    # /proc/<pid>/cmdline reads EMPTY - never the parent's argv, never a
+    # partial one. Measured 2026-10-24 on this machine under a load of 3-9:
+    # 162 of 1,500 reads taken the instant Popen returned were empty, the
+    # start time never moved, and test_a_recycled_pid_is_never_signalled went
+    # red 2 of 200 times at its `still_the_player(real, ...)` line for
+    # exactly that reason. So a sleeper is not returned until its token is
+    # readable: a cmdline read after this is a read of the exec'd process.
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline and token not in helper.proc_cmdline(process.pid):
+        time.sleep(0.005)
     # Installing SIG_IGN takes an interpreter start, and a rung that spends
     # none of its grace can deliver SIGTERM inside that window - which would
     # make the double DIE where the real wedged mpv it stands for survives
