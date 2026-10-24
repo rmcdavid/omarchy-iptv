@@ -265,6 +265,7 @@
         "withoutFailed",
         "stateSaveLanded",
         "stateSaveOutcome",
+        "mergeLeavesNothingUnsaved",
         "countReload",
         "reloadDisposition",
         "STATE_LOAD_ERRORS",

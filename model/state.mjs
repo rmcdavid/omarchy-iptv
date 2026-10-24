@@ -1540,6 +1540,21 @@ function mergeForeignState(base, ours, theirs, opts) {
   return { state: parseState(JSON.stringify(out)), conflicts: conflicts, dropped: dropped, migrationHeld: migrationHeld }
 }
 
+// D-SRC-43 (2026-10-24). After a merge, is anything of ours still unsaved?
+// The merge becomes memory and theirs becomes the base; when the two are
+// the same state (theirs won every conflict, or the cap dropped the only
+// addition of ours) and none of our writes is still in the air, the disk
+// holds memory exactly -- so a failure flag raised by the save that never
+// landed has nothing left to be about. Until this was asked, that flag
+// (and the guide's "state write failed" line, and the pointer plan's
+// saveFailed input) outlived its cause until some unrelated later save
+// landed. A write in flight is a different matter: it will report on
+// itself, and its text may still be older than the merge.
+function mergeLeavesNothingUnsaved(merged, theirs, ctx) {
+  var c = ctx || {}
+  return (Number(c.savesInFlight) || 0) === 0 && sameState(merged, theirs)
+}
+
 var MERGE_LINE_HEAD = "state.json was changed by another program while a change made here was not yet saved; "
 
 // The console line for one conflict: the field, the source key when it is a
@@ -1945,11 +1960,11 @@ export {
   withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
   stateSaveOutcome, countReload, reloadDisposition, sortedKeys,
   stateCanonical, sameState, canonValue, mergeSetField, recordFieldsDiffering,
-  MERGE_WHOLE_FIELDS, mergeForeignState, MERGE_LINE_HEAD, mergeConflictLine,
-  mergeDropCount, mergeDropLines, migrationHeldAgainLine, mergeDropNotice,
-  STATE_LOAD_ERRORS, stateLoadKind, stateInitFound, stateLoadDecision,
-  stateWriteGate, stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
-  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
-  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
-  stateBlockedHeader
+  MERGE_WHOLE_FIELDS, mergeForeignState, mergeLeavesNothingUnsaved,
+  MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount, mergeDropLines,
+  migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
+  stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
+  stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
+  STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
+  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
 }

@@ -15710,6 +15710,32 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     return [issued, baseAfterT1, afterFail, merged, h.file().favorites, h.root.stateSaveFailed, M.sameState(h.root.landedState, h.root.userState), h.compileErrors]
   }, [2, ["t:one.uk"], [true, ["t:one.uk"], 0], [["foreign-save-failed"], ["t:two.uk"]], ["t:two.uk"], false, true, []])
 
+  // D-SRC-43: a failed save's flag after a merge that leaves nothing unsaved.
+  checkCall("D-SRC-43: Model.mergeLeavesNothingUnsaved -- true only when the merge IS theirs and no write of ours is in flight", () => {
+    const theirs = M.parseState(stateText([rec(A)], KA)), same = M.parseState(stateText([rec(A)], KA)), other = M.parseState(stateText([rec(A)], KA, { favorites: ["t:x.uk"] }))
+    return [M.mergeLeavesNothingUnsaved(same, theirs, { savesInFlight: 0 }), M.mergeLeavesNothingUnsaved(same, theirs, { savesInFlight: 1 }),
+            M.mergeLeavesNothingUnsaved(other, theirs, { savesInFlight: 0 }), M.mergeLeavesNothingUnsaved(same, theirs, null)]
+  }, [true, false, false, true])
+  checkCall("D-SRC-43: through Service.mergeForeignText -- an in-app label edit whose save FAILED, then a foreign write that changed the same label (theirs wins, the merge equals theirs): stateSaveFailed is cleared, the record swept, the file equals memory, no save is asked for; a merge that keeps something of ours leaves the flag to the save it asks for", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.stateFile.writeFails = true
+    h.root.updateSource(KA, { label: "Mine" }); h.drain()
+    const failed = [h.root.stateSaveFailed, h.root.lastPersistFailure]
+    h.stateFile.writeFails = false
+    h.foreign(sf => { sf.disk = stateText([rec(A, { label: "Theirs", labelCustom: true })], KA) })
+    const conflict = [h.root.stateSaveFailed, h.root.lastPersistFailure, h.root.recentSaves.length, h.root.stateSavePending, h.root.stateSavesInFlight,
+                      M.sameState(h.file(), h.root.userState), h.root.userState.sources[0].label]
+    // The other shape: a foreign FAVOURITE lands while ours (a failed label edit) is still unsaved -- the flag stays until the merge's own save lands.
+    const g = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    g.stateFile.writeFails = true
+    g.root.updateSource(KA, { label: "Mine" }); g.drain()
+    g.stateFile.writeFails = false
+    g.foreign(sf => { sf.disk = stateText([rec(A)], KA, { favorites: ["t:x.uk"] }) })
+    const kept = [g.root.stateSaveFailed, g.root.stateSavePending || g.root.stateSavesInFlight > 0]
+    g.drain()
+    return [failed, conflict, kept, [g.root.stateSaveFailed, g.root.userState.sources[0].label, g.file().sources[0].label], h.compileErrors]
+  }, [[true, "state_write_failed"], [false, "persist_failed", 0, false, 0, true, "Theirs"], [true, true], [false, "Mine", "Mine"], []])
+
   // D-SRC-52: a good playlist status clears the sentence a failed one left
   // in lastError, and nothing else.
   checkCall("D-SRC-52: Model.lastErrorAfterStatus -- a good status clears exactly the previous status's reason; a different sentence (a play failure's) stands; a failed status writes its own reason; an empty lastError stays empty", () => {

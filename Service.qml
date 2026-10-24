@@ -2540,6 +2540,19 @@ Item {
     if (drops.length > 0) root.notify("mergeDropped", { dropped: merged.dropped })
     root.landedState = theirs
     root.userState = merged.state
+    // D-SRC-43: the merge equals the other program's file and nothing of
+    // ours is in the air -- the disk holds memory, so a failure flag the
+    // save that never landed raised has nothing left to be about: cleared
+    // here, with the burst record (no echo of ours is coming) and the
+    // failure reason. The owed entry mirror (R19d) is NOT paid here; it is
+    // paid by the next landed save, as before -- owedMirrorAction is asked
+    // only from onSaved.
+    if (Model.mergeLeavesNothingUnsaved(merged.state, theirs, { savesInFlight: root.stateSavesInFlight })) {
+      if (root.stateSaveFailed) console.warn("omarchy-iptv: the other program's write holds everything this session has; the earlier failed save is no longer pending")
+      root.stateSaveFailed = false
+      root.lastPersistFailure = "persist_failed"
+      root.recentSaves = []
+    }
     var behind = !Model.sameState(merged.state, theirs)
                  || (root.stateSavesInFlight > 0 && !Model.sameState(merged.state, root.lastSaveState))
     var settled = root.userState

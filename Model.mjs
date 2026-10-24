@@ -78,12 +78,12 @@ export {
   failedDocument, failedWhen, withFailed, failedAfterHealthy, withoutFailed,
   stateSaveLanded, stateSaveOutcome, countReload, reloadDisposition,
   stateCanonical, sameState, mergeSetField, mergeForeignState,
-  mergeConflictLine, mergeDropLines, migrationHeldAgainLine, mergeDropNotice,
-  STATE_LOAD_ERRORS, stateLoadKind, stateInitFound, stateLoadDecision,
-  stateWriteGate, stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
-  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
-  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
-  stateBlockedHeader
+  mergeLeavesNothingUnsaved, mergeConflictLine, mergeDropLines,
+  migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
+  stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
+  stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
+  STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
+  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
 } from "./model/state.mjs"
 export {
   parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
