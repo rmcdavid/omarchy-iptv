@@ -15578,6 +15578,19 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
             h.signals.filter(x => x[0] === "sourceSwitched").map(x => x[1] === KNEW), h.compileErrors]
   }, [true, { published: [KNEW], issued: 1, switching: true, active: true }, true, true, true, [true], []])
 
+  // D-SRC-37 (a): a merged pointer naming no merged record.
+  checkCall("D-SRC-37 (a): Model.mergeForeignState -- theirs removed the active source while ours kept the key: the pointer falls back to no active source IN THE STATE (as the helper's own remove does), as a conflict naming the source; the journal line says why; a pointer theirs moved to a record it kept is no conflict", () => {
+    const base = M.parseState(stateText([rec(A), rec(B)], KA)), ours = M.parseState(stateText([rec(A), rec(B)], KA, { favorites: ["t:one.uk"] }))
+    const theirsRemoved = M.parseState(stateText([rec(B)], KA))
+    const removed = M.mergeForeignState(base, ours, theirsRemoved, {})
+    const theirsMoved = M.mergeForeignState(base, ours, M.parseState(stateText([rec(A), rec(B)], KB)), {})
+    const handEdited = M.mergeForeignState(base, ours, M.parseState(stateText([rec(B)], "deadbeef")), {})
+    const line = M.mergeConflictLine(removed.conflicts[0])
+    return [removed.conflicts, String(removed.state.activeKey), M.activeKeyOf(removed.state), removed.state.favorites,
+            theirsMoved.conflicts, M.activeKeyOf(theirsMoved.state), handEdited.conflicts.map(c => c.key), String(handEdited.state.activeKey),
+            line.indexOf("version of activeKey (the source " + KA + " it named is gone, so no source is active)") !== -1, /lenspass|http/.test(line)]
+  }, [[{ field: "activeKey", key: KA, fields: ["removed"] }], "", "", ["t:one.uk"], [], KB, ["deadbeef"], "", true, false])
+
   // D-SRC-52: a good playlist status clears the sentence a failed one left
   // in lastError, and nothing else.
   checkCall("D-SRC-52: Model.lastErrorAfterStatus -- a good status clears exactly the previous status's reason; a different sentence (a play failure's) stands; a failed status writes its own reason; an empty lastError stays empty", () => {

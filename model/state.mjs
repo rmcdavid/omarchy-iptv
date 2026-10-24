@@ -25,8 +25,8 @@ import {
   formatClock, formatCount, pluralChannels
 } from "./epg.mjs"
 import {
-  CACHE_LAYOUT, MAX_SOURCES, MONTHS, isSourceKey, deriveLabel, uniqueLabel,
-  sameDay
+  CACHE_LAYOUT, MAX_SOURCES, MONTHS, isSourceKey, findSource, deriveLabel,
+  uniqueLabel, sameDay
 } from "./sources.mjs"
 import {
   warnState, normalizeSourceRecord, activeKeyText
@@ -1480,6 +1480,21 @@ function mergeForeignState(base, ours, theirs, opts) {
     dropped.sources = dropped.sources.filter(function (key) { return key !== migrationKey })
     if (str(out.activeKey) === migrationKey) out.activeKey = t.activeKey
   }
+  // D-SRC-37 (a), 2026-10-24: the pointer the merge keeps must name a record
+  // the merge keeps. Theirs removed (or re-keyed) the active source while
+  // ours held the key, or a hand-edited file dropped the record and kept
+  // the key: the whole-field rule above resolves `activeKey` on its own and
+  // left it dangling, which every reader resolves to "no active source"
+  // (Model.activeKeyOf) with no line saying so. The pointer falls back the
+  // way the helper's own `source remove` and Model.removeSource clear it
+  // (R3) -- so the file never says otherwise -- and the fall-back is a
+  // conflict of its own: the journal line, and D-SRC-33's notice, name the
+  // source it named.
+  var dangling = activeKeyText(out.activeKey)
+  if (dangling !== "" && !findSource(out.sources, dangling)) {
+    conflicts.push({ field: "activeKey", key: dangling, fields: ["removed"] })
+    out.activeKey = ""
+  }
   if (migrationHeld === "" && (entryMigratedOf(o) || entryMigratedOf(t))) out.entryMigrated = true
   else delete out.entryMigrated
   // D-SRC-64: the parked pair (the rule in the header above).
@@ -1505,6 +1520,8 @@ function mergeConflictLine(conflict) {
   var what = str(c.field) === "sources" && isSourceKey(str(c.key))
     ? "the source " + str(c.key) + (asList(c.fields).length > 0 ? " (" + asList(c.fields).map(str).join(", ") + ")" : "")
     : str(c.field)
+  // D-SRC-37 (a): the pointer fell back because the source it named is gone.
+  if (str(c.field) === "activeKey" && isSourceKey(str(c.key))) what += " (the source " + str(c.key) + " it named is gone, so no source is active)"
   return MERGE_LINE_HEAD + "kept the other program's version of " + what
 }
 
