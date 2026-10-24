@@ -639,6 +639,23 @@ def self_test():
 
             try:
                 a, b = connect(), connect()
+                # F-HARNESS-42. A connection becomes a broadcast target when
+                # its serve THREAD runs `serve()` and appends it under the
+                # lock -- not when connect() returns -- so under load A's seek
+                # could be broadcast before B was a target, and B heard
+                # nothing whatever the read bound was (red `[] != ['seek']`
+                # at load 2-5, green alone). The bound was the symptom; this
+                # wait is the cause closed: nothing is sent until both are
+                # registered, bounded, and a timeout is named as its own
+                # failure rather than as a missing event.
+                deadline = time.time() + 5.0
+                while time.time() < deadline:
+                    with stub.lock:
+                        if len(stub.conns) == 2:
+                            break
+                    time.sleep(0.01)
+                with stub.lock:
+                    self.assertEqual(len(stub.conns), 2, "both clients must be registered before anything is sent")
                 send(a, "loadfile", "http://127.0.0.1:9/x.m3u8", "replace")
                 lines(a, 1)
                 # Just enough for time-pos to EXIST. A backward seek from a
@@ -658,12 +675,16 @@ def self_test():
                 lines(a, 1)
                 send(a, "seek", -5.0, "relative")
                 got_a = lines(a, 2)
-                got_b = lines(b, 1)
+                # 10 s, not 2: B is a registered target (above), so the only
+                # thing this bound now waits on is a local socket write, and
+                # a green run returns at the first line; the cost of the
+                # wider bound falls on red runs alone.
+                got_b = lines(b, 1, bound=10.0)
                 # A gets its reply and the event; B, which asked for nothing,
                 # gets the event alone -- an event it did not cause.
                 self.assertEqual([m.get("error") for m in got_a if "request_id" in m], ["success"])
                 self.assertIn("seek", [m.get("event") for m in got_a])
-                self.assertEqual([m.get("event") for m in got_b], ["seek"], "B's event arrives within a 2 s read over a real socket, so this is load-dependent: re-run `python3 scripts/qa-stub-mpv.py --self-test` alone before reading it as a tree defect")
+                self.assertEqual([m.get("event") for m in got_b], ["seek"], "B was a registered target when the seek was sent and still heard no event within 10 s")
                 self.assertNotIn("request_id", got_b[0])
                 with stub.lock:
                     self.assertEqual(len(stub.conns), 2)
@@ -678,14 +699,26 @@ def self_test():
                 levels = [m for m in got_a if m.get("event") == "log-message"]
                 self.assertEqual(len(levels), 1, got_a)
                 self.assertIn("Cannot seek in this stream", levels[0]["text"])
-                self.assertEqual(lines(b, 1, bound=0.5), [], "a client that never subscribed heard a refusal")
+                # The absence half, asserted after a KNOWN point rather than
+                # after a 0.5 s sleep (F-HARNESS-42's shape in the other
+                # direction): B's own next command is answered by the same
+                # writer, in order, so a refusal line wrongly aimed at B
+                # would sit in front of B's reply. The first line B reads
+                # after asking is therefore its reply, or the defect.
+                send(b, "request_log_messages", "error")
+                got_b = lines(b, 1, bound=10.0)
+                self.assertEqual([("request_id" in m) for m in got_b], [True],
+                                 "a client that never subscribed heard a refusal: %r" % (got_b,))
+                # The follow-up loop writes to its targets OUTSIDE the lock,
+                # in connection order, so a wrongly aimed line could in
+                # principle land a few microseconds behind B's reply; a short
+                # bounded tail closes that window and nothing else.
+                self.assertEqual(lines(b, 1, bound=0.2), [], "a refusal reached a non-subscriber after its own reply")
                 # A client that goes away stops being a target -- and stops
                 # being a SUBSCRIBER, which is a second list and was the one
-                # with no check. B subscribes first so the assertion cannot
-                # pass on an empty list. Bounded wait: the serve thread
+                # with no check. B subscribed just above, so the assertion
+                # cannot pass on an empty list. Bounded wait: the serve thread
                 # notices the close on its next read.
-                send(b, "request_log_messages", "error")
-                lines(b, 1)
                 with stub.lock:
                     self.assertEqual(len(stub.log_conns), 2)
                 b.close()
