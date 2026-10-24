@@ -570,3 +570,34 @@ class SharedRedactionVectors(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StateReaderParityTest(unittest.TestCase):
+    """D-SINK-23, second half (PARITY, 2026-10-24): the helper's normalize_source
+    and Model.parseState read a STORED url the same way -- validated as origin
+    `cli`, the record keeping the validated form, a url that fails dropping
+    the record, epgUrl cleared rather than dropped. The shared fixture is
+    tests/fixtures/state-reader-urls.json; tests/Model.test.js runs the same
+    rows through the JS reader. This is the python half; it was green before
+    the JS half changed, which is the point: the fixture is what the shell now
+    has to match."""
+
+    def test_normalize_state_reads_every_fixture_row_as_the_fixture_says(self):
+        fixture = FIXTURES / "state-reader-urls.json"
+        self.assertTrue(fixture.exists(), "tests/fixtures/state-reader-urls.json is missing")
+        cases = json.loads(fixture.read_text(encoding="utf-8"))["cases"]
+        self.assertGreaterEqual(len(cases), 15)
+        self.assertGreaterEqual(sum(1 for c in cases if c["kept"] is False), 4)
+        self.assertGreaterEqual(sum(1 for c in cases if c["kept"] and c["url"] != c["outUrl"]), 4)
+        for c in cases:
+            record = {"key": "aaaaaaa1", "url": c["url"], "epgUrl": c["epgUrl"], "kind": "http", "label": "",
+                      "labelCustom": False, "origin": "guide", "addedAt": 1, "lastUsed": 1, "fetchedAt": 0,
+                      "channelCount": 0, "groupCount": 0}
+            state = helper.normalize_state({"version": 2, "cacheLayout": 2, "sources": [record]})
+            sources = state["sources"]
+            self.assertEqual(len(sources) == 1, c["kept"], c["why"])
+            if c["kept"]:
+                self.assertEqual(sources[0]["url"], c["outUrl"], c["why"])
+                self.assertEqual(sources[0]["epgUrl"], c["outEpgUrl"], c["why"])
+                self.assertEqual(sources[0]["kind"], c["kind"], c["why"])
+

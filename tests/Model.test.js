@@ -15541,6 +15541,29 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
   return [refreshed, switched, stamps(), h.root.preparedLru[0] === head, h.compileErrors]
 }, [[8200], [1, 8200], [8200, 1], true, []])
 
+// ---- D-SINK-23, second half: the two state readers agree about what a stored url IS ----
+// PARITY (the lead's ruling, 2026-10-24). The helper's normalize_source has
+// validated a stored `url` (origin cli) and dropped a record that fails since
+// the Sources feature; the JS reader kept the text as written, so a
+// hand-edited state.json held a URL the two mirrors read, keyed and redacted
+// differently. One shared fixture, run by tests/test_helper.py too.
+const stateReaderFixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/state-reader-urls.json"), "utf8"))
+checkCall("D-SINK-23 parity: parseState keeps the VALIDATED url and epgUrl of a stored record and drops one whose url does not validate, exactly as the helper's normalize_source does", () =>
+  stateReaderFixture.cases.map(c => {
+    const rec = { key: "aaaaaaa1", url: c.url, epgUrl: c.epgUrl, kind: "http", label: "", labelCustom: false, origin: "guide",
+      addedAt: 1, lastUsed: 1, fetchedAt: 0, channelCount: 0, groupCount: 0 }
+    const st = Model.parseState(JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], savedSearches: [], hiddenGroups: [], sources: [rec] }))
+    const s = st.sources[0]
+    return c.why + " -> " + show([st.sources.length === 1, s ? s.url : "", s ? s.epgUrl : "", s ? s.kind : ""])
+  }),
+  stateReaderFixture.cases.map(c => c.why + " -> " + show([c.kept, c.outUrl, c.outEpgUrl, c.kind])))
+check("D-SINK-23 parity: the fixture carries both halves of the cost -- rows the shell used to keep and now drops, and rows it re-reads in validated form -- so it cannot be trimmed to green", [
+  stateReaderFixture.cases.filter(c => c.kept === false).length >= 4,
+  stateReaderFixture.cases.filter(c => c.kept === true && c.url !== c.outUrl).length >= 4,
+  stateReaderFixture.cases.filter(c => c.kept === true && c.epgUrl !== "" && c.epgUrl !== c.outEpgUrl).length >= 2,
+  stateReaderFixture.cases.every(c => c.kept === (c.outUrl !== ""))
+], [true, true, true, true])
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All model tests passed.")
