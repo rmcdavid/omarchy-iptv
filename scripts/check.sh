@@ -579,7 +579,15 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2993}
 # and the UX-SOURCES 5.4 cap test (+1); both red on 4cf8910's documents.
 # 0.15.0 cut, 2026-10-22: re-levelled on lane-rel-0150 (7c1d37f plus the
 # version bump and the notes); the suite runs 1496 and the floor stays 1496.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1496}
+# 2026-10-24, lane-p23-helper (the P2/P3 round's helper lane): 1496 -> 1517
+# -- tests/test_fetch_bounds.py LookupBoundTest (+5, D-SRC-62, four red on
+# a9d20f9 and one on a mutation), tests/test_logo_run.py (+2 for the
+# D-LOGO-17 count cap, +7 for the D-LOGO-22 memo, all red on a9d20f9),
+# tests/test_cache.py (+1, the memo goes with a removed source, red),
+# tests/test_rewind.py (+2, F-RWD-8, red on a9d20f9 and on a return-on-seek
+# mutation), tests/test_census_dates.py (+4, F-EPG-24, red on a9d20f9 at
+# four blocks). The suite runs 1517 and the floor is 1517.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1517}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
