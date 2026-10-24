@@ -756,6 +756,7 @@
         "findSourceByUrl",
         "allocateSourceKey",
         "sourceCacheDir",
+        "cutHostParams",
         "hostPortOf",
         "deriveLabel",
         "labelKey",

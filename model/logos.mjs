@@ -8,6 +8,9 @@ import {
 import {
   formatCount, pluralChannels
 } from "./epg.mjs"
+import {
+  cutHostParams
+} from "./sources.mjs"
 
 // ------------------------------------------------------------ logos (M2-04)
 //
@@ -123,9 +126,21 @@ function splitLogoUrl(raw) {
 //
 // Userinfo makes the answer "". fetch_logo refuses such a URL outright, so
 // the host is never contacted, and naming it would print the credentials.
+//
+// D-SINK-30 (2026-10-24). The answer ends at the first `;`, `=` or `&` too,
+// through the same cutHostParams the Sources row's host goes through: a
+// playlist's `https://cdn.test;sid=SECRET/a.png` is a valid URL whose
+// authority is a credential, and this stopped at `:` alone, so the consent
+// dialog the HOST renders (confirmLogosMessage) named the busiest host as
+// `cdn.test;sid=secret`. Found by the recheck's rule-15 search over the
+// shape "a printed host that stops at `:` only", which the fix's own search
+// (over "authority after its last `@`") did not see. The `@` test runs over
+// the WHOLE netloc first: `cdn.test;u=p@evil` is refused by fetch_logo, so
+// a cut that hid its `@` would count a host that is never contacted.
 function logoHost(netloc) {
   var text = str(netloc).trim().toLowerCase()
   if (text.indexOf("@") !== -1) return ""
+  text = cutHostParams(text)
   if (text.charAt(0) === "[") {
     var close = text.indexOf("]")
     return close === -1 ? "" : text.substring(0, close + 1)

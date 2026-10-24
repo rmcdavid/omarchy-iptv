@@ -2333,7 +2333,7 @@ checkCall("M2-04: every shared logo-survey case matches the agreed answer", func
     })
   })
   return [logoFixture.cases.length, bad]
-}, [10, []])
+}, [11, []])
 
 checkCall("M2-04: userinfo never reaches the consent text", function () {
   // CLAUDE.md rule 5. The consent dialog is a sink and it was missing from
@@ -2343,6 +2343,22 @@ checkCall("M2-04: userinfo never reaches the consent text", function () {
   return [survey.hosts.length, survey.refused, survey.wouldContact,
           /pass|user@|provider\.test/.test(text)]
 }, [0, 1, 0, false])
+
+// D-SINK-30 (2026-10-24), the recheck's rule-15 finding: a reg-name
+// parameter is a valid authority (`https://cdn.test;sid=SECRET/a.png`) and
+// splitLogoUrl stopped at `:` alone, so the consent dialog the HOST renders
+// named the busiest host as `cdn.test;sid=secret`. The cut is the Sources
+// row's own (Model.cutHostParams, one copy), reached here through the
+// shipping composer: survey -> consent lines -> confirmLogosMessage.
+checkCall("D-SINK-30: the consent dialog's host ends at the first `;`, `=` or `&`, as the Sources row's does -- through confirmLogosMessage, the string the host draws", () => {
+  const survey = Model.logoSurvey([{ logo: "https://cdn.test;sid=SECRET/a.png" }, { logo: "https://cdn.test:8443;sid=SECRET/b.png" },
+                                   { logo: "https://other.test=SECRET/c.png" }, { logo: "https://other.test&k=SECRET/d.png" }])
+  const message = Model.confirmLogosMessage(survey)
+  return [survey.hosts, Model.splitLogoUrl("https://cdn.test;sid=SECRET/a.png"), Model.splitLogoUrl("https://[::1]:8443;sid=SECRET/x"),
+          Model.splitLogoUrl("https://cdn.test;u=p@evil.test/g.png").host,
+          message.indexOf("cdn.test (2 channels)") !== -1, /secret|sid|;|=|&/i.test(message)]
+}, [[{ host: "cdn.test", channels: 2 }, { host: "other.test", channels: 2 }], { scheme: "https", host: "cdn.test" }, { scheme: "https", host: "[::1]" },
+    "", true, false])
 
 checkCall("M2-04: the setting FAILS CLOSED, unlike every other boolean here", function () {
   // boolSetting is "anything but false means on", which would let

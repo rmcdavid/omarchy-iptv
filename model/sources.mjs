@@ -858,15 +858,30 @@ function sourceCacheDir(cacheDir, key) {
 // has always shown it. Validation is NOT changed: refusing them in a host
 // would drop a stored link on upgrade (D-SINK-27). The helper's
 // host_port_of is the mirror and the shared source-labels fixture pins both.
+// D-SINK-30 (2026-10-24). Where a PRINTED host ends: at the first `;`, `=`
+// or `&` after the userinfo cut. RFC 3986's reg-name admits all three, so
+// `http://h.test;sid=SECRET/x` VALIDATES with host `h.test;sid=secret`, and a
+// reader that stops at `:` alone prints the parameter wherever it prints the
+// host. One function, shared by every reader that derives a printable host
+// from a URL's authority -- hostPortOf (the Sources row and its default
+// label) and logoHost in model/logos.mjs (the consent dialog) -- so the rule
+// has one copy per mirror; the helper's is `cut_host_params`. The `:` port
+// is NOT cut here: hostPortOf keeps it and logoHost drops it, each in its
+// own line, and a bracketed literal is unaffected because none of the three
+// can appear inside the brackets. Validation is unchanged (D-SINK-27).
+function cutHostParams(hostport) {
+  var s = str(hostport)
+  var end = s.search(/[;=&]/)
+  return end === -1 ? s : s.substring(0, end)
+}
+
 function hostPortOf(url) {
   var m = str(url).match(/^[a-z][a-z0-9+.-]*:\/\/([^\/?#]*)/i)
   if (!m) return ""
   var authority = m[1]
   var at = authority.lastIndexOf("@")
   var hostport = at === -1 ? authority : authority.substring(at + 1)
-  var end = hostport.search(/[;=&]/)
-  if (end !== -1) hostport = hostport.substring(0, end)
-  return hostport.toLowerCase()
+  return cutHostParams(hostport).toLowerCase()
 }
 
 // Default label: the host (lowercase, leading `www.` dropped, `:port` kept
@@ -1407,14 +1422,15 @@ export {
   normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST,
   epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE, epgOriginNotice, isUrlField,
   sourceKey, isSourceKey, findSource, findSourceByUrl, allocateSourceKey,
-  sourceCacheDir, hostPortOf, deriveLabel, labelKey, labelTaken, uniqueLabel,
-  defaultSourceLabel, validateLabel, maskQuery, maskUrl, encodeQueryValue,
-  xtreamUrls, validateXtream, pluralGroups, countsLine, sameDay,
-  formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
-  EPG_HINT_ROW_TEXT, sourceDetail, sourceAccessibleName, sourcesHeaderCount,
-  sourcesHeaderRight, sourcesRowAccessibleName, confirmLogosMessage,
-  confirmRemoveMessage, fetchingLine, PROBE_LOCAL_REFUSALS, probeFailureLine,
-  sourceTransient, CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS,
-  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES,
-  logoFailedPath, logoBrokenMark, logoHaveLess
+  sourceCacheDir, cutHostParams, hostPortOf, deriveLabel, labelKey,
+  labelTaken, uniqueLabel, defaultSourceLabel, validateLabel, maskQuery,
+  maskUrl, encodeQueryValue, xtreamUrls, validateXtream, pluralGroups,
+  countsLine, sameDay, formatLastUsed, formatAgo, sourceView, sourceViews,
+  sourceRows, EPG_HINT_ROW_TEXT, sourceDetail, sourceAccessibleName,
+  sourcesHeaderCount, sourcesHeaderRight, sourcesRowAccessibleName,
+  confirmLogosMessage, confirmRemoveMessage, fetchingLine,
+  PROBE_LOCAL_REFUSALS, probeFailureLine, sourceTransient,
+  CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
+  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark,
+  logoHaveLess
 }
