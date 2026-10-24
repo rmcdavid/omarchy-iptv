@@ -2519,6 +2519,12 @@ Item {
     var theirs = Model.parseState(text)
     var merged = Model.mergeForeignState(root.landedState, root.userState, theirs, { migrationKey: root.migrationAddedKey })
     for (var i = 0; i < merged.conflicts.length; i++) console.warn("omarchy-iptv: " + Model.mergeConflictLine(merged.conflicts[i]))
+    // D-SRC-33: and the user told once per merge that kept the other
+    // program's version of something over a change made here (the journal
+    // line was the only word until now): Model.mergeConflictNotice's
+    // sentences, through the one notify path -- a field name and a key,
+    // never a value. The in-flight and parked branches reach here alike.
+    if (merged.conflicts.length > 0) root.notify("mergeConflict", { conflicts: merged.conflicts })
     // F1: the record this session's migration added did not land as ours --
     // another program took the place it used ("full"), or added the same
     // playlist itself ("changed"). No marker was carried; the merge re-parked

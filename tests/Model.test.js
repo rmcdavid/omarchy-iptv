@@ -15736,6 +15736,29 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     return [failed, conflict, kept, [g.root.stateSaveFailed, g.root.userState.sources[0].label, g.file().sources[0].label], h.compileErrors]
   }, [[true, "state_write_failed"], [false, "persist_failed", 0, false, 0, true, "Theirs"], [true, true], [false, "Mine", "Mine"], []])
 
+  // D-SRC-33: the merge's "theirs was kept" told on screen, not only in the journal.
+  checkCall("D-SRC-33: Model.mergeConflictNotice -- one sentence per conflict (a source by key and field names; a field by its name; the fallen-back pointer by why), the lead's title, no URL or value; null for no conflicts; the replace id is reserved beside the others", () => {
+    const told = M.mergeConflictNotice([{ field: "sources", key: KA, fields: ["label", "url"] }, { field: "recents", key: "" }, { field: "activeKey", key: KB, fields: ["removed"] }])
+    const ids = Object.keys(M.NOTIFY_IDS).map(k => M.NOTIFY_IDS[k])
+    return [told.title, told.body, /http|lenspass|example/.test(told.body), M.mergeConflictNotice([]), M.mergeConflictNotice(null), M.mergeConflictNotice([{ field: "activeKey", key: "" }]).body,
+            M.NOTIFY_IDS.mergeConflict, ids.length === new Set(ids).size, ids.indexOf(74019)]
+  }, ["Settings merged", "The source " + KA + " (label, url) kept the other program's version. The recent list kept the other program's version. The active source (the source " + KB + " it named is gone, so no source is active) kept the other program's version.",
+      false, null, null, "The active source kept the other program's version.", 74020, true, -1])
+  checkCall("D-SRC-33: through Service.mergeForeignText -- an in-app label edit held unsaved (its save failed) and a foreign write that changed the same label: ONE mergeConflict notice is raised through root.notify, carrying the conflicts and no value; a merge without conflicts raises none", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    const notified = []
+    const notify = h.root.notify
+    h.root.notify = (event, params) => { notified.push([event, JSON.stringify(params)]); return notify(event, params) }
+    h.stateFile.writeFails = true
+    h.root.updateSource(KA, { label: "Mine" }); h.drain()
+    h.stateFile.writeFails = false
+    h.foreign(sf => { sf.disk = stateText([rec(A, { label: "Theirs", labelCustom: true })], KA) })
+    const conflict = notified.slice()
+    h.foreign(sf => { sf.disk = stateText([rec(A, { label: "Theirs", labelCustom: true })], KA, { favorites: ["t:x.uk"] }) })
+    return [conflict.map(n => n[0]), conflict.length === 1 && /"field":"sources","key":"[0-9a-f]{8}","fields":\["label"(,"labelCustom")?\]/.test(conflict[0][1]), /Theirs|Mine|http/.test(conflict.map(n => n[1]).join()),
+            notified.length, h.compileErrors]
+  }, [["mergeConflict"], true, false, 1, []])
+
   // D-SRC-52: a good playlist status clears the sentence a failed one left
   // in lastError, and nothing else.
   checkCall("D-SRC-52: Model.lastErrorAfterStatus -- a good status clears exactly the previous status's reason; a different sentence (a play failure's) stands; a failed status writes its own reason; an empty lastError stays empty", () => {

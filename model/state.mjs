@@ -1571,6 +1571,33 @@ function mergeConflictLine(conflict) {
   return MERGE_LINE_HEAD + "kept the other program's version of " + what
 }
 
+// D-SRC-33 (2026-10-24). What the user is told, ONCE per merge that kept
+// the other program's version of anything over an in-app change not yet
+// saved: one sentence per conflict, composed from a field NAME and a
+// source's short key -- never a value, a label or a URL (a conflict entry
+// carries nothing else). The journal keeps mergeConflictLine's fuller line
+// per conflict; this is the on-screen half the in-flight and parked
+// branches never had (the failed branch was told when its save failed).
+// The title and body are the lead's words (P23). null when nothing
+// conflicted.
+var MERGE_CONFLICT_TITLE = "Settings merged"
+var MERGE_CONFLICT_FIELDS = { activeKey: "The active source", recents: "The recent list", lastPlayed: "The last played channel",
+                              session: "The player session", cacheLayout: "The cache layout" }
+function mergeConflictSentence(conflict) {
+  var c = conflict || {}
+  var field = str(c.field), key = str(c.key), fields = asList(c.fields).map(str)
+  var what
+  if (field === "sources" && isSourceKey(key)) what = "The source " + key + (fields.length > 0 ? " (" + fields.join(", ") + ")" : "")
+  else if (field === "activeKey" && isSourceKey(key)) what = MERGE_CONFLICT_FIELDS.activeKey + " (the source " + key + " it named is gone, so no source is active)"
+  else what = MERGE_CONFLICT_FIELDS[field] || field
+  return what + " kept the other program's version."
+}
+function mergeConflictNotice(conflicts) {
+  var list = asList(conflicts).filter(function (c) { return c && str(c.field) !== "" })
+  if (list.length === 0) return null
+  return { title: MERGE_CONFLICT_TITLE, body: list.map(mergeConflictSentence).join(" ") }
+}
+
 function mergeDropCount(dropped) {
   var d = dropped || {}
   return { sources: asList(d.sources).filter(function (k) { return isSourceKey(str(k)) }).map(str),
@@ -1961,10 +1988,12 @@ export {
   stateSaveOutcome, countReload, reloadDisposition, sortedKeys,
   stateCanonical, sameState, canonValue, mergeSetField, recordFieldsDiffering,
   MERGE_WHOLE_FIELDS, mergeForeignState, mergeLeavesNothingUnsaved,
-  MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount, mergeDropLines,
-  migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
-  stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
-  stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
-  STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
-  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
+  MERGE_LINE_HEAD, mergeConflictLine, MERGE_CONFLICT_TITLE,
+  MERGE_CONFLICT_FIELDS, mergeConflictSentence, mergeConflictNotice,
+  mergeDropCount, mergeDropLines, migrationHeldAgainLine, mergeDropNotice,
+  STATE_LOAD_ERRORS, stateLoadKind, stateInitFound, stateLoadDecision,
+  stateWriteGate, stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
+  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
+  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
+  stateBlockedHeader
 }
