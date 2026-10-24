@@ -15657,6 +15657,57 @@ checkCall("D-LOGO-19: through logoSlot and wallTile -- the slot a broken file fe
           Model.logoSlot({ enabled: true, channel: chA, logoDir: dir, have: Model.logoHaveLess(have, { ["/c/sources/other/logos/" + Model.fnv1a32(chA.logo)]: true }) }).kind]
 }, ["blank", "image", "mark", "image", "image"])
 
+// ---- D-SRC-12: the 28 code points where the two mirrors' lower-casing disagrees are PINNED ----
+// Each mirror folds a host and a label with its own runtime's tables; the
+// fixture holds both runtimes' whole non-identity lowering tables and the
+// set where they differ. This is the node half: its own table equals the
+// fixture's node table, the diff recomputed from the two tables equals the
+// pinned set, and every pinned code point reaches validateSourceUrl and
+// labelTaken as a call. tests/test_helper.py is the python half. Written
+// only under CASEFOLD_FIXTURE_REWRITE=1 (the node half of the file).
+const casefoldPath = path.join(__dirname, "fixtures/casefold-diff.json")
+const cpName = cp => "U+" + cp.toString(16).toUpperCase().padStart(4, "0")
+function ownLowerTable() {
+  const table = {}
+  for (let cp = 0; cp < 0x110000; cp++) {
+    if (cp >= 0xD800 && cp <= 0xDFFF) continue
+    const ch = String.fromCodePoint(cp)
+    const low = ch.toLowerCase()
+    if (low !== ch) table[cpName(cp)] = Array.from(low).map(c => cpName(c.codePointAt(0))).join(" ")
+  }
+  return table
+}
+function casefoldDiff(py, nd) {
+  const keys = new Set(Object.keys(py).concat(Object.keys(nd)))
+  return Array.from(keys).filter(k => py[k] !== nd[k]).sort((a, b) => parseInt(a.slice(2), 16) - parseInt(b.slice(2), 16))
+}
+checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement set recomputed from the two tables is the pinned 28, and each one reaches validateSourceUrl and labelTaken", () => {
+  const own = ownLowerTable()
+  if (process.env.CASEFOLD_FIXTURE_REWRITE === "1") {
+    const data = fs.existsSync(casefoldPath) ? JSON.parse(fs.readFileSync(casefoldPath, "utf8")) : {}
+    if (!data.python) data.python = { runtime: "", lower: {} }
+    data.node = { runtime: "node " + process.versions.node + ", ICU " + process.versions.icu + ", Unicode " + process.versions.unicode, lower: own }
+    data.diff = casefoldDiff(data.python.lower, own)
+    // sorted keys, as the python writer's sort_keys, so the two writers diff cleanly
+    const sorted = v => (v && typeof v === "object" && !Array.isArray(v)) ? Object.keys(v).sort().reduce((o, k) => { o[k] = sorted(v[k]); return o }, {}) : v
+    fs.writeFileSync(casefoldPath, JSON.stringify(sorted(data), null, 1) + "\n")
+  }
+  const data = JSON.parse(fs.readFileSync(casefoldPath, "utf8"))
+  const py = data.python.lower, nd = data.node.lower
+  const diff = casefoldDiff(py, nd)
+  const ownKeys = Object.keys(own), ndKeys = Object.keys(nd)
+  const tableSame = ownKeys.length === ndKeys.length && ownKeys.every(k => own[k] === nd[k])
+  const reach = diff.map(name => {
+    const ch = String.fromCodePoint(parseInt(name.slice(2), 16))
+    const want = (nd[name] || name).split(" ").map(c => String.fromCodePoint(parseInt(c.slice(2), 16))).join("")
+    const v = Model.validateSourceUrl("http://" + ch + ".test/")
+    return v.ok && v.host === want + ".test" && Model.sourceView({ key: "k", url: v.url, label: "" }, "k", 0, "", false).host === want + ".test"
+      && Model.labelTaken(ch, [want]) === true
+  })
+  return [tableSame, ownKeys.length > 1000, diff.length, diff.indexOf("U+A7CE") !== -1, diff.indexOf("U+16EA0") !== -1,
+          show(diff) === show(data.diff), reach.every(r => r === true), reach.length]
+}, [true, true, 28, true, true, true, true, 28])
+
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
 console.log("All model tests passed.")
