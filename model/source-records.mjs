@@ -748,9 +748,19 @@ function pointerWritePlan(input) {
 // issued a second save with the key. So the pointer is folded into the SAME
 // state object (probeCommitState) and the commit still runs the switch:
 // beginSwitch, then persistActive, which with the key already in memory
-// plans `write-entry-after-saved` -- one save, one entry write. The test
-// for "already the active directory" is `!wasActive && newKey === activeKey`:
-// an edit's newKey IS the active key once folded, and it must still switch.
+// plans `write-entry-after-saved` -- one save, one entry write.
+// `reload` is "already the active directory": `newKey === activeKey`, which
+// is a retry of the active source (or a switch to it). No guard on
+// `wasActive` is needed for the edit, because `activeKey` is the key BEFORE
+// the fold (the caller passes root.activeSourceKey with root.userState not
+// yet moved) and an edit's newKey is allocated from the NEW URL against the
+// sources with the old record already removed (allocateSourceKey, fnv1a32):
+// it names the old key only through a 32-bit hash collision between the two
+// URLs, which this plan does not decide. The first version carried
+// `!wasActive &&` here with a comment saying the folded newKey IS the active
+// key -- true of the old inline test, evaluated after the assignment, and
+// not of this function's input (P23 recheck, 2026-10-24: the term could not
+// change the answer on any input the caller builds).
 //   commit     whether success writes the settings (startProbe's `commit`)
 //   mode       add | edit | switch | retry
 //   key        the record the probe concerned (the OLD key for an edit)
@@ -761,7 +771,7 @@ function probeCommitPlan(input) {
   var it = input || {}
   var wasActive = str(it.mode) === "edit" && str(it.key) !== "" && str(it.key) === str(it.activeKey)
   var act = "none"
-  if (it.commit === true) act = !wasActive && str(it.newKey) === str(it.activeKey) ? "reload" : "switch"
+  if (it.commit === true) act = str(it.newKey) === str(it.activeKey) ? "reload" : "switch"
   return { wasActive: wasActive, act: act }
 }
 
