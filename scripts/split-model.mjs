@@ -75,6 +75,12 @@
 // NAME. A declaration it does not name goes to the part of the nearest
 // preceding named declaration and is REPORTED; a name it lists that the input
 // does not declare is reported too. Neither stops the cut.
+// F-GATE-10: once the tree exists, `parts[].names` is a GENERATED record of
+// it -- what each part declares at its top level, in declaration order,
+// private names included. --relink rewrites the lists from the parts and
+// --check reds on any drift, so the manifest's own `about` is a claim the
+// gate proves. Until 2026-10-24 only the cut modes read the lists, and the
+// tree had drifted 43 declarations past them with --check green.
 //
 // Node stdlib only. ASCII only (CLAUDE.md rule 8). Not shipped.
 
@@ -830,6 +836,38 @@ function readTree(opts, manifest) {
   return { agg, chunks, headers, publicNames, problems }
 }
 
+// F-GATE-10. The manifest's `parts[].names`, compared with what the parts on
+// disk declare: one problem per drifted part, naming the unlisted and the
+// stale names, or nothing. The lists are a record of the tree, so --relink
+// rewrites them (writeManifest) and --check reports them.
+const MANIFEST_ABOUT = "D-REL-5: the parts of model/ in aggregator order, and which top-level declaration of the model lives in each, by NAME. " +
+  "`parts[].names` is GENERATED: `node scripts/split-model.mjs --relink` rewrites each list from the part's own declarations " +
+  "(private names included, in declaration order) and `--check` goes red on any drift (F-GATE-10). " +
+  "The cut modes (--write, --verify) read the lists to place a monolith's declarations; see the script's header."
+function manifestDrift(manifest, chunks, label) {
+  const problems = []
+  for (const p of manifest.parts) {
+    const have = chunks.filter((c) => c.part === p.name).map((c) => c.name)
+    if (have.join(",") === p.names.join(",")) continue
+    const listed = new Set(p.names), declared = new Set(have)
+    const unlisted = have.filter((n) => !listed.has(n)), stale = p.names.filter((n) => !declared.has(n))
+    let why = ""
+    if (unlisted.length) why += "; declared but not listed: " + unlisted.join(", ")
+    if (stale.length) why += "; listed but not declared: " + stale.join(", ")
+    if (!why) why = "; the same names in another order"
+    problems.push(label + ": part " + p.name + " lists " + p.names.length + " name(s) and the part declares " + have.length +
+      why + " (run node scripts/split-model.mjs --relink)")
+  }
+  return problems
+}
+function writeManifest(file, manifest, chunks) {
+  const out = {
+    about: MANIFEST_ABOUT,
+    parts: manifest.parts.map((p) => ({ name: p.name, about: p.about, names: chunks.filter((c) => c.part === p.name).map((c) => c.name) })),
+  }
+  fs.writeFileSync(file, JSON.stringify(out, null, 2) + "\n")
+}
+
 async function modeTree(opts, manifest, rewrite) {
   const t = readTree(opts, manifest)
   const byName = indexModel(t.chunks, t.publicNames)
@@ -840,6 +878,15 @@ async function modeTree(opts, manifest, rewrite) {
       problems.push(AGGREGATOR + ": `" + n + "` is re-exported from " + r.part + " but declared in " + byName.get(n).part)
     }
   problems.push(...staticRules(t.chunks, byName))
+  // F-GATE-10: the manifest's name lists are judged against the tree like
+  // every other generated text -- rewritten by --relink, red under --check.
+  // The `about` is rewritten with them, so the file says what it is.
+  const manifestLabel = path.relative(opts.root, opts.manifest) || opts.manifest
+  const drift = manifestDrift(manifest, t.chunks, manifestLabel)
+  if (drift.length || (rewrite && manifest.about !== MANIFEST_ABOUT)) {
+    if (rewrite) { writeManifest(opts.manifest, manifest, t.chunks); console.log("relinked " + manifestLabel) }
+    else problems.push(...drift)
+  }
   const gen = generate(manifest.parts, t.chunks, byName, t.publicNames, t.headers)
   for (const [rel, text] of gen.files) {
     const file = path.join(opts.root, rel)

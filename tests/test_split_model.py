@@ -14,6 +14,7 @@ counts are in the lane's report for D-REL-5.
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -401,6 +402,70 @@ class SplitModel(unittest.TestCase):
         code, out = self.run_script('check')
         self.assertEqual(code, 1, out)
         self.assertIn('model/stray.mjs: a part the manifest does not list', out)
+
+    # ------------------------------------------------- F-GATE-10: the manifest's lists
+
+    def test_check_sees_a_manifest_that_does_not_list_what_a_part_declares(self):
+        """The manifest's `parts[].names` is a record of the tree that only
+        the cut modes used to read, so it drifted 43 declarations behind
+        the parts with --check green. --check now reds on the drift, naming
+        the unlisted and the stale names, and --relink rewrites the lists
+        from the parts and says what the file is. Red on a9d20f9's script
+        (--check exits 0 with `C` unlisted)."""
+        self.assertEqual(self.run_script('write')[0], 0)
+        drifted = [
+            {'name': 'one', 'about': 'the first part', 'names': ['A', 'B', 'f']},
+            {'name': 'two', 'about': 'the second part', 'names': ['g', 'Z']},   # C unlisted, Z stale
+        ]
+        code, out = self.run_script('check', parts=drifted)
+        self.assertEqual(code, 1, out)
+        self.assertIn('parts.json: part two lists 2 name(s) and the part declares 2; '
+                      'declared but not listed: C; listed but not declared: Z '
+                      '(run node scripts/split-model.mjs --relink)', out)
+        self.assertNotIn('part one lists', out, 'a part whose list matches is not reported')
+        code, out = self.run_script('relink', parts=drifted)
+        self.assertEqual(code, 0, out)
+        self.assertIn('relinked parts.json', out)
+        manifest = json.loads(self.read('parts.json'))
+        self.assertEqual([p['names'] for p in manifest['parts']], [['A', 'B', 'f'], ['g', 'C']])
+        self.assertEqual([p['about'] for p in manifest['parts']], ['the first part', 'the second part'])
+        self.assertIn('`parts[].names` is GENERATED', manifest['about'])
+        # --check reads the rewritten file as green: the record and the
+        # tree agree, which is the whole point.
+        self.write('Model.js', MONOLITH)
+        argv = ['node', SCRIPT, '--check', '--root', self.work, '--manifest', os.path.join(self.work, 'parts.json')]
+        proc = subprocess.run(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=60)
+        self.assertEqual(proc.returncode, 0, proc.stdout.decode('utf-8', 'replace'))
+
+    def test_the_same_names_in_another_order_are_drift_too(self):
+        self.assertEqual(self.run_script('write')[0], 0)
+        reordered = [
+            {'name': 'one', 'about': 'the first part', 'names': ['f', 'A', 'B']},
+            {'name': 'two', 'about': 'the second part', 'names': ['g', 'C']},
+        ]
+        code, out = self.run_script('check', parts=reordered)
+        self.assertEqual(code, 1, out)
+        self.assertIn('part one lists 3 name(s) and the part declares 3; the same names in another order', out)
+
+    def test_this_repository_manifest_lists_every_declaration_of_every_part(self):
+        """The join on the real tree: 829 declarations on 2026-10-24, every
+        one listed under the part that declares it, in order."""
+        with open(os.path.join(ROOT, 'scripts', 'model-parts.json')) as fh:
+            manifest = json.load(fh)
+        # split-model.mjs's own DECL_RE: a part's top level holds `var` and
+        # `function` declarations and nothing else (it refuses the rest).
+        decl = re.compile(r'^(?:var|function) ([A-Za-z_$][\w$]*)', re.M)
+        total = 0
+        for part in manifest['parts']:
+            with open(os.path.join(ROOT, 'model', part['name'] + '.mjs')) as fh:
+                text = fh.read()
+            # The generated import and export blocks declare nothing; the
+            # body between them is what split-model.mjs cuts into chunks.
+            body = text[:text.rfind('\nexport {\n')]
+            names = decl.findall(body)
+            self.assertEqual(part['names'], names, 'model/%s.mjs' % part['name'])
+            total += len(names)
+        self.assertGreaterEqual(total, 829)
 
 
 if __name__ == '__main__':

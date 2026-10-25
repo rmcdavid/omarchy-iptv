@@ -85,8 +85,19 @@
 # Model.js, where node and the QML spec call them for real (CLAUDE.md 12);
 # what is asserted against Service.qml is that it delegates.
 set -uo pipefail
+# ---- refusals above EVERY external command (F-M3-18 (b), the clip- and
+# logo-scenario shape): `command -v`, `[[ ]]` and `echo` are builtins, so an
+# empty PATH reaches the SKIP line -- exit 77, what the gate reads as "this
+# machine cannot run it" -- and nothing else. HERE is resolved from
+# BASH_SOURCE with builtins for the same reason: `dirname "$0"` used to run
+# first and an empty PATH died on `dirname: command not found` instead.
+for tool in python3 node; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "SKIP pip-scenario: $tool is not on PATH" >&2; exit 77; }
+done
 
-HERE=$(cd "$(dirname "$0")" && pwd)
+HERE=${BASH_SOURCE[0]%/*}
+[[ $HERE == "${BASH_SOURCE[0]}" ]] && HERE=.
+HERE=$(cd "$HERE" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 RUN="$HERE/run.sh"
 PLUGIN_ROOT=$(cd "${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT}" 2>/dev/null && pwd)
@@ -163,7 +174,10 @@ print(hits)' "$1" "$2" 2>/dev/null || printf '%s\n' "$QA_NO_STATE"
 cleanup() {
   # `--detach` deliberately installs no trap of its own: the shell and the
   # player must outlive the run.sh invocation that started them, because that
-  # is the state `restart-shell` acts on. So the teardown is ours. `run.sh
+  # is the state `restart-shell` acts on. So the teardown is ours: the trap is
+  # on the SCENARIO, not on the shell -- this cleanup runs on exit, and INT and
+  # TERM are turned into exits below it (F-HARNESS-18), so a signal mid-run
+  # reaps the detached shell too instead of stranding it. `run.sh
   # reap` matches only what is bound to THIS scratch directory - the
   # quickshell config root and the player's own --input-ipc-server path -
   # never a pattern that could reach the caller's own session, and never one
@@ -586,6 +600,12 @@ json.dump(state, open(sys.argv[1], "w"), indent=2)' "$STUB_STATE"
 }
 
 trap cleanup EXIT
+# A signal while this shell waits on a foreground child runs no EXIT trap;
+# an exit does. These two lines turn INT and TERM into exits (the clip-scenario
+# shape, F-HARNESS-18), so a `timeout -s TERM` or a Ctrl-C mid-run reaps what
+# cleanup reaps instead of stranding the shell, the server or the cage.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 case ${1:-live} in
   check-tree) preflight ;;

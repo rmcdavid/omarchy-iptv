@@ -355,6 +355,38 @@ st "a one-file helper from before the split has no parts, and that is fine" 0 qa
 is "and prints nothing" "$(qa_helper_parts "$HROOT")" ""
 rm "$HROOT/bin/omarchy-iptv"
 st "a root with no helper at all is refused" 1 qa_helper_parts "$HROOT"
+# F-HARNESS-34. A CRLF checkout (core.autocrlf=true before .gitattributes
+# existed) ends every stub line in CR, and the reader's `^HELPER_PARTS = ($`
+# and `/^)$/` never matched one: on this machine's grep (ugrep in grep mode,
+# which lets `$` match before a CR) the block was found and the sed range was
+# not, so the shipped reader REFUSED (exit 1, nothing printed) -- a split
+# helper read as one that cannot start -- and on a grep whose `$` is strict it
+# reads as a ONE-FILE helper, exit 0 and no parts, so a slow tree would stage
+# the stub alone. The stub itself reads its parts with CRLF as LF (D-REL-11),
+# so the reader now does the same. The real tree's stub and parts, copied
+# with CRLF line endings: the same eleven parts in the same order.
+HCRLF="$TMP/helper-crlf"
+mkdir -p "$HCRLF/bin/helper"
+sed 's/$/\r/' "$ROOT/bin/omarchy-iptv" >"$HCRLF/bin/omarchy-iptv"
+for hp in "$ROOT"/bin/helper/*.py; do sed 's/$/\r/' "$hp" >"$HCRLF/bin/helper/${hp##*/}"; done
+is "a CRLF copy of the stub yields the same parts as the LF tree, in order" \
+   "$(qa_helper_parts "$HCRLF" | sed "s#^$HCRLF/##" | tr '\n' ' ')" \
+   "$(qa_helper_parts "$ROOT" | sed "s#^$ROOT/##" | tr '\n' ' ')"
+is "and that is eleven of them, not none" "$(qa_helper_parts "$HCRLF" | wc -l | tr -d ' ')" "11"
+# The old reader, verbatim from a9d20f9's qa-lib.sh, against the same copy:
+# whichever grep is on PATH, it does not answer the eleven parts.
+old_helper_parts() {
+  local root=$1 rel
+  local -a parts=()
+  [[ -f $root/bin/omarchy-iptv ]] || return 1
+  grep -q '^HELPER_PARTS = ($' "$root/bin/omarchy-iptv" || return 0
+  mapfile -t parts < <(sed -n '/^HELPER_PARTS = ($/,/^)$/s/^    ("\([0-9][0-9]-[a-z][a-z0-9-]*\.py\)", [1-9][0-9]*, 0x[0-9a-f]\{8\}),$/\1/p' "$root/bin/omarchy-iptv")
+  (( ${#parts[@]} > 0 )) || return 1
+  for rel in "${parts[@]}"; do [[ -f $root/bin/helper/$rel ]] || return 1; done
+  for rel in "${parts[@]}"; do printf '%s\n' "$root/bin/helper/$rel"; done
+}
+is "the shipped reader answered a CRLF stub with no parts at all (the shape replaced)" \
+   "$(old_helper_parts "$HCRLF" | wc -l | tr -d ' ')" "0"
 
 # ======================================================== qa_tree_count (A2)
 
@@ -826,6 +858,106 @@ is "and asks run.sh to serve one, detached so a restart can be tested" \
 is "no scenario here plays a dead URL and then asserts about the player" \
    "$(qa_count 'ipc play "t:(bbc|itv|sky|dw|arte|zdf|kids|expired)' "$PS5")" "0"
 
+# ================================ qa_stop_pid (F-HARNESS-32)
+
+section "qa_stop_pid / F-HARNESS-32: one recorded pid, TERM then KILL after a bound"
+
+# The qa_reap_players ladder over a single pid, for the processes that were
+# still ended with TERM alone: run.sh's foreground shell and fixture server
+# (its exit cleanup and `reap`, which also carried `pkill -f` patterns), its
+# detached shell (an inline copy of the ladder), and the text, tls and
+# sources scenarios' servers. Driven against a stand-in that ignores TERM,
+# one that honours it, a zombie child, a process that is NOT our child, and
+# the old form.
+sp_deaf_sh="$TMP/sp-deaf.sh"
+printf '#!/bin/bash\ntrap "" TERM\n: >"$1"\nwhile :; do sleep 0.1; done\n' >"$sp_deaf_sh"
+chmod +x "$sp_deaf_sh"
+"$sp_deaf_sh" "$TMP/sp-deaf.ready" >/dev/null 2>&1 & sp_deaf=$!
+qa_wait_nonempty "$TMP/sp-deaf.ready" 50 >/dev/null 2>&1 || sleep 0.5
+# The old form, verbatim from a9d20f9's run.sh cleanup: `kill "$pid"`, done.
+kill "$sp_deaf" 2>/dev/null
+sleep 0.5
+is "old form: TERM alone leaves a TERM-ignoring child running" \
+   "$(kill -0 "$sp_deaf" 2>/dev/null && echo alive || echo gone)" "alive"
+sp_err=$(qa_stop_pid "$sp_deaf" 1 "stand-in" 2>&1 >/dev/null); sp_rc=$?
+is "qa_stop_pid ends it within the grace, by KILL, and reports 0" \
+   "$sp_rc $(kill -0 "$sp_deaf" 2>/dev/null && echo alive || echo gone)" "0 gone"
+is "and names the KILL and the pid on stderr" \
+   "$([[ $sp_err == *"sending KILL"* && $sp_err == *"$sp_deaf"* && $sp_err == *"stand-in"* ]] && echo said || echo "silent: $sp_err")" "said"
+ck "and the zombie is collected (a child that exited is not left for the parent to find)" \
+   '! kill -0 "$sp_deaf" 2>/dev/null'
+bash -c 'while :; do sleep 0.1; done' >/dev/null 2>&1 & sp_kind=$!
+sleep 0.2
+sp_err=$(qa_stop_pid "$sp_kind" 5 2>&1 >/dev/null); sp_rc=$?
+is "a child that honours TERM is gone with no KILL and nothing on stderr" \
+   "$sp_rc $(kill -0 "$sp_kind" 2>/dev/null && echo alive || echo gone) [$sp_err]" "0 gone []"
+# A zombie: a process that has exited and whose parent has not waited for
+# it. `kill -0` on it succeeds, so a ladder polling `kill -0` alone would
+# see it alive forever and report that it survived SIGKILL. bash collects
+# its own background children as they exit, so the zombie is made under a
+# python parent that never waits (and sleeps until it is ended by pid).
+python3 -c 'import subprocess, sys, time
+p = subprocess.Popen(["true"]); time.sleep(0.3); print(p.pid, flush=True); time.sleep(60)' >"$TMP/sp-zombie.pid" 2>/dev/null & sp_zparent=$!
+qa_wait_nonempty "$TMP/sp-zombie.pid" 5 || true
+sp_zombie=$(tr -d ' \n' <"$TMP/sp-zombie.pid")
+is "control: the exited child is a zombie, and kill -0 still answers yes" \
+   "$(awk '{print $3}' "/proc/$sp_zombie/stat" 2>/dev/null) $(kill -0 "$sp_zombie" 2>/dev/null && echo yes || echo no)" "Z yes"
+sp_err=$(qa_stop_pid "$sp_zombie" 1 2>&1 >/dev/null); sp_rc=$?
+is "a zombie counts as gone within one poll, and nothing is sent or said" \
+   "$sp_rc [$sp_err]" "0 []"
+kill -KILL "$sp_zparent" 2>/dev/null; wait "$sp_zparent" 2>/dev/null
+# Not our child: the detached shell `run.sh reap` ends was started by an
+# earlier invocation. A grandchild whose parent has gone is the same shape.
+sp_orphan=$( (bash -c 'while :; do sleep 0.1; done' >/dev/null 2>&1 & echo $!) )
+sleep 0.2
+is "control: the orphan is alive and is not our child" \
+   "$(kill -0 "$sp_orphan" 2>/dev/null && echo alive || echo gone) $(ps -o ppid= -p "$sp_orphan" | tr -d ' ' | awk -v me=$$ '{print ($1 == me) ? "child" : "notchild"}')" "alive notchild"
+sp_err=$(qa_stop_pid "$sp_orphan" 5 2>&1 >/dev/null); sp_rc=$?
+is "a process that is not our child is ended all the same, without a wait" \
+   "$sp_rc $(kill -0 "$sp_orphan" 2>/dev/null && echo alive || echo gone)" "0 gone"
+st "an empty pid is nothing to do, status 0" 0 qa_stop_pid ""
+st "a pid that is not a number is refused with 2" 2 qa_stop_pid "12ab"
+st "a pid that is already gone is 0" 0 qa_stop_pid "$sp_kind"
+# run.sh, DRIVEN: a deaf stand-in whose command line carries this scratch
+# directory's fixture-server pattern, recorded in server.pid the way
+# start_server records the real one; `run.sh reap` on that directory ends it
+# by that pid, says it had to KILL, and a pid file naming a process that is
+# NOT the server (a recycled pid) is left alone. The player half of reap is
+# driven above (F-HARNESS-30).
+sp_scr="$TMP/sp-scratch"; mkdir -p "$sp_scr/fixtures"
+sp_pat="http.server 8765 --bind 127.0.0.1 --directory $sp_scr/fixtures"
+"$sp_deaf_sh" "$TMP/sp-srv.ready" "$sp_pat" >/dev/null 2>&1 & sp_srv=$!
+qa_wait_nonempty "$TMP/sp-srv.ready" 50 >/dev/null 2>&1 || sleep 0.5
+printf '%s\n' "$sp_srv" >"$sp_scr/server.pid"
+sp_err=$(OMARCHY_IPTV_HARNESS_DIR=$sp_scr "$ROOT/scripts/dev-harness/run.sh" reap 2>&1 >/dev/null)
+is "run.sh reap ends the recorded fixture server (KILL behind the TERM), says so, and drops the pid file" \
+   "$(kill -0 "$sp_srv" 2>/dev/null && echo alive || echo gone) $([[ $sp_err == *"sending KILL"* && $sp_err == *"fixture server"* ]] && echo said || echo "silent: $sp_err") $([[ -e $sp_scr/server.pid ]] && echo pidfile || echo nopidfile)" "gone said nopidfile"
+bash -c 'while :; do sleep 0.1; done' >/dev/null 2>&1 & sp_other=$!
+sleep 0.2
+printf '%s\n' "$sp_other" >"$sp_scr/server.pid"
+OMARCHY_IPTV_HARNESS_DIR=$sp_scr "$ROOT/scripts/dev-harness/run.sh" reap >/dev/null 2>&1
+is "a server.pid naming a process that is not the server (a recycled pid) signals nothing" \
+   "$(kill -0 "$sp_other" 2>/dev/null && echo alive || echo gone)" "alive"
+# Belt and braces for a RED run: every stand-in this section started is
+# ended by its recorded pid here, whatever the checks above found. The
+# first red run against a9d20f9's run.sh left the deaf server stand-in
+# behind (reap did not end it, and nothing else did) for twenty minutes.
+kill -KILL "$sp_deaf" "$sp_kind" "$sp_srv" "$sp_other" "$sp_orphan" 2>/dev/null
+wait "$sp_deaf" "$sp_kind" "$sp_srv" "$sp_other" 2>/dev/null
+# The shapes, as bookkeeping (rule 14: the driven checks above are the
+# proof): no `pkill -f` is left in run.sh, and every scenario server kill
+# goes through the ladder behind its ownership guard.
+is "run.sh ends nothing by a pkill pattern any more (code lines; its comments may say the word)" \
+   "$(qa_count '^ *pkill -f' "$ROOT/scripts/dev-harness/run.sh")" "0"
+is "run.sh's cleanup, detached-shell stop and server stop all go through qa_stop_pid" \
+   "$(awk '/^cleanup\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "') $(awk '/^stop_detached_shell\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "') $(awk '/^stop_recorded_server\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/run.sh" | grep -c '^[^#]*qa_stop_pid "')" "2 1 1"
+sp_scen=""
+for sc in text tls sources; do
+  sp_scen="$sp_scen$sc:$(qa_count 'kill "\$(SERVER_PID|OWN_CHILD|SILENT_PID)"' "$ROOT/scripts/dev-harness/$sc-scenario.sh"):$(qa_count 'qa_stop_pid "\$(SERVER_PID|OWN_CHILD|SILENT_PID)"' "$ROOT/scripts/dev-harness/$sc-scenario.sh") "
+done
+is "the text, tls and sources scenarios end their servers with the ladder, never a bare kill (TERM-alone sites : ladder sites)" \
+   "$sp_scen" "text:0:3 tls:0:4 sources:0:1 "
+
 section "qa_openms: the open-budget number, and the payload that could not fail"
 
 # The condition that used to make this check pass silently, driven for real.
@@ -1165,6 +1297,38 @@ is "and sources qa-lib.sh ABOVE the call, so the call resolves to a function" \
    "${unsourced:-none}" "none"
 is "and in a check-tree scenario the call sits on the live arm only" \
    "${late:-none}" "none"
+# F-HARNESS-18, as bookkeeping by shape (rule 14: the proof is a display
+# lane's TERM at N s and INT leaving no cage, shell, socket or work dir, the
+# clip method). A scenario that traps EXIT and detaches something is
+# stranded by a signal while it waits on a child, because a signal runs no
+# EXIT trap and an exit does; the two lines that turn INT and TERM into
+# exits lived in eight scenarios and not the other eight. This is what goes
+# red when a seventeenth scenario is written without them.
+untrapped=""
+for f in "${SCEN_FILES[@]}"; do
+  [[ $(qa_count '^trap cleanup EXIT$' "$f") == 1 ]] || { untrapped="$untrapped ${f##*/}(no-EXIT-trap)"; continue; }
+  [[ $(qa_count "^trap 'exit 130' INT$" "$f") == 1 && $(qa_count "^trap 'exit 143' TERM$" "$f") == 1 ]] || untrapped="$untrapped ${f##*/}"
+done
+is "every scenario that traps EXIT also turns INT and TERM into exits (F-HARNESS-18)" "${untrapped:-none}" "none"
+# F-M3-18 (b), DRIVEN: with nothing on PATH every scenario reaches its own
+# SKIP line and exit 77 -- `command -v`, `[[ ]]` and `echo` are builtins, and
+# HERE is resolved from BASH_SOURCE with builtins -- rather than dying on
+# `dirname: command not found` before a refusal it could have given. Twelve
+# of sixteen died that way on a9d20f9 (exit 2, the shell's own message).
+# `env -i` empties the environment too, so nothing a scenario reads from it
+# (the harness directory, HOME) can reach a real path before the refusal.
+# Bounded: a scenario that got PAST its preamble with no PATH could not
+# start anything, and `timeout` ends it anyway.
+nopath=""
+for f in "${SCEN_FILES[@]}"; do
+  np_out=$(env -i PATH= /bin/bash "$f" 2>&1); np_rc=$?
+  np_name=${f##*/}; np_name=${np_name%.sh}
+  [[ $np_rc == 77 && $np_out == "SKIP $np_name"* && $np_out == *"is not on PATH"* && $np_out != *"command not found"* ]] \
+    || nopath="$nopath ${f##*/}(rc=$np_rc)"
+done
+is "with an empty PATH every scenario answers its own SKIP line and exit 77, not 'command not found'" "${nopath:-none}" "none"
+is "and no scenario resolves its directory with dirname (a code line; comments may say the word)" \
+   "$(cat "${SCEN_FILES[@]}" | grep -c '^[^#]*dirname "\$0"')" "0"
 # The four the gate runs, named, because those are the ones where a stray
 # transcript would land on every commit. The list is literal and so it
 # drifts: logo-scenario.sh joined the gate on 2026-10-11 and this loop did
@@ -1711,6 +1875,43 @@ rm -f "$FG/n"
 is "a steal after the front check refuses with 3 and types nothing" "$(fg_run type sky)" "3 0"
 ck "and the diagnosis is the guard's, not the two-attempt message" \
    'grep -q "type REFUSED" "$FG/out" && ! grep -q "did not arrive after two attempts" "$FG/out"'
+
+# F-HARNESS-12: `shot` asks the same question `key` does, and refuses the same
+# way. The capture itself is stubbed -- `hyprctl monitors -j` answers one
+# focused output, `grim` records its argv and writes the file -- so what is
+# observed is run.sh's DECISION and whether a file appeared, never a pixel.
+# Seen red on a9d20f9's run.sh: a closed guide was captured (exit 0, a file).
+cat >"$FG/bin/hyprctl" <<'FG_HYPR'
+#!/bin/bash
+echo '[{"name":"STUB-OUT","focused":true},{"name":"STUB-OTHER","focused":false}]'
+FG_HYPR
+cat >"$FG/bin/grim" <<'FG_GRIM'
+#!/bin/bash
+echo "$@" >>"$GRIM_LOG"
+: >"${@: -1}"
+FG_GRIM
+chmod +x "$FG/bin/hyprctl" "$FG/bin/grim"
+export GRIM_LOG="$FG/grim.log"
+fg_shot() { : >"$GRIM_LOG"; rm -rf "$FG/h/shots"; fg_run "$@" | cut -d' ' -f1; printf '%s %s\n' "$(wc -l <"$GRIM_LOG" | tr -d ' ')" "$([[ -e $FG/h/shots/${2:-guide}.png || -e $FG/h/shots/${3:-guide}.png ]] && echo file || echo nofile)"; }
+fg_stub "${FG_OPEN/\"open\":true/\"open\":false}" "" 0
+is "shot refuses with 3 while the guide is CLOSED: no grim call, no file" "$(fg_shot shot guide | tr '\n' ' ')" "3 0 nofile "
+ck "and the refusal is worded as key's is" 'grep -q "shot REFUSED: the guide is CLOSED" "$FG/out"'
+fg_stub "${FG_OPEN/\"keyboard\":true/\"keyboard\":false}" "" 0
+is "and while ANOTHER SURFACE holds the keyboard" "$(fg_shot shot guide | tr '\n' ' ')" "3 0 nofile "
+fg_stub "$FG_OPEN" "" 0
+is "a focused guide is captured, once, and the path is printed" "$(fg_shot shot guide | tr '\n' ' ') $(grep -c "^$FG/h/shots/guide.png$" "$FG/out")" "0 1 file  1"
+is "on the FOCUSED output" "$(tail -1 "$GRIM_LOG")" "-o STUB-OUT $FG/h/shots/guide.png"
+fg_stub "${FG_OPEN/\"open\":true/\"open\":false}" "" 0
+is "--any-surface is the deliberate shot of whatever is up, guide closed" "$(fg_shot shot --any-surface player | tr '\n' ' ')" "0 1 file "
+ck "and says the guard was skipped" 'grep -q "shot --any-surface: focus guard SKIPPED" "$FG/out"'
+is "--any-surface AFTER the name is a name, not a flag" "$(fg_shot shot guide --any-surface | tr '\n' ' ')" "3 0 nofile "
+ck "and no shot ever primes the shell (a shot is not a keystroke)" '[[ ! -f $FG/h/primed ]]'
+# The one caller: m3-scenario.sh used to send both of `shot`'s streams to
+# /dev/null and force its status to 0, so a refusal would have been as
+# invisible as the wrong surface. Its wrapper now turns exit 3 into a FAIL
+# line. Bookkeeping by shape (rule 14 says so): the live run is the proof.
+is "m3-scenario.sh's shot wrapper counts a refusal as a FAIL rather than hiding it" \
+   "$(awk '/^shot\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/m3-scenario.sh" | grep -c 'rc == 3.*fail "shot')" "1"
 
 # ============ shell.qml focusWalk: the two bounds, driven for real (F-M3-1 a)
 
@@ -2582,7 +2783,16 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # a one-file helper and no helper at all (8).
 # 513 -> 515 on 2026-10-20, R27f (lane-sweep-a1): the open instrument's two
 # floor joins (its check-tree recipe, and check.sh's OPEN_PREFLIGHT_MIN).
-EXPECTED=515
+# 515 -> 548 on 2026-10-24, the P2/P3 harness round (lane-p23-harness):
+# qa_helper_parts on a CRLF copy of the tree and the old reader beside it
+# (3, F-HARNESS-34); qa_stop_pid against a deaf child, a kind one, a zombie,
+# an orphan, the bad arguments, run.sh reap over a recorded server and a
+# recycled pid, and the run.sh / scenario shapes (17, F-HARNESS-32); run.sh
+# shot's decision table and m3's wrapper (10, F-HARNESS-12); the trap census,
+# the empty-PATH drive over every scenario and the dirname census (3,
+# F-HARNESS-18 and F-M3-18 (b)). 33 in all, and each section seen red
+# against a9d20f9's run.sh, qa-lib.sh or scenarios (the lane report).
+EXPECTED=548
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

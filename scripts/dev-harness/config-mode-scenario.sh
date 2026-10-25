@@ -113,7 +113,18 @@
 # Holds no display: starts no quickshell, no mpv, sends no keystroke, and reads
 # nothing from the live install.
 set -uo pipefail
-HERE=$(cd "$(dirname "$0")" && pwd)
+# ---- refusals above EVERY external command (F-M3-18 (b), the clip- and
+# logo-scenario shape): `command -v`, `[[ ]]` and `echo` are builtins, so an
+# empty PATH reaches the SKIP line -- exit 77, what the gate reads as "this
+# machine cannot run it" -- and nothing else. HERE is resolved from
+# BASH_SOURCE with builtins for the same reason: `dirname "$0"` used to run
+# first and an empty PATH died on `dirname: command not found` instead.
+for tool in python3 mktemp; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "SKIP config-mode-scenario: $tool is not on PATH" >&2; exit 77; }
+done
+HERE=${BASH_SOURCE[0]%/*}
+[[ $HERE == "${BASH_SOURCE[0]}" ]] && HERE=.
+HERE=$(cd "$HERE" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 # 77 is this project's "this machine cannot run that half", as pip-scenario.sh
 # uses it. `live` is accepted and SKIPPED rather than rejected, because the
@@ -170,6 +181,12 @@ chmod 0700 "$WORK"
 OWN_WORK=1
 cleanup() { (( OWN_WORK )) && [[ -n ${WORK:-} && -d $WORK ]] && rm -rf "$WORK"; }
 trap cleanup EXIT
+# A signal while this shell waits on a foreground child runs no EXIT trap;
+# an exit does. These two lines turn INT and TERM into exits (the clip-scenario
+# shape, F-HARNESS-18), so a `timeout -s TERM` or a Ctrl-C mid-run reaps what
+# cleanup reaps instead of stranding the shell, the server or the cage.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 PASS=0; FAIL=0
 pass() { PASS=$((PASS+1)); echo "PASS $1"; }
