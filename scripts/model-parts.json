@@ -455,6 +455,10 @@
         "mpvDiskName",
         "mpvArgWarning",
         "mpvArgWarnings",
+        "MPV_REFUSED_TEXT",
+        "MPV_REFUSED_JUNK_TEXT",
+        "mpvRefusedWarning",
+        "mpvRefusedWarnings",
         "splitMpvArgs",
         "mpvRejectedLine",
         "mpvRejectedName",
@@ -777,6 +781,9 @@
         "urlHostWithheld",
         "sourceUrlWarning",
         "formWarningLine",
+        "WARN_PLAIN_HTTP",
+        "plainHttpLine",
+        "formAdviceLine",
         "looksLikeHost",
         "validateSourceUrl",
         "normalizeSourceUrl",
@@ -794,6 +801,7 @@
         "findSourceByUrl",
         "allocateSourceKey",
         "sourceCacheDir",
+        "cutHostParams",
         "hostPortOf",
         "deriveLabel",
         "labelKey",
@@ -830,7 +838,10 @@
         "CLIPBOARD_KILL_GRACE_MS",
         "CLIPBOARD_WATCHDOG_MS",
         "CLIPBOARD_MAX_CHARS",
-        "CLIPBOARD_MAX_BYTES"
+        "CLIPBOARD_MAX_BYTES",
+        "logoFailedPath",
+        "logoBrokenMark",
+        "logoHaveLess"
       ]
     },
     {

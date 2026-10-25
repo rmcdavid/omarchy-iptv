@@ -370,6 +370,38 @@ class LogoSurveyFixtureTest(unittest.TestCase):
         self.assertEqual(helper.logo_host("[2001:db8::1]:8443"), "[2001:db8::1]")
         self.assertEqual(helper.logo_host("[2001:db8::1]"), "[2001:db8::1]")
 
+    def test_a_reg_name_parameter_is_not_the_host_in_the_survey_or_the_refusal_lines(self):
+        """D-SINK-30 (2026-10-24), the recheck's rule-15 finding. RFC 3986's
+        reg-name admits `;`, `=` and `&`, so `https://cdn.test;sid=SECRET/a.png`
+        is a valid URL whose authority is a credential; urllib hands it over
+        whole in `netloc`, and `logo_host` stopped at `:` alone -- so the
+        survey the consent dialog is composed from and the `refused a logo
+        from %s` lines named `cdn.test;sid=secret`. The cut is the Sources
+        row's own (`cut_host_params`, one copy in the helper), and the shared
+        logo-survey fixture carries the case for both mirrors; this pins the
+        two sinks by calling them."""
+        self.assertEqual(helper.logo_host("cdn.test;sid=SECRET"), "cdn.test")
+        self.assertEqual(helper.logo_host("cdn.test:8443;sid=SECRET"), "cdn.test")
+        self.assertEqual(helper.logo_host("cdn.test;sid=SECRET:8443"), "cdn.test")
+        self.assertEqual(helper.logo_host("cdn.test=SECRET"), "cdn.test")
+        self.assertEqual(helper.logo_host("cdn.test&k=SECRET"), "cdn.test")
+        self.assertEqual(helper.logo_host("[::1]:8443;sid=SECRET"), "[::1]")
+        # The `@` test sees the WHOLE netloc: fetch_logo refuses this one, so
+        # a cut that hid the `@` would count a host that is never contacted.
+        self.assertEqual(helper.logo_host("cdn.test;u=p@evil.test"), "")
+        # The same cut the Sources row uses: host_port_of keeps the port on
+        # its own line, logo_host drops it, the parameter cut is one function.
+        self.assertEqual(helper.host_port_of("https://cdn.test:8443;sid=SECRET/x"), "cdn.test:8443")
+        self.assertEqual(helper.cut_host_params("cdn.test:8443;sid=SECRET"), "cdn.test:8443")
+        survey = helper.logo_survey([{"logo": "https://cdn.test;sid=SECRET/a.png"},
+                                     {"logo": "https://cdn.test:8443&k=SECRET/b.png"}])
+        self.assertEqual(survey["hosts"], [{"host": "cdn.test", "channels": 2}])
+        for url in ("https://cdn.test;sid=SECRET/a.png", "https://cdn.test:8443=SECRET/b.png"):
+            text = helper.logo_dimension_refusal(url, b"\xff\xd8", "image/jpeg")
+            self.assertIn("from cdn.test:", text, text)
+            for leak in ("secret", "SECRET", "sid", ";", "=", "&", "8443"):
+                self.assertNotIn(leak, text, "%s leaked %r: %s" % (url, leak, text))
+
     def test_the_survey_contacts_nothing(self):
         """It is a count over the cache, and it must stay one."""
         import ast, inspect

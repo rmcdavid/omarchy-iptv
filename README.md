@@ -414,9 +414,11 @@ reach, because it configures the media library rather than the player:
 that reason.
 
 `--tls-verify` and `--stream-lavf-o` are refused rather than quietly
-overridden. Be aware of where that refusal goes: it is written to the shell's
-log, not shown to you in the guide, so if a token of yours seems to do nothing,
-that log is where to look.
+overridden, and the refusal is shown to you: the guide's one footer warning
+line names a refused option (`mpvArg --tls-verify refused: reserved by the
+plugin`) ahead of any warning about the options it keeps, which that line
+then counts (`+1 more`) rather than names -- by name only, never with the
+value you gave it. The shell's log names every refused option.
 
 If a player is already running when you update, the plugin does not leave it
 that way. The first time the new shell picks that player up it turns
@@ -622,7 +624,12 @@ In a form: `Tab` moves between fields, `Ctrl+V` or `Shift+Insert` pastes,
 `Ctrl+U` clears the field, `Enter` saves, `Esc` cancels. Saved URLs are shown
 masked (`password=****`); press `Ctrl+R` or the eye button to reveal one
 while editing. Only `http://`, `https://`, and absolute paths are accepted,
-and no prefix is guessed.
+and no prefix is guessed. One thing to know before you choose: `http://`
+sends the address and any password in it unencrypted, to anyone on the path
+between you and the provider, and `https://` does not. An Xtream username and
+password travel inside that address. The form says so on its own line while
+you edit an `http://` value; it is a fact, not a refusal, because many
+providers offer nothing else.
 
 **How these fields take input, and why.** They look like the shell's own
 text boxes, but Qt does not edit them: the plugin handles every keystroke

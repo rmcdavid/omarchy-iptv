@@ -181,10 +181,21 @@ def logo_host(netloc: str) -> str:
     Userinfo makes the answer "": fetch_logo refuses such a URL outright, so
     the host is never contacted, and naming it would print the credentials in
     the consent text. Mirrored by Model.splitLogoUrl.
+
+    D-SINK-30 (2026-10-24). The answer ends at the first `;`, `=` or `&` too,
+    through the same `cut_host_params` the Sources row's host goes through:
+    `https://cdn.test;sid=SECRET/a.png` is a valid URL whose authority is a
+    credential, urllib hands it over whole in `netloc`, and this stopped at
+    `:` alone -- so the survey the consent dialog is composed from and the
+    `refused a logo from %s` lines (logo_dimension_refusal, logo_chunks) named
+    `cdn.test;sid=secret`. The `@` test runs over the WHOLE netloc first:
+    `cdn.test;u=p@evil` is refused by fetch_logo, so a cut that hid its `@`
+    would count a host that is never contacted.
     """
     text = (netloc or "").strip().lower()
     if "@" in text:
         return ""
+    text = cut_host_params(text)
     if text.startswith("["):
         # IPv6 literal: the bracketed half is the host, any :port follows it.
         close = text.find("]")

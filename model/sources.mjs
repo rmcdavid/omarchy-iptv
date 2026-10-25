@@ -9,7 +9,7 @@ import {
   emptyState, stateBlockedHeader
 } from "./state.mjs"
 import {
-  logoConsentLines
+  logoConsentLines, logoHaveIsSet
 } from "./logos.mjs"
 import {
   hostOf, urlSpaceIndex, urlDelimiterIndex, redactUrls
@@ -512,6 +512,40 @@ function formWarningLine(form) {
   return ""
 }
 
+// D-SINK-14 (2026-10-24). The DISCLOSURE for plain http, which nothing in
+// the product said while a LOGO must be https by ruling: an `http://`
+// playlist, guide or Xtream server sends the address -- and an Xtream
+// username and password travel IN it, as a query string -- in cleartext to
+// anyone on the path. Not a refusal (PO-5: a large share of real providers
+// are http-only, and the user is choosing their own exposure) but the PO-10
+// treatment, one sentence where the URL is typed. The sentence is the
+// owner's wording; the README's Sources section carries the same fact.
+var WARN_PLAIN_HTTP = "http:// sends the address and any password in it unencrypted; https:// does not"
+
+// The sentence when any URL field of the form (playlist, EPG, Xtream server)
+// VALIDATES as an `http://` URL, else "". Read off the validated URL, so a
+// `HTTP://` spelling counts and a value that does not validate (the error
+// line's business) does not.
+function plainHttpLine(form) {
+  if (!form || typeof form !== "object" || !form.values || typeof form.values !== "object") return ""
+  var fields = form.kind === "xtream" ? ["server"] : ["playlist", "epg"]
+  for (var i = 0; i < fields.length; i++) {
+    var v = validateSourceUrl(form.values[fields[i]], { kind: fields[i] === "epg" ? "epg" : "playlist" })
+    if (v.ok && v.kind === "http" && v.url.indexOf("http://") === 0) return WARN_PLAIN_HTTP
+  }
+  return ""
+}
+
+// What the form's one advice line shows (Guide.qml, the sourceEdit and
+// sourceXtream result line): the `@`-typo warning first -- it is about a
+// password being read as a host, which outranks a disclosure about where
+// the same password travels -- else the plain-http sentence, else "". One
+// line, so the priority is decided here and not in QML.
+function formAdviceLine(form) {
+  var w = formWarningLine(form)
+  return w !== "" ? w : plainHttpLine(form)
+}
+
 // SR12: a "." or ":" before the first "/" reads as a host.
 function looksLikeHost(text) {
   return /[.:]/.test(str(text).split("/")[0])
@@ -814,13 +848,40 @@ function sourceCacheDir(cacheDir, key) {
 // it put an email username's domain on the Sources row of an Xtream
 // `/playlist/<email>/<pass>/m3u_plus` link. The form's warning
 // (sourceUrlWarning) is where the typo shape is told.
+//
+// D-SINK-30 (2026-10-24). RFC 3986's reg-name admits `;`, `=` and `&`, so
+// `http://h.test;sid=SECRET/x` validates with host `h.test;sid=secret` and
+// this printed it so -- on the Sources row and in its default label -- while
+// the free-text redactor (runHostParts) had cut the host at `:`, `;`, `=`
+// and `&` since R32a'. No real host carries those three, so the printed
+// host[:port] ends at the first of them; the `:` port is kept, as the row
+// has always shown it. Validation is NOT changed: refusing them in a host
+// would drop a stored link on upgrade (D-SINK-27). The helper's
+// host_port_of is the mirror and the shared source-labels fixture pins both.
+// D-SINK-30 (2026-10-24). Where a PRINTED host ends: at the first `;`, `=`
+// or `&` after the userinfo cut. RFC 3986's reg-name admits all three, so
+// `http://h.test;sid=SECRET/x` VALIDATES with host `h.test;sid=secret`, and a
+// reader that stops at `:` alone prints the parameter wherever it prints the
+// host. One function, shared by every reader that derives a printable host
+// from a URL's authority -- hostPortOf (the Sources row and its default
+// label) and logoHost in model/logos.mjs (the consent dialog) -- so the rule
+// has one copy per mirror; the helper's is `cut_host_params`. The `:` port
+// is NOT cut here: hostPortOf keeps it and logoHost drops it, each in its
+// own line, and a bracketed literal is unaffected because none of the three
+// can appear inside the brackets. Validation is unchanged (D-SINK-27).
+function cutHostParams(hostport) {
+  var s = str(hostport)
+  var end = s.search(/[;=&]/)
+  return end === -1 ? s : s.substring(0, end)
+}
+
 function hostPortOf(url) {
   var m = str(url).match(/^[a-z][a-z0-9+.-]*:\/\/([^\/?#]*)/i)
   if (!m) return ""
   var authority = m[1]
   var at = authority.lastIndexOf("@")
   var hostport = at === -1 ? authority : authority.substring(at + 1)
-  return hostport.toLowerCase()
+  return cutHostParams(hostport).toLowerCase()
 }
 
 // Default label: the host (lowercase, leading `www.` dropped, `:port` kept
@@ -1284,6 +1345,66 @@ var CLIPBOARD_KILL_GRACE_MS = 1000
 var CLIPBOARD_WATCHDOG_MS = CLIPBOARD_TIMEOUT_MS + 2 * CLIPBOARD_KILL_GRACE_MS + 2000
 var CLIPBOARD_MAX_CHARS = MAX_SOURCE_URL * 4
 var CLIPBOARD_MAX_BYTES = CLIPBOARD_MAX_CHARS * 4
+// ---- the guide's logo slots: a file Qt cannot decode (D-LOGO-19) ----
+//
+// A cached logo that passes every helper header gate (D-LOGO-11, -13, -14)
+// but fails Qt's decoder was pointed at again by every delegate realisation
+// -- each list scroll, each wall page, each guide open -- and Qt printed its
+// decode warning into the shell's journal each time. The helper cannot
+// decode (stdlib only), so the only place that KNOWS a file is undecodable
+// is the shell, and the shell threw that knowledge away. These three live
+// in this part rather than beside logoSlot (model/logos.mjs) because that
+// part is another lane's this round; moving them is a relink.
+//
+// The shape is logoSlot's own rule inverted: the slot draws only a name the
+// helper announced FOR THIS DIRECTORY (`have`, a directory-tagged set), so
+// the guide keeps the PATHS that failed, for the session, and hands the
+// slots `have` LESS those names -- the path carries its directory, so a
+// name broken in source A's directory is not hidden in source B's, and
+// nothing needs clearing on a source switch. Residual, stated: a transient
+// read error (the fetch's own atomic rename is not one; a disk hiccup is)
+// marks a good file broken until the shell restarts.
+
+// The path of a QML Image `source` that names a local file, "" for
+// anything else (an empty source, a scheme that is not file:).
+function logoFailedPath(source) {
+  var s = str(source)
+  if (s.indexOf("file://") !== 0) return ""
+  var path = s.substring(7)
+  return path.charAt(0) === "/" ? path : ""
+}
+
+// A COPY of the broken set with `path` added; never mutates, because the
+// guide binds through the property and a mutation in place is invisible to
+// the bindings. An empty path is not recorded.
+function logoBrokenMark(broken, path) {
+  var out = {}
+  if (broken && typeof broken === "object") {
+    for (var k in broken) {
+      if (broken[k] === true) out[k] = true
+    }
+  }
+  var p = str(path)
+  if (p !== "") out[p] = true
+  return out
+}
+
+// `have` less every name whose file, in the set's own directory, is in
+// `broken`. Anything that is not a tagged set comes back as it is (logoSlot
+// reads it as nothing announced); a set with no broken name in its directory
+// comes back as a copy with the same names.
+function logoHaveLess(have, broken) {
+  if (!logoHaveIsSet(have)) return have
+  var out = { dir: have.dir, names: {} }
+  var b = broken && typeof broken === "object" ? broken : {}
+  var base = have.dir.replace(/\/+$/, "") + "/"
+  for (var name in have.names) {
+    if (have.names[name] !== true) continue
+    if (b[base + name] === true) continue
+    out.names[name] = true
+  }
+  return out
+}
 export {
   CACHE_LAYOUT, MAX_SOURCES, MAX_SOURCE_URL, MAX_LABEL, MAX_XTREAM_SERVER,
   MAX_XTREAM_FIELD, SOURCES_DIR, MASK, MASK_CLEAR_PARAMS, LIMITS, PAUSE_KEY,
@@ -1296,18 +1417,20 @@ export {
   PERSIST_FAILURE_REASONS, persistFailureMessage, refusalMessage,
   ZERO_WIDTH_RE, IPV6_LITERAL_RE, isIpv6Literal, cutQueryAndFragment,
   ENCODE_SENTENCE, WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts,
-  urlHostWithheld, sourceUrlWarning, formWarningLine, looksLikeHost,
-  validateSourceUrl, normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
-  EPG_ORIGIN_PLAYLIST, epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE,
-  epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
-  findSourceByUrl, allocateSourceKey, sourceCacheDir, hostPortOf, deriveLabel,
-  labelKey, labelTaken, uniqueLabel, defaultSourceLabel, validateLabel,
-  maskQuery, maskUrl, encodeQueryValue, xtreamUrls, validateXtream,
-  pluralGroups, countsLine, sameDay, formatLastUsed, formatAgo, sourceView,
-  sourceViews, sourceRows, EPG_HINT_ROW_TEXT, sourceDetail,
-  sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
-  sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
-  fetchingLine, PROBE_LOCAL_REFUSALS, probeFailureLine, sourceTransient,
+  urlHostWithheld, sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP,
+  plainHttpLine, formAdviceLine, looksLikeHost, validateSourceUrl,
+  normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST,
+  epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE, epgOriginNotice, isUrlField,
+  sourceKey, isSourceKey, findSource, findSourceByUrl, allocateSourceKey,
+  sourceCacheDir, cutHostParams, hostPortOf, deriveLabel, labelKey,
+  labelTaken, uniqueLabel, defaultSourceLabel, validateLabel, maskQuery,
+  maskUrl, encodeQueryValue, xtreamUrls, validateXtream, pluralGroups,
+  countsLine, sameDay, formatLastUsed, formatAgo, sourceView, sourceViews,
+  sourceRows, EPG_HINT_ROW_TEXT, sourceDetail, sourceAccessibleName,
+  sourcesHeaderCount, sourcesHeaderRight, sourcesRowAccessibleName,
+  confirmLogosMessage, confirmRemoveMessage, fetchingLine,
+  PROBE_LOCAL_REFUSALS, probeFailureLine, sourceTransient,
   CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
-  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
+  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark,
+  logoHaveLess
 }

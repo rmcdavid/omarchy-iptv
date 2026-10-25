@@ -297,6 +297,52 @@
       }
     },
     {
+      "name": "D-SINK-30: a reg-name parameter is not the host, and the port is still not either",
+      "channels": [
+        {
+          "logo": "https://cdn.test;sid=SECRET/a.png"
+        },
+        {
+          "logo": "https://cdn.test:8443;sid=SECRET/b.png"
+        },
+        {
+          "logo": "https://cdn.test=SECRET/c.png"
+        },
+        {
+          "logo": "https://cdn.test&k=SECRET/d.png"
+        },
+        {
+          "logo": "https://CDN.test;sid=SECRET:8443/e.png"
+        },
+        {
+          "logo": "https://[::1]:8443;sid=SECRET/f.png"
+        },
+        {
+          "logo": "https://cdn.test;u=p@evil.test/g.png"
+        }
+      ],
+      "expect": {
+        "channels": 7,
+        "withLogo": 7,
+        "wouldContact": 6,
+        "refused": 1,
+        "hostCount": 2,
+        "hosts": [
+          {
+            "host": "cdn.test",
+            "channels": 5
+          },
+          {
+            "host": "[::1]",
+            "channels": 1
+          }
+        ],
+        "schemes": {
+          "https": 7
+        }
+      }
+    },
+    {
       "name": "ties between equal hosts break by name",
       "channels": [
         {

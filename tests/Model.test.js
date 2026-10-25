@@ -2333,7 +2333,7 @@ checkCall("M2-04: every shared logo-survey case matches the agreed answer", func
     })
   })
   return [logoFixture.cases.length, bad]
-}, [10, []])
+}, [11, []])
 
 checkCall("M2-04: userinfo never reaches the consent text", function () {
   // CLAUDE.md rule 5. The consent dialog is a sink and it was missing from
@@ -2343,6 +2343,22 @@ checkCall("M2-04: userinfo never reaches the consent text", function () {
   return [survey.hosts.length, survey.refused, survey.wouldContact,
           /pass|user@|provider\.test/.test(text)]
 }, [0, 1, 0, false])
+
+// D-SINK-30 (2026-10-24), the recheck's rule-15 finding: a reg-name
+// parameter is a valid authority (`https://cdn.test;sid=SECRET/a.png`) and
+// splitLogoUrl stopped at `:` alone, so the consent dialog the HOST renders
+// named the busiest host as `cdn.test;sid=secret`. The cut is the Sources
+// row's own (Model.cutHostParams, one copy), reached here through the
+// shipping composer: survey -> consent lines -> confirmLogosMessage.
+checkCall("D-SINK-30: the consent dialog's host ends at the first `;`, `=` or `&`, as the Sources row's does -- through confirmLogosMessage, the string the host draws", () => {
+  const survey = Model.logoSurvey([{ logo: "https://cdn.test;sid=SECRET/a.png" }, { logo: "https://cdn.test:8443;sid=SECRET/b.png" },
+                                   { logo: "https://other.test=SECRET/c.png" }, { logo: "https://other.test&k=SECRET/d.png" }])
+  const message = Model.confirmLogosMessage(survey)
+  return [survey.hosts, Model.splitLogoUrl("https://cdn.test;sid=SECRET/a.png"), Model.splitLogoUrl("https://[::1]:8443;sid=SECRET/x"),
+          Model.splitLogoUrl("https://cdn.test;u=p@evil.test/g.png").host,
+          message.indexOf("cdn.test (2 channels)") !== -1, /secret|sid|;|=|&/i.test(message)]
+}, [[{ host: "cdn.test", channels: 2 }, { host: "other.test", channels: 2 }], { scheme: "https", host: "cdn.test" }, { scheme: "https", host: "[::1]" },
+    "", true, false])
 
 checkCall("M2-04: the setting FAILS CLOSED, unlike every other boolean here", function () {
   // boolSetting is "anything but false means on", which would let
@@ -4674,10 +4690,12 @@ check("clampSetting unknown key passthrough", Model.clampSetting("nope", "v"), "
 
 // ---- mpv ----
 check("splitMpvArgs accepts options", Model.splitMpvArgs(" --profile=low-latency --hwdec=auto-safe --no-osc "), { args: ["--profile=low-latency", "--hwdec=auto-safe", "--no-osc"], rejected: [], warnings: [] })
-check("splitMpvArgs rejects reserved and junk", Model.splitMpvArgs("--input-ipc-server=/x --title=y ; rm -rf --no-idle --cache=yes"), { args: ["--cache=yes"], rejected: ["--input-ipc-server=/x", "--title=y", ";", "rm", "-rf", "--no-idle"], warnings: [] })
+check("splitMpvArgs rejects reserved and junk", Model.splitMpvArgs("--input-ipc-server=/x --title=y ; rm -rf --no-idle --cache=yes"), { args: ["--cache=yes"], rejected: ["--input-ipc-server=/x", "--title=y", ";", "rm", "-rf", "--no-idle"],
+  // F-UX-7: the refused ones are named in `warnings` too, by option name, one `<token>` line for the junk
+  warnings: ["mpvArg --input-ipc-server refused: reserved by the plugin", "mpvArg --title refused: reserved by the plugin", "mpvArg <token> refused: not a --option", "mpvArg --no-idle refused: reserved by the plugin"] })
 check("splitMpvArgs rejects --script and --config-dir", Model.splitMpvArgs("--script=/e.lua --config-dir=/x --scripts=/y --input-ipc-client=fd://3").args, [])
 check("splitMpvArgs empty", Model.splitMpvArgs(null), { args: [], rejected: [], warnings: [] })
-check("splitMpvArgs is case-sensitive (D-QA-11)", Model.splitMpvArgs("--Profile=fast --HWDEC=auto --profile=fast"), { args: ["--profile=fast"], rejected: ["--Profile=fast", "--HWDEC=auto"], warnings: [] })
+check("splitMpvArgs is case-sensitive (D-QA-11)", Model.splitMpvArgs("--Profile=fast --HWDEC=auto --profile=fast"), { args: ["--profile=fast"], rejected: ["--Profile=fast", "--HWDEC=auto"], warnings: ["mpvArg <token> refused: not a --option"] })
 check("splitMpvArgs rejects --no- forms of every reserved option", Model.splitMpvArgs("--no-input-ipc-server --no-wayland-app-id --no-title --no-force-media-title --no-idle --no-script --no-scripts --no-config-dir --no-input-ipc-client").args, [])
 check("headerArgs maps UA/referer and appends others", Model.headerArgs({ "User-Agent": "VLC", Referer: "http://r", "X-Token": "a,b" }), ["--user-agent=VLC", "--referrer=http://r", "--http-header-fields-append=X-Token: a,b"])
 check("headerArgs drops unsafe", Model.headerArgs({ "Bad Name": "x", Ok: "line\nbreak" }), [])
@@ -4742,7 +4760,7 @@ checkCall("the working directory is never the home the shell runs in", () => {
 }, [false, false, true])
 checkCall("dirnameOf behaves like os.path.dirname on the paths this plugin uses", () => [Model.dirnameOf("/a/b/c.sock"), Model.dirnameOf("/c.sock"), Model.dirnameOf("c.sock"), Model.dirnameOf("")], ["/a/b", "/", "", ""])
 checkCall("--watch-later-dir stays reserved so a resume record cannot be aimed at $HOME", () => Model.splitMpvArgs("--watch-later-dir=/home/u --screenshot-dir=/home/u/Pictures"),
-  { args: ["--screenshot-dir=/home/u/Pictures"], rejected: ["--watch-later-dir=/home/u"], warnings: [] })
+  { args: ["--screenshot-dir=/home/u/Pictures"], rejected: ["--watch-later-dir=/home/u"], warnings: ["mpvArg --watch-later-dir refused: reserved by the plugin"] })
 checkCall("a user who wants their screenshots elsewhere still wins (last token wins)", () => {
   const a = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: STATE_DIR, extraArgs: ["--screenshot-dir=/home/u/Pictures"] })
   return a.indexOf("--screenshot-dir=" + STATE_DIR + "/screenshots") < a.lastIndexOf("--screenshot-dir=/home/u/Pictures")
@@ -5156,7 +5174,7 @@ check("M5-01: --demuxer-cache-unlink-files is reserved and --cache-on-disk is no
   [Model.MPV_RESERVED["--demuxer-cache-unlink-files"], Model.MPV_RESERVED["--cache-on-disk"], Model.MPV_DISK_WARN["--cache-on-disk"]], [true, undefined, true])
 check("M5-01: every spelling of the unlink switch is rejected, and the disk cache itself is kept and warned",
   Model.splitMpvArgs("--demuxer-cache-unlink-files=no --no-demuxer-cache-unlink-files --demuxer-cache-unlink-files=whendone --cache-on-disk"),
-  { args: ["--cache-on-disk"], rejected: ["--demuxer-cache-unlink-files=no", "--no-demuxer-cache-unlink-files", "--demuxer-cache-unlink-files=whendone"], warnings: ["mpvArg --cache-on-disk" + Model.MPV_DISK_TEXT] })
+  { args: ["--cache-on-disk"], rejected: ["--demuxer-cache-unlink-files=no", "--no-demuxer-cache-unlink-files", "--demuxer-cache-unlink-files=whendone"], warnings: ["mpvArg --demuxer-cache-unlink-files refused: reserved by the plugin", "mpvArg --no-demuxer-cache-unlink-files refused: reserved by the plugin", "mpvArg --cache-on-disk" + Model.MPV_DISK_TEXT] })
 
 checkCall("D-SINK-4: --load-scripts is RESERVED, not merely defaulted off", function () {
   // The base argv says --load-scripts=no, but user tokens are concatenated
@@ -5206,9 +5224,13 @@ HANDOFF.cases.forEach(vector => {
 })
 checkCall("splitMpvArgs carries the warning for the tokens it KEEPS", () => Model.splitMpvArgs("--ytdl=yes --hwdec=auto"),
   { args: ["--ytdl=yes", "--hwdec=auto"], rejected: [], warnings: ["mpvArg --ytdl" + HANDOFF_TEXT] })
-checkCall("a REJECTED token never warns: it never reaches mpv (--script is reserved)",
+// F-UX-7 (2026-10-24): a REJECTED token never reaches mpv, so it draws no
+// HANDOFF sentence -- but it is no longer silent: it is named, by option
+// name, with the refused sentence, BEFORE the kept tokens' lines (the
+// footer prints the first line and counts the rest).
+checkCall("a REJECTED token draws no handoff warning (it never reaches mpv) but is named as refused (--script is reserved), ahead of the kept token's line",
   () => Model.splitMpvArgs("--script=/tmp/ytdl_hook.lua --script-opts=ytdl_hook-ytdl_path=/tmp/x").warnings,
-  ["mpvArg --script-opts" + HANDOFF_TEXT])
+  ["mpvArg --script" + Model.MPV_REFUSED_TEXT, "mpvArg --script-opts" + HANDOFF_TEXT])
 checkCall("the warning names the option and never its value (a proxy URL stays out of the sink)", () => {
   const w = Model.splitMpvArgs("--ytdl-raw-options=proxy=http://u:pw@prox.test:8080").warnings
   return [w.length, w[0].indexOf("prox.test") !== -1, w[0].indexOf("pw") !== -1, w[0]]
@@ -5608,6 +5630,24 @@ check("sourceLabel https", Model.sourceLabel("HTTPS://Host.Test/x.m3u"), "https:
 check("sourceLabel local", [Model.sourceLabel("/home/x/list.m3u"), Model.sourceLabel("~/l.m3u"), Model.sourceLabel("file:///tmp/x.m3u")], ["local file", "local file", "local file"])
 check("sourceLabel empty / junk", [Model.sourceLabel(""), Model.sourceLabel("ftp"), Model.sourceLabel(null)], ["", "unknown source", ""])
 check("hostOf", [Model.hostOf("http://u:p@h.test/x"), Model.hostOf("/x"), Model.hostOf("")], ["h.test", "local file", ""])
+// D-SINK-30 (2026-10-24). RFC 3986's reg-name admits `;`, `=` and `&`, so
+// `http://h.test;sid=SECRET/x` validated with host `h.test;sid=secret` and
+// the DISPLAY sinks printed the parameter: sourceLabel's host group ended at
+// `:` only, and hostPortOf (the Sources row's host and default label, pinned
+// by the shared source-labels fixture above) took the authority whole. The
+// free-text redactor had cut at the four since R32a'. The printed host now
+// ends at the first `;`, `=` or `&`; validation is unchanged (D-SINK-27).
+checkCall("D-SINK-30: sourceLabel and hostOf end the host at `;`, `=` and `&`, keep a port and a bracketed literal", () =>
+  ["http://h.test;sid=SECRET/x", "http://h.test=SECRET/x", "http://h.test&p=SECRET/x", "http://u:p@h.test;sid=SECRET/x",
+   "http://h.test:8080;sid=SECRET/x", "http://[::1]:8080;sid=SECRET/x"].map(u => Model.sourceLabel(u) + " | " + Model.hostOf(u)),
+  ["http://h.test | h.test", "http://h.test | h.test", "http://h.test | h.test", "http://h.test | h.test",
+   "http://h.test | h.test", "http://[::1] | [::1]"])
+checkCall("D-SINK-30: the label fixture carries the parameter-delimiter cases, so it cannot be trimmed to green", () => {
+  const labelFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/source-labels.json"), "utf8"))
+  return [labelFixture.cases.filter(c => /;/.test(c.url)).length >= 2, labelFixture.cases.filter(c => /^[^?]*=/.test(c.url)).length >= 1,
+   labelFixture.cases.filter(c => /^[^?]*&/.test(c.url)).length >= 1,
+   labelFixture.cases.filter(c => /[;=&]/.test(c.hostPort) || /[;=&]/.test(c.label)).length]
+}, [true, true, true, 0])
 check("redactUrls replaces every URL by its host (D-QA-01)", Model.redactUrls("Failed to open http://user:pass@tv.example.net:8080/get.php?u=1&p=2."), "Failed to open tv.example.net.")
 check("redactUrls several URLs", Model.redactUrls("open https://a.b/c/d?e=f and rtsp://u:p@h:554/x fine"), "open a.b and h fine")
 check("redactUrls no urls", Model.redactUrls("plain text"), "plain text")
@@ -15922,6 +15962,179 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     return [during === M.statusReason(M.parseHelperStatus(failedStatus, "playlist")), during !== "", after, h.root.lastError, h.compileErrors]
   }, [true, true, "", "play failed: x", []])
 }
+// ---- D-SINK-23, second half: the two state readers agree about what a stored url IS ----
+// PARITY (the lead's ruling, 2026-10-24). The helper's normalize_source has
+// validated a stored `url` (origin cli) and dropped a record that fails since
+// the Sources feature; the JS reader kept the text as written, so a
+// hand-edited state.json held a URL the two mirrors read, keyed and redacted
+// differently. One shared fixture, run by tests/test_helper.py too.
+const stateReaderFixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/state-reader-urls.json"), "utf8"))
+checkCall("D-SINK-23 parity: parseState keeps the VALIDATED url and epgUrl of a stored record and drops one whose url does not validate, exactly as the helper's normalize_source does", () =>
+  stateReaderFixture.cases.map(c => {
+    const rec = { key: "aaaaaaa1", url: c.url, epgUrl: c.epgUrl, kind: "http", label: "", labelCustom: false, origin: "guide",
+      addedAt: 1, lastUsed: 1, fetchedAt: 0, channelCount: 0, groupCount: 0 }
+    const st = Model.parseState(JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], savedSearches: [], hiddenGroups: [], sources: [rec] }))
+    const s = st.sources[0]
+    return c.why + " -> " + show([st.sources.length === 1, s ? s.url : "", s ? s.epgUrl : "", s ? s.kind : ""])
+  }),
+  stateReaderFixture.cases.map(c => c.why + " -> " + show([c.kept, c.outUrl, c.outEpgUrl, c.kind])))
+check("D-SINK-23 parity: the fixture carries both halves of the cost -- rows the shell used to keep and now drops, and rows it re-reads in validated form -- so it cannot be trimmed to green", [
+  stateReaderFixture.cases.filter(c => c.kept === false).length >= 4,
+  stateReaderFixture.cases.filter(c => c.kept === true && c.url !== c.outUrl).length >= 4,
+  stateReaderFixture.cases.filter(c => c.kept === true && c.epgUrl !== "" && c.epgUrl !== c.outEpgUrl).length >= 2,
+  stateReaderFixture.cases.every(c => c.kept === (c.outUrl !== ""))
+], [true, true, true, true])
+
+// ---- D-SINK-14: the plain-http disclosure, where the URL is typed ----
+// A LOGO must be https by ruling, and nothing said that an http:// playlist
+// or Xtream server sends the credentials in cleartext. PO-10 treatment, not
+// a refusal: one sentence on the form's advice line while a URL field holds
+// an http:// value, the `@`-typo warning winning when both hold.
+checkCall("D-SINK-14: formAdviceLine shows the owner's http sentence for an http:// playlist, EPG or Xtream server, and nothing for their https twins", () => {
+  const url = (p, e) => ({ kind: "url", values: { label: "", playlist: p, epg: e } })
+  const xt = s => ({ kind: "xtream", values: { server: s, username: "u", password: "p" } })
+  return [Model.WARN_PLAIN_HTTP, Model.formAdviceLine(xt("http://panel.test:8080")), Model.formAdviceLine(xt("https://panel.test:8080")),
+          Model.formAdviceLine(url("http://h.test/x", "")), Model.formAdviceLine(url("https://h.test/x", "")),
+          Model.formAdviceLine(url("https://h.test/x", "http://epg.test/g.xml")), Model.formAdviceLine(url("HTTP://H.test/x", "")),
+          Model.formAdviceLine(url("/srv/tv/list.m3u", "")), Model.formAdviceLine(url("http://h .test/x", "")),
+          Model.formAdviceLine(null), Model.formAdviceLine({}), Model.formAdviceLine({ values: null })]
+}, ["http:// sends the address and any password in it unencrypted; https:// does not",
+    "http:// sends the address and any password in it unencrypted; https:// does not", "",
+    "http:// sends the address and any password in it unencrypted; https:// does not", "",
+    "http:// sends the address and any password in it unencrypted; https:// does not",
+    "http:// sends the address and any password in it unencrypted; https:// does not", "", "", "", "", ""])
+checkCall("D-SINK-14: the `@`-typo warning outranks the http sentence on one line, and formWarningLine itself is unchanged", () => {
+  const typo = "http://user:2024/ab@host.test/x"
+  return [Model.formAdviceLine({ kind: "url", values: { label: "", playlist: typo, epg: "" } }) === Model.WARN_AT_AFTER_AUTHORITY,
+          Model.formWarningLine({ kind: "url", values: { label: "", playlist: "http://h.test/x", epg: "" } }),
+          Model.formAdviceLine({ kind: "url", values: { label: "", playlist: "https://h.test/x", epg: typo } }) === Model.WARN_AT_AFTER_AUTHORITY]
+}, [true, "", true])
+
+// ---- F-UX-7: a refused mpvArg is shown where the kept ones are shown ----
+// Service.playerArgWarnings is built from splitMpvArgs(...).warnings, which
+// covered KEPT tokens only; the refused list went to the journal (D-SINK-24,
+// names only) and nowhere the user looks. Now `warnings` names the refused
+// tokens too, by the same name rule, so the footer carries them -- FIRST,
+// because the footer's one line (footerWarning -> warningLine) prints the
+// first warning and counts the rest as `(+N more)`: with the kept lines
+// first, a refused option beside a kept-option warning was named nowhere the
+// user looks, while the README said it was (the recheck's P2 on fda0d52).
+checkCall("F-UX-7: splitMpvArgs names a refused token in `warnings` by its option name, never its value, one line per distinct name, BEFORE the kept tokens' lines", () => {
+  const r = Model.splitMpvArgs("--tls-verify=no --volume=50 --no-tls-verify --tls-verify=yes --ytdl=yes")
+  return [r.warnings, r.args, r.warnings.some(w => w.indexOf("=no") !== -1 || w.indexOf("=yes") !== -1 || w.indexOf("50") !== -1)]
+}, [["mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT, "mpvArg --no-tls-verify" + Model.MPV_REFUSED_TEXT, "mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT],
+    ["--volume=50", "--ytdl=yes"], false])
+checkCall("F-UX-7: the footer's ONE line, over a kept-option warning AND a refused option, names the refused option and counts the kept one -- the README sentence, made true by the composer", () => {
+  const warnings = Model.splitMpvArgs("--ytdl=yes --tls-verify=no").warnings
+  return [Model.footerWarning(Model.labelWarnings(warnings, "player"), []),
+          Model.footerWarning(Model.labelWarnings(Model.splitMpvArgs("--tls-verify=no").warnings, "player"), []),
+          Model.footerWarning(Model.labelWarnings(Model.splitMpvArgs("--ytdl=yes").warnings, "player"), [])]
+}, ["Player warning: mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT + " (+1 more)",
+    "Player warning: mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT,
+    "Player warning: mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT])
+checkCall("F-UX-7 is a sink (rule 5): a credential-shaped refused token yields its name and nothing after the `=`; a bare credential-shaped token yields `<token>`", () => {
+  const r = Model.splitMpvArgs("--stream-lavf-o=http_proxy=http://u:pw@p.test:3128 user:pw@proxy:3128 --http-header-fields=Authorization: Bearer eyJabc --u:pw@h=1")
+  const joined = r.warnings.join("\n")
+  return [r.warnings, ["pw", "eyJ", "Bearer", "proxy", "p.test", "u:"].filter(frag => joined.indexOf(frag) !== -1)]
+}, [["mpvArg --stream-lavf-o" + Model.MPV_REFUSED_TEXT, "mpvArg <token>" + Model.MPV_REFUSED_JUNK_TEXT], []])
+checkCall("F-UX-7: the refused name is the journal's name (mpvRejectedName), so the two sinks cannot drift", () =>
+  ["--tls-verify=no", "--no-idle", "--u:pw@h=1", "rm", "--Profile=x"].map(t => [Model.mpvRefusedWarnings([t])[0].indexOf("mpvArg " + Model.mpvRejectedName(t)) === 0]),
+  [[true], [true], [true], [true], [true]])
+checkCall("F-UX-7: through Service.playerArgWarnings -- the footer list the guide reads carries the refused token, labelled as the player's", () => {
+  const H = require("./service-harness.js")
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false, mpvArgs: "--tls-verify=no --ytdl=yes" }, stateText: "", host: "lag" })
+  return [h.root.playerArgWarnings, h.compileErrors]
+}, [["Player warning: mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT, "Player warning: mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT], []])
+
+// ---- D-LOGO-19: a cached logo Qt cannot decode is tried once, not on every realisation ----
+// The shell is the only place that knows a file failed the decoder, and it
+// threw that away: both Image slots in Guide.qml bound on Image.Ready and
+// listened for nothing else. Now a failed path is kept for the session and
+// the slots read `have` LESS those names, through the same directory-tagged
+// set logoSlot already refuses anything outside of.
+checkCall("D-LOGO-19: logoFailedPath turns the Image source back into the path the slot named, and nothing else", () =>
+  [Model.logoFailedPath("file:///c/sources/k/logos/abc12345"), Model.logoFailedPath("file://c/x"), Model.logoFailedPath("http://h.test/x.png"),
+   Model.logoFailedPath(""), Model.logoFailedPath(null), Model.logoFailedPath("/c/x")],
+  ["/c/sources/k/logos/abc12345", "", "", "", "", ""])
+checkCall("D-LOGO-19: logoBrokenMark copies, never mutates, and records no empty path", () => {
+  const a = { "/c/logos/one": true }
+  const b = Model.logoBrokenMark(a, "/c/logos/two")
+  const c = Model.logoBrokenMark(b, "")
+  return [a, b, c, Model.logoBrokenMark(null, "/x"), Model.logoBrokenMark({ "/c/stale": false }, "/x")]
+}, [{ "/c/logos/one": true }, { "/c/logos/one": true, "/c/logos/two": true }, { "/c/logos/one": true, "/c/logos/two": true }, { "/x": true }, { "/x": true }])
+checkCall("D-LOGO-19: logoHaveLess drops a name whose file is broken IN THE SET'S DIRECTORY, keeps one broken elsewhere, and leaves a non-set alone", () => {
+  const have = Model.logoHaveSet(["aaa", "bbb"], "/c/sources/k/logos")
+  const broken = { "/c/sources/k/logos/aaa": true, "/c/sources/other/logos/bbb": true }
+  const less = Model.logoHaveLess(have, broken)
+  return [less, Model.logoHaveLess(have, {}), Model.logoHaveLess({}, broken), Model.logoHaveLess(null, broken), Model.logoHaveLess(have, null),
+          // never mutates the set the service binds rows to
+          have.names]
+}, [{ dir: "/c/sources/k/logos", names: { bbb: true } }, { dir: "/c/sources/k/logos", names: { aaa: true, bbb: true } }, {}, null,
+    { dir: "/c/sources/k/logos", names: { aaa: true, bbb: true } }, { aaa: true, bbb: true }])
+checkCall("D-LOGO-19: through logoSlot and wallTile -- the slot a broken file fed answers blank (the wall: the mark) and the other channel's slot still draws, so the join is a call", () => {
+  const dir = "/c/sources/k/logos"
+  const chA = { name: "A", logo: "https://logos.test/a.png" }, chB = { name: "B", logo: "https://logos.test/b.png" }
+  const pathA = Model.logoSlot({ enabled: true, channel: chA, logoDir: dir, have: Model.logoHaveSet([Model.fnv1a32(chA.logo), Model.fnv1a32(chB.logo)], dir) }).path
+  const have = Model.logoHaveSet([Model.fnv1a32(chA.logo), Model.fnv1a32(chB.logo)], dir)
+  const broken = Model.logoBrokenMark({}, Model.logoFailedPath("file://" + pathA))
+  const shown = Model.logoHaveLess(have, broken)
+  return [Model.logoSlot({ enabled: true, channel: chA, logoDir: dir, have: shown }).kind, Model.logoSlot({ enabled: true, channel: chB, logoDir: dir, have: shown }).kind,
+          Model.wallTile({ enabled: true, channel: chA, logoDir: dir, have: shown }).kind, Model.wallTile({ enabled: true, channel: chB, logoDir: dir, have: shown }).kind,
+          // the same name broken in ANOTHER source's directory hides nothing here
+          Model.logoSlot({ enabled: true, channel: chA, logoDir: dir, have: Model.logoHaveLess(have, { ["/c/sources/other/logos/" + Model.fnv1a32(chA.logo)]: true }) }).kind]
+}, ["blank", "image", "mark", "image", "image"])
+
+// ---- D-SRC-12: the 28 code points where the two mirrors' lower-casing disagrees are PINNED ----
+// Each mirror folds a host and a label with its own runtime's tables; the
+// fixture holds both runtimes' whole non-identity lowering tables and the
+// set where they differ. This is the node half: its own table equals the
+// fixture's node table, the diff recomputed from the two tables equals the
+// pinned set, and every pinned code point reaches validateSourceUrl and
+// labelTaken as a call. tests/test_helper.py is the python half. Written
+// only under CASEFOLD_FIXTURE_REWRITE=1 (the node half of the file).
+const casefoldPath = path.join(__dirname, "fixtures/casefold-diff.json")
+const cpName = cp => "U+" + cp.toString(16).toUpperCase().padStart(4, "0")
+function ownLowerTable() {
+  const table = {}
+  for (let cp = 0; cp < 0x110000; cp++) {
+    if (cp >= 0xD800 && cp <= 0xDFFF) continue
+    const ch = String.fromCodePoint(cp)
+    const low = ch.toLowerCase()
+    if (low !== ch) table[cpName(cp)] = Array.from(low).map(c => cpName(c.codePointAt(0))).join(" ")
+  }
+  return table
+}
+function casefoldDiff(py, nd) {
+  const keys = new Set(Object.keys(py).concat(Object.keys(nd)))
+  return Array.from(keys).filter(k => py[k] !== nd[k]).sort((a, b) => parseInt(a.slice(2), 16) - parseInt(b.slice(2), 16))
+}
+checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement set recomputed from the two tables is the pinned 28, and each one reaches validateSourceUrl and labelTaken", () => {
+  const own = ownLowerTable()
+  if (process.env.CASEFOLD_FIXTURE_REWRITE === "1") {
+    const data = fs.existsSync(casefoldPath) ? JSON.parse(fs.readFileSync(casefoldPath, "utf8")) : {}
+    if (!data.python) data.python = { runtime: "", lower: {} }
+    data.node = { runtime: "node " + process.versions.node + ", ICU " + process.versions.icu + ", Unicode " + process.versions.unicode, lower: own }
+    data.diff = casefoldDiff(data.python.lower, own)
+    // sorted keys, as the python writer's sort_keys, so the two writers diff cleanly
+    const sorted = v => (v && typeof v === "object" && !Array.isArray(v)) ? Object.keys(v).sort().reduce((o, k) => { o[k] = sorted(v[k]); return o }, {}) : v
+    fs.writeFileSync(casefoldPath, JSON.stringify(sorted(data), null, 1) + "\n")
+  }
+  const data = JSON.parse(fs.readFileSync(casefoldPath, "utf8"))
+  const py = data.python.lower, nd = data.node.lower
+  const diff = casefoldDiff(py, nd)
+  const ownKeys = Object.keys(own), ndKeys = Object.keys(nd)
+  const tableSame = ownKeys.length === ndKeys.length && ownKeys.every(k => own[k] === nd[k])
+  const reach = diff.map(name => {
+    const ch = String.fromCodePoint(parseInt(name.slice(2), 16))
+    const want = (nd[name] || name).split(" ").map(c => String.fromCodePoint(parseInt(c.slice(2), 16))).join("")
+    const v = Model.validateSourceUrl("http://" + ch + ".test/")
+    return v.ok && v.host === want + ".test" && Model.sourceView({ key: "k", url: v.url, label: "" }, "k", 0, "", false).host === want + ".test"
+      && Model.labelTaken(ch, [want]) === true
+  })
+  return [tableSame, ownKeys.length > 1000, diff.length, diff.indexOf("U+A7CE") !== -1, diff.indexOf("U+16EA0") !== -1,
+          show(diff) === show(data.diff), reach.every(r => r === true), reach.length]
+}, [true, true, 28, true, true, true, true, 28])
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)

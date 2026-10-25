@@ -1448,6 +1448,27 @@ half), the predicate is `Model.urlHostWithheld(text)`, the warning is
 `Model.sourceUrlWarning(text)` placed by `Model.formWarningLine(form)`, and
 the appended error sentence is `Model.validateSourceUrl`'s own.
 
+**Plain http (D-SINK-14, 2026-10-24; not an error, never refuses).** While
+the Playlist, EPG or Server value validates as an `http://` URL, the same
+line shows, once, the owner's sentence `http:// sends the address and any
+password in it unencrypted; https:// does not`
+(`Model.WARN_PLAIN_HTTP`). A LOGO must be `https` by ruling and nothing had
+said what an `http://` playlist costs -- an Xtream username and password
+travel in its query string -- so this is the PO-10 treatment, the disclosure
+where the URL is typed, and not a refusal (PO-5: a large share of real
+providers are http-only). One line: the `@`-typo warning above wins when
+both hold, the error and fetching lines win over either; the form reads
+`Model.formAdviceLine(form)`, which is `Model.formWarningLine(form)` else
+`Model.plainHttpLine(form)`. The README's Sources section carries the same
+fact. Not shown on the Sources row of a stored `http://` source (an owner
+question, open).
+
+| Shape | Validates? | Line |
+|---|---|---|
+| an `http://` value in any URL field (`http://panel.test:8080`, `HTTP://h.test/x`), no `@`-typo shape | yes | `http:// sends the address and any password in it unencrypted; https:// does not` |
+| the same with the `@`-typo shape (`http://user:2024/ab@host.test/x`) | yes | the `@` warning, which wins |
+| `https://`, a path, a value that does not validate | -- | nothing from this rule |
+
 ### 5.5 Fetch results (asynchronous, same line)
 
 | State | String |

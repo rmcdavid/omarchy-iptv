@@ -37,22 +37,37 @@ function warnState(message) {
 // A record whose `url` carries a control character (NUL, CR, ...) is
 // dropped: it would reach the helper's argv and can never match a key
 // (D-SRC-09). A control character in `epgUrl` clears that field only.
-// D-SINK-23, second half, OPEN: this reader keeps a stored `url` AS WRITTEN,
-// where the helper's normalize_source validates it (validate_source_url) and
-// drops one that fails. Every display sink is safe for a pathless or
-// ambiguous URL since round 2, but the two readers still disagree about
-// which records exist. Not adopted in round 3 (the lead's answer to lane S's
-// question): dropping records in the shell's reader is a state-write change
-// in R27 territory, and it waits for its own round.
+//
+// D-SINK-23, second half (PARITY, the lead's ruling, 2026-10-24). This
+// reader used to keep a stored `url` AS WRITTEN, with length and control
+// checks only, where the helper's normalize_source validates it
+// (validate_source_url, origin `cli`) and drops one that fails. A
+// hand-edited state.json -- which the README invites -- could therefore
+// hold a URL the two mirrors read, keyed and redacted differently (an
+// upper-case host, a missing `/`, a default port), and D-SINK-27's lesson
+// is that the two readers must not disagree about what a stored link IS.
+// So the stored `url` is validated here exactly as there: the record keeps
+// the VALIDATED form (`pv.url`, `pv.kind`), and one that does not validate
+// is dropped (parseState journals the drop by key, never by URL). The
+// cost, stated in ARCHITECTURE-SOURCES 2.1: a hand-edited record
+// the shell used to keep (`http://h.test:abc/`, a `./relative` path, a
+// bare host) is dropped by the shell as the helper already dropped it on
+// its next write. `epgUrl` the same way, cleared rather than dropped.
+// Pinned by the shared state-reader-urls fixture on the dev branch, which
+// Model.parseState and the helper's normalize_state both run.
 function normalizeSourceRecord(raw) {
   if (!raw || typeof raw !== "object") return null
   var key = str(raw.key)
   var url = str(raw.url)
   if (!isSourceKey(key) || url === "" || url.length > MAX_SOURCE_URL || hasControlChars(url)) return null
-  var kind = str(raw.kind)
-  if (kind !== "http" && kind !== "file") kind = url.charAt(0) === "/" ? "file" : "http"
+  var pv = validateSourceUrl(url, { origin: "cli" })
+  if (!pv.ok) return null
+  url = pv.url
+  var kind = pv.kind
   var epg = str(raw.epgUrl)
   if (epg.length > MAX_SOURCE_URL || hasControlChars(epg)) epg = ""
+  var ev = validateSourceUrl(epg, { origin: "cli", kind: "epg" })
+  epg = ev.ok ? ev.url : ""
   var origin = str(raw.origin)
   if (SOURCE_ORIGINS.indexOf(origin) === -1) origin = "guide"
   var label = capCodePoints(sanitizeInput(raw.label), MAX_LABEL)
