@@ -1350,6 +1350,14 @@ is "the logo scenario's floor matches its recipe (column-zero ck lines + one per
    "$ldeclared" "$(( $(qa_count '^ck "?[A-Z]' "$LS") + lbombs ))"
 is "check.sh's logo preflight floor matches the scenario's own" \
    "$(grep -oE 'LOGO_PREFLIGHT_MIN:-[0-9]+' "$ROOT/scripts/check.sh" | cut -d- -f2)" "$(( ldeclared + 1 ))"
+# The live arm's W segment (F-M3-18's open half, 2026-10-25): its `ck "W<n>`
+# lines are indented inside two_source_segment so the column-zero recipe
+# above does not count them, and the live floor is the check-tree floor plus
+# exactly that many. Both halves, or a live run is permanently red by the
+# count of a check someone added, or quietly short by one that stopped.
+is "the logo live floor adds exactly the W segment's ck lines to the check-tree floor" \
+   "$(grep -oE '^\[\[ \$MODE == live \]\] && EXPECTED_CHECKS=\$\(\(EXPECTED_CHECKS \+ [0-9]+\)\)$' "$LS" | grep -oE '\+ [0-9]+' | tr -d '+ ')" \
+   "$(qa_count '^ *ck "W[0-9]' "$LS")"
 # D-CLIP-1's scenario (clip-scenario.sh, joined the gate 2026-10-11): the
 # same two joins, and its own recipe -- every assertion is one `ck "P<n>` or
 # `ck "L<n>` line, none in a loop, the probe arm being the P lines.
@@ -2800,7 +2808,10 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # the empty-PATH drive over every scenario and the dirname census (3,
 # F-HARNESS-18 and F-M3-18 (b)). 33 in all, and each section seen red
 # against a9d20f9's run.sh, qa-lib.sh or scenarios (the lane report).
-EXPECTED=548
+# 548 -> 549 on 2026-10-25: the logo live floor's W join (F-M3-18's live
+# segment), seen red with the add line's number moved to 8 (and with one W
+# line deleted) on lane-liveproofs.
+EXPECTED=549
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

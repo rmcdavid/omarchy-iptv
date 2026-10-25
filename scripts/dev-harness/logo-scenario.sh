@@ -108,6 +108,45 @@
 #       decoding (the gate must never decode a bomb on somebody's desktop,
 #       even capped)
 #
+# THE LIVE SEGMENT, W1..W7 (F-M3-18's open half, 2026-10-25). The three
+# lifecycle decisions that lived only in Service.qml -- clearSourceData
+# emptying `logoHave` on a switch, the announced set tagged with the LOGOS
+# directory through Model.logoDirFor, and the count rebuilt from the new
+# source's announced names alone -- observed on the real Service.qml under
+# a nested headless cage of this scenario's own (key-scenario.sh's shape),
+# through the harness shell's exposed `logoCount`, `logoHaveDir` and
+# `logoDir`. Two sources with DISTINCT logo sets, both local files, their
+# logos planted in each source's cache under the name the helper derives
+# (the cached-file branch announces a sound file with no request, so nothing
+# is contacted: every logo host here is .invalid and nothing resolves it);
+# logos switched on over the first, then a switch to the second, then back:
+#
+#   W1  over A, logos on: logoCount == A's 6, and the announced set's tag
+#       IS the directory the guide compares it with (logoHaveDir == logoDir
+#       == <A's cache>/logos, derived by the tree's own Model.logoDirFor)
+#   W2  the FIRST sample after the switch to B whose logoDir is B's reads
+#       logoCount 0 and no tag: the set was emptied in the turn the
+#       directory changed (clearSourceData), before any fetch for B answered
+#   W3  no sample between the switch and the rebuild carries a non-empty set
+#       tagged for a directory other than the one under it
+#   W4  the count rebuilds to B's 4 -- B's announced names only, not A's 6,
+#       not 10 -- tagged for B's logos directory
+#   W5, W6  the same two on the way back to A (0 first, then 6 tagged A)
+#   W7  the shell, the cage and the nested socket are gone at the end
+#
+# Seen red by mutation (rule 11), through `--tree` over a copy of the tree
+# with ONE Service.qml decision broken (the recipe is in README.md under
+# "Logos"): `root.logoHave = ({})` deleted from clearSourceData -> W2, W3
+# and W5 red (the first sample at B's directory still carries A's 6 names
+# tagged for A), 37 passed 3 failed; the tag made `root.activeCacheDir`
+# instead of `Model.logoDirFor(root.activeCacheDir)` -> W1, W3, W4 and W6
+# red (a set tagged for the cache directory, which the guide never compares
+# equal), 36 passed 4 failed; the tree itself 40 passed 0 failed
+# (lane-liveproofs over 0cae446, 2026-10-25, under private-bus.sh). The
+# window W2 reads is narrow: on the tree the first sample at the new
+# directory came about 60 ms after switchSource returned and the rebuilt set
+# one sample later, so the switch loop samples as fast as IPC answers.
+#
 # RULE 11, THE RED RUN. `--baseline 159da94` exports the shipped 0.13.3 and
 # runs its helper through the same rig. Measured 2026-10-11 (recipe and both
 # counts in the footer line the run prints): V1, V2, C1, C2, C3, C4, T2 and K1
@@ -122,20 +161,35 @@
 #
 # MODES. `check-tree` (what scripts/check.sh runs on every commit: no
 # transcript, no network beyond loopback, no display, no bomb decoded, under
-# 20 s) and `live` (the default: a transcript, the same checks, and the
-# --baseline lever). Both need python3, openssl, util-linux prlimit and
-# /usr/lib/qt6/bin/qml; a machine without them exits 77 with the reason,
-# never 0, and the tool checks run BEFORE anything else so the reason is the
-# first line out even with an empty PATH. LOGO_QML_BIN overrides the qml
-# path; it exists so the 77 path can be driven on a machine that has qml.
+# 20 s) and `live` (the default: a transcript, the same checks, the W
+# segment under a nested cage, and the --baseline / --tree levers; `--tree
+# <dir>` takes a prepared plugin tree where --baseline takes a ref). Both
+# need python3, openssl, util-linux prlimit and /usr/lib/qt6/bin/qml; live
+# also needs node, cage, quickshell and qs. A machine without one exits 77
+# with the reason, never 0, and the tool checks run BEFORE anything else so
+# the reason is the first line out even with an empty PATH. LOGO_QML_BIN
+# overrides the qml path and LOGO_CAGE_BIN the cage binary; they exist so
+# the 77 path can be driven on a machine that has both.
 #
-# Holds no display: starts no quickshell, no mpv, sends no keystroke, reads
-# nothing from the live install, touches nothing under ~/.config, ~/.cache or
-# ~/.local/state (the helper is run with HOME and every XDG variable pointed
-# into the scratch directory, and since F-HARNESS-20 the QML probe and the
-# rest of the driver run with a home inside the work directory).
+# Holds no display: check-tree starts no quickshell and no compositor; live
+# starts a nested headless cage of its own (cage's child records the display
+# and the run refuses one that names the caller's session) and the harness
+# shell on THAT display, in this scenario's own harness directory
+# ($XDG_RUNTIME_DIR/omarchy-iptv-logo unless OMARCHY_IPTV_HARNESS_DIR says
+# otherwise, so a display lane's shared harness is never reaped by this one).
+# No mpv, no keystroke, nothing read from the live install, nothing under
+# ~/.config, ~/.cache or ~/.local/state (the helper is run with HOME and
+# every XDG variable pointed into the scratch directory, and since
+# F-HARNESS-20 the QML probe and the rest of the driver run with a home
+# inside the work directory). INT and TERM are trapped into an exit, so
+# cleanup() reaps the shell by its recorded pid and the cage by its child's,
+# the way key-scenario.sh does; the F-HARNESS-18 live proof (a TERM at 6 s
+# in the cage and shell start, a TERM and an INT at 10 s inside the W
+# switch loop with the shell and the cage up, each leaving nothing) is in
+# docs/QA-RESULTS.md.
 set -uo pipefail
 QML_BIN=${LOGO_QML_BIN:-/usr/lib/qt6/bin/qml}
+CAGE_BIN=${LOGO_CAGE_BIN:-cage}
 # RLIMIT_AS, in bytes, on the qml process alone. Address space, not resident
 # set: Qt offscreen maps about 1 GB before it decodes anything, the 840 MB
 # bomb sits under this, and the 65500x65500 header asks for more than the
@@ -150,9 +204,9 @@ case $MODE in
   live|"")
     MODE=live; (( $# )) && shift ;;
   -*) MODE=live ;;
-  *) echo "usage: logo-scenario.sh [check-tree|live] [--baseline <ref>]" >&2; exit 2 ;;
+  *) echo "usage: logo-scenario.sh [check-tree|live] [--baseline <ref>|--tree <dir>]" >&2; exit 2 ;;
 esac
-BASELINE=""
+BASELINE=""; TREE=""
 while (( $# )); do
   case $1 in
     --baseline)
@@ -160,10 +214,14 @@ while (( $# )); do
       # would silently grade the current tree and call it a baseline.
       [[ ${2:-} == "" || ${2:-} == -* ]] && { echo "--baseline needs a git ref, and got '${2:-}'" >&2; exit 2; }
       BASELINE=$2; shift ;;
+    --tree)
+      [[ ${2:-} == "" || ${2:-} == -* ]] && { echo "--tree needs a directory, and got '${2:-}'" >&2; exit 2; }
+      TREE=$2; shift ;;
     *) echo "unknown option $1" >&2; exit 2 ;;
   esac
   shift
 done
+[[ -n $BASELINE && -n $TREE ]] && { echo "--baseline and --tree are the same lever; pass one" >&2; exit 2; }
 
 # ---- refusals, above the transcript (qa-lib.sh item 3) and above every
 # external command: `command -v`, `[[ -x ]]` and `echo` are builtins, so a
@@ -174,6 +232,11 @@ for tool in python3 openssl prlimit; do
   command -v "$tool" >/dev/null 2>&1 || { echo "SKIP logo-scenario: $tool is not on PATH" >&2; exit $SKIP; }
 done
 [[ -x $QML_BIN ]] || { echo "SKIP logo-scenario: $QML_BIN is not here (qt6-declarative)" >&2; exit $SKIP; }
+if [[ $MODE == live ]]; then
+  for tool in node "$CAGE_BIN" quickshell qs; do
+    command -v "$tool" >/dev/null 2>&1 || { echo "SKIP logo-scenario: $tool is not on PATH" >&2; exit $SKIP; }
+  done
+fi
 prlimit --as=$CAP_AS -- true 2>/dev/null \
   || { echo "SKIP logo-scenario: prlimit cannot set an address-space limit of $CAP_AS here" >&2; exit $SKIP; }
 HERE=${BASH_SOURCE[0]%/*}
@@ -186,9 +249,22 @@ for f in make-corpus.py serve-and-fetch.py probe-tmpl.qml peakrun.py; do
 done
 # shellcheck source=scripts/qa-lib.sh
 . "$ROOT/scripts/qa-lib.sh"
-HELPER="$ROOT/bin/omarchy-iptv"
+RUN="$HERE/run.sh"
+REAL_RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
+LIVE_DISPLAY=${WAYLAND_DISPLAY:-wayland-1}
+# This scenario's OWN harness directory (the W segment's shell, and the
+# transcript beside it), never the shared default: key-scenario.sh's shape.
+SCRATCH=${OMARCHY_IPTV_HARNESS_DIR:-$REAL_RUNTIME/omarchy-iptv-logo}
+export OMARCHY_IPTV_HARNESS_DIR=$SCRATCH
+PLUGIN_ROOT=$ROOT
 EXPORT_DIR=""
 TREE_LINE="== tree $ROOT ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo no-git))"
+if [[ -n $TREE ]]; then
+  PLUGIN_ROOT=$(cd "$TREE" 2>/dev/null && pwd) || { echo "--tree $TREE is not a directory I can enter" >&2; exit 2; }
+  [[ -f $PLUGIN_ROOT/Service.qml && -f $PLUGIN_ROOT/bin/omarchy-iptv ]] && qa_model_files "$PLUGIN_ROOT" >/dev/null \
+    || { echo "--tree $PLUGIN_ROOT is not a plugin tree (no Service.qml / readable model / bin/omarchy-iptv)" >&2; exit 2; }
+  TREE_LINE="== prepared tree $PLUGIN_ROOT"
+fi
 if [[ -n $BASELINE ]]; then
   git -C "$ROOT" rev-parse --verify -q "$BASELINE^{commit}" >/dev/null \
     || { echo "--baseline '$BASELINE' does not resolve to a commit in this repository" >&2; exit 2; }
@@ -198,9 +274,10 @@ if [[ -n $BASELINE ]]; then
     echo "could not export $BASELINE" >&2; rm -rf "$EXPORT_DIR"; exit 2
   fi
   [[ -f $EXPORT_DIR/bin/omarchy-iptv ]] || { echo "$BASELINE holds no bin/omarchy-iptv" >&2; rm -rf "$EXPORT_DIR"; exit 2; }
-  HELPER="$EXPORT_DIR/bin/omarchy-iptv"
+  PLUGIN_ROOT=$EXPORT_DIR
   TREE_LINE="== baseline tree $BASELINE ($(git -C "$ROOT" rev-parse --short "$BASELINE")) exported to $EXPORT_DIR"
 fi
+HELPER="$PLUGIN_ROOT/bin/omarchy-iptv"
 
 if [[ $MODE == live ]]; then
   # CLAUDE.md parallel rule 7, and F-M3-1: the evidence does not live in
@@ -214,11 +291,25 @@ echo "== mode $MODE   helper $HELPER   rlimit AS=$CAP_AS bytes on the qml proces
 
 WORK=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-iptv-logo.XXXXXX") || exit 2
 chmod 0700 "$WORK"
+T_START=$(date +%s.%N)
+elapsed() { python3 -c 'import sys; print("%.1f" % (float(sys.argv[1]) - float(sys.argv[2])))' "$(date +%s.%N)" "$T_START"; }
 OWN_WORK=1
+# Every process the W segment starts, by the pid bash handed it or the pid
+# the process wrote itself (cage's child, run.sh's qs.pid). Nothing is found
+# by a pattern that could match this shell (parallel rule 3).
+CAGE_PID=""; CAGE_CHILD=""; SHELL_STARTED=0; SHELL_PID=""; NESTED=""
 cleanup() {
   (( OWN_WORK )) || return
+  # The shell by its recorded pid (run.sh reap: TERM, a bound, KILL), then
+  # cage by its CHILD -- a TERM to cage itself is ignored for 10 s and
+  # leaves a stale socket (docs/SPIKE-CAGE-HEADLESS.md) -- so a TERM or an
+  # INT landing inside the W segment strands neither (F-HARNESS-18).
+  (( SHELL_STARTED )) && env -u HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY="$NESTED" "$RUN" reap >/dev/null 2>&1
+  [[ -n $CAGE_CHILD ]] && kill -TERM "$CAGE_CHILD" 2>/dev/null
+  if [[ -n $CAGE_PID ]] && kill -0 "$CAGE_PID" 2>/dev/null; then kill -TERM "$CAGE_PID" 2>/dev/null; wait "$CAGE_PID" 2>/dev/null; fi
   [[ -n ${WORK:-} && -d $WORK ]] && rm -rf "$WORK"
   [[ -n ${EXPORT_DIR:-} && -d $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"
+  return 0
 }
 trap cleanup EXIT
 # A signal while this shell waits on a foreground child runs no EXIT trap;
@@ -234,8 +325,16 @@ trap 'exit 143' TERM
 # 2026-10-13, this check-tree left a Qt cache ("QtProject/Qml Runtime") and an
 # fcitx directory in the decoy -- on an ordinary run, the developer's real
 # ~/.cache and ~/.config, on every gate run. The whole driver now has a home
-# inside WORK, which cleanup() removes.
-qa_harness_home "$WORK" || exit 2
+# inside WORK, which cleanup() removes -- in check-tree, the gate's arm, so a
+# gate step leaves no file behind. The live arm drives run.sh (the W
+# segment's shell, the helper that seeds its caches), so its home is the
+# harness directory's, the way every other driver of run.sh has it
+# (tests/test_harness_home.py pins the call by its argument).
+if [[ $MODE == live ]]; then
+  qa_harness_home "$SCRATCH" || exit 2
+else
+  qa_harness_home "$WORK" || exit 2
+fi
 
 PASS=0; FAIL=0
 pass() { PASS=$((PASS+1)); echo "PASS $1"; }
@@ -417,6 +516,188 @@ else
 fi
 ck "K2 $SINK_BOMB at the sink" "$k2" "withheld-and-gone"
 
+# ------------------------------------------------- the W segment (live only)
+# The real Service.qml under a nested headless cage of this scenario's own,
+# driven over IPC through the harness shell: key-scenario.sh's cage_start /
+# cage_stop / start_shell / stop_shell shapes, trimmed to what one switch
+# needs. Every value asserted is read off the running shell (`ipc state`:
+# the guide's `logoCount`, `logoHaveDir`, `logoDir`), never off a file.
+h()    { env -u HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY="$NESTED" "$RUN" "$@"; }
+ipc()  { h ipc "$@" 2>/dev/null; }
+svc()  { qa_field "d$1" "$(ipc state)"; }
+# One state read, three fields: "<logoDir>|<logoHaveDir>|<logoCount>", with
+# None for a tag that is not there ({} is "nothing announced"); NOSTATE when
+# the shell did not answer.
+logo_sample() { qa_guide_field "'%s|%s|%s' % (d.get('logoDir'), d.get('logoHaveDir'), d.get('logoCount'))" "$(ipc state)"; }
+# The tree under test's own joins, called and not mirrored (rule 12): the
+# key a path gets, the logo directory a cache directory gets, and the file
+# name a logo URL gets -- the helper's logo_filename is fnv1a32(url), and the
+# model's fnv1a32 matches it byte for byte (bin/helper/01-core.py). The
+# first file qa_model_files names is the aggregator node requires.
+model_file() { qa_model_files "$PLUGIN_ROOT" | head -n 1; }
+key_of() { node -e 'const M = require(process.argv[1]); const n = M.normalizeSourceUrl(process.argv[2], { origin: "cli" }); process.stdout.write(n === "" ? "" : M.sourceKey(n))' "$(model_file)" "$1"; }
+logo_dir_of() { node -e 'const M = require(process.argv[1]); process.stdout.write(M.logoDirFor(process.argv[2]))' "$(model_file)" "$1"; }
+logo_name_of() { node -e 'const M = require(process.argv[1]); process.stdout.write(M.fnv1a32(process.argv[2]))' "$(model_file)" "$1"; }
+record() {
+  local key=$1 url=$2 label=$3 count=$4
+  python3 -c 'import json, sys; print(json.dumps({"key": sys.argv[1], "url": sys.argv[2], "epgUrl": "", "kind": "file", "label": sys.argv[3], "labelCustom": False, "origin": "cli", "addedAt": 1799990000, "lastUsed": 1799990000, "fetchedAt": 1799990000, "channelCount": int(sys.argv[4]), "groupCount": 1}))' "$key" "$url" "$label" "$count"
+}
+# A playlist of N channels whose logos live on one .invalid host: nothing
+# resolves it, and nothing needs to -- every logo is planted below.
+write_playlist() {
+  local out=$1 host=$2 tag=$3 n=$4 i
+  {
+    echo "#EXTM3U"
+    for ((i = 1; i <= n; i++)); do
+      printf '#EXTINF:-1 tvg-id="%s%d" tvg-logo="https://%s/%d.png" group-title="%s",%s %d\n' "$tag" "$i" "$host" "$i" "$tag" "$tag" "$i"
+      printf 'http://127.0.0.1:9/dead/%s%d.m3u8\n' "$tag" "$i"
+    done
+  } >"$out"
+}
+# Plant the within-bound control (good-512.png, canonical: IHDR, IDAT, IEND)
+# under the name the helper derives for each logo URL of a playlist, 0600 in
+# a 0700 logos directory, so `logos --fetch` finds every one on disk and
+# announces it from the cached-file branch with no request.
+plant_logos() {
+  local playlist=$1 logo_dir=$2 url name
+  mkdir -p "$logo_dir" && chmod 0700 "$logo_dir"
+  while IFS= read -r url; do
+    name=$(logo_name_of "$url")
+    cp "$CORPUS/$GOOD" "$logo_dir/$name" && chmod 0600 "$logo_dir/$name"
+  done < <(grep -o 'tvg-logo="[^"]*"' "$playlist" | cut -d'"' -f2)
+}
+cage_start() {
+  local secs=$1 i
+  rm -f "$WORK/display" "$WORK/child.pid"
+  cat >"$WORK/child.sh" <<CHILD
+#!/bin/bash
+echo "\$WAYLAND_DISPLAY" >"$WORK/display"
+echo \$\$ >"$WORK/child.pid"
+exec sleep $secs
+CHILD
+  chmod 0700 "$WORK/child.sh"
+  env -u WAYLAND_DISPLAY -u DISPLAY WLR_BACKENDS=headless WLR_RENDERER=pixman WLR_LIBINPUT_NO_DEVICES=1 \
+    timeout -k 5 $((secs + 10)) "$CAGE_BIN" -- "$WORK/child.sh" >"$WORK/cage.log" 2>&1 &
+  CAGE_PID=$!
+  for ((i = 0; i < 100; i++)); do [[ -s $WORK/display && -s $WORK/child.pid ]] && break; sleep 0.1; done
+  NESTED=$(cat "$WORK/display" 2>/dev/null)
+  CAGE_CHILD=$(cat "$WORK/child.pid" 2>/dev/null)
+  if [[ -z $NESTED || -z $CAGE_CHILD ]]; then
+    echo "SKIP logo-scenario: cage did not bring up a nested display within 10 s ($(tr '\n' ' ' <"$WORK/cage.log" | head -c 300))" >&2
+    exit $SKIP
+  fi
+  if [[ $NESTED == "$LIVE_DISPLAY" || $NESTED == wayland-1 ]]; then
+    echo "REFUSING: cage's child reports display '$NESTED', which is the live session; nothing will be driven" >&2
+    exit 2
+  fi
+}
+STOP_VERDICT=""
+cage_stop() {
+  local i left=""
+  [[ -n $CAGE_CHILD ]] && kill -TERM "$CAGE_CHILD" 2>/dev/null
+  for ((i = 0; i < 50; i++)); do kill -0 "$CAGE_PID" 2>/dev/null || break; sleep 0.1; done
+  if kill -0 "$CAGE_PID" 2>/dev/null; then left="$left cage($CAGE_PID)"; kill -KILL "$CAGE_PID" 2>/dev/null; fi
+  wait "$CAGE_PID" 2>/dev/null; CAGE_PID=""; CAGE_CHILD=""
+  for ((i = 0; i < 20; i++)); do [[ -e $REAL_RUNTIME/$NESTED ]] || break; sleep 0.1; done
+  [[ -e $REAL_RUNTIME/$NESTED ]] && left="$left socket($NESTED)"
+  [[ -z $left ]] && STOP_VERDICT=gone || STOP_VERDICT="left:$left"
+}
+# Bounded 20 s; a shell that never settles is reported, not waited on.
+start_shell() {
+  h --detach --timeout 0 --keep "$@" >"$WORK/start.log" 2>&1
+  SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
+  local i
+  for ((i = 0; i < 200; i++)); do
+    [[ $(svc "['stateLoaded']") == true && $(svc "['cacheReady']") == true ]] && return 0
+    sleep 0.1
+  done
+  echo "   the shell (pid $SHELL_PID) did not settle within 20 s: $(tail -n 3 "$WORK/start.log" | tr '\n' ' ')"
+  return 1
+}
+stop_shell() {
+  h shell-stop >/dev/null 2>&1; local i
+  for ((i = 0; i < 50; i++)); do kill -0 "$SHELL_PID" 2>/dev/null || break; sleep 0.1; done
+  SHELL_STARTED=0; [[ -z $SHELL_PID ]] || kill -0 "$SHELL_PID" 2>/dev/null && echo "   the shell $SHELL_PID outlived shell-stop" || true
+}
+# wait_for <want> <secs> <cmd...>: until cmd prints want; says when it gave up.
+wait_for() {
+  local want=$1 secs=$2; shift 2
+  local i
+  for ((i = 0; i < secs * 10; i++)); do [[ $("$@") == "$want" ]] && return 0; sleep 0.1; done
+  echo "   gave up waiting ${secs}s for '$want' from: $*"
+  return 1
+}
+# switch_and_sample <key> <want-dir> <want-count>: ask for the switch, then
+# read the shell as fast as IPC answers until the set has rebuilt for the
+# directory asked for (or 15 s). Leaves FIRST (the first sample whose
+# logoDir is the wanted one), STRAY (every sample carrying a non-empty set
+# tagged for a directory other than the one under it) and LAST.
+FIRST=""; STRAY=""; LAST=""; SAMPLES=0
+switch_and_sample() {
+  local key=$1 want_dir=$2 want_count=$3 i smp dir have count
+  FIRST=""; STRAY=""; LAST=""; SAMPLES=0
+  ipc switchSource "$key" >/dev/null
+  for ((i = 0; i < 300; i++)); do
+    smp=$(logo_sample); SAMPLES=$((SAMPLES + 1))
+    dir=${smp%%|*}; have=${smp#*|}; have=${have%%|*}; count=${smp##*|}
+    [[ -z $FIRST && $dir == "$want_dir" ]] && FIRST=$smp
+    [[ $count =~ ^[0-9]+$ && $count -gt 0 && $have != "$dir" ]] && STRAY="$STRAY [$smp]"
+    LAST=$smp
+    [[ $dir == "$want_dir" && $have == "$want_dir" && $count == "$want_count" ]] && return 0
+    sleep 0.05
+  done
+  return 1
+}
+two_source_segment() {
+  local A B KA KB DIR_A DIR_B LOGOS_A LOGOS_B CACHE STATE smp i
+  echo "== W: two sources, two logo sets, one switch each way, on the real Service.qml under cage (plugin tree $PLUGIN_ROOT) ($(elapsed) s)"
+  cage_start 300
+  # The stub compositor in front of PATH and HYPRLAND_INSTANCE_SIGNATURE
+  # unset (h): the service's hyprctl probe stops at the stub and nothing can
+  # reach the user's compositor from here (pip- and key-scenario's shape).
+  mkdir -p "$SCRATCH/bin" && ln -sfn "$HERE/stub-hyprctl.py" "$SCRATCH/bin/hyprctl"
+  export OMARCHY_IPTV_PLUGIN_ROOT=$PLUGIN_ROOT
+  h reap >/dev/null 2>&1; h clean >/dev/null 2>&1
+  CACHE="$SCRATCH/cache/omarchy-iptv"; STATE="$SCRATCH/state/omarchy-iptv/state.json"
+  A="$WORK/a-six.m3u"; B="$WORK/b-four.m3u"
+  write_playlist "$A" logos-a.invalid A 6
+  write_playlist "$B" logos-b.invalid B 4
+  KA=$(key_of "$A"); KB=$(key_of "$B")
+  DIR_A="$CACHE/sources/$KA"; DIR_B="$CACHE/sources/$KB"
+  LOGOS_A=$(logo_dir_of "$DIR_A"); LOGOS_B=$(logo_dir_of "$DIR_B")
+  mkdir -p "$DIR_A" "$DIR_B" "$(dirname "$STATE")"
+  chmod 0700 "$CACHE" "$CACHE/sources" "$DIR_A" "$DIR_B" "$(dirname "$STATE")"
+  python3 "$HELPER" playlist --url "$A" --cache-dir "$DIR_A" >/dev/null 2>&1
+  python3 "$HELPER" playlist --url "$B" --cache-dir "$DIR_B" >/dev/null 2>&1
+  [[ -f $DIR_A/channels.json && -f $DIR_B/channels.json ]] || echo "   the helper did not write the two caches"
+  plant_logos "$A" "$LOGOS_A"; plant_logos "$B" "$LOGOS_B"
+  printf '{"version":2,"cacheLayout":2,"favorites":[],"recents":[],"lastPlayed":null,"session":null,"sources":[%s,%s],"savedSearches":[],"hiddenGroups":[],"activeKey":"%s","entryMigrated":true}\n' \
+    "$(record "$KA" "$A" "a-six" 6)" "$(record "$KB" "$B" "b-four" 4)" "$KA" >"$STATE"
+  chmod 0600 "$STATE"
+  echo "   keys: A $KA (6 logos planted in $LOGOS_A)  B $KB (4 in $LOGOS_B)"
+  start_shell --playlist none --source-key "$KA" || true
+  wait_for 6 10 svc "['channels']" >/dev/null || true
+  ipc set showLogos true >/dev/null
+  # The first fetch: the planted names announced from the cached-file
+  # branch; bounded 15 s, the last sample is what W1 reads either way.
+  for ((i = 0; i < 150; i++)); do smp=$(logo_sample); [[ ${smp##*|} == 6 ]] && break; sleep 0.1; done
+  ck "W1 over A with logos on (dir|tag|count)" "$smp" "$LOGOS_A|$LOGOS_A|6"
+  switch_and_sample "$KB" "$LOGOS_B" 4 || true
+  echo "   switch A->B: $SAMPLES samples; first at B's directory [$FIRST]; last [$LAST]"
+  ck "W2 the first sample at B's directory: the set is EMPTY (dir|tag|count)" "$FIRST" "$LOGOS_B|None|0"
+  ck "W3 samples carrying a set tagged for another directory than the one under it" "${STRAY:-none}" "none"
+  ck "W4 the set rebuilt from B's announced names alone (dir|tag|count)" "$LAST" "$LOGOS_B|$LOGOS_B|4"
+  switch_and_sample "$KA" "$LOGOS_A" 6 || true
+  echo "   switch B->A: $SAMPLES samples; first at A's directory [$FIRST]; last [$LAST]"
+  ck "W5 the first sample back at A's directory: the set is EMPTY (dir|tag|count)" "$FIRST" "$LOGOS_A|None|0"
+  ck "W6 the set rebuilt from A's announced names alone (dir|tag|count)" "$LAST" "$LOGOS_A|$LOGOS_A|6"
+  stop_shell
+  cage_stop
+  ck "W7 the shell, the cage and the nested socket at the end" "$STOP_VERDICT$([[ -n $SHELL_PID ]] && kill -0 "$SHELL_PID" 2>/dev/null && echo " shell($SHELL_PID)")" "gone"
+  echo "== W segment done ($(elapsed) s)"
+}
+[[ $MODE == live ]] && two_source_segment
+
 # The floor. A check that stops executing must turn the run red rather than
 # quietly shorten the summary (D-PLY-9). Recount with
 #   grep -cE '^ck "?[A-Z]' logo-scenario.sh    -> 22, the column-zero ck calls
@@ -432,6 +713,10 @@ ck "K2 $SINK_BOMB at the sink" "$k2" "withheld-and-gone"
 # (C4). scripts/check.sh's LOGO_PREFLIGHT_MIN is this plus one, and
 # scripts/qa-lib-test.sh asserts that join.
 EXPECTED_CHECKS=32
+# The live arm adds the W segment: the `ck "W<n>` lines inside
+# two_source_segment, indented so the column-zero recipe above does not count
+# them; scripts/qa-lib-test.sh asserts this number against that count.
+[[ $MODE == live ]] && EXPECTED_CHECKS=$((EXPECTED_CHECKS + 7))
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then
   pass "the scenario ran every check it has ($ran)"
@@ -441,6 +726,7 @@ fi
 
 if [[ -n $BASELINE ]]; then
   echo "baseline $BASELINE: P1..P10, S1, G1, F1, F2, R1, R2, R3, E1, E2, E3, M1, M2, T1 and K2 are expected RED here -- that helper announces and writes every bomb, sweeps nothing, reports neither bound and has no refusal function; K2's line carries what the Image did with the announced 304 bytes. V1, V2, C1, C2, C3, C4, T2 and K1 pass on both trees: they are controls, not discriminators."
+  echo "baseline $BASELINE: W1..W6 are expected RED on a tree from before D-LOGO-11 (no tagged set, no logoHaveDir) and read for information only; W7 is a control."
 fi
 echo "logo-scenario: $PASS passed, $FAIL failed (mode $MODE, helper $HELPER${BASELINE:+, baseline $BASELINE})"
 (( FAIL == 0 ))
