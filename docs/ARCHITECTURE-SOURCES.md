@@ -239,7 +239,7 @@ marker, the downgrade the D-SINK-19 ruling accepts. Pinned through
 `tests/service-harness.js` on both hosts and both echo modes, the review's
 `Q4 heldExposed` sequence among them, and in the model; red on fe40b2c]. The
 first version of this paragraph said the step "creates no record and deletes
-none"; that was false against the code and is withdrawn. "Must not lose a
+none"; that was false against the code and is **WITHDRAWN 2026-10-11**. "Must not lose a
 source" (SR38) is graded as "keeps the count it went in with" over a two-source
 state, one active and one not. The adopted key is written INTO the state
 (`Model.withActiveKey`), the state is saved, and the entry is rewritten with
@@ -493,7 +493,7 @@ acceptance rule, no control character ever types) and a paste through
    Xtream `/playlist/<email>/<pass>/m3u_plus` link and a WebDAV link on a
    non-default port, both stored and working, and the helper dropped such a
    source on the first normalize after the upgrade (D-SINK-27); it is
-   withdrawn. The display sinks (`hostPortOf`, `deriveLabel`, `sourceLabel`,
+   **WITHDRAWN 2026-10-22 (D-SINK-27)**. The display sinks (`hostPortOf`, `deriveLabel`, `sourceLabel`,
    `hostOf`) and validation show and use the RFC host, so a stored
    `http://host.test:25461/playlist/me@mail.test/pw/m3u_plus` resolves,
    normalizes and labels as `host.test:25461` exactly as before -- and the
@@ -1170,7 +1170,7 @@ on every owned write, heal and patch alike, and hands the answer to
 `Model.entryWith` as `keep`: every retired key the entry carries while the
 migration marker has not landed, none once it has. The two round-7 snapshots,
 the R19b held guide URL, R20b's slot marking after each write and R20c's
-landed-state patch rule are withdrawn (R21d), and the paragraphs above that
+landed-state patch rule are **WITHDRAWN 2026-10-13 (round 11, R21d)**, and the paragraphs above that
 describe them stand as the record of rounds 7-10. What the plugin does with
 a value found on the entry after the marker is not this funnel's question:
 `reconcile` refuses and reports it (R21b) and `stripEntryInputs` asks for
@@ -6615,7 +6615,7 @@ change is dropped; and two load-dependent sentences in the harness README.
 **The lead's ruling, R28 (2026-10-20), replacing the parts of R27 they
 break.**
 
-R28a [WITHDRAWN by R29a, round 19]. A STALLED READ IS NOT A NO-WRITE BLOCK. After a silent read the save
+R28a **[WITHDRAWN 2026-10-20 by R29a, round 19]**. A STALLED READ IS NOT A NO-WRITE BLOCK. After a silent read the save
 STAYS PARKED with memory as the authority; the read is retried on a bounded
 backoff (the schedule stated); there is never a blind write and never a
 drop; when a read answers, R26a's dispositions decide (the base -> write;

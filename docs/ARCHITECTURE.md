@@ -609,11 +609,11 @@ before write:
   asks for the load once more, and a second silence puts the session in the
   R22 no-write mode with reason `read-timeout`, told once (`Saving has
   stopped`, `... did not answer when it was read before a save (twice, 2
-  seconds each)`), lifted by a later read that answers [round 18, R28a: no
+  seconds each)`), lifted by a later read that answers [round 18, 2026-10-20, R28a: no
   longer -- the lift lost the held change; a silent read now keeps it held
-  and reads again, the amendment below] [round 19, R29a: and that is
-  withdrawn too -- a silent read's save goes ahead without it after 2 s,
-  the last amendment below]. What remains is
+  and reads again, the amendment below] **[round 19, 2026-10-20, R29a: and that is
+  WITHDRAWN too -- a silent read's save goes ahead without it after 2 s,
+  the last amendment below]**. What remains is
   window (b), a re-point landing between the read's load and the write it
   allows, a turn apart: milliseconds, stated in `Model.stateSavePlan`'s
   comment and the README. Pinned through the node double over the shipping
@@ -1514,7 +1514,7 @@ now, with each decision lifted into `Model.js` so node can call it (rule 12):
   and moves the service's snapshot (on the one-write-behind host the published
   entry falls back to the previous stored one, which carries no URL; on the
   echoing host, omacom/omarchy#15082, the snapshot is `""` at once), so the
-  re-set value differs from the snapshot and is adopted. Withdrawn 2026-10-12
+  re-set value differs from the snapshot and is adopted. **WITHDRAWN 2026-10-12**
   from every document that carried it; measured at the Model layer in node,
   not live.
 - An input is never stripped unadopted (R12, round 3). An `epgUrl` set while
@@ -1834,8 +1834,8 @@ kind), through which every comparison of an entry value goes -- reconcile's
 disagree; its search found a sibling, an EPG of control characters alone
 that emptied the active record's guide URL. R18b: a write that changes
 nothing changes nothing -- the funnel declines a write the host would
-answer `false` to (`entryWriteNeeded` in model/settings.mjs [withdrawn by
-R19a in round 9 and deleted by R22e in round 12], estimating the stored entry
+answer `false` to (`entryWriteNeeded` in model/settings.mjs **[WITHDRAWN 2026-10-12 by
+R19a in round 9; deleted 2026-10-13 by R22e in round 12]**, estimating the stored entry
 from its own last write while the publish has not moved, never waiting for
 an echo) and reassigns the own-write record only when it differs
 (`Model.sameOwnWrite`). R18c: quiescence is a check -- the node driver runs
@@ -2031,9 +2031,9 @@ NOT closed. Three things remain, and the first is the one to quote:
    DIGEST of each bar-entry input the service consumed (`entryInputs`,
    R20b), a refused one included -- a confirmation oracle of the same
    kind for that value, in the plugin's own private file rather than in
-   `shell.json`, and never a way back to it.] [Round 11: no longer --
-   `entryInputs` is withdrawn (R21d), and what the session has handled is
-   held in memory only.]
+   `shell.json`, and never a way back to it.] **[Round 11, 2026-10-13: no longer --
+   `entryInputs` is WITHDRAWN (R21d), and what the session has handled is
+   held in memory only.]**
 2. *The input path.* `omarchy bar set ... playlistUrl` is still supported and
    is still a write of a credential into that file, made by the host on the
    user's instruction, at a moment the plugin cannot gate. The plugin removes
@@ -2129,10 +2129,10 @@ holds was re-carried, and no owned write followed, so it stayed for the
 session and replaced a later edit at the next start. R20c is that correct
 narrowing, deciding from the state the last landed save serialised, and
 R20b closes the restart half. D-SINK-20 is closed as filed, the board's
-state the lead's; `ARCHITECTURE-SOURCES.md` round-10 rulings.] [Round 11: and after the migration it cannot happen at all -- the
+state the lead's; `ARCHITECTURE-SOURCES.md` round-10 rulings.] **[Round 11, 2026-10-13: and after the migration it cannot happen at all -- the
 patch-only write keeps no retired key once the marker has landed (R21b;
 node `R21e (...) a refused value is stripped by the logo toggle's
-patch-only write too`). R20c's landed-state rule is withdrawn with it.]
+patch-only write too`). R20c's landed-state rule is WITHDRAWN with it.]**
 
 **The costs, accepted by the product owner on 2026-10-09 before the work was
 briefed, restated after the review as what the code does.** (1) `omarchy bar
@@ -4423,7 +4423,7 @@ and security.
 | R7 | Bar widget | Glyph per state, never color-only: idle U+F0502, playing U+F0567, error U+F0503. On horizontal bars, when `showChannelName`, the name is elided at `Style.space(barLabelMaxWidth)`; vertical bars show the glyph only; the tooltip carries the full name and status (UX 6.3). Left click toggles the guide, right click stops, middle click refreshes, wheel zaps one step per tick via `Util.wheelSteps`. |
 | R8 | Model fields the guide binds | **AMENDED 2026-09-24: `failedAt` is no longer session-only and no longer HH:MM.** It is an epoch second, it persists in the per-source cache (`sources/<key>/failed.json`, not `state.json`), and the row renders it as a clock for a failure today and a date for an older one. The rest of the row stands. Original: Per UX 8.1: per channel `favorite`, `playing` (exactly one true), `failedAt` (session-only HH:MM), `epgNow {title, start, stop}`, `epgNext {title}`, `epgFraction` recomputed on a 30 s tick. Guide state: `mode`, `query`, `scopeId`, `cursorIndex`, `status` (ready, loading, refreshing, cached, error), `statusReason`, `statusHost`, `lastUpdated`, `bannerKind`, `resultTotal`, `nowPlaying {name, group, launchedFrom}`. |
 | R9 | Service actions and IPC | Service: `play(id, keepOpen)`, `stop()`, `toggleFavorite(id)`, `removeRecent(id)`, `refresh()`, `zap(delta)` over the zap ring (the list the channel was launched from, UX 3.4; Recent is never a ring), `focusPlayer()` = argv `["hyprctl", "dispatch", "focuswindow", "class:omarchy-iptv"]`. `IpcHandler` verbs: `toggle`, `play`, `stop`, `next`, `previous` (rename `prev`), `refresh`, `status`. |
-| R10 | mpv ownership | **WITHDRAWN: M2-02 detached the player (`docs/ARCHITECTURE-PLAYER.md` records "R10 closed"), and the README no longer states the limitation.** Left here with its marker because an unamended withdrawn ruling sat in this table for two milestones with its QA traceability row still asserting it, which is what this marker exists to stop. Original: Decision 2 stands for M1: attached `Process`, so mpv exits with the shell. The PM's detached-mpv mitigation (risk R3) is deferred to M2. The README documents the limitation. |
+| R10 | mpv ownership | **WITHDRAWN, marked 2026-09-24: M2-02 detached the player (`docs/ARCHITECTURE-PLAYER.md` records "R10 closed"), and the README no longer states the limitation.** Left here with its marker because an unamended withdrawn ruling sat in this table for two milestones with its QA traceability row still asserting it, which is what this marker exists to stop. Original: Decision 2 stands for M1: attached `Process`, so mpv exits with the shell. The PM's detached-mpv mitigation (risk R3) is deferred to M2. The README documents the limitation. |
 | R11 | Stream failure | **AMENDED 2026-09-24 by the product owner: the mark PERSISTS.** Non-zero exit without a user stop: notification per UX 6.4, a `failedAt` epoch on the channel stored in that source's cache, alert glyph on its row. The mark is dropped when the channel next plays, when its id is absent from the current playlist, when it ages out, and when the source is removed. It is deliberately NOT in `state.json`: channel ids are global across sources, so a state-level map would mark another provider's working channel, and it would fall inside D-ID-1's id-rotation blast radius, which that defect's row records as excluded precisely because this was session-only. Original ruling: session-only `failedAt` on the channel. |
 | R12 | Notifications and privacy | Manual refresh (`r`, middle click, IPC `refresh`) notifies on success and failure; timer refresh notifies only on failure. Never render a playlist or EPG URL beyond scheme and host anywhere: guide, tooltip, notification, console. |
 | R13 | Animation and placement | No open/close animation (UX 5.8). The overlay leaves `screen` unset so Hyprland maps it on the focused monitor. |

@@ -52,6 +52,15 @@
 #                                and nothing mandatory between them, the
 #                                shape maskUrl shipped and two reviews
 #                                cleared; D-PERF-11, lane H2's grader)
+#  15. README notice join        (scripts/check-readme-notices.py: every
+#                                capitalised backticked notice the README
+#                                quotes is a shipped literal, a named
+#                                composer's output with the real constants,
+#                                or an elided prefix of one; F-HARNESS-35)
+#  16. SR ruling register        (scripts/check-sr-register.py: every SRn
+#                                cited in a tracked file has a row in
+#                                ARCHITECTURE-SOURCES's register and every
+#                                row is cited at least once; F-M3-20)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
@@ -585,7 +594,17 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-2993}
 # carriage-return fixtures under .gitattributes, F-HARNESS-34) and
 # tests/test_split_model.py (+3: the manifest's name lists as a checked
 # record, F-GATE-10); each seen red on a9d20f9 (the lane report).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1506}
+# 2026-10-24, lane-p23-docs: 1496 -> 1521 -- tests/test_check_sr_register.py
+# (+13, F-M3-20; red on a9d20f9: three register rows cited nowhere outside
+# the register -- their ids are NOT written here, this file is in the
+# corpus that checker scans) and tests/test_check_readme_notices.py (+12,
+# F-HARNESS-35; red on a9d20f9: README.md:767 and :776). Both run the
+# shipping checker, never a copy. The first version of this raise was a
+# SECOND `${PY_TESTS_MIN:-1518}` line left below the old `:-1496` one; a
+# `${X:-n}` default binds only while X is unset, so the first line won and
+# the gate's floor stayed 1496 with both new test files deletable (P23
+# recheck, 2026-10-24). One assignment per floor, edited in place.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1521}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -685,6 +704,18 @@ TRIM_GUARD_FILES_MIN=${TRIM_GUARD_FILES_MIN:-22}
 # 22 files and every regex literal the trim guard reads (68 on this tree);
 # fewer literals means its scanner stopped seeing some of them.
 MODEL_REGEX_LITERALS_MIN=${MODEL_REGEX_LITERALS_MIN:-60}
+# F-HARNESS-35 (2026-10-24, lane-p23-docs): the README notice join reads 28
+# backticked notices from README.md and joins 19 (14 exact, 2 composed, 3
+# elided; 9 skipped as key chords or a command, each printed). Fewer joined
+# means the extraction stopped seeing quotes, not that the README improved.
+README_NOTICES_MIN=${README_NOTICES_MIN:-19}
+# F-M3-20 (2026-10-24, lane-p23-docs): the SR register holds 40 rows, the
+# one count the gate reads from the checker's summary line (its citation
+# and file counts are printed, never floored, and the first version of
+# this comment quoted two of them that the tree no longer read); fewer
+# rows means the register table moved out from under the row regex,
+# which is the failure this guards.
+SR_REGISTER_ROWS_MIN=${SR_REGISTER_ROWS_MIN:-40}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -1487,6 +1518,59 @@ if python3 "$ROOT/scripts/check-model-regex.py" >"$model_regex_log" 2>&1; then
   fi
 else
   cat "$model_regex_log"; bad "model regex guard"
+fi
+
+step "README notice join (every quoted notice is a shipped string)"
+# F-HARNESS-35 (2026-10-24). README.md quotes the plugin's notices in
+# backticks and nothing joined a quotation to the model, the QML or the
+# helper that composes it, so a copy change left the README quoting text the
+# plugin no longer shows with nothing red (rule 13's shape). Every quote is
+# a shipped literal, a named composer's output with the real constants
+# (Model.sourceErrorMessage through node, so `(50)` is MAX_SOURCES), or an
+# elided prefix of one; key chords and commands are skipped BY NAME on the
+# log. Seen red on a9d20f9: README.md:767 and :776 quoted the two warning
+# prefixes without the ellipsis the plugin always completes them with.
+notices_log=$CHECK_TMP/readme-notices.log
+if python3 "$ROOT/scripts/check-readme-notices.py" >"$notices_log" 2>&1; then
+  notices_n=$(grep -oE '^readme notices: [0-9]+ quote\(s\) in [0-9]+ file\(s\), [0-9]+ joined' "$notices_log" | head -1 | grep -oE '[0-9]+ joined' | grep -oE '[0-9]+')
+  if [[ -z $notices_n ]]; then
+    cat "$notices_log"; bad "README notice join printed no joined count at all"
+  elif (( notices_n < README_NOTICES_MIN )); then
+    cat "$notices_log"; bad "README notice join joined $notices_n notice(s), expected at least $README_NOTICES_MIN"
+  else
+    ok "$(tail -1 "$notices_log")"
+  fi
+else
+  cat "$notices_log"; bad "README notice join"
+fi
+
+step "SR ruling register (every cited SRn has a row, every row is cited)"
+# F-M3-20 (2026-10-24). The Sources rulings are `| SRn |` rows in
+# docs/ARCHITECTURE-SOURCES.md and the tracked files cite them by id, a
+# join made by a name and verified by nobody -- one register along from
+# the defect ids the ledger check pins. A cited id with no row, a row
+# cited nowhere outside the register's table and an id with two rows are
+# red; a row whose text says overturned/withdrawn/superseded is printed
+# with its citation count, because an overturned ruling stays cited as
+# history on purpose. Seen red on a9d20f9: the rows at
+# ARCHITECTURE-SOURCES.md:1761, :1763 and :1776 were cited nowhere outside
+# the register. Their ids are deliberately not written here: this file is
+# in the corpus the checker scans, and the first version of this comment
+# wrote them, which made the comment the citation that kept its own red
+# proof green (P23 recheck). Nothing under scripts/ or tests/ may name a
+# register id as a literal for the same reason; the test composes its.
+sr_log=$CHECK_TMP/sr-register.log
+if python3 "$ROOT/scripts/check-sr-register.py" >"$sr_log" 2>&1; then
+  sr_n=$(grep -oE '^sr register: [0-9]+ rows' "$sr_log" | head -1 | grep -oE '[0-9]+')
+  if [[ -z $sr_n ]]; then
+    cat "$sr_log"; bad "SR ruling register printed no row count at all"
+  elif (( sr_n < SR_REGISTER_ROWS_MIN )); then
+    cat "$sr_log"; bad "SR ruling register read $sr_n row(s), expected at least $SR_REGISTER_ROWS_MIN"
+  else
+    ok "$(tail -1 "$sr_log")"
+  fi
+else
+  cat "$sr_log"; bad "SR ruling register"
 fi
 
 if (( fail )); then echo "check.sh: FAILED"; exit 1; fi

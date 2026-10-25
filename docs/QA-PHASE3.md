@@ -229,7 +229,7 @@ D-GS-2, a blind spot: the helper's `matched` counts id matches while
 `epgCoverage` counts fillable rows, and no case separated them -- a guide whose
 ids all match but whose programmes are three days old does (matched 60,
 nowCount 0, rows single-line). One claim written before its measurement
-came back was wrong and is withdrawn: a Model.js mutant counting id matches
+came back was wrong and is **withdrawn (2026-09-20)**: a Model.js mutant counting id matches
 does NOT fail on that case, because the helper writes zero entries for a
 stale guide and Model.js sees an empty map. The separation is at the helper
 boundary, which (d) observes; it does not exercise epgCoverage's arithmetic
@@ -241,7 +241,7 @@ by the generator that wrote it; restored above.
 **One join by copy, filed.** `qa-sg1/verify.js` collects `groupNames` with a
 copy of the loop at `Guide.qml:696-700`, not a call, and the test asserted the
 result "as Guide.qml collects it" -- rules 12 and 14 exactly. The claim is
-withdrawn, the fixture README marks the join UNVERIFIED, and D-SG-2 asks for
+**withdrawn (2026-09-20)**, the fixture README marks the join UNVERIFIED, and D-SG-2 asks for
 the collection to be lifted into `Model.js` and called from both.
 
 **The board.** D-GS-2, D-ID-1 and D-SG-1 now read verified at the terminal,

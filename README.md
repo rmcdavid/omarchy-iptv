@@ -764,7 +764,7 @@ carry channel ids — most do — are not affected at all.
   provider's own list has been measured against them. Each kind that was
   cut or left out is counted in one warning line, and the warnings list at
   most 20 per-channel warnings, then a count of the rest. The footer's
-  `Playlist warning:` shows the first of them and how many more; the whole
+  `Playlist warning: ...` shows the first of them and how many more; the whole
   list is in the status file and the `status` output named above.
 - Guide data is held to the same limits. A channel name in the guide is
   cut at 512 characters before it is matched. Guide data read while the
@@ -773,7 +773,7 @@ carry channel ids — most do — are not affected at all.
   name, in the order the programmes appear (a channel declared but given
   no programme takes no place), and leaves out a channel whose id is over
   256 characters, which no playlist `tvg-id` can match. The programmes
-  left out either way are counted in a `Guide data warning:` line. Once
+  left out either way are counted in a `Guide data warning: ...` line. Once
   the channel list is there, the next guide refresh matches the guide
   against it and these two limits no longer apply.
 - Reading a playlist or guide data runs in a background helper that is

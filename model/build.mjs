@@ -43,10 +43,14 @@ var STATE_VERSION = 2
 //
 // `omarchy plugin update` fetches, fast-forwards and calls
 // `omarchy-shell shell rescanPlugins`, which is a hot reload rather than a
-// restart. This plugin sets `keepLoaded: true` so its overlay survives a
-// reload -- and an already-mounted overlay keeps the component it was built
-// from. So the files on disk update and the running interface does not, with
-// nothing to tell the user.
+// restart. This plugin sets `keepLoaded: true`, and what that keeps across a
+// reload is the SERVICE: measured on the 0.13.5-to-0.13.6 update
+// (2026-10-12, D-REL-6), the host's `rescanPlugins` rebuilt the overlay and
+// the bar from the CACHED old components (its `Qt.clearComponentCache` is
+// guarded on `typeof ... === "function"`, false on Quickshell 0.3.1), so a
+// stale build shows until a restart. An earlier version of this comment said
+// the overlay survives a reload; only the service does. So the files on disk
+// update and the running interface does not, with nothing to tell the user.
 //
 // That is not a hypothetical: the 0.7.3 update landed at 14:58 inside a boot
 // that had started two days earlier, and the shell rendered the pre-update
