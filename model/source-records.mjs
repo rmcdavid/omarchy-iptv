@@ -771,7 +771,7 @@ function pointerWritePlan(input) {
 // yet moved) and an edit's newKey is allocated from the NEW URL against the
 // sources with the old record already removed (allocateSourceKey, fnv1a32):
 // it names the old key only through a 32-bit hash collision between the two
-// URLs, which this plan does not decide. The first version carried
+// URLs, which this plan does not decide (D-SRC-68). The first version carried
 // `!wasActive &&` here with a comment saying the folded newKey IS the active
 // key -- true of the old inline test, evaluated after the assignment, and
 // not of this function's input (P23 recheck, 2026-10-24: the term could not
