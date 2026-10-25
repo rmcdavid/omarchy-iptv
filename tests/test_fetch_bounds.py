@@ -228,6 +228,155 @@ class WholeDownloadDeadlineTest(LoweredDeadline):
         self.assertEqual(outcome.get("code"), "timeout", outcome)
 
 
+class LookupBoundTest(LoweredDeadline):
+    """D-SRC-62: the host-name lookup is under the deadline too.
+
+    glibc's getaddrinfo does not return to the interpreter until the
+    resolver gives up -- it retries its own poll after a signal -- so the
+    alarm's handler ran only THEN, and a fetch overran its deadline by the
+    resolver's timeout (measured in a user namespace whose only resolver
+    never answers: 1.26-1.28 s for a 0.5 s deadline under `timeout:1
+    attempts:1`, 10.29-10.35 s under glibc's defaults, 2026-10-24,
+    scripts/dev-harness/spikes/resolver-overrun). The lookup now runs on a
+    worker thread the main thread waits for in short slices, so the alarm
+    ends the wait as it ends a read.
+
+    The double here has the C library's SHAPE, which is what makes it red
+    on the code before the fix: it blocks SIGALRM in the calling thread for
+    its whole delay, so the alarm cannot end it and is delivered only when
+    the mask lifts -- exactly as glibc hands the signal on only after the
+    resolver gave up. A plain `time.sleep` would not do: the raising
+    handler interrupts it, and the old code would pass.
+    """
+
+    SLOW = 2.0
+
+    def slow_lookup(self, only_host=None):
+        import socket
+        real = socket.getaddrinfo
+        calls = []
+
+        def getaddrinfo(host, port, *args, **kwargs):
+            calls.append(host)
+            if only_host is None or host == only_host:
+                signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
+                try:
+                    time.sleep(self.SLOW)
+                finally:
+                    signal.pthread_sigmask(signal.SIG_UNBLOCK, {signal.SIGALRM})
+            return real(host, port, *args, **kwargs)
+        patcher = mock.patch.object(socket, "getaddrinfo", getaddrinfo)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return calls
+
+    def timed(self, *argv):
+        started = time.monotonic()
+        result = run(*argv)
+        return result, time.monotonic() - started
+
+    def test_a_lookup_longer_than_the_deadline_is_cut_off_at_the_deadline(self):
+        server = self.serve({"/list.m3u": (response("200 OK", (), PLAYLIST),)})
+        calls = self.slow_lookup()
+        (code, status, stderr), elapsed = self.timed("playlist", "--url", server.url("/list.m3u"), "--cache-dir", self.cache)
+        self.assertEqual(code, 1, stderr)
+        self.assertEqual(status["error"]["code"], "timeout", status)
+        self.assertLess(elapsed, BEFORE_LATE, "refused only after the resolver gave up (%.2f s)" % elapsed)
+        self.assertEqual(calls, ["127.0.0.1"], "the lookup was not the one call")
+        self.assertEqual(server.paths, [], "a connection was made before the lookup ended")
+
+    def test_the_address_the_lookup_found_is_the_one_connected_to(self):
+        # One getaddrinfo per connection, and the stdlib makes none of its
+        # own after it: the result goes straight to the connect. Red on a
+        # mutation that hands the host name back to socket.create_connection.
+        server = self.serve({"/list.m3u": (response("200 OK", (), PLAYLIST),)})
+        calls = self.slow_lookup(only_host="never")
+        (code, status, stderr), elapsed = self.timed("playlist", "--url", server.url("/list.m3u"), "--cache-dir", self.cache)
+        self.assertEqual(code, 0, (status, stderr))
+        self.assertEqual(status["channelCount"], 1)
+        self.assertEqual(calls, ["127.0.0.1"])
+
+    def test_a_redirect_hop_s_lookup_is_under_the_same_deadline(self):
+        # The second hop names a different host (`localhost`), whose lookup
+        # is the slow one; the first resolves at once. Every connection the
+        # opener makes goes through the bounded lookup, not only the first.
+        redirect = response("302 Found", (("Location", "http://localhost:%d/real.m3u" % 0),))
+        server = self.serve({"/list.m3u": (redirect,), "/real.m3u": (response("200 OK", (), PLAYLIST),)})
+        redirect = response("302 Found", (("Location", "http://localhost:%d/real.m3u" % server.port),))
+        server.routes["/list.m3u"] = (redirect,)
+        calls = self.slow_lookup(only_host="localhost")
+        (code, status, stderr), elapsed = self.timed("playlist", "--url", server.url("/list.m3u"), "--cache-dir", self.cache)
+        self.assertEqual(code, 1, stderr)
+        self.assertEqual(status["error"]["code"], "timeout", status)
+        self.assertLess(elapsed, BEFORE_LATE, "the redirect's lookup overran the deadline (%.2f s)" % elapsed)
+        self.assertEqual(calls, ["127.0.0.1", "localhost"])
+        self.assertEqual(server.paths, ["/list.m3u"])
+
+    def test_a_logo_s_lookup_is_under_its_own_deadline(self):
+        # The logo opener (05-ipc-logos.py) is the other opener; its fetch
+        # runs under fetch_logo's budget, lowered here to the same 0.5 s.
+        self.slow_lookup()
+        started = time.monotonic()
+        with self.assertRaises(helper.HelperError) as caught:
+            helper.fetch_logo("https://127.0.0.1:9/a.png", 5, DEADLINE)
+        elapsed = time.monotonic() - started
+        self.assertEqual(caught.exception.code, "logo_timeout")
+        self.assertLess(elapsed, BEFORE_LATE, "the logo's lookup overran its deadline (%.2f s)" % elapsed)
+
+    def test_the_worker_blocks_the_alarm_and_the_main_thread_keeps_it(self):
+        # The round-2 recheck's P3: the worker's SIGALRM block was stated
+        # (so the kernel hands a process-directed alarm to the main thread,
+        # whose wait it interrupts at once) and never seen failing, because
+        # slow_lookup blocks the signal ITSELF to model glibc. This double
+        # blocks nothing and reads the mask from inside the lookup, on the
+        # thread the shipping resolve_within runs it on; the main thread's
+        # mask is read after, because a block that leaked back onto it
+        # would silence every FetchDeadline. Red on the mutation that drops
+        # the pthread_sigmask call, and on one that runs the lookup here.
+        # Linux's complete_signal prefers the main thread for a
+        # process-directed signal it does not block, so the DELIVERY cannot
+        # be told apart by a test on this kernel; the mask is the decision.
+        import socket
+        import threading
+        real = socket.getaddrinfo
+        seen = []
+
+        def getaddrinfo(host, port, *args, **kwargs):
+            blocked = signal.pthread_sigmask(signal.SIG_BLOCK, set())
+            seen.append((threading.current_thread() is threading.main_thread(), signal.SIGALRM in blocked))
+            return real(host, port, *args, **kwargs)
+        with mock.patch.object(socket, "getaddrinfo", getaddrinfo):
+            found = helper.resolve_within("127.0.0.1", 80, 1.0)
+        self.assertEqual(seen, [(False, True)], "lookup on the main thread, or with the alarm deliverable to the worker")
+        self.assertTrue(found and found[0][4][0] == "127.0.0.1", found)
+        self.assertNotIn(signal.SIGALRM, signal.pthread_sigmask(signal.SIG_BLOCK, set()), "the block leaked onto the main thread")
+
+    def test_off_the_main_thread_the_socket_timeout_bounds_the_lookup(self):
+        # No alarm can be installed off the main thread; there the lookup is
+        # held to the per-socket timeout as a connect is, and answered as a
+        # connect that took too long (`network`), never left to the resolver.
+        import threading
+        server = self.serve({"/list.m3u": (response("200 OK", (), PLAYLIST),)})
+        self.slow_lookup()
+        outcome = {}
+
+        def fetch():
+            started = time.monotonic()
+            try:
+                outcome["data"] = helper.read_http_source(server.url("/list.m3u"), 0.3, "playlist")
+            except helper.HelperError as error:
+                outcome["code"] = error.code
+                outcome["message"] = error.message
+            outcome["elapsed"] = time.monotonic() - started
+        worker = threading.Thread(target=fetch)
+        worker.start()
+        worker.join(timeout=10)
+        self.assertFalse(worker.is_alive(), "the download never ended")
+        self.assertEqual(outcome.get("code"), "network", outcome)
+        self.assertIn("host-name lookup took longer than 0.3 s", outcome.get("message", ""))
+        self.assertLess(outcome["elapsed"], BEFORE_LATE, outcome)
+
+
 class StatusLineDetailTest(LoweredDeadline):
     """D-SRC-59: a server's first line, when it is not a status line, reaches
     the reply redacted, then cut to NETWORK_DETAIL_MAX characters, its control

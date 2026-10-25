@@ -98,12 +98,19 @@ qa_model_count() {
 # that stub alone is the whole helper. Exit 1 (and nothing printed) when the
 # stub is missing, when the block names nothing, or when a named part is not
 # there: a copy that leaves a part behind is a helper that cannot start.
+# F-HARNESS-34: the stub is read with its CRs dropped, because the STUB
+# itself reads its parts that way (each entry's length and CRC-32 are of the
+# text with CRLF read as LF, D-REL-11) and a reader stricter than the thing
+# it reads for is as wrong as one more forgiving (rule 10). Before this, a
+# CRLF checkout's `^HELPER_PARTS = ($` never matched its CR-terminated line,
+# so the split helper read as a one-file one -- exit 0, no parts -- and the
+# slow trees would have staged the stub alone.
 qa_helper_parts() {
   local root=$1 rel
   local -a parts=()
   [[ -f $root/bin/omarchy-iptv ]] || return 1
-  grep -q '^HELPER_PARTS = ($' "$root/bin/omarchy-iptv" || return 0
-  mapfile -t parts < <(sed -n '/^HELPER_PARTS = ($/,/^)$/s/^    ("\([0-9][0-9]-[a-z][a-z0-9-]*\.py\)", [1-9][0-9]*, 0x[0-9a-f]\{8\}),$/\1/p' "$root/bin/omarchy-iptv")
+  tr -d '\r' <"$root/bin/omarchy-iptv" | grep -q '^HELPER_PARTS = ($' || return 0
+  mapfile -t parts < <(tr -d '\r' <"$root/bin/omarchy-iptv" | sed -n '/^HELPER_PARTS = ($/,/^)$/s/^    ("\([0-9][0-9]-[a-z][a-z0-9-]*\.py\)", [1-9][0-9]*, 0x[0-9a-f]\{8\}),$/\1/p')
   (( ${#parts[@]} > 0 )) || return 1
   for rel in "${parts[@]}"; do [[ -f $root/bin/helper/$rel ]] || return 1; done
   for rel in "${parts[@]}"; do printf '%s\n' "$root/bin/helper/$rel"; done
@@ -513,6 +520,65 @@ qa_reap_players() {
   echo "qa_reap_players: mpv$alive survived SIGKILL ($scratch)" >&2
   return 1
 }
+
+# qa_stop_pid <pid> [grace-seconds] [what]: end ONE process by its recorded
+# pid and make sure it is gone -- the qa_reap_players ladder over a single
+# pid: TERM, a bounded wait (default 5 s), KILL, a final look (3 s), the
+# KILL named on stderr. The pid is polled with `kill -0` and never `wait`ed
+# on, because the caller need not be its parent (`run.sh reap` ends a
+# detached shell an earlier invocation started). A child of the caller that
+# has exited is a ZOMBIE until collected, and `kill -0` on a zombie
+# succeeds, so a zombie counts as gone (qa_pid_live reads the state) and is
+# collected with `wait` where it is ours.
+#   0  gone (also: no pid given, or it was gone already)
+#   1  survived SIGKILL; named on stderr
+#   2  <pid> is not a number
+# F-HARNESS-32: run.sh's exit cleanup and `reap`, its stop_detached_shell,
+# and the text, tls and sources scenarios used to end their shell or server
+# with TERM alone (plus a `pkill -f` pattern in run.sh); the ladder existed
+# for players (F-HARNESS-30, measured ignoring TERM) and for nothing else.
+# What this never does: look a pid up by pattern. The caller records the pid
+# when it starts the process, and anything it did not record it cannot end.
+qa_stop_pid() {
+  local pid=${1-} grace=${2:-5} what=${3:-process} i ticks
+  [[ -n $pid ]] || return 0
+  [[ $pid =~ ^[0-9]+$ ]] || return 2
+  [[ $grace =~ ^[0-9]+$ ]] || grace=5
+  qa_pid_live "$pid" || { qa_collect_child "$pid"; return 0; }
+  kill -TERM "$pid" 2>/dev/null
+  ticks=$(( grace * 10 ))
+  for ((i = 0; i < ticks; i++)); do
+    qa_pid_live "$pid" || { qa_collect_child "$pid"; return 0; }
+    sleep 0.1
+  done
+  echo "qa_stop_pid: TERM ignored for ${grace} s by $what $pid; sending KILL" >&2
+  kill -KILL "$pid" 2>/dev/null
+  for ((i = 0; i < 30; i++)); do
+    qa_pid_live "$pid" || { qa_collect_child "$pid"; return 0; }
+    sleep 0.1
+  done
+  echo "qa_stop_pid: $what $pid survived SIGKILL" >&2
+  return 1
+}
+
+# qa_pid_live <pid>: 0 while the process exists and is not a zombie -- the
+# state field of /proc/<pid>/stat, read after the last ')' so a comm with a
+# space or a parenthesis cannot shift it (the helper's proc_start_time reads
+# the same line the same way).
+qa_pid_live() {
+  local st
+  kill -0 "$1" 2>/dev/null || return 1
+  st=$(cat "/proc/$1/stat" 2>/dev/null) || return 1
+  st=${st##*) }
+  st=${st%% *}
+  [[ $st != Z && $st != X ]]
+}
+
+# qa_collect_child <pid>: collect a finished child's status if it is ours;
+# for a pid that is not our child bash says so and we say nothing. Only
+# called once qa_pid_live says the process is gone or a zombie, so this
+# never blocks.
+qa_collect_child() { wait "$1" 2>/dev/null; return 0; }
 
 # qa_served_fixture <template> <out> <port>: the harness fixture with EVERY
 # stream served by run.sh's fixture server on <port>, one distinct URL per

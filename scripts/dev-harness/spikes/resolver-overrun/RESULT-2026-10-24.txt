@@ -1,0 +1,40 @@
+D-SRC-62 resolver overrun, run.sh on this machine (Linux 7.2.5-3-omarchy, CPython 3.14.7, glibc resolver inside the namespace), load average 2.5-2.9 on 4 cores.
+The host's own /etc/nsswitch.conf has 'hosts: mymachines mdns_minimal [NOTFOUND=return] resolve files myhostname dns', so a resolv.conf alone reproduces nothing here: nss-resolve reaches systemd-resolved over its unix socket inside the netns. The rig bind-mounts 'hosts: files dns' over it.
+
+=== BEFORE: a9d20f9's helper
+D-SRC-62 resolver overrun, helper a9d20f9, 2026-10-24 08:55:16, deadline 0.5 s, name nonexistent.example, 3 runs a case
+nsswitch hosts: files dns; resolv.conf nameserver 127.0.0.1 (a sink that never answers)
+== resolver options timeout:1 attempts:1
+  lookup      1.09 s  gaierror
+  lookup      1.04 s  gaierror
+  lookup      1.04 s  gaierror
+  playlist    1.28 s  overrun +0.78 s  rc=1 code=timeout
+  playlist    1.26 s  overrun +0.76 s  rc=1 code=timeout
+  playlist    1.28 s  overrun +0.78 s  rc=1 code=timeout
+== resolver glibc defaults (timeout:5 attempts:2)
+  lookup     10.05 s  gaierror
+  lookup     10.06 s  gaierror
+  lookup     10.05 s  gaierror
+  playlist   10.35 s  overrun +9.85 s  rc=1 code=timeout
+  playlist   10.29 s  overrun +9.79 s  rc=1 code=timeout
+  playlist   10.31 s  overrun +9.81 s  rc=1 code=timeout
+
+=== AFTER: the D-SRC-62 fix (resolve_within / bounded_create_connection)
+D-SRC-62 resolver overrun, helper lane-p23-helper (D-SRC-62 fixed), 2026-10-24 09:01:06, deadline 0.5 s, name nonexistent.example, 3 runs a case
+nsswitch hosts: files dns; resolv.conf nameserver 127.0.0.1 (a sink that never answers)
+== resolver options timeout:1 attempts:1
+  lookup      1.04 s  gaierror
+  lookup      1.05 s  gaierror
+  lookup      1.04 s  gaierror
+  playlist    0.78 s  overrun +0.28 s  rc=1 code=timeout
+  playlist    0.78 s  overrun +0.28 s  rc=1 code=timeout
+  playlist    0.78 s  overrun +0.28 s  rc=1 code=timeout
+== resolver glibc defaults (timeout:5 attempts:2)
+  lookup     10.05 s  gaierror
+  lookup     10.05 s  gaierror
+  lookup     10.05 s  gaierror
+  playlist    0.77 s  overrun +0.27 s  rc=1 code=timeout
+  playlist    0.84 s  overrun +0.34 s  rc=1 code=timeout
+  playlist    0.80 s  overrun +0.30 s  rc=1 code=timeout
+
+Reading: before, the fetch answered timeout only when the resolver gave up (1.26-1.28 s and 10.29-10.35 s for a 0.5 s deadline: the lookup's 1.04-1.09 / 10.05-10.06 s plus the helper's ~0.2 s start). After, 0.77-0.84 s under both settings: the lookup is abandoned at the deadline and the rest is the helper's start.

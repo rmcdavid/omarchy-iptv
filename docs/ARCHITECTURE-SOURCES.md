@@ -133,8 +133,8 @@ under ~/.config or /usr/share/omarchy was modified.
 | `entryInputs` | object `{ playlistUrl?, epgUrl? }`, optional; each slot `{ digest, at, stripped? }` | **WITHDRAWN 2026-10-13 (round 11, R21d; the round-11 rulings at the end of this file).** The key, its readers and writers and the helper's preservation of it are deleted, and both readers drop it from a file an earlier build of this chain wrote (shared fixture `tests/fixtures/state-keys.json`, `round 9 and 10 keys are dropped by both readers ...`). The text below is the round-9 and round-10 description, kept as written; the names in it are cited without the `Model.` prefix because they are no longer exports. D-SINK-19 round 10 (R20b, 2026-10-12; lane-key-z1 5b21950, lane A). WHAT THE SERVICE HAS ALREADY CONSUMED FROM THE BAR ENTRY, one slot per retired input (`Model.RETIRED_SETTINGS`). Until round 10 the only record of it was in memory (`Service.reconciledPlaylistUrl`, `reconciledEpgUrl`), so a restart began with every value on the entry fresh and adopted it again, seen NOW: a guide URL left there by a failed write (D-SRC-18) or written back by the lagging host's patch-only logo toggle (D-SINK-20's restart half) replaced a later in-app edit that had landed. `digest` is `entryInputDigest` of the consumed value: two FNV-1a 32-bit passes over the setting name and the value's ONE form (`Model.entryInputForm`), 16 lowercase hex digits -- a digest and never the value, because a REFUSED input is consumed too and can carry a credential the plugin strips from `shell.json` on purpose (rule 5), and the only question ever asked of a slot is whether the entry's value is THIS one (a collision makes one fresh input read as consumed, about 2^-64 per comparison; lane A's arithmetic). `at` is when it was consumed, in ms, recorded as R20b rules and decided on by nothing. `stripped: true` once an owned write has handed the host an entry WITHOUT that value (`entryInputsAfterWrite`); from then on the same value on the entry at the next start is the user setting it AGAIN -- an `omarchy bar set ... playlistUrl A` made while the shell was down -- and is fresh, which the lagging host, whose publish never shows our strip, would otherwise hide. The slot moves with its snapshot (`entryInputsAfterMove`), and the first reconcile after a start seeds the snapshot from it (`entryInputSeed`). It is NOT saved for its own sake: it rides the next state save, because a save issued for the slot alone held the strip behind it (R13) and reproduced the hidden re-set 308258f fixed (lane A: the R19c re-stamp case went red with an eager save). Absent when no slot is set; additive at version 2 on the `pendingEpg` precedent; read through `entryInputsOf` and `entryInputsRecord`, written through `withEntryInputs`; taught to `Model.parseState`, `Model.cloneState` (the seventh key that whitelist carries) and the helper's `normalize_state` (`normalize_entry_inputs`, which refuses a digest that is not 16 lowercase hex digits and never computes one) on the same day and the same shared fixture, and printed by the helper as it is, digests only, on the `activeKey` precedent. What a digest of a refused credential is, held in this 0600 file: a 64-bit confirmation oracle for a guess, the class `What REMAINS` item 1 in `ARCHITECTURE.md` section 6 describes for the 32-bit key in `shell.json`, and never a way back to the value. |
 | `sources[]` | array, max 50 | Ordered by `addedAt`; the UI sorts by `lastUsed` desc [UX-ASSUMPTION]. **After D-SINK-19 this array is the ONLY copy of the source list** (SR39 cost 3): `shell.json` no longer holds the active URL, so there is nothing left to rebuild a lost record from. |
 | `key` | string | `^[0-9a-f]{8}(-[0-9]{1,3})?$`, unique in the array; the cache directory name. |
-| `url` | string, 1-2048 | Normalized playlist URL (section 3.1); unique in the array; **the identity**. Carries provider credentials; the file is 0600 (README note, same class as shell.json). |
-| `epgUrl` | string, 0-2048 | Normalized EPG URL or `""`. |
+| `url` | string, 1-2048 | Normalized playlist URL (section 3.1); unique in the array; **the identity**. Carries provider credentials; the file is 0600 (README note, same class as shell.json). **Reader parity (D-SINK-23, second half; the lead's ruling, 2026-10-24).** Both readers validate a STORED `url` as origin `cli` and keep the VALIDATED form, and both DROP a record whose `url` does not validate: the helper's `normalize_source` always did (`validate_source_url`, a `state: dropped source <key> (invalid url: <code>)` line), and `Model.normalizeSourceRecord` kept the text as written with length and control checks only, so a hand-edited file -- which the README invites -- held a URL the two mirrors read, keyed and redacted differently (`http://HOST.test?password=x` was one record to the shell and `http://host.test/?password=x` to the helper). The cost, stated: a hand-edited record the shell used to keep and the helper already dropped on its next write (`http://h.test:abc/`, `./list.m3u`, a bare host, `ftp://`, `/proc/...`) is now dropped by the shell too, journaled by key (`parseState`), never by URL; a `~/path` reads as `file` in both. Shared fixture `tests/fixtures/state-reader-urls.json`, run by `Model.parseState` in `tests/Model.test.js` and by `normalize_state` in `tests/test_helper.py`. |
+| `epgUrl` | string, 0-2048 | Normalized EPG URL or `""`. Same parity rule as `url` (D-SINK-23): validated on read in both mirrors, a value that does not validate is CLEARED and the record kept (the same fixture pins it). |
 | `epgSetAt` | epoch MILLISECONDS, optional | **WITHDRAWN 2026-10-13 (round 11, R21d; the round-11 rulings at the end of this file).** The key, its readers and writers and the helper's preservation of it are deleted, and both readers drop it from a file an earlier build of this chain wrote (shared fixture `tests/fixtures/state-keys.json`, `round 9 and 10 keys are dropped by both readers ...`). The text below is the round-9 and round-10 description, kept as written; the names in it are cited without the `Model.` prefix because they are no longer exports. D-SINK-19 round 9 (R19c). When this record's guide URL was last SET: by the add form at SUBMIT time (`Service.addSource` hands `Date.now()` to `Model.addSource`, which stamps it only when the form carries a guide URL), by the edit form when the edit CHANGES the guide URL (`Model.updateSource`; the form re-sends every field, so a label-only edit is not a guide-URL input, and a playlist-URL edit carries the stamp to the replacement record), by the adoption of a CLI input beside an active source (`Model.adoptActiveSource` with the input's `seenAt`; an input equal to the guide URL the record already holds is not re-stamped, 308258f), or by a pending value that wins (`epgByTime`). Absent when 0: a record written before R19 has none and reads as 0, older than any stamped input (`epgSetAtOf`), and a record that never had one serializes exactly as before (`Model.normalizeSourceRecord`). Milliseconds from the wall clock on both sides, so a clock stepped backwards between two inputs inverts their order -- recorded, not handled (lane A's reading (e)). Not taught to the helper's `normalize_source` either: a helper write resets every record's stamp to 0, so a value held later wins over an in-app edit at the next active move (the open item in the `pendingEpg` row) [round 10: D-SRC-20, closed by R20a, below]. **Amended 2026-10-12 (round 10, R20a; lane-key-z1 5b21950).** `normalize_source` carries `epgSetAt` when it is above 0, coerced as `Model.normalizeSourceRecord` coerces it, and absent otherwise (shared fixture: `epgSetAt kept on a record`, `coerced (1e3 -> 1000)`, `0, negative or junk is absent, never 0`, `junk text is absent`). The helper is also the third route that SETS a guide URL, which round 9's R19c search named and left unstamped: `state source add --epg-url` stamps it, and `state source update --epg-url` stamps it only when the guide URL CHANGES, as `Model.updateSource` does, in milliseconds (`--now` seconds times 1000, else the wall clock; `test_r20a_a_guide_url_the_helper_sets_is_stamped_with_its_time_and_an_unchanged_one_is_not`). That the helper's explicit-input route should stamp is lane A's reading of "never invented" as applying to the readers, for the lead to confirm. |
 | `kind` | `"http"` or `"file"` | From validation. |
 | `label` | string, 1-64 | Sanitized (section 6); default from `Model.defaultSourceLabel`. |
@@ -239,7 +239,7 @@ marker, the downgrade the D-SINK-19 ruling accepts. Pinned through
 `tests/service-harness.js` on both hosts and both echo modes, the review's
 `Q4 heldExposed` sequence among them, and in the model; red on fe40b2c]. The
 first version of this paragraph said the step "creates no record and deletes
-none"; that was false against the code and is withdrawn. "Must not lose a
+none"; that was false against the code and is **WITHDRAWN 2026-10-11**. "Must not lose a
 source" (SR38) is graded as "keeps the count it went in with" over a two-source
 state, one active and one not. The adopted key is written INTO the state
 (`Model.withActiveKey`), the state is saved, and the entry is rewritten with
@@ -493,7 +493,7 @@ acceptance rule, no control character ever types) and a paste through
    Xtream `/playlist/<email>/<pass>/m3u_plus` link and a WebDAV link on a
    non-default port, both stored and working, and the helper dropped such a
    source on the first normalize after the upgrade (D-SINK-27); it is
-   withdrawn. The display sinks (`hostPortOf`, `deriveLabel`, `sourceLabel`,
+   **WITHDRAWN 2026-10-22 (D-SINK-27)**. The display sinks (`hostPortOf`, `deriveLabel`, `sourceLabel`,
    `hostOf`) and validation show and use the RFC host, so a stored
    `http://host.test:25461/playlist/me@mail.test/pw/m3u_plus` resolves,
    normalizes and labels as `host.test:25461` exactly as before -- and the
@@ -762,6 +762,13 @@ by the helper for a syntactic reason; the helper keeps the runtime refusals
 | `mergeForeignState(base, ours, theirs)` | R24a (round 14; `Model.mergeForeignState`): `{ state, conflicts }` [round 15, R25b: `{ state, conflicts, dropped }`], THE three-way merge of a FOREIGN write into a session that holds a change the file does not. Sets (`favorites`, `hiddenGroups`, `savedSearches`) merge; `sources` merge by key; `recents`, `activeKey`, `lastPlayed`, `session`, `cacheLayout` are taken whole; `entryMigrated` is set if either side has it [2026-10-20, F1 (lane-sweep-f4): except when it is OURS ALONE and the record the migration added -- `opts.migrationKey`, `Service.migrationAddedKey` -- did not land as ours: dropped at the cap (`migrationHeld` "full": the record is not counted in `dropped.sources`, and an `activeKey` naming it goes back to theirs) or replaced by theirs' version of the same playlist (`migrationHeld` "changed"). Then the marker is not carried, the entry keeps both URLs, the service logs `Model.migrationHeldAgainLine(why)` (no key, no URL), sets `migrationHeldFull`, and the reconcile the merge runs retries at once: over "changed" it migrates onto theirs' record, the bar's guide URL with it; over "full" it is held under the one `Sources is full` card until a removal. The signature is `mergeForeignState(base, ours, theirs, opts)`, `{ state, conflicts, dropped, migrationHeld }`]; a conflict goes to theirs and is reported as `{ field, key, fields }` with no value. The field table is in the round-14 rulings; the fixture is `tests/fixtures/state-merge.json` [round 15, R25b (D-SRC-31): the caps are applied INSIDE the merge, not left to `parseState`: theirs keeps its place and what goes past `MAX_SOURCES` (50), `MAX_SAVED_SEARCHES` (20) or `MAX_HIDDEN_GROUPS` (200) is always ours' additions, dropped and returned as `dropped` -- `sources` the keys, `savedSearches` and `hiddenGroups` counts; and the sets are built on THEIRS, theirs' order first, which the function's comment now says (D-SRC-37)] |
 | `mergeDropLines(dropped)`, `mergeDropNotice(dropped)` | R25b (round 15; `Model.mergeDropLines`, `Model.mergeDropNotice`): what a merge that dropped anything at a cap tells. The journal: one line per dropped element, `state.json was changed by another program while a change made here was not yet saved; the source <key> added here was not kept (the limit is 50 sources)`, `...; a saved search made here was not kept (the limit is 20 saved searches)`, `...; a group hidden here was not kept (the limit is 200 hidden groups)` -- a source by its key, the others as themselves, never a query or a group name. The user, ONCE per merge (notification, replace id 74018, normal urgency): `Not every change was kept` / `Another program changed state.json while a change made here was not yet saved, and together they went past a limit. The other program's version was kept, and <N> source(s) added here (the limit is 50 sources) [and ...] was/were not kept. Make room, then add it/them again.` -- counts and constants only. `null` and `[]` when nothing was dropped |
 | `mergeConflictLine(conflict)` | R24a (round 14; `Model.mergeConflictLine`): the console line for one conflict, `state.json was changed by another program while a change made here was not yet saved; kept the other program's version of <field>` or `... kept the other program's version of the source <key> (<field names>)` -- never a URL or a value [round 15, D-SRC-36: `version of` added; the line read `kept the other program's the source <key>` until then] |
+| `stateSaveOutcome({ viewText, lastSaveText, recentSaves })` | D-SRC-39 (2026-10-24, P23 lane A; `Model.stateSaveOutcome`): what a `saved` / `saveFailed` report means for the BASE, from the burst record -- `{ landed, last, state, remaining }`; `last` is `stateSaveLanded`, and a `saved` whose text is an EARLIER member of `recentSaves` is a landing whose `state` becomes `landedState` with the record trimmed to the texts after it. Both outcome handlers take it. |
+| `mergeLeavesNothingUnsaved(merged, theirs, { savesInFlight })` | D-SRC-43 (2026-10-24; `Model.mergeLeavesNothingUnsaved`): true when the merge IS theirs and no write of ours is in flight -- `mergeForeignText` then clears `stateSaveFailed` and `recentSaves`. The owed entry mirror is still paid by the next landed save. |
+| `mergeConflictNotice(conflicts)`, `MERGE_CONFLICT_TITLE`, `mergeConflictSentence(conflict)` | D-SRC-33 (2026-10-24; `Model.mergeConflictNotice`): `{ title: "Settings merged", body }` -- one sentence per conflict, `<The source <key> (<fields>) \| The active source \| The recent list \| ...> kept the other program's version.`; a field name and a key, never a value; null for none. Raised once per merge through `Service.notify("mergeConflict", ...)`, composed into the 74020 argv by `Model.notifyArgv`'s `mergeConflict` branch (`model/privacy.mjs`, normal urgency, the alert glyph). The lane's first tip had the event, the id and the notice but no branch, so the sink got null and the user nothing; the branch landed on 2026-10-24 (P23 lane A2) with a node check that CALLS `notifyArgv("mergeConflict", ...)` and one that reads the argv off the harness's `execDetached` -- both red before it (rule 13: an event name and an id are a join by name until a call makes it one). |
+| `probeCommitPlan({ commit, mode, key, newKey, activeKey })`, `probeCommitState(state, plan, newKey)` | D-SRC-14 (2026-10-24; `Model.probeCommitPlan`): `{ wasActive, act: "switch" \| "reload" \| "none" }` decided against the active key BEFORE the probe commit publishes; `probeCommitState` folds the new key into that state when the active source was edited, so no published state lacks an active source. |
+| `stateModeArgv(helperPath, stateDir)`, `stateModeReply(text)` | D-SRC-49 / D-SINK-22 (b)(c) (2026-10-24; `Model.stateModeArgv`): the argv of the helper's `state mode`, run after every landed save on `stateModeProc`; `stateModeReply` reads its one line -> `{ folder, file }` of `changed` \| `kept`, null for anything else. |
+| `lastErrorAfterStatus(lastError, previousReason, nextStatus)` | D-SRC-52 (2026-10-24; `Model.lastErrorAfterStatus`): a good playlist status clears exactly the sentence the replaced status composed (captured before the reassignment) and nothing else; a failed one writes its reason. |
+| `stateLoadDecision(...)`, the `initRetried` input and the `reinit` act | D-REL-8 (2026-10-24; `Model.stateLoadDecision`): an `unknown` init verdict with `initRetried` false answers `{ act: "reinit" }` before any re-read; the service re-runs `state init` once (`stateInitRetry`, 1 s) and sets the flag. `timeout` still blocks at once. |
 | `persistFailureMessage(reason)` | R16 (lane-key-u1; `Model.persistFailureMessage`): the sentence for THE reason `sourcesPersistFailed` carried, over `Model.PERSIST_FAILURE_REASONS` (`state_write_failed`, `config_unsafe`, `persist_failed`); an unknown reason falls back to `persist_failed`'s sentence; what the guide renders on the result line and in the footer |
 | `invalidInputBlocks(invalid, activeKey)` | whether a refused input becomes the guide's error state: only when there is no active source to show instead (D16, narrowed) |
 | `sourceRows(st, activeKey, nowSec, errors)` | UI rows, sorted `active` first then `lastUsed` desc [UX-ASSUMPTION]: `{ key, label, host, kind, active, channelCount, groupCount, lastUsed, lastUsedText, fetched, epgConfigured, origin, errorReason }` -- no URL field, ever |
@@ -830,7 +837,14 @@ source.
   writable bar entry) is logged by the one writer and repaired on the next
   start, never signalled, and both callers of that writer on lane-key-t1
   pass `announce` false (the logo toggle reports through its return value).
-  `Service.lastPersistFailure` keeps the last code for the harness.
+  `Service.lastPersistFailure` used to keep the last code "for the harness";
+  it was REMOVED on 2026-10-24 (D-SRC-67, P23 lane A's second finding,
+  removed by lane A2): set at the three
+  failure sites and cleared by D-SRC-43, read by nothing -- not the guide,
+  not the model, not the IPC summary, and by the harness only in the one
+  check written to the D-SRC-43 row's words. The reason travels as the
+  signal's argument and nowhere else; a node check pins that no shipped
+  source names the property.
   **Round 5 (2026-10-12, R16, lane-key-u1):** the guide renders the
   sentence for THE reason it is handed -- `Model.persistFailureMessage` over
   `Model.PERSIST_FAILURE_REASONS`, an unknown reason
@@ -1170,7 +1184,7 @@ on every owned write, heal and patch alike, and hands the answer to
 `Model.entryWith` as `keep`: every retired key the entry carries while the
 migration marker has not landed, none once it has. The two round-7 snapshots,
 the R19b held guide URL, R20b's slot marking after each write and R20c's
-landed-state patch rule are withdrawn (R21d), and the paragraphs above that
+landed-state patch rule are **WITHDRAWN 2026-10-13 (round 11, R21d)**, and the paragraphs above that
 describe them stand as the record of rounds 7-10. What the plugin does with
 a value found on the entry after the marker is not this funnel's question:
 `reconcile` refuses and reports it (R21b) and `stripEntryInputs` asks for
@@ -1257,7 +1271,14 @@ only because `Model.entryWith` copies them.
    init's verdict and decides a held load (`Model.stateInitFound`,
    `Model.stateLoadDecision`); any other failure gets one re-read after the
    init and then the no-write mode. The FileView measurement and the rest
-   are in the round-12 rulings.]**
+   are in the round-12 rulings.]** **[Amended 2026-10-24, D-REL-8 (P23,
+   lane A): an init that answered NOTHING READABLE -- `unknown`: exit 0 with
+   no `state init` line (the empty stub git leaves for milliseconds
+   mid-update) or a non-zero exit (a partial stub, the old stub refusing new
+   parts) -- is run ONCE MORE, a second later, under the start-up watchdog
+   again (`stateLoadDecision`'s `reinit` act, `initRetried`,
+   `stateInitRetry`); a second `unknown` takes the re-read-then-block path
+   above. A timed-out init is never re-run (R23c).]**
 3. `reconcile()` (also from `onPlaylistUrlChanged`, `onEpgUrlChanged`):
    `Model.reconcileSources(userState, playlistUrl, epgUrl, activeSourceKey, now)`;
    on `changed` assign `userState`, `saveState()`; for each `evicted` key
@@ -1496,7 +1517,14 @@ edit the control's copy and the next bound write would overwrite it.
    only inside the URL string in state.json and shell.json **[since
    D-SINK-19: in state.json only; the plugin writes no URL into shell.json]**.
 5. Files: `state.json` stays 0600 (created by `state init`, S-02; `FileView`
-   keeps an existing mode); `sources/` and every `sources/<key>/` are 0700
+   keeps an existing mode **[and, since 2026-10-24 (D-SRC-49, D-SINK-22
+   windows b and c; P23 lane A), is made 0600 again by the helper's `state
+   mode` after every save that LANDS, from `stateFile.onSaved` on its own
+   bounded Process -- a file the user put at the path at 0644, or one a save
+   created at the umask's mode after a re-point, is private within the
+   stub's start rather than until the next shell start; one interpreter
+   start per landed save, `ARCHITECTURE.md` section 5's 2026-10-24
+   amendment]**); `sources/` and every `sources/<key>/` are 0700
    (`mkdir -p -m 700` and `ensure_private_dir`); every helper write is the
    existing `O_EXCL` temp + `chmod 0600` + `os.replace`. Removal deletes
    known file names only. **The host's `shell.json` is not in that list and
@@ -5515,7 +5543,15 @@ D-DOC-11's double, F-HARNESS-27; a800bd5 and b10b5b6 key-scenario B19-B22;
   minus what theirs removed", in theirs' ORDER. The rest of D-SRC-37 (a merge
   can leave `activeKey` naming a source the other side removed or re-keyed,
   with no conflict line; `failedProc` and `whichProc` unbounded) is filed and
-  not this round's.
+  not this round's. [2026-10-24, P23 lane A: both halves fixed. (a) a merged
+  pointer naming no merged record falls back to no active source IN THE
+  STATE, the way `source remove` and `Model.removeSource` clear it (R3), and
+  the fall-back is a conflict `{ field: "activeKey", key, fields:
+  ["removed"] }` whose journal line says `... version of activeKey (the
+  source <key> it named is gone, so no source is active)`. (c) `failedProc`,
+  `whichProc`, `cacheProc`, `configShieldProc` and the two PiP start-up
+  probes each have a TERM-only watchdog at `helperTimeoutMs`
+  (`ARCHITECTURE.md` section 5's 2026-10-24 amendment).]
 - D-SRC-38. `Model.stateBlockedHeader(reason, path, midSession)`: `Saving has
   stopped` in a block that began after a state loaded, the notice's title
   otherwise; `Model.sourcesHeaderRight` takes the fourth argument and
@@ -6615,7 +6651,7 @@ change is dropped; and two load-dependent sentences in the harness README.
 **The lead's ruling, R28 (2026-10-20), replacing the parts of R27 they
 break.**
 
-R28a [WITHDRAWN by R29a, round 19]. A STALLED READ IS NOT A NO-WRITE BLOCK. After a silent read the save
+R28a **[WITHDRAWN 2026-10-20 by R29a, round 19]**. A STALLED READ IS NOT A NO-WRITE BLOCK. After a silent read the save
 STAYS PARKED with memory as the authority; the read is retried on a bounded
 backoff (the schedule stated); there is never a blind write and never a
 drop; when a read answers, R26a's dispositions decide (the base -> write;
@@ -7308,7 +7344,12 @@ states are the lead's, and none is cited here).**
   state it (the README, `UX-SOURCES.md` 5.10 item 9, `ARCHITECTURE.md`
   section 5), with HS7's loss measured on this tree as on 6f1d176. It has
   no board id of its own beyond D-SINK-22; if the board closes D-SINK-22
-  on window (a), window (c) needs one.
+  on window (a), window (c) needs one. [2026-10-24, P23 lane A: windows (b)
+  and (c) are NARROWED, not closed -- the save that creates the file at
+  0644 still can, and the repair the landing asks for (`state mode`,
+  D-SRC-49) makes it 0600 within the helper's start; the exposure is those
+  milliseconds, no longer the session. R29a's descope of the stalled-read
+  handling is untouched: nothing here touches a read path or a save path.]
 - (5) The R22 question carried from round 18 (2): a change made in a
   mid-session block is dropped on three ways back, as on 0.14.2. R29a
   removes the stall door into it; a read that answers with a load failure

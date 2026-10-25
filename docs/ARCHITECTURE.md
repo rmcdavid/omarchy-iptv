@@ -609,11 +609,11 @@ before write:
   asks for the load once more, and a second silence puts the session in the
   R22 no-write mode with reason `read-timeout`, told once (`Saving has
   stopped`, `... did not answer when it was read before a save (twice, 2
-  seconds each)`), lifted by a later read that answers [round 18, R28a: no
+  seconds each)`), lifted by a later read that answers [round 18, 2026-10-20, R28a: no
   longer -- the lift lost the held change; a silent read now keeps it held
-  and reads again, the amendment below] [round 19, R29a: and that is
-  withdrawn too -- a silent read's save goes ahead without it after 2 s,
-  the last amendment below]. What remains is
+  and reads again, the amendment below] **[round 19, 2026-10-20, R29a: and that is
+  WITHDRAWN too -- a silent read's save goes ahead without it after 2 s,
+  the last amendment below]**. What remains is
   window (b), a re-point landing between the read's load and the write it
   allows, a turn apart: milliseconds, stated in `Model.stateSavePlan`'s
   comment and the README. Pinned through the node double over the shipping
@@ -716,6 +716,66 @@ Not running: `{ "ok": false, "kind": "status", "running": false, "error": { "cod
 
 `{ "ok": true, "kind": "play", "id": "t:bbc1.uk", "name": "BBC One HD" }` or the
 error object with codes `not_running`, `unknown_channel`, `ipc_error`.
+
+Amended 2026-10-24 (P23, lane A: the service's state and save paths; rows
+D-SRC-14, D-SRC-33, D-SRC-37, D-SRC-39, D-SRC-43, D-SRC-49, D-SRC-52,
+D-SINK-22 (b)(c), D-REL-8, F-M3-18 (a)). What moved, and what it costs:
+- `state.json`'s mode is repaired after EVERY save that lands (D-SRC-49,
+  D-SINK-22 windows b and c). The FileView keeps an existing file's mode and
+  creates a missing one at the umask's 0644, so a file the user `mv`ed in at
+  0644, or one a save created after a re-point of the state folder inside a
+  save's read-to-write window, was written into at that mode for the rest
+  of the session. The helper's `state mode` verb (`bin/helper/10-state.py`,
+  `state_mode_repair`) makes the folder 0700 and a REGULAR file 0600 with
+  the existing `chmod_if_kind` primitives -- it creates nothing, reads
+  nothing, chmods nothing that is already right (so the steady state raises
+  no IN_ATTRIB on the watched file) and prints one line. The service runs it
+  on its own Process (`stateModeProc`, `Model.stateModeArgv`), from
+  `Qt.callLater` in `stateFile.onSaved` when the landed save was the last
+  asked for and nothing is in flight, coalesced like the config shield (one
+  run outstanding, a re-run flag), bounded by a TERM-only watchdog, and never
+  through `cacheProc` (its command is `cache --cache-dir`, the verb D-ID-1
+  keeps apart from the state file). **The cost is one interpreter start --
+  the sealed stub, about 30 ms of CPU idle -- per landed save, zaps and the
+  session record included**, accepted by the lead for the P23 round; the
+  residual is the milliseconds between a creating save and the repair,
+  stated in the README's two-window paragraph, no longer "until the next
+  shell start".
+- Every helper slot is bounded (D-SRC-37 (c)). `cacheProc`, `failedProc`,
+  `configShieldProc`, `whichProc` and the two PiP start-up probes had no
+  watchdog while every other slot had one; each has a TERM-only Timer at
+  `helperTimeoutMs` now, restarted where `running = true` is set and stopped
+  in an exit handler that is a root function. On fire the cache queue and
+  the failed-mark queue are dropped with one console line (the jobs are
+  re-derivable). The inventory -- every `*Proc` id against every Timer that
+  sends signal 15 -- is a node check, not a grep in a write-up.
+- A start-up `state init` that answered nothing readable is run once more
+  (D-REL-8): `Model.stateLoadDecision` answers `reinit` for an `unknown`
+  verdict (an empty or partial stub mid-update, a non-zero exit) when
+  `initRetried` is false; `stateInitRetry` runs it a second later under the
+  start-up watchdog, and a second `unknown` takes today's path. A timed-out
+  init is never re-run (R23c).
+- The base follows an EARLIER write of a burst that lands (D-SRC-39):
+  `Model.stateSaveOutcome` decides both outcome handlers from the burst
+  record (`recentSaves`), so with t1 landed and t2 failed the base is t1,
+  and a restore of the pre-burst file is foreign and merged rather than
+  ignored and written over.
+- A merge that leaves nothing of ours unsaved clears the failed-save flag
+  (D-SRC-43, `Model.mergeLeavesNothingUnsaved`); the owed entry mirror is
+  still paid by the next landed save. A merge that kept the other program's
+  version of a field or source is told on screen once per merge (D-SRC-33,
+  `Model.mergeConflictNotice`, `NOTIFY_IDS.mergeConflict` 74020). A merged
+  pointer naming no merged record falls back in the state, as a conflict
+  naming the source (D-SRC-37 (a)).
+- An edit of the active source's URL publishes no state without an active
+  key (D-SRC-14, `Model.probeCommitPlan` / `probeCommitState`): the pointer
+  is folded into the state the probe commit publishes, `beginSwitch` runs
+  before the key moves, and `persistActive` plans `write-entry-after-saved`
+  -- one save, one entry write. A good playlist status clears the sentence
+  a failed one left in `lastError` and nothing else (D-SRC-52,
+  `Model.lastErrorAfterStatus`).
+- The node harness runs the real `clearSourceData` (F-M3-18 (a)); the no-op
+  it carried is why the suite stayed green while the logo slots blanked.
 
 ## 6. Settings schema
 
@@ -1514,7 +1574,7 @@ now, with each decision lifted into `Model.js` so node can call it (rule 12):
   and moves the service's snapshot (on the one-write-behind host the published
   entry falls back to the previous stored one, which carries no URL; on the
   echoing host, omacom/omarchy#15082, the snapshot is `""` at once), so the
-  re-set value differs from the snapshot and is adopted. Withdrawn 2026-10-12
+  re-set value differs from the snapshot and is adopted. **WITHDRAWN 2026-10-12**
   from every document that carried it; measured at the Model layer in node,
   not live.
 - An input is never stripped unadopted (R12, round 3). An `epgUrl` set while
@@ -1834,8 +1894,8 @@ kind), through which every comparison of an entry value goes -- reconcile's
 disagree; its search found a sibling, an EPG of control characters alone
 that emptied the active record's guide URL. R18b: a write that changes
 nothing changes nothing -- the funnel declines a write the host would
-answer `false` to (`entryWriteNeeded` in model/settings.mjs [withdrawn by
-R19a in round 9 and deleted by R22e in round 12], estimating the stored entry
+answer `false` to (`entryWriteNeeded` in model/settings.mjs **[WITHDRAWN 2026-10-12 by
+R19a in round 9; deleted 2026-10-13 by R22e in round 12]**, estimating the stored entry
 from its own last write while the publish has not moved, never waiting for
 an echo) and reassigns the own-write record only when it differs
 (`Model.sameOwnWrite`). R18c: quiescence is a check -- the node driver runs
@@ -2031,9 +2091,9 @@ NOT closed. Three things remain, and the first is the one to quote:
    DIGEST of each bar-entry input the service consumed (`entryInputs`,
    R20b), a refused one included -- a confirmation oracle of the same
    kind for that value, in the plugin's own private file rather than in
-   `shell.json`, and never a way back to it.] [Round 11: no longer --
-   `entryInputs` is withdrawn (R21d), and what the session has handled is
-   held in memory only.]
+   `shell.json`, and never a way back to it.] **[Round 11, 2026-10-13: no longer --
+   `entryInputs` is WITHDRAWN (R21d), and what the session has handled is
+   held in memory only.]**
 2. *The input path.* `omarchy bar set ... playlistUrl` is still supported and
    is still a write of a credential into that file, made by the host on the
    user's instruction, at a moment the plugin cannot gate. The plugin removes
@@ -2129,10 +2189,10 @@ holds was re-carried, and no owned write followed, so it stayed for the
 session and replaced a later edit at the next start. R20c is that correct
 narrowing, deciding from the state the last landed save serialised, and
 R20b closes the restart half. D-SINK-20 is closed as filed, the board's
-state the lead's; `ARCHITECTURE-SOURCES.md` round-10 rulings.] [Round 11: and after the migration it cannot happen at all -- the
+state the lead's; `ARCHITECTURE-SOURCES.md` round-10 rulings.] **[Round 11, 2026-10-13: and after the migration it cannot happen at all -- the
 patch-only write keeps no retired key once the marker has landed (R21b;
 node `R21e (...) a refused value is stripped by the logo toggle's
-patch-only write too`). R20c's landed-state rule is withdrawn with it.]
+patch-only write too`). R20c's landed-state rule is WITHDRAWN with it.]**
 
 **The costs, accepted by the product owner on 2026-10-09 before the work was
 briefed, restated after the review as what the code does.** (1) `omarchy bar
@@ -2290,14 +2350,42 @@ coefficients, 24 MiB, the order Qt was already willing to allocate for a
 logo (the 23.8 MiB above), and the side cap exists because area alone
 admits 65535x64. A 1920x1080 banner passes; 4097x1024, 2048x2049 and
 65535x64 do not (called, 2026-10-11). The refusal names a host and the
-numbers, never the URL (rule 5). `MAX_LOGO_BYTES` stays, bounding the axis
-it always bounded.
+numbers, never the URL (rule 5) -- and since D-SINK-30 (2026-10-24) that
+host, like the consent dialog's busiest host and the Sources row's, ends at
+the first `;`, `=` or `&` after the userinfo cut: RFC 3986's reg-name admits
+all three, so `https://cdn.test;sid=SECRET/a.png` is a valid URL whose
+authority is a credential, urllib's `netloc` hands it over whole, and
+`logo_host` / `logoHost` in `model/logos.mjs` stopped at `:` alone (the refusal lines and
+`confirmLogosMessage`, which the HOST renders, printed `cdn.test;sid=secret`;
+found by the recheck's rule-15 search over the shape "a printed host that
+stops at `:` only"). The cut is ONE function per mirror, `cut_host_params`
+in `bin/helper/02-sources.py` and `cutHostParams` in `model/sources.mjs`,
+shared by `host_port_of`/`hostPortOf` and `logo_host`/`logoHost`, and the
+shared logo-survey fixture carries the case. Three helper readers still print
+the authority whole and are recorded on the board under D-SINK-30, not
+fixed here: `source_host` and `url_host` in `01-core.py` (urllib
+`hostname`), and `fetch_logo`'s own `host` in `05-ipc-logos.py`
+(`parsed.netloc.lower()`, into the `logo_redirect`, `logo_timeout`,
+`logo_too_large`, `logo_type` and `logo_fetch` refusal lines).
+`MAX_LOGO_BYTES` stays, bounding the axis it always bounded.
 **The cache written by 0.13.3 and earlier was never checked, so the fix is
 not complete without a sweep.** The guide points an `Image` at a cache file
 only when the helper announced that name, FOR THE DIRECTORY IT ANNOUNCED IT
 FOR (`Model.logoSlot`, `Model.wallTile`, `Service.qml` `logoHave`), and
 there are exactly two `Image` elements in the shipped tree, the wall tile
-and the row slot, both fed that way. So the "already on disk" branch of
+and the row slot, both fed that way. Since D-LOGO-19 (2026-10-24) both are
+also fed `have` LESS the paths whose `Image` reported `Image.Error` this
+session (`Guide.logoBroken`, `Model.logoHaveLess`), so a cached file that
+passes every helper header gate and still fails the decoder is tried once
+and journaled once instead of on every delegate realisation. The residual
+is the mechanism, not a corner of it: `Image.Error` is one status for every
+failure to load -- a decoder rejection, a file that cannot be opened, an
+announced file that is no longer there (a cache cleared by hand under a
+running shell; a source removed and re-added gets the same fnv key and so
+the same directory) -- and nothing clears a mark, so a later fetch that
+writes a good file to the same path and announces it stays hidden until the
+shell restarts. Before the fix that file cost a retry on every realisation;
+now it costs one restart. So the "already on disk" branch of
 `logos --fetch` proves each cached file with `logo_file_within_bounds`
 BEFORE announcing it; a file that fails is unlinked, not announced, counted
 as `swept`, and falls through to the fetch, which refuses the same bytes at
@@ -3829,7 +3917,7 @@ Performance budget (10k channels):
     -- about three times the quarter of an hour D-LOGO-8 measured for a
     first enable of 1,436 logos -- and gives each logo the lesser of its
     own deadline and what is left of the run's, so the run ends by that mark
-    plus the host-name lookup; what it held back is `postponed` and
+    plus one wait slice of the lookup; what it held back is `postponed` and
     `runExpired` in the summary, and the next run fetches it, because a file
     on disk is never fetched again. The shell's `logoFetchWatchdog` is the
     outer bound, `Model.LOGO_FETCH_WATCHDOG_MS` = the run's deadline + one
@@ -3837,10 +3925,32 @@ Performance budget (10k channels):
     the interpreter's start and the lookup, armed and stopped by the
     Process's own `running` state; it TERMs the helper and logs no URL. The
     three numbers are one shared fixture, `tests/fixtures/logo-deadlines.json`,
-    which both suites read. What no signal cuts short, stated rather than
-    rounded away: `getaddrinfo`, which runs in the C library and retries its
-    own poll after a signal, so a host-name lookup ends on the system
-    resolver's timeout and the handler runs then (UNVERIFIED by run). The
+    which both suites read. What no signal cut short, and was stated as
+    UNVERIFIED until it was measured (D-SRC-62): `getaddrinfo` runs in the
+    C library and retries its own poll after a signal, so a host-name
+    lookup ended on the system resolver's timeout and the handler ran
+    then. Measured 2026-10-24 (`scripts/dev-harness/spikes/resolver-overrun`,
+    a user namespace with its own network, `hosts: files dns` bind-mounted
+    over the host's nsswitch so nss-resolve cannot answer, and a resolver
+    that never does): with a 0.5 s deadline the `playlist` verb answered
+    `timeout` after 1.26-1.28 s under `options timeout:1 attempts:1` and
+    10.29-10.35 s under glibc's defaults, against a bare lookup of
+    1.04-1.09 s and 10.05-10.06 s. So the lookup now runs on a daemon
+    thread the main thread waits for in 50 ms slices (`resolve_within`),
+    which the alarm interrupts as it interrupts a read, and the address it
+    found is the one the socket connects to: `bounded_create_connection`
+    is installed as every connection's `_create_connection` by
+    `bounded_handlers`, which both openers (`make_opener`, `logo_opener`)
+    are built with, so a redirect hop's lookup is bounded like the first.
+    The same rig after the fix: 0.77-0.84 s under both resolver settings,
+    the 0.27-0.34 s over the deadline being the interpreter's start and
+    the parts' compile, which the before-run shows too. Off the main
+    thread, where no alarm can be installed, the lookup is held to the
+    per-socket timeout as a connect is. It is the only thread the helper
+    starts; the FetchDeadline docstring says so, where it used to say none.
+    Pinned by `tests/test_fetch_bounds.py` `LookupBoundTest` with a double
+    of the C library's shape (SIGALRM blocked for the lookup's whole
+    delay), four of whose five cases are red on a9d20f9. The
     test-only `OMARCHY_IPTV_HTTP_DEADLINE` now only LOWERS the budget, as
     `OMARCHY_IPTV_MEMORY_LIMIT_MB` does; it used to take any figure. So
     does `OMARCHY_IPTV_CLIPBOARD_DEADLINE` since F-HARNESS-36 (R32f), the
@@ -3919,29 +4029,74 @@ Performance budget (10k channels):
     ran at start only, so one session that switched through fifty sources
     kept fifty folders until the next start. One folder holds at most
     1,310,720,000 bytes (1.22 GiB, D-LOGO-12), and a folder grows only
-    while its source is active, which ends in a switch. So at every moment
-    of a session, not only after a restart, the install holds the active
-    source's folder and those of sources whose last fetch started or ended
-    within the past day: **1.22 GiB x (1 + the sources given logos in the
-    day before the last start or switch)**. `MAX_SOURCES` x 1.22 GiB,
-    65.5 GB, is reachable only by switching through all fifty with logos
-    on inside one day and filling each to its ceiling. UNVERIFIED at size;
-    arithmetic over the code; the switch prune is pinned through
-    `tests/service-harness.js`, which runs the directory's change handler
-    from its own text. The removal takes the folder's flock, non-blocking,
+    while its source is active, which ends in a switch. **The count cap
+    (D-LOGO-17's remainder, the lead's ruling of 2026-10-24, K = 2):**
+    `cache prune` keeps the day rule for the `LOGO_KEPT_FOLDERS` (2) kept,
+    non-active sources whose folder was most recently marked by a fetch
+    run -- ranked by that mark, the clock `age_logo_folder` reads, equal
+    marks by name -- and removes every other kept, non-active folder at
+    once, whatever its age (`age_logo_folder` with `LOGO_AGE_ANY`, so the
+    flock and the `busy` answer hold as they do under the day rule; a held
+    folder in a kept slot occupies it, a held one in the surplus is left
+    for the next prune). So at every moment of a session, not only after
+    a restart, the install holds at most three folders: **1.22 GiB x
+    (1 + 2) = 3.66 GiB**. The figure this replaces was 1.22 GiB x (1 + the
+    sources given logos in the day before the last start or switch), and
+    `MAX_SOURCES` x 1.22 GiB, 65.5 GB, was reachable by switching through
+    all fifty with logos on inside one day; the third-most-recent folder
+    now goes at the switch that makes it third. The cost, by the ruling: a
+    user rotating through four or more sources with logos on re-fetches a
+    source's logos at each switch that cycles back to it, which contacts
+    that source's logo hosts again (the disclosure R5 bounds), where the
+    day rule alone re-fetched only after a day away. What the prune does
+    NOT age, the rule-15 sibling by shape (a per-source cap times
+    `MAX_SOURCES`): a kept source's `channels.json`, at most
+    `MAX_SOURCE_BYTES` (64 MiB) each, 50 x 64 MiB = 3.2 GB across the
+    history by arithmetic; deliberate, because a kept source switches back
+    without a fetch and only `cache remove` takes its list. UNVERIFIED at
+    size; arithmetic over the code; the count cap is pinned by
+    `tests/test_logo_run.py` (`LogoFolderAgeTest`, two cases red on
+    a9d20f9) and the switch prune through `tests/service-harness.js`,
+    which runs the directory's change handler from its own text. The removal takes the folder's flock, non-blocking,
     on a descriptor opened `O_NOFOLLOW` and held across it (D-LOGO-21,
     R32f): a folder a running fetch holds -- a `logos --fetch` from a
     terminal on a non-active source, which the shell never starts -- is
     skipped, named in `busyLogos`, said once on stderr for however many,
     and aged by the next prune; before, such a run could lose its folder
     mid-run and `write_logo` then recreated an unlocked, uncounted one.
-    What stays as it was, stated (D-LOGO-22): a logo URL that failed --
-    timeout, refusal, 404 -- is tried once per run (the run's `seen` set
-    remembers every URL it looked at, pinned) and again at the next run;
-    nothing records a failure on disk, and `LOGO_RUN_DEADLINE` bounds what
-    a dead host costs a run. The cost, by the ruling: switching back to a
-    source whose folder was aged fetches its logos again, which contacts
-    those hosts again.
+    **The failure memo (D-LOGO-22, the lead's ruling of 2026-10-24).** A
+    logo URL that failed -- timeout, a refusal at the gate, an HTTP or
+    network error -- used to be tried once per run (the run's `seen` set)
+    and again at every next run, and the row's unnamed half was worse than
+    a retry: after `LOGO_RUN_DEADLINE` every later URL is `postponed`, and
+    the next run walked `channels` from the top with a fresh `seen`, so a
+    head of dead addresses (each up to min(`LOGO_DEADLINE`, what was left))
+    ate the same hour every run and the live logos behind it were never
+    reached; "the next run starts where this one stopped" was true of files
+    that landed and of nothing else. Now `fetch_logo_run` keeps
+    `logo-failed.json` beside the folder, in the source's directory (never
+    inside `logos/`, whose census counts entries; in `CACHE_FILES`, so
+    `cache remove` and the prune of an unkept key take it along): a map of
+    logo file name (the URL's fnv1a32, the name the folder already uses)
+    to `{at, reason}`, the reason one of the helper's own codes, never a
+    URL (rule 5), 0600, written atomically. One TTL, `LOGO_FAILED_TTL` =
+    `DEFAULT_EPG_MAX_AGE` (a day), so a host that was down is tried again
+    tomorrow; at most `LOGO_FAILED_MAX` (5,000, `MAX_LOGO_FILES`' figure)
+    entries, a full memo recording nothing new until one expires. It is
+    consulted after the on-disk check (a file on disk is announced
+    whatever the memo says) and before the ceiling and the deadline, and
+    a memoised address counts in the summary's `skippedFailed` and nowhere
+    else. It is written when the run's deadline is first seen past, not
+    only at the run's end, because a run the shell SIGTERMs (a switch, the
+    setting off) reaches no `finally`; `cache logos-clear` removes it with
+    the folder, so the user's reset is a reset. Pinned by
+    `tests/test_logo_run.py` `LogoFailureMemoTest` and the re-pinned
+    `seen` case (eight cases red on a9d20f9, the starvation case among
+    them: with the run's deadline lowered to one failed fetch's worth, two
+    dead addresses ahead of a live one left it postponed on every run) and
+    `tests/test_cache.py` (a removed source takes its memo along). The cost
+    of the day rule, by the ruling: switching back to a source whose folder
+    was aged fetches its logos again, which contacts those hosts again.
 
     **Leftovers of a killed write (D-SRC-60).** The atomic writers remove
     their temporary on every exit Python sees, and a SIGTERM is not one: the
@@ -4423,7 +4578,7 @@ and security.
 | R7 | Bar widget | Glyph per state, never color-only: idle U+F0502, playing U+F0567, error U+F0503. On horizontal bars, when `showChannelName`, the name is elided at `Style.space(barLabelMaxWidth)`; vertical bars show the glyph only; the tooltip carries the full name and status (UX 6.3). Left click toggles the guide, right click stops, middle click refreshes, wheel zaps one step per tick via `Util.wheelSteps`. |
 | R8 | Model fields the guide binds | **AMENDED 2026-09-24: `failedAt` is no longer session-only and no longer HH:MM.** It is an epoch second, it persists in the per-source cache (`sources/<key>/failed.json`, not `state.json`), and the row renders it as a clock for a failure today and a date for an older one. The rest of the row stands. Original: Per UX 8.1: per channel `favorite`, `playing` (exactly one true), `failedAt` (session-only HH:MM), `epgNow {title, start, stop}`, `epgNext {title}`, `epgFraction` recomputed on a 30 s tick. Guide state: `mode`, `query`, `scopeId`, `cursorIndex`, `status` (ready, loading, refreshing, cached, error), `statusReason`, `statusHost`, `lastUpdated`, `bannerKind`, `resultTotal`, `nowPlaying {name, group, launchedFrom}`. |
 | R9 | Service actions and IPC | Service: `play(id, keepOpen)`, `stop()`, `toggleFavorite(id)`, `removeRecent(id)`, `refresh()`, `zap(delta)` over the zap ring (the list the channel was launched from, UX 3.4; Recent is never a ring), `focusPlayer()` = argv `["hyprctl", "dispatch", "focuswindow", "class:omarchy-iptv"]`. `IpcHandler` verbs: `toggle`, `play`, `stop`, `next`, `previous` (rename `prev`), `refresh`, `status`. |
-| R10 | mpv ownership | **WITHDRAWN: M2-02 detached the player (`docs/ARCHITECTURE-PLAYER.md` records "R10 closed"), and the README no longer states the limitation.** Left here with its marker because an unamended withdrawn ruling sat in this table for two milestones with its QA traceability row still asserting it, which is what this marker exists to stop. Original: Decision 2 stands for M1: attached `Process`, so mpv exits with the shell. The PM's detached-mpv mitigation (risk R3) is deferred to M2. The README documents the limitation. |
+| R10 | mpv ownership | **WITHDRAWN, marked 2026-09-24: M2-02 detached the player (`docs/ARCHITECTURE-PLAYER.md` records "R10 closed"), and the README no longer states the limitation.** Left here with its marker because an unamended withdrawn ruling sat in this table for two milestones with its QA traceability row still asserting it, which is what this marker exists to stop. Original: Decision 2 stands for M1: attached `Process`, so mpv exits with the shell. The PM's detached-mpv mitigation (risk R3) is deferred to M2. The README documents the limitation. |
 | R11 | Stream failure | **AMENDED 2026-09-24 by the product owner: the mark PERSISTS.** Non-zero exit without a user stop: notification per UX 6.4, a `failedAt` epoch on the channel stored in that source's cache, alert glyph on its row. The mark is dropped when the channel next plays, when its id is absent from the current playlist, when it ages out, and when the source is removed. It is deliberately NOT in `state.json`: channel ids are global across sources, so a state-level map would mark another provider's working channel, and it would fall inside D-ID-1's id-rotation blast radius, which that defect's row records as excluded precisely because this was session-only. Original ruling: session-only `failedAt` on the channel. |
 | R12 | Notifications and privacy | Manual refresh (`r`, middle click, IPC `refresh`) notifies on success and failure; timer refresh notifies only on failure. Never render a playlist or EPG URL beyond scheme and host anywhere: guide, tooltip, notification, console. |
 | R13 | Animation and placement | No open/close animation (UX 5.8). The overlay leaves `screen` unset so Hyprland maps it on the focused monitor. |

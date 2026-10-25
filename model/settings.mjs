@@ -374,6 +374,26 @@ function statusReason(status) {
   return scrubUrls(message) || "Unknown error"
 }
 
+// D-SRC-52 (2026-10-24). `lastError` after a playlist status is applied. A
+// failed status writes its reason into `lastError` (applyPlaylistStatus); a
+// good one used to leave it there, so the IPC `status` reply carried the
+// damaged-files sentence of an update's window after the next good load,
+// until a play, a source move or a reset cleared it. Cleared at the sink
+// that set it, and ONLY what it set: a sentence another writer put there (a
+// play failure's, say) is not this function's to clear, which is why it
+// takes the reason the previous status composed rather than a flag.
+//   lastError        the property as it stands
+//   previousReason   Model.statusReason of the status being replaced,
+//                    captured BEFORE the reassignment (the binding moves
+//                    with it)
+//   nextStatus       the status being applied
+function lastErrorAfterStatus(lastError, previousReason, nextStatus) {
+  var held = str(lastError)
+  if (!nextStatus || nextStatus.ok !== true) return statusReason(nextStatus)
+  if (held !== "" && held === str(previousReason)) return ""
+  return held
+}
+
 function statusHost(status) {
   return status && status.sourceHost ? str(status.sourceHost) : ""
 }
@@ -1091,13 +1111,13 @@ export {
   parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
   parseEpgNow, EPG_CHANNELS_OPEN, EPG_STORE_KIND, emptyEpgStore,
   parseEpgNowStore, epgNowIndex, parseHelperStatus, HTTP_REASONS,
-  HELPER_PART_RE, helperDamagedReason, statusReason, statusHost,
-  statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel, labelWarning,
-  labelWarnings, warningLine, footerWarning, findBarEntry, settingOf,
-  boolSetting, clampInt, clampSetting, settingsFrom, entryInputText,
-  entryInputForm, sameEntryInput, ownWriteInForce, settingsWithOwnWrite,
-  ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS, MAX_SEEN_INPUTS,
-  entryInputSeen, entryInputLast, entryInputsSeenAfter, entryInputNotice,
-  ownedEntryPatch, barEntryWritable, entryFlushDisposition, owedMirrorAction,
-  ownedWriteMode, retiredInputsToKeep, sameOwnWrite
+  HELPER_PART_RE, helperDamagedReason, statusReason, lastErrorAfterStatus,
+  statusHost, statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel,
+  labelWarning, labelWarnings, warningLine, footerWarning, findBarEntry,
+  settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
+  entryInputText, entryInputForm, sameEntryInput, ownWriteInForce,
+  settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
+  MAX_SEEN_INPUTS, entryInputSeen, entryInputLast, entryInputsSeenAfter,
+  entryInputNotice, ownedEntryPatch, barEntryWritable, entryFlushDisposition,
+  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, sameOwnWrite
 }

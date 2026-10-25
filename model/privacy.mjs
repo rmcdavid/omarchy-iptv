@@ -9,7 +9,7 @@ import {
   cleanName
 } from "./channels.mjs"
 import {
-  mergeDropNotice, stateUnreadableNotice
+  mergeConflictNotice, mergeDropNotice, stateUnreadableNotice
 } from "./state.mjs"
 import {
   parseHelperStatus, entryInputNotice
@@ -282,6 +282,11 @@ function notifyArgv(event, params) {
     // caps, never a URL, a label, a query or a group name.
     var dropped = mergeDropNotice(p.dropped)
     if (dropped) spec = { title: dropped.title, body: dropped.body, glyph: GLYPHS.alert, urgency: "normal", id: NOTIFY_IDS.mergeDropped }
+  } else if (event === "mergeConflict") {
+    // D-SRC-33: Model.mergeConflictNotice's sentences and nothing else -- a
+    // field name and a source key per conflict, never a value or a URL.
+    var kept = mergeConflictNotice(p.conflicts)
+    if (kept) spec = { title: kept.title, body: kept.body, glyph: GLYPHS.alert, urgency: "normal", id: NOTIFY_IDS.mergeConflict }
   }
   if (!spec) return null
   return ["omarchy-notification-send", "--app-name", "IPTV", "-u", spec.urgency, "-g", spec.glyph, "-r", String(spec.id), spec.title, spec.body]
@@ -315,7 +320,10 @@ function sourceLabel(url) {
   // is the defect redactUrls was fixed for. Both halves are needed: either
   // alone still leaks. M4-01 made this reachable from a remote party, because
   // resolveEpgUrl publishes `hostOf` over a `url-tvg` the PLAYLIST declared.
-  var m = text.match(/^([a-z][a-z0-9+.-]*):\/\/(?:[^\/?#\s]*@)?(\[[^\/?#\s\]]*\]|[^\/\s?#:@\[]+)(?::\d+)?/i)
+  // D-SINK-30: the host group ends at `;`, `=` and `&` too, as runHostParts
+  // cuts the free-text host (reg-name admits them; no real host carries
+  // them), so `http://h.test;sid=SECRET/x` labels as `http://h.test`.
+  var m = text.match(/^([a-z][a-z0-9+.-]*):\/\/(?:[^\/?#\s]*@)?(\[[^\/?#\s\]]*\]|[^\/\s?#:@\[;=&]+)(?::\d+)?/i)
   if (m) {
     var scheme = m[1].toLowerCase()
     if (scheme === "file") return "local file"

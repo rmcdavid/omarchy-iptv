@@ -25,8 +25,8 @@ import {
   formatClock, formatCount, pluralChannels
 } from "./epg.mjs"
 import {
-  CACHE_LAYOUT, MAX_SOURCES, MONTHS, isSourceKey, deriveLabel, uniqueLabel,
-  sameDay
+  CACHE_LAYOUT, MAX_SOURCES, MONTHS, isSourceKey, findSource, deriveLabel,
+  uniqueLabel, sameDay
 } from "./sources.mjs"
 import {
   warnState, normalizeSourceRecord, activeKeyText
@@ -1147,6 +1147,37 @@ function stateSaveLanded(viewText, askedText) {
   return str(viewText) === str(askedText) && str(askedText) !== ""
 }
 
+// D-SRC-39 (2026-10-24). What a `saved` (or `saveFailed`) report means for
+// the BASE, decided from the burst record rather than from the last text
+// alone. stateSaveLanded answers only "is this the LAST text asked for";
+// an earlier write of a burst reports with ITS text, and until now that
+// changed nothing -- so with t1 landed and t2 failed the disk held t1
+// while the base stayed at the file before the burst, a restore of that
+// earlier file then matched the base, was ignored as save-failed, and the
+// next landed save wrote t1's change back over it. The record of the
+// burst (Service.recentSaves, R25a) names every text asked for since the
+// last landing, in order, and writes land in order, so a `saved` whose text
+// is a member of it IS a landing: the base becomes that text and the
+// record is trimmed to the texts after it.
+//   viewText      stateFile.text() as the handler reads it
+//   lastSaveText  the last text asked for
+//   recentSaves   the burst record
+// -> { landed, last, state, remaining }
+//   last       the view's text is the last asked for (stateSaveLanded)
+//   landed     last, or an earlier text of the burst: the file holds it
+//   state      parseState of an earlier landing's text (null otherwise:
+//              the last's state is the caller's lastSaveState)
+//   remaining  the record after this landing
+function stateSaveOutcome(ctx) {
+  var c = ctx || {}
+  var view = str(c.viewText), last = str(c.lastSaveText)
+  var saves = asList(c.recentSaves).map(str)
+  if (stateSaveLanded(view, last)) return { landed: true, last: true, state: null, remaining: [] }
+  var at = view === "" ? -1 : saves.indexOf(view)
+  if (at === -1) return { landed: false, last: false, state: null, remaining: saves }
+  return { landed: true, last: false, state: parseState(view), remaining: saves.slice(at + 1) }
+}
+
 // R15. The reload counter counts BY REASON: one number per reason
 // Model.reloadDisposition can answer, keyed by the reason string itself so
 // the counter cannot name a reason the decision does not (rule 13: joined by
@@ -1480,6 +1511,21 @@ function mergeForeignState(base, ours, theirs, opts) {
     dropped.sources = dropped.sources.filter(function (key) { return key !== migrationKey })
     if (str(out.activeKey) === migrationKey) out.activeKey = t.activeKey
   }
+  // D-SRC-37 (a), 2026-10-24: the pointer the merge keeps must name a record
+  // the merge keeps. Theirs removed (or re-keyed) the active source while
+  // ours held the key, or a hand-edited file dropped the record and kept
+  // the key: the whole-field rule above resolves `activeKey` on its own and
+  // left it dangling, which every reader resolves to "no active source"
+  // (Model.activeKeyOf) with no line saying so. The pointer falls back the
+  // way the helper's own `source remove` and Model.removeSource clear it
+  // (R3) -- so the file never says otherwise -- and the fall-back is a
+  // conflict of its own: the journal line, and D-SRC-33's notice, name the
+  // source it named.
+  var dangling = activeKeyText(out.activeKey)
+  if (dangling !== "" && !findSource(out.sources, dangling)) {
+    conflicts.push({ field: "activeKey", key: dangling, fields: ["removed"] })
+    out.activeKey = ""
+  }
   if (migrationHeld === "" && (entryMigratedOf(o) || entryMigratedOf(t))) out.entryMigrated = true
   else delete out.entryMigrated
   // D-SRC-64: the parked pair (the rule in the header above).
@@ -1494,6 +1540,21 @@ function mergeForeignState(base, ours, theirs, opts) {
   return { state: parseState(JSON.stringify(out)), conflicts: conflicts, dropped: dropped, migrationHeld: migrationHeld }
 }
 
+// D-SRC-43 (2026-10-24). After a merge, is anything of ours still unsaved?
+// The merge becomes memory and theirs becomes the base; when the two are
+// the same state (theirs won every conflict, or the cap dropped the only
+// addition of ours) and none of our writes is still in the air, the disk
+// holds memory exactly -- so a failure flag raised by the save that never
+// landed has nothing left to be about. Until this was asked, that flag
+// (and the guide's "state write failed" line, and the pointer plan's
+// saveFailed input) outlived its cause until some unrelated later save
+// landed. A write in flight is a different matter: it will report on
+// itself, and its text may still be older than the merge.
+function mergeLeavesNothingUnsaved(merged, theirs, ctx) {
+  var c = ctx || {}
+  return (Number(c.savesInFlight) || 0) === 0 && sameState(merged, theirs)
+}
+
 var MERGE_LINE_HEAD = "state.json was changed by another program while a change made here was not yet saved; "
 
 // The console line for one conflict: the field, the source key when it is a
@@ -1505,7 +1566,36 @@ function mergeConflictLine(conflict) {
   var what = str(c.field) === "sources" && isSourceKey(str(c.key))
     ? "the source " + str(c.key) + (asList(c.fields).length > 0 ? " (" + asList(c.fields).map(str).join(", ") + ")" : "")
     : str(c.field)
+  // D-SRC-37 (a): the pointer fell back because the source it named is gone.
+  if (str(c.field) === "activeKey" && isSourceKey(str(c.key))) what += " (the source " + str(c.key) + " it named is gone, so no source is active)"
   return MERGE_LINE_HEAD + "kept the other program's version of " + what
+}
+
+// D-SRC-33 (2026-10-24). What the user is told, ONCE per merge that kept
+// the other program's version of anything over an in-app change not yet
+// saved: one sentence per conflict, composed from a field NAME and a
+// source's short key -- never a value, a label or a URL (a conflict entry
+// carries nothing else). The journal keeps mergeConflictLine's fuller line
+// per conflict; this is the on-screen half the in-flight and parked
+// branches never had (the failed branch was told when its save failed).
+// The title and body are the lead's words (P23). null when nothing
+// conflicted.
+var MERGE_CONFLICT_TITLE = "Settings merged"
+var MERGE_CONFLICT_FIELDS = { activeKey: "The active source", recents: "The recent list", lastPlayed: "The last played channel",
+                              session: "The player session", cacheLayout: "The cache layout" }
+function mergeConflictSentence(conflict) {
+  var c = conflict || {}
+  var field = str(c.field), key = str(c.key), fields = asList(c.fields).map(str)
+  var what
+  if (field === "sources" && isSourceKey(key)) what = "The source " + key + (fields.length > 0 ? " (" + fields.join(", ") + ")" : "")
+  else if (field === "activeKey" && isSourceKey(key)) what = MERGE_CONFLICT_FIELDS.activeKey + " (the source " + key + " it named is gone, so no source is active)"
+  else what = MERGE_CONFLICT_FIELDS[field] || field
+  return what + " kept the other program's version."
+}
+function mergeConflictNotice(conflicts) {
+  var list = asList(conflicts).filter(function (c) { return c && str(c.field) !== "" })
+  if (list.length === 0) return null
+  return { title: MERGE_CONFLICT_TITLE, body: list.map(mergeConflictSentence).join(" ") }
 }
 
 function mergeDropCount(dropped) {
@@ -1655,10 +1745,21 @@ function stateInitFound(text, exitCode, timedOut) {
 //   ctx.loadedBefore a state has been applied this session
 //   ctx.initFound    Model.stateInitFound, "" until the start-up init exits
 //   ctx.retried      the one re-read after the init has been spent
+//   ctx.initRetried  the one re-run of the INIT has been spent (D-REL-8)
 // -> { act, reason }
 //   apply  the load is a state: apply it (and lift any no-write mode)
 //   fresh  nothing exists at the path: an empty state, the migration may run
 //   wait   the start-up init has not answered; nothing is applied or written
+//   reinit D-REL-8 (2026-10-24): the init answered NOTHING it could be read
+//          by -- exit 0 with no `state init` line (an EMPTY stub, mid-update:
+//          git rewrites bin/omarchy-iptv in place after the parts), or a
+//          non-zero exit (a partial stub's SyntaxError, the old stub refusing
+//          new parts with helper_damaged, D-REL-12) -- so run `state init`
+//          once more after about a second. The window is milliseconds and
+//          the outcome without this was a whole session in the no-write mode
+//          for a shell that started inside it. A second "unknown" falls
+//          through to today's path. R23c stands: a TIMED-OUT init is never
+//          re-run (the filesystem that held it would hold the re-run).
 //   retry  re-read once: the init restores the modes of the directory and
 //          file it finds, so the file may be readable now (it is, for both
 //          chmod 0000 cases; a 0000 file also raises its own reload)
@@ -1680,6 +1781,7 @@ function stateLoadDecision(ctx) {
   // there is no witness and nothing a re-read could fix: the load that was
   // waiting on it decides as the no-write mode, with that reason.
   if (found === "timeout") return { act: "block", reason: "init-timeout" }
+  if (found === "unknown" && c.initRetried !== true) return { act: "reinit", reason: kind }
   if (kind === "absent" && found === "absent") return { act: "fresh", reason: "absent" }
   if (c.retried !== true) return { act: "retry", reason: kind }
   // R24b: the helper named what is at the path, and that is the reason --
@@ -1687,6 +1789,31 @@ function stateLoadDecision(ctx) {
   // the user to chmod a folder that is fine.
   if (found === "link" || found === "not-a-dir" || found === "folder-link") return { act: "block", reason: found }
   return { act: "block", reason: kind === "absent" && found !== "unknown" ? "absent-unconfirmed" : kind }
+}
+
+// D-SRC-49 / D-SINK-22 (b)(c), 2026-10-24. The argv of the helper's
+// `state mode`, which the service runs after every save that LANDS: the
+// FileView keeps an existing file's mode and creates a missing one at the
+// umask's, so a state.json the user put at the path at 0644, or one a save
+// created after a re-point, is made 0600 (and its folder 0700) within the
+// stub's start rather than at the next shell start. Argv only, no URL.
+function stateModeArgv(helperPath, stateDir) {
+  return ["python3", str(helperPath), "state", "--state-dir", str(stateDir), "mode"]
+}
+
+// The verb's one-line reply -> { folder, file } ("changed" | "kept"), or
+// null for anything that is not that reply (a run the watchdog stopped
+// prints nothing). A `changed` is worth a journal line; `kept` is the
+// steady state and is silent.
+function stateModeReply(text) {
+  var lines = str(text).split("\n")
+  for (var i = lines.length - 1; i >= 0; i--) {
+    var o = parseJsonObject(lines[i])
+    if (!o || o.ok !== true || o.kind !== "state" || o.action !== "mode") continue
+    var pick = function (v) { return str(v) === "changed" ? "changed" : "kept" }
+    return { folder: pick(o.folder), file: pick(o.file) }
+  }
+  return null
 }
 
 // The one gate every state write goes through (Service.saveState).
@@ -1894,12 +2021,15 @@ export {
   toggleHiddenGroup, browsableChannels, hideAction, hideVerb, removeRecent,
   trimRecents, MAX_FAILED, FAILED_TTL_SEC, parseFailed, normalizeFailed,
   prunedFailed, knownIdSet, failedIndex, failedDocument, failedWhen,
-  withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded, countReload,
-  reloadDisposition, sortedKeys, stateCanonical, sameState, canonValue,
-  mergeSetField, recordFieldsDiffering, MERGE_WHOLE_FIELDS, mergeForeignState,
-  MERGE_LINE_HEAD, mergeConflictLine, mergeDropCount, mergeDropLines,
-  migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
-  stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
+  withFailed, failedAfterHealthy, withoutFailed, stateSaveLanded,
+  stateSaveOutcome, countReload, reloadDisposition, sortedKeys,
+  stateCanonical, sameState, canonValue, mergeSetField, recordFieldsDiffering,
+  MERGE_WHOLE_FIELDS, mergeForeignState, mergeLeavesNothingUnsaved,
+  MERGE_LINE_HEAD, mergeConflictLine, MERGE_CONFLICT_TITLE,
+  MERGE_CONFLICT_FIELDS, mergeConflictSentence, mergeConflictNotice,
+  mergeDropCount, mergeDropLines, migrationHeldAgainLine, mergeDropNotice,
+  STATE_LOAD_ERRORS, stateLoadKind, stateInitFound, stateLoadDecision,
+  stateModeArgv, stateModeReply, stateWriteGate, stateSavePlan,
   stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
   STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
   stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader

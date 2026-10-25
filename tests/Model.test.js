@@ -2333,7 +2333,7 @@ checkCall("M2-04: every shared logo-survey case matches the agreed answer", func
     })
   })
   return [logoFixture.cases.length, bad]
-}, [10, []])
+}, [11, []])
 
 checkCall("M2-04: userinfo never reaches the consent text", function () {
   // CLAUDE.md rule 5. The consent dialog is a sink and it was missing from
@@ -2343,6 +2343,22 @@ checkCall("M2-04: userinfo never reaches the consent text", function () {
   return [survey.hosts.length, survey.refused, survey.wouldContact,
           /pass|user@|provider\.test/.test(text)]
 }, [0, 1, 0, false])
+
+// D-SINK-30 (2026-10-24), the recheck's rule-15 finding: a reg-name
+// parameter is a valid authority (`https://cdn.test;sid=SECRET/a.png`) and
+// splitLogoUrl stopped at `:` alone, so the consent dialog the HOST renders
+// named the busiest host as `cdn.test;sid=secret`. The cut is the Sources
+// row's own (Model.cutHostParams, one copy), reached here through the
+// shipping composer: survey -> consent lines -> confirmLogosMessage.
+checkCall("D-SINK-30: the consent dialog's host ends at the first `;`, `=` or `&`, as the Sources row's does -- through confirmLogosMessage, the string the host draws", () => {
+  const survey = Model.logoSurvey([{ logo: "https://cdn.test;sid=SECRET/a.png" }, { logo: "https://cdn.test:8443;sid=SECRET/b.png" },
+                                   { logo: "https://other.test=SECRET/c.png" }, { logo: "https://other.test&k=SECRET/d.png" }])
+  const message = Model.confirmLogosMessage(survey)
+  return [survey.hosts, Model.splitLogoUrl("https://cdn.test;sid=SECRET/a.png"), Model.splitLogoUrl("https://[::1]:8443;sid=SECRET/x"),
+          Model.splitLogoUrl("https://cdn.test;u=p@evil.test/g.png").host,
+          message.indexOf("cdn.test (2 channels)") !== -1, /secret|sid|;|=|&/i.test(message)]
+}, [[{ host: "cdn.test", channels: 2 }, { host: "other.test", channels: 2 }], { scheme: "https", host: "cdn.test" }, { scheme: "https", host: "[::1]" },
+    "", true, false])
 
 checkCall("M2-04: the setting FAILS CLOSED, unlike every other boolean here", function () {
   // boolSetting is "anything but false means on", which would let
@@ -4674,10 +4690,12 @@ check("clampSetting unknown key passthrough", Model.clampSetting("nope", "v"), "
 
 // ---- mpv ----
 check("splitMpvArgs accepts options", Model.splitMpvArgs(" --profile=low-latency --hwdec=auto-safe --no-osc "), { args: ["--profile=low-latency", "--hwdec=auto-safe", "--no-osc"], rejected: [], warnings: [] })
-check("splitMpvArgs rejects reserved and junk", Model.splitMpvArgs("--input-ipc-server=/x --title=y ; rm -rf --no-idle --cache=yes"), { args: ["--cache=yes"], rejected: ["--input-ipc-server=/x", "--title=y", ";", "rm", "-rf", "--no-idle"], warnings: [] })
+check("splitMpvArgs rejects reserved and junk", Model.splitMpvArgs("--input-ipc-server=/x --title=y ; rm -rf --no-idle --cache=yes"), { args: ["--cache=yes"], rejected: ["--input-ipc-server=/x", "--title=y", ";", "rm", "-rf", "--no-idle"],
+  // F-UX-7: the refused ones are named in `warnings` too, by option name, one `<token>` line for the junk
+  warnings: ["mpvArg --input-ipc-server refused: reserved by the plugin", "mpvArg --title refused: reserved by the plugin", "mpvArg <token> refused: not a --option", "mpvArg --no-idle refused: reserved by the plugin"] })
 check("splitMpvArgs rejects --script and --config-dir", Model.splitMpvArgs("--script=/e.lua --config-dir=/x --scripts=/y --input-ipc-client=fd://3").args, [])
 check("splitMpvArgs empty", Model.splitMpvArgs(null), { args: [], rejected: [], warnings: [] })
-check("splitMpvArgs is case-sensitive (D-QA-11)", Model.splitMpvArgs("--Profile=fast --HWDEC=auto --profile=fast"), { args: ["--profile=fast"], rejected: ["--Profile=fast", "--HWDEC=auto"], warnings: [] })
+check("splitMpvArgs is case-sensitive (D-QA-11)", Model.splitMpvArgs("--Profile=fast --HWDEC=auto --profile=fast"), { args: ["--profile=fast"], rejected: ["--Profile=fast", "--HWDEC=auto"], warnings: ["mpvArg <token> refused: not a --option"] })
 check("splitMpvArgs rejects --no- forms of every reserved option", Model.splitMpvArgs("--no-input-ipc-server --no-wayland-app-id --no-title --no-force-media-title --no-idle --no-script --no-scripts --no-config-dir --no-input-ipc-client").args, [])
 check("headerArgs maps UA/referer and appends others", Model.headerArgs({ "User-Agent": "VLC", Referer: "http://r", "X-Token": "a,b" }), ["--user-agent=VLC", "--referrer=http://r", "--http-header-fields-append=X-Token: a,b"])
 check("headerArgs drops unsafe", Model.headerArgs({ "Bad Name": "x", Ok: "line\nbreak" }), [])
@@ -4742,7 +4760,7 @@ checkCall("the working directory is never the home the shell runs in", () => {
 }, [false, false, true])
 checkCall("dirnameOf behaves like os.path.dirname on the paths this plugin uses", () => [Model.dirnameOf("/a/b/c.sock"), Model.dirnameOf("/c.sock"), Model.dirnameOf("c.sock"), Model.dirnameOf("")], ["/a/b", "/", "", ""])
 checkCall("--watch-later-dir stays reserved so a resume record cannot be aimed at $HOME", () => Model.splitMpvArgs("--watch-later-dir=/home/u --screenshot-dir=/home/u/Pictures"),
-  { args: ["--screenshot-dir=/home/u/Pictures"], rejected: ["--watch-later-dir=/home/u"], warnings: [] })
+  { args: ["--screenshot-dir=/home/u/Pictures"], rejected: ["--watch-later-dir=/home/u"], warnings: ["mpvArg --watch-later-dir refused: reserved by the plugin"] })
 checkCall("a user who wants their screenshots elsewhere still wins (last token wins)", () => {
   const a = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: STATE_DIR, extraArgs: ["--screenshot-dir=/home/u/Pictures"] })
   return a.indexOf("--screenshot-dir=" + STATE_DIR + "/screenshots") < a.lastIndexOf("--screenshot-dir=/home/u/Pictures")
@@ -5156,7 +5174,7 @@ check("M5-01: --demuxer-cache-unlink-files is reserved and --cache-on-disk is no
   [Model.MPV_RESERVED["--demuxer-cache-unlink-files"], Model.MPV_RESERVED["--cache-on-disk"], Model.MPV_DISK_WARN["--cache-on-disk"]], [true, undefined, true])
 check("M5-01: every spelling of the unlink switch is rejected, and the disk cache itself is kept and warned",
   Model.splitMpvArgs("--demuxer-cache-unlink-files=no --no-demuxer-cache-unlink-files --demuxer-cache-unlink-files=whendone --cache-on-disk"),
-  { args: ["--cache-on-disk"], rejected: ["--demuxer-cache-unlink-files=no", "--no-demuxer-cache-unlink-files", "--demuxer-cache-unlink-files=whendone"], warnings: ["mpvArg --cache-on-disk" + Model.MPV_DISK_TEXT] })
+  { args: ["--cache-on-disk"], rejected: ["--demuxer-cache-unlink-files=no", "--no-demuxer-cache-unlink-files", "--demuxer-cache-unlink-files=whendone"], warnings: ["mpvArg --demuxer-cache-unlink-files refused: reserved by the plugin", "mpvArg --no-demuxer-cache-unlink-files refused: reserved by the plugin", "mpvArg --cache-on-disk" + Model.MPV_DISK_TEXT] })
 
 checkCall("D-SINK-4: --load-scripts is RESERVED, not merely defaulted off", function () {
   // The base argv says --load-scripts=no, but user tokens are concatenated
@@ -5206,9 +5224,13 @@ HANDOFF.cases.forEach(vector => {
 })
 checkCall("splitMpvArgs carries the warning for the tokens it KEEPS", () => Model.splitMpvArgs("--ytdl=yes --hwdec=auto"),
   { args: ["--ytdl=yes", "--hwdec=auto"], rejected: [], warnings: ["mpvArg --ytdl" + HANDOFF_TEXT] })
-checkCall("a REJECTED token never warns: it never reaches mpv (--script is reserved)",
+// F-UX-7 (2026-10-24): a REJECTED token never reaches mpv, so it draws no
+// HANDOFF sentence -- but it is no longer silent: it is named, by option
+// name, with the refused sentence, BEFORE the kept tokens' lines (the
+// footer prints the first line and counts the rest).
+checkCall("a REJECTED token draws no handoff warning (it never reaches mpv) but is named as refused (--script is reserved), ahead of the kept token's line",
   () => Model.splitMpvArgs("--script=/tmp/ytdl_hook.lua --script-opts=ytdl_hook-ytdl_path=/tmp/x").warnings,
-  ["mpvArg --script-opts" + HANDOFF_TEXT])
+  ["mpvArg --script" + Model.MPV_REFUSED_TEXT, "mpvArg --script-opts" + HANDOFF_TEXT])
 checkCall("the warning names the option and never its value (a proxy URL stays out of the sink)", () => {
   const w = Model.splitMpvArgs("--ytdl-raw-options=proxy=http://u:pw@prox.test:8080").warnings
   return [w.length, w[0].indexOf("prox.test") !== -1, w[0].indexOf("pw") !== -1, w[0]]
@@ -5608,6 +5630,24 @@ check("sourceLabel https", Model.sourceLabel("HTTPS://Host.Test/x.m3u"), "https:
 check("sourceLabel local", [Model.sourceLabel("/home/x/list.m3u"), Model.sourceLabel("~/l.m3u"), Model.sourceLabel("file:///tmp/x.m3u")], ["local file", "local file", "local file"])
 check("sourceLabel empty / junk", [Model.sourceLabel(""), Model.sourceLabel("ftp"), Model.sourceLabel(null)], ["", "unknown source", ""])
 check("hostOf", [Model.hostOf("http://u:p@h.test/x"), Model.hostOf("/x"), Model.hostOf("")], ["h.test", "local file", ""])
+// D-SINK-30 (2026-10-24). RFC 3986's reg-name admits `;`, `=` and `&`, so
+// `http://h.test;sid=SECRET/x` validated with host `h.test;sid=secret` and
+// the DISPLAY sinks printed the parameter: sourceLabel's host group ended at
+// `:` only, and hostPortOf (the Sources row's host and default label, pinned
+// by the shared source-labels fixture above) took the authority whole. The
+// free-text redactor had cut at the four since R32a'. The printed host now
+// ends at the first `;`, `=` or `&`; validation is unchanged (D-SINK-27).
+checkCall("D-SINK-30: sourceLabel and hostOf end the host at `;`, `=` and `&`, keep a port and a bracketed literal", () =>
+  ["http://h.test;sid=SECRET/x", "http://h.test=SECRET/x", "http://h.test&p=SECRET/x", "http://u:p@h.test;sid=SECRET/x",
+   "http://h.test:8080;sid=SECRET/x", "http://[::1]:8080;sid=SECRET/x"].map(u => Model.sourceLabel(u) + " | " + Model.hostOf(u)),
+  ["http://h.test | h.test", "http://h.test | h.test", "http://h.test | h.test", "http://h.test | h.test",
+   "http://h.test | h.test", "http://[::1] | [::1]"])
+checkCall("D-SINK-30: the label fixture carries the parameter-delimiter cases, so it cannot be trimmed to green", () => {
+  const labelFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/source-labels.json"), "utf8"))
+  return [labelFixture.cases.filter(c => /;/.test(c.url)).length >= 2, labelFixture.cases.filter(c => /^[^?]*=/.test(c.url)).length >= 1,
+   labelFixture.cases.filter(c => /^[^?]*&/.test(c.url)).length >= 1,
+   labelFixture.cases.filter(c => /[;=&]/.test(c.hostPort) || /[;=&]/.test(c.label)).length]
+}, [true, true, true, 0])
 check("redactUrls replaces every URL by its host (D-QA-01)", Model.redactUrls("Failed to open http://user:pass@tv.example.net:8080/get.php?u=1&p=2."), "Failed to open tv.example.net.")
 check("redactUrls several URLs", Model.redactUrls("open https://a.b/c/d?e=f and rtsp://u:p@h:554/x fine"), "open a.b and h fine")
 check("redactUrls no urls", Model.redactUrls("plain text"), "plain text")
@@ -7866,18 +7906,24 @@ check("R22a: stateInitFound -- only the init's own `absent` is absent; a file, a
    ['{"ok":true,"kind":"state","action":"init","created":true}', 0], ['{"ok":true,"kind":"state","action":"init","found":"ABSENT"}', 0],
    ["warning\n" + '{"ok":true,"kind":"state","action":"init","found":"absent"}', 0], ["not json", 0]].map(a => Model.stateInitFound(a[0], a[1])),
   ["absent", "present", "present", "present", "unknown", "unknown", "unknown", "unknown", "unknown", "absent", "unknown"])
-check("R22a: stateLoadDecision -- a state applies; mid-session anything else blocks at once; at a start it waits for the init, is fresh ONLY when the load and the helper both say absent, and is otherwise re-read once and then blocks",
+// D-REL-8 (2026-10-24): an init that answered nothing readable ("unknown")
+// is RE-RUN once before the file is re-read (the `initRetried: true` cases
+// are the table as it stood, one re-run later).
+check("R22a: stateLoadDecision -- a state applies; mid-session anything else blocks at once; at a start it waits for the init, is fresh ONLY when the load and the helper both say absent, re-runs an init that answered nothing readable once (D-REL-8), and is otherwise re-read once and then blocks",
   [{ kind: "loaded" }, { kind: "loaded", loadedBefore: true }, { kind: "" },
    { kind: "permission", loadedBefore: true }, { kind: "absent", loadedBefore: true, initFound: "absent" }, { kind: "unparsed", loadedBefore: true },
    { kind: "absent" }, { kind: "absent", initFound: "absent" }, { kind: "absent", initFound: "present" }, { kind: "absent", initFound: "present", retried: true },
-   { kind: "absent", initFound: "unknown" }, { kind: "absent", initFound: "unknown", retried: true },
+   { kind: "absent", initFound: "unknown", initRetried: true }, { kind: "absent", initFound: "unknown", retried: true, initRetried: true },
    { kind: "permission", initFound: "absent" }, { kind: "permission", initFound: "present", retried: true },
    { kind: "unparsed", initFound: "present" }, { kind: "unparsed", initFound: "present", retried: true },
-   { kind: "not-a-file", initFound: "present", retried: true }, { kind: "io-error", initFound: "present", retried: true }, null
+   { kind: "not-a-file", initFound: "present", retried: true }, { kind: "io-error", initFound: "present", retried: true }, null,
+   { kind: "absent", initFound: "unknown" }, { kind: "permission", initFound: "unknown" }, { kind: "absent", initFound: "unknown", retried: true },
+   { kind: "absent", initFound: "timeout" }, { kind: "absent", initFound: "timeout", initRetried: true }, { kind: "absent", initFound: "absent", initRetried: true }
   ].map(c => { const d = Model.stateLoadDecision(c); return d.act + "/" + d.reason }),
   ["apply/loaded", "apply/loaded", "wait/no-load", "block/permission", "block/absent", "block/unparsed",
    "wait/init", "fresh/absent", "retry/absent", "block/absent-unconfirmed", "retry/absent", "block/absent",
-   "retry/permission", "block/permission", "retry/unparsed", "block/unparsed", "block/not-a-file", "block/io-error", "wait/no-load"])
+   "retry/permission", "block/permission", "retry/unparsed", "block/unparsed", "block/not-a-file", "block/io-error", "wait/no-load",
+   "reinit/absent", "reinit/permission", "reinit/absent", "block/init-timeout", "block/init-timeout", "fresh/absent"])
 check("R22a: stateWriteGate -- the no-write mode refuses whatever else is true; before any state has loaded or before the dirs are ready a save PARKS; it writes only when loaded, ready and not blocked",
   [{ blocked: "permission", loaded: true, dirsReady: true }, { blocked: "unparsed" }, { loaded: false, dirsReady: true }, { loaded: true, dirsReady: false },
    { loaded: true, dirsReady: true }, { loaded: "true", dirsReady: true }, { blocked: "", loaded: true, dirsReady: true }, null].map(c => Model.stateWriteGate(c)),
@@ -8149,14 +8195,19 @@ checkCall("R11 (structural): stateInitProc's exit issues the parked save, THEN s
     // 700: R26b's handler-depth count and its try now wrap the body, the
     // landed branch and the settle unchanged inside it, 2026-10-16;
     // 900 / 1400: R27a's end of the write wait joined both landed branches,
-    // 2026-10-20, the settle unchanged after it)
-    savedSettles: /onSaved: \{[\s\S]{0,900}root\.settleEntryFlush\(\)/.test(serviceSource),
-    saveFailedSettles: /onSaveFailed: \(error\) => \{[\s\S]{0,1400}root\.stateSaveFailed = true[\s\S]{0,100}root\.settleEntryFlush\(\)/.test(serviceSource),
+    // 2026-10-20, the settle unchanged after it;
+    // 2100 / 1600: D-SRC-39's earlier-landing branch and D-SRC-49's mode
+    // repair joined onSaved and the outcome call lengthened onSaveFailed's
+    // guard, 2026-10-24)
+    savedSettles: /onSaved: \{[\s\S]{0,2100}root\.settleEntryFlush\(\)/.test(serviceSource),
+    saveFailedSettles: /onSaveFailed: \(error\) => \{[\s\S]{0,1600}root\.stateSaveFailed = true[\s\S]{0,100}root\.settleEntryFlush\(\)/.test(serviceSource),
     // R13: the outstanding flag is raised BEFORE setText with the text kept,
     // and cleared on either signal ONLY when the view reports on that text
-    // (Model.stateSaveLanded), never by counting signals.
+    // (Model.stateSaveLanded; since D-SRC-39 through Model.stateSaveOutcome's
+    // `last`, decided from the same text and the burst record), never by
+    // counting signals.
     marksBeforeWrite: /root\.lastSaveText = text\n\s*root\.stateSavesInFlight = 1\n\s*stateFile\.setText\(text\)/.test(serviceSource),
-    landsByContent: (serviceSource.match(/if \(Model\.stateSaveLanded\(stateFile\.text\(\), root\.lastSaveText\)\)[^\n]*\n?[^\n]*root\.stateSavesInFlight = 0/g) || []).length,
+    landsByContent: (serviceSource.match(/Model\.stateSaveOutcome\(\{ viewText: stateFile\.text\(\), lastSaveText: root\.lastSaveText, recentSaves: root\.recentSaves \}\)[\s\S]{0,120}root\.stateSavesInFlight = 0/g) || []).length,
     neverCounts: serviceSource.indexOf("root.stateSavesInFlight - 1") === -1 && serviceSource.indexOf("root.stateSavesInFlight + 1") === -1
   }
 }, { blockFound: true, readsExitCode: true, savesThenSettles: true, exitNeverFlushesDirectly: true, flushSites: 1,
@@ -12783,6 +12834,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     touchSource: () => [Model.touchSource(S, KB, 100)],
     withSourceStats: () => [Model.withSourceStats(S, KB, { ok: true, channelCount: 3, groupCount: 1, fetchedAt: 99 }, 100)],
     withActiveKey: () => [Model.withActiveKey(S, KB)],
+    // D-SRC-14: the probe commit's fold of the pointer (a reducer the commit
+    // hands the state to), driven both ways.
+    probeCommitState: () => [Model.probeCommitState(S, { wasActive: true, act: "switch" }, KB), Model.probeCommitState(S, { wasActive: false, act: "switch" }, KB)],
     withCacheLayout: () => [Model.withCacheLayout(S, 2), Model.withCacheLayout(S, 0)],
     withFavorites: () => [Model.withFavorites(S, ["a", "b"])],
     withSavedSearch: () => [Model.withSavedSearch(S, "news", 100).state],
@@ -13561,10 +13615,15 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         const migrate = h.cacheRuns.filter(c => c.indexOf("migrate") !== -1).length
         return [h.root.stateWriteBlocked, h.root.activeSourceKey === KNEW, summary(h.stateFile.disk), h.file().cacheLayout, migrate, told(h)]
       }, ["", true, { records: 1, favorites: 0, marker: true }, 2, 1, 0])
-      checkCall("R22a (" + mode + " host): nothing at the path but the helper's init FAILED (no witness) -- not a fresh install: re-read once, then the no-write mode; the CLI-only entry keeps its URL", () => {
+      // D-REL-8: a failed init is re-run once after a second; this is the
+      // path when the re-run fails too.
+      checkCall("R22a (" + mode + " host): nothing at the path but the helper's init FAILED (no witness), and failed again when re-run (D-REL-8) -- not a fresh install: re-read once, then the no-write mode; the CLI-only entry keeps its URL", () => {
         const h = boot({ playlistUrl: NEW, showLogos: false }, "", mode, { initCode: 1 })
-        return [h.root.stateWriteBlocked, h.root.stateLoaded, h.storedEntry().playlistUrl === NEW, h.stateFile.events.length, told(h)]
-      }, ["absent", false, true, 0, 1])
+        const afterFirst = [h.root.stateWriteBlocked, h.ids.stateInitRetry.running]
+        h.elapse(1000)
+        h.initExit({ code: 1 })
+        return [afterFirst, h.root.stateWriteBlocked, h.root.stateLoaded, h.storedEntry().playlistUrl === NEW, h.stateFile.events.length, told(h)]
+      }, [["", true], "absent", false, true, 0, 1])
       // R22b's other half: the dir-0000 start reaches the cache layout. On
       // lane-key-m2 the failed load was applied as an empty state with
       // cacheLayout 0, `cache migrate` ran and its save wrote the empty
@@ -15522,6 +15581,560 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
   h.root.applyChannels(doc(8200), A)
   return [refreshed, switched, stamps(), h.root.preparedLru[0] === head, h.compileErrors]
 }, [[8200], [1, 8200], [8200, 1], true, []])
+
+// ---- P23 lane A (2026-10-24): the service's state and save paths.
+// Every check here runs against IPTV_SERVICE_QML / IPTV_MODEL when set, so
+// the red proof on a9d20f9 is one command (rule 11): point both at a
+// checkout of that commit and the rows below go red for the defects they
+// pin; nothing else in this section depends on a function that commit lacks
+// (checkCall turns a missing export into one ordinary failure).
+{
+  const H = require("./service-harness.js")
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
+  const A = "http://a.example.test/list.m3u", B = "http://b.example.test/list.m3u", NEW = "http://new.example.test/get.php?username=u&password=p"
+  const keyOf = url => M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
+  const KA = keyOf(A), KB = keyOf(B), KNEW = keyOf(NEW)
+  const rec = (url, extra) => Object.assign({ key: keyOf(url), url, epgUrl: "", kind: "http", label: url.split("/")[2], labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }, extra || {})
+  const stateText = (sources, activeKey, extra) => JSON.stringify(Object.assign({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources, activeKey, entryMigrated: true }, extra || {})) + "\n"
+  const boot = (entry, text, o) => H.bootService(svcText, M, Object.assign({ entry, stateText: text, host: "lag" }, o || {}))
+  const okStatus = JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })
+  const failedStatus = JSON.stringify({ ok: false, kind: "playlist", error: { code: "helper_damaged", part: "05-ipc-logos.py", message: "part missing" } })
+
+  // D-SRC-14: editing the active source's URL through the probe commit.
+  checkCall("D-SRC-14: Model.probeCommitPlan -- an edit of the ACTIVE source folds the pointer and still switches; a retry of the active source reloads; an add or a switch to another key switches; nothing without commit; probeCommitState folds only when the plan says so", () => {
+    const edit = M.probeCommitPlan({ commit: true, mode: "edit", key: KA, newKey: KNEW, activeKey: KA })
+    const other = M.probeCommitPlan({ commit: true, mode: "edit", key: KB, newKey: KNEW, activeKey: KA })
+    const retry = M.probeCommitPlan({ commit: true, mode: "retry", key: KA, newKey: KA, activeKey: KA })
+    const add = M.probeCommitPlan({ commit: true, mode: "add", key: KB, newKey: KB, activeKey: KA })
+    const sw = M.probeCommitPlan({ commit: true, mode: "switch", key: KB, newKey: KB, activeKey: KA })
+    const none = M.probeCommitPlan({ commit: false, mode: "edit", key: KA, newKey: KNEW, activeKey: KA })
+    const st = M.parseState(stateText([rec(A), rec(NEW)], ""))
+    return [edit, other, retry, add, sw, none,
+            M.activeKeyOf(M.probeCommitState(st, edit, KNEW)), M.activeKeyOf(M.probeCommitState(st, other, KNEW)), M.probeCommitState(st, null, KNEW) === st]
+  }, [{ wasActive: true, act: "switch" }, { wasActive: false, act: "switch" }, { wasActive: false, act: "reload" },
+      { wasActive: false, act: "switch" }, { wasActive: false, act: "switch" }, { wasActive: true, act: "none" }, KNEW, "", true])
+  checkCall("D-SRC-14: through Service.handleProbeExit -- an edit of the active source's URL publishes NO state without an active source, issues ONE write, opens the switch, mirrors the new key into the bar entry once the save lands, and finishes with sourceSwitched for the new key", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A), rec(B)], KA))
+    const r = h.root
+    // Every value assigned to root.userState during the commit, by its active key.
+    const desc = Object.getOwnPropertyDescriptor(r, "userState")
+    const published = []
+    Object.defineProperty(r, "userState", { get: desc.get, set(v) { published.push(M.activeKeyOf(v)); desc.set.call(r, v) }, enumerable: true, configurable: true })
+    const issuedBefore = r.stateWritesIssued
+    const submitted = r.updateSource(KA, { playlistUrl: NEW, epgUrl: "", label: "a.example.test" })
+    h.runLater()
+    h.probeExit(okStatus)
+    // Two assignments carry the key (the commit's, then persistActive's
+    // re-assignment of the same object); none carries no key.
+    const afterCommit = { published: [...new Set(published)], issued: r.stateWritesIssued - issuedBefore, switching: r.switching, active: r.activeSourceKey === KNEW }
+    h.drain()
+    r.finishSwitch()
+    return [submitted.ok, afterCommit, published.indexOf("") === -1, h.storedEntry().sourceKey === KNEW, h.file().activeKey === KNEW,
+            h.signals.filter(x => x[0] === "sourceSwitched").map(x => x[1] === KNEW), h.compileErrors]
+  }, [true, { published: [KNEW], issued: 1, switching: true, active: true }, true, true, true, [true], []])
+
+  // D-SRC-37 (a): a merged pointer naming no merged record.
+  checkCall("D-SRC-37 (a): Model.mergeForeignState -- theirs removed the active source while ours kept the key: the pointer falls back to no active source IN THE STATE (as the helper's own remove does), as a conflict naming the source; the journal line says why; a pointer theirs moved to a record it kept is no conflict", () => {
+    const base = M.parseState(stateText([rec(A), rec(B)], KA)), ours = M.parseState(stateText([rec(A), rec(B)], KA, { favorites: ["t:one.uk"] }))
+    const theirsRemoved = M.parseState(stateText([rec(B)], KA))
+    const removed = M.mergeForeignState(base, ours, theirsRemoved, {})
+    const theirsMoved = M.mergeForeignState(base, ours, M.parseState(stateText([rec(A), rec(B)], KB)), {})
+    const handEdited = M.mergeForeignState(base, ours, M.parseState(stateText([rec(B)], "deadbeef")), {})
+    const line = M.mergeConflictLine(removed.conflicts[0])
+    return [removed.conflicts, String(removed.state.activeKey), M.activeKeyOf(removed.state), removed.state.favorites,
+            theirsMoved.conflicts, M.activeKeyOf(theirsMoved.state), handEdited.conflicts.map(c => c.key), String(handEdited.state.activeKey),
+            line.indexOf("version of activeKey (the source " + KA + " it named is gone, so no source is active)") !== -1, /lenspass|http/.test(line)]
+  }, [[{ field: "activeKey", key: KA, fields: ["removed"] }], "", "", ["t:one.uk"], [], KB, ["deadbeef"], "", true, false])
+
+  // D-SRC-37 (c): the four slots that had no bound (and the two PiP
+  // start-up probes rule 15's search found beside whichProc), each driven by
+  // its own Timer block through h.elapse: armed where `running = true` is
+  // set, fires at helperTimeoutMs with a TERM and nothing else, stopped by
+  // the exit handler the service runs.
+  checkCall("D-SRC-37 (c): cacheProc -- a cache job the helper never answers is TERMed at helperTimeoutMs (not a millisecond before), the queued jobs behind it DROPPED with one line, and the exit stops the watchdog", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.cacheHang = true
+    const cp = h.ids.cacheProc, wd = h.ids.cacheWatchdog
+    h.root.queueCacheJob(["remove", "--key", KB], null)
+    h.root.queueCacheJob(["epg-clear", "--key", KA], null)
+    const armed = [cp.running, wd.running, h.root.cacheQueue.length]
+    h.elapse(h.root.helperTimeoutMs - 1)
+    const before = [cp.signals.slice(), h.root.cacheQueue.length]
+    h.elapse(1)
+    const fired = [cp.signals.slice(), h.root.cacheQueue.length, h.warnings.filter(w => /cache remove exceeded 180 s, terminating it; 1 queued cache job\(s\) dropped/.test(w)).length]
+    cp._running = false; h.root.handleCacheExit("")
+    return [armed, before, fired, wd.running, h.root.cacheJob, h.compileErrors]
+  }, [[true, true, 1], [[], 1], [[15], 0, 1], false, null, []])
+  checkCall("D-SRC-37 (c): failedProc -- a mark the helper never writes is TERMed at helperTimeoutMs, the queued mark behind it dropped with one line, and handleFailedExit stops the watchdog", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    const fp = h.ids.failedProc, wd = h.ids.failedWatchdog
+    const ok = [h.root.persistFailed("mark", "t:one.uk"), h.root.persistFailed("mark", "t:two.uk")]
+    const armed = [fp.running, wd.running, h.root.failedQueue.length, fp.command.indexOf("failed") !== -1]
+    h.elapse(h.root.helperTimeoutMs)
+    const fired = [fp.signals.slice(), h.root.failedQueue.length, h.warnings.filter(w => /failed-channel helper exceeded 180 s, terminating it; 1 queued mark\(s\) dropped/.test(w)).length]
+    fp.running = false; h.root.handleFailedExit()
+    return [ok, armed, fired, wd.running, fp.running, h.compileErrors]
+  }, [[true, true], [true, true, 1, true], [[15], 0, 1], false, false, []])
+  checkCall("D-SRC-37 (c): configShieldProc -- a shield run that never answers is TERMed at helperTimeoutMs; its exit with no output stops the watchdog and reads as not private (fails closed), as before", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.unstub("runConfigShield")
+    const cs = h.ids.configShieldProc, wd = h.ids.configShieldWatchdog
+    h.root.runConfigShield()
+    const armed = [cs.running, wd.running]
+    h.elapse(h.root.helperTimeoutMs)
+    const fired = [cs.signals.slice(), h.warnings.filter(w => /config shield exceeded 180 s, terminating it/.test(w)).length]
+    cs.running = false; h.root.onConfigShieldExit("")
+    return [armed, fired, wd.running, h.root.hostConfigShield === M.CONFIG_SHIELD_PRIVATE, h.compileErrors]
+  }, [[true, true], [[15], 1], false, false, []])
+  checkCall("D-SRC-37 (c): whichProc -- `which mpv` that never answers is TERMed at helperTimeoutMs; handleWhichExit stops the watchdog and a non-zero exit reads as no mpv", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    const wp = h.ids.whichProc, wd = h.ids.whichWatchdog
+    h.root.mpvAvailable = true
+    h.root.runWhichMpv()
+    const armed = [wp.running, wd.running]
+    h.elapse(h.root.helperTimeoutMs)
+    const fired = [wp.signals.slice(), h.warnings.filter(w => /which mpv exceeded 180 s, terminating it/.test(w)).length]
+    wp.running = false; h.root.handleWhichExit(1)
+    return [armed, fired, wd.running, h.root.mpvAvailable, h.compileErrors]
+  }, [[true, true], [[15], 1], false, false, []])
+  checkCall("D-SRC-37 (c), rule 15 / D-PLY-26: the PiP start-up pair -- `which hyprctl` then `hyprctl systeminfo` share one watchdog; whichever is running at helperTimeoutMs is TERMed; each exit stops it, and a stopped probe hides PiP", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    const w = h.ids.hyprWhichProc, i = h.ids.hyprInfoProc, wd = h.ids.pipProbeWatchdog
+    h.root.runPipProbe()
+    const armed = [w.running, wd.running]
+    h.elapse(h.root.helperTimeoutMs)
+    const firedWhich = [w.signals.slice(), i.signals.slice()]
+    w.running = false; h.root.handlePipWhichExit(1)
+    const afterWhich = [wd.running, h.root.pipAvailable]
+    // The second half: which answered, systeminfo hangs.
+    h.root.runPipProbe(); w.running = false
+    h.ids.Quickshell.env = () => "sig"
+    h.root.handlePipWhichExit(0)
+    const rearmed = [i.running, wd.running]
+    h.elapse(h.root.helperTimeoutMs)
+    const firedInfo = [w.signals.length, i.signals.slice()]
+    i.running = false; h.root.handlePipInfoExit(1)
+    return [armed, firedWhich, afterWhich, rearmed, firedInfo, wd.running, h.root.pipAvailable, h.compileErrors]
+  }, [[true, true], [[15], []], [false, false], [true, true], [1, [15]], false, false, []])
+  // The inventory, as a check rather than a grep in a write-up: every
+  // Process the tree declares is named, by `.signal(`, in some Timer's
+  // onTriggered -- so the next unbounded slot goes red here.
+  checkCall("D-SRC-37 (c), rule 15 inventory: every `id: *Proc` in Service.qml is named by some Timer block that sends `.signal(15)` (directly, or as the one of a pair that is running)", () => {
+    // Both spellings: `id:` on its own line, and the one-line `Process { id: failedProc }`.
+    const procs = [...svcText.matchAll(/^    id: ([A-Za-z]+Proc)$|Process \{ id: ([A-Za-z]+Proc) \}/gm)].map(m => m[1] || m[2])
+    // Each Timer block to its matching brace (the harness's scanner), not to
+    // the first "  }" -- a lazy match spanned into the functions below a block.
+    const timers = [...svcText.matchAll(/^  Timer \{/gm)].map(m => svcText.slice(m.index, H.matchBrace(svcText, m.index + m[0].length - 1) + 1)).filter(t => t.indexOf(".signal(15)") !== -1)
+    const unbounded = procs.filter(id => !timers.some(t => t.indexOf(id + ".running") !== -1))
+    return [procs.length >= 18, unbounded]
+  }, [true, []])
+
+  // D-SRC-39: a burst whose first write lands and a later one fails.
+  checkCall("D-SRC-39: Model.stateSaveOutcome -- the last text is a landing that clears the record; an EARLIER text of the record is a landing whose state is the base and whose record is the texts after it; a text in neither lands nothing; an empty view lands nothing", () => {
+    const t1 = JSON.stringify({ version: 2, favorites: ["a"] }), t2 = JSON.stringify({ version: 2, favorites: ["a", "b"] }), t3 = JSON.stringify({ version: 2, favorites: ["c"] })
+    const last = M.stateSaveOutcome({ viewText: t3, lastSaveText: t3, recentSaves: [t1, t2, t3] })
+    const earlier = M.stateSaveOutcome({ viewText: t1, lastSaveText: t3, recentSaves: [t1, t2, t3] })
+    const middle = M.stateSaveOutcome({ viewText: t2, lastSaveText: t3, recentSaves: [t1, t2, t3] })
+    const foreign = M.stateSaveOutcome({ viewText: "{}", lastSaveText: t3, recentSaves: [t1, t2, t3] })
+    const empty = M.stateSaveOutcome({ viewText: "", lastSaveText: "", recentSaves: [""] })
+    return [last, [earlier.landed, earlier.last, earlier.state.favorites, earlier.remaining], [middle.landed, middle.state.favorites, middle.remaining],
+            [foreign.landed, foreign.last, foreign.state, foreign.remaining.length], [empty.landed, empty.last]]
+  }, [{ landed: true, last: true, state: null, remaining: [] }, [true, false, ["a"], [JSON.stringify({ version: 2, favorites: ["a", "b"] }), JSON.stringify({ version: 2, favorites: ["c"] })]],
+      [true, ["a", "b"], [JSON.stringify({ version: 2, favorites: ["c"] })]], [false, false, null, 3], [false, false]])
+  checkCall("D-SRC-39: through Service -- t1 lands and t2 fails (past the 2 s write wait, as R27a leaves it): the BASE is t1 when t1's `saved` reports, so a restore of the pre-burst file is FOREIGN and merged (not ignored as save-failed and written over); the merge's save lands and clears the failure", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    const pre = h.stateFile.disk
+    h.root.toggleFavorite("t:one.uk"); h.runLater()
+    const t1 = h.stateFile.events[0].text
+    h.stateFile.failWhen = t => t !== t1
+    h.root.toggleFavorite("t:two.uk"); h.runLater()
+    h.elapse(2000); h.elapse(2000)   // the write wait's bound, then the released read's bound: t2 is written
+    const issued = h.stateFile.events.length
+    const t2 = h.stateFile.events[1].text
+    h.stateFile.failWhen = null      // t2's failure is decided; every later write lands
+    h.deliverOne()                    // t1's `saved`, with t1's text, while t2 is out
+    const baseAfterT1 = M.parseState(JSON.stringify(h.root.landedState)).favorites
+    // The RECORD after the earlier landing (P23 recheck, 2026-10-24): the
+    // texts after t1 and nothing before it -- onSaved's `root.recentSaves =
+    // outcome.remaining`, which was true of the code and seen by no check
+    // (deleted, 3017 green: the stale t1 text equals the new base either way).
+    const recordAfterT1 = h.root.recentSaves.slice()
+    h.deliverOne()                    // t2's `saveFailed`
+    const afterFail = [h.root.stateSaveFailed, h.file().favorites, h.root.stateSavesInFlight]
+    h.foreign(sf => { sf.disk = pre })   // a backup from before the burst, put back
+    const merged = [Object.keys(h.root.stateReloadsByReason).filter(k => /save-failed/.test(k)), h.root.userState.favorites]
+    h.drain()
+    return [issued, baseAfterT1, recordAfterT1.length, recordAfterT1.length === 1 && recordAfterT1[0] === t2 && t2 !== t1,
+            afterFail, merged, h.file().favorites, h.root.stateSaveFailed, M.sameState(h.root.landedState, h.root.userState), h.compileErrors]
+  }, [2, ["t:one.uk"], 1, true, [true, ["t:one.uk"], 0], [["foreign-save-failed"], ["t:two.uk"]], ["t:two.uk"], false, true, []])
+
+  // D-SRC-43: a failed save's flag after a merge that leaves nothing unsaved.
+  checkCall("D-SRC-43: Model.mergeLeavesNothingUnsaved -- true only when the merge IS theirs and no write of ours is in flight", () => {
+    const theirs = M.parseState(stateText([rec(A)], KA)), same = M.parseState(stateText([rec(A)], KA)), other = M.parseState(stateText([rec(A)], KA, { favorites: ["t:x.uk"] }))
+    return [M.mergeLeavesNothingUnsaved(same, theirs, { savesInFlight: 0 }), M.mergeLeavesNothingUnsaved(same, theirs, { savesInFlight: 1 }),
+            M.mergeLeavesNothingUnsaved(other, theirs, { savesInFlight: 0 }), M.mergeLeavesNothingUnsaved(same, theirs, null)]
+  }, [true, false, false, true])
+  checkCall("D-SRC-43: through Service.mergeForeignText -- an in-app label edit whose save FAILED, then a foreign write that changed the same label (theirs wins, the merge equals theirs): stateSaveFailed is cleared, the record swept, the file equals memory, no save is asked for; a merge that keeps something of ours leaves the flag to the save it asks for", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.stateFile.writeFails = true
+    h.root.updateSource(KA, { label: "Mine" }); h.drain()
+    const failed = [h.root.stateSaveFailed]   // lastPersistFailure, read here alone, is gone (lane A2, 2026-10-24)
+    h.stateFile.writeFails = false
+    h.foreign(sf => { sf.disk = stateText([rec(A, { label: "Theirs", labelCustom: true })], KA) })
+    const conflict = [h.root.stateSaveFailed, h.root.recentSaves.length, h.root.stateSavePending, h.root.stateSavesInFlight,
+                      M.sameState(h.file(), h.root.userState), h.root.userState.sources[0].label]
+    // The other shape: a foreign FAVOURITE lands while ours (a failed label edit) is still unsaved -- the flag stays until the merge's own save lands.
+    const g = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    g.stateFile.writeFails = true
+    g.root.updateSource(KA, { label: "Mine" }); g.drain()
+    g.stateFile.writeFails = false
+    g.foreign(sf => { sf.disk = stateText([rec(A)], KA, { favorites: ["t:x.uk"] }) })
+    const kept = [g.root.stateSaveFailed, g.root.stateSavePending || g.root.stateSavesInFlight > 0]
+    g.drain()
+    return [failed, conflict, kept, [g.root.stateSaveFailed, g.root.userState.sources[0].label, g.file().sources[0].label], h.compileErrors]
+  }, [[true], [false, 0, false, 0, true, "Theirs"], [true, true], [false, "Mine", "Mine"], []])
+  // D-SRC-67, P23 lane A's second finding (2026-10-24, removed by lane A2 the
+  // same day): `Service.lastPersistFailure` was set
+  // in four places and read in none -- not Guide.qml, not the model, not the
+  // IPC summary; its one reader was the D-SRC-43 check above, written to the
+  // row's words. A property with writers and no reader looks like a surface
+  // (ARCHITECTURE-SOURCES called it "the one record of the LAST failure for
+  // the harness") and is not one, so it is removed with its writers. This
+  // pin is a grep over the TREE's shipped sources (not IPTV_SERVICE_QML: the
+  // sibling pins at the top of this file read the tree too), which is the
+  // one job a grep is good at (rule 15): where else does this name live.
+  // Red on the lane's first tip (four writers and the declaration), green
+  // once they are gone.
+  checkCall("lastPersistFailure removed (D-SRC-67, P23 lane A's second finding): no shipped source names it -- not Service.qml, not Guide.qml, not Model.mjs or any model part (a write-only property is not a surface)", () => {
+    const modelDir = path.join(__dirname, "../model")
+    const parts = fs.readdirSync(modelDir).filter(f => /\.mjs$/.test(f)).map(f => fs.readFileSync(path.join(modelDir, f), "utf8"))
+    const named = []
+    if (/lastPersistFailure/.test(serviceSource)) named.push("Service.qml")
+    if (/lastPersistFailure/.test(guideSource)) named.push("Guide.qml")
+    if (/lastPersistFailure/.test(fs.readFileSync(path.join(__dirname, "../Model.mjs"), "utf8"))) named.push("Model.mjs")
+    parts.forEach((text, i) => { if (/lastPersistFailure/.test(text)) named.push("model/" + i) })
+    return [parts.length >= 18, named, (serviceSource.match(/sourcesPersistFailed\(/g) || []).length >= 3]
+  }, [true, [], true])
+
+  // D-SRC-33: the merge's "theirs was kept" told on screen, not only in the journal.
+  checkCall("D-SRC-33: Model.mergeConflictNotice -- one sentence per conflict (a source by key and field names; a field by its name; the fallen-back pointer by why), the lead's title, no URL or value; null for no conflicts; the replace id is reserved beside the others", () => {
+    const told = M.mergeConflictNotice([{ field: "sources", key: KA, fields: ["label", "url"] }, { field: "recents", key: "" }, { field: "activeKey", key: KB, fields: ["removed"] }])
+    const ids = Object.keys(M.NOTIFY_IDS).map(k => M.NOTIFY_IDS[k])
+    return [told.title, told.body, /http|lenspass|example/.test(told.body), M.mergeConflictNotice([]), M.mergeConflictNotice(null), M.mergeConflictNotice([{ field: "activeKey", key: "" }]).body,
+            M.NOTIFY_IDS.mergeConflict, ids.length === new Set(ids).size, ids.indexOf(74019)]
+  }, ["Settings merged", "The source " + KA + " (label, url) kept the other program's version. The recent list kept the other program's version. The active source (the source " + KB + " it named is gone, so no source is active) kept the other program's version.",
+      false, null, null, "The active source kept the other program's version.", 74020, true, -1])
+  // Rule 13: the event name, the id 74020 and the notifyArgv branch are joined
+  // by a CALL here. On the lane's first tip Service raised the event and the
+  // id was reserved while notifyArgv had no branch for it, so the sink got
+  // null and the user nothing -- the state the row was filed against; this
+  // check was red there (P23 recheck, 2026-10-24).
+  checkCall("D-SRC-33: Model.notifyArgv joins the mergeConflict event to the notice -- the 74020 argv at normal urgency, the lead's title, Model.mergeConflictNotice's body (a key and a field name, no value or URL); null for no conflicts and for no params", () => {
+    const a = M.notifyArgv("mergeConflict", { conflicts: [{ field: "sources", key: KA, fields: ["label"] }] })
+    return [a === null ? null : a[0], a === null ? null : a[a.indexOf("-r") + 1], a === null ? null : a[a.indexOf("-u") + 1],
+            a === null ? null : a[a.length - 2], a === null ? null : a[a.length - 1], /http|lenspass|example/.test(JSON.stringify(a)),
+            M.notifyArgv("mergeConflict", { conflicts: [] }), M.notifyArgv("mergeConflict", {})]
+  }, ["omarchy-notification-send", "74020", "normal", "Settings merged", "The source " + KA + " (label) kept the other program's version.", false, null, null])
+  checkCall("D-SRC-33: through Service.mergeForeignText -- an in-app label edit held unsaved (its save failed) and a foreign write that changed the same label: ONE notification reaches the sink (Quickshell.execDetached: the 74020 argv, `Settings merged`, the source's key and the field name, no value or URL), raised through root.notify with the conflicts; a merge without conflicts sends none", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    const notified = []
+    const notify = h.root.notify
+    h.root.notify = (event, params) => { notified.push([event, JSON.stringify(params)]); return notify(event, params) }
+    // The SINK, not the event: what the shell would run (the harness records
+    // execDetached's argv and runs nothing). The first version of this check
+    // wrapped root.notify alone and was green while the sink returned null.
+    const sent = () => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74020") !== -1)
+    h.stateFile.writeFails = true
+    h.root.updateSource(KA, { label: "Mine" }); h.drain()
+    h.stateFile.writeFails = false
+    h.foreign(sf => { sf.disk = stateText([rec(A, { label: "Theirs", labelCustom: true })], KA) })
+    const card = sent().map(a => [a[a.indexOf("-u") + 1], a[a.length - 2], a[a.length - 1]])
+    const conflict = notified.slice()
+    h.foreign(sf => { sf.disk = stateText([rec(A, { label: "Theirs", labelCustom: true })], KA, { favorites: ["t:x.uk"] }) })
+    return [card.length, card.length === 1 ? card[0].slice(0, 2) : card, card.length === 1 && /^The source [0-9a-f]{8} \(label(, labelCustom)?\) kept the other program's version\.$/.test(card[0][2]),
+            /Theirs|Mine|http|lenspass/.test(JSON.stringify(h.detached)),
+            conflict.map(n => n[0]), conflict.length === 1 && /"field":"sources","key":"[0-9a-f]{8}","fields":\["label"(,"labelCustom")?\]/.test(conflict[0][1]), /Theirs|Mine|http/.test(conflict.map(n => n[1]).join()),
+            sent().length, notified.length, h.compileErrors]
+  }, [1, ["normal", "Settings merged"], true, false, ["mergeConflict"], true, false, 1, 1, []])
+
+  // D-SRC-49 / D-SINK-22 (b)(c): `state mode` after every landed save.
+  checkCall("D-SRC-49: Model.stateModeArgv is argv only (no URL, the state dir and the verb); Model.stateModeReply reads the verb's one line and nothing else", () => {
+    return [M.stateModeArgv("/p/bin/omarchy-iptv", "/s"), M.stateModeReply('{"ok": true, "kind": "state", "action": "mode", "folder": "kept", "file": "changed"}\n'),
+            M.stateModeReply(""), M.stateModeReply('{"ok": true, "kind": "state", "action": "init", "found": "absent"}\n'), M.stateModeReply('{"ok": false, "kind": "state", "action": "mode"}')]
+  }, [["python3", "/p/bin/omarchy-iptv", "state", "--state-dir", "/s", "mode"], { folder: "kept", file: "changed" }, null, null, null])
+  checkCall("D-SRC-49: through Service -- a LANDED save starts `state mode` on its own Process (never cacheProc) from a turn of its own, with the helper argv; a second landed save while it runs is folded into one re-run; a save that FAILED starts none; the steady-state reply is silent", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    const p = h.ids.stateModeProc
+    const runsAtBoot = h.root.stateModeRuns
+    const cacheBefore = h.cacheRuns.length
+    h.root.toggleFavorite("t:one.uk"); h.runLater()
+    const beforeLanding = [p.running, h.root.stateModeRuns - runsAtBoot]
+    h.deliverOne({ noLater: true })
+    const insideHandler = [p.running, h.later.some(e => e.fn === h.root.requestStateMode)]
+    h.runLater()
+    const started = [p.running, p.command, h.root.stateModeRuns - runsAtBoot, h.ids.stateModeWatchdog.running, h.cacheRuns.length - cacheBefore]
+    h.root.toggleFavorite("t:two.uk"); h.drain()
+    const folded = [h.root.stateModeRerun, h.root.stateModeRuns - runsAtBoot]
+    h.stateModeExit()
+    const rerun = [h.root.stateModeRerun, h.root.stateModeRuns - runsAtBoot, p.running]
+    h.stateModeExit()
+    const quiet = h.warnings.filter(w => /state mode|state.json's mode/.test(w)).length
+    h.stateFile.writeFails = true
+    h.root.toggleFavorite("t:three.uk"); h.drain()
+    return [beforeLanding, insideHandler, started, folded, rerun, quiet, [p.running, h.root.stateModeRuns - runsAtBoot], h.compileErrors]
+  }, [[false, 0], [false, true], [true, ["python3", "bin/omarchy-iptv", "state", "--state-dir", "/.local/state/omarchy-iptv", "mode"], 1, true, 0], [true, 1], [false, 2, true], 0, [false, 2], []])
+  checkCall("D-SINK-22 (b): the state FOLDER link re-pointed at an empty folder BETWEEN a save's read and the write it allowed -- the write CREATES state.json at the umask's 0644 (the window stays), and the repair the landing asks for makes it 0600 within the helper's start, told once; before: 0644 until the next shell start", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.root.toggleFavorite("t:one.uk"); h.drain()
+    while (h.stateModeExit()) {}
+    h.root.toggleFavorite("t:two.uk")   // the save reads first (R26a): the load is deferred
+    const load = h.later.shift(); load.fn.apply(null, load.args)   // the read answers; the write is decided, deferred (R26b)
+    h.replace(sf => { sf.exists = false; sf.disk = ""; sf.mode = null })   // the re-point lands in that window
+    h.drain()                            // the write creates the file
+    const created = [h.stateFile.exists, (h.stateFile.mode || 0).toString(8), h.ids.stateModeProc.running]
+    h.stateModeExit()
+    return [created, (h.stateFile.mode || 0).toString(8), h.warnings.filter(w => /state.json's mode was repaired after a save \(file changed, folder kept\)/.test(w)).length, h.file().favorites]
+  }, [[true, "644", true], "600", 1, ["t:one.uk", "t:two.uk"]])
+  checkCall("D-SRC-49 / D-SRC-37 (c): a `state mode` that never answers is TERMed at helperTimeoutMs; its exit stops the watchdog, a non-zero exit with no reply gets one line, and the folded re-run still goes", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.root.toggleFavorite("t:one.uk"); h.drain()
+    const p = h.ids.stateModeProc, wd = h.ids.stateModeWatchdog
+    const armed = [p.running, wd.running]
+    h.root.toggleFavorite("t:two.uk"); h.drain()
+    h.elapse(h.root.helperTimeoutMs)
+    const fired = [p.signals.slice(), h.warnings.filter(w => /state mode exceeded 180 s, terminating it/.test(w)).length]
+    h.stateModeExit({ code: 15, reply: "" })
+    return [armed, fired, wd.running || h.ids.stateModeWatchdog.restarts === 1, h.warnings.filter(w => /state mode exited 15/.test(w)).length, p.running, h.root.stateModeRerun, h.compileErrors]
+  }, [[true, true], [[15], 1], true, 1, true, false, []])
+
+  // D-REL-8: the start-up init that answered nothing readable is run once more.
+  checkCall("D-REL-8: through Service -- the first `state init` meets the EMPTY stub git leaves mid-update (exit 0, nothing printed): the load is held, the init is re-run after 1 s under the start-up bound, the re-run answers absent, the session is a fresh install and WRITES; before: the no-write mode for the session, told once", () => {
+    const h = boot({ sourceKey: "", showLogos: false }, "", { dirsLater: true, dirPresent: true })
+    h.initExit({ empty: true })
+    const afterEmpty = [h.root.stateWriteBlocked, h.root.stateInitRetried, h.ids.stateInitRetry.running, h.ids.stateInitProc.running, h.root.stateInitFound]
+    h.elapse(999)
+    const at999 = h.ids.stateInitProc.running
+    h.elapse(1)
+    const rerun = [h.ids.stateInitProc.running, h.ids.stateInitWatchdog.restarts, h.warnings.filter(w => /state init answered nothing readable; running it once more/.test(w)).length]
+    h.initExit()
+    h.drain()
+    const decided = [h.root.stateWriteBlocked, h.root.stateLoaded, h.root.stateInitFound]
+    h.root.toggleFavorite("t:one.uk"); h.drain()
+    return [afterEmpty, at999, rerun, decided, h.file().favorites, h.detached.filter(a => a.indexOf("74017") !== -1).length, h.compileErrors]
+  }, [["", true, true, false, "unknown"], false, [true, 2, 1], ["", true, "absent"], ["t:one.uk"], 0, []])
+  checkCall("D-REL-8: a TIMED-OUT init is never re-run (R23c): the held load decides as the no-write mode at once, and the retry Timer is not armed", () => {
+    const h = boot({ sourceKey: "", showLogos: false }, "", { dirsLater: true, dirPresent: true })
+    h.initExit({ timeout: true })
+    return [h.hang, h.root.stateWriteBlocked, h.ids.stateInitRetry.running, h.root.stateInitRetried]
+  }, ["terminated", "init-timeout", false, false])
+
+  // F-M3-18 (a): clearSourceData runs for real in the harness (the stub is gone).
+  checkCall("F-M3-18 (a): through Service -- a switch runs the REAL clearSourceData: the announced logo set is emptied, the channel-number index rebuilt, the previous source's channels, status and EPG dropped; the no-op stub the harness carried could not see any of it", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A), rec(B)], KA))
+    const r = h.root
+    r.logoHave = { "x.png": true, dir: "/cache/sources/" + KA }
+    r.chnoIndex = { marker: "stale" }
+    r.channels = [{ id: "t:a.uk", name: "A" }]
+    r.epgLoaded = true
+    r.lastError = "stale"
+    const stubbed = Object.keys(h.STUBBED).indexOf("clearSourceData") !== -1
+    r.switchSource(KB); r.finishSwitch(); h.drain()
+    return [stubbed, r.activeSourceKey === KB, r.logoHave, "marker" in r.chnoIndex, typeof r.chnoIndex, r.channels.length, r.epgLoaded, r.lastError, r.playlistStatus.ok, h.compileErrors]
+  }, [false, true, {}, false, "object", 0, false, "", false, []])
+
+  // D-SRC-52: a good playlist status clears the sentence a failed one left
+  // in lastError, and nothing else.
+  checkCall("D-SRC-52: Model.lastErrorAfterStatus -- a good status clears exactly the previous status's reason; a different sentence (a play failure's) stands; a failed status writes its own reason; an empty lastError stays empty", () => {
+    const failed = M.parseHelperStatus(failedStatus, "playlist"), ok = M.parseHelperStatus(okStatus, "playlist")
+    const reason = M.statusReason(failed)
+    return [reason !== "", M.lastErrorAfterStatus(reason, reason, ok), M.lastErrorAfterStatus("play failed: x", reason, ok),
+            M.lastErrorAfterStatus("", reason, ok), M.lastErrorAfterStatus("", "", failed) === reason, M.lastErrorAfterStatus("play failed: x", "", failed) === reason]
+  }, [true, "", "play failed: x", "", true, true])
+  checkCall("D-SRC-52: through Service.applyPlaylistStatus -- the damaged-files reason of a failed status is in lastError until the next good status, which clears it; a play failure's sentence survives the same good status", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
+    h.root.applyPlaylistStatus(failedStatus)
+    const during = h.root.lastError
+    h.root.applyPlaylistStatus(okStatus)
+    const after = h.root.lastError
+    h.root.lastError = "play failed: x"
+    h.root.applyPlaylistStatus(okStatus)
+    return [during === M.statusReason(M.parseHelperStatus(failedStatus, "playlist")), during !== "", after, h.root.lastError, h.compileErrors]
+  }, [true, true, "", "play failed: x", []])
+}
+// ---- D-SINK-23, second half: the two state readers agree about what a stored url IS ----
+// PARITY (the lead's ruling, 2026-10-24). The helper's normalize_source has
+// validated a stored `url` (origin cli) and dropped a record that fails since
+// the Sources feature; the JS reader kept the text as written, so a
+// hand-edited state.json held a URL the two mirrors read, keyed and redacted
+// differently. One shared fixture, run by tests/test_helper.py too.
+const stateReaderFixture = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/state-reader-urls.json"), "utf8"))
+checkCall("D-SINK-23 parity: parseState keeps the VALIDATED url and epgUrl of a stored record and drops one whose url does not validate, exactly as the helper's normalize_source does", () =>
+  stateReaderFixture.cases.map(c => {
+    const rec = { key: "aaaaaaa1", url: c.url, epgUrl: c.epgUrl, kind: "http", label: "", labelCustom: false, origin: "guide",
+      addedAt: 1, lastUsed: 1, fetchedAt: 0, channelCount: 0, groupCount: 0 }
+    const st = Model.parseState(JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], savedSearches: [], hiddenGroups: [], sources: [rec] }))
+    const s = st.sources[0]
+    return c.why + " -> " + show([st.sources.length === 1, s ? s.url : "", s ? s.epgUrl : "", s ? s.kind : ""])
+  }),
+  stateReaderFixture.cases.map(c => c.why + " -> " + show([c.kept, c.outUrl, c.outEpgUrl, c.kind])))
+check("D-SINK-23 parity: the fixture carries both halves of the cost -- rows the shell used to keep and now drops, and rows it re-reads in validated form -- so it cannot be trimmed to green", [
+  stateReaderFixture.cases.filter(c => c.kept === false).length >= 4,
+  stateReaderFixture.cases.filter(c => c.kept === true && c.url !== c.outUrl).length >= 4,
+  stateReaderFixture.cases.filter(c => c.kept === true && c.epgUrl !== "" && c.epgUrl !== c.outEpgUrl).length >= 2,
+  stateReaderFixture.cases.every(c => c.kept === (c.outUrl !== ""))
+], [true, true, true, true])
+
+// ---- D-SINK-14: the plain-http disclosure, where the URL is typed ----
+// A LOGO must be https by ruling, and nothing said that an http:// playlist
+// or Xtream server sends the credentials in cleartext. PO-10 treatment, not
+// a refusal: one sentence on the form's advice line while a URL field holds
+// an http:// value, the `@`-typo warning winning when both hold.
+checkCall("D-SINK-14: formAdviceLine shows the owner's http sentence for an http:// playlist, EPG or Xtream server, and nothing for their https twins", () => {
+  const url = (p, e) => ({ kind: "url", values: { label: "", playlist: p, epg: e } })
+  const xt = s => ({ kind: "xtream", values: { server: s, username: "u", password: "p" } })
+  return [Model.WARN_PLAIN_HTTP, Model.formAdviceLine(xt("http://panel.test:8080")), Model.formAdviceLine(xt("https://panel.test:8080")),
+          Model.formAdviceLine(url("http://h.test/x", "")), Model.formAdviceLine(url("https://h.test/x", "")),
+          Model.formAdviceLine(url("https://h.test/x", "http://epg.test/g.xml")), Model.formAdviceLine(url("HTTP://H.test/x", "")),
+          Model.formAdviceLine(url("/srv/tv/list.m3u", "")), Model.formAdviceLine(url("http://h .test/x", "")),
+          Model.formAdviceLine(null), Model.formAdviceLine({}), Model.formAdviceLine({ values: null })]
+}, ["http:// sends the address and any password in it unencrypted; https:// does not",
+    "http:// sends the address and any password in it unencrypted; https:// does not", "",
+    "http:// sends the address and any password in it unencrypted; https:// does not", "",
+    "http:// sends the address and any password in it unencrypted; https:// does not",
+    "http:// sends the address and any password in it unencrypted; https:// does not", "", "", "", "", ""])
+checkCall("D-SINK-14: the `@`-typo warning outranks the http sentence on one line, and formWarningLine itself is unchanged", () => {
+  const typo = "http://user:2024/ab@host.test/x"
+  return [Model.formAdviceLine({ kind: "url", values: { label: "", playlist: typo, epg: "" } }) === Model.WARN_AT_AFTER_AUTHORITY,
+          Model.formWarningLine({ kind: "url", values: { label: "", playlist: "http://h.test/x", epg: "" } }),
+          Model.formAdviceLine({ kind: "url", values: { label: "", playlist: "https://h.test/x", epg: typo } }) === Model.WARN_AT_AFTER_AUTHORITY]
+}, [true, "", true])
+
+// ---- F-UX-7: a refused mpvArg is shown where the kept ones are shown ----
+// Service.playerArgWarnings is built from splitMpvArgs(...).warnings, which
+// covered KEPT tokens only; the refused list went to the journal (D-SINK-24,
+// names only) and nowhere the user looks. Now `warnings` names the refused
+// tokens too, by the same name rule, so the footer carries them -- FIRST,
+// because the footer's one line (footerWarning -> warningLine) prints the
+// first warning and counts the rest as `(+N more)`: with the kept lines
+// first, a refused option beside a kept-option warning was named nowhere the
+// user looks, while the README said it was (the recheck's P2 on fda0d52).
+checkCall("F-UX-7: splitMpvArgs names a refused token in `warnings` by its option name, never its value, one line per distinct name, BEFORE the kept tokens' lines", () => {
+  const r = Model.splitMpvArgs("--tls-verify=no --volume=50 --no-tls-verify --tls-verify=yes --ytdl=yes")
+  return [r.warnings, r.args, r.warnings.some(w => w.indexOf("=no") !== -1 || w.indexOf("=yes") !== -1 || w.indexOf("50") !== -1)]
+}, [["mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT, "mpvArg --no-tls-verify" + Model.MPV_REFUSED_TEXT, "mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT],
+    ["--volume=50", "--ytdl=yes"], false])
+checkCall("F-UX-7: the footer's ONE line, over a kept-option warning AND a refused option, names the refused option and counts the kept one -- the README sentence, made true by the composer", () => {
+  const warnings = Model.splitMpvArgs("--ytdl=yes --tls-verify=no").warnings
+  return [Model.footerWarning(Model.labelWarnings(warnings, "player"), []),
+          Model.footerWarning(Model.labelWarnings(Model.splitMpvArgs("--tls-verify=no").warnings, "player"), []),
+          Model.footerWarning(Model.labelWarnings(Model.splitMpvArgs("--ytdl=yes").warnings, "player"), [])]
+}, ["Player warning: mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT + " (+1 more)",
+    "Player warning: mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT,
+    "Player warning: mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT])
+checkCall("F-UX-7 is a sink (rule 5): a credential-shaped refused token yields its name and nothing after the `=`; a bare credential-shaped token yields `<token>`", () => {
+  const r = Model.splitMpvArgs("--stream-lavf-o=http_proxy=http://u:pw@p.test:3128 user:pw@proxy:3128 --http-header-fields=Authorization: Bearer eyJabc --u:pw@h=1")
+  const joined = r.warnings.join("\n")
+  return [r.warnings, ["pw", "eyJ", "Bearer", "proxy", "p.test", "u:"].filter(frag => joined.indexOf(frag) !== -1)]
+}, [["mpvArg --stream-lavf-o" + Model.MPV_REFUSED_TEXT, "mpvArg <token>" + Model.MPV_REFUSED_JUNK_TEXT], []])
+checkCall("F-UX-7: the refused name is the journal's name (mpvRejectedName), so the two sinks cannot drift", () =>
+  ["--tls-verify=no", "--no-idle", "--u:pw@h=1", "rm", "--Profile=x"].map(t => [Model.mpvRefusedWarnings([t])[0].indexOf("mpvArg " + Model.mpvRejectedName(t)) === 0]),
+  [[true], [true], [true], [true], [true]])
+checkCall("F-UX-7: through Service.playerArgWarnings -- the footer list the guide reads carries the refused token, labelled as the player's", () => {
+  const H = require("./service-harness.js")
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const h = H.bootService(svcText, Model, { entry: { sourceKey: "", showLogos: false, mpvArgs: "--tls-verify=no --ytdl=yes" }, stateText: "", host: "lag" })
+  return [h.root.playerArgWarnings, h.compileErrors]
+}, [["Player warning: mpvArg --tls-verify" + Model.MPV_REFUSED_TEXT, "Player warning: mpvArg --ytdl" + Model.MPV_HANDOFF_TEXT], []])
+
+// ---- D-LOGO-19: a cached logo Qt cannot decode is tried once, not on every realisation ----
+// The shell is the only place that knows a file failed the decoder, and it
+// threw that away: both Image slots in Guide.qml bound on Image.Ready and
+// listened for nothing else. Now a failed path is kept for the session and
+// the slots read `have` LESS those names, through the same directory-tagged
+// set logoSlot already refuses anything outside of.
+checkCall("D-LOGO-19: logoFailedPath turns the Image source back into the path the slot named, and nothing else", () =>
+  [Model.logoFailedPath("file:///c/sources/k/logos/abc12345"), Model.logoFailedPath("file://c/x"), Model.logoFailedPath("http://h.test/x.png"),
+   Model.logoFailedPath(""), Model.logoFailedPath(null), Model.logoFailedPath("/c/x")],
+  ["/c/sources/k/logos/abc12345", "", "", "", "", ""])
+checkCall("D-LOGO-19: logoBrokenMark copies, never mutates, and records no empty path", () => {
+  const a = { "/c/logos/one": true }
+  const b = Model.logoBrokenMark(a, "/c/logos/two")
+  const c = Model.logoBrokenMark(b, "")
+  return [a, b, c, Model.logoBrokenMark(null, "/x"), Model.logoBrokenMark({ "/c/stale": false }, "/x")]
+}, [{ "/c/logos/one": true }, { "/c/logos/one": true, "/c/logos/two": true }, { "/c/logos/one": true, "/c/logos/two": true }, { "/x": true }, { "/x": true }])
+checkCall("D-LOGO-19: logoHaveLess drops a name whose file is broken IN THE SET'S DIRECTORY, keeps one broken elsewhere, and leaves a non-set alone", () => {
+  const have = Model.logoHaveSet(["aaa", "bbb"], "/c/sources/k/logos")
+  const broken = { "/c/sources/k/logos/aaa": true, "/c/sources/other/logos/bbb": true }
+  const less = Model.logoHaveLess(have, broken)
+  return [less, Model.logoHaveLess(have, {}), Model.logoHaveLess({}, broken), Model.logoHaveLess(null, broken), Model.logoHaveLess(have, null),
+          // never mutates the set the service binds rows to
+          have.names]
+}, [{ dir: "/c/sources/k/logos", names: { bbb: true } }, { dir: "/c/sources/k/logos", names: { aaa: true, bbb: true } }, {}, null,
+    { dir: "/c/sources/k/logos", names: { aaa: true, bbb: true } }, { aaa: true, bbb: true }])
+checkCall("D-LOGO-19: through logoSlot and wallTile -- the slot a broken file fed answers blank (the wall: the mark) and the other channel's slot still draws, so the join is a call", () => {
+  const dir = "/c/sources/k/logos"
+  const chA = { name: "A", logo: "https://logos.test/a.png" }, chB = { name: "B", logo: "https://logos.test/b.png" }
+  const pathA = Model.logoSlot({ enabled: true, channel: chA, logoDir: dir, have: Model.logoHaveSet([Model.fnv1a32(chA.logo), Model.fnv1a32(chB.logo)], dir) }).path
+  const have = Model.logoHaveSet([Model.fnv1a32(chA.logo), Model.fnv1a32(chB.logo)], dir)
+  const broken = Model.logoBrokenMark({}, Model.logoFailedPath("file://" + pathA))
+  const shown = Model.logoHaveLess(have, broken)
+  return [Model.logoSlot({ enabled: true, channel: chA, logoDir: dir, have: shown }).kind, Model.logoSlot({ enabled: true, channel: chB, logoDir: dir, have: shown }).kind,
+          Model.wallTile({ enabled: true, channel: chA, logoDir: dir, have: shown }).kind, Model.wallTile({ enabled: true, channel: chB, logoDir: dir, have: shown }).kind,
+          // the same name broken in ANOTHER source's directory hides nothing here
+          Model.logoSlot({ enabled: true, channel: chA, logoDir: dir, have: Model.logoHaveLess(have, { ["/c/sources/other/logos/" + Model.fnv1a32(chA.logo)]: true }) }).kind]
+}, ["blank", "image", "mark", "image", "image"])
+
+// ---- D-SRC-12: the 28 code points where the two mirrors' lower-casing disagrees are PINNED ----
+// Each mirror folds a host and a label with its own runtime's tables; the
+// fixture holds both runtimes' whole non-identity lowering tables and the
+// set where they differ. This is the node half: its own table equals the
+// fixture's node table, the diff recomputed from the two tables equals the
+// pinned set, and every pinned code point reaches validateSourceUrl and
+// labelTaken as a call. tests/test_helper.py is the python half. Written
+// only under CASEFOLD_FIXTURE_REWRITE=1 (the node half of the file).
+const casefoldPath = path.join(__dirname, "fixtures/casefold-diff.json")
+const cpName = cp => "U+" + cp.toString(16).toUpperCase().padStart(4, "0")
+function ownLowerTable() {
+  const table = {}
+  for (let cp = 0; cp < 0x110000; cp++) {
+    if (cp >= 0xD800 && cp <= 0xDFFF) continue
+    const ch = String.fromCodePoint(cp)
+    const low = ch.toLowerCase()
+    if (low !== ch) table[cpName(cp)] = Array.from(low).map(c => cpName(c.codePointAt(0))).join(" ")
+  }
+  return table
+}
+function casefoldDiff(py, nd) {
+  const keys = new Set(Object.keys(py).concat(Object.keys(nd)))
+  return Array.from(keys).filter(k => py[k] !== nd[k]).sort((a, b) => parseInt(a.slice(2), 16) - parseInt(b.slice(2), 16))
+}
+checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement set recomputed from the two tables is the pinned 28, and each one reaches validateSourceUrl and labelTaken", () => {
+  const own = ownLowerTable()
+  if (process.env.CASEFOLD_FIXTURE_REWRITE === "1") {
+    const data = fs.existsSync(casefoldPath) ? JSON.parse(fs.readFileSync(casefoldPath, "utf8")) : {}
+    if (!data.python) data.python = { runtime: "", lower: {} }
+    data.node = { runtime: "node " + process.versions.node + ", ICU " + process.versions.icu + ", Unicode " + process.versions.unicode, lower: own }
+    data.diff = casefoldDiff(data.python.lower, own)
+    // sorted keys, as the python writer's sort_keys, so the two writers diff cleanly
+    const sorted = v => (v && typeof v === "object" && !Array.isArray(v)) ? Object.keys(v).sort().reduce((o, k) => { o[k] = sorted(v[k]); return o }, {}) : v
+    fs.writeFileSync(casefoldPath, JSON.stringify(sorted(data), null, 1) + "\n")
+  }
+  const data = JSON.parse(fs.readFileSync(casefoldPath, "utf8"))
+  const py = data.python.lower, nd = data.node.lower
+  const diff = casefoldDiff(py, nd)
+  const ownKeys = Object.keys(own), ndKeys = Object.keys(nd)
+  const tableSame = ownKeys.length === ndKeys.length && ownKeys.every(k => own[k] === nd[k])
+  const reach = diff.map(name => {
+    const ch = String.fromCodePoint(parseInt(name.slice(2), 16))
+    const want = (nd[name] || name).split(" ").map(c => String.fromCodePoint(parseInt(c.slice(2), 16))).join("")
+    const v = Model.validateSourceUrl("http://" + ch + ".test/")
+    return v.ok && v.host === want + ".test" && Model.sourceView({ key: "k", url: v.url, label: "" }, "k", 0, "", false).host === want + ".test"
+      && Model.labelTaken(ch, [want]) === true
+  })
+  return [tableSame, ownKeys.length > 1000, diff.length, diff.indexOf("U+A7CE") !== -1, diff.indexOf("U+16EA0") !== -1,
+          show(diff) === show(data.diff), reach.every(r => r === true), reach.length]
+}, [true, true, 28, true, true, true, true, 28])
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)

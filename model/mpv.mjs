@@ -113,10 +113,52 @@ function mpvArgWarnings(tokens) {
   return out
 }
 
+// F-UX-7 (2026-10-24). A refused token used to be written to the journal
+// (mpvRejectedLine, below) and shown to the user nowhere: the footer's
+// warning list was built from KEPT tokens only, so a pasted `--tls-verify=no`
+// or `--no-load-scripts` looked like it did nothing, and the README had to
+// say "look in the shell's log". So `warnings` now carries one line per
+// distinct refused option too, by its NAME alone -- the footer is a sink
+// under rule 5 and a refused token is exactly where a credential goes
+// (`--stream-lavf-o=http_proxy=http://u:pw@p`, D-SINK-24) -- through the
+// same mpvRejectedName the journal line uses: the text before `=` when it
+// is option-shaped, else the fixed word `<token>`. An option-shaped name
+// that was refused is reserved (that is the only way splitMpvArgs refuses
+// one), so the sentence says so; a `<token>` is not an option at all.
+var MPV_REFUSED_TEXT = " refused: reserved by the plugin"
+var MPV_REFUSED_JUNK_TEXT = " refused: not a --option"
+
+function mpvRefusedWarning(token) {
+  var name = mpvRejectedName(token)
+  return "mpvArg " + name + (name === "<token>" ? MPV_REFUSED_JUNK_TEXT : MPV_REFUSED_TEXT)
+}
+
+// One line per distinct refused NAME, in the order the user wrote them.
+function mpvRefusedWarnings(rejected) {
+  var list = asList(rejected)
+  var seen = {}
+  var out = []
+  for (var i = 0; i < list.length; i++) {
+    var token = str(list[i])
+    if (token === "") continue
+    var line = mpvRefusedWarning(token)
+    if (seen[line] === true) continue
+    seen[line] = true
+    out.push(line)
+  }
+  return out
+}
+
 // mpvArgs is one string of whitespace-separated `--key[=value]` tokens.
 // Anything else (including reserved options) is rejected, never guessed.
-// `warnings` covers the tokens that are KEPT: a rejected token never reaches
-// mpv, so it has nothing to warn about beyond the existing `rejected` list.
+// `warnings` covers the tokens that were REFUSED (since F-UX-7, by name
+// only) and then the tokens that are KEPT (what the option does, PO-10); the
+// footer shows the list where the kept ones were already shown
+// (Service.playerArgWarnings). The refused lines come FIRST because the
+// footer's one line (Model.footerWarning -> warningLine) prints the first
+// warning and counts the rest as `(+N more)`: with the kept lines first, a
+// refused option beside any kept-option warning was named nowhere the user
+// looks, and the README said it was (the recheck's P2 on fda0d52).
 function splitMpvArgs(text) {
   var args = []
   var rejected = []
@@ -134,7 +176,7 @@ function splitMpvArgs(text) {
                                            || MPV_RESERVED[mpvOptionBase("--" + name.substring(5))] === true)) rejected.push(token)
     else args.push(token)
   }
-  return { args: args, rejected: rejected, warnings: mpvArgWarnings(args) }
+  return { args: args, rejected: rejected, warnings: mpvRefusedWarnings(rejected).concat(mpvArgWarnings(args)) }
 }
 
 // D-SINK-24 (ruling R32b). The journal line for the tokens splitMpvArgs
@@ -715,7 +757,8 @@ function trackAccessibleName(rows, index) {
 export {
   MPV_HANDOFF, MPV_HANDOFF_SCRIPT_OPTS, MPV_YTDL_OFF, MPV_HANDOFF_TEXT,
   MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase, mpvHandoffName, mpvDiskName,
-  mpvArgWarning, mpvArgWarnings, splitMpvArgs, mpvRejectedLine,
+  mpvArgWarning, mpvArgWarnings, MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT,
+  mpvRefusedWarning, mpvRefusedWarnings, splitMpvArgs, mpvRejectedLine,
   mpvRejectedName, headerArgs, MPV_RAW_PREFIX, mpvWindowTitle, playerDirs,
   dirnameOf, buildMpvArgv, helperArgv, playlistFetchArgv, fetchStateDir,
   playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,

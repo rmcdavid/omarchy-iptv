@@ -1,12 +1,12 @@
 diff --git a/Service.qml b/Service.qml
-index 0000000..0000000 100644
+index 8114630..44c0752 100644
 --- a/Service.qml
 +++ b/Service.qml
-@@ -5245,6 +5245,7 @@ Item {
+@@ -5550,6 +5550,7 @@ Item {
      onSaved: {
        root.stateInHandler = root.stateInHandler + 1
        try {
 +        root.recentSaves = []   // MUTATION (lane A, round 15): cleared on EVERY saved, mid-burst included
-         if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) {
-           root.stateSavesInFlight = 0
-           root.stateSaveFailed = false
+         // D-SRC-39: decided from the burst record, not the last text alone.
+         var outcome = Model.stateSaveOutcome({ viewText: stateFile.text(), lastSaveText: root.lastSaveText, recentSaves: root.recentSaves })
+         if (outcome.last) {

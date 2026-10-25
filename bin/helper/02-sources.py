@@ -244,6 +244,28 @@ def allocate_source_key(sources: list[dict[str, Any]], url: str) -> str:
     return key
 
 
+def cut_host_params(hostport: str) -> str:
+    """Where a PRINTED host ends: at the first `;`, `=` or `&` (D-SINK-30).
+
+    RFC 3986's reg-name admits all three, so `http://h.test;sid=SECRET/x`
+    validates with host `h.test;sid=secret`, and a reader that stops at `:`
+    alone prints the parameter wherever it prints the host. ONE copy of the
+    rule in the helper, shared by every reader that derives a printable host
+    from an authority -- `host_port_of` (the Sources row and its default
+    label) and `logo_host` (the consent survey and the logo refusal lines) --
+    mirrored by Model.cutHostParams. The `:` port is NOT cut here: each
+    caller keeps or drops it on its own line, and a bracketed literal is
+    unaffected because none of the three can appear inside the brackets.
+    A `find` per character rather than a pattern: the helper's regex guard
+    holds every compiled pattern to a reviewed table.
+    """
+    for delimiter in ";=&":
+        end = hostport.find(delimiter)
+        if end != -1:
+            hostport = hostport[:end]
+    return hostport
+
+
 def host_port_of(url: str) -> str:
     """Mirror of hostPortOf (model/sources.mjs, internal to the model): host[:port] of a URL, lower-cased; "" for paths.
 
@@ -256,6 +278,13 @@ def host_port_of(url: str) -> str:
     `redact_urls`; `url_host` and `validate_source_url` have been right all
     along because they hand the string to a real parser or cut at the last
     at-sign, and this now does the same.
+
+    D-SINK-30 (2026-10-24). RFC 3986's reg-name admits `;`, `=` and `&`, so
+    `http://h.test;sid=SECRET/x` validates with host `h.test;sid=secret` and
+    this printed it so, where run_host_parts had cut the free-text host at
+    `:`, `;`, `=` and `&` since R32a'. The printed host[:port] now ends at
+    the first of the three (the `:` port is kept); validation is unchanged
+    (D-SINK-27). The cut is `cut_host_params`, shared with `logo_host`.
     """
     match = re.match(r"^[A-Za-z][A-Za-z0-9+.\-]*://([^/?#]*)", url)
     if not match:
@@ -263,7 +292,7 @@ def host_port_of(url: str) -> str:
     authority = match.group(1)
     at = authority.rfind("@")
     hostport = authority if at == -1 else authority[at + 1:]
-    return hostport.lower()
+    return cut_host_params(hostport).lower()
 
 
 def derive_label(url: str, kind: str) -> str:

@@ -37,22 +37,37 @@ function warnState(message) {
 // A record whose `url` carries a control character (NUL, CR, ...) is
 // dropped: it would reach the helper's argv and can never match a key
 // (D-SRC-09). A control character in `epgUrl` clears that field only.
-// D-SINK-23, second half, OPEN: this reader keeps a stored `url` AS WRITTEN,
-// where the helper's normalize_source validates it (validate_source_url) and
-// drops one that fails. Every display sink is safe for a pathless or
-// ambiguous URL since round 2, but the two readers still disagree about
-// which records exist. Not adopted in round 3 (the lead's answer to lane S's
-// question): dropping records in the shell's reader is a state-write change
-// in R27 territory, and it waits for its own round.
+//
+// D-SINK-23, second half (PARITY, the lead's ruling, 2026-10-24). This
+// reader used to keep a stored `url` AS WRITTEN, with length and control
+// checks only, where the helper's normalize_source validates it
+// (validate_source_url, origin `cli`) and drops one that fails. A
+// hand-edited state.json -- which the README invites -- could therefore
+// hold a URL the two mirrors read, keyed and redacted differently (an
+// upper-case host, a missing `/`, a default port), and D-SINK-27's lesson
+// is that the two readers must not disagree about what a stored link IS.
+// So the stored `url` is validated here exactly as there: the record keeps
+// the VALIDATED form (`pv.url`, `pv.kind`), and one that does not validate
+// is dropped (parseState journals the drop by key, never by URL). The
+// cost, stated in ARCHITECTURE-SOURCES 2.1: a hand-edited record
+// the shell used to keep (`http://h.test:abc/`, a `./relative` path, a
+// bare host) is dropped by the shell as the helper already dropped it on
+// its next write. `epgUrl` the same way, cleared rather than dropped.
+// Pinned by the shared state-reader-urls fixture on the dev branch, which
+// Model.parseState and the helper's normalize_state both run.
 function normalizeSourceRecord(raw) {
   if (!raw || typeof raw !== "object") return null
   var key = str(raw.key)
   var url = str(raw.url)
   if (!isSourceKey(key) || url === "" || url.length > MAX_SOURCE_URL || hasControlChars(url)) return null
-  var kind = str(raw.kind)
-  if (kind !== "http" && kind !== "file") kind = url.charAt(0) === "/" ? "file" : "http"
+  var pv = validateSourceUrl(url, { origin: "cli" })
+  if (!pv.ok) return null
+  url = pv.url
+  var kind = pv.kind
   var epg = str(raw.epgUrl)
   if (epg.length > MAX_SOURCE_URL || hasControlChars(epg)) epg = ""
+  var ev = validateSourceUrl(epg, { origin: "cli", kind: "epg" })
+  epg = ev.ok ? ev.url : ""
   var origin = str(raw.origin)
   if (SOURCE_ORIGINS.indexOf(origin) === -1) origin = "guide"
   var label = capCodePoints(sanitizeInput(raw.label), MAX_LABEL)
@@ -739,6 +754,49 @@ function pointerWritePlan(input) {
   return { steps: ["write-entry"], entryWaits: false }
 }
 
+// D-SRC-14 (2026-10-24). The probe commit's decision, before the state it
+// commits is published. An EDIT of the ACTIVE source's URL removes the old
+// record (Model.removeSource, which clears the pointer it named, R3) and
+// adds the replacement under a new key; published like that, the state has
+// no active source for one assignment -- `configured` read false,
+// clearSourceData ran, and a key-less state was saved before persistActive
+// issued a second save with the key. So the pointer is folded into the SAME
+// state object (probeCommitState) and the commit still runs the switch:
+// beginSwitch, then persistActive, which with the key already in memory
+// plans `write-entry-after-saved` -- one save, one entry write.
+// `reload` is "already the active directory": `newKey === activeKey`, which
+// is a retry of the active source (or a switch to it). No guard on
+// `wasActive` is needed for the edit, because `activeKey` is the key BEFORE
+// the fold (the caller passes root.activeSourceKey with root.userState not
+// yet moved) and an edit's newKey is allocated from the NEW URL against the
+// sources with the old record already removed (allocateSourceKey, fnv1a32):
+// it names the old key only through a 32-bit hash collision between the two
+// URLs, which this plan does not decide. The first version carried
+// `!wasActive &&` here with a comment saying the folded newKey IS the active
+// key -- true of the old inline test, evaluated after the assignment, and
+// not of this function's input (P23 recheck, 2026-10-24: the term could not
+// change the answer on any input the caller builds).
+//   commit     whether success writes the settings (startProbe's `commit`)
+//   mode       add | edit | switch | retry
+//   key        the record the probe concerned (the OLD key for an edit)
+//   newKey     the record the history kept
+//   activeKey  the active key BEFORE the commit (the published state's)
+// -> { wasActive, act: "switch" | "reload" | "none" }
+function probeCommitPlan(input) {
+  var it = input || {}
+  var wasActive = str(it.mode) === "edit" && str(it.key) !== "" && str(it.key) === str(it.activeKey)
+  var act = "none"
+  if (it.commit === true) act = str(it.newKey) === str(it.activeKey) ? "reload" : "switch"
+  return { wasActive: wasActive, act: act }
+}
+
+// The state the commit publishes: the pointer folded in when the active
+// source was edited, the state as it is otherwise.
+function probeCommitState(state, plan, newKey) {
+  if (!plan || plan.wasActive !== true) return state
+  return withActiveKey(state, activeKeyText(newKey))
+}
+
 // `activeSourceKey(state, playlistUrl)` USED TO BE HERE and is deliberately
 // gone (D-SINK-19, rule 15). It was the one function whose job was "name the
 // active source from a URL", and leaving it behind with no caller would leave
@@ -1150,12 +1208,12 @@ export {
   updateSource, removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
   withSourceStats, activeKeyText, activeKeyOf, activeSourceRecord,
   withActiveKey, invalidInputBlocks, reconcileAction, entryPlaylistUnusable,
-  adoptActiveSource, activeEpgUrlOf, pointerWritePlan, reconcileSources,
-  sourceForEdit, sourcesSummary, entryWith, cacheStale, formFields,
-  isFormField, formLimit, FORM_SLACK, formCapacity, emptyValues, copyValues,
-  copyForm, formState, formFocusOrder, formHasText, firstFieldWithText,
-  guideWithForm, openForm, openFirstRun, openAddForm, openEditForm,
-  openXtreamForm, closeForm, withFormPatch, withFormValue, withFormFocus,
-  moveFormFocus, fieldMaskable, fieldRevealed, fieldMasked, toggleReveal,
-  withFormReveal
+  adoptActiveSource, activeEpgUrlOf, pointerWritePlan, probeCommitPlan,
+  probeCommitState, reconcileSources, sourceForEdit, sourcesSummary,
+  entryWith, cacheStale, formFields, isFormField, formLimit, FORM_SLACK,
+  formCapacity, emptyValues, copyValues, copyForm, formState, formFocusOrder,
+  formHasText, firstFieldWithText, guideWithForm, openForm, openFirstRun,
+  openAddForm, openEditForm, openXtreamForm, closeForm, withFormPatch,
+  withFormValue, withFormFocus, moveFormFocus, fieldMaskable, fieldRevealed,
+  fieldMasked, toggleReveal, withFormReveal
 }

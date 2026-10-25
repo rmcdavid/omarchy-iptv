@@ -1299,7 +1299,7 @@ So the old pass measured the glyph and compared it against a number computed
 for the words. Nothing was wrong with either measurement; they were of
 different things, and the mismatch was read as an error in the model.
 
-**The claim is withdrawn.** It is pinned by
+**The claim is withdrawn (2026-09-15).** It is pinned by
 `tests/fixtures/contrast-calibration.json` and five checks, so it cannot come
 back as folklore. One of those checks fails if a future lane widens the
 tolerance to make a bad model pass, which is the obvious way to lose this
@@ -1307,7 +1307,7 @@ again.
 
 ### What this changes, and what it does not
 
-**Reason 2 of the refusal is withdrawn.** The model can be trusted, so the
+**Reason 2 of the refusal is withdrawn (2026-09-15).** The model can be trusted, so the
 finding that the 0.52 rung is under threshold in 20 of 23 themes is real and
 D-RUNG-2 is not blocked on measurement any more.
 

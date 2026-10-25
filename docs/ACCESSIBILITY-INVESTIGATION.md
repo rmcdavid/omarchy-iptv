@@ -361,7 +361,7 @@ nothing acts on.
 (`Accessible.focusable` appears zero times in the repo), and real Qt focus stays
 on the key catcher. The numeric-entry chip's name is a hardcoded English literal
 (Guide.qml:2631-2632) outside the `root.copy` table (Guide.qml:166-211). One
-earlier claim is withdrawn: form field values do **not** outlive the form -
+earlier claim is **withdrawn (2026-09-15)**: form field values do **not** outlive the form -
 the fields are Repeater-built from `Model.formFields` (Guide.qml:311) and
 `Model.closeForm` nulls the form (Model.js:5496), so the delegates are
 destroyed. Hidden *screens* do stay in the tree as `invisible+offscreen` nodes.

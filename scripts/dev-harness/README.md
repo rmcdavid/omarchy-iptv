@@ -174,6 +174,9 @@ $OMARCHY_IPTV_HARNESS_DIR   (default $XDG_RUNTIME_DIR/omarchy-iptv-harness)
   runtime/   XDG_RUNTIME_DIR -> runtime/omarchy-iptv/mpv.sock (+ hypr -> real hypr dir)
   fixtures/  generated harness.m3u (and test.ts with --serve)
   shots/     screenshots from `run.sh shot`
+  qs.pid, server.pid  the detached shell's and the fixture server's RECORDED pids,
+             which `run.sh reap` and the EXIT trap end by pid -- TERM, a bound,
+             KILL -- never by a `pkill -f` pattern (F-HARNESS-32)
   transcripts/  one 0600 file per scenario run (0700 dir); NOT removed by
                 `run.sh clean`, because it is the run's evidence (F-M3-1)
 ```
@@ -338,7 +341,9 @@ $H key -k Tab             # real key events via wtype -- REFUSES unless the guid
 $H key j j f              # e.g. list mode: down, down, favorite
 $H key --to-compositor -k F13   # a chord for the COMPOSITOR: skips the focus check (not the lock one)
 $H type sky               # type text and prove it arrived, by reading the query back
-$H shot search            # grim screenshot -> shots/search.png
+$H shot search            # grim screenshot -> shots/search.png -- REFUSES unless the guide
+                          #   has the keyboard (F-HARNESS-12); `shot --any-surface player`
+                          #   is the deliberate shot of whatever is up (the flag comes first)
 ```
 
 ### `key` and `type` refuse rather than type blind (F-M3-1 half (a))
@@ -376,6 +381,30 @@ swallowed (1 fresh shell in 4), so `key` sends one Shift press per shell
 before the first real key, and `type` asserts the query it read back and
 retries once. A steal *after* the front check ends on the guard's verdict too
 -- exit 3, nothing typed -- not on a two-attempt failure message.
+
+`shot` asks the same question (F-HARNESS-12). It grades PIXELS, and a human
+reads its file as proof, so a capture of a surface that is not the guide's
+was the one failure the verb could not see -- the keystroke class, on the
+verb whose output is read as evidence. It refuses with exit 3 and `key`'s
+wording unless `ipc focusState` says the guide holds the keyboard;
+`shot --any-surface <name>`, flag first, is the deliberate shot of whatever
+is up (the player window). No lock refusal: nothing is typed. Which OUTPUT
+the guide is on is not asserted (`focusState` carries no output name; the
+focused monitor is captured, as before). `m3-scenario.sh`, its one caller,
+prints a refusal as a FAIL line instead of discarding both streams.
+`scripts/qa-lib-test.sh` drives the decision with `qs`, `hyprctl` and `grim`
+stubbed; it was red on the run.sh before this (a closed guide captured).
+
+`type` and `--to-compositor` are **prompt-and-gate-only** (F-HARNESS-6): no
+scenario calls either, because no scenario enters text through the keyboard
+(m3's search check is driven over `ipc query`, and its `key` calls are
+command keys), and `--to-compositor` has no caller by construction. Both are
+pinned by `qa-lib-test.sh`'s decision table (`type` refuses before its retry
+loop and ends on the guard's verdict after a mid-type steal; the hatch is
+positional and skips the primer). A caller would be an ADDED segment, not a
+replacement: a display lane giving m3 an H3c that enters search by keystroke
+and `type`s the query is the one check that reddens when `type` stops
+proving arrival.
 
 Operationally: `OMARCHY_IPTV_FOCUS_TIMEOUT` (default 5 s) bounds the wait for
 the reply and a timeout refuses rather than typing blind; a harness started
@@ -2002,6 +2031,23 @@ chords are `wtype -M ctrl u -m ctrl` (there is no `-k ctrl+u`); and a
 command line matches (and kills) that shell, so bracket one character of
 the pattern (`quickshell -p .../roo[t]`). The AF_UNIX socket path is limited
 to ~108 bytes: keep `OMARCHY_IPTV_HARNESS_DIR` short.
+
+Two conventions every scenario file keeps, both pinned by `qa-lib-test.sh`
+over the whole population so a seventeenth file cannot be written without
+them. **Refusals above every external command** (F-M3-18 (b)): the file
+resolves its own directory from `BASH_SOURCE` with builtins and checks its
+tools with `command -v` before anything else runs, so with nothing on PATH
+it answers its own `SKIP <name>-scenario: <tool> is not on PATH` and exit 77
+-- what the gate reads as "this machine cannot run it" -- where twelve of
+the sixteen used to die on `dirname: command not found` first (driven:
+`env -i PATH= /bin/bash <scenario>`). **INT and TERM are exits**
+(F-HARNESS-18): `trap 'exit 130' INT` and `trap 'exit 143' TERM` sit beside
+`trap cleanup EXIT`, because a signal while the shell waits on a foreground
+child runs no EXIT trap and an exit does; without them a `timeout -s TERM`
+mid-run stranded the shell, the cage, the server and the work directory
+(measured on clip-scenario, the first to carry them). The qa-lib-test pin is
+the shape; the proof is a display lane's TERM at N s and INT leaving nothing
+behind, recorded per scenario in docs/QA-RESULTS.md.
 
 ## What the fixture contains
 

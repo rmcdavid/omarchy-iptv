@@ -174,18 +174,36 @@ class FetchDeadline:
     CPython retries a socket call interrupted by a signal only after running
     the handler (PEP 475), and the handler's exception ends the call.
 
-    What it cannot cut short, stated rather than rounded away: a call that
-    does not return to the interpreter until it is done. The one on this
-    path is the host-name lookup -- getaddrinfo runs in the C library, which
-    retries its own poll after a signal -- so a lookup ends on the system
-    resolver's timeout and the handler runs then. UNVERIFIED by run.
+    What it cannot cut short: a call that does not return to the
+    interpreter until it is done. The one on this path was the host-name
+    lookup -- getaddrinfo runs in the C library, which retries its own poll
+    after a signal -- so a lookup ended on the system resolver's timeout and
+    the handler ran then. MEASURED 2026-10-24 (D-SRC-62, the
+    resolver-overrun spike on the dev branch, a user namespace whose
+    only resolver never answers): with a 0.5 s deadline the `playlist` verb
+    answered `timeout` after 1.26-1.28 s under `options timeout:1
+    attempts:1` and after 10.29-10.35 s under glibc's defaults, the
+    resolver's own 1.04-1.09 s and 10.05-10.06 s plus the helper's start.
+    So since that day the lookup is the one thing the fetch runs on a
+    thread of its own (resolve_within, through bounded_create_connection on
+    every connection the openers make, redirect hops included): the main
+    thread waits for it in slices it returns from, the alarm interrupts
+    that wait as it interrupts a read, and the worker blocks SIGALRM so the
+    signal is delivered to the thread that handles it. Measured the same
+    day on the same rig: 0.77-0.84 s under both resolver settings, the
+    lookup given up at the deadline and the rest the helper's own start,
+    which the before-figures carry too. The address the worker found is the
+    one the socket connects to, so the lookup is made once per connection
+    and never repeated by the stdlib.
 
     Only the main thread may install a signal handler. Anywhere else (a test
     calling from a thread) the body runs without the alarm and the read
-    loop's own monotonic check is the only bound, as before. A timer already
-    armed (none is, on any path that fetches) is put back with what remained
-    of it. The helper starts no thread and arms no other timer while a
-    fetch runs."""
+    loop's own monotonic check is the only bound, as before; the lookup
+    there is bounded by the socket timeout alone, as a connect is. A timer
+    already armed (none is, on any path that fetches) is put back with what
+    remained of it. The helper arms no other timer while a fetch runs, and
+    the resolver's worker is the only thread it ever starts; it is a daemon
+    thread, so one the deadline abandoned dies with the process."""
 
     def __init__(self, seconds: float) -> None:
         self.seconds = max(0.001, float(seconds))
@@ -226,6 +244,143 @@ class FetchDeadline:
                 left = self.prior[0] - (time.monotonic() - self.started)
                 signal.setitimer(signal.ITIMER_REAL, max(left, 0.001), self.prior[1])
         return False
+
+
+# D-SRC-62: the main thread waits for the resolver's worker in slices of
+# this many seconds, so a SIGALRM that the kernel delivered while the wait
+# was not interruptible still reaches its handler within one slice.
+RESOLVE_WAIT_SLICE_S = 0.05
+# The worker's stack. getaddrinfo needs well under this; the default 8 MiB
+# would be the largest single anonymous mapping a fetch verb makes under
+# limit_memory's RLIMIT_DATA.
+RESOLVE_STACK_BYTES = 1024 * 1024
+
+
+def resolve_within(host: str, port: int, timeout: float) -> list[Any]:
+    """getaddrinfo(host, port) for a stream socket, on a daemon thread the
+    main thread waits for at most `timeout` seconds (D-SRC-62).
+
+    The wait is a loop of short joins, so it returns to the interpreter
+    every RESOLVE_WAIT_SLICE_S and a FetchDeadline alarm ends it there, as
+    it ends a read; the worker blocks SIGALRM first, so the kernel hands
+    the signal to the main thread, whose wait is interrupted at once. A
+    lookup that outlives the wait raises TimeoutError, the error a connect
+    that took too long raises, and the caller answers it as one; the worker
+    then finishes on the resolver's own clock and is discarded (daemon:
+    the process does not wait for it at exit). Nothing is cached here and
+    nothing is re-looked-up: the result goes straight to the connect."""
+    import socket
+    import threading
+    result: list[Any] = []
+
+    def lookup() -> None:
+        try:
+            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
+        except (OSError, ValueError, AttributeError):
+            pass
+        try:
+            result.append(socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM))
+        except BaseException as error:         # handed to the main thread whole
+            result.append(error)
+
+    previous = threading.stack_size()
+    try:
+        threading.stack_size(RESOLVE_STACK_BYTES)
+    except (ValueError, RuntimeError):
+        pass
+    try:
+        worker = threading.Thread(target=lookup, name="omarchy-iptv-resolve", daemon=True)
+        try:
+            worker.start()
+        except RuntimeError as error:
+            # No thread to be had (a memory limit too low for one more
+            # mapping, the D-M3U-1 tests' very-low-limit case; a thread
+            # ceiling): the lookup runs here, under the alarm alone, as it
+            # did before D-SRC-62, and says so once. A verb that is about to
+            # refuse for memory still refuses for memory, not for this.
+            log("host-name lookup: no thread for it (%s); this lookup is not bounded by the deadline" % type(error).__name__)
+            return socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+    finally:
+        try:
+            threading.stack_size(previous)
+        except (ValueError, RuntimeError):
+            pass
+    bound = max(0.0, float(timeout))
+    until = time.monotonic() + bound
+    while worker.is_alive():
+        left = until - time.monotonic()
+        if left <= 0:
+            break
+        worker.join(min(RESOLVE_WAIT_SLICE_S, left))
+    if not result:
+        raise TimeoutError("the host-name lookup took longer than %.1f s" % bound)
+    found = result[0]
+    if isinstance(found, BaseException):
+        raise found
+    return found
+
+
+def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
+                              source_address: Any = None, **_: Any) -> Any:
+    """socket.create_connection with its lookup under resolve_within, the
+    same signature, the same first-address-that-connects loop (D-SRC-62).
+    Installed as every connection's `_create_connection` by
+    bounded_handlers, which is the one place http.client turns a host name
+    into a socket, so a redirect hop gets the same bound as the first hop.
+    `timeout` that is not a number (the stdlib's default sentinel) is
+    bounded by DEFAULT_TIMEOUT rather than left open."""
+    import socket
+    host, port = address
+    bound = float(timeout) if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) else float(DEFAULT_TIMEOUT)
+    error: OSError | None = None
+    for family, kind, proto, _, sockaddr in resolve_within(host, port, bound):
+        sock = None
+        try:
+            sock = socket.socket(family, kind, proto)
+            if isinstance(timeout, (int, float)) and not isinstance(timeout, bool):
+                sock.settimeout(timeout)
+            if source_address:
+                sock.bind(source_address)
+            sock.connect(sockaddr)
+            return sock
+        except OSError as failure:
+            error = failure
+            if sock is not None:
+                sock.close()
+    if error is not None:
+        raise error
+    raise OSError("getaddrinfo returned an empty list")
+
+
+def bounded_handlers(context: Any) -> list[Any]:
+    """The HTTP and HTTPS handlers every opener of this helper is built
+    with: the stdlib's, opening the stdlib's connection classes with their
+    `_create_connection` replaced by bounded_create_connection (D-SRC-62).
+    build_opener drops its own HTTPHandler and HTTPSHandler for these, as
+    it does for any subclass it is handed. `context` None gives the HTTPS
+    handler the stdlib's default context, as before."""
+    import http.client
+    import urllib.request
+
+    class BoundedHTTPConnection(http.client.HTTPConnection):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self._create_connection = bounded_create_connection
+
+    class BoundedHTTPSConnection(http.client.HTTPSConnection):
+        def __init__(self, *args: Any, **kwargs: Any) -> None:
+            super().__init__(*args, **kwargs)
+            self._create_connection = bounded_create_connection
+
+    class BoundedHTTPHandler(urllib.request.HTTPHandler):
+        def http_open(self, req: Any) -> Any:
+            return self.do_open(BoundedHTTPConnection, req)
+
+    class BoundedHTTPSHandler(urllib.request.HTTPSHandler):
+        def https_open(self, req: Any) -> Any:
+            return self.do_open(BoundedHTTPSConnection, req, context=self._context)
+
+    return [BoundedHTTPHandler(), BoundedHTTPSHandler(context=context)]
 
 
 # D-SRC-59: the most of a library error's text a network refusal carries.
@@ -275,10 +430,10 @@ def make_opener(label: str, host: str) -> Any:
                     new.remove_header(name)
             return new
 
-    handlers: list[Any] = [SafeRedirectHandler()]
-    context = TLS_CONTEXT.get("https")
-    if context is not None:
-        handlers.append(urllib.request.HTTPSHandler(context=context))
+    # D-SRC-62: the connections are the stdlib's with the host-name lookup
+    # bounded; the TLS context is the one limit_memory prepared, or the
+    # stdlib's default when none was.
+    handlers: list[Any] = [SafeRedirectHandler(), *bounded_handlers(TLS_CONTEXT.get("https"))]
     return urllib.request.build_opener(*handlers)
 
 

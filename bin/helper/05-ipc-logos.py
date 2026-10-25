@@ -181,10 +181,21 @@ def logo_host(netloc: str) -> str:
     Userinfo makes the answer "": fetch_logo refuses such a URL outright, so
     the host is never contacted, and naming it would print the credentials in
     the consent text. Mirrored by Model.splitLogoUrl.
+
+    D-SINK-30 (2026-10-24). The answer ends at the first `;`, `=` or `&` too,
+    through the same `cut_host_params` the Sources row's host goes through:
+    `https://cdn.test;sid=SECRET/a.png` is a valid URL whose authority is a
+    credential, urllib hands it over whole in `netloc`, and this stopped at
+    `:` alone -- so the survey the consent dialog is composed from and the
+    `refused a logo from %s` lines (logo_dimension_refusal, logo_chunks) named
+    `cdn.test;sid=secret`. The `@` test runs over the WHOLE netloc first:
+    `cdn.test;u=p@evil` is refused by fetch_logo, so a cut that hid its `@`
+    would count a host that is never contacted.
     """
     text = (netloc or "").strip().lower()
     if "@" in text:
         return ""
+    text = cut_host_params(text)
     if text.startswith("["):
         # IPv6 literal: the bracketed half is the host, any :port follows it.
         close = text.find("]")
@@ -377,10 +388,9 @@ def logo_opener(host: str) -> Any:
     # No FTPHandler: build_opener adds the defaults, and the redirect guard
     # already refuses an ftp target, but a handler that cannot be reached is
     # one fewer thing to reason about.
-    handlers: list[Any] = [LogoRedirectHandler()]
-    context = TLS_CONTEXT.get("https")
-    if context is not None:
-        handlers.append(urllib.request.HTTPSHandler(context=context))
+    # D-SRC-62: the connections are the stdlib's with the host-name lookup
+    # bounded (bounded_handlers), as make_opener's are.
+    handlers: list[Any] = [LogoRedirectHandler(), *bounded_handlers(TLS_CONTEXT.get("https"))]
     opener = urllib.request.build_opener(*handlers)
     opener.handlers = [h for h in opener.handlers
                        if h.__class__.__name__ not in ("FTPHandler", "CacheFTPHandler",

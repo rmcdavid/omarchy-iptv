@@ -570,3 +570,123 @@ class SharedRedactionVectors(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class StateReaderParityTest(unittest.TestCase):
+    """D-SINK-23, second half (PARITY, 2026-10-24): the helper's normalize_source
+    and Model.parseState read a STORED url the same way -- validated as origin
+    `cli`, the record keeping the validated form, a url that fails dropping
+    the record, epgUrl cleared rather than dropped. The shared fixture is
+    tests/fixtures/state-reader-urls.json; tests/Model.test.js runs the same
+    rows through the JS reader. This is the python half; it was green before
+    the JS half changed, which is the point: the fixture is what the shell now
+    has to match."""
+
+    def test_normalize_state_reads_every_fixture_row_as_the_fixture_says(self):
+        fixture = FIXTURES / "state-reader-urls.json"
+        self.assertTrue(fixture.exists(), "tests/fixtures/state-reader-urls.json is missing")
+        cases = json.loads(fixture.read_text(encoding="utf-8"))["cases"]
+        self.assertGreaterEqual(len(cases), 15)
+        self.assertGreaterEqual(sum(1 for c in cases if c["kept"] is False), 4)
+        self.assertGreaterEqual(sum(1 for c in cases if c["kept"] and c["url"] != c["outUrl"]), 4)
+        for c in cases:
+            record = {"key": "aaaaaaa1", "url": c["url"], "epgUrl": c["epgUrl"], "kind": "http", "label": "",
+                      "labelCustom": False, "origin": "guide", "addedAt": 1, "lastUsed": 1, "fetchedAt": 0,
+                      "channelCount": 0, "groupCount": 0}
+            state = helper.normalize_state({"version": 2, "cacheLayout": 2, "sources": [record]})
+            sources = state["sources"]
+            self.assertEqual(len(sources) == 1, c["kept"], c["why"])
+            if c["kept"]:
+                self.assertEqual(sources[0]["url"], c["outUrl"], c["why"])
+                self.assertEqual(sources[0]["epgUrl"], c["outEpgUrl"], c["why"])
+                self.assertEqual(sources[0]["kind"], c["kind"], c["why"])
+
+
+class CasefoldDiffPinTest(unittest.TestCase):
+    """D-SRC-12 (the optional pin, 2026-10-24). The two mirrors fold a host
+    and a label with their own runtime's Unicode tables (`host.lower()`
+    here, `host.toLowerCase()` in the model), and the tables disagree on 28
+    code points today (three Latin Extended-D letters and the 25 Medefaidrin
+    capitals) -- a node-vs-CPython version fact, accepted on the board
+    because no provider host carries them and ASCII-only folding would stop
+    folding every Cyrillic or Greek capital a user types. What this pins is
+    that the DISAGREEMENT SET is known: tests/fixtures/casefold-diff.json
+    holds each runtime's whole non-identity lowering table (every code point
+    whose lower() is not itself, surrogates excluded) and the set where the
+    two differ. This half asserts CPython's table equals the fixture's
+    python table, recomputes the diff from the fixture's two tables and
+    asserts it equals the pinned set, and runs every pinned code point
+    through the shipping validator and label_key, so the join is a call.
+    tests/Model.test.js is the node half. A runtime whose tables move goes
+    red here rather than being discovered as two cache directories for one
+    source. The suite WRITES its own half of the fixture only under
+    CASEFOLD_FIXTURE_REWRITE=1 (the node suite likewise); without the flag
+    it reads and pins."""
+
+    FIXTURE = FIXTURES / "casefold-diff.json"
+
+    @staticmethod
+    def code_point_name(cp):
+        return "U+%04X" % cp
+
+    @classmethod
+    def own_table(cls):
+        table = {}
+        for cp in range(0, 0x110000):
+            if 0xD800 <= cp <= 0xDFFF:
+                continue
+            ch = chr(cp)
+            low = ch.lower()
+            if low != ch:
+                table[cls.code_point_name(cp)] = " ".join(cls.code_point_name(ord(c)) for c in low)
+        return table
+
+    @staticmethod
+    def diff_of(python_table, node_table):
+        keys = set(python_table) | set(node_table)
+        return sorted((k for k in keys if python_table.get(k) != node_table.get(k)), key=lambda k: int(k[2:], 16))
+
+    def test_the_disagreement_set_is_pinned_and_reaches_the_validator(self):
+        import unicodedata
+        own = self.own_table()
+        if os.environ.get("CASEFOLD_FIXTURE_REWRITE") == "1":
+            data = json.loads(self.FIXTURE.read_text(encoding="utf-8")) if self.FIXTURE.exists() else {}
+            data.setdefault("node", {"runtime": "", "lower": {}})
+            data["python"] = {"runtime": "CPython %s, unicodedata %s" % (sys.version.split()[0], unicodedata.unidata_version), "lower": own}
+            data["diff"] = self.diff_of(own, data["node"]["lower"])
+            data["_comment"] = [
+                "D-SRC-12: the code points where CPython's str.lower and node's toLowerCase disagree.",
+                "`python.lower` and `node.lower` are each runtime's whole non-identity lowering table over",
+                "U+0000..U+10FFFF (surrogates excluded): code point -> the code points of its lower form.",
+                "`diff` is where the two tables differ; both suites recompute it from the two tables and pin it.",
+                "Written by the suite that owns each half under CASEFOLD_FIXTURE_REWRITE=1:",
+                "  CASEFOLD_FIXTURE_REWRITE=1 python3 -m unittest discover -s tests -p test_helper.py",
+                "  CASEFOLD_FIXTURE_REWRITE=1 node tests/Model.test.js",
+                "and read, never written, otherwise. ASCII only.",
+            ]
+            self.FIXTURE.write_text(json.dumps(data, indent=1, sort_keys=True) + "\n", encoding="utf-8")
+        self.assertTrue(self.FIXTURE.exists(), "tests/fixtures/casefold-diff.json is missing")
+        data = json.loads(self.FIXTURE.read_text(encoding="utf-8"))
+        python_table = data["python"]["lower"]
+        node_table = data["node"]["lower"]
+        self.assertGreater(len(python_table), 1000)
+        self.assertGreater(len(node_table), 1000)
+        # (1) this runtime's table is the one the fixture holds
+        self.assertEqual(own, python_table, "CPython's lowering table moved: re-run under CASEFOLD_FIXTURE_REWRITE=1 and re-read the diff")
+        # (2) the disagreement set is exactly the pinned one
+        diff = self.diff_of(python_table, node_table)
+        self.assertEqual(diff, data["diff"])
+        self.assertEqual(len(diff), 28)
+        self.assertIn("U+A7CE", diff)
+        self.assertIn("U+16EA0", diff)
+        # (3) every pinned code point reaches the shipping folders as a call
+        for name in diff:
+            cp = int(name[2:], 16)
+            ch = chr(cp)
+            want = "".join(chr(int(c[2:], 16)) for c in python_table.get(name, name).split(" "))
+            checked = helper.validate_source_url("http://" + ch + ".test/", origin="cli")
+            self.assertTrue(checked["ok"], name)
+            self.assertEqual(checked["host"], want + ".test", name)
+            self.assertEqual(helper.host_port_of(checked["url"]), want + ".test", name)
+            self.assertEqual(helper.label_key(ch), want, name)
+

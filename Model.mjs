@@ -76,26 +76,29 @@ export {
   hideAction, hideVerb, removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC,
   parseFailed, normalizeFailed, prunedFailed, knownIdSet, failedIndex,
   failedDocument, failedWhen, withFailed, failedAfterHealthy, withoutFailed,
-  stateSaveLanded, countReload, reloadDisposition, stateCanonical, sameState,
-  mergeSetField, mergeForeignState, mergeConflictLine, mergeDropLines,
+  stateSaveLanded, stateSaveOutcome, countReload, reloadDisposition,
+  stateCanonical, sameState, mergeSetField, mergeForeignState,
+  mergeLeavesNothingUnsaved, mergeConflictLine, MERGE_CONFLICT_TITLE,
+  mergeConflictSentence, mergeConflictNotice, mergeDropLines,
   migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
-  stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
-  stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
-  STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
-  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
+  stateInitFound, stateLoadDecision, stateModeArgv, stateModeReply,
+  stateWriteGate, stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
+  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
+  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
+  stateBlockedHeader
 } from "./model/state.mjs"
 export {
   parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
   parseEpgNow, emptyEpgStore, parseEpgNowStore, parseHelperStatus,
-  helperDamagedReason, statusReason, statusHost, statusHealthy,
-  statusWarnings, WARNING_PREFIX, warningLabel, labelWarning, labelWarnings,
-  warningLine, footerWarning, findBarEntry, settingOf, boolSetting, clampInt,
-  clampSetting, settingsFrom, entryInputText, entryInputForm, sameEntryInput,
-  ownWriteInForce, settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS,
-  RETIRED_SETTINGS, MAX_SEEN_INPUTS, entryInputSeen, entryInputLast,
-  entryInputsSeenAfter, entryInputNotice, ownedEntryPatch, barEntryWritable,
-  entryFlushDisposition, owedMirrorAction, ownedWriteMode,
-  retiredInputsToKeep, sameOwnWrite
+  helperDamagedReason, statusReason, lastErrorAfterStatus, statusHost,
+  statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel, labelWarning,
+  labelWarnings, warningLine, footerWarning, findBarEntry, settingOf,
+  boolSetting, clampInt, clampSetting, settingsFrom, entryInputText,
+  entryInputForm, sameEntryInput, ownWriteInForce, settingsWithOwnWrite,
+  ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS, MAX_SEEN_INPUTS,
+  entryInputSeen, entryInputLast, entryInputsSeenAfter, entryInputNotice,
+  ownedEntryPatch, barEntryWritable, entryFlushDisposition, owedMirrorAction,
+  ownedWriteMode, retiredInputsToKeep, sameOwnWrite
 } from "./model/settings.mjs"
 export {
   optInSetting, logoSurvey, splitLogoUrl, logoConsentLines, logoFile,
@@ -117,7 +120,8 @@ export {
 } from "./model/player.mjs"
 export {
   MPV_HANDOFF_TEXT, MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase,
-  mpvHandoffName, mpvDiskName, mpvArgWarning, mpvArgWarnings, splitMpvArgs,
+  mpvHandoffName, mpvDiskName, mpvArgWarning, mpvArgWarnings,
+  MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT, mpvRefusedWarnings, splitMpvArgs,
   mpvRejectedLine, mpvRejectedName, headerArgs, MPV_RAW_PREFIX,
   mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv, helperArgv,
   playlistFetchArgv, fetchStateDir, playlistProbeArgv, epgFetchArgv,
@@ -185,31 +189,33 @@ export {
   sanitizeTyping, sourceErrorMessage, sourceReason, PERSIST_FAILURE_REASONS,
   persistFailureMessage, refusalMessage, isIpv6Literal, cutQueryAndFragment,
   ENCODE_SENTENCE, WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts,
-  urlHostWithheld, sourceUrlWarning, formWarningLine, looksLikeHost,
-  validateSourceUrl, normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
-  EPG_ORIGIN_PLAYLIST, epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE,
-  epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
-  findSourceByUrl, allocateSourceKey, sourceCacheDir, deriveLabel, labelTaken,
-  uniqueLabel, defaultSourceLabel, validateLabel, maskUrl, encodeQueryValue,
-  xtreamUrls, validateXtream, pluralGroups, countsLine, formatLastUsed,
-  formatAgo, sourceView, sourceViews, sourceRows, EPG_HINT_ROW_TEXT,
-  sourceDetail, sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
-  sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
-  fetchingLine, probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
-  CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS,
-  CLIPBOARD_MAX_BYTES
+  urlHostWithheld, sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP,
+  formAdviceLine, looksLikeHost, validateSourceUrl, normalizeSourceUrl,
+  EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST, epgHintUrl,
+  resolveEpgUrl, EPG_HINT_NOTICE, epgOriginNotice, isUrlField, sourceKey,
+  isSourceKey, findSource, findSourceByUrl, allocateSourceKey, sourceCacheDir,
+  deriveLabel, labelTaken, uniqueLabel, defaultSourceLabel, validateLabel,
+  maskUrl, encodeQueryValue, xtreamUrls, validateXtream, pluralGroups,
+  countsLine, formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
+  EPG_HINT_ROW_TEXT, sourceDetail, sourceAccessibleName, sourcesHeaderCount,
+  sourcesHeaderRight, sourcesRowAccessibleName, confirmLogosMessage,
+  confirmRemoveMessage, fetchingLine, probeFailureLine, sourceTransient,
+  CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
+  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark,
+  logoHaveLess
 } from "./model/sources.mjs"
 export {
   hasControlChars, normalizeSourceRecord, sourcesFull, addSource,
   updateSource, removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
   withSourceStats, activeKeyText, activeKeyOf, activeSourceRecord,
   withActiveKey, invalidInputBlocks, reconcileAction, adoptActiveSource,
-  activeEpgUrlOf, pointerWritePlan, reconcileSources, sourceForEdit,
-  sourcesSummary, entryWith, cacheStale, formFields, isFormField, formLimit,
-  formCapacity, copyForm, formState, formFocusOrder, formHasText, openForm,
-  openFirstRun, openAddForm, openEditForm, openXtreamForm, closeForm,
-  withFormValue, withFormFocus, moveFormFocus, fieldMaskable, fieldRevealed,
-  fieldMasked, toggleReveal, withFormReveal
+  activeEpgUrlOf, pointerWritePlan, probeCommitPlan, probeCommitState,
+  reconcileSources, sourceForEdit, sourcesSummary, entryWith, cacheStale,
+  formFields, isFormField, formLimit, formCapacity, copyForm, formState,
+  formFocusOrder, formHasText, openForm, openFirstRun, openAddForm,
+  openEditForm, openXtreamForm, closeForm, withFormValue, withFormFocus,
+  moveFormFocus, fieldMaskable, fieldRevealed, fieldMasked, toggleReveal,
+  withFormReveal
 } from "./model/source-records.mjs"
 export {
   clipboardArgv, clipboardCut, parseClipboardReply, editRange, fullRange,

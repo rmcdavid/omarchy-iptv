@@ -1882,6 +1882,20 @@ journalctl --user -t omarchy-shell -f | grep --line-buffered omarchy-iptv   # fo
 Every failed step gets: the TC id, the screenshot, the journal excerpt and
 the exact command that reproduces it, in the defect row (section 6).
 
+A scenario's output is its evidence, and evidence is never summarised from
+a tail (CLAUDE.md, "Working in parallel" rule 7; the harness README says the
+same). Every scenario opens a transcript through `qa_transcript_start`
+(`scripts/qa-lib.sh`) and prints the path as its own first line; a result
+is reported FROM THAT FILE, never from `tail`, `| head` or `grep -c PASS`,
+which keep the arithmetic and discard the finding. F-M3-1 is one live run
+of `m3-scenario.sh` that answered 17 passed / 14 failed with WHICH FOURTEEN
+unknown, because its output went through `tail -n 3`. The transcript is a
+sink (engineering rule 5): 0600 inside a 0700 directory, and a scenario that
+sweeps its own transcript calls `qa_transcript_sync` first, because a line
+printed and grepped straight back was absent 6 times in 30 under load.
+(F-HARNESS-13: this rule reached the harness README and CLAUDE.md before it
+reached the plan a test's author reads first.)
+
 ### 5.10 Cleanup and uninstall (TC-INST-05, TC-INST-06, TC-INST-10, REL-02)
 
 ```

@@ -42,7 +42,18 @@
 #
 # Holds the display (starts the harness). Reaps everything it starts.
 set -uo pipefail
-HERE=$(cd "$(dirname "$0")" && pwd)
+# ---- refusals above EVERY external command (F-M3-18 (b), the clip- and
+# logo-scenario shape): `command -v`, `[[ ]]` and `echo` are builtins, so an
+# empty PATH reaches the SKIP line -- exit 77, what the gate reads as "this
+# machine cannot run it" -- and nothing else. HERE is resolved from
+# BASH_SOURCE with builtins for the same reason: `dirname "$0"` used to run
+# first and an empty PATH died on `dirname: command not found` instead.
+for tool in python3 mktemp ss pgrep; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "SKIP argv-scenario: $tool is not on PATH" >&2; exit 77; }
+done
+HERE=${BASH_SOURCE[0]%/*}
+[[ $HERE == "${BASH_SOURCE[0]}" ]] && HERE=.
+HERE=$(cd "$HERE" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 RUN="$HERE/run.sh"
 REAL_RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
@@ -100,6 +111,12 @@ cleanup() {
   rm -rf "$WORK"
 }
 trap cleanup EXIT
+# A signal while this shell waits on a foreground child runs no EXIT trap;
+# an exit does. These two lines turn INT and TERM into exits (the clip-scenario
+# shape, F-HARNESS-18), so a `timeout -s TERM` or a Ctrl-C mid-run reaps what
+# cleanup reaps instead of stranding the shell, the server or the cage.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 pgrep -x hyprlock >/dev/null && { echo "screen is locked"; exit 2; }
 ss -ltn 2>/dev/null | grep -q ":$PORT " && { echo "port $PORT is already in use"; exit 2; }
 

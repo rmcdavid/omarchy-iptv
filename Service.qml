@@ -694,6 +694,7 @@ Item {
   property string stateLoadKind: ""
   property string stateInitFound: ""
   property bool stateLoadRetried: false
+  property bool stateInitRetried: false   // D-REL-8: the one re-run of the init has been spent
   property string stateWriteBlocked: ""
   property bool stateBlockTold: false
   // R23c: set by stateInitWatchdog when it terminates the init; read once,
@@ -778,17 +779,20 @@ Item {
   // already moved off. { playlistUrl, epgUrl } or null.
   property var pendingPersist: null
   property bool configShieldRerun: false
-  // Which persist failure happened last. Since R13 no source call returns
-  // it (a refused entry mirror is logged, not reported, SR25 as amended
-  // 2026-10-12); it is kept as the one record of the LAST failure for the
-  // harness and for a reader of the log: "persist_failed" (no writable bar
-  // entry), "config_unsafe" (the host settings file could not be made
-  // private, D-SINK-18) or "state_write_failed" (the plugin's own state.json
-  // could not be written, which is the failure the guide now reports).
-  // The distinction is worth carrying because the sentences give opposite
-  // advice -- persist_failed sends the user to `omarchy bar set`, which is
-  // precisely what must not happen with a credentialed URL.
-  property string lastPersistFailure: "persist_failed"
+  // D-SRC-49 / D-SINK-22 (b)(c): a `state mode` asked while one runs is
+  // folded into one re-run on exit (the configShieldRerun shape); the count
+  // is what the harness and the IPC status read.
+  property bool stateModeRerun: false
+  property int stateModeRuns: 0
+  // A string property holding the LAST persist failure's code USED TO BE
+  // HERE (D-SRC-67, P23 lane A's second finding, 2026-10-24, removed by
+  // lane A2 the same day): set by the three failure sites and
+  // the D-SRC-43 clear, and READ BY NOTHING -- not the guide, not the model,
+  // not the IPC summary. The reason a failure is reported with is the
+  // sourcesPersistFailed(reason) signal's argument, carried to the guide's
+  // sentence by Model.persistFailureMessage; a property set in four places
+  // and read in none looked like a surface and was not one. A node check
+  // pins that no shipped source names it, this comment included.
   // D-LIVE-15: a `play` over IPC that finds no socket (player just
   // relaunched) or no answer is retried with backoff.
   property int playRetries: 0
@@ -1028,7 +1032,7 @@ Item {
     var channel = root.channelIndex[String(id || "")]
     if (!channel || !channel.url) return false
     if (!root.mpvAvailable) {
-      whichProc.running = true
+      root.runWhichMpv()
       root.notify("mpvMissing", {})
       return false
     }
@@ -2377,7 +2381,8 @@ Item {
   function decideStateLoad() {
     if (root.stateLoadKind === "" || root.stateLoadKind === "loaded") return
     var d = Model.stateLoadDecision({ kind: root.stateLoadKind, loadedBefore: root.stateLoaded,
-                                      initFound: root.stateInitFound, retried: root.stateLoadRetried })
+                                      initFound: root.stateInitFound, retried: root.stateLoadRetried,
+                                      initRetried: root.stateInitRetried })
     if (d.act === "fresh") {
       // The one load failure that is a fresh install: FileNotFound, AND the
       // helper found nothing there before it created the file.
@@ -2396,6 +2401,13 @@ Item {
       // true, so with a save of ours held it is ignored as the base, and
       // with none it is applied over an equal memory.
       stateFile.reload()
+    } else if (d.act === "reinit") {
+      // D-REL-8: the init answered nothing readable (an empty or partial stub
+      // mid-update, a stub refusing its parts): run it once more, after a
+      // moment, under the start-up bound again. Its exit lands here again
+      // with a verdict, or with "unknown" a second time and today's path.
+      root.stateInitRetried = true
+      stateInitRetry.restart()
     } else if (d.act === "retry") {
       root.stateLoadRetried = true
       stateFile.reload()
@@ -2519,6 +2531,12 @@ Item {
     var theirs = Model.parseState(text)
     var merged = Model.mergeForeignState(root.landedState, root.userState, theirs, { migrationKey: root.migrationAddedKey })
     for (var i = 0; i < merged.conflicts.length; i++) console.warn("omarchy-iptv: " + Model.mergeConflictLine(merged.conflicts[i]))
+    // D-SRC-33: and the user told once per merge that kept the other
+    // program's version of something over a change made here (the journal
+    // line was the only word until now): Model.mergeConflictNotice's
+    // sentences, through the one notify path -- a field name and a key,
+    // never a value. The in-flight and parked branches reach here alike.
+    if (merged.conflicts.length > 0) root.notify("mergeConflict", { conflicts: merged.conflicts })
     // F1: the record this session's migration added did not land as ours --
     // another program took the place it used ("full"), or added the same
     // playlist itself ("changed"). No marker was carried; the merge re-parked
@@ -2540,6 +2558,17 @@ Item {
     if (drops.length > 0) root.notify("mergeDropped", { dropped: merged.dropped })
     root.landedState = theirs
     root.userState = merged.state
+    // D-SRC-43: the merge equals the other program's file and nothing of
+    // ours is in the air -- the disk holds memory, so a failure flag the
+    // save that never landed raised has nothing left to be about: cleared
+    // here, with the burst record (no echo of ours is coming). The owed
+    // entry mirror (R19d) is NOT paid here; it is paid by the next landed
+    // save, as before -- owedMirrorAction is asked only from onSaved.
+    if (Model.mergeLeavesNothingUnsaved(merged.state, theirs, { savesInFlight: root.stateSavesInFlight })) {
+      if (root.stateSaveFailed) console.warn("omarchy-iptv: the other program's write holds everything this session has; the earlier failed save is no longer pending")
+      root.stateSaveFailed = false
+      root.recentSaves = []
+    }
     var behind = !Model.sameState(merged.state, theirs)
                  || (root.stateSavesInFlight > 0 && !Model.sameState(merged.state, root.lastSaveState))
     var settled = root.userState
@@ -2649,12 +2678,16 @@ Item {
   }
 
   function applyPlaylistStatus(text) {
+    // D-SRC-52: the reason the status being replaced composed, read BEFORE
+    // the reassignment (statusReason is a binding over playlistStatus), so a
+    // good status clears exactly the sentence a failed one left in lastError
+    // and never a play failure's (Model.lastErrorAfterStatus).
+    var previousReason = root.statusReason
     root.playlistStatus = Model.parseHelperStatus(text, "playlist")
+    root.lastError = Model.lastErrorAfterStatus(root.lastError, previousReason, root.playlistStatus)
     if (root.playlistStatus.ok === true) {
       root.playlistLoadWarnings = Model.statusWarnings(root.playlistStatus)
       root.adoptSourceStats(root.playlistStatus)
-    } else {
-      root.lastError = root.statusReason
     }
   }
 
@@ -3232,7 +3265,7 @@ Item {
     }
     if (code === "mpv_missing") {
       root.mpvAvailable = false
-      whichProc.running = true
+      root.runWhichMpv()
       root.playerWanted = false
       playerSocketTimer.stop()
       root.nowPlaying = null
@@ -4011,7 +4044,6 @@ Item {
   // writes no URL into the host's file. It is kept, and kept reachable
   // through Model.entryShieldDecision, for the write that would.
   function refuseUnsafePersist() {
-    root.lastPersistFailure = "config_unsafe"
     console.warn("omarchy-iptv: refusing to save a source URL into settings other users can read; see the config shield warning above")
     root.sourcesPersistFailed("config_unsafe")
   }
@@ -4091,10 +4123,7 @@ Item {
     if (!root.shell || typeof root.shell.updateEntryInline !== "function"
         || !Model.barEntryWritable(root.shell.barConfig, root.pluginId)) {
       console.warn("omarchy-iptv: no writable bar entry for the " + what)
-      if (announce !== false) {
-        root.lastPersistFailure = "persist_failed"
-        root.sourcesPersistFailed("persist_failed")
-      }
+      if (announce !== false) root.sourcesPersistFailed("persist_failed")
       return false
     }
     var patch = Model.ownedEntryPatch(root.settings, overrides)
@@ -4197,13 +4226,51 @@ Item {
       return
     }
     configShieldProc.running = true
+    configShieldWatchdog.restart()   // D-SRC-37 (c)
+  }
+
+  // D-SRC-49 / D-SINK-22 (b)(c). Start `state mode`, or remember to start it
+  // again: `running = true` on a running Process is not a queue, so a second
+  // landed save while one runs is folded into one re-run on exit -- the same
+  // shape as runConfigShield. Never through cacheProc: that slot's command is
+  // `cache --cache-dir`, and a state-file repair on the cache verb is the join
+  // D-ID-1 keeps apart. Bounded by its own TERM-only watchdog (D-SRC-37 (c)).
+  function requestStateMode() {
+    if (root.stateWriteBlocked !== "") return
+    if (stateModeProc.running) {
+      root.stateModeRerun = true
+      return
+    }
+    stateModeProc.command = Model.stateModeArgv(root.helperPath, root.stateDir)
+    root.stateModeRuns = root.stateModeRuns + 1
+    stateModeProc.running = true
+    stateModeWatchdog.restart()
+  }
+
+  // The verb's answer: a `changed` is a mode this plugin repaired on its own
+  // file, worth a line the user can find afterwards; `kept` is the steady
+  // state and silent. A stopped run prints nothing and changes nothing.
+  function handleStateModeExit(exitCode, text) {
+    stateModeWatchdog.stop()
+    var reply = Model.stateModeReply(text)
+    if (reply && (reply.file === "changed" || reply.folder === "changed")) {
+      console.warn("omarchy-iptv: state.json's mode was repaired after a save (file " + reply.file + ", folder " + reply.folder + ")")
+    } else if (!reply && exitCode !== 0) {
+      console.warn("omarchy-iptv: state mode exited " + exitCode + "; state.json keeps whatever mode it has until the next save or start")
+    }
+    if (root.stateModeRerun) {
+      root.stateModeRerun = false
+      Qt.callLater(root.requestStateMode)
+    }
   }
 
   // The verb's answer. `hostConfigShield` moves from unknown to private or
   // exposed and never back to unknown: Model.configShieldState fails closed,
   // so a helper that did not run, crashed or printed nothing reads as exposed
-  // rather than leaving every future persist deferred for ever.
+  // rather than leaving every future persist deferred for ever -- a run the
+  // watchdog stopped (D-SRC-37 (c)) prints nothing and reads as exposed too.
   function onConfigShieldExit(out) {
+    configShieldWatchdog.stop()
     root.hostConfigShield = Model.configShieldState(out)
     var pending = root.pendingPersist
     root.pendingPersist = null
@@ -4303,16 +4370,21 @@ Item {
   Process { id: failedProc }
   Connections {
     target: failedProc
-    // Drain the queue. Without this a second mark raised while the first was
-    // still being written would sit there for ever -- which is how the kill
-    // this replaced came to exist.
-    function onExited(exitCode, exitStatus) {
-      if (root.failedQueue.length === 0) return
-      var q = root.failedQueue.slice()
-      var next = q.shift()
-      root.failedQueue = q
-      root.runFailedJob(next)
-    }
+    function onExited(exitCode, exitStatus) { root.handleFailedExit() }
+  }
+
+  // Drain the queue. Without this a second mark raised while the first was
+  // still being written would sit there for ever -- which is how the kill
+  // this replaced came to exist. A root function rather than the handler's
+  // body so the harness, which delivers exits by hand, runs the same code
+  // (D-SRC-37 (c): and sees the watchdog stopped here).
+  function handleFailedExit() {
+    failedWatchdog.stop()
+    if (root.failedQueue.length === 0) return
+    var q = root.failedQueue.slice()
+    var next = q.shift()
+    root.failedQueue = q
+    root.runFailedJob(next)
   }
 
   // A one-deep queue rather than a kill. This used to SIGTERM its own
@@ -4339,6 +4411,7 @@ Item {
   function runFailedJob(job) {
     failedProc.command = Model.failedArgv(root.helperPath, job.action, job.id, job.dir)
     failedProc.running = true
+    failedWatchdog.restart()   // D-SRC-37 (c)
   }
 
   function str(v) { return v === undefined || v === null ? "" : String(v) }
@@ -4744,24 +4817,34 @@ Item {
       }
       st = Model.withSourceStats(st, newKey, status, nowSec)
       st = Model.touchSource(st, newKey, nowSec)
+      // D-SRC-14: decided against the active key as it still is (root.userState
+      // has not moved), BEFORE the state is published. An edit of the active
+      // source folds the pointer into this same state, so no assignment ever
+      // publishes a state with no active source (configured flickered false,
+      // clearSourceData ran, and a key-less save went out before the key's).
+      var plan = Model.probeCommitPlan({ commit: commit, mode: mode, key: key, newKey: newKey, activeKey: root.activeSourceKey })
+      st = Model.probeCommitState(st, plan, newKey)
+      // beginSwitch BEFORE the key moves (switchSource's rule): with the
+      // pointer folded, the assignment below is the move, and it fans out to
+      // onActiveCacheDirChanged, which can call finishSwitch.
+      if (plan.act === "switch") root.beginSwitch()
       root.userState = st
       root.saveState()
-      if (commit) {
-        if (newKey === root.activeSourceKey) {
-          // Already the active directory (a retry of the active source):
-          // the FileViews watch it, but reload deterministically.
-          channelsFile.reload()
-          playlistStatusFile.reload()
-        } else {
-          root.beginSwitch()
-          // D-SINK-19: `newKey`, not `rec.key`. They differ when a colliding
-          // record appeared through the CLI while the probe ran (S5, the
-          // `known` branch above), and the pointer has to name the record the
-          // history actually kept. The URL pair this used to pass hid that:
-          // `rec.url` was right either way, so the bug could not show.
-          if (!root.persistActive(newKey)) {
-            console.warn("omarchy-iptv: adopted source but could not mirror the key into the bar entry")
-          }
+      if (plan.act === "reload") {
+        // Already the active directory (a retry of the active source):
+        // the FileViews watch it, but reload deterministically.
+        channelsFile.reload()
+        playlistStatusFile.reload()
+      } else if (plan.act === "switch") {
+        // D-SINK-19: `newKey`, not `rec.key`. They differ when a colliding
+        // record appeared through the CLI while the probe ran (S5, the
+        // `known` branch above), and the pointer has to name the record the
+        // history actually kept. The URL pair this used to pass hid that:
+        // `rec.url` was right either way, so the bug could not show.
+        // For the folded edit the key is already in memory, so this plans
+        // `write-entry-after-saved`: the one save above, then the mirror.
+        if (!root.persistActive(newKey)) {
+          console.warn("omarchy-iptv: adopted source but could not mirror the key into the bar entry")
         }
       }
       root.sourceProbeFinished({
@@ -5041,9 +5124,11 @@ Item {
     root.cacheJob = job
     cacheProc.command = ["python3", root.helperPath, "cache", "--cache-dir", root.cacheDir].concat(job.args)
     cacheProc.running = true
+    cacheWatchdog.restart()   // D-SRC-37 (c): every run of the slot is bounded
   }
 
   function handleCacheExit(text) {
+    cacheWatchdog.stop()
     var job = root.cacheJob
     root.cacheJob = null
     var status = Model.parseHelperStatus(text, "cache")
@@ -5289,11 +5374,11 @@ Item {
     // independent of mkdirProc's chain on purpose -- it touches none of the
     // plugin's own directories and must not wait on them.
     root.runConfigShield()
-    whichProc.running = true
+    root.runWhichMpv()
     // M2-05 G-8: is there a compositor to talk to at all, and which dispatch
     // spelling can it parse? Both answers are read once, here, so the `p`
     // key can refuse honestly instead of firing into the dark.
-    hyprWhichProc.running = true
+    root.runPipProbe()
     // Reattach (4.5). Until the probe answers - about 130 ms - the UI shows
     // idle rather than guessing. `--owner-pid` claims a surviving player for
     // this shell, which is what tells the previous shell's orphan-check to
@@ -5457,7 +5542,9 @@ Item {
     onSaved: {
       root.stateInHandler = root.stateInHandler + 1
       try {
-        if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) {
+        // D-SRC-39: decided from the burst record, not the last text alone.
+        var outcome = Model.stateSaveOutcome({ viewText: stateFile.text(), lastSaveText: root.lastSaveText, recentSaves: root.recentSaves })
+        if (outcome.last) {
           root.stateSavesInFlight = 0
           root.stateSaveFailed = false
           root.landedState = root.lastSaveState   // R21a: what the disk holds now, the marker included
@@ -5465,7 +5552,21 @@ Item {
           // R27a: a save held for this write now reads, from a turn of its own.
           root.stateWriteWaitExpired = false
           root.endStateWriteWait(false)
+        } else if (outcome.landed) {
+          // D-SRC-39: an EARLIER write of the burst landed -- the disk holds
+          // its text now, whatever the later write does -- so it is the base
+          // from here, and the texts before it are no longer echoes to come.
+          // The later write is still in flight: nothing else moves.
+          root.landedState = outcome.state
+          root.recentSaves = outcome.remaining
         }
+        // D-SRC-49 / D-SINK-22 (b)(c): the landed save was the last asked for
+        // and nothing is in flight -- the file at the path is ours now, with
+        // whatever mode it had or was created with -- so the helper's `state
+        // mode` repairs it, from a turn of its own (never from inside the
+        // FileView's handler, R26b), on its own Process. Coalesced in
+        // requestStateMode; nothing here waits on it.
+        if (outcome.last) Qt.callLater(root.requestStateMode)
         root.settleEntryFlush()
         // R19d (D-SRC-18): a mirror a failed save withheld is paid by the first
         // save that lands with nothing else outstanding -- deferred, never from
@@ -5484,7 +5585,9 @@ Item {
       root.stateInHandler = root.stateInHandler + 1
       try {
         // R27a: and a save held for this write, failed or not, reads first.
-        if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) {
+        // D-SRC-39: the same decision as onSaved's (rule 15); a failed
+        // earlier write of a burst lands nothing, so only `last` is read.
+        if (Model.stateSaveOutcome({ viewText: stateFile.text(), lastSaveText: root.lastSaveText, recentSaves: root.recentSaves }).last) {
           root.stateSavesInFlight = 0
           root.stateWriteWaitExpired = false
           root.endStateWriteWait(false)
@@ -5499,7 +5602,6 @@ Item {
         // a later write lands -- because one switch issues two writes (the
         // touch, then the key move) and the guide would show the line twice.
         if (!root.stateSaveFailed) {
-          root.lastPersistFailure = "state_write_failed"
           root.sourcesPersistFailed("state_write_failed")
         }
         root.stateSaveFailed = true
@@ -5699,6 +5801,23 @@ Item {
       root.stateInitTimedOut = true
       proc.signal(15)
       stateInitKill.restart()
+    }
+  }
+
+  Timer {
+    // D-REL-8: the one re-run of a start-up init that answered nothing
+    // readable (decideStateLoad's `reinit`), a second after its exit -- long
+    // enough for git to have finished rewriting the stub in place (measured
+    // in milliseconds), short enough that a start inside that window is not
+    // a session without writes. Armed under the start-up watchdog again.
+    id: stateInitRetry
+    interval: 1000
+    repeat: false
+    onTriggered: {
+      console.warn("omarchy-iptv: state init answered nothing readable; running it once more")
+      root.stateInitTimedOut = false
+      root.startStateInit()
+      stateInitWatchdog.restart()
     }
   }
 
@@ -5991,6 +6110,23 @@ Item {
   }
 
   Process {
+    // D-SRC-49 / D-SINK-22 (b)(c): the helper's `state mode` after every
+    // landed save (requestStateMode). Argv only; the one JSON line is read at
+    // the exit and otherwise discarded. Its stderr is redacted like every
+    // other helper channel although the verb prints no URL.
+    id: stateModeProc
+    stdout: StdioCollector { id: stateModeStdout; waitForEnd: true }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv state mode:", Model.redactUrls(text.trim()))
+    }
+  }
+  Connections {
+    target: stateModeProc
+    function onExited(exitCode, exitStatus) { root.handleStateModeExit(exitCode, stateModeStdout.text) }
+  }
+
+  Process {
     // D-SINK-18: deny group and other on the HOST's settings file before any
     // source URL is persisted into it. The twin of stateInitProc one file up,
     // for the same reason (a writer that keeps whatever mode it finds) over a
@@ -6237,7 +6373,22 @@ Item {
   }
   Connections {
     target: whichProc
-    function onExited(exitCode, exitStatus) { root.mpvAvailable = exitCode === 0 }
+    function onExited(exitCode, exitStatus) { root.handleWhichExit(exitCode) }
+  }
+
+  // D-SRC-37 (c): `which mpv` is one more process this shell waits on (the
+  // start, a play without mpv, a `mpv_missing` reply), so it is run and read
+  // through one pair the harness can call, and bounded like every helper
+  // slot. A run the watchdog stopped exits non-zero: mpv reads as absent
+  // until the next ask, the answer the exit code gave before.
+  function runWhichMpv() {
+    whichProc.running = true
+    whichWatchdog.restart()
+  }
+
+  function handleWhichExit(exitCode) {
+    whichWatchdog.stop()
+    root.mpvAvailable = exitCode === 0
   }
 
   // ---- picture in picture (M2-05). Six Processes, argv arrays only, no
@@ -6256,13 +6407,29 @@ Item {
   }
   Connections {
     target: hyprWhichProc
-    function onExited(exitCode, exitStatus) {
-      if (exitCode !== 0 || Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") === "") {
-        root.pipAvailable = false
-        return
-      }
-      hyprInfoProc.running = true
+    function onExited(exitCode, exitStatus) { root.handlePipWhichExit(exitCode) }
+  }
+
+  // D-SRC-37 (c), rule 15 -- D-PLY-26: the two decide-once compositor probes
+  // had no watchdog. They are the shape of whichProc (a process the start
+  // waits on with no bound), found by the search for it and bounded by ONE
+  // Timer over whichever of the pair is running, the way stateInitWatchdog
+  // covers mkdir and the init. A probe the watchdog stopped exits non-zero
+  // and PiP is hidden, the answer the exit code gave before. Root functions
+  // so the harness runs the same code.
+  function runPipProbe() {
+    hyprWhichProc.running = true
+    pipProbeWatchdog.restart()
+  }
+
+  function handlePipWhichExit(exitCode) {
+    pipProbeWatchdog.stop()
+    if (exitCode !== 0 || Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") === "") {
+      root.pipAvailable = false
+      return
     }
+    hyprInfoProc.running = true
+    pipProbeWatchdog.restart()
   }
 
   Process {
@@ -6285,15 +6452,18 @@ Item {
   }
   Connections {
     target: hyprInfoProc
-    function onExited(exitCode, exitStatus) {
-      // Anything else - an older Hyprland on the hyprlang provider, or a
-      // systeminfo this build does not print - means a compositor whose
-      // dispatch language we do not speak. PiP is then hidden rather than
-      // broken: `p` says so immediately instead of dispatching strings that
-      // cannot parse and calling it `dispatch_failed` fifteen seconds later.
-      root.pipProvider = /configProvider:\s*lua/i.test(String(hyprInfoStdout.text)) ? "lua" : "other"
-      root.pipAvailable = exitCode === 0 && root.pipProvider === "lua"
-    }
+    function onExited(exitCode, exitStatus) { root.handlePipInfoExit(exitCode) }
+  }
+
+  // Anything else - an older Hyprland on the hyprlang provider, or a
+  // systeminfo this build does not print - means a compositor whose
+  // dispatch language we do not speak. PiP is then hidden rather than
+  // broken: `p` says so immediately instead of dispatching strings that
+  // cannot parse and calling it `dispatch_failed` fifteen seconds later.
+  function handlePipInfoExit(exitCode) {
+    pipProbeWatchdog.stop()
+    root.pipProvider = /configProvider:\s*lua/i.test(String(hyprInfoStdout.text)) ? "lua" : "other"
+    root.pipAvailable = exitCode === 0 && root.pipProvider === "lua"
   }
 
   Process {
@@ -6463,6 +6633,93 @@ Item {
       if (!clipboardProc.running) return
       console.warn("omarchy-iptv: clipboard helper exceeded " + Math.floor(Model.CLIPBOARD_WATCHDOG_MS / 1000) + " s, terminating it")
       clipboardProc.signal(15)
+    }
+  }
+
+  // D-SRC-37 (c), 2026-10-24: ONE shape over the four processes that had no
+  // bound while every other helper slot had one -- cacheProc (the FIFO every
+  // cache job runs through, writing into the cache directory: a stalled
+  // mount there held the queue for the session), failedProc (the same
+  // directory), configShieldProc and whichProc. TERM only, like every
+  // watchdog but the start-up one (R23c has the KILL half because the whole
+  // start waits on that run; nothing waits on these). Each is restarted
+  // where its `running = true` is set and stopped in the exit handler the
+  // harness runs. The bound is helperTimeoutMs, the playlist slot's: a
+  // cache prune over a large directory is the longest of them and is well
+  // inside it; the point is a bound, not a tight one. On fire, cacheProc's
+  // queue is DROPPED with one line -- the jobs are re-derivable (the
+  // start-up prune, a remove, epg-clear; the next start prunes again), and
+  // a queue behind a stalled slot would only stall in turn -- and so is
+  // failedProc's (the in-memory map is already right; a lost mark costs a
+  // mark, as the slot's comment says). The two decide-once processes
+  // (configShield, which) print nothing when stopped, which their exit
+  // handlers already read as "not private" and "no mpv".
+  Timer {
+    id: cacheWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!cacheProc.running) return
+      var job = root.cacheJob
+      console.warn("omarchy-iptv: cache " + (job ? job.args[0] : "?") + " exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it; "
+                   + root.cacheQueue.length + " queued cache job(s) dropped")
+      root.cacheQueue = []
+      cacheProc.signal(15)
+    }
+  }
+  Timer {
+    id: failedWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!failedProc.running) return
+      console.warn("omarchy-iptv: failed-channel helper exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it; "
+                   + root.failedQueue.length + " queued mark(s) dropped")
+      root.failedQueue = []
+      failedProc.signal(15)
+    }
+  }
+  Timer {
+    id: configShieldWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!configShieldProc.running) return
+      console.warn("omarchy-iptv: config shield exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
+      configShieldProc.signal(15)
+    }
+  }
+  Timer {
+    id: stateModeWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!stateModeProc.running) return
+      console.warn("omarchy-iptv: state mode exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
+      stateModeProc.signal(15)
+    }
+  }
+  Timer {
+    id: whichWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!whichProc.running) return
+      console.warn("omarchy-iptv: which mpv exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
+      whichProc.signal(15)
+    }
+  }
+  Timer {
+    // D-PLY-26: the PiP start-up pair (runPipProbe): `which hyprctl`, then
+    // `hyprctl systeminfo`; whichever is running is the one stopped.
+    id: pipProbeWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      var proc = hyprWhichProc.running ? hyprWhichProc : hyprInfoProc.running ? hyprInfoProc : null
+      if (proc === null) return
+      console.warn("omarchy-iptv: " + (proc === hyprWhichProc ? "which hyprctl" : "hyprctl systeminfo") + " exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
+      proc.signal(15)
     }
   }
 

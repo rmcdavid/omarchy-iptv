@@ -27,7 +27,18 @@
 # hold on both trees -- H1, H2c, H5a, H5b, H6b, T5a, T5d -- and the other
 # twenty-three are the evidence.
 set -uo pipefail
-HERE=$(cd "$(dirname "$0")" && pwd)
+# ---- refusals above EVERY external command (F-M3-18 (b), the clip- and
+# logo-scenario shape): `command -v`, `[[ ]]` and `echo` are builtins, so an
+# empty PATH reaches the SKIP line -- exit 77, what the gate reads as "this
+# machine cannot run it" -- and nothing else. HERE is resolved from
+# BASH_SOURCE with builtins for the same reason: `dirname "$0"` used to run
+# first and an empty PATH died on `dirname: command not found` instead.
+for tool in python3 ffmpeg mpv pgrep mktemp; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "SKIP m3-scenario: $tool is not on PATH" >&2; exit 77; }
+done
+HERE=${BASH_SOURCE[0]%/*}
+[[ $HERE == "${BASH_SOURCE[0]}" ]] && HERE=.
+HERE=$(cd "$HERE" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 RUN="$HERE/run.sh"
 REAL_RUNTIME=${XDG_RUNTIME_DIR:-/run/user/$(id -u)}
@@ -69,7 +80,20 @@ except Exception as e: print("NOSTATE")' "$1" "$(ipc state)"; }
 # wait_gf <expr> <json-expected> <tries>: bounded poll, 0.25 s apart.
 wait_gf() { local i; for ((i=0;i<$3;i++)); do [[ $(gf "$1") == "$2" ]] && return 0; sleep 0.25; done; return 1; }
 wait_sf() { local i; for ((i=0;i<$3;i++)); do [[ $(sf "$1") == "$2" ]] && return 0; sleep 0.25; done; return 1; }
-shot() { (( SHOTS )) && "$RUN" shot "$1" >/dev/null 2>&1; true; }
+# F-HARNESS-12: a refused shot is PRINTED and COUNTED. `shot` grades pixels a
+# human reads as proof, and this wrapper used to send both streams to
+# /dev/null and force the status to 0, so the guard's refusal (exit 3, the
+# guide not holding the keyboard) would have been as invisible as the wrong
+# surface it refuses to capture.
+shot() {
+  (( SHOTS )) || return 0
+  local out rc
+  out=$("$RUN" shot "$1" 2>&1); rc=$?
+  if (( rc == 3 )); then fail "shot $1" "refused: $(printf '%s\n' "$out" | grep -m1 'REFUSED')"
+  elif (( rc != 0 )); then fail "shot $1" "run.sh shot exited $rc"
+  fi
+  return 0
+}
 cleanup() {
   "$RUN" reap >/dev/null 2>&1
   # A --baseline run starts its player from the EXPORTED helper, and the reap
@@ -81,6 +105,12 @@ cleanup() {
   [[ -n $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"
 }
 trap cleanup EXIT
+# A signal while this shell waits on a foreground child runs no EXIT trap;
+# an exit does. These two lines turn INT and TERM into exits (the clip-scenario
+# shape, F-HARNESS-18), so a `timeout -s TERM` or a Ctrl-C mid-run reaps what
+# cleanup reaps instead of stranding the shell, the server or the cage.
+trap 'exit 130' INT
+trap 'exit 143' TERM
 
 if pgrep -x hyprlock >/dev/null; then echo "screen is locked; refusing to type"; exit 2; fi
 command -v ffmpeg >/dev/null || { echo "ffmpeg missing"; exit 2; }

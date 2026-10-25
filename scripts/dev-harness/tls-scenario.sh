@@ -192,8 +192,19 @@
 #   ./scripts/dev-harness/tls-scenario.sh --baseline <pre-fix ref>
 #   ./scripts/dev-harness/tls-scenario.sh --pre-tls <ref>   (S6's stage tree)
 set -uo pipefail
+# ---- refusals above EVERY external command (F-M3-18 (b), the clip- and
+# logo-scenario shape): `command -v`, `[[ ]]` and `echo` are builtins, so an
+# empty PATH reaches the SKIP line -- exit 77, what the gate reads as "this
+# machine cannot run it" -- and nothing else. HERE is resolved from
+# BASH_SOURCE with builtins for the same reason: `dirname "$0"` used to run
+# first and an empty PATH died on `dirname: command not found` instead.
+for tool in python3 openssl curl mktemp; do
+  command -v "$tool" >/dev/null 2>&1 || { echo "SKIP tls-scenario: $tool is not on PATH" >&2; exit 77; }
+done
 
-HERE=$(cd "$(dirname "$0")" && pwd)
+HERE=${BASH_SOURCE[0]%/*}
+[[ $HERE == "${BASH_SOURCE[0]}" ]] && HERE=.
+HERE=$(cd "$HERE" && pwd)
 ROOT=$(cd "$HERE/../.." && pwd)
 # Sourced here, above the tree checks, because they ask qa_model_files what a
 # plugin tree's model is (D-REL-5). It defines functions and touches nothing.
@@ -357,8 +368,10 @@ OWN_CHILD=""
 ours() { [[ -n ${1-} && $(ps -o ppid= -p "$1" 2>/dev/null | tr -d ' ') == "$$" ]]; }
 cleanup() {
   (( HARNESS_STARTED )) && "$RUN" reap >/dev/null 2>&1
-  (( SERVER_UP )) && ours "$SERVER_PID" && kill "$SERVER_PID" 2>/dev/null
-  ours "$OWN_CHILD" && kill "$OWN_CHILD" 2>/dev/null
+  # F-HARNESS-32: TERM, a bound, then KILL (qa_stop_pid), behind the same
+  # ownership guards -- a pid that is no longer our child is never signalled.
+  (( SERVER_UP )) && ours "$SERVER_PID" && qa_stop_pid "$SERVER_PID" 5 "rig server"
+  ours "$OWN_CHILD" && qa_stop_pid "$OWN_CHILD" 5 "unconfirmed server child"
   [[ -n $EXPORT_DIR && -d $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"
   [[ -n $PRE_DIR && -d $PRE_DIR ]] && rm -rf "$PRE_DIR"
   [[ -n $WORK && -d $WORK ]] && rm -rf "$WORK"
@@ -810,7 +823,7 @@ rig "G10 and the attacker SEES that connection end when the client walks away, w
    "$(closed stagectl)" "1"
 
 if [[ $MODE == rig ]]; then
-  (( SERVER_UP )) && ours "$SERVER_PID" && kill "$SERVER_PID" 2>/dev/null
+  (( SERVER_UP )) && ours "$SERVER_PID" && qa_stop_pid "$SERVER_PID" 5 "rig server"
   wait_port "$PORT_SELF" down 5 || true
   wait_port "$PORT_CA" down 5 || true
   echo "teardown: $(ss -ltn 2>/dev/null | grep -cE ":($PORT_SELF|$PORT_CA) ") of 2 ports still listening"
@@ -1193,7 +1206,7 @@ is "and this run's own transcript carries none either" "$leak_tr" "0"
 
 # ============================================================== teardown, proven
 "$RUN" reap >/dev/null 2>&1
-(( SERVER_UP )) && ours "$SERVER_PID" && kill "$SERVER_PID" 2>/dev/null
+(( SERVER_UP )) && ours "$SERVER_PID" && qa_stop_pid "$SERVER_PID" 5 "rig server"
 wait_port "$PORT_SELF" down 5 || true
 wait_port "$PORT_CA" down 5 || true
 until_eq 0 10 player_count || true

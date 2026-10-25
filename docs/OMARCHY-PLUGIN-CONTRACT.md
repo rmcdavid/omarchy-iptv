@@ -327,8 +327,8 @@ the publish once it has (`entryWriteNeeded` in model/settings.mjs, deleted
 would answer `false` to, and re-records its own write only when the record
 differs (`Model.sameOwnWrite`). On the echoing host the estimate is the
 echo itself, so the same code settles there after one reconcile; the echo
-path stays idempotent. [Round 9 (R19a, 2026-10-12): the estimate is
-WITHDRAWN, and the reason belongs in this section. On THIS host the publish
+path stays idempotent. **[Round 9 (R19a, 2026-10-12): the estimate is
+WITHDRAWN**, and the reason belongs in this section. On THIS host the publish
 recorded right after a write is the PRE-write entry, and an `omarchy bar
 set` that restores that entry exactly (`setBarWidget` assigns in place)
 publishes the write and then the restored entry -- A -> B -> A. The
@@ -371,7 +371,7 @@ last place this host's lag reached the retired keys. Before the one
 migration's state write has landed, every owned write keeps every retired
 key the entry carries; after it, none (`Model.retiredInputsToKeep` over the
 landed marker `entryMigrated`), so a stale publish can carry nothing back.
-patchInputsToKeep is withdrawn. What still depends on this host's lag is
+patchInputsToKeep is **withdrawn (2026-10-13, round 11)**. What still depends on this host's lag is
 the refusal's report: after the plugin strips a refused value, this host
 goes on publishing it until somebody else writes, and the service's
 in-memory record of what it has handled (`Model.entryInputsSeenAfter`)
@@ -1073,7 +1073,7 @@ of a file the view creates, a re-point and what re-arms after one, by round
     never a block and never a write; over an empty folder the read's
     eventual load failure is the `absent` mode, still with no file created
     (pinned on lane-sweep-a2, the same four shapes).] [2026-10-20, round
-    19, R29a (the lead's ruling): both answers are withdrawn and the
+    19, R29a (the lead's ruling): both answers are **withdrawn** and the
     watchdog's is 0.14.2's again -- no load within 2 s and the save is
     written without the read, counted and logged. Two windows remain: the
     re-point between the read's load and the write, and this one. The
@@ -1157,7 +1157,7 @@ of a file the view creates, a re-point and what re-arms after one, by round
   once and then stops saving with reason `read-timeout`] [round 18, R28a:
   and not that either -- a silent read keeps the save held, memory the
   authority, and is asked again on a bounded schedule until a load
-  answers] [round 19, R29a: withdrawn, back to the 2 s watchdog that saves
+  answers] **[round 19, R29a, 2026-10-20: withdrawn**, back to the 2 s watchdog that saves
   without the read, counted and logged; the save asked while our write is
   in flight still waits for it, at most 2 s, and then reads under that
   bound]; every write is issued from a turn of its own (`Qt.callLater`),

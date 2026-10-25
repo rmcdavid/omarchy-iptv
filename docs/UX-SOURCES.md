@@ -1448,6 +1448,27 @@ half), the predicate is `Model.urlHostWithheld(text)`, the warning is
 `Model.sourceUrlWarning(text)` placed by `Model.formWarningLine(form)`, and
 the appended error sentence is `Model.validateSourceUrl`'s own.
 
+**Plain http (D-SINK-14, 2026-10-24; not an error, never refuses).** While
+the Playlist, EPG or Server value validates as an `http://` URL, the same
+line shows, once, the owner's sentence `http:// sends the address and any
+password in it unencrypted; https:// does not`
+(`Model.WARN_PLAIN_HTTP`). A LOGO must be `https` by ruling and nothing had
+said what an `http://` playlist costs -- an Xtream username and password
+travel in its query string -- so this is the PO-10 treatment, the disclosure
+where the URL is typed, and not a refusal (PO-5: a large share of real
+providers are http-only). One line: the `@`-typo warning above wins when
+both hold, the error and fetching lines win over either; the form reads
+`Model.formAdviceLine(form)`, which is `Model.formWarningLine(form)` else
+`Model.plainHttpLine(form)`. The README's Sources section carries the same
+fact. Not shown on the Sources row of a stored `http://` source (an owner
+question, open).
+
+| Shape | Validates? | Line |
+|---|---|---|
+| an `http://` value in any URL field (`http://panel.test:8080`, `HTTP://h.test/x`), no `@`-typo shape | yes | `http:// sends the address and any password in it unencrypted; https:// does not` |
+| the same with the `@`-typo shape (`http://user:2024/ab@host.test/x`) | yes | the `@` warning, which wins |
+| `https://`, a path, a value that does not validate | -- | nothing from this rule |
+
 ### 5.5 Fetch results (asynchronous, same line)
 
 | State | String |
@@ -1826,10 +1847,10 @@ something that is not a regular file, a file where its FOLDER should be
 (round 14), a symbolic link AT its folder that leads nowhere or to
 something that is not a folder (round 15), an I/O error -- or does not parse as a state (an empty file
 included, settled by the lead on 2026-10-13), or when the start-up check of
-it does not answer (round 13), or, mid-session, the read before a save
-does not answer twice (round 17, R27a; withdrawn by round 18, R28a, and
+it does not answer (round 13), or, ~~mid-session, the read before a save
+does not answer twice (round 17, R27a)~~ **WITHDRAWN 2026-10-20 (round 18, R28a, and
 kept withdrawn by round 19, R29a: a read that does not answer is NOT this
-mode -- its save goes ahead without it after 2 s, item 9), the plugin WRITES NOTHING to it for the rest
+mode -- its save goes ahead without it after 2 s, item 9)**, the plugin WRITES NOTHING to it for the rest
 of the session [round 16 and 17: until a read finds it readable again, item 5] -- and since round 14 (R24e) neither does the helper the
 service starts, because the playlist fetch is handed no state directory. Until round 12 it read such a file as an
 empty state and saved that over it at the start, which erased every source,
@@ -2248,6 +2269,25 @@ lane-key-q1 (round 14) and lane-key-k1 (round 15):
    merge can leave the active source naming one the other program removed or
    re-keyed, with no line, after which the guide falls back as it does at a
    start, D-SRC-37. Both are filed and not this round's.)
+   [2026-10-24, P23 lane A, both fixed: a merge that kept the other
+   program's version of anything is told ONCE per merge by a notification
+   (`omarchy-notification-send --app-name IPTV -u normal -g <alert glyph> -r
+   74020 <title> <body>`, `Model.mergeConflictNotice` through the
+   `mergeConflict` branch of `Model.notifyArgv` -- the branch the lane's first
+   tip lacked, so that for one tip this sentence named a card the shell never
+   sent; a node check calls the branch and one reads the argv off the fake
+   notifier, both red before it, P23 lane A2, 2026-10-24): title `Settings
+   merged`, body one sentence per conflict in the lead's words, `The source
+   1a2b3c4d (label, url) kept the other program's version.` / `The active
+   source kept the other program's version.` / `The recent list kept the
+   other program's version.` -- a field name and a short key, never a URL,
+   a label or a value; the journal keeps its fuller line per conflict. And
+   a merged active source naming a record the other program removed falls
+   back to no active source in the state itself (D-SRC-37 (a)), as a
+   conflict of its own: `The active source (the source 1a2b3c4d it named
+   is gone, so no source is active) kept the other program's version.` The
+   card is UNVERIFIED on a display this round, like the round-15 cards
+   below.]
    [Round 15, R25b (D-SRC-31): **unless together they pass a limit.** Both
    sides' additions are kept up to 50 sources, 20 saved searches and 200
    hidden groups; past a limit the other program's version keeps its place
