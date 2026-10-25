@@ -660,7 +660,14 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3036}
 # P2/P3 sweep integration, 2026-10-24 (lane-p23-int): re-levelled to the
 # merged tree's count, 1565 = 1496 + 10 (harness) + 25 (docs) + 6 (state)
 # + 3 (model) + 25 (helper); the suite runs 1565 and the floor is 1565.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1565}
+# 2026-10-25, lane-fh44 (F-HARNESS-44): 1565 -> 1580 -- tests/test_harness_shader_seed.py
+# (+15): run.sh's --seed-cache parser and reset_scratch_cache, open-scenario.sh's
+# shader_seed_take and shader_cache_holds, the names joining the two, and a guard
+# against assigning a bash special name (GROUPS bit the first run). 13 failures
+# and 1 error on 448db72's export; one test red on each of two mutations (the
+# seed copied before the wipe; holds ignoring a file's size). The suite runs 1580
+# and the floor is 1580.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1580}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

@@ -260,6 +260,8 @@ scripts/dev-harness/run.sh --playlist /x.m3u --source-key d990c2e4 --keep   # th
                                                      # `omarchy bar set playlistUrl` beside the mirror (D-SINK-19);
                                                      # since R21 a migration input until the marker lands, refused after
 scripts/dev-harness/run.sh --host echo --keep         # the host that echoes a plugin's own write at once (#15082, D-HOST-4)
+scripts/dev-harness/run.sh --seed-cache DIR ...       # wipe the scratch cache and state, then copy DIR into the cache: a cold
+                                                     # shell over a warmed mesa shader cache (F-HARNESS-44); not with --keep
 scripts/dev-harness/run.sh ipc state                 # the harness's own target
 scripts/dev-harness/run.sh plugin-ipc status         # the plugin's target: the verbs a user binds
 scripts/dev-harness/run.sh plugin-ipc back 10        # argv is passed through untouched
@@ -1941,9 +1943,40 @@ printed beside the cold trace and graded by nothing: round 1's L6 said it
 of the built count; against the drawn screen it reads 10 rows (the same)
 and 18 tiles (two more).
 
-`OPEN_CHANNELS` (10000), `OPEN_COLD` (3 shells per view) and `OPEN_WARM`
-(8 opens per shell) set the run; each warm open is interleaved with
-PERF-02's method A (`open` round trip minus the median `ping`).
+`OPEN_CHANNELS` (10000), `OPEN_GROUPS` (400), `OPEN_COLD` (3 shells per
+view) and `OPEN_WARM` (8 opens per shell) set the run; each warm open is
+interleaved with PERF-02's method A (`open` round trip minus the median
+`ping`).
+
+**The shader cache is SEEDED, not wiped, for every cold shell (F-HARNESS-44,
+2026-10-25).** `run.sh` wipes `XDG_CACHE_HOME` at every start, and in the
+cage the GL is llvmpipe, which JIT-compiles its shaders into
+`mesa_shader_cache` under that directory at the first frame: every cold
+figure recorded before this date (D-PERF-1's 548 / 534, D-PERF-2's ~440)
+carried about 240 ms of that compile, which a desktop with a persistent
+cache does not pay (the D-PERF-2 attribution spike, `spikes/first-open`).
+So the shell arm starts with a warm-up: one throwaway shell over the same
+fixture, one open of each view, stopped; its `mesa_shader_cache` is copied
+aside and listed in the transcript (every file with its bytes, and a total),
+and every cold shell after it starts from a wiped scratch seeded with that
+copy through `run.sh --seed-cache` -- the plugin's own cache and state as
+cold as before, which is what cold means for the plugin. Checked, not
+assumed: C1 (a non-empty seed was taken), L0 and W0 (the instant run.sh
+returned from spawning the first cold shell of each view, every seeded file
+was under its cache at its size, and run.sh's own line for that start says
+`seeded`). The shell-arm header, the results header and the BUDGET line all
+say `shader cache: seeded (N files B bytes)` or `shader cache: wiped
+(OPEN_SHADER_SEED=0)`. `OPEN_SHADER_SEED=0` is the red proof and the old
+condition: with it the same cold open reads about 540-580 ms at 10,000
+channels and with the seed about 300 (QA-RESULTS, F-HARNESS-44, loads
+there). What the seed does NOT do: Qt's pipeline cache is not seeded (the
+harness shells never write one, the spike's lens measured; removing it
+alone changed nothing), and the desktop -- a GPU, persistent caches, the
+layer shell -- is measured by neither condition. `tests/test_harness_shader_seed.py`
+runs `run.sh`'s `reset_scratch_cache` and the scenario's `shader_seed_take`
+and `shader_cache_holds` over decoy directories. The only other harness
+script that times a cold shell is the spike itself, whose fresh-against-kept
+arms are the comparison and stay as they are.
 
 Measured 2026-10-20 by lane-sweep-a2 at c06f436 (transcripts in that lane's
 session scratch directory, copied 0600; load 1.7-3.0 unless stated):

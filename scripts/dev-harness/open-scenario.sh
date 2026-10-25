@@ -11,6 +11,12 @@
 #                                             own helper run writes the 10,000-channel
 #                                             epg-now.json, and every open waits for
 #                                             it to be loaded first (D-EPG-11, R31e)
+#   OPEN_SHADER_SEED=0 open-scenario.sh live  the shell arm with the shader cache WIPED
+#                                             before every cold shell: the condition every
+#                                             cold figure before 2026-10-25 was taken under
+#                                             (F-HARNESS-44's red proof; see below)
+#   OPEN_CHANNELS=N OPEN_GROUPS=G             the fixture's size (10000, 400); OPEN_COLD
+#                                             (3) and OPEN_WARM (8) the shells and opens
 #
 # THE DEFECT. `openMs` (shell.qml) force-lays-out the channel view in the
 # SAME turn as the summon and stops its clock there, so the view is not laid
@@ -48,7 +54,26 @@
 #   Service.qml and Guide.qml, in the harness-only floating window, under a
 #   nested headless cage this script starts, over a 10,000-channel playlist
 #   gen-playlist.py writes. COLD is the first open of a fresh shell, WARM a
-#   closed guide summoned again. Each warm instrument open is interleaved
+#   closed guide summoned again. F-HARNESS-44 (2026-10-25): a cold shell
+#   starts from a WIPED scratch -- run.sh wipes XDG_CACHE_HOME and the state
+#   at every start, which is what cold means for the plugin's own caches --
+#   but the cage's GL is llvmpipe, which JIT-compiles its shaders into
+#   mesa's cache under that same XDG_CACHE_HOME at the first frame, so with
+#   the wipe alone every cold figure on record carried ~240 ms of a software
+#   renderer's compile that no desktop with a persistent cache pays (the
+#   D-PERF-2 attribution spike: 540 ms wiped against 308 kept at 10,000
+#   channels). So the shell arm WARMS the shader cache once at its start: a
+#   throwaway shell over the same fixture opens each view once and is
+#   stopped, its mesa_shader_cache is copied aside, and every cold shell
+#   after it starts from a wiped scratch SEEDED with that copy (run.sh
+#   --seed-cache), the plugin's cache and state as cold as before. The
+#   transcript lists the seeded files with their byte count, each cold
+#   shell is checked to hold every one of them the instant it is spawned
+#   (L0, W0), and the figure lines say "shader cache: seeded" or "wiped" so
+#   a reader can never mistake one for the other. OPEN_SHADER_SEED=0 turns
+#   the seed off, which is the red proof: the same cold open reads ~540 ms
+#   with it off and ~300 with it on (QA-RESULTS, F-HARNESS-44). The desktop
+#   (a GPU, persistent caches, the layer shell) is measured by neither. Each warm instrument open is interleaved
 #   with PERF-02's method A (docs/QA.md: the round trip of `open` over IPC
 #   minus the median round trip of a call that does nothing), list view and
 #   wall. OPEN_COLD shells per view, OPEN_WARM opens per shell. The checks
@@ -228,6 +253,72 @@ console.log("E4 " + S(fr(A, C, C), 600))
 # ------------------------------------------------------------ the shell arm
 h()   { env -u HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY="$NESTED" "$RUN" "$@"; }
 ipc() { h ipc "$@" 2>/dev/null; }
+load() { cut -d' ' -f1-3 /proc/loadavg; }
+# ---------------------------------------------------- the shader-cache seed
+# F-HARNESS-44. SEED_ARGS is what every start_shell passes run.sh: empty
+# until the warm-up has taken a seed (and always, with OPEN_SHADER_SEED=0).
+SHADER_SEED=${OPEN_SHADER_SEED:-1}
+SEED_ARGS=()
+SEED_DIR="$WORK/shader-seed"; SEED_LIST="$WORK/shader-seed.list"; SEED_SUMMARY=""
+# shader_seed_take <cache> <seed-dir> <list>: copies <cache>/mesa_shader_cache
+# into <seed-dir>, writes every file's size and path to <list> (sorted by
+# path) and prints "N files B bytes" read from the COPY. Fails on no cache,
+# an empty one, or a copy that did not land. tests/test_harness_shader_seed.py
+# runs it and shader_cache_holds over a fake cache.
+shader_seed_take() {
+  local cache=$1 seed=$2 list=$3
+  [[ -d $cache/mesa_shader_cache ]] || { echo "   no mesa_shader_cache under $cache"; return 1; }
+  rm -rf -- "$seed" && mkdir -p -- "$seed" || return 1
+  cp -a -- "$cache/mesa_shader_cache" "$seed/" || return 1
+  (cd "$seed" && find mesa_shader_cache -type f -printf '%s %p\n' | LC_ALL=C sort -k2) >"$list" || return 1
+  [[ -s $list ]] || { echo "   the warm-up wrote no shader-cache file"; return 1; }
+  awk '{ n++; b += $1 } END { printf "%d files %d bytes\n", n, b }' "$list"
+}
+# shader_cache_holds <cache> <list>: "all N" when every listed file is under
+# <cache> at its listed size, else "missing K of N" -- the observation that a
+# cold shell really started over the seed (a seed copied before the wipe, or
+# into the wrong directory, reads missing).
+shader_cache_holds() {
+  python3 - "$1" "$2" <<'PYH'
+import os, sys
+cache, listed = sys.argv[1], sys.argv[2]
+rows = [l.split(" ", 1) for l in open(listed).read().splitlines() if l.strip()]
+missing = [p for s, p in rows
+           if not os.path.isfile(os.path.join(cache, p)) or os.path.getsize(os.path.join(cache, p)) != int(s)]
+print("all %d" % len(rows) if rows and not missing else "missing %d of %d" % (len(missing), len(rows)))
+PYH
+}
+shader_cache_files() { find "$1/mesa_shader_cache" -type f 2>/dev/null | wc -l; }
+# What run.sh said it did to the cache at this start: wiped, kept or seeded.
+runsh_cache_word() { grep -a -o '^\[run.sh\] cache [a-z]*' "$WORK/start.log" | head -1 | awk '{ print $3 }'; }
+# The state of the shader cache the instant the shell was spawned, read by
+# start_shell before it waits for the shell to settle: in seeded mode every
+# seeded file present at its size, in wiped mode no file at all. Against
+# run.sh's own word for the same start.
+cache_state_at_spawn() {
+  if (( SHADER_SEED )); then echo "$(shader_cache_holds "$SCRATCH/cache" "$SEED_LIST") run.sh:$(runsh_cache_word)"
+  else echo "files:$(shader_cache_files "$SCRATCH/cache") run.sh:$(runsh_cache_word)"; fi
+}
+# The warm-up: one throwaway shell (started wiped, like every shell before
+# F-HARNESS-44), one open of each view so both views' materials are compiled,
+# stopped, and its mesa_shader_cache taken as the seed. Its opens are printed
+# and are not figures.
+warm_shader_seed() {
+  local r view
+  echo "== shader cache warm-up: a throwaway shell over the fixture, one open of each view, its mesa_shader_cache copied aside   load $(load)"
+  start_shell || { echo "   the warm-up shell did not settle; no seed"; stop_shell; return 1; }
+  for view in list wall; do
+    r=$(async_open "$view"); echo "   warm-up $view open: realised $(jf "['realisedMs']" "$r") ms, drawn $(jf "['count']" "$r") (not a figure)"
+  done
+  ipc close >/dev/null
+  stop_shell
+  SEED_SUMMARY=$(shader_seed_take "$SCRATCH/cache" "$SEED_DIR" "$SEED_LIST") || return 1
+  echo "   seeded shader cache: $SEED_SUMMARY, taken from XDG_CACHE_HOME=$SCRATCH/cache/mesa_shader_cache; the files (bytes path):"
+  sed 's/^/      /' "$SEED_LIST"
+  SEED_ARGS=(--seed-cache "$SEED_DIR")
+  return 0
+}
+shader_cache_line() { if (( SHADER_SEED )); then echo "shader cache: seeded ($SEED_SUMMARY)"; else echo "shader cache: wiped (OPEN_SHADER_SEED=0)"; fi; }
 svc() { qa_field "d$1" "$(ipc state)"; }
 jf()  { qa_json_field "d$1" "$2"; }
 cage_start() {
@@ -257,10 +348,14 @@ cage_stop() {
 }
 # A detached shell over the 10k fixture, in the floating window, settled
 # (state loaded, cache ready, every channel in memory). Bounded 60 s.
+# F-HARNESS-44: every shell starts over a wiped scratch, seeded with the
+# shader cache once the warm-up has taken one (SEED_ARGS); the state of that
+# cache is read the instant run.sh returns, before the shell has settled.
 start_shell() {
-  if [[ -n $EPG_FIX ]]; then h --detach --timeout 0 --playlist "$FIX" --epg "$EPG_FIX" --window floating >"$WORK/start.log" 2>&1
-  else h --detach --timeout 0 --playlist "$FIX" --window floating >"$WORK/start.log" 2>&1; fi
+  if [[ -n $EPG_FIX ]]; then h --detach --timeout 0 --playlist "$FIX" --epg "$EPG_FIX" --window floating "${SEED_ARGS[@]}" >"$WORK/start.log" 2>&1
+  else h --detach --timeout 0 --playlist "$FIX" --window floating "${SEED_ARGS[@]}" >"$WORK/start.log" 2>&1; fi
   SHELL_PID=$(cat "$SCRATCH/qs.pid" 2>/dev/null); SHELL_STARTED=1
+  CACHE_AT_SPAWN=$(cache_state_at_spawn)
   local i
   for ((i = 0; i < 600; i++)); do
     if [[ $(svc "['channels']") == "$CHANNELS" ]]; then
@@ -324,8 +419,10 @@ rec_open() {   # rec_open <view> <kind> <result json>
 measure_shell() {   # measure_shell <view> <shell-number>
   local view=$1 n=$2 res a k
   start_shell || { echo "   shell $n ($view) did not settle; no samples from it"; return 1; }
+  [[ $n == 1 ]] && COLD_CACHE=$CACHE_AT_SPAWN
   # COLD: the first open this shell makes
   if res=$(async_open "$view"); then rec_open "$view" cold "$res"; else rec_open "$view" cold-unsettled "$res"; fi
+  echo "   $view shell $n: cold realised $(jf "['realisedMs']" "$res") ms (summon $(jf "['summonMs']" "$res")), shader cache at spawn [$CACHE_AT_SPAWN], load $(load)"
   [[ $n == 1 ]] && COLD_RES=$res
   # WARM, interleaved with method A
   for ((k = 0; k < WARM; k++)); do
@@ -360,6 +457,7 @@ if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=18
 else
   CHANNELS=${OPEN_CHANNELS:-10000}
+  FIX_GROUPS=${OPEN_GROUPS:-400}
   COLD=${OPEN_COLD:-3}
   WARM=${OPEN_WARM:-8}
   FIX="$WORK/fixtures/gen-10k.m3u"
@@ -373,22 +471,33 @@ else
     # epg-now.json it then holds -- the shipping path, not a file dropped
     # into the cache. start_shell waits for it to be loaded.
     EPG_FIX="$WORK/fixtures/gen-10k.xml"
-    python3 "$ROOT/scripts/gen-playlist.py" --channels "$CHANNELS" --groups 400 --seed 1 --epg-ids 1.0 --out "$FIX" --xmltv "$EPG_FIX" >/dev/null || { echo "gen-playlist failed" >&2; exit 2; }
+    python3 "$ROOT/scripts/gen-playlist.py" --channels "$CHANNELS" --groups "$FIX_GROUPS" --seed 1 --epg-ids 1.0 --out "$FIX" --xmltv "$EPG_FIX" >/dev/null || { echo "gen-playlist failed" >&2; exit 2; }
   else
-    python3 "$ROOT/scripts/gen-playlist.py" --channels "$CHANNELS" --groups 400 --seed 1 --out "$FIX" >/dev/null || { echo "gen-playlist failed" >&2; exit 2; }
+    python3 "$ROOT/scripts/gen-playlist.py" --channels "$CHANNELS" --groups "$FIX_GROUPS" --seed 1 --out "$FIX" >/dev/null || { echo "gen-playlist failed" >&2; exit 2; }
   fi
   export OMARCHY_IPTV_PLUGIN_ROOT=$PLUGIN_ROOT
   mkdir -p "$SCRATCH/bin" && ln -sfn "$HERE/stub-hyprctl.py" "$SCRATCH/bin/hyprctl"
   cage_start 1700
   h reap >/dev/null 2>&1
-  echo "== shell arm: $CHANNELS channels, $COLD cold shells and $WARM warm opens per view, floating window, cage $NESTED, guide data $([[ -n $EPG_FIX ]] && echo "for every channel (OPEN_EPG=1)" || echo none), load $(cut -d' ' -f1-3 /proc/loadavg)"
+  if (( SHADER_SEED )); then
+    if warm_shader_seed; then seeded=taken; else seeded=failed; fi
+    ck "C1 the shader-cache seed was taken from the warm-up shell's mesa_shader_cache after one open of each view, and is not empty" "$seeded" "taken"
+  else
+    ck "C1 the shader-cache seed step is OFF (OPEN_SHADER_SEED=0), so no seed directory was made: every cold shell below starts over a wiped shader cache, the pre-F-HARNESS-44 condition" "$([[ -e $SEED_DIR ]] && echo made || echo none)" "none"
+  fi
+  echo "== shell arm: $CHANNELS channels in $FIX_GROUPS groups, $COLD cold shells and $WARM warm opens per view, floating window, cage $NESTED, guide data $([[ -n $EPG_FIX ]] && echo "for every channel (OPEN_EPG=1)" || echo none), $(shader_cache_line), load $(load)"
   for view in list wall; do
     [[ $view == wall ]] && want=channelWall || want=resultList
     L=${view:0:1}; L=${L^^}
     for ((s = 1; s <= COLD; s++)); do
-      COLD_RES=""; WARM_RES=""
+      COLD_RES=""; WARM_RES=""; COLD_CACHE=""
       measure_shell "$view" "$s"
       if [[ $s == 1 ]]; then
+        if (( SHADER_SEED )); then
+          ck "${L}0 $view: the cold shell was spawned over the SEEDED shader cache -- every seeded file present at its size the instant run.sh returned, and run.sh's own word for that start is seeded" "$COLD_CACHE" "all ${SEED_SUMMARY%% files*} run.sh:seeded"
+        else
+          ck "${L}0 $view: the cold shell was spawned over a WIPED shader cache -- no mesa_shader_cache file the instant run.sh returned, and run.sh's own word for that start is wiped" "$COLD_CACHE" "files:0 run.sh:wiped"
+        fi
         ck "${L}1 $view: the instrument ran to its end on the cold open, its tail included, and named the presenting view" "$(jf "['state']" "$COLD_RES") $(jf "['endedBy']" "$COLD_RES") $(jf "['view']" "$COLD_RES")" "done settled $want"
         ck "${L}2 $view: the cold open SETTLED (a frame whose drawn set tiles the visible area) and saw the guide's window" "$(jf "['settled']" "$COLD_RES") $(jf "['hasWindow']" "$COLD_RES")" "true true"
         ck "${L}3 $view: a warm open settled too" "$(jf "['settled']" "$WARM_RES")" "true"
@@ -409,8 +518,8 @@ else
   cage_stop
   echo "== samples (view, kind, summon, realised, drawn, built, changed after, method A or ping round trip; ms)"
   sed 's/^/   /' "$SAMPLES"
-  echo "== results (ms; realised = the first frame whose drawn set tiles the visible area)"
-  python3 - "$SAMPLES" <<'PY'
+  echo "== results (ms; realised = the first frame whose drawn set tiles the visible area; $CHANNELS channels; $(shader_cache_line); load now $(load))"
+  python3 - "$SAMPLES" "$(shader_cache_line)" <<'PY'
 import statistics, sys
 rows = [l.rstrip("\n").split("\t") for l in open(sys.argv[1]) if l.strip()]
 def num(x):
@@ -440,9 +549,9 @@ for view in ("list", "wall"):
     # IPC client's own start, and the open's share sits inside its noise
     sa = ("n=%d median %.0f min %.0f max %.0f" % (len(a), statistics.median(a), min(a), max(a))) if a else "n=0"
     print("  %-4s PERF-02 method A (open round trip - median ping %.0f): %s" % (view, ping, sa))
-print("BUDGET (rule 7, 150 ms, the realised time; the warm median is graded as L6/W6, the rest reported): " + "; ".join(verdict))
+print("BUDGET (rule 7, 150 ms, the realised time; the warm median is graded as L6/W6, the rest reported; %s): " % sys.argv[2] + "; ".join(verdict))
 PY
-  EXPECTED_CHECKS=32
+  EXPECTED_CHECKS=35
 fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then
