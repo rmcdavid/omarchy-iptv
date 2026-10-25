@@ -717,6 +717,66 @@ Not running: `{ "ok": false, "kind": "status", "running": false, "error": { "cod
 `{ "ok": true, "kind": "play", "id": "t:bbc1.uk", "name": "BBC One HD" }` or the
 error object with codes `not_running`, `unknown_channel`, `ipc_error`.
 
+Amended 2026-10-24 (P23, lane A: the service's state and save paths; rows
+D-SRC-14, D-SRC-33, D-SRC-37, D-SRC-39, D-SRC-43, D-SRC-49, D-SRC-52,
+D-SINK-22 (b)(c), D-REL-8, F-M3-18 (a)). What moved, and what it costs:
+- `state.json`'s mode is repaired after EVERY save that lands (D-SRC-49,
+  D-SINK-22 windows b and c). The FileView keeps an existing file's mode and
+  creates a missing one at the umask's 0644, so a file the user `mv`ed in at
+  0644, or one a save created after a re-point of the state folder inside a
+  save's read-to-write window, was written into at that mode for the rest
+  of the session. The helper's `state mode` verb (`bin/helper/10-state.py`,
+  `state_mode_repair`) makes the folder 0700 and a REGULAR file 0600 with
+  the existing `chmod_if_kind` primitives -- it creates nothing, reads
+  nothing, chmods nothing that is already right (so the steady state raises
+  no IN_ATTRIB on the watched file) and prints one line. The service runs it
+  on its own Process (`stateModeProc`, `Model.stateModeArgv`), from
+  `Qt.callLater` in `stateFile.onSaved` when the landed save was the last
+  asked for and nothing is in flight, coalesced like the config shield (one
+  run outstanding, a re-run flag), bounded by a TERM-only watchdog, and never
+  through `cacheProc` (its command is `cache --cache-dir`, the verb D-ID-1
+  keeps apart from the state file). **The cost is one interpreter start --
+  the sealed stub, about 30 ms of CPU idle -- per landed save, zaps and the
+  session record included**, accepted by the lead for the P23 round; the
+  residual is the milliseconds between a creating save and the repair,
+  stated in the README's two-window paragraph, no longer "until the next
+  shell start".
+- Every helper slot is bounded (D-SRC-37 (c)). `cacheProc`, `failedProc`,
+  `configShieldProc`, `whichProc` and the two PiP start-up probes had no
+  watchdog while every other slot had one; each has a TERM-only Timer at
+  `helperTimeoutMs` now, restarted where `running = true` is set and stopped
+  in an exit handler that is a root function. On fire the cache queue and
+  the failed-mark queue are dropped with one console line (the jobs are
+  re-derivable). The inventory -- every `*Proc` id against every Timer that
+  sends signal 15 -- is a node check, not a grep in a write-up.
+- A start-up `state init` that answered nothing readable is run once more
+  (D-REL-8): `Model.stateLoadDecision` answers `reinit` for an `unknown`
+  verdict (an empty or partial stub mid-update, a non-zero exit) when
+  `initRetried` is false; `stateInitRetry` runs it a second later under the
+  start-up watchdog, and a second `unknown` takes today's path. A timed-out
+  init is never re-run (R23c).
+- The base follows an EARLIER write of a burst that lands (D-SRC-39):
+  `Model.stateSaveOutcome` decides both outcome handlers from the burst
+  record (`recentSaves`), so with t1 landed and t2 failed the base is t1,
+  and a restore of the pre-burst file is foreign and merged rather than
+  ignored and written over.
+- A merge that leaves nothing of ours unsaved clears the failed-save flag
+  (D-SRC-43, `Model.mergeLeavesNothingUnsaved`); the owed entry mirror is
+  still paid by the next landed save. A merge that kept the other program's
+  version of a field or source is told on screen once per merge (D-SRC-33,
+  `Model.mergeConflictNotice`, `NOTIFY_IDS.mergeConflict` 74020). A merged
+  pointer naming no merged record falls back in the state, as a conflict
+  naming the source (D-SRC-37 (a)).
+- An edit of the active source's URL publishes no state without an active
+  key (D-SRC-14, `Model.probeCommitPlan` / `probeCommitState`): the pointer
+  is folded into the state the probe commit publishes, `beginSwitch` runs
+  before the key moves, and `persistActive` plans `write-entry-after-saved`
+  -- one save, one entry write. A good playlist status clears the sentence
+  a failed one left in `lastError` and nothing else (D-SRC-52,
+  `Model.lastErrorAfterStatus`).
+- The node harness runs the real `clearSourceData` (F-M3-18 (a)); the no-op
+  it carried is why the suite stayed green while the logo slots blanked.
+
 ## 6. Settings schema
 
 Declared in `manifest.json` (`barWidget.schema`), edited with

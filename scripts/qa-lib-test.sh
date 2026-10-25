@@ -1653,6 +1653,14 @@ KM="$ROOT/scripts/dev-harness/spikes/key-mutations"
 # save never asked again), which B33 and the R27a node pins were seen red
 # against; and re-made r25a-keep-landed, r26a-no-read, r26b-no-defer and
 # r26d-periodic-reload, whose hunks R27a's lines moved -- the same decisions.
+# P23 lane A (2026-10-24, lane-p23-state) re-made r25a-clear-every-saved,
+# r25b-silent-drop, r25d-a5-base-not-moved and r25d-a7-no-inflight-half,
+# whose hunks D-SRC-39's outcome call and D-SRC-33 / D-SRC-43's lines in
+# mergeForeignText moved -- the same four decisions.
+# P23 lane A2 (2026-10-24, lane-p23-state) re-made r25d-a7-no-inflight-half,
+# whose context carried the lastPersistFailure clear that lane A2 removed
+# from mergeForeignText (lane A's second finding: a write-only property) --
+# the same decision.
 is "all nineteen key-mutation patches still apply to this tree (git apply --check)" \
    "$(for km_p in d3-save-parked r14-no-return r23a-no-rearm r23e-editable-field r24g-no-kill r25a-keep-landed r25a-clear-every-saved r25b-silent-drop r25d-a5-base-not-moved r25d-a7-no-inflight-half r25d-no-reload-on-change r26a-no-read r26b-no-defer r26a-no-verb-recheck r26d-periodic-reload r26a-watchdog-20ms r26a-watchdog-no-interval r27a-no-wait r27a-wait-never-released; do git -C "$ROOT" apply --check "$KM/$km_p.patch" >/dev/null 2>&1; printf '%s ' $?; done)" "0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 "
 is "and the key-mutations folder holds exactly those nineteen" "$(ls "$KM"/*.patch 2>/dev/null | wc -l | tr -d ' ')" "19"

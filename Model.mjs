@@ -76,26 +76,29 @@ export {
   hideAction, hideVerb, removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC,
   parseFailed, normalizeFailed, prunedFailed, knownIdSet, failedIndex,
   failedDocument, failedWhen, withFailed, failedAfterHealthy, withoutFailed,
-  stateSaveLanded, countReload, reloadDisposition, stateCanonical, sameState,
-  mergeSetField, mergeForeignState, mergeConflictLine, mergeDropLines,
+  stateSaveLanded, stateSaveOutcome, countReload, reloadDisposition,
+  stateCanonical, sameState, mergeSetField, mergeForeignState,
+  mergeLeavesNothingUnsaved, mergeConflictLine, MERGE_CONFLICT_TITLE,
+  mergeConflictSentence, mergeConflictNotice, mergeDropLines,
   migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
-  stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
-  stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
-  STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
-  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
+  stateInitFound, stateLoadDecision, stateModeArgv, stateModeReply,
+  stateWriteGate, stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
+  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
+  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
+  stateBlockedHeader
 } from "./model/state.mjs"
 export {
   parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
   parseEpgNow, emptyEpgStore, parseEpgNowStore, parseHelperStatus,
-  helperDamagedReason, statusReason, statusHost, statusHealthy,
-  statusWarnings, WARNING_PREFIX, warningLabel, labelWarning, labelWarnings,
-  warningLine, footerWarning, findBarEntry, settingOf, boolSetting, clampInt,
-  clampSetting, settingsFrom, entryInputText, entryInputForm, sameEntryInput,
-  ownWriteInForce, settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS,
-  RETIRED_SETTINGS, MAX_SEEN_INPUTS, entryInputSeen, entryInputLast,
-  entryInputsSeenAfter, entryInputNotice, ownedEntryPatch, barEntryWritable,
-  entryFlushDisposition, owedMirrorAction, ownedWriteMode,
-  retiredInputsToKeep, sameOwnWrite
+  helperDamagedReason, statusReason, lastErrorAfterStatus, statusHost,
+  statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel, labelWarning,
+  labelWarnings, warningLine, footerWarning, findBarEntry, settingOf,
+  boolSetting, clampInt, clampSetting, settingsFrom, entryInputText,
+  entryInputForm, sameEntryInput, ownWriteInForce, settingsWithOwnWrite,
+  ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS, MAX_SEEN_INPUTS,
+  entryInputSeen, entryInputLast, entryInputsSeenAfter, entryInputNotice,
+  ownedEntryPatch, barEntryWritable, entryFlushDisposition, owedMirrorAction,
+  ownedWriteMode, retiredInputsToKeep, sameOwnWrite
 } from "./model/settings.mjs"
 export {
   optInSetting, logoSurvey, splitLogoUrl, logoConsentLines, logoFile,
@@ -204,12 +207,13 @@ export {
   updateSource, removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
   withSourceStats, activeKeyText, activeKeyOf, activeSourceRecord,
   withActiveKey, invalidInputBlocks, reconcileAction, adoptActiveSource,
-  activeEpgUrlOf, pointerWritePlan, reconcileSources, sourceForEdit,
-  sourcesSummary, entryWith, cacheStale, formFields, isFormField, formLimit,
-  formCapacity, copyForm, formState, formFocusOrder, formHasText, openForm,
-  openFirstRun, openAddForm, openEditForm, openXtreamForm, closeForm,
-  withFormValue, withFormFocus, moveFormFocus, fieldMaskable, fieldRevealed,
-  fieldMasked, toggleReveal, withFormReveal
+  activeEpgUrlOf, pointerWritePlan, probeCommitPlan, probeCommitState,
+  reconcileSources, sourceForEdit, sourcesSummary, entryWith, cacheStale,
+  formFields, isFormField, formLimit, formCapacity, copyForm, formState,
+  formFocusOrder, formHasText, openForm, openFirstRun, openAddForm,
+  openEditForm, openXtreamForm, closeForm, withFormValue, withFormFocus,
+  moveFormFocus, fieldMaskable, fieldRevealed, fieldMasked, toggleReveal,
+  withFormReveal
 } from "./model/source-records.mjs"
 export {
   clipboardArgv, clipboardCut, parseClipboardReply, editRange, fullRange,

@@ -739,6 +739,49 @@ function pointerWritePlan(input) {
   return { steps: ["write-entry"], entryWaits: false }
 }
 
+// D-SRC-14 (2026-10-24). The probe commit's decision, before the state it
+// commits is published. An EDIT of the ACTIVE source's URL removes the old
+// record (Model.removeSource, which clears the pointer it named, R3) and
+// adds the replacement under a new key; published like that, the state has
+// no active source for one assignment -- `configured` read false,
+// clearSourceData ran, and a key-less state was saved before persistActive
+// issued a second save with the key. So the pointer is folded into the SAME
+// state object (probeCommitState) and the commit still runs the switch:
+// beginSwitch, then persistActive, which with the key already in memory
+// plans `write-entry-after-saved` -- one save, one entry write.
+// `reload` is "already the active directory": `newKey === activeKey`, which
+// is a retry of the active source (or a switch to it). No guard on
+// `wasActive` is needed for the edit, because `activeKey` is the key BEFORE
+// the fold (the caller passes root.activeSourceKey with root.userState not
+// yet moved) and an edit's newKey is allocated from the NEW URL against the
+// sources with the old record already removed (allocateSourceKey, fnv1a32):
+// it names the old key only through a 32-bit hash collision between the two
+// URLs, which this plan does not decide. The first version carried
+// `!wasActive &&` here with a comment saying the folded newKey IS the active
+// key -- true of the old inline test, evaluated after the assignment, and
+// not of this function's input (P23 recheck, 2026-10-24: the term could not
+// change the answer on any input the caller builds).
+//   commit     whether success writes the settings (startProbe's `commit`)
+//   mode       add | edit | switch | retry
+//   key        the record the probe concerned (the OLD key for an edit)
+//   newKey     the record the history kept
+//   activeKey  the active key BEFORE the commit (the published state's)
+// -> { wasActive, act: "switch" | "reload" | "none" }
+function probeCommitPlan(input) {
+  var it = input || {}
+  var wasActive = str(it.mode) === "edit" && str(it.key) !== "" && str(it.key) === str(it.activeKey)
+  var act = "none"
+  if (it.commit === true) act = str(it.newKey) === str(it.activeKey) ? "reload" : "switch"
+  return { wasActive: wasActive, act: act }
+}
+
+// The state the commit publishes: the pointer folded in when the active
+// source was edited, the state as it is otherwise.
+function probeCommitState(state, plan, newKey) {
+  if (!plan || plan.wasActive !== true) return state
+  return withActiveKey(state, activeKeyText(newKey))
+}
+
 // `activeSourceKey(state, playlistUrl)` USED TO BE HERE and is deliberately
 // gone (D-SINK-19, rule 15). It was the one function whose job was "name the
 // active source from a URL", and leaving it behind with no caller would leave
@@ -1150,12 +1193,12 @@ export {
   updateSource, removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
   withSourceStats, activeKeyText, activeKeyOf, activeSourceRecord,
   withActiveKey, invalidInputBlocks, reconcileAction, entryPlaylistUnusable,
-  adoptActiveSource, activeEpgUrlOf, pointerWritePlan, reconcileSources,
-  sourceForEdit, sourcesSummary, entryWith, cacheStale, formFields,
-  isFormField, formLimit, FORM_SLACK, formCapacity, emptyValues, copyValues,
-  copyForm, formState, formFocusOrder, formHasText, firstFieldWithText,
-  guideWithForm, openForm, openFirstRun, openAddForm, openEditForm,
-  openXtreamForm, closeForm, withFormPatch, withFormValue, withFormFocus,
-  moveFormFocus, fieldMaskable, fieldRevealed, fieldMasked, toggleReveal,
-  withFormReveal
+  adoptActiveSource, activeEpgUrlOf, pointerWritePlan, probeCommitPlan,
+  probeCommitState, reconcileSources, sourceForEdit, sourcesSummary,
+  entryWith, cacheStale, formFields, isFormField, formLimit, FORM_SLACK,
+  formCapacity, emptyValues, copyValues, copyForm, formState, formFocusOrder,
+  formHasText, firstFieldWithText, guideWithForm, openForm, openFirstRun,
+  openAddForm, openEditForm, openXtreamForm, closeForm, withFormPatch,
+  withFormValue, withFormFocus, moveFormFocus, fieldMaskable, fieldRevealed,
+  fieldMasked, toggleReveal, withFormReveal
 }

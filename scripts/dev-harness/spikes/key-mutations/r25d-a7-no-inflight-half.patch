@@ -1,11 +1,10 @@
 diff --git a/Service.qml b/Service.qml
-index 0000000..0000000 100644
 --- a/Service.qml
 +++ b/Service.qml
-@@ -2359,8 +2359,8 @@
-     if (drops.length > 0) root.notify("mergeDropped", { dropped: merged.dropped })
-     root.landedState = theirs
-     root.userState = merged.state
+@@ -2568,8 +2568,8 @@ Item {
+       root.stateSaveFailed = false
+       root.recentSaves = []
+     }
 +    // MUTATION (lane A, round 15): a7 -- the in-flight half of the re-save decision deleted
      var behind = !Model.sameState(merged.state, theirs)
 -                 || (root.stateSavesInFlight > 0 && !Model.sameState(merged.state, root.lastSaveState))

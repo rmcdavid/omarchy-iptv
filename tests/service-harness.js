@@ -43,7 +43,10 @@ function makeIds(h) {
   // "current" and so could not see it. Setting `running` queues the helper's
   // answer for the command it was given (h.cacheAnswer), delivered through
   // Service.handleCacheExit, the handler the real exit calls.
-  const cacheProc = { name: "cacheProc", command: [], environment: {}, signal() {}, _running: false }
+  // D-SRC-37 (c): and RECORDS its signals like the other process fakes; with
+  // h.cacheHang true the helper never answers (a stalled cache directory),
+  // which is the run the slot's watchdog exists for.
+  const cacheProc = { name: "cacheProc", command: [], environment: {}, signals: [], signal(n) { this.signals.push(n) }, _running: false }
   Object.defineProperty(cacheProc, "running", {
     get() { return cacheProc._running },
     set(v) {
@@ -51,6 +54,7 @@ function makeIds(h) {
       if (v === true) {
         const command = cacheProc.command.slice()
         h.cacheRuns.push(command)
+        if (h.cacheHang) return
         h.later.push({ fn: () => { cacheProc._running = false; h.root.handleCacheExit(h.cacheAnswer(command)) }, args: [] })
       }
     }
@@ -77,7 +81,26 @@ function makeIds(h) {
     logoFetchProc: proc("logoFetchProc"),
     cacheProc,
     failedProc: proc("failedProc"),
+    whichProc: proc("whichProc"),
+    // D-SRC-49: the `state mode` run after a landed save; its exit is
+    // delivered by the test (h.stateModeExit), with the helper's own reply.
+    stateModeProc: proc("stateModeProc"),
+    hyprWhichProc: proc("hyprWhichProc"),
+    hyprInfoProc: proc("hyprInfoProc"),
+    hyprInfoStdout: { text: "" },
     probeWatchdog: timer("probeWatchdog"),
+    // D-SRC-37 (c): the bounds on the four slots that had none. Each is
+    // driven from its own Timer block in the tree (interval and onTriggered)
+    // by h.elapse, like the two R26a/R27a watchdogs below; a tree without the
+    // block has a Timer that never fires, which is that tree.
+    cacheWatchdog: timer("cacheWatchdog"),
+    failedWatchdog: timer("failedWatchdog"),
+    configShieldWatchdog: timer("configShieldWatchdog"),
+    whichWatchdog: timer("whichWatchdog"),
+    pipProbeWatchdog: timer("pipProbeWatchdog"),
+    stateModeWatchdog: timer("stateModeWatchdog"),
+    // D-REL-8: the one re-run of the start-up init, driven from its block.
+    stateInitRetry: timer("stateInitRetry"),
     // R23c: the init's watchdog and its kill grace. Timers do not run here;
     // a test that times the init out calls h.initExit({ timeout: true }),
     // which runs the watchdog's OWN onTriggered and then the exit handler.
@@ -123,8 +146,12 @@ const STUBBED = {
   // schedulePrune and queuePrune RUN since D-LOGO-20 (R32f): a prune is a
   // cache job, recorded in h.cacheRuns like migrate and remove, so a pin can
   // see the start-up prune once and the switch prune on every switch.
+  // clearSourceData RUNS since F-M3-18 (a) (2026-10-24): it is the reset of
+  // every per-source property on a switch, and the no-op that stood here is
+  // why the node suite stayed green while the logo slots blanked (the three
+  // Service.qml-only decisions of D-LOGO-11's review had nothing that could
+  // redden off-display).
   fetchLogos: "starts the logo fetch",
-  clearSourceData: "unbinds the channel and EPG data of the previous source",
   pruneFailed: "dead-channel memory"
 }
 
@@ -380,6 +407,10 @@ class StateFile {
     this.dirAbsent = opts.dirAbsent !== undefined ? opts.dirAbsent === true : (!this.exists && !this.fault && opts.dirPresent !== true)
     this.watchArmed = !this.dirAbsent
     this.disk = text; this.view = text; this.events = []; this.writeFails = false; this.coalesce = false
+    // D-SRC-39 (rule 10): a PER-WRITE failure, `failWhen(text) -> bool`, so a
+    // burst can land its first write and fail a later one; `writeFails`
+    // stays the switch for every write.
+    this.failWhen = null
     this.loader = null
     this.mode = this.exists ? (opts.mode !== undefined ? opts.mode : 0o600) : null
     this.umask = opts.umask !== undefined ? opts.umask : 0o022
@@ -405,7 +436,8 @@ class StateFile {
       || this.fault === "dangling-link-nodir" || this.fault === "not-a-dir" || this.fault === "folder-link"
     // R26c: inside the view's own onLoaded, a write that lands raises nothing.
     if (this.inHandler > 0) this.handlerWrites++
-    const ev = { kind: this.writeFails || blocksWrite ? "saveFailed" : (this.inLoad ? "silent" : "saved"), text }
+    const fails = this.writeFails || blocksWrite || (typeof this.failWhen === "function" && this.failWhen(text) === true)
+    const ev = { kind: fails ? "saveFailed" : (this.inLoad ? "silent" : "saved"), text }
     if (this.coalesce && this.events.length >= 2) this.events[this.events.length - 1] = ev
     else this.events.push(ev)
   }
@@ -460,7 +492,12 @@ class StateFile {
 const HELPER_EMPTY_STATE = '{"version":2,"cacheLayout":0,"favorites":[],"recents":[],"lastPlayed":null,"session":null,"sources":[],"savedSearches":[],"hiddenGroups":[],"activeKey":""}\n'
 //   a non-zero exit  nothing printed and nothing changed (the init that
 //                   could not make the directory, say)
-function helperInit(file, code) {
+//   `empty` (D-REL-8) exit 0, nothing printed, nothing changed: the EMPTY
+//                   stub git leaves for milliseconds mid-update (measured
+//                   with inotify, 2026-10-17; the rewrite is delete, create,
+//                   write in place)
+function helperInit(file, code, empty) {
+  if (empty === true) return { reply: "", raises: false }
   if (code !== undefined && code !== 0) return { reply: "", raises: false }
   let found, raises = false
   if (file.fault === "dir-0000") { found = "unreadable"; file.fault = null }
@@ -487,7 +524,7 @@ function helperInit(file, code) {
 
 function bootService(serviceText, Model, o) {
   const opts = o || {}
-  const h = { clock: opts.clock || 1760000000000, later: [], cacheRuns: [], signals: [], warnings: [], detached: [], turns: 0 }
+  const h = { clock: opts.clock || 1760000000000, later: [], cacheRuns: [], signals: [], warnings: [], detached: [], turns: 0, cacheHang: false }
   h.host = new Host(opts.entry, opts.host || "lag")
   h.stateFile = new StateFile(opts.stateText || "", { exists: opts.exists, fault: opts.fault, ownEcho: opts.ownEcho, dirAbsent: opts.dirAbsent, dirPresent: opts.dirPresent, mode: opts.mode, umask: opts.umask })
   h.stateInitStdout = { text: "" }
@@ -578,11 +615,14 @@ function bootService(serviceText, Model, o) {
     if (name in STUBBED) continue
     root[name] = compile(fns[name].args, fns[name].body, name)
   }
+  // D-SRC-37 (c): a test that needs a STUBBED function for real (the config
+  // shield's run, to see its watchdog armed) installs the shipping text of
+  // it; the stub stays for every other test.
+  h.unstub = (name) => { if (!(name in fns)) throw new Error("service-harness: no function " + name); root[name] = compile(fns[name].args, fns[name].body, name) }
   root.runConfigShield = () => {}
   root.noteSessionOutcome = () => {}
   root.markDeadSession = () => {}
   root.fetchLogos = () => {}
-  root.clearSourceData = () => {}
   root.pruneFailed = () => {}
   // D-LOGO-20 (R32f): onActiveCacheDirChanged from its own text, fired by
   // the property setters above whenever the binding's value moved (""
@@ -718,13 +758,54 @@ function bootService(serviceText, Model, o) {
   ww.restart = function () { this.restarts++; this.running = true; this.armedAt = h.clock; this.armedInterval = this.interval }
   ww.stop = function () { this.stops++; this.running = false; this.armedAt = null }
   h.writeWaitWatchdog = () => { onWriteWaitWatchdog(); h.runLater() }
+  // D-SRC-37 (c): any other Timer of the tree, by id, driven the same way --
+  // its `interval` (a binding, read at each restart) and its onTriggered
+  // (one line or a block) compiled from its own Timer block. A tree without
+  // the block gets a Timer with a null interval, which never comes due.
+  const treeTimer = (id) => {
+    const t = ids[id]
+    const at = serviceText.indexOf("id: " + id + "\n")
+    const block = at === -1 ? null : serviceText.slice(serviceText.lastIndexOf("  Timer {", at), serviceText.indexOf("\n  }", at))
+    const intervalText = block === null ? null : ((block.match(/^    interval: (.*)$/m) || [])[1] || "1000")
+    const oneLine = block === null ? null : (block.match(/^    onTriggered: (?!\{)(.*)$/m) || [])[1]
+    const body = block === null ? null : (oneLine || handlerBlock(block, "onTriggered: {"))
+    const fire = body ? compile("", body, id + "_onTriggered") : () => {}
+    const interval = intervalText === null ? null : compile("", "return (" + intervalText + ")", id + "_interval")
+    Object.defineProperty(t, "interval", { get() { return interval === null ? null : interval() }, enumerable: true, configurable: true })
+    t.armedAt = null
+    t.armedInterval = null
+    t.restart = function () { this.restarts++; this.running = true; this.armedAt = h.clock; this.armedInterval = this.interval }
+    t.stop = function () { this.stops++; this.running = false; this.armedAt = null }
+    return [t, fire]
+  }
+  h.timed = [[vw, onVerifyWatchdog], [ww, onWriteWaitWatchdog]]
+  for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog", "stateModeWatchdog", "stateInitRetry"]) h.timed.push(treeTimer(id))
+  // D-SRC-49: the `state mode` run's exit, with the REAL helper's reply for
+  // the file as the double holds it (rule 10: the verb chmods a regular
+  // file that is not 0600 and nothing else; the fake's mode moves with it),
+  // or `reply` as given.
+  h.stateModeExit = (o2) => {
+    const io = o2 || {}
+    const p = ids.stateModeProc
+    if (!p.running) return false
+    p.running = false
+    let text = io.reply
+    if (text === undefined) {
+      let file = "kept"
+      if (h.stateFile.exists && !h.stateFile.fault && h.stateFile.mode !== null && h.stateFile.mode !== 0o600) { h.stateFile.mode = 0o600; file = "changed" }
+      text = JSON.stringify({ ok: true, kind: "state", action: "mode", folder: "kept", file }) + "\n"
+    }
+    root.handleStateModeExit(io.code === undefined ? 0 : io.code, text)
+    h.runLater()
+    return true
+  }
   // Each Timer fires once its restart() is `interval` old, in the order they
   // come due; a handler that re-arms its Timer (R27a's second read) is due
   // again `interval` after the moment it fired.
   h.elapse = (ms) => {
     const end = h.clock + ms
     for (;;) {
-      const due = [[vw, onVerifyWatchdog], [ww, onWriteWaitWatchdog]]
+      const due = h.timed
         .filter(([t]) => t.running && t.armedInterval !== null && t.armedAt + t.armedInterval <= end)
         .sort((a, b) => (a[0].armedAt + a[0].armedInterval) - (b[0].armedAt + b[0].armedInterval))
       if (!due.length) break
@@ -736,8 +817,8 @@ function bootService(serviceText, Model, o) {
     h.clock = end
   }
   // The start-up init's exit, with the double's reply and side effects.
-  h.helperInit = (code) => {
-    const out = helperInit(h.stateFile, code)
+  h.helperInit = (code, empty) => {
+    const out = helperInit(h.stateFile, code, empty)
     h.stateInitStdout.text = out.reply
     return out
   }
@@ -863,7 +944,7 @@ function bootService(serviceText, Model, o) {
     return "hung (the kill was not sent)"
   }
   h.initExit = (o2) => {
-    const io = Object.assign({ code: opts.initCode || 0, order: opts.initOrder || "reload-first", timeout: opts.initTimeout === true }, o2 || {})
+    const io = Object.assign({ code: opts.initCode || 0, order: opts.initOrder || "reload-first", timeout: opts.initTimeout === true, empty: false }, o2 || {})
     h.ignoreTerm = io.ignoreTerm === true
     if (io.timeout && io.hangAt === "mkdir") {
       // The mkdir itself hangs (a hung filesystem): the init is never reached.
@@ -881,7 +962,7 @@ function bootService(serviceText, Model, o) {
       h.hang = hangOut(ids.stateInitProc, (sig) => { onInitExited(sig, 1); h.runLater() })
       return
     }
-    const out = h.helperInit(io.code)
+    const out = h.helperInit(io.code, io.empty === true)
     ids.stateInitProc.running = false
     if (out.raises && io.order === "reload-first") { h.loadState(); h.runLater() }
     onInitExited(io.code, 0)
