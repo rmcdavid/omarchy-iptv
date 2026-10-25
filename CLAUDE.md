@@ -144,6 +144,13 @@ Consequences you must respect:
   **This hold ended at 2026-10-22T03:45:56Z**, when #12474 closed
   `approved-and-verified`; the standing rule applies again, and a release
   still waits for the owner's word.
+- **A fourth time, decided by the owner on 2026-10-25: `main` is HELD at
+  0.15.0 (e710341) until a maintainer actions #12636** (approves it or
+  raises a finding on it), for the same reason: a moved `main` makes the
+  pending request stale, and #12636 passed its validation and baseline on
+  2026-10-22. `dev` moves freely -- the P2/P3 sweep (51 rows, 3421d57) waits
+  on it, unreleased, as the next release's contents. A finding on #12636 is
+  fixed and released at once, carrying what `dev` holds.
 
 ## Where the truth lives
 
