@@ -44,6 +44,13 @@
 #   --entry-ms N        numberEntryMs, the channel-number entry timeout
 #   --no-bar-number     barShowChannelNumber=false
 #   --keep              keep the scratch cache/state between runs (default wipes cache+state)
+#   --seed-cache DIR    after the default wipe, copy DIR's contents into the scratch cache
+#                       (XDG_CACHE_HOME), so a COLD shell starts over a cache the caller chose
+#                       while the plugin's own cache and state are wiped as usual. What it is
+#                       for (F-HARNESS-44): a mesa shader cache warmed once by a throwaway
+#                       shell, so a cold open pays the plugin's cold costs and not llvmpipe's
+#                       shader JIT. Prints what it seeded (files, bytes). Not with --keep: the
+#                       two are the same lever, and the start refuses both
 #   --detach            start in the background and return (no EXIT trap): the shell survives
 #                       this invocation, which is what `restart-shell` needs. Reap with `reap`.
 #   --instance NAME     a second config root (root<NAME>) sharing the same cache / state /
@@ -372,6 +379,34 @@ prepare_root() {
   fi
   # hyprctl and Quickshell's Hyprland bits look under $XDG_RUNTIME_DIR/hypr.
   [[ -d $REAL_RUNTIME/hypr ]] && ln -sfn "$REAL_RUNTIME/hypr" "$SCRATCH/runtime/hypr"
+  return 0
+}
+
+# The scratch cache between prepare_root and the shell's start: wiped (the
+# default), kept (--keep), or wiped and then SEEDED from a directory
+# (--seed-cache DIR, F-HARNESS-44). The seed is copied with its modes and
+# times, and what landed is printed -- a count and a byte total, read back
+# from the scratch and not from the source -- so a scenario's transcript
+# records it. tests/test_harness_shader_seed.py runs this function over a
+# decoy scratch and asserts the plugin's cache is gone, the stale shader
+# cache is gone, and the seed is present byte for byte.
+reset_scratch_cache() {
+  local files bytes
+  if (( KEEP )); then
+    echo "[run.sh] cache kept"
+    return 0
+  fi
+  rm -rf "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/runtime/omarchy-iptv" \
+    || die "could not wipe the scratch cache and state under $SCRATCH"
+  mkdir -p "$SCRATCH/cache" "$SCRATCH/state" || die "could not re-create the scratch cache and state"
+  if [[ -z ${SEED_CACHE:-} ]]; then
+    echo "[run.sh] cache wiped"
+    return 0
+  fi
+  cp -a -- "$SEED_CACHE/." "$SCRATCH/cache/" || die "could not seed the scratch cache from $SEED_CACHE"
+  files=$(find "$SCRATCH/cache" -type f | wc -l)
+  bytes=$(find "$SCRATCH/cache" -type f -printf '%s\n' | awk '{ b += $1 } END { print b + 0 }')
+  echo "[run.sh] cache seeded from $SEED_CACHE: $files files, $bytes bytes"
   return 0
 }
 
@@ -850,7 +885,7 @@ except Exception: print("<unreadable>")' | tr -d '\n')
     ;;
   start|--*)
     [[ $cmd == start ]] && shift
-    OPEN=0 TIMEOUT=15 PLAYLIST="" EPG="" SOURCE2="" SERVE=0 FAKE_EPG=0 VERTICAL=0 SHOW_NAME=true LABEL_MAX=180 KEEP=0 DETACH=0
+    OPEN=0 TIMEOUT=15 PLAYLIST="" EPG="" SOURCE2="" SERVE=0 FAKE_EPG=0 VERTICAL=0 SHOW_NAME=true LABEL_MAX=180 KEEP=0 DETACH=0 SEED_CACHE=""
     ORDER=playlist ENTRY_MS=2000 BAR_NUMBER=true WINDOW=layer SOURCE_KEY="" SOURCE_KEY_SET=0 HOST_MODE=lag
     while (($# > 0)); do
       case $1 in
@@ -874,6 +909,11 @@ except Exception: print("<unreadable>")' | tr -d '\n')
                  (( ENTRY_MS >= 400 && ENTRY_MS <= 5000 )) || die "--entry-ms is 400..5000 (manifest range), got $ENTRY_MS" ;;
         --no-bar-number) BAR_NUMBER=false ;;
         --keep) KEEP=1 ;;
+        # F-HARNESS-44. Refused here for the same reason as --order: a seed
+        # directory that does not exist would start a shell over a wiped
+        # cache and print a cold figure under the wrong condition.
+        --seed-cache) SEED_CACHE=$2; shift
+                 [[ -n $SEED_CACHE && -d $SEED_CACHE ]] || die "--seed-cache takes a directory, not '$SEED_CACHE'" ;;
         --keep-player) KEEP_PLAYER=1 ;;
         --detach) DETACH=1; KEEP_PLAYER=1 ;;
         --instance) INSTANCE=$2; shift ;;
@@ -899,9 +939,10 @@ except Exception: print("<unreadable>")' | tr -d '\n')
     done
     # F-HARNESS-20: the environment FIRST, so the fixture server and ffmpeg
     # below run under the scratch HOME like everything else this starts.
+    (( KEEP )) && [[ -n $SEED_CACHE ]] && die "--keep and --seed-cache are the same lever; pass one"
     harness_env
     prepare_root
-    if (( ! KEEP )); then rm -rf "$SCRATCH/cache" "$SCRATCH/state" "$SCRATCH/runtime/omarchy-iptv"; mkdir -p "$SCRATCH/cache" "$SCRATCH/state"; fi
+    reset_scratch_cache
     # Always reap what we start: normal exit, --timeout, Ctrl-C, SIGTERM.
     # --detach deliberately installs no trap: the shell and the player must
     # outlive this invocation (that is the state `restart-shell` acts on),
