@@ -189,6 +189,8 @@ fail=0
 # 79 -> 80 on 2026-10-22 (lane-bounds-s4): test_r32a2_urlWhitespaceAndPunctuation.
 # 0.15.0 cut, 2026-10-22: re-levelled on lane-rel-0150 (7c1d37f plus the
 # version bump and the notes); the spec runs 80 and the floor stays 80.
+# P2/P3 sweep integration, 2026-10-24 (lane-p23-int): the merged tree runs
+# 80; no lane added a spec case, so the floor stays 80.
 QML_SPEC_MIN=${QML_SPEC_MIN:-80}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
@@ -385,15 +387,15 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-80}
 # version bump and the notes); the suite runs 2993 checks in both own-echo
 # modes and the floor stays 2993.
 # 2993 -> 3017 on 2026-10-24, P23 lane A (lane-p23-state): D-SRC-52 (+2),
-# D-SRC-14 (+2), D-SRC-37 (a) (+1) and (c) (+6, the Process inventory
-# among them), D-SRC-39 (+2), D-SRC-43 (+2), D-SRC-33 (+2), D-SRC-49 /
+# D-SRC-14 (+2), D-SRC-37 (a) (+1) and (c) (+6, the Process inventory and
+# the PiP pair's one watchdog, D-PLY-26, among them), D-SRC-39 (+2), D-SRC-43 (+2), D-SRC-33 (+2), D-SRC-49 /
 # D-SINK-22 (b)(c) (+4), D-REL-8 (+2), F-M3-18 (a) (+1); every one seen red
 # on a9d20f9 or on the stub put back (the lane report).
 # 3017 -> 3019 on 2026-10-24, P23 lane A2 (lane-p23-state, the recheck's
 # blockers): D-SRC-33's notifyArgv join (+1, red on the lane's first tip:
 # the argv was null) and the lastPersistFailure-removal pin (+1, red before
-# the removal; P23 lane A's second finding, its board row names the property). The D-SRC-33 harness check and the D-SRC-39 harness
-# check gained assertions, not checks.
+# the removal; D-SRC-67, P23 lane A's second finding). The D-SRC-33 harness
+# check and the D-SRC-39 harness check gained assertions, not checks.
 # 2026-10-24, lane-p23-model (D-SINK-30, D-SINK-23 parity, D-SINK-14, F-UX-7,
 # D-LOGO-19, D-SRC-12): 2993 -> 3008 -- the display-host cut (+2), the state
 # reader parity fixture (+2), the plain-http advice line (+2), the refused
@@ -405,7 +407,11 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-80}
 # confirmLogosMessage (+1) and the footer's one line naming the refused
 # option ahead of a kept-option warning (+1); both red on 2361574 and on the
 # cut or the composer order mutated back.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3019}
+# P2/P3 sweep integration, 2026-10-24 (lane-p23-int): the five lanes merged
+# (harness, docs, state, model, helper) and the floor re-levelled to the
+# merged tree's count, 3036 in both own-echo modes (3019 + the model lane's
+# 17; the other three lanes added no node check).
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3036}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -651,7 +657,10 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3019}
 # tests/test_fetch_bounds.py (+1, the resolver's worker blocks SIGALRM and
 # the main thread keeps it; red when the block is dropped and when the
 # lookup runs on the main thread). The suite runs 1521 and the floor is 1521.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1521}
+# P2/P3 sweep integration, 2026-10-24 (lane-p23-int): re-levelled to the
+# merged tree's count, 1565 = 1496 + 10 (harness) + 25 (docs) + 6 (state)
+# + 3 (model) + 25 (helper); the suite runs 1565 and the floor is 1565.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1565}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -1604,8 +1613,14 @@ step "SR ruling register (every cited SRn has a row, every row is cited)"
 # the register. Their ids are deliberately not written here: this file is
 # in the corpus the checker scans, and the first version of this comment
 # wrote them, which made the comment the citation that kept its own red
-# proof green (P23 recheck). Nothing under scripts/ or tests/ may name a
-# register id as a literal for the same reason; the test composes its.
+# proof green (P23 recheck). The rule is exactly as narrow as the checker's
+# docstring states it: THIS step's comment, scripts/check-sr-register.py and
+# tests/test_check_sr_register.py write no register id (the test composes
+# its ids; this comment names line numbers), and that test pins those three
+# files and no others. Every other tracked file's literal id is a citation
+# the checker counts and verifies -- a scenario or a test that cites a
+# ruling IS the join it exists to check (88 of the 388 citations on the
+# P23 tree live under scripts/ and tests/).
 sr_log=$CHECK_TMP/sr-register.log
 if python3 "$ROOT/scripts/check-sr-register.py" >"$sr_log" 2>&1; then
   sr_n=$(grep -oE '^sr register: [0-9]+ rows' "$sr_log" | head -1 | grep -oE '[0-9]+')

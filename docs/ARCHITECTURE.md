@@ -2361,7 +2361,7 @@ found by the recheck's rule-15 search over the shape "a printed host that
 stops at `:` only"). The cut is ONE function per mirror, `cut_host_params`
 in `bin/helper/02-sources.py` and `cutHostParams` in `model/sources.mjs`,
 shared by `host_port_of`/`hostPortOf` and `logo_host`/`logoHost`, and the
-shared logo-survey fixture carries the case. Two helper readers still print
+shared logo-survey fixture carries the case. Three helper readers still print
 the authority whole and are recorded on the board under D-SINK-30, not
 fixed here: `source_host` and `url_host` in `01-core.py` (urllib
 `hostname`), and `fetch_logo`'s own `host` in `05-ipc-logos.py`

@@ -785,8 +785,8 @@ Item {
   property bool stateModeRerun: false
   property int stateModeRuns: 0
   // A string property holding the LAST persist failure's code USED TO BE
-  // HERE (P23 lane A's second finding, 2026-10-24, removed by lane A2 the
-  // same day; its board row names the property): set by the three failure sites and
+  // HERE (D-SRC-67, P23 lane A's second finding, 2026-10-24, removed by
+  // lane A2 the same day): set by the three failure sites and
   // the D-SRC-43 clear, and READ BY NOTHING -- not the guide, not the model,
   // not the IPC summary. The reason a failure is reported with is the
   // sourcesPersistFailed(reason) signal's argument, carried to the guide's
@@ -6410,12 +6410,13 @@ Item {
     function onExited(exitCode, exitStatus) { root.handlePipWhichExit(exitCode) }
   }
 
-  // D-SRC-37 (c), rule 15: the two decide-once compositor probes are the
-  // shape of whichProc (a process the start waits on with no bound), found by
-  // the search for it and bounded by ONE Timer over whichever of the pair is
-  // running, the way stateInitWatchdog covers mkdir and the init. A probe the
-  // watchdog stopped exits non-zero and PiP is hidden, the answer the exit
-  // code gave before. Root functions so the harness runs the same code.
+  // D-SRC-37 (c), rule 15 -- D-PLY-26: the two decide-once compositor probes
+  // had no watchdog. They are the shape of whichProc (a process the start
+  // waits on with no bound), found by the search for it and bounded by ONE
+  // Timer over whichever of the pair is running, the way stateInitWatchdog
+  // covers mkdir and the init. A probe the watchdog stopped exits non-zero
+  // and PiP is hidden, the answer the exit code gave before. Root functions
+  // so the harness runs the same code.
   function runPipProbe() {
     hyprWhichProc.running = true
     pipProbeWatchdog.restart()
@@ -6709,8 +6710,8 @@ Item {
     }
   }
   Timer {
-    // The PiP start-up pair (runPipProbe): `which hyprctl`, then `hyprctl
-    // systeminfo`; whichever is running is the one stopped.
+    // D-PLY-26: the PiP start-up pair (runPipProbe): `which hyprctl`, then
+    // `hyprctl systeminfo`; whichever is running is the one stopped.
     id: pipProbeWatchdog
     interval: root.helperTimeoutMs
     repeat: false

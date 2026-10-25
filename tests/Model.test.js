@@ -15698,7 +15698,7 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     wp.running = false; h.root.handleWhichExit(1)
     return [armed, fired, wd.running, h.root.mpvAvailable, h.compileErrors]
   }, [[true, true], [[15], 1], false, false, []])
-  checkCall("D-SRC-37 (c), rule 15: the PiP start-up pair -- `which hyprctl` then `hyprctl systeminfo` share one watchdog; whichever is running at helperTimeoutMs is TERMed; each exit stops it, and a stopped probe hides PiP", () => {
+  checkCall("D-SRC-37 (c), rule 15 / D-PLY-26: the PiP start-up pair -- `which hyprctl` then `hyprctl systeminfo` share one watchdog; whichever is running at helperTimeoutMs is TERMed; each exit stops it, and a stopped probe hides PiP", () => {
     const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
     const w = h.ids.hyprWhichProc, i = h.ids.hyprInfoProc, wd = h.ids.pipProbeWatchdog
     h.root.runPipProbe()
@@ -15794,8 +15794,8 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     g.drain()
     return [failed, conflict, kept, [g.root.stateSaveFailed, g.root.userState.sources[0].label, g.file().sources[0].label], h.compileErrors]
   }, [[true], [false, 0, false, 0, true, "Theirs"], [true, true], [false, "Mine", "Mine"], []])
-  // P23 lane A's second finding (2026-10-24, removed by lane A2 the same day;
-  // its board row names the property): `Service.lastPersistFailure` was set
+  // D-SRC-67, P23 lane A's second finding (2026-10-24, removed by lane A2 the
+  // same day): `Service.lastPersistFailure` was set
   // in four places and read in none -- not Guide.qml, not the model, not the
   // IPC summary; its one reader was the D-SRC-43 check above, written to the
   // row's words. A property with writers and no reader looks like a surface
@@ -15806,7 +15806,7 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
   // one job a grep is good at (rule 15): where else does this name live.
   // Red on the lane's first tip (four writers and the declaration), green
   // once they are gone.
-  checkCall("lastPersistFailure removed (P23 lane A's second finding): no shipped source names it -- not Service.qml, not Guide.qml, not Model.mjs or any model part (a write-only property is not a surface)", () => {
+  checkCall("lastPersistFailure removed (D-SRC-67, P23 lane A's second finding): no shipped source names it -- not Service.qml, not Guide.qml, not Model.mjs or any model part (a write-only property is not a surface)", () => {
     const modelDir = path.join(__dirname, "../model")
     const parts = fs.readdirSync(modelDir).filter(f => /\.mjs$/.test(f)).map(f => fs.readFileSync(path.join(modelDir, f), "utf8"))
     const named = []
