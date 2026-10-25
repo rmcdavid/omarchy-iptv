@@ -307,10 +307,95 @@ def cmd_logos(args: argparse.Namespace) -> int:
     return 0
 
 
+def logo_failed_path(logo_dir: str) -> str:
+    """The memo's path: beside the logo folder, in the source's own
+    directory (D-LOGO-22), never inside the folder the census counts."""
+    return os.path.join(os.path.dirname(logo_dir.rstrip(os.sep) or logo_dir), LOGO_FAILED_FILE)
+
+
+def load_logo_failed(path: str, now: float) -> dict[str, tuple[int, str]]:
+    """The memo as {name: (at, reason)}, entries older than LOGO_FAILED_TTL
+    dropped, at most LOGO_FAILED_MAX of the newest kept. A name is a logo
+    file name's own shape (eight hex digits, the fnv1a32 of the URL,
+    logo_filename) and a reason a short code; anything else in the file
+    is skipped, and a file that is not a JSON object is an empty memo.
+    An `at` in the future reads as now, so a clock that stepped cannot
+    make an entry immortal."""
+    document = read_json(path)
+    entries = document.get("failed") if isinstance(document, dict) else None
+    memo: dict[str, tuple[int, str]] = {}
+    if not isinstance(entries, dict):
+        return memo
+    for name, entry in entries.items():
+        if not isinstance(name, str) or not _LOGO_NAME.match(name) or not isinstance(entry, dict):
+            continue
+        at = entry.get("at")
+        reason = entry.get("reason")
+        if isinstance(at, bool) or not isinstance(at, (int, float)) or at != at:
+            continue
+        at = min(int(at), int(now))
+        if now - at >= LOGO_FAILED_TTL:
+            continue
+        if not failed_reason_ok(reason):
+            reason = "failed"
+        memo[name] = (at, reason)
+    if len(memo) > LOGO_FAILED_MAX:
+        newest = sorted(memo.items(), key=lambda item: (-item[1][0], item[0]))[:LOGO_FAILED_MAX]
+        memo = dict(newest)
+    return memo
+
+
+def save_logo_failed(path: str, memo: dict[str, tuple[int, str]]) -> None:
+    """Write the memo atomically, 0600 in the source's 0700 directory
+    (write_json_atomic). Names and codes only, never a URL (rule 5): the
+    name is the hash the folder already uses, and a reason is one of the
+    helper's own error codes. An empty memo removes the file."""
+    if not memo:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return
+    write_json_atomic(path, {"version": 1, "failed": {
+        name: {"at": at, "reason": reason} for name, (at, reason) in sorted(memo.items())}})
+
+
+def failed_reason_ok(reason: Any) -> bool:
+    """A memo reason is one of the helper's own error codes: ASCII, a
+    lowercase letter first, letters, digits and underscores, at most 32
+    (no regex: the helper's regex guard reviews every pattern, and a
+    membership test over a code needs none)."""
+    return (isinstance(reason, str) and 0 < len(reason) <= 32 and reason.isascii()
+            and reason[0].islower() and reason.replace("_", "a").isalnum() and reason == reason.lower())
+
+
 def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[str, Any]:
     """The run itself, under the lock and the memory limit: every cached
     logo validated and announced, every missing one fetched while the
-    ceiling and the run's deadline allow. -> the summary's counts."""
+    ceiling, the run's deadline and the failure memo allow. -> the
+    summary's counts.
+
+    D-LOGO-22, the memo (logo-failed.json beside the folder): a URL whose
+    fetch failed THIS run or within the last LOGO_FAILED_TTL (a day) is
+    not fetched. Without it the run walked `channels` from the top every
+    time with a fresh `seen`, so a head of dead addresses -- each costing
+    up to min(LOGO_DEADLINE, what was left of the run) -- ate the same
+    hour of LOGO_RUN_DEADLINE every run and the live logos behind it were
+    never reached; the D-LOGO-16 comment's "the next run starts where
+    this one stopped" was true of files that landed and of nothing else.
+    IPTV lists with hundreds of dead logo links are ordinary input. The
+    memo is consulted after the on-disk check (a file on disk is announced
+    whatever the memo says) and before the ceiling and the deadline, so a
+    memoised address counts in `skippedFailed` and nowhere else; it is
+    written when the run's deadline passes, because a run the shell
+    SIGTERMs (a switch, the setting off) reaches no `finally` and would
+    otherwise record nothing, and again at the run's end. Every failure
+    is recorded alike: a timeout, a refusal at the gate (scheme, userinfo,
+    redirect, type, bytes, size, dimensions, chunks), an HTTP error, a
+    network error; a full memo (LOGO_FAILED_MAX) records nothing new. A
+    memoised address is tried again a day later, so a host that was down
+    gets another chance, and `cache logos-clear` drops the memo with the
+    folder so the user's own reset is a reset."""
     # D-SRC-60: a temporary a killed write left here is swept before the
     # folder is counted, so a leftover does not hold a slot under the
     # ceiling (sweep_stale_temps; once per folder per process).
@@ -332,8 +417,13 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
     present = logo_dir_entries(logo_dir)
     run_deadline = time.monotonic() + LOGO_RUN_DEADLINE
     fetched, cached, refused, failed, swept, deferred, rewritten = 0, 0, 0, 0, 0, 0, 0
-    postponed, unnamed = 0, 0
+    postponed, unnamed, skipped_failed = 0, 0, 0
     unnamed_checked = False
+    memo_path = logo_failed_path(logo_dir)
+    memo_at = int(time.time())
+    memo = load_logo_failed(memo_path, memo_at)
+    memo_dirty = False
+    memo_saved_at_deadline = False
     reasons: dict[str, int] = {}
     seen: set[str] = set()
     names: list[str] = []
@@ -349,12 +439,9 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
         url = channel.get("logo") if isinstance(channel, dict) else None
         # `seen` is the run's memory of every URL it has looked at, failed
         # ones included (D-LOGO-22, R32f): a URL two channels name is
-        # fetched once a run, and one that timed out, was refused or
-        # answered 404 is not tried again WITHIN the run. Across runs it is
-        # tried again, as before: nothing records a failure on disk, so a
-        # host that was down is given another chance at the next refresh,
-        # and the run's own deadline (LOGO_RUN_DEADLINE) bounds what a dead
-        # host costs a run. Stated rather than changed.
+        # fetched once a run. Across runs the memo below is the memory
+        # (logo-failed.json, a day): a failed address is not tried again
+        # until its entry expires.
         if not isinstance(url, str) or not url or url in seen:
             continue
         seen.add(url)
@@ -408,6 +495,12 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
                 present -= 1
             except OSError:
                 pass
+        if name in memo:
+            # D-LOGO-22: failed within the day (this run included, through
+            # the entry a failure below adds). Not fetched, not a failure
+            # again, not held back by the ceiling or the deadline.
+            skipped_failed += 1
+            continue
         if present + fetched >= MAX_LOGO_FILES and not unnamed_checked:
             # D-LOGO-18 (R30b): at the ceiling, before a URL is counted as
             # held back, the files no current channel names are swept, once a
@@ -434,7 +527,12 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
         if remaining <= 0:
             # D-LOGO-16: the run's own deadline. Counted, never fetched; the
             # next run starts where this one stopped, because what it fetched
-            # is on disk.
+            # is on disk and what failed is in the memo -- written HERE, once,
+            # the first time the deadline is seen past (D-LOGO-22): the shell
+            # may stop this run before its end.
+            if memo_dirty and not memo_saved_at_deadline:
+                memo_saved_at_deadline = True
+                save_logo_failed(memo_path, memo)
             postponed += 1
             continue
         try:
@@ -462,6 +560,13 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
                 refused += 1
             else:
                 failed += 1
+            # D-LOGO-22: remembered by name and code, for a day. A full memo
+            # records nothing new; an entry already there is refreshed.
+            if name in memo or len(memo) < LOGO_FAILED_MAX:
+                memo[name] = (memo_at, error.code)
+                memo_dirty = True
+    if memo_dirty:
+        save_logo_failed(memo_path, memo)
     # `names` is what is ON DISK now, and it is the whole reason this command
     # reports anything at all: the guide points an Image at a file only when
     # that file is in this list. Pointing at a missing one is not merely a
@@ -488,12 +593,13 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
     # many logos the run's deadline left for the next run, and `runExpired`
     # says it was reached (D-LOGO-16); a logo whose own deadline passed is a
     # failure, reason `logo_timeout`. `staleTemps` is how many leftovers of a
-    # killed write were swept (D-SRC-60).
+    # killed write were swept (D-SRC-60). `skippedFailed` is how many
+    # addresses the failure memo kept this run from trying (D-LOGO-22).
     return {"fetched": fetched, "cached": cached, "refusedOnPolicy": refused, "failed": failed,
             "reasons": reasons, "names": names, "swept": swept, "rewritten": rewritten,
             "deferred": deferred, "atCeiling": deferred > 0, "files": present + fetched,
             "unnamed": unnamed, "postponed": postponed, "runExpired": postponed > 0,
-            "staleTemps": stale}
+            "staleTemps": stale, "skippedFailed": skipped_failed}
 
 
 def logo_dir_entries(logo_dir: str) -> int:

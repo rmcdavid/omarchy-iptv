@@ -635,6 +635,22 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3019}
 # logo-host cut at `;`, `=` and `&` through logo_host, logo_survey and the
 # refusal line (+1; red on 2361574 and with the cut mutated out of logo_host);
 # the shared logo-survey fixture's new case runs under the existing test.
+# 2026-10-24, lane-p23-helper (the P2/P3 round's helper lane): 1496 -> 1517
+# -- tests/test_fetch_bounds.py LookupBoundTest (+5, D-SRC-62, four red on
+# a9d20f9 and one on a mutation), tests/test_logo_run.py (+2 for the
+# D-LOGO-17 count cap, +7 for the D-LOGO-22 memo, all red on a9d20f9),
+# tests/test_cache.py (+1, the memo goes with a removed source, red),
+# tests/test_rewind.py (+2, F-RWD-8, red on a9d20f9 and on a return-on-seek
+# mutation), tests/test_census_dates.py (+4, F-EPG-24, red on a9d20f9 at
+# four blocks). The suite runs 1517 and the floor is 1517.
+# 2026-10-24, lane-p23-helper round 2 (the recheck's blockers): 1517 -> 1521
+# -- tests/test_census_dates.py (+1, the matcher discharges every OPEN entry
+# a block carries; red on the `next()` version under all eight seeds),
+# tests/test_rewind.py (+2, a stray playback-restart before the seek event
+# is not the landing; both red on the count-any-restart mutation),
+# tests/test_fetch_bounds.py (+1, the resolver's worker blocks SIGALRM and
+# the main thread keeps it; red when the block is dropped and when the
+# lookup runs on the main thread). The suite runs 1521 and the floor is 1521.
 PY_TESTS_MIN=${PY_TESTS_MIN:-1521}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}

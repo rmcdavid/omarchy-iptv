@@ -3917,7 +3917,7 @@ Performance budget (10k channels):
     -- about three times the quarter of an hour D-LOGO-8 measured for a
     first enable of 1,436 logos -- and gives each logo the lesser of its
     own deadline and what is left of the run's, so the run ends by that mark
-    plus the host-name lookup; what it held back is `postponed` and
+    plus one wait slice of the lookup; what it held back is `postponed` and
     `runExpired` in the summary, and the next run fetches it, because a file
     on disk is never fetched again. The shell's `logoFetchWatchdog` is the
     outer bound, `Model.LOGO_FETCH_WATCHDOG_MS` = the run's deadline + one
@@ -3925,10 +3925,32 @@ Performance budget (10k channels):
     the interpreter's start and the lookup, armed and stopped by the
     Process's own `running` state; it TERMs the helper and logs no URL. The
     three numbers are one shared fixture, `tests/fixtures/logo-deadlines.json`,
-    which both suites read. What no signal cuts short, stated rather than
-    rounded away: `getaddrinfo`, which runs in the C library and retries its
-    own poll after a signal, so a host-name lookup ends on the system
-    resolver's timeout and the handler runs then (UNVERIFIED by run). The
+    which both suites read. What no signal cut short, and was stated as
+    UNVERIFIED until it was measured (D-SRC-62): `getaddrinfo` runs in the
+    C library and retries its own poll after a signal, so a host-name
+    lookup ended on the system resolver's timeout and the handler ran
+    then. Measured 2026-10-24 (`scripts/dev-harness/spikes/resolver-overrun`,
+    a user namespace with its own network, `hosts: files dns` bind-mounted
+    over the host's nsswitch so nss-resolve cannot answer, and a resolver
+    that never does): with a 0.5 s deadline the `playlist` verb answered
+    `timeout` after 1.26-1.28 s under `options timeout:1 attempts:1` and
+    10.29-10.35 s under glibc's defaults, against a bare lookup of
+    1.04-1.09 s and 10.05-10.06 s. So the lookup now runs on a daemon
+    thread the main thread waits for in 50 ms slices (`resolve_within`),
+    which the alarm interrupts as it interrupts a read, and the address it
+    found is the one the socket connects to: `bounded_create_connection`
+    is installed as every connection's `_create_connection` by
+    `bounded_handlers`, which both openers (`make_opener`, `logo_opener`)
+    are built with, so a redirect hop's lookup is bounded like the first.
+    The same rig after the fix: 0.77-0.84 s under both resolver settings,
+    the 0.27-0.34 s over the deadline being the interpreter's start and
+    the parts' compile, which the before-run shows too. Off the main
+    thread, where no alarm can be installed, the lookup is held to the
+    per-socket timeout as a connect is. It is the only thread the helper
+    starts; the FetchDeadline docstring says so, where it used to say none.
+    Pinned by `tests/test_fetch_bounds.py` `LookupBoundTest` with a double
+    of the C library's shape (SIGALRM blocked for the lookup's whole
+    delay), four of whose five cases are red on a9d20f9. The
     test-only `OMARCHY_IPTV_HTTP_DEADLINE` now only LOWERS the budget, as
     `OMARCHY_IPTV_MEMORY_LIMIT_MB` does; it used to take any figure. So
     does `OMARCHY_IPTV_CLIPBOARD_DEADLINE` since F-HARNESS-36 (R32f), the
@@ -4007,29 +4029,74 @@ Performance budget (10k channels):
     ran at start only, so one session that switched through fifty sources
     kept fifty folders until the next start. One folder holds at most
     1,310,720,000 bytes (1.22 GiB, D-LOGO-12), and a folder grows only
-    while its source is active, which ends in a switch. So at every moment
-    of a session, not only after a restart, the install holds the active
-    source's folder and those of sources whose last fetch started or ended
-    within the past day: **1.22 GiB x (1 + the sources given logos in the
-    day before the last start or switch)**. `MAX_SOURCES` x 1.22 GiB,
-    65.5 GB, is reachable only by switching through all fifty with logos
-    on inside one day and filling each to its ceiling. UNVERIFIED at size;
-    arithmetic over the code; the switch prune is pinned through
-    `tests/service-harness.js`, which runs the directory's change handler
-    from its own text. The removal takes the folder's flock, non-blocking,
+    while its source is active, which ends in a switch. **The count cap
+    (D-LOGO-17's remainder, the lead's ruling of 2026-10-24, K = 2):**
+    `cache prune` keeps the day rule for the `LOGO_KEPT_FOLDERS` (2) kept,
+    non-active sources whose folder was most recently marked by a fetch
+    run -- ranked by that mark, the clock `age_logo_folder` reads, equal
+    marks by name -- and removes every other kept, non-active folder at
+    once, whatever its age (`age_logo_folder` with `LOGO_AGE_ANY`, so the
+    flock and the `busy` answer hold as they do under the day rule; a held
+    folder in a kept slot occupies it, a held one in the surplus is left
+    for the next prune). So at every moment of a session, not only after
+    a restart, the install holds at most three folders: **1.22 GiB x
+    (1 + 2) = 3.66 GiB**. The figure this replaces was 1.22 GiB x (1 + the
+    sources given logos in the day before the last start or switch), and
+    `MAX_SOURCES` x 1.22 GiB, 65.5 GB, was reachable by switching through
+    all fifty with logos on inside one day; the third-most-recent folder
+    now goes at the switch that makes it third. The cost, by the ruling: a
+    user rotating through four or more sources with logos on re-fetches a
+    source's logos at each switch that cycles back to it, which contacts
+    that source's logo hosts again (the disclosure R5 bounds), where the
+    day rule alone re-fetched only after a day away. What the prune does
+    NOT age, the rule-15 sibling by shape (a per-source cap times
+    `MAX_SOURCES`): a kept source's `channels.json`, at most
+    `MAX_SOURCE_BYTES` (64 MiB) each, 50 x 64 MiB = 3.2 GB across the
+    history by arithmetic; deliberate, because a kept source switches back
+    without a fetch and only `cache remove` takes its list. UNVERIFIED at
+    size; arithmetic over the code; the count cap is pinned by
+    `tests/test_logo_run.py` (`LogoFolderAgeTest`, two cases red on
+    a9d20f9) and the switch prune through `tests/service-harness.js`,
+    which runs the directory's change handler from its own text. The removal takes the folder's flock, non-blocking,
     on a descriptor opened `O_NOFOLLOW` and held across it (D-LOGO-21,
     R32f): a folder a running fetch holds -- a `logos --fetch` from a
     terminal on a non-active source, which the shell never starts -- is
     skipped, named in `busyLogos`, said once on stderr for however many,
     and aged by the next prune; before, such a run could lose its folder
     mid-run and `write_logo` then recreated an unlocked, uncounted one.
-    What stays as it was, stated (D-LOGO-22): a logo URL that failed --
-    timeout, refusal, 404 -- is tried once per run (the run's `seen` set
-    remembers every URL it looked at, pinned) and again at the next run;
-    nothing records a failure on disk, and `LOGO_RUN_DEADLINE` bounds what
-    a dead host costs a run. The cost, by the ruling: switching back to a
-    source whose folder was aged fetches its logos again, which contacts
-    those hosts again.
+    **The failure memo (D-LOGO-22, the lead's ruling of 2026-10-24).** A
+    logo URL that failed -- timeout, a refusal at the gate, an HTTP or
+    network error -- used to be tried once per run (the run's `seen` set)
+    and again at every next run, and the row's unnamed half was worse than
+    a retry: after `LOGO_RUN_DEADLINE` every later URL is `postponed`, and
+    the next run walked `channels` from the top with a fresh `seen`, so a
+    head of dead addresses (each up to min(`LOGO_DEADLINE`, what was left))
+    ate the same hour every run and the live logos behind it were never
+    reached; "the next run starts where this one stopped" was true of files
+    that landed and of nothing else. Now `fetch_logo_run` keeps
+    `logo-failed.json` beside the folder, in the source's directory (never
+    inside `logos/`, whose census counts entries; in `CACHE_FILES`, so
+    `cache remove` and the prune of an unkept key take it along): a map of
+    logo file name (the URL's fnv1a32, the name the folder already uses)
+    to `{at, reason}`, the reason one of the helper's own codes, never a
+    URL (rule 5), 0600, written atomically. One TTL, `LOGO_FAILED_TTL` =
+    `DEFAULT_EPG_MAX_AGE` (a day), so a host that was down is tried again
+    tomorrow; at most `LOGO_FAILED_MAX` (5,000, `MAX_LOGO_FILES`' figure)
+    entries, a full memo recording nothing new until one expires. It is
+    consulted after the on-disk check (a file on disk is announced
+    whatever the memo says) and before the ceiling and the deadline, and
+    a memoised address counts in the summary's `skippedFailed` and nowhere
+    else. It is written when the run's deadline is first seen past, not
+    only at the run's end, because a run the shell SIGTERMs (a switch, the
+    setting off) reaches no `finally`; `cache logos-clear` removes it with
+    the folder, so the user's reset is a reset. Pinned by
+    `tests/test_logo_run.py` `LogoFailureMemoTest` and the re-pinned
+    `seen` case (eight cases red on a9d20f9, the starvation case among
+    them: with the run's deadline lowered to one failed fetch's worth, two
+    dead addresses ahead of a live one left it postponed on every run) and
+    `tests/test_cache.py` (a removed source takes its memo along). The cost
+    of the day rule, by the ruling: switching back to a source whose folder
+    was aged fetches its logos again, which contacts those hosts again.
 
     **Leftovers of a killed write (D-SRC-60).** The atomic writers remove
     their temporary on every exit Python sees, and a SIGTERM is not one: the
