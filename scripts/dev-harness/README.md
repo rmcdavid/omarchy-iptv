@@ -338,7 +338,8 @@ $H ipc pip toggle         # M2-05: the service's own verb (on | off | toggle)
 $H ipc pipKey             # M2-05: the guide's p key, through the same entry point
 $H ipc pipState           # M2-05: { available, on, applying, reason, provider, playerPid }
 $H ipc focusState         # F-M3-1: where the keyboard is -- { ok, open, keyboard, role, item,
-                          #   blocked, window, scanned, exhausted }. What `key` and `type` ask.
+                          #   blocked, window, scanned, exhausted, windowActive, windowVisible }.
+                          #   What `key`, `type` and `shot` ask (windowActive: F-M3-24).
 $H key -k Tab             # real key events via wtype -- REFUSES unless the guide has the keyboard
 $H key j j f              # e.g. list mode: down, down, favorite
 $H key --to-compositor -k F13   # a chord for the COMPOSITOR: skips the focus check (not the lock one)
@@ -368,6 +369,14 @@ found, rather than typing into an unknown surface. Two refusals:
   keys go elsewhere. The reply distinguishes "the guide is CLOSED", "another
   surface holds the keyboard" and "the walk gave up, so I cannot tell"
   (`exhausted`), and it fails **closed**: anything unreadable refuses.
+  Since F-M3-24 it also asks whether the guide's WINDOW holds the
+  compositor's keyboard (`windowActive`, Qt's `Window.active`), because an
+  item keeps `activeFocus` in a window that was never activated: under a
+  headless cage the production guide window never maps and its catcher still
+  read `activeFocus` true. A false `windowActive` refuses with the tag
+  `(window-inactive)` (`QA_KEY_WINDOW_INACTIVE` in `scripts/qa-lib.sh`); a
+  missing or null one refuses as "cannot tell", untagged. See "Keys under a
+  nested cage" below.
   Escapable with `--to-compositor`, which **must come first** -- everything
   after it belongs to `wtype`, whose own `--` means "the rest is text" -- and
   which exists for a chord aimed at the compositor, not for making a failing
@@ -415,6 +424,69 @@ or every key refuses; and `--instance` does **not** reach `key` or `type` --
 route a second instance with `OMARCHY_IPTV_HARNESS_INSTANCE=2`, because a flag
 after `key` is argv for `wtype` to type. The decision table is driven in
 `scripts/qa-lib-test.sh` against a stubbed transport.
+
+### Keys under a nested cage (F-M3-24)
+
+A real key reaches the guide only when the compositor gives the guide's
+window the keyboard, and under a headless `cage` the production guide window
+cannot map at all: it is a layer surface and cage has no layer-shell. That,
+not where the scenario runs, is why m3's H6a read red on every cage run.
+Measured 2026-10-26 under a `WLR_BACKENDS=headless WLR_RENDERER=pixman` cage
+on `private-bus.sh`, in both shapes the cage has been used in -- the scenario
+INSIDE the cage's child (the liveproofs rig, `env -u
+HYPRLAND_INSTANCE_SIGNATURE` in its child) and OUTSIDE it with
+`WAYLAND_DISPLAY=<nested>` (key-scenario's `h()`) -- with identical results:
+`focusState` answered `keyboard true, windowActive false, windowVisible
+true`; a real `x` passed the old guard and hid nothing; with the player up,
+cage had focused the player's window (mpv `focused` true) and the same `x`
+moved mpv's `sub-delay` 0.0 -> 0.1, which is mpv's own binding for `x`. With
+`--window floating` the guide's window read `windowActive true` and the `x`
+hid the group, until the player's window mapped and cage moved the keyboard
+to it. (key-scenario.sh sends no keystroke at all; its "key" is the D-SINK-19
+source key, so its live arm passing was never evidence that keys work there.)
+
+So under a cage:
+
+* **The guard refuses** every key, type and shot with the window-inactive
+  reason (exit 3), instead of typing into whatever cage focused.
+* **m3-scenario.sh reports its keyed checks as SKIP** -- H6a/H6b, T5a-T5d,
+  P1a-P1c and the refusal count -- each with the guard's reason, counted
+  apart from PASS and FAIL, and exits **77** when anything was skipped. It
+  opts in with `QA_KEY_SKIP_INACTIVE=1`; every other scenario still FAILs on
+  that refusal, and every other refusal is a FAIL everywhere. A SKIP is only
+  reachable through a refusal Qt's own `Window.active` caused, so a run in
+  which the guide holds the keyboard has none. H6b, T5a, T5b, T5d and P1c,
+  which assert a state a missing key would also leave, now require the state
+  the key before them made, so they FAIL rather than pass when a key arrives
+  and does nothing.
+* **To grade keys under a cage, use `--window floating`** (an xdg toplevel
+  cage maps and focuses). The keys then reach the guide until a player's
+  window maps, which cage focuses instead; a floating copy of m3 read H6
+  and P1 PASS and T5 SKIP that way. m3 itself starts the production window,
+  because focus semantics are part of what it grades on the desk.
+
+The shape for any rig: run.sh OUTSIDE the cage with `env -u
+HYPRLAND_INSTANCE_SIGNATURE -u DISPLAY WAYLAND_DISPLAY=<nested>`, the cage
+under `private-bus.sh`, and, when a player can start, the scenario under a
+private bus of its own too. Drop `DISPLAY`: the caller's is the owner's
+Xwayland, and mpv's VO probe tries `x11vk` before the Wayland EGL context
+(QA-RESULTS "F-HARNESS-45"), so an inherited `:0` could put the player's
+window on the owner's desktop. That was not run to find out. Inside the cage's
+child the cage's own `DISPLAY` is set, which is harmless.
+
+`hyprctl` containment, measured read-only (`hyprctl version`) from the
+harness shell's own environment in both shapes: the stub on `$SCRATCH/bin`
+answers `Invalid command`; the real binary answers `HYPRLAND_INSTANCE_SIGNATURE
+not set!` (exit 1), because every rig and `h()` unsets it; and even with the
+owner's signature put back, it could not connect (exit 4) -- not because the
+scratch `XDG_RUNTIME_DIR` contains it (run.sh symlinks `runtime/hypr` to the
+real directory) but because the socket path through that symlink is 123 to
+136 bytes, past `sun_path`'s 108 (the default harness directory's is 123).
+That is an accident, not a wall: through a 106-byte path (a harness directory
+of `$XDG_RUNTIME_DIR/hfm`, made for the read and removed) the same `version`
+answered the owner's Hyprland 0.56.2. The unset signature is the containment,
+with the service's own gate behind it (PiP is offered only with a signature,
+G-8); keep `env -u HYPRLAND_INSTANCE_SIGNATURE` on every rig.
 
 ### Sources (M2-01)
 
