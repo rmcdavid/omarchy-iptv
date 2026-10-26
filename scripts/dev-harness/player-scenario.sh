@@ -7,7 +7,9 @@
 # Scenarios (docs/ARCHITECTURE-PLAYER.md section 10, harness half):
 #   P1  cold start        one player, one window, class omarchy-iptv, title = channel
 #   P2  S-03 argv         no URL, no credential, no token, no header value and no
-#                         channel name on mpv's command line -- TC-PLAY-08 inverted
+#                         channel name on mpv's command line -- TC-PLAY-08 inverted;
+#                         and D-PLY-27's `--gpu-sw=yes` in the BASE section, once
+#                         (F-HARNESS-46)
 #   P3  detachment        the player is NOT a child of the shell
 #   P4  restart-shell     the shell dies and returns: same player pid, now-playing and
 #                         the zap ring recovered from the player's own stash
@@ -38,6 +40,12 @@
 # P13 and P14 MUST fail against 396a69a, the tree the M2-02 QA pass filed
 # D-PLY-1, D-PLY-3 and D-PLY-4 against. The rest are regression guards that
 # must pass on both.
+#
+# One check SKIPs on a baseline, and only there: P2's `--gpu-sw=yes` check
+# (F-HARNESS-46) against a ref that predates D-PLY-27, which no tree through
+# 0.15.0 carries. It prints `SKIP <label>: <reason>` and is counted in the
+# summary; see gpu_sw_skip_reason for the one condition. Without --baseline it
+# always asserts.
 #
 #   ./scripts/dev-harness/player-scenario.sh
 #   ./scripts/dev-harness/player-scenario.sh --baseline <pre-M2-02 ref>
@@ -76,6 +84,10 @@ fail=0
 # between a green run and a red one - which is what the floor at the end
 # needs. See EXPECTED_CHECKS below.
 checks=0
+# Checks this run decided NOT to assert (`skp`, F-HARNESS-46). Neither an
+# outcome nor an assertion: the floor counts them beside `checks`, so a run
+# that skips is held to the same number as one that asserts.
+skipped=0
 
 # The predicates this file asserts on, so that they can be tested without a
 # display: scripts/qa-lib-test.sh drives every one of them both ways.
@@ -107,6 +119,10 @@ is()  { checks=$((checks + 1)); if [[ "$2" == "$3" ]]; then ok "$1"; else bad "$
 # ck <label> '<bash test>': `[[ ]]` is a keyword, so the test is evaluated,
 # not executed. Single-quote the expression and let it read the variables.
 ck()  { checks=$((checks + 1)); if eval "$2"; then ok "$1"; else bad "$1"; fi; }
+# skp <label> <reason>: printed in the shape every other SKIP here takes
+# (`SKIP <what>: <why>`), so a reader of the transcript sees the reason on the
+# line, and counted, so the summary says how many checks were not asserted.
+skp() { printf 'SKIP %s: %s\n' "$1" "$2"; skipped=$((skipped + 1)); }
 
 ipc()  { "$RUN" ipc "$@" 2>/dev/null; }
 ipc2() { OMARCHY_IPTV_HARNESS_INSTANCE=2 "$RUN" ipc "$@" 2>/dev/null; }
@@ -130,6 +146,90 @@ player_pid()   { player_pids | head -1; }
 # the six S-03 "no secret on mpv's argv" sweeps then compared the secrets
 # against the KERNEL command line and passed.
 cmdline_of()   { qa_cmdline "$1"; }
+# F-HARNESS-46. D-PLY-27 put `--gpu-sw=yes` in the BASE section of the launch
+# argv in both mirrors (MPV_GPU_SW: after the two cache directories, before
+# D-SINK-13's layer 1 `--tls-verify=yes`), once, never re-asserted, never
+# reserved. Where it sits IS the property: run.sh's harness_env appends a
+# second `--gpu-sw=yes` to the USER's mpvArgs under a pixman cage
+# (F-HARNESS-45), and the user's section comes after layer 1, so a check that
+# counted the token anywhere would pass on a tree that lost the base one.
+#
+# So the argv is read as ITEMS. cmdline_of joins /proc/<pid>/cmdline with
+# spaces, and a joined string cannot tell an item from a piece of one; this
+# splits it on the NULs the kernel wrote (`mapfile -d ''`), with qa_cmdline's
+# refusals: a pid that is not a number never reads /proc//cmdline, which the
+# kernel resolves to /proc/cmdline, the KERNEL's command line.
+#
+# gpu_sw_base <pid> -> "layer1:<yes|no> base:<n>" where base counts the items
+# that are exactly `--gpu-sw=yes` before the FIRST `--tls-verify=yes`, or
+# NOARGV when the command line cannot be read. `layer1:yes` is the check's own
+# positive control: without layer 1 there is no "before" to be in, and every
+# copy, the lever's included, would count as base.
+# gpu_sw_items <pid> -> the items that decide it, with their argv indexes, for
+# the transcript: every `--gpu-sw*` / `--no-gpu-sw` spelling and every
+# `--tls-verify*`, plus the user's `--ao=` the lever adds beside its copy.
+argv_items() {
+  local pid=${1-}
+  ARGV=()
+  [[ $pid =~ ^[0-9]+$ && -r /proc/$pid/cmdline ]] || return 1
+  mapfile -d '' -t ARGV <"/proc/$pid/cmdline" 2>/dev/null || return 1
+  (( ${#ARGV[@]} > 0 ))
+}
+gpu_sw_base() {
+  local item layer1=no base=0
+  argv_items "${1-}" || { echo NOARGV; return 0; }
+  for item in "${ARGV[@]}"; do
+    if [[ $item == --tls-verify=yes ]]; then layer1=yes; break; fi
+    [[ $item == --gpu-sw=yes ]] && base=$((base + 1))
+  done
+  printf 'layer1:%s base:%d\n' "$layer1" "$base"
+}
+gpu_sw_items() {
+  local i out=""
+  argv_items "${1-}" || { echo NOARGV; return 0; }
+  for ((i = 0; i < ${#ARGV[@]}; i++)); do
+    case ${ARGV[i]} in
+      --gpu-sw|--gpu-sw=*|--no-gpu-sw|--tls-verify|--tls-verify=*|--no-tls-verify|--ao=*) out="$out #$i ${ARGV[i]}" ;;
+    esac
+  done
+  printf '%s of %d items\n' "${out# }" "${#ARGV[@]}"
+}
+# gpu_sw_skip_reason <baseline ref>: answers 0 and prints why when the check
+# must SKIP, answers 1 and prints nothing when it must ASSERT. The only SKIP:
+# --baseline names a ref that does NOT contain D-PLY-27's code commit AND whose
+# manifest declares 0.15.0 or older. Never keyed on whether the tree under
+# test defines MPV_GPU_SW -- a tree that LOST the constant would then skip
+# instead of going red (rule 14) -- and never without --baseline.
+# Why the version as well as the ancestry: `main` holds only release.py's
+# export, each release commit's parent the previous release, so NO release
+# tag contains any dev commit (measured: `merge-base --is-ancestor cc35557
+# v0.15.0` is false, cc35557 being the dev commit 0.15.0 was exported from).
+# On ancestry alone `--baseline v0.16.0`, which will carry the token, would
+# skip. The version alone would not do either: dev keeps the last release's
+# number until the cut, so a dev ref before D-PLY-27 and one after it both say
+# 0.15.0, and only the ancestry tells them apart. Anything git or the manifest
+# cannot answer (an unknown ref, a clone without 1044f7b, an unreadable
+# version) ASSERTS.
+DPLY27_CODE=1044f7b
+gpu_sw_skip_reason() {
+  local ref=${1-} anc ver
+  [[ -n $ref ]] || return 1
+  git -C "$ROOT" merge-base --is-ancestor "$DPLY27_CODE" "$ref" >/dev/null 2>&1
+  anc=$?
+  (( anc == 1 )) || return 1
+  ver=$(git -C "$ROOT" show "$ref:manifest.json" 2>/dev/null | python3 -I -c '
+import json, sys
+try:
+    v = json.load(sys.stdin)["version"]
+    t = tuple(int(x) for x in v.split("."))
+except Exception:
+    raise SystemExit(1)
+if len(t) != 3 or t > (0, 15, 0):
+    raise SystemExit(1)
+print(v)') || return 1
+  printf '%s (manifest %s) does not contain D-PLY-27 (%s): no tree through 0.15.0 launches mpv with --gpu-sw=yes\n' \
+    "$ref" "$ver" "$DPLY27_CODE"
+}
 ppid_of()      { ps -o ppid= -p "$1" 2>/dev/null | tr -d ' '; }
 window_of() {
   hyprctl clients -j 2>/dev/null | python3 -c '
@@ -334,6 +434,18 @@ ck "P2 no token on the command line"         '[[ "$cmd" != *"$SECRET_TOKEN"* ]]'
 ck "P2 no header value on the command line"  '[[ "$cmd" != *"$SECRET_UA"* && "$cmd" != *"--user-agent="* && "$cmd" != *"--referrer="* && "$cmd" != *"--http-header-fields"* ]]'
 ck "P2 no channel name on the command line"  '[[ "$cmd" != *"Harness Live One"* ]]'
 ck "P2 the neutral launch options are there" '[[ "$cmd" == *"--idle=once"* && "$cmd" == *"--wayland-app-id=omarchy-iptv"* && "$cmd" == *"--ytdl=no"* ]]'
+# F-HARNESS-46: D-PLY-27's token in the base section, once, read off the live
+# player's argv items (gpu_sw_base has why the position is the property). The
+# items are printed first, unasserted, so a FAIL shows where the copies were.
+printf '   P2 argv items read: %s\n' "$(gpu_sw_items "$PID1")"
+if GPU_SW_WHY=$(gpu_sw_skip_reason "$BASELINE"); then
+  skp "P2 the base section carries --gpu-sw=yes exactly once, before layer 1's --tls-verify=yes (D-PLY-27)" "$GPU_SW_WHY"
+else
+# Column 0 is load-bearing: scripts/qa-lib-test.sh recounts EXPECTED_CHECKS
+# from the assertions that START a line, and reads an indented one as P14's
+# loop body, which runs twice.
+is "P2 the base section carries --gpu-sw=yes exactly once, before layer 1's --tls-verify=yes (D-PLY-27)" "$(gpu_sw_base "$PID1")" "layer1:yes base:1"
+fi
 # F2: a bare negated pgrep cannot tell "nothing is running" from "pgrep is not
 # installed" or "the pattern stopped matching". Establish that pgrep answers.
 ck "P2 pgrep answers on this box (positive control)" 'pgrep -f "input-ipc-server=$SOCK" >/dev/null 2>&1'
@@ -607,9 +719,14 @@ ck "P9 reap stopped the shell" '! pgrep -f "quickshell -p $SCRATCH/root" >/dev/n
 #   grep -c '^\(is\|ck\) ' scripts/dev-harness/player-scenario.sh   -> top level
 #   plus the three inside P14's `for again in 1 2` loop, twice.
 # Never lower it to make a run green.
-EXPECTED_CHECKS=84
-ran=$checks
+#
+# A SKIPPED check counts toward it (F-HARNESS-46): P2's `--gpu-sw=yes` check
+# skips on a baseline that predates D-PLY-27, and that run has still reached
+# every check site. A skip only ever comes from `skp`, which prints its line
+# and moves `skipped`, so the floor cannot be met by a check that vanished.
+EXPECTED_CHECKS=85
+ran=$((checks + skipped))
 is "the harness ran every check it has" "$ran" "$EXPECTED_CHECKS"
 
-printf '\n== summary: %d passed, %d failed, %d assertions executed\n' "$pass" "$fail" "$checks"
+printf '\n== summary: %d passed, %d failed, %d skipped, %d assertions executed\n' "$pass" "$fail" "$skipped" "$checks"
 (( fail == 0 )) || exit 1
