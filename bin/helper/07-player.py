@@ -122,8 +122,10 @@ MPV_TLS_VERIFY = "--tls-verify=yes"
 # the llvmpipe EGL context as a software renderer, and then trips its own
 # assertion at x11egl, `vo_x11_init: Assertion '!vo->x11' failed`
 # (video/out/x11_common.c:679): SIGABRT about 5 s after every launch, a
-# crash card and a core per zap, relaunched by the service every ~5.5 s for
-# as long as the play intent stands. `--gpu-sw=yes` makes the probe ACCEPT
+# crash card and a coredump journal entry per zap (no core file: D-SINK-39
+# holds the player's core limit at 0), relaunched by the service every
+# ~5.5 s for as long as the play intent stands. `--gpu-sw=yes` makes the
+# probe ACCEPT
 # the software context (current-vo gpu-next, vo-configured true, exit 0);
 # DISPLAY is not the lever and `--vo=wlshm` is not an alternative. Measured
 # 2026-10-25 in a pixman cage with this argv shape (QA-RESULTS

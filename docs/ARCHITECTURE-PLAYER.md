@@ -912,8 +912,10 @@ by the same PO-5 shape as `--ytdl`: it is the documented escape, and
 `--screenshot-dir` is the precedent for an option this list deliberately leaves
 alone.
 
-`--gpu-sw` is left alone too, and it is the one base token whose shape is the
-OPPOSITE of 4.15's (D-PLY-27, the owner's decision of 2026-10-26). mpv
+`--gpu-sw` is left alone too, and its shape is the OPPOSITE of 4.15's -- the
+shape `--ytdl=no`, `--screenshot-dir` and the two cache directories already
+have, a base token a user's later one may beat (D-PLY-27, the owner's
+decision of 2026-10-26). mpv
 0.41.0's automatic VO probe aborts on any compositor that can serve no
 hardware GL or Vulkan context -- a VM on llvmpipe, a pixman compositor: it
 loses the `waylandvk` surface, fails `x11vk` through a lazy Xwayland or with
@@ -921,7 +923,8 @@ no DISPLAY at all and leaves `vo->x11` set, refuses the llvmpipe EGL context
 as a software renderer, and trips its own assertion at `x11egl`,
 `vo_x11_init: Assertion '!vo->x11' failed` (video/out/x11_common.c:679),
 about 5 s after every launch; the service relaunches it every ~5.5 s for as
-long as the play intent stands, a crash card and a core per zap. Measured on
+long as the play intent stands, a crash card and a coredump journal entry per
+zap (no core file: D-SINK-39 holds the player's core limit at 0). Measured on
 2026-10-25 in the harness's pixman cage with this argv shape (QA-RESULTS
 "F-HARNESS-45"): `--gpu-sw=yes` makes the probe accept the software context
 (`current-vo gpu-next`, `vo-configured true`); DISPLAY is not the lever and
