@@ -876,6 +876,18 @@ This project is built by role lanes running in separate git worktrees.
    the rig started and stayed failed (F-M3-21). A rig a lane writes for itself
    is held to this rule as much as the harness is; the harness's own scripts
    already never use `dbus-run-session`.
+   A nested cage that will host the PLAYER runs it through run.sh's
+   software-GPU lever -- `OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1` beside
+   `WAYLAND_DISPLAY=$NESTED`, or a scenario run inside the cage's child,
+   where `WLR_RENDERER=pixman` is inherited and run.sh reads it -- because
+   mpv 0.41.0's VO probe aborts on a pixman compositor (its own
+   `vo_x11_init` assertion, about 5 s after launch, relaunched by the
+   service every ~5.5 s) and every abort is a crash card on the user's
+   desktop and a 6 MB core (F-HARNESS-45, 30 dumps and 7 cards on
+   2026-10-25). `private-bus.sh`'s soft core limit of 0 is the second
+   layer, not the fix: the card is drawn from the JOURNAL entry, which
+   systemd-coredump writes whatever the limit says (measured), so a rig
+   that crashes a player posts a card whatever its limits are.
 7. A scenario's output is its evidence, and evidence is never summarised from
    a tail. Every scenario opens a transcript through `qa_transcript_start`
    (`scripts/qa-lib.sh`) and prints the path as its own first line; report
