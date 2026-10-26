@@ -72,7 +72,10 @@ chmod 0700 "$WORK"
 PIDS="$WORK/pids"; : >"$PIDS"
 CAGE_PID=""; CAGE_CHILD=""; NESTED=""; PROBE_PID=""; SHELL_PID=""; SHELL_STARTED=0
 record_pid() { echo "$1 $2" >>"$PIDS"; echo "== pid $1 $2"; }
-h() { env -u HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY="$NESTED" "$RUN" "$@"; }
+# F-HARNESS-45: the nested cage renders with pixman, so a player started toward
+# it needs run.sh's software-GPU lever (harness_env appends --gpu-sw=yes and
+# --ao=null to the mpvArgs); without it mpv 0.41.0 aborts in its VO probe.
+h() { env -u HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY="$NESTED" OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1 "$RUN" "$@"; }
 cleanup() {
   [[ -n $PROBE_PID ]] && qa_stop_pid "$PROBE_PID" 3 "probe quickshell" 2>/dev/null
   (( SHELL_STARTED )) && h reap >/dev/null 2>&1

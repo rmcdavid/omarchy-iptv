@@ -462,6 +462,49 @@ harness_env() {
   [[ $wl == /* ]] || wl="$REAL_RUNTIME/$wl"
   export WAYLAND_DISPLAY="$wl"
   export XDG_RUNTIME_DIR="$SCRATCH/runtime"
+  # F-HARNESS-45 (2026-10-25): a player under a nested headless cage. mpv
+  # 0.41.0's automatic VO probe ABORTS on a compositor that can serve no
+  # hardware GL or Vulkan context: `waylandvk` loses its surface, `x11vk`
+  # fails -- with the cage's lazy Xwayland (no DRI3) or with no DISPLAY at
+  # all -- and leaves `vo->x11` set, the wayland EGL context comes up on
+  # llvmpipe and is refused as a software renderer, and the next context,
+  # `x11egl`, trips `vo_x11_init: Assertion '!vo->x11' failed`
+  # (video/out/x11_common.c:679): SIGABRT in the `vo` thread about 5 s after
+  # the launch, a 6 MB core, a "Process crashed: mpv" card on the user's
+  # REAL desktop, and the service relaunches it, so again every ~5.5 s for
+  # as long as a play intent stands (30 dumps and 7 cards on 2026-10-25,
+  # from the liveproofs rig running m3 and pip inside a cage). Measured on a
+  # WLR_RENDERER=pixman cage with the plugin's own argv shape, both with the
+  # cage's DISPLAY and without one (QA-RESULTS "F-HARNESS-45"). Unsetting
+  # DISPLAY does not change it. `--gpu-sw=yes` does: the probe then ACCEPTS
+  # the llvmpipe context and the player comes up (gpu-next, vo-configured,
+  # idle, answering IPC). `--vo=wlshm` is NOT an alternative: forced
+  # windowed and idle it sends wl_viewport.set_destination with a zero size
+  # and the compositor disconnects it (exit 0, no window). `--ao=null`
+  # keeps the cage's player off the user's sound server: the same argv run
+  # under the user's runtime directory resolved `current-ao` to
+  # `pipewire-0`, the user's own, with the tone audible.
+  # The lever is the user's own, mpvArgs through OMARCHY_IPTV_MPV_ARGS, and
+  # the two tokens go BEHIND whatever the caller set -- never when the
+  # caller already named `--gpu-sw` or `--ao`, whose word wins as a user's
+  # would. When: the caller says so (OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1,
+  # which every scenario's `h()` sets beside WAYLAND_DISPLAY=$NESTED), or
+  # the environment says the compositor renders with pixman
+  # (WLR_RENDERER=pixman: a cage's child inherits it from the cage's own
+  # environment and no live session carries it -- the shape in which the
+  # rig ran a whole scenario INSIDE the cage's child). A caller that sets
+  # the variable to anything but 1 has said no. A live session's player
+  # gets nothing from here. tests/test_harness_cage_player.py drives this
+  # function and the shipped helper's filter over the result.
+  if [[ -z ${OMARCHY_IPTV_HARNESS_SOFTWARE_GPU+x} && ${WLR_RENDERER:-} == pixman ]]; then
+    export OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1
+  fi
+  if [[ ${OMARCHY_IPTV_HARNESS_SOFTWARE_GPU:-0} == 1 ]]; then
+    local args=${OMARCHY_IPTV_MPV_ARGS:-}
+    if [[ " $args " != *" --gpu-sw"* && " $args " != *" --no-gpu-sw "* ]]; then args="${args:+$args }--gpu-sw=yes"; fi
+    if [[ " $args " != *" --ao="* ]]; then args="${args:+$args }--ao=null"; fi
+    export OMARCHY_IPTV_MPV_ARGS="$args"
+  fi
   # F-HARNESS-20, and this one is a SAFETY isolation, not a convenience. The
   # D-SINK-18 comment that stood here said exporting XDG_CONFIG_HOME kept the
   # helper's chmod away from the developer's ~/.config/omarchy/shell.json.

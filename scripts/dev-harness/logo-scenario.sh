@@ -522,7 +522,10 @@ ck "K2 $SINK_BOMB at the sink" "$k2" "withheld-and-gone"
 # cage_stop / start_shell / stop_shell shapes, trimmed to what one switch
 # needs. Every value asserted is read off the running shell (`ipc state`:
 # the guide's `logoCount`, `logoHaveDir`, `logoDir`), never off a file.
-h()    { env -u HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY="$NESTED" "$RUN" "$@"; }
+# F-HARNESS-45: the nested cage renders with pixman, so a player started toward
+# it needs run.sh's software-GPU lever (harness_env appends --gpu-sw=yes and
+# --ao=null to the mpvArgs); without it mpv 0.41.0 aborts in its VO probe.
+h()    { env -u HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY="$NESTED" OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1 "$RUN" "$@"; }
 ipc()  { h ipc "$@" 2>/dev/null; }
 svc()  { qa_field "d$1" "$(ipc state)"; }
 # One state read, three fields: "<logoDir>|<logoHaveDir>|<logoCount>", with
