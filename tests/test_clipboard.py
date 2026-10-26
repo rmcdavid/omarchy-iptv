@@ -20,6 +20,7 @@ Run: python3 -m unittest discover -s tests
 import json
 import os
 import pathlib
+import resource
 import subprocess
 import sys
 import tempfile
@@ -61,6 +62,10 @@ sys.stderr.write("STUB-STDERR-MUST-NOT-REACH-THE-SHELL\\n")
 sys.stderr.flush()
 path = os.environ.get("STUB_WL_PASTE_FILE", "")
 data = open(path, "rb").read() if path else b""
+if mode == "limits":
+    # D-SINK-39: the clipboard IS the kernel's view of this process's limits,
+    # so the verb's reply carries what will be enforced on the real wl-paste.
+    data = open("/proc/self/limits", "rb").read()
 out = sys.stdout.buffer
 try:
     if mode == "stream":
@@ -457,6 +462,29 @@ class ClipboardVerbTestCase(unittest.TestCase):
         completed = subprocess.run([sys.executable, str(HELPER), "--help"],
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
         self.assertIn(b"clipboard", completed.stdout)
+
+
+class CoreDumpLimitTest(ClipboardVerbTestCase):
+    """D-SINK-39, rule 15's sibling of the player: wl-paste is the helper's
+    only other child, and what it holds is the user's clipboard -- which the
+    form's paste path exists to carry a provider URL through. A crash of it
+    would hand that offer to systemd-coredump, durably and readable by every
+    process of this uid. So it runs under RLIMIT_CORE (0, 0) like the player.
+
+    The stub's `limits` mode makes the clipboard the child's own
+    /proc/self/limits, so the shipping verb's reply is the kernel's answer.
+    """
+
+    def test_wl_paste_runs_with_a_zero_core_limit_soft_and_hard(self):
+        if resource.getrlimit(resource.RLIMIT_CORE)[1] == 0:
+            self.skipTest("RLIMIT_CORE is already hard-zero in this process; the child cannot be told apart from it")
+        completed, _ = self.run_verb(mode="limits")
+        reply = self.reply(completed)
+        self.assertTrue(reply["ok"], reply)
+        rows = [line for line in reply["text"].splitlines() if line.startswith("Max core file size")]
+        self.assertEqual(len(rows), 1, reply["text"][:400])
+        self.assertEqual(rows[0].split()[4:6], ["0", "0"], rows[0])
+        self.assert_stub_gone()
 
 
 if __name__ == "__main__":

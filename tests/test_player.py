@@ -17,6 +17,7 @@ import json
 import os
 import pathlib
 import re
+import resource
 import shutil
 import signal
 import socket
@@ -890,6 +891,44 @@ class WorkingDirectoryTest(PlayerTestCase):
         self.assertEqual(len(payload["warnings"]), 1)
         self.assertIn("could not create", payload["warnings"][0])
         self.assertIn("screenshots", payload["warnings"][0])
+
+
+class CoreDumpLimitTest(PlayerTestCase):
+    """D-SINK-39: the player the helper spawns cannot leave a core dump.
+
+    mpv is the one child that holds the stream URL (credentials and all) and
+    the provider headers in its memory, and systemd-coredump keeps a crashed
+    user process's core under /var/lib/systemd/coredump readable by every
+    process of that uid, durably. The helper itself is non-dumpable (the
+    stub's shield), but the kernel resets that flag on exec, so the only
+    lever that reaches the player is RLIMIT_CORE, inherited across the exec:
+    with a soft limit of 0 systemd-coredump records the crash and stores
+    nothing (measured 2026-10-25). The HARD limit is 0 as well, so nothing in
+    the player's own address space can raise the soft one back.
+
+    Asks the kernel, not the code: the stub mpv is a real process, and
+    /proc/<pid>/limits is what will be enforced on it.
+    """
+
+    @staticmethod
+    def core_limit(pid):
+        for line in pathlib.Path("/proc/%d/limits" % pid).read_text(encoding="ascii").splitlines():
+            if line.startswith("Max core file size"):
+                fields = line.split()
+                return fields[4], fields[5]          # soft, hard
+        raise AssertionError("no 'Max core file size' row in /proc/%d/limits" % pid)
+
+    def test_the_spawned_player_has_a_zero_core_limit_soft_and_hard(self):
+        inherited = resource.getrlimit(resource.RLIMIT_CORE)
+        if inherited[1] == 0:
+            self.skipTest("RLIMIT_CORE is already hard-zero in this process; the spawn cannot be told apart from it")
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(payload["spawned"], payload)
+        self.assertEqual(self.core_limit(payload["pid"]), ("0", "0"))
+        # Set in the child between fork and exec, never on the helper: run()
+        # drives main() in THIS process, so its own limit must be as it was.
+        self.assertEqual(resource.getrlimit(resource.RLIMIT_CORE), inherited)
 
 
 class IdempotenceTest(PlayerTestCase):
