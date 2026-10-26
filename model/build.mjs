@@ -293,6 +293,27 @@ var MPV_RESERVED = {
 // each other by the shared player-argv.json vectors.
 var MPV_TLS_VERIFY = "--tls-verify=yes"
 
+// D-PLY-27 (the owner's decision, 2026-10-26): the launch argv ACCEPTS a
+// software renderer. mpv 0.41.0's automatic VO probe, on a compositor that
+// can serve no hardware GL or Vulkan context (a VM on llvmpipe, a pixman
+// compositor), loses the waylandvk surface, fails x11vk -- through a lazy
+// Xwayland or with no DISPLAY at all -- and leaves `vo->x11` set, refuses the
+// llvmpipe EGL context as a software renderer, and then trips its own
+// assertion at x11egl, `vo_x11_init: Assertion '!vo->x11' failed`
+// (video/out/x11_common.c:679): SIGABRT about 5 s after every launch, a
+// crash card and a core per zap, relaunched by the service every ~5.5 s for
+// as long as the play intent stands. `--gpu-sw=yes` makes the probe ACCEPT
+// the software context (current-vo gpu-next, vo-configured true, exit 0);
+// DISPLAY is not the lever and `--vo=wlshm` is not an alternative. Measured
+// 2026-10-25 in a pixman cage with this argv shape (QA-RESULTS
+// "F-HARNESS-45"). A rendering preference, not a security layer: it sits in
+// the BASE argv so a user's own `--gpu-sw=no` or `--no-gpu-sw` lands after it
+// and wins, it is NOT re-asserted at the tail the way MPV_TLS_VERIFY is, and
+// it is NOT reserved. The python mirror keeps its own literal (MPV_GPU_SW in
+// the helper) and the two are pinned to each other by the shared
+// player-argv.json vectors (`gpuSoftware`).
+var MPV_GPU_SW = "--gpu-sw=yes"
+
 // D-SINK-16. The same two knobs as D-SINK-13, named as mpv PROPERTIES rather
 // than as command-line options, because an ADOPTED player has no launch argv
 // left to change. All four of D-SINK-13's layers live on the argv, so a
@@ -344,6 +365,6 @@ export {
   GROUP_SCOPE_PREFIX, MAX_HIDDEN_GROUPS, ELLIPSIS, QUOTE_OPEN, QUOTE_CLOSE,
   SEP, GLYPHS, SETTING_RANGES, MAX_CHNO_MAJOR, MAX_CHNO_MINOR, MAX_CHNO_LABEL,
   CHNO_SEPARATORS, CHNO_ENTRY_SEP, CHANNEL_ORDERS, CHNO_FIELDS, MPV_RESERVED,
-  MPV_TLS_VERIFY, MPV_TLS_VERIFY_PROP, MPV_STREAM_OPTS_PROP, NOTIFY_IDS,
-  PLACE_TTL_SEC, ZAP_MAX_SKIP
+  MPV_TLS_VERIFY, MPV_GPU_SW, MPV_TLS_VERIFY_PROP, MPV_STREAM_OPTS_PROP,
+  NOTIFY_IDS, PLACE_TTL_SEC, ZAP_MAX_SKIP
 }

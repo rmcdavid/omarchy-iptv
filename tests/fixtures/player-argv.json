@@ -65,6 +65,15 @@
     "self-signed stream (exit 0); with it present the same command refused it",
     "(exit 2). mpv's own default is --tls-verify=no."
   ],
+  "gpuSoftware": "--gpu-sw=yes",
+  "_gpuSoftwareComment": [
+    "D-PLY-27. The token every composed argv carries EXACTLY ONCE, in the base",
+    "section before layer 1 of TLS and so before every user token: a rendering",
+    "preference the user may override, so unlike tlsTrailing it is never the",
+    "last element and never reserved. Both suites assert the count and the",
+    "position off this field over every mpvArgv case, and the D-PLY-27 case",
+    "below carries the user's `--gpu-sw=no` that makes the position observable."
+  ],
   "mpvArgv": [
     {
       "name": "cold launch carries no channel: no URL, no headers, no title, no trailing --",
@@ -87,6 +96,7 @@
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--gpu-shader-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--gpu-sw=yes",
         "--tls-verify=yes",
         "--tls-verify=yes"
       ]
@@ -117,6 +127,7 @@
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--gpu-shader-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--gpu-sw=yes",
         "--tls-verify=yes",
         "--profile=low-latency",
         "--ytdl=yes",
@@ -166,6 +177,7 @@
         "--watch-later-dir=/tmp/watch-later",
         "--gpu-shader-cache-dir=/tmp/shader-cache",
         "--icc-cache-dir=/tmp/shader-cache",
+        "--gpu-sw=yes",
         "--tls-verify=yes",
         "--hwdec=auto-safe",
         "--tls-verify=yes"
@@ -214,9 +226,57 @@
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--gpu-shader-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--gpu-sw=yes",
         "--tls-verify=yes",
         "--profile=evil",
         "--tls-ca-file=/etc/ssl/provider-ca.pem",
+        "--tls-verify=yes"
+      ]
+    },
+    {
+      "_comment": [
+        "D-PLY-27 (the owner's decision, 2026-10-26): the launch argv accepts a",
+        "SOFTWARE renderer. mpv 0.41.0's VO probe, on a compositor that serves no",
+        "hardware GL or Vulkan context (a VM on llvmpipe, a pixman compositor),",
+        "trips its own assertion `vo_x11_init: Assertion '!vo->x11' failed` at",
+        "x11egl about 5 s after every launch, and the service relaunches it every",
+        "~5.5 s; `--gpu-sw=yes` makes the probe accept the software context",
+        "(measured 2026-10-25, QA-RESULTS \"F-HARNESS-45\"). A rendering preference,",
+        "not a security layer, so its shape is the OPPOSITE of --tls-verify's: in",
+        "the base section ONCE, before the user's tokens, never re-asserted and",
+        "never reserved, so this case's `--gpu-sw=no` and `--no-gpu-sw` both pass",
+        "the filter (`rejected` is empty on purpose) and both land AFTER the base",
+        "token, where mpv's last-token rule makes them win. Both mirrors run it,",
+        "and both assert the position off the top-level `gpuSoftware` field."
+      ],
+      "name": "D-PLY-27: the software-renderer token is in the base argv once, and a user's --gpu-sw=no and --no-gpu-sw land after it and win",
+      "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
+      "stateDir": "/home/u/.local/state/omarchy-iptv",
+      "mpvArgs": [
+        "--gpu-sw=no",
+        "--no-gpu-sw"
+      ],
+      "rejected": [],
+      "argv": [
+        "mpv",
+        "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
+        "--wayland-app-id=omarchy-iptv",
+        "--force-window=immediate",
+        "--idle=once",
+        "--keep-open=no",
+        "--title=$>IPTV",
+        "--force-media-title=IPTV",
+        "--msg-level=all=error",
+        "--ytdl=no",
+        "--load-scripts=no",
+        "--screenshot-dir=/home/u/.local/state/omarchy-iptv/screenshots",
+        "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--gpu-shader-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--gpu-sw=yes",
+        "--tls-verify=yes",
+        "--gpu-sw=no",
+        "--no-gpu-sw",
         "--tls-verify=yes"
       ]
     }

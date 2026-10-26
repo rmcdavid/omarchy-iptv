@@ -4741,7 +4741,30 @@ check("buildMpvArgv user args come after every fixed option, and exactly one tok
   const lastFixed = argv.findIndex(t => t.indexOf("--icc-cache-dir=") === 0)
   return { found: user > 0, afterTheFixedOptions: user > lastFixed, tail: argv.slice(user + 1) }
 })(), { found: true, afterTheFixedOptions: true, tail: ["--tls-verify=yes"] })
-check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--tls-verify=yes", "--tls-verify=yes"])
+check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--gpu-sw=yes", "--tls-verify=yes", "--tls-verify=yes"])
+// D-PLY-27 (the owner's decision, 2026-10-26): the launch argv accepts a
+// software renderer, because mpv 0.41.0's VO probe aborts on any compositor
+// that serves no hardware GL or Vulkan context (measured 2026-10-25 in the
+// harness's pixman cage, QA-RESULTS "F-HARNESS-45"). The token's shape is the
+// OPPOSITE of --tls-verify's, and that is what these pin: it is a preference,
+// so it sits in the base argv ONCE, before every user token, is never
+// re-asserted at the tail and is never reserved -- a user's `--gpu-sw=no` or
+// `--no-gpu-sw` passes the filter, lands after it, and wins by mpv's
+// last-token rule. The fixture's own `gpuSoftware` field is the token, so the
+// python mirror asserts the same field; the shared-vector loop below runs the
+// fixture's D-PLY-27 case through buildMpvArgv as an exact array.
+checkCall("D-PLY-27: a user's --gpu-sw=no and --no-gpu-sw pass the filter, land after the base token and are not outvoted; the token is once, unreserved, and never last", () => {
+  const r = Model.splitMpvArgs("--gpu-sw=no --no-gpu-sw")
+  const a = Model.buildMpvArgv({ socketPath: "/s", stateDir: "/st", extraArgs: r.args })
+  const base = a.indexOf(playerFixture.gpuSoftware)
+  return {
+    token: playerFixture.gpuSoftware, kept: r.args, rejected: r.rejected, reserved: Model.MPV_RESERVED["--gpu-sw"],
+    count: a.filter(function (t) { return t === playerFixture.gpuSoftware }).length,
+    baseBeforeLayer1: base >= 0 && base < a.indexOf(Model.MPV_TLS_VERIFY),
+    userAfterBase: a.indexOf("--gpu-sw=no") > base && a.indexOf("--no-gpu-sw") > base,
+    last: a[a.length - 1]
+  }
+}, { token: "--gpu-sw=yes", kept: ["--gpu-sw=no", "--no-gpu-sw"], rejected: [], reserved: undefined, count: 1, baseBeforeLayer1: true, userAfterBase: true, last: "--tls-verify=yes" })
 
 // ---- PO-11 / D-PLY-7: the player writes where it is told, not where it ----
 // mpv's own keys are live on its window: `s` writes a screenshot and `Q` a
@@ -5781,6 +5804,22 @@ check("fixture mpvArgv: every composed argv ends with the fixture's own trailing
   { token: Model.MPV_TLS_VERIFY, offenders: [] })
 check("fixture mpvArgv: at least one vector passes user arguments, or the trailing token is invisible to the pinning",
   playerFixture.mpvArgv.filter(function (v) { return (v.mpvArgs || []).length > 0 && Model.splitMpvArgs(v.mpvArgs.join(" ")).args.length > 0 }).length > 0, true)
+// D-PLY-27. The exact-array checks above carry the software-renderer token by
+// transcription; this says, once, off the fixture's own `gpuSoftware`, what
+// its position means: exactly once, in the base section before layer 1 of
+// TLS, and so before every token the user contributed -- the python mirror
+// asserts the same field over the same vectors.
+check("fixture mpvArgv: the fixture's own software-renderer token is in every composed argv exactly once, before layer 1 of TLS and before every user token (D-PLY-27)",
+  { token: playerFixture.gpuSoftware, offenders: playerFixture.mpvArgv.filter(function (v) {
+    const user = Model.splitMpvArgs((v.mpvArgs || []).join(" ")).args
+    const a = Model.buildMpvArgv({ socketPath: v.socketPath, stateDir: v.stateDir, extraArgs: user })
+    const at = a.indexOf(playerFixture.gpuSoftware)
+    const once = a.filter(function (t) { return t === playerFixture.gpuSoftware }).length === 1
+    return !once || at > a.indexOf(playerFixture.tlsTrailing) || user.some(function (t) { return a.indexOf(t) < at })
+  }).map(function (v) { return v.name }) },
+  { token: "--gpu-sw=yes", offenders: [] })
+check("fixture mpvArgv: at least one vector carries a user --gpu-sw=no, or the base token's position is invisible to the pinning",
+  playerFixture.mpvArgv.some(function (v) { return (v.mpvArgs || []).indexOf("--gpu-sw=no") !== -1 }), true)
 for (const v of playerFixture.stopLadder) {
   check("fixture stopLadder: " + v.name, Model.stopEscalation(v.stage), { action: v.action, signal: v.signal, waitMs: v.waitMs })
 }

@@ -42,6 +42,7 @@
         "CHNO_FIELDS",
         "MPV_RESERVED",
         "MPV_TLS_VERIFY",
+        "MPV_GPU_SW",
         "MPV_TLS_VERIFY_PROP",
         "MPV_STREAM_OPTS_PROP",
         "NOTIFY_IDS",
