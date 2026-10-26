@@ -523,8 +523,11 @@ ck "K2 $SINK_BOMB at the sink" "$k2" "withheld-and-gone"
 # needs. Every value asserted is read off the running shell (`ipc state`:
 # the guide's `logoCount`, `logoHaveDir`, `logoDir`), never off a file.
 # F-HARNESS-45: the nested cage renders with pixman, so a player started toward
-# it needs run.sh's software-GPU lever (harness_env appends --gpu-sw=yes and
-# --ao=null to the mpvArgs); without it mpv 0.41.0 aborts in its VO probe.
+# it gets run.sh's software-GPU lever (harness_env appends --gpu-sw=yes and
+# --ao=null to the mpvArgs). Since D-PLY-27 the base argv carries --gpu-sw=yes
+# itself, so on this tree the lever's job is --ao=null (the cage's player stays
+# off the user's sound server); on an older tree, such as a --baseline ref
+# through 0.15.0, mpv 0.41.0 aborts in its VO probe without it.
 h()    { env -u HYPRLAND_INSTANCE_SIGNATURE WAYLAND_DISPLAY="$NESTED" OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1 "$RUN" "$@"; }
 ipc()  { h ipc "$@" 2>/dev/null; }
 svc()  { qa_field "d$1" "$(ipc state)"; }
