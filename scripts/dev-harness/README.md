@@ -2173,6 +2173,22 @@ child inherits all of it through `run.sh`; one that starts the shell
 outside the cage sets the variable beside `WAYLAND_DISPLAY`, as the
 scenarios do.
 
+Since D-PLY-27 (the owner's decision, 2026-10-26) the shipped BASE argv
+carries `--gpu-sw=yes` itself -- `mpv_launch_argv` and `Model.buildMpvArgv`,
+after the two cache directories and before the first `--tls-verify=yes`, as
+a rendering preference a user's own `--gpu-sw=no` lands after and beats
+(ARCHITECTURE-PLAYER 4.12). So on the current tree the lever's `--gpu-sw=yes`
+is a second copy of a base token, with the same value, and a cage's player
+comes up without it: lane-dply27 ran one m3 cell under the pixman cage on
+the private bus with that half of the lever withheld
+(`OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=0`, `--ao=null` passed as the caller's
+own token), and read `vo-configured true` over the player's socket with the
+coredump journal at +0. The lever stays for two reasons: `--baseline <ref>`
+runs a scenario against an older tree whose base argv lacks the token
+(every release through 0.15.0), and `--ao=null` is the lever's own job on
+every tree, because the base argv does not carry it -- a user's player must
+have sound.
+
 ## What the fixture contains
 
 `fixtures/harness.m3u.in` has 20 channels in 9 groups, 15 of them

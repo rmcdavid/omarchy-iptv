@@ -496,6 +496,21 @@ harness_env() {
   # the variable to anything but 1 has said no. A live session's player
   # gets nothing from here. tests/test_harness_cage_player.py drives this
   # function and the shipped helper's filter over the result.
+  # D-PLY-27 (the owner's decision, 2026-10-26): the shipped BASE argv now
+  # carries `--gpu-sw=yes` itself (`mpv_launch_argv` in bin/helper/07-player.py
+  # and Model.buildMpvArgv, after the two cache directories and before the
+  # first `--tls-verify=yes`), so on the current tree the lever's
+  # `--gpu-sw=yes` is a second copy of a base token, with the same value, in
+  # the user's section, and the cage's player comes up without it: observed
+  # by lane-dply27 the same day, one m3 cell under the pixman cage on the
+  # private bus with this half of the lever withheld
+  # (OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=0 and `--ao=null` as the caller's own
+  # token), vo-configured true over the player's socket and the coredump
+  # journal +0. The lever STAYS, for two reasons: `--baseline <ref>` runs a
+  # scenario against an OLDER tree whose base argv lacks the token (every
+  # release through 0.15.0), and `--ao=null` is the lever's own job on every
+  # tree -- the base argv does NOT carry it, because a user's player must
+  # have sound.
   if [[ -z ${OMARCHY_IPTV_HARNESS_SOFTWARE_GPU+x} && ${WLR_RENDERER:-} == pixman ]]; then
     export OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1
   fi

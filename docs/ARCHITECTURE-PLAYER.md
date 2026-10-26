@@ -912,6 +912,29 @@ by the same PO-5 shape as `--ytdl`: it is the documented escape, and
 `--screenshot-dir` is the precedent for an option this list deliberately leaves
 alone.
 
+`--gpu-sw` is left alone too, and it is the one base token whose shape is the
+OPPOSITE of 4.15's (D-PLY-27, the owner's decision of 2026-10-26). mpv
+0.41.0's automatic VO probe aborts on any compositor that can serve no
+hardware GL or Vulkan context -- a VM on llvmpipe, a pixman compositor: it
+loses the `waylandvk` surface, fails `x11vk` through a lazy Xwayland or with
+no DISPLAY at all and leaves `vo->x11` set, refuses the llvmpipe EGL context
+as a software renderer, and trips its own assertion at `x11egl`,
+`vo_x11_init: Assertion '!vo->x11' failed` (video/out/x11_common.c:679),
+about 5 s after every launch; the service relaunches it every ~5.5 s for as
+long as the play intent stands, a crash card and a core per zap. Measured on
+2026-10-25 in the harness's pixman cage with this argv shape (QA-RESULTS
+"F-HARNESS-45"): `--gpu-sw=yes` makes the probe accept the software context
+(`current-vo gpu-next`, `vo-configured true`); DISPLAY is not the lever and
+`--vo=wlshm` is not an alternative. So `--gpu-sw=yes` is in the base argv
+(`MPV_GPU_SW` in both mirrors, after the two cache directories and before
+layer 1 of TLS) as a rendering PREFERENCE, not a security layer: once, before
+the user's tokens, so a `--gpu-sw=no` or `--no-gpu-sw` in `mpvArgs` lands
+after it and wins by the last-token rule; never re-asserted at the tail;
+never reserved. The shared fixture pins the count and the position off its
+own `gpuSoftware` field in both suites, and carries the user override as a
+case. The base argv does NOT carry `--ao=null` with it: a user's player must
+have sound, and that token is the harness's own (F-HARNESS-45).
+
 ### 4.13 Health check
 
 Unchanged: `healthTimer.interval = 10 s`, `Model.healthTick` with its
@@ -1118,7 +1141,10 @@ duplicate re-opens D-SINK-13, measured.
 This block is the M2-02 argv. Later rounds added tokens to the same base and
 did not rewrite it here: `--load-scripts=no` (D-SINK-4), `--screenshot-dir`
 and `--watch-later-dir` (PO-11), `--gpu-shader-cache-dir` and
-`--icc-cache-dir` (D-PLY-10 / CL2). `Model.buildMpvArgv` and the helper's
+`--icc-cache-dir` (D-PLY-10 / CL2), and `--gpu-sw=yes` (D-PLY-27, section
+4.12: the one base token a user's own `--gpu-sw=no` is meant to beat, so it
+sits before the user's tokens and before the first `--tls-verify=yes`, and
+is never re-asserted). `Model.buildMpvArgv` and the helper's
 `mpv_launch_argv` are the current list, pinned to each other by
 `tests/fixtures/player-argv.json`.
 
