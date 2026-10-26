@@ -36,7 +36,10 @@
 # child or outside it with WAYLAND_DISPLAY pointed at it, measured both ways
 # on 2026-10-26 -- so there run.sh refuses every key with its window-inactive
 # reason and the keyed checks (H6, T5, P1 and the refusal count) read SKIP;
-# the run then exits 77. Everything graded over IPC is unaffected.
+# the run then exits 77. Everything graded over IPC is unaffected. Under
+# Hyprland (HYPRLAND_INSTANCE_SIGNATURE set) the same refusal is a FAIL:
+# there the compositor has layer-shell, and a guide window without the
+# keyboard is a defect, not the display.
 set -uo pipefail
 # ---- refusals above EVERY external command (F-M3-18 (b), the clip- and
 # logo-scenario shape): `command -v`, `[[ ]]` and `echo` are builtins, so an
@@ -92,7 +95,11 @@ skip() { SKIP=$((SKIP+1)); echo "SKIP $1${2:+ -- $2}"; }
 # depended on it a SKIP, with the guard's reason, counted apart from PASS
 # and FAIL; the run then exits 77, never 0. That refusal exists only when
 # Qt reports the window inactive, so a run where the guide holds the
-# keyboard cannot SKIP. Every other refusal is still a FAIL. And the five
+# keyboard cannot SKIP; and it is a SKIP only off Hyprland (no
+# HYPRLAND_INSTANCE_SIGNATURE, as every cage rig runs): on the desk an
+# inactive guide window is the guide failing to take the keyboard, which
+# this scenario grades, so it stays a FAIL (qa_key_skippable). Every other
+# refusal is still a FAIL. And the five
 # checks that assert a state a missing key would also leave (H6b, T5a, T5b,
 # T5d, P1c) now also require the state the key before them should have
 # made, so a key that arrived and did nothing fails them rather than
@@ -127,7 +134,7 @@ shot() {
   (( SHOTS )) || return 0
   local out rc
   out=$("$RUN" shot "$1" 2>&1); rc=$?
-  if (( rc == 3 )) && [[ $out == *"($QA_KEY_WINDOW_INACTIVE)"* ]]; then skip "shot $1" "refused: $(printf '%s\n' "$out" | grep -m1 'REFUSED')"
+  if qa_key_skippable "$rc" "$out"; then skip "shot $1" "refused: $(printf '%s\n' "$out" | grep -m1 'REFUSED')"
   elif (( rc == 3 )); then fail "shot $1" "refused: $(printf '%s\n' "$out" | grep -m1 'REFUSED')"
   elif (( rc != 0 )); then fail "shot $1" "run.sh shot exited $rc"
   fi

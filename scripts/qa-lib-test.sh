@@ -2020,10 +2020,14 @@ section "qa_key: which refusal a scenario may SKIP (F-M3-24)"
 # start at zero; it prints "<status> skips=<n> refusals=<n> wtype=<calls>"
 # and then qa_key's own line. On b43c4a4 the inactive reply was SENT, "0 ...
 # wtype=2", which is the H6a/H6b shape of F-M3-24 in one line.
-fg_qa_key() {   # fg_qa_key <opt-in 0|1> <wtype args...>
+# Every case runs with NO Hyprland instance in its environment, as a cage rig
+# does, unless FGQK_HIS names one: the SKIP class is off under Hyprland, and
+# this suite's own caller usually has the owner's signature set.
+fg_qa_key() {   # [FGQK_HIS=<sig>] fg_qa_key <opt-in 0|1> <wtype args...>
   local opt=$1; shift
   rm -f "$FG"/h/primed*; : >"$FG/wtype.log"
   ( QA_KEY_SKIPS=0; QA_KEY_REFUSALS=0; QA_KEY_SKIP_REASON=""; QA_KEY_SKIP_INACTIVE=$opt
+    if [[ -n ${FGQK_HIS:-} ]]; then export HYPRLAND_INSTANCE_SIGNATURE=$FGQK_HIS; else unset HYPRLAND_INSTANCE_SIGNATURE; fi
     export WTYPE_LOG=$FG/wtype.log PATH="$FG/bin:$PATH" OMARCHY_IPTV_HARNESS_DIR=$FG/h
     # Not $( ): the counters must move in THIS shell, not in a copy of it.
     qa_key "$ROOT/scripts/dev-harness/run.sh" "$@" >"$FG/qk.out"; rc=$?
@@ -2039,6 +2043,16 @@ ck "and the reason a dependent SKIP will quote is the guard's own sentence" \
    '[[ $(sed -n 3p <<<"$QK") == "the compositor has not given the guide'"'"'s WINDOW the keyboard ($QA_KEY_WINDOW_INACTIVE)"* ]]'
 is "NOT opted in, the same refusal is still a FAIL and a counted refusal" "$(fg_qa_key 0 x | sed -n 1p)" "3 skips=0 refusals=1 wtype=0"
 is "and its line is the FAIL it always was" "$(fg_qa_key 0 x | sed -n 2p | cut -c1-34)" "FAIL run.sh key x was REFUSED (exi"
+# Recheck of F-M3-24 (2026-10-26): under Hyprland the compositor has
+# layer-shell, so an inactive guide window is the guide failing to take the
+# keyboard -- what m3 grades on the desk, and a FAIL under the old guard
+# ("ANOTHER SURFACE", or H6a red). On lane-fm324's d4f653c this read
+# "3 skips=1 refusals=0": a broken desk run would have SKIPped and exited 77.
+QK=$(FGQK_HIS=qa-lib-test-not-a-live-instance fg_qa_key 1 x)
+is "opted in, but UNDER HYPRLAND an inactive window is a FAIL, not a SKIP" "$(sed -n 1p <<<"$QK")" "3 skips=0 refusals=1 wtype=0"
+is "and its line is the FAIL line" "$(sed -n 2p <<<"$QK" | cut -c1-34)" "FAIL run.sh key x was REFUSED (exi"
+ck "the predicate m3's shot wrapper calls says the same: skippable off Hyprland, not under it" \
+   '( QA_KEY_SKIP_INACTIVE=1; unset HYPRLAND_INSTANCE_SIGNATURE; qa_key_skippable 3 "x ($QA_KEY_WINDOW_INACTIVE) y" ) && ( QA_KEY_SKIP_INACTIVE=1; HYPRLAND_INSTANCE_SIGNATURE=s; ! qa_key_skippable 3 "x ($QA_KEY_WINDOW_INACTIVE) y" )'
 fg_stub "${FG_OPEN/\"open\":true/\"open\":false}" "" 0
 is "opted in, a CLOSED guide is still a FAIL: only the window class may skip" "$(fg_qa_key 1 x | sed -n 1p)" "3 skips=0 refusals=1 wtype=0"
 fg_stub "${FG_OPEN/,\"windowActive\":true/}" "" 0
@@ -2983,7 +2997,10 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # end through the real run.sh (8); focusSnapshot's windowActive wiring over
 # its shipping text (5). Red on b43c4a4's run.sh, qa-lib.sh and shell.qml
 # (the lane report has the per-check counts).
-EXPECTED=573
+# 573 -> 576 on 2026-10-26, the recheck of lane-fm324: the SKIP class is off
+# under Hyprland, end to end through qa_key (2) and in the predicate m3's
+# shot wrapper calls (1); red on d4f653c's qa-lib.sh (3 failed).
+EXPECTED=576
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

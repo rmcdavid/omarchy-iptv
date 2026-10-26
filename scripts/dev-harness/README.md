@@ -455,7 +455,12 @@ So under a cage:
   opts in with `QA_KEY_SKIP_INACTIVE=1`; every other scenario still FAILs on
   that refusal, and every other refusal is a FAIL everywhere. A SKIP is only
   reachable through a refusal Qt's own `Window.active` caused, so a run in
-  which the guide holds the keyboard has none. H6b, T5a, T5b, T5d and P1c,
+  which the guide holds the keyboard has none. Nor is it reachable under
+  Hyprland (`HYPRLAND_INSTANCE_SIGNATURE` set): that compositor has
+  layer-shell, so an inactive guide window there is the guide failing to
+  take the keyboard -- which m3 grades on the desk -- and it stays a FAIL
+  (`qa_key_skippable` in `scripts/qa-lib.sh`). Every cage rig unsets the
+  signature, which the `hyprctl` containment below needs anyway. H6b, T5a, T5b, T5d and P1c,
   which assert a state a missing key would also leave, now require the state
   the key before them made, so they FAIL rather than pass when a key arrives
   and does nothing.
