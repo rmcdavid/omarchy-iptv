@@ -528,7 +528,10 @@ wait_for() {
 # reads no data, and maps a surface to do it). Bounded both ways, and the
 # nudge is SAID when it happens; the join is `ipc focusState`, the same
 # question `key` asks before typing.
-focus_held() { qa_json_field 'd["keyboard"] is True' "$(ipc focusState)"; }
+# F-M3-24: the guard's question is two bits now -- an item of the guide holds
+# Qt's focus AND the guide's window holds the compositor's keyboard -- so the
+# wait asks both, or it could say yes to a chord the guard then refuses.
+focus_held() { qa_json_field 'd["keyboard"] is True and d.get("windowActive") is True' "$(ipc focusState)"; }
 regain_focus() {
   wait_for true 2 focus_held >/dev/null && return 0
   echo "   focus: the guide lost its focus item after a producer restart (cage); nudging with wl-paste -l"

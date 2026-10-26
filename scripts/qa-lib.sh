@@ -1193,16 +1193,60 @@ qa_transcript_start() {
 #   helper prints, so the transcript and the operator get the cause. The count
 #   is kept as well as printed, because a FAIL line no summary reads is the
 #   same defect one layer along: each caller asserts QA_KEY_REFUSALS is 0.
+#
+#   F-M3-24: ONE refusal class may be a SKIP instead, and only for a caller
+#   that opts in with QA_KEY_SKIP_INACTIVE=1 (m3-scenario.sh). It is the
+#   refusal run.sh tags with $QA_KEY_WINDOW_INACTIVE: the guide is open but
+#   the COMPOSITOR has not given its window the keyboard (Qt's Window.active
+#   false), which under a headless cage is the environment, not the code --
+#   the production guide window is a layer surface and cage has no
+#   layer-shell, so it never maps. Measured 2026-10-26 (QA-RESULTS
+#   "F-M3-24"): there the guard used to pass on the catcher's activeFocus and
+#   the key reached nothing, or the player's window. For that class this
+#   prints a `KEY-REFUSED` line (not a check: the checks that depended on the
+#   key say SKIP themselves, with QA_KEY_SKIP_REASON), counts QA_KEY_SKIPS,
+#   and still returns the refusal's status, so a caller can never read it as
+#   sent. Every other refusal -- the lock screen, a closed guide, a focus item
+#   outside the guide, a harness that cannot answer -- stays a FAIL for every
+#   caller, opted in or not, and a caller that has not opted in gets a FAIL
+#   for this class too. The tag is this variable in both files, so the join
+#   is a name both read, not two copies of a string.
+#
+#   And never under Hyprland (recheck of F-M3-24, 2026-10-26): with
+#   HYPRLAND_INSTANCE_SIGNATURE in the environment the compositor is the
+#   owner's, which HAS layer-shell, so an inactive guide window there is not
+#   the environment -- it is the guide failing to take the keyboard (a lost
+#   keyboardFocus, a player that steals it), which m3 grades on the desk and
+#   which the guard used to report as a FAIL. Opted in or not, it stays a
+#   FAIL there. Every cage rig and `h()` unsets the signature (the hyprctl
+#   containment needs that anyway), so the cage keeps its SKIP. One predicate,
+#   qa_key_skippable, so m3's `shot` wrapper asks the same question by a call.
 QA_KEY_REFUSALS=0
+QA_KEY_SKIPS=0
+QA_KEY_SKIP_REASON=""
+QA_KEY_WINDOW_INACTIVE="window-inactive"
+# qa_key_skippable <status> <refusal text>: 0 when this refusal is the one
+# class a caller may report as SKIP (see above), 1 otherwise.
+qa_key_skippable() {
+  [[ ${QA_KEY_SKIP_INACTIVE:-0} == 1 && $1 == 3 && $2 == *"($QA_KEY_WINDOW_INACTIVE)"* \
+     && -z ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]
+}
 qa_key() {
   local run=$1; shift
-  local err rc
+  local err rc flat
   # `2>&1 >/dev/null` in this order captures stderr and discards stdout.
   err=$("$run" key "$@" 2>&1 >/dev/null); rc=$?
   (( rc == 0 )) && return 0
+  flat=$(printf '%s' "$err" | tr '\n' ' ')
+  if qa_key_skippable "$rc" "$flat"; then
+    QA_KEY_SKIPS=$((QA_KEY_SKIPS + 1))
+    [[ -n $QA_KEY_SKIP_REASON ]] || QA_KEY_SKIP_REASON=$(printf '%s' "$err" | grep -m1 'REFUSED' | sed 's/^\[run.sh\] key REFUSED: //')
+    printf 'KEY-REFUSED run.sh key %s (exit %s, %s) -- %s\n' "$*" "$rc" "$QA_KEY_WINDOW_INACTIVE" "$flat"
+    return "$rc"
+  fi
   QA_KEY_REFUSALS=$((QA_KEY_REFUSALS + 1))
   printf 'FAIL run.sh key %s was REFUSED (exit %s) -- %s\n' \
-    "$*" "$rc" "$(printf '%s' "$err" | tr '\n' ' ')"
+    "$*" "$rc" "$flat"
   return "$rc"
 }
 

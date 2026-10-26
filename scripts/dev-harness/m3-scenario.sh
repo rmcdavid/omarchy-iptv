@@ -25,7 +25,21 @@
 # runs the same checks. Measured against v0.8.0 on 2026-09-26: 7 pass and
 # 23 fail. The seven are regression guards that assert an ABSENCE and so
 # hold on both trees -- H1, H2c, H5a, H5b, H6b, T5a, T5d -- and the other
-# twenty-three are the evidence.
+# twenty-three are the evidence. Since F-M3-24 (2026-10-26) H6b, T5a, T5d,
+# T5b and P1c require the state the key before them made, so an absence
+# they assert can no longer be the absence nothing caused; that count is
+# not re-measured.
+#
+# Keys need a display whose compositor gives the guide's window the keyboard.
+# Under a headless cage the production guide window never maps (cage has no
+# layer-shell), in whichever shape the scenario is run -- inside the cage's
+# child or outside it with WAYLAND_DISPLAY pointed at it, measured both ways
+# on 2026-10-26 -- so there run.sh refuses every key with its window-inactive
+# reason and the keyed checks (H6, T5, P1 and the refusal count) read SKIP;
+# the run then exits 77. Everything graded over IPC is unaffected. Under
+# Hyprland (HYPRLAND_INSTANCE_SIGNATURE set) the same refusal is a FAIL:
+# there the compositor has layer-shell, and a guide window without the
+# keyboard is a defect, not the display.
 set -uo pipefail
 # ---- refusals above EVERY external command (F-M3-18 (b), the clip- and
 # logo-scenario shape): `command -v`, `[[ ]]` and `echo` are builtins, so an
@@ -66,9 +80,40 @@ fi
 # F-HARNESS-20: this driver's own processes (its helper runs, probes, mpv)
 # get the harness's HOME as well, not only what run.sh starts. Exports only.
 qa_harness_home "$SCRATCH" || exit 2
-PASS=0; FAIL=0
+PASS=0; FAIL=0; SKIP=0
 pass() { PASS=$((PASS+1)); echo "PASS $1"; }
 fail() { FAIL=$((FAIL+1)); echo "FAIL $1${2:+ -- $2}"; }
+skip() { SKIP=$((SKIP+1)); echo "SKIP $1${2:+ -- $2}"; }
+# F-M3-24. The keyed checks (H6, T5, P1) depend on a real key reaching the
+# guide, and a run where the compositor never gave the guide's window the
+# keyboard cannot grade them: under a headless cage the production guide
+# window never maps (no layer-shell), and every keyed check here used to be
+# graded anyway -- H6a red on every cage run, and H6b, which asserts an
+# absence, GREEN on every one of them with nothing ever hidden. So: a key the
+# guard refuses because the guide's WINDOW is inactive (run.sh's
+# $QA_KEY_WINDOW_INACTIVE refusal, opted into here) makes each check that
+# depended on it a SKIP, with the guard's reason, counted apart from PASS
+# and FAIL; the run then exits 77, never 0. That refusal exists only when
+# Qt reports the window inactive, so a run where the guide holds the
+# keyboard cannot SKIP; and it is a SKIP only off Hyprland (no
+# HYPRLAND_INSTANCE_SIGNATURE, as every cage rig runs): on the desk an
+# inactive guide window is the guide failing to take the keyboard, which
+# this scenario grades, so it stays a FAIL (qa_key_skippable). Every other
+# refusal is still a FAIL. And the five
+# checks that assert a state a missing key would also leave (H6b, T5a, T5b,
+# T5d, P1c) now also require the state the key before them should have
+# made, so a key that arrived and did nothing fails them rather than
+# passing them.
+QA_KEY_SKIP_INACTIVE=1
+# key_sent <wtype args...>: 0 sent; 1 refused in the window-inactive class
+# (SKIP what depends on it); 2 refused otherwise (already a FAIL line,
+# counted in QA_KEY_REFUSALS; what follows is graded and fails on its own).
+key_sent() {
+  local before=$QA_KEY_SKIPS
+  qa_key "$RUN" "$@" && return 0
+  (( QA_KEY_SKIPS > before )) && return 1
+  return 2
+}
 ipc() { "$RUN" ipc "$@" 2>/dev/null; }
 # gf <python expr over g> / sf <python expr over s>: one field of state().
 gf() { python3 -c 'import json,sys
@@ -89,7 +134,8 @@ shot() {
   (( SHOTS )) || return 0
   local out rc
   out=$("$RUN" shot "$1" 2>&1); rc=$?
-  if (( rc == 3 )); then fail "shot $1" "refused: $(printf '%s\n' "$out" | grep -m1 'REFUSED')"
+  if qa_key_skippable "$rc" "$out"; then skip "shot $1" "refused: $(printf '%s\n' "$out" | grep -m1 'REFUSED')"
+  elif (( rc == 3 )); then fail "shot $1" "refused: $(printf '%s\n' "$out" | grep -m1 'REFUSED')"
   elif (( rc != 0 )); then fail "shot $1" "run.sh shot exited $rc"
   fi
   return 0
@@ -174,10 +220,22 @@ k=$(gf 'g["scopeKinds"]'); h=$(gf 'g["hiddenGroups"]'); t=$(gf 'g["footer"]')
 [[ $k == '["favorites:Favorites", "all:All", "header:GROUPS", "group:News", "group:Religious", "group:Movies"]' && $h == '[]' ]] && pass "H5b x on it brings it back" || fail "H5b" "$k $h"
 [[ $t == *"Showing Religious"* ]] && pass "H5c and says so" || fail "H5c" "$t"
 # H6: the real key. Cursor is on Bravo in g:Religious (list mode).
-qa_key "$RUN" x; sleep 0.5
-[[ $(gf 'g["hiddenGroups"]') == '["Religious"]' ]] && pass "H6a a real x through the catcher hides" || fail "H6a" "$(gf 'g["hiddenGroups"]')"
-qa_key "$RUN" x; sleep 0.5
-[[ $(gf 'g["hiddenGroups"]') == '[]' ]] && pass "H6b and a second real x unhides" || fail "H6b" "$(gf 'g["hiddenGroups"]')"
+# H6b asserts an ABSENCE ([]), which is also the state before H6a's key, so
+# it is graded only over the hide H6a observed (F-M3-24: it passed on every
+# cage run with nothing ever hidden).
+key_sent x; kr=$?; sleep 0.5
+h6a=$(gf 'g["hiddenGroups"]')
+if (( kr == 1 )); then
+  skip "H6a a real x through the catcher hides" "$QA_KEY_SKIP_REASON"
+  skip "H6b and a second real x unhides" "depends on H6a's key, which the guard refused"
+else
+  [[ $h6a == '["Religious"]' ]] && pass "H6a a real x through the catcher hides" || fail "H6a" "$h6a"
+  key_sent x; kr=$?; sleep 0.5
+  h6b=$(gf 'g["hiddenGroups"]')
+  if (( kr == 1 )); then skip "H6b and a second real x unhides" "$QA_KEY_SKIP_REASON"
+  elif [[ $h6a != '["Religious"]' ]]; then fail "H6b" "nothing to unhide: H6a left $h6a, and [] after the second x would be the state before the first"
+  else [[ $h6b == '[]' ]] && pass "H6b and a second real x unhides" || fail "H6b" "$h6b"; fi
+fi
 
 # ---- T: the picker, against a real mpv
 ipc setScope all >/dev/null; sleep 0.2
@@ -216,16 +274,45 @@ wait_sf 's["tracks"]' '["audio1", "audio2*", "sub1*"]' 40 && pass "T4b the subti
 [[ $(gf 'g["trackRows"]') == *'"track:Off"'*'"track:English*"'* ]] && pass "T4c Off is no longer marked" || fail "T4c" "$(gf 'g["trackRows"]')"
 ipc trackMove -1 >/dev/null; sleep 0.2; ipc trackSelect >/dev/null
 wait_sf 's["tracks"]' '["audio1", "audio2*", "sub1"]' 40 && pass "T4d Off turns it off" || fail "T4d" "$(sf 's["tracks"]')"
-# T5: real keys through the catcher
-qa_key "$RUN" -k Escape; sleep 0.4
-[[ $(gf 'g["inTracks"]') == false && $(gf 'g["mode"]') == '"list"' ]] && pass "T5a a real Esc closes the picker to the list" || fail "T5a" "$(gf 'g["mode"]')"
-qa_key "$RUN" t; sleep 0.6
-[[ $(gf 'g["inTracks"]') == true ]] && pass "T5b a real t reopens it" || fail "T5b" "$(gf 'g["mode"]')"
-wait_sf 's["tracksState"]' '"ready"' 40
-c0=$(gf 'g["trackCursor"]'); qa_key "$RUN" j; sleep 0.3; c1=$(gf 'g["trackCursor"]')
-[[ $c0 == 2 && $c1 == 4 ]] && pass "T5c reopened on the selected track (Spanish); a real j steps over the header to Off" || fail "T5c" "$c0 -> $c1"
-qa_key "$RUN" t; sleep 0.4
-[[ $(gf 'g["inTracks"]') == false ]] && pass "T5d a real t closes it" || fail "T5d" "$(gf 'g["mode"]')"
+# T5: real keys through the catcher, a CHAIN: each key starts from the state
+# the one before it made. The first refused key (window-inactive) SKIPs the
+# rest of the chain unsent. T5a, T5b and T5d each assert a state a key that
+# never arrived could also leave, so each requires the state before its key
+# to be the other one (T5b: closed; T5d and T5a: open).
+t5=""
+t5pre=$(gf 'g["inTracks"]')
+key_sent -k Escape; kr=$?; sleep 0.4
+if (( kr == 1 )); then t5="T5a's Esc"; skip "T5a a real Esc closes the picker to the list" "$QA_KEY_SKIP_REASON"
+else
+  [[ $t5pre == true && $(gf 'g["inTracks"]') == false && $(gf 'g["mode"]') == '"list"' ]] && pass "T5a a real Esc closes the picker to the list" || fail "T5a" "before inTracks=$t5pre, after $(gf 'g["inTracks"]') mode $(gf 'g["mode"]')"
+fi
+if [[ -n $t5 ]]; then skip "T5b a real t reopens it" "depends on $t5, which the guard refused"
+else
+  t5pre=$(gf 'g["inTracks"]')
+  key_sent t; kr=$?; sleep 0.6
+  if (( kr == 1 )); then t5="T5b's t"; skip "T5b a real t reopens it" "$QA_KEY_SKIP_REASON"
+  else [[ $t5pre == false && $(gf 'g["inTracks"]') == true ]] && pass "T5b a real t reopens it" || fail "T5b" "before inTracks=$t5pre, after $(gf 'g["inTracks"]') mode $(gf 'g["mode"]')"; fi
+fi
+if [[ -n $t5 ]]; then skip "T5c reopened on the selected track (Spanish); a real j steps over the header to Off" "depends on $t5, which the guard refused"
+else
+  wait_sf 's["tracksState"]' '"ready"' 40
+  c0=$(gf 'g["trackCursor"]'); key_sent j; kr=$?; sleep 0.3; c1=$(gf 'g["trackCursor"]')
+  if (( kr == 1 )); then t5="T5c's j"; skip "T5c reopened on the selected track (Spanish); a real j steps over the header to Off" "$QA_KEY_SKIP_REASON"
+  else [[ $c0 == 2 && $c1 == 4 ]] && pass "T5c reopened on the selected track (Spanish); a real j steps over the header to Off" || fail "T5c" "$c0 -> $c1"; fi
+fi
+if [[ -n $t5 ]]; then skip "T5d a real t closes it" "depends on $t5, which the guard refused"
+else
+  t5pre=$(gf 'g["inTracks"]')
+  key_sent t; kr=$?; sleep 0.4
+  if (( kr == 1 )); then skip "T5d a real t closes it" "$QA_KEY_SKIP_REASON"
+  else [[ $t5pre == true && $(gf 'g["inTracks"]') == false ]] && pass "T5d a real t closes it" || fail "T5d" "before inTracks=$t5pre, after $(gf 'g["inTracks"]') mode $(gf 'g["mode"]')"; fi
+fi
+# A skipped chain leaves the picker as T4 left it, open; T6 starts from the
+# state T5d leaves, so it is closed through the IPC door, and said.
+if [[ -n $t5 && $(gf 'g["inTracks"]') == true ]]; then
+  ipc trackClose >/dev/null; sleep 0.3
+  echo "   T5 skipped: the picker closed through ipc trackClose, where T5d would have left it (inTracks $(gf 'g["inTracks"]'))"
+fi
 ipc stop >/dev/null; sleep 0.8
 [[ $(sf 's["tracksState"]') == '"idle"' && $(sf 's["tracks"]') == '[]' ]] && pass "T6a stop clears the tracks" || fail "T6a" "$(sf 's["tracksState"]') $(sf 's["tracks"]')"
 ipc listKey t >/dev/null; sleep 0.3
@@ -242,15 +329,23 @@ ipc listKey t >/dev/null; sleep 0.3
 # change either. Naming the id removes the question.
 ipc setScope all >/dev/null; sleep 0.3
 ipc move 0 >/dev/null; sleep 0.2
-qa_key "$RUN" x; sleep 0.6   # cursor is on Alpha News in All
-hid=$(gf 'g["hiddenGroups"]')
-[[ $hid == '["News"]' ]] && pass "P1a x in All hides the cursor row group" || fail "P1a" "$hid"
-rows=$(gf 'g["rows"]')
-[[ $rows == 3 ]] && pass "P1b All drops to the three remaining channels" || fail "P1b" "$rows"
-ipc setScope "g:News" >/dev/null; sleep 0.3
-ipc remove >/dev/null; sleep 0.5
-hid=$(gf 'g["hiddenGroups"]')
-[[ $hid == '[]' ]] && pass "P1c and unhiding from the HIDDEN entry restores it" || fail "P1c" "$hid"
+# P1c asserts an absence ([]) and is graded only over the hide P1a observed.
+key_sent x; kr=$?; sleep 0.6   # cursor is on Alpha News in All
+if (( kr == 1 )); then
+  skip "P1a x in All hides the cursor row group" "$QA_KEY_SKIP_REASON"
+  skip "P1b All drops to the three remaining channels" "depends on P1a's key, which the guard refused"
+  skip "P1c and unhiding from the HIDDEN entry restores it" "depends on P1a's key, which the guard refused"
+else
+  p1a=$(gf 'g["hiddenGroups"]')
+  [[ $p1a == '["News"]' ]] && pass "P1a x in All hides the cursor row group" || fail "P1a" "$p1a"
+  rows=$(gf 'g["rows"]')
+  [[ $rows == 3 ]] && pass "P1b All drops to the three remaining channels" || fail "P1b" "$rows"
+  ipc setScope "g:News" >/dev/null; sleep 0.3
+  ipc remove >/dev/null; sleep 0.5
+  hid=$(gf 'g["hiddenGroups"]')
+  if [[ $p1a != '["News"]' ]]; then fail "P1c" "nothing to restore: P1a left $p1a, and [] now would be the state before its key"
+  else [[ $hid == '[]' ]] && pass "P1c and unhiding from the HIDDEN entry restores it" || fail "P1c" "$hid"; fi
+fi
 
 # P2 the picker survives a channel change instead of claiming nothing plays
 ipc setScope all >/dev/null; sleep 0.3
@@ -276,11 +371,18 @@ for i in $(seq 1 40); do [[ $(sf 's["nowPlaying"]["id"]') == '"t:alpha"' ]] && b
 wait_sf 's["tracksState"]' '"ready"' 60 || fail "P3-setup" "not ready after the change"
 tr=$(sf 's["tracks"]')
 [[ $tr == '["audio1*", "audio2", "sub1"]' ]] && pass "P3 the track choice did not follow the channel, as the README says" || fail "P3" "$tr"
-qa_key "$RUN" -k Escape; sleep 0.3
+key_sent -k Escape; sleep 0.3
 
 # F-HARNESS-5. A FAIL line no summary reads is the same defect one layer
-# along, so the refusal count is asserted rather than only printed.
-if (( QA_KEY_REFUSALS == 0 )); then pass "no keystroke was refused by the focus guard"
-else fail "the focus guard refused $QA_KEY_REFUSALS keystroke(s)" "each one is a FAIL line above"; fi
-echo "m3-scenario: $PASS passed, $FAIL failed"
-(( FAIL == 0 ))
+# along, so the refusal count is asserted rather than only printed. F-M3-24:
+# a refusal of the window-inactive class is a SKIP here, never a PASS -- the
+# keys were refused -- and any other refusal still fails the run.
+if (( QA_KEY_REFUSALS > 0 )); then fail "the focus guard refused $QA_KEY_REFUSALS keystroke(s)" "each one is a FAIL line above"
+elif (( QA_KEY_SKIPS > 0 )); then skip "no keystroke was refused by the focus guard" "$QA_KEY_SKIPS refused, each a KEY-REFUSED line above: $QA_KEY_SKIP_REASON"
+else pass "no keystroke was refused by the focus guard"; fi
+echo "m3-scenario: $PASS passed, $FAIL failed, $SKIP skipped"
+# 77 when anything was skipped: not every check could be graded on this
+# display, which is neither a pass nor a failure of the code.
+(( FAIL == 0 )) || exit 1
+(( SKIP == 0 )) || exit 77
+exit 0
