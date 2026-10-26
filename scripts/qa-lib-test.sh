@@ -760,11 +760,68 @@ rp_scr2="$TMP/rp-scratch2"; mkdir -p "$rp_scr2"
 "$rp_bin/mpv" "--input-ipc-server=$rp_scr2/runtime/omarchy-iptv/mpv.sock" >/dev/null 2>&1 & rp_deaf2=$!
 sleep 0.3
 rp_err2=$(OMARCHY_IPTV_HARNESS_DIR=$rp_scr2 "$ROOT/scripts/dev-harness/run.sh" reap 2>&1 >/dev/null)
+# F-HARNESS-45: the KILL may now be the helper's ladder's (reap_player goes
+# through `player stop` first, which finds this deaf stand-in by its socket
+# token and ends it at the kill rung) or the sweep's; either names it.
 is "run.sh reap ends a TERM-ignoring player of its own harness (KILL behind the TERM), and says so" \
-   "$(kill -0 "$rp_deaf2" 2>/dev/null && echo alive || echo gone) $([[ $rp_err2 == *"sending KILL"* ]] && echo said || echo silent)" "gone said"
+   "$(kill -0 "$rp_deaf2" 2>/dev/null && echo alive || echo gone) $([[ $rp_err2 == *"sending KILL"* || $rp_err2 == *"at rung kill"* ]] && echo said || echo "silent: $rp_err2")" "gone said"
 is "and leaves another harness's player alone" "$(kill -0 "$rp_other" 2>/dev/null && echo alive || echo gone)" "alive"
 kill -KILL "$rp_deaf" "$rp_kind" "$rp_other" "$rp_deaf2" 2>/dev/null
 wait "$rp_deaf" "$rp_kind" "$rp_other" "$rp_deaf2" 2>/dev/null
+# F-HARNESS-45 (2026-10-25): run.sh's reap goes through the DESIGNED door
+# first -- the helper's `player stop` over this harness's socket, the
+# D-LIVE-17 ladder -- and only then sweeps by pid. DRIVEN: a stand-in NAMED
+# mpv that LISTENS on the harness socket and records which door ended it,
+# "quit" when asked over IPC and "term" when signalled. The old reap_player
+# (qa_reap_players alone) ends it with TERM; the door ends it with a quit
+# and signals nobody. Red on dev 96a1487 ("term gone", and nothing said).
+rd_bin="$TMP/rd-bin"; mkdir -p "$rd_bin"
+cat >"$rd_bin/mpv" <<'STANDIN'
+#!/usr/bin/python3 -I
+import json, os, signal, socket, sys
+sock = [a.split("=", 1)[1] for a in sys.argv if a.startswith("--input-ipc-server=")][0]
+marker = os.environ["FH45_MARKER"]
+def ended(how):
+    with open(marker, "w") as fh:
+        fh.write(how + "\n")
+    os._exit(0)
+signal.signal(signal.SIGTERM, lambda *_: ended("term"))
+os.makedirs(os.path.dirname(sock), mode=0o700, exist_ok=True)
+try:
+    os.unlink(sock)
+except FileNotFoundError:
+    pass
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.bind(sock)
+s.listen(4)
+open(marker + ".ready", "w").close()
+while True:
+    c, _ = s.accept()
+    f = c.makefile("rwb", buffering=0)
+    for line in f:
+        try:
+            d = json.loads(line)
+        except ValueError:
+            continue
+        rid = int(d.get("request_id", 0))
+        if (d.get("command") or [None])[0] == "quit":
+            f.write(('{"error":"success","request_id":%d}\n' % rid).encode())
+            ended("quit")
+        f.write(('{"error":"property unavailable","request_id":%d}\n' % rid).encode())
+    c.close()
+STANDIN
+chmod +x "$rd_bin/mpv"
+rd_scr="$TMP/rd-scratch"; mkdir -p "$rd_scr/runtime/omarchy-iptv"; chmod 0700 "$rd_scr/runtime/omarchy-iptv"
+rd_marker="$TMP/rd-marker"
+FH45_MARKER=$rd_marker "$rd_bin/mpv" "--input-ipc-server=$rd_scr/runtime/omarchy-iptv/mpv.sock" >/dev/null 2>&1 & rd_pid=$!
+for ((i = 0; i < 50; i++)); do [[ -e $rd_marker.ready ]] && break; sleep 0.1; done
+is "the listening stand-in is up on this harness's socket" "$([[ -e $rd_marker.ready ]] && kill -0 "$rd_pid" 2>/dev/null && echo up || echo down)" "up"
+rd_err=$(OMARCHY_IPTV_HARNESS_DIR=$rd_scr "$ROOT/scripts/dev-harness/run.sh" reap 2>&1 >/dev/null)
+for ((i = 0; i < 50; i++)); do kill -0 "$rd_pid" 2>/dev/null || break; sleep 0.1; done
+is "run.sh reap ends a listening player through the helper's own door, a quit over IPC, and signals nobody (F-HARNESS-45)" \
+   "$(tr -d '\n' <"$rd_marker" 2>/dev/null) $(kill -0 "$rd_pid" 2>/dev/null && echo alive || echo gone)" "quit gone"
+is "and names the pid and the rung that ended it" "$([[ $rd_err == *"ended pid $rd_pid at rung quit"* ]] && echo said || echo "silent: $rd_err")" "said"
+kill -KILL "$rd_pid" 2>/dev/null; wait "$rd_pid" 2>/dev/null
 # ...and the join that makes it reach every served scenario: run.sh's reap
 # and its exit both call reap_player, reap_player is qa_reap_players, and
 # each of the eight scenarios that start a player ends through `run.sh reap`
@@ -2811,7 +2868,10 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # 548 -> 549 on 2026-10-25: the logo live floor's W join (F-M3-18's live
 # segment), seen red with the add line's number moved to 8 (and with one W
 # line deleted) on lane-liveproofs.
-EXPECTED=549
+# 549 -> 552 on 2026-10-25, lane-fh45 (F-HARNESS-45): run.sh reap through
+# the helper's own door, driven against a listening stand-in (3); red on
+# 96a1487's run.sh ("term gone", nothing said).
+EXPECTED=552
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

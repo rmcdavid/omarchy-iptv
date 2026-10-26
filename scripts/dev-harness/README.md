@@ -1723,6 +1723,15 @@ What changed in the rigs:
   `run.sh` by pid and call `qa_reap_players` themselves, are all covered.
   The helper's own `player stop` is another path and already escalates to
   SIGKILL (quit, TERM at 2 s, then KILL; read, not changed).
+  **F-HARNESS-45 (2026-10-25): `reap_player` goes through that designed
+  door FIRST** -- `player stop --socket <this harness's socket>`, which
+  finds the player by the socket token in its argv, re-verifies the pid
+  before every signal, asks it to quit over IPC and only then signals --
+  and sweeps by pid afterwards as the backstop; it says
+  `player stop over the socket ended pid N at rung quit|term|kill`.
+  `qa-lib-test.sh` drives it against a stand-in named mpv that LISTENS on
+  the socket and records which door ended it: `quit gone` now, `term gone`
+  and nothing said on 96a1487.
 - The chno scenarios play every row from `run.sh`'s fixture server
   (`--serve`, port 8765, asserted to be this harness's own by
   `qa_listener_owned`) and compare a play token, the channel id and the

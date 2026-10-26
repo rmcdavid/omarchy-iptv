@@ -206,8 +206,22 @@ except Exception:
 # run.sh's own exit, comes through here. The helper's own `player stop` is a
 # different path and already escalates to SIGKILL (the D-LIVE-17 ladder).
 reap_player() {
-  local dir=$SCRATCH
+  local dir=$SCRATCH reply rung pid
   [[ $dir == /* ]] || dir=$PWD/$dir
+  # F-HARNESS-45: the designed door FIRST. `player stop` over THIS harness's
+  # socket runs the D-LIVE-17 ladder inside the helper -- quit over IPC,
+  # SIGTERM at 2 s, SIGKILL at 4 s, each against the pid the helper finds by
+  # the socket token in argv and re-verifies before signalling -- and
+  # reports the rung that ended it; a player that answers IPC leaves on the
+  # quit and is signalled by nobody. The sweep below stays as the backstop
+  # for a player the helper cannot see or a stop that did not run (no
+  # helper, or a part the stub refused): it ends nothing twice, because a
+  # pid the ladder ended is no longer there to match. Bounded by the
+  # ladder's own timeline plus `timeout`'s word. scripts/qa-lib-test.sh
+  # drives this against a stand-in that records which door ended it.
+  reply=$(timeout -k 2 20 python3 "$PLUGIN_ROOT/bin/omarchy-iptv" player stop --socket "$dir/runtime/omarchy-iptv/mpv.sock" 2>/dev/null)
+  rung=$(qa_json_field "d['rung']" "$reply" 2>/dev/null); pid=$(qa_json_field "d['pid']" "$reply" 2>/dev/null)
+  [[ $rung =~ ^(quit|term|kill)$ ]] && echo "[run.sh] player stop over the socket ended pid $pid at rung $rung" >&2
   qa_reap_players "$dir"
   return 0
 }
