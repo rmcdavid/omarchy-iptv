@@ -656,6 +656,12 @@ def spawn_detached(argv: list[str], cwd: str = "/") -> dict[str, Any]:
     argv[0] is the literal "mpv", never caller-supplied, so `player start` is
     not an arbitrary-exec verb.
 
+    D-SINK-39: the grandchild sets RLIMIT_CORE to (0, 0) as its last act
+    before the exec (disable_core_dumps says why both halves), because the
+    non-dumpable flag this helper runs under does not survive an exec and a
+    crashed player's core would carry the credentialed URL and the provider
+    headers to /var/lib/systemd/coredump, readable by the whole uid.
+
     PO-11: the working directory is explicit, never inherited. A process that
     inherits the shell's cwd is running in the user's home, and mpv's own key
     bindings write files relative to it. The umask is explicit for the same
@@ -700,6 +706,13 @@ def spawn_detached(argv: list[str], cwd: str = "/") -> dict[str, Any]:
                     os.close(fd)
                 except OSError:
                     pass
+            # D-SINK-39: the player is the one child that holds the stream
+            # URL and the provider headers, and a crash of it would hand them
+            # to systemd-coredump, durably and readable by every process of
+            # this uid. Set HERE, after the fork and before the exec, so the
+            # helper's own limits are untouched; a failure is reported over
+            # err_w like an exec failure and the player does not start.
+            disable_core_dumps()
             os.execvp("mpv", argv)
         except BaseException as error:                    # noqa: BLE001 - reported over the pipe
             number = getattr(error, "errno", 0) or 0

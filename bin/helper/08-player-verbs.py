@@ -434,6 +434,13 @@ def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
         client = probe_client(sock_path, ipc_timeout)
         if client is not None:
             keep = _connected_pid(client, found)
+            # D-SINK-39, D-SINK-16's shape: this player was forked by whoever
+            # ran before, so its core limit is whatever it inherited then.
+            # Lowered here, before apply_channel feeds it anything; a refusal
+            # is impossible for a live same-uid process, so it is reported
+            # rather than fatal (limit_core_of says why).
+            if not limit_core_of(keep):
+                warnings.append("could not limit the adopted player's core dumps")
             others = [record for record in found if record["pid"] != keep]
             if others:
                 # Never rung 1 here: `quit` travels over the shared socket and
@@ -645,6 +652,12 @@ def player_probe(args: argparse.Namespace) -> int:
             # here rather than at the next zap.
             payload["tls"] = migrate_tls(client)
             payload["pid"] = _connected_pid(client, found)
+            # D-SINK-39, beside the TLS migration and for the same reason: the
+            # reattach is the one moment a pre-upgrade player can be kept from
+            # dumping its memory before the new code feeds it. prlimit, not a
+            # property: nothing over IPC reaches a resource limit.
+            if not limit_core_of(payload["pid"]):
+                log("player probe: could not limit the player's core dumps")
             ok, idle = client.try_command("get_property", "idle-active")
             payload["idle"] = bool(idle) if ok and idle is not None else None
             ok, version = client.try_command("get_property", "mpv-version")

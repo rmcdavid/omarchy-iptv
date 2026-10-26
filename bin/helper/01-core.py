@@ -722,6 +722,69 @@ def default_socket_path() -> str:
     return os.path.join(runtime_dir(), "mpv.sock")
 
 
+def disable_core_dumps() -> None:
+    """RLIMIT_CORE (0, 0), soft AND hard, on the process that calls this
+    (D-SINK-39). Called in a CHILD between fork and exec -- the player's
+    (spawn_detached) and wl-paste's (read_clipboard, as Popen's
+    preexec_fn) -- and never in this helper itself.
+
+    Why a child needs its own lever: this helper is non-dumpable from its
+    first statement (the stub's shield), but the kernel sets dumpable back
+    to 1 on every exec, so the shield reaches no child; RLIMIT_CORE is
+    inherited across fork and exec and is the one setting that does. What it
+    closes, measured 2026-10-25: systemd-coredump stores a user process's
+    core under /var/lib/systemd/coredump as root:root 0640 with an ACL that
+    lets EVERY process of that uid read it, durably and with no retention
+    time, and the host then offers to point an AI agent at it; a playing
+    mpv's memory holds the stream URL, userinfo and all, in ten to thirteen
+    copies (three gcore runs: 12, 13, 10), and every provider header value
+    in three to eight, while its argv and environment hold none. With a soft limit of 0 systemd-coredump journals the crash
+    and stores nothing (COREDUMP_RLIMIT 0, no COREDUMP_FILENAME).
+
+    Why the HARD limit too: the soft limit is only the process's current
+    request, and anything in the child's own address space -- the program,
+    a library it loads, a config it reads -- may raise it back up to the
+    hard one with a plain setrlimit; raising the hard limit takes
+    CAP_SYS_RESOURCE. A user's `ulimit -c unlimited` in the shell's
+    environment is what the child INHERITS, and (0, 0) replaces both halves
+    of it. Lowering both can fail only for a process forbidden to change
+    its limits at all; the error propagates to the caller's spawn path (the
+    player's error pipe, Popen's SubprocessError) and the child is not
+    started -- a spawn that cannot be made safe is refused, never shrugged
+    at, the D-SINK-16 shape.
+    """
+    import resource
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+
+def limit_core_of(pid: int) -> bool:
+    """RLIMIT_CORE (0, 0) on a player this helper did NOT start (D-SINK-39,
+    the D-SINK-16 half). The detached player survives a shell restart by
+    design, so after an upgrade the shell reattaches to an mpv the OLD code
+    forked -- nothing between its fork and its exec set a limit -- and then
+    feeds it credentialed URLs and provider headers: the same live feed into
+    an unprotected process that D-SINK-16 closed for TLS. disable_core_dumps
+    reaches only a child of this helper; this reaches a process that is not.
+
+    prlimit(2) lets a process set another's limits when the target's real,
+    effective and saved uids and gids all match the caller's -- no ptrace, so
+    Yama's scope does not apply -- and lowering takes no capability while
+    raising the hard limit back takes CAP_SYS_RESOURCE, so the player cannot
+    undo it. Measured 2026-10-25 on a same-uid process: (-1, -1) -> (0, 0),
+    the raise refused with EPERM. Returns whether the kernel now reads
+    (0, 0); False for a pid that is gone or not ours, which the caller says
+    out loud. pid 0 would mean THIS process to prlimit, so it is refused.
+    """
+    import resource
+    if pid <= 0:
+        return False
+    try:
+        resource.prlimit(pid, resource.RLIMIT_CORE, (0, 0))
+        return resource.prlimit(pid, resource.RLIMIT_CORE) == (0, 0)
+    except (OSError, ValueError, OverflowError):
+        return False
+
+
 def socket_path(explicit: str | None = None) -> str:
     if explicit:
         return os.path.abspath(os.path.expanduser(explicit))

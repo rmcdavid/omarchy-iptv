@@ -263,11 +263,20 @@ def read_clipboard(argv: list[str], max_bytes: int, timeout: float, grace: float
     """
     import subprocess
     try:
+        # D-SINK-39, rule 15's sibling of the player: what wl-paste holds is
+        # the user's clipboard, and the form's paste path exists to carry a
+        # provider URL through it, so a crash of it would hand that offer to
+        # systemd-coredump. preexec_fn runs in the child between fork and
+        # exec, the same place the player gets it; this process is
+        # single-threaded, which is the condition Popen puts on it.
         child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                 stderr=subprocess.DEVNULL, close_fds=True)
+                                 stderr=subprocess.DEVNULL, close_fds=True,
+                                 preexec_fn=disable_core_dumps)
     except FileNotFoundError:
         return {"ok": False, "code": "no_wl_paste"}
-    except OSError:
+    except (OSError, subprocess.SubprocessError):
+        # SubprocessError is what Popen raises when preexec_fn itself
+        # failed: a child that cannot be kept from dumping is not started.
         return {"ok": False, "code": "spawn_failed"}
     deadline = time.monotonic() + timeout
     fd = child.stdout.fileno()

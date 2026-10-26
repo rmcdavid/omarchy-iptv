@@ -1228,6 +1228,65 @@ one CA rather than switching verification off. UNVERIFIED: whether
 measured, so the escape is documented as "name your provider's CA" and not as
 "keep everything else as well".
 
+**The core dump (D-SINK-39, 2026-10-25).** Every heading above asks where
+the URL and the headers are written while the player RUNS; a crash writes all
+of it at once. systemd-coredump stores a user process's core under
+`/var/lib/systemd/coredump/` as `root:root 0640` with an ACL granting the
+crashing uid read, durably and with no retention time, and the host's
+`omarchy-crash-watch` then posts a card whose click points an AI agent at the
+dump (`omarchy-agent-crash`, the `diagnose-crash` skill: `coredumpctl dump` to
+a temporary file, `gdb ... bt`, "read the whole core, not just frame 0"). That
+same-uid reader class is the one D-SINK-9 closed `/proc/<pid>/environ` against
+by making the helper non-dumpable -- and the kernel sets dumpable back to 1 on
+every exec, so the shield reaches no child. Measured 2026-10-25 (QA-RESULTS
+"D-SINK-39"): a player started through `player start` with `--vo=null
+--ao=null`, loaded through `apply_channel` with a synthetic userinfo
+credential, a User-Agent, a Referer and a custom header, dumped by gdb's
+`gcore` from its ancestor while `time-pos` moved -- no crash, no journal
+entry, no card. Its argv and its environment held nothing, 0 and 0, in both
+runs. Its core held the URL's userinfo 13 times in the clean run: one talloc'd
+copy in the main heap (the playlist entry, which `path` reads), the helper's
+own `loadfile` command text twice as received over IPC (raw, and tokenised in
+place), and ten in the thread arenas -- talloc'd demuxer and stream copies,
+FFmpeg's url and filename copies beside its protocol whitelist, a scheme-less
+parse buffer and a directory-prefix copy; the User-Agent value 4 times (three
+mpv option copies in the main heap, one FFmpeg `user_agent`); the Referer
+value 5 times and the custom header 7, among them the `set_property
+http-header-fields` command text twice, FFmpeg's `headers` string carrying
+both as `Name: value` lines, and the stale request buffer. No `Authorization:
+Basic` form was present: FFmpeg builds it only after a 401 challenge and the
+fixture server never challenged, so a challenging provider would add it (read
+in FFmpeg's `http.c`, not measured). Closed at the exec: `spawn_detached`'s
+grandchild sets RLIMIT_CORE to (0, 0), soft and hard, as its last act before
+`execvp` (`disable_core_dumps` says why both halves), and with it
+systemd-coredump journals the crash and stores nothing (`COREDUMP_RLIMIT 0`,
+no `COREDUMP_FILENAME`, measured the same day). `read_clipboard`'s wl-paste
+gets the same as a `preexec_fn`: the clipboard it reads is the form's paste
+path for a provider URL. And the player this shell ADOPTS -- D-SINK-16's
+shape, the one the exec-time lever cannot reach, because the old code forked
+it -- has its limit lowered from outside at the reattach: `player probe`
+(beside the TLS migration) and `player start`'s adopt branch call
+`limit_core_of`, which is `prlimit(2)` on the player's pid, allowed to a
+same-uid caller without ptrace and irreversible by the player (raising the
+hard limit back takes CAP_SYS_RESOURCE; measured). The counts above are one
+run's: three gcore runs gave the userinfo 12, 13 and 10 copies and the header
+values 3 to 9, so the number is "about a dozen", not a constant. The one
+re-run of the rig against the fixed helper, and one crash of that player with
+SIGSEGV, read `Max core file size 0 0` on the live process and left journal
+entry 34 of the day with `COREDUMP_RLIMIT 0`, no `COREDUMP_FILENAME` and the
+coredump directory unchanged at 67 files. What remains, stated exactly: the journal entry,
+whose fields were read on a real dump of the harness rig -- `COREDUMP_CMDLINE`
+is the launch argv, URL-free by S-03; `COREDUMP_ENVIRON` is the shell's whole
+environment, which the player's helper Process never hands a URL (no
+`OMARCHY_IPTV_URL` among its 257 names); `COREDUMP_OPEN_FDS` names sockets and
+pipes by inode, so an HTTP channel shows nothing and a `file://` channel would
+show its path; `COREDUMP_PROC_MAPS`, `_STATUS`, `_LIMITS` and `_CWD` carry no
+string of the stream's. The crash card and the agent it starts remain and then
+find no core. The cost: a crashed player leaves no core for the user's own
+diagnosis either. And the shell itself, which holds every source URL in its own
+heap, is host-owned and dumpable: the same sink one layer up, outside this
+plugin's reach, recorded for the owner.
+
 ## 7. Failure modes
 
 | Case | Designed behaviour |
