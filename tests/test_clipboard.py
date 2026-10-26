@@ -463,19 +463,20 @@ class ClipboardVerbTestCase(unittest.TestCase):
                                    stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=30)
         self.assertIn(b"clipboard", completed.stdout)
 
-
-class CoreDumpLimitTest(ClipboardVerbTestCase):
-    """D-SINK-39, rule 15's sibling of the player: wl-paste is the helper's
-    only other child, and what it holds is the user's clipboard -- which the
-    form's paste path exists to carry a provider URL through. A crash of it
-    would hand that offer to systemd-coredump, durably and readable by every
-    process of this uid. So it runs under RLIMIT_CORE (0, 0) like the player.
-
-    The stub's `limits` mode makes the clipboard the child's own
-    /proc/self/limits, so the shipping verb's reply is the kernel's answer.
-    """
-
     def test_wl_paste_runs_with_a_zero_core_limit_soft_and_hard(self):
+        """D-SINK-39, rule 15's sibling of the player: wl-paste is the
+        helper's only other child, and what it holds is the user's clipboard
+        -- which the form's paste path exists to carry a provider URL
+        through. A crash of it would hand that offer to systemd-coredump,
+        durably and readable by every process of this uid. So it runs under
+        RLIMIT_CORE (0, 0) like the player.
+
+        The stub's `limits` mode makes the clipboard the child's own
+        /proc/self/limits, so the shipping verb's reply is the kernel's
+        answer. A method on the one TestCase, not a subclass of it: a
+        subclass re-collects every inherited test under its own name, and
+        the first version ran this file's 22 tests twice (45 collected).
+        """
         if resource.getrlimit(resource.RLIMIT_CORE)[1] == 0:
             self.skipTest("RLIMIT_CORE is already hard-zero in this process; the child cannot be told apart from it")
         completed, _ = self.run_verb(mode="limits")
