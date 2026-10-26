@@ -40,6 +40,19 @@ if (( $# < 3 )); then
   echo "usage: private-bus.sh DIR SECONDS CMD [ARGS...]" >&2
   exit 2
 fi
+# F-HARNESS-45 (2026-10-25): a soft RLIMIT_CORE of 0 for everything beneath
+# -- the bus, the cage, its child, the scenario, the shell, the helper and
+# the player. core_pattern on this machine is a pipe to systemd-coredump and
+# the kernel ignores the limit for a pipe, so a crash still journals under
+# the coredump MESSAGE_ID and the host's crash watcher still posts its card
+# (it keys on the journal entry); what the limit changes is that
+# systemd-coredump STORES NO FILE ("Resource limits disable core dumping",
+# COREDUMP_RLIMIT 0, no COREDUMP_FILENAME -- measured with a renamed bash and
+# with a renamed mpv, both ABRT). The second layer, not the fix: the fix is
+# that the player under a cage does not crash (run.sh, harness_env). Soft,
+# so a spike that wants a core can raise it again under this script.
+# tests/test_harness_cage_player.py reads the limit from a probe run here.
+ulimit -S -c 0
 DIR=$1 SECS=$2
 shift 2
 if [[ -e $DIR ]]; then

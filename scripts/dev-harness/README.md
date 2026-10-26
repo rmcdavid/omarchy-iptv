@@ -1723,6 +1723,15 @@ What changed in the rigs:
   `run.sh` by pid and call `qa_reap_players` themselves, are all covered.
   The helper's own `player stop` is another path and already escalates to
   SIGKILL (quit, TERM at 2 s, then KILL; read, not changed).
+  **F-HARNESS-45 (2026-10-25): `reap_player` goes through that designed
+  door FIRST** -- `player stop --socket <this harness's socket>`, which
+  finds the player by the socket token in its argv, re-verifies the pid
+  before every signal, asks it to quit over IPC and only then signals --
+  and sweeps by pid afterwards as the backstop; it says
+  `player stop over the socket ended pid N at rung quit|term|kill`.
+  `qa-lib-test.sh` drives it against a stand-in named mpv that LISTENS on
+  the socket and records which door ended it: `quit gone` now, `term gone`
+  and nothing said on 96a1487.
 - The chno scenarios play every row from `run.sh`'s fixture server
   (`--serve`, port 8765, asserted to be this harness's own by
   `qa_listener_owned`) and compare a play token, the channel id and the
@@ -2117,6 +2126,52 @@ mid-run stranded the shell, the cage, the server and the work directory
 (measured on clip-scenario, the first to carry them). The qa-lib-test pin is
 the shape; the proof is a display lane's TERM at N s and INT leaving nothing
 behind, recorded per scenario in docs/QA-RESULTS.md.
+
+### A player under a nested cage (F-HARNESS-45)
+
+The m3 and pip cells of that live proof, run INSIDE a `WLR_RENDERER=pixman`
+cage's child, left mpv aborting: 30 cores of 6 MB and 7 "Process crashed:
+mpv" cards on the user's real desktop, none of them at a teardown. Every
+crash is the same one, about 5 s after each launch and again every ~5.5 s
+while the scenario's play intent stood, because the service relaunches a
+player that vanished: mpv 0.41.0's automatic VO probe on a compositor that
+can serve no hardware GL or Vulkan context -- `waylandvk` loses its surface
+(`VK_ERROR_SURFACE_LOST_KHR`), `x11vk` fails (through the cage's lazily
+started Xwayland, "No DRI3 support", or with no DISPLAY at all, "couldn't
+open the X11 display") and leaves `vo->x11` set, the wayland EGL context
+comes up on llvmpipe and is refused as a software renderer, and the next
+context, `x11egl`, trips mpv's own assertion, `vo_x11_init: Assertion
+'!vo->x11' failed` (video/out/x11_common.c:679), SIGABRT in the `vo`
+thread. Measured with a renamed copy of mpv (`omarchy-agent-mpv`, which the
+host's crash watcher skips by its own name rule) under a soft core limit of
+0, so the measurement posted no card and stored no file: the plugin's argv
+shape aborts with the cage's DISPLAY and without one; `--vo=wlshm` does not
+abort but is disconnected by the compositor on a zero-size
+`wl_viewport.set_destination` (exit 0, no window); `--gpu-sw=yes` comes up
+(`current-vo gpu-next`, `vo-configured true`, `idle-active true`, quit over
+IPC answered). The same argv under the user's own runtime directory
+resolved `current-ao` to `pipewire-0`, the user's sound server.
+
+So `run.sh`'s `harness_env` appends `--gpu-sw=yes --ao=null` to
+`OMARCHY_IPTV_MPV_ARGS` -- the user's own mpvArgs lever, behind the
+caller's tokens, never over a caller that already named `--gpu-sw` or
+`--ao` -- when the environment says `WLR_RENDERER=pixman` (a cage's child
+inherits it; no live session carries it) or the caller says
+`OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1`, which every scenario `h()` that
+points `run.sh` at `$NESTED` now sets (key, logo, open, clip, first-open).
+A caller that sets it to anything but 1 has said no. A gles2 cage gets
+nothing: it serves hardware contexts (the chno-mutations spike plays under
+one). `private-bus.sh` sets a soft `RLIMIT_CORE` of 0 for everything
+beneath it, the second layer: the kernel ignores the limit for a pipe
+`core_pattern`, so a crash still journals and still draws the card, but
+systemd-coredump stores no file. `tests/test_harness_cage_player.py` drives
+`harness_env` over the cases, runs the shipped helper's filter over the
+result (`--tls-verify=yes` still last), reads the limit from a probe under
+`private-bus.sh`, and holds the five `h()` lines to the lever; red on
+96a1487 in 7 of 8. A rig of your own that runs a scenario inside a cage's
+child inherits all of it through `run.sh`; one that starts the shell
+outside the cage sets the variable beside `WAYLAND_DISPLAY`, as the
+scenarios do.
 
 ## What the fixture contains
 
