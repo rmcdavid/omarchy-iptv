@@ -8,9 +8,11 @@ bus (QA-RESULTS "F-HARNESS-45"): mpv 0.41.0's automatic VO probe trips its
 own assertion, `vo_x11_init: Assertion '!vo->x11' failed`
 (video/out/x11_common.c:679), on a compositor that can serve no hardware GL
 or Vulkan context -- `waylandvk` loses its surface, `x11vk` fails (with the
-cage's lazy Xwayland or with no DISPLAY at all) and leaves `vo->x11` set,
-the wayland EGL context comes up on llvmpipe and is refused as a software
-renderer, and `x11egl` asserts. `--gpu-sw=yes` makes the probe accept the
+cage's lazy Xwayland or with no DISPLAY at all), the wayland EGL context
+comes up on llvmpipe and is refused as a software renderer without
+releasing its Wayland state (a pointer that shares a union with
+`vo->x11`), and `x11egl` asserts -- mpv-player/mpv#17190, fixed on master
+by a58dd8ac4, in no release as of 2026-10-26. `--gpu-sw=yes` makes the probe accept the
 llvmpipe context and the player comes up; `--vo=wlshm` does not (a
 zero-size wl_viewport destination, and the compositor disconnects it).
 

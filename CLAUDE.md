@@ -634,8 +634,10 @@ requests and raise the batch.
      that opens when a child DIES rather than while it runs: the kernel hands
      the whole process image to systemd-coredump, which stores it under
      `/var/lib/systemd/coredump/` as `root:root 0640` with an ACL
-     `user:<uid>:r--`, durably, with no retention time by default, and the
-     host's `omarchy-crash-watch` then posts a card whose click points an AI
+     `user:<uid>:r--`, for two weeks by default (`/usr/lib/tmpfiles.d/
+     systemd.conf` ages the directory at `2w`, applied daily by
+     `systemd-tmpfiles-clean.timer`; this entry first said "no retention
+     time", D-DOC-26), and the host's `omarchy-crash-watch` then posts a card whose click points an AI
      agent at it (`omarchy-agent-crash` -> the `diagnose-crash` skill:
      `coredumpctl dump` to a tempfile, `gdb ... bt`, "read the whole core,
      not just frame 0"). That reader class is the one D-SINK-9 closed

@@ -466,10 +466,13 @@ harness_env() {
   # 0.41.0's automatic VO probe ABORTS on a compositor that can serve no
   # hardware GL or Vulkan context: `waylandvk` loses its surface, `x11vk`
   # fails -- with the cage's lazy Xwayland (no DRI3) or with no DISPLAY at
-  # all -- and leaves `vo->x11` set, the wayland EGL context comes up on
-  # llvmpipe and is refused as a software renderer, and the next context,
+  # all -- the wayland EGL context comes up on llvmpipe and is refused as a
+  # software renderer WITHOUT releasing its Wayland state, whose pointer
+  # shares a union with `vo->x11` since mpv a310a65d, and the next context,
   # `x11egl`, trips `vo_x11_init: Assertion '!vo->x11' failed`
-  # (video/out/x11_common.c:679): SIGABRT in the `vo` thread about 5 s after
+  # (video/out/x11_common.c:679; mpv-player/mpv#17190, fixed on master by
+  # a58dd8ac4, in no release as of 2026-10-26; D-DOC-26 for the first
+  # version of this comment, which blamed x11vk): SIGABRT in the `vo` thread about 5 s after
   # the launch, a 6 MB core, a "Process crashed: mpv" card on the user's
   # REAL desktop, and the service relaunches it, so again every ~5.5 s for
   # as long as a play intent stands (30 dumps and 7 cards on 2026-10-25,
