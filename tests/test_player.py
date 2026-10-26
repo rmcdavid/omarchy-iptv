@@ -2287,6 +2287,9 @@ class ParityTest(unittest.TestCase):
         # the reserved list by adding them.
         self.assertNotIn("--tls-ca-file", names)
         self.assertNotIn("--profile", names)
+        # D-PLY-27: `--gpu-sw=yes` is in the base argv as a rendering
+        # PREFERENCE, so a user's `--gpu-sw=no` must stay free to follow it.
+        self.assertNotIn("--gpu-sw", names)
         self.assertNotIn("--cache-on-disk", names)
         self.assertNotIn("--ytdl", names)          # PO-5
         # NOT reserved, deliberately: ruling PO-10 / D-PLY-5 keeps --script-opts
@@ -2389,6 +2392,42 @@ class ParityTest(unittest.TestCase):
         # layer 2 at all, which would be a pinning that pins nothing.
         self.assertTrue(any(helper.filter_mpv_args(case["mpvArgs"])[0]
                             for case in self.fixture["mpvArgv"]))
+
+    def test_the_software_renderer_token_is_in_the_base_argv_once_and_a_user_no_lands_after_it(self):
+        """D-PLY-27 (the owner's decision, 2026-10-26): the launch argv accepts
+        a software renderer, because mpv 0.41.0's VO probe aborts on any
+        compositor that serves no hardware GL or Vulkan context (measured
+        2026-10-25 in the harness's pixman cage, QA-RESULTS "F-HARNESS-45").
+
+        The token's shape is the OPPOSITE of MPV_TLS_VERIFY's, and that is
+        what is pinned, off the fixture's own `gpuSoftware` so the JavaScript
+        mirror asserts the same field: EXACTLY ONCE, in the base section
+        before layer 1 of TLS and so before every user token; never the last
+        element; never reserved, so a user's `--gpu-sw=no` and `--no-gpu-sw`
+        pass the filter, land after it, and win by mpv's last-token rule. What
+        no test here can show is the probe accepting the context; that is the
+        cell under the pixman cage.
+        """
+        token = self.fixture["gpuSoftware"]
+        self.assertEqual(token, helper.MPV_GPU_SW)
+        self.assertIn('var MPV_GPU_SW = "%s"' % token, self.model)
+        self.assertNotIn("--gpu-sw", helper.MPV_RESERVED)
+        for case in self.fixture["mpvArgv"]:
+            args, _ = helper.filter_mpv_args(case["mpvArgs"])
+            dirs = helper.player_dirs(case["socketPath"], case["stateDir"])
+            argv = helper.mpv_launch_argv(case["socketPath"], args, dirs)
+            self.assertEqual(argv.count(token), 1, case["name"])
+            self.assertLess(argv.index(token), argv.index(helper.MPV_TLS_VERIFY), case["name"])
+            for user in args:
+                self.assertLess(argv.index(token), argv.index(user), case["name"])
+        for tokens in (["--gpu-sw=no"], ["--no-gpu-sw"], ["--gpu-sw=no", "--no-gpu-sw"]):
+            args, rejected = helper.filter_mpv_args(tokens)
+            self.assertEqual((args, rejected), (tokens, []), tokens)
+            argv = helper.mpv_launch_argv("/run/user/1000/omarchy-iptv/mpv.sock", args)
+            self.assertGreater(argv.index(tokens[-1]), argv.index(token), tokens)
+            self.assertEqual(argv[-1], helper.MPV_TLS_VERIFY, tokens)
+        # A fixture with no user `--gpu-sw=no` cannot see the position at all.
+        self.assertTrue(any("--gpu-sw=no" in case["mpvArgs"] for case in self.fixture["mpvArgv"]))
 
     def test_both_layers_are_present_and_are_two_occurrences_of_one_constant(self):
         """D-SINK-13 layers 1 and 2. Layer 1 is where a reader looks; layer 2 is

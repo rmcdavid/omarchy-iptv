@@ -656,6 +656,10 @@ TestCase {
     compare(argv.filter(function(t) { return t.indexOf("://") !== -1 }).length, 0)
     compare(argv.filter(function(t) { return t.indexOf("--user-agent") === 0 }).length, 0)
     compare(argv.indexOf("--idle=once") !== -1, true)
+    // D-PLY-27: the software renderer is accepted from the base argv, once,
+    // before layer 1 of TLS (so before any user token), in Qt's engine too.
+    compare(argv.filter(function(t) { return t === "--gpu-sw=yes" }).length, 1)
+    compare(argv.indexOf("--gpu-sw=yes") < argv.indexOf("--tls-verify=yes"), true)
     compare(argv.indexOf("--title=$>IPTV") !== -1, true)   // S-01: raw marker, never property-expanded
     compare(argv.indexOf("--force-media-title=IPTV") !== -1, true)
     compare(Model.splitMpvArgs("--Profile=x --no-idle --cache=yes").args, ["--cache=yes"])

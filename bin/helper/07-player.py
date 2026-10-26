@@ -114,6 +114,30 @@ MPV_RESERVED = frozenset((
 # purpose. Mirror of Model.MPV_TLS_VERIFY; the two literals are pinned to each
 # other by the shared player-argv.json vectors. See mpv_launch_argv.
 MPV_TLS_VERIFY = "--tls-verify=yes"
+# D-PLY-27 (the owner's decision, 2026-10-26): the launch argv ACCEPTS a
+# software renderer. mpv 0.41.0's automatic VO probe, on a compositor that
+# can serve no hardware GL or Vulkan context (a VM on llvmpipe, a pixman
+# compositor), loses the waylandvk surface, fails x11vk -- through a lazy
+# Xwayland or with no DISPLAY at all -- refuses the llvmpipe EGL context as a
+# software renderer without releasing its Wayland state, whose pointer
+# shares a union with `vo->x11`, and then trips its own assertion at x11egl,
+# `vo_x11_init: Assertion '!vo->x11' failed` (video/out/x11_common.c:679;
+# mpv-player/mpv#17190, fixed on master by a58dd8ac4, in no release as of
+# 2026-10-26): SIGABRT about 5 s after every launch, a
+# crash card and a coredump journal entry per zap (no core file: D-SINK-39
+# holds the player's core limit at 0), relaunched by the service every
+# ~5.5 s for as long as the play intent stands. `--gpu-sw=yes` makes the
+# probe ACCEPT
+# the software context (current-vo gpu-next, vo-configured true, exit 0);
+# DISPLAY is not the lever and `--vo=wlshm` is not an alternative. Measured
+# 2026-10-25 in a pixman cage with this argv shape (QA-RESULTS
+# "F-HARNESS-45"). A rendering preference, not a security layer: it sits in
+# the BASE argv so a user's own `--gpu-sw=no` or `--no-gpu-sw` lands after
+# it and wins, it is NOT re-asserted at the tail the way MPV_TLS_VERIFY is,
+# and it is NOT reserved. Mirror of the model's MPV_GPU_SW; the two literals
+# are pinned to each other by the shared player-argv.json vectors
+# (`gpuSoftware`).
+MPV_GPU_SW = "--gpu-sw=yes"
 # D-SINK-16. The same two knobs, named as mpv PROPERTIES rather than as
 # command-line options, because an ADOPTED player has no launch argv left to
 # change: all four of D-SINK-13's layers live on the argv, so a process started
@@ -327,6 +351,10 @@ def mpv_launch_argv(sock_path: str, mpv_args: list[str],
         "--watch-later-dir=%s" % where["watchLater"],
         "--gpu-shader-cache-dir=%s" % where["shaderCache"],
         "--icc-cache-dir=%s" % where["shaderCache"],
+        # D-PLY-27: accept a software renderer (see MPV_GPU_SW). In the base
+        # section, BEFORE the user's tokens, so a `--gpu-sw=no` in mpv_args
+        # lands after it and wins; once, never re-asserted, never reserved.
+        MPV_GPU_SW,
         # D-SINK-13, LAYER 1: stated here, where a reader looks to find out what
         # the player is launched with. mpv's own default is `--tls-verify=no`
         # (`mpv --list-options`, 0.41.0). Layer 1 alone is NOT the fix.
