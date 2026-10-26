@@ -930,6 +930,40 @@ class CoreDumpLimitTest(PlayerTestCase):
         # drives main() in THIS process, so its own limit must be as it was.
         self.assertEqual(resource.getrlimit(resource.RLIMIT_CORE), inherited)
 
+    # D-SINK-16's shape, one sink over: the player this shell ADOPTS was
+    # started by the old code, so nothing between its fork and its exec set a
+    # limit, and it keeps the unlimited core it inherited from the session
+    # while the new code feeds it credentialed URLs. prlimit(2) lets a process
+    # lower another's limit when their uids and gids match -- no ptrace, so
+    # Yama's scope does not apply -- and the hard half cannot be raised back
+    # without CAP_SYS_RESOURCE. The sleeper is a real process with THIS
+    # process's limits, found by the /proc scan exactly as a live mpv is.
+
+    def test_a_player_found_by_the_probe_gets_its_core_limit_lowered(self):
+        if resource.getrlimit(resource.RLIMIT_CORE)[1] == 0:
+            self.skipTest("RLIMIT_CORE is already hard-zero in this process; the adopted player cannot be told apart from it")
+        os.makedirs(self.runtime, 0o700)
+        idle = self.sleeper()
+        self.assertNotEqual(self.core_limit(idle.pid), ("0", "0"), "the pre-upgrade player must start unlimited")
+        self.start(props={"mpv-version": "mpv 0.41.0"})
+        code, payload, _, stderr = run("player", "probe", "--socket", self.sock, "--ipc-timeout", "1")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual(payload["pid"], idle.pid)
+        self.assertEqual(self.core_limit(idle.pid), ("0", "0"))
+
+    def test_a_player_adopted_by_start_gets_its_core_limit_lowered(self):
+        if resource.getrlimit(resource.RLIMIT_CORE)[1] == 0:
+            self.skipTest("RLIMIT_CORE is already hard-zero in this process; the adopted player cannot be told apart from it")
+        os.makedirs(self.runtime, 0o700)
+        idle = self.sleeper()
+        self.assertNotEqual(self.core_limit(idle.pid), ("0", "0"), "the pre-upgrade player must start unlimited")
+        self.start(props={"mpv-version": "mpv 0.41.0"})
+        code, payload, _, stderr = self.player_start()
+        self.assertEqual(code, 0, stderr)
+        self.assertFalse(payload["spawned"])
+        self.assertEqual(payload["pid"], idle.pid)
+        self.assertEqual(self.core_limit(idle.pid), ("0", "0"))
+
 
 class IdempotenceTest(PlayerTestCase):
     def test_a_live_player_is_adopted_and_zapped_never_duplicated(self):

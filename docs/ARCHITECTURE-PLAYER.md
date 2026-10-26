@@ -1262,7 +1262,19 @@ grandchild sets RLIMIT_CORE to (0, 0), soft and hard, as its last act before
 systemd-coredump journals the crash and stores nothing (`COREDUMP_RLIMIT 0`,
 no `COREDUMP_FILENAME`, measured the same day). `read_clipboard`'s wl-paste
 gets the same as a `preexec_fn`: the clipboard it reads is the form's paste
-path for a provider URL. What remains, stated exactly: the journal entry,
+path for a provider URL. And the player this shell ADOPTS -- D-SINK-16's
+shape, the one the exec-time lever cannot reach, because the old code forked
+it -- has its limit lowered from outside at the reattach: `player probe`
+(beside the TLS migration) and `player start`'s adopt branch call
+`limit_core_of`, which is `prlimit(2)` on the player's pid, allowed to a
+same-uid caller without ptrace and irreversible by the player (raising the
+hard limit back takes CAP_SYS_RESOURCE; measured). The counts above are one
+run's: three gcore runs gave the userinfo 12, 13 and 10 copies and the header
+values 3 to 9, so the number is "about a dozen", not a constant. The one
+re-run of the rig against the fixed helper, and one crash of that player with
+SIGSEGV, read `Max core file size 0 0` on the live process and left journal
+entry 34 of the day with `COREDUMP_RLIMIT 0`, no `COREDUMP_FILENAME` and the
+coredump directory unchanged at 67 files. What remains, stated exactly: the journal entry,
 whose fields were read on a real dump of the harness rig -- `COREDUMP_CMDLINE`
 is the launch argv, URL-free by S-03; `COREDUMP_ENVIRON` is the shell's whole
 environment, which the player's helper Process never hands a URL (no

@@ -736,9 +736,9 @@ def disable_core_dumps() -> None:
     core under /var/lib/systemd/coredump as root:root 0640 with an ACL that
     lets EVERY process of that uid read it, durably and with no retention
     time, and the host then offers to point an AI agent at it; a playing
-    mpv's memory holds the stream URL, userinfo and all, in ten copies, and
-    every provider header value in several, while its argv and environment
-    hold none. With a soft limit of 0 systemd-coredump journals the crash
+    mpv's memory holds the stream URL, userinfo and all, in ten to thirteen
+    copies (three gcore runs: 12, 13, 10), and every provider header value
+    in three to eight, while its argv and environment hold none. With a soft limit of 0 systemd-coredump journals the crash
     and stores nothing (COREDUMP_RLIMIT 0, no COREDUMP_FILENAME).
 
     Why the HARD limit too: the soft limit is only the process's current
@@ -755,6 +755,34 @@ def disable_core_dumps() -> None:
     """
     import resource
     resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+
+def limit_core_of(pid: int) -> bool:
+    """RLIMIT_CORE (0, 0) on a player this helper did NOT start (D-SINK-39,
+    the D-SINK-16 half). The detached player survives a shell restart by
+    design, so after an upgrade the shell reattaches to an mpv the OLD code
+    forked -- nothing between its fork and its exec set a limit -- and then
+    feeds it credentialed URLs and provider headers: the same live feed into
+    an unprotected process that D-SINK-16 closed for TLS. disable_core_dumps
+    reaches only a child of this helper; this reaches a process that is not.
+
+    prlimit(2) lets a process set another's limits when the target's real,
+    effective and saved uids and gids all match the caller's -- no ptrace, so
+    Yama's scope does not apply -- and lowering takes no capability while
+    raising the hard limit back takes CAP_SYS_RESOURCE, so the player cannot
+    undo it. Measured 2026-10-25 on a same-uid process: (-1, -1) -> (0, 0),
+    the raise refused with EPERM. Returns whether the kernel now reads
+    (0, 0); False for a pid that is gone or not ours, which the caller says
+    out loud. pid 0 would mean THIS process to prlimit, so it is refused.
+    """
+    import resource
+    if pid <= 0:
+        return False
+    try:
+        resource.prlimit(pid, resource.RLIMIT_CORE, (0, 0))
+        return resource.prlimit(pid, resource.RLIMIT_CORE) == (0, 0)
+    except (OSError, ValueError, OverflowError):
+        return False
 
 
 def socket_path(explicit: str | None = None) -> str:
