@@ -2138,11 +2138,16 @@ player that vanished: mpv 0.41.0's automatic VO probe on a compositor that
 can serve no hardware GL or Vulkan context -- `waylandvk` loses its surface
 (`VK_ERROR_SURFACE_LOST_KHR`), `x11vk` fails (through the cage's lazily
 started Xwayland, "No DRI3 support", or with no DISPLAY at all, "couldn't
-open the X11 display") and leaves `vo->x11` set, the wayland EGL context
-comes up on llvmpipe and is refused as a software renderer, and the next
+open the X11 display"), the wayland EGL context comes up on llvmpipe and is
+refused as a software renderer without releasing its Wayland state, whose
+pointer shares a union with `vo->x11` since mpv a310a65d, and the next
 context, `x11egl`, trips mpv's own assertion, `vo_x11_init: Assertion
 '!vo->x11' failed` (video/out/x11_common.c:679), SIGABRT in the `vo`
-thread. Measured with a renamed copy of mpv (`omarchy-agent-mpv`, which the
+thread. Upstream knows it: mpv-player/mpv#17190, fixed on master by
+a58dd8ac4 (2025-12-27) and in no release as of 2026-10-26; Arch's
+1:0.41.0-6 does not carry it. The first version of this paragraph said
+`x11vk` left `vo->x11` set; the no-DISPLAY arm, where no X11 display ever
+opened and the assertion still fired, contradicted that (D-DOC-26). Measured with a renamed copy of mpv (`omarchy-agent-mpv`, which the
 host's crash watcher skips by its own name rule) under a soft core limit of
 0, so the measurement posted no card and stored no file: the plugin's argv
 shape aborts with the cage's DISPLAY and without one; `--vo=wlshm` does not

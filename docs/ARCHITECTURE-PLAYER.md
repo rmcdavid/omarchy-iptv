@@ -1232,7 +1232,9 @@ measured, so the escape is documented as "name your provider's CA" and not as
 the URL and the headers are written while the player RUNS; a crash writes all
 of it at once. systemd-coredump stores a user process's core under
 `/var/lib/systemd/coredump/` as `root:root 0640` with an ACL granting the
-crashing uid read, durably and with no retention time, and the host's
+crashing uid read, for two weeks by default (the tmpfiles.d age of that
+directory, `2w`; this paragraph first said "no retention time", D-DOC-26),
+and the host's
 `omarchy-crash-watch` then posts a card whose click points an AI agent at the
 dump (`omarchy-agent-crash`, the `diagnose-crash` skill: `coredumpctl dump` to
 a temporary file, `gdb ... bt`, "read the whole core, not just frame 0"). That

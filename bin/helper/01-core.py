@@ -734,8 +734,9 @@ def disable_core_dumps() -> None:
     inherited across fork and exec and is the one setting that does. What it
     closes, measured 2026-10-25: systemd-coredump stores a user process's
     core under /var/lib/systemd/coredump as root:root 0640 with an ACL that
-    lets EVERY process of that uid read it, durably and with no retention
-    time, and the host then offers to point an AI agent at it; a playing
+    lets EVERY process of that uid read it, for two weeks by default (the
+    tmpfiles.d age of that directory), and the host then offers to point an
+    AI agent at it; a playing
     mpv's memory holds the stream URL, userinfo and all, in ten to thirteen
     copies (three gcore runs: 12, 13, 10), and every provider header value
     in three to eight, while its argv and environment hold none. With a soft limit of 0 systemd-coredump journals the crash
