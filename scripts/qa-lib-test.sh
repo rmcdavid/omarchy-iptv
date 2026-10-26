@@ -1838,7 +1838,7 @@ fg_run() {
   rm -f "$FG"/h/primed*
   fg_run_keep "$@"
 }
-FG_OPEN='{"ok":true,"error":"","open":true,"keyboard":true,"role":"catcher","item":"PanelKeyCatcher","blocked":false,"window":"layer","scanned":326,"exhausted":false}'
+FG_OPEN='{"ok":true,"error":"","open":true,"keyboard":true,"role":"catcher","item":"PanelKeyCatcher","blocked":false,"window":"layer","scanned":326,"exhausted":false,"windowActive":true,"windowVisible":true}'
 # The two integers in that reply are the lead's live reading of the real guide
 # on 2026-10-06 (220 visits closed, 326 open), not invented ones -- but nothing
 # in this section MEASURES them: `qs` is a stub, so every field here is a value
@@ -1865,6 +1865,28 @@ ck "and the refusal says which of the two it was" 'grep -q "the guide is CLOSED"
 fg_stub "${FG_OPEN/\"keyboard\":true/\"keyboard\":false}" "" 0
 is "an open guide whose keyboard is elsewhere refuses" "$(fg_run key j)" "3 0"
 ck "and says so, rather than naming the closed case" 'grep -q "ANOTHER SURFACE holds the keyboard" "$FG/out"'
+
+# F-M3-24: an item inside the guide holding focus is not the guide holding the
+# keyboard. Under a headless cage the guide's layer window never maps, its
+# catcher still read activeFocus true, and this table passed it: the reply
+# below is the one measured there (keyboard true, windowActive false), and on
+# b43c4a4's run.sh it answered "0 2" -- a primer and the key, typed into
+# whatever cage had focused. Refused now, tagged with the class a scenario
+# may SKIP, and the tag is the shared name, read from qa-lib.sh here.
+fg_stub "${FG_OPEN/\"windowActive\":true/\"windowActive\":false}" "" 0
+is "an open guide whose WINDOW is inactive refuses, though its catcher holds focus" "$(fg_run key j)" "3 0"
+ck "and says the compositor has not given the window the keyboard, with the shared tag" \
+   'grep -q "has not given the guide.s WINDOW the keyboard" "$FG/out" && grep -qF "($QA_KEY_WINDOW_INACTIVE)" "$FG/out"'
+is "type refuses the inactive window up front, nothing typed" "$(fg_run type sky)" "3 0"
+is "--to-compositor still sends past an inactive window, the chord only" "$(fg_run key --to-compositor -k Escape)" "0 1"
+# A reply that does not say is not a yes: a harness from before this field,
+# or a null the snapshot could not read. Refused as "cannot tell", UNtagged,
+# so no scenario can turn it into a SKIP.
+fg_stub "${FG_OPEN/,\"windowActive\":true/}" "" 0
+is "a reply with no windowActive refuses (fail closed)" "$(fg_run key j)" "3 0"
+ck "as 'cannot tell', without the SKIP tag" 'grep -q "so I cannot tell" "$FG/out" && ! grep -qF "($QA_KEY_WINDOW_INACTIVE)" "$FG/out"'
+fg_stub "${FG_OPEN/\"windowActive\":true/\"windowActive\":null}" "" 0
+is "and so does a null one" "$(fg_run key j)" "3 0"
 
 # A focused Sources field is still the guide: role is reported, never refused on.
 fg_stub "${FG_OPEN/\"role\":\"catcher\"/\"role\":\"other\"}" "" 0
@@ -1971,6 +1993,8 @@ is "shot refuses with 3 while the guide is CLOSED: no grim call, no file" "$(fg_
 ck "and the refusal is worded as key's is" 'grep -q "shot REFUSED: the guide is CLOSED" "$FG/out"'
 fg_stub "${FG_OPEN/\"keyboard\":true/\"keyboard\":false}" "" 0
 is "and while ANOTHER SURFACE holds the keyboard" "$(fg_shot shot guide | tr '\n' ' ')" "3 0 nofile "
+fg_stub "${FG_OPEN/\"windowActive\":true/\"windowActive\":false}" "" 0
+is "and while the guide's WINDOW is inactive (F-M3-24)" "$(fg_shot shot guide | tr '\n' ' ')" "3 0 nofile "
 fg_stub "$FG_OPEN" "" 0
 is "a focused guide is captured, once, and the path is printed" "$(fg_shot shot guide | tr '\n' ' ') $(grep -c "^$FG/h/shots/guide.png$" "$FG/out")" "0 1 file  1"
 is "on the FOCUSED output" "$(tail -1 "$GRIM_LOG")" "-o STUB-OUT $FG/h/shots/guide.png"
@@ -1985,6 +2009,42 @@ ck "and no shot ever primes the shell (a shot is not a keystroke)" '[[ ! -f $FG/
 # line. Bookkeeping by shape (rule 14 says so): the live run is the proof.
 is "m3-scenario.sh's shot wrapper counts a refusal as a FAIL rather than hiding it" \
    "$(awk '/^shot\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/m3-scenario.sh" | grep -c 'rc == 3.*fail "shot')" "1"
+
+# ======== qa_key: the window-inactive refusal is a SKIP only where opted in
+
+section "qa_key: which refusal a scenario may SKIP (F-M3-24)"
+
+# Driven end to end: the REAL run.sh over the stubbed qs above, through the
+# real qa_key, so the join between run.sh's refusal text and qa_key's match
+# is a call and not two strings. Each case runs in a subshell so the counters
+# start at zero; it prints "<status> skips=<n> refusals=<n> wtype=<calls>"
+# and then qa_key's own line. On b43c4a4 the inactive reply was SENT, "0 ...
+# wtype=2", which is the H6a/H6b shape of F-M3-24 in one line.
+fg_qa_key() {   # fg_qa_key <opt-in 0|1> <wtype args...>
+  local opt=$1; shift
+  rm -f "$FG"/h/primed*; : >"$FG/wtype.log"
+  ( QA_KEY_SKIPS=0; QA_KEY_REFUSALS=0; QA_KEY_SKIP_REASON=""; QA_KEY_SKIP_INACTIVE=$opt
+    export WTYPE_LOG=$FG/wtype.log PATH="$FG/bin:$PATH" OMARCHY_IPTV_HARNESS_DIR=$FG/h
+    # Not $( ): the counters must move in THIS shell, not in a copy of it.
+    qa_key "$ROOT/scripts/dev-harness/run.sh" "$@" >"$FG/qk.out"; rc=$?
+    printf '%s skips=%s refusals=%s wtype=%s\n%s\n%s\n' "$rc" "$QA_KEY_SKIPS" "$QA_KEY_REFUSALS" \
+      "$(wc -l <"$FG/wtype.log" | tr -d ' ')" "$(cat "$FG/qk.out")" "$QA_KEY_SKIP_REASON" )
+}
+fg_stub "${FG_OPEN/\"windowActive\":true/\"windowActive\":false}" "" 0
+QK=$(fg_qa_key 1 x)
+is "opted in, an inactive window is refused and counted as a SKIP, not a refusal" "$(sed -n 1p <<<"$QK")" "3 skips=1 refusals=0 wtype=0"
+ck "its line is KEY-REFUSED, which no PASS/FAIL/SKIP counter reads, and names the tag" \
+   '[[ $(sed -n 2p <<<"$QK") == "KEY-REFUSED run.sh key x (exit 3, $QA_KEY_WINDOW_INACTIVE) -- "* ]]'
+ck "and the reason a dependent SKIP will quote is the guard's own sentence" \
+   '[[ $(sed -n 3p <<<"$QK") == "the compositor has not given the guide'"'"'s WINDOW the keyboard ($QA_KEY_WINDOW_INACTIVE)"* ]]'
+is "NOT opted in, the same refusal is still a FAIL and a counted refusal" "$(fg_qa_key 0 x | sed -n 1p)" "3 skips=0 refusals=1 wtype=0"
+is "and its line is the FAIL it always was" "$(fg_qa_key 0 x | sed -n 2p | cut -c1-34)" "FAIL run.sh key x was REFUSED (exi"
+fg_stub "${FG_OPEN/\"open\":true/\"open\":false}" "" 0
+is "opted in, a CLOSED guide is still a FAIL: only the window class may skip" "$(fg_qa_key 1 x | sed -n 1p)" "3 skips=0 refusals=1 wtype=0"
+fg_stub "${FG_OPEN/,\"windowActive\":true/}" "" 0
+is "opted in, a reply that cannot tell is a FAIL, never a SKIP" "$(fg_qa_key 1 x | sed -n 1p)" "3 skips=0 refusals=1 wtype=0"
+fg_stub "$FG_OPEN" "" 0
+is "opted in, a guide that holds the keyboard sends: no SKIP is possible there" "$(fg_qa_key 1 x | sed -n 1p)" "0 skips=0 refusals=0 wtype=2"
 
 # ============ shell.qml focusWalk: the two bounds, driven for real (F-M3-1 a)
 
@@ -2054,6 +2114,53 @@ is "a branch that simply ENDS is not giving up (a null child must not set exhaus
    "$(fwline NULLS)" "NULLS leaf=false exhausted=false"
 is "and the NODE budget reports it too, at the budget" \
    "$(fwline BUDGET)" "BUDGET exhausted=true scanned=$(grep -oE 'focusScanBudget: [0-9]+' "$ROOT/scripts/dev-harness/shell.qml" | grep -oE '[0-9]+')"
+
+# ======== shell.qml focusSnapshot: the window bit reaches the reply (F-M3-24)
+
+section "shell.qml focusSnapshot: windowActive is the leaf's window, read for real"
+
+# The same method as focusWalk above: the shipping TEXT of focusSnapshot and
+# the four functions it calls, run by node over trees built here. What this
+# can show is the wiring -- that the reply's windowActive is the attached
+# Window.active of the item that would take the key, falls back to the guide
+# window's content item, and is null (never true) when unreadable. Whether
+# Qt's Window.active follows the compositor is the cage measurement's to say
+# (QA-RESULTS "F-M3-24"), not this. Red on b43c4a4's shell.qml: there is no
+# windowFocus, and its reply carries no windowActive at all.
+cat >"$TMP/focussnap.js" <<'FS_JS'
+var fs = require('fs');
+var src = fs.readFileSync(process.argv[2], 'utf8');
+function fn(name) {
+  var start = src.indexOf('\n  function ' + name + '(');
+  if (start < 0) { console.log('EXTRACT-FAIL function ' + name); process.exit(0); }
+  var end = src.indexOf('\n  }\n', start);
+  return eval('(' + src.slice(start + 1, end + 4).trim() + ')');
+}
+var harness = { focusScanBudget: 20000, focusDepthCap: 60 };
+['focusWalk', 'typeToken', 'windowHost', 'windowFocus', 'focusSnapshot'].forEach(function (n) { harness[n] = fn(n); });
+function win(active) { return { active: active, window: { visible: true } }; }
+function guide(leafWin, hostWin) {
+  var leaf = { activeFocus: true, children: [] };
+  if (typeof leafWin === 'function') Object.defineProperty(leaf, 'Window', { get: leafWin });
+  var content = { activeFocus: false, children: [] };
+  if (typeof hostWin === 'function') Object.defineProperty(content, 'Window', { get: hostWin });
+  return { opened: true, hostWindow: { contentItem: content }, children: [leafWin === null ? { activeFocus: false, children: [] } : leaf] };
+}
+function show(r) { return 'keyboard=' + r.keyboard + ' windowActive=' + r.windowActive + ' windowVisible=' + r.windowVisible; }
+console.log('CAGE ' + show(harness.focusSnapshot(guide(function () { return win(false); }))));
+console.log('HELD ' + show(harness.focusSnapshot(guide(function () { return win(true); }))));
+console.log('NOLEAF ' + show(harness.focusSnapshot(guide(null, function () { return win(true); }))));
+console.log('THROWS ' + show(harness.focusSnapshot(guide(function () { throw new Error('no attached Window'); }))));
+console.log('NOGUIDE ' + show(harness.focusSnapshot(null)));
+FS_JS
+FS=$(node "$TMP/focussnap.js" "$ROOT/scripts/dev-harness/shell.qml" 2>&1)
+fsline() { printf '%s\n' "$FS" | grep "^$1 " | head -1; }
+is "the cage's shape: a focused catcher in an INACTIVE window reports windowActive false" \
+   "$(fsline CAGE)" "CAGE keyboard=true windowActive=false windowVisible=true"
+is "a focused catcher in an active window reports true" "$(fsline HELD)" "HELD keyboard=true windowActive=true windowVisible=true"
+is "with no focused item, the guide window's own content item answers" "$(fsline NOLEAF)" "NOLEAF keyboard=false windowActive=true windowVisible=true"
+is "an unreadable attached Window is null, never true" "$(fsline THROWS)" "THROWS keyboard=true windowActive=null windowVisible=null"
+is "no guide at all is null" "$(fsline NOGUIDE)" "NOGUIDE keyboard=false windowActive=null windowVisible=null"
 
 # =========== qa_transcript_start: the directory mode the REFUSAL actually sees
 
@@ -2871,7 +2978,12 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # 549 -> 552 on 2026-10-25, lane-fh45 (F-HARNESS-45): run.sh reap through
 # the helper's own door, driven against a listening stand-in (3); red on
 # 96a1487's run.sh ("term gone", nothing said).
-EXPECTED=552
+# 552 -> 573 on 2026-10-26, lane-fm324 (F-M3-24): the guard's window bit in
+# the decision table (7) and in shot's (1); qa_key's SKIP class driven end to
+# end through the real run.sh (8); focusSnapshot's windowActive wiring over
+# its shipping text (5). Red on b43c4a4's run.sh, qa-lib.sh and shell.qml
+# (the lane report has the per-check counts).
+EXPECTED=573
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

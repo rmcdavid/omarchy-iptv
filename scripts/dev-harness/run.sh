@@ -85,6 +85,20 @@
 # layers` has no such field and `hyprctl activewindow` names a toplevel while
 # an overlay is taking keys -- so the question goes to the guide. The numbers
 # behind that are in scripts/dev-harness/shell.qml, at harness.focusSnapshot.
+# "The guide has the keyboard" is TWO observations since F-M3-24 (2026-10-26),
+# and the first alone was not true: an item inside the guide holds Qt's
+# activeFocus (`keyboard`), AND the guide's window is active (`windowActive`,
+# Qt's Window.active, which follows the compositor's keyboard enter/leave).
+# Under a headless cage, which has no layer-shell, the production guide
+# window never maps; its key catcher still read activeFocus true, the guard
+# passed, and every real key went to nothing or to the player's window
+# (mpv's sub-delay moved). A false `windowActive` refuses with the tag
+# $QA_KEY_WINDOW_INACTIVE in the message, which is the one refusal a
+# scenario may report as SKIP (qa_key); a missing one refuses as "cannot
+# tell". UNVERIFIED on the live desktop: that Hyprland's exclusive keyboard
+# focus on the guide's layer surface reads windowActive true has been read
+# in Qt's activation path, not observed, because this lane may not open a
+# window there; the first desk run of a keyed scenario observes it.
 #
 # Environment: OMARCHY_IPTV_PLUGIN_ROOT overrides which checkout the harness
 # loads Service.qml / Guide.qml / BarWidget.qml / bin/omarchy-iptv from
@@ -99,7 +113,7 @@
 #             XDG_CONFIG_HOME -> home/.config, XDG_DATA_HOME -> home/.local/share
 #   cache/    XDG_CACHE_HOME  -> cache/omarchy-iptv/{channels,playlist-status,epg-now}.json
 #   state/    XDG_STATE_HOME  -> state/omarchy-iptv/state.json
-#   runtime/  XDG_RUNTIME_DIR -> runtime/omarchy-iptv/mpv.sock (+ hypr symlink so hyprctl works)
+#   runtime/  XDG_RUNTIME_DIR -> runtime/omarchy-iptv/mpv.sock (+ a hypr symlink; prepare_root says when hyprctl can use it)
 #   fixtures/ generated playlist / test.ts (MPEG-TS, like a live stream; an MP4 with a trailing moov is not seekable over HTTP)
 #   qs<N>.pid, server.pid  the detached shell's and the fixture server's RECORDED pids: what
 #             `reap` and the EXIT trap end, by pid, with TERM then KILL (F-HARNESS-32);
@@ -392,6 +406,12 @@ prepare_root() {
       || die "$root/shell.qml differs from the harness shell.qml by more than its model import"
   fi
   # hyprctl and Quickshell's Hyprland bits look under $XDG_RUNTIME_DIR/hypr.
+  # Measured 2026-10-26 (F-M3-24, read-only `hyprctl version`): through this
+  # link the socket path is 123 bytes at the default harness directory, past
+  # sun_path's 108, so hyprctl CANNOT connect there (exit 4) even with a
+  # signature; through a 106-byte one it reached the user's live Hyprland.
+  # So this link is not what keeps a caged run off the user's compositor --
+  # an unset HYPRLAND_INSTANCE_SIGNATURE is (every rig and h() unsets it).
   [[ -d $REAL_RUNTIME/hypr ]] && ln -sfn "$REAL_RUNTIME/hypr" "$SCRATCH/runtime/hypr"
   return 0
 }
@@ -686,7 +706,7 @@ require_guide_focus() {
     echo "[run.sh] if this key is meant for the COMPOSITOR rather than the guide, pass --to-compositor" >&2
     return 1
   fi
-  verdict=$(python3 - "$reply" <<'PY'
+  verdict=$(python3 - "$reply" "$QA_KEY_WINDOW_INACTIVE" <<'PY'
 import json, sys
 raw = sys.argv[1]
 try:
@@ -700,11 +720,30 @@ if not isinstance(d, dict):
 if not d.get("ok"):
     print("no the harness has loaded no guide (error=%s)" % (d.get("error"),))
     sys.exit(0)
-where = ("window=%s open=%s keyboard=%s role=%s item=%s blocked=%s scanned=%s exhausted=%s"
+where = ("window=%s open=%s keyboard=%s role=%s item=%s blocked=%s scanned=%s exhausted=%s windowActive=%s windowVisible=%s"
          % (d.get("window"), d.get("open"), d.get("keyboard"), d.get("role"),
-            d.get("item"), d.get("blocked"), d.get("scanned"), d.get("exhausted")))
+            d.get("item"), d.get("blocked"), d.get("scanned"), d.get("exhausted"),
+            d.get("windowActive"), d.get("windowVisible")))
+# F-M3-24: `keyboard` is Qt's own item focus, and an item keeps activeFocus
+# in a window the compositor never mapped -- measured under a headless cage,
+# where the guide's layer window cannot map, with the guard passing and the
+# key reaching nothing, or the player's window. `windowActive` is the
+# window's activation, which Qt takes from the compositor's keyboard
+# enter/leave. Absent or null is "cannot tell" and refuses too (fail closed),
+# but without the tag: only an observed `false` is the class a scenario may
+# turn into a SKIP (qa_key, QA_KEY_SKIP_INACTIVE).
+active = d.get("windowActive")
 if not d.get("open"):
     print("no the guide is CLOSED, so a key would land in whatever is behind it; " + where)
+elif active is None:
+    print("no the harness did not say whether the guide's WINDOW holds the compositor's keyboard "
+          "(no windowActive in its reply: a harness started before F-M3-24? reap and restart it), "
+          "so I cannot tell; " + where)
+elif active is not True:
+    print("no the compositor has not given the guide's WINDOW the keyboard (%s): Qt reports the window "
+          "inactive, so a key would go to whatever the compositor focused, whatever item inside the guide "
+          "holds focus. Under a compositor with no layer-shell (headless cage) the production guide window "
+          "never maps; start the harness with --window floating there; " % sys.argv[2] + where)
 elif d.get("exhausted") and not d.get("keyboard"):
     print("no the focus walk gave up before it found a focused item, so I cannot tell; " + where)
 elif not d.get("keyboard"):

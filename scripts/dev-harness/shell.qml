@@ -731,12 +731,47 @@ ShellRoot {
     return acc
   }
 
+  // F-M3-24: whether the COMPOSITOR has given the guide's window the
+  // keyboard, which an item's `activeFocus` does not say. Measured
+  // 2026-10-26 under a headless pixman cage on a private bus, the scenario
+  // inside the cage's child and outside it alike (QA-RESULTS "F-M3-24"):
+  //   - the production guide window (a layer surface; cage has no
+  //     layer-shell, so it never maps): the catcher read activeFocus TRUE,
+  //     `windowActive` false, `windowVisible` true. A real `x` passed the
+  //     old guard and hid nothing; with a player up, cage had focused the
+  //     player's window (mpv `focused` true) and the same `x` moved mpv's
+  //     sub-delay 0.0 -> 0.1, mpv's own binding for x.
+  //   - the harness's floating window (an xdg toplevel cage maps and
+  //     focuses): `windowActive` true and the `x` hid the group; once the
+  //     player's window mapped, cage moved the keyboard to it and the guide
+  //     read windowActive false AND activeFocus false.
+  // So an item keeps activeFocus in a window that was never activated, and
+  // loses it in one that was activated and then left; `Window.active` is
+  // right in all four. Read from the item that would receive the key (the
+  // leaf), or from the guide window's content item when there is none, so a
+  // closed or unfocused guide still reports its window. `null` means
+  // unreadable, which run.sh refuses as "cannot tell".
+  //   windowActive    Window.active: the window holds the compositor's keyboard
+  //   windowVisible   the backing QQuickWindow's `visible` (Qt's intent, NOT
+  //                   proof of a map: the cage's unmapped layer window reads true)
+  function windowFocus(leaf, g) {
+    var r = { windowActive: null, windowVisible: null }
+    var item = leaf
+    if (!item) { try { item = g && g.hostWindow ? g.hostWindow.contentItem : null } catch (e) { item = null } }
+    if (!item) return r
+    try { var a = item.Window.active; if (a === true || a === false) r.windowActive = a } catch (e) {}
+    try { var w = item.Window.window; r.windowVisible = w ? w.visible === true : false } catch (e) {}
+    return r
+  }
+
   function focusSnapshot(g) {
     if (!g) {
       return { ok: false, error: "no_guide", open: false, keyboard: false, role: "none",
-               item: "", blocked: null, window: "none", scanned: 0, exhausted: false }
+               item: "", blocked: null, window: "none", scanned: 0, exhausted: false,
+               windowActive: null, windowVisible: null }
     }
     var acc = harness.focusWalk(g, 0, { leaf: null, depth: -1, scanned: 0, exhausted: false })
+    var win = harness.windowFocus(acc.leaf, g)
     var token = acc.leaf ? harness.typeToken(acc.leaf) : ""
     // The catcher's own `blocked`, which the guide binds to `!catcherLive`.
     // Reported, never refused on: in search mode the catcher is blocked and
@@ -758,7 +793,9 @@ ShellRoot {
       blocked: blocked,
       window: harness.windowHost(g).kind,
       scanned: acc.scanned,
-      exhausted: acc.exhausted === true
+      exhausted: acc.exhausted === true,
+      windowActive: win.windowActive,
+      windowVisible: win.windowVisible
     }
   }
 
