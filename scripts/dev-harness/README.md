@@ -856,9 +856,45 @@ passes 20/20 on the changed stub.
 
 ```
 scripts/dev-harness/logo-scenario.sh check-tree            # no display, loopback only; run by check.sh
-scripts/dev-harness/logo-scenario.sh                       # the same checks, with a transcript
+scripts/dev-harness/logo-scenario.sh                       # the same checks, with a transcript, then the W segment under a nested cage
 scripts/dev-harness/logo-scenario.sh --baseline 159da94    # the red run: the shipped 0.13.3
+scripts/dev-harness/logo-scenario.sh live --tree "$cp"     # a PREPARED copy of the tree: how W2/W3/W5 and W1/W4/W6 were seen red
 ```
+
+**The W segment (live only, 2026-10-25, F-M3-18's open half).** The three
+logo-lifecycle decisions that lived only in `Service.qml` -- `clearSourceData`
+emptying `logoHave` in the turn the active directory changes, the announced
+set tagged with the LOGOS directory through `Model.logoDirFor`, and the count
+rebuilt from the new source's announced names alone -- observed on the real
+`Service.qml` under a nested headless cage the scenario starts itself
+(`key-scenario.sh`'s `cage_start` / `cage_stop` shape, the stub `hyprctl` in
+front of PATH, `HYPRLAND_INSTANCE_SIGNATURE` unset, the scenario's OWN
+harness directory `$XDG_RUNTIME_DIR/omarchy-iptv-logo`), through the harness
+shell's `logoCount`, `logoHaveDir` and `logoDir`. Two local sources with
+distinct logo sets (A: six logos on `logos-a.invalid`, B: four on
+`logos-b.invalid`), each logo planted in its source's cache under the name
+the tree's own `Model.fnv1a32` gives it (the helper's `logo_filename`), so
+`logos --fetch` announces every one from its cached-file branch and contacts
+nothing. W1: over A with logos on, count 6 and `logoHaveDir == logoDir ==
+<A>/logos`. W2: the FIRST sample after `switchSource(B)` whose `logoDir` is
+B's reads count 0 and no tag. W3: no sample between the switch and the
+rebuild carries a non-empty set tagged for another directory than the one
+under it. W4: the count rebuilds to B's 4, tagged B. W5, W6: the same back
+to A. W7: shell, cage and nested socket gone. On the tree (0cae446, under
+`private-bus.sh`): **40 passed, 0 failed**, the first sample at the new
+directory about 60 ms after the switch returned, the rebuilt set one sample
+later. Seen red through `--tree` over a copy of the tree with one line
+changed (the recipe is `spikes/key-mutations/README.md`'s: `git archive HEAD
+| tar -x -C "$cp"`, edit `"$cp/Service.qml"`, run with `--tree "$cp"`, remove
+the copy): `root.logoHave = ({})` deleted from `clearSourceData` -> **37 / 3**,
+W2, W3 and W5 (the first sample at B's directory carried A's six names
+tagged for A); the tag made `root.activeCacheDir` instead of
+`Model.logoDirFor(root.activeCacheDir)` -> **36 / 4**, W1, W3, W4 and W6 (a
+set tagged for the cache directory, which the guide never compares equal).
+The live floor is the check-tree floor plus the W lines, pinned in
+`scripts/qa-lib-test.sh`; `check.sh`'s preflight (check-tree, 33) is
+unchanged. Live needs `node`, `cage`, `quickshell` and `qs` as well
+(`LOGO_CAGE_BIN` overrides the cage binary) and exits 77 without them.
 
 A provider logo's header chose how much memory the shell allocated: 304
 bytes declaring 20000x20000 took the row slot's `Image` to 840 MB (the fifth
