@@ -919,10 +919,13 @@ decision of 2026-10-26). mpv
 0.41.0's automatic VO probe aborts on any compositor that can serve no
 hardware GL or Vulkan context -- a VM on llvmpipe, a pixman compositor: it
 loses the `waylandvk` surface, fails `x11vk` through a lazy Xwayland or with
-no DISPLAY at all and leaves `vo->x11` set, refuses the llvmpipe EGL context
-as a software renderer, and trips its own assertion at `x11egl`,
-`vo_x11_init: Assertion '!vo->x11' failed` (video/out/x11_common.c:679),
-about 5 s after every launch; the service relaunches it every ~5.5 s for as
+no DISPLAY at all, refuses the llvmpipe EGL context as a software renderer
+without releasing its Wayland state -- a pointer that shares a union with
+`vo->x11` since mpv a310a65d -- and trips its own assertion at `x11egl`,
+`vo_x11_init: Assertion '!vo->x11' failed` (video/out/x11_common.c:679;
+mpv-player/mpv#17190, fixed on master by a58dd8ac4 and in no release as of
+2026-10-26; this paragraph first blamed `x11vk`, D-DOC-26), about 5 s after
+every launch; the service relaunches it every ~5.5 s for as
 long as the play intent stands, a crash card and a coredump journal entry per
 zap (no core file: D-SINK-39 holds the player's core limit at 0). Measured on
 2026-10-25 in the harness's pixman cage with this argv shape (QA-RESULTS
@@ -937,6 +940,18 @@ never reserved. The shared fixture pins the count and the position off its
 own `gpuSoftware` field in both suites, and carries the user override as a
 case. The base argv does NOT carry `--ao=null` with it: a user's player must
 have sound, and that token is the harness's own (F-HARNESS-45).
+
+The token's cost, read from mpv's probe order and NOT measured: with
+`--gpu-sw=yes` the probe accepts the FIRST context that comes up rather than
+the first that comes up in hardware, and `waylandvk` is tried before the
+wayland EGL context. So a machine whose GL is hardware but whose only Vulkan
+device is a CPU one (lavapipe, `vulkan-swrast`, with no hardware Vulkan ICD)
+would render through Vulkan in software where the token's absence would have
+fallen through to hardware EGL; a machine with a hardware Vulkan ICD is not
+in that class (libplacebo prefers it), and this machine is not (Intel and
+NVIDIA ICDs, no `vulkan-swrast`). That user's lever is `--gpu-sw=no` in
+`mpvArgs`, and the README names it. "Comes up on a VM" is likewise read
+from the class, not measured on a VM: what was measured is a pixman cage.
 
 ### 4.13 Health check
 

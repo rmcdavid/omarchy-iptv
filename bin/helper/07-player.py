@@ -118,10 +118,12 @@ MPV_TLS_VERIFY = "--tls-verify=yes"
 # software renderer. mpv 0.41.0's automatic VO probe, on a compositor that
 # can serve no hardware GL or Vulkan context (a VM on llvmpipe, a pixman
 # compositor), loses the waylandvk surface, fails x11vk -- through a lazy
-# Xwayland or with no DISPLAY at all -- and leaves `vo->x11` set, refuses
-# the llvmpipe EGL context as a software renderer, and then trips its own
-# assertion at x11egl, `vo_x11_init: Assertion '!vo->x11' failed`
-# (video/out/x11_common.c:679): SIGABRT about 5 s after every launch, a
+# Xwayland or with no DISPLAY at all -- refuses the llvmpipe EGL context as a
+# software renderer without releasing its Wayland state, whose pointer
+# shares a union with `vo->x11`, and then trips its own assertion at x11egl,
+# `vo_x11_init: Assertion '!vo->x11' failed` (video/out/x11_common.c:679;
+# mpv-player/mpv#17190, fixed on master by a58dd8ac4, in no release as of
+# 2026-10-26): SIGABRT about 5 s after every launch, a
 # crash card and a coredump journal entry per zap (no core file: D-SINK-39
 # holds the player's core limit at 0), relaunched by the service every
 # ~5.5 s for as long as the play intent stands. `--gpu-sw=yes` makes the
