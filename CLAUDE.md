@@ -629,6 +629,79 @@ requests and raise the batch.
      as `bad_xml` (one sentence, no URL), and hands ElementTree nothing until
      that parser has reached the root's start tag; no external DTD is read.
      It is the helper's only markup parser; the search is in QA-RESULTS.
+   - **The core dump** (D-SINK-39, found by the lead reading F-HARNESS-45's
+     evidence on 2026-10-25; fixed on `dev` 2026-10-26), which is the sink
+     that opens when a child DIES rather than while it runs: the kernel hands
+     the whole process image to systemd-coredump, which stores it under
+     `/var/lib/systemd/coredump/` as `root:root 0640` with an ACL
+     `user:<uid>:r--`, durably, with no retention time by default, and the
+     host's `omarchy-crash-watch` then posts a card whose click points an AI
+     agent at it (`omarchy-agent-crash` -> the `diagnose-crash` skill:
+     `coredumpctl dump` to a tempfile, `gdb ... bt`, "read the whole core,
+     not just frame 0"). That reader class is the one D-SINK-9 closed
+     `/proc/<pid>/environ` against by making the helper non-dumpable -- and
+     the kernel sets dumpable back to 1 on every exec, so the shield reaches
+     no child. Measured 2026-10-25, three runs, on a headless player started
+     through `player start` and loaded through `apply_channel` with a
+     synthetic userinfo credential and three header values, dumped by gdb's
+     `gcore` while `time-pos` moved (no crash, no journal entry, no card):
+     argv 0, environ 0, and the core held the URL's userinfo about a dozen
+     times (12, 13 and 10 -- the playlist entry in the main heap, which is
+     what `path` reads; the helper's own `loadfile` command text twice as
+     received over IPC; the rest talloc'd and FFmpeg copies in the thread
+     arenas) and every header value 3 to 8 times, among them the
+     `set_property http-header-fields` command text and FFmpeg's `headers`
+     string as sent. The counts are run-dependent, never a constant. No
+     `Authorization: Basic` form, because FFmpeg builds it only after a 401
+     challenge (read, not measured). Yama's `ptrace_scope` is 1 here, so
+     reading a child the helper has double-forked away needs an ANCESTOR:
+     the rig makes itself a child subreaper and execs gdb in place
+     (QA-RESULTS "D-SINK-39").
+     The lever is RLIMIT_CORE, the one setting that inherits across fork AND
+     exec: `spawn_detached`'s grandchild sets it to (0, 0) as its last act
+     before `execvp` (`disable_core_dumps`), and `read_clipboard`'s wl-paste
+     -- the helper's only other child, holding the clipboard the form's
+     paste path carries a provider URL through -- gets the same as a
+     `preexec_fn`. Both halves, because anything in the child's own address
+     space may raise the soft limit back up to the hard one and only
+     CAP_SYS_RESOURCE raises the hard one; a `ulimit -c unlimited` in the
+     session is what the child inherits, and (0, 0) replaces it. **The
+     exec-time lever reaches only a player THIS helper starts**, and the
+     detached player survives a shell restart by design, so after an
+     upgrade the shell reattaches to an mpv the old code forked with the
+     limit unlimited -- D-SINK-16's shape, missed by a rule-15 sweep that
+     grepped for forks and found by the recheck. `resource.prlimit(pid,
+     RLIMIT_CORE, (0, 0))` on a same-uid process works without ptrace
+     (Yama does not apply), reads back (0, 0), and raising it again is
+     refused with EPERM, so `limit_core_of` runs in `player probe` beside
+     `migrate_tls` and in `adopt_or_spawn`'s adopt branch. With it
+     systemd-coredump journals the crash and stores nothing (measured both
+     with a probe and with one deliberate SIGSEGV of the fixed helper's
+     playing mpv: `COREDUMP_RLIMIT 0`, no `COREDUMP_FILENAME`, the coredump
+     directory unchanged -- and the card still posted, which is right: the
+     user's player did crash). The tests ask the kernel, not the code:
+     `/proc/<pid>/limits` of the stub player after the shipping verb, the
+     stub wl-paste's own limits returned as the clipboard text, and a
+     hand-started sleeper's limits before and after the adoption path.
+     What remains, stated exactly: the journal entry (`COREDUMP_CMDLINE` is
+     the launch argv, URL-free by S-03; `COREDUMP_ENVIRON` is the shell's
+     whole environment, never handed a URL on the player's Process;
+     `COREDUMP_OPEN_FDS` is sockets and pipes by inode, so a `file://`
+     channel would show its path; `COREDUMP_PACKAGE_JSON` present); the
+     card and the agent, which then find no core; the cost, accepted by the
+     owner on 2026-10-26, that a crashed player leaves no core for the
+     user's own diagnosis either and no `mpvArgs` lever can restore it; a
+     `play` into a never-probed pre-upgrade player until its next probe or
+     start (`cmd_play` connects with no pid); the helper's own pre-shield
+     window, a dump window of the same 22.9-40.1 ms; and the SHELL, which
+     holds every source URL in its heap, is host-owned and dumpable, and is
+     the same sink one layer up -- not ours to fix, reported upstream on the
+     owner's word. The lesson, stated as the recheck corrected it: D-SINK-9's
+     own docstring already knew a dumpable crash hands the environment to
+     systemd-coredump, so the HELPER half was known; what nobody asked is
+     that the shield dies at exec, so the CHILD half -- the one process that
+     holds the credential longest -- was never covered. An enumeration over
+     what a running process WRITES cannot see what a dying one hands over.
    When you add a sink, add it here.
 6. Files the plugin writes: cache under `~/.cache/omarchy-iptv/sources/<key>/`,
    state at `~/.local/state/omarchy-iptv/state.json`, socket under
