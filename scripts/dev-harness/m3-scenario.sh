@@ -36,10 +36,11 @@
 # child or outside it with WAYLAND_DISPLAY pointed at it, measured both ways
 # on 2026-10-26 -- so there run.sh refuses every key with its window-inactive
 # reason and the keyed checks (H6, T5, P1 and the refusal count) read SKIP;
-# the run then exits 77. Everything graded over IPC is unaffected. Under
-# Hyprland (HYPRLAND_INSTANCE_SIGNATURE set) the same refusal is a FAIL:
-# there the compositor has layer-shell, and a guide window without the
-# keyboard is a defect, not the display.
+# the run then exits 77. Everything graded over IPC is unaffected. On the
+# session's own Hyprland (qa_target_nested: the socket its signature's lock
+# names, F-HARNESS-47) the same refusal is a FAIL: there the compositor has
+# layer-shell, and a guide window without the keyboard is a defect, not the
+# display.
 set -uo pipefail
 # ---- refusals above EVERY external command (F-M3-18 (b), the clip- and
 # logo-scenario shape): `command -v`, `[[ ]]` and `echo` are builtins, so an
@@ -95,10 +96,10 @@ skip() { SKIP=$((SKIP+1)); echo "SKIP $1${2:+ -- $2}"; }
 # depended on it a SKIP, with the guard's reason, counted apart from PASS
 # and FAIL; the run then exits 77, never 0. That refusal exists only when
 # Qt reports the window inactive, so a run where the guide holds the
-# keyboard cannot SKIP; and it is a SKIP only off Hyprland (no
-# HYPRLAND_INSTANCE_SIGNATURE, as every cage rig runs): on the desk an
-# inactive guide window is the guide failing to take the keyboard, which
-# this scenario grades, so it stays a FAIL (qa_key_skippable). Every other
+# keyboard cannot SKIP; and it is a SKIP only when the keys go to a nested
+# compositor, never to the session's own Hyprland (qa_target_nested): on the
+# desk an inactive guide window is the guide failing to take the keyboard,
+# which this scenario grades, so it stays a FAIL (qa_key_skippable). Every other
 # refusal is still a FAIL. And the five
 # checks that assert a state a missing key would also leave (H6b, T5a, T5b,
 # T5d, P1c) now also require the state the key before them should have

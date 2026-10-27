@@ -104,6 +104,10 @@
 # loads Service.qml / Guide.qml / BarWidget.qml / bin/omarchy-iptv from
 # (default: this repo). That is how a scenario is run against pre-change code
 # to prove it fails there before it counts as evidence (CLAUDE.md rule 10).
+# OMARCHY_IPTV_HARNESS_KEEP_DISPLAY=1 keeps the caller's DISPLAY for what this
+# starts, on the desk only; by default it is dropped, and so is
+# HYPRLAND_INSTANCE_SIGNATURE when WAYLAND_DISPLAY is a nested compositor
+# (F-HARNESS-47; harness_env says why).
 #
 # Everything lives under $OMARCHY_IPTV_HARNESS_DIR (default $XDG_RUNTIME_DIR/omarchy-iptv-harness):
 #   root/     scratch Quickshell config root: shell.qml + Commons/ Ui/ symlinks (the `qs` prefix)
@@ -113,7 +117,7 @@
 #             XDG_CONFIG_HOME -> home/.config, XDG_DATA_HOME -> home/.local/share
 #   cache/    XDG_CACHE_HOME  -> cache/omarchy-iptv/{channels,playlist-status,epg-now}.json
 #   state/    XDG_STATE_HOME  -> state/omarchy-iptv/state.json
-#   runtime/  XDG_RUNTIME_DIR -> runtime/omarchy-iptv/mpv.sock (+ a hypr symlink; prepare_root says when hyprctl can use it)
+#   runtime/  XDG_RUNTIME_DIR -> runtime/omarchy-iptv/mpv.sock (and no hypr/: prepare_root says why, F-HARNESS-48)
 #   fixtures/ generated playlist / test.ts (MPEG-TS, like a live stream; an MP4 with a trailing moov is not seekable over HTTP)
 #   qs<N>.pid, server.pid  the detached shell's and the fixture server's RECORDED pids: what
 #             `reap` and the EXIT trap end, by pid, with TERM then KILL (F-HARNESS-32);
@@ -405,14 +409,25 @@ prepare_root() {
     [[ $(diff "$HERE/shell.qml" "$root/shell.qml" | grep -c '^[<>]') == 2 ]] \
       || die "$root/shell.qml differs from the harness shell.qml by more than its model import"
   fi
-  # hyprctl and Quickshell's Hyprland bits look under $XDG_RUNTIME_DIR/hypr.
-  # Measured 2026-10-26 (F-M3-24, read-only `hyprctl version`): through this
-  # link the socket path is 123 bytes at the default harness directory, past
-  # sun_path's 108, so hyprctl CANNOT connect there (exit 4) even with a
-  # signature; through a 106-byte one it reached the user's live Hyprland.
-  # So this link is not what keeps a caged run off the user's compositor --
-  # an unset HYPRLAND_INSTANCE_SIGNATURE is (every rig and h() unsets it).
-  [[ -d $REAL_RUNTIME/hypr ]] && ln -sfn "$REAL_RUNTIME/hypr" "$SCRATCH/runtime/hypr"
+  # F-HARNESS-48 (2026-10-26): NO `runtime/hypr`. hyprctl and Quickshell's
+  # Hyprland module find an instance at $XDG_RUNTIME_DIR/hypr/<signature>/,
+  # and this script used to link the scratch runtime's `hypr` to the real
+  # one "so hyprctl works". It never did at the default harness directory:
+  # through the link the socket path is 123 bytes, past sun_path's 108, so
+  # hyprctl could not connect (exit 4, measured read-only by lane-fm324);
+  # through a 106-byte path it answered the owner's live Hyprland 0.56.2. A
+  # link that works only by accident of a path's length is a bridge to the
+  # owner's compositor for any shorter OMARCHY_IPTV_HARNESS_DIR, and
+  # nothing here needs it: the harness's real-compositor calls (`shot`'s
+  # `hyprctl monitors`) run in run.sh's own environment, never under this
+  # runtime directory, and every scenario that exercises the service's
+  # hyprctl puts stub-hyprctl.py on $SCRATCH/bin. A link left by an older
+  # run.sh is removed, so an existing scratch tree loses it too.
+  # tests/test_harness_display.py connects through the path it used to make.
+  if [[ -L $SCRATCH/runtime/hypr ]]; then
+    rm -f -- "$SCRATCH/runtime/hypr" || die "could not remove the stale $SCRATCH/runtime/hypr link"
+  fi
+  [[ -e $SCRATCH/runtime/hypr ]] && die "$SCRATCH/runtime/hypr exists and is not the link an older run.sh made; refusing to start a harness that could find a compositor there"
   return 0
 }
 
@@ -480,6 +495,48 @@ harness_env() {
   # absolute socket path (it accepts one) and keep the real DBus address.
   local wl=${WAYLAND_DISPLAY:-wayland-1}
   [[ $wl == /* ]] || wl="$REAL_RUNTIME/$wl"
+  # F-HARNESS-47 and -48 (2026-10-26). Nothing this script starts -- the
+  # shell, the helper the service spawns, the player the helper forks -- may
+  # inherit a display or a compositor IPC that is not the harness's own
+  # target, and the target is WAYLAND_DISPLAY. Decided here, on the caller's
+  # target, before anything below rewrites the runtime directory.
+  #
+  # DISPLAY is dropped ALWAYS. A caged run used to inherit the caller's
+  # `:0`, the owner's Xwayland, and mpv's VO probe tries `x11vk` after
+  # `waylandvk` loses its surface (QA-RESULTS "F-HARNESS-45"), so a player
+  # started toward a cage could map its window on the owner's real desktop.
+  # Nothing in the harness or the plugin needs an X display, searched
+  # 2026-10-26: no DISPLAY, x11, Xwayland, xdotool, xprop, xclip, xsel or
+  # xrandr in Service.qml, Guide.qml, BarWidget.qml, bin/helper/ or model/
+  # (only the D-PLY-27 comments that describe mpv's probe); the launch argv
+  # is Wayland-first (`--wayland-app-id`, and `--gpu-sw=yes` since D-PLY-27);
+  # the harness's own tools are wtype, grim, wl-copy and hyprctl; the
+  # session's QT_QPA_PLATFORM is `wayland;xcb`, so without DISPLAY the xcb
+  # fallback has no screen to open behind a Wayland failure. The one way to keep it is
+  # OMARCHY_IPTV_HARNESS_KEEP_DISPLAY=1, honoured only when the target is the
+  # session's own compositor (on a nested one the caller's DISPLAY is by
+  # construction another display, so asking is refused, not ignored).
+  #
+  # HYPRLAND_INSTANCE_SIGNATURE is dropped when the target is NESTED
+  # (qa_target_nested, scripts/qa-lib.sh: anything but the socket the
+  # signature's own lock file names). It is what points hyprctl and
+  # Quickshell's Hyprland module at a compositor, and a cage is not one. On
+  # the desk it stays: there the target IS that instance.
+  #
+  # Belt and braces, on purpose: the five cage `h()` lines (key-, logo-,
+  # open-, clip-scenario and spikes/first-open) still say `env -u
+  # HYPRLAND_INSTANCE_SIGNATURE`, the cage starters `env -u DISPLAY`, and the
+  # rigs both. With this function dropping both for a nested target those
+  # are no longer the containment, and they stay as a second layer.
+  # tests/test_harness_display.py drives this function and reads both.
+  local nested=0
+  qa_target_nested "$wl" "$REAL_RUNTIME" && nested=1
+  (( nested )) && unset HYPRLAND_INSTANCE_SIGNATURE
+  if [[ ${OMARCHY_IPTV_HARNESS_KEEP_DISPLAY:-0} == 1 ]]; then
+    (( nested )) && die "OMARCHY_IPTV_HARNESS_KEEP_DISPLAY=1, and the target $wl is not the session's own compositor: the caller's DISPLAY is another display than the one this harness drives (F-HARNESS-47). Keep it only on the desk."
+  else
+    unset DISPLAY
+  fi
   export WAYLAND_DISPLAY="$wl"
   export XDG_RUNTIME_DIR="$SCRATCH/runtime"
   # F-HARNESS-45 (2026-10-25): a player under a nested headless cage. mpv

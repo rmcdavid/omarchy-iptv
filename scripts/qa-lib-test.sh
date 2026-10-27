@@ -1836,6 +1836,29 @@ is "R18 syncs before it sweeps" "$(qa_count '^if qa_transcript_sync ' "$RW")" "1
 
 # ================================ the focus guard's decision table (F-M3-1 a)
 
+section "qa_target_nested: the desk is the socket its signature's own lock names (F-HARNESS-47)"
+
+# One predicate decides where a harness is pointed, for run.sh's harness_env
+# (what the shell, helper and player may inherit) and for qa_key_skippable
+# (whether a refused key is the display's doing). Driven over a runtime
+# directory built here: a Hyprland lock in the shape 0.56.2 writes (pid,
+# then the session's Wayland socket name), so nothing reads the owner's.
+TN="$TMP/tn"; mkdir -p "$TN/hypr/tnsig"
+printf '4242\nwayland-tn\n' >"$TN/hypr/tnsig/hyprland.lock"
+tn() {   # [TNSIG=<sig>] [TNWLR=<renderer>] tn <wayland-display> -> the predicate's status
+  ( unset WLR_BACKENDS WLR_RENDERER HYPRLAND_INSTANCE_SIGNATURE
+    [[ -n ${TNSIG:-} ]] && export HYPRLAND_INSTANCE_SIGNATURE=$TNSIG
+    [[ -n ${TNWLR:-} ]] && export WLR_RENDERER=$TNWLR
+    qa_target_nested "$1" "$TN"; echo $? )
+}
+is "the socket the signature's lock names is the session's own (1)" "$(TNSIG=tnsig tn wayland-tn)" "1"
+is "and so is that socket's absolute path" "$(TNSIG=tnsig tn "$TN/wayland-tn")" "1"
+is "another socket, the same signature inherited, is NESTED (0): the F-HARNESS-47 case" "$(TNSIG=tnsig tn wayland-cage)" "0"
+is "no signature: nothing shows the target is the session's, so nested" "$(tn wayland-tn)" "0"
+is "a signature that names no instance is nested" "$(TNSIG=nosuch tn wayland-tn)" "0"
+is "a signature that is a path is never followed out of hypr/" "$(TNSIG=../hypr/tnsig tn wayland-tn)" "0"
+is "a cage's child (WLR_RENDERER inherited) is nested whatever socket it names" "$(TNSIG=tnsig TNWLR=pixman tn wayland-tn)" "0"
+
 section "run.sh key/type: the focus guard, decided from a stubbed reply"
 
 # The first review of the guard found that NOTHING in the gate could go red for
@@ -2071,13 +2094,21 @@ section "qa_key: which refusal a scenario may SKIP (F-M3-24)"
 # and then qa_key's own line. On b43c4a4 the inactive reply was SENT, "0 ...
 # wtype=2", which is the H6a/H6b shape of F-M3-24 in one line.
 # Every case runs with NO Hyprland instance in its environment, as a cage rig
-# does, unless FGQK_HIS names one: the SKIP class is off under Hyprland, and
-# this suite's own caller usually has the owner's signature set.
-fg_qa_key() {   # [FGQK_HIS=<sig>] fg_qa_key <opt-in 0|1> <wtype args...>
+# does, unless FGQK_HIS names one: the SKIP class is off on the session's own
+# Hyprland, and this suite's own caller usually has the owner's signature
+# set. With FGQK_HIS the runtime is the hermetic one qa_target_nested's
+# section built (F-HARNESS-47), and the keys go to FGQK_WL: wayland-tn, the
+# socket that signature's lock names (the desk), unless the case says
+# otherwise.
+fg_qa_key() {   # [FGQK_HIS=<sig>] [FGQK_WL=<display>] fg_qa_key <opt-in 0|1> <wtype args...>
   local opt=$1; shift
   rm -f "$FG"/h/primed*; : >"$FG/wtype.log"
   ( QA_KEY_SKIPS=0; QA_KEY_REFUSALS=0; QA_KEY_SKIP_REASON=""; QA_KEY_SKIP_INACTIVE=$opt
-    if [[ -n ${FGQK_HIS:-} ]]; then export HYPRLAND_INSTANCE_SIGNATURE=$FGQK_HIS; else unset HYPRLAND_INSTANCE_SIGNATURE; fi
+    if [[ -n ${FGQK_HIS:-} ]]; then
+      export HYPRLAND_INSTANCE_SIGNATURE=$FGQK_HIS XDG_RUNTIME_DIR=$TN WAYLAND_DISPLAY=${FGQK_WL:-wayland-tn}
+    else
+      unset HYPRLAND_INSTANCE_SIGNATURE
+    fi
     export WTYPE_LOG=$FG/wtype.log PATH="$FG/bin:$PATH" OMARCHY_IPTV_HARNESS_DIR=$FG/h
     # Not $( ): the counters must move in THIS shell, not in a copy of it.
     qa_key "$ROOT/scripts/dev-harness/run.sh" "$@" >"$FG/qk.out"; rc=$?
@@ -2098,11 +2129,17 @@ is "and its line is the FAIL it always was" "$(fg_qa_key 0 x | sed -n 2p | cut -
 # keyboard -- what m3 grades on the desk, and a FAIL under the old guard
 # ("ANOTHER SURFACE", or H6a red). On lane-fm324's d4f653c this read
 # "3 skips=1 refusals=0": a broken desk run would have SKIPped and exited 77.
-QK=$(FGQK_HIS=qa-lib-test-not-a-live-instance fg_qa_key 1 x)
-is "opted in, but UNDER HYPRLAND an inactive window is a FAIL, not a SKIP" "$(sed -n 1p <<<"$QK")" "3 skips=0 refusals=1 wtype=0"
+QK=$(FGQK_HIS=tnsig fg_qa_key 1 x)
+is "opted in, but on the session's OWN Hyprland an inactive window is a FAIL, not a SKIP" "$(sed -n 1p <<<"$QK")" "3 skips=0 refusals=1 wtype=0"
 is "and its line is the FAIL line" "$(sed -n 2p <<<"$QK" | cut -c1-34)" "FAIL run.sh key x was REFUSED (exi"
-ck "the predicate m3's shot wrapper calls says the same: skippable off Hyprland, not under it" \
-   '( QA_KEY_SKIP_INACTIVE=1; unset HYPRLAND_INSTANCE_SIGNATURE; qa_key_skippable 3 "x ($QA_KEY_WINDOW_INACTIVE) y" ) && ( QA_KEY_SKIP_INACTIVE=1; HYPRLAND_INSTANCE_SIGNATURE=s; ! qa_key_skippable 3 "x ($QA_KEY_WINDOW_INACTIVE) y" )'
+# F-HARNESS-47: the signature is not the target. A cage rig that inherits the
+# owner's signature sends its keys to the CAGE, which has no layer-shell, so
+# its inactive guide window is the display's doing and a SKIP -- on e243c29's
+# qa-lib.sh, which asked only "is the signature set", it read as a desk FAIL.
+QK=$(FGQK_HIS=tnsig FGQK_WL=wayland-cage fg_qa_key 1 x)
+is "opted in, a signature INHERITED but the keys aimed at a cage: a SKIP, not a desk FAIL" "$(sed -n 1p <<<"$QK")" "3 skips=1 refusals=0 wtype=0"
+ck "the predicate m3's shot wrapper calls says the same: skippable off the desk, not on it" \
+   '( QA_KEY_SKIP_INACTIVE=1; unset HYPRLAND_INSTANCE_SIGNATURE; qa_key_skippable 3 "x ($QA_KEY_WINDOW_INACTIVE) y" ) && ( QA_KEY_SKIP_INACTIVE=1; HYPRLAND_INSTANCE_SIGNATURE=tnsig XDG_RUNTIME_DIR=$TN WAYLAND_DISPLAY=wayland-tn; ! qa_key_skippable 3 "x ($QA_KEY_WINDOW_INACTIVE) y" ) && ( QA_KEY_SKIP_INACTIVE=1; HYPRLAND_INSTANCE_SIGNATURE=tnsig XDG_RUNTIME_DIR=$TN WAYLAND_DISPLAY=wayland-cage; qa_key_skippable 3 "x ($QA_KEY_WINDOW_INACTIVE) y" )'
 fg_stub "${FG_OPEN/\"open\":true/\"open\":false}" "" 0
 is "opted in, a CLOSED guide is still a FAIL: only the window class may skip" "$(fg_qa_key 1 x | sed -n 1p)" "3 skips=0 refusals=1 wtype=0"
 fg_stub "${FG_OPEN/,\"windowActive\":true/}" "" 0
@@ -3055,7 +3092,12 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # it with pipefail on and off, and a stub that cannot be read, read by both
 # (5). Red on e243c29's qa-lib.sh: the slow writer's "0 0" and the
 # unreadable stub's 0 (2 failed).
-EXPECTED=581
+# 581 -> 589 on 2026-10-26, lane-hfu (F-HARNESS-47): qa_target_nested over a
+# hermetic Hyprland lock (7), and qa_key's SKIP for a signature inherited
+# toward a cage (1); the desk case and the predicate's ck were rewritten over
+# the same lock, not added. Red on e243c29's qa-lib.sh: 9 failed (the
+# predicate absent, 127, and the inherited signature read as the desk).
+EXPECTED=589
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then
