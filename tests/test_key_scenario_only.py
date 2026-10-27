@@ -4,8 +4,9 @@ before the flag existed, and a partial run can never be read as a full one.
 
 `--only A,B19` runs the instrument arm, the named shell-arm blocks, then P1,
 P2 and T1. It exists because A2 and B19 went red on 2026-10-27 and a full
-live run costs about ten minutes a sample. What can go wrong with such a
-flag is exactly what these cases pin:
+live run costs about ten minutes a sample. `PRUNE` is a rig (no check) that
+only `--only` runs. What can go wrong with such a flag is exactly what these
+cases pin:
 
   * a block a full run used to execute is skipped when the flag is ABSENT
     (the count would drop and the floor catch it -- but only on a live run;

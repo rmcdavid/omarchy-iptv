@@ -10,7 +10,8 @@
 #                                           with a patch applied: spikes/key-mutations/)
 #   key-scenario.sh [live] ... --only A,B19 a PARTIAL live run: the instrument arm, the
 #                                           named shell-arm segments, then P and T1
-#                                           (F-HARNESS-49; never a release count)
+#                                           (F-HARNESS-49; never a release count;
+#                                           PRUNE is a rig that only --only runs)
 #
 # THE FINDING. For the life of the project the host's bar entry carried the
 # provider's playlist URL -- credentials and all -- in ~/.config/omarchy/
@@ -292,6 +293,10 @@
 #   B21 the EXISTING-folder session damaged after an own save landed: the
 #       garbage is noticed, told once                 <- R25d, D-DOC-9's half
 #   B22 ... and the Sources header there says saving has stopped <- D-SRC-38
+#   PRUNE (a RIG that only `--only PRUNE` runs: never in a full run, no check)
+#       an add made while the start-up init is held, then the start-up
+#       prune: prints what is left of the added source's cache
+#                                    <- the start-up prune race, F-HARNESS-49
 #   P1  no labelled harness-log line carries a URL or a fixture path
 #   P2  no credential token anywhere in the harness log
 #   T1  the shell, the compositor and the nested socket are gone (by pid)
@@ -704,14 +709,15 @@
 # `--only SEG[,SEG]` (F-HARNESS-49, 2026-10-27) runs the instrument arm, the
 # named shell-arm segments and then P1, P2 and T1, and nothing else: a ten
 # minute run to look at two checks was what made bisecting A2 and watching
-# B19 cost an hour a sample. The names are the two blocks it was made for,
-# `A` (A1, A2) and `B19`, and nothing else is accepted: a segment that
-# leans on an earlier one's state cannot be cut loose by a flag without
-# being checked, so a new name is added only with a run that shows it
-# stands alone. A full run is untouched by it -- every block it does not
-# name is `if [[ -z $ONLY ]]` or `if seg_on X`, both true when the flag is
-# absent, and the counts are the same lines -- and a partial run cannot be
-# read as one:
+# B19 cost an hour a sample. The names are the blocks it was made for, `A`
+# (A1, A2) and `B19`, and `PRUNE`, a RIG that only --only runs (no check:
+# it prints what the start-up prune leaves of an add, F-HARNESS-49);
+# nothing else is accepted: a segment that leans on an earlier one's state
+# cannot be cut loose by a flag without being checked, so a new name is
+# added only with a run that shows it stands alone. A full run is untouched
+# by it -- every block it does not name is `if [[ -z $ONLY ]]` or `if
+# seg_on X`, both true when the flag is absent, PRUNE's is false then, and
+# the counts are the same lines -- and a partial run cannot be read as one:
 # its floor is the selected blocks' own (ONLY_CHECKS below, pinned to the
 # ck lines between each block's markers by tests/test_key_scenario_only.py),
 # and its summary line says `PARTIAL (only ...)`. Refused with check-tree.
@@ -780,7 +786,7 @@ BASELINE=""; TREE=""; ONLY=""
 while (( $# )); do
   case $1 in
     --only)
-      [[ ${2:-} == "" || ${2:-} == -* ]] && { echo "--only needs a segment list (A, B19, comma separated), and got '${2:-}'" >&2; exit 2; }
+      [[ ${2:-} == "" || ${2:-} == -* ]] && { echo "--only needs a segment list (A, B19, PRUNE, comma separated), and got '${2:-}'" >&2; exit 2; }
       ONLY=$2; shift ;;
     --baseline)
       [[ ${2:-} == "" || ${2:-} == -* ]] && { echo "--baseline needs a git ref, and got '${2:-}'" >&2; exit 2; }
@@ -830,12 +836,12 @@ TREE_LINE="== tree $ROOT ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null ||
 # F-HARNESS-49: --only, refused above the transcript like the other levers.
 # How many lettered checks each selectable block holds (its ck lines, which
 # tests/test_key_scenario_only.py counts between the block's markers).
-declare -A ONLY_CHECKS=([A]=2 [B19]=1)
+declare -A ONLY_CHECKS=([A]=2 [B19]=1 [PRUNE]=0)
 if [[ -n $ONLY ]]; then
   [[ $MODE == check-tree ]] && { echo "--only selects shell-arm segments; check-tree runs the instrument arm alone" >&2; exit 2; }
   IFS=, read -r -a only_names <<<"$ONLY"
   for seg in "${only_names[@]}"; do
-    [[ -n $seg && -n ${ONLY_CHECKS[$seg]:-} ]] || { echo "--only: '$seg' is not a selectable segment (A, B19)" >&2; exit 2; }
+    [[ -n $seg && -n ${ONLY_CHECKS[$seg]:-} ]] || { echo "--only: '$seg' is not a selectable segment (A, B19, PRUNE)" >&2; exit 2; }
   done
   unset seg only_names
 fi
@@ -1171,7 +1177,8 @@ for kid in kids:
         argv = [a.decode("utf-8", "replace") for a in open("/proc/%s/cmdline" % kid, "rb").read().split(b"\0") if a]
     except OSError:
         continue
-    if len(argv) < 3 or os.path.realpath(argv[1]) != helper:
+    # the helper itself, or the real one that a staged slow tree wrapper execs
+    if len(argv) < 3 or os.path.realpath(argv[1]) not in (helper, helper + ".real"):
         continue
     if argv[2] == "cache":
         found.append("cache")
@@ -1323,8 +1330,45 @@ observe_window() {
   return 1
 }
 
+# The slow tree: the tree under test copied to $1 with its helper replaced by
+# fixtures/slow-helper.py, which holds the verbs OMARCHY_IPTV_SLOW_VERBS names
+# for OMARCHY_IPTV_SLOW_MS and then execs the real helper (bin/omarchy-iptv.real)
+# with the same argv. O stages it (and B10, B17, B18 and the disk-gone tree
+# reuse O's); PRUNE stages its own, O not running in a partial run. Lifted out
+# of O on 2026-10-27 (F-HARNESS-49), every line as it was there. Fails when
+# anything could not be copied.
+stage_slow_tree() {
+  local tree=$1 staged=1
+  mkdir -p "$tree/bin"
+  for f in manifest.json Service.qml Guide.qml BarWidget.qml; do cp "$PLUGIN_ROOT/$f" "$tree/$f" 2>/dev/null || staged=0; done
+  # The model is every file qa_model_files names (Model.mjs and its parts since
+  # D-REL-5, or a pre-split tree's Model.js), each at its own relative path:
+  # rewind-scenario.sh's R16 stages its slow tree the same way.
+  local -a model_files=(); local mf rel
+  mapfile -t model_files < <(qa_model_files "$PLUGIN_ROOT")
+  (( ${#model_files[@]} > 0 )) || staged=0
+  for mf in "${model_files[@]}"; do
+    rel=${mf#"$PLUGIN_ROOT/"}
+    mkdir -p "$tree/$(dirname "$rel")" && cp "$mf" "$tree/$rel" 2>/dev/null || staged=0
+  done
+  cp -R "$PLUGIN_ROOT/contrib" "$tree/contrib" 2>/dev/null || true
+  cp "$PLUGIN_ROOT/bin/omarchy-iptv" "$tree/bin/omarchy-iptv.real" 2>/dev/null || staged=0
+  # D-REL-7: the helper is a stub and the parts it names, and the stub finds
+  # them in bin/helper/ beside itself whatever it is called, so they are
+  # copied there too (none for a tree from before the split).
+  local -a helper_parts=(); local hp
+  qa_helper_parts "$PLUGIN_ROOT" >/dev/null || staged=0
+  mapfile -t helper_parts < <(qa_helper_parts "$PLUGIN_ROOT")
+  for hp in "${helper_parts[@]}"; do
+    mkdir -p "$tree/bin/helper" && cp "$hp" "$tree/bin/helper/" 2>/dev/null || staged=0
+  done
+  cp "$HERE/fixtures/slow-helper.py" "$tree/bin/omarchy-iptv" 2>/dev/null || staged=0
+  chmod +x "$tree/bin/omarchy-iptv" "$tree/bin/omarchy-iptv.real" 2>/dev/null || true
+  (( staged ))
+}
+
 shell_arm() {
-  local i left before window orphan seed_playlist seed_key sha0 staged
+  local i left before window orphan seed_playlist seed_key sha0
   echo "== shell arm: the real Service.qml under cage (plugin tree $PLUGIN_ROOT) ($(elapsed) s)"
   # The nested compositor's lifetime is an upper bound only (cage_stop ends
   # it). Round 15: 500 s was outlived by a mutated tree whose earlier waits
@@ -1520,33 +1564,8 @@ shell_arm() {
   # is stubbed: `dirsReady` simply stays false for seconds instead of ~400 ms,
   # which is the window the review's P2 lives in. rewind-scenario.sh's R16
   # stages the same shape for the same reason.
-  SLOW_TREE="$WORK/slow-tree"; mkdir -p "$SLOW_TREE/bin"
-  staged=1
-  for f in manifest.json Service.qml Guide.qml BarWidget.qml; do cp "$PLUGIN_ROOT/$f" "$SLOW_TREE/$f" 2>/dev/null || staged=0; done
-  # The model is every file qa_model_files names (Model.mjs and its parts since
-  # D-REL-5, or a pre-split tree's Model.js), each at its own relative path:
-  # rewind-scenario.sh's R16 stages its slow tree the same way.
-  local -a model_files=(); local mf rel
-  mapfile -t model_files < <(qa_model_files "$PLUGIN_ROOT")
-  (( ${#model_files[@]} > 0 )) || staged=0
-  for mf in "${model_files[@]}"; do
-    rel=${mf#"$PLUGIN_ROOT/"}
-    mkdir -p "$SLOW_TREE/$(dirname "$rel")" && cp "$mf" "$SLOW_TREE/$rel" 2>/dev/null || staged=0
-  done
-  cp -R "$PLUGIN_ROOT/contrib" "$SLOW_TREE/contrib" 2>/dev/null || true
-  cp "$PLUGIN_ROOT/bin/omarchy-iptv" "$SLOW_TREE/bin/omarchy-iptv.real" 2>/dev/null || staged=0
-  # D-REL-7: the helper is a stub and the parts it names, and the stub finds
-  # them in bin/helper/ beside itself whatever it is called, so they are
-  # copied there too (none for a tree from before the split).
-  local -a helper_parts=(); local hp
-  qa_helper_parts "$PLUGIN_ROOT" >/dev/null || staged=0
-  mapfile -t helper_parts < <(qa_helper_parts "$PLUGIN_ROOT")
-  for hp in "${helper_parts[@]}"; do
-    mkdir -p "$SLOW_TREE/bin/helper" && cp "$hp" "$SLOW_TREE/bin/helper/" 2>/dev/null || staged=0
-  done
-  cp "$HERE/fixtures/slow-helper.py" "$SLOW_TREE/bin/omarchy-iptv" 2>/dev/null || staged=0
-  chmod +x "$SLOW_TREE/bin/omarchy-iptv" "$SLOW_TREE/bin/omarchy-iptv.real" 2>/dev/null || true
-  (( staged )) || echo "   the slow tree could not be staged from $PLUGIN_ROOT"
+  SLOW_TREE="$WORK/slow-tree"
+  stage_slow_tree "$SLOW_TREE" || echo "   the slow tree could not be staged from $PLUGIN_ROOT"
   sha0=$SHA_STATE
   export OMARCHY_IPTV_PLUGIN_ROOT=$SLOW_TREE OMARCHY_IPTV_SLOW_MS=$SLOW_MS OMARCHY_IPTV_SLOW_VERBS="state init"
   log_mark
@@ -1905,6 +1924,50 @@ shell_arm() {
 
   fi   # --only: end of D .. Z
 
+  # F-HARNESS-49 (2026-10-27): THE START-UP PRUNE RACE, a product finding
+  # reported for the owner. A RIG, NOT A CHECK: it runs only when `--only
+  # PRUNE` names it, never
+  # in a full run, and asserts nothing -- it prints what the sink holds, so
+  # the owner can see the defect on any tree (`--baseline REF --only PRUNE`)
+  # until it is decided. The start-up `cache prune` is QUEUED when the cache
+  # layout is ready (schedulePrune) with the keys the state holds THEN, and
+  # RUN when the dirs are (stateInitExited -> runNextCacheJob); an in-app
+  # add made in between probes into sources/<new key>, which no record names
+  # (SR23), so the prune removes it: mid-write the probe fails on its rename
+  # (A2's FileNotFoundError, 2026-10-27, the add dropped), and once written
+  # the ADDED, ACTIVE source keeps a record and loses its channels for the
+  # session. The window is made deterministic here by holding the start-up
+  # init 4 s (the slow tree), so the add's probe completes and commits before
+  # the dirs are ready. Measured 2026-10-27 on dev 45bded9 and on cc35557
+  # (0.15.0) alike: committed with 11 channels and its directory; after
+  # dirsReady the prune `--keep <A> <C>` (no D, no --active) removed
+  # sources/<D>; the session then showed 0 channels on the active source
+  # until a restart refetched it.
+  if [[ -n $ONLY ]] && seg_on PRUNE; then   # --only PRUNE begins (a rig: never in a full run)
+  echo "== PRUNE (a rig, no check): an add whose probe commits while the start-up init is held, then the start-up prune ($(elapsed) s)"
+  PRUNE_TREE="$WORK/prune-tree"
+  stage_slow_tree "$PRUNE_TREE" || echo "   the slow tree could not be staged from $PLUGIN_ROOT"
+  seed "" migrated
+  export OMARCHY_IPTV_PLUGIN_ROOT=$PRUNE_TREE OMARCHY_IPTV_SLOW_MS=4000 OMARCHY_IPTV_SLOW_VERBS="state init"
+  start_shell --playlist none --source-key "" || true
+  at_add="dirsReady:$(pf "['dirsReady']")"
+  res=$(ipc addSource "$D" "" "")
+  wait_for "$KD" 20 svc "['activeSourceKey']" >/dev/null || true
+  committed="active:$([[ $(svc "['activeSourceKey']") == "$KD" ]] && echo D || echo other) dirsReady:$(pf "['dirsReady']") cache:$([[ -f $CACHE/sources/$KD/channels.json ]] && echo kept || echo gone) channels:$(svc "['channels']")"
+  wait_for true 20 pf "['dirsReady']" >/dev/null || true
+  wait_settled || true
+  sleep 2
+  after="active:$([[ $(svc "['activeSourceKey']") == "$KD" ]] && echo D || echo other) record:$(sj "'$KD' in [s['key'] for s in d['sources']]") cache:$([[ -f $CACHE/sources/$KD/channels.json ]] && echo kept || echo gone) channels:$(svc "['channels']")"
+  stop_shell
+  export OMARCHY_IPTV_PLUGIN_ROOT=$PLUGIN_ROOT; unset OMARCHY_IPTV_SLOW_MS OMARCHY_IPTV_SLOW_VERBS
+  echo "   PRUNE at the add $at_add (add ok:$(qa_json_field "d['ok']" "$res")); committed $committed; after the start-up prune $after"
+  case $after in
+    *"cache:gone channels:0") echo "   PRUNE: the start-up prune REMOVED the added, active source's cache (the race is present on this tree)" ;;
+    *"cache:kept channels:11") echo "   PRUNE: the added source's cache SURVIVED the start-up prune (the race is absent on this tree)" ;;
+    *) echo "   PRUNE: neither shape -- read the lines above" ;;
+  esac
+  fi   # --only PRUNE ends
+
   if seg_on A; then   # --only A begins
   echo "== A: the in-app add after a CLI epgUrl was refused, through the harness addSource verb (R21b; R17b's and R18d's rig) ($(elapsed) s)"
   # The probe commit of an in-app add (Service's sourceProbeProc exit),
@@ -1923,9 +1986,9 @@ shell_arm() {
   # (FileNotFoundError in the harness log, the probe failed, the add was
   # dropped). Not a regression: the prune has run at dirsReady with a keep
   # list taken at queue time since f138740 (2026-09-13), and the same rig
-  # deletes an added source's cache on cc35557 (0.15.0) and on dev alike.
-  # That race is a product finding of its own, reported with F-HARNESS-49
-  # for the owner to decide; A observes R21b, the CLI
+  # deletes an added source's cache on cc35557 (0.15.0) and on dev alike
+  # (`--only PRUNE`). That race is a product finding of its own, reported
+  # with F-HARNESS-49 for the owner to decide; A observes R21b, the CLI
   # value refused and the form's own guide URL kept, in a settled session.
   seed "" migrated
   start_shell --playlist none --epg "$EPG" --source-key "" || true
