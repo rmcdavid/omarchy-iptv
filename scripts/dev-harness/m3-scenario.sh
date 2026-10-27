@@ -36,10 +36,11 @@
 # child or outside it with WAYLAND_DISPLAY pointed at it, measured both ways
 # on 2026-10-26 -- so there run.sh refuses every key with its window-inactive
 # reason and the keyed checks (H6, T5, P1 and the refusal count) read SKIP;
-# the run then exits 77. Everything graded over IPC is unaffected. Under
-# Hyprland (HYPRLAND_INSTANCE_SIGNATURE set) the same refusal is a FAIL:
-# there the compositor has layer-shell, and a guide window without the
-# keyboard is a defect, not the display.
+# the run then exits 77. Everything graded over IPC is unaffected. On the
+# session's own Hyprland (qa_target_nested: the socket its signature's lock
+# names, F-HARNESS-47) the same refusal is a FAIL: there the compositor has
+# layer-shell, and a guide window without the keyboard is a defect, not the
+# display.
 set -uo pipefail
 # ---- refusals above EVERY external command (F-M3-18 (b), the clip- and
 # logo-scenario shape): `command -v`, `[[ ]]` and `echo` are builtins, so an
@@ -95,10 +96,10 @@ skip() { SKIP=$((SKIP+1)); echo "SKIP $1${2:+ -- $2}"; }
 # depended on it a SKIP, with the guard's reason, counted apart from PASS
 # and FAIL; the run then exits 77, never 0. That refusal exists only when
 # Qt reports the window inactive, so a run where the guide holds the
-# keyboard cannot SKIP; and it is a SKIP only off Hyprland (no
-# HYPRLAND_INSTANCE_SIGNATURE, as every cage rig runs): on the desk an
-# inactive guide window is the guide failing to take the keyboard, which
-# this scenario grades, so it stays a FAIL (qa_key_skippable). Every other
+# keyboard cannot SKIP; and it is a SKIP only when the keys go to a nested
+# compositor, never to the session's own Hyprland (qa_target_nested): on the
+# desk an inactive guide window is the guide failing to take the keyboard,
+# which this scenario grades, so it stays a FAIL (qa_key_skippable). Every other
 # refusal is still a FAIL. And the five
 # checks that assert a state a missing key would also leave (H6b, T5a, T5b,
 # T5d, P1c) now also require the state the key before them should have
@@ -304,11 +305,13 @@ if [[ -n $t5 ]]; then skip "T5d a real t closes it" "depends on $t5, which the g
 else
   t5pre=$(gf 'g["inTracks"]')
   key_sent t; kr=$?; sleep 0.4
-  if (( kr == 1 )); then skip "T5d a real t closes it" "$QA_KEY_SKIP_REASON"
+  if (( kr == 1 )); then t5="T5d's t"; skip "T5d a real t closes it" "$QA_KEY_SKIP_REASON"
   else [[ $t5pre == true && $(gf 'g["inTracks"]') == false ]] && pass "T5d a real t closes it" || fail "T5d" "before inTracks=$t5pre, after $(gf 'g["inTracks"]') mode $(gf 'g["mode"]')"; fi
 fi
 # A skipped chain leaves the picker as T4 left it, open; T6 starts from the
-# state T5d leaves, so it is closed through the IPC door, and said.
+# state T5d leaves, so it is closed through the IPC door, and said. T5d's
+# own refusal is a skipped chain too (F-HARNESS-54 (2)): it used to leave t5
+# unset, so a picker that T5b reopened stayed open into T6b.
 if [[ -n $t5 && $(gf 'g["inTracks"]') == true ]]; then
   ipc trackClose >/dev/null; sleep 0.3
   echo "   T5 skipped: the picker closed through ipc trackClose, where T5d would have left it (inTracks $(gf 'g["inTracks"]'))"

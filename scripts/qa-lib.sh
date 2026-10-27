@@ -105,12 +105,22 @@ qa_model_count() {
 # CRLF checkout's `^HELPER_PARTS = ($` never matched its CR-terminated line,
 # so the split helper read as a one-file one -- exit 0, no parts -- and the
 # slow trees would have staged the stub alone.
+# F-HARNESS-50 (2026-10-26): the stub is read ONCE, into a variable, and the
+# block is looked for there. It used to be `tr -d '\r' <stub | grep -q`, and
+# every caller runs under `pipefail`: grep -q exits on the match (byte 6,294
+# of the 9,137-byte stub), tr's next write takes SIGPIPE, the pipeline
+# answers 141, and the `|| return 0` read that as "a one-file helper" -- no
+# parts, status 0 -- 5 calls in 1500 under 2x CPU oversubscription, every
+# time under a writer that pauses after 8,192 bytes. A stub that cannot be
+# read at all is refused (1) rather than read as one with no block: the
+# same failure, the writer's, masked the same way.
 qa_helper_parts() {
-  local root=$1 rel
+  local root=$1 rel stub
   local -a parts=()
   [[ -f $root/bin/omarchy-iptv ]] || return 1
-  tr -d '\r' <"$root/bin/omarchy-iptv" | grep -q '^HELPER_PARTS = ($' || return 0
-  mapfile -t parts < <(tr -d '\r' <"$root/bin/omarchy-iptv" | sed -n '/^HELPER_PARTS = ($/,/^)$/s/^    ("\([0-9][0-9]-[a-z][a-z0-9-]*\.py\)", [1-9][0-9]*, 0x[0-9a-f]\{8\}),$/\1/p')
+  stub=$(tr -d '\r' 2>/dev/null <"$root/bin/omarchy-iptv") || return 1
+  [[ $'\n'$stub$'\n' == *$'\nHELPER_PARTS = (\n'* ]] || return 0
+  mapfile -t parts < <(sed -n '/^HELPER_PARTS = ($/,/^)$/s/^    ("\([0-9][0-9]-[a-z][a-z0-9-]*\.py\)", [1-9][0-9]*, 0x[0-9a-f]\{8\}),$/\1/p' <<<"$stub")
   (( ${#parts[@]} > 0 )) || return 1
   for rel in "${parts[@]}"; do [[ -f $root/bin/helper/$rel ]] || return 1; done
   for rel in "${parts[@]}"; do printf '%s\n' "$root/bin/helper/$rel"; done
@@ -997,6 +1007,40 @@ qa_harness_real_home() {
   printf '%s\n' "${h%/}"
 }
 
+# ---------------------------------------------------------- harness target
+
+# qa_target_nested <wayland-display> <real-runtime-dir>
+#   Is the compositor a harness is pointed at NESTED -- anything other than
+#   the session's own Hyprland? F-HARNESS-47 and -48 (2026-10-26). One
+#   definition, read by run.sh's harness_env (what the processes it starts
+#   may inherit) and by qa_key_skippable (whether a refused key is the
+#   display's doing), so the two cannot disagree about where the harness is.
+#     1  the session's own: HYPRLAND_INSTANCE_SIGNATURE names an instance
+#        whose lock file ($rt/hypr/<sig>/hyprland.lock, 0644, written by
+#        Hyprland: pid on line 1, its Wayland socket's name on line 2 --
+#        read on 0.56.2) names the socket <wayland-display> resolves to, and
+#        no wlroots variable says this process is a nested compositor's
+#        child (a cage's child inherits WLR_BACKENDS / WLR_RENDERER from the
+#        cage's own environment; no Hyprland session carries either).
+#     0  anything else: nested, or not shown to be the session's own. That
+#        includes no signature, a signature naming no instance, a lock that
+#        cannot be read, and a target that is not the socket the lock names.
+#   It reads one small file and connects to nothing.
+qa_target_nested() {
+  local wl=${1-} rt=${2-} sig=${HYPRLAND_INSTANCE_SIGNATURE:-} lock sock a b
+  [[ -n ${WLR_BACKENDS:-}${WLR_RENDERER:-} ]] && return 0
+  [[ -n $wl && $rt == /* && $sig =~ ^[A-Za-z0-9_]+$ ]] || return 0
+  lock="$rt/hypr/$sig/hyprland.lock"
+  [[ -f $lock && -r $lock ]] || return 0
+  sock=$(sed -n '2{p;q}' "$lock" 2>/dev/null)
+  [[ $sock =~ ^[A-Za-z0-9._/-]+$ ]] || return 0
+  [[ $sock == /* ]] || sock="$rt/$sock"
+  [[ $wl == /* ]] || wl="$rt/$wl"
+  a=$(realpath -m -- "$wl" 2>/dev/null) b=$(realpath -m -- "$sock" 2>/dev/null)
+  [[ -n $a && $a == "$b" ]] && return 1
+  return 0
+}
+
 # ------------------------------------------------------------ transcripts
 
 # F-M3-1, half (b). One live run of m3-scenario.sh answered "17 passed, 14
@@ -1212,15 +1256,20 @@ qa_transcript_start() {
 #   for this class too. The tag is this variable in both files, so the join
 #   is a name both read, not two copies of a string.
 #
-#   And never under Hyprland (recheck of F-M3-24, 2026-10-26): with
-#   HYPRLAND_INSTANCE_SIGNATURE in the environment the compositor is the
-#   owner's, which HAS layer-shell, so an inactive guide window there is not
-#   the environment -- it is the guide failing to take the keyboard (a lost
-#   keyboardFocus, a player that steals it), which m3 grades on the desk and
-#   which the guard used to report as a FAIL. Opted in or not, it stays a
-#   FAIL there. Every cage rig and `h()` unsets the signature (the hyprctl
-#   containment needs that anyway), so the cage keeps its SKIP. One predicate,
-#   qa_key_skippable, so m3's `shot` wrapper asks the same question by a call.
+#   And never on the session's own Hyprland (recheck of F-M3-24,
+#   2026-10-26): that compositor HAS layer-shell, so an inactive guide window
+#   there is not the environment -- it is the guide failing to take the
+#   keyboard (a lost keyboardFocus, a player that steals it), which m3 grades
+#   on the desk and which the guard used to report as a FAIL. Opted in or
+#   not, it stays a FAIL there. Which compositor the keys go to is
+#   qa_target_nested's answer for the caller's WAYLAND_DISPLAY (F-HARNESS-47,
+#   2026-10-26), the same one run.sh's harness_env acts on. It used to be "is
+#   HYPRLAND_INSTANCE_SIGNATURE set", a proxy for the target that a cage rig
+#   inheriting the owner's signature got wrong: its keys went to the cage and
+#   read as desk FAILs. The desk is unchanged (the signature's lock names
+#   the very socket the keys go to), and so is a cage rig that unsets the
+#   signature. One predicate, qa_key_skippable, so m3's `shot` wrapper asks
+#   the same question by a call.
 QA_KEY_REFUSALS=0
 QA_KEY_SKIPS=0
 QA_KEY_SKIP_REASON=""
@@ -1228,8 +1277,8 @@ QA_KEY_WINDOW_INACTIVE="window-inactive"
 # qa_key_skippable <status> <refusal text>: 0 when this refusal is the one
 # class a caller may report as SKIP (see above), 1 otherwise.
 qa_key_skippable() {
-  [[ ${QA_KEY_SKIP_INACTIVE:-0} == 1 && $1 == 3 && $2 == *"($QA_KEY_WINDOW_INACTIVE)"* \
-     && -z ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]
+  [[ ${QA_KEY_SKIP_INACTIVE:-0} == 1 && $1 == 3 && $2 == *"($QA_KEY_WINDOW_INACTIVE)"* ]] \
+    && qa_target_nested "${WAYLAND_DISPLAY:-wayland-1}" "${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 }
 qa_key() {
   local run=$1; shift

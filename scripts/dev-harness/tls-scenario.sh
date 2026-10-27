@@ -310,7 +310,7 @@ for tool in openssl ffmpeg curl python3 ss; do
   command -v "$tool" >/dev/null 2>&1 || { echo "$tool is not on PATH; this scenario needs it" >&2; exit 2; }
 done
 for port in "$PORT_SELF" "$PORT_CA"; do
-  ss -ltn 2>/dev/null | grep -q ":$port " && { echo "port $port is already in use; refusing to disturb whatever holds it" >&2; exit 2; }
+  grep -q ":$port " < <(ss -ltn 2>/dev/null) && { echo "port $port is already in use; refusing to disturb whatever holds it" >&2; exit 2; }
 done
 # S6's stage ref is resolved in BOTH modes, because a typo in it is a usage
 # error and a usage error should be reported by the run that was typed, not by
@@ -484,7 +484,7 @@ until_eq() {   # until_eq <want> <secs> <cmd...>
 wait_port() {   # wait_port <port> <up|down> <secs>
   local port=$1 want=$2 secs=$3 i seen
   for ((i = 0; i < secs * 10; i++)); do
-    seen=up; ss -ltn 2>/dev/null | grep -q ":$port " || seen=down
+    seen=up; grep -q ":$port " < <(ss -ltn 2>/dev/null) || seen=down
     [[ $seen == "$want" ]] && return 0
     sleep 0.1
   done

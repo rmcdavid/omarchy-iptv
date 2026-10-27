@@ -172,7 +172,7 @@ harness_stop() {
 have_verb() { grep -qE "function $1\(" "$ROOT/scripts/dev-harness/shell.qml"; }
 have_cache_verb() { python3 "$HELPER" cache --help >/dev/null 2>&1; }
 fake_applies_entry() {
-  awk '/function updateEntryInline/{f=1} f&&/barConfig|setSetting/{print "yes"; exit} f&&/^  }/{exit}' "$ROOT/scripts/dev-harness/shell.qml" | grep -q yes
+  grep -q yes < <(awk '/function updateEntryInline/{f=1} f&&/barConfig|setSetting/{print "yes"; exit} f&&/^  }/{exit}' "$ROOT/scripts/dev-harness/shell.qml")
 }
 
 need() {            # need verbs:a,b helper:cache apply:entry -- in print mode only notes

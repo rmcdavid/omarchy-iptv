@@ -116,8 +116,8 @@ trap cleanup EXIT
 PORT=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1]); s.close()')
 python3 "$HERE/probe_server.py" "$PORT" "$LOG" >/dev/null 2>&1 &
 OWN_CHILD=$!
-for i in $(seq 1 50); do ss -ltn 2>/dev/null | grep -q ":$PORT " && break; sleep 0.1; done
-ss -ltn 2>/dev/null | grep -q ":$PORT " || { echo "probe server did not start on $PORT"; exit 2; }
+for i in $(seq 1 50); do grep -q ":$PORT " < <(ss -ltn 2>/dev/null) && break; sleep 0.1; done
+grep -q ":$PORT " < <(ss -ltn 2>/dev/null) || { echo "probe server did not start on $PORT"; exit 2; }
 lpid=$(listener_pid)
 [[ -n $lpid && $(ps -o ppid= -p "$lpid" 2>/dev/null | tr -d ' ') == "$$" ]] || { echo "port $PORT is held by pid ${lpid:-?}, not a child of this run; leaving it alone"; exit 2; }
 SERVER_PID=$lpid
@@ -200,6 +200,6 @@ print("result matches the 2026-10-02 measurement (Qt 6.11.2): fetched column and
 PY
 status=$?
 kill "$SERVER_PID" 2>/dev/null
-for i in $(seq 1 30); do ss -ltn 2>/dev/null | grep -q ":$PORT " || break; sleep 0.1; done
-ss -ltn 2>/dev/null | grep -q ":$PORT " && echo "WARNING: port $PORT still listening" || echo "probe server stopped, port $PORT free"
+for i in $(seq 1 30); do grep -q ":$PORT " < <(ss -ltn 2>/dev/null) || break; sleep 0.1; done
+grep -q ":$PORT " < <(ss -ltn 2>/dev/null) && echo "WARNING: port $PORT still listening" || echo "probe server stopped, port $PORT free"
 exit $status

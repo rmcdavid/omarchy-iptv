@@ -118,7 +118,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 pgrep -x hyprlock >/dev/null && { echo "screen is locked"; exit 2; }
-ss -ltn 2>/dev/null | grep -q ":$PORT " && { echo "port $PORT is already in use"; exit 2; }
+grep -q ":$PORT " < <(ss -ltn 2>/dev/null) && { echo "port $PORT is already in use"; exit 2; }
 
 # F-M3-1 half (b). The transcript matters more here than anywhere: this
 # scenario drives a SYNTHETIC CREDENTIAL through a real source, so its own
@@ -141,8 +141,8 @@ class H(http.server.BaseHTTPRequestHandler):
 http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])), H).serve_forever()
 PY
 python3 "$WORK/slow.py" "$PORT" >/dev/null 2>&1 &
-for i in $(seq 1 20); do ss -ltn 2>/dev/null | grep -q ":$PORT " && break; sleep 0.1; done
-ss -ltn 2>/dev/null | grep -q ":$PORT " || { echo "slow server did not start"; exit 2; }
+for i in $(seq 1 20); do grep -q ":$PORT " < <(ss -ltn 2>/dev/null) && break; sleep 0.1; done
+grep -q ":$PORT " < <(ss -ltn 2>/dev/null) || { echo "slow server did not start"; exit 2; }
 
 # ---- the sweeper: every 50 ms, every helper process, cmdline and environ
 cat >"$WORK/sweep.py" <<'PY'

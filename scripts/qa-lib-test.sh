@@ -387,6 +387,56 @@ old_helper_parts() {
 }
 is "the shipped reader answered a CRLF stub with no parts at all (the shape replaced)" \
    "$(old_helper_parts "$HCRLF" | wc -l | tr -d ' ')" "0"
+# F-HARNESS-50 (2026-10-26). Every caller runs this reader under `pipefail`,
+# and 81853f7's shape was `tr -d '\r' <stub | grep -q '^HELPER_PARTS = ($'
+# || return 0`: grep -q exits on the match, 6,294 bytes into the 9,137-byte
+# stub, tr's next write takes SIGPIPE, the pipeline answers 141, and the
+# reader said "a one-file helper" -- no parts, status 0 -- 5 calls in 1500
+# under 2x CPU oversubscription, and a red gate. Here the writer is made
+# deterministic: `tr` is shadowed, in a subshell, by one that writes 8,192
+# bytes, pauses, then writes the rest -- the recheck's slow writer, the
+# scheduler's bad day and nothing a real tr cannot do. LC_ALL=C makes the
+# 8,192 bytes. The 81853f7 reader, verbatim, is the proof the writer bites.
+old_helper_parts_pipe() {
+  local root=$1 rel
+  local -a parts=()
+  [[ -f $root/bin/omarchy-iptv ]] || return 1
+  tr -d '\r' <"$root/bin/omarchy-iptv" | grep -q '^HELPER_PARTS = ($' || return 0
+  mapfile -t parts < <(tr -d '\r' <"$root/bin/omarchy-iptv" | sed -n '/^HELPER_PARTS = ($/,/^)$/s/^    ("\([0-9][0-9]-[a-z][a-z0-9-]*\.py\)", [1-9][0-9]*, 0x[0-9a-f]\{8\}),$/\1/p')
+  (( ${#parts[@]} > 0 )) || return 1
+  for rel in "${parts[@]}"; do [[ -f $root/bin/helper/$rel ]] || return 1; done
+  for rel in "${parts[@]}"; do printf '%s\n' "$root/bin/helper/$rel"; done
+}
+slow_tr_parts() {   # slow_tr_parts <pipefail 0|1> <reader> <root> -> "<status> <parts>"
+  ( export LC_ALL=C
+    if (( $1 )); then set -o pipefail; else set +o pipefail; fi
+    tr() { local d; d=$(command tr "$@") || return; printf '%s' "${d:0:8192}"; sleep 0.5; printf '%s\n' "${d:8192}"; }
+    out=$("$2" "$3"); rc=$?
+    n=0; [[ -n $out ]] && n=$(wc -l <<<"$out")
+    printf '%s %s\n' "$rc" "$n" )
+}
+is "81853f7's reader under pipefail and the slow writer: a one-file helper, status 0, no parts (the defect)" \
+   "$(slow_tr_parts 1 old_helper_parts_pipe "$ROOT")" "0 0"
+is "the same reader and writer without pipefail finds all eleven, so it is the status and not the bytes" \
+   "$(slow_tr_parts 0 old_helper_parts_pipe "$ROOT")" "0 11"
+is "qa_helper_parts under pipefail and the slow writer names all eleven parts, status 0" \
+   "$(slow_tr_parts 1 qa_helper_parts "$ROOT")" "0 11"
+# The same reader's other masked writer failure: a stub that exists and
+# cannot be READ. 81853f7 answered it as a one-file helper too (tr failed,
+# grep saw nothing, `|| return 0`). Root reads a mode-000 file, so there
+# the case cannot be built and both checks say so instead of passing.
+HUNREAD="$TMP/helper-unread"
+mkdir -p "$HUNREAD/bin/helper"
+cp "$ROOT/bin/omarchy-iptv" "$HUNREAD/bin/omarchy-iptv"; chmod 000 "$HUNREAD/bin/omarchy-iptv"
+if [[ -r $HUNREAD/bin/omarchy-iptv ]]; then
+  bad "an unreadable stub could not be made here (running as root?); the two checks below cannot be graded"
+  bad "(the second of them)"
+else
+  is "81853f7's reader read an unreadable stub as a one-file helper: status 0" \
+     "$(old_helper_parts_pipe "$HUNREAD" >/dev/null 2>&1; echo $?)" "0"
+  st "qa_helper_parts refuses a stub it cannot read (1), never a one-file helper" 1 qa_helper_parts "$HUNREAD"
+fi
+chmod 600 "$HUNREAD/bin/omarchy-iptv"
 
 # ======================================================== qa_tree_count (A2)
 
@@ -1786,6 +1836,29 @@ is "R18 syncs before it sweeps" "$(qa_count '^if qa_transcript_sync ' "$RW")" "1
 
 # ================================ the focus guard's decision table (F-M3-1 a)
 
+section "qa_target_nested: the desk is the socket its signature's own lock names (F-HARNESS-47)"
+
+# One predicate decides where a harness is pointed, for run.sh's harness_env
+# (what the shell, helper and player may inherit) and for qa_key_skippable
+# (whether a refused key is the display's doing). Driven over a runtime
+# directory built here: a Hyprland lock in the shape 0.56.2 writes (pid,
+# then the session's Wayland socket name), so nothing reads the owner's.
+TN="$TMP/tn"; mkdir -p "$TN/hypr/tnsig"
+printf '4242\nwayland-tn\n' >"$TN/hypr/tnsig/hyprland.lock"
+tn() {   # [TNSIG=<sig>] [TNWLR=<renderer>] tn <wayland-display> -> the predicate's status
+  ( unset WLR_BACKENDS WLR_RENDERER HYPRLAND_INSTANCE_SIGNATURE
+    [[ -n ${TNSIG:-} ]] && export HYPRLAND_INSTANCE_SIGNATURE=$TNSIG
+    [[ -n ${TNWLR:-} ]] && export WLR_RENDERER=$TNWLR
+    qa_target_nested "$1" "$TN"; echo $? )
+}
+is "the socket the signature's lock names is the session's own (1)" "$(TNSIG=tnsig tn wayland-tn)" "1"
+is "and so is that socket's absolute path" "$(TNSIG=tnsig tn "$TN/wayland-tn")" "1"
+is "another socket, the same signature inherited, is NESTED (0): the F-HARNESS-47 case" "$(TNSIG=tnsig tn wayland-cage)" "0"
+is "no signature: nothing shows the target is the session's, so nested" "$(tn wayland-tn)" "0"
+is "a signature that names no instance is nested" "$(TNSIG=nosuch tn wayland-tn)" "0"
+is "a signature that is a path is never followed out of hypr/" "$(TNSIG=../hypr/tnsig tn wayland-tn)" "0"
+is "a cage's child (WLR_RENDERER inherited) is nested whatever socket it names" "$(TNSIG=tnsig TNWLR=pixman tn wayland-tn)" "0"
+
 section "run.sh key/type: the focus guard, decided from a stubbed reply"
 
 # The first review of the guard found that NOTHING in the gate could go red for
@@ -1879,6 +1952,39 @@ ck "and says the compositor has not given the window the keyboard, with the shar
    'grep -q "has not given the guide.s WINDOW the keyboard" "$FG/out" && grep -qF "($QA_KEY_WINDOW_INACTIVE)" "$FG/out"'
 is "type refuses the inactive window up front, nothing typed" "$(fg_run type sky)" "3 0"
 is "--to-compositor still sends past an inactive window, the chord only" "$(fg_run key --to-compositor -k Escape)" "0 1"
+# F-HARNESS-54 (1): the refusal's words, by window kind, keyboard and where
+# the keys go. The `--window floating` hint is advice for ONE case -- the
+# production layer window on a nested compositor, which cannot map it -- and
+# was printed for a guide already floating and for a desk FAIL as well. The
+# target is the hermetic runtime above (the session's socket wayland-tn, a
+# cage at wayland-cage, the signature inherited either way), and a stand-in
+# NAMED mpv bound to this harness's socket is the player that takes the
+# keyboard when it maps (QA-RESULTS "F-M3-24"). On e243c29's run.sh every
+# one of these carried the cage hint and none named a player.
+fg_word() {   # fg_word <desk|cage> <reply> -> "<exit> <wtype calls>", the refusal in $FG/out
+  fg_stub "$2" "" 0
+  HYPRLAND_INSTANCE_SIGNATURE=tnsig XDG_RUNTIME_DIR=$TN WAYLAND_DISPLAY=wayland-${1/desk/tn} fg_run key j
+}
+FG_FLOAT_LOST=${FG_OPEN/\"keyboard\":true/\"keyboard\":false}
+FG_FLOAT_LOST=${FG_FLOAT_LOST/\"window\":\"layer\"/\"window\":\"floating\"}
+FG_FLOAT_LOST=${FG_FLOAT_LOST/\"windowActive\":true/\"windowActive\":false}
+is "the layer window on a nested compositor: refused" "$(fg_word cage "${FG_OPEN/\"windowActive\":true/\"windowActive\":false}")" "3 0"
+ck "with the cage hint, the tag and the item that still holds focus" \
+   'grep -q "start the harness with --window floating there" "$FG/out" && grep -qF "($QA_KEY_WINDOW_INACTIVE)" "$FG/out" && grep -q "whatever item inside the guide holds focus" "$FG/out"'
+is "a FLOATING window whose keyboard was taken: refused" "$(fg_word cage "$FG_FLOAT_LOST")" "3 0"
+ck "without the cage hint (it is already floating), naming no player when none is up" \
+   '! grep -q -- "--window floating" "$FG/out" && grep -q "no player of this harness is up" "$FG/out" && grep -q "no item inside the guide holds focus either" "$FG/out" && grep -qF "($QA_KEY_WINDOW_INACTIVE)" "$FG/out"'
+fw_bin="$TMP/fw-bin"; mkdir -p "$fw_bin"
+printf '#!/bin/bash\nwhile :; do sleep 0.1; done\n' >"$fw_bin/mpv"; chmod +x "$fw_bin/mpv"
+"$fw_bin/mpv" "--input-ipc-server=$FG/h/runtime/omarchy-iptv/mpv.sock" >/dev/null 2>&1 & fw_player=$!
+for ((fw_i = 0; fw_i < 50; fw_i++)); do [[ $(qa_cmdline "$fw_player" 2>/dev/null) == *input-ipc-server* ]] && break; sleep 0.1; done
+is "and with this harness's player up: refused" "$(fg_word cage "$FG_FLOAT_LOST")" "3 0"
+ck "naming the surface that holds the keyboard: the player, by pid" \
+   'grep -q "this harness.s player is up (mpv pid $fw_player)" "$FG/out" && ! grep -q -- "--window floating" "$FG/out"'
+kill "$fw_player" 2>/dev/null; wait "$fw_player" 2>/dev/null
+is "the layer window on the session's OWN compositor (a desk FAIL): refused" "$(fg_word desk "${FG_OPEN/\"windowActive\":true/\"windowActive\":false}")" "3 0"
+ck "with no cage hint: the guide is named as failing to take the keyboard" \
+   '! grep -q -- "--window floating" "$FG/out" && grep -q "this is the guide failing to take it, not the display" "$FG/out" && grep -qF "($QA_KEY_WINDOW_INACTIVE)" "$FG/out"'
 # A reply that does not say is not a yes: a harness from before this field,
 # or a null the snapshot could not read. Refused as "cannot tell", UNtagged,
 # so no scenario can turn it into a SKIP.
@@ -2005,10 +2111,90 @@ is "--any-surface AFTER the name is a name, not a flag" "$(fg_shot shot guide --
 ck "and no shot ever primes the shell (a shot is not a keystroke)" '[[ ! -f $FG/h/primed ]]'
 # The one caller: m3-scenario.sh used to send both of `shot`'s streams to
 # /dev/null and force its status to 0, so a refusal would have been as
-# invisible as the wrong surface. Its wrapper now turns exit 3 into a FAIL
-# line. Bookkeeping by shape (rule 14 says so): the live run is the proof.
-is "m3-scenario.sh's shot wrapper counts a refusal as a FAIL rather than hiding it" \
-   "$(awk '/^shot\(\) \{/,/^\}/' "$ROOT/scripts/dev-harness/m3-scenario.sh" | grep -c 'rc == 3.*fail "shot')" "1"
+# invisible as the wrong surface. Its wrapper turns exit 3 into a FAIL line,
+# and since F-M3-24 the window-inactive class off the desk into a SKIP.
+# F-HARNESS-54 (3): this was pinned by a grep for `rc == 3.*fail "shot`,
+# which stayed green when the wrapper was mutated to skip EVERY refused
+# shot. Now the wrapper itself runs: its text, extracted from m3-scenario.sh
+# (the start and the end of the function both found, or the case says so),
+# over the REAL run.sh and the stubbed qs/hyprctl/grim above, with m3's own
+# counters. Each case prints "<pass> <fail> <skip> <grim calls>".
+m3_shot_fn=$(sed -n '/^shot() {$/,/^}$/p' "$ROOT/scripts/dev-harness/m3-scenario.sh")
+m3_shot() {   # m3_shot <desk|cage> <shots 0|1> <reply>
+  fg_stub "$3" "" 0
+  : >"$GRIM_LOG"; rm -rf "$FG/h/shots"
+  ( PASS=0; FAIL=0; SKIP=0; SHOTS=$2; RUN="$ROOT/scripts/dev-harness/run.sh"; QA_KEY_SKIP_INACTIVE=1
+    pass() { PASS=$((PASS+1)); }; fail() { FAIL=$((FAIL+1)); }; skip() { SKIP=$((SKIP+1)); }
+    export HYPRLAND_INSTANCE_SIGNATURE=tnsig XDG_RUNTIME_DIR=$TN WAYLAND_DISPLAY=wayland-${1/desk/tn}
+    export PATH="$FG/bin:$PATH" OMARCHY_IPTV_HARNESS_DIR=$FG/h
+    # Evaluated only when it is the function and nothing past it: a range
+    # whose end is missing would hand eval m3's top level, which starts a
+    # harness (the held F-HARNESS-46 test's lesson, tests/test_harness_gpu_sw_check.py).
+    [[ $(head -n 1 <<<"$m3_shot_fn") == "shot() {" && $(tail -n 1 <<<"$m3_shot_fn") == "}" && $(wc -l <<<"$m3_shot_fn") -lt 20 ]] \
+      || { echo "m3-scenario.sh's shot() was not extracted whole"; exit 0; }
+    eval "$m3_shot_fn"
+    declare -F shot >/dev/null || { echo "no shot() in m3-scenario.sh"; exit 0; }
+    shot m3-test >/dev/null 2>&1
+    printf '%s %s %s %s\n' "$PASS" "$FAIL" "$SKIP" "$(wc -l <"$GRIM_LOG" | tr -d ' ')" )
+}
+ck "m3's shot() is extracted whole: it starts and ends where the function does" \
+   '[[ $(head -n 1 <<<"$m3_shot_fn") == "shot() {" && $(tail -n 1 <<<"$m3_shot_fn") == "}" && $(wc -l <<<"$m3_shot_fn") -lt 20 ]]'
+is "m3's shot(): a guide that holds the keyboard is captured, nothing counted against it" \
+   "$(m3_shot cage 1 "$FG_OPEN")" "0 0 0 1"
+is "m3's shot(): the window-inactive refusal under a cage is a SKIP" \
+   "$(m3_shot cage 1 "${FG_OPEN/\"windowActive\":true/\"windowActive\":false}")" "0 0 1 0"
+is "m3's shot(): the same refusal on the desk is a FAIL" \
+   "$(m3_shot desk 1 "${FG_OPEN/\"windowActive\":true/\"windowActive\":false}")" "0 1 0 0"
+is "m3's shot(): any OTHER refusal (the guide closed) is a FAIL, under a cage too" \
+   "$(m3_shot cage 1 "${FG_OPEN/\"open\":true/\"open\":false}")" "0 1 0 0"
+is "m3's shot(): without --shots nothing is captured and nothing counted" \
+   "$(m3_shot cage 0 "${FG_OPEN/\"open\":true/\"open\":false}")" "0 0 0 0"
+
+# F-HARNESS-54 (2): m3's T5 chain, driven. A key the guard refuses SKIPs the
+# rest of the chain, and the trackClose fallback after it closes the picker
+# T5 would have closed -- but only when `t5` is set, and T5d's refusal did not
+# set it: with T5a-c sent and T5d refused, the picker T5b reopened stayed open
+# into T6b. The block's own text (from `t5=""` to the `fi` that closes the
+# fallback) runs here over stubs: gf answers a picker that the keys open and
+# close, key_sent answers each call from a list (0 sent, 1 window-inactive),
+# ipc counts trackClose. Each case prints its counters. On e243c29's
+# m3-scenario.sh the T5d case read "closes=0 open=true".
+m3_t5_block=$(awk '/^t5=""$/ { on = 1 } on { print } on && /ipc trackClose/ { seen = 1 } on && seen && /^fi$/ { exit }' "$ROOT/scripts/dev-harness/m3-scenario.sh")
+m3_t5() {   # m3_t5 <key_sent answers...> -> "pass= fail= skip= closes= open= keys="
+  local out
+  out=$( PASS=0; FAIL=0; SKIP=0; QA_KEY_SKIP_REASON="refused ($QA_KEY_WINDOW_INACTIVE)"
+    INTR=true CUR=2 KI=0 CLOSES=0; KEYS=("$@")
+    pass() { PASS=$((PASS+1)); }; fail() { FAIL=$((FAIL+1)); }; skip() { SKIP=$((SKIP+1)); }
+    sleep() { :; }; wait_sf() { return 0; }
+    gf() { case $1 in 'g["inTracks"]') echo "$INTR" ;; 'g["mode"]') echo '"list"' ;; 'g["trackCursor"]') echo "$CUR" ;; *) echo NOSTATE ;; esac; }
+    key_sent() {
+      local rc=${KEYS[KI]:-0}; KI=$((KI+1))
+      (( rc == 0 )) || return "$rc"
+      case "$*" in
+        "-k Escape") INTR=false ;;
+        t) if [[ $INTR == true ]]; then INTR=false; else INTR=true; CUR=2; fi ;;
+        j) CUR=4 ;;
+      esac
+      return 0
+    }
+    ipc() { [[ ${1-} == trackClose ]] && { CLOSES=$((CLOSES+1)); INTR=false; }; return 0; }
+    # As for shot() above: only the block, never the rest of the file.
+    [[ $(head -n 1 <<<"$m3_t5_block") == 't5=""' && $(tail -n 1 <<<"$m3_t5_block") == fi && $(wc -l <<<"$m3_t5_block") -lt 60 ]] \
+      || { echo "m3-scenario.sh's T5 block was not extracted whole"; exit 0; }
+    eval "$m3_t5_block" >/dev/null
+    printf 'pass=%s fail=%s skip=%s closes=%s open=%s keys=%s\n' "$PASS" "$FAIL" "$SKIP" "$CLOSES" "$INTR" "$KI" )
+  printf '%s\n' "${out##*$'\n'}"
+}
+ck "m3's T5 block is extracted whole: from t5=\"\" through the trackClose fallback's fi" \
+   '[[ $(head -n 1 <<<"$m3_t5_block") == "t5=\"\"" && $(tail -n 1 <<<"$m3_t5_block") == "fi" && $m3_t5_block == *"ipc trackClose"* && $(wc -l <<<"$m3_t5_block") -lt 60 ]]'
+is "T5 with every key sent: four passes, nothing closed behind it" \
+   "$(m3_t5 0 0 0 0)" "pass=4 fail=0 skip=0 closes=0 open=false keys=4"
+is "T5 with T5d alone refused: the fallback closes the picker T5b reopened" \
+   "$(m3_t5 0 0 0 1)" "pass=3 fail=0 skip=1 closes=1 open=false keys=4"
+is "T5 with T5a refused: the rest unsent, the picker T4 left open closed by the fallback" \
+   "$(m3_t5 1)" "pass=0 fail=0 skip=4 closes=1 open=false keys=1"
+is "T5 with T5b refused: the picker T5a closed stays closed, nothing for the fallback" \
+   "$(m3_t5 0 1)" "pass=1 fail=0 skip=3 closes=0 open=false keys=2"
 
 # ======== qa_key: the window-inactive refusal is a SKIP only where opted in
 
@@ -2021,13 +2207,21 @@ section "qa_key: which refusal a scenario may SKIP (F-M3-24)"
 # and then qa_key's own line. On b43c4a4 the inactive reply was SENT, "0 ...
 # wtype=2", which is the H6a/H6b shape of F-M3-24 in one line.
 # Every case runs with NO Hyprland instance in its environment, as a cage rig
-# does, unless FGQK_HIS names one: the SKIP class is off under Hyprland, and
-# this suite's own caller usually has the owner's signature set.
-fg_qa_key() {   # [FGQK_HIS=<sig>] fg_qa_key <opt-in 0|1> <wtype args...>
+# does, unless FGQK_HIS names one: the SKIP class is off on the session's own
+# Hyprland, and this suite's own caller usually has the owner's signature
+# set. With FGQK_HIS the runtime is the hermetic one qa_target_nested's
+# section built (F-HARNESS-47), and the keys go to FGQK_WL: wayland-tn, the
+# socket that signature's lock names (the desk), unless the case says
+# otherwise.
+fg_qa_key() {   # [FGQK_HIS=<sig>] [FGQK_WL=<display>] fg_qa_key <opt-in 0|1> <wtype args...>
   local opt=$1; shift
   rm -f "$FG"/h/primed*; : >"$FG/wtype.log"
   ( QA_KEY_SKIPS=0; QA_KEY_REFUSALS=0; QA_KEY_SKIP_REASON=""; QA_KEY_SKIP_INACTIVE=$opt
-    if [[ -n ${FGQK_HIS:-} ]]; then export HYPRLAND_INSTANCE_SIGNATURE=$FGQK_HIS; else unset HYPRLAND_INSTANCE_SIGNATURE; fi
+    if [[ -n ${FGQK_HIS:-} ]]; then
+      export HYPRLAND_INSTANCE_SIGNATURE=$FGQK_HIS XDG_RUNTIME_DIR=$TN WAYLAND_DISPLAY=${FGQK_WL:-wayland-tn}
+    else
+      unset HYPRLAND_INSTANCE_SIGNATURE
+    fi
     export WTYPE_LOG=$FG/wtype.log PATH="$FG/bin:$PATH" OMARCHY_IPTV_HARNESS_DIR=$FG/h
     # Not $( ): the counters must move in THIS shell, not in a copy of it.
     qa_key "$ROOT/scripts/dev-harness/run.sh" "$@" >"$FG/qk.out"; rc=$?
@@ -2048,11 +2242,17 @@ is "and its line is the FAIL it always was" "$(fg_qa_key 0 x | sed -n 2p | cut -
 # keyboard -- what m3 grades on the desk, and a FAIL under the old guard
 # ("ANOTHER SURFACE", or H6a red). On lane-fm324's d4f653c this read
 # "3 skips=1 refusals=0": a broken desk run would have SKIPped and exited 77.
-QK=$(FGQK_HIS=qa-lib-test-not-a-live-instance fg_qa_key 1 x)
-is "opted in, but UNDER HYPRLAND an inactive window is a FAIL, not a SKIP" "$(sed -n 1p <<<"$QK")" "3 skips=0 refusals=1 wtype=0"
+QK=$(FGQK_HIS=tnsig fg_qa_key 1 x)
+is "opted in, but on the session's OWN Hyprland an inactive window is a FAIL, not a SKIP" "$(sed -n 1p <<<"$QK")" "3 skips=0 refusals=1 wtype=0"
 is "and its line is the FAIL line" "$(sed -n 2p <<<"$QK" | cut -c1-34)" "FAIL run.sh key x was REFUSED (exi"
-ck "the predicate m3's shot wrapper calls says the same: skippable off Hyprland, not under it" \
-   '( QA_KEY_SKIP_INACTIVE=1; unset HYPRLAND_INSTANCE_SIGNATURE; qa_key_skippable 3 "x ($QA_KEY_WINDOW_INACTIVE) y" ) && ( QA_KEY_SKIP_INACTIVE=1; HYPRLAND_INSTANCE_SIGNATURE=s; ! qa_key_skippable 3 "x ($QA_KEY_WINDOW_INACTIVE) y" )'
+# F-HARNESS-47: the signature is not the target. A cage rig that inherits the
+# owner's signature sends its keys to the CAGE, which has no layer-shell, so
+# its inactive guide window is the display's doing and a SKIP -- on e243c29's
+# qa-lib.sh, which asked only "is the signature set", it read as a desk FAIL.
+QK=$(FGQK_HIS=tnsig FGQK_WL=wayland-cage fg_qa_key 1 x)
+is "opted in, a signature INHERITED but the keys aimed at a cage: a SKIP, not a desk FAIL" "$(sed -n 1p <<<"$QK")" "3 skips=1 refusals=0 wtype=0"
+ck "the predicate m3's shot wrapper calls says the same: skippable off the desk, not on it" \
+   '( QA_KEY_SKIP_INACTIVE=1; unset HYPRLAND_INSTANCE_SIGNATURE; qa_key_skippable 3 "x ($QA_KEY_WINDOW_INACTIVE) y" ) && ( QA_KEY_SKIP_INACTIVE=1; HYPRLAND_INSTANCE_SIGNATURE=tnsig XDG_RUNTIME_DIR=$TN WAYLAND_DISPLAY=wayland-tn; ! qa_key_skippable 3 "x ($QA_KEY_WINDOW_INACTIVE) y" ) && ( QA_KEY_SKIP_INACTIVE=1; HYPRLAND_INSTANCE_SIGNATURE=tnsig XDG_RUNTIME_DIR=$TN WAYLAND_DISPLAY=wayland-cage; qa_key_skippable 3 "x ($QA_KEY_WINDOW_INACTIVE) y" )'
 fg_stub "${FG_OPEN/\"open\":true/\"open\":false}" "" 0
 is "opted in, a CLOSED guide is still a FAIL: only the window class may skip" "$(fg_qa_key 1 x | sed -n 1p)" "3 skips=0 refusals=1 wtype=0"
 fg_stub "${FG_OPEN/,\"windowActive\":true/}" "" 0
@@ -3000,7 +3200,25 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # 573 -> 576 on 2026-10-26, the recheck of lane-fm324: the SKIP class is off
 # under Hyprland, end to end through qa_key (2) and in the predicate m3's
 # shot wrapper calls (1); red on d4f653c's qa-lib.sh (3 failed).
-EXPECTED=576
+# 576 -> 581 on 2026-10-26, lane-hfu (F-HARNESS-50): qa_helper_parts under
+# pipefail and a writer that pauses after 8,192 bytes, 81853f7's reader beside
+# it with pipefail on and off, and a stub that cannot be read, read by both
+# (5). Red on e243c29's qa-lib.sh: the slow writer's "0 0" and the
+# unreadable stub's 0 (2 failed).
+# 581 -> 589 on 2026-10-26, lane-hfu (F-HARNESS-47): qa_target_nested over a
+# hermetic Hyprland lock (7), and qa_key's SKIP for a signature inherited
+# toward a cage (1); the desk case and the predicate's ck were rewritten over
+# the same lock, not added. Red on e243c29's qa-lib.sh: 9 failed (the
+# predicate absent, 127, and the inherited signature read as the desk).
+# 589 -> 607 on 2026-10-26, lane-hfu (F-HARNESS-54): the window-inactive
+# refusal worded by window kind, keyboard and target, a stand-in player named
+# by pid (8, item 1); m3's shot() run over the real run.sh in place of the
+# grep that pinned it (6 for 1, item 3: red on a copy whose wrapper skips
+# every refused shot, 2 failed, where the grep read 1 and stayed green);
+# m3's T5 chain driven, T5d's refusal included (5, item 2). Red on the
+# F-HARNESS-47 commit's run.sh and m3-scenario.sh: the three wordings and
+# T5d (4 failed); with e243c29's qa-lib.sh as well, 5.
+EXPECTED=607
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

@@ -218,8 +218,8 @@ check "active key unchanged, channels still 20" '[[ "$(svc "['\''activeSourceKey
 wait_gone "$CACHE/sources/$KBAD" 5
 check "nothing saved: no record, no directory, state.json untouched by the add" \
   '[[ "$(py "len([s for s in d if s['\''id'\'']=='\''$KBAD'\''])" "$(ipc sources)")" == 0 && ! -e "$CACHE/sources/$KBAD" && "$(python3 -c "import json;print(len(json.load(open(\"$STATE\"))[\"sources\"]))")" == 1 ]]'
-check "signals() lists the failed probe, host only" 'ipc signals | grep -q "sourceProbeFinished" && ! ipc signals | grep -q "://"'
-check "sources() carries no URL" '! ipc sources | grep -q "://"'
+check "signals() lists the failed probe, host only" 'grep -q "sourceProbeFinished" < <(ipc signals) && ! grep -q "://" < <(ipc signals)'
+check "sources() carries no URL" '! grep -q "://" < <(ipc sources)'
 check "re-submitting is a fresh add with the same id (the form is the retry)" '[[ "$(py "(d['\''code'\''], d['\''id'\''])" "$(ipc addSource "http://127.0.0.1:9/x.m3u" "" "")")" == "('\''ok'\'', '\''$KBAD'\'')" ]]'
 wait_for false 15 svc "['probing']" || true
 check "removeSource of the never-recorded id -> unknown_source" '[[ "$(py "d['\''code'\'']" "$(ipc removeSource "$KBAD")")" == unknown_source ]]'
@@ -231,7 +231,7 @@ check "addSource ok" '[[ "$(py "d['\''ok'\'']" "$res")" == true && -n "$K2" ]]'
 wait_log "sourceSwitched .*\"id\":\"$K2\"" 30 || bad "sourceSwitched($K2) not observed"
 check "probe ok with $CHANNELS_10K channels" '[[ "$(last_log sourceProbeFinished)" == *"\"ok\":true"*"\"channelCount\":$CHANNELS_10K"* ]]'
 check "new source active, channels loaded" '[[ "$(svc "['\''activeSourceKey'\'']")" == "$K2" && "$(svc "['\''channels'\'']")" == "$CHANNELS_10K" ]]'
-check "updateEntryInline logged with keys only" 'grep -q "updateEntryInline io.github.rmcdavid.iptv keys:" "$LOG" && ! grep "updateEntryInline" "$LOG" | grep -q "gen-10k"'
+check "updateEntryInline logged with keys only" 'grep -q "updateEntryInline io.github.rmcdavid.iptv keys:" "$LOG" && ! grep -q "gen-10k" < <(grep "updateEntryInline" "$LOG")'
 check "activeCache() switched" '[[ "$(ipc activeCache)" == "$CACHE/sources/$K2" ]]'
 
 echo "== H6/H8 switch timing (5 each way, warm caches)"

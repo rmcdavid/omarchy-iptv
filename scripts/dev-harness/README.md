@@ -223,9 +223,25 @@ probes:
   the decoy empty.
 
 Because `XDG_RUNTIME_DIR` is redirected, `run.sh` exports `WAYLAND_DISPLAY`
-as the absolute socket path (libwayland accepts that) and symlinks the real
-`hypr/` directory so `hyprctl` keeps working. `run.sh ipc` re-exports the
-same runtime dir so `qs ipc` can find the instance.
+as the absolute socket path (libwayland accepts that). `run.sh ipc`
+re-exports the same runtime dir so `qs ipc` can find the instance.
+
+**What the harness's processes may inherit (F-HARNESS-47, -48).** The
+target is `WAYLAND_DISPLAY`, and nothing `run.sh` starts -- the shell, the
+helper, the player -- inherits a display or a compositor IPC that is not
+it. `harness_env` drops `DISPLAY` always (nothing in the harness or the
+plugin needs X; `OMARCHY_IPTV_HARNESS_KEEP_DISPLAY=1` keeps it, on the desk
+only, and is refused against a nested compositor), and drops
+`HYPRLAND_INSTANCE_SIGNATURE` whenever the target is nested: anything but
+the socket named on line 2 of that signature's own
+`$XDG_RUNTIME_DIR/hypr/<signature>/hyprland.lock`, or any process carrying a
+cage's `WLR_BACKENDS` / `WLR_RENDERER` (`qa_target_nested` in
+`scripts/qa-lib.sh`, which `qa_key_skippable` asks too). The scratch runtime
+has no `hypr/`: the link that used to sit there "so hyprctl works" never
+did at the default directory (123 bytes to the socket, past `sun_path`'s
+108) and through a shorter one reached the owner's Hyprland. The cage
+`h()` lines' `env -u` and the cage starters' `-u DISPLAY` stay as a second
+layer. `tests/test_harness_display.py` drives all of it.
 
 **Two IPC targets, two subcommands.** The harness shell declares its own
 `IpcHandler` under the target `harness` -- the inspection verbs (`state`,
@@ -455,12 +471,18 @@ So under a cage:
   opts in with `QA_KEY_SKIP_INACTIVE=1`; every other scenario still FAILs on
   that refusal, and every other refusal is a FAIL everywhere. A SKIP is only
   reachable through a refusal Qt's own `Window.active` caused, so a run in
-  which the guide holds the keyboard has none. Nor is it reachable under
-  Hyprland (`HYPRLAND_INSTANCE_SIGNATURE` set): that compositor has
-  layer-shell, so an inactive guide window there is the guide failing to
-  take the keyboard -- which m3 grades on the desk -- and it stays a FAIL
-  (`qa_key_skippable` in `scripts/qa-lib.sh`). Every cage rig unsets the
-  signature, which the `hyprctl` containment below needs anyway. H6b, T5a, T5b, T5d and P1c,
+  which the guide holds the keyboard has none. Nor is it reachable on the
+  session's own Hyprland: that compositor has layer-shell, so an inactive
+  guide window there is the guide failing to take the keyboard -- which m3
+  grades on the desk -- and it stays a FAIL (`qa_key_skippable` in
+  `scripts/qa-lib.sh`). "The session's own" is `qa_target_nested`'s answer
+  for the keys' `WAYLAND_DISPLAY` (F-HARNESS-47): until 2026-10-26 it was
+  "the signature is set", so a cage rig that inherited the owner's
+  signature read its cage keys as desk FAILs. The refusal's own words follow
+  the window kind and that answer (F-HARNESS-54): the `--window floating`
+  hint only for the layer window on a nested compositor, the player's pid
+  when a floating window lost the keyboard to it, and on the desk the guide
+  named as failing. H6b, T5a, T5b, T5d and P1c,
   which assert a state a missing key would also leave, now require the state
   the key before them made, so they FAIL rather than pass when a key arrives
   and does nothing.
@@ -473,25 +495,32 @@ So under a cage:
 The shape for any rig: run.sh OUTSIDE the cage with `env -u
 HYPRLAND_INSTANCE_SIGNATURE -u DISPLAY WAYLAND_DISPLAY=<nested>`, the cage
 under `private-bus.sh`, and, when a player can start, the scenario under a
-private bus of its own too. Drop `DISPLAY`: the caller's is the owner's
+private bus of its own too. `DISPLAY` matters: the caller's is the owner's
 Xwayland, and mpv's VO probe tries `x11vk` before the Wayland EGL context
 (QA-RESULTS "F-HARNESS-45"), so an inherited `:0` could put the player's
-window on the owner's desktop. That was not run to find out. Inside the cage's
-child the cage's own `DISPLAY` is set, which is harmless.
+window on the owner's desktop. Since F-HARNESS-47 `harness_env` drops both
+for what `run.sh` starts (above), so the rig's `env -u` is a second layer,
+not the only one -- and still the only one for anything the rig or a
+scenario driver starts itself, outside `run.sh`. Inside the cage's child the
+cage's own `DISPLAY` is set; `harness_env` drops that too.
 
 `hyprctl` containment, measured read-only (`hyprctl version`) from the
-harness shell's own environment in both shapes: the stub on `$SCRATCH/bin`
-answers `Invalid command`; the real binary answers `HYPRLAND_INSTANCE_SIGNATURE
-not set!` (exit 1), because every rig and `h()` unsets it; and even with the
-owner's signature put back, it could not connect (exit 4) -- not because the
-scratch `XDG_RUNTIME_DIR` contains it (run.sh symlinks `runtime/hypr` to the
-real directory) but because the socket path through that symlink is 123 to
-136 bytes, past `sun_path`'s 108 (the default harness directory's is 123).
-That is an accident, not a wall: through a 106-byte path (a harness directory
-of `$XDG_RUNTIME_DIR/hfm`, made for the read and removed) the same `version`
-answered the owner's Hyprland 0.56.2. The unset signature is the containment,
-with the service's own gate behind it (PiP is offered only with a signature,
-G-8); keep `env -u HYPRLAND_INSTANCE_SIGNATURE` on every rig.
+harness shell's own environment in both shapes (lane-fm324, 2026-10-26): the
+stub on `$SCRATCH/bin` answered `Invalid command`; the real binary answered
+`HYPRLAND_INSTANCE_SIGNATURE not set!` (exit 1), because every rig and `h()`
+unset it; and even with the owner's signature put back, it could not connect
+(exit 4) -- not because the scratch `XDG_RUNTIME_DIR` contained it (run.sh
+then symlinked `runtime/hypr` to the real directory) but because the socket
+path through that symlink was 123 to 136 bytes, past `sun_path`'s 108. That
+was an accident, not a wall: through a 106-byte path (a harness directory of
+`$XDG_RUNTIME_DIR/hfm`, made for the read and removed) the same `version`
+answered the owner's Hyprland 0.56.2. Since F-HARNESS-48 there are three
+layers, none of them a path's length: the scratch runtime has no `hypr/` at
+all, so no signature can find a socket under it at any length;
+`harness_env` drops the signature for a nested target; and the service's own
+gate stands behind both (PiP is offered only with a signature, G-8). Keep
+`env -u HYPRLAND_INSTANCE_SIGNATURE` on every rig as well: it is the only
+layer for what the rig starts outside `run.sh`.
 
 ### Sources (M2-01)
 
