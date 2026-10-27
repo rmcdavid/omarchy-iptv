@@ -1150,7 +1150,7 @@ scripts/dev-harness/key-scenario.sh --baseline lane-key-r2  # the red run: the t
 scripts/dev-harness/key-scenario.sh --baseline f275bde      # the earlier red run: the first build (39 / 25; O2 its one discriminator)
 scripts/dev-harness/key-scenario.sh --tree "$cp"            # a PREPARED export: spikes/key-mutations/README.md has the recipe
 scripts/dev-harness/key-scenario.sh --only A,B19            # a PARTIAL run (F-HARNESS-49): the instrument arm, A1, A2, B19, then P1, P2, T1 -- about 40 s, never a release count
-scripts/dev-harness/key-scenario.sh --baseline cc35557 --only PRUNE  # the start-up prune race's rig (F-HARNESS-49), no check: what the start-up prune leaves of an add made before the dirs are ready
+scripts/dev-harness/key-scenario.sh --baseline cc35557 --only PRUNE  # the start-up prune race's rig (D-SRC-69), no check: what the start-up prune leaves of an add made before the dirs are ready
 ```
 
 D-SINK-19 takes the provider URL off the host's bar entry: the entry
@@ -2060,8 +2060,8 @@ state folder's chmods by inotify:
   sources/<D>, and removed that directory between the probe's temporary
   file and its rename: FileNotFoundError, the probe failed, the add was
   dropped. Not a regression -- the prune has run that way since f138740
-  -- and not the test's: it is a product race of its own, reported with
-  F-HARNESS-49 for the owner. A now adds in a settled session. The race is
+  -- and not the test's: it is a product race of its own, D-SRC-69, found
+  under F-HARNESS-49 for the owner. A now adds in a settled session. The race is
   made deterministic by `--only PRUNE`, a rig that holds the start-up init
   4 s so the add commits first, and prints what the prune leaves; it is no
   check and never runs in a full run. On e3fcb6f and on cc35557 (0.15.0)

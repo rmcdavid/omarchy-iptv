@@ -296,7 +296,7 @@
 #   PRUNE (a RIG that only `--only PRUNE` runs: never in a full run, no check)
 #       an add made while the start-up init is held, then the start-up
 #       prune: prints what is left of the added source's cache
-#                                    <- the start-up prune race, F-HARNESS-49
+#                                    <- the start-up prune race, D-SRC-69 (F-HARNESS-49)
 #   P1  no labelled harness-log line carries a URL or a fixture path
 #   P2  no credential token anywhere in the harness log
 #   T1  the shell, the compositor and the nested socket are gone (by pid)
@@ -711,7 +711,7 @@
 # minute run to look at two checks was what made bisecting A2 and watching
 # B19 cost an hour a sample. The names are the blocks it was made for, `A`
 # (A1, A2) and `B19`, and `PRUNE`, a RIG that only --only runs (no check:
-# it prints what the start-up prune leaves of an add, F-HARNESS-49);
+# it prints what the start-up prune leaves of an add, D-SRC-69);
 # nothing else is accepted: a segment that leans on an earlier one's state
 # cannot be cut loose by a flag without being checked, so a new name is
 # added only with a run that shows it stands alone. A full run is untouched
@@ -1150,7 +1150,7 @@ wait_gone() {
 # layout is ready and run when the dirs are, removes every sources/<key> no
 # record named when it was QUEUED -- an in-app add's probe directory among
 # them, which is how A2 lost its add on 2026-10-27: the start-up prune
-# race, a product finding of its own reported with F-HARNESS-49) and
+# race, D-SRC-69, a product finding of its own found under F-HARNESS-49) and
 # `state ... mode` (D-SRC-49: after every save that LANDS the helper puts
 # the state folder back to 0700 -- B19's and B30's 0500 among them, which is
 # how B19 lost its hold). Read from /proc/<shell>/task/*/children by EXACT
@@ -1924,8 +1924,8 @@ shell_arm() {
 
   fi   # --only: end of D .. Z
 
-  # F-HARNESS-49 (2026-10-27): THE START-UP PRUNE RACE, a product finding
-  # reported for the owner. A RIG, NOT A CHECK: it runs only when `--only
+  # F-HARNESS-49 (2026-10-27): THE START-UP PRUNE RACE, D-SRC-69, a product
+  # finding reported for the owner. A RIG, NOT A CHECK: it runs only when `--only
   # PRUNE` names it, never
   # in a full run, and asserts nothing -- it prints what the sink holds, so
   # the owner can see the defect on any tree (`--baseline REF --only PRUNE`)

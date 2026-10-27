@@ -13315,6 +13315,92 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### F-HARNESS-49: A2 and B19 were the scenario staging inside the start's own work (lane-fh49, 2026-10-27, c6d4a69..3e3a062)
+
+**The red.** On dev 45bded9 at idle (load 0.93), key-scenario's live arm read 136 / 2, with A2 and B19 red, where 0.15.0's cut read 138 / 0 (lead, key-20261027-081824-375921). Both reds come from one cause. `start_shell` returns at stateLoaded and cacheReady, which is before the start-up `state init` makes the dirs ready. So a segment that stages something straight away races two pieces of start-up work:
+- the start-up `cache prune`, which runs at dirsReady;
+- the `state mode` that D-SRC-49 runs after the start's own save lands.
+
+**B19, observed.** Rig: `--only A,B19` on 45bded9 plus the selector, with a tracer polling the shell's children from /proc every 5 ms and inotify on the state folder (key-20261027-084233-429718).
+
+| t (epoch s) | event |
+|---|---|
+| 570.621 | child `state --state-dir <dir> mode`, asked for by the start's own landed save |
+| 570.961 | ATTRIB state folder, mode 500: the scenario's chmod, 340 ms later |
+| 571.036 | ATTRIB state folder, mode 700: 75 ms after the chmod |
+| 571.159 | a second `state mode`, asked for by the in-app save, which LANDED |
+
+The shell logged once: "state.json's mode was repaired after a save (file kept, folder changed)". B19 read `held:false merged:0`. The merge was never exercised, yet B19's data outcome was right, because no hold had existed. The lanes' `merged:2`, `:1`, `:1` under load on 2026-10-26 fit the same repair landing later, mid-window.
+
+**Decision: the product is right.** The folder is the plugin's own. `state init` at every start and `ensure_private_dir` on every helper write already set it to 0700. `requestStateMode` is reached only from a save that landed, and 0700 is owner-only. The fix is in the test:
+- `wait_settled` waits until the dirs are ready, nothing is saved in flight or parked, and no `cache` or `state mode` child of the recorded shell pid is running, read from /proc by exact argv, five reads in a row, bounded at 15 s.
+- After the chmod, B19 checks its premise, `held:true folder:500 repaired:+0`, printed as `B19 premise:`.
+- Only then is the merge graded; otherwise the check reads `FAIL ... PREMISE NOT ESTABLISHED`.
+- B30 had the same shape and got the same fix.
+- Seen red with dev's dirsReady wait put back (`--only B19`, key-20261027-085551-448786): `jobs:[cache mode]` at the chmod, then `held:false folder:700 repaired:+1`.
+
+**A2, observed: no first bad commit.** The lead's harness log holds the A2 probe's `FileNotFoundError` on `os.replace(sources/ea3cde26/.tmp-channels.json-..., channels.json)`, then `sourceProbeFinished ok:false`. Mechanism:
+- The start-up prune is queued at cacheReady with the seeded keys, A and C.
+- It runs at dirsReady and removes the add's probe directory, which no record names yet (SR23), between the probe's temporary file and its rename.
+- In the unsettled trace the add, the prune and the probe start within 130 ms of each other. One of the 12 recorded A-type adds lost the race.
+
+That code path is unchanged since f138740 (2026-09-13); I checked it at cc35557. The same product code passed A2 in lane-fm324's three runs.
+
+Made deterministic by the `--only PRUNE` rig (start-up init held 4 s, so the add commits first):
+
+| tree | committed | after the start-up prune | transcript |
+|---|---|---|---|
+| 45bded9 (diagnostic rig) | active D, cache kept, 11 channels | record kept, cache gone, 0 channels (still 0 at +8 s; restart refetched 11) | key-20261027-084635-437767 |
+| cc35557 (diagnostic rig) | the same | the same | key-20261027-084720-439468 |
+| e3fcb6f (committed rig) | the same | the same | key-20261027-093344-570009 |
+| --baseline cc35557 (committed rig) | the same | the same | key-20261027-095437-650223 |
+
+This is filed as D-SRC-69, a product finding for the owner. A now adds on a settled start; in the trace the prune child then starts 1.5 s before the probe.
+
+**`--only`.** `--only A,B19` (and `PRUNE`) runs the instrument arm, the named blocks and P1, P2, T1 in about 40 s. Its floor is the blocks' own (ONLY_CHECKS) and its summary says PARTIAL. A full run is the same lines: every other block is `if [[ -z $ONLY ]]`. P1 accepts 'nothing labelled to judge' only in a partial run.
+
+tests/test_key_scenario_only.py has 5 tests: green on the lane tree, 9 failures on 45bded9, and red on each of five mutations:
+
+| mutation | failures |
+|---|---|
+| ONLY_CHECKS A=3 | 1 |
+| seg_on matching a substring | 1 |
+| the check-tree refusal deleted | 1 |
+| a full-run block turned opt-in | 2 |
+| a ck moved into the rig | 3 |
+
+**Rule 15.** Fixed: B19 and B30. Cleared, with reasons:
+- F, L and H: disk-gone-after-init.py chmods before any save can land.
+- B1-B4: they expect the init to restore the modes.
+- Q1, Q2 and B37: a slow fetch creates the probe directory after the prune has run.
+- B16 and sources-scenario: they add long after the start.
+- spikes/folder-link, tests/test_state.py and tests/Model.test.js: no service and no state-mode process.
+
+Product siblings are recorded in D-SRC-69: the D-LOGO-20 switch prune, and URL edits.
+
+**Runs**, summary-line counts:
+
+| run | tree | result | time | load start / end | coredump journal |
+|---|---|---|---|---|---|
+| full | e3fcb6f | 138 / 0 | 591.9 s | 3.20 / 2.66 | +0 |
+| full | e3fcb6f | 138 / 0 | 590.8 s | 2.64 / 3.06 | +0 |
+| full | 7d9782f (same executed code) | 138 / 0 | 590.5 s | | +0 |
+| full | 7d9782f (same executed code) | 138 / 0 | 589.8 s | | +0 |
+| `--only PRUNE,A,B19` | e3fcb6f | 18 / 0 | 39.1 s | | |
+
+Full-run transcripts:
+- /run/user/1000/omarchy-iptv-fh49-g1h/transcripts/key-20261027-093431-573208.out
+- /run/user/1000/omarchy-iptv-fh49-g2h/transcripts/key-20261027-094435-611742.out
+- key-20261027-090300-467313 and key-20261027-091305-505818 (the 7d9782f runs)
+
+Gate: check.sh green on 3e3a062 (node 3041, python 1629); key-scenario check-tree 12 / 0; qa-lib-test 607 / 0.
+
+**New findings.**
+1. **D-SRC-69 (P3, proposed): the cache prune's keep list is fixed when it is queued, so it can remove a running probe's directory.** Mid-write, the add is dropped and the user is told the exception text. Once written, the added, active source shows 0 channels until a restart.
+2. **F-HARNESS-61 (P3, proposed): pointerState exposes no stateModeRuns, stateModeRerun or cache-queue state**, so wait_settled reads /proc instead of the service's own count.
+
+**The recheck (same day).** MERGEABLE, nothing changed. `--only B19` 16/0 on the branch; red on `r25d-a5-base-not-moved.patch` (premise established, outcome `merged:2 favs:t:helper.uk,t:h3.uk`) and PREMISE NOT ESTABLISHED on a product mutant where a failed save also asks for `state mode` (`held:true folder:700 repaired:+1`); a full run over that mutant read 129/9 (B19, B30 and F2-F6, L1, L2), which confirms why F, L and H were cleared (only a landed save asks for the repair). `--only PRUNE,A` read `cache:gone channels:0` on the branch and on `--baseline cc35557`; A1 and A2 red under the settle on a mutant that lets the entry's epgUrl win, so the settle does not weaken A. One full idle run: 138/0, 592.0 s, the same 138 check ids as the lead's dev run, in order. Two more exposures of D-SRC-69 outside key-scenario: argv-scenario.sh:211-217 and qa-player-scenarios.sh:207-214 add straight after a start (they would read red, not falsely green). F-HARNESS-61 filed from the lane's report.
+
 ### F-M3-24 at the desk: the guide's layer window does take the keyboard, a second late (2026-10-27)
 
 **On the owner's "go"**, the one claim F-M3-24 left UNVERIFIED, read alone (no workflow or agent running, no cage or player, screen unlocked, load 0.31). `run.sh --detach --open --timeout 0 --playlist none` on the owner's own Hyprland session (no `--playlist`, so no "Bar setting ignored" cards, F-HARNESS-51), `ipc focusState` polled until `open` read true, read again a second later, then `run.sh reap`. The guide was on screen from 07:16:56.2 to 07:17:01.1; no keystroke was sent; the owner's shell (pid 2062603) was the only quickshell afterwards; no notification card was posted. Replies kept 0600 under `scratchpad/desk-focus/`.
