@@ -2033,6 +2033,49 @@ round 2's reviews).
   (`sources-20261020-185340-2605788`). The transcripts are in the lane's
   session scratch directory, not the tree.
 
+#### F-HARNESS-49 (2026-10-27): a start that has SETTLED, and `--only`
+
+The release's live step read 136 / 2 on dev 45bded9, A2 and B19, where
+0.15.0's cut read 138 / 0. Both were the scenario staging something
+while the start was still running work that undoes it -- `start_shell`
+returns at stateLoaded and cacheReady, BEFORE the start-up init makes
+the dirs ready -- observed from the shell's children in /proc and the
+state folder's chmods by inotify:
+
+- B19: the `state mode` D-SRC-49 runs after every LANDED save (the
+  start's own among them) was still starting when the scenario took `w`
+  off the state folder, and put 0700 back 75 ms later; the shell logged
+  "state.json's mode was repaired after a save (file kept, folder
+  changed)", the in-app save landed, and B19 read `held:false merged:0`.
+  The repair is the product's design, so the test changed: `wait_settled`
+  (dirs ready, nothing saved in flight or parked, no `cache` or `state
+  mode` child of the shell, five reads in a row) before the chmod, and the
+  hold is B19's PREMISE -- `held:true folder:500 repaired:+0`, printed as
+  `B19 premise:` and checked before the merge is graded, or `FAIL ...
+  PREMISE NOT ESTABLISHED`. B30 takes `w` the same way and got the same
+  treatment. Seen red with dev's dirsReady wait put back (`--only B19`):
+  `jobs:[cache mode]` at the chmod, `held:false folder:700 repaired:+1`.
+- A2: the start-up `cache prune`, queued at cacheReady with the keys the
+  state held then, ran at dirsReady while the add's probe wrote into
+  sources/<D>, and removed that directory between the probe's temporary
+  file and its rename: FileNotFoundError, the probe failed, the add was
+  dropped. Not a regression -- the prune has run that way since f138740
+  -- and not the test's: it is a product race of its own, reported with
+  F-HARNESS-49 for the owner. A now adds in a settled session. The race is
+  made deterministic by `--only PRUNE`, a rig that holds the start-up init
+  4 s so the add commits first, and prints what the prune leaves; it is no
+  check and never runs in a full run. On e3fcb6f and on cc35557 (0.15.0)
+  alike: `committed active:D ... cache:kept channels:11; after the
+  start-up prune active:D record:true cache:gone channels:0`.
+
+`--only A,B19` (and `PRUNE`) runs the instrument arm, the named blocks and
+P1, P2, T1, about 40 s; its floor is the blocks' own and its summary says
+`PARTIAL`. A full run is the same lines as before (every other block is
+`if [[ -z $ONLY ]]`), which tests/test_key_scenario_only.py pins.
+Counts, the summary line's: two full runs on e3fcb6f 138 / 0 (591.9 s and
+590.8 s, load 3.2 and 2.6 at the start, nothing else of the lane's
+running, the coredump journal +0 each); `--only PRUNE,A,B19` 18 / 0.
+
 ### The open, measured with its delegates (D-PERF-1, R27f; R28d)
 
 ```
