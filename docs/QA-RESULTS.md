@@ -13315,6 +13315,58 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### Harness follow-up: F-HARNESS-47, -48, -50, -54 and F-HARNESS-46's held test (lane-hfu, 2026-10-26, 6bd7486..60821e0)
+
+**F-HARNESS-47.** harness_env now drops DISPLAY for everything run.sh starts.
+- I searched first for anything that needs X: there is no X use in Service.qml, Guide.qml, BarWidget.qml, bin/helper or model, and the launch argv is Wayland-first.
+- OMARCHY_IPTV_HARNESS_KEEP_DISPLAY=1 keeps DISPLAY, on the desk only. It is refused toward a nested compositor.
+- HYPRLAND_INSTANCE_SIGNATURE is dropped whenever the target is nested. One predicate, qa_target_nested, decides that: the desk is the socket named on line 2 of the signature's own `hyprland.lock`, and a cage child's WLR_* variables mean nested.
+- qa_key_skippable asks the same predicate instead of "is the signature set".
+
+**F-HARNESS-48.** The scratch runtime has no `hypr/` any more, and a link an older run.sh left is removed.
+- Measured hermetically: a listening stand-in where Hyprland's socket sits, and a short scratch path.
+- Through e243c29's link the harness environment's connect succeeded. On the lane it is ENOENT.
+
+**F-HARNESS-50.** qa_helper_parts reads the stub once into a variable.
+- Under pipefail, a writer that pauses after 8,192 bytes makes 81853f7's reader answer "a one-file helper" every time (0 0). Without pipefail the same reader finds all 11 parts. The lane's reader finds all 11.
+- Sibling sweep: 23 more status pipelines now read from a process substitution, three of them URL checks where a SIGPIPE under `!` read as "no URL". The remaining early-exit readers were cleared site by site.
+
+**F-HARNESS-54.**
+- (1) The window-inactive refusal is worded by window kind, keyboard and target.
+- (2) A refused T5d closes the picker through trackClose.
+- (3) m3's shot() wrapper is run, not grepped, and the T5 block is driven over stubs.
+
+**F-HARNESS-46.** The held test is adopted with an end check on every extraction it evaluates.
+
+**Red and green.**
+
+| Proof | Red | Green |
+|---|---|---|
+| qa-lib-test, F-HARNESS-50 part | 579/2 on e243c29's qa-lib.sh | 581/0 |
+| qa-lib-test, F-HARNESS-47 part | 578/11 on e243c29's qa-lib.sh | 589/0 |
+| qa-lib-test, F-HARNESS-54 part | 603/4 on 202beda; skip-every-shot copy 605/2 (the old grep read 1) | 607/0 |
+| test_harness_display.py | 10/11 on e243c29 (the old link connected) | 11/0 |
+| test_harness_gpu_sw_check.py | 20/20 failed on b43c4a4; mutants 6, 2, 4, 2 | 20/0 |
+
+The gate was green, run alone, on each of the four commits: node 3041, python 1593 → 1624, qml 80, harness predicates 581 → 607.
+
+**Cage cells.** Every cell used a headless pixman cage on private-bus.sh, with the command outside it carrying DISPLAY=:99 and a signature passed in on purpose. The coredump journal stayed at +0 in every cell.
+
+| Cell | Tree | What the harness shell's environ held | Result |
+|---|---|---|---|
+| ctl-e243 | e243c29 | DISPLAY=:99 and the signature | stopped before any player |
+| m3-60821e0 | lane | neither; the helpers and the player neither | m3 28 passed, 0 failed, 10 skipped, exit 77 |
+| shell-owner-60821e0 | lane, shell only | neither, with the owner's signature passed in | no player started |
+
+Transcript: scratchpad/hfu/results/m3-60821e0/transcripts/m3-20261026-211043-4016731.out.
+
+**Filed beside the rows.**
+- F-HARNESS-55: player-scenario P10's direct `player start` is outside run.sh's drop.
+- F-HARNESS-56: two older two-anchor extractions in qa-lib-test are sourced without an end check.
+- F-HARNESS-57: sources-scenario's "sources() carries no URL" has no positive control.
+
+**The recheck (same day).** Every count reproduced; seven mutants of its own against `qa_target_nested`, `harness_env` and `prepare_root`, two against m3 and eight against the shipped P2, all red; F-HARNESS-50 reproduced with its own slow writer (pausing after 7,000 or 8,192 bytes); one cage cell with `DISPLAY=:99` and a bogus signature passed in: the harness shell, the fixture server and the player held neither, m3 28 / 0 / 10, journal +0; desk-shaped calls in the owner's own environment keep the signature toward wayland-1 and drop both toward any other socket. It found **F-HARNESS-58** (`run.sh shot` asks the session's Hyprland for a monitor under a nested target) and **F-HARNESS-59** (m3's H6 chain has T5d's shape without a fallback); the lane found **F-HARNESS-55** (a driver that starts a player outside run.sh), **F-HARNESS-56** (two older extractions eval'd without an end check) and **F-HARNESS-57** (sources-scenario:222 has no positive control). This record supersedes the `hypr/` link described in the F-M3-24 block below: F-HARNESS-48 removed it.
+
 ### F-M3-24: m3's real keys under a nested cage (lane-fm324, 2026-10-26)
 
 **Cause, measured.** Cage was headless pixman with -D, on private-bus.sh. The probe used m3's fixture, the guide open and one real `x` per phase, run in both shapes: inside the cage's child with the signature unset, and outside with `env -u HYPRLAND_INSTANCE_SIGNATURE -u DISPLAY WAYLAND_DISPLAY=<nested>`. The two shapes gave identical readings. focusState was `keyboard true, windowActive false, windowVisible true` (the production guide is a layer surface; cage has no layer-shell, so it never maps). The `x` passed the old guard and hid nothing. With the player up, mpv was `focused true` and the same `x` moved its `sub-delay` 0.0 -> 0.1. With `--window floating`, windowActive was true and the `x` hid the group, until mpv's window mapped; then windowActive and activeFocus were both false. key-scenario.sh sends no keystroke at all (its "key" is D-SINK-19's), and the earlier rigs already unset the signature.

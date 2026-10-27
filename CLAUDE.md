@@ -960,7 +960,16 @@ This project is built by role lanes running in separate git worktrees.
    only for want of DRI3, which the owner's `:0` has -- so the player can
    open on the owner's real desktop. Every caged run therefore uses
    `env -u DISPLAY` (and `-u HYPRLAND_INSTANCE_SIGNATURE`, key-scenario's
-   reason) until `harness_env` drops it itself.
+   reason). Since 2026-10-26 `harness_env` drops both itself for what
+   run.sh starts -- DISPLAY always (`OMARCHY_IPTV_HARNESS_KEEP_DISPLAY=1`
+   keeps it on the desk only, and is refused toward a nested target), the
+   signature whenever `qa_target_nested` says the target is not the
+   socket the signature's own `hyprland.lock` names -- and the scratch
+   runtime no longer links `hypr/` (F-HARNESS-48: that link kept nothing
+   out; only `sun_path`'s 108 bytes did, by accident). The rig's own `-u`
+   stays, because it is the ONLY layer for what a rig or a scenario driver
+   starts itself, outside run.sh (F-HARNESS-55: player-scenario's P10
+   starts a player from the driver's environment).
    A nested cage that will host the PLAYER runs it through run.sh's
    software-GPU lever -- `OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1` beside
    `WAYLAND_DISPLAY=$NESTED`, or a scenario run inside the cage's child,
