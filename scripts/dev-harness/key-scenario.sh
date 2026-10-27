@@ -8,6 +8,9 @@
 #   key-scenario.sh [live] [--baseline REF] the instrument arm, then the shell arm
 #   key-scenario.sh [live] --tree DIR       the same over a PREPARED tree (an export
 #                                           with a patch applied: spikes/key-mutations/)
+#   key-scenario.sh [live] ... --only A,B19 a PARTIAL live run: the instrument arm, the
+#                                           named shell-arm segments, then P and T1
+#                                           (F-HARNESS-49; never a release count)
 #
 # THE FINDING. For the life of the project the host's bar entry carried the
 # provider's playlist URL -- credentials and all -- in ~/.config/omarchy/
@@ -697,7 +700,22 @@
 # `live` (the default: a transcript, both arms, and the --baseline / --tree
 # levers; about 120 s). `--tree DIR` is --baseline pointed at a directory
 # that already exists -- an export with a patch from spikes/key-mutations/
-# applied -- and is never removed by this scenario. check-tree needs node
+# applied -- and is never removed by this scenario.
+# `--only SEG[,SEG]` (F-HARNESS-49, 2026-10-27) runs the instrument arm, the
+# named shell-arm segments and then P1, P2 and T1, and nothing else: a ten
+# minute run to look at two checks was what made bisecting A2 and watching
+# B19 cost an hour a sample. The names are the two blocks it was made for,
+# `A` (A1, A2) and `B19`, and nothing else is accepted: a segment that
+# leans on an earlier one's state cannot be cut loose by a flag without
+# being checked, so a new name is added only with a run that shows it
+# stands alone. A full run is untouched by it -- every block it does not
+# name is `if [[ -z $ONLY ]]` or `if seg_on X`, both true when the flag is
+# absent, and the counts are the same lines -- and a partial run cannot be
+# read as one:
+# its floor is the selected blocks' own (ONLY_CHECKS below, pinned to the
+# ck lines between each block's markers by tests/test_key_scenario_only.py),
+# and its summary line says `PARTIAL (only ...)`. Refused with check-tree.
+# check-tree needs node
 # and python3; live also needs cage and
 # quickshell. A machine without one of them exits 77 with the reason, never
 # 0, and those checks run BEFORE anything else so the reason is the first
@@ -758,9 +776,12 @@ case $MODE in
   -*) MODE=live ;;
   *) echo "usage: key-scenario.sh [check-tree|live] [--baseline <ref>]" >&2; exit 2 ;;
 esac
-BASELINE=""; TREE=""
+BASELINE=""; TREE=""; ONLY=""
 while (( $# )); do
   case $1 in
+    --only)
+      [[ ${2:-} == "" || ${2:-} == -* ]] && { echo "--only needs a segment list (A, B19, comma separated), and got '${2:-}'" >&2; exit 2; }
+      ONLY=$2; shift ;;
     --baseline)
       [[ ${2:-} == "" || ${2:-} == -* ]] && { echo "--baseline needs a git ref, and got '${2:-}'" >&2; exit 2; }
       BASELINE=$2; shift ;;
@@ -806,6 +827,20 @@ TREE_LINE="== tree $ROOT ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null ||
 # pinned by scripts/qa-lib-test.sh): a mistyped lever is one line on stderr
 # and no file. --tree is a directory the caller prepared and keeps.
 [[ -n $BASELINE && -n $TREE ]] && { echo "--baseline and --tree are the same lever; pass one" >&2; exit 2; }
+# F-HARNESS-49: --only, refused above the transcript like the other levers.
+# How many lettered checks each selectable block holds (its ck lines, which
+# tests/test_key_scenario_only.py counts between the block's markers).
+declare -A ONLY_CHECKS=([A]=2 [B19]=1)
+if [[ -n $ONLY ]]; then
+  [[ $MODE == check-tree ]] && { echo "--only selects shell-arm segments; check-tree runs the instrument arm alone" >&2; exit 2; }
+  IFS=, read -r -a only_names <<<"$ONLY"
+  for seg in "${only_names[@]}"; do
+    [[ -n $seg && -n ${ONLY_CHECKS[$seg]:-} ]] || { echo "--only: '$seg' is not a selectable segment (A, B19)" >&2; exit 2; }
+  done
+  unset seg only_names
+fi
+# Is block $1 in this run? Every block, when --only is absent.
+seg_on() { [[ -z $ONLY || ",$ONLY," == *",$1,"* ]]; }
 if [[ -n $TREE ]]; then
   PLUGIN_ROOT=$(cd "$TREE" 2>/dev/null && pwd) || { echo "--tree $TREE is not a directory I can enter" >&2; exit 2; }
   # The model is whatever qa_model_files answers (D-REL-5: Model.mjs and its
@@ -1001,6 +1036,12 @@ except Exception:
 print(json.dumps(v) if isinstance(v, bool) else ("NULL" if v is None else v))' "$STATE" "$1" 2>/dev/null \
     || printf '%s\n' "$QA_NO_FILE"
 }
+# The records holding the bar's guide URL $EPG, by key ("none" for none),
+# and whether that URL is anywhere in state.json's text. Compared inside
+# python, never printed. Defined in U until F-HARNESS-49, and A reads them,
+# so `--only A` would have called neither.
+epg_on() { sj "','.join(sorted(s['key'] for s in d['sources'] if s.get('epgUrl') == '$EPG')) or 'none'"; }
+infile() { python3 -c 'import sys; print("yes" if sys.argv[2] in open(sys.argv[1]).read() else "no")' "$STATE" "$EPG" 2>/dev/null || echo NOFILE; }
 # The key of a URL or path, by the tree under test's own function.
 # The tree's model through qa_model_files (D-REL-5): its first file is what
 # node requires, the aggregator or a pre-split tree's Model.js.
@@ -1250,7 +1291,10 @@ shell_arm() {
   STATE="$SCRATCH/state/omarchy-iptv/state.json"
   KA=$(key_of "$A"); KB=$(key_of "$B"); KC=$(key_of "$C"); KD=$(key_of "$D"); KDEAD=$(key_of "$DEAD")
   echo "   keys: A $KA  B $KB  C $KC  D $KD"
+  [[ -n $ONLY ]] && echo "   PARTIAL RUN: only $ONLY (--only), then P and T1"
 
+  # Every block --only does not name runs only when --only is absent.
+  if [[ -z $ONLY ]]; then   # --only: D .. Z, full runs only
   echo "== D: the adoption made at start-up, watched across the start-up dirs becoming ready ($(elapsed) s)"
   seed ""
   # The file goes in at 0644, not the seed's 0600: the helper's start-up
@@ -1656,8 +1700,6 @@ shell_arm() {
   start_shell --playlist none --epg "$EPG" --source-key "" || true
   wait_for no 10 stored_has epgUrl >/dev/null || true
   sleep 0.5
-  epg_on() { sj "','.join(sorted(s['key'] for s in d['sources'] if s.get('epgUrl') == '$EPG')) or 'none'"; }
-  infile() { python3 -c 'import sys; print("yes" if sys.argv[2] in open(sys.argv[1]).read() else "no")' "$STATE" "$EPG" 2>/dev/null || echo NOFILE; }
   ck "U1 loaded on the lagging host with no active source: the guide URL REPORTED once (no-source), OFF the stored entry, on no record, nowhere in the state file, and the marker landed" \
      "host:$(qa_json_field "d['host']" "$(ipc hostEntry)") configured:$(svc "['configured']") epgUrl:$(stored_has epgUrl) reports:$(reports) on:$(epg_on) file:$(infile) landed:$(landed)" \
      "host:lag configured:false epgUrl:no reports:epgUrl:no-source on:none file:no landed:true"
@@ -1800,6 +1842,9 @@ shell_arm() {
   ck "Z3 a whitespace-wrapped REFUSED credential beside a working source leaves the stored entry once reported, and the working source stays active" \
      "playlistUrl:$(stored_has playlistUrl) active:$(svc "['activeSourceKey']") $(svc "['configured']") reports:$(reports)" "playlistUrl:no active:$KA true reports:playlistUrl:retired"
 
+  fi   # --only: end of D .. Z
+
+  if seg_on A; then   # --only A begins
   echo "== A: the in-app add after a CLI epgUrl was refused, through the harness addSource verb (R21b; R17b's and R18d's rig) ($(elapsed) s)"
   # The probe commit of an in-app add (Service's sourceProbeProc exit),
   # which the round-7 live lens found no segment reaching. R17b landed a
@@ -1827,7 +1872,9 @@ shell_arm() {
   ck "A2 an in-app add whose FORM carries its own guide URL, after a refused CLI epgUrl: the form's guide URL is on the new record, the CLI value on none and nowhere in the file" \
      "ok:$(qa_json_field "d['ok']" "$res") active:$(svc "['activeSourceKey']") form:$(form_on) cli:$(epg_on) file:$(infile) epgUrl:$(stored_has epgUrl)" \
      "ok:true active:$KD form:$KD cli:none file:no epgUrl:no"
+  fi   # --only A ends
 
+  if [[ -z $ONLY ]]; then   # --only: Y .. B18, full runs only
   echo "== Y: a publish that goes A -> B -> A on the lagging host, then the user's own act (R19a; the round-8 lenses' P1-A) ($(elapsed) s)"
   # Lifted from the round-8 data-loss lens's aba-child.sh (T=logo, bad, epg).
   # Round 8's funnel skipped an owned write when its record of its LAST
@@ -2435,7 +2482,10 @@ PYSEED
      "at-stop:alive after-deadline:gone left:none"
   for p in $initpid $left; do kill -KILL "$p" 2>/dev/null; done
   export OMARCHY_IPTV_PLUGIN_ROOT=$PLUGIN_ROOT; unset OMARCHY_IPTV_SLOW_MS OMARCHY_IPTV_SLOW_VERBS OMARCHY_IPTV_SLOW_AT
+  fi   # --only: end of Y .. B18
 
+  if seg_on B19; then   # --only B19 begins
+  [[ -n $ONLY ]] && echo "== B19 alone (--only): R24a's merge, live ($(elapsed) s)"
   # R25d (F-HARNESS-26): R24a OBSERVED. The round-14 data-loss lens found
   # that nothing live watched the merge: two of its decisions (a5, the base
   # moved to theirs; a7, the in-flight re-save) survived every check. The
@@ -2483,7 +2533,9 @@ PYSEED
      "held:$held edits:$(qa_json_field "d['ok']" "$res")/$(qa_json_field "d['ok']" "$res2") helper:$hrc merged:$merged $file1 restart:$(qa_json_field "','.join(sorted(s['label'] for s in d))" "$(ipc sources)")/$(sj "','.join(d['favorites']) or '-'")" \
      "held:true edits:true/true helper:0 merged:3 labels:A=in-app-two,C=in-app-one favs:t:helper.uk restart:in-app-one,in-app-two/t:helper.uk"
   stop_shell
+  fi   # --only B19 ends
 
+  if [[ -z $ONLY ]]; then   # --only: B20 .. B40, full runs only
   # R25a (D-SRC-30): THE RESTORE OF A BACKUP TAKEN FROM THE PLUGIN'S OWN
   # FILE. The round-14 data-loss lens: a copy of state.json taken after an
   # in-app change had LANDED, then an in-app remove that landed, then the
@@ -2982,11 +3034,17 @@ json.dump(d, open(sys.argv[1], "w"))' "$STATE"; chmod 0600 "$STATE"
      "add:true helper:0 probe:$(node -e 'const M = require(process.argv[1]); process.stdout.write(M.sourceErrorMessage("too_many"))' "$(qa_model_files "$PLUGIN_ROOT" | head -n 1)") on-disk:50 d:true slow:false restart:50"
   stop_shell
   kill_pid "$SLOW_PID"; SLOW_PID=""
+  fi   # --only: end of B20 .. B40
 
   echo "== P: the console sink, then teardown ($(elapsed) s)"
   qa_leak_on_labelled 'sourceProbeFinished|sourceSwitched|sourceRemoved|updateEntryInline' "://|$WORK" "$LOG"
   case $? in 0) left=clean ;; 1) left=LEAK ;; *) left="nothing labelled to judge" ;; esac
-  ck "P1 no labelled harness-log line carries a URL or a fixture path" "$left" "clean"
+  # A PARTIAL run may label nothing at all (B19 alone adds no source and
+  # writes no entry), and says so rather than reading red for it; a full run
+  # labels dozens of lines and wants them clean, as before.
+  p1_want=clean
+  [[ -n $ONLY && $left == "nothing labelled to judge" ]] && p1_want=$left
+  ck "P1 no labelled harness-log line carries a URL or a fixture path" "$left" "$p1_want"
   ck "P2 no credential token anywhere in the harness log" "$(qa_count 'u:p@|token=abc|harness-live-cred' "$LOG")" "0"
   h reap >/dev/null 2>&1; SHELL_STARTED=0
   for ((i = 0; i < 50; i++)); do kill -0 "$SHELL_PID" 2>/dev/null || break; sleep 0.1; done
@@ -3051,9 +3109,19 @@ if [[ $MODE == check-tree ]]; then
 else
   EXPECTED_CHECKS=137
 fi
+# F-HARNESS-49: a PARTIAL run's floor is the instrument arm, the selected
+# blocks and P1, P2, T1 -- its own, never the full one, and never lowered
+# to make a run green either.
+if [[ -n $ONLY ]]; then
+  only_floor=$((11 + 3))
+  IFS=, read -r -a only_names <<<"$ONLY"
+  for seg in "${only_names[@]}"; do only_floor=$((only_floor + ONLY_CHECKS[$seg])); done
+  EXPECTED_CHECKS=$only_floor
+fi
 ran=$((PASS + FAIL))
 if (( ran == EXPECTED_CHECKS )); then
-  pass "the scenario ran every check it has ($ran)"
+  if [[ -n $ONLY ]]; then pass "the scenario ran every check the selected segments have ($ran)"
+  else pass "the scenario ran every check it has ($ran)"; fi
 else
   fail "the scenario ran $ran checks, expected $EXPECTED_CHECKS" "one stopped executing"
 fi
@@ -3066,5 +3134,5 @@ if [[ -n $BASELINE || -n $TREE ]]; then
   # every older one names the tree it was measured on and says it was.
   echo "baseline ${BASELINE:-$TREE}: R29 (measured 2026-10-20 by lane-sweep-a3 under this harness, 137 lettered checks): on lane-sweep-c2 2bb1237 134 passed, 4 failed -- K1..K3 (\`reports:epgUrl:no-source,playlistUrl:invalid\`, two notices where R29d tells the pair once) and B40 (\`a-epg:bar ... pair:0 file:yes\`: the active source's own guide URL replaced by the one beside the unusable playlist); on 6f1d176 127 passed, 11 failed -- those four, B32, B33 (\`waited:NOFIELD\`), B35..B39. S4 reads the harness, not the product, so it is green on every baseline; it was seen red on the unscoped init_pids in check-tree. Before that, R28 (measured 2026-10-20 by lane-sweep-a2 under this harness, 135 lettered checks): on lane-sweep-c1 843ae87 133 passed, 3 failed -- B32 (R28e's sentence: \`body:0\`), B38 (\`a-epg:bar\`: the picked source's own guide URL replaced by the bar's across the restart) and B39 (\`d-epg:empty ... a-epg:bar\`: D moved in with no guide URL); on 6f1d176 129 passed, 7 failed -- B32, B33 (\`waited:NOFIELD\` at load 2-3), B35, B36, B37, and B38 / B39 (the migration evicted and ran at the first start: \`entry:no/no ... reports:playlistUrl:retired,epgUrl:retired\`, \`records:49\`). Before that, on 6f1d176 (0.14.2's code, the helper split on top; measured 2026-10-20 by lane-sweep-a1 under this harness: 129 passed, 5 failed of the 134 lettered checks then, B34 since dropped) the reds are R27's -- B32 (the mid-session block's notification titled \`Saved sources not loaded\`: \`saving-stopped:0 not-loaded:1 body:0\`), B33 (at idle \`waited:NOFIELD->NOFIELD\` only, the first write having landed by the deferred turn; under load -- round 1's review at load 5-8, \`key-20261020-135918-1751390\` -- red on behaviour too, \`skipped:+1\`, a write without its read: window (a) DOES open from outside the shell under load, and the node pins time it either way; seen red on behaviour through spikes/key-mutations/r27a-wait-never-released.patch, --tree: 133 passed, 1 failed, B33 \`disk:...C=w-one\`, the held edit never written), B35 (the migration at 50 sources evicted the least recently used record and marked: \`same:no d:true marker:true entry:no told:0\`), B36 (\`records:49 told:0\`) and B37 (\`probe:ok\`, the 51st committed). The counts that follow were measured before B32..B37 existed (128 lettered checks). On dev 1c88877 (round 15's code and 0.14.1, measured 2026-10-16 by lane-clean-a1 under this harness: 120 passed, 9 failed) the reds are R26's -- B23..B27 (a linked state.json replaced by a rename, sed -i or rm-and-copy, or re-pointed, or the state folder link re-pointed: unseen, and the in-app save writes memory over it, \`disk:A=seed\` beside the hand edit lost), B28 (the folder link re-pointed at an EMPTY folder: \`created:644 holds:[state.json] blocked: told:0\`, D-SINK-21), B29 (a target put back stays blocked for every call: \`lifted:[absent] second:false\`), B30 (the merge's save inside the load is never reported: \`inFlight:1 saveFailed:true\`, D-SRC-46) and B31 (\`idle-reads:NOFIELD\`: no read before a save). Through --tree: r26a-no-read.patch 122 / 7 (B23..B28, B31), r26b-no-defer.patch 128 / 1 (B30), r26a-no-verb-recheck.patch 128 / 1 (B29), r26d-periodic-reload.patch 126 / 3 (B31 \`idle-loads:+15\`, and B28 and B29, which the timer answers before the first call does); d3-save-parked.patch now reads 76 / 53, D3 and W3 among them, because every in-app save waits behind a read that only save-parked keeps from being applied. The counts that follow were measured before B23..B31 existed (119 lettered checks). On dev 002662d (round 14's code, measured 2026-10-14 by lane-key-k1 under this harness: 118 passed, 2 failed) the reds are round 15's -- B20 (a backup copied from the plugin's own file, put back after an in-app remove, is ignored as an echo and written over: \`restored:1 records:1 ... restart:1\`) and B22 (the MID-session Sources header reads \`Saved sources not loaded\` above the session's two rows). B19 and B21 are GREEN there: R24a's merge and the FileView's watch after an own save were in round 14's code and only their checks were missing, so they are seen red through spikes/key-mutations/r25d-a5-base-not-moved.patch (--tree: 119 passed, 1 failed, B19 \`merged:2 ... favs:t:helper.uk,t:h3.uk\`: the favourite the second hand edit removed is written back) and r25d-no-reload-on-change.patch (--tree: 110 passed, 10 failed, B21 \`blocked: told:0\` among every segment that needs a reload: D3, W3, W6, B7, B9, B16, B19, B20, B22). The counts that follow were measured before B19..B22 existed (115 lettered checks). On ced1bd1 (round 13's code, measured 2026-10-14 by lane-key-q1 under this harness: 113 passed, 3 failed) the reds were round 14's -- B15 (\`header:[No sources] rows:2 after-a:sourceEdit says:other\`), B16 (\`seen:0 file:D blocked: told:0\`) and B18 (the held init \`after-deadline:alive(<pid>)\`); B17 is GREEN there, round 13 having the KILL, and is seen red through r24g-no-kill.patch (--tree: 115 passed, 1 failed, B17 \`blocked: helper:no(<pid>) left:<pid> told:0\`). The counts that follow were measured before B15..B18 existed (111 lettered checks). On lane-key-n2 (round 12's code, measured 2026-10-13 by lane-key-p1 under this harness: 107 passed, 5 failed) the reds were round 13's -- B10 (no watchdog: the init held by the slow tree is still running and the start never decides, \`blocked: found: helper:no(<pid>) left:<pid> told:0\`), B11 (the no-write start draws the first-run form: \`kind:unconfigured form:true shown:NOFIELD title:other prose:other\`), B12 (the logo refusal says \`try omarchy bar set\`: \`says:other advice:bar-set\`), B13 (the drawn-copy field reads the hidden empty state's \`Add your M3U URL or path in Sources...\` over the form that draws \`Paste or type...\`) and B14 (the FIFO hangs the init: \`blocked: found: told:0 left:<pid>\`). B9 is GREEN there: the re-arm it guards was in round 12's code and only its check was missing, so it is seen red through spikes/key-mutations/r23a-no-rearm.patch instead (--tree: 111 passed, 1 failed, B9 \`told:1/1\`); r23e-editable-field.patch reads 111 / 1 the same way (B13, \`editable:2\`). The counts that follow were measured before B9..B14 existed (105 lettered checks). On lane-key-m2 (round 11's code, measured 2026-10-13 by lane-key-n1 under this harness: 97 passed, 9 failed) the reds are round 12's -- B1..B4 (a migrated install whose state.json, or whose state directory, could not be read at the start: the failed load is applied as an EMPTY state and written over the file, \`records:0\` at B1 and at the second start, B2, and through the directory, B3/B4), B5, B6 (a file that does not parse is replaced at the start, \`file:changed\`; an add goes through, \`add:ok\`; the mirror moves, \`writes:2\`), B7 (nothing left to restore: \`records:0\`) and B8 (the hint reads \`check playlistUrl\`: \`retired:yes\`). N1 is red there ONLY for the field it reads (\`found:NOFIELD\`): its adoption is the same. Every other check is green on round 11's code. The counts that follow were measured before B existed (97 lettered checks). On lane-key-z2 (round 10's code, measured 2026-10-13 by lane-key-m1 under the 97-check harness: 68 passed, 30 failed) the reds were G1, G2, G5, F4, U1..U7, K1..K3, Z1..Z3, A1, Y2, Y3, Q1, Q2, V1, H1 and X1..X6, and EIGHT of them -- F4, U2, K2, K3, Q2, V1, Y2 and Z3 -- differ from their want ONLY in \`reports:NOFIELD\`: they prove the refusal record does not exist there, and nothing about behaviour (classified got against want token by token over the round-11 live lens's transcript, which counted seven and missed U2; this footer used to fold Y2 in with Y3's \`twice:E\`, leave Z3 out, and describe K1..K3 by K1's \`file:yes\` alone). The twenty-two that discriminate: G1, G2, G5 (no migration marker is ever written, so a downgrade's entry and a 0.13.5 entry are read alike), U1, U3..U7 (the guide URL with no source is HELD in state.json, \`file:yes\`, and the switch lands it on A: U3 \`on:<A>\`), K1 (the guide URL held in the file, \`file:yes\`), Z1, Z2 and X1..X4 (a CLI value after the marker is ADOPTED: Z1 and X1 read B active), X5, X6 (no notification: the refusal does not exist), A1, Q1 (the CLI guide URL lands on the new record), Y3 (the CLI guide URL is adopted onto A, \`twice:E\`) and H1 (the marker never lands, \`landed:.../false\`). G3, G4, F1..F3, F5..F7, L1, L2 and A2 are its controls (F and L are R13 and R16 on a migration that fails, which round 10 already held). The counts that follow were measured before G and X existed and before U, K, Z, A, Y2, Y3, Q, V, F and H moved to the R21 contract (86 lettered checks). On lane-key-y0 (round 8's code) the reds are round 9's -- U1, U2, U5, K1, K2, K3 (a guide URL with no source to land on waits on the ENTRY instead of being held in state.json), Y1, Y2, Y3 (after a publish A -> B -> A the lagging host's write is skipped: the in-app logo OFF, the strip of a re-set refused credential and of a re-set EPG input that the restart then puts back over an in-app edit), Q1 (a CLI epgUrl set while the add's probe runs exists nowhere), V1 (an earlier held value replaces a guide URL typed in the edit form) and H1 (D-SRC-18): 74 passed, 12 failed; A1, A2 and Q2 are its controls. The counts that follow were measured before Y, Q, V and H existed (78 lettered checks). On lane-key-w2 (round 7's code) the reds are round 8's -- K1 (the lagging host LOOPS on a refused playlistUrl beside a pending EPG: about 17,000 entry writes and 600 CPU ticks in 5 s), K3 (the echoing host loops on the same value wrapped in whitespace and keeps the credential), Z1, Z2 (a whitespace-wrapped CLI playlist removed comes back at the next start), Z3 (a whitespace-wrapped refused credential stays on the stored entry) and A2 (a pending CLI epgUrl replaces the add form's own guide URL): 73 passed, 6 failed; K2 and A1 are its controls. The counts that follow were measured before K, Z and A existed (70 lettered checks). On lane-key-v2 (round 6's code) the reds are round 7's -- U2, U3, U4 (the logo toggle's heal stripped an EPG no source had adopted, so the switch had nothing to land and the restart stands on A with no EPG) and U6, U7 (the same input lost by the switch alone on the echoing fake host): 66 passed, 5 failed. The counts that follow were measured before U existed (63 lettered checks). On lane-key-t2 (round 4's code) the reds are round 5's -- L1, L2 (the logo toggle on the failed disk mirrored the in-memory key and stripped the URL) and F6, F7 (the restart over that entry finds no record for B): 60 passed, 4 failed. On lane-key-s2 (round 3's code) round 4's join them -- D3, W3, W6 (no per-reason counter there), F3, F4, F5 (the dirsReady-route state write failing strips the URL, moves the mirror and loses the input): 54 passed, 10 failed. On lane-key-r2 (the tree D-SRC-15 was found on) D2, D3, W2, W3, W6, M1, M3, M5, C1..C5, E1, O5, O6 and the F and L reds: the start-up chmod reload replaces the adoption and the in-window switch/remove alike (D2 and W at the sink, D3 NOFIELD for want of a counter) and everything resting on a start-up adoption with it: 38 passed, 26 failed. On f275bde (the first build) O2 is the one discriminating red against every later tree (the entry rewritten while the save is parked); D2, M1, M3, M5 pass there by the accident the header describes: 39 passed, 25 failed. The two patches under spikes/key-mutations/ read 58 / 6 (D2, D3, W2, W3, W4, W6) and 59 / 5 (D2, W2, W3, W4, W6; D3 green) through --tree. N1..N4 are green on EVERY tree: the created-file shape never fires the reload. D1, M2, M4, M6, J1..J3, E2, E3, R1..R5, O1, O3, O4, P1, P2, T1 and every I and S check are controls; W1, W5, F1 and F2 are controls wherever the field they read exists (NOFIELD on f275bde and, for F1/F2, on lane-key-r2)."
 fi
-echo "key-scenario: $PASS passed, $FAIL failed (mode $MODE, tree $PLUGIN_ROOT${BASELINE:+, baseline $BASELINE}${TREE:+, prepared tree}, $(elapsed) s)"
+echo "key-scenario: $PASS passed, $FAIL failed (mode $MODE${ONLY:+, PARTIAL (only $ONLY)}, tree $PLUGIN_ROOT${BASELINE:+, baseline $BASELINE}${TREE:+, prepared tree}, $(elapsed) s)"
 (( FAIL == 0 ))

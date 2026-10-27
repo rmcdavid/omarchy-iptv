@@ -1149,6 +1149,7 @@ scripts/dev-harness/key-scenario.sh --baseline lane-key-s2  # the round-4 red ru
 scripts/dev-harness/key-scenario.sh --baseline lane-key-r2  # the red run: the tree D-SRC-15 was found on (38 / 26)
 scripts/dev-harness/key-scenario.sh --baseline f275bde      # the earlier red run: the first build (39 / 25; O2 its one discriminator)
 scripts/dev-harness/key-scenario.sh --tree "$cp"            # a PREPARED export: spikes/key-mutations/README.md has the recipe
+scripts/dev-harness/key-scenario.sh --only A,B19            # a PARTIAL run (F-HARNESS-49): the instrument arm, A1, A2, B19, then P1, P2, T1 -- about 40 s, never a release count
 ```
 
 D-SINK-19 takes the provider URL off the host's bar entry: the entry
