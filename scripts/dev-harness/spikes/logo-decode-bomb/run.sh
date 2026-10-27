@@ -208,5 +208,5 @@ if (( BRACKET )) && [[ -f $WORK/corpus/bomb-prog-20000.jpg ]]; then
 fi
 
 echo
-echo "logo-decode-bomb: $judged rows judged, $diff_rows DIFF (qt6 $("$QML_BIN" --version 2>/dev/null | head -1 || echo unknown))"
+echo "logo-decode-bomb: $judged rows judged, $diff_rows DIFF (qt6 $(head -1 < <("$QML_BIN" --version 2>/dev/null || echo unknown)))"
 (( diff_rows == 0 && judged > 0 ))

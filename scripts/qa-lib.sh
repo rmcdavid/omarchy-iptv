@@ -105,12 +105,22 @@ qa_model_count() {
 # CRLF checkout's `^HELPER_PARTS = ($` never matched its CR-terminated line,
 # so the split helper read as a one-file one -- exit 0, no parts -- and the
 # slow trees would have staged the stub alone.
+# F-HARNESS-50 (2026-10-26): the stub is read ONCE, into a variable, and the
+# block is looked for there. It used to be `tr -d '\r' <stub | grep -q`, and
+# every caller runs under `pipefail`: grep -q exits on the match (byte 6,294
+# of the 9,137-byte stub), tr's next write takes SIGPIPE, the pipeline
+# answers 141, and the `|| return 0` read that as "a one-file helper" -- no
+# parts, status 0 -- 5 calls in 1500 under 2x CPU oversubscription, every
+# time under a writer that pauses after 8,192 bytes. A stub that cannot be
+# read at all is refused (1) rather than read as one with no block: the
+# same failure, the writer's, masked the same way.
 qa_helper_parts() {
-  local root=$1 rel
+  local root=$1 rel stub
   local -a parts=()
   [[ -f $root/bin/omarchy-iptv ]] || return 1
-  tr -d '\r' <"$root/bin/omarchy-iptv" | grep -q '^HELPER_PARTS = ($' || return 0
-  mapfile -t parts < <(tr -d '\r' <"$root/bin/omarchy-iptv" | sed -n '/^HELPER_PARTS = ($/,/^)$/s/^    ("\([0-9][0-9]-[a-z][a-z0-9-]*\.py\)", [1-9][0-9]*, 0x[0-9a-f]\{8\}),$/\1/p')
+  stub=$(tr -d '\r' 2>/dev/null <"$root/bin/omarchy-iptv") || return 1
+  [[ $'\n'$stub$'\n' == *$'\nHELPER_PARTS = (\n'* ]] || return 0
+  mapfile -t parts < <(sed -n '/^HELPER_PARTS = ($/,/^)$/s/^    ("\([0-9][0-9]-[a-z][a-z0-9-]*\.py\)", [1-9][0-9]*, 0x[0-9a-f]\{8\}),$/\1/p' <<<"$stub")
   (( ${#parts[@]} > 0 )) || return 1
   for rel in "${parts[@]}"; do [[ -f $root/bin/helper/$rel ]] || return 1; done
   for rel in "${parts[@]}"; do printf '%s\n' "$root/bin/helper/$rel"; done

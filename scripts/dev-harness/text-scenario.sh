@@ -159,7 +159,7 @@ trap cleanup EXIT
 trap 'exit 130' INT
 trap 'exit 143' TERM
 pgrep -x hyprlock >/dev/null && { echo "screen is locked"; exit 2; }
-ss -ltn 2>/dev/null | grep -q ":$PORT " && { echo "port $PORT is already in use"; exit 2; }
+grep -q ":$PORT " < <(ss -ltn 2>/dev/null) && { echo "port $PORT is already in use"; exit 2; }
 
 # F-M3-1 half (b): the run's own evidence goes to disk, not only to whatever
 # window it was started in. T1..T6 are observations of a NETWORK sink and the
@@ -185,11 +185,11 @@ PY
 : >"$REQLOG"
 python3 "$WORK/probe_server.py" "$PORT" "$REQLOG" >/dev/null 2>&1 &
 OWN_CHILD=$!
-for i in $(seq 1 30); do ss -ltn 2>/dev/null | grep -q ":$PORT " && break; sleep 0.1; done
+for i in $(seq 1 30); do grep -q ":$PORT " < <(ss -ltn 2>/dev/null) && break; sleep 0.1; done
 # On this exit the trap reaps OWN_CHILD if it is still ours: a server that
 # binds after the 3 s window must not be left holding 8767 for the next run
 # to refuse as foreign.
-ss -ltn 2>/dev/null | grep -q ":$PORT " || { echo "probe server did not start"; exit 2; }
+grep -q ":$PORT " < <(ss -ltn 2>/dev/null) || { echo "probe server did not start"; exit 2; }
 # The listener is ours only if this shell is its parent; a server that lost
 # the port to someone who bound it between the check above and the bind
 # would leave a foreign pid on the port, and that one is not remembered.
@@ -280,9 +280,9 @@ fi
 # ---- teardown, proven: the shell is gone and the port is free
 "$RUN" reap >/dev/null 2>&1
 ours "$SERVER_PID" && qa_stop_pid "$SERVER_PID" 5 "fixture server"
-for i in $(seq 1 30); do ss -ltn 2>/dev/null | grep -q ":$PORT " || break; sleep 0.1; done
+for i in $(seq 1 30); do grep -q ":$PORT " < <(ss -ltn 2>/dev/null) || break; sleep 0.1; done
 qs_left=$([[ -f "$SCRATCH/qs${OMARCHY_IPTV_HARNESS_INSTANCE:-}.pid" ]] && echo "pidfile present" || echo "no pidfile")
-port_left=$(ss -ltn 2>/dev/null | grep -q ":$PORT " && echo "port $PORT STILL LISTENING" || echo "port $PORT free")
+port_left=$(grep -q ":$PORT " < <(ss -ltn 2>/dev/null) && echo "port $PORT STILL LISTENING" || echo "port $PORT free")
 echo "teardown: $qs_left, $port_left"
 echo "requests: before-open=$before_open after-list=$list_hits after-wall=$wall_hits distinct-names=$(probe_distinct) of $PROBES (probe paths only; UA of the first: $(grep -o -- "/${TOKEN}-[0-9]*\.png UA=.*" "$REQLOG" 2>/dev/null | head -1 | sed 's/.*UA=//'))"
 if [[ -n $BASELINE ]]; then

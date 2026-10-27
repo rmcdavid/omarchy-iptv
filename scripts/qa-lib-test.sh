@@ -387,6 +387,56 @@ old_helper_parts() {
 }
 is "the shipped reader answered a CRLF stub with no parts at all (the shape replaced)" \
    "$(old_helper_parts "$HCRLF" | wc -l | tr -d ' ')" "0"
+# F-HARNESS-50 (2026-10-26). Every caller runs this reader under `pipefail`,
+# and 81853f7's shape was `tr -d '\r' <stub | grep -q '^HELPER_PARTS = ($'
+# || return 0`: grep -q exits on the match, 6,294 bytes into the 9,137-byte
+# stub, tr's next write takes SIGPIPE, the pipeline answers 141, and the
+# reader said "a one-file helper" -- no parts, status 0 -- 5 calls in 1500
+# under 2x CPU oversubscription, and a red gate. Here the writer is made
+# deterministic: `tr` is shadowed, in a subshell, by one that writes 8,192
+# bytes, pauses, then writes the rest -- the recheck's slow writer, the
+# scheduler's bad day and nothing a real tr cannot do. LC_ALL=C makes the
+# 8,192 bytes. The 81853f7 reader, verbatim, is the proof the writer bites.
+old_helper_parts_pipe() {
+  local root=$1 rel
+  local -a parts=()
+  [[ -f $root/bin/omarchy-iptv ]] || return 1
+  tr -d '\r' <"$root/bin/omarchy-iptv" | grep -q '^HELPER_PARTS = ($' || return 0
+  mapfile -t parts < <(tr -d '\r' <"$root/bin/omarchy-iptv" | sed -n '/^HELPER_PARTS = ($/,/^)$/s/^    ("\([0-9][0-9]-[a-z][a-z0-9-]*\.py\)", [1-9][0-9]*, 0x[0-9a-f]\{8\}),$/\1/p')
+  (( ${#parts[@]} > 0 )) || return 1
+  for rel in "${parts[@]}"; do [[ -f $root/bin/helper/$rel ]] || return 1; done
+  for rel in "${parts[@]}"; do printf '%s\n' "$root/bin/helper/$rel"; done
+}
+slow_tr_parts() {   # slow_tr_parts <pipefail 0|1> <reader> <root> -> "<status> <parts>"
+  ( export LC_ALL=C
+    if (( $1 )); then set -o pipefail; else set +o pipefail; fi
+    tr() { local d; d=$(command tr "$@") || return; printf '%s' "${d:0:8192}"; sleep 0.5; printf '%s\n' "${d:8192}"; }
+    out=$("$2" "$3"); rc=$?
+    n=0; [[ -n $out ]] && n=$(wc -l <<<"$out")
+    printf '%s %s\n' "$rc" "$n" )
+}
+is "81853f7's reader under pipefail and the slow writer: a one-file helper, status 0, no parts (the defect)" \
+   "$(slow_tr_parts 1 old_helper_parts_pipe "$ROOT")" "0 0"
+is "the same reader and writer without pipefail finds all eleven, so it is the status and not the bytes" \
+   "$(slow_tr_parts 0 old_helper_parts_pipe "$ROOT")" "0 11"
+is "qa_helper_parts under pipefail and the slow writer names all eleven parts, status 0" \
+   "$(slow_tr_parts 1 qa_helper_parts "$ROOT")" "0 11"
+# The same reader's other masked writer failure: a stub that exists and
+# cannot be READ. 81853f7 answered it as a one-file helper too (tr failed,
+# grep saw nothing, `|| return 0`). Root reads a mode-000 file, so there
+# the case cannot be built and both checks say so instead of passing.
+HUNREAD="$TMP/helper-unread"
+mkdir -p "$HUNREAD/bin/helper"
+cp "$ROOT/bin/omarchy-iptv" "$HUNREAD/bin/omarchy-iptv"; chmod 000 "$HUNREAD/bin/omarchy-iptv"
+if [[ -r $HUNREAD/bin/omarchy-iptv ]]; then
+  bad "an unreadable stub could not be made here (running as root?); the two checks below cannot be graded"
+  bad "(the second of them)"
+else
+  is "81853f7's reader read an unreadable stub as a one-file helper: status 0" \
+     "$(old_helper_parts_pipe "$HUNREAD" >/dev/null 2>&1; echo $?)" "0"
+  st "qa_helper_parts refuses a stub it cannot read (1), never a one-file helper" 1 qa_helper_parts "$HUNREAD"
+fi
+chmod 600 "$HUNREAD/bin/omarchy-iptv"
 
 # ======================================================== qa_tree_count (A2)
 
@@ -3000,7 +3050,12 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # 573 -> 576 on 2026-10-26, the recheck of lane-fm324: the SKIP class is off
 # under Hyprland, end to end through qa_key (2) and in the predicate m3's
 # shot wrapper calls (1); red on d4f653c's qa-lib.sh (3 failed).
-EXPECTED=576
+# 576 -> 581 on 2026-10-26, lane-hfu (F-HARNESS-50): qa_helper_parts under
+# pipefail and a writer that pauses after 8,192 bytes, 81853f7's reader beside
+# it with pipefail on and off, and a stub that cannot be read, read by both
+# (5). Red on e243c29's qa-lib.sh: the slow writer's "0 0" and the
+# unreadable stub's 0 (2 failed).
+EXPECTED=581
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

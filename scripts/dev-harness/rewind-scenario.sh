@@ -379,7 +379,7 @@ pgrep -x hyprlock >/dev/null && { echo "screen is locked" >&2; exit 2; }
 command -v ffmpeg >/dev/null || { echo "ffmpeg is required for the local stream" >&2; exit 2; }
 command -v mpv >/dev/null || { echo "mpv is required" >&2; exit 2; }
 command -v wtype >/dev/null || { echo "wtype is required (R13)" >&2; exit 2; }
-ss -ltn 2>/dev/null | grep -q ":$PORT " && { echo "port $PORT is already in use" >&2; exit 2; }
+grep -q ":$PORT " < <(ss -ltn 2>/dev/null) && { echo "port $PORT is already in use" >&2; exit 2; }
 qa_safe_path "$SCRATCH" || { echo "unsafe scratch path" >&2; exit 2; }
 
 # ---- which checkout is under test. ALL of its refusals sit ABOVE the
@@ -443,8 +443,8 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
 http.server.ThreadingHTTPServer(("127.0.0.1", int(sys.argv[1])),
     functools.partial(Quiet, directory=sys.argv[2])).serve_forever()
 PY
-for i in $(seq 1 30); do ss -ltn 2>/dev/null | grep -q ":$PORT " && break; sleep 0.1; done
-ss -ltn 2>/dev/null | grep -q ":$PORT " || { echo "the fixture server did not start" >&2; exit 2; }
+for i in $(seq 1 30); do grep -q ":$PORT " < <(ss -ltn 2>/dev/null) && break; sleep 0.1; done
+grep -q ":$PORT " < <(ss -ltn 2>/dev/null) || { echo "the fixture server did not start" >&2; exit 2; }
 # From here the listener on $PORT is OURS, and only now may cleanup kill it.
 SERVER_OWNED=1
 start_stream() {   # start_stream <dir> <size> <tone-hz>
