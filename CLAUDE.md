@@ -951,6 +951,16 @@ This project is built by role lanes running in separate git worktrees.
    the rig started and stayed failed (F-M3-21). A rig a lane writes for itself
    is held to this rule as much as the harness is; the harness's own scripts
    already never use `dbus-run-session`.
+   **And never with the session's `DISPLAY`** (F-HARNESS-47, raised
+   2026-10-26 by lane-fm324 against a brief of the lead's that copied
+   key-scenario's `h()`): a caller that points the harness at a nested
+   socket and leaves `DISPLAY=:0` inherited hands the OWNER's Xwayland to
+   everything the harness starts, and mpv's VO probe tries `x11vk` right
+   after `waylandvk` fails on the cage -- on the cage's own `:1` it failed
+   only for want of DRI3, which the owner's `:0` has -- so the player can
+   open on the owner's real desktop. Every caged run therefore uses
+   `env -u DISPLAY` (and `-u HYPRLAND_INSTANCE_SIGNATURE`, key-scenario's
+   reason) until `harness_env` drops it itself.
    A nested cage that will host the PLAYER runs it through run.sh's
    software-GPU lever -- `OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1` beside
    `WAYLAND_DISPLAY=$NESTED`, or a scenario run inside the cage's child,

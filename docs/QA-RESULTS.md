@@ -13315,6 +13315,60 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### F-M3-24: m3's real keys under a nested cage (lane-fm324, 2026-10-26)
+
+**Cause, measured.** Cage was headless pixman with -D, on private-bus.sh. The probe used m3's fixture, the guide open and one real `x` per phase, run in both shapes: inside the cage's child with the signature unset, and outside with `env -u HYPRLAND_INSTANCE_SIGNATURE -u DISPLAY WAYLAND_DISPLAY=<nested>`. The two shapes gave identical readings. focusState was `keyboard true, windowActive false, windowVisible true` (the production guide is a layer surface; cage has no layer-shell, so it never maps). The `x` passed the old guard and hid nothing. With the player up, mpv was `focused true` and the same `x` moved its `sub-delay` 0.0 -> 0.1. With `--window floating`, windowActive was true and the `x` hid the group, until mpv's window mapped; then windowActive and activeFocus were both false. key-scenario.sh sends no keystroke at all (its "key" is D-SINK-19's), and the earlier rigs already unset the signature.
+
+**Fix.** focusSnapshot reports `windowActive` (Qt's Window.active of the leaf's window). run.sh refuses a false one with the tag `(window-inactive)` and a missing one as "cannot tell". m3 opts the tagged class into SKIP (exit 77). H6b, T5a, T5b, T5d and P1c now require the state their key's predecessor made. clip's focus wait asks both bits.
+
+**Counts.**
+
+| Run | Result |
+|---|---|
+| m3, cage, b43c4a4 | 30 passed / 8 failed (H6b, T5b and the refusal count passing vacuously) |
+| m3, cage, lane tree, both shapes | 28 / 0 / 10 skipped, exit 77 |
+| m3, floating copy | 33 / 0 / 5 (H6, P1 PASS; T5 SKIP while mpv held the keyboard) |
+| new m3 over the old guard | 28 / 10 (H6b, T5b, P1c FAIL on their preconditions) |
+| qa-lib-test | 573 / 0, and 555 / 18 on b43c4a4's code |
+
+Coredump journal +0 for every run. Transcripts are under `scratchpad/fm324-probe/results/`.
+
+**hyprctl.** `hyprctl version` from the harness shell's environment reached nothing: unset signature, exit 1; with the signature, exit 4 through a 123-136-byte socket path. Through a 106-byte path it answered the owner's Hyprland, so the unset signature is the containment.
+
+**UNVERIFIED.** That the guide's layer surface on Hyprland reads windowActive true has not been observed. The first desk run of m3 should read `ipc focusState` before its first key.
+
+**The recheck of lane-fm324 (same day), and the hole it closed.** Every count re-run (qa-lib-test 573/0 on the lane, 555/18 over b43c4a4's code; five mutants of the lane's code each red), and the measurement re-taken in one cage: phase A `keyboard true, windowActive false`, `run.sh key x` now exit 3 with the tag and `hiddenGroups` unchanged; phase B with the player up, the guarded `x` refused and mpv's `sub-delay` stayed 0.0, while a `--to-compositor x` moved it to 0.1 -- the unguarded key goes to the player. The hole: the lane's SKIP was taken wherever m3 ran, so on the desk -- where Hyprland HAS layer-shell and an inactive guide window is the product failing -- a broken tree read 0 failed, exit 77. a891291 makes the class skippable only with `HYPRLAND_INSTANCE_SIGNATURE` unset (every cage rig and `h()` unset it already), so the cage keeps its SKIP and a desk run FAILs; qa-lib-test 576/0, 573/3 over the lane's own qa-lib.sh. Gate green alone on a891291.
+
+**What this round filed beside the two rows** (lane-fh46, lane-fm324 and their rechecks, 2026-10-26): **F-HARNESS-48** run.sh's `runtime/hypr` symlink keeps nothing out -- `hyprctl` cannot connect through it only because the socket path is 123-136 bytes, over `sun_path`'s 108, and through a 106-byte path it answered the owner's Hyprland 0.56.2 (a read); the containment is the unset signature. **F-HARNESS-49** key-scenario.sh's live arm, the release recipe's live step, reads B19 red on dev's own code (137/1 twice on the lane tree, 135/3 on a b43c4a4 export; the foreign-merge count `merged:2`/`:1` against 3, the data outcome right every time), measured at load 3-9 and not idle. **F-HARNESS-50** `qa_helper_parts`' `tr | grep -q` pipeline under its callers' `pipefail`: GNU grep exits on the match, `tr` takes SIGPIPE, and the reader answers "a one-file helper" with status 0 (5 of 1500 calls under 2x CPU oversubscription, 0 of 2000 idle; reproduced deterministically by the recheck with a slow writer); it reddened one gate run of lane-fh46's and can make rewind and key stage the stub alone. **F-HARNESS-51** `run.sh --playlist` posts ten "Bar setting ignored ... playlistUrl" notifications per player-scenario run, which on an uncaged run reach the owner's notification daemon. **F-HARNESS-52** tls-scenario S5 reads layer 2's position and the layer count from `qa_cmdline`'s space-joined string, the shape F-HARNESS-46 replaced with NUL-split items (latent: S5's user args are fixed). **F-HARNESS-53** all eight baseline-capable scenarios print `rev-parse --short "$BASELINE"`, the TAG object for an annotated tag (`v0.15.0 (a204f9b)` where the commit is e710341). **F-HARNESS-54** three loose ends in m3's new SKIP plumbing: the window-inactive refusal always gives the cage hint (`--window floating`) even for a floating window or a desk FAIL; a refused T5d leaves `t5` unset, so the `trackClose` fallback is skipped and T6b would FAIL on the environment; and m3's `shot()` SKIP branch is pinned only by a grep. **D-PLY-28** player-scenario P13 read "the play was DROPPED" in 2 of 35 trials across the lanes' and the recheck's cage runs, one on the mutant and one on the tree, at load 4-6 under software rendering -- D-PLY-4's dropped-play half recurring, or the 15 s bound under llvmpipe, unknown. **D-PLY-29** `endedReport` takes the LAST log-tail line as the failure reason, so under software GL a mesa stderr line can win: one of seven cage runs' failure toasts read "did not play · MESA-EGL: warning: failed to get driver name for fd -1", and the users who see that are D-PLY-27's.
+
+**F-M3-25, the lead's, and its cost.** Mid-run SendMessage notes to the two lanes started a COPY of each in its worktree while the original ran without the note; the lead stopped the copies with TaskStop on the agent ids at 21:39:32Z. That stop also took down the two originals' running cage cells in the same second (lane-fh46's green1, cut at P12, and lane-fm324's first probe cell, SIGTERM to its cage child and SIGKILL to the cell): nothing survived, nothing aborted, the coredump journal stayed at +0, and both lanes re-ran. That answers both lanes' "who killed it" questions. The copy's untracked `tests/test_harness_gpu_sw_check.py` (302 lines, pins the parser and the skip decision in the gate, which never runs player-scenario) was moved out of the tree intact and is held for a follow-up lane's own red proofs.
+
+### F-HARNESS-46: player-scenario P2 observes D-PLY-27's `--gpu-sw=yes` (lane-fh46, 2026-10-26, bca8cab)
+
+**The check.** P2 now reads the live player's `/proc/<pid>/cmdline` as NUL-separated items (`argv_items`). It asserts `layer1:yes base:1`: exactly one `--gpu-sw=yes` before the first `--tls-verify=yes`. Position is the property. run.sh's software-GPU lever adds a second copy to the user's mpvArgs, after layer 1, so a count anywhere would pass on a tree that lost the base token.
+
+**The SKIP.** It is printed as `SKIP <label>: <reason>` and counted toward the floor. It happens only when `--baseline` names a ref that both:
+- does not contain 1044f7b, and
+- declares 0.15.0 or older.
+
+Release tags on main contain no dev commit, which is why the version is needed as well: `merge-base --is-ancestor cc35557 v0.15.0` is false.
+
+**Rig.** A nested headless pixman cage on `private-bus.sh`. The scenario ran outside the cage with:
+- `env -u HYPRLAND_INSTANCE_SIGNATURE -u DISPLAY WAYLAND_DISPLAY=$NESTED OMARCHY_IPTV_HARNESS_SOFTWARE_GPU=1`;
+- a refusing `hyprctl` stub and a logging `omarchy-notification-send` stub first on PATH.
+
+**Results.**
+
+| Run | Tree | P2 `--gpu-sw` check | Summary | Coredump journal |
+|---|---|---|---|---|
+| green3 | bca8cab | PASS, items `#15 --gpu-sw=yes #16 --tls-verify=yes #17 --gpu-sw=yes #18 --ao=null #19 --tls-verify=yes` | 77 passed, 9 failed, 0 skipped | +0 |
+| red1 | `MPV_GPU_SW` removed from both mirrors, stub re-sealed | FAIL `layer1:yes base:0`, items `#15 --tls-verify=yes #16 --gpu-sw=yes #17 --ao=null #18 --tls-verify=yes`; the player was up | 75 passed, 12 failed | +0 |
+| base1 | `--baseline v0.15.0` | SKIP with the reason | 76 passed, 9 failed, 1 skipped; floor PASS | +0 |
+
+**Expected failures.** The 9 failures in every run are the window checks: P1 x2, P4, P5, P8, P6, P11, P12 x2. Each asks `hyprctl clients -j`, and the cage has no Hyprland.
+
+**Gate.** `check.sh` is green on bca8cab: node 3041, python 1593, qml 80, harness predicates 552.
+
 ### D-PLY-27: the shipped launch argv accepts a software renderer (lane-dply27, 2026-10-26)
 
 **Decision.** The owner's, 2026-10-26: `--gpu-sw=yes` joins the base argv, so a compositor that serves no hardware GL or Vulkan context gets a slow player instead of mpv 0.41.0's VO-probe assertion and a crash card per zap (F-HARNESS-45's measurement; the assertion is mpv-player/mpv#17190, fixed on master by a58dd8ac4 and in no release as of 2026-10-26). The decision was first taken on the lead's premise that hardware desktops are unaffected; the recheck read mpv's probe order and found a class where that is false (below), and the owner confirmed "Merge as built" with the cost in front of them.
