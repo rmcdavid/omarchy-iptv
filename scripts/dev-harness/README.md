@@ -2076,6 +2076,39 @@ Counts, the summary line's: two full runs on e3fcb6f 138 / 0 (591.9 s and
 590.8 s, load 3.2 and 2.6 at the start, nothing else of the lane's
 running, the coredump journal +0 each); `--only PRUNE,A,B19` 18 / 0.
 
+#### D-SRC-69 (2026-10-27): the PRUNE rig is B41
+
+The fix decides a prune's keep list when the prune RUNS (the records and
+the active key of that moment, plus the folder of a probe not yet
+handled), holds a probe asked for while a prune that does not keep its
+folder is running, and drops a queued removal of a folder a later probe
+started into. So the rig became a check, B41, in every full run and in
+`--only PRUNE`: the add commits with the dirs NOT ready -- its premise,
+read in the same line (`committed active:D dirsReady:false cache:kept
+channels:11`), so a run that never staged the race is red for that --
+and after the start-up prune the added, active source still has its
+record, its cache and its channels (`after active:D record:true
+cache:kept channels:11`). The live floor is 138; a green full run reads
+139 / 0. tests/test_key_scenario_only.py pins PRUNE as a counted block
+holding B41 alone.
+
+Counts, the summary line's, all under `private-bus.sh` with
+`env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE`, one cage at a time:
+
+| run | tree | result | time | load start / end |
+|---|---|---|---|---|
+| `--only PRUNE` | lane tree c2eefa8 | 16 / 0 | 14.2 s | 2.53 / 2.93 |
+| `--only PRUNE,A` | lane tree c2eefa8 | 18 / 0 | 28.5 s | 2.33 / 2.65 |
+| `--only PRUNE --baseline b5da837` | dev | 15 / 1, B41 `cache:gone channels:0` | 14.2 s | 2.55 / 2.43 |
+| `--only PRUNE --baseline cc35557` | 0.15.0 | 15 / 1, B41 `cache:gone channels:0` | 14.1 s | 2.43 / 2.49 |
+| full | lane tree c2eefa8 | 139 / 0 | 602.0 s | 2.79 / 3.14 |
+
+The transcripts' tree line reads c2eefa8: the lane's third commit before a
+message-only rebuild, the same tree as ef08a06. The coredump journal
+(MESSAGE_ID fc2e22bc6ee647b6b90729ab34a250b1) read +0 across every run; the load is the machine's own background, nothing
+else of the lane's running. The transcripts are in the lane's session
+scratch directory, not the tree.
+
 ### The open, measured with its delegates (D-PERF-1, R27f; R28d)
 
 ```
