@@ -1150,7 +1150,7 @@ scripts/dev-harness/key-scenario.sh --baseline lane-key-r2  # the red run: the t
 scripts/dev-harness/key-scenario.sh --baseline f275bde      # the earlier red run: the first build (39 / 25; O2 its one discriminator)
 scripts/dev-harness/key-scenario.sh --tree "$cp"            # a PREPARED export: spikes/key-mutations/README.md has the recipe
 scripts/dev-harness/key-scenario.sh --only A,B19            # a PARTIAL run (F-HARNESS-49): the instrument arm, A1, A2, B19, then P1, P2, T1 -- about 40 s, never a release count
-scripts/dev-harness/key-scenario.sh --baseline cc35557 --only PRUNE  # the start-up prune race's rig (D-SRC-69), no check: what the start-up prune leaves of an add made before the dirs are ready
+scripts/dev-harness/key-scenario.sh --baseline cc35557 --only PRUNE  # B41 alone (D-SRC-69): an add made before the dirs are ready, after the start-up prune -- red there (`cache:gone channels:0`), green on the fix
 ```
 
 D-SINK-19 takes the provider URL off the host's bar entry: the entry

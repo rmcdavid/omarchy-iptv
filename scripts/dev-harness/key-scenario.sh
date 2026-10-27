@@ -11,7 +11,7 @@
 #   key-scenario.sh [live] ... --only A,B19 a PARTIAL live run: the instrument arm, the
 #                                           named shell-arm segments, then P and T1
 #                                           (F-HARNESS-49; never a release count;
-#                                           PRUNE is a rig that only --only runs)
+#                                           PRUNE holds B41, D-SRC-69's check)
 #
 # THE FINDING. For the life of the project the host's bar entry carried the
 # provider's playlist URL -- credentials and all -- in ~/.config/omarchy/
@@ -293,9 +293,9 @@
 #   B21 the EXISTING-folder session damaged after an own save landed: the
 #       garbage is noticed, told once                 <- R25d, D-DOC-9's half
 #   B22 ... and the Sources header there says saving has stopped <- D-SRC-38
-#   PRUNE (a RIG that only `--only PRUNE` runs: never in a full run, no check)
-#       an add made while the start-up init is held, then the start-up
-#       prune: prints what is left of the added source's cache
+#   B41 (the PRUNE segment) an add made while the start-up init is held
+#       commits, and the start-up prune run at dirsReady leaves the added,
+#       ACTIVE source its record, its cache and its channels
 #                                    <- the start-up prune race, D-SRC-69 (F-HARNESS-49)
 #   P1  no labelled harness-log line carries a URL or a fixture path
 #   P2  no credential token anywhere in the harness log
@@ -710,14 +710,15 @@
 # named shell-arm segments and then P1, P2 and T1, and nothing else: a ten
 # minute run to look at two checks was what made bisecting A2 and watching
 # B19 cost an hour a sample. The names are the blocks it was made for, `A`
-# (A1, A2) and `B19`, and `PRUNE`, a RIG that only --only runs (no check:
-# it prints what the start-up prune leaves of an add, D-SRC-69);
+# (A1, A2) and `B19`, and `PRUNE` (B41: what the start-up prune leaves of
+# an add, D-SRC-69; a rig with no check until D-SRC-69 was fixed, a counted
+# check in every full run since);
 # nothing else is accepted: a segment that leans on an earlier one's state
 # cannot be cut loose by a flag without being checked, so a new name is
 # added only with a run that shows it stands alone. A full run is untouched
 # by it -- every block it does not name is `if [[ -z $ONLY ]]` or `if
-# seg_on X`, both true when the flag is absent, PRUNE's is false then, and
-# the counts are the same lines -- and a partial run cannot be read as one:
+# seg_on X`, both true when the flag is absent, and the counts are the same
+# lines -- and a partial run cannot be read as one:
 # its floor is the selected blocks' own (ONLY_CHECKS below, pinned to the
 # ck lines between each block's markers by tests/test_key_scenario_only.py),
 # and its summary line says `PARTIAL (only ...)`. Refused with check-tree.
@@ -836,7 +837,7 @@ TREE_LINE="== tree $ROOT ($(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null ||
 # F-HARNESS-49: --only, refused above the transcript like the other levers.
 # How many lettered checks each selectable block holds (its ck lines, which
 # tests/test_key_scenario_only.py counts between the block's markers).
-declare -A ONLY_CHECKS=([A]=2 [B19]=1 [PRUNE]=0)
+declare -A ONLY_CHECKS=([A]=2 [B19]=1 [PRUNE]=1)
 if [[ -n $ONLY ]]; then
   [[ $MODE == check-tree ]] && { echo "--only selects shell-arm segments; check-tree runs the instrument arm alone" >&2; exit 2; }
   IFS=, read -r -a only_names <<<"$ONLY"
@@ -1924,27 +1925,30 @@ shell_arm() {
 
   fi   # --only: end of D .. Z
 
-  # F-HARNESS-49 (2026-10-27): THE START-UP PRUNE RACE, D-SRC-69, a product
-  # finding reported for the owner. A RIG, NOT A CHECK: it runs only when `--only
-  # PRUNE` names it, never
-  # in a full run, and asserts nothing -- it prints what the sink holds, so
-  # the owner can see the defect on any tree (`--baseline REF --only PRUNE`)
-  # until it is decided. The start-up `cache prune` is QUEUED when the cache
-  # layout is ready (schedulePrune) with the keys the state holds THEN, and
-  # RUN when the dirs are (stateInitExited -> runNextCacheJob); an in-app
-  # add made in between probes into sources/<new key>, which no record names
-  # (SR23), so the prune removes it: mid-write the probe fails on its rename
-  # (A2's FileNotFoundError, 2026-10-27, the add dropped), and once written
-  # the ADDED, ACTIVE source keeps a record and loses its channels for the
-  # session. The window is made deterministic here by holding the start-up
-  # init 4 s (the slow tree), so the add's probe completes and commits before
-  # the dirs are ready. Measured 2026-10-27 on dev 45bded9 and on cc35557
-  # (0.15.0) alike: committed with 11 channels and its directory; after
-  # dirsReady the prune `--keep <A> <C>` (no D, no --active) removed
-  # sources/<D>; the session then showed 0 channels on the active source
-  # until a restart refetched it.
-  if [[ -n $ONLY ]] && seg_on PRUNE; then   # --only PRUNE begins (a rig: never in a full run)
-  echo "== PRUNE (a rig, no check): an add whose probe commits while the start-up init is held, then the start-up prune ($(elapsed) s)"
+  # F-HARNESS-49 (2026-10-27): THE START-UP PRUNE RACE, D-SRC-69. The
+  # start-up `cache prune` is QUEUED when the cache layout is ready
+  # (schedulePrune) and RUN when the dirs are (stateInitExited ->
+  # runNextCacheJob); its keep list used to be the keys the state held at
+  # the QUEUE, so an in-app add made in between probed into sources/<new
+  # key>, which no record named then (SR23), and the prune removed it:
+  # mid-write the probe failed on its rename (A2's FileNotFoundError,
+  # 2026-10-27, the add dropped), and once written the ADDED, ACTIVE source
+  # kept a record and lost its channels for the session. The window is made
+  # deterministic here by holding the start-up init 4 s (the slow tree), so
+  # the add's probe completes and commits before the dirs are ready.
+  # Measured 2026-10-27 on dev 45bded9 and on cc35557 (0.15.0) alike:
+  # committed with 11 channels and its directory; after dirsReady the prune
+  # `--keep <A> <C>` (no D, no --active) removed sources/<D>; the session
+  # showed 0 channels on the active source until a restart refetched it.
+  # It was a RIG (`--only PRUNE`, no check) until the fix, which decides the
+  # list when the prune RUNS (Model.pruneArgs: the records then, and the
+  # folder of a probe in flight); now B41 grades it in every full run, red
+  # on dev b5da837 and on `--baseline cc35557` (`cache:gone channels:0`).
+  # Its premise is part of what it reads: the add committed while the dirs
+  # were NOT ready (`dirsReady:false` at the commit), or the race was never
+  # staged and the check is red for that reason, by its own text.
+  if seg_on PRUNE; then   # --only PRUNE begins
+  echo "== PRUNE (B41): an add whose probe commits while the start-up init is held, then the start-up prune ($(elapsed) s)"
   PRUNE_TREE="$WORK/prune-tree"
   stage_slow_tree "$PRUNE_TREE" || echo "   the slow tree could not be staged from $PLUGIN_ROOT"
   seed "" migrated
@@ -1966,6 +1970,9 @@ shell_arm() {
     *"cache:kept channels:11") echo "   PRUNE: the added source's cache SURVIVED the start-up prune (the race is absent on this tree)" ;;
     *) echo "   PRUNE: neither shape -- read the lines above" ;;
   esac
+  ck "B41 D-SRC-69: an in-app add whose probe commits while the start-up init is held (the dirs not ready) keeps, after the start-up prune has run, its record, its cache and its channels, and stays active" \
+     "ok:$(qa_json_field "d['ok']" "$res") committed $committed after $after" \
+     "ok:true committed active:D dirsReady:false cache:kept channels:11 after active:D record:true cache:kept channels:11"
   fi   # --only PRUNE ends
 
   if seg_on A; then   # --only A begins
@@ -3277,7 +3284,8 @@ instrument
 # B38 and B39 (the held migration holds the bar's guide URL with its
 # playlist); 137 the same day, R29: B40 (R29d, a guide URL beside an
 # unusable playlist is never adopted onto the active source) and S4 (R29e,
-# init_pids scoped to this run), which also takes check-tree 10 -> 11.)
+# init_pids scoped to this run), which also takes check-tree 10 -> 11;
+# 138 on 2026-10-27, D-SRC-69: B41, the PRUNE rig turned into a check.)
 # Every assertion is one `ck "<letter><n> ...` line, none in a loop; the
 # probe's fallback `fail` lines replace the seven I lines one for one when
 # the probe does not run, so the count holds either way; the definition of
@@ -3287,7 +3295,7 @@ instrument
 if [[ $MODE == check-tree ]]; then
   EXPECTED_CHECKS=11
 else
-  EXPECTED_CHECKS=137
+  EXPECTED_CHECKS=138
 fi
 # F-HARNESS-49: a PARTIAL run's floor is the instrument arm, the selected
 # blocks and P1, P2, T1 -- its own, never the full one, and never lowered
