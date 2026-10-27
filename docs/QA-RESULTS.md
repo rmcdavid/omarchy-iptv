@@ -13315,6 +13315,17 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### F-M3-24 at the desk: the guide's layer window does take the keyboard, a second late (2026-10-27)
+
+**On the owner's "go"**, the one claim F-M3-24 left UNVERIFIED, read alone (no workflow or agent running, no cage or player, screen unlocked, load 0.31). `run.sh --detach --open --timeout 0 --playlist none` on the owner's own Hyprland session (no `--playlist`, so no "Bar setting ignored" cards, F-HARNESS-51), `ipc focusState` polled until `open` read true, read again a second later, then `run.sh reap`. The guide was on screen from 07:16:56.2 to 07:17:01.1; no keystroke was sent; the owner's shell (pid 2062603) was the only quickshell afterwards; no notification card was posted. Replies kept 0600 under `scratchpad/desk-focus/`.
+
+| Read | open | keyboard | role / item | window | windowActive |
+|---|---|---|---|---|---|
+| 07:16:59.45, the first with `open` true | true | true | other / TextField | layer | **false** |
+| 07:17:00.56, 1.1 s later | true | true | other / TextField | layer | **true** |
+
+So Hyprland's exclusive keyboard focus on the layer surface does reach Qt as `Window.active` -- the F-M3-24 guard asks the right question on the desk -- but it arrives up to a second after the guide reports itself open. With no source the guide opened on the Sources form, so the focused leaf was its `TextField`, not the key catcher; the window's activation is the same for either. **F-HARNESS-60** is the consequence: a key sent in that gap is refused by the guard, and on the desk (`qa_key_skippable` false) that refusal is a FAIL. One reading pair, not a distribution.
+
 ### Harness follow-up: F-HARNESS-47, -48, -50, -54 and F-HARNESS-46's held test (lane-hfu, 2026-10-26, 6bd7486..60821e0)
 
 **F-HARNESS-47.** harness_env now drops DISPLAY for everything run.sh starts.
@@ -13387,7 +13398,7 @@ Coredump journal +0 for every run. Transcripts are under `scratchpad/fm324-probe
 
 **hyprctl.** `hyprctl version` from the harness shell's environment reached nothing: unset signature, exit 1; with the signature, exit 4 through a 123-136-byte socket path. Through a 106-byte path it answered the owner's Hyprland, so the unset signature is the containment.
 
-**UNVERIFIED.** That the guide's layer surface on Hyprland reads windowActive true has not been observed. The first desk run of m3 should read `ipc focusState` before its first key.
+**UNVERIFIED.** That the guide's layer surface on Hyprland reads windowActive true has not been observed. The first desk run of m3 should read `ipc focusState` before its first key. **Observed 2026-10-27**: true, about a second after `open` -- see "F-M3-24 at the desk" (F-HARNESS-60).
 
 **The recheck of lane-fm324 (same day), and the hole it closed.** Every count re-run (qa-lib-test 573/0 on the lane, 555/18 over b43c4a4's code; five mutants of the lane's code each red), and the measurement re-taken in one cage: phase A `keyboard true, windowActive false`, `run.sh key x` now exit 3 with the tag and `hiddenGroups` unchanged; phase B with the player up, the guarded `x` refused and mpv's `sub-delay` stayed 0.0, while a `--to-compositor x` moved it to 0.1 -- the unguarded key goes to the player. The hole: the lane's SKIP was taken wherever m3 ran, so on the desk -- where Hyprland HAS layer-shell and an inactive guide window is the product failing -- a broken tree read 0 failed, exit 77. a891291 makes the class skippable only with `HYPRLAND_INSTANCE_SIGNATURE` unset (every cage rig and `h()` unset it already), so the cage keeps its SKIP and a desk run FAILs; qa-lib-test 576/0, 573/3 over the lane's own qa-lib.sh. Gate green alone on a891291.
 

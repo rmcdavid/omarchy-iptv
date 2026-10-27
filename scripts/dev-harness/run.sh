@@ -95,10 +95,12 @@
 # (mpv's sub-delay moved). A false `windowActive` refuses with the tag
 # $QA_KEY_WINDOW_INACTIVE in the message, which is the one refusal a
 # scenario may report as SKIP (qa_key); a missing one refuses as "cannot
-# tell". UNVERIFIED on the live desktop: that Hyprland's exclusive keyboard
-# focus on the guide's layer surface reads windowActive true has been read
-# in Qt's activation path, not observed, because this lane may not open a
-# window there; the first desk run of a keyed scenario observes it.
+# tell". OBSERVED on the live desktop 2026-10-27 (QA-RESULTS "F-M3-24 at
+# the desk"): Hyprland's exclusive keyboard focus on the guide's layer
+# surface reads windowActive true -- but about a second AFTER the guide
+# reports open (false at the first focusState with open true, true 1.1 s
+# later), so a key sent in that gap is refused here, and on the desk that
+# refusal is a FAIL (F-HARNESS-60).
 #
 # Environment: OMARCHY_IPTV_PLUGIN_ROOT overrides which checkout the harness
 # loads Service.qml / Guide.qml / BarWidget.qml / bin/omarchy-iptv from
