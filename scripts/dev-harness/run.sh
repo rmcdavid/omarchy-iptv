@@ -734,7 +734,7 @@ FOCUS_TIMEOUT=${OMARCHY_IPTV_FOCUS_TIMEOUT:-5}
 # Fails CLOSED. Any answer that is not a readable "yes" refuses, because the
 # whole point is that a keystroke into an unknown surface is invisible.
 require_guide_focus() {
-  local what=$1 reply status verdict diag errfile
+  local what=$1 reply status verdict diag errfile target=nested players="" dir=$SCRATCH p c
   # The two streams are kept APART, and this is the whole finding of the first
   # review of this guard. `2>&1` here fed any diagnostic `qs` wrote on stderr
   # into json.loads, and the guard fails closed, so ONE stray line turned every
@@ -763,7 +763,19 @@ require_guide_focus() {
     echo "[run.sh] if this key is meant for the COMPOSITOR rather than the guide, pass --to-compositor" >&2
     return 1
   fi
-  verdict=$(python3 - "$reply" "$QA_KEY_WINDOW_INACTIVE" <<'PY'
+  # F-HARNESS-54 (1): what the refusal can SAY about an inactive window. Which
+  # compositor the key would go to (the desk or a nested one, the predicate
+  # harness_env acts on), and whether this harness's own player is up -- the
+  # surface that took the keyboard when the floating guide lost it under a
+  # cage (QA-RESULTS "F-M3-24"). Its pid, never its argv: the command line
+  # is read only to match this scratch's socket.
+  qa_target_nested "${WAYLAND_DISPLAY:-wayland-1}" "$REAL_RUNTIME" || target=desk
+  [[ $dir == /* ]] || dir=$PWD/$dir
+  for p in $(pgrep -x mpv 2>/dev/null); do
+    c=$(qa_cmdline "$p") || continue
+    [[ $c == *"input-ipc-server=$dir/runtime/omarchy-iptv/mpv.sock"* ]] && players="${players:+$players,}$p"
+  done
+  verdict=$(python3 - "$reply" "$QA_KEY_WINDOW_INACTIVE" "$target" "$players" <<'PY'
 import json, sys
 raw = sys.argv[1]
 try:
@@ -797,10 +809,30 @@ elif active is None:
           "(no windowActive in its reply: a harness started before F-M3-24? reap and restart it), "
           "so I cannot tell; " + where)
 elif active is not True:
-    print("no the compositor has not given the guide's WINDOW the keyboard (%s): Qt reports the window "
-          "inactive, so a key would go to whatever the compositor focused, whatever item inside the guide "
-          "holds focus. Under a compositor with no layer-shell (headless cage) the production guide window "
-          "never maps; start the harness with --window floating there; " % sys.argv[2] + where)
+    # F-HARNESS-54 (1): worded by window kind and keyboard. The cage hint
+    # belongs to the one case it fixes -- the production LAYER window on a
+    # nested compositor, which cannot map it -- and was given to a guide
+    # already floating, and to a desk FAIL, where it is wrong advice.
+    kind, target, players = d.get("window"), sys.argv[3], sys.argv[4]
+    msg = ("the compositor has not given the guide's WINDOW the keyboard (%s): Qt reports the %s window "
+           "inactive, so a key would go to whatever the compositor focused" % (sys.argv[2], kind))
+    msg += (", whatever item inside the guide holds focus" if d.get("keyboard")
+            else ", and no item inside the guide holds focus either")
+    if kind == "floating":
+        if players:
+            msg += (". The floating window is mapped and another toplevel took the keyboard: this harness's "
+                    "player is up (mpv pid %s), and a compositor that focuses its newest toplevel, as cage "
+                    "does, gave it to the player's window when that mapped" % players)
+        else:
+            msg += (". The floating window is mapped and another toplevel holds the keyboard; no player of "
+                    "this harness is up, so it is not this harness's player window")
+    elif kind == "layer" and target == "nested":
+        msg += (". Under a compositor with no layer-shell (headless cage) the production guide window never "
+                "maps; start the harness with --window floating there")
+    elif kind == "layer":
+        msg += (". This is the session's own compositor, which has layer-shell, so the open guide's layer "
+                "window should hold the keyboard: this is the guide failing to take it, not the display")
+    print("no " + msg + "; " + where)
 elif d.get("exhausted") and not d.get("keyboard"):
     print("no the focus walk gave up before it found a focused item, so I cannot tell; " + where)
 elif not d.get("keyboard"):

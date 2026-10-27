@@ -478,7 +478,11 @@ So under a cage:
   `scripts/qa-lib.sh`). "The session's own" is `qa_target_nested`'s answer
   for the keys' `WAYLAND_DISPLAY` (F-HARNESS-47): until 2026-10-26 it was
   "the signature is set", so a cage rig that inherited the owner's
-  signature read its cage keys as desk FAILs. H6b, T5a, T5b, T5d and P1c,
+  signature read its cage keys as desk FAILs. The refusal's own words follow
+  the window kind and that answer (F-HARNESS-54): the `--window floating`
+  hint only for the layer window on a nested compositor, the player's pid
+  when a floating window lost the keyboard to it, and on the desk the guide
+  named as failing. H6b, T5a, T5b, T5d and P1c,
   which assert a state a missing key would also leave, now require the state
   the key before them made, so they FAIL rather than pass when a key arrives
   and does nothing.

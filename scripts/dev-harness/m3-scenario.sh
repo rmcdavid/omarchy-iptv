@@ -305,11 +305,13 @@ if [[ -n $t5 ]]; then skip "T5d a real t closes it" "depends on $t5, which the g
 else
   t5pre=$(gf 'g["inTracks"]')
   key_sent t; kr=$?; sleep 0.4
-  if (( kr == 1 )); then skip "T5d a real t closes it" "$QA_KEY_SKIP_REASON"
+  if (( kr == 1 )); then t5="T5d's t"; skip "T5d a real t closes it" "$QA_KEY_SKIP_REASON"
   else [[ $t5pre == true && $(gf 'g["inTracks"]') == false ]] && pass "T5d a real t closes it" || fail "T5d" "before inTracks=$t5pre, after $(gf 'g["inTracks"]') mode $(gf 'g["mode"]')"; fi
 fi
 # A skipped chain leaves the picker as T4 left it, open; T6 starts from the
-# state T5d leaves, so it is closed through the IPC door, and said.
+# state T5d leaves, so it is closed through the IPC door, and said. T5d's
+# own refusal is a skipped chain too (F-HARNESS-54 (2)): it used to leave t5
+# unset, so a picker that T5b reopened stayed open into T6b.
 if [[ -n $t5 && $(gf 'g["inTracks"]') == true ]]; then
   ipc trackClose >/dev/null; sleep 0.3
   echo "   T5 skipped: the picker closed through ipc trackClose, where T5d would have left it (inTracks $(gf 'g["inTracks"]'))"
