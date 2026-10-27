@@ -1139,6 +1139,67 @@ wait_gone() {
   for ((i = 0; i < secs * 10; i++)); do [[ ! -e $p ]] && return 0; sleep 0.1; done
   return 1
 }
+# F-HARNESS-49. The shell's own helper children that can UNDO what a segment
+# is about to stage: a `cache` job (the start-up prune, queued when the cache
+# layout is ready and run when the dirs are, removes every sources/<key> no
+# record named when it was QUEUED -- an in-app add's probe directory among
+# them, which is how A2 lost its add on 2026-10-27: the start-up prune
+# race, a product finding of its own reported with F-HARNESS-49) and
+# `state ... mode` (D-SRC-49: after every save that LANDS the helper puts
+# the state folder back to 0700 -- B19's and B30's 0500 among them, which is
+# how B19 lost its hold). Read from /proc/<shell>/task/*/children by EXACT
+# argv -- argv[1] this tree's helper, argv[2] the verb -- for the recorded
+# shell pid only, never by a pattern over a command line (parallel rule 3).
+# Prints the verbs it found ("cache", "mode"), nothing when there is none.
+helper_jobs() {
+  python3 -c '
+import os, sys
+shell, helper = sys.argv[1], os.path.realpath(sys.argv[2])
+kids = []
+try:
+    tids = os.listdir("/proc/%s/task" % shell)
+except OSError:
+    tids = []
+for tid in tids:
+    try:
+        kids += open("/proc/%s/task/%s/children" % (shell, tid)).read().split()
+    except OSError:
+        pass
+found = []
+for kid in kids:
+    try:
+        argv = [a.decode("utf-8", "replace") for a in open("/proc/%s/cmdline" % kid, "rb").read().split(b"\0") if a]
+    except OSError:
+        continue
+    if len(argv) < 3 or os.path.realpath(argv[1]) != helper:
+        continue
+    if argv[2] == "cache":
+        found.append("cache")
+    elif argv[2] == "state" and argv[-1] == "mode":
+        found.append("mode")
+print(" ".join(sorted(found)))' "${SHELL_PID:-0}" "${OMARCHY_IPTV_PLUGIN_ROOT:-$PLUGIN_ROOT}/bin/omarchy-iptv" 2>/dev/null
+}
+# A start SETTLED: the dirs ready, no state save parked or in flight, and no
+# helper job above running -- five reads in a row, 0.1 s apart, because a
+# landed save asks for `state mode` from a turn of its own and one quiet
+# read can fall between the two. start_shell returns at stateLoaded and
+# cacheReady, which is BEFORE the start-up init has made the dirs ready and
+# so before the prune has run and before the start's own save has landed
+# and been repaired. Bounded at 15 s, and says when it gave up (rule 3).
+wait_settled() {
+  local i quiet=0 ps
+  for ((i = 0; i < 150; i++)); do
+    ps=$(ipc pointerState)
+    if [[ $(qa_json_field "d['dirsReady'] and not d['stateSavePending'] and d['stateSavesInFlight'] == 0" "$ps") == true && -z $(helper_jobs) ]]; then
+      quiet=$((quiet + 1)); (( quiet >= 5 )) && return 0
+    else
+      quiet=0
+    fi
+    sleep 0.1
+  done
+  echo "   gave up after 15 s waiting for the start to settle (helper jobs: [$(helper_jobs)])"
+  return 1
+}
 LOG="$SCRATCH/harness.log"
 LOG_MARK=0
 # A missing log (the first start in a fresh harness directory) is mark 0:
@@ -1854,8 +1915,21 @@ shell_arm() {
   # form's own guide URL and nothing else. Saved sources, none active, the
   # marker landed (the seed).
   form_on() { sj "','.join(sorted(s['key'] for s in d['sources'] if s.get('epgUrl') == '$FORM_EPG')) or 'none'"; }
+  # F-HARNESS-49: each add waits for the start to SETTLE (wait_settled). A2
+  # was red on 2026-10-27 at idle (`active: form:none`): the add's probe
+  # wrote into sources/<D> while the start-up `cache prune`, queued before
+  # the add with the two seeded keys, ran at dirsReady and removed that
+  # directory between the probe's temporary file and its rename
+  # (FileNotFoundError in the harness log, the probe failed, the add was
+  # dropped). Not a regression: the prune has run at dirsReady with a keep
+  # list taken at queue time since f138740 (2026-09-13), and the same rig
+  # deletes an added source's cache on cc35557 (0.15.0) and on dev alike.
+  # That race is a product finding of its own, reported with F-HARNESS-49
+  # for the owner to decide; A observes R21b, the CLI
+  # value refused and the form's own guide URL kept, in a settled session.
   seed "" migrated
   start_shell --playlist none --epg "$EPG" --source-key "" || true
+  wait_settled || true
   res=$(ipc addSource "$D" "" "")
   wait_for "$KD" 20 svc "['activeSourceKey']" >/dev/null || true
   wait_for no 10 stored_has epgUrl >/dev/null || true
@@ -1865,6 +1939,7 @@ shell_arm() {
      "ok:true active:$KD on:none reports:epgUrl:retired epgUrl:no stored:$KD"
   seed "" migrated
   start_shell --playlist none --epg "$EPG" --source-key "" || true
+  wait_settled || true
   res=$(ipc addSource "$D" "$FORM_EPG" "")
   wait_for "$KD" 20 svc "['activeSourceKey']" >/dev/null || true
   wait_for no 10 stored_has epgUrl >/dev/null || true
@@ -2510,11 +2585,33 @@ PYSEED
   # the directory 0700 again (ensure_private_dir). The first live run of
   # this segment took `w` away inside that window and saw no failure
   # (`held:false merged:0`). So: after dirsReady.
-  wait_for true 20 pf "['dirsReady']" >/dev/null || true
+  # F-HARNESS-49 (2026-10-27): and after the start SETTLES (wait_settled),
+  # because dirsReady stopped being enough. D-SRC-49 (9203141, the P2/P3
+  # sweep) runs the helper's `state mode` after every save that LANDS, and
+  # it puts the state folder back to 0700 -- by design: the folder is the
+  # plugin's own, and `state init` at every start and every helper write
+  # already did the same. Observed at idle on dev 45bded9 (the shell's
+  # children from /proc, the folder's chmods by inotify): the `state mode`
+  # the start's own landed save asked for began 340 ms before this chmod,
+  # was still starting under the start-up load when the chmod landed, and
+  # put 0700 back 75 ms after it; the shell logged "state.json's mode was
+  # repaired after a save (file kept, folder changed)", the in-app save
+  # LANDED, and B19 read `held:false merged:0`: no merge was exercised at
+  # all, and the outcome it printed was the outcome of no hold. A repair
+  # landing later, mid-window, is the `merged:2`, `:1`, `:1` the lanes read
+  # under load on 2026-10-26. A save that fails asks for no repair, so once
+  # nothing is in flight at the chmod the hold stands until the helper's own
+  # write gives the folder back. And the hold is the PREMISE, checked on its
+  # own below: without it B19 has observed nothing, and says so.
+  wait_settled || true
+  pre19="folder:$(stat -c %a "$(dirname "$STATE")") jobs:[$(helper_jobs)]"
+  repairs0=$(log_since 'mode was repaired after a save')
   chmod 0500 "$(dirname "$STATE")"
   res=$(ipc updateSource "$KC" '{"label": "in-app-one"}')
   wait_for true 10 pf "['stateSaveFailed']" >/dev/null || true
   held="$(pf "['stateSaveFailed']")"
+  premise="held:$held folder:$(stat -c %a "$(dirname "$STATE")") repaired:+$(( $(log_since 'mode was repaired after a save') - repairs0 ))"
+  echo "   B19 premise: settled with $pre19; after the in-app change $premise"
   python3 -c 'import json, sys; p = sys.argv[1]; d = json.load(open(p)); d["favorites"] = d.get("favorites", []) + ["t:h3.uk"]; open(p, "w").write(json.dumps(d) + "\n")' "$STATE"
   wait_for 1 10 merges >/dev/null || true
   python3 -c 'import json, sys; p = sys.argv[1]; d = json.load(open(p)); d["favorites"] = [f for f in d.get("favorites", []) if f != "t:h3.uk"]; open(p, "w").write(json.dumps(d) + "\n")' "$STATE"
@@ -2529,9 +2626,17 @@ PYSEED
   stop_shell
   start_shell --playlist none --source-key "$KA" || true
   sleep 0.5
+  outcome="edits:$(qa_json_field "d['ok']" "$res")/$(qa_json_field "d['ok']" "$res2") helper:$hrc merged:$merged $file1 restart:$(qa_json_field "','.join(sorted(s['label'] for s in d))" "$(ipc sources)")/$(sj "','.join(d['favorites']) or '-'")"
+  # The premise first, and the outcome only on it. One assertion either way
+  # (the fail line is the ck's other branch, as the probe's fallback lines
+  # are the I lines'), so the floor's recipe counts one.
+  if [[ $premise == "held:true folder:500 repaired:+0" ]]; then
   ck "B19 R24a live: an in-app change HELD by a failed save, two hand edits in place inside that window (a favourite added, then removed), a hand-run helper write, a second in-app change -- the file keeps BOTH in-app changes and the helper's favourite, the removed one stays removed, every foreign write was merged, and a restart stands on all of it" \
-     "held:$held edits:$(qa_json_field "d['ok']" "$res")/$(qa_json_field "d['ok']" "$res2") helper:$hrc merged:$merged $file1 restart:$(qa_json_field "','.join(sorted(s['label'] for s in d))" "$(ipc sources)")/$(sj "','.join(d['favorites']) or '-'")" \
-     "held:true edits:true/true helper:0 merged:3 labels:A=in-app-two,C=in-app-one favs:t:helper.uk restart:in-app-one,in-app-two/t:helper.uk"
+     "$outcome" \
+     "edits:true/true helper:0 merged:3 labels:A=in-app-two,C=in-app-one favs:t:helper.uk restart:in-app-one,in-app-two/t:helper.uk"
+  else
+    fail "B19 R24a live: PREMISE NOT ESTABLISHED -- the in-app change's save was not held" "got [$premise], want [held:true folder:500 repaired:+0]: the folder was writable again when the save ran, so no merge was exercised and the outcome [$outcome] grades nothing"
+  fi
   stop_shell
   fi   # --only B19 ends
 
@@ -2796,19 +2901,31 @@ print(json.dumps(d))' "$1" "$KA" "$2" "$3"
   # Issued inside stateFile's onLoaded, that write raised no `saved`: the
   # session read inFlight 1 and saveFailed true for good (lane W, 16 of 16,
   # and live on dev). Issued from a turn of its own, it is reported.
+  # F-HARNESS-49, B19's sibling (rule 15): the same 0500 under a running
+  # shell, the same D-SRC-49 repair able to undo it. r26_start's 0.5 s after
+  # dirsReady outlasted the start's `state mode` at idle; nothing bounded
+  # it under load. So: settled first, and the hold is the premise.
   seed_r26 dir; r26_start
+  wait_settled || true
+  repairs0=$(log_since 'mode was repaired after a save')
   chmod 0500 "$SDIR"
   res=$(ipc updateSource "$KC" '{"label": "app-fail"}')
   wait_for true 10 pf "['stateSaveFailed']" >/dev/null || true
   held=$(pf "['stateSaveFailed']")
+  premise="held:$held folder:$(stat -c %a "$SDIR") repaired:+$(( $(log_since 'mode was repaired after a save') - repairs0 ))"
   chmod 0700 "$SDIR"
   python3 "$PLUGIN_ROOT/bin/omarchy-iptv" state --state-dir "$SDIR" favorite add t:helper.uk >/dev/null 2>&1; hrc=$?
   wait_for false 10 pf "['stateSaveFailed']" >/dev/null || true
   for ((i = 0; i < 30; i++)); do [[ $(pf "['stateSavesInFlight']") == 0 ]] && break; sleep 0.1; done
   sleep 1.0
+  outcome="edit:$(okf "$res") helper:$hrc inFlight:$(pf "['stateSavesInFlight']") saveFailed:$(pf "['stateSaveFailed']") disk:$(r26_info "$STATE")"
+  if [[ $premise == "held:true folder:500 repaired:+0" ]]; then
   ck "B30 R26b (D-SRC-46, INLOAD): a failed save held, the folder given back, a hand-run helper write: the merge's save, asked for inside that load, is issued from a turn of its own and REPORTED -- nothing in flight, the failure cleared, both on disk" \
-     "edit:$(okf "$res") held:$held helper:$hrc inFlight:$(pf "['stateSavesInFlight']") saveFailed:$(pf "['stateSaveFailed']") disk:$(r26_info "$STATE")" \
-     "edit:true held:true helper:0 inFlight:0 saveFailed:false disk:A=seed,C=app-fail,favs=t:seed.uk+t:helper.uk"
+     "$outcome" \
+     "edit:true helper:0 inFlight:0 saveFailed:false disk:A=seed,C=app-fail,favs=t:seed.uk+t:helper.uk"
+  else
+    fail "B30 R26b (D-SRC-46, INLOAD): PREMISE NOT ESTABLISHED -- the in-app change's save was not held" "got [$premise], want [held:true folder:500 repaired:+0]: no load was asked to merge, and the outcome [$outcome] grades nothing"
+  fi
   stop_shell
 
   # B31: IDLE (R26d) -- no periodic reload: 30 s of an idle shell reads the
