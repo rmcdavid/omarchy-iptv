@@ -1029,6 +1029,20 @@ def write_status_quietly(path: str, status: dict[str, Any]) -> None:
         log("could not write %s: %s" % (os.path.basename(path), io_error))
 
 
+def cache_unwritable(path: str, io_error: OSError) -> HelperError:
+    """D-SRC-69 (2026-10-27): a fetch's own cache file could not be written,
+    as a refusal with a code rather than an OSError left to main()'s
+    catch-all. That catch-all answers `internal` with the exception's text,
+    and the Sources result line used to show it: `FileNotFoundError: [Errno
+    2] No such file or directory: '<cache path>/.tmp-channels.json-<hex>' ->
+    ...` when the start-up prune removed an add's folder between the
+    temporary file and its rename. The sentence names the file's BASE name
+    and the error's own words, never a path (R12): the folder is the user's
+    cache, and a path carries their home directory into the reply."""
+    reason = io_error.strerror or type(io_error).__name__
+    return HelperError("cache_unwritable", "could not write %s in the source's cache folder (%s)" % (os.path.basename(path), reason))
+
+
 # ------------------------------------------------------------ playlist
 
 def url_from(args: argparse.Namespace) -> str:
@@ -1089,7 +1103,10 @@ def cmd_playlist(args: argparse.Namespace) -> int:
                 "count": len(parsed["channels"]),
                 "channels": parsed["channels"],
             }
-            write_json_atomic(channels_path, document)
+            try:
+                write_json_atomic(channels_path, document)
+            except OSError as io_error:
+                raise cache_unwritable(channels_path, io_error) from None
             document = None
         finally:
             # D-M3U-3: the limit covers the fetch, the parse and channels.json
@@ -1126,7 +1143,15 @@ def cmd_playlist(args: argparse.Namespace) -> int:
             "stale": False,
             "error": None,
         }
-        write_json_atomic(status_path, status)
+        # D-SRC-69, the same refusal for the second file: channels.json is
+        # written, but a cache without its status is not one the service can
+        # judge, so the run fails as the first write's failure does.
+        try:
+            write_json_atomic(status_path, status)
+        except OSError as io_error:
+            error = cache_unwritable(status_path, io_error)
+    if error is None:
+        assert parsed is not None
         # The upgrade path of ARCHITECTURE.md decision 6. A state file written
         # under id scheme 1 still names its favorites by a hash of the
         # credentialed stream URL, and this is the one place the helper holds

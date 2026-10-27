@@ -13087,6 +13087,12 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
             M.probeWaitsFor(["prune", "--keep"], KNEW), M.probeWaitsFor(["remove", "--key", KNEW], KNEW), M.probeWaitsFor(["remove", "--key", KA], KNEW),
             M.probeWaitsFor(["epg-clear", "--key", KNEW], KNEW), M.probeWaitsFor(["migrate", "--key", KNEW], KNEW), M.probeWaitsFor(null, KNEW), M.probeWaitsFor(prune, "")]
   }, [true, false, false, true, true, false, false, false, false, false])
+  checkCall("D-SRC-69 (B): Model.statusReason -- `internal` (the helper's catch-all for a bug) and `cache_unwritable` (a fetch that could not write its cache) are sentences; the exception's text, with its path, is never the reason", () => {
+    const internal = { ok: false, kind: "playlist", error: { code: "internal", message: "FileNotFoundError: [Errno 2] No such file or directory: '/run/user/1000/c/sources/" + KNEW + "/.tmp-channels.json-ab12cd34'" } }
+    const unwritable = { ok: false, kind: "playlist", error: { code: "cache_unwritable", message: "could not write channels.json in the source's cache folder (No such file or directory)" } }
+    return [M.statusReason(internal), M.statusReason(unwritable), M.statusReason(Object.assign({}, internal, { kind: "epg" })),
+            M.lastErrorAfterStatus("", "", internal)]
+  }, ["Helper failed unexpectedly", "Could not write the cache", "Helper failed unexpectedly", "Helper failed unexpectedly"])
 
   checkCall("D-SRC-69: an add made between cacheReady and dirsReady whose probe COMMITS before the dirs are ready -- the start-up prune, run at dirsReady, keeps the new record's folder and names it active; nothing removes it", () => {
     const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), "lag", { dirsLater: true })
@@ -13203,6 +13209,14 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     return { early, after: [h.root.probing, h.ids.sourceProbeProc.running], finished: finished(h), queued: h.root.cacheQueue.map(j => j.args.join(" ")) }
   }, { early: [true, 0], after: [false, false], finished: [[false, false, "Helper timed out"]], queued: ["remove --key " + KNEW] })
 
+  checkCall("D-SRC-69 (B): a probe the helper answered with `internal` -- a bug, its message an exception -- reports one sentence on the result line, never the exception's text or its path", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    add(h)
+    h.probeExit(JSON.stringify({ ok: false, kind: "playlist", error: { code: "internal", message: "FileNotFoundError: [Errno 2] No such file or directory: '/run/user/1000/x/cache/omarchy-iptv/sources/" + KNEW + "/.tmp-channels.json-ab12cd34' -> '/run/user/1000/x/channels.json'" } }))
+    h.drain()
+    const reason = finished(h)[0][2]
+    return [reason, /Error|Errno|\/run\/|tmp-/.test(reason)]
+  }, ["Helper failed unexpectedly", false])
 
   // ---- R21e (D-SINK-19 round 11): THE MIGRATION, through Service.qml ----
   //

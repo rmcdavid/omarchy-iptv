@@ -342,6 +342,21 @@ function statusReason(status) {
     no_source: "No playlist configured",
     not_implemented: "Helper command not implemented",
     no_output: "Helper produced no output",
+    // D-SRC-69 (2026-10-27). `internal` is the helper's catch-all for a BUG
+    // (main() in the helper's CLI part): its message is an exception's type
+    // and text -- `FileNotFoundError: [Errno 2] No such file or directory:
+    // '<runtime path>/...'` reached the Sources result line when the
+    // start-up prune removed an add's folder mid-write. Redacted, but an
+    // exception is not a sentence, and every surface that shows a helper's
+    // reason comes through this function (the playlist and guide-data
+    // banners and notifications, the probe's result line, a play failure,
+    // the rewind line), so it is mapped once, here. The traceback stays in
+    // the journal (the service logs the helper's stderr, redacted).
+    internal: "Helper failed unexpectedly",
+    // D-SRC-69: a fetch that could not write its cache files (the folder
+    // removed or unwritable, the disk full), named by the helper instead of
+    // leaving the OSError to main()'s catch-all.
+    cache_unwritable: "Could not write the cache",
     not_running: "mpv is not running",
     unknown_channel: "Unknown channel",
     ipc_error: "mpv did not answer",
