@@ -1311,6 +1311,14 @@ only because `Model.entryWith` copies them.
    otherwise unchanged).
 7. Once per start, after `cacheReady`: queue `cache prune --cache-dir C
    --keep <every key> --active <activeSourceKey> --epg-max-age 86400`.
+   **[Amended 2026-10-27, D-SRC-69: the prune is QUEUED here and its list
+   is decided when it RUNS, at dirsReady at the earliest -- every record and
+   the active key of that moment, plus the folder of a probe not yet handled
+   (`Model.pruneArgs`). Until then the list was this step's, and an in-app
+   add made between cacheReady and dirsReady lost its folder to the prune
+   (mid-write the add was dropped; once committed, the added, active source
+   showed 0 channels for the session). ARCHITECTURE.md section 8 item 17
+   has the guarantee a probe in flight now has.]**
 
 Helper invocations of `playlist`, `epg` (both modes) and `play --id` use
 `--cache-dir root.activeCacheDir` and return early while it is `""`.
@@ -1354,7 +1362,12 @@ the playing channel's group is absent (`Model.zapRing` -> `nextInGroup([])`
 collectors, redaction (`Model.redactUrls` on stderr) and 180 s watchdog as
 `playlistProc` (`Service.qml:965-977, 833-846`), so a running refresh of the
 active source never blocks adding another one and vice versa. One probe at a
-time (`busy`). Command: `Model.playlistProbeArgv(helperPath, sourceCacheDir(cacheDir, key))`,
+time (`busy`). **[Amended 2026-10-27, D-SRC-69: a probe asked for while a
+cache job decided before it RUNS and could take its folder -- a prune that
+does not keep it, a removal of that key (`Model.probeWaitsFor`) -- is held
+until that job exits: `probing` is true and the helper starts at the job's
+exit; the watchdog bounds the wait, and a cancel ends a held probe at once.
+In the usual case nothing runs and the probe starts as before.]** Command: `Model.playlistProbeArgv(helperPath, sourceCacheDir(cacheDir, key))`,
 with `rec.url` in the process environment as `OMARCHY_IPTV_URL`
 (`sourceProbeProc.environment = Model.fetchEnvironment(rec.url)` immediately
 before `running = true`) and not on the command line -- it rode argv as
@@ -1379,7 +1392,17 @@ One `cacheProc` `Process` plus a FIFO of `{ args, onDone }` (`migrate`,
 `remove`, `prune`); the next job starts from `onExited`. Output is parsed
 with `parseHelperStatus(text, "cache")`; failures are `console.warn`ed with
 the code and action only. Nothing waits on the queue except `cacheReady`
-(migrate).
+(migrate). **[Amended 2026-10-27, D-SRC-69: what a job deletes is decided
+when it runs (`Model.cacheJobArgs`, from `runNextCacheJob`), not when it
+is queued. A prune is queued as `["prune"]` and built from the state, the
+active key and the probe in flight of that moment; a `remove --key K` is
+dropped when a probe is writing into K or started into K after the removal
+was asked for (each job carries `sourceProbeSeq` at its queue, each key the
+count of the last probe started into it), and a removal asked for by a
+probe's own exit still runs (SR7, SR23). `migrate` and `epg-clear` run as
+queued: neither deletes what a probe writes. The guarantee is stated in
+ARCHITECTURE.md section 8 item 17 and the rule-15 search is recorded with
+D-SRC-69 in QA-RESULTS.]**
 
 ### 4.8 IPC
 
@@ -1578,7 +1601,9 @@ edit the control's copy and the next bound write would overwrite it.
    plugin owns and one it does not own that a URL only passes through.]**
 9. Concurrency bounds: one probe, one playlist refresh, one EPG run, one
    cache job at a time; each helper under the 180 s watchdog; at most 50
-   sources; `cache prune` argv carries at most 50 keys.
+   sources; `cache prune` argv carries at most 50 keys. **[2026-10-27,
+   D-SRC-69: at most 51 -- the 50 records and, during a URL edit at the
+   cap, the new folder its probe writes into, which the prune now keeps.]**
 
 7. The shell process never reads the clipboard, and no element it
    instantiates subscribes to it (D-CLIP-1, added 2026-10-11). Every form
