@@ -13315,6 +13315,52 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### D-PLY-32: a player start refused on this machine marks no channel (lane-ply32, 2026-10-28, 8a3de81..e99cae6)
+
+The owner's word: "Please fix 32".
+
+**The reading, proven.** A failed `player start|restart` reply is no verdict on the stream. A stream that fails arrives in one of two ways: as an ok reply whose `firstLoad.state` is "failed", or as the socket's end judged by `Model.endedReport`.
+
+Every code `player start` can refuse with was read in the helper: player_target, player_runtime, check_socket_path, acquire_lock, check_seq, adopt_or_spawn, apply_channel, main() and the stub. The shell adds `no_output` and `error`. Only `unsupported_scheme` (the entry's own URL scheme) is about the channel. The parser already skips such lines, so only a foreign cache carries one.
+
+`tls_unverified` is read off the PLAYER before anything about the channel is sent.
+
+`ipc_error` cannot be caused by a channel's data. Measured on mpv 0.41.0, windowless on a private socket: the three header properties and loadfile answered `success` for NUL, C0, U+0085, a comma, 70,000 characters and 200 header fields.
+
+**The change.** `Model.playerStartFailure(code)` lists the one channel code; every other code reads local. That makes it a superset of PLAY_UNREADABLE, HELPER_CANNOT_TELL and PROBE_LOCAL_REFUSALS by construction, and a check holds it.
+
+handlePlayerResult's refusal tail sends a local refusal to `raiseLocalPlayFailure`. That function records lastError and, as before, the cleared intent and the retired session record. It marks nothing and tells "Could not start playback" (`-r 74021`, the stream failure's body) once per episode.
+
+**Tests.**
+
+| tree | node | python | qml |
+|---|---|---|---|
+| 8473655 (dev) | 3065 | 1643 | 80 |
+| 8a3de81 | 3071 | 1643 | 80 |
+| 187356d | 3077 | 1643 | 80 |
+| e99cae6 | 3077 | 1643 | 80 |
+
+The 12 new checks were run against dev 8473655: 11 red. Dev marks the channel, writes `failed mark`, sets lastFailedId and posts "Stream failed" for all 16 local codes driven (the 4 local-refusals.json replies and 12 more); 10 refused channels gave 10 cards. The 12th check is the guard that genuine failures still mark: unsupported_scheme, a watched first load, and an end-file error at the socket's end. It is green on both.
+
+14 mutants of the change, each red.
+
+The service harness gains the socket observer's Component (its connect fails unless told otherwise) and the timers and slots handlePlayerGone stops (F-HARNESS-63).
+
+**Live.** Nested cage, private bus, no desktop. Coredump journal 81 -> 81 throughout.
+- player-scenario, dev (`--baseline 8473655`) and tree: 77 / 9 each, the same 9 window checks, P7 and P13 green on both, identical notification logs. Transcripts player-20261028-061644-2247570 and -061914-2255379.
+- A lane probe of the fix itself: a folder at the player's lock, three channels played, then repaired, played and broken again.
+  - Tree: 13 / 0. One "Could not start playback" card for three channels, a second after the start that succeeded, no mark in the service or in failed.json.
+  - Dev: 5 / 8. Three, then four, "Stream failed" cards, and the channels marked in failed.json.
+  - Transcripts ply32probe-20261028-061608-2245962 and -061533-2244302.
+
+**Rule 15.** playerFirstLoadFailed is reached only from an ok reply (an end-file error on its own entry is a stream verdict). The zap path never marks. The health respawn and the retry and relaunch timers reach the fixed tail. PO-3's markDeadSession cannot mark a local refusal, because the tail retires the record (tested).
+
+A death with NO end-file still marks and says "Stream failed". In the harness: "Playback stopped unexpectedly", or a VO error line. 4.8's table designs it, and no code tells a local death from a stream-caused one: **D-PLY-33**. The player lock's `busy` reads "Another fetch is running": **D-PLY-34**.
+
+**Marks already written** clear when the channel is played again, or after 14 days. failed.json carries no reason, so they cannot be told apart; nothing is migrated.
+
+**The recheck (same day).** MERGEABLE, with two test commits. The classification re-read in player_start and everything it calls (only `unsupported_scheme` is about the entry; two channel-specific corners -- a lone surrogate in a foreign cache's name or URL, which MpvIpc's encode turns into `internal` -- now read local, the cheap direction). Driven through Service.qml's own functions over local-refusals.json: each start/restart refusal for five channels in a row, a good start, the refusal again -- branch: no mark, no `failed mark`, one 74021 card, a second after the good start; dev 8473655: six Stream failed cards and six marks each. A firstLoad `failed` ok-reply in the same session still marks and says Stream failed. Its mutant R1 (play() resetting the episode, so every zap told again) survived the lane's suite; 15297cf plays ten channels through Service.play() and pins one card and no marks (red on dev and under R1). Eight mutants of its own, five red, R1 fixed, two near-equivalent and stated. Local deaths through handlePlayerGone confirm **D-PLY-33**. It also found `too_large` reading "Source too large" on a player verb (folded into **D-PLY-34**) and the watchdog-vs-start-bounds question (**D-PLY-35**, unmeasured). The lane's two player-scenario cage runs (dev and tree) read 77/9 with identical check lists and P7 passing on both; no cage of its own was needed. Gate green alone on 9723684 (node 3078, python 1643).
+
 ### D-SRC-73, D-PLY-30, D-DOC-27: one answer for a folder the helper cannot use, and a sentence for it (lane-p3trio, 2026-10-27, 0fe1deb..8a33905)
 
 The owner's word was "Fix those three P3s too". There is one commit per finding. check.sh was green on each commit's own tree, run alone.
