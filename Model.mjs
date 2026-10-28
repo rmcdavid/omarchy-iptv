@@ -111,12 +111,12 @@ export {
 } from "./model/logos.mjs"
 export {
   stopEscalation, healthTick, playFork, playForkBlind, zapArgs,
-  helperCannotTell, playFailureVerdict, replyTarget, reconcileVerdict,
-  sessionIntentRepair, playerOrphanCheckArgv, playerStash, tlsPropertiesSafe,
-  playerTls, tlsReloadDisposition, playerTlsVerdict, parsePlayerProbe,
-  parsePlayerEvent, endedVerdict, probeVerdict, playerDeathKind,
-  playerSessionFollowUp, playerRouterState, pushPlayerLog, routePlayerEvent,
-  rememberEntryOwner, channelForEnd, endedReport
+  helperCannotTell, playFailureVerdict, playerStartFailure, replyTarget,
+  reconcileVerdict, sessionIntentRepair, playerOrphanCheckArgv, playerStash,
+  tlsPropertiesSafe, playerTls, tlsReloadDisposition, playerTlsVerdict,
+  parsePlayerProbe, parsePlayerEvent, endedVerdict, probeVerdict,
+  playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
+  routePlayerEvent, rememberEntryOwner, channelForEnd, endedReport
 } from "./model/player.mjs"
 export {
   MPV_HANDOFF_TEXT, MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase,

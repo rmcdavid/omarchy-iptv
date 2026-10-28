@@ -5010,6 +5010,57 @@ checkCall("play failure: a refusal out of retries is still a refusal, never a fa
 checkCall("play failure: a user stop stops the retrying", () => failed("ipc_error", { userStopped: true }), "failed")
 checkCall("play failure: anything the table does not name is a failed switch, and the label goes back", () => [failed("unsupported_scheme"), failed(""), failed(null)], ["failed", "failed", "failed"])
 
+// ---- D-PLY-32 (2026-10-28): what a FAILED `player start|restart` says about the channel ----
+//
+// Every code the helper's `player start` can refuse with, read in bin/helper
+// (player_target, player_runtime, check_socket_path, acquire_lock,
+// check_seq, adopt_or_spawn, apply_channel, main(), the stub) plus the
+// shell's own (`no_output`, parseHelperStatus's `error`). Only the entry's
+// own URL scheme is about the channel; everything else was refused before
+// the stream was contacted. Red on dev 8473655 (no such function).
+checkCall("D-PLY-32: playerStartFailure -- every code `player start|restart` can answer is LOCAL except `unsupported_scheme`, the one refusal about the channel's own entry",
+  () => ["no_cache", "unknown_channel", "folder_unusable", "runtime_unwritable", "socket_path_blocked", "busy",
+         "superseded", "mpv_missing", "spawn_failed", "no_socket", "tls_unverified", "ipc_error", "internal",
+         "too_large", "helper_damaged", "no_output", "error", "not_implemented", "unsupported_scheme"].map(c => c + ":" + Model.playerStartFailure(c)),
+  ["no_cache:local", "unknown_channel:local", "folder_unusable:local", "runtime_unwritable:local", "socket_path_blocked:local", "busy:local",
+   "superseded:local", "mpv_missing:local", "spawn_failed:local", "no_socket:local", "tls_unverified:local", "ipc_error:local", "internal:local",
+   "too_large:local", "helper_damaged:local", "no_output:local", "error:local", "not_implemented:local", "unsupported_scheme:channel"])
+checkCall("D-PLY-32: playerStartFailure -- a code nobody has classified yet, an empty one, null, undefined and a number read local: marking is the costly direction",
+  () => [Model.playerStartFailure("a_code_from_next_year"), Model.playerStartFailure(""), Model.playerStartFailure(null),
+         Model.playerStartFailure(undefined), Model.playerStartFailure(7), Model.playerStartFailure("UNSUPPORTED_SCHEME")],
+  ["local", "local", "local", "local", "local", "local"])
+// One notion of "local": the three lists that already say a code is this
+// machine's (the zap's PLAY_UNREADABLE, the status branch's
+// HELPER_CANNOT_TELL, the probe's PROBE_LOCAL_REFUSALS) are read from the
+// parts that declare them, and none of their codes may read "channel" here.
+checkCall("D-PLY-32: one notion of local -- no code on PLAY_UNREADABLE, HELPER_CANNOT_TELL or PROBE_LOCAL_REFUSALS reads \"channel\", and the channel list is the one code",
+  () => {
+    const P = require("../model/player.mjs"), S = require("../model/sources.mjs")
+    const lists = { PLAY_UNREADABLE: P.PLAY_UNREADABLE, HELPER_CANNOT_TELL: P.HELPER_CANNOT_TELL, PROBE_LOCAL_REFUSALS: S.PROBE_LOCAL_REFUSALS }
+    const out = {}
+    for (const k in lists) out[k] = [Array.isArray(lists[k]) && lists[k].length > 2, lists[k].filter(c => Model.playerStartFailure(c) !== "local")]
+    out.channel = P.PLAYER_START_CHANNEL_REFUSALS
+    return out
+  },
+  { PLAY_UNREADABLE: [true, []], HELPER_CANNOT_TELL: [true, []], PROBE_LOCAL_REFUSALS: [true, []], channel: ["unsupported_scheme"] })
+checkCall("D-PLY-32: notifyArgv localPlayFailure -- its own title, mpvMissing's glyph, its own replace-id 74021, and the stream failure's body word for word (the channel that did not play, then the reason)",
+  () => {
+    const p = { name: "Sky Sports", reason: "Could not write the player's runtime folder" }
+    const a = Model.notifyArgv("localPlayFailure", p)
+    const s = Model.notifyArgv("streamFailed", p)
+    return [a.slice(0, 9), a[9], a[a.length - 1] === s[s.length - 1], a[a.length - 1]]
+  },
+  [["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", Model.GLYPHS.tvOff, "-r", "74021"], "Could not start playback", true,
+   "\u201cSky Sports\u201d did not play" + Model.SEP + "Could not write the player's runtime folder"])
+checkCall("D-PLY-32: notifyArgv localPlayFailure -- through the same sanitising path: a hostile name is quoted and cleaned, a URL in the reason keeps its host only, no reason is no tail",
+  () => [Model.notifyArgv("localPlayFailure", { name: "--urgency=critical", reason: "-r 1" }).slice(-1)[0],
+         Model.notifyArgv("localPlayFailure", { name: "X", reason: "Failed to open https://u:p@h.test/live/x.m3u8?t=1." }).slice(-1)[0],
+         Model.notifyArgv("localPlayFailure", { name: "X" }).slice(-1)[0]],
+  ["\u201curgency=critical\u201d did not play" + Model.SEP + "-r 1", "\u201cX\u201d did not play" + Model.SEP + "Failed to open h.test.", "\u201cX\u201d did not play"])
+checkCall("D-PLY-32: the new replace-id is no other notification's (74019 stays retired)",
+  () => { const ids = Object.values(Model.NOTIFY_IDS); return [Model.NOTIFY_IDS.localPlayFailure, ids.filter(v => v === 74021).length, ids.length === new Set(ids).size, ids.indexOf(74019)] },
+  [74021, 1, true, -1])
+
 // replyTarget: who the reply is ABOUT. Both rememberEntry call sites passed
 // the shell's nowPlaying, which in a burst is the intent current when the
 // REPLY landed - the exact case the entry ring exists for.

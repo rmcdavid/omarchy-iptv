@@ -417,6 +417,8 @@
         "helperCannotTell",
         "PLAY_RETRYABLE",
         "playFailureVerdict",
+        "PLAYER_START_CHANNEL_REFUSALS",
+        "playerStartFailure",
         "replyTarget",
         "reconcileVerdict",
         "sessionIntentRepair",

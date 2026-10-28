@@ -352,7 +352,12 @@ var NOTIFY_IDS = {
   // D-SRC-33 (2026-10-24): a merge of another program's write kept THEIR
   // version of a field or source over an in-app change that was not yet
   // saved (Model.mergeConflictNotice). Told once per merge.
-  mergeConflict: 74020
+  mergeConflict: 74020,
+  // D-PLY-32 (2026-10-28): a `player start|restart` refused on THIS machine
+  // (Model.playerStartFailure "local"): the runtime folder, the lock, the
+  // plugin's own files, the cache. Its own id, not streamFailed's, because
+  // it blames no channel; told once per episode (Service.qml).
+  localPlayFailure: 74021
 }
 
 // Long enough to cover a first-load failure and the user's reaction, short

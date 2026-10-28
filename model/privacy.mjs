@@ -256,6 +256,13 @@ function notifyArgv(event, params) {
   var reason = scrubUrls(str(p.reason))
   if (event === "streamFailed") {
     spec = { title: "Stream failed", body: QUOTE_OPEN + name + QUOTE_CLOSE + " did not play" + (reason !== "" ? SEP + reason : ""), glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.streamFailed }
+  } else if (event === "localPlayFailure") {
+    // D-PLY-32: the same body as a stream failure -- the channel is what did
+    // not play, the reason is why -- under a title that blames no stream,
+    // because this machine refused before the stream was contacted
+    // (Model.playerStartFailure "local"). The glyph is mpvMissing's, the
+    // other local reason a player cannot start.
+    spec = { title: "Could not start playback", body: QUOTE_OPEN + name + QUOTE_CLOSE + " did not play" + (reason !== "" ? SEP + reason : ""), glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.localPlayFailure }
   } else if (event === "playlistRefreshed") {
     spec = { title: "Playlist refreshed", body: pluralChannels(p.channelCount) + " in " + formatCount(p.groupCount) + (Number(p.groupCount) === 1 ? " group" : " groups"), glyph: GLYPHS.refresh, urgency: "low", id: NOTIFY_IDS.playlistRefreshed }
   } else if (event === "playlistError") {

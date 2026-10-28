@@ -160,6 +160,66 @@ function playFailureVerdict(code, context) {
   return "failed"
 }
 
+// D-PLY-32 (2026-10-28): what a FAILED `player start|restart` reply says
+// about the channel it was asked to play, once the service has taken the
+// codes it handles before this (`superseded`, `mpv_missing`, and `busy` and
+// `no_socket` while retries are left). Until now every one of them marked
+// the channel failed and toasted "Stream failed", so with the runtime folder
+// broken every channel the user tried turned red and dropped out of the zap
+// ring for 14 days, for a fault of this machine.
+//
+//   channel  the refusal is about the channel's own playlist entry: mark it
+//            and tell the user the stream failed
+//   local    anything else: the stream was never contacted, so the reply is
+//            no verdict on it. Record the reason, mark nothing
+//
+// A failed start REPLY is never a verdict on the stream. A stream that fails
+// to load reaches the shell as an OK reply whose `firstLoad.state` is
+// "failed" (playerFirstLoadFailed), or as the socket's EOF judged by
+// endedReport (handlePlayerGone); neither comes through here. What the
+// helper's `player start` can refuse with, read in bin/helper on 2026-10-28,
+// and where:
+//   player_target   no_cache (channels.json missing or unreadable),
+//                   unknown_channel (the cache does not hold the id),
+//                   unsupported_scheme (the entry's own URL scheme)
+//   player_runtime  folder_unusable, runtime_unwritable
+//   check_socket_path  socket_path_blocked
+//   acquire_lock    runtime_unwritable, busy
+//   check_seq       superseded
+//   adopt_or_spawn  mpv_missing, spawn_failed, no_socket
+//   apply_channel   tls_unverified (read off the PLAYER before the channel
+//                   is touched), ipc_error (the connection closed or timed
+//                   out; mpv 0.41.0 was measured accepting every
+//                   channel-shaped value -- NUL, C0, C1, 70,000 characters,
+//                   200 header fields -- on the three header properties and
+//                   loadfile, so no channel's data makes it refuse)
+//   main()          internal, too_large, folder_unusable
+//   the stub        helper_damaged
+//   the shell       no_output (nothing on stdout: a crash, argparse, the
+//                   player slot's watchdog TERM), `error` (a reply with no
+//                   code: parseHelperStatus)
+// Only `unsupported_scheme` is about the entry, and only a cache this
+// helper's parser would not write can carry one (it skips such lines), so
+// it is the one code listed.
+//
+// A list of the CHANNEL code rather than a fourth list of local ones, and
+// on purpose: marking is the costly direction, so a code the helper grows
+// later (D-PLY-31 names one) reads local until someone shows it is about
+// the entry. That also makes this the superset of the three lists that
+// already say "local" -- HELPER_CANNOT_TELL, PLAY_UNREADABLE and the probe's
+// PROBE_LOCAL_REFUSALS (model/sources.mjs) -- by construction, and the node
+// suite holds it: no code on any of them reads "channel" here. They stay
+// three lists because they answer other questions about other verbs, and a
+// code's meaning moves with the verb: `too_large` on the probe is the
+// provider's source over its bound ("from <host>" is right), on a player
+// verb it is this helper's own memory; `busy` there is a fetch, here the
+// player lock; `unknown_channel` and `no_cache` are no probe's codes at all.
+var PLAYER_START_CHANNEL_REFUSALS = ["unsupported_scheme"]
+
+function playerStartFailure(code) {
+  return PLAYER_START_CHANNEL_REFUSALS.indexOf(str(code)) !== -1 ? "channel" : "local"
+}
+
 // Who a reply is about. Both `rememberEntry` call sites passed the shell's
 // `nowPlaying`, which in a burst is the intent current when the REPLY
 // landed, not the one the reply is for - which is precisely the case the
@@ -599,10 +659,11 @@ function endedReport(context) {
 export {
   stopEscalation, healthTick, playFork, playForkBlind, zapArgs,
   PLAY_UNREADABLE, HELPER_CANNOT_TELL, helperCannotTell, PLAY_RETRYABLE,
-  playFailureVerdict, replyTarget, reconcileVerdict, sessionIntentRepair,
-  playerOrphanCheckArgv, playerStash, playerOwner, tlsPropertiesSafe,
-  playerTls, tlsReloadDisposition, playerTlsVerdict, parsePlayerProbe,
-  parsePlayerEvent, playerEntryId, endedVerdict, probeVerdict,
-  playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
-  routePlayerEvent, rememberEntryOwner, channelForEnd, endedReport
+  playFailureVerdict, PLAYER_START_CHANNEL_REFUSALS, playerStartFailure,
+  replyTarget, reconcileVerdict, sessionIntentRepair, playerOrphanCheckArgv,
+  playerStash, playerOwner, tlsPropertiesSafe, playerTls,
+  tlsReloadDisposition, playerTlsVerdict, parsePlayerProbe, parsePlayerEvent,
+  playerEntryId, endedVerdict, probeVerdict, playerDeathKind,
+  playerSessionFollowUp, playerRouterState, pushPlayerLog, routePlayerEvent,
+  rememberEntryOwner, channelForEnd, endedReport
 }
