@@ -132,7 +132,13 @@ function makeIds(h) {
     // here, so a connect finds nothing listening and `connected` stays false
     // when set, which is what Quickshell's Socket does on a failed connect
     // (docs/SPIKE-QUICKSHELL-SOCKET.md, C5) -- never more forgiving than it
-    // (rule 10). `h.socketListening` true makes the connect succeed.
+    // (rule 10). There is deliberately no switch that makes the connect
+    // succeed: on the real Socket a success runs onConnectionStateChanged,
+    // and so onPlayerAttached, synchronously inside the assignment (C4),
+    // which this double does not do -- a `connected` reading true here would
+    // be a half-attached player no real shell can be in. (The first version
+    // had such a switch, `h.socketListening`, that no test set; the recheck
+    // of lane-ply32 removed it.)
     // D-PLY-32: and what the socket's EOF (handlePlayerGone) stops on its way
     // to the failure report: the player slot (asked whether a start is in
     // flight; nothing runs), the focus retry, the stop backstop and PiP's two
@@ -150,11 +156,10 @@ function makeIds(h) {
     playerSocketComponent: {
       createObject() {
         h.socketsMade = (h.socketsMade || 0) + 1
-        let up = false
         return {
-          get connected() { return up },
-          set connected(v) { up = v === true && h.socketListening === true },
-          write() {}, destroy() { up = false }
+          get connected() { return false },
+          set connected(v) {},
+          write() {}, destroy() {}
         }
       }
     },
