@@ -251,6 +251,19 @@ rewrites it in this shape. `epg-status.json` mirrors the playlist status shape w
 `bad_xml` with one sentence and no URL, before ElementTree reads a byte of
 it (D-EPG-6, security standard 2); a `<!DOCTYPE tv SYSTEM "xmltv.dtd">`
 line without an internal subset is accepted as it always was.
+**[2026-10-28, D-EPG-13: the EPG verb's two parse refusals have a sentence
+in `Model.statusReason`, and the user no longer reads the parser's text:
+`bad_xml` -- a feed that does not parse (`could not parse EPG XML: <expat's
+words>`) and the entity refusal above alike, one code and so one sentence,
+because the remedy is the same and the journal keeps which it was -- reads
+`Not a valid XMLTV guide`; `empty_epg` (`no programmes found in the EPG`, a
+feed that parses and lists none) reads `Guide has no programmes`. Both are
+the provider's (D-SRC-71's reading: the guide's own content), so they are
+not on `PROBE_LOCAL_REFUSALS` and a line that composes `from <host>` keeps
+the host; the guide-data banner and the `Guide data error` notification
+compose none. `not_xmltv` and `not_m3u` left the table the same day: no
+helper verb answers either (`not_m3u` was v0.1's name for `not_a_playlist`,
+D-QA-13; `not_xmltv` never shipped).]**
 
 ### `state.json` (service <-> disk, via `Model.parseState`)
 

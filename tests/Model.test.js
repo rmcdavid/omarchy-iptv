@@ -6159,7 +6159,14 @@ checkCall("D-SRC-63 meets R32a''': the predicate's authority cut at the six deli
   return [withTab.code, withTab.message.indexOf(Model.ENCODE_SENTENCE) !== -1, without.code, without.message.indexOf(Model.ENCODE_SENTENCE) !== -1,
           Model.urlHostWithheld("http://my:pa\t/ss@h.test/x"), Model.urlHostWithheld("http://my:pa/ss@h.test/x"), Model.sourceUrlWarning("http://my:pa\t/ss@h.test/x")]
 }, ["invalid", false, "invalid", true, false, true, ""])
-check("statusReason: one spelling for a non-M3U source (SR28)", [Model.statusReason({ ok: false, error: { code: "not_m3u", message: "" } }), Model.statusReason({ ok: false, error: { code: "not_a_playlist", message: "" } })], ["Not an M3U playlist", "Not an M3U playlist"])
+// D-EPG-13 (2026-10-28): `not_m3u` was v0.1's plan name for what the helper
+// shipped as `not_a_playlist` (D-QA-13); no helper commit ever answered it
+// (`git log -S` over bin/), so the table no longer maps it and SR28's one
+// spelling is pinned on the code the playlist verb really answers.
+check("statusReason: one spelling for a non-M3U source (SR28), on the playlist verb's own code; `not_m3u`, which no verb answers, is no longer mapped",
+  [Model.statusReason({ ok: false, kind: "playlist", error: { code: "not_a_playlist", message: "source from h.test is not an M3U playlist (no #EXTM3U or #EXTINF lines)" } }),
+   Model.statusReason({ ok: false, error: { code: "not_m3u", message: "" } })],
+  ["Not an M3U playlist", "Unknown error"])
 check("codePointLength / capCodePoints count code points, not UTF-16 units (SR22)", [Model.codePointLength("a\ud83d\udce1b"), Model.capCodePoints("a\ud83d\udce1b", 2), Model.validateLabel("\ud83d\udce1".repeat(64), [], "").ok, Model.validateLabel("\ud83d\udce1".repeat(65), [], "").code, Model.uniqueLabel("\ud83d\udce1".repeat(70), []).length], [3, "a\ud83d\udce1", true, "label_too_long", 128])
 check("formCapacity is the cap plus slack so over-cap input is refused, not cut (SR18)", [Model.formCapacity("playlist") > Model.formLimit("playlist"), Model.withFormValue(Model.openFirstRun(Model.guideState("all")), "playlist", "http://h.test/" + "a".repeat(2100)).form.values.playlist.length > 2048, Model.validateUrlForm({ label: "", playlist: "http://h.test/" + "a".repeat(2100), epg: "" }, [], "").error.code], [true, true, "too_long"])
 check("validateSourceUrl result shape", Object.keys(Model.validateSourceUrl("http://h.test/x")).sort(), ["code", "field", "host", "kind", "message", "ok", "url"])
@@ -15648,6 +15655,26 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     return [M.parseClipboardReply(reply), JSON.parse(reply).code, st.error.code, M.statusReason(st) !== "Could not start mpv", fixtureCase("clipboard-wl-paste-not-executable").surface,
             shaped !== "Could not start mpv"]
   }, [null, "spawn_failed", "error", true, "none", true])
+
+  const E13 = ["epg-not-xml", "epg-declares-entity", "epg-no-programmes"]
+
+  checkCall("D-EPG-13: the guide's own refusals (the real helper's replies: a feed that does not parse, one that declares an entity, one with no programme) map to the fixture's sentence, which a line composing `from <host>` would keep (the provider's, D-SRC-71's reading); as the user reads them -- the guide-data banner (Guide.qml's own bannerText), the \"Guide data error\" notification (74014), the service's epgReason and the IPC status's epg.reason -- they carry the sentence, never the parser's text", () => {
+    const copy = new Function("Model", "root", "return (" + guideBlock("  readonly property var copy: ({") + ")")(M, { pluginId: "io.github.rmcdavid.iptv" })
+    const bannerOf = new Function("root", "Model", guideBlock("readonly property string bannerText: {").slice(1, -1))
+    return E13.map(id => {
+      const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+      h.detached.length = 0
+      h.root.handleEpgExit(fixtureReply(id), false)
+      h.drain()
+      const banner = bannerOf({ bannerKind: "epgError", copy, service: h.root }, M)
+      const told = h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74014") !== -1).map(a => a[a.length - 1])
+      const seen = [banner, h.root.epgReason, h.root.statusSummary().epg.reason].concat(told)
+      const [same, raw, composed] = sentenceOf(id)
+      return [id, same, raw, composed === fixtureCase(id).reason + " from new.example.test", banner, told, h.root.statusSummary().epg.reason,
+              seen.some(t => HELPER_WORDS.test(t) || namesPath(t))]
+    })
+  }, E13.map(id => [id, true, false, true, "Guide data unavailable (" + fixtureCase(id).reason + ")" + Model.SEP + "channels still work" + Model.SEP + "r retry",
+                    ["Could not fetch the EPG (" + fixtureCase(id).reason + "). Channels still work."], fixtureCase(id).reason, false]))
 })()
 
 // ---- D-REL-7, the split's reviews P2 and P3a: a damaged helper says so.

@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- D-EPG-13 fixture: an XMLTV feed cut off mid-programme, so it does not parse. ASCII only. -->
+<tv generator-info-name="omarchy-iptv fixture">
+  <channel id="bbc1.uk"><display-name>BBC One</display-name></channel>
+  <programme start="20260912200000 +0000" stop="20260912210000 +0000" channel="bbc1.uk">
+    <title>Cut off

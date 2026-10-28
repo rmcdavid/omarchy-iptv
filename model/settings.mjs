@@ -376,8 +376,21 @@ function statusReason(status) {
     bad_gzip: "Bad gzip data",
     empty_playlist: "Playlist has no channels",
     not_a_playlist: "Not an M3U playlist",
-    not_m3u: "Not an M3U playlist",
-    not_xmltv: "Not an XMLTV file",
+    // D-EPG-13 (2026-10-28). The EPG verb's two parse refusals, which showed
+    // the parser's own text in the guide-data banner ("could not parse EPG
+    // XML: not well-formed (invalid token): line 1, column 0") and the EPG
+    // notification. `bad_xml` is also D-EPG-6's refusal of a feed that
+    // declares an XML entity: the same code, so the same sentence -- the
+    // user's remedy is the same (the address does not serve a plain XMLTV
+    // guide) and the journal keeps which it was. Both are the PROVIDER'S
+    // (D-SRC-71's reading: the guide's own content), so they stay off
+    // PROBE_LOCAL_REFUSALS and a line that composes `from <host>` keeps the
+    // host; none does today. `not_m3u` and `not_xmltv` went from this table
+    // the same day: no helper verb answers either -- `not_m3u` was v0.1's
+    // name for what shipped as `not_a_playlist` (D-QA-13, D-LIVE-03), and
+    // `not_xmltv` never shipped; the EPG verb says `bad_xml`.
+    bad_xml: "Not a valid XMLTV guide",
+    empty_epg: "Guide has no programmes",
     no_source: "No playlist configured",
     not_implemented: "Helper command not implemented",
     no_output: "Helper produced no output",

@@ -43,6 +43,10 @@ the helper's own process, between the fork and the exec, never in this one.
 The clipboard verb's `spawn_failed` (a wl-paste that cannot be executed) is
 pinned beside them, because the two share a code and not a sentence.
 
+D-EPG-13 (2026-10-28). The EPG verb's two parse refusals, `bad_xml` (a feed
+that does not parse, and one that declares an XML entity, D-EPG-6) and
+`empty_epg`, from three small fixture feeds into a fresh cache folder.
+
 The helper's code and the model's sentence are joined by a name, so this file
 and tests/Model.test.js run the same fixture (rule 13). Each case damages a
 scratch folder for real and runs the helper as the shell does, a subprocess
@@ -208,6 +212,10 @@ class LocalRefusalTest(unittest.TestCase):
             cache_root.mkdir(mode=0o700)
             os.symlink(cache_root / "gone", sources)
             return sources, lambda: os.path.islink(sources) and not os.path.lexists(cache_root / "gone")
+        if name == "fresh":
+            folder = self.root / "fresh"
+            folder.mkdir(mode=0o700)
+            return folder, lambda: sorted(os.listdir(folder)) == ["epg-status.json"]
         if name == "lock-held":
             folder = self.root / "run" / "omarchy-iptv"
             folder.mkdir(parents=True, mode=0o700)
@@ -258,6 +266,10 @@ class LocalRefusalTest(unittest.TestCase):
         want = self.fill(case["reply"], names)
         self.assertEqual(len(lines), 1, (lines, err))
         got = json.loads(lines[0])
+        for key, value in list(want.items()):
+            # `{int}`: the run's own durationMs, any whole number.
+            if value == "{int}" and isinstance(got.get(key), int) and got[key] >= 0:
+                want[key] = got[key]
         self.assertEqual((code, got), (1, want), err)
         self.assertNotIn("Traceback", err)
         if "error" in want:
