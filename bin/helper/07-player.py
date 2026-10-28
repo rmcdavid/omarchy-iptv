@@ -48,6 +48,15 @@ LOCK_RETRIES = 5
 SETTLE_LOCK_TIMEOUT = 0.5
 SPAWN_POLL_S = 0.02
 STOP_POLL_S = 0.05
+# D-PLY-35 (2026-10-28): the two bounds of the spawn and the settle that were
+# literals, named so the shared player-bounds fixture can pin them. The shell's
+# player watchdog (Model.playerWatchdogMs) is derived from every bound a
+# `player start|restart|probe` can wait out, these two included; a literal
+# could change without anything noticing. Values unchanged: how long the
+# spawn waits for the grandchild to report its pid, and the connect timeout
+# of socket_is_dead's one look at a socket that may be stale.
+SPAWN_PID_TIMEOUT = 2.0
+SETTLE_CONNECT_TIMEOUT = 0.2
 LAUNCH_STDERR_MAX = 4096          # PO-6: the launch window's stderr, memory only
 PLAYER_UMASK = 0o077              # PO-11: 0600 files / 0700 dirs, requirement 10
 # Mirror of Model.splitMpvArgs (4.12). The helper re-validates every
@@ -803,7 +812,7 @@ def spawn_detached(argv: list[str], cwd: str = "/") -> dict[str, Any]:
         os.waitpid(child, 0)                              # the intermediate child, never a zombie
     except OSError:
         pass
-    pid_text = _read_pipe(pid_r, 2.0).decode("ascii", "replace").strip()
+    pid_text = _read_pipe(pid_r, SPAWN_PID_TIMEOUT).decode("ascii", "replace").strip()
     os.close(pid_r)
     failure = _read_pipe(err_r, DEFAULT_SPAWN_TIMEOUT).decode("ascii", "replace").strip()
     os.close(err_r)
@@ -926,7 +935,7 @@ def quit_over_ipc(sock_path: str, ipc_timeout: float) -> bool:
 
 
 def socket_is_dead(sock_path: str) -> bool:
-    client = MpvIpc(sock_path, 0.2)
+    client = MpvIpc(sock_path, SETTLE_CONNECT_TIMEOUT)
     try:
         client.connect()
     except HelperError:

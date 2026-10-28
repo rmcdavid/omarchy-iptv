@@ -5061,6 +5061,49 @@ checkCall("D-PLY-32: the new replace-id is no other notification's (74019 stays 
   () => { const ids = Object.values(Model.NOTIFY_IDS); return [Model.NOTIFY_IDS.localPlayFailure, ids.filter(v => v === 74021).length, ids.length === new Set(ids).size, ids.indexOf(74019)] },
   [74021, 1, true, -1])
 
+// ---- D-PLY-35 (2026-10-28): the player slot's watchdog, derived from the helper's bounds ----
+//
+// tests/fixtures/player-bounds.json is shared: tests/test_player_bounds.py
+// reads every one of its `helper` numbers off the helper by the name the
+// fixture gives, and observes the two that were literals being used. Here:
+// the model's mirrors are the fixture's, Model.playerWatchdogMs per verb is
+// the fixture's arithmetic, and the shell hands the helper none of the
+// timeout flags (so the helper's DEFAULTS are the bounds being mirrored).
+// Red on dev da0000d: no PLAYER_BOUNDS and no playerWatchdogMs, and its one
+// interval is 12 s against a start's own 14 s of deadlines.
+;(function () {
+  const PB = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/player-bounds.json"), "utf8"))
+  const B = Model.PLAYER_BOUNDS || {}
+  checkCall("D-PLY-35: the model's mirrors of the helper's player bounds are the shared fixture's, every one (the stop ladder's two graces are the ones it already shared)", () =>
+    Object.keys(PB.helper).map(k => k + "=" + (k === "quitGraceMs" ? Model.STOP_QUIT_GRACE_MS : k === "killGraceMs" ? Model.STOP_KILL_GRACE_MS : B[k])),
+    Object.keys(PB.helper).map(k => k + "=" + PB.helper[k]))
+  checkCall("D-PLY-35: and the model mirrors nothing the fixture does not hold, so a bound added on one side only is red", () =>
+    Object.keys(B).filter(k => !Object.prototype.hasOwnProperty.call(PB.helper, k)), [])
+  checkCall("D-PLY-35: playerWatchdogMs per verb is the fixture's arithmetic -- start, restart, probe -- and \"\" (no verb: the birth edge) keeps its 12 s; the margin is the fixture's", () =>
+    [Object.keys(PB.watchdogMs).map(k => JSON.stringify(k) + "=" + (typeof Model.playerWatchdogMs === "function" ? Model.playerWatchdogMs(k) : "none")),
+     Model.PLAYER_WATCHDOG_MARGIN_MS, Model.PLAYER_BIRTH_EDGE_MS],
+    [Object.keys(PB.watchdogMs).map(k => JSON.stringify(k) + "=" + PB.watchdogMs[k]), PB.marginMs, PB.watchdogMs[""]])
+  checkCall("D-PLY-35: every verb's bound is past its own deadlines -- a start past lock + spawn + first load (the board's 14 s) plus a request, a restart past that plus its ladder from term, a probe past three requests -- and every one is past what the old 12 s let a start have", () => {
+    const h = PB.helper, w = k => typeof Model.playerWatchdogMs === "function" ? Model.playerWatchdogMs(k) : PB.previousMs
+    return [w("start") > PB.boardMs + h.ipcMs,
+            w("restart") > PB.boardMs + h.ipcMs + h.killGraceMs + 2 * h.settleMs,
+            w("probe") >= 3 * h.ipcMs,
+            w("start") > PB.previousMs, PB.boardMs === h.lockMs + h.spawnMs + h.firstLoadMs]
+  }, [true, true, true, true, true])
+  checkCall("D-PLY-35: a kind it does not know -- a typo, null, undefined, a number -- gets the LONGEST verb's bound, never a shorter one", () => {
+    if (typeof Model.playerWatchdogMs !== "function") return "none"
+    const longest = Math.max(Model.playerWatchdogMs("start"), Model.playerWatchdogMs("restart"), Model.playerWatchdogMs("probe"))
+    return ["strat", null, undefined, 7, "probe "].map(k => Model.playerWatchdogMs(k) === longest)
+  }, [true, true, true, true, true])
+  checkCall("D-PLY-35: the shell passes the helper NONE of the timeout flags on any slot verb, so the defaults the fixture pins are the bounds the helper runs with", () => {
+    const flags = ["--lock-timeout", "--spawn-timeout", "--first-load-timeout", "--ipc-timeout"]
+    const argvs = [Model.playerStartArgv("/r/mpv.sock", "/c", "t:x", 3, "g:x", 100, ["--vo=null"], 42),
+                   Model.playerRestartArgv("/r/mpv.sock", "/c", "t:x", 3, "g:x", 100, ["--vo=null"], "term", 42),
+                   Model.playerProbeArgv("/r/mpv.sock", 42)]
+    return argvs.map(a => [a[1], flags.filter(f => a.some(t => t === f || String(t).indexOf(f + "=") === 0))])
+  }, [["start", []], ["restart", []], ["probe", []]])
+})()
+
 // replyTarget: who the reply is ABOUT. Both rememberEntry call sites passed
 // the shell's nowPlaying, which in a burst is the intent current when the
 // REPLY landed - the exact case the entry ring exists for.

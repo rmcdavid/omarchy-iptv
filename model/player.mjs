@@ -43,6 +43,84 @@ function healthTick(skips, busy) {
   return { check: !busy, restart: restart, skips: restart ? 0 : n }
 }
 
+// ---- D-PLY-35 (2026-10-28): the player slot's watchdog, derived ----
+//
+// The shell's playerWatchdog TERMs a `player start|restart|probe` that runs
+// longer than this. It was one 12 s constant for all three, and a start's own
+// bounds add up past it: lock 6 s + spawn 5 s + first load 3 s is already
+// 14 s. Measured on dev 2026-10-28 (QA-RESULTS "D-PLY-35", dev branch),
+// headless and in a nested cage: a start that waited out a held lock, a slow
+// spawn and its first-load window was TERMed at 12 s, a second AFTER its
+// loadfile; the player it had started went on to play the channel with the
+// shell's observer off, `nowPlaying` null, the session record retired, and a
+// "Could not start playback" card on screen. The next play adopted it.
+//
+// So the bound is derived per verb from the helper's own bounds, mirrored in
+// PLAYER_BOUNDS and pinned on both sides by the shared player-bounds fixture
+// (dev branch: the python half reads each one off the helper by name, and the
+// shell passes none of the timeout flags, so the helper's defaults are the
+// bounds). A verb's bound is its longest path through the helper's code with
+// every wait it SURVIVES at its full bound, the one wait that ends it, and a
+// margin:
+//   ladder(""): the quit rung, which counts its own IPC (a connect and a
+//     request) inside its grace and runs past it when they are longer, then
+//     SIGTERM's grace, the kill rung's settle and the final one (stop_ladder)
+//   ladder("term"): SIGTERM's grace and the two settles
+//   wedged: a found player that does not answer the start's probe (connect
+//     and request at their bound), then the whole ladder (adopt_or_spawn)
+//   spawn: the settle's one connect, the pid and exec pipes, the bind window,
+//     and the last probe of it, which can start just inside the window
+//   tail: the larger of the `no_socket` refusal (the spawn laddered from
+//     term, then a settle) and the load (the one request after the loadfile
+//     whose timeout does not end the verb, then the first-load window)
+// What is NOT summed is every other request at its bound: a request that
+// reaches its bound raises and ends the verb (MpvIpc.request), so only an mpv
+// answering each of a start's twenty-odd requests just inside 2 s could run a
+// verb past this. That residual is recovered, not bounded: a start the
+// watchdog stopped is no verdict, and the reattach probe decides what it left
+// (Service.qml, handlePlayerResult). The margin is what no bound cuts: the
+// interpreter and the stub's compile (a whole `player probe` with no player,
+// 259-306 ms at load 3.2), a 10,000-channel cache read (a start that resolves
+// its id in one, 356-390 ms), the /proc scans and the poll overshoots; 5 s is
+// twelve times that. "" is no verb: after a reply the same Timer bounds the
+// birth edge (`playerPending` that no socket confirmed), unchanged at 12 s.
+var PLAYER_BOUNDS = {
+  lockMs: 6000,           // DEFAULT_LOCK_TIMEOUT
+  lockPollMs: 50,         // LOCK_POLL_S
+  spawnMs: 5000,          // DEFAULT_SPAWN_TIMEOUT: the exec pipe, then the bind window
+  spawnPidMs: 2000,       // SPAWN_PID_TIMEOUT: the grandchild's pid pipe
+  firstLoadMs: 3000,      // DEFAULT_FIRST_LOAD_TIMEOUT
+  ipcMs: 2000,            // DEFAULT_IPC_TIMEOUT: one connect, or one request
+  settleMs: 500,          // STOP_SETTLE_MS (not Service.qml's stopSettleMs)
+  settleConnectMs: 200,   // SETTLE_CONNECT_TIMEOUT: socket_is_dead's one connect
+  settleLockMs: 500       // SETTLE_LOCK_TIMEOUT: the probe's settle under the lock
+}
+var PLAYER_WATCHDOG_MARGIN_MS = 5000
+var PLAYER_BIRTH_EDGE_MS = 12000
+
+// The stop ladder's longest run from its first rung: "" (quit) or "term".
+function playerLadderMs(fromRung) {
+  var tail = STOP_KILL_GRACE_MS + 2 * PLAYER_BOUNDS.settleMs
+  if (str(fromRung) === "term") return tail
+  return Math.max(STOP_QUIT_GRACE_MS, 2 * PLAYER_BOUNDS.ipcMs) + tail
+}
+
+// The shell's watchdog over one run of `kind` on the player slot, in ms:
+// "start", "restart", "probe", or "" for the birth edge. Anything else, a
+// string or not, gets the longest verb's, never a shorter one.
+function playerWatchdogMs(kind) {
+  var b = PLAYER_BOUNDS
+  var k = typeof kind === "string" ? kind : "?"
+  var lock = b.lockMs + b.lockPollMs
+  var spawn = b.settleConnectMs + b.spawnPidMs + 2 * b.spawnMs + 2 * b.ipcMs
+  var tail = Math.max(playerLadderMs("term") + b.settleConnectMs, b.ipcMs + b.firstLoadMs)
+  if (k === "start") return lock + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
+  if (k === "restart") return lock + playerLadderMs("term") + b.settleConnectMs + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
+  if (k === "probe") return Math.max(3 * b.ipcMs, b.settleLockMs + b.lockPollMs + b.settleConnectMs) + PLAYER_WATCHDOG_MARGIN_MS
+  if (k === "") return PLAYER_BIRTH_EDGE_MS
+  return Math.max(playerWatchdogMs("start"), playerWatchdogMs("restart"), playerWatchdogMs("probe"))
+}
+
 // ---- D-PLY-11: the play fork ----
 //
 // What the shell decides when a channel is asked for, lifted here so it can
@@ -728,14 +806,15 @@ function loadFailedForOwnEntry(end, owners, currentEntryId) {
   return id === playerEntryId(currentEntryId)
 }
 export {
-  stopEscalation, healthTick, playFork, playForkBlind, zapArgs,
-  PLAY_UNREADABLE, HELPER_CANNOT_TELL, helperCannotTell, PLAY_RETRYABLE,
-  playFailureVerdict, PLAYER_START_CHANNEL_REFUSALS, playerStartFailure,
-  replyTarget, reconcileVerdict, sessionIntentRepair, playerOrphanCheckArgv,
-  playerStash, playerOwner, tlsPropertiesSafe, playerTls,
-  tlsReloadDisposition, playerTlsVerdict, parsePlayerProbe, parsePlayerEvent,
-  playerEntryId, endedVerdict, probeVerdict, playerDeathKind,
-  playerSessionFollowUp, playerRouterState, pushPlayerLog, routePlayerEvent,
-  rememberEntryOwner, channelForEnd, endedReport, deathReport,
-  loadFailedForOwnEntry
+  stopEscalation, healthTick, PLAYER_BOUNDS, PLAYER_WATCHDOG_MARGIN_MS,
+  PLAYER_BIRTH_EDGE_MS, playerLadderMs, playerWatchdogMs, playFork,
+  playForkBlind, zapArgs, PLAY_UNREADABLE, HELPER_CANNOT_TELL,
+  helperCannotTell, PLAY_RETRYABLE, playFailureVerdict,
+  PLAYER_START_CHANNEL_REFUSALS, playerStartFailure, replyTarget,
+  reconcileVerdict, sessionIntentRepair, playerOrphanCheckArgv, playerStash,
+  playerOwner, tlsPropertiesSafe, playerTls, tlsReloadDisposition,
+  playerTlsVerdict, parsePlayerProbe, parsePlayerEvent, playerEntryId,
+  endedVerdict, probeVerdict, playerDeathKind, playerSessionFollowUp,
+  playerRouterState, pushPlayerLog, routePlayerEvent, rememberEntryOwner,
+  channelForEnd, endedReport, deathReport, loadFailedForOwnEntry
 }
