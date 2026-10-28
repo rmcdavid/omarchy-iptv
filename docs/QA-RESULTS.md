@@ -13315,6 +13315,143 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### D-SRC-70, D-SRC-71, D-SRC-72: the follow-ups D-SRC-69 found (lane-src7072, 2026-10-27, 868dd65..d7d5df4)
+
+The owner's word was "Fix all three". There is one commit per finding, and check.sh was green on each commit's own tree, run alone.
+
+**D-SRC-70: a cancelled re-check of the active source keeps its folder.**
+
+The choice is a run-time rule at the sink. `Model.cacheJobDrop` answers "active" for a `remove --key K` when K is the active key at the moment the job RUNS, and `cacheJobArgs` drops it. That is the prune's implicit `--active` keep (D-SRC-07), mirrored. The rule covers the seven removal sites, not only the cancel.
+
+The brief asked whether a removed source can be active when its removal runs:
+- `removeSource` publishes the cleared pointer (R3) before it queues, so its removal runs. Tested at once and queued behind a running prune.
+- The commit of a URL edit of the ACTIVE source queued the old folder's removal before `root.userState = st`. A job queued while cacheProc is idle runs inside `queueCacheJob`, so it read the old active key.
+- That removal now waits for the publish. Mutant m70-2 shows the guard red without it.
+
+Recorded consequence: a cancel's removal that is queued behind a running job is decided when it runs. If the user has switched away by then, the never-fetched record's folder goes, as SR7's cancel of any other never-fetched record does. This is pinned in a test.
+
+| node check | dev 6761cd4 | lane |
+|---|---|---|
+| cacheJobDrop / cacheJobArgs | red (throws) | green |
+| the reachable path (duplicate -> retrySource -> cancel) | red, `removed:[A]` | green, `removed:[]`, active A, records A B |
+| the same cancel queued behind a running prune | red, `removed:[A]` | green |
+| guards: cancelled add, cancelled edit of the active source, removeSource(active) and the active edit's commit, each at once and queued | green (by design) | green |
+
+Mutants:
+
+| mutant | node failures |
+|---|---|
+| the active rule removed | 3 |
+| the edit commit's removal queued before the publish | 1 |
+| the rule applied to every keyed verb (R22a's `migrate --key <active>` dropped) | 3 |
+
+lane-src69's probe-active-retry.js reads `removes:["ACTIVE"]` on dev and `removes:[]` on the lane.
+
+**D-SRC-71: a failure on this machine names no host.**
+
+- handleProbeExit's failure branch carries `code` (`Model.statusCode`), and Service exposes `statusCode`.
+- `PROBE_LOCAL_REFUSALS` gains `cache_unwritable`, `internal` and `helper_timeout` (the owner's).
+- It also gains `no_output`, `helper_damaged` and `not_implemented` (the model's HELPER_CANNOT_TELL, rule-15 siblings, for the lead to confirm).
+- The refresh empty state composes through `Model.failureFromHost`, which probeFailureLine also uses.
+- UX.md 6.3 carries the two new reasons and the rule.
+
+| node check | dev 6761cd4 | lane |
+|---|---|---|
+| failureFromHost / probeFailureLine / statusCode | red (throws) | green |
+| probe: cache_unwritable, internal, http_404, the watchdog | red: "Could not write the cache from new.example.test", "Helper failed unexpectedly from ...", "Helper timed out from ..." | green: the reason alone; the 404 keeps its host |
+| refresh (handlePlaylistExit), the same four | red | green |
+
+Mutants:
+
+| mutant | node failures |
+|---|---|
+| no code on the failure | 1 |
+| the list without cache_unwritable | 3 |
+| the list without helper_timeout | 3 |
+| statusCode bound to "" | 1 |
+| an empty host named | 1 |
+| a code read off a good status | 1 |
+
+**D-SRC-72: every helper writer into a source's folder has a named code.**
+
+All of these answer `cache_unwritable`, with D-SRC-69's sentence (a base name, no path):
+- epg-window.txt, epg-now.json (fetch and `--now-only`) and epg-status.json. The status case fails the run, and `stale` says the window is on disk.
+- write_logo.
+- the logo failure memo.
+- failed.json.
+
+R25c's `folder_unusable` passes through every new except. My first version converted it, and test_state FolderLinkSiblingsTest and test_logos' R25c case went red.
+
+A logo the folder refuses:
+- stops the run's FETCHING, which is today's disclosure bound;
+- is not memoised;
+- leaves the cached files further down still validated and named;
+- ends in a reply `ok:false` that still carries `names`, which `Model.logoSummaryNames` reads.
+
+| python test (tests/test_cache.py OtherWritersRefusalTest) | dev 6761cd4 | lane |
+|---|---|---|
+| guide window | red, `internal` "IsADirectoryError: ... '<tmp>/.tmp-epg-window.txt-...'" | green |
+| epg-now.json on a fetch and on `--now-only` | red, `internal` | green |
+| epg-status.json | red, `internal` | green |
+| failed.json mark and clear | red, `internal` | green |
+| a logo the folder refuses | red, `internal` | green |
+| the logo memo | red, `internal` | green |
+| guard: epg over a folder link to nothing keeps `folder_unusable` | green | green |
+
+Mutants, 11 of 11 red:
+- fetching not stopped;
+- the refusal memoised;
+- the memo skipped behind a logo refusal;
+- the memo's refusal swallowed;
+- each epg write unconverted (3);
+- `stale` false;
+- failed.json unconverted;
+- write_logo unconverted;
+- the epg verb swallowing folder_unusable.
+
+**Rule 15.**
+
+D-SRC-70, the seven removal sites:
+- removeSource: runs, because the pointer is cleared first.
+- the cancel: fixed.
+- the record gone: runs.
+- the edit commit: reordered.
+- too_many: runs, a new key.
+- key moved: runs, never active.
+- a failed pending add or edit: runs, a new key.
+- epg-clear and migrate `--key <active>` stay as queued (the rule is remove-only).
+
+D-SRC-71, surfaces:
+- Fixed: the form result line, the Sources result line, the refresh empty state.
+- Cleared: "Fetching from", "Parsed 0 channels from", the banners (no host; "from <time>" is a clock), the notifications (no host), the logo consent survey, Service.qml (reason and host are separate fields), BarWidget.qml (no host).
+
+D-SRC-72, writers:
+- Tolerated and logged: write_status_quietly, the epg-now retry, canonical_logo_file, lock_logo_dir, the logo folder's utime, the D-ID-1 remap, write_lock_record.
+- May stay `internal`, because nothing on screen reads them: the `cache` verbs (handleCacheExit logs the code) and `state init` (exit code only).
+- Left: the player's runtime folder, D-PLY-30.
+
+**Gate.**
+
+| tree | node | python | other |
+|---|---|---|---|
+| 868dd65 | 3054 | 1640 | |
+| a459758 | 3058 | 1640 | |
+| d7d5df4 | 3061 | 1640 | qml spec 80, key preflight 12 |
+
+**Live.** One full idle run of `key-scenario.sh live` on d7d5df4 under the private bus:
+
+| result | time | load start / end | coredump journal | transcript |
+|---|---|---|---|---|
+| 139 / 0 | 601.5 s | 2.34 / 3.50 | 81 -> 81, +0 | key-20261027-212150-1524287 |
+
+B41 read `orphan:pruned cache:kept channels:11`. No live rig drives the three fixes; they are pinned through Service.qml's own functions and through the helper's main().
+
+**New findings.**
+1. **D-PLY-30 (P3, proposed): the player verbs answer `internal` with a path when the runtime folder cannot be made.** player_runtime and acquire_lock are the writers. Measured: `player stop --socket <0500 dir>/omarchy-iptv/mpv.sock` printed `PermissionError: [Errno 13] ...`.
+2. **D-SRC-73 (P3, proposed): a source cache folder that is a link to nothing reads `cache_unwritable` from the playlist verb but `folder_unusable` from every other verb.** D-SRC-69's `except OSError` catches R25c's FolderUnusable. statusReason has no entry for `folder_unusable`, so the EPG banner would show the folder's path.
+
+**The recheck (same day).** MERGEABLE, with one test of its own (1f2e76a). Every count rerun (node 3061/0 on the lane, 6 failures on dev 6761cd4; python OtherWritersRefusalTest 7 OK, 6 red on dev with the guard green). Fourteen mutants of its own, twelve red at first; the two that survived -- the guide passing "" as the code, and `http_403` added to the local list -- showed the lane's refresh check rebuilt the guide's composition instead of reading it (rule 12), so 1f2e76a compiles Guide.qml's own `copy`, `emptyPlaylist` and `prose` bindings over the booted service for the local failures and 12 provider outcomes (401, 403, 404, 429, 503, refused, TLS, timeout, too_large, unsafe_redirect, bad_gzip, not_a_playlist), red on dev on behaviour and under both survivors, green on the branch (node 3062). D-SRC-70: seven deliberate removals the lane had not driven remove the same folder on dev and on the branch; only the reachable cancel differs (dev `[A]`, branch `[]`). D-SRC-72 driven with EFBIG (RLIMIT_FSIZE) and EACCES as the shell runs the helper: one stdout line, a named code, no path, Errno, `.tmp-` or traceback. One full idle live run: 139/0, 633.8 s, coredump journal +0. Gate green alone on 1f2e76a.
+
 ### D-SRC-69: a cache job decides what it deletes when it runs (lane-src69, 2026-10-27, 63e0f2f..bc1127e)
 
 **The fix.** The start-up `cache prune` is queued at cacheReady and run at dirsReady. Until now its keep list was the records of the queue moment. It is now queued as `["prune"]`, and `runNextCacheJob` builds the argv through `Model.cacheJobArgs` -> `Model.pruneArgs` from:
