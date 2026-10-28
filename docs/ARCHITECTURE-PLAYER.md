@@ -314,6 +314,22 @@ notification and in `lastError`. It now chooses by the reply's kind: for
 `player`, `player.<verb>`, `play`, `stop`, `status` and `seek` they read
 `The player is busy` (the guide's pause line's own words) and `Helper ran
 out of memory`; the playlist and EPG verbs keep theirs.]**
+**[Amended 2026-10-28, D-PLY-31: no code is added. `spawn_failed` now also
+covers the spawn's OWN failures before the grandchild exists: one of its
+three pipes refused (EMFILE, ENFILE) or its first fork refused (EAGAIN
+under RLIMIT_NPROC, ENOMEM) answers `could not start mpv: <error's words>`
+-- the message shape the grandchild's own fork, setsid and exec failures
+already had over the errno pipe -- with whatever it had opened closed first.
+Until then those reached main()'s catch-all as `internal` (with the
+exception's text) and read "Helper failed unexpectedly". The user reads
+`Could not start mpv` for every `spawn_failed`, and `Something else is at
+the player's socket path` for `socket_path_blocked`, where both used to
+reach the "Could not start playback" notification as the helper's lowercase
+message. `spawn_failed` is also the `clipboard` verb's code for a wl-paste
+that cannot be started; that reply carries no `error` object and the shell
+drops every clipboard failure without a word, so mpv's sentence is chosen
+only for a player verb's kind. Both codes are local (`PROBE_LOCAL_REFUSALS`,
+D-PLY-30's reading; `Model.playerStartFailure` already read them so).]**
 
 Additive changes to existing verbs: `play` gains optional `--scope` / `--since`
 (so a zap refreshes the stash) and returns `"entryId"`; `status` gains

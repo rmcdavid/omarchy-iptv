@@ -722,11 +722,34 @@ def spawn_detached(argv: list[str], cwd: str = "/") -> dict[str, Any]:
     0o077 puts every file the player creates at 0600 and every directory it
     creates at 0700, matching requirement 10. `chdir` failing must never
     leave us in the inherited directory, so "/" is the fallback.
+
+    D-PLY-31 (2026-10-28): the three pipes and the first fork are this
+    process's own, and their failure -- no descriptor left for a pipe
+    (EMFILE, ENFILE), no process to fork (EAGAIN under RLIMIT_NPROC, ENOMEM)
+    -- used to leave an OSError to main()'s catch-all, `internal`, which the
+    shell reads as "Helper failed unexpectedly". It is `spawn_failed` with
+    the error's words, the code and the message shape the grandchild's
+    failures already have (its own fork, its setsid, the exec all come back
+    over err_w as `could not start mpv: <words>`), because to the user it is
+    the same fact: the player program could not be started. Whatever was
+    opened before the failure is closed first.
     """
-    pid_r, pid_w = os.pipe()
-    err_r, err_w = os.pipe2(os.O_CLOEXEC)
-    log_r, log_w = os.pipe()
-    child = os.fork()
+    opened: list[int] = []
+    try:
+        pid_r, pid_w = os.pipe()
+        opened += [pid_r, pid_w]
+        err_r, err_w = os.pipe2(os.O_CLOEXEC)
+        opened += [err_r, err_w]
+        log_r, log_w = os.pipe()
+        opened += [log_r, log_w]
+        child = os.fork()
+    except OSError as error:
+        for fd in opened:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        raise HelperError("spawn_failed", "could not start mpv: %s" % (error.strerror or type(error).__name__)) from None
     if child == 0:                                        # pragma: no cover
         try:
             os.setsid()

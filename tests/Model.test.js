@@ -15628,6 +15628,26 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
        zap: ["Helper ran out of memory", ["omarchy-iptv: play failed: Helper ran out of memory"]],
        rewind: "Helper ran out of memory",
        fetch: ["Source too large", "Source too large", "Another fetch is running", "Another fetch is running"], seen: false })
+
+  const P31 = ["player-start-socket-file", "player-restart-socket-file", "player-start-mpv-not-executable", "player-start-fork-refused", "player-start-pipes-refused"]
+
+  checkCall("D-PLY-31: a start refused at the socket path or at the spawn (the real helper's replies: a file at mpv.sock, an mpv that cannot be executed, the fork refused, no descriptors for the pipes) maps to the fixture's sentence with no host after it, and is one \"Could not start playback\" card and lastError in that sentence through Service.handlePlayerResult -- no helper words, no errno, nothing marked", () =>
+    P31.map(id => {
+      const h = bootPlayer()
+      refuse(h, fixtureCase(id).reply.kind.split(".")[1], fixtureReply(id))
+      const v = verdictOf(h)
+      const [same, raw, composed] = sentenceOf(id)
+      const seen = v[3].concat([h.root.lastError], h.warnings)
+      return [id, same, raw, composed === fixtureCase(id).reason, v[3], h.root.lastError, v[0].length + v[1].length, seen.some(t => HELPER_WORDS.test(t) || namesPath(t))]
+    }), P31.map(id => [id, true, false, true, ["74021 Could not start playback | \u201cX\u201d did not play" + Model.SEP + fixtureCase(id).reason], fixtureCase(id).reason, 0, false]))
+
+  checkCall("D-PLY-31: `spawn_failed` is also the clipboard verb's code (wl-paste), and the clipboard keeps its own reading -- the real reply (a wl-paste that cannot be executed) is dropped by Model.parseClipboardReply, so a failed paste says nothing and clears nothing (R2), and it carries no `error` object, so Model.statusReason never gives it mpv's sentence; mpv's sentence is a player verb's alone, so not even a clipboard reply in the error shape would read it", () => {
+    const reply = fixtureReply("clipboard-wl-paste-not-executable")
+    const st = M.parseHelperStatus(reply, "clipboard")
+    const shaped = M.statusReason({ ok: false, kind: "clipboard", error: { code: "spawn_failed", message: "could not start wl-paste" } })
+    return [M.parseClipboardReply(reply), JSON.parse(reply).code, st.error.code, M.statusReason(st) !== "Could not start mpv", fixtureCase("clipboard-wl-paste-not-executable").surface,
+            shaped !== "Could not start mpv"]
+  }, [null, "spawn_failed", "error", true, "none", true])
 })()
 
 // ---- D-REL-7, the split's reviews P2 and P3a: a damaged helper says so.

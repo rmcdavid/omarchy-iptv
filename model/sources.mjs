@@ -1318,9 +1318,16 @@ function fetchingLine(host, kind) {
 // (the player's runtime folder or its lock) joins it by the same reading:
 // no surface composes a player refusal with a host today, and the list is
 // the one place that says which codes are this machine's.
+//
+// D-PLY-31 (2026-10-28): `socket_path_blocked` (something that is not a
+// socket at the player's socket path) and `spawn_failed` (mpv could not be
+// started: its exec, or the spawn's own pipes or fork, refused) join it by
+// D-PLY-30's reading -- this machine's, and composed with no host anywhere.
+// The guide's own refusals, `bad_xml` and `empty_epg` (D-EPG-13), do NOT:
+// they are about the provider's guide.
 var PROBE_LOCAL_REFUSALS = ["too_many", "state_unreadable", "unknown_source", "cache_unwritable", "internal",
                             "helper_timeout", "no_output", "helper_damaged", "not_implemented", "folder_unusable",
-                            "runtime_unwritable"]
+                            "runtime_unwritable", "socket_path_blocked", "spawn_failed"]
 
 // "<reason> from <host>", or the reason alone when the code is a local
 // failure (PROBE_LOCAL_REFUSALS) or there is no host to name. The reason is

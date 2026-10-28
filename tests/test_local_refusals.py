@@ -32,6 +32,17 @@ the helper's main() in this process, with MemoryError raised where the verb
 reads the channel list: main() answers every MemoryError the same way, and no
 limit on a real process lands that error at a predictable line.
 
+D-PLY-31 (2026-10-28). The player's own refusals the "did not play" card
+showed in the helper's words (`socket_path_blocked`, `spawn_failed`) are
+driven here as the shell meets them -- a file at the socket path, an `mpv`
+that cannot be executed -- and the spawn's own exhaustion, which reached
+main()'s `internal`, is driven with the fork refused (RLIMIT_NPROC 0) and with
+no room for a pipe (the descriptor table full but for the lock and one more):
+both now answer `spawn_failed` with the error's words. Those limits are set in
+the helper's own process, between the fork and the exec, never in this one.
+The clipboard verb's `spawn_failed` (a wl-paste that cannot be executed) is
+pinned beside them, because the two share a code and not a sentence.
+
 The helper's code and the model's sentence are joined by a name, so this file
 and tests/Model.test.js run the same fixture (rule 13). Each case damages a
 scratch folder for real and runs the helper as the shell does, a subprocess
@@ -46,6 +57,7 @@ import io
 import json
 import os
 import pathlib
+import resource
 import subprocess
 import sys
 import tempfile
@@ -60,8 +72,33 @@ FIXTURES = ROOT / "tests" / "fixtures"
 FIXTURE = json.loads((FIXTURES / "local-refusals.json").read_text(encoding="utf-8"))
 TIMEOUT = 20
 KEY = "b067481d"
+# pipes-refused: the descriptor table the helper starts with. Every slot from
+# 3 to NOFILE_LIMIT - 3 holds /dev/null, so after the exec the helper has the
+# last two: the player's lock takes one, and a pipe needs two.
+NOFILE_LIMIT = 16
 
 helper_module = load_helper()
+
+
+def refuse_fork():
+    resource.setrlimit(resource.RLIMIT_NPROC, (0, 0))
+
+
+def leave_two_descriptors():
+    """Between the fork and the exec of the helper: lower RLIMIT_NOFILE and
+    fill every slot below its last two with an INHERITABLE /dev/null (dup2
+    makes one), so what the helper finds free after the exec does not depend
+    on which descriptors this test process happened to hold. Slots the parent
+    held close-on-exec are overwritten here, never left to be freed at exec."""
+    resource.setrlimit(resource.RLIMIT_NOFILE, (NOFILE_LIMIT, NOFILE_LIMIT))
+    null = os.open(os.devnull, os.O_RDONLY)
+    for fd in range(3, NOFILE_LIMIT - 2):
+        if fd != null:
+            os.dup2(null, fd)
+    if 3 <= null < NOFILE_LIMIT - 2:
+        os.set_inheritable(null, True)
+    else:
+        os.close(null)
 
 
 class LocalRefusalTest(unittest.TestCase):
@@ -136,6 +173,29 @@ class LocalRefusalTest(unittest.TestCase):
             os.chmod(folder, 0o700)
             (lock / "keep").write_text("x", encoding="utf-8")
             return folder, lambda: lock.is_dir() and sorted(os.listdir(lock)) == ["keep"] and sorted(os.listdir(folder)) == ["player.lock"]
+        if name == "socket-file":
+            folder = self.root / "run" / "omarchy-iptv"
+            folder.mkdir(parents=True, mode=0o700)
+            blocker = folder / "mpv.sock"
+            blocker.write_text("x", encoding="utf-8")
+            return folder, lambda: blocker.is_file() and blocker.read_text(encoding="utf-8") == "x" and not blocker.is_symlink()
+        if name in ("mpv-not-executable", "wl-paste-not-executable"):
+            program = self.root / "no-bin" / name.split("-not-")[0]
+            program.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+            os.chmod(program, 0o644)
+            folder = self.root / "run" / "omarchy-iptv"
+            return folder, lambda: (program.stat().st_mode & 0o777) == 0o644 and not os.path.lexists(folder / "mpv.sock")
+        if name == "fork-refused":
+            if os.geteuid() == 0:
+                self.skipTest("root is not refused by RLIMIT_NPROC")
+            self.preexec = refuse_fork
+            folder = self.root / "run" / "omarchy-iptv"
+            return folder, lambda: not os.path.lexists(folder / "mpv.sock")
+        if name == "pipes-refused":
+            self.preexec = leave_two_descriptors
+            self.close_fds = False
+            folder = self.root / "run" / "omarchy-iptv"
+            return folder, lambda: not os.path.lexists(folder / "mpv.sock")
         if name in ("key-file", "sources-link"):
             cache_root = self.root / "cache-root"
             sources = cache_root / "sources"
@@ -200,9 +260,13 @@ class LocalRefusalTest(unittest.TestCase):
         got = json.loads(lines[0])
         self.assertEqual((code, got), (1, want), err)
         self.assertNotIn("Traceback", err)
-        # The journal keeps what the reply says, the path included
-        # (the service logs the helper's stderr, redacted).
-        self.assertIn(want["error"]["message"], err)
+        if "error" in want:
+            # The journal keeps what the reply says, the path included
+            # (the service logs the helper's stderr, redacted).
+            self.assertIn(want["error"]["message"], err)
+        else:
+            # The clipboard verb: one object on stdout and nothing on stderr.
+            self.assertEqual(err, "")
         self.assertTrue(untouched(), "the damage was changed: %s" % case["id"])
         return got
 

@@ -320,6 +320,16 @@ function helperDamagedReason(status) {
 // over its socket -- `play` (a zap), `stop`, `status` and `seek` (the rewind
 // verb's own refusal shape). The playlist and EPG verbs keep the table's
 // sentences, unchanged.
+//
+// `spawn_failed` is the third (D-PLY-31): on a player verb the mpv spawn
+// could not happen -- an exec refused (`could not start mpv: Permission
+// denied`), or since D-PLY-31 the spawn's own pipes or fork refused. The
+// clipboard verb answers the same code for wl-paste, and its sentence must
+// not be mpv's; it never meets this function -- its reply carries `code` at
+// the top and no `error` (so the first line below answers ""), and
+// Model.parseClipboardReply drops every failure without a word (R2) -- and
+// keeping the code out of the general table keeps it that way should one
+// ever arrive.
 var PLAYER_VERB_KINDS = ["player", "play", "stop", "status", "seek"]
 
 function playerVerbKind(kind) {
@@ -330,6 +340,7 @@ function playerVerbKind(kind) {
 function playerVerbReason(code) {
   if (code === "busy") return "The player is busy"
   if (code === "too_large") return "Helper ran out of memory"
+  if (code === "spawn_failed") return "Could not start mpv"
   return ""
 }
 
@@ -401,6 +412,12 @@ function statusReason(status) {
     // used to be main()'s `internal` with the exception and the path. A play
     // that fails this way is told in the "did not play" notification.
     runtime_unwritable: "Could not write the player's runtime folder",
+    // D-PLY-31 (2026-10-28): a regular file -- anything that is not a socket
+    // -- at the player's socket path ($XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock).
+    // The helper never unlinks it and never spawns over it
+    // (check_socket_path); its message, "the socket path is not a socket",
+    // reached the "did not play" card as it was.
+    socket_path_blocked: "Something else is at the player's socket path",
     not_running: "mpv is not running",
     unknown_channel: "Unknown channel",
     ipc_error: "mpv did not answer",
