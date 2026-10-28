@@ -15570,6 +15570,64 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       }
     }
   }
+
+  // ---- lane-p31e13 (2026-10-28): the player's and the guide's own refusals read a sentence ----
+  //
+  // The replies are the REAL helper's, from the shared fixture
+  // (tests/fixtures/local-refusals.json; tests/test_local_refusals.py drives
+  // each for real and compares stdout). `refusals` carries the ones the
+  // checks above already take (this machine's, told at once), and
+  // `otherRefusals` the ones they cannot (the fixture's `about` says why).
+  // Every surface below is the shipping one: Service.qml's handlers,
+  // Guide.qml's own bannerText compiled from its text, the notification
+  // argv, lastError and the IPC status. Each check is red on dev 795a7bf,
+  // where the user read the helper's own words or the fetch verbs'.
+  const OTHER = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/local-refusals.json"), "utf8")).otherRefusals
+  const fixtureCase = id => {
+    const c = LOCAL.concat(OTHER).find(x => x.id === id)
+    if (!c) throw new Error("local-refusals.json: no case " + id)
+    return c
+  }
+  const fixtureReply = id => JSON.stringify(fixtureCase(id).reply).split("{dir}").join(LOCAL_DIR)
+  // The helper's own words for every code this round maps, and the shapes
+  // of an exception: none may reach a surface.
+  const HELPER_WORDS = /could not parse EPG XML|no programmes found|refused the EPG|socket path is not a socket|could not start mpv|did not report a pid|another player command|needs more memory|Errno|Error:|Traceback/
+  // A reply's sentence, and whether it is clean: not the helper's words, no path.
+  const sentenceOf = id => {
+    const st = M.parseHelperStatus(fixtureReply(id), fixtureCase(id).reply.kind)
+    const reason = M.statusReason(st)
+    return [reason === fixtureCase(id).reason, HELPER_WORDS.test(reason) || namesPath(reason), M.failureFromHost(reason, "new.example.test", M.statusCode(st))]
+  }
+
+  checkCall("D-PLY-34: a player verb's `busy` (the player lock, out of retries) and `too_large` (main()'s MemoryError, the real helper's replies) read the player's sentences -- the \"Could not start playback\" card, lastError, the zap's `play failed` line and the rewind line -- while the fetch verbs keep theirs and `busy` still retries silently while retries are left", () => {
+    const spent = bootPlayer()
+    spent.root.playRetries = spent.root.playRetryMax
+    refuse(spent, "start", fixtureReply("player-start-lock-held"))
+    const left = bootPlayer()
+    refuse(left, "start", fixtureReply("player-start-lock-held"))
+    const memory = bootPlayer()
+    refuse(memory, "start", fixtureReply("player-start-out-of-memory"))
+    const zap = bootPlayer()
+    zap.root.playerUp = true
+    zap.root.nowPlaying = { id: "t:x", name: "X", group: "", launchedFrom: "", since: 1 }
+    zap.root.controlKind = "play"
+    zap.root.handleControlResult(fixtureReply("zap-play-out-of-memory") + "\n")
+    zap.drain()
+    const rewind = M.seekTransientText(M.parseHelperStatus(fixtureReply("player-start-out-of-memory"), "seek"), "The player is busy" + M.SEP + "try again")
+    const fetchOf = (kind, code) => M.statusReason({ ok: false, kind, error: { code, message: "source from h.test exceeds the limit" } })
+    return { mapped: ["player-start-lock-held", "player-start-out-of-memory", "zap-play-out-of-memory"].map(id => sentenceOf(id).slice(0, 2)),
+             spent: [toasts(spent), spent.root.lastError], left: [toasts(left).length, left.root.playRetries, left.root.lastError],
+             memory: [toasts(memory), memory.root.lastError],
+             zap: [zap.root.lastError, zap.warnings.filter(w => /play failed:/.test(w))],
+             rewind,
+             fetch: [fetchOf("playlist", "too_large"), fetchOf("epg", "too_large"), fetchOf("", "busy"), fetchOf("playlist", "busy")],
+             seen: toasts(spent).concat(toasts(memory), [spent.root.lastError, memory.root.lastError, zap.root.lastError, rewind], spent.warnings, memory.warnings, zap.warnings).some(t => HELPER_WORDS.test(t)) }
+  }, { mapped: [[true, false], [true, false], [true, false]],
+       spent: [["74021 Could not start playback | \u201cX\u201d did not play" + Model.SEP + "The player is busy"], "The player is busy"], left: [0, 1, ""],
+       memory: [["74021 Could not start playback | \u201cX\u201d did not play" + Model.SEP + "Helper ran out of memory"], "Helper ran out of memory"],
+       zap: ["Helper ran out of memory", ["omarchy-iptv: play failed: Helper ran out of memory"]],
+       rewind: "Helper ran out of memory",
+       fetch: ["Source too large", "Source too large", "Another fetch is running", "Another fetch is running"], seen: false })
 })()
 
 // ---- D-REL-7, the split's reviews P2 and P3a: a damaged helper says so.

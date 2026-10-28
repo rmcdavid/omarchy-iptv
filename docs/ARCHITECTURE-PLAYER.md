@@ -303,6 +303,17 @@ list above was already incomplete before this bracket: `start` and `restart`
 also answer `tls_unverified` (D-SINK-16), any verb can answer the helper's
 catch-all `internal`, and the later `pause` and `tracks` verbs answer
 `pause_refused`, `track_refused` and `bad_track`.]**
+**[Amended 2026-10-28, D-PLY-34: no code is added or retired; two keep
+their code and change their words. `busy` here is the player LOCK (another
+`start`, `restart` or `stop` holds it past `--lock-timeout`, or the lock
+file kept being replaced), and `too_large`, which a player verb answers
+only from main()'s MemoryError (reply `kind: player`), is this helper's own
+memory. `Model.statusReason` read both in the fetch verbs' words, `Another
+fetch is running` and `Source too large`, on the "Could not start playback"
+notification and in `lastError`. It now chooses by the reply's kind: for
+`player`, `player.<verb>`, `play`, `stop`, `status` and `seek` they read
+`The player is busy` (the guide's pause line's own words) and `Helper ran
+out of memory`; the playlist and EPG verbs keep theirs.]**
 
 Additive changes to existing verbs: `play` gains optional `--scope` / `--since`
 (so a zap refreshes the stash) and returns `"entryId"`; `status` gains

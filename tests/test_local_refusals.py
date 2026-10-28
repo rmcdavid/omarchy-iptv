@@ -24,6 +24,14 @@ NotADirectoryError naming the path, a traceback). They answer R25c's
 `folder_unusable` now, as `cache migrate` did, and the rule-15 matrix below
 holds every cache subverb to one answer per damage.
 
+D-PLY-34 (2026-10-28). Two player-verb replies the shell read in the fetch
+verbs' words are pinned here as the helper gives them: the player lock's
+`busy` (this test holds the lock) and main()'s answer to a MemoryError on a
+player verb, `too_large` with `kind: player` or `kind: play`. The second runs
+the helper's main() in this process, with MemoryError raised where the verb
+reads the channel list: main() answers every MemoryError the same way, and no
+limit on a real process lands that error at a predictable line.
+
 The helper's code and the model's sentence are joined by a name, so this file
 and tests/Model.test.js run the same fixture (rule 13). Each case damages a
 scratch folder for real and runs the helper as the shell does, a subprocess
@@ -32,6 +40,9 @@ directory: nothing of the user's is read, and no mpv can be started.
 
 Run: python3 -m unittest discover -s tests
 """
+import contextlib
+import fcntl
+import io
 import json
 import os
 import pathlib
@@ -39,6 +50,9 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from unittest import mock
+
+from helper_loader import load_helper          # redirects HOME and $XDG_* first
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 HELPER = ROOT / "bin" / "omarchy-iptv"
@@ -46,6 +60,8 @@ FIXTURES = ROOT / "tests" / "fixtures"
 FIXTURE = json.loads((FIXTURES / "local-refusals.json").read_text(encoding="utf-8"))
 TIMEOUT = 20
 KEY = "b067481d"
+
+helper_module = load_helper()
 
 
 class LocalRefusalTest(unittest.TestCase):
@@ -59,6 +75,7 @@ class LocalRefusalTest(unittest.TestCase):
         (self.root / "no-bin").mkdir()
         self.preexec = None
         self.close_fds = True
+        self.in_process = False
         self.names = {}
 
     def env(self):
@@ -72,6 +89,8 @@ class LocalRefusalTest(unittest.TestCase):
         }
 
     def helper(self, argv):
+        if self.in_process:
+            return self.helper_in_process(argv)
         try:
             proc = subprocess.run([sys.executable, "-I", str(HELPER), *argv], capture_output=True, text=True,
                                   env=self.env(), timeout=TIMEOUT, stdin=subprocess.DEVNULL,
@@ -80,6 +99,15 @@ class LocalRefusalTest(unittest.TestCase):
             self.fail("the helper did not answer within %d s: %s" % (TIMEOUT, " ".join(argv)))
         lines = proc.stdout.strip().splitlines()
         return proc.returncode, lines, proc.stderr
+
+    def helper_in_process(self, argv):
+        """main() in this process, with MemoryError where the verb reads the
+        channel list -- the reply main() gives any MemoryError (D-M3U-1)."""
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(helper_module, "load_channels", side_effect=MemoryError()), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = helper_module.main(list(argv))
+        return code, out.getvalue().strip().splitlines(), err.getvalue()
 
     def damage(self, name):
         """Make the damage for real; -> ({dir}, a check that it was left as it was)."""
@@ -120,16 +148,27 @@ class LocalRefusalTest(unittest.TestCase):
             cache_root.mkdir(mode=0o700)
             os.symlink(cache_root / "gone", sources)
             return sources, lambda: os.path.islink(sources) and not os.path.lexists(cache_root / "gone")
+        if name == "lock-held":
+            folder = self.root / "run" / "omarchy-iptv"
+            folder.mkdir(parents=True, mode=0o700)
+            held = os.open(folder / "player.lock", os.O_CREAT | os.O_RDWR, 0o600)
+            self.addCleanup(os.close, held)
+            fcntl.flock(held, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            return folder, lambda: sorted(os.listdir(folder)) == ["player.lock"]
+        if name == "out-of-memory":
+            self.in_process = True
+            folder = self.root / "run" / "omarchy-iptv"
+            return folder, lambda: not os.path.lexists(folder)
         raise AssertionError("unknown damage %r" % name)
 
     def seeded_cache(self):
         """A cache folder holding a channel list, for the verbs that resolve a
         channel before they touch the runtime folder; -> (folder, first id)."""
         cache = self.root / "cache"
-        preexec, close_fds = self.preexec, self.close_fds
-        self.preexec, self.close_fds = None, True
+        in_process, preexec, close_fds = self.in_process, self.preexec, self.close_fds
+        self.in_process, self.preexec, self.close_fds = False, None, True
         code, lines, err = self.helper(["playlist", "--url", str(FIXTURES / "basic.m3u"), "--cache-dir", str(cache)])
-        self.preexec, self.close_fds = preexec, close_fds
+        self.in_process, self.preexec, self.close_fds = in_process, preexec, close_fds
         self.assertEqual(code, 0, err)
         channels = json.loads((cache / "channels.json").read_text(encoding="utf-8"))["channels"]
         return cache, channels[0]["id"]
@@ -169,6 +208,16 @@ class LocalRefusalTest(unittest.TestCase):
 
     def test_every_case_is_the_fixtures_reply_one_line_and_exit_1_with_nothing_written(self):
         for case in FIXTURE["refusals"]:
+            with self.subTest(case=case["id"]):
+                self.run_case(case)
+
+    def test_every_other_refusal_is_the_fixtures_reply_one_line_and_exit_1(self):
+        # The replies the checks over `refusals` cannot take (the fixture's
+        # `about` says why): the player lock's `busy` and main()'s
+        # MemoryError on a player verb (D-PLY-34), the clipboard's
+        # spawn_failed (D-PLY-31) and the guide's own refusals, the
+        # provider's (D-EPG-13).
+        for case in FIXTURE["otherRefusals"]:
             with self.subTest(case=case["id"]):
                 self.run_case(case)
 

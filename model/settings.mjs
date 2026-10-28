@@ -307,6 +307,32 @@ function helperDamagedReason(status) {
     + SEP + "reinstall the plugin"
 }
 
+// D-PLY-34 (2026-10-28). A code's meaning moves with the verb (D-PLY-32's
+// reading), and two of the codes below are the FETCH verbs' words: `busy`
+// ("Another fetch is running") and `too_large` ("Source too large"). On a
+// player verb the helper's `busy` is the PLAYER lock (acquire_lock: another
+// `player start|restart|stop` holds it, after the shell's retries are spent)
+// and `too_large` is main()'s answer to a MemoryError, this helper's own
+// memory -- no player verb reads a provider's source. Both reached the
+// "Could not start playback" card and lastError in the fetch's words. The
+// kind decides: `player.<verb>` (each player verb's own refusal), `player`
+// (main()'s catch-alls for any of them) and the verbs that drive the player
+// over its socket -- `play` (a zap), `stop`, `status` and `seek` (the rewind
+// verb's own refusal shape). The playlist and EPG verbs keep the table's
+// sentences, unchanged.
+var PLAYER_VERB_KINDS = ["player", "play", "stop", "status", "seek"]
+
+function playerVerbKind(kind) {
+  var k = str(kind)
+  return PLAYER_VERB_KINDS.indexOf(k) !== -1 || k.indexOf("player.") === 0
+}
+
+function playerVerbReason(code) {
+  if (code === "busy") return "The player is busy"
+  if (code === "too_large") return "Helper ran out of memory"
+  return ""
+}
+
 // Short, credential-free reason per UX 6.3. Maps helper error codes first,
 // then falls back to a scrubbed message.
 function statusReason(status) {
@@ -314,6 +340,8 @@ function statusReason(status) {
   var code = str(status.error.code)
   var message = str(status.error.message)
   if (code === "helper_damaged") return helperDamagedReason(status)
+  var byVerb = playerVerbKind(status.kind) ? playerVerbReason(code) : ""
+  if (byVerb !== "") return byVerb
   var http = code.match(/^http_(\d{3})$/)
   if (http) {
     var n = Number(http[1])
@@ -1149,10 +1177,11 @@ export {
   parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
   parseEpgNow, EPG_CHANNELS_OPEN, EPG_STORE_KIND, emptyEpgStore,
   parseEpgNowStore, epgNowIndex, parseHelperStatus, HTTP_REASONS,
-  HELPER_PART_RE, helperDamagedReason, statusReason, lastErrorAfterStatus,
-  statusHost, statusCode, statusHealthy, statusWarnings, WARNING_PREFIX,
-  warningLabel, labelWarning, labelWarnings, warningLine, footerWarning,
-  findBarEntry, settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
+  HELPER_PART_RE, helperDamagedReason, PLAYER_VERB_KINDS, playerVerbKind,
+  playerVerbReason, statusReason, lastErrorAfterStatus, statusHost,
+  statusCode, statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel,
+  labelWarning, labelWarnings, warningLine, footerWarning, findBarEntry,
+  settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
   entryInputText, entryInputForm, sameEntryInput, ownWriteInForce,
   settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
   MAX_SEEN_INPUTS, entryInputSeen, entryInputLast, entryInputsSeenAfter,
