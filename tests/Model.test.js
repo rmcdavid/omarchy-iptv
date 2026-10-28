@@ -13378,6 +13378,57 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   }, [["cache_unwritable", "Could not write the cache"], ["internal", "Helper failed unexpectedly"], ["http_404", "HTTP 404 Not Found from new.example.test"],
       ["helper_timeout", "Helper timed out"]])
 
+  // D-SRC-71, the recheck (rule 12). The check above composes the refresh
+  // empty state as Guide.qml does -- a copy of the guide's one call -- so it
+  // stayed green with the guide's call handing failureFromHost "" for the
+  // code, while the guide read "Could not write the cache from <host>"; and
+  // no check named a provider code beyond five, so http_403 added to the
+  // local list was green too. This compiles the guide's own `copy`, its
+  // `emptyPlaylist` binding and its `prose` binding from the shipping
+  // Guide.qml (the way the service harness compiles Service.qml) and runs
+  // them over the booted service, for the helper's local failures and for
+  // every provider-side code the playlist verb answers; and reads the
+  // Sources result line for the same probe failures.
+  const guideText = fs.readFileSync(path.join(__dirname, "../Guide.qml"), "utf8")
+  const guideOnce = anchor => {
+    const at = guideText.indexOf(anchor)
+    if (at === -1 || guideText.indexOf(anchor, at + 1) !== -1) throw new Error("Guide.qml: expected exactly one " + JSON.stringify(anchor))
+    return at + anchor.length
+  }
+  const guideBlock = anchor => { const open = guideOnce(anchor) - 1; const close = H.matchBrace(guideText, open); if (close === -1) throw new Error("Guide.qml: no end to " + anchor); return guideText.slice(open, close + 1) }
+  const guideExpr = anchor => { const from = guideOnce(anchor); return guideText.slice(from, guideText.indexOf("\n", from)) }
+  const PROVIDER = [["http_401", "HTTP 401 from new.example.test", "HTTP 401 Unauthorized"], ["http_403", "HTTP 403 from new.example.test", "HTTP 403 Forbidden"],
+                    ["http_404", "HTTP 404 from new.example.test", "HTTP 404 Not Found"], ["http_429", "HTTP 429 from new.example.test", "HTTP 429 Too Many Requests"],
+                    ["http_503", "HTTP 503 from new.example.test", "HTTP 503"], ["network", "connection refused by new.example.test", "Connection refused"],
+                    ["network", "certificate verify failed for new.example.test", "TLS error"], ["timeout", "timed out reading from new.example.test", "Timed out"],
+                    ["too_large", "source from new.example.test exceeds the limit", "Source too large"], ["unsafe_redirect", "refused a redirect from new.example.test", "Unsafe redirect"],
+                    ["bad_gzip", "bad gzip data from new.example.test", "Bad gzip data"], ["not_a_playlist", "source from new.example.test is not an M3U playlist", "Not an M3U playlist"]]
+
+  checkCall("D-SRC-71 (recheck): the refresh empty state as Guide.qml's own `copy`, `emptyPlaylist` and `prose` bindings compose it, compiled from the shipping text over the booted service, and the Sources result line for the same probe failures -- a local failure (the cache, a bug, the watchdog) is the reason alone; EVERY provider-side code the playlist verb answers keeps 'from <host>'", () => {
+    const copy = new Function("Model", "root", "return (" + guideBlock("  readonly property var copy: ({") + ")")(M, { pluginId: "io.github.rmcdavid.iptv" })
+    const emptyPlaylistOf = new Function("root", "Model", "return (" + guideExpr("readonly property bool emptyPlaylist: ") + ")")
+    const proseOf = new Function("root", "emptyState", "Model", guideBlock("readonly property string prose: {").slice(1, -1))
+    const shown = h => { const g = { emptyKind: "error", invalidSettingsText: "", copy, service: h.root }; return proseOf(g, { emptyPlaylist: emptyPlaylistOf(g, M) }, M) }
+    const refreshed = reply => { const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag"); h.root.handlePlaylistExit(reply); h.drain(); return shown(h) }
+    const probed = reply => {
+      const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+      add(h); h.probeExit(reply); h.drain()
+      const r = h.signals.filter(s => s[0] === "sourceProbeFinished").map(s => s[1])[0]
+      return M.probeFailureLine(r.reason, String(r.host || ""), "url", String(r.code || ""))
+    }
+    const t = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    t.root.playlistTimedOut = true
+    t.root.handlePlaylistExit(""); t.drain()
+    const local = [refreshed(helperSays("cache_unwritable", "could not write channels.json in the source's cache folder (No space left on device)")),
+                   refreshed(helperSays("internal", "OSError: [Errno 28] No space left on device")), shown(t)]
+    const wrong = PROVIDER.filter(([code, message, reason]) =>
+      refreshed(helperSays(code, message)) !== reason + " from new.example.test" + M.SEP + copy.errorCheck
+      || probed(helperSays(code, message)) !== reason + " from new.example.test").map(p => p[0] + ":" + p[2])
+    return { local, wrong, emptyPlaylist: refreshed(helperSays("empty_playlist", "no playable channels found in playlist from new.example.test")) }
+  }, { local: ["Could not write the cache" + Model.SEP + "check the source in Sources", "Helper failed unexpectedly" + Model.SEP + "check the source in Sources",
+               "Helper timed out" + Model.SEP + "check the source in Sources"],
+       wrong: [], emptyPlaylist: "Parsed 0 channels from new.example.test" + Model.SEP + "check the URL points at an M3U" })
+
   // ---- R21e (D-SINK-19 round 11): THE MIGRATION, through Service.qml ----
   //
   // Every pin here runs the shipping functions over a 0.13.5-shaped install:
