@@ -193,7 +193,7 @@ cursor to row 0 (or to the playing channel if it is in the new list).
 |---|---|---|
 | lead (`Style.space(24)` wide) | Favorite star, filled | Empty for non-favorites. Clicking the lead slot toggles favorite without playing. |
 | name | `tvg-name` or `#EXTINF` title | `Style.font.title`, elide right. Bold (`Font.Bold`) only on the channel that is currently playing. |
-| trail (`Style.space(20)` wide) | Playing glyph, or failed glyph | Playing: `ó°` U+F040A. Failed this session: `ó°¦` U+F0026. Otherwise empty. |
+| trail (`Style.space(20)` wide) | Playing glyph, or failed glyph | Playing: `󰐊` U+F040A. Failed this session: `󰀦` U+F0026. Otherwise empty. |
 | right meta | `until HH:MM` when EPG has a current programme | `Style.font.caption`, opacity 0.52, right aligned. Hidden without EPG. |
 | detail line | `Group - Now: X - Next: Y` | `Style.font.bodySmall`, opacity 0.52, elide right. Group segment is omitted when the selected column entry is that group. `Now:`/`Next:` segments are omitted without EPG data. A failed channel shows `Failed HH:MM - Space to retry` in place of the EPG segments. |
 | progress | Thin bar, fraction of current programme elapsed | Only with EPG and a current programme. See 5.6. |
@@ -553,23 +553,23 @@ glyphs.
 |  Search channels...                                                     Favorites - 6 channels |
 |                                                                                                |
 |  Recent           3 |                                                                          |
-|  Favorites        6 |> ó°  Sky Sports Main Event                              ó°     until 21:30 |
+|  Favorites        6 |> 󰓎  Sky Sports Main Event                              󰐊     until 21:30 |
 |  All          1,204 |>     Now: Premier League: Arsenal v Spurs - Next: Match Replay           |
 |                     |>     ===============================-----------------------------------  |
 |  GROUPS             |                                                                          |
-|  UK | SPORTS    142 |  ó°  BBC One HD                                                until 20:00 |
+|  UK | SPORTS    142 |  󰓎  BBC One HD                                                until 20:00 |
 |  UK | ENTERTAIN  96 |      Now: EastEnders - Next: The One Show                                |
 |  UK | NEWS       38 |      ============---------------------------------------------------      |
 |  UK | KIDS       24 |                                                                          |
-|  UK | MOVIES     57 |  ó°  Al Jazeera English                                        until 20:30 |
+|  UK | MOVIES     57 |  󰓎  Al Jazeera English                                        until 20:30 |
 |  US | NEWS       41 |      Now: Newshour - Next: Inside Story                                  |
 |  PL | INFORMAC.  19 |      ===========================--------------------------------------    |
 |  DE | SPORT      33 |                                                                          |
-|  ...                |  ó°  Arte HD                                                   until 21:15 |
+|  ...                |  󰓎  Arte HD                                                   until 21:15 |
 |                     |      Now: Karambolage - Next: Tracks                                     |
 |                     |      ====----------------------------------------------------------      |
 |                     |                                                                          |
-|  ó° Sky Sports Main Event - s stop          Enter play - Up/Down move - Left/Right group - Tab keys - Esc close |
+|  󰐊 Sky Sports Main Event - s stop          Enter play - Up/Down move - Left/Right group - Tab keys - Esc close |
 +------------------------------------------------------------------------------------------------+
 ```
 
@@ -585,7 +585,7 @@ card is centered. The top-right scope label and the footer are
 |  sky                                                                        in All - 14 matches |
 |                                                                                                |
 |  Recent           3 |                                                                          |
-|  Favorites        6 |> ó°  Sky Sports Main Event                              ó°     until 21:30 |
+|  Favorites        6 |> 󰓎  Sky Sports Main Event                              󰐊     until 21:30 |
 |  All          1,204 |>     UK | SPORTS - Now: Premier League: Arsenal v Spurs - Next: Match Re |
 |                     |>     ===============================-----------------------------------  |
 |  GROUPS             |                                                                          |
@@ -601,7 +601,7 @@ card is centered. The top-right scope label and the footer are
 |                     |      UK | ENTERTAINMENT - Now: Portrait Artist of the Year - Next: Tate  |
 |                     |      ==============================-----------------------------------    |
 |                     |                                                                          |
-|  ó° Sky Sports Main Event - s stop                Enter play - Up/Down move - Left/Right narrow - Tab keys |
+|  󰐊 Sky Sports Main Event - s stop                Enter play - Up/Down move - Left/Right narrow - Tab keys |
 +------------------------------------------------------------------------------------------------+
 ```
 
@@ -615,7 +615,7 @@ label would read `in UK | SPORTS - 9 matches`.
  lead(24)  name (title, elide) ..................... trail(20)  right meta (caption)
  |         |                                          |          |
  v         v                                          v          v
- ó°         Sky Sports Main Event                     ó°          until 21:30
+ 󰓎         Sky Sports Main Event                     󰐊          until 21:30
            Now: Premier League: Arsenal v Spurs - Next: Match Replay          <- bodySmall, 0.52
            ===============================-----------------------------------   <- Style.space(2) tall
            ^ fill = Util.alpha(Color.accent, 0.55)    ^ track = Util.alpha(fg, 0.12)
@@ -624,13 +624,13 @@ label would read `in UK | SPORTS - 9 matches`.
 Same row, no EPG configured, inside its own group (single-line row):
 
 ```
- ó°         Sky Sports Main Event                     ó°
+ 󰓎         Sky Sports Main Event                     󰐊
 ```
 
 Same row after a failed play this session:
 
 ```
-           Sky Sports Main Event                     ó°¦
+           Sky Sports Main Event                     󰀦
            Failed 21:12 - Space to retry
 ```
 
@@ -686,7 +686,7 @@ when no source is active, carries that one under `Saving has stopped`
 |                                                                                                |
 |                                                                                                |
 |                                                                                                |
-|                                             ó°                                                  |
+|                                             󰔂                                                  |
 |                                                                                                |
 |                                    No playlist configured                                      |
 |                                                                                                |
@@ -750,7 +750,7 @@ playlistUrl ""`" no longer exists (an empty value was a no-op since round
 |                                                                                                |
 |                                                                                                |
 |                                                                                                |
-|                                             ó°                                                  |
+|                                             󰔂                                                  |
 |                                                                                                |
 |                                    No playlist configured                                      |
 |                                                                                                |
@@ -779,7 +779,7 @@ this state is normally behind the Sources first-run form (`UX-SOURCES.md` 1.2,
 |                                                                                                |
 |                                                                                                |
 |                                                                                                |
-|                                             ó°                                                  |
+|                                             󰇘                                                  |
 |                                                                                                |
 |                                     Loading playlist...                                        |
 |                                                                                                |
@@ -803,10 +803,10 @@ and the footer says `Refreshing...`.
 |                                                                                                |
 |  Search channels...                                                     Favorites - 6 channels |
 |                                                                                                |
-|  ó°¦  Playlist refresh failed (HTTP 503) - showing cached copy from 12:40 - r retry              |
+|  󰀦  Playlist refresh failed (HTTP 503) - showing cached copy from 12:40 - r retry              |
 |                                                                                                |
 |  Recent           3 |                                                                          |
-|  Favorites        6 |> ó°  Sky Sports Main Event                                    until 21:30 |
+|  Favorites        6 |> 󰓎  Sky Sports Main Event                                    until 21:30 |
 |  All          1,204 |>     Now: Premier League: Arsenal v Spurs - Next: Match Replay           |
 |                     |>     ===============================-----------------------------------  |
 |  GROUPS             |                                                                          |
@@ -817,7 +817,7 @@ and the footer says `Refreshing...`.
 ```
 
 Banner spec: height `Style.space(28)`, radius `Style.cornerRadius`, fill
-`Util.alpha(Color.urgent, 0.10)`, glyph `ó°¦` in `Color.urgent`, text in
+`Util.alpha(Color.urgent, 0.10)`, glyph `󰀦` in `Color.urgent`, text in
 `Color.menu.text` at `Style.font.bodySmall`. The word "failed" carries the
 meaning; the tint is decoration. The banner appears with a 140 ms opacity
 fade and stays until the next successful refresh. The footer's
@@ -826,7 +826,7 @@ fade and stays until the next successful refresh. The footer's
 Error, no cache at all (empty state, column hidden):
 
 ```
-                                             ó°
+                                             󰔃
 
                                    Playlist failed to load
 
@@ -845,7 +845,7 @@ round-11 live lens drew it inside a cage on lane-key-m2, which round 12 does
 not change:
 
 ```
-                                             ó°
+                                             󰔃
 
                                    Playlist failed to load
 
@@ -864,10 +864,10 @@ wrap of the longer line at the shipped width is UNVERIFIED on a display.]**
 Three coordinated cues, all present at once:
 
 ```
-  row:     ó°  Sky Sports Main Event                              ó°     until 21:30
+  row:     󰓎  Sky Sports Main Event                              󰐊     until 21:30
            ^ name is Font.Bold                                   ^ playing glyph in the trail slot
 
-  footer:  ó° Sky Sports Main Event - s stop          (left side of the footer, Style.font.caption)
+  footer:  󰐊 Sky Sports Main Event - s stop          (left side of the footer, Style.font.caption)
 
   column:  no change (the column never highlights on playback)
 ```
@@ -884,18 +884,18 @@ Horizontal bar (`Style.bar.sizeHorizontal` tall). The icon sits in a
 the label is a `Text` in `Style.font.body` clipped to a max width.
 
 ```
-idle, ready (dimmed glyph, no label):          [ ó° ]
+idle, ready (dimmed glyph, no label):          [ 󰔂 ]
 
-not configured (dimmed glyph, tooltip):        [ ó° ]      tooltip: "IPTV - no playlist configured"
+not configured (dimmed glyph, tooltip):        [ 󰔂 ]      tooltip: "IPTV - no playlist configured"
 
-playing (glyph + label, elided at max width):  [ ó°§ Sky Sports Main Ev.. ]
+playing (glyph + label, elided at max width):  [ 󰕧 Sky Sports Main Ev.. ]
                                                   |<-- Style.space(180) -->|
 
-playing, short name:                           [ ó°§ Arte HD ]
+playing, short name:                           [ 󰕧 Arte HD ]
 
-error, not playing (television-off glyph):     [ ó° ]      tooltip: "IPTV - playlist error, open the guide"
+error, not playing (television-off glyph):     [ 󰔃 ]      tooltip: "IPTV - playlist error, open the guide"
 
-refreshing (any state; tooltip only):          [ ó° ]      tooltip: "IPTV - refreshing playlist..."
+refreshing (any state; tooltip only):          [ 󰔂 ]      tooltip: "IPTV - refreshing playlist..."
 ```
 
 **Behind live (M5-01).** The bar is the only plugin surface visible with the
@@ -935,7 +935,7 @@ lives in the tooltip with the name.
 
 ```
  +----+
- | ó°§ |   tooltip: "Playing Sky Sports Main Event"
+ | 󰕧 |   tooltip: "Playing Sky Sports Main Event"
  +----+
 ```
 
@@ -1113,15 +1113,15 @@ calls it with the width left after the group column is hidden, `gap` =
 
 | Meaning | Glyph | Codepoint | Nerd Font name |
 |---|---|---|---|
-| IPTV idle / not configured (bar), empty-state icon | ó° | U+F0502 | nf-md-television |
-| Playing (bar) | ó°§ | U+F0567 | nf-md-television_play (also the menu-entry icon in the contract) |
-| Playlist error, no cache (bar + empty state) | ó° | U+F0503 | nf-md-television_off |
-| Favorite (row lead) | ó° | U+F04CE | nf-md-star |
-| Playing (row trail, footer) | ó° | U+F040A | nf-md-play |
-| Failed this session (row trail), banner, notifications | ó°¦ | U+F0026 | nf-md-alert |
-| Loading (empty state) | ó° | U+F01D8 | nf-md-dots_horizontal |
-| Refresh (notification glyph) | ó° | U+F0450 | nf-md-refresh |
-| Recent (notification); behind live (bar lead glyph, M5-01, 4.8) | ó° | U+F02DA | nf-md-history |
+| IPTV idle / not configured (bar), empty-state icon | 󰔂 | U+F0502 | nf-md-television |
+| Playing (bar) | 󰕧 | U+F0567 | nf-md-television_play (also the menu-entry icon in the contract) |
+| Playlist error, no cache (bar + empty state) | 󰔃 | U+F0503 | nf-md-television_off |
+| Favorite (row lead) | 󰓎 | U+F04CE | nf-md-star |
+| Playing (row trail, footer) | 󰐊 | U+F040A | nf-md-play |
+| Failed this session (row trail), banner, notifications | 󰀦 | U+F0026 | nf-md-alert |
+| Loading (empty state) | 󰇘 | U+F01D8 | nf-md-dots_horizontal |
+| Refresh (notification glyph) | 󰑐 | U+F0450 | nf-md-refresh |
+| Recent (notification); behind live (bar lead glyph, M5-01, 4.8) | 󰋚 | U+F02DA | nf-md-history |
 | Paused (bar lead glyph; already `GLYPHS.tvPause`, confirmed in the installed font by fc-query) | 󰿑 | U+F0FD1 | nf-md-television_pause |
 
 Do not use color to distinguish these; each carries meaning by shape. Bar
@@ -1211,8 +1211,8 @@ matches for "x"", "Invalid reminder / Enter the number of minutes").
 | Row failed detail | `Failed 21:12 - Space to retry` |
 | Footer status, normal | `1,204 channels - updated 12:40` |
 | Footer status, cached | `1,204 channels - cached 12:40 - offline` |
-| Footer status, playing | `ó° Sky Sports Main Event - s stop` |
-| Footer status, playing behind live (M5-01) | `ó° 1:32 behind live - Sky Sports Main Event - s stop`; paused, `ó° paused - 0:42 behind live - Sky Sports Main Event - s stop`. The state LEADS the line: the status elides on the right, and a name can lose its tail where a number cannot (F-UX-5) |
+| Footer status, playing | `󰐊 Sky Sports Main Event - s stop` |
+| Footer status, playing behind live (M5-01) | `󰐊 1:32 behind live - Sky Sports Main Event - s stop`; paused, `󰐊 paused - 0:42 behind live - Sky Sports Main Event - s stop`. The state LEADS the line: the status elides on the right, and a name can lose its tail where a number cannot (F-UX-5) |
 | Footer status, playing behind live (M5-01) | `1:32 behind live`; paused: `paused · 0:42 behind live` (`Model.playbackStateText`; empty at live, absent until the player reports a zero point) |
 | Footer status, transient | `Refreshing...`, `Refreshed - 1,204 channels`, `Stopped`, `Added to Favorites`, `Removed from Favorites`, `Removed from Recent` |
 | Footer status, view flip (2.4b) | `Channel wall` on the way in, `Channel list` on the way back. The name of the view arrived at, not the key or the verb: `Ctrl+G` is one key doing two things and the transient is the only thing that says which one happened, on a card where the change itself is unmissable |
@@ -1243,7 +1243,7 @@ key/verb contrast is the accepted cost of the footer being readable at all.
 | Saved sources not loaded (no-write mode, nothing loaded; D-SINK-19 round 13, R23e, 2026-10-13) | `Saved sources not loaded` (the alert glyph above it) | `<path> <what>. Nothing is saved until it can be read, so sources, favorites and settings changed now are not kept. <fix>` -- `Model.stateUnreadableNotice(reason, path)`, the notification's own body, one source of copy; `<what>` and `<fix>` per reason in `UX-SOURCES.md` 5.10 item 1. Footer `Esc close` (no `r retry`; `o sources` only with sources in memory). Replaces `Not configured` whenever the no-write mode holds; drawn as the round-13 live run reads it (key-scenario B11 `title:notice prose:notice editable:0`), the pixels UNVERIFIED on a display **[Round 14, 2026-10-14 (R24b, R24f): the reasons `link` and `not-a-dir` join the table in `UX-SOURCES.md` 5.10 item 1 (`<path>` is the FOLDER's for `not-a-dir`), and the Sources screen in the mode carries this same title in its header with no Add rows (`UX-SOURCES.md` 3.2.6)]** **[Round 15, 2026-10-14 (R25c, D-SRC-38): the reason `folder-link` joins the table (a symbolic link at the state FOLDER that leads nowhere; `<path>` is the folder's); and in a block that began MID-session the Sources header reads `Saving has stopped` (`Model.stateBlockedHeader`), not this title]** **[Round 17, 2026-10-20 (R27e, D-SRC-42, D-SRC-51): the body is now `<path> <what>. Sources, favorites and settings changed now are not saved until the file can be read again. <fix>`, and the notice takes the service's `stateLoaded`, so a block that began mid-session is titled `Saving has stopped` here too -- and this surface is drawn mid-session whenever no source is active, so that title does reach it (R29c, 2026-10-20, corrects "only ever drawn at a start", which this bracket said); R27a's mid-session reason `read-timeout` was withdrawn by R28a and stays withdrawn under R29a]** **[Round 18, 2026-10-20 (R28e): the second sentence is `Sources, favorites and settings changed now are not kept.` at a start and the mid-session sentence quoted in 6.4 mid-session]** |
 | Loading, no cache | `Loading playlist...` | `Fetching from <host>` |
 | Fetch failed, no cache | `Playlist failed to load` | `<reason> from <host> - check playlistUrl` where reason is one of `HTTP 403 Forbidden`, `HTTP 404 Not Found`, `HTTP 5xx`, `Could not resolve host`, `Connection refused`, `Timed out`, `Not an M3U playlist`, `File not found` (local path) **[Amended 2026-10-13, D-SINK-19 round 12 (R22c): `<reason> from <host> - check the source in Sources` (`Guide.qml` `errorCheck` on lane-key-n1). No shipped string tells the user to set `playlistUrl` or `epgUrl` any more; `tests/test_shipped_copy.py` searches every string literal in every shipped code file for one (4.6).]** **[Amended 2026-10-27, D-SRC-69 and D-SRC-71: two more reasons, `Could not write the cache` (the fetch could not write its own cache files) and `Helper failed unexpectedly` (the helper's catch-all for a bug; the traceback stays in the journal), both from `Model.statusReason`. A failure on this machine is the reason ALONE, with no `from <host>`, because the provider had no part in it: `Could not write the cache`, `Helper failed unexpectedly`, `Helper timed out`, `Helper produced no output`, `Helper command not implemented` and the damaged-install sentence (`Plugin files damaged - reinstall the plugin`), so the body reads `Could not write the cache - check the source in Sources`. That is R28e's rule for the plugin's own refusals, extended by the owner (D-SRC-71); one list, `PROBE_LOCAL_REFUSALS` in model/sources.mjs, composed by `Model.failureFromHost`, serves this body and the Sources result line (UX-SOURCES 5.5) alike.]** **[Amended 2026-10-27, D-SRC-73 and D-PLY-30: two more reasons from `Model.statusReason`, both failures on this machine, so both are on that one list and read alone. `A folder the plugin uses is a broken link or not a folder` (`folder_unusable`, R25c's refusal): a folder the helper writes into -- a source's cache folder, its logo folder, the player's runtime folder -- is a symbolic link whose target is missing or is not a folder, or something that is not a folder is at its path. The helper's own message names the full path; the journal keeps it and no surface shows it. Here the body reads `A folder the plugin uses is a broken link or not a folder - check the source in Sources`, and the guide-data banner and both error notifications (6.4) carry the same sentence as their reason. Until D-SRC-73 the playlist fetch answered such a folder `Could not write the cache` and the guide-data banner showed the folder's path. `Could not write the player's runtime folder` (`runtime_unwritable`): a play the player's runtime folder refused, because the folder could not be made or its lock file could not be opened. It reaches the user as the reason in the `Stream failed` notification (6.4), `“<name>” did not play - Could not write the player's runtime folder`, and as `lastError` in the IPC `status` reply; a runtime folder that is a broken link reads the first sentence there. Until D-PLY-30 a runtime folder that could not be made, or a lock file that could not be opened, read `Helper failed unexpectedly`, and a runtime folder that is a broken link read its own path.]** **[Amended 2026-10-28, D-PLY-32: a play this machine refused no longer reaches the user as `Stream failed`. When `player start` or `restart` answers a refusal of its own -- the runtime folder or its lock (both sentences above), the plugin's files, the source's cache, the socket path, the spawn, the TLS read-back, the player's connection, or `busy` and `no_socket` once their retries are spent -- the reason is told in its own notification, `Could not start playback` (6.4), with the same body (`“<name>” did not play - Could not write the player's runtime folder`), and only once per episode: the same reason again is not told again until a start succeeds, and a different reason is told. The channel is NOT marked failed -- no red row, nothing written to `failed.json`, not skipped by the zap ring -- because the stream was never contacted (`Model.playerStartFailure`); `lastError` and the IPC `status` reply still carry the reason. `Stream failed` is kept for what is about the channel: a first load the player watched fail, an `end-file` error, a death at the socket's end (ARCHITECTURE-PLAYER 4.8), and a channel whose own stream URL scheme the player refuses. Until D-PLY-32 every one of these refusals marked the channel it was asked for, so with the runtime folder broken every channel the user tried turned red.]** **[Amended 2026-10-28, D-PLY-34: a player refusal reads the player's words, not the playlist fetch's. `The player is busy` (`busy`: another player command held the player's lock past every retry; the guide's own pause line already says it this way) and `Helper ran out of memory` (`too_large` from a player verb: the helper's own memory, never a source) replace `Another fetch is running` and `Source too large` on the `Could not start playback` notification, in `lastError` and the IPC `status` reply, on a zap's journal line and on the rewind line. The playlist and guide-data fetches keep `Another fetch is running` and `Source too large`. The sentence is chosen by the reply's kind (`Model.statusReason`).]** **[Amended 2026-10-28, D-PLY-31: two more of the player's own refusals read a sentence instead of the helper's words, in the same `Could not start playback` notification (`“<name>” did not play - Could not start mpv`) and in `lastError`. `Could not start mpv` (`spawn_failed`): the player program could not be started -- it is not executable, or this machine had no process or no file descriptor left to start it with. `Something else is at the player's socket path` (`socket_path_blocked`): a file, or anything that is not the player's socket, is at `$XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock`; the plugin never deletes it, and the player cannot start until it is moved. Until D-PLY-31 these read `the socket path is not a socket` and `could not start mpv: Permission denied`, and running out of processes or descriptors read `Helper failed unexpectedly`. A paste in the Sources form whose clipboard reader cannot start still says nothing and clears nothing.]** **[Amended 2026-10-28, D-PLY-33 (the owner's decision): of what the bracket above keeps for `Stream failed`, "a death at the socket's end" now marks the channel only when mpv said its load failed -- an `end-file` error for that channel's own entry. A player that died without saying so -- it crashed, was killed by the user, another program or the out-of-memory killer, or the display driver refused it -- is told as `Playback stopped` / `“<name>” stopped unexpectedly` (6.4), and the channel is NOT marked: no red row, nothing written to `failed.json`, not skipped by the zap ring; `lastError` reads `Playback stopped unexpectedly`. A channel whose player is found gone when the shell starts (PO-3) is no longer marked either, and is still not told. A first load the player watched fail still marks and still says `Stream failed`, because the helper's answer cannot yet say whether mpv reported the load failed or closed the connection. `Could not start playback` is unchanged: once per episode.]** |
-| Fetch failed, cache present (banner) | -- | `ó°¦  Playlist refresh failed (<reason>) - showing cached copy from 12:40 - r retry` |
+| Fetch failed, cache present (banner) | -- | `󰀦  Playlist refresh failed (<reason>) - showing cached copy from 12:40 - r retry` |
 | EPG failed (banner, low emphasis) | -- | `Guide data unavailable (<reason>) - channels still work - r retry` **[Amended 2026-10-28, D-EPG-13: the guide's own two refusals read a sentence, here and in the `Guide data error` notification (6.4) and the IPC `status` reply. `Not a valid XMLTV guide` (`bad_xml`): what the guide address served is not XML that parses, or it declares an XML entity, which no XMLTV guide does and the helper refuses before reading further (D-EPG-6). `Guide has no programmes` (`empty_epg`): the guide parsed and lists no programme at all. Until D-EPG-13 the banner showed the parser's own text, such as `Guide data unavailable (could not parse EPG XML: not well-formed (invalid token): line 1, column 0)`; the journal still has it. Both are about the provider's guide, so a line that names a host keeps it (no such line exists for the guide today).]** |
 | Playlist loaded with warnings (footer line) | -- | `Playlist warning: <first warning> (+N more)` when more than one. Shown after a load that produced warnings, such as the 50,000 channel or 2,000 group caps, and cleared by the next clean load. It never displaces a playing, refreshing or error state; see the precedence note below |
 | Guide data loaded with warnings (footer line) | -- | `Guide data warning: <first warning> (+N more)`. Same rules as the playlist warning, and the playlist warning wins when both are present |
@@ -1271,15 +1271,15 @@ Bar tooltips (`bar.showTooltip`):
 
 | Event | Headline | Body | Glyph | Urgency |
 |---|---|---|---|---|
-| Stream failed | `Stream failed` | `“Sky Sports Main Event” did not play` (the name is wrapped in curly quotes so a name starting with `-` can never be read as a flag, security finding S-04; append ` - <mpv reason>` when mpv gives one, e.g. `HTTP 403`) **[D-PLY-32, 2026-10-28: only for a failure about the channel -- the load failed, the player died on it, or its own URL scheme is refused; a play this machine refused before the stream was contacted is the next row, and marks nothing]** **[D-PLY-33, 2026-10-28, the owner's decision: "the player died on it" now means mpv said the load failed -- an `end-file` error for that channel's own entry, or `player start`'s first-load window answering `failed`; a player that died with no such report is `Playback stopped` below, and marks nothing]** | `ó°` U+F0503 | normal |
-| A play this machine refused before the stream was contacted (D-PLY-32, 2026-10-28; `-r 74021`, its own id; once per episode: told again only after a start succeeds, or for a different reason) | `Could not start playback` | `“Sky Sports Main Event” did not play - Could not write the player's runtime folder` (the `Stream failed` body, the same S-04 quoting and URL scrubbing, the reason from `Model.statusReason`, which names no path; `Model.notifyArgv("localPlayFailure")`). The channel is not marked failed (6.3) | `ó°` U+F0503 (mpv not found's: the other local reason a player cannot start) | normal |
-| The player died and mpv never said the load failed: it crashed, was killed (by the user, another program or the out-of-memory killer), or the display driver refused it (D-PLY-33, 2026-10-28; `-r 74022`, its own id; one card per death) | `Playback stopped` | `“Sky Sports Main Event” stopped unexpectedly` (the S-04 quoting and nothing else: no reason, because what mpv's log holds at such a death is a driver warning as often as a cause, and a crash or a kill leaves none; `Model.notifyArgv("playerStopped")`). It neither blames the stream nor says "did not play" about a channel that may have played for an hour (PO-4). The channel is not marked failed (6.3), and `lastError` reads `Playback stopped unexpectedly` | `ó°` U+F0503 (the stream failure's) | normal |
-| Playlist refreshed (manual `r` / middle click only) | `Playlist refreshed` | `1,204 channels in 38 groups` | `ó°` U+F0450 | low |
-| Playlist error, cache used | `Playlist error` | `Could not fetch the playlist (<reason>). Using cached copy from 12:40.` | `ó°¦` U+F0026 | normal |
-| Playlist error, no cache | `Playlist error` | `Could not fetch the playlist (<reason>). Open the guide for details.` | `ó°¦` | normal |
-| EPG error | `Guide data error` | `Could not fetch the EPG (<reason>). Channels still work.` | `ó°¦` | low |
-| mpv missing | `mpv not found` | `Install mpv to play channels.` | `ó°` | critical |
-| A merge of another program's write into an unsaved in-app change went past a limit (D-SINK-19 round 15, R25b, D-SRC-31; `-r 74018`, once per merge) | `Not every change was kept` | `Another program changed state.json while a change made here was not yet saved, and together they went past a limit. The other program's version was kept, and 1 source added here (the limit is 50 sources) was not kept. Make room, then add it again.` (`Model.mergeDropNotice`: counts and limits only -- sources 50, saved searches 20, hidden groups 200 -- never a URL, label, query or group name; `UX-SOURCES.md` 5.10 item 8) | `ó°¦` U+F0026 | normal |
+| Stream failed | `Stream failed` | `“Sky Sports Main Event” did not play` (the name is wrapped in curly quotes so a name starting with `-` can never be read as a flag, security finding S-04; append ` - <mpv reason>` when mpv gives one, e.g. `HTTP 403`) **[D-PLY-32, 2026-10-28: only for a failure about the channel -- the load failed, the player died on it, or its own URL scheme is refused; a play this machine refused before the stream was contacted is the next row, and marks nothing]** **[D-PLY-33, 2026-10-28, the owner's decision: "the player died on it" now means mpv said the load failed -- an `end-file` error for that channel's own entry, or `player start`'s first-load window answering `failed`; a player that died with no such report is `Playback stopped` below, and marks nothing]** | `󰔃` U+F0503 | normal |
+| A play this machine refused before the stream was contacted (D-PLY-32, 2026-10-28; `-r 74021`, its own id; once per episode: told again only after a start succeeds, or for a different reason) | `Could not start playback` | `“Sky Sports Main Event” did not play - Could not write the player's runtime folder` (the `Stream failed` body, the same S-04 quoting and URL scrubbing, the reason from `Model.statusReason`, which names no path; `Model.notifyArgv("localPlayFailure")`). The channel is not marked failed (6.3) | `󰔃` U+F0503 (mpv not found's: the other local reason a player cannot start) | normal |
+| The player died and mpv never said the load failed: it crashed, was killed (by the user, another program or the out-of-memory killer), or the display driver refused it (D-PLY-33, 2026-10-28; `-r 74022`, its own id; one card per death) | `Playback stopped` | `“Sky Sports Main Event” stopped unexpectedly` (the S-04 quoting and nothing else: no reason, because what mpv's log holds at such a death is a driver warning as often as a cause, and a crash or a kill leaves none; `Model.notifyArgv("playerStopped")`). It neither blames the stream nor says "did not play" about a channel that may have played for an hour (PO-4). The channel is not marked failed (6.3), and `lastError` reads `Playback stopped unexpectedly` | `󰔃` U+F0503 (the stream failure's) | normal |
+| Playlist refreshed (manual `r` / middle click only) | `Playlist refreshed` | `1,204 channels in 38 groups` | `󰑐` U+F0450 | low |
+| Playlist error, cache used | `Playlist error` | `Could not fetch the playlist (<reason>). Using cached copy from 12:40.` | `󰀦` U+F0026 | normal |
+| Playlist error, no cache | `Playlist error` | `Could not fetch the playlist (<reason>). Open the guide for details.` | `󰀦` | normal |
+| EPG error | `Guide data error` | `Could not fetch the EPG (<reason>). Channels still work.` | `󰀦` | low |
+| mpv missing | `mpv not found` | `Install mpv to play channels.` | `󰔃` | critical |
+| A merge of another program's write into an unsaved in-app change went past a limit (D-SINK-19 round 15, R25b, D-SRC-31; `-r 74018`, once per merge) | `Not every change was kept` | `Another program changed state.json while a change made here was not yet saved, and together they went past a limit. The other program's version was kept, and 1 source added here (the limit is 50 sources) was not kept. Make room, then add it again.` (`Model.mergeDropNotice`: counts and limits only -- sources 50, saved searches 20, hidden groups 200 -- never a URL, label, query or group name; `UX-SOURCES.md` 5.10 item 8) | `󰀦` U+F0026 | normal |
 | The no-write mode begins (D-SINK-19 R22a; titles R27e, 2026-10-20; `-r 74017`, once per episode) | `Saved sources not loaded` when it begins at a start; `Saving has stopped` when it begins after the sources loaded (`Model.STATE_BLOCK_TITLE_START`, `Model.STATE_BLOCK_TITLE_MID`) | `<path> <what>. <unsaved> <fix>`, `<unsaved>` being `Sources, favorites and settings changed now are not kept.` at a start and, mid-session, `Favorites and other changes made now are held in this session only: the next such change made here saves them if it finds the file again, but they are dropped if the file comes back by itself first, if a source change is what finds it, or if the shell is stopped.` (R28e, 2026-10-20; until then both read `... are not saved until the file can be read again.`) (`Model.stateUnreadableNotice(reason, path, midSession)`; every reason's `<what>` and `<fix>` in `UX-SOURCES.md` 5.10 item 1, verbatim in `tests/fixtures/state-notices.json`); the journal line is `<title>: <body>` | the alert glyph | critical |
 | The one-time migration found Sources full (D-SINK-19 R27d, D-SRC-44, 2026-10-20; R28b the same day: the guide URL beside the playlist is held with it; R29e the same day: the body says which source ends active; `-r 74016`, the entry-report id, once a session) | `Sources is full` | `The playlist set on the bar, and its guide URL if one is set, were not moved into Sources: Sources already holds 50 sources, the most it can. Remove one in the guide's Sources screen and the bar's playlist and its guide move in together; the bar's playlist then becomes the active source.` (`Model.entryInputNotice("playlistUrl", "full")`: no URL, no label; `UX-SOURCES.md` 5.9) | the alert glyph | normal |
 | ~~A read of `state.json` before a save has not answered for 8 s; the change is held and the file is read again (D-SINK-19 R28a, 2026-10-20; `-r 74019`, its own id, once per held save)~~ **WITHDRAWN 2026-10-20 (R29a): there is no such card. A read that does not answer within 2 s lets its save go ahead without it, counted and logged, as on 0.14.2, and nothing is told (`UX-SOURCES.md` 5.10 item 9). Id 74019 is retired, not reused.** | ~~`Saving is waiting`~~ | ~~R28a's sentence, which promised the change "saved when the file answers"~~ | -- | -- |
@@ -1511,7 +1511,7 @@ keyboard focus of an overlay already ends on Esc).
 | 11 | Bar label: marquee or elide? | Elide right at `Style.space(barLabelMaxWidth)`, default 180; full name in the tooltip. A marquee under live TV is distracting. |
 | 12 | Vertical bar | Icon only; tooltip carries the name. (First-class vertical layout is M2 per PRODUCT.md.) |
 | 13 | Open/close animation | None, matching clipboard/menu/emojis and the 150 ms budget. |
-| 14 | Which glyphs | ó° idle, ó°§ playing, ó° error, ó° favorite, ó° playing row, ó°¦ failed/alert, ó° loading, ó° refresh (all verified in the installed font). |
+| 14 | Which glyphs | 󰔂 idle, 󰕧 playing, 󰔃 error, 󰓎 favorite, 󰐊 playing row, 󰀦 failed/alert, 󰇘 loading, 󰑐 refresh (all verified in the installed font). |
 | 15 | Refresh notifications | Only for manual refresh (`r`, middle click). Timer refreshes are silent unless they fail. |
 | 16 | Where do settings live for a plugin that is both bar-widget and overlay? | The empty state names the command (`omarchy bar set ...`) and the file (`~/.config/omarchy/shell.json`); the architect decides whether the overlay reads the bar-layout entry or a `plugins[]` entry, and the README states which. Copy does not change either way. **[2026-10-13, D-SINK-19 round 11: the empty state names no command any more; sources are added in the guide, and the file line names both files (4.4).]** |
 | 17 | Digits | Ignored in list mode (reserved for M2 channel numbers); literal in search mode. |
