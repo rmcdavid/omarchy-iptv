@@ -245,6 +245,20 @@ player orphan-check --socket S --owner-pid PID [--grace 6.0]
 player tracks  --socket S [--audio ID|no] [--sub ID|no] [--ipc-timeout 2.0]
 ```
 
+**[Amended 2026-10-28, D-PLY-35: the service passes NONE of the four timeout
+flags on any verb (Model.playerStartArgv, playerRestartArgv, playerProbeArgv;
+pinned by a node check), so the defaults above are the bounds every shell run
+waits out, and the shell's watchdog over the player slot is derived from them
+(4.4's bracket). Two more bounds sit inside `start` and `restart` and were
+literals until this day: the spawn's wait for the grandchild's pid,
+`SPAWN_PID_TIMEOUT` (2 s), and the one connect `socket_is_dead` makes before a
+settle unlinks, `SETTLE_CONNECT_TIMEOUT` (0.2 s); both are named now, values
+unchanged. Every one of these numbers, with `LOCK_POLL_S`, `STOP_SETTLE_MS`,
+`SETTLE_LOCK_TIMEOUT` and the ladder's two graces, is pinned by
+tests/fixtures/player-bounds.json, which the python side reads off the helper
+by name (tests/test_player_bounds.py, which also observes the two former
+literals being used) and the model mirrors (Model.PLAYER_BOUNDS).]**
+
 `player tracks` (M3-02) lists mpv's `track-list` and, given a selection,
 sets `aid` / `sid` FIRST and lists after, so one reply carries the player's
 answer to the request (PLAN-M3 decision 5). The list is a sink (rule 5, dev
@@ -409,6 +423,46 @@ Additive changes to existing verbs: `play` gains optional `--scope` / `--since`
     binds. On connect it sends exactly `request_log_messages "error"` and
     `observe_property 1 idle-active`. Observed properties are dropped when a
     connection closes, so a new shell re-subscribes rather than inheriting.
+
+**[Amended 2026-10-28, D-PLY-35: the bounds of steps 4 to 11 add up past
+the one 12 s `playerWatchdog` step 2 starts -- the lock's 6 s, the spawn's 5 s
+and the first-load window's 3 s are 14 s before any IPC -- and the watchdog
+TERMs the helper. Measured on dev da0000d, headless and in a nested cage on a
+private bus (QA-RESULTS "D-PLY-35"): with the lock held 5.8 s by a stand-in, the
+spawn slowed 4 s and the stream's first byte 6 s late, the start was TERMed at
+12.0 s, a second after its loadfile (step 9e); the player it had spawned
+played the channel on, with the shell's observer off, `nowPlaying` null, the
+session record retired and a "Could not start playback / Helper produced no
+output" card up. The next play adopted that player (step 5), so nothing
+multiplied; nothing observed it in between either. Two changes.
+(1) The watchdog's interval is the bound of the verb in flight,
+`Model.playerWatchdogMs(verb)`: the verb's longest path through the helper's
+code with every wait it survives at its full bound and the one wait that ends
+it, plus a 5 s margin for the interpreter, the cache read and the /proc scans
+(a whole `player probe` with no player measured 259-306 ms, a start that
+resolves its id in a 10,000-channel cache 356-390 ms, at load 3.2). Start
+43.25 s (the lock, a found player that does not answer and its whole ladder,
+the spawn's pipes, its bind window and the last probe of it, then the larger of
+the `no_socket` tail and one caught request plus the first-load window),
+restart 35.45 s (the lock, its ladder from term and a settle, then the same
+spawn and tail), probe 11 s (its connect and request and one more request).
+model/player.mjs carries the arithmetic and tests/fixtures/player-bounds.json
+its result. Not summed: every other IPC request at its 2 s bound -- a request
+that reaches its bound raises and ends the verb, so only an mpv answering
+each of a start's twenty-odd requests just inside 2 s could run past it.
+(2) That residual, and anything else that runs past, is recovered rather than
+bounded: step 12 reads a start or restart the watchdog stopped (an empty reply
+with the watchdog's flag) as `helper_timeout` -- the S-05 status the fetch
+slots already synthesise -- and not as a refusal. With an intent still
+standing the shell tells nothing yet, keeps `nowPlaying`, arms the socket hunt
+and runs the reattach probe (4.5). A player carrying the stash is adopted,
+the start's relaunch and retries settled as an ok reply settles them; if its
+stash names another channel the intent is put back and sent again (ruling
+CL5). Anything else -- no player, one that does not answer, one it cannot
+identify or make verify -- ends the start as the local failure it would have
+answered, `Could not start playback` with "Helper timed out", marking nothing
+(D-PLY-32). A probe that is stale (a newer play went out) or a socket EOF that
+already told a death drops the stopped start untold.]**
 
 Two concurrent IPC clients are safe: mpv names them `ipc_0`/`ipc_1` and
 correlates by `request_id`.
@@ -638,7 +692,11 @@ readonly property bool playing: playerUp && nowPlaying !== null
 ```
 
 `playerPending` is cleared by the socket connecting, by `handlePlayerResult()`,
-or by `playerWatchdog` (12 s) - whichever is first. That gives `playerUp` the
+or by `playerWatchdog` (12 s) - whichever is first. **[Amended 2026-10-28,
+D-PLY-35: 12 s is now the Timer's bound only while no verb runs, after a reply
+(`Model.PLAYER_BIRTH_EDGE_MS`); while `start`, `restart` or `probe` runs it
+carries that verb's own bound (4.4's bracket), and a start it stops keeps the
+birth edge while the reattach probe looks for what it left.]** That gives `playerUp` the
 same synchronous birth edge `mpvProc.running` had, and a sub-second death edge
 from socket EOF, which is strictly better than a 10 s poll.
 
@@ -1551,7 +1609,8 @@ Owns `Service.qml`, `scripts/dev-harness/*`. Must not touch `Model.js`,
   (`:369-394`), `Timer stopTimer` (`:1685`), `stopStage`.
 - Add `Socket { id: playerSocket }` + `SplitParser` + `Connections`,
   `Timer playerSocketTimer` (250 ms), `Process { id: playerProc }` +
-  `Timer playerWatchdog` (12 s), and the properties `playerPending`,
+  `Timer playerWatchdog` (12 s; **[Amended 2026-10-28, D-PLY-35: per verb,
+  derived from the helper's bounds; 12 s is the birth edge, 4.7]**), and the properties `playerPending`,
   `playerWanted`, `playSeq`, `stopAt`, `currentEntryId`, `entryOwners`.
 - Add `startPlayer()`, `runPlayerProbe()`, `applyProbe()`,
   `reconcileNowPlaying()`, `handlePlayerLine()`, `handlePlayerGone()`,
