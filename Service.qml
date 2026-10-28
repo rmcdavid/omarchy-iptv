@@ -3342,9 +3342,14 @@ Item {
   // EOF is about to say the same thing; whichever wins, the user sees one
   // toast.
   function playerFirstLoadFailed(reason) {
-    var target = root.nowPlaying
     if (reason !== "") root.rememberStderr(reason)
-    root.raiseStreamFailure(target, reason !== "" ? reason : Model.PLAYER_GENERIC_FAILURE)
+    // D-PLY-33: the same decision as every other death, which here can only
+    // take the helper's word -- its reply does not say whether mpv sent an
+    // end-file error or closed the connection, so it still marks (raised
+    // with D-PLY-33's report).
+    var report = Model.deathReport({ firstLoad: true, nowPlaying: root.nowPlaying, reason: reason })
+    if (report.card === "streamFailed") root.raiseStreamFailure(report.target, report.reason)
+    else if (report.card === "playerStopped") root.raisePlayerStopped(report.target, report.reason)
     if (!root.socketAttached()) {
       root.playerPending = false
       root.playerWanted = false
@@ -3549,7 +3554,9 @@ Item {
   // holds a session record, the channel it names died with no shell attached
   // to notice - so the guide gets a red row, silently, and the record is
   // cleared. A toast for something that stopped minutes ago, possibly on
-  // another login, is noise that arrives without context.
+  // another login, is noise that arrives without context. [D-PLY-33,
+  // 2026-10-28: no red row any more -- see the mark below; the record is
+  // still cleared and nothing is told.]
   //
   // The race: this runs from the probe reply, about 130 ms after
   // Component.onCompleted, while stateFile loads whenever it loads - either
@@ -3562,11 +3569,18 @@ Item {
                                            Model.formatClock(Math.floor(Date.now() / 1000)))
     root.deadSessionPending = verdict.pending
     if (!verdict.mark) return
-    root.failedAt = verdict.failed
-    // The mark is raised, so the record is spent. Retiring it goes through
-    // the same decision as every other ending rather than being written
-    // here: that is what makes the clear stick when the write loses its
-    // race with state.json's own load.
+    // D-PLY-33 (owner, 2026-10-28): a surviving record is a player that died
+    // with nobody attached, so nobody saw an end-file -- and a death with no
+    // end-file marks nothing. The record cannot tell a dead stream from a
+    // crash, a kill, a logout, or a clean end PO-4 keeps silent. So the mark
+    // deadSessionVerdict prepared is applied only if Model.deathReport says
+    // an unattended death marks, which it does not; PO-3's "no stale toast"
+    // stands with it.
+    if (Model.deathReport({ unattended: true }).mark === true) root.failedAt = verdict.failed
+    // The record is spent either way. Retiring it goes through the same
+    // decision as every other ending rather than being written here: that
+    // is what makes the clear stick when the write loses its race with
+    // state.json's own load.
     root.noteSessionOutcome("marked")
   }
 
@@ -3793,6 +3807,21 @@ Item {
     root.notify("localPlayFailure", { name: String(target.name || ""), reason: reason })
   }
 
+  // D-PLY-33 (owner, 2026-10-28): the player died and mpv never said the load
+  // failed (Model.deathReport card "playerStopped"). Told, because a player
+  // that vanished must never vanish in silence (F4), and in copy that blames
+  // no stream; `failedAt`, failed.json and `lastFailedId` are NOT touched.
+  // The same one-card-per-failed-play gate as raiseStreamFailure, so
+  // whichever detector speaks first is the one the user hears.
+  function raisePlayerStopped(target, reason) {
+    if (!target) return
+    var id = String(target.id || "")
+    if (id !== "" && root.notifiedFailureId === id) return
+    root.notifiedFailureId = id
+    root.lastError = reason
+    root.notify("playerStopped", { name: String(target.name || "") })
+  }
+
   function rememberStderr(line) {
     var tail = Model.pushPlayerLog(root.mpvStderrTail, line)
     if (tail === root.mpvStderrTail) return
@@ -3814,10 +3843,14 @@ Item {
     var current = root.nowPlaying
     var end = root.lastEndFile
     var stopped = root.userStopped
-    var report = Model.endedReport({
+    // D-PLY-33: Model.deathReport is endedReport plus what the death is
+    // evidence of -- marked only for an end-file error on the channel's own
+    // entry, which is why it takes the entry the player last started.
+    var report = Model.deathReport({
       lastEndFile: end,
       owners: root.entryOwners,
       nowPlaying: current,
+      entryId: root.currentEntryId,
       userStopped: stopped,
       stopping: root.stopping,
       tail: root.mpvStderrTail
@@ -3889,12 +3922,15 @@ Item {
     // channel that died unattended (PO-3).
     root.noteSessionOutcome("ended")
     root.entryOwners = Model.keyedMap()
-    if (!report.notify) return
-    // report.reason is the log-message tail when there is one ("Failed to
-    // open scheme://host" says what actually went wrong), else mpv's own
-    // generic file_error. Both are redacted, the tail twice (in python and
-    // again in Model.pushPlayerLog).
-    root.raiseStreamFailure(report.target, report.reason)
+    // D-PLY-33 (owner, 2026-10-28). A load mpv said failed is the stream's:
+    // marked, "Stream failed", and report.reason is the log-message tail when
+    // there is one ("Failed to open scheme://host" says what actually went
+    // wrong), else mpv's own generic file_error -- both redacted, the tail
+    // twice (in python and again in Model.pushPlayerLog). A death with no
+    // such end-file -- a crash, a kill, a VO abort -- is told and marks
+    // nothing, because nothing says the stream caused it.
+    if (report.card === "streamFailed") root.raiseStreamFailure(report.target, report.reason)
+    else if (report.card === "playerStopped") root.raisePlayerStopped(report.target, report.reason)
   }
 
   function handlePlaylistExit(text) {
