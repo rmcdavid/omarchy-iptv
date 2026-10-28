@@ -3,7 +3,7 @@ import {
   QUOTE_OPEN, QUOTE_CLOSE, SEP, GLYPHS, NOTIFY_IDS
 } from "./build.mjs"
 import {
-  str, asList
+  str, asList, keyedMap, ownKeyValue
 } from "./text.mjs"
 import {
   cleanName
@@ -14,6 +14,9 @@ import {
 import {
   parseHelperStatus, entryInputNotice
 } from "./settings.mjs"
+import {
+  outputFailureSentence
+} from "./player.mjs"
 import {
   helperArgv
 } from "./mpv.mjs"
@@ -249,7 +252,17 @@ function playerPauseArgv(socket, state) {
 // one of its own flags (`--urgency=...`, `-g`, ...), so the body is built to
 // never start with "-": the playlist-controlled name is quoted with the
 // typographic quotes and cleaned of leading dashes (S-04).
-function notifyArgv(event, params) {
+//
+// D-HOST-5 (owner, 2026-10-28). `replaceId` is the id the notification
+// server returned for this kind's last card (Model.notifyPost keeps it): sent
+// as `-r`, it replaces that card in place while the server still holds it,
+// and an id the server no longer holds (the card expired or was dismissed)
+// gets a fresh card -- both measured on Quickshell 0.3.1's server. With no
+// such id the kind's fixed NOTIFY_IDS number goes out, which the server
+// answers with a fresh card too. `-p` makes the wrapper print the id the
+// server returned, which is how the next post of the kind finds it; it comes
+// before `-r` so `-r <id> <headline>` stays one run of the argv.
+function notifyArgv(event, params, replaceId) {
   var p = params || {}
   var spec = null
   var name = cleanName(p.name) || "Channel"
@@ -272,6 +285,19 @@ function notifyArgv(event, params) {
     // driver warning as often as a cause (D-PLY-29), and a crash or a kill
     // leaves no line at all. The same S-04 quoting as every body with a name.
     spec = { title: "Playback stopped", body: QUOTE_OPEN + name + QUOTE_CLOSE + " stopped unexpectedly", glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.playerStopped }
+  } else if (event === "outputFailed") {
+    // D-PLY-37 (owner, 2026-10-28): mpv ended the load because an output of
+    // THIS machine could not be opened (Model.deathReport card
+    // "outputFailed"). The headline names the output, the body says the
+    // channel stopped and why, in a sentence that blames this computer --
+    // never "did not play", because the picture played until the stream
+    // ended (measured: mpv 0.41.0 plays the video on and reports the audio
+    // output only when the file ends). `output` is "audio" or "video"; the
+    // sentence is Model.outputFailureSentence's, the one lastError records.
+    var lost = p.output === "video" ? "video" : "audio"
+    spec = { title: lost === "video" ? "Video output failed" : "Audio output failed",
+             body: QUOTE_OPEN + name + QUOTE_CLOSE + " stopped" + SEP + outputFailureSentence(lost),
+             glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.outputFailed }
   } else if (event === "playlistRefreshed") {
     spec = { title: "Playlist refreshed", body: pluralChannels(p.channelCount) + " in " + formatCount(p.groupCount) + (Number(p.groupCount) === 1 ? " group" : " groups"), glyph: GLYPHS.refresh, urgency: "low", id: NOTIFY_IDS.playlistRefreshed }
   } else if (event === "playlistError") {
@@ -305,7 +331,98 @@ function notifyArgv(event, params) {
     if (kept) spec = { title: kept.title, body: kept.body, glyph: GLYPHS.alert, urgency: "normal", id: NOTIFY_IDS.mergeConflict }
   }
   if (!spec) return null
-  return ["omarchy-notification-send", "--app-name", "IPTV", "-u", spec.urgency, "-g", spec.glyph, "-r", String(spec.id), spec.title, spec.body]
+  var held = notifyReplaceId(replaceId)
+  return ["omarchy-notification-send", "--app-name", "IPTV", "-u", spec.urgency, "-g", spec.glyph, "-p",
+          "-r", String(held > 0 ? held : spec.id), spec.title, spec.body]
+}
+
+// ---- D-HOST-5 (owner, 2026-10-28): one card per notice kind, refreshed in place.
+//
+// The service posts every notice through ONE slot per kind (the notifyArgv
+// event name). The slot holds the id the server returned for the kind's last
+// card and sends it back as `-r` on the next post of that kind, so a repeated
+// notice refreshes its card where the server still holds it. Two posts of a
+// kind are never in flight together: the second would leave before the
+// first's id came back and stack a second card. A post that arrives while
+// its kind's post is in flight is HELD -- the latest replacing any earlier
+// one held, because it would replace that card on screen anyway -- and goes
+// out with the returned id when the post in flight answers. Kinds never wait
+// on each other.
+//
+// The ids live in the service's memory only and are never saved. The server
+// is the shell's own (Omarchy's notifications plugin runs in the same
+// omarchy-shell process), and its ids start again from 1 with each server
+// generation; memory that dies with the shell is the one store that can never
+// hand a new generation an old id, which a saved id would -- and the server
+// replaces whatever card holds an id, whichever program posted it.
+//
+// slots: a keyedMap of event -> { id, busy, held }, never mutated; every call
+// returns a new map. `held` is the params of the post waiting, or null.
+
+// A notice post (the wrapper, then busctl) normally answers in tens of
+// milliseconds; this bounds one that does not, so a wedged post cannot hold
+// its kind's later notices forever. busctl's own call timeout is 25 s.
+var NOTIFY_POST_TIMEOUT_MS = 5000
+
+// A server id as `-r` takes it: a positive integer in UINT32 range, else 0.
+function notifyReplaceId(value) {
+  var n = typeof value === "number" ? value : Number(str(value))
+  if (!isFinite(n) || n !== Math.floor(n) || n < 1 || n > 4294967295) return 0
+  return n
+}
+
+// The id `omarchy-notification-send -p` printed: one decimal integer on one
+// line. Anything else -- a wrapper that failed (it exits non-zero and prints
+// nothing), a logging stub that prints nothing, a post the watchdog ended, a
+// crash -- is 0, "no id held": the next post of the kind goes out with the
+// fixed number and gets a fresh card, the safe direction.
+function notifyReplyId(text, exitCode) {
+  if (Number(exitCode) !== 0) return 0
+  var m = /^[ \t]*([0-9]{1,10})[ \t]*\r?\n?$/.exec(str(text))
+  return m ? notifyReplaceId(Number(m[1])) : 0
+}
+
+function notifySlot(slots, event) {
+  var s = slots && typeof slots === "object" ? ownKeyValue(slots, str(event)) : null
+  return {
+    id: s ? notifyReplaceId(s.id) : 0,
+    busy: !!(s && s.busy === true),
+    held: s && s.held !== undefined && s.held !== null ? s.held : null
+  }
+}
+
+function withNotifySlot(slots, event, slot) {
+  var out = keyedMap()
+  var keys = slots && typeof slots === "object" ? Object.keys(slots) : []
+  for (var i = 0; i < keys.length; i++) out[keys[i]] = slots[keys[i]]
+  out[str(event)] = slot
+  return out
+}
+
+// A notice to post. Returns { slots, argv }: argv is the command to run now,
+// or null when the kind's post is in flight (the notice is held) or the event
+// makes no card (notifyArgv's null: an unknown event, a merge with nothing
+// dropped).
+function notifyPost(slots, event, params) {
+  if (notifyArgv(event, params) === null) return { slots: slots, argv: null }
+  var slot = notifySlot(slots, event)
+  var p = params || {}
+  if (slot.busy) return { slots: withNotifySlot(slots, event, { id: slot.id, busy: true, held: p }), argv: null }
+  return { slots: withNotifySlot(slots, event, { id: slot.id, busy: true, held: null }), argv: notifyArgv(event, p, slot.id) }
+}
+
+// A post of `event` answered: its stdout and exit code. The slot now holds
+// what this post returned -- the id of the card it made or refreshed, or none
+// -- and a notice held meanwhile goes out at once with that id. Returns
+// { slots, argv } as notifyPost does.
+function notifyAnswered(slots, event, text, exitCode) {
+  var slot = notifySlot(slots, event)
+  var id = notifyReplyId(text, exitCode)
+  if (slot.held !== null) {
+    var argv = notifyArgv(event, slot.held, id)
+    if (argv !== null) return { slots: withNotifySlot(slots, event, { id: id, busy: true, held: null }), argv: argv }
+  }
+  return { slots: withNotifySlot(slots, event, { id: id, busy: false, held: null }), argv: null }
 }
 
 // ------------------------------------------------------------ privacy
@@ -650,8 +767,10 @@ export {
   configShieldArgv, configShieldState, persistCarriesSecret,
   configShieldDecision, entryShieldDecision, seqArg, mpvArgArgv,
   playerSessionArgv, playerStartArgv, playerStopArgv, playerRestartArgv,
-  playerPauseArgv, notifyArgv, sourceLabel, hostOf, SPACE_RE, isSpaceAt,
-  URL_SPACE_CODES, isUrlSpaceAt, urlSpaceIndex, URL_DELIMITER_CODES,
-  isUrlDelimiterAt, urlDelimiterIndex, trailingPunctuationLength,
-  isSchemeRestCode, isLetterCode, redactUrls, scrubUrls, sinkText
+  playerPauseArgv, notifyArgv, NOTIFY_POST_TIMEOUT_MS, notifyReplaceId,
+  notifyReplyId, notifySlot, withNotifySlot, notifyPost, notifyAnswered,
+  sourceLabel, hostOf, SPACE_RE, isSpaceAt, URL_SPACE_CODES, isUrlSpaceAt,
+  urlSpaceIndex, URL_DELIMITER_CODES, isUrlDelimiterAt, urlDelimiterIndex,
+  trailingPunctuationLength, isSchemeRestCode, isLetterCode, redactUrls,
+  scrubUrls, sinkText
 }

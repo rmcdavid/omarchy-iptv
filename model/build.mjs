@@ -328,8 +328,17 @@ var MPV_GPU_SW = "--gpu-sw=yes"
 var MPV_TLS_VERIFY_PROP = "tls-verify"
 var MPV_STREAM_OPTS_PROP = "stream-lavf-o"
 
-// Stable notification replace-ids so a repeated failure replaces its toast
-// instead of stacking (UX.md 6.4).
+// One fixed number per notice kind (UX.md 6.4). Until D-HOST-5 these were
+// sent as `-r <id>` in the belief that a repeated notice replaced its card;
+// Omarchy's server (Quickshell 0.3.1's NotificationServer) numbers cards
+// itself from 1 and replaces only an id it handed out and still holds, so a
+// fixed id never replaced anything and every post stacked a new card
+// (measured 2026-10-28 on a private bus). Since D-HOST-5 the service keeps
+// the id the server RETURNS for each kind and sends that back
+// (Model.notifyPost); the fixed number is what goes out when no id is held
+// -- the kind's first post, or one after a post that returned none -- which
+// the server answers with a fresh card, and it stays the kind's label in a
+// logging stub's log, where the scenarios count notices by it.
 var NOTIFY_IDS = {
   streamFailed: 74011,
   playlistRefreshed: 74012,
@@ -362,7 +371,12 @@ var NOTIFY_IDS = {
   // load failed (Model.deathReport card "playerStopped"): a crash, a kill, an
   // out-of-memory kill, a VO abort. Its own id, because it marks no channel
   // and says nothing about the stream; one card per death.
-  playerStopped: 74022
+  playerStopped: 74022,
+  // D-PLY-37 (owner, 2026-10-28): mpv ended the load because an OUTPUT of
+  // this machine could not be opened -- no audio device, the sound server
+  // down (Model.deathReport card "outputFailed"). Its own id, because it
+  // blames this machine and marks no channel.
+  outputFailed: 74023
 }
 
 // Long enough to cover a first-load failure and the user's reaction, short

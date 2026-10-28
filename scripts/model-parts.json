@@ -450,6 +450,9 @@
         "rememberEntryOwner",
         "channelForEnd",
         "endedReport",
+        "PLAYER_OUTPUT_ERRORS",
+        "outputFailure",
+        "outputFailureSentence",
         "deathReport",
         "loadFailedForOwnEntry"
       ]
@@ -624,6 +627,13 @@
         "playerRestartArgv",
         "playerPauseArgv",
         "notifyArgv",
+        "NOTIFY_POST_TIMEOUT_MS",
+        "notifyReplaceId",
+        "notifyReplyId",
+        "notifySlot",
+        "withNotifySlot",
+        "notifyPost",
+        "notifyAnswered",
         "sourceLabel",
         "hostOf",
         "SPACE_RE",

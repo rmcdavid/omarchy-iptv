@@ -875,11 +875,11 @@ Item {
   // the same dead stream (4.8 signals 1 and 3) and either can win the race;
   // this keeps the user's toast count at one.
   property string notifiedFailureId: ""
-  // D-PLY-32: the reason the last LOCAL start refusal was told with, so an
-  // episode is told once -- a user zapping through ten channels under a
-  // broken runtime folder gets one card, not ten. Cleared when a start
-  // succeeds; a different reason is a new episode and is told.
-  property string localFailureTold: ""
+  // D-HOST-5 (owner, 2026-10-28): one slot per notice kind -- the id the
+  // notification server returned for the kind's last card, whether a post of
+  // it is in flight, and the notice held behind it (Model.notifyPost). In
+  // memory only: the server is this shell's own and its ids restart with it.
+  property var notifySlots: Model.keyedMap()
   // D-PLY-35: set by playerWatchdog when it TERMs the helper, read once by
   // handlePlayerResult. A start or restart the watchdog ended has answered
   // nothing about the player: it may have spawned one and loaded the channel
@@ -1868,9 +1868,54 @@ Item {
     epgDebounce.restart()
   }
 
+  // D-HOST-5 (owner, 2026-10-28). Every notice the plugin posts goes through
+  // here, and through its kind's slot (Model.notifyPost): the post runs as a
+  // Process of its own, `omarchy-notification-send -p` prints the id the
+  // server returned, and the next post of that kind sends it back as `-r`,
+  // so a repeated notice refreshes its card in place instead of stacking a
+  // new one. Until D-HOST-5 the post was detached with a fixed `-r`, which
+  // Omarchy's server never replaces. A post of a kind already in flight is
+  // held and goes out when that one answers; kinds never wait on each other.
   function notify(event, params) {
-    var argv = Model.notifyArgv(event, params)
-    if (argv) Quickshell.execDetached(argv)
+    var step = Model.notifyPost(root.notifySlots, event, params)
+    root.notifySlots = step.slots
+    if (step.argv) root.runNotify(String(event), step.argv)
+  }
+
+  // One post of `event`: a Process from notifyComponent, argv only (the
+  // wrapper is busctl underneath, no shell). Bounded by its own watchdog
+  // (Model.NOTIFY_POST_TIMEOUT_MS). Should the object not be made, the post
+  // still goes out, detached and untracked as every post did before
+  // D-HOST-5 -- a notice is never dropped for want of its id.
+  function runNotify(event, argv) {
+    var run = notifyComponent.createObject(root, { kind: event })
+    if (run === null || run === undefined) {
+      console.warn("omarchy-iptv: could not make a notification process; posting it untracked")
+      Quickshell.execDetached(argv)
+      root.handleNotifyExit(null, event, 1, 0, "")
+      return
+    }
+    run.command = argv
+    run.running = true
+  }
+
+  // A post answered (or was ended). The slot keeps the id it printed, or
+  // none, and a notice of the same kind held meanwhile goes out with it.
+  // `exitStatus` non-zero is a crash or a signal (the watchdog's TERM): its
+  // stdout is no answer.
+  function handleNotifyExit(run, event, exitCode, exitStatus, text) {
+    var step = Model.notifyAnswered(root.notifySlots, event, text, Number(exitStatus) === 0 ? exitCode : -1)
+    root.notifySlots = step.slots
+    if (run) run.destroy()
+    if (step.argv) root.runNotify(event, step.argv)
+  }
+
+  // The post's watchdog fired: a post still running is ended, and its exit
+  // frees the slot (handleNotifyExit) with no id kept.
+  function notifyOverdue(run) {
+    if (!run || !run.running) return
+    console.warn("omarchy-iptv: a notification post exceeded " + Math.floor(Model.NOTIFY_POST_TIMEOUT_MS / 1000) + " s, terminating it")
+    run.signal(15)
   }
 
   // `nowPlaying` as the IPC reports it: the shipped literal plus the playing
@@ -3244,9 +3289,6 @@ Item {
       // branch reads a healthy new player as "still not answering").
       relaunchTimer.stop()
       root.playRetries = 0
-      // D-PLY-32: this machine started a player, so a local refusal told
-      // before it is over; the next one is a new episode and is told.
-      root.localFailureTold = ""
       // The reply's own channel, not whatever is current now: a start that
       // stood down left a DIFFERENT channel on the player, and that entry id
       // belongs to that channel.
@@ -3292,7 +3334,7 @@ Item {
         if (follow === "recover") root.runPlayerProbe()
       }
       var first = status.firstLoad && typeof status.firstLoad === "object" ? status.firstLoad : null
-      if (first && String(first.state) === "failed") root.playerFirstLoadFailed(String(first.reason || ""))
+      if (first && String(first.state) === "failed") root.playerFirstLoadFailed(first)
       root.drainPendingPlay()
       return
     }
@@ -3365,9 +3407,19 @@ Item {
     // no verdict on the stream, which was never contacted -- a refusal of
     // this machine (the runtime folder, the lock, the plugin's files, the
     // cache, `busy` and `no_socket` out of retries) marks nothing and is told
-    // as a local failure, once per episode. Only a refusal about the
+    // as a local failure, on every try (the owner's "refresh on every try",
+    // one card refreshed in place since D-HOST-5). Only a refusal about the
     // channel's own entry is a stream failure (Model.playerStartFailure).
-    if (!root.userStopped && !root.stopping) {
+    //
+    // D-PLY-41: told whenever the play was the user's and not taken back by
+    // a stop -- `userStopped`, which stop() sets and play() clears. A stop
+    // that is still settling (`stopping`) is not a reason to keep quiet: it
+    // belongs to the player BEFORE this play, and with it in the gate a play
+    // made in the seconds after a stop that this machine refused vanished,
+    // no card and the intent dropped. play() does not clear `stopping`
+    // instead, because that flag is what sends a play after a stop down the
+    // start branch rather than at a socket being torn down (4.10).
+    if (!root.userStopped) {
       if (Model.playerStartFailure(code) === "channel") root.raiseStreamFailure(target, reason)
       else root.raiseLocalPlayFailure(target, reason)
     }
@@ -3380,16 +3432,19 @@ Item {
   // `player start` observed the first load fail on its own connection (F3,
   // signal 1 of 4). Under --idle=once mpv exits on that failure, so socket
   // EOF is about to say the same thing; whichever wins, the user sees one
-  // toast.
-  function playerFirstLoadFailed(reason) {
+  // toast. `first` is the reply's firstLoad member.
+  function playerFirstLoadFailed(first) {
+    var reason = String(first && first.reason ? first.reason : "")
     if (reason !== "") root.rememberStderr(reason)
-    // D-PLY-33: the same decision as every other death, which here can only
-    // take the helper's word -- its reply does not say whether mpv sent an
-    // end-file error or closed the connection, so it still marks (raised
-    // with D-PLY-33's report).
-    var report = Model.deathReport({ firstLoad: true, nowPlaying: root.nowPlaying, reason: reason })
-    if (report.card === "streamFailed") root.raiseStreamFailure(report.target, report.reason)
-    else if (report.card === "playerStopped") root.raisePlayerStopped(report.target, report.reason)
+    // D-PLY-33: the same decision as every other death. D-PLY-36: the reply
+    // now says which ending the window saw -- an end-file error for the
+    // start's entry (`ended` "end-file", mpv's file_error in `fileError`) or
+    // mpv closing the connection (`ended` "closed") -- and only the first is
+    // the stream's (and not even then for an output of this machine,
+    // D-PLY-37). A reply without `ended` is the helper's word, as before.
+    var report = Model.deathReport({ firstLoad: true, nowPlaying: root.nowPlaying, reason: reason,
+                                     ended: first ? first.ended : undefined, fileError: first ? first.fileError : undefined })
+    root.raiseDeath(report)
     if (!root.socketAttached()) {
       root.playerPending = false
       root.playerWanted = false
@@ -3853,12 +3908,15 @@ Item {
   // the IPC status); `failedAt`, failed.json and `lastFailedId` are NOT
   // touched, because nothing is known about the channel, and a broken
   // runtime folder would otherwise mark every channel the user tries and
-  // take each out of the zap ring. One card per episode: the same reason
-  // again is the same fault, still there.
+  // take each out of the zap ring. Told on EVERY try (the owner, 2026-10-28:
+  // "refresh on every try"): each post refreshes the one card in place, with
+  // the channel and the reason of the latest try, because the notice slot
+  // sends back the id the server returned for the last one (D-HOST-5). Until
+  // then it was told once per episode, because a fixed replace id stacked a
+  // card per try on Omarchy's server.
   function raiseLocalPlayFailure(target, reason) {
     root.lastError = reason
-    if (!target || root.localFailureTold === reason) return
-    root.localFailureTold = reason
+    if (!target) return
     root.notify("localPlayFailure", { name: String(target.name || ""), reason: reason })
   }
 
@@ -3884,7 +3942,6 @@ Item {
       root.relaunchPending = false
       relaunchTimer.stop()
       root.playRetries = 0
-      root.localFailureTold = ""
       if (intent && root.nowPlaying && String(root.nowPlaying.id) !== String(intent.id)) {
         console.log("omarchy-iptv: the stopped start left another channel on the player; re-applying the intent")
         root.nowPlaying = intent
@@ -3899,7 +3956,9 @@ Item {
     root.playerPending = false
     root.nowPlaying = null
     root.playRetries = 0
-    if (!root.userStopped && !root.stopping) root.raiseLocalPlayFailure(intent, reason)
+    // D-PLY-41's gate, the refusal tail's: the intent was the user's unless
+    // a stop took it back; a stop still settling from before it is no reason.
+    if (!root.userStopped) root.raiseLocalPlayFailure(intent, reason)
     else root.lastError = reason
     root.noteSessionOutcome("failed")
   }
@@ -3917,6 +3976,31 @@ Item {
     root.notifiedFailureId = id
     root.lastError = reason
     root.notify("playerStopped", { name: String(target.name || "") })
+  }
+
+  // D-PLY-37 (owner, 2026-10-28): mpv ended the load because an output of
+  // THIS machine could not be opened -- no audio device, the sound server
+  // down (Model.deathReport card "outputFailed"). Told in copy that blames
+  // this computer and marks nothing; the same one-card-per-failed-play gate
+  // as the two above. `output` is "audio" or "video"; `reason` is the
+  // sentence lastError records.
+  function raiseOutputFailure(target, output, reason) {
+    if (!target) return
+    var id = String(target.id || "")
+    if (id !== "" && root.notifiedFailureId === id) return
+    root.notifiedFailureId = id
+    root.lastError = reason
+    root.notify("outputFailed", { name: String(target.name || ""), output: output })
+  }
+
+  // Model.deathReport's card, raised. One dispatcher for every detector that
+  // asks it (the socket's EOF, the first-load window), so a card the model
+  // adds is a card every detector tells.
+  function raiseDeath(report) {
+    if (!report) return
+    if (report.card === "streamFailed") root.raiseStreamFailure(report.target, report.reason)
+    else if (report.card === "playerStopped") root.raisePlayerStopped(report.target, report.reason)
+    else if (report.card === "outputFailed") root.raiseOutputFailure(report.target, report.output, report.reason)
   }
 
   function rememberStderr(line) {
@@ -4029,9 +4113,9 @@ Item {
     // wrong), else mpv's own generic file_error -- both redacted, the tail
     // twice (in python and again in Model.pushPlayerLog). A death with no
     // such end-file -- a crash, a kill, a VO abort -- is told and marks
-    // nothing, because nothing says the stream caused it.
-    if (report.card === "streamFailed") root.raiseStreamFailure(report.target, report.reason)
-    else if (report.card === "playerStopped") root.raisePlayerStopped(report.target, report.reason)
+    // nothing, because nothing says the stream caused it. D-PLY-37: nor does
+    // an end-file error that names an output of this machine.
+    root.raiseDeath(report)
   }
 
   function handlePlaylistExit(text) {
@@ -7019,6 +7103,36 @@ Item {
   Connections {
     target: playerProc
     function onExited(exitCode, exitStatus) { root.handlePlayerResult(playerStdout.text) }
+  }
+
+  // D-HOST-5 (owner, 2026-10-28): one notice post, made per post by
+  // runNotify(). `omarchy-notification-send -p` prints the id the server
+  // returned (the wrapper's busctl call waits for the server's answer, which
+  // this shell's own notification server gives on its event loop; the
+  // Process keeps that wait off it), read whole by the collector: one short
+  // line from the host's own wrapper. `guard` is the post's watchdog, running
+  // exactly while the post is; the exit frees the kind's slot and destroys
+  // the object (handleNotifyExit). argv only (runNotify sets `command`).
+  Component {
+    id: notifyComponent
+
+    Process {
+      id: notifyRun
+      property string kind: ""
+      stdout: StdioCollector { id: notifyOut; waitForEnd: true }
+      property Timer guard: Timer {
+        interval: Model.NOTIFY_POST_TIMEOUT_MS
+        repeat: false
+        running: notifyRun.running
+        onTriggered: root.notifyOverdue(notifyRun)
+      }
+      property Connections exits: Connections {
+        target: notifyRun
+        function onExited(exitCode, exitStatus) {
+          root.handleNotifyExit(notifyRun, notifyRun.kind, exitCode, exitStatus, String(notifyOut.text))
+        }
+      }
+    }
   }
 
   // The socket observer, one fresh object per attempt (spike C1, and the

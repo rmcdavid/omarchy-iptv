@@ -118,7 +118,7 @@ export {
   parsePlayerProbe, parsePlayerEvent, endedVerdict, probeVerdict,
   playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
   routePlayerEvent, rememberEntryOwner, channelForEnd, endedReport,
-  deathReport
+  PLAYER_OUTPUT_ERRORS, outputFailure, outputFailureSentence, deathReport
 } from "./model/player.mjs"
 export {
   MPV_HANDOFF_TEXT, MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase,
@@ -157,9 +157,11 @@ export {
   CONFIG_SHIELD_ABSENT, CONFIG_PERSIST, CONFIG_REFUSE, CONFIG_DEFER,
   configShieldArgv, configShieldState, persistCarriesSecret,
   configShieldDecision, entryShieldDecision, playerStartArgv, playerStopArgv,
-  playerRestartArgv, playerPauseArgv, notifyArgv, sourceLabel, hostOf,
-  URL_SPACE_CODES, isUrlSpaceAt, URL_DELIMITER_CODES, isUrlDelimiterAt,
-  trailingPunctuationLength, redactUrls, scrubUrls, sinkText
+  playerRestartArgv, playerPauseArgv, notifyArgv, NOTIFY_POST_TIMEOUT_MS,
+  notifyReplaceId, notifyReplyId, notifyPost, notifyAnswered, sourceLabel,
+  hostOf, URL_SPACE_CODES, isUrlSpaceAt, URL_DELIMITER_CODES,
+  isUrlDelimiterAt, trailingPunctuationLength, redactUrls, scrubUrls,
+  sinkText
 } from "./model/privacy.mjs"
 export {
   formatClock, formatCount, pluralChannels, epgFraction, epgNowStale,

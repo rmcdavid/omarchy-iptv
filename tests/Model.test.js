@@ -5048,9 +5048,9 @@ checkCall("D-PLY-32: notifyArgv localPlayFailure -- its own title, mpvMissing's 
     const p = { name: "Sky Sports", reason: "Could not write the player's runtime folder" }
     const a = Model.notifyArgv("localPlayFailure", p)
     const s = Model.notifyArgv("streamFailed", p)
-    return [a.slice(0, 9), a[9], a[a.length - 1] === s[s.length - 1], a[a.length - 1]]
+    return [a.slice(0, 10), a[10], a[a.length - 1] === s[s.length - 1], a[a.length - 1]]
   },
-  [["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", Model.GLYPHS.tvOff, "-r", "74021"], "Could not start playback", true,
+  [["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", Model.GLYPHS.tvOff, "-p", "-r", "74021"], "Could not start playback", true,
    "\u201cSky Sports\u201d did not play" + Model.SEP + "Could not write the player's runtime folder"])
 checkCall("D-PLY-32: notifyArgv localPlayFailure -- through the same sanitising path: a hostile name is quoted and cleaned, a URL in the reason keeps its host only, no reason is no tail",
   () => [Model.notifyArgv("localPlayFailure", { name: "--urgency=critical", reason: "-r 1" }).slice(-1)[0],
@@ -5060,6 +5060,129 @@ checkCall("D-PLY-32: notifyArgv localPlayFailure -- through the same sanitising 
 checkCall("D-PLY-32: the new replace-id is no other notification's (74019 stays retired)",
   () => { const ids = Object.values(Model.NOTIFY_IDS); return [Model.NOTIFY_IDS.localPlayFailure, ids.filter(v => v === 74021).length, ids.length === new Set(ids).size, ids.indexOf(74019)] },
   [74021, 1, true, -1])
+
+// ---- D-HOST-5 (owner, 2026-10-28): the id the server returned, kept per notice kind ----
+//
+// Omarchy's notification server (Quickshell 0.3.1's NotificationServer)
+// numbers cards itself and replaces only an id it handed out and still
+// holds, so the fixed `-r 740xx` the plugin sent never replaced anything:
+// every post stacked a card (measured on a private bus, lane-ply33 and
+// lane-host5). The service now keeps the id `omarchy-notification-send -p`
+// printed for each kind and sends it back (Model.notifyPost /
+// notifyAnswered). Red on dev 9e380ae, which has none of these functions and
+// sends no -p.
+checkCall("D-HOST-5: notifyReplyId reads exactly what the wrapper prints for -p -- one decimal integer on one line, in UINT32 range, from a post that exited 0 -- and anything else is 0, \"no id held\"",
+  () => [["7\n", 0], ["  12  \n", 0], ["12", 0], ["12\r\n", 0], ["4294967295\n", 0], ["", 0], ["u 7\n", 0], ["7\n8\n", 0], ["0\n", 0],
+         ["4294967296\n", 0], ["12345678901\n", 0], ["-3\n", 0], ["7.5\n", 0], ["0x10\n", 0], [null, 0], [undefined, 0], ["7\n", 1], ["7\n", -1], ["7\n", "x"]]
+    .map(([text, code]) => Model.notifyReplyId(text, code)),
+  [7, 12, 12, 12, 4294967295, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0])
+checkCall("D-HOST-5: notifyArgv sends -p and, as -r, the id the server returned when one is held, the kind's fixed number otherwise; `-p -r <id> <headline>` is one run of the argv for every kind (a logging stub counts notices by ` <id> <headline>`)",
+  () => {
+    const kinds = [["streamFailed", { name: "X" }], ["localPlayFailure", { name: "X", reason: "r" }], ["playerStopped", { name: "X" }],
+                   ["outputFailed", { name: "X", output: "audio" }], ["playlistRefreshed", { channelCount: 2, groupCount: 1 }],
+                   ["playlistError", { reason: "r" }], ["epgError", { reason: "r" }], ["mpvMissing", {}],
+                   ["entryInputRefused", { setting: "playlistUrl", reason: "invalid" }], ["stateUnreadable", { reason: "permission", path: "/s/state.json" }],
+                   ["mergeDropped", { dropped: { sources: ["aaaaaaaa"], savedSearches: 0, hiddenGroups: 0 } }],
+                   ["mergeConflict", { conflicts: [{ field: "sources", key: "k1", fields: ["label"] }] }]]
+    const shape = a => { const r = a.indexOf("-r"); return [a.indexOf("-p") === r - 1, r === a.length - 4] }
+    return kinds.map(([event, p]) => {
+      const fixed = Model.notifyArgv(event, p)
+      const held = Model.notifyArgv(event, p, 9)
+      const bad = [0, -1, 1.5, "x", 4294967296, null, undefined, "9"].map(v => { const a = Model.notifyArgv(event, p, v); return a[a.indexOf("-r") + 1] })
+      return [event, fixed[fixed.indexOf("-r") + 1] === String(Model.NOTIFY_IDS[event]), held[held.indexOf("-r") + 1]].concat(shape(fixed), shape(held), [bad])
+    })
+  },
+  ["streamFailed", "localPlayFailure", "playerStopped", "outputFailed", "playlistRefreshed", "playlistError", "epgError", "mpvMissing",
+   "entryInputRefused", "stateUnreadable", "mergeDropped", "mergeConflict"].map(event => {
+    const fixed = String(Model.NOTIFY_IDS[event])
+    return [event, true, "9", true, true, true, true, [fixed, fixed, fixed, fixed, fixed, fixed, fixed, "9"]]
+  }))
+checkCall("D-HOST-5: notifyPost / notifyAnswered -- the kind's first post goes with its fixed number; a second while it is in flight is HELD (the latest replacing an earlier held one) and goes out, with the id the first returned, when the first answers; the next post sends that id back; another kind is never held behind it; a post that returned no id leaves none; a notice that makes no card touches nothing; the slots are never mutated",
+  () => {
+    const trace = []
+    const rid = a => a ? a[a.indexOf("-r") + 1] + " " + a[a.length - 1] : null
+    const busy = (s, e) => Model.ownKeyValue(s, e) ? [Model.ownKeyValue(s, e).id, Model.ownKeyValue(s, e).busy] : null
+    let s = Model.keyedMap()
+    const s0 = s
+    let step = Model.notifyPost(s, "localPlayFailure", { name: "A", reason: "r1" }); s = step.slots; trace.push(rid(step.argv), busy(s, "localPlayFailure"))
+    step = Model.notifyPost(s, "localPlayFailure", { name: "B", reason: "r1" }); s = step.slots; trace.push(rid(step.argv))
+    step = Model.notifyPost(s, "localPlayFailure", { name: "C", reason: "r2" }); s = step.slots; trace.push(rid(step.argv))
+    step = Model.notifyPost(s, "epgError", { reason: "x" }); s = step.slots; trace.push(rid(step.argv))
+    const beforeAnswer = s
+    step = Model.notifyAnswered(s, "localPlayFailure", "3\n", 0); s = step.slots; trace.push(rid(step.argv), busy(s, "localPlayFailure"))
+    step = Model.notifyAnswered(s, "localPlayFailure", "3\n", 0); s = step.slots; trace.push(rid(step.argv), busy(s, "localPlayFailure"))
+    step = Model.notifyPost(s, "localPlayFailure", { name: "D", reason: "r2" }); s = step.slots; trace.push(rid(step.argv))
+    step = Model.notifyAnswered(s, "localPlayFailure", "", 1); s = step.slots; trace.push(rid(step.argv), busy(s, "localPlayFailure"))
+    step = Model.notifyPost(s, "localPlayFailure", { name: "E", reason: "r2" }); s = step.slots; trace.push(rid(step.argv))
+    const none = Model.notifyPost(s, "mergeDropped", { dropped: {} })
+    const unknown = Model.notifyPost(s, "nope", {})
+    trace.push(none.argv, none.slots === s, unknown.argv, unknown.slots === s, Object.keys(s0).length, busy(beforeAnswer, "localPlayFailure"), busy(s, "epgError"))
+    return trace
+  },
+  ["74021 \u201cA\u201d did not play" + Model.SEP + "r1", [0, true], null, null, "74014 Could not fetch the EPG (x). Channels still work.",
+   "3 \u201cC\u201d did not play" + Model.SEP + "r2", [3, true], null, [3, false], "3 \u201cD\u201d did not play" + Model.SEP + "r2",
+   null, [0, false], "74021 \u201cE\u201d did not play" + Model.SEP + "r2", null, true, null, true, 0, [0, true], [0, true]])
+checkCall("D-PLY-37: notifyArgv outputFailed -- its own id 74023, a headline naming the output, a body that says the channel stopped and that this computer's output could not be opened, never \"did not play\"; the S-04 quoting of a hostile name; 74023 is no other card's",
+  () => {
+    const audio = Model.notifyArgv("outputFailed", { name: "Sky Sports", output: "audio" })
+    const video = Model.notifyArgv("outputFailed", { name: "Sky Sports", output: "video" })
+    const other = Model.notifyArgv("outputFailed", { name: "--urgency=critical", output: "speakers" })
+    const ids = Object.values(Model.NOTIFY_IDS)
+    return [audio.slice(0, 10), audio.slice(10), video.slice(10), other.slice(10), audio.join(" ").indexOf("did not play"),
+            Model.NOTIFY_IDS.outputFailed, ids.filter(v => v === 74023).length, ids.length === new Set(ids).size]
+  },
+  [["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", Model.GLYPHS.tvOff, "-p", "-r", "74023"],
+   ["Audio output failed", "\u201cSky Sports\u201d stopped" + Model.SEP + "This computer's audio output could not be opened"],
+   ["Video output failed", "\u201cSky Sports\u201d stopped" + Model.SEP + "This computer's video output could not be opened"],
+   ["Audio output failed", "\u201curgency=critical\u201d stopped" + Model.SEP + "This computer's audio output could not be opened"], -1, 74023, 1, true])
+
+// ---- D-PLY-37 and D-PLY-36: tests/fixtures/player-endings.json, the model's half ----
+//
+// The helper's half is tests/test_player_endings.py over the same file: it
+// runs observe_first_load over each `firstLoad` case's batches and expects
+// the case's `reply`, and it runs the real mpv to read the audio output's
+// string again. Here: the pinned strings through Model.outputFailure, mpv's
+// measured lines through the router and Model.deathReport at the socket's
+// EOF, and every reply the helper writes through deathReport's firstLoad
+// branch. Red on dev 9e380ae (no outputFailure; the audio output's ending
+// marks and says Stream failed; a `closed` first load marks).
+;(function () {
+  const ENDINGS = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/player-endings.json"), "utf8"))
+  const verdict = r => r && r.notify ? { card: r.card, mark: r.mark, output: r.output } : null
+  checkCall("D-PLY-37: Model.outputFailure names the output for each of mpv's pinned output strings and nothing else -- not a stream's strings, not a near match, not a reason that is not `error` -- and the model's list is the fixture's, both ways",
+    () => ({
+      pinned: ENDINGS.outputErrors.map(e => [e.fileError, Model.outputFailure({ reason: "error", fileError: e.fileError }), Model.outputFailure({ reason: "error", file_error: e.fileError })]),
+      stream: ENDINGS.streamErrors.map(e => Model.outputFailure({ reason: "error", fileError: e.fileError })),
+      near: ["Audio output initialization failed", "audio output initialization failed.", "audio output initialization", "the audio output initialization failed", ""].map(f => Model.outputFailure({ reason: "error", fileError: f })),
+      notError: ["eof", "stop", "quit", "redirect", ""].map(r => Model.outputFailure({ reason: r, fileError: "audio output initialization failed" })),
+      junk: [null, undefined, "x", 5].map(v => Model.outputFailure(v)),
+      list: Model.PLAYER_OUTPUT_ERRORS.map(p => p.join("=")).sort().join(" ") === ENDINGS.outputErrors.map(e => e.fileError + "=" + e.output).sort().join(" "),
+      sentences: ["audio", "video", ""].map(Model.outputFailureSentence),
+      version: ENDINGS.mpv.version
+    }),
+    { pinned: ENDINGS.outputErrors.map(e => [e.fileError, e.output, e.output]), stream: ENDINGS.streamErrors.map(() => ""),
+      near: ["", "", "", "", ""], notError: ["", "", "", "", ""], junk: ["", "", "", ""], list: true,
+      sentences: ["This computer's audio output could not be opened", "This computer's video output could not be opened", ""], version: "0.41.0" })
+  checkCall("D-PLY-37: mpv's measured endings, line by line through Model.routePlayerEvent and judged at the socket's EOF by Model.deathReport -- an audio output that cannot open (ALSA, PulseAudio, PipeWire, across a zap) is outputFailed and never marked; a dead stream, a file that is not media and a stream with nothing playable still mark",
+    () => ENDINGS.socket.map(c => {
+      let st = Model.playerRouterState(null)
+      for (const l of c.lines) st = Model.routePlayerEvent(st, JSON.stringify(l))
+      let owners = Model.keyedMap()
+      for (const [entry, who] of c.owners) owners = Model.rememberEntryOwner(owners, entry, who)
+      const r = Model.deathReport({ lastEndFile: st.lastEndFile, owners, nowPlaying: c.nowPlaying, entryId: st.entryId, tail: st.tail })
+      return [c.name, r.notify ? r.card : "", r.mark, r.output, r.target ? r.target.id : null,
+              r.card === "outputFailed" ? r.reason === Model.outputFailureSentence(r.output) : true]
+    }),
+    ENDINGS.socket.map(c => [c.name, c.expect.card, c.expect.mark, c.expect.output, c.expect.target, true]))
+  checkCall("D-PLY-36: every first-load reply the helper writes (the fixture's, which tests/test_player_endings.py pins to observe_first_load), through deathReport's firstLoad branch -- `ended` end-file is the stream's and marks (unless it names an output, D-PLY-37); `ended` closed is a death with no end-file, Playback stopped, never marked; a reply without `ended` is the helper's word, as before",
+    () => ENDINGS.firstLoad.concat(ENDINGS.oldReplies).map(c => {
+      const reply = c.reply
+      if (reply.state !== "failed") return [c.name, null]
+      const r = Model.deathReport({ firstLoad: true, nowPlaying: { id: "t:x", name: "X" }, reason: reply.reason, ended: reply.ended, fileError: reply.fileError })
+      return [c.name, verdict(r), r.target ? r.target.id : null]
+    }),
+    ENDINGS.firstLoad.concat(ENDINGS.oldReplies).map(c => c.reply.state !== "failed" ? [c.name, null] : [c.name, c.expect, "t:x"]))
+})()
 
 // ---- D-PLY-35 (2026-10-28): the player slot's watchdog, derived from the helper's bounds ----
 //
@@ -5721,7 +5844,7 @@ check("endedReport: with no tail it quotes the verdict; a stop, a clean eof and 
 const tvOff = "\udb81\udd03", alert = "\udb80\udc26", refreshGlyph = "\udb81\udc50"
 const Q = (s) => String.fromCharCode(0x201c) + s + String.fromCharCode(0x201d)   // typographic quotes, file stays ASCII
 check("notifyArgv streamFailed", Model.notifyArgv("streamFailed", { name: "Sky Sports", reason: "HTTP 403" }),
-  ["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", tvOff, "-r", "74011", "Stream failed", Q("Sky Sports") + " did not play" + SEP + "HTTP 403"])
+  ["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", tvOff, "-p", "-r", "74011", "Stream failed", Q("Sky Sports") + " did not play" + SEP + "HTTP 403"])
 check("notifyArgv streamFailed without reason", Model.notifyArgv("streamFailed", { name: "X" }).slice(-1), [Q("X") + " did not play"])
 check("notifyArgv streamFailed redacts URLs from the reason", Model.notifyArgv("streamFailed", { name: "X", reason: "Failed to open https://u:p@h.test/live/x.m3u8?t=1." }).slice(-1), [Q("X") + " did not play" + SEP + "Failed to open h.test."])
 // S-04: the wrapper reads a body matching --urgency=* / --icon=* / -g ... as an option.
@@ -5729,17 +5852,17 @@ check("notifyArgv body never starts with a dash (S-04)", (() => {
   const out = []
   for (const name of ["--urgency=critical", "-g", "--icon=x", "--exec", "-", "", null]) {
     const a = Model.notifyArgv("streamFailed", { name: name, reason: "-r 1" })
-    out.push(a.slice(9).every(item => item.charAt(0) !== "-"))
+    out.push(a.slice(10).every(item => item.charAt(0) !== "-"))
   }
   return out
 })(), [true, true, true, true, true, true, true])
 check("notifyArgv streamFailed cleans and quotes a hostile name", Model.notifyArgv("streamFailed", { name: "--urgency=critical" }).slice(-1), [Q("urgency=critical") + " did not play"])
 check("notifyArgv streamFailed falls back to Channel for an all-dash name", Model.notifyArgv("streamFailed", { name: "---" }).slice(-1), [Q("Channel") + " did not play"])
-check("notifyArgv playlistRefreshed", Model.notifyArgv("playlistRefreshed", { channelCount: 1204, groupCount: 38 }).slice(3), ["-u", "low", "-g", refreshGlyph, "-r", "74012", "Playlist refreshed", "1,204 channels in 38 groups"])
+check("notifyArgv playlistRefreshed", Model.notifyArgv("playlistRefreshed", { channelCount: 1204, groupCount: 38 }).slice(3), ["-u", "low", "-g", refreshGlyph, "-p", "-r", "74012", "Playlist refreshed", "1,204 channels in 38 groups"])
 check("notifyArgv playlistError with cache", Model.notifyArgv("playlistError", { reason: "HTTP 503", cachedAt: "12:40" }).slice(-2), ["Playlist error", "Could not fetch the playlist (HTTP 503). Using cached copy from 12:40."])
 check("notifyArgv playlistError without cache", Model.notifyArgv("playlistError", { reason: "Timed out" }).slice(-1), ["Could not fetch the playlist (Timed out). Open the guide for details."])
-check("notifyArgv epgError", Model.notifyArgv("epgError", { reason: "HTTP 404 Not Found" }).slice(3), ["-u", "low", "-g", alert, "-r", "74014", "Guide data error", "Could not fetch the EPG (HTTP 404 Not Found). Channels still work."])
-check("notifyArgv mpvMissing", Model.notifyArgv("mpvMissing").slice(3), ["-u", "critical", "-g", tvOff, "-r", "74015", "mpv not found", "Install mpv to play channels."])
+check("notifyArgv epgError", Model.notifyArgv("epgError", { reason: "HTTP 404 Not Found" }).slice(3), ["-u", "low", "-g", alert, "-p", "-r", "74014", "Guide data error", "Could not fetch the EPG (HTTP 404 Not Found). Channels still work."])
+check("notifyArgv mpvMissing", Model.notifyArgv("mpvMissing").slice(3), ["-u", "critical", "-g", tvOff, "-p", "-r", "74015", "mpv not found", "Install mpv to play channels."])
 check("notifyArgv unknown", Model.notifyArgv("nope"), null)
 
 // ---- privacy ----
@@ -13702,44 +13825,53 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
               verdictOf(spent)[0], verdictOf(spent)[1], verdictOf(spent)[3].map(t => t.split(" | ")[0])]
     }), [["busy", 1, 1, 0, [], [], ["74021 Could not start playback"]], ["no_socket", 1, 1, 0, [], [], ["74021 Could not start playback"]]])
 
-  checkCall("D-PLY-32: ONE card per episode -- ten channels refused for the same reason are told once (each still records lastError, none is marked); a different reason is told; a start that SUCCEEDS ends the episode and the next refusal is told again", () => {
+  // Amended 2026-10-28 by lane-host5 (the owner's "refresh on every try",
+  // after D-HOST-5). The two checks below pinned ONE card per episode, which
+  // was the right answer while a fixed replace id stacked a card per post on
+  // Omarchy's server. Every refusal is now POSTED, and each post after the
+  // first sends back the id the server returned, so the server holds ONE card
+  // that the latest try refreshed. h.notifyServer is that server as measured
+  // (tests/service-harness.js notificationServer). Every no-mark assertion is
+  // kept. Red on dev 9e380ae (one post per episode, three cards).
+  const tries = h => h.notifyRuns.filter(r => r.kind === "localPlayFailure").map(r => r.command[r.command.indexOf("-r") + 1])
+  const localCards = h => h.notifyServer.cards.filter(c => c.title === "Could not start playback")
+  checkCall("D-PLY-32 / D-HOST-5: EVERY try is told and refreshes ONE card -- ten channels refused for the same reason are ten posts, each after the first sending back the id the server returned, one card on the server showing the latest channel (each still records lastError, none is marked); a different reason refreshes the same card; a start that succeeds between two refusals changes nothing about that", () => {
     const h = bootPlayer()
+    h.notifyServer = H.notificationServer()
     const unwritable = localReply("player-start-parent-0500")
     const link = localReply("player-start-folder-link")
     const errors = []
     for (let i = 0; i < 10; i++) { refuse(h, "start", unwritable, "t:c" + i); errors.push(h.root.lastError) }
-    const afterTen = toasts(h).length
+    const afterTen = [tries(h).length, localCards(h).length]
     refuse(h, "restart", unwritable, "t:c10")
     refuse(h, "start", link, "t:c11")
     refuse(h, "start", link, "t:c12")
-    const afterLink = toasts(h).length
-    // A start that answered ok: the machine played something.
+    const afterLink = [tries(h).length, localCards(h).length]
     h.root.nowPlaying = { id: "t:ok", name: "OK", group: "", launchedFrom: "", since: 1 }
     h.root.playerKind = "start"
     h.root.handlePlayerResult(JSON.stringify({ ok: true, kind: "player.start", spawned: true, pid: 4242, id: "t:ok", name: "OK", entryId: 1, seq: 2,
                                                firstLoad: { state: "playing", reason: "" }, warnings: [], applied: true, playing: null }))
     h.drain()
     refuse(h, "start", link, "t:c13")
-    return { afterTen, afterLink, afterSuccess: toasts(h).length, lastErrors: errors.filter(e => e === "Could not write the player's runtime folder").length,
-             marked: Object.keys(h.root.failedAt).length, jobs: h.jobs(), lastFailedId: h.root.lastFailedId,
-             cards: toasts(h).map(t => t.split(" | ")[1]) }
-  }, { afterTen: 1, afterLink: 2, afterSuccess: 3, lastErrors: 10, marked: 0, jobs: [], lastFailedId: "",
-       cards: ["\u201cC0\u201d did not play" + Model.SEP + "Could not write the player's runtime folder",
-               "\u201cC11\u201d did not play" + Model.SEP + "A folder the plugin uses is a broken link or not a folder",
-               "\u201cC13\u201d did not play" + Model.SEP + "A folder the plugin uses is a broken link or not a folder"] })
+    const card = localCards(h)[0] || {}
+    return { afterTen, afterLink, afterSuccess: [tries(h).length, localCards(h).length], replaceIds: tries(h).filter((r, i, all) => all.indexOf(r) === i),
+             card: [card.id, card.updates, card.body], lastErrors: errors.filter(e => e === "Could not write the player's runtime folder").length,
+             marked: Object.keys(h.root.failedAt).length, jobs: h.jobs(), lastFailedId: h.root.lastFailedId }
+  }, { afterTen: [10, 1], afterLink: [13, 1], afterSuccess: [14, 1], replaceIds: ["74021", "1"],
+       card: [1, 13, "\u201cC13\u201d did not play" + Model.SEP + "A folder the plugin uses is a broken link or not a folder"],
+       lastErrors: 10, marked: 0, jobs: [], lastFailedId: "" })
 
   // The check above sets nowPlaying by hand and calls handlePlayerResult, so
   // it never runs Service.play(), the function every zap and every guide
-  // Enter goes through. A play() that reset the episode (one more line beside
-  // its `notifiedFailureId = ""`) left it and every other check green while
-  // the user got one card per channel again -- the recheck's mutant, red
-  // here. Each play below issues its own `player start` through the real
-  // fork, and the slot's exit is the helper's real reply. The first channel
-  // carries a mark the defect already wrote: play() clears it, as it always
-  // has, and the local refusal no longer writes it back (on dev 8473655 it
-  // was re-marked at once). Red on dev 8473655.
-  checkCall("D-PLY-32: through Service.play(), the path every zap takes -- ten channels played under the same local refusal each issue their own `player start`, are told ONCE and marked never; an old mark on the first is cleared by its play and not written back", () => {
+  // Enter goes through. Each play below issues its own `player start`
+  // through the real fork, and the slot's exit is the helper's real reply.
+  // The first channel carries a mark the defect already wrote: play() clears
+  // it, as it always has, and the local refusal no longer writes it back (on
+  // dev 8473655 it was re-marked at once). Since the every-try card each of
+  // the ten is posted, into one card.
+  checkCall("D-PLY-32 / D-HOST-5: through Service.play(), the path every zap takes -- ten channels played under the same local refusal each issue their own `player start`, are each told into ONE card and marked never; an old mark on the first is cleared by its play and not written back", () => {
     const h = bootPlayer()
+    h.notifyServer = H.notificationServer()
     const index = M.keyedMap()
     const ids = []
     for (let i = 0; i < 10; i++) {
@@ -13759,8 +13891,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       h.drain()
       return issued
     })
-    return [starts.filter(Boolean).length, toasts(h).map(t => t.split(" | ")[0]), Object.keys(h.root.failedAt), h.jobs(), h.root.lastFailedId]
-  }, [10, ["74021 Could not start playback"], [], ["clear:t:z0"], ""])
+    const cards = localCards(h)
+    return [starts.filter(Boolean).length, tries(h).length, cards.length, cards.length ? cards[0].body : "", Object.keys(h.root.failedAt), h.jobs(), h.root.lastFailedId]
+  }, [10, 10, 1, "\u201cZ9\u201d did not play" + Model.SEP + "Could not write the player's runtime folder", [], ["clear:t:z0"], ""])
 
   checkCall("D-PLY-32: a genuine CHANNEL failure still marks and still says \"Stream failed\" (74011) -- the entry's own scheme refused, a first load the start watched fail, and an end-file error at the socket's EOF judged by endedReport", () => {
     const scheme = bootPlayer()
@@ -13872,10 +14005,10 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       const a = M.notifyArgv("playerStopped", { name: "Sky Sports", reason: "MESA-EGL: warning: failed to get driver name for fd -1" })
       const hostile = M.notifyArgv("playerStopped", { name: "--urgency=critical" })
       const ids = Object.values(M.NOTIFY_IDS)
-      return [a.slice(0, 9), a[9], a[10], a.join(" ").indexOf("did not play"), a.join(" ").indexOf("MESA"), hostile[hostile.length - 1],
+      return [a.slice(0, 10), a[10], a[11], a.join(" ").indexOf("did not play"), a.join(" ").indexOf("MESA"), hostile[hostile.length - 1],
               M.NOTIFY_IDS.playerStopped, ids.filter(v => v === 74022).length, ids.length === new Set(ids).size, ids.indexOf(74019), a.length]
-    }, [["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", M.GLYPHS.tvOff, "-r", "74022"], "Playback stopped",
-        "\u201cSky Sports\u201d stopped unexpectedly", -1, -1, "\u201curgency=critical\u201d stopped unexpectedly", 74022, 1, true, -1, 11])
+    }, [["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", M.GLYPHS.tvOff, "-p", "-r", "74022"], "Playback stopped",
+        "\u201cSky Sports\u201d stopped unexpectedly", -1, -1, "\u201curgency=critical\u201d stopped unexpectedly", 74022, 1, true, -1, 12])
 
     // Through Service.qml's own handlePlayerLine (the router, fed mpv's own
     // JSON lines) and handlePlayerGone (the socket's EOF).
@@ -14066,12 +14199,12 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       stopped(h)
       exit(h, "")
       h.root.playRetries = 2
-      // The recheck: and the local-failure episode ends, as an ok reply
-      // ends it (unpinned until then: the reset could go, all green).
-      h.root.localFailureTold = "Helper timed out"
+      // The recheck pinned the local-failure episode's end here as well; the
+      // episode is gone since the owner's "refresh on every try" (lane-host5,
+      // D-HOST-5): every refusal is told, so there is nothing to end.
       exit(h, probeOf())
-      return [said(h), h.root.playerWanted, h.root.timedOutPlay, h.root.playRetries, h.root.playing === true || h.root.playerUp === true, h.root.localFailureTold]
-    }, [[X.id, [], [], [], ""], true, null, 0, true, ""])
+      return [said(h), h.root.playerWanted, h.root.timedOutPlay, h.root.playRetries, h.root.playing === true || h.root.playerUp === true]
+    }, [[X.id, [], [], [], ""], true, null, 0, true])
 
     checkCall("D-PLY-35: the probe finds NOTHING -- the start failed, and is told once as \"Could not start playback\" with \"Helper timed out\", marks nothing, and the record is retired", () => {
       const h = bootPlayer()
@@ -14181,6 +14314,220 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       exit(scheme, JSON.stringify({ ok: false, kind: "player.start", error: { code: "unsupported_scheme", message: "unsupported stream URL scheme 'rtmp'" }, id: X.id, seq: 1 }))
       return [[busy.root.playRetries, busy.ids.playRetryTimer.restarts, slotVerb(busy), toasts(busy).length], said(scheme)]
     }, [[1, 1, "start", 0], [null, ["74011 Stream failed | \u201cX\u201d did not play" + M.SEP + "Unsupported URL"], [X.id], ["mark:" + X.id], "Unsupported URL"]])
+
+    // D-PLY-41's sibling (lane-host5, rule 15): settleTimedOutPlay carried
+    // the refusal tail's gate, `!userStopped && !stopping`, so the same play
+    // made while a stop settles, whose start the watchdog then ended with
+    // nothing left behind, was dropped untold too. In time this needs the
+    // stop to settle slower than a start's 43 s bound, which the 5 s backstop
+    // forbids; the harness holds `stopping`, so the gate is what is pinned.
+    checkCall("D-PLY-41 (sibling): a play made while an earlier stop is still settling, whose start the watchdog ended and the probe found nothing of, is told once as Could not start playback / Helper timed out, marking nothing", () => {
+      const h = bootPlayer()
+      const index = M.keyedMap()
+      index[X.id] = X
+      h.root.channelIndex = index
+      h.root.stop()
+      h.drain()
+      h.root.play(X.id, true, "")
+      h.drain()
+      stopped(h)
+      exit(h, "")
+      const settling = h.root.stopping === true
+      exit(h, probeOf({ running: false, responsive: false, pid: null, stash: null, idle: null, tls: null }))
+      return [settling, said(h)]
+    }, [true, [null, ["74021 Could not start playback | \u201cX\u201d did not play" + M.SEP + "Helper timed out"], [], [], "Helper timed out"]])
+  }
+
+  // ---- D-HOST-5, D-PLY-37, D-PLY-36, D-PLY-41 (the owner, 2026-10-28), through Service.qml ----
+  //
+  // D-HOST-5: every notice goes through Service.notify and its kind's slot
+  // (Model.notifyPost); the post is a Process of its own whose stdout, the
+  // id the server returned, the next post of the kind sends back as `-r`.
+  // h.notifyServer is Omarchy's server as measured (service-harness.js
+  // notificationServer): it replaces only an id it handed out and still
+  // holds. D-PLY-37: an end-file error that names an output of this machine
+  // is told as "Audio output failed" (74023) and marks nothing. D-PLY-36:
+  // the first-load reply's `ended` decides the mark. D-PLY-41: a play made
+  // while an earlier stop settles, refused on this machine, is told. Red on
+  // dev 9e380ae: notices detached with a fixed id (a card per post), the
+  // audio output's ending marked as a Stream failed, a `closed` first load
+  // marked, and the play after a stop silent.
+  {
+    const X = { id: "t:x", name: "X", group: "", launchedFrom: "", since: 1 }
+    const ENDINGS = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/player-endings.json"), "utf8"))
+    const served = h => { h.notifyServer = H.notificationServer(); return h }
+    const rOf = argv => argv[argv.indexOf("-r") + 1]
+    const posts = (h, kind) => h.notifyRuns.filter(r => r.kind === kind).map(r => rOf(r.command))
+    const cardsOf = (h, title) => h.notifyServer.cards.filter(c => c.title === title).map(c => [c.id, c.updates, c.open])
+    const okPlaylist = JSON.stringify({ ok: true, kind: "playlist", channelCount: 2, groupCount: 1, warnings: [] })
+
+    checkCall("D-HOST-5: through the service's own paths, each notice kind posted twice is ONE card on the server -- the second post sends back the id the first returned and refreshes it in place -- for the stream failure, the local refusal, the player's death, the lost audio output, the manual refresh, the playlist and guide errors and mpv missing; two kinds are two cards", () => {
+      const h = served(bootPlayer())
+      const twice = (fn) => { fn(); fn() }
+      const index = M.keyedMap()
+      index["t:x"] = { id: "t:x", name: "X", url: "http://s.example.test/x.ts", group: "G" }
+      h.root.channelIndex = index
+      twice(() => { h.root.notifiedFailureId = ""; h.root.raiseStreamFailure({ id: "t:x", name: "X" }, "loading failed"); h.drain() })
+      twice(() => refuse(h, "start", localReply("player-start-parent-0500")))
+      twice(() => { h.root.notifiedFailureId = ""; h.root.raisePlayerStopped({ id: "t:x", name: "X" }, M.PLAYER_GENERIC_FAILURE); h.drain() })
+      twice(() => { h.root.notifiedFailureId = ""; h.root.raiseOutputFailure({ id: "t:x", name: "X" }, "audio", M.outputFailureSentence("audio")); h.drain() })
+      twice(() => { h.root.manualRefresh = true; h.root.handlePlaylistExit(okPlaylist); h.drain() })
+      twice(() => { h.root.handlePlaylistExit(localReply("playlist-folder-link")); h.drain() })
+      twice(() => { h.root.handleEpgExit(localReply("epg-folder-link"), false); h.drain() })
+      twice(() => { h.root.mpvAvailable = false; h.root.play("t:x", true, ""); h.drain() })
+      const kinds = ["streamFailed", "localPlayFailure", "playerStopped", "outputFailed", "playlistRefreshed", "playlistError", "epgError", "mpvMissing"]
+      return { posts: kinds.map(k => [k, posts(h, k)]), cards: h.notifyServer.cards.map(c => [c.id, c.updates]), allOpen: h.notifyServer.open().length }
+    }, { posts: [["streamFailed", ["74011", "1"]], ["localPlayFailure", ["74021", "2"]], ["playerStopped", ["74022", "3"]], ["outputFailed", ["74023", "4"]],
+                 ["playlistRefreshed", ["74012", "5"]], ["playlistError", ["74013", "6"]], ["epgError", ["74014", "7"]], ["mpvMissing", ["74015", "8"]]],
+         cards: [[1, 1], [2, 1], [3, 1], [4, 1], [5, 1], [6, 1], [7, 1], [8, 1]], allOpen: 8 })
+
+    checkCall("D-HOST-5: a card the server no longer holds (expired or dismissed) is not replaced -- the next post of its kind gets a fresh card, and the post after that refreshes THAT one; with no server answering (a logging stub, no daemon) every post goes with the kind's fixed number", () => {
+      const h = served(bootPlayer())
+      refuse(h, "start", localReply("player-start-parent-0500"), "t:a")
+      refuse(h, "start", localReply("player-start-parent-0500"), "t:b")
+      h.notifyServer.expire(1)
+      refuse(h, "start", localReply("player-start-parent-0500"), "t:c")
+      refuse(h, "start", localReply("player-start-parent-0500"), "t:d")
+      const bare = bootPlayer()
+      for (const id of ["t:a", "t:b", "t:c"]) refuse(bare, "start", localReply("player-start-parent-0500"), id)
+      return [posts(h, "localPlayFailure"), cardsOf(h, "Could not start playback"), posts(bare, "localPlayFailure")]
+    }, [["74021", "1", "1", "2"], [[1, 1, false], [2, 1, true]], ["74021", "74021", "74021"]])
+
+    checkCall("D-HOST-5: one post per kind in flight -- a notice of a kind whose post has not answered is held (the latest replacing one held before it) and goes out with the id the post returned the moment it answers; another kind goes at once; nothing is lost and nothing stacks", () => {
+      const h = served(bootPlayer())
+      h.root.notify("localPlayFailure", { name: "A", reason: "r" })
+      h.root.notify("localPlayFailure", { name: "B", reason: "r" })
+      h.root.notify("localPlayFailure", { name: "C", reason: "r" })
+      h.root.notify("epgError", { reason: "x" })
+      const inFlight = h.notifyRuns.map(r => r.kind + ":" + rOf(r.command))
+      h.drain()
+      return [inFlight, h.notifyRuns.map(r => r.kind + ":" + rOf(r.command) + ":" + r.command[r.command.length - 1].slice(0, 3)),
+              cardsOf(h, "Could not start playback"), h.notifyRuns.every(r => r.destroyed === true && r.running === false)]
+    }, [["localPlayFailure:74021", "epgError:74014"],
+        ["localPlayFailure:74021:\u201cA\u201d", "epgError:74014:Cou", "localPlayFailure:1:\u201cC\u201d"], [[1, 1, true]], true])
+
+    checkCall("D-HOST-5: a post that never answers is ended by its watchdog (Service.notifyOverdue: TERM, once, and only while it runs), its kind is freed with no id kept, and the notice held behind it goes out with the fixed number; the bound is Model.NOTIFY_POST_TIMEOUT_MS", () => {
+      const h = served(bootPlayer())
+      h.notifyHang = true
+      h.root.notify("playerStopped", { name: "A" })
+      h.root.notify("playerStopped", { name: "B" })
+      const stuck = h.notifyRuns[0]
+      h.notifyHang = false
+      h.root.notifyOverdue(stuck)
+      h.drain()
+      h.root.notifyOverdue(stuck)
+      return [stuck.signals, h.notifyRuns.map(r => rOf(r.command)), h.notifyRuns.length, M.ownKeyValue(h.root.notifySlots, "playerStopped"),
+              h.warnings.filter(w => /notification post exceeded 5 s/.test(w)).length, M.NOTIFY_POST_TIMEOUT_MS]
+    }, [[15], ["74022", "74022"], 2, { id: 1, busy: false, held: null }, 1, 5000])
+
+    checkCall("D-HOST-5: should the post's process not be made, the notice still goes out (detached, untracked, as before D-HOST-5) and its kind is freed for the next", () => {
+      const h = served(bootPlayer())
+      const made = h.ids.notifyComponent.createObject
+      h.ids.notifyComponent.createObject = () => null
+      h.allowDetachedNotice = 1
+      h.root.notify("epgError", { reason: "x" })
+      h.ids.notifyComponent.createObject = made
+      h.root.notify("epgError", { reason: "y" })
+      h.drain()
+      return [h.detached.filter(a => a[0] === "omarchy-notification-send").map(rOf), h.notifyRuns.length, M.ownKeyValue(h.root.notifySlots, "epgError").busy, h.allowDetachedNotice]
+    }, [["74014", "74014"], 1, false, 0])
+
+    // D-PLY-37 through handlePlayerGone, over the measured lines.
+    const AO = ENDINGS.socket[0]
+    const feedDie = (h, c) => {
+      h.root.nowPlaying = Object.assign({}, X)
+      let owners = M.keyedMap()
+      for (const [entry, who] of c.owners) owners = M.rememberEntryOwner(owners, entry, who)
+      h.root.entryOwners = owners
+      for (const l of c.lines) h.root.handlePlayerLine(JSON.stringify(l))
+      h.root.handlePlayerGone()
+      h.drain()
+      return verdictOf(h).concat([h.root.lastError])
+    }
+    checkCall("D-PLY-37: through handlePlayerLine and handlePlayerGone, mpv's measured ending for an audio output that cannot open (ALSA, PulseAudio, PipeWire) marks NOTHING -- failedAt, failed.json, lastFailedId untouched -- and is told once as Audio output failed (74023), blaming this computer; the dead stream beside it still marks", () =>
+      ENDINGS.socket.slice(0, 3).concat([ENDINGS.socket[5]]).map(c => feedDie(bootPlayer(), c)),
+      [0, 1, 2].map(() => [[], [], "", ["74023 Audio output failed | \u201cX\u201d stopped" + M.SEP + "This computer's audio output could not be opened"], "This computer's audio output could not be opened"])
+        .concat([[["t:x"], ["mark:t:x"], "t:x", ["74011 Stream failed | \u201cX\u201d did not play" + M.SEP + "[stream] Failed to open 127.0.0.1."], "[stream] Failed to open 127.0.0.1."]]))
+
+    // D-PLY-36 through handlePlayerResult's ok branch.
+    const firstLoad = (first) => {
+      const h = bootPlayer()
+      h.root.nowPlaying = Object.assign({}, X)
+      h.root.playerKind = "start"
+      h.root.handlePlayerResult(JSON.stringify({ ok: true, kind: "player.start", spawned: true, pid: 4242, id: "t:x", name: "X", entryId: 1, seq: 1,
+                                                 firstLoad: first, warnings: [], applied: true, playing: null }))
+      h.drain()
+      return verdictOf(h)
+    }
+    checkCall("D-PLY-36: through handlePlayerResult, a first load the window saw end `closed` (mpv died: no end-file) marks NOTHING and is Playback stopped; `end-file` with mpv's loading failed still marks and says Stream failed; `end-file` naming the audio output marks nothing (D-PLY-37); a reply with no `ended` (a helper before D-PLY-36) is taken as before", () => [
+      firstLoad({ state: "failed", reason: "Error: could not create a GL context", ended: "closed" }),
+      firstLoad({ state: "failed", reason: "Failed to open 127.0.0.1.", ended: "end-file", fileError: "loading failed" }),
+      firstLoad({ state: "failed", reason: "Could not open/initialize audio device -> no sound.", ended: "end-file", fileError: "audio output initialization failed" }),
+      firstLoad({ state: "failed", reason: "Failed to open 127.0.0.1." })
+    ], [
+      [[], [], "", ["74022 Playback stopped | \u201cX\u201d stopped unexpectedly"]],
+      [["t:x"], ["mark:t:x"], "t:x", ["74011 Stream failed | \u201cX\u201d did not play" + M.SEP + "Failed to open 127.0.0.1."]],
+      [[], [], "", ["74023 Audio output failed | \u201cX\u201d stopped" + M.SEP + "This computer's audio output could not be opened"]],
+      [["t:x"], ["mark:t:x"], "t:x", ["74011 Stream failed | \u201cX\u201d did not play" + M.SEP + "Failed to open 127.0.0.1."]]
+    ])
+
+    // Found by this lane's mutant S9 (the gate dropped from raiseOutputFailure,
+    // every check green): the two detectors of one dead play are told once.
+    checkCall("D-PLY-37: one card per failed play -- a first load the window saw end with the audio output's error, then the socket's EOF carrying mpv's same ending, posts Audio output failed ONCE and marks nothing", () => {
+      const h = bootPlayer()
+      h.root.nowPlaying = Object.assign({}, X)
+      h.root.playerKind = "start"
+      h.root.handlePlayerResult(JSON.stringify({ ok: true, kind: "player.start", spawned: true, pid: 4242, id: "t:x", name: "X", entryId: 1, seq: 1,
+                                                 firstLoad: { state: "failed", reason: "Could not open/initialize audio device -> no sound.", ended: "end-file", fileError: "audio output initialization failed" },
+                                                 warnings: [], applied: true, playing: null }))
+      h.drain()
+      h.root.nowPlaying = Object.assign({}, X)
+      h.root.entryOwners = M.rememberEntryOwner(M.keyedMap(), 1, { id: "t:x", name: "X" })
+      for (const l of AO.lines) h.root.handlePlayerLine(JSON.stringify(l))
+      h.root.handlePlayerGone()
+      h.drain()
+      return verdictOf(h)
+    }, [[], [], "", ["74023 Audio output failed | \u201cX\u201d stopped" + M.SEP + "This computer's audio output could not be opened"]])
+
+    // Found by mutant S13 (the exit status ignored, every check green): a post
+    // that did not end normally -- the watchdog's TERM, a crash -- is no
+    // answer, whatever its stdout holds (a TERM can cut "12" to "1").
+    checkCall("D-HOST-5: a post that did not exit normally keeps no id, even with an id-shaped stdout; one that did keeps it", () => {
+      const h = bootPlayer()
+      const run = { kind: "epgError", destroyed: false, destroy() { this.destroyed = true } }
+      h.root.notifySlots = M.keyedMap()
+      h.root.notify("epgError", { reason: "x" })
+      h.root.handleNotifyExit(run, "epgError", 0, 1, "12\n")
+      const crashed = M.ownKeyValue(h.root.notifySlots, "epgError").id
+      h.root.notify("epgError", { reason: "y" })
+      h.root.handleNotifyExit(run, "epgError", 0, 0, "12\n")
+      return [crashed, M.ownKeyValue(h.root.notifySlots, "epgError").id, run.destroyed]
+    }, [0, 12, true])
+
+    // D-PLY-41: lane-ply35's rig (stop-then-refused.js), through Service.play().
+    const stopThenPlay = (stopFirst, stopAfter) => {
+      const h = bootPlayer()
+      const index = M.keyedMap()
+      index["t:x"] = { id: "t:x", name: "X", url: "http://s.example.test/x.ts", group: "G" }
+      h.root.channelIndex = index
+      if (stopFirst) { h.root.stop(); h.drain() }
+      const settling = h.root.stopping === true
+      const played = h.root.play("t:x", true, "")
+      h.drain()
+      const issued = h.ids.playerProc.running === true && h.ids.playerProc.command.indexOf("start") !== -1
+      if (stopAfter) { h.root.stop(); h.drain() }
+      h.ids.playerProc.running = false
+      h.root.handlePlayerResult(localReply("player-start-parent-0500"))
+      h.drain()
+      return [settling, played, issued, toasts(h).map(t => t.split(" | ")[0]), h.root.nowPlaying, h.root.lastError, Object.keys(h.root.failedAt)]
+    }
+    checkCall("D-PLY-41: a play made while an earlier stop is still settling, whose `player start` this machine refuses, is TOLD (Could not start playback) and its intent cleared, as the same play without a stop is; a stop made AFTER the play still silences its refusal; nothing is marked", () => [
+      stopThenPlay(false, false), stopThenPlay(true, false), stopThenPlay(false, true)
+    ], [
+      [false, true, true, ["74021 Could not start playback"], null, "Could not write the player's runtime folder", []],
+      [true, true, true, ["74021 Could not start playback"], null, "Could not write the player's runtime folder", []],
+      [false, true, true, [], null, "Could not write the player's runtime folder", []]
+    ])
   }
 
   // ---- R21e (D-SINK-19 round 11): THE MIGRATION, through Service.qml ----
@@ -17429,6 +17776,21 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   return [tableSame, ownKeys.length > 1000, diff.length, diff.indexOf("U+A7CE") !== -1, diff.indexOf("U+16EA0") !== -1,
           show(diff) === show(data.diff), reach.every(r => r === true), reach.length]
 }, [true, true, 28, true, true, true, true, 28])
+
+// ---- D-HOST-5, rule 15: every notice the service posted in this run went through its kind's slot ----
+//
+// Every service boot in this process (tests/service-harness.js) records each
+// notice it posted: through its kind's slot, by kind, or detached past it.
+// Read LAST, after every check that boots the service has run its shipping
+// paths: no notice went out past a slot (except the one test that drives the
+// fallback, which declares it), and every kind in NOTIFY_IDS was posted
+// through a slot by some real path -- so a notice kind added later that
+// bypasses Service.notify, or that no check reaches, turns this red. Red on
+// dev 9e380ae, whose every notice is detached.
+checkCall("D-HOST-5 (rule 15): across every service boot in this run, no notice was posted past its kind's slot, and every notice kind the plugin has was posted through one by the service's own paths", () => {
+  const L = require("./service-harness.js").NOTICE_LEDGER
+  return { detached: L.detached.slice(0, 5), detachedCount: L.detached.length, kinds: Object.keys(L.slotted || {}).sort() }
+}, { detached: [], detachedCount: 0, kinds: Object.keys(Model.NOTIFY_IDS).sort() })
 
 console.log("\n" + checks + " checks, " + failures + " failure(s)")
 if (failures > 0) process.exit(1)
