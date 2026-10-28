@@ -61,6 +61,11 @@
 #                                cited in a tracked file has a row in
 #                                ARCHITECTURE-SOURCES's register and every
 #                                row is cited at least once; F-M3-20)
+#  17. double-encoding guard     (scripts/check-double-encoding.py: no text
+#                                file in the tree holds UTF-8 that was read
+#                                as Latin-1 or Windows-1252 and written
+#                                again, the four characters UX.md held for
+#                                every Nerd Font glyph; D-DOC-28)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
@@ -667,7 +672,14 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3036}
 # and 1 error on 448db72's export; one test red on each of two mutations (the
 # seed copied before the wipe; holds ignoring a file's size). The suite runs 1580
 # and the floor is 1580.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1580}
+# 2026-10-28, lane-doc28 (D-DOC-28): 1580 -> 1668 --
+# tests/test_check_double_encoding.py (+23), the guard over throwaway
+# repositories and through `python3 -I` as the gate runs it; each of 18
+# mutations of the guard turns at least one red (the lane report). The other
+# 65 were already running on da0000d (1645 in its gate) under a floor left at
+# 1580 since 2026-10-25, so any 65 of them could have been deleted green;
+# the floor is again what the suite runs.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1668}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
@@ -779,6 +791,13 @@ README_NOTICES_MIN=${README_NOTICES_MIN:-19}
 # rows means the register table moved out from under the row regex,
 # which is the failure this guards.
 SR_REGISTER_ROWS_MIN=${SR_REGISTER_ROWS_MIN:-40}
+# D-DOC-28 (2026-10-28, lane-doc28): the double-encoding guard reads every
+# UTF-8 text file the tree lists, tracked or not yet staged -- 405 on
+# lane-doc28, with preview.png and the gzipped EPG fixture skipped by name.
+# Fewer means it stopped reading part of the tree. A commit that deletes
+# files lowers this in the same commit and says which, as the text format
+# guard's 61 -> 58 did; a new file needs nothing.
+DOUBLE_ENCODING_FILES_MIN=${DOUBLE_ENCODING_FILES_MIN:-405}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -1640,6 +1659,34 @@ if python3 "$ROOT/scripts/check-sr-register.py" >"$sr_log" 2>&1; then
   fi
 else
   cat "$sr_log"; bad "SR ruling register"
+fi
+
+step "double-encoding guard (no UTF-8 read as one byte per character and written again)"
+# D-DOC-28 (2026-10-28). docs/UX.md held every Nerd Font glyph as the UTF-8
+# of its four bytes read as Latin-1 -- four characters, two of them
+# invisible C1 controls -- from one commit on 2026-09-13 (acd1723), and the
+# damage spread by copy: a new row copies its neighbour's glyph cell, so 57
+# sequences became 64 on 50 lines with every gate green, because no gate
+# read for it. The guard walks every run of characters that a Latin-1 or a
+# Windows-1252 reading gives one byte each for a strict UTF-8 sequence, and
+# flags one of three or four bytes, or of two with an A-circumflex or
+# A-tilde lead or a C1 control in it; a Latin-1 letter before a symbol or a
+# no-break space is legitimate text and is counted as rejected, never
+# flagged. `--repair FILE` undoes a flagged sequence and nothing else, and
+# refuses to write unless the reverse at the same places is the original.
+# Seen red on da0000d: 64 problems, all docs/UX.md, on 50 lines.
+dbl_log=$CHECK_TMP/double-encoding.log
+if python3 -I "$ROOT/scripts/check-double-encoding.py" --root "$ROOT" >"$dbl_log" 2>&1; then
+  dbl_n=$(grep -oE '^double-encoding guard: [0-9]+ file\(s\) read' "$dbl_log" | head -1 | grep -oE '[0-9]+')
+  if [[ -z $dbl_n ]]; then
+    cat "$dbl_log"; bad "double-encoding guard printed no file count at all"
+  elif (( dbl_n < DOUBLE_ENCODING_FILES_MIN )); then
+    cat "$dbl_log"; bad "double-encoding guard read $dbl_n file(s), expected at least $DOUBLE_ENCODING_FILES_MIN"
+  else
+    ok "$(tail -1 "$dbl_log")"
+  fi
+else
+  cat "$dbl_log"; bad "double-encoding guard"
 fi
 
 if (( fail )); then echo "check.sh: FAILED"; exit 1; fi
