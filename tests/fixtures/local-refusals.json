@@ -1,0 +1,33 @@
+{
+  "about": "D-SRC-73 (2026-10-27): what the helper answers when a folder it writes into cannot be used, and the sentence the shell shows for it. The helper's code and the model's sentence are joined by a NAME, so both sides run this file (rule 13): tests/test_local_refusals.py applies each `damage` in a scratch directory, runs the REAL helper as a subprocess with `argv` (HOME, the XDG folders and PATH in the scratch directory, so nothing of the user's is read and no mpv can start), and compares its stdout with `reply` exactly, with `{dir}` the damaged folder, `{fixtures}` tests/fixtures, `{cache}` a seeded cache folder and `{id}` its first channel; tests/Model.test.js maps `reply` through Model.parseHelperStatus and Model.statusReason and compares `reason`, with `{dir}` a path under a home directory, and checks that the reason names no path and that Model.failureFromHost puts no host after it. Damages: `folder-link` -- {dir} is a symbolic link to a name that does not exist; `folder-file` -- a regular file is at {dir}.",
+  "refusals": [
+    {
+      "id": "playlist-folder-link",
+      "damage": "folder-link",
+      "argv": ["playlist", "--url", "{fixtures}/basic.m3u", "--cache-dir", "{dir}"],
+      "reply": {"ok": false, "kind": "playlist", "error": {"code": "folder_unusable", "message": "{dir} is a symbolic link whose target is missing or is not a folder; nothing was written"}},
+      "reason": "A folder the plugin uses is a broken link or not a folder"
+    },
+    {
+      "id": "playlist-folder-file",
+      "damage": "folder-file",
+      "argv": ["playlist", "--url", "{fixtures}/basic.m3u", "--cache-dir", "{dir}"],
+      "reply": {"ok": false, "kind": "playlist", "error": {"code": "folder_unusable", "message": "{dir} is not a folder; nothing was written"}},
+      "reason": "A folder the plugin uses is a broken link or not a folder"
+    },
+    {
+      "id": "epg-folder-link",
+      "damage": "folder-link",
+      "argv": ["epg", "--url", "{fixtures}/epg-basic.xml", "--cache-dir", "{dir}", "--now", "1789246800"],
+      "reply": {"ok": false, "kind": "epg", "error": {"code": "folder_unusable", "message": "{dir} is a symbolic link whose target is missing or is not a folder; nothing was written"}},
+      "reason": "A folder the plugin uses is a broken link or not a folder"
+    },
+    {
+      "id": "failed-mark-folder-link",
+      "damage": "folder-link",
+      "argv": ["failed", "--cache-dir", "{dir}", "mark", "--id", "t:x"],
+      "reply": {"ok": false, "kind": "failed", "error": {"code": "folder_unusable", "message": "{dir} is a symbolic link whose target is missing or is not a folder; nothing was written"}},
+      "reason": "A folder the plugin uses is a broken link or not a folder"
+    }
+  ]
+}

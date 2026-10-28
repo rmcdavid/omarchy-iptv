@@ -1311,8 +1311,12 @@ function fetchingLine(host, kind) {
 // handleProbeExit), and the refresh empty state composes through the same
 // function (failureFromHost, Guide.qml), so every "<reason> from <host>"
 // reads one list.
+//
+// D-SRC-73 (2026-10-27): `folder_unusable` joins it. R25c's refusal is about
+// a folder on this machine (the source's cache folder is a link to nothing,
+// or not a folder), never the provider's.
 var PROBE_LOCAL_REFUSALS = ["too_many", "state_unreadable", "unknown_source", "cache_unwritable", "internal",
-                            "helper_timeout", "no_output", "helper_damaged", "not_implemented"]
+                            "helper_timeout", "no_output", "helper_damaged", "not_implemented", "folder_unusable"]
 
 // "<reason> from <host>", or the reason alone when the code is a local
 // failure (PROBE_LOCAL_REFUSALS) or there is no host to name. The reason is

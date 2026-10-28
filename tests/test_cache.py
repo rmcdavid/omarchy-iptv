@@ -137,6 +137,37 @@ class CacheWriteRefusalTest(CacheTestCase):
         self.assert_refused(code, status, err, "playlist-status.json", "Is a directory")
         self.assertTrue(status["stale"])   # the channel list itself was written
 
+    def test_d_src_73_a_folder_that_is_a_link_to_nothing_is_r25c_folder_unusable_at_either_write(self):
+        # D-SRC-73: FolderUnusable is an OSError, and the two excepts above
+        # folded R25c's refusal into cache_unwritable, so this verb answered
+        # a link to nothing differently from every other one. Both writes are
+        # driven: the folder a link to nothing from the start (the channel
+        # list's write meets it), and the folder replaced by one between the
+        # channel list and its status (the status's write meets it). Red on
+        # dev 41ab132: cache_unwritable, "(is a symbolic link whose target is
+        # missing or is not a folder)".
+        target = self.sources / KEY
+        self.sources.mkdir(parents=True)
+        os.symlink(self.sources / "gone", target)
+        first = self.probe(target)
+        os.unlink(target)
+        real = helper.write_json_atomic
+
+        def swap_after_the_channel_list(path, payload, *rest):
+            real(path, payload, *rest)
+            if os.path.basename(path) == "channels.json":
+                os.rename(target, self.sources / "moved")
+                os.symlink(self.sources / "gone", target)
+
+        with mock.patch.object(helper, "write_json_atomic", swap_after_the_channel_list):
+            second = self.probe(target)
+        sentence = "%s is a symbolic link whose target is missing or is not a folder; nothing was written" % target
+        for code, status, err in (first, second):
+            self.assertEqual((code, status["ok"], status["kind"], status["error"]), (1, False, "playlist", {"code": "folder_unusable", "message": sentence}), err)
+            self.assertNotIn("Traceback", err)
+        self.assertFalse(os.path.lexists(self.sources / "gone"))
+        self.assertTrue((self.sources / "moved" / "channels.json").is_file())   # the second run's list landed before the swap
+
 
 class OtherWritersRefusalTest(CacheTestCase):
     """D-SRC-72 (2026-10-27, the owner's decision): every helper writer into
