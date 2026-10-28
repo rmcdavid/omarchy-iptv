@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- D-EPG-13 fixture: a well-formed XMLTV feed that lists channels and no programme. ASCII only. -->
+<tv generator-info-name="omarchy-iptv fixture">
+  <channel id="bbc1.uk"><display-name>BBC One</display-name></channel>
+  <channel id="bbc2.uk"><display-name>BBC Two</display-name></channel>
+</tv>

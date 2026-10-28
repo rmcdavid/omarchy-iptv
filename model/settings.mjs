@@ -307,6 +307,43 @@ function helperDamagedReason(status) {
     + SEP + "reinstall the plugin"
 }
 
+// D-PLY-34 (2026-10-28). A code's meaning moves with the verb (D-PLY-32's
+// reading), and two of the codes below are the FETCH verbs' words: `busy`
+// ("Another fetch is running") and `too_large` ("Source too large"). On a
+// player verb the helper's `busy` is the PLAYER lock (acquire_lock: another
+// `player start|restart|stop` holds it, after the shell's retries are spent)
+// and `too_large` is main()'s answer to a MemoryError, this helper's own
+// memory -- no player verb reads a provider's source. Both reached the
+// "Could not start playback" card and lastError in the fetch's words. The
+// kind decides: `player.<verb>` (each player verb's own refusal), `player`
+// (main()'s catch-alls for any of them) and the verbs that drive the player
+// over its socket -- `play` (a zap), `stop`, `status` and `seek` (the rewind
+// verb's own refusal shape). The playlist and EPG verbs keep the table's
+// sentences, unchanged.
+//
+// `spawn_failed` is the third (D-PLY-31): on a player verb the mpv spawn
+// could not happen -- an exec refused (`could not start mpv: Permission
+// denied`), or since D-PLY-31 the spawn's own pipes or fork refused. The
+// clipboard verb answers the same code for wl-paste, and its sentence must
+// not be mpv's; it never meets this function -- its reply carries `code` at
+// the top and no `error` (so the first line below answers ""), and
+// Model.parseClipboardReply drops every failure without a word (R2) -- and
+// keeping the code out of the general table keeps it that way should one
+// ever arrive.
+var PLAYER_VERB_KINDS = ["player", "play", "stop", "status", "seek"]
+
+function playerVerbKind(kind) {
+  var k = str(kind)
+  return PLAYER_VERB_KINDS.indexOf(k) !== -1 || k.indexOf("player.") === 0
+}
+
+function playerVerbReason(code) {
+  if (code === "busy") return "The player is busy"
+  if (code === "too_large") return "Helper ran out of memory"
+  if (code === "spawn_failed") return "Could not start mpv"
+  return ""
+}
+
 // Short, credential-free reason per UX 6.3. Maps helper error codes first,
 // then falls back to a scrubbed message.
 function statusReason(status) {
@@ -314,6 +351,8 @@ function statusReason(status) {
   var code = str(status.error.code)
   var message = str(status.error.message)
   if (code === "helper_damaged") return helperDamagedReason(status)
+  var byVerb = playerVerbKind(status.kind) ? playerVerbReason(code) : ""
+  if (byVerb !== "") return byVerb
   var http = code.match(/^http_(\d{3})$/)
   if (http) {
     var n = Number(http[1])
@@ -337,8 +376,21 @@ function statusReason(status) {
     bad_gzip: "Bad gzip data",
     empty_playlist: "Playlist has no channels",
     not_a_playlist: "Not an M3U playlist",
-    not_m3u: "Not an M3U playlist",
-    not_xmltv: "Not an XMLTV file",
+    // D-EPG-13 (2026-10-28). The EPG verb's two parse refusals, which showed
+    // the parser's own text in the guide-data banner ("could not parse EPG
+    // XML: not well-formed (invalid token): line 1, column 0") and the EPG
+    // notification. `bad_xml` is also D-EPG-6's refusal of a feed that
+    // declares an XML entity: the same code, so the same sentence -- the
+    // user's remedy is the same (the address does not serve a plain XMLTV
+    // guide) and the journal keeps which it was. Both are the PROVIDER'S
+    // (D-SRC-71's reading: the guide's own content), so they stay off
+    // PROBE_LOCAL_REFUSALS and a line that composes `from <host>` keeps the
+    // host; none does today. `not_m3u` and `not_xmltv` went from this table
+    // the same day: no helper verb answers either -- `not_m3u` was v0.1's
+    // name for what shipped as `not_a_playlist` (D-QA-13, D-LIVE-03), and
+    // `not_xmltv` never shipped; the EPG verb says `bad_xml`.
+    bad_xml: "Not a valid XMLTV guide",
+    empty_epg: "Guide has no programmes",
     no_source: "No playlist configured",
     not_implemented: "Helper command not implemented",
     no_output: "Helper produced no output",
@@ -373,6 +425,12 @@ function statusReason(status) {
     // used to be main()'s `internal` with the exception and the path. A play
     // that fails this way is told in the "did not play" notification.
     runtime_unwritable: "Could not write the player's runtime folder",
+    // D-PLY-31 (2026-10-28): a regular file -- anything that is not a socket
+    // -- at the player's socket path ($XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock).
+    // The helper never unlinks it and never spawns over it
+    // (check_socket_path); its message, "the socket path is not a socket",
+    // reached the "did not play" card as it was.
+    socket_path_blocked: "Something else is at the player's socket path",
     not_running: "mpv is not running",
     unknown_channel: "Unknown channel",
     ipc_error: "mpv did not answer",
@@ -1149,10 +1207,11 @@ export {
   parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
   parseEpgNow, EPG_CHANNELS_OPEN, EPG_STORE_KIND, emptyEpgStore,
   parseEpgNowStore, epgNowIndex, parseHelperStatus, HTTP_REASONS,
-  HELPER_PART_RE, helperDamagedReason, statusReason, lastErrorAfterStatus,
-  statusHost, statusCode, statusHealthy, statusWarnings, WARNING_PREFIX,
-  warningLabel, labelWarning, labelWarnings, warningLine, footerWarning,
-  findBarEntry, settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
+  HELPER_PART_RE, helperDamagedReason, PLAYER_VERB_KINDS, playerVerbKind,
+  playerVerbReason, statusReason, lastErrorAfterStatus, statusHost,
+  statusCode, statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel,
+  labelWarning, labelWarnings, warningLine, footerWarning, findBarEntry,
+  settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
   entryInputText, entryInputForm, sameEntryInput, ownWriteInForce,
   settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
   MAX_SEEN_INPUTS, entryInputSeen, entryInputLast, entryInputsSeenAfter,

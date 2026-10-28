@@ -251,6 +251,19 @@ rewrites it in this shape. `epg-status.json` mirrors the playlist status shape w
 `bad_xml` with one sentence and no URL, before ElementTree reads a byte of
 it (D-EPG-6, security standard 2); a `<!DOCTYPE tv SYSTEM "xmltv.dtd">`
 line without an internal subset is accepted as it always was.
+**[2026-10-28, D-EPG-13: the EPG verb's two parse refusals have a sentence
+in `Model.statusReason`, and the user no longer reads the parser's text:
+`bad_xml` -- a feed that does not parse (`could not parse EPG XML: <expat's
+words>`) and the entity refusal above alike, one code and so one sentence,
+because the remedy is the same and the journal keeps which it was -- reads
+`Not a valid XMLTV guide`; `empty_epg` (`no programmes found in the EPG`, a
+feed that parses and lists none) reads `Guide has no programmes`. Both are
+the provider's (D-SRC-71's reading: the guide's own content), so they are
+not on `PROBE_LOCAL_REFUSALS` and a line that composes `from <host>` keeps
+the host; the guide-data banner and the `Guide data error` notification
+compose none. `not_xmltv` and `not_m3u` left the table the same day: no
+helper verb answers either (`not_m3u` was v0.1's name for `not_a_playlist`,
+D-QA-13; `not_xmltv` never shipped).]**
 
 ### `state.json` (service <-> disk, via `Model.parseState`)
 
@@ -4197,6 +4210,20 @@ Performance budget (10k channels):
     regular file at the key still reaches `internal` from `remove`,
     `epg-clear` and `logos-clear` -- read in the journal only, because the
     shell logs a cache job's code and shows the user nothing.]**
+    **[2026-10-28, D-SRC-74: `cache remove`, `epg-clear` and `logos-clear`
+    answer R25c's `folder_unusable` for a regular file at the key, as
+    `migrate --key` does -- R25c's code, sentence and exit, unchanged, and
+    the file left where it is -- through the walk `ensure_private_dir`
+    refuses with, `missing_folders`, which creates nothing. The same walk
+    gives the one answer for every damage ABOVE the key: a `sources`
+    folder (or the cache folder) that is a file, or a link to nothing, is
+    `folder_unusable` from all five subverbs; the three removals used to
+    answer `internal` for a file there and succeed, removing nothing, for
+    a link to nothing. Two differences remain, each by design: a symbolic
+    link AT the key is `bad_key` from every key verb (source_dir refuses it
+    first, D-SRC-73's decision), and `cache prune`, which sweeps the
+    sources folder, skips a file or a link at a key and lists it in
+    `skipped` without touching it.]**
 
     **The one line the shell writes (R30c).** A run that stopped at the
     ceiling or at its deadline, or found the folder busy, exits 0, and its

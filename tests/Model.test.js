@@ -6159,7 +6159,14 @@ checkCall("D-SRC-63 meets R32a''': the predicate's authority cut at the six deli
   return [withTab.code, withTab.message.indexOf(Model.ENCODE_SENTENCE) !== -1, without.code, without.message.indexOf(Model.ENCODE_SENTENCE) !== -1,
           Model.urlHostWithheld("http://my:pa\t/ss@h.test/x"), Model.urlHostWithheld("http://my:pa/ss@h.test/x"), Model.sourceUrlWarning("http://my:pa\t/ss@h.test/x")]
 }, ["invalid", false, "invalid", true, false, true, ""])
-check("statusReason: one spelling for a non-M3U source (SR28)", [Model.statusReason({ ok: false, error: { code: "not_m3u", message: "" } }), Model.statusReason({ ok: false, error: { code: "not_a_playlist", message: "" } })], ["Not an M3U playlist", "Not an M3U playlist"])
+// D-EPG-13 (2026-10-28): `not_m3u` was v0.1's plan name for what the helper
+// shipped as `not_a_playlist` (D-QA-13); no helper commit ever answered it
+// (`git log -S` over bin/), so the table no longer maps it and SR28's one
+// spelling is pinned on the code the playlist verb really answers.
+check("statusReason: one spelling for a non-M3U source (SR28), on the playlist verb's own code; `not_m3u`, which no verb answers, is no longer mapped",
+  [Model.statusReason({ ok: false, kind: "playlist", error: { code: "not_a_playlist", message: "source from h.test is not an M3U playlist (no #EXTM3U or #EXTINF lines)" } }),
+   Model.statusReason({ ok: false, error: { code: "not_m3u", message: "" } })],
+  ["Not an M3U playlist", "Unknown error"])
 check("codePointLength / capCodePoints count code points, not UTF-16 units (SR22)", [Model.codePointLength("a\ud83d\udce1b"), Model.capCodePoints("a\ud83d\udce1b", 2), Model.validateLabel("\ud83d\udce1".repeat(64), [], "").ok, Model.validateLabel("\ud83d\udce1".repeat(65), [], "").code, Model.uniqueLabel("\ud83d\udce1".repeat(70), []).length], [3, "a\ud83d\udce1", true, "label_too_long", 128])
 check("formCapacity is the cap plus slack so over-cap input is refused, not cut (SR18)", [Model.formCapacity("playlist") > Model.formLimit("playlist"), Model.withFormValue(Model.openFirstRun(Model.guideState("all")), "playlist", "http://h.test/" + "a".repeat(2100)).form.values.playlist.length > 2048, Model.validateUrlForm({ label: "", playlist: "http://h.test/" + "a".repeat(2100), epg: "" }, [], "").error.code], [true, true, "too_long"])
 check("validateSourceUrl result shape", Object.keys(Model.validateSourceUrl("http://h.test/x")).sort(), ["code", "field", "host", "kind", "message", "ok", "url"])
@@ -15570,6 +15577,109 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       }
     }
   }
+
+  // ---- lane-p31e13 (2026-10-28): the player's and the guide's own refusals read a sentence ----
+  //
+  // The replies are the REAL helper's, from the shared fixture
+  // (tests/fixtures/local-refusals.json; tests/test_local_refusals.py drives
+  // each for real and compares stdout). `refusals` carries the ones the
+  // checks above already take (this machine's, told at once), and
+  // `otherRefusals` the ones they cannot (the fixture's `about` says why).
+  // Every surface below is the shipping one: Service.qml's handlers,
+  // Guide.qml's own bannerText compiled from its text, the notification
+  // argv, lastError and the IPC status. Each check is red on dev 795a7bf,
+  // where the user read the helper's own words or the fetch verbs'.
+  const OTHER = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/local-refusals.json"), "utf8")).otherRefusals
+  const fixtureCase = id => {
+    const c = LOCAL.concat(OTHER).find(x => x.id === id)
+    if (!c) throw new Error("local-refusals.json: no case " + id)
+    return c
+  }
+  const fixtureReply = id => JSON.stringify(fixtureCase(id).reply).split("{dir}").join(LOCAL_DIR)
+  // The helper's own words for every code this round maps, and the shapes
+  // of an exception: none may reach a surface.
+  const HELPER_WORDS = /could not parse EPG XML|no programmes found|refused the EPG|socket path is not a socket|could not start mpv|did not report a pid|another player command|needs more memory|Errno|Error:|Traceback/
+  // A reply's sentence, and whether it is clean: not the helper's words, no path.
+  const sentenceOf = id => {
+    const st = M.parseHelperStatus(fixtureReply(id), fixtureCase(id).reply.kind)
+    const reason = M.statusReason(st)
+    return [reason === fixtureCase(id).reason, HELPER_WORDS.test(reason) || namesPath(reason), M.failureFromHost(reason, "new.example.test", M.statusCode(st))]
+  }
+
+  checkCall("D-PLY-34: a player verb's `busy` (the player lock, out of retries) and `too_large` (main()'s MemoryError, the real helper's replies) read the player's sentences -- the \"Could not start playback\" card, lastError, the zap's `play failed` line and the rewind line -- while the fetch verbs keep theirs and `busy` still retries silently while retries are left", () => {
+    const spent = bootPlayer()
+    spent.root.playRetries = spent.root.playRetryMax
+    refuse(spent, "start", fixtureReply("player-start-lock-held"))
+    const left = bootPlayer()
+    refuse(left, "start", fixtureReply("player-start-lock-held"))
+    const memory = bootPlayer()
+    refuse(memory, "start", fixtureReply("player-start-out-of-memory"))
+    const zap = bootPlayer()
+    zap.root.playerUp = true
+    zap.root.nowPlaying = { id: "t:x", name: "X", group: "", launchedFrom: "", since: 1 }
+    zap.root.controlKind = "play"
+    zap.root.handleControlResult(fixtureReply("zap-play-out-of-memory") + "\n")
+    zap.drain()
+    const rewind = M.seekTransientText(M.parseHelperStatus(fixtureReply("player-start-out-of-memory"), "seek"), "The player is busy" + M.SEP + "try again")
+    const fetchOf = (kind, code) => M.statusReason({ ok: false, kind, error: { code, message: "source from h.test exceeds the limit" } })
+    return { mapped: ["player-start-lock-held", "player-start-out-of-memory", "zap-play-out-of-memory"].map(id => sentenceOf(id).slice(0, 2)),
+             spent: [toasts(spent), spent.root.lastError], left: [toasts(left).length, left.root.playRetries, left.root.lastError],
+             memory: [toasts(memory), memory.root.lastError],
+             zap: [zap.root.lastError, zap.warnings.filter(w => /play failed:/.test(w))],
+             rewind,
+             fetch: [fetchOf("playlist", "too_large"), fetchOf("epg", "too_large"), fetchOf("", "busy"), fetchOf("playlist", "busy")],
+             seen: toasts(spent).concat(toasts(memory), [spent.root.lastError, memory.root.lastError, zap.root.lastError, rewind], spent.warnings, memory.warnings, zap.warnings).some(t => HELPER_WORDS.test(t)) }
+  }, { mapped: [[true, false], [true, false], [true, false]],
+       spent: [["74021 Could not start playback | \u201cX\u201d did not play" + Model.SEP + "The player is busy"], "The player is busy"], left: [0, 1, ""],
+       memory: [["74021 Could not start playback | \u201cX\u201d did not play" + Model.SEP + "Helper ran out of memory"], "Helper ran out of memory"],
+       zap: ["Helper ran out of memory", ["omarchy-iptv: play failed: Helper ran out of memory"]],
+       rewind: "Helper ran out of memory",
+       fetch: ["Source too large", "Source too large", "Another fetch is running", "Another fetch is running"], seen: false })
+
+  // `player-restart-mpv-not-executable` (the recheck, 2026-10-28): the
+  // kind's `player.<verb>` half, on the one other verb that spawns. Without
+  // it a statusReason that read mpv's sentence for `player.start` alone
+  // stayed green.
+  const P31 = ["player-start-socket-file", "player-restart-socket-file", "player-start-mpv-not-executable", "player-restart-mpv-not-executable",
+               "player-start-fork-refused", "player-start-pipes-refused"]
+
+  checkCall("D-PLY-31: a start refused at the socket path or at the spawn (the real helper's replies: a file at mpv.sock, an mpv that cannot be executed, the fork refused, no descriptors for the pipes) maps to the fixture's sentence with no host after it, and is one \"Could not start playback\" card and lastError in that sentence through Service.handlePlayerResult -- no helper words, no errno, nothing marked", () =>
+    P31.map(id => {
+      const h = bootPlayer()
+      refuse(h, fixtureCase(id).reply.kind.split(".")[1], fixtureReply(id))
+      const v = verdictOf(h)
+      const [same, raw, composed] = sentenceOf(id)
+      const seen = v[3].concat([h.root.lastError], h.warnings)
+      return [id, same, raw, composed === fixtureCase(id).reason, v[3], h.root.lastError, v[0].length + v[1].length, seen.some(t => HELPER_WORDS.test(t) || namesPath(t))]
+    }), P31.map(id => [id, true, false, true, ["74021 Could not start playback | \u201cX\u201d did not play" + Model.SEP + fixtureCase(id).reason], fixtureCase(id).reason, 0, false]))
+
+  checkCall("D-PLY-31: `spawn_failed` is also the clipboard verb's code (wl-paste), and the clipboard keeps its own reading -- the real reply (a wl-paste that cannot be executed) is dropped by Model.parseClipboardReply, so a failed paste says nothing and clears nothing (R2), and it carries no `error` object, so Model.statusReason never gives it mpv's sentence; mpv's sentence is a player verb's alone, so not even a clipboard reply in the error shape would read it", () => {
+    const reply = fixtureReply("clipboard-wl-paste-not-executable")
+    const st = M.parseHelperStatus(reply, "clipboard")
+    const shaped = M.statusReason({ ok: false, kind: "clipboard", error: { code: "spawn_failed", message: "could not start wl-paste" } })
+    return [M.parseClipboardReply(reply), JSON.parse(reply).code, st.error.code, M.statusReason(st) !== "Could not start mpv", fixtureCase("clipboard-wl-paste-not-executable").surface,
+            shaped !== "Could not start mpv"]
+  }, [null, "spawn_failed", "error", true, "none", true])
+
+  const E13 = ["epg-not-xml", "epg-declares-entity", "epg-no-programmes"]
+
+  checkCall("D-EPG-13: the guide's own refusals (the real helper's replies: a feed that does not parse, one that declares an entity, one with no programme) map to the fixture's sentence, which a line composing `from <host>` would keep (the provider's, D-SRC-71's reading); as the user reads them -- the guide-data banner (Guide.qml's own bannerText), the \"Guide data error\" notification (74014), the service's epgReason and the IPC status's epg.reason -- they carry the sentence, never the parser's text", () => {
+    const copy = new Function("Model", "root", "return (" + guideBlock("  readonly property var copy: ({") + ")")(M, { pluginId: "io.github.rmcdavid.iptv" })
+    const bannerOf = new Function("root", "Model", guideBlock("readonly property string bannerText: {").slice(1, -1))
+    return E13.map(id => {
+      const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+      h.detached.length = 0
+      h.root.handleEpgExit(fixtureReply(id), false)
+      h.drain()
+      const banner = bannerOf({ bannerKind: "epgError", copy, service: h.root }, M)
+      const told = h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74014") !== -1).map(a => a[a.length - 1])
+      const seen = [banner, h.root.epgReason, h.root.statusSummary().epg.reason].concat(told)
+      const [same, raw, composed] = sentenceOf(id)
+      return [id, same, raw, composed === fixtureCase(id).reason + " from new.example.test", banner, told, h.root.statusSummary().epg.reason,
+              seen.some(t => HELPER_WORDS.test(t) || namesPath(t))]
+    })
+  }, E13.map(id => [id, true, false, true, "Guide data unavailable (" + fixtureCase(id).reason + ")" + Model.SEP + "channels still work" + Model.SEP + "r retry",
+                    ["Could not fetch the EPG (" + fixtureCase(id).reason + "). Channels still work."], fixtureCase(id).reason, false]))
 })()
 
 // ---- D-REL-7, the split's reviews P2 and P3a: a damaged helper says so.

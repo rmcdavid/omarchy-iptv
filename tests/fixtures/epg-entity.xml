@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- D-EPG-13 fixture: a feed that declares an XML entity, which the helper refuses before parsing (D-EPG-6). ASCII only. -->
+<!DOCTYPE tv [
+  <!ENTITY name "BBC One">
+]>
+<tv generator-info-name="omarchy-iptv fixture">
+  <channel id="bbc1.uk"><display-name>&name;</display-name></channel>
+  <programme start="20260912200000 +0000" stop="20260912210000 +0000" channel="bbc1.uk"><title>News</title></programme>
+</tv>
