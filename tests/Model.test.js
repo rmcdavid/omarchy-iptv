@@ -15636,7 +15636,12 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
        rewind: "Helper ran out of memory",
        fetch: ["Source too large", "Source too large", "Another fetch is running", "Another fetch is running"], seen: false })
 
-  const P31 = ["player-start-socket-file", "player-restart-socket-file", "player-start-mpv-not-executable", "player-start-fork-refused", "player-start-pipes-refused"]
+  // `player-restart-mpv-not-executable` (the recheck, 2026-10-28): the
+  // kind's `player.<verb>` half, on the one other verb that spawns. Without
+  // it a statusReason that read mpv's sentence for `player.start` alone
+  // stayed green.
+  const P31 = ["player-start-socket-file", "player-restart-socket-file", "player-start-mpv-not-executable", "player-restart-mpv-not-executable",
+               "player-start-fork-refused", "player-start-pipes-refused"]
 
   checkCall("D-PLY-31: a start refused at the socket path or at the spawn (the real helper's replies: a file at mpv.sock, an mpv that cannot be executed, the fork refused, no descriptors for the pipes) maps to the fixture's sentence with no host after it, and is one \"Could not start playback\" card and lastError in that sentence through Service.handlePlayerResult -- no helper words, no errno, nothing marked", () =>
     P31.map(id => {

@@ -100,6 +100,13 @@
       "reason": "Could not start mpv"
     },
     {
+      "id": "player-restart-mpv-not-executable",
+      "damage": "mpv-not-executable",
+      "argv": ["player", "restart", "--socket", "{dir}/mpv.sock", "--cache-dir", "{cache}", "--id", "{id}", "--seq", "1", "--lock-timeout", "1", "--spawn-timeout", "1", "--first-load-timeout", "1"],
+      "reply": {"ok": false, "kind": "player.restart", "error": {"code": "spawn_failed", "message": "could not start mpv: Permission denied"}, "id": "{id}", "seq": 1},
+      "reason": "Could not start mpv"
+    },
+    {
       "id": "player-start-fork-refused",
       "damage": "fork-refused",
       "argv": ["player", "start", "--socket", "{dir}/mpv.sock", "--cache-dir", "{cache}", "--id", "{id}", "--seq", "1", "--lock-timeout", "1", "--spawn-timeout", "1", "--first-load-timeout", "1"],
