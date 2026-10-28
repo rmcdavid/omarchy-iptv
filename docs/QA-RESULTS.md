@@ -13315,6 +13315,75 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### D-SRC-69: a cache job decides what it deletes when it runs (lane-src69, 2026-10-27, 63e0f2f..bc1127e)
+
+**The fix.** The start-up `cache prune` is queued at cacheReady and run at dirsReady. Until now its keep list was the records of the queue moment. It is now queued as `["prune"]`, and `runNextCacheJob` builds the argv through `Model.cacheJobArgs` -> `Model.pruneArgs` from:
+- the records of the state at run time;
+- the active key at run time;
+- the folder of a probe not yet handled (`probeDirKey`, and `probingKey` for an edit);
+- the EPG age.
+
+The D-LOGO-20 switch prune goes through the same function.
+
+**The other order.** A probe can start after a prune's argv was fixed: the helper is still starting, or has listed sources/ and not yet reached the folder. Such a probe is HELD when the running job is a prune that does not keep its folder, or a removal of its key (`Model.probeWaitsFor`). While held:
+- `probing` reads true;
+- the helper starts at the job's exit (handleCacheExit -> launchProbe);
+- the probe watchdog bounds the wait;
+- a cancel ends the probe at once.
+
+**The sibling.** A queued `cache remove --key K` is dropped at run time when a probe is writing into K, or when a probe started into K after the removal was queued (`sourceProbeSeq` and `sourceProbeClaims`). On dev, a failed add submitted again inside the start-up window had its committed folder removed by its own earlier removal (node: `removed:[NEW]`). A probe's own removals still run (SR7, SR23).
+
+**The reason.** The playlist verb answers `cache_unwritable` for its own failed cache write: "could not write channels.json in the source's cache folder (No such file or directory)", no path. `Model.statusReason` maps `internal` to "Helper failed unexpectedly" and `cache_unwritable` to "Could not write the cache". statusReason is the one route from a helper reply to user text: the banners, the notifications, the probe's result line, a play failure and the rewind line. D-PLY-29's reason, mpv's own log line, is not a helper reply and is not covered.
+
+**Tests, red first.**
+
+| test | dev b5da837 | lane |
+|---|---|---|
+| node, 13 new checks (4 model, 9 through Service.qml's own functions) | 13 red | 3054 / 0, both own-echo modes |
+| python CacheWriteRefusalTest, 3 tests (the first runs the helper's own cache_prune between the temporary file and its rename) | 3 red (`internal`) | green |
+| test_key_scenario_only, 6 tests | 2 red | green |
+
+Node mutants on the lane:
+
+| mutant | node failures |
+|---|---|
+| every removal dropped | 11 |
+| in-flight key ignored | 4 |
+| no hold | 4 |
+| no claim | 1 |
+| held cancel signals the process | 1 |
+
+**B41, live** (the PRUNE rig is now a counted check; the floor is 138; a green full run reads 139 / 0):
+
+| run | tree | result | time | load start / end | transcript |
+|---|---|---|---|---|---|
+| `--only PRUNE` | `--baseline b5da837` | 15 / 1, `after active:D record:true cache:gone channels:0` | 14.2 s | 2.55 / 2.43 | key-20261027-175403-1134249 |
+| `--only PRUNE` | `--baseline cc35557` | 15 / 1, the same | 14.1 s | 2.43 / 2.49 | key-20261027-175418-1135465 |
+| `--only PRUNE` | lane | 16 / 0 | 14.2 s | 2.53 / 2.93 | key-20261027-175441-1136769 |
+| `--only PRUNE,A` | lane | 18 / 0 | 28.5 s | 2.33 / 2.65 | key-20261027-175323-1131878 |
+| full | lane (c2eefa8, the tree of ef08a06) | 139 / 0 | 602.0 s | 2.79 / 3.14 | key-20261027-175506-1138119 |
+
+The coredump journal read +0 throughout.
+
+The in-flight and other-order shapes are pinned in node only. The slow helper sleeps before the real helper writes anything, so no live rig can put a probe's folder on disk mid-prune deterministically.
+
+**Rule 15.**
+- Fixed: both prunes, and the seven `cache remove` sites.
+- Cleared:
+  - `cache migrate`: before cacheReady and serialized with the prune;
+  - `cache epg-clear`: deletes only EPG files, which no probe writes;
+  - `cache logos-clear`: never queued by the service;
+  - the playlist, guide, logo and failed-mark writers: active folder only, which every prune keeps.
+- argv-scenario.sh:211-217 and qa-player-scenarios.sh:207-214 are safe by the mechanism. argv-scenario was not run (no cage of its own; `--open` on the inherited display).
+- Found and filed: **D-SRC-70**.
+
+**Gate.** check.sh green on 63e0f2f (node 3052, python 1629) and on the final tree (node 3054, python 1633; qml spec 80; key preflight 12).
+
+**New findings.**
+1. **D-SRC-70 (P3, proposed): a cancelled re-check of the ACTIVE source removes the active source's cache folder.** The cancel branch queues `cache remove --key <dirKey>` for every mode, and `cache remove` has no notion of the active key. Reachable when the active source never fetched and the same URL is added again, then cancelled. Seen in the service harness on dev and on the lane; not observed live.
+
+**The recheck (same day).** MERGEABLE. Every new test re-run red on dev b5da837 and green on the branch (node 13 of 3054; python 3), and nine node mutants of its own each red (the keep list at queue time again 6; the probe keys dropped 2; the reverse-order hold removed 4; either half of probeWaitsFor 3 each; the probe's own removal dropped 7; the held probe never launched 2; `probing` ignoring a held probe 4; every claimed key kept 6). The race in both orders read in the code and seen live (`--only PRUNE,A` 18/0). The user-facing reason driven end to end: "Could not write the cache", no exception text, path or URL -- but after the provider's host, **D-SRC-71**. It found **F-HARNESS-62** (B41 read green on a tree whose prune never ran) and fixed it on the branch: B41 lays an orphan folder and reads `orphan:pruned`; that mutant 15/1, cc35557 15/1, the fix 139/0 full in 602.1 s, coredump journal +0. Also filed from the lane: **D-SRC-70** (a cancelled re-check of the active source removes its folder, pre-existing) and **D-SRC-72** (the guide, logo and failed-list writers still answer `internal`).
+
 ### F-HARNESS-49: A2 and B19 were the scenario staging inside the start's own work (lane-fh49, 2026-10-27, c6d4a69..3e3a062)
 
 **The red.** On dev 45bded9 at idle (load 0.93), key-scenario's live arm read 136 / 2, with A2 and B19 red, where 0.15.0's cut read 138 / 0 (lead, key-20261027-081824-375921). Both reds come from one cause. `start_shell` returns at stateLoaded and cacheReady, which is before the start-up `state init` makes the dirs ready. So a segment that stages something straight away races two pieces of start-up work:
