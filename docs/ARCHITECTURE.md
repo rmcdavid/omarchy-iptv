@@ -4197,6 +4197,20 @@ Performance budget (10k channels):
     regular file at the key still reaches `internal` from `remove`,
     `epg-clear` and `logos-clear` -- read in the journal only, because the
     shell logs a cache job's code and shows the user nothing.]**
+    **[2026-10-28, D-SRC-74: `cache remove`, `epg-clear` and `logos-clear`
+    answer R25c's `folder_unusable` for a regular file at the key, as
+    `migrate --key` does -- R25c's code, sentence and exit, unchanged, and
+    the file left where it is -- through the walk `ensure_private_dir`
+    refuses with, `missing_folders`, which creates nothing. The same walk
+    gives the one answer for every damage ABOVE the key: a `sources`
+    folder (or the cache folder) that is a file, or a link to nothing, is
+    `folder_unusable` from all five subverbs; the three removals used to
+    answer `internal` for a file there and succeed, removing nothing, for
+    a link to nothing. Two differences remain, each by design: a symbolic
+    link AT the key is `bad_key` from every key verb (source_dir refuses it
+    first, D-SRC-73's decision), and `cache prune`, which sweeps the
+    sources folder, skips a file or a link at a key and lists it in
+    `skipped` without touching it.]**
 
     **The one line the shell writes (R30c).** A run that stopped at the
     ceiling or at its deadline, or found the folder busy, exits 0, and its

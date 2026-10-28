@@ -878,6 +878,32 @@ class FolderUnusable(NotADirectoryError):
         self.sentence = "%s %s; nothing was written" % (path, what)
 
 
+def missing_folders(path: str) -> list[str]:
+    """The folders missing at `path` and above it, nearest first, up to the
+    first one that exists; creates nothing.
+
+    R25c's refusal is HERE, so the verbs that only delete in a folder refuse
+    exactly what the verbs that write into it refuse (D-SRC-74, 2026-10-28):
+    a symbolic link at `path`, or above it, that dangles or leads to
+    something that is not a folder, or a file or anything else that is not a
+    folder there, raises FolderUnusable with R25c's sentence. A link that
+    leads to a folder is a folder (os.path.isdir follows it) and ends the
+    walk, as it always has in ensure_private_dir."""
+    missing: list[str] = []
+    current = path
+    while current and not os.path.isdir(current):
+        if os.path.lexists(current):
+            if os.path.islink(current):
+                raise FolderUnusable(current, "is a symbolic link whose target is missing or is not a folder")
+            raise FolderUnusable(current, "is not a folder")
+        missing.append(current)
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return missing
+
+
 def ensure_private_dir(path: str) -> None:
     """mkdir -p with every directory this call creates set to 0700 (the
     per-source layout means the helper may be the first to create
@@ -895,20 +921,9 @@ def ensure_private_dir(path: str) -> None:
     anything is created: it used to reach a mkdir under the link and end in
     a FileNotFoundError traceback and `code: internal` (every caller --
     the state folder, a cache folder, the runtime socket folder, the logo
-    folder -- measured, the same before.txt run)."""
-    missing: list[str] = []
-    current = path
-    while current and not os.path.isdir(current):
-        if os.path.lexists(current):
-            if os.path.islink(current):
-                raise FolderUnusable(current, "is a symbolic link whose target is missing or is not a folder")
-            raise FolderUnusable(current, "is not a folder")
-        missing.append(current)
-        parent = os.path.dirname(current)
-        if parent == current:
-            break
-        current = parent
-    for directory in reversed(missing):
+    folder -- measured, the same before.txt run). The walk and the refusal
+    are missing_folders', which the deleting cache verbs share (D-SRC-74)."""
+    for directory in reversed(missing_folders(path)):
         try:
             os.mkdir(directory, 0o700)
         except FileExistsError:

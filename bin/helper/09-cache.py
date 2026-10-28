@@ -34,6 +34,30 @@ def source_dir(directory: str, key: Any) -> str:
     return target
 
 
+def usable_source_dir(directory: str, key: Any) -> str:
+    """source_dir for the verbs that only DELETE in it -- `cache remove`,
+    `epg-clear`, `logos-clear` -- with R25c's refusal (missing_folders) for a
+    folder they cannot use.
+
+    D-SRC-74 (2026-10-28): a regular file at sources/<key> reached main()'s
+    catch-all from all three, `internal` with a NotADirectoryError naming
+    the path and a traceback in the journal, while `cache migrate` over the
+    same file answered R25c's `folder_unusable`, because it makes the folder
+    through ensure_private_dir. The same walk now runs here and creates
+    nothing: a file, or anything else that is not a folder, at the key or at
+    a folder above it, and a link that leads nowhere above it, is
+    `folder_unusable` with R25c's sentence, its code and its exit (main()
+    answers it). A key folder that simply is not there is still nothing to
+    delete and succeeds, and a link AT the key is still source_dir's
+    `bad_key`. The damage is left as it is. `cache prune` is the one subverb
+    that reads a file at a key differently, and on purpose: it sweeps the
+    sources folder and skips any name that is not a key folder, never
+    touching it (`skipped`)."""
+    path = source_dir(directory, key)
+    missing_folders(path)
+    return path
+
+
 def is_temp_name(name: str) -> bool:
     return name.startswith(TEMP_PREFIX)
 
@@ -212,7 +236,7 @@ def cache_migrate(directory: str, key: str | None) -> dict[str, Any]:
 
 
 def cache_remove(directory: str, key: str) -> dict[str, Any]:
-    removed, kept = clear_source_dir(source_dir(directory, key))
+    removed, kept = clear_source_dir(usable_source_dir(directory, key))
     return {"key": key, "removed": removed, "kept": kept}
 
 
@@ -226,7 +250,7 @@ def cache_epg_clear(directory: str, key: str) -> dict[str, Any]:
     untouched -- the source is still there, only its guide data is gone -- and
     so is the directory, which the source still owns. Idempotent: clearing a
     URL that was never set removes nothing and still succeeds."""
-    path = source_dir(directory, key)
+    path = usable_source_dir(directory, key)
     removed: list[str] = []
     for name in EPG_CACHE_FILES:
         if remove_regular(os.path.join(path, name)):
@@ -310,7 +334,7 @@ def cache_logos_clear(directory: str, key: str) -> dict[str, Any]:
     exposure D-LOGO-4 found in the leftovers themselves, which there is no
     reason to recreate on stdout (rule 5).
     """
-    source = source_dir(directory, key)
+    source = usable_source_dir(directory, key)
     path = os.path.join(source, LOGO_SUBDIR)
     before = subdir_census(path)
     removed = remove_cache_subdir(path)
