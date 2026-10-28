@@ -13315,6 +13315,110 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### D-PLY-35: the player slot's watchdog is derived per verb, and a start it stops is looked for (lane-ply35, 2026-10-28, e1edf79..61ba63c)
+
+The owner's word: "Then fix D-PLY-35 too".
+
+**What the helper's own bounds add up to.** The shell passes none of the timeout flags, so the helper's defaults are the bounds. A request that reaches its 2 s bound raises and ends the verb, so only the waits a verb survives add up, plus the one wait that ends it.
+- `player start`: lock 6.05 s; a found player that does not answer (4 s probe, then the 7 s ladder from quit); settle 0.2 s; the spawn's pid and exec pipes (2 + 5 s); the bind window (5 s) and its last probe (4 s); then the larger of the no_socket tail (3.2 s) and the load (one caught request 2 s, then the first-load window 3 s). Total 38.25 s.
+- `player restart`: 41.45 s by the recheck's walk (the lane first wrote 30.45 s, "its ladder from term replaces the wedged path"; in fact a restart runs the ladder from term and then adopt_or_spawn, which finds a player in uninterruptible sleep again, probes it and ladders it again from quit).
+- `player probe`: 6 s.
+- `player stop`: 13.25 s, but it is detached and no shell watchdog covers it.
+- The board named 14 s (lock + spawn + first load) against the slot's one 12 s.
+- Not summed: a start's twenty-odd requests each at their bound (D-PLY-39).
+
+**The overrun, observed.** The rig held the lock 5.8 s with a stand-in, slowed the spawn 4 s with an mpv wrapper on PATH, and served the first byte 6 s late.
+- Headless helper on dev da0000d: TERM at 12.024 s; exit 143 with nothing on stdout; the stream's GET at +9.95 s. mpv played on: stash t:slowone, time-pos 5.25 s at +9 s. A later start adopted it: spawned false, same pid.
+- In a nested headless cage on a private bus, dev: the slot idled at +12.1 s with one "exceeded 12 s" line. The player played on (time-pos 8.8 at +26 s) while the shell held playing false, nowPlaying null, the observer detached, state.json session null, lastError "Helper produced no output", and a "Could not start playback" card. The next play adopted the same process. Probe 6 / 5, transcript ply35probe-20261028-134527-2916273.
+
+**The change.**
+- playerWatchdog's interval is `Model.playerWatchdogMs(playerKind)`: start 43.25 s, restart 46.45 s (after the recheck), probe 11 s, and 12 s for the birth edge after a reply. That is the arithmetic above plus a 5 s margin; a whole probe run measured 259-306 ms and a 10k-channel start 356-390 ms at load 3.2.
+- `Model.PLAYER_BOUNDS` mirrors the helper's numbers. tests/fixtures/player-bounds.json pins both sides: node checks the mirrors and the arithmetic; python reads every number off the helper by name and observes the two former literals in use (`SPAWN_PID_TIMEOUT`, `SETTLE_CONNECT_TIMEOUT`, named, values unchanged).
+- A start or restart the watchdog stops is read as `helper_timeout` (the S-05 shape), not as a refusal. With an intent standing, nothing is told: the socket hunt is armed and the reattach probe decides.
+  - A player carrying the stash is adopted, and the start's relaunch and retries settle as on an ok reply.
+  - If the stash names another channel, the intent is put back and re-sent (ruling CL5).
+  - No player, an unresponsive one, an unidentifiable one, or one that cannot be made to verify: the start is told once as "Could not start playback / Helper timed out", marking nothing (D-PLY-32).
+  - A stale probe or a socket EOF drops the stopped start untold.
+
+**Tests.**
+
+| tree | node | python | qml |
+|---|---|---|---|
+| da0000d (dev) | 3090 | 1645 | 80 |
+| e1edf79 | 3096 | 1650 | 80 |
+| a1c930a / 61ba63c | 3109 | 1650 | 80 |
+
+The python figure for dev is 1650 less the five new tests; it was not run on dev on its own.
+
+- Run over dev's code, the new checks are red: node 17 of 3109 (16 of the 19 new checks and the session pin); python one test, because the two names do not exist on dev.
+- The slot reads 12000 for every verb on dev.
+- 26 mutants red, each against the suite that should see it.
+
+**Live.** Nested cage, private bus, no desktop; coredump journal 81 -> 81 throughout.
+- Probe on the tree: 11 / 0. The start answered at +14.0 s with no TERM; the observer attached; session t:slowone; no card. Transcript ply35probe-20261028-151612-3130178.
+- The same with the start bound forced to 12 s, to exercise the recovery: 11 / 0. "exceeded 12 s", then "looking for the player it may have left", then adopted, with no card. Transcript ply35probe-20261028-151710-3131832.
+- player-scenario, dev (--baseline da0000d): 76/10 then 77/9. Tree: 76/11 then 77/9.
+  - The 9 window checks fail on every run.
+  - P13 flaked once on each first run (D-PLY-28: dev lost a record, the tree dropped a play in trial 3 at load 4.79).
+  - P7 and P10 to P14 green on the second runs of both.
+  - Transcripts player-20261028-151807-3133420, -152647-3160011, -152052-3141616, -152417-3152015.
+
+**Rule 15.** Every other shell watchdog over a helper verb is cleared with arithmetic:
+- control 8 s against the longest control verb, 6.25 s (seek)
+- playlist, EPG and source probe 180 s against the 60 s FetchDeadline plus parse
+- cache, failed, config shield and state mode 180 s; none has a wait of its own
+- state init 15 s, measured 1.77 s at 3x
+- clipboard and logos already derived and pinned
+
+The backstop over the detached stop, stopSettleTimer at 5 s, is shorter than the stop's own 13.25 s: D-PLY-40. A play during that settle whose start is refused locally is silent: D-PLY-41, pre-existing, measured through the harness on dev and the tree.
+
+CHANGELOG sentence: A channel that is slow to start, such as a slow stream while another player command holds the lock, is no longer cut off after 12 seconds and left playing behind a "Could not start playback" notification with the bar showing nothing; each player step now gets its own time limit, and if a start is ever stopped anyway the plugin finds the player it left and shows it as playing.
+
+**The recheck of lane-ply35 (same day).** MERGEABLE, with two commits. d420774: the lane's restart bound (35.45 s) undercut the restart's own worst case -- the shipping code walks the survivor path in 41.12 s -- because a restart that meets a player in uninterruptible sleep ladders it from term, rescans /proc, finds it again, probes it and ladders it again from quit; the formula now adds that path (46.45 s), the fixture and ARCHITECTURE-PLAYER bracket corrected, tests/test_player_bounds.py gains a worst-path walk. a94953c pins three recovery behaviours that each survived a mutant with every check green: the socket hunt armed at the stopped start's exit, the local-failure episode reset on adoption, and the watchdog flag reset (left set, a later crash-with-no-output start would be probed instead of told). The headless and cage measurements re-taken (dev 6/5, the tree 11/0, the tree with the start bound forced to 12 s 11/0 with both journal lines); player-scenario 77/9 (the 9 window checks); counts after the recheck node 3111, python 1653 on the branch, 19 node checks red on dev. It widened **D-PLY-39** to the probe and the control verbs, and reproduced **D-PLY-41** on both trees.
+
+### D-DOC-28: the double-encoded glyph cells in docs/UX.md (2026-10-28, lane-doc28)
+
+**What was damaged.** dev da0000d's docs/UX.md held every Nerd Font glyph as the UTF-8 of its four bytes read as Latin-1. U+F0503 (bytes F3 B0 94 83) appeared as the four characters U+00F3 U+00B0 U+0094 U+0083.
+- That is 64 sequences on 50 lines: U+F040A x14, U+F0026 x11, U+F04CE x11, U+F0503 x9, U+F0502 x7, U+F0567 x5, U+F01D8 x3, U+F0450 x3, U+F02DA x1.
+- acd1723 (2026-09-13) introduced 57 of them on 44 lines.
+- Five later commits copied a damaged neighbouring cell: 8d1da69 (+2), efde249 (+2), 542d43b (+1), 0893d41 (D-PLY-32, +1), 0c00ca6 (D-PLY-33, +1).
+
+**Search.** I scanned all 405 text files the tree lists (tracked plus untracked, ignores honoured) under both a Latin-1 and a Windows-1252 reading. The two binaries were skipped by name, and the gzipped EPG fixture was decompressed and scanned separately: clean. Nothing outside UX.md is damaged:
+- no U+FFFD
+- no C1 control characters after the repair (UX.md held 112)
+- 38 rejected candidates, every one a Latin-1 letter that ends its run (e-acute 20, multiplication sign 8, E-acute 4, o-acute 2, sharp s 2, U-diaeresis 1, i-diaeresis 1)
+
+**Repair (b5114e9).** Each sequence became the one codepoint it encodes.
+- Turning those nine codepoints in the repaired file back into their Latin-1 reading gives dev's file byte for byte. The original held no real copy of any of them, so the reverse is unambiguous.
+- sha256 e9785918...fb20 -> f61e4f34...b24a; 50 lines changed, 1542 lines before and after.
+- All other non-ASCII characters are unchanged: U+201C x7, U+201D x7, U+2026 x1, U+F0FD1 x1.
+- The same repair applied to acd1723's file differs from acd1723~1 on one line only: the 6.4 Stream failed row, whose wording that commit deliberately changed. Its glyph, U+F0503, matches the parent.
+
+**Font.** All nine codepoints are in /usr/share/fonts/TTF/JetBrainsMonoNerdFont-Regular.ttf, which is what `fc-match monospace` resolves to. Two methods agree:
+- `fc-list :charset=<cp>`
+- a direct read of the font's cmap (format 12), with glyph ids 5370 through 6715
+
+Negative controls: U+F1AF1 and U+F2000 are absent from the cmap. All 19 distinct private-use codepoints in the tracked .md, .qml and .jsonc files are present.
+
+**Against the code.** Every row matches the glyph the shipping code produces:
+- notifyArgv's `-g` for each of the nine 6.4 rows
+- barGlyph for idle, playing, error and behind live
+- footerStatus for playing and behind live
+- Guide.qml read, not called, for the row lead and trail, the banner and the empty states
+
+There is no mismatch. Separately, the meaning text of the U+F02DA row in 5.5 names a "Recent (notification)" that nothing uses (D-DOC-30).
+
+**Guard (059eba6).** scripts/check-double-encoding.py runs as check.sh step 17 (python3 -I, floor 405 files).
+- It flags a strict UTF-8 sequence of 3 or 4 bytes, or of 2 bytes with an A-circumflex or A-tilde lead or a C1 control, under a Latin-1 or Windows-1252 reading.
+- It counts as rejected a Latin-1 letter followed by a symbol or a no-break space, such as French guillemets after an accented capital.
+- `--repair` writes only when the reverse transform reproduces the original.
+- Red on da0000d: 64 problems, all in UX.md, on 50 lines. Green on the repair: 405 files, 0 problems.
+- tests/test_check_double_encoding.py has 23 cases, with every damaged string built at run time. The brief's fixture (one damaged glyph, one legitimate Latin-1 word, one real glyph) reads red, green, green. All 18 mutations of the guard turned the tests red.
+
+**Gate.** check.sh green, run alone, on both commits: python 1668 on 059eba6 and 1645 on b5114e9, node 3090, qml spec 80. PY_TESTS_MIN moved 1580 -> 1668: this lane's 23, plus 65 that were already running under the old floor (F-GATE-12).
+
+**The recheck of lane-doc28 (same day).** MERGEABLE, with 78e2f92: three guard decisions no case reached (two damaged glyphs in one run, a double-encoded middle dot -- Model.SEP, 113 of them in the tree -- and a lead on the last plane), each the only test red on its mutant; 18 mutants of its own, all red after the fix; python floor 1671. The byte-exact repair re-proved by a line-and-character diff; an independent scanner over eight single-byte codecs with no rejection rule finds 0 on the branch and only UX.md's 64 on dev. Font and QML cross-checked (Model GLYPHS and barGlyph called through node, notifyArgv's specs, Guide.qml's uses): no mismatch. It found **F-GATE-13**: the guard's Windows-1252 reading flags the legitimate "Le café…" and its `--repair` would turn it into a CJK ideograph, and a lead in U+00C4..U+00DF is never flagged under that reading, so cp1252 mojibake of a Cyrillic channel name passes. The board's history corrected: acd1723 put in 57 sequences on 44 lines, five later commits copied damaged cells, and dev da0000d held 64 on 50.
+
 ### D-PLY-31, D-PLY-34, D-EPG-13, D-SRC-74: the player's and the guide's own refusals read a sentence (lane-p31e13, 2026-10-28, 9990f83..315e85e)
 
 The owner's words: "Fix D-PLY-31 and D-EPG-13 next", then "fix D-SRC-74 too". The lead added D-PLY-34 as the same copy work. There is one commit per finding, and check.sh was green on each commit's own tree, run alone under the shared lock.

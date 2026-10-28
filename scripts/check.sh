@@ -416,7 +416,12 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-80}
 # (harness, docs, state, model, helper) and the floor re-levelled to the
 # merged tree's count, 3036 in both own-echo modes (3019 + the model lane's
 # 17; the other three lanes added no node check).
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3036}
+# 2026-10-28, the lead (F-GATE-12): 3036 -> 3111 -- the merged tree's count.
+# The floor had stayed at 3036 since 2026-10-25 while the D-SRC-69..74,
+# D-PLY-30..35 and D-EPG-13 rounds added 75 checks, every one red first in its
+# lane (the lane reports in QA-RESULTS), so any 75 could have been deleted with
+# the gate green; the floor is again what the suite runs.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3111}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -683,7 +688,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3036}
 # guard, each the only one red on a mutant the 23 let through: two damaged
 # glyphs in one run (a scan that stopped at a run's first hit), a middle dot
 # written twice (only the A-tilde lead flagged), and U+10FFFD (no F4 lead).
-PY_TESTS_MIN=${PY_TESTS_MIN:-1671}
+# 2026-10-28, the lead (merge of rc-ply35 and rc-doc28): 1671 -> 1679 --
+# tests/test_player_bounds.py's eight (D-PLY-35: the helper's bounds equal the
+# shared fixture's, and the recheck's worst-path walks), red first in the lane
+# and its recheck; the suite runs 1679 and the floor is 1679.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1679}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
