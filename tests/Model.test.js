@@ -13674,6 +13674,40 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
                "\u201cC11\u201d did not play" + Model.SEP + "A folder the plugin uses is a broken link or not a folder",
                "\u201cC13\u201d did not play" + Model.SEP + "A folder the plugin uses is a broken link or not a folder"] })
 
+  // The check above sets nowPlaying by hand and calls handlePlayerResult, so
+  // it never runs Service.play(), the function every zap and every guide
+  // Enter goes through. A play() that reset the episode (one more line beside
+  // its `notifiedFailureId = ""`) left it and every other check green while
+  // the user got one card per channel again -- the recheck's mutant, red
+  // here. Each play below issues its own `player start` through the real
+  // fork, and the slot's exit is the helper's real reply. The first channel
+  // carries a mark the defect already wrote: play() clears it, as it always
+  // has, and the local refusal no longer writes it back (on dev 8473655 it
+  // was re-marked at once). Red on dev 8473655.
+  checkCall("D-PLY-32: through Service.play(), the path every zap takes -- ten channels played under the same local refusal each issue their own `player start`, are told ONCE and marked never; an old mark on the first is cleared by its play and not written back", () => {
+    const h = bootPlayer()
+    const index = M.keyedMap()
+    const ids = []
+    for (let i = 0; i < 10; i++) {
+      const c = { id: "t:z" + i, name: "Z" + i, url: "http://s.example.test/z" + i + ".ts", group: "G" }
+      ids.push(M.channelId(c))
+      index[M.channelId(c)] = c
+    }
+    h.root.channelIndex = index
+    h.root.failedAt = M.withFailed(h.root.failedAt, ids[0], 1000)
+    const reply = localReply("player-start-parent-0500")
+    const starts = ids.map(id => {
+      const played = h.root.play(id, true, "")
+      h.drain()
+      const issued = played === true && h.ids.playerProc.running === true && h.ids.playerProc.command.indexOf("start") !== -1
+      h.ids.playerProc.running = false
+      h.root.handlePlayerResult(reply)
+      h.drain()
+      return issued
+    })
+    return [starts.filter(Boolean).length, toasts(h).map(t => t.split(" | ")[0]), Object.keys(h.root.failedAt), h.jobs(), h.root.lastFailedId]
+  }, [10, ["74021 Could not start playback"], [], ["clear:t:z0"], ""])
+
   checkCall("D-PLY-32: a genuine CHANNEL failure still marks and still says \"Stream failed\" (74011) -- the entry's own scheme refused, a first load the start watched fail, and an end-file error at the socket's EOF judged by endedReport", () => {
     const scheme = bootPlayer()
     refuse(scheme, "start", startReply("start", "unsupported_scheme", "unsupported stream URL scheme 'rtmp'"))
