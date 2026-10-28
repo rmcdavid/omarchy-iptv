@@ -13314,6 +13314,70 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
        removeActive: { now: [true, ["A"], "-"], queued: [true, ["A"], "-"] },
        editCommit: { now: [["A"], "EDITED"], queued: [["A"], "EDITED"] } })
 
+  // ---- D-SRC-71 (2026-10-27): a failure on this machine does not name the provider's host ----
+  //
+  // R28e removed "from <host>" after the plugin's own refusals; the codes
+  // D-SRC-69 gave the user -- the cache could not be written, the helper
+  // failed unexpectedly -- and the watchdog's timeout were still put after
+  // it: "Could not write the cache from 127.0.0.1" (the recheck of
+  // D-SRC-69). The probe's failure did not carry its code, and the refresh
+  // empty state composed "<reason> from <statusHost>" in Guide.qml. Both now
+  // read one list (Model.failureFromHost). Red on dev 6761cd4.
+  const helperSays = (code, message) => JSON.stringify({ ok: false, kind: "playlist", sourceHost: "new.example.test", stale: false, error: { code, message } })
+
+  checkCall("D-SRC-71: Model.failureFromHost / probeFailureLine -- a refusal the plugin made itself or a failure of its own helper (the cache, a bug, a timeout, no answer, a damaged install) is the reason alone; what the provider's side answered keeps 'from <host>'; a local file and an empty host never name one", () => {
+    const line = code => M.probeFailureLine(M.statusReason({ ok: false, error: { code, message: "said by the helper" } }), "a.example.test", "url", code)
+    return [["cache_unwritable", "internal", "helper_timeout", "no_output", "helper_damaged", "not_implemented", "too_many", "unknown_source"].map(line),
+            ["http_404", "network", "timeout", "not_a_playlist", "too_large"].map(line),
+            M.failureFromHost("Could not write the cache", "a.example.test", "cache_unwritable"),
+            M.failureFromHost("HTTP 404 Not Found", "a.example.test", "http_404"),
+            M.failureFromHost("HTTP 404 Not Found", "", "http_404"),
+            M.failureFromHost("", "a.example.test", ""),
+            M.probeFailureLine("File not found", "local file", "file", "not_found"),
+            [M.statusCode({ ok: false, error: { code: "cache_unwritable" } }), M.statusCode({ ok: true, error: null }), M.statusCode(null), M.statusCode({ ok: false })]]
+  }, [["Could not write the cache", "Helper failed unexpectedly", "Helper timed out", "Helper produced no output", "Plugin files damaged \u00b7 reinstall the plugin", "Helper command not implemented", "Too many sources", "Unknown source"],
+      ["HTTP 404 Not Found from a.example.test", "Network error from a.example.test", "Timed out from a.example.test", "Not an M3U playlist from a.example.test", "Source too large from a.example.test"],
+      "Could not write the cache", "HTTP 404 Not Found from a.example.test", "HTTP 404 Not Found", "Unknown error from a.example.test", "File not found",
+      ["cache_unwritable", "", "", ""]])
+
+  checkCall("D-SRC-71: a probe that failed on this machine -- its cache could not be written, the helper failed unexpectedly, the watchdog stopped it -- carries its code on sourceProbeFinished, and the Sources line built from it (both of the guide's calls) names no host; an HTTP failure still does", () => {
+    const outcome = h => { const r = h.signals.filter(s => s[0] === "sourceProbeFinished").map(s => s[1])[0]; return [r.code, M.probeFailureLine(r.reason, r.host, "url", r.code)] }
+    const out = []
+    for (const reply of [helperSays("cache_unwritable", "could not write channels.json in the source's cache folder (No such file or directory)"),
+                         helperSays("internal", "OSError: [Errno 5] Input/output error"),
+                         helperSays("http_404", "HTTP 404 from new.example.test")]) {
+      const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+      add(h); h.probeExit(reply); h.drain()
+      out.push(outcome(h))
+    }
+    const t = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    add(t)
+    t.elapse(t.ids.probeWatchdog.interval)
+    const signalled = t.ids.sourceProbeProc.signals.slice()
+    t.probeExit(""); t.drain()
+    out.push(outcome(t).concat([signalled]))
+    return out
+  }, [["cache_unwritable", "Could not write the cache"], ["internal", "Helper failed unexpectedly"], ["http_404", "HTTP 404 Not Found from new.example.test"],
+      ["helper_timeout", "Helper timed out", [15]]])
+
+  checkCall("D-SRC-71: the refresh empty state (Guide.qml's line: Model.failureFromHost over the service's statusReason, statusHost and statusCode) -- a refresh that could not write the cache, failed unexpectedly or was stopped by the watchdog names no host; an HTTP failure still reads '<reason> from <host>'", () => {
+    const line = h => [h.root.statusCode, M.failureFromHost(h.root.statusReason, h.root.statusHost, h.root.statusCode)]
+    const out = []
+    for (const reply of [helperSays("cache_unwritable", "could not write channels.json in the source's cache folder (Permission denied)"),
+                         helperSays("internal", "PermissionError: [Errno 13] Permission denied"),
+                         helperSays("http_404", "HTTP 404 from new.example.test")]) {
+      const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+      h.root.handlePlaylistExit(reply); h.drain()
+      out.push(line(h))
+    }
+    const t = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    t.root.playlistTimedOut = true
+    t.root.handlePlaylistExit(""); t.drain()
+    out.push(line(t))
+    return out
+  }, [["cache_unwritable", "Could not write the cache"], ["internal", "Helper failed unexpectedly"], ["http_404", "HTTP 404 Not Found from new.example.test"],
+      ["helper_timeout", "Helper timed out"]])
+
   // ---- R21e (D-SINK-19 round 11): THE MIGRATION, through Service.qml ----
   //
   // Every pin here runs the shipping functions over a 0.13.5-shaped install:

@@ -91,14 +91,14 @@ export {
   parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
   parseEpgNow, emptyEpgStore, parseEpgNowStore, parseHelperStatus,
   helperDamagedReason, statusReason, lastErrorAfterStatus, statusHost,
-  statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel, labelWarning,
-  labelWarnings, warningLine, footerWarning, findBarEntry, settingOf,
-  boolSetting, clampInt, clampSetting, settingsFrom, entryInputText,
-  entryInputForm, sameEntryInput, ownWriteInForce, settingsWithOwnWrite,
-  ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS, MAX_SEEN_INPUTS,
-  entryInputSeen, entryInputLast, entryInputsSeenAfter, entryInputNotice,
-  ownedEntryPatch, barEntryWritable, entryFlushDisposition, owedMirrorAction,
-  ownedWriteMode, retiredInputsToKeep, sameOwnWrite
+  statusCode, statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel,
+  labelWarning, labelWarnings, warningLine, footerWarning, findBarEntry,
+  settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
+  entryInputText, entryInputForm, sameEntryInput, ownWriteInForce,
+  settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
+  MAX_SEEN_INPUTS, entryInputSeen, entryInputLast, entryInputsSeenAfter,
+  entryInputNotice, ownedEntryPatch, barEntryWritable, entryFlushDisposition,
+  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, sameOwnWrite
 } from "./model/settings.mjs"
 export {
   optInSetting, logoSurvey, splitLogoUrl, logoConsentLines, logoFile,
@@ -199,10 +199,10 @@ export {
   countsLine, formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
   EPG_HINT_ROW_TEXT, sourceDetail, sourceAccessibleName, sourcesHeaderCount,
   sourcesHeaderRight, sourcesRowAccessibleName, confirmLogosMessage,
-  confirmRemoveMessage, fetchingLine, probeFailureLine, sourceTransient,
-  CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
-  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark,
-  logoHaveLess
+  confirmRemoveMessage, fetchingLine, failureFromHost, probeFailureLine,
+  sourceTransient, CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS,
+  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES,
+  logoFailedPath, logoBrokenMark, logoHaveLess
 } from "./model/sources.mjs"
 export {
   hasControlChars, normalizeSourceRecord, sourcesFull, addSource,

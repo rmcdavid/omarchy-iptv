@@ -422,6 +422,9 @@ Item {
   readonly property string lastUpdated: Model.formatClock(playlistStatus && playlistStatus.fetchedAt ? playlistStatus.fetchedAt : (channelsMeta && channelsMeta.generatedAt ? channelsMeta.generatedAt : 0))
   readonly property string statusReason: Model.statusReason(playlistStatus)
   readonly property string statusHost: Model.statusHost(playlistStatus) || root.sourceHost
+  // D-SRC-71: the failed status's code, so the guide's "<reason> from
+  // <host>" names no host for a local failure (Model.failureFromHost).
+  readonly property string statusCode: Model.statusCode(playlistStatus)
   readonly property string epgReason: Model.statusReason(epgStatus)
   // R8 status vocabulary: ready | loading | refreshing | cached | error
   readonly property string status: {
@@ -4915,10 +4918,14 @@ Item {
     // or replacement was never recorded and its directory goes (SR23); an
     // existing record keeps fetchedAt 0 plus a session-only reason for the
     // result line (SR26).
+    // D-SRC-71: the code rides along, as on the refusals above (R28e), so
+    // a failure on this machine -- the cache unwritable, the helper failing
+    // or timing out -- is not put after the provider's host
+    // (Model.probeFailureLine).
     var reason = Model.statusReason(status)
     if (pending) root.queueCacheJob(["remove", "--key", dirKey], null)
     else root.sourceErrors = root.withKey(root.sourceErrors, key, reason)
-    root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: reason, host: host, cancelled: false, replacedId: "" })
+    root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: reason, code: Model.statusCode(status), host: host, cancelled: false, replacedId: "" })
   }
 
   // D-SINK-19, round 11 (R21). WHAT THE BAR ENTRY'S URLS MEAN: one
