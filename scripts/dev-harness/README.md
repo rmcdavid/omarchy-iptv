@@ -2109,6 +2109,25 @@ message-only rebuild, the same tree as ef08a06. The coredump journal
 else of the lane's running. The transcripts are in the lane's session
 scratch directory, not the tree.
 
+The recheck (same day) found B41's green unable to say the prune had run:
+a cache that survives is also what a prune that never runs leaves, and on
+a prepared tree whose `queuePrune` does nothing B41 read 16 / 0. So the
+segment lays an orphan folder (B's key, no record names it) beside the
+seed and reads it in the same line; `orphan:pruned` is the start-up prune
+having run with a list that is not "keep everything". The want is now
+`after active:D record:true orphan:pruned cache:kept channels:11`. Its
+runs, the same recipe:
+
+| run | tree | result | time | load start / end |
+|---|---|---|---|---|
+| `--only PRUNE --tree <no queuePrune>` | before the orphan | 16 / 0 (the gap) | 13.8 s | 2.27 / 2.46 |
+| `--only PRUNE --tree <no queuePrune>` | with the orphan | 15 / 1, B41 `orphan:kept cache:kept channels:11` | 14.0 s | 2.14 / 2.59 |
+| `--only PRUNE --baseline cc35557` | 0.15.0 | 15 / 1, B41 `orphan:pruned cache:gone channels:0` | 14.2 s | 2.63 / 2.76 |
+| `--only PRUNE,A` | the recheck's tree | 18 / 0 | 29.0 s | 2.70 / 3.45 |
+| full | 3a14acc | 139 / 0 | 602.1 s | 2.86 / 3.15 |
+
+The coredump journal read +0 across these runs too.
+
 ### The open, measured with its delegates (D-PERF-1, R27f; R28d)
 
 ```
