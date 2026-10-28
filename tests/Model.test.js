@@ -13770,6 +13770,11 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       sum(M.deathReport({ lastEndFile: { kind: "end-file", entryId: 7, reason: "error", fileError: "loading failed" }, owners: ring(3), nowPlaying: X, entryId: 3, tail: ["[stream] Failed to open h.test"] })),
       // an error with no entry id at all
       sum(M.deathReport({ lastEndFile: { kind: "end-file", entryId: null, reason: "error", fileError: "loading failed" }, owners: ring(3), nowPlaying: X, entryId: 3 })),
+      // an error for an entry the ring has not heard of while the router has
+      // seen no start-file either (entryId 0, e.g. an adopted player whose
+      // stash carried no entry id): nothing ties it to the channel, so it is
+      // told and not marked
+      sum(M.deathReport({ lastEndFile: { kind: "end-file", entryId: 5, reason: "error", fileError: "loading failed" }, owners: ring(3), nowPlaying: X, entryId: 0, tail: ["[stream] Failed to open h.test"] })),
       // a load replaced, then the process died
       sum(M.deathReport({ lastEndFile: { kind: "end-file", entryId: 3, reason: "stop", fileError: "" }, owners: ring(3), nowPlaying: X, entryId: 3 })),
       // no end-file at all, with D-PLY-27's VO line and a mesa warning in the tail (D-PLY-29)
@@ -13783,6 +13788,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     ], [
       [true, true, "streamFailed", "t:x", "[ffmpeg] tcp: Connection refused"],
       [true, true, "streamFailed", "t:x", "loading failed"],
+      [true, false, "playerStopped", "t:x", GENERIC],
       [true, false, "playerStopped", "t:x", GENERIC],
       [true, false, "playerStopped", "t:x", GENERIC],
       [true, false, "playerStopped", "t:x", GENERIC],
