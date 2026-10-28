@@ -5010,6 +5010,57 @@ checkCall("play failure: a refusal out of retries is still a refusal, never a fa
 checkCall("play failure: a user stop stops the retrying", () => failed("ipc_error", { userStopped: true }), "failed")
 checkCall("play failure: anything the table does not name is a failed switch, and the label goes back", () => [failed("unsupported_scheme"), failed(""), failed(null)], ["failed", "failed", "failed"])
 
+// ---- D-PLY-32 (2026-10-28): what a FAILED `player start|restart` says about the channel ----
+//
+// Every code the helper's `player start` can refuse with, read in bin/helper
+// (player_target, player_runtime, check_socket_path, acquire_lock,
+// check_seq, adopt_or_spawn, apply_channel, main(), the stub) plus the
+// shell's own (`no_output`, parseHelperStatus's `error`). Only the entry's
+// own URL scheme is about the channel; everything else was refused before
+// the stream was contacted. Red on dev 8473655 (no such function).
+checkCall("D-PLY-32: playerStartFailure -- every code `player start|restart` can answer is LOCAL except `unsupported_scheme`, the one refusal about the channel's own entry",
+  () => ["no_cache", "unknown_channel", "folder_unusable", "runtime_unwritable", "socket_path_blocked", "busy",
+         "superseded", "mpv_missing", "spawn_failed", "no_socket", "tls_unverified", "ipc_error", "internal",
+         "too_large", "helper_damaged", "no_output", "error", "not_implemented", "unsupported_scheme"].map(c => c + ":" + Model.playerStartFailure(c)),
+  ["no_cache:local", "unknown_channel:local", "folder_unusable:local", "runtime_unwritable:local", "socket_path_blocked:local", "busy:local",
+   "superseded:local", "mpv_missing:local", "spawn_failed:local", "no_socket:local", "tls_unverified:local", "ipc_error:local", "internal:local",
+   "too_large:local", "helper_damaged:local", "no_output:local", "error:local", "not_implemented:local", "unsupported_scheme:channel"])
+checkCall("D-PLY-32: playerStartFailure -- a code nobody has classified yet, an empty one, null, undefined and a number read local: marking is the costly direction",
+  () => [Model.playerStartFailure("a_code_from_next_year"), Model.playerStartFailure(""), Model.playerStartFailure(null),
+         Model.playerStartFailure(undefined), Model.playerStartFailure(7), Model.playerStartFailure("UNSUPPORTED_SCHEME")],
+  ["local", "local", "local", "local", "local", "local"])
+// One notion of "local": the three lists that already say a code is this
+// machine's (the zap's PLAY_UNREADABLE, the status branch's
+// HELPER_CANNOT_TELL, the probe's PROBE_LOCAL_REFUSALS) are read from the
+// parts that declare them, and none of their codes may read "channel" here.
+checkCall("D-PLY-32: one notion of local -- no code on PLAY_UNREADABLE, HELPER_CANNOT_TELL or PROBE_LOCAL_REFUSALS reads \"channel\", and the channel list is the one code",
+  () => {
+    const P = require("../model/player.mjs"), S = require("../model/sources.mjs")
+    const lists = { PLAY_UNREADABLE: P.PLAY_UNREADABLE, HELPER_CANNOT_TELL: P.HELPER_CANNOT_TELL, PROBE_LOCAL_REFUSALS: S.PROBE_LOCAL_REFUSALS }
+    const out = {}
+    for (const k in lists) out[k] = [Array.isArray(lists[k]) && lists[k].length > 2, lists[k].filter(c => Model.playerStartFailure(c) !== "local")]
+    out.channel = P.PLAYER_START_CHANNEL_REFUSALS
+    return out
+  },
+  { PLAY_UNREADABLE: [true, []], HELPER_CANNOT_TELL: [true, []], PROBE_LOCAL_REFUSALS: [true, []], channel: ["unsupported_scheme"] })
+checkCall("D-PLY-32: notifyArgv localPlayFailure -- its own title, mpvMissing's glyph, its own replace-id 74021, and the stream failure's body word for word (the channel that did not play, then the reason)",
+  () => {
+    const p = { name: "Sky Sports", reason: "Could not write the player's runtime folder" }
+    const a = Model.notifyArgv("localPlayFailure", p)
+    const s = Model.notifyArgv("streamFailed", p)
+    return [a.slice(0, 9), a[9], a[a.length - 1] === s[s.length - 1], a[a.length - 1]]
+  },
+  [["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", Model.GLYPHS.tvOff, "-r", "74021"], "Could not start playback", true,
+   "\u201cSky Sports\u201d did not play" + Model.SEP + "Could not write the player's runtime folder"])
+checkCall("D-PLY-32: notifyArgv localPlayFailure -- through the same sanitising path: a hostile name is quoted and cleaned, a URL in the reason keeps its host only, no reason is no tail",
+  () => [Model.notifyArgv("localPlayFailure", { name: "--urgency=critical", reason: "-r 1" }).slice(-1)[0],
+         Model.notifyArgv("localPlayFailure", { name: "X", reason: "Failed to open https://u:p@h.test/live/x.m3u8?t=1." }).slice(-1)[0],
+         Model.notifyArgv("localPlayFailure", { name: "X" }).slice(-1)[0]],
+  ["\u201curgency=critical\u201d did not play" + Model.SEP + "-r 1", "\u201cX\u201d did not play" + Model.SEP + "Failed to open h.test.", "\u201cX\u201d did not play"])
+checkCall("D-PLY-32: the new replace-id is no other notification's (74019 stays retired)",
+  () => { const ids = Object.values(Model.NOTIFY_IDS); return [Model.NOTIFY_IDS.localPlayFailure, ids.filter(v => v === 74021).length, ids.length === new Set(ids).size, ids.indexOf(74019)] },
+  [74021, 1, true, -1])
+
 // replyTarget: who the reply is ABOUT. Both rememberEntry call sites passed
 // the shell's nowPlaying, which in a burst is the intent current when the
 // REPLY landed - the exact case the entry ring exists for.
@@ -13514,6 +13565,181 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   }, { cases: true,
        rows: LOCAL.filter(c => /^player\.(start|restart)$/.test(c.reply.kind)).map(c => [c.id, ["\u201cX\u201d did not play" + Model.SEP + c.reason], c.reason, 0, true, false]),
        internal: [["\u201cX\u201d did not play" + Model.SEP + "Helper failed unexpectedly"], "Helper failed unexpectedly", 0, true, false] })
+
+  // ---- D-PLY-32 (2026-10-28): a start THIS machine refused marks no channel ----
+  //
+  // Every failed `player start|restart` reply went to raiseStreamFailure:
+  // failedAt, a `failed mark` into failed.json, lastFailedId, and "Stream
+  // failed", so a broken runtime folder turned every channel the user tried
+  // red and took it out of the zap ring. A failed start reply is no verdict
+  // on the stream (Model.playerStartFailure); only `unsupported_scheme` is
+  // about the entry. The local refusals are the REAL helper's replies where
+  // a fixture holds them (local-refusals.json for the runtime folder and its
+  // lock, helper-damaged.json for the stub), and the reply shapes the
+  // helper's error_payload and main() emit for the rest. Red on dev 8473655.
+  const DAMAGED = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/helper-damaged.json"), "utf8")).refusals[0].reply
+  const startReply = (kind, code, message) => JSON.stringify({ ok: false, kind: "player." + kind, error: { code, message }, id: "t:x", seq: 1 })
+  const OTHER_LOCAL = [
+    ["start", "no_cache", startReply("start", "no_cache", "This source has no channel list yet; refresh the playlist first.")],
+    ["start", "unknown_channel", startReply("start", "unknown_channel", "channel t:x is not in the playlist cache")],
+    ["start", "socket_path_blocked", startReply("start", "socket_path_blocked", "the socket path is not a socket")],
+    ["start", "spawn_failed", startReply("start", "spawn_failed", "could not start mpv: Resource temporarily unavailable")],
+    ["start", "tls_unverified", startReply("start", "tls_unverified", "the player would not verify the stream's certificate")],
+    ["restart", "ipc_error", startReply("restart", "ipc_error", "mpv closed the connection")],
+    ["start", "internal", JSON.stringify({ ok: false, kind: "player", error: { code: "internal", message: "OSError: [Errno 24] Too many open files" } })],
+    ["start", "too_large", JSON.stringify({ ok: false, kind: "player", error: { code: "too_large", message: "player needs more memory than this helper allows itself" } })],
+    ["start", "helper_damaged", JSON.stringify(DAMAGED)],
+    ["start", "no_output", ""],
+    ["start", "error", JSON.stringify({ ok: false, kind: "player.start" })],
+    ["start", "not_implemented", startReply("start", "not_implemented", "not implemented")]
+  ]
+  // Every `failed mark|clear` the service hands the helper, from the sink:
+  // the failed slot's command as it is assigned, and whatever queued behind it.
+  const failedJobs = h => {
+    const seen = []
+    let held = h.ids.failedProc.command
+    Object.defineProperty(h.ids.failedProc, "command", { get() { return held }, set(v) { held = v; seen.push(v.slice()) }, configurable: true })
+    return () => seen.map(c => c[c.indexOf("failed") + 1] + ":" + c[c.indexOf("--id") + 1])
+      .concat((h.root.failedQueue || []).map(j => j.action + ":" + j.id))
+  }
+  const toasts = h => h.detached.filter(a => a[0] === "omarchy-notification-send").map(a => a[a.indexOf("-r") + 1] + " " + a[a.length - 2] + " | " + a[a.length - 1])
+  const bootPlayer = () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    h.detached.length = 0
+    h.warnings.length = 0
+    h.jobs = failedJobs(h)
+    return h
+  }
+  const refuse = (h, kind, reply, id) => {
+    h.root.nowPlaying = { id: id || "t:x", name: (id || "t:x").slice(2).toUpperCase(), group: "", launchedFrom: "", since: 1 }
+    h.root.playerKind = kind
+    h.root.handlePlayerResult(reply)
+    h.drain()
+  }
+  const verdictOf = h => [Object.keys(h.root.failedAt), h.jobs(), h.root.lastFailedId, toasts(h)]
+
+  checkCall("D-PLY-32: a `player start` or `restart` refused for the runtime folder or its lock (the real helper's replies, local-refusals.json) marks NOTHING -- failedAt, failed.json and lastFailedId untouched -- records the fixture's sentence in lastError, and is told as \"Could not start playback\" (74021), not \"Stream failed\"", () => {
+    const cases = LOCAL.filter(c => /^player\.(start|restart)$/.test(c.reply.kind))
+    return { cases: cases.length >= 4, rows: cases.map(c => {
+      const h = bootPlayer()
+      refuse(h, c.reply.kind.split(".")[1], localReply(c.id))
+      return [c.id].concat(verdictOf(h), [h.root.lastError, h.root.nowPlaying === null])
+    }) }
+  }, { cases: true, rows: LOCAL.filter(c => /^player\.(start|restart)$/.test(c.reply.kind)).map(c =>
+       [c.id, [], [], "", ["74021 Could not start playback | \u201cX\u201d did not play" + Model.SEP + c.reason], c.reason, true]) })
+
+  checkCall("D-PLY-32: every other local refusal a start can answer -- the cache, the socket path, the spawn, the TLS read-back, the player's connection, main()'s catch-alls, the damaged stub, nothing on stdout, a reply with no code, an old helper -- marks nothing and is told locally", () =>
+    OTHER_LOCAL.map(([kind, code, reply]) => {
+      const h = bootPlayer()
+      refuse(h, kind, reply)
+      const v = verdictOf(h)
+      return [code, v[0].length, v[1].length, v[2], v[3].map(t => t.split(" | ")[0]), h.root.lastError === M.statusReason(M.parseHelperStatus(reply, "player." + kind))]
+    }), OTHER_LOCAL.map(([kind, code]) => [code, 0, 0, "", ["74021 Could not start playback"], true]))
+
+  checkCall("D-PLY-32: `busy` and `no_socket` still back off while retries are left (silent, unmarked), and OUT of retries are local refusals, not stream failures", () =>
+    [["busy", "another player command holds the lock"], ["no_socket", "the player did not open its socket: Error parsing option x (option not found)"]].map(([code, message]) => {
+      const reply = startReply("start", code, message)
+      const left = bootPlayer()
+      refuse(left, "start", reply)
+      const spent = bootPlayer()
+      spent.root.playRetries = spent.root.playRetryMax
+      refuse(spent, "start", reply)
+      return [code, left.root.playRetries, left.ids.playRetryTimer.restarts, verdictOf(left)[0].length + verdictOf(left)[3].length,
+              verdictOf(spent)[0], verdictOf(spent)[1], verdictOf(spent)[3].map(t => t.split(" | ")[0])]
+    }), [["busy", 1, 1, 0, [], [], ["74021 Could not start playback"]], ["no_socket", 1, 1, 0, [], [], ["74021 Could not start playback"]]])
+
+  checkCall("D-PLY-32: ONE card per episode -- ten channels refused for the same reason are told once (each still records lastError, none is marked); a different reason is told; a start that SUCCEEDS ends the episode and the next refusal is told again", () => {
+    const h = bootPlayer()
+    const unwritable = localReply("player-start-parent-0500")
+    const link = localReply("player-start-folder-link")
+    const errors = []
+    for (let i = 0; i < 10; i++) { refuse(h, "start", unwritable, "t:c" + i); errors.push(h.root.lastError) }
+    const afterTen = toasts(h).length
+    refuse(h, "restart", unwritable, "t:c10")
+    refuse(h, "start", link, "t:c11")
+    refuse(h, "start", link, "t:c12")
+    const afterLink = toasts(h).length
+    // A start that answered ok: the machine played something.
+    h.root.nowPlaying = { id: "t:ok", name: "OK", group: "", launchedFrom: "", since: 1 }
+    h.root.playerKind = "start"
+    h.root.handlePlayerResult(JSON.stringify({ ok: true, kind: "player.start", spawned: true, pid: 4242, id: "t:ok", name: "OK", entryId: 1, seq: 2,
+                                               firstLoad: { state: "playing", reason: "" }, warnings: [], applied: true, playing: null }))
+    h.drain()
+    refuse(h, "start", link, "t:c13")
+    return { afterTen, afterLink, afterSuccess: toasts(h).length, lastErrors: errors.filter(e => e === "Could not write the player's runtime folder").length,
+             marked: Object.keys(h.root.failedAt).length, jobs: h.jobs(), lastFailedId: h.root.lastFailedId,
+             cards: toasts(h).map(t => t.split(" | ")[1]) }
+  }, { afterTen: 1, afterLink: 2, afterSuccess: 3, lastErrors: 10, marked: 0, jobs: [], lastFailedId: "",
+       cards: ["\u201cC0\u201d did not play" + Model.SEP + "Could not write the player's runtime folder",
+               "\u201cC11\u201d did not play" + Model.SEP + "A folder the plugin uses is a broken link or not a folder",
+               "\u201cC13\u201d did not play" + Model.SEP + "A folder the plugin uses is a broken link or not a folder"] })
+
+  // The check above sets nowPlaying by hand and calls handlePlayerResult, so
+  // it never runs Service.play(), the function every zap and every guide
+  // Enter goes through. A play() that reset the episode (one more line beside
+  // its `notifiedFailureId = ""`) left it and every other check green while
+  // the user got one card per channel again -- the recheck's mutant, red
+  // here. Each play below issues its own `player start` through the real
+  // fork, and the slot's exit is the helper's real reply. The first channel
+  // carries a mark the defect already wrote: play() clears it, as it always
+  // has, and the local refusal no longer writes it back (on dev 8473655 it
+  // was re-marked at once). Red on dev 8473655.
+  checkCall("D-PLY-32: through Service.play(), the path every zap takes -- ten channels played under the same local refusal each issue their own `player start`, are told ONCE and marked never; an old mark on the first is cleared by its play and not written back", () => {
+    const h = bootPlayer()
+    const index = M.keyedMap()
+    const ids = []
+    for (let i = 0; i < 10; i++) {
+      const c = { id: "t:z" + i, name: "Z" + i, url: "http://s.example.test/z" + i + ".ts", group: "G" }
+      ids.push(M.channelId(c))
+      index[M.channelId(c)] = c
+    }
+    h.root.channelIndex = index
+    h.root.failedAt = M.withFailed(h.root.failedAt, ids[0], 1000)
+    const reply = localReply("player-start-parent-0500")
+    const starts = ids.map(id => {
+      const played = h.root.play(id, true, "")
+      h.drain()
+      const issued = played === true && h.ids.playerProc.running === true && h.ids.playerProc.command.indexOf("start") !== -1
+      h.ids.playerProc.running = false
+      h.root.handlePlayerResult(reply)
+      h.drain()
+      return issued
+    })
+    return [starts.filter(Boolean).length, toasts(h).map(t => t.split(" | ")[0]), Object.keys(h.root.failedAt), h.jobs(), h.root.lastFailedId]
+  }, [10, ["74021 Could not start playback"], [], ["clear:t:z0"], ""])
+
+  checkCall("D-PLY-32: a genuine CHANNEL failure still marks and still says \"Stream failed\" (74011) -- the entry's own scheme refused, a first load the start watched fail, and an end-file error at the socket's EOF judged by endedReport", () => {
+    const scheme = bootPlayer()
+    refuse(scheme, "start", startReply("start", "unsupported_scheme", "unsupported stream URL scheme 'rtmp'"))
+    const first = bootPlayer()
+    first.root.nowPlaying = { id: "t:x", name: "X", group: "", launchedFrom: "", since: 1 }
+    first.root.playerKind = "start"
+    first.root.handlePlayerResult(JSON.stringify({ ok: true, kind: "player.start", spawned: true, pid: 4242, id: "t:x", name: "X", entryId: 1, seq: 1,
+                                                   firstLoad: { state: "failed", reason: "Failed to open 127.0.0.1." }, warnings: [], applied: true, playing: null }))
+    first.drain()
+    const eof = bootPlayer()
+    eof.root.nowPlaying = { id: "t:x", name: "X", group: "", launchedFrom: "", since: 1 }
+    eof.root.entryOwners = M.rememberEntryOwner(M.keyedMap(), 3, { id: "t:x", name: "X" })
+    eof.root.lastEndFile = { kind: "end-file", entryId: 3, reason: "error", fileError: "loading failed" }
+    eof.root.handlePlayerGone()
+    eof.drain()
+    return [scheme, first, eof].map(verdictOf)
+  }, [[["t:x"], ["mark:t:x"], "t:x", ["74011 Stream failed | \u201cX\u201d did not play" + Model.SEP + "Unsupported URL"]],
+      [["t:x"], ["mark:t:x"], "t:x", ["74011 Stream failed | \u201cX\u201d did not play" + Model.SEP + "Failed to open 127.0.0.1."]],
+      [["t:x"], ["mark:t:x"], "t:x", ["74011 Stream failed | \u201cX\u201d did not play" + Model.SEP + "loading failed"]]])
+
+  checkCall("D-PLY-32: a local refusal still retires the session record (PO-3), so a later reattach that finds no player marks nothing either", () => {
+    const h = bootPlayer()
+    h.unstub("noteSessionOutcome")
+    h.unstub("markDeadSession")
+    h.root.userState = M.recordPlayed(h.root.userState, { id: "t:x", name: "X" }, 10, 1000)
+    const before = M.stateSession(h.root.userState) !== null
+    refuse(h, "start", localReply("player-start-lock-dir"))
+    const after = M.stateSession(h.root.userState)
+    h.root.markDeadSession()
+    h.drain()
+    return [before, after, Object.keys(h.root.failedAt), h.jobs()]
+  }, [true, null, [], []])
 
   // ---- R21e (D-SINK-19 round 11): THE MIGRATION, through Service.qml ----
   //
