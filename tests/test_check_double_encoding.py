@@ -164,6 +164,35 @@ class ShapeCase(Repo):
         self.assertEqual(rc, 1, out)
         self.assertIn('U+0414 written as 2 characters (\\u00d0\\u0094)', out)
 
+    def test_two_sequences_in_one_run_are_both_found(self):
+        # The channel wall draws the play glyph and the star with nothing
+        # between them (Guide.qml, the tile's lead), so a mockup of it holds
+        # two damaged glyphs in ONE run; a scan that stopped at the first
+        # hit in a run passed every other case here (recheck mutant R16).
+        rc, out = self.check_one('%s\n' % latin1('\U000f040a\U000f04ce'))
+        self.assertEqual(rc, 1, out)
+        self.assertIn('a.md:1:1: U+F040A written as 4 characters', out)
+        self.assertIn('a.md:1:5: U+F04CE written as 4 characters', out)
+        self.assertIn('2 problem(s)', out)
+
+    def test_a_double_encoded_middle_dot_is_red(self):
+        # Model.SEP is a middle dot between spaces, and the tree holds over a
+        # hundred of them: written twice it is U+00C2 U+00B7, the A-circumflex
+        # lead. Without this case a guard that flagged only the A-tilde lead
+        # passed every other one (recheck mutants R6 and R7).
+        rc, out = self.check_one('a%sb\n' % latin1(' \xb7 '))
+        self.assertEqual(rc, 1, out)
+        self.assertIn('a.md:1:3: U+00B7 written as 2 characters (\\u00c2\\u00b7)', out)
+        self.assertIn('1 problem(s)', out)
+
+    def test_a_lead_on_the_last_plane_is_read(self):
+        # U+10FFFD, the last private-use codepoint, is F4 8F BF BD: the
+        # highest lead UTF-8 allows. A guard that stopped its leads at F3
+        # passed every other case (recheck mutant R4).
+        rc, out = self.check_one('x %s\n' % latin1('\U0010fffd'))
+        self.assertEqual(rc, 1, out)
+        self.assertIn('a.md:1:3: U+10FFFD written as 4 characters', out)
+
     def test_guillemets_after_an_accented_capital_are_green(self):
         rc, out = self.check_one('%s\n' % GUILLEMETS)
         self.assertEqual(rc, 0, out)

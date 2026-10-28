@@ -679,7 +679,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3036}
 # 65 were already running on da0000d (1645 in its gate) under a floor left at
 # 1580 since 2026-10-25, so any 65 of them could have been deleted green;
 # the floor is again what the suite runs.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1668}
+# 2026-10-28, rc-doc28 (the recheck): 1668 -> 1671 -- three cases for the
+# guard, each the only one red on a mutant the 23 let through: two damaged
+# glyphs in one run (a scan that stopped at a run's first hit), a middle dot
+# written twice (only the A-tilde lead flagged), and U+10FFFD (no F4 lead).
+PY_TESTS_MIN=${PY_TESTS_MIN:-1671}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
