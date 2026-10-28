@@ -1385,6 +1385,23 @@ On exit:
   edit is dropped again (old record intact); the previous active source is
   untouched (S8); emit `sourceProbeFinished(key, false, reason, 0, 0)`. No
   notification (the user is looking at the form) [UX-ASSUMPTION].
+  **[Amended 2026-10-27, D-SRC-71: the signal carries ONE object, as SR3
+  has it, and Service.qml lists its fields beside the declaration: `{ ok,
+  id, channelCount, groupCount, reason, host, cancelled, replacedId, code }`.
+  A failure carries `code` -- the helper's error code through
+  `Model.statusCode(status)`, `helper_timeout` when the probe's watchdog
+  stopped it, or the plugin's own refusal at the commit (R28e:
+  `too_many`, `state_unreadable`, `unknown_source`); a success and a cancel
+  carry none. `host` is the record's (`Service.hostForRecord`), never a
+  URL. The guide composes the line through `Model.probeFailureLine` ->
+  `Model.failureFromHost`: a code on `PROBE_LOCAL_REFUSALS` (model/
+  sources.mjs) reads the reason alone, any other `<reason> from <host>`,
+  and a local file the reason alone whatever its code. Since D-SRC-73
+  (the same day) `folder_unusable` is on that list and has its own
+  sentence, and the `playlist` verb answers it for a cache folder that is
+  a link to nothing, as every other verb that writes into the folder
+  does (ARCHITECTURE.md section 8 item 17 names which verbs do and which
+  answer otherwise).]**
 
 ### 4.7 Cache helper queue
 
@@ -1789,7 +1806,7 @@ two use different names, the following applies and both lanes code to it.
 |---|---|---|
 | SR1 | Identifiers | The state file keeps this document's field names (`key`, `url`, `epgUrl`, `lastUsed`, `fetchedAt`, ...). The guide never reads state objects directly: the service exposes `sources[]` as view objects built by one pure function `Model.sourceView(stateSource, activeKey, nowSec)` with the UX 8.1 names: `id` (= `key`), `label`, `kind` (`url`, `file`, `xtream`), `host` (derived, never a URL), `hasEpg`, `channelCount` (`-1` when never fetched), `groupCount`, `cachedAt` (= `fetchedAt`), `lastUsedAt` (= `lastUsed`), `active`. The service also exposes `activeSourceId`. |
 | SR2 | Service actions | `addSource({label, playlistUrl, epgUrl, kind})`, `updateSource(id, fields)`, `removeSource(id)`, `switchSource(id)`, `buildXtreamSource({server, username, password, label})` (the Xtream form submit), `sourceForEdit(id)` (the only call that returns full URLs, used to populate the edit form), `retrySource(id)`, and `cancelProbe()` (from UX 8.1; add it). Return shape `{ok, code, message, id}`. Booleans `probing` and `switching`. |
-| SR3 | Signals | `sourceProbeFinished({ok, id, channelCount, groupCount, reason, host})`, `sourcesChanged()`, `sourceSwitched(id)`, `sourceRemoved(id)`, `sourcesPersistFailed(reason)`. `reason` is already redacted. |
+| SR3 | Signals | `sourceProbeFinished({ok, id, channelCount, groupCount, reason, host})`, `sourcesChanged()`, `sourceSwitched(id)`, `sourceRemoved(id)`, `sourcesPersistFailed(reason)`. `reason` is already redacted. **[Amended 2026-10-27, D-SRC-71; the ruling's decision is unchanged: a FAILED `sourceProbeFinished` also carries `code`, which decides whether the guide's line names `host` (`Model.failureFromHost` over `PROBE_LOCAL_REFUSALS`: a failure on this machine reads the reason alone). The object has carried `cancelled` and `replacedId` since before this amendment (section 4.6 as amended lists the fields).]** |
 | SR4 | Mask rule | Fixed token `****` (UX) replaces userinfo, the fragment, and every query value except the non-secret keys `type` and `output` (this document's exception); scheme, host, port, path, and query keys stay visible; local paths are never masked. Reveal is `Ctrl+R` or the eye button, re-masked on blur, save, cancel, and paste. |
 | SR5 | Limits | This document's caps are canonical: playlist/EPG URL 2048, label 64, server 512, username/password 256, 50 sources. `Model.LIMITS` carries them and UX copy quotes them. |
 | SR6 | Validation codes | The code list in UX-SOURCES.md 5.4 is canonical for user-facing errors; the shared JSON fixture (tests/fixtures/source-urls.json) uses those codes and both the JS validators and the Python mirror must pass it. |

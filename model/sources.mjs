@@ -1311,8 +1311,16 @@ function fetchingLine(host, kind) {
 // handleProbeExit), and the refresh empty state composes through the same
 // function (failureFromHost, Guide.qml), so every "<reason> from <host>"
 // reads one list.
+//
+// D-SRC-73 (2026-10-27): `folder_unusable` joins it. R25c's refusal is about
+// a folder on this machine (the source's cache folder is a link to nothing,
+// or not a folder), never the provider's. D-PLY-30's `runtime_unwritable`
+// (the player's runtime folder or its lock) joins it by the same reading:
+// no surface composes a player refusal with a host today, and the list is
+// the one place that says which codes are this machine's.
 var PROBE_LOCAL_REFUSALS = ["too_many", "state_unreadable", "unknown_source", "cache_unwritable", "internal",
-                            "helper_timeout", "no_output", "helper_damaged", "not_implemented"]
+                            "helper_timeout", "no_output", "helper_damaged", "not_implemented", "folder_unusable",
+                            "runtime_unwritable"]
 
 // "<reason> from <host>", or the reason alone when the code is a local
 // failure (PROBE_LOCAL_REFUSALS) or there is no host to name. The reason is

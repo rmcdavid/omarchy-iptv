@@ -119,6 +119,13 @@ function makeIds(h) {
     // first; a test runs that handler to see how the status branch routes a
     // reply from a damaged helper. Counted like every timer, never run.
     controlWatchdog: timer("controlWatchdog"),
+    // D-PLY-30: the player slot's four timers, which handlePlayerResult
+    // stops or restarts; a test runs that handler to see what a refused
+    // `player start` tells the user. Counted like every timer, never run.
+    playerWatchdog: timer("playerWatchdog"),
+    playerSocketTimer: timer("playerSocketTimer"),
+    playRetryTimer: timer("playRetryTimer"),
+    relaunchTimer: timer("relaunchTimer"),
     configShieldDebounce: timer("configShieldDebounce"),
     // D-EPG-11 (R31b): the guide-data load is observed -- applyEpgNow runs
     // for real over both file shapes -- and these three are what a fetch

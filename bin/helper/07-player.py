@@ -542,6 +542,22 @@ def player_lock_path(sock_path: str) -> str:
     return os.path.join(os.path.dirname(sock_path), PLAYER_LOCK_FILE)
 
 
+def runtime_unwritable(what: str, io_error: OSError) -> HelperError:
+    """D-PLY-30 (2026-10-27): the player's runtime folder could not be made,
+    or its lock file could not be opened, as a refusal with a code rather
+    than an OSError left to main()'s catch-all, which answered `internal`
+    with the exception's text and the path (`PermissionError: [Errno 13]
+    Permission denied: '<runtime>/omarchy-iptv'` under a parent the user
+    cannot write). `what` says which of the two and the error's own words
+    say why; nothing names the path, which is fixed by the socket path
+    ($XDG_RUNTIME_DIR/omarchy-iptv, rule 6) and carries the user's home
+    directory when that variable is unset. The shape of D-SRC-69's
+    cache_unwritable. A folder that is a link to nothing, or not a folder,
+    stays R25c's `folder_unusable` (player_runtime)."""
+    reason = io_error.strerror or type(io_error).__name__
+    return HelperError("runtime_unwritable", "could not %s (%s)" % (what, reason))
+
+
 def acquire_lock(path: str, timeout: float) -> int:
     """flock with an inode re-check.
 
@@ -553,7 +569,15 @@ def acquire_lock(path: str, timeout: float) -> int:
     """
     deadline = _monotonic() + max(0.0, float(timeout))
     for _ in range(LOCK_RETRIES):
-        fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+        # D-PLY-30: a lock file that cannot be opened -- a folder at its
+        # name, a file this user may not write, a runtime folder gone from
+        # under it -- is a named refusal, not main()'s `internal` with the
+        # path. settle_under_lock still reads any failure here as "cannot
+        # take the lock" and leaves the socket alone.
+        try:
+            fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+        except OSError as io_error:
+            raise runtime_unwritable("open the player's lock file", io_error) from None
         try:
             # R23d (rule 15): only a regular file is made 0600, decided on
             # the descriptor. O_RDWR never blocks on a FIFO (Linux), so the

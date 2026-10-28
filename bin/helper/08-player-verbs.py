@@ -386,8 +386,23 @@ def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
 # -------------------------------------------------------------- the verbs
 
 def player_runtime(sock_path: str) -> str:
+    """The socket's folder, made 0700 (rule 6) -> its path.
+
+    D-PLY-30 (2026-10-27): every way this can fail is a refusal in the
+    player verbs' own reply shape (`kind: player.<verb>`), never main()'s
+    `internal` with an exception and a path. A link to nothing, or something
+    that is not a folder, at the folder or above it is R25c's
+    `folder_unusable` with R25c's sentence, which names the path (the
+    journal keeps it; Model.statusReason shows the user a sentence). Any
+    other failure to make it -- a parent this user cannot write, a full or
+    read-only filesystem -- is `runtime_unwritable`."""
     directory = os.path.dirname(sock_path)
-    ensure_private_dir(directory)
+    try:
+        ensure_private_dir(directory)
+    except FolderUnusable as error:
+        raise HelperError("folder_unusable", error.sentence) from None
+    except OSError as io_error:
+        raise runtime_unwritable("make the player's runtime folder", io_error) from None
     return directory
 
 

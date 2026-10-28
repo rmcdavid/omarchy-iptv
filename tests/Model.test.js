@@ -13429,6 +13429,92 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
                "Helper timed out" + Model.SEP + "check the source in Sources"],
        wrong: [], emptyPlaylist: "Parsed 0 channels from new.example.test" + Model.SEP + "check the URL points at an M3U" })
 
+  // ---- D-SRC-73 (2026-10-27): a folder that is a link to nothing has ONE answer, and the user reads no path ----
+  //
+  // R25c's `folder_unusable` names the folder's full path, which the journal
+  // keeps; Model.statusReason had no entry for it, so the guide-data banner
+  // (the `epg` verb answers it) showed the cache folder's path, and the
+  // `playlist` verb answered the same folder `cache_unwritable`. The replies
+  // here are the REAL helper's: tests/fixtures/local-refusals.json, which
+  // tests/test_local_refusals.py compares with the helper's stdout, with
+  // `{dir}` a source's cache folder under a home directory. Every surface is
+  // the shipping one -- Service.qml's handlers and Guide.qml's own bindings
+  // compiled from their text. Red on dev 41ab132.
+  const LOCAL = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/local-refusals.json"), "utf8")).refusals
+  const LOCAL_DIR = "/home/someone/.cache/omarchy-iptv/sources/" + KNEW
+  const localReply = id => { const c = LOCAL.find(x => x.id === id); if (!c) throw new Error("local-refusals.json: no case " + id); return JSON.stringify(c.reply).split("{dir}").join(LOCAL_DIR) }
+  const namesPath = text => /\/home\/|omarchy-iptv\/sources|\{dir\}/.test(String(text))
+
+  checkCall("D-SRC-73: every reply in local-refusals.json (the real helper's, for a folder it cannot use) maps to the fixture's sentence through Model.statusReason; the sentence names no path, and Model.failureFromHost puts no host after it", () => {
+    const rows = LOCAL.map(c => {
+      const st = M.parseHelperStatus(JSON.stringify(c.reply).split("{dir}").join(LOCAL_DIR), c.reply.kind)
+      const reason = M.statusReason(st)
+      return [c.id, reason === c.reason, namesPath(reason), M.failureFromHost(reason, "new.example.test", M.statusCode(st)) === reason]
+    })
+    return { cases: LOCAL.length >= 4, rows }
+  }, { cases: true, rows: LOCAL.map(c => [c.id, true, false, true]) })
+
+  checkCall("D-SRC-73: a source's cache folder that is a link to nothing, as the user reads it -- the Sources result line after a probe, the refresh empty state (Guide.qml's `prose`) and its notification, the guide-data banner (Guide.qml's `bannerText`) and its notification -- is the one sentence, with no host and no path", () => {
+    const sentence = "A folder the plugin uses is a broken link or not a folder"
+    const copy = new Function("Model", "root", "return (" + guideBlock("  readonly property var copy: ({") + ")")(M, { pluginId: "io.github.rmcdavid.iptv" })
+    const emptyPlaylistOf = new Function("root", "Model", "return (" + guideExpr("readonly property bool emptyPlaylist: ") + ")")
+    const proseOf = new Function("root", "emptyState", "Model", guideBlock("readonly property string prose: {").slice(1, -1))
+    const bannerOf = new Function("root", "Model", guideBlock("readonly property string bannerText: {").slice(1, -1))
+    const notes = h => h.detached.filter(a => a[0] === "omarchy-notification-send").map(a => a.join(" "))
+    const p = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    add(p); p.probeExit(localReply("playlist-folder-link")); p.drain()
+    const r = p.signals.filter(s => s[0] === "sourceProbeFinished").map(s => s[1])[0]
+    const line = M.probeFailureLine(r.reason, String(r.host || ""), "url", String(r.code || ""))
+    const f = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    f.detached.length = 0
+    f.root.handlePlaylistExit(localReply("playlist-folder-link")); f.drain()
+    const g = { emptyKind: "error", invalidSettingsText: "", copy, service: f.root }
+    const prose = proseOf(g, { emptyPlaylist: emptyPlaylistOf(g, M) }, M)
+    const e = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    e.detached.length = 0
+    e.root.handleEpgExit(localReply("epg-folder-link"), false); e.drain()
+    const banner = bannerOf({ bannerKind: "epgError", copy, service: e.root }, M)
+    const told = notes(f).concat(notes(e))
+    return { code: r.code, line, prose, banner,
+             told: told.map(t => t.indexOf(sentence) !== -1),
+             path: [line, prose, banner, f.root.lastError].concat(told, f.warnings, e.warnings).some(namesPath) }
+  }, { code: "folder_unusable", line: "A folder the plugin uses is a broken link or not a folder",
+       prose: "A folder the plugin uses is a broken link or not a folder" + Model.SEP + "check the source in Sources",
+       banner: "Guide data unavailable (A folder the plugin uses is a broken link or not a folder)" + Model.SEP + "channels still work" + Model.SEP + "r retry",
+       told: [true, true], path: false })
+
+  // ---- D-PLY-30 (2026-10-27): a play the player's runtime folder refuses is told in a sentence ----
+  //
+  // `player start|restart` answered `internal` with an exception and the
+  // runtime folder's path when the folder could not be made or its lock
+  // opened; the "did not play" notification has read "Helper failed
+  // unexpectedly" since D-SRC-69. The helper now names the refusal
+  // (`runtime_unwritable`, or R25c's `folder_unusable` for a link to
+  // nothing) and the model gives each its sentence. The replies are the
+  // real helper's (local-refusals.json); the handler is Service.qml's own.
+  // Red on dev 41ab132.
+  checkCall("D-PLY-30: a `player start` or `restart` the runtime folder or its lock refused (the real helper's replies) reaches the user through Service.handlePlayerResult as the fixture's sentence -- the \"did not play\" notification and lastError, no path, no exception, no retry, nothing left playing; dev's `internal` reply still reads the D-SRC-69 sentence", () => {
+    const run = (reply, kind) => {
+      const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+      h.detached.length = 0
+      h.warnings.length = 0
+      h.root.nowPlaying = { id: "t:x", name: "X", group: "", launchedFrom: "", since: 1 }
+      h.root.playerKind = kind
+      h.root.handlePlayerResult(reply)
+      h.drain()
+      const toast = h.detached.filter(a => a.join(" ").indexOf("did not play") !== -1).map(a => a[a.length - 1])
+      const seen = toast.concat([h.root.lastError], h.warnings)
+      return [toast, h.root.lastError, h.root.playRetries, h.root.nowPlaying === null, seen.some(t => namesPath(t) || /Error:|Errno|\/run\//.test(t))]
+    }
+    const cases = LOCAL.filter(c => /^player\.(start|restart)$/.test(c.reply.kind))
+    const internal = JSON.stringify({ ok: false, kind: "player", error: { code: "internal", message: "PermissionError: [Errno 13] Permission denied: '/run/user/1000/x/omarchy-iptv'" } })
+    return { cases: cases.length >= 4,
+             rows: cases.map(c => [c.id].concat(run(localReply(c.id), c.reply.kind.split(".")[1]))),
+             internal: run(internal, "start") }
+  }, { cases: true,
+       rows: LOCAL.filter(c => /^player\.(start|restart)$/.test(c.reply.kind)).map(c => [c.id, ["\u201cX\u201d did not play" + Model.SEP + c.reason], c.reason, 0, true, false]),
+       internal: [["\u201cX\u201d did not play" + Model.SEP + "Helper failed unexpectedly"], "Helper failed unexpectedly", 0, true, false] })
+
   // ---- R21e (D-SINK-19 round 11): THE MIGRATION, through Service.qml ----
   //
   // Every pin here runs the shipping functions over a 0.13.5-shaped install:

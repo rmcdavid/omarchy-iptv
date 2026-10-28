@@ -1103,8 +1103,15 @@ def cmd_playlist(args: argparse.Namespace) -> int:
                 "count": len(parsed["channels"]),
                 "channels": parsed["channels"],
             }
+            # D-SRC-73: a folder that is a link to nothing, or not a folder
+            # at all, is R25c's `folder_unusable` here as in every other verb
+            # (main() answers it, with its sentence). FolderUnusable is an
+            # OSError, so the except below used to fold it into
+            # cache_unwritable, and one folder got two answers.
             try:
                 write_json_atomic(channels_path, document)
+            except FolderUnusable:
+                raise
             except OSError as io_error:
                 raise cache_unwritable(channels_path, io_error) from None
             document = None
@@ -1145,9 +1152,12 @@ def cmd_playlist(args: argparse.Namespace) -> int:
         }
         # D-SRC-69, the same refusal for the second file: channels.json is
         # written, but a cache without its status is not one the service can
-        # judge, so the run fails as the first write's failure does.
+        # judge, so the run fails as the first write's failure does. A
+        # folder made a link to nothing in between is R25c's (D-SRC-73).
         try:
             write_json_atomic(status_path, status)
+        except FolderUnusable:
+            raise
         except OSError as io_error:
             error = cache_unwritable(status_path, io_error)
     if error is None:
