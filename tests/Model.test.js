@@ -5061,6 +5061,50 @@ checkCall("D-PLY-32: the new replace-id is no other notification's (74019 stays 
   () => { const ids = Object.values(Model.NOTIFY_IDS); return [Model.NOTIFY_IDS.localPlayFailure, ids.filter(v => v === 74021).length, ids.length === new Set(ids).size, ids.indexOf(74019)] },
   [74021, 1, true, -1])
 
+// ---- D-PLY-35 (2026-10-28): the player slot's watchdog, derived from the helper's bounds ----
+//
+// tests/fixtures/player-bounds.json is shared: tests/test_player_bounds.py
+// reads every one of its `helper` numbers off the helper by the name the
+// fixture gives, and observes the two that were literals being used. Here:
+// the model's mirrors are the fixture's, Model.playerWatchdogMs per verb is
+// the fixture's arithmetic, and the shell hands the helper none of the
+// timeout flags (so the helper's DEFAULTS are the bounds being mirrored).
+// Red on dev da0000d: no PLAYER_BOUNDS and no playerWatchdogMs, and its one
+// interval is 12 s against a start's own 14 s of deadlines. The shell's
+// half -- the slot's Timer and a start it stops -- is in the harness block.
+;(function () {
+  const PB = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/player-bounds.json"), "utf8"))
+  const B = Model.PLAYER_BOUNDS || {}
+  checkCall("D-PLY-35: the model's mirrors of the helper's player bounds are the shared fixture's, every one (the stop ladder's two graces are the ones it already shared)", () =>
+    Object.keys(PB.helper).map(k => k + "=" + (k === "quitGraceMs" ? Model.STOP_QUIT_GRACE_MS : k === "killGraceMs" ? Model.STOP_KILL_GRACE_MS : B[k])),
+    Object.keys(PB.helper).map(k => k + "=" + PB.helper[k]))
+  checkCall("D-PLY-35: and the model mirrors nothing the fixture does not hold, so a bound added on one side only is red", () =>
+    Object.keys(B).filter(k => !Object.prototype.hasOwnProperty.call(PB.helper, k)), [])
+  checkCall("D-PLY-35: playerWatchdogMs per verb is the fixture's arithmetic -- start, restart, probe -- and \"\" (no verb: the birth edge) keeps its 12 s; the margin is the fixture's", () =>
+    [Object.keys(PB.watchdogMs).map(k => JSON.stringify(k) + "=" + (typeof Model.playerWatchdogMs === "function" ? Model.playerWatchdogMs(k) : "none")),
+     Model.PLAYER_WATCHDOG_MARGIN_MS, Model.PLAYER_BIRTH_EDGE_MS],
+    [Object.keys(PB.watchdogMs).map(k => JSON.stringify(k) + "=" + PB.watchdogMs[k]), PB.marginMs, PB.watchdogMs[""]])
+  checkCall("D-PLY-35: every verb's bound is past its own deadlines -- a start past lock + spawn + first load (the board's 14 s) plus a request, a restart past that plus its ladder from term, a probe past three requests -- and every one is past what the old 12 s let a start have", () => {
+    const h = PB.helper, w = k => typeof Model.playerWatchdogMs === "function" ? Model.playerWatchdogMs(k) : PB.previousMs
+    return [w("start") > PB.boardMs + h.ipcMs,
+            w("restart") > PB.boardMs + h.ipcMs + h.killGraceMs + 2 * h.settleMs,
+            w("probe") >= 3 * h.ipcMs,
+            w("start") > PB.previousMs, PB.boardMs === h.lockMs + h.spawnMs + h.firstLoadMs]
+  }, [true, true, true, true, true])
+  checkCall("D-PLY-35: a kind it does not know -- a typo, null, undefined, a number -- gets the LONGEST verb's bound, never a shorter one", () => {
+    if (typeof Model.playerWatchdogMs !== "function") return "none"
+    const longest = Math.max(Model.playerWatchdogMs("start"), Model.playerWatchdogMs("restart"), Model.playerWatchdogMs("probe"))
+    return ["strat", null, undefined, 7, "probe "].map(k => Model.playerWatchdogMs(k) === longest)
+  }, [true, true, true, true, true])
+  checkCall("D-PLY-35: the shell passes the helper NONE of the timeout flags on any slot verb, so the defaults the fixture pins are the bounds the helper runs with", () => {
+    const flags = ["--lock-timeout", "--spawn-timeout", "--first-load-timeout", "--ipc-timeout"]
+    const argvs = [Model.playerStartArgv("/r/mpv.sock", "/c", "t:x", 3, "g:x", 100, ["--vo=null"], 42),
+                   Model.playerRestartArgv("/r/mpv.sock", "/c", "t:x", 3, "g:x", 100, ["--vo=null"], "term", 42),
+                   Model.playerProbeArgv("/r/mpv.sock", 42)]
+    return argvs.map(a => [a[1], flags.filter(f => a.some(t => t === f || String(t).indexOf(f + "=") === 0))])
+  }, [["start", []], ["restart", []], ["probe", []]])
+})()
+
 // replyTarget: who the reply is ABOUT. Both rememberEntry call sites passed
 // the shell's nowPlaying, which in a burst is the intent current when the
 // REPLY landed - the exact case the entry ring exists for.
@@ -6892,6 +6936,9 @@ check("CL10: the journal witness is kept, and is NOT what proves the property",
 // of these eight - "mpvMissing", "failed" and "abandoned" - read as NOTHING
 // before this change: those are the branches that left the record behind.
 //
+// D-PLY-35 adds a ninth, "failed": settleTimedOutPlay ends a start the
+// watchdog stopped when the reattach probe found nothing of it to adopt.
+//
 // One slot reads "outcome" rather than a word, and that is not a hole: D-SINK-16
 // gave the stop ladder a second caller, so its one body takes the word from its
 // caller. What this check is for survives - the very next thing after that drop
@@ -6905,7 +6952,7 @@ serviceSource.replace(/root\.nowPlaying\s*=\s*null|root\.noteSessionOutcome\(("?
 check("every Service.qml branch that drops the channel hands the record to the decision", serviceTokens
   .map((t, i) => t === "drop" ? (serviceTokens[i + 1] === undefined || serviceTokens[i + 1] === "drop" ? "NOTHING" : serviceTokens[i + 1]) : null)
   .filter(x => x !== null),
-  ["stopped", "mpvMissing", "failed", "failed", "markDeadSession", "outcome", "ended", "abandoned"])
+  ["stopped", "mpvMissing", "failed", "failed", "markDeadSession", "outcome", "failed", "ended", "abandoned"])
 
 check("every reducer carries the session through (cloneState)", [
   Model.withFavorites(sessionState, ["a"]).session,
@@ -13905,6 +13952,235 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       h.drain()
       return [before, M.stateSession(h.root.userState), h.root.deadSessionPending].concat(verdictOf(h))
     }, [true, null, false, [], [], "", []])
+  }
+
+  // ---- D-PLY-35 (2026-10-28): the player slot's watchdog, and a start it stopped ----
+  //
+  // The slot's one 12 s watchdog was shorter than a start's own deadlines
+  // (lock 6 s + spawn 5 s + first load 3 s), and measured on dev in a nested
+  // cage, a start that spent them was TERMed a second after its loadfile: the
+  // player it had started played the channel on with the shell's observer
+  // off, `nowPlaying` null, the record retired and a "Could not start
+  // playback" card up. Here, through Service.qml's own functions: the Timer
+  // is armed with the bound of the verb it runs (Model.playerWatchdogMs,
+  // tests/fixtures/player-bounds.json), it fires there and not at 12 s, and a
+  // start it does stop is no verdict -- the reattach probe decides, adopting
+  // the start's player (re-applying the intent if it is on another channel)
+  // or telling the start's failure once as "Helper timed out" with no mark.
+  // The Timer runs from its own block (h.elapse); the helper's replies are
+  // delivered as the slot's exit is. Red on dev da0000d, which arms 12 s for
+  // every verb and reads the stopped start as a refusal.
+  {
+    const PB = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/player-bounds.json"), "utf8"))
+    const X = { id: "t:x", name: "X", url: "http://s.example.test/x.ts", group: "G" }
+    const Y = { id: "t:y", name: "Y", url: "http://s.example.test/y.ts", group: "G" }
+    const okStart = id => JSON.stringify({ ok: true, kind: "player.start", spawned: true, pid: 4242, id, name: id.slice(2).toUpperCase(), entryId: 1, seq: 1,
+                                           firstLoad: { state: "unknown", reason: "" }, warnings: [], applied: true, playing: null })
+    const probeOf = o => JSON.stringify(Object.assign({ ok: true, kind: "player.probe", running: true, responsive: true, pid: 4242, idle: false,
+      stash: { schema: 1, playing: true, id: "t:x", name: "X", group: "G", launchedFrom: "", sourceKey: KA, since: 1, entryId: 1, seq: 1, verb: "start" },
+      owner: null, seq: 1, claimed: true, rewind: null, tls: { verify: true, optionCount: 0, migrated: false } }, o || {}))
+    const slotVerb = h => { const c = h.ids.playerProc.command; const i = c.indexOf("player"); return i === -1 ? "" : c[i + 1] }
+    const exit = (h, text) => { h.ids.playerProc.running = false; h.root.handlePlayerResult(text); h.drain() }
+    const playing = h => {
+      const index = M.keyedMap()
+      index[X.id] = X
+      index[Y.id] = Y
+      h.root.channelIndex = index
+      const played = h.root.play(X.id, true, "")
+      h.drain()
+      return played === true && h.ids.playerProc.running === true && slotVerb(h) === "start"
+    }
+    // The watchdog's moment for a start that never answers: the tree's own
+    // bound, whatever it is (12 s on dev), so the TERM is the Timer's own.
+    const stopped = h => { h.elapse(PB.watchdogMs.start); return h.ids.playerProc.signals.slice() }
+    const said = h => [h.root.nowPlaying ? h.root.nowPlaying.id : null, toasts(h), Object.keys(h.root.failedAt), h.jobs(), h.root.lastError]
+
+    checkCall("D-PLY-35: the slot's watchdog is armed with the bound of the verb it runs -- a start's, a restart's, a probe's, all from the shared fixture -- and the birth edge after a reply keeps its 12 s", () => {
+      const h = bootPlayer()
+      const issued = playing(h)
+      const start = h.ids.playerWatchdog.armedInterval
+      exit(h, okStart(X.id))
+      const birth = h.ids.playerWatchdog.armedInterval
+      h.root.restartPlayer()
+      h.drain()
+      const restartVerb = slotVerb(h), from = h.ids.playerProc.command[h.ids.playerProc.command.indexOf("--from") + 1]
+      const restart = h.ids.playerWatchdog.armedInterval
+      exit(h, okStart(X.id))
+      h.root.runPlayerProbe()
+      const probeVerb = slotVerb(h), probe = h.ids.playerWatchdog.armedInterval
+      return [issued, start, birth, restartVerb, from, restart, probeVerb, probe]
+    }, [true, PB.watchdogMs.start, PB.watchdogMs[""], "restart", "term", PB.watchdogMs.restart, "probe", PB.watchdogMs.probe])
+
+    checkCall("D-PLY-35: a start that spends its own deadlines (the board's 14 s, and more) is NOT terminated; the Timer fires at the start's bound, and only then", () => {
+      const h = bootPlayer()
+      playing(h)
+      h.elapse(PB.boardMs + PB.helper.ipcMs)
+      const atSixteen = h.ids.playerProc.signals.slice()
+      h.elapse(PB.watchdogMs.start - (PB.boardMs + PB.helper.ipcMs) - 1)
+      const justBefore = h.ids.playerProc.signals.slice()
+      h.elapse(1)
+      return [atSixteen, justBefore, h.ids.playerProc.signals.slice(), h.root.playerTimedOut]
+    }, [[], [], [15], true])
+
+    checkCall("D-PLY-35: a start the watchdog stopped is not a refusal -- no card, no mark, the intent kept and still wanted, and the reattach probe sent to find what it left", () => {
+      const h = bootPlayer()
+      playing(h)
+      const signals = stopped(h)
+      exit(h, "")
+      return [signals, said(h), h.root.playerWanted, h.root.playerPending, slotVerb(h), h.ids.playerProc.running, h.root.timedOutPlay !== null && h.root.timedOutPlay !== undefined]
+    }, [[15], [X.id, [], [], [], ""], true, true, "probe", true, true])
+
+    // The recheck of lane-ply35: the claim "the observer hunts at once" was
+    // unpinned (removing the arm left every check green), because the start's
+    // own 3 s burst had long ended and only the probe's adoption re-armed it.
+    checkCall("D-PLY-35 (recheck): the socket hunt is armed on the stopped start's exit itself, before the probe answers -- a fresh observer object and the retry timer restarted", () => {
+      const h = bootPlayer()
+      playing(h)
+      stopped(h)
+      const made = h.socketsMade || 0, restarts = h.ids.playerSocketTimer.restarts
+      exit(h, "")
+      return [(h.socketsMade || 0) - made, h.ids.playerSocketTimer.restarts - restarts, slotVerb(h)]
+    }, [1, 1, "probe"])
+
+    // The watchdog's flag is spent on the exit it was raised for. Left set, a
+    // later start that dies with no output and no TERM -- a helper crash --
+    // read as stopped by the watchdog and went looking instead of telling
+    // (the recheck's mutant: every check green with the reset removed).
+    checkCall("D-PLY-35 (recheck): the watchdog's flag is spent on its own exit -- after a stopped start was told, a later start's empty reply with no TERM is the no-output refusal it is, told, not a look", () => {
+      const h = bootPlayer()
+      playing(h)
+      stopped(h)
+      exit(h, "")
+      exit(h, probeOf({ running: false, responsive: false, pid: null, stash: null, idle: null, tls: null }))
+      const first = toasts(h).length
+      h.root.play(X.id, true, "")
+      h.drain()
+      const again = slotVerb(h)
+      exit(h, "")
+      return [first, again, h.ids.playerProc.running, toasts(h).slice(first), h.root.lastError]
+    }, [1, "start", false, ["74021 Could not start playback | \u201cX\u201d did not play" + M.SEP + "Helper produced no output"], "Helper produced no output"])
+
+    checkCall("D-PLY-35: the probe finds the stopped start's player on the channel (dev's measured case) -- adopted, observed, nothing told, nothing marked, and the start's relaunch and retries settled as an ok reply settles them", () => {
+      const h = bootPlayer()
+      playing(h)
+      stopped(h)
+      exit(h, "")
+      h.root.playRetries = 2
+      // The recheck: and the local-failure episode ends, as an ok reply
+      // ends it (unpinned until then: the reset could go, all green).
+      h.root.localFailureTold = "Helper timed out"
+      exit(h, probeOf())
+      return [said(h), h.root.playerWanted, h.root.timedOutPlay, h.root.playRetries, h.root.playing === true || h.root.playerUp === true, h.root.localFailureTold]
+    }, [[X.id, [], [], [], ""], true, null, 0, true, ""])
+
+    checkCall("D-PLY-35: the probe finds NOTHING -- the start failed, and is told once as \"Could not start playback\" with \"Helper timed out\", marks nothing, and the record is retired", () => {
+      const h = bootPlayer()
+      h.unstub("noteSessionOutcome")
+      playing(h)
+      const before = M.stateSession(h.root.userState) !== null
+      stopped(h)
+      exit(h, "")
+      exit(h, probeOf({ running: false, responsive: false, pid: null, stash: null, idle: null, tls: null }))
+      return [before, said(h), h.root.playerWanted, M.stateSession(h.root.userState), h.root.timedOutPlay]
+    }, [true, [null, ["74021 Could not start playback | \u201cX\u201d did not play" + M.SEP + "Helper timed out"], [], [], "Helper timed out"], false, null, null])
+
+    checkCall("D-PLY-35: the probe finds a player that does not answer, or one it cannot identify -- stopped by the ladder, as the reattach always has, and the start's failure told", () => ["unresponsive", "foreign"].map(how => {
+      const h = bootPlayer()
+      playing(h)
+      stopped(h)
+      exit(h, "")
+      h.detached.length = 0
+      const reply = how === "unresponsive" ? probeOf({ responsive: false }) : probeOf({ stash: null, idle: true })
+      exit(h, reply)
+      if (how === "foreign") { h.root.runPlayerProbe(); exit(h, reply) }
+      const stops = h.detached.filter(a => a.indexOf("player") !== -1 && a[a.indexOf("player") + 1] === "stop").length
+      return [how, stops, said(h)]
+    }), ["unresponsive", "foreign"].map(how => [how, 1, [null, ["74021 Could not start playback | \u201cX\u201d did not play" + M.SEP + "Helper timed out"], [], [], "Helper timed out"]]))
+
+    checkCall("D-PLY-35: the probe finds the player on ANOTHER channel (the start was stopped before its own load) -- adopted, and the intent put back and sent again over the socket (ruling CL5), not the label changed to match", () => {
+      const h = bootPlayer()
+      playing(h)
+      stopped(h)
+      exit(h, "")
+      const zaps = []
+      let held = h.ids.controlProc.command
+      Object.defineProperty(h.ids.controlProc, "command", { get() { return held }, set(v) { held = v; zaps.push(v.slice()) }, configurable: true })
+      exit(h, probeOf({ stash: { schema: 1, playing: true, id: "t:y", name: "Y", group: "G", launchedFrom: "", sourceKey: KA, since: 1, entryId: 1, seq: 1, verb: "play" } }))
+      const sent = zaps.map(c => c[c.indexOf("play")] + ":" + c[c.indexOf("--id") + 1])
+      return [said(h), sent]
+    }, [[X.id, [], [], [], ""], ["play:" + X.id]])
+
+    checkCall("D-PLY-35: the reattach probe itself stopped at ITS bound (the fixture's) -- the start it was looking for has failed, told once", () => {
+      const h = bootPlayer()
+      playing(h)
+      stopped(h)
+      exit(h, "")
+      const armed = h.ids.playerWatchdog.armedInterval
+      h.elapse(PB.watchdogMs.probe)
+      const signals = h.ids.playerProc.signals.slice()
+      exit(h, "")
+      return [armed, signals, said(h)]
+    }, [PB.watchdogMs.probe, [15, 15], [null, ["74021 Could not start playback | \u201cX\u201d did not play" + M.SEP + "Helper timed out"], [], [], "Helper timed out"]])
+
+    checkCall("D-PLY-35: the stopped start's player dies while the probe is out (the socket's EOF tells that death, as it tells every one) -- the probe's \"nothing there\" does not tell it a second time", () => {
+      const h = bootPlayer()
+      playing(h)
+      stopped(h)
+      exit(h, "")
+      h.root.handlePlayerGone()
+      h.drain()
+      exit(h, probeOf({ running: false, responsive: false, pid: null, stash: null, idle: null, tls: null }))
+      return toasts(h).map(t => t.split(" | ")[0])
+    }, ["74022 Playback stopped"])
+
+    checkCall("D-PLY-35: a newer play while the probe is out owns the outcome -- the probe's answer is stale, the stopped start is dropped untold, and the newer channel is what the shell holds", () => {
+      const h = bootPlayer()
+      playing(h)
+      stopped(h)
+      exit(h, "")
+      const replayed = h.root.play(Y.id, true, "")
+      h.drain()
+      exit(h, probeOf({ running: false, responsive: false, pid: null, stash: null, idle: null, tls: null }))
+      return [replayed, h.root.timedOutPlay, toasts(h), h.root.nowPlaying ? h.root.nowPlaying.id : null]
+    }, [true, null, [], Y.id])
+
+    checkCall("D-PLY-35: a stopped start the user has since stopped is not looked for and not told (the stop's own ladder ends whatever it left); its reason is recorded as the timeout it was", () => {
+      const h = bootPlayer()
+      playing(h)
+      stopped(h)
+      h.root.stop()
+      h.drain()
+      exit(h, "")
+      return [said(h), slotVerb(h), h.ids.playerProc.running]
+    }, [[null, [], [], [], "Helper timed out"], "start", false])
+
+    checkCall("D-PLY-35: a play made while an earlier stop is still settling is a new intent -- its start, stopped by the watchdog, is looked for like any other", () => {
+      const h = bootPlayer()
+      const index = M.keyedMap()
+      index[X.id] = X
+      h.root.channelIndex = index
+      h.root.stop()
+      h.drain()
+      const settling = h.root.stopping === true
+      h.root.play(X.id, true, "")
+      h.drain()
+      const startVerb = slotVerb(h)
+      stopped(h)
+      exit(h, "")
+      return [settling, startVerb, slotVerb(h), said(h)]
+    }, [true, "start", "probe", [X.id, [], [], [], ""]])
+
+    checkCall("D-PLY-35: a refusal the helper finished printing before the TERM landed is still that refusal (busy backs off; a stream's own refusal still marks) -- the watchdog's flag turns only an EMPTY reply into a look", () => {
+      const busy = bootPlayer()
+      playing(busy)
+      stopped(busy)
+      exit(busy, JSON.stringify({ ok: false, kind: "player.start", error: { code: "busy", message: "another player command holds the lock" }, id: X.id, seq: 1 }))
+      const scheme = bootPlayer()
+      playing(scheme)
+      stopped(scheme)
+      exit(scheme, JSON.stringify({ ok: false, kind: "player.start", error: { code: "unsupported_scheme", message: "unsupported stream URL scheme 'rtmp'" }, id: X.id, seq: 1 }))
+      return [[busy.root.playRetries, busy.ids.playRetryTimer.restarts, slotVerb(busy), toasts(busy).length], said(scheme)]
+    }, [[1, 1, "start", 0], [null, ["74011 Stream failed | \u201cX\u201d did not play" + M.SEP + "Unsupported URL"], [X.id], ["mark:" + X.id], "Unsupported URL"]])
   }
 
   // ---- R21e (D-SINK-19 round 11): THE MIGRATION, through Service.qml ----

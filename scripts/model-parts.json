@@ -412,6 +412,11 @@
       "names": [
         "stopEscalation",
         "healthTick",
+        "PLAYER_BOUNDS",
+        "PLAYER_WATCHDOG_MARGIN_MS",
+        "PLAYER_BIRTH_EDGE_MS",
+        "playerLadderMs",
+        "playerWatchdogMs",
         "playFork",
         "playForkBlind",
         "zapArgs",

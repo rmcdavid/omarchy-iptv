@@ -73,7 +73,11 @@ Item {
   // ---- detached player timings (ARCHITECTURE-PLAYER.md 4.4, 4.7, spike C6)
   readonly property int playerSocketRetryMs: 250   // reattach tick
   readonly property int playerSocketTries: 12      // burst cap: 12 x 250 ms = 3 s (C6)
-  readonly property int playerTimeoutMs: 12 * 1000 // watchdog for one player verb
+  // D-PLY-35: the watchdog over the verb the player slot is running, derived
+  // from the helper's own bounds for THAT verb (Model.playerWatchdogMs says
+  // how); with no verb running, the same Timer bounds the birth edge, 12 s.
+  // It used to be one 12 s for every verb, under a start's own 14 s.
+  readonly property int playerTimeoutMs: Model.playerWatchdogMs(root.playerKind)
   // Watchdog for one `play` or `status` helper run. `controlProc` was the
   // only one of the four Processes without one, and it is the one that holds
   // the single control slot: a helper that never exits blocks every later
@@ -876,6 +880,15 @@ Item {
   // broken runtime folder gets one card, not ten. Cleared when a start
   // succeeds; a different reason is a new episode and is told.
   property string localFailureTold: ""
+  // D-PLY-35: set by playerWatchdog when it TERMs the helper, read once by
+  // handlePlayerResult. A start or restart the watchdog ended has answered
+  // nothing about the player: it may have spawned one and loaded the channel
+  // into it before the signal landed (measured).
+  property bool playerTimedOut: false
+  // D-PLY-35: a start the watchdog ended ({kind, intent}: its verb and the
+  // channel it was for) while the reattach probe finds out what it left;
+  // null otherwise. Settled by settleTimedOutPlay() on the probe's answer.
+  property var timedOutPlay: null
   // The channel of the most recent failure. The guide reads it to decide
   // whether an open is "come back after a dead stream" or a fresh start
   // (UX 1.3). Distinct from `failedAt`, which is every mark ever: this is
@@ -3212,6 +3225,8 @@ Item {
     playerWatchdog.stop()
     var kind = root.playerKind
     root.playerKind = ""
+    var timedOut = root.playerTimedOut
+    root.playerTimedOut = false
     if (kind === "probe") {
       root.applyProbe(text)
       root.drainPendingPlay()
@@ -3281,8 +3296,33 @@ Item {
       root.drainPendingPlay()
       return
     }
-    root.playerPending = false
     var code = status.error ? String(status.error.code) : ""
+    if (timedOut && code === "no_output") {
+      // D-PLY-35: no output because the watchdog stopped it, which is the
+      // S-05 shape the fetch slots already report (helperTimeoutStatus).
+      status = Model.parseHelperStatus(root.helperTimeoutStatus("player." + kind, false), "player." + kind)
+      code = "helper_timeout"
+    }
+    if (code === "helper_timeout" && root.nowPlaying !== null) {
+      // D-PLY-35. A start the watchdog ended has not refused anything: it
+      // may have spawned a player and loaded the channel before the signal
+      // landed, which is what dev did at 12 s -- the channel played on,
+      // unobserved, under a "Could not start playback" card. So nothing is
+      // told yet and the intent is kept: the socket hunt is armed and the
+      // reattach probe, the read a shell restart makes, finds what the start
+      // left. A player carrying this shell's stash is adopted; anything else
+      // ends in settleTimedOutPlay(false), told as the start's own failure.
+      // The intent alone gates it: a stop withdraws it (stop() clears
+      // `nowPlaying` and its own ladder ends whatever the start left), and a
+      // play after a stop is a new intent even while that stop settles.
+      console.warn("omarchy-iptv: player " + kind + " was stopped by its watchdog; looking for the player it may have left")
+      root.timedOutPlay = { kind: kind, intent: root.nowPlaying }
+      root.playerWanted = true
+      root.armPlayerSocket()
+      if (!root.runPlayerProbe()) root.settleTimedOutPlay(false)
+      return
+    }
+    root.playerPending = false
     var reason = Model.statusReason(status)
     if (code === "superseded") {
       // A later intent already won under the lock; this one never happened.
@@ -3371,6 +3411,9 @@ Item {
       // Garbage, a truncated line or an error reply is not evidence of a
       // player; the 10 s poll and the next play() both recover.
       root.playerPending = false
+      // D-PLY-35: and when this probe was looking for what a stopped start
+      // left, it has found nothing it can name, so that start fails here.
+      root.settleTimedOutPlay(false)
       return
     }
     // Ordering survives the restart, and an intent issued after this probe
@@ -3384,6 +3427,8 @@ Item {
       // the play they issued owns the outcome, and drainPendingPlay() is
       // about to deliver it.
       root.probeRetried = false
+      // D-PLY-35: and a stopped start's, whose player the newer one adopts.
+      root.timedOutPlay = null
       return
     }
     if (root.stopConfirmPending) {
@@ -3409,6 +3454,11 @@ Item {
       playerSocketTimer.stop()
       root.playerPending = false
       root.nowPlaying = null
+      // D-PLY-35: a stopped start that left no player failed, and is told.
+      if (root.timedOutPlay !== null) {
+        root.settleTimedOutPlay(false)
+        return
+      }
       // Nothing is playing and nothing claimed to have stopped it: if a
       // session record survived, that channel died unattended (PO-3).
       root.markDeadSession()
@@ -3493,6 +3543,8 @@ Item {
     playerWatchdog.restart()
     root.reconcileNowPlaying()
     root.reestablishForTls()
+    // D-PLY-35: a stopped start's player, found and adopted.
+    root.settleTimedOutPlay(true)
   }
 
   // D-SINK-16's second half: the player has been MIGRATED, and now the channel
@@ -3632,6 +3684,9 @@ Item {
     root.tlsReloadPending = false
     root.noteSessionOutcome(outcome)
     Quickshell.execDetached(Model.helperArgv(root.helperPath, Model.playerStopArgv(root.socketPath, root.playSeq)))
+    // D-PLY-35: when the reattach probe was looking for what a stopped start
+    // left, this is what it found, and that start failed.
+    root.settleTimedOutPlay(false)
     return true
   }
 
@@ -3807,6 +3862,48 @@ Item {
     root.notify("localPlayFailure", { name: String(target.name || ""), reason: reason })
   }
 
+  // D-PLY-35: the end of a start the watchdog stopped, once the reattach
+  // probe has said what it left (applyProbe). `found`: the probe adopted that
+  // player, which is the start delivered late, so it settles as an ok reply
+  // does -- the relaunch is spent, the retries and the local-failure episode
+  // end -- and nothing is told. If the player is on another channel (the
+  // start was stopped before it loaded its own), the intent is put back and
+  // sent again over the socket, ruling CL5's repair: the shell holds what the
+  // user asked for, and relabelling would hide the wrong channel. Otherwise
+  // nothing of this start's plays: the probe's own branch has stopped
+  // anything it could not adopt, and this ends the intent and tells the
+  // failure the start would have answered had it been let finish,
+  // `helper_timeout` ("Helper timed out"), which is local (D-PLY-32: it marks
+  // nothing). A no-op when no stopped start is waiting.
+  function settleTimedOutPlay(found) {
+    var pending = root.timedOutPlay
+    if (pending === null) return
+    root.timedOutPlay = null
+    var intent = pending.intent
+    if (found) {
+      root.relaunchPending = false
+      relaunchTimer.stop()
+      root.playRetries = 0
+      root.localFailureTold = ""
+      if (intent && root.nowPlaying && String(root.nowPlaying.id) !== String(intent.id)) {
+        console.log("omarchy-iptv: the stopped start left another channel on the player; re-applying the intent")
+        root.nowPlaying = intent
+        root.pendingPlayId = String(intent.id)
+      }
+      return
+    }
+    var kind = "player." + String(pending.kind || "start")
+    var reason = Model.statusReason(Model.parseHelperStatus(root.helperTimeoutStatus(kind, false), kind))
+    root.playerWanted = false
+    playerSocketTimer.stop()
+    root.playerPending = false
+    root.nowPlaying = null
+    root.playRetries = 0
+    if (!root.userStopped && !root.stopping) root.raiseLocalPlayFailure(intent, reason)
+    else root.lastError = reason
+    root.noteSessionOutcome("failed")
+  }
+
   // D-PLY-33 (owner, 2026-10-28): the player died and mpv never said the load
   // failed (Model.deathReport card "playerStopped"). Told, because a player
   // that vanished must never vanish in silence (F4), and in copy that blames
@@ -3876,6 +3973,10 @@ Item {
     root.stopConfirmPending = false     // the EOF is the confirmation
     root.pendingPlayId = ""
     root.playRetries = 0
+    // D-PLY-35: a stopped start whose player the socket reached has its end
+    // told here, as every death is; the probe's later "nothing there" must
+    // not tell it a second time.
+    root.timedOutPlay = null
     // M5-01: no player, no history, and no seek to deliver to it.
     root.clearRewind()
     root.healthSkips = 0
@@ -6068,12 +6169,17 @@ Item {
     // One bound for the player slot (F1): a helper verb that hangs is
     // terminated, and a `playerPending` that no socket ever confirmed is
     // released, so the birth edge can never latch the UI into "playing".
+    // D-PLY-35: the interval follows the verb in flight (playerTimeoutMs);
+    // runPlayer() sets `playerKind` before it restarts this, so each run is
+    // bounded by its own verb's worst case.
     id: playerWatchdog
     interval: root.playerTimeoutMs
     repeat: false
     onTriggered: {
       if (playerProc.running) {
         console.warn("omarchy-iptv: player helper exceeded " + Math.floor(root.playerTimeoutMs / 1000) + " s, terminating it")
+        // D-PLY-35: so its exit is read as stopped, not as a refusal.
+        root.playerTimedOut = true
         playerProc.signal(15)
         return
       }

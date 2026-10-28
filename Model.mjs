@@ -110,7 +110,8 @@ export {
   LOGO_FETCH_WATCHDOG_MS, logoSummaryNotice
 } from "./model/logos.mjs"
 export {
-  stopEscalation, healthTick, playFork, playForkBlind, zapArgs,
+  stopEscalation, healthTick, PLAYER_BOUNDS, PLAYER_WATCHDOG_MARGIN_MS,
+  PLAYER_BIRTH_EDGE_MS, playerWatchdogMs, playFork, playForkBlind, zapArgs,
   helperCannotTell, playFailureVerdict, playerStartFailure, replyTarget,
   reconcileVerdict, sessionIntentRepair, playerOrphanCheckArgv, playerStash,
   tlsPropertiesSafe, playerTls, tlsReloadDisposition, playerTlsVerdict,
