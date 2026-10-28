@@ -459,19 +459,21 @@ class FirstLoadReasonBoundTest(unittest.TestCase):
                               {"event": "end-file", "reason": "error", "playlist_entry_id": 4}])
         with mock.patch.object(helper, "FIRST_LOAD_REASON_MAX", 10):
             verdict = helper.observe_first_load(client, 4, 5.0)
-        self.assertEqual(verdict, {"state": "failed", "reason": "the server"})
+        # D-PLY-36: and the reply says it was an end-file (this one carries no
+        # file_error, so its fileError is empty).
+        self.assertEqual(verdict, {"state": "failed", "reason": "the server", "ended": "end-file", "fileError": ""})
 
     def test_a_closed_player_reason_is_cut_too(self):
         client = self.Client([{"event": "log-message", "level": "fatal", "text": "fatal words from the demuxer"}])
         with mock.patch.object(helper, "FIRST_LOAD_REASON_MAX", 5):
             verdict = helper.observe_first_load(client, 4, 5.0)
-        self.assertEqual(verdict, {"state": "failed", "reason": "fatal"})
+        self.assertEqual(verdict, {"state": "failed", "reason": "fatal", "ended": "closed"})
 
     def test_an_ordinary_reason_is_untouched(self):
         client = self.Client([{"event": "log-message", "level": "error", "text": "HTTP error 403 Forbidden"},
                               {"event": "end-file", "reason": "error", "playlist_entry_id": 4}])
         verdict = helper.observe_first_load(client, 4, 5.0)
-        self.assertEqual(verdict, {"state": "failed", "reason": "HTTP error 403 Forbidden"})
+        self.assertEqual(verdict, {"state": "failed", "reason": "HTTP error 403 Forbidden", "ended": "end-file", "fileError": ""})
 
 
 class InternalErrorBoundTest(unittest.TestCase):

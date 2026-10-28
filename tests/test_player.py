@@ -230,6 +230,12 @@ def _handle(conn):
                 events.append({"event": "start-file", "playlist_entry_id": state["entry"]})
                 if load == "ok":
                     events.append({"event": "file-loaded"})
+                elif load == "crash":
+                    # D-PLY-36: the player dies inside the first-load window
+                    # with no end-file (a crash, a kill, a VO abort): a log
+                    # line, then the connection simply closes.
+                    events.append({"event": "log-message", "prefix": "vo/gpu", "level": "error",
+                                   "text": "Error: could not create a GL context\\n"})
                 else:
                     events.append({"event": "log-message", "prefix": "stream", "level": "error",
                                    "text": "Failed to open %s.\\n" % state["url"]})
@@ -245,6 +251,9 @@ def _handle(conn):
             if load == "fail" and name == "loadfile":
                 time.sleep(0.05)
                 orderly_exit(2)      # --idle=once exits when the playlist ends
+            if load == "crash" and name == "loadfile":
+                time.sleep(0.05)
+                os._exit(134)        # no orderly anything: the connection just ends
 
 
 while True:
@@ -595,6 +604,27 @@ class StartTest(PlayerTestCase):
         self.assertIn("provider.test", payload["firstLoad"]["reason"])
         for secret in (PASSWORD, TOKEN, "/live/"):
             self.assertNotIn(secret, json.dumps(payload), secret)
+
+    def test_d_ply_36_a_failed_first_load_says_which_ending_it_saw(self):
+        """D-PLY-36 (2026-10-28): the reply's `firstLoad` says WHICH ending
+        the window saw, so the shell can mark a stream mpv said failed and not
+        a player that died. An end-file error for the start's entry is
+        `ended` "end-file" with mpv's own file_error beside it; the player
+        closing the connection with no end-file is `ended` "closed". Before
+        D-PLY-36 both read `{state: "failed", reason}` and nothing more. The
+        model's reading of both is tests/fixtures/player-endings.json."""
+        self.env(STUB_MPV_LOAD="fail")
+        code, payload, _, stderr = self.player_start("--first-load-timeout", "3")
+        self.assertEqual(code, 0, stderr)
+        first = payload["firstLoad"]
+        self.assertEqual([first["state"], first.get("ended"), first.get("fileError")], ["failed", "end-file", "loading failed"])
+        run("player", "stop", "--socket", self.sock, "--seq", "9", "--ipc-timeout", "1")
+        self.env(STUB_MPV_LOAD="crash")
+        code, payload, _, stderr = self.player_start("--seq", "10", "--first-load-timeout", "3")
+        self.assertEqual(code, 0, stderr)
+        first = payload["firstLoad"]
+        self.assertEqual([first["state"], first.get("ended"), "fileError" in first], ["failed", "closed", False])
+        self.assertEqual(first["reason"], "Error: could not create a GL context")
 
     def test_user_mpv_args_are_filtered_and_reported(self):
         code, payload, _, stderr = self.player_start(
