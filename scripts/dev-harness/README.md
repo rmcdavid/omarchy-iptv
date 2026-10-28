@@ -1150,7 +1150,7 @@ scripts/dev-harness/key-scenario.sh --baseline lane-key-r2  # the red run: the t
 scripts/dev-harness/key-scenario.sh --baseline f275bde      # the earlier red run: the first build (39 / 25; O2 its one discriminator)
 scripts/dev-harness/key-scenario.sh --tree "$cp"            # a PREPARED export: spikes/key-mutations/README.md has the recipe
 scripts/dev-harness/key-scenario.sh --only A,B19            # a PARTIAL run (F-HARNESS-49): the instrument arm, A1, A2, B19, then P1, P2, T1 -- about 40 s, never a release count
-scripts/dev-harness/key-scenario.sh --baseline cc35557 --only PRUNE  # the start-up prune race's rig (D-SRC-69), no check: what the start-up prune leaves of an add made before the dirs are ready
+scripts/dev-harness/key-scenario.sh --baseline cc35557 --only PRUNE  # B41 alone (D-SRC-69): an add made before the dirs are ready, after the start-up prune -- red there (`cache:gone channels:0`), green on the fix
 ```
 
 D-SINK-19 takes the provider URL off the host's bar entry: the entry
@@ -2075,6 +2075,58 @@ P1, P2, T1, about 40 s; its floor is the blocks' own and its summary says
 Counts, the summary line's: two full runs on e3fcb6f 138 / 0 (591.9 s and
 590.8 s, load 3.2 and 2.6 at the start, nothing else of the lane's
 running, the coredump journal +0 each); `--only PRUNE,A,B19` 18 / 0.
+
+#### D-SRC-69 (2026-10-27): the PRUNE rig is B41
+
+The fix decides a prune's keep list when the prune RUNS (the records and
+the active key of that moment, plus the folder of a probe not yet
+handled), holds a probe asked for while a prune that does not keep its
+folder is running, and drops a queued removal of a folder a later probe
+started into. So the rig became a check, B41, in every full run and in
+`--only PRUNE`: the add commits with the dirs NOT ready -- its premise,
+read in the same line (`committed active:D dirsReady:false cache:kept
+channels:11`), so a run that never staged the race is red for that --
+and after the start-up prune the added, active source still has its
+record, its cache and its channels (`after active:D record:true
+cache:kept channels:11`). The live floor is 138; a green full run reads
+139 / 0. tests/test_key_scenario_only.py pins PRUNE as a counted block
+holding B41 alone.
+
+Counts, the summary line's, all under `private-bus.sh` with
+`env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE`, one cage at a time:
+
+| run | tree | result | time | load start / end |
+|---|---|---|---|---|
+| `--only PRUNE` | lane tree c2eefa8 | 16 / 0 | 14.2 s | 2.53 / 2.93 |
+| `--only PRUNE,A` | lane tree c2eefa8 | 18 / 0 | 28.5 s | 2.33 / 2.65 |
+| `--only PRUNE --baseline b5da837` | dev | 15 / 1, B41 `cache:gone channels:0` | 14.2 s | 2.55 / 2.43 |
+| `--only PRUNE --baseline cc35557` | 0.15.0 | 15 / 1, B41 `cache:gone channels:0` | 14.1 s | 2.43 / 2.49 |
+| full | lane tree c2eefa8 | 139 / 0 | 602.0 s | 2.79 / 3.14 |
+
+The transcripts' tree line reads c2eefa8: the lane's third commit before a
+message-only rebuild, the same tree as ef08a06. The coredump journal
+(MESSAGE_ID fc2e22bc6ee647b6b90729ab34a250b1) read +0 across every run; the load is the machine's own background, nothing
+else of the lane's running. The transcripts are in the lane's session
+scratch directory, not the tree.
+
+The recheck (same day) found B41's green unable to say the prune had run:
+a cache that survives is also what a prune that never runs leaves, and on
+a prepared tree whose `queuePrune` does nothing B41 read 16 / 0. So the
+segment lays an orphan folder (B's key, no record names it) beside the
+seed and reads it in the same line; `orphan:pruned` is the start-up prune
+having run with a list that is not "keep everything". The want is now
+`after active:D record:true orphan:pruned cache:kept channels:11`. Its
+runs, the same recipe:
+
+| run | tree | result | time | load start / end |
+|---|---|---|---|---|
+| `--only PRUNE --tree <no queuePrune>` | before the orphan | 16 / 0 (the gap) | 13.8 s | 2.27 / 2.46 |
+| `--only PRUNE --tree <no queuePrune>` | with the orphan | 15 / 1, B41 `orphan:kept cache:kept channels:11` | 14.0 s | 2.14 / 2.59 |
+| `--only PRUNE --baseline cc35557` | 0.15.0 | 15 / 1, B41 `orphan:pruned cache:gone channels:0` | 14.2 s | 2.63 / 2.76 |
+| `--only PRUNE,A` | the recheck's tree | 18 / 0 | 29.0 s | 2.70 / 3.45 |
+| full | 3a14acc | 139 / 0 | 602.1 s | 2.86 / 3.15 |
+
+The coredump journal read +0 across these runs too.
 
 ### The open, measured with its delegates (D-PERF-1, R27f; R28d)
 

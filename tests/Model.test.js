@@ -13031,6 +13031,193 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     return { atStart, afterSwitch, afterRemoval, activeDir: next.root.activeCacheDir === "" ? "" : "set" }
   }, { atStart: [KA], afterSwitch: [KA, KB], afterRemoval: [KA, KB], activeDir: "" })
 
+  // ---- D-SRC-69 (2026-10-27): what a cache job deletes is decided when it RUNS ----
+  //
+  // The start-up `cache prune` is queued at cacheReady and run at dirsReady;
+  // its keep list used to be the records of the first moment, so an add made
+  // between the two lost its folder -- mid-write (the add dropped, the user
+  // told an exception) or after its commit (the added, ACTIVE source with 0
+  // channels for the session). key-scenario B41 observes the same live. Each
+  // of these runs Service.qml's own functions; `dirsLater` holds the
+  // start-up init, so cacheReady has come and dirsReady has not.
+  const OK5 = JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })
+  const FAIL404 = JSON.stringify({ ok: false, kind: "playlist", error: { code: "http_404", message: "HTTP 404 from new.example.test" } })
+  const prunes = h => h.cacheRuns.filter(c => c[5] === "prune")
+  const keepsOf = c => { const out = []; for (let i = c.indexOf("--keep") + 1; i > 0 && i < c.length && c[i].indexOf("--") !== 0; i++) out.push(c[i]); return out }
+  const activeOf = c => c.indexOf("--active") === -1 ? "" : c[c.indexOf("--active") + 1]
+  const removed = h => h.cacheRuns.filter(c => c[5] === "remove").map(c => c[c.indexOf("--key") + 1])
+  const keyName = k => ({ [KA]: "A", [KB]: "B", [KNEW]: "NEW", "": "-" })[k] || k
+  const named = keys => keys.map(keyName)
+  const add = h => h.root.addSource({ playlistUrl: NEW, epgUrl: "", label: "" })
+  const finished = h => h.signals.filter(s => s[0] === "sourceProbeFinished").map(s => [s[1].ok, s[1].cancelled === true, s[1].reason])
+
+  checkCall("D-SRC-69: Model.pruneArgs -- the state's record keys, then every key of the probe in flight not already there (a non-key ignored), the active key, the EPG age; a removed record is simply absent; the age left to the helper when it is not a number", () => {
+    const st = M.parseState(migratedText([rec(A), rec(B)], KA))
+    return [M.pruneArgs(st, KA, [KNEW, KA, "../x", ""], 86400),
+            M.pruneArgs(M.removeSource(st, KB).state, KA, [], 86400),
+            M.pruneArgs(st, "", null, undefined),
+            M.pruneArgs(null, null, null, null),
+            M.pruneArgs(st, KA, [], "soon")]
+  }, [["prune", "--keep", KA, KB, KNEW, "--active", KA, "--epg-max-age", "86400"],
+      ["prune", "--keep", KA, "--active", KA, "--epg-max-age", "86400"],
+      ["prune", "--keep", KA, KB],
+      ["prune", "--keep"],
+      ["prune", "--keep", KA, KB, "--active", KA]])
+  checkCall("D-SRC-69: Model.cacheJobArgs -- a queued prune is built at run time; a removal is dropped while a probe writes its key or once a probe started into it AFTER it was asked for, and runs for a claim made before or by its own probe; every other job runs as queued", () => {
+    const st = M.parseState(migratedText([rec(A)], KA))
+    const ctx = (o) => Object.assign({ state: st, activeKey: KA, inFlight: [], claims: {}, epgMaxAgeSec: 86400 }, o || {})
+    const rm = (seq) => ({ args: ["remove", "--key", KNEW], seq })
+    const claims = { [KNEW]: 4 }
+    return [M.cacheJobArgs({ args: ["prune"], seq: 0 }, ctx({ inFlight: [KNEW] })),
+            M.cacheJobArgs(rm(1), ctx({ inFlight: [KNEW] })),
+            M.cacheJobArgs(rm(3), ctx({ claims })),
+            M.cacheJobArgs(rm(4), ctx({ claims })),
+            M.cacheJobArgs(rm(5), ctx({ claims })),
+            M.cacheJobArgs(rm(undefined), ctx({ claims: {} })),
+            M.cacheJobArgs({ args: ["remove", "--key", KB], seq: 1 }, ctx({ inFlight: [KNEW], claims })),
+            M.cacheJobArgs({ args: ["epg-clear", "--key", KNEW], seq: 1 }, ctx({ inFlight: [KNEW], claims })),
+            M.cacheJobArgs({ args: ["migrate", "--key", KA] }, null),
+            M.cacheJobArgs(null, null)]
+  }, [["prune", "--keep", KA, KNEW, "--active", KA, "--epg-max-age", "86400"],
+      null, null, ["remove", "--key", KNEW], ["remove", "--key", KNEW], ["remove", "--key", KNEW],
+      ["remove", "--key", KB], ["epg-clear", "--key", KNEW], ["migrate", "--key", KA], []])
+  checkCall("D-SRC-69: Model.probeWaitsFor -- the other order: a running prune that does not keep the probe's folder, or a removal of that very key, holds the probe; a prune that keeps it (listed or active), another key's removal, epg-clear, migrate and nothing running do not", () => {
+    const prune = M.pruneArgs(M.parseState(migratedText([rec(A)], KA)), KB, [], 86400)
+    return [M.probeWaitsFor(prune, KNEW), M.probeWaitsFor(prune, KA), M.probeWaitsFor(prune, KB),
+            M.probeWaitsFor(["prune", "--keep"], KNEW), M.probeWaitsFor(["remove", "--key", KNEW], KNEW), M.probeWaitsFor(["remove", "--key", KA], KNEW),
+            M.probeWaitsFor(["epg-clear", "--key", KNEW], KNEW), M.probeWaitsFor(["migrate", "--key", KNEW], KNEW), M.probeWaitsFor(null, KNEW), M.probeWaitsFor(prune, "")]
+  }, [true, false, false, true, true, false, false, false, false, false])
+  checkCall("D-SRC-69 (B): Model.statusReason -- `internal` (the helper's catch-all for a bug) and `cache_unwritable` (a fetch that could not write its cache) are sentences; the exception's text, with its path, is never the reason", () => {
+    const internal = { ok: false, kind: "playlist", error: { code: "internal", message: "FileNotFoundError: [Errno 2] No such file or directory: '/run/user/1000/c/sources/" + KNEW + "/.tmp-channels.json-ab12cd34'" } }
+    const unwritable = { ok: false, kind: "playlist", error: { code: "cache_unwritable", message: "could not write channels.json in the source's cache folder (No such file or directory)" } }
+    return [M.statusReason(internal), M.statusReason(unwritable), M.statusReason(Object.assign({}, internal, { kind: "epg" })),
+            M.lastErrorAfterStatus("", "", internal)]
+  }, ["Helper failed unexpectedly", "Could not write the cache", "Helper failed unexpectedly", "Helper failed unexpectedly"])
+
+  checkCall("D-SRC-69: an add made between cacheReady and dirsReady whose probe COMMITS before the dirs are ready -- the start-up prune, run at dirsReady, keeps the new record's folder and names it active; nothing removes it", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), "lag", { dirsLater: true })
+    const before = [h.root.cacheReady, h.root.dirsReady, prunes(h).length, h.root.cacheQueue.length]
+    const ok = add(h).ok
+    h.probeExit(OK5); h.drain()
+    const committed = [h.root.activeSourceKey === KNEW, prunes(h).length]
+    h.initExit(); h.drain()
+    return { before, ok, committed, keeps: prunes(h).map(c => named(keepsOf(c))), actives: prunes(h).map(c => keyName(activeOf(c))), removed: named(removed(h)) }
+  }, { before: [true, false, 0, 1], ok: true, committed: [true, 0], keeps: [["A", "B", "NEW"], ["A", "B", "NEW"]], actives: ["NEW", "NEW"], removed: [] })
+
+  checkCall("D-SRC-69: an add whose probe is still IN FLIGHT when the dirs become ready -- the start-up prune keeps the folder the probe is writing (not yet a record, SR23), and the add then commits with it", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), "lag", { dirsLater: true })
+    const ok = add(h).ok
+    h.initExit(); h.drain()
+    const atDirs = prunes(h).map(c => named(keepsOf(c)))
+    const records = h.root.userState.sources.map(s => name(s.url))
+    h.probeExit(OK5); h.drain()
+    return { ok, atDirs, recordsWhileProbing: records, active: name(h.root.userState.sources.find(s => s.key === h.root.activeSourceKey).url), removed: named(removed(h)) }
+  }, { ok: true, atDirs: [["A", "B", "NEW"]], recordsWhileProbing: ["A", "B"], active: "NEW", removed: [] })
+
+  checkCall("D-SRC-69: a record REMOVED between cacheReady and dirsReady is pruned by the start-up prune -- the list is the state's when it runs, not every key ever named -- and its own removal runs", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), "lag", { dirsLater: true })
+    const r = h.root.removeSource(KB)
+    h.initExit(); h.drain()
+    return { ok: r.ok, keeps: prunes(h).map(c => named(keepsOf(c))), actives: prunes(h).map(c => keyName(activeOf(c))), removed: named(removed(h)) }
+  }, { ok: true, keeps: [["A"]], actives: ["A"], removed: ["B"] })
+
+  checkCall("D-SRC-69 / D-LOGO-20: a switch prune decided while a probe is in flight keeps the probe's folder; and the other order -- an add asked for while a prune that does not keep its folder RUNS is HELD (probing, no helper) until that prune exits, then starts, and the next prune is decided with it in flight", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), "lag")
+    h.cacheHang = true
+    sw(h, KB); h.drain()                       // its prune runs, and has not exited
+    sw(h, KA); h.drain()                       // a second prune queued behind it
+    const ok = add(h).ok
+    const whileRunning = { probing: h.root.probing, helper: h.ids.sourceProbeProc.running, probingId: keyName(h.root.probingId), canAdd: h.root.canAddSource }
+    const runsBefore = h.cacheRuns.length
+    h.cacheExit()                              // the first switch prune exits
+    const afterExit = { helper: h.ids.sourceProbeProc.running, nextDecided: h.cacheRuns.length - runsBefore, nextKeeps: named(keepsOf(h.cacheRuns[h.cacheRuns.length - 1])), nextActive: keyName(activeOf(h.cacheRuns[h.cacheRuns.length - 1])) }
+    h.cacheHang = false
+    h.cacheExit()
+    h.probeExit(OK5); h.drain(); h.root.finishSwitch()
+    return { ok, whileRunning, afterExit, active: h.root.activeSourceKey === KNEW, removed: named(removed(h)) }
+  }, { ok: true, whileRunning: { probing: true, helper: false, probingId: "NEW", canAdd: false },
+       afterExit: { helper: true, nextDecided: 1, nextKeeps: ["A", "B", "NEW"], nextActive: "A" }, active: true, removed: [] })
+
+  checkCall("D-SRC-69: a probe asked for while a prune that KEEPS its folder runs (a never-fetched record's switch) or while an unrelated job runs is not held; one asked for while a removal of its OWN key runs is", () => {
+    const unfetched = rec(B, { fetchedAt: 0, channelCount: -1, groupCount: 0 })
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), unfetched], KA), "lag")
+    h.cacheHang = true
+    h.root.queuePrune(); h.drain()             // a prune keeping A and B, running
+    const sw1 = h.root.switchSource(KB)
+    const keptPrune = [sw1.ok, h.ids.sourceProbeProc.running]
+    h.root.cancelProbe(); h.probeExit(""); h.drain()
+    h.cacheHang = false; while (h.cacheExit()) {} h.drain()
+    const h2 = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    h2.cacheHang = true
+    h2.root.queueCacheJob(["remove", "--key", KNEW], null); h2.drain()
+    const addOwn = add(h2).ok
+    const ownKey = [addOwn, h2.ids.sourceProbeProc.running, h2.root.probing]
+    h2.cacheHang = false; h2.cacheExit()
+    const released = h2.ids.sourceProbeProc.running
+    const h3 = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    h3.cacheHang = true
+    h3.root.queueCacheJob(["epg-clear", "--key", KA], null); h3.drain()
+    const other = [add(h3).ok, h3.ids.sourceProbeProc.running]
+    return { keptPrune, ownKey, released, other }
+  }, { keptPrune: [true, true], ownKey: [true, false, true], released: true, other: [true, true] })
+
+  checkCall("D-SRC-69 (SR7 unchanged): a cancelled add's folder is still removed -- the running probe's and the HELD one's, which has no helper to stop and finishes as cancelled at once", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    add(h)
+    h.root.cancelProbe()
+    const signalled = h.ids.sourceProbeProc.signals.slice()
+    h.probeExit(""); h.drain()
+    const running = { signalled, finished: finished(h), removed: named(removed(h)) }
+    const g = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    g.cacheHang = true
+    g.root.queuePrune(); g.drain()
+    add(g)
+    const c = g.root.cancelProbe()
+    const atCancel = { ok: c.ok, signalled: g.ids.sourceProbeProc.signals.slice(), probing: g.root.probing, finished: finished(g) }
+    g.cacheHang = false; while (g.cacheExit()) {} g.drain()
+    return { running, held: Object.assign(atCancel, { removed: named(removed(g)), helperEverRan: g.ids.sourceProbeProc.running }) }
+  }, { running: { signalled: [15], finished: [[false, true, ""]], removed: ["NEW"] },
+       held: { ok: true, signalled: [], probing: false, finished: [[false, true, ""]], removed: ["NEW"], helperEverRan: false } })
+
+  checkCall("D-SRC-69: a FAILED add's removal, still queued (the dirs not ready), is dropped once the same add is submitted again -- the folder is the new probe's, in flight or committed -- and a failure's own removal still runs when nothing came after it", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag", { dirsLater: true })
+    add(h); h.probeExit(FAIL404); h.drain()
+    add(h)                                     // the retry is the same submit (SR23)
+    h.initExit(); h.drain()                    // the removal comes due with the retry in flight
+    const inFlight = named(removed(h))
+    h.probeExit(OK5); h.drain()
+    const g = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag", { dirsLater: true })
+    add(g); g.probeExit(FAIL404); g.drain()
+    add(g); g.probeExit(OK5); g.drain()        // the retry COMMITS before the dirs are ready
+    g.initExit(); g.drain()
+    const committed = { removed: named(removed(g)), active: g.root.activeSourceKey === KNEW, keeps: prunes(g).map(c => named(keepsOf(c))) }
+    const f = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag", { dirsLater: true })
+    add(f); f.probeExit(FAIL404); f.drain()
+    f.initExit(); f.drain()
+    return { inFlight, retried: h.root.activeSourceKey === KNEW, committed, alone: named(removed(f)), reason: finished(f)[0][2] }
+  }, { inFlight: [], retried: true, committed: { removed: [], active: true, keeps: [["A", "NEW"], ["A", "NEW"]] }, alone: ["NEW"], reason: "HTTP 404 Not Found" })
+
+  checkCall("D-SRC-69: a probe held behind a cache job that never exits fails as a timeout at the probe's own bound, with no helper ever started and its folder's removal queued", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    h.cacheHang = true
+    h.root.queueCacheJob(["remove", "--key", KNEW], null); h.drain()
+    add(h)
+    const ms = h.ids.probeWatchdog.interval
+    h.elapse(ms - 1)
+    const early = [h.root.probing, finished(h).length]
+    h.elapse(1)
+    return { early, after: [h.root.probing, h.ids.sourceProbeProc.running], finished: finished(h), queued: h.root.cacheQueue.map(j => j.args.join(" ")) }
+  }, { early: [true, 0], after: [false, false], finished: [[false, false, "Helper timed out"]], queued: ["remove --key " + KNEW] })
+
+  checkCall("D-SRC-69 (B): a probe the helper answered with `internal` -- a bug, its message an exception -- reports one sentence on the result line, never the exception's text or its path", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    add(h)
+    h.probeExit(JSON.stringify({ ok: false, kind: "playlist", error: { code: "internal", message: "FileNotFoundError: [Errno 2] No such file or directory: '/run/user/1000/x/cache/omarchy-iptv/sources/" + KNEW + "/.tmp-channels.json-ab12cd34' -> '/run/user/1000/x/channels.json'" } }))
+    h.drain()
+    const reason = finished(h)[0][2]
+    return [reason, /Error|Errno|\/run\/|tmp-/.test(reason)]
+  }, ["Helper failed unexpectedly", false])
+
   // ---- R21e (D-SINK-19 round 11): THE MIGRATION, through Service.qml ----
   //
   // Every pin here runs the shipping functions over a 0.13.5-shaped install:

@@ -4117,6 +4117,53 @@ Performance budget (10k channels):
     (`staleTemps` in its summary), and `cache prune` sweeps the folders of
     kept sources that are not active.
 
+    **What a prune keeps is decided when it RUNS (D-SRC-69, 2026-10-27).**
+    The prune is queued at the start (`schedulePrune`, at cacheReady) and
+    at every switch, and it runs when `cacheProc` is free and the dirs are
+    ready (`runNextCacheJob`); until 0.15.0 its `--keep` list was the
+    records of the moment it was QUEUED. The start-up one is queued at
+    cacheReady and run at dirsReady, normally 0.1-0.5 s later, and an
+    in-app add made in that window probed into `sources/<new key>`, which
+    no record names until the probe succeeds (SR23): the prune removed it.
+    Mid-write the add was dropped and the user was told the helper's
+    exception (`FileNotFoundError: ... .tmp-channels.json-<hex> -> ...`);
+    once written, the added, ACTIVE source kept its record and showed 0
+    channels for the rest of the session. Present from f138740
+    (2026-09-13). Now a prune is queued as `["prune"]` and given its list
+    at run time by `Model.pruneArgs`: every record of the state THEN, the
+    active key THEN, and the folder of the probe not yet handled
+    (`probeDirKey`, and `probingKey` for an edit). A record removed before
+    the prune runs is pruned; the list is the state's, not every key ever
+    named. **What a probe in flight is guaranteed:** no cache job removes
+    the folder it writes into, whichever starts first. A prune or removal
+    decided while the probe is in flight names it (kept, or the removal
+    dropped, `Model.cacheJobArgs`); a probe asked for while a job decided
+    BEFORE it runs, and able to take its folder -- a prune that does not
+    keep it, a removal of that key (`Model.probeWaitsFor`) -- is HELD:
+    `probing` reads true, the helper starts at that job's exit, and the
+    probe's own watchdog bounds the wait (a job that never exits fails the
+    probe as a timeout). The removals other code asks for are judged at run
+    time too: a `cache remove --key K` queued before a later probe started
+    into K (a failed or cancelled add submitted again, a source removed and
+    added back, inside the start-up window or behind a running job) is
+    dropped, because the folder is that probe's now -- each job carries the
+    probe count it was queued at (`sourceProbeSeq`) and each key the count
+    of the last probe that started into it (`sourceProbeClaims`). A
+    removal asked for by a probe's own exit (SR7's cancel, SR23's failure)
+    still runs. The other writers into `sources/<key>` -- the playlist and
+    guide fetches and the logo run -- write only the ACTIVE source's
+    folder, which every prune keeps, and `cache migrate` runs before
+    cacheReady, when no probe can start. And a fetch whose own cache file
+    cannot be written now answers `cache_unwritable` with one sentence
+    (`playlist`; the guide fetch and the logo run still answer `internal`
+    for that, which the model maps to `Helper failed unexpectedly`
+    wherever a reason is shown). Pinned through `tests/service-harness.js`
+    (the start-up window both ways, a removal before the prune, the switch
+    prune and the held probe, SR7's cancel, the removal dropped, the held
+    probe's timeout), `tests/test_cache.py` (the helper's own `cache_prune`
+    run between the temporary file and its rename) and key-scenario B41,
+    live.
+
     **The one line the shell writes (R30c).** A run that stopped at the
     ceiling or at its deadline, or found the folder busy, exits 0, and its
     counted stderr line went to a Process with no stderr reader. The

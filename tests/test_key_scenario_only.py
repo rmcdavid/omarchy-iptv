@@ -4,9 +4,11 @@ before the flag existed, and a partial run can never be read as a full one.
 
 `--only A,B19` runs the instrument arm, the named shell-arm blocks, then P1,
 P2 and T1. It exists because A2 and B19 went red on 2026-10-27 and a full
-live run costs about ten minutes a sample. `PRUNE` is a rig (no check) that
-only `--only` runs. What can go wrong with such a flag is exactly what these
-cases pin:
+live run costs about ten minutes a sample. `PRUNE` was a rig (no check) that
+only `--only` ran; since D-SRC-69 was fixed it holds B41 and runs in every
+full run like A and B19 (pinned below: a check that only an opt-in flag
+reaches is a check no release run counts). What can go wrong with such a
+flag is exactly what these cases pin:
 
   * a block a full run used to execute is skipped when the flag is ABSENT
     (the count would drop and the floor catch it -- but only on a live run;
@@ -110,6 +112,17 @@ class OnlyIsNarrowAndAFullRunIsWhole(unittest.TestCase):
         self.assertEqual(table, found)
         self.assertEqual(table.get("A"), 2)
         self.assertEqual(table.get("B19"), 1)
+        self.assertEqual(table.get("PRUNE"), 1)
+
+    def test_prune_is_a_counted_block_of_every_full_run(self):
+        # D-SRC-69 (2026-10-27): the rig became B41. It must be a `seg` block
+        # (true when --only is absent), hold B41 and nothing else, and no
+        # opt-in block may be left holding it.
+        kinds = {(k, n): lines for k, n, lines in blocks(text())}
+        self.assertNotIn(("optin", "PRUNE"), kinds)
+        self.assertIn(("seg", "PRUNE"), kinds)
+        cks = [re.match(r'^ *ck "([A-Z][0-9]+)', l).group(1) for l in kinds[("seg", "PRUNE")] if CK.match(l)]
+        self.assertEqual(cks, ["B41"])
 
     def test_a_full_run_counts_what_the_floor_says(self):
         # The floor's own recipe (qa-lib-test.sh joins it too): every lettered

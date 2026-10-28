@@ -288,6 +288,20 @@ Item {
   property bool probeTimedOut: false
   property var probeAdd: null                          // pending record of an add probe (recorded only when it succeeds, SR23)
   property var probeEdit: null                         // pending replacement record of a URL edit (applied only when its probe succeeds, SR7)
+  // D-SRC-69 (2026-10-27). A probe asked for while a cache job that could
+  // take its folder RUNS (Model.probeWaitsFor: a prune that does not keep
+  // it, a removal of that key) is HELD: probingKey and the rest are set and
+  // `probing` reads true, but the helper starts only at that job's exit
+  // (handleCacheExit -> launchProbe); every job decided meanwhile counts it
+  // in flight (cacheJobContext).
+  property bool probeHeld: false
+  // D-SRC-69: probes started this session, and per key the count of the
+  // LAST one that started writing into sources/<key>. A cache job carries
+  // the count it was queued at, so a removal can tell a folder it was asked
+  // to take from one a later probe has started filling (Model.cacheJobArgs).
+  // Keys only, memory only.
+  property int sourceProbeSeq: 0
+  property var sourceProbeClaims: ({})
   property var sourceErrors: ({})                      // session-only { key: reason }, URL-free (Model.statusReason)
   // D16 / SR8: the validation result when the `playlistUrl` INPUT is set but
   // invalid. Since R21 an input exists only during the migration, so this is
@@ -321,7 +335,7 @@ Item {
   // reasons only, never a value. The harness reads it through pointerState
   // to count the reports; the user reads the notification and the console.
   property var entryInputReports: []
-  property var cacheQueue: []                          // FIFO of { args, onDone } for cacheProc (section 4.7)
+  property var cacheQueue: []                          // FIFO of { args, onDone, seq } for cacheProc (section 4.7); a prune's args are ["prune"] until it runs (D-SRC-69)
   property var cacheJob: null
   // R25a (D-SINK-19 round 15, D-SRC-30): the texts asked for since the last
   // save that LANDED -- an echo is only a text still in flight. stateFile's
@@ -341,7 +355,7 @@ Item {
   // simply never matches again.
   property var preparedLru: []
   readonly property int preparedLruSize: 2
-  readonly property bool probing: sourceProbeProc.running
+  readonly property bool probing: sourceProbeProc.running || root.probeHeld
   readonly property string probingId: probingKey
   // D-SINK-19. From the state, not by matching a URL. Model.activeKeyOf
   // resolves a key that names no record to "", so an evicted source, a CLI
@@ -2122,7 +2136,10 @@ Item {
     var key = root.probingKey
     root.probeCancelled = true
     probeWatchdog.stop()
-    sourceProbeProc.signal(15)
+    // D-SRC-69: a probe still held behind a cache job has no process to
+    // signal; it ends here, as a cancel, through the same exit path.
+    if (root.probeHeld) root.handleProbeExit("")
+    else sourceProbeProc.signal(15)
     return root.sourceResult(true, "ok", "", key)
   }
 
@@ -4696,7 +4713,7 @@ Item {
   // retry, `commit` whether success writes the settings.
   function startProbe(key, dirKey, mode, commit) {
     var rec = root.probeRecord(mode, key)
-    if (!rec || sourceProbeProc.running) {
+    if (!rec || root.probing) {
       root.probeAdd = null
       root.probeEdit = null
       if (!rec) return root.sourceResult(false, "unknown_source", Model.sourceErrorMessage("unknown_source"), key)
@@ -4709,6 +4726,36 @@ Item {
     root.probeCancelled = false
     root.probeTimedOut = false
     root.sourceErrors = root.withoutKey(root.sourceErrors, key)
+    // D-SRC-69: this probe's claim on its folder, counted before any cache
+    // job can be decided again, so a removal queued earlier for this key
+    // knows the folder is the probe's now (Model.cacheJobArgs).
+    root.sourceProbeSeq += 1
+    root.sourceProbeClaims = root.withKey(root.sourceProbeClaims, dirKey, root.sourceProbeSeq)
+    // D-SRC-69, the other order: a running cache job decided before this
+    // probe existed and able to take its folder -- the helper is still
+    // starting, or has listed sources/ and not reached it -- is waited for.
+    // Its exit starts the probe (handleCacheExit). The watchdog bounds the
+    // wait too: a job that never exits fails the probe as a timeout.
+    if (cacheProc.running && root.cacheJob && Model.probeWaitsFor(root.cacheJob.args, dirKey)) {
+      root.probeHeld = true
+      probeWatchdog.restart()
+      return root.sourceResult(true, "ok", "", key)
+    }
+    root.launchProbe()
+    return root.sourceResult(true, "ok", "", key)
+  }
+
+  // The helper run of the probe startProbe set up (at once, or at the exit
+  // of the cache job it was held behind). A record that went away while it
+  // was held ends the probe as the record-less one it is.
+  function launchProbe() {
+    root.probeHeld = false
+    var rec = root.probeRecord(root.probeMode, root.probingKey)
+    if (!rec) {
+      root.handleProbeExit("")
+      return
+    }
+    var dirKey = root.probeDirKey
     // D-ID-1: NO `--state-dir` here, deliberately, and this absence is
     // load-bearing rather than an oversight. A probe runs for every source
     // add, edit, switch and re-check, including ones the user then cancels.
@@ -4723,7 +4770,6 @@ Item {
     sourceProbeProc.environment = Model.fetchEnvironment(rec.url)
     sourceProbeProc.running = true
     probeWatchdog.restart()
-    return root.sourceResult(true, "ok", "", key)
   }
 
   function handleProbeExit(text) {
@@ -4735,6 +4781,7 @@ Item {
     var cancelled = root.probeCancelled
     var timedOut = root.probeTimedOut
     var pending = mode === "add" ? root.probeAdd : (mode === "edit" ? root.probeEdit : null)
+    root.probeHeld = false
     root.probingKey = ""
     root.probeDirKey = ""
     root.probeMode = ""
@@ -5099,32 +5146,58 @@ Item {
   // restart: a session that switched through fifty sources with logos on
   // used to keep all fifty folders until the next start. Keys only; the
   // helper skips a folder a running fetch holds and says so once.
+  // D-SRC-69 (2026-10-27): queued as ["prune"] and given its list when it
+  // RUNS (runNextCacheJob, Model.pruneArgs), not here. The start-up prune is
+  // queued at cacheReady and runs at dirsReady, and its list used to be the
+  // records of the first moment: an add made between the two probed into a
+  // folder no record named yet and lost it.
   function queuePrune() {
-    var args = ["prune", "--keep"]
-    var sources = root.userState.sources
-    for (var i = 0; i < sources.length; i++) args.push(sources[i].key)
-    if (root.activeSourceKey !== "") args = args.concat(["--active", root.activeSourceKey])
-    args = args.concat(["--epg-max-age", String(root.epgMaxAgeSec)])
-    root.queueCacheJob(args, null)
+    root.queueCacheJob(["prune"], null)
   }
 
-  // Section 4.7: one cacheProc, a FIFO of { args, onDone }; failures are
-  // logged with the action and code only.
+  // Section 4.7: one cacheProc, a FIFO of { args, onDone, seq }; failures
+  // are logged with the action and code only. `seq` is the probe count when
+  // the job was asked for (D-SRC-69, Model.cacheJobArgs).
   function queueCacheJob(args, onDone) {
     var queue = root.cacheQueue.slice()
-    queue.push({ args: args, onDone: onDone })
+    queue.push({ args: args, onDone: onDone, seq: root.sourceProbeSeq })
     root.cacheQueue = queue
     root.runNextCacheJob()
   }
 
+  // D-SRC-69: what a job deletes is decided HERE, when it runs, against the
+  // state, the active key and the probe in flight as they are now
+  // (Model.cacheJobArgs): a prune keeps every record and the folder a probe
+  // not yet handled writes into; a removal a later probe has claimed the
+  // folder of is dropped. probingKey and probeDirKey are cleared only by
+  // handleProbeExit, so a probe whose process has ended and whose exit has
+  // not been handled still counts as in flight.
+  function cacheJobContext() {
+    var inFlight = []
+    if (root.probeDirKey !== "") inFlight.push(root.probeDirKey)
+    if (root.probingKey !== "" && root.probingKey !== root.probeDirKey) inFlight.push(root.probingKey)
+    return { state: root.userState, activeKey: root.activeSourceKey, inFlight: inFlight, claims: root.sourceProbeClaims, epgMaxAgeSec: root.epgMaxAgeSec }
+  }
+
   function runNextCacheJob() {
-    if (cacheProc.running || root.cacheQueue.length === 0 || !root.dirsReady) return
-    var job = root.cacheQueue[0]
-    root.cacheQueue = root.cacheQueue.slice(1)
-    root.cacheJob = job
-    cacheProc.command = ["python3", root.helperPath, "cache", "--cache-dir", root.cacheDir].concat(job.args)
-    cacheProc.running = true
-    cacheWatchdog.restart()   // D-SRC-37 (c): every run of the slot is bounded
+    for (;;) {
+      if (cacheProc.running || root.cacheQueue.length === 0 || !root.dirsReady) return
+      var job = root.cacheQueue[0]
+      root.cacheQueue = root.cacheQueue.slice(1)
+      var args = Model.cacheJobArgs(job, root.cacheJobContext())
+      if (args === null) {
+        // Keys only (R12): the folder is a later probe's, not the garbage
+        // this job was asked to take.
+        console.info("omarchy-iptv: cache " + job.args[0] + " of " + Model.asList(job.args).slice(1).join(" ") + " dropped: a probe has started writing there since it was asked for")
+        if (typeof job.onDone === "function") job.onDone({ ok: true, kind: "cache", skipped: true, error: null })
+        continue
+      }
+      root.cacheJob = { args: args, onDone: job.onDone, seq: job.seq }
+      cacheProc.command = ["python3", root.helperPath, "cache", "--cache-dir", root.cacheDir].concat(args)
+      cacheProc.running = true
+      cacheWatchdog.restart()   // D-SRC-37 (c): every run of the slot is bounded
+      return
+    }
   }
 
   function handleCacheExit(text) {
@@ -5134,6 +5207,11 @@ Item {
     var status = Model.parseHelperStatus(text, "cache")
     if (status.ok !== true) console.warn("omarchy-iptv: cache " + (job ? job.args[0] : "?") + " failed:", status.error ? status.error.code : "error")
     if (job && typeof job.onDone === "function") job.onDone(status)
+    // D-SRC-69: a probe held behind this job starts now. The next job is
+    // decided with it in flight either way: probingKey and probeDirKey are
+    // set while it is held (cacheJobContext), so a prune queued next keeps
+    // its folder and a removal of that key is dropped.
+    if (root.probeHeld) root.launchProbe()
     root.runNextCacheJob()
   }
 
@@ -5839,6 +5917,14 @@ Item {
     interval: root.helperTimeoutMs
     repeat: false
     onTriggered: {
+      // D-SRC-69: a probe still held behind a cache job that has not exited
+      // in the probe's whole budget fails as a timeout, with nothing to stop.
+      if (root.probeHeld) {
+        console.warn("omarchy-iptv: source probe waited " + Math.floor(root.helperTimeoutMs / 1000) + " s for a cache job to finish; giving up")
+        root.probeTimedOut = true
+        root.handleProbeExit("")
+        return
+      }
       if (!sourceProbeProc.running) return
       console.warn("omarchy-iptv: source probe exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
       root.probeTimedOut = true

@@ -779,7 +779,9 @@ function bootService(serviceText, Model, o) {
     return [t, fire]
   }
   h.timed = [[vw, onVerifyWatchdog], [ww, onWriteWaitWatchdog]]
-  for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog", "stateModeWatchdog", "stateInitRetry"]) h.timed.push(treeTimer(id))
+  // D-SRC-69: probeWatchdog joins them -- a probe HELD behind a cache job
+  // is bounded by it, and a test that never moves the clock is unchanged.
+  for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog", "stateModeWatchdog", "stateInitRetry", "probeWatchdog"]) h.timed.push(treeTimer(id))
   // D-SRC-49: the `state mode` run's exit, with the REAL helper's reply for
   // the file as the double holds it (rule 10: the verb chmods a regular
   // file that is not 0600 and nothing else; the fake's mode moves with it),
@@ -897,6 +899,16 @@ function bootService(serviceText, Model, o) {
   h.file = () => Model.parseState(h.stateFile.disk)
   // A helper process's exit, with its own status text.
   h.probeExit = (statusText) => { ids.sourceProbeProc.running = false; root.handleProbeExit(statusText); h.runLater() }
+  // D-SRC-69: the exit of a cache job left running by `h.cacheHang` (the
+  // helper still starting, or slow), with the double's answer for its
+  // command, through the handler the real exit calls. False when none runs.
+  h.cacheExit = () => {
+    if (!ids.cacheProc._running) return false
+    ids.cacheProc._running = false
+    root.handleCacheExit(h.cacheAnswer(ids.cacheProc.command.slice()))
+    h.runLater()
+    return true
+  }
   h.STUBBED = STUBBED
   h.ids = ids
   // The start, in the order the shell makes it: `shell` arrives (a reconcile

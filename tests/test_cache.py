@@ -14,6 +14,7 @@ import sys
 import tempfile
 import time
 import unittest
+from unittest import mock
 
 from helper_loader import load_helper
 
@@ -72,6 +73,62 @@ class LayoutTest(CacheTestCase):
         self.assertEqual(self.sources.stat().st_mode & 0o777, 0o700)
         # The legacy location stays untouched.
         self.assertEqual(self.names(self.cache), ["sources"])
+
+
+class CacheWriteRefusalTest(CacheTestCase):
+    """D-SRC-69 (2026-10-27): a `playlist` run -- the source probe and the
+    active source's refresh -- whose own cache file cannot be written answers
+    with a CODE and one sentence, `cache_unwritable`, naming the file's base
+    name and the error's own words. It used to leave the OSError to main()'s
+    catch-all, which answers `internal` with the exception's text and its
+    path, and the Sources result line showed exactly that when the start-up
+    prune removed an add's folder between the temporary file and its rename
+    (key-scenario A2 on 2026-10-27, F-HARNESS-49). Each case makes the write
+    really fail on the filesystem; the first runs the helper's OWN
+    cache_prune at that moment, which is the race itself."""
+
+    def probe(self, target):
+        return run("playlist", "--url", str(FIXTURES / "basic.m3u"), "--cache-dir", str(target))
+
+    def assert_refused(self, code, status, err, name, reason):
+        self.assertEqual(code, 1)
+        self.assertEqual(status["ok"], False)
+        self.assertEqual(status["error"]["code"], "cache_unwritable")
+        self.assertEqual(status["error"]["message"], "could not write %s in the source's cache folder (%s)" % (name, reason))
+        self.assertNotIn(self.tmp.name, json.dumps(status))
+        self.assertNotIn("Traceback", err)
+
+    def test_the_folder_pruned_between_the_temporary_file_and_its_rename_is_a_named_refusal(self):
+        target = self.sources / KEY
+        real = os.fchmod
+        pruned = []
+
+        def prune_mid_write(fd, mode):
+            # write_text_atomic: the temporary file is open and written, its
+            # mode set -- and before os.replace the prune takes the folder.
+            real(fd, mode)
+            if not pruned:
+                pruned.append(helper.cache_prune(str(self.cache), [], None, 86400.0))
+
+        with mock.patch.object(os, "fchmod", prune_mid_write):
+            code, status, err = self.probe(target)
+        self.assertEqual(pruned[0]["removed"], [KEY])
+        self.assert_refused(code, status, err, "channels.json", "No such file or directory")
+
+    def test_a_channel_list_that_cannot_be_put_in_place_is_a_named_refusal(self):
+        target = self.sources / KEY
+        (target / "channels.json").mkdir(parents=True)
+        (target / "channels.json" / "keep").write_text("x", encoding="utf-8")
+        code, status, err = self.probe(target)
+        self.assert_refused(code, status, err, "channels.json", "Is a directory")
+
+    def test_a_status_that_cannot_be_written_fails_the_run_the_same_way(self):
+        target = self.sources / KEY
+        (target / "playlist-status.json").mkdir(parents=True)
+        (target / "playlist-status.json" / "keep").write_text("x", encoding="utf-8")
+        code, status, err = self.probe(target)
+        self.assert_refused(code, status, err, "playlist-status.json", "Is a directory")
+        self.assertTrue(status["stale"])   # the channel list itself was written
 
 
 class MigrateTest(CacheTestCase):
