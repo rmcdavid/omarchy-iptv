@@ -121,7 +121,8 @@ function makeIds(h) {
     controlWatchdog: timer("controlWatchdog"),
     // D-PLY-30: the player slot's four timers, which handlePlayerResult
     // stops or restarts; a test runs that handler to see what a refused
-    // `player start` tells the user. Counted like every timer, never run.
+    // `player start` tells the user. Counted like every timer; the watchdog
+    // is driven from its own block by h.elapse since D-PLY-35 (below).
     playerWatchdog: timer("playerWatchdog"),
     playerSocketTimer: timer("playerSocketTimer"),
     playRetryTimer: timer("playRetryTimer"),
@@ -153,6 +154,14 @@ function makeIds(h) {
     stopSettleTimer: timer("stopSettleTimer"),
     pipSequenceWatchdog: timer("pipSequenceWatchdog"),
     pipStepWatchdog: timer("pipStepWatchdog"),
+    // D-PLY-35: what the reattach probe's answer reaches through applyProbe,
+    // which a start the watchdog stopped now asks: the one ambiguous-probe
+    // re-read (counted; a test sends the second probe itself), and the PiP
+    // read the adoption makes of a pid it did not have (pipPeek), which
+    // nothing here answers -- the compositor's reply is not this harness's.
+    probeRetryTimer: timer("probeRetryTimer"),
+    hyprPeekProc: proc("hyprPeekProc"),
+    pipPeekWatchdog: timer("pipPeekWatchdog"),
     playerSocketComponent: {
       createObject() {
         h.socketsMade = (h.socketsMade || 0) + 1
@@ -825,7 +834,11 @@ function bootService(serviceText, Model, o) {
   h.timed = [[vw, onVerifyWatchdog], [ww, onWriteWaitWatchdog]]
   // D-SRC-69: probeWatchdog joins them -- a probe HELD behind a cache job
   // is bounded by it, and a test that never moves the clock is unchanged.
-  for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog", "stateModeWatchdog", "stateInitRetry", "probeWatchdog"]) h.timed.push(treeTimer(id))
+  // D-PLY-35: and the player slot's, whose interval is a binding over the
+  // verb in flight (`root.playerTimeoutMs`), read at each restart() the way
+  // QML's Timer reads it; h.elapse fires its own onTriggered, which TERMs a
+  // running helper (recorded in playerProc.signals) and flags the exit.
+  for (const id of ["cacheWatchdog", "failedWatchdog", "configShieldWatchdog", "whichWatchdog", "pipProbeWatchdog", "stateModeWatchdog", "stateInitRetry", "probeWatchdog", "playerWatchdog"]) h.timed.push(treeTimer(id))
   // D-SRC-49: the `state mode` run's exit, with the REAL helper's reply for
   // the file as the double holds it (rule 10: the verb chmods a regular
   // file that is not 0600 and nothing else; the fake's mode moves with it),
