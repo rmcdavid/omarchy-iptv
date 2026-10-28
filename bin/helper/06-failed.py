@@ -88,8 +88,24 @@ def cmd_failed(args: argparse.Namespace) -> int:
     # `list` falls through: pruning and emitting is the whole of it.
     rows = prune_failed(rows, now, known_channel_ids(directory))
     if args.action in ("mark", "clear"):
-        ensure_private_dir(directory)
-        write_json_atomic(os.path.join(directory, FAILED_FILE), {"version": 1, "failed": rows})
+        # D-SRC-72: the marks' file refused with the playlist verb's code
+        # (cache_unwritable, D-SRC-69) when it cannot be written, as every
+        # other refusal of this verb is answered here, never left to
+        # main()'s `internal`. Nothing on screen reads this reply (the
+        # service fires and forgets, Service.persistFailed); the shell's
+        # in-memory mark stands for the session either way. A folder that is
+        # a link to nothing stays R25c's `folder_unusable`.
+        path = os.path.join(directory, FAILED_FILE)
+        try:
+            ensure_private_dir(directory)
+            write_json_atomic(path, {"version": 1, "failed": rows})
+        except FolderUnusable:
+            raise
+        except OSError as io_error:
+            error = cache_unwritable(path, io_error)
+            log("failed: %s" % error.message)
+            emit(error_payload("failed", error, action=args.action))
+            return EXIT_ERROR
     emit({"ok": True, "kind": "failed", "action": args.action, "count": len(rows), "failed": rows})
     return 0
 
@@ -289,6 +305,7 @@ def cmd_logos(args: argparse.Namespace) -> int:
         log("logos: %s" % error.message)
         emit(error_payload("logos", error, action="fetch"))
         return EXIT_ERROR
+    refusal = result.pop("refusal")
     # Said ONCE on stderr as well, counted, because a ceiling that stops
     # fetches in silence reads as a provider being down; the shell, which
     # reads no stderr from this process, writes its own journal line from
@@ -302,8 +319,17 @@ def cmd_logos(args: argparse.Namespace) -> int:
             % (int(LOGO_RUN_DEADLINE),
                counted_sentence(result["postponed"], "%d logo was left for the next run",
                                 "%d logos were left for the next run")))
-    emit(dict(survey, ok=True, kind="logos", action="fetch", busy=False, **result,
-              cap=MAX_LOGO_FILES, maxBytes=MAX_LOGO_BYTES, maxSide=MAX_LOGO_SIDE, maxPixels=MAX_LOGO_PIXELS))
+    limits = {"cap": MAX_LOGO_FILES, "maxBytes": MAX_LOGO_BYTES, "maxSide": MAX_LOGO_SIDE, "maxPixels": MAX_LOGO_PIXELS}
+    if refusal is not None:
+        # D-SRC-72: a logo or the failure memo could not be written. The
+        # run's own code and sentence, never main()'s `internal` -- and the
+        # summary still carries `names`, every file on disk this run
+        # validated, which is the line the shell replaces its set from
+        # (Model.logoSummaryNames reads `names` whatever `ok` says).
+        log("logos: %s" % refusal.message)
+        emit(dict(survey, **error_payload("logos", refusal, action="fetch", busy=False, **result, **limits)))
+        return EXIT_ERROR
+    emit(dict(survey, ok=True, kind="logos", action="fetch", busy=False, **result, **limits))
     return 0
 
 
@@ -345,19 +371,30 @@ def load_logo_failed(path: str, now: float) -> dict[str, tuple[int, str]]:
     return memo
 
 
-def save_logo_failed(path: str, memo: dict[str, tuple[int, str]]) -> None:
+def save_logo_failed(path: str, memo: dict[str, tuple[int, str]]) -> HelperError | None:
     """Write the memo atomically, 0600 in the source's 0700 directory
     (write_json_atomic). Names and codes only, never a URL (rule 5): the
     name is the hash the folder already uses, and a reason is one of the
-    helper's own error codes. An empty memo removes the file."""
+    helper's own error codes. An empty memo removes the file.
+
+    D-SRC-72: -> None, or the refusal when the memo cannot be written
+    (cache_unwritable), which the run answers with once it has finished --
+    a memo is not worth stopping the run for, and an OSError here used to
+    end it in main()'s `internal` with no summary at all."""
     if not memo:
         try:
             os.unlink(path)
         except OSError:
             pass
-        return
-    write_json_atomic(path, {"version": 1, "failed": {
-        name: {"at": at, "reason": reason} for name, (at, reason) in sorted(memo.items())}})
+        return None
+    try:
+        write_json_atomic(path, {"version": 1, "failed": {
+            name: {"at": at, "reason": reason} for name, (at, reason) in sorted(memo.items())}})
+    except FolderUnusable:
+        raise
+    except OSError as io_error:
+        return cache_unwritable(path, io_error)
+    return None
 
 
 def failed_reason_ok(reason: Any) -> bool:
@@ -424,6 +461,11 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
     memo = load_logo_failed(memo_path, memo_at)
     memo_dirty = False
     memo_saved_at_deadline = False
+    # D-SRC-72: the first write this run could not make (a logo, or the
+    # memo), and how many logos it left unfetched or unkept for it.
+    refusal: HelperError | None = None
+    fetch_stopped = False
+    unsaved = 0
     reasons: dict[str, int] = {}
     seen: set[str] = set()
     names: list[str] = []
@@ -501,6 +543,15 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
             # again, not held back by the ceiling or the deadline.
             skipped_failed += 1
             continue
+        if fetch_stopped:
+            # D-SRC-72: a logo could not be written into this folder, and
+            # every later one goes to the same folder -- so nothing more is
+            # FETCHED: a logo the run cannot keep is a request to its host
+            # for nothing. The pass goes on, because a cached file further
+            # down is still validated and announced (the lesson of the
+            # ceiling's old `break`, above).
+            unsaved += 1
+            continue
         if present + fetched >= MAX_LOGO_FILES and not unnamed_checked:
             # D-LOGO-18 (R30b): at the ceiling, before a URL is counted as
             # held back, the files no current channel names are swept, once a
@@ -532,7 +583,8 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
             # may stop this run before its end.
             if memo_dirty and not memo_saved_at_deadline:
                 memo_saved_at_deadline = True
-                save_logo_failed(memo_path, memo)
+                memo_refusal = save_logo_failed(memo_path, memo)
+                refusal = refusal or memo_refusal
             postponed += 1
             continue
         try:
@@ -552,6 +604,14 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
             # the last line; nothing else about the contract changes.
             emit({"ok": True, "kind": "logo", "name": names[-1]})
         except HelperError as error:
+            if error.code == "cache_unwritable":
+                # D-SRC-72 (write_logo): this folder's failure, not the
+                # address's -- not counted as one, not remembered in the
+                # memo, and the fetching stops here (above).
+                refusal = error
+                fetch_stopped = True
+                unsaved += 1
+                continue
             # Hosts and codes only, never the URL (rule 5).
             reasons[error.code] = reasons.get(error.code, 0) + 1
             if error.code in ("logo_scheme", "logo_userinfo", "logo_redirect",
@@ -566,7 +626,8 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
                 memo[name] = (memo_at, error.code)
                 memo_dirty = True
     if memo_dirty:
-        save_logo_failed(memo_path, memo)
+        memo_refusal = save_logo_failed(memo_path, memo)
+        refusal = refusal or memo_refusal
     # `names` is what is ON DISK now, and it is the whole reason this command
     # reports anything at all: the guide points an Image at a file only when
     # that file is in this list. Pointing at a missing one is not merely a
@@ -595,11 +656,14 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
     # failure, reason `logo_timeout`. `staleTemps` is how many leftovers of a
     # killed write were swept (D-SRC-60). `skippedFailed` is how many
     # addresses the failure memo kept this run from trying (D-LOGO-22).
+    # `unsaved` is how many logos a write this folder refused left unkept or
+    # unfetched (D-SRC-72); `refusal` is that write's refusal, or the memo's,
+    # which cmd_logos answers with -- and takes out of the summary.
     return {"fetched": fetched, "cached": cached, "refusedOnPolicy": refused, "failed": failed,
             "reasons": reasons, "names": names, "swept": swept, "rewritten": rewritten,
             "deferred": deferred, "atCeiling": deferred > 0, "files": present + fetched,
             "unnamed": unnamed, "postponed": postponed, "runExpired": postponed > 0,
-            "staleTemps": stale, "skippedFailed": skipped_failed}
+            "staleTemps": stale, "skippedFailed": skipped_failed, "unsaved": unsaved, "refusal": refusal}
 
 
 def logo_dir_entries(logo_dir: str) -> int:

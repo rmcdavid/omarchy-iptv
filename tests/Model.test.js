@@ -13218,6 +13218,217 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     return [reason, /Error|Errno|\/run\/|tmp-/.test(reason)]
   }, ["Helper failed unexpectedly", false])
 
+  // ---- D-SRC-70 (2026-10-27): a cancelled re-check of the ACTIVE source keeps the active source's folder ----
+  //
+  // The cancel queued `cache remove --key <dirKey>` for every probe (SR7),
+  // and a re-check of the active source writes into the active source's OWN
+  // folder -- not the new folder SR7 discards. Reachable from the form: the
+  // active source never fetched (a migrated record before its first refresh
+  // landed, or one whose refreshes all failed), its URL is added again
+  // (`duplicate` -> Guide.retryIfUnfetched -> retrySource), and the re-check
+  // is cancelled. The owner's decision: the folder is kept the way the
+  // clean-up always keeps it -- a removal of the key that is active when it
+  // RUNS is dropped (Model.cacheJobDrop "active"). The guards after it pin
+  // what must not move with it: SR7's discard of a NEW folder, and the two
+  // deliberate removals of a folder that was active (removeSource, and the
+  // commit of a URL edit of the active source, whose old folder's removal is
+  // now queued after the state that moves the pointer is published).
+  const EDITED = "http://edited.example.test/list.m3u", KED = keyOf(EDITED)
+  const nm = k => k === KED ? "EDITED" : keyName(k)
+  const unfetched = () => rec(A, { fetchedAt: 0, channelCount: -1, groupCount: 0, origin: "migrated" })
+  // What the guide does on a duplicate of a record that never fetched.
+  const addAgain = h => { const dup = h.root.addSource({ playlistUrl: A, epgUrl: "", label: "" }); return [dup.ok, dup.code, nm(dup.id), h.root.retrySource(dup.id).ok] }
+  const editA = h => h.root.updateSource(KA, { label: "a.example.test", playlistUrl: EDITED, epgUrl: "" })
+
+  checkCall("D-SRC-70: Model.cacheJobDrop / cacheJobArgs -- a `remove --key K` is dropped when K is the ACTIVE key when it runs ('active'), the prune's keep of the active key mirrored; another key's removal, K's once something else or nothing is active, an epg-clear of the active key and a prune run; D-SRC-69's rule still answers 'probe'", () => {
+    const st = M.parseState(migratedText([rec(A), rec(B)], KA))
+    const ctx = o => Object.assign({ state: st, activeKey: KA, inFlight: [], claims: {}, epgMaxAgeSec: 86400 }, o || {})
+    const rm = (k, seq) => ({ args: ["remove", "--key", k], seq: seq === undefined ? 1 : seq })
+    const claims = {}
+    claims[KNEW] = 2
+    return [M.cacheJobDrop(rm(KA), ctx()), M.cacheJobArgs(rm(KA), ctx()),
+            M.cacheJobDrop(rm(KB), ctx()), M.cacheJobArgs(rm(KB), ctx()),
+            M.cacheJobDrop(rm(KA), ctx({ activeKey: "" })), M.cacheJobArgs(rm(KA), ctx({ activeKey: KB })),
+            M.cacheJobDrop({ args: ["epg-clear", "--key", KA], seq: 1 }, ctx()), M.cacheJobArgs({ args: ["epg-clear", "--key", KA], seq: 1 }, ctx()),
+            M.cacheJobDrop({ args: ["prune"], seq: 1 }, ctx()),
+            M.cacheJobDrop(rm(KNEW), ctx({ inFlight: [KNEW] })), M.cacheJobDrop(rm(KNEW, 1), ctx({ claims })),
+            M.cacheJobDrop(rm(""), ctx({ activeKey: "" })), M.cacheJobDrop(null, null)]
+  }, ["active", null, "", ["remove", "--key", KB], "", ["remove", "--key", KA], "", ["epg-clear", "--key", KA], "", "probe", "probe", "", ""])
+
+  checkCall("D-SRC-70: the reachable path -- the active source never fetched, its URL added again from the form (duplicate -> retrySource), the re-check cancelled: the active source keeps its folder, its record and its place, and the cancel is reported as one", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([unfetched(), rec(B)], KA), "lag")
+    const asked = addAgain(h)
+    const probe = [h.root.probing, h.root.probeMode, nm(h.root.probeDirKey)]
+    h.root.cancelProbe(); h.probeExit(""); h.drain()
+    return { asked, probe, removed: named(removed(h)), active: nm(h.root.activeSourceKey), records: h.root.userState.sources.map(s => nm(s.key)), finished: finished(h) }
+  }, { asked: [false, "duplicate", "A", true], probe: [true, "retry", "A"], removed: [], active: "A", records: ["A", "B"], finished: [[false, true, ""]] })
+
+  checkCall("D-SRC-70: the same cancel while a cache job runs -- its removal waits in the queue and is decided when it runs: dropped while the source is still active; run once the user has switched away (the folder of a never-fetched source that is not active, which SR7's cancel of any other never-fetched source takes too)", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([unfetched(), rec(B)], KA), "lag")
+    h.cacheHang = true
+    h.root.queuePrune(); h.drain()           // a prune keeping A and B, running
+    addAgain(h)
+    h.root.cancelProbe(); h.probeExit(""); h.drain()
+    const queued = h.root.cacheQueue.map(j => j.args[0] + " " + nm(j.args[j.args.indexOf("--key") + 1]))
+    h.cacheHang = false; while (h.cacheExit()) {} h.drain()
+    const stillActive = { removed: named(removed(h)), active: nm(h.root.activeSourceKey) }
+    const g = boot({ sourceKey: KA, showLogos: false }, migratedText([unfetched(), rec(B)], KA), "lag")
+    g.cacheHang = true
+    g.root.queuePrune(); g.drain()
+    addAgain(g)
+    g.root.cancelProbe(); g.probeExit(""); g.drain()
+    sw(g, KB); g.drain()                     // B has a cache: the switch commits at once
+    g.cacheHang = false; while (g.cacheExit()) {} g.drain()
+    return { queued, stillActive, switchedAway: { removed: named(removed(g)), active: nm(g.root.activeSourceKey), records: g.root.userState.sources.map(s => nm(s.key)) } }
+  }, { queued: ["remove A"], stillActive: { removed: [], active: "A" }, switchedAway: { removed: ["A"], active: "B", records: ["A", "B"] } })
+
+  checkCall("D-SRC-70 (guards): SR7 unchanged -- a cancelled add, and a cancelled URL edit of the ACTIVE source (which probes into a NEW folder), still lose that folder; and the removals of a folder that WAS active still run -- removeSource of the active source, at once and queued behind a running job, and the commit of a URL edit of the active source, at once and queued", () => {
+    const a = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    add(a); a.root.cancelProbe(); a.probeExit(""); a.drain()
+    const e = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    const edited = editA(e).ok
+    const editProbe = [e.root.probeMode, nm(e.root.probeDirKey)]
+    e.root.cancelProbe(); e.probeExit(""); e.drain()
+    const r = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), "lag")
+    const removedNow = r.root.removeSource(KA).ok; r.drain()
+    const q = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), "lag")
+    q.cacheHang = true
+    q.root.queuePrune(); q.drain()
+    const removedQueued = q.root.removeSource(KA).ok; q.drain()
+    q.cacheHang = false; while (q.cacheExit()) {} q.drain()
+    const c = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    editA(c); c.probeExit(OK5); c.drain(); c.root.finishSwitch()
+    const d = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    editA(d)
+    d.cacheHang = true
+    d.root.queuePrune(); d.drain()
+    d.probeExit(OK5); d.drain(); d.root.finishSwitch()
+    d.cacheHang = false; while (d.cacheExit()) {} d.drain()
+    return {
+      cancelledAdd: named(removed(a)),
+      cancelledEdit: { edited, editProbe, removed: removed(e).map(nm), active: nm(e.root.activeSourceKey) },
+      removeActive: { now: [removedNow, named(removed(r)), nm(r.root.activeSourceKey)], queued: [removedQueued, named(removed(q)), nm(q.root.activeSourceKey)] },
+      editCommit: { now: [removed(c).map(nm), nm(c.root.activeSourceKey)], queued: [removed(d).map(nm), nm(d.root.activeSourceKey)] }
+    }
+  }, { cancelledAdd: ["NEW"], cancelledEdit: { edited: true, editProbe: ["edit", "EDITED"], removed: ["EDITED"], active: "A" },
+       removeActive: { now: [true, ["A"], "-"], queued: [true, ["A"], "-"] },
+       editCommit: { now: [["A"], "EDITED"], queued: [["A"], "EDITED"] } })
+
+  // ---- D-SRC-71 (2026-10-27): a failure on this machine does not name the provider's host ----
+  //
+  // R28e removed "from <host>" after the plugin's own refusals; the codes
+  // D-SRC-69 gave the user -- the cache could not be written, the helper
+  // failed unexpectedly -- and the watchdog's timeout were still put after
+  // it: "Could not write the cache from 127.0.0.1" (the recheck of
+  // D-SRC-69). The probe's failure did not carry its code, and the refresh
+  // empty state composed "<reason> from <statusHost>" in Guide.qml. Both now
+  // read one list (Model.failureFromHost). Red on dev 6761cd4.
+  const helperSays = (code, message) => JSON.stringify({ ok: false, kind: "playlist", sourceHost: "new.example.test", stale: false, error: { code, message } })
+
+  checkCall("D-SRC-71: Model.failureFromHost / probeFailureLine -- a refusal the plugin made itself or a failure of its own helper (the cache, a bug, a timeout, no answer, a damaged install) is the reason alone; what the provider's side answered keeps 'from <host>'; a local file and an empty host never name one", () => {
+    const line = code => M.probeFailureLine(M.statusReason({ ok: false, error: { code, message: "said by the helper" } }), "a.example.test", "url", code)
+    return [["cache_unwritable", "internal", "helper_timeout", "no_output", "helper_damaged", "not_implemented", "too_many", "unknown_source"].map(line),
+            ["http_404", "network", "timeout", "not_a_playlist", "too_large"].map(line),
+            M.failureFromHost("Could not write the cache", "a.example.test", "cache_unwritable"),
+            M.failureFromHost("HTTP 404 Not Found", "a.example.test", "http_404"),
+            M.failureFromHost("HTTP 404 Not Found", "", "http_404"),
+            M.failureFromHost("", "a.example.test", ""),
+            M.probeFailureLine("File not found", "local file", "file", "not_found"),
+            [M.statusCode({ ok: false, error: { code: "cache_unwritable" } }), M.statusCode({ ok: true, error: null }), M.statusCode(null), M.statusCode({ ok: false })]]
+  }, [["Could not write the cache", "Helper failed unexpectedly", "Helper timed out", "Helper produced no output", "Plugin files damaged \u00b7 reinstall the plugin", "Helper command not implemented", "Too many sources", "Unknown source"],
+      ["HTTP 404 Not Found from a.example.test", "Network error from a.example.test", "Timed out from a.example.test", "Not an M3U playlist from a.example.test", "Source too large from a.example.test"],
+      "Could not write the cache", "HTTP 404 Not Found from a.example.test", "HTTP 404 Not Found", "Unknown error from a.example.test", "File not found",
+      ["cache_unwritable", "", "", ""]])
+
+  checkCall("D-SRC-71: a probe that failed on this machine -- its cache could not be written, the helper failed unexpectedly, the watchdog stopped it -- carries its code on sourceProbeFinished, and the Sources line built from it (both of the guide's calls) names no host; an HTTP failure still does", () => {
+    const outcome = h => { const r = h.signals.filter(s => s[0] === "sourceProbeFinished").map(s => s[1])[0]; return [r.code, M.probeFailureLine(r.reason, r.host, "url", r.code)] }
+    const out = []
+    for (const reply of [helperSays("cache_unwritable", "could not write channels.json in the source's cache folder (No such file or directory)"),
+                         helperSays("internal", "OSError: [Errno 5] Input/output error"),
+                         helperSays("http_404", "HTTP 404 from new.example.test")]) {
+      const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+      add(h); h.probeExit(reply); h.drain()
+      out.push(outcome(h))
+    }
+    const t = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    add(t)
+    t.elapse(t.ids.probeWatchdog.interval)
+    const signalled = t.ids.sourceProbeProc.signals.slice()
+    t.probeExit(""); t.drain()
+    out.push(outcome(t).concat([signalled]))
+    return out
+  }, [["cache_unwritable", "Could not write the cache"], ["internal", "Helper failed unexpectedly"], ["http_404", "HTTP 404 Not Found from new.example.test"],
+      ["helper_timeout", "Helper timed out", [15]]])
+
+  checkCall("D-SRC-71: the refresh empty state (Guide.qml's line: Model.failureFromHost over the service's statusReason, statusHost and statusCode) -- a refresh that could not write the cache, failed unexpectedly or was stopped by the watchdog names no host; an HTTP failure still reads '<reason> from <host>'", () => {
+    const line = h => [h.root.statusCode, M.failureFromHost(h.root.statusReason, h.root.statusHost, h.root.statusCode)]
+    const out = []
+    for (const reply of [helperSays("cache_unwritable", "could not write channels.json in the source's cache folder (Permission denied)"),
+                         helperSays("internal", "PermissionError: [Errno 13] Permission denied"),
+                         helperSays("http_404", "HTTP 404 from new.example.test")]) {
+      const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+      h.root.handlePlaylistExit(reply); h.drain()
+      out.push(line(h))
+    }
+    const t = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    t.root.playlistTimedOut = true
+    t.root.handlePlaylistExit(""); t.drain()
+    out.push(line(t))
+    return out
+  }, [["cache_unwritable", "Could not write the cache"], ["internal", "Helper failed unexpectedly"], ["http_404", "HTTP 404 Not Found from new.example.test"],
+      ["helper_timeout", "Helper timed out"]])
+
+  // D-SRC-71, the recheck (rule 12). The check above composes the refresh
+  // empty state as Guide.qml does -- a copy of the guide's one call -- so it
+  // stayed green with the guide's call handing failureFromHost "" for the
+  // code, while the guide read "Could not write the cache from <host>"; and
+  // no check named a provider code beyond five, so http_403 added to the
+  // local list was green too. This compiles the guide's own `copy`, its
+  // `emptyPlaylist` binding and its `prose` binding from the shipping
+  // Guide.qml (the way the service harness compiles Service.qml) and runs
+  // them over the booted service, for the helper's local failures and for
+  // every provider-side code the playlist verb answers; and reads the
+  // Sources result line for the same probe failures.
+  const guideText = fs.readFileSync(path.join(__dirname, "../Guide.qml"), "utf8")
+  const guideOnce = anchor => {
+    const at = guideText.indexOf(anchor)
+    if (at === -1 || guideText.indexOf(anchor, at + 1) !== -1) throw new Error("Guide.qml: expected exactly one " + JSON.stringify(anchor))
+    return at + anchor.length
+  }
+  const guideBlock = anchor => { const open = guideOnce(anchor) - 1; const close = H.matchBrace(guideText, open); if (close === -1) throw new Error("Guide.qml: no end to " + anchor); return guideText.slice(open, close + 1) }
+  const guideExpr = anchor => { const from = guideOnce(anchor); return guideText.slice(from, guideText.indexOf("\n", from)) }
+  const PROVIDER = [["http_401", "HTTP 401 from new.example.test", "HTTP 401 Unauthorized"], ["http_403", "HTTP 403 from new.example.test", "HTTP 403 Forbidden"],
+                    ["http_404", "HTTP 404 from new.example.test", "HTTP 404 Not Found"], ["http_429", "HTTP 429 from new.example.test", "HTTP 429 Too Many Requests"],
+                    ["http_503", "HTTP 503 from new.example.test", "HTTP 503"], ["network", "connection refused by new.example.test", "Connection refused"],
+                    ["network", "certificate verify failed for new.example.test", "TLS error"], ["timeout", "timed out reading from new.example.test", "Timed out"],
+                    ["too_large", "source from new.example.test exceeds the limit", "Source too large"], ["unsafe_redirect", "refused a redirect from new.example.test", "Unsafe redirect"],
+                    ["bad_gzip", "bad gzip data from new.example.test", "Bad gzip data"], ["not_a_playlist", "source from new.example.test is not an M3U playlist", "Not an M3U playlist"]]
+
+  checkCall("D-SRC-71 (recheck): the refresh empty state as Guide.qml's own `copy`, `emptyPlaylist` and `prose` bindings compose it, compiled from the shipping text over the booted service, and the Sources result line for the same probe failures -- a local failure (the cache, a bug, the watchdog) is the reason alone; EVERY provider-side code the playlist verb answers keeps 'from <host>'", () => {
+    const copy = new Function("Model", "root", "return (" + guideBlock("  readonly property var copy: ({") + ")")(M, { pluginId: "io.github.rmcdavid.iptv" })
+    const emptyPlaylistOf = new Function("root", "Model", "return (" + guideExpr("readonly property bool emptyPlaylist: ") + ")")
+    const proseOf = new Function("root", "emptyState", "Model", guideBlock("readonly property string prose: {").slice(1, -1))
+    const shown = h => { const g = { emptyKind: "error", invalidSettingsText: "", copy, service: h.root }; return proseOf(g, { emptyPlaylist: emptyPlaylistOf(g, M) }, M) }
+    const refreshed = reply => { const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag"); h.root.handlePlaylistExit(reply); h.drain(); return shown(h) }
+    const probed = reply => {
+      const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+      add(h); h.probeExit(reply); h.drain()
+      const r = h.signals.filter(s => s[0] === "sourceProbeFinished").map(s => s[1])[0]
+      return M.probeFailureLine(r.reason, String(r.host || ""), "url", String(r.code || ""))
+    }
+    const t = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    t.root.playlistTimedOut = true
+    t.root.handlePlaylistExit(""); t.drain()
+    const local = [refreshed(helperSays("cache_unwritable", "could not write channels.json in the source's cache folder (No space left on device)")),
+                   refreshed(helperSays("internal", "OSError: [Errno 28] No space left on device")), shown(t)]
+    const wrong = PROVIDER.filter(([code, message, reason]) =>
+      refreshed(helperSays(code, message)) !== reason + " from new.example.test" + M.SEP + copy.errorCheck
+      || probed(helperSays(code, message)) !== reason + " from new.example.test").map(p => p[0] + ":" + p[2])
+    return { local, wrong, emptyPlaylist: refreshed(helperSays("empty_playlist", "no playable channels found in playlist from new.example.test")) }
+  }, { local: ["Could not write the cache" + Model.SEP + "check the source in Sources", "Helper failed unexpectedly" + Model.SEP + "check the source in Sources",
+               "Helper timed out" + Model.SEP + "check the source in Sources"],
+       wrong: [], emptyPlaylist: "Parsed 0 channels from new.example.test" + Model.SEP + "check the URL points at an M3U" })
+
   // ---- R21e (D-SINK-19 round 11): THE MIGRATION, through Service.qml ----
   //
   // Every pin here runs the shipping functions over a 0.13.5-shaped install:

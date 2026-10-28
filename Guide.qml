@@ -4438,7 +4438,10 @@ Item {
                 // sentence alone (no host: nothing was contacted).
                 if (root.invalidSettingsText !== "") return root.invalidSettingsText
                 if (emptyState.emptyPlaylist) return root.copy.emptyPlaylistProse + root.service.statusHost + Model.SEP + root.copy.emptyPlaylistCheck
-                return root.service.statusReason + " from " + root.service.statusHost + Model.SEP + root.copy.errorCheck
+                // D-SRC-71: a failure on this machine (the cache unwritable,
+                // the helper failing or timing out) names no host; one list
+                // with the Sources result line (Model.failureFromHost).
+                return Model.failureFromHost(root.service.statusReason, root.service.statusHost, root.service.statusCode) + Model.SEP + root.copy.errorCheck
               }
               if (root.emptyKind === "noFavorites") return root.copy.noFavoritesProse
               if (root.emptyKind === "noMatches") {

@@ -413,6 +413,13 @@ function statusHost(status) {
   return status && status.sourceHost ? str(status.sourceHost) : ""
 }
 
+// The code of a failed status, "" for a good one or none (D-SRC-71): what
+// decides whether a failure line names the provider's host
+// (Model.failureFromHost).
+function statusCode(status) {
+  return status && status.ok !== true && status.error ? str(status.error.code) : ""
+}
+
 function statusHealthy(status) {
   return !!(status && status.ok === true && status.running !== false)
 }
@@ -1127,9 +1134,9 @@ export {
   parseEpgNow, EPG_CHANNELS_OPEN, EPG_STORE_KIND, emptyEpgStore,
   parseEpgNowStore, epgNowIndex, parseHelperStatus, HTTP_REASONS,
   HELPER_PART_RE, helperDamagedReason, statusReason, lastErrorAfterStatus,
-  statusHost, statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel,
-  labelWarning, labelWarnings, warningLine, footerWarning, findBarEntry,
-  settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
+  statusHost, statusCode, statusHealthy, statusWarnings, WARNING_PREFIX,
+  warningLabel, labelWarning, labelWarnings, warningLine, footerWarning,
+  findBarEntry, settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
   entryInputText, entryInputForm, sameEntryInput, ownWriteInForce,
   settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
   MAX_SEEN_INPUTS, entryInputSeen, entryInputLast, entryInputsSeenAfter,

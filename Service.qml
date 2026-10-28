@@ -422,6 +422,9 @@ Item {
   readonly property string lastUpdated: Model.formatClock(playlistStatus && playlistStatus.fetchedAt ? playlistStatus.fetchedAt : (channelsMeta && channelsMeta.generatedAt ? channelsMeta.generatedAt : 0))
   readonly property string statusReason: Model.statusReason(playlistStatus)
   readonly property string statusHost: Model.statusHost(playlistStatus) || root.sourceHost
+  // D-SRC-71: the failed status's code, so the guide's "<reason> from
+  // <host>" names no host for a local failure (Model.failureFromHost).
+  readonly property string statusCode: Model.statusCode(playlistStatus)
   readonly property string epgReason: Model.statusReason(epgStatus)
   // R8 status vocabulary: ready | loading | refreshing | cached | error
   readonly property string status: {
@@ -4796,7 +4799,10 @@ Item {
     if (cancelled) {
       // SR7: the directory the probe was writing is discarded; a pending
       // add or replacement was never recorded (SR23) and the form keeps its
-      // values (UX 5.5).
+      // values (UX 5.5). D-SRC-70: a re-check of the ACTIVE source wrote
+      // into the active source's own folder, not a new one, and the removal
+      // is dropped when it runs (Model.cacheJobDrop "active"), the way the
+      // prune always keeps that folder.
       root.queueCacheJob(["remove", "--key", dirKey], null)
       root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: "", host: host, cancelled: true, replacedId: "" })
       return
@@ -4818,12 +4824,19 @@ Item {
     }
     if (status.ok === true) {
       var newKey = key
+      // D-SRC-70: the edited record's old folder, removed once the state
+      // that moves the pointer off it is published (below). A removal of
+      // the key that is active when it runs is dropped (Model.cacheJobDrop),
+      // and a job queued here can run at once, while root.userState -- and
+      // so the active key -- is still the one before the commit: queued
+      // here, an edit of the ACTIVE source would keep its old folder.
+      var retiredKey = ""
       if (pending) {
         // Record the pending add now (SR23), or move the edited record to
         // its new key (SR7): the old record and its directory go.
         if (mode === "edit") {
           st = Model.removeSource(st, key).state
-          root.queueCacheJob(["remove", "--key", key], null)
+          retiredKey = key
           root.sourceErrors = root.withoutKey(root.sourceErrors, key)
         }
         var known = Model.findSourceByUrl(st.sources, pending.url)
@@ -4877,6 +4890,7 @@ Item {
       if (plan.act === "switch") root.beginSwitch()
       root.userState = st
       root.saveState()
+      if (retiredKey !== "") root.queueCacheJob(["remove", "--key", retiredKey], null)
       if (plan.act === "reload") {
         // Already the active directory (a retry of the active source):
         // the FileViews watch it, but reload deterministically.
@@ -4904,10 +4918,14 @@ Item {
     // or replacement was never recorded and its directory goes (SR23); an
     // existing record keeps fetchedAt 0 plus a session-only reason for the
     // result line (SR26).
+    // D-SRC-71: the code rides along, as on the refusals above (R28e), so
+    // a failure on this machine -- the cache unwritable, the helper failing
+    // or timing out -- is not put after the provider's host
+    // (Model.probeFailureLine).
     var reason = Model.statusReason(status)
     if (pending) root.queueCacheJob(["remove", "--key", dirKey], null)
     else root.sourceErrors = root.withKey(root.sourceErrors, key, reason)
-    root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: reason, host: host, cancelled: false, replacedId: "" })
+    root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: reason, code: Model.statusCode(status), host: host, cancelled: false, replacedId: "" })
   }
 
   // D-SINK-19, round 11 (R21). WHAT THE BAR ENTRY'S URLS MEAN: one
@@ -5184,11 +5202,15 @@ Item {
       if (cacheProc.running || root.cacheQueue.length === 0 || !root.dirsReady) return
       var job = root.cacheQueue[0]
       root.cacheQueue = root.cacheQueue.slice(1)
-      var args = Model.cacheJobArgs(job, root.cacheJobContext())
+      var context = root.cacheJobContext()
+      var args = Model.cacheJobArgs(job, context)
       if (args === null) {
         // Keys only (R12): the folder is a later probe's, not the garbage
-        // this job was asked to take.
-        console.info("omarchy-iptv: cache " + job.args[0] + " of " + Model.asList(job.args).slice(1).join(" ") + " dropped: a probe has started writing there since it was asked for")
+        // this job was asked to take (D-SRC-69), or it is the ACTIVE
+        // source's, which no cache job takes, the way the prune always
+        // keeps it (D-SRC-70).
+        var why = Model.cacheJobDrop(job, context) === "active" ? "it is the active source's folder" : "a probe has started writing there since it was asked for"
+        console.info("omarchy-iptv: cache " + job.args[0] + " of " + Model.asList(job.args).slice(1).join(" ") + " dropped: " + why)
         if (typeof job.onDone === "function") job.onDone({ ok: true, kind: "cache", skipped: true, error: null })
         continue
       }

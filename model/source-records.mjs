@@ -868,6 +868,40 @@ function cacheJobKey(args) {
   return at === -1 || at + 1 >= list.length ? "" : str(list[at + 1])
 }
 
+// cacheJobDrop -- why a queued job must not run any more, decided at RUN
+//   time: "" when it runs, "probe" for a `remove --key K` of a folder a
+//   probe writes into (cacheJobArgs, below), "active" for one of the ACTIVE
+//   key. The reason is for the service's one log line; cacheJobArgs drops
+//   the job for either.
+//
+// D-SRC-70 (2026-10-27, the owner's decision): a `remove --key K` is
+//   dropped when K is the active key when it runs -- the prune's implicit
+//   keep of the active key (D-SRC-07, pruneArgs' --active) mirrored, so no
+//   cache job deletes the folder the guide is reading. It was reachable
+//   through SR7's cancel: a re-check of the active source (a never-fetched
+//   one, added again from the form -> retrySource) probes into the active
+//   source's OWN folder, which is not the new folder SR7 discards, and the
+//   cancel's removal took it. A deliberate removal is unaffected because it
+//   is asked for after the pointer has moved: removeSource publishes the
+//   state with the active key cleared (R3) before it queues, and the commit
+//   of an edit of the active source publishes the new key before it queues
+//   the old folder's removal (Service.handleProbeExit).
+function cacheJobDrop(job, ctx) {
+  var j = job || {}
+  var c = ctx || {}
+  var args = asList(j.args)
+  if (str(args[0]) !== "remove") return ""
+  var key = cacheJobKey(args)
+  if (key === "") return ""
+  if (key === str(c.activeKey)) return "active"
+  var inFlight = asList(c.inFlight)
+  for (var i = 0; i < inFlight.length; i++) if (str(inFlight[i]) === key) return "probe"
+  var claimed = Number(ownKeyValue(c.claims, key))
+  var asked = Number(j.seq)
+  if (isFinite(claimed) && claimed > (isFinite(asked) ? asked : 0)) return "probe"
+  return ""
+}
+
 // cacheJobArgs -- what a queued job runs, decided at RUN time, or null when
 //   it must not run any more. A prune is built by pruneArgs. A `remove --key
 //   K` is DROPPED when a probe is writing into K now, or when a probe started
@@ -877,7 +911,8 @@ function cacheJobKey(args) {
 //   all inside the start-up window or behind a running job). A removal asked
 //   for by a probe's OWN exit -- a cancel (SR7), a failure or a refusal
 //   (SR23), a key that moved -- carries that probe's count and still runs,
-//   and so does every removal of a key no later probe touched. Every other
+//   and so does every removal of a key no later probe touched, unless the
+//   key is the active one when it runs (D-SRC-70, cacheJobDrop). Every other
 //   job (migrate, epg-clear) runs as queued: neither deletes what a probe
 //   writes (rule 15, in ARCHITECTURE-SOURCES 4.7).
 //     job  { args, seq }: the argv as queued -- ["prune"] for a prune --
@@ -892,14 +927,7 @@ function cacheJobArgs(job, ctx) {
   var args = asList(j.args)
   var verb = str(args[0])
   if (verb === "prune") return pruneArgs(c.state, c.activeKey, c.inFlight, c.epgMaxAgeSec)
-  if (verb === "remove") {
-    var key = cacheJobKey(args)
-    var inFlight = asList(c.inFlight)
-    for (var i = 0; i < inFlight.length; i++) if (key !== "" && str(inFlight[i]) === key) return null
-    var claimed = Number(ownKeyValue(c.claims, key))
-    var asked = Number(j.seq)
-    if (isFinite(claimed) && claimed > (isFinite(asked) ? asked : 0)) return null
-  }
+  if (cacheJobDrop(j, c) !== "") return null
   return args.slice()
 }
 
@@ -1337,12 +1365,12 @@ export {
   withSourceStats, activeKeyText, activeKeyOf, activeSourceRecord,
   withActiveKey, invalidInputBlocks, reconcileAction, entryPlaylistUnusable,
   adoptActiveSource, activeEpgUrlOf, pointerWritePlan, probeCommitPlan,
-  probeCommitState, pruneArgs, pruneKeeps, cacheJobKey, cacheJobArgs,
-  probeWaitsFor, reconcileSources, sourceForEdit, sourcesSummary, entryWith,
-  cacheStale, formFields, isFormField, formLimit, FORM_SLACK, formCapacity,
-  emptyValues, copyValues, copyForm, formState, formFocusOrder, formHasText,
-  firstFieldWithText, guideWithForm, openForm, openFirstRun, openAddForm,
-  openEditForm, openXtreamForm, closeForm, withFormPatch, withFormValue,
-  withFormFocus, moveFormFocus, fieldMaskable, fieldRevealed, fieldMasked,
-  toggleReveal, withFormReveal
+  probeCommitState, pruneArgs, pruneKeeps, cacheJobKey, cacheJobDrop,
+  cacheJobArgs, probeWaitsFor, reconcileSources, sourceForEdit,
+  sourcesSummary, entryWith, cacheStale, formFields, isFormField, formLimit,
+  FORM_SLACK, formCapacity, emptyValues, copyValues, copyForm, formState,
+  formFocusOrder, formHasText, firstFieldWithText, guideWithForm, openForm,
+  openFirstRun, openAddForm, openEditForm, openXtreamForm, closeForm,
+  withFormPatch, withFormValue, withFormFocus, moveFormFocus, fieldMaskable,
+  fieldRevealed, fieldMasked, toggleReveal, withFormReveal
 }

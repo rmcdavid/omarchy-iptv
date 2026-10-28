@@ -1298,12 +1298,34 @@ function fetchingLine(host, kind) {
 // mode, a record gone -- which is about this machine, not the host, so the
 // line does not say "from <host>": round 1's review read "Sources is full
 // (50) \u00b7 remove one first from 127.0.0.1". A failure the fetch reported
-// (no code) keeps the host, as UX-SOURCES 5.5 has it.
-var PROBE_LOCAL_REFUSALS = ["too_many", "state_unreadable", "unknown_source"]
-function probeFailureLine(reason, host, kind, code) {
+// keeps the host, as UX-SOURCES 5.5 has it.
+//
+// D-SRC-71 (2026-10-27, the owner's decision): R28e's rule extended to a
+// failure of the plugin's own helper, which is just as local -- it could not
+// write the cache (`cache_unwritable`), it failed unexpectedly (`internal`),
+// the service stopped it at its time limit (`helper_timeout`) -- and, by the
+// same reading (rule 15), it could not answer at all (Model's
+// HELPER_CANNOT_TELL: `no_output`, `helper_damaged`, `not_implemented`). The
+// recheck of D-SRC-69 read "Could not write the cache from 127.0.0.1".
+// Since D-SRC-71 the probe's failure carries its code (Service.
+// handleProbeExit), and the refresh empty state composes through the same
+// function (failureFromHost, Guide.qml), so every "<reason> from <host>"
+// reads one list.
+var PROBE_LOCAL_REFUSALS = ["too_many", "state_unreadable", "unknown_source", "cache_unwritable", "internal",
+                            "helper_timeout", "no_output", "helper_damaged", "not_implemented"]
+
+// "<reason> from <host>", or the reason alone when the code is a local
+// failure (PROBE_LOCAL_REFUSALS) or there is no host to name. The reason is
+// redacted again and "Unknown error" when empty.
+function failureFromHost(reason, host, code) {
   var text = redactUrls(str(reason)) || "Unknown error"
-  if (kind === "file" || str(host) === "" || PROBE_LOCAL_REFUSALS.indexOf(str(code)) !== -1) return text
+  if (str(host) === "" || PROBE_LOCAL_REFUSALS.indexOf(str(code)) !== -1) return text
   return text + " from " + str(host)
+}
+
+function probeFailureLine(reason, host, kind, code) {
+  if (kind === "file") return redactUrls(str(reason)) || "Unknown error"
+  return failureFromHost(reason, host, code)
 }
 
 // Footer transients (UX-SOURCES 5.3). `added` names the new source by its
@@ -1429,7 +1451,7 @@ export {
   sourceRows, EPG_HINT_ROW_TEXT, sourceDetail, sourceAccessibleName,
   sourcesHeaderCount, sourcesHeaderRight, sourcesRowAccessibleName,
   confirmLogosMessage, confirmRemoveMessage, fetchingLine,
-  PROBE_LOCAL_REFUSALS, probeFailureLine, sourceTransient,
+  PROBE_LOCAL_REFUSALS, failureFromHost, probeFailureLine, sourceTransient,
   CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
   CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark,
   logoHaveLess

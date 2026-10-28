@@ -980,10 +980,23 @@ def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
             host = logo_host(urllib.parse.urlsplit(url).netloc or "") or "an unnamed host"
             raise HelperError("logo_chunks", "refused a logo from %s: its PNG chunks are malformed" % host)
         data = canon
-    ensure_private_dir(logo_dir)
     name = logo_filename(url)
     path = os.path.join(logo_dir, name)
-    write_bytes_atomic(path, data)
+    # D-SRC-72: a logo that cannot be put in the cache -- the disk full, the
+    # folder not writable, something else at the file's name -- is refused
+    # with the playlist verb's code (cache_unwritable, D-SRC-69), naming the
+    # file (a hash of the URL, never the URL) and the error's own words. It
+    # used to reach main()'s `internal` and end the run with no summary.
+    # The run stops FETCHING at it (fetch_logo_run): this is not the
+    # address's failure, and a logo it cannot keep is a request for nothing.
+    # A logo folder that is a link to nothing stays R25c's FolderUnusable.
+    try:
+        ensure_private_dir(logo_dir)
+        write_bytes_atomic(path, data)
+    except FolderUnusable:
+        raise
+    except OSError as io_error:
+        raise cache_unwritable(path, io_error) from None
     return name
 
 
