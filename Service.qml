@@ -871,6 +871,11 @@ Item {
   // the same dead stream (4.8 signals 1 and 3) and either can win the race;
   // this keeps the user's toast count at one.
   property string notifiedFailureId: ""
+  // D-PLY-32: the reason the last LOCAL start refusal was told with, so an
+  // episode is told once -- a user zapping through ten channels under a
+  // broken runtime folder gets one card, not ten. Cleared when a start
+  // succeeds; a different reason is a new episode and is told.
+  property string localFailureTold: ""
   // The channel of the most recent failure. The guide reads it to decide
   // whether an open is "come back after a dead stream" or a fresh start
   // (UX 1.3). Distinct from `failedAt`, which is every mark ever: this is
@@ -3224,6 +3229,9 @@ Item {
       // branch reads a healthy new player as "still not answering").
       relaunchTimer.stop()
       root.playRetries = 0
+      // D-PLY-32: this machine started a player, so a local refusal told
+      // before it is over; the next one is a new episode and is told.
+      root.localFailureTold = ""
       // The reply's own channel, not whatever is current now: a start that
       // stood down left a DIFFERENT channel on the player, and that entry id
       // belongs to that channel.
@@ -3313,9 +3321,16 @@ Item {
     var target = root.nowPlaying
     root.nowPlaying = null
     root.playRetries = 0
-    // The player never started: the same class of event the non-zero exit
-    // of an attached mpv used to report (requirement 6).
-    if (!root.userStopped && !root.stopping) root.raiseStreamFailure(target, reason)
+    // The player never started (requirement 6). D-PLY-32: and the reply is
+    // no verdict on the stream, which was never contacted -- a refusal of
+    // this machine (the runtime folder, the lock, the plugin's files, the
+    // cache, `busy` and `no_socket` out of retries) marks nothing and is told
+    // as a local failure, once per episode. Only a refusal about the
+    // channel's own entry is a stream failure (Model.playerStartFailure).
+    if (!root.userStopped && !root.stopping) {
+      if (Model.playerStartFailure(code) === "channel") root.raiseStreamFailure(target, reason)
+      else root.raiseLocalPlayFailure(target, reason)
+    }
     // Terminal either way. The toast above is the user's copy of this event
     // when the play was theirs; when a stop overtook it, stop() already
     // retired the record. Neither leaves anything for a reattach to mark.
@@ -3762,6 +3777,20 @@ Item {
       root.lastFailedId = id
     }
     root.notify("streamFailed", { name: String(target.name || ""), reason: reason })
+  }
+
+  // D-PLY-32: a play this machine refused before the stream was contacted.
+  // The reason is recorded where every play failure records it (`lastError`,
+  // the IPC status); `failedAt`, failed.json and `lastFailedId` are NOT
+  // touched, because nothing is known about the channel, and a broken
+  // runtime folder would otherwise mark every channel the user tries and
+  // take each out of the zap ring. One card per episode: the same reason
+  // again is the same fault, still there.
+  function raiseLocalPlayFailure(target, reason) {
+    root.lastError = reason
+    if (!target || root.localFailureTold === reason) return
+    root.localFailureTold = reason
+    root.notify("localPlayFailure", { name: String(target.name || ""), reason: reason })
   }
 
   function rememberStderr(line) {

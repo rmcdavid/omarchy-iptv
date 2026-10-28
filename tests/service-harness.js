@@ -126,6 +126,38 @@ function makeIds(h) {
     playerSocketTimer: timer("playerSocketTimer"),
     playRetryTimer: timer("playRetryTimer"),
     relaunchTimer: timer("relaunchTimer"),
+    // D-PLY-32: the socket observer's Component (ARCHITECTURE-PLAYER 13), so
+    // a test can run handlePlayerResult's OK branch, which arms it. Each
+    // createObject() is a fresh Socket, counted in h.socketsMade. No mpv runs
+    // here, so a connect finds nothing listening and `connected` stays false
+    // when set, which is what Quickshell's Socket does on a failed connect
+    // (docs/SPIKE-QUICKSHELL-SOCKET.md, C5) -- never more forgiving than it
+    // (rule 10). `h.socketListening` true makes the connect succeed.
+    // D-PLY-32: and what the socket's EOF (handlePlayerGone) stops on its way
+    // to the failure report: the player slot (asked whether a start is in
+    // flight; nothing runs), the focus retry, the stop backstop and PiP's two
+    // bounds. Counted like every timer here, never run.
+    playerProc: proc("playerProc"),
+    // the control slot, which the rewind's clear asks whether a seek is in
+    // flight (clearRewind -> applySeekPlan); nothing runs on it here.
+    controlProc: proc("controlProc"),
+    // and the seek throttle the same clear stops (applySeekPlan).
+    seekThrottle: timer("seekThrottle"),
+    focusTimer: timer("focusTimer"),
+    stopSettleTimer: timer("stopSettleTimer"),
+    pipSequenceWatchdog: timer("pipSequenceWatchdog"),
+    pipStepWatchdog: timer("pipStepWatchdog"),
+    playerSocketComponent: {
+      createObject() {
+        h.socketsMade = (h.socketsMade || 0) + 1
+        let up = false
+        return {
+          get connected() { return up },
+          set connected(v) { up = v === true && h.socketListening === true },
+          write() {}, destroy() { up = false }
+        }
+      }
+    },
     configShieldDebounce: timer("configShieldDebounce"),
     // D-EPG-11 (R31b): the guide-data load is observed -- applyEpgNow runs
     // for real over both file shapes -- and these three are what a fetch
