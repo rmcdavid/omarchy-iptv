@@ -441,7 +441,9 @@
         "routePlayerEvent",
         "rememberEntryOwner",
         "channelForEnd",
-        "endedReport"
+        "endedReport",
+        "deathReport",
+        "loadFailedForOwnEntry"
       ]
     },
     {

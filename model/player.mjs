@@ -656,6 +656,77 @@ function endedReport(context) {
     reason: tail.length > 0 ? str(tail[tail.length - 1]) : str(verdict.reason)
   }
 }
+
+// D-PLY-33 (owner, 2026-10-28): what a player's death says about the CHANNEL.
+// endedReport answers whether the user hears about a death and which channel
+// it names; this answers what the death is evidence of, for every detector
+// that sees one. The owner's rule: a channel is marked failed only when mpv
+// said the stream failed to load -- an end-file whose reason is "error", for
+// that channel's own entry. Every other death the user is told about -- a
+// crash, an external or out-of-memory kill, a VO abort (D-PLY-27), a load
+// replaced and then a death ("stop") -- is told (F4 fails open) and marks
+// nothing, under copy that neither blames the stream nor says "did not play"
+// about a channel that may have played for an hour (PO-4). Until this, 4.8's
+// table read "no end-file at all" as a stream failure, and no code could
+// tell a death on this machine's account from one a stream caused.
+//
+// "Own entry": the end-file names an entry, and either the entry-owner ring
+// says whose it is (channelForEnd names that owner), or the ring has not
+// heard of it and it is the entry the player last started (the router's
+// entryId, from start-file). The second half is not a loosening: the reply
+// that puts an entry on the ring can land after mpv has failed that load and
+// quit (apply_channel says so of an instant failure), and the ring alone
+// would leave a dead stream on a warm player unmarked. An error for an entry
+// neither names, or with no entry id, is no evidence about the channel the
+// card names, so it is told and not marked.
+//
+// The detectors (Service.qml):
+//   the socket's EOF  context.lastEndFile, owners, nowPlaying, entryId,
+//                     userStopped, stopping, tail -- handlePlayerGone
+//   context.unattended  PO-3's reattach: the player died with no shell
+//                     attached, so no end-file was seen by anyone. Never told
+//                     (PO-3) and, by the same rule, never marked.
+//   context.firstLoad `player start`'s own first-load window answered
+//                     "failed" (context.reason, its reason). The helper's
+//                     reply does not say whether mpv sent an end-file error
+//                     for the entry or closed the connection: its
+//                     observe_first_load returns the same {state, reason} for
+//                     both. So this is the helper's word, taken as before --
+//                     marked, "Stream failed" -- and the one detector the rule
+//                     cannot yet reach, raised with D-PLY-33's report.
+//
+// Returns { notify, mark, card, target, reason }: card is the notifyArgv
+// event ("streamFailed" or "playerStopped"), "" when nothing is told; reason
+// is what lastError records -- endedReport's tail-or-file_error for a load
+// that failed (D-PLY-29 stands there), the generic sentence for a death with
+// no such end-file, whose card carries no reason at all.
+function deathReport(context) {
+  var ctx = context && typeof context === "object" ? context : {}
+  if (ctx.unattended === true) return { notify: false, mark: false, card: "", target: null, reason: "" }
+  if (ctx.firstLoad === true) {
+    var np = ctx.nowPlaying
+    var why = str(ctx.reason)
+    return { notify: true, mark: true, card: "streamFailed",
+             target: np ? { id: str(np.id), name: str(np.name) } : null,
+             reason: why !== "" ? why : PLAYER_GENERIC_FAILURE }
+  }
+  var report = endedReport(ctx)
+  if (report.notify !== true) return { notify: false, mark: false, card: "", target: report.target, reason: "" }
+  if (loadFailedForOwnEntry(ctx.lastEndFile, ctx.owners, ctx.entryId)) {
+    return { notify: true, mark: true, card: "streamFailed", target: report.target, reason: report.reason }
+  }
+  return { notify: true, mark: false, card: "playerStopped", target: report.target, reason: PLAYER_GENERIC_FAILURE }
+}
+
+// deathReport's evidence test: an end-file "error" for an entry the ring
+// owns, or, the ring silent, for the entry the player last started.
+function loadFailedForOwnEntry(end, owners, currentEntryId) {
+  if (!end || typeof end !== "object" || str(end.reason) !== "error") return false
+  var id = playerEntryId(end.entryId)
+  if (id === null) return false
+  if (owners && typeof owners === "object" && ownKeyValue(owners, String(id))) return true
+  return id === playerEntryId(currentEntryId)
+}
 export {
   stopEscalation, healthTick, playFork, playForkBlind, zapArgs,
   PLAY_UNREADABLE, HELPER_CANNOT_TELL, helperCannotTell, PLAY_RETRYABLE,
@@ -665,5 +736,6 @@ export {
   tlsReloadDisposition, playerTlsVerdict, parsePlayerProbe, parsePlayerEvent,
   playerEntryId, endedVerdict, probeVerdict, playerDeathKind,
   playerSessionFollowUp, playerRouterState, pushPlayerLog, routePlayerEvent,
-  rememberEntryOwner, channelForEnd, endedReport
+  rememberEntryOwner, channelForEnd, endedReport, deathReport,
+  loadFailedForOwnEntry
 }

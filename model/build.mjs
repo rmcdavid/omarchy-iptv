@@ -357,7 +357,12 @@ var NOTIFY_IDS = {
   // (Model.playerStartFailure "local"): the runtime folder, the lock, the
   // plugin's own files, the cache. Its own id, not streamFailed's, because
   // it blames no channel; told once per episode (Service.qml).
-  localPlayFailure: 74021
+  localPlayFailure: 74021,
+  // D-PLY-33 (owner, 2026-10-28): the player died and mpv never said the
+  // load failed (Model.deathReport card "playerStopped"): a crash, a kill, an
+  // out-of-memory kill, a VO abort. Its own id, because it marks no channel
+  // and says nothing about the stream; one card per death.
+  playerStopped: 74022
 }
 
 // Long enough to cover a first-load failure and the user's reaction, short

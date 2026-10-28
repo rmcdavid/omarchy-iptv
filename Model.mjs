@@ -116,7 +116,8 @@ export {
   tlsPropertiesSafe, playerTls, tlsReloadDisposition, playerTlsVerdict,
   parsePlayerProbe, parsePlayerEvent, endedVerdict, probeVerdict,
   playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
-  routePlayerEvent, rememberEntryOwner, channelForEnd, endedReport
+  routePlayerEvent, rememberEntryOwner, channelForEnd, endedReport,
+  deathReport
 } from "./model/player.mjs"
 export {
   MPV_HANDOFF_TEXT, MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase,
