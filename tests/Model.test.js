@@ -13748,6 +13748,165 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     return [before, after, Object.keys(h.root.failedAt), h.jobs()]
   }, [true, null, [], []])
 
+  // ---- D-PLY-33 (owner, 2026-10-28): a death with NO end-file marks nothing ----
+  //
+  // Every death the socket's EOF judged as a failure went to
+  // raiseStreamFailure: failedAt, a `failed mark` into failed.json,
+  // lastFailedId and "Stream failed / X did not play", for a crash, a kill,
+  // an out-of-memory kill or D-PLY-27's VO abort as much as for a dead
+  // stream, and PO-3's reattach marked a record nobody saw end. The owner's
+  // rule (Model.deathReport): mark only an end-file "error" for the
+  // channel's own entry; any other death is told as "Playback stopped" (its
+  // own id, 74022) and marks nothing; the reattach marks nothing and tells
+  // nothing. The first-load window still takes the helper's word, which
+  // cannot say which ending it saw (raised with D-PLY-33's report). Red on
+  // dev 795a7bf, which has no deathReport and marks every one of these
+  // deaths: 6 of these 8 checks (the two that pass there are the guards
+  // that a load mpv said failed still marks, and one card per failed play).
+  {
+    const X = { id: "t:x", name: "X", group: "", launchedFrom: "", since: 1 }
+    const GENERIC = "Playback stopped unexpectedly"
+    const ring = (entry, who) => M.rememberEntryOwner(M.keyedMap(), entry, who || { id: X.id, name: X.name })
+    const sum = r => [r.notify, r.mark, r.card, r.target ? r.target.id : null, r.reason]
+    checkCall("D-PLY-33: deathReport over the end-file shapes -- only an end-file ERROR for the channel's own entry (the ring's, or the entry the player last started) marks and says Stream failed; another entry's error, a stop then a death, and no end-file at all are told as Playback stopped and mark nothing; eof, quit and a redirect are silent", () => [
+      // the ring owns entry 3: its error marks its owner, with the tail as the reason
+      sum(M.deathReport({ lastEndFile: { kind: "end-file", entryId: 3, reason: "error", fileError: "loading failed" }, owners: ring(3), nowPlaying: { id: "t:y", name: "Y" }, entryId: 4, tail: ["[ffmpeg] tcp: Connection refused"] })),
+      // the ring has not heard of entry 5, and 5 is the entry the player last started
+      sum(M.deathReport({ lastEndFile: { kind: "end-file", entryId: 5, reason: "error", fileError: "loading failed" }, owners: ring(3), nowPlaying: X, entryId: 5, tail: [] })),
+      // an error for an entry neither the ring nor the router ties to anyone
+      sum(M.deathReport({ lastEndFile: { kind: "end-file", entryId: 7, reason: "error", fileError: "loading failed" }, owners: ring(3), nowPlaying: X, entryId: 3, tail: ["[stream] Failed to open h.test"] })),
+      // an error with no entry id at all
+      sum(M.deathReport({ lastEndFile: { kind: "end-file", entryId: null, reason: "error", fileError: "loading failed" }, owners: ring(3), nowPlaying: X, entryId: 3 })),
+      // an error for an entry the ring has not heard of while the router has
+      // seen no start-file either (entryId 0, e.g. an adopted player whose
+      // stash carried no entry id): nothing ties it to the channel, so it is
+      // told and not marked
+      sum(M.deathReport({ lastEndFile: { kind: "end-file", entryId: 5, reason: "error", fileError: "loading failed" }, owners: ring(3), nowPlaying: X, entryId: 0, tail: ["[stream] Failed to open h.test"] })),
+      // a load replaced, then the process died
+      sum(M.deathReport({ lastEndFile: { kind: "end-file", entryId: 3, reason: "stop", fileError: "" }, owners: ring(3), nowPlaying: X, entryId: 3 })),
+      // no end-file at all, with D-PLY-27's VO line and a mesa warning in the tail (D-PLY-29)
+      sum(M.deathReport({ lastEndFile: null, owners: ring(3), nowPlaying: X, entryId: 3, tail: ["[vo/gpu] Error: could not create a GL context", "MESA-EGL: warning: failed to get driver name for fd -1"] })),
+      sum(M.deathReport({ lastEndFile: { kind: "end-file", entryId: 3, reason: "eof", fileError: "" }, owners: ring(3), nowPlaying: X, entryId: 3 })),
+      sum(M.deathReport({ lastEndFile: { kind: "end-file", entryId: 3, reason: "quit", fileError: "" }, owners: ring(3), nowPlaying: X, entryId: 3 })),
+      sum(M.deathReport({ lastEndFile: { kind: "end-file", entryId: 3, reason: "redirect", fileError: "" }, owners: ring(3), nowPlaying: X, entryId: 3 })),
+      // our own stop outranks an error
+      sum(M.deathReport({ lastEndFile: { kind: "end-file", entryId: 3, reason: "error", fileError: "loading failed" }, owners: ring(3), nowPlaying: X, entryId: 3, userStopped: true })),
+      sum(M.deathReport({ lastEndFile: null, owners: ring(3), nowPlaying: X, entryId: 3, stopping: true }))
+    ], [
+      [true, true, "streamFailed", "t:x", "[ffmpeg] tcp: Connection refused"],
+      [true, true, "streamFailed", "t:x", "loading failed"],
+      [true, false, "playerStopped", "t:x", GENERIC],
+      [true, false, "playerStopped", "t:x", GENERIC],
+      [true, false, "playerStopped", "t:x", GENERIC],
+      [true, false, "playerStopped", "t:x", GENERIC],
+      [true, false, "playerStopped", "t:x", GENERIC],
+      [false, false, "", "t:x", ""],
+      [false, false, "", "t:x", ""],
+      [false, false, "", "t:x", ""],
+      [false, false, "", "t:x", ""],
+      [false, false, "", "t:x", ""]
+    ])
+    checkCall("D-PLY-33: deathReport -- PO-3's unattended death is never told and never marked; the first-load window's \"failed\" is the helper's word, still marked until the reply says which ending it saw, with the generic sentence when it gave no reason; F4 fails open on a null context", () => [
+      sum(M.deathReport({ unattended: true })),
+      sum(M.deathReport({ unattended: true, lastEndFile: { kind: "end-file", entryId: 3, reason: "error" }, owners: ring(3), nowPlaying: X, entryId: 3 })),
+      sum(M.deathReport({ firstLoad: true, nowPlaying: X, reason: "Failed to open 127.0.0.1." })),
+      sum(M.deathReport({ firstLoad: true, nowPlaying: X, reason: "" })),
+      sum(M.deathReport(null)),
+      M.PLAYER_GENERIC_FAILURE
+    ], [
+      [false, false, "", null, ""],
+      [false, false, "", null, ""],
+      [true, true, "streamFailed", "t:x", "Failed to open 127.0.0.1."],
+      [true, true, "streamFailed", "t:x", GENERIC],
+      [true, false, "playerStopped", null, GENERIC],
+      GENERIC
+    ])
+    checkCall("D-PLY-33: notifyArgv playerStopped -- its own title and replace-id 74022, a sentence that neither blames the stream nor says \"did not play\", no reason even when one is passed, the S-04 quoting of a hostile name; 74022 is no other card's and 74019 stays retired", () => {
+      const a = M.notifyArgv("playerStopped", { name: "Sky Sports", reason: "MESA-EGL: warning: failed to get driver name for fd -1" })
+      const hostile = M.notifyArgv("playerStopped", { name: "--urgency=critical" })
+      const ids = Object.values(M.NOTIFY_IDS)
+      return [a.slice(0, 9), a[9], a[10], a.join(" ").indexOf("did not play"), a.join(" ").indexOf("MESA"), hostile[hostile.length - 1],
+              M.NOTIFY_IDS.playerStopped, ids.filter(v => v === 74022).length, ids.length === new Set(ids).size, ids.indexOf(74019), a.length]
+    }, [["omarchy-notification-send", "--app-name", "IPTV", "-u", "normal", "-g", M.GLYPHS.tvOff, "-r", "74022"], "Playback stopped",
+        "\u201cSky Sports\u201d stopped unexpectedly", -1, -1, "\u201curgency=critical\u201d stopped unexpectedly", 74022, 1, true, -1, 11])
+
+    // Through Service.qml's own handlePlayerLine (the router, fed mpv's own
+    // JSON lines) and handlePlayerGone (the socket's EOF).
+    const feed = (h, lines) => { for (const l of lines) h.root.handlePlayerLine(JSON.stringify(l)) }
+    const die = (h, lines, owners) => {
+      h.root.nowPlaying = Object.assign({}, X)
+      h.root.entryOwners = owners || ring(3)
+      feed(h, lines)
+      h.root.handlePlayerGone()
+      h.drain()
+      return verdictOf(h).concat([h.root.lastError, h.root.nowPlaying === null])
+    }
+    const START3 = { event: "start-file", playlist_entry_id: 3 }
+    const VO = { event: "log-message", level: "error", prefix: "vo/gpu", text: "Error: could not create a GL context\n" }
+    const MESA = { event: "log-message", level: "error", prefix: "", text: "MESA-EGL: warning: failed to get driver name for fd -1\n" }
+    const STOPPED = ["74022 Playback stopped | \u201cX\u201d stopped unexpectedly"]
+    checkCall("D-PLY-33: through handlePlayerGone, a death with NO end-file -- a crash or a kill (nothing in the tail), D-PLY-27's VO abort, a mesa warning last in the tail -- marks NOTHING (failedAt, failed.json, lastFailedId untouched) and is told once as Playback stopped (74022) with no tail line, lastError the generic sentence", () => [
+      die(bootPlayer(), [START3]),
+      die(bootPlayer(), [START3, VO]),
+      die(bootPlayer(), [START3, VO, MESA])
+    ], [
+      [[], [], "", STOPPED, GENERIC, true],
+      [[], [], "", STOPPED, GENERIC, true],
+      [[], [], "", STOPPED, GENERIC, true]
+    ])
+    checkCall("D-PLY-33: through handlePlayerGone, a load replaced and then a death, and an error for an entry neither the ring nor the router ties to the channel, mark nothing and are told as Playback stopped (F4: told, never silent)", () => [
+      die(bootPlayer(), [START3, { event: "end-file", playlist_entry_id: 3, reason: "stop" }]),
+      die(bootPlayer(), [START3, { event: "end-file", playlist_entry_id: 9, reason: "error", file_error: "loading failed" }])
+    ], [
+      [[], [], "", STOPPED, GENERIC, true],
+      [[], [], "", STOPPED, GENERIC, true]
+    ])
+    checkCall("D-PLY-33: through handlePlayerGone, an end-file ERROR for the channel's own entry still marks and still says Stream failed (74011) -- the ring's entry, and an entry the ring has not heard of yet that the player last started (the reply can land after mpv quit); a clean eof stays silent and unmarked (PO-4)", () => [
+      die(bootPlayer(), [START3, { event: "log-message", level: "error", prefix: "ffmpeg", text: "tcp: Connection refused\n" }, { event: "end-file", playlist_entry_id: 3, reason: "error", file_error: "loading failed" }]),
+      die(bootPlayer(), [{ event: "start-file", playlist_entry_id: 6 }, { event: "end-file", playlist_entry_id: 6, reason: "error", file_error: "loading failed" }], M.keyedMap()),
+      die(bootPlayer(), [START3, { event: "end-file", playlist_entry_id: 3, reason: "eof" }])
+    ], [
+      [["t:x"], ["mark:t:x"], "t:x", ["74011 Stream failed | \u201cX\u201d did not play" + M.SEP + "[ffmpeg] tcp: Connection refused"], "[ffmpeg] tcp: Connection refused", true],
+      [["t:x"], ["mark:t:x"], "t:x", ["74011 Stream failed | \u201cX\u201d did not play" + M.SEP + "loading failed"], "loading failed", true],
+      [[], [], "", [], "", true]
+    ])
+    checkCall("D-PLY-33: one card per failed play -- a first load the start watched fail (marked, Stream failed) followed by the socket's EOF with no end-file adds no second card and keeps the mark; a death after the user plays the channel again is told again", () => {
+      const h = bootPlayer()
+      h.root.nowPlaying = Object.assign({}, X)
+      h.root.playerKind = "start"
+      h.root.handlePlayerResult(JSON.stringify({ ok: true, kind: "player.start", spawned: true, pid: 4242, id: "t:x", name: "X", entryId: 3, seq: 1,
+                                                 firstLoad: { state: "failed", reason: "Failed to open 127.0.0.1." }, warnings: [], applied: true, playing: null }))
+      h.drain()
+      const afterFirst = toasts(h).length
+      h.root.nowPlaying = Object.assign({}, X)
+      h.root.handlePlayerGone()
+      h.drain()
+      const afterEof = verdictOf(h)
+      // The gate is the play's: Service.play() itself opens it again.
+      const again = bootPlayer()
+      const index = M.keyedMap()
+      index["t:x"] = { id: "t:x", name: "X", url: "http://s.example.test/x.ts", group: "G" }
+      again.root.channelIndex = index
+      die(again, [START3])
+      const replayed = again.root.play("t:x", true, "")
+      again.drain()
+      again.ids.playerProc.running = false
+      die(again, [START3])
+      return [afterFirst, afterEof, replayed, toasts(again).length]
+    }, [1, [["t:x"], ["mark:t:x"], "t:x", ["74011 Stream failed | \u201cX\u201d did not play" + M.SEP + "Failed to open 127.0.0.1."]], true, 2])
+    checkCall("D-PLY-33 / PO-3: a reattach that finds no player and a surviving session record (the probe's real reply through applyProbe) marks NOTHING -- failedAt, failed.json and lastFailedId untouched, no card -- and still retires the record", () => {
+      const h = bootPlayer()
+      h.unstub("noteSessionOutcome")
+      h.unstub("markDeadSession")
+      h.root.userState = M.recordPlayed(h.root.userState, { id: "t:x", name: "X" }, 10, 1000)
+      const before = M.stateSession(h.root.userState) !== null
+      h.root.probeSeq = h.root.playSeq
+      h.root.applyProbe(JSON.stringify({ ok: true, kind: "player.probe", running: false, responsive: false, pid: null, seq: 0 }))
+      h.drain()
+      return [before, M.stateSession(h.root.userState), h.root.deadSessionPending].concat(verdictOf(h))
+    }, [true, null, false, [], [], "", []])
+  }
+
   // ---- R21e (D-SINK-19 round 11): THE MIGRATION, through Service.qml ----
   //
   // Every pin here runs the shipping functions over a 0.13.5-shaped install:

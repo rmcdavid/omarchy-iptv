@@ -61,11 +61,14 @@ TestCase {
   //
   // What is left here is only what Service.qml itself is: the loop, the
   // property writes, and the notify call. Model.routePlayerEvent() per line
-  // exactly as handlePlayerLine() does it, Model.endedReport() at EOF exactly
-  // as handlePlayerGone() does it (which also clears the last end-file and
-  // the entry id), Model.rememberEntryOwner() for the ring. "EOF" stands for
-  // the socket closing, the only moment a toast can be raised. Break a rule
-  // in Model.js and these cases go red without anyone editing them.
+  // exactly as handlePlayerLine() does it, Model.deathReport() at EOF exactly
+  // as handlePlayerGone() does it (with the router's entry id, and clearing
+  // the last end-file and the entry id after), Model.rememberEntryOwner() for
+  // the ring. "EOF" stands for the socket closing, the only moment a toast
+  // can be raised. Each toast records the card deathReport picks and whether
+  // it marks: since D-PLY-33 those are the decision, and a toast's name and
+  // reason alone no longer show it. Break a rule in Model.js and these cases
+  // go red without anyone editing them.
   function routePlayer(transcript) {
     var lines = transcript.lines || []
     var owners = transcript.owners || ({})
@@ -74,15 +77,16 @@ TestCase {
     var toasts = []
     for (var i = 0; i < lines.length; i++) {
       if (lines[i] === "EOF") {
-        var report = Model.endedReport({
+        var report = Model.deathReport({
           lastEndFile: state.lastEndFile,
           owners: owners,
           nowPlaying: current,
+          entryId: state.entryId,
           userStopped: transcript.userStopped === true,
           stopping: transcript.stopping === true,
           tail: state.tail
         })
-        if (report.notify) toasts.push({ name: report.target ? String(report.target.name) : "", reason: report.reason })
+        if (report.notify) toasts.push({ name: report.target ? String(report.target.name) : "", reason: report.reason, card: report.card, mark: report.mark })
         state = { entryId: 0, lastEndFile: null, idle: state.idle, tail: state.tail }
         continue
       }
@@ -715,20 +719,24 @@ TestCase {
     compare(live.entryId, 2)
     // And the superseded end-file cannot come back later: if the player dies
     // after the zap that is a crash naming the channel now playing, with the
-    // generic reason - never entry 1 and never the zap's own "stop".
+    // generic reason - never entry 1 and never the zap's own "stop". A death
+    // with no end-file is "Playback stopped" and marks nothing (D-PLY-33).
     var died = routePlayer({ lines: zap.concat(["EOF"]), owners: owners, nowPlaying: { id: "t:b", name: "Channel B" } })
     compare(died.toasts.length, 1)
     compare(died.toasts[0].name, "Channel B")
     compare(died.toasts[0].reason, Model.PLAYER_GENERIC_FAILURE)
+    compare(died.toasts[0].card, "playerStopped")
+    compare(died.toasts[0].mark, false)
     // The silence is the start-file's doing, not a free pass for "stop": the
     // same end-file with no load after it is a failure the user must see (a
-    // load we issued was replaced and then the process died).
+    // load we issued was replaced and then the process died) -- told as
+    // "Playback stopped", and not marked: nothing says the stream caused it.
     var orphanStop = routePlayer({ lines: [
       '{"event":"start-file","playlist_entry_id":1}',
       '{"event":"end-file","reason":"stop","playlist_entry_id":1}',
       "EOF"
     ], owners: owners, nowPlaying: { id: "t:a", name: "Channel A" } })
-    compare(orphanStop.toasts, [{ name: "Channel A", reason: Model.PLAYER_GENERIC_FAILURE }])
+    compare(orphanStop.toasts, [{ name: "Channel A", reason: Model.PLAYER_GENERIC_FAILURE, card: "playerStopped", mark: false }])
     // A .m3u8 master resolves through redirect on nearly every load: never terminal.
     var master = routePlayer({ lines: [
       '{"event":"start-file","playlist_entry_id":1}',
@@ -757,13 +765,15 @@ TestCase {
     compare(slow.toasts.length, 1)
     compare(slow.toasts[0].name, "Channel A")
     compare(slow.toasts[0].reason, "loading failed")
-    // Fail open, three ways.
-    compare(burst('{"event":"end-file","reason":"error","playlist_entry_id":99,"file_error":"loading failed"}').toasts,
-            [{ name: "Channel B", reason: "loading failed" }])
-    compare(burst('{"event":"end-file","reason":"error","file_error":"loading failed"}').toasts,
-            [{ name: "Channel B", reason: "loading failed" }])
-    compare(burst('{"event":"end-file","reason":"error","playlist_entry_id":"junk","file_error":"loading failed"}').toasts,
-            [{ name: "Channel B", reason: "loading failed" }])
+    compare(slow.toasts[0].card, "streamFailed")
+    compare(slow.toasts[0].mark, true)
+    // Fail open, three ways: told, naming the channel playing now. Since
+    // D-PLY-33 an error the ring and the router cannot tie to that channel is
+    // "Playback stopped" with the generic sentence, and marks nothing.
+    var opened = [{ name: "Channel B", reason: Model.PLAYER_GENERIC_FAILURE, card: "playerStopped", mark: false }]
+    compare(burst('{"event":"end-file","reason":"error","playlist_entry_id":99,"file_error":"loading failed"}').toasts, opened)
+    compare(burst('{"event":"end-file","reason":"error","file_error":"loading failed"}').toasts, opened)
+    compare(burst('{"event":"end-file","reason":"error","playlist_entry_id":"junk","file_error":"loading failed"}').toasts, opened)
     // What we caused is silent, whatever mpv reported (PO-4 for a clean end).
     compare(burst('{"event":"end-file","reason":"error","playlist_entry_id":1,"file_error":"loading failed"}', "userStopped").toasts, [])
     compare(burst('{"event":"end-file","reason":"error","playlist_entry_id":1,"file_error":"loading failed"}', "stopping").toasts, [])
@@ -788,14 +798,16 @@ TestCase {
       '{"event":"end-file","reason":"error","playlist_entry_id":4,"file_error":"loading failed"}',
       "EOF"
     ], owners: owners, nowPlaying: { id: "t:5", name: "Channel 5" } })
-    compare(known.toasts, [{ name: "Channel 4", reason: "loading failed" }])
-    // Entry 1 fell off the back. The user still gets the toast.
+    compare(known.toasts, [{ name: "Channel 4", reason: "loading failed", card: "streamFailed", mark: true }])
+    // Entry 1 fell off the back. The user still gets the toast -- naming the
+    // channel playing now, which nothing ties to entry 1, so since D-PLY-33
+    // it is "Playback stopped" and marks nothing.
     var forgotten = routePlayer({ lines: [
       '{"event":"start-file","playlist_entry_id":5}',
       '{"event":"end-file","reason":"error","playlist_entry_id":1,"file_error":"loading failed"}',
       "EOF"
     ], owners: owners, nowPlaying: { id: "t:5", name: "Channel 5" } })
-    compare(forgotten.toasts, [{ name: "Channel 5", reason: "loading failed" }])
+    compare(forgotten.toasts, [{ name: "Channel 5", reason: Model.PLAYER_GENERIC_FAILURE, card: "playerStopped", mark: false }])
     // A reply with no entry id, and a start whose target is not known yet,
     // record nothing rather than poisoning the ring with a blank row.
     compare(ownersFor([[0, { id: "t:x", name: "X" }], ["junk", { id: "t:y", name: "Y" }], [3, null]]), ({}))
@@ -814,7 +826,7 @@ TestCase {
       "EOF"
     ], owners: ownersFor([[1, { id: "t:a", name: "Channel A" }]]), nowPlaying: { id: "t:a", name: "Channel A" } })
     compare(run.tail, ["[stream] Failed to open provider.test"])          // the info line is not kept
-    compare(run.toasts, [{ name: "Channel A", reason: "[stream] Failed to open provider.test" }])
+    compare(run.toasts, [{ name: "Channel A", reason: "[stream] Failed to open provider.test", card: "streamFailed", mark: true }])
     var blob = JSON.stringify(run)
     compare(blob.indexOf("pw@"), -1)
     compare(blob.indexOf("secret-token"), -1)

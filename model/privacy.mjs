@@ -263,6 +263,15 @@ function notifyArgv(event, params) {
     // (Model.playerStartFailure "local"). The glyph is mpvMissing's, the
     // other local reason a player cannot start.
     spec = { title: "Could not start playback", body: QUOTE_OPEN + name + QUOTE_CLOSE + " did not play" + (reason !== "" ? SEP + reason : ""), glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.localPlayFailure }
+  } else if (event === "playerStopped") {
+    // D-PLY-33 (owner, 2026-10-28): the player died and mpv never said the
+    // load failed (Model.deathReport). Nothing is known about the stream, so
+    // the copy blames nothing, and the channel may have been playing for an
+    // hour, so it does not say "did not play" (PO-4). A sentence and no
+    // reason: what the log tail holds at a death with no end-file is a
+    // driver warning as often as a cause (D-PLY-29), and a crash or a kill
+    // leaves no line at all. The same S-04 quoting as every body with a name.
+    spec = { title: "Playback stopped", body: QUOTE_OPEN + name + QUOTE_CLOSE + " stopped unexpectedly", glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.playerStopped }
   } else if (event === "playlistRefreshed") {
     spec = { title: "Playlist refreshed", body: pluralChannels(p.channelCount) + " in " + formatCount(p.groupCount) + (Number(p.groupCount) === 1 ? " group" : " groups"), glyph: GLYPHS.refresh, urgency: "low", id: NOTIFY_IDS.playlistRefreshed }
   } else if (event === "playlistError") {

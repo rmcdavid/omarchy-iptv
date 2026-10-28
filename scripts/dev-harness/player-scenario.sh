@@ -30,7 +30,10 @@
 #   P13 startup race      D-PLY-4: a play issued from the earliest instant the
 #                         successor's IPC accepts one keeps its session record
 #   P14 marked once       D-PLY-3: PO-3's record is retired when it is consumed,
-#                         so the next start does not raise the same mark again
+#                         so the next start does not raise the same mark again.
+#                         Since D-PLY-33 (owner, 2026-10-28) the reattach marks
+#                         nothing at all -- nobody saw an end-file -- so the
+#                         check is that the record is retired and NO mark lands
 #   P9  reap              the harness teardown still finds a detached grandchild
 #
 # Evidence rule (CLAUDE.md 10): run with --baseline <git-ref> to export that
@@ -655,11 +658,20 @@ is "P13 no play issued at shell start is dropped ($RACE_TRIALS trials)" "$nostar
 is "P13 no play issued at shell start loses its session record ($RACE_TRIALS trials)" "$losses" "0"
 is "P13 and the record names the channel that is demonstrably playing" "$(session_id)" "$(np id)"
 
-echo "== P14 D-PLY-3: PO-3's mark is raised once, not on every later start"
+echo "== P14 D-PLY-3 / D-PLY-33: PO-3's record is retired, and the reattach marks nothing"
 # The full PO-3 procedure: play, kill the shell and then the player with
-# nobody listening, come back. The mark must land once and the record must be
-# RETIRED - live at 8f9447e it stayed on disk in 2 runs of 3, so the next
-# start consumed it again and re-marked the same channel with the same HH:MM.
+# nobody listening, come back. The record must be RETIRED - live at 8f9447e it
+# stayed on disk in 2 runs of 3, so the next start consumed it again and
+# re-marked the same channel with the same HH:MM.
+#
+# D-PLY-33 (owner, 2026-10-28): a record found with no player is a death
+# nobody saw an end-file for, so the reattach marks NOTHING (it told nothing
+# before either). This check used to wait for the mark. The retirement is
+# read FIRST because it is the evidence that the reattach decided:
+# markDeadSession retires the record in the same turn that dev 795a7bf
+# raised the mark in, so once the file reads no record a mark that was
+# coming is already in failedAt -- and NOFIELD is qa_field's answer from a
+# service that answered, never from a dead one (NOSTATE).
 ipc play "t:live1" >/dev/null
 until_eq 1 15 player_count || bad "P14 no player to abandon"
 until_session "t:live1" 10 || true
@@ -671,11 +683,9 @@ until_eq 0 8 player_count || true
 : >"$SCRATCH/harness.log"
 "$RUN" restart-shell >>"$LOG" 2>&1 || { bad "P14 restart-shell failed (see $LOG)"; exit 1; }
 wait_log 'service loaded' 20 || bad "P14 the shell did not come back"
-until_set 15 svc "d['failedAt'].get('t:live1')" || true
-mark14=$(svc "d['failedAt'].get('t:live1')")
-ck "P14 the channel that died unattended is marked in the guide" 'qa_value "$mark14"'
 until_no_session 10 || true
 is "P14 the record is retired once it has been consumed" "$(session_id)" "$QA_NO_SESSION"
+is "P14 the channel that died unattended is NOT marked (D-PLY-33)" "$(svc "d['failedAt'].get('t:live1')")" "$QA_NO_FIELD"
 for again in 1 2; do
   "$RUN" restart-shell >>"$LOG" 2>&1 || { bad "P14 restart $again failed (see $LOG)"; exit 1; }
   wait_log 'service loaded' 20 || bad "P14 restart $again did not come back"
