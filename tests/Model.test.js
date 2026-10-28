@@ -14030,15 +14030,48 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       return [signals, said(h), h.root.playerWanted, h.root.playerPending, slotVerb(h), h.ids.playerProc.running, h.root.timedOutPlay !== null && h.root.timedOutPlay !== undefined]
     }, [[15], [X.id, [], [], [], ""], true, true, "probe", true, true])
 
+    // The recheck of lane-ply35: the claim "the observer hunts at once" was
+    // unpinned (removing the arm left every check green), because the start's
+    // own 3 s burst had long ended and only the probe's adoption re-armed it.
+    checkCall("D-PLY-35 (recheck): the socket hunt is armed on the stopped start's exit itself, before the probe answers -- a fresh observer object and the retry timer restarted", () => {
+      const h = bootPlayer()
+      playing(h)
+      stopped(h)
+      const made = h.socketsMade || 0, restarts = h.ids.playerSocketTimer.restarts
+      exit(h, "")
+      return [(h.socketsMade || 0) - made, h.ids.playerSocketTimer.restarts - restarts, slotVerb(h)]
+    }, [1, 1, "probe"])
+
+    // The watchdog's flag is spent on the exit it was raised for. Left set, a
+    // later start that dies with no output and no TERM -- a helper crash --
+    // read as stopped by the watchdog and went looking instead of telling
+    // (the recheck's mutant: every check green with the reset removed).
+    checkCall("D-PLY-35 (recheck): the watchdog's flag is spent on its own exit -- after a stopped start was told, a later start's empty reply with no TERM is the no-output refusal it is, told, not a look", () => {
+      const h = bootPlayer()
+      playing(h)
+      stopped(h)
+      exit(h, "")
+      exit(h, probeOf({ running: false, responsive: false, pid: null, stash: null, idle: null, tls: null }))
+      const first = toasts(h).length
+      h.root.play(X.id, true, "")
+      h.drain()
+      const again = slotVerb(h)
+      exit(h, "")
+      return [first, again, h.ids.playerProc.running, toasts(h).slice(first), h.root.lastError]
+    }, [1, "start", false, ["74021 Could not start playback | \u201cX\u201d did not play" + M.SEP + "Helper produced no output"], "Helper produced no output"])
+
     checkCall("D-PLY-35: the probe finds the stopped start's player on the channel (dev's measured case) -- adopted, observed, nothing told, nothing marked, and the start's relaunch and retries settled as an ok reply settles them", () => {
       const h = bootPlayer()
       playing(h)
       stopped(h)
       exit(h, "")
       h.root.playRetries = 2
+      // The recheck: and the local-failure episode ends, as an ok reply
+      // ends it (unpinned until then: the reset could go, all green).
+      h.root.localFailureTold = "Helper timed out"
       exit(h, probeOf())
-      return [said(h), h.root.playerWanted, h.root.timedOutPlay, h.root.playRetries, h.root.playing === true || h.root.playerUp === true]
-    }, [[X.id, [], [], [], ""], true, null, 0, true])
+      return [said(h), h.root.playerWanted, h.root.timedOutPlay, h.root.playRetries, h.root.playing === true || h.root.playerUp === true, h.root.localFailureTold]
+    }, [[X.id, [], [], [], ""], true, null, 0, true, ""])
 
     checkCall("D-PLY-35: the probe finds NOTHING -- the start failed, and is told once as \"Could not start playback\" with \"Helper timed out\", marks nothing, and the record is retired", () => {
       const h = bootPlayer()
