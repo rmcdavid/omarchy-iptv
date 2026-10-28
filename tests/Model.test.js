@@ -13483,6 +13483,38 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
        banner: "Guide data unavailable (A folder the plugin uses is a broken link or not a folder)" + Model.SEP + "channels still work" + Model.SEP + "r retry",
        told: [true, true], path: false })
 
+  // ---- D-PLY-30 (2026-10-27): a play the player's runtime folder refuses is told in a sentence ----
+  //
+  // `player start|restart` answered `internal` with an exception and the
+  // runtime folder's path when the folder could not be made or its lock
+  // opened; the "did not play" notification has read "Helper failed
+  // unexpectedly" since D-SRC-69. The helper now names the refusal
+  // (`runtime_unwritable`, or R25c's `folder_unusable` for a link to
+  // nothing) and the model gives each its sentence. The replies are the
+  // real helper's (local-refusals.json); the handler is Service.qml's own.
+  // Red on dev 41ab132.
+  checkCall("D-PLY-30: a `player start` or `restart` the runtime folder or its lock refused (the real helper's replies) reaches the user through Service.handlePlayerResult as the fixture's sentence -- the \"did not play\" notification and lastError, no path, no exception, no retry, nothing left playing; dev's `internal` reply still reads the D-SRC-69 sentence", () => {
+    const run = (reply, kind) => {
+      const h = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+      h.detached.length = 0
+      h.warnings.length = 0
+      h.root.nowPlaying = { id: "t:x", name: "X", group: "", launchedFrom: "", since: 1 }
+      h.root.playerKind = kind
+      h.root.handlePlayerResult(reply)
+      h.drain()
+      const toast = h.detached.filter(a => a.join(" ").indexOf("did not play") !== -1).map(a => a[a.length - 1])
+      const seen = toast.concat([h.root.lastError], h.warnings)
+      return [toast, h.root.lastError, h.root.playRetries, h.root.nowPlaying === null, seen.some(t => namesPath(t) || /Error:|Errno|\/run\//.test(t))]
+    }
+    const cases = LOCAL.filter(c => /^player\.(start|restart)$/.test(c.reply.kind))
+    const internal = JSON.stringify({ ok: false, kind: "player", error: { code: "internal", message: "PermissionError: [Errno 13] Permission denied: '/run/user/1000/x/omarchy-iptv'" } })
+    return { cases: cases.length >= 4,
+             rows: cases.map(c => [c.id].concat(run(localReply(c.id), c.reply.kind.split(".")[1]))),
+             internal: run(internal, "start") }
+  }, { cases: true,
+       rows: LOCAL.filter(c => /^player\.(start|restart)$/.test(c.reply.kind)).map(c => [c.id, ["\u201cX\u201d did not play" + Model.SEP + c.reason], c.reason, 0, true, false]),
+       internal: [["\u201cX\u201d did not play" + Model.SEP + "Helper failed unexpectedly"], "Helper failed unexpectedly", 0, true, false] })
+
   // ---- R21e (D-SINK-19 round 11): THE MIGRATION, through Service.qml ----
   //
   // Every pin here runs the shipping functions over a 0.13.5-shaped install:

@@ -366,6 +366,13 @@ function statusReason(status) {
     // user reads names none. Until now this code had no entry, so the
     // guide-data banner showed the cache folder's path.
     folder_unusable: "A folder the plugin uses is a broken link or not a folder",
+    // D-PLY-30 (2026-10-27): `player start|restart|stop` could not make the
+    // player's runtime folder (a parent it cannot write, a full or read-only
+    // filesystem) or open the lock file in it (a folder at its name). The
+    // helper's message says which, with the error's words and no path; it
+    // used to be main()'s `internal` with the exception and the path. A play
+    // that fails this way is told in the "did not play" notification.
+    runtime_unwritable: "Could not write the player's runtime folder",
     not_running: "mpv is not running",
     unknown_channel: "Unknown channel",
     ipc_error: "mpv did not answer",

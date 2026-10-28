@@ -278,6 +278,27 @@ error         {"ok":false,"kind":"player.<verb>","error":{"code":C,"message":M}}
 Error codes, exhaustive: `busy`, `superseded`, `socket_path_blocked`,
 `mpv_missing`, `spawn_failed`, `no_socket`, `not_running`, `ipc_error`,
 `no_cache`, `unknown_channel`, `unsupported_scheme`.
+**[Amended 2026-10-27, D-PLY-30: `start`, `restart` and `stop` make the
+runtime folder (step 3) and open the lock file (4.2) before anything else,
+and a failure of either is now a refusal in the shape above
+(`kind: player.<verb>`). `folder_unusable` is R25c's (D-SRC-32): the runtime
+folder, or one above it, is a symbolic link whose target is missing or is not
+a folder, or something that is not a folder is at its path; the message is
+R25c's sentence and names the path. `runtime_unwritable` is any other
+failure: the folder could not be made (a parent this user cannot write, a
+full or read-only filesystem), `could not make the player's runtime folder
+(<error>)`, or the lock file could not be opened (a folder at its name, a
+file this user may not write), `could not open the player's lock file
+(<error>)`. Its message names no path. Until then both reached the helper's
+catch-all: `internal`, the exception's text and the path, in a reply of
+`kind: player`. `Model.statusReason` gives the user `A folder the plugin uses
+is a broken link or not a folder` and `Could not write the player's runtime
+folder`, in the "did not play" notification. `probe` takes no lock of its
+own, and it still answers over a lock it cannot open, as it did before. The
+list above was already incomplete before this bracket: `start` and `restart`
+also answer `tls_unverified` (D-SINK-16), any verb can answer the helper's
+catch-all `internal`, and the later `pause` and `tracks` verbs answer
+`pause_refused`, `track_refused` and `bad_track`.]**
 
 Additive changes to existing verbs: `play` gains optional `--scope` / `--since`
 (so a zap refreshes the stash) and returns `"entryId"`; `status` gains

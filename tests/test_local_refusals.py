@@ -9,6 +9,15 @@ which Model.statusReason had no entry for, so the guide-data banner showed it.
 Now every verb answers `folder_unusable` with R25c's sentence (the journal
 keeps the path) and the model maps the code to one sentence that names none.
 
+D-PLY-30 (2026-10-27). `player start|restart|stop` let a PermissionError from
+making the runtime folder, or an IsADirectoryError from opening the lock file,
+reach main()'s catch-all: `internal`, the exception and the path, in a reply
+of `kind: player`. They now answer in their own shape, `kind: player.<verb>`:
+R25c's `folder_unusable` for a runtime folder that is a link to nothing, and
+`runtime_unwritable` -- which of the two, the error's own words, no path --
+for a folder that cannot be made or a lock that cannot be opened. Nothing is
+created, and the lock's folder is left where it is.
+
 The helper's code and the model's sentence are joined by a name, so this file
 and tests/Model.test.js run the same fixture (rule 13). Each case damages a
 scratch folder for real and runs the helper as the shell does, a subprocess
@@ -70,7 +79,32 @@ class LocalRefusalTest(unittest.TestCase):
             folder = self.root / "d"
             folder.write_text("x", encoding="utf-8")
             return folder, lambda: folder.is_file() and folder.read_text(encoding="utf-8") == "x"
+        if name == "parent-0500":
+            if os.geteuid() == 0:
+                self.skipTest("root is not refused by a 0500 folder")
+            parent = self.root / "ro"
+            parent.mkdir(mode=0o500)
+            os.chmod(parent, 0o500)
+            self.addCleanup(os.chmod, parent, 0o700)
+            folder = parent / "omarchy-iptv"
+            return folder, lambda: not os.path.lexists(folder) and (parent.stat().st_mode & 0o777) == 0o500
+        if name == "lock-dir":
+            folder = self.root / "run" / "omarchy-iptv"
+            lock = folder / "player.lock"
+            lock.mkdir(parents=True)
+            os.chmod(folder, 0o700)
+            (lock / "keep").write_text("x", encoding="utf-8")
+            return folder, lambda: lock.is_dir() and sorted(os.listdir(lock)) == ["keep"] and sorted(os.listdir(folder)) == ["player.lock"]
         raise AssertionError("unknown damage %r" % name)
+
+    def seeded_cache(self):
+        """A cache folder holding a channel list, for the verbs that resolve a
+        channel before they touch the runtime folder; -> (folder, first id)."""
+        cache = self.root / "cache"
+        code, lines, err = self.helper(["playlist", "--url", str(FIXTURES / "basic.m3u"), "--cache-dir", str(cache)])
+        self.assertEqual(code, 0, err)
+        channels = json.loads((cache / "channels.json").read_text(encoding="utf-8"))["channels"]
+        return cache, channels[0]["id"]
 
     @staticmethod
     def fill(value, names):
@@ -90,6 +124,9 @@ class LocalRefusalTest(unittest.TestCase):
                 self.scratch()
                 folder, untouched = self.damage(case["damage"])
                 names = {"dir": str(folder), "fixtures": str(FIXTURES)}
+                if "{cache}" in case["argv"]:
+                    cache, first = self.seeded_cache()
+                    names.update({"cache": str(cache), "id": first})
                 code, lines, err = self.helper(self.fill(case["argv"], names))
                 want = self.fill(case["reply"], names)
                 self.assertEqual(len(lines), 1, lines)
@@ -100,6 +137,23 @@ class LocalRefusalTest(unittest.TestCase):
                 self.assertIn(want["error"]["message"], err)
                 self.assertTrue(untouched(), "the damage was changed: %s" % case["id"])
 
+
+    def test_the_probe_still_answers_over_a_lock_it_cannot_open(self):
+        # A guard, green on dev as well: `player probe` takes no lock of its
+        # own and settles a stale socket only under the player lock, giving
+        # the settle up when it cannot take it (settle_under_lock). The lock's
+        # open now raises the named refusal instead of an OSError, and the
+        # probe must still read that as "cannot take the lock" and answer.
+        # (`orphan-check` reaches the same settle only after it has stopped a
+        # player, which needs one running; it is not driven here.)
+        self.scratch()
+        folder, untouched = self.damage("lock-dir")
+        code, lines, err = self.helper(["player", "probe", "--socket", str(folder / "mpv.sock")])
+        self.assertEqual((code, len(lines)), (0, 1), err)
+        reply = json.loads(lines[0])
+        self.assertEqual((reply["ok"], reply["kind"], reply["running"]), (True, "player.probe", False))
+        self.assertNotIn("Traceback", err)
+        self.assertTrue(untouched())
 
 if __name__ == "__main__":
     unittest.main()
