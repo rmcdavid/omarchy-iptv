@@ -1402,7 +1402,14 @@ count of the last probe started into it), and a removal asked for by a
 probe's own exit still runs (SR7, SR23). `migrate` and `epg-clear` run as
 queued: neither deletes what a probe writes. The guarantee is stated in
 ARCHITECTURE.md section 8 item 17 and the rule-15 search is recorded with
-D-SRC-69 in QA-RESULTS.]**
+D-SRC-69 in QA-RESULTS.]** **[Amended 2026-10-27, D-SRC-70:
+and a `remove --key K` is dropped when K is the ACTIVE key when it runs
+(`Model.cacheJobDrop` answers "active"), so a cancel's removal no longer
+takes the active source's own folder (SR7 as amended). Every deliberate
+removal of a folder that was active is queued after the state that moves the
+pointer off it is published: `removeSource` (the pointer cleared, R3) and the
+commit of a URL edit of the active source, whose old folder's removal used to
+be queued before the commit published the new key and is now queued after it.]**
 
 ### 4.8 IPC
 
@@ -1786,7 +1793,7 @@ two use different names, the following applies and both lanes code to it.
 | SR4 | Mask rule | Fixed token `****` (UX) replaces userinfo, the fragment, and every query value except the non-secret keys `type` and `output` (this document's exception); scheme, host, port, path, and query keys stay visible; local paths are never masked. Reveal is `Ctrl+R` or the eye button, re-masked on blur, save, cancel, and paste. |
 | SR5 | Limits | This document's caps are canonical: playlist/EPG URL 2048, label 64, server 512, username/password 256, 50 sources. `Model.LIMITS` carries them and UX copy quotes them. |
 | SR6 | Validation codes | The code list in UX-SOURCES.md 5.4 is canonical for user-facing errors; the shared JSON fixture (tests/fixtures/source-urls.json) uses those codes and both the JS validators and the Python mirror must pass it. |
-| SR7 | Probe semantics | Add, playlist-URL edits, and switching to a never-fetched source probe into the source's own cache dir and commit only on success (D7/D8, S8). Label and EPG edits commit immediately. Cancel aborts the probe and discards the new cache dir. |
+| SR7 | Probe semantics | Add, playlist-URL edits, and switching to a never-fetched source probe into the source's own cache dir and commit only on success (D7/D8, S8). Label and EPG edits commit immediately. Cancel aborts the probe and discards the new cache dir. **[Amended 2026-10-27, D-SRC-70, the owner's decision; the ruling stands as written: "the new cache dir" is read as it says. A re-check of the ACTIVE source -- a never-fetched one, added again from the form, which the guide retries -- probes into the active source's own folder, which is not new, and its cancel no longer takes it: a `cache remove --key K` is dropped when K is the active key at the moment it runs (`Model.cacheJobDrop`), the way the prune always keeps that key (D-SRC-07). The discard of a new folder -- a cancelled add, a cancelled URL edit's replacement folder -- is unchanged, and so are the deliberate removals of a folder that was active, which are asked for after the pointer has moved (4.7).]** |
 | SR8 | CLI parity | `omarchy bar set ... playlistUrl` reconciles into the history with a derived label and `origin: cli`; an invalid value synthesizes an error status and never runs the helper (D16). **OVERTURNED 2026-10-13 (round 11, R21; the owner's decision): CLI parity is withdrawn.** The adoption described here runs only as the one migration of a 0.13.x install's bar entry (R21a); after it a URL set with `omarchy bar set` is refused, reported once and removed (R21b), and a source is added or changed in the Sources screen only. |
 | SR9 | Favorites and recents | Global, keyed by channel id, unchanged (D14). |
 | SR10 | Lanes | Lane 1: `Model.js`, `Guide.qml`, `tests/Model.test.js`, `tests/Model.spec.qml`, `tests/fixtures/source-urls.json`. Lane 2: `Service.qml`, `bin/omarchy-iptv`, `tests/test_*.py`, `scripts/dev-harness/*`. Both build against the interface in this document; the product owner merges Lane 1 first. |

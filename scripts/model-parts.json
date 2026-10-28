@@ -880,6 +880,7 @@
         "pruneArgs",
         "pruneKeeps",
         "cacheJobKey",
+        "cacheJobDrop",
         "cacheJobArgs",
         "probeWaitsFor",
         "reconcileSources",

@@ -13218,6 +13218,102 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     return [reason, /Error|Errno|\/run\/|tmp-/.test(reason)]
   }, ["Helper failed unexpectedly", false])
 
+  // ---- D-SRC-70 (2026-10-27): a cancelled re-check of the ACTIVE source keeps the active source's folder ----
+  //
+  // The cancel queued `cache remove --key <dirKey>` for every probe (SR7),
+  // and a re-check of the active source writes into the active source's OWN
+  // folder -- not the new folder SR7 discards. Reachable from the form: the
+  // active source never fetched (a migrated record before its first refresh
+  // landed, or one whose refreshes all failed), its URL is added again
+  // (`duplicate` -> Guide.retryIfUnfetched -> retrySource), and the re-check
+  // is cancelled. The owner's decision: the folder is kept the way the
+  // clean-up always keeps it -- a removal of the key that is active when it
+  // RUNS is dropped (Model.cacheJobDrop "active"). The guards after it pin
+  // what must not move with it: SR7's discard of a NEW folder, and the two
+  // deliberate removals of a folder that was active (removeSource, and the
+  // commit of a URL edit of the active source, whose old folder's removal is
+  // now queued after the state that moves the pointer is published).
+  const EDITED = "http://edited.example.test/list.m3u", KED = keyOf(EDITED)
+  const nm = k => k === KED ? "EDITED" : keyName(k)
+  const unfetched = () => rec(A, { fetchedAt: 0, channelCount: -1, groupCount: 0, origin: "migrated" })
+  // What the guide does on a duplicate of a record that never fetched.
+  const addAgain = h => { const dup = h.root.addSource({ playlistUrl: A, epgUrl: "", label: "" }); return [dup.ok, dup.code, nm(dup.id), h.root.retrySource(dup.id).ok] }
+  const editA = h => h.root.updateSource(KA, { label: "a.example.test", playlistUrl: EDITED, epgUrl: "" })
+
+  checkCall("D-SRC-70: Model.cacheJobDrop / cacheJobArgs -- a `remove --key K` is dropped when K is the ACTIVE key when it runs ('active'), the prune's keep of the active key mirrored; another key's removal, K's once something else or nothing is active, an epg-clear of the active key and a prune run; D-SRC-69's rule still answers 'probe'", () => {
+    const st = M.parseState(migratedText([rec(A), rec(B)], KA))
+    const ctx = o => Object.assign({ state: st, activeKey: KA, inFlight: [], claims: {}, epgMaxAgeSec: 86400 }, o || {})
+    const rm = (k, seq) => ({ args: ["remove", "--key", k], seq: seq === undefined ? 1 : seq })
+    const claims = {}
+    claims[KNEW] = 2
+    return [M.cacheJobDrop(rm(KA), ctx()), M.cacheJobArgs(rm(KA), ctx()),
+            M.cacheJobDrop(rm(KB), ctx()), M.cacheJobArgs(rm(KB), ctx()),
+            M.cacheJobDrop(rm(KA), ctx({ activeKey: "" })), M.cacheJobArgs(rm(KA), ctx({ activeKey: KB })),
+            M.cacheJobDrop({ args: ["epg-clear", "--key", KA], seq: 1 }, ctx()), M.cacheJobArgs({ args: ["epg-clear", "--key", KA], seq: 1 }, ctx()),
+            M.cacheJobDrop({ args: ["prune"], seq: 1 }, ctx()),
+            M.cacheJobDrop(rm(KNEW), ctx({ inFlight: [KNEW] })), M.cacheJobDrop(rm(KNEW, 1), ctx({ claims })),
+            M.cacheJobDrop(rm(""), ctx({ activeKey: "" })), M.cacheJobDrop(null, null)]
+  }, ["active", null, "", ["remove", "--key", KB], "", ["remove", "--key", KA], "", ["epg-clear", "--key", KA], "", "probe", "probe", "", ""])
+
+  checkCall("D-SRC-70: the reachable path -- the active source never fetched, its URL added again from the form (duplicate -> retrySource), the re-check cancelled: the active source keeps its folder, its record and its place, and the cancel is reported as one", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([unfetched(), rec(B)], KA), "lag")
+    const asked = addAgain(h)
+    const probe = [h.root.probing, h.root.probeMode, nm(h.root.probeDirKey)]
+    h.root.cancelProbe(); h.probeExit(""); h.drain()
+    return { asked, probe, removed: named(removed(h)), active: nm(h.root.activeSourceKey), records: h.root.userState.sources.map(s => nm(s.key)), finished: finished(h) }
+  }, { asked: [false, "duplicate", "A", true], probe: [true, "retry", "A"], removed: [], active: "A", records: ["A", "B"], finished: [[false, true, ""]] })
+
+  checkCall("D-SRC-70: the same cancel while a cache job runs -- its removal waits in the queue and is decided when it runs: dropped while the source is still active; run once the user has switched away (the folder of a never-fetched source that is not active, which SR7's cancel of any other never-fetched source takes too)", () => {
+    const h = boot({ sourceKey: KA, showLogos: false }, migratedText([unfetched(), rec(B)], KA), "lag")
+    h.cacheHang = true
+    h.root.queuePrune(); h.drain()           // a prune keeping A and B, running
+    addAgain(h)
+    h.root.cancelProbe(); h.probeExit(""); h.drain()
+    const queued = h.root.cacheQueue.map(j => j.args[0] + " " + nm(j.args[j.args.indexOf("--key") + 1]))
+    h.cacheHang = false; while (h.cacheExit()) {} h.drain()
+    const stillActive = { removed: named(removed(h)), active: nm(h.root.activeSourceKey) }
+    const g = boot({ sourceKey: KA, showLogos: false }, migratedText([unfetched(), rec(B)], KA), "lag")
+    g.cacheHang = true
+    g.root.queuePrune(); g.drain()
+    addAgain(g)
+    g.root.cancelProbe(); g.probeExit(""); g.drain()
+    sw(g, KB); g.drain()                     // B has a cache: the switch commits at once
+    g.cacheHang = false; while (g.cacheExit()) {} g.drain()
+    return { queued, stillActive, switchedAway: { removed: named(removed(g)), active: nm(g.root.activeSourceKey), records: g.root.userState.sources.map(s => nm(s.key)) } }
+  }, { queued: ["remove A"], stillActive: { removed: [], active: "A" }, switchedAway: { removed: ["A"], active: "B", records: ["A", "B"] } })
+
+  checkCall("D-SRC-70 (guards): SR7 unchanged -- a cancelled add, and a cancelled URL edit of the ACTIVE source (which probes into a NEW folder), still lose that folder; and the removals of a folder that WAS active still run -- removeSource of the active source, at once and queued behind a running job, and the commit of a URL edit of the active source, at once and queued", () => {
+    const a = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    add(a); a.root.cancelProbe(); a.probeExit(""); a.drain()
+    const e = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    const edited = editA(e).ok
+    const editProbe = [e.root.probeMode, nm(e.root.probeDirKey)]
+    e.root.cancelProbe(); e.probeExit(""); e.drain()
+    const r = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), "lag")
+    const removedNow = r.root.removeSource(KA).ok; r.drain()
+    const q = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A), rec(B)], KA), "lag")
+    q.cacheHang = true
+    q.root.queuePrune(); q.drain()
+    const removedQueued = q.root.removeSource(KA).ok; q.drain()
+    q.cacheHang = false; while (q.cacheExit()) {} q.drain()
+    const c = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    editA(c); c.probeExit(OK5); c.drain(); c.root.finishSwitch()
+    const d = boot({ sourceKey: KA, showLogos: false }, migratedText([rec(A)], KA), "lag")
+    editA(d)
+    d.cacheHang = true
+    d.root.queuePrune(); d.drain()
+    d.probeExit(OK5); d.drain(); d.root.finishSwitch()
+    d.cacheHang = false; while (d.cacheExit()) {} d.drain()
+    return {
+      cancelledAdd: named(removed(a)),
+      cancelledEdit: { edited, editProbe, removed: removed(e).map(nm), active: nm(e.root.activeSourceKey) },
+      removeActive: { now: [removedNow, named(removed(r)), nm(r.root.activeSourceKey)], queued: [removedQueued, named(removed(q)), nm(q.root.activeSourceKey)] },
+      editCommit: { now: [removed(c).map(nm), nm(c.root.activeSourceKey)], queued: [removed(d).map(nm), nm(d.root.activeSourceKey)] }
+    }
+  }, { cancelledAdd: ["NEW"], cancelledEdit: { edited: true, editProbe: ["edit", "EDITED"], removed: ["EDITED"], active: "A" },
+       removeActive: { now: [true, ["A"], "-"], queued: [true, ["A"], "-"] },
+       editCommit: { now: [["A"], "EDITED"], queued: [["A"], "EDITED"] } })
+
   // ---- R21e (D-SINK-19 round 11): THE MIGRATION, through Service.qml ----
   //
   // Every pin here runs the shipping functions over a 0.13.5-shaped install:

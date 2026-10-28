@@ -210,12 +210,12 @@ export {
   withSourceStats, activeKeyText, activeKeyOf, activeSourceRecord,
   withActiveKey, invalidInputBlocks, reconcileAction, adoptActiveSource,
   activeEpgUrlOf, pointerWritePlan, probeCommitPlan, probeCommitState,
-  pruneArgs, cacheJobArgs, probeWaitsFor, reconcileSources, sourceForEdit,
-  sourcesSummary, entryWith, cacheStale, formFields, isFormField, formLimit,
-  formCapacity, copyForm, formState, formFocusOrder, formHasText, openForm,
-  openFirstRun, openAddForm, openEditForm, openXtreamForm, closeForm,
-  withFormValue, withFormFocus, moveFormFocus, fieldMaskable, fieldRevealed,
-  fieldMasked, toggleReveal, withFormReveal
+  pruneArgs, cacheJobDrop, cacheJobArgs, probeWaitsFor, reconcileSources,
+  sourceForEdit, sourcesSummary, entryWith, cacheStale, formFields,
+  isFormField, formLimit, formCapacity, copyForm, formState, formFocusOrder,
+  formHasText, openForm, openFirstRun, openAddForm, openEditForm,
+  openXtreamForm, closeForm, withFormValue, withFormFocus, moveFormFocus,
+  fieldMaskable, fieldRevealed, fieldMasked, toggleReveal, withFormReveal
 } from "./model/source-records.mjs"
 export {
   clipboardArgv, clipboardCut, parseClipboardReply, editRange, fullRange,
