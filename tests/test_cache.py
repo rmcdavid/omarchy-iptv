@@ -25,6 +25,13 @@ FIXTURES = ROOT / "tests" / "fixtures"
 KEY = "d5977d8a"
 OTHER = "d990c2e4"
 FILES = ("channels.json", "playlist-status.json", "epg-now.json", "epg-status.json", "epg-window.txt")
+# D-SRC-72: the guide fixture's clock (tests/test_epg.py's NOW,
+# 2026-09-12 21:00 UTC) and a small PNG the logo gate accepts, in the
+# canonical form the helper caches (D-LOGO-13).
+EPG_NOW = 1789246800
+PNG = bytes.fromhex(next(c["hex"] for c in json.loads((FIXTURES / "logo-dimensions.json").read_text(encoding="ascii"))["cases"]
+                         if c["id"] == "png-small"))
+CANON_PNG = helper.canonical_png(PNG)
 
 
 def run(*args):
@@ -129,6 +136,143 @@ class CacheWriteRefusalTest(CacheTestCase):
         code, status, err = self.probe(target)
         self.assert_refused(code, status, err, "playlist-status.json", "Is a directory")
         self.assertTrue(status["stale"])   # the channel list itself was written
+
+
+class OtherWritersRefusalTest(CacheTestCase):
+    """D-SRC-72 (2026-10-27, the owner's decision): every helper writer into
+    a source's folder says what failed with a named code, never main()'s
+    `internal`. D-SRC-69 gave the playlist verb's two cache writes
+    `cache_unwritable`; the guide fetch's three (the window, epg-now.json,
+    epg-status.json, on a fetch and on the five-minute `--now-only`
+    recompute), a logo (`write_logo`), the logo failure memo and the
+    dead-channel marks (`failed.json`) still fell through to the catch-all,
+    with an exception's text, a path and a traceback. Each case makes the
+    write really fail on the filesystem -- a folder where the file goes --
+    and runs the verb through main(), where the catch-all lives. Red on dev
+    6761cd4 (`internal`)."""
+
+    def assert_refused(self, code, status, err, name, reason="Is a directory"):
+        self.assertEqual(code, 1, status)
+        self.assertEqual(status["ok"], False)
+        self.assertEqual(status["error"]["code"], "cache_unwritable", status)
+        self.assertEqual(status["error"]["message"], "could not write %s in the source's cache folder (%s)" % (name, reason))
+        self.assertNotIn(self.tmp.name, json.dumps(status))
+        self.assertNotIn("Traceback", err)
+
+    def blocked(self, directory, name):
+        (directory / name).mkdir(parents=True)
+        (directory / name / "keep").write_text("x", encoding="utf-8")
+
+    def source(self):
+        target = self.sources / KEY
+        code, _, err = run("playlist", "--url", str(FIXTURES / "epg-channels.m3u"), "--cache-dir", str(target))
+        self.assertEqual(code, 0, err)
+        return target
+
+    def epg(self, target, *extra):
+        return run("epg", "--url", str(FIXTURES / "epg-basic.xml"), "--cache-dir", str(target), "--now", str(EPG_NOW), *extra)
+
+    def test_a_guide_window_that_cannot_be_written_is_a_named_refusal(self):
+        target = self.source()
+        self.blocked(target, "epg-window.txt")
+        code, status, err = self.epg(target)
+        self.assert_refused(code, status, err, "epg-window.txt")
+        self.assertEqual((status["kind"], status["stale"]), ("epg", False))
+
+    def test_a_now_and_next_file_that_cannot_be_written_is_a_named_refusal_on_a_fetch_and_on_the_recompute(self):
+        target = self.source()
+        self.blocked(target, "epg-now.json")
+        code, status, err = self.epg(target)
+        self.assert_refused(code, status, err, "epg-now.json")
+        self.assertTrue(status["stale"])          # the window itself was written
+        code, status, err = run("epg", "--now-only", "--cache-dir", str(target), "--now", str(EPG_NOW + 600))
+        self.assert_refused(code, status, err, "epg-now.json")
+
+    def test_a_guide_status_that_cannot_be_written_fails_the_run_the_same_way(self):
+        target = self.source()
+        self.blocked(target, "epg-status.json")
+        code, status, err = self.epg(target)
+        self.assert_refused(code, status, err, "epg-status.json")
+        self.assertTrue(status["stale"])
+        self.assertTrue((target / "epg-now.json").is_file())
+
+    def test_a_guide_fetch_into_a_folder_that_is_a_link_to_nothing_stays_r25c_folder_unusable(self):
+        # A guard, green on dev as well: the new refusal must not swallow
+        # R25c's own code (D-SRC-32), whose sentence names the link.
+        link = self.sources / KEY
+        self.sources.mkdir(parents=True)
+        os.symlink(self.sources / "gone", link)
+        code, status, err = self.epg(link)
+        self.assertEqual((code, status["error"]["code"]), (1, "folder_unusable"), status)
+        self.assertNotIn("Traceback", err)
+        self.assertFalse(os.path.lexists(self.sources / "gone"))
+
+    def test_a_dead_channel_mark_that_cannot_be_written_is_a_named_refusal(self):
+        target = self.source()
+        self.blocked(target, "failed.json")
+        for action in ("mark", "clear"):
+            code, status, err = run("failed", "--cache-dir", str(target), action, "--id", "t:x")
+            self.assert_refused(code, status, err, "failed.json")
+            self.assertEqual((status["kind"], status["action"]), ("failed", action))
+
+    def logo_source(self, urls):
+        target = self.sources / KEY
+        target.mkdir(parents=True)
+        doc = {"version": 1, "count": len(urls), "channels": [
+            {"id": "c%d" % i, "name": "C%d" % i, "group": "G", "url": "http://127.0.0.1/%d" % i, "logo": u}
+            for i, u in enumerate(urls)]}
+        (target / "channels.json").write_text(json.dumps(doc), encoding="utf-8")
+        return target
+
+    def logos(self, target, fetcher):
+        out, err = io.StringIO(), io.StringIO()
+        with mock.patch.object(helper, "fetch_logo", fetcher), contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = helper.main(["logos", "--fetch", "--cache-dir", str(target)])
+        lines = [json.loads(line) for line in out.getvalue().splitlines() if line.strip()]
+        return code, lines[-1], [l["name"] for l in lines[:-1] if l.get("kind") == "logo"], err.getvalue()
+
+    def test_a_logo_that_cannot_be_written_stops_the_fetching_and_is_a_named_refusal_that_still_names_what_is_on_disk(self):
+        dead = "https://dead.example.test/a.png"
+        urls = [dead] + ["https://logos.example.test/%d.png" % i for i in range(3)]
+        target = self.logo_source(urls)
+        logo_dir = target / helper.LOGO_SUBDIR
+        logo_dir.mkdir(mode=0o700)
+        blocked, cached = helper.logo_filename(urls[1]), helper.logo_filename(urls[3])
+        self.blocked(logo_dir, blocked)
+        (logo_dir / cached).write_bytes(CANON_PNG)
+        calls = []
+
+        def fetcher(url, timeout, budget=None):
+            calls.append(url)
+            if url == dead:
+                raise helper.HelperError("logo_fetch", "could not fetch a logo from dead.example.test: TimeoutError")
+            return PNG, "image/png"
+        code, summary, announced, err = self.logos(target, fetcher)
+        self.assert_refused(code, summary, err, blocked)
+        # The fetching stopped at the folder's refusal: the third logo was
+        # not asked for. The cached one further down is still validated and
+        # named, in the summary the shell replaces its set from.
+        self.assertEqual(calls, urls[:2])
+        self.assertEqual((announced, summary["names"], summary["unsaved"], summary["failed"], summary["reasons"]),
+                         ([cached], [cached], 2, 1, {"logo_fetch": 1}), summary)
+        # The memo is still written, with the address that failed and NOT
+        # the one the folder refused: that is not the address's failure.
+        memo = json.loads((target / helper.LOGO_FAILED_FILE).read_text(encoding="utf-8"))
+        self.assertEqual(sorted(memo["failed"]), [helper.logo_filename(dead)])
+
+    def test_a_logo_failure_memo_that_cannot_be_written_is_a_named_refusal_after_the_run(self):
+        urls = ["https://dead.example.test/a.png", "https://logos.example.test/b.png"]
+        target = self.logo_source(urls)
+        self.blocked(target, helper.LOGO_FAILED_FILE)
+
+        def fetcher(url, timeout, budget=None):
+            if "dead" in url:
+                raise helper.HelperError("logo_fetch", "could not fetch a logo from dead.example.test: TimeoutError")
+            return PNG, "image/png"
+        code, summary, announced, err = self.logos(target, fetcher)
+        self.assert_refused(code, summary, err, helper.LOGO_FAILED_FILE)
+        self.assertEqual((announced, summary["names"], summary["fetched"], summary["failed"]),
+                         ([helper.logo_filename(urls[1])], [helper.logo_filename(urls[1])], 1, 1), summary)
 
 
 class MigrateTest(CacheTestCase):

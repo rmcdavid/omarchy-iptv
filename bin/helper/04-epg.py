@@ -1235,7 +1235,18 @@ def fetch_window(url: str, timeout: float, now: int, directory: str) -> dict[str
     lines = []
     for cid in list(channels):
         lines.append(window_line(cid, channels.pop(cid)))
-    write_window_lines(os.path.join(directory, EPG_WINDOW_FILE), meta, lines)
+    # D-SRC-72: the fetch's own cache file, refused with a code like the
+    # playlist verb's two (cache_unwritable, D-SRC-69), never left to
+    # main()'s `internal`. A folder that is a link to nothing stays R25c's
+    # `folder_unusable` (main() answers it, with its sentence), here and at
+    # the two writes below.
+    window_path = os.path.join(directory, EPG_WINDOW_FILE)
+    try:
+        write_window_lines(window_path, meta, lines)
+    except FolderUnusable:
+        raise
+    except OSError as io_error:
+        raise cache_unwritable(window_path, io_error) from None
     window = dict(meta)
     window["lines"] = lines
     return window
@@ -1389,7 +1400,15 @@ def cmd_epg(args: argparse.Namespace) -> int:
                     else:
                         from_cache = True
                 assert window is not None
-                valid_until, now_count = write_epg_now(directory, window, now)
+                # D-SRC-72: as the window's write above. The except below
+                # then tries the same file once more from the window, and
+                # logs that failure rather than raising it.
+                try:
+                    valid_until, now_count = write_epg_now(directory, window, now)
+                except FolderUnusable:
+                    raise
+                except OSError as io_error:
+                    raise cache_unwritable(os.path.join(directory, EPG_NOW_FILE), io_error) from None
             except HelperError as caught:
                 error = caught
                 cached = window is not None
@@ -1458,9 +1477,20 @@ def cmd_epg(args: argparse.Namespace) -> int:
             "stale": from_cache and (now - fetched_at > args.ttl),
             "error": None,
         }
-        write_json_atomic(status_path, status)
-        emit(status)
-        return EXIT_OK
+        # D-SRC-72, the playlist verb's rule for its status (D-SRC-69): a
+        # guide cache without its status is not one the service can judge,
+        # so the run fails as a write of the window does. The window itself
+        # is on disk, which `stale` says.
+        try:
+            write_json_atomic(status_path, status)
+        except FolderUnusable:
+            raise
+        except OSError as io_error:
+            error = cache_unwritable(status_path, io_error)
+            cached = os.path.isfile(window_path)
+        else:
+            emit(status)
+            return EXIT_OK
     if refresh_error is not None:
         log("could not refresh %s: %s" % (EPG_NOW_FILE, refresh_error))
     host = source_host(url) if url else (window.get("sourceHost", "") if window else "")
