@@ -13315,6 +13315,152 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### D-PLY-31, D-PLY-34, D-EPG-13, D-SRC-74: the player's and the guide's own refusals read a sentence (lane-p31e13, 2026-10-28, 9990f83..315e85e)
+
+The owner's words: "Fix D-PLY-31 and D-EPG-13 next", then "fix D-SRC-74 too". The lead added D-PLY-34 as the same copy work. There is one commit per finding, and check.sh was green on each commit's own tree, run alone under the shared lock.
+
+The join is the shared fixture `tests/fixtures/local-refusals.json`:
+- `refusals` grows from 11 to 20 cases.
+- A new list, `otherRefusals` (7), holds what the checks over `refusals` cannot take:
+  - the guide's refusals, which are the provider's (`host: kept`);
+  - the player lock's `busy`, which is retried before it is told;
+  - main()'s MemoryError;
+  - the clipboard, which reaches no surface.
+- `tests/test_local_refusals.py` drives every case for real as a subprocess. Resource limits are set only in the helper's own process, between fork and exec.
+- The one exception is main()'s MemoryError. It runs in-process through main(), with MemoryError raised in `load_channels`, because no limit lands it predictably.
+- The node checks map each reply through Model.statusReason. They read Service.qml's own handlers and Guide.qml's own compiled bannerText.
+
+**D-SRC-74.** `missing_folders` is R25c's walk, factored out of ensure_private_dir. It creates nothing. `cache remove`, `epg-clear` and `logos-clear` run it, so a file at the key is `folder_unusable`, as `migrate` answers. R25c's code, sentence and exit are unchanged, and the file is left in place.
+
+The rule-15 matrix covers 6 damages x 5 subverbs, and gives one answer per damage:
+- A file at sources/ or at the cache folder: the removals answered `internal` on dev.
+- A dangling `sources` link: the removals answered ok, removing nothing.
+- Both are now `folder_unusable`, as migrate and prune already answered.
+
+Two differences remain, by design:
+- A link AT the key is `bad_key` (D-SRC-73).
+- `prune` skips a file or a link at a key.
+
+**D-PLY-34.** The reply's kind decides the sentence: `player`, `player.<verb>`, `play`, `stop`, `status`, `seek`.
+- `busy` reads "The player is busy".
+- `too_large` reads "Helper ran out of memory".
+- Playlist and EPG keep "Another fetch is running" and "Source too large".
+
+**D-PLY-31.**
+- `socket_path_blocked` reads "Something else is at the player's socket path".
+- `spawn_failed` reads "Could not start mpv", on a player verb's kind only.
+- spawn_detached's own pipes and first fork answer `spawn_failed` "could not start mpv: <strerror>", closing what was opened. Before, they answered `internal`, or nothing when the catch-all's traceback import had no descriptor.
+- Both codes are local (PROBE_LOCAL_REFUSALS).
+- The clipboard's `spawn_failed` has no `error` object. Model.parseClipboardReply drops it, so the paste is silent (R2).
+
+**D-EPG-13.**
+- `bad_xml`, including D-EPG-6's entity refusal (same code, same remedy), reads "Not a valid XMLTV guide".
+- `empty_epg` reads "Guide has no programmes".
+- Both are the provider's, and stay off the local list.
+- `not_m3u` and `not_xmltv` are removed: `git log -S` over bin/ finds neither in any helper commit.
+
+| check | dev 795a7bf | lane |
+|---|---|---|
+| python: cache matrix | 12 red (the 3 removals x 4 damages) | green |
+| python: fixture `refusals` | 6 red (fork and pipes: `internal`; 4 cache cases: `internal`/ok) | green |
+| python: `otherRefusals` | green (helper replies unchanged; red is node's) | green |
+| node: SR28 re-pin, D-SRC-73/D-PLY-30/D-PLY-32 over the new cases, D-PLY-34, D-PLY-31, D-EPG-13 | 7 red of 3082 | 3082/0 |
+| node: clipboard guard | green (guard) | green |
+
+What dev showed:
+- The banner read `Guide data unavailable (could not parse EPG XML: no element found: line 7, column 0)`.
+- The card read `... did not play · Another fetch is running` and `... · Source too large`.
+- The zap line and the rewind line read `Source too large`.
+
+Mutants, 19 of 19 red: py 16/5/18/1/1/2, node 4/4/1/2/1/1/1/5/5/1/1/1/1. One equivalent mutant is stated, not run: not closing the already-opened fds is unobservable, because the helper exits straight after.
+
+**Gate.**
+
+| commit | node | python | qml |
+|---|---|---|---|
+| 9990f83 | 3078 | 1644 | 80 |
+| 126285c | 3079 | 1645 | 80 |
+| ea2244a | 3081 | 1645 | 80 |
+| 315e85e | 3082 | 1645 | 80 |
+
+ea2244a needed three runs:
+- The first was red only on the load-dependent performance tests. They passed 7/7 alone.
+- The second was red only on clip P4 (F-HARNESS-66).
+
+**Live.** The spawn path changed, so player-scenario ran in the F-HARNESS-46 rig: nested headless cage, private bus, no desktop.
+- dev `--baseline 795a7bf`, three runs: 77/9 each.
+- tree ea2244a, three runs: 76/11, 75/12, 77/9.
+- The 9 window checks fail on every run. The extra FAILs are P13's dropped start-up play: 2 of 15 tree trials, 0 of 15 dev. lane-p3trio saw the reverse (D-PLY-28, open).
+- P7 passed on all six runs.
+- Coredump journal +0 on every run. Harness directories removed.
+
+Transcripts:
+- dev: player-20261028-105912-2668242, -115927-2725832, -120415-2741204
+- tree: -110137-2675921, -115629-2715786, -120150-2733494
+
+**Rule 15.** The code inventory was re-run on the merged tree, with every helper code mapped by kind. Still the helper's text on a statusReason surface:
+- `no_cache`: already a sentence.
+- `no_socket`: PO-6.
+- the model's own `error`: no shipping verb sends it.
+
+Found and not fixed:
+- D-PLY-38: descriptor exhaustion outside spawn_detached.
+- D-SRC-75: the cache removals over a key folder they cannot write in answer `internal` with the path, journal only.
+- F-HARNESS-66.
+
+**The recheck of lane-p31e13 (same day).** MERGEABLE, with fe8ba4b: the `player.<verb>` half of the kind choice was pinned only on `player.start` (a mutant giving mpv's sentence to `player.start` alone stayed green on 3082 checks while `player restart` answers the same `spawn_failed` to the same card); a real `player-restart-mpv-not-executable` case now pins it (red on 4 checks). Rerun: node 3082/0, 7 red on dev 795a7bf; python test_local_refusals 18 subtests red on dev. Fourteen mutants of its own, twelve red at first, MM1 red after the fix, MM2 (cutting PLAYER_VERB_KINDS to player and play) survives because `stop`, `status` and `seek` meet no statusReason surface with these codes -- recorded. RLIMIT_NPROC 0 and NOFILE 4..10 reproduced inside a subprocess (NOFILE 4 still answers nothing: D-PLY-38). An AST walk found 57 helper codes; only busy, too_large and spawn_failed vary by kind. Two cage runs of its own: identical FAIL sets on the tree and dev (the 9 window checks plus one P13 drop each -- D-PLY-28, on dev too).
+
+### D-PLY-33: a player death with no end-file marks nothing (lane-ply33, 2026-10-28)
+
+**Owner's decisions of 2026-10-28.** Decision 1 is "refresh on every try" for "Could not start playback". Decision 2 is D-PLY-33: a death with no end-file stops marking the channel.
+
+**Decision 1 is not applied: its premise is false on this host (D-HOST-5).**
+- The plugin sends a fixed `-r <id>` (model/privacy.mjs, `notifyArgv`'s argv) and never reads back the id the server returns.
+- Quickshell 0.3.1's NotificationServer, which hosts Omarchy's notifications, numbers notifications itself from 1. It replaces only an id it handed out and still holds. The host's Service.qml says so at lines 284 and 559-561, and NotificationLogic.js at line 360.
+- The host's `handleNotification` removes popups only by that server id (line 191) and inserts every new notification as a card (line 192).
+- Measured with the server running offscreen on a private bus. The real `/usr/bin/omarchy-notification-send` with `-r 74021` three times gave ids 1, 2 and 3. `-r 3`, an id the server had returned, updated that notification in place. `-r 74011` twice gave ids 4 and 5. `Model.notifyArgv("localPlayFailure")`'s exact argv three times gave ids 6, 7 and 8.
+- So posting on every try stacks one card per try. Once per episode stands, and the decision returns to the owner.
+
+**Decision 2: `Model.deathReport`.**
+- **What marks.** A channel is marked only for an end-file `error` on its own entry: the entry-owner ring's, or, when the ring is silent, the entry the player last started.
+- **Every other death the verdict tells** is `Playback stopped` / `“<name>” stopped unexpectedly` (74022). That covers no end-file, a `stop` then a death, and another entry's error. It writes no mark, no failed.json entry and no lastFailedId, and lastError reads `Playback stopped unexpectedly`.
+- **No log-tail line.** The card carries none, so D-PLY-29 is resolved on this path.
+- **PO-3.** The reattach marks nothing and tells nothing, and still retires the record.
+- **The first-load window** still marks: the helper's `failed` cannot tell an end-file error from a closed connection (D-PLY-36).
+
+**Node.**
+- 3086 checks, 0 failures; dev has 3078.
+- 8 new checks in one D-PLY-33 block, through Service.qml's own handlePlayerLine, handlePlayerGone, handlePlayerResult, play() and applyProbe.
+- Red on dev 795a7bf: 6 of 3086. On dev, a death with no end-file reads `74011 Stream failed | “X” did not play · MESA-EGL: warning...` and marks t:x, and PO-3 marks t:x.
+- 16 mutants, 15 red. The survivor, raisePlayerStopped not setting the shared gate, is near-equivalent: no second detector can speak for the same play after that card.
+
+**Live: player-scenario.** Run in a nested headless cage on a private bus.
+
+| Tree | Passed | Failed |
+|---|---|---|
+| dev `--baseline 795a7bf` | 77 | 9 |
+| lane tree 86ef158 | 76 | 10 |
+
+- Both trees fail the same 9 window checks, by design in a headless cage.
+- The one extra FAIL on the tree is `P14 the channel that died unattended is marked in the guide`. That is the PO-3 mark this change withdraws (F-HARNESS-65).
+- P7 is 5/5 on both trees.
+
+**Live: SIGKILL probe** (lane rig, not committed):
+
+| Shell | Result | D1: SIGKILL of a playing channel's mpv |
+|---|---|---|
+| lane tree | 11/0 | one `-r 74022 Playback stopped “Harness Live One” stopped unexpectedly`; nothing marked; lastError the sentence |
+| dev 795a7bf | 2/9 | `-r 74011 Stream failed “Harness Live One” did not play · [vo/gpu-next/libplacebo] ... VK_ERROR_SURFACE_LOST_KHR ...`; t:live1 marked in failedAt and failed.json |
+
+The control, D2 (a zap to 127.0.0.1:9), says Stream failed and marks t:dead1 on both shells.
+
+**Evidence and hygiene.**
+- Coredump journal: 81 before and 81 after every run.
+- Transcripts: `player-20261028-075245-2399310` (dev) and `player-20261028-080415-2431404` (tree); `ply33probe-20261028-081613-2465692` (tree) and `ply33probe-20261028-081655-2467352` (dev).
+- Gate green on 86ef158: 3086 / 1643 / 80.
+
+**The recheck of lane-ply33 (same day).** MERGEABLE, with three commits: f0340e4 pins an end-file error for an entry neither the ring nor the router knows as told and not marked (mutant R3 had left 3086 checks green); 9a76cae (F-HARNESS-64) makes the spec's routePlayer ask Model.deathReport; 0829846 (F-HARNESS-65) inverts P14 to assert the unattended death is NOT marked (tree 77/9, `--baseline 795a7bf` 76/10 with exactly that check red). The host's replace semantics verified in its sources. The lane's live probe re-observed: a SIGKILLed playing channel gives one "Playback stopped" card and no mark; a dead stream still marks and says Stream failed; dev's shell named an audio-device line as the reason a SIGKILLed channel "did not play". Eighteen mutants of its own, seventeen red after the pin. It found **D-PLY-37**: an audio output that cannot open ends the file with an error for the channel's own entry, so D-PLY-33's rule marks it -- measured three ways, on the tree and dev alike.
+
 ### D-PLY-32: a player start refused on this machine marks no channel (lane-ply32, 2026-10-28, 8a3de81..e99cae6)
 
 The owner's word: "Please fix 32".
