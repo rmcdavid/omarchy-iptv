@@ -444,10 +444,16 @@ resolves its id in a 10,000-channel cache 356-390 ms, at load 3.2). Start
 43.25 s (the lock, a found player that does not answer and its whole ladder,
 the spawn's pipes, its bind window and the last probe of it, then the larger of
 the `no_socket` tail and one caught request plus the first-load window),
-restart 35.45 s (the lock, its ladder from term and a settle, then the same
-spawn and tail), probe 11 s (its connect and request and one more request).
-model/player.mjs carries the arithmetic and tests/fixtures/player-bounds.json
-its result. Not summed: every other IPC request at its 2 s bound -- a request
+restart 46.45 s (the lock, its ladder from term and a settle, then all of a
+start's path after its lock: a player that ladder could not end -- a process in
+uninterruptible sleep acts on neither signal -- is found by adopt_or_spawn,
+probed and laddered again from quit; the first version said 35.45 s and left
+that path out, found by the recheck), probe 11 s (its connect and request and
+one more request). model/player.mjs carries the arithmetic and
+tests/fixtures/player-bounds.json its result; tests/test_player_bounds.py walks
+the shipping verbs' long paths under a virtual clock, each wait at the bound
+the code itself sets, and holds each inside its watchdog less the margin
+(start 38.07 s, restart 41.12 s, probe 6 s). Not summed: every other IPC request at its 2 s bound -- a request
 that reaches its bound raises and ends the verb, so only an mpv answering
 each of a start's twenty-odd requests just inside 2 s could run past it.
 (2) That residual, and anything else that runs past, is recovered rather than

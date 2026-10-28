@@ -67,7 +67,14 @@ function healthTick(skips, busy) {
 //     SIGTERM's grace, the kill rung's settle and the final one (stop_ladder)
 //   ladder("term"): SIGTERM's grace and the two settles
 //   wedged: a found player that does not answer the start's probe (connect
-//     and request at their bound), then the whole ladder (adopt_or_spawn)
+//     and request at their bound), then the whole ladder (adopt_or_spawn).
+//     A RESTART meets it too, after its own ladder from term: a player in
+//     uninterruptible sleep acts on neither signal, so that ladder can end
+//     with it still there, and adopt_or_spawn, which runs next, finds it,
+//     probes it and ladders it again from quit. So a restart's bound is a
+//     start's plus its own ladder and settle (the recheck walked the
+//     shipping code under a virtual clock: 41.12 s on that path, past the
+//     35.45 s this first said; the player-bounds walk, dev branch)
 //   spawn: the settle's one connect, the pid and exec pipes, the bind window,
 //     and the last probe of it, which can start just inside the window
 //   tail: the larger of the `no_socket` refusal (the spawn laddered from
@@ -115,7 +122,7 @@ function playerWatchdogMs(kind) {
   var spawn = b.settleConnectMs + b.spawnPidMs + 2 * b.spawnMs + 2 * b.ipcMs
   var tail = Math.max(playerLadderMs("term") + b.settleConnectMs, b.ipcMs + b.firstLoadMs)
   if (k === "start") return lock + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
-  if (k === "restart") return lock + playerLadderMs("term") + b.settleConnectMs + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
+  if (k === "restart") return lock + playerLadderMs("term") + b.settleConnectMs + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
   if (k === "probe") return Math.max(3 * b.ipcMs, b.settleLockMs + b.lockPollMs + b.settleConnectMs) + PLAYER_WATCHDOG_MARGIN_MS
   if (k === "") return PLAYER_BIRTH_EDGE_MS
   return Math.max(playerWatchdogMs("start"), playerWatchdogMs("restart"), playerWatchdogMs("probe"))
