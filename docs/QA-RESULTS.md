@@ -13315,6 +13315,82 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### D-SRC-73, D-PLY-30, D-DOC-27: one answer for a folder the helper cannot use, and a sentence for it (lane-p3trio, 2026-10-27, 0fe1deb..8a33905)
+
+The owner's word was "Fix those three P3s too". There is one commit per finding. check.sh was green on each commit's own tree, run alone.
+
+**D-SRC-73: a cache folder that is a link to nothing reads one sentence.**
+
+The playlist verb's two `except OSError` clauses (D-SRC-69) now let R25c's FolderUnusable through, as D-SRC-72 did for the guide, logo and failed writers. So every verb answers `folder_unusable`, and main() gives R25c's sentence, which names the path. `Model.statusReason` maps the code to `A folder the plugin uses is a broken link or not a folder`. The journal keeps the path. `folder_unusable` joins `PROBE_LOCAL_REFUSALS`. R25c's code, sentence and exit are unchanged.
+
+`tests/fixtures/local-refusals.json` joins the helper's code to the model's sentence (rule 13):
+- `tests/test_local_refusals.py` damages a scratch folder for real and runs the helper as a subprocess. HOME, the XDG folders and PATH are in scratch, so there is no mpv. It compares stdout exactly.
+- The node checks map every reply through `statusReason`.
+- They also read Service.qml's handlers and Guide.qml's own compiled `prose` and `bannerText`.
+
+| check | dev 41ab132 | lane |
+|---|---|---|
+| fixture: playlist over a dangling link, over a file | red, `cache_unwritable` "(is a symbolic link ...)" / "(is not a folder)" | green |
+| fixture: epg, failed mark over a dangling link | green (already R25c's) | green |
+| test_cache: both playlist writes (the folder swapped for a dangling link between them) | red | green |
+| node: every fixture reply's sentence, no path, no host | red | green |
+| node: Sources line, empty state, banner, both notifications | red: the banner read `Guide data unavailable (/home/.../sources/<key> is a symbolic link ...)` | green |
+
+Mutants, 4 of 4 red:
+- the channel write unconverted: py 3;
+- the status write unconverted: py 1;
+- the sentence removed: node 2;
+- off the local list: node 2.
+
+**D-PLY-30: the player verbs name a runtime folder or lock they cannot use.**
+
+`player_runtime` turns FolderUnusable into `folder_unusable` (R25c's sentence) in the verb's own reply shape (`kind: player.<verb>`). Any other OSError there, and `acquire_lock`'s open, give `runtime_unwritable`: `could not make the player's runtime folder (<error>)` or `could not open the player's lock file (<error>)`, with no path. `Model.statusReason` maps it to `Could not write the player's runtime folder`. The play-failure path was already through the model (`handlePlayerResult` -> `statusReason` -> `raiseStreamFailure`). `runtime_unwritable` also joins `PROBE_LOCAL_REFUSALS`.
+
+| check | dev 41ab132 | lane |
+|---|---|---|
+| fixture, 7 cases: start/stop over a dangling link; start/restart/stop under a 0500 parent; start/stop with a folder at `player.lock` | red: `internal` "PermissionError: [Errno 13] ... '<path>'" / "IsADirectoryError ...", `kind: player` | green; nothing created, the parent still 0500, the lock folder intact |
+| probe over a lock folder (guard) | green | green |
+| node: Service.handlePlayerResult over the 4 start/restart replies | red (the path; the helper's text) | green: "“X” did not play · <sentence>", no retry, nowPlaying cleared |
+
+Mutants, 7 of 7 red:
+- the link folded into runtime_unwritable: py 3;
+- the mkdir failure unnamed: py 3;
+- the lock open unnamed: py 2;
+- the sentence removed: node 2;
+- off the list: node 1;
+- settle_under_lock catching only OSError: py 1;
+- the path in the message: py 5.
+
+**D-DOC-27.** Dated brackets were added to these, each read against the merged code:
+- UX-SOURCES 5.5;
+- ARCHITECTURE-SOURCES 4.6 and SR3;
+- ARCHITECTURE.md section 8 item 17. This adds D-SRC-70's active-key rule and corrects the parenthesis that still said the guide and logo writers answer `internal`.
+- UX.md 6.3 gains the two sentences.
+- ARCHITECTURE-PLAYER's error-code list gained its bracket with D-PLY-30.
+
+**Rule 15.**
+- Every helper code was inventoried. One code with a path reached the user unmapped (`folder_unusable`); it is now mapped. Unmapped codes without a path are proposed D-EPG-13 (bad_xml, empty_epg, and the dead not_xmltv/not_m3u entries) and D-PLY-31 (socket_path_blocked, spawn_failed).
+- The FolderUnusable-folding shape: only cmd_playlist had it. The cache key verbs keep `bad_key` for a linked key folder, by design and journal only.
+- Every other OSError path in the player parts is wrapped or cleared. spawn_detached's pipe/fork exhaustion still reads `Helper failed unexpectedly`, with no path.
+
+**Gate.**
+
+| tree | node | python | qml |
+|---|---|---|---|
+| 0fe1deb | 3064 | 1642 | 80 |
+| 8287ad1 | 3065 | 1643 | 80 |
+| 8a33905 | 3065 | 1643 | 80 |
+
+**Live.** Every run had no desktop and a private bus. The coredump journal stayed 81 -> 81 across all of them.
+- key-scenario live on 8a33905: 139 / 0, 607.2 s, load 2.36 / 3.46. B41 read `orphan:pruned cache:kept channels:11`. Transcript key-20261027-234752-1801811.
+- player-scenario in the F-HARNESS-46 rig, dev (`--baseline 41ab132`) twice: 76 / 11 each. The tree twice: 77 / 9 each.
+  - The tree failed only the 9 window checks.
+  - Dev failed those plus P13's dropped play, once in each run: 2 of 10 trials, against 0 of 10 on the tree. That is D-PLY-28's service-side race; this lane changes no Service.qml and no success path.
+  - Transcripts: player-20261027-235827-1841491, -20261028-000337-1857208, -20261028-000102-1849412, -20261028-000625-1865225.
+- No live segment drives the damages; they are pinned through the real helper and the shipping QML text.
+
+**The recheck (same day).** MERGEABLE, with d1cb741 (docs). Every new test re-run red on dev 41ab132 (node 3 of 3065; python 9 fixture subtests and 1 of test_cache) and green on the branch; eight mutants of its own each red (a lock open turned into `busy`, which the shell would retry; player_runtime outside player_stop's try; the sentence lost; the reason without strerror; R25c's sentence lost from the player verbs; main()'s R25c journal line removed; handlePlayerResult retrying `runtime_unwritable`; the message appended to the sentence). Driven as the shell runs the helper: 15 verbs over 4 damages (a key that is a dangling link or a file, a dangling logos link, a dangling `sources` link) and 10 player verbs over 9 damages, on both trees -- one code, R25c's sentence in the reply and the journal, one sentence on every surface, nothing created, no traceback; on dev, `cache_unwritable` from the playlist and the full path elsewhere, `internal` with a traceback from the player. Three D-DOC-27 sentences corrected to what the code does (which verbs answer `folder_unusable`; "every other verb that writes into the folder"; start and restart resolve the channel before the runtime folder). It found **D-PLY-32** (a local start refusal marks the channel failed, through the harness: failedAt holds the channel for all four local codes) and **D-SRC-74** (three cache key verbs answer `internal` for a regular file at the key, journal only). Full idle key-scenario 139/0; gate green alone on d1cb741.
+
 ### D-SRC-70, D-SRC-71, D-SRC-72: the follow-ups D-SRC-69 found (lane-src7072, 2026-10-27, 868dd65..d7d5df4)
 
 The owner's word was "Fix all three". There is one commit per finding, and check.sh was green on each commit's own tree, run alone.
