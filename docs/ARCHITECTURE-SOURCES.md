@@ -1399,7 +1399,9 @@ On exit:
   and a local file the reason alone whatever its code. Since D-SRC-73
   (the same day) `folder_unusable` is on that list and has its own
   sentence, and the `playlist` verb answers it for a cache folder that is
-  a link to nothing, as every other verb does.]**
+  a link to nothing, as every other verb that writes into the folder
+  does (ARCHITECTURE.md section 8 item 17 names which verbs do and which
+  answer otherwise).]**
 
 ### 4.7 Cache helper queue
 

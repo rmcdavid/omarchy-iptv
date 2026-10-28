@@ -279,8 +279,10 @@ Error codes, exhaustive: `busy`, `superseded`, `socket_path_blocked`,
 `mpv_missing`, `spawn_failed`, `no_socket`, `not_running`, `ipc_error`,
 `no_cache`, `unknown_channel`, `unsupported_scheme`.
 **[Amended 2026-10-27, D-PLY-30: `start`, `restart` and `stop` make the
-runtime folder (step 3) and open the lock file (4.2) before anything else,
-and a failure of either is now a refusal in the shape above
+runtime folder (step 3) and open the lock file (4.2) before they touch a
+player (`start` and `restart` resolve the channel from the cache first, so
+`no_cache` and `unknown_channel` still come before either), and a failure
+of either is now a refusal in the shape above
 (`kind: player.<verb>`). `folder_unusable` is R25c's (D-SRC-32): the runtime
 folder, or one above it, is a symbolic link whose target is missing or is not
 a folder, or something that is not a folder is at its path; the message is
@@ -289,9 +291,11 @@ failure: the folder could not be made (a parent this user cannot write, a
 full or read-only filesystem), `could not make the player's runtime folder
 (<error>)`, or the lock file could not be opened (a folder at its name, a
 file this user may not write), `could not open the player's lock file
-(<error>)`. Its message names no path. Until then both reached the helper's
-catch-all: `internal`, the exception's text and the path, in a reply of
-`kind: player`. `Model.statusReason` gives the user `A folder the plugin uses
+(<error>)`. Its message names no path. Until then a folder that could not
+be made and a lock file that could not be opened reached the helper's
+catch-all, `internal` with the exception's text and the path, and a link to
+nothing reached main()'s R25c answer, `folder_unusable` with R25c's
+sentence, both in a reply of `kind: player`. `Model.statusReason` gives the user `A folder the plugin uses
 is a broken link or not a folder` and `Could not write the player's runtime
 folder`, in the "did not play" notification. `probe` takes no lock of its
 own, and it still answers over a lock it cannot open, as it did before. The

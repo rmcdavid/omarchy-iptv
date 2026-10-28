@@ -4181,11 +4181,22 @@ Performance budget (10k channels):
     out of date: the guide fetch's three files (`epg-window.txt`,
     `epg-now.json` on a fetch and on `--now-only`, `epg-status.json`), a
     logo, the logo failure memo and `failed.json` answer `cache_unwritable`
-    as the playlist verb does, never `internal` (D-SRC-72). A folder that
-    is a symbolic link to nothing, or not a folder, is R25c's
-    `folder_unusable` from every verb, the playlist verb included since
-    D-SRC-73, and the model shows it as `A folder the plugin uses is a
-    broken link or not a folder`.]**
+    as the playlist verb does, never `internal` (D-SRC-72). A source's
+    cache folder that is a symbolic link to nothing, or not a folder, is
+    R25c's `folder_unusable` from every verb that writes into it -- both
+    fetches (the playlist verb since D-SRC-73), `failed`, and `cache
+    migrate --key` over a file at the key -- and so is a `sources` folder
+    that is one, from those and from `cache prune`; the model shows it as
+    `A folder the plugin uses is a broken link or not a folder`. Not every
+    verb gives that answer, and none of the others reaches a user surface
+    with a path: a verb that reads the folder before it writes anything
+    (`epg --now-only`, `logos`, `play`, `player start`) finds no channel
+    list or window there and answers `no_cache`, and the cache key verbs
+    (`cache remove`, `epg-clear`, `logos-clear`, `migrate --key`) refuse a
+    symbolic link at the key as `bad_key` without following it, while a
+    regular file at the key still reaches `internal` from `remove`,
+    `epg-clear` and `logos-clear` -- read in the journal only, because the
+    shell logs a cache job's code and shows the user nothing.]**
 
     **The one line the shell writes (R30c).** A run that stopped at the
     ceiling or at its deadline, or found the folder busy, exits 0, and its
