@@ -289,6 +289,23 @@ def build_png(width, height, bit_depth=8, declared=None):
             + png_chunk(b"IEND", b""))
 
 
+def build_png_with_metadata(width, height):
+    """D-LOGO-13's shape, small: a valid PNG carrying the three chunks libpng
+    INFLATES while it reads the header -- iCCP, zTXt, iTXt -- and a tEXt, all
+    between IHDR and IDAT where a real encoder puts them. Each payload is a
+    few hundred bytes inflated; the chunks are here to be DROPPED, so what
+    the preflight asks is that the cached file holds none of them and the
+    provider's IDAT unchanged, never how much they would cost."""
+    plain = build_png(width, height)
+    ihdr_end = 8 + 12 + 13
+    profile = zlib.compress(b"rig-profile " * 16)
+    meta = (png_chunk(b"iCCP", b"rig\x00\x00" + profile)
+            + png_chunk(b"zTXt", b"Comment\x00\x00" + zlib.compress(b"rig zTXt " * 32))
+            + png_chunk(b"iTXt", b"Description\x00\x01\x00en\x00\x00" + zlib.compress(b"rig iTXt " * 32))
+            + png_chunk(b"tEXt", b"Software\x00rig"))
+    return plain[:ihdr_end] + meta + plain[ihdr_end:]
+
+
 # ---- GIF
 
 
@@ -487,6 +504,12 @@ CORPUS = [
      lambda: build_gif(64, 64, canvas=(65500, 65500))),
     # ---- the R4 case: magic bytes, allowed content type, no readable header.
     ("unreadable-no-sof.jpg", "none", build_jpeg_no_sof),
+    # ---- D-LOGO-13 (2026-10-29, lane-p1c): metadata chunks a canonical
+    # cache file must not hold. Two names, the same bytes: one is only
+    # served (the fetch path), the other planted in the cache as well (the
+    # cached-file branch, which rewrites it in place).
+    ("meta-chunks-64.png", "64x64", lambda: build_png_with_metadata(64, 64)),
+    ("meta-chunks-planted-64.png", "64x64", lambda: build_png_with_metadata(64, 64)),
 ]
 
 # Files that need a real encoder. --with-encoder adds them; nothing in

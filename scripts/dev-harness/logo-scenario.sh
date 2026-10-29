@@ -89,6 +89,12 @@
 #   C4  a 64x64 JPEG with a whole thumbnail JPEG in its APP1: announced, on
 #       disk -- a parser that refused every APP1 would get the bomb below
 #       right for the wrong reason
+#   C5  D-LOGO-13 (2026-10-29): a 64x64 PNG carrying iCCP, zTXt, iTXt and
+#       tEXt, served: one GET, announced, and the file on disk is IHDR, IDAT,
+#       IEND with the provider's IDAT bytes unchanged -- read from the file,
+#       not from the helper's word
+#   C6  the same bytes planted in the cache under a second name: no GET,
+#       announced, and the file rewritten to that canonical form in place
 #   P1..P10 each planted bomb is GONE from the cache afterwards  <- the sweep
 #       P8 is the EXIF-thumbnail bomb (a 64x64 SOF inside the APP1, the real
 #       SOF 20000x20000 after it), P9 the 64x65535 column (pixels UNDER the
@@ -99,14 +105,15 @@
 #   G1  each swept bomb was fetched exactly once: the sweep fell through to
 #       the gate, one bomb one refusal, and nothing was fetched twice
 #   F1  no bomb's name was announced                              <- the gate
-#   F2  the logo directory holds exactly the four legitimate names
+#   F2  the logo directory holds exactly the six legitimate names
 #   R1  reasons.logo_dimensions == 13   (10 bombs + 2 edges + the unreadable)
 #   R2  the policy refusals, four numbers in one line: refusedOnPolicy == 14
 #       (the 13 above and the logo on 127.0.0.1), reasons.local_address == 1,
 #       no GET reached the 127.0.0.1 server, and its name is not announced --
 #       the destination policy observed live inside the namespace, folded
 #       into R2 so the floor (and check.sh's join to it) does not move
-#   R3  fetched == 3, cached == 1
+#   R3  fetched == 4, cached == 2 (C5 is the fourth fetch, C6 the second
+#       cached file)
 #   E1  side over, pixels under (5000x800): not announced
 #   E2  pixels over, both sides under (2048x2049): not announced
 #   E3  magic bytes and no frame header: not announced (refused, not passed)
@@ -183,7 +190,11 @@
 # F2, R2 and R3, the policy's three, and nothing else; and the tree with
 # `for_logos` made to permit every address (`--tree` over a sealed copy) the
 # same 30 and 3. The rig run outside a namespace refuses with exit 2 before
-# it serves anything.
+# it serves anything. With C5 and C6 (lane-p1c, the same day): the tree 35
+# passed, 0 failed; a sealed copy whose canonical_png returns its input 33
+# and 2, C5 and C6 alone; `--baseline 159da94` 9 and 26, C5 and C6 among
+# them; `--baseline 713afbf` (D-LOGO-13 shipped, D-SINK-40 not) 32 and 3,
+# the policy's three as before.
 #
 # MODES. `check-tree` (what scripts/check.sh runs on every commit: no
 # transcript, no network outside a private namespace of its own, no display,
@@ -388,6 +399,10 @@ GOOD=good-512.png
 AT_BOUND=edge-at-bound.jpg
 CACHED_OK=ctl-prog-64.jpg
 EXIF_OK=ctl-exif-thumb-64.jpg
+# D-LOGO-13: one PNG carrying iCCP, zTXt, iTXt and tEXt that is only served,
+# and the same bytes under a second name planted in the cache as well.
+META=meta-chunks-64.png
+META_PLANTED=meta-chunks-planted-64.png
 BOMBS=(bomb-prog-20000.jpg bomb-prog-rgb-20000.jpg bomb-base-65500.jpg
        bomb-png-20000.png bomb-gif-20000.gif bomb-webp-16383.webp valid-png-20000.png
        bomb-exif-thumb-20000.jpg bomb-column-64x65535.jpg bomb-gif-second-frame-65500.gif)
@@ -396,8 +411,9 @@ EDGE_PIXELS=edge-pixels-only.jpg
 UNREADABLE=unreadable-no-sof.jpg
 SINK_BOMB=bomb-prog-20000.jpg
 join() { local IFS=,; echo "$*"; }
-SERVED=$(join "$GOOD" "$AT_BOUND" "$CACHED_OK" "$EXIF_OK" "${BOMBS[@]}" "$EDGE_SIDE" "$EDGE_PIXELS" "$UNREADABLE")
-PLANTED=$(join "$CACHED_OK" "${BOMBS[@]}")
+SERVED=$(join "$GOOD" "$AT_BOUND" "$CACHED_OK" "$EXIF_OK" "${BOMBS[@]}" "$EDGE_SIDE" "$EDGE_PIXELS" "$UNREADABLE" \
+  "$META" "$META_PLANTED")
+PLANTED=$(join "$CACHED_OK" "${BOMBS[@]}" "$META_PLANTED")
 CORPUS="$WORK/corpus"
 if ! python3 "$SPIKE/make-corpus.py" "$CORPUS" --only "$SERVED" >"$WORK/corpus.log" 2>&1; then
   cat "$WORK/corpus.log"; echo "make-corpus failed" >&2; exit 2
@@ -457,6 +473,36 @@ ck "C3 $CACHED_OK planted sound: GET announced ondisk" "$(gets_of "$CACHED_OK") 
 ex_name=$(name_of "$EXIF_OK")
 ck "C4 $EXIF_OK (a thumbnail JPEG inside its APP1, real frame 64x64): GET announced ondisk" "$(gets_of "$EXIF_OK") $(announced "$ex_name") $(ondisk "$ex_name")" "1 true yes"
 
+# ---- C5 / C6: D-LOGO-13 at the sink that matters, the file the Image will
+# read. The chunk list of the cache file, and whether its IDAT is the
+# provider's own bytes, read from disk -- not from the helper's word.
+canon_of() {
+  python3 -I -c '
+import struct, sys
+def chunks(path):
+    data = open(path, "rb").read()
+    pos, out = 8, []
+    while pos + 12 <= len(data):
+        n = struct.unpack(">I", data[pos:pos + 4])[0]
+        out.append((data[pos + 4:pos + 8].decode("ascii", "replace"), data[pos + 8:pos + 8 + n]))
+        pos += 12 + n
+    return out
+try:
+    have, want = chunks(sys.argv[1]), chunks(sys.argv[2])
+except OSError:
+    print("absent")
+    sys.exit(0)
+idat = lambda c: b"".join(p for k, p in c if k == "IDAT")
+print(",".join(k for k, _ in have) + (" same-idat" if idat(have) == idat(want) else " other-idat"))
+' "$LOGO_DIR/$1" "$CORPUS/$2"
+}
+me_name=$(name_of "$META")
+ck "C5 $META (iCCP, zTXt, iTXt, tEXt) fetched: GET announced, and the cache file" \
+   "$(gets_of "$META") $(announced "$me_name") $(canon_of "$me_name" "$META")" "1 true IHDR,IDAT,IEND same-idat"
+mp_name=$(name_of "$META_PLANTED")
+ck "C6 $META_PLANTED planted with them: GET announced, and the cache file rewritten" \
+   "$(gets_of "$META_PLANTED") $(announced "$mp_name") $(canon_of "$mp_name" "$META_PLANTED")" "0 true IHDR,IDAT,IEND same-idat"
+
 # ---- P1..P10: the sweep, at the sink that matters -- the directory.
 i=0
 for bomb in "${BOMBS[@]}"; do
@@ -477,9 +523,9 @@ ck "G1 bombs fetched exactly once after the sweep${detail:+ (not:$detail)}" "$on
 leaked=""
 for bomb in "${BOMBS[@]}"; do [[ $(announced "$(name_of "$bomb")") == false ]] || leaked="$leaked $bomb"; done
 ck "F1 bombs announced" "${leaked:-none}" "none"
-want_disk=$(printf '%s\n' "$good_name" "$ab_name" "$ok_name" "$ex_name" | sort | tr '\n' ' ')
+want_disk=$(printf '%s\n' "$good_name" "$ab_name" "$ok_name" "$ex_name" "$me_name" "$mp_name" | sort | tr '\n' ' ')
 have_disk=$(rig_field logos-on-disk | cut -d' ' -f2- | tr ' ' '\n' | sort | tr '\n' ' ')
-ck "F2 the logo directory holds exactly the four legitimate names" "$have_disk" "$want_disk"
+ck "F2 the logo directory holds exactly the six legitimate names" "$have_disk" "$want_disk"
 
 # ---- R1..R3: the counts the service reads.
 ck "R1 reasons.logo_dimensions" "$(field 'd["reasons"].get("logo_dimensions")')" "13"
@@ -487,7 +533,7 @@ lb_name=$(grep -a "^RIG name-loopback $GOOD " "$WORK/rig.out" | head -1 | awk '{
 lb_gets=$(grep -a "^RIG get-loopback $GOOD " "$WORK/rig.out" | head -1 | awk '{ print $4 }')
 ck "R2 refusedOnPolicy, reasons.local_address, GETs at 127.0.0.1, the 127.0.0.1 logo announced" \
    "$(field 'd["refusedOnPolicy"]') $(field 'd["reasons"].get("local_address")') ${lb_gets:-NA} $(announced "${lb_name:-NA}")" "14 1 0 false"
-ck "R3 fetched cached" "$(field 'd["fetched"]') $(field 'd["cached"]')" "3 1"
+ck "R3 fetched cached" "$(field 'd["fetched"]') $(field 'd["cached"]')" "4 2"
 
 # ---- E1..E3: the two bounds driven apart, and the unreadable header.
 ck "E1 $EDGE_SIDE (5000x800: side over, pixels under) announced" "$(announced "$(name_of "$EDGE_SIDE")")" "false"
@@ -758,9 +804,9 @@ two_source_segment() {
 
 # The floor. A check that stops executing must turn the run red rather than
 # quietly shorten the summary (D-PLY-9). Recount with
-#   grep -cE '^ck "?[A-Z]' logo-scenario.sh    -> 22, the column-zero ck calls
+#   grep -cE '^ck "?[A-Z]' logo-scenario.sh    -> 24, the column-zero ck calls
 # plus the P loop, whose one ck line is indented inside `for` and runs once
-# per bomb, ${#BOMBS[@]} = 10 times: 22 + 10 = 32. The definition of ck() does
+# per bomb, ${#BOMBS[@]} = 10 times: 24 + 10 = 34. The definition of ck() does
 # not match the recipe and the floor's own line -- not a `ck` -- cannot count
 # itself. The first version of this recipe read `^ck [A-Z]` and counted 2,
 # because every label but V1 and V2 opens with a quote; a recipe that does
@@ -768,9 +814,12 @@ two_source_segment() {
 # Never lower the floor to make a run green, and keep it a LITERAL: derived
 # from ${#BOMBS[@]} it would follow a bomb quietly deleted from the array.
 # 28 -> 32 on 2026-10-11: three reviewer bombs (P8..P10) and the EXIF control
-# (C4). scripts/check.sh's LOGO_PREFLIGHT_MIN is this plus one, and
+# (C4). 32 -> 34 on 2026-10-29 (lane-p1c): C5 and C6, the first checks this
+# scenario has that observe D-LOGO-13 (a canonical_png that returned its
+# input unchanged read 33 passed, 0 failed here before them).
+# scripts/check.sh's LOGO_PREFLIGHT_MIN is this plus one, and
 # scripts/qa-lib-test.sh asserts that join.
-EXPECTED_CHECKS=32
+EXPECTED_CHECKS=34
 # The live arm adds the W segment: the `ck "W<n>` lines inside
 # two_source_segment, indented so the column-zero recipe above does not count
 # them; scripts/qa-lib-test.sh asserts this number against that count.

@@ -758,8 +758,10 @@ STUB_TESTS_MIN=${STUB_TESTS_MIN:-43}
 # two-frame GIF) and the EXIF control. The red run against the shipped
 # 0.13.3 (159da94) answers 9 passed, 24 failed; recipe in the scenario's
 # footer, and scripts/qa-lib-test.sh asserts this number is the scenario's
-# EXPECTED_CHECKS plus one.
-LOGO_PREFLIGHT_MIN=${LOGO_PREFLIGHT_MIN:-33}
+# EXPECTED_CHECKS plus one. 32 -> 34 on 2026-10-29 (lane-p1c): a PNG carrying
+# iCCP, zTXt and iTXt, fetched and planted, whose cache file must be the
+# canonical form -- D-LOGO-13, which no check here observed until then.
+LOGO_PREFLIGHT_MIN=${LOGO_PREFLIGHT_MIN:-35}
 # The D-CLIP-1 clipboard preflight (scripts/dev-harness/clip-scenario.sh
 # check-tree): 6 checks over the lead's three probes inside a nested headless
 # cage -- the editable TextField reads a 25 MB foreign offer in full, the
@@ -1312,11 +1314,15 @@ step "scripts/dev-harness/logo-scenario.sh check-tree (D-LOGO-11)"
 # bytes took the row slot's Image to 840 MB (the fifth maintainer finding,
 # docs/QA-RESULTS.md 2026-10-09). The unit tests prove the parsers; this
 # half observes the two sinks -- the helper as the subprocess the service
-# runs, over a loopback https provider, and the shell's Image as an offscreen
+# runs, over an https provider the rig serves inside a network namespace of
+# its own (`unshare -rn`), from an address that is public there and exists
+# nowhere else (since 2026-10-29; a loopback provider is what DestinationPolicy
+# now refuses, which the same run checks as its control), and the shell's
+# Image as an offscreen
 # probe under a 2.5 GB address-space rlimit (util-linux prlimit, on the qml
 # process alone) -- so the gate goes red if the sweep, the refusal or the
 # announcement stops happening, not only if a function changes its answer.
-# It needs no network beyond loopback, no display, and it never decodes a
+# It needs no network beyond its own namespace, no display, and it never decodes a
 # bomb: on the fixed tree the helper withholds every one, and the 840 MB arm
 # is `--baseline 159da94`, which a human runs.
 #
