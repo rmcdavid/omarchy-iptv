@@ -219,6 +219,9 @@ function makeIds(h) {
     // other timer and process here.
     epgProc: proc("epgProc"),
     epgDebounce: timer("epgDebounce"),
+    // D-SINK-41: what a playlist refresh decided at freshness restarts
+    // (refreshPlaylist); counted, never run, like the EPG's debounce.
+    refreshDebounce: timer("refreshDebounce"),
     epgWatchdog: timer("epgWatchdog"),
     epgFile: view("epgFile"),
     channelsFile: view("channelsFile"),

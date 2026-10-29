@@ -1342,6 +1342,8 @@ checkCall("D-SINK-8 (c) Service.qml sets the environment through the builder at 
   const sites = []
   code.forEach(function (l, i) {
     const m = /^\s*(\w+)\.environment = Model\.fetchEnvironment\((.*)\)\s*$/.exec(l)
+    const n = /^\s*(\w+)\.environment = Model\.fetchEnvironmentFor\((.*)\)\s*$/.exec(l)
+    if (n) sites.push({ proc: n[1], arg: n[2], next: String(code[i + 1] || "").trim() })
     if (m) sites.push({ proc: m[1], arg: m[2], next: String(code[i + 1] || "").trim() })
   })
   // Containment, not whole-line equality: the mutant that survived the first
@@ -1357,12 +1359,15 @@ checkCall("D-SINK-8 (c) Service.qml sets the environment through the builder at 
     sites.map(function (s) { return runs(s.proc) }),
     // Every environment assignment goes through the builder: an inline
     // object literal would be a second spelling of the variable name.
-    code.filter(function (l) { return /\.environment = / .test(l) && !/Model\.fetchEnvironment\(/.test(l) }).length,
+    // D-SINK-40: through fetchEnvironmentFor, which composes fetchEnvironment
+    // with the URL's provenance in the same one assignment.
+    code.filter(function (l) { return /\.environment = / .test(l) && !/Model\.fetchEnvironmentFor\(/.test(l) }).length,
     // And no command, on any process, carries the flag the URL used to ride on.
     code.filter(function (l) { return /"--url"/.test(l) }).length,
     code.filter(function (l) { return /\.command = /.test(l) && /Url\b|\.url\b/.test(l) }).length
   ]
-}, [["playlistProc <- root.playlistUrl", "epgProc <- nowOnly ? \"\" : root.epgFetchUrl", "sourceProbeProc <- rec.url"],
+}, [["playlistProc <- root.playlistUrl, { origin: \"user\" }", "epgProc <- nowOnly ? \"\" : root.epgFetchUrl, root.epgProvenance",
+     "sourceProbeProc <- rec.url, { origin: \"user\" }"],
     [true, true, true], [1, 1, 1], 0, 0, 0])
 
 // ---- D-ID-3: the shell adopts the helper's id scheme, or undoes it ----
@@ -3958,7 +3963,9 @@ checkCall("R32a': the vectors where the free-text host and the RFC host differ a
 checkCall("D-SINK-1: the doubled-at URL reads the same host through all three spellings", function () {
   const u = "http://user:p@ss@host.example.test/live"
   return [Model.sourceLabel(u), Model.hostOf(u), Model.redactUrls(u),
-          Model.resolveEpgUrl({ userUrl: "", hint: u }).host]
+          // D-SINK-40: a hint carrying userinfo is REFUSED now, and the
+          // refusal names its host -- read the same way as the other three.
+          Model.epgHintVerdict({ epgUrlHint: u }).host]
 }, ["http://host.example.test", "host.example.test", "host.example.test", "host.example.test"])
 
 // ---- F-SINK-11: redaction is linear, and says the same thing it said ----
@@ -6505,7 +6512,9 @@ const recCli = { key: "d5977d8a", url: "https://iptv-org.github.io/iptv/countrie
 const recFile = { key: "b0eed9fb", url: "/srv/tv/channels.m3u", epgUrl: "", kind: "file", label: "channels.m3u", labelCustom: false, origin: "guide", addedAt: 10, lastUsed: local(2026, 9, 3, 12, 0), fetchedAt: 220, channelCount: 12, groupCount: 1 }
 const state4 = { version: 2, cacheLayout: 2, favorites: [], recents: [], lastPlayed: null, sources: [recFile, recNas, recProvider, recCli] }
 const viewProvider = Model.sourceView(recProvider, "d990c2e4", nowSep)
-check("sourceView carries the UX names and never the URL", viewProvider, { id: "d990c2e4", label: "Provider", kind: "xtream", host: "tv.example.net:8080", hasEpg: true, epgFromPlaylist: false, channelCount: 1475, groupCount: 28, cachedAt: 200, lastUsedAt: local(2026, 9, 13, 21, 30), lastUsedText: "used 21:30", active: true, origin: "xtream", errorReason: "" })
+check("sourceView carries the UX names and never the URL", viewProvider, { id: "d990c2e4", label: "Provider", kind: "xtream", host: "tv.example.net:8080", hasEpg: true, epgFromPlaylist: false, channelCount: 1475, groupCount: 28, cachedAt: 200, lastUsedAt: local(2026, 9, 13, 21, 30), lastUsedText: "used 21:30", active: true, origin: "xtream", errorReason: "",
+  // D-SINK-40: the guide hint's refusal and plain-http state, hosts only.
+  epgHintRefused: "", epgHintHost: "", epgHintPlainHttp: false })
 check("sourceView never fetched: channelCount -1, file host is 'local file'", [Model.sourceView(recCli, "", nowSep).channelCount, Model.sourceView(recCli, "", nowSep).cachedAt, Model.sourceView(recFile, "", nowSep).host, Model.sourceView(recFile, "", nowSep).kind, Model.sourceView(recNas, "", nowSep).kind], [-1, 0, "local file", "file", "url"])
 check("sourceView null-safe", Model.sourceView(null, "", 0).id, "")
 check("sourceView attaches the session error", Model.sourceView(recCli, "", nowSep, "Connection refused").errorReason, "Connection refused")
@@ -11347,7 +11356,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
 
 // ---- M4-01 repair 3: the url-tvg hint ----
 ;(function () {
-  const CRED = "http://user:s3cret@guide.example.net:8080/xmltv.php?u=user&p=s3cret"
+  // D-SINK-40: credentials in the QUERY (an Xtream guide link); a hint with
+  // USERINFO is refused, which the D-SINK-40 block below pins.
+  const CRED = "http://guide.example.net:8080/xmltv.php?u=user&p=s3cret"
   // epgHintUrl is validateSourceUrl plus ONE narrowing: http(s) only.
   check("M4-01/3: a http hint is accepted and normalised the way a typed URL is",
         [Model.epgHintUrl({ epgUrlHint: "HTTP://Guide.Example.NET:80/xmltv.xml" }),
@@ -17793,6 +17804,141 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   return [tableSame, ownKeys.length > 1000, diff.length, diff.indexOf("U+A7CE") !== -1, diff.indexOf("U+16EA0") !== -1,
           show(diff) === show(data.diff), reach.every(r => r === true), reach.length]
 }, [true, true, 28, true, true, true, true, 28])
+
+// ---- D-SINK-40, D-SINK-41, D-SINK-42: where provider data may send this machine ----
+//
+// The owner's policy (2026-10-29): a source the user typed may reach any
+// address on its first hop; a destination the provider chose may not reach a
+// non-global one unless it is the user's own playlist host. The helper's
+// connect-time check is the binding layer (tests/test_destinations.py, against
+// 127.0.0.1 servers); the model's literal check is the visible one, and the
+// service is the conduit that tells the helper where a URL came from. Shared
+// fixture: tests/fixtures/destinations.json, run here and by the python suite.
+// checkCall throughout, so on a tree without these functions each check is
+// one failure rather than an abort (rule 11's red counts).
+;(function () {
+  const D = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/destinations.json"), "utf8"))
+  checkCall("D-SINK-40: every host spelling in the shared fixture classifies and keys in the model as in the helper (hostClass, hostKey)", () =>
+    D.hosts.map(r => [r.host, Model.hostClass(r.host), Model.hostKey(r.host)]),
+    D.hosts.map(r => [r.host, r.class, r.key]))
+  checkCall("D-SINK-40: the shared fixture's names are the model's: the classes, the cache version and the four environment variables", () =>
+    [Model.ADDRESS_CLASSES, Model.DESTINATION_RULES, Model.FETCH_URL_ENV, Model.FETCH_ORIGIN_ENV, Model.FETCH_HOME_HOST_ENV, Model.FETCH_HOME_CLASS_ENV],
+    [D.classes, D.destinationRules, D.env.url, D.env.origin, D.env.playlistHost, D.env.playlistClass])
+  checkCall("D-SINK-40: every guide hint in the fixture -- each spelling of a loopback, private, link-local, CGNAT and unspecified host, userinfo, the playlist's own host -- gets the fixture's verdict", () =>
+    D.hints.map(r => { const v = Model.epgHintVerdict({ epgUrlHint: r.hint }, r.playlist); return [r.hint, r.playlist, v.url, v.refused, v.host, v.plainHttp] }),
+    D.hints.map(r => [r.hint, r.playlist, r.url, r.refused, r.host, r.plainHttp]))
+  checkCall("D-SINK-40: resolveEpgUrl adopts exactly the hints the verdict adopts, and a refused one is no guide URL at all", () =>
+    D.hints.map(r => { const e = Model.resolveEpgUrl({ userUrl: "", hint: r.hint, playlistUrl: r.playlist }); return [e.url, e.origin, e.fromPlaylist] }),
+    D.hints.map(r => [r.url, r.url !== "" ? Model.EPG_ORIGIN_PLAYLIST : Model.EPG_ORIGIN_NONE, r.url !== ""]))
+  checkCall("D-SINK-40: without the playlist's URL no non-global literal hint is adopted, and a hint the user's own guide URL overrides is never in play", () => {
+    const lan = "http://192.168.1.5:9981/xmltv"
+    return [Model.resolveEpgUrl({ userUrl: "", hint: lan }).url, Model.epgHintUrl({ epgUrlHint: lan }),
+            Model.epgHintRowState({ userUrl: "https://mine.test/g.xml", hint: "http://127.0.0.1/x" }),
+            Model.epgHintRowState({ userUrl: "", hint: "http://127.0.0.1/x", playlistUrl: "https://p.test/x" })]
+  }, ["", "", { refused: "", host: "", plainHttp: false }, { refused: "local", host: "127.0.0.1", plainHttp: false }])
+  checkCall("D-SINK-40: the helper's refusal reply maps to its sentence and keeps `from <host>` (the provider's choice, not this machine's)", () =>
+    D.refusals.map(r => { const st = Model.parseHelperStatus(JSON.stringify(r.reply), r.reply.kind); const reason = Model.statusReason(st)
+      return [reason, Model.failureFromHost(reason, Model.statusHost(st), Model.statusCode(st))] }),
+    D.refusals.map(r => [r.reason, r.line]))
+
+  // The environment, the conduit to the helper's policy.
+  checkCall("D-SINK-40: fetchEnvironmentFor is fetchEnvironment plus the URL's provenance -- origin, the playlist's HOST (never its URL) and a known class", () => {
+    const hint = Model.fetchEnvironmentFor("http://192.168.1.5:9981/xmltv", { origin: "playlist", playlistUrl: "http://me:s3cret@192.168.1.5:9981/playlist?u=1", playlistClass: "private" })
+    const user = Model.fetchEnvironmentFor("http://u:p@a.test/x.m3u", { origin: "user" })
+    return [hint, user, JSON.stringify(hint).indexOf("s3cret"), Object.keys(Model.fetchEnvironmentFor("http://a.test/x", { origin: "user", playlistUrl: "/home/u/tv.m3u" }))]
+  }, [{ OMARCHY_IPTV_URL: "http://192.168.1.5:9981/xmltv", OMARCHY_IPTV_ORIGIN: "playlist", OMARCHY_IPTV_PLAYLIST_HOST: "192.168.1.5", OMARCHY_IPTV_PLAYLIST_CLASS: "private" },
+      { OMARCHY_IPTV_URL: "http://u:p@a.test/x.m3u", OMARCHY_IPTV_ORIGIN: "user" }, -1, ["OMARCHY_IPTV_URL", "OMARCHY_IPTV_ORIGIN"]])
+  checkCall("D-SINK-40: an origin that is not exactly `user` reads as the provider's, an unknown class is dropped, and an empty URL is {} whatever else is given", () =>
+    [Model.fetchEnvironmentFor("http://a.test/x", {}).OMARCHY_IPTV_ORIGIN, Model.fetchEnvironmentFor("http://a.test/x").OMARCHY_IPTV_ORIGIN,
+     Model.fetchEnvironmentFor("http://a.test/x", { origin: "User" }).OMARCHY_IPTV_ORIGIN, Model.fetchEnvironmentFor("http://a.test/x", { origin: "" }).OMARCHY_IPTV_ORIGIN,
+     Object.keys(Model.fetchEnvironmentFor("http://a.test/x", { origin: "user", playlistClass: "intranet" })),
+     Model.fetchEnvironmentFor("", { origin: "user", playlistUrl: "http://a.test/p", playlistClass: "private" }),
+     Model.fetchEnvironmentFor(null, { origin: "playlist" }), Model.fetchEnvironmentFor("http://a.test/x", { origin: "user" }) === Model.fetchEnvironmentFor("http://a.test/x", { origin: "user" })],
+    ["playlist", "playlist", "playlist", "playlist", ["OMARCHY_IPTV_URL", "OMARCHY_IPTV_ORIGIN"], {}, {}, false])
+
+  // The Sources row (UX-SOURCES 5.2).
+  checkCall("D-SINK-40: the active row says a hint was refused, naming only its host, says an adopted http hint under an https playlist travels in plain http, and a screen reader hears the same", () => {
+    const rec = { key: "bbbbbbbb", url: "https://b.example/p.m3u", epgUrl: "", label: "Bare", lastUsed: 90, fetchedAt: 90, channelCount: 20, groupCount: 3 }
+    const local = Model.epgHintRowState({ userUrl: "", hint: "http://admin@192.168.1.1/x", playlistUrl: rec.url })
+    const lan = Model.epgHintRowState({ userUrl: "", hint: "http://192.168.1.1/cgi-bin/luci?x=1", playlistUrl: rec.url })
+    const plain = Model.epgHintRowState({ userUrl: "", hint: "http://epg.example/g.xml?token=T0K", playlistUrl: rec.url })
+    const vUser = Model.sourceView(rec, "bbbbbbbb", 1000, "", false, local)
+    const vLan = Model.sourceView(rec, "bbbbbbbb", 1000, "", false, lan)
+    const vPlain = Model.sourceView(rec, "bbbbbbbb", 1000, "", true, plain)
+    const vOther = Model.sourceView(rec, "aaaaaaaa", 1000, "", false, lan)
+    const vOwn = Model.sourceView(Object.assign({}, rec, { epgUrl: "http://mine.example/g.xml" }), "bbbbbbbb", 1000, "", false, lan)
+    return [Model.sourceDetail(vUser, false), Model.sourceDetail(vLan, false), Model.sourceDetail(vPlain, false),
+            Model.sourceAccessibleName(vLan).indexOf("EPG from playlist not used: 192.168.1.1 is a local address") !== -1,
+            Model.sourceDetail(vOther, false).indexOf("EPG") === -1, Model.sourceDetail(vOwn, false).indexOf("not used") === -1,
+            [vUser, vLan, vPlain].map(v => JSON.stringify(v)).join("").search(/:\/\/|admin|T0K|luci/)]
+  }, ["active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist not used: its address for 192.168.1.1 carries a password",
+      "active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist not used: 192.168.1.1 is a local address",
+      "active \u00b7 b.example \u00b7 20 channels in 3 groups \u00b7 EPG from playlist over plain http", true, true, true, -1])
+
+  checkCall("D-SINK-41: a playlist cache whose status predates the destination rules is refreshed once whatever its age; one written under them is not", () =>
+    [Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1 }), Model.cacheBeforeDestinationRules({ ok: true, fetchedAt: 1, destinationRules: 1 }),
+     Model.cacheBeforeDestinationRules({ ok: true, destinationRules: 2 }), Model.cacheBeforeDestinationRules({ ok: true, destinationRules: "x" }),
+     Model.cacheBeforeDestinationRules({ ok: false }), Model.cacheBeforeDestinationRules(null)],
+    [true, false, false, true, false, false])
+
+  // Service.qml's own functions (tests/service-harness.js): every URL-carrying
+  // spawn says where its URL came from, through the one assignment, reset
+  // at every run.
+  const H = require("./service-harness.js")
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
+  const keyOf = url => M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
+  const LAN = "http://me:s3cret@192.168.1.5:9981/playlist", OWN = "http://e.example.test/xmltv.php?username=u&password=p"
+  const rec = (url, extra) => Object.assign({ key: keyOf(url), url, epgUrl: "", kind: "http", label: "tvh", labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }, extra || {})
+  const stateText = (sources, activeKey) => JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources, activeKey, entryMigrated: true }) + "\n"
+  const boot = (sources) => H.bootService(svcText, M, { entry: { sourceKey: keyOf(LAN), showLogos: false }, stateText: stateText(sources, keyOf(LAN)), host: "lag" })
+  checkCall("D-SINK-40 (service): the guide fetch of a hint on the playlist's own host carries origin playlist, that host and the class its playlist fetch connected to; the --now-only run after it carries nothing", () => {
+    const h = boot([rec(LAN)])
+    h.root.channelsMeta = { epgUrlHint: "http://192.168.1.5:9981/xmltv", sourceClass: "private" }
+    h.ids.epgProc.running = false
+    h.root.runEpgHelper(false)
+    const fetch = Object.assign({}, h.ids.epgProc.environment)
+    h.ids.epgProc.running = false
+    h.root.epgLoaded = true
+    h.root.runEpgHelper(true)
+    return [fetch, h.ids.epgProc.environment, h.compileErrors]
+  }, [{ OMARCHY_IPTV_URL: "http://192.168.1.5:9981/xmltv", OMARCHY_IPTV_ORIGIN: "playlist", OMARCHY_IPTV_PLAYLIST_HOST: "192.168.1.5", OMARCHY_IPTV_PLAYLIST_CLASS: "private" }, {}, []])
+  checkCall("D-SINK-40 (service): a hint on another LAN host is never fetched and the active row says so; the user's own guide URL is fetched as theirs", () => {
+    const h = boot([rec(LAN)])
+    h.root.channelsMeta = { epgUrlHint: "http://192.168.1.6/xmltv", sourceClass: "private" }
+    h.ids.epgProc.running = false
+    h.root.runEpgHelper(false)
+    const refused = [h.ids.epgProc.running, h.root.epgFetchUrl, M.sourceDetail(h.root.sources[0], false)]
+    const g = boot([rec(LAN, { epgUrl: OWN })])
+    g.root.channelsMeta = { epgUrlHint: "http://192.168.1.6/xmltv", sourceClass: "private" }
+    g.ids.epgProc.running = false
+    g.root.runEpgHelper(false)
+    return [refused, g.ids.epgProc.environment]
+  }, [[false, "", "active \u00b7 192.168.1.5:9981 \u00b7 9 channels in 2 groups \u00b7 EPG from playlist not used: 192.168.1.6 is a local address"],
+      { OMARCHY_IPTV_URL: OWN, OMARCHY_IPTV_ORIGIN: "user", OMARCHY_IPTV_PLAYLIST_HOST: "192.168.1.5", OMARCHY_IPTV_PLAYLIST_CLASS: "private" }])
+  checkCall("D-SINK-40 (service): the playlist fetch and the source probe carry origin user and no playlist host of their own", () => {
+    const h = boot([rec(LAN)])
+    h.ids.playlistProc.running = false
+    h.root.runPlaylistHelper()
+    const fetch = Object.assign({}, h.ids.playlistProc.environment)
+    h.root.addSource({ playlistUrl: "http://new.example.test/get.php?username=u&password=p", epgUrl: "", label: "" })
+    h.runLater()
+    return [fetch, h.ids.sourceProbeProc.environment]
+  }, [{ OMARCHY_IPTV_URL: LAN, OMARCHY_IPTV_ORIGIN: "user" },
+      { OMARCHY_IPTV_URL: "http://new.example.test/get.php?username=u&password=p", OMARCHY_IPTV_ORIGIN: "user" }])
+  checkCall("D-SINK-41 (service): applyFreshness refreshes a fresh cache written before the destination rules, and leaves one written under them", () => {
+    const runs = status => {
+      const h = boot([rec(LAN)])
+      h.root.playlistStatus = status
+      h.root.pendingFreshness = true
+      const before = h.ids.refreshDebounce ? h.ids.refreshDebounce.restarts : 0
+      h.root.applyFreshness()
+      return (h.ids.refreshDebounce ? h.ids.refreshDebounce.restarts : 0) - before
+    }
+    const now = Math.floor(Date.now() / 1000)
+    return [runs({ ok: true, kind: "playlist", fetchedAt: now }), runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 1 })]
+  }, [1, 0])
+})()
 
 // ---- D-HOST-5, rule 15: every notice the service posted in this run went through its kind's slot ----
 //

@@ -195,18 +195,21 @@ export {
   ENCODE_SENTENCE, WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts,
   urlHostWithheld, sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP,
   formAdviceLine, looksLikeHost, validateSourceUrl, normalizeSourceUrl,
-  EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST, epgHintUrl,
-  resolveEpgUrl, EPG_HINT_NOTICE, epgOriginNotice, isUrlField, sourceKey,
-  isSourceKey, findSource, findSourceByUrl, allocateSourceKey, sourceCacheDir,
-  deriveLabel, labelTaken, uniqueLabel, defaultSourceLabel, validateLabel,
-  maskUrl, encodeQueryValue, xtreamUrls, validateXtream, pluralGroups,
-  countsLine, formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
-  EPG_HINT_ROW_TEXT, sourceDetail, sourceAccessibleName, sourcesHeaderCount,
-  sourcesHeaderRight, sourcesRowAccessibleName, confirmLogosMessage,
-  confirmRemoveMessage, fetchingLine, failureFromHost, probeFailureLine,
-  sourceTransient, CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS,
-  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES,
-  logoFailedPath, logoBrokenMark, logoHaveLess
+  ADDRESS_CLASSES, hostClass, hostKey, FETCH_ORIGIN_ENV, FETCH_HOME_HOST_ENV,
+  FETCH_HOME_CLASS_ENV, fetchEnvironmentFor, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
+  EPG_ORIGIN_PLAYLIST, EPG_HINT_REFUSED_USERINFO, EPG_HINT_REFUSED_LOCAL,
+  epgHintVerdict, epgHintUrl, resolveEpgUrl, epgHintRowState, EPG_HINT_NOTICE,
+  epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
+  findSourceByUrl, allocateSourceKey, sourceCacheDir, deriveLabel, labelTaken,
+  uniqueLabel, defaultSourceLabel, validateLabel, maskUrl, encodeQueryValue,
+  xtreamUrls, validateXtream, pluralGroups, countsLine, formatLastUsed,
+  formatAgo, sourceView, sourceViews, sourceRows, EPG_HINT_ROW_TEXT,
+  EPG_HINT_PLAIN_ROW_TEXT, epgHintRowText, sourceDetail, sourceAccessibleName,
+  sourcesHeaderCount, sourcesHeaderRight, sourcesRowAccessibleName,
+  confirmLogosMessage, confirmRemoveMessage, fetchingLine, failureFromHost,
+  probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
+  CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS,
+  CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark, logoHaveLess
 } from "./model/sources.mjs"
 export {
   hasControlChars, normalizeSourceRecord, sourcesFull, addSource,
@@ -215,11 +218,12 @@ export {
   withActiveKey, invalidInputBlocks, reconcileAction, adoptActiveSource,
   activeEpgUrlOf, pointerWritePlan, probeCommitPlan, probeCommitState,
   pruneArgs, cacheJobDrop, cacheJobArgs, probeWaitsFor, reconcileSources,
-  sourceForEdit, sourcesSummary, entryWith, cacheStale, formFields,
-  isFormField, formLimit, formCapacity, copyForm, formState, formFocusOrder,
-  formHasText, openForm, openFirstRun, openAddForm, openEditForm,
-  openXtreamForm, closeForm, withFormValue, withFormFocus, moveFormFocus,
-  fieldMaskable, fieldRevealed, fieldMasked, toggleReveal, withFormReveal
+  sourceForEdit, sourcesSummary, entryWith, DESTINATION_RULES,
+  cacheBeforeDestinationRules, cacheStale, formFields, isFormField, formLimit,
+  formCapacity, copyForm, formState, formFocusOrder, formHasText, openForm,
+  openFirstRun, openAddForm, openEditForm, openXtreamForm, closeForm,
+  withFormValue, withFormFocus, moveFormFocus, fieldMaskable, fieldRevealed,
+  fieldMasked, toggleReveal, withFormReveal
 } from "./model/source-records.mjs"
 export {
   clipboardArgv, clipboardCut, parseClipboardReply, editRange, fullRange,

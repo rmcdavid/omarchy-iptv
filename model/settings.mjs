@@ -372,6 +372,12 @@ function statusReason(status) {
     timeout: "Timed out",
     helper_timeout: "Helper timed out",
     unsafe_redirect: "Unsafe redirect",
+    // D-SINK-40 (2026-10-29): the helper refused to connect to an address on
+    // this machine or a local network that the PROVIDER chose -- a redirect
+    // hop, the playlist's guide hint, a logo. About the provider's choice, so
+    // it keeps `from <host>` (off PROBE_LOCAL_REFUSALS); the helper's own
+    // message names the refused host and is the journal's.
+    local_address: "Refused a local address",
     too_large: "Source too large",
     bad_gzip: "Bad gzip data",
     empty_playlist: "Playlist has no channels",

@@ -1097,6 +1097,19 @@ function entryWith(entry, patch, opts) {
 
 // A cache is stale when its status is not ok, has no fetchedAt, or is older
 // than refreshMinutes.
+// D-SINK-41 (2026-10-29): a playlist cache written before the helper's
+// destination rules (its status carries no `destinationRules` at or above
+// this) holds channels nothing checked -- a LAN literal from a public list,
+// a sign-in header for another host -- and lacks the `sourceClass` a guide
+// hint on the playlist's own host is matched by. The service refreshes such
+// a cache at the next start or swap, once, whatever its age. The helper's
+// DESTINATION_RULES; joined by the destinations fixture.
+var DESTINATION_RULES = 1
+
+function cacheBeforeDestinationRules(status) {
+  return !!(status && status.ok === true && !(Number(status.destinationRules) >= DESTINATION_RULES))
+}
+
 function cacheStale(status, refreshMinutes, nowSec) {
   if (!status || status.ok !== true) return true
   var fetched = Number(status.fetchedAt) || 0
@@ -1367,10 +1380,11 @@ export {
   adoptActiveSource, activeEpgUrlOf, pointerWritePlan, probeCommitPlan,
   probeCommitState, pruneArgs, pruneKeeps, cacheJobKey, cacheJobDrop,
   cacheJobArgs, probeWaitsFor, reconcileSources, sourceForEdit,
-  sourcesSummary, entryWith, cacheStale, formFields, isFormField, formLimit,
-  FORM_SLACK, formCapacity, emptyValues, copyValues, copyForm, formState,
-  formFocusOrder, formHasText, firstFieldWithText, guideWithForm, openForm,
-  openFirstRun, openAddForm, openEditForm, openXtreamForm, closeForm,
-  withFormPatch, withFormValue, withFormFocus, moveFormFocus, fieldMaskable,
-  fieldRevealed, fieldMasked, toggleReveal, withFormReveal
+  sourcesSummary, entryWith, DESTINATION_RULES, cacheBeforeDestinationRules,
+  cacheStale, formFields, isFormField, formLimit, FORM_SLACK, formCapacity,
+  emptyValues, copyValues, copyForm, formState, formFocusOrder, formHasText,
+  firstFieldWithText, guideWithForm, openForm, openFirstRun, openAddForm,
+  openEditForm, openXtreamForm, closeForm, withFormPatch, withFormValue,
+  withFormFocus, moveFormFocus, fieldMaskable, fieldRevealed, fieldMasked,
+  toggleReveal, withFormReveal
 }
