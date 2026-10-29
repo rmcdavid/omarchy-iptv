@@ -13315,6 +13315,68 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### D-HOST-5, the every-try card, D-PLY-37, D-PLY-36, D-PLY-41 (lane-host5, 2026-10-28, e968e03..f747c5f)
+
+**The owner's decisions.**
+1. D-HOST-5 first, then "refresh on every try".
+2. D-PLY-37: a lost audio or video output is this machine's.
+3. D-PLY-36: the first-load window says which ending it saw.
+4. D-PLY-41, folded in by the lead.
+
+**The host.** Read in Omarchy's sources and measured on private buses with Quickshell 0.3.1's own NotificationServer behind the real `/usr/bin/omarchy-notification-send`.
+- The server numbers cards itself and replaces only an id it handed out and still holds; `-p` prints that id.
+- A1, model-driven:
+  - Five posts of one kind sending back the printed id made ONE card, updated four times.
+  - A second kind made a second card.
+  - A card the server expired got a fresh id on the next post, and the post after that refreshed the new card.
+  - Dev 9e380ae's argv (no `-p`, a fixed `-r`) made a card per post: ten cards from ten posts.
+- A3: an IPTV post sending ANOTHER program's card id overwrote that card. So the ids live in memory only, which dies with the shell, and the shell is where the server lives (D-HOST-6 for the rest).
+
+**What changed.**
+- **Notices.** Every notice goes through `Service.notify` and one slot per kind: `Model.notifyPost` / `notifyAnswered`, a Process per post, a 5 s watchdog, and the latest held notice going out with the returned id. The fixed 740xx goes out only when no id is held.
+- **Could not start playback** is posted on every refused try.
+- **D-PLY-37.** `Model.outputFailure` reads mpv's `file_error`.
+  - Measured on mpv 0.41.0: an ALSA device that does not exist, PulseAudio down, PipeWire down, and the launch shape all end the file with reason `error`, "audio output initialization failed", after the picture played.
+  - That ending is told as `Audio output failed` / "“X” stopped · This computer's audio output could not be opened" (74023) and marks nothing.
+  - "video output initialization failed" is mpv's own name and was reached by none of the five video output failures measured; it is UNVERIFIED.
+- **D-PLY-36.** `firstLoad.ended` is `end-file` (with `fileError`) or `closed`. Only an end-file marks.
+- **D-PLY-41.** The refusal tail and settleTimedOutPlay gate on `userStopped` alone. `stopAt` is not reset in play(), so a play after a stop still takes the start branch (4.10).
+
+**Tests.**
+
+| tree | node | python | spec |
+|---|---|---|---|
+| dev 9e380ae | 3111 | 1679 | 80 |
+| e968e03 | 3111 | 1684 | 80 |
+| 7d199bc | 3130 | 1684 | 81 |
+| f747c5f | 3130 | 1684 | 81 |
+
+- Red on dev: node 27 of 3130 (the 19 new checks and 8 updated ones); python 6 of the 8 targeted tests; the new spec function.
+- The shared fixture `tests/fixtures/player-endings.json` is run by `tests/test_player_endings.py` (observe_first_load, plus a real-mpv canary) and by node (deathReport over the same replies and mpv's measured lines).
+- A ledger read last proves all 12 notice kinds were posted through their slot and none detached.
+- 33 mutants, all red. S9 and S13 survived the first pass and are pinned by two checks added for them.
+
+**Live.** Nested headless cage, private bus, no desktop. Coredump journal 81 → 81 on every run.
+
+| run | result | transcript |
+|---|---|---|
+| player-scenario, tree | 77/9 | player-20261028-183600-3500523 |
+| player-scenario, dev (`--baseline 9e380ae`) | 77/9 | player-20261028-183839-3508429 |
+| lane probe, tree | 21/0 | host5probe-20261028-184215-3519326 |
+| lane probe, dev's shell | 6/15 | host5probe-20261028-184310-3522331 |
+
+- player-scenario: the same 9 window checks fail on both trees; P7 and P14 are green on both.
+- The lane probe used the real Service.qml and wrapper with the probe's own server.
+  - Tree: three refusals made 3 posts and 1 card; two audio-output endings made 1 card and no mark; a dead stream still marks; a SIGKILL is Playback stopped.
+  - Dev's shell: one post for three refusals, two stacked Stream failed cards, and the channel marked.
+
+**Rule 15.**
+- Every notice kind: streamFailed, localPlayFailure, playerStopped, outputFailed, playlistRefreshed, playlistError, epgError, mpvMissing, entryInputRefused, stateUnreadable, mergeConflict, mergeDropped. All go through the slot.
+- Every end-file reader (parsePlayerEvent, routePlayerEvent, endedVerdict, endedReport, deathReport, handlePlayerGone, playerFirstLoadFailed, PO-3, the helper's ended_verdict and observe_first_load, the spec's routePlayer) now leaves the card and the mark to deathReport.
+- Filed: D-HOST-6, D-PLY-42, D-PLY-43, F-HARNESS-67.
+
+**The recheck (same day).** MERGEABLE, with two pins: 38d89b7 (a stop is never told over the audio output's ending; mutant X6, the output test moved ahead of endedReport's tell-or-not, had survived all 3130 checks) and bfb44d5 (the first-load reply of a window that runs out carries no `ended`; mutant X16 had survived the helper suite). Its own private-bus rig with Quickshell 0.3.1's server and the real wrapper: one kind five posts one card, two kinds two cards, an expired or dismissed card a fresh id then in place, dev's argv three cards from three posts; the server object rebuilt in the same process keeps its counter (a held stale id got a fresh card and replaced nothing), a restarted server PROCESS let a stale id overwrite another app's card -- so in-memory ids are right for the in-shell server (**D-HOST-6** narrowed). A hung server (SIGSTOP) left the shell answering IPC in 112-174 ms and the post TERMed after 5 s. mpv 0.41.0 probed windowless (12 cases): every audio-output failure ends with the pinned string after file-loaded; no video-output failure produces its string. The helper's observe_first_load over real mpv: SIGKILL gives `closed`, a refused connection `end-file` / "loading failed". Its cage probe: tree 29/0, dev's shell 9/20; player-scenario 77/9 (the 9 window checks), P7 and P14 holding. It found **D-HOST-7**: with `-p` removed from a copy of the wrapper, every notice exits 1 and is lost silently. Quickshell 0.3.1 kills a Process's child when its object is destroyed (measured), so a notice in flight at shell exit is lost. Gate green alone on bfb44d5: node 3131, python 1685, QML spec 81.
+
 ### D-PLY-35: the player slot's watchdog is derived per verb, and a start it stops is looked for (lane-ply35, 2026-10-28, e1edf79..61ba63c)
 
 The owner's word: "Then fix D-PLY-35 too".

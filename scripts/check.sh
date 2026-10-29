@@ -196,7 +196,9 @@ fail=0
 # version bump and the notes); the spec runs 80 and the floor stays 80.
 # P2/P3 sweep integration, 2026-10-24 (lane-p23-int): the merged tree runs
 # 80; no lane added a spec case, so the floor stays 80.
-QML_SPEC_MIN=${QML_SPEC_MIN:-80}
+# 2026-10-28, rc-host5 (D-PLY-37, D-PLY-36): 80 -> 81 --
+# test_playerOutputEndingAndNoticeSlots, red on 9e380ae.
+QML_SPEC_MIN=${QML_SPEC_MIN:-81}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -421,7 +423,10 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-80}
 # D-PLY-30..35 and D-EPG-13 rounds added 75 checks, every one red first in its
 # lane (the lane reports in QA-RESULTS), so any 75 could have been deleted with
 # the gate green; the floor is again what the suite runs.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3111}
+# 2026-10-28, rc-host5 (D-HOST-5, D-PLY-37, D-PLY-36, D-PLY-41): 3111 -> 3131
+# -- 19 new checks in the lane and one in its recheck, every one red on
+# 9e380ae or on a mutant (QA-RESULTS); the suite runs 3131.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3131}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -692,7 +697,10 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3111}
 # tests/test_player_bounds.py's eight (D-PLY-35: the helper's bounds equal the
 # shared fixture's, and the recheck's worst-path walks), red first in the lane
 # and its recheck; the suite runs 1679 and the floor is 1679.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1679}
+# 2026-10-28, rc-host5 (D-PLY-36): 1679 -> 1685 -- test_player_endings.py's
+# four and test_player.py's D-PLY-36 verb test in the lane, the window-runs-out
+# reply in its recheck; red on 9e380ae or on a mutant; the suite runs 1685.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1685}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
