@@ -56,30 +56,57 @@ def run(*args):
 # a per-file profile could undo and the profile list itself (D-SINK-44).
 # Spelled out rather than built from the helper's constants, so a change to
 # the sequence has to be a change to this list too.
+#
+# 2026-10-29 (lane-p1b): the demuxer map also gets the pinned protocol
+# whitelist (D-SINK-55: absent here, so it is appended), reset-on-next-file is
+# read back with the TLS pins and never written (D-SINK-60), and the
+# per-file profile check asks about EVERY pinned option, in the helper's
+# sorted order, not only the TLS ones (the lead's decision on the recheck).
+WHITELIST = "http,https,tls,tcp,crypto,data,httpproxy"
+PINNED_OPTIONS = ("demuxer-lavf-o", "demuxer-lavf-propagate-opts", "drag-and-drop", "input-commands",
+                  "load-auto-profiles", "load-scripts", "load-select", "load-unsafe-playlists", "log-file",
+                  "osd-playlist-entry", "player-operation-mode", "reset-on-next-file", "save-watch-history",
+                  "script-opts", "scripts", "stream-lavf-o", "tls-verify", "watch-later-dir")
 TLS_PRELUDE_PRE_PIN = [
     ["set_property", "tls-verify", True],
     ["set_property", "stream-lavf-o", {}],
     ["get_property", "demuxer-lavf-o"],
+    ["change-list", "demuxer-lavf-o", "append", "protocol_whitelist=" + WHITELIST],
     ["get_property", "load-auto-profiles"],
     ["set_property", "load-auto-profiles", "no"],
     ["get_property", "tls-verify"],
     ["get_property", "stream-lavf-o"],
     ["get_property", "demuxer-lavf-o"],
     ["get_property", "load-auto-profiles"],
-    ["get_property", "option-info/tls-verify/set-from-commandline"],
-    ["get_property", "option-info/stream-lavf-o/set-from-commandline"],
-    ["get_property", "option-info/demuxer-lavf-o/set-from-commandline"],
-    ["get_property", "option-info/demuxer-lavf-propagate-opts/set-from-commandline"],
-    ["get_property", "option-info/load-auto-profiles/set-from-commandline"],
+    ["get_property", "reset-on-next-file"],
+] + [["get_property", "option-info/%s/set-from-commandline" % name] for name in PINNED_OPTIONS] + [
     ["get_property", "profile-list"],
 ]
 # The options the pin block sets from the command line: a FakeMpv given these
 # as `cmdline` (and the pinned values as `props`) is a player launched by this
 # release's argv.
-PINNED_CMDLINE = ("tls-verify", "stream-lavf-o", "demuxer-lavf-o", "demuxer-lavf-propagate-opts",
-                  "load-auto-profiles")
-PINNED_PROPS = {"tls-verify": True, "stream-lavf-o": {}, "demuxer-lavf-o": {"tls_verify": "1"},
-                "load-auto-profiles": False}
+PINNED_CMDLINE = PINNED_OPTIONS
+PINNED_PROPS = {"tls-verify": True, "stream-lavf-o": {},
+                "demuxer-lavf-o": {"protocol_whitelist": WHITELIST, "tls_verify": "1"},
+                "load-auto-profiles": False, "reset-on-next-file": []}
+# The per-file options of the helper's loadfile (channel_load_options): the
+# demuxer that refuses a nested playlist (D-PLY-44), the channel's user agent
+# and referrer, its header list emptied and then one verbatim -append per
+# header. Ordered pairs, because the object repeats a key.
+def load_options(agent=helper.MPV_DEFAULT_USER_AGENT, referrer="", fields=()):
+    return ([["demuxer", "lavf"], ["user-agent", agent], ["referrer", referrer], ["http-header-fields-clr", ""]]
+            + [["http-header-fields-append", f] for f in fields])
+
+
+class Obj(dict):
+    """A JSON object as mpv's own reader takes it: every key in order,
+    repeats kept, in `pairs` (measured on mpv 0.41.0: three
+    `http-header-fields-append` keys in one object were three headers). As a
+    dict it compares like the object Python's json would make of it."""
+
+    def __init__(self, pairs):
+        super().__init__(pairs)
+        self.pairs = [[k, v] for k, v in pairs]
 
 
 class FakeMpv:
@@ -169,10 +196,11 @@ class FakeMpv:
                     "load-auto-profiles": "auto", "profile-list": [],
                     "load-select": True, "save-watch-history": False, "load-unsafe-playlists": False,
                     "reset-on-next-file": [], "osd-playlist-entry": "title", "log-file": "",
-                    "watch-later-dir": ""}
+                    "watch-later-dir": "", "drag-and-drop": "auto", "script-opts": {}}
     # mpv 0.41 answers `yes` and `no` of these choices as booleans (measured for
-    # load-auto-profiles: "auto" before, False after `set ... no`).
-    CHOICE_BOOLEANS = {"load-auto-profiles": {"no": False, "yes": True}}
+    # load-auto-profiles: "auto" before, False after `set ... no`; and for
+    # drag-and-drop: False for `no`, lane-p1b 2026-10-29).
+    CHOICE_BOOLEANS = {"load-auto-profiles": {"no": False, "yes": True}, "drag-and-drop": {"no": False}}
 
     def __init__(self, path, props=None, event_first=False, silent=False, refuse=(), close_on_quit=True,
                  entry_ids=True, user_data=None, seek_moves=True, seek_lag_s=0.0, seek_silent=False,
@@ -265,7 +293,7 @@ class FakeMpv:
                 buffer += chunk
                 while b"\n" in buffer:
                     line, buffer = buffer.split(b"\n", 1)
-                    message = json.loads(line.decode("utf-8"))
+                    message = json.loads(line.decode("utf-8"), object_pairs_hook=Obj)
                     with self.lock:
                         self.commands.append(message["command"])
                         self.command_times.append(time.monotonic())
@@ -478,16 +506,64 @@ class PlayTest(MpvTestCase):
             ["set_property", "sid", "auto"],
             ["set_property", "title", "$>ESPN"],
             ["set_property", "force-media-title", "ESPN"],
-            ["set_property", "user-agent", "VLC/3.0.20"],
-            ["set_property", "referrer", "http://ref.example.test/"],
-            # D-SINK-41: the playlist is a local FILE, which has no host for
-            # the channel's to equal, so its Cookie is a sign-in header for
+            # 2026-10-29: the GLOBAL header properties at values that belong
+            # to no provider, whatever the channel carries...
+            ["get_property", "option-info/user-agent/default-value"],
+            ["set_property", "user-agent", helper.MPV_DEFAULT_USER_AGENT],
+            ["set_property", "referrer", ""],
+            ["set_property", "http-header-fields", []],
+            # ...and the channel's own on the loadfile, per file. D-SINK-41:
+            # the playlist is a local FILE, which has no host for the
+            # channel's to equal, so its Cookie is a sign-in header for
             # another host and is dropped at parse time; the rest arrive.
-            ["set_property", "http-header-fields", ["X-Forwarded-For: 1.2.3.4"]],
-            ["loadfile", "http://stream.example.test/live/espn.m3u8", "replace"],
+            ["loadfile", "http://stream.example.test/live/espn.m3u8", "replace", -1,
+             dict(load_options("VLC/3.0.20", "http://ref.example.test/", ["X-Forwarded-For: 1.2.3.4"]))],
         ])
+        self.assertEqual(server.commands[-1][4].pairs,
+                         load_options("VLC/3.0.20", "http://ref.example.test/", ["X-Forwarded-For: 1.2.3.4"]))
         self.assertEqual(len(stdout.strip().splitlines()), 1)
         self.assertNotIn("espn.m3u8", stdout + stderr)
+
+    def test_the_headers_ride_the_loadfile_and_no_global_carries_them(self):
+        """2026-10-29 (D-PLY-44's sibling, the review's ctrl-v finding). The
+        helper used to set the channel's headers as GLOBAL properties, so an
+        entry it did not load -- a paste, a drop, a nested playlist's entry,
+        playlist-next -- went out with them. Now no global property is ever
+        given a provider value: every set_property of the three names carries
+        mpv's default, nothing, or the empty list, and the channel's values
+        appear only in the loadfile's own options."""
+        server = self.start()
+        code, _, _, stderr = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 0, stderr)
+        globals_ = [c for c in server.commands if c[0] == "set_property"
+                    and c[1] in ("user-agent", "referrer", "http-header-fields")]
+        self.assertEqual(globals_, [["set_property", "user-agent", helper.MPV_DEFAULT_USER_AGENT],
+                                    ["set_property", "referrer", ""], ["set_property", "http-header-fields", []]])
+        flat = json.dumps([c for c in server.commands if c[0] != "loadfile"])
+        for value in ("VLC/3.0.20", "ref.example.test", "1.2.3.4"):
+            self.assertNotIn(value, flat)
+
+    def test_a_header_value_with_commas_quotes_and_backslashes_stays_one_header(self):
+        """The per-file list is written as one VERBATIM `-append` per header:
+        the plain list option splits a value at every comma (measured on mpv
+        0.41.0 against a logging server: `X-A: 1,2` arrived as `X-A: 1`). The
+        object repeats the key, so it is written in order by hand (IpcPairs)
+        and read here as mpv reads it. CR and LF never reach it: the parse
+        refuses them (clean_header_value turns them into spaces)."""
+        playlist = os.path.join(self.dir, "hard.m3u")
+        value = 'v1,v2=v3 "q" back\\slash [br] end\\'
+        pathlib.Path(playlist).write_text(
+            '#EXTM3U\n#EXTINF:-1 tvg-id="h.test",Hard\n#EXTVLCOPT:http-user-agent=UA, a=b "c"\n'
+            "#KODIPROP:inputstream.adaptive.stream_headers=X-A=%s&X-B=two%%0D%%0AX-Evil: 1\n"
+            "http://stream.example.test/h.m3u8\n" % value.replace(",", "%2C").replace("&", "%26").replace("=", "%3D"),
+            encoding="utf-8")
+        code, _, _, stderr = run("playlist", "--url", playlist, "--cache-dir", self.cache)
+        self.assertEqual(code, 0, stderr)
+        server = self.start()
+        code, _, _, stderr = self.play("--id", "t:h.test")
+        self.assertEqual(code, 0, stderr)
+        options = [c for c in server.commands if c[0] == "loadfile"][0][4].pairs
+        self.assertEqual(options, load_options('UA, a=b "c"', "", ["X-A: " + value, "X-B: two  X-Evil: 1"]))
 
     def test_a_channel_change_resets_the_track_selection(self):
         """M3-02 / 0.9.0 preflight. mpv keeps `aid` and `sid` across a
@@ -505,7 +581,7 @@ class PlayTest(MpvTestCase):
         self.assertIn(["set_property", "aid", "auto"], sets)
         self.assertIn(["set_property", "sid", "auto"], sets)
         # Before the loadfile, or the new channel loads with the old track.
-        load = server.commands.index(["loadfile", "http://stream.example.test/live/espn.m3u8", "replace"])
+        load = [i for i, c in enumerate(server.commands) if c[0] == "loadfile"][0]
         for prop in ("aid", "sid"):
             self.assertLess(server.commands.index(["set_property", prop, "auto"]), load)
 
@@ -524,8 +600,10 @@ class PlayTest(MpvTestCase):
             ["set_property", "user-agent", "mpv-default-ua"],
             ["set_property", "referrer", ""],
             ["set_property", "http-header-fields", []],
-            ["loadfile", "http://stream.example.test/live/bbc1.m3u8", "replace"],
+            ["loadfile", "http://stream.example.test/live/bbc1.m3u8", "replace", -1,
+             dict(load_options("mpv-default-ua"))],
         ])
+        self.assertEqual(server.commands[-1][4].pairs, load_options("mpv-default-ua"))
 
     def test_user_agent_falls_back_to_libmpv_without_option_info(self):
         server = self.start()
@@ -538,10 +616,31 @@ class PlayTest(MpvTestCase):
         code, payload, stdout, stderr = self.play("--url", "https://user:pw@live.example.test/secret/path.m3u8?token=abc")
         self.assertEqual(code, 0, stderr)
         self.assertEqual(payload, {"ok": True, "kind": "play", "id": None, "name": "live.example.test"})
-        self.assertEqual(server.commands[-1], ["loadfile", "https://user:pw@live.example.test/secret/path.m3u8?token=abc", "replace"])
+        self.assertEqual(server.commands[-1][:4], ["loadfile", "https://user:pw@live.example.test/secret/path.m3u8?token=abc", "replace", -1])
+        self.assertEqual(server.commands[-1][4].pairs, load_options())
         self.assertIn(["set_property", "http-header-fields", []], server.commands)
         for secret in ("user:pw", "secret", "token=abc"):
             self.assertNotIn(secret, stdout + stderr)
+
+    def test_only_an_rtsp_channel_widens_the_demuxer_protocols_and_only_for_itself(self):
+        """D-SINK-55 (2026-10-29). The pin block gives every entry the demuxer
+        whitelist without rtp and udp (a sniffed SDP's rtp is how a server
+        made the player listen). An rtsp channel's demuxer opens its RTP
+        transport itself, which the user's own --rtsp-transport=udp needs
+        (warned, D-SINK-53; measured: with the global list alone it stopped
+        at DESCRIBE), so the helper's loadfile of an rtsp channel -- and of
+        nothing else -- adds them, per file."""
+        server = self.start()
+        for url, extra in (("rtsp://cam.example.test/live", [["demuxer-lavf-o-append",
+                                                                "protocol_whitelist=" + WHITELIST + ",rtp,udp"]]),
+                           ("RTSP://cam.example.test/live", [["demuxer-lavf-o-append",
+                                                                "protocol_whitelist=" + WHITELIST + ",rtp,udp"]]),
+                           ("http://stream.example.test/x.ts", []), ("rtmp://cdn.example.test/app/x", []),
+                           ("udp://@239.1.1.1:1234", []), ("srt://srt.example.test:9000", [])):
+            with self.subTest(url=url):
+                code, _, _, stderr = self.play("--url", url)
+                self.assertEqual(code, 0, stderr)
+                self.assertEqual(server.commands[-1][4].pairs, load_options() + extra)
 
     def test_unknown_channel_never_touches_mpv(self):
         server = self.start()
@@ -587,7 +686,7 @@ class PlayTest(MpvTestCase):
         self.assertEqual(code, 1)
         self.assertEqual(payload["error"]["code"], "ipc_error")
         self.assertIn("http-header-fields", payload["error"]["message"])
-        self.assertNotIn(["loadfile", "http://stream.example.test/live/espn.m3u8", "replace"], server.commands)
+        self.assertEqual([c for c in server.commands if c[0] == "loadfile"], [])
 
     def test_title_failure_is_tolerated(self):
         server = self.start(refuse={"title"})
@@ -654,7 +753,8 @@ class TlsVerificationTest(MpvTestCase):
     """
 
     FIXTURE = pathlib.Path(__file__).resolve().parent / "fixtures" / "player-tls.json"
-    LOADFILE = ["loadfile", "http://stream.example.test/live/espn.m3u8", "replace"]
+    LOADFILE = ["loadfile", "http://stream.example.test/live/espn.m3u8", "replace", -1,
+                dict(load_options("VLC/3.0.20", "http://ref.example.test/", ["X-Forwarded-For: 1.2.3.4"]))]
 
     def test_the_property_names_are_the_fixture_and_not_a_second_copy(self):
         """Rule 13: two literals joined by a name are joined by nothing. The
@@ -830,7 +930,8 @@ class PinnedTlsTest(MpvTestCase):
     FakeMpv answers each property the way mpv 0.41 measured does (rule 10).
     """
 
-    LOADFILE = ["loadfile", "http://stream.example.test/live/espn.m3u8", "replace"]
+    LOADFILE = ["loadfile", "http://stream.example.test/live/espn.m3u8", "replace", -1,
+                dict(load_options("VLC/3.0.20", "http://ref.example.test/", ["X-Forwarded-For: 1.2.3.4"]))]
 
     def loaded(self, server):
         return [c for c in server.commands if c[0] == "loadfile"] == [self.LOADFILE]
@@ -851,19 +952,20 @@ class PinnedTlsTest(MpvTestCase):
         """D-SINK-43 on a player that holds them: both kinds go, by key, and the
         user's own live_start_index stays. The removals precede the load."""
         server = self.start(props={"demuxer-lavf-o": {"tls_verify": "0", "verifyhost": "evil.example",
-                                                      "live_start_index": "-1"}})
+                                                      "live_start_index": "-1", "protocol_whitelist": WHITELIST}})
         code, payload, stdout, stderr = self.play("--id", "t:espn.us")
         self.assertEqual(code, 0, stderr)
         self.assertTrue(self.loaded(server))
-        self.assertEqual(server.props["demuxer-lavf-o"], {"live_start_index": "-1"})
-        removes = [i for i, c in enumerate(server.commands) if c[0] == "change-list"]
+        self.assertEqual(server.props["demuxer-lavf-o"], {"live_start_index": "-1", "protocol_whitelist": WHITELIST})
+        removes = [i for i, c in enumerate(server.commands) if c[:3] == ["change-list", "demuxer-lavf-o", "remove"]]
         self.assertEqual(sorted(server.commands[i][3] for i in removes), ["tls_verify", "verifyhost"])
         self.assertLess(max(removes), server.commands.index(self.LOADFILE))
         for secret in ("evil.example", "verifyhost"):
             self.assertNotIn(secret, stdout + stderr, secret)
 
     def test_a_tls_verify_entry_reading_one_is_left_alone(self):
-        server = self.start(props={"demuxer-lavf-o": {"tls_verify": "1", "live_start_index": "-1"}})
+        server = self.start(props={"demuxer-lavf-o": {"tls_verify": "1", "live_start_index": "-1",
+                                                      "protocol_whitelist": WHITELIST}})
         code, _, _, stderr = self.play("--id", "t:espn.us")
         self.assertEqual(code, 0, stderr)
         self.assertEqual([c for c in server.commands if c[0] == "change-list"], [])
@@ -873,7 +975,8 @@ class PinnedTlsTest(MpvTestCase):
                         {"ca_file": "/tmp/evil.pem"}, {"cafile": "/tmp/evil.pem"}, {"listen": "1"},
                         {"external_sock": "1"}):
             with self.subTest(options=sorted(options)):
-                server = self.start(props={"demuxer-lavf-o": dict(options)}, refuse={"demuxer-lavf-o"})
+                server = self.start(props={"demuxer-lavf-o": dict(options, protocol_whitelist=WHITELIST)},
+                                    refuse={"demuxer-lavf-o"})
                 code, payload, _, stderr = self.play("--id", "t:espn.us")
                 self.assertEqual(code, 1, stderr)
                 self.assertEqual(payload["error"]["code"], "tls_unverified")
@@ -881,6 +984,80 @@ class PinnedTlsTest(MpvTestCase):
                 self.assertIn("1 other TLS pins are not held", stderr)
                 server.close()
                 self.server = None
+
+    def test_the_protocol_whitelist_is_appended_whole_and_read_back(self):
+        """D-SINK-55 (2026-10-29): a stream server that answers with an SDP
+        body made the player LISTEN, through the whitelist the sdp demuxer
+        inherited (measured). The pin block gives a player of this release the
+        list; a player that lacks it -- or holds another -- gets it appended
+        as ONE key, the user's other keys kept, and is loaded only once the
+        read-back says it holds exactly that list."""
+        for found in ({}, {"protocol_whitelist": "file,http,rtp,udp", "live_start_index": "-1"}):
+            with self.subTest(found=found):
+                server = self.start(props={"demuxer-lavf-o": dict(found)})
+                code, _, _, stderr = self.play("--id", "t:espn.us")
+                self.assertEqual(code, 0, stderr)
+                self.assertTrue(self.loaded(server))
+                self.assertIn(["change-list", "demuxer-lavf-o", "append", "protocol_whitelist=" + WHITELIST],
+                              server.commands)
+                want = dict(found, protocol_whitelist=WHITELIST)
+                self.assertEqual(server.props["demuxer-lavf-o"], want)
+                server.close()
+                self.server = None
+
+    def test_a_player_that_cannot_take_the_whitelist_is_not_loaded_into(self):
+        for found in ({}, {"protocol_whitelist": "file,http,rtp,udp"}, {"protocol_whitelist": WHITELIST + ",rtp"}):
+            with self.subTest(found=found):
+                server = self.start(props={"demuxer-lavf-o": dict(found)}, refuse={"demuxer-lavf-o"})
+                code, payload, _, stderr = self.play("--id", "t:espn.us")
+                self.assertEqual(code, 1, stderr)
+                self.assertEqual(payload["error"]["code"], "tls_unverified")
+                self.assertEqual([c for c in server.commands if c[0] == "loadfile"], [])
+                server.close()
+                self.server = None
+
+    def test_a_player_with_reset_on_next_file_is_not_loaded_into(self):
+        """D-SINK-60 (lane-p1b, 2026-10-29). mpv backs up the options
+        `reset-on-next-file` names when a file STARTS and restores them when it
+        ENDS, inside the next loadfile -- after any read-back. Measured on mpv
+        0.41.0: with `all`, tls-verify set true over IPC during one file read
+        true, and the next load, of a self-signed server, read false again and
+        fetched from it; and a player started by v0.15.0's argv whose demuxer
+        tls_verify=0 was removed AND whose list was emptied over IPC still
+        sent the next HLS segment request to the attacker (the list itself was
+        restored too). So a player holding ANY entry is refused, and nothing
+        writes the list: emptying it would only make the read-back lie."""
+        for value in (["all"], ["tls-verify"], ["http-header-fields"]):
+            with self.subTest(value=value):
+                server = self.start(props={"reset-on-next-file": value})
+                code, payload, _, _ = self.play("--id", "t:espn.us")
+                self.assertEqual(code, 1)
+                self.assertEqual(payload["error"]["code"], "tls_unverified")
+                self.assertEqual([c for c in server.commands if c[0] == "loadfile"], [])
+                self.assertEqual([c for c in server.commands if c[:2] == ["set_property", "reset-on-next-file"]], [])
+                self.assertIn(["get_property", "reset-on-next-file"], server.commands)
+                server.close()
+                self.server = None
+        server = self.start(missing={"reset-on-next-file"})
+        code, payload, _, _ = self.play("--id", "t:espn.us")
+        self.assertEqual((code, payload["error"]["code"]), (1, "tls_unverified"), "an unreadable list is not an empty one")
+        server.close()
+        self.server = None
+
+    def test_mutating_the_reset_reading_lets_the_url_out(self):
+        """Rule 11 for D-SINK-60: read a refused reset-on-next-file as empty
+        and the player that keeps `all` is loaded into."""
+        original = helper.read_tls_state
+
+        def blind(client):
+            verify, count, unpinned = original(client)
+            return verify, count, (unpinned - 1 if isinstance(unpinned, int) and unpinned > 0 else unpinned)
+        helper.read_tls_state = blind
+        self.addCleanup(setattr, helper, "read_tls_state", original)
+        server = self.start(props={"reset-on-next-file": ["all"]})
+        code, _, _, _ = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 0, "the mutation must reach the load, or the reset test is decoration")
+        self.assertTrue(self.loaded(server))
 
     def test_auto_profiles_are_turned_off_and_read_back_as_mpv_answers(self):
         """mpv answers `no` of this choice as the boolean False: the set takes
@@ -933,6 +1110,29 @@ class PinnedTlsTest(MpvTestCase):
         code, _, _, stderr = self.play("--id", "t:espn.us")
         self.assertEqual(code, 0, stderr)
         self.assertTrue(self.loaded(server))
+
+    def test_a_per_file_profile_on_any_pinned_option_refuses_the_load(self):
+        """The lead's decision on rc-mpvpin's recheck (2026-10-29): on a pre-pin
+        player a [protocol.http] profile with save-watch-history,
+        load-unsafe-playlists or load-select undid pin_adopted_player's runtime
+        writes at every load (measured: the watch history got the
+        credentialed path, a nested playlist truncated a scratch file, select
+        forked ffmpeg with the URL). Such a player is now stopped rather than
+        migrated, for EVERY option the pin block holds, an alias of one
+        included."""
+        for key in ("save-watch-history", "load-unsafe-playlists", "load-select", "script", "scripts-append",
+                    "watch-later-directory", "osd-playlist-entry", "drag-and-drop", "script-opts-append",
+                    "input-commands", "player-operation-mode", "reset-on-next-file", "log-file",
+                    "no-load-select"):
+            with self.subTest(key=key):
+                profiles = [{"name": "protocol.http", "options": [{"key": key, "value": "yes"}]}]
+                server = self.start(props={"profile-list": profiles}, cmdline={"tls-verify"})
+                code, payload, _, _ = self.play("--id", "t:espn.us")
+                self.assertEqual(code, 1)
+                self.assertEqual(payload["error"]["code"], "tls_unverified")
+                self.assertEqual([c for c in server.commands if c[0] == "loadfile"], [])
+                server.close()
+                self.server = None
 
     def test_a_profile_named_by_a_per_file_profile_is_followed(self):
         nested = [{"name": "protocol.https", "options": [{"key": "profile", "value": "a,b"}]},
@@ -990,13 +1190,18 @@ class DemuxerAndProfileReadingTest(unittest.TestCase):
     """The two pure readings, called directly (rule 12)."""
 
     def test_demuxer_tls_unsafe_counts_exactly_the_tls_entries(self):
-        for options, want in (({}, 0), ({"live_start_index": "-1", "http_persistent": "0"}, 0),
-                              ({"tls_verify": "1"}, 0), ({"verify": "1"}, 0),
-                              ({"tls_verify": "0"}, 1), ({"tls_verify": "true"}, 1), ({"verify": "0"}, 1),
-                              ({"verifyhost": "x"}, 1), ({"ca_file": "/x"}, 1), ({"cafile": "/x"}, 1),
-                              ({"listen": "1"}, 1), ({"external_sock": "1"}, 1),
-                              ({"tls_verify": "0", "verifyhost": "x", "live_start_index": "-1"}, 2),
-                              ({"cert_file": "/c.pem", "key_file": "/k.pem", "http_proxy": "http://p"}, 0),
+        w = {"protocol_whitelist": WHITELIST}
+        for options, want in (({}, 1), (w, 0), (dict(w, live_start_index="-1", http_persistent="0"), 0),
+                              (dict(w, tls_verify="1"), 0), (dict(w, verify="1"), 0),
+                              (dict(w, tls_verify="0"), 1), (dict(w, tls_verify="true"), 1), (dict(w, verify="0"), 1),
+                              (dict(w, verifyhost="x"), 1), (dict(w, ca_file="/x"), 1), (dict(w, cafile="/x"), 1),
+                              (dict(w, listen="1"), 1), (dict(w, external_sock="1"), 1),
+                              (dict(w, tls_verify="0", verifyhost="x", live_start_index="-1"), 2),
+                              (dict(w, cert_file="/c.pem", key_file="/k.pem", http_proxy="http://p"), 0),
+                              # D-SINK-55: the whitelist must read exactly the pinned list.
+                              ({"protocol_whitelist": WHITELIST + ",rtp,udp"}, 1),
+                              ({"protocol_whitelist": "file," + WHITELIST}, 1), ({"protocol_whitelist": ""}, 1),
+                              ({"tls_verify": "0"}, 2),
                               (None, None), ([], None), ("tls_verify=0", None)):
             with self.subTest(options=options):
                 self.assertEqual(helper.demuxer_tls_unsafe(options), want)

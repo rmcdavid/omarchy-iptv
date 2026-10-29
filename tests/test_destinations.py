@@ -63,7 +63,7 @@ class LoggingServer:
 
     def __init__(self, routes, host="127.0.0.1"):
         seen = self.seen = []
-        table = dict(routes)
+        table = self.routes = dict(routes)
 
         class Handler(http.server.BaseHTTPRequestHandler):
             protocol_version = "HTTP/1.1"
@@ -176,9 +176,34 @@ class FixtureTest(unittest.TestCase):
         got = [(r["url"], r["source"], helper.stream_host_refused(r["url"], r["source"])) for r in FIXTURE["streamHosts"]]
         self.assertEqual(got, [(r["url"], r["source"], r["refused"]) for r in FIXTURE["streamHosts"]])
 
+    def test_the_parse_reads_every_host_row_as_play_time_does(self):
+        """rc-p1b (2026-10-29): parse_m3u's one read (stream_entry_refusal)
+        and the play-time rule (stream_host_refused, which player_target runs
+        again) are two readings of ONE rule, and the parse took the scheme's
+        default port for a port that does not PARSE -- `127.0.0.1:631:80` was
+        the port-80 home to it and refused at play time, a channel listed
+        that can never play. Every row: the parse says `local` exactly when
+        play time refuses."""
+        got = [(r["url"], helper.stream_entry_refusal(r["url"], r["source"])[0] == "local") for r in FIXTURE["streamHosts"]]
+        self.assertEqual(got, [(r["url"], r["refused"]) for r in FIXTURE["streamHosts"]])
+        self.assertIn("http://127.0.0.1:631:80/x", [r["url"] for r in FIXTURE["streamHosts"]])
+
+    def test_the_own_host_rule_counts_the_port_on_loopback_only(self):
+        """D-SINK-57 (owner, 2026-10-29), the shared rows: on loopback the
+        playlist's own host is host AND port; a LAN or public host keeps any
+        port; a port nobody knows matches nothing."""
+        got = [(r["name"], helper.own_host_match(r["host"], r["port"], r["home"])) for r in FIXTURE["ownHosts"]]
+        self.assertEqual(got, [(r["name"], r["same"]) for r in FIXTURE["ownHosts"]])
+        self.assertGreaterEqual(len(got), 15)
+
+    def test_a_url_port_is_the_named_one_or_the_schemes_default(self):
+        got = [(r["url"], helper.url_port(r["url"])) for r in FIXTURE["urlPorts"]]
+        self.assertEqual(got, [(r["url"], r["port"]) for r in FIXTURE["urlPorts"]])
+
     def test_the_names_the_shell_and_the_helper_share(self):
         self.assertEqual(FIXTURE["env"], {"url": helper.URL_ENV, "origin": helper.ORIGIN_ENV,
-                                          "playlistHost": helper.HOME_HOST_ENV, "playlistClass": helper.HOME_CLASS_ENV})
+                                          "playlistHost": helper.HOME_HOST_ENV, "playlistClass": helper.HOME_CLASS_ENV,
+                                          "playlistPort": helper.HOME_PORT_ENV})
         self.assertEqual((FIXTURE["classes"], FIXTURE["destinationRules"]),
                          (list(helper.ADDRESS_CLASSES), helper.DESTINATION_RULES))
 
@@ -205,13 +230,29 @@ class ConnectPolicyTest(unittest.TestCase):
         return run_helper(["epg", "--cache-dir", self.cache, "--timeout", "5"], env)
 
     def test_a_same_host_redirect_from_a_typed_loopback_source_is_followed(self):
-        b = self.serve({"/pl.m3u": (200, (), PLAYLIST)})
-        a = self.serve({"/start.m3u": (302, (("Location", b.url("/pl.m3u")),), b"")})
+        """Same host AND, on loopback, the same port (D-SINK-57): a relay
+        redirecting within itself is followed."""
+        a = self.serve({"/pl.m3u": (200, (), PLAYLIST)})
+        a.routes["/start.m3u"] = (302, (("Location", a.url("/pl.m3u")),), b"")
         code, status, err = self.playlist(a.url("/start.m3u"), OMARCHY_IPTV_ORIGIN="user")
         self.assertEqual((code, status["ok"], status["channelCount"]), (0, True, 1), err)
-        self.assertEqual(b.seen, [("/pl.m3u", None)])
+        self.assertEqual(a.seen, [("/start.m3u", None), ("/pl.m3u", None)])
         cached = json.loads((pathlib.Path(self.cache) / "channels.json").read_text(encoding="utf-8"))
         self.assertEqual((cached["sourceClass"], status["destinationRules"]), ("loopback", helper.DESTINATION_RULES))
+        # D-SINK-57/58: and what play time needs to run the parse's rules again.
+        self.assertEqual((cached["sourcePort"], cached["sourceLocal"]), (a.port, True))
+
+    def test_a_redirect_to_another_port_on_loopback_is_refused_and_never_contacted(self):
+        """D-SINK-57 (owner, 2026-10-29), the review's reproduction 1: a typed
+        loopback source whose 302 names the same host on ANOTHER port. Until
+        this the same-host exception ignored ports, so anything on loopback --
+        the print server, a local API -- was the relay's own host."""
+        b = self.serve({"/admin": (200, (), PLAYLIST)})
+        a = self.serve({"/start.m3u": (302, (("Location", b.url("/admin?op=x")),), b"")})
+        code, status, err = self.playlist(a.url("/start.m3u"), OMARCHY_IPTV_ORIGIN="user")
+        self.assertEqual((code, status["error"]["code"]), (1, "local_address"), err)
+        self.assertEqual(b.seen, [], "the other port received a request")
+        self.assertNotIn("op=x", json.dumps(status) + err)
 
     def test_a_redirect_to_another_loopback_host_is_refused_and_never_contacted(self):
         b = self.serve({"/cgi-bin/admin": (200, (), PLAYLIST)}, host="127.0.0.2")
@@ -254,9 +295,23 @@ class ConnectPolicyTest(unittest.TestCase):
     def test_a_hinted_guide_on_the_playlists_own_host_and_class_is_fetched(self):
         a = self.serve({"/xmltv": (200, (), XMLTV)})
         code, status, err = self.epg(a.url("/xmltv"), OMARCHY_IPTV_ORIGIN="playlist",
-                                     OMARCHY_IPTV_PLAYLIST_HOST="127.0.0.1", OMARCHY_IPTV_PLAYLIST_CLASS="loopback")
+                                     OMARCHY_IPTV_PLAYLIST_HOST="127.0.0.1", OMARCHY_IPTV_PLAYLIST_CLASS="loopback",
+                                     OMARCHY_IPTV_PLAYLIST_PORT=str(a.port))
         self.assertEqual((code, status["ok"]), (0, True), err)
         self.assertEqual(a.seen, [("/xmltv", None)])
+
+    def test_a_hinted_guide_on_another_port_of_a_loopback_playlist_host_is_refused(self):
+        """D-SINK-57: the playlist's own LOOPBACK host is its port too, so a
+        hint naming the same address on another port -- or with the shell
+        saying no port at all -- is refused and never contacted."""
+        a = self.serve({"/xmltv": (200, (), XMLTV)})
+        for port in (str(a.port + 1 if a.port < 65535 else a.port - 1), "", "0", "65536", "80x"):
+            with self.subTest(port=port):
+                code, status, err = self.epg(a.url("/xmltv"), OMARCHY_IPTV_ORIGIN="playlist",
+                                             OMARCHY_IPTV_PLAYLIST_HOST="127.0.0.1",
+                                             OMARCHY_IPTV_PLAYLIST_CLASS="loopback", OMARCHY_IPTV_PLAYLIST_PORT=port)
+                self.assertEqual((code, status["error"]["code"]), (1, "local_address"), err)
+        self.assertEqual(a.seen, [])
 
     def test_the_same_host_in_another_class_than_its_playlist_fetch_is_refused(self):
         """The DNS-rebinding shape: the playlist's own name answered a public
@@ -284,19 +339,24 @@ class ConnectPolicyTest(unittest.TestCase):
         self.assertEqual(a.seen, [("/xmltv", "Basic bWU6cHc=")])
 
     def test_a_local_list_keeps_its_local_streams_and_drops_a_sign_in_header_for_another_host(self):
+        a = self.serve({})
         body = (b"#EXTM3U\n#EXTINF:-1,Tuner\n"
                 b"#KODIPROP:inputstream.adaptive.stream_headers=Cookie=a%3Db&X-Ok=1\n"
                 b"http://192.168.1.20:5004/auto/v1\n"
                 b"#EXTINF:-1,Own\n#KODIPROP:inputstream.adaptive.stream_headers=Authorization=Basic%20eA%3D%3D\n"
-                b"http://127.0.0.1:9981/stream/1\n"
+                + a.url("/stream/1").encode() + b"\n"
+                # D-SINK-57: the same loopback address on ANOTHER port is
+                # another host, so its sign-in header is dropped too.
+                b"#EXTINF:-1,Cups\n#KODIPROP:inputstream.adaptive.stream_headers=Authorization=Basic%20eQ%3D%3D\n"
+                b"http://127.0.0.1:631/admin\n"
                 b"#EXTINF:-1,Listener\nsrt://0.0.0.0:9000?mode=listener\n")
-        a = self.serve({"/pl.m3u": (200, (), body)})
+        a.routes["/pl.m3u"] = (200, (), body)
         code, status, err = self.playlist(a.url("/pl.m3u"), OMARCHY_IPTV_ORIGIN="user")
-        self.assertEqual((code, status["channelCount"]), (0, 2), err)
+        self.assertEqual((code, status["channelCount"]), (0, 3), err)
         channels = json.loads((pathlib.Path(self.cache) / "channels.json").read_text(encoding="utf-8"))["channels"]
         self.assertEqual([(c["name"], c.get("headers")) for c in channels],
-                         [("Tuner", {"X-Ok": "1"}), ("Own", {"Authorization": "Basic eA=="})])
-        self.assertIn("1 sign-in header dropped: its channel is on another host than the playlist", status["warnings"])
+                         [("Tuner", {"X-Ok": "1"}), ("Own", {"Authorization": "Basic eA=="}), ("Cups", None)])
+        self.assertIn("2 sign-in headers dropped: their channels are on other hosts than the playlist", status["warnings"])
         self.assertIn("1 entry skipped: the stream would listen on this machine for anyone to send to", status["warnings"])
 
 
@@ -593,6 +653,22 @@ class StreamGateTest(unittest.TestCase):
         self.assertEqual([c.get("headers") for c in result["channels"]], [{"X-Ok": "1"}])
         self.assertIn("2 sign-in headers dropped: their channels are on other hosts than the playlist", result["warnings"])
 
+    def test_a_typed_name_that_connected_to_loopback_holds_the_port_rule(self):
+        """D-SINK-57: "a name whose playlist fetch connected to loopback" is a
+        loopback home too, not only a literal or a localhost name -- read from
+        the first hop's class (playlist_source's `first_class`). A mutant
+        that read loopback from the literal alone survived the suite (rc-p1b):
+        the relay's own port keeps its sign-in headers, another port of the
+        same name does not."""
+        source = helper.playlist_source("http", "http://relay.example.test:34400/m3u", "loopback", "loopback")
+        self.assertEqual((source["host"], source["port"], source["loopback"], source["local"]),
+                         ("relay.example.test", 34400, True, True))
+        text = ("#EXTM3U\n#EXTINF:-1,Own\n#KODIPROP:inputstream.adaptive.stream_headers=Cookie=a&X-Ok=1\n"
+                "http://relay.example.test:34400/s/1\n#EXTINF:-1,Other\n"
+                "#KODIPROP:inputstream.adaptive.stream_headers=Cookie=a&X-Ok=1\nhttp://relay.example.test:631/s/2\n")
+        result = helper.parse_m3u(text, source)
+        self.assertEqual([c.get("headers") for c in result["channels"]], [{"Cookie": "a", "X-Ok": "1"}, {"X-Ok": "1"}])
+
     def test_a_cached_listening_url_is_refused_at_play_time(self):
         """A cache written before the rule: player_target re-checks it."""
         with tempfile.TemporaryDirectory() as cache:
@@ -676,8 +752,100 @@ class StreamGateTest(unittest.TestCase):
         result = helper.parse_m3u(text, {"host": "p.example.test", "local": False})
         self.assertEqual([c.get("headers") for c in result["channels"]], [{"X-Ok": "1"}])
         self.assertIn("dropped header with unsafe name for Cdn", result["warnings"])
-        self.assertEqual(helper.header_properties({"User-Agent": "UA", "Cookie\n": "a", "X-Ok": "1"}, None),
-                         [("user-agent", "UA"), ("referrer", ""), ("http-header-fields", ["X-Ok: 1"])])
+        self.assertEqual(helper.header_values({"User-Agent": "UA", "Cookie\n": "a", "X-Ok": "1"}),
+                         ("UA", "", ["X-Ok: 1"]))
+
+
+
+class PlayTimeGateTest(unittest.TestCase):
+    """D-SINK-58 (2026-10-29): player_target runs the parse's host rule and
+    sign-in header rule again, against the cache's own record of its
+    playlist (cached_source), so a cache nothing checked -- one written
+    before the destination rules, whose refresh then failed -- cannot reach
+    a LAN or loopback literal its playlist chose, or hand a sign-in header to
+    another host. Called for real (rule 12), over caches written here."""
+
+    def cache(self, document):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        cache = pathlib.Path(tmp.name) / "cache"
+        cache.mkdir(mode=0o700)
+        (cache / "channels.json").write_text(json.dumps(document), encoding="utf-8")
+        return str(cache)
+
+    CHANNELS = [
+        {"id": "t:lan", "name": "LAN", "url": "http://192.168.1.20:5004/auto/v1"},
+        {"id": "t:loop", "name": "Loop", "url": "http://127.0.0.1:631/admin"},
+        {"id": "t:cdn", "name": "CDN", "url": "http://cdn.example.test/x.m3u8", "headers": {"Cookie": "s=1", "X-Ok": "1"}},
+        {"id": "t:own", "name": "Own", "url": "http://p.example.test/live/1.ts", "headers": {"Authorization": "Basic eA=="}},
+        {"id": "t:relay", "name": "Relay", "url": "http://127.0.0.1:34400/stream/1", "headers": {"Cookie": "r=1"}},
+        {"id": "t:mc", "name": "Multicast", "url": "udp://@239.1.1.1:1234"},
+    ]
+
+    def target(self, directory, cid):
+        try:
+            return helper.player_target(cid, "", directory)
+        except helper.HelperError as error:
+            return error.code
+
+    def test_a_pre_rules_cache_from_a_public_playlist_refuses_local_literals_and_drops_sign_in_headers(self):
+        # The shape 0.15.0 wrote: no sourceClass, no sourceLocal, no sourcePort.
+        directory = self.cache({"version": 1, "sourceHost": "p.example.test", "channels": self.CHANNELS})
+        got = {}
+        for cid in ("t:lan", "t:loop", "t:cdn", "t:own", "t:mc"):
+            with mock.patch.object(helper, "cache_dir", lambda d: d):
+                result = self.target(directory, cid)
+            got[cid] = result if isinstance(result, str) else result["headers"]
+        self.assertEqual(got, {"t:lan": "local_address", "t:loop": "local_address", "t:cdn": {"X-Ok": "1"},
+                               "t:own": {"Authorization": "Basic eA=="}, "t:mc": {}})
+
+    def test_a_pre_rules_cache_from_a_file_or_a_lan_literal_is_local(self):
+        for host in ("local file", "192.168.1.5"):
+            with self.subTest(host=host):
+                directory = self.cache({"version": 1, "sourceHost": host, "channels": self.CHANNELS})
+                with mock.patch.object(helper, "cache_dir", lambda d: d):
+                    lan = self.target(directory, "t:lan")
+                    cdn = self.target(directory, "t:cdn")
+                self.assertEqual(lan["url"], "http://192.168.1.20:5004/auto/v1")
+                # A file has no host, and the CDN is not the LAN host: dropped.
+                self.assertEqual(cdn["headers"], {"X-Ok": "1"})
+
+    def test_a_cache_written_now_carries_what_play_time_needs(self):
+        """A loopback relay (Threadfin, xTeVe): its own port keeps the
+        sign-in header; the local exemption still lets its list name another
+        loopback port (D-SINK-41's rule for a local source), but that
+        channel's sign-in header is another host's (D-SINK-57)."""
+        relay = [dict(c) for c in self.CHANNELS] + [
+            {"id": "t:other", "name": "Other", "url": "http://127.0.0.1:631/x", "headers": {"Cookie": "o=1"}}]
+        directory = self.cache({"version": 1, "sourceHost": "127.0.0.1", "sourceClass": "loopback",
+                                "sourcePort": 34400, "sourceLocal": True, "channels": relay})
+        with mock.patch.object(helper, "cache_dir", lambda d: d):
+            own = self.target(directory, "t:relay")
+            other = self.target(directory, "t:other")
+        self.assertEqual(own["headers"], {"Cookie": "r=1"})
+        self.assertEqual((other["url"], other["headers"]), ("http://127.0.0.1:631/x", {}))
+        # Without the port (a cache from before D-SINK-57) the relay's own
+        # sign-in header fails closed until the next refresh writes it.
+        directory = self.cache({"version": 1, "sourceHost": "127.0.0.1", "sourceClass": "loopback",
+                                "channels": relay})
+        with mock.patch.object(helper, "cache_dir", lambda d: d):
+            self.assertEqual(self.target(directory, "t:relay")["headers"], {})
+
+    def test_the_cli_url_meets_the_listening_rule_only(self):
+        self.assertEqual(helper.player_target("", "http://192.168.1.20:5004/auto/v1", "/nonexistent")["url"],
+                         "http://192.168.1.20:5004/auto/v1")
+        with self.assertRaises(helper.HelperError) as caught:
+            helper.player_target("", "udp://0.0.0.0:1234", "/nonexistent")
+        self.assertEqual(caught.exception.code, "unsupported_scheme")
+
+    def test_mutating_the_play_time_gate_away_lets_the_lan_literal_through(self):
+        """Rule 11: with stream_host_refused answering False, the pre-rules
+        cache's LAN channel resolves -- so the first test is the gate's."""
+        directory = self.cache({"version": 1, "sourceHost": "p.example.test", "channels": self.CHANNELS})
+        with mock.patch.object(helper, "cache_dir", lambda d: d), \
+                mock.patch.object(helper, "stream_host_refused", lambda url, source: False):
+            self.assertEqual(self.target(directory, "t:lan")["url"], "http://192.168.1.20:5004/auto/v1")
+
 
 
 if __name__ == "__main__":

@@ -56,6 +56,42 @@ fix>` reds W1..W10 and the controls stay green):
   C2  a CA-signed HLS channel with --demuxer-lavf-o=live_start_index=-1 PLAYS
       and keeps the user's key
 
+lane-p1b (2026-10-29) adds, against a seventh server, `lab` (plain http,
+8785, every request's headers logged), and with the player's own listening
+sockets read by `ss` -- which is why tls-scenario.sh runs this rig inside
+`unshare -rn` when it can, where nothing but this rig's servers and players
+is on the namespace's only interface:
+  W11 a channel whose server answers with a PLAIN playlist (D-PLY-44) naming
+      an http entry, an srt listener and an rtp listener: no entry is
+      fetched, nothing listens, and the load ends `unrecognized file format`
+  W12 a channel whose server answers with an SDP body, under .sdp and under
+      .ts (D-SINK-55): nothing listens
+  W13 provider headers with commas, `=`, quotes and backslashes (the per-file
+      loadfile options, 2026-10-29): each arrives as ONE header, verbatim
+  W14 an entry the helper did not load (an append, then playlist-next): the
+      channel's provider header does not reach it
+  W15 the paste-to-playlist key (D-PLY-46): with the user's own input.conf
+      binding ctrl+v to append a URL -- the deterministic stand-in for mpv's
+      clipboard binding, which a headless player has no clipboard for -- the
+      key appends nothing (the entry it would append is never fetched, even
+      after playlist-next)
+  W16 a typed loopback playlist source whose 302 names the same address on
+      ANOTHER port (D-SINK-57, the review's reproduction 1): the shipping
+      `playlist` verb refuses it and the other port gets nothing
+  W17 an ADOPTED player started by the --pre-pin tree's argv with
+      `reset-on-next-file=all` in its mpv.conf and a demuxer tls_verify=0
+      left on its command line (D-SINK-60), playing a channel the pre-pin
+      tree loaded: the tree's apply_channel refuses the next channel, an HLS
+      one whose segment is the attacker's, and the attacker gets nothing --
+      mpv restores what the reset list backed up when the playing file ends,
+      inside the loadfile, so no migration made during it survives
+  W18 an ADOPTED pre-pin player whose mpv.conf has a [protocol.http] profile
+      setting save-watch-history (a non-TLS pin): the load is refused and no
+      file outside the runtime folder holds the credential
+  C3  a loopback relay (Threadfin's shape: playlist, guide and streams on one
+      port): the playlist verb keeps its channel's Cookie, the guide hint on
+      that port is fetched, and the channel plays with the Cookie
+
 usage: tls_pins_rig.py --tree DIR [--pre-pin DIR] --work DIR
 Exit 0 green, 1 red, 77 when mpv, ffmpeg or openssl is missing. Stdlib only.
 """
@@ -73,7 +109,12 @@ import subprocess
 import sys
 import time
 
-PORTS = {"provider": 8780, "attacker": 8781, "hlsok": 8782, "alt": 8783, "plain": 8784}
+PORTS = {"provider": 8780, "attacker": 8781, "hlsok": 8782, "alt": 8783, "plain": 8784, "lab": 8785}
+# W11's nested entries name these; nothing may ever listen on them.
+NEST_SRT, NEST_RTP, SDP_RTP = 8790, 8792, 8794
+HARD_VALUE = 'a,b=c "d" \'e\' back\\slash end\\'
+XMLTV = (b'<?xml version="1.0"?><tv><channel id="a.test"><display-name>A</display-name></channel>'
+         b'<programme start="20260101000000 +0000" stop="20991231000000 +0000" channel="a.test"><title>T</title></programme></tv>')
 SECRET = "rigPINpass7q"
 HEADER = "X-Rig-Secret"
 HEADER_VALUE = "rig-provider-header-4k"
@@ -94,7 +135,10 @@ def serve(name: str, port: int, www: str, log: str, cert: str, key: str, alt_cer
             with os.fdopen(fd, "a") as fh:
                 fh.write(json.dumps({"server": name, "path": self.path.split("?")[0],
                                      "secret": SECRET in self.path, "header": HEADER_VALUE in str(self.headers),
-                                     "ua": self.headers.get("User-Agent", "")}) + "\n")
+                                     "ua": self.headers.get("User-Agent", ""),
+                                     "headers": [[k, v] for k, v in self.headers.items()]}) + "\n")
+            if name == "lab":
+                return self.lab()
             if self.headers.get("User-Agent", "").startswith("Lavf"):
                 time.sleep(4)        # keeps a forked ffmpeg alive long enough to be seen
             base = os.path.basename(self.path.split("?")[0])
@@ -117,6 +161,42 @@ def serve(name: str, port: int, www: str, log: str, cert: str, key: str, alt_cer
             self.send_header("Content-Length", str(len(body)))
             self.end_headers()
             self.wfile.write(body)
+
+        def lab(self):
+            """lane-p1b's routes: what a stream server can answer with."""
+            lab = "http://127.0.0.1:%d" % port
+            path = self.path.split("?")[0]
+            sdp = ("v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=x\r\nc=IN IP4 0.0.0.0\r\nt=0 0\r\n"
+                   "m=video %d RTP/AVP 33\r\n" % SDP_RTP).encode()
+            routes = {
+                "/nest.m3u": (200, "audio/x-mpegurl", ("#EXTM3U\n#EXTINF:-1,a\n%s/inner.ts\n#EXTINF:-1,b\nsrt://0.0.0.0:%d?mode=listener\n"
+                                                       "#EXTINF:-1,c\nrtp://0.0.0.0:%d\n" % (lab, NEST_SRT, NEST_RTP)).encode()),
+                "/x.sdp": (200, "application/sdp", sdp),
+                "/x.ts": (200, "video/mp2t", sdp),
+                "/epg.xml": (200, "application/xml", XMLTV),
+                "/relay.m3u": (200, "audio/x-mpegurl", ('#EXTM3U url-tvg="%s/epg.xml"\n#EXTINF:-1 tvg-id="r.test",Relay\n'
+                                                        "#KODIPROP:inputstream.adaptive.stream_headers=Cookie=relay%%3D1\n"
+                                                        "%s/stream/1\n" % (lab, lab)).encode()),
+            }
+            if path == "/redir.m3u":
+                self.send_response(302)
+                self.send_header("Location", "http://127.0.0.1:%d/admin?op=x" % PORTS["plain"])
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
+            if path in routes:
+                status, ctype, body = routes[path]
+            else:
+                with open(os.path.join(www, "long.ts"), "rb") as fh:
+                    status, ctype, body = 200, "video/mp2t", fh.read()
+            self.send_response(status)
+            self.send_header("Content-Type", ctype)
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            try:
+                self.wfile.write(body)
+            except OSError:
+                pass
 
     class Server(http.server.ThreadingHTTPServer):
         seen = 0
@@ -205,6 +285,7 @@ def start_servers(work: str, rig: dict[str, str]) -> list[subprocess.Popen]:
         "hlsok": (c + "/good.pem", c + "/good.key", "", "", "https://127.0.0.1:%d/seg.ts" % PORTS["hlsok"]),
         "alt": (c + "/good.pem", c + "/good.key", c + "/name.pem", c + "/name.key", "https://127.0.0.1:%d/seg.ts" % PORTS["alt"]),
         "plain": ("", "", "", "", ""),
+        "lab": ("", "", "", "", ""),
     }
     procs = []
     for name, (cert, key, acert, akey, seg) in specs.items():
@@ -263,13 +344,22 @@ def kids_with_secret(pid: int) -> list[str]:
     return out
 
 
+def listening(pid: int) -> list[str]:
+    """The inet sockets mpv itself holds open for anyone to send to (ss's
+    listening TCP and unconnected UDP rows owned by this pid)."""
+    out = run(["ss", "-Hlunp"]).stdout + run(["ss", "-Hltnp"]).stdout
+    return sorted({line.split()[3] for line in out.splitlines() if "pid=%d," % pid in line})
+
+
 def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=(), raw=(), conf="",
-          seconds=5.0, post=(), migrate=False, watch=()) -> dict:
+          seconds=5.0, post=(), migrate=False, watch=(), inputconf="", first_url="", headers=None) -> dict:
     base = os.path.join(work, "cases", case)
     for sub in ("home", "cache", "state", "config/mpv", "data", "run/omarchy-iptv"):
         os.makedirs(os.path.join(base, sub), mode=0o700, exist_ok=True)
     with open(os.path.join(base, "config", "mpv", "mpv.conf"), "w") as fh:
         fh.write(conf)
+    with open(os.path.join(base, "config", "mpv", "input.conf"), "w") as fh:
+        fh.write(inputconf)
     env = {k: v for k, v in os.environ.items()
            if k not in ("DISPLAY", "WAYLAND_DISPLAY", "HYPRLAND_INSTANCE_SIGNATURE", "DBUS_SESSION_BUS_ADDRESS", "MPV_HOME")}
     env.update(HOME=base + "/home", XDG_CACHE_HOME=base + "/cache", XDG_STATE_HOME=base + "/state",
@@ -285,7 +375,8 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
     os.chdir(runtime)
     err = open(os.path.join(base, "mpv.stderr"), "wb")
     player = subprocess.Popen(cmd, cwd=runtime, env=env, stdin=subprocess.DEVNULL, stdout=err, stderr=err, preexec_fn=no_core)
-    result = {"case": case, "rejected": rejected, "applied": None, "timePos": None, "props": {}, "kids": [], "post": []}
+    result = {"case": case, "rejected": rejected, "applied": None, "timePos": None, "props": {}, "kids": [], "post": [],
+              "listening": [], "ends": []}
     try:
         client = logic_ns["wait_for_socket"]("mpv.sock", 8.0, 3.0)
         if client is None:
@@ -296,8 +387,17 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
                 if "pin_adopted_player" in logic_ns:
                     logic_ns["pin_adopted_player"](client, os.path.join(runtime, "mpv.sock"))
             try:
+                client.try_command("request_log_messages", "error")
+                if first_url:
+                    # The channel the player was playing when it was adopted:
+                    # loaded by the tree that LAUNCHED it (argv_ns), as the
+                    # shell before the upgrade loaded it.
+                    argv_ns["apply_channel"](client, {"id": "", "url": first_url, "name": "Rig First",
+                                                       "headers": {HEADER: HEADER_VALUE}, "group": ""})
+                    time.sleep(1.5)
                 logic_ns["apply_channel"](client, {"id": "", "url": url, "name": "Rig Channel",
-                                                    "headers": {HEADER: HEADER_VALUE}, "group": ""})
+                                                    "headers": dict(headers) if headers is not None else {HEADER: HEADER_VALUE},
+                                                    "group": ""})
                 result["applied"] = True
             except logic_ns["HelperError"] as error:
                 result["applied"] = False
@@ -313,6 +413,9 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
                         ok, value = client.try_command("get_property", prop)
                         if ok:
                             result["props"][prop] = value
+                    for sock in listening(player.pid):
+                        if sock not in result["listening"]:
+                            result["listening"].append(sock)
                 except logic_ns["HelperError"]:
                     break
                 while pending and time.monotonic() - started >= pending[0][0]:
@@ -321,6 +424,21 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
                     time.sleep(1.0)
                     result["kids"] += kids_with_secret(player.pid)
                 time.sleep(0.25)
+            # The end-file of a load that failed arrives with nothing waiting
+            # for it, and under --idle=once just before the connection
+            # closes: read what is buffered, bounded, before judging.
+            seen_events, client.events = list(client.events), []
+            for _ in range(50):
+                try:
+                    batch = client.drain_events(time.monotonic() + 0.2)
+                except Exception:
+                    break
+                if not batch:
+                    break
+                seen_events += batch
+            for event in seen_events:
+                if event.get("event") == "end-file":
+                    result["ends"].append(str(event.get("file_error") or event.get("reason") or ""))
             try:
                 client.request(["quit"], allow_close=True)
             except Exception:
@@ -350,6 +468,23 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
     return result
 
 
+def helper_verb(tree_dir: str, work: str, case: str, verb: str, url: str, env_extra: dict) -> tuple[int, dict]:
+    """The tree's helper as a SUBPROCESS, the way the shell runs it: the URL
+    in OMARCHY_IPTV_URL, a private cache folder. -> (exit code, reply)."""
+    cache = os.path.join(work, "cases", case, "cache-" + verb)
+    os.makedirs(cache, mode=0o700, exist_ok=True)
+    env = {k: v for k, v in os.environ.items() if not k.lower().endswith("_proxy")}
+    env.update({"OMARCHY_IPTV_URL": url}, **env_extra)
+    done = run([sys.executable, os.path.join(tree_dir, "bin", "omarchy-iptv"), verb, "--cache-dir", cache, "--timeout", "5"],
+               env=env)
+    lines = [line for line in done.stdout.strip().splitlines() if line.strip()]
+    return done.returncode, (json.loads(lines[-1]) if lines else {})
+
+
+def lab_headers(result: dict, path: str) -> list[list[list[str]]]:
+    return [r.get("headers", []) for r in result["requests"] if r["server"] == "lab" and r["path"] == path]
+
+
 def got(result: dict, server: str) -> int:
     return len([r for r in result["requests"] if r["server"] == server])
 
@@ -366,7 +501,11 @@ def main(argv: list[str]) -> int:
             return 2
         opts[argv[i]] = argv[i + 1]
         i += 2
-    for tool in ("mpv", "ffmpeg", "openssl", "journalctl"):
+    if os.environ.get("OMARCHY_IPTV_RIG_NETNS") == "1":
+        # tls-scenario.sh ran this inside `unshare -rn`: a namespace whose
+        # only interface is a loopback that starts down.
+        run(["ip", "link", "set", "lo", "up"])
+    for tool in ("mpv", "ffmpeg", "openssl", "journalctl", "ss"):
         if not shutil.which(tool):
             print("SKIP tls windowless: %s is not on PATH" % tool)
             return 77
@@ -450,6 +589,71 @@ def main(argv: list[str]) -> int:
             check("W9 an adopted pre-pin player with that profile: the load is refused and the attacker gets nothing",
                   r["applied"] is False and got(r, "attacker") == 0,
                   "applied %s, attacker requests %d" % (r["applied"], got(r, "attacker")))
+        lab = "http://127.0.0.1:%d" % PORTS["lab"]
+        if os.environ.get("OMARCHY_IPTV_RIG_NETNS") != "1":
+            # A baseline player LISTENS here, on every interface it has: only
+            # in a namespace of its own is that nobody's but the rig's.
+            print("SKIP W11 W12: they need unshare -rn (tls-scenario.sh --windowless runs the rig in it where it can)")
+        else:
+            r = probe(work, "W11", tree, tree, lab + "/nest.m3u", seconds=4,
+                      post=[[1.5, ["playlist-next"]], [2.5, ["playlist-next"]]])
+            check("W11 a server that answers with a plain playlist: no entry is fetched, nothing listens, the load ends unrecognized",
+                  lab_headers(r, "/inner.ts") == [] and r["listening"] == [] and "unrecognized file format" in r["ends"],
+                  "inner fetched %d, listening %s, ends %s" % (len(lab_headers(r, "/inner.ts")), r["listening"], r["ends"]))
+            r1 = probe(work, "W12a", tree, tree, lab + "/x.sdp", seconds=3)
+            r2 = probe(work, "W12b", tree, tree, lab + "/x.ts", seconds=3)
+            check("W12 a server that answers with an SDP body, under .sdp and under .ts: nothing listens",
+                  r1["listening"] == [] and r2["listening"] == [] and lab_headers(r1, "/x.sdp") != [] and lab_headers(r2, "/x.ts") != [],
+                  "listening %s / %s" % (r1["listening"], r2["listening"]))
+        hard = {"X-Hard": HARD_VALUE, "X-Two": "1,2", "User-Agent": "UA, x=y \"z\"", "Referer": "http://r.test/a,b"}
+        r = probe(work, "W13", tree, tree, lab + "/hdr.ts", seconds=2, headers=hard)
+        seen = lab_headers(r, "/hdr.ts")[:1]
+        mine = [[k, v] for k, v in (seen[0] if seen else []) if k.lower() in ("x-hard", "x-two", "user-agent", "referer")]
+        check("W13 headers with commas, =, quotes and backslashes each arrive as ONE header, verbatim",
+              sorted(mine) == sorted([["X-Hard", HARD_VALUE], ["X-Two", "1,2"], ["User-Agent", hard["User-Agent"]],
+                                      ["Referer", hard["Referer"]]]), "got %s" % mine)
+        r = probe(work, "W14", tree, tree, lab + "/chan.ts", seconds=4,
+                  post=[[1.5, ["loadfile", lab + "/pasted.ts", "append-play"]], [2.0, ["playlist-next"]]])
+        pasted = lab_headers(r, "/pasted.ts")
+        check("W14 an entry the helper did not load: the channel's provider header does not reach it",
+              pasted != [] and not any(HEADER_VALUE in json.dumps(h) for h in pasted)
+              and any(HEADER_VALUE in json.dumps(h) for h in lab_headers(r, "/chan.ts")),
+              "pasted requests %d, with the header %d" % (len(pasted), sum(HEADER_VALUE in json.dumps(h) for h in pasted)))
+        r = probe(work, "W15", tree, tree, lab + "/chan2.ts", seconds=4,
+                  inputconf="ctrl+v loadfile %s/pasted2.ts append-play\n" % lab,
+                  # append-play only appends while a channel plays; the next
+                  # entry is what fetches it.
+                  post=[[1.5, ["keypress", "ctrl+v"]], [2.0, ["playlist-next"]]])
+        check("W15 the paste-to-playlist key appends nothing", lab_headers(r, "/pasted2.ts") == [],
+              "pasted requests %d" % len(lab_headers(r, "/pasted2.ts")))
+        before = len(requests(work))
+        code, reply = helper_verb(opts["--tree"], work, "W16", "playlist", lab + "/redir.m3u", {"OMARCHY_IPTV_ORIGIN": "user"})
+        admin = [x for x in requests(work)[before:] if x["server"] == "plain" and x["path"] == "/admin"]
+        check("W16 a typed loopback source redirected to another port of the same address: refused, never contacted",
+              code == 1 and (reply.get("error") or {}).get("code") == "local_address" and admin == [],
+              "exit %d, code %s, the other port got %d" % (code, (reply.get("error") or {}).get("code"), len(admin)))
+        if pre is not None:
+            r = probe(work, "W17", pre, tree, hls, user=[ca, "--demuxer-lavf-o=tls_verify=0"], conf="reset-on-next-file=all\n",
+                      first_url="http://127.0.0.1:%d/live/rig/%s/long.ts" % (PORTS["plain"], SECRET), seconds=5)
+            check("W17 an adopted pre-pin player with reset-on-next-file=all: the next load is refused, the attacker gets nothing",
+                  r["applied"] is False and got(r, "attacker") == 0,
+                  "attacker requests %d, applied %s" % (got(r, "attacker"), r["applied"]))
+            r = probe(work, "W18", pre, tree, "http://127.0.0.1:%d/live/rig/%s/long.ts" % (PORTS["plain"], SECRET),
+                      conf="[protocol.http]\nsave-watch-history=yes\n", migrate=True, seconds=3)
+            check("W18 an adopted pre-pin player whose per-file profile sets a non-TLS pin: refused, nothing written",
+                  r["applied"] is False and r["leaks"] == [], "applied %s, files %s" % (r["applied"], r["leaks"]))
+        code, reply = helper_verb(opts["--tree"], work, "C3", "playlist", lab + "/relay.m3u", {"OMARCHY_IPTV_ORIGIN": "user"})
+        cache = os.path.join(work, "cases", "C3", "cache-playlist", "channels.json")
+        channels = json.load(open(cache)) if os.path.isfile(cache) else {}
+        kept = [c.get("headers") for c in channels.get("channels", [])]
+        ecode, ereply = helper_verb(opts["--tree"], work, "C3", "epg", lab + "/epg.xml",
+                                    {"OMARCHY_IPTV_ORIGIN": "playlist", "OMARCHY_IPTV_PLAYLIST_HOST": "127.0.0.1",
+                                     "OMARCHY_IPTV_PLAYLIST_CLASS": "loopback", "OMARCHY_IPTV_PLAYLIST_PORT": str(PORTS["lab"])})
+        r = probe(work, "C3", tree, tree, lab + "/stream/1", seconds=3, headers={"Cookie": "relay=1"})
+        check("C3 a loopback relay on one port: its sign-in header is kept, its guide on that port fetched, its channel plays with it (control)",
+              code == 0 and kept == [{"Cookie": "relay=1"}] and ecode == 0 and r["timePos"] is not None
+              and any("relay=1" in json.dumps(h) for h in lab_headers(r, "/stream/1")),
+              "playlist exit %d, headers %s, guide exit %d, played %s" % (code, kept, ecode, r["timePos"] is not None))
         r = probe(work, "C1", tree, tree, p + "/live/rig/%s/long.ts" % SECRET, seconds=4,
                   user=["--hwdec=auto-safe", "--profile=low-latency", "--cache-secs=30", "--volume=50", ca],
                   watch=("volume", "cache-secs"))

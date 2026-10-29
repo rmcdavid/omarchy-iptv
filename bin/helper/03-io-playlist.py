@@ -340,6 +340,12 @@ class DestinationPolicy:
     host, a second LAN host -- is refused before a byte is sent, `local_address`
     naming the host only (rule 5).
 
+    D-SINK-57 (owner, 2026-10-29): on LOOPBACK "the same host" is host AND
+    port (own_host_match). A typed http://127.0.0.1:8080/ that redirects to
+    127.0.0.1:631 is a second host, refused; a relay that serves its playlist,
+    guide and streams on one loopback port stays its own host. A LAN or public
+    host keeps any port.
+
     Through a PROXY the socket connects to the proxy, which the user chose;
     the TARGET is then looked up here (resolve_within, the same bound) and
     every address it answers must be allowed, because the proxy may use any
@@ -351,17 +357,20 @@ class DestinationPolicy:
 
     One object per fetch, never shared: it counts the fetch's hops."""
 
-    def __init__(self, label: str, origin: str, home_host: str = "", home_class: str = "", logos: bool = False) -> None:
+    def __init__(self, label: str, origin: str, home_host: str = "", home_class: str = "", logos: bool = False,
+                 home_port: int | None = None) -> None:
         self.label = label
         self.origin = origin if origin == ORIGIN_USER else ORIGIN_PLAYLIST
         self.home = host_key(home_host) if home_host else ""
         if home_class not in ADDRESS_CLASSES:
             home_class = host_class(home_host) if home_host else ""
         self.home_class = home_class
+        self.home_port = home_port
         self.logos = logos
         self.hops = 0
         self.first_host = ""
         self.first_class = ""
+        self.first_port: int | None = None
         self.last_class = ""
 
     @classmethod
@@ -370,8 +379,12 @@ class DestinationPolicy:
         beside the URL (ORIGIN_ENV and its neighbours, 01-core.py)."""
         raw = (os.environ.get(ORIGIN_ENV) or "").strip()
         origin = ORIGIN_USER if raw in ("", ORIGIN_USER) else ORIGIN_PLAYLIST
+        port_text = (os.environ.get(HOME_PORT_ENV) or "").strip()
+        # D-SINK-57: a port that is not 1..65535 in digits is no port, and a
+        # loopback home with no port matches nothing (own_host_match).
+        port = int(port_text) if port_text.isdigit() and len(port_text) <= 5 and 0 < int(port_text) < 65536 else None
         return cls(label, origin, (os.environ.get(HOME_HOST_ENV) or "").strip(),
-                   (os.environ.get(HOME_CLASS_ENV) or "").strip())
+                   (os.environ.get(HOME_CLASS_ENV) or "").strip(), home_port=port)
 
     @classmethod
     def for_logos(cls) -> "DestinationPolicy":
@@ -383,22 +396,24 @@ class DestinationPolicy:
         self.hops += 1
         return first
 
-    def permits(self, host: str, kind: str, first: bool) -> bool:
+    def permits(self, host: str, kind: str, first: bool, port: int | None = None) -> bool:
         if kind == "global":
             return True
         if self.logos:
             return False
-        key = host_key(host)
         if first and self.origin == ORIGIN_USER:
             return True
-        if self.first_host != "" and key == self.first_host and kind == self.first_class:
+        if self.first_host != "" and kind == self.first_class and own_host_match(
+                host, port, {"host": self.first_host, "port": self.first_port, "loopback": kind == "loopback"}):
             return True
-        return self.home != "" and key == self.home and self.home_class != "" and kind == self.home_class
+        return (self.home != "" and self.home_class != "" and kind == self.home_class and own_host_match(
+            host, port, {"host": self.home, "port": self.home_port, "loopback": kind == "loopback"}))
 
-    def connected(self, host: str, kind: str, first: bool) -> None:
+    def connected(self, host: str, kind: str, first: bool, port: int | None = None) -> None:
         if first:
             self.first_host = host_key(host)
             self.first_class = kind
+            self.first_port = port
         self.last_class = kind
 
     def refusal(self, host: str, first: bool) -> HelperError:
@@ -420,13 +435,13 @@ class DestinationPolicy:
         if not kinds:
             if (first and self.origin == ORIGIN_USER and not self.logos) or \
                     (self.first_host != "" and host_key(host) == self.first_host and self.first_class == "unresolved"):
-                self.connected(host, "unresolved", first)
+                self.connected(host, "unresolved", first, port)
                 return
             raise HelperError("network", "could not resolve %s to check where it leads through the proxy" % (host or "the host"))
         for kind in kinds:
-            if not self.permits(host, kind, first):
+            if not self.permits(host, kind, first, port):
                 raise self.refusal(host, first)
-        self.connected(host, "global" if kinds == {"global"} else sorted(kinds - {"global"})[0], first)
+        self.connected(host, "global" if kinds == {"global"} else sorted(kinds - {"global"})[0], first, port)
 
 
 def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
@@ -454,7 +469,7 @@ def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
         verdict = "global"
         if policy is not None and not proxied:
             verdict = address_class(sockaddr[0])
-            if not policy.permits(host, verdict, first):
+            if not policy.permits(host, verdict, first, port):
                 refused = True
                 continue
         sock = None
@@ -466,7 +481,7 @@ def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
                 sock.bind(source_address)
             sock.connect(sockaddr)
             if policy is not None and not proxied:
-                policy.connected(host, verdict, first)
+                policy.connected(host, verdict, first, port)
             return sock
         except OSError as failure:
             error = failure
@@ -1255,7 +1270,7 @@ def cmd_playlist(args: argparse.Namespace) -> int:
             policy = DestinationPolicy.from_environment("playlist")
             text = fetch_bytes(url, args.timeout, "playlist", policy)
             kind = resolve_source(url, "playlist")[0]
-            parsed = parse_m3u(playlist_lines(text), playlist_source(kind, url, policy.last_class))
+            parsed = parse_m3u(playlist_lines(text), playlist_source(kind, url, policy.last_class, policy.first_class))
             text = None
             if not parsed["channels"]:
                 if not parsed["isPlaylist"]:
@@ -1271,6 +1286,12 @@ def cmd_playlist(args: argparse.Namespace) -> int:
                 # to, which the shell hands a later guide-hint fetch so a hint
                 # on this host may stay in this class (DestinationPolicy.home).
                 "sourceClass": policy.first_class if kind == "http" else "",
+                # D-SINK-57/58 (2026-10-29): what player_target needs to run
+                # the parse's own-host and local-source rules again at play
+                # time: the typed URL's port, and whether the source read as
+                # local (its last hop connected to a non-global address).
+                "sourcePort": url_port(url) if kind == "http" else None,
+                "sourceLocal": kind == "file" or policy.last_class not in ("", "global", "unresolved"),
                 "count": len(parsed["channels"]),
                 "channels": parsed["channels"],
             }

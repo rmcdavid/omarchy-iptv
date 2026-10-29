@@ -14,7 +14,12 @@
     "with no compositor and no sound server in it, --vo=null or a video output that cannot connect,",
     "--ao=null or an output that cannot open) unless the case says `measured: false`. Log text is",
     "mpv's, a trailing newline as mpv sends it. ASCII only: scripts/check.sh refuses anything else in",
-    "tests/fixtures/."
+    "tests/fixtures/.",
+    "D-PLY-44 (owner, 2026-10-29: refuse nested playlists): the helper's loadfile carries the per-file option",
+    "demuxer=lavf, so a channel whose address answers with a plain playlist (or a page) ends with mpv's",
+    "`unrecognized file format`. `formatErrors` pins that string and the sentence the shell shows for it",
+    "(Model.unopenedFormatSentence, which outranks the log tail for that ending only), and",
+    "`mpv.formatCanary` is run by test_player_endings.py: the real mpv, given the helper's own loadfile shape."
   ],
   "mpv": {
     "version": "0.41.0",
@@ -24,8 +29,22 @@
       "argv": ["--no-config", "--load-scripts=no", "--idle=once", "--keep-open=no", "--force-window=immediate", "--msg-level=all=error", "--ytdl=no", "--no-terminal", "--vo=null", "--ao=alsa", "--audio-device=alsa/omarchy_iptv_canary_nonexistent", "--audio-file=av://lavfi:sine=frequency=440:duration=1"],
       "url": "av://lavfi:testsrc=duration=1:size=64x48:rate=10",
       "endFile": {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "audio output initialization failed"}
+    },
+    "formatCanary": {
+      "_comment": "A plain M3U on disk loaded the way apply_channel loads a channel: the positional loadfile, its options a JSON object. Measured on mpv 0.41.0 (lane-p1b, 2026-10-29) for a .pls, a plain .m3u and a web page served over http inside an unprivileged network namespace; the canary uses a file so it contacts nothing.",
+      "argv": ["--no-config", "--load-scripts=no", "--idle=once", "--keep-open=no", "--msg-level=all=error", "--ytdl=no", "--no-terminal", "--vo=null", "--ao=null"],
+      "body": "#EXTM3U\n#EXTINF:-1,inner\nhttp://127.0.0.1:9/inner.ts\n",
+      "options": {"demuxer": "lavf"},
+      "endFile": {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "unrecognized file format"}
     }
   },
+  "formatErrors": [
+    {
+      "fileError": "unrecognized file format",
+      "sentence": "The address sent a playlist file or a web page, which the player does not open",
+      "measured": "a .pls, a plain .m3u and a web page under the per-file demuxer=lavf, mpv 0.41.0, lane-p1b 2026-10-29"
+    }
+  ],
   "outputErrors": [
     {
       "fileError": "audio output initialization failed",
@@ -179,6 +198,18 @@
         {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "video output initialization failed"}
       ],
       "expect": {"card": "outputFailed", "mark": false, "output": "video", "target": "t:x"}
+    },
+    {
+      "name": "D-PLY-44: a channel whose address is a plain .m3u or .pls redirector, refused by the per-file demuxer=lavf -- the stream's ending, marked, and told in a sentence the user can read instead of mpv's log line",
+      "owners": [[1, {"id": "t:x", "name": "X"}]],
+      "nowPlaying": {"id": "t:x", "name": "X"},
+      "lines": [
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "log-message", "prefix": "cplayer", "level": "error", "text": "Failed to recognize file format.\n"},
+        {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "unrecognized file format"}
+      ],
+      "expect": {"card": "streamFailed", "mark": true, "output": "", "target": "t:x"},
+      "expectReason": "The address sent a playlist file or a web page, which the player does not open"
     }
   ],
   "firstLoad": [
@@ -263,6 +294,18 @@
       ]],
       "reply": {"state": "unknown", "reason": ""},
       "expect": null
+    },
+    {
+      "name": "D-PLY-44: the same ending inside player start's first-load window -- the helper's reply keeps mpv's line and its file_error; the sentence is the shell's",
+      "entryId": 1,
+      "batches": [[
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "log-message", "prefix": "cplayer", "level": "error", "text": "Failed to recognize file format.\n"},
+        {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "unrecognized file format"}
+      ]],
+      "reply": {"state": "failed", "reason": "Failed to recognize file format.", "ended": "end-file", "fileError": "unrecognized file format"},
+      "expect": {"card": "streamFailed", "mark": true, "output": ""},
+      "expectReason": "The address sent a playlist file or a web page, which the player does not open"
     }
   ],
   "oldReplies": [

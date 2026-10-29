@@ -105,6 +105,7 @@
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
+        "--input-commands-append=keybind ctrl+v ignore",
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
@@ -113,8 +114,11 @@
         "--log-file=",
         "--reset-on-next-file-clr",
         "--osd-playlist-entry=title",
+        "--drag-and-drop=no",
+        "--script-opts-append=osc-title_mbtn_mid_command=ignore",
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
+        "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
       ]
@@ -155,6 +159,7 @@
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
+        "--input-commands-append=keybind ctrl+v ignore",
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
@@ -163,8 +168,11 @@
         "--log-file=",
         "--reset-on-next-file-clr",
         "--osd-playlist-entry=title",
+        "--drag-and-drop=no",
+        "--script-opts-append=osc-title_mbtn_mid_command=ignore",
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
+        "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
       ]
@@ -217,6 +225,7 @@
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
+        "--input-commands-append=keybind ctrl+v ignore",
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
@@ -225,8 +234,11 @@
         "--log-file=",
         "--reset-on-next-file-clr",
         "--osd-playlist-entry=title",
+        "--drag-and-drop=no",
+        "--script-opts-append=osc-title_mbtn_mid_command=ignore",
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
+        "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
       ]
@@ -282,6 +294,7 @@
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
+        "--input-commands-append=keybind ctrl+v ignore",
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
@@ -290,8 +303,11 @@
         "--log-file=",
         "--reset-on-next-file-clr",
         "--osd-playlist-entry=title",
+        "--drag-and-drop=no",
+        "--script-opts-append=osc-title_mbtn_mid_command=ignore",
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
+        "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
       ]
@@ -344,6 +360,7 @@
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
+        "--input-commands-append=keybind ctrl+v ignore",
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
@@ -352,8 +369,11 @@
         "--log-file=",
         "--reset-on-next-file-clr",
         "--osd-playlist-entry=title",
+        "--drag-and-drop=no",
+        "--script-opts-append=osc-title_mbtn_mid_command=ignore",
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
+        "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
       ]
@@ -417,6 +437,7 @@
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
+        "--input-commands-append=keybind ctrl+v ignore",
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
@@ -425,8 +446,11 @@
         "--log-file=",
         "--reset-on-next-file-clr",
         "--osd-playlist-entry=title",
+        "--drag-and-drop=no",
+        "--script-opts-append=osc-title_mbtn_mid_command=ignore",
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
+        "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
       ]
@@ -527,6 +551,7 @@
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
+        "--input-commands-append=keybind ctrl+v ignore",
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
@@ -535,8 +560,11 @@
         "--log-file=",
         "--reset-on-next-file-clr",
         "--osd-playlist-entry=title",
+        "--drag-and-drop=no",
+        "--script-opts-append=osc-title_mbtn_mid_command=ignore",
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
+        "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
       ]
@@ -591,6 +619,7 @@
         "--load-scripts=no",
         "--scripts-clr",
         "--input-commands-clr",
+        "--input-commands-append=keybind ctrl+v ignore",
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
@@ -599,10 +628,81 @@
         "--log-file=",
         "--reset-on-next-file-clr",
         "--osd-playlist-entry=title",
+        "--drag-and-drop=no",
+        "--script-opts-append=osc-title_mbtn_mid_command=ignore",
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
+        "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
+      ]
+    },
+    {
+      "name": "2026-10-29 (lane-p1b): a --script-opts token that sets an OSC command or carries ${ is refused (D-SINK-52), every other key and the ytdl handoff kept; --drag-and-drop (D-PLY-46) and a demuxer protocol list (D-SINK-55) are refused",
+      "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
+      "stateDir": "/home/u/.local/state/omarchy-iptv",
+      "mpvArgs": [
+        "--script-opts=osc-deadzonesize=0.5",
+        "--script-opts=osc-title_mbtn_mid_command=show-text_${path}",
+        "--script-opts-append=osc-title=${path}",
+        "--script-opt=osc-playlist_next_mbtn_mid_command=run_x",
+        "--script-opts=osc-volume_wheel_up_command=add_volume_5",
+        "--script-opts=ytdl_hook-ytdl_path=/usr/bin/yt-dlp",
+        "--drag-and-drop=auto",
+        "--demuxer-lavf-o=protocol_whitelist=file,http",
+        "--demuxer-lavf-o-append=protocol_blacklist=tcp",
+        "--demuxer-lavf-o=live_start_index=-1"
+      ],
+      "argv": [
+        "mpv",
+        "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
+        "--wayland-app-id=omarchy-iptv",
+        "--force-window=immediate",
+        "--idle=once",
+        "--keep-open=no",
+        "--title=$>IPTV",
+        "--force-media-title=IPTV",
+        "--msg-level=all=error",
+        "--ytdl=no",
+        "--load-scripts=no",
+        "--screenshot-dir=/home/u/.local/state/omarchy-iptv/screenshots",
+        "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--gpu-shader-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--gpu-sw=yes",
+        "--tls-verify=yes",
+        "--script-opts=osc-deadzonesize=0.5",
+        "--script-opts=ytdl_hook-ytdl_path=/usr/bin/yt-dlp",
+        "--demuxer-lavf-o=live_start_index=-1",
+        "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--load-scripts=no",
+        "--scripts-clr",
+        "--input-commands-clr",
+        "--input-commands-append=keybind ctrl+v ignore",
+        "--load-auto-profiles=no",
+        "--player-operation-mode=cplayer",
+        "--load-select=no",
+        "--load-unsafe-playlists=no",
+        "--save-watch-history=no",
+        "--log-file=",
+        "--reset-on-next-file-clr",
+        "--osd-playlist-entry=title",
+        "--drag-and-drop=no",
+        "--script-opts-append=osc-title_mbtn_mid_command=ignore",
+        "--stream-lavf-o-clr",
+        "--demuxer-lavf-propagate-opts=yes",
+        "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+        "--demuxer-lavf-o-append=tls_verify=1",
+        "--tls-verify=yes"
+      ],
+      "rejected": [
+        "--script-opts=osc-title_mbtn_mid_command=show-text_${path}",
+        "--script-opts-append=osc-title=${path}",
+        "--script-opt=osc-playlist_next_mbtn_mid_command=run_x",
+        "--script-opts=osc-volume_wheel_up_command=add_volume_5",
+        "--drag-and-drop=auto",
+        "--demuxer-lavf-o=protocol_whitelist=file,http",
+        "--demuxer-lavf-o-append=protocol_blacklist=tcp"
       ]
     }
   ],
@@ -616,7 +716,9 @@
       "M5-01 (design 2.6): `--cache-on-disk` rides the same mechanism with its",
       "own sentence, `diskText`: it writes the stream to the user's own disk",
       "while it plays (allowed, PO-5's shape) and is said out loud (PO-10).",
-      "`--demuxer-cache-unlink-files` is RESERVED, not warned: see mpvReserved."
+      "`--demuxer-cache-unlink-files` is RESERVED, not warned: see mpvReserved.",
+      "2026-10-29 (lane-p1b): `listenText` is D-SINK-53's sentence, for an --rtsp-transport that makes every",
+      "rtsp channel bind RTP/RTCP ports; and --demuxer-lavf-o carrying http_proxy is a handoff (D-SINK-59)."
     ],
     "text": " hands the stream address to another program",
     "cases": [
@@ -811,9 +913,64 @@
         "warnings": [
           "mpvArg --http-proxy hands the stream address to another program"
         ]
+      },
+      {
+        "name": "D-SINK-53: --rtsp-transport=udp makes every rtsp channel bind RTP and RTCP ports, and is told so",
+        "tokens": [
+          "--rtsp-transport=udp"
+        ],
+        "warnings": [
+          "mpvArg --rtsp-transport opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-53: so does udp_multicast, one token to a vector so the warning cannot come from the other (rc-p1b)",
+        "tokens": [
+          "--rtsp-transport=udp_multicast"
+        ],
+        "warnings": [
+          "mpvArg --rtsp-transport opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-53: and lavf (FFmpeg's choice, which tries UDP first), alone for the same reason",
+        "tokens": [
+          "--rtsp-transport=lavf"
+        ],
+        "warnings": [
+          "mpvArg --rtsp-transport opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-53: tcp (mpv's default) and http bind nothing and are silent, in any case",
+        "tokens": [
+          "--rtsp-transport=tcp",
+          "--rtsp-transport=HTTP"
+        ],
+        "warnings": []
+      },
+      {
+        "name": "D-SINK-59: --demuxer-lavf-o carrying FFmpeg's http_proxy hands a plain-http HLS stream to the proxy, like --http-proxy",
+        "tokens": [
+          "--demuxer-lavf-o=http_proxy=http://u:pw@proxy.test:3128"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o hands the stream address to another program"
+        ]
+      },
+      {
+        "name": "D-SINK-59: and through -append; a demuxer workaround without it is silent",
+        "tokens": [
+          "--demuxer-lavf-o=live_start_index=-1",
+          "--demuxer-lavf-o-append=http_proxy=http://p:1"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o-append hands the stream address to another program"
+        ]
       }
     ],
-    "diskText": " writes the stream to disk while it plays"
+    "diskText": " writes the stream to disk while it plays",
+    "listenText": " opens ports on this computer that anyone can send to"
   },
   "mpvReserved": [
     "--ao-pcm-file",
@@ -825,6 +982,7 @@
     "--cover-art-files",
     "--demuxer-cache-unlink-files",
     "--demuxer-lavf-propagate-opts",
+    "--drag-and-drop",
     "--dump-stats",
     "--external-file",
     "--external-files",

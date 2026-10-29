@@ -30,7 +30,7 @@ import sys
 import unittest
 
 from helper_loader import load_helper
-from test_mpv import FakeMpv, PINNED_CMDLINE, PINNED_PROPS
+from test_mpv import FakeMpv, PINNED_CMDLINE, PINNED_PROPS, load_options
 
 helper = load_helper()
 
@@ -102,7 +102,11 @@ state = {"entry": 0, "url": "", "user_data": {}, "props": {}}
 # whatever its argv said would be more forgiving than mpv (CLAUDE.md 10).
 cmdline = set()
 state["props"].update({"tls-verify": False, "stream-lavf-o": {}, "demuxer-lavf-o": {},
-                       "load-auto-profiles": "auto", "profile-list": []})
+                       "load-auto-profiles": "auto", "profile-list": [],
+                       # 2026-10-29 (lane-p1b): mpv's own defaults for the
+                       # readings and pins added that day; `no` of
+                       # drag-and-drop reads as False (measured).
+                       "reset-on-next-file": [], "drag-and-drop": "auto", "script-opts": {}})
 for arg in argv:
     if not arg.startswith("--"):
         continue
@@ -116,9 +120,15 @@ for arg in argv:
         state["props"]["tls-verify"] = value != "no"
     elif name == "load-auto-profiles":
         state["props"]["load-auto-profiles"] = {"no": False, "yes": True}.get(value, value)
-    elif name in ("stream-lavf-o-clr", "demuxer-lavf-o-clr"):
+    elif name == "reset-on-next-file-clr":
+        state["props"]["reset-on-next-file"] = []
+    elif name == "reset-on-next-file":
+        state["props"]["reset-on-next-file"] = [v for v in value.split(",") if v]
+    elif name == "drag-and-drop":
+        state["props"]["drag-and-drop"] = False if value == "no" else value
+    elif name in ("stream-lavf-o-clr", "demuxer-lavf-o-clr", "script-opts-clr"):
         state["props"][base] = {}
-    elif name in ("stream-lavf-o-append", "demuxer-lavf-o-append"):
+    elif name in ("stream-lavf-o-append", "demuxer-lavf-o-append", "script-opts-append"):
         key, _, item = value.partition("=")
         current = dict(state["props"][base])
         current.pop(key, None)
@@ -1088,8 +1098,16 @@ class IdempotenceTest(PlayerTestCase):
         # pre-pin player at mpv's defaults, so the select menu is on and the
         # resume folder is mpv's own), then apply_channel's TLS assertion, which
         # now turns auto-profiles off as well.
-        self.assertEqual(sets[:2], [["set_property", "load-select"], ["set_property", "watch-later-dir"]])
-        sets = sets[2:]
+        # 2026-10-29 (lane-p1b): and drag-and-drop off (D-PLY-46), and the
+        # three GLOBAL header properties at values that belong to no provider,
+        # because a player last driven by an older helper holds the previous
+        # channel's headers there (the channel's own now ride the loadfile).
+        self.assertEqual(sets[:6], [["set_property", "load-select"], ["set_property", "watch-later-dir"],
+                                    ["set_property", "drag-and-drop"], ["set_property", "user-agent"],
+                                    ["set_property", "referrer"], ["set_property", "http-header-fields"]])
+        self.assertIn(["keybind", "ctrl+v", "ignore"], server.commands)
+        self.assertIn(["change-list", "script-opts", "append", "osc-title_mbtn_mid_command=ignore"], server.commands)
+        sets = sets[6:]
         self.assertEqual(sets[:8], [["set_property", "tls-verify"],
                                     ["set_property", "stream-lavf-o"],
                                     ["set_property", "load-auto-profiles"],
@@ -1725,9 +1743,14 @@ class RestartTest(PlayerTestCase):
         code, _, _, stderr = run("player", "start", "--socket", self.sock, "--cache-dir", self.cache,
                                  "--id", "t:espn.us", "--seq", "1", "--ipc-timeout", "1", "--first-load-timeout", "0.2")
         self.assertEqual(code, 0, stderr)
+        # 2026-10-29: the channel's headers ride its loadfile, per file, and
+        # no GLOBAL property is ever given a provider's value.
+        loads = [command for command in server.commands if command[0] == "loadfile"]
+        self.assertEqual(loads[-1][4].pairs, load_options("VLC/3.0.20", "http://ref.test/", loads[-1][4].pairs[4:]
+                                                           and [p[1] for p in loads[-1][4].pairs[4:]]))
         sent = [command for command in server.commands if command[0] == "set_property"]
-        self.assertIn(["set_property", "user-agent", "VLC/3.0.20"], sent)
-        self.assertIn(["set_property", "referrer", "http://ref.test/"], sent)
+        self.assertNotIn(["set_property", "user-agent", "VLC/3.0.20"], sent)
+        self.assertNotIn(["set_property", "referrer", "http://ref.test/"], sent)
         server.commands.clear()
         # A channel without headers actively resets the previous channel's:
         # requirement 7's clearing mechanism, now applied to the FIRST channel
@@ -1739,6 +1762,9 @@ class RestartTest(PlayerTestCase):
         self.assertIn(["set_property", "user-agent", helper.MPV_DEFAULT_USER_AGENT], sent)
         self.assertIn(["set_property", "referrer", ""], sent)
         self.assertIn(["set_property", "http-header-fields", []], sent)
+        # And per file, the second channel's own: none of the first's.
+        loads = [command for command in server.commands if command[0] == "loadfile"]
+        self.assertEqual(loads[-1][4].pairs, load_options())
         self.assertIsNone(idle.poll())
 
 
@@ -1968,7 +1994,9 @@ class ProbeTlsTest(PlayerTestCase):
         self.addCleanup(setattr, helper, "migrate_tls", original)
         code, payload, _, stderr = self.probe()
         self.assertEqual(code, 0, stderr)
-        self.assertEqual(payload["tls"], {"verify": False, "optionCount": 0, "unpinned": 1, "migrated": False},
+        # unpinned 2: load-auto-profiles reads mpv's "auto", and (D-SINK-55,
+        # 2026-10-29) the demuxer map holds no protocol whitelist.
+        self.assertEqual(payload["tls"], {"verify": False, "optionCount": 0, "unpinned": 2, "migrated": False},
                          "the mutation must be visible in the reply, or the tests above are decoration")
         self.assertIs(server.props["tls-verify"], False)
 
@@ -2387,7 +2415,8 @@ class ParityTest(unittest.TestCase):
         # name by name, so this count is the number and not the list.
         # 54 the same day: --player-operation-mode, whose pseudo-gui applies
         # the user's [pseudo-gui] profile after the command line (recheck).
-        self.assertEqual(len(names), 54)
+        # 55 the same day again: --drag-and-drop, pinned off (D-PLY-46).
+        self.assertEqual(len(names), 55)
         self.assertIn("--include", names)
         self.assertIn("--load-scripts", names)
         self.assertIn("--demuxer-cache-unlink-files", names)

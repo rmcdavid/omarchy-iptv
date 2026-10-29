@@ -1,5 +1,5 @@
 {
- "about": "D-SINK-40, D-SINK-41, D-SINK-42 (2026-10-29): where provider data may send this machine. One file, two implementations (CLAUDE.md: a rule in two languages gets one shared fixture). `hosts`: every spelling of a URL host, its class (bin/helper 01-core.py host_class / Model.hostClass; one of `classes`, or \"\" for a name only a lookup can classify) and its key (host_key / Model.hostKey: what \"the same host\" compares) -- run by tests/test_destinations.py and tests/Model.test.js. `streams`: the helper's stream gate (stream_listen_refusal and is_stream_url; the model has none) -- the python suite. `streamHosts`: the helper's parse-time host rule for a channel URL against the playlist it came from (stream_host_refused; `source` is playlist_source's shape) -- the python suite. `hints`: the model's guide-hint verdict (Model.epgHintVerdict, with the active playlist's URL) -- the node suite; the helper's connect-time check is the binding layer behind it and is observed by tests/test_destinations.py against 127.0.0.1 servers. `refusals`: the reply the real helper gives for a redirect into a local address (tests/test_destinations.py composes it from a live run and compares), and the sentence the shell shows for it (Model.statusReason; Model.failureFromHost keeps the host) -- both suites. `env` and `destinationRules` are the names and the cache version the shell and the helper share.",
+ "about": "D-SINK-40, D-SINK-41, D-SINK-42 (2026-10-29): where provider data may send this machine. One file, two implementations (CLAUDE.md: a rule in two languages gets one shared fixture). `hosts`: every spelling of a URL host, its class (bin/helper 01-core.py host_class / Model.hostClass; one of `classes`, or \"\" for a name only a lookup can classify) and its key (host_key / Model.hostKey: what \"the same host\" compares) -- run by tests/test_destinations.py and tests/Model.test.js. `streams`: the helper's stream gate (stream_listen_refusal and is_stream_url; the model has none) -- the python suite. `streamHosts`: the helper's parse-time host rule for a channel URL against the playlist it came from (stream_host_refused; `source` is playlist_source's shape) -- the python suite. `hints`: the model's guide-hint verdict (Model.epgHintVerdict, with the active playlist's URL) -- the node suite; the helper's connect-time check is the binding layer behind it and is observed by tests/test_destinations.py against 127.0.0.1 servers. `refusals`: the reply the real helper gives for a redirect into a local address (tests/test_destinations.py composes it from a live run and compares), and the sentence the shell shows for it (Model.statusReason; Model.failureFromHost keeps the host) -- both suites. `env` and `destinationRules` are the names and the cache version the shell and the helper share. D-SINK-57 (owner, 2026-10-29): on LOOPBACK the playlist's own host is host AND port. `ownHosts`: own_host_match / Model.ownHostMatch, a host at a port against the playlist's {host key, port, loopback} -- both suites. `urlPorts`: url_port / Model.urlPortOf, a URL's port or its scheme's default (http 80 = no port) -- both suites. `streamHosts` sources carry `port` and `loopback` (playlist_source's shape) and `hints` carry loopback rows with ports.",
  "classes": [
   "global",
   "loopback",
@@ -15,7 +15,8 @@
   "url": "OMARCHY_IPTV_URL",
   "origin": "OMARCHY_IPTV_ORIGIN",
   "playlistHost": "OMARCHY_IPTV_PLAYLIST_HOST",
-  "playlistClass": "OMARCHY_IPTV_PLAYLIST_CLASS"
+  "playlistClass": "OMARCHY_IPTV_PLAYLIST_CLASS",
+  "playlistPort": "OMARCHY_IPTV_PLAYLIST_PORT"
  },
  "hosts": [
   {
@@ -778,6 +779,8 @@
    "url": "http://127.1:8080/x",
    "source": {
     "host": "127.0.0.1",
+    "port": 8080,
+    "loopback": true,
     "local": false
    },
    "refused": false
@@ -786,9 +789,121 @@
    "url": "http://localhost:8080/x",
    "source": {
     "host": "127.0.0.1",
+    "port": 8080,
+    "loopback": true,
     "local": false
    },
    "refused": true
+  },
+  {
+   "url": "http://127.0.0.1:631/admin",
+   "source": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "loopback": true,
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "http://127.0.0.1:8080/x",
+   "source": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "loopback": true,
+    "local": false
+   },
+   "refused": false
+  },
+  {
+   "url": "http://127.0.0.1/x",
+   "source": {
+    "host": "127.0.0.1",
+    "port": 80,
+    "loopback": true,
+    "local": false
+   },
+   "refused": false
+  },
+  {
+   "url": "http://127.0.0.1:80/x",
+   "source": {
+    "host": "127.0.0.1",
+    "port": 80,
+    "loopback": true,
+    "local": false
+   },
+   "refused": false
+  },
+  {
+   "url": "http://127.0.0.1:631:80/x",
+   "source": {
+    "host": "127.0.0.1",
+    "port": 80,
+    "loopback": true,
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "http://127.0.0.1:631x/x",
+   "source": {
+    "host": "127.0.0.1",
+    "port": 80,
+    "loopback": true,
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "https://127.0.0.1/x",
+   "source": {
+    "host": "127.0.0.1",
+    "port": 80,
+    "loopback": true,
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "http://127.0.0.1:8080/x",
+   "source": {
+    "host": "127.0.0.1",
+    "port": null,
+    "loopback": true,
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "http://[::1]:34400/s",
+   "source": {
+    "host": "0000:0000:0000:0000:0000:0000:0000:0001",
+    "port": 34400,
+    "loopback": true,
+    "local": false
+   },
+   "refused": false
+  },
+  {
+   "url": "http://[::1]:34401/s",
+   "source": {
+    "host": "0000:0000:0000:0000:0000:0000:0000:0001",
+    "port": 34400,
+    "loopback": true,
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "http://192.168.1.5:5004/s",
+   "source": {
+    "host": "192.168.1.5",
+    "port": 9981,
+    "loopback": false,
+    "local": false
+   },
+   "refused": false
   }
  ],
  "hints": [
@@ -1039,6 +1154,78 @@
    "refused": "",
    "host": "",
    "plainHttp": false
+  },
+  {
+   "hint": "http://127.0.0.1:631/admin",
+   "playlist": "http://127.0.0.1:8080/pl",
+   "url": "",
+   "refused": "local",
+   "host": "127.0.0.1",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://127.0.0.1:8080/xmltv",
+   "playlist": "http://127.0.0.1:8080/m3u",
+   "url": "http://127.0.0.1:8080/xmltv",
+   "refused": "",
+   "host": "127.0.0.1",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://127.0.0.1/epg",
+   "playlist": "http://127.0.0.1:80/pl",
+   "url": "http://127.0.0.1/epg",
+   "refused": "",
+   "host": "127.0.0.1",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://127.0.0.1:8080/epg",
+   "playlist": "https://127.0.0.1/pl",
+   "url": "",
+   "refused": "local",
+   "host": "127.0.0.1",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://[::1]:34400/xmltv",
+   "playlist": "http://[::1]:34400/m3u",
+   "url": "http://[::1]:34400/xmltv",
+   "refused": "",
+   "host": "[::1]",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://[::1]:34401/xmltv",
+   "playlist": "http://[::1]:34400/m3u",
+   "url": "",
+   "refused": "local",
+   "host": "[::1]",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://localhost:34400/x",
+   "playlist": "http://localhost:34400/m",
+   "url": "http://localhost:34400/x",
+   "refused": "",
+   "host": "localhost",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://localhost:34401/x",
+   "playlist": "http://localhost:34400/m",
+   "url": "",
+   "refused": "local",
+   "host": "localhost",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://192.168.1.5:8080/xmltv",
+   "playlist": "http://192.168.1.5:9981/playlist",
+   "url": "http://192.168.1.5:8080/xmltv",
+   "refused": "",
+   "host": "192.168.1.5",
+   "plainHttp": false
   }
  ],
  "refusals": [
@@ -1069,6 +1256,272 @@
    },
    "reason": "Refused a local address",
    "line": "Refused a local address from 127.0.0.1"
+  }
+ ],
+ "ownHosts": [
+  {
+   "name": "a relay's own port",
+   "host": "127.0.0.1",
+   "port": 34400,
+   "home": {
+    "host": "127.0.0.1",
+    "port": 34400,
+    "loopback": true
+   },
+   "same": true
+  },
+  {
+   "name": "another port on loopback is another host (the review's reproduction 1)",
+   "host": "127.0.0.1",
+   "port": 631,
+   "home": {
+    "host": "127.0.0.1",
+    "port": 34400,
+    "loopback": true
+   },
+   "same": false
+  },
+  {
+   "name": "every spelling of the address, the same port",
+   "host": "127.1",
+   "port": 34400,
+   "home": {
+    "host": "127.0.0.1",
+    "port": 34400,
+    "loopback": true
+   },
+   "same": true
+  },
+  {
+   "name": "a port that is not known matches none",
+   "host": "127.0.0.1",
+   "port": null,
+   "home": {
+    "host": "127.0.0.1",
+    "port": 34400,
+    "loopback": true
+   },
+   "same": false
+  },
+  {
+   "name": "nor does a home whose port is not known",
+   "host": "127.0.0.1",
+   "port": 34400,
+   "home": {
+    "host": "127.0.0.1",
+    "port": null,
+    "loopback": true
+   },
+   "same": false
+  },
+  {
+   "name": "localhost by name is another host than 127.0.0.1",
+   "host": "localhost",
+   "port": 34400,
+   "home": {
+    "host": "127.0.0.1",
+    "port": 34400,
+    "loopback": true
+   },
+   "same": false
+  },
+  {
+   "name": "localhost by name, its own port",
+   "host": "LOCALHOST.",
+   "port": 8080,
+   "home": {
+    "host": "localhost",
+    "port": 8080,
+    "loopback": true
+   },
+   "same": true
+  },
+  {
+   "name": "a *.localhost name, another port",
+   "host": "relay.localhost",
+   "port": 8081,
+   "home": {
+    "host": "relay.localhost",
+    "port": 8080,
+    "loopback": true
+   },
+   "same": false
+  },
+  {
+   "name": "IPv6 loopback, its own port",
+   "host": "[::1]",
+   "port": 34400,
+   "home": {
+    "host": "0000:0000:0000:0000:0000:0000:0000:0001",
+    "port": 34400,
+    "loopback": true
+   },
+   "same": true
+  },
+  {
+   "name": "IPv6 loopback, another port",
+   "host": "::1",
+   "port": 34401,
+   "home": {
+    "host": "0000:0000:0000:0000:0000:0000:0000:0001",
+    "port": 34400,
+    "loopback": true
+   },
+   "same": false
+  },
+  {
+   "name": "the mapped spelling of 127.0.0.1 is loopback too",
+   "host": "[::ffff:127.0.0.1]",
+   "port": 1,
+   "home": {
+    "host": "0000:0000:0000:0000:0000:ffff:7f00:0001",
+    "port": 2,
+    "loopback": true
+   },
+   "same": false
+  },
+  {
+   "name": "a name whose playlist fetch connected to loopback counts its port",
+   "host": "relay.test",
+   "port": 34401,
+   "home": {
+    "host": "relay.test",
+    "port": 34400,
+    "loopback": true
+   },
+   "same": false
+  },
+  {
+   "name": "and is its own host on its own port",
+   "host": "Relay.Test.",
+   "port": 34400,
+   "home": {
+    "host": "relay.test",
+    "port": 34400,
+    "loopback": true
+   },
+   "same": true
+  },
+  {
+   "name": "a loopback literal against a home recorded as not loopback still counts the port (fail closed)",
+   "host": "127.0.0.1",
+   "port": 9,
+   "home": {
+    "host": "127.0.0.1",
+    "port": 8080,
+    "loopback": false
+   },
+   "same": false
+  },
+  {
+   "name": "a LAN host keeps any port",
+   "host": "192.168.1.5",
+   "port": 5004,
+   "home": {
+    "host": "192.168.1.5",
+    "port": 9981,
+    "loopback": false
+   },
+   "same": true
+  },
+  {
+   "name": "a public name keeps any port",
+   "host": "p.example.test",
+   "port": 8443,
+   "home": {
+    "host": "p.example.test",
+    "port": 443,
+    "loopback": false
+   },
+   "same": true
+  },
+  {
+   "name": "another host is another host",
+   "host": "192.168.1.6",
+   "port": 9981,
+   "home": {
+    "host": "192.168.1.5",
+    "port": 9981,
+    "loopback": false
+   },
+   "same": false
+  },
+  {
+   "name": "no home is nobody's host",
+   "host": "127.0.0.1",
+   "port": 80,
+   "home": {
+    "host": "",
+    "port": null,
+    "loopback": false
+   },
+   "same": false
+  }
+ ],
+ "urlPorts": [
+  {
+   "url": "http://127.0.0.1:8080/x",
+   "port": 8080
+  },
+  {
+   "url": "http://127.0.0.1/x",
+   "port": 80
+  },
+  {
+   "url": "https://127.0.0.1/x",
+   "port": 443
+  },
+  {
+   "url": "https://[::1]/x",
+   "port": 443
+  },
+  {
+   "url": "https://[::1]:9443/x",
+   "port": 9443
+  },
+  {
+   "url": "http://u:p@h.test:77/x",
+   "port": 77
+  },
+  {
+   "url": "http://u:p:q@h.test/x",
+   "port": 80
+  },
+  {
+   "url": "HTTP://H.TEST:81",
+   "port": 81
+  },
+  {
+   "url": "rtsp://cam.test/live",
+   "port": 554
+  },
+  {
+   "url": "rtmp://cdn.test/app",
+   "port": 1935
+  },
+  {
+   "url": "srt://h.test:9000",
+   "port": 9000
+  },
+  {
+   "url": "udp://@239.1.1.1",
+   "port": null
+  },
+  {
+   "url": "http://h.test:99999/x",
+   "port": null
+  },
+  {
+   "url": "http://h.test:abc/x",
+   "port": null
+  },
+  {
+   "url": "/home/u/tv.m3u",
+   "port": null
+  },
+  {
+   "url": "",
+   "port": null
   }
  ]
 }

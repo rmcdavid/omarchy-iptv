@@ -181,5 +181,74 @@ class MpvStillSaysItTest(unittest.TestCase):
                          "re-pin tests/fixtures/player-endings.json" % (version, FIXTURE["mpv"]["version"]))
 
 
+    def test_a_nested_playlist_under_the_helpers_loadfile_reads_as_pinned(self):
+        """D-PLY-44's canary (2026-10-29): the real mpv, given a plain M3U the
+        way apply_channel gives it a channel -- the positional loadfile, its
+        options a JSON object carrying demuxer=lavf -- answers the loadfile
+        and ends the file with the string Model.unopenedFormatSentence joins
+        on. A file on disk, so it contacts nothing; no window, no sound."""
+        canary = FIXTURE["mpv"]["formatCanary"]
+        work = short_dir()
+        sock_path = os.path.join(work, "m.sock")
+        home = os.path.join(work, "home")
+        os.mkdir(home, 0o700)
+        playlist = os.path.join(work, "nested.m3u")
+        with open(playlist, "w", encoding="ascii") as fh:
+            fh.write(canary["body"])
+        env = {"PATH": os.environ.get("PATH", "/usr/bin"), "HOME": home, "XDG_RUNTIME_DIR": work,
+               "XDG_CONFIG_HOME": os.path.join(home, ".config"), "XDG_CACHE_HOME": os.path.join(home, ".cache"),
+               "XDG_STATE_HOME": os.path.join(home, ".state"), "LANG": "C.UTF-8"}
+        proc = subprocess.Popen(["mpv"] + canary["argv"] + ["--input-ipc-server=" + sock_path],
+                                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=env,
+                                preexec_fn=lambda: __import__("resource").setrlimit(__import__("resource").RLIMIT_CORE, (0, 0)))
+        ends, replies = [], []
+        try:
+            client = socket.socket(socket.AF_UNIX)
+            deadline = time.monotonic() + 10
+            while True:
+                try:
+                    client.connect(sock_path)
+                    break
+                except OSError:
+                    if time.monotonic() > deadline or proc.poll() is not None:
+                        self.fail("mpv opened no socket (exit %r)" % proc.poll())
+                    time.sleep(0.05)
+            client.settimeout(0.5)
+            client.sendall((json.dumps({"command": ["loadfile", playlist, "replace", -1, canary["options"]],
+                                        "request_id": 7}) + "\n").encode())
+            buf = b""
+            deadline = time.monotonic() + 15
+            while time.monotonic() < deadline and not ends:
+                try:
+                    chunk = client.recv(65536)
+                except socket.timeout:
+                    continue
+                if not chunk:
+                    break
+                buf += chunk
+                while b"\n" in buf:
+                    line, buf = buf.split(b"\n", 1)
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        continue
+                    if event.get("request_id") == 7:
+                        replies.append(event.get("error"))
+                    if event.get("event") == "end-file":
+                        ends.append({k: event[k] for k in ("event", "reason", "playlist_entry_id", "file_error") if k in event})
+            client.close()
+        finally:
+            if proc.poll() is None:
+                proc.kill()
+            proc.wait(timeout=10)
+            shutil.rmtree(work, ignore_errors=True)
+        self.assertEqual(replies, ["success"], "mpv refused the loadfile's options object")
+        self.assertEqual(ends[:1], [canary["endFile"]],
+                         "the installed mpv no longer ends a nested plain playlist under demuxer=lavf the way mpv %s "
+                         "did; Model.unopenedFormatSentence joins on that string (D-PLY-44), so re-measure and re-pin "
+                         "tests/fixtures/player-endings.json" % FIXTURE["mpv"]["version"])
+        self.assertEqual(canary["endFile"]["file_error"], FIXTURE["formatErrors"][0]["fileError"])
+
+
 if __name__ == "__main__":
     unittest.main()

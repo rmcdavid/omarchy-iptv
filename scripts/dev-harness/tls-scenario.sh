@@ -203,6 +203,22 @@
 # helper: W1..W10 red, C1..C2 green, which is the proof each check can fail.
 # Ports 8780-8784. A machine without mpv, ffmpeg or openssl answers 77.
 #
+# lane-p1b (2026-10-29) adds W11..W18 and C3 against a sixth server on 8785
+# (D-PLY-44's nested playlist, D-SINK-55's SDP answer, provider headers with
+# commas and quotes, an entry the helper did not load, the paste key, the
+# loopback port rule of D-SINK-57, D-SINK-60's reset-on-next-file on an
+# adopted player, a pre-pin player's non-TLS per-file profile, and a loopback
+# relay as the control), two of which ask `ss` what the PLAYER is listening
+# on. So the arm now runs the rig inside `unshare -rn` when this machine
+# allows it: a private network namespace whose only interface is its own
+# loopback, so the listener checks see the rig's players and nothing of the
+# user's, and no port the rig takes is one the user's machine holds. Where
+# `unshare -rn` is refused the rig runs as before, on the shared loopback,
+# and says so on its first line, without W11 and W12: a baseline player
+# would listen on this machine's own interfaces. `--baseline 6c79a9a` (sec-int) reds W11,
+# W12, W14, W15, W16, W17 and W18; W13 is green there too -- the old global
+# header properties were exact as well -- and holds the per-file form to it.
+#
 #   ./scripts/dev-harness/tls-scenario.sh --rig-only
 #   ./scripts/dev-harness/tls-scenario.sh --windowless [--baseline <ref>] [--pre-pin <ref>]
 #   ./scripts/dev-harness/tls-scenario.sh
@@ -454,7 +470,13 @@ if [[ $MODE == windowless ]]; then
   # it holds the pids of), its own players (the same) and nothing of the
   # harness, so nothing above this needs reaping and the EXIT trap removes
   # WORK and the stage tree.
-  python3 -I "$ROOT/tests/tls_pins_rig.py" --tree "$PLUGIN_ROOT" --pre-pin "$PIN_DIR" --work "$WORK"
+  if command -v unshare >/dev/null 2>&1 && unshare -rn true 2>/dev/null; then
+    echo "== windowless rig inside unshare -rn (a private network namespace: loopback only)"
+    OMARCHY_IPTV_RIG_NETNS=1 unshare -rn python3 -I "$ROOT/tests/tls_pins_rig.py" --tree "$PLUGIN_ROOT" --pre-pin "$PIN_DIR" --work "$WORK"
+  else
+    echo "== windowless rig on the shared loopback: unshare -rn is refused here, so W11 and W12 are skipped (a baseline player would listen on this machine's interfaces)"
+    python3 -I "$ROOT/tests/tls_pins_rig.py" --tree "$PLUGIN_ROOT" --pre-pin "$PIN_DIR" --work "$WORK"
+  fi
   rig_rc=$?
   (( rig_rc == 77 )) && exit 77
   exit "$rig_rc"

@@ -1056,6 +1056,64 @@ What remains, each with its size:
   working too (the same rule), and so does a typed `localhost` source that
   redirects to `127.0.0.1` (two hosts by name).
 
+**[2026-10-29, D-SINK-57 -- the owner's decision on the recheck of the same
+day: on LOOPBACK the port counts.]** The same-host exception above compared
+host keys and ignored ports, so a provider whose list reached the user
+through a local relay on loopback (Threadfin, xTeVe, an nginx cache) held
+the relay's exception for EVERY loopback port: a hint to
+`http://127.0.0.1:<any>/` was adopted and fetched, a typed loopback source's
+302 to the same address on another port was followed (the review's literal
+reproduction 1), and a channel on `127.0.0.1:<any>` kept its sign-in
+headers. Now, when the playlist's own host is on loopback -- 127.0.0.0/8,
+::1 and its mapped forms, `localhost` and `*.localhost`, or a name whose
+playlist fetch connected to loopback -- "the same host" is host AND port, the
+scheme's default standing for a port the URL does not name (http 80 = no
+port); a LAN or public host keeps any port. One comparison in each mirror,
+`own_host_match` (bin/helper 01-core.py) and `Model.ownHostMatch`
+(model/sources.mjs), with `url_port` / `Model.urlPortOf`, run over the shared
+rows `ownHosts` and `urlPorts` of tests/fixtures/destinations.json, and
+called at every place the own-host rule lives: `DestinationPolicy.permits`
+for a later hop (the first hop's port is recorded with its host and class)
+and for the playlist host (the port arrives as a fourth variable,
+`OMARCHY_IPTV_PLAYLIST_PORT`, set by `Model.fetchEnvironmentFor` from the
+typed URL; a port that is absent or not 1..65535 matches nothing);
+`playlist_source` and the parse's host rule and `drop_sign_in_headers`
+(02-sources.py); and `Model.epgHintVerdict` for a literal hint. Measured
+through the shipping `playlist` verb against two local servers
+(`tls-scenario.sh --windowless`, W16): the 302 to another port is refused
+`local_address` and the other port receives nothing; the relay shape (C3) --
+playlist, guide and stream on one loopback port -- fetches, keeps its
+channel's Cookie and plays. Two things the port does NOT change, stated so
+nobody reads more into it: a LOCAL source (its last hop connected to a
+non-global address) may still list channels on any loopback or LAN literal,
+because that is D-SINK-41's rule for a local source, not the own-host rule;
+only those channels' sign-in headers now need the relay's own port. And a
+loopback home recorded with no port (a cache written before this) matches no
+channel, so its sign-in headers are dropped at play time until the next
+refresh records the port.
+
+**[2026-10-29, D-SINK-58 -- two residuals the section above did not state.]**
+(1) Non-global is an ADDRESS class, so a device on the user's LAN that has a
+GLOBAL IPv6 address -- often the router at `<prefix>::1`, and this machine's
+own public address -- counts as global, and a provider-chosen destination may
+reach it. The table cannot tell a global address on the LAN from one on the
+internet; nothing here pretends otherwise. (2) A cache written before the
+destination rules is refreshed once (`Model.cacheBeforeDestinationRules`),
+and if that refresh FAILS its channels were never checked. They are now
+checked at play time: `player_target` (08-player-verbs.py) reads what the
+parse recorded about its playlist out of channels.json (`cached_source`:
+`sourceHost`, `sourceClass`, and since this day `sourcePort` and
+`sourceLocal`) and runs the parse's host rule and sign-in header rule again
+before the player is told anything. A pre-rules cache records no class, so it
+reads as LOCAL only when its host's own literal is non-global or it is a
+file, and otherwise as a public source: its LAN and loopback literal
+channels are refused `local_address` -- a channel refusal
+(`PLAYER_START_CHANNEL_REFUSALS` in model/player.mjs), shown as `Refused a local address`
+-- and a sign-in header for another host is dropped, until a refresh
+succeeds. The cost: a pre-rules cache from a LAN server typed by NAME
+(`tvh.lan`) whose first refresh after the update failed cannot play its
+LAN-literal channels until a refresh succeeds.
+
 Closed 2026-10-02 (D-TEXT-1). The same maintainer, reviewing the shipped
 0.9.2 artifact (omacom/omarchy-plugin-marketplace#9628), reported that a
 channel name keeps its markup through the helper and `Model.displayName`

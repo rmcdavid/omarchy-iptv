@@ -231,8 +231,15 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None):
                 # holding the pinned tls_verify, auto-profiles off (mpv answers
                 # that `no` as False), and every option a per-file profile
                 # could undo set from the command line.
+                # 2026-10-29 (lane-p1b): and the pinned protocol whitelist in
+                # the demuxer map (D-SINK-55), reset-on-next-file emptied by
+                # its -clr (D-SINK-60), drag-and-drop off and the OSC key set.
                 answers = {helper.MPV_TLS_VERIFY_PROP: True, helper.MPV_STREAM_OPTS_PROP: {}, "playlist-count": 0,
-                           helper.MPV_DEMUXER_OPTS_PROP: {"tls_verify": "1"}, helper.MPV_AUTO_PROFILES_PROP: False}
+                           helper.MPV_DEMUXER_OPTS_PROP: {"protocol_whitelist": helper.MPV_PROTOCOL_WHITELIST,
+                                                          "tls_verify": "1"},
+                           helper.MPV_AUTO_PROFILES_PROP: False, helper.MPV_RESET_PROP: [],
+                           "drag-and-drop": False,
+                           "script-opts": {helper.MPV_OSC_TITLE_KEY: helper.MPV_OSC_TITLE_VALUE}}
                 for option in helper.PER_FILE_TLS_OPTIONS:
                     answers["option-info/%s/set-from-commandline" % option] = True
                 data = answers.get(command[1])

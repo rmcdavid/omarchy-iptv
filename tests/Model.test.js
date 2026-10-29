@@ -4749,7 +4749,7 @@ checkCall("buildMpvArgv user args come after every fixed option, and exactly the
   const lastFixed = argv.findIndex(t => t.indexOf("--icc-cache-dir=") === 0)
   return { found: user > 0, afterTheFixedOptions: user > lastFixed, tailIsThePins: JSON.stringify(argv.slice(user + 1)) === JSON.stringify(Model.mpvPinBlock(Model.playerDirs("/run/user/1000/omarchy-iptv/mpv.sock", STATE_DIR))) }
 }, { found: true, afterTheFixedOptions: true, tailIsThePins: true })
-check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--gpu-sw=yes", "--tls-verify=yes", "--watch-later-dir=/watch-later", "--load-scripts=no", "--scripts-clr", "--input-commands-clr", "--load-auto-profiles=no", "--player-operation-mode=cplayer", "--load-select=no", "--load-unsafe-playlists=no", "--save-watch-history=no", "--log-file=", "--reset-on-next-file-clr", "--osd-playlist-entry=title", "--stream-lavf-o-clr", "--demuxer-lavf-propagate-opts=yes", "--demuxer-lavf-o-append=tls_verify=1", "--tls-verify=yes"])
+check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--gpu-sw=yes", "--tls-verify=yes", "--watch-later-dir=/watch-later", "--load-scripts=no", "--scripts-clr", "--input-commands-clr", "--input-commands-append=keybind ctrl+v ignore", "--load-auto-profiles=no", "--player-operation-mode=cplayer", "--load-select=no", "--load-unsafe-playlists=no", "--save-watch-history=no", "--log-file=", "--reset-on-next-file-clr", "--osd-playlist-entry=title", "--drag-and-drop=no", "--script-opts-append=osc-title_mbtn_mid_command=ignore", "--stream-lavf-o-clr", "--demuxer-lavf-propagate-opts=yes", "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy", "--demuxer-lavf-o-append=tls_verify=1", "--tls-verify=yes"])
 // D-PLY-27 (the owner's decision, 2026-10-26): the launch argv accepts a
 // software renderer, because mpv 0.41.0's VO probe aborts on any compositor
 // that serves no hardware GL or Vulkan context (measured 2026-10-25 in the
@@ -5050,7 +5050,10 @@ checkCall("D-PLY-32: one notion of local -- no code on PLAY_UNREADABLE, HELPER_C
     out.channel = P.PLAYER_START_CHANNEL_REFUSALS
     return out
   },
-  { PLAY_UNREADABLE: [true, []], HELPER_CANNOT_TELL: [true, []], PROBE_LOCAL_REFUSALS: [true, []], channel: ["unsupported_scheme"] })
+  // D-SINK-58 (2026-10-29): `local_address` joins the channel codes --
+  // player_target refuses a cached channel on a LAN or loopback literal its
+  // playlist chose, which is about the entry.
+  { PLAY_UNREADABLE: [true, []], HELPER_CANNOT_TELL: [true, []], PROBE_LOCAL_REFUSALS: [true, []], channel: ["unsupported_scheme", "local_address"] })
 checkCall("D-PLY-32: notifyArgv localPlayFailure -- its own title, mpvMissing's glyph, its own replace-id 74021, and the stream failure's body word for word (the channel that did not play, then the reason)",
   () => {
     const p = { name: "Sky Sports", reason: "Could not write the player's runtime folder" }
@@ -5207,6 +5210,35 @@ checkCall("D-PLY-37: notifyArgv outputFailed -- its own id 74023, a headline nam
       return [c.name, verdict(r), r.target ? r.target.id : null]
     }),
     ENDINGS.firstLoad.concat(ENDINGS.oldReplies).map(c => c.reply.state !== "failed" ? [c.name, null] : [c.name, c.expect, "t:x"]))
+  // D-PLY-44 (owner, 2026-10-29: refuse nested playlists). A channel whose
+  // address is a plain .m3u or .pls redirector ends with mpv's `unrecognized
+  // file format` under the helper's per-file demuxer=lavf, after a log line
+  // that says nothing a user can act on; the sentence outranks it for that
+  // ending, at the socket's EOF and in the first-load window, and nowhere else.
+  checkCall("D-PLY-44: a refused playlist address is told in a sentence the user can read -- at the socket's EOF and in player start's first-load window -- and the sentence and mpv's string are the fixture's",
+    () => {
+      const sock = ENDINGS.socket.filter(c => c.expectReason).map(c => {
+        let st = Model.playerRouterState(null)
+        for (const l of c.lines) st = Model.routePlayerEvent(st, JSON.stringify(l))
+        let owners = Model.keyedMap()
+        for (const [entry, who] of c.owners) owners = Model.rememberEntryOwner(owners, entry, who)
+        return Model.deathReport({ lastEndFile: st.lastEndFile, owners, nowPlaying: c.nowPlaying, entryId: st.entryId, tail: st.tail }).reason
+      })
+      const first = ENDINGS.firstLoad.filter(c => c.expectReason).map(c =>
+        Model.deathReport({ firstLoad: true, nowPlaying: { id: "t:x", name: "X" }, reason: c.reply.reason, ended: c.reply.ended, fileError: c.reply.fileError }).reason)
+      return [sock, first, Model.PLAYER_FORMAT_ERROR, Model.PLAYER_FORMAT_SENTENCE]
+    },
+    [ENDINGS.socket.filter(c => c.expectReason).map(c => c.expectReason), ENDINGS.firstLoad.filter(c => c.expectReason).map(c => c.expectReason),
+     ENDINGS.formatErrors[0].fileError, ENDINGS.formatErrors[0].sentence])
+  checkCall("D-PLY-44: the sentence replaces only that ending -- not a dead stream's log line, not a stop, not an output's own sentence, not a near match",
+    () => [Model.unopenedFormatSentence({ reason: "error", fileError: "loading failed" }),
+           Model.unopenedFormatSentence({ reason: "stop", fileError: "unrecognized file format" }),
+           Model.unopenedFormatSentence({ reason: "error", file_error: " unrecognized file format " }),
+           Model.unopenedFormatSentence({ reason: "error", fileError: "Unrecognized file format" }),
+           Model.unopenedFormatSentence(null),
+           Model.endedReport({ lastEndFile: { reason: "error", fileError: "loading failed" }, tail: ["[stream] Failed to open 127.0.0.1."] }).reason,
+           Model.deathReport({ firstLoad: true, nowPlaying: { id: "t:x", name: "X" }, reason: "Failed to open 127.0.0.1.", ended: "end-file", fileError: "loading failed" }).reason],
+    ["", "", Model.PLAYER_FORMAT_SENTENCE, "", "", "[stream] Failed to open 127.0.0.1.", "Failed to open 127.0.0.1."])
 })()
 
 // ---- D-PLY-35 (2026-10-28): the player slot's watchdog, derived from the helper's bounds ----
@@ -5442,7 +5474,9 @@ checkCall("mpv options: the pin block is the fixture's, in its order, the TLS to
     constant: JSON.stringify(Model.MPV_PIN_BLOCK) === JSON.stringify(block.slice(1)),
     composed: JSON.stringify(Model.mpvPinBlock(dirs)) === JSON.stringify(block.map(t => t.replace("{watchLater}", dirs.watchLater))),
     last: Model.MPV_PIN_BLOCK[Model.MPV_PIN_BLOCK.length - 1] === Model.MPV_TLS_VERIFY,
-    bases: block.map(t => Model.mpvOptionBase(t.split("=")[0])).sort(),
+    // An option pinned with several tokens (input-commands, demuxer-lavf-o)
+    // is one base.
+    bases: Array.from(new Set(block.map(t => Model.mpvOptionBase(t.split("=")[0])))).sort(),
     pinnedClass: mpvOptionNames.filter(n => mpvOptions.options[n].class === "pinned" && mpvOptions.options[n].type !== "alias").sort()
   }
 }, (() => {
@@ -5457,11 +5491,16 @@ checkCall("mpv options: whatever the user's tokens say, every pinned option's LA
   const a = Model.buildMpvArgv({ socketPath: "/s", stateDir: "/st", extraArgs: contrary })
   const tail = Model.mpvPinBlock(dirs)
   const lastUser = Math.max.apply(null, contrary.map(t => a.indexOf(t)))
-  return tail.filter(pin => {
-    const base = Model.mpvOptionBase(pin.split("=")[0])
-    let last = -1
-    a.forEach((t, i) => { if (Model.mpvOptionBase(t.split("=")[0]) === base) last = i })
-    return !(last > lastUser && a[last] === pin)
+  // An option the block pins with several tokens ends the argv with exactly
+  // those tokens, in the block's order (2026-10-29: input-commands' -clr and
+  // paste key, demuxer-lavf-o's two keys).
+  const baseOf = t => Model.mpvOptionBase(t.split("=")[0])
+  return Array.from(new Set(tail.map(baseOf))).filter(base => {
+    const ours = tail.filter(t => baseOf(t) === base)
+    const at = []
+    a.forEach((t, i) => { if (baseOf(t) === base) at.push(i) })
+    const lastOnes = at.slice(-ours.length)
+    return !(lastOnes[0] > lastUser && JSON.stringify(lastOnes.map(i => a[i])) === JSON.stringify(ours))
   })
 }, [])
 checkCall("mpv options: a base option is set first and never refused, so a user token still wins", () => {
@@ -5516,7 +5555,28 @@ const RESERVED_ADDED = ["--log-file", "--dump-stats", "--stream-record", "--save
 // tests/fixtures/mpv-options.json, held to that file name by name below.
 // 54 the same day: --player-operation-mode, whose pseudo-gui applies the
 // user's [pseudo-gui] profile after the command line (recheck).
-check("MPV_RESERVED holds exactly 54 entries", Object.keys(Model.MPV_RESERVED).length, 54)
+// 55 the same day again: --drag-and-drop, pinned off (D-PLY-46).
+check("MPV_RESERVED holds exactly 55 entries", Object.keys(Model.MPV_RESERVED).length, 55)
+// D-SINK-52 (owner, 2026-10-29: pin and refuse): a --script-opts token that
+// sets an OSC command or carries ${ is refused, by text, in this mirror as in
+// the helper; every other key, and PO-10's ytdl warning, stand.
+check("D-SINK-52: splitMpvArgs refuses a --script-opts token that sets an OSC *_command, *_mbtn_* or *_wheel_* key or carries ${, in every spelling, and keeps every other key and the ytdl warning",
+  (() => {
+    const r = Model.splitMpvArgs("--script-opts=osc-title_mbtn_mid_command=show-text_${path} --script-opts-append=osc-title=${path} " +
+      "--script-opt=osc-playlist_next_mbtn_mid_command=run_x --script-opts-set=osc-volume_wheel_up_command=x " +
+      "--script-opts=osc-deadzonesize=0.5 --script-opts=ytdl_hook-ytdl_path=/usr/bin/yt-dlp --script-opts=stats-font_size=9")
+    return [r.rejected.length, r.args, r.warnings.filter(w => w.indexOf("hands the stream address") !== -1)]
+  })(),
+  [4, ["--script-opts=osc-deadzonesize=0.5", "--script-opts=ytdl_hook-ytdl_path=/usr/bin/yt-dlp", "--script-opts=stats-font_size=9"],
+   ["mpvArg --script-opts hands the stream address to another program"]])
+// D-PLY-46 / D-SINK-55: the two new pinned names are refused as tokens, and so
+// is a demuxer protocol list, which the pin block owns.
+check("D-PLY-46 / D-SINK-55: --drag-and-drop and a demuxer protocol whitelist or blacklist are refused in every spelling; a demuxer workaround is kept",
+  Model.splitMpvArgs("--drag-and-drop=auto --no-drag-and-drop --demuxer-lavf-o=protocol_whitelist=file,http " +
+    "--demuxer-lavf-o-append=protocol_blacklist=tcp --demuxer-lavf-o=\"protocol_whitelist\"=x --demuxer-lavf-o=live_start_index=-1").args,
+  ["--demuxer-lavf-o=live_start_index=-1"])
+check("D-SINK-55: the model's whitelist is the pin block's and the helper's (the shared argv vectors pin the block)",
+  Model.MPV_PIN_BLOCK.indexOf("--demuxer-lavf-o-append=protocol_whitelist=" + Model.MPV_PROTOCOL_WHITELIST) !== -1, true)
 check("M5-01: --demuxer-cache-unlink-files is reserved and --cache-on-disk is not",
   [Model.MPV_RESERVED["--demuxer-cache-unlink-files"], Model.MPV_RESERVED["--cache-on-disk"], Model.MPV_DISK_WARN["--cache-on-disk"]], [true, undefined, true])
 check("M5-01: every spelling of the unlink switch is rejected, and the disk cache itself is kept and warned",
@@ -17910,9 +17970,22 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   checkCall("D-SINK-40: every host spelling in the shared fixture classifies and keys in the model as in the helper (hostClass, hostKey)", () =>
     D.hosts.map(r => [r.host, Model.hostClass(r.host), Model.hostKey(r.host)]),
     D.hosts.map(r => [r.host, r.class, r.key]))
-  checkCall("D-SINK-40: the shared fixture's names are the model's: the classes, the cache version and the four environment variables", () =>
-    [Model.ADDRESS_CLASSES, Model.DESTINATION_RULES, Model.FETCH_URL_ENV, Model.FETCH_ORIGIN_ENV, Model.FETCH_HOME_HOST_ENV, Model.FETCH_HOME_CLASS_ENV],
-    [D.classes, D.destinationRules, D.env.url, D.env.origin, D.env.playlistHost, D.env.playlistClass])
+  checkCall("D-SINK-40: the shared fixture's names are the model's: the classes, the cache version and the five environment variables", () =>
+    [Model.ADDRESS_CLASSES, Model.DESTINATION_RULES, Model.FETCH_URL_ENV, Model.FETCH_ORIGIN_ENV, Model.FETCH_HOME_HOST_ENV, Model.FETCH_HOME_CLASS_ENV, Model.FETCH_HOME_PORT_ENV],
+    [D.classes, D.destinationRules, D.env.url, D.env.origin, D.env.playlistHost, D.env.playlistClass, D.env.playlistPort])
+  // D-SINK-57 (owner, 2026-10-29): on loopback the playlist's own host is
+  // host AND port. The shared rows, run here and by the python suite.
+  checkCall("D-SINK-57: Model.ownHostMatch reads every shared row as own_host_match does -- the port counts on loopback only, and a port nobody knows matches nothing", () =>
+    D.ownHosts.map(r => [r.name, Model.ownHostMatch(r.host, r.port, r.home)]),
+    D.ownHosts.map(r => [r.name, r.same]))
+  checkCall("D-SINK-57: Model.urlPortOf is the named port or the scheme's default, as url_port", () =>
+    D.urlPorts.map(r => [r.url, Model.urlPortOf(r.url)]),
+    D.urlPorts.map(r => [r.url, r.port]))
+  checkCall("D-SINK-57: the guide fetch of a loopback playlist carries its port, the scheme's default when it names none, and a file carries none", () =>
+    [Model.fetchEnvironmentFor("http://127.0.0.1:34400/xmltv", { origin: "playlist", playlistUrl: "http://127.0.0.1:34400/m3u", playlistClass: "loopback" }).OMARCHY_IPTV_PLAYLIST_PORT,
+     Model.fetchEnvironmentFor("http://127.0.0.1/xmltv", { origin: "playlist", playlistUrl: "https://u:p@127.0.0.1/m3u", playlistClass: "loopback" }).OMARCHY_IPTV_PLAYLIST_PORT,
+     Model.fetchEnvironmentFor("http://a.test/x", { origin: "playlist", playlistUrl: "/home/u/tv.m3u" }).OMARCHY_IPTV_PLAYLIST_PORT],
+    ["34400", "443", undefined])
   checkCall("D-SINK-40: every guide hint in the fixture -- each spelling of a loopback, private, link-local, CGNAT and unspecified host, userinfo, the playlist's own host -- gets the fixture's verdict", () =>
     D.hints.map(r => { const v = Model.epgHintVerdict({ epgUrlHint: r.hint }, r.playlist); return [r.hint, r.playlist, v.url, v.refused, v.host, v.plainHttp] }),
     D.hints.map(r => [r.hint, r.playlist, r.url, r.refused, r.host, r.plainHttp]))
@@ -17935,7 +18008,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     const hint = Model.fetchEnvironmentFor("http://192.168.1.5:9981/xmltv", { origin: "playlist", playlistUrl: "http://me:s3cret@192.168.1.5:9981/playlist?u=1", playlistClass: "private" })
     const user = Model.fetchEnvironmentFor("http://u:p@a.test/x.m3u", { origin: "user" })
     return [hint, user, JSON.stringify(hint).indexOf("s3cret"), Object.keys(Model.fetchEnvironmentFor("http://a.test/x", { origin: "user", playlistUrl: "/home/u/tv.m3u" }))]
-  }, [{ OMARCHY_IPTV_URL: "http://192.168.1.5:9981/xmltv", OMARCHY_IPTV_ORIGIN: "playlist", OMARCHY_IPTV_PLAYLIST_HOST: "192.168.1.5", OMARCHY_IPTV_PLAYLIST_CLASS: "private" },
+  }, [{ OMARCHY_IPTV_URL: "http://192.168.1.5:9981/xmltv", OMARCHY_IPTV_ORIGIN: "playlist", OMARCHY_IPTV_PLAYLIST_HOST: "192.168.1.5", OMARCHY_IPTV_PLAYLIST_PORT: "9981", OMARCHY_IPTV_PLAYLIST_CLASS: "private" },
       { OMARCHY_IPTV_URL: "http://u:p@a.test/x.m3u", OMARCHY_IPTV_ORIGIN: "user" }, -1, ["OMARCHY_IPTV_URL", "OMARCHY_IPTV_ORIGIN"]])
   checkCall("D-SINK-40: an origin that is not exactly `user` reads as the provider's, an unknown class is dropped, and an empty URL is {} whatever else is given", () =>
     [Model.fetchEnvironmentFor("http://a.test/x", {}).OMARCHY_IPTV_ORIGIN, Model.fetchEnvironmentFor("http://a.test/x").OMARCHY_IPTV_ORIGIN,
@@ -17991,7 +18064,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     h.root.epgLoaded = true
     h.root.runEpgHelper(true)
     return [fetch, h.ids.epgProc.environment, h.compileErrors]
-  }, [{ OMARCHY_IPTV_URL: "http://192.168.1.5:9981/xmltv", OMARCHY_IPTV_ORIGIN: "playlist", OMARCHY_IPTV_PLAYLIST_HOST: "192.168.1.5", OMARCHY_IPTV_PLAYLIST_CLASS: "private" }, {}, []])
+  }, [{ OMARCHY_IPTV_URL: "http://192.168.1.5:9981/xmltv", OMARCHY_IPTV_ORIGIN: "playlist", OMARCHY_IPTV_PLAYLIST_HOST: "192.168.1.5", OMARCHY_IPTV_PLAYLIST_PORT: "9981", OMARCHY_IPTV_PLAYLIST_CLASS: "private" }, {}, []])
   checkCall("D-SINK-40 (service): a hint on another LAN host is never fetched and the active row says so; the user's own guide URL is fetched as theirs", () => {
     const h = boot([rec(LAN)])
     h.root.channelsMeta = { epgUrlHint: "http://192.168.1.6/xmltv", sourceClass: "private" }
@@ -18004,7 +18077,7 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     g.root.runEpgHelper(false)
     return [refused, g.ids.epgProc.environment]
   }, [[false, "", "active \u00b7 192.168.1.5:9981 \u00b7 9 channels in 2 groups \u00b7 EPG from playlist not used: 192.168.1.6 is a local address"],
-      { OMARCHY_IPTV_URL: OWN, OMARCHY_IPTV_ORIGIN: "user", OMARCHY_IPTV_PLAYLIST_HOST: "192.168.1.5", OMARCHY_IPTV_PLAYLIST_CLASS: "private" }])
+      { OMARCHY_IPTV_URL: OWN, OMARCHY_IPTV_ORIGIN: "user", OMARCHY_IPTV_PLAYLIST_HOST: "192.168.1.5", OMARCHY_IPTV_PLAYLIST_PORT: "9981", OMARCHY_IPTV_PLAYLIST_CLASS: "private" }])
   checkCall("D-SINK-40 (service): the playlist fetch and the source probe carry origin user and no playlist host of their own", () => {
     const h = boot([rec(LAN)])
     h.ids.playlistProc.running = false

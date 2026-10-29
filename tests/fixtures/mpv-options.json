@@ -26,17 +26,18 @@
   "base": "set by the plugin BEFORE the user's tokens; a user token may override it"
  },
  "counts": {
-  "allowed": 827,
+  "allowed": 825,
   "base": 8,
-  "pinned": 18,
+  "pinned": 21,
   "reserved": 39,
-  "warned": 7
+  "warned": 6
  },
  "pinBlock": [
   "--watch-later-dir={watchLater}",
   "--load-scripts=no",
   "--scripts-clr",
   "--input-commands-clr",
+  "--input-commands-append=keybind ctrl+v ignore",
   "--load-auto-profiles=no",
   "--player-operation-mode=cplayer",
   "--load-select=no",
@@ -45,8 +46,11 @@
   "--log-file=",
   "--reset-on-next-file-clr",
   "--osd-playlist-entry=title",
+  "--drag-and-drop=no",
+  "--script-opts-append=osc-title_mbtn_mid_command=ignore",
   "--stream-lavf-o-clr",
   "--demuxer-lavf-propagate-opts=yes",
+  "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
   "--demuxer-lavf-o-append=tls_verify=1",
   "--tls-verify=yes"
  ],
@@ -57,14 +61,17 @@
    "them on every segment open. `pinned`: must read \"1\" when present (DEMUXER_TLS_ON in the",
    "helper; the pin block appends tls_verify=1). `forbidden`: must be absent (DEMUXER_TLS_FORBIDDEN).",
    "`allowed`: neither weakens the peer check. Every pinned or forbidden key must contain one of",
-   "`words`, the substrings the token filter refuses (MPV_DEMUXER_TLS_WORDS in both mirrors)."
+   "`words`, the substrings the token filter refuses (MPV_DEMUXER_TLS_WORDS in both mirrors).",
+   "2026-10-29 (lane-p1b, D-SINK-55): the words also hold the two format-context keys in `ffmpegFormat`."
   ],
   "words": [
    "verify",
    "ca_file",
    "cafile",
    "listen",
-   "external_sock"
+   "external_sock",
+   "protocol_whitelist",
+   "protocol_blacklist"
   ],
   "options": {
    "listen": "forbidden",
@@ -807,8 +814,9 @@
    "type": "Key/value list",
    "class": "pinned",
    "pin": "--demuxer-lavf-o-append=tls_verify=1",
-   "why": "for HLS and DASH the demuxer's options configure the PROTOCOL of the reopen and every nested open (D-SINK-43)",
-   "pinKey": "tls_verify=1"
+   "why": "for HLS and DASH the demuxer's options configure the PROTOCOL of the reopen and every nested open (D-SINK-43); the pin block also gives it the protocol whitelist that keeps a sniffed SDP from making the player listen (D-SINK-55)",
+   "pinKey": "tls_verify=1",
+   "warn": "D-SINK-59 (lead, 2026-10-29): a token carrying http_proxy hands a plain-http HLS stream to the proxy, like --http-proxy"
   },
   "--demuxer-lavf-probe-info": {
    "type": "Choices",
@@ -949,7 +957,9 @@
   },
   "--drag-and-drop": {
    "type": "Choices",
-   "class": "allowed"
+   "class": "pinned",
+   "pin": "--drag-and-drop=no",
+   "why": "D-PLY-46 (lead, 2026-10-29): a URL dropped on the player window became a new entry no gate saw; pinned off, at start and on adoption"
   },
   "--drm-connector": {
    "type": "String",
@@ -2338,7 +2348,8 @@
   },
   "--rtsp-transport": {
    "type": "Choices",
-   "class": "allowed"
+   "class": "warned",
+   "why": "D-SINK-53 (lead, 2026-10-29): udp, udp_multicast and lavf make every rtsp channel bind RTP and RTCP ports for anyone to send to (measured); the user's choice, said out loud"
   },
   "--saturation": {
    "type": "Float",
@@ -2505,13 +2516,18 @@
   "--script-opt": {
    "type": "alias",
    "alias": "--script-opts-append",
-   "class": "warned",
-   "why": "alias for --script-opts-append: classified as its target"
+   "class": "pinned",
+   "why": "alias for --script-opts-append: classified as its target",
+   "pinKey": "osc-title_mbtn_mid_command=ignore",
+   "warn": "PO-10 / D-PLY-5: still warned when it names ytdl"
   },
   "--script-opts": {
    "type": "Key/value list",
-   "class": "warned",
-   "why": "PO-10 / D-PLY-5: warned when it names ytdl; reaches the builtin scripts' options"
+   "class": "pinned",
+   "pin": "--script-opts-append=osc-title_mbtn_mid_command=ignore",
+   "pinKey": "osc-title_mbtn_mid_command=ignore",
+   "warn": "PO-10 / D-PLY-5: still warned when it names ytdl",
+   "why": "D-SINK-52 (owner, 2026-10-29: pin and refuse): the OSC's title middle-click ran show-text ${path}; that key is pinned, and a token setting any OSC *_command, *_mbtn_* or *_wheel_* key or carrying ${ is refused; every other key stays the user's"
   },
   "--scripts": {
    "type": "String list",
@@ -4039,6 +4055,23 @@
    "cliOnly": true,
    "class": "reserved",
    "why": "per-file option group; MPV_ARG_RE cannot pass the shape"
+  }
+ },
+ "ffmpegFormat": {
+  "_comment": [
+   "D-SINK-55 (2026-10-29): the AVFormatContext keys of a --demuxer-lavf-o map that decide which protocols",
+   "libavformat may open below the demuxer -- an HLS segment, a sniffed SDP's rtp. `pinned`: the pin block",
+   "appends protocol_whitelist and the helper's read-back requires exactly MPV_PROTOCOL_WHITELIST;",
+   "`forbidden`: refused in a token by the same words. Not FFmpeg TLS options, so the mpv option guard does",
+   "not list them; tests/test_mpv_options.py holds them to the helper."
+  ],
+  "options": {
+   "protocol_whitelist": "pinned",
+   "protocol_blacklist": "forbidden"
+  },
+  "why": {
+   "protocol_whitelist": "measured: an http(s) stream server answering with an SDP body made the player bind 0.0.0.0:P and P+1; with the pinned list it bound nothing and every admitted scheme played or reached its server",
+   "protocol_blacklist": "a user list of its own would sit beside the pinned whitelist; refused by the same words rather than reasoned about"
   }
  }
 }
