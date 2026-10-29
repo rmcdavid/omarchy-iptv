@@ -948,7 +948,11 @@ class PinnedTlsTest(MpvTestCase):
                 self.server = None
 
     def test_an_unreadable_profile_list_or_flag_refuses_the_load(self):
-        for missing in ({"profile-list"},):
+        # The flag case was named here and not run (recheck, 2026-10-29):
+        # read_profile_threats treating an unreadable flag as "set from the
+        # command line" turned nothing red, and that reading skips the profile
+        # list for the option -- a pre-pin player read as safe.
+        for missing in ({"profile-list"}, {"option-info/stream-lavf-o/set-from-commandline"}):
             with self.subTest(missing=sorted(missing)):
                 server = self.start(missing=missing)
                 code, payload, _, _ = self.play("--id", "t:espn.us")
