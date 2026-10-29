@@ -400,8 +400,14 @@ def is_stream_url(url: str) -> bool:
 def stream_form_ok(url: str) -> bool:
     """The allow-listed scheme with a non-empty host, never option-looking:
     is_stream_url before D-SINK-42, kept apart so parse_m3u can count a
-    listening form as itself rather than as an unsupported scheme."""
-    if url.startswith("-"):
+    listening form as itself rather than as an unsupported scheme.
+
+    No control character (C0, DEL, C1) anywhere, either: urlsplit reads the
+    host past a NUL and mpv's JSON IPC ends the string at it, so
+    `http://127.0.0.1:631<NUL>@p.example/x` was the playlist's own host to
+    every rule here and 127.0.0.1:631 to the player (measured through the
+    shipping playlist verb and apply_channel, the recheck of D-SINK-41/42)."""
+    if url.startswith("-") or _CONTROL_CHARS.search(url):
         return False
     try:
         parts = urllib.parse.urlsplit(url)
@@ -473,9 +479,10 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
     """parse_m3u's one read of a location line, with ONE urlsplit (the
     10,000-channel budget): -> (why it is not a channel, its host), the
     reason "" for a channel, `scheme` (not a stream URL: is_stream_url's
-    first half), `listener` (stream_listen_refusal, D-SINK-42) or `local`
-    (stream_host_refused, D-SINK-41)."""
-    if url.startswith("-"):
+    first half, a control character included: stream_form_ok), `listener`
+    (stream_listen_refusal, D-SINK-42) or `local` (stream_host_refused,
+    D-SINK-41)."""
+    if url.startswith("-") or _CONTROL_CHARS.search(url):
         return "scheme", ""
     try:
         parts = urllib.parse.urlsplit(url)

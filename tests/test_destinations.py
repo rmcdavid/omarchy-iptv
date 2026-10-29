@@ -558,6 +558,62 @@ class StreamGateTest(unittest.TestCase):
             self.assertEqual(refused, ["unsupported_scheme", "unsupported_scheme"])
             self.assertEqual(helper.player_target("m", "", cache)["url"], "udp://@239.1.1.1:1234")
 
+    # The recheck of lane-dest (2026-10-29). The helper reads a channel URL's
+    # host with urlsplit; the player reads it after the helper's own JSON IPC
+    # `loadfile`, and mpv decodes a `\u0000` there and ends the string at it.
+    # So `http://127.0.0.1:631<NUL>@p.example.test/x` was the playlist's own
+    # host to every rule above and 127.0.0.1:631 to the player -- measured in
+    # an unprivileged network namespace through the shipping `playlist` verb
+    # and apply_channel: the loopback server got `GET /` carrying the list's
+    # Authorization and Cookie, and `udp://0.0.0.0:P<NUL>@239.1.1.1:1` bound
+    # 0.0.0.0:P. A control byte has no place in a stream URL, so any C0, DEL
+    # or C1 character makes the line no stream URL at all, at parse time and
+    # at play time; the NUL is the measured split, the rest are refused so no
+    # other parser difference over control bytes has to be found first.
+    CONTROL_SPLITS = (
+        "http://127.0.0.1:631\x00@p.example.test/x",
+        "udp://0.0.0.0:53317\x00@239.1.1.1:1",
+        "rtp://0.0.0.0:5004\x00@239.1.1.1:1",
+        "http://p.example.test/x\x00y",
+        "udp://0.0.0.0:53318\t@239.1.1.1:1",
+        "http://p.example.test/a\x7fb",
+        "http://p.example.test/a\x85b",
+    )
+
+    def test_a_control_byte_in_a_channel_url_makes_it_no_channel_whatever_the_source(self):
+        for source in ({"host": "p.example.test", "local": False}, {"host": "", "local": True}):
+            lines = ["#EXTM3U"]
+            for index, url in enumerate(self.CONTROL_SPLITS):
+                lines += ["#EXTINF:-1,C%d" % index,
+                          "#KODIPROP:inputstream.adaptive.stream_headers=Authorization=a&Cookie=b", url]
+            lines += ["#EXTINF:-1,Ok", "http://p.example.test/ok"]
+            # As lines, the way the playlist verb hands them over
+            # (playlist_lines splits at LF only): a str would be cut at
+            # U+0085 by splitlines before the gate ever saw it.
+            result = helper.parse_m3u(lines, source)
+            self.assertEqual([c["name"] for c in result["channels"]], ["Ok"], source)
+            self.assertIn("%d entries skipped: unsupported URL scheme" % len(self.CONTROL_SPLITS), result["warnings"])
+        for url in self.CONTROL_SPLITS:
+            self.assertFalse(helper.is_stream_url(url), repr(url))
+
+    def test_a_cached_or_typed_url_with_a_control_byte_is_refused_at_play_time(self):
+        """A cache written before the rule, and `play --url`: player_target."""
+        with tempfile.TemporaryDirectory() as cache:
+            rows = [{"id": "c%d" % i, "name": "C", "group": "G", "url": url,
+                     "headers": {"Authorization": "a"}} for i, url in enumerate(self.CONTROL_SPLITS)]
+            (pathlib.Path(cache) / "channels.json").write_text(json.dumps({"version": 1, "channels": rows}),
+                                                                encoding="utf-8")
+            codes = []
+            for row in rows:
+                with self.assertRaises(helper.HelperError) as caught:
+                    helper.player_target(row["id"], "", cache)
+                codes.append(caught.exception.code)
+            for url in self.CONTROL_SPLITS:
+                with self.assertRaises(helper.HelperError) as caught:
+                    helper.player_target("", url, cache)
+                codes.append(caught.exception.code)
+            self.assertEqual(codes, ["unsupported_scheme"] * (2 * len(self.CONTROL_SPLITS)))
+
 
 if __name__ == "__main__":
     unittest.main()
