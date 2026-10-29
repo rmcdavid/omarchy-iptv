@@ -4737,11 +4737,11 @@ check("buildMpvArgv user args can re-enable ytdl (last wins)", (() => { const a 
 // until D-SINK-43..46 widened it, 2026-10-29). Asserted as the relationship
 // rather than as a position, so it keeps meaning what it meant - and the
 // block gets its own assertions below.
-check("buildMpvArgv user args come after every fixed option, and exactly the pin block follows them", (() => {
+checkCall("buildMpvArgv user args come after every fixed option, and exactly the pin block follows them", () => {
   const user = argv.indexOf("--profile=low-latency")
   const lastFixed = argv.findIndex(t => t.indexOf("--icc-cache-dir=") === 0)
   return { found: user > 0, afterTheFixedOptions: user > lastFixed, tailIsThePins: JSON.stringify(argv.slice(user + 1)) === JSON.stringify(Model.mpvPinBlock(Model.playerDirs("/run/user/1000/omarchy-iptv/mpv.sock", STATE_DIR))) }
-})(), { found: true, afterTheFixedOptions: true, tailIsThePins: true })
+}, { found: true, afterTheFixedOptions: true, tailIsThePins: true })
 check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--gpu-sw=yes", "--tls-verify=yes", "--watch-later-dir=/watch-later", "--load-scripts=no", "--scripts-clr", "--input-commands-clr", "--load-auto-profiles=no", "--load-select=no", "--load-unsafe-playlists=no", "--save-watch-history=no", "--log-file=", "--reset-on-next-file-clr", "--osd-playlist-entry=title", "--stream-lavf-o-clr", "--demuxer-lavf-propagate-opts=yes", "--demuxer-lavf-o-append=tls_verify=1", "--tls-verify=yes"])
 // D-PLY-27 (the owner's decision, 2026-10-26): the launch argv accepts a
 // software renderer, because mpv 0.41.0's VO probe aborts on any compositor
@@ -5468,12 +5468,12 @@ checkCall("mpv options: a warned option is kept and told", () =>
     const r = Model.splitMpvArgs(token)
     return r.args.length !== 1 || r.warnings.length !== 1
   }), [])
-check("mpv options: the token filter's words are the fixture's, and they catch every key FFmpeg's TLS forbids or pins",
-  { words: Model.MPV_DEMUXER_TLS_WORDS.slice().sort(),
-    uncaught: Object.keys(mpvOptions.ffmpegTls.options).filter(k => mpvOptions.ffmpegTls.options[k] !== "allowed" && !Model.demuxerNamesTls("--demuxer-lavf-o", "--demuxer-lavf-o=" + k + "=1")) },
+checkCall("mpv options: the token filter's words are the fixture's, and they catch every key FFmpeg's TLS forbids or pins",
+  () => ({ words: Model.MPV_DEMUXER_TLS_WORDS.slice().sort(),
+    uncaught: Object.keys(mpvOptions.ffmpegTls.options).filter(k => mpvOptions.ffmpegTls.options[k] !== "allowed" && !Model.demuxerNamesTls("--demuxer-lavf-o", "--demuxer-lavf-o=" + k + "=1")) }),
   { words: mpvOptions.ffmpegTls.words.slice().sort(), uncaught: [] })
-check("D-SINK-43: demuxerNamesTls reads the raw token, every spelling, and only for --demuxer-lavf-o",
-  ["--demuxer-lavf-o=tls_verify=0", "--demuxer-lavf-o=\"verify\"=0", "--demuxer-lavf-o-add=%10%verifyhost=x",
+checkCall("D-SINK-43: demuxerNamesTls reads the raw token, every spelling, and only for --demuxer-lavf-o",
+  () => ["--demuxer-lavf-o=tls_verify=0", "--demuxer-lavf-o=\"verify\"=0", "--demuxer-lavf-o-add=%10%verifyhost=x",
    "--demuxer-lavf-o=ca_file=/c", "--demuxer-lavf-o=live_start_index=-1", "--stream-lavf-o=verify=0", "--hwdec=verify"]
     .map(t => Model.demuxerNamesTls(Model.mpvOptionBase(t.split("=")[0]), t)),
   [true, true, true, true, false, false, false])
