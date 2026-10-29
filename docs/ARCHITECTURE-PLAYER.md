@@ -1658,20 +1658,20 @@ reads, found by searching the n9.0.1 source for `io_open`,
 | concat | every file its ffconcat list names: relative names on its own host under `safe=1`, any URL under `safe=0` | excluded (W20, W25) |
 | sdp | rtp/udp at the addresses and ports the SDP names | excluded, and the protocol list has no rtp (W12) |
 | rtp | its own URL (probed by the name `rtp:` only), then rtp built from the packets | excluded; an `rtp://` channel is played by mpv's stream layer as `mpegts` (measured) |
-| sap | the SAP multicast address, then an sdp child (probed by the name `sap:` only) | excluded |
-| vobsub | its own URL with `.sub` for its extension, same host | excluded |
-| mlv | up to 100 siblings of its own URL, same host | excluded |
+| sap | the SAP multicast address, then an sdp child (probed by the name `sap:` only; read in the source) | excluded |
+| vobsub | its own URL with `.sub` for its extension, same host | excluded (sec-int fetched the `.sub` of an index a server answered with; the tree fetches nothing past the index) |
+| mlv | up to 100 siblings of its own URL, same host (read) | excluded |
 | image2 | numbered siblings of its own URL (probed by a `%d` in the name) | excluded; not reached through mpv's probe on sec-int either (measured) |
-| dvdvideo | a DVD structure at its own path; forced only | excluded |
+| dvdvideo | a DVD structure at its own path; forced only (read) | excluded |
 | avisynth | imports its own path as an AviSynth script (extension `avs`); the library is not installed here | excluded |
-| vapoursynth | evaluates the stream as a VapourSynth Python script; forced only (its probe answers 0); the library IS installed here | excluded |
-| lavfi (a device) | a filter graph whose movie sources open any URL; forced only | excluded |
+| vapoursynth | evaluates the stream as a VapourSynth Python script; forced only (its probe answers 0; read); the library IS installed here | excluded, which also refuses a user's `--demuxer-lavf-format=vapoursynth` |
+| lavfi (a device) | a filter graph whose movie sources open any URL; forced only (read) | excluded |
 | the other devices | local capture; forced only | excluded |
 | hls | playlists, variants, keys, init sections and segments, over http(s), data and crypto only (its own scheme check; `file` is not on the protocol list); each segment through a child with the lists copied and an opener that refuses every further open, and an extension check (`extension_picky`) | admitted, bounded so; the LAN reach of a segment is 19.2's residual |
 | dash | the manifest's segments over http(s) only (its own scheme check); each representation through a child with the lists copied and an opener that refuses every further open | admitted, bounded so (W21: a tcp BaseURL bound nothing, on sec-int too) |
-| rtsp | its own server's control connection and redirects (rtsp only), RTP over udp only when the user chose that transport (D-SINK-53's per-file widening); asf (WMS) and RealMedia payloads through children read from memory | admitted; RealMedia over rtsp fails (`rdt` is off the list) |
+| rtsp | its own server's control connection and redirects (rtsp only), RTP over udp only when the user chose that transport (D-SINK-53's per-file widening); asf (WMS) and RealMedia payloads through children read from memory (read) | admitted (measured: over TCP and with the user's udp); RealMedia over rtsp would fail, `rdt` being off the list (read, not measured) |
 | mov | external data references: off by default (`enable_drefs`), an absolute one only with `use_absolute_path` too, and a dref path has every `:` turned into `/` as it is read, so it is a local path | admitted; with both user keys past the filter the absolute reference was opened as `file`, which the protocol list refuses (measured) |
-| avi | GAB2 subtitles through an srt or ass child read from memory | excluded (not IPTV; opens nothing) |
+| avi | GAB2 subtitles through an srt or ass child read from memory (read) | excluded (not IPTV; opens nothing) |
 | every other demuxer | nothing beyond its own stream, by the search | excluded unless listed; the listed ones open nothing |
 
 **Every admitted channel kind, played through the tree's own
