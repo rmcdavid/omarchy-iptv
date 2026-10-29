@@ -1616,7 +1616,13 @@ edit the control's copy and the next bound write would overwrite it.
    accept, `[::1]`, IPv4-mapped forms, `localhost.` and `*.localhost`;
    `Model.hostClass`, the helper's `host_class` mirror over the shared
    destinations fixture) unless it is the playlist's own host
-   (`Model.hostKey`, so `127.1` and `127.0.0.1` are one). A refused hint is
+   (`Model.hostKey`, so `127.1` and `127.0.0.1` are one; **[2026-10-29,
+   D-SINK-57, the owner: on LOOPBACK the own host is host AND port --
+   `Model.ownHostMatch`, the scheme's default standing for a port the URL
+   does not name -- so a hint to `http://127.0.0.1:631/` under a relay
+   playlist on `127.0.0.1:34400` is refused, and one on `:34400` adopted; a
+   LAN or public host keeps any port. ARCHITECTURE.md section 6 has the
+   rule and its measurements]**). A refused hint is
    never fetched, and the active row says so naming the hint's HOST only
    (`Model.epgHintRowState`, UX-SOURCES 5.2): provider text on the row, so
    it is PlainText like every row and cut at 253 characters, a DNS name's

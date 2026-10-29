@@ -375,7 +375,7 @@ One place they can escape that, worth knowing, and one that used to:
 | `epgUrl` | string | `""` | **Not a setting any more**, on the same terms as `playlistUrl`: read once, at the first start on this version, and attached to the source that becomes active then (removed, with a `Bar setting removed` notification, when there is none); ignored and removed after that. A source's guide-data URL is set in the add or edit form on the Sources screen (`a`, `e`), and cleared there |
 | `sourceKey` | string | `""` | written by the plugin, not by you: the short code naming the active source, the one that names its cache directory under `~/.cache/omarchy-iptv/sources/`. The plugin's own `state.json` is the authority; this is a mirror it falls back to only when that file names no source, and a code that names none of your sources is ignored. It is not among the plugin's declared settings, so `omarchy bar set` shows no help for it, though it writes it like any other key |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
-| `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Every option the installed mpv offers has been classified, and the ones that would write your stream address or the stream somewhere durable, draw the address on screen, run commands or load a script, load a playlist of their own, or send your provider's headers to a second address are refused. `--script-opts` is the exception, kept for the built-in scripts' settings: it is warned about when it names yt-dlp, and a setting that changes the on-screen controller's title text can still put your stream address on screen. So is `--load-scripts`: the player loads none of your mpv scripts, because one of them publishes your playlist URL on the desktop message bus; mpv's own built-in on-screen controller, console and statistics stay, and its select menu is turned off, because one of its keys hands your stream address to a second program on a command line other accounts can read. The plugin also sets a few options itself AFTER yours, so neither a token nor your own mpv config can switch them back: the script list, startup commands, mpv's conditional auto-profiles, the select menu, watch history, the log file, the resume folder, unsafe nested playlist entries and the certificate checks below. Your mpv config is still read for everything else. `--demuxer-cache-unlink-files` is refused too, because with it turned off a copy of the stream can outlive the player at a path nobody listed, and `--cache-on-disk` is accepted with a warning in the guide's footer, because it writes the stream to your disk for as long as a channel plays; so is `--http-proxy`, because a proxy receives the whole address of a plain-`http` stream and its headers. The one lever on how far back you can rewind is `--demuxer-max-back-bytes`, which is deliberately not refused: it costs RAM, about 35 to 80 MiB per minute of history at the bitrates this was measured on (4.7 to 10 Mbps), so thirty minutes is 1 to 2.4 GiB per player, and the plugin does not set it for you. `--tls-verify` is refused as well, because the player must check your provider's certificate, and so is a `--demuxer-lavf-o` token that names a TLS setting (one without, such as `live_start_index=-1`, is kept); a provider whose certificate is self-signed or signed by a private CA is served by `--tls-ca-file=/path/to/ca.pem`, which is accepted -- see below. The player accepts a software renderer by default (`--gpu-sw=yes` is among its own options, so it comes up on a virtual machine or any other compositor with no hardware GL or Vulkan to give it, where mpv 0.41.0 otherwise aborts); `--gpu-sw=no` turns that off, since your tokens come after the plugin's |
+| `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Every option the installed mpv offers has been classified, and the ones that would write your stream address or the stream somewhere durable, draw the address on screen, run commands or load a script, load a playlist of their own, or send your provider's headers to a second address are refused. `--script-opts` is the exception, kept for the built-in scripts' settings: it is warned about when it names yt-dlp, and a token that sets one of the on-screen controller's click or wheel commands (a `*_command`, `*_mbtn_*` or `*_wheel_*` key) or contains `${` is refused, because a command can draw your stream address or start a program and `${...}` puts a value such as the address into text on screen; every other key is kept. So is `--load-scripts`: the player loads none of your mpv scripts, because one of them publishes your playlist URL on the desktop message bus; mpv's own built-in on-screen controller, console and statistics stay, and its select menu is turned off, because one of its keys hands your stream address to a second program on a command line other accounts can read. The plugin also sets a few options itself AFTER yours, so neither a token nor your own mpv config can switch them back: the script list, startup commands, mpv's conditional auto-profiles, the select menu, watch history, the log file, the resume folder, unsafe nested playlist entries, the `Ctrl+V` key and drag-and-drop (neither adds an address to the player any more), the on-screen controller's title middle-click (it showed your whole stream address), the list of network protocols the media library may open beneath a stream, and the certificate checks below; `--drag-and-drop` and a `--demuxer-lavf-o` protocol list are refused for that reason. Your mpv config is still read for everything else. `--demuxer-cache-unlink-files` is refused too, because with it turned off a copy of the stream can outlive the player at a path nobody listed, and `--cache-on-disk` is accepted with a warning in the guide's footer, because it writes the stream to your disk for as long as a channel plays; so is `--http-proxy`, because a proxy receives the whole address of a plain-`http` stream and its headers, and so is a `--demuxer-lavf-o` token that names `http_proxy`, for the same reason; `--rtsp-transport=udp` (or `udp_multicast` or `lavf`) is accepted with a warning that it opens ports on this computer that anyone can send to, because an `rtsp` channel then receives its stream on ports the player opens. The one lever on how far back you can rewind is `--demuxer-max-back-bytes`, which is deliberately not refused: it costs RAM, about 35 to 80 MiB per minute of history at the bitrates this was measured on (4.7 to 10 Mbps), so thirty minutes is 1 to 2.4 GiB per player, and the plugin does not set it for you. `--tls-verify` is refused as well, because the player must check your provider's certificate, and so is a `--demuxer-lavf-o` token that names a TLS setting (one without, such as `live_start_index=-1`, is kept); a provider whose certificate is self-signed or signed by a private CA is served by `--tls-ca-file=/path/to/ca.pem`, which is accepted -- see below. The player accepts a software renderer by default (`--gpu-sw=yes` is among its own options, so it comes up on a virtual machine or any other compositor with no hardware GL or Vulkan to give it, where mpv 0.41.0 otherwise aborts); `--gpu-sw=no` turns that off, since your tokens come after the plugin's |
 | `showChannelName` | boolean | `true` | show the channel name next to the TV glyph on horizontal bars |
 | `barLabelMaxWidth` | integer 60-600 | `180` | width (px) at which the bar label is cut with an ellipsis |
 | `maxRecents` | integer 1-50 | `10` | size of the Recent list |
@@ -396,10 +396,17 @@ links that are not direct streams, hands the full address to a separate
 program, and that program puts it on its own command line where other local
 accounts can read it for as long as it runs. The plugin keeps the option
 available because it is the only way some sources work. Use it knowing the
-cost, and prefer a direct stream address when you have one. `--http-proxy`
+cost, and prefer a direct stream address when you have one. Since the player
+stopped opening a playlist that a server answers with (below), a link that
+yt-dlp resolves into SEPARATE video and audio streams does not play with it
+either, because mpv joins those two into a small playlist of its own; a link
+it resolves into one stream still plays. `--http-proxy`
 is the other one the footer warns about: a proxy you name receives the whole
 address of a plain-`http` stream, credentials included, and your provider's
-headers. And the classification covers what you type here, not everything
+headers (a `--demuxer-lavf-o` token naming `http_proxy` does the same for an
+HLS stream and is warned the same way). `--rtsp-transport=udp` is warned too:
+it makes the player open ports on this computer for every `rtsp` channel,
+and anyone on your network can send to them. And the classification covers what you type here, not everything
 your own mpv config may say: an option the plugin does not set itself, such
 as a recording or an on-screen message you configured there, still applies
 in this player, because it is your configuration.
@@ -771,7 +778,11 @@ carry channel ids — most do — are not affected at all.
   them somewhere else, add `--screenshot-dir=/path` to `mpvArgs`. mpv's own
   arrow keys seek inside the same buffer the guide's `b` and `w` use; the
   bar's behind-live number catches up with them on its next ten-second
-  status read rather than at once.
+  status read rather than at once. Three of mpv's own do nothing in this
+  player: `Ctrl+V` (it added the clipboard's address to the playlist, where
+  it was sent your provider's headers), dropping a link on the window (the
+  same), and a middle click on the on-screen controller's title (it showed
+  your whole stream address).
 
 ## Limits
 
@@ -824,7 +835,10 @@ carry channel ids — most do — are not affected at all.
   type may be on this computer or your local network (a TVHeadend, a NAS);
   what the provider chooses -- a redirect to another host, the playlist's
   guide address, a logo -- may not, and shows `Refused a local address`
-  (a redirect that stays on the host you typed is fine). When the server's
+  (a redirect that stays on the host you typed is fine; on this computer
+  -- `127.0.0.1`, `localhost` -- the host is the address AND the port, so a
+  local relay such as Threadfin may redirect within its own port but not
+  to another program's). When the server's
   answer is not HTTP at all, the error shows at most 200 characters of it.
 - A file the plugin was writing when it was stopped (a timeout, a source
   switch) can leave a `.tmp-` file beside it in the cache; one more than a
@@ -845,10 +859,22 @@ carry channel ids — most do — are not affected at all.
   point channels at addresses on this computer or your local network (a
   playlist from your own network or a file may), and a sign-in header it
   sets (`Authorization`, `Cookie`, `Proxy-Authorization`, `Host`) is kept
-  only for channels on the playlist's own server. Each is counted in the
-  guide footer's `Playlist warning: ...`. A channel the player loads that is itself a playlist
-  is not checked this way; nor is a server that redirects a channel
-  elsewhere.
+  only for channels on the playlist's own server -- on this computer, its
+  own port. Each is counted in the guide footer's `Playlist warning: ...`.
+  A channel list saved by an earlier version is checked the same way when
+  you play a channel from it, so a list whose first refresh after the
+  update failed cannot reach these addresses either; such a channel says
+  `Refused a local address`.
+- A channel whose server answers with a playlist instead of a stream -- a
+  plain `.m3u` or `.pls` "redirector" -- is not played: its entries were
+  never checked by any of the above, and could make the player listen on
+  this computer. The channel fails with `The address sent a playlist file
+  or a web page, which the player does not open`; use the stream address
+  inside it instead. HLS (`.m3u8`) streams are not affected. Your provider's
+  headers go only to the channel the plugin loads, never to an address you
+  add yourself, and a stream server that answers with a session description
+  (SDP) cannot make the player listen either. A server that redirects a
+  channel elsewhere is still not checked.
 
 ## Picture in picture settings
 

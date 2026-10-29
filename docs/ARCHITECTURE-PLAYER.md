@@ -684,6 +684,35 @@ such player, not only by a pre-0.13.0 one. The probe and the adoption branch
 of `player start` also carry the pins that are not about the TLS peer, best
 effort (`pin_adopted_player`, 4.12.1). Section 4.12.1 has the measurements.
 
+**[2026-10-29, lane-p1b: two more readings make an adopted player unsafe, and
+the adoption carries four more pins.]** (1) The per-file profiles the third
+reading counts are now those that touch ANY option the pin block holds, not
+only the TLS ones (the lead's decision on rc-mpvpin's recheck, which measured
+a `[protocol.http]` profile with `save-watch-history`, `load-unsafe-playlists`
+or `load-select` undoing `pin_adopted_player`'s runtime writes at every load):
+such a pre-pin player is STOPPED rather than migrated (`tls-scenario.sh
+--windowless` W18: refused, and no file outside the runtime folder holds the
+credential; on sec-int 6c79a9a it was loaded and the watch history held the
+URL). (2) D-SINK-60: a player whose `reset-on-next-file` holds any entry is
+not safe, and nothing can make it so. mpv BACKS UP the options that list names
+when a file STARTS and restores them when that file ENDS -- inside the next
+`loadfile`, after every read-back -- so every migration made while the
+current file plays is undone at the next load, the list itself included.
+Measured on mpv 0.41.0, windowless: with `all` and no pin block, `tls-verify`
+set true during file A read true and the load of a self-signed B read false
+and fetched from it; and on a player started by v0.15.0's argv with a
+`--demuxer-lavf-o=tls_verify=0` and `reset-on-next-file=all` in its mpv.conf
+(W17), the first version of this fix removed the key AND emptied the list,
+read back safe, and the attacker still received the next HLS segment request.
+So the list is READ with the TLS pins (`read_tls_state`) and never written:
+a non-empty list counts one, and the player is stopped. (3) The adoption now
+also sets `drag-and-drop` off, binds `ctrl+v` to `ignore`, sets the OSC's
+title middle-click to `ignore` (one key of `script-opts`, the user's others
+kept) and puts the three GLOBAL header properties at values that belong to
+no provider, because the helper before this one set the channel's headers
+there (4.11). And `secure_player` appends the demuxer's protocol whitelist
+(D-SINK-55, 4.12.1) to a player that lacks it; the read-back requires it.
+
 **Where the flag and the field names are fixed.** The owner claim is the
 precedent for an opt-in write on a verb documented as a read
 (`Model.playerProbeArgv`'s own comment: "Omitted, the probe is read-only"),
@@ -1073,6 +1102,39 @@ from argv and is the one channel whose headers nothing ever clears.
 `Model.headerArgs` leaves `buildMpvArgv` but stays in `Model.js` with its two
 tests as the validator of record for `^[A-Za-z0-9-]+$` names and CR/LF rejection.
 
+**[2026-10-29, lane-p1b: the headers are PER FILE now, and the paragraph
+above describes a mechanism that is gone.]** `header_properties` set the
+channel's user agent, referrer and header list as GLOBAL properties before
+the `loadfile`, so every entry the player went on to play without the helper
+-- a nested playlist's entry (D-PLY-44), a pasted URL (the review's Ctrl+V
+finding), a dropped one (D-PLY-46), `playlist-next` -- went out with the
+provider's headers (measured: an appended entry's request carried the
+channel's header on sec-int 6c79a9a, `tls-scenario.sh --windowless` W14).
+Now `apply_channel` sets the three GLOBAL properties to values that belong to
+no provider (mpv's default user agent, no referrer, no fields:
+`neutral_header_properties`, still not best effort) and hands the channel's
+own to the `loadfile` as PER-FILE options (`channel_load_options`):
+`demuxer=lavf` (D-PLY-44), `user-agent`, `referrer`, `http-header-fields-clr`
+and one `http-header-fields-append` per header. mpv restores a per-file
+option when its file ends and applies none to an entry the helper did not
+load, so requirement 7 holds by construction rather than by a remembered
+reset. **The form, measured** (mpv 0.41.0 against a logging server inside
+`unshare -rn`): the options argument as a STRING is a comma-separated
+key=value list, and `http-header-fields=X-A: 1,2` arrived as `X-A: 1`; as a
+JSON OBJECT it is read key by key, but the plain list option still splits
+its value at commas (the same `X-A: 1`), and a backslash-escaped comma cannot
+carry a value that ends in a backslash (`X-A: a\,X-B: b` arrived as ONE
+header). `-append` takes its value verbatim, and an object that repeats the
+key arrived as that many headers, in order, with `,`, `=`, both quotes and a
+trailing backslash intact (W13 holds it). Python's json cannot repeat a key,
+so the helper writes that object itself (`IpcPairs` / `ipc_json`, 05).
+The positional form, `["loadfile", url, "replace", -1, {...}]`, and the
+named form (`{"name": "loadfile", ...}`) were measured equal; the positional
+one is used because every double of the player and the harness stub read
+the array, and mpv 0.41.0 takes `index` (-1, its default) before `options`
+-- the pin block already needs an mpv that new. CR and LF never reach a
+value: the parse turns them into spaces (`clean_header_value`).
+
 **TLS joins this sequence (D-SINK-16, 4.15 layer 6).** `apply_channel` already
 asserts `pause`, `aid`, `sid` and the three header properties before every
 load, each for the same class of reason: mpv keeps them across a `loadfile`,
@@ -1212,10 +1274,10 @@ alias.
 
 | Class | What the plugin does | Count (mpv 0.41.0) |
 |---|---|---|
-| `allowed` | a user token passes and lands after the base argv | 827 |
+| `allowed` | a user token passes and lands after the base argv | 827; 825 since 2026-10-29 |
 | `reserved` | a user token is REFUSED, by name, in both mirrors' `MPV_RESERVED` | 39 |
-| `pinned` | re-asserted by the trailing pin block, AFTER the user's tokens; refused as a token as well, except the key-pinned `--demuxer-lavf-o` | 18 (16 options and 2 aliases) |
-| `warned` | kept, with the PO-10 footer line | 7 |
+| `pinned` | re-asserted by the trailing pin block, AFTER the user's tokens; refused as a token as well, except the key-pinned `--demuxer-lavf-o` and (2026-10-29) `--script-opts` | 18 (16 options and 2 aliases); 21 since 2026-10-29 (+ `--drag-and-drop`, `--script-opts` and its alias) |
+| `warned` | kept, with the PO-10 footer line | 7; 6 since 2026-10-29 (`--script-opts` moved to key-pinned and still warns for ytdl; `--rtsp-transport` joined) |
 | `base` | set before the user's tokens; a user token may override it | 8 |
 
 An alias takes its target's class (`--watch-later-directory` is mpv's alias
@@ -1244,6 +1306,7 @@ deleted from the file, with FFmpeg's `verifyhost` deleted, and with the
 | `--load-scripts=no` | D-SINK-4; a named profile turned autoload back on (measured) |
 | `--scripts-clr` | a plain mpv.conf `script=` line loaded a script despite `--load-scripts=no`, and the script read the credentialed path (measured) |
 | `--input-commands-clr` | commands run at startup: `load-script`, `run`, `set` (D-SINK-45; a plain mpv.conf line ran them, measured) |
+| `--input-commands-append=keybind ctrl+v ignore` | **[2026-10-29, lane-p1b, D-PLY-46]** mpv's default `Ctrl+v` is `loadfile ${clipboard/text} append-play`: a pasted URL became an entry no gate saw. `ignore` replaces it and the user's own input.conf binding of the key (measured: the binding list shows `ignore` at a higher priority than both, and a keypress appended nothing, W15); the same `keybind` is sent on adoption |
 | `--load-auto-profiles=no` | auto_profiles.lua applies a profile-cond profile at every load, over the command line (D-SINK-44) |
 | `--player-operation-mode=cplayer` | `pseudo-gui` makes mpv apply the user's `[pseudo-gui]` profile AFTER the command line with nothing preserved, which undid every other pin; a plain mpv.conf line was enough (measured by the recheck, below; D-SINK-44) |
 | `--load-select=no` | select.lua: `g l` forks `ffmpeg -i <path>`, the credentialed URL on a 0444 `/proc` cmdline for the life of the stream (measured), `g p` draws it (D-SINK-46) |
@@ -1252,8 +1315,11 @@ deleted from the file, with FFmpeg's `verifyhost` deleted, and with the
 | `--log-file=` | a log naming every URL (a plain mpv.conf `log-file` wrote one; pinned empty, no file at all) |
 | `--reset-on-next-file-clr` | `all` restores the PREVIOUS channel's header options at the next load, so a zap sent the first provider's headers to the second provider's host (measured, D-SINK-51) |
 | `--osd-playlist-entry=title` | `filename` makes `${playlist}` (F8, the OSC's playlist buttons) draw the whole loadfile URL (measured) |
+| `--drag-and-drop=no` | **[2026-10-29, D-PLY-46]** mpv's default `auto` loads a URL dropped on the window as a new entry no gate saw; read back as off (mpv answers `no` as the boolean False), and set on adoption. A drop itself was not performed: there is no window here |
+| `--script-opts-append=osc-title_mbtn_mid_command=ignore` | **[2026-10-29, D-SINK-52, the owner's "pin and refuse"]** the OSC binds the title's middle click to `show-text ${path}`, which draws the whole credentialed URL (read from the osc.lua in /usr/bin/mpv, not clicked). `-append` replaces that one key: a user token setting it lost to the pin and the user's other key stayed (measured). Of the OSC's other command defaults, the playlist buttons' middle click draws `${playlist}`, which reads the channel's title under the pinned osd-playlist-entry (measured with expand-text); the rest draw no path |
 | `--stream-lavf-o-clr` | command-line-set, so a `[protocol.https]` profile can no longer put FFmpeg's `tls_verify=0` back (D-SINK-44) |
-| `--demuxer-lavf-propagate-opts=yes` | the next pin reaches segment and key opens only by propagation; off, they fall back to FFmpeg's own default -- true in n9.0.1, and a default this layer does not choose |
+| `--demuxer-lavf-propagate-opts=yes` | the next pins reach segment and key opens only by propagation; off, they fall back to FFmpeg's own default -- true in n9.0.1, and a default this layer does not choose |
+| `--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy` | **[2026-10-29, D-SINK-55]** a stream server that answers an http(s) URL with an SDP body makes FFmpeg's sdp demuxer open `rtp` with the whitelist it inherited from http, and the player LISTENS (rc-dest measured `c=0.0.0.0` binding 0.0.0.0:P and P+1, under a .ts path too). With this list nothing bound, and every scheme the gate admits still played or reached its server (the table below). Read back exactly over IPC (`demuxer_tls_unsafe`), appended on adoption, refused in a token (`protocol_whitelist`, `protocol_blacklist` joined the filter's words). An rtsp channel's own loadfile adds `rtp,udp` for that file only, because its demuxer opens its RTP transport itself and a user's `--rtsp-transport=udp` (warned, D-SINK-53) needs them |
 | `--demuxer-lavf-o-append=tls_verify=1` | D-SINK-43: the last word on FFmpeg's `tls_verify` for every segment open; `-append` replaces that one key and keeps the user's others |
 | `--tls-verify=yes` | D-SINK-13 layer 2, still the last element |
 
@@ -1303,6 +1369,35 @@ needs `--o`, which is reserved and which mpv refuses in a config file
 (measured); no other post-command-line profile was found, by reading, not
 by a search of mpv's source.
 
+**[2026-10-29, lane-p1b: every scheme the gate admits, under the whole pin
+set.]** Measured windowless inside `unshare -rn` (loopback only; multicast
+routed onto it in the namespace), each channel loaded by the tree's own
+`apply_channel`, the player's listening sockets read with `ss`, crash
+journal 81 before and after every run (the lane's rig, the QA-RESULTS block):
+
+| Scheme | Result with the pins | On sec-int 6c79a9a |
+|---|---|---|
+| http TS, https TS (CA via `--tls-ca-file`) | play | play |
+| HLS master over http, variant and segments over https | play, segments fetched | play |
+| rtmp (an `ffmpeg -listen 1` server) | plays | plays |
+| rtmps | reaches its server (TLS handshake, RTMP C0) | the same |
+| rtsp, mpv's default TCP transport (a fake server streaming MP2T interleaved) | plays, binds nothing | plays |
+| rtsp with the user's `--rtsp-transport=udp` | reaches SETUP and binds its RTP/RTCP pair -- the user's warned choice (D-SINK-53); with the global list alone it stopped at DESCRIBE, which is why an rtsp channel's loadfile adds `rtp,udp` | binds |
+| rtsp whose server answers a TCP request with a UDP transport | binds nothing | -- |
+| udp and rtp multicast (`ffmpeg` senders on 239.x) | play, bind the group | the same |
+| srt as caller (an `ffmpeg` srt listener) | plays (its own ephemeral UDP socket, a caller's) | the same |
+| mms, mmsh | reach the server (mpv maps mms to mmsh, HTTP) | the same |
+| a server answering with an SDP body, `.sdp` and `.ts` | nothing binds (W12) | binds 0.0.0.0:P and P+1 |
+| a server answering with a plain M3U (http, srt listener, rtp entries) | `unrecognized file format`; nothing fetched, nothing binds (W11) | the http entry fetched, srt and rtp bound |
+| a `.pls` or plain `.m3u` redirector as the channel | `unrecognized file format`, told as a sentence (below) | played through the nested entry |
+| `--ytdl=yes` on a page yt-dlp resolves into separate video and audio formats (a stand-in yt-dlp on the rig's own server) | does NOT play: mpv joins the two as an `edl://` playlist of its own, and the per-file `demuxer=lavf` refuses it (nothing past the page fetched); a page resolved into ONE format plays | plays |
+
+That last row is a cost the owner's decision did not name: PO-5's documented
+escape hatch stops working for split-format sources. It is raised as a
+decision request rather than routed around -- skipping `demuxer=lavf` when
+`--ytdl` is on would reopen the nested route for exactly the users who
+already accepted a handoff -- and the README says it.
+
 **The token filter adds one rule.** A `--demuxer-lavf-o*` token whose text
 contains `verify`, `ca_file`, `cafile`, `listen` or `external_sock` is
 refused (`MPV_DEMUXER_TLS_WORDS`). A substring of the raw token rather than a
@@ -1348,12 +1443,26 @@ stop: ytdl_hook (inert under `--ytdl=no`), auto_profiles (off), select (off),
 osc, console, stats, commands, context menu, positioning. Of those that stay,
 read from the scripts embedded in `/usr/bin/mpv` and not clicked: the OSC's
 title middle-click runs `show-text ${path}` and draws the whole credentialed
-URL (D-SINK-52, the owner's call), the stats page the OSC title's left click
+URL (D-SINK-52; **[2026-10-29: pinned to `ignore`, the owner's "pin and
+refuse"]**), the stats page the OSC title's left click
 opens draws `${filename}`, which carries a query-string token (measured:
-`long.ts?token=...`) but not userinfo or path credentials, the context
+`long.ts?token=...`) but not userinfo or path credentials (**[2026-10-29:
+still so, reported, no change without the owner]**), the context
 menu's select entries are dead with select off, the console forks only
 `wl-paste` on a user's paste, and commands and positioning fork nothing that
-carries `path`.
+carries `path`. **[2026-10-29, lane-p1b: the console DRAWS a sink of its
+own, reported and not changed (the owner's call, proposed D-SINK-61).]**
+commands.lua enables `silent:terminal-default` at load, so mpv queues every
+log line at the terminal's level -- `--msg-level=all=error` here -- and draws
+them when the console opens. mpv logs a failed open at ERROR level with the
+WHOLE URL: measured over IPC at that level, `[stream] Failed to open
+http://u9:pass9@127.0.0.1:47800/live/tok9/missing.ts.` So a channel that
+fails to open puts its credentialed address on screen, and into any
+screenshot, the next time the user opens the console in that player. The
+shell's own copy of that line is redacted (`Model.pushPlayerLog`); the
+console's is mpv's. Levers, none taken: `--load-console=no` (the owner kept
+the console), `--msg-level=stream=fatal` (also silences the line the shell's
+failure tail uses), or living with it as a user action on the user's screen.
 
 **An adopted player.** A player launched by 0.15.0 or earlier holds none of
 the pin block. Over IPC the helper migrates what can be migrated and refuses
@@ -1377,7 +1486,10 @@ wrote the credentialed path to the watch history, one with
 file, and one with `load-select` let select's subtitle-line key fork `ffmpeg`
 with the URL. Only the TLS options are counted by the third reading, so such
 a player is migrated, not stopped, and those three stay open until it is
-replaced -- the owner's DR7 question. A player of THIS release reads every pin
+replaced -- the owner's DR7 question. **[2026-10-29, lane-p1b: closed by the
+lead's decision.]** The third reading counts a per-file profile that touches
+ANY pinned option, an alias of one included (`script`, `watch-later-directory`,
+`script-opt`), so that player is stopped (W18). A player of THIS release reads every pin
 set from the command line, so none of that applies to it.
 
 **What a user sees.** Their own profile-cond auto-profiles do not apply in the
@@ -1390,6 +1502,22 @@ A `--demuxer-lavf-o` workaround keeps working unless it names a TLS key.
 `--http-proxy` draws a footer warning. Every player running when the user
 upgrades rebuffers once when the new shell adopts it, and one whose mpv.conf
 carries a per-file profile that touches a TLS option is stopped instead.
+**[2026-10-29, lane-p1b.]** And: a channel whose address is itself a plain
+`.m3u` or `.pls` redirector no longer plays, told as "The address sent a
+playlist file or a web page, which the player does not open"
+(`Model.unopenedFormatSentence`, which outranks the log tail for mpv's
+`unrecognized file format` and for nothing else); `Ctrl+V` in the player no
+longer appends the clipboard, and a URL dropped on it is not loaded; the
+OSC's title middle-click does nothing; a `--script-opts` token that sets an
+OSC `*_command`, `*_mbtn_*` or `*_wheel_*` key or carries `${` is refused by
+the existing footer line (every other key passes); `--drag-and-drop` and a
+`--demuxer-lavf-o` protocol list are refused; `--rtsp-transport=udp`,
+`udp_multicast` or `lavf` draws "opens ports on this computer that anyone can
+send to", and a `--demuxer-lavf-o` carrying `http_proxy` draws the handoff
+warning (D-SINK-59); a player started by an earlier version whose
+`reset-on-next-file` is set, or whose mpv.conf has a per-file profile that
+touches any pinned option, is stopped on the first probe instead of migrated
+(press Enter for a fresh player).
 
 ### 4.13 Health check
 
@@ -1486,7 +1614,7 @@ and not the runs described in this paragraph.
 | # | Layer | Job | Measured basis |
 |---|---|---|---|
 | 8 | The trailing pin block (4.12.1): `--stream-lavf-o-clr`, `--demuxer-lavf-propagate-opts=yes`, `--demuxer-lavf-o-append=tls_verify=1`, `--load-auto-profiles=no` and (2026-10-29, the recheck) `--player-operation-mode=cplayer` among the pins, before the final `--tls-verify=yes` | Makes the libavformat lists COMMAND-LINE-SET, so no per-file profile replaces them, gives FFmpeg's own `tls_verify` the last word for every segment open, and keeps auto_profiles.lua from ever loading and the `[pseudo-gui]` profile from applying after the command line | Five ways per pin -- a contrary token, a plain mpv.conf line, a `[protocol.*]` profile, a profile-cond profile, a named profile: on dev 713afbf the attacker got the GET through `demuxer-lavf-o` all five ways, through `stream-lavf-o` by the two per-file profiles and through `tls-verify` by the profile-cond one; on the tree, 0 GETs in all fifteen |
-| 9 | The third reading over IPC, `unpinned`, before every load and on adoption: the TLS entries of `demuxer-lavf-o` (removed by key), `load-auto-profiles` (set off), and the per-file profiles that could set a loose TLS option after the read-back (not fixable: the load is refused) | `verifyhost=<the attacker's own name>` in `demuxer-lavf-o` is a key the trailing pin cannot outvote, and a player started without the pins has no command-line-set lists | `--demuxer-lavf-o=verifyhost=evil.test` past the filter, with the tls_verify pin in place: on dev the attacker's certificate for its own name was accepted and its segment played; on the tree the key is removed before the load and the reopen is refused |
+| 9 | The third reading over IPC, `unpinned`, before every load and on adoption: the TLS entries of `demuxer-lavf-o` (removed by key), `load-auto-profiles` (set off), and the per-file profiles that could set a loose TLS option after the read-back (not fixable: the load is refused). **[2026-10-29, lane-p1b: and the demuxer's protocol whitelist, which must read exactly the pinned list (appended when absent, D-SINK-55); `reset-on-next-file`, which must be empty and is never written (D-SINK-60: mpv restores what it backed up at the playing file's start inside the next load); and per-file profiles touching ANY pinned option]** | `verifyhost=<the attacker's own name>` in `demuxer-lavf-o` is a key the trailing pin cannot outvote, and a player started without the pins has no command-line-set lists | `--demuxer-lavf-o=verifyhost=evil.test` past the filter, with the tls_verify pin in place: on dev the attacker's certificate for its own name was accepted and its segment played; on the tree the key is removed before the load and the reopen is refused |
 
 Layers 1 to 5 are blind to a player this shell did not launch, every one of
 them, and that blindness is what D-SINK-16 is: the fix was complete for new
@@ -2474,6 +2602,23 @@ what it lets into channels.json and what it lets through `player_target`.
   final line break: `Cookie%0A` decoded to a `Cookie\n` the sign-in rule,
   which compares names exactly, did not see.
 
+**[2026-10-29, lane-p1b: the player now closes what the gate cannot reach
+of the nested route, the paste and the drop, and a server's own SDP answer.]**
+The owner's decision on D-PLY-44 is to REFUSE nested playlists: the
+helper's `loadfile` carries the per-file `demuxer=lavf`, so a plain M3U or
+PLS a stream server returns -- its http, srt and rtp entries alike -- is
+`unrecognized file format`, nothing fetched, nothing bound, while HLS master,
+HLS variant and MPEG-TS play (`tls-scenario.sh --windowless` W11; sec-int
+6c79a9a fetched the http entry and bound the srt and rtp listeners). The
+provider's headers are per-file options of that same `loadfile` (4.11), so
+an entry the helper did not load is sent none of them (W14). The paste key is
+bound to `ignore` and drag-and-drop is off, at start and on adoption (D-PLY-46,
+W15). And D-SINK-55, which rc-dest found the gate's form check could not see
+-- any http(s) URL whose server answers with an SDP body made FFmpeg open
+`rtp` with the whitelist inherited from http, binding 0.0.0.0:P and P+1 --
+is closed by the pin block's demuxer `protocol_whitelist` (4.12.1, W12).
+Below, 19.2 as written; the brackets in it say what moved.
+
 ### 19.2 What the gate cannot reach, stated exactly
 
 - **A NAME that resolves to a LAN address.** mpv resolves it, not the
@@ -2524,6 +2669,16 @@ what it lets into channels.json and what it lets through `player_target`.
   the concurrent lane-mpvpin, and the brief forbade shipping half a lever.
   Until they land, the nested route and Ctrl+V are open as described, with
   D-SINK-42's listening forms closed only for URLs the helper loads.
+  **[2026-10-29, lane-p1b: all three shipped, with drag-and-drop off and the
+  SDP answer closed -- the bracket above 19.2. The cost the owner accepted is
+  told: a channel whose URL is itself a plain playlist ends with mpv's
+  `unrecognized file format`, which the shell shows as "The address sent a
+  playlist file or a web page, which the player does not open"
+  (`Model.unopenedFormatSentence`), marked like any stream that failed to
+  load. What stays open of this item: nothing of the nested route. The
+  FFmpeg-redirect residual above is unchanged: a per-file option belongs to
+  the file, so FFmpeg's own 302 still carries the channel's headers to the
+  host it names.]**
 
 ### 19.3 The fixture
 
