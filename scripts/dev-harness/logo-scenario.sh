@@ -39,6 +39,20 @@
 #      no pid read from `$!`, nothing to kill by pattern (parallel rule 3).
 #      The corpus is built from spikes/logo-decode-bomb/make-corpus.py, which
 #      is stdlib only, so the gate depends on nothing installed.
+#      The provider is PUBLIC (2026-10-29). Since D-SINK-40 a logo never
+#      reaches an address on this machine or a local network, so the rig's
+#      first provider, on 127.0.0.1, was refused `local_address` before a
+#      byte moved and the preflight read 23 passed, 10 failed over a helper
+#      that was right. The rig and the helper now run inside `unshare -rn`, a
+#      private network namespace whose only interfaces are its own loopback
+#      and a dummy one carrying 11.0.0.1 -- an address the helper's REAL
+#      classifier calls global, which exists nowhere but there, so nothing
+#      the helper does can reach a real interface. No seam: the helper is the
+#      tree's, unpatched. A second server on 127.0.0.1 inside the namespace
+#      serves the good logo to one more channel, and the shipping policy must
+#      refuse it with no GET reaching it (R2), so a namespace or a helper that
+#      stopped enforcing the policy is red in the same run (rule 10). The
+#      QML probe below reads files from disk and runs outside it.
 #   2. The shell's Image, as the probe spikes/logo-decode-bomb/probe-tmpl.qml
 #      declares it (exactly Guide.qml's row slot), handed whatever the helper
 #      ANNOUNCED, under an ADDRESS-SPACE RLIMIT of 2.5 GB (util-linux
@@ -87,7 +101,11 @@
 #   F1  no bomb's name was announced                              <- the gate
 #   F2  the logo directory holds exactly the four legitimate names
 #   R1  reasons.logo_dimensions == 13   (10 bombs + 2 edges + the unreadable)
-#   R2  refusedOnPolicy == 13
+#   R2  the policy refusals, four numbers in one line: refusedOnPolicy == 14
+#       (the 13 above and the logo on 127.0.0.1), reasons.local_address == 1,
+#       no GET reached the 127.0.0.1 server, and its name is not announced --
+#       the destination policy observed live inside the namespace, folded
+#       into R2 so the floor (and check.sh's join to it) does not move
 #   R3  fetched == 3, cached == 1
 #   E1  side over, pixels under (5000x800): not announced
 #   E2  pixels over, both sides under (2048x2049): not announced
@@ -158,18 +176,30 @@
 # rc=0 peak_mb=839, which is the finding at the sink. G1 is red there for
 # the right reason: the planted bombs were served from the cache and never
 # fetched, so the GET count reads 0 of 10, not 10 of 10.
+# Re-measured on the namespace rig, 2026-10-29, check-tree: the tree 33
+# passed, 0 failed; `--baseline 159da94` the same 9 passed, 24 failed, its R2
+# reading "0 NULL 1 true" (the 127.0.0.1 logo fetched and announced);
+# `--baseline 713afbf`, the last dev before D-SINK-40, 30 passed, 3 failed --
+# F2, R2 and R3, the policy's three, and nothing else; and the tree with
+# `for_logos` made to permit every address (`--tree` over a sealed copy) the
+# same 30 and 3. The rig run outside a namespace refuses with exit 2 before
+# it serves anything.
 #
 # MODES. `check-tree` (what scripts/check.sh runs on every commit: no
-# transcript, no network beyond loopback, no display, no bomb decoded, under
-# 20 s) and `live` (the default: a transcript, the same checks, the W
-# segment under a nested cage, and the --baseline / --tree levers; `--tree
-# <dir>` takes a prepared plugin tree where --baseline takes a ref). Both
-# need python3, openssl, util-linux prlimit and /usr/lib/qt6/bin/qml; live
-# also needs node, cage, quickshell and qs. A machine without one exits 77
-# with the reason, never 0, and the tool checks run BEFORE anything else so
+# transcript, no network outside a private namespace of its own, no display,
+# no bomb decoded, under 20 s) and `live` (the default: a transcript, the
+# same checks, the W segment under a nested cage, and the --baseline / --tree
+# levers; `--tree <dir>` takes a prepared plugin tree where --baseline takes
+# a ref; both work in check-tree too). Both need python3, openssl, util-linux
+# prlimit and unshare, iproute2's ip, /usr/lib/qt6/bin/qml, and a kernel
+# that lets this user make a network namespace with a dummy interface in it;
+# live also needs node, cage, quickshell and qs. A machine without one exits
+# 77 with the reason, never 0 (and check.sh calls a 77 red unless
+# LOGO_PREFLIGHT_SKIP_OK=1), and the tool checks run BEFORE anything else so
 # the reason is the first line out even with an empty PATH. LOGO_QML_BIN
-# overrides the qml path and LOGO_CAGE_BIN the cage binary; they exist so
-# the 77 path can be driven on a machine that has both.
+# overrides the qml path, LOGO_CAGE_BIN the cage binary and LOGO_UNSHARE_BIN
+# the unshare binary; they exist so the 77 path can be driven on a machine
+# that has all three.
 #
 # Holds no display: check-tree starts no quickshell and no compositor; live
 # starts a nested headless cage of its own (cage's child records the display
@@ -190,6 +220,7 @@
 set -uo pipefail
 QML_BIN=${LOGO_QML_BIN:-/usr/lib/qt6/bin/qml}
 CAGE_BIN=${LOGO_CAGE_BIN:-cage}
+UNSHARE_BIN=${LOGO_UNSHARE_BIN:-unshare}
 # RLIMIT_AS, in bytes, on the qml process alone. Address space, not resident
 # set: Qt offscreen maps about 1 GB before it decodes anything, the 840 MB
 # bomb sits under this, and the 65500x65500 header asks for more than the
@@ -228,7 +259,7 @@ done
 # PATH with nothing on it reaches the SKIP line and nothing else. The first
 # version computed HERE with dirname above these, and an empty PATH printed
 # "dirname: command not found" and a sourcing error before its own reason.
-for tool in python3 openssl prlimit; do
+for tool in python3 openssl prlimit "$UNSHARE_BIN" ip; do
   command -v "$tool" >/dev/null 2>&1 || { echo "SKIP logo-scenario: $tool is not on PATH" >&2; exit $SKIP; }
 done
 [[ -x $QML_BIN ]] || { echo "SKIP logo-scenario: $QML_BIN is not here (qt6-declarative)" >&2; exit $SKIP; }
@@ -239,6 +270,14 @@ if [[ $MODE == live ]]; then
 fi
 prlimit --as=$CAP_AS -- true 2>/dev/null \
   || { echo "SKIP logo-scenario: prlimit cannot set an address-space limit of $CAP_AS here" >&2; exit $SKIP; }
+# Since D-SINK-40 the provider is a global address inside a private network
+# namespace, so a machine that cannot make one (unprivileged user namespaces
+# off, or no dummy driver) cannot run the scenario at all -- said here, as a
+# SKIP, rather than as ten refusals that read like a broken helper. The
+# probe makes the same interface the rig makes, in a namespace that is gone
+# when it exits.
+ns_why=$(timeout -k 2 10 "$UNSHARE_BIN" -rn ip link add d0 type dummy 2>&1) \
+  || { echo "SKIP logo-scenario: cannot make a private network namespace with a dummy interface here (\`$UNSHARE_BIN -rn ip link add d0 type dummy\`: ${ns_why:-no reason given}); the provider has to be a global address that exists nowhere else" >&2; exit $SKIP; }
 HERE=${BASH_SOURCE[0]%/*}
 [[ $HERE == "${BASH_SOURCE[0]}" ]] && HERE=.
 HERE=$(cd "$HERE" && pwd)
@@ -365,11 +404,21 @@ if ! python3 "$SPIKE/make-corpus.py" "$CORPUS" --only "$SERVED" >"$WORK/corpus.l
 fi
 echo "== corpus: $(grep -c ' bytes ' "$WORK/corpus.log") files, $(du -sh "$CORPUS" | cut -f1)"
 
-# ---- the run: plant, serve, fetch. One helper invocation.
+# ---- the run: plant, serve, fetch. One helper invocation, inside a
+# private network namespace (since D-SINK-40): the rig refuses to run in the
+# namespace this shell is in, which it is told by its link, and the bound
+# covers the rig's own 60 s deadline on the helper with room to spare.
 RIG="$WORK/rig"
-if ! python3 "$SPIKE/serve-and-fetch.py" fetch --helper "$HELPER" --corpus "$CORPUS" --work "$RIG" \
-       --names "$SERVED" --plant "$PLANTED" --timeout 5 --deadline 60 >"$WORK/rig.out" 2>"$WORK/rig.err"; then
-  cat "$WORK/rig.out" "$WORK/rig.err"; echo "the rig did not run" >&2; exit 2
+OUTER_NETNS=$(readlink "/proc/$$/ns/net")
+timeout -k 5 120 "$UNSHARE_BIN" -rn python3 -I "$SPIKE/serve-and-fetch.py" fetch --outer-netns "$OUTER_NETNS" \
+  --helper "$HELPER" --corpus "$CORPUS" --work "$RIG" --names "$SERVED" --plant "$PLANTED" \
+  --loopback "$GOOD" --timeout 5 --deadline 60 >"$WORK/rig.out" 2>"$WORK/rig.err"
+rig_rc=$?
+if (( rig_rc == SKIP )); then
+  echo "SKIP logo-scenario: $(grep -a '^RIG netns-refused ' "$WORK/rig.out" | head -1 | cut -d' ' -f3-)" >&2; exit $SKIP
+fi
+if (( rig_rc != 0 )); then
+  cat "$WORK/rig.out" "$WORK/rig.err"; echo "the rig did not run (exit $rig_rc)" >&2; exit 2
 fi
 grep -a '^RIG ' "$WORK/rig.out" | grep -av '^RIG name ' | sed 's/^/   /'
 rig_field() { grep -a "^RIG $1 " "$WORK/rig.out" | head -1 | cut -d' ' -f3-; }
@@ -434,7 +483,10 @@ ck "F2 the logo directory holds exactly the four legitimate names" "$have_disk" 
 
 # ---- R1..R3: the counts the service reads.
 ck "R1 reasons.logo_dimensions" "$(field 'd["reasons"].get("logo_dimensions")')" "13"
-ck "R2 refusedOnPolicy" "$(field 'd["refusedOnPolicy"]')" "13"
+lb_name=$(grep -a "^RIG name-loopback $GOOD " "$WORK/rig.out" | head -1 | awk '{ print $4 }')
+lb_gets=$(grep -a "^RIG get-loopback $GOOD " "$WORK/rig.out" | head -1 | awk '{ print $4 }')
+ck "R2 refusedOnPolicy, reasons.local_address, GETs at 127.0.0.1, the 127.0.0.1 logo announced" \
+   "$(field 'd["refusedOnPolicy"]') $(field 'd["reasons"].get("local_address")') ${lb_gets:-NA} $(announced "${lb_name:-NA}")" "14 1 0 false"
 ck "R3 fetched cached" "$(field 'd["fetched"]') $(field 'd["cached"]')" "3 1"
 
 # ---- E1..E3: the two bounds driven apart, and the unreadable header.
