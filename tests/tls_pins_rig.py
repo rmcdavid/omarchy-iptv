@@ -29,7 +29,7 @@ A request in the attacker's log is the attacker holding the stream request,
 and with it the provider header the case set.
 
 Checks, each asserting the FIXED behaviour (so `--baseline <ref before the
-fix>` reds W1..W9 and the controls stay green):
+fix>` reds W1..W10 and the controls stay green):
   W1  an HLS channel with `--demuxer-lavf-o=tls_verify=0` in mpvArgs: refused
       by the filter, and the attacker gets nothing
   W2  the same key past the filter (a token the filter missed, or an mpv.conf
@@ -45,6 +45,12 @@ fix>` reds W1..W9 and the controls stay green):
   W9  an ADOPTED player started by the --pre-pin tree's argv, with W4's
       profile in its mpv.conf: the tree's migration and apply_channel refuse
       to load, and the attacker gets nothing
+  W10 `player-operation-mode=pseudo-gui` as a plain mpv.conf line: mpv then
+      applies the user's [pseudo-gui] profile AFTER the command line, over
+      every pin (recheck, 2026-10-29). With that profile turning on a script,
+      the watch history, the select menu and a resume record in $HOME: no
+      file outside the runtime folder holds the credential and no child of
+      the player carries it
   C1  a common harmless set (--hwdec=auto-safe --profile=low-latency
       --cache-secs=30 --volume=50 --tls-ca-file=<CA>) is kept and PLAYS
   C2  a CA-signed HLS channel with --demuxer-lavf-o=live_start_index=-1 PLAYS
@@ -424,6 +430,21 @@ def main(argv: list[str]) -> int:
                   post=[[1.5, ["set_property", "sid", 1]], [2.5, ["script-binding", "select/select-subtitle-line"]]])
         check("W8 select's subtitle-line binding: no child of the player carries the credential",
               r["kids"] == [], "children with it: %s" % r["kids"])
+        marker = os.path.join(work, "marker.lua")
+        with open(marker, "w") as fh:
+            fh.write('local h = os.getenv("HOME")\n'
+                     'mp.register_event("file-loaded", function()\n'
+                     '  local f = io.open(h .. "/marker.txt", "a"); f:write((mp.get_property("path") or "") .. "\\n"); f:close()\n'
+                     'end)\n')
+        home10 = os.path.join(work, "cases", "W10", "home")
+        r = probe(work, "W10", tree, tree, "http://127.0.0.1:%d/live/rig/%s/sub.mkv" % (PORTS["plain"], SECRET), seconds=7,
+                  conf=("player-operation-mode=pseudo-gui\n[pseudo-gui]\nsave-watch-history=yes\nload-select=yes\n"
+                        "script=%s\nwrite-filename-in-watch-later-config=yes\nwatch-later-dir=%s/wl\n" % (marker, home10)),
+                  post=[[1.5, ["set_property", "sid", 1]], [2.0, ["script-binding", "select/select-subtitle-line"]],
+                        [2.5, ["write-watch-later-config"]]])
+        check("W10 a [pseudo-gui] profile switched on by a plain mpv.conf line: nothing outside the runtime folder holds the credential, no child carries it",
+              r["leaks"] == [] and r["kids"] == [] and r["timePos"] is not None,
+              "files %s, children %s, played %s" % (r["leaks"], r["kids"], r["timePos"] is not None))
         if pre is not None:
             r = probe(work, "W9", pre, tree, direct_evil, conf="[protocol.https]\nstream-lavf-o=tls_verify=0\n", migrate=True)
             check("W9 an adopted pre-pin player with that profile: the load is refused and the attacker gets nothing",

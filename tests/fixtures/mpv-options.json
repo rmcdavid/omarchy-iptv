@@ -26,9 +26,9 @@
   "base": "set by the plugin BEFORE the user's tokens; a user token may override it"
  },
  "counts": {
-  "allowed": 828,
+  "allowed": 827,
   "base": 8,
-  "pinned": 17,
+  "pinned": 18,
   "reserved": 39,
   "warned": 7
  },
@@ -38,6 +38,7 @@
   "--scripts-clr",
   "--input-commands-clr",
   "--load-auto-profiles=no",
+  "--player-operation-mode=cplayer",
   "--load-select=no",
   "--load-unsafe-playlists=no",
   "--save-watch-history=no",
@@ -2236,7 +2237,9 @@
   },
   "--player-operation-mode": {
    "type": "Choices",
-   "class": "allowed"
+   "class": "pinned",
+   "pin": "--player-operation-mode=cplayer",
+   "why": "pseudo-gui makes mpv apply the user's [pseudo-gui] profile AFTER the command line, over every pin; a plain mpv.conf line did it (measured, D-SINK-44)"
   },
   "--playlist": {
    "type": "String",

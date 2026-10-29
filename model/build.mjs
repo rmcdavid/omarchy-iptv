@@ -304,6 +304,10 @@ var MPV_RESERVED = {
   "--input-commands": true,
   "--reset-on-next-file": true,
   "--osd-playlist-entry": true,
+  // `pseudo-gui` makes mpv apply the user's [pseudo-gui] profile AFTER the
+  // command line, with nothing preserved, so it undid every pin (recheck,
+  // 2026-10-29: a plain mpv.conf line was enough). D-SINK-44.
+  "--player-operation-mode": true,
   "--demuxer-lavf-propagate-opts": true,
   // mpv's own alias for watch-later-dir; base-name matching cannot see it.
   "--watch-later-directory": true,
@@ -370,6 +374,7 @@ var MPV_PIN_BLOCK = [
   "--scripts-clr",                     // an explicit script= line loads anyway
   "--input-commands-clr",              // D-SINK-45: commands run at startup
   "--load-auto-profiles=no",           // D-SINK-44: profile-cond beats the command line
+  "--player-operation-mode=cplayer",   // D-SINK-44: [pseudo-gui] applies after the command line
   "--load-select=no",                  // D-SINK-46: g l forks ffmpeg with the URL
   "--load-unsafe-playlists=no",        // D-SINK-44: mpv's origin rule for nested entries
   "--save-watch-history=no",           // D-SINK-44: every path, durably

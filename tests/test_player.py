@@ -2385,7 +2385,9 @@ class ParityTest(unittest.TestCase):
         # of tests/fixtures/mpv-options.json, which classifies every option of
         # the installed mpv; test_mpv_options.py holds the set to that file
         # name by name, so this count is the number and not the list.
-        self.assertEqual(len(names), 53)
+        # 54 the same day: --player-operation-mode, whose pseudo-gui applies
+        # the user's [pseudo-gui] profile after the command line (recheck).
+        self.assertEqual(len(names), 54)
         self.assertIn("--include", names)
         self.assertIn("--load-scripts", names)
         self.assertIn("--demuxer-cache-unlink-files", names)

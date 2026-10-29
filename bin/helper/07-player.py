@@ -138,6 +138,11 @@ MPV_RESERVED = frozenset((
     "--load-auto-profiles", "--load-select", "--load-unsafe-playlists",
     "--save-watch-history", "--input-commands", "--reset-on-next-file",
     "--osd-playlist-entry", "--demuxer-lavf-propagate-opts",
+    # `pseudo-gui` makes mpv apply the user's [pseudo-gui] profile AFTER the
+    # command line, with nothing preserved, so it undid every pin in
+    # MPV_PIN_BLOCK (recheck, 2026-10-29: a plain mpv.conf line was enough;
+    # D-SINK-44).
+    "--player-operation-mode",
     # An ALIAS of a reserved name is the same option (D-SINK-2's lesson in the
     # other direction): mpv lists `--watch-later-directory` as an alias for
     # watch-later-dir, and base-name matching cannot see that.
@@ -195,6 +200,7 @@ MPV_PIN_BLOCK = (
     "--scripts-clr",                     # an explicit script= line loads anyway
     "--input-commands-clr",              # D-SINK-45: commands run at startup
     "--load-auto-profiles=no",           # D-SINK-44: profile-cond beats the command line
+    "--player-operation-mode=cplayer",   # D-SINK-44: [pseudo-gui] applies after the command line
     "--load-select=no",                  # D-SINK-46: g l forks ffmpeg with the URL
     "--load-unsafe-playlists=no",        # D-SINK-44: mpv's origin rule for nested entries
     "--save-watch-history=no",           # D-SINK-44: every path, durably

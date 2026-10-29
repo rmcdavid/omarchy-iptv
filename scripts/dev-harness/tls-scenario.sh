@@ -187,7 +187,7 @@
 # so a refusal that started nothing signals nothing, least of all the process
 # holding a port this run refused to take.
 #
-# `--windowless` (D-SINK-43..46, 2026-10-29) runs W1..W9 and C1..C2 and
+# `--windowless` (D-SINK-43..46, 2026-10-29) runs W1..W10 and C1..C2 and
 # stops: tests/tls_pins_rig.py (dev branch), the same attacker's-side view with
 # NO window, shell, cage or harness -- mpv with `--vo=null --ao=null`, no
 # DISPLAY, WAYLAND_DISPLAY or session bus, a core limit of 0, a private HOME
@@ -200,7 +200,7 @@
 # per-protocol and profile-cond profiles, the watch history -- plus select's
 # subtitle-line fork and an ADOPTED player started by the `--pre-pin <ref>`
 # tree (default v0.15.0). `--baseline <ref>` runs it against that ref's
-# helper: W1..W9 red, C1..C2 green, which is the proof each check can fail.
+# helper: W1..W10 red, C1..C2 green, which is the proof each check can fail.
 # Ports 8780-8784. A machine without mpv, ffmpeg or openssl answers 77.
 #
 #   ./scripts/dev-harness/tls-scenario.sh --rig-only
