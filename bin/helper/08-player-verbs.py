@@ -319,8 +319,28 @@ def owner_claim(owner_pid: int) -> dict[str, Any] | None:
 FIRST_LOAD_REASON_MAX = 512
 
 
-def first_load_result(state: str, reason: str) -> dict[str, Any]:
-    return {"state": state, "reason": reason[:FIRST_LOAD_REASON_MAX].rstrip()}
+def first_load_result(state: str, reason: str, ended: str = "",
+                      file_error: str = "") -> dict[str, Any]:
+    """The `firstLoad` member of `player start`'s reply.
+
+    D-PLY-36 (2026-10-28): a "failed" says WHICH ending the window saw, in
+    two additive members an older shell ignores. `ended` is "end-file" when
+    mpv sent an end-file error for the start's own entry, with mpv's
+    `file_error` beside it in `fileError` (one of its fixed strings, redacted
+    and cut like the reason; D-PLY-37 reads an output that could not be
+    opened from it), or "closed" when mpv closed the connection, which under
+    --idle=once is its death with no end-file. The shell's Model.deathReport
+    marks the channel only for the first, and not even then for an output
+    of this machine (the shared fixture player-endings.json, dev branch
+    tests, run by both suites). "playing" and "unknown" carry neither
+    member.
+    """
+    result = {"state": state, "reason": reason[:FIRST_LOAD_REASON_MAX].rstrip()}
+    if ended:
+        result["ended"] = ended
+    if ended == "end-file":
+        result["fileError"] = file_error[:FIRST_LOAD_REASON_MAX].strip()
+    return result
 
 
 def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
@@ -376,11 +396,17 @@ def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
                     # The log line says what actually went wrong; mpv's own
                     # file_error is a generic "loading failed". Both are
                     # already redacted, here, inside python (section 6).
-                    return first_load_result("failed", last_error or verdict["reason"])
+                    # D-PLY-36: and the reply says it was an end-file, with
+                    # mpv's own file_error beside the reason.
+                    file_error = redact_urls(str(message.get("file_error") or ""))
+                    return first_load_result("failed", last_error or verdict["reason"],
+                                             "end-file", file_error)
                 return {"state": "unknown", "reason": ""}
     if state == "failed" and not reason:
         reason = last_error or PLAYER_GENERIC_FAILURE
-    return first_load_result(state, reason)
+    # D-PLY-36: the only "failed" that reaches here is mpv closing the
+    # connection -- a death with no end-file for this entry.
+    return first_load_result(state, reason, "closed" if state == "failed" else "")
 
 
 # -------------------------------------------------------------- the verbs

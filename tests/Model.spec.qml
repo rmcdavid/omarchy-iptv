@@ -850,6 +850,41 @@ TestCase {
     compare(mixed.tail, ["could not open provider.test"])
   }
 
+  function test_playerOutputEndingAndNoticeSlots() {
+    // D-PLY-37 (the owner, 2026-10-28), in Qt's own engine: mpv 0.41.0's
+    // measured ending for an audio output that cannot open -- the picture
+    // played, then end-file error "audio output initialization failed" for
+    // the channel's own entry -- is "outputFailed" and marks nothing; the
+    // same entry's "loading failed" still marks.
+    var ao = routePlayer({ lines: [
+      '{"event":"start-file","playlist_entry_id":1}',
+      '{"event":"file-loaded"}',
+      '{"event":"log-message","level":"error","prefix":"cplayer","text":"Could not open/initialize audio device -> no sound.\\n"}',
+      '{"event":"end-file","reason":"error","playlist_entry_id":1,"file_error":"audio output initialization failed"}',
+      "EOF"
+    ], owners: ownersFor([[1, { id: "t:a", name: "Channel A" }]]), nowPlaying: { id: "t:a", name: "Channel A" } })
+    compare(ao.toasts, [{ name: "Channel A", reason: "This computer's audio output could not be opened", card: "outputFailed", mark: false }])
+    var dead = routePlayer({ lines: [
+      '{"event":"start-file","playlist_entry_id":1}',
+      '{"event":"end-file","reason":"error","playlist_entry_id":1,"file_error":"loading failed"}',
+      "EOF"
+    ], owners: ownersFor([[1, { id: "t:a", name: "Channel A" }]]), nowPlaying: { id: "t:a", name: "Channel A" } })
+    compare(dead.toasts, [{ name: "Channel A", reason: "loading failed", card: "streamFailed", mark: true }])
+    // D-PLY-36: the first-load reply's `ended`.
+    compare(Model.deathReport({ firstLoad: true, nowPlaying: { id: "t:a", name: "A" }, reason: "x", ended: "closed" }).card, "playerStopped")
+    compare(Model.deathReport({ firstLoad: true, nowPlaying: { id: "t:a", name: "A" }, reason: "x", ended: "closed" }).mark, false)
+    compare(Model.deathReport({ firstLoad: true, nowPlaying: { id: "t:a", name: "A" }, reason: "x", ended: "end-file", fileError: "loading failed" }).mark, true)
+    // D-HOST-5: the notice slots, in V4 (null-prototype maps, no mutation).
+    var step = Model.notifyPost(Model.keyedMap(), "epgError", { reason: "x" })
+    compare(step.argv.slice(7, 10), ["-p", "-r", "74014"])
+    var held = Model.notifyPost(step.slots, "epgError", { reason: "y" })
+    compare(held.argv, null)
+    var answered = Model.notifyAnswered(held.slots, "epgError", "5\n", 0)
+    compare(answered.argv.slice(7, 10), ["-p", "-r", "5"])
+    compare(answered.argv[answered.argv.length - 1], "Could not fetch the EPG (y). Channels still work.")
+    compare(Model.notifyReplyId("u 5\n", 0), 0)
+  }
+
   function test_playerUpTruthTable() {
     // 4.7: playerUp replaces mpvProc.running at some twenty read sites, so it
     // has to keep the SYNCHRONOUS birth edge the process gave (playerPending,

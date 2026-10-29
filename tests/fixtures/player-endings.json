@@ -1,0 +1,280 @@
+{
+  "_comment": [
+    "How a player's ending reads, in BOTH languages: D-PLY-36 and D-PLY-37 (the owner, 2026-10-28).",
+    "Read by tests/test_player_endings.py (the helper's observe_first_load over `firstLoad[].batches`,",
+    "and the real mpv over `mpv.canary`) and by tests/Model.test.js (Model.outputFailure over",
+    "`outputErrors` and `streamErrors`, Model.routePlayerEvent then Model.deathReport over `socket`,",
+    "Model.deathReport over every `firstLoad[].reply` and `oldReplies`). A rule written twice gets one",
+    "fixture (CLAUDE.md): the helper writes the first-load reply, the model reads it.",
+    "D-PLY-37 joins on mpv's PROSE -- the end-file's `file_error` -- so the strings are pinned here",
+    "with the mpv version they were read from, and test_player_endings.py runs the real mpv (when it",
+    "is installed) to read the audio one again: a later mpv that rewords it turns that test red, not",
+    "a channel. `socket[].lines` are mpv's own JSON lines as the shell's socket router reads them,",
+    "MEASURED (lane-host5, 2026-10-28, mpv 0.41.0, windowless and silent: a private runtime folder",
+    "with no compositor and no sound server in it, --vo=null or a video output that cannot connect,",
+    "--ao=null or an output that cannot open) unless the case says `measured: false`. Log text is",
+    "mpv's, a trailing newline as mpv sends it. ASCII only: scripts/check.sh refuses anything else in",
+    "tests/fixtures/."
+  ],
+  "mpv": {
+    "version": "0.41.0",
+    "measured": "2026-10-28",
+    "canary": {
+      "_comment": "The audio output that cannot open, in the player's own launch shape: run by test_player_endings.py, which expects `endFile` from the real mpv.",
+      "argv": ["--no-config", "--load-scripts=no", "--idle=once", "--keep-open=no", "--force-window=immediate", "--msg-level=all=error", "--ytdl=no", "--no-terminal", "--vo=null", "--ao=alsa", "--audio-device=alsa/omarchy_iptv_canary_nonexistent", "--audio-file=av://lavfi:sine=frequency=440:duration=1"],
+      "url": "av://lavfi:testsrc=duration=1:size=64x48:rate=10",
+      "endFile": {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "audio output initialization failed"}
+    }
+  },
+  "outputErrors": [
+    {
+      "fileError": "audio output initialization failed",
+      "output": "audio",
+      "measured": true,
+      "shapes": ["--ao=alsa --audio-device=alsa/<nonexistent>", "--ao=pulse with no PulseAudio server", "--ao=pipewire with no PipeWire server", "the player's launch shape (--force-window=immediate --idle=once) with the ALSA device missing", "an audio-only file with the ALSA device missing"]
+    },
+    {
+      "fileError": "video output initialization failed",
+      "output": "video",
+      "measured": false,
+      "note": "In mpv 0.41.0's error table (MPV_ERROR_VO_INIT_FAILED; its error strings are in the binary) and reached by none of the five video output failures measured: a per-file one reads `no audio or video data played` (below) when nothing else can play, and nothing at all when the sound plays on; the player's own --force-window=immediate makes a video output that cannot open an exit before the socket, with no end-file (D-PLY-27). Kept on the owner's word; UNVERIFIED."
+    }
+  ],
+  "streamErrors": [
+    {"fileError": "loading failed", "measured": "a refused connection to 127.0.0.1:9"},
+    {"fileError": "unrecognized file format", "measured": "a file that is not media"},
+    {"fileError": "no audio or video data played", "measured": "a video-only file with a video output that cannot open and --force-window left at its default (--vo=x11 with no display; --vo=gpu with no compositor). Under the player's launch shape the video output is made before any file, so this string is a stream with nothing playable, which marks."}
+  ],
+  "socket": [
+    {
+      "name": "D-PLY-37: no ALSA device -- the picture plays on and the file ends with the audio output's error, for the channel's own entry",
+      "owners": [[1, {"id": "t:x", "name": "X"}]],
+      "nowPlaying": {"id": "t:x", "name": "X"},
+      "lines": [
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "file-loaded"},
+        {"event": "log-message", "prefix": "ao/alsa", "level": "error", "text": "Playback open error: No such file or directory\n"},
+        {"event": "log-message", "prefix": "ao", "level": "error", "text": "Failed to initialize audio driver 'alsa'\n"},
+        {"event": "log-message", "prefix": "cplayer", "level": "error", "text": "Could not open/initialize audio device -> no sound.\n"},
+        {"event": "playback-restart"},
+        {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "audio output initialization failed"}
+      ],
+      "expect": {"card": "outputFailed", "mark": false, "output": "audio", "target": "t:x"}
+    },
+    {
+      "name": "D-PLY-37: the sound server is down (PulseAudio)",
+      "owners": [[1, {"id": "t:x", "name": "X"}]],
+      "nowPlaying": {"id": "t:x", "name": "X"},
+      "lines": [
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "file-loaded"},
+        {"event": "log-message", "prefix": "ao/pulse", "level": "error", "text": "Init failed: Connection refused\n"},
+        {"event": "log-message", "prefix": "ao", "level": "error", "text": "Failed to initialize audio driver 'pulse'\n"},
+        {"event": "log-message", "prefix": "cplayer", "level": "error", "text": "Could not open/initialize audio device -> no sound.\n"},
+        {"event": "playback-restart"},
+        {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "audio output initialization failed"}
+      ],
+      "expect": {"card": "outputFailed", "mark": false, "output": "audio", "target": "t:x"}
+    },
+    {
+      "name": "D-PLY-37: the sound server is down (PipeWire)",
+      "owners": [[1, {"id": "t:x", "name": "X"}]],
+      "nowPlaying": {"id": "t:x", "name": "X"},
+      "lines": [
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "file-loaded"},
+        {"event": "log-message", "prefix": "ao/pipewire", "level": "error", "text": "Could not connect to context '(null)': Host is down\n"},
+        {"event": "log-message", "prefix": "ao", "level": "error", "text": "Failed to initialize audio driver 'pipewire'\n"},
+        {"event": "log-message", "prefix": "cplayer", "level": "error", "text": "Could not open/initialize audio device -> no sound.\n"},
+        {"event": "playback-restart"},
+        {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "audio output initialization failed"}
+      ],
+      "expect": {"card": "outputFailed", "mark": false, "output": "audio", "target": "t:x"}
+    },
+    {
+      "name": "D-PLY-37: a zap under a missing audio device -- the first entry ends `stop`, the second ends with the output's error and is the one named; nothing is marked",
+      "owners": [[1, {"id": "t:x", "name": "X"}], [2, {"id": "t:y", "name": "Y"}]],
+      "nowPlaying": {"id": "t:y", "name": "Y"},
+      "lines": [
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "file-loaded"},
+        {"event": "log-message", "prefix": "cplayer", "level": "error", "text": "Could not open/initialize audio device -> no sound.\n"},
+        {"event": "playback-restart"},
+        {"event": "end-file", "reason": "stop", "playlist_entry_id": 1},
+        {"event": "start-file", "playlist_entry_id": 2},
+        {"event": "file-loaded"},
+        {"event": "log-message", "prefix": "ao/alsa", "level": "error", "text": "Playback open error: No such file or directory\n"},
+        {"event": "log-message", "prefix": "cplayer", "level": "error", "text": "Could not open/initialize audio device -> no sound.\n"},
+        {"event": "playback-restart"},
+        {"event": "end-file", "reason": "error", "playlist_entry_id": 2, "file_error": "audio output initialization failed"}
+      ],
+      "expect": {"card": "outputFailed", "mark": false, "output": "audio", "target": "t:y"}
+    },
+    {
+      "name": "D-PLY-37: the output's error for an entry the ring and the router do not tie to the channel is still the output's -- told as such, never marked",
+      "owners": [[1, {"id": "t:x", "name": "X"}]],
+      "nowPlaying": {"id": "t:x", "name": "X"},
+      "lines": [
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "end-file", "reason": "error", "playlist_entry_id": 9, "file_error": "audio output initialization failed"}
+      ],
+      "expect": {"card": "outputFailed", "mark": false, "output": "audio", "target": "t:x"}
+    },
+    {
+      "name": "the control: a dead stream (a refused connection) still marks and says Stream failed",
+      "owners": [[1, {"id": "t:x", "name": "X"}]],
+      "nowPlaying": {"id": "t:x", "name": "X"},
+      "lines": [
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "log-message", "prefix": "ffmpeg", "level": "error", "text": "tcp: Connection to tcp://127.0.0.1:9 failed: Connection refused\n"},
+        {"event": "log-message", "prefix": "stream", "level": "error", "text": "Failed to open http://127.0.0.1:9/x.ts.\n"},
+        {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "loading failed"}
+      ],
+      "expect": {"card": "streamFailed", "mark": true, "output": "", "target": "t:x"}
+    },
+    {
+      "name": "the control: a file that is not media still marks",
+      "owners": [[1, {"id": "t:x", "name": "X"}]],
+      "nowPlaying": {"id": "t:x", "name": "X"},
+      "lines": [
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "unrecognized file format"}
+      ],
+      "expect": {"card": "streamFailed", "mark": true, "output": "", "target": "t:x"}
+    },
+    {
+      "name": "a video-only file whose video output cannot open (outside the player's launch shape) reads `no audio or video data played`, which is not an output's string and marks",
+      "owners": [[1, {"id": "t:x", "name": "X"}]],
+      "nowPlaying": {"id": "t:x", "name": "X"},
+      "lines": [
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "log-message", "prefix": "vo/x11/x11", "level": "error", "text": "couldn't open the X11 display ()!\n"},
+        {"event": "log-message", "prefix": "cplayer", "level": "error", "text": "Error opening/initializing the selected video_out (--vo) device.\n"},
+        {"event": "log-message", "prefix": "cplayer", "level": "error", "text": "No video or audio streams selected.\n"},
+        {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "no audio or video data played"}
+      ],
+      "expect": {"card": "streamFailed", "mark": true, "output": "", "target": "t:x"}
+    },
+    {
+      "name": "a video output that cannot open while the sound plays: mpv drops the picture and ends the file `eof` -- silent, as a clean end is (PO-4)",
+      "owners": [[1, {"id": "t:x", "name": "X"}]],
+      "nowPlaying": {"id": "t:x", "name": "X"},
+      "lines": [
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "log-message", "prefix": "vo/x11/x11", "level": "error", "text": "couldn't open the X11 display ()!\n"},
+        {"event": "log-message", "prefix": "cplayer", "level": "error", "text": "Error opening/initializing the selected video_out (--vo) device.\n"},
+        {"event": "file-loaded"},
+        {"event": "playback-restart"},
+        {"event": "end-file", "reason": "eof", "playlist_entry_id": 1}
+      ],
+      "expect": {"card": "", "mark": false, "output": "", "target": "t:x"}
+    },
+    {
+      "name": "D-PLY-37, UNVERIFIED shape (measured: false): the video output's own error string",
+      "measured": false,
+      "owners": [[1, {"id": "t:x", "name": "X"}]],
+      "nowPlaying": {"id": "t:x", "name": "X"},
+      "lines": [
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "video output initialization failed"}
+      ],
+      "expect": {"card": "outputFailed", "mark": false, "output": "video", "target": "t:x"}
+    }
+  ],
+  "firstLoad": [
+    {
+      "name": "D-PLY-36: an end-file error for the start's own entry -- `ended` end-file, mpv's file_error beside the log line; the stream's, so marked",
+      "entryId": 1,
+      "batches": [[
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "log-message", "prefix": "stream", "level": "error", "text": "Failed to open http://127.0.0.1:9/x.ts.\n"},
+        {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "loading failed"}
+      ]],
+      "reply": {"state": "failed", "reason": "Failed to open http://127.0.0.1.", "ended": "end-file", "fileError": "loading failed"},
+      "expect": {"card": "streamFailed", "mark": true, "output": ""}
+    },
+    {
+      "name": "D-PLY-36: mpv closed the connection inside the window (it died: a crash, a kill, a VO abort) -- `ended` closed, never marked",
+      "entryId": 1,
+      "batches": [[
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "log-message", "prefix": "vo/gpu", "level": "error", "text": "Error: could not create a GL context\n"}
+      ], null],
+      "reply": {"state": "failed", "reason": "Error: could not create a GL context", "ended": "closed"},
+      "expect": {"card": "playerStopped", "mark": false, "output": ""}
+    },
+    {
+      "name": "D-PLY-36: a closed connection with nothing in the log reads the generic sentence, still `closed`",
+      "entryId": 1,
+      "batches": [null],
+      "reply": {"state": "failed", "reason": "Playback stopped unexpectedly", "ended": "closed"},
+      "expect": {"card": "playerStopped", "mark": false, "output": ""}
+    },
+    {
+      "name": "D-PLY-36 / D-PLY-37: an output's error for the start's entry inside the window (the window ends at file-loaded, which mpv 0.41.0 sends first, so this is the rule held for a later mpv) -- not marked",
+      "entryId": 1,
+      "batches": [[
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "log-message", "prefix": "cplayer", "level": "error", "text": "Could not open/initialize audio device -> no sound.\n"},
+        {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "audio output initialization failed"}
+      ]],
+      "reply": {"state": "failed", "reason": "Could not open/initialize audio device -> no sound.", "ended": "end-file", "fileError": "audio output initialization failed"},
+      "expect": {"card": "outputFailed", "mark": false, "output": "audio"}
+    },
+    {
+      "name": "D-PLY-13's shape: a redirect, then the resolved stream's error -- an end-file, marked",
+      "entryId": 1,
+      "batches": [[
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "end-file", "reason": "redirect", "playlist_entry_id": 1},
+        {"event": "log-message", "prefix": "stream", "level": "error", "text": "Server returned 401 Unauthorized\n"},
+        {"event": "end-file", "reason": "error", "playlist_entry_id": 1, "file_error": "loading failed"}
+      ]],
+      "reply": {"state": "failed", "reason": "Server returned 401 Unauthorized", "ended": "end-file", "fileError": "loading failed"},
+      "expect": {"card": "streamFailed", "mark": true, "output": ""}
+    },
+    {
+      "name": "another entry's error is not the start's: the window reads on, and mpv then closing the connection is `closed`",
+      "entryId": 1,
+      "batches": [[
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "end-file", "reason": "error", "playlist_entry_id": 7, "file_error": "loading failed"}
+      ], null],
+      "reply": {"state": "failed", "reason": "Playback stopped unexpectedly", "ended": "closed"},
+      "expect": {"card": "playerStopped", "mark": false, "output": ""}
+    },
+    {
+      "name": "the measured audio failure as the window sees it: file-loaded comes before the output opens, so the window answers playing",
+      "entryId": 1,
+      "batches": [[
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "file-loaded"},
+        {"event": "log-message", "prefix": "cplayer", "level": "error", "text": "Could not open/initialize audio device -> no sound.\n"}
+      ]],
+      "reply": {"state": "playing", "reason": ""},
+      "expect": null
+    },
+    {
+      "name": "D-PLY-12's shape: a zap replaced the start's entry -- unknown, no `ended`",
+      "entryId": 1,
+      "batches": [[
+        {"event": "start-file", "playlist_entry_id": 1},
+        {"event": "end-file", "reason": "stop", "playlist_entry_id": 1}
+      ]],
+      "reply": {"state": "unknown", "reason": ""},
+      "expect": null
+    }
+  ],
+  "oldReplies": [
+    {
+      "name": "a reply from a helper before D-PLY-36 has no `ended`: the helper's word, taken as before -- marked, Stream failed",
+      "reply": {"state": "failed", "reason": "Failed to open 127.0.0.1."},
+      "expect": {"card": "streamFailed", "mark": true, "output": ""}
+    },
+    {
+      "name": "an `ended` the shell does not know is read as no `ended` at all",
+      "reply": {"state": "failed", "reason": "x", "ended": "sideways"},
+      "expect": {"card": "streamFailed", "mark": true, "output": ""}
+    }
+  ]
+}

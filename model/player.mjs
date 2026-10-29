@@ -742,6 +742,47 @@ function endedReport(context) {
   }
 }
 
+// D-PLY-37 (owner, 2026-10-28): an OUTPUT of this machine that could not be
+// opened is this machine's failure, not the stream's. mpv ends the file with
+// reason "error" and one of these `file_error` strings -- the names of mpv's
+// own MPV_ERROR_AO_INIT_FAILED and MPV_ERROR_VO_INIT_FAILED -- and the join is
+// on mpv's prose, so the strings are pinned in the shared fixture
+// player-endings.json (dev branch tests) with the version they were read
+// from, and a python test runs the real mpv to see the audio one again (a
+// later mpv that reworded it turns that test red, not a channel). Measured on mpv 0.41.0
+// (2026-10-28, windowless and silent): an ALSA device that does not exist,
+// PulseAudio down and PipeWire down each play the picture on and end the file
+// with "audio output initialization failed", once the file ends. The video
+// one is in mpv's error table and was reached by none of the five video
+// output failures measured: a per-file one reads "no audio or video data
+// played" when nothing else can play (and marks, as a stream with nothing
+// playable does), or nothing at all when the sound plays on, and the
+// player's own --force-window=immediate makes a video output that cannot
+// open an exit before the socket, which has no end-file (D-PLY-27). It is
+// kept on the owner's word and is UNVERIFIED.
+var PLAYER_OUTPUT_ERRORS = [
+  ["audio output initialization failed", "audio"],
+  ["video output initialization failed", "video"]
+]
+
+// "audio" or "video" when an end-file says an output of this machine could
+// not be opened, "" for anything else. Exact strings, compared after a trim:
+// a near match is mpv saying something else.
+function outputFailure(end) {
+  if (!end || typeof end !== "object" || str(end.reason) !== "error") return ""
+  var raw = end.fileError !== undefined && end.fileError !== null && str(end.fileError) !== "" ? end.fileError : end.file_error
+  var detail = str(raw).trim()
+  for (var i = 0; i < PLAYER_OUTPUT_ERRORS.length; i++) if (detail === PLAYER_OUTPUT_ERRORS[i][0]) return PLAYER_OUTPUT_ERRORS[i][1]
+  return ""
+}
+
+// The sentence lastError records and the card carries for a lost output.
+function outputFailureSentence(output) {
+  if (output === "video") return "This computer's video output could not be opened"
+  if (output === "audio") return "This computer's audio output could not be opened"
+  return ""
+}
+
 // D-PLY-33 (owner, 2026-10-28): what a player's death says about the CHANNEL.
 // endedReport answers whether the user hears about a death and which channel
 // it names; this answers what the death is evidence of, for every detector
@@ -754,6 +795,11 @@ function endedReport(context) {
 // about a channel that may have played for an hour (PO-4). Until this, 4.8's
 // table read "no end-file at all" as a stream failure, and no code could
 // tell a death on this machine's account from one a stream caused.
+//
+// D-PLY-37 (owner, 2026-10-28): an end-file error that names an OUTPUT of
+// this machine (outputFailure above) is not the stream failing to load: told
+// as "outputFailed", in copy that blames this computer, and marked never --
+// whichever entry it names, because the cause is known either way.
 //
 // "Own entry": the end-file names an entry, and either the entry-owner ring
 // says whose it is (channelForEnd names that owner), or the ring has not
@@ -772,35 +818,48 @@ function endedReport(context) {
 //                     attached, so no end-file was seen by anyone. Never told
 //                     (PO-3) and, by the same rule, never marked.
 //   context.firstLoad `player start`'s own first-load window answered
-//                     "failed" (context.reason, its reason). The helper's
-//                     reply does not say whether mpv sent an end-file error
-//                     for the entry or closed the connection: its
-//                     observe_first_load returns the same {state, reason} for
-//                     both. So this is the helper's word, taken as before --
-//                     marked, "Stream failed" -- and the one detector the rule
-//                     cannot yet reach, raised with D-PLY-33's report.
+//                     "failed" (context.reason, its reason). D-PLY-36: the
+//                     reply now says which ending it saw, in
+//                     context.ended -- "end-file" (mpv sent an end-file error
+//                     for the start's entry; its file_error in
+//                     context.fileError) or "closed" (mpv closed the
+//                     connection: it died, with no end-file). An end-file
+//                     error is the stream's -- marked, "Stream failed" --
+//                     unless it names an output (D-PLY-37); a closed
+//                     connection is a death with no end-file, told as
+//                     "Playback stopped" and never marked. A reply without the
+//                     field (a helper from before D-PLY-36) is the helper's
+//                     word, taken as it always was: marked, "Stream failed".
 //
-// Returns { notify, mark, card, target, reason }: card is the notifyArgv
-// event ("streamFailed" or "playerStopped"), "" when nothing is told; reason
-// is what lastError records -- endedReport's tail-or-file_error for a load
-// that failed (D-PLY-29 stands there), the generic sentence for a death with
-// no such end-file, whose card carries no reason at all.
+// Returns { notify, mark, card, target, reason, output }: card is the
+// notifyArgv event ("streamFailed", "playerStopped" or "outputFailed"), ""
+// when nothing is told; reason is what lastError records -- endedReport's
+// tail-or-file_error for a load that failed (D-PLY-29 stands there), the
+// generic sentence for a death with no such end-file, whose card carries no
+// reason at all, and the output's sentence for an output that could not be
+// opened; output is "audio" or "video" for that card, "" otherwise.
 function deathReport(context) {
   var ctx = context && typeof context === "object" ? context : {}
-  if (ctx.unattended === true) return { notify: false, mark: false, card: "", target: null, reason: "" }
+  if (ctx.unattended === true) return { notify: false, mark: false, card: "", target: null, reason: "", output: "" }
   if (ctx.firstLoad === true) {
     var np = ctx.nowPlaying
+    var who = np ? { id: str(np.id), name: str(np.name) } : null
     var why = str(ctx.reason)
-    return { notify: true, mark: true, card: "streamFailed",
-             target: np ? { id: str(np.id), name: str(np.name) } : null,
-             reason: why !== "" ? why : PLAYER_GENERIC_FAILURE }
+    var ended = str(ctx.ended)
+    var lostFirst = ended === "end-file" ? outputFailure({ reason: "error", fileError: ctx.fileError }) : ""
+    if (lostFirst !== "") return { notify: true, mark: false, card: "outputFailed", target: who, reason: outputFailureSentence(lostFirst), output: lostFirst }
+    if (ended === "closed") return { notify: true, mark: false, card: "playerStopped", target: who, reason: PLAYER_GENERIC_FAILURE, output: "" }
+    return { notify: true, mark: true, card: "streamFailed", target: who,
+             reason: why !== "" ? why : PLAYER_GENERIC_FAILURE, output: "" }
   }
   var report = endedReport(ctx)
-  if (report.notify !== true) return { notify: false, mark: false, card: "", target: report.target, reason: "" }
+  if (report.notify !== true) return { notify: false, mark: false, card: "", target: report.target, reason: "", output: "" }
+  var lost = outputFailure(ctx.lastEndFile)
+  if (lost !== "") return { notify: true, mark: false, card: "outputFailed", target: report.target, reason: outputFailureSentence(lost), output: lost }
   if (loadFailedForOwnEntry(ctx.lastEndFile, ctx.owners, ctx.entryId)) {
-    return { notify: true, mark: true, card: "streamFailed", target: report.target, reason: report.reason }
+    return { notify: true, mark: true, card: "streamFailed", target: report.target, reason: report.reason, output: "" }
   }
-  return { notify: true, mark: false, card: "playerStopped", target: report.target, reason: PLAYER_GENERIC_FAILURE }
+  return { notify: true, mark: false, card: "playerStopped", target: report.target, reason: PLAYER_GENERIC_FAILURE, output: "" }
 }
 
 // deathReport's evidence test: an end-file "error" for an entry the ring
@@ -823,5 +882,6 @@ export {
   playerTlsVerdict, parsePlayerProbe, parsePlayerEvent, playerEntryId,
   endedVerdict, probeVerdict, playerDeathKind, playerSessionFollowUp,
   playerRouterState, pushPlayerLog, routePlayerEvent, rememberEntryOwner,
-  channelForEnd, endedReport, deathReport, loadFailedForOwnEntry
+  channelForEnd, endedReport, PLAYER_OUTPUT_ERRORS, outputFailure,
+  outputFailureSentence, deathReport, loadFailedForOwnEntry
 }

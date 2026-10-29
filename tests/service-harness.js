@@ -172,6 +172,45 @@ function makeIds(h) {
         }
       }
     },
+    // D-HOST-5: one notice post per object (Service.runNotify). Setting
+    // `running` records the argv in h.detached -- the notification sink every
+    // check before D-HOST-5 reads, which saw execDetached's argv the same way
+    // -- and in h.notifyRuns, and asks h.notifyServer for the answer; the
+    // exit is delivered asynchronously, as a Process's is, through the shell's
+    // own handleNotifyExit. With no server (the default: what a scenario's
+    // logging stub and a desktop with no notification daemon both are) the
+    // wrapper fails: exit 1, nothing on stdout. h.notifyHang leaves a post
+    // running until something ends it; a TERM ends it (signal exit, no
+    // stdout), as it ends the wrapper's bash. The `guard` Timer and the exit
+    // Connections inside the Component are QML glue this double replaces:
+    // a test fires the guard by calling root.notifyOverdue(run).
+    notifyComponent: {
+      createObject(parent, props) {
+        const run = { kind: String((props && props.kind) || ""), command: [], signals: [], destroyed: false, _running: false,
+                      signal(n) {
+                        this.signals.push(n)
+                        if (!this._running || n !== 15) return
+                        this._running = false
+                        h.later.push({ fn: () => h.root.handleNotifyExit(run, run.kind, 15, 1, ""), args: [] })
+                      },
+                      destroy() { this.destroyed = true } }
+        Object.defineProperty(run, "running", {
+          get() { return run._running },
+          set(v) {
+            if (v !== true || run._running) return
+            run._running = true
+            const argv = run.command.slice()
+            h.detached.push(argv)
+            h.notifyRuns.push(run)
+            NOTICE_LEDGER.slotted[run.kind] = (NOTICE_LEDGER.slotted[run.kind] || 0) + 1
+            if (h.notifyHang) return
+            const answer = h.notifyServer ? h.notifyServer.post(argv) : { code: 1, text: "" }
+            h.later.push({ fn: () => { if (!run._running) return; run._running = false; h.root.handleNotifyExit(run, run.kind, answer.code, 0, answer.text) }, args: [] })
+          }
+        })
+        return run
+      }
+    },
     configShieldDebounce: timer("configShieldDebounce"),
     // D-EPG-11 (R31b): the guide-data load is observed -- applyEpgNow runs
     // for real over both file shapes -- and these three are what a fetch
@@ -184,11 +223,29 @@ function makeIds(h) {
     epgFile: view("epgFile"),
     channelsFile: view("channelsFile"),
     playlistStatusFile: view("playlistStatusFile"),
-    // execDetached is the notification sink (Service.notify): recorded as the
-    // argv the shell would run, never run (R21b's report is observed here).
-    Quickshell: { env() { return "" }, execDetached(argv) { h.detached.push(argv.slice()) } }
+    // execDetached is the notification sink (Service.notify) on a tree from
+    // before D-HOST-5, and the fallback after it: recorded as the argv the
+    // shell would run, never run (R21b's report is observed here). A
+    // notification posted this way still reaches h.notifyServer when a test
+    // set one -- detached is how it was sent, not whether it arrived -- and
+    // its stdout goes nowhere, so nothing reads the id it was given.
+    Quickshell: { env() { return "" }, execDetached(argv) {
+      h.detached.push(argv.slice())
+      if (argv[0] !== "omarchy-notification-send") return
+      if (h.notifyServer) h.notifyServer.post(argv.slice())
+      // The rule-15 ledger (D-HOST-5): a notice sent past the kind's slot. A
+      // test that drives the fallback on purpose declares it first.
+      if (h.allowDetachedNotice > 0) h.allowDetachedNotice--
+      else NOTICE_LEDGER.detached.push(argv[argv.indexOf("-r") + 1] + " " + argv[argv.length - 2])
+    } }
   }
 }
+
+// D-HOST-5, rule 15: every notice any service boot in this process posted,
+// across the whole suite -- through a kind's slot (by kind), or detached past
+// it. tests/Model.test.js reads it last: the tree must post every kind, and
+// nothing detached but what a test declared (h.allowDetachedNotice).
+const NOTICE_LEDGER = { slotted: Object.create(null), detached: [] }
 
 // What the harness does not run, and why. Each is a QML-side effect with no
 // say in what the bar entry or state.json end up holding.
@@ -577,7 +634,8 @@ function helperInit(file, code, empty) {
 
 function bootService(serviceText, Model, o) {
   const opts = o || {}
-  const h = { clock: opts.clock || 1760000000000, later: [], cacheRuns: [], signals: [], warnings: [], detached: [], turns: 0, cacheHang: false }
+  const h = { clock: opts.clock || 1760000000000, later: [], cacheRuns: [], signals: [], warnings: [], detached: [], turns: 0, cacheHang: false,
+              notifyRuns: [], notifyServer: null, notifyHang: false, allowDetachedNotice: 0 }
   h.host = new Host(opts.entry, opts.host || "lag")
   h.stateFile = new StateFile(opts.stateText || "", { exists: opts.exists, fault: opts.fault, ownEcho: opts.ownEcho, dirAbsent: opts.dirAbsent, dirPresent: opts.dirPresent, mode: opts.mode, umask: opts.umask })
   h.stateInitStdout = { text: "" }
@@ -1047,6 +1105,35 @@ function bootService(serviceText, Model, o) {
   return h
 }
 
+// D-HOST-5: Omarchy's notification server as MEASURED, for a test that sets
+// h.notifyServer (rule 10: never more forgiving than the real one). Quickshell
+// 0.3.1's NotificationServer, run on a private bus on 2026-10-28 by lane-ply33
+// and again by lane-host5 behind the real /usr/bin/omarchy-notification-send:
+// it numbers cards itself from 1; `-r <id>` replaces a card only when the id
+// is one it handed out and still holds (the card updates in place, the same
+// id comes back); any other id -- a fixed 74021, an expired card's -- gets a
+// NEW card with the next id; an expired or dismissed card is no longer held.
+// The wrapper prints the returned id only with `-p`. `cards` is every card
+// the server ever made, in order; `open()` those still held.
+function notificationServer() {
+  const s = { next: 1, cards: [], held: new Map() }
+  s.post = (argv) => {
+    const r = argv.indexOf("-r")
+    const want = r === -1 ? 0 : Number(argv[r + 1])
+    const app = argv.indexOf("--app-name") === -1 ? "omarchy-action" : argv[argv.indexOf("--app-name") + 1]
+    const title = argv[argv.length - 2]
+    const body = argv[argv.length - 1]
+    let card = s.held.get(want)
+    if (card) { card.title = title; card.body = body; card.app = app; card.updates++ }
+    else { card = { id: s.next++, app, title, body, updates: 0, open: true }; s.cards.push(card); s.held.set(card.id, card) }
+    return { code: 0, text: argv.indexOf("-p") === -1 ? "" : card.id + "\n" }
+  }
+  // The card's own timeout, or the user dismissing it: the server lets go.
+  s.expire = (id) => { const c = s.held.get(id); if (c) { c.open = false; s.held.delete(id) } }
+  s.open = () => s.cards.filter(c => c.open)
+  return s
+}
+
 // A shell restart over what the last one left: the host's stored entry and
 // the state file's bytes, the clock running on.
 function restartService(serviceText, Model, h, o) {
@@ -1054,4 +1141,4 @@ function restartService(serviceText, Model, h, o) {
                                                           stateText: h.stateFile.disk, host: h.host.mode, clock: h.clock + 60000 }, o || {}))
 }
 
-module.exports = { bootService, restartService, rootFunctions, rootProperties, matchBrace, STUBBED, PID, HELPER_EMPTY_STATE }
+module.exports = { bootService, restartService, rootFunctions, rootProperties, matchBrace, STUBBED, PID, HELPER_EMPTY_STATE, notificationServer, NOTICE_LEDGER }
