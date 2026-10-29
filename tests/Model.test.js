@@ -4733,15 +4733,16 @@ check("buildMpvArgv neutral title keeps the raw marker and mpv's own default off
 check("buildMpvArgv user args can re-enable ytdl (last wins)", (() => { const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: ["--ytdl=yes"] }); return a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes") })(), true)
 // D-SINK-13 changed what this one can say. User args still land after every
 // fixed option, which is what makes --ytdl=yes and --screenshot-dir work, but
-// they are no longer LAST: one token follows them deliberately. Asserted as
-// the relationship rather than as a position, so it keeps meaning what it
-// meant - and the trailing token gets its own assertions below.
-check("buildMpvArgv user args come after every fixed option, and exactly one token follows them", (() => {
+// they are no longer LAST: the pin block follows them deliberately (one token
+// until D-SINK-43..46 widened it, 2026-10-29). Asserted as the relationship
+// rather than as a position, so it keeps meaning what it meant - and the
+// block gets its own assertions below.
+check("buildMpvArgv user args come after every fixed option, and exactly the pin block follows them", (() => {
   const user = argv.indexOf("--profile=low-latency")
   const lastFixed = argv.findIndex(t => t.indexOf("--icc-cache-dir=") === 0)
-  return { found: user > 0, afterTheFixedOptions: user > lastFixed, tail: argv.slice(user + 1) }
-})(), { found: true, afterTheFixedOptions: true, tail: ["--tls-verify=yes"] })
-check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--gpu-sw=yes", "--tls-verify=yes", "--tls-verify=yes"])
+  return { found: user > 0, afterTheFixedOptions: user > lastFixed, tailIsThePins: JSON.stringify(argv.slice(user + 1)) === JSON.stringify(Model.mpvPinBlock(Model.playerDirs("/run/user/1000/omarchy-iptv/mpv.sock", STATE_DIR))) }
+})(), { found: true, afterTheFixedOptions: true, tailIsThePins: true })
+check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--gpu-sw=yes", "--tls-verify=yes", "--watch-later-dir=/watch-later", "--load-scripts=no", "--scripts-clr", "--input-commands-clr", "--load-auto-profiles=no", "--load-select=no", "--load-unsafe-playlists=no", "--save-watch-history=no", "--log-file=", "--reset-on-next-file-clr", "--osd-playlist-entry=title", "--stream-lavf-o-clr", "--demuxer-lavf-propagate-opts=yes", "--demuxer-lavf-o-append=tls_verify=1", "--tls-verify=yes"])
 // D-PLY-27 (the owner's decision, 2026-10-26): the launch argv accepts a
 // software renderer, because mpv 0.41.0's VO probe aborts on any compositor
 // that serves no hardware GL or Vulkan context (measured 2026-10-25 in the
@@ -5353,13 +5354,18 @@ checkCall("D-SINK-13 layer 4: the two escapes stay open - --tls-ca-file for a pr
 // on 2026-10-07 with BOTH tls-verify tokens in place, `--stream-lavf-o=
 // tls_verify=0` played the attacker's self-signed stream (exit 0, the GET in
 // the attacker's log), and so did -add, -append and -set. The reserved list is
-// the only thing that closes it. `--demuxer-lavf-o` is measured NOT to bypass
-// and stays open, so this also pins that we did not reserve on suspicion.
-checkCall("D-SINK-13 layer 5: every --stream-lavf-o spelling is refused and --demuxer-lavf-o stays open", () => {
-  const r = Model.splitMpvArgs("--stream-lavf-o=tls_verify=0 --stream-lavf-o-add=tls_verify=0 --stream-lavf-o-append=a=1 --stream-lavf-o-set=b=2 --stream-lavf-o-del=c --demuxer-lavf-o=tls_verify=0")
+// the only thing that closes it. `--demuxer-lavf-o` was "measured NOT to
+// bypass" -- on a DIRECT stream. For HLS and DASH libavformat reopens the URL
+// with the demuxer's options and hands them to every segment open, and
+// `--demuxer-lavf-o=tls_verify=0` played the attacker's segment with both
+// tokens in place (D-SINK-43, 2026-10-29). It stays unreserved for its real
+// workarounds; a token that names a TLS key is refused. This check pinned
+// the opposite (`kept: ["--demuxer-lavf-o=tls_verify=0"]`) until that day.
+checkCall("D-SINK-13 layer 5 and D-SINK-43: every --stream-lavf-o spelling is refused, and --demuxer-lavf-o keeps only its workarounds", () => {
+  const r = Model.splitMpvArgs("--stream-lavf-o=tls_verify=0 --stream-lavf-o-add=tls_verify=0 --stream-lavf-o-append=a=1 --stream-lavf-o-set=b=2 --stream-lavf-o-del=c --demuxer-lavf-o=tls_verify=0 --demuxer-lavf-o-append=verifyhost=evil.example --demuxer-lavf-o=live_start_index=-1")
   return { kept: r.args, rejectedCount: r.rejected.length, streamReserved: Model.MPV_RESERVED["--stream-lavf-o"], demuxerReserved: Model.MPV_RESERVED["--demuxer-lavf-o"] }
 }, {
-  kept: ["--demuxer-lavf-o=tls_verify=0"], rejectedCount: 5,
+  kept: ["--demuxer-lavf-o=live_start_index=-1"], rejectedCount: 7,
   streamReserved: true, demuxerReserved: undefined
 })
 // LAYER 2, the one that actually guarantees verification. The assertion is
@@ -5403,6 +5409,78 @@ checkCall("the --no- form of every reserved option is refused, --tls-verify incl
   }), [])
 
 
+// ---- D-SINK-43..46: every mpv option classified, and the pin block ----
+//
+// The owner's decision of 2026-10-29: pin + classify, not a strict allowlist.
+// tests/fixtures/mpv-options.json classifies EVERY option base mpv 0.41.0
+// lists; scripts/check-mpv-options.py holds it against the installed mpv, and
+// these checks hold the JavaScript mirror to it by CALLING splitMpvArgs and
+// buildMpvArgv (rule 12). tests/test_mpv_options.py does the same to the
+// helper, so the two mirrors meet in one file.
+const mpvOptions = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/mpv-options.json"), "utf8"))
+const mpvOptionNames = Object.keys(mpvOptions.options)
+const mpvRefused = mpvOptionNames.filter(n => {
+  const e = mpvOptions.options[n]
+  return e.class === "reserved" || (e.class === "pinned" && e.pinKey === undefined)
+})
+check("mpv options: MPV_RESERVED is the fixture's reserved and pinned classes, less the two names refused by shape",
+  { reserved: Object.keys(Model.MPV_RESERVED).sort(), byShape: mpvRefused.filter(n => !/^--[a-z0-9][a-z0-9-]*$/.test(n)).sort() },
+  { reserved: mpvRefused.filter(n => /^--[a-z0-9][a-z0-9-]*$/.test(n)).sort(), byShape: ["--{", "--}"] })
+checkCall("mpv options: every refused name is refused as a token, in its = form", () =>
+  mpvRefused.filter(n => Model.splitMpvArgs(n + "=x").rejected.length !== 1), [])
+checkCall("mpv options: the pin block is the fixture's, in its order, the TLS token last", () => {
+  const dirs = Model.playerDirs("/run/user/1000/omarchy-iptv/mpv.sock", "/st")
+  const block = mpvOptions.pinBlock
+  return {
+    constant: JSON.stringify(Model.MPV_PIN_BLOCK) === JSON.stringify(block.slice(1)),
+    composed: JSON.stringify(Model.mpvPinBlock(dirs)) === JSON.stringify(block.map(t => t.replace("{watchLater}", dirs.watchLater))),
+    last: Model.MPV_PIN_BLOCK[Model.MPV_PIN_BLOCK.length - 1] === Model.MPV_TLS_VERIFY,
+    bases: block.map(t => Model.mpvOptionBase(t.split("=")[0])).sort(),
+    pinnedClass: mpvOptionNames.filter(n => mpvOptions.options[n].class === "pinned" && mpvOptions.options[n].type !== "alias").sort()
+  }
+}, (() => {
+  const pinned = mpvOptionNames.filter(n => mpvOptions.options[n].class === "pinned" && mpvOptions.options[n].type !== "alias").sort()
+  return { constant: true, composed: true, last: true, bases: pinned, pinnedClass: pinned }
+})())
+checkCall("mpv options: whatever the user's tokens say, every pinned option's LAST word is the pin block's", () => {
+  // The contrary value of each pinned option, injected PAST the filter so the
+  // position alone decides (the layer-2 shape, for every pin).
+  const contrary = mpvOptionNames.filter(n => mpvOptions.options[n].class === "pinned" && mpvOptions.options[n].type !== "alias").map(n => n + "=x")
+  const dirs = Model.playerDirs("/s", "/st")
+  const a = Model.buildMpvArgv({ socketPath: "/s", stateDir: "/st", extraArgs: contrary })
+  const tail = Model.mpvPinBlock(dirs)
+  const lastUser = Math.max.apply(null, contrary.map(t => a.indexOf(t)))
+  return tail.filter(pin => {
+    const base = Model.mpvOptionBase(pin.split("=")[0])
+    let last = -1
+    a.forEach((t, i) => { if (Model.mpvOptionBase(t.split("=")[0]) === base) last = i })
+    return !(last > lastUser && a[last] === pin)
+  })
+}, [])
+checkCall("mpv options: a base option is set first and never refused, so a user token still wins", () => {
+  const base = mpvOptionNames.filter(n => mpvOptions.options[n].class === "base" && mpvOptions.options[n].type !== "alias")
+  const a = Model.buildMpvArgv({ socketPath: "/s", stateDir: "/st" })
+  return base.filter(n => Model.splitMpvArgs(n + "=x").rejected.length !== 0 || !a.some(t => t.split("=")[0] === n))
+}, [])
+checkCall("mpv options: a warned option is kept and told", () =>
+  mpvOptionNames.filter(n => mpvOptions.options[n].class === "warned").filter(n => {
+    const token = n + "=" + (n === "--ytdl" || n === "--cache-on-disk" ? "yes" : "ytdl_hook-x=1")
+    const r = Model.splitMpvArgs(token)
+    return r.args.length !== 1 || r.warnings.length !== 1
+  }), [])
+check("mpv options: the token filter's words are the fixture's, and they catch every key FFmpeg's TLS forbids or pins",
+  { words: Model.MPV_DEMUXER_TLS_WORDS.slice().sort(),
+    uncaught: Object.keys(mpvOptions.ffmpegTls.options).filter(k => mpvOptions.ffmpegTls.options[k] !== "allowed" && !Model.demuxerNamesTls("--demuxer-lavf-o", "--demuxer-lavf-o=" + k + "=1")) },
+  { words: mpvOptions.ffmpegTls.words.slice().sort(), uncaught: [] })
+check("D-SINK-43: demuxerNamesTls reads the raw token, every spelling, and only for --demuxer-lavf-o",
+  ["--demuxer-lavf-o=tls_verify=0", "--demuxer-lavf-o=\"verify\"=0", "--demuxer-lavf-o-add=%10%verifyhost=x",
+   "--demuxer-lavf-o=ca_file=/c", "--demuxer-lavf-o=live_start_index=-1", "--stream-lavf-o=verify=0", "--hwdec=verify"]
+    .map(t => Model.demuxerNamesTls(Model.mpvOptionBase(t.split("=")[0]), t)),
+  [true, true, true, true, false, false, false])
+check("D-SINK-51: --http-proxy is kept and told, because the proxy gets a plain-http stream's whole URL",
+  Model.splitMpvArgs("--http-proxy=http://u:pw@proxy.example:3128"),
+  { args: ["--http-proxy=http://u:pw@proxy.example:3128"], rejected: [], warnings: ["mpvArg --http-proxy hands the stream address to another program"] })
+
 // ---- MPV_RESERVED (ARCHITECTURE-PLAYER.md 4.12, plus D-SINK-2) ----
 const RESERVED_ADDED = ["--log-file", "--dump-stats", "--stream-record", "--save-position-on-quit", "--watch-later-dir", "--osd-msg1", "--osd-msg2", "--osd-msg3", "--term-status-msg", "--screenshot-template"]
 // D-SINK-2 added an eleventh, `--include`: it loads a config file, and a
@@ -5427,7 +5505,9 @@ const RESERVED_ADDED = ["--log-file", "--dump-stats", "--stream-record", "--save
 // The LABEL below is a count, not a word: it said "thirteen" when the number
 // was 22 and "fourteen" when it was 23, because the word was never re-read
 // when the number moved. It names the number now.
-check("MPV_RESERVED holds exactly 24 entries", Object.keys(Model.MPV_RESERVED).length, 24)
+// 53 since D-SINK-43..46 (2026-10-29): the reserved and pinned classes of
+// tests/fixtures/mpv-options.json, held to that file name by name below.
+check("MPV_RESERVED holds exactly 53 entries", Object.keys(Model.MPV_RESERVED).length, 53)
 check("M5-01: --demuxer-cache-unlink-files is reserved and --cache-on-disk is not",
   [Model.MPV_RESERVED["--demuxer-cache-unlink-files"], Model.MPV_RESERVED["--cache-on-disk"], Model.MPV_DISK_WARN["--cache-on-disk"]], [true, undefined, true])
 check("M5-01: every spelling of the unlink switch is rejected, and the disk cache itself is kept and warned",
@@ -5456,8 +5536,10 @@ check("D-SINK-2: every spelling of a reserved list option is rejected, not just 
   const r = Model.splitMpvArgs(spellings.join(" "))
   return [r.args, r.rejected.length]
 })(), [[], 6])
+// (`--sub-files-append` was the example until 2026-10-29, when D-SINK-51
+// reserved it: it opens a second address with the provider's headers.)
 check("D-SINK-2: and an ordinary option with a list suffix is still accepted", (() => {
-  const r = Model.splitMpvArgs("--sub-files-append=/tmp/a.srt --volume=50")
+  const r = Model.splitMpvArgs("--glsl-shaders-append=/tmp/a.glsl --volume=50")
   return [r.args.length, r.rejected]
 })(), [2, []])
 check("splitMpvArgs rejects every addition and its --no- form", (() => {
@@ -5593,14 +5675,15 @@ check("parsePlayerProbe: a foreign or pre-M2-02 player has no stash", (() => { c
 // vectors are the file bin/omarchy-iptv runs too (rule 12).
 const tlsFixture = JSON.parse(require("fs").readFileSync(require("path").join(__dirname, "fixtures/player-tls.json"), "utf8"))
 checkCall("tlsPropertiesSafe: the shared fixture, every case, by name",
-  () => tlsFixture.cases.map(c => c.name + ": " + Model.tlsPropertiesSafe(c.verify, c.optionCount)),
+  () => tlsFixture.cases.map(c => c.name + ": " + Model.tlsPropertiesSafe(c.verify, c.optionCount, c.unpinned)),
   tlsFixture.cases.map(c => c.name + ": " + c.safe))
 // The fixture earns its keep only if it holds both answers and the readings that
 // cannot be taken at all.
 check("tlsPropertiesSafe: the fixture has a safe case, unsafe cases, and both absent readings",
   [tlsFixture.cases.filter(c => c.safe === true).length, tlsFixture.cases.filter(c => c.safe === false).length,
-   tlsFixture.cases.some(c => c.verify === null), tlsFixture.cases.some(c => c.optionCount === null)],
-  [1, 14, true, true])
+   tlsFixture.cases.some(c => c.verify === null), tlsFixture.cases.some(c => c.optionCount === null),
+   tlsFixture.cases.some(c => c.unpinned === null), tlsFixture.cases.some(c => c.unpinned === false)],
+  [1, 22, true, true, true, true])
 checkCall("playerTlsVerdict: the shared verdicts, every case, by name",
   () => tlsFixture.verdicts.map(v => { const got = Model.playerTlsVerdict(v.tls); return v.name + ": " + got.safe + "/" + got.action }),
   tlsFixture.verdicts.map(v => v.name + ": " + v.safe + "/" + v.action))
@@ -5701,22 +5784,24 @@ checkCall("D-SINK-16: an owed TLS reload is HELD when the shell is not ready, an
 // whose cost is the credential.
 checkCall("playerTls: a missing node, junk, and the shapes that must not read as zero", () => [
   Model.playerTls(undefined), Model.playerTls(null), Model.playerTls("tls-verify=yes"), Model.playerTls(7),
-  Model.playerTls({ verify: true, optionCount: 0 }),
-  Model.playerTls({ verify: "yes", optionCount: false, migrated: 1 }),
-  Model.playerTls({ verify: true, optionCount: 0.5 }),
-  Model.playerTls({ verify: true, optionCount: -1 })
+  Model.playerTls({ verify: true, optionCount: 0, unpinned: 0 }),
+  Model.playerTls({ verify: "yes", optionCount: false, unpinned: false, migrated: 1 }),
+  Model.playerTls({ verify: true, optionCount: 0.5, unpinned: 0.5 }),
+  Model.playerTls({ verify: true, optionCount: -1, unpinned: -1 }),
+  Model.playerTls({ verify: true, optionCount: 0 })
 ], [null, null, null, null,
-  { verify: true, optionCount: 0, migrated: false },
-  { verify: null, optionCount: null, migrated: false },
-  { verify: true, optionCount: null, migrated: false },
-  { verify: true, optionCount: null, migrated: false }])
+  { verify: true, optionCount: 0, unpinned: 0, migrated: false },
+  { verify: null, optionCount: null, unpinned: null, migrated: false },
+  { verify: true, optionCount: null, unpinned: null, migrated: false },
+  { verify: true, optionCount: null, unpinned: null, migrated: false },
+  { verify: true, optionCount: 0, unpinned: null, migrated: false }])
 // `migrated` is the whole of the difference between "adopt it" and "adopt it and
 // re-establish the channel on it", so it is strict about what counts as true.
 checkCall("playerTlsVerdict: only a true `migrated` asks for the reload", () => [
-  Model.playerTlsVerdict({ verify: true, optionCount: 0, migrated: true }).action,
-  Model.playerTlsVerdict({ verify: true, optionCount: 0, migrated: false }).action,
-  Model.playerTlsVerdict({ verify: true, optionCount: 0, migrated: "yes" }).action,
-  Model.playerTlsVerdict({ verify: true, optionCount: 0 }).action
+  Model.playerTlsVerdict({ verify: true, optionCount: 0, unpinned: 0, migrated: true }).action,
+  Model.playerTlsVerdict({ verify: true, optionCount: 0, unpinned: 0, migrated: false }).action,
+  Model.playerTlsVerdict({ verify: true, optionCount: 0, unpinned: 0, migrated: "yes" }).action,
+  Model.playerTlsVerdict({ verify: true, optionCount: 0, unpinned: 0 }).action
 ], ["reload", "feed", "feed", "feed"])
 // An unsafe player is "stop" whatever else the node says, including the case
 // where the helper never managed to set anything.
@@ -5724,9 +5809,11 @@ checkCall("playerTlsVerdict: unsafe is stop, and so is a node that is not there"
   Model.playerTlsVerdict(null).action, Model.playerTlsVerdict(undefined).action,
   Model.playerTlsVerdict({}).action,
   Model.playerTlsVerdict({ verify: false, optionCount: 0, migrated: false }).action,
-  Model.playerTlsVerdict({ verify: true, optionCount: 1, migrated: true }).action,
-  Model.playerTlsVerdict(null).safe, Model.playerTlsVerdict({ verify: true, optionCount: 0, migrated: true }).safe
-], ["stop", "stop", "stop", "stop", "stop", false, true])
+  Model.playerTlsVerdict({ verify: true, optionCount: 1, unpinned: 0, migrated: true }).action,
+  Model.playerTlsVerdict({ verify: true, optionCount: 0, unpinned: 1, migrated: true }).action,
+  Model.playerTlsVerdict({ verify: true, optionCount: 0, migrated: true }).action,
+  Model.playerTlsVerdict(null).safe, Model.playerTlsVerdict({ verify: true, optionCount: 0, unpinned: 0, migrated: true }).safe
+], ["stop", "stop", "stop", "stop", "stop", "stop", "stop", false, true])
 // The node is pinned on both sides like `pid` and `rewind`: a helper that
 // dropped it reads as "stop", never as "feed".
 checkCall("parsePlayerProbe: `tls` comes off the shared vector, and absent reads null", () => [
@@ -5735,14 +5822,14 @@ checkCall("parsePlayerProbe: `tls` comes off the shared vector, and absent reads
   Model.playerTlsVerdict(Model.parsePlayerProbe(probeBody).tls).action,
   (() => { const bare = Object.assign({}, probeFixture.reply); delete bare.tls; return Model.parsePlayerProbe(JSON.stringify(bare)).tls })(),
   Model.playerTlsVerdict(Model.parsePlayerProbe("junk").tls).action
-], [true, { verify: true, optionCount: 0, migrated: false }, "feed", null, "stop"])
+], [true, { verify: true, optionCount: 0, unpinned: 0, migrated: false }, "feed", null, "stop"])
 // The property names cross the JS/python boundary as literals on both sides, so
 // they are pinned here the way MPV_TLS_VERIFY is: a rename on one side and not
 // the other would make every read answer "property not found", which reads as
 // "stop" - visible, but it would stop every adopted player in the field.
-check("the two property names the helper and the shell must spell the same",
-  [Model.MPV_TLS_VERIFY_PROP, Model.MPV_STREAM_OPTS_PROP],
-  [tlsFixture.properties.verify, tlsFixture.properties.streamOptions])
+check("the four property names the helper and the shell must spell the same",
+  [Model.MPV_TLS_VERIFY_PROP, Model.MPV_STREAM_OPTS_PROP, Model.MPV_DEMUXER_OPTS_PROP, Model.MPV_AUTO_PROFILES_PROP],
+  [tlsFixture.properties.verify, tlsFixture.properties.streamOptions, tlsFixture.properties.demuxerOptions, tlsFixture.properties.autoProfiles])
 check("and the fixture names them, so the join is a call and not a copy",
   [tlsFixture.properties.verify, tlsFixture.properties.streamOptions], ["tls-verify", "stream-lavf-o"])
 // WHAT THIS PAIR IS AND IS NOT (rule 14, said out loud rather than implied).
@@ -14128,7 +14215,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
                                            firstLoad: { state: "unknown", reason: "" }, warnings: [], applied: true, playing: null })
     const probeOf = o => JSON.stringify(Object.assign({ ok: true, kind: "player.probe", running: true, responsive: true, pid: 4242, idle: false,
       stash: { schema: 1, playing: true, id: "t:x", name: "X", group: "G", launchedFrom: "", sourceKey: KA, since: 1, entryId: 1, seq: 1, verb: "start" },
-      owner: null, seq: 1, claimed: true, rewind: null, tls: { verify: true, optionCount: 0, migrated: false } }, o || {}))
+      owner: null, seq: 1, claimed: true, rewind: null, tls: { verify: true, optionCount: 0, unpinned: 0, migrated: false } }, o || {}))
     const slotVerb = h => { const c = h.ids.playerProc.command; const i = c.indexOf("player"); return i === -1 ? "" : c[i + 1] }
     const exit = (h, text) => { h.ids.playerProc.running = false; h.root.handlePlayerResult(text); h.drain() }
     const playing = h => {

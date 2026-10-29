@@ -35,7 +35,7 @@ def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, An
     return {"id": channel_id or "", "url": url, "name": name, "headers": headers, "group": group}
 
 
-def tls_properties_safe(verify: Any, option_count: Any) -> bool:
+def tls_properties_safe(verify: Any, option_count: Any, unpinned: Any) -> bool:
     """Is this player's certificate handling safe to hand a credentialed URL to?
 
     Mirror of Model.tlsPropertiesSafe; both sides run the shared
@@ -47,18 +47,110 @@ def tls_properties_safe(verify: Any, option_count: Any) -> bool:
     how many entries `stream-lavf-o` holds, which must be zero: FFmpeg's own
     `tls_verify` AVOption reaches the same place as mpv's option and OUTVOTES
     it (measured, D-SINK-13 layer 3), so a non-empty map is not safe whatever
-    happens to be in it. None means the reading could not be taken, which is
-    not safe either.
+    happens to be in it. `unpinned` (D-SINK-43/44, 2026-10-29) is how many of
+    the OTHER TLS pins the player does not hold -- see read_tls_state -- and
+    must be zero too. None means a reading could not be taken, which is not
+    safe either.
     """
     if verify is not True:
         return False
-    if isinstance(option_count, bool) or not isinstance(option_count, int):
-        return False
-    return option_count == 0
+    for count in (option_count, unpinned):
+        if isinstance(count, bool) or not isinstance(count, int) or count != 0:
+            return False
+    return True
 
 
-def read_tls_state(client: MpvIpc) -> tuple[Any, Any]:
-    """The two D-SINK-16 readings, taken OFF the player.
+def demuxer_tls_unsafe(options: Any) -> int | None:
+    """How many entries of a `demuxer-lavf-o` map undo or weaken certificate
+    verification (D-SINK-43), or None when the reading is not a map.
+
+    For HLS and DASH libavformat reopens the URL with these options and copies
+    them into every segment and key open, so they are TLS PROTOCOL options
+    there: `tls_verify` / `verify` other than "1" turned verification off with
+    both --tls-verify=yes tokens in place, and `verifyhost` accepted the
+    attacker's certificate for its OWN name (both measured). The trailing pin
+    makes `tls_verify` read "1"; nothing pins the rest, so they are counted
+    here and the load is refused. A COUNT, never a key or a value (rule 5).
+    """
+    if not isinstance(options, dict):
+        return None
+    count = 0
+    for key, value in options.items():
+        if key in DEMUXER_TLS_ON and value != "1":
+            count += 1
+        elif key in DEMUXER_TLS_FORBIDDEN:
+            count += 1
+    return count
+
+
+def profile_option_bases(by_name: dict[str, Any], name: str, seen: set[str] | None = None) -> set[str]:
+    """Every option base a profile sets, following `profile=` to the profiles
+    it names (cycle-safe). Keys only: a profile's VALUES are the user's and
+    can carry anything (a header, a proxy with credentials)."""
+    seen = set() if seen is None else seen
+    if name in seen:
+        return set()
+    seen.add(name)
+    out: set[str] = set()
+    profile = by_name.get(name)
+    options = profile.get("options") if isinstance(profile, dict) else None
+    for option in options if isinstance(options, list) else []:
+        key = option.get("key") if isinstance(option, dict) else None
+        if not isinstance(key, str):
+            continue
+        base = mpv_option_base("--" + key)[2:]
+        if base.startswith("no-") and base[3:] in PER_FILE_TLS_OPTIONS:
+            base = base[3:]
+        if base == "profile":
+            for target in str(option.get("value") or "").split(","):
+                out |= profile_option_bases(by_name, target.strip(), seen)
+        else:
+            out.add(base)
+    return out
+
+
+def per_file_profile_threats(profiles: Any, loose: list[str]) -> int | None:
+    """How many of the user's [protocol.*] / [extension.*] profiles would set,
+    at file load and so AFTER the read-back, an option the TLS layer depends
+    on that this player does NOT have set from the command line (`loose`).
+
+    The residual this closes is measured: a player launched without the pin
+    block, adopted, migrated over IPC and read back as safe, fetched the
+    attacker's stream anyway because its mpv.conf held [protocol.https]
+    stream-lavf-o=tls_verify=0 -- mpv applies those profiles to every option
+    that was not set on the command line, and a set_property is not one. On a
+    player launched with the pin block `loose` is empty and this is never
+    asked. `include` counts too: what it loads cannot be read from here."""
+    if not isinstance(profiles, list):
+        return None
+    by_name = {p["name"]: p for p in profiles if isinstance(p, dict) and isinstance(p.get("name"), str)}
+    watched = set(loose) | {"include"}
+    count = 0
+    for name in by_name:
+        if name.startswith(PER_FILE_PROFILE_PREFIXES) and profile_option_bases(by_name, name) & watched:
+            count += 1
+    return count
+
+
+def read_profile_threats(client: MpvIpc) -> int | None:
+    """per_file_profile_threats over this player, or None when it cannot be
+    established. `option-info/<name>/set-from-commandline` is mpv's own
+    answer, and it survives our runtime set_property (measured)."""
+    loose = []
+    for option in PER_FILE_TLS_OPTIONS:
+        ok, flag = client.try_command("get_property", "option-info/%s/set-from-commandline" % option)
+        if not ok or not isinstance(flag, bool):
+            return None
+        if not flag:
+            loose.append(option)
+    if not loose:
+        return 0
+    ok, profiles = client.try_command("get_property", "profile-list")
+    return per_file_profile_threats(profiles if ok else None, loose)
+
+
+def read_tls_state(client: MpvIpc) -> tuple[Any, Any, Any]:
+    """The D-SINK-16 readings, taken OFF the player.
 
     Read back rather than inferred from a set_property reply, because a
     `success` reply is a statement about the request and not about the value;
@@ -66,16 +158,58 @@ def read_tls_state(client: MpvIpc) -> tuple[Any, Any]:
     2026-10-07. An unreadable property answers None, and tls_properties_safe
     refuses None.
 
-    A COUNT, never the keys or the values: `stream-lavf-o` can hold a proxy
-    address with credentials in it, and this number travels out of here into a
-    reply the shell reads (engineering rule 5). The count is the whole of what
-    the decision needs.
+    COUNTS, never the keys or the values: `stream-lavf-o` can hold a proxy
+    address with credentials in it, and these numbers travel out of here into
+    a reply the shell reads (engineering rule 5). The counts are the whole of
+    what the decision needs.
+
+    The third reading (2026-10-29) is every OTHER TLS pin the player must hold,
+    summed: demuxer-lavf-o's TLS entries (D-SINK-43), load-auto-profiles not
+    reading False, mpv's `no` (D-SINK-44: a profile-cond profile applies over the command
+    line at every load), and the per-file profiles that could undo a loose
+    option after this read (read_profile_threats). A player launched with the
+    pin block reads 0 on all three.
     """
     ok, verify = client.try_command("get_property", MPV_TLS_VERIFY_PROP)
     verify = verify if ok and isinstance(verify, bool) else None
     ok, options = client.try_command("get_property", MPV_STREAM_OPTS_PROP)
     count = len(options) if ok and isinstance(options, dict) else None
-    return verify, count
+    ok, demuxer = client.try_command("get_property", MPV_DEMUXER_OPTS_PROP)
+    demuxer_unsafe = demuxer_tls_unsafe(demuxer) if ok else None
+    # mpv's JSON IPC answers this choice as the boolean False for `no` (and
+    # True for `yes`, the string "auto" for auto: measured on 0.41.0), so the
+    # one safe reading is False itself -- not the string, which mpv never sends.
+    ok, mode = client.try_command("get_property", MPV_AUTO_PROFILES_PROP)
+    auto_on = (0 if mode is False else 1) if ok and isinstance(mode, (bool, str)) else None
+    threats = read_profile_threats(client)
+    parts = (demuxer_unsafe, auto_on, threats)
+    unpinned = None if any(part is None for part in parts) else sum(parts)
+    return verify, count, unpinned
+
+
+def secure_player(client: MpvIpc) -> None:
+    """The writes that make a player hold the TLS pins over IPC. Their replies
+    are not consulted: the read-back that follows is the judge.
+
+    `tls-verify` and `stream-lavf-o` are set unconditionally, as D-SINK-16
+    always did. demuxer-lavf-o loses only its unsafe KEYS -- the user's other
+    keys are real workarounds -- and with `tls_verify` gone mpv's own
+    tls-verify, now True, is what libavformat is handed. load-auto-profiles is
+    set to no only where it is not already, and mpv UNLOADS auto_profiles.lua
+    when it is (measured on a pre-pin player: the profile-cond profile that
+    had turned verification off stopped applying, 3 of 3). A runtime set does
+    not clear an option's set-from-commandline flag (measured), so none of
+    this weakens the pins of a player that already holds them."""
+    client.try_command("set_property", MPV_TLS_VERIFY_PROP, True)
+    client.try_command("set_property", MPV_STREAM_OPTS_PROP, {})
+    ok, options = client.try_command("get_property", MPV_DEMUXER_OPTS_PROP)
+    if ok and isinstance(options, dict):
+        for key, value in options.items():
+            if (key in DEMUXER_TLS_ON and value != "1") or key in DEMUXER_TLS_FORBIDDEN:
+                client.try_command("change-list", MPV_DEMUXER_OPTS_PROP, "remove", key)
+    ok, mode = client.try_command("get_property", MPV_AUTO_PROFILES_PROP)
+    if not ok or mode is not False:
+        client.try_command("set_property", MPV_AUTO_PROFILES_PROP, "no")
 
 
 def assert_tls_verification(client: MpvIpc, label: str) -> None:
@@ -94,15 +228,14 @@ def assert_tls_verification(client: MpvIpc, label: str) -> None:
     consulted: the measurement that this fix rests on is a read-back, and a
     `success` reply says nothing about the value that ended up there.
     """
-    client.try_command("set_property", MPV_TLS_VERIFY_PROP, True)
-    client.try_command("set_property", MPV_STREAM_OPTS_PROP, {})
-    verify, count = read_tls_state(client)
-    if tls_properties_safe(verify, count):
+    secure_player(client)
+    verify, count, unpinned = read_tls_state(client)
+    if tls_properties_safe(verify, count, unpinned):
         return
-    # Diagnosable without being a sink: a three-valued flag and a count, never
-    # a key or a value out of that map.
-    log("%s: %s reads %r and %s holds %r entries after being set"
-        % (label, MPV_TLS_VERIFY_PROP, verify, MPV_STREAM_OPTS_PROP, count))
+    # Diagnosable without being a sink: a three-valued flag and two counts,
+    # never a key or a value out of either map.
+    log("%s: %s reads %r and %s holds %r entries after being set, and %r other TLS pins are not held"
+        % (label, MPV_TLS_VERIFY_PROP, verify, MPV_STREAM_OPTS_PROP, count, unpinned))
     raise HelperError("tls_unverified", "the player would not verify the stream's certificate")
 
 
@@ -126,14 +259,42 @@ def migrate_tls(client: MpvIpc) -> dict[str, Any]:
     unchanged process, `set_property tls-verify True` read back True and the
     attacker's log went from one GET to none, with a plain http:// stream from
     a second local server still playing as the positive control.
+
+    Since 2026-10-29 `unpinned` rides with the two older readings: a player
+    started by 0.15.0 or earlier holds none of the pin block, so the demuxer's
+    TLS keys and load-auto-profiles are migrated here too, and a per-file
+    profile in its mpv.conf that could undo a loose option after this read is
+    counted -- that one no migration can fix, so the shell stops the player.
     """
-    verify, count = read_tls_state(client)
-    if tls_properties_safe(verify, count):
-        return {"verify": verify, "optionCount": count, "migrated": False}
-    client.try_command("set_property", MPV_TLS_VERIFY_PROP, True)
-    client.try_command("set_property", MPV_STREAM_OPTS_PROP, {})
-    verify, count = read_tls_state(client)
-    return {"verify": verify, "optionCount": count, "migrated": True}
+    verify, count, unpinned = read_tls_state(client)
+    if tls_properties_safe(verify, count, unpinned):
+        return {"verify": verify, "optionCount": count, "unpinned": unpinned, "migrated": False}
+    secure_player(client)
+    verify, count, unpinned = read_tls_state(client)
+    return {"verify": verify, "optionCount": count, "unpinned": unpinned, "migrated": True}
+
+
+def pin_adopted_player(client: MpvIpc, sock_path: str) -> int:
+    """The pins that are not about the TLS peer, applied over IPC to a player
+    this helper did not start (2026-10-29, D-SINK-16's shape): best effort,
+    read first and written only where they differ, never a reason to refuse.
+    Each was measured taking effect at runtime on a pre-pin player: watch
+    history stopped, the select menu unloaded, nested unsafe entries were
+    refused, a zap sent its own headers, ${playlist} drew the title, the log
+    stopped growing. Returns how many writes did not take, for the journal."""
+    where = player_dirs(sock_path)
+    failed = 0
+    for prop, value in (("load-select", False), ("save-watch-history", False),
+                        ("load-unsafe-playlists", False), ("reset-on-next-file", []),
+                        ("osd-playlist-entry", "title"), ("log-file", ""),
+                        ("watch-later-dir", where["watchLater"])):
+        ok, current = client.try_command("get_property", prop)
+        if ok and current == value:
+            continue
+        written, _ = client.try_command("set_property", prop, value)
+        if not written:
+            failed += 1
+    return failed
 
 
 def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] | None = None,
@@ -214,7 +375,8 @@ def applied_by_another_client(client: MpvIpc) -> dict[str, Any] | None:
     against real mpv 0.41, headless: the node answers `property not found`
     until something writes it, and the count answers 0 until something loads.
     Nothing on the launch argv can put a file there either (`filter_mpv_args`
-    keeps bare tokens off it, and `--idle=once` idles). So a channel sitting
+    keeps bare tokens off it, refuses `--playlist` -- which did put entries
+    there until 2026-10-29 -- and `--idle=once` idles). So a channel sitting
     there NOW was applied by a client that connected after the spawn, and
     every such client is carrying an intent this start was issued BEFORE.
 
@@ -482,6 +644,12 @@ def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
             # rather than fatal (limit_core_of says why).
             if not limit_core_of(keep):
                 warnings.append("could not limit the adopted player's core dumps")
+            # 2026-10-29: the pins that are not about the TLS peer (the TLS
+            # ones are apply_channel's, before the load). Best effort, so a
+            # journal line and not a warning the shell would show.
+            failed = pin_adopted_player(client, sock_path)
+            if failed:
+                log("player start: the adopted player refused %d pin(s)" % failed)
             others = [record for record in found if record["pid"] != keep]
             if others:
                 # Never rung 1 here: `quit` travels over the shared socket and
@@ -692,6 +860,11 @@ def player_probe(args: argparse.Namespace) -> int:
             # this probe learns, a player that is not verifying stops being one
             # here rather than at the next zap.
             payload["tls"] = migrate_tls(client)
+            # 2026-10-29: and the pins that are not about the TLS peer, best
+            # effort (pin_adopted_player); the readings above are the gate.
+            failed = pin_adopted_player(client, sock)
+            if failed:
+                log("player probe: the adopted player refused %d pin(s)" % failed)
             payload["pid"] = _connected_pid(client, found)
             # D-SINK-39, beside the TLS migration and for the same reason: the
             # reattach is the one moment a pre-upgrade player can be kept from

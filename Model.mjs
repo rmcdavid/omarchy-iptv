@@ -31,8 +31,9 @@ export {
   GROUP_SCOPE_PREFIX, MAX_HIDDEN_GROUPS, ELLIPSIS, QUOTE_OPEN, QUOTE_CLOSE,
   SEP, GLYPHS, SETTING_RANGES, MAX_CHNO_MAJOR, MAX_CHNO_MINOR, MAX_CHNO_LABEL,
   CHNO_SEPARATORS, CHNO_ENTRY_SEP, CHANNEL_ORDERS, CHNO_FIELDS, MPV_RESERVED,
-  MPV_TLS_VERIFY, MPV_TLS_VERIFY_PROP, MPV_STREAM_OPTS_PROP, NOTIFY_IDS,
-  PLACE_TTL_SEC, ZAP_MAX_SKIP
+  MPV_DEMUXER_TLS_WORDS, MPV_TLS_VERIFY, MPV_PIN_BLOCK, MPV_TLS_VERIFY_PROP,
+  MPV_STREAM_OPTS_PROP, MPV_DEMUXER_OPTS_PROP, MPV_AUTO_PROFILES_PROP,
+  NOTIFY_IDS, PLACE_TTL_SEC, ZAP_MAX_SKIP
 } from "./model/build.mjs"
 export {
   FOLD_GROUPS, asList, keyedMap, hasOwnKey, ownKeyValue, trimEndSpace,
@@ -124,14 +125,14 @@ export {
   MPV_HANDOFF_TEXT, MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase,
   mpvHandoffName, mpvDiskName, mpvArgWarning, mpvArgWarnings,
   MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT, mpvRefusedWarnings, splitMpvArgs,
-  mpvRejectedLine, mpvRejectedName, headerArgs, MPV_RAW_PREFIX,
-  mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv, helperArgv,
-  playlistFetchArgv, fetchStateDir, playlistProbeArgv, epgFetchArgv,
-  FETCH_URL_ENV, fetchEnvironment, failedArgv, logoFetchArgv,
-  playerTracksArgv, trackChoice, parseTracks, trackLanguage, trackLabel,
-  trackDetail, trackRows, trackCursorHome, moveTrackCursor,
-  TRACKS_RECOVERY_MAX, shouldRefreshTracks, trackPanelMessage,
-  trackAccessibleName
+  demuxerNamesTls, mpvRejectedLine, mpvRejectedName, headerArgs,
+  MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv,
+  mpvPinBlock, helperArgv, playlistFetchArgv, fetchStateDir,
+  playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,
+  failedArgv, logoFetchArgv, playerTracksArgv, trackChoice, parseTracks,
+  trackLanguage, trackLabel, trackDetail, trackRows, trackCursorHome,
+  moveTrackCursor, TRACKS_RECOVERY_MAX, shouldRefreshTracks,
+  trackPanelMessage, trackAccessibleName
 } from "./model/mpv.mjs"
 export {
   SEEK_FLOOR_MARGIN_S, SEEK_EDGE_MARGIN_S, SEEK_MOVED_THRESHOLD_S, SEEK_MAX_S,

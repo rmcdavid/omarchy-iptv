@@ -47,6 +47,41 @@ def run(*args):
     return code, payload, out.getvalue(), err.getvalue()
 
 
+# The TLS assertion's wire sequence (assert_tls_verification) on a player
+# started WITHOUT the pin block, which is what FakeMpv's defaults are: the two
+# D-SINK-16 sets, the demuxer map read (nothing to remove in an empty one),
+# load-auto-profiles read as mpv's own "auto" and set to no, then the
+# read-back -- the two old readings, the two new ones, and, because nothing on
+# this player was set from the command line, mpv's own answer for each option
+# a per-file profile could undo and the profile list itself (D-SINK-44).
+# Spelled out rather than built from the helper's constants, so a change to
+# the sequence has to be a change to this list too.
+TLS_PRELUDE_PRE_PIN = [
+    ["set_property", "tls-verify", True],
+    ["set_property", "stream-lavf-o", {}],
+    ["get_property", "demuxer-lavf-o"],
+    ["get_property", "load-auto-profiles"],
+    ["set_property", "load-auto-profiles", "no"],
+    ["get_property", "tls-verify"],
+    ["get_property", "stream-lavf-o"],
+    ["get_property", "demuxer-lavf-o"],
+    ["get_property", "load-auto-profiles"],
+    ["get_property", "option-info/tls-verify/set-from-commandline"],
+    ["get_property", "option-info/stream-lavf-o/set-from-commandline"],
+    ["get_property", "option-info/demuxer-lavf-o/set-from-commandline"],
+    ["get_property", "option-info/demuxer-lavf-propagate-opts/set-from-commandline"],
+    ["get_property", "option-info/load-auto-profiles/set-from-commandline"],
+    ["get_property", "profile-list"],
+]
+# The options the pin block sets from the command line: a FakeMpv given these
+# as `cmdline` (and the pinned values as `props`) is a player launched by this
+# release's argv.
+PINNED_CMDLINE = ("tls-verify", "stream-lavf-o", "demuxer-lavf-o", "demuxer-lavf-propagate-opts",
+                  "load-auto-profiles")
+PINNED_PROPS = {"tls-verify": True, "stream-lavf-o": {}, "demuxer-lavf-o": {"tls_verify": "1"},
+                "load-auto-profiles": False}
+
+
 class FakeMpv:
     """Accepts connections on a unix socket, records every command and answers
     like mpv: {"error": "success", "data": ..., "request_id": N}.
@@ -120,13 +155,35 @@ class FakeMpv:
     # mpv 0.41's own defaults for the two D-SINK-16 properties: `--tls-verify`
     # defaults to NO (`mpv --list-options`), and `stream-lavf-o` is an empty
     # key-value map that the JSON IPC answers as {}.
-    TLS_DEFAULTS = {"tls-verify": False, "stream-lavf-o": {}}
+    #
+    # 2026-10-29 (D-SINK-43/44 and the adopted-player pins): the rest of what
+    # the read-back now asks, at mpv 0.41's own defaults, each measured over a
+    # real IPC socket rather than assumed: `demuxer-lavf-o` an empty map,
+    # `load-auto-profiles` the STRING "auto" (and, after a set of "no", the
+    # BOOLEAN False -- mpv answers that choice's yes/no as JSON booleans, which
+    # is what set_property models below), `profile-list` the user's profiles
+    # (none here; the builtin ones are never per-file), and the pins
+    # pin_adopted_player reads. With no `props` this is still a player the way
+    # 0.12.1 launched one: nothing set from the command line (`cmdline`).
+    TLS_DEFAULTS = {"tls-verify": False, "stream-lavf-o": {}, "demuxer-lavf-o": {},
+                    "load-auto-profiles": "auto", "profile-list": [],
+                    "load-select": True, "save-watch-history": False, "load-unsafe-playlists": False,
+                    "reset-on-next-file": [], "osd-playlist-entry": "title", "log-file": "",
+                    "watch-later-dir": ""}
+    # mpv 0.41 answers `yes` and `no` of these choices as booleans (measured for
+    # load-auto-profiles: "auto" before, False after `set ... no`).
+    CHOICE_BOOLEANS = {"load-auto-profiles": {"no": False, "yes": True}}
 
     def __init__(self, path, props=None, event_first=False, silent=False, refuse=(), close_on_quit=True,
                  entry_ids=True, user_data=None, seek_moves=True, seek_lag_s=0.0, seek_silent=False,
                  missing=(), landing_offset=0.0, restart_lag_s=0.0, restart_silent=False,
-                 restart_before_seek=False):
+                 restart_before_seek=False, cmdline=()):
         self.path = path
+        # The options this player had on its command line: mpv's own
+        # `option-info/<name>/set-from-commandline` answers True for them and
+        # False for every other option (measured; a runtime set_property does
+        # not change it, also measured).
+        self.cmdline = set(cmdline)
         self.props = dict(self.TLS_DEFAULTS)
         self.props.update(props or {})
         self.missing = set(missing)
@@ -254,7 +311,27 @@ class FakeMpv:
             if name == "user-data":
                 with self.lock:
                     return {"error": "success", "data": dict(self.user_data), "request_id": request_id}
+            if name.startswith("option-info/") and name.endswith("/set-from-commandline"):
+                option = name[len("option-info/"):-len("/set-from-commandline")]
+                return {"error": "success", "data": option in self.cmdline, "request_id": request_id}
             return {"error": "property not found", "request_id": request_id}
+        if command[0] == "change-list":
+            # mpv's list editing over IPC, for the key/value lists the helper
+            # touches: `remove` deletes a key, `append` sets one. A name in
+            # `refuse` refuses this the way it refuses a set.
+            name, operation, value = command[1], command[2], command[3]
+            if name in self.refuse or name in self.missing:
+                return {"error": "property unavailable", "request_id": request_id}
+            with self.lock:
+                current = dict(self.props.get(name) or {})
+                if operation == "remove":
+                    current.pop(value, None)
+                elif operation == "append":
+                    key, _, item = str(value).partition("=")
+                    current.pop(key, None)
+                    current[key] = item
+                self.props[name] = current
+            return {"error": "success", "data": None, "request_id": request_id}
         if command[0] == "set_property":
             name = command[1]
             if name in self.refuse:
@@ -272,8 +349,12 @@ class FakeMpv:
             # D-SINK-16's fix depends on (rule 10). A name in `missing` stays
             # unreadable: that is the wedged / too-old player.
             if name not in self.missing:
+                value = command[2]
+                mapping = self.CHOICE_BOOLEANS.get(name)
+                if mapping and isinstance(value, str):
+                    value = mapping.get(value, value)
                 with self.lock:
-                    self.props[name] = command[2]
+                    self.props[name] = value
             return {"error": "success", "data": None, "request_id": request_id}
         if command[0] == "loadfile" and self.entry_ids:
             with self.lock:
@@ -388,14 +469,10 @@ class PlayTest(MpvTestCase):
         code, payload, stdout, stderr = self.play("--id", "t:espn.us")
         self.assertEqual(code, 0, stderr)
         self.assertEqual(payload, {"ok": True, "kind": "play", "id": "t:espn.us", "name": "ESPN"})
-        self.assertEqual(server.commands, [
+        self.assertEqual(server.commands, TLS_PRELUDE_PRE_PIN + [
             # D-SINK-16: asserted and READ BACK before anything else, because
             # everything below this is the act of telling an unverified process
-            # about a channel.
-            ["set_property", "tls-verify", True],
-            ["set_property", "stream-lavf-o", {}],
-            ["get_property", "tls-verify"],
-            ["get_property", "stream-lavf-o"],
+            # about a channel (the prelude above).
             ["set_property", "pause", False],
             ["set_property", "aid", "auto"],
             ["set_property", "sid", "auto"],
@@ -434,11 +511,7 @@ class PlayTest(MpvTestCase):
         code, payload, _, stderr = self.play("--id", "t:bbc1.uk")
         self.assertEqual(code, 0, stderr)
         self.assertEqual(payload["name"], "BBC One HD")
-        self.assertEqual(server.commands, [
-            ["set_property", "tls-verify", True],
-            ["set_property", "stream-lavf-o", {}],
-            ["get_property", "tls-verify"],
-            ["get_property", "stream-lavf-o"],
+        self.assertEqual(server.commands, TLS_PRELUDE_PRE_PIN + [
             ["set_property", "pause", False],
             ["set_property", "aid", "auto"],
             ["set_property", "sid", "auto"],
@@ -585,21 +658,25 @@ class TlsVerificationTest(MpvTestCase):
         shared fixture names them and Model.test.js asserts its own constants
         against the same two strings."""
         names = json.loads(self.FIXTURE.read_text(encoding="utf-8"))["properties"]
-        self.assertEqual([helper.MPV_TLS_VERIFY_PROP, helper.MPV_STREAM_OPTS_PROP],
-                         [names["verify"], names["streamOptions"]])
+        self.assertEqual([helper.MPV_TLS_VERIFY_PROP, helper.MPV_STREAM_OPTS_PROP,
+                          helper.MPV_DEMUXER_OPTS_PROP, helper.MPV_AUTO_PROFILES_PROP],
+                         [names["verify"], names["streamOptions"], names["demuxerOptions"], names["autoProfiles"]])
 
     def test_the_shared_fixture_decides_the_rule_in_both_languages(self):
         """Rule 12: one fixture, both implementations. tests/Model.test.js runs
         the same cases through Model.tlsPropertiesSafe."""
         cases = json.loads(self.FIXTURE.read_text(encoding="utf-8"))["cases"]
         self.assertGreaterEqual(len(cases), 15)
-        got = ["%s: %s" % (c["name"], helper.tls_properties_safe(c["verify"], c["optionCount"])) for c in cases]
+        got = ["%s: %s" % (c["name"], helper.tls_properties_safe(c["verify"], c["optionCount"], c["unpinned"]))
+               for c in cases]
         want = ["%s: %s" % (c["name"], c["safe"]) for c in cases]
         self.assertEqual(got, want)
         # The vectors that matter most are the ones a more forgiving reader would
         # wave through, so assert the fixture still carries them.
         self.assertIn(1, [c["verify"] for c in cases])
         self.assertIn(False, [c["optionCount"] for c in cases])
+        self.assertIn(False, [c["unpinned"] for c in cases])
+        self.assertIn(None, [c["unpinned"] for c in cases])
         self.assertEqual([c["safe"] for c in cases].count(True), 1)
 
     def test_both_properties_are_set_and_read_back_before_the_loadfile(self):
@@ -732,6 +809,209 @@ class TlsVerificationTest(MpvTestCase):
         self.assertTrue(payload["ok"])
         self.assertIn(self.LOADFILE, server.commands)
         self.assertIs(server.props["tls-verify"], False)
+
+
+class PinnedTlsTest(MpvTestCase):
+    """D-SINK-43 and D-SINK-44 at the IPC layer (2026-10-29): the third reading.
+
+    The launch argv's pin block binds a player THIS release starts. Over IPC the
+    helper must also bind one it did not start (D-SINK-16's shape), and must
+    not be fooled by what happens AFTER its read-back: libavformat hands
+    `demuxer-lavf-o` to every segment open of an HLS or DASH stream, so a
+    `tls_verify=0` or a `verifyhost=` there undoes verification (measured);
+    auto_profiles.lua applies a profile-cond profile at load, over the
+    command line (measured); and mpv applies the user's [protocol.*] and
+    [extension.*] profiles at file load to every option that was not set on
+    the command line -- a set_property is not one -- which a pre-pin player
+    read back as safe and then fetched from the attacker anyway (measured).
+    FakeMpv answers each property the way mpv 0.41 measured does (rule 10).
+    """
+
+    LOADFILE = ["loadfile", "http://stream.example.test/live/espn.m3u8", "replace"]
+
+    def loaded(self, server):
+        return [c for c in server.commands if c[0] == "loadfile"] == [self.LOADFILE]
+
+    def test_a_player_launched_with_the_pins_is_read_and_not_rewritten(self):
+        """The common path costs reads only: nothing to remove, nothing to turn
+        off, and no profile list, because every option a per-file profile
+        could undo is already set from the command line."""
+        server = self.start(props=dict(PINNED_PROPS), cmdline=PINNED_CMDLINE)
+        code, payload, _, stderr = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(self.loaded(server))
+        self.assertEqual([c for c in server.commands if c[0] == "change-list"], [])
+        self.assertNotIn(["set_property", "load-auto-profiles", "no"], server.commands)
+        self.assertNotIn(["get_property", "profile-list"], server.commands)
+
+    def test_demuxer_tls_entries_are_removed_before_the_load_and_the_workaround_kept(self):
+        """D-SINK-43 on a player that holds them: both kinds go, by key, and the
+        user's own live_start_index stays. The removals precede the load."""
+        server = self.start(props={"demuxer-lavf-o": {"tls_verify": "0", "verifyhost": "evil.example",
+                                                      "live_start_index": "-1"}})
+        code, payload, stdout, stderr = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(self.loaded(server))
+        self.assertEqual(server.props["demuxer-lavf-o"], {"live_start_index": "-1"})
+        removes = [i for i, c in enumerate(server.commands) if c[0] == "change-list"]
+        self.assertEqual(sorted(server.commands[i][3] for i in removes), ["tls_verify", "verifyhost"])
+        self.assertLess(max(removes), server.commands.index(self.LOADFILE))
+        for secret in ("evil.example", "verifyhost"):
+            self.assertNotIn(secret, stdout + stderr, secret)
+
+    def test_a_tls_verify_entry_reading_one_is_left_alone(self):
+        server = self.start(props={"demuxer-lavf-o": {"tls_verify": "1", "live_start_index": "-1"}})
+        code, _, _, stderr = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 0, stderr)
+        self.assertEqual([c for c in server.commands if c[0] == "change-list"], [])
+
+    def test_a_demuxer_entry_that_cannot_be_removed_refuses_the_load(self):
+        for options in ({"tls_verify": "0"}, {"verify": "0"}, {"verifyhost": "evil.example"},
+                        {"ca_file": "/tmp/evil.pem"}, {"cafile": "/tmp/evil.pem"}, {"listen": "1"},
+                        {"external_sock": "1"}):
+            with self.subTest(options=sorted(options)):
+                server = self.start(props={"demuxer-lavf-o": dict(options)}, refuse={"demuxer-lavf-o"})
+                code, payload, _, stderr = self.play("--id", "t:espn.us")
+                self.assertEqual(code, 1, stderr)
+                self.assertEqual(payload["error"]["code"], "tls_unverified")
+                self.assertEqual([c for c in server.commands if c[0] == "loadfile"], [])
+                self.assertIn("1 other TLS pins are not held", stderr)
+                server.close()
+                self.server = None
+
+    def test_auto_profiles_are_turned_off_and_read_back_as_mpv_answers(self):
+        """mpv answers `no` of this choice as the boolean False: the set takes
+        the string, the read-back is the boolean, and that is what passes."""
+        server = self.start()
+        code, _, _, stderr = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 0, stderr)
+        self.assertIs(server.props["load-auto-profiles"], False)
+        self.assertLess(server.commands.index(["set_property", "load-auto-profiles", "no"]),
+                        server.commands.index(self.LOADFILE))
+
+    def test_auto_profiles_that_cannot_be_turned_off_refuse_the_load(self):
+        for props in ({}, {"load-auto-profiles": True}):
+            with self.subTest(props=props):
+                server = self.start(props=props, refuse={"load-auto-profiles"})
+                code, payload, _, _ = self.play("--id", "t:espn.us")
+                self.assertEqual(code, 1)
+                self.assertEqual(payload["error"]["code"], "tls_unverified")
+                self.assertEqual([c for c in server.commands if c[0] == "loadfile"], [])
+                server.close()
+                self.server = None
+
+    def test_the_string_no_is_not_the_reading_mpv_gives(self):
+        """Rule 10 in the other direction: a reader that accepted "no" would be
+        more forgiving than mpv, which never sends it."""
+        server = self.start(props={"load-auto-profiles": "no"}, refuse={"load-auto-profiles"})
+        code, payload, _, _ = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"]["code"], "tls_unverified")
+
+    def test_a_per_file_profile_on_a_loose_option_refuses_the_load(self):
+        """The D-SINK-44 residual on a pre-pin player, closed: nothing over IPC
+        can make `stream-lavf-o` command-line-set, so a [protocol.https]
+        profile that sets it would apply at file load, after the read-back.
+        That player is not loaded into. Counts only reach the journal."""
+        profiles = [{"name": "protocol.https", "options": [{"key": "stream-lavf-o", "value": "tls_verify=0"}]}]
+        server = self.start(props={"profile-list": profiles}, cmdline={"tls-verify"})
+        code, payload, stdout, stderr = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 1)
+        self.assertEqual(payload["error"]["code"], "tls_unverified")
+        self.assertEqual([c for c in server.commands if c[0] == "loadfile"], [])
+        for secret in ("tls_verify=0", "protocol.https"):
+            self.assertNotIn(secret, stdout + stderr, secret)
+
+    def test_the_same_profile_is_harmless_on_a_pinned_player(self):
+        profiles = [{"name": "protocol.https", "options": [{"key": "stream-lavf-o", "value": "tls_verify=0"},
+                                                           {"key": "tls-verify", "value": "no"}]}]
+        props = dict(PINNED_PROPS, **{"profile-list": profiles})
+        server = self.start(props=props, cmdline=PINNED_CMDLINE)
+        code, _, _, stderr = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(self.loaded(server))
+
+    def test_a_profile_named_by_a_per_file_profile_is_followed(self):
+        nested = [{"name": "protocol.https", "options": [{"key": "profile", "value": "a,b"}]},
+                  {"name": "a", "options": [{"key": "volume", "value": "50"}]},
+                  {"name": "b", "options": [{"key": "profile", "value": "protocol.https"},
+                                            {"key": "demuxer-lavf-o-append", "value": "tls_verify=0"}]}]
+        harmless = [{"name": "extension.m3u8", "options": [{"key": "cache-secs", "value": "30"}]},
+                    {"name": "gpu-hq", "options": [{"key": "stream-lavf-o", "value": "tls_verify=0"}]}]
+        included = [{"name": "protocol.http", "options": [{"key": "include", "value": "/tmp/x.conf"}]}]
+        for profiles, code_wanted in ((nested, 1), (harmless, 0), (included, 1)):
+            with self.subTest(names=[p["name"] for p in profiles]):
+                server = self.start(props={"profile-list": profiles}, cmdline={"tls-verify"})
+                code, _, _, stderr = self.play("--id", "t:espn.us")
+                self.assertEqual(code, code_wanted, stderr)
+                server.close()
+                self.server = None
+
+    def test_an_unreadable_profile_list_or_flag_refuses_the_load(self):
+        for missing in ({"profile-list"},):
+            with self.subTest(missing=sorted(missing)):
+                server = self.start(missing=missing)
+                code, payload, _, _ = self.play("--id", "t:espn.us")
+                self.assertEqual(code, 1)
+                self.assertEqual(payload["error"]["code"], "tls_unverified")
+                server.close()
+                self.server = None
+
+    def test_mutating_the_demuxer_reading_lets_the_url_out(self):
+        """Rule 11: break demuxer_tls_unsafe -- read every map as clean -- and a
+        player that keeps verifyhost (its removal refused) is loaded into."""
+        original = helper.demuxer_tls_unsafe
+        helper.demuxer_tls_unsafe = lambda options: 0 if isinstance(options, dict) else None
+        self.addCleanup(setattr, helper, "demuxer_tls_unsafe", original)
+        server = self.start(props={"demuxer-lavf-o": {"verifyhost": "evil.example"}}, refuse={"demuxer-lavf-o"})
+        code, _, _, _ = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 0, "the mutation must reach the load, or the tests above are decoration")
+        self.assertTrue(self.loaded(server))
+
+    def test_mutating_the_profile_reading_lets_the_url_out(self):
+        original = helper.per_file_profile_threats
+        helper.per_file_profile_threats = lambda profiles, loose: 0 if isinstance(profiles, list) else None
+        self.addCleanup(setattr, helper, "per_file_profile_threats", original)
+        profiles = [{"name": "protocol.https", "options": [{"key": "stream-lavf-o", "value": "tls_verify=0"}]}]
+        server = self.start(props={"profile-list": profiles}, cmdline={"tls-verify"})
+        code, _, _, _ = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 0, "the mutation must reach the load, or the profile test is decoration")
+        self.assertTrue(self.loaded(server))
+
+
+class DemuxerAndProfileReadingTest(unittest.TestCase):
+    """The two pure readings, called directly (rule 12)."""
+
+    def test_demuxer_tls_unsafe_counts_exactly_the_tls_entries(self):
+        for options, want in (({}, 0), ({"live_start_index": "-1", "http_persistent": "0"}, 0),
+                              ({"tls_verify": "1"}, 0), ({"verify": "1"}, 0),
+                              ({"tls_verify": "0"}, 1), ({"tls_verify": "true"}, 1), ({"verify": "0"}, 1),
+                              ({"verifyhost": "x"}, 1), ({"ca_file": "/x"}, 1), ({"cafile": "/x"}, 1),
+                              ({"listen": "1"}, 1), ({"external_sock": "1"}, 1),
+                              ({"tls_verify": "0", "verifyhost": "x", "live_start_index": "-1"}, 2),
+                              ({"cert_file": "/c.pem", "key_file": "/k.pem", "http_proxy": "http://p"}, 0),
+                              (None, None), ([], None), ("tls_verify=0", None)):
+            with self.subTest(options=options):
+                self.assertEqual(helper.demuxer_tls_unsafe(options), want)
+
+    def test_per_file_profile_threats_reads_keys_and_follows_profiles(self):
+        loose = ["stream-lavf-o", "demuxer-lavf-o", "demuxer-lavf-propagate-opts", "load-auto-profiles"]
+        p = lambda name, *keys: {"name": name, "options": [{"key": k, "value": "v"} for k in keys]}
+        for profiles, want in (([], 0), ([p("protocol.https", "volume")], 0),
+                               ([p("protocol.https", "stream-lavf-o")], 1),
+                               ([p("protocol.https", "stream-lavf-o-append")], 1),
+                               ([p("extension.m3u8", "demuxer-lavf-o-set")], 1),
+                               ([p("protocol.https", "tls-verify")], 0),       # tls-verify is not loose here
+                               ([p("protocol.https", "no-load-auto-profiles")], 1),
+                               ([p("named", "stream-lavf-o")], 0),             # named profiles apply only when asked
+                               ([p("protocol.http", "include")], 1),
+                               ([{"name": "protocol.https", "options": [{"key": "profile", "value": "x"}]},
+                                 p("x", "demuxer-lavf-propagate-opts")], 1),
+                               ([{"name": "protocol.https", "options": [{"key": "profile", "value": "protocol.https"}]}], 0),
+                               ([p("protocol.https", "stream-lavf-o"), p("protocol.http", "stream-lavf-o")], 2),
+                               (None, None), ("x", None)):
+            with self.subTest(names=[x.get("name") for x in profiles] if isinstance(profiles, list) else profiles):
+                self.assertEqual(helper.per_file_profile_threats(profiles, loose), want)
 
 
 class StopTest(MpvTestCase):

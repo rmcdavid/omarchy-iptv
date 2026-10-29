@@ -418,16 +418,32 @@ function playerOwner(raw) {
 //                and outvotes it (D-SINK-13's layer 3), so a non-empty map is
 //                not safe whatever is in it; cleared means 0.
 //
-// A COUNT and never the keys or the values: `stream-lavf-o` can hold a proxy
-// address with credentials in it, and this number crosses a process boundary
-// into the shell, which is a rule 5 sink like any other. The count is the whole
-// of what the decision needs.
+//   unpinned     (2026-10-29, D-SINK-43/44) how many of the OTHER TLS pins the
+//                player does not hold, summed by the helper: demuxer-lavf-o's
+//                TLS entries (for HLS and DASH they configure the protocol of
+//                every segment open), load-auto-profiles not reading off (a
+//                profile-cond profile applies over the command line at every
+//                load), and the user's [protocol.*] / [extension.*] profiles
+//                that could undo, at file load, an option this player does not
+//                have set from the command line. A player launched with the
+//                pin block reads 0; one launched by 0.15.0 or earlier is
+//                migrated where it can be, and a per-file profile no migration
+//                can reach leaves it unsafe -- stopped, not fed.
+//
+// COUNTS and never the keys or the values: `stream-lavf-o` can hold a proxy
+// address with credentials in it, and these numbers cross a process boundary
+// into the shell, which is a rule 5 sink like any other. The counts are the
+// whole of what the decision needs.
 //
 // Mirror of tls_properties_safe in the helper; both sides run the shared
 // player-tls.json fixture (dev branch).
-function tlsPropertiesSafe(verify, optionCount) {
+function tlsPropertiesSafe(verify, optionCount, unpinned) {
   if (verify !== true) return false
-  return typeof optionCount === "number" && isFinite(optionCount) && optionCount === 0
+  var counts = [optionCount, unpinned]
+  for (var i = 0; i < counts.length; i++) {
+    if (!(typeof counts[i] === "number" && isFinite(counts[i]) && counts[i] === 0)) return false
+  }
+  return true
 }
 
 // The two readings, as the probe reply carries them. Defensive in the same way
@@ -437,16 +453,23 @@ function tlsPropertiesSafe(verify, optionCount) {
 // refuses null. `false` for a count would otherwise coerce to 0 and pass.
 function playerTls(raw) {
   if (!raw || typeof raw !== "object") return null
-  var count = raw.optionCount
   return {
     verify: raw.verify === true ? true : (raw.verify === false ? false : null),
     // A WHOLE count, not a rounded one: the helper produces it with len() on a
     // map, so a fraction is not a small reading, it is a reading from something
     // that is not the helper -- and Math.floor() would turn 0.5 into the one
     // value that passes.
-    optionCount: typeof count === "number" && isFinite(count) && count >= 0 && Math.floor(count) === count ? count : null,
+    optionCount: wholeCount(raw.optionCount),
+    // The same shape for the third reading; absent (a helper older than the
+    // pin block cannot answer a shell newer than it, but a renamed field can)
+    // reads null, which the verdict refuses.
+    unpinned: wholeCount(raw.unpinned),
     migrated: raw.migrated === true
   }
+}
+
+function wholeCount(count) {
+  return typeof count === "number" && isFinite(count) && count >= 0 && Math.floor(count) === count ? count : null
 }
 
 // What the reattach path does with the player it has just identified:
@@ -495,7 +518,7 @@ function tlsReloadDisposition(o) {
 function playerTlsVerdict(tls) {
   var reading = playerTls(tls)
   if (reading === null) return { safe: false, action: "stop", migrated: false }
-  if (!tlsPropertiesSafe(reading.verify, reading.optionCount)) {
+  if (!tlsPropertiesSafe(reading.verify, reading.optionCount, reading.unpinned)) {
     return { safe: false, action: "stop", migrated: reading.migrated }
   }
   return { safe: true, action: reading.migrated ? "reload" : "feed", migrated: reading.migrated }
@@ -878,7 +901,7 @@ export {
   helperCannotTell, PLAY_RETRYABLE, playFailureVerdict,
   PLAYER_START_CHANNEL_REFUSALS, playerStartFailure, replyTarget,
   reconcileVerdict, sessionIntentRepair, playerOrphanCheckArgv, playerStash,
-  playerOwner, tlsPropertiesSafe, playerTls, tlsReloadDisposition,
+  playerOwner, tlsPropertiesSafe, playerTls, wholeCount, tlsReloadDisposition,
   playerTlsVerdict, parsePlayerProbe, parsePlayerEvent, playerEntryId,
   endedVerdict, probeVerdict, playerDeathKind, playerSessionFollowUp,
   playerRouterState, pushPlayerLog, routePlayerEvent, rememberEntryOwner,

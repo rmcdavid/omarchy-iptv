@@ -1,0 +1,4041 @@
+{
+ "_comment": [
+  "D-SINK-43..46 (owner, 2026-10-29: pin + classify, not a strict allowlist).",
+  "EVERY option base the installed mpv offers, with the class that decides what the",
+  "plugin does with a user's mpvArgs token for it and with the user's own mpv.conf.",
+  "Read by tests/test_player.py and tests/Model.test.js (both mirrors' MPV_RESERVED",
+  "and the trailing pin block must equal what this file says) and by",
+  "scripts/check-mpv-options.py, which the gate runs against `mpv --list-options`",
+  "and which goes RED on any option this file does not classify: a new mpv option",
+  "is a decision, not a default.",
+  "`why` is required for every string-shaped option (String, String list,",
+  "Key/value list, Object settings list, [file]) and for aliases; flags and numbers",
+  "in bulk carry none. An alias takes its target's class. ASCII only."
+ ],
+ "mpv": {
+  "version": "mpv v0.41.0",
+  "ffmpeg": "n9.0.1",
+  "listed": 899,
+  "source": "mpv --no-config --list-options, windowless, 2026-10-29"
+ },
+ "classes": {
+  "allowed": "a user token passes the filter and lands after the base argv",
+  "reserved": "a user token is REFUSED (both mirrors' MPV_RESERVED); the user's own mpv.conf is the user's",
+  "pinned": "re-asserted by the trailing pin block, AFTER the user's tokens, so no token, named profile, plain mpv.conf line or per-file profile can change it; REFUSED in mpvArgs as well, except a key-pinned list (pinKey), whose other keys stay the user's",
+  "warned": "kept, with the PO-10 footer warning (MPV_HANDOFF / MPV_DISK_WARN)",
+  "base": "set by the plugin BEFORE the user's tokens; a user token may override it"
+ },
+ "counts": {
+  "allowed": 828,
+  "base": 8,
+  "pinned": 17,
+  "reserved": 39,
+  "warned": 7
+ },
+ "pinBlock": [
+  "--watch-later-dir={watchLater}",
+  "--load-scripts=no",
+  "--scripts-clr",
+  "--input-commands-clr",
+  "--load-auto-profiles=no",
+  "--load-select=no",
+  "--load-unsafe-playlists=no",
+  "--save-watch-history=no",
+  "--log-file=",
+  "--reset-on-next-file-clr",
+  "--osd-playlist-entry=title",
+  "--stream-lavf-o-clr",
+  "--demuxer-lavf-propagate-opts=yes",
+  "--demuxer-lavf-o-append=tls_verify=1",
+  "--tls-verify=yes"
+ ],
+ "ffmpegTls": {
+  "_comment": [
+   "D-SINK-43: FFmpeg's own TLS protocol options, as `ffmpeg -hide_banner -h protocol=tls` lists",
+   "them (FFmpeg n9.0.1). For an HLS or DASH stream a --demuxer-lavf-o key reaches every one of",
+   "them on every segment open. `pinned`: must read \"1\" when present (DEMUXER_TLS_ON in the",
+   "helper; the pin block appends tls_verify=1). `forbidden`: must be absent (DEMUXER_TLS_FORBIDDEN).",
+   "`allowed`: neither weakens the peer check. Every pinned or forbidden key must contain one of",
+   "`words`, the substrings the token filter refuses (MPV_DEMUXER_TLS_WORDS in both mirrors)."
+  ],
+  "words": [
+   "verify",
+   "ca_file",
+   "cafile",
+   "listen",
+   "external_sock"
+  ],
+  "options": {
+   "listen": "forbidden",
+   "http_proxy": "allowed",
+   "external_sock": "forbidden",
+   "use_srtp": "allowed",
+   "mtu": "allowed",
+   "cert_pem": "allowed",
+   "key_pem": "allowed",
+   "ca_file": "forbidden",
+   "cafile": "forbidden",
+   "tls_verify": "pinned",
+   "verify": "pinned",
+   "cert_file": "allowed",
+   "cert": "allowed",
+   "key_file": "allowed",
+   "key": "allowed",
+   "verifyhost": "forbidden"
+  },
+  "why": {
+   "listen": "turns the client into a server for the URL's address",
+   "http_proxy": "a CONNECT tunnel: TLS stays end to end (the plain-http case is --http-proxy, warned)",
+   "external_sock": "hands the TLS layer a socket the plugin did not open",
+   "use_srtp": "DTLS only",
+   "mtu": "DTLS only",
+   "cert_pem": "a client certificate, not peer verification",
+   "key_pem": "a client key",
+   "ca_file": "a trust anchor: --tls-ca-file is the one escape, verified behind the pins",
+   "cafile": "an alias of ca_file",
+   "tls_verify": "measured: 0 played the attacker's segment with both --tls-verify=yes tokens",
+   "verify": "an alias of tls_verify",
+   "cert_file": "a client certificate",
+   "cert": "a client certificate",
+   "key_file": "a client key",
+   "key": "a client key",
+   "verifyhost": "measured: the attacker's certificate for its OWN name was accepted"
+  }
+ },
+ "options": {
+  "--ab-loop-a": {
+   "type": "Time",
+   "class": "allowed"
+  },
+  "--ab-loop-b": {
+   "type": "Time",
+   "class": "allowed"
+  },
+  "--ab-loop-count": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--access-references": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "mpv's origin rule still applies to what a reference opens"
+  },
+  "--ad": {
+   "type": "String",
+   "class": "allowed",
+   "why": "decoder selection"
+  },
+  "--ad-lavc-ac3drc": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--ad-lavc-downmix": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--ad-lavc-o": {
+   "type": "Key/value list",
+   "class": "allowed",
+   "why": "audio decoder AVOptions: a codec opens neither a file nor the network"
+  },
+  "--ad-lavc-threads": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--ad-queue-enable": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--ad-queue-max-bytes": {
+   "type": "ByteSize",
+   "class": "allowed"
+  },
+  "--ad-queue-max-samples": {
+   "type": "Integer64",
+   "class": "allowed"
+  },
+  "--ad-queue-max-secs": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--af": {
+   "type": "Object settings list",
+   "class": "allowed",
+   "why": "audio filters see samples, never the URL; a lavfi graph can open or write a file the token itself names (P4, recorded)"
+  },
+  "--aid": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--alang": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "track language preference"
+  },
+  "--allow-delayed-peak-detect": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--alsa-buffer-time": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--alsa-ignore-chmap": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--alsa-mixer-device": {
+   "type": "String",
+   "class": "allowed",
+   "why": "local audio device"
+  },
+  "--alsa-mixer-index": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--alsa-mixer-name": {
+   "type": "String",
+   "class": "allowed",
+   "why": "local audio mixer"
+  },
+  "--alsa-non-interleaved": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--alsa-periods": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--alsa-resample": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--ao": {
+   "type": "Object settings list",
+   "class": "allowed",
+   "why": "audio output choice; ao=pcm writes into the contained cwd unless --ao-pcm-file (reserved)"
+  },
+  "--ao-null-broken-delay": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--ao-null-broken-eof": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--ao-null-buffer": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--ao-null-channel-layouts": {
+   "type": "Audio channels or channel map",
+   "class": "allowed"
+  },
+  "--ao-null-format": {
+   "type": "Audio format",
+   "class": "allowed"
+  },
+  "--ao-null-latency": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--ao-null-outburst": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--ao-null-speed": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--ao-null-untimed": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--ao-pcm-append": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--ao-pcm-file": {
+   "type": "String",
+   "file": true,
+   "class": "reserved",
+   "why": "with --ao=pcm, writes the stream's decoded audio to a durable file the plugin never listed"
+  },
+  "--ao-pcm-waveheader": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--archive-exts": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "extensions for local directory expansion"
+  },
+  "--audio": {
+   "type": "alias",
+   "alias": "--aid",
+   "class": "allowed",
+   "why": "alias for --aid: classified as its target"
+  },
+  "--audio-backward-batch": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--audio-backward-overlap": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--audio-buffer": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--audio-channels": {
+   "type": "Audio channels or channel map",
+   "class": "allowed"
+  },
+  "--audio-client-name": {
+   "type": "String",
+   "class": "allowed",
+   "why": "the audio server client name"
+  },
+  "--audio-delay": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--audio-demuxer": {
+   "type": "String",
+   "class": "allowed",
+   "why": "demuxer choice for external audio"
+  },
+  "--audio-device": {
+   "type": "String",
+   "class": "allowed",
+   "why": "local audio device"
+  },
+  "--audio-display": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--audio-exclusive": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--audio-exts": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "extensions for local autoload"
+  },
+  "--audio-fallback-to-null": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--audio-file": {
+   "type": "alias",
+   "alias": "--audio-files-append",
+   "class": "reserved",
+   "why": "alias for --audio-files-append: classified as its target"
+  },
+  "--audio-file-auto": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--audio-file-auto-exts": {
+   "type": "alias",
+   "alias": "--audio-exts",
+   "class": "allowed",
+   "why": "alias for --audio-exts: classified as its target"
+  },
+  "--audio-file-paths": {
+   "type": "String list",
+   "file": true,
+   "class": "allowed",
+   "why": "local search directories for external audio (not reached for a URL; measured no request)"
+  },
+  "--audio-files": {
+   "type": "String list",
+   "file": true,
+   "class": "reserved",
+   "why": "opens a second address the token names, sending it the channel's provider headers (measured)"
+  },
+  "--audio-format": {
+   "type": "Audio format",
+   "class": "allowed"
+  },
+  "--audio-normalize-downmix": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--audio-pitch-correction": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--audio-resample-cutoff": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--audio-resample-filter-size": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--audio-resample-linear": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--audio-resample-max-output-size": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--audio-resample-phase-shift": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--audio-reversal-buffer": {
+   "type": "ByteSize",
+   "class": "allowed"
+  },
+  "--audio-samplerate": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--audio-set-media-role": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--audio-spdif": {
+   "type": "String",
+   "class": "allowed",
+   "why": "passthrough codec list"
+  },
+  "--audio-stream-silence": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--audio-swresample-o": {
+   "type": "Key/value list",
+   "class": "allowed",
+   "why": "resampler AVOptions: opens neither a file nor the network"
+  },
+  "--audio-wait-open": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--auto-window-resize": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--autocreate-playlist": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--autofit": {
+   "type": "Window size",
+   "class": "allowed"
+  },
+  "--autofit-larger": {
+   "type": "Window size",
+   "class": "allowed"
+  },
+  "--autofit-smaller": {
+   "type": "Window size",
+   "class": "allowed"
+  },
+  "--autoload-files": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--autosync": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--background": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--background-blur-radius": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--background-color": {
+   "type": "Color",
+   "class": "allowed"
+  },
+  "--background-tile-color-0": {
+   "type": "Color",
+   "class": "allowed"
+  },
+  "--background-tile-color-1": {
+   "type": "Color",
+   "class": "allowed"
+  },
+  "--background-tile-size": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--blend-subtitles": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--bluray-angle": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--bluray-device": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "a local device path"
+  },
+  "--border": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--border-background": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--brightness": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--cache": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--cache-on-disk": {
+   "type": "Flag",
+   "class": "warned",
+   "why": "writes the stream to the user's own disk while it plays (M5-01, PO-5's shape)"
+  },
+  "--cache-pause": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--cache-pause-initial": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--cache-pause-wait": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--cache-secs": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--cdda-cdtext": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--cdda-device": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "a local device path"
+  },
+  "--cdda-overlap": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--cdda-paranoia": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--cdda-sector-size": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--cdda-skip": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--cdda-span-a": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--cdda-span-b": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--cdda-speed": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--cdda-toc-offset": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--chapter-merge-threshold": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--chapter-seek-threshold": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--chapters-file": {
+   "type": "String",
+   "file": true,
+   "class": "reserved",
+   "why": "opens a second address the token names, sending it the channel's provider headers (measured)"
+  },
+  "--clipboard-backends": {
+   "type": "Object settings list",
+   "class": "allowed",
+   "why": "where clipboard text comes from; the default Ctrl+V append is a recorded review finding, not changed here (decision request)"
+  },
+  "--clipboard-monitor": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--clipboard-xwayland": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--config": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "--no-config only reads less"
+  },
+  "--config-dir": {
+   "type": "String",
+   "file": true,
+   "cliOnly": true,
+   "class": "reserved",
+   "why": "points mpv at another configuration tree, which can set any option"
+  },
+  "--container-fps-override": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--contrast": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--cookies": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "sends the user's own cookie file to the stream host"
+  },
+  "--cookies-file": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "the user's own cookie file, sent to the stream host when --cookies is on"
+  },
+  "--corner-rounding": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--correct-downscaling": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--correct-pts": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--cover-art-auto": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--cover-art-auto-exts": {
+   "type": "alias",
+   "alias": "--image-exts",
+   "class": "allowed",
+   "why": "alias for --image-exts: classified as its target"
+  },
+  "--cover-art-file": {
+   "type": "alias",
+   "alias": "--cover-art-files-append",
+   "class": "reserved",
+   "why": "alias for --cover-art-files-append: classified as its target"
+  },
+  "--cover-art-files": {
+   "type": "String list",
+   "file": true,
+   "class": "reserved",
+   "why": "opens a second address the token names, sending it the channel's provider headers (measured)"
+  },
+  "--cover-art-whitelist": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "local file names"
+  },
+  "--cscale": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--cscale-antiring": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--cscale-blur": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--cscale-clamp": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--cscale-param1": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--cscale-param2": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--cscale-radius": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--cscale-taper": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--cscale-window": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--cscale-wparam": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--cscale-wtaper": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--cuda-decode-device": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--cursor-autohide": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--cursor-autohide-fs-only": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--deband": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--deband-grain": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--deband-iterations": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--deband-range": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--deband-threshold": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--deinterlace": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--deinterlace-field-parity": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--demuxer": {
+   "type": "String",
+   "class": "allowed",
+   "why": "demuxer choice; the pins hold whichever opens the stream"
+  },
+  "--demuxer-backward-playback-step": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--demuxer-cache-dir": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "the cache file is unlinked at creation (--demuxer-cache-unlink-files is reserved)"
+  },
+  "--demuxer-cache-unlink-files": {
+   "type": "Choices",
+   "class": "reserved",
+   "why": "keeps the on-disk cache file after the player exits (M5-01 D3)"
+  },
+  "--demuxer-cache-wait": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--demuxer-donate-buffer": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--demuxer-hysteresis-secs": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--demuxer-lavf-allow-mimetype": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--demuxer-lavf-analyzeduration": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--demuxer-lavf-buffersize": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--demuxer-lavf-format": {
+   "type": "String",
+   "class": "allowed",
+   "why": "forces a container format"
+  },
+  "--demuxer-lavf-hacks": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "with it off the demuxer pin still refused the attacker (measured)"
+  },
+  "--demuxer-lavf-linearize-timestamps": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--demuxer-lavf-o": {
+   "type": "Key/value list",
+   "class": "pinned",
+   "pin": "--demuxer-lavf-o-append=tls_verify=1",
+   "why": "for HLS and DASH the demuxer's options configure the PROTOCOL of the reopen and every nested open (D-SINK-43)",
+   "pinKey": "tls_verify=1"
+  },
+  "--demuxer-lavf-probe-info": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--demuxer-lavf-probescore": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--demuxer-lavf-probesize": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--demuxer-lavf-propagate-opts": {
+   "type": "Flag",
+   "class": "pinned",
+   "pin": "--demuxer-lavf-propagate-opts=yes",
+   "why": "the demuxer pin reaches segment and key opens only through propagation; off, they fall back to FFmpeg's own default"
+  },
+  "--demuxer-max-back-bytes": {
+   "type": "ByteSize",
+   "class": "allowed"
+  },
+  "--demuxer-max-bytes": {
+   "type": "ByteSize",
+   "class": "allowed"
+  },
+  "--demuxer-mkv-crop-compat": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--demuxer-mkv-probe-start-time": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--demuxer-mkv-probe-video-duration": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--demuxer-mkv-subtitle-preroll": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--demuxer-mkv-subtitle-preroll-secs": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--demuxer-mkv-subtitle-preroll-secs-index": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--demuxer-rawaudio-channels": {
+   "type": "Audio channels or channel map",
+   "class": "allowed"
+  },
+  "--demuxer-rawaudio-format": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--demuxer-rawaudio-rate": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--demuxer-rawvideo-codec": {
+   "type": "String",
+   "class": "allowed",
+   "why": "raw video codec"
+  },
+  "--demuxer-rawvideo-format": {
+   "type": "FourCC",
+   "class": "allowed"
+  },
+  "--demuxer-rawvideo-fps": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--demuxer-rawvideo-h": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--demuxer-rawvideo-mp-format": {
+   "type": "Image format",
+   "class": "allowed"
+  },
+  "--demuxer-rawvideo-size": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--demuxer-rawvideo-w": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--demuxer-readahead-secs": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--demuxer-seekable-cache": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--demuxer-termination-timeout": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--demuxer-thread": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--directory-filter-types": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "local directory expansion"
+  },
+  "--directory-mode": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--display-fps-override": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--display-tags": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "which stream metadata tags are shown (provider text, not the URL)"
+  },
+  "--dither": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--dither-depth": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--dither-size-fruit": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--drag-and-drop": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--drm-connector": {
+   "type": "String",
+   "class": "allowed",
+   "why": "local display"
+  },
+  "--drm-device": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "a local device path"
+  },
+  "--drm-draw-plane": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--drm-draw-surface-size": {
+   "type": "Window size",
+   "class": "allowed"
+  },
+  "--drm-drmprime-video-plane": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--drm-format": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--drm-mode": {
+   "type": "String",
+   "class": "allowed",
+   "why": "local display mode"
+  },
+  "--drm-vrr-enabled": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--dscale": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--dscale-antiring": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--dscale-blur": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--dscale-clamp": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--dscale-param1": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--dscale-param2": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--dscale-radius": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--dscale-taper": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--dscale-window": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--dscale-wparam": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--dscale-wtaper": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--dump-stats": {
+   "type": "String",
+   "file": true,
+   "class": "reserved",
+   "why": "writes a durable stats file"
+  },
+  "--dvbin-card": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--dvbin-channel-switch-offset": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--dvbin-file": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "a local channels file"
+  },
+  "--dvbin-full-transponder": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--dvbin-prog": {
+   "type": "String",
+   "class": "allowed",
+   "why": "DVB program name"
+  },
+  "--dvbin-timeout": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--dvd-angle": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--dvd-device": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "a local device path"
+  },
+  "--dvd-speed": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--edition": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--egl-config-id": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--egl-output-format": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--embeddedfonts": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--end": {
+   "type": "Relative time or percent position",
+   "class": "allowed"
+  },
+  "--error-diffusion": {
+   "type": "String",
+   "class": "allowed",
+   "why": "dither kernel"
+  },
+  "--external-file": {
+   "type": "alias",
+   "alias": "--external-files-append",
+   "class": "reserved",
+   "why": "alias for --external-files-append: classified as its target"
+  },
+  "--external-files": {
+   "type": "String list",
+   "file": true,
+   "class": "reserved",
+   "why": "opens a second address the token names, sending it the channel's provider headers (measured)"
+  },
+  "--fbo-format": {
+   "type": "String",
+   "class": "allowed",
+   "why": "render format"
+  },
+  "--focus-on": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--focus-on-open": {
+   "type": "removed",
+   "class": "allowed",
+   "why": "removed by mpv: inert"
+  },
+  "--force-media-title": {
+   "type": "String",
+   "class": "reserved",
+   "why": "the channel name, set per channel over IPC (S-01)"
+  },
+  "--force-render": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--force-rgba-osd-rendering": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--force-seekable": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--force-window": {
+   "type": "Choices",
+   "class": "base",
+   "why": "window behaviour; a user may prefer no early window"
+  },
+  "--force-window-position": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--framedrop": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--frames": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--fs": {
+   "type": "alias",
+   "alias": "--fullscreen",
+   "class": "allowed",
+   "why": "alias for --fullscreen: classified as its target"
+  },
+  "--fs-screen": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--fs-screen-name": {
+   "type": "String",
+   "class": "allowed",
+   "why": "local screen name"
+  },
+  "--fullscreen": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--gamma": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--gamma-auto": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--gamma-factor": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--gamut-clipping": {
+   "type": "removed",
+   "class": "allowed",
+   "why": "removed by mpv: inert"
+  },
+  "--gamut-mapping-mode": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--gamut-warning": {
+   "type": "removed",
+   "class": "allowed",
+   "why": "removed by mpv: inert"
+  },
+  "--gapless-audio": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--geometry": {
+   "type": "Window geometry",
+   "class": "allowed"
+  },
+  "--glsl-shader": {
+   "type": "alias",
+   "alias": "--glsl-shaders-append",
+   "class": "allowed",
+   "why": "alias for --glsl-shaders-append: classified as its target"
+  },
+  "--glsl-shader-opts": {
+   "type": "Key/value list",
+   "class": "allowed",
+   "why": "shader parameters"
+  },
+  "--glsl-shaders": {
+   "type": "String list",
+   "file": true,
+   "class": "allowed",
+   "why": "GPU shaders run on the GPU and see pixels only (popular: upscalers); a URL is not fetched under --vo=null (read, not measured with a GPU VO)"
+  },
+  "--gpu-api": {
+   "type": "Object settings list",
+   "class": "allowed",
+   "why": "rendering API"
+  },
+  "--gpu-context": {
+   "type": "Object settings list",
+   "class": "allowed",
+   "why": "rendering context"
+  },
+  "--gpu-debug": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--gpu-dumb-mode": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--gpu-hwdec-interop": {
+   "type": "String",
+   "class": "allowed",
+   "why": "hardware decoding interop"
+  },
+  "--gpu-shader-cache": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--gpu-shader-cache-dir": {
+   "type": "String",
+   "file": true,
+   "class": "base",
+   "why": "D-PLY-10 / CL2: content-free cache, contained by default"
+  },
+  "--gpu-sw": {
+   "type": "Flag",
+   "class": "base",
+   "why": "D-PLY-27: a rendering preference the user may turn off"
+  },
+  "--gpu-tex-pad-x": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--gpu-tex-pad-y": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--h": {
+   "type": "String",
+   "cliOnly": true,
+   "class": "allowed",
+   "why": "prints help and exits: a broken start, not an exposure"
+  },
+  "--hdr-compute-peak": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--hdr-contrast-recovery": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--hdr-contrast-smoothness": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--hdr-peak-decay-rate": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--hdr-peak-percentile": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--hdr-reference-white": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--hdr-scene-threshold-high": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--hdr-scene-threshold-low": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--help": {
+   "type": "String",
+   "cliOnly": true,
+   "class": "allowed",
+   "why": "prints help and exits: a broken start, not an exposure"
+  },
+  "--hidpi-window-scale": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--hls-bitrate": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--hr-seek": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--hr-seek-demuxer-offset": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--hr-seek-framedrop": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--http-header-fields": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "reset on every channel by apply_channel (requirement 7)"
+  },
+  "--http-proxy": {
+   "type": "String",
+   "class": "warned",
+   "why": "a plain-http stream's full URL and its provider headers go to the proxy (measured); a legitimate need, said out loud (D-SINK-51)"
+  },
+  "--hue": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--hwdec": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "hardware decoding"
+  },
+  "--hwdec-codecs": {
+   "type": "String",
+   "class": "allowed",
+   "why": "hardware decoding codecs"
+  },
+  "--hwdec-extra-frames": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--hwdec-image-format": {
+   "type": "Image format",
+   "class": "allowed"
+  },
+  "--hwdec-software-fallback": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--hwdec-threads": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--icc-3dlut-size": {
+   "type": "String",
+   "class": "allowed",
+   "why": "colour management"
+  },
+  "--icc-cache": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--icc-cache-dir": {
+   "type": "String",
+   "file": true,
+   "class": "base",
+   "why": "D-PLY-10 / CL2: content-free cache, contained by default"
+  },
+  "--icc-force-contrast": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--icc-intent": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--icc-profile": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "a local ICC file (no request measured for a URL)"
+  },
+  "--icc-profile-auto": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--icc-use-luma": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--idle": {
+   "type": "Choices",
+   "class": "reserved",
+   "why": "the exit semantics the service depends on (PO-1)"
+  },
+  "--ignore-path-in-watch-later-config": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--image-display-duration": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--image-exts": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "extensions for local autoload"
+  },
+  "--image-lut": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "a local LUT file (no request measured for a URL)"
+  },
+  "--image-lut-type": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--image-subs-hdr-peak": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--image-subs-video-resolution": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--include": {
+   "type": "String",
+   "file": true,
+   "class": "reserved",
+   "why": "loads a config file, which can set any option on this list (D-SINK-2)"
+  },
+  "--index": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--initial-audio-sync": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--input-ar-delay": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--input-ar-rate": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--input-builtin-bindings": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "turning bindings off only removes actions"
+  },
+  "--input-builtin-dragging": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--input-cmdlist": {
+   "type": "Print",
+   "cliOnly": true,
+   "class": "allowed",
+   "why": "prints and exits"
+  },
+  "--input-commands": {
+   "type": "String list",
+   "class": "pinned",
+   "pin": "--input-commands-clr",
+   "why": "commands run at startup: load-script, run, set; a plain mpv.conf line ran them (measured) (D-SINK-45)"
+  },
+  "--input-conf": {
+   "type": "String",
+   "file": true,
+   "class": "reserved",
+   "why": "a file of key bindings, each of which can `run` a program or draw ${path}; also fetched from a URL at startup (measured)"
+  },
+  "--input-cursor": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--input-cursor-passthrough": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--input-default-bindings": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "turning bindings off only removes actions"
+  },
+  "--input-doubleclick-time": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--input-dragging-deadzone": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--input-gamepad": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--input-ime": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--input-ipc-client": {
+   "type": "String",
+   "class": "reserved",
+   "why": "hands the IPC to a descriptor the shell does not own"
+  },
+  "--input-ipc-server": {
+   "type": "String",
+   "file": true,
+   "class": "reserved",
+   "why": "the service's own socket; an invariant of the shell (4.3)"
+  },
+  "--input-key-fifo-size": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--input-keylist": {
+   "type": "Print",
+   "cliOnly": true,
+   "class": "allowed",
+   "why": "prints and exits"
+  },
+  "--input-media-keys": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--input-preprocess-wheel": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--input-right-alt-gr": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--input-tablet-emulate-mouse": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--input-terminal": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--input-test": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--input-touch-emulate-mouse": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--input-vo-keyboard": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--interpolation": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--interpolation-preserve": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--interpolation-threshold": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--inverse-tone-mapping": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--jack-autostart": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--jack-connect": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--jack-name": {
+   "type": "String",
+   "class": "allowed",
+   "why": "JACK client name"
+  },
+  "--jack-port": {
+   "type": "String",
+   "class": "allowed",
+   "why": "JACK port"
+  },
+  "--jack-std-channel-layout": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--js-memory-report": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--keep-open": {
+   "type": "Choices",
+   "class": "base",
+   "why": "exit semantics a user may change at their own cost"
+  },
+  "--keep-open-pause": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--keepaspect": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--keepaspect-window": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--lavfi-complex": {
+   "type": "String",
+   "class": "allowed",
+   "why": "a filter graph over decoded streams; can open or write a file the token itself names (P4, recorded)"
+  },
+  "--length": {
+   "type": "Relative time or percent position",
+   "class": "allowed"
+  },
+  "--libplacebo-opts": {
+   "type": "Key/value list",
+   "class": "allowed",
+   "why": "renderer parameters: libplacebo opens neither a file nor the network"
+  },
+  "--linear-downscaling": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--linear-upscaling": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--list-options": {
+   "type": "Flag",
+   "cliOnly": true,
+   "class": "allowed"
+  },
+  "--list-properties": {
+   "type": "Flag",
+   "cliOnly": true,
+   "class": "allowed"
+  },
+  "--list-protocols": {
+   "type": "Print",
+   "cliOnly": true,
+   "class": "allowed",
+   "why": "prints and exits"
+  },
+  "--load-auto-profiles": {
+   "type": "Choices",
+   "class": "pinned",
+   "pin": "--load-auto-profiles=no",
+   "why": "auto_profiles.lua applies profile-cond profiles at load, over the command line (D-SINK-44)"
+  },
+  "--load-commands": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "owner, 2026-10-29: stays on; commands.lua forks nothing that carries path (read)"
+  },
+  "--load-console": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "owner, 2026-10-29: stays on; the console forks only wl-paste on a user paste (read)"
+  },
+  "--load-context-menu": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "owner, 2026-10-29: stays on; its select entries are dead with --load-select=no"
+  },
+  "--load-osd-console": {
+   "type": "alias",
+   "alias": "--load-console",
+   "class": "allowed",
+   "why": "alias for --load-console: classified as its target"
+  },
+  "--load-positioning": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "owner, 2026-10-29: stays on"
+  },
+  "--load-scripts": {
+   "type": "Flag",
+   "class": "pinned",
+   "pin": "--load-scripts=no",
+   "why": "D-SINK-4: autoload would load mpv-mpris; a named profile turned it back on (measured)"
+  },
+  "--load-select": {
+   "type": "Flag",
+   "class": "pinned",
+   "pin": "--load-select=no",
+   "why": "select.lua: g l forks ffmpeg with the URL on argv, g p draws it (D-SINK-46)"
+  },
+  "--load-stats-overlay": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "owner, 2026-10-29: stays on; page 5 draws ${filename}, a query token included (recorded)"
+  },
+  "--load-unsafe-playlists": {
+   "type": "Flag",
+   "class": "pinned",
+   "pin": "--load-unsafe-playlists=no",
+   "why": "mpv's origin rule for nested entries: a server's playlist wrote a file and played a local one with it on (measured, D-SINK-44)"
+  },
+  "--log-file": {
+   "type": "String",
+   "file": true,
+   "class": "pinned",
+   "pin": "--log-file=",
+   "why": "a log naming every URL; a plain mpv.conf log-file wrote one (measured)"
+  },
+  "--loop": {
+   "type": "alias",
+   "alias": "--loop-file",
+   "class": "allowed",
+   "why": "alias for --loop-file: classified as its target"
+  },
+  "--loop-file": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--loop-playlist": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--lut": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "a local LUT file (no request measured for a URL)"
+  },
+  "--lut-type": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--mc": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--media-controls": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "Windows only (no MPRIS in this build; read)"
+  },
+  "--merge-files": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--metadata-codepage": {
+   "type": "String",
+   "class": "allowed",
+   "why": "text decoding"
+  },
+  "--mf-fps": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--mf-type": {
+   "type": "String",
+   "class": "allowed",
+   "why": "image sequence type"
+  },
+  "--monitoraspect": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--monitorpixelaspect": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--msg-color": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--msg-level": {
+   "type": "Output verbosity levels",
+   "class": "base",
+   "why": "terminal verbosity; the player's terminal is closed"
+  },
+  "--msg-module": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--msg-time": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--mute": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--native-fs": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--native-keyrepeat": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--native-touch": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--network-timeout": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--o": {
+   "type": "String",
+   "file": true,
+   "cliOnly": true,
+   "class": "reserved",
+   "why": "encoding mode: writes the stream to a file (D-SINK-45; the --stream-record class)"
+  },
+  "--oac": {
+   "type": "String",
+   "class": "allowed",
+   "why": "encoder choice: inert without --o (reserved)"
+  },
+  "--oacopts": {
+   "type": "Key/value list",
+   "class": "allowed",
+   "why": "encoder options: inert without --o (reserved)"
+  },
+  "--ocopy-metadata": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--of": {
+   "type": "String",
+   "class": "allowed",
+   "why": "encoder container: inert without --o (reserved)"
+  },
+  "--ofopts": {
+   "type": "Key/value list",
+   "class": "allowed",
+   "why": "encoder container options: inert without --o (reserved)"
+  },
+  "--on-all-workspaces": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--ontop": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--ontop-level": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--openal-direct-channels": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--openal-num-buffers": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--openal-num-samples": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--opengl-check-pattern-a": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--opengl-check-pattern-b": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--opengl-early-flush": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--opengl-es": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--opengl-glfinish": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--opengl-pbo": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--opengl-rectangle-textures": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--opengl-swapinterval": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--opengl-waitvsync": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--orawts": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--ordered-chapters": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--ordered-chapters-files": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "local segment files (no request measured for a URL)"
+  },
+  "--oremove-metadata": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "encoder metadata: inert without --o (reserved)"
+  },
+  "--osc": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "the on-screen controller; its title middle-click draws ${path} (recorded, D-SINK-52, owner's call)"
+  },
+  "--osd-align-x": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--osd-align-y": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--osd-back-color": {
+   "type": "Color",
+   "class": "allowed"
+  },
+  "--osd-bar": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--osd-bar-align-x": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--osd-bar-align-y": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--osd-bar-border-size": {
+   "type": "alias",
+   "alias": "--osd-bar-outline-size",
+   "class": "allowed",
+   "why": "alias for --osd-bar-outline-size: classified as its target"
+  },
+  "--osd-bar-h": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--osd-bar-marker-min-size": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--osd-bar-marker-scale": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--osd-bar-marker-style": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--osd-bar-outline-size": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--osd-bar-w": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--osd-bitmap-max-size": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--osd-blur": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--osd-bold": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--osd-border-color": {
+   "type": "alias",
+   "alias": "--osd-outline-color",
+   "class": "allowed",
+   "why": "alias for --osd-outline-color: classified as its target"
+  },
+  "--osd-border-size": {
+   "type": "alias",
+   "alias": "--osd-outline-size",
+   "class": "allowed",
+   "why": "alias for --osd-outline-size: classified as its target"
+  },
+  "--osd-border-style": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--osd-color": {
+   "type": "Color",
+   "class": "allowed"
+  },
+  "--osd-duration": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--osd-font": {
+   "type": "String",
+   "class": "allowed",
+   "why": "font name"
+  },
+  "--osd-font-provider": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--osd-font-size": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--osd-fonts-dir": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "a local font directory"
+  },
+  "--osd-fractions": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--osd-glyph-limit": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--osd-italic": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--osd-justify": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--osd-level": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--osd-margin-x": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--osd-margin-y": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--osd-msg1": {
+   "type": "String",
+   "class": "reserved",
+   "why": "property-expanding OSD text: ${path} puts the credentialed URL on screen"
+  },
+  "--osd-msg2": {
+   "type": "String",
+   "class": "reserved",
+   "why": "property-expanding OSD text"
+  },
+  "--osd-msg3": {
+   "type": "String",
+   "class": "reserved",
+   "why": "property-expanding OSD text"
+  },
+  "--osd-on-seek": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--osd-outline-color": {
+   "type": "Color",
+   "class": "allowed"
+  },
+  "--osd-outline-size": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--osd-playing-msg": {
+   "type": "String",
+   "class": "reserved",
+   "why": "property-expanding OSD text at every file start (D-SINK-45)"
+  },
+  "--osd-playing-msg-duration": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--osd-playlist-entry": {
+   "type": "Choices",
+   "class": "pinned",
+   "pin": "--osd-playlist-entry=title",
+   "why": "filename or both draws the full loadfile URL wherever ${playlist} is shown (F8, the OSC) (measured)"
+  },
+  "--osd-prune-delay": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--osd-scale": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--osd-scale-by-window": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--osd-selected-color": {
+   "type": "Color",
+   "class": "allowed"
+  },
+  "--osd-selected-outline-color": {
+   "type": "Color",
+   "class": "allowed"
+  },
+  "--osd-shadow-color": {
+   "type": "alias",
+   "alias": "--osd-back-color",
+   "class": "allowed",
+   "why": "alias for --osd-back-color: classified as its target"
+  },
+  "--osd-shadow-offset": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--osd-shaper": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--osd-spacing": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--osd-status-msg": {
+   "type": "String",
+   "class": "reserved",
+   "why": "property-expanding OSD status text (D-SINK-45)"
+  },
+  "--oset-metadata": {
+   "type": "Key/value list",
+   "class": "allowed",
+   "why": "encoder metadata: inert without --o (reserved)"
+  },
+  "--ovc": {
+   "type": "String",
+   "class": "allowed",
+   "why": "encoder choice: inert without --o (reserved)"
+  },
+  "--ovcopts": {
+   "type": "Key/value list",
+   "class": "allowed",
+   "why": "encoder options: inert without --o (reserved)"
+  },
+  "--override-display-fps": {
+   "type": "alias",
+   "alias": "--display-fps-override",
+   "class": "allowed",
+   "why": "alias for --display-fps-override: classified as its target"
+  },
+  "--panscan": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--pause": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--pipewire-buffer": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--pipewire-remote": {
+   "type": "String",
+   "class": "allowed",
+   "why": "the audio server to connect to"
+  },
+  "--pipewire-volume-mode": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--pitch": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--play-dir": {
+   "type": "alias",
+   "alias": "--play-direction",
+   "class": "allowed",
+   "why": "alias for --play-direction: classified as its target"
+  },
+  "--play-direction": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--player-operation-mode": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--playlist": {
+   "type": "String",
+   "file": true,
+   "cliOnly": true,
+   "class": "reserved",
+   "why": "loads entries before the shell: user-origin entries pass every protocol (av://, file://) and the newborn-player check (applied_by_another_client) reads them as another client's"
+  },
+  "--playlist-exts": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "extensions for local directory expansion"
+  },
+  "--playlist-start": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--prefetch-playlist": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "the shell loads one entry at a time"
+  },
+  "--profile": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "D-SINK-13: allowed on purpose; the trailing pin block is the last word over any named profile"
+  },
+  "--pulse-allow-suspended": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--pulse-buffer": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--pulse-host": {
+   "type": "String",
+   "class": "allowed",
+   "why": "the audio server to connect to (the user's own; carries decoded audio, never the URL)"
+  },
+  "--pulse-latency-hacks": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--quiet": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--rar-list-all-volumes": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--really-quiet": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--rebase-start-time": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--referrer": {
+   "type": "String",
+   "class": "allowed",
+   "why": "reset on every channel by apply_channel"
+  },
+  "--replaygain": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--replaygain-clip": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--replaygain-fallback": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--replaygain-preamp": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--reset-on-next-file": {
+   "type": "String list",
+   "class": "pinned",
+   "pin": "--reset-on-next-file-clr",
+   "why": "restores the PREVIOUS channel's header options at the next load, so a zap sends them to the next host (measured, D-SINK-51)"
+  },
+  "--resume-playback": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "reads resume records from the pinned watch-later-dir only"
+  },
+  "--resume-playback-check-mtime": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--rtsp-transport": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--saturation": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--save-position-on-quit": {
+   "type": "Flag",
+   "class": "reserved",
+   "why": "a resume record whose header line is the stream path; lands in the pinned watch-later-dir"
+  },
+  "--save-watch-history": {
+   "type": "Flag",
+   "class": "pinned",
+   "pin": "--save-watch-history=no",
+   "why": "appends every path played, credentials and all, to a durable file (measured from mpv.conf, D-SINK-44)"
+  },
+  "--scale": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--scale-antiring": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--scale-blur": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--scale-clamp": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--scale-param1": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--scale-param2": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--scale-radius": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--scale-taper": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--scale-window": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--scale-wparam": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--scale-wtaper": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--scaler-resizes-only": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--screen": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--screen-name": {
+   "type": "String",
+   "class": "allowed",
+   "why": "local screen name"
+  },
+  "--screenshot-avif-encoder": {
+   "type": "String",
+   "class": "allowed",
+   "why": "screenshot encoding"
+  },
+  "--screenshot-avif-opts": {
+   "type": "Key/value list",
+   "class": "allowed",
+   "why": "screenshot encoding options"
+  },
+  "--screenshot-avif-pixfmt": {
+   "type": "String",
+   "class": "allowed",
+   "why": "screenshot encoding"
+  },
+  "--screenshot-dir": {
+   "type": "String",
+   "file": true,
+   "class": "base",
+   "why": "PO-11: contained by default, deliberately the user's to move"
+  },
+  "--screenshot-directory": {
+   "type": "alias",
+   "alias": "--screenshot-dir",
+   "class": "base",
+   "why": "alias for --screenshot-dir: classified as its target"
+  },
+  "--screenshot-format": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--screenshot-high-bit-depth": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--screenshot-jpeg-quality": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--screenshot-jpeg-source-chroma": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--screenshot-jxl-distance": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--screenshot-jxl-effort": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--screenshot-png-compression": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--screenshot-png-filter": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--screenshot-sw": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--screenshot-tag-colorspace": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--screenshot-template": {
+   "type": "String",
+   "class": "reserved",
+   "why": "property-expanding screenshot file names"
+  },
+  "--screenshot-webp-compression": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--screenshot-webp-lossless": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--screenshot-webp-quality": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--script": {
+   "type": "alias",
+   "alias": "--scripts-append",
+   "class": "pinned",
+   "why": "alias for --scripts-append: classified as its target"
+  },
+  "--script-opt": {
+   "type": "alias",
+   "alias": "--script-opts-append",
+   "class": "warned",
+   "why": "alias for --script-opts-append: classified as its target"
+  },
+  "--script-opts": {
+   "type": "Key/value list",
+   "class": "warned",
+   "why": "PO-10 / D-PLY-5: warned when it names ytdl; reaches the builtin scripts' options"
+  },
+  "--scripts": {
+   "type": "String list",
+   "file": true,
+   "class": "pinned",
+   "pin": "--scripts-clr",
+   "why": "an explicit script list loads despite --load-scripts=no; a plain mpv.conf script= line did (measured)"
+  },
+  "--sdl-buflen": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sdl-sw": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sdl-switch-mode": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sdl-vsync": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sdr-adjust-gamma": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--secondary-sid": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--secondary-sub-ass-override": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--secondary-sub-delay": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--secondary-sub-pos": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--secondary-sub-visibility": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sharpen": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--show-in-taskbar": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--show-profile": {
+   "type": "String",
+   "cliOnly": true,
+   "class": "allowed",
+   "why": "prints and exits"
+  },
+  "--shuffle": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sid": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--sigmoid-center": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sigmoid-slope": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sigmoid-upscaling": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--slang": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "track language preference"
+  },
+  "--snap-window": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--speed": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--spirv-compiler": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--sstep": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--start": {
+   "type": "Relative time or percent position",
+   "class": "allowed"
+  },
+  "--stop-playback-on-init-failure": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--stop-screensaver": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--stream-buffer-size": {
+   "type": "ByteSize",
+   "class": "allowed"
+  },
+  "--stream-dump": {
+   "type": "String",
+   "file": true,
+   "class": "reserved",
+   "why": "writes the stream itself to a file (D-SINK-45; the --stream-record class)"
+  },
+  "--stream-lavf-o": {
+   "type": "Key/value list",
+   "class": "pinned",
+   "pin": "--stream-lavf-o-clr",
+   "why": "FFmpeg's own tls_verify for the stream (D-SINK-15); -clr makes it command-line-set, so no per-file profile replaces it"
+  },
+  "--stream-record": {
+   "type": "String",
+   "class": "reserved",
+   "why": "writes the stream itself to a durable file"
+  },
+  "--stretch-dvd-subs": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--stretch-image-subs-to-screen": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub": {
+   "type": "alias",
+   "alias": "--sid",
+   "class": "allowed",
+   "why": "alias for --sid: classified as its target"
+  },
+  "--sub-align-x": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--sub-align-y": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--sub-ass": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-ass-force-margins": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-ass-force-style": {
+   "type": "alias",
+   "alias": "--sub-ass-style-overrides",
+   "class": "allowed",
+   "why": "alias for --sub-ass-style-overrides: classified as its target"
+  },
+  "--sub-ass-hinting": {
+   "type": "alias",
+   "alias": "--sub-hinting",
+   "class": "allowed",
+   "why": "alias for --sub-hinting: classified as its target"
+  },
+  "--sub-ass-justify": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-ass-line-spacing": {
+   "type": "alias",
+   "alias": "--sub-line-spacing",
+   "class": "allowed",
+   "why": "alias for --sub-line-spacing: classified as its target"
+  },
+  "--sub-ass-override": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--sub-ass-prune-delay": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--sub-ass-scale-with-window": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-ass-shaper": {
+   "type": "alias",
+   "alias": "--sub-shaper",
+   "class": "allowed",
+   "why": "alias for --sub-shaper: classified as its target"
+  },
+  "--sub-ass-style-overrides": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "subtitle styling"
+  },
+  "--sub-ass-styles": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "a local styles file (no request measured for a URL)"
+  },
+  "--sub-ass-use-video-data": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--sub-ass-video-aspect-override": {
+   "type": "Aspect",
+   "class": "allowed"
+  },
+  "--sub-ass-vsfilter-aspect-compat": {
+   "type": "removed",
+   "class": "allowed",
+   "why": "removed by mpv: inert"
+  },
+  "--sub-ass-vsfilter-blur-compat": {
+   "type": "removed",
+   "class": "allowed",
+   "why": "removed by mpv: inert"
+  },
+  "--sub-ass-vsfilter-color-compat": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--sub-auto": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--sub-auto-exts": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "extensions for local autoload"
+  },
+  "--sub-back-color": {
+   "type": "Color",
+   "class": "allowed"
+  },
+  "--sub-bitmap-max-size": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--sub-blur": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sub-bold": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-border-color": {
+   "type": "alias",
+   "alias": "--sub-outline-color",
+   "class": "allowed",
+   "why": "alias for --sub-outline-color: classified as its target"
+  },
+  "--sub-border-size": {
+   "type": "alias",
+   "alias": "--sub-outline-size",
+   "class": "allowed",
+   "why": "alias for --sub-outline-size: classified as its target"
+  },
+  "--sub-border-style": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--sub-clear-on-seek": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-codepage": {
+   "type": "String",
+   "class": "allowed",
+   "why": "text decoding"
+  },
+  "--sub-color": {
+   "type": "Color",
+   "class": "allowed"
+  },
+  "--sub-create-cc-track": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-delay": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sub-demuxer": {
+   "type": "String",
+   "class": "allowed",
+   "why": "demuxer choice for subtitles"
+  },
+  "--sub-file": {
+   "type": "alias",
+   "alias": "--sub-files-append",
+   "class": "reserved",
+   "why": "alias for --sub-files-append: classified as its target"
+  },
+  "--sub-file-paths": {
+   "type": "String list",
+   "file": true,
+   "class": "allowed",
+   "why": "local search directories (not reached for a URL; measured no request)"
+  },
+  "--sub-files": {
+   "type": "String list",
+   "file": true,
+   "class": "reserved",
+   "why": "opens a second address the token names, sending it the channel's provider headers (measured)"
+  },
+  "--sub-filter-jsre": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "regular expressions over subtitle text"
+  },
+  "--sub-filter-regex": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "regular expressions over subtitle text"
+  },
+  "--sub-filter-regex-enable": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-filter-regex-plain": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-filter-regex-warn": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-filter-sdh": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-filter-sdh-enclosures": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "subtitle text filtering"
+  },
+  "--sub-filter-sdh-harder": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-fix-timing": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-fix-timing-keep": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--sub-fix-timing-threshold": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--sub-font": {
+   "type": "String",
+   "class": "allowed",
+   "why": "font name"
+  },
+  "--sub-font-provider": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--sub-font-size": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sub-fonts-dir": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "a local font directory"
+  },
+  "--sub-forced-events-only": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-fps": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sub-gauss": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sub-glyph-limit": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--sub-gray": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-hdr-peak": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--sub-hinting": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--sub-italic": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-justify": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--sub-lavc-o": {
+   "type": "Key/value list",
+   "class": "allowed",
+   "why": "subtitle decoder AVOptions: opens neither a file nor the network"
+  },
+  "--sub-line-spacing": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sub-margin-x": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--sub-margin-y": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--sub-outline-color": {
+   "type": "Color",
+   "class": "allowed"
+  },
+  "--sub-outline-size": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sub-past-video-end": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-pos": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sub-scale": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sub-scale-by-window": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-scale-signs": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-scale-with-window": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-shadow-color": {
+   "type": "alias",
+   "alias": "--sub-back-color",
+   "class": "allowed",
+   "why": "alias for --sub-back-color: classified as its target"
+  },
+  "--sub-shadow-offset": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sub-shaper": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--sub-spacing": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sub-speed": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sub-stretch-durations": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-use-margins": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-visibility": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sub-vsfilter-bidi-compat": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--subs-fallback": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--subs-fallback-forced": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--subs-match-os-language": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--subs-with-matching-audio": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--swapchain-depth": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--sws-allow-zimg": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sws-bitexact": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sws-cgb": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sws-chs": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--sws-cs": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sws-cvs": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--sws-fast": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--sws-lgb": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sws-ls": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--sws-scaler": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--target-colorspace-hint": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--target-colorspace-hint-mode": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--target-colorspace-hint-strict": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--target-contrast": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--target-gamut": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--target-lut": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "a local LUT file (no request measured for a URL)"
+  },
+  "--target-peak": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--target-prim": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--target-trc": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--taskbar-progress": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--teletext-page": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--temporal-dither": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--temporal-dither-period": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--term-osd": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--term-osd-bar": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--term-osd-bar-chars": {
+   "type": "String",
+   "class": "allowed",
+   "why": "terminal bar glyphs, not expanded"
+  },
+  "--term-playing-msg": {
+   "type": "String",
+   "class": "reserved",
+   "why": "property-expanding terminal text at every file start"
+  },
+  "--term-status-msg": {
+   "type": "String",
+   "class": "reserved",
+   "why": "property-expanding terminal status line"
+  },
+  "--term-title": {
+   "type": "String",
+   "class": "reserved",
+   "why": "property-expanding terminal title"
+  },
+  "--terminal": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--title": {
+   "type": "String",
+   "class": "reserved",
+   "why": "property-expanding window title, set per channel over IPC with the $> prefix (S-01)"
+  },
+  "--title-bar": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--tls-ca-file": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "D-SINK-13 layer 4: the one escape for a private CA, verified behind the trailing token"
+  },
+  "--tls-cert-file": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "a client certificate, not peer verification"
+  },
+  "--tls-key-file": {
+   "type": "String",
+   "file": true,
+   "class": "allowed",
+   "why": "a client key, not peer verification"
+  },
+  "--tls-verify": {
+   "type": "Flag",
+   "class": "pinned",
+   "pin": "--tls-verify=yes",
+   "why": "D-SINK-13 layer 2: the last word; mpv's own default is no"
+  },
+  "--tone-mapping": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--tone-mapping-desaturate": {
+   "type": "removed",
+   "class": "allowed",
+   "why": "removed by mpv: inert"
+  },
+  "--tone-mapping-desaturate-exponent": {
+   "type": "removed",
+   "class": "allowed",
+   "why": "removed by mpv: inert"
+  },
+  "--tone-mapping-max-boost": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--tone-mapping-param": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--tone-mapping-visualize": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--track-auto-selection": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--treat-srgb-as-power22": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--tscale": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--tscale-antiring": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--tscale-blur": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--tscale-clamp": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--tscale-param1": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--tscale-param2": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--tscale-radius": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--tscale-taper": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--tscale-window": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--tscale-wparam": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--tscale-wtaper": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--untimed": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--use-embedded-icc-profile": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--use-filedir-conf": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "reads a config beside a LOCAL file; a stream URL has no directory"
+  },
+  "--user-agent": {
+   "type": "String",
+   "class": "allowed",
+   "why": "reset on every channel by apply_channel"
+  },
+  "--v": {
+   "type": "Flag",
+   "cliOnly": true,
+   "class": "allowed"
+  },
+  "--V": {
+   "type": "Print",
+   "cliOnly": true,
+   "class": "allowed",
+   "why": "prints and exits"
+  },
+  "--vaapi-device": {
+   "type": "String",
+   "class": "allowed",
+   "why": "a local device path"
+  },
+  "--vd": {
+   "type": "String",
+   "class": "allowed",
+   "why": "decoder selection"
+  },
+  "--vd-apply-cropping": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vd-lavc-assume-old-x264": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vd-lavc-bitexact": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vd-lavc-check-hw-profile": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vd-lavc-dr": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--vd-lavc-fast": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vd-lavc-film-grain": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--vd-lavc-framedrop": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--vd-lavc-o": {
+   "type": "Key/value list",
+   "class": "allowed",
+   "why": "video decoder AVOptions: a codec opens neither a file nor the network"
+  },
+  "--vd-lavc-show-all": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vd-lavc-skipframe": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--vd-lavc-skipidct": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--vd-lavc-skiploopfilter": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--vd-lavc-software-fallback": {
+   "type": "alias",
+   "alias": "--hwdec-software-fallback",
+   "class": "allowed",
+   "why": "alias for --hwdec-software-fallback: classified as its target"
+  },
+  "--vd-lavc-threads": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vd-queue-enable": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vd-queue-max-bytes": {
+   "type": "ByteSize",
+   "class": "allowed"
+  },
+  "--vd-queue-max-samples": {
+   "type": "Integer64",
+   "class": "allowed"
+  },
+  "--vd-queue-max-secs": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--version": {
+   "type": "Print",
+   "cliOnly": true,
+   "class": "allowed",
+   "why": "prints and exits"
+  },
+  "--vf": {
+   "type": "Object settings list",
+   "class": "allowed",
+   "why": "video filters see frames, never the URL; a lavfi graph can open or write a file the token itself names (P4, recorded)"
+  },
+  "--vid": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--video": {
+   "type": "alias",
+   "alias": "--vid",
+   "class": "allowed",
+   "why": "alias for --vid: classified as its target"
+  },
+  "--video-align-x": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--video-align-y": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--video-aspect-method": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--video-aspect-override": {
+   "type": "Aspect",
+   "class": "allowed"
+  },
+  "--video-backward-batch": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--video-backward-overlap": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--video-crop": {
+   "type": "Video rect",
+   "class": "allowed"
+  },
+  "--video-exts": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "extensions for local autoload"
+  },
+  "--video-latency-hacks": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--video-margin-ratio-bottom": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--video-margin-ratio-left": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--video-margin-ratio-right": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--video-margin-ratio-top": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--video-osd": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--video-output-levels": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--video-pan-x": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--video-pan-y": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--video-recenter": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--video-reversal-buffer": {
+   "type": "ByteSize",
+   "class": "allowed"
+  },
+  "--video-rotate": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--video-scale-x": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--video-scale-y": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--video-sync": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--video-sync-max-audio-change": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--video-sync-max-factor": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--video-sync-max-video-change": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--video-timing-offset": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--video-unscaled": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--video-zoom": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--vlang": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "track language preference"
+  },
+  "--vo": {
+   "type": "Object settings list",
+   "class": "allowed",
+   "why": "video output choice; vo=image writes into the contained cwd unless --vo-image-outdir (reserved)"
+  },
+  "--vo-image-avif-encoder": {
+   "type": "String",
+   "class": "allowed",
+   "why": "image output encoding"
+  },
+  "--vo-image-avif-opts": {
+   "type": "Key/value list",
+   "class": "allowed",
+   "why": "image output encoding options"
+  },
+  "--vo-image-avif-pixfmt": {
+   "type": "String",
+   "class": "allowed",
+   "why": "image output encoding"
+  },
+  "--vo-image-format": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--vo-image-high-bit-depth": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-image-jpeg-quality": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-image-jpeg-source-chroma": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-image-jxl-distance": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--vo-image-jxl-effort": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-image-outdir": {
+   "type": "String",
+   "file": true,
+   "class": "reserved",
+   "why": "with --vo=image, writes every decoded frame to a durable directory the plugin never listed"
+  },
+  "--vo-image-png-compression": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-image-png-filter": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-image-tag-colorspace": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-image-webp-compression": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-image-webp-lossless": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-image-webp-quality": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-kitty-alt-screen": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-kitty-auto-multiplexer-passthrough": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-kitty-cols": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-kitty-config-clear": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-kitty-height": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-kitty-left": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-kitty-rows": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-kitty-top": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-kitty-use-shm": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-kitty-width": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-null-fps": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--vo-sixel-alt-screen": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-sixel-buffered": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-sixel-cols": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-sixel-config-clear": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-sixel-dither": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--vo-sixel-fixedpalette": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-sixel-height": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-sixel-left": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-sixel-pad-x": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-sixel-pad-y": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-sixel-reqcolors": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-sixel-rows": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-sixel-threshold": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-sixel-top": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-sixel-width": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-tct-256": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-tct-algo": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--vo-tct-buffering": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--vo-tct-height": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-tct-width": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-vaapi-scaled-osd": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-vaapi-scaling": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--vo-vdpau-chroma-deint": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-vdpau-colorkey": {
+   "type": "Color",
+   "class": "allowed"
+  },
+  "--vo-vdpau-composite-detect": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-vdpau-denoise": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--vo-vdpau-force-yuv": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-vdpau-fps": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--vo-vdpau-hqscaling": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-vdpau-output-surfaces": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-vdpau-pullup": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vo-vdpau-queuetime-fs": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-vdpau-queuetime-windowed": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vo-vdpau-sharpen": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--volume": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--volume-gain": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--volume-gain-max": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--volume-gain-min": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--volume-max": {
+   "type": "Float",
+   "class": "allowed"
+  },
+  "--vulkan-async-compute": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vulkan-async-transfer": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--vulkan-device": {
+   "type": "String",
+   "class": "allowed",
+   "why": "GPU choice"
+  },
+  "--vulkan-display-display": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vulkan-display-mode": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vulkan-display-plane": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vulkan-queue-count": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--vulkan-swap-mode": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--watch-history-path": {
+   "type": "String",
+   "file": true,
+   "class": "reserved",
+   "why": "chooses where mpv's watch history (every path played) lands (D-SINK-45)"
+  },
+  "--watch-later-dir": {
+   "type": "String",
+   "file": true,
+   "class": "pinned",
+   "pin": "--watch-later-dir={watchLater}",
+   "why": "contains the resume record (it names the stream path) in the runtime folder; a named profile moved it (measured)"
+  },
+  "--watch-later-directory": {
+   "type": "alias",
+   "alias": "--watch-later-dir",
+   "class": "pinned",
+   "why": "alias for --watch-later-dir: classified as its target"
+  },
+  "--watch-later-options": {
+   "type": "String list",
+   "class": "allowed",
+   "why": "which options a resume record stores (contained by the pinned watch-later-dir)"
+  },
+  "--wayland-app-id": {
+   "type": "String",
+   "class": "reserved",
+   "why": "the window class picture in picture matches on (PIP_CLASS)"
+  },
+  "--wayland-configure-bounds": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--wayland-content-type": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--wayland-disable-vsync": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--wayland-edge-pixels-pointer": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--wayland-edge-pixels-touch": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--wayland-internal-vsync": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--wayland-present": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--wid": {
+   "type": "Integer64",
+   "class": "allowed"
+  },
+  "--window-dragging": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--window-maximized": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--window-minimized": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--window-scale": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--write-filename-in-watch-later-config": {
+   "type": "Flag",
+   "class": "allowed",
+   "why": "the record lands in the pinned, contained watch-later-dir"
+  },
+  "--x11-bypass-compositor": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--x11-name": {
+   "type": "String",
+   "class": "allowed",
+   "why": "X11 class name"
+  },
+  "--x11-netwm": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--x11-present": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--x11-wid-title": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--xv-adaptor": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--xv-buffers": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--xv-ck": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--xv-ck-method": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--xv-colorkey": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--xv-port": {
+   "type": "Integer",
+   "class": "allowed"
+  },
+  "--ytdl": {
+   "type": "Flag",
+   "class": "warned",
+   "why": "PO-5: the escape hatch for links that are not streams; puts the URL on yt-dlp's argv (also base: --ytdl=no)"
+  },
+  "--ytdl-format": {
+   "type": "String",
+   "class": "warned",
+   "why": "configures the yt-dlp handoff (PO-10)"
+  },
+  "--ytdl-raw-options": {
+   "type": "Key/value list",
+   "class": "warned",
+   "why": "configures the yt-dlp handoff (PO-10)"
+  },
+  "--zimg-dither": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--zimg-fast": {
+   "type": "Flag",
+   "class": "allowed"
+  },
+  "--zimg-scaler": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--zimg-scaler-chroma": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--zimg-scaler-chroma-param-a": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--zimg-scaler-chroma-param-b": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--zimg-scaler-param-a": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--zimg-scaler-param-b": {
+   "type": "Double",
+   "class": "allowed"
+  },
+  "--zimg-threads": {
+   "type": "Choices",
+   "class": "allowed"
+  },
+  "--{": {
+   "type": "Flag",
+   "cliOnly": true,
+   "class": "reserved",
+   "why": "per-file option group; MPV_ARG_RE cannot pass the shape"
+  },
+  "--}": {
+   "type": "Flag",
+   "cliOnly": true,
+   "class": "reserved",
+   "why": "per-file option group; MPV_ARG_RE cannot pass the shape"
+  }
+ }
+}

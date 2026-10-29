@@ -2224,24 +2224,31 @@ TestCase {
   function test_adoptedPlayerTlsVerdict() {
     compare(Model.MPV_TLS_VERIFY_PROP, "tls-verify")
     compare(Model.MPV_STREAM_OPTS_PROP, "stream-lavf-o")
-    compare(Model.tlsPropertiesSafe(true, 0), true)
-    compare(Model.tlsPropertiesSafe(false, 0), false)
-    compare(Model.tlsPropertiesSafe(true, 1), false)
-    compare(Model.tlsPropertiesSafe(null, 0), false)
-    compare(Model.tlsPropertiesSafe(true, null), false)
+    compare(Model.tlsPropertiesSafe(true, 0, 0), true)
+    compare(Model.tlsPropertiesSafe(false, 0, 0), false)
+    compare(Model.tlsPropertiesSafe(true, 1, 0), false)
+    compare(Model.tlsPropertiesSafe(null, 0, 0), false)
+    compare(Model.tlsPropertiesSafe(true, null, 0), false)
+    // 2026-10-29: the third reading, every other TLS pin the player holds.
+    compare(Model.tlsPropertiesSafe(true, 0, 1), false)
+    compare(Model.tlsPropertiesSafe(true, 0, null), false)
+    compare(Model.tlsPropertiesSafe(true, 0), false)
     // The coercions a more forgiving reader would wave through.
-    compare(Model.tlsPropertiesSafe(1, 0), false)
-    compare(Model.tlsPropertiesSafe(true, false), false)
+    compare(Model.tlsPropertiesSafe(1, 0, 0), false)
+    compare(Model.tlsPropertiesSafe(true, false, 0), false)
+    compare(Model.tlsPropertiesSafe(true, 0, false), false)
     // feed / reload / stop, the three answers applyProbe switches on.
-    compare(Model.playerTlsVerdict({ verify: true, optionCount: 0, migrated: false }).action, "feed")
-    compare(Model.playerTlsVerdict({ verify: true, optionCount: 0, migrated: true }).action, "reload")
-    compare(Model.playerTlsVerdict({ verify: false, optionCount: 0, migrated: true }).action, "stop")
+    compare(Model.playerTlsVerdict({ verify: true, optionCount: 0, unpinned: 0, migrated: false }).action, "feed")
+    compare(Model.playerTlsVerdict({ verify: true, optionCount: 0, unpinned: 0, migrated: true }).action, "reload")
+    compare(Model.playerTlsVerdict({ verify: false, optionCount: 0, unpinned: 0, migrated: true }).action, "stop")
+    compare(Model.playerTlsVerdict({ verify: true, optionCount: 0, unpinned: 1, migrated: true }).action, "stop")
+    compare(Model.playerTlsVerdict({ verify: true, optionCount: 0, migrated: false }).action, "stop")
     compare(Model.playerTlsVerdict(null).action, "stop")
     compare(Model.playerTlsVerdict(null).safe, false)
     // And through the parser the service actually feeds it.
     var probe = Model.parsePlayerProbe('{"ok":true,"kind":"player.probe","running":true,"responsive":true,'
       + '"pid":7,"idle":false,"stash":null,"owner":null,"seq":1,'
-      + '"tls":{"verify":false,"optionCount":0,"migrated":true}}')
+      + '"tls":{"verify":false,"optionCount":0,"unpinned":0,"migrated":true}}')
     compare(Model.playerTlsVerdict(probe.tls).action, "stop")
     compare(Model.playerTlsVerdict(Model.parsePlayerProbe("junk").tls).action, "stop")
   }

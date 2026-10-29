@@ -30,7 +30,7 @@ import sys
 import unittest
 
 from helper_loader import load_helper
-from test_mpv import FakeMpv
+from test_mpv import FakeMpv, PINNED_CMDLINE, PINNED_PROPS
 
 helper = load_helper()
 
@@ -90,6 +90,42 @@ server.bind(path)
 os.chmod(path, 0o600)
 server.listen(8)
 state = {"entry": 0, "url": "", "user_data": {}, "props": {}}
+# 2026-10-29 (the pin block). What real mpv 0.41 answers for the options the
+# TLS read-back asks about is what its OWN ARGV made them, so the stub derives
+# them from its argv the way mpv does -- the last token wins, `-clr` empties a
+# list, `-append` replaces one key -- at mpv's own defaults otherwise, and it
+# remembers which options came from the command line, because mpv's
+# `option-info/<name>/set-from-commandline` answers exactly that (measured).
+# `load-auto-profiles` is a choice mpv answers as a BOOLEAN for yes/no and as
+# the string "auto" otherwise (measured). A stub that answered `property not
+# found` here would be refused by the read-back; one that answered "safe"
+# whatever its argv said would be more forgiving than mpv (CLAUDE.md 10).
+cmdline = set()
+state["props"].update({"tls-verify": False, "stream-lavf-o": {}, "demuxer-lavf-o": {},
+                       "load-auto-profiles": "auto", "profile-list": []})
+for arg in argv:
+    if not arg.startswith("--"):
+        continue
+    name, _, value = arg[2:].partition("=")
+    base = name
+    for suffix in ("-clr", "-append", "-add", "-set", "-del", "-remove", "-pre", "-toggle"):
+        if base.endswith(suffix):
+            base = base[:-len(suffix)]
+    cmdline.add(base)
+    if name == "tls-verify":
+        state["props"]["tls-verify"] = value != "no"
+    elif name == "load-auto-profiles":
+        state["props"]["load-auto-profiles"] = {"no": False, "yes": True}.get(value, value)
+    elif name in ("stream-lavf-o-clr", "demuxer-lavf-o-clr"):
+        state["props"][base] = {}
+    elif name in ("stream-lavf-o-append", "demuxer-lavf-o-append"):
+        key, _, item = value.partition("=")
+        current = dict(state["props"][base])
+        current.pop(key, None)
+        current[key] = item
+        state["props"][base] = current
+    elif name in ("stream-lavf-o", "demuxer-lavf-o"):
+        state["props"][base] = dict(pair.partition("=")[::2] for pair in value.split(",") if pair)
 
 
 def orderly_exit(code):
@@ -200,6 +236,8 @@ def _handle(conn):
                     reply = {"error": "success", "data": os.getpid(), "request_id": rid}
                 elif prop == "path":
                     reply = {"error": "success", "data": state["url"], "request_id": rid}
+                elif prop.startswith("option-info/") and prop.endswith("/set-from-commandline"):
+                    reply = {"error": "success", "data": prop.split("/")[1] in cmdline, "request_id": rid}
                 elif prop.startswith("user-data/") and prop.split("/", 1)[1] in state["user_data"]:
                     reply = {"error": "success", "data": state["user_data"][prop.split("/", 1)[1]], "request_id": rid}
                 elif prop in state["props"]:
@@ -212,7 +250,20 @@ def _handle(conn):
             elif name == "set_property":
                 # Real mpv remembers what it was told; a double that forgets
                 # cannot show which of two writers landed last.
-                state["props"][command[1]] = command[2]
+                value = command[2]
+                if command[1] == "load-auto-profiles" and isinstance(value, str):
+                    value = {"no": False, "yes": True}.get(value, value)
+                state["props"][command[1]] = value
+                reply = {"error": "success", "request_id": rid}
+            elif name == "change-list":
+                current = dict(state["props"].get(command[1]) or {})
+                if command[2] == "remove":
+                    current.pop(command[3], None)
+                elif command[2] == "append":
+                    key, _, item = str(command[3]).partition("=")
+                    current.pop(key, None)
+                    current[key] = item
+                state["props"][command[1]] = current
                 reply = {"error": "success", "request_id": rid}
             elif name == "loadfile":
                 # F-MPV-1, second half. Real mpv 0.41 measured headless: a
@@ -906,8 +957,13 @@ class WorkingDirectoryTest(PlayerTestCase):
         code, payload, _, stderr = self.player_start("--mpv-arg=--watch-later-dir=%s" % self.dir)
         self.assertEqual(code, 0, stderr)
         self.assertIn("dropped mpvArg --watch-later-dir", payload["warnings"])
-        self.assertEqual([t for t in self.spawned_argv()[0] if t.startswith("--watch-later-dir=")],
-                         ["--watch-later-dir=%s" % self.later])
+        # Twice since 2026-10-29: in the base argv where a reader looks, and in
+        # the pin block, after every user token, because a named profile in the
+        # user's own mpv.conf moved it (measured). Both name the contained one.
+        argv = self.spawned_argv()[0]
+        self.assertEqual([t for t in argv if t.startswith("--watch-later-dir=")],
+                         ["--watch-later-dir=%s" % self.later] * 2)
+        self.assertEqual(argv[-len(helper.MPV_PIN_BLOCK) - 1], "--watch-later-dir=%s" % self.later)
 
     def test_a_directory_that_cannot_be_created_warns_and_still_plays(self):
         # "What happens when it does not exist" has a second half: what
@@ -1009,7 +1065,12 @@ class IdempotenceTest(PlayerTestCase):
         # The adoption check comes first, then the subscription - and the
         # subscription is before any load, which is F3's whole point.
         self.assertEqual(names[0], ["get_property", "mpv-version"])
-        self.assertEqual(names[1], ["request_log_messages", "error"])
+        # 2026-10-29: then the adopted player's non-TLS pins (pin_adopted_player
+        # reads each before it writes it), and only then the subscription --
+        # which is still before every property of the channel and the load.
+        self.assertEqual(names[1], ["get_property", "load-select"])
+        subscribed = names.index(["request_log_messages", "error"])
+        self.assertLess(subscribed, names.index(["set_property", "tls-verify"]))
         order = [command[0] for command in server.commands]
         self.assertLess(order.index("request_log_messages"), order.index("loadfile"))
         # PAUSE LIVE TV: `pause` is cleared FIRST, before the title, because
@@ -1022,8 +1083,16 @@ class IdempotenceTest(PlayerTestCase):
         # two certificate properties AHEAD of all of them: they are the only
         # ones whose failure means "do not load at all", so they are asserted
         # before the player is told anything about the channel.
-        self.assertEqual(sets[:7], [["set_property", "tls-verify"],
+        # 2026-10-29: an ADOPTED player is first given the pins that are not
+        # about the TLS peer (pin_adopted_player, best effort; this double is a
+        # pre-pin player at mpv's defaults, so the select menu is on and the
+        # resume folder is mpv's own), then apply_channel's TLS assertion, which
+        # now turns auto-profiles off as well.
+        self.assertEqual(sets[:2], [["set_property", "load-select"], ["set_property", "watch-later-dir"]])
+        sets = sets[2:]
+        self.assertEqual(sets[:8], [["set_property", "tls-verify"],
                                     ["set_property", "stream-lavf-o"],
+                                    ["set_property", "load-auto-profiles"],
                                     ["set_property", "pause"],
                                     ["set_property", "aid"],
                                     ["set_property", "sid"],
@@ -1804,8 +1873,9 @@ class ProbeTlsTest(PlayerTestCase):
                                    "stream-lavf-o": {"tls_verify": "0"}})
         code, payload, _, stderr = self.probe()
         self.assertEqual(code, 0, stderr)
-        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 0, "migrated": True})
+        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 0, "unpinned": 0, "migrated": True})
         self.assertIs(server.props["tls-verify"], True)
+        self.assertIs(server.props["load-auto-profiles"], False)
         self.assertEqual(server.props["stream-lavf-o"], {})
         # And it is the first thing the probe does with the player after the
         # connection handshake (probe_client's own `mpv-version` read, which is
@@ -1824,10 +1894,12 @@ class ProbeTlsTest(PlayerTestCase):
         answer `migrated: False`, or every poll would cost the user a rebuffer."""
         os.makedirs(self.runtime, 0o700)
         self.sleeper()
-        server = self.start(props={"mpv-version": "mpv 0.41.0", "tls-verify": True})
+        # Since 2026-10-29 "upgraded" means launched with the pin block: the
+        # pinned values, set from the command line (test_mpv's PINNED_*).
+        server = self.start(props=dict(PINNED_PROPS, **{"mpv-version": "mpv 0.41.0"}), cmdline=PINNED_CMDLINE)
         code, payload, _, stderr = self.probe()
         self.assertEqual(code, 0, stderr)
-        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 0, "migrated": False})
+        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 0, "unpinned": 0, "migrated": False})
         self.assertEqual([c for c in server.commands if c[:2] == ["set_property", "tls-verify"]], [])
 
     def test_a_set_that_does_not_take_is_reported_unsafe_rather_than_hidden(self):
@@ -1839,8 +1911,9 @@ class ProbeTlsTest(PlayerTestCase):
         self.start(props={"mpv-version": "mpv 0.41.0", "tls-verify": False}, refuse={"tls-verify"})
         code, payload, _, stderr = self.probe()
         self.assertEqual(code, 0, stderr)
-        self.assertEqual(payload["tls"], {"verify": False, "optionCount": 0, "migrated": True})
-        self.assertFalse(helper.tls_properties_safe(payload["tls"]["verify"], payload["tls"]["optionCount"]))
+        self.assertEqual(payload["tls"], {"verify": False, "optionCount": 0, "unpinned": 0, "migrated": True})
+        self.assertFalse(helper.tls_properties_safe(payload["tls"]["verify"], payload["tls"]["optionCount"],
+                                                    payload["tls"]["unpinned"]))
 
     def test_an_unreadable_property_is_reported_as_no_reading(self):
         os.makedirs(self.runtime, 0o700)
@@ -1849,7 +1922,8 @@ class ProbeTlsTest(PlayerTestCase):
         code, payload, _, stderr = self.probe()
         self.assertEqual(code, 0, stderr)
         self.assertIsNone(payload["tls"]["verify"])
-        self.assertFalse(helper.tls_properties_safe(payload["tls"]["verify"], payload["tls"]["optionCount"]))
+        self.assertFalse(helper.tls_properties_safe(payload["tls"]["verify"], payload["tls"]["optionCount"],
+                                                    payload["tls"]["unpinned"]))
 
     def test_a_player_that_was_never_reached_carries_no_readings_at_all(self):
         """`tls: null`, which Model.playerTlsVerdict answers "stop" to. An absent
@@ -1872,7 +1946,7 @@ class ProbeTlsTest(PlayerTestCase):
                    refuse={"stream-lavf-o"})
         code, payload, stdout, stderr = self.probe()
         self.assertEqual(code, 0, stderr)
-        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 2, "migrated": True})
+        self.assertEqual(payload["tls"], {"verify": True, "optionCount": 2, "unpinned": 0, "migrated": True})
         for secret in ("u:pw", "proxy.test", "http_proxy", "tls_verify"):
             self.assertNotIn(secret, stdout + stderr, secret)
 
@@ -1888,13 +1962,13 @@ class ProbeTlsTest(PlayerTestCase):
         original = helper.migrate_tls
 
         def read_only(client):
-            verify, count = helper.read_tls_state(client)
-            return {"verify": verify, "optionCount": count, "migrated": False}
+            verify, count, unpinned = helper.read_tls_state(client)
+            return {"verify": verify, "optionCount": count, "unpinned": unpinned, "migrated": False}
         helper.migrate_tls = read_only
         self.addCleanup(setattr, helper, "migrate_tls", original)
         code, payload, _, stderr = self.probe()
         self.assertEqual(code, 0, stderr)
-        self.assertEqual(payload["tls"], {"verify": False, "optionCount": 0, "migrated": False},
+        self.assertEqual(payload["tls"], {"verify": False, "optionCount": 0, "unpinned": 1, "migrated": False},
                          "the mutation must be visible in the reply, or the tests above are decoration")
         self.assertIs(server.props["tls-verify"], False)
 
@@ -2307,7 +2381,11 @@ class ParityTest(unittest.TestCase):
         # trailing re-assertion cannot outvote an option forwarded to
         # libavformat. Measured: it played the attacker's stream with both
         # tls-verify tokens in place.
-        self.assertEqual(len(names), 24)
+        # 53 since D-SINK-43..46 (2026-10-29): the reserved and pinned classes
+        # of tests/fixtures/mpv-options.json, which classifies every option of
+        # the installed mpv; test_mpv_options.py holds the set to that file
+        # name by name, so this count is the number and not the list.
+        self.assertEqual(len(names), 53)
         self.assertIn("--include", names)
         self.assertIn("--load-scripts", names)
         self.assertIn("--demuxer-cache-unlink-files", names)
@@ -2472,16 +2550,25 @@ class ParityTest(unittest.TestCase):
         self.assertGreater(at[1], user)              # layer 2: after everything the user gets
         self.assertEqual(at[1], len(argv) - 1)
 
-    def test_every_stream_lavf_o_spelling_is_refused_and_demuxer_lavf_o_is_not(self):
+    def test_every_stream_lavf_o_spelling_is_refused_and_demuxer_lavf_o_keeps_only_its_workarounds(self):
         """D-SINK-13 layer 5: the bypass the trailing token cannot reach.
 
         `--stream-lavf-o` forwards key=value to libavformat for the stream, and
         FFmpeg's own AVOption `tls_verify` is a different knob reaching the same
         place, so the re-assertion cannot outvote it. Measured 2026-10-07 with
         both tls-verify tokens in place: it PLAYED the attacker's self-signed
-        stream, as did -add, -append and -set. `--demuxer-lavf-o` is measured
-        NOT to bypass, so it stays open and that is pinned here too rather than
-        reserved on suspicion.
+        stream, as did -add, -append and -set.
+
+        `--demuxer-lavf-o` was "measured NOT to bypass" -- on a DIRECT stream,
+        the one shape where that is true. For HLS and DASH libavformat reopens
+        the URL with the demuxer's options and copies them into every segment
+        open, and `--demuxer-lavf-o=tls_verify=0` PLAYED the attacker's segment
+        with both tokens in place (D-SINK-43, 2026-10-29), as did
+        `verifyhost=<the attacker's own name>`. It stays unreserved for the
+        workarounds users rely on; a token that names a TLS key is refused.
+        This test pinned the opposite, `kept == [--demuxer-lavf-o=tls_verify=0]`,
+        until that day: a test that asserted the measured negative on the
+        wrong shape is how the claim stayed true on paper.
         """
         kept, rejected = helper.filter_mpv_args([
             "--stream-lavf-o=tls_verify=0",
@@ -2490,9 +2577,11 @@ class ParityTest(unittest.TestCase):
             "--stream-lavf-o-set=b=2",
             "--stream-lavf-o-del=c",
             "--demuxer-lavf-o=tls_verify=0",
+            "--demuxer-lavf-o-append=verifyhost=evil.example",
+            "--demuxer-lavf-o=live_start_index=-1",
         ])
-        self.assertEqual(kept, ["--demuxer-lavf-o=tls_verify=0"])
-        self.assertEqual(len(rejected), 5)
+        self.assertEqual(kept, ["--demuxer-lavf-o=live_start_index=-1"])
+        self.assertEqual(len(rejected), 7)
         self.assertIn("--stream-lavf-o", helper.MPV_RESERVED)
         self.assertNotIn("--demuxer-lavf-o", helper.MPV_RESERVED)
 

@@ -23,7 +23,18 @@
     "and the integer that JSON carries in the shell -- and a vector the two",
     "languages must answer differently would be a vector that teaches the wrong",
     "lesson. Model.playerTls refuses a fractional count outright for the same",
-    "reason."
+    "reason.",
+    "",
+    "2026-10-29 (D-SINK-43/44): a third reading, `unpinned`, the number of OTHER TLS",
+    "pins the player does not hold, summed by the helper (read_tls_state): the TLS",
+    "entries of `demuxer-lavf-o` -- for HLS and DASH libavformat hands that map to",
+    "every segment open, so `tls_verify=0` or `verifyhost=<the attacker's name>`",
+    "there undoes verification with both --tls-verify=yes tokens in place (measured)",
+    "-- plus 1 when `load-auto-profiles` is not off, plus every [protocol.*] or",
+    "[extension.*] profile that could set, at file load and so after this read, an",
+    "option this player does not have set from the command line. Zero is the only",
+    "safe count, for the same reasons as optionCount, and the same shapes are",
+    "refused: null, a boolean, a negative, a fraction, a string."
   ],
   "properties": {
     "_comment": [
@@ -35,128 +46,242 @@
       "field stopped on reattach."
     ],
     "verify": "tls-verify",
-    "streamOptions": "stream-lavf-o"
+    "streamOptions": "stream-lavf-o",
+    "demuxerOptions": "demuxer-lavf-o",
+    "autoProfiles": "load-auto-profiles"
   },
   "cases": [
     {
-      "name": "verifying and nothing overriding it: the only safe shape",
+      "name": "verifying, nothing overriding it and every pin held: the only safe shape",
       "verify": true,
       "optionCount": 0,
-      "safe": true
+      "safe": true,
+      "unpinned": 0
     },
     {
       "name": "a pre-upgrade player: mpv's own default is no",
       "verify": false,
       "optionCount": 0,
-      "safe": false
+      "safe": false,
+      "unpinned": 0
     },
     {
       "name": "verifying, but stream-lavf-o holds something that can outvote it",
       "verify": true,
       "optionCount": 1,
-      "safe": false
+      "safe": false,
+      "unpinned": 0
     },
     {
       "name": "verifying, several stream options",
       "verify": true,
       "optionCount": 3,
-      "safe": false
+      "safe": false,
+      "unpinned": 0
     },
     {
       "name": "the verify reading could not be taken",
       "verify": null,
       "optionCount": 0,
-      "safe": false
+      "safe": false,
+      "unpinned": 0
     },
     {
       "name": "the stream-lavf-o reading could not be taken",
       "verify": true,
       "optionCount": null,
-      "safe": false
+      "safe": false,
+      "unpinned": 0
     },
     {
       "name": "neither reading could be taken",
       "verify": null,
       "optionCount": null,
-      "safe": false
+      "safe": false,
+      "unpinned": 0
     },
     {
       "name": "1 is not true: mpv answers a flag with a boolean",
       "verify": 1,
       "optionCount": 0,
-      "safe": false
+      "safe": false,
+      "unpinned": 0
     },
     {
       "name": "\"yes\" is the command-line spelling, not the property value",
       "verify": "yes",
       "optionCount": 0,
-      "safe": false
+      "safe": false,
+      "unpinned": 0
     },
     {
       "name": "a boolean count must not coerce to zero",
       "verify": true,
       "optionCount": false,
-      "safe": false
+      "safe": false,
+      "unpinned": 0
     },
     {
       "name": "a boolean count must not coerce to one either",
       "verify": true,
       "optionCount": true,
-      "safe": false
+      "safe": false,
+      "unpinned": 0
     },
     {
       "name": "a negative count is not an empty map",
       "verify": true,
       "optionCount": -1,
-      "safe": false
+      "safe": false,
+      "unpinned": 0
     },
     {
       "name": "a fractional count is not a reading len() can produce",
       "verify": true,
       "optionCount": 0.5,
-      "safe": false
+      "safe": false,
+      "unpinned": 0
     },
     {
       "name": "a string count is not a count",
       "verify": true,
       "optionCount": "0",
-      "safe": false
+      "safe": false,
+      "unpinned": 0
     },
     {
       "name": "verify false and options set: the shape the maintainer measured",
       "verify": false,
       "optionCount": 1,
+      "safe": false,
+      "unpinned": 0
+    },
+    {
+      "name": "D-SINK-43: a TLS entry left in demuxer-lavf-o",
+      "verify": true,
+      "optionCount": 0,
+      "unpinned": 1,
+      "safe": false
+    },
+    {
+      "name": "D-SINK-44: auto-profiles still on, and a per-file profile that can undo a loose option",
+      "verify": true,
+      "optionCount": 0,
+      "unpinned": 2,
+      "safe": false
+    },
+    {
+      "name": "the third reading could not be taken",
+      "verify": true,
+      "optionCount": 0,
+      "unpinned": null,
+      "safe": false
+    },
+    {
+      "name": "a boolean unpinned must not coerce to zero",
+      "verify": true,
+      "optionCount": 0,
+      "unpinned": false,
+      "safe": false
+    },
+    {
+      "name": "a negative unpinned is not a held pin",
+      "verify": true,
+      "optionCount": 0,
+      "unpinned": -1,
+      "safe": false
+    },
+    {
+      "name": "a fractional unpinned is not a count the helper produces",
+      "verify": true,
+      "optionCount": 0,
+      "unpinned": 0.5,
+      "safe": false
+    },
+    {
+      "name": "a string unpinned is not a count",
+      "verify": true,
+      "optionCount": 0,
+      "unpinned": "0",
+      "safe": false
+    },
+    {
+      "name": "every reading unsafe at once",
+      "verify": false,
+      "optionCount": 1,
+      "unpinned": 3,
       "safe": false
     }
   ],
   "verdicts": [
     {
       "name": "already verifying, nothing to do",
-      "tls": { "verify": true, "optionCount": 0, "migrated": false },
+      "tls": {
+        "verify": true,
+        "optionCount": 0,
+        "migrated": false,
+        "unpinned": 0
+      },
       "safe": true,
       "action": "feed"
     },
     {
       "name": "migrated by the probe: the channel is re-established",
-      "tls": { "verify": true, "optionCount": 0, "migrated": true },
+      "tls": {
+        "verify": true,
+        "optionCount": 0,
+        "migrated": true,
+        "unpinned": 0
+      },
       "safe": true,
       "action": "reload"
     },
     {
       "name": "the set did not take: stopped rather than fed",
-      "tls": { "verify": false, "optionCount": 0, "migrated": true },
+      "tls": {
+        "verify": false,
+        "optionCount": 0,
+        "migrated": true,
+        "unpinned": 0
+      },
       "safe": false,
       "action": "stop"
     },
     {
       "name": "stream options survived the clear: stopped rather than fed",
-      "tls": { "verify": true, "optionCount": 2, "migrated": true },
+      "tls": {
+        "verify": true,
+        "optionCount": 2,
+        "migrated": true,
+        "unpinned": 0
+      },
       "safe": false,
       "action": "stop"
     },
     {
       "name": "no readings at all (an older helper, or a player never reached)",
       "tls": null,
+      "safe": false,
+      "action": "stop"
+    },
+    {
+      "name": "D-SINK-44: a per-file profile no migration reaches: stopped rather than fed",
+      "tls": {
+        "verify": true,
+        "optionCount": 0,
+        "unpinned": 1,
+        "migrated": true
+      },
+      "safe": false,
+      "action": "stop"
+    },
+    {
+      "name": "a helper reply without the third reading is not a safe one",
+      "tls": {
+        "verify": true,
+        "optionCount": 0,
+        "migrated": false
+      },
       "safe": false,
       "action": "stop"
     }
