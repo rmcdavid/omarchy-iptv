@@ -836,6 +836,26 @@
    "refused": false
   },
   {
+   "url": "http://127.0.0.1:631:80/x",
+   "source": {
+    "host": "127.0.0.1",
+    "port": 80,
+    "loopback": true,
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "http://127.0.0.1:631x/x",
+   "source": {
+    "host": "127.0.0.1",
+    "port": 80,
+    "loopback": true,
+    "local": false
+   },
+   "refused": true
+  },
+  {
    "url": "https://127.0.0.1/x",
    "source": {
     "host": "127.0.0.1",

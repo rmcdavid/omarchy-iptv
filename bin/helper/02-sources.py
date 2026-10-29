@@ -494,11 +494,18 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
         return "scheme", host
     if _listen_refusal(url, scheme, host) != "":
         return "listener", host
+    # url_port's reading, from the one urlsplit: the scheme's default stands
+    # only for a port the URL does not name. A port that does not parse is no
+    # port, never the default -- `http://127.0.0.1:631:80/` is 631 to FFmpeg
+    # (it reads digits up to the next colon) and was the playlist's own port
+    # 80 here while stream_host_refused refused it at play time (rc-p1b).
     try:
         port = parts.port
+        if port is None:
+            port = URL_DEFAULT_PORTS.get(scheme)
     except ValueError:
         port = None
-    if _host_refused(host, scheme, source, port if port is not None else URL_DEFAULT_PORTS.get(scheme)):
+    if _host_refused(host, scheme, source, port):
         return "local", host
     return "", host
 

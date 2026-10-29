@@ -176,6 +176,18 @@ class FixtureTest(unittest.TestCase):
         got = [(r["url"], r["source"], helper.stream_host_refused(r["url"], r["source"])) for r in FIXTURE["streamHosts"]]
         self.assertEqual(got, [(r["url"], r["source"], r["refused"]) for r in FIXTURE["streamHosts"]])
 
+    def test_the_parse_reads_every_host_row_as_play_time_does(self):
+        """rc-p1b (2026-10-29): parse_m3u's one read (stream_entry_refusal)
+        and the play-time rule (stream_host_refused, which player_target runs
+        again) are two readings of ONE rule, and the parse took the scheme's
+        default port for a port that does not PARSE -- `127.0.0.1:631:80` was
+        the port-80 home to it and refused at play time, a channel listed
+        that can never play. Every row: the parse says `local` exactly when
+        play time refuses."""
+        got = [(r["url"], helper.stream_entry_refusal(r["url"], r["source"])[0] == "local") for r in FIXTURE["streamHosts"]]
+        self.assertEqual(got, [(r["url"], r["refused"]) for r in FIXTURE["streamHosts"]])
+        self.assertIn("http://127.0.0.1:631:80/x", [r["url"] for r in FIXTURE["streamHosts"]])
+
     def test_the_own_host_rule_counts_the_port_on_loopback_only(self):
         """D-SINK-57 (owner, 2026-10-29), the shared rows: on loopback the
         playlist's own host is host AND port; a LAN or public host keeps any
