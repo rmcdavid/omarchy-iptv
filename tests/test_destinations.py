@@ -513,6 +513,46 @@ class ProxyTest(unittest.TestCase):
         self.assertIn("could not resolve guide.example.test", caught.exception.message)
         self.assertEqual(proxy.seen, [])
 
+    def test_every_address_a_proxied_target_answers_must_be_allowed(self):
+        """check_proxied, called (the recheck of lane-dest: a mutant that
+        checked ONE address of the answer survived the suite). The proxy may
+        connect to any address the name answers, so a single non-global one
+        among global ones is a refusal, in either order; the lookup is made to
+        answer two addresses for that one name, which any resolver can."""
+        for answer in (("8.8.8.8", "127.0.0.1"), ("127.0.0.1", "8.8.8.8"), ("8.8.4.4", "10.0.0.5")):
+            def lookup(host, port, timeout, answer=answer):
+                return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", (a, port)) for a in answer]
+            policy = helper.DestinationPolicy("playlist", "user")
+            policy.connected("p.example.test", "global", True)
+            with mock.patch.object(helper, "resolve_within", lookup):
+                with self.assertRaises(helper.HelperError) as caught:
+                    policy.check_proxied("cdn.example.test", 80, 5, False)
+            self.assertEqual(caught.exception.code, "local_address", answer)
+
+        def single(host, port, timeout):
+            return [(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", port))]
+        policy = helper.DestinationPolicy("playlist", "user")
+        policy.connected("p.example.test", "global", True)
+        with mock.patch.object(helper, "resolve_within", single):
+            policy.check_proxied("cdn.example.test", 80, 5, False)
+        self.assertEqual(policy.last_class, "global")
+
+    def test_a_typed_first_hop_this_machine_cannot_resolve_is_no_local_source(self):
+        """The lane's decision, pinned: behind a proxy with no local DNS the
+        typed first hop is allowed as `unresolved`, and a source of that class
+        is NOT local, so its list's LAN literals are still skipped (a mutant
+        that read `unresolved` as local survived the suite)."""
+        def lookup(host, port, timeout):
+            raise socket.gaierror(-2, "Name or service not known")
+        policy = helper.DestinationPolicy("playlist", "user")
+        with mock.patch.object(helper, "resolve_within", lookup):
+            policy.check_proxied("tvh.example.test", 80, 5, policy.begin_hop())
+        self.assertEqual((policy.first_class, policy.last_class), ("unresolved", "unresolved"))
+        source = helper.playlist_source("http", "http://tvh.example.test/pl.m3u", policy.last_class)
+        self.assertFalse(source["local"])
+        parsed = helper.parse_m3u(["#EXTM3U", "#EXTINF:-1,L", "http://10.0.0.5/x", "#EXTINF:-1,P", "http://cdn.example.test/x"], source)
+        self.assertEqual([c["name"] for c in parsed["channels"]], ["P"])
+
     def test_a_typed_first_hop_through_the_proxy_is_fetched(self):
         target = "http://192.0.2.10/pl.m3u"
         proxy = LoggingServer({target: (200, (), PLAYLIST)})
@@ -541,6 +581,16 @@ class StreamGateTest(unittest.TestCase):
         result = helper.parse_m3u(text, {"host": "p.example.test", "local": False})
         self.assertEqual([c.get("headers") for c in result["channels"]],
                          [{"Authorization": "a", "Cookie": "b", "Proxy-Authorization": "c", "Host": "d", "X-Ok": "1"}, {"X-Ok": "1"}])
+        self.assertIn("2 sign-in headers dropped: their channels are on other hosts than the playlist", result["warnings"])
+
+    def test_host_and_proxy_authorization_are_sign_in_headers_too(self):
+        """The two of the four the suite never put on another host's channel
+        (a mutant that forgot `host` survived it): a forged Host, and a
+        proxy credential, for a channel off the playlist's own host."""
+        text = ("#EXTM3U\n#EXTINF:-1,Cdn\n#KODIPROP:inputstream.adaptive.stream_headers="
+                "HOST=p.example.test&proxy-authorization=c&X-Ok=1\nhttp://cdn.example.test/live/2\n")
+        result = helper.parse_m3u(text, {"host": "p.example.test", "local": False})
+        self.assertEqual([c.get("headers") for c in result["channels"]], [{"X-Ok": "1"}])
         self.assertIn("2 sign-in headers dropped: their channels are on other hosts than the playlist", result["warnings"])
 
     def test_a_cached_listening_url_is_refused_at_play_time(self):
