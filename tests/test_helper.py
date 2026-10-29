@@ -276,7 +276,21 @@ class RedirectTest(unittest.TestCase):
             return run("playlist", "--url", self.first.url(path, "user:pw"), "--cache-dir", tmp, "--timeout", "5")
 
     def test_cross_origin_redirect_drops_authorization(self):
-        code, status, stderr = self.fetch("/cross")
+        """D-SINK-57 (2026-10-29): a typed LOOPBACK source whose redirect names
+        another port is redirected to another HOST, refused at connect
+        (tests/test_destinations.py holds that). So the two servers stand in
+        for two PUBLIC hosts here, through the one test seam that reads
+        127.0.0.1 as global (helper_loader.loopback_reads_public), with the
+        helper run in this process -- the seam reaches no subprocess."""
+        import contextlib
+        import io
+        from helper_loader import loopback_reads_public
+        out, err = io.StringIO(), io.StringIO()
+        with tempfile.TemporaryDirectory() as tmp, loopback_reads_public(helper), \
+                contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+            code = helper.main(["playlist", "--url", self.first.url("/cross", "user:pw"), "--cache-dir", tmp,
+                                "--timeout", "5"])
+        status, stderr = json.loads(out.getvalue().strip().splitlines()[-1]), err.getvalue()
         self.assertEqual(code, 0, stderr)
         self.assertEqual(status["channelCount"], 1)
         self.assertEqual(self.first.seen["/cross"]["Authorization"], "Basic dXNlcjpwdw==")

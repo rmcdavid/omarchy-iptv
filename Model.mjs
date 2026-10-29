@@ -31,9 +31,10 @@ export {
   GROUP_SCOPE_PREFIX, MAX_HIDDEN_GROUPS, ELLIPSIS, QUOTE_OPEN, QUOTE_CLOSE,
   SEP, GLYPHS, SETTING_RANGES, MAX_CHNO_MAJOR, MAX_CHNO_MINOR, MAX_CHNO_LABEL,
   CHNO_SEPARATORS, CHNO_ENTRY_SEP, CHANNEL_ORDERS, CHNO_FIELDS, MPV_RESERVED,
-  MPV_DEMUXER_TLS_WORDS, MPV_TLS_VERIFY, MPV_PIN_BLOCK, MPV_TLS_VERIFY_PROP,
-  MPV_STREAM_OPTS_PROP, MPV_DEMUXER_OPTS_PROP, MPV_AUTO_PROFILES_PROP,
-  NOTIFY_IDS, PLACE_TTL_SEC, ZAP_MAX_SKIP
+  MPV_DEMUXER_TLS_WORDS, MPV_PROTOCOL_WHITELIST, MPV_TLS_VERIFY,
+  MPV_PIN_BLOCK, MPV_TLS_VERIFY_PROP, MPV_STREAM_OPTS_PROP,
+  MPV_DEMUXER_OPTS_PROP, MPV_AUTO_PROFILES_PROP, NOTIFY_IDS, PLACE_TTL_SEC,
+  ZAP_MAX_SKIP
 } from "./model/build.mjs"
 export {
   FOLD_GROUPS, asList, keyedMap, hasOwnKey, ownKeyValue, trimEndSpace,
@@ -119,6 +120,7 @@ export {
   parsePlayerProbe, parsePlayerEvent, endedVerdict, probeVerdict,
   playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
   routePlayerEvent, rememberEntryOwner, channelForEnd, endedReport,
+  PLAYER_FORMAT_ERROR, PLAYER_FORMAT_SENTENCE, unopenedFormatSentence,
   PLAYER_OUTPUT_ERRORS, outputFailure, outputFailureSentence, deathReport
 } from "./model/player.mjs"
 export {
@@ -196,8 +198,9 @@ export {
   ENCODE_SENTENCE, WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts,
   urlHostWithheld, sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP,
   formAdviceLine, looksLikeHost, validateSourceUrl, normalizeSourceUrl,
-  ADDRESS_CLASSES, hostClass, hostKey, FETCH_ORIGIN_ENV, FETCH_HOME_HOST_ENV,
-  FETCH_HOME_CLASS_ENV, fetchEnvironmentFor, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
+  ADDRESS_CLASSES, hostClass, hostKey, urlPortOf, ownHostMatch,
+  FETCH_ORIGIN_ENV, FETCH_HOME_HOST_ENV, FETCH_HOME_CLASS_ENV,
+  FETCH_HOME_PORT_ENV, fetchEnvironmentFor, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
   EPG_ORIGIN_PLAYLIST, EPG_HINT_REFUSED_USERINFO, EPG_HINT_REFUSED_LOCAL,
   epgHintVerdict, epgHintUrl, resolveEpgUrl, epgHintRowState, EPG_HINT_NOTICE,
   epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,

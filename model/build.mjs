@@ -337,7 +337,10 @@ var MPV_RESERVED = {
   "--sub-file": true,
   "--audio-file": true,
   "--external-file": true,
-  "--cover-art-file": true
+  "--cover-art-file": true,
+  // D-PLY-46 (lead, 2026-10-29): PINNED off. mpv's default `auto` loads a URL
+  // dropped on the player window as a new entry, which no gate saw.
+  "--drag-and-drop": true
 }
 
 // D-SINK-43 (and its verifyhost sibling): the words a `--demuxer-lavf-o*`
@@ -350,7 +353,21 @@ var MPV_RESERVED = {
 // so every spelling of a key (quoted, %n%-escaped, -append'ed) still carries
 // the word. The binding layer is the helper's read-back of the parsed map
 // before every load. Mirrored by MPV_DEMUXER_TLS_WORDS in the helper.
-var MPV_DEMUXER_TLS_WORDS = ["verify", "ca_file", "cafile", "listen", "external_sock"]
+// D-SINK-55 (2026-10-29): and `protocol_whitelist` / `protocol_blacklist`,
+// because the pin block now gives the demuxer a protocol whitelist
+// (MPV_PROTOCOL_WHITELIST) and a user key of the same name would replace it.
+var MPV_DEMUXER_TLS_WORDS = ["verify", "ca_file", "cafile", "listen", "external_sock",
+                             "protocol_whitelist", "protocol_blacklist"]
+
+// D-SINK-55 (2026-10-29). The protocols libavformat may open below a demuxer:
+// an HLS or DASH segment and key, and whatever a sniffed format opens on its
+// own. A stream server that answers an http(s) URL with an SDP body made the
+// player LISTEN (measured: c=0.0.0.0 bound 0.0.0.0:P and P+1); with this list
+// it bound nothing, and every scheme the helper's gate admits still played or
+// reached its server (lane-p1b, 2026-10-29). Pinned in MPV_PIN_BLOCK; the
+// helper adds rtp and udp on its own loadfile of an rtsp channel only.
+// Mirrored by MPV_PROTOCOL_WHITELIST in the helper.
+var MPV_PROTOCOL_WHITELIST = "http,https,tls,tcp,crypto,data,httpproxy"
 
 // D-SINK-13, layers 1 and 2. ONE string, written into the argv TWICE on
 // purpose. See buildMpvArgv for why the second occurrence is load-bearing;
@@ -373,6 +390,7 @@ var MPV_PIN_BLOCK = [
   "--load-scripts=no",                 // D-SINK-4 against a named profile
   "--scripts-clr",                     // an explicit script= line loads anyway
   "--input-commands-clr",              // D-SINK-45: commands run at startup
+  "--input-commands-append=keybind ctrl+v ignore", // D-PLY-46: the paste-to-playlist key
   "--load-auto-profiles=no",           // D-SINK-44: profile-cond beats the command line
   "--player-operation-mode=cplayer",   // D-SINK-44: [pseudo-gui] applies after the command line
   "--load-select=no",                  // D-SINK-46: g l forks ffmpeg with the URL
@@ -381,8 +399,11 @@ var MPV_PIN_BLOCK = [
   "--log-file=",                       // every URL, durably
   "--reset-on-next-file-clr",          // D-SINK-51: the previous channel's headers
   "--osd-playlist-entry=title",        // ${playlist} draws the URL otherwise
+  "--drag-and-drop=no",                // D-PLY-46: a dropped URL is an entry no gate saw
+  "--script-opts-append=osc-title_mbtn_mid_command=ignore", // D-SINK-52: show-text ${path}
   "--stream-lavf-o-clr",               // D-SINK-44: command-line-set, so no profile replaces it
-  "--demuxer-lavf-propagate-opts=yes", // the next pin reaches segments only this way
+  "--demuxer-lavf-propagate-opts=yes", // the next pins reach segments only this way
+  "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy", // D-SINK-55
   "--demuxer-lavf-o-append=tls_verify=1", // D-SINK-43
   MPV_TLS_VERIFY                       // D-SINK-13 layer 2: LAST
 ]
@@ -492,7 +513,8 @@ export {
   GROUP_SCOPE_PREFIX, MAX_HIDDEN_GROUPS, ELLIPSIS, QUOTE_OPEN, QUOTE_CLOSE,
   SEP, GLYPHS, SETTING_RANGES, MAX_CHNO_MAJOR, MAX_CHNO_MINOR, MAX_CHNO_LABEL,
   CHNO_SEPARATORS, CHNO_ENTRY_SEP, CHANNEL_ORDERS, CHNO_FIELDS, MPV_RESERVED,
-  MPV_DEMUXER_TLS_WORDS, MPV_TLS_VERIFY, MPV_PIN_BLOCK, MPV_GPU_SW,
-  MPV_TLS_VERIFY_PROP, MPV_STREAM_OPTS_PROP, MPV_DEMUXER_OPTS_PROP,
-  MPV_AUTO_PROFILES_PROP, NOTIFY_IDS, PLACE_TTL_SEC, ZAP_MAX_SKIP
+  MPV_DEMUXER_TLS_WORDS, MPV_PROTOCOL_WHITELIST, MPV_TLS_VERIFY,
+  MPV_PIN_BLOCK, MPV_GPU_SW, MPV_TLS_VERIFY_PROP, MPV_STREAM_OPTS_PROP,
+  MPV_DEMUXER_OPTS_PROP, MPV_AUTO_PROFILES_PROP, NOTIFY_IDS, PLACE_TTL_SEC,
+  ZAP_MAX_SKIP
 }

@@ -16,22 +16,69 @@ def fallback_channel_name(url: str, default: str) -> str:
     return url_host(url) or default
 
 
+def cached_source(document: dict[str, Any]) -> dict[str, Any]:
+    """playlist_source as the parse saw it, read back out of channels.json
+    (D-SINK-58, 2026-10-29), so player_target can run the parse's host rule
+    and sign-in header rule again at play time.
+
+    A cache written since 2026-10-29 records `sourceLocal` and `sourcePort`
+    beside `sourceHost` and `sourceClass`. One written before the
+    destination rules records neither class nor locality, and the refresh
+    that replaces it (Model.cacheBeforeDestinationRules) can fail: such a
+    cache reads as local only when its recorded class or its host's own
+    literal says so, and otherwise as a PUBLIC source -- the stricter
+    reading, so a LAN-literal channel from it is refused and a sign-in header
+    for another host dropped until a refresh succeeds. A port it does not
+    record matches no loopback home (own_host_match), the same way."""
+    host = str(document.get("sourceHost") or "")
+    if host == "local file":
+        return {"host": "", "port": None, "loopback": False, "local": True}
+    klass = document.get("sourceClass")
+    klass = klass if klass in ADDRESS_CLASSES else ""
+    local = document.get("sourceLocal")
+    if not isinstance(local, bool):
+        local = klass not in ("", "global") or host_class(host) not in ("", "global")
+    port = document.get("sourcePort")
+    port = port if isinstance(port, int) and not isinstance(port, bool) else None
+    return {"host": host_key(host), "port": port,
+            "loopback": klass == "loopback" or host_class(host) == "loopback", "local": local}
+
+
 def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, Any]:
     """Resolve the channel the helper will play. The URL is read from the
-    0600 cache by the helper itself and never crosses a process boundary."""
+    0600 cache by the helper itself and never crosses a process boundary.
+
+    D-SINK-58 (2026-10-29): a cached channel meets the parse's gate again
+    here -- the listening forms and control characters (is_stream_url), and
+    now the host rule and the sign-in headers against the cache's own record
+    of its playlist (cached_source) -- so a cache nothing checked cannot
+    reach a LAN or loopback literal, or hand a sign-in header to another
+    host, while the refresh that would replace it keeps failing. A `--url`
+    a human typed meets the listening rule only (it has no playlist)."""
     if channel_id:
-        channel = find_channel(load_channels(cache_dir(directory)), channel_id)
+        document = read_channel_document(cache_dir(directory))
+        channel = find_channel(document["channels"], channel_id)
         url = str(channel.get("url") or "")
         name = str(channel.get("name") or "") or fallback_channel_name(url, "channel")
-        headers = channel.get("headers") if isinstance(channel.get("headers"), dict) else {}
+        headers = dict(channel.get("headers")) if isinstance(channel.get("headers"), dict) else {}
         group = str(channel.get("group") or "")
+        source = cached_source(document)
     else:
         url = (raw_url or "").strip()
         name = fallback_channel_name(url, "stream")
         headers = {}
         group = ""
+        source = None
     if not is_stream_url(url):
         raise HelperError("unsupported_scheme", "unsupported stream URL scheme '%s'" % (stream_scheme(url) or "none"))
+    if source is not None:
+        if stream_host_refused(url, source):
+            raise HelperError("local_address", "%s is an address on this machine or a local network that the playlist "
+                                               "chose; not played" % (url_host(url) or "the host"))
+        held = {"url": url, "headers": headers}
+        if drop_sign_in_headers(held, source):
+            log("play: dropped a sign-in header for another host")
+        headers = held.get("headers") or {}
     return {"id": channel_id or "", "url": url, "name": name, "headers": headers, "group": group}
 
 
@@ -71,10 +118,15 @@ def demuxer_tls_unsafe(options: Any) -> int | None:
     attacker's certificate for its OWN name (both measured). The trailing pin
     makes `tls_verify` read "1"; nothing pins the rest, so they are counted
     here and the load is refused. A COUNT, never a key or a value (rule 5).
+
+    D-SINK-55 (2026-10-29): and the map's `protocol_whitelist` must read
+    exactly MPV_PROTOCOL_WHITELIST -- absent or different counts one. Without
+    it a stream server that answers with an SDP body makes the player listen
+    (measured), so a player that does not hold it is not loaded into.
     """
     if not isinstance(options, dict):
         return None
-    count = 0
+    count = 0 if options.get(MPV_DEMUXER_WHITELIST_KEY) == MPV_PROTOCOL_WHITELIST else 1
     for key, value in options.items():
         if key in DEMUXER_TLS_ON and value != "1":
             count += 1
@@ -99,8 +151,9 @@ def profile_option_bases(by_name: dict[str, Any], name: str, seen: set[str] | No
         if not isinstance(key, str):
             continue
         base = mpv_option_base("--" + key)[2:]
-        if base.startswith("no-") and base[3:] in PER_FILE_TLS_OPTIONS:
-            base = base[3:]
+        base = PER_FILE_OPTION_ALIASES.get(base, base)
+        if base.startswith("no-") and PER_FILE_OPTION_ALIASES.get(base[3:], base[3:]) in PER_FILE_TLS_OPTIONS:
+            base = PER_FILE_OPTION_ALIASES.get(base[3:], base[3:])
         if base == "profile":
             for target in str(option.get("value") or "").split(","):
                 out |= profile_option_bases(by_name, target.strip(), seen)
@@ -111,8 +164,9 @@ def profile_option_bases(by_name: dict[str, Any], name: str, seen: set[str] | No
 
 def per_file_profile_threats(profiles: Any, loose: list[str]) -> int | None:
     """How many of the user's [protocol.*] / [extension.*] profiles would set,
-    at file load and so AFTER the read-back, an option the TLS layer depends
-    on that this player does NOT have set from the command line (`loose`).
+    at file load and so AFTER the read-back, an option the pin block holds
+    (PER_FILE_TLS_OPTIONS, every pinned option since 2026-10-29) that this
+    player does NOT have set from the command line (`loose`).
 
     The residual this closes is measured: a player launched without the pin
     block, adopted, migrated over IPC and read back as safe, fetched the
@@ -166,9 +220,11 @@ def read_tls_state(client: MpvIpc) -> tuple[Any, Any, Any]:
     The third reading (2026-10-29) is every OTHER TLS pin the player must hold,
     summed: demuxer-lavf-o's TLS entries (D-SINK-43), load-auto-profiles not
     reading False, mpv's `no` (D-SINK-44: a profile-cond profile applies over the command
-    line at every load), and the per-file profiles that could undo a loose
-    option after this read (read_profile_threats). A player launched with the
-    pin block reads 0 on all three.
+    line at every load), `reset-on-next-file` not empty (D-SINK-60: it rolls
+    this read-back's values back when the next file starts), and the per-file
+    profiles that could undo a loose option after this read
+    (read_profile_threats). A player launched with the pin block reads 0 on
+    all four.
     """
     ok, verify = client.try_command("get_property", MPV_TLS_VERIFY_PROP)
     verify = verify if ok and isinstance(verify, bool) else None
@@ -181,8 +237,25 @@ def read_tls_state(client: MpvIpc) -> tuple[Any, Any, Any]:
     # one safe reading is False itself -- not the string, which mpv never sends.
     ok, mode = client.try_command("get_property", MPV_AUTO_PROFILES_PROP)
     auto_on = (0 if mode is False else 1) if ok and isinstance(mode, (bool, str)) else None
+    # D-SINK-60 (lane-p1b, 2026-10-29): mpv backs up the options
+    # `reset-on-next-file` names when a file STARTS and restores them when it
+    # ENDS -- inside the next loadfile, after this read-back. So on a player
+    # that holds any entry, every migration made during the current file is
+    # undone at the next load. Measured twice on mpv 0.41.0: with
+    # --reset-on-next-file=all and no pin block, tls-verify set true over IPC
+    # during file A read true, and the load of a self-signed B read false
+    # again and fetched from it (attacker GETs 1; 0 without the option); and
+    # on a player started by v0.15.0's argv with a demuxer tls_verify=0 and
+    # `reset-on-next-file=all` in its mpv.conf, an apply_channel that removed
+    # the key AND emptied the list read back safe, and the next HLS load sent
+    # its segment request to the attacker anyway (the list itself was among
+    # the options restored). The pin block's -clr keeps it empty on a player
+    # of this release; one that holds any entry is not loaded into -- it is
+    # stopped, like any player that cannot be made safe.
+    ok, resets = client.try_command("get_property", MPV_RESET_PROP)
+    reset_on = (0 if not resets else 1) if ok and isinstance(resets, list) else None
     threats = read_profile_threats(client)
-    parts = (demuxer_unsafe, auto_on, threats)
+    parts = (demuxer_unsafe, auto_on, reset_on, threats)
     unpinned = None if any(part is None for part in parts) else sum(parts)
     return verify, count, unpinned
 
@@ -207,9 +280,18 @@ def secure_player(client: MpvIpc) -> None:
         for key, value in options.items():
             if (key in DEMUXER_TLS_ON and value != "1") or key in DEMUXER_TLS_FORBIDDEN:
                 client.try_command("change-list", MPV_DEMUXER_OPTS_PROP, "remove", key)
+        # D-SINK-55: `append` replaces that one key and keeps the user's
+        # others; the comma-separated value is taken whole (measured).
+        if options.get(MPV_DEMUXER_WHITELIST_KEY) != MPV_PROTOCOL_WHITELIST:
+            client.try_command("change-list", MPV_DEMUXER_OPTS_PROP, "append",
+                               "%s=%s" % (MPV_DEMUXER_WHITELIST_KEY, MPV_PROTOCOL_WHITELIST))
     ok, mode = client.try_command("get_property", MPV_AUTO_PROFILES_PROP)
     if not ok or mode is not False:
         client.try_command("set_property", MPV_AUTO_PROFILES_PROP, "no")
+    # NOT reset-on-next-file (D-SINK-60): mpv backed up the options it names
+    # when the CURRENT file started and restores them when that file ends, so
+    # emptying it now changes nothing about the next load -- and would make
+    # the read-back below report a player that is not safe as one that is.
 
 
 def assert_tls_verification(client: MpvIpc, label: str) -> None:
@@ -280,20 +362,44 @@ def pin_adopted_player(client: MpvIpc, sock_path: str) -> int:
     read first and written only where they differ, never a reason to refuse.
     Each was measured taking effect at runtime on a pre-pin player: watch
     history stopped, the select menu unloaded, nested unsafe entries were
-    refused, a zap sent its own headers, ${playlist} drew the title, the log
-    stopped growing. Returns how many writes did not take, for the journal."""
+    refused, ${playlist} drew the title, the log stopped growing; and
+    (lane-p1b, 2026-10-29) drag-and-drop read off, the paste key bound to
+    `ignore` (a later keypress appended nothing), the OSC key set. Not
+    reset-on-next-file, which is read with the TLS pins instead (D-SINK-60).
+    Returns how many writes did not take, for the journal."""
     where = player_dirs(sock_path)
     failed = 0
-    for prop, value in (("load-select", False), ("save-watch-history", False),
-                        ("load-unsafe-playlists", False), ("reset-on-next-file", []),
-                        ("osd-playlist-entry", "title"), ("log-file", ""),
-                        ("watch-later-dir", where["watchLater"])):
+    # D-PLY-46 (2026-10-29): mpv answers drag-and-drop's `no` as the boolean
+    # False (measured), and is set with the choice's name.
+    # Not reset-on-next-file: it is read with the TLS pins and never written
+    # (read_tls_state says why, D-SINK-60).
+    for prop, value, write in (("load-select", False, False), ("save-watch-history", False, False),
+                               ("load-unsafe-playlists", False, False),
+                               ("osd-playlist-entry", "title", "title"), ("log-file", "", ""),
+                               ("watch-later-dir", where["watchLater"], where["watchLater"]),
+                               ("drag-and-drop", False, "no")):
         ok, current = client.try_command("get_property", prop)
         if ok and current == value:
             continue
-        written, _ = client.try_command("set_property", prop, value)
+        written, _ = client.try_command("set_property", prop, write)
         if not written:
             failed += 1
+    # D-PLY-46: the paste key, as the pin block's input-commands sets it at
+    # start (measured over IPC too: a later keypress appended nothing).
+    written, _ = client.try_command("keybind", "ctrl+v", "ignore")
+    failed += 0 if written else 1
+    # D-SINK-52: the OSC's title middle-click, one key of the user's
+    # script-opts (the OSC re-reads its options when the property changes).
+    ok, opts = client.try_command("get_property", "script-opts")
+    if not (ok and isinstance(opts, dict) and opts.get(MPV_OSC_TITLE_KEY) == MPV_OSC_TITLE_VALUE):
+        written, _ = client.try_command("change-list", "script-opts", "append",
+                                        "%s=%s" % (MPV_OSC_TITLE_KEY, MPV_OSC_TITLE_VALUE))
+        failed += 0 if written else 1
+    # The previous helper set the channel's headers as GLOBALS; an entry no
+    # gate saw would still be sent them (apply_channel's comment).
+    for prop, value in neutral_header_properties(default_user_agent(client)):
+        written, _ = client.try_command("set_property", prop, value)
+        failed += 0 if written else 1
     return failed
 
 
@@ -340,11 +446,27 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
         ok, _ = client.try_command("set_property", prop, value)
         if not ok:
             log("%s: mpv refused to set %s" % (label, prop))
-    for prop, value in header_properties(target["headers"], client):
+    # 2026-10-29 (D-PLY-44, D-SINK-55 and the per-file headers): the GLOBAL
+    # header properties are set to values that belong to no provider, every
+    # load, and NOT best effort -- a player last driven by an older helper
+    # holds the previous channel's headers there. The channel's own headers,
+    # and the demuxer that refuses a nested playlist, ride the loadfile as
+    # per-file options (channel_load_options), so they reach this channel and
+    # its HLS segments and no entry the helper did not load.
+    default = default_user_agent(client)
+    for prop, value in neutral_header_properties(default):
         client.command("set_property", prop, value)
     if stash is not None:
         client.try_command("set_property", USER_DATA_STASH, dict(stash, entryId=None))
-    data = client.command("loadfile", target["url"], "replace")
+    # The positional form, the options argument a JSON object: mpv 0.41.0
+    # takes `index` before `options` (-1 is its default), and a JSON object
+    # there is read as a map, key by key -- never the comma-separated
+    # key=value string the same argument as TEXT is parsed as (measured: as
+    # text, `X-A: 1,2` arrived as `X-A: 1`). The named form
+    # ({"name": "loadfile", ...}) was measured equal; the array form is the
+    # one every double of the player and the harness stub read.
+    data = client.command("loadfile", target["url"], "replace", -1,
+                          channel_load_options(target, default))
     entry_id = data.get("playlist_entry_id") if isinstance(data, dict) else None
     if not isinstance(entry_id, int) or isinstance(entry_id, bool) or entry_id <= 0:
         entry_id = None
@@ -363,6 +485,45 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
             log("%s: the player closed while recording %s" % (label, prop))
             break
     return entry_id
+
+
+def channel_load_options(target: dict[str, Any], default_agent: str) -> IpcPairs:
+    """The PER-FILE options of the helper's own loadfile of a channel, in
+    order (2026-10-29). Per file, because mpv restores each of them when the
+    file ends and applies none of them to an entry the helper did not load.
+
+    - `demuxer=lavf` (D-PLY-44, owner: refuse nested playlists). mpv's own
+      playlist demuxer expands a plain M3U or PLS a stream server returns, and
+      counts srt and rtp as safe for a network playlist: its entries bound
+      srt and rtp listeners on 0.0.0.0 (measured). With libavformat as the
+      only demuxer a nested plain playlist is `unrecognized file format` --
+      nothing fetched, nothing bound -- while an HLS master, an HLS variant
+      and MPEG-TS play (measured). The cost the owner accepted: a channel
+      whose URL is itself a .m3u or .pls redirector stops playing, and the
+      user is told so (Model.unopenedFormatSentence).
+    - `user-agent`, `referrer`: the channel's, or mpv's default
+      (`default_agent`, default_user_agent's) and none.
+    - `http-header-fields-clr`, then one `http-header-fields-append` per
+      header: `-append` takes its value VERBATIM, where the plain list option
+      splits at every comma (measured: three -append keys arrived as three
+      headers with `,`, `=`, quotes and a trailing backslash intact; one
+      plain key split `X-A: 1,2` into `X-A: 1`). The -clr makes the list
+      exactly the channel's whatever a per-file profile of the user's set.
+    - `demuxer-lavf-o-append=protocol_whitelist=...,rtp,udp` for an rtsp
+      channel only (D-SINK-55): its demuxer opens the RTP transport itself,
+      which the user's own --rtsp-transport=udp needs; every other entry keeps
+      the pin block's list.
+    """
+    user_agent, referrer, fields = header_values(target.get("headers") or {})
+    pairs = IpcPairs([("demuxer", "lavf"),
+                      ("user-agent", user_agent or default_agent),
+                      ("referrer", referrer),
+                      ("http-header-fields-clr", "")])
+    pairs.extend(("http-header-fields-append", line) for line in fields)
+    if stream_scheme(str(target.get("url") or "")) == "rtsp":
+        pairs.append(("demuxer-lavf-o-append", "%s=%s,%s" % (MPV_DEMUXER_WHITELIST_KEY, MPV_PROTOCOL_WHITELIST,
+                                                             MPV_RTSP_PROTOCOLS)))
+    return pairs
 
 
 def applied_by_another_client(client: MpvIpc) -> dict[str, Any] | None:

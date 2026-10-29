@@ -94,10 +94,14 @@ class ClassificationTest(unittest.TestCase):
         tail = helper.mpv_pin_block(dirs)
         self.assertEqual(argv[-len(tail):], tail)
         last_user = max(argv.index(t) for t in contrary)
-        for pin in tail:
-            positions = [i for i, t in enumerate(argv) if base_of(t) == base_of(pin)]
-            self.assertGreater(positions[-1], last_user, pin)
-            self.assertEqual(argv[positions[-1]], pin)
+        # An option the block pins with SEVERAL tokens (input-commands: -clr
+        # then the paste key; demuxer-lavf-o: two keys, 2026-10-29) ends the
+        # argv with exactly those tokens, in the block's order.
+        for base in {base_of(t) for t in tail}:
+            ours = [t for t in tail if base_of(t) == base]
+            positions = [i for i, t in enumerate(argv) if base_of(t) == base]
+            self.assertEqual([argv[i] for i in positions[-len(ours):]], ours, base)
+            self.assertGreater(positions[-len(ours)], last_user, base)
 
     def test_the_base_section_holds_only_what_the_fixture_lets_the_plugin_set_first(self):
         argv = helper.mpv_launch_argv(SOCK, [])
@@ -112,11 +116,18 @@ class ClassificationTest(unittest.TestCase):
             self.assertEqual(helper.filter_mpv_args([name + "=x"])[1], [], name)
 
     def test_the_warned_class_is_the_handoff_and_disk_sets(self):
-        warned = self.klass("warned")
+        # 2026-10-29 (lane-p1b): an option of another class may warn as well
+        # (`warn`): --script-opts is key-pinned now (D-SINK-52) and still warns
+        # for ytdl (PO-10), --demuxer-lavf-o warns for http_proxy (D-SINK-59);
+        # --rtsp-transport joins the warned class (D-SINK-53).
+        warned = self.klass("warned") | {n for n, e in self.options.items() if e.get("warn")}
         self.assertEqual(warned, set(helper.MPV_HANDOFF) | set(helper.MPV_HANDOFF_SCRIPT_OPTS)
-                         | {"--ytdl"} | set(helper.MPV_DISK_WARN))
+                         | {"--ytdl"} | set(helper.MPV_DISK_WARN) | set(helper.MPV_LISTEN_WARN)
+                         | {helper.MPV_DEMUXER_OPTS})
+        values = {"--ytdl": "yes", "--cache-on-disk": "yes", "--rtsp-transport": "udp",
+                  "--demuxer-lavf-o": "http_proxy=http://p:1"}
         for name in sorted(warned):
-            value = "yes" if name in ("--ytdl", "--cache-on-disk") else "ytdl_hook-x=1"
+            value = values.get(name, "ytdl_hook-x=1")
             self.assertNotEqual(helper.mpv_arg_warnings([name + "=" + value]), [], name)
             self.assertEqual(helper.filter_mpv_args([name + "=" + value])[1], [], name)
 
@@ -142,7 +153,15 @@ class ClassificationTest(unittest.TestCase):
         that should go red if someone 'completes' the list."""
         o = self.options
         self.assertEqual(o["--ytdl"]["class"], "warned")
-        self.assertEqual(o["--script-opts"]["class"], "warned")
+        # The owner's decision of 2026-10-29 (D-SINK-52: pin and refuse) moved
+        # --script-opts from `warned` to KEY-pinned: one OSC key is the pin
+        # block's, a token setting an OSC command or carrying ${ is refused,
+        # and PO-10's ytdl handoff warning stands, so it is not refused as a
+        # name and it still warns.
+        self.assertEqual(o["--script-opts"]["class"], "pinned")
+        self.assertIn("pinKey", o["--script-opts"])
+        self.assertNotIn("--script-opts", helper.MPV_RESERVED)
+        self.assertNotEqual(helper.mpv_arg_warnings(["--script-opts=ytdl_hook-ytdl_path=/x"]), [])
         self.assertEqual(o["--profile"]["class"], "allowed")
         self.assertEqual(o["--tls-ca-file"]["class"], "allowed")
         self.assertEqual(o["--screenshot-dir"]["class"], "base")
@@ -155,6 +174,20 @@ class ClassificationTest(unittest.TestCase):
                      "--load-positioning", "--osc"):
             self.assertEqual(o[name]["class"], "allowed", name)
         self.assertEqual(o["--load-select"]["class"], "pinned")
+
+    def test_the_format_keys_are_the_helpers_whitelist_and_the_filters_words(self):
+        """D-SINK-55 (2026-10-29): the demuxer's protocol whitelist is pinned
+        (the helper's MPV_DEMUXER_WHITELIST_KEY, read back as exactly
+        MPV_PROTOCOL_WHITELIST) and a blacklist is forbidden, both refused in
+        a token by the filter's words."""
+        fmt = self.fixture["ffmpegFormat"]["options"]
+        self.assertEqual({k for k, c in fmt.items() if c == "pinned"}, {helper.MPV_DEMUXER_WHITELIST_KEY})
+        self.assertIn("--demuxer-lavf-o-append=%s=%s" % (helper.MPV_DEMUXER_WHITELIST_KEY, helper.MPV_PROTOCOL_WHITELIST),
+                      self.fixture["pinBlock"])
+        for key in fmt:
+            for token in ("--demuxer-lavf-o=%s=file" % key, "--demuxer-lavf-o-append=%s=http" % key,
+                          '--demuxer-lavf-o="%s"=x' % key):
+                self.assertEqual(helper.filter_mpv_args([token]), ([], [token]), token)
 
     def test_ffmpeg_tls_keys_are_the_helpers_two_sets_and_the_filters_words(self):
         tls = self.fixture["ffmpegTls"]

@@ -63,6 +63,8 @@ PLAYER_UMASK = 0o077              # PO-11: 0600 files / 0700 dirs, requirement 1
 # --mpv-arg because bin/omarchy-iptv is a public CLI, and a parity test pins
 # the two reserved sets equal.
 MPV_ARG_RE = re.compile(r"^--[a-z0-9][a-z0-9-]*(=.*)?$")
+# The list-option suffixes mpv spells one option with (mpv_option_base).
+MPV_LIST_SUFFIX_RE = re.compile(r"-(add|append|set|pre|clr|del|remove|toggle)$")
 MPV_RESERVED = frozenset((
     "--input-ipc-server", "--wayland-app-id", "--title", "--force-media-title",
     "--idle", "--input-ipc-client", "--script", "--scripts", "--config-dir",
@@ -163,6 +165,9 @@ MPV_RESERVED = frozenset((
     # The aliases are the CLI spellings of the same options.
     "--sub-files", "--audio-files", "--external-files", "--cover-art-files", "--chapters-file",
     "--sub-file", "--audio-file", "--external-file", "--cover-art-file",
+    # D-PLY-46 (lead, 2026-10-29): PINNED off. mpv's default `auto` loads a
+    # URL dropped on the player window as a new entry, which no gate saw.
+    "--drag-and-drop",
 ))
 # D-SINK-43 (and its verifyhost sibling): the words a `--demuxer-lavf-o*`
 # token may not contain. For an HLS or DASH stream libavformat reopens the URL
@@ -180,8 +185,44 @@ MPV_RESERVED = frozenset((
 # reaches. Every key FFmpeg's TLS protocol names that is not harmless contains
 # one of these words; the gate holds that against `ffmpeg -h protocol=tls`.
 # Mirror of Model.MPV_DEMUXER_TLS_WORDS.
-MPV_DEMUXER_TLS_WORDS = ("verify", "ca_file", "cafile", "listen", "external_sock")
+#
+# D-SINK-55 (2026-10-29): and `protocol_whitelist` / `protocol_blacklist`,
+# because the pin block now gives the demuxer a protocol whitelist (see
+# MPV_PROTOCOL_WHITELIST) and a user key of the same name would replace it.
+MPV_DEMUXER_TLS_WORDS = ("verify", "ca_file", "cafile", "listen", "external_sock",
+                         "protocol_whitelist", "protocol_blacklist")
 MPV_DEMUXER_OPTS = "--demuxer-lavf-o"
+# D-SINK-55 (2026-10-29). The protocols libavformat may open BELOW a demuxer
+# -- an HLS or DASH segment and key, and whatever a sniffed format opens on its
+# own. A stream server that answers an http(s) URL with an SDP body makes
+# FFmpeg's sdp demuxer open rtp with the whitelist it inherited from http, and
+# the player then LISTENS (measured inside `unshare -rn`: c=0.0.0.0 bound
+# 0.0.0.0:P and P+1, also under a .ts path). With this list as the demuxer's
+# `protocol_whitelist` the same server bound nothing, and every scheme the
+# gate admits still played or reached its server: http and https TS, an HLS
+# master over http and a variant over https (segments too), rtmp, rtmps,
+# rtsp over its default TCP transport, multicast udp and rtp, srt as caller,
+# mms and mmsh (lane-p1b, 2026-10-29). The stream itself is opened by mpv's
+# stream layer, which this list does not govern, so a udp, rtp or srt channel
+# needs nothing from it. ONE exception, per file: an rtsp channel's demuxer
+# opens its RTP transport itself, so the user's own --rtsp-transport=udp (or
+# udp_multicast, or lavf) needs rtp and udp there -- MPV_RTSP_PROTOCOLS is
+# added on the helper's own loadfile of an rtsp channel and nowhere else
+# (channel_load_options). Mirror of Model.MPV_PROTOCOL_WHITELIST.
+MPV_PROTOCOL_WHITELIST = "http,https,tls,tcp,crypto,data,httpproxy"
+MPV_RTSP_PROTOCOLS = "rtp,udp"
+MPV_DEMUXER_WHITELIST_KEY = "protocol_whitelist"
+# D-SINK-52 (owner, 2026-10-29: pin and refuse). The OSC embedded in mpv 0.41.0
+# binds the title's middle click to `show-text ${path}`, which draws the whole
+# credentialed URL on the picture and into any screenshot (read from osc.lua
+# in /usr/bin/mpv, not clicked: no window here). Pinned to `ignore` as one key
+# of script-opts, `-append` replacing that key and keeping the user's others
+# (measured: a user token setting the same key lost to the pin and its other
+# key stayed). Of the OSC's other command defaults, the playlist buttons'
+# middle click draws ${playlist}, which reads the channel's title under the
+# pinned osd-playlist-entry=title (measured); the rest draw no path.
+MPV_OSC_TITLE_KEY = "osc-title_mbtn_mid_command"
+MPV_OSC_TITLE_VALUE = "ignore"
 # D-SINK-13, layers 1 and 2: one string, written into the argv twice on
 # purpose. Mirror of Model.MPV_TLS_VERIFY; the two literals are pinned to each
 # other by the shared player-argv.json vectors. See mpv_launch_argv.
@@ -199,6 +240,7 @@ MPV_PIN_BLOCK = (
     "--load-scripts=no",                 # D-SINK-4 against a named profile
     "--scripts-clr",                     # an explicit script= line loads anyway
     "--input-commands-clr",              # D-SINK-45: commands run at startup
+    "--input-commands-append=keybind ctrl+v ignore",  # D-PLY-46: the paste-to-playlist key
     "--load-auto-profiles=no",           # D-SINK-44: profile-cond beats the command line
     "--player-operation-mode=cplayer",   # D-SINK-44: [pseudo-gui] applies after the command line
     "--load-select=no",                  # D-SINK-46: g l forks ffmpeg with the URL
@@ -207,8 +249,11 @@ MPV_PIN_BLOCK = (
     "--log-file=",                       # every URL, durably
     "--reset-on-next-file-clr",          # D-SINK-51: the previous channel's headers
     "--osd-playlist-entry=title",        # ${playlist} draws the URL otherwise
+    "--drag-and-drop=no",                # D-PLY-46: a dropped URL is an entry no gate saw
+    "--script-opts-append=%s=%s" % (MPV_OSC_TITLE_KEY, MPV_OSC_TITLE_VALUE),  # D-SINK-52: show-text ${path}
     "--stream-lavf-o-clr",               # D-SINK-44: command-line-set, so no profile replaces it
-    "--demuxer-lavf-propagate-opts=yes", # the next pin reaches segments only this way
+    "--demuxer-lavf-propagate-opts=yes", # the next pins reach segments only this way
+    "--demuxer-lavf-o-append=protocol_whitelist=" + MPV_PROTOCOL_WHITELIST,  # D-SINK-55
     "--demuxer-lavf-o-append=tls_verify=1",  # D-SINK-43
     MPV_TLS_VERIFY,                      # D-SINK-13 layer 2: LAST
 )
@@ -258,6 +303,8 @@ MPV_STREAM_OPTS_PROP = "stream-lavf-o"
 # them for n9.0.1; the gate holds this list against the installed FFmpeg.
 MPV_DEMUXER_OPTS_PROP = "demuxer-lavf-o"
 MPV_AUTO_PROFILES_PROP = "load-auto-profiles"
+# D-SINK-60: read back with the TLS pins (read_tls_state says why).
+MPV_RESET_PROP = "reset-on-next-file"
 DEMUXER_TLS_ON = frozenset(("tls_verify", "verify"))
 DEMUXER_TLS_FORBIDDEN = frozenset(("ca_file", "cafile", "verifyhost", "listen", "external_sock"))
 # The options a [protocol.*] or [extension.*] profile could set at file load,
@@ -266,8 +313,20 @@ DEMUXER_TLS_FORBIDDEN = frozenset(("ca_file", "cafile", "verifyhost", "listen", 
 # player that does not (measured: a pre-pin player with [protocol.https]
 # stream-lavf-o=tls_verify=0 in its mpv.conf read safe and then fetched from
 # the attacker). `profile` is followed, since a profile can name another.
-PER_FILE_TLS_OPTIONS = ("tls-verify", "stream-lavf-o", "demuxer-lavf-o",
-                        "demuxer-lavf-propagate-opts", "load-auto-profiles")
+#
+# Since 2026-10-29 (the lead's decision on rc-mpvpin's recheck) it is EVERY
+# option the pin block holds, not only the TLS ones: on a pre-pin player a
+# [protocol.http] profile with save-watch-history, load-unsafe-playlists or
+# load-select undid pin_adopted_player's runtime writes at every load
+# (measured by the recheck: the watch history got the credentialed path, a
+# nested playlist truncated a scratch file, select forked ffmpeg with the
+# URL). So a pre-pin player whose mpv.conf holds a per-file profile that
+# touches ANY pinned option is stopped rather than migrated.
+PER_FILE_TLS_OPTIONS = tuple(sorted({MPV_LIST_SUFFIX_RE.sub("", token.split("=", 1)[0])[2:]
+                                     for token in ("--watch-later-dir=",) + MPV_PIN_BLOCK}))
+# mpv's own aliases of pinned options, as a profile's key may spell them.
+PER_FILE_OPTION_ALIASES = {"script": "scripts", "watch-later-directory": "watch-later-dir",
+                           "script-opt": "script-opts"}
 PER_FILE_PROFILE_PREFIXES = ("protocol.", "extension.")
 PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "tracks", "seek")
 # Mirror of MPV_HANDOFF (model/mpv.mjs, internal to the model) and friends (PO-10, D-PLY-5). These options are
@@ -292,7 +351,31 @@ MPV_HANDOFF_TEXT = " hands the stream address to another program"
 # loud, because nothing else would say it. Mirror of Model.MPV_DISK_WARN.
 MPV_DISK_WARN = frozenset(("--cache-on-disk",))
 MPV_DISK_TEXT = " writes the stream to disk while it plays"
-MPV_LIST_SUFFIX_RE = re.compile(r"-(add|append|set|pre|clr|del|remove|toggle)$")
+# D-SINK-59 (lead, 2026-10-29): `--demuxer-lavf-o` carrying FFmpeg's
+# `http_proxy` key hands a plain-http HLS stream's whole credentialed request
+# line and the provider header to the proxy (measured by rc-mpvpin's recheck,
+# 2 of 2 requests), exactly what --http-proxy does, so it is warned the same
+# way. A substring of the raw token, the MPV_DEMUXER_TLS_WORDS shape.
+MPV_DEMUXER_PROXY_WORD = "http_proxy"
+# D-SINK-53 (lead, 2026-10-29): `--rtsp-transport` other than tcp or http makes
+# every rtsp channel bind RTP and RTCP ports on all interfaces for anyone to
+# send to (measured by lane-dest: SETUP asked for client_port with udp, TCP
+# interleaved without it). The user's own choice (PO-5's shape), so warned.
+# mpv 0.41.0's values: lavf udp tcp http udp_multicast; `lavf` lets FFmpeg
+# pick, and it tries UDP first.
+MPV_LISTEN_WARN = frozenset(("--rtsp-transport",))
+MPV_LISTEN_QUIET = frozenset(("tcp", "http", "https"))
+MPV_LISTEN_TEXT = " opens ports on this computer that anyone can send to"
+# D-SINK-52 (owner, 2026-10-29: pin and refuse). A `--script-opts` token is
+# REFUSED when its text sets an on-screen-controller command -- the OSC runs
+# its `*_mbtn_*_command` / `*_wheel_*_command` options as input commands on a
+# click, so `show-text ${path}` draws the credentialed URL and `run` starts a
+# program -- or carries `${`, which the OSC's text options property-expand. A
+# substring of the raw token, the MPV_DEMUXER_TLS_WORDS shape: every spelling
+# of such a key still carries the word, and the price is refusing a value
+# that happens to contain one. Every other key, `ytdl_hook-*` included (PO-10,
+# warned), passes. Mirror of Model.MPV_SCRIPT_OPTS_WORDS.
+MPV_SCRIPT_OPTS_WORDS = ("${", "_command", "_mbtn_", "_wheel_")
 
 
 def _monotonic() -> float:
@@ -321,7 +404,7 @@ def filter_mpv_args(tokens: list[str]) -> tuple[list[str], list[str]]:
         bare = "--" + name[5:] if name.startswith("--no-") else ""
         no_form = bool(bare) and (bare in MPV_RESERVED or mpv_option_base(bare) in MPV_RESERVED)
         if (not MPV_ARG_RE.match(text) or name in MPV_RESERVED or base in MPV_RESERVED or no_form
-                or demuxer_names_tls(base, text)):
+                or demuxer_names_tls(base, text) or script_opts_refused(base, text)):
             rejected.append(text)
         else:
             args.append(text)
@@ -332,6 +415,12 @@ def demuxer_names_tls(base: str, token: str) -> bool:
     """Mirror of Model.demuxerNamesTls: a `--demuxer-lavf-o*` token that names
     a TLS setting (D-SINK-43). See MPV_DEMUXER_TLS_WORDS for why a substring."""
     return base == MPV_DEMUXER_OPTS and any(word in token for word in MPV_DEMUXER_TLS_WORDS)
+
+
+def script_opts_refused(base: str, token: str) -> bool:
+    """Mirror of Model.scriptOptsRefused: a `--script-opts*` token that sets
+    an OSC command or carries `${` (D-SINK-52). See MPV_SCRIPT_OPTS_WORDS."""
+    return base in MPV_HANDOFF_SCRIPT_OPTS and any(word in token for word in MPV_SCRIPT_OPTS_WORDS)
 
 
 def mpv_option_base(name: str) -> str:
@@ -356,6 +445,8 @@ def mpv_arg_hands_off_url(token: str) -> str:
         return name
     if base in MPV_HANDOFF_SCRIPT_OPTS:
         return name if "ytdl" in value else ""
+    if base == MPV_DEMUXER_OPTS:
+        return name if MPV_DEMUXER_PROXY_WORD in value else ""
     return ""
 
 
@@ -372,9 +463,20 @@ def mpv_arg_writes_disk(token: str) -> str:
     return ""
 
 
+def mpv_arg_opens_ports(token: str) -> str:
+    """Mirror of Model.mpvListenName: the option NAME when the token makes
+    rtsp channels bind ports (D-SINK-53), "" otherwise. The value is a
+    transport name, but the line still carries the name alone (R12)."""
+    text = str(token)
+    name, _, value = text.partition("=")
+    if name.startswith("--no-") or mpv_option_base(name) not in MPV_LISTEN_WARN:
+        return ""
+    return "" if value.strip().lower() in MPV_LISTEN_QUIET else name
+
+
 def mpv_arg_warning(token: str) -> str:
     """Mirror of Model.mpvArgWarning: the whole warning line for one token,
-    or "". The two costs carry their own sentence, so the user is told WHAT
+    or "". The three costs carry their own sentence, so the user is told WHAT
     the option does rather than that it is "dangerous"."""
     name = mpv_arg_hands_off_url(token)
     if name:
@@ -382,6 +484,9 @@ def mpv_arg_warning(token: str) -> str:
     name = mpv_arg_writes_disk(token)
     if name:
         return "mpvArg " + name + MPV_DISK_TEXT
+    name = mpv_arg_opens_ports(token)
+    if name:
+        return "mpvArg " + name + MPV_LISTEN_TEXT
     return ""
 
 

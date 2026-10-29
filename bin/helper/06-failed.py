@@ -688,11 +688,17 @@ def logo_dir_entries(logo_dir: str) -> int:
         return MAX_LOGO_FILES
 
 
-def load_channels(directory: str) -> list[dict[str, Any]]:
+def read_channel_document(directory: str) -> dict[str, Any]:
+    """channels.json whole: the channel list and what the parse recorded
+    about its playlist (player_target's cached_source reads that half)."""
     document = read_json(os.path.join(directory, CHANNELS_FILE))
     if not isinstance(document, dict) or not isinstance(document.get("channels"), list):
         raise HelperError("no_cache", "This source has no channel list yet; refresh the playlist first.")
-    return document["channels"]
+    return document
+
+
+def load_channels(directory: str) -> list[dict[str, Any]]:
+    return read_channel_document(directory)["channels"]
 
 
 def find_channel(channels: list[dict[str, Any]], wanted: str) -> dict[str, Any]:
@@ -702,18 +708,23 @@ def find_channel(channels: list[dict[str, Any]], wanted: str) -> dict[str, Any]:
     raise HelperError("unknown_channel", "channel %s is not in the playlist cache" % wanted)
 
 
-def header_properties(headers: dict[str, Any], client: MpvIpc) -> list[tuple[str, Any]]:
-    """Ordered (property, value) pairs applying the channel's HTTP headers.
+def header_values(headers: dict[str, Any]) -> tuple[str, str, list[str]]:
+    """A channel's headers as (user-agent, referrer, the other header lines),
+    "" / "" / [] where the channel has none. Names are held to the WHOLE of
+    _HEADER_NAME (fullmatch, as make_channel's: a cached `Cookie\n` is no
+    name) and values lose their line breaks, so nothing here can add a
+    header line of its own.
 
-    Every property is always set: a channel without headers resets
-    user-agent / referrer / http-header-fields so nothing leaks from the
-    previous channel.
-    """
+    Since 2026-10-29 these ride the `loadfile` as PER-FILE options
+    (channel_load_options, 08), not global properties: an entry the helper did
+    not load -- a nested playlist's entry, a paste, a drop -- never inherits
+    them. Requirement 7 (a channel without headers sends none of the previous
+    one's) now holds by construction, because mpv restores a per-file option
+    when its file ends."""
     user_agent = ""
     referrer = ""
     fields: list[str] = []
     for name, value in headers.items():
-        # fullmatch, as make_channel's: a cached `Cookie\n` is no name.
         if not isinstance(name, str) or not isinstance(value, str) or not _HEADER_NAME.fullmatch(name):
             continue
         cleaned = clean_header_value(value)
@@ -724,10 +735,24 @@ def header_properties(headers: dict[str, Any], client: MpvIpc) -> list[tuple[str
             referrer = cleaned
         elif cleaned:
             fields.append("%s: %s" % (name, cleaned))
-    if not user_agent:
-        ok, default = client.try_command("get_property", "option-info/user-agent/default-value")
-        user_agent = default if ok and isinstance(default, str) and default else MPV_DEFAULT_USER_AGENT
-    return [("user-agent", user_agent), ("referrer", referrer), ("http-header-fields", fields)]
+    return user_agent, referrer, fields
+
+
+def default_user_agent(client: MpvIpc) -> str:
+    """mpv's own default user agent (`option-info/user-agent/default-value`),
+    or MPV_DEFAULT_USER_AGENT when the player cannot say."""
+    ok, default = client.try_command("get_property", "option-info/user-agent/default-value")
+    return default if ok and isinstance(default, str) and default else MPV_DEFAULT_USER_AGENT
+
+
+def neutral_header_properties(user_agent: str) -> list[tuple[str, Any]]:
+    """The three GLOBAL header properties at values that belong to no
+    provider: mpv's default user agent, no referrer, no extra fields. Set
+    before every load (apply_channel) and on adoption (pin_adopted_player),
+    because a player started or last driven by a helper from before
+    2026-10-29 holds the previous channel's headers as GLOBALS, and an entry
+    nobody gated would be sent them. `user_agent` is default_user_agent's."""
+    return [("user-agent", user_agent), ("referrer", ""), ("http-header-fields", [])]
 
 
 def cmd_play(args: argparse.Namespace) -> int:

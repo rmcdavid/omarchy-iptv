@@ -494,7 +494,11 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
         return "scheme", host
     if _listen_refusal(url, scheme, host) != "":
         return "listener", host
-    if _host_refused(host, scheme, source):
+    try:
+        port = parts.port
+    except ValueError:
+        port = None
+    if _host_refused(host, scheme, source, port if port is not None else URL_DEFAULT_PORTS.get(scheme)):
         return "local", host
     return "", host
 
@@ -505,15 +509,23 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
 SIGN_IN_HEADERS = frozenset({"authorization", "cookie", "proxy-authorization", "host"})
 
 
-def playlist_source(kind: str, url: str, connected_class: str = "") -> dict[str, Any]:
+def playlist_source(kind: str, url: str, connected_class: str = "", first_class: str = "") -> dict[str, Any]:
     """What parse_m3u knows about the playlist it parses (D-SINK-41): the
     user-typed URL's host key, and whether the source is LOCAL -- a file the
     user pointed at, or an http(s) source whose last hop connected to a
     non-global address (DestinationPolicy.last_class). A source this
-    machine could not classify is not local."""
+    machine could not classify is not local.
+
+    D-SINK-57 (2026-10-29): and the typed URL's port, with whether that host
+    is on LOOPBACK -- its literal or localhost name says so, or its first hop
+    connected there (`first_class`) -- because on loopback the playlist's own
+    host is host AND port (own_host_match)."""
     if kind == "file":
-        return {"host": "", "local": True}
-    return {"host": host_key(url_host(url)), "local": connected_class not in ("", "global", "unresolved")}
+        return {"host": "", "port": None, "loopback": False, "local": True}
+    host = url_host(url)
+    return {"host": host_key(host), "port": url_port(url),
+            "loopback": first_class == "loopback" or host_class(host) == "loopback",
+            "local": connected_class not in ("", "global", "unresolved")}
 
 
 def stream_host_refused(url: str, source: dict[str, Any]) -> bool:
@@ -523,10 +535,10 @@ def stream_host_refused(url: str, source: dict[str, Any]) -> bool:
     rtp group is the ISP-multicast case and passes. A NAME that resolves to
     such an address is mpv's lookup and not seen here (ARCHITECTURE-PLAYER,
     the residuals)."""
-    return _host_refused(url_host(url), stream_scheme(url), source)
+    return _host_refused(url_host(url), stream_scheme(url), source, url_port(url))
 
 
-def _host_refused(host: str, scheme: str, source: dict[str, Any]) -> bool:
+def _host_refused(host: str, scheme: str, source: dict[str, Any], port: int | None = None) -> bool:
     kind = host_class(host)
     if kind in ("", "global"):
         return False
@@ -534,8 +546,7 @@ def _host_refused(host: str, scheme: str, source: dict[str, Any]) -> bool:
         return False
     if source.get("local"):
         return False
-    home = str(source.get("host") or "")
-    return not (home != "" and host_key(host) == home)
+    return not own_host_match(host, port, source)
 
 
 def drop_sign_in_headers(channel: dict[str, Any], source: dict[str, Any], host: str | None = None) -> int:
@@ -546,10 +557,11 @@ def drop_sign_in_headers(channel: dict[str, Any], source: dict[str, Any], host: 
     headers = channel.get("headers")
     if not isinstance(headers, dict):
         return 0
-    home = str(source.get("host") or "")
+    url = str(channel.get("url") or "")
     if host is None:
-        host = url_host(str(channel.get("url") or ""))
-    if home != "" and host_key(host) == home:
+        host = url_host(url)
+    # D-SINK-57: on loopback the own host is host AND port.
+    if own_host_match(host, url_port(url), source):
         return 0
     dropped = [name for name in headers if name.lower() in SIGN_IN_HEADERS]
     for name in dropped:

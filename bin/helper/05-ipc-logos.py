@@ -4,6 +4,31 @@
 from __future__ import annotations
 # ------------------------------------------------------------- mpv IPC
 
+class IpcPairs(list):
+    """A JSON OBJECT written in this order, a key as often as it is listed:
+    the per-file options of a `loadfile` (apply_channel, 2026-10-29). Python's
+    dict keeps a key once, and `http-header-fields-append` has to appear once
+    per header, because `-append` is the one spelling that takes its value
+    verbatim -- the plain list option splits a header value at every comma
+    (measured on mpv 0.41.0 against a logging server: `X-A: 1,2` arrived as
+    `X-A: 1`; three `-append` keys in one object arrived as three headers,
+    commas, `=`, quotes and a trailing backslash intact, in order). mpv's own
+    JSON reader keeps every key of an object in order (the same measurement).
+    A list of (key, value) pairs; a value may be another IpcPairs."""
+
+
+def ipc_json(value: Any) -> str:
+    """json.dumps, except that an IpcPairs is written as an object in its own
+    order with its repeated keys. ensure_ascii=False, as request() has always
+    sent: mpv reads UTF-8."""
+    if isinstance(value, IpcPairs):
+        return "{" + ", ".join("%s: %s" % (json.dumps(str(k), ensure_ascii=False), ipc_json(v))
+                               for k, v in value) + "}"
+    if isinstance(value, list):
+        return "[" + ", ".join(ipc_json(item) for item in value) + "]"
+    return json.dumps(value, ensure_ascii=False)
+
+
 class MpvIpc:
     """Minimal client for mpv's JSON IPC: one request at a time, replies
     correlated by request_id, unsolicited events KEPT.
@@ -85,7 +110,7 @@ class MpvIpc:
         assert self.sock is not None
         request_id = self.next_id
         self.next_id += 1
-        payload = json.dumps({"command": command, "request_id": request_id}, ensure_ascii=False) + "\n"
+        payload = '{"command": %s, "request_id": %d}\n' % (ipc_json(list(command)), request_id)
         try:
             self.sock.sendall(payload.encode("utf-8"))
         except (ConnectionResetError, BrokenPipeError):

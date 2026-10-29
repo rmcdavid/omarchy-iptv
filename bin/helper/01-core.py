@@ -163,6 +163,10 @@ URL_ENV = "OMARCHY_IPTV_URL"
 ORIGIN_ENV = "OMARCHY_IPTV_ORIGIN"
 HOME_HOST_ENV = "OMARCHY_IPTV_PLAYLIST_HOST"
 HOME_CLASS_ENV = "OMARCHY_IPTV_PLAYLIST_CLASS"
+# D-SINK-57 (owner, 2026-10-29): and the playlist URL's port (its scheme's
+# default when it names none), because on LOOPBACK the playlist's own host is
+# host AND port (own_host_match).
+HOME_PORT_ENV = "OMARCHY_IPTV_PLAYLIST_PORT"
 ORIGIN_USER = "user"
 ORIGIN_PLAYLIST = "playlist"
 # Every class address_class answers. "global" is the only one a destination
@@ -1745,6 +1749,40 @@ def may_be_ip_literal(text: str) -> bool:
     label = text[:-1] if text.endswith(".") and len(text) > 1 else text
     last = label.rsplit(".", 1)[-1].lower()
     return last != "" and (last[:2] == "0x" or set(last) <= _DECIMAL_DIGITS)
+
+
+# D-SINK-57: the port a URL names, or its scheme's default (http 80 = no
+# port). Schemes with no default (srt, udp, rtp) answer None.
+URL_DEFAULT_PORTS = {"http": 80, "https": 443, "rtmp": 1935, "rtmps": 443, "rtsp": 554, "mms": 80, "mmsh": 80}
+
+
+def url_port(url: str) -> int | None:
+    """The port of a URL, its scheme's default when it names none, None when
+    neither is known or the URL does not parse (D-SINK-57)."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return None
+    return port if port is not None else URL_DEFAULT_PORTS.get(parts.scheme.lower())
+
+
+def own_host_match(host: Any, port: Any, home: dict[str, Any]) -> bool:
+    """Is `host` (at `port`) the playlist's OWN host? D-SINK-57 (owner,
+    2026-10-29): the host keys are equal (host_key), and when the home is on
+    LOOPBACK the ports are equal too -- so a local relay (Threadfin, xTeVe, an
+    nginx cache) on 127.0.0.1:34400 is its own host and 127.0.0.1:631 is not.
+    A LAN or public home keeps any port. `home` is {"host": host_key, "port":
+    int or None, "loopback": bool}; the home is loopback when its literal is
+    (host_class) or when its fetch connected to loopback (a name that resolves
+    there). A port that is not known is never equal to one that is."""
+    key = str(home.get("host") or "")
+    if key == "" or host_key(host) != key:
+        return False
+    if not home.get("loopback") and host_class(host) != "loopback":
+        return True
+    want = home.get("port")
+    return isinstance(port, int) and not isinstance(port, bool) and port == want
 
 
 def host_key(host: Any) -> str:

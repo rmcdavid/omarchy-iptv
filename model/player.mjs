@@ -299,7 +299,13 @@ function playFailureVerdict(code, context) {
 // provider's source over its bound ("from <host>" is right), on a player
 // verb it is this helper's own memory; `busy` there is a fetch, here the
 // player lock; `unknown_channel` and `no_cache` are no probe's codes at all.
-var PLAYER_START_CHANNEL_REFUSALS = ["unsupported_scheme"]
+//
+// D-SINK-58 (2026-10-29): `local_address` joins it. player_target now runs
+// the parse's host rule again against the cache's own record of its
+// playlist, so a cache nothing checked -- one from before the destination
+// rules, whose refresh failed -- refuses a channel on a LAN or loopback
+// literal that its playlist chose. That refusal is about the entry.
+var PLAYER_START_CHANNEL_REFUSALS = ["unsupported_scheme", "local_address"]
 
 function playerStartFailure(code) {
   return PLAYER_START_CHANNEL_REFUSALS.indexOf(str(code)) !== -1 ? "channel" : "local"
@@ -757,12 +763,37 @@ function endedReport(context) {
   var ctx = context && typeof context === "object" ? context : {}
   var verdict = endedVerdict(ctx.lastEndFile, ctx.userStopped === true, ctx.stopping === true)
   var tail = asList(ctx.tail)
+  var format = unopenedFormatSentence(ctx.lastEndFile)
   return {
     notify: verdict.notify === true,
     kind: verdict.kind,
     target: channelForEnd(ctx.owners, ctx.lastEndFile, ctx.nowPlaying),
-    reason: tail.length > 0 ? str(tail[tail.length - 1]) : str(verdict.reason)
+    reason: format !== "" ? format : tail.length > 0 ? str(tail[tail.length - 1]) : str(verdict.reason)
   }
+}
+
+// D-PLY-44 (owner, 2026-10-29: refuse nested playlists). The helper's own
+// loadfile carries the per-file option `demuxer=lavf`, so a stream server
+// that answers with a plain playlist -- and a channel whose address is itself
+// a .m3u or .pls redirector -- is not opened. mpv ends that load with reason
+// "error" and this `file_error` (its MPV_ERROR_UNKNOWN_FORMAT), after one
+// error-level line, "[cplayer] Failed to recognize file format." (measured on
+// mpv 0.41.0 for a .pls, a plain .m3u and a web page, windowless, lane-p1b
+// 2026-10-29). That line says nothing a user can act on, so this sentence
+// outranks the log tail for that ending, and only for it. It names both
+// things the ending can mean, because mpv cannot tell them apart: a
+// playlist file, which the player no longer opens, and a page, which it
+// never did. Pinned in the shared fixture player-endings.json
+// (`formatErrors`), which the python suite reads too.
+var PLAYER_FORMAT_ERROR = "unrecognized file format"
+var PLAYER_FORMAT_SENTENCE = "The address sent a playlist file or a web page, which the player does not open"
+
+// The sentence for an end-file that says mpv could not tell what the stream
+// is, "" for any other ending. Exact string after a trim, as outputFailure.
+function unopenedFormatSentence(end) {
+  if (!end || typeof end !== "object" || str(end.reason) !== "error") return ""
+  var raw = end.fileError !== undefined && end.fileError !== null && str(end.fileError) !== "" ? end.fileError : end.file_error
+  return str(raw).trim() === PLAYER_FORMAT_ERROR ? PLAYER_FORMAT_SENTENCE : ""
 }
 
 // D-PLY-37 (owner, 2026-10-28): an OUTPUT of this machine that could not be
@@ -872,8 +903,9 @@ function deathReport(context) {
     var lostFirst = ended === "end-file" ? outputFailure({ reason: "error", fileError: ctx.fileError }) : ""
     if (lostFirst !== "") return { notify: true, mark: false, card: "outputFailed", target: who, reason: outputFailureSentence(lostFirst), output: lostFirst }
     if (ended === "closed") return { notify: true, mark: false, card: "playerStopped", target: who, reason: PLAYER_GENERIC_FAILURE, output: "" }
+    var formatFirst = ended === "end-file" ? unopenedFormatSentence({ reason: "error", fileError: ctx.fileError }) : ""
     return { notify: true, mark: true, card: "streamFailed", target: who,
-             reason: why !== "" ? why : PLAYER_GENERIC_FAILURE, output: "" }
+             reason: formatFirst !== "" ? formatFirst : why !== "" ? why : PLAYER_GENERIC_FAILURE, output: "" }
   }
   var report = endedReport(ctx)
   if (report.notify !== true) return { notify: false, mark: false, card: "", target: report.target, reason: "", output: "" }
@@ -905,6 +937,7 @@ export {
   playerTlsVerdict, parsePlayerProbe, parsePlayerEvent, playerEntryId,
   endedVerdict, probeVerdict, playerDeathKind, playerSessionFollowUp,
   playerRouterState, pushPlayerLog, routePlayerEvent, rememberEntryOwner,
-  channelForEnd, endedReport, PLAYER_OUTPUT_ERRORS, outputFailure,
+  channelForEnd, endedReport, PLAYER_FORMAT_ERROR, PLAYER_FORMAT_SENTENCE,
+  unopenedFormatSentence, PLAYER_OUTPUT_ERRORS, outputFailure,
   outputFailureSentence, deathReport, loadFailedForOwnEntry
 }

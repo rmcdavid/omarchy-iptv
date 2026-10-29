@@ -59,6 +59,30 @@ var MPV_HANDOFF_TEXT = " hands the stream address to another program"
 // by `mpv_arg_writes_disk()` in the helper (bin/helper/), same fixture.
 var MPV_DISK_WARN = { "--cache-on-disk": true }
 var MPV_DISK_TEXT = " writes the stream to disk while it plays"
+// D-SINK-59 (lead, 2026-10-29): `--demuxer-lavf-o` carrying FFmpeg's
+// `http_proxy` key hands a plain-http HLS stream's whole credentialed request
+// line and the provider header to the proxy (measured by rc-mpvpin's
+// recheck), what --http-proxy does, so it is warned the same way. A substring
+// of the raw token, the MPV_DEMUXER_TLS_WORDS shape. Mirrored by
+// MPV_DEMUXER_PROXY_WORD in the helper.
+var MPV_DEMUXER_PROXY_WORD = "http_proxy"
+// D-SINK-53 (lead, 2026-10-29): `--rtsp-transport` other than tcp or http
+// makes every rtsp channel bind RTP and RTCP ports on all interfaces for
+// anyone to send to (measured by lane-dest). The user's own choice (PO-5),
+// so warned. Mirrored by MPV_LISTEN_WARN / MPV_LISTEN_QUIET in the helper.
+var MPV_LISTEN_WARN = { "--rtsp-transport": true }
+var MPV_LISTEN_QUIET = { "tcp": true, "http": true, "https": true }
+var MPV_LISTEN_TEXT = " opens ports on this computer that anyone can send to"
+// D-SINK-52 (owner, 2026-10-29: pin and refuse). A `--script-opts` token is
+// REFUSED when its text sets an on-screen-controller command (the OSC runs
+// its *_mbtn_*_command / *_wheel_*_command options as input commands on a
+// click: `show-text ${path}` draws the credentialed URL, `run` starts a
+// program) or carries `${`, which the OSC's text options property-expand. A
+// substring of the raw token: every spelling of such a key still carries the
+// word, and the price is refusing a value that happens to contain one. Every
+// other key, `ytdl_hook-*` included (PO-10, warned), passes. Mirrored by
+// MPV_SCRIPT_OPTS_WORDS in the helper.
+var MPV_SCRIPT_OPTS_WORDS = ["${", "_command", "_mbtn_", "_wheel_"]
 
 // mpv spells the list-option variants `--opt-append`, `--opt-set` and so on;
 // every one of them sets the same option, so the base name is what decides.
@@ -80,6 +104,7 @@ function mpvHandoffName(token) {
   if (base === "--ytdl") return MPV_YTDL_OFF[value.toLowerCase()] === true ? "" : name
   if (MPV_HANDOFF[base] === true) return name
   if (MPV_HANDOFF_SCRIPT_OPTS[base] === true) return value.indexOf("ytdl") === -1 ? "" : name
+  if (base === "--demuxer-lavf-o") return value.indexOf(MPV_DEMUXER_PROXY_WORD) === -1 ? "" : name
   return ""
 }
 
@@ -95,6 +120,18 @@ function mpvDiskName(token) {
   return MPV_YTDL_OFF[value.toLowerCase()] === true ? "" : name
 }
 
+// The option NAME when the token makes rtsp channels bind ports (D-SINK-53),
+// "" otherwise. The value is a transport name, but the line carries the name
+// alone, as every warning does (R12).
+function mpvListenName(token) {
+  var text = str(token)
+  var eq = text.indexOf("=")
+  var name = eq === -1 ? text : text.substring(0, eq)
+  var value = eq === -1 ? "" : text.substring(eq + 1)
+  if (name.indexOf("--no-") === 0 || MPV_LISTEN_WARN[mpvOptionBase(name)] !== true) return ""
+  return MPV_LISTEN_QUIET[value.trim().toLowerCase()] === true ? "" : name
+}
+
 // The whole warning line for one token, or "". Each cost carries its own
 // sentence, so the user is told WHAT the option does.
 function mpvArgWarning(token) {
@@ -102,6 +139,8 @@ function mpvArgWarning(token) {
   if (name !== "") return "mpvArg " + name + MPV_HANDOFF_TEXT
   name = mpvDiskName(token)
   if (name !== "") return "mpvArg " + name + MPV_DISK_TEXT
+  name = mpvListenName(token)
+  if (name !== "") return "mpvArg " + name + MPV_LISTEN_TEXT
   return ""
 }
 
@@ -180,7 +219,7 @@ function splitMpvArgs(text) {
     if (!ok || MPV_RESERVED[name] === true || MPV_RESERVED[base] === true
         || name.indexOf("--no-") === 0 && (MPV_RESERVED["--" + name.substring(5)] === true
                                            || MPV_RESERVED[mpvOptionBase("--" + name.substring(5))] === true)
-        || demuxerNamesTls(base, token)) rejected.push(token)
+        || demuxerNamesTls(base, token) || scriptOptsRefused(base, token)) rejected.push(token)
     else args.push(token)
   }
   return { args: args, rejected: rejected, warnings: mpvRefusedWarnings(rejected).concat(mpvArgWarnings(args)) }
@@ -194,6 +233,17 @@ function demuxerNamesTls(base, token) {
   var text = str(token)
   for (var i = 0; i < MPV_DEMUXER_TLS_WORDS.length; i++) {
     if (text.indexOf(MPV_DEMUXER_TLS_WORDS[i]) !== -1) return true
+  }
+  return false
+}
+
+// D-SINK-52: a `--script-opts*` token that sets an OSC command or carries
+// `${`. See MPV_SCRIPT_OPTS_WORDS. Mirror of script_opts_refused in the helper.
+function scriptOptsRefused(base, token) {
+  if (MPV_HANDOFF_SCRIPT_OPTS[base] !== true) return false
+  var text = str(token)
+  for (var i = 0; i < MPV_SCRIPT_OPTS_WORDS.length; i++) {
+    if (text.indexOf(MPV_SCRIPT_OPTS_WORDS[i]) !== -1) return true
   }
   return false
 }
@@ -796,9 +846,11 @@ function trackAccessibleName(rows, index) {
 }
 export {
   MPV_HANDOFF, MPV_HANDOFF_SCRIPT_OPTS, MPV_YTDL_OFF, MPV_HANDOFF_TEXT,
-  MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase, mpvHandoffName, mpvDiskName,
-  mpvArgWarning, mpvArgWarnings, MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT,
-  mpvRefusedWarning, mpvRefusedWarnings, splitMpvArgs, demuxerNamesTls,
+  MPV_DISK_WARN, MPV_DISK_TEXT, MPV_DEMUXER_PROXY_WORD, MPV_LISTEN_WARN,
+  MPV_LISTEN_QUIET, MPV_LISTEN_TEXT, MPV_SCRIPT_OPTS_WORDS, mpvOptionBase,
+  mpvHandoffName, mpvDiskName, mpvListenName, mpvArgWarning, mpvArgWarnings,
+  MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT, mpvRefusedWarning,
+  mpvRefusedWarnings, splitMpvArgs, demuxerNamesTls, scriptOptsRefused,
   mpvRejectedLine, mpvRejectedName, headerArgs, MPV_RAW_PREFIX,
   mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv, mpvPinBlock,
   helperArgv, playlistFetchArgv, fetchStateDir, playlistProbeArgv,

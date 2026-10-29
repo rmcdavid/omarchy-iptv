@@ -145,7 +145,10 @@ class LocalRefusalTest(unittest.TestCase):
         """main() in this process, with MemoryError where the verb reads the
         channel list -- the reply main() gives any MemoryError (D-M3U-1)."""
         out, err = io.StringIO(), io.StringIO()
-        with mock.patch.object(helper_module, "load_channels", side_effect=MemoryError()), \
+        # read_channel_document since 2026-10-29: player_target reads the
+        # whole channels.json (what the parse recorded about its playlist,
+        # D-SINK-58) and load_channels reads it through the same function.
+        with mock.patch.object(helper_module, "read_channel_document", side_effect=MemoryError()), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
             code = helper_module.main(list(argv))
         return code, out.getvalue().strip().splitlines(), err.getvalue()

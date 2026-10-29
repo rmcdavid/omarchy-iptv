@@ -858,6 +858,43 @@ function hostKey(host) {
   return text.charAt(text.length - 1) === "." ? text.substring(0, text.length - 1) : text
 }
 
+// D-SINK-57 (owner, 2026-10-29). The port a URL names, or its scheme's
+// default when it names none (http 80 = no port), null when neither is known.
+// Mirror of url_port in the helper; the shared destinations fixture runs both.
+var URL_DEFAULT_PORTS = { http: 80, https: 443, rtmp: 1935, rtmps: 443, rtsp: 554, mms: 80, mmsh: 80 }
+
+function urlPortOf(url) {
+  var m = str(url).match(/^([a-z][a-z0-9+.-]*):\/\/([^\/?#]*)/i)
+  if (!m) return null
+  var authority = m[2]
+  var at = authority.lastIndexOf("@")
+  var hostport = at === -1 ? authority : authority.substring(at + 1)
+  var close = hostport.lastIndexOf("]")
+  var colon = hostport.lastIndexOf(":")
+  if (colon !== -1 && colon > close) {
+    var digits = hostport.substring(colon + 1)
+    if (digits !== "") {
+      if (!/^[0-9]{1,5}$/.test(digits) || Number(digits) > 65535) return null
+      return Number(digits)
+    }
+  }
+  var scheme = m[1].toLowerCase()
+  return Object.prototype.hasOwnProperty.call(URL_DEFAULT_PORTS, scheme) ? URL_DEFAULT_PORTS[scheme] : null
+}
+
+// D-SINK-57: is `host` at `port` the playlist's OWN host? The host keys are
+// equal, and when the home is on LOOPBACK the ports are equal too -- a local
+// relay on 127.0.0.1:34400 is its own host and 127.0.0.1:631 is not; a LAN or
+// public home keeps any port. `home` is { host: hostKey, port, loopback }. A
+// port that is not known matches none. Mirror of own_host_match.
+function ownHostMatch(host, port, home) {
+  var h = home && typeof home === "object" ? home : {}
+  var key = str(h.host)
+  if (key === "" || hostKey(host) !== key) return false
+  if (h.loopback !== true && hostClass(host) !== "loopback") return true
+  return typeof port === "number" && isFinite(port) && port === h.port
+}
+
 // The validated http(s) host of a URL the user typed, "" for a file, a
 // path or anything that does not validate.
 function typedHttpHost(url) {
@@ -885,6 +922,9 @@ function typedHttpHost(url) {
 var FETCH_ORIGIN_ENV = "OMARCHY_IPTV_ORIGIN"
 var FETCH_HOME_HOST_ENV = "OMARCHY_IPTV_PLAYLIST_HOST"
 var FETCH_HOME_CLASS_ENV = "OMARCHY_IPTV_PLAYLIST_CLASS"
+// D-SINK-57: the playlist URL's port (its scheme's default when it names
+// none), because on loopback the playlist's own host is host AND port.
+var FETCH_HOME_PORT_ENV = "OMARCHY_IPTV_PLAYLIST_PORT"
 
 function fetchEnvironmentFor(url, provenance) {
   var env = fetchEnvironment(url)
@@ -892,7 +932,11 @@ function fetchEnvironmentFor(url, provenance) {
   var p = provenance && typeof provenance === "object" ? provenance : {}
   env[FETCH_ORIGIN_ENV] = str(p.origin) === "user" ? "user" : "playlist"
   var home = typedHttpHost(p.playlistUrl)
-  if (home !== "") env[FETCH_HOME_HOST_ENV] = home
+  if (home !== "") {
+    env[FETCH_HOME_HOST_ENV] = home
+    var port = urlPortOf(validateSourceUrl(p.playlistUrl).url)
+    if (port !== null) env[FETCH_HOME_PORT_ENV] = String(port)
+  }
   if (ADDRESS_CLASSES.indexOf(str(p.playlistClass)) !== -1) env[FETCH_HOME_CLASS_ENV] = str(p.playlistClass)
   return env
 }
@@ -972,8 +1016,11 @@ function epgHintVerdict(meta, playlistUrl) {
     return { url: "", refused: EPG_HINT_REFUSED_USERINFO, host: shown, plainHttp: false }
   var kind = hostClass(v.host)
   if (kind !== "" && kind !== "global") {
+    // D-SINK-57: the playlist's own host, and on loopback its own PORT.
     var home = typedHttpHost(playlistUrl)
-    if (home === "" || hostKey(home) !== hostKey(v.host))
+    var own = { host: home === "" ? "" : hostKey(home), port: urlPortOf(validateSourceUrl(playlistUrl).url),
+                loopback: hostClass(home) === "loopback" }
+    if (!ownHostMatch(v.host, urlPortOf(v.url), own))
       return { url: "", refused: EPG_HINT_REFUSED_LOCAL, host: shown, plainHttp: false }
   }
   var plain = v.url.indexOf("http://") === 0 && str(validateSourceUrl(playlistUrl).url).indexOf("https://") === 0
@@ -1741,8 +1788,9 @@ export {
   plainHttpLine, formAdviceLine, looksLikeHost, validateSourceUrl,
   normalizeSourceUrl, ADDRESS_CLASSES, ADDRESS_TABLE_V4, IPV4_PART_RE,
   IPV6_GROUP_RE, IPV4_OCTET_RE, parseIpv4Literal, parseIpv6Groups, ipLiteral,
-  ipv4Class, ipv6Class, hostClass, hostKey, typedHttpHost, FETCH_ORIGIN_ENV,
-  FETCH_HOME_HOST_ENV, FETCH_HOME_CLASS_ENV, fetchEnvironmentFor,
+  ipv4Class, ipv6Class, hostClass, hostKey, URL_DEFAULT_PORTS, urlPortOf,
+  ownHostMatch, typedHttpHost, FETCH_ORIGIN_ENV, FETCH_HOME_HOST_ENV,
+  FETCH_HOME_CLASS_ENV, FETCH_HOME_PORT_ENV, fetchEnvironmentFor,
   EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST,
   EPG_HINT_REFUSED_USERINFO, EPG_HINT_REFUSED_LOCAL, EPG_HINT_HOST_MAX,
   epgHintVerdict, epgHintUrl, resolveEpgUrl, epgHintRowState, EPG_HINT_NOTICE,
