@@ -1605,6 +1605,32 @@ edit the control's copy and the next bound write would overwrite it.
    groups, or the `#EXTM3U url-tvg` hint (`epgUrlHint` is deliberately not
    surfaced in v0.2). A hostile *label* (`${path}`, `--urgency=x`) is
    PlainText on screen and never reaches mpv or `omarchy-notification-send`.
+   **[Amended 2026-10-29, D-SINK-40: no longer "nothing". Since M4-01 the
+   active row reads `EPG from playlist` for an adopted hint, and the hint is
+   now ADOPTED only under the owner's destination policy
+   (`Model.epgHintVerdict(meta, playlistUrl)`, with the active playlist's
+   URL): refused when it carries userinfo -- a provider never chooses the
+   credentials this machine sends, and the helper would have turned them
+   into a pre-emptive `Authorization: Basic` -- and refused when its LITERAL
+   host is not global (every IPv4 spelling the WHATWG and inet_aton parsers
+   accept, `[::1]`, IPv4-mapped forms, `localhost.` and `*.localhost`;
+   `Model.hostClass`, the helper's `host_class` mirror over the shared
+   destinations fixture) unless it is the playlist's own host
+   (`Model.hostKey`, so `127.1` and `127.0.0.1` are one). A refused hint is
+   never fetched, and the active row says so naming the hint's HOST only
+   (`Model.epgHintRowState`, UX-SOURCES 5.2): provider text on the row, so
+   it is PlainText like every row and cut at 253 characters, a DNS name's
+   longest. An adopted `http://` hint under an `https://` playlist reads
+   `EPG from playlist over plain http` (D-SINK-14's disclosure, PO-5: told,
+   not refused). A hint whose NAME resolves to a LAN address is adopted by
+   the model and refused by the helper at connect time, which is the
+   binding layer (ARCHITECTURE.md section 6, 2026-10-29); its guide then
+   fails `Refused a local address`. The guide fetch carries the hint's
+   provenance (`Model.fetchEnvironmentFor`): origin `playlist`, the active
+   playlist's host and the class its playlist fetch connected to
+   (channels.json `sourceClass`), so a hint on a TVHeadend's own LAN host
+   keeps working. Cost the owner accepted: a hint on a DIFFERENT LAN host, or
+   on any LAN host under a file playlist, must be typed.]**
 8. Credentials at rest: `state.json` now holds every known playlist/EPG URL
    (0600, 0700 dir), shell.json holds the active one (0600 **because the
    plugin makes it so before each write, not because it arrives that way** --

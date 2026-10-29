@@ -429,9 +429,9 @@ class LineByLineTest(unittest.TestCase):
         seen = []
         real = helper.parse_m3u
 
-        def spy(text):
+        def spy(text, *rest):
             seen.append(type(text).__name__)
-            return real(text)
+            return real(text, *rest)
         out = io.StringIO()
         with tempfile.TemporaryDirectory() as cache, mock.patch.object(helper, "parse_m3u", side_effect=spy), \
                 contextlib.redirect_stdout(out), contextlib.redirect_stderr(io.StringIO()):

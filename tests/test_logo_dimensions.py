@@ -993,7 +993,11 @@ class LogoFetchCapTest(unittest.TestCase):
         self.assertEqual(again["deferred"], 0)
         self.assertFalse(again["atCeiling"])
         self.assertEqual(again["swept"], 0)
-        self.assertEqual(again["failed"], 5, "the three held-back new URLs and the two late ones")
+        # D-SINK-40: "fail" is now the destination policy's refusal -- a logo
+        # never reaches an address on this machine, so the five go nowhere
+        # and are counted with the policy refusals, in a real helper process.
+        self.assertEqual((again["failed"], again["refusedOnPolicy"], again["reasons"]),
+                         (0, 5, {"local_address": 5}), "the three held-back new URLs and the two late ones")
         self.assertEqual(sorted(again["names"]), sorted(summary["names"]))
         self.assertEqual(sorted(l["name"] for l in announced_again), sorted(summary["names"]))
 

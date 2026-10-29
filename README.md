@@ -686,7 +686,13 @@ that way is removed from the shell's settings file with a `Bar setting
 ignored` notification and changes nothing here (Settings above has the
 detail). A guide-data URL belongs to its source: set it in the add form, or
 later with `e`, and clear it there. If your playlist names its own guide and
-the source has none, that one is used and the Sources screen says so.
+the source has none, that one is used and the Sources screen says so --
+unless that address is on this computer or your local network and not on
+the playlist's own server, or carries a user name or password: then it is
+not used, nothing is fetched from it, and the Sources row says `EPG from
+playlist not used` with the reason. Type it into the source's EPG field to
+use it anyway. A guide the playlist names over plain `http://` while the
+playlist itself is `https://` reads `EPG from playlist over plain http`.
 Channels are matched to the guide by id and, when the ids do not agree, by
 name -- which is usually what happens, because playlists and guides rarely
 come from the same place. Up to 50 sources are kept, and this list is the
@@ -814,7 +820,11 @@ carry channel ids — most do — are not affected at all.
   own timeout, about ten seconds at the resolver's usual settings). The
   body of a redirect
   is never read, redirects to anything but http(s) are refused, and
-  credentials are dropped when a redirect changes host. When the server's
+  credentials are dropped when a redirect changes host. An address you
+  type may be on this computer or your local network (a TVHeadend, a NAS);
+  what the provider chooses -- a redirect to another host, the playlist's
+  guide address, a logo -- may not, and shows `Refused a local address`
+  (a redirect that stays on the host you typed is fine). When the server's
   answer is not HTTP at all, the error shows at most 200 characters of it.
 - A file the plugin was writing when it was stopped (a timeout, a source
   switch) can leave a `.tmp-` file beside it in the cache; one more than a
@@ -825,6 +835,20 @@ carry channel ids — most do — are not affected at all.
   the download cannot bound what such definitions expand to, and XMLTV
   files never contain them; the usual `<!DOCTYPE tv SYSTEM "xmltv.dtd">`
   line is fine (a marketplace reviewer reported this against 0.14.1).
+
+- What a playlist may make the player do is limited too. A `udp://` or
+  `rtp://` channel must be a multicast group (`udp://@239.1.2.3:1234`, as
+  ISP television uses); one that would listen for anyone on your network
+  to send to -- a unicast or `0.0.0.0` address, `srt://` in listener or
+  rendezvous mode, or a `localport`, `localaddr`, `reuse` or `listen`
+  setting in the address -- is skipped. A playlist from the internet may not
+  point channels at addresses on this computer or your local network (a
+  playlist from your own network or a file may), and a sign-in header it
+  sets (`Authorization`, `Cookie`, `Proxy-Authorization`, `Host`) is kept
+  only for channels on the playlist's own server. Each is counted in the
+  guide footer's `Playlist warning: ...`. A channel the player loads that is itself a playlist
+  is not checked this way; nor is a server that redirects a channel
+  elsewhere.
 
 ## Picture in picture settings
 

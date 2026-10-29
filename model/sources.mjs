@@ -12,6 +12,9 @@ import {
   logoConsentLines, logoHaveIsSet
 } from "./logos.mjs"
 import {
+  FETCH_URL_ENV, fetchEnvironment
+} from "./mpv.mjs"
+import {
   hostOf, urlSpaceIndex, urlDelimiterIndex, redactUrls
 } from "./privacy.mjs"
 import {
@@ -687,6 +690,213 @@ function normalizeSourceUrl(text, opts) {
   return v.ok ? v.url : ""
 }
 
+// ---- destinations (D-SINK-40, D-SINK-41, D-SINK-42; the owner, 2026-10-29)
+//
+// Where provider data may send this machine. A source the USER typed may
+// reach any address on its first hop; a destination the PROVIDER chose may
+// not reach a non-global one unless it is the user's own playlist host. The
+// helper enforces that at connect time, against the address it connects to
+// (DestinationPolicy, bin/helper/03-io-playlist.py) -- that is the binding
+// layer. This is the VISIBLE one: the model refuses a guide hint whose
+// LITERAL host is not global before any fetch, so the Sources row can say so
+// (epgHintVerdict). A mirror of the helper's host_class / host_key, run with
+// it over the shared destinations fixture (dev branch; the project's rule: a
+// rule in two languages gets one shared fixture). Pure arithmetic over numbers and
+// 16-bit groups: no BigInt, which Qt's V4 is not relied on for.
+var ADDRESS_CLASSES = ["global", "loopback", "private", "shared", "link-local", "unspecified", "multicast", "reserved"]
+// [first address, prefix length, class], the helper's _ADDRESS_TABLE_V4.
+var ADDRESS_TABLE_V4 = [
+  [0x00000000, 8, "unspecified"], [0x0a000000, 8, "private"], [0x64400000, 10, "shared"],
+  [0x7f000000, 8, "loopback"], [0xa9fe0000, 16, "link-local"], [0xac100000, 12, "private"],
+  [0xc0000000, 24, "reserved"], [0xc0000200, 24, "reserved"], [0xc0586300, 24, "reserved"],
+  [0xc0a80000, 16, "private"], [0xc6120000, 15, "reserved"], [0xc6336400, 24, "reserved"],
+  [0xcb007100, 24, "reserved"], [0xe0000000, 4, "multicast"], [0xf0000000, 4, "reserved"]
+]
+var IPV4_PART_RE = /^(?:0[xX][0-9A-Fa-f]*|[0-9]+)$/
+var IPV6_GROUP_RE = /^[0-9a-f]{1,4}$/
+var IPV4_OCTET_RE = /^(?:0|[1-9][0-9]{0,2})$/
+
+// parse_ipv4_literal: the address a numeric IPv4 host names in any WHATWG /
+// inet_aton spelling (`127.1`, `2130706433`, `0x7f000001`, `0177.0.0.1`,
+// one trailing dot), else -1.
+function parseIpv4Literal(host) {
+  var text = str(host)
+  if (text.length > 1 && text.charAt(text.length - 1) === ".") text = text.substring(0, text.length - 1)
+  var parts = text.split(".")
+  if (parts.length < 1 || parts.length > 4) return -1
+  var numbers = []
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i]
+    if (part.length > 32 || !IPV4_PART_RE.test(part)) return -1
+    if (part.substring(0, 2) === "0x" || part.substring(0, 2) === "0X") numbers.push(parseInt(part.substring(2) || "0", 16))
+    else if (part.length > 1 && part.charAt(0) === "0") {
+      if (!/^[0-7]+$/.test(part)) return -1
+      numbers.push(parseInt(part, 8))
+    } else numbers.push(parseInt(part, 10))
+  }
+  var last = numbers.pop()
+  for (var j = 0; j < numbers.length; j++) if (numbers[j] > 255) return -1
+  if (last >= Math.pow(256, 4 - numbers.length)) return -1
+  var value = last
+  for (var k = 0; k < numbers.length; k++) value += numbers[k] * Math.pow(256, 3 - k)
+  return value
+}
+
+// An IPv6 literal (no brackets, `%zone` already dropped) as eight 16-bit
+// groups, else null: `::` at most once, a dotted IPv4 tail as the last two.
+function parseIpv6Groups(text) {
+  var s = str(text)
+  if (s === "" || s.indexOf(":") === -1) return null
+  var v4 = -1
+  var lastColon = s.lastIndexOf(":")
+  var tail = s.substring(lastColon + 1)
+  if (tail.indexOf(".") !== -1) {
+    var octets = tail.split(".")
+    if (octets.length !== 4) return null
+    v4 = 0
+    for (var i = 0; i < 4; i++) {
+      if (!IPV4_OCTET_RE.test(octets[i]) || Number(octets[i]) > 255) return null
+      v4 = v4 * 256 + Number(octets[i])
+    }
+    s = s.substring(0, lastColon + 1) + "0:0"
+  }
+  var halves = s.split("::")
+  if (halves.length > 2) return null
+  function groupsOf(part) {
+    if (part === "") return []
+    var list = part.split(":")
+    var out = []
+    for (var g = 0; g < list.length; g++) {
+      if (!IPV6_GROUP_RE.test(list[g])) return null
+      out.push(parseInt(list[g], 16))
+    }
+    return out
+  }
+  var head = groupsOf(halves[0])
+  var rest = halves.length === 2 ? groupsOf(halves[1]) : []
+  if (head === null || rest === null) return null
+  var total = head.length + rest.length
+  if (halves.length === 1 ? total !== 8 : total > 7) return null
+  var groups = head.slice()
+  for (var z = 0; z < 8 - total; z++) groups.push(0)
+  groups = groups.concat(rest)
+  if (v4 !== -1) { groups[6] = Math.floor(v4 / 65536); groups[7] = v4 % 65536 }
+  return groups
+}
+
+// parse_ip_literal: { v: 4, n } or { v: 6, g }, or null for a name.
+function ipLiteral(host) {
+  var text = str(host).trim().toLowerCase()
+  if (text.charAt(0) === "[" && text.charAt(text.length - 1) === "]") text = text.substring(1, text.length - 1)
+  if (text === "") return null
+  if (text.indexOf(":") !== -1) {
+    var pct = text.indexOf("%")
+    var groups = parseIpv6Groups(pct === -1 ? text : text.substring(0, pct))
+    return groups === null ? null : { v: 6, g: groups }
+  }
+  var n = parseIpv4Literal(text)
+  return n === -1 ? null : { v: 4, n: n }
+}
+
+function ipv4Class(n) {
+  for (var i = 0; i < ADDRESS_TABLE_V4.length; i++) {
+    var row = ADDRESS_TABLE_V4[i]
+    if (n >= row[0] && n < row[0] + Math.pow(2, 32 - row[1])) return row[2]
+  }
+  return "global"
+}
+
+// address_class over the groups, in the helper's order: mapped, NAT64,
+// 6to4, the table, then everything outside 2000::/3 is reserved.
+function ipv6Class(g) {
+  var zero = function (from, to) { for (var i = from; i <= to; i++) if (g[i] !== 0) return false; return true }
+  if (zero(0, 4) && g[5] === 0xffff) return ipv4Class(g[6] * 65536 + g[7])
+  if (g[0] === 0x64 && g[1] === 0xff9b && zero(2, 5)) return ipv4Class(g[6] * 65536 + g[7])
+  if (g[0] === 0x2002) {
+    var inner = ipv4Class(g[1] * 65536 + g[2])
+    return inner !== "global" ? inner : "reserved"
+  }
+  if (zero(0, 7)) return "unspecified"
+  if (zero(0, 6) && g[7] === 1) return "loopback"
+  if (g[0] === 0x64 && g[1] === 0xff9b && g[2] === 1) return "reserved"
+  if (g[0] === 0x100 && zero(1, 3)) return "reserved"
+  if (g[0] === 0x2001 && g[1] < 0x200) return "reserved"
+  if (g[0] === 0x2001 && g[1] === 0xdb8) return "reserved"
+  if (g[0] === 0x3fff && g[1] < 0x1000) return "reserved"
+  if (g[0] === 0x5f00) return "reserved"
+  if ((g[0] & 0xfe00) === 0xfc00) return "private"
+  if ((g[0] & 0xffc0) === 0xfe80) return "link-local"
+  if ((g[0] & 0xffc0) === 0xfec0) return "private"
+  if ((g[0] & 0xff00) === 0xff00) return "multicast"
+  if ((g[0] & 0xe000) !== 0x2000) return "reserved"
+  return "global"
+}
+
+// host_class: a literal's class, `loopback` for localhost and *.localhost,
+// "" for any other name (a lookup's business, which is the helper's).
+function hostClass(host) {
+  var text = str(host).trim().toLowerCase()
+  if (text === "localhost" || text === "localhost." || /\.localhost\.?$/.test(text)) return "loopback"
+  var lit = ipLiteral(text)
+  if (lit === null) return ""
+  return lit.v === 4 ? ipv4Class(lit.n) : ipv6Class(lit.g)
+}
+
+// host_key: what "the same host" compares -- IPv4 dotted, IPv6 exploded
+// (eight four-digit groups), a name case-folded with one trailing dot
+// dropped.
+function hostKey(host) {
+  var text = str(host).trim().toLowerCase()
+  var lit = ipLiteral(text)
+  if (lit !== null) {
+    if (lit.v === 4) return [Math.floor(lit.n / 16777216), Math.floor(lit.n / 65536) % 256, Math.floor(lit.n / 256) % 256, lit.n % 256].join(".")
+    var out = []
+    for (var i = 0; i < 8; i++) out.push(("000" + lit.g[i].toString(16)).slice(-4))
+    return out.join(":")
+  }
+  if (text.charAt(0) === "[" && text.charAt(text.length - 1) === "]") text = text.substring(1, text.length - 1)
+  return text.charAt(text.length - 1) === "." ? text.substring(0, text.length - 1) : text
+}
+
+// The validated http(s) host of a URL the user typed, "" for a file, a
+// path or anything that does not validate.
+function typedHttpHost(url) {
+  var v = validateSourceUrl(url)
+  return v.ok && v.kind === "http" ? v.host : ""
+}
+
+// D-SINK-40. The environment of a URL-carrying helper spawn: fetchEnvironment
+// (D-SINK-8, the URL) plus WHERE the URL came from, which is what the
+// helper's connect-time policy decides by. One builder, so engineering rule
+// 5's one assignment immediately before every `running = true` (dev branch)
+// stays one:
+//   origin         "user" for a URL the user typed (the playlist fetch, the
+//                  probe, a typed guide URL); anything else is the
+//                  provider's and reads as "playlist" -- the stricter value,
+//                  so a caller that passes nothing fails closed.
+//   playlistUrl    the ACTIVE playlist's URL, for a guide fetch: its host
+//                  (never the URL) goes to OMARCHY_IPTV_PLAYLIST_HOST, so a
+//                  guide on the playlist's own host may stay on it.
+//   playlistClass  channels.json `sourceClass`, the class that playlist's
+//                  first hop connected to; dropped unless it is one of
+//                  ADDRESS_CLASSES.
+// An empty URL is {} whatever else is given: the `--now-only` run contacts
+// nobody and carries nothing.
+var FETCH_ORIGIN_ENV = "OMARCHY_IPTV_ORIGIN"
+var FETCH_HOME_HOST_ENV = "OMARCHY_IPTV_PLAYLIST_HOST"
+var FETCH_HOME_CLASS_ENV = "OMARCHY_IPTV_PLAYLIST_CLASS"
+
+function fetchEnvironmentFor(url, provenance) {
+  var env = fetchEnvironment(url)
+  if (str(env[FETCH_URL_ENV]) === "") return env
+  var p = provenance && typeof provenance === "object" ? provenance : {}
+  env[FETCH_ORIGIN_ENV] = str(p.origin) === "user" ? "user" : "playlist"
+  var home = typedHttpHost(p.playlistUrl)
+  if (home !== "") env[FETCH_HOME_HOST_ENV] = home
+  if (ADDRESS_CLASSES.indexOf(str(p.playlistClass)) !== -1) env[FETCH_HOME_CLASS_ENV] = str(p.playlistClass)
+  return env
+}
+
 // ---- the guide URL the playlist declares (M4-01 repair 3, D-EPG-2)
 //
 // `#EXTM3U url-tvg="..."` / `x-tvg-url="..."` has reached channels.json as
@@ -725,17 +935,53 @@ var EPG_ORIGIN_USER = "user"
 var EPG_ORIGIN_PLAYLIST = "playlist"
 
 // The channels.json hint, validated and narrowed to http(s), or "".
-function epgHintUrl(meta) {
+// D-SINK-40: and refused, with the reason, when it carries USERINFO -- a
+// provider has no business choosing the credentials this machine sends, and
+// the helper turns userinfo into a pre-emptive `Authorization: Basic` -- or
+// when its LITERAL host is not global (a loopback, private, link-local,
+// CGNAT, unspecified, reserved or multicast address in any spelling, `[::1]`,
+// a localhost name) unless it is the user's playlist host itself
+// (`playlistUrl`; same hostKey, hence the same address). A name that only a
+// lookup can classify passes here and meets the helper's connect-time check.
+//   -> { url, refused: "" | "userinfo" | "local", host, plainHttp }
+// `host` is the hint's display host (hostOf: no userinfo, no port, no path);
+// `plainHttp` is an adopted `http://` hint under an `https://` playlist, the
+// downgrade the Sources row discloses (D-SINK-14's sentence, PO-5: disclosed,
+// not refused).
+var EPG_HINT_REFUSED_USERINFO = "userinfo"
+var EPG_HINT_REFUSED_LOCAL = "local"
+var EPG_HINT_HOST_MAX = 253
+
+function epgHintVerdict(meta, playlistUrl) {
   var m = meta && typeof meta === "object" ? meta : {}
+  var none = { url: "", refused: "", host: "", plainHttp: false }
   var raw = str(m.epgUrlHint)
-  if (raw === "") return ""
+  if (raw === "") return none
   var v = validateSourceUrl(raw, { kind: "epg" })
   // `kind: "epg"` passes an EMPTY value as ok with kind "", so `v.ok` alone
   // would accept nonsense that sanitized away to nothing; and `kind !==
   // "http"` is decision 2 above, not a formality -- that branch is the one
   // that refuses `/etc/passwd` and `file:///...` from a provider.
-  if (!v.ok || v.kind !== "http" || v.url === "") return ""
-  return v.url
+  if (!v.ok || v.kind !== "http" || v.url === "") return none
+  // Provider text on the Sources row: cut at a DNS name's longest.
+  var shown = hostOf(v.url)
+  if (shown.length > EPG_HINT_HOST_MAX) shown = shown.substring(0, EPG_HINT_HOST_MAX) + ELLIPSIS
+  var body = v.url.substring(v.url.indexOf("://") + 3)
+  var cut = body.search(/[\/?#]/)
+  if ((cut === -1 ? body : body.substring(0, cut)).indexOf("@") !== -1)
+    return { url: "", refused: EPG_HINT_REFUSED_USERINFO, host: shown, plainHttp: false }
+  var kind = hostClass(v.host)
+  if (kind !== "" && kind !== "global") {
+    var home = typedHttpHost(playlistUrl)
+    if (home === "" || hostKey(home) !== hostKey(v.host))
+      return { url: "", refused: EPG_HINT_REFUSED_LOCAL, host: shown, plainHttp: false }
+  }
+  var plain = v.url.indexOf("http://") === 0 && str(validateSourceUrl(playlistUrl).url).indexOf("https://") === 0
+  return { url: v.url, refused: "", host: shown, plainHttp: plain }
+}
+
+function epgHintUrl(meta, playlistUrl) {
+  return epgHintVerdict(meta, playlistUrl).url
 }
 
 // Which guide URL is in force, and where it came from.
@@ -745,13 +991,29 @@ function epgHintUrl(meta) {
 // user can see and fix. Substituting the provider's hint for a URL the user
 // mistyped would produce an error message about a URL they never entered, or
 // worse, silently fetch somewhere else and look like it worked.
+// D-SINK-40: `playlistUrl` is the active playlist's, which a hint on that
+// same host may share (epgHintVerdict); without it no non-global literal
+// hint is adopted.
 function resolveEpgUrl(opts) {
   var o = opts || {}
   var user = str(o.userUrl)
   if (user !== "") return { url: user, origin: EPG_ORIGIN_USER, host: hostOf(user), fromPlaylist: false }
-  var hint = epgHintUrl({ epgUrlHint: o.hint })
+  var hint = epgHintUrl({ epgUrlHint: o.hint }, o.playlistUrl)
   if (hint === "") return { url: "", origin: EPG_ORIGIN_NONE, host: "", fromPlaylist: false }
   return { url: hint, origin: EPG_ORIGIN_PLAYLIST, host: hostOf(hint), fromPlaylist: true }
+}
+
+// D-SINK-40. What the active Sources row says about the playlist's guide
+// hint beyond "EPG from playlist": that one was REFUSED (and why, naming its
+// host), or that the adopted one travels over plain http under an https
+// playlist. Nothing when the user set their own guide URL -- theirs wins and
+// the hint is not in play -- or when there is no hint.
+//   -> { refused: "" | "userinfo" | "local", host, plainHttp }
+function epgHintRowState(opts) {
+  var o = opts || {}
+  if (str(o.userUrl) !== "") return { refused: "", host: "", plainHttp: false }
+  var v = epgHintVerdict({ epgUrlHint: o.hint }, o.playlistUrl)
+  return { refused: v.refused, host: v.refused !== "" || v.plainHttp ? v.host : "", plainHttp: v.plainHttp }
 }
 
 // The one line of copy that makes the provenance visible (M4-01 repair 3:
@@ -1152,13 +1414,17 @@ function formatAgo(nowSec, atSec) {
 // claims to. A source with its own `epgUrl` is never marked hinted -- the
 // user's value wins in resolveEpgUrl and it must win here too, or the row
 // would tell the user their own URL came from the provider.
-function sourceView(source, activeKey, nowSec, errorReason, epgFromPlaylist) {
+// `epgHint` (D-SINK-40) is the active source's Model.epgHintRowState: a
+// refused hint, or an adopted one over plain http, on the same terms.
+function sourceView(source, activeKey, nowSec, errorReason, epgFromPlaylist, epgHint) {
   var s = source || {}
   var key = str(s.key)
   var kind = str(s.kind) === "file" ? "file" : (str(s.origin) === "xtream" ? "xtream" : "url")
   var fetched = Number(s.fetchedAt) > 0
   var ownEpg = str(s.epgUrl) !== ""
   var hinted = !ownEpg && epgFromPlaylist === true && key !== "" && key === str(activeKey)
+  var hintState = !ownEpg && key !== "" && key === str(activeKey) && epgHint && typeof epgHint === "object" ? epgHint : {}
+  var refusedHint = !hinted && (hintState.refused === EPG_HINT_REFUSED_LOCAL || hintState.refused === EPG_HINT_REFUSED_USERINFO)
   return {
     id: key,
     label: str(s.label),
@@ -1173,20 +1439,23 @@ function sourceView(source, activeKey, nowSec, errorReason, epgFromPlaylist) {
     lastUsedText: formatLastUsed(s.lastUsed, nowSec),
     active: key !== "" && key === str(activeKey),
     origin: str(s.origin),
-    errorReason: str(errorReason)
+    errorReason: str(errorReason),
+    epgHintRefused: refusedHint ? str(hintState.refused) : "",
+    epgHintHost: refusedHint || (hinted && hintState.plainHttp === true) ? str(hintState.host) : "",
+    epgHintPlainHttp: hinted && hintState.plainHttp === true
   }
 }
 
 // Every record as a view, active first, then last used (newest first),
 // then added (newest first). `errors` is the service's { key: reason } map.
-function sourceViews(state, activeKey, nowSec, errors, epgFromPlaylist) {
+function sourceViews(state, activeKey, nowSec, errors, epgFromPlaylist, epgHint) {
   var st = state || emptyState()
   var errs = errors && typeof errors === "object" ? errors : {}
   var list = asList(st.sources)
   var out = []
   for (var i = 0; i < list.length; i++) {
     if (!list[i]) continue
-    var view = sourceView(list[i], activeKey, nowSec, errs[str(list[i].key)], epgFromPlaylist)
+    var view = sourceView(list[i], activeKey, nowSec, errs[str(list[i].key)], epgFromPlaylist, epgHint)
     view.addedAt = Math.floor(Number(list[i].addedAt) || 0)
     out.push(view)
   }
@@ -1206,13 +1475,25 @@ function sourceViews(state, activeKey, nowSec, errors, epgFromPlaylist) {
 }
 
 // Architecture name.
-function sourceRows(state, activeKey, nowSec, errors, epgFromPlaylist) {
-  return sourceViews(state, activeKey, nowSec, errors, epgFromPlaylist)
+function sourceRows(state, activeKey, nowSec, errors, epgFromPlaylist, epgHint) {
+  return sourceViews(state, activeKey, nowSec, errors, epgFromPlaylist, epgHint)
 }
 
 // The Sources row and accessible-name word for a hinted guide URL. One
 // literal, two sinks, so the screen and the screen reader cannot drift.
 var EPG_HINT_ROW_TEXT = "EPG from playlist"
+// D-SINK-40 (UX-SOURCES 5.2, 2026-10-29): the same slot when the hint is
+// adopted over plain http under an https playlist, and when it was refused.
+// Each names the hint's HOST and nothing else of it.
+var EPG_HINT_PLAIN_ROW_TEXT = "EPG from playlist over plain http"
+
+function epgHintRowText(view) {
+  var v = view || {}
+  if (v.epgHintRefused === EPG_HINT_REFUSED_LOCAL) return "EPG from playlist not used: " + str(v.epgHintHost) + " is a local address"
+  if (v.epgHintRefused === EPG_HINT_REFUSED_USERINFO) return "EPG from playlist not used: its address for " + str(v.epgHintHost) + " carries a password"
+  if (v.hasEpg) return v.epgFromPlaylist === true ? (v.epgHintPlainHttp === true ? EPG_HINT_PLAIN_ROW_TEXT : EPG_HINT_ROW_TEXT) : "EPG"
+  return ""
+}
 
 // Row detail (UX-SOURCES 5.2): `active` (active source only), `used ...` on
 // narrow cards, host, `Xtream`, counts or `not loaded yet`, `EPG`. Rows
@@ -1230,7 +1511,8 @@ function sourceDetail(view, narrow) {
   // the playlist declared. The row is where the user finds out, and the two
   // must never read the same -- an adopted hint that looked like their own
   // setting is the failure this wording exists to prevent.
-  if (v.hasEpg) parts.push(v.epgFromPlaylist === true ? EPG_HINT_ROW_TEXT : "EPG")
+  var epg = epgHintRowText(v)
+  if (epg !== "") parts.push(epg)
   return joinParts(parts)
 }
 
@@ -1240,7 +1522,8 @@ function sourceAccessibleName(view) {
   var out = str(v.label) + ", " + str(v.host)
   out += ", " + (Number(v.channelCount) >= 0 ? countsLine(v.channelCount, v.groupCount) : "not loaded yet")
   if (v.active) out += ", active"
-  if (v.hasEpg) out += ", " + (v.epgFromPlaylist === true ? EPG_HINT_ROW_TEXT : "EPG")
+  var epg = epgHintRowText(v)
+  if (epg !== "") out += ", " + epg
   var used = str(v.lastUsedText) || formatLastUsed(v.lastUsedAt)
   out += ", " + (used === "never used" ? used : "last " + used)
   return out
@@ -1456,18 +1739,24 @@ export {
   ENCODE_SENTENCE, WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts,
   urlHostWithheld, sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP,
   plainHttpLine, formAdviceLine, looksLikeHost, validateSourceUrl,
-  normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST,
-  epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE, epgOriginNotice, isUrlField,
-  sourceKey, isSourceKey, findSource, findSourceByUrl, allocateSourceKey,
-  sourceCacheDir, cutHostParams, hostPortOf, deriveLabel, labelKey,
-  labelTaken, uniqueLabel, defaultSourceLabel, validateLabel, maskQuery,
-  maskUrl, encodeQueryValue, xtreamUrls, validateXtream, pluralGroups,
-  countsLine, sameDay, formatLastUsed, formatAgo, sourceView, sourceViews,
-  sourceRows, EPG_HINT_ROW_TEXT, sourceDetail, sourceAccessibleName,
-  sourcesHeaderCount, sourcesHeaderRight, sourcesRowAccessibleName,
-  confirmLogosMessage, confirmRemoveMessage, fetchingLine,
-  PROBE_LOCAL_REFUSALS, failureFromHost, probeFailureLine, sourceTransient,
-  CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
-  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark,
-  logoHaveLess
+  normalizeSourceUrl, ADDRESS_CLASSES, ADDRESS_TABLE_V4, IPV4_PART_RE,
+  IPV6_GROUP_RE, IPV4_OCTET_RE, parseIpv4Literal, parseIpv6Groups, ipLiteral,
+  ipv4Class, ipv6Class, hostClass, hostKey, typedHttpHost, FETCH_ORIGIN_ENV,
+  FETCH_HOME_HOST_ENV, FETCH_HOME_CLASS_ENV, fetchEnvironmentFor,
+  EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST,
+  EPG_HINT_REFUSED_USERINFO, EPG_HINT_REFUSED_LOCAL, EPG_HINT_HOST_MAX,
+  epgHintVerdict, epgHintUrl, resolveEpgUrl, epgHintRowState, EPG_HINT_NOTICE,
+  epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
+  findSourceByUrl, allocateSourceKey, sourceCacheDir, cutHostParams,
+  hostPortOf, deriveLabel, labelKey, labelTaken, uniqueLabel,
+  defaultSourceLabel, validateLabel, maskQuery, maskUrl, encodeQueryValue,
+  xtreamUrls, validateXtream, pluralGroups, countsLine, sameDay,
+  formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
+  EPG_HINT_ROW_TEXT, EPG_HINT_PLAIN_ROW_TEXT, epgHintRowText, sourceDetail,
+  sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
+  sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
+  fetchingLine, PROBE_LOCAL_REFUSALS, failureFromHost, probeFailureLine,
+  sourceTransient, CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS,
+  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES,
+  logoFailedPath, logoBrokenMark, logoHaveLess
 }

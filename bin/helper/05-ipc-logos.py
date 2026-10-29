@@ -322,7 +322,7 @@ def logo_filename(url: str) -> str:
     return fnv1a32(url)
 
 
-def logo_opener(host: str) -> Any:
+def logo_opener(host: str, policy: Any = None) -> Any:
     """An opener that enforces the https rule on EVERY hop, not just the first.
 
     D-LOGO-1. `fetch_logo` checked the scheme of the URL it was handed and then
@@ -356,8 +356,19 @@ def logo_opener(host: str) -> Any:
     MAX_LOGO_BYTES bounded the final response only. The TLS context is the
     one limit_memory prepared, as make_opener's is, so the CA store is loaded
     once a run and before the memory limit rather than once a logo under it.
+
+    D-SINK-40 (2026-10-29): and never to an address on this machine or a
+    local network, on ANY hop -- the first included, because a logo URL is
+    the provider's choice. The check is the connect-time one every fetch
+    makes (DestinationPolicy.for_logos), so an https logo that redirects to
+    127.0.0.1 or 192.168.1.1, or whose name answers one, opens no socket
+    there; it is refused as `local_address` and counted with the policy
+    refusals. The residual above is narrowed to GLOBAL https hosts.
     """
     import urllib.request
+
+    if policy is None:
+        policy = DestinationPolicy.for_logos()
 
     class LogoRedirectHandler(unread_redirect_handler()):
         def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
@@ -390,7 +401,7 @@ def logo_opener(host: str) -> Any:
     # one fewer thing to reason about.
     # D-SRC-62: the connections are the stdlib's with the host-name lookup
     # bounded (bounded_handlers), as make_opener's are.
-    handlers: list[Any] = [LogoRedirectHandler(), *bounded_handlers(TLS_CONTEXT.get("https"))]
+    handlers: list[Any] = [LogoRedirectHandler(), *bounded_handlers(TLS_CONTEXT.get("https"), policy)]
     opener = urllib.request.build_opener(*handlers)
     opener.handlers = [h for h in opener.handlers
                        if h.__class__.__name__ not in ("FTPHandler", "CacheFTPHandler",

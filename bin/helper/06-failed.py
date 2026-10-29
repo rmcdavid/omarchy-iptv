@@ -614,9 +614,11 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
                 continue
             # Hosts and codes only, never the URL (rule 5).
             reasons[error.code] = reasons.get(error.code, 0) + 1
+            # D-SINK-40: `local_address` is the policy's too -- a logo, or a
+            # hop of one, aimed at this machine or a local network.
             if error.code in ("logo_scheme", "logo_userinfo", "logo_redirect",
                               "logo_type", "logo_bytes", "logo_too_large",
-                              "logo_dimensions", "logo_chunks"):
+                              "logo_dimensions", "logo_chunks", "local_address"):
                 refused += 1
             else:
                 failed += 1
@@ -711,7 +713,8 @@ def header_properties(headers: dict[str, Any], client: MpvIpc) -> list[tuple[str
     referrer = ""
     fields: list[str] = []
     for name, value in headers.items():
-        if not isinstance(name, str) or not isinstance(value, str) or not _HEADER_NAME.match(name):
+        # fullmatch, as make_channel's: a cached `Cookie\n` is no name.
+        if not isinstance(name, str) or not isinstance(value, str) or not _HEADER_NAME.fullmatch(name):
             continue
         cleaned = clean_header_value(value)
         lower = name.lower()

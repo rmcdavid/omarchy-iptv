@@ -248,9 +248,22 @@ Item {
   // every source swap (clearSourceData), so a resolved hint goes to "" on a
   // swap, and wiping epg-now.json / epg-status.json on a swap would be a new
   // defect rather than the setting-owns-its-cache rule it looks like.
+  // D-SINK-40: the active playlist's URL decides whether a hint whose
+  // LITERAL host is on this machine or a local network may be adopted (only
+  // on the playlist's own host); the helper's connect-time check decides
+  // the rest.
   readonly property var epgSource: Model.resolveEpgUrl({
     userUrl: root.activeEpgUrl,
-    hint: root.channelsMeta ? root.channelsMeta.epgUrlHint : ""
+    hint: root.channelsMeta ? root.channelsMeta.epgUrlHint : "",
+    playlistUrl: root.playlistUrl
+  })
+  // D-SINK-40: what the active Sources row says beyond "EPG from playlist":
+  // a hint that was refused, naming its host, or one adopted over plain http
+  // under an https playlist (Model.epgHintRowState).
+  readonly property var epgHintState: Model.epgHintRowState({
+    userUrl: root.activeEpgUrl,
+    hint: root.channelsMeta ? root.channelsMeta.epgUrlHint : "",
+    playlistUrl: root.playlistUrl
   })
   // The URL every EPG fetch uses. Redacted everywhere else: `epgSourceHost`
   // is what any sink gets, and the URL itself only ever reaches the helper's
@@ -259,6 +272,15 @@ Item {
   readonly property string epgUrlOrigin: root.epgSource.origin
   readonly property bool epgFromPlaylist: root.epgSource.origin === Model.EPG_ORIGIN_PLAYLIST
   readonly property string epgSourceHost: root.epgSource.host
+  // D-SINK-40: where a guide fetch's URL came from, for the helper's
+  // connect-time policy (Model.fetchEnvironmentFor): the origin above, the
+  // active playlist's URL (only its host is passed on) and the class its
+  // first hop connected to, from channels.json.
+  readonly property var epgProvenance: ({
+    origin: root.epgUrlOrigin,
+    playlistUrl: root.playlistUrl,
+    playlistClass: root.channelsMeta && root.channelsMeta.sourceClass ? String(root.channelsMeta.sourceClass) : ""
+  })
   // The one line that makes the provenance visible, for the Sources screen
   // and the source form: "" when the URL is the user's own.
   readonly property string epgOriginNotice: Model.epgOriginNotice(root.epgSource.origin)
@@ -383,7 +405,7 @@ Item {
   // `EPG from playlist` rather than `EPG` (M4-01 repair 3): the user must be
   // able to tell a URL the provider declared from one they typed, which is
   // the whole reason the hint is not persisted.
-  readonly property var sources: Model.sourceViews(root.userState, root.activeSourceKey, root.nowSec, root.sourceErrors, root.epgFromPlaylist)
+  readonly property var sources: Model.sourceViews(root.userState, root.activeSourceKey, root.nowSec, root.sourceErrors, root.epgFromPlaylist, root.epgHintState)
 
   // ---- data (read by Guide.qml / BarWidget.qml; never mutated by them)
   property var channels: []                 // Model.prepareChannels output, in the ACTIVE order
@@ -2860,8 +2882,9 @@ Item {
     // local user for the life of the fetch. Assigned immediately before the
     // run, every run: the assignment REPLACES the previous value (measured on
     // Quickshell 0.3.1, see Model.fetchEnvironment), so a stale URL cannot
-    // survive a source switch.
-    playlistProc.environment = Model.fetchEnvironment(root.playlistUrl)
+    // survive a source switch. D-SINK-40: the same one assignment says the
+    // URL is the user's, which is what lets its first hop reach a LAN host.
+    playlistProc.environment = Model.fetchEnvironmentFor(root.playlistUrl, { origin: "user" })
     playlistProc.running = true
     playlistWatchdog.restart()
   }
@@ -2887,7 +2910,10 @@ Item {
     // deliberately rather than left alone: the assignment REPLACES the value
     // the last fetch set (measured, see Model.fetchEnvironment), so the
     // offline recompute runs with no URL in its environment at all.
-    epgProc.environment = Model.fetchEnvironment(nowOnly ? "" : root.epgFetchUrl)
+    // D-SINK-40: and where the URL came from -- the user's own field or the
+    // playlist's hint -- with the playlist's host and the class its fetch
+    // connected to, which a hint on that same host may share.
+    epgProc.environment = Model.fetchEnvironmentFor(nowOnly ? "" : root.epgFetchUrl, root.epgProvenance)
     epgProc.running = true
     epgWatchdog.restart()
   }
@@ -5019,8 +5045,9 @@ Item {
     // D-SINK-8: a candidate's URL is as credentialed as the active one, so it
     // goes in the environment too, assigned immediately before the run so a
     // re-check of source B never runs with source A's URL (the assignment
-    // replaces, measured; see Model.fetchEnvironment).
-    sourceProbeProc.environment = Model.fetchEnvironment(rec.url)
+    // replaces, measured; see Model.fetchEnvironment). D-SINK-40: a URL the
+    // user is adding or re-checking is theirs.
+    sourceProbeProc.environment = Model.fetchEnvironmentFor(rec.url, { origin: "user" })
     sourceProbeProc.running = true
     probeWatchdog.restart()
   }
@@ -5495,7 +5522,10 @@ Item {
     root.pendingFreshness = false
     if (root.activeCacheDir === "") return
     var nowSec = Math.floor(Date.now() / 1000)
-    if (Model.cacheStale(root.playlistStatus, root.refreshMinutes, nowSec)) root.refreshPlaylist(true)
+    // D-SINK-41: a cache written before the destination rules is refreshed
+    // once, whatever its age (Model.cacheBeforeDestinationRules).
+    if (Model.cacheStale(root.playlistStatus, root.refreshMinutes, nowSec)
+        || Model.cacheBeforeDestinationRules(root.playlistStatus)) root.refreshPlaylist(true)
     if (root.epgFetchUrl !== "" && !epgProc.running) root.refreshEpg(true)
   }
 

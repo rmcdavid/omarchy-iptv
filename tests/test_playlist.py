@@ -310,7 +310,9 @@ class HardeningTest(unittest.TestCase):
     def test_kodiprop_manifest_headers_and_unsafe_names(self):
         text = ("#EXTM3U\n#EXTINF:-1,A\n#KODIPROP:inputstream.adaptive.manifest_headers=Authorization=Bearer%20x&bad%20name=1\n"
                 "#KODIPROP:inputstream.adaptive.license_key=http://lic.test/\nhttp://x.test/a\n")
-        result = self.parse(text)
+        # D-SINK-41: a sign-in header survives only on the playlist's own
+        # host, which is what this parse is told the list was served from.
+        result = helper.parse_m3u(text, {"host": "x.test", "local": False})
         channel = result["channels"][0]
         self.assertEqual(channel["headers"], {"Authorization": "Bearer x"})
         self.assertEqual(channel["options"], {"kodi:inputstream.adaptive.license_key": "http://lic.test/"})

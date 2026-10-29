@@ -1,0 +1,1074 @@
+{
+ "about": "D-SINK-40, D-SINK-41, D-SINK-42 (2026-10-29): where provider data may send this machine. One file, two implementations (CLAUDE.md: a rule in two languages gets one shared fixture). `hosts`: every spelling of a URL host, its class (bin/helper 01-core.py host_class / Model.hostClass; one of `classes`, or \"\" for a name only a lookup can classify) and its key (host_key / Model.hostKey: what \"the same host\" compares) -- run by tests/test_destinations.py and tests/Model.test.js. `streams`: the helper's stream gate (stream_listen_refusal and is_stream_url; the model has none) -- the python suite. `streamHosts`: the helper's parse-time host rule for a channel URL against the playlist it came from (stream_host_refused; `source` is playlist_source's shape) -- the python suite. `hints`: the model's guide-hint verdict (Model.epgHintVerdict, with the active playlist's URL) -- the node suite; the helper's connect-time check is the binding layer behind it and is observed by tests/test_destinations.py against 127.0.0.1 servers. `refusals`: the reply the real helper gives for a redirect into a local address (tests/test_destinations.py composes it from a live run and compares), and the sentence the shell shows for it (Model.statusReason; Model.failureFromHost keeps the host) -- both suites. `env` and `destinationRules` are the names and the cache version the shell and the helper share.",
+ "classes": [
+  "global",
+  "loopback",
+  "private",
+  "shared",
+  "link-local",
+  "unspecified",
+  "multicast",
+  "reserved"
+ ],
+ "destinationRules": 1,
+ "env": {
+  "url": "OMARCHY_IPTV_URL",
+  "origin": "OMARCHY_IPTV_ORIGIN",
+  "playlistHost": "OMARCHY_IPTV_PLAYLIST_HOST",
+  "playlistClass": "OMARCHY_IPTV_PLAYLIST_CLASS"
+ },
+ "hosts": [
+  {
+   "host": "127.0.0.1",
+   "class": "loopback",
+   "key": "127.0.0.1"
+  },
+  {
+   "host": "2130706433",
+   "class": "loopback",
+   "key": "127.0.0.1"
+  },
+  {
+   "host": "0x7f000001",
+   "class": "loopback",
+   "key": "127.0.0.1"
+  },
+  {
+   "host": "0177.0.0.1",
+   "class": "loopback",
+   "key": "127.0.0.1"
+  },
+  {
+   "host": "127.1",
+   "class": "loopback",
+   "key": "127.0.0.1"
+  },
+  {
+   "host": "0x7f.1",
+   "class": "loopback",
+   "key": "127.0.0.1"
+  },
+  {
+   "host": "127.0.0.1.",
+   "class": "loopback",
+   "key": "127.0.0.1"
+  },
+  {
+   "host": "localhost",
+   "class": "loopback",
+   "key": "localhost"
+  },
+  {
+   "host": "LOCALHOST",
+   "class": "loopback",
+   "key": "localhost"
+  },
+  {
+   "host": "localhost.",
+   "class": "loopback",
+   "key": "localhost"
+  },
+  {
+   "host": "a.localhost",
+   "class": "loopback",
+   "key": "a.localhost"
+  },
+  {
+   "host": "printer.localhost.",
+   "class": "loopback",
+   "key": "printer.localhost"
+  },
+  {
+   "host": "[::1]",
+   "class": "loopback",
+   "key": "0000:0000:0000:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "::1",
+   "class": "loopback",
+   "key": "0000:0000:0000:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "::ffff:127.0.0.1",
+   "class": "loopback",
+   "key": "0000:0000:0000:0000:0000:ffff:7f00:0001"
+  },
+  {
+   "host": "[::ffff:7f00:1]",
+   "class": "loopback",
+   "key": "0000:0000:0000:0000:0000:ffff:7f00:0001"
+  },
+  {
+   "host": "0.0.0.0",
+   "class": "unspecified",
+   "key": "0.0.0.0"
+  },
+  {
+   "host": "0",
+   "class": "unspecified",
+   "key": "0.0.0.0"
+  },
+  {
+   "host": "0.1.2.3",
+   "class": "unspecified",
+   "key": "0.1.2.3"
+  },
+  {
+   "host": "[::]",
+   "class": "unspecified",
+   "key": "0000:0000:0000:0000:0000:0000:0000:0000"
+  },
+  {
+   "host": "fe80::1%eth0",
+   "class": "link-local",
+   "key": "fe80:0000:0000:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "[fe80::1%25eth0]",
+   "class": "link-local",
+   "key": "fe80:0000:0000:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "169.254.169.254",
+   "class": "link-local",
+   "key": "169.254.169.254"
+  },
+  {
+   "host": "100.64.0.1",
+   "class": "shared",
+   "key": "100.64.0.1"
+  },
+  {
+   "host": "100.127.255.255",
+   "class": "shared",
+   "key": "100.127.255.255"
+  },
+  {
+   "host": "100.128.0.0",
+   "class": "global",
+   "key": "100.128.0.0"
+  },
+  {
+   "host": "100.63.255.255",
+   "class": "global",
+   "key": "100.63.255.255"
+  },
+  {
+   "host": "10.0.0.1",
+   "class": "private",
+   "key": "10.0.0.1"
+  },
+  {
+   "host": "172.16.0.1",
+   "class": "private",
+   "key": "172.16.0.1"
+  },
+  {
+   "host": "172.31.255.255",
+   "class": "private",
+   "key": "172.31.255.255"
+  },
+  {
+   "host": "172.32.0.1",
+   "class": "global",
+   "key": "172.32.0.1"
+  },
+  {
+   "host": "192.168.1.1",
+   "class": "private",
+   "key": "192.168.1.1"
+  },
+  {
+   "host": "192.168.1.1.",
+   "class": "private",
+   "key": "192.168.1.1"
+  },
+  {
+   "host": "3232235777",
+   "class": "private",
+   "key": "192.168.1.1"
+  },
+  {
+   "host": "fc00::1",
+   "class": "private",
+   "key": "fc00:0000:0000:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "fd12:3456::1",
+   "class": "private",
+   "key": "fd12:3456:0000:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "fec0::1",
+   "class": "private",
+   "key": "fec0:0000:0000:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "224.0.0.1",
+   "class": "multicast",
+   "key": "224.0.0.1"
+  },
+  {
+   "host": "239.1.1.1",
+   "class": "multicast",
+   "key": "239.1.1.1"
+  },
+  {
+   "host": "[ff02::1]",
+   "class": "multicast",
+   "key": "ff02:0000:0000:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "ff15::1",
+   "class": "multicast",
+   "key": "ff15:0000:0000:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "192.0.0.9",
+   "class": "reserved",
+   "key": "192.0.0.9"
+  },
+  {
+   "host": "192.0.2.1",
+   "class": "reserved",
+   "key": "192.0.2.1"
+  },
+  {
+   "host": "198.51.100.7",
+   "class": "reserved",
+   "key": "198.51.100.7"
+  },
+  {
+   "host": "203.0.113.9",
+   "class": "reserved",
+   "key": "203.0.113.9"
+  },
+  {
+   "host": "192.88.99.1",
+   "class": "reserved",
+   "key": "192.88.99.1"
+  },
+  {
+   "host": "198.18.0.1",
+   "class": "reserved",
+   "key": "198.18.0.1"
+  },
+  {
+   "host": "240.0.0.1",
+   "class": "reserved",
+   "key": "240.0.0.1"
+  },
+  {
+   "host": "255.255.255.255",
+   "class": "reserved",
+   "key": "255.255.255.255"
+  },
+  {
+   "host": "4294967295",
+   "class": "reserved",
+   "key": "255.255.255.255"
+  },
+  {
+   "host": "64:ff9b::7f00:1",
+   "class": "loopback",
+   "key": "0064:ff9b:0000:0000:0000:0000:7f00:0001"
+  },
+  {
+   "host": "64:ff9b::a9fe:a9fe",
+   "class": "link-local",
+   "key": "0064:ff9b:0000:0000:0000:0000:a9fe:a9fe"
+  },
+  {
+   "host": "64:ff9b::808:808",
+   "class": "global",
+   "key": "0064:ff9b:0000:0000:0000:0000:0808:0808"
+  },
+  {
+   "host": "64:ff9b:1::1",
+   "class": "reserved",
+   "key": "0064:ff9b:0001:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "2002:7f00:1::1",
+   "class": "loopback",
+   "key": "2002:7f00:0001:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "2002:c0a8:101::1",
+   "class": "private",
+   "key": "2002:c0a8:0101:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "2002:808:808::1",
+   "class": "reserved",
+   "key": "2002:0808:0808:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "2001::1",
+   "class": "reserved",
+   "key": "2001:0000:0000:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "2001:db8::1",
+   "class": "reserved",
+   "key": "2001:0db8:0000:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "3fff::1",
+   "class": "reserved",
+   "key": "3fff:0000:0000:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "5f00::1",
+   "class": "reserved",
+   "key": "5f00:0000:0000:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "::7f00:1",
+   "class": "reserved",
+   "key": "0000:0000:0000:0000:0000:0000:7f00:0001"
+  },
+  {
+   "host": "::ffff:0:7f00:1",
+   "class": "reserved",
+   "key": "0000:0000:0000:0000:ffff:0000:7f00:0001"
+  },
+  {
+   "host": "100::1",
+   "class": "reserved",
+   "key": "0100:0000:0000:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "4000::1",
+   "class": "reserved",
+   "key": "4000:0000:0000:0000:0000:0000:0000:0001"
+  },
+  {
+   "host": "8.8.8.8",
+   "class": "global",
+   "key": "8.8.8.8"
+  },
+  {
+   "host": "1.1.1.1",
+   "class": "global",
+   "key": "1.1.1.1"
+  },
+  {
+   "host": "134744072",
+   "class": "global",
+   "key": "8.8.8.8"
+  },
+  {
+   "host": "2606:4700:4700::1111",
+   "class": "global",
+   "key": "2606:4700:4700:0000:0000:0000:0000:1111"
+  },
+  {
+   "host": "[2a00:1450::200e]",
+   "class": "global",
+   "key": "2a00:1450:0000:0000:0000:0000:0000:200e"
+  },
+  {
+   "host": "example.com",
+   "class": "",
+   "key": "example.com"
+  },
+  {
+   "host": "tv.example.test",
+   "class": "",
+   "key": "tv.example.test"
+  },
+  {
+   "host": "tvheadend.home.arpa",
+   "class": "",
+   "key": "tvheadend.home.arpa"
+  },
+  {
+   "host": "1.2.3.4.5",
+   "class": "",
+   "key": "1.2.3.4.5"
+  },
+  {
+   "host": "127.0.0.1.0",
+   "class": "",
+   "key": "127.0.0.1.0"
+  },
+  {
+   "host": "256.1.1.1",
+   "class": "",
+   "key": "256.1.1.1"
+  },
+  {
+   "host": "4294967296",
+   "class": "",
+   "key": "4294967296"
+  },
+  {
+   "host": "08.1.1.1",
+   "class": "",
+   "key": "08.1.1.1"
+  },
+  {
+   "host": "0x100.0.0.1",
+   "class": "",
+   "key": "0x100.0.0.1"
+  },
+  {
+   "host": "1e3",
+   "class": "",
+   "key": "1e3"
+  },
+  {
+   "host": "1..1",
+   "class": "",
+   "key": "1..1"
+  },
+  {
+   "host": "::ffff:01.2.3.4",
+   "class": "",
+   "key": "::ffff:01.2.3.4"
+  },
+  {
+   "host": "1::2::3",
+   "class": "",
+   "key": "1::2::3"
+  }
+ ],
+ "streams": [
+  {
+   "url": "http://stream.example.test/x.m3u8",
+   "listen": "",
+   "stream": true
+  },
+  {
+   "url": "udp://@239.1.1.1:1234",
+   "listen": "",
+   "stream": true
+  },
+  {
+   "url": "udp://239.1.1.1:1234",
+   "listen": "",
+   "stream": true
+  },
+  {
+   "url": "rtp://@239.0.0.2:5004",
+   "listen": "",
+   "stream": true
+  },
+  {
+   "url": "udp://@[ff15::1]:1234",
+   "listen": "",
+   "stream": true
+  },
+  {
+   "url": "udp://@0xef010101:1234",
+   "listen": "",
+   "stream": true
+  },
+  {
+   "url": "udp://0.0.0.0:1234",
+   "listen": "multicast_only",
+   "stream": false
+  },
+  {
+   "url": "udp://[::]:1234",
+   "listen": "multicast_only",
+   "stream": false
+  },
+  {
+   "url": "udp://127.0.0.1:1234",
+   "listen": "multicast_only",
+   "stream": false
+  },
+  {
+   "url": "udp://192.168.1.10:5000",
+   "listen": "multicast_only",
+   "stream": false
+  },
+  {
+   "url": "rtp://0.0.0.0:5004",
+   "listen": "multicast_only",
+   "stream": false
+  },
+  {
+   "url": "rtp://127.0.0.1:5004",
+   "listen": "multicast_only",
+   "stream": false
+  },
+  {
+   "url": "udp://iptv.example.test:1234",
+   "listen": "multicast_only",
+   "stream": false
+  },
+  {
+   "url": "srt://0.0.0.0:9000?mode=listener",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "srt://relay.example.test:9000?mode=rendezvous",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "srt://relay.example.test:9000?mode=Listener",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "srt://relay.example.test:9000?mode=",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "srt://relay.example.test:9000?streamid=live",
+   "listen": "",
+   "stream": true
+  },
+  {
+   "url": "srt://relay.example.test:9000?mode=caller",
+   "listen": "",
+   "stream": true
+  },
+  {
+   "url": "srt://relay.example.test:9000#?mode=listener",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "udp://@239.1.1.1:1234?localaddr=192.168.1.5",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "udp://192.168.1.10:5000?localport=53317",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "srt://198.51.100.1:9000?mode=rendezvous&localport=53317",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "rtp://@239.0.0.2:5004?localrtpport=5006",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "rtmp://live.example.test/app?listen=1",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "rtmp://live.example.test/app?rtmp_listen=1",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "rtsp://cam.example.test/x?rtsp_flags=listen",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "rtsp://cam.example.test/x?listen",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "http://h.test/x.ts?reuse=1",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "https://h.test/x?LocalPort=1",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "http://h.test/x?loc%61lport=1",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "http://h.test/x?token=a&reuse_socket=1",
+   "listen": "listener",
+   "stream": false
+  },
+  {
+   "url": "http://h.test/x?listening=1",
+   "listen": "",
+   "stream": true
+  },
+  {
+   "url": "http://h.test/x?mode=listener",
+   "listen": "",
+   "stream": true
+  },
+  {
+   "url": "http://h.test/x?token=listen",
+   "listen": "",
+   "stream": true
+  },
+  {
+   "url": "ftp://h.test/x",
+   "listen": "",
+   "stream": false
+  },
+  {
+   "url": "http:///x",
+   "listen": "",
+   "stream": false
+  }
+ ],
+ "streamHosts": [
+  {
+   "url": "http://192.168.1.1/cgi-bin/reboot.cgi",
+   "source": {
+    "host": "provider.example.test",
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "http://127.0.0.1:631/admin",
+   "source": {
+    "host": "provider.example.test",
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "http://[::1]:8080/x",
+   "source": {
+    "host": "provider.example.test",
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "http://169.254.169.254/latest",
+   "source": {
+    "host": "provider.example.test",
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "http://localhost/x",
+   "source": {
+    "host": "provider.example.test",
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "http://2130706433/x",
+   "source": {
+    "host": "provider.example.test",
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "http://[::ffff:7f00:1]/x",
+   "source": {
+    "host": "provider.example.test",
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "http://100.64.0.1/x",
+   "source": {
+    "host": "provider.example.test",
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "rtsp://10.0.0.5/live",
+   "source": {
+    "host": "provider.example.test",
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "http://224.0.0.1/x",
+   "source": {
+    "host": "provider.example.test",
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "srt://0.0.0.0:9000",
+   "source": {
+    "host": "provider.example.test",
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "http://stream.example.test/x",
+   "source": {
+    "host": "provider.example.test",
+    "local": false
+   },
+   "refused": false
+  },
+  {
+   "url": "http://8.8.8.8/x",
+   "source": {
+    "host": "provider.example.test",
+    "local": false
+   },
+   "refused": false
+  },
+  {
+   "url": "udp://@239.1.1.1:1234",
+   "source": {
+    "host": "provider.example.test",
+    "local": false
+   },
+   "refused": false
+  },
+  {
+   "url": "http://192.168.1.20:5004/auto/v1",
+   "source": {
+    "host": "192.168.1.5",
+    "local": true
+   },
+   "refused": false
+  },
+  {
+   "url": "http://127.0.0.1:9981/stream",
+   "source": {
+    "host": "192.168.1.5",
+    "local": true
+   },
+   "refused": false
+  },
+  {
+   "url": "http://192.168.1.20:5004/auto/v1",
+   "source": {
+    "host": "192.168.1.5",
+    "local": false
+   },
+   "refused": true
+  },
+  {
+   "url": "http://192.168.1.5:9981/stream/1",
+   "source": {
+    "host": "192.168.1.5",
+    "local": false
+   },
+   "refused": false
+  },
+  {
+   "url": "http://192.168.1.20:5004/auto/v1",
+   "source": {
+    "host": "",
+    "local": true
+   },
+   "refused": false
+  },
+  {
+   "url": "http://127.1:8080/x",
+   "source": {
+    "host": "127.0.0.1",
+    "local": false
+   },
+   "refused": false
+  },
+  {
+   "url": "http://localhost:8080/x",
+   "source": {
+    "host": "127.0.0.1",
+    "local": false
+   },
+   "refused": true
+  }
+ ],
+ "hints": [
+  {
+   "hint": "http://192.168.1.1/cgi-bin/luci/;stok=/locale?form=country&operation=write",
+   "playlist": "https://p.example.test/get.php?username=u&password=p",
+   "url": "",
+   "refused": "local",
+   "host": "192.168.1.1",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://127.0.0.1:631/admin?op=x",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "local",
+   "host": "127.0.0.1",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://169.254.169.254/latest/meta-data/iam/",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "local",
+   "host": "169.254.169.254",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://localhost:8080/api/shutdown",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "local",
+   "host": "localhost",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://0x7f000001/",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "local",
+   "host": "0x7f000001",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://2130706433/",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "local",
+   "host": "2130706433",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://[::1]:631/admin",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "local",
+   "host": "[::1]",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://0.0.0.0:631/",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "local",
+   "host": "0.0.0.0",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://[::ffff:7f00:1]/x",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "local",
+   "host": "[::ffff:7f00:1]",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://100.64.0.1/x",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "local",
+   "host": "100.64.0.1",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://LOCALHOST./x",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "local",
+   "host": "localhost.",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://a.localhost/x",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "local",
+   "host": "a.localhost",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://0177.0.0.1/x",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "local",
+   "host": "0177.0.0.1",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://127.1/x",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "local",
+   "host": "127.1",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://admin:admin@192.168.1.1/apply.cgi?reboot=1",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "userinfo",
+   "host": "192.168.1.1",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://user:pw@epg.example.test/x.xml",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "userinfo",
+   "host": "epg.example.test",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://epg.example.test/guide.xml",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "http://epg.example.test/guide.xml",
+   "refused": "",
+   "host": "epg.example.test",
+   "plainHttp": true
+  },
+  {
+   "hint": "http://epg.example.test/guide.xml",
+   "playlist": "http://p.example.test/x.m3u",
+   "url": "http://epg.example.test/guide.xml",
+   "refused": "",
+   "host": "epg.example.test",
+   "plainHttp": false
+  },
+  {
+   "hint": "https://epg.example.test/guide.xml.gz",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "https://epg.example.test/guide.xml.gz",
+   "refused": "",
+   "host": "epg.example.test",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://epg.example.test:8080/xmltv.php?username=u&password=p",
+   "playlist": "http://p.example.test/x.m3u",
+   "url": "http://epg.example.test:8080/xmltv.php?username=u&password=p",
+   "refused": "",
+   "host": "epg.example.test",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://192.168.1.5:9981/xmltv",
+   "playlist": "http://192.168.1.5:9981/playlist",
+   "url": "http://192.168.1.5:9981/xmltv",
+   "refused": "",
+   "host": "192.168.1.5",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://192.168.1.6:9981/xmltv",
+   "playlist": "http://192.168.1.5:9981/playlist",
+   "url": "",
+   "refused": "local",
+   "host": "192.168.1.6",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://127.1:8080/epg",
+   "playlist": "http://127.0.0.1:8080/pl",
+   "url": "http://127.1:8080/epg",
+   "refused": "",
+   "host": "127.1",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://localhost:8080/epg",
+   "playlist": "http://127.0.0.1:8080/pl",
+   "url": "",
+   "refused": "local",
+   "host": "localhost",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://192.168.1.5:9981/xmltv",
+   "playlist": "/home/u/lists/tv.m3u",
+   "url": "",
+   "refused": "local",
+   "host": "192.168.1.5",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://192.168.1.5:9981/xmltv",
+   "playlist": "",
+   "url": "",
+   "refused": "local",
+   "host": "192.168.1.5",
+   "plainHttp": false
+  },
+  {
+   "hint": "http://tvh.lan:9981/xmltv",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "http://tvh.lan:9981/xmltv",
+   "refused": "",
+   "host": "tvh.lan",
+   "plainHttp": true
+  },
+  {
+   "hint": "https://tvh.lan:9981/xmltv",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "https://tvh.lan:9981/xmltv",
+   "refused": "",
+   "host": "tvh.lan",
+   "plainHttp": false
+  },
+  {
+   "hint": "file:///etc/passwd",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "",
+   "host": "",
+   "plainHttp": false
+  },
+  {
+   "hint": "/etc/passwd",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "",
+   "host": "",
+   "plainHttp": false
+  },
+  {
+   "hint": "",
+   "playlist": "https://p.example.test/x.m3u",
+   "url": "",
+   "refused": "",
+   "host": "",
+   "plainHttp": false
+  }
+ ],
+ "refusals": [
+  {
+   "id": "redirect",
+   "reply": {
+    "ok": false,
+    "kind": "playlist",
+    "sourceHost": "127.0.0.1",
+    "error": {
+     "code": "local_address",
+     "message": "playlist: 127.0.0.2 is an address on this machine or a local network that a redirect chose; not contacted"
+    }
+   },
+   "reason": "Refused a local address",
+   "line": "Refused a local address from 127.0.0.1"
+  },
+  {
+   "id": "hint",
+   "reply": {
+    "ok": false,
+    "kind": "epg",
+    "sourceHost": "127.0.0.1",
+    "error": {
+     "code": "local_address",
+     "message": "EPG: 127.0.0.1 is an address on this machine or a local network that the playlist chose; not contacted"
+    }
+   },
+   "reason": "Refused a local address",
+   "line": "Refused a local address from 127.0.0.1"
+  }
+ ]
+}

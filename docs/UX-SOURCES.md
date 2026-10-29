@@ -1375,6 +1375,28 @@ List order (SR32): the active source first, then by `lastUsedAt` descending,
 then never-used sources in the order they were added.
 | detail, narrow | `active` (if any), `used ...` / `never used`, then the segments above |
 
+**[2026-10-29, D-SINK-40: the guide segment of the ACTIVE row, when the
+user set no guide URL of their own.]** The playlist's `url-tvg` hint is
+adopted only under the owner's destination policy (ARCHITECTURE-SOURCES
+section 6, item 7), and the segment says which way it went. One literal per
+case, the same words to a screen reader (`Model.epgHintRowText`, read by
+`Model.sourceDetail` and `Model.sourceAccessibleName`); `<host>` is the
+hint's host and nothing else of it -- no userinfo, port, path or query --
+cut at 253 characters:
+
+| The hint | Segment |
+|---|---|
+| adopted | `EPG from playlist` (M4-01, unchanged) |
+| adopted, `http://` under an `https://` playlist | `EPG from playlist over plain http` -- D-SINK-14's disclosure where the user cannot type it (PO-5: told, not refused) |
+| refused: its literal host is on this machine or a local network (loopback, private, link-local, CGNAT, unspecified, reserved, multicast, `localhost`, in any spelling) and is not the playlist's own | `EPG from playlist not used: <host> is a local address` |
+| refused: it carries a user name or password | `EPG from playlist not used: its address for <host> carries a password` |
+
+Not an error (SR26 stands: rows carry no failure text) but a fact about the
+row, like `EPG from playlist`: nothing was fetched, and typing the URL into
+the source's EPG field is the way to use it, which the user's own value
+always wins. A hint whose NAME resolves to a local address cannot be known
+here; its guide fetch fails with the reason below (5.5).
+
 ### 5.3 Footer
 
 | Mode / state | Status (left) | Hints (right) |
@@ -1475,7 +1497,7 @@ question, open).
 |---|---|
 | fetching, URL | `Fetching from tv.example.net...` |
 | fetching, path | `Reading the file...` |
-| failed, URL | `<reason> from <host>` with `<reason>` from the shipped `Model.statusReason`: `HTTP 403 Forbidden`, `HTTP 404 Not Found`, `HTTP 503 Service Unavailable`, `Could not resolve host`, `Connection refused`, `Timed out`, `TLS error`, `Network error`, `Not an M3U playlist`, `Playlist has no channels`, `Source too large`, `Unsafe redirect` **[Amended 2026-10-27, D-SRC-71 and D-SRC-73: a failure on THIS machine is `<reason>` alone, with no `from <host>`, because the provider had no part in it -- R28e's rule for the plugin's own refusals, extended by the owner to a failure of its own helper (D-SRC-71). The local reasons: `Could not write the cache` (`cache_unwritable`), `Helper failed unexpectedly` (`internal`), `Helper timed out` (`helper_timeout`, the probe's watchdog), `Helper produced no output` (`no_output`), `Helper command not implemented` (`not_implemented`), `Plugin files damaged - reinstall the plugin` (`helper_damaged`, with the damaged part's name in parentheses when it has a part's shape), and since D-SRC-73 `A folder the plugin uses is a broken link or not a folder` (`folder_unusable`: the source's cache folder is a symbolic link to nothing, or not a folder; the helper's message names the path, which this line never shows). The probe's result now carries its `code` (`Service.handleProbeExit`, `Model.statusCode`); `Model.probeFailureLine` composes through `Model.failureFromHost`, and `PROBE_LOCAL_REFUSALS` in model/sources.mjs is the one list both this line and the refresh empty state (UX.md 6.3) read. The list also holds `runtime_unwritable` (D-PLY-30), which this line never receives. Every code the fetch answers for the provider's side -- each HTTP status, `network`, `timeout`, `too_large`, `unsafe_redirect`, `bad_gzip`, `not_a_playlist`, `empty_playlist` -- keeps `from <host>`.]** |
+| failed, URL | `<reason> from <host>` with `<reason>` from the shipped `Model.statusReason`: `HTTP 403 Forbidden`, `HTTP 404 Not Found`, `HTTP 503 Service Unavailable`, `Could not resolve host`, `Connection refused`, `Timed out`, `TLS error`, `Network error`, `Not an M3U playlist`, `Playlist has no channels`, `Source too large`, `Unsafe redirect`, `Refused a local address` (**[2026-10-29, D-SINK-40]** `local_address`: a redirect, the playlist's guide hint or a logo aimed at an address on this machine or a local network, which the helper refuses before connecting -- the provider's choice, so it keeps `from <host>`, and the helper's message, which the journal keeps, names the refused host) **[Amended 2026-10-27, D-SRC-71 and D-SRC-73: a failure on THIS machine is `<reason>` alone, with no `from <host>`, because the provider had no part in it -- R28e's rule for the plugin's own refusals, extended by the owner to a failure of its own helper (D-SRC-71). The local reasons: `Could not write the cache` (`cache_unwritable`), `Helper failed unexpectedly` (`internal`), `Helper timed out` (`helper_timeout`, the probe's watchdog), `Helper produced no output` (`no_output`), `Helper command not implemented` (`not_implemented`), `Plugin files damaged - reinstall the plugin` (`helper_damaged`, with the damaged part's name in parentheses when it has a part's shape), and since D-SRC-73 `A folder the plugin uses is a broken link or not a folder` (`folder_unusable`: the source's cache folder is a symbolic link to nothing, or not a folder; the helper's message names the path, which this line never shows). The probe's result now carries its `code` (`Service.handleProbeExit`, `Model.statusCode`); `Model.probeFailureLine` composes through `Model.failureFromHost`, and `PROBE_LOCAL_REFUSALS` in model/sources.mjs is the one list both this line and the refresh empty state (UX.md 6.3) read. The list also holds `runtime_unwritable` (D-PLY-30), which this line never receives. Every code the fetch answers for the provider's side -- each HTTP status, `network`, `timeout`, `too_large`, `unsafe_redirect`, `bad_gzip`, `not_a_playlist`, `empty_playlist` -- keeps `from <host>`.]** |
 | failed, path | `<reason>` alone: `File not found`, `Path not allowed`, `Not an M3U playlist`, `Playlist has no channels` |
 | refused at the commit: another program took the last of the 50 places while the probe ran (round 17, R27c, D-SRC-41) | `Sources is full (50) · remove one first` (the `too_many` sentence through `Model.probeFailureLine`); nothing is recorded and the probe's cache directory is removed. Until R27 the 51st record was committed and the next start's parse dropped it silently. [Round 18, 2026-10-20, R28e: no host. Until R28e the line read `Sources is full (50) · remove one first from <host>`, as if the user should remove one from the provider (round 1's review: `... from 127.0.0.1`). The probe result now carries the refusal's `code`, and a result whose code is one the plugin refuses itself -- `too_many`, `state_unreadable`, `unknown_source` (`PROBE_LOCAL_REFUSALS` in model/sources.mjs) -- reads its sentence alone, so the sibling refusal from the same commit reads `state.json could not be read · nothing is saved until it can be`. A fetch failure keeps `from <host>` (the row above)] |
 | cancelled | no line; the form thaws |
