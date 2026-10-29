@@ -2206,6 +2206,20 @@ what it lets into channels.json and what it lets through `player_target`.
   host is the playlist's own. A local FILE has no host, so its channels keep
   none of them -- the owner's rule read literally, and raised as a decision
   request by the lane.
+- **No control character, and a header name read whole (the lane's
+  recheck, 2026-10-29).** The gate reads a URL's host with `urlsplit`; the
+  player reads the URL after the helper's own JSON IPC `loadfile`, where
+  mpv decodes a `\u0000` and ends the string at it. So a NUL after the host
+  gave the two of them different hosts, and every rule above read the one
+  the player never used (measured through the shipping `playlist` verb and
+  `apply_channel` in an unprivileged network namespace: the loopback server
+  received the list's sign-in headers, and a udp form bound 0.0.0.0). Any
+  C0, DEL or C1 character now makes a line no stream URL, at parse time and
+  at play time (`stream_form_ok`, `stream_entry_refusal`), counted with the
+  `unsupported URL scheme` entries. And `_HEADER_NAME` is applied with
+  `fullmatch` at both its readers, because `re.match` let `$` match before a
+  final line break: `Cookie%0A` decoded to a `Cookie\n` the sign-in rule,
+  which compares names exactly, did not see.
 
 ### 19.2 What the gate cannot reach, stated exactly
 
