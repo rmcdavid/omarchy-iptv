@@ -187,7 +187,24 @@
 # so a refusal that started nothing signals nothing, least of all the process
 # holding a port this run refused to take.
 #
+# `--windowless` (D-SINK-43..46, 2026-10-29) runs W1..W10 and C1..C2 and
+# stops: tests/tls_pins_rig.py (dev branch), the same attacker's-side view with
+# NO window, shell, cage or harness -- mpv with `--vo=null --ao=null`, no
+# DISPLAY, WAYLAND_DISPLAY or session bus, a core limit of 0, a private HOME
+# and XDG tree and a `--config-dir` naming the case's own mpv.conf, the argv
+# composed by the tree's own filter_mpv_args + mpv_launch_argv and the channel
+# loaded by its own apply_channel. It adds the shapes S1..S6 never had: an
+# HLS channel (the D-SINK-15 negative was measured on a direct stream, the one
+# shape where it holds), an attacker that answers libavformat's reopen with a
+# certificate valid for its own name, and the user's mpv.conf as a route --
+# per-protocol and profile-cond profiles, the watch history -- plus select's
+# subtitle-line fork and an ADOPTED player started by the `--pre-pin <ref>`
+# tree (default v0.15.0). `--baseline <ref>` runs it against that ref's
+# helper: W1..W10 red, C1..C2 green, which is the proof each check can fail.
+# Ports 8780-8784. A machine without mpv, ffmpeg or openssl answers 77.
+#
 #   ./scripts/dev-harness/tls-scenario.sh --rig-only
+#   ./scripts/dev-harness/tls-scenario.sh --windowless [--baseline <ref>] [--pre-pin <ref>]
 #   ./scripts/dev-harness/tls-scenario.sh
 #   ./scripts/dev-harness/tls-scenario.sh --baseline <pre-fix ref>
 #   ./scripts/dev-harness/tls-scenario.sh --pre-tls <ref>   (S6's stage tree)
@@ -252,6 +269,11 @@ PLUGIN_ROOT=${OMARCHY_IPTV_PLUGIN_ROOT:-$ROOT}
 PRE_TLS_REF="b731882^"
 PRE_TLS_SHA=""
 PRE_DIR=""
+# --windowless's adopted-player case (W9): the tree whose OWN argv starts the
+# player the tree under test then adopts. v0.15.0 is the last release before
+# the pin block.
+PRE_PIN_REF="v0.15.0"
+PIN_DIR=""
 # The paced body S6's "did it keep being fed" question is read from, and the
 # ONLY paths that get it: the stage channel the pre-update player holds open,
 # and the rig's own control path. Everything S1..S5 fetch keeps the single
@@ -293,7 +315,11 @@ while (($# > 0)); do
     --pre-tls)
       [[ ${2:-} == "" || ${2:-} == -* ]] && { echo "--pre-tls needs a git ref, and got '${2:-}'" >&2; exit 2; }
       PRE_TLS_REF=$2; shift ;;
+    --pre-pin)
+      [[ ${2:-} == "" || ${2:-} == -* ]] && { echo "--pre-pin needs a git ref, and got '${2:-}'" >&2; exit 2; }
+      PRE_PIN_REF=$2; shift ;;
     --rig-only) MODE=rig ;;
+    --windowless) MODE=windowless ;;
     *) echo "unknown option: $1" >&2; exit 2 ;;
   esac
   shift
@@ -330,7 +356,15 @@ if [[ -n $BASELINE ]]; then
   TREE_LINE="== baseline tree $BASELINE ($(git -C "$ROOT" rev-parse --short "$BASELINE")) exported"
 fi
 PRE_TLS_LINE=""
-if [[ $MODE != rig ]]; then
+if [[ $MODE == windowless ]]; then
+  PIN_DIR=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-iptv-tls-prepin.XXXXXX") || exit 2
+  if ! git -C "$ROOT" archive "$PRE_PIN_REF" | tar -x -C "$PIN_DIR" || [[ ! -f $PIN_DIR/bin/omarchy-iptv ]]; then
+    echo "could not export a helper from the --pre-pin tree $PRE_PIN_REF" >&2
+    rm -rf "$PIN_DIR"
+    exit 2
+  fi
+  PRE_TLS_LINE="== W9 stage tree $PRE_PIN_REF ($(git -C "$ROOT" rev-parse --short "$PRE_PIN_REF^{commit}")) exported; its own helper composes the adopted player's argv"
+elif [[ $MODE != rig ]]; then
   PRE_DIR=$(mktemp -d "${TMPDIR:-/tmp}/omarchy-iptv-tls-pretls.XXXXXX") || exit 2
   if ! git -C "$ROOT" archive "$PRE_TLS_REF" | tar -x -C "$PRE_DIR"; then
     echo "could not export the --pre-tls tree $PRE_TLS_REF" >&2
@@ -374,6 +408,7 @@ cleanup() {
   ours "$OWN_CHILD" && qa_stop_pid "$OWN_CHILD" 5 "unconfirmed server child"
   [[ -n $EXPORT_DIR && -d $EXPORT_DIR ]] && rm -rf "$EXPORT_DIR"
   [[ -n $PRE_DIR && -d $PRE_DIR ]] && rm -rf "$PRE_DIR"
+  [[ -n $PIN_DIR && -d $PIN_DIR ]] && rm -rf "$PIN_DIR"
   [[ -n $WORK && -d $WORK ]] && rm -rf "$WORK"
   return 0
 }
@@ -386,7 +421,7 @@ qa_transcript_start tls || exit 2
 [[ -n $PRE_TLS_LINE ]] && echo "$PRE_TLS_LINE"
 export OMARCHY_IPTV_PLUGIN_ROOT="$PLUGIN_ROOT"
 echo "== mode $MODE   plugin tree $PLUGIN_ROOT   scratch $SCRATCH"
-echo "== the attacker is https://127.0.0.1:$PORT_SELF (self-signed), the provider is https://127.0.0.1:$PORT_CA (signed by this run's CA)"
+[[ $MODE != windowless ]] && echo "== the attacker is https://127.0.0.1:$PORT_SELF (self-signed), the provider is https://127.0.0.1:$PORT_CA (signed by this run's CA)"
 
 ok()  { printf 'PASS %s\n' "$*"; pass=$((pass + 1)); }
 bad() { printf 'FAIL %s\n' "$*"; fail=$((fail + 1)); }
@@ -414,6 +449,16 @@ chmod 0700 "$WORK"
 # for a reason that has nothing to do with TLS, so refuse it here and say so.
 qa_safe_path "$WORK" || { echo "the work directory $WORK is not a plain absolute path; set TMPDIR somewhere simpler" >&2; exit 2; }
 [[ $WORK != *" "* ]] || { echo "the work directory $WORK carries a space; mpvArgs is whitespace-split, so set TMPDIR somewhere simpler" >&2; exit 2; }
+if [[ $MODE == windowless ]]; then
+  # The whole arm is the rig's: it starts and stops its own servers (children
+  # it holds the pids of), its own players (the same) and nothing of the
+  # harness, so nothing above this needs reaping and the EXIT trap removes
+  # WORK and the stage tree.
+  python3 -I "$ROOT/tests/tls_pins_rig.py" --tree "$PLUGIN_ROOT" --pre-pin "$PIN_DIR" --work "$WORK"
+  rig_rc=$?
+  (( rig_rc == 77 )) && exit 77
+  exit "$rig_rc"
+fi
 REQLOG="$WORK/hits.log"
 PLAYLIST="$WORK/tls.m3u"
 MPV_CONF_DIR="$WORK/mpv"

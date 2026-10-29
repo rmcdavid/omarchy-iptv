@@ -375,7 +375,7 @@ One place they can escape that, worth knowing, and one that used to:
 | `epgUrl` | string | `""` | **Not a setting any more**, on the same terms as `playlistUrl`: read once, at the first start on this version, and attached to the source that becomes active then (removed, with a `Bar setting removed` notification, when there is none); ignored and removed after that. A source's guide-data URL is set in the add or edit form on the Sources screen (`a`, `e`), and cleared there |
 | `sourceKey` | string | `""` | written by the plugin, not by you: the short code naming the active source, the one that names its cache directory under `~/.cache/omarchy-iptv/sources/`. The plugin's own `state.json` is the authority; this is a mirror it falls back to only when that file names no source, and a code that names none of your sources is ignored. It is not among the plugin's declared settings, so `omarchy bar set` shows no help for it, though it writes it like any other key |
 | `refreshMinutes` | integer 15-1440 | `360` | playlist and EPG refresh interval (providers rate-limit playlist downloads; keep it high) |
-| `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Options that would write your stream address somewhere durable are refused, and so is `--load-scripts`: the plugin's player loads no mpv scripts, because one of them publishes your playlist URL on the desktop message bus. `--demuxer-cache-unlink-files` is refused too, because with it turned off a copy of the stream can outlive the player at a path nobody listed, and `--cache-on-disk` is accepted with a warning in the guide's footer, because it writes the stream to your disk for as long as a channel plays. The one lever on how far back you can rewind is `--demuxer-max-back-bytes`, which is deliberately not refused: it costs RAM, about 35 to 80 MiB per minute of history at the bitrates this was measured on (4.7 to 10 Mbps), so thirty minutes is 1 to 2.4 GiB per player, and the plugin does not set it for you. `--tls-verify` is refused as well, because the player must check your provider's certificate; a provider whose certificate is self-signed or signed by a private CA is served by `--tls-ca-file=/path/to/ca.pem`, which is accepted -- see below. The player accepts a software renderer by default (`--gpu-sw=yes` is among its own options, so it comes up on a virtual machine or any other compositor with no hardware GL or Vulkan to give it, where mpv 0.41.0 otherwise aborts); `--gpu-sw=no` turns that off, since your tokens come after the plugin's |
+| `mpvArgs` | string | `""` | extra mpv options, space-separated `--key=value` tokens, e.g. `--profile=low-latency --hwdec=auto-safe`. Every option the installed mpv offers has been classified, and the ones that would write your stream address or the stream somewhere durable, draw the address on screen, run commands or load a script, load a playlist of their own, or send your provider's headers to a second address are refused. `--script-opts` is the exception, kept for the built-in scripts' settings: it is warned about when it names yt-dlp, and a setting that changes the on-screen controller's title text can still put your stream address on screen. So is `--load-scripts`: the player loads none of your mpv scripts, because one of them publishes your playlist URL on the desktop message bus; mpv's own built-in on-screen controller, console and statistics stay, and its select menu is turned off, because one of its keys hands your stream address to a second program on a command line other accounts can read. The plugin also sets a few options itself AFTER yours, so neither a token nor your own mpv config can switch them back: the script list, startup commands, mpv's conditional auto-profiles, the select menu, watch history, the log file, the resume folder, unsafe nested playlist entries and the certificate checks below. Your mpv config is still read for everything else. `--demuxer-cache-unlink-files` is refused too, because with it turned off a copy of the stream can outlive the player at a path nobody listed, and `--cache-on-disk` is accepted with a warning in the guide's footer, because it writes the stream to your disk for as long as a channel plays; so is `--http-proxy`, because a proxy receives the whole address of a plain-`http` stream and its headers. The one lever on how far back you can rewind is `--demuxer-max-back-bytes`, which is deliberately not refused: it costs RAM, about 35 to 80 MiB per minute of history at the bitrates this was measured on (4.7 to 10 Mbps), so thirty minutes is 1 to 2.4 GiB per player, and the plugin does not set it for you. `--tls-verify` is refused as well, because the player must check your provider's certificate, and so is a `--demuxer-lavf-o` token that names a TLS setting (one without, such as `live_start_index=-1`, is kept); a provider whose certificate is self-signed or signed by a private CA is served by `--tls-ca-file=/path/to/ca.pem`, which is accepted -- see below. The player accepts a software renderer by default (`--gpu-sw=yes` is among its own options, so it comes up on a virtual machine or any other compositor with no hardware GL or Vulkan to give it, where mpv 0.41.0 otherwise aborts); `--gpu-sw=no` turns that off, since your tokens come after the plugin's |
 | `showChannelName` | boolean | `true` | show the channel name next to the TV glyph on horizontal bars |
 | `barLabelMaxWidth` | integer 60-600 | `180` | width (px) at which the bar label is cut with an ellipsis |
 | `maxRecents` | integer 1-50 | `10` | size of the Recent list |
@@ -396,7 +396,13 @@ links that are not direct streams, hands the full address to a separate
 program, and that program puts it on its own command line where other local
 accounts can read it for as long as it runs. The plugin keeps the option
 available because it is the only way some sources work. Use it knowing the
-cost, and prefer a direct stream address when you have one.
+cost, and prefer a direct stream address when you have one. `--http-proxy`
+is the other one the footer warns about: a proxy you name receives the whole
+address of a plain-`http` stream, credentials included, and your provider's
+headers. And the classification covers what you type here, not everything
+your own mpv config may say: an option the plugin does not set itself, such
+as a recording or an on-screen message you configured there, still applies
+in this player, because it is your configuration.
 
 **The player checks your provider's certificate.** Up to and including 0.12.1
 it did not. mpv leaves its own `--tls-verify` off unless something turns it
@@ -408,10 +414,17 @@ now. Verification is set in the player's own options and set AGAIN as the very
 last option, after yours, so an ordinary token of yours cannot switch it back
 off -- not `--tls-verify=no`, and not a `--profile` naming a profile in your
 own mpv config that turns it off, which is why that second one is there and is
-not a duplicate to be tidied away. One kind of token the last word cannot
-reach, because it configures the media library rather than the player:
-`--stream-lavf-o` forwards settings straight through, and it is refused for
-that reason.
+not a duplicate to be tidied away. Two kinds of token the last word cannot
+reach on its own, because they configure the media library rather than the
+player: `--stream-lavf-o` forwards settings straight through and is refused,
+and `--demuxer-lavf-o`, whose settings reach the certificate check of every
+piece of an HLS or DASH stream, is refused when it names a TLS setting -- up
+to and including 0.15.0 it was not, and the plugin's own security review
+found it able to turn the check off for HLS. The plugin also sets that
+library's own check last and reads it back before every channel. Your own
+mpv config cannot undo it either: a conditional auto-profile (`profile-cond`) is not loaded in this
+player at all, and a per-protocol profile such as `[protocol.https]` cannot
+replace what the plugin sets on its command line.
 
 `--tls-verify` and `--stream-lavf-o` are refused rather than quietly
 overridden, and the refusal is shown to you: the guide's one footer warning
@@ -426,7 +439,11 @@ verification on inside it and then tunes your channel again, because the
 stream already open was opened without it -- so expect one short rebuffer,
 once, and nothing for you to do. If that player will not accept the change it
 is stopped instead of being handed your stream address again: press Enter on
-the channel and a fresh, verified player starts.
+the channel and a fresh, verified player starts. The same happens to a player
+started by 0.15.0 or earlier whose mpv config holds a per-protocol or
+per-extension profile that touches the certificate settings, because nothing
+can stop that profile applying to a player that was not started with the
+new settings; every other player from before the update rebuffers once.
 
 The cost, because it is not free for everyone: a provider whose certificate is
 self-signed, or signed by a CA your system does not already trust, stops

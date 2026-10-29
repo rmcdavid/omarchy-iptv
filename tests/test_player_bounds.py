@@ -226,7 +226,16 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None):
                 raise TimeoutError()
             data, error = None, "success"
             if command[0] == "get_property":
-                data = {helper.MPV_TLS_VERIFY_PROP: True, helper.MPV_STREAM_OPTS_PROP: {}, "playlist-count": 0}.get(command[1])
+                # The spawned player is one THIS release launched, so it reads
+                # what the pin block made it (2026-10-29): the demuxer map
+                # holding the pinned tls_verify, auto-profiles off (mpv answers
+                # that `no` as False), and every option a per-file profile
+                # could undo set from the command line.
+                answers = {helper.MPV_TLS_VERIFY_PROP: True, helper.MPV_STREAM_OPTS_PROP: {}, "playlist-count": 0,
+                           helper.MPV_DEMUXER_OPTS_PROP: {"tls_verify": "1"}, helper.MPV_AUTO_PROFILES_PROP: False}
+                for option in helper.PER_FILE_TLS_OPTIONS:
+                    answers["option-info/%s/set-from-commandline" % option] = True
+                data = answers.get(command[1])
                 if data is None:
                     error = "property unavailable"
             elif command[0] == "loadfile":

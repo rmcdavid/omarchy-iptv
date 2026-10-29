@@ -84,7 +84,13 @@ MPV_RESERVED = frozenset((
     # tls-verify tokens in place: `--stream-lavf-o=tls_verify=0` PLAYED the
     # attacker's stream, as did the -add, -append and -set forms.
     # mpv_option_base strips the list suffixes, so this covers all six.
-    # `--demuxer-lavf-o` is NOT reserved: measured, it does not bypass.
+    # `--demuxer-lavf-o` is NOT reserved, but that is no longer because it
+    # "does not bypass": it DOES, for HLS and DASH (D-SINK-43, 2026-10-29),
+    # because libavformat reopens those with the demuxer's options and hands
+    # them to every segment open. It stays the user's because its other keys
+    # are real workarounds (live_start_index, http_persistent); its TLS keys
+    # are refused by filter_mpv_args (MPV_DEMUXER_TLS_WORDS), pinned by the
+    # trailing block, and read back over IPC before every load.
     "--stream-lavf-o",
     "--log-file", "--dump-stats", "--stream-record", "--save-position-on-quit",
     "--watch-later-dir", "--osd-msg1", "--osd-msg2", "--osd-msg3",
@@ -118,11 +124,94 @@ MPV_RESERVED = frozenset((
     # feature that the trailing token makes harmless. `--tls-cert-file` and
     # `--tls-key-file` are CLIENT certificates, a different thing, untouched.
     "--tls-verify",
+    # D-SINK-43..46 (owner, 2026-10-29: pin + classify). From here on the list
+    # is the `reserved` and `pinned` classes of the mpv-options.json fixture
+    # (dev branch), which classifies EVERY option of the installed mpv and is
+    # what both mirrors are pinned to; a new mpv option nobody classified turns
+    # the gate red (the mpv option guard, dev branch). Each entry's reason is in
+    # the fixture; the groups are:
+    #
+    # PINNED as well as reserved: MPV_PIN_BLOCK re-asserts each after the
+    # user's tokens, so a named profile, a plain mpv.conf line or a per-file
+    # profile cannot change it either; refusing the token is the honest half,
+    # exactly as for `--tls-verify` above.
+    "--load-auto-profiles", "--load-select", "--load-unsafe-playlists",
+    "--save-watch-history", "--input-commands", "--reset-on-next-file",
+    "--osd-playlist-entry", "--demuxer-lavf-propagate-opts",
+    # `pseudo-gui` makes mpv apply the user's [pseudo-gui] profile AFTER the
+    # command line, with nothing preserved, so it undid every pin in
+    # MPV_PIN_BLOCK (recheck, 2026-10-29: a plain mpv.conf line was enough;
+    # D-SINK-44).
+    "--player-operation-mode",
+    # An ALIAS of a reserved name is the same option (D-SINK-2's lesson in the
+    # other direction): mpv lists `--watch-later-directory` as an alias for
+    # watch-later-dir, and base-name matching cannot see that.
+    "--watch-later-directory",
+    # Durable writes of the stream or of the URL (the --stream-record class).
+    "--stream-dump", "--o", "--watch-history-path", "--ao-pcm-file", "--vo-image-outdir",
+    # Property-expanding text (siblings of --osd-msg1..3 and --term-status-msg).
+    "--osd-playing-msg", "--osd-status-msg", "--term-playing-msg", "--term-title",
+    # A file of commands: every binding can `run` a program or draw ${path},
+    # and mpv fetches it from a URL at startup (measured).
+    "--input-conf",
+    # Entries loaded before the shell: user-origin, so mpv's origin rule lets
+    # them open any protocol, and the newborn-player check
+    # (applied_by_another_client) would read them as another client's.
+    "--playlist",
+    # D-SINK-51: each opens a second address the token names and sends it the
+    # channel's PROVIDER HEADERS (measured: the collector logged the header).
+    # The aliases are the CLI spellings of the same options.
+    "--sub-files", "--audio-files", "--external-files", "--cover-art-files", "--chapters-file",
+    "--sub-file", "--audio-file", "--external-file", "--cover-art-file",
 ))
+# D-SINK-43 (and its verifyhost sibling): the words a `--demuxer-lavf-o*`
+# token may not contain. For an HLS or DASH stream libavformat reopens the URL
+# with the demuxer's options and copies them into every segment and key open,
+# so a key there configures the TLS PROTOCOL: `tls_verify=0` played the
+# attacker's segment with both --tls-verify=yes tokens in place, and
+# `verifyhost=<attacker's own name>` played it with a certificate that was
+# valid for that name -- the trailing tls_verify=1 pin cannot reach the
+# second, which is why the token is refused and not merely outvoted. A
+# substring test over the raw token, not a parse of mpv's key/value syntax:
+# FFmpeg matches option names exactly, so every spelling of a TLS key
+# (quoted, %n%-escaped, -append'ed) still carries the word, and the price is
+# refusing a token whose VALUE happens to say "verify". The binding layer is
+# the IPC read-back of the parsed map (demuxer_tls_unsafe), which no quoting
+# reaches. Every key FFmpeg's TLS protocol names that is not harmless contains
+# one of these words; the gate holds that against `ffmpeg -h protocol=tls`.
+# Mirror of Model.MPV_DEMUXER_TLS_WORDS.
+MPV_DEMUXER_TLS_WORDS = ("verify", "ca_file", "cafile", "listen", "external_sock")
+MPV_DEMUXER_OPTS = "--demuxer-lavf-o"
 # D-SINK-13, layers 1 and 2: one string, written into the argv twice on
 # purpose. Mirror of Model.MPV_TLS_VERIFY; the two literals are pinned to each
 # other by the shared player-argv.json vectors. See mpv_launch_argv.
 MPV_TLS_VERIFY = "--tls-verify=yes"
+# The trailing pin block (owner, 2026-10-29, decision 1): what a security layer
+# depends on, re-asserted AFTER the user's tokens -- the D-SINK-13 layer-2
+# shape. mpv takes the last token for an option, and a token here is also SET
+# FROM THE COMMAND LINE, which is what keeps a [protocol.*] or [extension.*]
+# profile from replacing it at file load (measured, per pin, in the five-way
+# table of ARCHITECTURE-PLAYER 4.12). The block is the `pinned` class of
+# the mpv-options.json fixture (dev branch), in this order, preceded by the one pin that
+# carries a path (`--watch-later-dir`, composed in mpv_pin_block); its last
+# element is layer 2 of D-SINK-13 and stays last. Mirror of Model.MPV_PIN_BLOCK.
+MPV_PIN_BLOCK = (
+    "--load-scripts=no",                 # D-SINK-4 against a named profile
+    "--scripts-clr",                     # an explicit script= line loads anyway
+    "--input-commands-clr",              # D-SINK-45: commands run at startup
+    "--load-auto-profiles=no",           # D-SINK-44: profile-cond beats the command line
+    "--player-operation-mode=cplayer",   # D-SINK-44: [pseudo-gui] applies after the command line
+    "--load-select=no",                  # D-SINK-46: g l forks ffmpeg with the URL
+    "--load-unsafe-playlists=no",        # D-SINK-44: mpv's origin rule for nested entries
+    "--save-watch-history=no",           # D-SINK-44: every path, durably
+    "--log-file=",                       # every URL, durably
+    "--reset-on-next-file-clr",          # D-SINK-51: the previous channel's headers
+    "--osd-playlist-entry=title",        # ${playlist} draws the URL otherwise
+    "--stream-lavf-o-clr",               # D-SINK-44: command-line-set, so no profile replaces it
+    "--demuxer-lavf-propagate-opts=yes", # the next pin reaches segments only this way
+    "--demuxer-lavf-o-append=tls_verify=1",  # D-SINK-43
+    MPV_TLS_VERIFY,                      # D-SINK-13 layer 2: LAST
+)
 # D-PLY-27 (the owner's decision, 2026-10-26): the launch argv ACCEPTS a
 # software renderer. mpv 0.41.0's automatic VO probe, on a compositor that
 # can serve no hardware GL or Vulkan context (a VM on llvmpipe, a pixman
@@ -156,6 +245,30 @@ MPV_GPU_SW = "--gpu-sw=yes"
 # Model.MPV_STREAM_OPTS_PROP.
 MPV_TLS_VERIFY_PROP = "tls-verify"
 MPV_STREAM_OPTS_PROP = "stream-lavf-o"
+# D-SINK-16's other half (2026-10-29): the properties an ADOPTED player must
+# also hold before it is handed a URL, because the launch argv of the process
+# that is running may predate the pin block. `demuxer-lavf-o` is D-SINK-43 at
+# runtime; `load-auto-profiles` is the switch for auto_profiles.lua, which
+# applies a profile-cond profile at every load over the command line and over
+# our own set_property (measured: tls-verify read false during play) -- and
+# which mpv UNLOADS when the option is set to no at runtime (measured 3 of 3
+# on a pre-pin player: the self-signed server got nothing). The two keys of
+# demuxer-lavf-o that must read "1" when present, and the ones that must be
+# absent, are FFmpeg's TLS protocol options as `ffmpeg -h protocol=tls` lists
+# them for n9.0.1; the gate holds this list against the installed FFmpeg.
+MPV_DEMUXER_OPTS_PROP = "demuxer-lavf-o"
+MPV_AUTO_PROFILES_PROP = "load-auto-profiles"
+DEMUXER_TLS_ON = frozenset(("tls_verify", "verify"))
+DEMUXER_TLS_FORBIDDEN = frozenset(("ca_file", "cafile", "verifyhost", "listen", "external_sock"))
+# The options a [protocol.*] or [extension.*] profile could set at file load,
+# AFTER the read-back, to undo the TLS layer -- harmless on a player that has
+# them set from the command line (the pin block does), and the residual on a
+# player that does not (measured: a pre-pin player with [protocol.https]
+# stream-lavf-o=tls_verify=0 in its mpv.conf read safe and then fetched from
+# the attacker). `profile` is followed, since a profile can name another.
+PER_FILE_TLS_OPTIONS = ("tls-verify", "stream-lavf-o", "demuxer-lavf-o",
+                        "demuxer-lavf-propagate-opts", "load-auto-profiles")
+PER_FILE_PROFILE_PREFIXES = ("protocol.", "extension.")
 PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "tracks", "seek")
 # Mirror of MPV_HANDOFF (model/mpv.mjs, internal to the model) and friends (PO-10, D-PLY-5). These options are
 # allowed - PO-5 keeps `--ytdl` as the documented escape hatch for links that
@@ -163,7 +276,12 @@ PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "t
 # on a SECOND program's command line, so the user is told at the moment the
 # option is in force. Pinned to the JavaScript by the `mpvHandoff` vectors in
 # the player-argv.json. fixture (dev branch)
-MPV_HANDOFF = frozenset(("--ytdl-format", "--ytdl-raw-options"))
+# D-SINK-51 (2026-10-29): `--http-proxy` joins them. For a plain-http stream
+# the proxy receives the request line -- the WHOLE credentialed URL -- and the
+# provider headers (measured: the proxy logged both); for https it receives
+# the host name only, TLS staying end to end. A real need for some users, so
+# warned, not refused.
+MPV_HANDOFF = frozenset(("--ytdl-format", "--ytdl-raw-options", "--http-proxy"))
 MPV_HANDOFF_SCRIPT_OPTS = frozenset(("--script-opts", "--script-opt"))
 MPV_YTDL_OFF = frozenset(("no", "0", "false"))
 MPV_HANDOFF_TEXT = " hands the stream address to another program"
@@ -202,11 +320,18 @@ def filter_mpv_args(tokens: list[str]) -> tuple[list[str], list[str]]:
         base = mpv_option_base(name)
         bare = "--" + name[5:] if name.startswith("--no-") else ""
         no_form = bool(bare) and (bare in MPV_RESERVED or mpv_option_base(bare) in MPV_RESERVED)
-        if not MPV_ARG_RE.match(text) or name in MPV_RESERVED or base in MPV_RESERVED or no_form:
+        if (not MPV_ARG_RE.match(text) or name in MPV_RESERVED or base in MPV_RESERVED or no_form
+                or demuxer_names_tls(base, text)):
             rejected.append(text)
         else:
             args.append(text)
     return args, rejected
+
+
+def demuxer_names_tls(base: str, token: str) -> bool:
+    """Mirror of Model.demuxerNamesTls: a `--demuxer-lavf-o*` token that names
+    a TLS setting (D-SINK-43). See MPV_DEMUXER_TLS_WORDS for why a substring."""
+    return base == MPV_DEMUXER_OPTS and any(word in token for word in MPV_DEMUXER_TLS_WORDS)
 
 
 def mpv_option_base(name: str) -> str:
@@ -325,16 +450,18 @@ def mpv_launch_argv(sock_path: str, mpv_args: list[str],
     their screenshots elsewhere can still say so: `--screenshot-dir` is not
     reserved and user tokens land after these. `--watch-later-dir` IS
     reserved, because a resume record naming a stream path has no business
-    being redirected back into $HOME.
+    being redirected back into $HOME -- and since 2026-10-29 it is pinned too,
+    because a named profile in the user's own mpv.conf moved it (measured).
 
     The two cache directories are D-PLY-10 / CL2, in the same shape and for
     the same reason: mpv's shader and ICC caches default into
     $XDG_CACHE_HOME/mpv/, outside this plugin's tree. Neither is reserved -
     both are content-free - so a user token can still point them elsewhere.
 
-    D-SINK-13 breaks the "user tokens land last" shape on purpose, for exactly
-    one option: `--tls-verify=yes` appears in the base argv AND again as the
-    final token, after the user's. See the comment on the return.
+    D-SINK-13 broke the "user tokens land last" shape on purpose for one
+    option, `--tls-verify=yes`, in the base argv AND again after the user's;
+    D-SINK-43..46 widened that tail to the whole pin block (MPV_PIN_BLOCK),
+    which still ends with that token. See the comment on the return.
     """
     where = dirs or player_dirs(sock_path)
     return [
@@ -390,7 +517,20 @@ def mpv_launch_argv(sock_path: str, mpv_args: list[str],
     # Mirror of Model.buildMpvArgv's return; pinned to it by the
     # `--profile=evil` vector in the player-argv.json fixture (dev branch),
     # whose user arguments are what make this line visible at all.
-    ] + list(mpv_args or []) + [MPV_TLS_VERIFY]
+    #
+    # D-SINK-43..46 (owner, 2026-10-29) widened the tail from one token to the
+    # pin block, on the same reasoning: every option a security layer depends
+    # on is re-asserted here, after the user's tokens, so the last word is ours
+    # over a token, a named profile and a plain mpv.conf line, and each is set
+    # from the command line, so no per-file profile replaces it. The block ends
+    # with MPV_TLS_VERIFY, so the line above still describes the last element.
+    ] + list(mpv_args or []) + mpv_pin_block(where)
+
+
+def mpv_pin_block(where: dict[str, str]) -> list[str]:
+    """Mirror of Model.mpvPinBlock: the trailing pins, the contained resume
+    folder first (a named profile moved it: measured), then MPV_PIN_BLOCK."""
+    return ["--watch-later-dir=%s" % where["watchLater"]] + list(MPV_PIN_BLOCK)
 
 
 def stop_escalation(stage: str) -> dict[str, Any]:
