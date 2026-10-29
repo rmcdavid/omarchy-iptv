@@ -772,7 +772,10 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
         if key in ("inputstream.adaptive.stream_headers", "inputstream.adaptive.manifest_headers"):
             for hname, hvalue in urllib.parse.parse_qsl(value, keep_blank_values=False):
                 cleaned = clean_header_value(hvalue)
-                if not _HEADER_NAME.match(hname):
+                # fullmatch: `$` in `re.match` also matches before a final
+                # line break, so `Cookie%0A` passed as `Cookie\n` and slipped
+                # the sign-in rule below, which compares names exactly.
+                if not _HEADER_NAME.fullmatch(hname):
                     channel_warning(warnings, bounds, "dropped header with unsafe name for %s" % name)
                 elif cleaned:
                     bounded_option(hname, cleaned, headers, bounds)

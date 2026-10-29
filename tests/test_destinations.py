@@ -614,6 +614,21 @@ class StreamGateTest(unittest.TestCase):
                 codes.append(caught.exception.code)
             self.assertEqual(codes, ["unsupported_scheme"] * (2 * len(self.CONTROL_SPLITS)))
 
+    def test_a_header_name_ending_in_a_line_break_is_no_header(self):
+        """`_HEADER_NAME` is `^...$`, and `re.match` lets `$` match before a
+        final line break, so `Cookie%0A` decoded to a name `Cookie\\n` that
+        passed the name check AND the sign-in rule, which compares the name
+        exactly, and reached the player's http-header-fields as `Cookie\\n:`.
+        The parse refuses such a name as unsafe, and so does the play-time
+        reader for a cache written before."""
+        text = ("#EXTM3U\n#EXTINF:-1,Cdn\n#KODIPROP:inputstream.adaptive.stream_headers="
+                "Cookie%0A=a&Authorization%0A=b&X-Ok=1\nhttp://cdn.example.test/x\n")
+        result = helper.parse_m3u(text, {"host": "p.example.test", "local": False})
+        self.assertEqual([c.get("headers") for c in result["channels"]], [{"X-Ok": "1"}])
+        self.assertIn("dropped header with unsafe name for Cdn", result["warnings"])
+        self.assertEqual(helper.header_properties({"User-Agent": "UA", "Cookie\n": "a", "X-Ok": "1"}, None),
+                         [("user-agent", "UA"), ("referrer", ""), ("http-header-fields", ["X-Ok: 1"])])
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -713,7 +713,8 @@ def header_properties(headers: dict[str, Any], client: MpvIpc) -> list[tuple[str
     referrer = ""
     fields: list[str] = []
     for name, value in headers.items():
-        if not isinstance(name, str) or not isinstance(value, str) or not _HEADER_NAME.match(name):
+        # fullmatch, as make_channel's: a cached `Cookie\n` is no name.
+        if not isinstance(name, str) or not isinstance(value, str) or not _HEADER_NAME.fullmatch(name):
             continue
         cleaned = clean_header_value(value)
         lower = name.lower()
