@@ -1092,6 +1092,31 @@ loopback home recorded with no port (a cache written before this) matches no
 channel, so its sign-in headers are dropped at play time until the next
 refresh records the port.
 
+**[2026-10-29, D-SINK-57's scope -- the lead's decision, following the
+owner's intent ("on this machine, only the relay's own port is the
+playlist's host"): the first of the two things above has changed.]** A
+LOOPBACK source -- its typed host is loopback, or its first hop connected
+there -- is still a local source, and its LAN-literal channels are still
+listed (a relay passing an HDHomeRun or a TVHeadend stream through keeps
+working), but a channel whose LITERAL host is loopback must be on the
+source's own port: any other port of this machine is some other service,
+which a relay's playlist has no reason to name. Such a channel is skipped at
+parse time and counted apart (`N entries skipped: stream addresses on this
+machine at other ports than the playlist's`), and refused again at play
+time (`local_address`, a channel refusal), by one decision,
+`_host_refusal` in 02-sources.py, which `stream_entry_refusal` (the parse)
+and `stream_host_refused` (`player_target`) both call; the model has no
+stream gate, so there is no JavaScript half. The rule is the PORT, as
+decided: `localhost:34400` under a relay typed as `127.0.0.1:34400` is
+listed, and its sign-in headers -- another host key to `own_host_match` --
+are still dropped. A loopback source that records no port (a cache written
+before `sourcePort`) matches no port, so its loopback channels are refused
+at play time until the next refresh records it; its LAN channels still
+play. Rows in `streamHosts` of tests/fixtures/destinations.json, with a
+`reason` of `port`, held by both the parse and the play-time readers. A LAN
+source's loopback-literal channels are not this rule's (the lead's wording
+named a loopback source), and stay as D-SINK-41 left them.
+
 **[2026-10-29, D-SINK-58 -- two residuals the section above did not state.]**
 (1) Non-global is an ADDRESS class, so a device on the user's LAN that has a
 GLOBAL IPv6 address -- often the router at `<prefix>::1`, and this machine's
