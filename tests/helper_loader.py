@@ -117,3 +117,30 @@ def load_helper():
     module = importlib.util.module_from_spec(spec)
     loader.exec_module(module)
     return module
+
+
+def loopback_reads_public(helper, address="127.0.0.1"):
+    """A test SEAM for D-SINK-40, and the only one: while it is entered, the
+    helper's address classifier calls exactly one address -- the one the
+    fixture TLS and HTTP servers bind, 127.0.0.1 -- `global`, and hands every
+    other value to the real classifier unchanged.
+
+    Why it exists. A logo never reaches a non-global address, on any hop, so
+    with the real classifier no logo can be fetched from a server on this
+    machine, and this machine has no public server to fetch from. The tests
+    that need one are about the logo run's OTHER properties (its ceiling,
+    its deadlines, its redirect rules), not about where it may connect.
+
+    Why it is no more forgiving than it has to be (rule 10): it widens ONE
+    address and nothing else -- 127.0.0.2, ::1 and the IPv4-mapped
+    ::ffff:127.0.0.1 stay loopback under it -- and it lives in the test
+    process only, so no shipped code path can reach it. tests/
+    test_destinations.py holds it to that, and proves the same fetches are
+    refused without it."""
+    import unittest.mock
+    real = helper.address_class
+
+    def classify(value):
+        text = str(value).split("%", 1)[0]
+        return "global" if text == address else real(value)
+    return unittest.mock.patch.object(helper, "address_class", classify)

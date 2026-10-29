@@ -403,7 +403,10 @@ class PlayTest(MpvTestCase):
             ["set_property", "force-media-title", "ESPN"],
             ["set_property", "user-agent", "VLC/3.0.20"],
             ["set_property", "referrer", "http://ref.example.test/"],
-            ["set_property", "http-header-fields", ["X-Forwarded-For: 1.2.3.4", "Cookie: a=b"]],
+            # D-SINK-41: the playlist is a local FILE, which has no host for
+            # the channel's to equal, so its Cookie is a sign-in header for
+            # another host and is dropped at parse time; the rest arrive.
+            ["set_property", "http-header-fields", ["X-Forwarded-For: 1.2.3.4"]],
             ["loadfile", "http://stream.example.test/live/espn.m3u8", "replace"],
         ])
         self.assertEqual(len(stdout.strip().splitlines()), 1)

@@ -35,7 +35,7 @@ import unittest
 from unittest import mock
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from helper_loader import load_helper          # redirects HOME and $XDG_* first
+from helper_loader import load_helper, loopback_reads_public  # redirects HOME and $XDG_* first
 from scripted_server import ScriptedServer, response
 from test_reply_bounds import PROBE, PROBE_LIMIT_MIB, LIMIT_ENV
 
@@ -143,6 +143,12 @@ class LogoDeadlineOverTlsTest(LogoRunCase):
         patcher = mock.patch.dict(os.environ, {"SSL_CERT_FILE": self.cert})
         patcher.start()
         self.addCleanup(patcher.stop)
+        # D-SINK-40: a logo never reaches this machine, and the fixture
+        # server is on it; the one seam (helper_loader.loopback_reads_public)
+        # makes 127.0.0.1 read public for these tests of the run's other rules.
+        seam = loopback_reads_public(helper)
+        seam.start()
+        self.addCleanup(seam.stop)
 
     def serve(self, routes):
         server = ScriptedServer(routes, self.context)

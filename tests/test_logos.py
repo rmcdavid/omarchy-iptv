@@ -12,7 +12,7 @@ import sys
 import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from helper_loader import load_helper
+from helper_loader import load_helper, loopback_reads_public
 
 helper = load_helper()
 
@@ -513,6 +513,14 @@ class LogoRedirectTest(unittest.TestCase):
 
     These run against 127.0.0.1 only and never leave the machine.
     """
+
+    def setUp(self):
+        # D-SINK-40: a logo never reaches this machine, and the fixture
+        # server is on it; the one seam (helper_loader.loopback_reads_public)
+        # makes 127.0.0.1 read public for these tests of the run's other rules.
+        seam = loopback_reads_public(helper)
+        seam.start()
+        self.addCleanup(seam.stop)
 
     @staticmethod
     def serve(handler_cls):

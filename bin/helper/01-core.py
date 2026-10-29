@@ -151,6 +151,30 @@ CHANNELS_FILE = "channels.json"
 PLAYLIST_STATUS_FILE = "playlist-status.json"
 # D-SINK-8: how the shell hands `playlist` and `epg` their URL (see url_from).
 URL_ENV = "OMARCHY_IPTV_URL"
+# D-SINK-40 (2026-10-29): where that URL CAME FROM, set by the shell beside
+# it at every spawn that carries one (Model.fetchEnvironmentFor). `user` is a
+# URL the user typed -- its first hop may reach any address, LAN and loopback
+# included; `playlist` is one the provider chose (the url-tvg guide hint).
+# Absent reads `user` (a human at their own shell with --url); any other
+# value reads `playlist`, the stricter one. The playlist's own host and the
+# address class its first hop connected to (channels.json `sourceClass`)
+# ride beside them, so a provider-chosen destination on THAT host may stay
+# on it (DestinationPolicy, 03-io-playlist.py). No URL is in either.
+ORIGIN_ENV = "OMARCHY_IPTV_ORIGIN"
+HOME_HOST_ENV = "OMARCHY_IPTV_PLAYLIST_HOST"
+HOME_CLASS_ENV = "OMARCHY_IPTV_PLAYLIST_CLASS"
+ORIGIN_USER = "user"
+ORIGIN_PLAYLIST = "playlist"
+# Every class address_class answers. "global" is the only one a destination
+# the provider chose may reach unconditionally; "unresolved" is never an
+# address's class, only a proxied target this machine could not look up.
+ADDRESS_CLASSES = ("global", "loopback", "private", "shared", "link-local",
+                   "unspecified", "multicast", "reserved")
+# The version of the destination rules a cache was written under
+# (playlist-status.json `destinationRules`). A cache without it predates
+# them, holds channels nothing checked, and is refreshed at the next start
+# (Model.cacheBeforeDestinationRules).
+DESTINATION_RULES = 1
 EPG_NOW_FILE = "epg-now.json"
 EPG_STATUS_FILE = "epg-status.json"
 # Helper-private programme window (not a QML contract). Line 1 is a JSON
@@ -1523,3 +1547,221 @@ def fnv1a32(value: Any) -> str:
     return "%08x" % hash_
 
 
+
+
+# ---------------------------------------------------------- destinations
+#
+# D-SINK-40, D-SINK-41, D-SINK-42 (2026-10-29). Where provider data may send
+# this machine. The owner's policy: a source the USER typed may reach any
+# address on its first hop; a destination the PROVIDER chose -- a guide hint,
+# a redirect hop, a logo, a channel URL -- may not reach a non-global
+# address unless it is the user's own playlist host, in the same class.
+# These functions classify; the policy is applied at connect time
+# (DestinationPolicy, 03-io-playlist.py) and at parse time (02-sources.py).
+# Mirrored by Model.hostClass / Model.hostKey, both run over the shared
+# destinations fixture (dev branch).
+#
+# The table is EXPLICIT rather than ipaddress's `is_global`, measured on
+# CPython 3.14.7: is_global answers True for multicast, for 64:ff9b::7f00:1
+# (NAT64 over loopback), ::7f00:1 (IPv4-compatible), ::ffff:0:7f00:1
+# (IPv4-translated), fec0::/10 (site-local), 4000::1 (unallocated) and
+# 192.88.99.0/24 -- each a place a provider could aim at this machine or its
+# LAN -- and its table moved between 3.12 and 3.13. Every address this table
+# calls global, is_global calls global too (the python suite asserts it over
+# the fixture), so it is never the more forgiving of the two.
+_ADDRESS_TABLE_V4 = (
+    ("0.0.0.0/8", "unspecified"),     # "this network"; 0.0.0.0 connects to this machine on Linux
+    ("10.0.0.0/8", "private"),
+    ("100.64.0.0/10", "shared"),      # CGNAT, and every Tailscale tailnet: other people's devices
+    ("127.0.0.0/8", "loopback"),
+    ("169.254.0.0/16", "link-local"),  # 169.254.169.254 among them
+    ("172.16.0.0/12", "private"),
+    ("192.0.0.0/24", "reserved"),
+    ("192.0.2.0/24", "reserved"),
+    ("192.88.99.0/24", "reserved"),
+    ("192.168.0.0/16", "private"),
+    ("198.18.0.0/15", "reserved"),
+    ("198.51.100.0/24", "reserved"),
+    ("203.0.113.0/24", "reserved"),
+    ("224.0.0.0/4", "multicast"),
+    ("240.0.0.0/4", "reserved"),      # 255.255.255.255 among them
+)
+_ADDRESS_TABLE_V6 = (
+    ("::/128", "unspecified"),
+    ("::1/128", "loopback"),
+    ("64:ff9b:1::/48", "reserved"),
+    ("100::/64", "reserved"),
+    ("2001::/23", "reserved"),        # Teredo (2001::/32) among them
+    ("2001:db8::/32", "reserved"),
+    ("3fff::/20", "reserved"),
+    ("5f00::/16", "reserved"),
+    ("fc00::/7", "private"),          # ULA
+    ("fe80::/10", "link-local"),
+    ("fec0::/10", "private"),         # site-local, deprecated, still routed by some LANs
+    ("ff00::/8", "multicast"),
+)
+# Compiled on first use into (version, first, last, class) integer ranges;
+# a dict filled in place, as TLS_CONTEXT is, so no part needs `global`.
+_ADDRESS_RANGES: dict[str, Any] = {}
+_LOCALHOST_NAMES = ("localhost", "localhost.")
+_DECIMAL_DIGITS = frozenset("0123456789")
+_OCTAL_DIGITS = frozenset("01234567")
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
+
+
+def _address_ranges() -> list[tuple[int, int, int, str]]:
+    if "ranges" not in _ADDRESS_RANGES:
+        import ipaddress
+        ranges = []
+        for text, kind in _ADDRESS_TABLE_V4 + _ADDRESS_TABLE_V6:
+            net = ipaddress.ip_network(text)
+            ranges.append((net.version, int(net.network_address), int(net.broadcast_address), kind))
+        _ADDRESS_RANGES["ranges"] = ranges
+    return _ADDRESS_RANGES["ranges"]
+
+
+def parse_ipv4_literal(host: str) -> int | None:
+    """The 32-bit address a host NAMES when it is numeric IPv4 in any spelling
+    the WHATWG URL parser and glibc's inet_aton accept, else None: one to four
+    dot-separated parts, each decimal, `0x` hex or `0` octal, the last filling
+    the bytes the others leave (`127.1`, `2130706433`, `0x7f000001`,
+    `0177.0.0.1`), one trailing dot allowed (WHATWG's; glibc would look the
+    dotted name up instead, so reading it as the address is the stricter
+    choice). A part over 32 characters is no address, so provider text can
+    never ask int() for a long conversion."""
+    text = host[:-1] if host.endswith(".") and len(host) > 1 else host
+    parts = text.split(".")
+    if not 1 <= len(parts) <= 4:
+        return None
+    numbers = []
+    for part in parts:
+        if part == "" or len(part) > 32:
+            return None
+        if part[:2] in ("0x", "0X"):
+            if not set(part[2:]) <= _HEX_DIGITS:
+                return None
+            numbers.append(int(part[2:] or "0", 16))
+        elif not set(part) <= _DECIMAL_DIGITS:
+            return None
+        elif len(part) > 1 and part[0] == "0":
+            if not set(part) <= _OCTAL_DIGITS:
+                return None
+            numbers.append(int(part, 8))
+        else:
+            numbers.append(int(part))
+    last = numbers.pop()
+    if any(n > 255 for n in numbers) or last >= 256 ** (4 - len(numbers)):
+        return None
+    value = last
+    for index, n in enumerate(numbers):
+        value += n << (8 * (3 - index))
+    return value
+
+
+def parse_ip_literal(host: Any) -> Any:
+    """An ipaddress object for a URL host that is a numeric literal -- IPv6
+    with or without its brackets and with any `%zone` dropped, or IPv4 in
+    any parse_ipv4_literal spelling -- else None (a name, or nothing)."""
+    import ipaddress
+    text = str(host or "").strip().lower()
+    if text.startswith("[") and text.endswith("]"):
+        text = text[1:-1]
+    if text == "":
+        return None
+    if ":" in text:
+        try:
+            return ipaddress.IPv6Address(text.split("%", 1)[0])
+        except ValueError:
+            return None
+    value = parse_ipv4_literal(text)
+    return ipaddress.IPv4Address(value) if value is not None else None
+
+
+def address_class(address: Any) -> str:
+    """One of ADDRESS_CLASSES for an address (an ipaddress object or the
+    numeric text a socket address carries, `%zone` and all). An IPv4-mapped
+    (::ffff:a.b.c.d) or NAT64 (64:ff9b::/96) address is the class of the
+    IPv4 address inside it; a 6to4 one (2002::/16) is that class when it is
+    not global, else `reserved`; any other IPv6 outside 2000::/3 that the
+    table does not name is `reserved`. Text that is no address is
+    `reserved` too: what cannot be read is never global."""
+    import ipaddress
+    if not isinstance(address, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+        try:
+            address = ipaddress.ip_address(str(address).split("%", 1)[0])
+        except ValueError:
+            return "reserved"
+    return _classify_address(address)
+
+
+def _classify_address(address: Any) -> str:
+    """address_class over a parsed address; it recurses HERE, never through
+    the public name, so the tests' one seam (which replaces address_class
+    for one address) cannot reach an address wrapped inside another."""
+    import ipaddress
+    if address.version == 6:
+        if address.ipv4_mapped is not None:
+            return _classify_address(address.ipv4_mapped)
+        value = int(address)
+        if value >> 32 == 0x0064FF9B << 64:
+            return _classify_address(ipaddress.IPv4Address(value & 0xFFFFFFFF))
+        if address.sixtofour is not None:
+            inner = _classify_address(address.sixtofour)
+            return inner if inner != "global" else "reserved"
+    value = int(address)
+    for version, first, last, kind in _address_ranges():
+        if version == address.version and first <= value <= last:
+            return kind
+    if address.version == 6 and value >> 125 != 0b001:
+        return "reserved"
+    return "global"
+
+
+def host_class(host: Any) -> str:
+    """The class of a URL host: a numeric literal's address_class,
+    `loopback` for `localhost` and every `*.localhost` name (RFC 6761: they
+    resolve to this machine), "" for any other name, whose class only a
+    lookup can tell (the connect-time check makes that lookup; a stream
+    host's lookup is mpv's, and the residual is stated in
+    ARCHITECTURE-PLAYER)."""
+    text = str(host or "").strip().lower()
+    if text in _LOCALHOST_NAMES or text.endswith(".localhost") or text.endswith(".localhost."):
+        return "loopback"
+    if not may_be_ip_literal(text):
+        return ""
+    address = parse_ip_literal(text)
+    return address_class(address) if address is not None else ""
+
+
+def may_be_ip_literal(text: str) -> bool:
+    """False only for text parse_ip_literal is sure to answer None for: no
+    `:` (so no IPv6) and a last label -- one trailing dot dropped, as the
+    parser drops it -- that is neither all decimal digits nor `0x`-led (so
+    no IPv4 part). Every channel URL's host passes through host_class, and
+    nearly every one is a name: this keeps a 10,000-channel parse inside its
+    budget (engineering constraint 7) without importing ipaddress for them."""
+    if ":" in text:
+        return True
+    label = text[:-1] if text.endswith(".") and len(text) > 1 else text
+    last = label.rsplit(".", 1)[-1].lower()
+    return last != "" and (last[:2] == "0x" or set(last) <= _DECIMAL_DIGITS)
+
+
+def host_key(host: Any) -> str:
+    """What "the same host" compares: a numeric literal as its address
+    (`127.1` and `127.0.0.1` are one host) -- IPv4 dotted, IPv6 as eight
+    four-digit hex groups composed here from the integer, because both of
+    ipaddress's own spellings of an IPv4-mapped address (str() and
+    .exploded) end in a dotted quad on CPython 3.14 and did not before 3.13;
+    Model.hostKey composes the same eight groups -- a name case-folded with
+    one trailing dot dropped. Never a port and never userinfo."""
+    text = str(host or "").strip().lower()
+    address = parse_ip_literal(text)
+    if address is not None:
+        if address.version == 4:
+            return str(address)
+        value = int(address)
+        return ":".join("%04x" % ((value >> (16 * (7 - index))) & 0xFFFF) for index in range(8))
+    if text.startswith("[") and text.endswith("]"):
+        text = text[1:-1]
+    return text[:-1] if text.endswith(".") else text

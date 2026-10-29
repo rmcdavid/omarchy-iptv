@@ -57,7 +57,9 @@ http://127.0.0.1/4
 
 class FilterBenchFixtureTest(unittest.TestCase):
     def parse(self):
-        return helper.parse_m3u(PLAYLIST)["channels"]
+        # D-SINK-41: the dev harness's shape -- a list on this machine naming
+        # streams on this machine -- so parsed as the LOCAL source it is.
+        return helper.parse_m3u(PLAYLIST, helper.playlist_source("file", ""))["channels"]
 
     def test_every_always_field_is_on_every_parsed_channel(self):
         """The bench's ALWAYS_FIELDS is the helper's unconditional set, by call."""
