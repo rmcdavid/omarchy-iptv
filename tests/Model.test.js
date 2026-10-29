@@ -5174,6 +5174,23 @@ checkCall("D-PLY-37: notifyArgv outputFailed -- its own id 74023, a headline nam
               r.card === "outputFailed" ? r.reason === Model.outputFailureSentence(r.output) : true]
     }),
     ENDINGS.socket.map(c => [c.name, c.expect.card, c.expect.mark, c.expect.output, c.expect.target, true]))
+  // rc-host5: deathReport asks endedReport WHETHER a death is told before it
+  // asks what the ending was, so a user's stop, or a stop still settling, is
+  // never told -- not even over the audio output's ending. A mutant that put
+  // the output test first survived every check until this one.
+  checkCall("D-PLY-37: a user's stop, or a stop still settling, is never told, even over mpv's audio output ending; with neither, the same ending is the output card",
+    () => {
+      const ao = ENDINGS.socket[0]
+      let st = Model.playerRouterState(null)
+      for (const l of ao.lines) st = Model.routePlayerEvent(st, JSON.stringify(l))
+      let owners = Model.keyedMap()
+      for (const [entry, who] of ao.owners) owners = Model.rememberEntryOwner(owners, entry, who)
+      return [{ userStopped: true }, { stopping: true }, {}].map(extra => {
+        const r = Model.deathReport(Object.assign({ lastEndFile: st.lastEndFile, owners, nowPlaying: ao.nowPlaying, entryId: st.entryId, tail: st.tail }, extra))
+        return [r.notify, r.card, r.mark]
+      })
+    },
+    [[false, "", false], [false, "", false], [true, "outputFailed", false]])
   checkCall("D-PLY-36: every first-load reply the helper writes (the fixture's, which tests/test_player_endings.py pins to observe_first_load), through deathReport's firstLoad branch -- `ended` end-file is the stream's and marks (unless it names an output, D-PLY-37); `ended` closed is a death with no end-file, Playback stopped, never marked; a reply without `ended` is the helper's word, as before",
     () => ENDINGS.firstLoad.concat(ENDINGS.oldReplies).map(c => {
       const reply = c.reply
