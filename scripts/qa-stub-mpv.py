@@ -120,10 +120,12 @@ and every value, coercion and refusal string there was measured on mpv
 0.41.0 over a real IPC socket, windowless (`prlimit --core=0 timeout 20 env
 -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u
 DBUS_SESSION_BUS_ADDRESS mpv --no-config --vo=null --ao=null`, a private
-HOME, the crash journal unchanged). The seven transcripts -- a player
+HOME, the crash journal unchanged). The nine transcripts -- a player
 launched with the pin block, one launched by 0.15.0's argv, four bare players
-with the list forms, empty values and negations on the command line, and one
-of the runtime edges the recheck measured -- are
+with the list forms, empty values and negations on the command line, one
+of the runtime edges the recheck measured, and (lane-p1c, 2026-10-29) a
+player launched with this tree's pin block and one launched with sec-int
+124589e's, which hold every option the read-back now asks about -- are
 tests/fixtures/stub-mpv-ipc.json,
 and `--self-test` REPLAYS every step of them against this stub and requires
 the same reply, so the model is held to the measurement rather than to its
@@ -162,6 +164,14 @@ with the reason. What was measured, in short:
     the user's own, so the per-file profile threat is drivable at all.
   * a sub-path of a key-value list (`demuxer-lavf-o/tls_verify`) is `error
     accessing property` for a read and for a write; the write changes nothing.
+  * lane-p1c: every option the pin block holds is answered, as is
+    `option-info/<opt>/set-from-commandline` for it -- drag-and-drop (a
+    choice whose `no` reads False), input-commands and scripts (string
+    lists; `-append` on the command line adds ONE item, spaces kept),
+    load-scripts, prefetch-playlist and load-console (flags), script-opts (a
+    key-value list), and mpv's alias load-osd-console, whose option-info is
+    load-console's. `player-operation-mode` is an option and not a property:
+    a read and a write are `property not found`, its option-info is there.
   * a property mpv does not have is `property not found`, for a read and for
     a write. This stub still STORES a write of a name it does not model,
     where mpv refuses it -- the one place it stays more forgiving, named in
@@ -201,10 +211,34 @@ OPTIONS = {
     "osd-playlist-entry": ("choice", "title"),
     "log-file": ("string", ""),
     "watch-later-dir": ("string", ""),
+    # lane-p1c (2026-10-29): the rest of what the tree's
+    # read-back asks set-from-commandline of (every option the pin block
+    # holds), and what the adoption writes, at mpv 0.41.0's own defaults --
+    # measured, the transcripts pinned-p1c and prepin-p1c.
+    "drag-and-drop": ("choice", "auto"),
+    "input-commands": ("strlist", []),
+    "load-scripts": ("flag", True),
+    "script-opts": ("kvlist", {}),
+    "scripts": ("strlist", []),
+    "prefetch-playlist": ("flag", False),
+    "load-console": ("flag", True),
 }
 # The three values of osd-playlist-entry, each measured taking (`both` on
-# the recheck of 2026-10-29); "bogus" was measured refused.
-CHOICES = {"osd-playlist-entry": ("title", "filename", "both")}
+# the recheck of 2026-10-29); "bogus" was measured refused. drag-and-drop's
+# `no` and `auto` were measured taking (lane-p1c), and mpv answers `no` as the
+# boolean False (CHOICE_FALSE); its other three words are mpv's own list, not
+# measured one by one.
+CHOICES = {"osd-playlist-entry": ("title", "filename", "both"),
+           "drag-and-drop": ("no", "auto", "replace", "append", "insert-next")}
+CHOICE_FALSE = {"drag-and-drop": "no"}
+# An option mpv takes on the command line and does NOT have as a property:
+# `player-operation-mode` is `property not found` for a read and for a write,
+# while its option-info answers set-from-commandline (measured, lane-p1c).
+CLI_ONLY = ("player-operation-mode",)
+# mpv's alias of a modelled option: its option-info answers as its target's
+# does (measured: load-osd-console with load-console, True on the pinned
+# argv and False on sec-int's), and a token naming it sets the target.
+ALIASES = {"load-osd-console": "load-console"}
 # Options whose option-info this stub answers without modelling their value:
 # the helper reads user-agent's default when it restores the header.
 INFO_ONLY = {"user-agent": "libmpv"}
@@ -308,8 +342,15 @@ def coerce(name, value):
             return (value.split(",") if value else []), None
         return None, ERR_ACCESS                     # not measured
     if kind == "choice":
+        false_word = CHOICE_FALSE.get(name)
         if isinstance(value, str):
-            return (value, None) if value in CHOICES[name] else (None, ERR_FORMAT)
+            if value not in CHOICES[name]:
+                return None, ERR_FORMAT
+            return (False if value == false_word else value), None   # drag-and-drop `no` reads False
+        if value is False and false_word:
+            return False, None                      # drag-and-drop False (measured)
+        if isinstance(value, bool):
+            return None, ERR_FORMAT                 # True: not measured; refused, the stricter reading
         return None, ERR_ACCESS                     # not measured
     if isinstance(value, str):
         return value, None
@@ -342,6 +383,10 @@ def read_argv(argv):
             continue
         name, sep, value = arg[2:].partition("=")
         value = value if sep else None
+        if name in CLI_ONLY:
+            named.add(name)                         # player-operation-mode: option-info only
+            continue
+        name = ALIASES.get(name, name)
         negated = False
         if name not in OPTIONS and name.startswith("no-") and name[3:] in OPTIONS and value is None:
             name, negated = name[3:], True
@@ -377,6 +422,11 @@ def read_argv(argv):
                 new = []
             elif suffix in ("", "-set") and value is not None:
                 new = value.split(",") if value else []
+            elif suffix in ("-append", "-add") and value is not None:
+                # One item, commas and spaces kept (lane-p1c, measured:
+                # `--input-commands-append=keybind ctrl+v ignore` reads
+                # ["keybind ctrl+v ignore"] after the -clr before it).
+                new = list(values[name]) + [value]
             else:
                 continue
         elif suffix:
@@ -606,10 +656,13 @@ class Stub(object):
                 return ([dict(p) for p in self.profiles], None)
             if name.startswith("option-info/"):
                 option, _, field = name[len("option-info/"):].partition("/")
-                if option not in OPTIONS and option not in INFO_ONLY:
+                option = ALIASES.get(option, option)
+                if option not in OPTIONS and option not in INFO_ONLY and option not in CLI_ONLY:
                     return (None, ERR_NOT_FOUND)
                 if field == "set-from-commandline":
                     return (option in self.from_cli, None)
+                if option in CLI_ONLY:
+                    return (None, "property unavailable")   # its other fields: not modelled
                 if field == "default-value":
                     return (copy_value(OPTIONS[option][1]) if option in OPTIONS else INFO_ONLY[option], None)
                 return (None, "property unavailable")   # the node and its other fields: not modelled
@@ -634,6 +687,9 @@ class Stub(object):
     def put(self, name, value):
         """None when it took, an mpv error string when it was refused.
 
+        lane-p1c: an option mpv has only on the command line answers
+        `property not found` to a write too (measured), and nothing changes.
+
         The refusal returns BEFORE anything is written, so a refused property
         keeps the value it had. A double that answered an error and stored the
         value anyway would let a caller's cannot-be-made-safe path look tested
@@ -641,6 +697,8 @@ class Stub(object):
         (CLAUDE.md rule 10).
         """
         with self.lock:
+            if name in CLI_ONLY:
+                return ERR_NOT_FOUND
             if name in self.refuse:
                 return "property unavailable"
             if name == "profile-list" or name.startswith("option-info/"):
@@ -1381,7 +1439,9 @@ def self_test():
             return {"error": out["error"], "data": out["data"]}
 
         def test_the_measured_transcripts_replay_identically(self):
-            self.assertEqual(sorted(t["name"] for t in self.transcripts), ["argv-a", "argv-b", "argv-c", "argv-d", "pinned", "prepin", "runtime-b"])
+            self.assertEqual(sorted(t["name"] for t in self.transcripts),
+                             ["argv-a", "argv-b", "argv-c", "argv-d", "pinned", "pinned-p1c", "prepin", "prepin-p1c",
+                              "runtime-b"])
             compared, wrong = 0, []
             for t in self.transcripts:
                 stub = Stub("/nonexistent/pin.sock", clock=FakeClock(), argv=t["argv"][1:])
@@ -1394,9 +1454,10 @@ def self_test():
                     if got != step["reply"]:
                         wrong.append("%s step %d %r: mpv %r, stub %r" % (t["name"], number, command, step["reply"], got))
             self.assertEqual(wrong, [])
-            # A replay that skipped its way to green proves nothing: 374 steps
-            # were measured and all but the named ones are compared.
-            self.assertGreaterEqual(compared, 360)
+            # A replay that skipped its way to green proves nothing: 548 steps
+            # were measured (374 until lane-p1c's two transcripts) and all but
+            # the named ones are compared.
+            self.assertGreaterEqual(compared, 530)
 
         def test_a_pinned_player_holds_every_pin_and_says_it_was_told_on_the_command_line(self):
             stub = self.stub("pinned")
@@ -1473,6 +1534,54 @@ def self_test():
             stub = self.stub("prepin")
             self.assertEqual(stub.get("profile-list")[0][-1]["name"], "protocol.https")
             self.assertEqual(self.reply(stub, "set_property", "profile-list", [])["error"], "error accessing property")
+
+        # lane-p1c (2026-10-29): the rules the two transcripts
+        # of that day measured, one at a time.
+        PINNED_P1C = ("tls-verify", "stream-lavf-o", "demuxer-lavf-o", "demuxer-lavf-propagate-opts",
+                      "load-auto-profiles", "load-select", "save-watch-history", "load-unsafe-playlists",
+                      "reset-on-next-file", "osd-playlist-entry", "log-file", "watch-later-dir", "drag-and-drop",
+                      "input-commands", "load-scripts", "player-operation-mode", "script-opts", "scripts",
+                      "prefetch-playlist", "load-console", "load-osd-console")
+
+        def test_every_option_the_pin_block_holds_says_it_came_from_the_command_line(self):
+            stub = self.stub("pinned-p1c")
+            for option in self.PINNED_P1C:
+                self.assertEqual(stub.get("option-info/%s/set-from-commandline" % option), (True, None), option)
+            older = self.stub("prepin-p1c")
+            for option in ("prefetch-playlist", "load-console", "load-osd-console"):
+                self.assertEqual(older.get("option-info/%s/set-from-commandline" % option), (False, None), option)
+            self.assertEqual(older.get("load-console"), (True, None))
+
+        def test_the_demuxer_lists_are_read_whole_from_the_argv(self):
+            want = {"protocol_whitelist": "http,https,tls,tcp,crypto,data,httpproxy",
+                    "format_whitelist": "hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
+                    "tls_verify": "1"}
+            self.assertEqual(self.stub("pinned-p1c").get("demuxer-lavf-o"), (want, None))
+            del want["format_whitelist"]
+            self.assertEqual(self.stub("prepin-p1c").get("demuxer-lavf-o"), (want, None))
+
+        def test_player_operation_mode_is_an_option_and_never_a_property(self):
+            stub = self.stub("pinned-p1c")
+            self.assertEqual(stub.get("player-operation-mode"), (None, "property not found"))
+            self.assertEqual(self.reply(stub, "set_property", "player-operation-mode", "pseudo-gui")["error"],
+                             "property not found")
+            self.assertEqual(stub.get("option-info/player-operation-mode/set-from-commandline"), (True, None))
+
+        def test_drag_and_drop_reads_its_no_as_false_and_refuses_a_word_it_lacks(self):
+            stub = self.stub("pinned-p1c")
+            self.assertEqual(stub.get("drag-and-drop"), (False, None))
+            self.assertEqual(self.reply(stub, "set_property", "drag-and-drop", "auto")["error"], "success")
+            self.assertEqual(stub.get("drag-and-drop"), ("auto", None))
+            self.assertEqual(self.reply(stub, "set_property", "drag-and-drop", "bogus")["error"],
+                             "unsupported format for accessing property")
+            self.assertEqual(stub.get("drag-and-drop"), ("auto", None))
+            self.assertEqual(self.reply(stub, "set_property", "drag-and-drop", False)["error"], "success")
+            self.assertEqual(stub.get("drag-and-drop"), (False, None))
+
+        def test_a_string_list_append_on_the_command_line_is_one_item(self):
+            stub = self.stub("pinned-p1c")
+            self.assertEqual(stub.get("input-commands"), (["keybind ctrl+v ignore"], None))
+            self.assertEqual(stub.get("scripts"), ([], None))
 
         def test_option_info_of_an_option_mpv_does_not_have_is_not_found(self):
             stub = self.stub("pinned")

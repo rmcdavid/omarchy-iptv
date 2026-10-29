@@ -745,7 +745,11 @@ HELPER_REGEX_SITES_MIN=${HELPER_REGEX_SITES_MIN:-36}
 # 28 -> 38 on 2026-10-29: the stub learned the pin read-back (D-SINK-43,
 # D-SINK-44) -- the replay of four measured mpv 0.41.0 transcripts and nine
 # cases naming its rules -- and the floor moves with it for the same reason.
-STUB_TESTS_MIN=${STUB_TESTS_MIN:-38}
+# 38 -> 43 on 2026-10-29 (lane-p1c): the stub answers what this
+# tree's read-back asks -- set-from-commandline for every option the pin block
+# holds, the demuxer's two lists from its argv -- held by two more measured
+# transcripts in the replay and five cases naming the rules.
+STUB_TESTS_MIN=${STUB_TESTS_MIN:-43}
 # The D-LOGO-11 logo preflight (scripts/dev-harness/logo-scenario.sh
 # check-tree): 32 checks over the shipping helper as a subprocess and the
 # shell's Image as a probe under an address-space rlimit, plus its own "ran

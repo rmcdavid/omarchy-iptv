@@ -100,8 +100,10 @@ class StubAgainstTheShippingReadBack(unittest.TestCase):
 
     def test_a_player_from_before_the_pins_is_migrated_to_safe(self):
         stub = self.player(argv=launch_argv(pins=False))
-        # load-auto-profiles reads "auto": one pin not held.
-        self.assertEqual(helper.read_tls_state(stub.client), (True, 0, 1))
+        # Three pins not held: load-auto-profiles reads "auto", and the
+        # demuxer map holds neither the protocol list (D-SINK-55) nor, since
+        # lane-p1c (2026-10-29), the format list (D-SINK-62).
+        self.assertEqual(helper.read_tls_state(stub.client), (True, 0, 3))
         result = helper.migrate_tls(stub.client)
         self.assertEqual((result["migrated"], result["verify"], result["optionCount"], result["unpinned"]),
                          (True, True, 0, 0))

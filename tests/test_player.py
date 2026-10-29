@@ -106,7 +106,11 @@ state["props"].update({"tls-verify": False, "stream-lavf-o": {}, "demuxer-lavf-o
                        # 2026-10-29 (lane-p1b): mpv's own defaults for the
                        # readings and pins added that day; `no` of
                        # drag-and-drop reads as False (measured).
-                       "reset-on-next-file": [], "drag-and-drop": "auto", "script-opts": {}})
+                       "reset-on-next-file": [], "drag-and-drop": "auto", "script-opts": {},
+                       # lane-p1c (2026-10-29): mpv 0.41's own defaults for
+                       # the two flags pinned that day, which it answers as
+                       # booleans (measured).
+                       "prefetch-playlist": False, "load-console": True})
 for arg in argv:
     if not arg.startswith("--"):
         continue
@@ -126,6 +130,8 @@ for arg in argv:
         state["props"]["reset-on-next-file"] = [v for v in value.split(",") if v]
     elif name == "drag-and-drop":
         state["props"]["drag-and-drop"] = False if value == "no" else value
+    elif name in ("prefetch-playlist", "load-console"):
+        state["props"][name] = value not in ("no", "false", "0")
     elif name in ("stream-lavf-o-clr", "demuxer-lavf-o-clr", "script-opts-clr"):
         state["props"][base] = {}
     elif name in ("stream-lavf-o-append", "demuxer-lavf-o-append", "script-opts-append"):
@@ -1102,12 +1108,15 @@ class IdempotenceTest(PlayerTestCase):
         # three GLOBAL header properties at values that belong to no provider,
         # because a player last driven by an older helper holds the previous
         # channel's headers there (the channel's own now ride the loadfile).
-        self.assertEqual(sets[:6], [["set_property", "load-select"], ["set_property", "watch-later-dir"],
-                                    ["set_property", "drag-and-drop"], ["set_property", "user-agent"],
+        # lane-p1c (2026-10-29): and the console unloaded (D-SINK-61; this
+        # double's console is mpv's default, on), prefetch already off here.
+        self.assertEqual(sets[:7], [["set_property", "load-select"], ["set_property", "watch-later-dir"],
+                                    ["set_property", "drag-and-drop"], ["set_property", "load-console"],
+                                    ["set_property", "user-agent"],
                                     ["set_property", "referrer"], ["set_property", "http-header-fields"]])
         self.assertIn(["keybind", "ctrl+v", "ignore"], server.commands)
         self.assertIn(["change-list", "script-opts", "append", "osc-title_mbtn_mid_command=ignore"], server.commands)
-        sets = sets[6:]
+        sets = sets[7:]
         self.assertEqual(sets[:8], [["set_property", "tls-verify"],
                                     ["set_property", "stream-lavf-o"],
                                     ["set_property", "load-auto-profiles"],
@@ -1994,9 +2003,10 @@ class ProbeTlsTest(PlayerTestCase):
         self.addCleanup(setattr, helper, "migrate_tls", original)
         code, payload, _, stderr = self.probe()
         self.assertEqual(code, 0, stderr)
-        # unpinned 2: load-auto-profiles reads mpv's "auto", and (D-SINK-55,
-        # 2026-10-29) the demuxer map holds no protocol whitelist.
-        self.assertEqual(payload["tls"], {"verify": False, "optionCount": 0, "unpinned": 2, "migrated": False},
+        # unpinned 3: load-auto-profiles reads mpv's "auto", and (D-SINK-55,
+        # 2026-10-29) the demuxer map holds no protocol whitelist, and
+        # (D-SINK-62, lane-p1c) no format whitelist.
+        self.assertEqual(payload["tls"], {"verify": False, "optionCount": 0, "unpinned": 3, "migrated": False},
                          "the mutation must be visible in the reply, or the tests above are decoration")
         self.assertIs(server.props["tls-verify"], False)
 
@@ -2416,7 +2426,9 @@ class ParityTest(unittest.TestCase):
         # 54 the same day: --player-operation-mode, whose pseudo-gui applies
         # the user's [pseudo-gui] profile after the command line (recheck).
         # 55 the same day again: --drag-and-drop, pinned off (D-PLY-46).
-        self.assertEqual(len(names), 55)
+        # 58 the same day (lane-p1c): --prefetch-playlist (D-SINK-63) and
+        # --load-console with mpv's alias --load-osd-console (D-SINK-61).
+        self.assertEqual(len(names), 58)
         self.assertIn("--include", names)
         self.assertIn("--load-scripts", names)
         self.assertIn("--demuxer-cache-unlink-files", names)

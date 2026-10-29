@@ -62,16 +62,25 @@ def run(*args):
 # read back with the TLS pins and never written (D-SINK-60), and the
 # per-file profile check asks about EVERY pinned option, in the helper's
 # sorted order, not only the TLS ones (the lead's decision on the recheck).
+#
+# lane-p1c (2026-10-29): and the pinned FORMAT list (D-SINK-62), appended the
+# same way, and two more pinned options the per-file check asks about,
+# load-console (D-SINK-61) and prefetch-playlist (D-SINK-63).
 WHITELIST = "http,https,tls,tcp,crypto,data,httpproxy"
+FORMATS = "hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt"
+# What a demuxer-lavf-o map holds on a player of this release, less tls_verify.
+LISTS = {"protocol_whitelist": WHITELIST, "format_whitelist": FORMATS}
 PINNED_OPTIONS = ("demuxer-lavf-o", "demuxer-lavf-propagate-opts", "drag-and-drop", "input-commands",
-                  "load-auto-profiles", "load-scripts", "load-select", "load-unsafe-playlists", "log-file",
-                  "osd-playlist-entry", "player-operation-mode", "reset-on-next-file", "save-watch-history",
-                  "script-opts", "scripts", "stream-lavf-o", "tls-verify", "watch-later-dir")
+                  "load-auto-profiles", "load-console", "load-scripts", "load-select", "load-unsafe-playlists",
+                  "log-file", "osd-playlist-entry", "player-operation-mode", "prefetch-playlist",
+                  "reset-on-next-file", "save-watch-history", "script-opts", "scripts", "stream-lavf-o",
+                  "tls-verify", "watch-later-dir")
 TLS_PRELUDE_PRE_PIN = [
     ["set_property", "tls-verify", True],
     ["set_property", "stream-lavf-o", {}],
     ["get_property", "demuxer-lavf-o"],
     ["change-list", "demuxer-lavf-o", "append", "protocol_whitelist=" + WHITELIST],
+    ["change-list", "demuxer-lavf-o", "append", "format_whitelist=" + FORMATS],
     ["get_property", "load-auto-profiles"],
     ["set_property", "load-auto-profiles", "no"],
     ["get_property", "tls-verify"],
@@ -87,7 +96,7 @@ TLS_PRELUDE_PRE_PIN = [
 # release's argv.
 PINNED_CMDLINE = PINNED_OPTIONS
 PINNED_PROPS = {"tls-verify": True, "stream-lavf-o": {},
-                "demuxer-lavf-o": {"protocol_whitelist": WHITELIST, "tls_verify": "1"},
+                "demuxer-lavf-o": dict(LISTS, tls_verify="1"),
                 "load-auto-profiles": False, "reset-on-next-file": []}
 # The per-file options of the helper's loadfile (channel_load_options): the
 # demuxer that refuses a nested playlist (D-PLY-44), the channel's user agent
@@ -196,7 +205,10 @@ class FakeMpv:
                     "load-auto-profiles": "auto", "profile-list": [],
                     "load-select": True, "save-watch-history": False, "load-unsafe-playlists": False,
                     "reset-on-next-file": [], "osd-playlist-entry": "title", "log-file": "",
-                    "watch-later-dir": "", "drag-and-drop": "auto", "script-opts": {}}
+                    "watch-later-dir": "", "drag-and-drop": "auto", "script-opts": {},
+                    # lane-p1c: mpv 0.41's defaults (measured): no prefetch,
+                    # the console loaded.
+                    "prefetch-playlist": False, "load-console": True}
     # mpv 0.41 answers `yes` and `no` of these choices as booleans (measured for
     # load-auto-profiles: "auto" before, False after `set ... no`; and for
     # drag-and-drop: False for `no`, lane-p1b 2026-10-29).
@@ -951,12 +963,12 @@ class PinnedTlsTest(MpvTestCase):
     def test_demuxer_tls_entries_are_removed_before_the_load_and_the_workaround_kept(self):
         """D-SINK-43 on a player that holds them: both kinds go, by key, and the
         user's own live_start_index stays. The removals precede the load."""
-        server = self.start(props={"demuxer-lavf-o": {"tls_verify": "0", "verifyhost": "evil.example",
-                                                      "live_start_index": "-1", "protocol_whitelist": WHITELIST}})
+        server = self.start(props={"demuxer-lavf-o": dict(LISTS, tls_verify="0", verifyhost="evil.example",
+                                                          live_start_index="-1")})
         code, payload, stdout, stderr = self.play("--id", "t:espn.us")
         self.assertEqual(code, 0, stderr)
         self.assertTrue(self.loaded(server))
-        self.assertEqual(server.props["demuxer-lavf-o"], {"live_start_index": "-1", "protocol_whitelist": WHITELIST})
+        self.assertEqual(server.props["demuxer-lavf-o"], dict(LISTS, live_start_index="-1"))
         removes = [i for i, c in enumerate(server.commands) if c[:3] == ["change-list", "demuxer-lavf-o", "remove"]]
         self.assertEqual(sorted(server.commands[i][3] for i in removes), ["tls_verify", "verifyhost"])
         self.assertLess(max(removes), server.commands.index(self.LOADFILE))
@@ -964,8 +976,7 @@ class PinnedTlsTest(MpvTestCase):
             self.assertNotIn(secret, stdout + stderr, secret)
 
     def test_a_tls_verify_entry_reading_one_is_left_alone(self):
-        server = self.start(props={"demuxer-lavf-o": {"tls_verify": "1", "live_start_index": "-1",
-                                                      "protocol_whitelist": WHITELIST}})
+        server = self.start(props={"demuxer-lavf-o": dict(LISTS, tls_verify="1", live_start_index="-1")})
         code, _, _, stderr = self.play("--id", "t:espn.us")
         self.assertEqual(code, 0, stderr)
         self.assertEqual([c for c in server.commands if c[0] == "change-list"], [])
@@ -975,7 +986,7 @@ class PinnedTlsTest(MpvTestCase):
                         {"ca_file": "/tmp/evil.pem"}, {"cafile": "/tmp/evil.pem"}, {"listen": "1"},
                         {"external_sock": "1"}):
             with self.subTest(options=sorted(options)):
-                server = self.start(props={"demuxer-lavf-o": dict(options, protocol_whitelist=WHITELIST)},
+                server = self.start(props={"demuxer-lavf-o": dict(options, **LISTS)},
                                     refuse={"demuxer-lavf-o"})
                 code, payload, _, stderr = self.play("--id", "t:espn.us")
                 self.assertEqual(code, 1, stderr)
@@ -1000,13 +1011,14 @@ class PinnedTlsTest(MpvTestCase):
                 self.assertTrue(self.loaded(server))
                 self.assertIn(["change-list", "demuxer-lavf-o", "append", "protocol_whitelist=" + WHITELIST],
                               server.commands)
-                want = dict(found, protocol_whitelist=WHITELIST)
+                want = dict(found, **LISTS)
                 self.assertEqual(server.props["demuxer-lavf-o"], want)
                 server.close()
                 self.server = None
 
     def test_a_player_that_cannot_take_the_whitelist_is_not_loaded_into(self):
-        for found in ({}, {"protocol_whitelist": "file,http,rtp,udp"}, {"protocol_whitelist": WHITELIST + ",rtp"}):
+        for found in ({}, {"protocol_whitelist": "file,http,rtp,udp"}, {"protocol_whitelist": WHITELIST + ",rtp"},
+                      dict(LISTS, protocol_whitelist="file,http")):
             with self.subTest(found=found):
                 server = self.start(props={"demuxer-lavf-o": dict(found)}, refuse={"demuxer-lavf-o"})
                 code, payload, _, stderr = self.play("--id", "t:espn.us")
@@ -1015,6 +1027,57 @@ class PinnedTlsTest(MpvTestCase):
                 self.assertEqual([c for c in server.commands if c[0] == "loadfile"], [])
                 server.close()
                 self.server = None
+
+    def test_the_format_whitelist_is_appended_whole_and_read_back(self):
+        """D-SINK-62 (lane-p1c, 2026-10-29). A stream server that answers with
+        an IMF composition playlist made FFmpeg open the asset URIs it named,
+        and the player LISTENED on 0.0.0.0 -- through a protocol list that has
+        to hold tcp (measured by rc-p1b). The pin block gives a player of this
+        release the demuxer's format list; a player that lacks it, or holds
+        another, gets it appended as ONE key, the user's keys kept, and is
+        loaded only once the read-back says it holds exactly that list."""
+        for found in ({"protocol_whitelist": WHITELIST},
+                      {"protocol_whitelist": WHITELIST, "format_whitelist": "hls,imf,concat", "live_start_index": "-1"}):
+            with self.subTest(found=found):
+                server = self.start(props={"demuxer-lavf-o": dict(found)})
+                code, _, _, stderr = self.play("--id", "t:espn.us")
+                self.assertEqual(code, 0, stderr)
+                self.assertTrue(self.loaded(server))
+                append = ["change-list", "demuxer-lavf-o", "append", "format_whitelist=" + FORMATS]
+                self.assertIn(append, server.commands)
+                self.assertLess(server.commands.index(append), server.commands.index(self.LOADFILE))
+                self.assertEqual(server.props["demuxer-lavf-o"], dict(found, **LISTS))
+                server.close()
+                self.server = None
+
+    def test_the_segment_demuxers_options_are_removed_before_the_load(self):
+        """D-SINK-64 (lane-p1c, 2026-10-29). hls's `seg_format_options` is a
+        dictionary FFmpeg parses with its own escapes, so a key the token
+        filter refuses can be spelled past it inside one: measured, a
+        `format\\_whitelist` there replaced the pinned list in the HLS
+        segment's context, and with `extension_picky=0` beside it an SDP
+        segment made the player listen. On a player that holds one -- a
+        pre-pin player, or a user's mpv.conf -- the key goes, by name, before
+        the load, the user's other keys kept, and its value never reaches the
+        reply or the journal (it is the user's text)."""
+        value = "format\\_whitelist=sdp:protocol\\_whitelist=rtp,udp"
+        server = self.start(props={"demuxer-lavf-o": dict(LISTS, seg_format_options=value, live_start_index="-1")})
+        code, _, stdout, stderr = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(self.loaded(server))
+        remove = ["change-list", "demuxer-lavf-o", "remove", "seg_format_options"]
+        self.assertIn(remove, server.commands)
+        self.assertLess(server.commands.index(remove), server.commands.index(self.LOADFILE))
+        self.assertEqual(server.props["demuxer-lavf-o"], dict(LISTS, live_start_index="-1"))
+        for secret in ("sdp", "seg_format_options"):
+            self.assertNotIn(secret, stdout + stderr, secret)
+        server.close()
+        self.server = None
+        # ...and a player that will not let it go is not loaded into.
+        server = self.start(props={"demuxer-lavf-o": dict(LISTS, seg_format_options=value)}, refuse={"demuxer-lavf-o"})
+        code, payload, _, _ = self.play("--id", "t:espn.us")
+        self.assertEqual((code, payload["error"]["code"]), (1, "tls_unverified"))
+        self.assertEqual([c for c in server.commands if c[0] == "loadfile"], [])
 
     def test_a_player_with_reset_on_next_file_is_not_loaded_into(self):
         """D-SINK-60 (lane-p1b, 2026-10-29). mpv backs up the options
@@ -1123,7 +1186,7 @@ class PinnedTlsTest(MpvTestCase):
         for key in ("save-watch-history", "load-unsafe-playlists", "load-select", "script", "scripts-append",
                     "watch-later-directory", "osd-playlist-entry", "drag-and-drop", "script-opts-append",
                     "input-commands", "player-operation-mode", "reset-on-next-file", "log-file",
-                    "no-load-select"):
+                    "no-load-select", "prefetch-playlist", "load-console", "load-osd-console"):
             with self.subTest(key=key):
                 profiles = [{"name": "protocol.http", "options": [{"key": key, "value": "yes"}]}]
                 server = self.start(props={"profile-list": profiles}, cmdline={"tls-verify"})
@@ -1186,12 +1249,51 @@ class PinnedTlsTest(MpvTestCase):
         self.assertTrue(self.loaded(server))
 
 
+class AdoptedPinsTest(MpvTestCase):
+    """lane-p1c (2026-10-29): what pin_adopted_player now also writes on a
+    player this helper did not start, called directly (rule 12). D-SINK-63:
+    prefetch-playlist off, so an appended entry is never opened while the
+    channel's per-file headers are live; D-SINK-61: load-console off, which
+    unloads mpv's console at runtime. Both flags are read as the booleans
+    mpv answers (measured) and written only where they differ."""
+
+    def pin(self, server):
+        client = helper.MpvIpc(self.sock, 1.0)
+        client.connect()
+        try:
+            return helper.pin_adopted_player(client, self.sock)
+        finally:
+            client.close()
+
+    def test_prefetch_and_the_console_are_turned_off_on_adoption(self):
+        server = self.start(props={"prefetch-playlist": True, "load-console": True})
+        self.assertEqual(self.pin(server), 0)
+        self.assertIs(server.props["prefetch-playlist"], False)
+        self.assertIs(server.props["load-console"], False)
+        for prop in ("prefetch-playlist", "load-console"):
+            self.assertIn(["get_property", prop], server.commands)
+            self.assertIn(["set_property", prop, False], server.commands)
+
+    def test_a_player_that_holds_them_already_is_only_read(self):
+        server = self.start(props={"prefetch-playlist": False, "load-console": False})
+        self.pin(server)
+        sets = [c[1] for c in server.commands if c[0] == "set_property"]
+        self.assertNotIn("prefetch-playlist", sets)
+        self.assertNotIn("load-console", sets)
+
+    def test_a_write_that_does_not_take_is_counted(self):
+        server = self.start(props={"prefetch-playlist": True, "load-console": True},
+                            refuse={"prefetch-playlist", "load-console"})
+        self.assertGreaterEqual(self.pin(server), 2)
+        self.assertIs(server.props["prefetch-playlist"], True)
+
+
 class DemuxerAndProfileReadingTest(unittest.TestCase):
     """The two pure readings, called directly (rule 12)."""
 
     def test_demuxer_tls_unsafe_counts_exactly_the_tls_entries(self):
-        w = {"protocol_whitelist": WHITELIST}
-        for options, want in (({}, 1), (w, 0), (dict(w, live_start_index="-1", http_persistent="0"), 0),
+        w = dict(LISTS)
+        for options, want in ((w, 0), (dict(w, live_start_index="-1", http_persistent="0"), 0),
                               (dict(w, tls_verify="1"), 0), (dict(w, verify="1"), 0),
                               (dict(w, tls_verify="0"), 1), (dict(w, tls_verify="true"), 1), (dict(w, verify="0"), 1),
                               (dict(w, verifyhost="x"), 1), (dict(w, ca_file="/x"), 1), (dict(w, cafile="/x"), 1),
@@ -1199,9 +1301,15 @@ class DemuxerAndProfileReadingTest(unittest.TestCase):
                               (dict(w, tls_verify="0", verifyhost="x", live_start_index="-1"), 2),
                               (dict(w, cert_file="/c.pem", key_file="/k.pem", http_proxy="http://p"), 0),
                               # D-SINK-55: the whitelist must read exactly the pinned list.
-                              ({"protocol_whitelist": WHITELIST + ",rtp,udp"}, 1),
-                              ({"protocol_whitelist": "file," + WHITELIST}, 1), ({"protocol_whitelist": ""}, 1),
-                              ({"tls_verify": "0"}, 2),
+                              (dict(w, protocol_whitelist=WHITELIST + ",rtp,udp"), 1),
+                              (dict(w, protocol_whitelist="file," + WHITELIST), 1), (dict(w, protocol_whitelist=""), 1),
+                              ({"format_whitelist": FORMATS}, 1),
+                              # D-SINK-62 (lane-p1c): the format list too, exactly.
+                              ({"protocol_whitelist": WHITELIST}, 1), (dict(w, format_whitelist=FORMATS + ",imf"), 1),
+                              (dict(w, format_whitelist="hls"), 1), (dict(w, format_whitelist=""), 1),
+                              # D-SINK-64: the segment demuxer's options, whatever they hold.
+                              (dict(w, seg_format_options=""), 1), (dict(w, seg_format_options="probesize=1"), 1),
+                              ({}, 2), ({"tls_verify": "0"}, 3),
                               (None, None), ([], None), ("tls_verify=0", None)):
             with self.subTest(options=options):
                 self.assertEqual(helper.demuxer_tls_unsafe(options), want)

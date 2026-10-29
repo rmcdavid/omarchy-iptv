@@ -169,21 +169,32 @@ class ClassificationTest(unittest.TestCase):
         self.assertEqual(o["--gpu-sw"]["class"], "base")
         self.assertEqual(o["--demuxer-lavf-o"]["class"], "pinned")
         self.assertEqual(o["--demuxer-lavf-o"]["pinKey"], "tls_verify=1")
-        # The owner's decision 3: only the select menu goes.
-        for name in ("--load-stats-overlay", "--load-console", "--load-context-menu", "--load-commands",
+        # The owner's decision 3: only the select menu goes -- and, the
+        # owner's decision on D-SINK-61 (2026-10-29), the console with it,
+        # mpv's alias included. Stats, commands, the context menu,
+        # positioning and the OSC stay.
+        for name in ("--load-stats-overlay", "--load-context-menu", "--load-commands",
                      "--load-positioning", "--osc"):
             self.assertEqual(o[name]["class"], "allowed", name)
-        self.assertEqual(o["--load-select"]["class"], "pinned")
+        for name in ("--load-select", "--load-console", "--load-osd-console", "--prefetch-playlist"):
+            self.assertEqual(o[name]["class"], "pinned", name)
 
     def test_the_format_keys_are_the_helpers_whitelist_and_the_filters_words(self):
         """D-SINK-55 (2026-10-29): the demuxer's protocol whitelist is pinned
         (the helper's MPV_DEMUXER_WHITELIST_KEY, read back as exactly
         MPV_PROTOCOL_WHITELIST) and a blacklist is forbidden, both refused in
-        a token by the filter's words."""
+        a token by the filter's words. lane-p1c (2026-10-29): the format list
+        the same way (D-SINK-62, MPV_DEMUXER_FORMATS_KEY and
+        MPV_FORMAT_WHITELIST), and the `removed` keys are the read-back's
+        DEMUXER_FORMAT_FORBIDDEN (D-SINK-64)."""
         fmt = self.fixture["ffmpegFormat"]["options"]
-        self.assertEqual({k for k, c in fmt.items() if c == "pinned"}, {helper.MPV_DEMUXER_WHITELIST_KEY})
-        self.assertIn("--demuxer-lavf-o-append=%s=%s" % (helper.MPV_DEMUXER_WHITELIST_KEY, helper.MPV_PROTOCOL_WHITELIST),
-                      self.fixture["pinBlock"])
+        self.assertEqual({k for k, c in fmt.items() if c == "pinned"},
+                         {helper.MPV_DEMUXER_WHITELIST_KEY, helper.MPV_DEMUXER_FORMATS_KEY})
+        self.assertEqual({k for k, c in fmt.items() if c == "removed"}, set(helper.DEMUXER_FORMAT_FORBIDDEN))
+        self.assertEqual(set(fmt.values()), {"pinned", "forbidden", "removed"})
+        for key, wanted in ((helper.MPV_DEMUXER_WHITELIST_KEY, helper.MPV_PROTOCOL_WHITELIST),
+                            (helper.MPV_DEMUXER_FORMATS_KEY, helper.MPV_FORMAT_WHITELIST)):
+            self.assertIn("--demuxer-lavf-o-append=%s=%s" % (key, wanted), self.fixture["pinBlock"])
         for key in fmt:
             for token in ("--demuxer-lavf-o=%s=file" % key, "--demuxer-lavf-o-append=%s=http" % key,
                           '--demuxer-lavf-o="%s"=x' % key):

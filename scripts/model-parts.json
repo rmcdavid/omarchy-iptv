@@ -43,6 +43,7 @@
         "MPV_RESERVED",
         "MPV_DEMUXER_TLS_WORDS",
         "MPV_PROTOCOL_WHITELIST",
+        "MPV_FORMAT_WHITELIST",
         "MPV_TLS_VERIFY",
         "MPV_PIN_BLOCK",
         "MPV_GPU_SW",

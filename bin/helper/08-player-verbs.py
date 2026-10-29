@@ -123,14 +123,20 @@ def demuxer_tls_unsafe(options: Any) -> int | None:
     exactly MPV_PROTOCOL_WHITELIST -- absent or different counts one. Without
     it a stream server that answers with an SDP body makes the player listen
     (measured), so a player that does not hold it is not loaded into.
+
+    D-SINK-62 (lane-p1c, 2026-10-29): the same for `format_whitelist` and
+    MPV_FORMAT_WHITELIST, without which an IMF answer listens; and D-SINK-64:
+    a `seg_format_options` key counts one, because what it carries reaches
+    the HLS segment's demuxer past every word of the token filter.
     """
     if not isinstance(options, dict):
         return None
     count = 0 if options.get(MPV_DEMUXER_WHITELIST_KEY) == MPV_PROTOCOL_WHITELIST else 1
+    count += 0 if options.get(MPV_DEMUXER_FORMATS_KEY) == MPV_FORMAT_WHITELIST else 1
     for key, value in options.items():
         if key in DEMUXER_TLS_ON and value != "1":
             count += 1
-        elif key in DEMUXER_TLS_FORBIDDEN:
+        elif key in DEMUXER_TLS_FORBIDDEN or key in DEMUXER_FORMAT_FORBIDDEN:
             count += 1
     return count
 
@@ -278,13 +284,16 @@ def secure_player(client: MpvIpc) -> None:
     ok, options = client.try_command("get_property", MPV_DEMUXER_OPTS_PROP)
     if ok and isinstance(options, dict):
         for key, value in options.items():
-            if (key in DEMUXER_TLS_ON and value != "1") or key in DEMUXER_TLS_FORBIDDEN:
+            if ((key in DEMUXER_TLS_ON and value != "1") or key in DEMUXER_TLS_FORBIDDEN
+                    or key in DEMUXER_FORMAT_FORBIDDEN):
                 client.try_command("change-list", MPV_DEMUXER_OPTS_PROP, "remove", key)
         # D-SINK-55: `append` replaces that one key and keeps the user's
-        # others; the comma-separated value is taken whole (measured).
-        if options.get(MPV_DEMUXER_WHITELIST_KEY) != MPV_PROTOCOL_WHITELIST:
-            client.try_command("change-list", MPV_DEMUXER_OPTS_PROP, "append",
-                               "%s=%s" % (MPV_DEMUXER_WHITELIST_KEY, MPV_PROTOCOL_WHITELIST))
+        # others; the comma-separated value is taken whole (measured). The
+        # same for D-SINK-62's format list.
+        for key, wanted in ((MPV_DEMUXER_WHITELIST_KEY, MPV_PROTOCOL_WHITELIST),
+                            (MPV_DEMUXER_FORMATS_KEY, MPV_FORMAT_WHITELIST)):
+            if options.get(key) != wanted:
+                client.try_command("change-list", MPV_DEMUXER_OPTS_PROP, "append", "%s=%s" % (key, wanted))
     ok, mode = client.try_command("get_property", MPV_AUTO_PROFILES_PROP)
     if not ok or mode is not False:
         client.try_command("set_property", MPV_AUTO_PROFILES_PROP, "no")
@@ -366,6 +375,9 @@ def pin_adopted_player(client: MpvIpc, sock_path: str) -> int:
     (lane-p1b, 2026-10-29) drag-and-drop read off, the paste key bound to
     `ignore` (a later keypress appended nothing), the OSC key set. Not
     reset-on-next-file, which is read with the TLS pins instead (D-SINK-60).
+    And (lane-p1c, 2026-10-29) prefetch-playlist off (D-SINK-63) and the
+    console unloaded (D-SINK-61: mpv unloads a built-in script when its
+    load- option goes off at runtime, as load-auto-profiles showed).
     Returns how many writes did not take, for the journal."""
     where = player_dirs(sock_path)
     failed = 0
@@ -377,7 +389,8 @@ def pin_adopted_player(client: MpvIpc, sock_path: str) -> int:
                                ("load-unsafe-playlists", False, False),
                                ("osd-playlist-entry", "title", "title"), ("log-file", "", ""),
                                ("watch-later-dir", where["watchLater"], where["watchLater"]),
-                               ("drag-and-drop", False, "no")):
+                               ("drag-and-drop", False, "no"), ("prefetch-playlist", False, False),
+                               ("load-console", False, False)):
         ok, current = client.try_command("get_property", prop)
         if ok and current == value:
             continue
