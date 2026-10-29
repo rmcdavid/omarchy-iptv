@@ -10,24 +10,56 @@ the server is shut down and joined with a deadline, and when this process
 exits there is nothing left to find or kill. No port is chosen -- the kernel
 hands out an ephemeral one, so two lanes cannot collide on it.
 
-    serve-and-fetch.py fetch --helper <bin/omarchy-iptv> --corpus <dir> --work <dir>
+    unshare -rn serve-and-fetch.py fetch --outer-netns <net:[inode]>
+                             --helper <bin/omarchy-iptv> --corpus <dir> --work <dir>
                              --names a.png,b.jpg,... [--plant a.png,...]
-                             [--timeout <s>] [--tree-id <word>]
+                             [--loopback <fixture>] [--timeout <s>]
     serve-and-fetch.py refusal --helper <bin/omarchy-iptv> --corpus <dir>
                                --name <fixture> --url <https url>
 
+THE PROVIDER IS PUBLIC, AND LIVES IN A NAMESPACE (2026-10-29). Since
+D-SINK-40 a logo never reaches an address on this machine or a local
+network, on any hop (DestinationPolicy.for_logos, checked at connect time
+against the address the socket connects to). The first version of this rig
+served from 127.0.0.1, so on a tree with that policy every fetch was refused
+`local_address` before a byte moved and the scenario read 23 passed, 10
+failed: the gate stopped observing the sink it exists for. The answer is
+not a seam -- the helper runs UNPATCHED, as the service runs it, and its
+own classifier decides -- but an address the real classifier calls global
+that exists nowhere but here: `fetch` must run inside `unshare -rn` (a user
+namespace with its own network namespace, which an unprivileged user may
+make), and it gives that namespace a dummy interface carrying PUBLIC_ADDR.
+Nothing in the namespace is connected to a real interface, so the
+"internet" the helper reaches is this process and nothing else
+(tests/netns_public.py is the same construction, D-SINK-40's own test).
+
+It refuses to touch a namespace that is not its own: `--outer-netns` is the
+caller's /proc/<pid>/ns/net link, and the run stops with exit 2 when its own
+link is that one, or when the namespace holds any interface but `lo` before
+it adds its own. An `ip` step that fails inside a private namespace (no
+dummy driver on this kernel) is exit 77, the machine-cannot-run-this code.
+
+The rule-10 half: a second server on 127.0.0.1 INSIDE the namespace serves
+`--loopback <fixture>`, and one channel names it. The shipping policy must
+refuse it (`local_address`) with no GET reaching it, so a run whose
+namespace or helper had stopped enforcing the policy is red in the same
+run rather than greener than the real thing.
+
 `fetch` writes a channel cache under <work>/cache naming every fixture in
---names at https://localhost:<port>/<token>/<name>, copies every fixture in
+--names at https://PUBLIC_ADDR:<port>/<token>/<name>, copies every fixture in
 --plant into the logo cache under the name the helper will look it up by
 (a cache "written by 0.13.3", which never checked dimensions), runs
 `<helper> logos --fetch --cache-dir <work>/cache` as a subprocess with
 SSL_CERT_FILE pointed at the certificate this process just made, and reports:
 
+    RIG netns <outer> -> <own> public <addr>  (the namespace the run is in)
     RIG port <n>
     RIG token <t>                  (the random path component every URL carries)
     RIG name <fixture> <fnv1a32>   (the cache name the helper derives for it)
+    RIG name-loopback <fixture> <fnv1a32>
     RIG helper rc <n> stdout <path> stderr <path>
     RIG get <fixture> <count>      (how many GETs the server logged for it)
+    RIG get-loopback <fixture> <count>   (GETs that reached 127.0.0.1)
     RIG logos-on-disk <n> <names>  (what the logo directory holds afterwards)
 
 The helper's two streams go to files, never through this process's stdout,
@@ -41,10 +73,13 @@ about one fixture, or `RIG absent` on a tree without that function. That is
 the only place the helper is imported rather than run: the refusal text is
 swallowed into a count by `logos --fetch`, so the sink it would reach is the
 function's own return value, and rule 14 allows calling the shipping logic.
+It needs no namespace: nothing is fetched.
 
-The certificate is EC prime256v1, self-signed, CN=localhost with a DNS SAN,
-made by `openssl req` as an argv list (rule 2) and valid for two days. It is
-written 0600 into --work and is worth nothing outside this process's life.
+The certificate is EC prime256v1, self-signed, for the IP addresses
+PUBLIC_ADDR and 127.0.0.1 (subjectAltName, which is what TLS verification
+reads for an address), made by `openssl req` as an argv list (rule 2) and
+valid for two days. It is written 0600 into --work and is worth nothing
+outside this process's life.
 
 fnv1a32 is reimplemented here rather than imported, so that the planted
 names are computed by something OTHER than the code under test: the scenario
@@ -63,11 +98,21 @@ import json
 import os
 import secrets
 import shutil
+import socket
 import socketserver
 import ssl
 import subprocess
 import sys
 import threading
+
+# The provider's address inside the namespace. 11.0.0.0/8 is in no entry of
+# the IANA special-purpose registries the helper's classifier reads, so
+# address_class() answers `global` for it -- the classifier's own answer,
+# not a seam's -- and inside `unshare -rn` it exists on a dummy interface and
+# nowhere else. tests/netns_public.py and lane-dest's probe use the same one.
+PUBLIC_ADDR = "11.0.0.1"
+LOOPBACK_ADDR = "127.0.0.1"
+EXIT_SKIP = 77
 
 CONTENT_TYPES = {
     ".png": "image/png",
@@ -97,7 +142,8 @@ def make_certificate(work):
     argv = ["openssl", "req", "-x509", "-newkey", "ec",
             "-pkeyopt", "ec_paramgen_curve:prime256v1", "-nodes",
             "-keyout", key, "-out", cert, "-days", "2",
-            "-subj", "/CN=localhost", "-addext", "subjectAltName=DNS:localhost"]
+            "-subj", "/CN=" + PUBLIC_ADDR,
+            "-addext", "subjectAltName=IP:%s,IP:%s" % (PUBLIC_ADDR, LOOPBACK_ADDR)]
     subprocess.run(argv, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     os.chmod(key, 0o600)
     os.chmod(cert, 0o600)
@@ -109,10 +155,43 @@ class Server(socketserver.ThreadingMixIn, http.server.HTTPServer):
     allow_reuse_address = False
 
 
-def serve_corpus(corpus, token, cert, key):
-    """A server answering GET /<token>/<fixture> from the corpus. Returns
-    (server, thread, hits): hits is a dict fixture -> GET count, appended to
-    under a lock by the handler and read after the helper has exited."""
+def enter_public_namespace(outer):
+    """Give the private network namespace this process runs in its two
+    interfaces: `lo` up, and a dummy `d0` carrying PUBLIC_ADDR/32. Returns
+    (exit code, reason): 0 when ready; 2 when this is NOT a private
+    namespace (the caller's own, or one holding a real interface), so
+    nothing here ever adds an interface where a real one lives; 77 when an
+    `ip` step fails inside a private namespace, which is the machine's
+    answer (no dummy driver), not the rig's bug."""
+    try:
+        own = os.readlink("/proc/self/ns/net")
+    except OSError as error:
+        return 2, "cannot read /proc/self/ns/net: %s" % error.strerror
+    if not outer or own == outer:
+        return 2, "not inside a private network namespace (own %s, caller %s); run under `unshare -rn`" % (own, outer or "unstated")
+    present = sorted(name for _, name in socket.if_nameindex())
+    if present != ["lo"]:
+        return 2, "the namespace already holds %s; a fresh one holds only lo" % " ".join(present)
+    for argv in (["ip", "link", "set", "lo", "up"],
+                 ["ip", "link", "add", "d0", "type", "dummy"],
+                 ["ip", "link", "set", "d0", "up"],
+                 ["ip", "addr", "add", PUBLIC_ADDR + "/32", "dev", "d0"]):
+        try:
+            done = subprocess.run(argv, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, timeout=10)
+        except (OSError, subprocess.TimeoutExpired) as error:
+            return EXIT_SKIP, "`%s` did not run: %s" % (" ".join(argv), error.__class__.__name__)
+        if done.returncode != 0:
+            why = done.stderr.decode("ascii", "replace").strip().splitlines()
+            return EXIT_SKIP, "`%s` failed in the namespace: %s" % (" ".join(argv), why[0] if why else "rc %d" % done.returncode)
+    print("RIG netns %s -> %s public %s" % (outer, own, PUBLIC_ADDR))
+    return 0, ""
+
+
+def serve_corpus(corpus, token, cert, key, address):
+    """A server on `address` answering GET /<token>/<fixture> from the corpus.
+    Returns (server, thread, hits): hits is a dict fixture -> GET count,
+    appended to under a lock by the handler and read after the helper has
+    exited."""
     hits = {}
     lock = threading.Lock()
 
@@ -142,7 +221,7 @@ def serve_corpus(corpus, token, cert, key):
         def log_message(self, *args):
             pass
 
-    server = Server(("127.0.0.1", 0), Handler)
+    server = Server((address, 0), Handler)
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
     context.load_cert_chain(cert, key)
     server.socket = context.wrap_socket(server.socket, server_side=True)
@@ -154,10 +233,16 @@ def serve_corpus(corpus, token, cert, key):
 def cmd_fetch(args):
     names = [n for n in args.names.split(",") if n]
     plant = [n for n in (args.plant or "").split(",") if n]
-    for name in names + plant:
+    loopback = args.loopback or ""
+    for name in names + plant + ([loopback] if loopback else []):
         if not os.path.isfile(os.path.join(args.corpus, name)):
             sys.stderr.write("serve-and-fetch: no fixture %s in %s\n" % (name, args.corpus))
             return 2
+    code, why = enter_public_namespace(args.outer_netns)
+    if code != 0:
+        print("RIG netns-refused %s" % why)
+        sys.stderr.write("serve-and-fetch: %s\n" % why)
+        return code
     private_dir(args.work)
     cache = os.path.join(args.work, "cache")
     logos = os.path.join(cache, "logos")
@@ -166,13 +251,15 @@ def cmd_fetch(args):
         private_dir(path)
     cert, key = make_certificate(args.work)
     token = "t" + secrets.token_hex(6)
-    server, thread, hits = serve_corpus(args.corpus, token, cert, key)
+    server, thread, hits = serve_corpus(args.corpus, token, cert, key, PUBLIC_ADDR)
+    local, local_thread, local_hits = serve_corpus(args.corpus, token, cert, key, LOOPBACK_ADDR)
     port = server.server_address[1]
+    local_port = local.server_address[1]
     print("RIG port %d" % port)
     print("RIG token %s" % token)
 
     def url_of(name):
-        return "https://localhost:%d/%s/%s" % (port, token, name)
+        return "https://%s:%d/%s/%s" % (PUBLIC_ADDR, port, token, name)
 
     channels = []
     seen = []
@@ -181,9 +268,15 @@ def cmd_fetch(args):
             continue
         seen.append(name)
         channels.append({"id": "logo-%d" % index, "name": "Logo %d" % index,
-                         "url": "https://localhost:%d/stream/%d.ts" % (port, index),
+                         "url": "https://%s:%d/stream/%d.ts" % (PUBLIC_ADDR, port, index),
                          "logo": url_of(name)})
         print("RIG name %s %s" % (name, fnv1a32(url_of(name))))
+    if loopback:
+        local_url = "https://%s:%d/%s/%s" % (LOOPBACK_ADDR, local_port, token, loopback)
+        channels.append({"id": "logo-loopback", "name": "Logo on this machine",
+                         "url": "https://%s:%d/stream/loopback.ts" % (PUBLIC_ADDR, port),
+                         "logo": local_url})
+        print("RIG name-loopback %s %s" % (loopback, fnv1a32(local_url)))
     with open(os.path.join(cache, "channels.json"), "w") as handle:
         json.dump({"version": 1, "channels": channels}, handle)
     os.chmod(os.path.join(cache, "channels.json"), 0o600)
@@ -216,16 +309,19 @@ def cmd_fetch(args):
         with open(err_path, "ab") as err:
             err.write(b"serve-and-fetch: gave up after %d s and killed the helper\n" % args.deadline)
     finally:
-        server.shutdown()
-        server.server_close()
-        thread.join(timeout=5)
-        if thread.is_alive():
-            print("RIG server thread did not stop within 5 s")
+        for each, each_thread in ((server, thread), (local, local_thread)):
+            each.shutdown()
+            each.server_close()
+            each_thread.join(timeout=5)
+            if each_thread.is_alive():
+                print("RIG server thread did not stop within 5 s")
     os.chmod(out_path, 0o600)
     os.chmod(err_path, 0o600)
     print("RIG helper rc %d stdout %s stderr %s" % (rc, out_path, err_path))
     for name in seen:
         print("RIG get %s %d" % (name, hits.get(name, 0)))
+    if loopback:
+        print("RIG get-loopback %s %d" % (loopback, sum(local_hits.values())))
     try:
         on_disk = sorted(os.listdir(logos))
     except OSError:
@@ -261,6 +357,10 @@ def main(argv):
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     sub = parser.add_subparsers(dest="verb", required=True)
     fetch = sub.add_parser("fetch")
+    fetch.add_argument("--outer-netns", required=True,
+                       help="the caller's /proc/<pid>/ns/net link; this run refuses to be in it")
+    fetch.add_argument("--loopback", default="",
+                       help="a fixture served from 127.0.0.1 inside the namespace, which the policy must refuse")
     fetch.add_argument("--helper", required=True)
     fetch.add_argument("--corpus", required=True)
     fetch.add_argument("--work", required=True)

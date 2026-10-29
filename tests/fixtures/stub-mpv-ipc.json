@@ -1,0 +1,4840 @@
+{
+ "_comment": "What mpv 0.41.0 answered over its JSON IPC socket, measured 2026-10-29 for scripts/qa-stub-mpv.py, which must answer every modelled step of every transcript identically (its --self-test replays them). Each player: prlimit --core=0, timeout 20, env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u DBUS_SESSION_BUS_ADDRESS, a private HOME and XDG tree, --no-config --vo=null --ao=null, one connection, every command in the order listed, exit status 0 and nothing on stderr; the crash journal unchanged. The runtime directory is rewritten to /run/iptv-stub and argv[0] to mpv. These are measurements: edit them only by measuring again.",
+ "mpv": "mpv v0.41.0",
+ "measured": "2026-10-29",
+ "transcripts": [
+  {
+   "name": "pinned",
+   "what": "a player launched with the tree's launch argv after the pin block landed (mpv_launch_argv, the user's mpvArgs being --vo=null --ao=null): what every player this plugin now starts holds",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--wayland-app-id=omarchy-iptv",
+    "--force-window=immediate",
+    "--idle=once",
+    "--keep-open=no",
+    "--title=$>IPTV",
+    "--force-media-title=IPTV",
+    "--msg-level=all=error",
+    "--ytdl=no",
+    "--load-scripts=no",
+    "--screenshot-dir=/run/iptv-stub/shots",
+    "--watch-later-dir=/run/iptv-stub/wl",
+    "--gpu-shader-cache-dir=/run/iptv-stub/sc",
+    "--icc-cache-dir=/run/iptv-stub/sc",
+    "--gpu-sw=yes",
+    "--tls-verify=yes",
+    "--vo=null",
+    "--ao=null",
+    "--watch-later-dir=/run/iptv-stub/wl",
+    "--load-scripts=no",
+    "--scripts-clr",
+    "--input-commands-clr",
+    "--load-auto-profiles=no",
+    "--player-operation-mode=cplayer",
+    "--load-select=no",
+    "--load-unsafe-playlists=no",
+    "--save-watch-history=no",
+    "--log-file=",
+    "--reset-on-next-file-clr",
+    "--osd-playlist-entry=title",
+    "--stream-lavf-o-clr",
+    "--demuxer-lavf-propagate-opts=yes",
+    "--demuxer-lavf-o-append=tls_verify=1",
+    "--tls-verify=yes"
+   ],
+   "steps": [
+    {
+     "command": [
+      "get_property",
+      "mpv-version"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "mpv v0.41.0"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "stream-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "tls_verify": "1"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-propagate-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/tls-verify/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/stream-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-propagate-opts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-auto-profiles/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-select/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/osd-playlist-entry/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/user-agent/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/no-such-option/set-from-commandline"
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/user-agent/default-value"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "libmpv"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "profile-list"
+     ],
+     "reply": {
+      "error": "success",
+      "data": [
+       {
+        "name": "box",
+        "options": [
+         {
+          "key": "profile",
+          "value": "osd-box"
+         },
+         {
+          "key": "profile",
+          "value": "sub-box"
+         }
+        ]
+       },
+       {
+        "name": "sub-box",
+        "options": [
+         {
+          "key": "sub-border-style",
+          "value": "background-box"
+         },
+         {
+          "key": "sub-outline-size",
+          "value": "0"
+         },
+         {
+          "key": "sub-shadow-offset",
+          "value": "4"
+         }
+        ]
+       },
+       {
+        "name": "osd-box",
+        "options": [
+         {
+          "key": "osd-border-style",
+          "value": "background-box"
+         },
+         {
+          "key": "osd-outline-size",
+          "value": "0"
+         },
+         {
+          "key": "osd-shadow-offset",
+          "value": "4"
+         },
+         {
+          "key": "script-opt",
+          "value": "console-border_size=0"
+         },
+         {
+          "key": "script-opt",
+          "value": "console-corner_radius=0"
+         },
+         {
+          "key": "script-opt",
+          "value": "context_menu-padding_y=0"
+         },
+         {
+          "key": "script-opt",
+          "value": "context_menu-corner_radius=0"
+         },
+         {
+          "key": "script-opt",
+          "value": "stats-border_size=0"
+         }
+        ]
+       },
+       {
+        "name": "sw-fast",
+        "options": [
+         {
+          "key": "sws-scaler",
+          "value": "bilinear"
+         },
+         {
+          "key": "sws-fast",
+          "value": "yes"
+         },
+         {
+          "key": "zimg-scaler",
+          "value": "bilinear"
+         },
+         {
+          "key": "zimg-dither",
+          "value": "no"
+         }
+        ]
+       },
+       {
+        "name": "low-latency",
+        "options": [
+         {
+          "key": "audio-buffer",
+          "value": "0"
+         },
+         {
+          "key": "vd-lavc-threads",
+          "value": "1"
+         },
+         {
+          "key": "cache-pause",
+          "value": "no"
+         },
+         {
+          "key": "demuxer-lavf-o-add",
+          "value": "fflags=+nobuffer"
+         },
+         {
+          "key": "demuxer-lavf-probe-info",
+          "value": "nostreams"
+         },
+         {
+          "key": "demuxer-lavf-analyzeduration",
+          "value": "0.1"
+         },
+         {
+          "key": "video-sync",
+          "value": "audio"
+         },
+         {
+          "key": "interpolation",
+          "value": "no"
+         },
+         {
+          "key": "video-latency-hacks",
+          "value": "yes"
+         },
+         {
+          "key": "stream-buffer-size",
+          "value": "4k"
+         }
+        ]
+       },
+       {
+        "name": "gpu-hq",
+        "options": [
+         {
+          "key": "profile",
+          "value": "high-quality"
+         }
+        ]
+       },
+       {
+        "name": "high-quality",
+        "options": [
+         {
+          "key": "scale",
+          "value": "ewa_lanczossharp"
+         },
+         {
+          "key": "hdr-peak-percentile",
+          "value": "99.995"
+         },
+         {
+          "key": "hdr-contrast-recovery",
+          "value": "0.30"
+         }
+        ]
+       },
+       {
+        "name": "fast",
+        "options": [
+         {
+          "key": "scale",
+          "value": "bilinear"
+         },
+         {
+          "key": "dscale",
+          "value": "bilinear"
+         },
+         {
+          "key": "dither",
+          "value": "no"
+         },
+         {
+          "key": "correct-downscaling",
+          "value": "no"
+         },
+         {
+          "key": "linear-downscaling",
+          "value": "no"
+         },
+         {
+          "key": "sigmoid-upscaling",
+          "value": "no"
+         },
+         {
+          "key": "hdr-compute-peak",
+          "value": "no"
+         },
+         {
+          "key": "allow-delayed-peak-detect",
+          "value": "yes"
+         }
+        ]
+       },
+       {
+        "name": "encoding",
+        "options": [
+         {
+          "key": "vo",
+          "value": "lavc"
+         },
+         {
+          "key": "ao",
+          "value": "lavc"
+         },
+         {
+          "key": "keep-open",
+          "value": "no"
+         },
+         {
+          "key": "force-window",
+          "value": "no"
+         },
+         {
+          "key": "gapless-audio",
+          "value": "yes"
+         },
+         {
+          "key": "resume-playback",
+          "value": "no"
+         },
+         {
+          "key": "load-scripts",
+          "value": "no"
+         },
+         {
+          "key": "osc",
+          "value": "no"
+         },
+         {
+          "key": "framedrop",
+          "value": "no"
+         }
+        ]
+       },
+       {
+        "name": "libmpv",
+        "options": [
+         {
+          "key": "config",
+          "value": "no"
+         },
+         {
+          "key": "idle",
+          "value": "yes"
+         },
+         {
+          "key": "terminal",
+          "value": "no"
+         },
+         {
+          "key": "input-terminal",
+          "value": "no"
+         },
+         {
+          "key": "osc",
+          "value": "no"
+         },
+         {
+          "key": "input-default-bindings",
+          "value": "no"
+         },
+         {
+          "key": "input-vo-keyboard",
+          "value": "no"
+         },
+         {
+          "key": "input-media-keys",
+          "value": "no"
+         },
+         {
+          "key": "media-controls",
+          "value": "no"
+         }
+        ]
+       },
+       {
+        "name": "builtin-pseudo-gui",
+        "options": [
+         {
+          "key": "terminal",
+          "value": "no"
+         },
+         {
+          "key": "force-window",
+          "value": "yes"
+         },
+         {
+          "key": "idle",
+          "value": "once"
+         },
+         {
+          "key": "screenshot-dir",
+          "value": "~~desktop/"
+         }
+        ]
+       },
+       {
+        "name": "pseudo-gui",
+        "options": [
+         {
+          "key": "player-operation-mode",
+          "value": "pseudo-gui"
+         }
+        ]
+       },
+       {
+        "name": "default",
+        "options": []
+       }
+      ]
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-select"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "save-watch-history"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-unsafe-playlists"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "reset-on-next-file"
+     ],
+     "reply": {
+      "error": "success",
+      "data": []
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "title"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "log-file"
+     ],
+     "reply": {
+      "error": "success",
+      "data": ""
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "watch-later-dir"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "/run/iptv-stub/wl"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o/tls_verify"
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      "auto"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "auto"
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      "yes"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      "no"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      true
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      "bogus"
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      1
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      null
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property_string",
+      "load-auto-profiles",
+      "no"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-o",
+      {
+       "tls_verify": "0",
+       "foo": "bar"
+      }
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "tls_verify": "0",
+       "foo": "bar"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "remove",
+      "tls_verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "foo": "bar"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "remove",
+      "absent_key"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "foo": "bar"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "append",
+      "verify=0"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "foo": "bar",
+       "verify": "0"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "add",
+      "x=1"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "foo": "bar",
+       "verify": "0",
+       "x": "1"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "set",
+      "y=2"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "y": "2"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "bogus-op",
+      "y"
+     ],
+     "reply": {
+      "error": "error running command",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "no-such-option",
+      "remove",
+      "x"
+     ],
+     "reply": {
+      "error": "error running command",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "tls-verify",
+      "remove",
+      "x"
+     ],
+     "reply": {
+      "error": "error running command",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-o",
+      "x"
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-o",
+      [
+       "a"
+      ]
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-o",
+      {
+       "n": 1
+      }
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "y": "2"
+      }
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-o",
+      {}
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "stream-lavf-o",
+      "x"
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "stream-lavf-o",
+      {
+       "tls_verify": "0"
+      }
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "stream-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "tls_verify": "0"
+      }
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "stream-lavf-o",
+      {}
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      "yes"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      1
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      "bogus"
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      true
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-propagate-opts",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-propagate-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-propagate-opts",
+      true
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/tls-verify/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/stream-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-propagate-opts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-auto-profiles/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "option-info/tls-verify/set-from-commandline",
+      false
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "profile-list",
+      []
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "no-such-property",
+      1
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "no-such-property"
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/no-such-option"
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "name": "tls-verify",
+       "type": "Flag",
+       "set-from-commandline": true,
+       "set-locally": false,
+       "expects-file": false,
+       "default-value": false
+      }
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-select",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-select"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "save-watch-history",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "save-watch-history"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-unsafe-playlists",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-unsafe-playlists"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "reset-on-next-file",
+      []
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "reset-on-next-file"
+     ],
+     "reply": {
+      "error": "success",
+      "data": []
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "osd-playlist-entry",
+      "title"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "title"
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "log-file",
+      ""
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "log-file"
+     ],
+     "reply": {
+      "error": "success",
+      "data": ""
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "watch-later-dir",
+      "/run/iptv-stub/wl"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "watch-later-dir"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "/run/iptv-stub/wl"
+     }
+    }
+   ]
+  },
+  {
+   "name": "prepin",
+   "what": "a player launched with dev 713afbf's launch argv, which has no pin block: what an ADOPTED player started by 0.15.0 or earlier holds",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--wayland-app-id=omarchy-iptv",
+    "--force-window=immediate",
+    "--idle=once",
+    "--keep-open=no",
+    "--title=$>IPTV",
+    "--force-media-title=IPTV",
+    "--msg-level=all=error",
+    "--ytdl=no",
+    "--load-scripts=no",
+    "--screenshot-dir=/run/iptv-stub/shots",
+    "--watch-later-dir=/run/iptv-stub/wl",
+    "--gpu-shader-cache-dir=/run/iptv-stub/sc",
+    "--icc-cache-dir=/run/iptv-stub/sc",
+    "--gpu-sw=yes",
+    "--tls-verify=yes",
+    "--vo=null",
+    "--ao=null",
+    "--tls-verify=yes"
+   ],
+   "steps": [
+    {
+     "command": [
+      "get_property",
+      "mpv-version"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "mpv v0.41.0"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "stream-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-propagate-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "auto"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/tls-verify/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/stream-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-propagate-opts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-auto-profiles/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-select/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/osd-playlist-entry/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/user-agent/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/no-such-option/set-from-commandline"
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/user-agent/default-value"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "libmpv"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "profile-list"
+     ],
+     "reply": {
+      "error": "success",
+      "data": [
+       {
+        "name": "box",
+        "options": [
+         {
+          "key": "profile",
+          "value": "osd-box"
+         },
+         {
+          "key": "profile",
+          "value": "sub-box"
+         }
+        ]
+       },
+       {
+        "name": "sub-box",
+        "options": [
+         {
+          "key": "sub-border-style",
+          "value": "background-box"
+         },
+         {
+          "key": "sub-outline-size",
+          "value": "0"
+         },
+         {
+          "key": "sub-shadow-offset",
+          "value": "4"
+         }
+        ]
+       },
+       {
+        "name": "osd-box",
+        "options": [
+         {
+          "key": "osd-border-style",
+          "value": "background-box"
+         },
+         {
+          "key": "osd-outline-size",
+          "value": "0"
+         },
+         {
+          "key": "osd-shadow-offset",
+          "value": "4"
+         },
+         {
+          "key": "script-opt",
+          "value": "console-border_size=0"
+         },
+         {
+          "key": "script-opt",
+          "value": "console-corner_radius=0"
+         },
+         {
+          "key": "script-opt",
+          "value": "context_menu-padding_y=0"
+         },
+         {
+          "key": "script-opt",
+          "value": "context_menu-corner_radius=0"
+         },
+         {
+          "key": "script-opt",
+          "value": "stats-border_size=0"
+         }
+        ]
+       },
+       {
+        "name": "sw-fast",
+        "options": [
+         {
+          "key": "sws-scaler",
+          "value": "bilinear"
+         },
+         {
+          "key": "sws-fast",
+          "value": "yes"
+         },
+         {
+          "key": "zimg-scaler",
+          "value": "bilinear"
+         },
+         {
+          "key": "zimg-dither",
+          "value": "no"
+         }
+        ]
+       },
+       {
+        "name": "low-latency",
+        "options": [
+         {
+          "key": "audio-buffer",
+          "value": "0"
+         },
+         {
+          "key": "vd-lavc-threads",
+          "value": "1"
+         },
+         {
+          "key": "cache-pause",
+          "value": "no"
+         },
+         {
+          "key": "demuxer-lavf-o-add",
+          "value": "fflags=+nobuffer"
+         },
+         {
+          "key": "demuxer-lavf-probe-info",
+          "value": "nostreams"
+         },
+         {
+          "key": "demuxer-lavf-analyzeduration",
+          "value": "0.1"
+         },
+         {
+          "key": "video-sync",
+          "value": "audio"
+         },
+         {
+          "key": "interpolation",
+          "value": "no"
+         },
+         {
+          "key": "video-latency-hacks",
+          "value": "yes"
+         },
+         {
+          "key": "stream-buffer-size",
+          "value": "4k"
+         }
+        ]
+       },
+       {
+        "name": "gpu-hq",
+        "options": [
+         {
+          "key": "profile",
+          "value": "high-quality"
+         }
+        ]
+       },
+       {
+        "name": "high-quality",
+        "options": [
+         {
+          "key": "scale",
+          "value": "ewa_lanczossharp"
+         },
+         {
+          "key": "hdr-peak-percentile",
+          "value": "99.995"
+         },
+         {
+          "key": "hdr-contrast-recovery",
+          "value": "0.30"
+         }
+        ]
+       },
+       {
+        "name": "fast",
+        "options": [
+         {
+          "key": "scale",
+          "value": "bilinear"
+         },
+         {
+          "key": "dscale",
+          "value": "bilinear"
+         },
+         {
+          "key": "dither",
+          "value": "no"
+         },
+         {
+          "key": "correct-downscaling",
+          "value": "no"
+         },
+         {
+          "key": "linear-downscaling",
+          "value": "no"
+         },
+         {
+          "key": "sigmoid-upscaling",
+          "value": "no"
+         },
+         {
+          "key": "hdr-compute-peak",
+          "value": "no"
+         },
+         {
+          "key": "allow-delayed-peak-detect",
+          "value": "yes"
+         }
+        ]
+       },
+       {
+        "name": "encoding",
+        "options": [
+         {
+          "key": "vo",
+          "value": "lavc"
+         },
+         {
+          "key": "ao",
+          "value": "lavc"
+         },
+         {
+          "key": "keep-open",
+          "value": "no"
+         },
+         {
+          "key": "force-window",
+          "value": "no"
+         },
+         {
+          "key": "gapless-audio",
+          "value": "yes"
+         },
+         {
+          "key": "resume-playback",
+          "value": "no"
+         },
+         {
+          "key": "load-scripts",
+          "value": "no"
+         },
+         {
+          "key": "osc",
+          "value": "no"
+         },
+         {
+          "key": "framedrop",
+          "value": "no"
+         }
+        ]
+       },
+       {
+        "name": "libmpv",
+        "options": [
+         {
+          "key": "config",
+          "value": "no"
+         },
+         {
+          "key": "idle",
+          "value": "yes"
+         },
+         {
+          "key": "terminal",
+          "value": "no"
+         },
+         {
+          "key": "input-terminal",
+          "value": "no"
+         },
+         {
+          "key": "osc",
+          "value": "no"
+         },
+         {
+          "key": "input-default-bindings",
+          "value": "no"
+         },
+         {
+          "key": "input-vo-keyboard",
+          "value": "no"
+         },
+         {
+          "key": "input-media-keys",
+          "value": "no"
+         },
+         {
+          "key": "media-controls",
+          "value": "no"
+         }
+        ]
+       },
+       {
+        "name": "builtin-pseudo-gui",
+        "options": [
+         {
+          "key": "terminal",
+          "value": "no"
+         },
+         {
+          "key": "force-window",
+          "value": "yes"
+         },
+         {
+          "key": "idle",
+          "value": "once"
+         },
+         {
+          "key": "screenshot-dir",
+          "value": "~~desktop/"
+         }
+        ]
+       },
+       {
+        "name": "pseudo-gui",
+        "options": [
+         {
+          "key": "player-operation-mode",
+          "value": "pseudo-gui"
+         }
+        ]
+       },
+       {
+        "name": "default",
+        "options": []
+       }
+      ]
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-select"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "save-watch-history"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-unsafe-playlists"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "reset-on-next-file"
+     ],
+     "reply": {
+      "error": "success",
+      "data": []
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "title"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "log-file"
+     ],
+     "reply": {
+      "error": "success",
+      "data": ""
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "watch-later-dir"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "/run/iptv-stub/wl"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o/tls_verify"
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      "auto"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "auto"
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      "yes"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      "no"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      true
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      "bogus"
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      1
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      null
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property_string",
+      "load-auto-profiles",
+      "no"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-o",
+      {
+       "tls_verify": "0",
+       "foo": "bar"
+      }
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "tls_verify": "0",
+       "foo": "bar"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "remove",
+      "tls_verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "foo": "bar"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "remove",
+      "absent_key"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "foo": "bar"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "append",
+      "verify=0"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "foo": "bar",
+       "verify": "0"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "add",
+      "x=1"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "foo": "bar",
+       "verify": "0",
+       "x": "1"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "set",
+      "y=2"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "y": "2"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "bogus-op",
+      "y"
+     ],
+     "reply": {
+      "error": "error running command",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "no-such-option",
+      "remove",
+      "x"
+     ],
+     "reply": {
+      "error": "error running command",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "tls-verify",
+      "remove",
+      "x"
+     ],
+     "reply": {
+      "error": "error running command",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-o",
+      "x"
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-o",
+      [
+       "a"
+      ]
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-o",
+      {
+       "n": 1
+      }
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "y": "2"
+      }
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-o",
+      {}
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "stream-lavf-o",
+      "x"
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "stream-lavf-o",
+      {
+       "tls_verify": "0"
+      }
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "stream-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "tls_verify": "0"
+      }
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "stream-lavf-o",
+      {}
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      "yes"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      1
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      "bogus"
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      true
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-propagate-opts",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-propagate-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-propagate-opts",
+      true
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/tls-verify/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/stream-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-propagate-opts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-auto-profiles/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "option-info/tls-verify/set-from-commandline",
+      false
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "profile-list",
+      []
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "no-such-property",
+      1
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "no-such-property"
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/no-such-option"
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "name": "tls-verify",
+       "type": "Flag",
+       "set-from-commandline": true,
+       "set-locally": false,
+       "expects-file": false,
+       "default-value": false
+      }
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-select",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-select"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "save-watch-history",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "save-watch-history"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-unsafe-playlists",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-unsafe-playlists"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "reset-on-next-file",
+      []
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "reset-on-next-file"
+     ],
+     "reply": {
+      "error": "success",
+      "data": []
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "osd-playlist-entry",
+      "title"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "title"
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "log-file",
+      ""
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "log-file"
+     ],
+     "reply": {
+      "error": "success",
+      "data": ""
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "watch-later-dir",
+      "/run/iptv-stub/wl"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "watch-later-dir"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "/run/iptv-stub/wl"
+     }
+    }
+   ]
+  },
+  {
+   "name": "argv-a",
+   "what": "a bare player with the key-value list set, appended and cleared, the auto-profiles choice set to yes and a flag negated on the command line",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--idle=yes",
+    "--vo=null",
+    "--ao=null",
+    "--load-scripts=no",
+    "--msg-level=all=error",
+    "--demuxer-lavf-o=a=1,b=2",
+    "--demuxer-lavf-o-append=tls_verify=1",
+    "--stream-lavf-o-clr",
+    "--load-auto-profiles=yes",
+    "--no-demuxer-lavf-propagate-opts"
+   ],
+   "steps": [
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "a": "1",
+       "b": "2",
+       "tls_verify": "1"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "stream-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/stream-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-auto-profiles/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-propagate-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-propagate-opts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/tls-verify/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-select"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-select/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "save-watch-history"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/save-watch-history/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-unsafe-playlists"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-unsafe-playlists/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "reset-on-next-file"
+     ],
+     "reply": {
+      "error": "success",
+      "data": []
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/reset-on-next-file/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "title"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/osd-playlist-entry/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "log-file"
+     ],
+     "reply": {
+      "error": "success",
+      "data": ""
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/log-file/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "watch-later-dir"
+     ],
+     "reply": {
+      "error": "success",
+      "data": ""
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/watch-later-dir/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "yes"
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "no"
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "a=1,b=2,tls_verify=1"
+     }
+    },
+    {
+     "command": [
+      "set_property_string",
+      "demuxer-lavf-o",
+      "a=1,b=2"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "a": "1",
+       "b": "2"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "append",
+      "novalue"
+     ],
+     "reply": {
+      "error": "error running command",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "a": "1",
+       "b": "2"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "remove",
+      ""
+     ],
+     "reply": {
+      "error": "error running command",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "clr",
+      ""
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "append",
+      "k=v,w=x"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "k": "v,w=x"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "stream-lavf-o",
+      "append",
+      "tls_verify=0"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "stream-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "tls_verify": "0"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "stream-lavf-o",
+      "remove",
+      "tls_verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "stream-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-o",
+      null
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      null
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      "no"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      "true"
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-propagate-opts",
+      "no"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-propagate-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-select",
+      0
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "osd-playlist-entry",
+      "bogus"
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "title"
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "reset-on-next-file",
+      "x"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "reset-on-next-file",
+      [
+       1
+      ]
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "log-file",
+      5
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/user-agent"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "name": "user-agent",
+       "type": "String",
+       "set-from-commandline": false,
+       "set-locally": false,
+       "expects-file": false,
+       "default-value": "libmpv"
+      }
+     }
+    },
+    {
+     "command": [
+      "quit"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    }
+   ]
+  },
+  {
+   "name": "argv-b",
+   "what": "a bare player with the other list forms (-append, -clr, a plain set, -add), a bare flag and a choice set on the command line",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--idle=yes",
+    "--vo=null",
+    "--ao=null",
+    "--load-scripts=no",
+    "--msg-level=all=error",
+    "--demuxer-lavf-o-append=x=1",
+    "--demuxer-lavf-o-clr",
+    "--stream-lavf-o=tls_verify=0",
+    "--load-auto-profiles=auto",
+    "--demuxer-lavf-o-add=y=2",
+    "--load-select",
+    "--osd-playlist-entry=filename"
+   ],
+   "steps": [
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "y": "2"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "stream-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "tls_verify": "0"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/stream-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "auto"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-auto-profiles/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-propagate-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-propagate-opts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/tls-verify/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-select"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-select/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "save-watch-history"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/save-watch-history/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-unsafe-playlists"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-unsafe-playlists/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "reset-on-next-file"
+     ],
+     "reply": {
+      "error": "success",
+      "data": []
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/reset-on-next-file/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "filename"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/osd-playlist-entry/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "log-file"
+     ],
+     "reply": {
+      "error": "success",
+      "data": ""
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/log-file/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "watch-later-dir"
+     ],
+     "reply": {
+      "error": "success",
+      "data": ""
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/watch-later-dir/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "auto"
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "no"
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "y=2"
+     }
+    },
+    {
+     "command": [
+      "set_property_string",
+      "demuxer-lavf-o",
+      "a=1,b=2"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "a": "1",
+       "b": "2"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "append",
+      "novalue"
+     ],
+     "reply": {
+      "error": "error running command",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "a": "1",
+       "b": "2"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "remove",
+      ""
+     ],
+     "reply": {
+      "error": "error running command",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "clr",
+      ""
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "append",
+      "k=v,w=x"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "k": "v,w=x"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "stream-lavf-o",
+      "append",
+      "tls_verify=0"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "stream-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "tls_verify": "0"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "stream-lavf-o",
+      "remove",
+      "tls_verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "stream-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-o",
+      null
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      null
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      "no"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      "true"
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-propagate-opts",
+      "no"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-propagate-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-select",
+      0
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "osd-playlist-entry",
+      "bogus"
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "filename"
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "reset-on-next-file",
+      "x"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "reset-on-next-file",
+      [
+       1
+      ]
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "log-file",
+      5
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/user-agent"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "name": "user-agent",
+       "type": "String",
+       "set-from-commandline": false,
+       "set-locally": false,
+       "expects-file": false,
+       "default-value": "libmpv"
+      }
+     }
+    },
+    {
+     "command": [
+      "quit"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    }
+   ]
+  },
+  {
+   "name": "argv-c",
+   "what": "a bare player with empty values on three flags and the tri-state after an explicit no (mpv reads an empty value as yes), and the key-value lists' -remove form",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--idle=yes",
+    "--vo=null",
+    "--ao=null",
+    "--load-scripts=no",
+    "--msg-level=all=error",
+    "--load-auto-profiles=no",
+    "--load-auto-profiles=",
+    "--tls-verify=no",
+    "--tls-verify=",
+    "--load-select=no",
+    "--load-select=",
+    "--save-watch-history=",
+    "--demuxer-lavf-o=a=1,b=2",
+    "--demuxer-lavf-o-remove=a",
+    "--stream-lavf-o-remove=absent"
+   ],
+   "steps": [
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-select"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "save-watch-history"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "b": "2"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "stream-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-auto-profiles/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/tls-verify/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-select/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/save-watch-history/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/stream-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "yes"
+     }
+    }
+   ]
+  },
+  {
+   "name": "argv-d",
+   "what": "a bare player with the tri-state negated after a yes, and the third osd-playlist-entry word",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--idle=yes",
+    "--vo=null",
+    "--ao=null",
+    "--load-scripts=no",
+    "--msg-level=all=error",
+    "--load-auto-profiles=yes",
+    "--no-load-auto-profiles",
+    "--osd-playlist-entry=both"
+   ],
+   "steps": [
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-auto-profiles/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "no"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "both"
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "both"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/osd-playlist-entry/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "runtime-b",
+   "what": "runtime sets the first four transcripts did not make: a sub-path of a key-value list, change-list del, an empty string on a flag and on the tri-state, a fractional number, and osd-playlist-entry both",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--idle=yes",
+    "--vo=null",
+    "--ao=null",
+    "--load-scripts=no",
+    "--msg-level=all=error",
+    "--demuxer-lavf-o=tls_verify=1"
+   ],
+   "steps": [
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-o/tls_verify",
+      "0"
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "tls_verify": "1"
+      }
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "stream-lavf-o/tls_verify",
+      "0"
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "stream-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "del",
+      "tls_verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "del",
+      "absent"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "del",
+      ""
+     ],
+     "reply": {
+      "error": "error running command",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      ""
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property_string",
+      "tls-verify",
+      ""
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      1.5
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      ""
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      1.5
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      0
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-select",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-select",
+      ""
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-select"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "osd-playlist-entry",
+      "both"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "both"
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "both"
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "osd-playlist-entry",
+      "title"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "title"
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "yes"
+     }
+    }
+   ]
+  }
+ ]
+}

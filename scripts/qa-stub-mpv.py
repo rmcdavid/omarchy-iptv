@@ -37,7 +37,11 @@ Environment:
                  made safe is drivable at all. The value is left exactly as it
                  was: a double that refused and then stored would be more
                  forgiving than the thing it stands in for, in the direction
-                 that matters.
+                 that matters. A `change-list` on such a list is refused too.
+  STUB_PROFILES  a JSON list of profiles in mpv's `profile-list` shape
+                 ({"name": .., "options": [{"key": .., "value": ..}]}),
+                 appended to the built-in ones: the user's mpv.conf, for a
+                 player whose pins are not all set from the command line.
   STUB_WINDOW_S  seconds of history the back buffer holds before the floor
                  starts to move (default 60). STUB_LEAD_S is the forward
                  cache ahead of the reader (default 3.6, what a 2 s-segment
@@ -103,6 +107,66 @@ and cannot be read or written right now, and a caller must branch on
 implicit, because a double whose made-up details read as measurements is how a
 test double stops being evidence (CLAUDE.md rule 14).
 
+THE PIN READ-BACK (D-SINK-43, D-SINK-44, 2026-10-29). Since the pin block the
+helper refuses to load unless it can read, off the player, every OTHER TLS
+pin: `demuxer-lavf-o` (its TLS keys), `load-auto-profiles` (False, mpv's
+`no`), `option-info/<opt>/set-from-commandline` for the five per-file TLS
+options, and -- when one of those is not set from the command line --
+`profile-list`. This stub answered "property unavailable" for all four, so
+every play into it was refused `tls_unverified`: a double LESS forgiving than
+mpv in the direction that hides the ordinary path, the shape the TLS
+properties above were fixed for. They are now answered from OPTIONS below,
+and every value, coercion and refusal string there was measured on mpv
+0.41.0 over a real IPC socket, windowless (`prlimit --core=0 timeout 20 env
+-u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u
+DBUS_SESSION_BUS_ADDRESS mpv --no-config --vo=null --ao=null`, a private
+HOME, the crash journal unchanged). The seven transcripts -- a player
+launched with the pin block, one launched by 0.15.0's argv, four bare players
+with the list forms, empty values and negations on the command line, and one
+of the runtime edges the recheck measured -- are
+tests/fixtures/stub-mpv-ipc.json,
+and `--self-test` REPLAYS every step of them against this stub and requires
+the same reply, so the model is held to the measurement rather than to its
+author's reading of it. The steps it does not model are named in the replay
+with the reason. What was measured, in short:
+
+  * the initial values come from the launch argv, last token winning:
+    `--demuxer-lavf-o=k=v,k=v` sets the list, `-append=k=v` and `-add=k=v`
+    add one pair, `-remove=k` drops one, `-clr` empties it;
+    `--load-auto-profiles=no|yes|auto` reads False, True or "auto"; a bare
+    flag reads True, `--no-<flag>` False, and an EMPTY value (`--tls-verify=`,
+    `--load-auto-profiles=`) reads True, mpv's `yes` -- so an empty token
+    after an explicit `no` turns the option back on. `--no-load-auto-profiles`
+    reads False.
+  * `option-info/<opt>/set-from-commandline` is True for an option any token
+    on the argv named, in any of those forms, and stays what it was through a
+    runtime set_property; an option mpv does not have is `property not found`.
+  * a flag takes true/false and the strings "yes"/"no", and the EMPTY string
+    as "yes"; any other string is `unsupported format for accessing
+    property`, a number or null `error accessing property`.
+    `load-auto-profiles` also takes "auto", and refuses an integer with the
+    FORMAT error and a fractional number with the ACCESS error.
+    `osd-playlist-entry` takes title, filename and both. A key-value list
+    takes a map of strings or a
+    "k=v,k=v" string; a non-string value or a string without `=` is the
+    format error, a list or null the access error. A refused set leaves the
+    value alone.
+  * `change-list <list> remove <key>` (and `del`, the same) succeeds whether
+    or not the key is there; `append`/`add` take one "k=v" (commas stay in
+    the value), `set`
+    replaces the list, `clr` empties it; an empty key, a pair with no `=`, an
+    unknown operation, an option that is not a key-value list and an option
+    mpv does not have are all `error running command`.
+  * `profile-list` on a --no-config player is mpv's thirteen built-in
+    profiles, none of them [protocol.*] or [extension.*]; STUB_PROFILES adds
+    the user's own, so the per-file profile threat is drivable at all.
+  * a sub-path of a key-value list (`demuxer-lavf-o/tls_verify`) is `error
+    accessing property` for a read and for a write; the write changes nothing.
+  * a property mpv does not have is `property not found`, for a read and for
+    a write. This stub still STORES a write of a name it does not model,
+    where mpv refuses it -- the one place it stays more forgiving, named in
+    the replay rather than hidden.
+
 `python3 scripts/qa-stub-mpv.py --self-test` runs the unittest cases that
 pin these, against a fake clock. Each case was seen red by mutating the rule
 it names (counts in docs/QA-REWIND.md section 5).
@@ -120,6 +184,232 @@ import time
 
 VERSION = "mpv 0.41.0 (qa-stub)"
 
+# ---- the options the helper's TLS read-back and the adopted-player pins read
+# (D-SINK-43, D-SINK-44), modelled as mpv 0.41.0 answered them on 2026-10-29
+# (the header, and tests/fixtures/stub-mpv-ipc.json, which --self-test
+# replays). name -> (kind, the value a player launched without it reads).
+OPTIONS = {
+    "tls-verify": ("flag", False),
+    "demuxer-lavf-propagate-opts": ("flag", True),
+    "load-select": ("flag", True),
+    "save-watch-history": ("flag", False),
+    "load-unsafe-playlists": ("flag", False),
+    "load-auto-profiles": ("tristate", "auto"),
+    "stream-lavf-o": ("kvlist", {}),
+    "demuxer-lavf-o": ("kvlist", {}),
+    "reset-on-next-file": ("strlist", []),
+    "osd-playlist-entry": ("choice", "title"),
+    "log-file": ("string", ""),
+    "watch-later-dir": ("string", ""),
+}
+# The three values of osd-playlist-entry, each measured taking (`both` on
+# the recheck of 2026-10-29); "bogus" was measured refused.
+CHOICES = {"osd-playlist-entry": ("title", "filename", "both")}
+# Options whose option-info this stub answers without modelling their value:
+# the helper reads user-agent's default when it restores the header.
+INFO_ONLY = {"user-agent": "libmpv"}
+OPTION_SUFFIXES = ("-set", "-append", "-add", "-remove", "-clr")
+ERR_FORMAT = "unsupported format for accessing property"
+ERR_ACCESS = "error accessing property"
+ERR_NOT_FOUND = "property not found"
+ERR_COMMAND = "error running command"
+# mpv 0.41.0's built-in profiles, as `profile-list` lists them on a player
+# started with --no-config (measured): the order, the names and the options.
+BUILTIN_PROFILES = (
+    ('box', (('profile', 'osd-box'), ('profile', 'sub-box'))),
+    ('sub-box', (('sub-border-style', 'background-box'), ('sub-outline-size', '0'),
+        ('sub-shadow-offset', '4'))),
+    ('osd-box', (('osd-border-style', 'background-box'), ('osd-outline-size', '0'),
+        ('osd-shadow-offset', '4'), ('script-opt', 'console-border_size=0'), ('script-opt',
+        'console-corner_radius=0'), ('script-opt', 'context_menu-padding_y=0'), ('script-opt',
+        'context_menu-corner_radius=0'), ('script-opt', 'stats-border_size=0'))),
+    ('sw-fast', (('sws-scaler', 'bilinear'), ('sws-fast', 'yes'), ('zimg-scaler', 'bilinear'),
+        ('zimg-dither', 'no'))),
+    ('low-latency', (('audio-buffer', '0'), ('vd-lavc-threads', '1'), ('cache-pause', 'no'),
+        ('demuxer-lavf-o-add', 'fflags=+nobuffer'), ('demuxer-lavf-probe-info', 'nostreams'),
+        ('demuxer-lavf-analyzeduration', '0.1'), ('video-sync', 'audio'), ('interpolation', 'no'),
+        ('video-latency-hacks', 'yes'), ('stream-buffer-size', '4k'))),
+    ('gpu-hq', (('profile', 'high-quality'),)),
+    ('high-quality', (('scale', 'ewa_lanczossharp'), ('hdr-peak-percentile', '99.995'),
+        ('hdr-contrast-recovery', '0.30'))),
+    ('fast', (('scale', 'bilinear'), ('dscale', 'bilinear'), ('dither', 'no'),
+        ('correct-downscaling', 'no'), ('linear-downscaling', 'no'), ('sigmoid-upscaling', 'no'),
+        ('hdr-compute-peak', 'no'), ('allow-delayed-peak-detect', 'yes'))),
+    ('encoding', (('vo', 'lavc'), ('ao', 'lavc'), ('keep-open', 'no'), ('force-window', 'no'),
+        ('gapless-audio', 'yes'), ('resume-playback', 'no'), ('load-scripts', 'no'), ('osc', 'no'),
+        ('framedrop', 'no'))),
+    ('libmpv', (('config', 'no'), ('idle', 'yes'), ('terminal', 'no'), ('input-terminal', 'no'),
+        ('osc', 'no'), ('input-default-bindings', 'no'), ('input-vo-keyboard', 'no'),
+        ('input-media-keys', 'no'), ('media-controls', 'no'))),
+    ('builtin-pseudo-gui', (('terminal', 'no'), ('force-window', 'yes'), ('idle', 'once'),
+        ('screenshot-dir', '~~desktop/'))),
+    ('pseudo-gui', (('player-operation-mode', 'pseudo-gui'),)),
+    ('default', ()),
+)
+
+
+def copy_value(value):
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, list):
+        return list(value)
+    return value
+
+
+def parse_kvlist(text):
+    """mpv's `k=v,k=v` for a key-value list, or None when a pair has no `=`
+    or no key. mpv's quoting forms are not modelled; nothing the helper or
+    the harness sends uses them."""
+    out = {}
+    if text == "":
+        return out
+    for pair in text.split(","):
+        key, sep, value = pair.partition("=")
+        if not sep or key == "":
+            return None
+        out[key] = value
+    return out
+
+
+def coerce(name, value):
+    """(the value mpv stores, None) for a set_property of a modelled option,
+    or (None, mpv's refusal string). Measured, except where a line says not."""
+    kind = OPTIONS[name][0]
+    if kind in ("flag", "tristate"):
+        if isinstance(value, bool):
+            return value, None
+        if isinstance(value, str):
+            if value in ("yes", ""):
+                return True, None                   # "" is mpv's yes (measured)
+            if value == "no":
+                return False, None
+            if kind == "tristate" and value == "auto":
+                return "auto", None
+            return None, ERR_FORMAT                 # "bogus", "true"
+        if kind == "tristate" and isinstance(value, int):
+            return None, ERR_FORMAT                 # load-auto-profiles 1 and 0
+        return None, ERR_ACCESS                     # tls-verify 1, load-select 0, 1.5, null
+    if kind == "kvlist":
+        if isinstance(value, dict):
+            if all(isinstance(v, str) for v in value.values()):
+                return dict(value), None
+            return None, ERR_FORMAT                 # {"n": 1}
+        if isinstance(value, str):
+            parsed = parse_kvlist(value)            # "a=1,b=2" taken, "x" refused
+            return (parsed, None) if parsed is not None else (None, ERR_FORMAT)
+        return None, ERR_ACCESS                     # ["a"], null
+    if kind == "strlist":
+        if isinstance(value, list):
+            if all(isinstance(v, str) for v in value):
+                return list(value), None
+            return None, ERR_FORMAT                 # [1]
+        if isinstance(value, str):
+            # "x" was measured TAKEN; what it then reads was not measured.
+            return (value.split(",") if value else []), None
+        return None, ERR_ACCESS                     # not measured
+    if kind == "choice":
+        if isinstance(value, str):
+            return (value, None) if value in CHOICES[name] else (None, ERR_FORMAT)
+        return None, ERR_ACCESS                     # not measured
+    if isinstance(value, str):
+        return value, None
+    return None, ERR_ACCESS                         # log-file 5
+
+
+def string_form(name, value):
+    """What get_property_string answers for a modelled option (measured for
+    a flag, the tri-state and a key-value list)."""
+    if isinstance(value, bool):
+        return "yes" if value else "no"
+    kind = OPTIONS[name][0]
+    if kind == "kvlist":
+        return ",".join("%s=%s" % pair for pair in value.items())
+    if kind == "strlist":
+        return ",".join(value)
+    return value
+
+
+def read_argv(argv):
+    """The modelled options as a player launched with `argv` holds them, and
+    the set of options any token named (option-info's set-from-commandline).
+    mpv takes the LAST token for an option, which is what the plugin's
+    trailing pins rely on, so the tokens are applied in order. A token whose
+    value mpv would refuse is skipped here; mpv itself would refuse to start."""
+    values = dict((name, copy_value(default)) for name, (_, default) in OPTIONS.items())
+    named = set()
+    for arg in argv:
+        if not arg.startswith("--"):
+            continue
+        name, sep, value = arg[2:].partition("=")
+        value = value if sep else None
+        negated = False
+        if name not in OPTIONS and name.startswith("no-") and name[3:] in OPTIONS and value is None:
+            name, negated = name[3:], True
+        suffix = ""
+        if name not in OPTIONS:
+            for candidate in OPTION_SUFFIXES:
+                if name.endswith(candidate) and name[:-len(candidate)] in OPTIONS:
+                    name, suffix = name[:-len(candidate)], candidate
+                    break
+        if name not in OPTIONS:
+            continue
+        kind = OPTIONS[name][0]
+        if kind == "kvlist":
+            if suffix == "-clr":
+                new = {}
+            elif suffix in ("-append", "-add") and value is not None:
+                key, has, pair_value = value.partition("=")
+                if not has or key == "":
+                    continue
+                new = dict(values[name])
+                new[key] = pair_value
+            elif suffix == "-remove" and value:
+                new = dict(values[name])            # an absent key still names it
+                new.pop(value, None)
+            elif suffix in ("", "-set") and value is not None:
+                new = parse_kvlist(value)
+                if new is None:
+                    continue
+            else:
+                continue
+        elif kind == "strlist":
+            if suffix == "-clr":
+                new = []
+            elif suffix in ("", "-set") and value is not None:
+                new = value.split(",") if value else []
+            else:
+                continue
+        elif suffix:
+            continue
+        elif negated:
+            if kind not in ("flag", "tristate"):
+                continue
+            new = False                             # --no-load-auto-profiles reads false
+        elif value is None:
+            if kind not in ("flag", "tristate"):
+                continue
+            new = True                              # --load-select reads true
+        else:
+            new, err = coerce(name, value)
+            if err:
+                continue
+        values[name] = new
+        named.add(name)
+    return values, named
+
+
+def stub_profiles():
+    """The built-in profiles in mpv's shape, then STUB_PROFILES'."""
+    out = [{"name": name, "options": [{"key": k, "value": v} for k, v in options]}
+           for name, options in BUILTIN_PROFILES]
+    extra = os.environ.get("STUB_PROFILES", "")
+    if extra:
+        added = json.loads(extra)
+        if not isinstance(added, list):
+            raise ValueError("STUB_PROFILES must be a JSON list of profiles")
+        out.extend(added)
+    return out
+
 
 def _env_float(name, default):
     try:
@@ -129,7 +419,7 @@ def _env_float(name, default):
 
 
 class Stub(object):
-    def __init__(self, path, clock=time.monotonic, tls_verify=False):
+    def __init__(self, path, clock=time.monotonic, tls_verify=False, argv=()):
         self.path = path
         self.clock = clock
         self.lock = threading.RLock()
@@ -171,22 +461,25 @@ class Stub(object):
             "playlist/current/id": None,
             "pause": False,
             "paused-for-cache": False,
-            # D-SINK-16. Both of these are READABLE on a real player and both
-            # read these values on one launched with no TLS token on its argv
-            # (measured 2026-10-07, see the header). They are not in `unset`:
-            # mpv does not say "unavailable" for them, and a stub that did would
-            # push a caller down its cannot-be-made-safe path on every run.
-            #
-            # The INITIAL value comes from the launch argv, as real mpv's does.
-            # It was hardcoded False, which models a pre-update player and lies
-            # about every player this plugin now starts -- so the "already safe,
-            # nothing to migrate" path could not be reached at all without a
-            # display, which is rule 10 in the direction that hides a case
-            # rather than forgives one. Found by the review of the lane that
-            # taught the stub these properties.
-            "tls-verify": tls_verify,
-            "stream-lavf-o": {},
         }
+        # D-SINK-16, and since 2026-10-29 the pin read-back. `tls-verify` and
+        # `stream-lavf-o` are READABLE on a real player and read False and {}
+        # on one launched with no TLS token on its argv (measured 2026-10-07,
+        # see the header); they are not in `unset`, because mpv does not say
+        # "unavailable" for them and a stub that did would push a caller down
+        # its cannot-be-made-safe path on every run. The same now holds for
+        # every option in OPTIONS (measured 2026-10-29).
+        #
+        # The INITIAL values come from the launch argv, as real mpv's do. They
+        # were hardcoded, which modelled a pre-update player and lied about
+        # every player this plugin starts -- so the "already safe, nothing to
+        # migrate" path could not be reached at all without a display, which
+        # is rule 10 in the direction that hides a case rather than forgives
+        # one. Found by the review of the lane that taught the stub
+        # tls-verify. `tls_verify=True` is shorthand for that one token.
+        self.values, self.from_cli = read_argv(
+            (["--tls-verify=yes"] if tls_verify else []) + [str(a) for a in argv])
+        self.profiles = stub_profiles()
         # Absent until something sets or loads them - mpv reports
         # "property unavailable" for these on an idle player, and the
         # stand-down decision reads exactly that difference.
@@ -307,6 +600,21 @@ class Stub(object):
         with self.lock:
             if name in self.unset:
                 return (None, "property unavailable")
+            if name in self.values:
+                return (copy_value(self.values[name]), None)
+            if name == "profile-list":
+                return ([dict(p) for p in self.profiles], None)
+            if name.startswith("option-info/"):
+                option, _, field = name[len("option-info/"):].partition("/")
+                if option not in OPTIONS and option not in INFO_ONLY:
+                    return (None, ERR_NOT_FOUND)
+                if field == "set-from-commandline":
+                    return (option in self.from_cli, None)
+                if field == "default-value":
+                    return (copy_value(OPTIONS[option][1]) if option in OPTIONS else INFO_ONLY[option], None)
+                return (None, "property unavailable")   # the node and its other fields: not modelled
+            if "/" in name and name.split("/", 1)[0] in OPTIONS:
+                return (None, ERR_ACCESS)               # demuxer-lavf-o/tls_verify
             if name == "time-pos":
                 pos = self.time_pos()
                 return (pos, None) if pos is not None else (None, "property unavailable")
@@ -320,7 +628,8 @@ class Stub(object):
                 if isinstance(node, dict) and key in node:
                     return (node[key], None)
                 return (None, "property unavailable")
-            return (None, "property unavailable")
+            # A name mpv does not have (measured: `property not found`).
+            return (None, ERR_NOT_FOUND)
 
     def put(self, name, value):
         """None when it took, an mpv error string when it was refused.
@@ -334,6 +643,23 @@ class Stub(object):
         with self.lock:
             if name in self.refuse:
                 return "property unavailable"
+            if name == "profile-list" or name.startswith("option-info/"):
+                return ERR_ACCESS                       # read-only (measured)
+            if "/" in name and name.split("/", 1)[0] in OPTIONS:
+                # demuxer-lavf-o/tls_verify and stream-lavf-o/tls_verify
+                # (measured): refused, and the list is left as it was. It
+                # used to fall through to the store below and answer success.
+                return ERR_ACCESS
+            if name in self.values:
+                # Coerced and refused as mpv does; a refusal stores nothing.
+                # set-from-commandline is NOT touched: a runtime set does not
+                # change it (measured), which is why the pins survive one.
+                stored, err = coerce(name, value)
+                if err:
+                    return err
+                self.values[name] = stored
+                self.unset.discard(name)
+                return None
             self.unset.discard(name)
             if name == "pause":
                 self.set_pause(value)
@@ -346,6 +672,37 @@ class Stub(object):
                 self.props["user-data"] = node
                 self.unset.discard("user-data")
             self.props[name] = value
+            return None
+
+    def change_list(self, name, operation, value):
+        """mpv's `change-list` on a key-value list (measured): None when it
+        took, else mpv's refusal, with the list left as it was."""
+        with self.lock:
+            if name not in OPTIONS or OPTIONS[name][0] != "kvlist":
+                return ERR_COMMAND                      # an unknown option, tls-verify
+            if name in self.refuse:
+                return ERR_COMMAND                      # fault injection, not a measurement
+            current = dict(self.values[name])
+            value = "" if value is None else str(value)
+            if operation == "clr":
+                current = {}
+            elif operation in ("remove", "del"):        # del is remove (measured)
+                if value == "":
+                    return ERR_COMMAND
+                current.pop(value, None)                # an absent key still succeeds
+            elif operation in ("append", "add"):
+                key, sep, pair_value = value.partition("=")
+                if not sep or key == "":
+                    return ERR_COMMAND                  # "novalue"
+                current[key] = pair_value               # "k=v,w=x" -> {"k": "v,w=x"}
+            elif operation == "set":
+                parsed = parse_kvlist(value)
+                if parsed is None:
+                    return ERR_COMMAND
+                current = parsed
+            else:
+                return ERR_COMMAND
+            self.values[name] = current
             return None
 
     def loadfile(self, url):
@@ -475,6 +832,8 @@ class Stub(object):
             value, err = self.get(cmd[1])
             if err:
                 out["error"] = err
+            elif verb == "get_property_string" and cmd[1] in OPTIONS:
+                out["data"] = string_form(cmd[1], value)
             elif verb == "get_property_string":
                 out["data"] = value if isinstance(value, str) else json.dumps(value)
             else:
@@ -484,6 +843,11 @@ class Stub(object):
             # caller that must refuse to load when a property cannot be made
             # safe needs that reply to exist before its refusal is testable.
             err = self.put(cmd[1], cmd[2])
+            if err:
+                out["error"] = err
+        elif verb == "change-list":
+            err = self.change_list(cmd[1] if len(cmd) > 1 else "", cmd[2] if len(cmd) > 2 else "",
+                                   cmd[3] if len(cmd) > 3 else "")
             if err:
                 out["error"] = err
         elif verb == "loadfile":
@@ -921,10 +1285,12 @@ def self_test():
         def test_main_reads_the_tls_token_off_its_own_argv_last_one_winning(self):
             import types
             seen = {}
-            def fake_stub(path, tls_verify=False):
-                seen["tls"] = tls_verify
-                raise SystemExit(0)
             saved = globals()["Stub"]
+            def fake_stub(path, argv=()):
+                # main() hands the Stub its whole argv; what the player then
+                # READS is the real Stub's answer to that argv.
+                seen["tls"] = saved(path, argv=argv).get("tls-verify")[0]
+                raise SystemExit(0)
             globals()["Stub"] = fake_stub
             try:
                 for argv, want in (
@@ -966,14 +1332,159 @@ def self_test():
             out = self.reply(stub, "set_property", "stream-lavf-o", {})
             self.assertEqual(out["error"], "success")
 
-        def test_an_unknown_property_is_still_unavailable(self):
-            # The default did not get looser: only the two measured names moved.
+        def test_an_unknown_property_is_not_found(self):
+            # The default did not get looser: only measured names moved. The
+            # words did change, to mpv's own (measured 2026-10-29, the
+            # replay below): "property unavailable" is what mpv says of a
+            # property it HAS and cannot read right now.
             self.assertEqual(self.stub.get("no-such-mpv-property"),
-                             (None, "property unavailable"))
+                             (None, "property not found"))
+
+    class PinReadBack(unittest.TestCase):
+        """D-SINK-43, D-SINK-44: what the helper reads back before it loads, as
+        mpv 0.41.0 answered it on 2026-10-29 (the header). The first case
+        replays the seven measured transcripts whole; the rest name the rules
+        one at a time, so a red run says which."""
+
+        FIXTURE = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                               "tests", "fixtures", "stub-mpv-ipc.json")
+        # The steps of the transcripts this stub does not model, each with
+        # the reason. Everything else must answer exactly as mpv did.
+        UNMODELLED = (
+            (lambda c: c[:2] == ["get_property", "mpv-version"],
+             "the stub names itself (VERSION), so a log line says which player answered"),
+            (lambda c: c[0] == "get_property" and c[1].startswith("option-info/") and c[1].count("/") == 1,
+             "the whole option-info node; the helper reads two of its fields, which ARE modelled"),
+            (lambda c: c[:2] == ["set_property", "no-such-property"],
+             "the stub STORES a write of a name it does not model where mpv refuses it: "
+             "more forgiving, and kept so because it cannot list every property mpv has"),
+            (lambda c: c[0] == "quit", "the stub exits on quit"),
+        )
+
+        def setUp(self):
+            os.environ.pop("STUB_REFUSE_PROPS", None)
+            os.environ.pop("STUB_PROFILES", None)
+            with open(self.FIXTURE, encoding="ascii") as handle:
+                self.transcripts = json.load(handle)["transcripts"]
+
+        def tearDown(self):
+            os.environ.pop("STUB_PROFILES", None)
+
+        def transcript(self, name):
+            return [t for t in self.transcripts if t["name"] == name][0]
+
+        def stub(self, name):
+            return Stub("/nonexistent/pin.sock", clock=FakeClock(), argv=self.transcript(name)["argv"][1:])
+
+        def reply(self, stub, *command):
+            out = stub.dispatch({"command": list(command), "request_id": 3})
+            return {"error": out["error"], "data": out["data"]}
+
+        def test_the_measured_transcripts_replay_identically(self):
+            self.assertEqual(sorted(t["name"] for t in self.transcripts), ["argv-a", "argv-b", "argv-c", "argv-d", "pinned", "prepin", "runtime-b"])
+            compared, wrong = 0, []
+            for t in self.transcripts:
+                stub = Stub("/nonexistent/pin.sock", clock=FakeClock(), argv=t["argv"][1:])
+                for number, step in enumerate(t["steps"]):
+                    command = step["command"]
+                    if any(skip(command) for skip, _ in self.UNMODELLED):
+                        continue
+                    got = self.reply(stub, *command)
+                    compared += 1
+                    if got != step["reply"]:
+                        wrong.append("%s step %d %r: mpv %r, stub %r" % (t["name"], number, command, step["reply"], got))
+            self.assertEqual(wrong, [])
+            # A replay that skipped its way to green proves nothing: 374 steps
+            # were measured and all but the named ones are compared.
+            self.assertGreaterEqual(compared, 360)
+
+        def test_a_pinned_player_holds_every_pin_and_says_it_was_told_on_the_command_line(self):
+            stub = self.stub("pinned")
+            self.assertEqual(stub.get("demuxer-lavf-o"), ({"tls_verify": "1"}, None))
+            self.assertEqual(stub.get("load-auto-profiles"), (False, None))
+            self.assertEqual(stub.get("stream-lavf-o"), ({}, None))
+            for option in ("tls-verify", "stream-lavf-o", "demuxer-lavf-o", "demuxer-lavf-propagate-opts",
+                           "load-auto-profiles"):
+                self.assertEqual(stub.get("option-info/%s/set-from-commandline" % option), (True, None), option)
+
+        def test_a_player_from_before_the_pins_reads_as_one(self):
+            stub = self.stub("prepin")
+            self.assertEqual(stub.get("demuxer-lavf-o"), ({}, None))
+            self.assertEqual(stub.get("load-auto-profiles"), ("auto", None))
+            self.assertEqual(stub.get("option-info/tls-verify/set-from-commandline"), (True, None))
+            for option in ("stream-lavf-o", "demuxer-lavf-o", "demuxer-lavf-propagate-opts", "load-auto-profiles"):
+                self.assertEqual(stub.get("option-info/%s/set-from-commandline" % option), (False, None), option)
+
+        def test_a_runtime_set_does_not_make_an_option_command_line_set(self):
+            stub = self.stub("prepin")
+            self.assertEqual(self.reply(stub, "set_property", "load-auto-profiles", "no")["error"], "success")
+            self.assertEqual(stub.get("load-auto-profiles"), (False, None))
+            self.assertEqual(stub.get("option-info/load-auto-profiles/set-from-commandline"), (False, None))
+
+        def test_the_tristate_takes_its_words_and_refuses_the_rest_unchanged(self):
+            stub = self.stub("prepin")
+            for value, want in (("no", False), ("yes", True), ("auto", "auto"), (False, False), (True, True)):
+                self.assertEqual(self.reply(stub, "set_property", "load-auto-profiles", value)["error"], "success")
+                self.assertEqual(stub.get("load-auto-profiles"), (want, None))
+            for value, err in (("bogus", "unsupported format for accessing property"),
+                               (1, "unsupported format for accessing property"),
+                               (None, "error accessing property")):
+                self.assertEqual(self.reply(stub, "set_property", "load-auto-profiles", value)["error"], err)
+                self.assertEqual(stub.get("load-auto-profiles"), (True, None))
+
+        def test_a_flag_takes_yes_and_no_and_refuses_true_as_a_word(self):
+            stub = self.stub("pinned")
+            self.assertEqual(self.reply(stub, "set_property", "tls-verify", "no")["error"], "success")
+            self.assertEqual(stub.get("tls-verify"), (False, None))
+            for value, err in (("true", "unsupported format for accessing property"), (1, "error accessing property")):
+                self.assertEqual(self.reply(stub, "set_property", "tls-verify", value)["error"], err)
+                self.assertEqual(stub.get("tls-verify"), (False, None))
+
+        def test_change_list_on_the_demuxer_options_as_measured(self):
+            stub = self.stub("pinned")
+            self.assertEqual(self.reply(stub, "change-list", "demuxer-lavf-o", "remove", "tls_verify")["error"], "success")
+            self.assertEqual(stub.get("demuxer-lavf-o"), ({}, None))
+            self.assertEqual(self.reply(stub, "change-list", "demuxer-lavf-o", "remove", "absent")["error"], "success")
+            self.assertEqual(self.reply(stub, "change-list", "demuxer-lavf-o", "append", "verify=0")["error"], "success")
+            self.assertEqual(stub.get("demuxer-lavf-o"), ({"verify": "0"}, None))
+            for operation, value in (("append", "novalue"), ("remove", ""), ("bogus-op", "x")):
+                self.assertEqual(self.reply(stub, "change-list", "demuxer-lavf-o", operation, value)["error"],
+                                 "error running command")
+            self.assertEqual(stub.get("demuxer-lavf-o"), ({"verify": "0"}, None))
+            self.assertEqual(self.reply(stub, "change-list", "tls-verify", "remove", "x")["error"], "error running command")
+            self.assertEqual(self.reply(stub, "change-list", "demuxer-lavf-o", "clr", "")["error"], "success")
+            self.assertEqual(stub.get("demuxer-lavf-o"), ({}, None))
+
+        def test_a_refused_list_is_refused_by_change_list_too(self):
+            os.environ["STUB_REFUSE_PROPS"] = "demuxer-lavf-o"
+            try:
+                stub = self.stub("pinned")
+            finally:
+                os.environ.pop("STUB_REFUSE_PROPS", None)
+            self.assertNotEqual(self.reply(stub, "change-list", "demuxer-lavf-o", "remove", "tls_verify")["error"], "success")
+            self.assertEqual(stub.get("demuxer-lavf-o"), ({"tls_verify": "1"}, None))
+
+        def test_profile_list_is_the_builtin_thirteen_and_then_the_users(self):
+            names = [p["name"] for p in self.stub("prepin").get("profile-list")[0]]
+            self.assertEqual(len(names), 13)
+            self.assertEqual([n for n in names if n.startswith(("protocol.", "extension."))], [])
+            os.environ["STUB_PROFILES"] = json.dumps([{"name": "protocol.https", "options": [
+                {"key": "stream-lavf-o", "value": "tls_verify=0"}]}])
+            stub = self.stub("prepin")
+            self.assertEqual(stub.get("profile-list")[0][-1]["name"], "protocol.https")
+            self.assertEqual(self.reply(stub, "set_property", "profile-list", [])["error"], "error accessing property")
+
+        def test_option_info_of_an_option_mpv_does_not_have_is_not_found(self):
+            stub = self.stub("pinned")
+            self.assertEqual(stub.get("option-info/no-such-option/set-from-commandline"), (None, "property not found"))
+            self.assertEqual(stub.get("option-info/user-agent/default-value"), ("libmpv", None))
+            self.assertEqual(self.reply(stub, "set_property", "option-info/tls-verify/set-from-commandline", False)["error"],
+                             "error accessing property")
 
     suite = unittest.TestSuite([
         unittest.defaultTestLoader.loadTestsFromTestCase(SeekSemantics),
         unittest.defaultTestLoader.loadTestsFromTestCase(TlsProperties),
+        unittest.defaultTestLoader.loadTestsFromTestCase(PinReadBack),
     ])
     result = unittest.TextTestRunner(verbosity=1).run(suite)
     return 0 if result.wasSuccessful() else 1
@@ -984,23 +1495,20 @@ def main(argv):
         return self_test()
     path = None
     # D-SINK-16. mpv resolves a repeated option by taking the LAST token, which
-    # is why the plugin re-asserts --tls-verify=yes after the user's arguments;
-    # a stub that ignored its argv could not model a player launched by the
-    # FIXED code at all, so the "already safe, nothing to migrate" path was
-    # unreachable without a display.
-    tls_verify = False
+    # is why the plugin re-asserts --tls-verify=yes after the user's arguments
+    # (and since 2026-10-29 the whole pin block); a stub that ignored its argv
+    # could not model a player launched by the FIXED code at all, so the
+    # "already safe, nothing to migrate" path was unreachable without a
+    # display. The whole argv goes to the Stub, which reads it as mpv does
+    # (read_argv).
     for arg in argv:
         if arg.startswith("--input-ipc-server="):
             path = arg.split("=", 1)[1]
-        elif arg in ("--tls-verify", "--tls-verify=yes", "--tls-verify=true"):
-            tls_verify = True
-        elif arg in ("--tls-verify=no", "--tls-verify=false", "--no-tls-verify"):
-            tls_verify = False
     if not path:
         # The "spawned but never binds" shape. Sleep past --spawn-timeout.
         time.sleep(float(os.environ.get("STUB_LIFE", "60")))
         return 0
-    stub = Stub(path, tls_verify=tls_verify)
+    stub = Stub(path, argv=argv)
     try:
         os.unlink(path)
     except OSError:
