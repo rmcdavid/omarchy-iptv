@@ -4249,6 +4249,592 @@
      }
     }
    ]
+  },
+  {
+   "name": "argv-c",
+   "what": "a bare player with empty values on three flags and the tri-state after an explicit no (mpv reads an empty value as yes), and the key-value lists' -remove form",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--idle=yes",
+    "--vo=null",
+    "--ao=null",
+    "--load-scripts=no",
+    "--msg-level=all=error",
+    "--load-auto-profiles=no",
+    "--load-auto-profiles=",
+    "--tls-verify=no",
+    "--tls-verify=",
+    "--load-select=no",
+    "--load-select=",
+    "--save-watch-history=",
+    "--demuxer-lavf-o=a=1,b=2",
+    "--demuxer-lavf-o-remove=a",
+    "--stream-lavf-o-remove=absent"
+   ],
+   "steps": [
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-select"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "save-watch-history"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "b": "2"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "stream-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-auto-profiles/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/tls-verify/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-select/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/save-watch-history/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/stream-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "yes"
+     }
+    }
+   ]
+  },
+  {
+   "name": "argv-d",
+   "what": "a bare player with the tri-state negated after a yes, and the third osd-playlist-entry word",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--idle=yes",
+    "--vo=null",
+    "--ao=null",
+    "--load-scripts=no",
+    "--msg-level=all=error",
+    "--load-auto-profiles=yes",
+    "--no-load-auto-profiles",
+    "--osd-playlist-entry=both"
+   ],
+   "steps": [
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-auto-profiles/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "no"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "both"
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "both"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/osd-playlist-entry/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    }
+   ]
+  },
+  {
+   "name": "runtime-b",
+   "what": "runtime sets the first four transcripts did not make: a sub-path of a key-value list, change-list del, an empty string on a flag and on the tri-state, a fractional number, and osd-playlist-entry both",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--idle=yes",
+    "--vo=null",
+    "--ao=null",
+    "--load-scripts=no",
+    "--msg-level=all=error",
+    "--demuxer-lavf-o=tls_verify=1"
+   ],
+   "steps": [
+    {
+     "command": [
+      "set_property",
+      "demuxer-lavf-o/tls_verify",
+      "0"
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "tls_verify": "1"
+      }
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "stream-lavf-o/tls_verify",
+      "0"
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "stream-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "del",
+      "tls_verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "del",
+      "absent"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "del",
+      ""
+     ],
+     "reply": {
+      "error": "error running command",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      ""
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property_string",
+      "tls-verify",
+      ""
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "tls-verify",
+      1.5
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      ""
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      1.5
+     ],
+     "reply": {
+      "error": "error accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-auto-profiles",
+      0
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-select",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-select",
+      ""
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-select"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "osd-playlist-entry",
+      "both"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "both"
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "both"
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "osd-playlist-entry",
+      "title"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "title"
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "yes"
+     }
+    }
+   ]
   }
  ]
 }
