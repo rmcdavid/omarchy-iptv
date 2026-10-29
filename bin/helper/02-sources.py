@@ -480,8 +480,8 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
     10,000-channel budget): -> (why it is not a channel, its host), the
     reason "" for a channel, `scheme` (not a stream URL: is_stream_url's
     first half, a control character included: stream_form_ok), `listener`
-    (stream_listen_refusal, D-SINK-42) or `local` (stream_host_refused,
-    D-SINK-41)."""
+    (stream_listen_refusal, D-SINK-42), `local` (stream_host_refused,
+    D-SINK-41) or `port` (the same rule's loopback-relay half, D-SINK-57)."""
     if url.startswith("-") or _CONTROL_CHARS.search(url):
         return "scheme", ""
     try:
@@ -505,8 +505,9 @@ def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
             port = URL_DEFAULT_PORTS.get(scheme)
     except ValueError:
         port = None
-    if _host_refused(host, scheme, source, port):
-        return "local", host
+    refusal = _host_refusal(host, scheme, source, port)
+    if refusal:
+        return refusal, host
     return "", host
 
 
@@ -546,14 +547,37 @@ def stream_host_refused(url: str, source: dict[str, Any]) -> bool:
 
 
 def _host_refused(host: str, scheme: str, source: dict[str, Any], port: int | None = None) -> bool:
+    return _host_refusal(host, scheme, source, port) != ""
+
+
+def _host_refusal(host: str, scheme: str, source: dict[str, Any], port: int | None = None) -> str:
+    """Why a channel host is not one this playlist may name: "" when it may,
+    `local` (a non-global literal from a playlist that is neither local nor
+    on that host), or `port`.
+
+    `port` is D-SINK-57's scope (the lead, 2026-10-29, after the owner's "on
+    this machine, only the relay's own port is the playlist's host"): a
+    LOOPBACK source -- a local relay such as Threadfin or xTeVe -- is a local
+    source, and a local source's channels may name the LAN (a relay passing
+    an HDHomeRun or a TVHeadend stream through keeps working), but a channel
+    whose literal host is loopback must be on the relay's own PORT. Any
+    other port of this machine is some other service, which the relay's
+    playlist did not have to name: the review's reproduction 1 again, one
+    layer down, as a channel rather than a redirect. A port the source does
+    not record (a cache written before sourcePort) matches none."""
     kind = host_class(host)
     if kind in ("", "global"):
-        return False
+        return ""
     if kind == "multicast" and scheme in MULTICAST_ONLY_SCHEMES:
-        return False
+        return ""
     if source.get("local"):
-        return False
-    return not own_host_match(host, port, source)
+        if kind == "loopback" and source.get("loopback"):
+            want = source.get("port")
+            same = (isinstance(port, int) and not isinstance(port, bool)
+                    and isinstance(want, int) and not isinstance(want, bool) and port == want)
+            return "" if same else "port"
+        return ""
+    return "" if own_host_match(host, port, source) else "local"
 
 
 def drop_sign_in_headers(channel: dict[str, Any], source: dict[str, Any], host: str | None = None) -> int:
@@ -888,6 +912,7 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
     playlist = source if isinstance(source, dict) else {"host": "", "local": False}
     skipped_listen = 0
     skipped_local = 0
+    skipped_port = 0
     dropped_sign_in = 0
 
     if isinstance(text, str):
@@ -950,6 +975,8 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
             skipped_listen += 1               # D-SINK-42: a form that would listen
         elif refusal == "local":
             skipped_local += 1                # D-SINK-41: a LAN literal from a public list
+        elif refusal == "port":
+            skipped_port += 1                 # D-SINK-57: another port of this machine, from a relay
         elif len(channels) >= MAX_CHANNELS:
             over_cap += 1
         else:
@@ -979,6 +1006,9 @@ def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]
     if skipped_local:
         warnings.append(counted_sentence(skipped_local, "%d entry skipped: a stream address on this machine or a local network, from a playlist that is not",
                                          "%d entries skipped: stream addresses on this machine or a local network, from a playlist that is not"))
+    if skipped_port:
+        warnings.append(counted_sentence(skipped_port, "%d entry skipped: a stream address on this machine at another port than the playlist's",
+                                         "%d entries skipped: stream addresses on this machine at other ports than the playlist's"))
     if dropped_sign_in:
         warnings.append(counted_sentence(dropped_sign_in, "%d sign-in header dropped: its channel is on another host than the playlist",
                                          "%d sign-in headers dropped: their channels are on other hosts than the playlist"))

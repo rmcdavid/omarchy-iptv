@@ -239,7 +239,9 @@ class ShieldTest(unittest.TestCase):
         import http.server, threading
         served = threading.Event()
         release = threading.Event()
-        body = b"#EXTM3U\n#EXTINF:-1 tvg-id=\"a\" group-title=\"G\",Alpha\nhttp://127.0.0.1:1/a\n"
+        # A named channel host (lane-p1c): from a loopback playlist, this
+        # machine at another port is skipped since D-SINK-57's scope.
+        body = b"#EXTM3U\n#EXTINF:-1 tvg-id=\"a\" group-title=\"G\",Alpha\nhttp://stream.example.test/a\n"
 
         class Hold(http.server.BaseHTTPRequestHandler):
             def log_message(self, *a):
