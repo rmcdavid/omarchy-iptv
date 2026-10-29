@@ -2153,3 +2153,114 @@ punish, so seek runs are exempt: `busy = controlProc.running &&
 controlKind !== "seek"` (D10). The seek itself replied in 0.10 ms and the
 read after it in 0.34 ms against that 8 s watchdog (spike 11.3); the
 exemption is for the slot's occupancy, not its latency.
+
+## 19. Where a channel may send this machine (D-SINK-41, D-SINK-42, D-PLY-44; 2026-10-29)
+
+The owner's policy of 2026-10-29 (ARCHITECTURE.md section 6 has its fetch
+half): a destination the PROVIDER chose may not reach a non-global address
+unless it is the user's own playlist host; udp and rtp only to multicast
+groups; no stream form that listens; no sign-in header to another host.
+The helper never sees mpv's connection, so for a stream its only lever is
+what it lets into channels.json and what it lets through `player_target`.
+
+### 19.1 The gate, and the layer each part sits in
+
+- **Listening forms (D-SINK-42), context-free, at parse time AND at play
+  time.** Measured with mpv 0.41.0 / FFmpeg n9.0.1 inside `unshare -rn`
+  (loopback only, so nothing bound a real interface; crash journal 81
+  before and after every run): `udp://0.0.0.0:P` and `udp://[::]:P` bind
+  every interface, `udp://127.0.0.1:P` binds that address (an input binds
+  the URL's own host), `rtp://` unicast binds its port and its RTCP port on
+  0.0.0.0, `srt://...?mode=listener` binds P and `mode=rendezvous` binds P,
+  and `localport`, `localaddr` and `localrtpport` move the bind;
+  `udp://@239.1.1.1:P` binds the GROUP address. rtmp `?listen=1` and
+  `?rtmp_listen=1`, rtsp `?listen` and `?rtsp_flags=listen`, http
+  `?listen=1`, mms and mmsh bound nothing (FFmpeg reads no option from those
+  URLs); `tcp://` is not a stream scheme. `is_stream_url` now refuses udp
+  and rtp to anything but a multicast literal, srt in any mode but caller,
+  and any stream URL carrying one of `LISTEN_PARAMS` -- the measured binders
+  and the aliases FFmpeg's udp, rtp, tcp, rtmp and rtsp protocols give them,
+  read the way FFmpeg reads them (after the FIRST `?`, a `#` included, so
+  `srt://h:1#?mode=listener` is refused) and compared case-folded and
+  %-decoded, which is stricter than FFmpeg. `player_target` runs every
+  cached URL through `is_stream_url` before a load, so a cache written
+  before this cannot open a port either; it answers `unsupported_scheme`,
+  as for any URL the gate refuses (a CHANNEL refusal, D-PLY-31's reading).
+  A refused line is counted: `N entries skipped: the streams would listen on
+  this machine for anyone to send to`. Cost the owner accepted: an ISP
+  multicast list that pins the interface with `localaddr` is refused, and a
+  provider URL whose query happens to carry one of those names is refused.
+- **Non-global literal hosts (D-SINK-41), at parse time, against the
+  playlist.** `parse_m3u` is handed `playlist_source(kind, url,
+  policy.last_class)`: the typed URL's host key, and whether the source is
+  LOCAL -- a file the user pointed at, or an http(s) source whose last hop
+  connected to a non-global address (the fetch's own DestinationPolicy). A
+  channel whose LITERAL host is not global (any spelling of loopback, the
+  LAN, link-local, CGNAT, unspecified or reserved; `localhost`) is skipped
+  and counted unless the source is local or the host is the playlist's own;
+  a multicast udp or rtp group passes. A parse that is told nothing reads
+  as a public source on no host and fails closed.
+- **Sign-in headers (D-SINK-41).** `Authorization`, `Cookie`,
+  `Proxy-Authorization` and `Host` from `#KODIPROP` (`#EXTVLCOPT` gives only
+  `User-Agent` and `Referer`) are dropped, counted, unless the channel's
+  host is the playlist's own. A local FILE has no host, so its channels keep
+  none of them -- the owner's rule read literally, and raised as a decision
+  request by the lane.
+
+### 19.2 What the gate cannot reach, stated exactly
+
+- **A NAME that resolves to a LAN address.** mpv resolves it, not the
+  helper. A pre-resolve in `apply_channel` was weighed and not made: it is
+  check-then-use against the provider's own DNS, and a provider who runs a
+  server beats it without DNS at all -- measured: FFmpeg followed a 302 from
+  127.0.0.1:47200 to 127.0.0.1:47201 and carried the per-file
+  `http-header-fields` (`X-Test: provider`) to the second host. FFmpeg's
+  `max_redirects` would stop that, but only through `--stream-lavf-o`, which
+  must stay EMPTY (D-SINK-13 layer three, D-SINK-16's read-back), and a
+  redirect-free player would break every load-balanced provider.
+- **HLS variant and segment URLs.** FFmpeg's hls demuxer fetches them
+  itself; measured, it opens only http(s), file and data URLs (an HLS-shaped
+  playlist whose "segments" were `udp://0.0.0.0:P` and `rtp://0.0.0.0:P`
+  bound nothing through it), so the LAN reach of a segment is the residual
+  and a listening segment is not.
+- **The nested route and D-PLY-44: entries the helper did not load.** A
+  plain M3U the stream server returns is expanded by mpv's own playlist
+  demuxer, and mpv counts srt and rtp as SAFE protocols for a network
+  playlist, so `load-unsafe-playlists=no` lets `srt://0.0.0.0:P?mode=
+  listener` and `rtp://0.0.0.0:P` through (measured: both bound; udp was
+  refused). mpv's default Ctrl+V binding (`loadfile ${clipboard/text}
+  append-play`) appends an entry nobody gated, which then plays with the
+  previous channel's provider headers, because the helper sets them as
+  GLOBAL properties. Measured on 2026-10-29, the levers, in the brief's order:
+  1. **An `on_load` hook over the shell's own IPC connection does not
+     exist**: mpv 0.41.0 answers `hook-add` over JSON IPC with
+     `Command 'hook-add' not found` (hooks are client-API only, `mpv_hook_add`;
+     the JSON IPC has no mapping). Rejected by measurement.
+  2. `access-references=no` stops the nested route -- and every HLS master
+     and variant playlist with it (`unrecognized file format`). Rejected:
+     HLS is most of IPTV.
+  3. **What works, all helper-side:** a PER-FILE `demuxer=lavf` on the
+     helper's own `loadfile` refuses a nested plain M3U (http, srt and rtp
+     entries alike: `unrecognized file format`, nothing fetched, nothing
+     bound) while HLS master, HLS variant and MPEG-TS play; PER-FILE header
+     options (`http-header-fields`, and the user agent and referrer, on the
+     `loadfile` instead of `set_property`) reach the channel and its HLS
+     segments and do NOT reach a nested entry or an appended one (measured:
+     the nested and the pasted request carried no `X-Test`, every segment
+     request did); and `keybind ctrl+v ignore` sent once per player
+     replaces the default binding (measured with `keypress`: a bound
+     loadfile appended one entry, the same key after `ignore` appended
+     none). The cost of `demuxer=lavf`: a channel whose URL is itself a
+     plain playlist (a radio `.pls`, an `.m3u` redirector) stops playing.
+  **Not shipped by lane-dest**: all three sit in `apply_channel` and the
+  player argv (bin/helper/08-player-verbs.py, 07-player.py), which belong to
+  the concurrent lane-mpvpin, and the brief forbade shipping half a lever.
+  Until they land, the nested route and Ctrl+V are open as described, with
+  D-SINK-42's listening forms closed only for URLs the helper loads.
+
+### 19.3 The fixture
+
+`tests/fixtures/destinations.json` holds every host spelling with its class
+and key (both suites), every stream form with the gate's verdict (`streams`,
+`streamHosts`; the python suite: the model has no stream gate), and the
+helper's refusal replies with the shell's sentence for them.

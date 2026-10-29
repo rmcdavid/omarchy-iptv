@@ -965,6 +965,97 @@ child, so the URL ends at the helper. That makes the helper's no-subprocess
 shape load-bearing for this sink, which is why engineering rule 5 now says
 so.
 
+Amended 2026-10-29 (D-SINK-40, D-SINK-41, D-SINK-42; the owner's policy of
+the same day). **The environment now says where its URL CAME FROM, and the
+helper decides where each hop of a fetch may connect.** Until this, nothing
+anywhere asked where a request goes, only its scheme: the playlist's
+`url-tvg` hint was adopted and fetched with no user action to any host
+(loopback, the LAN, 169.254.169.254, `2130706433`), a hint's userinfo became
+a pre-emptive `Authorization: Basic` to that host, and every 3xx on a
+playlist, guide or probe fetch was followed to any http(s) host. The policy:
+
+- A source the USER typed may reach any address on its FIRST hop -- a
+  TVHeadend, a Jellyfin, a NAS, a Tailscale host, the harness's 127.0.0.1
+  fixtures -- and a later hop may stay on that same host in the same address
+  class.
+- A destination the PROVIDER chose -- a guide hint, a redirect hop to
+  another host, a logo -- may not reach a non-global address, except the
+  user's own playlist host in the class its playlist fetch connected to. A
+  logo never reaches one, on any hop.
+- Non-global is `address_class` (bin/helper/01-core.py) over an EXPLICIT
+  table, mirrored by `Model.hostClass` and run with it over
+  `tests/fixtures/destinations.json`: loopback, private (RFC 1918, ULA,
+  site-local), shared (100.64/10 -- decided explicitly: CGNAT and every
+  Tailscale tailnet are other people's devices; a TYPED Tailscale host keeps
+  working through the first-hop rule), link-local, unspecified (0.0.0.0/8,
+  which connects to this machine on Linux), multicast (never right for a
+  TCP fetch), reserved, every IPv4-mapped, NAT64 and 6to4 form of those, and
+  any IPv6 outside 2000::/3. Not `ipaddress.is_global`, which on CPython
+  3.14.7 calls multicast, `64:ff9b::7f00:1`, `::7f00:1`, `::ffff:0:7f00:1`
+  and `fec0::/10` global; the python suite proves the table never calls
+  global what `is_global` does not.
+
+The CHECK is in `bounded_create_connection`, which every opener's every hop
+goes through (D-SRC-62), against the socket address actually connected --
+so `127.1`, `0x7f000001` and `[::ffff:7f00:1]` are read as what they connect
+to, and a name cannot answer one address to a check and another to the use.
+`DestinationPolicy` (bin/helper/03-io-playlist.py) is one object per fetch
+and counts its hops: each request is one (urllib opens one connection per
+request). A refusal is `local_address`, its sentence naming the refused
+host only (rule 5), `Refused a local address` in the shell
+(`Model.statusReason`; it keeps `from <host>`, being the provider's choice).
+
+The PROVENANCE rides beside the URL in the one assignment rule 5 asks for,
+`<proc>.environment = Model.fetchEnvironmentFor(<url>, <provenance>)`, which
+is `fetchEnvironment` plus up to three variables that carry no URL:
+`OMARCHY_IPTV_ORIGIN` (`user` for the playlist fetch, the probe and a typed
+guide URL; `playlist` for a hint; anything else, and anything the builder is
+not told, reads `playlist`), `OMARCHY_IPTV_PLAYLIST_HOST` (the active
+playlist's HOST, for a guide fetch) and `OMARCHY_IPTV_PLAYLIST_CLASS` (the
+class that playlist's first hop connected to, which the `playlist` verb now
+records in channels.json as `sourceClass`). Absent, the origin reads `user`:
+a human at their own shell with `--url`. The class is what defeats a
+rebinding provider: a hint on the playlist's own NAME is allowed into the
+LAN only when that name answered a LAN address when the playlist was
+fetched. A literal host needs no record. A name with no record (a cache
+written before this) is refused, and such a cache is refreshed at the next
+start or swap whatever its age (`Model.cacheBeforeDestinationRules`, over
+playlist-status.json's `destinationRules`).
+
+PROXIES, decided. urllib's default `ProxyHandler` honours `http_proxy` and
+`https_proxy`, and `make_opener` keeps it, so through a proxy the socket
+connects to the PROXY -- which the user chose, and which is not the
+destination. The handler therefore checks the TARGET instead, before the
+proxy is asked: it looks the name up with the same bounded lookup
+(`resolve_within`) and every address the answer holds must be allowed,
+because the proxy may use any of them. That is check-then-use, and it is the
+residual stated here rather than hidden: a name whose answer changes between
+this lookup and the proxy's own, or that the proxy resolves differently
+(split horizon), is not caught. A target this machine cannot resolve at all
+is allowed only on a typed first hop and on a later hop to that same host,
+and refused everywhere else (`network`, `Could not resolve host`); the cost
+is that, behind a proxy with no local DNS, a provider redirect to another
+host fails. Refusing every proxied provider-chosen hop was the alternative
+and would break every CDN redirect behind a proxy.
+
+What remains, each with its size:
+
+- The first hop of a typed NAME goes wherever the name's owner points it; a
+  provider who owns the playlist's domain can aim the user's own playlist
+  fetch at a LAN address. Accepted by the policy (the URL is the user's);
+  the provider chooses the address there, not the path.
+- The shell does not see the DNS answer of a hint's NAME (a dotless
+  `router`, a `tvh.lan`): the model adopts it, and the helper refuses it at
+  connect. The guide then fails `Refused a local address`, rather than the
+  row saying so in advance (the row names only LITERAL refusals).
+- Streams are mpv's, not the helper's: ARCHITECTURE-PLAYER.md section 19
+  holds what the parse-time gate covers and what FFmpeg still follows.
+- Costs the owner accepted: a guide hint on a DIFFERENT LAN host than the
+  playlist must be typed; a public provider that redirects into the user's
+  LAN stops working; a LAN server that redirects to ANOTHER LAN host stops
+  working too (the same rule), and so does a typed `localhost` source that
+  redirects to `127.0.0.1` (two hosts by name).
+
 Closed 2026-10-02 (D-TEXT-1). The same maintainer, reviewing the shipped
 0.9.2 artifact (omacom/omarchy-plugin-marketplace#9628), reported that a
 channel name keeps its markup through the helper and `Model.displayName`
