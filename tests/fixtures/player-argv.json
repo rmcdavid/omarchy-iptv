@@ -924,9 +924,17 @@
         ]
       },
       {
-        "name": "D-SINK-53: so do udp_multicast and lavf (FFmpeg's choice, which tries UDP first)",
+        "name": "D-SINK-53: so does udp_multicast, one token to a vector so the warning cannot come from the other (rc-p1b)",
         "tokens": [
-          "--rtsp-transport=udp_multicast",
+          "--rtsp-transport=udp_multicast"
+        ],
+        "warnings": [
+          "mpvArg --rtsp-transport opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-53: and lavf (FFmpeg's choice, which tries UDP first), alone for the same reason",
+        "tokens": [
           "--rtsp-transport=lavf"
         ],
         "warnings": [
