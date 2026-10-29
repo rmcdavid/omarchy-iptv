@@ -91,6 +91,22 @@ class FirstLoadReplyTest(unittest.TestCase):
         self.assertNotIn("token", reply["fileError"])
         self.assertLessEqual(len(reply["fileError"]), helper.FIRST_LOAD_REASON_MAX)
 
+    def test_a_window_that_runs_out_says_neither_ending(self):
+        """A window that reaches its deadline having seen no ending answers
+        exactly "unknown": neither an end-file nor a closed connection, so
+        no `ended` and no `fileError`. Every fixture case ends before its
+        deadline, so a mutant that wrote `closed` here survived them all
+        (rc-host5); the real mpv behind a server that never answers gives
+        this reply too."""
+
+        class Quiet:
+            def drain_events(self, deadline):
+                time.sleep(max(0.0, min(0.01, deadline - time.monotonic())))
+                return []
+
+        reply = helper.observe_first_load(Quiet(), 3, 0.05)
+        self.assertEqual(reply, {"state": "unknown", "reason": ""})
+
 
 def short_dir():
     """A private folder whose socket path fits sun_path (108 bytes): the
