@@ -653,6 +653,22 @@ class StreamGateTest(unittest.TestCase):
         self.assertEqual([c.get("headers") for c in result["channels"]], [{"X-Ok": "1"}])
         self.assertIn("2 sign-in headers dropped: their channels are on other hosts than the playlist", result["warnings"])
 
+    def test_a_typed_name_that_connected_to_loopback_holds_the_port_rule(self):
+        """D-SINK-57: "a name whose playlist fetch connected to loopback" is a
+        loopback home too, not only a literal or a localhost name -- read from
+        the first hop's class (playlist_source's `first_class`). A mutant
+        that read loopback from the literal alone survived the suite (rc-p1b):
+        the relay's own port keeps its sign-in headers, another port of the
+        same name does not."""
+        source = helper.playlist_source("http", "http://relay.example.test:34400/m3u", "loopback", "loopback")
+        self.assertEqual((source["host"], source["port"], source["loopback"], source["local"]),
+                         ("relay.example.test", 34400, True, True))
+        text = ("#EXTM3U\n#EXTINF:-1,Own\n#KODIPROP:inputstream.adaptive.stream_headers=Cookie=a&X-Ok=1\n"
+                "http://relay.example.test:34400/s/1\n#EXTINF:-1,Other\n"
+                "#KODIPROP:inputstream.adaptive.stream_headers=Cookie=a&X-Ok=1\nhttp://relay.example.test:631/s/2\n")
+        result = helper.parse_m3u(text, source)
+        self.assertEqual([c.get("headers") for c in result["channels"]], [{"Cookie": "a", "X-Ok": "1"}, {"X-Ok": "1"}])
+
     def test_a_cached_listening_url_is_refused_at_play_time(self):
         """A cache written before the rule: player_target re-checks it."""
         with tempfile.TemporaryDirectory() as cache:
