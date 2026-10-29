@@ -1212,16 +1212,16 @@ alias.
 
 | Class | What the plugin does | Count (mpv 0.41.0) |
 |---|---|---|
-| `allowed` | a user token passes and lands after the base argv | 828 |
+| `allowed` | a user token passes and lands after the base argv | 827 |
 | `reserved` | a user token is REFUSED, by name, in both mirrors' `MPV_RESERVED` | 39 |
-| `pinned` | re-asserted by the trailing pin block, AFTER the user's tokens; refused as a token as well, except the key-pinned `--demuxer-lavf-o` | 17 (15 options and 2 aliases) |
+| `pinned` | re-asserted by the trailing pin block, AFTER the user's tokens; refused as a token as well, except the key-pinned `--demuxer-lavf-o` | 18 (16 options and 2 aliases) |
 | `warned` | kept, with the PO-10 footer line | 7 |
 | `base` | set before the user's tokens; a user token may override it | 8 |
 
 An alias takes its target's class (`--watch-later-directory` is mpv's alias
 for the reserved `--watch-later-dir`, and base-name matching could not see
 it). The two names `--{` and `--}` are refused by shape, `MPV_ARG_RE`, so the
-two mirrors hold 53 names. The unit tests pin both mirrors to the file by
+two mirrors hold 54 names. The unit tests pin both mirrors to the file by
 CALLING the filter and the argv builder (`tests/test_mpv_options.py`,
 `tests/Model.test.js`); `scripts/check-mpv-options.py`, run by
 `scripts/check.sh` as "mpv option guard", holds the file against the mpv
@@ -1245,6 +1245,7 @@ deleted from the file, with FFmpeg's `verifyhost` deleted, and with the
 | `--scripts-clr` | a plain mpv.conf `script=` line loaded a script despite `--load-scripts=no`, and the script read the credentialed path (measured) |
 | `--input-commands-clr` | commands run at startup: `load-script`, `run`, `set` (D-SINK-45; a plain mpv.conf line ran them, measured) |
 | `--load-auto-profiles=no` | auto_profiles.lua applies a profile-cond profile at every load, over the command line (D-SINK-44) |
+| `--player-operation-mode=cplayer` | `pseudo-gui` makes mpv apply the user's `[pseudo-gui]` profile AFTER the command line with nothing preserved, which undid every other pin; a plain mpv.conf line was enough (measured by the recheck, below; D-SINK-44) |
 | `--load-select=no` | select.lua: `g l` forks `ffmpeg -i <path>`, the credentialed URL on a 0444 `/proc` cmdline for the life of the stream (measured), `g p` draws it (D-SINK-46) |
 | `--load-unsafe-playlists=no` | mpv's origin rule for nested entries: with it on, a server's playlist made the player write a file the server named and play a local file (measured, D-SINK-44) |
 | `--save-watch-history=no` | appends every path played, credentials and all, to `~/.local/state/mpv/watch_history.jsonl` (measured from mpv.conf) |
@@ -1282,6 +1283,26 @@ shape, with an adopted player started by v0.15.0's own argv) read 13 passed,
 0 failed on the tree and, with `--baseline 713afbf`, 4 passed and 9 failed --
 every attack check red, both controls green.
 
+**[2026-10-29, the recheck: a sixteenth pin.]** The five routes above are not
+every way mpv.conf reaches the options. With `player-operation-mode=pseudo-gui`
+-- a plain mpv.conf line, a named profile or a token -- mpv applies the user's
+`[pseudo-gui]` profile once at startup, AFTER the command line and with nothing
+preserved, so it overrode every pin while `set-from-commandline` still read
+true. Measured on the tree as it stood (the lane's tip, 99d23aa): a script
+loaded and wrote the credentialed path, the resume record and the watch
+history landed outside the runtime folder, select forked `ffmpeg` with the
+URL, and with `load-unsafe-playlists` in that profile a server's nested
+playlist truncated a scratch file the server named. The TLS peer held, because
+`apply_channel` re-sets and reads back its properties before every load. A
+trailing `--player-operation-mode=cplayer` (pinned, and the name reserved)
+closes it: the profile is consulted only when the mode reads `pseudo-gui`
+after the whole command line. `tls-scenario.sh --windowless` W10 observes it:
+red on 99d23aa and on dev 713afbf, green with the pin (14 passed, 0 failed).
+The `[encoding]` profile, which mpv applies the same way in encoding mode,
+needs `--o`, which is reserved and which mpv refuses in a config file
+(measured); no other post-command-line profile was found, by reading, not
+by a search of mpv's source.
+
 **The token filter adds one rule.** A `--demuxer-lavf-o*` token whose text
 contains `verify`, `ca_file`, `cafile`, `listen` or `external_sock` is
 refused (`MPV_DEMUXER_TLS_WORDS`). A substring of the raw token rather than a
@@ -1315,9 +1336,11 @@ request line and the headers (measured), and some users need one.
 with what holds it now: a token (the filter, then the pin block); a plain
 mpv.conf line (loses to anything on the command line); a named profile, the
 user's own `--profile` (the pin block comes after it); a profile-cond
-profile (never loaded: `--load-auto-profiles=no`); a `[protocol.*]` or
-`[extension.*]` profile (cannot replace a command-line-set option, so every
-pin is one); `--include` and `--config-dir` (reserved); input.conf and
+profile (never loaded: `--load-auto-profiles=no`); the `[pseudo-gui]`
+profile mpv applies after the command line in that operation mode (never:
+`--player-operation-mode=cplayer`, pinned, added by the recheck); a
+`[protocol.*]` or `[extension.*]` profile (cannot replace a
+command-line-set option, so every pin is one); `--include` and `--config-dir` (reserved); input.conf and
 `--input-commands` (commands at startup cleared; key bindings are the user's
 keypresses); IPC `set_property` from the helper (the third reading, before
 every load); and the built-in scripts, which `--load-scripts=no` does not
@@ -1344,7 +1367,17 @@ history stopped, and select's fork did not happen; the CA-signed control
 played. What remains on such a player, stated exactly: a script it already
 loaded from a `script=` line in mpv.conf keeps running (nothing unloads it),
 startup `input-commands` already ran, and an `include`-carrying per-file
-profile reads unsafe and stops it. A player of THIS release reads every pin
+profile reads unsafe and stops it. **[2026-10-29, the recheck.]** And the
+non-TLS pins `pin_adopted_player` writes at runtime do not hold against a
+per-file profile, which applies at every load to an option that was not set
+on the command line: measured on a player launched by dev 713afbf's argv and
+driven by this tree, a `[protocol.http]` profile with `save-watch-history`
+wrote the credentialed path to the watch history, one with
+`load-unsafe-playlists` let a server's nested playlist truncate a scratch
+file, and one with `load-select` let select's subtitle-line key fork `ffmpeg`
+with the URL. Only the TLS options are counted by the third reading, so such
+a player is migrated, not stopped, and those three stay open until it is
+replaced -- the owner's DR7 question. A player of THIS release reads every pin
 set from the command line, so none of that applies to it.
 
 **What a user sees.** Their own profile-cond auto-profiles do not apply in the
@@ -1452,7 +1485,7 @@ and not the runs described in this paragraph.
 
 | # | Layer | Job | Measured basis |
 |---|---|---|---|
-| 8 | The trailing pin block (4.12.1): `--stream-lavf-o-clr`, `--demuxer-lavf-propagate-opts=yes`, `--demuxer-lavf-o-append=tls_verify=1` and `--load-auto-profiles=no` among the pins, before the final `--tls-verify=yes` | Makes the libavformat lists COMMAND-LINE-SET, so no per-file profile replaces them, gives FFmpeg's own `tls_verify` the last word for every segment open, and keeps auto_profiles.lua from ever loading | Five ways per pin -- a contrary token, a plain mpv.conf line, a `[protocol.*]` profile, a profile-cond profile, a named profile: on dev 713afbf the attacker got the GET through `demuxer-lavf-o` all five ways, through `stream-lavf-o` by the two per-file profiles and through `tls-verify` by the profile-cond one; on the tree, 0 GETs in all fifteen |
+| 8 | The trailing pin block (4.12.1): `--stream-lavf-o-clr`, `--demuxer-lavf-propagate-opts=yes`, `--demuxer-lavf-o-append=tls_verify=1`, `--load-auto-profiles=no` and (2026-10-29, the recheck) `--player-operation-mode=cplayer` among the pins, before the final `--tls-verify=yes` | Makes the libavformat lists COMMAND-LINE-SET, so no per-file profile replaces them, gives FFmpeg's own `tls_verify` the last word for every segment open, and keeps auto_profiles.lua from ever loading and the `[pseudo-gui]` profile from applying after the command line | Five ways per pin -- a contrary token, a plain mpv.conf line, a `[protocol.*]` profile, a profile-cond profile, a named profile: on dev 713afbf the attacker got the GET through `demuxer-lavf-o` all five ways, through `stream-lavf-o` by the two per-file profiles and through `tls-verify` by the profile-cond one; on the tree, 0 GETs in all fifteen |
 | 9 | The third reading over IPC, `unpinned`, before every load and on adoption: the TLS entries of `demuxer-lavf-o` (removed by key), `load-auto-profiles` (set off), and the per-file profiles that could set a loose TLS option after the read-back (not fixable: the load is refused) | `verifyhost=<the attacker's own name>` in `demuxer-lavf-o` is a key the trailing pin cannot outvote, and a player started without the pins has no command-line-set lists | `--demuxer-lavf-o=verifyhost=evil.test` past the filter, with the tls_verify pin in place: on dev the attacker's certificate for its own name was accepted and its segment played; on the tree the key is removed before the load and the reopen is refused |
 
 Layers 1 to 5 are blind to a player this shell did not launch, every one of
