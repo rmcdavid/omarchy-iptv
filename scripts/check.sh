@@ -742,7 +742,10 @@ HELPER_REGEX_SITES_MIN=${HELPER_REGEX_SITES_MIN:-36}
 # D-SINK-16. The lane that grew it reported there was no floor on this step;
 # there is, it sits here, and leaving it at 19 would have let seven cases be
 # deleted without the gate noticing. Found by the review of that lane.
-STUB_TESTS_MIN=${STUB_TESTS_MIN:-28}
+# 28 -> 38 on 2026-10-29: the stub learned the pin read-back (D-SINK-43,
+# D-SINK-44) -- the replay of four measured mpv 0.41.0 transcripts and nine
+# cases naming its rules -- and the floor moves with it for the same reason.
+STUB_TESTS_MIN=${STUB_TESTS_MIN:-38}
 # The D-LOGO-11 logo preflight (scripts/dev-harness/logo-scenario.sh
 # check-tree): 32 checks over the shipping helper as a subprocess and the
 # shell's Image as a probe under an address-space rlimit, plus its own "ran
