@@ -66,6 +66,12 @@
 #                                as Latin-1 or Windows-1252 and written
 #                                again, the four characters UX.md held for
 #                                every Nerd Font glyph; D-DOC-28)
+#  18. mpv option guard          (scripts/check-mpv-options.py: every option
+#                                the installed mpv lists, and every TLS key
+#                                the installed FFmpeg lists, is classified in
+#                                tests/fixtures/mpv-options.json -- a new one
+#                                is red, and so is no mpv at all unless
+#                                MPV_OPTIONS_SKIP_OK=1; D-SINK-43..46)
 # Exit status is non-zero if any gate fails. qmllint *warnings* are reported
 # but do not fail the gate (the first-party widgets trigger the same
 # unqualified-access / missing-property warnings); qmllint *errors* do.
@@ -819,6 +825,9 @@ SR_REGISTER_ROWS_MIN=${SR_REGISTER_ROWS_MIN:-40}
 # files lowers this in the same commit and says which, as the text format
 # guard's 61 -> 58 did; a new file needs nothing.
 DOUBLE_ENCODING_FILES_MIN=${DOUBLE_ENCODING_FILES_MIN:-405}
+# The mpv option guard (D-SINK-43..46, 2026-10-29): mpv 0.41.0 lists 899
+# option bases; a guard that classified fewer read a different mpv or none.
+MPV_OPTIONS_MIN=${MPV_OPTIONS_MIN:-899}
 
 step() { printf '\n== %s\n' "$*"; }
 ok()   { printf 'ok   %s\n' "$*"; }
@@ -1708,6 +1717,42 @@ if python3 -I "$ROOT/scripts/check-double-encoding.py" --root "$ROOT" >"$dbl_log
   fi
 else
   cat "$dbl_log"; bad "double-encoding guard"
+fi
+
+step "mpv option guard (every mpv option and every FFmpeg TLS key is a decision)"
+# D-SINK-43..46 (owner, 2026-10-29: pin + classify, not a strict allowlist).
+# The reserved list was a list of the options someone had thought about, and
+# the 2026-10-29 review found eight it had not (demuxer-lavf-o for HLS,
+# input-commands, an alias of a reserved name, the watch history, unsafe
+# playlists, the auto-profiles, two OSD messages, the select menu). Every
+# option the installed mpv offers is now classified in one fixture that both
+# mirrors' reserved set and the trailing pin block are pinned to by the unit
+# tests; this step holds that fixture against the mpv and the FFmpeg that are
+# actually installed, so an option nobody classified is red. mpv runs
+# windowless with --no-config in a temporary HOME. No mpv answers 77, which is
+# RED unless MPV_OPTIONS_SKIP_OK=1 (the LOGO_PREFLIGHT_SKIP_OK shape).
+# Seen red on a fixture with --load-select deleted, with FFmpeg's verifyhost
+# deleted, and with the --watch-later-directory alias classified allowed.
+mpvopt_log=$CHECK_TMP/mpv-options.log
+python3 -I "$ROOT/scripts/check-mpv-options.py" >"$mpvopt_log" 2>&1; mpvopt_rc=$?
+if (( mpvopt_rc == 0 )); then
+  mpvopt_n=$(grep -oE '^mpv option guard: [0-9]+ options classified' "$mpvopt_log" | head -1 | grep -oE '[0-9]+')
+  if [[ -z $mpvopt_n ]]; then
+    cat "$mpvopt_log"; bad "mpv option guard printed no option count at all"
+  elif (( mpvopt_n < MPV_OPTIONS_MIN )); then
+    cat "$mpvopt_log"; bad "mpv option guard classified $mpvopt_n option(s), expected at least $MPV_OPTIONS_MIN"
+  else
+    grep -E '^NOTE' "$mpvopt_log" || true
+    ok "$(tail -1 "$mpvopt_log")"
+  fi
+elif (( mpvopt_rc == 77 )); then
+  if [[ ${MPV_OPTIONS_SKIP_OK:-0} == 1 ]]; then
+    printf 'SKIP mpv option guard (MPV_OPTIONS_SKIP_OK=1): no mpv on PATH\n'
+  else
+    bad "mpv option guard SKIPPED, which is not green: no mpv on PATH (set MPV_OPTIONS_SKIP_OK=1 to accept a gate that classified nothing)"
+  fi
+else
+  cat "$mpvopt_log"; bad "mpv option guard"
 fi
 
 if (( fail )); then echo "check.sh: FAILED"; exit 1; fi
