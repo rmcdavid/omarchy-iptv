@@ -668,6 +668,26 @@ by the helper for a syntactic reason; the helper keeps the runtime refusals
   its key; else `base = sourceKey(url)`, then `base`, `base-2`, `base-3`...
   until no record uses it. Deterministic given the list, so a re-add after a
   removal gets the same key unless a colliding record appeared in between.
+  **[Amended 2026-10-29, lane-p2a (D-SINK-48, the security review's
+  recommendation): a NEW key is a random draw, no longer `sourceKey(url)`.]**
+  `allocateSourceKey(sources, url, preferred, draw)`: the record whose `url ===
+  url` -> its key, as before; else `preferred` when it is a well-formed key no
+  record uses (the add and edit commits hand back the key their probe wrote
+  under, so the probe's folder is the new source's cache); else eight hex digits
+  of one draw (`Math.random` in the shell, `secrets.randbits(32)` in the
+  helper's `allocate_source_key`), then `-2`, `-3`... as before. Why: the key
+  names the cache folder, is mirrored into `shell.json` as `sourceKey`, and
+  appears in journal lines, and a 32-bit hash of a credentialed URL is a check on
+  a guessed password for anyone who reads it (SR36, SR40); nothing needs it to
+  be a function of the URL, because every lookup goes by the key the record
+  stores. What dedupes a re-added URL is unchanged and was never the key: the
+  normalized URL itself, compared (`findSourceByUrl`, SR14). What changes: a
+  URL removed and added again gets a NEW key and a fresh folder (the old one is
+  pruned), where it used to land on the same key -- and on whatever of its old
+  folder the prune had not yet taken. Existing records keep the keys they have
+  (fnv1a32 of their URLs) for as long as they exist; `sourceKey` stays as the
+  derivation they were made with, and the vectors above stand. The shared
+  fixture `tests/fixtures/source-keys.json` runs both mirrors.
 - `findSource(sources, key)`, `findSourceByUrl(sources, url)` -> record or null.
 - `defaultSourceLabel(url, kind, existingLabels)`: http -> host as computed
   (lowercase, no `www.` stripping); file -> last path segment (`local.m3u`),
