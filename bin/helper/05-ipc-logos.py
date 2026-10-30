@@ -480,6 +480,22 @@ def fetch_logo(url: str, timeout: float, budget: float | None = None) -> tuple[b
 
 
 def read_logo_response(opener: Any, request: Any, timeout: float, host: str) -> tuple[bytes, str]:
+    """One logo's response under the type gate, or `logo_fetch` naming the
+    host and the error's CLASS only, never its text (rule 5).
+
+    D-LOGO-24 (2026-10-29): http.client's own errors are not OSErrors, and
+    urllib wraps only OSErrors, so they used to pass straight through to
+    main()'s `internal`, ending the whole run before the failure memo was
+    written -- and the same logo ended every later run the same way: a
+    status line that is not one (BadStatusLine), a header line or a header
+    count over http.client's limits (LineTooLong, HTTPException), a chunked
+    body that does not parse (IncompleteRead), and InvalidURL, raised before
+    any connection for a URL with a space or a control character in its
+    path or a port that is not a number -- whose text quotes the path and
+    query. read_http_response has caught them since D-SRC-59; this is the
+    same catch on the logo path, and the run keeps a backstop of its own
+    (fetch_logo_run) for whatever escapes next."""
+    import http.client
     import urllib.error
     try:
         with opener.open(request, timeout=timeout) as response:
@@ -489,7 +505,7 @@ def read_logo_response(opener: Any, request: Any, timeout: float, host: str) -> 
             data = response.read(MAX_LOGO_BYTES + 1)
     except HelperError:
         raise
-    except (urllib.error.URLError, OSError, ValueError) as error:
+    except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException) as error:
         raise HelperError("logo_fetch", "could not fetch a logo from %s: %s" % (host, error.__class__.__name__))
     return data, ctype
 

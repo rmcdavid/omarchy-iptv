@@ -4328,7 +4328,26 @@ Performance budget (10k channels):
     else. It is written when the run's deadline is first seen past, not
     only at the run's end, because a run the shell SIGTERMs (a switch, the
     setting off) reaches no `finally`; `cache logos-clear` removes it with
-    the folder, so the user's reset is a reset. Pinned by
+    the folder, so the user's reset is a reset.
+    **[2026-10-29, D-LOGO-24: the failures above did not include
+    http.client's own errors, which are not OSErrors and which urllib does
+    not wrap: a status line that is not one, a header line or
+    a header count over http.client's limits, a chunked body that does not
+    parse, and InvalidURL, raised before any connection for a logo URL
+    with a space or a control character in its path or a port that is not
+    a number. Each reached main()'s `internal`, ending the run before the
+    memo was written, so the same logo ended every later run and no logo
+    after it in channel order was ever fetched (and InvalidURL's text, which
+    quotes the path and query, was printed). `read_logo_response` now maps
+    them to `logo_fetch` with the class name only, as `read_http_response`
+    has since D-SRC-59; the run keeps a backstop that turns any other
+    exception of one logo's fetch or cached-file check into that logo's
+    `logo_fetch` (said once on stderr by class name), MemoryError and
+    `folder_unusable` excepted, which are the run's; and the memo's end-of-run
+    write is a `finally`, so whatever still ends the run records what it
+    learned first. Pinned by `tests/test_logo_escapes.py` over a TLS fixture
+    server (all six shapes) and doubles (the backstop, the memory refusal,
+    the cached-file check).]** Pinned by
     `tests/test_logo_run.py` `LogoFailureMemoTest` and the re-pinned
     `seen` case (eight cases red on a9d20f9, the starvation case among
     them: with the run's deadline lowered to one failed fetch's worth, two
