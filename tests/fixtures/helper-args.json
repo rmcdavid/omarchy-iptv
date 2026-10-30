@@ -1,0 +1,771 @@
+{
+ "_comment": [
+  "D-SINK-47, D-SINK-48 (lane-p2a, 2026-10-29): the private arguments of a helper run, off",
+  "the world-readable /proc/<pid>/cmdline and into the environment. Run by BOTH suites:",
+  "tests/Model.test.js holds Model.helperSpawn to `command` and `private` for every",
+  "`argv` (a builder's own output), and the harness's stand-in for the helper's expansion to",
+  "`parsed`; tests/test_argv_secrets.py holds the helper's helper_arguments to `parsed` and",
+  "proves argparse reads `parsed` exactly as it reads `argv`. `environment` is the run's own",
+  "(a fetch's URL and provenance), kept beside the list. Reviewed by hand, case by case.",
+  "ASCII only."
+ ],
+ "env": "OMARCHY_IPTV_ARGS",
+ "flag": "--args-from-env",
+ "cases": [
+  {
+   "name": "player start: the cache folder, the channel id, the scope and every user token move; the socket, seq, since and owner stay",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "start",
+    "--socket",
+    "/run/user/1000/omarchy-iptv/mpv.sock",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--id",
+    "u:1a2b3c4d",
+    "--seq",
+    "7",
+    "--scope",
+    "g:Sports http://u:s3cret@cdn.test/x",
+    "--since",
+    "1761700000",
+    "--owner-pid",
+    "4242",
+    "--mpv-arg=--http-proxy=http://alice:S3cret@proxy.test:3128",
+    "--mpv-arg=--http-header-fields=X-Api-Key:k3y",
+    "--mpv-arg=--volume=50"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "start",
+    "--socket",
+    "/run/user/1000/omarchy-iptv/mpv.sock",
+    "--seq",
+    "7",
+    "--since",
+    "1761700000",
+    "--owner-pid",
+    "4242",
+    "--args-from-env"
+   ],
+   "private": [
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--id",
+    "u:1a2b3c4d",
+    "--scope",
+    "g:Sports http://u:s3cret@cdn.test/x",
+    "--mpv-arg=--http-proxy=http://alice:S3cret@proxy.test:3128",
+    "--mpv-arg=--http-header-fields=X-Api-Key:k3y",
+    "--mpv-arg=--volume=50"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "start",
+    "--socket",
+    "/run/user/1000/omarchy-iptv/mpv.sock",
+    "--seq",
+    "7",
+    "--since",
+    "1761700000",
+    "--owner-pid",
+    "4242",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--id",
+    "u:1a2b3c4d",
+    "--scope",
+    "g:Sports http://u:s3cret@cdn.test/x",
+    "--mpv-arg=--http-proxy=http://alice:S3cret@proxy.test:3128",
+    "--mpv-arg=--http-header-fields=X-Api-Key:k3y",
+    "--mpv-arg=--volume=50"
+   ]
+  },
+  {
+   "name": "player restart: the same, and --from stays",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "restart",
+    "--socket",
+    "/r/mpv.sock",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--id",
+    "t:bbc.uk",
+    "--seq",
+    "8",
+    "--owner-pid",
+    "4242",
+    "--from",
+    "term"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "restart",
+    "--socket",
+    "/r/mpv.sock",
+    "--seq",
+    "8",
+    "--owner-pid",
+    "4242",
+    "--from",
+    "term",
+    "--args-from-env"
+   ],
+   "private": [
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--id",
+    "t:bbc.uk"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "restart",
+    "--socket",
+    "/r/mpv.sock",
+    "--seq",
+    "8",
+    "--owner-pid",
+    "4242",
+    "--from",
+    "term",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--id",
+    "t:bbc.uk"
+   ]
+  },
+  {
+   "name": "player probe, stop, pause, tracks and orphan-check carry nothing private: no flag, no variable",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "probe",
+    "--socket",
+    "/r/mpv.sock",
+    "--owner-pid",
+    "4242"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "probe",
+    "--socket",
+    "/r/mpv.sock",
+    "--owner-pid",
+    "4242"
+   ],
+   "private": [],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "probe",
+    "--socket",
+    "/r/mpv.sock",
+    "--owner-pid",
+    "4242"
+   ]
+  },
+  {
+   "name": "player stop",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "stop",
+    "--socket",
+    "/r/mpv.sock",
+    "--seq",
+    "9",
+    "--from",
+    "kill"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "stop",
+    "--socket",
+    "/r/mpv.sock",
+    "--seq",
+    "9",
+    "--from",
+    "kill"
+   ],
+   "private": [],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "player",
+    "stop",
+    "--socket",
+    "/r/mpv.sock",
+    "--seq",
+    "9",
+    "--from",
+    "kill"
+   ]
+  },
+  {
+   "name": "a zap: the id, the cache folder and the scope move",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "play",
+    "--id",
+    "n:9f8e7d6c",
+    "--socket",
+    "/r/mpv.sock",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--scope",
+    "fav",
+    "--since",
+    "1761700001"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "play",
+    "--socket",
+    "/r/mpv.sock",
+    "--since",
+    "1761700001",
+    "--args-from-env"
+   ],
+   "private": [
+    "--id",
+    "n:9f8e7d6c",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--scope",
+    "fav"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "play",
+    "--socket",
+    "/r/mpv.sock",
+    "--since",
+    "1761700001",
+    "--id",
+    "n:9f8e7d6c",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--scope",
+    "fav"
+   ]
+  },
+  {
+   "name": "the playlist fetch: the cache folder moves, the state folder stays, the URL's own environment is kept beside the list",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "playlist",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--state-dir",
+    "/home/u/.local/state/omarchy-iptv"
+   ],
+   "environment": {
+    "OMARCHY_IPTV_URL": "http://u:p@provider.test/get.php?username=u&password=p",
+    "OMARCHY_IPTV_ORIGIN": "user"
+   },
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "playlist",
+    "--state-dir",
+    "/home/u/.local/state/omarchy-iptv",
+    "--args-from-env"
+   ],
+   "private": [
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "playlist",
+    "--state-dir",
+    "/home/u/.local/state/omarchy-iptv",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ]
+  },
+  {
+   "name": "the source probe",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "playlist",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ],
+   "environment": {
+    "OMARCHY_IPTV_URL": "http://u:p@provider.test/x.m3u",
+    "OMARCHY_IPTV_ORIGIN": "user"
+   },
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "playlist",
+    "--args-from-env"
+   ],
+   "private": [
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "playlist",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ]
+  },
+  {
+   "name": "the guide's --now-only recompute",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "epg",
+    "--now-only",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "epg",
+    "--now-only",
+    "--args-from-env"
+   ],
+   "private": [
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "epg",
+    "--now-only",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ]
+  },
+  {
+   "name": "a dead-channel mark",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "failed",
+    "mark",
+    "--id",
+    "u:1a2b3c4d",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "failed",
+    "mark",
+    "--args-from-env"
+   ],
+   "private": [
+    "--id",
+    "u:1a2b3c4d",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "failed",
+    "mark",
+    "--id",
+    "u:1a2b3c4d",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ]
+  },
+  {
+   "name": "a dead-channel clear",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "failed",
+    "clear",
+    "--id",
+    "t:x",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "failed",
+    "clear",
+    "--args-from-env"
+   ],
+   "private": [
+    "--id",
+    "t:x",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "failed",
+    "clear",
+    "--id",
+    "t:x",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ]
+  },
+  {
+   "name": "the logo fetch",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "logos",
+    "--fetch",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "logos",
+    "--fetch",
+    "--args-from-env"
+   ],
+   "private": [
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "logos",
+    "--fetch",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv/sources/584a58e5"
+   ]
+  },
+  {
+   "name": "the prune: the cache root, every kept key and the active key move, the age stays",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "cache",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv",
+    "prune",
+    "--keep",
+    "584a58e5",
+    "d990c2e4-2",
+    "0badf00d",
+    "--active",
+    "584a58e5",
+    "--epg-max-age",
+    "604800"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "cache",
+    "prune",
+    "--epg-max-age",
+    "604800",
+    "--args-from-env"
+   ],
+   "private": [
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv",
+    "--keep",
+    "584a58e5",
+    "d990c2e4-2",
+    "0badf00d",
+    "--active",
+    "584a58e5"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "cache",
+    "prune",
+    "--epg-max-age",
+    "604800",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv",
+    "--keep",
+    "584a58e5",
+    "d990c2e4-2",
+    "0badf00d",
+    "--active",
+    "584a58e5"
+   ]
+  },
+  {
+   "name": "a prune that keeps nothing",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "cache",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv",
+    "prune",
+    "--keep",
+    "--active",
+    ""
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "cache",
+    "prune",
+    "--args-from-env"
+   ],
+   "private": [
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv",
+    "--keep",
+    "--active",
+    ""
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "cache",
+    "prune",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv",
+    "--keep",
+    "--active",
+    ""
+   ]
+  },
+  {
+   "name": "a removal",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "cache",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv",
+    "remove",
+    "--key",
+    "584a58e5"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "cache",
+    "remove",
+    "--args-from-env"
+   ],
+   "private": [
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv",
+    "--key",
+    "584a58e5"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "cache",
+    "remove",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv",
+    "--key",
+    "584a58e5"
+   ]
+  },
+  {
+   "name": "the migration with no key",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "cache",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv",
+    "migrate",
+    "--key",
+    ""
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "cache",
+    "migrate",
+    "--args-from-env"
+   ],
+   "private": [
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv",
+    "--key",
+    ""
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "cache",
+    "migrate",
+    "--cache-dir",
+    "/home/u/.cache/omarchy-iptv",
+    "--key",
+    ""
+   ]
+  },
+  {
+   "name": "the attached spellings move too",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "play",
+    "--id=t:x",
+    "--cache-dir=/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--socket",
+    "/r/s",
+    "--scope=g:News"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "play",
+    "--socket",
+    "/r/s",
+    "--args-from-env"
+   ],
+   "private": [
+    "--id=t:x",
+    "--cache-dir=/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--scope=g:News"
+   ],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "play",
+    "--socket",
+    "/r/s",
+    "--id=t:x",
+    "--cache-dir=/home/u/.cache/omarchy-iptv/sources/584a58e5",
+    "--scope=g:News"
+   ]
+  },
+  {
+   "name": "the state verbs carry nothing private",
+   "argv": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "state",
+    "--state-dir",
+    "/home/u/.local/state/omarchy-iptv",
+    "mode"
+   ],
+   "environment": {},
+   "command": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "state",
+    "--state-dir",
+    "/home/u/.local/state/omarchy-iptv",
+    "mode"
+   ],
+   "private": [],
+   "parsed": [
+    "python3",
+    "-I",
+    "/plugin/bin/omarchy-iptv",
+    "state",
+    "--state-dir",
+    "/home/u/.local/state/omarchy-iptv",
+    "mode"
+   ]
+  }
+ ]
+}

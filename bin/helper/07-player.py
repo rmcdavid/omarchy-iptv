@@ -397,8 +397,8 @@ DEMUXER_TLS_FORBIDDEN = frozenset(("ca_file", "cafile", "verifyhost", "listen", 
 # touches ANY pinned option is stopped rather than migrated.
 #
 # lane-p2a (2026-10-29): EXCEPT load-stats-overlay (D-SINK-67), for now and
-# on purpose. The harness's stand-in mpv (scripts/qa-stub-mpv.py, outside
-# lane A's files) does not model that option, so its option-info would read
+# on purpose. The harness's stand-in mpv (the qa stub on the dev branch,
+# outside lane A's files) does not model that option, so its option-info would read
 # `property not found`, the read-back would refuse every player the stub
 # plays and every stub scenario would fail `tls_unverified` -- the reason the
 # stub learned each pin before. What the exclusion leaves: a PRE-PIN player,
@@ -502,8 +502,12 @@ def filter_mpv_args(tokens: list[str]) -> tuple[list[str], list[str]]:
         base = mpv_option_base(name)
         bare = "--" + name[5:] if name.startswith("--no-") else ""
         no_form = bool(bare) and (bare in MPV_RESERVED or mpv_option_base(bare) in MPV_RESERVED)
+        # D-SINK-47: a token becomes one line of the player's options file
+        # (mpv_args_config), and a line break or a NUL cannot be carried on
+        # one -- refused here, so the writer never meets one.
         if (not MPV_ARG_RE.match(text) or name in MPV_RESERVED or base in MPV_RESERVED or no_form
-                or demuxer_names_tls(base, text) or script_opts_refused(base, text)):
+                or demuxer_names_tls(base, text) or script_opts_refused(base, text)
+                or any(char in text for char in "\0\n\r")):
             rejected.append(text)
         else:
             args.append(text)
@@ -670,6 +674,10 @@ def player_dirs(sock_path: str, state_override: str | None = None) -> dict[str, 
       uninstall. Containment here is a sensible default, not a guarantee:
       neither option is reserved, because MPV_RESERVED is a privacy
       instrument and a content-free cache does not belong on it (CL2).
+
+    D-SINK-47 (lane-p2a, 2026-10-29): `mpvArgs` is the private file the
+    user's tokens live in for the length of a launch (write_mpv_args), in the
+    runtime directory beside the socket.
     """
     runtime = os.path.dirname(sock_path)
     return {
@@ -677,6 +685,7 @@ def player_dirs(sock_path: str, state_override: str | None = None) -> dict[str, 
         "screenshots": os.path.join(state_dir(state_override), "screenshots"),
         "watchLater": os.path.join(runtime, "watch-later"),
         "shaderCache": os.path.join(runtime, "shader-cache"),
+        "mpvArgs": os.path.join(runtime, MPV_ARGS_FILE),
     }
 
 
@@ -767,7 +776,89 @@ def mpv_launch_argv(sock_path: str, mpv_args: list[str],
     # over a token, a named profile and a plain mpv.conf line, and each is set
     # from the command line, so no per-file profile replaces it. The block ends
     # with MPV_TLS_VERIFY, so the line above still describes the last element.
-    ] + list(mpv_args or []) + mpv_pin_block(where)
+    #
+    # D-SINK-47 (lane-p2a, 2026-10-29): the user's tokens are no longer ON this
+    # argv, which is /proc/<pid>/cmdline -- world-readable for the hours a
+    # player runs, and COREDUMP_CMDLINE in the journal if it crashes -- and a
+    # token is where a proxy password or an API-key header goes. They are in
+    # the private file `where["mpvArgs"]` (write_mpv_args), named here at the
+    # place they stood: mpv parses an --include file AT ITS POSITION and marks
+    # what it sets as set from the command line (measured), so the pin block
+    # after it keeps the last word exactly as it did over the tokens.
+    ] + (["--include=%s" % mpv_args_path(sock_path, where)] if mpv_args else []) + mpv_pin_block(where)
+
+
+# D-SINK-47: the private file's name, in the runtime directory.
+MPV_ARGS_FILE = "mpv-args.conf"
+
+
+def mpv_args_path(sock_path: str, where: dict[str, str]) -> str:
+    """The options file a set of player folders names, or the runtime
+    folder's own when a caller's set predates it. Mirror of the model's
+    fallback in buildMpvArgv."""
+    return where.get("mpvArgs") or os.path.join(os.path.dirname(sock_path), MPV_ARGS_FILE)
+
+
+def mpv_args_config(tokens: list[str]) -> str:
+    """The text of the player's options file: one line per token, in order.
+
+    `--name` becomes `name` (mpv's config syntax for a flag, and for
+    `no-name`, measured), and `--name=value` becomes `name=%N%value`, N being
+    the value's length in UTF-8 bytes: mpv's length-quoted form, the one form
+    whose value is taken exactly, so a value holding `=`, `,`, either quote,
+    spaces, `#` (a comment in the plain form, measured cutting `a#b` to `a`),
+    `%`, a trailing backslash or any other byte means what it meant on the
+    argv -- measured token by token, 16 of 16 reading back identical both
+    ways. A line break or a NUL cannot be carried on a line, and the filter
+    refuses both before this is reached; one here is a bug, and refused."""
+    lines = []
+    for token in tokens or []:
+        text = str(token)
+        if not text.startswith("--") or any(char in text for char in "\0\n\r"):
+            raise HelperError("bad_arguments", "an mpv option cannot be written to the player's options")
+        name, eq, value = text[2:].partition("=")
+        lines.append("%s=%%%d%%%s" % (name, len(value.encode("utf-8")), value) if eq else name)
+    return "".join(line + "\n" for line in lines)
+
+
+def write_mpv_args(path: str, tokens: list[str]) -> None:
+    """D-SINK-47: put the user's tokens where only this uid can read them, for
+    the length of a launch. The folder is the 0700 runtime folder
+    (player_runtime made it); the file is created 0600 under a name of its
+    own with O_EXCL and O_NOFOLLOW -- a link or anything else at that name is
+    never written through -- and renamed over `path`, so mpv reads either the
+    whole file or none, and a stale one from a helper that was killed is
+    replaced, never appended to."""
+    data = mpv_args_config(tokens).encode("utf-8")
+    temp = os.path.join(os.path.dirname(path), ".%s.%d" % (os.path.basename(path), os.getpid()))
+    try:
+        try:
+            os.unlink(temp)
+        except FileNotFoundError:
+            pass
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        try:
+            view = memoryview(data)
+            while view:
+                view = view[os.write(fd, view):]
+        finally:
+            os.close(fd)
+        os.rename(temp, path)
+    except OSError as io_error:
+        remove_mpv_args(temp)
+        raise runtime_unwritable("write the player's options", io_error) from None
+
+
+def remove_mpv_args(path: str) -> None:
+    """D-SINK-47: the file goes as soon as mpv has read it -- once its socket
+    answers, which mpv binds only after its whole command line is parsed --
+    and on every path out of a launch that failed. Quiet: a file already gone
+    is the goal, and any other failure leaves a 0600 file in a 0700 folder
+    that the next launch's rename replaces and a logout removes."""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def mpv_pin_block(where: dict[str, str]) -> list[str]:

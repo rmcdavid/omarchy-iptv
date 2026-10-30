@@ -52,7 +52,9 @@ function makeIds(h) {
     set(v) {
       cacheProc._running = v
       if (v === true) {
-        const command = cacheProc.command.slice()
+        // What the HELPER parses (helperView): since D-SINK-48 the keys ride
+        // in the environment and the command names only the verb.
+        const command = helperView(cacheProc.command, cacheProc.environment)
         h.cacheRuns.push(command)
         if (h.cacheHang) return
         h.later.push({ fn: () => { cacheProc._running = false; h.root.handleCacheExit(h.cacheAnswer(command)) }, args: [] })
@@ -242,6 +244,25 @@ function makeIds(h) {
       else NOTICE_LEDGER.detached.push(argv[argv.indexOf("-r") + 1] + " " + argv[argv.length - 2])
     } }
   }
+}
+
+// D-SINK-47, D-SINK-48 (lane-p2a, 2026-10-29): the helper's own reading of a
+// spawn, for the doubles that answer as the helper would. A command carrying
+// `--args-from-env` is the command without it, followed by the JSON list in
+// OMARCHY_IPTV_ARGS -- helper_arguments in bin/helper/11-cli.py, pinned to
+// this function by tests/fixtures/helper-args.json in both suites. Never more
+// forgiving than the helper (rule 10): a flag with no list, or a list that is
+// not strings, is a run that does not happen, here as there.
+function helperView(command, environment) {
+  const c = (command || []).map(String)
+  const at = c.indexOf("--args-from-env")
+  if (at === -1) return c
+  if (c.indexOf("--args-from-env", at + 1) !== -1) throw new Error("service-harness: --args-from-env twice")
+  const raw = environment && Object.prototype.hasOwnProperty.call(environment, "OMARCHY_IPTV_ARGS") ? environment.OMARCHY_IPTV_ARGS : null
+  if (raw === null) throw new Error("service-harness: --args-from-env with no OMARCHY_IPTV_ARGS")
+  const list = JSON.parse(raw)
+  if (!Array.isArray(list) || list.some(x => typeof x !== "string" || x.indexOf("\0") !== -1)) throw new Error("service-harness: OMARCHY_IPTV_ARGS is not a list of strings")
+  return c.slice(0, at).concat(c.slice(at + 1)).concat(list)
 }
 
 // The verb of a recorded `cache` run: the first word after `cache` that is
@@ -1156,4 +1177,4 @@ function restartService(serviceText, Model, h, o) {
                                                           stateText: h.stateFile.disk, host: h.host.mode, clock: h.clock + 60000 }, o || {}))
 }
 
-module.exports = { bootService, restartService, rootFunctions, rootProperties, matchBrace, STUBBED, PID, HELPER_EMPTY_STATE, notificationServer, NOTICE_LEDGER, cacheVerb }
+module.exports = { bootService, restartService, rootFunctions, rootProperties, matchBrace, STUBBED, PID, HELPER_EMPTY_STATE, notificationServer, NOTICE_LEDGER, cacheVerb, helperView }

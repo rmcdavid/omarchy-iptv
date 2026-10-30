@@ -143,6 +143,10 @@ SETUP is streamed, a UDP one answered with the client's own ports), and:
       -- with the same case's control, a pre-pin player loaded by the pre-pin
       tree with a demuxer tls_verify=0 past the filter, reaching the attacker
       (the rig can see a bypass in this shape)
+  W29 the user's tokens (D-SINK-47) -- one carrying the secret, one with
+      `,`, quotes, `#` and a trailing backslash -- take effect in a real
+      player whose /proc/<pid>/cmdline holds none of them, only the name of
+      the private options file, which is gone once the socket answers
 
 usage: tls_pins_rig.py --tree DIR [--pre-pin DIR] --work DIR
 Exit 0 green, 1 red, 77 when mpv, ffmpeg or openssl is missing. Stdlib only.
@@ -567,7 +571,7 @@ def listening(pid: int) -> list[str]:
 
 def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=(), raw=(), conf="",
           seconds=5.0, post=(), migrate=False, watch=(), inputconf="", first_url="", headers=None,
-          drawwatch=False) -> dict:
+          drawwatch=False, cmdline_words=()) -> dict:
     base = os.path.join(work, "cases", case)
     for sub in ("home", "cache", "state", "config/mpv", "data", "run/omarchy-iptv"):
         os.makedirs(os.path.join(base, sub), mode=0o700, exist_ok=True)
@@ -583,6 +587,14 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
     kept, rejected = argv_ns["filter_mpv_args"](list(user))
     dirs = argv_ns["player_dirs"](os.path.join(runtime, "mpv.sock"), os.path.join(base, "state", "omarchy-iptv"))
     argv = argv_ns["mpv_launch_argv"]("mpv.sock", kept + list(raw), dirs)
+    # lane-p2a (D-SINK-47): a tree whose launch argv names the private options
+    # file gets it written as its own adopt_or_spawn writes it -- the user's
+    # tokens and the raw ones past the filter, in order -- and removed once
+    # the socket answers, as the helper removes it. A tree before it carries
+    # the tokens on the argv itself.
+    options = dirs.get("mpvArgs", "")
+    if options and "write_mpv_args" in argv_ns and any(a == "--include=" + options for a in argv):
+        argv_ns["write_mpv_args"](options, kept + list(raw))
     cmd = ["mpv", "--config-dir=" + base + "/config/mpv", "--vo=null", "--ao=null"] + [a for a in argv[1:] if not a.startswith("--force-window")]
     before = len(requests(work))
     jb = journal()
@@ -591,10 +603,22 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
     err = open(os.path.join(base, "mpv.stderr"), "wb")
     player = subprocess.Popen(cmd, cwd=runtime, env=env, stdin=subprocess.DEVNULL, stdout=err, stderr=err, preexec_fn=no_core)
     result = {"case": case, "rejected": rejected, "applied": None, "timePos": None, "props": {}, "kids": [], "post": [],
-              "listening": [], "ends": [], "drawn": [], "errlines": []}
+              "listening": [], "ends": [], "drawn": [], "errlines": [], "cmdlineHas": None}
     watcher = None
     try:
         client = logic_ns["wait_for_socket"]("mpv.sock", 8.0, 3.0)
+        if options and "remove_mpv_args" in argv_ns:
+            result["optionsFile"] = os.path.lexists(options)
+            argv_ns["remove_mpv_args"](options)
+        if cmdline_words:
+            # lane-p2a (D-SINK-47): what /proc shows every account, read off
+            # the player itself while it runs. Which words, never the line.
+            try:
+                with open("/proc/%d/cmdline" % player.pid, "rb") as fh:
+                    line = fh.read().decode("utf-8", "replace")
+                result["cmdlineHas"] = [word for word in cmdline_words if word in line]
+            except OSError:
+                result["cmdlineHas"] = None
         if client is None:
             result["error"] = "no socket"
         else:
@@ -1004,6 +1028,20 @@ def main(argv: list[str]) -> int:
                   off["props"].get("demuxer-lavf-propagate-opts") is False and got(off, "attacker") == 0 and got(ctl, "attacker") > 0,
                   "propagate %s, attacker requests %d; control %d" % (off["props"].get("demuxer-lavf-propagate-opts"),
                                                                       got(off, "attacker"), got(ctl, "attacker")))
+        # D-SINK-47: the user's tokens reach the player through the private
+        # options file, and only there.
+        tok = ["--volume=37", "--script-opts=rigkey=%s" % SECRET, '--sub-font=a,b "c" #d e\\']
+        r = probe(work, "W29", tree, tree, plain, user=tok, seconds=3, watch=("volume", "script-opts", "sub-font"),
+                  cmdline_words=(SECRET, "rigkey", "--volume=37", "sub-font", "--include="), headers={})
+        opts_file = os.path.join(work, "cases", "W29", "run", "omarchy-iptv", "mpv-args.conf")
+        check("W29 the user's tokens -- one carrying a secret, one with `,`, quotes, `#` and a trailing backslash -- take effect in a real player whose command line holds none of them, only the private file's name, and that file is gone once the socket answers",
+              r["timePos"] is not None and r["props"].get("volume") == 37.0
+              and (r["props"].get("script-opts") or {}).get("rigkey") == SECRET and r["props"].get("sub-font") == tok[2][11:]
+              and r["cmdlineHas"] == ["--include="] and r.get("optionsFile") is True and not os.path.lexists(opts_file),
+              "played %s, volume %s, script-opts carries it %s, sub-font verbatim %s, command line holds %s, file there at the socket %s, after %s" % (
+                  r["timePos"] is not None, r["props"].get("volume"),
+                  (r["props"].get("script-opts") or {}).get("rigkey") == SECRET, r["props"].get("sub-font") == tok[2][11:],
+                  r["cmdlineHas"], r.get("optionsFile"), os.path.lexists(opts_file)))
         r = probe(work, "C4", tree, tree, lab + "/m/master.m3u8", seconds=5, watch=("track-list", "file-format"))
         tracks = sorted((t.get("type"), t.get("codec")) for t in (r["props"].get("track-list") or []))
         check("C4 a fragmented-MP4 HLS channel with a WebVTT rendition plays, its subtitle track there (control)",

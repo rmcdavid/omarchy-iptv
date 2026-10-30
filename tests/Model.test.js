@@ -68,6 +68,19 @@ function checkCall(name, produce, expected) {
   check(name, actual, expected)
 }
 
+// D-SINK-47 (lane-p2a, 2026-10-29): the user's tokens reach mpv through the
+// --include file the launch argv names where they used to stand, and mpv
+// parses that file AT ITS POSITION (measured: an earlier token is beaten by
+// it, a later one beats it, and what it sets reads as set from the command
+// line). `applied` is the sequence mpv applies: the argv with the --include
+// replaced by the tokens the file holds. A check about where a user token
+// lands asks this; a check about what /proc shows asks the argv itself.
+function applied(argv, user) {
+  const list = Array.isArray(argv) ? argv : []
+  const i = list.findIndex(a => String(a).indexOf("--include=") === 0)
+  return i === -1 ? list.slice() : list.slice(0, i).concat(user || []).concat(list.slice(i + 1))
+}
+
 // ---- the runner's own comparison (audit F8) ----
 // Every one of these passed against the JSON.stringify comparison this file
 // shipped with, which is why they are here: a runner that cannot tell
@@ -1332,43 +1345,45 @@ checkCall("D-SINK-8 (c) Service.qml sets the environment through the builder at 
   // which URL, line content rather than line number. Three sites, not two:
   // the EPG site covers both the fetch and the --now-only recompute, the
   // latter handed "" (so {}), because the assignment REPLACES the last value
-  // and a stale URL must not ride into the offline run. "Immediately" is
-  // structural: the next non-comment line after each assignment must be
-  // that same process's `running = true`, and each of the three processes
-  // runs from exactly one place, so no run can start on an older environment.
+  // and a stale URL must not ride into the offline run.
+  //
+  // D-SINK-48 (lane-p2a, 2026-10-29): every helper Process now starts in ONE
+  // function, runHelper, which assigns the command and the environment
+  // Model.helperSpawn makes and then sets `running` -- so "immediately" is
+  // that function's three lines, and "one place per process" is one
+  // runHelper call per process with no `running = true` of its own.
   const fs = require("fs"), path = require("path")
-  const code = fs.readFileSync(path.join(__dirname, "..", "Service.qml"), "utf8").split("\n")
-    .filter(function (l) { return !/^\s*\/\//.test(l) })
+  const text = fs.readFileSync(path.join(__dirname, "..", "Service.qml"), "utf8")
+  const code = text.split("\n").filter(function (l) { return !/^\s*\/\//.test(l) })
+  const flat = code.join("\n")
   const sites = []
-  code.forEach(function (l, i) {
-    const m = /^\s*(\w+)\.environment = Model\.fetchEnvironment\((.*)\)\s*$/.exec(l)
-    const n = /^\s*(\w+)\.environment = Model\.fetchEnvironmentFor\((.*)\)\s*$/.exec(l)
-    if (n) sites.push({ proc: n[1], arg: n[2], next: String(code[i + 1] || "").trim() })
-    if (m) sites.push({ proc: m[1], arg: m[2], next: String(code[i + 1] || "").trim() })
-  })
-  // Containment, not whole-line equality: the mutant that survived the first
-  // draft was `if (x) playlistProc.running = true` on one line, a second run
-  // site that set no environment and that an equality compare never saw.
-  function runs(proc) {
-    const re = new RegExp("\\b" + proc + "\\.running = true\\b")
-    return code.filter(function (l) { return re.test(l) }).length
+  // A call spans its own line and at most one more (the argv, then the environment).
+  const re = /root\.runHelper\((\w+),[^\n]*(?:\n[^\n]*)?Model\.fetchEnvironmentFor\(([^\n]*)\)\)\s*$/gm
+  let m
+  while ((m = re.exec(flat)) !== null) sites.push({ proc: m[1], arg: m[2] })
+  const body = (/function runHelper\(proc, argv, environment\) \{\n([\s\S]*?)\n  \}/.exec(flat) || [])[1] || ""
+  const lines = body.split("\n").map(function (l) { return l.trim() })
+  function calls(proc) {
+    return code.filter(function (l) { return new RegExp("root\\.runHelper\\(" + proc + ",").test(l) }).length
+  }
+  function ownRuns(proc) {
+    return code.filter(function (l) { return new RegExp("\\b" + proc + "\\.running = true\\b").test(l) }).length
   }
   return [
     sites.map(function (s) { return s.proc + " <- " + s.arg }),
-    sites.map(function (s) { return s.next === s.proc + ".running = true" }),
-    sites.map(function (s) { return runs(s.proc) }),
-    // Every environment assignment goes through the builder: an inline
-    // object literal would be a second spelling of the variable name.
-    // D-SINK-40: through fetchEnvironmentFor, which composes fetchEnvironment
-    // with the URL's provenance in the same one assignment.
-    code.filter(function (l) { return /\.environment = / .test(l) && !/Model\.fetchEnvironmentFor\(/.test(l) }).length,
+    lines,
+    sites.map(function (s) { return [calls(s.proc), ownRuns(s.proc)] }),
+    // No environment assignment anywhere but runHelper's: an inline object
+    // literal would be a second spelling of the variable name.
+    code.filter(function (l) { return /\.environment = /.test(l) && !/^\s*proc\.environment = spawn\.environment$/.test(l) }).length,
     // And no command, on any process, carries the flag the URL used to ride on.
     code.filter(function (l) { return /"--url"/.test(l) }).length,
     code.filter(function (l) { return /\.command = /.test(l) && /Url\b|\.url\b/.test(l) }).length
   ]
 }, [["playlistProc <- root.playlistUrl, { origin: \"user\" }", "epgProc <- nowOnly ? \"\" : root.epgFetchUrl, root.epgProvenance",
      "sourceProbeProc <- rec.url, { origin: \"user\" }"],
-    [true, true, true], [1, 1, 1], 0, 0, 0])
+    ["var spawn = Model.helperSpawn(argv, environment)", "proc.command = spawn.command", "proc.environment = spawn.environment", "proc.running = true"],
+    [[1, 0], [1, 0], [1, 0]], 0, 0, 0])
 
 // ---- D-ID-3: the shell adopts the helper's id scheme, or undoes it ----
 // With --state-dir the helper moved state.json onto scheme 2 (`moved N`) and
@@ -4712,7 +4727,7 @@ check("headerArgs drops unsafe", Model.headerArgs({ "Bad Name": "x", Ok: "line\n
 // travels over the 0600 socket instead. The vectors are shared with the
 // Python mirror in tests/fixtures/player-argv.json.
 const STATE_DIR = "/home/u/.local/state/omarchy-iptv"
-const argv = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: STATE_DIR, extraArgs: ["--profile=low-latency"] })
+const argv = applied(Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: STATE_DIR, extraArgs: ["--profile=low-latency"] }), ["--profile=low-latency"])
 check("buildMpvArgv starts with mpv and ipc socket", argv.slice(0, 2), ["mpv", "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock"])
 check("buildMpvArgv fixed options in order", argv.slice(2, 10), ["--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no"])
 check("buildMpvArgv idles at startup so the first channel arrives over IPC (PO-1)", [argv.indexOf("--idle=once") !== -1, argv.indexOf("--idle=no") !== -1, argv.indexOf("--idle=yes") !== -1], [true, false, false])
@@ -4737,7 +4752,7 @@ check("buildMpvArgv: every token after argv[0] is an option", argv.slice(1).ever
 // carries. force-media-title is not expanded by mpv, so it stays plain.
 check("mpvWindowTitle prefixes the raw marker", [Model.MPV_RAW_PREFIX, Model.mpvWindowTitle("BBC One"), Model.mpvWindowTitle(null)], ["$>", "$>BBC One", "$>"])
 check("buildMpvArgv neutral title keeps the raw marker and mpv's own default off screen", Model.buildMpvArgv({ socketPath: "/s" }).indexOf("--title=$>IPTV") !== -1, true)
-check("buildMpvArgv user args can re-enable ytdl (last wins)", (() => { const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: ["--ytdl=yes"] }); return a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes") })(), true)
+check("buildMpvArgv user args can re-enable ytdl (last wins)", (() => { const a = applied(Model.buildMpvArgv({ socketPath: "/s", extraArgs: ["--ytdl=yes"] }), ["--ytdl=yes"]); return a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes") })(), true)
 // D-SINK-13 changed what this one can say. User args still land after every
 // fixed option, which is what makes --ytdl=yes and --screenshot-dir work, but
 // they are no longer LAST: the pin block follows them deliberately (one token
@@ -4763,7 +4778,7 @@ check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc
 // fixture's D-PLY-27 case through buildMpvArgv as an exact array.
 checkCall("D-PLY-27: a user's --gpu-sw=no and --no-gpu-sw pass the filter, land after the base token and are not outvoted; the token is once, unreserved, and never last", () => {
   const r = Model.splitMpvArgs("--gpu-sw=no --no-gpu-sw")
-  const a = Model.buildMpvArgv({ socketPath: "/s", stateDir: "/st", extraArgs: r.args })
+  const a = applied(Model.buildMpvArgv({ socketPath: "/s", stateDir: "/st", extraArgs: r.args }), r.args)
   const base = a.indexOf(playerFixture.gpuSoftware)
   return {
     token: playerFixture.gpuSoftware, kept: r.args, rejected: r.rejected, reserved: Model.MPV_RESERVED["--gpu-sw"],
@@ -4793,7 +4808,7 @@ checkCall("dirnameOf behaves like os.path.dirname on the paths this plugin uses"
 checkCall("--watch-later-dir stays reserved so a resume record cannot be aimed at $HOME", () => Model.splitMpvArgs("--watch-later-dir=/home/u --screenshot-dir=/home/u/Pictures"),
   { args: ["--screenshot-dir=/home/u/Pictures"], rejected: ["--watch-later-dir=/home/u"], warnings: ["mpvArg --watch-later-dir refused: reserved by the plugin"] })
 checkCall("a user who wants their screenshots elsewhere still wins (last token wins)", () => {
-  const a = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: STATE_DIR, extraArgs: ["--screenshot-dir=/home/u/Pictures"] })
+  const a = applied(Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: STATE_DIR, extraArgs: ["--screenshot-dir=/home/u/Pictures"] }), ["--screenshot-dir=/home/u/Pictures"])
   return a.indexOf("--screenshot-dir=" + STATE_DIR + "/screenshots") < a.lastIndexOf("--screenshot-dir=/home/u/Pictures")
 }, true)
 // ---- D-PIP-1: focus the player, and a check that can actually fail -------
@@ -5348,7 +5363,7 @@ checkCall("the launch argv aims both of mpv's caches at it", () => {
 }, [true, true])
 checkCall("neither cache option is reserved (CL2: the list is a privacy instrument) and a user token still wins", () => {
   const r = Model.splitMpvArgs("--gpu-shader-cache-dir=/home/u/.cache/shaders --icc-cache-dir=/home/u/.cache/icc")
-  const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: r.args })
+  const a = applied(Model.buildMpvArgv({ socketPath: "/s", extraArgs: r.args }), r.args)
   return [r.rejected, a.indexOf("--gpu-shader-cache-dir=/shader-cache") < a.lastIndexOf("--gpu-shader-cache-dir=/home/u/.cache/shaders")]
 }, [[], true])
 
@@ -5434,7 +5449,7 @@ checkCall("D-SINK-13 layer 2: the composed argv ENDS with --tls-verify=yes whate
 // the fix needs them: one among the fixed options where a reader looks, one
 // after everything the user can contribute.
 checkCall("D-SINK-13 layers 1 and 2 are two occurrences of one constant, not one of either", () => {
-  const a = Model.buildMpvArgv({ socketPath: "/s", stateDir: "/st", extraArgs: Model.splitMpvArgs("--profile=evil").args })
+  const a = applied(Model.buildMpvArgv({ socketPath: "/s", stateDir: "/st", extraArgs: Model.splitMpvArgs("--profile=evil").args }), ["--profile=evil"])
   const at = a.reduce(function (acc, t, i) { if (t === Model.MPV_TLS_VERIFY) acc.push(i); return acc }, [])
   const user = a.indexOf("--profile=evil")
   return { count: at.length, layer1BeforeTheUser: at[0] < user, layer2AfterTheUser: at[1] > user, isLast: at[1] === a.length - 1 }
@@ -5644,7 +5659,7 @@ check("splitMpvArgs rejects every addition and its --no- form", (() => {
 })(), [[], 20])
 check("--ytdl stays unreserved (PO-5) and still sorts after the built-in --ytdl=no", (() => {
   const r = Model.splitMpvArgs("--ytdl=yes")
-  const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: r.args })
+  const a = applied(Model.buildMpvArgv({ socketPath: "/s", extraArgs: r.args }), r.args)
   return [r.args, a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes")]
 })(), [["--ytdl=yes"], true])
 
@@ -6229,7 +6244,7 @@ check("fixture mpvArgv: at least one vector passes user arguments, or the traili
 check("fixture mpvArgv: the fixture's own software-renderer token is in every composed argv exactly once, before layer 1 of TLS and before every user token (D-PLY-27)",
   { token: playerFixture.gpuSoftware, offenders: playerFixture.mpvArgv.filter(function (v) {
     const user = Model.splitMpvArgs((v.mpvArgs || []).join(" ")).args
-    const a = Model.buildMpvArgv({ socketPath: v.socketPath, stateDir: v.stateDir, extraArgs: user })
+    const a = applied(Model.buildMpvArgv({ socketPath: v.socketPath, stateDir: v.stateDir, extraArgs: user }), user)
     const at = a.indexOf(playerFixture.gpuSoftware)
     const once = a.filter(function (t) { return t === playerFixture.gpuSoftware }).length === 1
     return !once || at > a.indexOf(playerFixture.tlsTrailing) || user.some(function (t) { return a.indexOf(t) < at })
@@ -13975,11 +13990,13 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     ["start", "not_implemented", startReply("start", "not_implemented", "not implemented")]
   ]
   // Every `failed mark|clear` the service hands the helper, from the sink:
-  // the failed slot's command as it is assigned, and whatever queued behind it.
+  // what the helper parses at each run of the failed slot (since D-SINK-48
+  // the id rides in the environment: H.helperView), and whatever queued
+  // behind it.
   const failedJobs = h => {
     const seen = []
-    let held = h.ids.failedProc.command
-    Object.defineProperty(h.ids.failedProc, "command", { get() { return held }, set(v) { held = v; seen.push(v.slice()) }, configurable: true })
+    let held = h.ids.failedProc.running
+    Object.defineProperty(h.ids.failedProc, "running", { get() { return held }, set(v) { held = v; if (v === true) seen.push(H.helperView(h.ids.failedProc.command, h.ids.failedProc.environment)) }, configurable: true })
     return () => seen.map(c => c[c.indexOf("failed") + 1] + ":" + c[c.indexOf("--id") + 1])
       .concat((h.root.failedQueue || []).map(j => j.action + ":" + j.id))
   }
@@ -14440,8 +14457,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       stopped(h)
       exit(h, "")
       const zaps = []
-      let held = h.ids.controlProc.command
-      Object.defineProperty(h.ids.controlProc, "command", { get() { return held }, set(v) { held = v; zaps.push(v.slice()) }, configurable: true })
+      let held = h.ids.controlProc.running
+      Object.defineProperty(h.ids.controlProc, "running", { get() { return held }, set(v) { held = v; if (v === true) zaps.push(H.helperView(h.ids.controlProc.command, h.ids.controlProc.environment)) }, configurable: true })
       exit(h, probeOf({ stash: { schema: 1, playing: true, id: "t:y", name: "Y", group: "G", launchedFrom: "", sourceKey: KA, since: 1, entryId: 1, seq: 1, verb: "play" } }))
       const sent = zaps.map(c => c[c.indexOf("play")] + ":" + c[c.indexOf("--id") + 1])
       return [said(h), sent]
@@ -18081,16 +18098,20 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   const rec = (url, extra) => Object.assign({ key: keyOf(url), url, epgUrl: "", kind: "http", label: "tvh", labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }, extra || {})
   const stateText = (sources, activeKey) => JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources, activeKey, entryMigrated: true }) + "\n"
   const boot = (sources) => H.bootService(svcText, M, { entry: { sourceKey: keyOf(LAN), showLogos: false }, stateText: stateText(sources, keyOf(LAN)), host: "lag" })
+  // The URL and its provenance, which is what these checks are about: since
+  // D-SINK-48 the same environment also carries the run's private arguments
+  // (OMARCHY_IPTV_ARGS), which the lane-p2a block below checks on its own.
+  const urlEnv = e => { const o = Object.assign({}, e); delete o.OMARCHY_IPTV_ARGS; return o }
   checkCall("D-SINK-40 (service): the guide fetch of a hint on the playlist's own host carries origin playlist, that host and the class its playlist fetch connected to; the --now-only run after it carries nothing", () => {
     const h = boot([rec(LAN)])
     h.root.channelsMeta = { epgUrlHint: "http://192.168.1.5:9981/xmltv", sourceClass: "private" }
     h.ids.epgProc.running = false
     h.root.runEpgHelper(false)
-    const fetch = Object.assign({}, h.ids.epgProc.environment)
+    const fetch = urlEnv(h.ids.epgProc.environment)
     h.ids.epgProc.running = false
     h.root.epgLoaded = true
     h.root.runEpgHelper(true)
-    return [fetch, h.ids.epgProc.environment, h.compileErrors]
+    return [fetch, urlEnv(h.ids.epgProc.environment), h.compileErrors]
   }, [{ OMARCHY_IPTV_URL: "http://192.168.1.5:9981/xmltv", OMARCHY_IPTV_ORIGIN: "playlist", OMARCHY_IPTV_PLAYLIST_HOST: "192.168.1.5", OMARCHY_IPTV_PLAYLIST_PORT: "9981", OMARCHY_IPTV_PLAYLIST_CLASS: "private" }, {}, []])
   checkCall("D-SINK-40 (service): a hint on another LAN host is never fetched and the active row says so; the user's own guide URL is fetched as theirs", () => {
     const h = boot([rec(LAN)])
@@ -18102,17 +18123,17 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     g.root.channelsMeta = { epgUrlHint: "http://192.168.1.6/xmltv", sourceClass: "private" }
     g.ids.epgProc.running = false
     g.root.runEpgHelper(false)
-    return [refused, g.ids.epgProc.environment]
+    return [refused, urlEnv(g.ids.epgProc.environment)]
   }, [[false, "", "active \u00b7 192.168.1.5:9981 \u00b7 9 channels in 2 groups \u00b7 EPG from playlist not used: 192.168.1.6 is a local address"],
       { OMARCHY_IPTV_URL: OWN, OMARCHY_IPTV_ORIGIN: "user", OMARCHY_IPTV_PLAYLIST_HOST: "192.168.1.5", OMARCHY_IPTV_PLAYLIST_PORT: "9981", OMARCHY_IPTV_PLAYLIST_CLASS: "private" }])
   checkCall("D-SINK-40 (service): the playlist fetch and the source probe carry origin user and no playlist host of their own", () => {
     const h = boot([rec(LAN)])
     h.ids.playlistProc.running = false
     h.root.runPlaylistHelper()
-    const fetch = Object.assign({}, h.ids.playlistProc.environment)
+    const fetch = urlEnv(h.ids.playlistProc.environment)
     h.root.addSource({ playlistUrl: "http://new.example.test/get.php?username=u&password=p", epgUrl: "", label: "" })
     h.runLater()
-    return [fetch, h.ids.sourceProbeProc.environment]
+    return [fetch, urlEnv(h.ids.sourceProbeProc.environment)]
   }, [{ OMARCHY_IPTV_URL: LAN, OMARCHY_IPTV_ORIGIN: "user" },
       { OMARCHY_IPTV_URL: "http://new.example.test/get.php?username=u&password=p", OMARCHY_IPTV_ORIGIN: "user" }])
   checkCall("D-SINK-41 (service): applyFreshness refreshes a fresh cache written before the destination rules, and leaves one written under them", () => {
@@ -18200,6 +18221,101 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     const ran = fs.existsSync(marker)
     return { exit: run.status, ran, warned: /non-dumpable/.test(run.stderr || "") }
   }, { exit: 0, ran: false, warned: false })
+  // D-SINK-47, D-SINK-48: the private arguments, off argv. The shared
+  // fixture first, in both directions: what the model hands the Process, and
+  // what the helper reads back out of it (the harness's stand-in, which the
+  // python suite holds the helper's own helper_arguments to).
+  const HA = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/helper-args.json"), "utf8"))
+  const envOf = c => c.private.length ? Object.assign({}, c.environment, { [HA.env]: JSON.stringify(c.private) }) : Object.assign({}, c.environment)
+  checkCall("D-SINK-48 (shared fixture): helperSpawn moves every private value off the argv into the environment, beside the run's own, and leaves the flag that makes the helper refuse to run without them", () =>
+    HA.cases.map(c => { const sp = M.helperSpawn(c.argv, c.environment); return [c.name, sp.command, sp.environment] }),
+    HA.cases.map(c => [c.name, c.command, envOf(c)]))
+  checkCall("D-SINK-48 (shared fixture): the harness's stand-in for the helper reads each command and environment back into the argv argparse is given", () =>
+    HA.cases.map(c => H.helperView(c.command, envOf(c))), HA.cases.map(c => c.parsed))
+  checkCall("D-SINK-48 (shared fixture): no private value is left on any command, and every case that has one names the flag once", () =>
+    HA.cases.map(c => { const sp = M.helperSpawn(c.argv, c.environment)
+      return [c.private.filter(x => x !== "" && sp.command.indexOf(x) !== -1), sp.command.filter(x => x === HA.flag).length] }),
+    HA.cases.map(c => [[], c.private.length ? 1 : 0]))
+  checkCall("D-SINK-48: helperSpawn tolerates null, keeps a given environment's own keys only, and never mutates its inputs", () => {
+    const argv = ["python3", "-I", "/h", "play", "--id", "t:x"], env = { OMARCHY_IPTV_URL: "u" }
+    const a = M.helperSpawn(argv, env)
+    const proto = M.helperSpawn(["python3"], JSON.parse('{"__proto__": {"x": 1}, "K": "v"}'))
+    return [M.helperSpawn(null, null), argv.length, Object.keys(env), Object.keys(a.environment), Object.keys(proto.environment), proto.environment.x]
+  }, [{ command: [], environment: {} }, 6, ["OMARCHY_IPTV_URL"], ["OMARCHY_IPTV_URL", "OMARCHY_IPTV_ARGS"], ["K"], undefined])
+
+  // Every helper spawn Service.qml makes, from Service.qml's own functions:
+  // what /proc/<pid>/cmdline would show (the Process's command) and what the
+  // helper parses (H.helperView). The values a local account could use --
+  // the cache folder's key, a u: id, a scope carrying a URL, a user token's
+  // proxy password, the keys of a prune -- are in the second and never in
+  // the first.
+  checkCall("D-SINK-48 (service): no spawn's command carries a source key, a channel id, a scope or a user token -- the zap, the player start and restart, the playlist and guide runs, the probe, the dead-channel mark, the logo run and the cache jobs -- and each still reaches the helper whole", () => {
+    const SCOPE = "g:Sports http://u:s3cret@cdn.test/x", ID = "u:1a2b3c4d", TOKEN = "--http-proxy=http://alice:S3cretPw@proxy.test:3128"
+    const h = H.bootService(svcText, M, { entry: { sourceKey: keyOf(PL), showLogos: true, mpvArgs: TOKEN + " --volume=50" },
+                                          stateText: stateText([rec(PL)], keyOf(PL)), host: "lag" })
+    const runs = []
+    const watch = (name) => {
+      const p = h.ids[name]
+      let held = p.running
+      Object.defineProperty(p, "running", { get() { return held }, set(v) { held = v; if (v === true) runs.push([name, p.command.slice(), H.helperView(p.command, p.environment)]) }, configurable: true })
+    }
+    for (const name of ["controlProc", "playerProc", "playlistProc", "epgProc", "failedProc", "sourceProbeProc", "logoFetchProc"]) watch(name)
+    const cacheBefore = h.cacheRuns.length
+    h.root.nowPlaying = { id: ID, name: "X", group: "Sports", launchedFrom: SCOPE, since: 1761700000 }
+    h.ids.controlProc.running = false
+    h.root.runControl("play", h.root.playArgs(ID))
+    h.ids.playerProc.running = false
+    h.root.issuePlayerSession("start", { id: ID, name: "X" }, "")
+    h.ids.playerProc.running = false
+    h.root.issuePlayerSession("restart", { id: ID, name: "X" }, "term")
+    h.ids.playlistProc.running = false
+    h.root.runPlaylistHelper()
+    h.ids.epgProc.running = false
+    h.root.epgLoaded = true
+    h.root.runEpgHelper(true)
+    h.ids.failedProc.running = false
+    h.root.runFailedJob({ action: "mark", id: ID, dir: h.root.activeCacheDir })
+    h.unstub("fetchLogos")
+    h.ids.logoFetchProc.running = false
+    h.root.fetchLogos()
+    h.root.addSource({ playlistUrl: "http://new.example.test/get.php?username=n&password=n3w", epgUrl: "", label: "" })
+    h.runLater()
+    // Not the active source's folder, which no cache job takes (D-SRC-70).
+    h.root.queueCacheJob(["remove", "--key", "0badf00d"], null)
+    h.drain()
+    const key = keyOf(PL)
+    const secrets = [key, ID, SCOPE, "S3cretPw", "--mpv-arg", "--cache-dir", "--id", "--scope"]
+    const onCommand = runs.map(r => [r[0], secrets.filter(x => r[1].some(a => a.indexOf(x) !== -1))])
+    const reached = runs.map(r => [r[0], r[2].some(a => a.indexOf("--cache-dir") === 0)])
+    const cache = h.cacheRuns.slice(cacheBefore)
+    return { names: runs.map(r => r[0] + ":" + (r[1].indexOf("player") !== -1 ? r[1][r[1].indexOf("player") + 1] : r[1][3])),
+             onCommand: onCommand.filter(x => x[1].length > 0), reached: reached.filter(x => !x[1]).map(x => x[0]),
+             tokenReached: runs.filter(r => r[0] === "playerProc").map(r => r[2].indexOf("--mpv-arg=" + TOKEN) !== -1),
+             scopeReached: runs.filter(r => r[0] === "controlProc").map(r => r[2][r[2].indexOf("--scope") + 1] === SCOPE),
+             cacheKeys: cache.map(c => c.indexOf("0badf00d") !== -1),
+             cacheCommand: [h.ids.cacheProc.command.join(" ").indexOf("0badf00d"), h.ids.cacheProc.command.slice(3)],
+             compileErrors: h.compileErrors }
+  }, { names: ["controlProc:play", "playerProc:start", "playerProc:restart", "playlistProc:playlist", "epgProc:epg", "failedProc:failed",
+               "logoFetchProc:logos", "sourceProbeProc:playlist"],
+       onCommand: [], reached: [], tokenReached: [true, true], scopeReached: [true], cacheKeys: [true],
+       cacheCommand: [-1, ["cache", "remove", "--args-from-env"]], compileErrors: [] })
+  // D-SINK-47: the player's half. No user token on the launch argv; the
+  // private file named where they stood, before the pin block; none at all
+  // when there are no tokens.
+  checkCall("D-SINK-47: the launch argv carries no user token -- a credentialed proxy, an API-key header -- and names the private options file once, where the tokens stood, right before the pin block; with no tokens, no file is named", () => {
+    const S = "/run/user/1000/omarchy-iptv/mpv.sock", ST = "/home/u/.local/state/omarchy-iptv"
+    const user = M.splitMpvArgs("--http-proxy=http://alice:S3cret@proxy.test:3128 --http-header-fields=X-Api-Key:k3y --volume=50").args
+    const a = M.buildMpvArgv({ socketPath: S, stateDir: ST, extraArgs: user })
+    const none = M.buildMpvArgv({ socketPath: S, stateDir: ST, extraArgs: [] })
+    const pins = M.mpvPinBlock(M.playerDirs(S, ST))
+    const inc = a.filter(t => t.indexOf("--include=") === 0)
+    return { onArgv: user.filter(t => a.join("\n").indexOf(t.split("=")[0]) !== -1), secret: a.join(" ").indexOf("S3cret"), inc,
+             beforePins: a.indexOf(inc[0]) === a.length - pins.length - 1, noTokens: none.filter(t => t.indexOf("--include") === 0),
+             file: M.playerDirs(S, ST).mpvArgs }
+  }, { onArgv: [], secret: -1, inc: ["--include=/run/user/1000/omarchy-iptv/mpv-args.conf"], beforePins: true, noTokens: [],
+       file: "/run/user/1000/omarchy-iptv/mpv-args.conf" })
+  checkCall("D-SINK-47: a token holding a NUL is refused by the shell's filter too (it cannot be one line of the options file)", () =>
+    M.splitMpvArgs("--volume=5 --user-agent=a\u0000b"), { args: ["--volume=5"], rejected: ["--user-agent=a\u0000b"], warnings: ["mpvArg --user-agent refused: reserved by the plugin"] })
   fs.rmSync(scratch, { recursive: true, force: true })
 })()
 

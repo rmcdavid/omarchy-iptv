@@ -277,7 +277,11 @@ function splitMpvArgs(text) {
     if (!ok || MPV_RESERVED[name] === true || MPV_RESERVED[base] === true
         || name.indexOf("--no-") === 0 && (MPV_RESERVED["--" + name.substring(5)] === true
                                            || MPV_RESERVED[mpvOptionBase("--" + name.substring(5))] === true)
-        || demuxerNamesTls(base, token) || scriptOptsRefused(base, token)) rejected.push(token)
+        || demuxerNamesTls(base, token) || scriptOptsRefused(base, token)
+        // D-SINK-47: a token now becomes one line of the player's options
+        // file, and a line break or a NUL cannot be carried on one; the
+        // split above leaves only the NUL possible here.
+        || /[\0\n\r]/.test(token)) rejected.push(token)
     else args.push(token)
   }
   return { args: args, rejected: rejected, warnings: mpvRefusedWarnings(rejected).concat(mpvArgWarnings(args)) }
@@ -401,13 +405,18 @@ function mpvWindowTitle(name) {
 //    gone at logout - and adds no durable path and nothing to clean up.
 //
 // Mirrored by `player_dirs()` in the helper (bin/helper/).
+//
+// D-SINK-47 (lane-p2a, 2026-10-29): and `mpvArgs`, the private file the
+// user's tokens are written into for the length of a launch, in the runtime
+// directory (0700) beside the socket. buildMpvArgv names it.
 function playerDirs(socketPath, stateDir) {
   var runtime = dirnameOf(socketPath)
   return {
     cwd: runtime,
     screenshots: str(stateDir) + "/screenshots",
     watchLater: runtime + "/watch-later",
-    shaderCache: runtime + "/shader-cache"
+    shaderCache: runtime + "/shader-cache",
+    mpvArgs: runtime + "/mpv-args.conf"
   }
 }
 
@@ -536,7 +545,25 @@ function buildMpvArgv(params) {
   // token, a named profile and a plain mpv.conf line, and each is set from the
   // command line, so no per-file profile replaces it. The block ends with
   // MPV_TLS_VERIFY, so everything above still describes the last element.
-  return argv.concat(asList(p.extraArgs)).concat(mpvPinBlock(dirs))
+  //
+  // D-SINK-47 (lane-p2a, 2026-10-29): the user's tokens are no longer ON this
+  // argv, which is /proc/<pid>/cmdline -- world-readable for the hours a
+  // player runs, and COREDUMP_CMDLINE in the journal if it crashes -- and a
+  // token is where a proxy password or an API-key header goes. The helper
+  // writes them into the private file `dirs.mpvArgs` (0600, in the 0700
+  // runtime folder, one `name=%N%value` line each, the length-quoted form
+  // that reads every value exactly as the argv did: measured for `=`, `,`,
+  // both quotes, spaces, `#`, `%`, a trailing backslash and UTF-8) and names
+  // it here, at the place the tokens stood. mpv parses an --include file AT
+  // ITS POSITION and marks what it sets as set from the command line, so a
+  // later argv token still wins and a per-file profile still cannot replace
+  // a token's value (measured): the pin block after it keeps the last word.
+  // The file is removed once mpv has bound its socket, which it does only
+  // after reading its whole command line. No tokens, no --include.
+  var extra = asList(p.extraArgs)
+  var file = str(dirs.mpvArgs) !== "" ? str(dirs.mpvArgs) : dirnameOf(p.socketPath) + "/mpv-args.conf"
+  var user = extra.length > 0 ? ["--include=" + file] : []
+  return argv.concat(user).concat(mpvPinBlock(dirs))
 }
 
 // The trailing pins: the contained resume folder first (a named profile in
@@ -570,6 +597,67 @@ function mpvPinBlock(dirs) {
 // Service.qml goes through it (the node suite holds every builder to it).
 function helperArgv(helperPath, args) {
   return ["python3", "-I", str(helperPath)].concat(asList(args))
+}
+
+// D-SINK-47, D-SINK-48 (lane-p2a, 2026-10-29). The helper's argv is
+// /proc/<pid>/cmdline, mode 0444 on a proc mounted without hidepid: every
+// account on the computer reads it. Four kinds of value rode there:
+//   --cache-dir <cache>/sources/<key> and the keys of the cache verbs, where
+//     every source added before this release is keyed by fnv1a32 of its
+//     credentialed playlist URL -- a 32-bit check on a guessed password, on
+//     the argv of every refresh, guide fetch, zap, logo run (for up to an
+//     hour) and start-up prune (SR40 kept shell.json private for that datum);
+//   --id, whose `u:` form hashes a stream URL the same way;
+//   --scope, a provider's group-title;
+//   --mpv-arg, the user's own tokens, where a proxy password goes.
+// helperSpawn takes the argv a builder made, moves every one of those --
+// HELPER_PRIVATE_VALUE's options with their value, HELPER_PRIVATE_LIST's
+// with every value up to the next option, and each attached `--mpv-arg=` --
+// into a JSON list in HELPER_ARGS_ENV, and leaves HELPER_ARGS_FLAG in their
+// place, so the helper refuses to run on defaults if the list does not
+// arrive. The environment is what D-SINK-8 moved the URL to: closed to other
+// uids from exec, to this uid from the stub's shield on. The verbs, sockets,
+// sequence numbers, times and pids stay on argv, where `pgrep -a` and the
+// harness find them. -> { command, environment }: Service.qml assigns BOTH,
+// immediately before the run (runHelper), and `environment` carries the
+// given one (a fetch's URL and provenance) as well. The helper's mirror is
+// helper_arguments; the shared helper-args fixture (dev branch) holds the two
+// together.
+var HELPER_ARGS_ENV = "OMARCHY_IPTV_ARGS"
+var HELPER_ARGS_FLAG = "--args-from-env"
+var HELPER_PRIVATE_VALUE = { "--cache-dir": true, "--id": true, "--scope": true, "--key": true, "--active": true }
+var HELPER_PRIVATE_LIST = { "--keep": true }
+var HELPER_PRIVATE_ATTACHED = "--mpv-arg="
+
+function helperSpawn(argv, environment) {
+  var list = asList(argv)
+  var command = []
+  var hidden = []
+  for (var i = 0; i < list.length; i++) {
+    var item = str(list[i])
+    var eq = item.indexOf("=")
+    var name = eq === -1 ? item : item.substring(0, eq)
+    if (item.indexOf(HELPER_PRIVATE_ATTACHED) === 0
+        || (eq !== -1 && (HELPER_PRIVATE_VALUE[name] === true || HELPER_PRIVATE_LIST[name] === true))) {
+      hidden.push(item)
+    } else if (HELPER_PRIVATE_VALUE[item] === true && i + 1 < list.length) {
+      hidden.push(item, str(list[i + 1]))
+      i++
+    } else if (HELPER_PRIVATE_LIST[item] === true) {
+      hidden.push(item)
+      while (i + 1 < list.length && str(list[i + 1]).indexOf("--") !== 0) hidden.push(str(list[++i]))
+    } else {
+      command.push(item)
+    }
+  }
+  var env = {}
+  var given = environment && typeof environment === "object" ? environment : {}
+  for (var k in given) if (Object.prototype.hasOwnProperty.call(given, k) && k !== "__proto__") env[k] = str(given[k])
+  if (hidden.length > 0) {
+    command.push(HELPER_ARGS_FLAG)
+    env[HELPER_ARGS_ENV] = JSON.stringify(hidden)
+  }
+  return { command: command, environment: env }
 }
 
 // D-SINK-50: the cache slot's argv, lifted out of Service.qml's
@@ -931,7 +1019,9 @@ export {
   mpvRefusedWarning, mpvRefusedWarnings, splitMpvArgs, demuxerNamesTls,
   scriptOptsRefused, mpvRejectedLine, mpvRejectedName, headerArgs,
   MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv,
-  mpvPinBlock, helperArgv, cacheRunArgv, playlistFetchArgv, fetchStateDir,
+  mpvPinBlock, helperArgv, HELPER_ARGS_ENV, HELPER_ARGS_FLAG,
+  HELPER_PRIVATE_VALUE, HELPER_PRIVATE_LIST, HELPER_PRIVATE_ATTACHED,
+  helperSpawn, cacheRunArgv, playlistFetchArgv, fetchStateDir,
   playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,
   failedArgv, logoFetchArgv, playerTracksArgv, trackChoice, parseTracks,
   LANG_NAMES, trackLanguage, trackLabel, trackDetail, trackRows,

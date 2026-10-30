@@ -2848,6 +2848,23 @@ Item {
     })
   }
 
+  // D-SINK-47, D-SINK-48 (2026-10-29): the one way a helper is started on a
+  // Process. Model.helperSpawn takes the private values -- a cache folder
+  // named by a key, a channel id, a scope, the user's mpv tokens -- off the
+  // argv, where /proc shows them to every account, and into the environment;
+  // the command and the environment are assigned together, immediately
+  // before the run, every run, because an assignment REPLACES the previous
+  // value on the same Process (measured on Quickshell 0.3.1, see
+  // Model.fetchEnvironment) and that is what keeps one run's values out of
+  // the next. `environment` is the run's own (a fetch's URL and provenance,
+  // rule 5); {} for every other run.
+  function runHelper(proc, argv, environment) {
+    var spawn = Model.helperSpawn(argv, environment)
+    proc.command = spawn.command
+    proc.environment = spawn.environment
+    proc.running = true
+  }
+
   // Runs against the active source's own cache directory; nothing runs
   // while it is unknown ("" before startup finished, or unconfigured) or
   // while the configured URL is invalid (D16: the status is synthesized).
@@ -2876,16 +2893,16 @@ Item {
     // theirs (parallel rule 1 (dev branch), ownership follows the coupling).
     // R24e (round 14, D-SRC-27): not in the no-write mode -- the remap is a
     // writer of state.json too, and that mode writes nothing to it.
-    playlistProc.command = Model.playlistFetchArgv(root.helperPath, root.activeCacheDir, Model.fetchStateDir(root.stateDir, root.stateWriteBlocked))
     // D-SINK-8: the URL carries the provider's credentials and goes in the
     // environment, never on argv, where /proc/<pid>/cmdline shows it to every
     // local user for the life of the fetch. Assigned immediately before the
-    // run, every run: the assignment REPLACES the previous value (measured on
-    // Quickshell 0.3.1, see Model.fetchEnvironment), so a stale URL cannot
-    // survive a source switch. D-SINK-40: the same one assignment says the
-    // URL is the user's, which is what lets its first hop reach a LAN host.
-    playlistProc.environment = Model.fetchEnvironmentFor(root.playlistUrl, { origin: "user" })
-    playlistProc.running = true
+    // run, every run (runHelper): the assignment REPLACES the previous value
+    // (measured on Quickshell 0.3.1, see Model.fetchEnvironment), so a stale
+    // URL cannot survive a source switch. D-SINK-40: the same one assignment
+    // says the URL is the user's, which is what lets its first hop reach a
+    // LAN host.
+    root.runHelper(playlistProc, Model.playlistFetchArgv(root.helperPath, root.activeCacheDir, Model.fetchStateDir(root.stateDir, root.stateWriteBlocked)),
+                   Model.fetchEnvironmentFor(root.playlistUrl, { origin: "user" }))
     playlistWatchdog.restart()
   }
 
@@ -2897,12 +2914,10 @@ Item {
     if (nowOnly) {
       if (!root.epgLoaded) return
       epgProc.nowOnly = true
-      epgProc.command = Model.epgFetchArgv(root.helperPath, root.activeCacheDir, true)
     } else {
       if (root.epgFetchUrl === "") return
       root.epgAttempted = true
       epgProc.nowOnly = false
-      epgProc.command = Model.epgFetchArgv(root.helperPath, root.activeCacheDir, false)
     }
     root.epgTimedOut = false
     // D-SINK-8: the EPG URL can carry credentials too, so it travels in the
@@ -2913,16 +2928,15 @@ Item {
     // D-SINK-40: and where the URL came from -- the user's own field or the
     // playlist's hint -- with the playlist's host and the class its fetch
     // connected to, which a hint on that same host may share.
-    epgProc.environment = Model.fetchEnvironmentFor(nowOnly ? "" : root.epgFetchUrl, root.epgProvenance)
-    epgProc.running = true
+    root.runHelper(epgProc, Model.epgFetchArgv(root.helperPath, root.activeCacheDir, nowOnly),
+                   Model.fetchEnvironmentFor(nowOnly ? "" : root.epgFetchUrl, root.epgProvenance))
     epgWatchdog.restart()
   }
 
   function runControl(kind, args) {
     if (controlProc.running) return false
     root.controlKind = kind
-    controlProc.command = Model.helperArgv(root.helperPath, args)
-    controlProc.running = true
+    root.runHelper(controlProc, Model.helperArgv(root.helperPath, args), {})
     controlWatchdog.restart()
     return true
   }
@@ -3278,8 +3292,7 @@ Item {
   function runPlayer(kind, args) {
     if (playerProc.running) return false
     root.playerKind = kind
-    playerProc.command = Model.helperArgv(root.helperPath, args)
-    playerProc.running = true
+    root.runHelper(playerProc, Model.helperArgv(root.helperPath, args), {})
     playerWatchdog.restart()
     return true
   }
@@ -4705,8 +4718,7 @@ Item {
   }
 
   function runFailedJob(job) {
-    failedProc.command = Model.failedArgv(root.helperPath, job.action, job.id, job.dir)
-    failedProc.running = true
+    root.runHelper(failedProc, Model.failedArgv(root.helperPath, job.action, job.id, job.dir), {})
     failedWatchdog.restart()   // D-SRC-37 (c)
   }
 
@@ -5041,14 +5053,13 @@ Item {
     // Passing the flag would remap the global favourites against a playlist
     // that never became the active list. The helper touches no state file
     // without the flag, so this is safe by construction.
-    sourceProbeProc.command = Model.playlistProbeArgv(root.helperPath, Model.sourceCacheDir(root.cacheDir, dirKey))
     // D-SINK-8: a candidate's URL is as credentialed as the active one, so it
     // goes in the environment too, assigned immediately before the run so a
     // re-check of source B never runs with source A's URL (the assignment
     // replaces, measured; see Model.fetchEnvironment). D-SINK-40: a URL the
     // user is adding or re-checking is theirs.
-    sourceProbeProc.environment = Model.fetchEnvironmentFor(rec.url, { origin: "user" })
-    sourceProbeProc.running = true
+    root.runHelper(sourceProbeProc, Model.playlistProbeArgv(root.helperPath, Model.sourceCacheDir(root.cacheDir, dirKey)),
+                   Model.fetchEnvironmentFor(rec.url, { origin: "user" }))
     probeWatchdog.restart()
   }
 
@@ -5492,8 +5503,7 @@ Item {
         continue
       }
       root.cacheJob = { args: args, onDone: job.onDone, seq: job.seq }
-      cacheProc.command = Model.cacheRunArgv(root.helperPath, root.cacheDir, args)
-      cacheProc.running = true
+      root.runHelper(cacheProc, Model.cacheRunArgv(root.helperPath, root.cacheDir, args), {})
       cacheWatchdog.restart()   // D-SRC-37 (c): every run of the slot is bounded
       return
     }
@@ -6732,8 +6742,7 @@ Item {
     // The tag is the LOGOS directory, through the same call `logoDir` is
     // bound through, so the guide's comparison (Model.logoSlot) can match.
     root.logoFetchDir = Model.logoDirFor(root.activeCacheDir)
-    logoFetchProc.command = Model.logoFetchArgv(root.helperPath, root.activeCacheDir)
-    logoFetchProc.running = true
+    root.runHelper(logoFetchProc, Model.logoFetchArgv(root.helperPath, root.activeCacheDir), {})
     return true
   }
 
