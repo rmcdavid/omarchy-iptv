@@ -110,7 +110,10 @@ state["props"].update({"tls-verify": False, "stream-lavf-o": {}, "demuxer-lavf-o
                        # lane-p1c (2026-10-29): mpv 0.41's own defaults for
                        # the two flags pinned that day, which it answers as
                        # booleans (measured).
-                       "prefetch-playlist": False, "load-console": True})
+                       "prefetch-playlist": False, "load-console": True,
+                       # lane-p2a (2026-10-29): and the stats overlay loaded,
+                       # mpv 0.41's default (measured: True).
+                       "load-stats-overlay": True})
 for arg in argv:
     if not arg.startswith("--"):
         continue
@@ -130,7 +133,7 @@ for arg in argv:
         state["props"]["reset-on-next-file"] = [v for v in value.split(",") if v]
     elif name == "drag-and-drop":
         state["props"]["drag-and-drop"] = False if value == "no" else value
-    elif name in ("prefetch-playlist", "load-console"):
+    elif name in ("prefetch-playlist", "load-console", "load-stats-overlay"):
         state["props"][name] = value not in ("no", "false", "0")
     elif name in ("stream-lavf-o-clr", "demuxer-lavf-o-clr", "script-opts-clr"):
         state["props"][base] = {}
@@ -1110,13 +1113,14 @@ class IdempotenceTest(PlayerTestCase):
         # channel's headers there (the channel's own now ride the loadfile).
         # lane-p1c (2026-10-29): and the console unloaded (D-SINK-61; this
         # double's console is mpv's default, on), prefetch already off here.
-        self.assertEqual(sets[:7], [["set_property", "load-select"], ["set_property", "watch-later-dir"],
+        # lane-p2a (2026-10-29): and the stats overlay unloaded (D-SINK-67).
+        self.assertEqual(sets[:8], [["set_property", "load-select"], ["set_property", "watch-later-dir"],
                                     ["set_property", "drag-and-drop"], ["set_property", "load-console"],
-                                    ["set_property", "user-agent"],
+                                    ["set_property", "load-stats-overlay"], ["set_property", "user-agent"],
                                     ["set_property", "referrer"], ["set_property", "http-header-fields"]])
         self.assertIn(["keybind", "ctrl+v", "ignore"], server.commands)
         self.assertIn(["change-list", "script-opts", "append", "osc-title_mbtn_mid_command=ignore"], server.commands)
-        sets = sets[7:]
+        sets = sets[8:]
         self.assertEqual(sets[:8], [["set_property", "tls-verify"],
                                     ["set_property", "stream-lavf-o"],
                                     ["set_property", "load-auto-profiles"],
@@ -2428,7 +2432,9 @@ class ParityTest(unittest.TestCase):
         # 55 the same day again: --drag-and-drop, pinned off (D-PLY-46).
         # 58 the same day (lane-p1c): --prefetch-playlist (D-SINK-63) and
         # --load-console with mpv's alias --load-osd-console (D-SINK-61).
-        self.assertEqual(len(names), 58)
+        # 59 the same day (lane-p2a): --load-stats-overlay (D-SINK-67).
+        self.assertEqual(len(names), 59)
+        self.assertIn("--load-stats-overlay", names)
         self.assertIn("--include", names)
         self.assertIn("--load-scripts", names)
         self.assertIn("--demuxer-cache-unlink-files", names)

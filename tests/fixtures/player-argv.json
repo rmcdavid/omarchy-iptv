@@ -110,6 +110,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -167,6 +168,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -236,6 +238,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -308,6 +311,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -377,6 +381,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -457,6 +462,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -574,6 +580,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -645,6 +652,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -707,6 +715,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -773,6 +782,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -1059,6 +1069,77 @@
         "warnings": [
           "mpvArg --demuxer-lavf-o-append hands the stream address to another program"
         ]
+      },
+      {
+        "name": "D-SINK-65: FFmpeg's own rtsp_transport key binds an rtsp channel's ports like --rtsp-transport=udp, in every spelling measured binding (name, number, hex, expression, +udp, -tcp, 0, quoted, bracketed, %n%-escaped, multicast, the list forms, beside another key, a later repeat)",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport=udp",
+          "--demuxer-lavf-o=rtsp_transport=1",
+          "--demuxer-lavf-o=rtsp_transport=0x1",
+          "--demuxer-lavf-o=rtsp_transport=2*0.5",
+          "--demuxer-lavf-o=rtsp_transport=+udp",
+          "--demuxer-lavf-o=rtsp_transport=-tcp",
+          "--demuxer-lavf-o=rtsp_transport=0",
+          "--demuxer-lavf-o=rtsp_transport=\"udp\"",
+          "--demuxer-lavf-o=rtsp_transport=[udp]",
+          "--demuxer-lavf-o=rtsp_transport=%3%udp",
+          "--demuxer-lavf-o=rtsp_transport=udp_multicast",
+          "--demuxer-lavf-o-append=rtsp_transport=udp",
+          "--demuxer-lavf-o-set=rtsp_transport=udp",
+          "--demuxer-lavf-o-add=rtsp_transport=udp+tcp",
+          "--demuxer-lavf-o=live_start_index=-1,rtsp_transport=udp",
+          "--demuxer-lavf-o=rtsp_transport=tcp,rtsp_transport=udp"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to",
+          "mpvArg --demuxer-lavf-o-append opens ports on this computer that anyone can send to",
+          "mpvArg --demuxer-lavf-o-set opens ports on this computer that anyone can send to",
+          "mpvArg --demuxer-lavf-o-add opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65: the spellings measured binding nothing are silent (tcp, http, https and their +-joins, quoted or bracketed), and so are rtsp_flags, which no spelling of binds, a removal, and a key that is not rtsp_transport",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport=tcp",
+          "--demuxer-lavf-o=rtsp_transport=http",
+          "--demuxer-lavf-o=rtsp_transport=https",
+          "--demuxer-lavf-o=rtsp_transport=tcp+http",
+          "--demuxer-lavf-o=rtsp_transport=\"tcp\"",
+          "--demuxer-lavf-o=rtsp_transport=[tcp]",
+          "--demuxer-lavf-o=rtsp_flags=prefer_tcp",
+          "--demuxer-lavf-o=rtsp_flags=2",
+          "--demuxer-lavf-o-remove=rtsp_transport",
+          "--demuxer-lavf-o-clr",
+          "--demuxer-lavf-o=live_start_index=-1",
+          "--demuxer-lavf-o=rtsp_transport=tcp,live_start_index=-1"
+        ],
+        "warnings": []
+      },
+      {
+        "name": "D-SINK-65: a spelling nobody enumerated warns rather than passes -- the key with no value, an empty value, an upper-case name FFmpeg would refuse, an unterminated quote, the numeric tcp -- the price of reading flags conservatively",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport",
+          "--demuxer-lavf-o=rtsp_transport=,x=1",
+          "--demuxer-lavf-o-append=rtsp_transport=TCP",
+          "--demuxer-lavf-o-set=rtsp_transport=\"tcp",
+          "--demuxer-lavf-o-add=rtsp_transport=2"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to",
+          "mpvArg --demuxer-lavf-o-append opens ports on this computer that anyone can send to",
+          "mpvArg --demuxer-lavf-o-set opens ports on this computer that anyone can send to",
+          "mpvArg --demuxer-lavf-o-add opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65: one token that carries two costs is told both, the handoff first (D-SINK-59 and D-SINK-65 together)",
+        "tokens": [
+          "--demuxer-lavf-o=http_proxy=http://p.test:3128,rtsp_transport=udp"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o hands the stream address to another program",
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
+        ]
       }
     ],
     "diskText": " writes the stream to disk while it plays",
@@ -1090,6 +1171,7 @@
     "--load-osd-console",
     "--load-scripts",
     "--load-select",
+    "--load-stats-overlay",
     "--load-unsafe-playlists",
     "--log-file",
     "--o",

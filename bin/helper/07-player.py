@@ -178,6 +178,11 @@ MPV_RESERVED = frozenset((
     # open, or an HLS key that would not open, with its whole URL (measured).
     # `--load-osd-console` is mpv's alias of it, the same option.
     "--load-console", "--load-osd-console",
+    # D-SINK-67 (owner, 2026-10-29: turn stats off): PINNED off. The stats
+    # overlay's first and file pages draw `${filename}`, which is the whole
+    # URL, userinfo and path credentials included, for a URL whose last path
+    # segment is empty, and the userinfo for one with no path (measured).
+    "--load-stats-overlay",
 ))
 # D-SINK-43 (and its verifyhost sibling): the words a `--demuxer-lavf-o*`
 # token may not contain. For an HLS or DASH stream libavformat reopens the URL
@@ -309,6 +314,7 @@ MPV_PIN_BLOCK = (
     "--player-operation-mode=cplayer",   # D-SINK-44: [pseudo-gui] applies after the command line
     "--load-select=no",                  # D-SINK-46: g l forks ffmpeg with the URL
     "--load-console=no",                 # D-SINK-61: the console draws a failed open's URL
+    "--load-stats-overlay=no",           # D-SINK-67: stats draws ${filename}, credentials and all
     "--prefetch-playlist=no",            # D-SINK-63: a prefetched entry got the channel's headers
     "--load-unsafe-playlists=no",        # D-SINK-44: mpv's origin rule for nested entries
     "--save-watch-history=no",           # D-SINK-44: every path, durably
@@ -389,8 +395,22 @@ DEMUXER_TLS_FORBIDDEN = frozenset(("ca_file", "cafile", "verifyhost", "listen", 
 # nested playlist truncated a scratch file, select forked ffmpeg with the
 # URL). So a pre-pin player whose mpv.conf holds a per-file profile that
 # touches ANY pinned option is stopped rather than migrated.
+#
+# lane-p2a (2026-10-29): EXCEPT load-stats-overlay (D-SINK-67), for now and
+# on purpose. The harness's stand-in mpv (scripts/qa-stub-mpv.py, outside
+# lane A's files) does not model that option, so its option-info would read
+# `property not found`, the read-back would refuse every player the stub
+# plays and every stub scenario would fail `tls_unverified` -- the reason the
+# stub learned each pin before. What the exclusion leaves: a PRE-PIN player,
+# adopted after the upgrade, whose own mpv.conf has a [protocol.*] or
+# [extension.*] profile turning stats back ON gets them back at its next load
+# (the pin_adopted_player write is undone there), until it restarts; a player
+# this release starts holds the pin from the command line, which no per-file
+# profile replaces. Raised with the lead: teach the stub, then drop this.
+PER_FILE_EXEMPT = frozenset(("load-stats-overlay",))
 PER_FILE_TLS_OPTIONS = tuple(sorted({MPV_LIST_SUFFIX_RE.sub("", token.split("=", 1)[0])[2:]
-                                     for token in ("--watch-later-dir=",) + MPV_PIN_BLOCK}))
+                                     for token in ("--watch-later-dir=",) + MPV_PIN_BLOCK}
+                                    - PER_FILE_EXEMPT))
 # mpv's own aliases of pinned options, as a profile's key may spell them.
 PER_FILE_OPTION_ALIASES = {"script": "scripts", "watch-later-directory": "watch-later-dir",
                            "script-opt": "script-opts", "load-osd-console": "load-console"}
@@ -433,6 +453,18 @@ MPV_DEMUXER_PROXY_WORD = "http_proxy"
 MPV_LISTEN_WARN = frozenset(("--rtsp-transport",))
 MPV_LISTEN_QUIET = frozenset(("tcp", "http", "https"))
 MPV_LISTEN_TEXT = " opens ports on this computer that anyone can send to"
+# D-SINK-65 (lane-p2a, 2026-10-29): the same cost through FFmpeg's own key.
+# `--demuxer-lavf-o=rtsp_transport=udp` binds an rtsp channel's RTP/RTCP pair
+# on 0.0.0.0 exactly as `--rtsp-transport=udp` does, and FFmpeg takes the
+# value as FLAGS: a name, a number, an expression, `+udp` and `-tcp` against
+# mpv's tcp, `0`, quoted, bracketed or %n%-escaped -- each measured binding
+# inside `unshare -rn`, none of them warned. So every occurrence of the key is
+# read and the token warns unless EACH value is a plain `+`-join of tcp, http
+# and https; anything else warns. No spelling of `rtsp_flags` binds
+# (measured), and a removal (-clr, -del, -remove) sets nothing. Mirror of
+# Model's MPV_RTSP_TRANSPORT_KEY.
+MPV_RTSP_TRANSPORT_KEY = "rtsp_transport"
+MPV_LIST_REMOVALS = ("-clr", "-del", "-remove")
 # D-SINK-52 (owner, 2026-10-29: pin and refuse). A `--script-opts` token is
 # REFUSED when its text sets an on-screen-controller command -- the OSC runs
 # its `*_mbtn_*_command` / `*_wheel_*_command` options as input commands on a
@@ -532,42 +564,81 @@ def mpv_arg_writes_disk(token: str) -> str:
 
 def mpv_arg_opens_ports(token: str) -> str:
     """Mirror of Model.mpvListenName: the option NAME when the token makes
-    rtsp channels bind ports (D-SINK-53), "" otherwise. The value is a
-    transport name, but the line still carries the name alone (R12)."""
+    rtsp channels bind ports (D-SINK-53, and D-SINK-65 through FFmpeg's own
+    rtsp_transport), "" otherwise. The line carries the name alone (R12)."""
     text = str(token)
     name, _, value = text.partition("=")
-    if name.startswith("--no-") or mpv_option_base(name) not in MPV_LISTEN_WARN:
+    if name.startswith("--no-"):
+        return ""
+    base = mpv_option_base(name)
+    if base == MPV_DEMUXER_OPTS:
+        return name if demuxer_opens_ports(name, value) else ""
+    if base not in MPV_LISTEN_WARN:
         return ""
     return "" if value.strip().lower() in MPV_LISTEN_QUIET else name
 
 
+def demuxer_opens_ports(name: str, value: str) -> bool:
+    """Mirror of Model.demuxerOpensPorts (D-SINK-65): a `--demuxer-lavf-o*`
+    value that sets rtsp_transport to anything but a plain `+`-join of tcp,
+    http and https. Index walks, no pattern."""
+    if str(name).endswith(MPV_LIST_REMOVALS):
+        return False
+    text = str(value)
+    at = text.find(MPV_RTSP_TRANSPORT_KEY)
+    while at != -1:
+        rest = text[at + len(MPV_RTSP_TRANSPORT_KEY):]
+        if not rest.startswith("="):
+            return True
+        v = rest[1:]
+        close = '"' if v.startswith('"') else ("]" if v.startswith("[") else "")
+        end = v.find(close, 1) if close else v.find(",")
+        if close:
+            v = v if end == -1 else v[1:end]
+        elif end != -1:
+            v = v[:end]
+        if not all(part in MPV_LISTEN_QUIET for part in v.split("+")):
+            return True
+        at = text.find(MPV_RTSP_TRANSPORT_KEY, at + 1)
+    return False
+
+
 def mpv_arg_warning(token: str) -> str:
     """Mirror of Model.mpvArgWarning: the whole warning line for one token,
-    or "". The three costs carry their own sentence, so the user is told WHAT
-    the option does rather than that it is "dangerous"."""
+    or "" -- the first of mpv_arg_warning_lines. The three costs carry their
+    own sentence, so the user is told WHAT the option does rather than that
+    it is "dangerous"."""
+    lines = mpv_arg_warning_lines(token)
+    return lines[0] if lines else ""
+
+
+def mpv_arg_warning_lines(token: str) -> list[str]:
+    """Mirror of Model.mpvArgWarningLines: every cost one token carries, in a
+    fixed order (D-SINK-65 made one token able to carry two)."""
+    out = []
     name = mpv_arg_hands_off_url(token)
     if name:
-        return "mpvArg " + name + MPV_HANDOFF_TEXT
+        out.append("mpvArg " + name + MPV_HANDOFF_TEXT)
     name = mpv_arg_writes_disk(token)
     if name:
-        return "mpvArg " + name + MPV_DISK_TEXT
+        out.append("mpvArg " + name + MPV_DISK_TEXT)
     name = mpv_arg_opens_ports(token)
     if name:
-        return "mpvArg " + name + MPV_LISTEN_TEXT
-    return ""
+        out.append("mpvArg " + name + MPV_LISTEN_TEXT)
+    return out
 
 
 def mpv_arg_warnings(tokens: list[str]) -> list[str]:
-    """Mirror of Model.mpvArgWarnings: one line per distinct option, in the
-    order the user wrote them."""
+    """Mirror of Model.mpvArgWarnings: one line per distinct option and cost,
+    in the order the user wrote them."""
     seen: set[str] = set()
     out: list[str] = []
     for token in tokens or []:
-        line = mpv_arg_warning(token)
-        if not line or line in seen:
-            continue
-        seen.add(line)
-        out.append(line)
+        for line in mpv_arg_warning_lines(token):
+            if line in seen:
+                continue
+            seen.add(line)
+            out.append(line)
     return out
 
 

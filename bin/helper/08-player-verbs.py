@@ -377,7 +377,9 @@ def pin_adopted_player(client: MpvIpc, sock_path: str) -> int:
     reset-on-next-file, which is read with the TLS pins instead (D-SINK-60).
     And (lane-p1c, 2026-10-29) prefetch-playlist off (D-SINK-63) and the
     console unloaded (D-SINK-61: mpv unloads a built-in script when its
-    load- option goes off at runtime, as load-auto-profiles showed).
+    load- option goes off at runtime, as load-auto-profiles showed); and
+    (lane-p2a, 2026-10-29) the stats overlay unloaded the same way (D-SINK-67:
+    measured, `script-binding stats/...` is then refused).
     Returns how many writes did not take, for the journal."""
     where = player_dirs(sock_path)
     failed = 0
@@ -390,7 +392,7 @@ def pin_adopted_player(client: MpvIpc, sock_path: str) -> int:
                                ("osd-playlist-entry", "title", "title"), ("log-file", "", ""),
                                ("watch-later-dir", where["watchLater"], where["watchLater"]),
                                ("drag-and-drop", False, "no"), ("prefetch-playlist", False, False),
-                               ("load-console", False, False)):
+                               ("load-console", False, False), ("load-stats-overlay", False, False)):
         ok, current = client.try_command("get_property", prop)
         if ok and current == value:
             continue

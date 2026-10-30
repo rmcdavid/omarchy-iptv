@@ -171,12 +171,13 @@ class ClassificationTest(unittest.TestCase):
         self.assertEqual(o["--demuxer-lavf-o"]["pinKey"], "tls_verify=1")
         # The owner's decision 3: only the select menu goes -- and, the
         # owner's decision on D-SINK-61 (2026-10-29), the console with it,
-        # mpv's alias included. Stats, commands, the context menu,
+        # mpv's alias included, and on D-SINK-67 (2026-10-29, "yes" to
+        # turning stats off), the stats overlay. Commands, the context menu,
         # positioning and the OSC stay.
-        for name in ("--load-stats-overlay", "--load-context-menu", "--load-commands",
-                     "--load-positioning", "--osc"):
+        for name in ("--load-context-menu", "--load-commands", "--load-positioning", "--osc"):
             self.assertEqual(o[name]["class"], "allowed", name)
-        for name in ("--load-select", "--load-console", "--load-osd-console", "--prefetch-playlist"):
+        for name in ("--load-select", "--load-console", "--load-osd-console", "--prefetch-playlist",
+                     "--load-stats-overlay"):
             self.assertEqual(o[name]["class"], "pinned", name)
 
     def test_the_format_keys_are_the_helpers_whitelist_and_the_filters_words(self):

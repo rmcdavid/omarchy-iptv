@@ -350,7 +350,12 @@ var MPV_RESERVED = {
   // open, or an HLS key that would not open, with its whole URL (measured).
   // `--load-osd-console` is mpv's alias of it, the same option.
   "--load-console": true,
-  "--load-osd-console": true
+  "--load-osd-console": true,
+  // D-SINK-67 (owner, 2026-10-29: turn stats off): PINNED off. The stats
+  // overlay's first and file pages draw `${filename}`, which is the whole
+  // URL, userinfo and path credentials included, for a URL whose last path
+  // segment is empty, and the userinfo for one with no path (measured).
+  "--load-stats-overlay": true
 }
 
 // D-SINK-43 (and its verifyhost sibling): the words a `--demuxer-lavf-o*`
@@ -425,6 +430,7 @@ var MPV_PIN_BLOCK = [
   "--player-operation-mode=cplayer",   // D-SINK-44: [pseudo-gui] applies after the command line
   "--load-select=no",                  // D-SINK-46: g l forks ffmpeg with the URL
   "--load-console=no",                 // D-SINK-61: the console draws a failed open's URL
+  "--load-stats-overlay=no",           // D-SINK-67: stats draws ${filename}, credentials and all
   "--prefetch-playlist=no",            // D-SINK-63: a prefetched entry got the channel's headers
   "--load-unsafe-playlists=no",        // D-SINK-44: mpv's origin rule for nested entries
   "--save-watch-history=no",           // D-SINK-44: every path, durably

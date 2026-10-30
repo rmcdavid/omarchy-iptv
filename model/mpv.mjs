@@ -73,6 +73,22 @@ var MPV_DEMUXER_PROXY_WORD = "http_proxy"
 var MPV_LISTEN_WARN = { "--rtsp-transport": true }
 var MPV_LISTEN_QUIET = { "tcp": true, "http": true, "https": true }
 var MPV_LISTEN_TEXT = " opens ports on this computer that anyone can send to"
+// D-SINK-65 (lane-p2a, 2026-10-29): the same cost through FFmpeg's own key.
+// `--demuxer-lavf-o=rtsp_transport=udp` binds an rtsp channel's RTP/RTCP pair
+// on 0.0.0.0 exactly as `--rtsp-transport=udp` does, and FFmpeg takes that
+// key's value as FLAGS: a name, a number (`1`, `0x1`), an expression
+// (`2*0.5`), `+udp` and `-tcp` against mpv's own tcp, `0` (every transport,
+// UDP first), quoted, bracketed or `%n%`-escaped -- each of those measured
+// binding inside `unshare -rn`, and none of them warned. So every occurrence
+// of the key is read and the token warns unless EACH value is a plain `+`-join
+// of tcp, http and https, the spellings measured binding nothing; anything
+// else, a spelling nobody enumerated included, warns -- the price being a
+// warning on a harmless spelling (`2`, `%3%tcp`). `rtsp_flags` needs no
+// reading: no spelling of it binds (measured: `prefer_tcp` and `filter_src`
+// play over TCP, and the numeric `listen`, 2, fails without the
+// `listen_timeout` the read-back removes). A removal (-clr, -del, -remove)
+// sets nothing. Mirrored by MPV_RTSP_TRANSPORT_KEY in the helper.
+var MPV_RTSP_TRANSPORT_KEY = "rtsp_transport"
 // D-SINK-52 (owner, 2026-10-29: pin and refuse). A `--script-opts` token is
 // REFUSED when its text sets an on-screen-controller command (the OSC runs
 // its *_mbtn_*_command / *_wheel_*_command options as input commands on a
@@ -128,32 +144,74 @@ function mpvListenName(token) {
   var eq = text.indexOf("=")
   var name = eq === -1 ? text : text.substring(0, eq)
   var value = eq === -1 ? "" : text.substring(eq + 1)
-  if (name.indexOf("--no-") === 0 || MPV_LISTEN_WARN[mpvOptionBase(name)] !== true) return ""
+  if (name.indexOf("--no-") === 0) return ""
+  var base = mpvOptionBase(name)
+  if (base === "--demuxer-lavf-o") return demuxerOpensPorts(name, value) ? name : ""
+  if (MPV_LISTEN_WARN[base] !== true) return ""
   return MPV_LISTEN_QUIET[value.trim().toLowerCase()] === true ? "" : name
 }
 
-// The whole warning line for one token, or "". Each cost carries its own
-// sentence, so the user is told WHAT the option does.
-function mpvArgWarning(token) {
-  var name = mpvHandoffName(token)
-  if (name !== "") return "mpvArg " + name + MPV_HANDOFF_TEXT
-  name = mpvDiskName(token)
-  if (name !== "") return "mpvArg " + name + MPV_DISK_TEXT
-  name = mpvListenName(token)
-  if (name !== "") return "mpvArg " + name + MPV_LISTEN_TEXT
-  return ""
+// D-SINK-65: true when a `--demuxer-lavf-o*` token's value sets FFmpeg's
+// rtsp_transport to anything but a plain `+`-join of tcp, http and https
+// (MPV_RTSP_TRANSPORT_KEY says why that reading). Index walks, no pattern.
+function demuxerOpensPorts(name, value) {
+  if (/-(clr|del|remove)$/.test(str(name))) return false
+  var text = str(value)
+  var at = text.indexOf(MPV_RTSP_TRANSPORT_KEY)
+  while (at !== -1) {
+    var rest = text.substring(at + MPV_RTSP_TRANSPORT_KEY.length)
+    if (rest.charAt(0) !== "=") return true
+    var v = rest.substring(1)
+    var close = v.charAt(0) === '"' ? '"' : (v.charAt(0) === "[" ? "]" : "")
+    var end = close !== "" ? v.indexOf(close, 1) : v.indexOf(",")
+    if (close !== "") v = end === -1 ? v : v.substring(1, end)
+    else if (end !== -1) v = v.substring(0, end)
+    if (!rtspTransportQuiet(v)) return true
+    at = text.indexOf(MPV_RTSP_TRANSPORT_KEY, at + 1)
+  }
+  return false
 }
 
-// One line per distinct option, in the order the user wrote them.
+function rtspTransportQuiet(value) {
+  var parts = str(value).split("+")
+  for (var i = 0; i < parts.length; i++) if (MPV_LISTEN_QUIET[parts[i]] !== true) return false
+  return parts.length > 0
+}
+
+// The whole warning line for one token, or "". Each cost carries its own
+// sentence, so the user is told WHAT the option does. The first of
+// mpvArgWarningLines.
+function mpvArgWarning(token) {
+  var lines = mpvArgWarningLines(token)
+  return lines.length > 0 ? lines[0] : ""
+}
+
+// Every cost one token carries, in a fixed order. D-SINK-65 made one token
+// able to carry two: a `--demuxer-lavf-o` holding both FFmpeg's http_proxy
+// (D-SINK-59) and a binding rtsp_transport is told both.
+function mpvArgWarningLines(token) {
+  var out = []
+  var name = mpvHandoffName(token)
+  if (name !== "") out.push("mpvArg " + name + MPV_HANDOFF_TEXT)
+  name = mpvDiskName(token)
+  if (name !== "") out.push("mpvArg " + name + MPV_DISK_TEXT)
+  name = mpvListenName(token)
+  if (name !== "") out.push("mpvArg " + name + MPV_LISTEN_TEXT)
+  return out
+}
+
+// One line per distinct option and cost, in the order the user wrote them.
 function mpvArgWarnings(tokens) {
   var list = asList(tokens)
   var seen = {}
   var out = []
   for (var i = 0; i < list.length; i++) {
-    var line = mpvArgWarning(list[i])
-    if (line === "" || seen[line] === true) continue
-    seen[line] = true
-    out.push(line)
+    var lines = mpvArgWarningLines(list[i])
+    for (var j = 0; j < lines.length; j++) {
+      if (seen[lines[j]] === true) continue
+      seen[lines[j]] = true
+      out.push(lines[j])
+    }
   }
   return out
 }
@@ -866,13 +924,14 @@ function trackAccessibleName(rows, index) {
 export {
   MPV_HANDOFF, MPV_HANDOFF_SCRIPT_OPTS, MPV_YTDL_OFF, MPV_HANDOFF_TEXT,
   MPV_DISK_WARN, MPV_DISK_TEXT, MPV_DEMUXER_PROXY_WORD, MPV_LISTEN_WARN,
-  MPV_LISTEN_QUIET, MPV_LISTEN_TEXT, MPV_SCRIPT_OPTS_WORDS, mpvOptionBase,
-  mpvHandoffName, mpvDiskName, mpvListenName, mpvArgWarning, mpvArgWarnings,
-  MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT, mpvRefusedWarning,
-  mpvRefusedWarnings, splitMpvArgs, demuxerNamesTls, scriptOptsRefused,
-  mpvRejectedLine, mpvRejectedName, headerArgs, MPV_RAW_PREFIX,
-  mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv, mpvPinBlock,
-  helperArgv, cacheRunArgv, playlistFetchArgv, fetchStateDir,
+  MPV_LISTEN_QUIET, MPV_LISTEN_TEXT, MPV_RTSP_TRANSPORT_KEY,
+  MPV_SCRIPT_OPTS_WORDS, mpvOptionBase, mpvHandoffName, mpvDiskName,
+  mpvListenName, demuxerOpensPorts, rtspTransportQuiet, mpvArgWarning,
+  mpvArgWarningLines, mpvArgWarnings, MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT,
+  mpvRefusedWarning, mpvRefusedWarnings, splitMpvArgs, demuxerNamesTls,
+  scriptOptsRefused, mpvRejectedLine, mpvRejectedName, headerArgs,
+  MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv,
+  mpvPinBlock, helperArgv, cacheRunArgv, playlistFetchArgv, fetchStateDir,
   playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,
   failedArgv, logoFetchArgv, playerTracksArgv, trackChoice, parseTracks,
   LANG_NAMES, trackLanguage, trackLabel, trackDetail, trackRows,

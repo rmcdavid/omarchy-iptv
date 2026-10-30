@@ -26,9 +26,9 @@
   "base": "set by the plugin BEFORE the user's tokens; a user token may override it"
  },
  "counts": {
-  "allowed": 822,
+  "allowed": 821,
   "base": 8,
-  "pinned": 24,
+  "pinned": 25,
   "reserved": 39,
   "warned": 6
  },
@@ -42,6 +42,7 @@
   "--player-operation-mode=cplayer",
   "--load-select=no",
   "--load-console=no",
+  "--load-stats-overlay=no",
   "--prefetch-playlist=no",
   "--load-unsafe-playlists=no",
   "--save-watch-history=no",
@@ -1748,8 +1749,9 @@
   },
   "--load-stats-overlay": {
    "type": "Flag",
-   "class": "allowed",
-   "why": "owner, 2026-10-29: stays on; page 5 draws ${filename}, a query token included (recorded)"
+   "class": "pinned",
+   "pin": "--load-stats-overlay=no",
+   "why": "D-SINK-67 (owner, 2026-10-29: turn stats off): the first and file pages draw ${filename}, the whole URL with userinfo and path credentials when its last path segment is empty, the userinfo when it has no path (measured); pinned off, and unloaded on adoption"
   },
   "--load-unsafe-playlists": {
    "type": "Flag",
