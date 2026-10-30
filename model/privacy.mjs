@@ -268,6 +268,19 @@ function playerPauseArgv(socket, state) {
 // guide's row printed `News HD (backup cdn.test)` while this body printed
 // the whole credentialed URL, and the host keeps every body in its history.
 // Redacted BEFORE cleanName, so the S-04 dash rule sees what is shown.
+//
+// D-SINK-49 (2026-10-29). The host renders the BODY as Text.StyledText
+// (OMARCHY-PLUGIN-CONTRACT.md (dev branch), "Verified host renderers", and
+// pinned by its host text-format test) behind a stripper that drops image tags
+// only, and the Desktop Notifications spec leaves escaping to the client
+// once a server advertises body-markup. So a `<b>`, a `<font>` or an
+// `<a href>` in a provider's name or in a reason restyled this plugin's own
+// card. The WHOLE body is escaped once, at the one exit below, so no branch
+// -- and no branch added later -- can hand the renderer a tag; StyledText
+// decodes the three entities, so the user reads the name exactly as the
+// provider wrote it (an `&` included, which unescaped could swallow the
+// text after it). The TITLE is not escaped: the host draws it PlainText
+// (pinned the same way), where an entity would show as written.
 function notifyArgv(event, params, replaceId) {
   var p = params || {}
   var spec = null
@@ -339,7 +352,16 @@ function notifyArgv(event, params, replaceId) {
   if (!spec) return null
   var held = notifyReplaceId(replaceId)
   return ["omarchy-notification-send", "--app-name", "IPTV", "-u", spec.urgency, "-g", spec.glyph, "-p",
-          "-r", String(held > 0 ? held : spec.id), spec.title, spec.body]
+          "-r", String(held > 0 ? held : spec.id), spec.title, markupEscape(spec.body)]
+}
+
+// D-SINK-49: text on its way into a StyledText renderer, shown as written.
+// `&` first, so the entities written for `<` and `>` are not escaped again.
+// Quotes are left alone: with no `<` left there is no tag for an attribute
+// to sit in, and StyledText draws a quote as a quote (measured, the QML
+// spec's "D-SINK-49" case). Three single-character global replaces, linear.
+function markupEscape(text) {
+  return str(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
 // ---- D-HOST-5 (owner, 2026-10-28): one card per notice kind, refreshed in place.
@@ -786,10 +808,10 @@ export {
   configShieldArgv, configShieldState, persistCarriesSecret,
   configShieldDecision, entryShieldDecision, seqArg, mpvArgArgv,
   playerSessionArgv, playerStartArgv, playerStopArgv, playerRestartArgv,
-  playerPauseArgv, notifyArgv, NOTIFY_POST_TIMEOUT_MS, notifyReplaceId,
-  notifyReplyId, notifySlot, withNotifySlot, notifyPost, notifyAnswered,
-  sourceLabel, hostOf, SPACE_RE, isSpaceAt, URL_SPACE_CODES, isUrlSpaceAt,
-  urlSpaceIndex, URL_DELIMITER_CODES, isUrlDelimiterAt, urlDelimiterIndex,
-  trailingPunctuationLength, isSchemeRestCode, isLetterCode, redactUrls,
-  scrubUrls, sinkText
+  playerPauseArgv, notifyArgv, markupEscape, NOTIFY_POST_TIMEOUT_MS,
+  notifyReplaceId, notifyReplyId, notifySlot, withNotifySlot, notifyPost,
+  notifyAnswered, sourceLabel, hostOf, SPACE_RE, isSpaceAt, URL_SPACE_CODES,
+  isUrlSpaceAt, urlSpaceIndex, URL_DELIMITER_CODES, isUrlDelimiterAt,
+  urlDelimiterIndex, trailingPunctuationLength, isSchemeRestCode,
+  isLetterCode, redactUrls, scrubUrls, sinkText
 }

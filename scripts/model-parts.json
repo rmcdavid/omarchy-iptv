@@ -647,6 +647,7 @@
         "playerRestartArgv",
         "playerPauseArgv",
         "notifyArgv",
+        "markupEscape",
         "NOTIFY_POST_TIMEOUT_MS",
         "notifyReplaceId",
         "notifyReplyId",

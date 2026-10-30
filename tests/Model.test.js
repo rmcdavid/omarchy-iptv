@@ -4385,6 +4385,45 @@ function redactUrlsBeforeDSink23(text) {
   }, [null, null, []])
 })()
 
+// ---- D-SINK-49 (2026-10-29): the notification BODY is markup, so the body is
+// escaped. The host draws it as Text.StyledText behind a stripper that drops
+// image tags only (docs/OMARCHY-PLUGIN-CONTRACT.md; pinned by
+// tests/test_host_text_format.py), so a provider's `<a href>`, `<font>` or
+// `<br>` restyled the plugin's own card. Every event, with markup in the name
+// and in the reason: the body carries no `<` or `>` at all, every `&` begins
+// an entity it wrote, and decoding the three entities gives back exactly the
+// body as composed without escaping. Red on dev 2727179: the body carried the
+// tags verbatim. The TITLE is the host's PlainText and is not escaped.
+;(function () {
+  const MARKUP = ["<b>B</b>", "a &amp; b", "<a href=\"https://evil.test/login\">renew</a>",
+                  "<br><font color=\"#ff0000\" size=\"+4\">X</font>", "AT&T > 5 < 6", "x &lt; y"]
+  const EVENTS = ["streamFailed", "localPlayFailure", "playerStopped", "outputFailed", "playlistRefreshed", "playlistError",
+                  "epgError", "mpvMissing", "entryInputRefused", "stateUnreadable"]
+  const decode = function (s) { return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&") }
+  checkCall("D-SINK-49: every notification body, every event, markup in the name and the reason: no `<` or `>` reaches the StyledText body, every `&` opens one of the three entities, and decoding them gives back the composed body exactly", function () {
+    const bad = []
+    for (const ev of EVENTS) for (const m of MARKUP) {
+      const argv = Model.notifyArgv(ev, { name: m, reason: m, output: "video", channelCount: 2, groupCount: 1, setting: "playlistUrl", path: "/p/state.json" })
+      if (argv === null) { bad.push(ev + ": no argv"); continue }
+      const body = argv[argv.length - 1]
+      if (/[<>]/.test(body)) bad.push(ev + " " + m + " -> " + body)
+      if (/&(?!amp;|lt;|gt;)/.test(body)) bad.push(ev + " " + m + " (bare &) -> " + body)
+    }
+    return bad
+  }, [])
+  checkCall("D-SINK-49: escaping is the RENDERING, not a loss -- decoded, the body is the plugin's sentence with the name as the provider wrote it (after the S-04 dash rule and redaction); the title is a constant and is not escaped", function () {
+    return MARKUP.map(function (m) {
+      const argv = Model.notifyArgv("streamFailed", { name: m, reason: "HTTP 403" })
+      return [decode(argv[argv.length - 1]) === Model.QUOTE_OPEN + Model.cleanName(Model.sinkText(m)) + Model.QUOTE_CLOSE + " did not play" + Model.SEP + "HTTP 403",
+              argv[argv.length - 2]]
+    })
+  }, MARKUP.map(function () { return [true, "Stream failed"] }))
+  checkCall("D-SINK-49: markupEscape escapes exactly `&`, `<` and `>` (the `&` first, so its own entities are not escaped twice), leaves quotes and every other character, and is the identity on text without them", function () {
+    return [Model.markupEscape("<b>&amp;</b>"), Model.markupEscape("a \"b\" 'c' \u201cd\u201d"), Model.markupEscape(""), Model.markupEscape(null),
+            Model.markupEscape("plain \u00b7 text"), Model.markupEscape("&&<<>>")]
+  }, ["&lt;b&gt;&amp;amp;&lt;/b&gt;", "a \"b\" 'c' \u201cd\u201d", "", "", "plain \u00b7 text", "&amp;&amp;&lt;&lt;&gt;&gt;"])
+})()
+
 checkCall("D-RUNG-9: the header the HOST draws is under 4.5 on three themes and INVERTED on five", function () {
   // The defect, asserted before the fix so the fix has something to beat.
   const under = menuTokens.themes.filter(function (t) {
@@ -16795,7 +16834,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   }, E13.map(id => [id, true, false, true, "Guide data unavailable (" + fixtureCase(id).reason + ")" + Model.SEP + "channels still work" + Model.SEP + "r retry",
                     ["Could not fetch the EPG (" + fixtureCase(id).reason + "). Channels still work."], fixtureCase(id).reason, false]))
 
-  // ---- F-SINK-14 (2026-10-29), through Service.qml ----
+  // ---- F-SINK-14, D-SINK-49 (2026-10-29), through Service.qml ----
   //
   // The shared shown-names fixture again, now through the service's OWN
   // functions: the IPC `status` reply (statusSummary -> nowPlayingSummary ->
@@ -16839,6 +16878,23 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
                 told.filter(t => t.indexOf(Model.QUOTE_OPEN + v.js + Model.QUOTE_CLOSE) !== -1).length,
                 v.mustNotAppear.filter(frag => all.indexOf(frag) !== -1)]
       }), SHOWN.map(() => ["t:x", true, true, true, true, 4, []]))
+
+    checkCall("D-SINK-49 (service): a channel name and a reason carrying markup reach the posted body escaped -- no `<` or `>` in the argv the shell runs, for the stream failure, the local refusal, the player's death and the lost output", () => {
+      const h = bootPlayer()
+      const NAME = "<a href=\"x\">Renew</a><br><b>B</b> & co"
+      h.root.notifiedFailureId = ""
+      h.root.raiseStreamFailure({ id: "t:m", name: NAME }, "<b>HTTP 403</b>"); h.drain()
+      h.root.nowPlaying = { id: "t:m", name: NAME, group: "", launchedFrom: "", since: 1 }
+      h.root.playerKind = "start"
+      h.root.handlePlayerResult(localReply("player-start-parent-0500")); h.drain()
+      h.root.nowPlaying = null
+      h.root.notifiedFailureId = ""
+      h.root.raisePlayerStopped({ id: "t:m", name: NAME }, M.PLAYER_GENERIC_FAILURE); h.drain()
+      h.root.notifiedFailureId = ""
+      h.root.raiseOutputFailure({ id: "t:m", name: NAME }, "video", M.outputFailureSentence("video")); h.drain()
+      const told = bodies(h)
+      return [told.length, told.filter(t => /[<>]/.test(t)), told.every(t => t.indexOf("&lt;a href=\"x\"&gt;Renew&lt;/a&gt;&lt;br&gt;&lt;b&gt;B&lt;/b&gt; &amp; co") !== -1)]
+    }, [4, [], true])
   }
 })()
 

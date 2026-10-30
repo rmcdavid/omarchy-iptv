@@ -72,5 +72,33 @@ class HostTextFormatCase(unittest.TestCase):
         ] + ["  " + m for m in missing]))
 
 
+    def test_the_notification_host_activates_no_link(self):
+        """D-SINK-49 (2026-10-29). The toast body is StyledText, and the
+        server advertises body markup AND hyperlinks, so the one thing between
+        a provider's `<a href>` and a click that opens it is that nothing under
+        plugins/notifications/ handles a link: no onLinkActivated, no
+        linkActivated, no linkAt or hoveredLink, no Qt.openUrlExternally. The
+        plugin escapes every body since D-SINK-49, so its own cards draw no
+        link either way; this pins the host fact the contract states, so a host
+        update that wires links is a re-measurement and not a silence. Proven
+        red by adding `onLinkActivated: Qt.openUrlExternally(link)` to the
+        body Text of a copy (OMARCHY_SHELL_DIR)."""
+        base = os.path.join(HOST, "plugins", "notifications")
+        found = []
+        seen = 0
+        for dirpath, _dirs, files in os.walk(base):
+            for name in sorted(files):
+                if not name.endswith((".qml", ".js")):
+                    continue
+                seen += 1
+                rel = os.path.relpath(os.path.join(dirpath, name), HOST)
+                text = read(rel)
+                for word in ("onLinkActivated", "linkActivated", "linkAt", "hoveredLink", "onLinkHovered", "openUrlExternally"):
+                    if word in text:
+                        found.append("%s: %s" % (rel, word))
+        self.assertGreaterEqual(seen, 3, "the notifications plugin's files were not found under %s" % base)
+        self.assertEqual([], found, "the host now handles links in notifications; re-measure D-SINK-49 "
+                                    "(docs/OMARCHY-PLUGIN-CONTRACT.md, Verified host renderers)")
+
 if __name__ == "__main__":
     unittest.main()
