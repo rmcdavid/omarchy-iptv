@@ -1105,10 +1105,23 @@ def write_json_atomic(path: str, payload: Any, private_dir: bool = True) -> None
 
 
 def json_string(text: str) -> str:
-    """JSON string literal; the common quote-free case skips the encoder."""
-    if '"' in text or "\\" in text:
-        return json.dumps(text, ensure_ascii=False)
-    return '"' + text + '"'
+    """JSON string literal, always through the encoder (D-EPG-14).
+
+    It used to skip the encoder when `text` held no quote and no backslash,
+    which was right for the guide's own ids -- folded of every control
+    character at the parse -- and wrong for the window's other keys, the
+    playlist's tvg-ids, which make_channel only strips: a TAB, a CR or any
+    other C0 control inside one was written raw. A TAB moved the window
+    line's first-TAB split, a CR split the line on the next read, and any of
+    them made epg-now.json invalid JSON, so one such channel blanked the
+    whole source's guide. The encoder escapes all of them and changes no
+    other character (ensure_ascii=False), so every id that was written
+    correctly is written byte for byte as before. What it leaves raw -- DEL,
+    the C1 controls, U+2028 and U+2029 -- is valid inside a JSON string and
+    splits no line here: the window is split on LF alone and read with
+    universal newlines (LF, CR and CRLF), and the shell splits epg-now.json
+    on LF. The shared fixture epg-id-controls.json pins each of them."""
+    return json.dumps(text, ensure_ascii=False)
 
 
 # D-SINK-19 round 13, R23b, rule 15: every open() in this helper of a path

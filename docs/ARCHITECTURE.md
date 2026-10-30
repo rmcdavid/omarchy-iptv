@@ -239,8 +239,29 @@ service holds the file's text and a null-prototype index from tvg-id to
 `[offset, length]` into it (`Model.parseEpgNowStore`), and a row parses
 its own entry when it asks (`Model.epgEntry`). An id may hold quotes,
 backslashes, non-ASCII and `__proto__` (its key is the JSON literal up to
-the unescaped closing quote); a fragment never holds a raw newline (ids are
-folded of control characters at the parse, every value is JSON-encoded).
+the unescaped closing quote); a fragment never holds a raw newline or any
+other C0 control (every id and every value is JSON-encoded).
+**[2026-10-29, D-EPG-14: the parenthesis said "ids are folded of control
+characters at the parse", which was true of the GUIDE's ids only. With a
+playlist loaded the window and this file are keyed by the PLAYLIST's
+tvg-ids, which `make_channel` only strips, and `json_string` skipped the
+encoder for an id with no quote and no backslash, so a TAB, a CR or any
+other C0 control inside one was written raw: one such id made the file
+invalid JSON and the store empty for every channel of the source while
+`epg` answered ok, and a TAB moved the window line's first-TAB split and
+ended the fetch, and every recompute, in `internal`. Every id is now
+ENCODED (`json.dumps`, non-ASCII kept), not folded, so no id changes and no
+favorite moves; and `compute_now_next` skips, and counts, a line of an
+older window whose id is not one JSON string literal or whose record lacks
+its fixed-width head, and the status says so in one counted warning
+(`1 channel in the cached guide could not be read and was skipped`) until
+the next fetch rewrites the window. DEL, the C1 controls, U+2028 and U+2029
+stay raw: valid inside a JSON string, and no reader here splits a line on
+them (the window on LF, read with universal newlines; this file on LF).
+Verified by one shared fixture, `tests/fixtures/epg-id-controls.json`, run
+through the shipping `playlist` and `epg` verbs and then `json.loads`
+(`tests/test_epg_id_controls.py`) and `Model.parseEpgNowStore` /
+`Model.epgEntry` (`tests/Model.test.js`).]**
 An entry is written only with a titled `now` or `next`
 (`compute_now_next` drops an untitled half; R31c), which is what lets the
 shell count a channel as covered by the index alone. A single-line file --

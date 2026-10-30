@@ -17026,6 +17026,89 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   try { fs.rmSync(work, { recursive: true, force: true }) } catch (e) { /* a leftover in tmp is not a failure */ }
 })()
 
+// ------------------------------------------------------------------ D-EPG-14
+// A playlist tvg-id carrying a control character (2026-10-29). The helper
+// wrote it raw into epg-window.txt and epg-now.json -- json_string skipped
+// the encoder for an id with no quote and no backslash -- and one such id
+// made the store fail for EVERY channel of the source (parseEpgNowStore
+// ok=false, count 0) while `epg` answered ok:true; a TAB ended the fetch in
+// `internal`. tests/fixtures/epg-id-controls.json is the shared fixture:
+// tests/test_epg_id_controls.py runs the same ids through the same verbs and
+// json.loads; here the SHIPPING helper writes the files (R31d: never a
+// hand-made file of the shape the parser reads) and the store reads them.
+;(function () {
+  const fs = require("fs")
+  const os = require("os")
+  const path = require("path")
+  const cp = require("child_process")
+  const HELPER = path.join(__dirname, "../bin/omarchy-iptv")
+  const fx = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures", "epg-id-controls.json"), "ascii"))
+  const work = fs.mkdtempSync(path.join(os.tmpdir(), "omarchy-iptv-epg14-"))
+  fs.chmodSync(work, 0o700)
+  const stamp = (sec) => {
+    const d = new Date(sec * 1000)
+    const p = (n) => (n < 10 ? "0" : "") + n
+    return "" + d.getUTCFullYear() + p(d.getUTCMonth() + 1) + p(d.getUTCDate()) + p(d.getUTCHours()) + p(d.getUTCMinutes()) + p(d.getUTCSeconds()) + " +0000"
+  }
+  // As test_epg_id_controls.write_sources writes them: channel i is
+  // `Fixture channel <case>` with the raw tvg-id, guide channel g<i>
+  // declares the same name, so the window is keyed by the playlist's id.
+  const playlist = ["#EXTM3U"]
+  const guide = ['<?xml version="1.0" encoding="UTF-8"?>', "<tv>"]
+  fx.ids.forEach((row, i) => {
+    const name = "Fixture channel " + row.case
+    playlist.push('#EXTINF:-1 tvg-id="' + row.tvgId + '",' + name, "http://127.0.0.1:9/" + i + ".ts")
+    guide.push('<channel id="g' + i + '"><display-name>' + name + "</display-name></channel>")
+  })
+  fx.ids.forEach((row, i) => {
+    guide.push('<programme channel="g' + i + '" start="' + stamp(fx.start) + '" stop="' + stamp(fx.stop) + '"><title>Now ' + row.case + "</title></programme>")
+    guide.push('<programme channel="g' + i + '" start="' + stamp(fx.stop) + '" stop="' + stamp(fx.nextStop) + '"><title>Next ' + row.case + "</title></programme>")
+  })
+  guide.push("</tv>")
+  const m3u = path.join(work, "playlist.m3u")
+  const xml = path.join(work, "guide.xml")
+  fs.writeFileSync(m3u, playlist.join("\n") + "\n")
+  fs.writeFileSync(xml, guide.join("\n") + "\n")
+  const cache = path.join(work, "cache")
+  fs.mkdirSync(cache, { mode: 0o700 })
+  const env = Object.assign({}, process.env, {
+    HOME: work, XDG_CONFIG_HOME: path.join(work, "config"), XDG_CACHE_HOME: path.join(work, "xcache"),
+    XDG_STATE_HOME: path.join(work, "state"), XDG_DATA_HOME: path.join(work, "data")
+  })
+  const helper = (args) => {
+    const out = cp.spawnSync("python3", [HELPER].concat(args), { encoding: "utf8", env: env, timeout: 60000 })
+    const lines = (out.stdout || "").trim().split("\n")
+    let last = null
+    try { last = JSON.parse(lines[lines.length - 1]) } catch (e) { last = { unparsed: out.stdout + out.stderr } }
+    return [out.status, last]
+  }
+  const ids = fx.ids.map((row) => row.tvgId)
+  const read = (text) => {
+    const st = Model.parseEpgNowStore(text)
+    const titles = fx.ids.map((row) => {
+      const entry = Model.epgEntry(st, row.tvgId)
+      return entry && entry.now && entry.next ? [entry.now.title === "Now " + row.case, entry.next.title === "Next " + row.case] : [row.case, "no entry"]
+    })
+    let parsed = null
+    try { parsed = Object.keys(JSON.parse(text).channels).sort() } catch (e) { parsed = "JSON.parse threw" }
+    return [st.ok, st.legacy, st.count, titles.every((t) => t[0] === true && t[1] === true) ? "every title" : titles, show(parsed) === show(ids.slice().sort())]
+  }
+  const want = [true, false, ids.length, "every title", true]
+  // Every read is inside its check: a helper that wrote no file is one
+  // failure here, never an exception that ends the run and hides the rest.
+  const nowFile = () => fs.readFileSync(path.join(cache, "epg-now.json"), "utf8")
+  checkCall("D-EPG-14: the helper writes every fixture tvg-id (TAB, CR, NUL, SOH, VT, FF, US, DEL, NEL, U+2028, U+2029) so that parseEpgNowStore indexes all of them and epgEntry reads each one's now and next", () => {
+    const loaded = helper(["playlist", "--url", m3u, "--cache-dir", cache])
+    const fetched = helper(["epg", "--url", xml, "--cache-dir", cache, "--now", String(fx.now)])
+    return [loaded[0], fetched[0], fetched[1] && fetched[1].matched, fetched[1] && fetched[1].nowCount].concat(read(nowFile()))
+  }, [0, 0, ids.length, ids.length].concat(want))
+  checkCall("D-EPG-14: the 5-minute recompute reads the window back and writes the same store", () => {
+    const recomputed = helper(["epg", "--now-only", "--cache-dir", cache, "--now", String(fx.now + 60)])
+    return [recomputed[0], recomputed[1] && recomputed[1].nowCount].concat(read(nowFile()))
+  }, [0, ids.length].concat(want))
+  try { fs.rmSync(work, { recursive: true, force: true }) } catch (e) { /* a leftover in tmp is not a failure */ }
+})()
+
 // ============================================================ the bounds sweep, lane S (2026-10-21)
 
 // ---- D-SG-3 (ruling R30f): a name Object.prototype answers to is a name like any other ----

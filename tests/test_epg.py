@@ -742,7 +742,8 @@ class EpgNowLineShapeTest(unittest.TestCase):
                 "restricted": False, "channelTotal": None, "matched": None, "epgChannels": len(channels),
                 "programmeCount": 0, "warnings": []}
         helper.write_window(os.path.join(tmp, helper.EPG_WINDOW_FILE), meta, channels)
-        valid_until, now_count = helper.write_epg_now(tmp, helper.load_window(os.path.join(tmp, helper.EPG_WINDOW_FILE)), now)
+        valid_until, now_count, skipped = helper.write_epg_now(tmp, helper.load_window(os.path.join(tmp, helper.EPG_WINDOW_FILE)), now)
+        self.assertEqual(skipped, 0, "a window this helper wrote has no unreadable line (D-EPG-14)")
         with open(os.path.join(tmp, "epg-now.json"), encoding="utf-8") as fh:
             return fh.read(), now_count
 
