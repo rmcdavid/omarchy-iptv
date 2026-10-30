@@ -272,6 +272,17 @@ rewrites it in this shape. `epg-status.json` mirrors the playlist status shape w
 `bad_xml` with one sentence and no URL, before ElementTree reads a byte of
 it (D-EPG-6, security standard 2); a `<!DOCTYPE tv SYSTEM "xmltv.dtd">`
 line without an internal subset is accepted as it always was.
+**[2026-10-29, D-EPG-15: and so is a feed that carries an internal subset
+at all, whatever it declares: an entity is not the only declaration that
+expands, because expat copies an ATTLIST default onto every element that
+omits the attribute (a 270 KB guide reached the verb's memory limit, and an
+ATTLIST default could hand a programme a channel it never named). The
+prolog reader refuses the subset at the DOCTYPE's start, before any
+declaration in it is read -- `refused the EPG: it carries a DTD internal
+subset, which XMLTV feeds never do` -- and keeps the entity refusal behind
+it. Same code, same sentence on screen (`Not a valid XMLTV guide`). A
+DOCTYPE without a subset, after a comment or a processing instruction or
+not, still passes.]**
 **[2026-10-28, D-EPG-13: the EPG verb's two parse refusals have a sentence
 in `Model.statusReason`, and the user no longer reads the parser's text:
 `bad_xml` -- a feed that does not parse (`could not parse EPG XML: <expat's
@@ -3455,6 +3466,17 @@ Performance budget (10k channels):
    reached the root's start tag (D-EPG-6; XMLTV declares none). Verified by
    calling `parse_xmltv` and the `epg` verb over small documents, plain and
    gzip.
+   **[2026-10-29, D-EPG-15: "define text for the parser to expand" covers
+   more than entities. An ATTLIST default is expanded onto every element
+   that omits the attribute, so the prolog parser now refuses any internal
+   subset at the DOCTYPE's start (`StartDoctypeDeclHandler`), whatever it
+   declares; the entity refusal stays as the second layer. Verified by
+   calling `EntityRefusingReader`, `parse_xmltv` and the `epg` verb over
+   one-declaration documents, plain and gzip (`tests/test_epg_dtd_subset.py`),
+   and measured under `prlimit` on small guides: a 24 KB guide whose
+   8 KiB ATTLIST default lands on 4,000 elements peaked the verb at 46.8 MB
+   against 30.8 MB for the same guide without it before the fix, and is
+   refused at 30.1 MB after.]**
 3. Stream URLs are allow-listed by scheme (`http https rtmp rtmps rtsp udp rtp
    mms mmsh srt`); `file:`, `plugin:`, `javascript:` and option-looking lines
    (`-...`) are dropped and counted.
@@ -4868,7 +4890,9 @@ Manual QA on the live shell (QA role, machine of record):
 11. EPG size: a 10k-channel XMLTV can exceed 100 MB; the helper must stream
     (`iterparse`) and cap at 64 MB compressed or bail with `too_large`. The
     cap bounds input, not expansion, so a feed that declares an entity is
-    refused (D-EPG-6, security standard 2).
+    refused (D-EPG-6, security standard 2). **[2026-10-29, D-EPG-15: and
+    one that carries any DTD internal subset, since an ATTLIST default
+    expands too.]**
 12. Vertical bars: the widget shows the glyph only (`vertical` check);
     first-class vertical layout is M2 per PRODUCT.md.
 

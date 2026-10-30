@@ -393,7 +393,10 @@ class EntityDeclarationTest(unittest.TestCase):
             with self.assertRaises(helper.HelperError, msg=prolog) as caught:
                 self.parse(prolog)
             self.assertEqual(caught.exception.code, "bad_xml", prolog)
-            self.assertIn("entity", caught.exception.message, prolog)
+            # D-EPG-15: refused at the DOCTYPE's start, for carrying an
+            # internal subset at all, before the declaration inside it is
+            # read; the entity refusal stays behind it as the second layer.
+            self.assertIn("internal subset", caught.exception.message, prolog)
 
     def test_an_external_dtd_is_never_read(self):
         # What the guard rests on: a declaration can only reach ElementTree
@@ -416,7 +419,7 @@ class EntityDeclarationTest(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertEqual(status["error"]["code"], "bad_xml")
             message = status["error"]["message"]
-            self.assertIn("entity", message)
+            self.assertIn("internal subset", message)   # D-EPG-15, as above
             self.assertNotIn(tmp, message + stderr)
             self.assertEqual(message.count(". "), 0, message)
 

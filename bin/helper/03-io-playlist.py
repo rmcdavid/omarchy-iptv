@@ -933,7 +933,20 @@ class EntityRefusingReader:
     common, and passes), so the first read runs the prolog through its own
     expat parser, whose EntityDeclHandler refuses general and parameter
     entities alike, and hands the parse nothing until that parser reaches the
-    root's start tag: a declaration can only come before it."""
+    root's start tag: a declaration can only come before it.
+
+    D-EPG-15 (2026-10-29): an entity is not the only declaration that
+    expands. An ATTLIST default is copied by expat onto every element that
+    omits the attribute, so a small internal subset multiplied every element
+    of the guide by its default -- a 270 KB guide drove the verb to its
+    memory limit, and a smaller default only cost time, bounded by the
+    service's watchdog. So the prolog parser refuses the INTERNAL SUBSET
+    itself, at the DOCTYPE's start (StartDoctypeDeclHandler is called before
+    a declaration inside it is read), whatever it declares: XMLTV feeds never
+    carry one, and one rule closes ATTLIST and any declaration kind nobody
+    has thought of yet. A DOCTYPE without a subset -- `<!DOCTYPE tv SYSTEM
+    "xmltv.dtd">` -- passes as it always did, and the DTD it names is never
+    read. The entity handler stays, as the second layer."""
 
     class Root(Exception):
         pass
@@ -950,10 +963,15 @@ class EntityRefusingReader:
         def declared(*_: Any) -> None:
             raise HelperError("bad_xml", "refused the EPG: it declares an XML entity, which XMLTV feeds never do")
 
+        def doctype(_name: Any, _system: Any, _public: Any, has_internal_subset: Any) -> None:
+            if has_internal_subset:
+                raise HelperError("bad_xml", "refused the EPG: it carries a DTD internal subset, which XMLTV feeds never do")
+
         def root(*_: Any) -> None:
             raise EntityRefusingReader.Root()
 
         parser = xml.parsers.expat.ParserCreate()
+        parser.StartDoctypeDeclHandler = doctype
         parser.EntityDeclHandler = declared
         parser.StartElementHandler = root
         held = []
