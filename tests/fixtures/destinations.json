@@ -1091,6 +1091,28 @@
     },
     "refused": false,
     "reason": ""
+   },
+   {
+    "url": "http://127.0.0.1:631x/x",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": true,
+    "reason": "port"
+   },
+   {
+    "url": "srt://127.0.0.1",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": true,
+    "reason": "port"
    }
  ],
  "hints": [

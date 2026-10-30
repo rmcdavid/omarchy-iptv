@@ -1582,6 +1582,15 @@ def self_test():
             stub = self.stub("pinned-p1c")
             self.assertEqual(stub.get("input-commands"), (["keybind ctrl+v ignore"], None))
             self.assertEqual(stub.get("scripts"), ([], None))
+            # rc-p1c (2026-10-29, measured on mpv 0.41.0 windowless): two
+            # -append tokens are two items in order, a comma inside one kept;
+            # after a -clr only one of them is no proof that -append ADDS.
+            two = Stub("/nonexistent/pin.sock", clock=FakeClock(),
+                       argv=["--input-commands-append=set volume 50", "--input-commands-append=set volume 60",
+                             "--scripts-clr", "--scripts-append=/nonexistent/a.lua",
+                             "--scripts-append=/nonexistent/b,c.lua"])
+            self.assertEqual(two.get("input-commands"), (["set volume 50", "set volume 60"], None))
+            self.assertEqual(two.get("scripts"), (["/nonexistent/a.lua", "/nonexistent/b,c.lua"], None))
 
         def test_option_info_of_an_option_mpv_does_not_have_is_not_found(self):
             stub = self.stub("pinned")
