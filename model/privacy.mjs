@@ -456,11 +456,24 @@ function sourceLabel(url) {
   // D-SINK-30: the host group ends at `;`, `=` and `&` too, as runHostParts
   // cuts the free-text host (reg-name admits them; no real host carries
   // them), so `http://h.test;sid=SECRET/x` labels as `http://h.test`.
-  var m = text.match(/^([a-z][a-z0-9+.-]*):\/\/(?:[^\/?#\s]*@)?(\[[^\/?#\s\]]*\]|[^\/\s?#:@\[;=&]+)(?::\d+)?/i)
+  //
+  // F-SINK-15 (2026-10-29). The AUTHORITY is hostPortOf's -- everything up
+  // to the first `/`, `?` or `#`, its userinfo cut at the LAST `@` -- and not
+  // a pattern of its own. The userinfo group here used to stop at JS
+  // whitespace as well, so on text with a space or U+3000 in the password the
+  // optional group failed and the host group took the USERNAME:
+  // `http://user:pa ss@cdn.test/x` labelled itself `http://user` where
+  // hostPortOf, the helper's urllib and validateSourceUrl all read
+  // `cdn.test`. Latent (every caller passes a validated URL, and validation
+  // refuses whitespace), and the third printer with a boundary of its own.
+  // The HOST still ends at whitespace, so nothing after one is printed.
+  var m = text.match(/^([a-z][a-z0-9+.-]*):\/\/([^\/?#]*)/i)
   if (m) {
     var scheme = m[1].toLowerCase()
     if (scheme === "file") return "local file"
-    return scheme + "://" + m[2]
+    var hostport = m[2].substring(m[2].lastIndexOf("@") + 1)
+    var h = hostport.match(/^(?:\[[^\/?#\s\]]*\]|[^\/\s?#:@\[;=&]+)/)
+    if (h) return scheme + "://" + h[0]
   }
   if (text.charAt(0) === "/" || text.charAt(0) === "~") return "local file"
   return "unknown source"

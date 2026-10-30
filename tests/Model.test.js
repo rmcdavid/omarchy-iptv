@@ -3941,8 +3941,14 @@ checkCall("D-SINK-1: the fixture is not empty and carries the doubled-at case th
 // free-text redactor prints (a vector says so with `rfcHost`, and lists what
 // the display must not show with `displayMustNotAppear`); where the two
 // agree the one `host` and one `mustNotAppear` serve both.
+// F-SINK-15 (2026-10-29): "bare" is every vector that STARTS with a scheme,
+// whitespace or not. The filter was `://\S+$`, which left out exactly the
+// shape sourceLabel got wrong -- a space or U+3000 in the userinfo, where its
+// own userinfo group stopped and the host group printed the username -- so
+// the display check could not see it. Red on dev 2727179 with the two
+// F-SINK-15 vectors (`http://u5er` both times).
 checkCall("D-SINK-1: sourceLabel and hostOf obey the authority rule too, on every bare-URL vector", function () {
-  const bare = redactionVectors.vectors.filter(function (v) { return /^[a-z][a-z0-9+.-]*:\/\/\S+$/i.test(v.text) })
+  const bare = redactionVectors.vectors.filter(function (v) { return /^[a-z][a-z0-9+.-]*:\/\//i.test(v.text) })
   return [bare.length >= 3, bare.filter(function (v) {
     const label = Model.sourceLabel(v.text)
     const host = Model.hostOf(v.text)
@@ -3951,6 +3957,14 @@ checkCall("D-SINK-1: sourceLabel and hostOf obey the authority rule too, on ever
     return (v.displayMustNotAppear || v.mustNotAppear).some(function (frag) { return label.indexOf(frag) >= 0 || host.indexOf(frag) >= 0 })
   }).map(function (v) { return v.why + " -> " + Model.sourceLabel(v.text) })]
 }, [true, []])
+checkCall("F-SINK-15: the bare vectors include a userinfo holding an ASCII space and one holding U+3000, and sourceLabel and hostOf print the RFC host for both -- the host hostPortOf prints from the same authority -- never the username; the file and path branches are unchanged", function () {
+  const ws = redactionVectors.vectors.filter(function (v) { return /^[a-z][a-z0-9+.-]*:\/\/[^\/?#]*\s[^\/?#]*@/i.test(v.text) })
+  return [ws.length, ws.map(function (v) { return [Model.sourceLabel(v.text), Model.hostOf(v.text)] }),
+          [Model.sourceLabel("file:///home/u/list.m3u"), Model.sourceLabel("/home/u/list.m3u"), Model.sourceLabel("~/list.m3u"),
+           Model.sourceLabel("http://"), Model.sourceLabel("nonsense"), Model.sourceLabel(""), Model.sourceLabel("HTTPS://U:P@[::1]:8/x"),
+           Model.sourceLabel("http://h.test x@y.test/z"), Model.sourceLabel("http://u:p@ h.test/x")]]
+}, [2, [["http://cdn.test", "cdn.test"], ["http://cdn.test", "cdn.test"]],
+    ["local file", "local file", "local file", "unknown source", "unknown source", "", "https://[::1]", "http://y.test", "unknown source"]])
 checkCall("R32a': the vectors where the free-text host and the RFC host differ are present, each names both, and the free-text side is always the withheld token -- never a host after a later at-sign", function () {
   const split = redactionVectors.vectors.filter(function (v) { return v.rfcHost !== undefined })
   return [split.length >= 8, split.filter(function (v) { return v.host !== Model.HOST_WITHHELD && !v.accepted }).map(function (v) { return v.text }),

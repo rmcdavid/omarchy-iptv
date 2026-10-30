@@ -472,6 +472,28 @@ class SharedRedactionVectors(unittest.TestCase):
                     bad.append("%s -> leaked %r: %s" % (v["why"], frag, out))
         self.assertEqual([], bad)
 
+    def test_f_sink_15_the_display_reading_prints_the_rfc_host_on_every_bare_http_vector(self):
+        """F-SINK-15 (2026-10-29): the DISPLAY side of the shared fixture, which
+        only the node suite ran (sourceLabel, hostOf). The helper's display
+        printer is source_host (urllib's RFC reading), and it must print each
+        bare http(s) vector's `rfcHost` (or its `host` where the two readings
+        agree) and none of `displayMustNotAppear`. The model's sourceLabel
+        ended its userinfo at JS whitespace and printed the USERNAME for the
+        two F-SINK-15 vectors; this side never did, and the test keeps the
+        two mirrors on one reading. Mutation-checked: a source_host that cut
+        the userinfo at whitespace goes red on both."""
+        bare = [v for v in self.vectors() if re.match(r"^https?://", v["text"], re.I)]
+        self.assertGreaterEqual(len(bare), 20)
+        self.assertEqual(2, sum(1 for v in bare if re.match(r"^https?://[^/?#]*\s[^/?#]*@", v["text"])))
+        bad = []
+        for v in bare:
+            host = helper.source_host(v["text"])
+            want = v.get("rfcHost", v["host"]).lower()
+            leaked = [f for f in v.get("displayMustNotAppear", v["mustNotAppear"]) if f in host]
+            if host != want or leaked:
+                bad.append("%s -> %r %r" % (v["why"], host, leaked))
+        self.assertEqual([], bad)
+
     def test_r32a2_every_vector_with_an_exact_py_output_gets_it(self):
         """R32a''' (2026-10-22): a vector carrying `py` pins the EXACT helper
         output -- the restored sentence punctuation (`'`, `"`, `<`, `>`
