@@ -4269,6 +4269,122 @@ function redactUrlsBeforeDSink23(text) {
           .filter(function (t) { return Model.sinkText(t) !== Model.redactUrls(t) }), [])
 })()
 
+// ---- F-SINK-14 (2026-10-29): ONE redaction rule for every place a provider's
+// channel name or group is SHOWN, against the shared fixture the helper's
+// window title runs too (tests/fixtures/shown-names.json; tests/test_mpv.py
+// drives apply_channel through the shipping `play` verb over it).
+//
+// F-SINK-10 put Model.sinkText on the guide's row and said "the same string
+// reaches two sinks under two rules". Its closure stopped at the row: the bar
+// label, tooltip and accessible name, the notification body, the IPC status,
+// the footer while playing, the group column and its accessible name, the
+// header's scope label, the empty-scope and no-matches titles and the group
+// hint all printed the whole credentialed URL beside a row printing its host.
+// Every composer below is the one its sink calls, given what the sink gives
+// it; each must show the fixture's `js` inside its own words and none of
+// `mustNotAppear`. Red on dev 2727179: every composer printed the raw name,
+// and rawScopeName / ipcNowPlaying did not exist.
+;(function () {
+  const SHOWN = JSON.parse(require("fs").readFileSync(
+    require("path").join(__dirname, "fixtures/shown-names.json"), "utf8")).names
+  const G = function (v) { return Model.groupScopeId(v.name) }
+  // Two groups, so the column narrows and draws group entries at all.
+  const chans = function (v) {
+    return Model.prepareChannels([{ id: "t:a", name: v.name, group: v.name, url: "http://s.example.test/a.ts", chno: "101" },
+                                  { id: "t:b", name: "Other", group: "Other", url: "http://s.example.test/b.ts" }])
+  }
+  const shown = function (v) {
+    const ch = chans(v)
+    const surface = Model.scopeSurface(ch, null)
+    const entry = surface.entries.filter(function (e) { return e.id === G(v) })[0] || {}
+    const hidden = Model.scopeSurface(ch, { version: 2, favorites: [], recents: [], hiddenGroups: [v.name] })
+    const hiddenEntry = hidden.entries.filter(function (e) { return e.id === G(v) })[0] || {}
+    const np = Model.ipcNowPlaying({ id: "t:a", name: v.name, group: v.name, launchedFrom: G(v), since: 7 }, "101")
+    const body = function (ev) { const a = Model.notifyArgv(ev, { name: v.name, reason: "r", output: "audio" }); return a[a.length - 1] }
+    return {
+      sinkText: Model.sinkText(v.name),
+      barTooltip: Model.barTooltip({ configured: true, playing: true, name: v.name }),
+      barTooltipPaused: Model.barTooltip({ configured: true, playing: true, paused: true, chno: "101", name: v.name }),
+      barAccessibleName: Model.barAccessibleName({ playing: true, chno: "101", name: v.name }),
+      footerStatus: Model.footerStatus({ configured: true, count: 5, playingName: v.name }),
+      chnoStatus: Model.chnoStatus("exact", "101", v.name, 1, 1, true),
+      streamFailed: body("streamFailed"), localPlayFailure: body("localPlayFailure"),
+      playerStopped: body("playerStopped"), outputFailed: body("outputFailed"),
+      columnLabel: entry.label, hiddenLabel: hiddenEntry.label,
+      columnSpoken: Model.scopeEntryAccessibleName({ label: v.name, count: 1, kind: "group" }),
+      hiddenSpoken: Model.scopeEntryAccessibleName({ label: v.name, count: 1, kind: "hidden" }),
+      scopeName: Model.scopeName(G(v)),
+      scopeLabel: Model.scopeLabel(G(v), "", 1),
+      scopeLabelSearching: Model.scopeLabel(G(v), "zz", 0),
+      noMatchesTitle: Model.noMatchesTitle("zz", G(v)),
+      hintNames: Model.groupNamesForHint(surface).join("|"),
+      soleHint: Model.groupNamesForHint(Model.scopeSurface([ch[0]], null)).join("|"),
+      ipcName: np.name, ipcGroup: np.group, ipcLaunchedFrom: np.launchedFrom
+    }
+  }
+  checkCall("F-SINK-14: every composer a shown name reaches prints the shared fixture's `js` in its own words -- the bar's tooltip and accessible name, the footer while playing, the chno line, all four notification bodies that quote a name, the group column's label and accessible name (shown and hidden), the shown scope name, the header's scope label, the no-matches title, the group hint (a narrowing list and a one-group list) and the IPC status's name, group and launchedFrom", function () {
+    const SEP_ = Model.SEP
+    return SHOWN.map(function (v) {
+      const got = shown(v)
+      const want = {
+        sinkText: v.js,
+        barTooltip: "Playing " + v.js,
+        barTooltipPaused: "Paused 101" + SEP_ + v.js,
+        barAccessibleName: "IPTV, playing channel 101, " + v.js,
+        footerStatus: Model.GLYPHS.play + " " + v.js + SEP_ + "s stop",
+        chnoStatus: "Channel 101" + SEP_ + v.js,
+        streamFailed: Model.QUOTE_OPEN + v.js + Model.QUOTE_CLOSE + " did not play" + SEP_ + "r",
+        localPlayFailure: Model.QUOTE_OPEN + v.js + Model.QUOTE_CLOSE + " did not play" + SEP_ + "r",
+        playerStopped: Model.QUOTE_OPEN + v.js + Model.QUOTE_CLOSE + " stopped unexpectedly",
+        outputFailed: Model.QUOTE_OPEN + v.js + Model.QUOTE_CLOSE + " stopped" + SEP_ + Model.outputFailureSentence("audio"),
+        columnLabel: v.js, hiddenLabel: v.js,
+        columnSpoken: v.js + ", 1 channel", hiddenSpoken: v.js + ", 1 channel, hidden",
+        scopeName: v.js,
+        scopeLabel: v.js + SEP_ + "1 channel",
+        scopeLabelSearching: "in " + v.js + SEP_ + "0 matches",
+        noMatchesTitle: "No matches for " + Model.QUOTE_OPEN + "zz" + Model.QUOTE_CLOSE + " in " + v.js,
+        hintNames: v.js + "|Other", soleHint: v.js,
+        ipcName: v.js, ipcGroup: v.js, ipcLaunchedFrom: "g:" + v.js
+      }
+      const wrong = Object.keys(want).filter(function (k) { return got[k] !== want[k] })
+        .map(function (k) { return k + " -> " + JSON.stringify(got[k]) })
+      const leaked = Object.keys(got).filter(function (k) {
+        return v.mustNotAppear.some(function (frag) { return String(got[k]).indexOf(frag) >= 0 })
+      })
+      return [v.why, wrong, leaked]
+    })
+  }, SHOWN.map(function (v) { return [v.why, [], []] }))
+
+  // The IDS stay raw, and that is a rule of its own, not an accident: a group
+  // scope id keys hidden groups and saved scopes in state.json, and the
+  // channels a group scope holds are found by matching the RAW group
+  // (channelsForScope through rawScopeName). Redacting the id would empty the
+  // scope and orphan every hidden group whose name carries a URL.
+  checkCall("F-SINK-14: the ids stay raw -- the column's entry id, the IPC status's channel id, the scope's channels and a hidden group's entry -- and rawScopeName round-trips the raw group while scopeName shows it", function () {
+    const starred = { version: 2, favorites: ["t:a"], recents: [] }
+    return SHOWN.map(function (v) {
+      const ch = chans(v)
+      const surface = Model.scopeSurface(ch, null)
+      const hidden = Model.scopeSurface(ch, { version: 2, favorites: [], recents: [], hiddenGroups: [v.name] })
+      const np = Model.ipcNowPlaying({ id: "t:a", name: v.name, group: v.name, launchedFrom: G(v), since: 7 }, "101")
+      return [surface.entries.some(function (e) { return e.id === "g:" + v.name && e.kind === "group" }),
+              hidden.entries.some(function (e) { return e.id === "g:" + v.name && e.kind === "hidden" }),
+              Model.channelsForScope(ch, G(v), null).map(function (c) { return c.id }).join(","),
+              Model.rawScopeName(G(v)) === v.name, np.id, np.chno, np.since,
+              // M2-09 D2 on a one-group list: the sole group's id asks for All,
+              // matched on the RAW group. With a favourite starred, the
+              // vanished-scope fallback would answer Favorites instead, so
+              // the answer shows which rule decided.
+              Model.requestedScope(Model.scopeSurface([ch[0]], starred).entries, G(v), Model.scopeSurface([ch[0]], starred).axis)]
+    })
+  }, SHOWN.map(function () { return [true, true, "t:a", true, "t:a", "101", 7, "all"] }))
+
+  checkCall("F-SINK-14: ipcNowPlaying is null when nothing plays, as the property is, and sinkText is idempotent over the fixture (a name shown twice is the name shown once)", function () {
+    return [Model.ipcNowPlaying(null, "1"), Model.ipcNowPlaying(undefined, ""),
+            SHOWN.filter(function (v) { return Model.sinkText(Model.sinkText(v.name)) !== Model.sinkText(v.name) }).map(function (v) { return v.why })]
+  }, [null, null, []])
+})()
+
 checkCall("D-RUNG-9: the header the HOST draws is under 4.5 on three themes and INVERTED on five", function () {
   // The defect, asserted before the fix so the fix has something to beat.
   const under = menuTokens.themes.filter(function (t) {
@@ -16678,6 +16794,52 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     })
   }, E13.map(id => [id, true, false, true, "Guide data unavailable (" + fixtureCase(id).reason + ")" + Model.SEP + "channels still work" + Model.SEP + "r retry",
                     ["Could not fetch the EPG (" + fixtureCase(id).reason + "). Channels still work."], fixtureCase(id).reason, false]))
+
+  // ---- F-SINK-14 (2026-10-29), through Service.qml ----
+  //
+  // The shared shown-names fixture again, now through the service's OWN
+  // functions: the IPC `status` reply (statusSummary -> nowPlayingSummary ->
+  // Model.ipcNowPlaying), the `channel` verb's reply (tuneByNumber), and the
+  // four notices that quote a channel's name, each posted by the path that
+  // posts it in the shell (raiseStreamFailure, a refused `player start`,
+  // raisePlayerStopped, raiseOutputFailure) and read off the argv the shell
+  // runs. Red on dev 2727179: every one of them carried the raw name.
+  {
+    const SHOWN = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/shown-names.json"), "utf8")).names
+    const bodies = h => h.detached.filter(a => a[0] === "omarchy-notification-send").map(a => a[a.indexOf("-r") + 1] + " " + a[a.length - 1])
+    checkCall("F-SINK-14 (service): the IPC status's nowPlaying shows the fixture's `js` for the name, the group and the scope it was launched from, the id stays raw; the `channel` verb's reply shows it too; and every one of the four name-quoting notices the shell posts carries it", () =>
+      SHOWN.map(v => {
+        const h = bootPlayer()
+        const index = M.keyedMap()
+        index["t:x"] = { id: "t:x", name: v.name, url: "http://s.example.test/x.ts", group: v.name }
+        h.root.channelIndex = index
+        h.root.channels = M.prepareChannels([{ id: "t:x", name: v.name, group: v.name, url: "http://s.example.test/x.ts", chno: "101" }])
+        h.root.chnoIndex = M.buildChnoIndex(h.root.channels)
+        h.root.playerUp = true
+        h.root.nowPlaying = { id: "t:x", name: v.name, group: v.name, launchedFrom: M.groupScopeId(v.name), since: 3 }
+        const np = h.root.statusSummary().nowPlaying
+        const tuned = h.root.tuneByNumber("101")
+        h.detached.length = 0
+        h.root.notifiedFailureId = ""
+        h.root.raiseStreamFailure({ id: "t:x", name: v.name }, "loading failed"); h.drain()
+        h.root.nowPlaying = { id: "t:x", name: v.name, group: v.name, launchedFrom: M.groupScopeId(v.name), since: 3 }
+        h.root.playerKind = "start"
+        h.root.handlePlayerResult(localReply("player-start-parent-0500")); h.drain()
+        h.root.nowPlaying = null
+        h.root.notifiedFailureId = ""
+        h.root.raisePlayerStopped({ id: "t:x", name: v.name }, M.PLAYER_GENERIC_FAILURE); h.drain()
+        h.root.notifiedFailureId = ""
+        h.root.raiseOutputFailure({ id: "t:x", name: v.name }, "audio", M.outputFailureSentence("audio")); h.drain()
+        const told = bodies(h)
+        const all = JSON.stringify([np, tuned]) + told.join("\n")
+        // The `channel` reply names the PREPARED channel, which for a name that
+        // is itself a URL is the generated one (Model.displayName, D-QA-02).
+        return [np.id, np.name === v.js, np.group === v.js, np.launchedFrom === "g:" + v.js,
+                tuned.name === (h.root.channels[0].name === v.name ? v.js : h.root.channels[0].name),
+                told.filter(t => t.indexOf(Model.QUOTE_OPEN + v.js + Model.QUOTE_CLOSE) !== -1).length,
+                v.mustNotAppear.filter(frag => all.indexOf(frag) !== -1)]
+      }), SHOWN.map(() => ["t:x", true, true, true, true, 4, []]))
+  }
 })()
 
 // ---- D-REL-7, the split's reviews P2 and P3a: a damaged helper says so.

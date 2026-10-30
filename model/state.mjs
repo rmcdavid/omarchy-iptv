@@ -19,7 +19,7 @@ import {
   WALL_KEY
 } from "./logos.mjs"
 import {
-  scrubUrls
+  scrubUrls, sinkText
 } from "./privacy.mjs"
 import {
   formatClock, formatCount, pluralChannels
@@ -220,9 +220,11 @@ function hideNotice(hidden, group, count, view) {
 
 // The group column entry's accessible name (UX 7.1). A hidden entry says
 // so, because the dimming that tells a sighted user is not on the bus.
+// F-SINK-14: the label through sinkText, here as well as in scopeSurface
+// that builds it, so the bus hears what the column draws whoever calls this.
 function scopeEntryAccessibleName(entry) {
   var e = entry || {}
-  var label = str(e.label)
+  var label = sinkText(e.label)
   if (e.kind === "header") return label
   var name = label + ", " + pluralChannels(e.count)
   return e.kind === "hidden" ? name + ", hidden" : name

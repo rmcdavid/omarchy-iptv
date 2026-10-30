@@ -1390,7 +1390,8 @@ Item {
     }
     var id = Model.channelId(found)
     var label = String(found.chnoLabel || "")
-    var name = String(found.name || "")
+    // F-SINK-14: the reply prints the name the bar and the row print.
+    var name = Model.sinkText(found.name)
     // play() refuses when mpv is missing or the entry has no URL. Reporting
     // that as ok:true would be a lie about the one thing this verb exists to
     // do; the success shape is unchanged for the case it describes.
@@ -1942,11 +1943,10 @@ Item {
 
   // `nowPlaying` as the IPC reports it: the shipped literal plus the playing
   // channel's number (3.3). Null when nothing plays, exactly like the property.
+  // F-SINK-14: composed by Model.ipcNowPlaying, which redacts the name, the
+  // group and the scope it was launched from as the bar and the row do.
   function nowPlayingSummary() {
-    var np = root.nowPlaying
-    if (!np) return null
-    return { id: np.id, name: np.name, group: np.group, chno: root.nowPlayingChno,
-             launchedFrom: np.launchedFrom, since: np.since }
+    return Model.ipcNowPlaying(root.nowPlaying, root.nowPlayingChno)
   }
 
   // JSON summary for the IPC `status` verb; URL-free by construction.

@@ -1,0 +1,62 @@
+{
+  "note": "F-SINK-14 (2026-10-29): ONE rule for every place a provider's channel name or group is SHOWN. The guide's row put the name through Model.sinkText (F-SINK-10) while the bar label, the bar tooltip, the bar's accessible name, the notification body, the IPC status and channel replies, the guide footer while playing, the group column and its accessible name, the header's scope label, the empty-scope and no-matches titles, the group-word hint and the player's window title took it raw, so a name holding a credentialed URL printed the whole URL on all of them while the row beside them printed its host. `name` is what a playlist wrote; `js` is EXACTLY what Model.sinkText shows, and every composer in tests/Model.test.js must show it (inside its own words); `py` is EXACTLY what the helper's redact_urls shows, which apply_channel sets as mpv's `title` (after the `$>` prefix, S-01) and `force-media-title`, driven by tests/test_mpv.py through the shipping `play` verb. The two renderings differ on purpose, as they do in redaction-vectors.json: the helper keeps the scheme. `mustNotAppear` holds for both. Ids are NOT redacted (a group scope id keys hidden groups and saved scopes in state.json, and `play` takes a channel id back), and the node suite asserts that too.",
+  "credentialsAreFake": "Every credential here is invented and every host is under the reserved .test TLD. Never put a real provider value in this file.",
+  "names": [
+    {
+      "why": "the review's shape: a backup URL written into the channel name",
+      "name": "News HD (backup http://u5er:S3CRET@cdn.test/live/1.ts)",
+      "js": "News HD (backup cdn.test)",
+      "py": "News HD (backup http://cdn.test)",
+      "mustNotAppear": ["u5er", "S3CRET", "live/1.ts"]
+    },
+    {
+      "why": "a group-title carrying one (the group column printed it while `x` printed `Hid Sports cdn.test`)",
+      "name": "Sports http://u5er:S3CRET@cdn.test/x",
+      "js": "Sports cdn.test",
+      "py": "Sports http://cdn.test",
+      "mustNotAppear": ["u5er", "S3CRET", "/x"]
+    },
+    {
+      "why": "D-SINK-1's shape: an unencoded `@` inside the password",
+      "name": "Movies http://u5er:p@S3CRET@cdn.test/live/2.ts",
+      "js": "Movies cdn.test",
+      "py": "Movies http://cdn.test",
+      "mustNotAppear": ["u5er", "S3CRET", "p@", "live/2.ts"]
+    },
+    {
+      "why": "D-SINK-28's shape: a `#` in the password makes the RFC host the username, so the host is withheld, never printed",
+      "name": "Kids http://u5er:pa#S3CRET@cdn.test/live/3.ts",
+      "js": "Kids [host withheld]",
+      "py": "Kids http://[host withheld]",
+      "mustNotAppear": ["u5er", "S3CRET", "pa#", "live/3.ts"]
+    },
+    {
+      "why": "sentence punctuation after the URL is put back by both mirrors (R32a'')",
+      "name": "Feed (see http://u5er:S3CRET@cdn.test/live/4.ts).",
+      "js": "Feed (see cdn.test).",
+      "py": "Feed (see http://cdn.test).",
+      "mustNotAppear": ["u5er", "S3CRET", "live/4.ts"]
+    },
+    {
+      "why": "a name that IS a URL of another scheme, with a port (the guide shows a generated name for it, Model.displayName; the composers and the helper still redact what they are handed)",
+      "name": "rtmp://u5er:S3CRET@cdn.test:1935/live",
+      "js": "cdn.test",
+      "py": "rtmp://cdn.test",
+      "mustNotAppear": ["u5er", "S3CRET", "1935", "/live"]
+    },
+    {
+      "why": "an ordinary name is shown exactly as written: the rule costs nothing without `://`",
+      "name": "UK: Sky Sports 1 FHD",
+      "js": "UK: Sky Sports 1 FHD",
+      "py": "UK: Sky Sports 1 FHD",
+      "mustNotAppear": []
+    },
+    {
+      "why": "S-01's property-expansion text beside a URL: the `${path}` stays literal text (the `$>` prefix keeps mpv from expanding the title) and the URL is redacted",
+      "name": "${path} http://u5er:S3CRET@cdn.test/x",
+      "js": "${path} cdn.test",
+      "py": "${path} http://cdn.test",
+      "mustNotAppear": ["u5er", "S3CRET", "/x"]
+    }
+  ]
+}

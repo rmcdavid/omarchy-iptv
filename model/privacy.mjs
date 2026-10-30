@@ -262,10 +262,16 @@ function playerPauseArgv(socket, state) {
 // answers with a fresh card too. `-p` makes the wrapper print the id the
 // server returned, which is how the next post of the kind finds it; it comes
 // before `-r` so `-r <id> <headline>` stays one run of the argv.
+//
+// F-SINK-14 (2026-10-29). The channel name is redacted HERE, by sinkText,
+// the one rule every place a provider's name is shown goes through: the
+// guide's row printed `News HD (backup cdn.test)` while this body printed
+// the whole credentialed URL, and the host keeps every body in its history.
+// Redacted BEFORE cleanName, so the S-04 dash rule sees what is shown.
 function notifyArgv(event, params, replaceId) {
   var p = params || {}
   var spec = null
-  var name = cleanName(p.name) || "Channel"
+  var name = cleanName(sinkText(p.name)) || "Channel"
   var reason = scrubUrls(str(p.reason))
   if (event === "streamFailed") {
     spec = { title: "Stream failed", body: QUOTE_OPEN + name + QUOTE_CLOSE + " did not play" + (reason !== "" ? SEP + reason : ""), glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.streamFailed }

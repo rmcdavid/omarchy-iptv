@@ -455,7 +455,13 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     # neighbour, then measured on a real player.
     for prop in ("aid", "sid"):
         client.try_command("set_property", prop, "auto")
-    for prop, value in (("title", MPV_RAW_PREFIX + target["name"]), ("force-media-title", target["name"])):
+    # F-SINK-14 (2026-10-29): the name the window title and media-title show
+    # is the one the guide row shows -- redact_urls, Model.sinkText's mirror
+    # (the shared shown-names fixture, dev branch, runs both). A name holding a
+    # credentialed URL put the whole URL in the compositor's toplevel title,
+    # where every client that lists windows reads it. `$>` stays (S-01).
+    shown = redact_urls(target["name"])
+    for prop, value in (("title", MPV_RAW_PREFIX + shown), ("force-media-title", shown)):
         ok, _ = client.try_command("set_property", prop, value)
         if not ok:
             log("%s: mpv refused to set %s" % (label, prop))

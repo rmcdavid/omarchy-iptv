@@ -745,6 +745,57 @@ class PlayTest(MpvTestCase):
         self.assertNotIn("user:pw", stdout + stderr)
 
 
+class ShownNamesTest(MpvTestCase):
+    """F-SINK-14 (2026-10-29): the player's window title is the name the guide
+    row shows. apply_channel set mpv's `title` and `force-media-title` from the
+    RAW channel name, so a playlist name holding a credentialed URL became the
+    compositor's toplevel title -- read by every client that lists windows --
+    while the guide row printed the host. It now sets both from redact_urls,
+    the helper's mirror of Model.sinkText, keeping the `$>` prefix (S-01).
+
+    Driven over the SHARED fixture tests/Model.test.js runs every shown-name
+    composer over (tests/fixtures/shown-names.json), through the shipping
+    `play` verb against FakeMpv: `py` is exactly what each property is set to.
+    Red on dev 2727179: every name with a URL went out whole."""
+
+    def names(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "fixtures", "shown-names.json"), encoding="utf-8") as fh:
+            return json.load(fh)["names"]
+
+    def test_redact_urls_is_the_fixture_s_py_output(self):
+        bad = [(v["why"], helper.redact_urls(v["name"])) for v in self.names() if helper.redact_urls(v["name"]) != v["py"]]
+        self.assertEqual([], bad)
+
+    def test_play_sets_title_and_force_media_title_to_the_shown_name(self):
+        names = self.names()
+        playlist = os.path.join(self.dir, "shown.m3u")
+        lines = ["#EXTM3U"]
+        for i, v in enumerate(names):
+            lines.append('#EXTINF:-1 tvg-id="n%d.test",%s' % (i, v["name"]))
+            lines.append("http://stream.example.test/live/n%d.m3u8" % i)
+        pathlib.Path(playlist).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        code, _, _, stderr = run("playlist", "--url", playlist, "--cache-dir", self.cache)
+        self.assertEqual(code, 0, stderr)
+        seen = []
+        for i, v in enumerate(names):
+            with self.subTest(why=v["why"]):
+                sock = os.path.join(self.dir, "s%d.sock" % i)
+                server = FakeMpv(sock)
+                self.addCleanup(server.close)
+                code, payload, stdout, stderr = run("play", "--id", "t:n%d.test" % i, "--cache-dir", self.cache,
+                                                    "--socket", sock, "--ipc-timeout", "1")
+                self.assertEqual(code, 0, stderr)
+                titles = [c[2] for c in server.commands if c[:2] == ["set_property", "title"]]
+                forced = [c[2] for c in server.commands if c[:2] == ["set_property", "force-media-title"]]
+                self.assertEqual(titles, [helper.MPV_RAW_PREFIX + v["py"]])
+                self.assertEqual(forced, [v["py"]])
+                for frag in v["mustNotAppear"]:
+                    self.assertNotIn(frag, titles[0] + forced[0])
+                seen.append(v["py"])
+        self.assertEqual(len(seen), len(names))
+
+
 class TlsVerificationTest(MpvTestCase):
     """D-SINK-16: apply_channel asserts the certificate properties, and REFUSES
     to load when it cannot make them safe.
