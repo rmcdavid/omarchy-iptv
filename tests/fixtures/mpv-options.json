@@ -595,7 +595,7 @@
   "--clipboard-backends": {
    "type": "Object settings list",
    "class": "allowed",
-   "why": "where clipboard text comes from; the default Ctrl+V append is a recorded review finding, not changed here (decision request)"
+   "why": "where clipboard text comes from; Ctrl+V itself is bound to ignore in the pin block (D-PLY-46, 2026-10-29)"
   },
   "--clipboard-monitor": {
    "type": "Flag",
@@ -1973,7 +1973,7 @@
   "--osc": {
    "type": "Flag",
    "class": "allowed",
-   "why": "the on-screen controller; its title middle-click draws ${path} (recorded, D-SINK-52, owner's call)"
+   "why": "the on-screen controller; its title middle-click, which ran show-text ${path}, is pinned to ignore in the pin block (D-SINK-52, 2026-10-29)"
   },
   "--osd-align-x": {
    "type": "Choices",

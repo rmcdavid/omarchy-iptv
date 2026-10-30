@@ -432,7 +432,11 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-81}
 # 2026-10-28, rc-host5 (D-HOST-5, D-PLY-37, D-PLY-36, D-PLY-41): 3111 -> 3131
 # -- 19 new checks in the lane and one in its recheck, every one red on
 # 9e380ae or on a mutant (QA-RESULTS); the suite runs 3131.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3131}
+# 2026-10-29, the security round (rc-mpvpin, rc-dest, rc-harn, rc-p1b, rc-p1c
+# on sec-int): 3131 -> 3182 -- the destination, pin, classification and
+# format checks, every one red on the tree before its lane or on a mutant
+# (QA-RESULTS "The whole-codebase security review"); the suite runs 3182.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3182}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -706,7 +710,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3131}
 # 2026-10-28, rc-host5 (D-PLY-36): 1679 -> 1685 -- test_player_endings.py's
 # four and test_player.py's D-PLY-36 verb test in the lane, the window-runs-out
 # reply in its recheck; red on 9e380ae or on a mutant; the suite runs 1685.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1685}
+# 2026-10-29, the security round (same merges): 1685 -> 1789 --
+# test_destinations.py, test_mpv_options.py, test_stub_mpv_pins.py and the
+# pin, read-back, gate and stub cases beside them, red first in their lanes
+# or on a mutant; the suite runs 1789.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1789}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

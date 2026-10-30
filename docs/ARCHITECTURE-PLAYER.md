@@ -1514,8 +1514,8 @@ title middle-click runs `show-text ${path}` and draws the whole credentialed
 URL (D-SINK-52; **[2026-10-29: pinned to `ignore`, the owner's "pin and
 refuse"]**), the stats page the OSC title's left click
 opens draws `${filename}`, which carries a query-string token (measured:
-`long.ts?token=...`) but not userinfo or path credentials (**[2026-10-29:
-still so, reported, no change without the owner]**), the context
+`long.ts?token=...`) (**[2026-10-29: kept on; the owner turned off only
+select and the console]**), the context
 menu's select entries are dead with select off, the console forks only
 `wl-paste` on a user's paste, and commands and positioning fork nothing that
 carries `path`. **[2026-10-29, lane-p1b: the console DRAWS a sink of its

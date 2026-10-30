@@ -286,6 +286,16 @@ requests and raise the batch.
      The lesson generalises past this one option: **a sink can be opened by
      software you did not write and did not choose to run.** The sink list had
      only ever been audited over code in this repository.
+     And `--load-scripts=no` stops only the scripts mpv finds in its
+     directories, not the ones built into it (D-SINK-46, 2026-10-29): the
+     built-in select menu forked `ffmpeg -i <the credentialed URL>` on a
+     default key binding, and auto_profiles.lua, the console and the
+     on-screen controller each reached the URL or undid a pin their own way.
+     Most built-ins have a `--load-*` switch (the controller's is `--osc`,
+     yt-dlp's hook `--ytdl`). The pin block turns select, the console and
+     auto-profiles off and pins the controller's title click; the rest stay
+     on by the owner's decision (see "The player's configuration surface"
+     below).
    - **Qt text layout** (D-TEXT-1). A `Text` whose `textFormat` is left at
      the default, `Text.AutoText`, is a NETWORK sink for whatever string it
      renders: Qt reads the string for markup, and an `<img src="http://...">`
@@ -439,9 +449,15 @@ requests and raise the batch.
      and so did its `-add`, `-append` and `-set` forms, with the GET in the
      attacker's log each time. It is reserved, which is the only thing that
      closes it, and `mpvOptionBase` strips the list suffixes so one entry
-     covers all six spellings. `--demuxer-lavf-o` is measured NOT to bypass
-     (it configures the demuxer, not the protocol) and stays unreserved rather
-     than reserved on suspicion.
+     covers all six spellings. This entry used to say `--demuxer-lavf-o` was
+     "measured NOT to bypass" and stayed unreserved; that was measured on a
+     DIRECT stream, and it is false for HLS (measured) and, by reading, DASH,
+     whose demuxer reopens
+     the playlist and every segment with the demuxer's options
+     (D-SINK-43, 2026-10-29: `tls_verify=0` there played the attacker's
+     segment with both tls-verify tokens in place). It is now pinned:
+     `tls_verify=1` appended after the user's tokens, any token naming a TLS
+     key refused, and the parsed map read back before every load.
      The lesson, and it is the one worth carrying: an option that forwards
      arbitrary options to a LIBRARY is not covered by winning an argument with
      the program. Ask what the library is configured with, not only what the
@@ -449,8 +465,23 @@ requests and raise the batch.
      that had already been measured working. Do not "tidy away" the duplicate token -- removing
      either occurrence is a security change, and the one that matters is the
      last.
-     A user's own `mpv.conf` does NOT beat the command line (measured), so a
-     pre-existing configuration cannot undo this. A bare `--` would make
+     A user's own `mpv.conf` does NOT beat the command line for a PLAIN
+     option line (measured). This entry said that settled it -- "a
+     pre-existing configuration cannot undo this" -- and on 2026-10-29 the
+     security review measured two ways it can and rc-mpvpin's recheck a
+     third (D-SINK-44): a `[protocol.*]` profile (an `[extension.*]` one
+     takes the same path, read) replaces, per file and after
+     the D-SINK-16 read-back, any option NOT set on the command line; a
+     `profile-cond` auto-profile runs `apply-profile`, which beats the
+     command line too; and `player-operation-mode=pseudo-gui` applies a
+     profile after the whole command line, which undid every pin on the
+     launch argv at once (the IPC read-back still held the TLS peer). So the
+     pin block now sets on the command line every option the pinned layers
+     depend on (`--load-auto-profiles=no` and the operation mode among
+     them; a reserved option that is not pinned still applies from the
+     user's own mpv.conf, by the owner's decision), and an adopted older
+     player whose per-file profile touches any
+     pinned option is stopped rather than fed. A bare `--` would make
      everything after it a filename, which would defeat a trailing token, but
      `MPV_ARG_RE` is `^--[a-z0-9][a-z0-9-]*(=.*)?$` and the shipping
      `filter_mpv_args` rejects a bare `--`; that is measured by calling it,
@@ -704,6 +735,79 @@ requests and raise the batch.
      that the shield dies at exec, so the CHILD half -- the one process that
      holds the credential longest -- was never covered. An enumeration over
      what a running process WRITES cannot see what a dying one hands over.
+   - **Where provider data sends this machine** (D-SINK-40, -41, -42, -54,
+     -57, -58; found by the whole-codebase security review of 2026-10-29
+     and, for -54, -57 and -58, by the recheck of its fix; fixed on `dev`
+     the same day). Every check before then was on the
+     SCHEME of a URL, none on where it goes: a playlist's guide hint was
+     fetched from any host with no click (its userinfo sent as a Basic
+     login), every redirect was followed into loopback and the LAN, a
+     channel could name a LAN device with an Authorization header, and
+     `udp://0.0.0.0`, srt listener mode or a `localport` parameter made the
+     player LISTEN on every interface. The rule now: a URL the user typed
+     may reach any address on its first hop; a destination the PROVIDER
+     chose (a hint, a redirect, a logo, a channel) may be non-global only on
+     the playlist's own host -- on this machine its own host AND port -- and
+     a logo never; except that a playlist which is itself local may list
+     channels on the LAN, with a loopback relay's channels on this machine
+     held to its own port. The helper checks the address each hop actually connects
+     to (`DestinationPolicy` in `bounded_create_connection`), so rebinding
+     cannot slip between check and use (through a proxy the target is
+     checked by name, which is check-then-use, stated); provenance rides in the fetch
+     environment beside `OMARCHY_IPTV_URL` (`Model.fetchEnvironmentFor`);
+     stream URLs are gated at parse AND at play time; and a control
+     character in a channel URL is refused, because a NUL made the gate and
+     mpv read different hosts (D-SINK-54). What stays open is stated in
+     docs/ARCHITECTURE-PLAYER.md 19.2 (a NAME that resolves into the LAN --
+     mpv resolves it, not the helper -- an FFmpeg redirect, HLS segment
+     hosts) and docs/ARCHITECTURE.md section 6 (a LAN device with a global
+     IPv6 address counts as global). The lesson: a
+     scheme allowlist answers "what kind of thing is this", never "where
+     does it go", and the second question is the one a provider abuses.
+   - **What a stream server's ANSWER opens** (D-PLY-44, D-SINK-55, -62,
+     -64, -66; 2026-10-29). Every layer above judges the URL the helper
+     loads; the server then chooses what comes back, and both mpv and
+     FFmpeg open what that answer names. A plain M3U was expanded by mpv
+     (now refused: `demuxer=lavf` on every load, the owner's decision); an
+     SDP body behind an http URL made FFmpeg open rtp (closed by a pinned
+     `protocol_whitelist`); an IMF composition or ffconcat answer made
+     FFmpeg open `tcp://...?listen=1` assets, which a protocol list cannot
+     stop because http itself runs over tcp (closed by a pinned
+     `format_whitelist` of the sixteen formats IPTV carries, which FFmpeg
+     copies into every nested context). Two keys then reached past the
+     token filter from the user's side (a token, mpv.conf or an adopted
+     player): hls's dictionary-typed `seg_format_options`, which could
+     rewrite both lists inside a segment (D-SINK-64), and rtsp's
+     `listen_timeout`, which turns on the listen flag and which the read-back
+     removed only as an exact `listen` key (D-SINK-66). Most of these were
+     found while building or checking an earlier fix, and that is the
+     lesson: **a protocol list bounds where bytes come from,
+     not what a content-sniffed demuxer decides to open** -- ask which
+     formats the library will accept, and enumerate the demuxers that open
+     other URLs (docs/ARCHITECTURE-PLAYER.md 4.12.2) rather than the ones a
+     reviewer happened to try.
+   - **The player's configuration surface** (D-SINK-43, -44, -45, -46, -51,
+     -52, -53, -59, -60, -61, -63, D-PLY-46; 2026-10-29). The TLS entry's
+     "last word" was one token; the review and the rechecks of its fixes
+     found that mpv.conf profiles,
+     auto-profiles, the operation mode, built-in scripts (select, console,
+     the controller's click commands), prefetch, `reset-on-next-file` and
+     some thirty unreserved options each undid a layer or carried the URL
+     somewhere. The owner chose pin-and-classify over a strict allowlist:
+     every option a layer depends on is in a trailing PIN BLOCK after the
+     user's tokens (and, where mpv takes it at runtime, set again on an
+     adopted player; one whose per-file profile or `reset-on-next-file`
+     could undo a pin is stopped); every one of the
+     installed mpv's options is classified in
+     `tests/fixtures/mpv-options.json`, which both mirrors' reserved sets
+     are held to; and the gate's "mpv option guard"
+     (`scripts/check-mpv-options.py`) goes red on any option nobody has
+     classified, so the next mpv release cannot add an OPTION silently; a
+     new behaviour behind an existing option, or a new FFmpeg key outside
+     the TLS list, still needs a reader (D-SINK-64 and -66 were that shape).
+     The lesson is D-SINK-2's, generalised: a DENYLIST of a program's options
+     rots with every release of that program; a classification the gate
+     checks against the program itself does not.
    When you add a sink, add it here.
 6. Files the plugin writes: cache under `~/.cache/omarchy-iptv/sources/<key>/`,
    state at `~/.local/state/omarchy-iptv/state.json`, socket under
