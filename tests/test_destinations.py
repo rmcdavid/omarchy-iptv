@@ -358,6 +358,11 @@ class ConnectPolicyTest(unittest.TestCase):
                 b"#EXTINF:-1,Cups\n#KODIPROP:inputstream.adaptive.stream_headers=Authorization=Basic%20eQ%3D%3D\n"
                 b"http://127.0.0.1:631/admin\n"
                 b"#EXTINF:-1,Localhost\nhttp://localhost:1/x\n"
+                # rc-p1c (2026-10-29): 0.0.0.0 and `::` are this machine to a
+                # connect (a channel there reached a 127.0.0.1 server's port),
+                # so they are held to the relay's port too.
+                b"#EXTINF:-1,Zero\nhttp://0.0.0.0:631/admin\n"
+                b"#EXTINF:-1,Zero6\nhttp://[::]:631/admin\n"
                 b"#EXTINF:-1,Listener\nsrt://0.0.0.0:9000?mode=listener\n")
         a.routes["/pl.m3u"] = (200, (), body)
         code, status, err = self.playlist(a.url("/pl.m3u"), OMARCHY_IPTV_ORIGIN="user")
@@ -366,7 +371,7 @@ class ConnectPolicyTest(unittest.TestCase):
         self.assertEqual([(c["name"], c.get("headers")) for c in channels],
                          [("Tuner", {"X-Ok": "1"}), ("Own", {"Authorization": "Basic eA=="})])
         self.assertIn("1 sign-in header dropped: its channel is on another host than the playlist", status["warnings"])
-        self.assertIn("2 entries skipped: stream addresses on this machine at other ports than the playlist's",
+        self.assertIn("4 entries skipped: stream addresses on this machine at other ports than the playlist's",
                       status["warnings"])
         self.assertIn("1 entry skipped: the stream would listen on this machine for anyone to send to", status["warnings"])
 

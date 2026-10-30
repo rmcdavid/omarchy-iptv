@@ -564,14 +564,21 @@ def _host_refusal(host: str, scheme: str, source: dict[str, Any], port: int | No
     other port of this machine is some other service, which the relay's
     playlist did not have to name: the review's reproduction 1 again, one
     layer down, as a channel rather than a redirect. A port the source does
-    not record (a cache written before sourcePort) matches none."""
+    not record (a cache written before sourcePort) matches none.
+
+    rc-p1c (2026-10-29): an UNSPECIFIED literal -- 0.0.0.0, `::` and their
+    spellings -- is this machine too: a connect to it reaches whatever listens
+    on loopback at that port (measured inside `unshare -rn`: `0.0.0.0:P`
+    reached a 127.0.0.1 listener and `::` a ::1 one, and the player played a
+    loopback relay's channel at `http://0.0.0.0:<another port>/` from the
+    server there). So it is held to the relay's port the same way."""
     kind = host_class(host)
     if kind in ("", "global"):
         return ""
     if kind == "multicast" and scheme in MULTICAST_ONLY_SCHEMES:
         return ""
     if source.get("local"):
-        if kind == "loopback" and source.get("loopback"):
+        if kind in ("loopback", "unspecified") and source.get("loopback"):
             want = source.get("port")
             same = (isinstance(port, int) and not isinstance(port, bool)
                     and isinstance(want, int) and not isinstance(want, bool) and port == want)

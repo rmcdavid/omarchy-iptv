@@ -1116,6 +1116,15 @@ play. Rows in `streamHosts` of tests/fixtures/destinations.json, with a
 `reason` of `port`, held by both the parse and the play-time readers. A LAN
 source's loopback-literal channels are not this rule's (the lead's wording
 named a loopback source), and stay as D-SINK-41 left them.
+**[2026-10-29, rc-p1c: "loopback" here includes the UNSPECIFIED literals.]**
+`0.0.0.0` and `::` (with their spellings, `0`, `0x0`, `[::ffff:0.0.0.0]`) are
+a different address class from loopback, so the rule as first written let a
+relay's playlist name `http://0.0.0.0:<another port>/` -- and a connect to an
+unspecified address reaches this machine: measured inside `unshare -rn`,
+`0.0.0.0:P` reached a 127.0.0.1 listener and `::` a ::1 one, and the player
+played such a channel from the server on that other port. `_host_refusal`
+holds an unspecified literal to the source's port the same way (four more
+`streamHosts` rows, and the shipping `playlist` verb counts both spellings).
 
 **[2026-10-29, D-SINK-58 -- two residuals the section above did not state.]**
 (1) Non-global is an ADDRESS class, so a device on the user's LAN that has a
