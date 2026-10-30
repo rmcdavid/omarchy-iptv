@@ -265,7 +265,17 @@ MPV_FORMAT_WHITELIST = "hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,ea
 MPV_DEMUXER_FORMATS_KEY = "format_whitelist"
 # D-SINK-64: the keys of a demuxer-lavf-o map that are never left in it (see
 # MPV_DEMUXER_TLS_WORDS): the hls segment demuxer's own options dictionary.
-DEMUXER_FORMAT_FORBIDDEN = frozenset(("seg_format_options",))
+# rc-p1c (2026-10-29): and the rtsp demuxer's `listen_timeout`, which IMPLIES
+# its listen flag (a value above 0 sets RTSP_FLAG_LISTEN in rtsp_read_header)
+# and is the one key without which that flag cannot bind (the listener's tcp
+# timeout is the value times 1000, and the default -1 is out of tcp's range).
+# DEMUXER_TLS_FORBIDDEN removes an exact `listen` and nothing else, so a plain
+# mpv.conf `demuxer-lavf-o=listen_timeout=5` -- a token is refused by the word
+# `listen` -- made an rtsp channel LISTEN on its URL's host and port (measured
+# inside `unshare -rn`: 127.0.0.1:P bound, on sec-int 124589e and lane-p1c
+# alike; the same with the key removed bound nothing). A client that receives
+# a channel by listening is not a player of a channel, so the key goes.
+DEMUXER_FORMAT_FORBIDDEN = frozenset(("seg_format_options", "listen_timeout"))
 # D-SINK-52 (owner, 2026-10-29: pin and refuse). The OSC embedded in mpv 0.41.0
 # binds the title's middle click to `show-text ${path}`, which draws the whole
 # credentialed URL on the picture and into any screenshot (read from osc.lua

@@ -1459,6 +1459,26 @@ another such key over every demuxer and protocol the list admits
 (`ffmpeg -h demuxer=X`, `-h protocol=X`, `-h full` for the context's own):
 the only other dictionary-typed option is mov's `decryption_keys`, a map of
 key identifiers to keys, which carries no option name.
+**[2026-10-29, rc-p1c: the read-back's exact keys had the same blind spot one
+layer down.]** The token filter matches a WORD; the read-back removes exact
+KEYS, and `DEMUXER_TLS_FORBIDDEN` holds `listen` and no other listener key.
+The rtsp demuxer's `listen_timeout` implies its listen flag (a value above 0
+sets it in `rtsp_read_header`), and it is the key that flag cannot bind
+without (the listener's tcp timeout is the value times 1000; the default -1
+is out of tcp's range, so `rtsp_flags=listen` alone fails to open). A token
+naming it is refused by the word `listen`, but a plain mpv.conf
+`demuxer-lavf-o=listen_timeout=5` reached the map, and an rtsp channel then
+LISTENED on its URL's host and port -- measured inside `unshare -rn` on
+sec-int 124589e and on lane-p1c, by mpv.conf, with `rtsp_flags=listen,
+listen_timeout=0`, and on an adopted pre-pin player; the URL's host is the
+provider's, so it binds where that name resolves to this machine. The key is
+now in `DEMUXER_FORMAT_FORBIDDEN` (`removed` in the fixture's ffmpegFormat):
+counted by the read-back and removed before every load, after which the same
+three bound nothing and an rtsp channel with the user's other rtsp key
+played. The search over the admitted demuxers' and protocols' options for
+another key that turns the client into a listener: `listen` (http, tcp,
+tls: removed already), rtsp's `rtsp_flags` (its listen bit cannot open
+without this key) and `listen_timeout`; none other.
 
 **What else is reserved** (each reason in the fixture): `--stream-dump` and
 `--o` (the stream to a file, `--stream-record`'s class), `--watch-history-path`,

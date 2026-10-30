@@ -4075,21 +4075,23 @@
    "not list them; tests/test_mpv_options.py holds them to the helper.",
    "2026-10-29 (lane-p1c): D-SINK-62's format_whitelist is pinned the same way (MPV_FORMAT_WHITELIST), and",
    "`removed` (D-SINK-64) is refused in a token AND removed from the map before every load, the read-back",
-   "counting it (DEMUXER_FORMAT_FORBIDDEN in the helper)."
+   "counting it (DEMUXER_FORMAT_FORBIDDEN in the helper). rc-p1c (2026-10-29): and the rtsp demuxer's listen_timeout."
   ],
   "options": {
    "protocol_whitelist": "pinned",
    "protocol_blacklist": "forbidden",
    "format_whitelist": "pinned",
    "format_blacklist": "forbidden",
-   "seg_format_options": "removed"
+   "seg_format_options": "removed",
+   "listen_timeout": "removed"
   },
   "why": {
    "protocol_whitelist": "measured: an http(s) stream server answering with an SDP body made the player bind 0.0.0.0:P and P+1; with the pinned list it bound nothing and every admitted scheme played or reached its server",
    "protocol_blacklist": "a user list of its own would sit beside the pinned whitelist; refused by the same words rather than reasoned about",
    "format_whitelist": "measured: a stream server answering with an IMF composition playlist, or an ffconcat file naming one, made the player bind 0.0.0.0 through the asset URIs; with the pinned list FFmpeg refused the format at the top level and in every nested context, and every admitted channel kind played",
    "format_blacklist": "FFmpeg n9.0.1 has no such key; refused by the same words rather than reasoned about",
-   "seg_format_options": "the hls segment demuxer's options, a dictionary FFmpeg reads with its own escapes: format\\_whitelist inside it carries no word and replaced the pinned list in the segment's context (measured: with extension_picky=0 an SDP segment bound 0.0.0.0)"
+   "seg_format_options": "the hls segment demuxer's options, a dictionary FFmpeg reads with its own escapes: format\\_whitelist inside it carries no word and replaced the pinned list in the segment's context (measured: with extension_picky=0 an SDP segment bound 0.0.0.0)",
+   "listen_timeout": "rc-p1c: the rtsp demuxer's listen_timeout implies its listen flag and is the key that flag cannot bind without; carries the word listen, so a token is refused, but an mpv.conf line reached the map and made an rtsp channel bind its URL's host and port (measured); removed before every load like the TLS listen key"
   }
  }
 }

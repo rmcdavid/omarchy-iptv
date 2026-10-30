@@ -1079,6 +1079,29 @@ class PinnedTlsTest(MpvTestCase):
         self.assertEqual((code, payload["error"]["code"]), (1, "tls_unverified"))
         self.assertEqual([c for c in server.commands if c[0] == "loadfile"], [])
 
+    def test_rtsps_listen_timeout_is_removed_before_the_load(self):
+        """rc-p1c (2026-10-29). The rtsp demuxer's `listen_timeout` IMPLIES its
+        listen flag, and it is the key that flag cannot bind without; a token
+        naming it is refused by the word `listen`, but the read-back removed
+        only an exact `listen`, so an mpv.conf `demuxer-lavf-o=listen_timeout=5`
+        made an rtsp channel bind its URL's host and port (measured inside
+        `unshare -rn`). It goes by name before the load, the user's other keys
+        kept, and a player that will not let it go is not loaded into."""
+        server = self.start(props={"demuxer-lavf-o": dict(LISTS, listen_timeout="5", rtsp_flags="prefer_tcp")})
+        code, _, stdout, stderr = self.play("--id", "t:espn.us")
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(self.loaded(server))
+        remove = ["change-list", "demuxer-lavf-o", "remove", "listen_timeout"]
+        self.assertIn(remove, server.commands)
+        self.assertLess(server.commands.index(remove), server.commands.index(self.LOADFILE))
+        self.assertEqual(server.props["demuxer-lavf-o"], dict(LISTS, rtsp_flags="prefer_tcp"))
+        server.close()
+        self.server = None
+        server = self.start(props={"demuxer-lavf-o": dict(LISTS, listen_timeout="5")}, refuse={"demuxer-lavf-o"})
+        code, payload, _, _ = self.play("--id", "t:espn.us")
+        self.assertEqual((code, payload["error"]["code"]), (1, "tls_unverified"))
+        self.assertEqual([c for c in server.commands if c[0] == "loadfile"], [])
+
     def test_a_player_with_reset_on_next_file_is_not_loaded_into(self):
         """D-SINK-60 (lane-p1b, 2026-10-29). mpv backs up the options
         `reset-on-next-file` names when a file STARTS and restores them when it
@@ -1309,6 +1332,9 @@ class DemuxerAndProfileReadingTest(unittest.TestCase):
                               (dict(w, format_whitelist="hls"), 1), (dict(w, format_whitelist=""), 1),
                               # D-SINK-64: the segment demuxer's options, whatever they hold.
                               (dict(w, seg_format_options=""), 1), (dict(w, seg_format_options="probesize=1"), 1),
+                              # rc-p1c: rtsp's listen_timeout implies its listen flag, whatever it holds.
+                              (dict(w, listen_timeout="5"), 1), (dict(w, listen_timeout="-1"), 1),
+                              (dict(w, rtsp_flags="prefer_tcp"), 0),
                               ({}, 2), ({"tls_verify": "0"}, 3),
                               (None, None), ([], None), ("tls_verify=0", None)):
             with self.subTest(options=options):
