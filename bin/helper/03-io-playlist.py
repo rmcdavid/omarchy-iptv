@@ -382,7 +382,11 @@ class DestinationPolicy:
         port_text = (os.environ.get(HOME_PORT_ENV) or "").strip()
         # D-SINK-57: a port that is not 1..65535 in digits is no port, and a
         # loopback home with no port matches nothing (own_host_match).
-        port = int(port_text) if port_text.isdigit() and len(port_text) <= 5 and 0 < int(port_text) < 65536 else None
+        # isascii as well (D-EPG-16's rule 15): isdigit() is True for a
+        # superscript, which int() refuses. The shell sets this from a URL it
+        # validated, so no provider reaches it; the shape is closed anyway.
+        port = (int(port_text) if port_text.isascii() and port_text.isdigit() and len(port_text) <= 5
+                and 0 < int(port_text) < 65536 else None)
         return cls(label, origin, (os.environ.get(HOME_HOST_ENV) or "").strip(),
                    (os.environ.get(HOME_CLASS_ENV) or "").strip(), home_port=port)
 

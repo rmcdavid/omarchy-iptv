@@ -171,7 +171,13 @@ def episode_ns_text(raw: str) -> str:
         if index >= len(fields):
             break
         number = fields[index].split("/")[0].strip()
-        if number.isdigit():
+        # D-EPG-16 (2026-10-29): isdecimal, not isdigit. isdigit() is True
+        # for superscripts and circled digits, which int() refuses, so ONE
+        # programme numbered `\u00b2.3.` raised ValueError out of the parse
+        # and ended every fetch of that guide in `internal`. isdecimal() is
+        # exactly the characters int() reads, so every number that rendered
+        # before renders the same, and the rest are dropped, not guessed.
+        if number.isdecimal():
             out.append("%s%d" % (prefix, int(number) + 1))
     return " ".join(out)
 
