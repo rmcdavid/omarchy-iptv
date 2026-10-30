@@ -693,7 +693,7 @@ TestCase {
     compare(start[start.length - 1], "--mpv-arg=--cache=yes")
     compare(Model.playerStopArgv("/tmp/s", 42, "term"), ["player", "stop", "--socket", "/tmp/s", "--seq", "42", "--from", "term"])
     compare(Model.playerProbeArgv("/tmp/s", 301706), ["player", "probe", "--socket", "/tmp/s", "--owner-pid", "301706"])
-    compare(Model.helperArgv("/p/bin/omarchy-iptv", ["player", "stop"]), ["python3", "/p/bin/omarchy-iptv", "player", "stop"])
+    compare(Model.helperArgv("/p/bin/omarchy-iptv", ["player", "stop"]), ["python3", "-I", "/p/bin/omarchy-iptv", "player", "stop"])
     var probe = Model.parsePlayerProbe('{"ok":true,"kind":"player.probe","running":true,"responsive":true,"pid":7,"idle":false,"seq":41,"stash":{"schema":1,"id":"t:bbc1.uk","name":"BBC One HD","launchedFrom":"g:uk"},"owner":null}')
     compare([probe.valid, probe.running, probe.pid, probe.stash.launchedFrom], [true, true, 7, "g:uk"])
     compare(Model.parsePlayerProbe("not json").valid, false)
@@ -2274,7 +2274,7 @@ TestCase {
             Model.CONFIG_SHIELD_EXPOSED)
     compare(Model.configShieldState(""), Model.CONFIG_SHIELD_EXPOSED)
     compare(Model.configShieldArgv("/p/bin/omarchy-iptv").join(" "),
-            "python3 /p/bin/omarchy-iptv config shield")
+            "python3 -I /p/bin/omarchy-iptv config shield")
   }
 
   function test_formatting() {

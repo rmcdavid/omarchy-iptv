@@ -2921,7 +2921,7 @@ Item {
   function runControl(kind, args) {
     if (controlProc.running) return false
     root.controlKind = kind
-    controlProc.command = ["python3", root.helperPath].concat(args)
+    controlProc.command = Model.helperArgv(root.helperPath, args)
     controlProc.running = true
     controlWatchdog.restart()
     return true
@@ -5492,7 +5492,7 @@ Item {
         continue
       }
       root.cacheJob = { args: args, onDone: job.onDone, seq: job.seq }
-      cacheProc.command = ["python3", root.helperPath, "cache", "--cache-dir", root.cacheDir].concat(args)
+      cacheProc.command = Model.cacheRunArgv(root.helperPath, root.cacheDir, args)
       cacheProc.running = true
       cacheWatchdog.restart()   // D-SRC-37 (c): every run of the slot is bounded
       return
@@ -6487,7 +6487,7 @@ Item {
     // Argv only; the helper prints one JSON line, read at the exit for its
     // `found` (R22a) and otherwise discarded.
     id: stateInitProc
-    command: ["python3", root.helperPath, "state", "--state-dir", root.stateDir, "init"]
+    command: Model.stateInitArgv(root.helperPath, root.stateDir)
     // R22a: the reply is READ now. Its `found` is what was at the path before
     // the helper touched it, and only `absent` lets a FileNotFound load be a
     // fresh install (Model.stateInitFound).

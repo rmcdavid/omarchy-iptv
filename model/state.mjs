@@ -19,6 +19,9 @@ import {
   WALL_KEY
 } from "./logos.mjs"
 import {
+  helperArgv
+} from "./mpv.mjs"
+import {
   scrubUrls
 } from "./privacy.mjs"
 import {
@@ -1798,7 +1801,13 @@ function stateLoadDecision(ctx) {
 // created after a re-point, is made 0600 (and its folder 0700) within the
 // stub's start rather than at the next shell start. Argv only, no URL.
 function stateModeArgv(helperPath, stateDir) {
-  return ["python3", str(helperPath), "state", "--state-dir", str(stateDir), "mode"]
+  return helperArgv(helperPath, ["state", "--state-dir", str(stateDir), "mode"])
+}
+
+// D-SINK-50: the start-up `state init` (S-02, R22a), lifted out of the
+// Process block in Service.qml, which built the interpreter's argv inline.
+function stateInitArgv(helperPath, stateDir) {
+  return helperArgv(helperPath, ["state", "--state-dir", str(stateDir), "init"])
 }
 
 // The verb's one-line reply -> { folder, file } ("changed" | "kept"), or
@@ -2029,7 +2038,7 @@ export {
   MERGE_CONFLICT_FIELDS, mergeConflictSentence, mergeConflictNotice,
   mergeDropCount, mergeDropLines, migrationHeldAgainLine, mergeDropNotice,
   STATE_LOAD_ERRORS, stateLoadKind, stateInitFound, stateLoadDecision,
-  stateModeArgv, stateModeReply, stateWriteGate, stateSavePlan,
+  stateModeArgv, stateInitArgv, stateModeReply, stateWriteGate, stateSavePlan,
   stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
   STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
   stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader

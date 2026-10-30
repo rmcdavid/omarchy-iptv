@@ -498,8 +498,27 @@ function mpvPinBlock(dirs) {
 // mpv tokens travel as repeated `--mpv-arg TOKEN` so argparse can never
 // swallow an option-looking token and no token is ever split or merged.
 
+//
+// D-SINK-50 (2026-10-29): `python3 -I`, every spawn. Without it the
+// interpreter honours PYTHONPATH and PYTHONHOME and runs the user-site `.pth`
+// files and `sitecustomize` BEFORE the stub's first statement -- before the
+// shield that makes the process non-dumpable (D-SINK-9), with the source URL
+// already in the environment of the fetch verbs, and with `ctypes`, the
+// module the shield itself imports, open to being shadowed. `-I` is `-E -s
+// -P`: no PYTHON* variable, no user site directory, no script directory on
+// sys.path. The stub compiles its parts from its own directory by path and
+// imports nothing from it, so isolation costs it nothing (measured). This is
+// the ONE builder of the interpreter's argv: every helper spawn in
+// Service.qml goes through it (the node suite holds every builder to it).
 function helperArgv(helperPath, args) {
-  return ["python3", str(helperPath)].concat(asList(args))
+  return ["python3", "-I", str(helperPath)].concat(asList(args))
+}
+
+// D-SINK-50: the cache slot's argv, lifted out of Service.qml's
+// runNextCacheJob, which built the interpreter's argv inline and so did not
+// go through helperArgv. `args` is Model.cacheJobArgs' answer.
+function cacheRunArgv(helperPath, cacheDir, args) {
+  return helperArgv(helperPath, ["cache", "--cache-dir", str(cacheDir)].concat(asList(args)))
 }
 
 // D-ID-1. The two playlist invocations differ by ONE argument and the
@@ -853,10 +872,10 @@ export {
   mpvRefusedWarnings, splitMpvArgs, demuxerNamesTls, scriptOptsRefused,
   mpvRejectedLine, mpvRejectedName, headerArgs, MPV_RAW_PREFIX,
   mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv, mpvPinBlock,
-  helperArgv, playlistFetchArgv, fetchStateDir, playlistProbeArgv,
-  epgFetchArgv, FETCH_URL_ENV, fetchEnvironment, failedArgv, logoFetchArgv,
-  playerTracksArgv, trackChoice, parseTracks, LANG_NAMES, trackLanguage,
-  trackLabel, trackDetail, trackRows, trackCursorHome, moveTrackCursor,
-  TRACKS_RECOVERY_MAX, shouldRefreshTracks, trackPanelMessage,
-  trackAccessibleName
+  helperArgv, cacheRunArgv, playlistFetchArgv, fetchStateDir,
+  playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,
+  failedArgv, logoFetchArgv, playerTracksArgv, trackChoice, parseTracks,
+  LANG_NAMES, trackLanguage, trackLabel, trackDetail, trackRows,
+  trackCursorHome, moveTrackCursor, TRACKS_RECOVERY_MAX, shouldRefreshTracks,
+  trackPanelMessage, trackAccessibleName
 }

@@ -1232,12 +1232,12 @@ checkCall("calibration: on retropc, opacity 0.8 computes to the 7.13 the old pas
 // (The URL left both argvs under D-SINK-8, below; the flag is the whole of
 // what still tells them apart.)
 check("D-ID-1 the active fetch carries the state dir", Model.playlistFetchArgv("/h", "/c", "/s"),
-  ["python3", "/h", "playlist", "--cache-dir", "/c", "--state-dir", "/s"])
+  ["python3", "-I", "/h", "playlist", "--cache-dir", "/c", "--state-dir", "/s"])
 check("D-ID-1 the probe does NOT, and that absence is the safety property", Model.playlistProbeArgv("/h", "/c"),
-  ["python3", "/h", "playlist", "--cache-dir", "/c"])
+  ["python3", "-I", "/h", "playlist", "--cache-dir", "/c"])
 check("D-ID-1 the probe can never grow the flag by accident", Model.playlistProbeArgv("/h", "/c").indexOf("--state-dir"), -1)
 check("D-ID-1 an empty state dir omits the flag rather than passing a blank", Model.playlistFetchArgv("/h", "/c", ""),
-  ["python3", "/h", "playlist", "--cache-dir", "/c"])
+  ["python3", "-I", "/h", "playlist", "--cache-dir", "/c"])
 checkCall("D-ID-1 Service.qml calls the builders and builds no playlist argv of its own", function () {
   // The gap the review named: nothing asserted the argv Service constructs.
   // A literal argv here would be invisible to every test again.
@@ -1285,7 +1285,7 @@ checkCall("D-SINK-8 (a) no builder puts a URL, a credential or --url on argv, an
   return [argvLeaks(fetch), argvLeaks(probe), argvLeaks(epg), argvLeaks(now),
           fetch.slice(0, 3), probe.slice(0, 3), epg.slice(0, 3), now.slice(0, 3)]
 }, [[], [], [], [],
-    ["python3", "/h", "playlist"], ["python3", "/h", "playlist"], ["python3", "/h", "epg"], ["python3", "/h", "epg"]])
+    ["python3", "-I", "/h"], ["python3", "-I", "/h"], ["python3", "-I", "/h"], ["python3", "-I", "/h"]])
 checkCall("D-SINK-8 (a) a URL handed to a builder as a surplus argument goes nowhere", function () {
   // The parameter that was removed must not grow back at the END of the
   // list either, which is where a "harmless" extra argument lands. Hand a
@@ -1302,10 +1302,10 @@ checkCall("D-SINK-8 (a) no builder keeps an ignored url parameter: a parameter n
 // the whole before-run, hiding every count after it (rule 11).
 checkCall("D-SINK-8 (a) epgFetchArgv is the inline EPG argv Service.qml used to build, minus the URL", function () {
   return [Model.epgFetchArgv("/h", "/c", false), Model.epgFetchArgv("/h", "/c", true)]
-}, [["python3", "/h", "epg", "--cache-dir", "/c"], ["python3", "/h", "epg", "--now-only", "--cache-dir", "/c"]])
+}, [["python3", "-I", "/h", "epg", "--cache-dir", "/c"], ["python3", "-I", "/h", "epg", "--now-only", "--cache-dir", "/c"]])
 checkCall("D-SINK-8 (a) epgFetchArgv treats nowOnly as a flag, not a value: nothing but a truthy value adds it", function () {
   return [Model.epgFetchArgv("/h", "/c").indexOf("--now-only"), Model.epgFetchArgv("/h", "/c", null).indexOf("--now-only"), Model.epgFetchArgv("/h", "/c", 1).indexOf("--now-only")]
-}, [-1, -1, 3])
+}, [-1, -1, 4])
 checkCall("D-SINK-8 (b) fetchEnvironment names exactly one variable, OMARCHY_IPTV_URL, and hands it the URL verbatim", function () {
   const env = Model.fetchEnvironment("http://u:p@h/x")
   // The name is the contract with the helper, spelled as a literal here on
@@ -2209,8 +2209,8 @@ checkCall("dead channels: the whole render path still works off the formatted st
 checkCall("dead channels: the mark is written by argv, never shell text", function () {
   const a = Model.failedArgv("/p/bin/omarchy-iptv", "mark", "t:x; rm -rf /", "/c/sources/ab")
   return [a.indexOf("t:x; rm -rf /") !== -1, a.length,
-          Model.failedArgv("/p/b", "nonsense", "t:x", "/c")[3]]
-}, [true, 8, "mark"])
+          Model.failedArgv("/p/b", "nonsense", "t:x", "/c")[4]]
+}, [true, 9, "mark"])
 
 checkCall("dead channels: withFailed keeps an epoch a NUMBER", function () {
   // failedIndex produces numbers from the file. If this str()'d, one map
@@ -5701,7 +5701,7 @@ check("playerRestartArgv is start plus the rung, under one lock", Model.playerRe
   ["player", "restart", "--socket", "/s", "--cache-dir", "/c", "--id", "t:x", "--seq", "7", "--scope", "g:uk", "--mpv-arg=--cache=yes", "--from", "term"])
 check("playerProbeArgv with and without an owner claim", [Model.playerProbeArgv("/s", 301706), Model.playerProbeArgv("/s", 0)], [["player", "probe", "--socket", "/s", "--owner-pid", "301706"], ["player", "probe", "--socket", "/s"]])
 check("playerOrphanCheckArgv", [Model.playerOrphanCheckArgv("/s", 301706, 6), Model.playerOrphanCheckArgv("/s", 301706, null)], [["player", "orphan-check", "--socket", "/s", "--owner-pid", "301706", "--grace", "6"], ["player", "orphan-check", "--socket", "/s", "--owner-pid", "301706", "--grace", "6"]])
-check("helperArgv prefixes the interpreter and the helper path", Model.helperArgv("/p/bin/omarchy-iptv", Model.playerStopArgv("/s", 3)), ["python3", "/p/bin/omarchy-iptv", "player", "stop", "--socket", "/s", "--seq", "3"])
+check("helperArgv prefixes the interpreter and the helper path", Model.helperArgv("/p/bin/omarchy-iptv", Model.playerStopArgv("/s", 3)), ["python3", "-I", "/p/bin/omarchy-iptv", "player", "stop", "--socket", "/s", "--seq", "3"])
 check("no player argv ever carries a URL or a header value", (() => {
   const all = [].concat(
     Model.playerStartArgv("/s", "/c", "t:x", 1, "g:uk", 12, ["--cache=yes"]),
@@ -13015,7 +13015,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   checkCall("D-SINK-18: the shield argv names the verb and nothing else", function () {
     const argv = Model.configShieldArgv("/plugin/bin/omarchy-iptv")
     return [argv, argv.filter(function (a) { return /shell\.json|--path|\.config/.test(a) })]
-  }, [["python3", "/plugin/bin/omarchy-iptv", "config", "shield"], []])
+  }, [["python3", "-I", "/plugin/bin/omarchy-iptv", "config", "shield"], []])
 
   // The sentence. NOT the persist_failed one: that sends the user to
   // `omarchy bar set`, which writes the credentialed URL into their shell
@@ -13162,7 +13162,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   // allowed to hold the bytes briefly and die.
   checkCall("D-CLIP-1 R8: clipboardArgv is the helper's clipboard verb, argv only", function () {
     return Model.clipboardArgv("/opt/p/bin/omarchy-iptv")
-  }, ["python3", "/opt/p/bin/omarchy-iptv", "clipboard"])
+  }, ["python3", "-I", "/opt/p/bin/omarchy-iptv", "clipboard"])
   checkCall("D-CLIP-1 R8: the shell's argv never names wl-paste", function () {
     return Model.clipboardArgv("/opt/p/bin/omarchy-iptv").indexOf(clip.argv[0])
   }, -1)
@@ -13374,6 +13374,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
 // counts.
 ;(function () {
   const H = require("./service-harness.js")
+  const cacheVerb = H.cacheVerb
   const svcPath = process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml")
   const svcText = fs.readFileSync(svcPath, "utf8")
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
@@ -13472,10 +13473,10 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   // start-up init, so cacheReady has come and dirsReady has not.
   const OK5 = JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })
   const FAIL404 = JSON.stringify({ ok: false, kind: "playlist", error: { code: "http_404", message: "HTTP 404 from new.example.test" } })
-  const prunes = h => h.cacheRuns.filter(c => c[5] === "prune")
+  const prunes = h => h.cacheRuns.filter(c => cacheVerb(c) === "prune")
   const keepsOf = c => { const out = []; for (let i = c.indexOf("--keep") + 1; i > 0 && i < c.length && c[i].indexOf("--") !== 0; i++) out.push(c[i]); return out }
   const activeOf = c => c.indexOf("--active") === -1 ? "" : c[c.indexOf("--active") + 1]
-  const removed = h => h.cacheRuns.filter(c => c[5] === "remove").map(c => c[c.indexOf("--key") + 1])
+  const removed = h => h.cacheRuns.filter(c => cacheVerb(c) === "remove").map(c => c[c.indexOf("--key") + 1])
   const keyName = k => ({ [KA]: "A", [KB]: "B", [KNEW]: "NEW", "": "-" })[k] || k
   const named = keys => keys.map(keyName)
   const add = h => h.root.addSource({ playlistUrl: NEW, epgUrl: "", label: "" })
@@ -17705,7 +17706,7 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
   checkCall("D-SRC-49: Model.stateModeArgv is argv only (no URL, the state dir and the verb); Model.stateModeReply reads the verb's one line and nothing else", () => {
     return [M.stateModeArgv("/p/bin/omarchy-iptv", "/s"), M.stateModeReply('{"ok": true, "kind": "state", "action": "mode", "folder": "kept", "file": "changed"}\n'),
             M.stateModeReply(""), M.stateModeReply('{"ok": true, "kind": "state", "action": "init", "found": "absent"}\n'), M.stateModeReply('{"ok": false, "kind": "state", "action": "mode"}')]
-  }, [["python3", "/p/bin/omarchy-iptv", "state", "--state-dir", "/s", "mode"], { folder: "kept", file: "changed" }, null, null, null])
+  }, [["python3", "-I", "/p/bin/omarchy-iptv", "state", "--state-dir", "/s", "mode"], { folder: "kept", file: "changed" }, null, null, null])
   checkCall("D-SRC-49: through Service -- a LANDED save starts `state mode` on its own Process (never cacheProc) from a turn of its own, with the helper argv; a second landed save while it runs is folded into one re-run; a save that FAILED starts none; the steady-state reply is silent", () => {
     const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
     const p = h.ids.stateModeProc
@@ -17726,7 +17727,7 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     h.stateFile.writeFails = true
     h.root.toggleFavorite("t:three.uk"); h.drain()
     return [beforeLanding, insideHandler, started, folded, rerun, quiet, [p.running, h.root.stateModeRuns - runsAtBoot], h.compileErrors]
-  }, [[false, 0], [false, true], [true, ["python3", "bin/omarchy-iptv", "state", "--state-dir", "/.local/state/omarchy-iptv", "mode"], 1, true, 0], [true, 1], [false, 2, true], 0, [false, 2], []])
+  }, [[false, 0], [false, true], [true, ["python3", "-I", "bin/omarchy-iptv", "state", "--state-dir", "/.local/state/omarchy-iptv", "mode"], 1, true, 0], [true, 1], [false, 2, true], 0, [false, 2], []])
   checkCall("D-SINK-22 (b): the state FOLDER link re-pointed at an empty folder BETWEEN a save's read and the write it allowed -- the write CREATES state.json at the umask's 0644 (the window stays), and the repair the landing asks for makes it 0600 within the helper's start, told once; before: 0644 until the next shell start", () => {
     const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
     h.root.toggleFavorite("t:one.uk"); h.drain()
@@ -18125,6 +18126,80 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     const now = Math.floor(Date.now() / 1000)
     return [runs({ ok: true, kind: "playlist", fetchedAt: now }), runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 1 })]
   }, [1, 0])
+})()
+
+// ---- lane-p2a (2026-10-29): secrets and their fingerprints off every command line ----
+//
+// D-SINK-47, -48, -50, -65, -67, -68. Every check below reads the model under
+// test through M (IPTV_MODEL), Service.qml through IPTV_SERVICE_QML and the
+// helper through IPTV_HELPER, so the same block runs against dev 2727179 for
+// its red counts (rule 11).
+;(() => {
+  const fs = require("fs"), path = require("path"), os = require("os"), cp = require("child_process")
+  const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
+  const H = require("./service-harness.js")
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const HELPER = path.resolve(process.env.IPTV_HELPER || path.join(__dirname, "../bin/omarchy-iptv"))
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "iptv-p2a-"))
+  fs.chmodSync(scratch, 0o700)
+  const keyOf = url => M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
+  const PL = "http://me:s3cret@provider.example.test/get.php?username=me&password=s3cret"
+  const rec = (url, extra) => Object.assign({ key: keyOf(url), url, epgUrl: "", kind: "http", label: "p", labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }, extra || {})
+  const stateText = (sources, activeKey) => JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources, activeKey, entryMigrated: true }) + "\n"
+  const boot = () => H.bootService(svcText, M, { entry: { sourceKey: keyOf(PL), showLogos: false }, stateText: stateText([rec(PL)], keyOf(PL)), host: "lag" })
+
+  // D-SINK-50: `python3 -I`, from the one builder, everywhere.
+  checkCall("D-SINK-50: every helper argv builder in the model starts `python3 -I <helper>`", () => {
+    const P = "/p/bin/omarchy-iptv"
+    const built = [M.helperArgv(P, ["x"]), M.playlistFetchArgv(P, "/c/sources/k", "/s"), M.playlistProbeArgv(P, "/c/sources/k"),
+                   M.epgFetchArgv(P, "/c/sources/k", true), M.epgFetchArgv(P, "/c/sources/k", false), M.failedArgv(P, "mark", "t:x", "/c/sources/k"),
+                   M.logoFetchArgv(P, "/c/sources/k"), M.configShieldArgv(P), M.clipboardArgv(P), M.stateModeArgv(P, "/s"),
+                   M.stateInitArgv(P, "/s"), M.cacheRunArgv(P, "/c", ["prune"])]
+    return built.map(argv => argv.slice(0, 3).join(" "))
+  }, Array(12).fill("python3 -I /p/bin/omarchy-iptv"))
+  checkCall("D-SINK-50 (service): the control, player, cache, failed, playlist, EPG and state-mode slots run the interpreter isolated, and Service.qml composes no interpreter argv of its own", () => {
+    const h = boot()
+    h.ids.controlProc.running = false
+    h.root.runControl("play", ["play", "--id", "t:x"])
+    const control = h.ids.controlProc.command.slice(0, 2)
+    h.ids.playerProc.running = false
+    h.root.runPlayer("probe", ["player", "probe", "--socket", "/r/mpv.sock"])
+    const player = h.ids.playerProc.command.slice(0, 2)
+    h.ids.playlistProc.running = false
+    h.root.runPlaylistHelper()
+    const playlist = h.ids.playlistProc.command.slice(0, 2)
+    h.ids.epgProc.running = false
+    h.root.epgLoaded = true
+    h.root.runEpgHelper(true)
+    const epg = h.ids.epgProc.command.slice(0, 2)
+    h.ids.failedProc.running = false
+    h.root.runFailedJob({ action: "mark", id: "t:x", dir: "/c/sources/k" })
+    const failed = h.ids.failedProc.command.slice(0, 2)
+    h.root.queueCacheJob(["remove", "--key", "deadbeef"], null)
+    h.drain()
+    const cache = (h.cacheRuns[h.cacheRuns.length - 1] || []).slice(0, 2)
+    const literal = (svcText.match(/"python3"/g) || []).length
+    return { control, player, playlist, epg, failed, cache, literal, compileErrors: h.compileErrors }
+  }, { control: ["python3", "-I"], player: ["python3", "-I"], playlist: ["python3", "-I"], epg: ["python3", "-I"], failed: ["python3", "-I"],
+       cache: ["python3", "-I"], literal: 0, compileErrors: [] })
+  checkCall("D-SINK-50 (the sink): run with the argv the model builds, the helper's interpreter runs no PYTHONPATH code before the shield -- neither a sitecustomize nor a module that shadows the ctypes the shield imports", () => {
+    const evil = path.join(scratch, "pypath")
+    fs.mkdirSync(evil, { mode: 0o700 })
+    const marker = path.join(scratch, "ran-before-shield")
+    const body = "import os\nopen(" + JSON.stringify(marker) + ", 'a').write(os.environ.get('OMARCHY_IPTV_URL', '') + '\\n')\n"
+    fs.writeFileSync(path.join(evil, "sitecustomize.py"), body)
+    fs.writeFileSync(path.join(evil, "ctypes.py"), body + "raise ImportError('shadowed')\n")
+    const list = path.join(scratch, "p.m3u")
+    fs.writeFileSync(list, "#EXTM3U\n#EXTINF:-1 tvg-id=\"a.test\",A\nhttp://127.0.0.1:9/a.ts\n")
+    const cache = path.join(scratch, "cache")
+    fs.mkdirSync(cache, { mode: 0o700 })
+    const argv = M.playlistFetchArgv(HELPER, cache, "")
+    const env = Object.assign({}, process.env, { PYTHONPATH: evil, OMARCHY_IPTV_URL: list, HOME: scratch, XDG_CACHE_HOME: scratch, XDG_STATE_HOME: scratch })
+    const run = cp.spawnSync(argv[0], argv.slice(1), { env, encoding: "utf8", timeout: 30000 })
+    const ran = fs.existsSync(marker)
+    return { exit: run.status, ran, warned: /non-dumpable/.test(run.stderr || "") }
+  }, { exit: 0, ran: false, warned: false })
+  fs.rmSync(scratch, { recursive: true, force: true })
 })()
 
 // ---- D-HOST-5, rule 15: every notice the service posted in this run went through its kind's slot ----

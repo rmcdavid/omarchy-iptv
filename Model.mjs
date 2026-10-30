@@ -83,11 +83,11 @@ export {
   mergeLeavesNothingUnsaved, mergeConflictLine, MERGE_CONFLICT_TITLE,
   mergeConflictSentence, mergeConflictNotice, mergeDropLines,
   migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
-  stateInitFound, stateLoadDecision, stateModeArgv, stateModeReply,
-  stateWriteGate, stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
-  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
-  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
-  stateBlockedHeader
+  stateInitFound, stateLoadDecision, stateModeArgv, stateInitArgv,
+  stateModeReply, stateWriteGate, stateSavePlan, stateBlockRecheck,
+  STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START,
+  STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST, stateUnreadableNotice,
+  stateUnreadableJournal, stateBlockedHeader
 } from "./model/state.mjs"
 export {
   parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
@@ -129,7 +129,7 @@ export {
   MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT, mpvRefusedWarnings, splitMpvArgs,
   demuxerNamesTls, mpvRejectedLine, mpvRejectedName, headerArgs,
   MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv,
-  mpvPinBlock, helperArgv, playlistFetchArgv, fetchStateDir,
+  mpvPinBlock, helperArgv, cacheRunArgv, playlistFetchArgv, fetchStateDir,
   playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,
   failedArgv, logoFetchArgv, playerTracksArgv, trackChoice, parseTracks,
   trackLanguage, trackLabel, trackDetail, trackRows, trackCursorHome,

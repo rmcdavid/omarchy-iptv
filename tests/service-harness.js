@@ -244,6 +244,18 @@ function makeIds(h) {
   }
 }
 
+// The verb of a recorded `cache` run: the first word after `cache` that is
+// neither an option nor an option's value. Index-free, because the
+// interpreter's argv grew `-I` (D-SINK-50, 2026-10-29) and read `--cache-dir`
+// plus two before that.
+function cacheVerb(command) {
+  const c = command || []
+  let i = c.indexOf("cache") + 1
+  if (i <= 0) return ""
+  while (i < c.length && String(c[i]).indexOf("--") === 0) i += String(c[i]).indexOf("=") === -1 ? 2 : 1
+  return i < c.length ? String(c[i]) : ""
+}
+
 // D-HOST-5, rule 15: every notice any service boot in this process posted,
 // across the whole suite -- through a kind's slot (by kind), or detached past
 // it. tests/Model.test.js reads it last: the tree must post every kind, and
@@ -646,7 +658,7 @@ function bootService(serviceText, Model, o) {
   // otherwise (h.cacheFails = ["migrate"]).
   h.cacheFails = []
   h.cacheAnswer = (command) => {
-    const verb = command[command.indexOf("--cache-dir") + 2] || ""
+    const verb = cacheVerb(command)
     if (h.cacheFails.indexOf(verb) !== -1) return JSON.stringify({ ok: false, kind: "cache", action: verb, error: { code: "io", message: "failed" } }) + "\n"
     return JSON.stringify({ ok: true, kind: "cache", action: verb }) + "\n"
   }
@@ -1144,4 +1156,4 @@ function restartService(serviceText, Model, h, o) {
                                                           stateText: h.stateFile.disk, host: h.host.mode, clock: h.clock + 60000 }, o || {}))
 }
 
-module.exports = { bootService, restartService, rootFunctions, rootProperties, matchBrace, STUBBED, PID, HELPER_EMPTY_STATE, notificationServer, NOTICE_LEDGER }
+module.exports = { bootService, restartService, rootFunctions, rootProperties, matchBrace, STUBBED, PID, HELPER_EMPTY_STATE, notificationServer, NOTICE_LEDGER, cacheVerb }
