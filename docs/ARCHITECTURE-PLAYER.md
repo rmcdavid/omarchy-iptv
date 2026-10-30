@@ -713,6 +713,16 @@ no provider, because the helper before this one set the channel's headers
 there (4.11). And `secure_player` appends the demuxer's protocol whitelist
 (D-SINK-55, 4.12.1) to a player that lacks it; the read-back requires it.
 
+**[2026-10-29, lane-p1c: and the format list, and two more pins.]**
+`secure_player` appends the demuxer's format list (D-SINK-62, 4.12.2) the same
+way, and the read-back requires it exactly; it removes a `seg_format_options`
+key (D-SINK-64), which the read-back counts. `pin_adopted_player` sets
+`prefetch-playlist` off (D-SINK-63) and `load-console` off, which unloads the
+console script at runtime (D-SINK-61; mpv answered both flags as booleans
+over IPC, measured). Every player started by sec-int 124589e or earlier lacks
+the format list, so it reads "migrated" on the first probe after the update
+and pays the one rebuffer of the second row.
+
 **Where the flag and the field names are fixed.** The owner claim is the
 precedent for an opt-in write on a verb documented as a read
 (`Model.playerProbeArgv`'s own comment: "Omitted, the probe is read-only"),
@@ -1128,6 +1138,13 @@ header). `-append` takes its value verbatim, and an object that repeats the
 key arrived as that many headers, in order, with `,`, `=`, both quotes and a
 trailing backslash intact (W13 holds it). Python's json cannot repeat a key,
 so the helper writes that object itself (`IpcPairs` / `ipc_json`, 05).
+**[2026-10-29, lane-p1c, D-SINK-63: "applies none of them to an entry the
+helper did not load" held only while mpv did not PREFETCH.]** With
+`prefetch-playlist` on, mpv opens the next entry while the playing file's
+per-file options are still in force, so an appended entry was sent the
+channel's provider headers (rc-p1b measured it by token; W22 by token, past
+the filter and from mpv.conf on sec-int 124589e). `--prefetch-playlist=no`
+is now pinned and the name refused, so the sentence holds again.
 The positional form, `["loadfile", url, "replace", -1, {...}]`, and the
 named form (`{"name": "loadfile", ...}`) were measured equal; the positional
 one is used because every double of the player and the harness stub read
@@ -1265,6 +1282,10 @@ again, so the model changed. Three decisions, the owner's:
   apply, but cannot replace a pinned option (measured below).
 - **Turn off only the select menu**: `--load-select=no`, pinned and reserved.
   Stats, the console, the context menu, commands and positioning stay.
+  **[2026-10-29, the owner's decision on D-SINK-61: the console goes too --
+  `--load-console=no`, pinned, with mpv's alias `--load-osd-console`
+  reserved beside it. Stats, the context menu, commands and positioning
+  stay. Measured below, in the routes paragraph.]**
 
 **The classification** is `tests/fixtures/mpv-options.json` (dev branch): every
 one of the 899 option bases `mpv --no-config --list-options` prints on mpv
@@ -1274,9 +1295,9 @@ alias.
 
 | Class | What the plugin does | Count (mpv 0.41.0) |
 |---|---|---|
-| `allowed` | a user token passes and lands after the base argv | 827; 825 since 2026-10-29 |
+| `allowed` | a user token passes and lands after the base argv | 827; 825 since 2026-10-29; 822 since lane-p1c (the same day) |
 | `reserved` | a user token is REFUSED, by name, in both mirrors' `MPV_RESERVED` | 39 |
-| `pinned` | re-asserted by the trailing pin block, AFTER the user's tokens; refused as a token as well, except the key-pinned `--demuxer-lavf-o` and (2026-10-29) `--script-opts` | 18 (16 options and 2 aliases); 21 since 2026-10-29 (+ `--drag-and-drop`, `--script-opts` and its alias) |
+| `pinned` | re-asserted by the trailing pin block, AFTER the user's tokens; refused as a token as well, except the key-pinned `--demuxer-lavf-o` and (2026-10-29) `--script-opts` | 18 (16 options and 2 aliases); 21 since 2026-10-29 (+ `--drag-and-drop`, `--script-opts` and its alias); 24 since lane-p1c (+ `--load-console` and its alias, `--prefetch-playlist`) |
 | `warned` | kept, with the PO-10 footer line | 7; 6 since 2026-10-29 (`--script-opts` moved to key-pinned and still warns for ytdl; `--rtsp-transport` joined) |
 | `base` | set before the user's tokens; a user token may override it | 8 |
 
@@ -1310,6 +1331,8 @@ deleted from the file, with FFmpeg's `verifyhost` deleted, and with the
 | `--load-auto-profiles=no` | auto_profiles.lua applies a profile-cond profile at every load, over the command line (D-SINK-44) |
 | `--player-operation-mode=cplayer` | `pseudo-gui` makes mpv apply the user's `[pseudo-gui]` profile AFTER the command line with nothing preserved, which undid every other pin; a plain mpv.conf line was enough (measured by the recheck, below; D-SINK-44) |
 | `--load-select=no` | select.lua: `g l` forks `ffmpeg -i <path>`, the credentialed URL on a 0444 `/proc` cmdline for the life of the stream (measured), `g p` draws it (D-SINK-46) |
+| `--load-console=no` | **[2026-10-29, lane-p1c, D-SINK-61, the owner's "turn the console off"]** commands.lua queues every log line at the terminal's level for the console, and the console draws them when it opens; an HLS key that 404s while a channel plays is logged at error level with its whole URL. On sec-int 124589e the console key put that line in the console's buffer and drew it (read at mpv's trace level from a second client: the `script-message-to console log` that handed it over and the `show-text` the console drew with both carried the URL's secret -- the console's terminal-mode render, `--video-osd=no` in the rig, which has no window to draw an overlay on); with the pin the console is not loaded, `script-binding console/enable` is refused, the key draws nothing that carries it, and the same error line still reaches an error-level client (`tls-scenario.sh --windowless` W23). Also set off on adoption, which unloads the script |
+| `--prefetch-playlist=no` | **[2026-10-29, lane-p1c, D-SINK-63]** with it on, mpv opens the NEXT entry while the playing file's per-file options are still in force, so an entry the helper did not load was sent the channel's provider headers (measured by rc-p1b; on sec-int 124589e by token, past the filter and from mpv.conf, W22). Reserved as a token, and set off on adoption |
 | `--load-unsafe-playlists=no` | mpv's origin rule for nested entries: with it on, a server's playlist made the player write a file the server named and play a local file (measured, D-SINK-44) |
 | `--save-watch-history=no` | appends every path played, credentials and all, to `~/.local/state/mpv/watch_history.jsonl` (measured from mpv.conf) |
 | `--log-file=` | a log naming every URL (a plain mpv.conf `log-file` wrote one; pinned empty, no file at all) |
@@ -1320,6 +1343,7 @@ deleted from the file, with FFmpeg's `verifyhost` deleted, and with the
 | `--stream-lavf-o-clr` | command-line-set, so a `[protocol.https]` profile can no longer put FFmpeg's `tls_verify=0` back (D-SINK-44) |
 | `--demuxer-lavf-propagate-opts=yes` | the next pins reach segment and key opens only by propagation; off, they fall back to FFmpeg's own default -- true in n9.0.1, and a default this layer does not choose |
 | `--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy` | **[2026-10-29, D-SINK-55]** a stream server that answers an http(s) URL with an SDP body makes FFmpeg's sdp demuxer open `rtp` with the whitelist it inherited from http, and the player LISTENS (rc-dest measured `c=0.0.0.0` binding 0.0.0.0:P and P+1, under a .ts path too). With this list nothing bound, and every scheme the gate admits still played or reached its server (the table below). Read back exactly over IPC (`demuxer_tls_unsafe`), appended on adoption, refused in a token (`protocol_whitelist`, `protocol_blacklist` joined the filter's words). An rtsp channel's own loadfile adds `rtp,udp` for that file only, because its demuxer opens its RTP transport itself and a user's `--rtsp-transport=udp` (warned, D-SINK-53) needs them |
+| `--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt` | **[2026-10-29, lane-p1c, D-SINK-62]** the demuxers libavformat may use, checked against the format a probe chose or a user forced and copied into every nested context. A demuxer that opens the URLs its content names opens them with the protocol list above, which has to hold tcp and tls, so FFmpeg's IMF demuxer listened on 0.0.0.0 through an asset URI, and an ffconcat file naming the CPL reached it too; with the list, nothing listens and every channel kind the gate admits still plays (4.12.2 has the search and the measurements). Read back exactly, appended on adoption, refused in a token (`format_whitelist`, `format_blacklist`) |
 | `--demuxer-lavf-o-append=tls_verify=1` | D-SINK-43: the last word on FFmpeg's `tls_verify` for every segment open; `-append` replaces that one key and keeps the user's others |
 | `--tls-verify=yes` | D-SINK-13 layer 2, still the last element |
 
@@ -1412,6 +1436,50 @@ two sets are FFmpeg's TLS options as the gate lists them, classified in the
 fixture, and every key the fixture forbids or pins contains one of the
 filter's words, which the gate also holds.
 
+**[2026-10-29, lane-p1c: three more words, and the premise above is false in
+one place.]** `format_whitelist` and `format_blacklist` (D-SINK-62: the pin
+block now owns the demuxer's format list; FFmpeg n9.0.1 has no
+`format_blacklist`, refused rather than reasoned about) and
+`seg_format_options` (D-SINK-64). "Every spelling of a key still carries the
+word" holds for a key of the demuxer-lavf-o map itself, which mpv hands to
+FFmpeg as dictionary entries, byte for byte. It does NOT hold inside a key
+whose VALUE is itself an options dictionary, because FFmpeg parses that
+value with its own escapes and quotes: hls's `seg_format_options` (the
+options of each segment's demuxer) took `"format\_whitelist=sdp:protocol\_whitelist=rtp,udp"`,
+which carries neither word, passed this filter in both mirrors, and replaced
+both pinned lists in the segment's context; with the user's
+`extension_picky=0` beside it, a stream server answering an HLS segment with
+an SDP body made the player listen on 0.0.0.0 -- on sec-int 124589e and,
+past the filter, on the format-listed tree before this word (measured
+inside `unshare -rn`). So the key is refused whole, and the read-back
+counts it (`DEMUXER_FORMAT_FORBIDDEN`) and `secure_player` removes it before
+every load, the way it removes a TLS key, because a plain mpv.conf line
+lands in the same map (`tls-scenario.sh --windowless` W24). The search for
+another such key over every demuxer and protocol the list admits
+(`ffmpeg -h demuxer=X`, `-h protocol=X`, `-h full` for the context's own):
+the only other dictionary-typed option is mov's `decryption_keys`, a map of
+key identifiers to keys, which carries no option name.
+**[2026-10-29, rc-p1c: the read-back's exact keys had the same blind spot one
+layer down.]** The token filter matches a WORD; the read-back removes exact
+KEYS, and `DEMUXER_TLS_FORBIDDEN` holds `listen` and no other listener key.
+The rtsp demuxer's `listen_timeout` implies its listen flag (a value above 0
+sets it in `rtsp_read_header`), and it is the key that flag cannot bind
+without (the listener's tcp timeout is the value times 1000; the default -1
+is out of tcp's range, so `rtsp_flags=listen` alone fails to open). A token
+naming it is refused by the word `listen`, but a plain mpv.conf
+`demuxer-lavf-o=listen_timeout=5` reached the map, and an rtsp channel then
+LISTENED on its URL's host and port -- measured inside `unshare -rn` on
+sec-int 124589e and on lane-p1c, by mpv.conf, with `rtsp_flags=listen,
+listen_timeout=0`, and on an adopted pre-pin player; the URL's host is the
+provider's, so it binds where that name resolves to this machine. The key is
+now in `DEMUXER_FORMAT_FORBIDDEN` (`removed` in the fixture's ffmpegFormat):
+counted by the read-back and removed before every load, after which the same
+three bound nothing and an rtsp channel with the user's other rtsp key
+played. The search over the admitted demuxers' and protocols' options for
+another key that turns the client into a listener: `listen` (http, tcp,
+tls: removed already), rtsp's `rtsp_flags` (its listen bit cannot open
+without this key) and `listen_timeout`; none other.
+
 **What else is reserved** (each reason in the fixture): `--stream-dump` and
 `--o` (the stream to a file, `--stream-record`'s class), `--watch-history-path`,
 `--ao-pcm-file` and `--vo-image-outdir` (the stream's decoded audio or every
@@ -1463,6 +1531,23 @@ shell's own copy of that line is redacted (`Model.pushPlayerLog`); the
 console's is mpv's. Levers, none taken: `--load-console=no` (the owner kept
 the console), `--msg-level=stream=fatal` (also silences the line the shell's
 failure tail uses), or living with it as a user action on the user's screen.
+**[2026-10-29, lane-p1c: the owner's decision is to turn the console off,
+`--load-console=no` in the pin block (the table above has the
+measurement).]** Two corrections to the paragraph. Under `--idle=once` a
+load that fails ends the player, so the line that sits in the console's
+queue is one logged while a channel PLAYS -- an HLS key that will not open
+(`hls: Unable to open key file <URL>` at error level), a segment refused by
+hls's extension check (`URL <URL> is not in allowed_segment_extensions`) --
+which is what W23 drives. And with the console gone, commands.lua stays
+loaded (`--load-commands` is the owner's to keep) and still asks mpv to queue
+the log for it, silently, but it hands the queue to no one: its prompt opens
+through the console, so the key that would open it reaches a script that is
+not there, nothing is drawn, the queue is never delivered (measured: no
+command the player is told to run carries the URL), and the key adds no
+error line of its own to what the shell reads. The shell's failure tail is
+unchanged: mpv sends the same error-level line to a client that asked for
+error-level messages, and the shell redacts it (`Model.pushPlayerLog`; W23
+reads the line and `redact_urls` of it).
 
 **An adopted player.** A player launched by 0.15.0 or earlier holds none of
 the pin block. Over IPC the helper migrates what can be migrated and refuses
@@ -1518,6 +1603,132 @@ warning (D-SINK-59); a player started by an earlier version whose
 `reset-on-next-file` is set, or whose mpv.conf has a per-file profile that
 touches any pinned option, is stopped on the first probe instead of migrated
 (press Enter for a fresh player).
+**[2026-10-29, lane-p1c.]** And: the console is gone from the player (the
+`` ` `` key and `script-binding console/enable` do nothing); `--prefetch-playlist`,
+`--load-console` and its alias are refused by the footer line, as is a
+`--demuxer-lavf-o` token naming a format list or hls's `seg_format_options`;
+a channel whose server answers with a format the player does not take (4.12.2)
+fails with the sentence above; and a player started by an earlier version is
+given the format list and loses a `seg_format_options` key on its first
+probe, which is the rebuffer 4.5.1 already describes.
+
+### 4.12.2 The demuxers that open what a stream server names (2026-10-29, lane-p1c, D-SINK-62)
+
+**What was wrong.** D-SINK-55's protocol list governs what libavformat may
+open BELOW a demuxer, and that list has to hold tcp and tls, because http and
+https run over them. So a demuxer that opens the URLs its CONTENT names opens
+`tcp://0.0.0.0:P?listen=1` as readily as a segment. rc-p1b found the one
+that does it from a stream server's answer: FFmpeg's IMF demuxer, chosen by
+the probe at score 100 from the bytes `<CompositionPlaylist` and
+`ContentTitle>` (as `text/xml`, and as `video/mp2t` under `.ts`), fetches
+`ASSETMAP.xml` beside the CPL and opens every asset URI in it -- a
+`tcp://`, `tls://` or `listen=2` asset bound 0.0.0.0 -- and an ffconcat file
+naming the CPL by a relative name reaches it too. Measured again on sec-int
+124589e through its own `apply_channel` inside `unshare -rn`: all four IMF
+forms bound, the relative ffconcat bound, and with the user's `safe=0` past
+the filter an absolute ffconcat entry bound; a forced
+`--demuxer-lavf-format=concat` bound as well.
+
+**The lever: FFmpeg's `format_whitelist`, as the player's last word.** It is
+an AVFormatContext option, so it travels in `demuxer-lavf-o` beside the
+protocol list (`--demuxer-lavf-o-append=format_whitelist=...` in the pin
+block). FFmpeg checks it in `avformat_open_input` against the format the
+probe CHOSE -- or the one a caller forced -- after the probe and before the
+demuxer reads a byte (`Format not on whitelist`), so a format off the list
+fails closed whatever its score; and `ff_copy_whiteblacklists` copies it into
+every nested context (read in the n9.0.1 source: hls's segment and
+subtitle contexts, dash's representations, concat's and imf's children,
+vobsub's, avi's GAB2 subtitles, rtsp's asf and RealMedia payloads; imf then
+narrows its own children to `mxf`). Measured that it binds at every depth:
+with the list less one nested format, the stream that needs it fails --
+HLS over TS without `mpegts`, fMP4 HLS and DASH without `mov`, packed-audio
+HLS without `aac`, `ac3` or `eac3`, and an HLS channel with a WebVTT
+rendition without `webvtt` (the whole channel fails, not only the subtitle
+track, which is why `webvtt` is on the list); an rtsp channel without
+`rtsp`, its loadfile's per-file protocol widening included. The list is read
+back exactly before every load and appended on adoption, and a token naming
+`format_whitelist` or `format_blacklist` is refused (4.12.1).
+
+**The list, from what IPTV carries:** `hls,dash,mpegts,mov,matroska,flv,
+live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt`. `mov` matches FFmpeg's
+`mov,mp4,m4a,3gp,3g2,mj2` and `matroska` its `matroska,webm` (FFmpeg
+compares each name of a list with each). Three are beyond the brief's list,
+each for a measured reason: `dash` (a DASH channel played on sec-int, and
+IPTV lists carry them; bounded exactly as hls is, below), `live_flv` (FFmpeg
+picks it over `flv` for an FLV whose metadata says NGINX RTMP, which is what
+an nginx HTTP-FLV live channel serves -- measured with such a file) and
+`flac` (an internet-radio form; it opens nothing). Off it, and a cost:
+raw H.264 or HEVC, MJPEG and multipart MJPEG (an IP camera's), AVI, MPEG-PS,
+WAV and RealMedia over rtsp. HLS needs no raw-video demuxer: its segments are
+TS, fMP4 or packed audio (measured: an HLS channel of each plays), and the
+timed-metadata path is `hls` itself (it reads a packed segment's ID3
+timestamp before handing the rest to `aac`, `ac3` or `eac3`) and `mpegts`
+(an ID3 stream inside TS is one of its streams).
+
+**The rule-15 search.** Every demuxer this FFmpeg lists (`ffmpeg -demuxers`:
+377, eleven of them devices) that opens another URL or file from what it
+reads, found by searching the n9.0.1 source for `io_open`,
+`avformat_open_input`, `avformat_alloc_context`, `ffurl_open_whitelist` and
+`av_probe_input_format` in libavformat (read-only, on github.com), with
+`mov.c`, which is too large for that search, read by hand:
+
+| Demuxer | Opens what | Here |
+|---|---|---|
+| imf | ASSETMAP.xml beside the CPL, then every asset URI it names, any scheme the protocol list admits | excluded (W19) |
+| concat | every file its ffconcat list names: relative names on its own host under `safe=1`, any URL under `safe=0` | excluded (W20, W25) |
+| sdp | rtp/udp at the addresses and ports the SDP names | excluded, and the protocol list has no rtp (W12) |
+| rtp | its own URL (probed by the name `rtp:` only), then rtp built from the packets | excluded; an `rtp://` channel is played by mpv's stream layer as `mpegts` (measured) |
+| sap | the SAP multicast address, then an sdp child (probed by the name `sap:` only; read in the source) | excluded |
+| vobsub | its own URL with `.sub` for its extension, same host | excluded (sec-int fetched the `.sub` of an index a server answered with; the tree fetches nothing past the index) |
+| mlv | up to 100 siblings of its own URL, same host (read) | excluded |
+| image2 | numbered siblings of its own URL (probed by a `%d` in the name) | excluded; not reached through mpv's probe on sec-int either (measured) |
+| dvdvideo | a DVD structure at its own path; forced only (read) | excluded |
+| avisynth | imports its own path as an AviSynth script (extension `avs`); the library is not installed here | excluded |
+| vapoursynth | evaluates the stream as a VapourSynth Python script; forced only (its probe answers 0; read); the library IS installed here | excluded, which also refuses a user's `--demuxer-lavf-format=vapoursynth` |
+| lavfi (a device) | a filter graph whose movie sources open any URL; forced only (read) | excluded |
+| the other devices | local capture; forced only | excluded |
+| hls | playlists, variants, keys, init sections and segments, over http(s), data and crypto only (its own scheme check; `file` is not on the protocol list); each segment through a child with the lists copied and an opener that refuses every further open, and an extension check (`extension_picky`) | admitted, bounded so; the LAN reach of a segment is 19.2's residual |
+| dash | the manifest's segments over http(s) only (its own scheme check); each representation through a child with the lists copied and an opener that refuses every further open | admitted, bounded so (W21: a tcp BaseURL bound nothing, on sec-int too) |
+| rtsp | its own server's control connection and redirects (rtsp only), RTP over udp only when the user chose that transport (D-SINK-53's per-file widening); asf (WMS) and RealMedia payloads through children read from memory (read) | admitted (measured: over TCP and with the user's udp); RealMedia over rtsp would fail, `rdt` being off the list (read, not measured) |
+| mov | external data references: off by default (`enable_drefs`), an absolute one only with `use_absolute_path` too, and a dref path has every `:` turned into `/` as it is read, so it is a local path | admitted; with both user keys past the filter the absolute reference was opened as `file`, which the protocol list refuses (measured) |
+| avi | GAB2 subtitles through an srt or ass child read from memory (read) | excluded (not IPTV; opens nothing) |
+| every other demuxer | nothing beyond its own stream, by the search | excluded unless listed; the listed ones open nothing |
+
+**Every admitted channel kind, played through the tree's own
+`apply_channel`** (mpv 0.41.0 / FFmpeg n9.0.1, windowless, inside `unshare
+-rn` with multicast routed onto lo, crash journal 81 before and after every
+run; the lane's format rig): http and https TS, an HLS master and variant
+over TS (http and https), fMP4 HLS, packed-audio HLS of AAC, AC-3 and E-AC-3
+with ID3 timestamps, HLS with a WebVTT rendition (the subtitle track there),
+progressive MP4, MKV, FLV over http, an nginx-style live FLV, FLV over rtmp
+(an `ffmpeg -listen` server), an Icecast-style MP3 and AAC stream, Ogg
+Vorbis and Opus, FLAC, ASF over http, DASH, rtsp over TCP, srt as caller,
+udp and rtp multicast: each played (`time-pos` moved), as the same format
+FFmpeg chose on sec-int. rtmps, mms and mmsh reached their servers as before
+(no server of theirs plays here), and the user's `--rtsp-transport=udp` bound
+its RTP/RTCP pair, as asked.
+
+**Every route refused** (nothing listens, on the tree; on sec-int as shown):
+IMF with tcp, tls and listen=2 assets and as `.ts` (sec-int: all four bound),
+and with an http asset on another port (sec-int: fetched there); ffconcat
+relative to the CPL (bound), absolute under the user's `safe=0` (bound), and
+naming another port (fetched under `safe=0`); a forced concat (bound); phase
+1b's twenty SDP answers (five `c=` lines under four servings; sec-int: none
+bound already, the protocol list; now also refused as a format); DASH with a
+tcp, tls or udp BaseURL (none bound on either); an absolute mov reference,
+with and without the user's two keys; an image2 pattern; a vobsub index
+(sec-int fetched the `.sub`); and rc-p1b's nested-playlist battery -- M3U as
+.m3u and as .ts, m3u8 without tags, a bare list, PLS, ASX, CUE, EDL as .edl
+and as .ts, a redirect to an M3U, and an HLS segment that is itself an HLS
+playlist, an ffconcat list or an IMF CPL. A refused format ends the load
+like any unrecognised one, `unrecognized file format`, which the shell
+already words (`Model.unopenedFormatSentence`).
+
+**What it costs.** A channel whose server answers with a format off the list
+stops playing and reads "The address sent a playlist file or a web page,
+which the player does not open": raw elementary video, an MJPEG camera, an
+AVI or MPEG-PS file, a WAV stream, RealMedia over rtsp. And a
+`--demuxer-lavf-format` naming such a format fails the same way.
 
 ### 4.13 Health check
 
@@ -1614,7 +1825,7 @@ and not the runs described in this paragraph.
 | # | Layer | Job | Measured basis |
 |---|---|---|---|
 | 8 | The trailing pin block (4.12.1): `--stream-lavf-o-clr`, `--demuxer-lavf-propagate-opts=yes`, `--demuxer-lavf-o-append=tls_verify=1`, `--load-auto-profiles=no` and (2026-10-29, the recheck) `--player-operation-mode=cplayer` among the pins, before the final `--tls-verify=yes` | Makes the libavformat lists COMMAND-LINE-SET, so no per-file profile replaces them, gives FFmpeg's own `tls_verify` the last word for every segment open, and keeps auto_profiles.lua from ever loading and the `[pseudo-gui]` profile from applying after the command line | Five ways per pin -- a contrary token, a plain mpv.conf line, a `[protocol.*]` profile, a profile-cond profile, a named profile: on dev 713afbf the attacker got the GET through `demuxer-lavf-o` all five ways, through `stream-lavf-o` by the two per-file profiles and through `tls-verify` by the profile-cond one; on the tree, 0 GETs in all fifteen |
-| 9 | The third reading over IPC, `unpinned`, before every load and on adoption: the TLS entries of `demuxer-lavf-o` (removed by key), `load-auto-profiles` (set off), and the per-file profiles that could set a loose TLS option after the read-back (not fixable: the load is refused). **[2026-10-29, lane-p1b: and the demuxer's protocol whitelist, which must read exactly the pinned list (appended when absent, D-SINK-55); `reset-on-next-file`, which must be empty and is never written (D-SINK-60: mpv restores what it backed up at the playing file's start inside the next load); and per-file profiles touching ANY pinned option]** | `verifyhost=<the attacker's own name>` in `demuxer-lavf-o` is a key the trailing pin cannot outvote, and a player started without the pins has no command-line-set lists | `--demuxer-lavf-o=verifyhost=evil.test` past the filter, with the tls_verify pin in place: on dev the attacker's certificate for its own name was accepted and its segment played; on the tree the key is removed before the load and the reopen is refused |
+| 9 | The third reading over IPC, `unpinned`, before every load and on adoption: the TLS entries of `demuxer-lavf-o` (removed by key), `load-auto-profiles` (set off), and the per-file profiles that could set a loose TLS option after the read-back (not fixable: the load is refused). **[2026-10-29, lane-p1b: and the demuxer's protocol whitelist, which must read exactly the pinned list (appended when absent, D-SINK-55); `reset-on-next-file`, which must be empty and is never written (D-SINK-60: mpv restores what it backed up at the playing file's start inside the next load); and per-file profiles touching ANY pinned option]** **[lane-p1c: and the demuxer's format list, which must read exactly the pinned list (D-SINK-62), and no `seg_format_options` key (D-SINK-64), removed before the load]** | `verifyhost=<the attacker's own name>` in `demuxer-lavf-o` is a key the trailing pin cannot outvote, and a player started without the pins has no command-line-set lists | `--demuxer-lavf-o=verifyhost=evil.test` past the filter, with the tls_verify pin in place: on dev the attacker's certificate for its own name was accepted and its segment played; on the tree the key is removed before the load and the reopen is refused |
 
 Layers 1 to 5 are blind to a player this shell did not launch, every one of
 them, and that blindness is what D-SINK-16 is: the fix was complete for new
@@ -2619,6 +2830,15 @@ W15). And D-SINK-55, which rc-dest found the gate's form check could not see
 is closed by the pin block's demuxer `protocol_whitelist` (4.12.1, W12).
 Below, 19.2 as written; the brackets in it say what moved.
 
+**[2026-10-29, lane-p1c: two more.]** (1) D-SINK-57's scope (the lead's
+decision): a LOOPBACK source's channel whose literal host is loopback must be
+on the source's own port -- refused and counted at parse time, refused at play
+time -- while its LAN channels still pass (ARCHITECTURE.md section 6 has the
+rule and its cost). (2) The demuxer's format list (4.12.2, D-SINK-62) closes
+what the nested-route paragraph below called closed and was not: a stream
+server answering with an IMF composition playlist, or an ffconcat file naming
+one, made FFmpeg open listeners the protocol list had to admit.
+
 ### 19.2 What the gate cannot reach, stated exactly
 
 - **A NAME that resolves to a LAN address.** mpv resolves it, not the
@@ -2678,7 +2898,16 @@ Below, 19.2 as written; the brackets in it say what moved.
   load. What stays open of this item: nothing of the nested route. The
   FFmpeg-redirect residual above is unchanged: a per-file option belongs to
   the file, so FFmpeg's own 302 still carries the channel's headers to the
-  host it names.]**
+  host it names.]** **[2026-10-29, lane-p1c: "nothing of the nested route"
+  was wrong when written. mpv's playlist demuxer was closed; FFmpeg's own
+  were not -- its IMF demuxer opens the asset URIs a CPL's ASSETMAP names,
+  and its concat demuxer the files an ffconcat list names, through the
+  protocol list D-SINK-55 pinned, which has to hold tcp (rc-p1b's recheck,
+  D-SINK-62: tcp, tls and listen=2 assets bound 0.0.0.0). Closed by the
+  demuxer's format list (4.12.2), measured with every route above refused
+  and every channel kind still playing; and mpv's prefetch handed an entry
+  the helper did not load the channel's per-file headers (D-SINK-63, pinned
+  off, 4.11).]**
 
 ### 19.3 The fixture
 

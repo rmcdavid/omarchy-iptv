@@ -219,6 +219,22 @@
 # W12, W14, W15, W16, W17 and W18; W13 is green there too -- the old global
 # header properties were exact as well -- and holds the per-file form to it.
 #
+# lane-p1c (2026-10-29) adds W19..W25 and C4..C5 on the same lab server, on
+# ports 8796-8807 inside the namespace: an IMF composition playlist whose
+# assets are tcp, tls and listen=2 listeners, also served as .ts (D-SINK-62);
+# an ffconcat file naming that CPL, and one naming a listener under the
+# user's safe=0; a DASH BaseURL that is a listener (green before the fix too,
+# kept observed); the user's prefetch-playlist by token, past the filter and
+# from mpv.conf (D-SINK-63); the console over an HLS key that 404s with its
+# URL logged at error level, a second client at trace level reading what the
+# player is told to draw (D-SINK-61); hls's seg_format_options with escapes
+# no word of the filter sees (D-SINK-64); a forced --demuxer-lavf-format;
+# and two controls that the format list keeps, a fragmented-MP4 HLS channel
+# with a WebVTT rendition and a DASH channel. W19..W21, W24 and W25 need
+# the namespace and are skipped without it. On the tree 32 passed, 0
+# failed; `--baseline 124589e` (sec-int before this lane) 26 passed, 6
+# failed: W19, W20, W22, W23, W24 and W25 red, W21 and every control green.
+#
 #   ./scripts/dev-harness/tls-scenario.sh --rig-only
 #   ./scripts/dev-harness/tls-scenario.sh --windowless [--baseline <ref>] [--pre-pin <ref>]
 #   ./scripts/dev-harness/tls-scenario.sh
@@ -474,7 +490,7 @@ if [[ $MODE == windowless ]]; then
     echo "== windowless rig inside unshare -rn (a private network namespace: loopback only)"
     OMARCHY_IPTV_RIG_NETNS=1 unshare -rn python3 -I "$ROOT/tests/tls_pins_rig.py" --tree "$PLUGIN_ROOT" --pre-pin "$PIN_DIR" --work "$WORK"
   else
-    echo "== windowless rig on the shared loopback: unshare -rn is refused here, so W11 and W12 are skipped (a baseline player would listen on this machine's interfaces)"
+    echo "== windowless rig on the shared loopback: unshare -rn is refused here, so W11, W12, W19, W20, W21, W24 and W25 are skipped (a baseline player would listen on this machine's interfaces)"
     python3 -I "$ROOT/tests/tls_pins_rig.py" --tree "$PLUGIN_ROOT" --pre-pin "$PIN_DIR" --work "$WORK"
   fi
   rig_rc=$?

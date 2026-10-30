@@ -911,6 +911,27 @@ reachable from a test. mpv's error TEXT for that case is not measured by anyone,
 so the stub injects `property unavailable` and the header says plainly that a
 caller must branch on `error != "success"` and not on those words.
 
+**[2026-10-29: what this paragraph describes is two days old.]** Since the
+pin block (D-SINK-43, D-SINK-44) the helper loads nothing until it has read,
+off the player, every other pin -- `demuxer-lavf-o` and its keys,
+`load-auto-profiles`, `reset-on-next-file`, `option-info/<opt>/set-from-commandline`
+for EVERY option the pin block holds, `profile-list` -- and the stub answers
+each the way mpv 0.41.0 did, from its own launch argv (the last token
+winning, `-clr`, `-append`, `-add`, `-remove`, `--no-`, an empty value as
+`yes`), with mpv's coercions and refusal strings. Those answers are held to
+nine transcripts measured on real mpv, windowless, and kept in
+`tests/fixtures/stub-mpv-ipc.json`: `--self-test` REPLAYS every step and
+requires mpv's reply, naming the few steps it does not model and why. The
+last two transcripts (lane-p1c, 2026-10-29) are a player launched with this
+tree's pin block -- the demuxer's format list, prefetch and the console off
+among the pins -- and one launched with sec-int 124589e's, and they cover
+drag-and-drop (a choice whose `no` reads False), input-commands and scripts
+(string lists, `-append` adding ONE item), load-scripts, prefetch-playlist,
+load-console and its alias, script-opts, and `player-operation-mode`, which
+is an option mpv has no property for. `tests/test_stub_mpv_pins.py` drives
+the shipping read-back against the stub over a real socket. The case count
+and the gate's floor are `STUB_TESTS_MIN` in `scripts/check.sh`.
+
 `rewind-scenario.sh` runs REAL mpv against a LOCAL live-like stream and
 drives the helper verb `player seek`, the service, the bar and the guide
 key `b` through the harness; the plan with every check named is
@@ -961,7 +982,7 @@ passes 20/20 on the changed stub.
 ### Logos: a header is not a size (D-LOGO-11)
 
 ```
-scripts/dev-harness/logo-scenario.sh check-tree            # no display, loopback only; run by check.sh
+scripts/dev-harness/logo-scenario.sh check-tree            # no display, a private network namespace of its own; run by check.sh
 scripts/dev-harness/logo-scenario.sh                       # the same checks, with a transcript, then the W segment under a nested cage
 scripts/dev-harness/logo-scenario.sh --baseline 159da94    # the red run: the shipped 0.13.3
 scripts/dev-harness/logo-scenario.sh live --tree "$cp"     # a PREPARED copy of the tree: how W2/W3/W5 and W1/W4/W6 were seen red
@@ -998,8 +1019,8 @@ tagged for A); the tag made `root.activeCacheDir` instead of
 `Model.logoDirFor(root.activeCacheDir)` -> **36 / 4**, W1, W3, W4 and W6 (a
 set tagged for the cache directory, which the guide never compares equal).
 The live floor is the check-tree floor plus the W lines, pinned in
-`scripts/qa-lib-test.sh`; `check.sh`'s preflight (check-tree, 33) is
-unchanged. Live needs `node`, `cage`, `quickshell` and `qs` as well
+`scripts/qa-lib-test.sh`; `check.sh`'s preflight was check-tree's 33 then,
+and is 35 since 2026-10-29 (C5 and C6, below). Live needs `node`, `cage`, `quickshell` and `qs` as well
 (`LOGO_CAGE_BIN` overrides the cage binary) and exits 77 without them.
 
 A provider logo's header chose how much memory the shell allocated: 304
@@ -1020,8 +1041,19 @@ process alone -- an rlimit rather than a service-manager memory scope,
 because the marketplace capability scan reads the scope tool's name as
 service management anywhere in a tracked file, and because under the rlimit
 an over-bound decode is a clean allocator refusal rather than a kill.
+**[2026-10-29: the provider is no longer on loopback.]** Since D-SINK-40 a
+logo never reaches an address on this machine or a local network, so the
+rig and the helper run inside `unshare -rn`, a network namespace of their
+own whose only interfaces are its loopback and a dummy one carrying
+11.0.0.1 -- an address the helper's real classifier calls global, which
+exists nowhere else -- and the certificate names that address. A second
+server on 127.0.0.1 inside the namespace serves one more logo, which the
+helper must refuse with no request reaching it (R2), so a namespace or a
+helper that stopped enforcing the policy is red in the same run. The rig
+refuses to run in the caller's own namespace, and a machine that cannot make
+one answers 77 with the reason.
 
-Thirty-two checks and the floor: the verb exists (V1); the rig's names are
+Thirty-four checks and the floor: the verb exists (V1); the rig's names are
 the helper's names (V2); the 512x512 logo is fetched, announced, written and
 reaches `Image.Ready` at 72 MB (C1, K1 -- the positive control, because a
 scenario where everything is refused passes against a helper that refuses
@@ -1034,13 +1066,19 @@ reviewer crafted against the parser: an EXIF thumbnail with its own 64x64
 SOF before the real 20000x20000 one, a 64x65535 column whose pixel count is
 UNDER the bound by 64, and a two-frame GIF whose second frame declares
 65500x65500 -- refetched once each (G1), refused under
-`reasons.logo_dimensions` with nothing on disk (F1, F2, R1..R3); the two
+`reasons.logo_dimensions` with nothing on disk (F1, F2, R1..R3); a PNG
+carrying iCCP, zTXt, iTXt and tEXt chunks, fetched (C5) and planted in the
+cache under a second name (C6), is announced and on disk in its canonical
+form, IHDR, IDAT and IEND with the provider's IDAT bytes unchanged
+(D-LOGO-13, read from the file; since 2026-10-29 -- before that no check
+here observed it, and a canonical_png that returned its input read 33
+passed, 0 failed); the two
 bounds are driven apart (E1, E2) and an unreadable header is refused rather
 than passed (E3); the summary carries both numbers (M1, M2); the refusal
 text names a host and no URL (T1, T2); and the 304-byte bomb never reaches
 the sink (K2, whose evidence line says which of `withheld-and-gone`,
 `withheld-but-file-survived` or `announced` it saw). On `--baseline 159da94`
-it reads 9 passed, 24 failed, and K2's red line carries `rc=0 peak_mb=839`:
+it reads 9 passed, 26 failed (24 before C5 and C6), and K2's red line carries `rc=0 peak_mb=839`:
 the finding, observed. check-tree never decodes a bomb, even capped; the
 840 MB arm is the baseline's, for a human.
 

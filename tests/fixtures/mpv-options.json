@@ -26,9 +26,9 @@
   "base": "set by the plugin BEFORE the user's tokens; a user token may override it"
  },
  "counts": {
-  "allowed": 825,
+  "allowed": 822,
   "base": 8,
-  "pinned": 21,
+  "pinned": 24,
   "reserved": 39,
   "warned": 6
  },
@@ -41,6 +41,8 @@
   "--load-auto-profiles=no",
   "--player-operation-mode=cplayer",
   "--load-select=no",
+  "--load-console=no",
+  "--prefetch-playlist=no",
   "--load-unsafe-playlists=no",
   "--save-watch-history=no",
   "--log-file=",
@@ -51,6 +53,7 @@
   "--stream-lavf-o-clr",
   "--demuxer-lavf-propagate-opts=yes",
   "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+  "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
   "--demuxer-lavf-o-append=tls_verify=1",
   "--tls-verify=yes"
  ],
@@ -62,7 +65,8 @@
    "helper; the pin block appends tls_verify=1). `forbidden`: must be absent (DEMUXER_TLS_FORBIDDEN).",
    "`allowed`: neither weakens the peer check. Every pinned or forbidden key must contain one of",
    "`words`, the substrings the token filter refuses (MPV_DEMUXER_TLS_WORDS in both mirrors).",
-   "2026-10-29 (lane-p1b, D-SINK-55): the words also hold the two format-context keys in `ffmpegFormat`."
+   "2026-10-29 (lane-p1b, D-SINK-55): the words also hold the two format-context keys in `ffmpegFormat`;",
+   "(lane-p1c, D-SINK-62 and D-SINK-64) and its format-list keys and the hls segment demuxer's options."
   ],
   "words": [
    "verify",
@@ -71,7 +75,10 @@
    "listen",
    "external_sock",
    "protocol_whitelist",
-   "protocol_blacklist"
+   "protocol_blacklist",
+   "format_whitelist",
+   "format_blacklist",
+   "seg_format_options"
   ],
   "options": {
    "listen": "forbidden",
@@ -1707,8 +1714,9 @@
   },
   "--load-console": {
    "type": "Flag",
-   "class": "allowed",
-   "why": "owner, 2026-10-29: stays on; the console forks only wl-paste on a user paste (read)"
+   "class": "pinned",
+   "pin": "--load-console=no",
+   "why": "D-SINK-61 (owner, 2026-10-29: turn the console off): commands.lua queues the log at the terminal's level for the console, which draws it when opened, and mpv logs a failed open or an HLS key that would not open with its whole URL (measured); pinned off, and unloaded on adoption"
   },
   "--load-context-menu": {
    "type": "Flag",
@@ -1718,7 +1726,7 @@
   "--load-osd-console": {
    "type": "alias",
    "alias": "--load-console",
-   "class": "allowed",
+   "class": "pinned",
    "why": "alias for --load-console: classified as its target"
   },
   "--load-positioning": {
@@ -2269,8 +2277,9 @@
   },
   "--prefetch-playlist": {
    "type": "Flag",
-   "class": "allowed",
-   "why": "the shell loads one entry at a time"
+   "class": "pinned",
+   "pin": "--prefetch-playlist=no",
+   "why": "D-SINK-63 (lane-p1c, 2026-10-29): a prefetched entry is opened while the playing file's per-file options are in force, so an entry the helper did not load was sent the channel's provider headers (measured); pinned off, and set off on adoption"
   },
   "--profile": {
    "type": "String list",
@@ -4063,15 +4072,26 @@
    "libavformat may open below the demuxer -- an HLS segment, a sniffed SDP's rtp. `pinned`: the pin block",
    "appends protocol_whitelist and the helper's read-back requires exactly MPV_PROTOCOL_WHITELIST;",
    "`forbidden`: refused in a token by the same words. Not FFmpeg TLS options, so the mpv option guard does",
-   "not list them; tests/test_mpv_options.py holds them to the helper."
+   "not list them; tests/test_mpv_options.py holds them to the helper.",
+   "2026-10-29 (lane-p1c): D-SINK-62's format_whitelist is pinned the same way (MPV_FORMAT_WHITELIST), and",
+   "`removed` (D-SINK-64) is refused in a token AND removed from the map before every load, the read-back",
+   "counting it (DEMUXER_FORMAT_FORBIDDEN in the helper). rc-p1c (2026-10-29): and the rtsp demuxer's listen_timeout."
   ],
   "options": {
    "protocol_whitelist": "pinned",
-   "protocol_blacklist": "forbidden"
+   "protocol_blacklist": "forbidden",
+   "format_whitelist": "pinned",
+   "format_blacklist": "forbidden",
+   "seg_format_options": "removed",
+   "listen_timeout": "removed"
   },
   "why": {
    "protocol_whitelist": "measured: an http(s) stream server answering with an SDP body made the player bind 0.0.0.0:P and P+1; with the pinned list it bound nothing and every admitted scheme played or reached its server",
-   "protocol_blacklist": "a user list of its own would sit beside the pinned whitelist; refused by the same words rather than reasoned about"
+   "protocol_blacklist": "a user list of its own would sit beside the pinned whitelist; refused by the same words rather than reasoned about",
+   "format_whitelist": "measured: a stream server answering with an IMF composition playlist, or an ffconcat file naming one, made the player bind 0.0.0.0 through the asset URIs; with the pinned list FFmpeg refused the format at the top level and in every nested context, and every admitted channel kind played",
+   "format_blacklist": "FFmpeg n9.0.1 has no such key; refused by the same words rather than reasoned about",
+   "seg_format_options": "the hls segment demuxer's options, a dictionary FFmpeg reads with its own escapes: format\\_whitelist inside it carries no word and replaced the pinned list in the segment's context (measured: with extension_picky=0 an SDP segment bound 0.0.0.0)",
+   "listen_timeout": "rc-p1c: the rtsp demuxer's listen_timeout implies its listen flag and is the key that flag cannot bind without; carries the word listen, so a token is refused, but an mpv.conf line reached the map and made an rtsp channel bind its URL's host and port (measured); removed before every load like the TLS listen key"
   }
  }
 }

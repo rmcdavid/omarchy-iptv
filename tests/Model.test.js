@@ -4749,7 +4749,7 @@ checkCall("buildMpvArgv user args come after every fixed option, and exactly the
   const lastFixed = argv.findIndex(t => t.indexOf("--icc-cache-dir=") === 0)
   return { found: user > 0, afterTheFixedOptions: user > lastFixed, tailIsThePins: JSON.stringify(argv.slice(user + 1)) === JSON.stringify(Model.mpvPinBlock(Model.playerDirs("/run/user/1000/omarchy-iptv/mpv.sock", STATE_DIR))) }
 }, { found: true, afterTheFixedOptions: true, tailIsThePins: true })
-check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--gpu-sw=yes", "--tls-verify=yes", "--watch-later-dir=/watch-later", "--load-scripts=no", "--scripts-clr", "--input-commands-clr", "--input-commands-append=keybind ctrl+v ignore", "--load-auto-profiles=no", "--player-operation-mode=cplayer", "--load-select=no", "--load-unsafe-playlists=no", "--save-watch-history=no", "--log-file=", "--reset-on-next-file-clr", "--osd-playlist-entry=title", "--drag-and-drop=no", "--script-opts-append=osc-title_mbtn_mid_command=ignore", "--stream-lavf-o-clr", "--demuxer-lavf-propagate-opts=yes", "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy", "--demuxer-lavf-o-append=tls_verify=1", "--tls-verify=yes"])
+check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--gpu-sw=yes", "--tls-verify=yes", "--watch-later-dir=/watch-later", "--load-scripts=no", "--scripts-clr", "--input-commands-clr", "--input-commands-append=keybind ctrl+v ignore", "--load-auto-profiles=no", "--player-operation-mode=cplayer", "--load-select=no", "--load-console=no", "--prefetch-playlist=no", "--load-unsafe-playlists=no", "--save-watch-history=no", "--log-file=", "--reset-on-next-file-clr", "--osd-playlist-entry=title", "--drag-and-drop=no", "--script-opts-append=osc-title_mbtn_mid_command=ignore", "--stream-lavf-o-clr", "--demuxer-lavf-propagate-opts=yes", "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy", "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt", "--demuxer-lavf-o-append=tls_verify=1", "--tls-verify=yes"])
 // D-PLY-27 (the owner's decision, 2026-10-26): the launch argv accepts a
 // software renderer, because mpv 0.41.0's VO probe aborts on any compositor
 // that serves no hardware GL or Vulkan context (measured 2026-10-25 in the
@@ -5556,7 +5556,9 @@ const RESERVED_ADDED = ["--log-file", "--dump-stats", "--stream-record", "--save
 // 54 the same day: --player-operation-mode, whose pseudo-gui applies the
 // user's [pseudo-gui] profile after the command line (recheck).
 // 55 the same day again: --drag-and-drop, pinned off (D-PLY-46).
-check("MPV_RESERVED holds exactly 55 entries", Object.keys(Model.MPV_RESERVED).length, 55)
+// 58 the same day (lane-p1c): --prefetch-playlist (D-SINK-63) and
+// --load-console with mpv's alias --load-osd-console (D-SINK-61), pinned off.
+check("MPV_RESERVED holds exactly 58 entries", Object.keys(Model.MPV_RESERVED).length, 58)
 // D-SINK-52 (owner, 2026-10-29: pin and refuse): a --script-opts token that
 // sets an OSC command or carries ${ is refused, by text, in this mirror as in
 // the helper; every other key, and PO-10's ytdl warning, stand.
@@ -5577,6 +5579,29 @@ check("D-PLY-46 / D-SINK-55: --drag-and-drop and a demuxer protocol whitelist or
   ["--demuxer-lavf-o=live_start_index=-1"])
 check("D-SINK-55: the model's whitelist is the pin block's and the helper's (the shared argv vectors pin the block)",
   Model.MPV_PIN_BLOCK.indexOf("--demuxer-lavf-o-append=protocol_whitelist=" + Model.MPV_PROTOCOL_WHITELIST) !== -1, true)
+// lane-p1c (2026-10-29). D-SINK-62: the pin block gives the demuxer a FORMAT
+// list too (an IMF answer made the player listen through the protocol list,
+// which must hold tcp), so a token naming it is refused like the protocol
+// list; D-SINK-64: hls's seg_format_options is a dictionary FFmpeg parses with
+// its own escapes, so `format\_whitelist` inside it carries no word -- the key
+// is refused whole. D-SINK-61 and D-SINK-63: --load-console (and mpv's alias)
+// and --prefetch-playlist are pinned off, so refused as tokens.
+check("D-SINK-62 / D-SINK-64: a demuxer format list, a format blacklist and the hls segment demuxer's options are refused in every spelling, the escaped one included; a demuxer workaround is kept",
+  Model.splitMpvArgs("--demuxer-lavf-o=format_whitelist=hls,imf --demuxer-lavf-o-append=format_blacklist=sdp " +
+    "--demuxer-lavf-o=extension_picky=0,seg_format_options=\"format\\_whitelist=sdp:protocol\\_whitelist=rtp,udp\" " +
+    "--demuxer-lavf-o-add=%18%seg_format_options=x --demuxer-lavf-o=live_start_index=-1").args,
+  ["--demuxer-lavf-o=live_start_index=-1"])
+check("D-SINK-61 / D-SINK-63: --load-console, its alias and --prefetch-playlist are refused in every spelling",
+  Model.splitMpvArgs("--load-console=yes --no-load-console --load-osd-console=yes --prefetch-playlist=yes " +
+    "--no-prefetch-playlist --load-commands=yes").args,
+  ["--load-commands=yes"])
+check("D-SINK-62: the model's format list is the pin block's, before the TLS keys' last word",
+  (() => {
+    const at = Model.MPV_PIN_BLOCK.indexOf("--demuxer-lavf-o-append=format_whitelist=" + Model.MPV_FORMAT_WHITELIST)
+    return [at !== -1, at < Model.MPV_PIN_BLOCK.indexOf("--demuxer-lavf-o-append=tls_verify=1"),
+            Model.MPV_PIN_BLOCK.indexOf("--load-console=no") !== -1, Model.MPV_PIN_BLOCK.indexOf("--prefetch-playlist=no") !== -1]
+  })(),
+  [true, true, true, true])
 check("M5-01: --demuxer-cache-unlink-files is reserved and --cache-on-disk is not",
   [Model.MPV_RESERVED["--demuxer-cache-unlink-files"], Model.MPV_RESERVED["--cache-on-disk"], Model.MPV_DISK_WARN["--cache-on-disk"]], [true, undefined, true])
 check("M5-01: every spelling of the unlink switch is rejected, and the disk cache itself is kept and warned",

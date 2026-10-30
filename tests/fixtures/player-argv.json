@@ -109,6 +109,8 @@
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
+        "--load-console=no",
+        "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
         "--log-file=",
@@ -119,6 +121,7 @@
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
         "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+        "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
       ]
@@ -163,6 +166,8 @@
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
+        "--load-console=no",
+        "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
         "--log-file=",
@@ -173,6 +178,7 @@
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
         "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+        "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
       ]
@@ -229,6 +235,8 @@
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
+        "--load-console=no",
+        "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
         "--log-file=",
@@ -239,6 +247,7 @@
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
         "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+        "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
       ]
@@ -298,6 +307,8 @@
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
+        "--load-console=no",
+        "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
         "--log-file=",
@@ -308,6 +319,7 @@
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
         "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+        "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
       ]
@@ -364,6 +376,8 @@
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
+        "--load-console=no",
+        "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
         "--log-file=",
@@ -374,6 +388,7 @@
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
         "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+        "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
       ]
@@ -441,6 +456,8 @@
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
+        "--load-console=no",
+        "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
         "--log-file=",
@@ -451,6 +468,7 @@
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
         "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+        "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
       ]
@@ -555,6 +573,8 @@
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
+        "--load-console=no",
+        "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
         "--log-file=",
@@ -565,6 +585,7 @@
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
         "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+        "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
       ]
@@ -623,6 +644,8 @@
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
+        "--load-console=no",
+        "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
         "--log-file=",
@@ -633,6 +656,7 @@
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
         "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+        "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
       ]
@@ -682,6 +706,8 @@
         "--load-auto-profiles=no",
         "--player-operation-mode=cplayer",
         "--load-select=no",
+        "--load-console=no",
+        "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
         "--log-file=",
@@ -692,6 +718,7 @@
         "--stream-lavf-o-clr",
         "--demuxer-lavf-propagate-opts=yes",
         "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+        "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
       ],
@@ -703,6 +730,71 @@
         "--drag-and-drop=auto",
         "--demuxer-lavf-o=protocol_whitelist=file,http",
         "--demuxer-lavf-o-append=protocol_blacklist=tcp"
+      ]
+    },
+    {
+      "name": "2026-10-29 (lane-p1c): --prefetch-playlist (D-SINK-63) and --load-console (D-SINK-61) are pinned off and refused; a demuxer format list (D-SINK-62) and the hls segment demuxer's own options, whose escapes no word reaches (D-SINK-64), are refused; a demuxer workaround is kept",
+      "socketPath": "/run/user/1000/omarchy-iptv/mpv.sock",
+      "stateDir": "/home/u/.local/state/omarchy-iptv",
+      "mpvArgs": [
+        "--prefetch-playlist=yes",
+        "--no-prefetch-playlist",
+        "--load-console=yes",
+        "--demuxer-lavf-o=format_whitelist=hls,imf",
+        "--demuxer-lavf-o-append=format_blacklist=sdp",
+        "--demuxer-lavf-o=extension_picky=0,seg_format_options=\"format\\_whitelist=sdp:protocol\\_whitelist=rtp,udp\"",
+        "--demuxer-lavf-o=live_start_index=-1"
+      ],
+      "argv": [
+        "mpv",
+        "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock",
+        "--wayland-app-id=omarchy-iptv",
+        "--force-window=immediate",
+        "--idle=once",
+        "--keep-open=no",
+        "--title=$>IPTV",
+        "--force-media-title=IPTV",
+        "--msg-level=all=error",
+        "--ytdl=no",
+        "--load-scripts=no",
+        "--screenshot-dir=/home/u/.local/state/omarchy-iptv/screenshots",
+        "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--gpu-shader-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
+        "--gpu-sw=yes",
+        "--tls-verify=yes",
+        "--demuxer-lavf-o=live_start_index=-1",
+        "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
+        "--load-scripts=no",
+        "--scripts-clr",
+        "--input-commands-clr",
+        "--input-commands-append=keybind ctrl+v ignore",
+        "--load-auto-profiles=no",
+        "--player-operation-mode=cplayer",
+        "--load-select=no",
+        "--load-console=no",
+        "--prefetch-playlist=no",
+        "--load-unsafe-playlists=no",
+        "--save-watch-history=no",
+        "--log-file=",
+        "--reset-on-next-file-clr",
+        "--osd-playlist-entry=title",
+        "--drag-and-drop=no",
+        "--script-opts-append=osc-title_mbtn_mid_command=ignore",
+        "--stream-lavf-o-clr",
+        "--demuxer-lavf-propagate-opts=yes",
+        "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+        "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
+        "--demuxer-lavf-o-append=tls_verify=1",
+        "--tls-verify=yes"
+      ],
+      "rejected": [
+        "--prefetch-playlist=yes",
+        "--no-prefetch-playlist",
+        "--load-console=yes",
+        "--demuxer-lavf-o=format_whitelist=hls,imf",
+        "--demuxer-lavf-o-append=format_blacklist=sdp",
+        "--demuxer-lavf-o=extension_picky=0,seg_format_options=\"format\\_whitelist=sdp:protocol\\_whitelist=rtp,udp\""
       ]
     }
   ],
@@ -994,6 +1086,8 @@
     "--input-ipc-client",
     "--input-ipc-server",
     "--load-auto-profiles",
+    "--load-console",
+    "--load-osd-console",
     "--load-scripts",
     "--load-select",
     "--load-unsafe-playlists",
@@ -1007,6 +1101,7 @@
     "--osd-status-msg",
     "--player-operation-mode",
     "--playlist",
+    "--prefetch-playlist",
     "--reset-on-next-file",
     "--save-position-on-quit",
     "--save-watch-history",

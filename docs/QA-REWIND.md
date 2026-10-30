@@ -244,6 +244,17 @@ live in `scripts/check.sh` as `STUB_TESTS_MIN`; they have moved three times
 in two days, so they are not copied here. The six mutations in the table
 above were run against the file as it stood at 14 cases.
 
+**[2026-10-29: what is true of the counts now.]** The "Ran 14" above is the
+stub as this plan measured it, and it is not today's: the stub has 43 cases
+(16, 17 and 19 with the ordering and broadcast rounds, 26 with the two
+TLS properties of D-SINK-16 and 28 by the round after, 38 with the pin read-back of D-SINK-43/44 and
+the replay of the measured mpv transcripts, 43 since lane-p1c taught it every
+option the pin block holds). Every case was seen red by a mutation of the
+rule it names -- the six above at 14, the later ones in the round that added
+them (docs/QA-RESULTS.md) -- and `qa-player-scenarios.sh run cold --apply`
+reads 20 pass, 0 fail on today's tree and stub, and 10 pass, 10 fail on
+a939fd7, the documented discriminators.
+
 ## 6. The run on 2d7df1f plus this lane's files (red, as required)
 
 The runs on the integrated tree -- 72/7 on the first, the two defects that

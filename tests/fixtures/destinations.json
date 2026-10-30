@@ -1,5 +1,5 @@
 {
- "about": "D-SINK-40, D-SINK-41, D-SINK-42 (2026-10-29): where provider data may send this machine. One file, two implementations (CLAUDE.md: a rule in two languages gets one shared fixture). `hosts`: every spelling of a URL host, its class (bin/helper 01-core.py host_class / Model.hostClass; one of `classes`, or \"\" for a name only a lookup can classify) and its key (host_key / Model.hostKey: what \"the same host\" compares) -- run by tests/test_destinations.py and tests/Model.test.js. `streams`: the helper's stream gate (stream_listen_refusal and is_stream_url; the model has none) -- the python suite. `streamHosts`: the helper's parse-time host rule for a channel URL against the playlist it came from (stream_host_refused; `source` is playlist_source's shape) -- the python suite. `hints`: the model's guide-hint verdict (Model.epgHintVerdict, with the active playlist's URL) -- the node suite; the helper's connect-time check is the binding layer behind it and is observed by tests/test_destinations.py against 127.0.0.1 servers. `refusals`: the reply the real helper gives for a redirect into a local address (tests/test_destinations.py composes it from a live run and compares), and the sentence the shell shows for it (Model.statusReason; Model.failureFromHost keeps the host) -- both suites. `env` and `destinationRules` are the names and the cache version the shell and the helper share. D-SINK-57 (owner, 2026-10-29): on LOOPBACK the playlist's own host is host AND port. `ownHosts`: own_host_match / Model.ownHostMatch, a host at a port against the playlist's {host key, port, loopback} -- both suites. `urlPorts`: url_port / Model.urlPortOf, a URL's port or its scheme's default (http 80 = no port) -- both suites. `streamHosts` sources carry `port` and `loopback` (playlist_source's shape) and `hints` carry loopback rows with ports.",
+ "about": "D-SINK-40, D-SINK-41, D-SINK-42 (2026-10-29): where provider data may send this machine. One file, two implementations (CLAUDE.md: a rule in two languages gets one shared fixture). `hosts`: every spelling of a URL host, its class (bin/helper 01-core.py host_class / Model.hostClass; one of `classes`, or \"\" for a name only a lookup can classify) and its key (host_key / Model.hostKey: what \"the same host\" compares) -- run by tests/test_destinations.py and tests/Model.test.js. `streams`: the helper's stream gate (stream_listen_refusal and is_stream_url; the model has none) -- the python suite. `streamHosts`: the helper's parse-time host rule for a channel URL against the playlist it came from (stream_host_refused; `source` is playlist_source's shape) -- the python suite. `hints`: the model's guide-hint verdict (Model.epgHintVerdict, with the active playlist's URL) -- the node suite; the helper's connect-time check is the binding layer behind it and is observed by tests/test_destinations.py against 127.0.0.1 servers. `refusals`: the reply the real helper gives for a redirect into a local address (tests/test_destinations.py composes it from a live run and compares), and the sentence the shell shows for it (Model.statusReason; Model.failureFromHost keeps the host) -- both suites. `env` and `destinationRules` are the names and the cache version the shell and the helper share. D-SINK-57 (owner, 2026-10-29): on LOOPBACK the playlist's own host is host AND port. `ownHosts`: own_host_match / Model.ownHostMatch, a host at a port against the playlist's {host key, port, loopback} -- both suites. `urlPorts`: url_port / Model.urlPortOf, a URL's port or its scheme's default (http 80 = no port) -- both suites. `streamHosts` sources carry `port` and `loopback` (playlist_source's shape) and `hints` carry loopback rows with ports. D-SINK-57's scope (the lead, 2026-10-29, after the owner's \"on this machine, only the relay's own port is the playlist's host\"): a LOOPBACK source is a local source, whose LAN channels pass, but its channel whose literal host is loopback must be on the source's own port (any loopback spelling); another port, or a source that records none, is refused at parse time (`reason` `port`, counted apart) and at play time. rc-p1c (2026-10-29): an unspecified literal (0.0.0.0, `::`) is this machine to a connect, so under a loopback source it is held to the source's port the same way.",
  "classes": [
   "global",
   "loopback",
@@ -904,7 +904,216 @@
     "local": false
    },
    "refused": false
-  }
+  },
+   {
+    "url": "http://127.0.0.1:34400/stream/1",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": false,
+    "reason": ""
+   },
+   {
+    "url": "http://127.0.0.1:631/admin",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": true,
+    "reason": "port"
+   },
+   {
+    "url": "http://127.0.0.1/x",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": true,
+    "reason": "port"
+   },
+   {
+    "url": "rtsp://127.0.0.1/live",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": true,
+    "reason": "port"
+   },
+   {
+    "url": "http://[::1]:631/x",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": true,
+    "reason": "port"
+   },
+   {
+    "url": "http://localhost:34400/stream/2",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": false,
+    "reason": ""
+   },
+   {
+    "url": "http://localhost:1/x",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": true,
+    "reason": "port"
+   },
+   {
+    "url": "srt://127.0.0.1:9000",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": true,
+    "reason": "port"
+   },
+   {
+    "url": "http://192.168.1.20:5004/auto/v1",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": false,
+    "reason": ""
+   },
+   {
+    "url": "http://10.0.0.5:631/x",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": false,
+    "reason": ""
+   },
+   {
+    "url": "http://stream.example.test/x",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": false,
+    "reason": ""
+   },
+   {
+    "url": "http://127.0.0.1:34400/stream/1",
+    "source": {
+     "host": "127.0.0.1",
+     "port": null,
+     "loopback": true,
+     "local": true
+    },
+    "refused": true,
+    "reason": "port"
+   },
+   {
+    "url": "http://192.168.1.20:5004/auto/v1",
+    "source": {
+     "host": "127.0.0.1",
+     "port": null,
+     "loopback": true,
+     "local": true
+    },
+    "refused": false,
+    "reason": ""
+   },
+   {
+    "url": "http://0.0.0.0:631/admin",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": true,
+    "reason": "port"
+   },
+   {
+    "url": "http://[::]:631/admin",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": true,
+    "reason": "port"
+   },
+   {
+    "url": "rtsp://0.0.0.0/live",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": true,
+    "reason": "port"
+   },
+   {
+    "url": "http://0.0.0.0:34400/stream/3",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": false,
+    "reason": ""
+   },
+   {
+    "url": "http://127.0.0.1:631x/x",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": true,
+    "reason": "port"
+   },
+   {
+    "url": "srt://127.0.0.1",
+    "source": {
+     "host": "127.0.0.1",
+     "port": 34400,
+     "loopback": true,
+     "local": true
+    },
+    "refused": true,
+    "reason": "port"
+   }
  ],
  "hints": [
   {

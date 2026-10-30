@@ -92,6 +92,36 @@ is on the namespace's only interface:
       port): the playlist verb keeps its channel's Cookie, the guide hint on
       that port is fetched, and the channel plays with the Cookie
 
+lane-p1c (2026-10-29) adds, on the same lab server and, for the listener
+checks, inside the same `unshare -rn`:
+  W19 a channel whose server answers with an IMF composition playlist whose
+      ASSETMAP names `tcp://0.0.0.0:P?listen=1`, its tls and listen=2 forms,
+      and the same CPL served as video/mp2t under .ts (D-SINK-62): nothing
+      listens and the ASSETMAP is never fetched
+  W20 an ffconcat file naming the CPL by a relative name, and one naming a
+      tcp listener with the user's `safe=0` past the filter: nothing listens
+  W21 a DASH manifest whose BaseURL is a tcp listener: nothing listens (dash
+      opens http(s) only; green before the fix too, kept observed)
+  W22 the user's `--prefetch-playlist=yes`, refused as a token, then past the
+      filter and as an mpv.conf line (D-SINK-63): an entry appended while the
+      channel plays is fetched without the channel's provider header
+  W23 an HLS key that 404s while the channel plays logs its whole URL at error
+      level; the console key and both console bindings then draw nothing that
+      carries it (D-SINK-61: no console), and the same error line still
+      reaches a client that asked for error-level messages, which is what the
+      shell's own redacted failure tail reads
+  W24 hls's `seg_format_options` carrying `format\\_whitelist` and
+      `protocol\\_whitelist` (escapes no word of the filter sees) beside
+      `extension_picky=0`, past the filter, over an HLS segment that answers
+      with an SDP body (D-SINK-64): refused as a token, and past the filter
+      nothing listens
+  W25 `--demuxer-lavf-format=concat` past the filter over an ffconcat file
+      naming the CPL: the forced format is refused like a sniffed one
+  C4  a fragmented-MP4 HLS channel with a WebVTT rendition plays and has its
+      subtitle track (the format list reaches nested contexts and keeps what
+      HLS needs)
+  C5  a DASH channel plays (the same, for DASH's nested demuxer)
+
 usage: tls_pins_rig.py --tree DIR [--pre-pin DIR] --work DIR
 Exit 0 green, 1 red, 77 when mpv, ffmpeg or openssl is missing. Stdlib only.
 """
@@ -112,6 +142,34 @@ import time
 PORTS = {"provider": 8780, "attacker": 8781, "hlsok": 8782, "alt": 8783, "plain": 8784, "lab": 8785}
 # W11's nested entries name these; nothing may ever listen on them.
 NEST_SRT, NEST_RTP, SDP_RTP = 8790, 8792, 8794
+# lane-p1c's listeners (W19-W21, W24, W25): nothing may ever listen on them.
+IMF_TCP, IMF_TLS, IMF_LISTEN2, IMF_TS, CC_REL, CC_ABS, DASH_BASE, SEG_SDP, FORCED = (
+    8796, 8797, 8798, 8799, 8800, 8801, 8802, 8804, 8806)
+CPL = ('<?xml version="1.0" encoding="UTF-8" standalone="no" ?>\n'
+       '<CompositionPlaylist xmlns="http://www.smpte-ra.org/schemas/2067-3/2016" '
+       'xmlns:cc="http://www.smpte-ra.org/schemas/2067-2/2016">\n'
+       '<Id>urn:uuid:8713c020-2489-45f5-a9f7-87be539e20b5</Id><IssueDate>2021-07-13T17:06:22Z</IssueDate>'
+       '<Creator>t</Creator><ContentTitle>Hello</ContentTitle><EditRate>24 1</EditRate>\n'
+       '<SegmentList><Segment><Id>urn:uuid:81fed4e5-9722-400a-b9d1-7f2bd21df4b6</Id><SequenceList>'
+       '<cc:MainImageSequence><Id>urn:uuid:6ae100b0-92d1-41be-9321-85e0933dfc42</Id>'
+       '<TrackId>urn:uuid:e8ef9653-565c-479c-8039-82d4547973c5</TrackId><ResourceList>'
+       '<Resource xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance" xsi:type="TrackFileResourceType">'
+       '<Id>urn:uuid:7be07495-1aaa-4a69-8b92-3ec162122b34</Id><EditRate>24 1</EditRate>'
+       '<IntrinsicDuration>24</IntrinsicDuration><SourceDuration>24</SourceDuration><RepeatCount>1</RepeatCount>'
+       '<TrackFileId>urn:uuid:00000000-0000-0000-0000-000000000001</TrackFileId></Resource></ResourceList>'
+       '</cc:MainImageSequence></SequenceList></Segment></SegmentList></CompositionPlaylist>\n')
+
+
+def assetmap(uri: str) -> str:
+    return ('<?xml version="1.0" encoding="UTF-8"?>\n<AssetMap xmlns="http://www.smpte-ra.org/schemas/429-9/2007/AM">'
+            '<Id>urn:uuid:68d9f591-8191-46b5-38b4-affb87a14132</Id><AssetList><Asset>'
+            '<Id>urn:uuid:00000000-0000-0000-0000-000000000001</Id><ChunkList><Chunk><Path>%s</Path></Chunk></ChunkList>'
+            '</Asset></AssetList></AssetMap>\n' % uri.replace("&", "&amp;"))
+
+
+def listener(port: int, proto: str = "tcp", form: str = "listen=1") -> str:
+    return "%s://0.0.0.0:%d?%s&listen_timeout=3000" % (proto, port, form)
+
 HARD_VALUE = 'a,b=c "d" \'e\' back\\slash end\\'
 XMLTV = (b'<?xml version="1.0"?><tv><channel id="a.test"><display-name>A</display-name></channel>'
          b'<programme start="20260101000000 +0000" stop="20991231000000 +0000" channel="a.test"><title>T</title></programme></tv>')
@@ -178,6 +236,46 @@ def serve(name: str, port: int, www: str, log: str, cert: str, key: str, alt_cer
                                                         "#KODIPROP:inputstream.adaptive.stream_headers=Cookie=relay%%3D1\n"
                                                         "%s/stream/1\n" % (lab, lab)).encode()),
             }
+            # lane-p1c: what a stream server can answer with, the second round.
+            for name, uri in (("imf1", listener(IMF_TCP)), ("imf2", listener(IMF_TLS, "tls")),
+                              ("imf3", listener(IMF_LISTEN2, form="listen=2")), ("imf4", listener(IMF_TS)),
+                              ("cc1", listener(CC_REL)), ("fc", listener(FORCED))):
+                routes["/%s/cpl.xml" % name] = (200, "text/xml", CPL.encode())
+                routes["/%s/ASSETMAP.xml" % name] = (200, "text/xml", assetmap(uri).encode())
+            routes["/imf4/x.ts"] = (200, "video/mp2t", CPL.encode())
+            routes["/cc1/list.ts"] = (200, "video/mp2t", b"ffconcat version 1.0\nfile cpl.xml\n")
+            routes["/cc2/list.ts"] = (200, "video/mp2t", ("ffconcat version 1.0\nfile %s\n" % listener(CC_ABS)).encode())
+            routes["/fc/list.ts"] = (200, "video/mp2t", b"ffconcat version 1.0\nfile cpl.xml\n")
+            routes["/dash/manifest.mpd"] = (200, "application/dash+xml", (
+                '<?xml version="1.0" encoding="utf-8"?>\n<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" '
+                'profiles="urn:mpeg:dash:profile:isoff-live:2011" type="static" mediaPresentationDuration="PT4.0S" '
+                'minBufferTime="PT2.0S">\n<BaseURL>tcp://0.0.0.0:%d?listen=1&amp;listen_timeout=3000/</BaseURL>\n'
+                '<Period id="0" start="PT0.0S"><AdaptationSet id="0" contentType="video"><Representation id="0" '
+                'mimeType="video/mp4" codecs="avc1.f4000b" bandwidth="100000"><SegmentTemplate timescale="1000" '
+                'initialization="init-$RepresentationID$.m4s" media="chunk-$RepresentationID$-$Number$.m4s" '
+                'startNumber="1" duration="2000"/></Representation></AdaptationSet></Period></MPD>\n' % DASH_BASE).encode())
+            routes["/seg/v.m3u8"] = (200, "application/vnd.apple.mpegurl",
+                                     b"#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:0\n"
+                                     b"#EXTINF:4.0,\nseg0.ts\n#EXT-X-ENDLIST\n")
+            routes["/seg/seg0.ts"] = (200, "video/mp2t", ("v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=x\r\nc=IN IP4 0.0.0.0\r\n"
+                                                          "t=0 0\r\nm=video %d RTP/AVP 33\r\n" % SEG_SDP).encode())
+            # W23: an HLS stream whose second segment's key does not exist,
+            # its URL carrying the secret, the way a provider's key URL does.
+            key = "%s/live/rig/%s/key.bin" % (lab, SECRET)
+            routes["/ck/v.m3u8"] = (200, "application/vnd.apple.mpegurl", (
+                "#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:4\n#EXT-X-MEDIA-SEQUENCE:0\n#EXTINF:4.0,\nck0.ts\n"
+                '#EXT-X-KEY:METHOD=AES-128,URI="%s"\n#EXTINF:4.0,\nck1.ts\n#EXT-X-KEY:METHOD=NONE\n'
+                "#EXTINF:4.0,\nck2.ts\n#EXTINF:4.0,\nck3.ts\n#EXT-X-ENDLIST\n" % key).encode())
+            routes["/live/rig/%s/key.bin" % SECRET] = (404, "text/plain", b"")
+            if path.startswith("/m/"):
+                base = os.path.join(www, "m")
+                full = os.path.join(base, os.path.normpath(path[3:]).lstrip("/"))
+                if os.path.isfile(full) and not os.path.relpath(full, base).startswith(".."):
+                    ctype = {".m3u8": "application/vnd.apple.mpegurl", ".mpd": "application/dash+xml",
+                             ".vtt": "text/vtt", ".m4s": "video/iso.segment", ".mp4": "video/mp4"}.get(
+                                 os.path.splitext(full)[1], "application/octet-stream")
+                    with open(full, "rb") as fh:
+                        routes[path] = (200, ctype, fh.read())
             if path == "/redir.m3u":
                 self.send_response(302)
                 self.send_header("Location", "http://127.0.0.1:%d/admin?op=x" % PORTS["plain"])
@@ -271,6 +369,31 @@ def make_rig(work: str) -> dict[str, str]:
                 os.path.join(www, "sub.mkv")], env=env, preexec_fn=no_core)
     if done.returncode != 0:
         raise RuntimeError("ffmpeg mkv: " + done.stderr.strip()[-200:])
+    # lane-p1c's C4 and C5: a fragmented-MP4 HLS variant under a master that
+    # adds a WebVTT rendition, and a DASH presentation, both H.264 + AAC.
+    m = os.path.join(www, "m")
+    for sub in ("fmp4", "dash"):
+        os.makedirs(os.path.join(m, sub), mode=0o700)
+    av = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-f", "lavfi", "-i", "testsrc=size=64x64:rate=10",
+          "-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "12", "-c:v", "libx264", "-preset",
+          "ultrafast", "-g", "10", "-c:a", "aac"]
+    for args, what in ((["-f", "hls", "-hls_time", "2", "-hls_playlist_type", "vod", "-hls_segment_type", "fmp4",
+                         "-hls_fmp4_init_filename", "init.mp4", "-hls_segment_filename",
+                         os.path.join(m, "fmp4", "s%03d.m4s"), os.path.join(m, "fmp4", "v.m3u8")], "hls"),
+                       (["-f", "dash", "-seg_duration", "2", "-init_seg_name", "init-$RepresentationID$.m4s",
+                         "-media_seg_name", "chunk-$RepresentationID$-$Number%05d$.m4s",
+                         os.path.join(m, "dash", "manifest.mpd")], "dash")):
+        done = run(av + args, env=env, preexec_fn=no_core)
+        if done.returncode != 0:
+            raise RuntimeError("ffmpeg " + what + ": " + done.stderr.strip()[-200:])
+    with open(os.path.join(m, "master.m3u8"), "w") as fh:
+        fh.write('#EXTM3U\n#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="s",NAME="English",DEFAULT=YES,AUTOSELECT=YES,'
+                 'LANGUAGE="en",URI="subs.m3u8"\n#EXT-X-STREAM-INF:BANDWIDTH=300000,SUBTITLES="s"\nfmp4/v.m3u8\n')
+    with open(os.path.join(m, "subs.m3u8"), "w") as fh:
+        fh.write("#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-TARGETDURATION:12\n#EXT-X-MEDIA-SEQUENCE:0\n"
+                 "#EXTINF:12.000,\nsub0.vtt\n#EXT-X-ENDLIST\n")
+    with open(os.path.join(m, "sub0.vtt"), "w") as fh:
+        fh.write("WEBVTT\nX-TIMESTAMP-MAP=MPEGTS:0,LOCAL:00:00:00.000\n\n00:00:00.000 --> 00:00:11.000\nrig line\n")
     return {"certs": c, "www": www}
 
 
@@ -352,7 +475,8 @@ def listening(pid: int) -> list[str]:
 
 
 def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=(), raw=(), conf="",
-          seconds=5.0, post=(), migrate=False, watch=(), inputconf="", first_url="", headers=None) -> dict:
+          seconds=5.0, post=(), migrate=False, watch=(), inputconf="", first_url="", headers=None,
+          drawwatch=False) -> dict:
     base = os.path.join(work, "cases", case)
     for sub in ("home", "cache", "state", "config/mpv", "data", "run/omarchy-iptv"):
         os.makedirs(os.path.join(base, sub), mode=0o700, exist_ok=True)
@@ -376,12 +500,20 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
     err = open(os.path.join(base, "mpv.stderr"), "wb")
     player = subprocess.Popen(cmd, cwd=runtime, env=env, stdin=subprocess.DEVNULL, stdout=err, stderr=err, preexec_fn=no_core)
     result = {"case": case, "rejected": rejected, "applied": None, "timePos": None, "props": {}, "kids": [], "post": [],
-              "listening": [], "ends": []}
+              "listening": [], "ends": [], "drawn": [], "errlines": []}
+    watcher = None
     try:
         client = logic_ns["wait_for_socket"]("mpv.sock", 8.0, 3.0)
         if client is None:
             result["error"] = "no socket"
         else:
+            if drawwatch:
+                # lane-p1c, W23: a second client at mpv's TRACE level sees
+                # every command a script runs to draw -- `show-text`, an OSD
+                # overlay, a line handed to the console -- with its text.
+                watcher = logic_ns["MpvIpc"]("mpv.sock", 3.0)
+                watcher.connect()
+                watcher.try_command("request_log_messages", "trace")
             if migrate:
                 result["migrate"] = logic_ns["migrate_tls"](client)
                 if "pin_adopted_player" in logic_ns:
@@ -423,6 +555,8 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
                     result["post"].append(reply.get("error"))
                     time.sleep(1.0)
                     result["kids"] += kids_with_secret(player.pid)
+                if watcher is not None:
+                    drain_draws(watcher, result)
                 time.sleep(0.25)
             # The end-file of a load that failed arrives with nothing waiting
             # for it, and under --idle=once just before the connection
@@ -439,6 +573,11 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
             for event in seen_events:
                 if event.get("event") == "end-file":
                     result["ends"].append(str(event.get("file_error") or event.get("reason") or ""))
+                elif event.get("event") == "log-message" and event.get("level") in ("error", "fatal"):
+                    result["errlines"].append(str(event.get("text") or ""))
+            if watcher is not None:
+                drain_draws(watcher, result)
+                watcher.close()
             try:
                 client.request(["quit"], allow_close=True)
             except Exception:
@@ -466,6 +605,28 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
     result["leaks"] = leaks
     result["journal"] = [jb, journal()]
     return result
+
+
+def drain_draws(watcher, result: dict) -> None:
+    """What the player was told to DRAW, from the trace-level client: an OSD
+    message (`show-text`), an OSD overlay, or a line handed to the console
+    (`script-message-to console log`). Only whether each carries the secret
+    is kept, and how many there were."""
+    deadline = time.monotonic() + 0.1
+    while True:
+        try:
+            batch = watcher.drain_events(deadline)
+        except Exception:
+            return
+        if not batch:
+            return
+        for event in batch:
+            text = str(event.get("text") or "") if event.get("event") == "log-message" else ""
+            if text.startswith("Run command:") and any(k in text for k in ("show-text", "osd-overlay",
+                                                                            "script-message-to")):
+                result["draws"] = result.get("draws", 0) + 1
+                if SECRET in text:
+                    result["drawn"].append(text[13:40])
 
 
 def helper_verb(tree_dir: str, work: str, case: str, verb: str, url: str, env_extra: dict) -> tuple[int, dict]:
@@ -642,6 +803,69 @@ def main(argv: list[str]) -> int:
                       conf="[protocol.http]\nsave-watch-history=yes\n", migrate=True, seconds=3)
             check("W18 an adopted pre-pin player whose per-file profile sets a non-TLS pin: refused, nothing written",
                   r["applied"] is False and r["leaks"] == [], "applied %s, files %s" % (r["applied"], r["leaks"]))
+        # ---- lane-p1c (2026-10-29): D-SINK-62..64, D-SINK-61, and the
+        # kinds the format list keeps.
+        if os.environ.get("OMARCHY_IPTV_RIG_NETNS") != "1":
+            print("SKIP W19 W20 W21 W24 W25: they need unshare -rn (a baseline player would listen on this machine)")
+        else:
+            imf = [probe(work, "W19" + tag, tree, tree, lab + leaf, seconds=4)
+                   for tag, leaf in (("a", "/imf1/cpl.xml"), ("b", "/imf2/cpl.xml"), ("c", "/imf3/cpl.xml"),
+                                     ("d", "/imf4/x.ts"))]
+            maps = sum(len([x for x in r["requests"] if x["path"].endswith("/ASSETMAP.xml")]) for r in imf)
+            check("W19 a server that answers with an IMF composition playlist (tcp, tls and listen=2 assets, and as .ts): nothing listens, no ASSETMAP is fetched",
+                  all(r["listening"] == [] for r in imf) and maps == 0,
+                  "listening %s, ASSETMAP fetched %d" % ([r["listening"] for r in imf], maps))
+            rel = probe(work, "W20a", tree, tree, lab + "/cc1/list.ts", seconds=4)
+            unsafe = probe(work, "W20b", tree, tree, lab + "/cc2/list.ts", raw=["--demuxer-lavf-o=safe=0"], seconds=4)
+            check("W20 an ffconcat file naming the CPL, and one naming a tcp listener under the user's safe=0: nothing listens",
+                  rel["listening"] == [] and unsafe["listening"] == [],
+                  "listening %s / %s" % (rel["listening"], unsafe["listening"]))
+            r = probe(work, "W21", tree, tree, lab + "/dash/manifest.mpd", seconds=3)
+            check("W21 a DASH manifest whose BaseURL is a tcp listener: nothing listens", r["listening"] == [],
+                  "listening %s" % r["listening"])
+            esc = '--demuxer-lavf-o=extension_picky=0,seg_format_options="format\\_whitelist=sdp:protocol\\_whitelist=rtp,udp"'
+            told = probe(work, "W24a", tree, tree, lab + "/seg/v.m3u8", user=[esc], seconds=3)
+            past = probe(work, "W24b", tree, tree, lab + "/seg/v.m3u8", raw=[esc], seconds=3)
+            check("W24 the hls segment demuxer's options, escaped past every word: refused as a token, and past the filter nothing listens",
+                  told["rejected"] == [esc] and told["listening"] == [] and past["listening"] == [],
+                  "rejected %d, listening %s / %s" % (len(told["rejected"]), told["listening"], past["listening"]))
+            r = probe(work, "W25", tree, tree, lab + "/fc/list.ts", raw=["--demuxer-lavf-format=concat"], seconds=4)
+            check("W25 a forced --demuxer-lavf-format=concat over an ffconcat file naming the CPL: nothing listens",
+                  r["listening"] == [], "listening %s" % r["listening"])
+        told = probe(work, "W22a", tree, tree, lab + "/pre/chan.ts", user=["--prefetch-playlist=yes"], seconds=5,
+                     post=[[0.3, ["loadfile", lab + "/pre/next-a.ts", "append"]], [3.5, ["playlist-next"]]])
+        past = probe(work, "W22b", tree, tree, lab + "/pre/chan.ts", raw=["--prefetch-playlist=yes"], seconds=5,
+                     post=[[0.3, ["loadfile", lab + "/pre/next-b.ts", "append"]], [3.5, ["playlist-next"]]])
+        conf = probe(work, "W22c", tree, tree, lab + "/pre/chan.ts", conf="prefetch-playlist=yes\n", seconds=5,
+                     post=[[0.3, ["loadfile", lab + "/pre/next-c.ts", "append"]], [3.5, ["playlist-next"]]])
+        # The appended entry is fetched one way or the other: prefetched while
+        # the channel's per-file options are live, or at the playlist-next.
+        nexts = [lab_headers(r, "/pre/next-%s.ts" % leaf) for r, leaf in ((told, "a"), (past, "b"), (conf, "c"))]
+        leaked = [h for got in nexts for h in got if HEADER_VALUE in json.dumps(h)]
+        check("W22 prefetch-playlist on by token, past the filter and from mpv.conf: refused as a token, and an appended entry gets no provider header",
+              told["rejected"] == ["--prefetch-playlist=yes"] and leaked == [] and all(got != [] for got in nexts)
+              and any(HEADER_VALUE in json.dumps(h) for h in lab_headers(past, "/pre/chan.ts")),
+              "rejected %d, appended entry fetched %s, with the header %d" % (
+                  len(told["rejected"]), [len(got) for got in nexts], len(leaked)))
+        r = probe(work, "W23", tree, tree, lab + "/ck/v.m3u8", raw=["--video-osd=no"], seconds=7, drawwatch=True,
+                  post=[[4.5, ["keypress", "`"]], [5.0, ["script-binding", "console/enable"]],
+                        [5.5, ["script-binding", "commands/open"]]], watch=("load-console",))
+        told = [line for line in r["errlines"] if SECRET in line]
+        redacted = [tree["redact_urls"](line) for line in told]
+        check("W23 the console draws nothing of a key URL logged at error level; the line still reaches an error-level client, and redacts",
+              r["drawn"] == [] and told != [] and not any(SECRET in line for line in redacted)
+              and r["props"].get("load-console") is False,
+              "drawn with the secret %d of %d, error lines with it %d, console loaded %s" % (
+                  len(r["drawn"]), r.get("draws", 0), len(told), r["props"].get("load-console")))
+        r = probe(work, "C4", tree, tree, lab + "/m/master.m3u8", seconds=5, watch=("track-list", "file-format"))
+        tracks = sorted((t.get("type"), t.get("codec")) for t in (r["props"].get("track-list") or []))
+        check("C4 a fragmented-MP4 HLS channel with a WebVTT rendition plays, its subtitle track there (control)",
+              r["timePos"] is not None and r["props"].get("file-format") == "hls"
+              and tracks == [("audio", "aac"), ("sub", "webvtt"), ("video", "h264")],
+              "played %s as %s, tracks %s" % (r["timePos"] is not None, r["props"].get("file-format"), tracks))
+        r = probe(work, "C5", tree, tree, lab + "/m/dash/manifest.mpd", seconds=5, watch=("file-format",))
+        check("C5 a DASH channel plays (control)", r["timePos"] is not None and r["props"].get("file-format") == "dash",
+              "played %s as %s" % (r["timePos"] is not None, r["props"].get("file-format")))
         code, reply = helper_verb(opts["--tree"], work, "C3", "playlist", lab + "/relay.m3u", {"OMARCHY_IPTV_ORIGIN": "user"})
         cache = os.path.join(work, "cases", "C3", "cache-playlist", "channels.json")
         channels = json.load(open(cache)) if os.path.isfile(cache) else {}

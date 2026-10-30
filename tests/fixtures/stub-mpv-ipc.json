@@ -1,5 +1,5 @@
 {
- "_comment": "What mpv 0.41.0 answered over its JSON IPC socket, measured 2026-10-29 for scripts/qa-stub-mpv.py, which must answer every modelled step of every transcript identically (its --self-test replays them). Each player: prlimit --core=0, timeout 20, env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u DBUS_SESSION_BUS_ADDRESS, a private HOME and XDG tree, --no-config --vo=null --ao=null, one connection, every command in the order listed, exit status 0 and nothing on stderr; the crash journal unchanged. The runtime directory is rewritten to /run/iptv-stub and argv[0] to mpv. These are measurements: edit them only by measuring again.",
+ "_comment": "What mpv 0.41.0 answered over its JSON IPC socket, measured 2026-10-29 for scripts/qa-stub-mpv.py, which must answer every modelled step of every transcript identically (its --self-test replays them). Each player: prlimit --core=0, timeout 20, env -u DISPLAY -u WAYLAND_DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u DBUS_SESSION_BUS_ADDRESS, a private HOME and XDG tree, --no-config --vo=null --ao=null, one connection, every command in the order listed, exit status 0 and nothing on stderr; the crash journal unchanged. The runtime directory is rewritten to /run/iptv-stub and argv[0] to mpv. These are measurements: edit them only by measuring again. The two transcripts pinned-p1c and prepin-p1c (lane-p1c, 2026-10-29: the tree's launch argv after the format list, prefetch and console pins, and sec-int 124589e's before them) were taken the same way except that prlimit execs mpv directly, with no timeout wrapper, and the player is stopped by the pid held.",
  "mpv": "mpv v0.41.0",
  "measured": "2026-10-29",
  "transcripts": [
@@ -4832,6 +4832,1936 @@
      "reply": {
       "error": "success",
       "data": "yes"
+     }
+    }
+   ]
+  },
+  {
+   "name": "pinned-p1c",
+   "what": "a player launched with the tree's launch argv after lane-p1c's pins (the format list, prefetch and the console off), the user's mpvArgs being --vo=null --ao=null",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--wayland-app-id=omarchy-iptv",
+    "--force-window=immediate",
+    "--idle=once",
+    "--keep-open=no",
+    "--title=$>IPTV",
+    "--force-media-title=IPTV",
+    "--msg-level=all=error",
+    "--ytdl=no",
+    "--load-scripts=no",
+    "--screenshot-dir=/run/iptv-stub/shots",
+    "--watch-later-dir=/run/iptv-stub/wl",
+    "--gpu-shader-cache-dir=/run/iptv-stub/sc",
+    "--icc-cache-dir=/run/iptv-stub/sc",
+    "--gpu-sw=yes",
+    "--tls-verify=yes",
+    "--vo=null",
+    "--ao=null",
+    "--watch-later-dir=/run/iptv-stub/wl",
+    "--load-scripts=no",
+    "--scripts-clr",
+    "--input-commands-clr",
+    "--input-commands-append=keybind ctrl+v ignore",
+    "--load-auto-profiles=no",
+    "--player-operation-mode=cplayer",
+    "--load-select=no",
+    "--load-console=no",
+    "--prefetch-playlist=no",
+    "--load-unsafe-playlists=no",
+    "--save-watch-history=no",
+    "--log-file=",
+    "--reset-on-next-file-clr",
+    "--osd-playlist-entry=title",
+    "--drag-and-drop=no",
+    "--script-opts-append=osc-title_mbtn_mid_command=ignore",
+    "--stream-lavf-o-clr",
+    "--demuxer-lavf-propagate-opts=yes",
+    "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+    "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
+    "--demuxer-lavf-o-append=tls_verify=1",
+    "--tls-verify=yes"
+   ],
+   "steps": [
+    {
+     "command": [
+      "get_property",
+      "mpv-version"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "mpv v0.41.0"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "stream-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "protocol_whitelist": "http,https,tls,tcp,crypto,data,httpproxy",
+       "format_whitelist": "hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
+       "tls_verify": "1"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-propagate-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-select"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "save-watch-history"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-unsafe-playlists"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "reset-on-next-file"
+     ],
+     "reply": {
+      "error": "success",
+      "data": []
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "title"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "log-file"
+     ],
+     "reply": {
+      "error": "success",
+      "data": ""
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "watch-later-dir"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "/run/iptv-stub/wl"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "drag-and-drop"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "input-commands"
+     ],
+     "reply": {
+      "error": "success",
+      "data": [
+       "keybind ctrl+v ignore"
+      ]
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-scripts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "player-operation-mode"
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "script-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "osc-title_mbtn_mid_command": "ignore"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "scripts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": []
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "prefetch-playlist"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-console"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/tls-verify/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/stream-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-propagate-opts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-auto-profiles/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-select/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/save-watch-history/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-unsafe-playlists/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/reset-on-next-file/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/osd-playlist-entry/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/log-file/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/watch-later-dir/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/drag-and-drop/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/input-commands/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-scripts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/player-operation-mode/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/script-opts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/scripts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/prefetch-playlist/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-console/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-osd-console/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "append",
+      "format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "protocol_whitelist": "http,https,tls,tcp,crypto,data,httpproxy",
+       "tls_verify": "1",
+       "format_whitelist": "hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "append",
+      "seg_format_options=format\\_whitelist=sdp"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "protocol_whitelist": "http,https,tls,tcp,crypto,data,httpproxy",
+       "tls_verify": "1",
+       "format_whitelist": "hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
+       "seg_format_options": "format\\_whitelist=sdp"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "remove",
+      "seg_format_options"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "protocol_whitelist": "http,https,tls,tcp,crypto,data,httpproxy",
+       "tls_verify": "1",
+       "format_whitelist": "hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "remove",
+      "seg_format_options"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "prefetch-playlist",
+      true
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "prefetch-playlist"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "prefetch-playlist",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "prefetch-playlist"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "prefetch-playlist",
+      "yes"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "prefetch-playlist"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "prefetch-playlist",
+      "no"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "prefetch-playlist"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-console",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-console"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-console",
+      "yes"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-console"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-console",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-console"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "drag-and-drop",
+      "no"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "drag-and-drop"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "drag-and-drop",
+      "auto"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "drag-and-drop"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "auto"
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "drag-and-drop",
+      "bogus"
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "drag-and-drop"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "auto"
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "drag-and-drop",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "drag-and-drop"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "player-operation-mode",
+      "pseudo-gui"
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "player-operation-mode"
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "player-operation-mode",
+      "bogus"
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "player-operation-mode"
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-scripts",
+      "no"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-scripts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/prefetch-playlist/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-console/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/drag-and-drop/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/player-operation-mode/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "script-opts",
+      "append",
+      "osc-title_mbtn_mid_command=ignore"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "script-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "osc-title_mbtn_mid_command": "ignore"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "prefetch-playlist"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "no"
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "load-console"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "no"
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "drag-and-drop"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "no"
+     }
+    },
+    {
+     "command": [
+      "quit"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    }
+   ]
+  },
+  {
+   "name": "prepin-p1c",
+   "what": "a player launched with sec-int 124589e's launch argv, the pin block before lane-p1c: what a player of that build holds when this one adopts it",
+   "argv": [
+    "mpv",
+    "--no-config",
+    "--input-ipc-server=/run/iptv-stub/s",
+    "--wayland-app-id=omarchy-iptv",
+    "--force-window=immediate",
+    "--idle=once",
+    "--keep-open=no",
+    "--title=$>IPTV",
+    "--force-media-title=IPTV",
+    "--msg-level=all=error",
+    "--ytdl=no",
+    "--load-scripts=no",
+    "--screenshot-dir=/run/iptv-stub/shots",
+    "--watch-later-dir=/run/iptv-stub/wl",
+    "--gpu-shader-cache-dir=/run/iptv-stub/sc",
+    "--icc-cache-dir=/run/iptv-stub/sc",
+    "--gpu-sw=yes",
+    "--tls-verify=yes",
+    "--vo=null",
+    "--ao=null",
+    "--watch-later-dir=/run/iptv-stub/wl",
+    "--load-scripts=no",
+    "--scripts-clr",
+    "--input-commands-clr",
+    "--input-commands-append=keybind ctrl+v ignore",
+    "--load-auto-profiles=no",
+    "--player-operation-mode=cplayer",
+    "--load-select=no",
+    "--load-unsafe-playlists=no",
+    "--save-watch-history=no",
+    "--log-file=",
+    "--reset-on-next-file-clr",
+    "--osd-playlist-entry=title",
+    "--drag-and-drop=no",
+    "--script-opts-append=osc-title_mbtn_mid_command=ignore",
+    "--stream-lavf-o-clr",
+    "--demuxer-lavf-propagate-opts=yes",
+    "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy",
+    "--demuxer-lavf-o-append=tls_verify=1",
+    "--tls-verify=yes"
+   ],
+   "steps": [
+    {
+     "command": [
+      "get_property",
+      "mpv-version"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "mpv v0.41.0"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "tls-verify"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "stream-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {}
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "protocol_whitelist": "http,https,tls,tcp,crypto,data,httpproxy",
+       "tls_verify": "1"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-propagate-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-auto-profiles"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-select"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "save-watch-history"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-unsafe-playlists"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "reset-on-next-file"
+     ],
+     "reply": {
+      "error": "success",
+      "data": []
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "osd-playlist-entry"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "title"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "log-file"
+     ],
+     "reply": {
+      "error": "success",
+      "data": ""
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "watch-later-dir"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "/run/iptv-stub/wl"
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "drag-and-drop"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "input-commands"
+     ],
+     "reply": {
+      "error": "success",
+      "data": [
+       "keybind ctrl+v ignore"
+      ]
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-scripts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "player-operation-mode"
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "script-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "osc-title_mbtn_mid_command": "ignore"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "scripts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": []
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "prefetch-playlist"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-console"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/tls-verify/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/stream-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-o/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/demuxer-lavf-propagate-opts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-auto-profiles/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-select/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/save-watch-history/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-unsafe-playlists/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/reset-on-next-file/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/osd-playlist-entry/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/log-file/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/watch-later-dir/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/drag-and-drop/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/input-commands/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-scripts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/player-operation-mode/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/script-opts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/scripts/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/prefetch-playlist/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-console/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-osd-console/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "append",
+      "format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "protocol_whitelist": "http,https,tls,tcp,crypto,data,httpproxy",
+       "tls_verify": "1",
+       "format_whitelist": "hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "append",
+      "seg_format_options=format\\_whitelist=sdp"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "protocol_whitelist": "http,https,tls,tcp,crypto,data,httpproxy",
+       "tls_verify": "1",
+       "format_whitelist": "hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
+       "seg_format_options": "format\\_whitelist=sdp"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "remove",
+      "seg_format_options"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "demuxer-lavf-o"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "protocol_whitelist": "http,https,tls,tcp,crypto,data,httpproxy",
+       "tls_verify": "1",
+       "format_whitelist": "hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt"
+      }
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "demuxer-lavf-o",
+      "remove",
+      "seg_format_options"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "prefetch-playlist",
+      true
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "prefetch-playlist"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "prefetch-playlist",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "prefetch-playlist"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "prefetch-playlist",
+      "yes"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "prefetch-playlist"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "prefetch-playlist",
+      "no"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "prefetch-playlist"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-console",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-console"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-console",
+      "yes"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-console"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-console",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-console"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "drag-and-drop",
+      "no"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "drag-and-drop"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "drag-and-drop",
+      "auto"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "drag-and-drop"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "auto"
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "drag-and-drop",
+      "bogus"
+     ],
+     "reply": {
+      "error": "unsupported format for accessing property",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "drag-and-drop"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "auto"
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "drag-and-drop",
+      false
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "drag-and-drop"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "player-operation-mode",
+      "pseudo-gui"
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "player-operation-mode"
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "player-operation-mode",
+      "bogus"
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "player-operation-mode"
+     ],
+     "reply": {
+      "error": "property not found",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "set_property",
+      "load-scripts",
+      "no"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "load-scripts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/prefetch-playlist/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/load-console/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": false
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/drag-and-drop/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "option-info/player-operation-mode/set-from-commandline"
+     ],
+     "reply": {
+      "error": "success",
+      "data": true
+     }
+    },
+    {
+     "command": [
+      "change-list",
+      "script-opts",
+      "append",
+      "osc-title_mbtn_mid_command=ignore"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
+     }
+    },
+    {
+     "command": [
+      "get_property",
+      "script-opts"
+     ],
+     "reply": {
+      "error": "success",
+      "data": {
+       "osc-title_mbtn_mid_command": "ignore"
+      }
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "prefetch-playlist"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "no"
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "load-console"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "no"
+     }
+    },
+    {
+     "command": [
+      "get_property_string",
+      "drag-and-drop"
+     ],
+     "reply": {
+      "error": "success",
+      "data": "no"
+     }
+    },
+    {
+     "command": [
+      "quit"
+     ],
+     "reply": {
+      "error": "success",
+      "data": null
      }
     }
    ]

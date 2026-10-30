@@ -340,7 +340,17 @@ var MPV_RESERVED = {
   "--cover-art-file": true,
   // D-PLY-46 (lead, 2026-10-29): PINNED off. mpv's default `auto` loads a URL
   // dropped on the player window as a new entry, which no gate saw.
-  "--drag-and-drop": true
+  "--drag-and-drop": true,
+  // D-SINK-63 (lane-p1c, 2026-10-29): PINNED off. With it on, mpv opens the
+  // next entry while the playing file's per-file options are in force, so an
+  // entry the helper did not load was sent the channel's provider headers.
+  "--prefetch-playlist": true,
+  // D-SINK-61 (owner, 2026-10-29: turn the console off): PINNED off. The
+  // console draws the log commands.lua queues for it, and mpv logs a failed
+  // open, or an HLS key that would not open, with its whole URL (measured).
+  // `--load-osd-console` is mpv's alias of it, the same option.
+  "--load-console": true,
+  "--load-osd-console": true
 }
 
 // D-SINK-43 (and its verifyhost sibling): the words a `--demuxer-lavf-o*`
@@ -356,8 +366,15 @@ var MPV_RESERVED = {
 // D-SINK-55 (2026-10-29): and `protocol_whitelist` / `protocol_blacklist`,
 // because the pin block now gives the demuxer a protocol whitelist
 // (MPV_PROTOCOL_WHITELIST) and a user key of the same name would replace it.
+// D-SINK-62 (lane-p1c, 2026-10-29): and `format_whitelist` (MPV_FORMAT_WHITELIST
+// is the pin block's) and `format_blacklist`; and D-SINK-64:
+// `seg_format_options`, the hls segment demuxer's own options, a dictionary
+// FFmpeg parses with its own escapes -- `format\_whitelist` inside it carries
+// no word above and replaced the pinned list in the segment's context
+// (measured). The key is refused whole; the helper's read-back removes it.
 var MPV_DEMUXER_TLS_WORDS = ["verify", "ca_file", "cafile", "listen", "external_sock",
-                             "protocol_whitelist", "protocol_blacklist"]
+                             "protocol_whitelist", "protocol_blacklist",
+                             "format_whitelist", "format_blacklist", "seg_format_options"]
 
 // D-SINK-55 (2026-10-29). The protocols libavformat may open below a demuxer:
 // an HLS or DASH segment and key, and whatever a sniffed format opens on its
@@ -368,6 +385,19 @@ var MPV_DEMUXER_TLS_WORDS = ["verify", "ca_file", "cafile", "listen", "external_
 // helper adds rtp and udp on its own loadfile of an rtsp channel only.
 // Mirrored by MPV_PROTOCOL_WHITELIST in the helper.
 var MPV_PROTOCOL_WHITELIST = "http,https,tls,tcp,crypto,data,httpproxy"
+
+// D-SINK-62 (lane-p1c, 2026-10-29). The demuxers libavformat may use, as the
+// demuxer's `format_whitelist`. A protocol list could not close what a
+// sniffed format opens itself: FFmpeg's IMF demuxer, chosen from a stream
+// server's answer, opened the asset URIs it named with the list above, which
+// holds tcp and tls, and listened on 0.0.0.0 (measured; an ffconcat file
+// reached it too). FFmpeg checks this list against the chosen format before
+// the demuxer reads a byte and copies it into every nested context, an HLS or
+// DASH segment and a WebVTT rendition included (measured). What IPTV carries;
+// the helper's comment on its mirror and ARCHITECTURE-PLAYER 4.12.1 have the
+// search of every demuxer that opens a URL. Mirrored by MPV_FORMAT_WHITELIST
+// in the helper.
+var MPV_FORMAT_WHITELIST = "hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt"
 
 // D-SINK-13, layers 1 and 2. ONE string, written into the argv TWICE on
 // purpose. See buildMpvArgv for why the second occurrence is load-bearing;
@@ -394,6 +424,8 @@ var MPV_PIN_BLOCK = [
   "--load-auto-profiles=no",           // D-SINK-44: profile-cond beats the command line
   "--player-operation-mode=cplayer",   // D-SINK-44: [pseudo-gui] applies after the command line
   "--load-select=no",                  // D-SINK-46: g l forks ffmpeg with the URL
+  "--load-console=no",                 // D-SINK-61: the console draws a failed open's URL
+  "--prefetch-playlist=no",            // D-SINK-63: a prefetched entry got the channel's headers
   "--load-unsafe-playlists=no",        // D-SINK-44: mpv's origin rule for nested entries
   "--save-watch-history=no",           // D-SINK-44: every path, durably
   "--log-file=",                       // every URL, durably
@@ -404,6 +436,7 @@ var MPV_PIN_BLOCK = [
   "--stream-lavf-o-clr",               // D-SINK-44: command-line-set, so no profile replaces it
   "--demuxer-lavf-propagate-opts=yes", // the next pins reach segments only this way
   "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy", // D-SINK-55
+  "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt", // D-SINK-62
   "--demuxer-lavf-o-append=tls_verify=1", // D-SINK-43
   MPV_TLS_VERIFY                       // D-SINK-13 layer 2: LAST
 ]
@@ -513,8 +546,8 @@ export {
   GROUP_SCOPE_PREFIX, MAX_HIDDEN_GROUPS, ELLIPSIS, QUOTE_OPEN, QUOTE_CLOSE,
   SEP, GLYPHS, SETTING_RANGES, MAX_CHNO_MAJOR, MAX_CHNO_MINOR, MAX_CHNO_LABEL,
   CHNO_SEPARATORS, CHNO_ENTRY_SEP, CHANNEL_ORDERS, CHNO_FIELDS, MPV_RESERVED,
-  MPV_DEMUXER_TLS_WORDS, MPV_PROTOCOL_WHITELIST, MPV_TLS_VERIFY,
-  MPV_PIN_BLOCK, MPV_GPU_SW, MPV_TLS_VERIFY_PROP, MPV_STREAM_OPTS_PROP,
-  MPV_DEMUXER_OPTS_PROP, MPV_AUTO_PROFILES_PROP, NOTIFY_IDS, PLACE_TTL_SEC,
-  ZAP_MAX_SKIP
+  MPV_DEMUXER_TLS_WORDS, MPV_PROTOCOL_WHITELIST, MPV_FORMAT_WHITELIST,
+  MPV_TLS_VERIFY, MPV_PIN_BLOCK, MPV_GPU_SW, MPV_TLS_VERIFY_PROP,
+  MPV_STREAM_OPTS_PROP, MPV_DEMUXER_OPTS_PROP, MPV_AUTO_PROFILES_PROP,
+  NOTIFY_IDS, PLACE_TTL_SEC, ZAP_MAX_SKIP
 }

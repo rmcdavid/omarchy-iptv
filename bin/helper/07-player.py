@@ -168,6 +168,16 @@ MPV_RESERVED = frozenset((
     # D-PLY-46 (lead, 2026-10-29): PINNED off. mpv's default `auto` loads a
     # URL dropped on the player window as a new entry, which no gate saw.
     "--drag-and-drop",
+    # D-SINK-63 (lane-p1c, 2026-10-29): PINNED off. With it on, mpv opens the
+    # next playlist entry while the playing file's per-file options are still
+    # in force, so an entry the helper did not load was sent the channel's
+    # provider headers (measured).
+    "--prefetch-playlist",
+    # D-SINK-61 (owner, 2026-10-29: turn the console off): PINNED off. mpv's
+    # console draws the log commands.lua queues for it, and mpv logs a failed
+    # open, or an HLS key that would not open, with its whole URL (measured).
+    # `--load-osd-console` is mpv's alias of it, the same option.
+    "--load-console", "--load-osd-console",
 ))
 # D-SINK-43 (and its verifyhost sibling): the words a `--demuxer-lavf-o*`
 # token may not contain. For an HLS or DASH stream libavformat reopens the URL
@@ -189,8 +199,21 @@ MPV_RESERVED = frozenset((
 # D-SINK-55 (2026-10-29): and `protocol_whitelist` / `protocol_blacklist`,
 # because the pin block now gives the demuxer a protocol whitelist (see
 # MPV_PROTOCOL_WHITELIST) and a user key of the same name would replace it.
+#
+# D-SINK-62 (lane-p1c, 2026-10-29): and `format_whitelist` (the pin block's
+# MPV_FORMAT_WHITELIST) and `format_blacklist` (no such FFmpeg key today;
+# refused rather than reasoned about), and D-SINK-64: `seg_format_options`,
+# the hls demuxer's options for its SEGMENT demuxer. That value is itself a
+# dictionary FFmpeg parses with its own escapes, so the substring premise
+# above is false inside it: `seg_format_options="format\_whitelist=sdp:
+# protocol\_whitelist=rtp,udp"` carries neither word, passed this filter, and
+# replaced both pinned lists in the segment's context -- with the user's
+# `extension_picky=0` beside it, a stream server answering an HLS segment
+# with an SDP body made the player listen on 0.0.0.0 (measured inside
+# `unshare -rn`). The key is refused whole, and the read-back removes it.
 MPV_DEMUXER_TLS_WORDS = ("verify", "ca_file", "cafile", "listen", "external_sock",
-                         "protocol_whitelist", "protocol_blacklist")
+                         "protocol_whitelist", "protocol_blacklist",
+                         "format_whitelist", "format_blacklist", "seg_format_options")
 MPV_DEMUXER_OPTS = "--demuxer-lavf-o"
 # D-SINK-55 (2026-10-29). The protocols libavformat may open BELOW a demuxer
 # -- an HLS or DASH segment and key, and whatever a sniffed format opens on its
@@ -209,9 +232,50 @@ MPV_DEMUXER_OPTS = "--demuxer-lavf-o"
 # udp_multicast, or lavf) needs rtp and udp there -- MPV_RTSP_PROTOCOLS is
 # added on the helper's own loadfile of an rtsp channel and nowhere else
 # (channel_load_options). Mirror of Model.MPV_PROTOCOL_WHITELIST.
+#
+# [lane-p1c, 2026-10-29: "whatever a sniffed format opens on its own" above
+# was too wide a claim. A demuxer that opens the URLs its CONTENT names opens
+# them with this same list, which must hold tcp and tls because http and
+# https run over them -- so FFmpeg's IMF demuxer, sniffed from a stream
+# server's answer at score 100, bound `tcp://0.0.0.0:P?listen=1` and its tls
+# and listen=2 forms, and an ffconcat file naming the CPL reached it too
+# (rc-p1b, D-SINK-62). No protocol list can close that; MPV_FORMAT_WHITELIST
+# below does.]
 MPV_PROTOCOL_WHITELIST = "http,https,tls,tcp,crypto,data,httpproxy"
 MPV_RTSP_PROTOCOLS = "rtp,udp"
 MPV_DEMUXER_WHITELIST_KEY = "protocol_whitelist"
+# D-SINK-62 (lane-p1c, 2026-10-29). The demuxers libavformat may use, as the
+# demuxer's `format_whitelist`: FFmpeg checks it against the format a probe
+# chose (or a user forced) before the demuxer reads a byte, and copies it into
+# every nested context -- an HLS or DASH segment, a WebVTT rendition, a
+# concat or IMF child -- so it binds at every depth (measured: each nested
+# format taken off the list failed the stream that needed it). The list is
+# what IPTV carries, and nothing on it opens a URL its content names except
+# hls and dash, which open http(s) and data alone and give each segment's
+# demuxer no opener of its own, and mov, whose external references are off by
+# default and are local paths when on (measured: the colon becomes a slash,
+# and `file` is not on MPV_PROTOCOL_WHITELIST). Every other demuxer that opens
+# what it reads -- imf, concat, sdp, rtp, sap, vobsub, mlv, image2, dvdvideo,
+# avisynth, vapoursynth, the lavfi device -- is off it (ARCHITECTURE-PLAYER
+# 4.12.1 has the whole search). Measured inside `unshare -rn` through
+# apply_channel: every channel kind the gate admits still plays or reaches
+# its server, and every IMF, ffconcat, SDP and DASH-listen route binds
+# nothing. Mirror of Model.MPV_FORMAT_WHITELIST.
+MPV_FORMAT_WHITELIST = "hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt"
+MPV_DEMUXER_FORMATS_KEY = "format_whitelist"
+# D-SINK-64: the keys of a demuxer-lavf-o map that are never left in it (see
+# MPV_DEMUXER_TLS_WORDS): the hls segment demuxer's own options dictionary.
+# rc-p1c (2026-10-29): and the rtsp demuxer's `listen_timeout`, which IMPLIES
+# its listen flag (a value above 0 sets RTSP_FLAG_LISTEN in rtsp_read_header)
+# and is the one key without which that flag cannot bind (the listener's tcp
+# timeout is the value times 1000, and the default -1 is out of tcp's range).
+# DEMUXER_TLS_FORBIDDEN removes an exact `listen` and nothing else, so a plain
+# mpv.conf `demuxer-lavf-o=listen_timeout=5` -- a token is refused by the word
+# `listen` -- made an rtsp channel LISTEN on its URL's host and port (measured
+# inside `unshare -rn`: 127.0.0.1:P bound, on sec-int 124589e and lane-p1c
+# alike; the same with the key removed bound nothing). A client that receives
+# a channel by listening is not a player of a channel, so the key goes.
+DEMUXER_FORMAT_FORBIDDEN = frozenset(("seg_format_options", "listen_timeout"))
 # D-SINK-52 (owner, 2026-10-29: pin and refuse). The OSC embedded in mpv 0.41.0
 # binds the title's middle click to `show-text ${path}`, which draws the whole
 # credentialed URL on the picture and into any screenshot (read from osc.lua
@@ -244,6 +308,8 @@ MPV_PIN_BLOCK = (
     "--load-auto-profiles=no",           # D-SINK-44: profile-cond beats the command line
     "--player-operation-mode=cplayer",   # D-SINK-44: [pseudo-gui] applies after the command line
     "--load-select=no",                  # D-SINK-46: g l forks ffmpeg with the URL
+    "--load-console=no",                 # D-SINK-61: the console draws a failed open's URL
+    "--prefetch-playlist=no",            # D-SINK-63: a prefetched entry got the channel's headers
     "--load-unsafe-playlists=no",        # D-SINK-44: mpv's origin rule for nested entries
     "--save-watch-history=no",           # D-SINK-44: every path, durably
     "--log-file=",                       # every URL, durably
@@ -254,6 +320,7 @@ MPV_PIN_BLOCK = (
     "--stream-lavf-o-clr",               # D-SINK-44: command-line-set, so no profile replaces it
     "--demuxer-lavf-propagate-opts=yes", # the next pins reach segments only this way
     "--demuxer-lavf-o-append=protocol_whitelist=" + MPV_PROTOCOL_WHITELIST,  # D-SINK-55
+    "--demuxer-lavf-o-append=format_whitelist=" + MPV_FORMAT_WHITELIST,      # D-SINK-62
     "--demuxer-lavf-o-append=tls_verify=1",  # D-SINK-43
     MPV_TLS_VERIFY,                      # D-SINK-13 layer 2: LAST
 )
@@ -326,7 +393,7 @@ PER_FILE_TLS_OPTIONS = tuple(sorted({MPV_LIST_SUFFIX_RE.sub("", token.split("=",
                                      for token in ("--watch-later-dir=",) + MPV_PIN_BLOCK}))
 # mpv's own aliases of pinned options, as a profile's key may spell them.
 PER_FILE_OPTION_ALIASES = {"script": "scripts", "watch-later-directory": "watch-later-dir",
-                           "script-opt": "script-opts"}
+                           "script-opt": "script-opts", "load-osd-console": "load-console"}
 PER_FILE_PROFILE_PREFIXES = ("protocol.", "extension.")
 PLAYER_VERBS = ("start", "stop", "restart", "probe", "orphan-check", "pause", "tracks", "seek")
 # Mirror of MPV_HANDOFF (model/mpv.mjs, internal to the model) and friends (PO-10, D-PLY-5). These options are

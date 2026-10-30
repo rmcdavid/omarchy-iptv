@@ -235,8 +235,12 @@ def walk_player_verb(verb, survivor_answers=0, lock_at=None, bind_after=None):
                 # the demuxer map (D-SINK-55), reset-on-next-file emptied by
                 # its -clr (D-SINK-60), drag-and-drop off and the OSC key set.
                 answers = {helper.MPV_TLS_VERIFY_PROP: True, helper.MPV_STREAM_OPTS_PROP: {}, "playlist-count": 0,
+                           # lane-p1c (2026-10-29): and the pinned format
+                           # list (D-SINK-62), prefetch and the console off.
                            helper.MPV_DEMUXER_OPTS_PROP: {"protocol_whitelist": helper.MPV_PROTOCOL_WHITELIST,
+                                                          "format_whitelist": helper.MPV_FORMAT_WHITELIST,
                                                           "tls_verify": "1"},
+                           "prefetch-playlist": False, "load-console": False,
                            helper.MPV_AUTO_PROFILES_PROP: False, helper.MPV_RESET_PROP: [],
                            "drag-and-drop": False,
                            "script-opts": {helper.MPV_OSC_TITLE_KEY: helper.MPV_OSC_TITLE_VALUE}}

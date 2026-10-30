@@ -40,7 +40,10 @@ from scripted_server import ScriptedServer, response
 helper = load_helper()
 
 FIXTURES = pathlib.Path(__file__).resolve().parent / "fixtures"
-PLAYLIST = b"#EXTM3U\n#EXTINF:-1,One\nhttp://127.0.0.1/one\n"
+# The channel's own host is a NAME (lane-p1c, 2026-10-29): served from a
+# loopback port, a playlist may name this machine only at that same port
+# (D-SINK-57's scope), and what these tests time is the fetch, not the list.
+PLAYLIST = b"#EXTM3U\n#EXTINF:-1,One\nhttp://stream.example.test/one\n"
 DEADLINE = 0.5           # the lowered budget, seconds
 LATE = 0.9               # a little more than it: the response's delay
 BEFORE_LATE = 0.8        # a refusal before this came from the deadline, not the response
