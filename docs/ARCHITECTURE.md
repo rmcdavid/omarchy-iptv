@@ -993,10 +993,13 @@ switched the shield off before, and does not run after. The window before the
 shield, re-measured by the method above (12 runs per arm per pass,
 interleaved, twice, the `playlist` verb over a local file, load average 1.98):
 with `-I` 26.2 ms median (23.6-29.2) and 25.85 (24.5-29.2), without it 26.2
-(25.4-31.9) and 26.6 (24.9-30.0) on the same machine -- `-I` changes the window
-by nothing measurable here, because this session has no user site packages and
-no `PYTHONPATH`; it removes what such a session would add. Every read refused
-EACCES once shielded, 48 of 48. Readable by same-uid processes only in that
+(25.4-31.9) and 26.6 (24.9-30.0) on the same machine; again on the lane's last
+commit at a load average of 3.7-4.1, with `-I` 28.35 and 30.2 ms (22.6-36.2),
+without it 26.75 and 27.15 (23.9-36.4) -- `-I` changes the window by nothing
+the noise does not cover, because this session has no user site packages and
+no `PYTHONPATH`; it removes what such a session would add, and every number is
+inside the 22.9-40.1 ms stated above. Every run's reads ended in EACCES once
+shielded, 96 of 96. Readable by same-uid processes only in that
 window, as before. What remains: a player adopted after the upgrade keeps the
 tokens on its argv until it restarts; and the measurement is not valid inside
 `unshare -rn` (the rig's own user namespace grants its reader CAP_SYS_PTRACE
