@@ -1181,7 +1181,12 @@ TestCase {
     compare(Model.sourceKey("https://iptv-org.github.io/iptv/countries/us.m3u"), "d5977d8a")
     compare(Model.sourceKey("http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts"), "d990c2e4")
     compare(Model.sourceKey("/srv/tv/local.m3u"), "b0eed9fb")
-    compare(Model.allocateSourceKey([{ key: "d5977d8a", url: "http://other.test/" }], "https://iptv-org.github.io/iptv/countries/us.m3u"), "d5977d8a-2")
+    // D-SINK-48: a new key is a draw; a fixed draw pins the suffix rule, and a
+    // key drawn by THIS engine's own Math.random is a key and not the hash.
+    compare(Model.allocateSourceKey([{ key: "d5977d8a", url: "http://other.test/" }], "https://iptv-org.github.io/iptv/countries/us.m3u", "", function () { return 0xd5977d8a / 4294967296 }), "d5977d8a-2")
+    var drawn = Model.allocateSourceKey([], "https://iptv-org.github.io/iptv/countries/us.m3u")
+    compare(Model.isSourceKey(drawn), true)
+    verify(drawn !== "d5977d8a")
     compare(Model.sourceCacheDir("/c", "d5977d8a"), "/c/sources/d5977d8a")
     compare(Model.sourceCacheDir("/c", "../x"), "")
     compare(Model.deriveLabel("http://www.NAS.local:9981/x"), "nas.local:9981")
@@ -1250,43 +1255,46 @@ TestCase {
     compare(v1.sources, [])
     var added = Model.addSource(Model.emptyState(), { playlistUrl: "HTTP://Provider.Example.TEST:80/get.php?username=u&password=p&type=m3u_plus&output=ts", label: "", origin: "xtream" }, 1000)
     compare(added.ok, true)
-    compare(added.key, "d990c2e4")
+    // D-SINK-48: the key is a draw, the record's own, never the URL's hash.
+    var K = added.key
+    compare(Model.isSourceKey(K), true)
+    verify(K !== Model.sourceKey(added.state.sources[0].url))
     compare(added.state.sources[0].label, "provider.example.test")
     compare(Model.addSource(added.state, { playlistUrl: "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts" }).code, "duplicate")
     var round = Model.parseState(JSON.stringify(added.state))
     compare(round.sources.length, 1)
-    compare(round.sources[0].key, "d990c2e4")
+    compare(round.sources[0].key, K)
     compare(Model.recordPlayed(added.state, { id: "c1", name: "C" }, 10, 5).sources.length, 1)
     compare(Model.withFavorites(added.state, ["c1"]).sources.length, 1)
-    var upd = Model.updateSource(added.state, "d990c2e4", { playlistUrl: "http://provider.example.test:8080/get.php?username=u&password=p&type=m3u_plus&output=ts" }, 2000)
+    var upd = Model.updateSource(added.state, K, { playlistUrl: "http://provider.example.test:8080/get.php?username=u&password=p&type=m3u_plus&output=ts" }, 2000)
     compare(upd.urlChanged, true)
-    compare(upd.replacedKey, "d990c2e4")
-    compare(upd.key, "85ac744a")
+    compare(upd.replacedKey, K)
+    verify(Model.isSourceKey(upd.key) && upd.key !== K && upd.key !== "85ac744a")
     compare(upd.state.sources.length, 2)
-    compare(Model.removeSource(upd.state, "d990c2e4").state.sources.length, 1)
+    compare(Model.removeSource(upd.state, K).state.sources.length, 1)
     var rec = Model.reconcileSources(Model.emptyState(), "https://iptv-org.github.io/iptv/countries/us.m3u", "", "", 5)
-    compare(rec.added, "d5977d8a")
+    compare(Model.isSourceKey(rec.added), true)
     compare(rec.state.sources[0].origin, "migrated")
     // D-SINK-19 deleted Model.activeSourceKey. Identity by URL survives as the
     // composition below; the active source is Model.activeKeyOf(state).
-    compare(String(Model.findSourceByUrl(rec.state.sources, Model.normalizeSourceUrl("HTTPS://iptv-org.github.io:443/iptv/countries/us.m3u", { origin: "cli" })).key), "d5977d8a")
-    compare(Model.sourceForEdit(added.state, "d990c2e4").playlistMasked, "http://provider.example.test/get.php?username=****&password=****&type=m3u_plus&output=ts")
-    compare(JSON.stringify(Model.sourcesSummary(added.state, "d990c2e4")).indexOf("://"), -1)
-    compare(Model.entryWith({ id: "x", refreshMinutes: 30 }, { sourceKey: "d990c2e4" }), { id: "x", refreshMinutes: 30, sourceKey: "d990c2e4" })
+    compare(String(Model.findSourceByUrl(rec.state.sources, Model.normalizeSourceUrl("HTTPS://iptv-org.github.io:443/iptv/countries/us.m3u", { origin: "cli" })).key), rec.added)
+    compare(Model.sourceForEdit(added.state, K).playlistMasked, "http://provider.example.test/get.php?username=****&password=****&type=m3u_plus&output=ts")
+    compare(JSON.stringify(Model.sourcesSummary(added.state, K)).indexOf("://"), -1)
+    compare(Model.entryWith({ id: "x", refreshMinutes: 30 }, { sourceKey: K }), { id: "x", refreshMinutes: 30, sourceKey: K })
     // D-SINK-19, inside the Qt engine as well as in node: a URL the host
     // still holds does not survive an owned write. `for (var k in ...)` over
     // a QJSValue-backed object is the part that cannot be assumed from node.
     compare(Model.entryWith({ id: "x", playlistUrl: "http://h.test/a.m3u", epgUrl: "http://h.test/a.xml", refreshMinutes: 30 },
-                            { sourceKey: "d990c2e4" }),
-            { id: "x", refreshMinutes: 30, sourceKey: "d990c2e4" })
+                            { sourceKey: K }),
+            { id: "x", refreshMinutes: 30, sourceKey: K })
     // ... and the active key round-trips through state.json in this engine.
-    var activeRound = Model.parseState(JSON.stringify(Model.withActiveKey(added.state, "d990c2e4")))
-    compare(activeRound.activeKey, "d990c2e4")
-    compare(Model.activeKeyOf(activeRound), "d990c2e4")
+    var activeRound = Model.parseState(JSON.stringify(Model.withActiveKey(added.state, K)))
+    compare(activeRound.activeKey, K)
+    compare(Model.activeKeyOf(activeRound), K)
     compare(Model.activeKeyOf(Model.withActiveKey(added.state, "deadbeef")), "")
     compare(Model.withActiveKey(added.state, "../../etc").activeKey, "")
     // The reducers carry it, which is the fifth whitelist (cloneState).
-    compare(Model.withFavorites(Model.withActiveKey(added.state, "d990c2e4"), ["c1"]).activeKey, "d990c2e4")
+    compare(Model.withFavorites(Model.withActiveKey(added.state, K), ["c1"]).activeKey, K)
     compare(Model.cacheStale({ ok: true, fetchedAt: 1000 }, 15, 1000 + 900), true)
     compare(Model.cacheStale({ ok: true, fetchedAt: 1000 }, 15, 1000 + 899), false)
   }

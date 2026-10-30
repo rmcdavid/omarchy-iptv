@@ -1102,15 +1102,43 @@ function findSourceByUrl(sources, url) {
   return null
 }
 
-// The record with this url keeps its key; otherwise fnv1a32(url), suffixed
+// The record with this url keeps its key; otherwise a NEW key, suffixed
 // `-2`, `-3`, ... while another record already uses it (harmless collision).
-function allocateSourceKey(sources, url) {
+//
+// D-SINK-48 (lane-p2a, 2026-10-29): the new key is RANDOM, no longer
+// sourceKey(url). The key names the source's cache folder, rides helper
+// spawns and sits in shell.json's `sourceKey` mirror, and a 32-bit FNV hash of
+// a credentialed URL is a check on a guessed password for anyone who reads it
+// (SR40). Nothing needs it to be a function of the URL: every lookup goes by
+// the key the record stores, and what dedupes a re-added URL is
+// findSourceByUrl above -- the normalized URL itself, compared -- exactly as
+// before. Existing keys, folders and records are untouched; sourceKey stays
+// the derivation they were made with. `preferred` is a key the caller already
+// handed out for this record (the add or edit form's probe folder), kept when
+// it is still free so the probe's cache becomes the source's; `draw` is the
+// random source, Math.random unless a test hands one in (QV4's Math.random
+// draws from the system generator; a key needs to be unrelated to the URL,
+// not secret). Mirror of allocate_source_key in the helper, pinned to it by
+// the shared source-keys fixture (dev branch).
+function allocateSourceKey(sources, url, preferred, draw) {
   var existing = findSourceByUrl(sources, url)
   if (existing) return str(existing.key)
-  var base = sourceKey(url)
+  var want = str(preferred)
+  if (want !== "" && isSourceKey(want) && findSource(sources, want) === null) return want
+  var base = randomSourceKey(draw)
   var key = base
   for (var n = 2; findSource(sources, key) !== null; n++) key = base + "-" + n
   return key
+}
+
+// Eight lowercase hex digits from one draw in [0, 1).
+function randomSourceKey(draw) {
+  var d = typeof draw === "function" ? draw : Math.random
+  var n = Math.floor(Number(d()) * 4294967296)
+  if (!isFinite(n) || n < 0) n = 0
+  var hex = (n % 4294967296).toString(16)
+  while (hex.length < 8) hex = "0" + hex
+  return hex
 }
 
 // `<cacheDir>/sources/<key>`; "" when either input is empty or the key is
@@ -1795,8 +1823,8 @@ export {
   EPG_HINT_REFUSED_USERINFO, EPG_HINT_REFUSED_LOCAL, EPG_HINT_HOST_MAX,
   epgHintVerdict, epgHintUrl, resolveEpgUrl, epgHintRowState, EPG_HINT_NOTICE,
   epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
-  findSourceByUrl, allocateSourceKey, sourceCacheDir, cutHostParams,
-  hostPortOf, deriveLabel, labelKey, labelTaken, uniqueLabel,
+  findSourceByUrl, allocateSourceKey, randomSourceKey, sourceCacheDir,
+  cutHostParams, hostPortOf, deriveLabel, labelKey, labelTaken, uniqueLabel,
   defaultSourceLabel, validateLabel, maskQuery, maskUrl, encodeQueryValue,
   xtreamUrls, validateXtream, pluralGroups, countsLine, sameDay,
   formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,

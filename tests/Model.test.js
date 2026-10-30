@@ -12,6 +12,25 @@ const playerFixture = JSON.parse(require("fs").readFileSync(require("path").join
 // two "identical" fixtures drift.
 const pipFixture = require("./fixtures/pip-cases.js")
 
+// D-SINK-48 (lane-p2a, 2026-10-29): a NEW source's key is a random draw now
+// (Model.allocateSourceKey), never the URL's fnv1a32. Much of this suite
+// drives adds and migrations and then names the new record by its key, so the
+// suite FIXES the draw: every new key it allocates is DRAWN_KEY, and a second
+// one in the same history takes the `-2` suffix (the collision rule, unchanged
+// and exercised the harder for it). The draw itself -- random, never the
+// URL's hash, a free preferred key kept -- is checked against the real
+// generator, kept here as REAL_RANDOM, in the lane-p2a block near the end.
+const REAL_RANDOM = Math.random
+const DRAWN_KEY = "5eed0000"
+Math.random = () => 0x5eed0000 / 4294967296
+// Another fixed draw for the length of `fn`, for a check that needs two new
+// keys to differ in one story (an add and an edit).
+function withDraw(n, fn) {
+  const keep = Math.random
+  Math.random = () => n / 4294967296
+  try { return fn() } finally { Math.random = keep }
+}
+
 let failures = 0
 let checks = 0
 
@@ -6582,9 +6601,11 @@ check("statusReason knows the new codes", [Model.statusReason({ ok: false, error
 check("sourceKey vectors", [Model.sourceKey("https://iptv-org.github.io/iptv/countries/us.m3u"), Model.sourceKey("http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts"), Model.sourceKey("/srv/tv/local.m3u")], ["d5977d8a", "d990c2e4", "b0eed9fb"])
 check("isSourceKey", ["d5977d8a", "d5977d8a-2", "d5977d8a-999", "D5977D8A", "d5977d8", "../x", "d5977d8a/..", "d5977d8a-1000"].map(Model.isSourceKey), [true, true, true, false, false, false, false, false])
 const collided = [{ key: "d5977d8a", url: "http://other.test/x" }, { key: "d5977d8a-2", url: "http://other2.test/x" }]
-check("allocateSourceKey suffixes on a collision", Model.allocateSourceKey(collided, "https://iptv-org.github.io/iptv/countries/us.m3u"), "d5977d8a-3")
+// D-SINK-48: a new key is a draw; `draw` pins it here, so the suffix rule is
+// what is checked. Randomness itself is checked in the lane-p2a block.
+check("allocateSourceKey suffixes on a collision", Model.allocateSourceKey(collided, "https://iptv-org.github.io/iptv/countries/us.m3u", "", () => 0xd5977d8a / 4294967296), "d5977d8a-3")
 check("allocateSourceKey returns the existing key for a known url", Model.allocateSourceKey(collided, "http://other2.test/x"), "d5977d8a-2")
-check("allocateSourceKey on an empty list is the plain hash", Model.allocateSourceKey([], "/srv/tv/local.m3u"), "b0eed9fb")
+check("allocateSourceKey on an empty list is the plain draw, never the URL's hash", [Model.allocateSourceKey([], "/srv/tv/local.m3u", "", () => 0.5), Model.allocateSourceKey([], "/srv/tv/local.m3u")], ["80000000", DRAWN_KEY])
 check("findSource / findSourceByUrl with a forced collision", [Model.findSource(collided, "d5977d8a-2").url, Model.findSourceByUrl(collided, "http://other.test/x").key, Model.findSource(collided, "nope"), Model.findSourceByUrl(null, "x")], ["http://other2.test/x", "d5977d8a", null, null])
 check("sourceCacheDir", [Model.sourceCacheDir("/c/omarchy-iptv/", "d5977d8a"), Model.sourceCacheDir("/c", "d5977d8a-2"), Model.sourceCacheDir("/c", "../x"), Model.sourceCacheDir("", "d5977d8a"), Model.sourceCacheDir("/c", "")], ["/c/omarchy-iptv/sources/d5977d8a", "/c/sources/d5977d8a-2", "", "", ""])
 
@@ -7301,35 +7322,43 @@ check("every reducer carries the session through (cloneState)", [
 ], [sessionState.session, sessionState.session, sessionState.session, sessionState.session])
 
 const addOk = Model.addSource(Model.emptyState(), { playlistUrl: " HTTP://Provider.Example.TEST:80/get.php?username=u&password=p&type=m3u_plus&output=ts ", epgUrl: "http://provider.example.test/xmltv.php?username=u&password=p", label: "", origin: "xtream" }, 1000)
-check("addSource normalizes, derives the label, allocates the key", [addOk.ok, addOk.key, addOk.state.sources[0]], [true, "d990c2e4", { key: "d990c2e4", url: "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts", epgUrl: "http://provider.example.test/xmltv.php?username=u&password=p", kind: "http", label: "provider.example.test", labelCustom: false, origin: "xtream", addedAt: 1000, lastUsed: 1000, fetchedAt: 0, channelCount: 0, groupCount: 0 }])
+// D-SINK-48 (lane-p2a, 2026-10-29): a new source's key is a DRAW, no longer the
+// URL's fnv1a32 (d990c2e4 here): ADDED is the key the reducer handed out.
+const ADDED = addOk.key
+check("addSource normalizes, derives the label, allocates the key", [addOk.ok, Model.isSourceKey(ADDED) && ADDED !== Model.sourceKey(addOk.state.sources[0].url), addOk.state.sources[0]], [true, true, { key: ADDED, url: "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts", epgUrl: "http://provider.example.test/xmltv.php?username=u&password=p", kind: "http", label: "provider.example.test", labelCustom: false, origin: "xtream", addedAt: 1000, lastUsed: 1000, fetchedAt: 0, channelCount: 0, groupCount: 0 }])
 check("addSource does not mutate the input state", Model.emptyState().sources.length, 0)
-check("addSource typed label is custom; unknown origin is guide", (() => { const r = Model.addSource(addOk.state, { playlistUrl: "/srv/tv/local.m3u", label: " NAS ", origin: "junk" }, 2000); return [r.state.sources[1].label, r.state.sources[1].labelCustom, r.state.sources[1].origin, r.state.sources[1].kind, r.key] })(), ["NAS", true, "guide", "file", "b0eed9fb"])
+check("addSource typed label is custom; unknown origin is guide", (() => { const r = Model.addSource(addOk.state, { playlistUrl: "/srv/tv/local.m3u", label: " NAS ", origin: "junk" }, 2000); return [r.state.sources[1].label, r.state.sources[1].labelCustom, r.state.sources[1].origin, r.state.sources[1].kind, Model.isSourceKey(r.key) && r.key !== ADDED && r.key === r.state.sources[1].key] })(), ["NAS", true, "guide", "file", true])
 check("addSource codes: empty, scheme, invalid, relative_path, unsafe_path, too_long", ["", "x.test/a", "http://h .test/", "~/a", "/proc/x", "/" + "x".repeat(2100)].map(u => Model.addSource(Model.emptyState(), { playlistUrl: u }).code), ["empty", "scheme", "invalid", "relative_path", "unsafe_path", "too_long"])
 check("addSource bad EPG is rejected with the EPG copy", (() => { const r = Model.addSource(Model.emptyState(), { playlistUrl: "http://h.test/x", epgUrl: "ftp://e" }); return [r.code, r.message] })(), ["scheme", "EPG: start with http://, https://, or / for a local file"])
-check("addSource duplicate returns the existing key (case-changed host, default port)", (() => { const r = Model.addSource(addOk.state, { playlistUrl: "http://PROVIDER.example.test:80/get.php?username=u&password=p&type=m3u_plus&output=ts" }); return [r.code, r.key, r.message] })(), ["duplicate", "d990c2e4", "Already in Sources as " + Q("provider.example.test")])
+check("addSource duplicate returns the existing key (case-changed host, default port)", (() => { const r = Model.addSource(addOk.state, { playlistUrl: "http://PROVIDER.example.test:80/get.php?username=u&password=p&type=m3u_plus&output=ts" }); return [r.code, r.key, r.message] })(), ["duplicate", ADDED, "Already in Sources as " + Q("provider.example.test")])
 check("addSource label_taken for a typed collision; derived labels get a suffix", (() => { const taken = Model.addSource(addOk.state, { playlistUrl: "http://other.test/", label: "Provider.Example.TEST" }); const derived = Model.addSource(addOk.state, { playlistUrl: "http://provider.example.test/other.m3u" }); return [taken.code, derived.state.sources[1].label] })(), ["label_taken", "provider.example.test 2"])
 check("addSource label_too_long", Model.addSource(Model.emptyState(), { playlistUrl: "http://h.test/", label: "x".repeat(65) }).code, "label_too_long")
 const full50 = { version: 2, cacheLayout: 2, favorites: [], recents: [], lastPlayed: null, sources: Array.from({ length: 50 }, (_, i) => ({ key: (10000000 + i).toString(16).padStart(8, "0"), url: "http://h" + i + ".test/", epgUrl: "", kind: "http", label: "h" + i, labelCustom: false, origin: "cli", addedAt: i, lastUsed: i, fetchedAt: 0, channelCount: 0, groupCount: 0 })) }
 check("addSource too_many at the cap", Model.addSource(full50, { playlistUrl: "http://new.test/" }).code, "too_many")
 check("addSource result never carries a URL on failure", JSON.stringify(Model.addSource(full50, { playlistUrl: "http://new.test/" })).indexOf("new.test"), -1)
 
-const twoState = Model.addSource(addOk.state, { playlistUrl: "/srv/tv/local.m3u" }, 2000).state
-check("updateSource label only: labelCustom, state otherwise intact", (() => { const r = Model.updateSource(twoState, "d990c2e4", { label: "Provider" }, 3000); return [r.ok, r.urlChanged, r.replacedKey, r.state.sources[0].label, r.state.sources[0].labelCustom, r.state.sources.length] })(), [true, false, "", "Provider", true, 2])
-check("updateSource empty label re-derives and clears labelCustom", (() => { const r = Model.updateSource(Model.updateSource(twoState, "d990c2e4", { label: "Custom" }).state, "d990c2e4", { label: "" }); return [r.state.sources[0].label, r.state.sources[0].labelCustom] })(), ["provider.example.test", false])
-check("updateSource label_taken against another record, not itself", [Model.updateSource(twoState, "d990c2e4", { label: "LOCAL.m3u" }).code, Model.updateSource(twoState, "d990c2e4", { label: "provider.example.test" }).ok], ["label_taken", true])
-check("updateSource epg only", (() => { const r = Model.updateSource(twoState, "b0eed9fb", { epgUrl: " http://E.test:80/x.xml " }); return [r.ok, r.urlChanged, r.state.sources[1].epgUrl] })(), [true, false, "http://e.test/x.xml"])
-check("updateSource bad epg", Model.updateSource(twoState, "b0eed9fb", { epgUrl: "~/x" }).code, "relative_path")
-check("updateSource same playlist url (normalized) is not a change", Model.updateSource(twoState, "d990c2e4", { playlistUrl: "HTTP://provider.example.test:80/get.php?username=u&password=p&type=m3u_plus&output=ts" }).urlChanged, false)
-const moved = Model.updateSource(twoState, "d990c2e4", { playlistUrl: "http://provider.example.test:8080/get.php?username=u&password=p&type=m3u_plus&output=ts", label: "Provider" }, 4000)
-check("updateSource changed url: new record with a new key, old kept until the probe confirms", [moved.ok, moved.urlChanged, moved.key, moved.replacedKey, moved.state.sources.length, moved.state.sources[2].fetchedAt, moved.state.sources[2].label, moved.state.sources[2].addedAt, moved.state.sources[2].lastUsed, moved.state.sources[0].url === twoState.sources[0].url], [true, true, "85ac744a", "d990c2e4", 3, 0, "Provider", 1000, 4000, true])
-check("updateSource changed url with a derived label re-derives it", Model.updateSource(twoState, "d990c2e4", { playlistUrl: "http://new.test/x" }).state.sources[2].label, "new.test")
-check("updateSource duplicate / unknown", [Model.updateSource(twoState, "d990c2e4", { playlistUrl: "/srv/tv/local.m3u" }).code, Model.updateSource(twoState, "nope", { label: "x" }).code], ["duplicate", "unknown_source"])
+// The reducers below are about a state of two records under the keys this
+// block was written against (how a key is allocated is checked above), so the
+// records the two adds made are re-keyed to them: K1 the provider, K2 the file.
+const K1 = "d990c2e4", K2 = "b0eed9fb"
+const twoStateDrawn = Model.addSource(addOk.state, { playlistUrl: "/srv/tv/local.m3u" }, 2000).state
+const twoState = Model.cloneState(twoStateDrawn, { sources: twoStateDrawn.sources.map((r, i) => Object.assign({}, r, { key: [K1, K2][i] })) })
+check("updateSource label only: labelCustom, state otherwise intact", (() => { const r = Model.updateSource(twoState, K1, { label: "Provider" }, 3000); return [r.ok, r.urlChanged, r.replacedKey, r.state.sources[0].label, r.state.sources[0].labelCustom, r.state.sources.length] })(), [true, false, "", "Provider", true, 2])
+check("updateSource empty label re-derives and clears labelCustom", (() => { const r = Model.updateSource(Model.updateSource(twoState, K1, { label: "Custom" }).state, K1, { label: "" }); return [r.state.sources[0].label, r.state.sources[0].labelCustom] })(), ["provider.example.test", false])
+check("updateSource label_taken against another record, not itself", [Model.updateSource(twoState, K1, { label: "LOCAL.m3u" }).code, Model.updateSource(twoState, K1, { label: "provider.example.test" }).ok], ["label_taken", true])
+check("updateSource epg only", (() => { const r = Model.updateSource(twoState, K2, { epgUrl: " http://E.test:80/x.xml " }); return [r.ok, r.urlChanged, r.state.sources[1].epgUrl] })(), [true, false, "http://e.test/x.xml"])
+check("updateSource bad epg", Model.updateSource(twoState, K2, { epgUrl: "~/x" }).code, "relative_path")
+check("updateSource same playlist url (normalized) is not a change", Model.updateSource(twoState, K1, { playlistUrl: "HTTP://provider.example.test:80/get.php?username=u&password=p&type=m3u_plus&output=ts" }).urlChanged, false)
+const moved = Model.updateSource(twoState, K1, { playlistUrl: "http://provider.example.test:8080/get.php?username=u&password=p&type=m3u_plus&output=ts", label: "Provider" }, 4000)
+check("updateSource changed url: new record with a new key, old kept until the probe confirms", [moved.ok, moved.urlChanged, Model.isSourceKey(moved.key) && [K1, K2].indexOf(moved.key) === -1, moved.replacedKey, moved.state.sources.length, moved.state.sources[2].fetchedAt, moved.state.sources[2].label, moved.state.sources[2].addedAt, moved.state.sources[2].lastUsed, moved.state.sources[0].url === twoState.sources[0].url], [true, true, true, K1, 3, 0, "Provider", 1000, 4000, true])
+check("updateSource changed url with a derived label re-derives it", Model.updateSource(twoState, K1, { playlistUrl: "http://new.test/x" }).state.sources[2].label, "new.test")
+check("updateSource duplicate / unknown", [Model.updateSource(twoState, K1, { playlistUrl: "/srv/tv/local.m3u" }).code, Model.updateSource(twoState, "nope", { label: "x" }).code], ["duplicate", "unknown_source"])
 check("updateSource at the cap: a playlist-URL edit never counts against MAX_SOURCES (the replacement takes the old record's place)", (() => { const r = Model.updateSource(full50, "00989680", { playlistUrl: "http://new.test/" }, 5); return [r.ok, r.code, r.urlChanged, r.replacedKey, r.state.sources.length, r.state.sources.some(s => s.url === "http://new.test/"), Model.removeSource(r.state, r.replacedKey).state.sources.length] })(), [true, "ok", true, "00989680", 51, true, 50])
 check("updateSource at the cap: label / EPG edits and a duplicate stay unaffected", [Model.updateSource(full50, "00989680", { label: "Renamed" }).ok, Model.updateSource(full50, "00989680", { epgUrl: "http://e.test/x.xml" }).ok, Model.updateSource(full50, "00989680", { playlistUrl: "http://h1.test/" }).code], [true, true, "duplicate"])
-check("removeSource", (() => { const r = Model.removeSource(twoState, "b0eed9fb"); return [r.removed.key, r.state.sources.length, Model.removeSource(twoState, "nope").removed, twoState.sources.length] })(), ["b0eed9fb", 1, null, 2])
-check("touchSource bumps lastUsed, unknown key is a no-op", [Model.touchSource(twoState, "b0eed9fb", 9000).sources[1].lastUsed, Model.touchSource(twoState, "nope", 9000).sources[1].lastUsed], [9000, 2000])
-check("withSourceStats copies the counts of an ok status", Model.withSourceStats(twoState, "d990c2e4", { ok: true, fetchedAt: 5000, channelCount: "1475", groupCount: 28 }).sources[0], { ...twoState.sources[0], fetchedAt: 5000, channelCount: 1475, groupCount: 28 })
-check("withSourceStats ignores a failed status, falls back to nowSec", [Model.withSourceStats(twoState, "d990c2e4", { ok: false }).sources[0].fetchedAt, Model.withSourceStats(twoState, "d990c2e4", { ok: true, channelCount: 3 }, 777).sources[0].fetchedAt], [0, 777])
+check("removeSource", (() => { const r = Model.removeSource(twoState, K2); return [r.removed.key, r.state.sources.length, Model.removeSource(twoState, "nope").removed, twoState.sources.length] })(), [K2, 1, null, 2])
+check("touchSource bumps lastUsed, unknown key is a no-op", [Model.touchSource(twoState, K2, 9000).sources[1].lastUsed, Model.touchSource(twoState, "nope", 9000).sources[1].lastUsed], [9000, 2000])
+check("withSourceStats copies the counts of an ok status", Model.withSourceStats(twoState, K1, { ok: true, fetchedAt: 5000, channelCount: "1475", groupCount: 28 }).sources[0], { ...twoState.sources[0], fetchedAt: 5000, channelCount: 1475, groupCount: 28 })
+check("withSourceStats ignores a failed status, falls back to nowSec", [Model.withSourceStats(twoState, K1, { ok: false }).sources[0].fetchedAt, Model.withSourceStats(twoState, K1, { ok: true, channelCount: 3 }, 777).sources[0].fetchedAt], [0, 777])
 // D-SINK-19 deleted Model.activeSourceKey (see the comment where it was): the
 // active source is no longer named from a URL. What survives is "which record
 // holds this URL", which is identity (D4's untouched half) and is a
@@ -7358,10 +7387,10 @@ checkCall("R2: reconcileSources writes the adopted key into out.state, on the kn
           // a state with NO key that adopts a known URL: nothing in the history
           // moves, but the key now does, so it is a change to write
           same.changed, Model.activeKeyOf(same.state), Model.activeKeyOf(twoState)]
-}, ["b0eed9fb", "b0eed9fb", true, "d5977d8a", "d5977d8a", true, "d990c2e4", ""])
+}, ["b0eed9fb", "b0eed9fb", true, DRAWN_KEY, DRAWN_KEY, true, "d990c2e4", ""])
 check("reconcileSources: known url, key changed -> lastUsed bumped only", (() => { const r = Model.reconcileSources(twoState, "/srv/tv/local.m3u", "", "d990c2e4", 5000); return [r.changed, r.activeKey, r.added, r.state.sources[1].lastUsed, r.state.sources[0].lastUsed] })(), [true, "b0eed9fb", "", 5000, 1000])
 check("reconcileSources: adopts a changed valid epgUrl, ignores an invalid one", [Model.reconcileSources(twoState, "/srv/tv/local.m3u", "http://e.test/x.xml", "b0eed9fb", 5000).state.sources[1].epgUrl, Model.reconcileSources(Model.withActiveKey(twoState, "b0eed9fb"), "/srv/tv/local.m3u", "ftp://e", "b0eed9fb", 5000).changed], ["http://e.test/x.xml", false])
-check("reconcileSources: unknown url is added with origin cli and a derived label", (() => { const r = Model.reconcileSources(twoState, "https://iptv-org.github.io/iptv/countries/us.m3u", "", "d990c2e4", 6000); const s = r.state.sources[2]; return [r.changed, r.activeKey, r.added, s.origin, s.label, s.lastUsed, s.fetchedAt, s.labelCustom] })(), [true, "d5977d8a", "d5977d8a", "cli", "iptv-org.github.io", 6000, 0, false])
+check("reconcileSources: unknown url is added with origin cli and a derived label", (() => { const r = Model.reconcileSources(twoState, "https://iptv-org.github.io/iptv/countries/us.m3u", "", "d990c2e4", 6000); const s = r.state.sources[2]; return [r.changed, r.activeKey, r.added, s.origin, s.label, s.lastUsed, s.fetchedAt, s.labelCustom] })(), [true, DRAWN_KEY, DRAWN_KEY, "cli", "iptv-org.github.io", 6000, 0, false])
 check("reconcileSources: first v2 run (no history, legacy layout) tags the record migrated", [Model.reconcileSources(Model.emptyState(), "https://iptv-org.github.io/iptv/countries/us.m3u", "", "", 1).state.sources[0].origin, Model.reconcileSources(Model.withCacheLayout(Model.emptyState(), 2), "https://iptv-org.github.io/iptv/countries/us.m3u", "", "", 1).state.sources[0].origin, Model.reconcileSources(Model.emptyState(), "http://x.test/", "", "", 1, "cli").state.sources[0].origin], ["migrated", "cli", "cli"])
 check("reconcileSources: derived label is made unique", Model.reconcileSources(twoState, "http://provider.example.test/second.m3u", "", "", 1).state.sources[2].label, "provider.example.test 2")
 // R27d (2026-10-20, D-SRC-44) replaces the two eviction pins that stood here
@@ -7796,7 +7825,7 @@ check("D-SRC-09: normalizeSourceRecord returns null for a control character in u
 check("D-SRC-05: openFirstRun clears the query (header reads the placeholder again)", (() => { const st = Model.withQuery(Model.guideState("all"), "Harness Live"); const fr = Model.openFirstRun(st); return [fr.query, fr.mode, fr.form.origin, fr.cursorIndex] })(), ["", "sourceEdit", "firstRun", 0])
 check("D-SRC-05: afterRemove of the last source and closeSources to an unconfigured guide both land with an empty query", (() => { const q = Model.withQuery(Model.guideState("all"), "Harness Live"); const src = Model.openSources(q, []); return [Model.afterRemove(src, 0).query, Model.closeSources(src, { configured: false }).query, Model.closeSources(src, { configured: true }).query] })(), ["", "", "Harness Live"])
 check("D-SRC-10: adoptEpg false keeps a known record's own epgUrl (the settings' one belongs to the previous source)", (() => { const r = Model.reconcileSources(twoState, "/srv/tv/local.m3u", "http://prev.test/xmltv.php?username=u&password=p", "d990c2e4", 5000, "", { adoptEpg: false }); return [r.changed, r.activeKey, r.state.sources[1].epgUrl, r.state.sources[1].lastUsed] })(), [true, "b0eed9fb", "", 5000])
-check("D-SRC-10: adoptEpg false starts a new CLI record without the carried-over epgUrl", (() => { const r = Model.reconcileSources(twoState, "https://iptv-org.github.io/iptv/countries/us.m3u", "http://prev.test/xmltv.php?username=u&password=p", "d990c2e4", 6000, "", { adoptEpg: false }); const s = r.state.sources[2]; return [r.added, s.epgUrl, s.origin, s.url] })(), ["d5977d8a", "", "cli", "https://iptv-org.github.io/iptv/countries/us.m3u"])
+check("D-SRC-10: adoptEpg false starts a new CLI record without the carried-over epgUrl", (() => { const r = Model.reconcileSources(twoState, "https://iptv-org.github.io/iptv/countries/us.m3u", "http://prev.test/xmltv.php?username=u&password=p", "d990c2e4", 6000, "", { adoptEpg: false }); const s = r.state.sources[2]; return [r.added, s.epgUrl, s.origin, s.url] })(), [DRAWN_KEY, "", "cli", "https://iptv-org.github.io/iptv/countries/us.m3u"])
 check("D-SRC-02: the default (and an explicit adoptEpg true) adopts a changed epgUrl into the known active record", [Model.reconcileSources(twoState, "/srv/tv/local.m3u", "http://e.test/x.xml", "b0eed9fb", 5000).state.sources[1].epgUrl, Model.reconcileSources(twoState, "/srv/tv/local.m3u", "http://e.test/x.xml", "b0eed9fb", 5000, "", { adoptEpg: true }).state.sources[1].epgUrl, Model.reconcileSources(twoState, "/srv/tv/local.m3u", "http://e.test/x.xml", "b0eed9fb", 5000, "", {}).changed], ["http://e.test/x.xml", "http://e.test/x.xml", true])
 check("D-SRC-02: adopting an empty epgUrl clears the record's (omarchy bar set epgUrl '')", Model.reconcileSources(state4, recNas.url, "", "11111111", 5000).state.sources[1].epgUrl, "")
 check("D-SRC-01: statusFetchedAt prefers fetchedAt, then generatedAt, else 0", [Model.statusFetchedAt({ fetchedAt: 1789244100, generatedAt: 5 }), Model.statusFetchedAt({ generatedAt: 7 }), Model.statusFetchedAt({ fetchedAt: "x" }), Model.statusFetchedAt(null)], [1789244100, 7, 0, 0])
@@ -7941,7 +7970,7 @@ checkCall("D-SINK-19 migration 4: a URL the history has never seen is ADDED, not
           fresh.key, Model.findSource(fresh.state.sources, fresh.key).origin,
           // the source that was already there survives
           out.state.sources.map(r => r.key).indexOf("42839dd5") >= 0]
-}, ["d5977d8a", "d5977d8a", true, 2, "https://iptv-org.github.io/iptv/countries/us.m3u", "http://e.test/x.xml", "cli", "d5977d8a", "migrated", true])
+}, [DRAWN_KEY, DRAWN_KEY, true, 2, "https://iptv-org.github.io/iptv/countries/us.m3u", "http://e.test/x.xml", "cli", DRAWN_KEY, "migrated", true])
 
 checkCall("D-SINK-19 migration 5 (R1): an entry with a KEY and a SEEN URL -- the key wins and the URL is not read; an unseen URL beside the same key is adopted while migrating", () => {
   // The seen case is the host one write behind: the plugin has already
@@ -7960,7 +7989,7 @@ checkCall("D-SINK-19 migration 5 (R1): an entry with a KEY and a SEEN URL -- the
   return [consumed.key, consumed.adoptedUrl, consumed.state.sources.length, consumed.added,
           fresh.key, fresh.adoptedUrl, fresh.state.sources.length, fresh.added, fresh.moved,
           junk.key, junk.adoptedUrl, junk.state.sources.length]
-}, ["42839dd5", false, 1, "", OLD_KEY, true, 2, OLD_KEY, true, "", false, 1])
+}, ["42839dd5", false, 1, "", DRAWN_KEY, true, 2, DRAWN_KEY, true, "", false, 1])
 
 checkCall("D-SINK-19 migration 6: an activeKey naming a source that no longer exists falls through, and the dangling value is cleared", () => {
   const dangling = oldShape([srcSecond], "d990c2e4")
@@ -7974,7 +8003,7 @@ checkCall("D-SINK-19 migration 6: an activeKey naming a source that no longer ex
   return [none.key, none.changed, none.state.activeKey, none.state.sources.length,
           viaKey.key, viaKey.state.activeKey,
           viaUrl.key, viaUrl.added, viaUrl.state.sources.length]
-}, ["", true, "", 1, "42839dd5", "42839dd5", OLD_KEY, OLD_KEY, 2])
+}, ["", true, "", 1, "42839dd5", "42839dd5", DRAWN_KEY, DRAWN_KEY, 2])
 
 checkCall("D-SINK-19 migration: an empty install stays empty, and an INVALID URL at the migration leaves the active source alone (D16)", () => {
   const empty = Model.adoptActiveSource(Model.emptyState(), { playlistUrl: "", epgUrl: "", sourceKey: "" }, 1000, "")
@@ -9253,7 +9282,7 @@ checkCall("SR8 / R21: the migration's adoption really is reconcileSources, and i
           Model.activeKeyOf(active), again.changed, again.activeKey, again.added]
   // `cli`, not `migrated`: the cache layout marker is already 2, so this is
   // not the first v2 run (reconcileSources' origin rule, unchanged).
-}, ["d990c2e4", "d990c2e4", "cli", "d990c2e4", false, "d990c2e4", ""])
+}, [DRAWN_KEY, DRAWN_KEY, "cli", DRAWN_KEY, false, DRAWN_KEY, ""])
 
 check("D-SINK-19: the state the migration writes is the only place the URL is, and the IPC summary still carries none",
   [JSON.stringify(Model.sourcesSummary(oldShape([srcProvider]), OLD_KEY)).indexOf("://"),
@@ -13398,7 +13427,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   const E = "http://e.example.test/xmltv.php?username=u&password=p", F = "http://f.example.test/guide.xml", G = "http://g.example.test/guide.xml"
   const BAD = "ftp://u:lenspass@bad.example.test/list.m3u", BADE = "ftp://u:lenspass@bad.example.test/guide.xml"
   const keyOf = url => M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
-  const KA = keyOf(A), KB = keyOf(B), KNEW = keyOf(NEW)
+  // D-SINK-48: NEW is added by the runs below, so its key is the suite's draw.
+  const KA = keyOf(A), KB = keyOf(B), KNEW = DRAWN_KEY
   const rec = (url, extra) => Object.assign({ key: keyOf(url), url, epgUrl: "", kind: "http", label: url.split("/")[2], labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }, extra || {})
   const stateText = (sources, activeKey, extra) => JSON.stringify(Object.assign({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources, activeKey }, extra || {})) + "\n"
   // A state the migration has already written: the marker is in the FILE.
@@ -13680,12 +13710,14 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   // deliberate removals of a folder that was active (removeSource, and the
   // commit of a URL edit of the active source, whose old folder's removal is
   // now queued after the state that moves the pointer is published).
-  const EDITED = "http://edited.example.test/list.m3u", KED = keyOf(EDITED)
+  // D-SINK-48: an edit's new folder is a draw; this block draws it apart from
+  // an add's (withDraw), so a check can still tell the two folders apart.
+  const EDITED = "http://edited.example.test/list.m3u", KED = "ed17ed00"
   const nm = k => k === KED ? "EDITED" : keyName(k)
   const unfetched = () => rec(A, { fetchedAt: 0, channelCount: -1, groupCount: 0, origin: "migrated" })
   // What the guide does on a duplicate of a record that never fetched.
   const addAgain = h => { const dup = h.root.addSource({ playlistUrl: A, epgUrl: "", label: "" }); return [dup.ok, dup.code, nm(dup.id), h.root.retrySource(dup.id).ok] }
-  const editA = h => h.root.updateSource(KA, { label: "a.example.test", playlistUrl: EDITED, epgUrl: "" })
+  const editA = h => withDraw(0xed17ed00, () => h.root.updateSource(KA, { label: "a.example.test", playlistUrl: EDITED, epgUrl: "" }))
 
   checkCall("D-SRC-70: Model.cacheJobDrop / cacheJobArgs -- a `remove --key K` is dropped when K is the ACTIVE key when it runs ('active'), the prune's keep of the active key mirrored; another key's removal, K's once something else or nothing is active, an epg-clear of the active key and a prune run; D-SRC-69's rule still answers 'probe'", () => {
     const st = M.parseState(migratedText([rec(A), rec(B)], KA))
@@ -15050,6 +15082,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // round 9 and 10's add-form race (R19c, R20d): a CLI guide URL set while
     // the add form's probe runs is refused, so the form's guide URL stands
     checkCall("R21e (" + mode + " host) the add form's race: a CLI epgUrl set while the first add's probe runs is REFUSED; the form's guide URL F lands with the record and survives the restart", () => {
+      // D-SINK-48: A is ADDED here (no record seeds it), so its key is the draw.
       const h = boot({ showLogos: false }, migratedText([], ""), mode)
       const submitted = h.root.addSource({ playlistUrl: A, epgUrl: F, label: "" })
       h.tick(5000)
@@ -15057,7 +15090,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       h.tick(5000)
       h.probeExit(JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })); h.drain()
       const next = restart(h)
-      return [submitted.ok, h.root.activeSourceKey === KA, name(epgOf(h.file(), KA)), reports(h), retired(h.storedEntry()), name(epgOf(next.file(), KA))]
+      return [submitted.ok, h.root.activeSourceKey === DRAWN_KEY, name(epgOf(h.file(), DRAWN_KEY)), reports(h), retired(h.storedEntry()), name(epgOf(next.file(), DRAWN_KEY))]
     }, [true, true, "F", ["epgUrl:retired"], [], "F"])
     // D-SINK-20's recarry: on the lagging host the publish still carries a
     // value the heal stripped, and the patch-only toggle used to write it back
@@ -15592,7 +15625,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     const H4 = "http://h4.example.test/l.m3u"
     const KH = keyOf(H4)
     const Z = "http://z.example.test/get.php?username=u&password=zpass"
-    const KZ = keyOf(Z)
+    // D-SINK-48: Z is added in-app by the runs below, so its key is the draw.
+    const KZ = DRAWN_KEY
     const keysOf = st => st.sources.map(r => r.key === KA ? "A" : r.key === KB ? "B" : r.key === KH ? "H" : r.key === KZ ? "Z" : r.key)
     const helperAdd = sf => { const st = JSON.parse(sf.disk); st.sources.push(rec(H4)); sf.disk = JSON.stringify(st) + "\n"; sf.exists = true }
     const reasons = h => h.root.stateReloadsByReason || {}
@@ -16222,7 +16256,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   // report).
   {
     const H4 = "http://h4.example.test/l.m3u", KH = keyOf(H4)
-    const Z = "http://z.example.test/get.php?username=u&password=zpass", KZ = keyOf(Z)
+    // D-SINK-48: Z is added by the runs below (in-app, or adopted), so its key is the draw.
+    const Z = "http://z.example.test/get.php?username=u&password=zpass", KZ = DRAWN_KEY
     const many = n => { const out = []; for (let i = 0; i < n; i++) out.push(rec("http://m" + i + ".example.test/l.m3u", { lastUsed: 100 + i })); return out }
     const helperAdd = sf => { const st = JSON.parse(sf.disk); st.sources.push(rec(H4)); sf.disk = JSON.stringify(st) + "\n"; sf.exists = true }
     const fullTold = h => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74016") !== -1 && a[a.length - 2] === "Sources is full")
@@ -16401,6 +16436,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           return { race, then: thenRemoveOne(h, keyOf("http://m8.example.test/l.m3u")) }
         }, { race: afterRace, then: migrated })
         checkCall("F1 (" + tag + "), rule 15: held full, a hand-run removal frees a place, and another program adds the SAME playlist (no guide URL) before the retry's save has read the file -- the record stands as theirs, and the migration is retried over it at once: the bar's guide URL reaches the record, the marker lands, the entry is stripped; nothing told but the one full card (before F1 the guide URL was lost, told by a journal line only)", () => {
+          // D-SINK-48: the record the other program adds carries its own key, not
+          // the shell's draw: KTHEIRS.
+          const KTHEIRS = keyOf(NEW)
           const fifty = [rec(A), rec(B)].concat(many(48))
           const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
           h.drain()
@@ -16410,8 +16448,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           h.foreign(sf => { const st = JSON.parse(sf.disk); st.sources = st.sources.filter(r => r.url !== "http://m7.example.test/l.m3u"); sf.disk = JSON.stringify(st) + "\n" })
           h.drain(); h.elapse(3000); h.drain()
           const next = restart(h)
-          return { fired, file: [h.file().sources.length, name(epgOf(h.file(), KNEW)), marked(h), M.activeKeyOf(h.file()) === KNEW], entry: retired(h.storedEntry()), held: h.root.migrationHeldFull,
-                   reports: reports(h), told: allTold(h), dropTold: dropTold(h), clean: clean(h) && !leaks(h), restart: [name(epgOf(next.file(), KNEW)), next.root.activeSourceKey === KNEW] }
+          return { fired, file: [h.file().sources.length, name(epgOf(h.file(), KTHEIRS)), marked(h), M.activeKeyOf(h.file()) === KTHEIRS], entry: retired(h.storedEntry()), held: h.root.migrationHeldFull,
+                   reports: reports(h), told: allTold(h), dropTold: dropTold(h), clean: clean(h) && !leaks(h), restart: [name(epgOf(next.file(), KTHEIRS)), next.root.activeSourceKey === KTHEIRS] }
         }, { fired: true, file: [50, "E", true, true], entry: [], held: false, reports: ["playlistUrl:full"], told: ["Sources is full"], dropTold: 0, clean: true, restart: ["E", true] })
         // ---- D-SRC-64 (round 7, 2026-10-22, the owner's decision): A HELD
         // MIGRATION PARKS BOTH URLS IN STATE.JSON. The #14748 review's plugin
@@ -16478,15 +16516,17 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
              landed: { parked: PAIR, fav: true, urlWrites: 0, entry: [] }, restart: { entry: [], parked: PAIR, heldFull: true, urlWrites: 0, inRecords: false },
              removed: { rm: true, parked: null, newEpg: "E", active: true, marked: true, entry: [] }, clean: true })
         checkCall("D-SRC-64 (" + tag + "): held (the pair parked, the entry empty), then ONE foreign write both removes a source and adds the parked playlist itself (a hand-run `state source remove` and `state source add` before the shell reloads) -- the pair is redundant: the retry lands onto THAT record, which takes the parked guide URL, the marker lands, the pair is dropped, nothing told but the one full card", () => {
+          // D-SINK-48: the record the hand-run add makes carries its own key: KTHEIRS.
+          const KTHEIRS = keyOf(NEW)
           const fifty = [rec(A), rec(B)].concat(many(48))
           const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
           h.drain()
           const before = { parked: pendingOf(h.file()), entry: retired(h.storedEntry()) }
           h.foreign(sf => { const st = JSON.parse(sf.disk); st.sources = st.sources.filter(r => r.url !== "http://m1.example.test/l.m3u"); st.sources.push(rec(NEW, { label: "theirs", labelCustom: true })); sf.disk = JSON.stringify(st) + "\n" }); h.drain()
           const next = restart(h)
-          return { before, file: [h.file().sources.length, name(epgOf(h.file(), KNEW)), marked(h), M.activeKeyOf(h.file()) === KNEW, pendingOf(h.file())], label: M.findSource(h.file().sources, KNEW).label,
+          return { before, file: [h.file().sources.length, name(epgOf(h.file(), KTHEIRS)), marked(h), M.activeKeyOf(h.file()) === KTHEIRS, pendingOf(h.file())], label: M.findSource(h.file().sources, KTHEIRS).label,
                    entry: retired(h.storedEntry()), held: h.root.migrationHeldFull, reports: reports(h), told: allTold(h), dropTold: dropTold(h),
-                   restart: [pendingOf(next.file()), name(epgOf(next.file(), KNEW)), next.root.activeSourceKey === KNEW, reports(next)], clean: clean(h) && !leaks(h) }
+                   restart: [pendingOf(next.file()), name(epgOf(next.file(), KTHEIRS)), next.root.activeSourceKey === KTHEIRS, reports(next)], clean: clean(h) && !leaks(h) }
         }, { before: { parked: PAIR, entry: [] }, file: [50, "E", true, true, null], label: "theirs", entry: [], held: false, reports: ["playlistUrl:full"], told: ["Sources is full"], dropTold: 0, restart: [null, "E", true, []], clean: true })
         // ---- Round 8 (2026-10-22, the round 7 recheck's P2 #1): a hand
         // `omarchy bar set playlistUrl <any>` DURING the hold. Red on the
@@ -16511,7 +16551,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           const rm = g.root.removeSource(keyOf("http://m0.example.test/l.m3u")); g.drain()
           const next = restart(g)
           return { other, again, entryWins,
-                   landed: { rm: rm.ok, parked: pendingOf(g.file()), zEpg: name(epgOf(g.file(), KZ)), newInRecords: M.findSource(g.file().sources, KNEW) !== null, active: g.root.activeSourceKey === KZ, marked: marked(g), entry: retired(g.storedEntry()), count: g.file().sources.length,
+                   landed: { rm: rm.ok, parked: pendingOf(g.file()), zEpg: name(epgOf(g.file(), KZ)), newInRecords: M.findSourceByUrl(g.file().sources, M.normalizeSourceUrl(NEW, { origin: "cli" })) !== null, active: g.root.activeSourceKey === KZ, marked: marked(g), entry: retired(g.storedEntry()), count: g.file().sources.length,
                              restart: [pendingOf(next.file()), name(epgOf(next.file(), KZ)), next.root.activeSourceKey === KZ] },
                    clean: clean(h) && clean(g) && clean(next) && !leaks(h) && !leaks(g) }
         }, { other: { parked: { playlistUrl: Z, epgUrl: E }, memory: { playlistUrl: Z, epgUrl: E }, entry: [], oracleE: true, journal: 1, both: 1, urlWrites: 0, told: ["Sources is full"], heldFull: true },
@@ -17456,7 +17496,8 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const A = "http://a.example.test/list.m3u", B = "http://b.example.test/list.m3u", NEW = "http://new.example.test/get.php?username=u&password=p"
   const keyOf = url => M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
-  const KA = keyOf(A), KB = keyOf(B), KNEW = keyOf(NEW)
+  // D-SINK-48: NEW is added by the runs below, so its key is the suite's draw.
+  const KA = keyOf(A), KB = keyOf(B), KNEW = DRAWN_KEY
   const rec = (url, extra) => Object.assign({ key: keyOf(url), url, epgUrl: "", kind: "http", label: url.split("/")[2], labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }, extra || {})
   const stateText = (sources, activeKey, extra) => JSON.stringify(Object.assign({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources, activeKey, entryMigrated: true }, extra || {})) + "\n"
   const boot = (entry, text, o) => H.bootService(svcText, M, Object.assign({ entry, stateText: text, host: "lag" }, o || {}))
@@ -17471,7 +17512,7 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     const add = M.probeCommitPlan({ commit: true, mode: "add", key: KB, newKey: KB, activeKey: KA })
     const sw = M.probeCommitPlan({ commit: true, mode: "switch", key: KB, newKey: KB, activeKey: KA })
     const none = M.probeCommitPlan({ commit: false, mode: "edit", key: KA, newKey: KNEW, activeKey: KA })
-    const st = M.parseState(stateText([rec(A), rec(NEW)], ""))
+    const st = M.parseState(stateText([rec(A), rec(NEW, { key: KNEW })], ""))   // D-SINK-48: the edit's record carries the draw
     return [edit, other, retry, add, sw, none,
             M.activeKeyOf(M.probeCommitState(st, edit, KNEW)), M.activeKeyOf(M.probeCommitState(st, other, KNEW)), M.probeCommitState(st, null, KNEW) === st]
   }, [{ wasActive: true, act: "switch" }, { wasActive: false, act: "switch" }, { wasActive: false, act: "reload" },
@@ -18316,6 +18357,30 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
        file: "/run/user/1000/omarchy-iptv/mpv-args.conf" })
   checkCall("D-SINK-47: a token holding a NUL is refused by the shell's filter too (it cannot be one line of the options file)", () =>
     M.splitMpvArgs("--volume=5 --user-agent=a\u0000b"), { args: ["--volume=5"], rejected: ["--user-agent=a\u0000b"], warnings: ["mpvArg --user-agent refused: reserved by the plugin"] })
+  // D-SINK-48 (a): a NEW source's key is a random draw, never the URL's
+  // fnv1a32. The shared fixture with fixed draws, then the real generator.
+  const SK = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-keys.json"), "utf8"))
+  checkCall("D-SINK-48 (shared fixture): allocateSourceKey -- a new key is the draw (zero-padded hex), a known URL keeps its record's key, the -2 suffix rule holds, and a free, well-formed preferred key is kept", () =>
+    SK.cases.map(c => [c.name, M.allocateSourceKey(c.sources, c.url, c.preferred, () => c.draw / 4294967296)]), SK.cases.map(c => [c.name, c.want]))
+  checkCall("D-SINK-48: with the real generator, two hundred new keys for one URL are well-formed keys, none is the URL's hash (the confirmation oracle), and they are not one value", () => {
+    const url = "http://provider.example.test/get.php?username=u&password=p"
+    const keys = Array.from({ length: 200 }, () => M.allocateSourceKey([], url, "", REAL_RANDOM))
+    return [keys.every(k => M.isSourceKey(k)), keys.indexOf(M.sourceKey(url)), new Set(keys).size > 190]
+  }, [true, -1, true])
+  checkCall("D-SINK-48 (service): an in-app add's commit keeps the key its probe wrote under -- the probe's folder IS the new source's cache -- and queues no removal of it", () => {
+    const h = boot()
+    const url = "http://fresh.example.test/get.php?username=f&password=f"
+    // The add draws aaaa0000; the commit, were it to draw again, would get
+    // the suite's 5eed0000 -- which is how a commit that dropped the probe's
+    // key would show.
+    const added = withDraw(0xaaaa0000, () => h.root.addSource({ playlistUrl: url, epgUrl: "", label: "" }))
+    h.runLater()
+    const dirKey = h.root.probeDirKey
+    const before = h.cacheRuns.length
+    h.probeExit(JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })); h.drain()
+    const rec = M.findSourceByUrl(h.root.userState.sources, M.normalizeSourceUrl(url, { origin: "cli" }))
+    return [added.ok, dirKey, rec ? rec.key : null, h.cacheRuns.slice(before).filter(c => c.indexOf("remove") !== -1).length, h.compileErrors]
+  }, [true, "aaaa0000", "aaaa0000", 0, []])
   fs.rmSync(scratch, { recursive: true, force: true })
 })()
 

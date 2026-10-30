@@ -5149,7 +5149,10 @@ Item {
           // later-by-time landing of the form's is withdrawn with R21.
           newKey = String(known.key)
         } else {
-          newKey = Model.allocateSourceKey(st.sources, pending.url)
+          // D-SINK-48: new keys are random, so the probe's own key is
+          // handed back and kept while it is free -- the probe's folder IS the
+          // source's cache.
+          newKey = Model.allocateSourceKey(st.sources, pending.url, pending.key)
           var record = pending
           if (newKey !== pending.key) {
             record = {}

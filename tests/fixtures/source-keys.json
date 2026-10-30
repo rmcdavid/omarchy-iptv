@@ -1,0 +1,115 @@
+{
+ "_comment": [
+  "D-SINK-48 (lane-p2a, 2026-10-29): a NEW source's key is a random draw, no longer fnv1a32 of",
+  "its URL. Run by Model.allocateSourceKey (tests/Model.test.js, draw = () => draw / 2^32) and by",
+  "allocate_source_key (tests/test_source.py, draw = lambda: draw), the same cases. `draw` is the",
+  "32-bit number the generator produced. Existing keys and the -2 suffix rule are unchanged; what",
+  "dedupes a re-added URL is the URL itself (findSourceByUrl). ASCII only."
+ ],
+ "cases": [
+  {
+   "name": "an empty history: the draw, as eight lowercase hex digits",
+   "sources": [],
+   "url": "http://provider.example.test/get.php?username=u&password=p",
+   "preferred": "",
+   "draw": 3735928559,
+   "want": "deadbeef"
+  },
+  {
+   "name": "a small draw is zero-padded",
+   "sources": [],
+   "url": "http://provider.example.test/get.php?username=u&password=p",
+   "preferred": "",
+   "draw": 10,
+   "want": "0000000a"
+  },
+  {
+   "name": "never the URL's hash unless the draw happens to be it (d990c2e4 is this URL's fnv1a32)",
+   "sources": [],
+   "url": "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts",
+   "preferred": "",
+   "draw": 1,
+   "want": "00000001"
+  },
+  {
+   "name": "a known URL keeps its record's key, whatever is drawn or preferred",
+   "sources": [
+    {
+     "key": "0badf00d",
+     "url": "http://provider.example.test/get.php?username=u&password=p"
+    }
+   ],
+   "url": "http://provider.example.test/get.php?username=u&password=p",
+   "preferred": "cafebabe",
+   "draw": 1,
+   "want": "0badf00d"
+  },
+  {
+   "name": "a drawn key another record holds takes the -2 suffix",
+   "sources": [
+    {
+     "key": "deadbeef",
+     "url": "http://other.test/"
+    }
+   ],
+   "url": "http://provider.example.test/get.php?username=u&password=p",
+   "preferred": "",
+   "draw": 3735928559,
+   "want": "deadbeef-2"
+  },
+  {
+   "name": "and -3 past a -2",
+   "sources": [
+    {
+     "key": "deadbeef",
+     "url": "http://other.test/"
+    },
+    {
+     "key": "deadbeef-2",
+     "url": "http://other2.test/"
+    }
+   ],
+   "url": "http://provider.example.test/get.php?username=u&password=p",
+   "preferred": "",
+   "draw": 3735928559,
+   "want": "deadbeef-3"
+  },
+  {
+   "name": "a free preferred key is kept (the probe's folder becomes the source's)",
+   "sources": [],
+   "url": "http://provider.example.test/get.php?username=u&password=p",
+   "preferred": "cafebabe",
+   "draw": 1,
+   "want": "cafebabe"
+  },
+  {
+   "name": "a preferred key another record holds is not",
+   "sources": [
+    {
+     "key": "cafebabe",
+     "url": "http://other.test/"
+    }
+   ],
+   "url": "http://provider.example.test/get.php?username=u&password=p",
+   "preferred": "cafebabe",
+   "draw": 1,
+   "want": "00000001"
+  },
+  {
+   "name": "a preferred value that is not a key is not",
+   "sources": [],
+   "url": "http://provider.example.test/get.php?username=u&password=p",
+   "preferred": "../x",
+   "draw": 1,
+   "want": "00000001"
+  },
+  {
+   "name": "a suffixed preferred key is a key",
+   "sources": [],
+   "url": "http://provider.example.test/get.php?username=u&password=p",
+   "preferred": "cafebabe-2",
+   "draw": 1,
+   "want": "cafebabe-2"
+  }
+ ]
+}

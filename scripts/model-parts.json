@@ -881,6 +881,7 @@
         "findSource",
         "findSourceByUrl",
         "allocateSourceKey",
+        "randomSourceKey",
         "sourceCacheDir",
         "cutHostParams",
         "hostPortOf",
