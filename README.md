@@ -422,9 +422,10 @@ privately and the helper gives them to the player in a file only your account
 can read, which it deletes as soon as the player has read it. A player that was
 already running when you updated keeps its old command line until it is next
 restarted (stop and play again). Two things behave differently in that file:
-an option mpv cannot understand is skipped with a message in the player's log
-instead of stopping the player from starting, and `--no-config` no longer stops
-mpv reading your own mpv config (remove the line from your config instead).
+an option mpv cannot understand is skipped instead of stopping the player from
+starting (mpv says so only on its own output, which the plugin discards, so a
+typo now fails quietly), and `--no-config` no longer stops mpv
+reading your own mpv config (remove the line from your config instead).
 The same goes for the keys that name your sources and the ids of channels:
 neither is on a command line any more, and a source you add from now on gets a
 random key rather than one worked out from its address.

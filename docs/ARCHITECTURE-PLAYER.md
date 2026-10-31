@@ -1241,7 +1241,7 @@ re-run with the tokens in the file, holds every pin. The file is removed as
 soon as the socket answers -- mpv binds it only after reading its whole
 command line -- and on every way out of a launch; a restart writes it again. A
 crash or an adoption sees the file's NAME on the argv and no file. What
-differs from the argv, stated: a line mpv cannot parse is logged and skipped
+differs from the argv, stated: a line mpv cannot parse is reported and skipped
 where a token stopped the player from starting; the eleven options mpv takes on
 the command line only (`--help`, `--version`, `--v`, `--list-*`, `--show-profile`,
 `--input-cmdlist`, `--input-keylist`) are refused in a file; and `--no-config`
@@ -1251,7 +1251,15 @@ filters; so is one holding a lone surrogate, which no UTF-8 file can hold (a
 byte the helper's argv could not decode arrives as one, and so does a JSON
 `\ud800` escape): the first version kept it and the start ended `internal`
 at the write (`Model.splitMpvArgs` / `filter_mpv_args`, through
-`mpv_token_writable`). Residual: a player adopted after the upgrade keeps the
+`mpv_token_writable`). mpv's report of a line it cannot parse ECHOES the value
+(`<file>:1: setting option volume='<value>' failed.`, and the option's own
+complaint before it), which for a token holding a secret would be a sink; it
+is not one here only because mpv 0.41.0 writes those lines to its standard
+OUTPUT, which `spawn_detached` points at /dev/null -- measured, windowless, the
+helper's own descriptors: nothing on the stderr pipe the launch reason is read
+from, the same lines on stdout when stdout is a pipe. Capturing the player's
+stdout for a better launch reason would open it, and needs the kept tokens'
+values scrubbed first. Residual: a player adopted after the upgrade keeps the
 tokens it was launched with on its argv until it restarts.]**
 
 `MPV_RESERVED` gains ten entries, every one of which is reachable today from the
