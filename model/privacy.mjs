@@ -24,7 +24,7 @@ import {
   formatCount, pluralChannels
 } from "./epg.mjs"
 import {
-  HOST_WITHHELD, runHostParts
+  CONTROL_RE, HOST_WITHHELD, runHostParts
 } from "./sources.mjs"
 
 // ---- D-SINK-18: the container the host settings file is, before a URL goes
@@ -262,11 +262,41 @@ function playerPauseArgv(socket, state) {
 // answers with a fresh card too. `-p` makes the wrapper print the id the
 // server returned, which is how the next post of the kind finds it; it comes
 // before `-r` so `-r <id> <headline>` stays one run of the argv.
+//
+// F-SINK-14 (2026-10-29). The channel name is redacted HERE, by sinkText,
+// the one rule every place a provider's name is shown goes through: the
+// guide's row printed `News HD (backup cdn.test)` while this body printed
+// the whole credentialed URL, and the host keeps every body in its history.
+// Redacted BEFORE cleanName, so the S-04 dash rule sees what is shown.
+//
+// D-SINK-49 (2026-10-29). The host renders the BODY as Text.StyledText
+// (OMARCHY-PLUGIN-CONTRACT.md (dev branch), "Verified host renderers", and
+// pinned by its host text-format test) behind a stripper that drops image tags
+// only, and the Desktop Notifications spec leaves escaping to the client
+// once a server advertises body-markup. So a `<b>`, a `<font>` or an
+// `<a href>` in a provider's name or in a reason restyled this plugin's own
+// card. The WHOLE body is escaped once, at the one exit below, so no branch
+// -- and no branch added later -- can hand the renderer a tag; StyledText
+// decodes the three entities, so the user reads the name exactly as the
+// provider wrote it (an `&` included, which unescaped could swallow the
+// text after it). The TITLE is not escaped: the host draws it PlainText
+// (pinned the same way), where an entity would show as written.
+//
+// F-SINK-16 (2026-10-29). And the body carries no control character. The
+// playlist parse keeps a provider's C0 and C1 controls in a name (measured:
+// TAB, VT, FF, ESC, DEL, U+0085, U+009B, U+009D), the host turns a line
+// break in a body into `<br/>`, and it persists every body as JSON under
+// ~/.local/state/omarchy/notifications/, where JSON.stringify leaves DEL and
+// C1 as they are for whatever prints the file. No body the plugin composes
+// means anything by one. The name and the reason lose theirs BEFORE the
+// redaction, as the player's title does (apply_channel): a TAB inside a
+// password then no longer splits the URL there (D-SINK-34's cost) on this
+// sink; and the whole body loses any left at the exit, before the escape.
 function notifyArgv(event, params, replaceId) {
   var p = params || {}
   var spec = null
-  var name = cleanName(p.name) || "Channel"
-  var reason = scrubUrls(str(p.reason))
+  var name = cleanName(sinkText(str(p.name).replace(CONTROL_RE, ""))) || "Channel"
+  var reason = scrubUrls(str(p.reason).replace(CONTROL_RE, ""))
   if (event === "streamFailed") {
     spec = { title: "Stream failed", body: QUOTE_OPEN + name + QUOTE_CLOSE + " did not play" + (reason !== "" ? SEP + reason : ""), glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.streamFailed }
   } else if (event === "localPlayFailure") {
@@ -333,7 +363,16 @@ function notifyArgv(event, params, replaceId) {
   if (!spec) return null
   var held = notifyReplaceId(replaceId)
   return ["omarchy-notification-send", "--app-name", "IPTV", "-u", spec.urgency, "-g", spec.glyph, "-p",
-          "-r", String(held > 0 ? held : spec.id), spec.title, spec.body]
+          "-r", String(held > 0 ? held : spec.id), spec.title, markupEscape(str(spec.body).replace(CONTROL_RE, ""))]
+}
+
+// D-SINK-49: text on its way into a StyledText renderer, shown as written.
+// `&` first, so the entities written for `<` and `>` are not escaped again.
+// Quotes are left alone: with no `<` left there is no tag for an attribute
+// to sit in, and StyledText draws a quote as a quote (measured, the QML
+// spec's "D-SINK-49" case). Three single-character global replaces, linear.
+function markupEscape(text) {
+  return str(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
 // ---- D-HOST-5 (owner, 2026-10-28): one card per notice kind, refreshed in place.
@@ -456,11 +495,24 @@ function sourceLabel(url) {
   // D-SINK-30: the host group ends at `;`, `=` and `&` too, as runHostParts
   // cuts the free-text host (reg-name admits them; no real host carries
   // them), so `http://h.test;sid=SECRET/x` labels as `http://h.test`.
-  var m = text.match(/^([a-z][a-z0-9+.-]*):\/\/(?:[^\/?#\s]*@)?(\[[^\/?#\s\]]*\]|[^\/\s?#:@\[;=&]+)(?::\d+)?/i)
+  //
+  // F-SINK-15 (2026-10-29). The AUTHORITY is hostPortOf's -- everything up
+  // to the first `/`, `?` or `#`, its userinfo cut at the LAST `@` -- and not
+  // a pattern of its own. The userinfo group here used to stop at JS
+  // whitespace as well, so on text with a space or U+3000 in the password the
+  // optional group failed and the host group took the USERNAME:
+  // `http://user:pa ss@cdn.test/x` labelled itself `http://user` where
+  // hostPortOf, the helper's urllib and validateSourceUrl all read
+  // `cdn.test`. Latent (every caller passes a validated URL, and validation
+  // refuses whitespace), and the third printer with a boundary of its own.
+  // The HOST still ends at whitespace, so nothing after one is printed.
+  var m = text.match(/^([a-z][a-z0-9+.-]*):\/\/([^\/?#]*)/i)
   if (m) {
     var scheme = m[1].toLowerCase()
     if (scheme === "file") return "local file"
-    return scheme + "://" + m[2]
+    var hostport = m[2].substring(m[2].lastIndexOf("@") + 1)
+    var h = hostport.match(/^(?:\[[^\/?#\s\]]*\]|[^\/\s?#:@\[;=&]+)/)
+    if (h) return scheme + "://" + h[0]
   }
   if (text.charAt(0) === "/" || text.charAt(0) === "~") return "local file"
   return "unknown source"
@@ -767,10 +819,10 @@ export {
   configShieldArgv, configShieldState, persistCarriesSecret,
   configShieldDecision, entryShieldDecision, seqArg, mpvArgArgv,
   playerSessionArgv, playerStartArgv, playerStopArgv, playerRestartArgv,
-  playerPauseArgv, notifyArgv, NOTIFY_POST_TIMEOUT_MS, notifyReplaceId,
-  notifyReplyId, notifySlot, withNotifySlot, notifyPost, notifyAnswered,
-  sourceLabel, hostOf, SPACE_RE, isSpaceAt, URL_SPACE_CODES, isUrlSpaceAt,
-  urlSpaceIndex, URL_DELIMITER_CODES, isUrlDelimiterAt, urlDelimiterIndex,
-  trailingPunctuationLength, isSchemeRestCode, isLetterCode, redactUrls,
-  scrubUrls, sinkText
+  playerPauseArgv, notifyArgv, markupEscape, NOTIFY_POST_TIMEOUT_MS,
+  notifyReplaceId, notifyReplyId, notifySlot, withNotifySlot, notifyPost,
+  notifyAnswered, sourceLabel, hostOf, SPACE_RE, isSpaceAt, URL_SPACE_CODES,
+  isUrlSpaceAt, urlSpaceIndex, URL_DELIMITER_CODES, isUrlDelimiterAt,
+  urlDelimiterIndex, trailingPunctuationLength, isSchemeRestCode,
+  isLetterCode, redactUrls, scrubUrls, sinkText
 }

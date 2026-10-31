@@ -1286,7 +1286,14 @@ Bar tooltips (`bar.showTooltip`):
 | ~~A read of `state.json` before a save has not answered for 8 s; the change is held and the file is read again (D-SINK-19 R28a, 2026-10-20; `-r 74019`, its own id, once per held save)~~ **WITHDRAWN 2026-10-20 (R29a): there is no such card. A read that does not answer within 2 s lets its save go ahead without it, counted and logged, as on 0.14.2, and nothing is told (`UX-SOURCES.md` 5.10 item 9). Id 74019 is retired, not reused.** | ~~`Saving is waiting`~~ | ~~R28a's sentence, which promised the change "saved when the file answers"~~ | -- | -- |
 
 Rules: never include the playlist URL or query string in any notification
-(credentials). Timer-driven refreshes are silent on success. Use
+(credentials). **[2026-10-29, D-SINK-49: the host draws the body as
+markup (StyledText), so the plugin escapes it: a channel name or a reason
+holding `<b>`, `<a href>`, `<br>` or `&` is drawn exactly as written, as
+plain characters, and can no longer restyle, link-style or add lines to the
+card. F-SINK-16: a name's or a reason's control characters (a TAB, an ESC,
+U+009B) are left out of the body, so a name whose words a TAB separates
+reads joined there. A URL inside a name is shown as its host (F-SINK-14,
+section 8 row 20).]** Timer-driven refreshes are silent on success. Use
 `--app-name IPTV`. Pass `-r <id>` so a repeated failure replaces the
 previous toast rather than stacking. **[Measured 2026-10-28, raised with
 D-PLY-33's report: on Omarchy's own notification server this does NOT
@@ -1518,7 +1525,7 @@ keyboard focus of an overlay already ends on Esc).
 | 17 | Digits | Ignored in list mode (reserved for M2 channel numbers); literal in search mode. |
 | 18 | Uppercase command letters | `F`, `S`, `R`, `X` behave like lowercase (tailscale precedent). |
 | 19 | Narrow screens | Hide the group column under a `Style.space(720)` card width; `h`/`l` keep working with the header scope label as feedback. |
-| 20 | Credentials in UI | Never render the playlist or EPG URL beyond scheme + host anywhere (guide, tooltip, notification, console). |
+| 20 | Credentials in UI | Never render the playlist or EPG URL beyond scheme + host anywhere (guide, tooltip, notification, console). **[2026-10-29, F-SINK-14: and a URL a provider wrote INTO a channel name or a group is shown as its host wherever that name or group is shown, by the guide row's own rule (`Model.sinkText`): the bar label, tooltip and accessible name, the footer while playing, the group column and its accessible name, the header's scope label, the empty-scope and no-matches titles and hint, the notification body, the IPC `status` and `channel` replies, and the player's window title. `News HD (backup http://user:pw@cdn.test/1.ts)` reads `News HD (backup cdn.test)` on every one of them, as it already did on the row (the window title keeps the scheme: `News HD (backup http://cdn.test)`). A name with no `://` is shown exactly as written, except that the window title and the notification body leave out its control characters (F-SINK-16).]** |
 | 21 | Clicking the command box in the not-configured state | Copies the command with `wl-copy` and shows `Copied` in the footer for 3 s. Optional; keyboard users have the README. **[WITHDRAWN 2026-10-13, D-SINK-19 round 11 (R21): the command box, its click-to-copy and the `Copied` transient are deleted (4.4).]** |
 | 22 | Home with a query active in list mode | Jumps the column to All (the "Home for All" hint). Without a query, Home is first row as usual. |
 

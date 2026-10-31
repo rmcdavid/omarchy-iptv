@@ -3975,8 +3975,14 @@ checkCall("D-SINK-1: the fixture is not empty and carries the doubled-at case th
 // free-text redactor prints (a vector says so with `rfcHost`, and lists what
 // the display must not show with `displayMustNotAppear`); where the two
 // agree the one `host` and one `mustNotAppear` serve both.
+// F-SINK-15 (2026-10-29): "bare" is every vector that STARTS with a scheme,
+// whitespace or not. The filter was `://\S+$`, which left out exactly the
+// shape sourceLabel got wrong -- a space or U+3000 in the userinfo, where its
+// own userinfo group stopped and the host group printed the username -- so
+// the display check could not see it. Red on dev 2727179 with the two
+// F-SINK-15 vectors (`http://u5er` both times).
 checkCall("D-SINK-1: sourceLabel and hostOf obey the authority rule too, on every bare-URL vector", function () {
-  const bare = redactionVectors.vectors.filter(function (v) { return /^[a-z][a-z0-9+.-]*:\/\/\S+$/i.test(v.text) })
+  const bare = redactionVectors.vectors.filter(function (v) { return /^[a-z][a-z0-9+.-]*:\/\//i.test(v.text) })
   return [bare.length >= 3, bare.filter(function (v) {
     const label = Model.sourceLabel(v.text)
     const host = Model.hostOf(v.text)
@@ -3985,6 +3991,14 @@ checkCall("D-SINK-1: sourceLabel and hostOf obey the authority rule too, on ever
     return (v.displayMustNotAppear || v.mustNotAppear).some(function (frag) { return label.indexOf(frag) >= 0 || host.indexOf(frag) >= 0 })
   }).map(function (v) { return v.why + " -> " + Model.sourceLabel(v.text) })]
 }, [true, []])
+checkCall("F-SINK-15: the bare vectors include a userinfo holding an ASCII space and one holding U+3000, and sourceLabel and hostOf print the RFC host for both -- the host hostPortOf prints from the same authority -- never the username; the file and path branches are unchanged", function () {
+  const ws = redactionVectors.vectors.filter(function (v) { return /^[a-z][a-z0-9+.-]*:\/\/[^\/?#]*\s[^\/?#]*@/i.test(v.text) })
+  return [ws.length, ws.map(function (v) { return [Model.sourceLabel(v.text), Model.hostOf(v.text)] }),
+          [Model.sourceLabel("file:///home/u/list.m3u"), Model.sourceLabel("/home/u/list.m3u"), Model.sourceLabel("~/list.m3u"),
+           Model.sourceLabel("http://"), Model.sourceLabel("nonsense"), Model.sourceLabel(""), Model.sourceLabel("HTTPS://U:P@[::1]:8/x"),
+           Model.sourceLabel("http://h.test x@y.test/z"), Model.sourceLabel("http://u:p@ h.test/x")]]
+}, [2, [["http://cdn.test", "cdn.test"], ["http://cdn.test", "cdn.test"]],
+    ["local file", "local file", "local file", "unknown source", "unknown source", "", "https://[::1]", "http://y.test", "unknown source"]])
 checkCall("R32a': the vectors where the free-text host and the RFC host differ are present, each names both, and the free-text side is always the withheld token -- never a host after a later at-sign", function () {
   const split = redactionVectors.vectors.filter(function (v) { return v.rfcHost !== undefined })
   return [split.length >= 8, split.filter(function (v) { return v.host !== Model.HOST_WITHHELD && !v.accepted }).map(function (v) { return v.text }),
@@ -4287,6 +4301,223 @@ function redactUrlsBeforeDSink23(text) {
         ["plain words", "a:b c:d", "mailto:x@y", "1://2", "no scheme //h/x", "x".repeat(400),
          CRED, "HTTP://H/X", "s://u:p@h@g/e", "", "   "]
           .filter(function (t) { return Model.sinkText(t) !== Model.redactUrls(t) }), [])
+})()
+
+// ---- F-SINK-14 (2026-10-29): ONE redaction rule for every place a provider's
+// channel name or group is SHOWN, against the shared fixture the helper's
+// window title runs too (tests/fixtures/shown-names.json; tests/test_mpv.py
+// drives apply_channel through the shipping `play` verb over it).
+//
+// F-SINK-10 put Model.sinkText on the guide's row and said "the same string
+// reaches two sinks under two rules". Its closure stopped at the row: the bar
+// label, tooltip and accessible name, the notification body, the IPC status,
+// the footer while playing, the group column and its accessible name, the
+// header's scope label, the empty-scope and no-matches titles and the group
+// hint all printed the whole credentialed URL beside a row printing its host.
+// Every composer below is the one its sink calls, given what the sink gives
+// it; each must show the fixture's `js` inside its own words and none of
+// `mustNotAppear`. Red on dev 2727179: every composer printed the raw name,
+// and rawScopeName / ipcNowPlaying did not exist.
+;(function () {
+  const SHOWN = JSON.parse(require("fs").readFileSync(
+    require("path").join(__dirname, "fixtures/shown-names.json"), "utf8")).names
+  const G = function (v) { return Model.groupScopeId(v.name) }
+  // Two groups, so the column narrows and draws group entries at all.
+  const chans = function (v) {
+    return Model.prepareChannels([{ id: "t:a", name: v.name, group: v.name, url: "http://s.example.test/a.ts", chno: "101" },
+                                  { id: "t:b", name: "Other", group: "Other", url: "http://s.example.test/b.ts" }])
+  }
+  const shown = function (v) {
+    const ch = chans(v)
+    const surface = Model.scopeSurface(ch, null)
+    const entry = surface.entries.filter(function (e) { return e.id === G(v) })[0] || {}
+    const hidden = Model.scopeSurface(ch, { version: 2, favorites: [], recents: [], hiddenGroups: [v.name] })
+    const hiddenEntry = hidden.entries.filter(function (e) { return e.id === G(v) })[0] || {}
+    const np = Model.ipcNowPlaying({ id: "t:a", name: v.name, group: v.name, launchedFrom: G(v), since: 7 }, "101")
+    const body = function (ev) { const a = Model.notifyArgv(ev, { name: v.name, reason: "r", output: "audio" }); return a[a.length - 1] }
+    return {
+      sinkText: Model.sinkText(v.name),
+      barTooltip: Model.barTooltip({ configured: true, playing: true, name: v.name }),
+      barTooltipPaused: Model.barTooltip({ configured: true, playing: true, paused: true, chno: "101", name: v.name }),
+      barAccessibleName: Model.barAccessibleName({ playing: true, chno: "101", name: v.name }),
+      footerStatus: Model.footerStatus({ configured: true, count: 5, playingName: v.name }),
+      chnoStatus: Model.chnoStatus("exact", "101", v.name, 1, 1, true),
+      streamFailed: body("streamFailed"), localPlayFailure: body("localPlayFailure"),
+      playerStopped: body("playerStopped"), outputFailed: body("outputFailed"),
+      columnLabel: entry.label, hiddenLabel: hiddenEntry.label,
+      columnSpoken: Model.scopeEntryAccessibleName({ label: v.name, count: 1, kind: "group" }),
+      hiddenSpoken: Model.scopeEntryAccessibleName({ label: v.name, count: 1, kind: "hidden" }),
+      scopeName: Model.scopeName(G(v)),
+      scopeLabel: Model.scopeLabel(G(v), "", 1),
+      scopeLabelSearching: Model.scopeLabel(G(v), "zz", 0),
+      noMatchesTitle: Model.noMatchesTitle("zz", G(v)),
+      hintNames: Model.groupNamesForHint(surface).join("|"),
+      soleHint: Model.groupNamesForHint(Model.scopeSurface([ch[0]], null)).join("|"),
+      // A surface whose group entry carries the RAW label, as a caller other
+      // than scopeSurface would hand it: groupNamesForHint redacts it itself
+      // (rc-p2c: removing that sinkText survived every check, because
+      // scopeSurface had already redacted every label it was given).
+      rawLabelHint: Model.groupNamesForHint({ axis: {}, entries: [{ id: G(v), label: v.name, kind: "group", count: 1 }] }).join("|"),
+      ipcName: np.name, ipcGroup: np.group, ipcLaunchedFrom: np.launchedFrom
+    }
+  }
+  checkCall("F-SINK-14: every composer a shown name reaches prints the shared fixture's `js` in its own words -- the bar's tooltip and accessible name, the footer while playing, the chno line, all four notification bodies that quote a name, the group column's label and accessible name (shown and hidden), the shown scope name, the header's scope label, the no-matches title, the group hint (a narrowing list and a one-group list) and the IPC status's name, group and launchedFrom", function () {
+    const SEP_ = Model.SEP
+    return SHOWN.map(function (v) {
+      const got = shown(v)
+      const want = {
+        sinkText: v.js,
+        barTooltip: "Playing " + v.js,
+        barTooltipPaused: "Paused 101" + SEP_ + v.js,
+        barAccessibleName: "IPTV, playing channel 101, " + v.js,
+        footerStatus: Model.GLYPHS.play + " " + v.js + SEP_ + "s stop",
+        chnoStatus: "Channel 101" + SEP_ + v.js,
+        streamFailed: Model.QUOTE_OPEN + v.js + Model.QUOTE_CLOSE + " did not play" + SEP_ + "r",
+        localPlayFailure: Model.QUOTE_OPEN + v.js + Model.QUOTE_CLOSE + " did not play" + SEP_ + "r",
+        playerStopped: Model.QUOTE_OPEN + v.js + Model.QUOTE_CLOSE + " stopped unexpectedly",
+        outputFailed: Model.QUOTE_OPEN + v.js + Model.QUOTE_CLOSE + " stopped" + SEP_ + Model.outputFailureSentence("audio"),
+        columnLabel: v.js, hiddenLabel: v.js,
+        columnSpoken: v.js + ", 1 channel", hiddenSpoken: v.js + ", 1 channel, hidden",
+        scopeName: v.js,
+        scopeLabel: v.js + SEP_ + "1 channel",
+        scopeLabelSearching: "in " + v.js + SEP_ + "0 matches",
+        noMatchesTitle: "No matches for " + Model.QUOTE_OPEN + "zz" + Model.QUOTE_CLOSE + " in " + v.js,
+        hintNames: v.js + "|Other", soleHint: v.js, rawLabelHint: v.js,
+        ipcName: v.js, ipcGroup: v.js, ipcLaunchedFrom: "g:" + v.js
+      }
+      const wrong = Object.keys(want).filter(function (k) { return got[k] !== want[k] })
+        .map(function (k) { return k + " -> " + JSON.stringify(got[k]) })
+      const leaked = Object.keys(got).filter(function (k) {
+        return v.mustNotAppear.some(function (frag) { return String(got[k]).indexOf(frag) >= 0 })
+      })
+      return [v.why, wrong, leaked]
+    })
+  }, SHOWN.map(function (v) { return [v.why, [], []] }))
+
+  // The IDS stay raw, and that is a rule of its own, not an accident: a group
+  // scope id keys hidden groups and saved scopes in state.json, and the
+  // channels a group scope holds are found by matching the RAW group
+  // (channelsForScope through rawScopeName). Redacting the id would empty the
+  // scope and orphan every hidden group whose name carries a URL.
+  const URL_ID = "t:http://epg.example.test/a"
+  checkCall("F-SINK-14: the ids stay raw -- the column's entry id, the IPC status's channel id, the scope's channels and a hidden group's entry -- and rawScopeName round-trips the raw group while scopeName shows it", function () {
+    const starred = { version: 2, favorites: ["t:a"], recents: [] }
+    return SHOWN.map(function (v) {
+      const ch = chans(v)
+      const surface = Model.scopeSurface(ch, null)
+      const hidden = Model.scopeSurface(ch, { version: 2, favorites: [], recents: [], hiddenGroups: [v.name] })
+      // The channel id is one that sinkText WOULD change (a tvg-id that is
+      // itself an address), so an ipcNowPlaying that redacted the id -- and
+      // broke `play <id>` taking it back -- goes red here (rc-p2c: with
+      // "t:a" that mutation survived every check).
+      const np = Model.ipcNowPlaying({ id: URL_ID, name: v.name, group: v.name, launchedFrom: G(v), since: 7 }, "101")
+      return [surface.entries.some(function (e) { return e.id === "g:" + v.name && e.kind === "group" }),
+              hidden.entries.some(function (e) { return e.id === "g:" + v.name && e.kind === "hidden" }),
+              Model.channelsForScope(ch, G(v), null).map(function (c) { return c.id }).join(","),
+              Model.rawScopeName(G(v)) === v.name, np.id, np.chno, np.since,
+              // M2-09 D2 on a one-group list: the sole group's id asks for All,
+              // matched on the RAW group. With a favourite starred, the
+              // vanished-scope fallback would answer Favorites instead, so
+              // the answer shows which rule decided.
+              Model.requestedScope(Model.scopeSurface([ch[0]], starred).entries, G(v), Model.scopeSurface([ch[0]], starred).axis)]
+    })
+  }, SHOWN.map(function () { return [true, true, "t:a", true, URL_ID, "101", 7, "all"] }))
+
+  checkCall("F-SINK-14: ipcNowPlaying is null when nothing plays, as the property is, and sinkText is idempotent over the fixture (a name shown twice is the name shown once)", function () {
+    return [Model.ipcNowPlaying(null, "1"), Model.ipcNowPlaying(undefined, ""),
+            SHOWN.filter(function (v) { return Model.sinkText(Model.sinkText(v.name)) !== Model.sinkText(v.name) }).map(function (v) { return v.why })]
+  }, [null, null, []])
+})()
+
+// ---- D-SINK-49 (2026-10-29): the notification BODY is markup, so the body is
+// escaped. The host draws it as Text.StyledText behind a stripper that drops
+// image tags only (docs/OMARCHY-PLUGIN-CONTRACT.md; pinned by
+// tests/test_host_text_format.py), so a provider's `<a href>`, `<font>` or
+// `<br>` restyled the plugin's own card. Every event, with markup in the name
+// and in the reason: the body carries no `<` or `>` at all, every `&` begins
+// an entity it wrote, and decoding the three entities gives back exactly the
+// body as composed without escaping. Red on dev 2727179: the body carried the
+// tags verbatim. The TITLE is the host's PlainText and is not escaped.
+;(function () {
+  const MARKUP = ["<b>B</b>", "a &amp; b", "<a href=\"https://evil.test/login\">renew</a>",
+                  "<br><font color=\"#ff0000\" size=\"+4\">X</font>", "AT&T > 5 < 6", "x &lt; y"]
+  const EVENTS = ["streamFailed", "localPlayFailure", "playerStopped", "outputFailed", "playlistRefreshed", "playlistError",
+                  "epgError", "mpvMissing", "entryInputRefused", "stateUnreadable"]
+  const decode = function (s) { return s.replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&amp;/g, "&") }
+  checkCall("D-SINK-49: every notification body, every event, markup in the name and the reason: no `<` or `>` reaches the StyledText body, every `&` opens one of the three entities, and decoding them gives back the composed body exactly", function () {
+    const bad = []
+    for (const ev of EVENTS) for (const m of MARKUP) {
+      const argv = Model.notifyArgv(ev, { name: m, reason: m, output: "video", channelCount: 2, groupCount: 1, setting: "playlistUrl", path: "/p/state.json" })
+      if (argv === null) { bad.push(ev + ": no argv"); continue }
+      const body = argv[argv.length - 1]
+      if (/[<>]/.test(body)) bad.push(ev + " " + m + " -> " + body)
+      if (/&(?!amp;|lt;|gt;)/.test(body)) bad.push(ev + " " + m + " (bare &) -> " + body)
+    }
+    return bad
+  }, [])
+  checkCall("D-SINK-49: escaping is the RENDERING, not a loss -- decoded, the body is the plugin's sentence with the name as the provider wrote it (after the S-04 dash rule and redaction); the title is a constant and is not escaped", function () {
+    return MARKUP.map(function (m) {
+      const argv = Model.notifyArgv("streamFailed", { name: m, reason: "HTTP 403" })
+      return [decode(argv[argv.length - 1]) === Model.QUOTE_OPEN + Model.cleanName(Model.sinkText(m)) + Model.QUOTE_CLOSE + " did not play" + Model.SEP + "HTTP 403",
+              argv[argv.length - 2]]
+    })
+  }, MARKUP.map(function () { return [true, "Stream failed"] }))
+  checkCall("D-SINK-49: markupEscape escapes exactly `&`, `<` and `>` (the `&` first, so its own entities are not escaped twice), leaves quotes and every other character, and is the identity on text without them", function () {
+    return [Model.markupEscape("<b>&amp;</b>"), Model.markupEscape("a \"b\" 'c' \u201cd\u201d"), Model.markupEscape(""), Model.markupEscape(null),
+            Model.markupEscape("plain \u00b7 text"), Model.markupEscape("&&<<>>")]
+  }, ["&lt;b&gt;&amp;amp;&lt;/b&gt;", "a \"b\" 'c' \u201cd\u201d", "", "", "plain \u00b7 text", "&amp;&amp;&lt;&lt;&gt;&gt;"])
+})()
+
+// ---- F-SINK-16 (2026-10-29): the IPC replies escape the C1 controls.
+// JSON.stringify escapes C0 (ESC among them) and passes DEL and U+0080..U+009F
+// through, and the helper keeps a playlist's C1 controls in names and groups,
+// so `status` and `channel` printed an 8-bit CSI (U+009B) or OSC (U+009D)
+// into whatever terminal ran `omarchy-shell ipc call`. Model.ipcJson is every
+// JSON reply of the IpcHandler; the value parses back identical. Red on dev
+// 2727179: ipcJson did not exist (the handler called JSON.stringify).
+;(function () {
+  const v = { name: "News\u009b31mRED\u0085x\u009d52;c;aGk=\u009c", d: "\u007f", ls: "a\u2028b\u2029c", ok: true, n: 1, esc: "\u001b[2J" }
+  checkCall("F-SINK-16: ipcJson carries no DEL, no C1 control and no U+2028/U+2029, parses back to the same value as JSON.stringify's, and is JSON.stringify's text whenever there is nothing to escape", function () {
+    const out = Model.ipcJson(v)
+    const plain = { a: "b \u00b7 \u201cc\u201d", n: [1, null, true] }
+    return [/[\u007f-\u009f\u2028\u2029\u0000-\u001f]/.test(out), JSON.stringify(JSON.parse(out)) === JSON.stringify(v),
+            Model.ipcJson(plain) === JSON.stringify(plain), Model.ipcJson(undefined), Model.ipcJson(null),
+            out.indexOf("\\u009b") >= 0, out.indexOf("\\u001b") >= 0]
+  }, [false, true, true, "null", "null", true, true])
+
+  // And no control character in a notification body (Model.notifyArgv). The
+  // parse keeps a provider's TAB, VT, FF, ESC, DEL and C1 controls in a name;
+  // the host turns a line break in a body into `<br/>` and persists every
+  // body as JSON, where C1 and DEL stay raw for whatever prints the file.
+  // Every event, a name and a reason full of them: the body carries none.
+  // The name and the reason lose theirs BEFORE the redaction, as the
+  // player's title does, so a TAB inside a password no longer leaves its
+  // tail after the run (D-SINK-34's shape) on this sink. The state file's
+  // path (from the user's XDG_STATE_HOME, not the provider) is the one body
+  // field that reaches the exit with its controls, so it is what proves the
+  // exit's own drop. Red on dev 2727179: every control went out in the argv.
+  const CTL = "a\tb\u000bc\u000cd\u001b[2Je\u0007f\u0008g\u007fh\u0085i\u009b31mj\u009d0;x\u009ck\nl\rm"
+  const EVENTS = ["streamFailed", "localPlayFailure", "playerStopped", "outputFailed", "playlistRefreshed", "playlistError",
+                  "epgError", "mpvMissing", "entryInputRefused", "stateUnreadable"]
+  checkCall("F-SINK-16: no notification body, for any event, carries a C0, DEL or C1 control when the channel name and the reason hold every kind the parse keeps -- and the name and the reason still read as written, less the controls", function () {
+    const bad = []
+    let quoted = 0
+    for (const ev of EVENTS) {
+      const argv = Model.notifyArgv(ev, { name: "News " + CTL, reason: "HTTP " + CTL, output: "video", channelCount: 2, groupCount: 1, setting: "playlistUrl", path: "/p/" + CTL + "/state.json" })
+      const body = argv[argv.length - 1]
+      if (/[\u0000-\u001f\u007f-\u009f]/.test(body)) bad.push(ev + " -> " + JSON.stringify(body))
+      if (body.indexOf("News abcd[2Jefgh") !== -1) quoted++
+    }
+    return [bad, quoted]
+  }, [[], 4])
+  checkCall("F-SINK-16: the controls leave the name and the reason BEFORE their redaction -- a TAB, a VT, an ESC or a CSI inside a password is URL text to the body, so the host prints and no tail of the password does; a name with no `://` is only its controls shorter", function () {
+    return ["\t", "\u000b", "\u001b", "\u009b"].map(function (c) {
+      const argv = Model.notifyArgv("streamFailed", { name: "News (http://u5er:pa" + c + "S3CRET@cdn.test/live/1.ts)",
+                                                      reason: "HTTP 403 from http://u5er:pa" + c + "S3CRET@cdn.test/live/1.ts" })
+      const body = argv[argv.length - 1]
+      return [body.indexOf("S3CRET") === -1 && body.indexOf("u5er") === -1, body.indexOf("(cdn.test)") !== -1, body.indexOf("from cdn.test") !== -1]
+    }).concat([Model.notifyArgv("playerStopped", { name: "UK:\tSky\u009b" })[11]])
+  }, [[true, true, true], [true, true, true], [true, true, true], [true, true, true], Model.QUOTE_OPEN + "UK:Sky" + Model.QUOTE_CLOSE + " stopped unexpectedly"])
 })()
 
 checkCall("D-RUNG-9: the header the HOST draws is under 4.5 on three themes and INVERTED on five", function () {
@@ -16723,6 +16954,115 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     })
   }, E13.map(id => [id, true, false, true, "Guide data unavailable (" + fixtureCase(id).reason + ")" + Model.SEP + "channels still work" + Model.SEP + "r retry",
                     ["Could not fetch the EPG (" + fixtureCase(id).reason + "). Channels still work."], fixtureCase(id).reason, false]))
+
+  // ---- F-SINK-14, D-SINK-49, F-SINK-16 (2026-10-29), through Service.qml ----
+  //
+  // The shared shown-names fixture again, now through the service's OWN
+  // functions: the IPC `status` and `channel` replies as the shipping verbs
+  // print them (h.ipc, compiled from the IpcHandler's own text: status ->
+  // statusSummary -> nowPlayingSummary -> Model.ipcNowPlaying, channel ->
+  // tuneByNumber), and the four notices that quote a channel's name, each
+  // posted by the path that posts it in the shell (raiseStreamFailure, a
+  // refused `player start`, raisePlayerStopped, raiseOutputFailure) and read
+  // off the argv the shell runs. Red on dev 2727179: every one of them
+  // carried the raw name.
+  {
+    const SHOWN = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/shown-names.json"), "utf8")).names
+    const bodies = h => h.detached.filter(a => a[0] === "omarchy-notification-send").map(a => a[a.indexOf("-r") + 1] + " " + a[a.length - 1])
+    checkCall("F-SINK-14 (service): the IPC status's nowPlaying shows the fixture's `js` for the name, the group and the scope it was launched from, the id stays raw; the `channel` verb's reply shows it too; and every one of the four name-quoting notices the shell posts carries it", () =>
+      SHOWN.map(v => {
+        const h = bootPlayer()
+        const index = M.keyedMap()
+        index["t:x"] = { id: "t:x", name: v.name, url: "http://s.example.test/x.ts", group: v.name }
+        h.root.channelIndex = index
+        h.root.channels = M.prepareChannels([{ id: "t:x", name: v.name, group: v.name, url: "http://s.example.test/x.ts", chno: "101" }])
+        h.root.chnoIndex = M.buildChnoIndex(h.root.channels)
+        h.root.playerUp = true
+        h.root.nowPlaying = { id: "t:x", name: v.name, group: v.name, launchedFrom: M.groupScopeId(v.name), since: 3 }
+        const np = JSON.parse(h.ipc.status()).nowPlaying
+        const tuned = JSON.parse(h.ipc.channel("101"))
+        h.detached.length = 0
+        h.root.notifiedFailureId = ""
+        h.root.raiseStreamFailure({ id: "t:x", name: v.name }, "loading failed"); h.drain()
+        h.root.nowPlaying = { id: "t:x", name: v.name, group: v.name, launchedFrom: M.groupScopeId(v.name), since: 3 }
+        h.root.playerKind = "start"
+        h.root.handlePlayerResult(localReply("player-start-parent-0500")); h.drain()
+        h.root.nowPlaying = null
+        h.root.notifiedFailureId = ""
+        h.root.raisePlayerStopped({ id: "t:x", name: v.name }, M.PLAYER_GENERIC_FAILURE); h.drain()
+        h.root.notifiedFailureId = ""
+        h.root.raiseOutputFailure({ id: "t:x", name: v.name }, "audio", M.outputFailureSentence("audio")); h.drain()
+        const told = bodies(h)
+        const all = JSON.stringify([np, tuned]) + told.join("\n")
+        // The `channel` reply names the PREPARED channel, which for a name that
+        // is itself a URL is the generated one (Model.displayName, D-QA-02).
+        return [np.id, np.name === v.js, np.group === v.js, np.launchedFrom === "g:" + v.js,
+                tuned.name === (h.root.channels[0].name === v.name ? v.js : h.root.channels[0].name),
+                told.filter(t => t.indexOf(Model.QUOTE_OPEN + v.js + Model.QUOTE_CLOSE) !== -1).length,
+                v.mustNotAppear.filter(frag => all.indexOf(frag) !== -1)]
+      }), SHOWN.map(() => ["t:x", true, true, true, true, 4, []]))
+
+    checkCall("D-SINK-49 (service): a channel name and a reason carrying markup reach the posted body escaped -- no `<` or `>` in the argv the shell runs, for the stream failure, the local refusal, the player's death and the lost output", () => {
+      const h = bootPlayer()
+      const NAME = "<a href=\"x\">Renew</a><br><b>B</b> & co"
+      h.root.notifiedFailureId = ""
+      h.root.raiseStreamFailure({ id: "t:m", name: NAME }, "<b>HTTP 403</b>"); h.drain()
+      h.root.nowPlaying = { id: "t:m", name: NAME, group: "", launchedFrom: "", since: 1 }
+      h.root.playerKind = "start"
+      h.root.handlePlayerResult(localReply("player-start-parent-0500")); h.drain()
+      h.root.nowPlaying = null
+      h.root.notifiedFailureId = ""
+      h.root.raisePlayerStopped({ id: "t:m", name: NAME }, M.PLAYER_GENERIC_FAILURE); h.drain()
+      h.root.notifiedFailureId = ""
+      h.root.raiseOutputFailure({ id: "t:m", name: NAME }, "video", M.outputFailureSentence("video")); h.drain()
+      const told = bodies(h)
+      return [told.length, told.filter(t => /[<>]/.test(t)), told.every(t => t.indexOf("&lt;a href=\"x\"&gt;Renew&lt;/a&gt;&lt;br&gt;&lt;b&gt;B&lt;/b&gt; &amp; co") !== -1)]
+    }, [4, [], true])
+
+    // F-SINK-16: the replies read off the shipping verbs (h.ipc), never
+    // recomposed here. The playing channel's name and group hold U+009B (an
+    // 8-bit CSI to a terminal that honours C1), U+009D (OSC), U+009C (ST),
+    // U+0085 (NEL) and DEL; the reply must carry none of them raw and parse
+    // back to the same value. Red on dev 2727179: the handler called
+    // JSON.stringify, which passes DEL and C1 through.
+    const C1 = "News\u009b31mRED\u0085x\u009d52;c;aGk=\u009c\u007f"
+    checkCall("F-SINK-16 (service): the IPC `status` and `channel` replies, as the shipping verbs print them, carry no DEL or C1 control when the playing channel's name and group hold them, and parse back to the same value", () => {
+      const h = bootPlayer()
+      const index = M.keyedMap()
+      index["t:c"] = { id: "t:c", name: C1, url: "http://s.example.test/c.ts", group: C1 }
+      h.root.channelIndex = index
+      h.root.channels = M.prepareChannels([{ id: "t:c", name: C1, group: C1, url: "http://s.example.test/c.ts", chno: "101" }])
+      h.root.chnoIndex = M.buildChnoIndex(h.root.channels)
+      h.root.playerUp = true
+      h.root.nowPlaying = { id: "t:c", name: C1, group: C1, launchedFrom: M.groupScopeId(C1), since: 3 }
+      const status = h.ipc.status()
+      const channel = h.ipc.channel("101")
+      const np = JSON.parse(status).nowPlaying
+      return [/[\u007f-\u009f]/.test(status), np.name === C1, np.group === C1, np.launchedFrom === "g:" + C1,
+              /[\u007f-\u009f]/.test(channel), JSON.parse(channel).name === M.sinkText(h.root.channels[0].name),
+              JSON.parse(channel).name.indexOf("\u009b") !== -1]
+    }, [false, true, true, true, false, true, true])
+
+    // And EVERY verb, so a verb added later on JSON.stringify is red here and
+    // not unseen: each is called with the functions it reports through
+    // answering C1 controls (the side-effecting ones made inert), and no
+    // reply may carry one raw. The second half names the verbs that answer
+    // JSON, which is what makes the first half non-vacuous.
+    checkCall("F-SINK-16 (service): every IPC verb, called with what it reports answering C1 controls, prints none of them raw -- and the verbs that answer JSON (back, channel, forward, live, pip, status) carry them escaped", () => {
+      const h = bootPlayer()
+      const loud = () => ({ ok: false, text: C1, nested: { name: C1, list: [C1] } })
+      for (const fn of ["statusSummary", "tuneByNumber", "requestPip", "seekBy", "seekLive", "seekRefuse"]) h.root[fn] = loud
+      h.root.play = () => false
+      h.root.stop = () => {}
+      h.root.zap = () => false
+      h.root.refresh = () => {}
+      h.root.togglePause = () => ""
+      const verbs = Object.keys(h.ipc).sort()
+      const replies = verbs.map(v => [v, String(h.ipc[v]("1"))])
+      return [verbs.length, replies.filter(r => /[\u007f-\u009f\u2028\u2029]/.test(r[1])).map(r => r[0]),
+              replies.filter(r => r[1].indexOf("\\u009b") !== -1).map(r => r[0])]
+    }, [13, [], ["back", "channel", "forward", "live", "pip", "status"]])
+  }
 })()
 
 // ---- D-REL-7, the split's reviews P2 and P3a: a damaged helper says so.

@@ -7,6 +7,9 @@ import {
   str, asList, keyedMap, hasOwnKey, trimEndSpace, normalizeText, searchKey,
   GENERATED_NAME_WORD, channelId
 } from "./text.mjs"
+import {
+  sinkText
+} from "./privacy.mjs"
 
 // ------------------------------------------------------------ channels
 
@@ -745,7 +748,10 @@ function chnoStatus(kind, label, name, matches, ordinal, committed) {
   var m = Math.floor(Number(matches))
   if (!isFinite(m) || m < 1) m = 1
   var out = "Channel " + text
-  if ((committed === true || m > 1) && str(name) !== "") out += SEP + str(name)
+  // F-SINK-14: the name through sinkText here as well as where the guide
+  // takes it off the row (numberTargetName), so a caller that hands a raw
+  // name in still shows what the row shows.
+  if ((committed === true || m > 1) && str(name) !== "") out += SEP + sinkText(name)
   if (m > 1) out += " (" + Math.floor(Number(ordinal) || 1) + " of " + m + ")"
   return out
 }

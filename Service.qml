@@ -1390,7 +1390,8 @@ Item {
     }
     var id = Model.channelId(found)
     var label = String(found.chnoLabel || "")
-    var name = String(found.name || "")
+    // F-SINK-14: the reply prints the name the bar and the row print.
+    var name = Model.sinkText(found.name)
     // play() refuses when mpv is missing or the entry has no URL. Reporting
     // that as ok:true would be a lie about the one thing this verb exists to
     // do; the success shape is unchanged for the case it describes.
@@ -1942,11 +1943,10 @@ Item {
 
   // `nowPlaying` as the IPC reports it: the shipped literal plus the playing
   // channel's number (3.3). Null when nothing plays, exactly like the property.
+  // F-SINK-14: composed by Model.ipcNowPlaying, which redacts the name, the
+  // group and the scope it was launched from as the bar and the row do.
   function nowPlayingSummary() {
-    var np = root.nowPlaying
-    if (!np) return null
-    return { id: np.id, name: np.name, group: np.group, chno: root.nowPlayingChno,
-             launchedFrom: np.launchedFrom, since: np.since }
+    return Model.ipcNowPlaying(root.nowPlaying, root.nowPlayingChno)
   }
 
   // JSON summary for the IPC `status` verb; URL-free by construction.
@@ -7245,7 +7245,7 @@ Item {
     //
     // A mistyped keybinding must not raise a desktop popup, so a failure is
     // this JSON and nothing else - no notification, no toast (6.5).
-    function channel(n: string): string { return JSON.stringify(root.tuneByNumber(n)) }
+    function channel(n: string): string { return Model.ipcJson(root.tuneByNumber(n)) }
     // Picture in picture (M2-05). `pip on`, `pip off`, `pip toggle`.
     //
     // The reply is what is knowable when the key is pressed, and no more.
@@ -7258,7 +7258,7 @@ Item {
     // new `pip` block carries { available, on, applying, reason }, where
     // `reason` is the last failure code (dispatch_failed, no_window,
     // ambiguous, timeout, ...) and "" after a success.
-    function pip(mode: string): string { return JSON.stringify(root.requestPip(mode)) }
+    function pip(mode: string): string { return Model.ipcJson(root.requestPip(mode)) }
     // PAUSE LIVE TV. An IPC verb rather than only a guide key, because this is
     // the first action in the product you want while WATCHING -- with the
     // guide closed -- rather than while browsing. contrib/bindings.lua shows
@@ -7279,17 +7279,19 @@ Item {
     // contrib/bindings.lua suggests SUPER+SHIFT+H / L / R.
     function back(seconds: string): string {
       var n = Model.seekVerbSeconds(seconds)
-      return JSON.stringify(n === 0 ? root.seekRefuse(0, "bad_seconds") : root.seekBy(-n))
+      return Model.ipcJson(n === 0 ? root.seekRefuse(0, "bad_seconds") : root.seekBy(-n))
     }
     function forward(seconds: string): string {
       var n = Model.seekVerbSeconds(seconds)
-      return JSON.stringify(n === 0 ? root.seekRefuse(0, "bad_seconds") : root.seekBy(n))
+      return Model.ipcJson(n === 0 ? root.seekRefuse(0, "bad_seconds") : root.seekBy(n))
     }
-    function live(): string { return JSON.stringify(root.seekLive()) }
+    function live(): string { return Model.ipcJson(root.seekLive()) }
     function stop(): string { root.stop(); return "ok" }
     function next(): string { return root.zap(1) ? "ok" : "nothing playing" }
     function previous(): string { return root.zap(-1) ? "ok" : "nothing playing" }
     function refresh(): string { root.refresh(); return "ok" }
-    function status(): string { return JSON.stringify(root.statusSummary()) }
+    // F-SINK-16: every JSON reply through Model.ipcJson, which escapes the
+    // C1 controls JSON.stringify passes through to the caller's terminal.
+    function status(): string { return Model.ipcJson(root.statusSummary()) }
   }
 }

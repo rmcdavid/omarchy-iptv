@@ -2306,6 +2306,46 @@ TestCase {
   // rests on, an editable one for what Qt deletes and inserts, which is the
   // only way to see it. tests/fixtures/form-edit.js is the transcript these
   // produced, and node holds the model to the same rows.
+  // ---- D-SINK-49 (2026-10-29): the toast body's renderer, observed. The host
+  // draws a notification body as Text.StyledText (NotificationCard.qml; the
+  // host text-format test pins it), so these two Texts are the body's
+  // declaration and the plain reading it should match. Measured here, not
+  // reasoned: escaped, every case lays out exactly as its plain text does
+  // (the same width and height), and UNescaped every markup case does not --
+  // `<br><font size="+4">` grows the card a line and a size, and a bare `&`
+  // swallows what follows it (`Q&A` draws as `Q`, `Sky&Co` as `Sky`). Quotes
+  // need no escape: they draw as quotes either way. Red on dev 2727179:
+  // Model.markupEscape did not exist.
+  Text { id: bodyPlain; textFormat: Text.PlainText; font.pixelSize: 20 }
+  // Not shipped: a test double of the host's body, so StyledText is the point.
+  Text { id: bodyStyled; textFormat: Text.StyledText; font.pixelSize: 20 }
+
+  function test_notificationBodyEscapingRendersTheTextAsWritten() {
+    var markup = ["<b>B</b>", "a &amp; b", "<a href=\"https://evil.test/login\">renew</a>",
+                  "<br><font color=\"#ff0000\" size=\"+4\">X</font>", "AT&T > 5 < 6", "x &lt; y", "Sky&Co", "Q&A"]
+    var plainCases = ["it's \"quoted\"", "“Name” did not play · r", "UK: Sky Sports 1 FHD"]
+    var all = markup.concat(plainCases)
+    for (var i = 0; i < all.length; i++) {
+      bodyPlain.text = all[i]
+      bodyStyled.text = Model.markupEscape(all[i])
+      compare(JSON.stringify([bodyStyled.implicitWidth, bodyStyled.implicitHeight]),
+              JSON.stringify([bodyPlain.implicitWidth, bodyPlain.implicitHeight]), "escaped, " + all[i] + " lays out as its plain text")
+    }
+    // The double is the markup reader the host's is: unescaped, each markup
+    // case renders as something else (rule 10, never more forgiving).
+    var differs = []
+    for (var j = 0; j < markup.length; j++) {
+      bodyPlain.text = markup[j]
+      bodyStyled.text = markup[j]
+      if (bodyStyled.implicitWidth !== bodyPlain.implicitWidth || bodyStyled.implicitHeight !== bodyPlain.implicitHeight) differs.push(markup[j])
+    }
+    compare(differs.length, markup.length, "unescaped, every markup case is read as markup: " + JSON.stringify(differs))
+    bodyStyled.text = "<br><font size=\"+4\">X</font>"
+    var tall = bodyStyled.implicitHeight
+    bodyStyled.text = Model.markupEscape("<br><font size=\"+4\">X</font>")
+    verify(tall > bodyStyled.implicitHeight, "the raw tag grows the card; escaped it is one line")
+  }
+
   TextInput { id: roInput; readOnly: true; width: 300 }
   TextInput { id: edInput; readOnly: false; width: 300 }
   TextInput { id: pwInput; readOnly: false; echoMode: TextInput.Password; width: 300 }

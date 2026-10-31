@@ -55,13 +55,14 @@ export {
 export {
   containsAllWords, matchRank, groupNamesForHint, groupWordHint, favoriteSet,
   filterChannels, groupChannels, groupScopeId, isGroupScope, isPinnedScope,
-  scopeName, scopeSurface, scopeEntries, channelsForScope, numberJumpScope,
-  channelsInGroup, effectiveScope, moveScope, scopeIndex, columnAnchor,
-  fallbackScope, requestedScope, initialScope, cursorFor, revealOffset,
-  scopeLabel, GUIDE_MODES, guideMode, guideState, copyGuide, openTracks,
-  closeTracks, withTrackCursor, withQuery, withScope, withMode, withCursor,
-  toggleMode, onEscape, moveCursor, launchScope, zapRing, nextInGroup,
-  rowIndexOfId, placeToRestore, placeMark, zapSkipNotice, zapStep
+  rawScopeName, scopeName, scopeSurface, scopeEntries, channelsForScope,
+  numberJumpScope, channelsInGroup, effectiveScope, moveScope, scopeIndex,
+  columnAnchor, fallbackScope, requestedScope, initialScope, cursorFor,
+  revealOffset, scopeLabel, GUIDE_MODES, guideMode, guideState, copyGuide,
+  openTracks, closeTracks, withTrackCursor, withQuery, withScope, withMode,
+  withCursor, toggleMode, onEscape, moveCursor, launchScope, zapRing,
+  nextInGroup, rowIndexOfId, placeToRestore, placeMark, zapSkipNotice,
+  zapStep
 } from "./model/browse.mjs"
 export {
   MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedSearchTerms,
@@ -161,11 +162,11 @@ export {
   CONFIG_SHIELD_ABSENT, CONFIG_PERSIST, CONFIG_REFUSE, CONFIG_DEFER,
   configShieldArgv, configShieldState, persistCarriesSecret,
   configShieldDecision, entryShieldDecision, playerStartArgv, playerStopArgv,
-  playerRestartArgv, playerPauseArgv, notifyArgv, NOTIFY_POST_TIMEOUT_MS,
-  notifyReplaceId, notifyReplyId, notifyPost, notifyAnswered, sourceLabel,
-  hostOf, URL_SPACE_CODES, isUrlSpaceAt, URL_DELIMITER_CODES,
-  isUrlDelimiterAt, trailingPunctuationLength, redactUrls, scrubUrls,
-  sinkText
+  playerRestartArgv, playerPauseArgv, notifyArgv, markupEscape,
+  NOTIFY_POST_TIMEOUT_MS, notifyReplaceId, notifyReplyId, notifyPost,
+  notifyAnswered, sourceLabel, hostOf, URL_SPACE_CODES, isUrlSpaceAt,
+  URL_DELIMITER_CODES, isUrlDelimiterAt, trailingPunctuationLength,
+  redactUrls, scrubUrls, sinkText
 } from "./model/privacy.mjs"
 export {
   formatClock, formatCount, pluralChannels, epgFraction, epgNowStale,
@@ -184,9 +185,10 @@ export {
   noMatchesTitle
 } from "./model/contrast.mjs"
 export {
-  barGlyph, barTooltip, barAccessibleName, guideSurface, firstRunAllowed,
-  footerStatus, footerHints, formHints, keyboardMapUntabled, hideMeaning,
-  sameEscape, verbForKey, setKeyRow, keyboardMap, keyboardMapKeys
+  barGlyph, barTooltip, barAccessibleName, ipcNowPlaying, ipcJson,
+  guideSurface, firstRunAllowed, footerStatus, footerHints, formHints,
+  keyboardMapUntabled, hideMeaning, sameEscape, verbForKey, setKeyRow,
+  keyboardMap, keyboardMapKeys
 } from "./model/view.mjs"
 export {
   CACHE_LAYOUT, MAX_SOURCES, MAX_SOURCE_URL, MAX_LABEL, MAX_XTREAM_SERVER,

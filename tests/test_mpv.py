@@ -750,6 +750,87 @@ class PlayTest(MpvTestCase):
         self.assertNotIn("user:pw", stdout + stderr)
 
 
+class ShownNamesTest(MpvTestCase):
+    """F-SINK-14 (2026-10-29): the player's window title is the name the guide
+    row shows. apply_channel set mpv's `title` and `force-media-title` from the
+    RAW channel name, so a playlist name holding a credentialed URL became the
+    compositor's toplevel title -- read by every client that lists windows --
+    while the guide row printed the host. It now sets both from redact_urls,
+    the helper's mirror of Model.sinkText, keeping the `$>` prefix (S-01).
+
+    Driven over the SHARED fixture tests/Model.test.js runs every shown-name
+    composer over (tests/fixtures/shown-names.json), through the shipping
+    `play` verb against FakeMpv: `py` is exactly what each property is set to.
+    Red on dev 2727179: every name with a URL went out whole."""
+
+    def names(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(here, "fixtures", "shown-names.json"), encoding="utf-8") as fh:
+            return json.load(fh)["names"]
+
+    def test_redact_urls_is_the_fixture_s_py_output(self):
+        bad = [(v["why"], helper.redact_urls(v["name"])) for v in self.names() if helper.redact_urls(v["name"]) != v["py"]]
+        self.assertEqual([], bad)
+
+    def test_play_sets_title_and_force_media_title_to_the_shown_name(self):
+        names = self.names()
+        playlist = os.path.join(self.dir, "shown.m3u")
+        lines = ["#EXTM3U"]
+        for i, v in enumerate(names):
+            lines.append('#EXTINF:-1 tvg-id="n%d.test",%s' % (i, v["name"]))
+            lines.append("http://stream.example.test/live/n%d.m3u8" % i)
+        pathlib.Path(playlist).write_text("\n".join(lines) + "\n", encoding="utf-8")
+        code, _, _, stderr = run("playlist", "--url", playlist, "--cache-dir", self.cache)
+        self.assertEqual(code, 0, stderr)
+        seen = []
+        for i, v in enumerate(names):
+            with self.subTest(why=v["why"]):
+                sock = os.path.join(self.dir, "s%d.sock" % i)
+                server = FakeMpv(sock)
+                self.addCleanup(server.close)
+                code, payload, stdout, stderr = run("play", "--id", "t:n%d.test" % i, "--cache-dir", self.cache,
+                                                    "--socket", sock, "--ipc-timeout", "1")
+                self.assertEqual(code, 0, stderr)
+                titles = [c[2] for c in server.commands if c[:2] == ["set_property", "title"]]
+                forced = [c[2] for c in server.commands if c[:2] == ["set_property", "force-media-title"]]
+                self.assertEqual(titles, [helper.MPV_RAW_PREFIX + v["py"]])
+                self.assertEqual(forced, [v["py"]])
+                for frag in v["mustNotAppear"]:
+                    self.assertNotIn(frag, titles[0] + forced[0])
+                seen.append(v["py"])
+        self.assertEqual(len(seen), len(names))
+
+
+class TitleControlsTest(MpvTestCase):
+    """F-SINK-16 (2026-10-29): the player's title carries no control
+    character. The playlist parse keeps a provider's C0 and C1 controls in a
+    channel name (measured: ESC, BEL, BS, DEL, U+009B and U+009D survive into
+    channels.json), apply_channel set them as mpv's `title`, and a toplevel
+    title is printed raw by the tools a user runs in a terminal. They are
+    dropped before the redaction, so a tab inside a password no longer
+    splits the URL (D-SINK-34's cost) on this sink either. Red on dev
+    2727179: the title carried every control and the whole URL."""
+
+    def test_title_and_media_title_carry_no_control_character(self):
+        name = "News\x1b]52;c;aGk=\x07 \x1b[2J\x08\x7f \x9b31m\x9d0;x\x9c (http://u5er:pa\tS3CRET@cdn.test/x)"
+        playlist = os.path.join(self.dir, "controls.m3u")
+        pathlib.Path(playlist).write_text('#EXTM3U\n#EXTINF:-1 tvg-id="ctl.test",%s\nhttp://stream.example.test/live/c.m3u8\n' % name,
+                                          encoding="utf-8")
+        code, _, _, stderr = run("playlist", "--url", playlist, "--cache-dir", self.cache)
+        self.assertEqual(code, 0, stderr)
+        server = self.start()
+        code, payload, _, stderr = self.play("--id", "t:ctl.test")
+        self.assertEqual(code, 0, stderr)
+        # The cache really holds the controls: this is the parse's output, not
+        # a name the test made up after it.
+        self.assertIn("\x1b", payload["name"])
+        self.assertIn("\x9b", payload["name"])
+        titles = [c[2] for c in server.commands if c[:2] == ["set_property", "title"]]
+        forced = [c[2] for c in server.commands if c[:2] == ["set_property", "force-media-title"]]
+        self.assertEqual(titles, ["$>News]52;c;aGk= [2J 31m0;x (http://cdn.test)"])
+        self.assertEqual(forced, ["News]52;c;aGk= [2J 31m0;x (http://cdn.test)"])
+
+
 class TlsVerificationTest(MpvTestCase):
     """D-SINK-16: apply_channel asserts the certificate properties, and REFUSES
     to load when it cannot make them safe.
