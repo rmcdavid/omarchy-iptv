@@ -4319,6 +4319,11 @@ function redactUrlsBeforeDSink23(text) {
       noMatchesTitle: Model.noMatchesTitle("zz", G(v)),
       hintNames: Model.groupNamesForHint(surface).join("|"),
       soleHint: Model.groupNamesForHint(Model.scopeSurface([ch[0]], null)).join("|"),
+      // A surface whose group entry carries the RAW label, as a caller other
+      // than scopeSurface would hand it: groupNamesForHint redacts it itself
+      // (rc-p2c: removing that sinkText survived every check, because
+      // scopeSurface had already redacted every label it was given).
+      rawLabelHint: Model.groupNamesForHint({ axis: {}, entries: [{ id: G(v), label: v.name, kind: "group", count: 1 }] }).join("|"),
       ipcName: np.name, ipcGroup: np.group, ipcLaunchedFrom: np.launchedFrom
     }
   }
@@ -4343,7 +4348,7 @@ function redactUrlsBeforeDSink23(text) {
         scopeLabel: v.js + SEP_ + "1 channel",
         scopeLabelSearching: "in " + v.js + SEP_ + "0 matches",
         noMatchesTitle: "No matches for " + Model.QUOTE_OPEN + "zz" + Model.QUOTE_CLOSE + " in " + v.js,
-        hintNames: v.js + "|Other", soleHint: v.js,
+        hintNames: v.js + "|Other", soleHint: v.js, rawLabelHint: v.js,
         ipcName: v.js, ipcGroup: v.js, ipcLaunchedFrom: "g:" + v.js
       }
       const wrong = Object.keys(want).filter(function (k) { return got[k] !== want[k] })
@@ -4360,13 +4365,18 @@ function redactUrlsBeforeDSink23(text) {
   // channels a group scope holds are found by matching the RAW group
   // (channelsForScope through rawScopeName). Redacting the id would empty the
   // scope and orphan every hidden group whose name carries a URL.
+  const URL_ID = "t:http://epg.example.test/a"
   checkCall("F-SINK-14: the ids stay raw -- the column's entry id, the IPC status's channel id, the scope's channels and a hidden group's entry -- and rawScopeName round-trips the raw group while scopeName shows it", function () {
     const starred = { version: 2, favorites: ["t:a"], recents: [] }
     return SHOWN.map(function (v) {
       const ch = chans(v)
       const surface = Model.scopeSurface(ch, null)
       const hidden = Model.scopeSurface(ch, { version: 2, favorites: [], recents: [], hiddenGroups: [v.name] })
-      const np = Model.ipcNowPlaying({ id: "t:a", name: v.name, group: v.name, launchedFrom: G(v), since: 7 }, "101")
+      // The channel id is one that sinkText WOULD change (a tvg-id that is
+      // itself an address), so an ipcNowPlaying that redacted the id -- and
+      // broke `play <id>` taking it back -- goes red here (rc-p2c: with
+      // "t:a" that mutation survived every check).
+      const np = Model.ipcNowPlaying({ id: URL_ID, name: v.name, group: v.name, launchedFrom: G(v), since: 7 }, "101")
       return [surface.entries.some(function (e) { return e.id === "g:" + v.name && e.kind === "group" }),
               hidden.entries.some(function (e) { return e.id === "g:" + v.name && e.kind === "hidden" }),
               Model.channelsForScope(ch, G(v), null).map(function (c) { return c.id }).join(","),
@@ -4377,7 +4387,7 @@ function redactUrlsBeforeDSink23(text) {
               // the answer shows which rule decided.
               Model.requestedScope(Model.scopeSurface([ch[0]], starred).entries, G(v), Model.scopeSurface([ch[0]], starred).axis)]
     })
-  }, SHOWN.map(function () { return [true, true, "t:a", true, "t:a", "101", 7, "all"] }))
+  }, SHOWN.map(function () { return [true, true, "t:a", true, URL_ID, "101", 7, "all"] }))
 
   checkCall("F-SINK-14: ipcNowPlaying is null when nothing plays, as the property is, and sinkText is idempotent over the fixture (a name shown twice is the name shown once)", function () {
     return [Model.ipcNowPlaying(null, "1"), Model.ipcNowPlaying(undefined, ""),
