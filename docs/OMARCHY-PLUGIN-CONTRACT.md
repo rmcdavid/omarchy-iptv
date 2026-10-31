@@ -826,7 +826,8 @@ Two neighbouring facts, read rather than run:
   location and that the entry is an object, then `entry[String(key)] = value`
   (379). The manifest's `defaults` never reach an entry (a put entry is `{
   id: key }`, PluginRegistry.qml 526), and the only host reads of `schema` and
-  `defaults` are the registration at shell.qml 1406-1408. `sourceKey`, which
+  `defaults` are the registration at shell.qml 1406-1408 (1409-1411 on
+  4.0.6-1, and still the only ones). `sourceKey`, which
   the manifest does not declare, is written and read back through `barConfig`
   today. So the migration does not depend on the manifest declaring
   `playlistUrl` or `epgUrl`; whether to stop declaring them is the lead's.]
