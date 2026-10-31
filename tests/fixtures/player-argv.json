@@ -22,7 +22,8 @@
       "shader and ICC caches default into $XDG_CACHE_HOME/mpv/, outside this",
       "plugin's tree; both are content-free and regenerable, so they are",
       "contained in the runtime directory and are ephemeral on purpose.",
-      "Run by Model.playerDirs and player_dirs()."
+      "Run by Model.playerDirs and player_dirs().",
+      "D-SINK-47 (lane-p2a, 2026-10-29): `mpvArgs` is the private file the user's tokens are written into for the length of a launch, in the runtime directory."
     ],
     "cases": [
       {
@@ -33,7 +34,8 @@
           "cwd": "/run/user/1000/omarchy-iptv",
           "screenshots": "/home/u/.local/state/omarchy-iptv/screenshots",
           "watchLater": "/run/user/1000/omarchy-iptv/watch-later",
-          "shaderCache": "/run/user/1000/omarchy-iptv/shader-cache"
+          "shaderCache": "/run/user/1000/omarchy-iptv/shader-cache",
+          "mpvArgs": "/run/user/1000/omarchy-iptv/mpv-args.conf"
         }
       },
       {
@@ -44,7 +46,8 @@
           "cwd": "/tmp",
           "screenshots": "/home/u/.local/state/omarchy-iptv/screenshots",
           "watchLater": "/tmp/watch-later",
-          "shaderCache": "/tmp/shader-cache"
+          "shaderCache": "/tmp/shader-cache",
+          "mpvArgs": "/tmp/mpv-args.conf"
         }
       }
     ]
@@ -110,6 +113,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -124,7 +128,8 @@
         "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
-      ]
+      ],
+      "include": []
     },
     {
       "name": "user mpvArgs land after the fixed options so --ytdl=yes, --screenshot-dir and the caches still win",
@@ -154,10 +159,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
-        "--profile=low-latency",
-        "--ytdl=yes",
-        "--screenshot-dir=/home/u/Pictures",
-        "--gpu-shader-cache-dir=/home/u/.cache/shaders",
+        "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
         "--scripts-clr",
@@ -167,6 +169,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -181,6 +184,12 @@
         "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
+      ],
+      "include": [
+        "profile=%11%low-latency",
+        "ytdl=%3%yes",
+        "screenshot-dir=%16%/home/u/Pictures",
+        "gpu-shader-cache-dir=%22%/home/u/.cache/shaders"
       ]
     },
     {
@@ -226,7 +235,7 @@
         "--icc-cache-dir=/tmp/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
-        "--hwdec=auto-safe",
+        "--include=/tmp/mpv-args.conf",
         "--watch-later-dir=/tmp/watch-later",
         "--load-scripts=no",
         "--scripts-clr",
@@ -236,6 +245,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -250,6 +260,9 @@
         "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
+      ],
+      "include": [
+        "hwdec=%9%auto-safe"
       ]
     },
     {
@@ -297,8 +310,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
-        "--profile=evil",
-        "--tls-ca-file=/etc/ssl/provider-ca.pem",
+        "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
         "--scripts-clr",
@@ -308,6 +320,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -322,6 +335,10 @@
         "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
+      ],
+      "include": [
+        "profile=%4%evil",
+        "tls-ca-file=%24%/etc/ssl/provider-ca.pem"
       ]
     },
     {
@@ -366,8 +383,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
-        "--gpu-sw=no",
-        "--no-gpu-sw",
+        "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
         "--scripts-clr",
@@ -377,6 +393,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -391,6 +408,10 @@
         "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
+      ],
+      "include": [
+        "gpu-sw=%2%no",
+        "no-gpu-sw"
       ]
     },
     {
@@ -447,7 +468,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
-        "--demuxer-lavf-o=live_start_index=-1,http_persistent=0",
+        "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
         "--scripts-clr",
@@ -457,6 +478,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -471,6 +493,9 @@
         "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
+      ],
+      "include": [
+        "demuxer-lavf-o=%37%live_start_index=-1,http_persistent=0"
       ]
     },
     {
@@ -564,7 +589,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
-        "--hwdec=auto-safe",
+        "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
         "--scripts-clr",
@@ -574,6 +599,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -588,6 +614,9 @@
         "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
+      ],
+      "include": [
+        "hwdec=%9%auto-safe"
       ]
     },
     {
@@ -628,14 +657,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
-        "--hwdec=auto-safe",
-        "--profile=low-latency",
-        "--cache-secs=30",
-        "--volume=50",
-        "--tls-ca-file=/etc/ssl/provider-ca.pem",
-        "--demuxer-lavf-o=live_start_index=-1",
-        "--screenshot-dir=/home/u/Pictures",
-        "--http-proxy=http://proxy.example:3128",
+        "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
         "--scripts-clr",
@@ -645,6 +667,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -659,6 +682,16 @@
         "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt",
         "--demuxer-lavf-o-append=tls_verify=1",
         "--tls-verify=yes"
+      ],
+      "include": [
+        "hwdec=%9%auto-safe",
+        "profile=%11%low-latency",
+        "cache-secs=%2%30",
+        "volume=%2%50",
+        "tls-ca-file=%24%/etc/ssl/provider-ca.pem",
+        "demuxer-lavf-o=%19%live_start_index=-1",
+        "screenshot-dir=%16%/home/u/Pictures",
+        "http-proxy=%25%http://proxy.example:3128"
       ]
     },
     {
@@ -695,9 +728,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
-        "--script-opts=osc-deadzonesize=0.5",
-        "--script-opts=ytdl_hook-ytdl_path=/usr/bin/yt-dlp",
-        "--demuxer-lavf-o=live_start_index=-1",
+        "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
         "--scripts-clr",
@@ -707,6 +738,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -730,6 +762,11 @@
         "--drag-and-drop=auto",
         "--demuxer-lavf-o=protocol_whitelist=file,http",
         "--demuxer-lavf-o-append=protocol_blacklist=tcp"
+      ],
+      "include": [
+        "script-opts=%20%osc-deadzonesize=0.5",
+        "script-opts=%35%ytdl_hook-ytdl_path=/usr/bin/yt-dlp",
+        "demuxer-lavf-o=%19%live_start_index=-1"
       ]
     },
     {
@@ -763,7 +800,7 @@
         "--icc-cache-dir=/run/user/1000/omarchy-iptv/shader-cache",
         "--gpu-sw=yes",
         "--tls-verify=yes",
-        "--demuxer-lavf-o=live_start_index=-1",
+        "--include=/run/user/1000/omarchy-iptv/mpv-args.conf",
         "--watch-later-dir=/run/user/1000/omarchy-iptv/watch-later",
         "--load-scripts=no",
         "--scripts-clr",
@@ -773,6 +810,7 @@
         "--player-operation-mode=cplayer",
         "--load-select=no",
         "--load-console=no",
+        "--load-stats-overlay=no",
         "--prefetch-playlist=no",
         "--load-unsafe-playlists=no",
         "--save-watch-history=no",
@@ -795,6 +833,9 @@
         "--demuxer-lavf-o=format_whitelist=hls,imf",
         "--demuxer-lavf-o-append=format_blacklist=sdp",
         "--demuxer-lavf-o=extension_picky=0,seg_format_options=\"format\\_whitelist=sdp:protocol\\_whitelist=rtp,udp\""
+      ],
+      "include": [
+        "demuxer-lavf-o=%19%live_start_index=-1"
       ]
     }
   ],
@@ -1059,6 +1100,194 @@
         "warnings": [
           "mpvArg --demuxer-lavf-o-append hands the stream address to another program"
         ]
+      },
+      {
+        "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o=rtsp_transport=udp",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport=udp"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o=rtsp_transport=1",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport=1"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o=rtsp_transport=0x1",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport=0x1"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o=rtsp_transport=2*0.5",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport=2*0.5"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o=rtsp_transport=+udp",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport=+udp"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o=rtsp_transport=-tcp",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport=-tcp"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o=rtsp_transport=0",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport=0"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o=rtsp_transport=\"udp\"",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport=\"udp\""
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o=rtsp_transport=[udp]",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport=[udp]"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o=rtsp_transport=%3%udp",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport=%3%udp"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o=rtsp_transport=udp_multicast",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport=udp_multicast"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o-append=rtsp_transport=udp",
+        "tokens": [
+          "--demuxer-lavf-o-append=rtsp_transport=udp"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o-append opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o-set=rtsp_transport=udp",
+        "tokens": [
+          "--demuxer-lavf-o-set=rtsp_transport=udp"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o-set opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o-add=rtsp_transport=udp+tcp",
+        "tokens": [
+          "--demuxer-lavf-o-add=rtsp_transport=udp+tcp"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o-add opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o=live_start_index=-1,rtsp_transport=udp",
+        "tokens": [
+          "--demuxer-lavf-o=live_start_index=-1,rtsp_transport=udp"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65, one spelling at a time (each measured binding): --demuxer-lavf-o=rtsp_transport=tcp,rtsp_transport=udp",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport=tcp,rtsp_transport=udp"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65: the spellings measured binding nothing are silent (tcp, http, https and their +-joins, quoted or bracketed), and so are rtsp_flags, which no spelling of binds, a removal, and a key that is not rtsp_transport",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport=tcp",
+          "--demuxer-lavf-o=rtsp_transport=http",
+          "--demuxer-lavf-o=rtsp_transport=https",
+          "--demuxer-lavf-o=rtsp_transport=tcp+http",
+          "--demuxer-lavf-o=rtsp_transport=\"tcp\"",
+          "--demuxer-lavf-o=rtsp_transport=[tcp]",
+          "--demuxer-lavf-o=rtsp_flags=prefer_tcp",
+          "--demuxer-lavf-o=rtsp_flags=2",
+          "--demuxer-lavf-o-remove=rtsp_transport",
+          "--demuxer-lavf-o-clr",
+          "--demuxer-lavf-o=live_start_index=-1",
+          "--demuxer-lavf-o=rtsp_transport=tcp,live_start_index=-1"
+        ],
+        "warnings": []
+      },
+      {
+        "name": "D-SINK-65: a spelling nobody enumerated warns rather than passes -- the key with no value, an empty value, an upper-case name FFmpeg would refuse, an unterminated quote, the numeric tcp -- the price of reading flags conservatively",
+        "tokens": [
+          "--demuxer-lavf-o=rtsp_transport",
+          "--demuxer-lavf-o=rtsp_transport=,x=1",
+          "--demuxer-lavf-o-append=rtsp_transport=TCP",
+          "--demuxer-lavf-o-set=rtsp_transport=\"tcp",
+          "--demuxer-lavf-o-add=rtsp_transport=2"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to",
+          "mpvArg --demuxer-lavf-o-append opens ports on this computer that anyone can send to",
+          "mpvArg --demuxer-lavf-o-set opens ports on this computer that anyone can send to",
+          "mpvArg --demuxer-lavf-o-add opens ports on this computer that anyone can send to"
+        ]
+      },
+      {
+        "name": "D-SINK-65: one token that carries two costs is told both, the handoff first (D-SINK-59 and D-SINK-65 together)",
+        "tokens": [
+          "--demuxer-lavf-o=http_proxy=http://p.test:3128,rtsp_transport=udp"
+        ],
+        "warnings": [
+          "mpvArg --demuxer-lavf-o hands the stream address to another program",
+          "mpvArg --demuxer-lavf-o opens ports on this computer that anyone can send to"
+        ]
       }
     ],
     "diskText": " writes the stream to disk while it plays",
@@ -1090,6 +1319,7 @@
     "--load-osd-console",
     "--load-scripts",
     "--load-select",
+    "--load-stats-overlay",
     "--load-unsafe-playlists",
     "--log-file",
     "--o",
@@ -1640,5 +1870,12 @@
         "kind": "failed"
       }
     }
+  ],
+  "_mpvArgvIncludeComment": [
+    "D-SINK-47 (lane-p2a, 2026-10-29): the user's kept tokens are no longer on the launch argv",
+    "(/proc/<pid>/cmdline, world-readable); `--include=<runtime>/mpv-args.conf` stands where they stood,",
+    "and `include` is that file's lines, one per kept token, `name` or `name=%N%value` with N the",
+    "value's UTF-8 length (mpv's length-quoted form). No tokens, no --include and no file. Python",
+    "alone writes the file (mpv_args_config); both mirrors compose the argv."
   ]
 }

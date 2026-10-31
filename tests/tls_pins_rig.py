@@ -122,6 +122,32 @@ checks, inside the same `unshare -rn`:
       HLS needs)
   C5  a DASH channel plays (the same, for DASH's nested demuxer)
 
+lane-p2a (2026-10-29) adds an eighth server, `rtsp` (8807, a fake RTSP
+server: OPTIONS, DESCRIBE with one MP2T track, SETUP, PLAY; a TCP-interleaved
+SETUP is streamed, a UDP one answered with the client's own ports), and:
+  W26 the stats overlay (D-SINK-67, the owner's "turn stats off") on a
+      channel whose last path segment is empty, so mpv's `filename` is the
+      whole credentialed URL: `i`, `I`, `script-binding
+      stats/display-stats-toggle` and `stats/display-page-5` (what the OSC's
+      title left-click runs) draw nothing that carries it, the bindings are
+      refused, and the option reads off -- on a player this tree starts, and
+      on a pre-pin player once the tree's adoption has turned it off
+  W27 every spelling of `--demuxer-lavf-o` that makes an rtsp channel bind
+      its RTP/RTCP pair is WARNED by the tree's filter (D-SINK-65): each is
+      played past the filter inside the namespace and, where it binds, the
+      tree's mpv_arg_warnings must name it; a spelling that binds nothing is
+      a control
+  W28 an ADOPTED pre-pin player whose PLAIN mpv.conf line says
+      `demuxer-lavf-propagate-opts=no` (D-SINK-68): the HLS segment on the
+      attacker gets nothing -- FFmpeg n9.0.1's own tls_verify default is true
+      -- with the same case's control, a pre-pin player loaded by the pre-pin
+      tree with a demuxer tls_verify=0 past the filter, reaching the attacker
+      (the rig can see a bypass in this shape)
+  W29 the user's tokens (D-SINK-47) -- one carrying the secret, one with
+      `,`, quotes, `#` and a trailing backslash -- take effect in a real
+      player whose /proc/<pid>/cmdline holds none of them, only the name of
+      the private options file, which is gone once the socket answers
+
 usage: tls_pins_rig.py --tree DIR [--pre-pin DIR] --work DIR
 Exit 0 green, 1 red, 77 when mpv, ffmpeg or openssl is missing. Stdlib only.
 """
@@ -139,7 +165,7 @@ import subprocess
 import sys
 import time
 
-PORTS = {"provider": 8780, "attacker": 8781, "hlsok": 8782, "alt": 8783, "plain": 8784, "lab": 8785}
+PORTS = {"provider": 8780, "attacker": 8781, "hlsok": 8782, "alt": 8783, "plain": 8784, "lab": 8785, "rtsp": 8807}
 # W11's nested entries name these; nothing may ever listen on them.
 NEST_SRT, NEST_RTP, SDP_RTP = 8790, 8792, 8794
 # lane-p1c's listeners (W19-W21, W24, W25): nothing may ever listen on them.
@@ -319,6 +345,73 @@ def serve(name: str, port: int, www: str, log: str, cert: str, key: str, alt_cer
     Server(("127.0.0.1", port), Handler).serve_forever()
 
 
+def serve_rtsp(port: int, www: str, log: str) -> None:
+    """lane-p2a: a fake RTSP server (W27). OPTIONS, DESCRIBE (one MP2T
+    track), SETUP, PLAY. A TCP-interleaved SETUP is streamed long.ts in
+    RTP/MP2T; a UDP SETUP is answered with the client's ports and nothing is
+    sent -- the player binds its RTP/RTCP pair on SETUP whatever follows,
+    which is the sink. Every request's method and Transport is logged."""
+    import struct
+    import threading
+    with open(os.path.join(www, "long.ts"), "rb") as fh:
+        ts = fh.read()
+    lsock = socket.socket()
+    lsock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    lsock.bind(("127.0.0.1", port))
+    lsock.listen(8)
+
+    def client(conn):
+        buf, interleaved = b"", False
+        conn.settimeout(15)
+        try:
+            while True:
+                while b"\r\n\r\n" not in buf:
+                    chunk = conn.recv(4096)
+                    if not chunk:
+                        return
+                    buf += chunk
+                head, buf = buf.split(b"\r\n\r\n", 1)
+                lines = head.decode("latin-1").split("\r\n")
+                method = lines[0].split(" ")[0]
+                hdr = {l.split(":", 1)[0].strip().lower(): l.split(":", 1)[1].strip() for l in lines[1:] if ":" in l}
+                fd = os.open(log, os.O_WRONLY | os.O_APPEND | os.O_CREAT, 0o600)
+                with os.fdopen(fd, "a") as fh:
+                    fh.write(json.dumps({"server": "rtsp", "path": method, "transport": hdr.get("transport", ""),
+                                         "secret": False, "header": False, "ua": "", "headers": []}) + "\n")
+                extra, body = "", b""
+                if method == "OPTIONS":
+                    extra = "Public: OPTIONS, DESCRIBE, SETUP, PLAY, TEARDOWN\r\n"
+                elif method == "DESCRIBE":
+                    body = (b"v=0\r\no=- 0 0 IN IP4 127.0.0.1\r\ns=x\r\nc=IN IP4 0.0.0.0\r\nt=0 0\r\n"
+                            b"m=video 0 RTP/AVP 33\r\na=control:track1\r\n")
+                    extra = "Content-Type: application/sdp\r\nContent-Base: rtsp://127.0.0.1:%d/live/\r\n" % port
+                elif method == "SETUP":
+                    tr = hdr.get("transport", "")
+                    interleaved = "interleaved" in tr
+                    extra = "Session: 4242;timeout=60\r\nTransport: %s\r\n" % (
+                        "RTP/AVP/TCP;unicast;interleaved=0-1" if interleaved else tr + ";server_port=47821-47822")
+                elif method == "PLAY":
+                    extra = "Session: 4242\r\n"
+                conn.sendall(("RTSP/1.0 200 OK\r\nCSeq: %s\r\n%sContent-Length: %d\r\n\r\n"
+                              % (hdr.get("cseq", "1"), extra, len(body))).encode() + body)
+                if method == "PLAY" and interleaved:
+                    seq = stamp = 0
+                    for off in range(0, len(ts) - 1316, 1316):
+                        pkt = struct.pack("!BBHII", 0x80, 33, seq & 0xFFFF, stamp & 0xFFFFFFFF, 0x1234) + ts[off:off + 1316]
+                        conn.sendall(b"$" + bytes([0]) + struct.pack("!H", len(pkt)) + pkt)
+                        seq, stamp = seq + 1, stamp + 900
+                        time.sleep(0.004)
+                    return
+        except OSError:
+            return
+        finally:
+            conn.close()
+
+    while True:
+        conn, _ = lsock.accept()
+        threading.Thread(target=client, args=(conn,), daemon=True).start()
+
+
 # ------------------------------------------------------------------ the rig
 
 def run(argv: list[str], timeout: int = 60, **kw) -> subprocess.CompletedProcess:
@@ -410,7 +503,9 @@ def start_servers(work: str, rig: dict[str, str]) -> list[subprocess.Popen]:
         "plain": ("", "", "", "", ""),
         "lab": ("", "", "", "", ""),
     }
-    procs = []
+    procs = [subprocess.Popen([sys.executable, "-I", os.path.abspath(__file__), "--serve-rtsp", str(PORTS["rtsp"]),
+                               rig["www"], log], stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                              stderr=subprocess.DEVNULL)]
     for name, (cert, key, acert, akey, seg) in specs.items():
         procs.append(subprocess.Popen([sys.executable, "-I", os.path.abspath(__file__), "--serve", name, str(PORTS[name]),
                                        rig["www"], log, cert, key, acert, akey, seg],
@@ -476,7 +571,7 @@ def listening(pid: int) -> list[str]:
 
 def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=(), raw=(), conf="",
           seconds=5.0, post=(), migrate=False, watch=(), inputconf="", first_url="", headers=None,
-          drawwatch=False) -> dict:
+          drawwatch=False, cmdline_words=()) -> dict:
     base = os.path.join(work, "cases", case)
     for sub in ("home", "cache", "state", "config/mpv", "data", "run/omarchy-iptv"):
         os.makedirs(os.path.join(base, sub), mode=0o700, exist_ok=True)
@@ -492,6 +587,14 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
     kept, rejected = argv_ns["filter_mpv_args"](list(user))
     dirs = argv_ns["player_dirs"](os.path.join(runtime, "mpv.sock"), os.path.join(base, "state", "omarchy-iptv"))
     argv = argv_ns["mpv_launch_argv"]("mpv.sock", kept + list(raw), dirs)
+    # lane-p2a (D-SINK-47): a tree whose launch argv names the private options
+    # file gets it written as its own adopt_or_spawn writes it -- the user's
+    # tokens and the raw ones past the filter, in order -- and removed once
+    # the socket answers, as the helper removes it. A tree before it carries
+    # the tokens on the argv itself.
+    options = dirs.get("mpvArgs", "")
+    if options and "write_mpv_args" in argv_ns and any(a == "--include=" + options for a in argv):
+        argv_ns["write_mpv_args"](options, kept + list(raw))
     cmd = ["mpv", "--config-dir=" + base + "/config/mpv", "--vo=null", "--ao=null"] + [a for a in argv[1:] if not a.startswith("--force-window")]
     before = len(requests(work))
     jb = journal()
@@ -500,10 +603,22 @@ def probe(work: str, case: str, argv_ns: dict, logic_ns: dict, url: str, user=()
     err = open(os.path.join(base, "mpv.stderr"), "wb")
     player = subprocess.Popen(cmd, cwd=runtime, env=env, stdin=subprocess.DEVNULL, stdout=err, stderr=err, preexec_fn=no_core)
     result = {"case": case, "rejected": rejected, "applied": None, "timePos": None, "props": {}, "kids": [], "post": [],
-              "listening": [], "ends": [], "drawn": [], "errlines": []}
+              "listening": [], "ends": [], "drawn": [], "errlines": [], "cmdlineHas": None}
     watcher = None
     try:
         client = logic_ns["wait_for_socket"]("mpv.sock", 8.0, 3.0)
+        if options and "remove_mpv_args" in argv_ns:
+            result["optionsFile"] = os.path.lexists(options)
+            argv_ns["remove_mpv_args"](options)
+        if cmdline_words:
+            # lane-p2a (D-SINK-47): what /proc shows every account, read off
+            # the player itself while it runs. Which words, never the line.
+            try:
+                with open("/proc/%d/cmdline" % player.pid, "rb") as fh:
+                    line = fh.read().decode("utf-8", "replace")
+                result["cmdlineHas"] = [word for word in cmdline_words if word in line]
+            except OSError:
+                result["cmdlineHas"] = None
         if client is None:
             result["error"] = "no socket"
         else:
@@ -653,6 +768,9 @@ def got(result: dict, server: str) -> int:
 def main(argv: list[str]) -> int:
     if argv[:1] == ["--serve"]:
         serve(argv[1], int(argv[2]), argv[3], argv[4], argv[5], argv[6], argv[7], argv[8], argv[9])
+        return 0
+    if argv[:1] == ["--serve-rtsp"]:
+        serve_rtsp(int(argv[1]), argv[2], argv[3])
         return 0
     opts = {"--tree": "", "--pre-pin": "", "--work": ""}
     i = 0
@@ -857,6 +975,73 @@ def main(argv: list[str]) -> int:
               and r["props"].get("load-console") is False,
               "drawn with the secret %d of %d, error lines with it %d, console loaded %s" % (
                   len(r["drawn"]), r.get("draws", 0), len(told), r["props"].get("load-console")))
+        # ---- lane-p2a (2026-10-29): D-SINK-67, D-SINK-65, D-SINK-68.
+        bare = lab + "/live/rig/%s/" % SECRET            # an empty last segment: `filename` is the whole URL
+        stats_post = [[2.0, ["keypress", "i"]], [2.6, ["keypress", "I"]],
+                      [3.2, ["script-binding", "stats/display-stats-toggle"]],
+                      [3.8, ["script-binding", "stats/display-page-5"]]]
+        own = probe(work, "W26a", tree, tree, bare, raw=["--video-osd=no"], seconds=6, drawwatch=True,
+                    post=stats_post, watch=("load-stats-overlay", "filename"))
+        stats = [own]
+        if pre is not None:
+            stats.append(probe(work, "W26b", pre, tree, bare, raw=["--video-osd=no"], seconds=6, drawwatch=True,
+                               post=stats_post, migrate=True, watch=("load-stats-overlay", "filename")))
+        check("W26 the stats overlay draws nothing of a URL whose `filename` is the whole of it: i, I, the toggle and page 5 (the OSC title's left click); the bindings are refused and the option reads off -- on this tree's player and on an adopted pre-pin one",
+              all(r["drawn"] == [] and SECRET in str(r["props"].get("filename", "")) and r["timePos"] is not None
+                  and r["props"].get("load-stats-overlay") is False and r["post"][2:] == ["error running command"] * 2
+                  for r in stats),
+              "; ".join("%s: drawn with the secret %d of %d, filename carries it %s, bindings %s, option %s" % (
+                  r["case"], len(r["drawn"]), r.get("draws", 0), SECRET in str(r["props"].get("filename", "")),
+                  r["post"][2:], r["props"].get("load-stats-overlay")) for r in stats))
+        if os.environ.get("OMARCHY_IPTV_RIG_NETNS") != "1":
+            print("SKIP W27: it needs unshare -rn (an rtsp channel over udp binds on every interface)")
+        else:
+            rtsp = "rtsp://127.0.0.1:%d/live/x" % PORTS["rtsp"]
+            spellings = ["--demuxer-lavf-o=rtsp_transport=udp", "--demuxer-lavf-o=rtsp_transport=1",
+                         "--demuxer-lavf-o=rtsp_transport=0x1", "--demuxer-lavf-o=rtsp_transport=+udp",
+                         "--demuxer-lavf-o=rtsp_transport=-tcp", "--demuxer-lavf-o=rtsp_transport=0",
+                         "--demuxer-lavf-o=rtsp_transport=udp+tcp", '--demuxer-lavf-o=rtsp_transport="udp"',
+                         "--demuxer-lavf-o=rtsp_transport=udp_multicast", "--demuxer-lavf-o-append=rtsp_transport=udp",
+                         "--demuxer-lavf-o-set=rtsp_transport=udp", "--demuxer-lavf-o=live_start_index=-1,rtsp_transport=udp",
+                         "--demuxer-lavf-o=rtsp_transport=tcp,rtsp_transport=udp", "--demuxer-lavf-o=rtsp_flags=prefer_tcp",
+                         "--demuxer-lavf-o=rtsp_flags=2", "--demuxer-lavf-o=rtsp_flags=+filter_src",
+                         "--demuxer-lavf-o=rtsp_transport=tcp", "--demuxer-lavf-o=rtsp_transport=http",
+                         "--demuxer-lavf-o=rtsp_transport=tcp+http"]
+            rows = []
+            for i, token in enumerate(spellings):
+                r = probe(work, "W27-%02d" % i, tree, tree, rtsp, raw=[token], seconds=3)
+                rows.append((token, r["listening"], tree["mpv_arg_warnings"]([token])))
+            control = probe(work, "W27-none", tree, tree, rtsp, seconds=3)
+            bound = [row for row in rows if row[1]]
+            untold = [row[0] for row in bound if not row[2]]
+            for token, sockets, told in rows:
+                print("   W27 %-62s binds %-3s warned %s" % (token, "yes" if sockets else "no", "yes" if told else "no"))
+            check("W27 every --demuxer-lavf-o spelling that makes an rtsp channel bind its RTP/RTCP pair is warned, and the channel with no token binds nothing",
+                  bound != [] and untold == [] and control["listening"] == [],
+                  "%d of %d spellings bind, %d of them unwarned %s; no token: listening %s" % (
+                      len(bound), len(rows), len(untold), untold, control["listening"]))
+        if pre is not None:
+            off = probe(work, "W28a", pre, tree, hls, user=[ca], conf="demuxer-lavf-propagate-opts=no\n", migrate=True,
+                        seconds=5, watch=("demuxer-lavf-propagate-opts",))
+            ctl = probe(work, "W28b", pre, pre, hls, user=[ca], raw=["--demuxer-lavf-o=tls_verify=0"], seconds=5)
+            check("W28 an adopted pre-pin player whose plain mpv.conf turns propagation off: the attacker's HLS segment gets nothing (control: the pre-pin tree's own load with tls_verify=0 reaches it)",
+                  off["props"].get("demuxer-lavf-propagate-opts") is False and got(off, "attacker") == 0 and got(ctl, "attacker") > 0,
+                  "propagate %s, attacker requests %d; control %d" % (off["props"].get("demuxer-lavf-propagate-opts"),
+                                                                      got(off, "attacker"), got(ctl, "attacker")))
+        # D-SINK-47: the user's tokens reach the player through the private
+        # options file, and only there.
+        tok = ["--volume=37", "--script-opts=rigkey=%s" % SECRET, '--sub-font=a,b "c" #d e\\']
+        r = probe(work, "W29", tree, tree, plain, user=tok, seconds=3, watch=("volume", "script-opts", "sub-font"),
+                  cmdline_words=(SECRET, "rigkey", "--volume=37", "sub-font", "--include="), headers={})
+        opts_file = os.path.join(work, "cases", "W29", "run", "omarchy-iptv", "mpv-args.conf")
+        check("W29 the user's tokens -- one carrying a secret, one with `,`, quotes, `#` and a trailing backslash -- take effect in a real player whose command line holds none of them, only the private file's name, and that file is gone once the socket answers",
+              r["timePos"] is not None and r["props"].get("volume") == 37.0
+              and (r["props"].get("script-opts") or {}).get("rigkey") == SECRET and r["props"].get("sub-font") == tok[2][11:]
+              and r["cmdlineHas"] == ["--include="] and r.get("optionsFile") is True and not os.path.lexists(opts_file),
+              "played %s, volume %s, script-opts carries it %s, sub-font verbatim %s, command line holds %s, file there at the socket %s, after %s" % (
+                  r["timePos"] is not None, r["props"].get("volume"),
+                  (r["props"].get("script-opts") or {}).get("rigkey") == SECRET, r["props"].get("sub-font") == tok[2][11:],
+                  r["cmdlineHas"], r.get("optionsFile"), os.path.lexists(opts_file)))
         r = probe(work, "C4", tree, tree, lab + "/m/master.m3u8", seconds=5, watch=("track-list", "file-format"))
         tracks = sorted((t.get("type"), t.get("codec")) for t in (r["props"].get("track-list") or []))
         check("C4 a fragmented-MP4 HLS channel with a WebVTT rendition plays, its subtitle track there (control)",

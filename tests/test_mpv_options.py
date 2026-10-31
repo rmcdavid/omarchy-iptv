@@ -90,7 +90,11 @@ class ClassificationTest(unittest.TestCase):
         pinned option is the pin block's."""
         contrary = ["--%s=x" % n[2:] for n in self.klass("pinned") if self.options[n]["type"] != "alias"]
         dirs = helper.player_dirs(SOCK, "/home/u/.local/state/omarchy-iptv")
-        argv = helper.mpv_launch_argv(SOCK, contrary, dirs)
+        # D-SINK-47: the tokens reach mpv through the --include file, which mpv
+        # parses at its position (measured); this is the sequence it applies.
+        launch = helper.mpv_launch_argv(SOCK, contrary, dirs)
+        at = launch.index("--include=" + dirs["mpvArgs"])
+        argv = launch[:at] + contrary + launch[at + 1:]
         tail = helper.mpv_pin_block(dirs)
         self.assertEqual(argv[-len(tail):], tail)
         last_user = max(argv.index(t) for t in contrary)
@@ -171,12 +175,13 @@ class ClassificationTest(unittest.TestCase):
         self.assertEqual(o["--demuxer-lavf-o"]["pinKey"], "tls_verify=1")
         # The owner's decision 3: only the select menu goes -- and, the
         # owner's decision on D-SINK-61 (2026-10-29), the console with it,
-        # mpv's alias included. Stats, commands, the context menu,
+        # mpv's alias included, and on D-SINK-67 (2026-10-29, "yes" to
+        # turning stats off), the stats overlay. Commands, the context menu,
         # positioning and the OSC stay.
-        for name in ("--load-stats-overlay", "--load-context-menu", "--load-commands",
-                     "--load-positioning", "--osc"):
+        for name in ("--load-context-menu", "--load-commands", "--load-positioning", "--osc"):
             self.assertEqual(o[name]["class"], "allowed", name)
-        for name in ("--load-select", "--load-console", "--load-osd-console", "--prefetch-playlist"):
+        for name in ("--load-select", "--load-console", "--load-osd-console", "--prefetch-playlist",
+                     "--load-stats-overlay"):
             self.assertEqual(o[name]["class"], "pinned", name)
 
     def test_the_format_keys_are_the_helpers_whitelist_and_the_filters_words(self):

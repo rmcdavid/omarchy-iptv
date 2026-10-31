@@ -29,7 +29,7 @@ import time
 import sys
 import unittest
 
-from helper_loader import load_helper
+from helper_loader import HELPER, load_helper
 from test_mpv import FakeMpv, PINNED_CMDLINE, PINNED_PROPS, load_options
 
 helper = load_helper()
@@ -57,15 +57,50 @@ http://provider.test/live/espn.m3u8
 # mpv 0.41 (including the playlist_entry_id of a loadfile and the events that
 # follow it). STUB_MPV_MODE picks the failure being tested.
 STUB_MPV = '''#!/usr/bin/env python3
-import json, os, socket, sys, threading, time
+import json, os, socket, stat, sys, threading, time
 
-argv = sys.argv[1:]
+raw_argv = sys.argv[1:]
 mask = os.umask(0o022)
 os.umask(mask)
+# D-SINK-47 (lane-p2a, 2026-10-29): the user's tokens arrive in the file an
+# --include names, not on the argv, and mpv parses that file AT ITS POSITION
+# in the command line (measured), reading `name` as `--name` and the length-
+# quoted `name=%N%value` as `--name=value`, N counted in UTF-8 bytes. The stub
+# does the same, so everything below -- the screenshot folder, the options it
+# derives its answers from -- reads what mpv would apply, and a file missing
+# at exec is applied as nothing, as mpv does (measured: it logs and goes on).
+include = None
+argv = []
+for arg in raw_argv:
+    if not arg.startswith("--include="):
+        argv.append(arg)
+        continue
+    path = arg.split("=", 1)[1]
+    try:
+        st = os.lstat(path)
+        with open(path, "rb") as handle:
+            data = handle.read()
+    except OSError:
+        include = {"path": path, "missing": True}
+        continue
+    lines = []
+    for line in data.decode("utf-8").split("\\n"):
+        if not line:
+            continue
+        name, eq, rest = line.partition("=")
+        if not eq:
+            argv.append("--" + name)
+        else:
+            n, _, tail = rest[1:].partition("%")
+            value = tail.encode("utf-8")[:int(n)].decode("utf-8")
+            argv.append("--%s=%s" % (name, value))
+        lines.append(line)
+    include = {"path": path, "lines": lines, "mode": stat.S_IMODE(st.st_mode), "regular": stat.S_ISREG(st.st_mode)}
 record = os.environ.get("STUB_MPV_RECORD", "")
 if record:
     with open(record, "a", encoding="utf-8") as handle:
-        handle.write(json.dumps({"argv": argv, "cwd": os.getcwd(), "umask": mask}) + "\\n")
+        handle.write(json.dumps({"argv": raw_argv, "applied": argv, "include": include, "cwd": os.getcwd(), "umask": mask,
+                                 "env": sorted(k for k in os.environ if k.startswith("OMARCHY_IPTV"))}) + "\\n")
 # PO-11: mpv's `s` key writes a screenshot with no explicit mode, into
 # --screenshot-dir or, without one, the directory it was started in. Verified
 # against real mpv 0.41; the stub must not be more forgiving (CLAUDE.md 10).
@@ -110,7 +145,10 @@ state["props"].update({"tls-verify": False, "stream-lavf-o": {}, "demuxer-lavf-o
                        # lane-p1c (2026-10-29): mpv 0.41's own defaults for
                        # the two flags pinned that day, which it answers as
                        # booleans (measured).
-                       "prefetch-playlist": False, "load-console": True})
+                       "prefetch-playlist": False, "load-console": True,
+                       # lane-p2a (2026-10-29): and the stats overlay loaded,
+                       # mpv 0.41's default (measured: True).
+                       "load-stats-overlay": True})
 for arg in argv:
     if not arg.startswith("--"):
         continue
@@ -130,7 +168,7 @@ for arg in argv:
         state["props"]["reset-on-next-file"] = [v for v in value.split(",") if v]
     elif name == "drag-and-drop":
         state["props"]["drag-and-drop"] = False if value == "no" else value
-    elif name in ("prefetch-playlist", "load-console"):
+    elif name in ("prefetch-playlist", "load-console", "load-stats-overlay"):
         state["props"][name] = value not in ("no", "false", "0")
     elif name in ("stream-lavf-o-clr", "demuxer-lavf-o-clr", "script-opts-clr"):
         state["props"][base] = {}
@@ -488,6 +526,17 @@ def wait_gone(process, timeout=6.0):
     return False
 
 
+def applied(argv, tokens):
+    """D-SINK-47: the sequence mpv applies -- the launch argv with its
+    --include replaced by the user's tokens, which mpv parses at the
+    include's position (measured). A check about where a user token lands
+    asks this; a check about what /proc shows asks the argv itself."""
+    for i, arg in enumerate(argv):
+        if arg.startswith("--include="):
+            return argv[:i] + list(tokens) + argv[i + 1:]
+    return list(argv)
+
+
 class PlayerTestCase(unittest.TestCase):
     def setUp(self):
         # AF_UNIX paths are limited to ~108 bytes: keep the socket under /tmp.
@@ -574,7 +623,13 @@ class PlayerTestCase(unittest.TestCase):
         return [json.loads(line) for line in pathlib.Path(self.record).read_text(encoding="utf-8").splitlines() if line.strip()]
 
     def spawned_argv(self):
+        """What /proc/<pid>/cmdline of each launch held."""
         return [launch["argv"] for launch in self.spawned_launches()]
+
+    def spawned_applied(self):
+        """What mpv applied, in order: the argv with its --include replaced by
+        the tokens the file held (D-SINK-47; the stub reads it as mpv does)."""
+        return [launch["applied"] for launch in self.spawned_launches()]
 
     def player_start(self, *args):
         return run("player", "start", "--socket", self.sock, "--cache-dir", self.cache,
@@ -619,6 +674,118 @@ class StartTest(PlayerTestCase):
         self.assertTrue(stash["playing"])
         self.assertEqual(owner["pid"], os.getpid())
         self.assertEqual(owner["startTime"], helper.proc_start_time(os.getpid()))
+
+    def test_the_tokens_and_the_ids_reach_mpv_by_private_routes_only(self):
+        """D-SINK-47 and D-SINK-48 (lane-p2a, 2026-10-29), observed at the
+        sinks, through the CLI the shell runs, as a SUBPROCESS: the channel
+        id, the cache folder, the scope and the user's tokens arrive in
+        OMARCHY_IPTV_ARGS behind --args-from-env, and
+
+          - no /proc/<pid>/cmdline of the helper, sampled for as long as it
+            runs, holds any of them;
+          - the player's argv holds none of them and names the private file
+            once, where the tokens stood, before the pin block;
+          - that file was a regular 0600 file when mpv read it, holding the
+            tokens in the length-quoted form; it is gone once start returns;
+          - the player's environment does not carry OMARCHY_IPTV_ARGS (the
+            helper took it out of its own before it forked);
+          - and mpv applied every token: a credentialed proxy and a header
+            value with `,`, `#`, quotes and a trailing backslash come back
+            exactly.
+        """
+        proxy = "--http-proxy=http://alice:%s@proxy.test:3128" % PASSWORD
+        header = '--user-agent=a,b "c" #d \\'
+        private = ["--cache-dir", self.cache, "--id", "t:bbc1.uk", "--scope", "g:Sports http://u:%s@cdn.test/x" % TOKEN,
+                   "--mpv-arg=" + proxy, "--mpv-arg=" + header, "--mpv-arg=--volume=50"]
+        env = dict(os.environ, OMARCHY_IPTV_ARGS=json.dumps(private))
+        argv = [sys.executable, "-I", str(HELPER), "player", "start", "--socket", self.sock, "--seq", "1",
+                "--ipc-timeout", "1", "--lock-timeout", "1", "--spawn-timeout", "4", "--first-load-timeout", "1",
+                "--args-from-env"]
+        proc = subprocess.Popen(argv, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        seen = set()
+        deadline = time.monotonic() + 30
+        while proc.poll() is None and time.monotonic() < deadline:
+            try:
+                with open("/proc/%d/cmdline" % proc.pid, "rb") as handle:
+                    seen.add(handle.read())
+            except OSError:
+                pass
+            time.sleep(0.005)
+        out, err = proc.communicate(timeout=30)
+        self.assertEqual(proc.returncode, 0, err)
+        payload = json.loads(out.decode().strip().splitlines()[-1])
+        self.assertTrue(payload["ok"], payload)
+        self.assertTrue(seen, "the helper's command line was read at least once")
+        for secret in (self.cache, "t:bbc1.uk", "g:Sports", TOKEN, PASSWORD, "--mpv-arg", "--cache-dir", "--id", "--scope"):
+            self.assertFalse(any(secret.encode() in line for line in seen), secret)
+        launch = self.spawned_launches()[0]
+        raw, include = launch["argv"], launch["include"]
+        for secret in (PASSWORD, "alice", "--volume=50", "--user-agent", "--http-proxy"):
+            self.assertNotIn(secret, " ".join(raw), secret)
+        path = os.path.join(self.runtime, helper.MPV_ARGS_FILE)
+        self.assertEqual([a for a in raw if a.startswith("--include=")], ["--include=" + path])
+        self.assertEqual(raw.index("--include=" + path) + 1, len(raw) - len(helper.mpv_pin_block(helper.player_dirs(self.sock))))
+        self.assertEqual((include["regular"], include["mode"]), (True, 0o600))
+        self.assertEqual(include["lines"], helper.mpv_args_config([proxy, header, "--volume=50"]).splitlines())
+        self.assertFalse(os.path.lexists(path), "the file is removed once mpv has read it")
+        self.assertEqual(launch["env"], [])
+        self.assertEqual(launch["applied"][launch["applied"].index(proxy):][:3], [proxy, header, "--volume=50"])
+        found = helper.find_player(self.sock)
+        self.assertEqual(len(found), 1)
+        with open("/proc/%d/environ" % found[0]["pid"], "rb") as handle:
+            self.assertNotIn(b"OMARCHY_IPTV_ARGS", handle.read())
+
+    def test_a_token_no_options_file_can_hold_is_dropped_by_name_and_the_player_starts(self):
+        """D-SINK-47's writer and a lone surrogate (no UTF-8 file can hold
+        one): through the helper's own argv, where a byte that is not UTF-8
+        arrives as U+DCFF, and through OMARCHY_IPTV_ARGS, where a JSON \\ud800
+        escape does. The first version kept the token, met it at the write
+        and ended the start `internal`, with no player. Now it is dropped by
+        NAME, like a NUL, and the other tokens still reach mpv."""
+        code, payload, stdout, stderr = self.player_start("--mpv-arg=--user-agent=a\udcffb", "--mpv-arg=--volume=50")
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(payload["ok"], payload)
+        self.assertIn("dropped mpvArg --user-agent", payload["warnings"])
+        applied = self.spawned_applied()[0]
+        self.assertIn("--volume=50", applied)
+        self.assertFalse([a for a in applied if a.startswith("--user-agent")])
+        private = ["--cache-dir", self.cache, "--id", "t:bbc1.uk", "--mpv-arg=--sub-font=x\ud800", "--mpv-arg=--volume=40"]
+        env = dict(os.environ, OMARCHY_IPTV_ARGS=json.dumps(private))
+        self.assertIn("\\ud800", env["OMARCHY_IPTV_ARGS"])
+        done = subprocess.run([sys.executable, "-I", str(HELPER), "player", "restart", "--socket", self.sock, "--seq", "2",
+                               "--ipc-timeout", "1", "--lock-timeout", "1", "--spawn-timeout", "4", "--first-load-timeout", "1",
+                               "--from", "quit", "--args-from-env"], env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        reply = json.loads(done.stdout.strip().splitlines()[-1])
+        self.assertTrue(reply["ok"], reply)
+        self.assertIn("dropped mpvArg --sub-font", reply["warnings"])
+        applied = self.spawned_applied()[-1]
+        self.assertIn("--volume=40", applied)
+        self.assertFalse([a for a in applied if a.startswith("--sub-font")])
+
+    def test_a_flag_with_no_list_runs_no_verb(self):
+        """D-SINK-48: --args-from-env with OMARCHY_IPTV_ARGS absent, not JSON,
+        not a list of strings, or past the kernel's bound is `bad_arguments`,
+        exit 2, and NOTHING runs -- a `player start` that lost its --cache-dir
+        and --id must not fall back to the default cache. The value is never
+        echoed."""
+        for value in (None, "not json", '{"a": 1}', '["--id", 7]', '["--id", "a\\u0000b"]'):
+            env = {k: v for k, v in os.environ.items() if k != "OMARCHY_IPTV_ARGS"}
+            if value is not None:
+                env["OMARCHY_IPTV_ARGS"] = value
+            done = subprocess.run([sys.executable, "-I", str(HELPER), "player", "start", "--socket", self.sock,
+                                   "--args-from-env"], env=env, capture_output=True, text=True, timeout=30)
+            self.assertEqual(done.returncode, 2, (value, done.stderr))
+            reply = json.loads(done.stdout.strip().splitlines()[-1])
+            self.assertEqual((reply["ok"], reply["kind"], reply["error"]["code"]), (False, "player", "bad_arguments"))
+            self.assertNotIn("not json", done.stdout + done.stderr)
+        self.assertEqual(self.spawned_launches(), [])
+        self.assertFalse(os.path.exists(self.runtime))
+        # Past the kernel's bound on one environment string no exec can hand
+        # it over (measured: E2BIG at the spawn), so the bound is read in-process.
+        with self.assertRaises(helper.HelperError) as caught:
+            helper.helper_arguments(["play", "--args-from-env"], {"OMARCHY_IPTV_ARGS": json.dumps(["x" * helper.ARGS_ENV_MAX])})
+        self.assertEqual(caught.exception.code, "bad_arguments")
 
     def test_spawn_argv_carries_no_url_no_header_and_no_channel_name(self):
         # The S-03 regression net. This is the whole point of M2-02.
@@ -698,8 +865,10 @@ class StartTest(PlayerTestCase):
             "--mpv-arg=--profile=low-latency", "--mpv-arg=--log-file=/tmp/mpv.log",
             "--mpv-arg=--input-ipc-server=/tmp/evil.sock", "--mpv-arg=; rm -rf")
         self.assertEqual(code, 0, stderr)
-        argv = self.spawned_argv()[0]
+        # D-SINK-47: kept tokens reach mpv through the private file, never its argv.
+        argv = self.spawned_applied()[0]
         self.assertIn("--profile=low-latency", argv)
+        self.assertNotIn("--profile=low-latency", self.spawned_argv()[0])
         self.assertNotIn("--log-file=/tmp/mpv.log", argv)
         self.assertNotIn("--input-ipc-server=/tmp/evil.sock", argv)
         self.assertEqual(argv.count("--input-ipc-server=%s" % self.sock), 1)
@@ -758,9 +927,13 @@ class StartTest(PlayerTestCase):
             "--mpv-arg=--profile=evil", "--mpv-arg=--tls-ca-file=/etc/ssl/provider-ca.pem",
             "--mpv-arg=--tls-verify=no", "--mpv-arg=--no-tls-verify")
         self.assertEqual(code, 0, stderr)
-        argv = self.spawned_argv()[0]
+        # D-SINK-47: what mpv applied, the --include read in its place; the
+        # command line itself holds no user token at all.
+        self.assertNotIn("--profile=evil", self.spawned_argv()[0])
+        argv = self.spawned_applied()[0]
         # Layer 2: the last token on the command line mpv was given.
         self.assertEqual(argv[-1], helper.MPV_TLS_VERIFY)
+        self.assertEqual(self.spawned_argv()[0][-1], helper.MPV_TLS_VERIFY)
         # Layer 1 is also there, and the user's bypass sits BETWEEN them, which
         # is the whole arrangement: nothing the user contributed can come after
         # ours.
@@ -785,7 +958,7 @@ class StartTest(PlayerTestCase):
             "--mpv-arg=--ytdl=yes", "--mpv-arg=--ytdl-raw-options=proxy=http://u:pw@prox.test:8080",
             "--mpv-arg=--script-opts=ytdl_hook-ytdl_path=/tmp/mine", "--mpv-arg=--hwdec=auto-safe")
         self.assertEqual(code, 0, stderr)
-        argv = self.spawned_argv()[0]
+        argv = self.spawned_applied()[0]                       # D-SINK-47: what mpv applied
         self.assertIn("--ytdl=yes", argv)                       # kept, never refused
         self.assertLess(argv.index("--ytdl=no"), argv.index("--ytdl=yes"))
         self.assertEqual(payload["warnings"], [
@@ -936,7 +1109,7 @@ class WorkingDirectoryTest(PlayerTestCase):
                                                      "--mpv-arg=--icc-cache-dir=%s" % mine)
         self.assertEqual(code, 0, stderr)
         self.assertEqual(payload["warnings"], [])
-        argv = self.spawned_argv()[0]
+        argv = self.spawned_applied()[0]                       # D-SINK-47: what mpv applied
         self.assertLess(argv.index("--gpu-shader-cache-dir=%s" % self.shaders),
                         argv.index("--gpu-shader-cache-dir=%s" % mine))
         self.assertLess(argv.index("--icc-cache-dir=%s" % self.shaders),
@@ -963,7 +1136,7 @@ class WorkingDirectoryTest(PlayerTestCase):
         self.env(STUB_MPV_SHOT="1")
         code, _, _, stderr = self.player_start("--mpv-arg=--screenshot-dir=%s" % mine)
         self.assertEqual(code, 0, stderr)
-        argv = self.spawned_argv()[0]
+        argv = self.spawned_applied()[0]                       # D-SINK-47: what mpv applied
         self.assertLess(argv.index("--screenshot-dir=%s" % self.shots), argv.index("--screenshot-dir=%s" % mine))
         self.assertTrue(os.path.exists(os.path.join(mine, "mpv-shot0001.jpg")))
 
@@ -1110,13 +1283,14 @@ class IdempotenceTest(PlayerTestCase):
         # channel's headers there (the channel's own now ride the loadfile).
         # lane-p1c (2026-10-29): and the console unloaded (D-SINK-61; this
         # double's console is mpv's default, on), prefetch already off here.
-        self.assertEqual(sets[:7], [["set_property", "load-select"], ["set_property", "watch-later-dir"],
+        # lane-p2a (2026-10-29): and the stats overlay unloaded (D-SINK-67).
+        self.assertEqual(sets[:8], [["set_property", "load-select"], ["set_property", "watch-later-dir"],
                                     ["set_property", "drag-and-drop"], ["set_property", "load-console"],
-                                    ["set_property", "user-agent"],
+                                    ["set_property", "load-stats-overlay"], ["set_property", "user-agent"],
                                     ["set_property", "referrer"], ["set_property", "http-header-fields"]])
         self.assertIn(["keybind", "ctrl+v", "ignore"], server.commands)
         self.assertIn(["change-list", "script-opts", "append", "osc-title_mbtn_mid_command=ignore"], server.commands)
-        sets = sets[7:]
+        sets = sets[8:]
         self.assertEqual(sets[:8], [["set_property", "tls-verify"],
                                     ["set_property", "stream-lavf-o"],
                                     ["set_property", "load-auto-profiles"],
@@ -2428,7 +2602,9 @@ class ParityTest(unittest.TestCase):
         # 55 the same day again: --drag-and-drop, pinned off (D-PLY-46).
         # 58 the same day (lane-p1c): --prefetch-playlist (D-SINK-63) and
         # --load-console with mpv's alias --load-osd-console (D-SINK-61).
-        self.assertEqual(len(names), 58)
+        # 59 the same day (lane-p2a): --load-stats-overlay (D-SINK-67).
+        self.assertEqual(len(names), 59)
+        self.assertIn("--load-stats-overlay", names)
         self.assertIn("--include", names)
         self.assertIn("--load-scripts", names)
         self.assertIn("--demuxer-cache-unlink-files", names)
@@ -2498,6 +2674,8 @@ class ParityTest(unittest.TestCase):
             args, rejected = helper.filter_mpv_args(vector["mpvArgs"])
             dirs = helper.player_dirs(vector["socketPath"], vector["stateDir"])
             self.assertEqual(helper.mpv_launch_argv(vector["socketPath"], args, dirs), vector["argv"], vector["name"])
+            # D-SINK-47: and the private file's lines, which only python writes.
+            self.assertEqual(helper.mpv_args_config(args).splitlines(), vector["include"], vector["name"])
             if "rejected" in vector:
                 self.assertEqual(rejected, vector["rejected"], vector["name"])
 
@@ -2566,7 +2744,7 @@ class ParityTest(unittest.TestCase):
         for case in self.fixture["mpvArgv"]:
             args, _ = helper.filter_mpv_args(case["mpvArgs"])
             dirs = helper.player_dirs(case["socketPath"], case["stateDir"])
-            argv = helper.mpv_launch_argv(case["socketPath"], args, dirs)
+            argv = applied(helper.mpv_launch_argv(case["socketPath"], args, dirs), args)   # D-SINK-47
             self.assertEqual(argv.count(token), 1, case["name"])
             self.assertLess(argv.index(token), argv.index(helper.MPV_TLS_VERIFY), case["name"])
             for user in args:
@@ -2574,7 +2752,7 @@ class ParityTest(unittest.TestCase):
         for tokens in (["--gpu-sw=no"], ["--no-gpu-sw"], ["--gpu-sw=no", "--no-gpu-sw"]):
             args, rejected = helper.filter_mpv_args(tokens)
             self.assertEqual((args, rejected), (tokens, []), tokens)
-            argv = helper.mpv_launch_argv("/run/user/1000/omarchy-iptv/mpv.sock", args)
+            argv = applied(helper.mpv_launch_argv("/run/user/1000/omarchy-iptv/mpv.sock", args), args)
             self.assertGreater(argv.index(tokens[-1]), argv.index(token), tokens)
             self.assertEqual(argv[-1], helper.MPV_TLS_VERIFY, tokens)
         # A fixture with no user `--gpu-sw=no` cannot see the position at all.
@@ -2585,7 +2763,7 @@ class ParityTest(unittest.TestCase):
         what binds. Deleting either is a security change, so the count and the
         two positions are asserted rather than left to a reader's good faith."""
         args, _ = helper.filter_mpv_args(["--profile=evil"])
-        argv = helper.mpv_launch_argv("/run/user/1000/omarchy-iptv/mpv.sock", args)
+        argv = applied(helper.mpv_launch_argv("/run/user/1000/omarchy-iptv/mpv.sock", args), args)   # D-SINK-47
         at = [i for i, token in enumerate(argv) if token == helper.MPV_TLS_VERIFY]
         user = argv.index("--profile=evil")
         self.assertEqual(len(at), 2, argv)

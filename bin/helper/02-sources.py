@@ -211,7 +211,10 @@ def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
 
 
 def source_cache_key(url: str) -> str:
-    """Cache directory name of a normalized playlist URL (Model.sourceKey)."""
+    """Cache directory name of a normalized playlist URL (Model.sourceKey):
+    the key every source added before 2026-10-29 was given, and still the
+    key those records carry. A NEW source's key is random since D-SINK-48
+    (allocate_source_key); nothing derives a key from a URL any more."""
     return fnv1a32(url)
 
 
@@ -229,13 +232,32 @@ def find_source_by_url(sources: list[dict[str, Any]], url: str) -> dict[str, Any
     return None
 
 
-def allocate_source_key(sources: list[dict[str, Any]], url: str) -> str:
-    """The record's key when the URL is known, else fnv1a32 with a "-2",
-    "-3", ... suffix while another record already uses that key."""
+def allocate_source_key(sources: list[dict[str, Any]], url: str, preferred: str = "",
+                        draw: Any = None) -> str:
+    """The record's key when the URL is known, else a NEW key with a "-2",
+    "-3", ... suffix while another record already uses it.
+
+    D-SINK-48 (lane-p2a, 2026-10-29): the new key is RANDOM, no longer
+    fnv1a32 of the URL: a 32-bit hash of a credentialed URL is a check on a
+    guessed password for anyone who reads the key (SR40), and the key names
+    a cache folder, sits in the shell's settings mirror and in journal lines.
+    Every lookup goes by the key the record stores, so nothing needs it to be
+    a function of the URL; what dedupes a re-added URL is find_source_by_url
+    above, as it always was. Existing keys are untouched. `preferred` is kept
+    when it is a free, well-formed key; `draw` returns a 32-bit integer
+    (secrets.randbits(32) unless a test hands one in). Mirror of
+    Model.allocateSourceKey."""
     existing = find_source_by_url(sources, url)
     if existing is not None:
         return str(existing["key"])
-    base = source_cache_key(url)
+    if preferred and SOURCE_KEY_RE.match(preferred) and find_source(sources, preferred) is None:
+        return preferred
+    if draw is None:
+        import secrets
+        number = secrets.randbits(32)
+    else:
+        number = int(draw()) % 4294967296
+    base = "%08x" % number
     key = base
     suffix = 2
     while find_source(sources, key) is not None:

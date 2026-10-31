@@ -377,7 +377,9 @@ def pin_adopted_player(client: MpvIpc, sock_path: str) -> int:
     reset-on-next-file, which is read with the TLS pins instead (D-SINK-60).
     And (lane-p1c, 2026-10-29) prefetch-playlist off (D-SINK-63) and the
     console unloaded (D-SINK-61: mpv unloads a built-in script when its
-    load- option goes off at runtime, as load-auto-profiles showed).
+    load- option goes off at runtime, as load-auto-profiles showed); and
+    (lane-p2a, 2026-10-29) the stats overlay unloaded the same way (D-SINK-67:
+    measured, `script-binding stats/...` is then refused).
     Returns how many writes did not take, for the journal."""
     where = player_dirs(sock_path)
     failed = 0
@@ -390,7 +392,7 @@ def pin_adopted_player(client: MpvIpc, sock_path: str) -> int:
                                ("osd-playlist-entry", "title", "title"), ("log-file", "", ""),
                                ("watch-later-dir", where["watchLater"], where["watchLater"]),
                                ("drag-and-drop", False, "no"), ("prefetch-playlist", False, False),
-                               ("load-console", False, False)):
+                               ("load-console", False, False), ("load-stats-overlay", False, False)):
         ok, current = client.try_command("get_property", prop)
         if ok and current == value:
             continue
@@ -837,9 +839,19 @@ def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
     settle_socket(sock_path)
     where = dirs or player_dirs(sock_path)
     ensure_player_dirs(where, warnings)
-    launched = spawn_detached(mpv_launch_argv(sock_path, mpv_args, where), where["cwd"])
-    errors: list[str] = []
-    client = wait_for_socket(sock_path, spawn_timeout, ipc_timeout, launched["stderrFd"], errors)
+    # D-SINK-47: the user's tokens go to mpv in a private file, never on its
+    # argv (mpv_launch_argv names the file). Written before the spawn, removed
+    # as soon as the socket answers -- mpv binds it only after reading its
+    # whole command line -- and on every way out of the launch.
+    options = mpv_args_path(sock_path, where)
+    if mpv_args:
+        write_mpv_args(options, mpv_args)
+    try:
+        launched = spawn_detached(mpv_launch_argv(sock_path, mpv_args, where), where["cwd"])
+        errors: list[str] = []
+        client = wait_for_socket(sock_path, spawn_timeout, ipc_timeout, launched["stderrFd"], errors)
+    finally:
+        remove_mpv_args(options)
     if client is None:
         drain_launch_stderr(launched["stderrFd"], errors)
         os.close(launched["stderrFd"])

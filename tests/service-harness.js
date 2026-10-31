@@ -52,7 +52,9 @@ function makeIds(h) {
     set(v) {
       cacheProc._running = v
       if (v === true) {
-        const command = cacheProc.command.slice()
+        // What the HELPER parses (helperView): since D-SINK-48 the keys ride
+        // in the environment and the command names only the verb.
+        const command = helperView(cacheProc.command, cacheProc.environment)
         h.cacheRuns.push(command)
         if (h.cacheHang) return
         h.later.push({ fn: () => { cacheProc._running = false; h.root.handleCacheExit(h.cacheAnswer(command)) }, args: [] })
@@ -242,6 +244,37 @@ function makeIds(h) {
       else NOTICE_LEDGER.detached.push(argv[argv.indexOf("-r") + 1] + " " + argv[argv.length - 2])
     } }
   }
+}
+
+// D-SINK-47, D-SINK-48 (lane-p2a, 2026-10-29): the helper's own reading of a
+// spawn, for the doubles that answer as the helper would. A command carrying
+// `--args-from-env` is the command without it, followed by the JSON list in
+// OMARCHY_IPTV_ARGS -- helper_arguments in bin/helper/11-cli.py, pinned to
+// this function by tests/fixtures/helper-args.json in both suites. Never more
+// forgiving than the helper (rule 10): a flag with no list, or a list that is
+// not strings, is a run that does not happen, here as there.
+function helperView(command, environment) {
+  const c = (command || []).map(String)
+  const at = c.indexOf("--args-from-env")
+  if (at === -1) return c
+  if (c.indexOf("--args-from-env", at + 1) !== -1) throw new Error("service-harness: --args-from-env twice")
+  const raw = environment && Object.prototype.hasOwnProperty.call(environment, "OMARCHY_IPTV_ARGS") ? environment.OMARCHY_IPTV_ARGS : null
+  if (raw === null) throw new Error("service-harness: --args-from-env with no OMARCHY_IPTV_ARGS")
+  const list = JSON.parse(raw)
+  if (!Array.isArray(list) || list.some(x => typeof x !== "string" || x.indexOf("\0") !== -1)) throw new Error("service-harness: OMARCHY_IPTV_ARGS is not a list of strings")
+  return c.slice(0, at).concat(c.slice(at + 1)).concat(list)
+}
+
+// The verb of a recorded `cache` run: the first word after `cache` that is
+// neither an option nor an option's value. Index-free, because the
+// interpreter's argv grew `-I` (D-SINK-50, 2026-10-29) and read `--cache-dir`
+// plus two before that.
+function cacheVerb(command) {
+  const c = command || []
+  let i = c.indexOf("cache") + 1
+  if (i <= 0) return ""
+  while (i < c.length && String(c[i]).indexOf("--") === 0) i += String(c[i]).indexOf("=") === -1 ? 2 : 1
+  return i < c.length ? String(c[i]) : ""
 }
 
 // D-HOST-5, rule 15: every notice any service boot in this process posted,
@@ -646,7 +679,7 @@ function bootService(serviceText, Model, o) {
   // otherwise (h.cacheFails = ["migrate"]).
   h.cacheFails = []
   h.cacheAnswer = (command) => {
-    const verb = command[command.indexOf("--cache-dir") + 2] || ""
+    const verb = cacheVerb(command)
     if (h.cacheFails.indexOf(verb) !== -1) return JSON.stringify({ ok: false, kind: "cache", action: verb, error: { code: "io", message: "failed" } }) + "\n"
     return JSON.stringify({ ok: true, kind: "cache", action: verb }) + "\n"
   }
@@ -1144,4 +1177,4 @@ function restartService(serviceText, Model, h, o) {
                                                           stateText: h.stateFile.disk, host: h.host.mode, clock: h.clock + 60000 }, o || {}))
 }
 
-module.exports = { bootService, restartService, rootFunctions, rootProperties, matchBrace, STUBBED, PID, HELPER_EMPTY_STATE, notificationServer, NOTICE_LEDGER }
+module.exports = { bootService, restartService, rootFunctions, rootProperties, matchBrace, STUBBED, PID, HELPER_EMPTY_STATE, notificationServer, NOTICE_LEDGER, cacheVerb, helperView }

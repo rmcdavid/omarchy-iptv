@@ -178,6 +178,11 @@ MPV_RESERVED = frozenset((
     # open, or an HLS key that would not open, with its whole URL (measured).
     # `--load-osd-console` is mpv's alias of it, the same option.
     "--load-console", "--load-osd-console",
+    # D-SINK-67 (owner, 2026-10-29: turn stats off): PINNED off. The stats
+    # overlay's first and file pages draw `${filename}`, which is the whole
+    # URL, userinfo and path credentials included, for a URL whose last path
+    # segment is empty, and the userinfo for one with no path (measured).
+    "--load-stats-overlay",
 ))
 # D-SINK-43 (and its verifyhost sibling): the words a `--demuxer-lavf-o*`
 # token may not contain. For an HLS or DASH stream libavformat reopens the URL
@@ -309,6 +314,7 @@ MPV_PIN_BLOCK = (
     "--player-operation-mode=cplayer",   # D-SINK-44: [pseudo-gui] applies after the command line
     "--load-select=no",                  # D-SINK-46: g l forks ffmpeg with the URL
     "--load-console=no",                 # D-SINK-61: the console draws a failed open's URL
+    "--load-stats-overlay=no",           # D-SINK-67: stats draws ${filename}, credentials and all
     "--prefetch-playlist=no",            # D-SINK-63: a prefetched entry got the channel's headers
     "--load-unsafe-playlists=no",        # D-SINK-44: mpv's origin rule for nested entries
     "--save-watch-history=no",           # D-SINK-44: every path, durably
@@ -389,8 +395,22 @@ DEMUXER_TLS_FORBIDDEN = frozenset(("ca_file", "cafile", "verifyhost", "listen", 
 # nested playlist truncated a scratch file, select forked ffmpeg with the
 # URL). So a pre-pin player whose mpv.conf holds a per-file profile that
 # touches ANY pinned option is stopped rather than migrated.
+#
+# lane-p2a (2026-10-29): EXCEPT load-stats-overlay (D-SINK-67), for now and
+# on purpose. The harness's stand-in mpv (the qa stub on the dev branch,
+# outside lane A's files) does not model that option, so its option-info would read
+# `property not found`, the read-back would refuse every player the stub
+# plays and every stub scenario would fail `tls_unverified` -- the reason the
+# stub learned each pin before. What the exclusion leaves: a PRE-PIN player,
+# adopted after the upgrade, whose own mpv.conf has a [protocol.*] or
+# [extension.*] profile turning stats back ON gets them back at its next load
+# (the pin_adopted_player write is undone there), until it restarts; a player
+# this release starts holds the pin from the command line, which no per-file
+# profile replaces. Raised with the lead: teach the stub, then drop this.
+PER_FILE_EXEMPT = frozenset(("load-stats-overlay",))
 PER_FILE_TLS_OPTIONS = tuple(sorted({MPV_LIST_SUFFIX_RE.sub("", token.split("=", 1)[0])[2:]
-                                     for token in ("--watch-later-dir=",) + MPV_PIN_BLOCK}))
+                                     for token in ("--watch-later-dir=",) + MPV_PIN_BLOCK}
+                                    - PER_FILE_EXEMPT))
 # mpv's own aliases of pinned options, as a profile's key may spell them.
 PER_FILE_OPTION_ALIASES = {"script": "scripts", "watch-later-directory": "watch-later-dir",
                            "script-opt": "script-opts", "load-osd-console": "load-console"}
@@ -433,6 +453,18 @@ MPV_DEMUXER_PROXY_WORD = "http_proxy"
 MPV_LISTEN_WARN = frozenset(("--rtsp-transport",))
 MPV_LISTEN_QUIET = frozenset(("tcp", "http", "https"))
 MPV_LISTEN_TEXT = " opens ports on this computer that anyone can send to"
+# D-SINK-65 (lane-p2a, 2026-10-29): the same cost through FFmpeg's own key.
+# `--demuxer-lavf-o=rtsp_transport=udp` binds an rtsp channel's RTP/RTCP pair
+# on 0.0.0.0 exactly as `--rtsp-transport=udp` does, and FFmpeg takes the
+# value as FLAGS: a name, a number, an expression, `+udp` and `-tcp` against
+# mpv's tcp, `0`, quoted, bracketed or %n%-escaped -- each measured binding
+# inside `unshare -rn`, none of them warned. So every occurrence of the key is
+# read and the token warns unless EACH value is a plain `+`-join of tcp, http
+# and https; anything else warns. No spelling of `rtsp_flags` binds
+# (measured), and a removal (-clr, -del, -remove) sets nothing. Mirror of
+# Model's MPV_RTSP_TRANSPORT_KEY.
+MPV_RTSP_TRANSPORT_KEY = "rtsp_transport"
+MPV_LIST_REMOVALS = ("-clr", "-del", "-remove")
 # D-SINK-52 (owner, 2026-10-29: pin and refuse). A `--script-opts` token is
 # REFUSED when its text sets an on-screen-controller command -- the OSC runs
 # its `*_mbtn_*_command` / `*_wheel_*_command` options as input commands on a
@@ -470,8 +502,15 @@ def filter_mpv_args(tokens: list[str]) -> tuple[list[str], list[str]]:
         base = mpv_option_base(name)
         bare = "--" + name[5:] if name.startswith("--no-") else ""
         no_form = bool(bare) and (bare in MPV_RESERVED or mpv_option_base(bare) in MPV_RESERVED)
+        # D-SINK-47: a token becomes one line of the player's options file
+        # (mpv_args_config), and a line break or a NUL cannot be carried on
+        # one -- refused here, so the writer never meets one. Nor can a lone
+        # surrogate, which no UTF-8 file can hold: a byte argv could not
+        # decode arrives as one (U+DC80-U+DCFF), and so does a JSON \ud800
+        # escape; the writer met it and the start ended `internal`.
         if (not MPV_ARG_RE.match(text) or name in MPV_RESERVED or base in MPV_RESERVED or no_form
-                or demuxer_names_tls(base, text) or script_opts_refused(base, text)):
+                or demuxer_names_tls(base, text) or script_opts_refused(base, text)
+                or not mpv_token_writable(text)):
             rejected.append(text)
         else:
             args.append(text)
@@ -532,42 +571,81 @@ def mpv_arg_writes_disk(token: str) -> str:
 
 def mpv_arg_opens_ports(token: str) -> str:
     """Mirror of Model.mpvListenName: the option NAME when the token makes
-    rtsp channels bind ports (D-SINK-53), "" otherwise. The value is a
-    transport name, but the line still carries the name alone (R12)."""
+    rtsp channels bind ports (D-SINK-53, and D-SINK-65 through FFmpeg's own
+    rtsp_transport), "" otherwise. The line carries the name alone (R12)."""
     text = str(token)
     name, _, value = text.partition("=")
-    if name.startswith("--no-") or mpv_option_base(name) not in MPV_LISTEN_WARN:
+    if name.startswith("--no-"):
+        return ""
+    base = mpv_option_base(name)
+    if base == MPV_DEMUXER_OPTS:
+        return name if demuxer_opens_ports(name, value) else ""
+    if base not in MPV_LISTEN_WARN:
         return ""
     return "" if value.strip().lower() in MPV_LISTEN_QUIET else name
 
 
+def demuxer_opens_ports(name: str, value: str) -> bool:
+    """Mirror of Model.demuxerOpensPorts (D-SINK-65): a `--demuxer-lavf-o*`
+    value that sets rtsp_transport to anything but a plain `+`-join of tcp,
+    http and https. Index walks, no pattern."""
+    if str(name).endswith(MPV_LIST_REMOVALS):
+        return False
+    text = str(value)
+    at = text.find(MPV_RTSP_TRANSPORT_KEY)
+    while at != -1:
+        rest = text[at + len(MPV_RTSP_TRANSPORT_KEY):]
+        if not rest.startswith("="):
+            return True
+        v = rest[1:]
+        close = '"' if v.startswith('"') else ("]" if v.startswith("[") else "")
+        end = v.find(close, 1) if close else v.find(",")
+        if close:
+            v = v if end == -1 else v[1:end]
+        elif end != -1:
+            v = v[:end]
+        if not all(part in MPV_LISTEN_QUIET for part in v.split("+")):
+            return True
+        at = text.find(MPV_RTSP_TRANSPORT_KEY, at + 1)
+    return False
+
+
 def mpv_arg_warning(token: str) -> str:
     """Mirror of Model.mpvArgWarning: the whole warning line for one token,
-    or "". The three costs carry their own sentence, so the user is told WHAT
-    the option does rather than that it is "dangerous"."""
+    or "" -- the first of mpv_arg_warning_lines. The three costs carry their
+    own sentence, so the user is told WHAT the option does rather than that
+    it is "dangerous"."""
+    lines = mpv_arg_warning_lines(token)
+    return lines[0] if lines else ""
+
+
+def mpv_arg_warning_lines(token: str) -> list[str]:
+    """Mirror of Model.mpvArgWarningLines: every cost one token carries, in a
+    fixed order (D-SINK-65 made one token able to carry two)."""
+    out = []
     name = mpv_arg_hands_off_url(token)
     if name:
-        return "mpvArg " + name + MPV_HANDOFF_TEXT
+        out.append("mpvArg " + name + MPV_HANDOFF_TEXT)
     name = mpv_arg_writes_disk(token)
     if name:
-        return "mpvArg " + name + MPV_DISK_TEXT
+        out.append("mpvArg " + name + MPV_DISK_TEXT)
     name = mpv_arg_opens_ports(token)
     if name:
-        return "mpvArg " + name + MPV_LISTEN_TEXT
-    return ""
+        out.append("mpvArg " + name + MPV_LISTEN_TEXT)
+    return out
 
 
 def mpv_arg_warnings(tokens: list[str]) -> list[str]:
-    """Mirror of Model.mpvArgWarnings: one line per distinct option, in the
-    order the user wrote them."""
+    """Mirror of Model.mpvArgWarnings: one line per distinct option and cost,
+    in the order the user wrote them."""
     seen: set[str] = set()
     out: list[str] = []
     for token in tokens or []:
-        line = mpv_arg_warning(token)
-        if not line or line in seen:
-            continue
-        seen.add(line)
-        out.append(line)
+        for line in mpv_arg_warning_lines(token):
+            if line in seen:
+                continue
+            seen.add(line)
+            out.append(line)
     return out
 
 
@@ -599,6 +677,10 @@ def player_dirs(sock_path: str, state_override: str | None = None) -> dict[str, 
       uninstall. Containment here is a sensible default, not a guarantee:
       neither option is reserved, because MPV_RESERVED is a privacy
       instrument and a content-free cache does not belong on it (CL2).
+
+    D-SINK-47 (lane-p2a, 2026-10-29): `mpvArgs` is the private file the
+    user's tokens live in for the length of a launch (write_mpv_args), in the
+    runtime directory beside the socket.
     """
     runtime = os.path.dirname(sock_path)
     return {
@@ -606,6 +688,7 @@ def player_dirs(sock_path: str, state_override: str | None = None) -> dict[str, 
         "screenshots": os.path.join(state_dir(state_override), "screenshots"),
         "watchLater": os.path.join(runtime, "watch-later"),
         "shaderCache": os.path.join(runtime, "shader-cache"),
+        "mpvArgs": os.path.join(runtime, MPV_ARGS_FILE),
     }
 
 
@@ -696,7 +779,104 @@ def mpv_launch_argv(sock_path: str, mpv_args: list[str],
     # over a token, a named profile and a plain mpv.conf line, and each is set
     # from the command line, so no per-file profile replaces it. The block ends
     # with MPV_TLS_VERIFY, so the line above still describes the last element.
-    ] + list(mpv_args or []) + mpv_pin_block(where)
+    #
+    # D-SINK-47 (lane-p2a, 2026-10-29): the user's tokens are no longer ON this
+    # argv, which is /proc/<pid>/cmdline -- world-readable for the hours a
+    # player runs, and COREDUMP_CMDLINE in the journal if it crashes -- and a
+    # token is where a proxy password or an API-key header goes. They are in
+    # the private file `where["mpvArgs"]` (write_mpv_args), named here at the
+    # place they stood: mpv parses an --include file AT ITS POSITION and marks
+    # what it sets as set from the command line (measured), so the pin block
+    # after it keeps the last word exactly as it did over the tokens.
+    ] + (["--include=%s" % mpv_args_path(sock_path, where)] if mpv_args else []) + mpv_pin_block(where)
+
+
+# D-SINK-47: the private file's name, in the runtime directory.
+MPV_ARGS_FILE = "mpv-args.conf"
+
+
+def mpv_args_path(sock_path: str, where: dict[str, str]) -> str:
+    """The options file a set of player folders names, or the runtime
+    folder's own when a caller's set predates it. Mirror of the model's
+    fallback in buildMpvArgv."""
+    return where.get("mpvArgs") or os.path.join(os.path.dirname(sock_path), MPV_ARGS_FILE)
+
+
+def mpv_token_writable(text: str) -> bool:
+    """D-SINK-47: whether one token can be one line of the player's options
+    file: no NUL, no line break, and UTF-8 encodable -- a lone surrogate,
+    which is what a byte argv could not decode becomes, is not. Mirror of
+    Model.mpvTokenWritable."""
+    if any(char in text for char in "\0\n\r"):
+        return False
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
+def mpv_args_config(tokens: list[str]) -> str:
+    """The text of the player's options file: one line per token, in order.
+
+    `--name` becomes `name` (mpv's config syntax for a flag, and for
+    `no-name`, measured), and `--name=value` becomes `name=%N%value`, N being
+    the value's length in UTF-8 bytes: mpv's length-quoted form, the one form
+    whose value is taken exactly, so a value holding `=`, `,`, either quote,
+    spaces, `#` (a comment in the plain form, measured cutting `a#b` to `a`),
+    `%`, a trailing backslash or any other byte means what it meant on the
+    argv -- measured token by token, 16 of 16 reading back identical both
+    ways. A line break, a NUL or a lone surrogate cannot be carried on a
+    line (mpv_token_writable), and the filter refuses each before this is
+    reached; one here is a bug, and refused."""
+    lines = []
+    for token in tokens or []:
+        text = str(token)
+        if not text.startswith("--") or not mpv_token_writable(text):
+            raise HelperError("bad_arguments", "an mpv option cannot be written to the player's options")
+        name, eq, value = text[2:].partition("=")
+        lines.append("%s=%%%d%%%s" % (name, len(value.encode("utf-8")), value) if eq else name)
+    return "".join(line + "\n" for line in lines)
+
+
+def write_mpv_args(path: str, tokens: list[str]) -> None:
+    """D-SINK-47: put the user's tokens where only this uid can read them, for
+    the length of a launch. The folder is the 0700 runtime folder
+    (player_runtime made it); the file is created 0600 under a name of its
+    own with O_EXCL and O_NOFOLLOW -- a link or anything else at that name is
+    never written through -- and renamed over `path`, so mpv reads either the
+    whole file or none, and a stale one from a helper that was killed is
+    replaced, never appended to."""
+    data = mpv_args_config(tokens).encode("utf-8")
+    temp = os.path.join(os.path.dirname(path), ".%s.%d" % (os.path.basename(path), os.getpid()))
+    try:
+        try:
+            os.unlink(temp)
+        except FileNotFoundError:
+            pass
+        fd = os.open(temp, os.O_WRONLY | os.O_CREAT | os.O_EXCL | os.O_NOFOLLOW | os.O_CLOEXEC, 0o600)
+        try:
+            view = memoryview(data)
+            while view:
+                view = view[os.write(fd, view):]
+        finally:
+            os.close(fd)
+        os.rename(temp, path)
+    except OSError as io_error:
+        remove_mpv_args(temp)
+        raise runtime_unwritable("write the player's options", io_error) from None
+
+
+def remove_mpv_args(path: str) -> None:
+    """D-SINK-47: the file goes as soon as mpv has read it -- once its socket
+    answers, which mpv binds only after its whole command line is parsed --
+    and on every path out of a launch that failed. Quiet: a file already gone
+    is the goal, and any other failure leaves a 0600 file in a 0700 folder
+    that the next launch's rename replaces and a logout removes."""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 def mpv_pin_block(where: dict[str, str]) -> list[str]:

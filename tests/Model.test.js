@@ -12,6 +12,25 @@ const playerFixture = JSON.parse(require("fs").readFileSync(require("path").join
 // two "identical" fixtures drift.
 const pipFixture = require("./fixtures/pip-cases.js")
 
+// D-SINK-48 (lane-p2a, 2026-10-29): a NEW source's key is a random draw now
+// (Model.allocateSourceKey), never the URL's fnv1a32. Much of this suite
+// drives adds and migrations and then names the new record by its key, so the
+// suite FIXES the draw: every new key it allocates is DRAWN_KEY, and a second
+// one in the same history takes the `-2` suffix (the collision rule, unchanged
+// and exercised the harder for it). The draw itself -- random, never the
+// URL's hash, a free preferred key kept -- is checked against the real
+// generator, kept here as REAL_RANDOM, in the lane-p2a block near the end.
+const REAL_RANDOM = Math.random
+const DRAWN_KEY = "5eed0000"
+Math.random = () => 0x5eed0000 / 4294967296
+// Another fixed draw for the length of `fn`, for a check that needs two new
+// keys to differ in one story (an add and an edit).
+function withDraw(n, fn) {
+  const keep = Math.random
+  Math.random = () => n / 4294967296
+  try { return fn() } finally { Math.random = keep }
+}
+
 let failures = 0
 let checks = 0
 
@@ -66,6 +85,19 @@ function checkCall(name, produce, expected) {
     actual = "threw: " + error.message
   }
   check(name, actual, expected)
+}
+
+// D-SINK-47 (lane-p2a, 2026-10-29): the user's tokens reach mpv through the
+// --include file the launch argv names where they used to stand, and mpv
+// parses that file AT ITS POSITION (measured: an earlier token is beaten by
+// it, a later one beats it, and what it sets reads as set from the command
+// line). `applied` is the sequence mpv applies: the argv with the --include
+// replaced by the tokens the file holds. A check about where a user token
+// lands asks this; a check about what /proc shows asks the argv itself.
+function applied(argv, user) {
+  const list = Array.isArray(argv) ? argv : []
+  const i = list.findIndex(a => String(a).indexOf("--include=") === 0)
+  return i === -1 ? list.slice() : list.slice(0, i).concat(user || []).concat(list.slice(i + 1))
 }
 
 // ---- the runner's own comparison (audit F8) ----
@@ -1232,12 +1264,12 @@ checkCall("calibration: on retropc, opacity 0.8 computes to the 7.13 the old pas
 // (The URL left both argvs under D-SINK-8, below; the flag is the whole of
 // what still tells them apart.)
 check("D-ID-1 the active fetch carries the state dir", Model.playlistFetchArgv("/h", "/c", "/s"),
-  ["python3", "/h", "playlist", "--cache-dir", "/c", "--state-dir", "/s"])
+  ["python3", "-I", "/h", "playlist", "--cache-dir", "/c", "--state-dir", "/s"])
 check("D-ID-1 the probe does NOT, and that absence is the safety property", Model.playlistProbeArgv("/h", "/c"),
-  ["python3", "/h", "playlist", "--cache-dir", "/c"])
+  ["python3", "-I", "/h", "playlist", "--cache-dir", "/c"])
 check("D-ID-1 the probe can never grow the flag by accident", Model.playlistProbeArgv("/h", "/c").indexOf("--state-dir"), -1)
 check("D-ID-1 an empty state dir omits the flag rather than passing a blank", Model.playlistFetchArgv("/h", "/c", ""),
-  ["python3", "/h", "playlist", "--cache-dir", "/c"])
+  ["python3", "-I", "/h", "playlist", "--cache-dir", "/c"])
 checkCall("D-ID-1 Service.qml calls the builders and builds no playlist argv of its own", function () {
   // The gap the review named: nothing asserted the argv Service constructs.
   // A literal argv here would be invisible to every test again.
@@ -1285,7 +1317,7 @@ checkCall("D-SINK-8 (a) no builder puts a URL, a credential or --url on argv, an
   return [argvLeaks(fetch), argvLeaks(probe), argvLeaks(epg), argvLeaks(now),
           fetch.slice(0, 3), probe.slice(0, 3), epg.slice(0, 3), now.slice(0, 3)]
 }, [[], [], [], [],
-    ["python3", "/h", "playlist"], ["python3", "/h", "playlist"], ["python3", "/h", "epg"], ["python3", "/h", "epg"]])
+    ["python3", "-I", "/h"], ["python3", "-I", "/h"], ["python3", "-I", "/h"], ["python3", "-I", "/h"]])
 checkCall("D-SINK-8 (a) a URL handed to a builder as a surplus argument goes nowhere", function () {
   // The parameter that was removed must not grow back at the END of the
   // list either, which is where a "harmless" extra argument lands. Hand a
@@ -1302,10 +1334,10 @@ checkCall("D-SINK-8 (a) no builder keeps an ignored url parameter: a parameter n
 // the whole before-run, hiding every count after it (rule 11).
 checkCall("D-SINK-8 (a) epgFetchArgv is the inline EPG argv Service.qml used to build, minus the URL", function () {
   return [Model.epgFetchArgv("/h", "/c", false), Model.epgFetchArgv("/h", "/c", true)]
-}, [["python3", "/h", "epg", "--cache-dir", "/c"], ["python3", "/h", "epg", "--now-only", "--cache-dir", "/c"]])
+}, [["python3", "-I", "/h", "epg", "--cache-dir", "/c"], ["python3", "-I", "/h", "epg", "--now-only", "--cache-dir", "/c"]])
 checkCall("D-SINK-8 (a) epgFetchArgv treats nowOnly as a flag, not a value: nothing but a truthy value adds it", function () {
   return [Model.epgFetchArgv("/h", "/c").indexOf("--now-only"), Model.epgFetchArgv("/h", "/c", null).indexOf("--now-only"), Model.epgFetchArgv("/h", "/c", 1).indexOf("--now-only")]
-}, [-1, -1, 3])
+}, [-1, -1, 4])
 checkCall("D-SINK-8 (b) fetchEnvironment names exactly one variable, OMARCHY_IPTV_URL, and hands it the URL verbatim", function () {
   const env = Model.fetchEnvironment("http://u:p@h/x")
   // The name is the contract with the helper, spelled as a literal here on
@@ -1332,43 +1364,45 @@ checkCall("D-SINK-8 (c) Service.qml sets the environment through the builder at 
   // which URL, line content rather than line number. Three sites, not two:
   // the EPG site covers both the fetch and the --now-only recompute, the
   // latter handed "" (so {}), because the assignment REPLACES the last value
-  // and a stale URL must not ride into the offline run. "Immediately" is
-  // structural: the next non-comment line after each assignment must be
-  // that same process's `running = true`, and each of the three processes
-  // runs from exactly one place, so no run can start on an older environment.
+  // and a stale URL must not ride into the offline run.
+  //
+  // D-SINK-48 (lane-p2a, 2026-10-29): every helper Process now starts in ONE
+  // function, runHelper, which assigns the command and the environment
+  // Model.helperSpawn makes and then sets `running` -- so "immediately" is
+  // that function's three lines, and "one place per process" is one
+  // runHelper call per process with no `running = true` of its own.
   const fs = require("fs"), path = require("path")
-  const code = fs.readFileSync(path.join(__dirname, "..", "Service.qml"), "utf8").split("\n")
-    .filter(function (l) { return !/^\s*\/\//.test(l) })
+  const text = fs.readFileSync(path.join(__dirname, "..", "Service.qml"), "utf8")
+  const code = text.split("\n").filter(function (l) { return !/^\s*\/\//.test(l) })
+  const flat = code.join("\n")
   const sites = []
-  code.forEach(function (l, i) {
-    const m = /^\s*(\w+)\.environment = Model\.fetchEnvironment\((.*)\)\s*$/.exec(l)
-    const n = /^\s*(\w+)\.environment = Model\.fetchEnvironmentFor\((.*)\)\s*$/.exec(l)
-    if (n) sites.push({ proc: n[1], arg: n[2], next: String(code[i + 1] || "").trim() })
-    if (m) sites.push({ proc: m[1], arg: m[2], next: String(code[i + 1] || "").trim() })
-  })
-  // Containment, not whole-line equality: the mutant that survived the first
-  // draft was `if (x) playlistProc.running = true` on one line, a second run
-  // site that set no environment and that an equality compare never saw.
-  function runs(proc) {
-    const re = new RegExp("\\b" + proc + "\\.running = true\\b")
-    return code.filter(function (l) { return re.test(l) }).length
+  // A call spans its own line and at most one more (the argv, then the environment).
+  const re = /root\.runHelper\((\w+),[^\n]*(?:\n[^\n]*)?Model\.fetchEnvironmentFor\(([^\n]*)\)\)\s*$/gm
+  let m
+  while ((m = re.exec(flat)) !== null) sites.push({ proc: m[1], arg: m[2] })
+  const body = (/function runHelper\(proc, argv, environment\) \{\n([\s\S]*?)\n  \}/.exec(flat) || [])[1] || ""
+  const lines = body.split("\n").map(function (l) { return l.trim() })
+  function calls(proc) {
+    return code.filter(function (l) { return new RegExp("root\\.runHelper\\(" + proc + ",").test(l) }).length
+  }
+  function ownRuns(proc) {
+    return code.filter(function (l) { return new RegExp("\\b" + proc + "\\.running = true\\b").test(l) }).length
   }
   return [
     sites.map(function (s) { return s.proc + " <- " + s.arg }),
-    sites.map(function (s) { return s.next === s.proc + ".running = true" }),
-    sites.map(function (s) { return runs(s.proc) }),
-    // Every environment assignment goes through the builder: an inline
-    // object literal would be a second spelling of the variable name.
-    // D-SINK-40: through fetchEnvironmentFor, which composes fetchEnvironment
-    // with the URL's provenance in the same one assignment.
-    code.filter(function (l) { return /\.environment = / .test(l) && !/Model\.fetchEnvironmentFor\(/.test(l) }).length,
+    lines,
+    sites.map(function (s) { return [calls(s.proc), ownRuns(s.proc)] }),
+    // No environment assignment anywhere but runHelper's: an inline object
+    // literal would be a second spelling of the variable name.
+    code.filter(function (l) { return /\.environment = /.test(l) && !/^\s*proc\.environment = spawn\.environment$/.test(l) }).length,
     // And no command, on any process, carries the flag the URL used to ride on.
     code.filter(function (l) { return /"--url"/.test(l) }).length,
     code.filter(function (l) { return /\.command = /.test(l) && /Url\b|\.url\b/.test(l) }).length
   ]
 }, [["playlistProc <- root.playlistUrl, { origin: \"user\" }", "epgProc <- nowOnly ? \"\" : root.epgFetchUrl, root.epgProvenance",
      "sourceProbeProc <- rec.url, { origin: \"user\" }"],
-    [true, true, true], [1, 1, 1], 0, 0, 0])
+    ["var spawn = Model.helperSpawn(argv, environment)", "proc.command = spawn.command", "proc.environment = spawn.environment", "proc.running = true"],
+    [[1, 0], [1, 0], [1, 0]], 0, 0, 0])
 
 // ---- D-ID-3: the shell adopts the helper's id scheme, or undoes it ----
 // With --state-dir the helper moved state.json onto scheme 2 (`moved N`) and
@@ -2209,8 +2243,8 @@ checkCall("dead channels: the whole render path still works off the formatted st
 checkCall("dead channels: the mark is written by argv, never shell text", function () {
   const a = Model.failedArgv("/p/bin/omarchy-iptv", "mark", "t:x; rm -rf /", "/c/sources/ab")
   return [a.indexOf("t:x; rm -rf /") !== -1, a.length,
-          Model.failedArgv("/p/b", "nonsense", "t:x", "/c")[3]]
-}, [true, 8, "mark"])
+          Model.failedArgv("/p/b", "nonsense", "t:x", "/c")[4]]
+}, [true, 9, "mark"])
 
 checkCall("dead channels: withFailed keeps an epoch a NUMBER", function () {
   // failedIndex produces numbers from the file. If this str()'d, one map
@@ -4712,7 +4746,7 @@ check("headerArgs drops unsafe", Model.headerArgs({ "Bad Name": "x", Ok: "line\n
 // travels over the 0600 socket instead. The vectors are shared with the
 // Python mirror in tests/fixtures/player-argv.json.
 const STATE_DIR = "/home/u/.local/state/omarchy-iptv"
-const argv = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: STATE_DIR, extraArgs: ["--profile=low-latency"] })
+const argv = applied(Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: STATE_DIR, extraArgs: ["--profile=low-latency"] }), ["--profile=low-latency"])
 check("buildMpvArgv starts with mpv and ipc socket", argv.slice(0, 2), ["mpv", "--input-ipc-server=/run/user/1000/omarchy-iptv/mpv.sock"])
 check("buildMpvArgv fixed options in order", argv.slice(2, 10), ["--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no"])
 check("buildMpvArgv idles at startup so the first channel arrives over IPC (PO-1)", [argv.indexOf("--idle=once") !== -1, argv.indexOf("--idle=no") !== -1, argv.indexOf("--idle=yes") !== -1], [true, false, false])
@@ -4737,7 +4771,7 @@ check("buildMpvArgv: every token after argv[0] is an option", argv.slice(1).ever
 // carries. force-media-title is not expanded by mpv, so it stays plain.
 check("mpvWindowTitle prefixes the raw marker", [Model.MPV_RAW_PREFIX, Model.mpvWindowTitle("BBC One"), Model.mpvWindowTitle(null)], ["$>", "$>BBC One", "$>"])
 check("buildMpvArgv neutral title keeps the raw marker and mpv's own default off screen", Model.buildMpvArgv({ socketPath: "/s" }).indexOf("--title=$>IPTV") !== -1, true)
-check("buildMpvArgv user args can re-enable ytdl (last wins)", (() => { const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: ["--ytdl=yes"] }); return a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes") })(), true)
+check("buildMpvArgv user args can re-enable ytdl (last wins)", (() => { const a = applied(Model.buildMpvArgv({ socketPath: "/s", extraArgs: ["--ytdl=yes"] }), ["--ytdl=yes"]); return a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes") })(), true)
 // D-SINK-13 changed what this one can say. User args still land after every
 // fixed option, which is what makes --ytdl=yes and --screenshot-dir work, but
 // they are no longer LAST: the pin block follows them deliberately (one token
@@ -4749,7 +4783,7 @@ checkCall("buildMpvArgv user args come after every fixed option, and exactly the
   const lastFixed = argv.findIndex(t => t.indexOf("--icc-cache-dir=") === 0)
   return { found: user > 0, afterTheFixedOptions: user > lastFixed, tailIsThePins: JSON.stringify(argv.slice(user + 1)) === JSON.stringify(Model.mpvPinBlock(Model.playerDirs("/run/user/1000/omarchy-iptv/mpv.sock", STATE_DIR))) }
 }, { found: true, afterTheFixedOptions: true, tailIsThePins: true })
-check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--gpu-sw=yes", "--tls-verify=yes", "--watch-later-dir=/watch-later", "--load-scripts=no", "--scripts-clr", "--input-commands-clr", "--input-commands-append=keybind ctrl+v ignore", "--load-auto-profiles=no", "--player-operation-mode=cplayer", "--load-select=no", "--load-console=no", "--prefetch-playlist=no", "--load-unsafe-playlists=no", "--save-watch-history=no", "--log-file=", "--reset-on-next-file-clr", "--osd-playlist-entry=title", "--drag-and-drop=no", "--script-opts-append=osc-title_mbtn_mid_command=ignore", "--stream-lavf-o-clr", "--demuxer-lavf-propagate-opts=yes", "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy", "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt", "--demuxer-lavf-o-append=tls_verify=1", "--tls-verify=yes"])
+check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc-server=", "--wayland-app-id=omarchy-iptv", "--force-window=immediate", "--idle=once", "--keep-open=no", "--title=$>IPTV", "--force-media-title=IPTV", "--msg-level=all=error", "--ytdl=no", "--load-scripts=no", "--screenshot-dir=/screenshots", "--watch-later-dir=/watch-later", "--gpu-shader-cache-dir=/shader-cache", "--icc-cache-dir=/shader-cache", "--gpu-sw=yes", "--tls-verify=yes", "--watch-later-dir=/watch-later", "--load-scripts=no", "--scripts-clr", "--input-commands-clr", "--input-commands-append=keybind ctrl+v ignore", "--load-auto-profiles=no", "--player-operation-mode=cplayer", "--load-select=no", "--load-console=no", "--load-stats-overlay=no", "--prefetch-playlist=no", "--load-unsafe-playlists=no", "--save-watch-history=no", "--log-file=", "--reset-on-next-file-clr", "--osd-playlist-entry=title", "--drag-and-drop=no", "--script-opts-append=osc-title_mbtn_mid_command=ignore", "--stream-lavf-o-clr", "--demuxer-lavf-propagate-opts=yes", "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy", "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt", "--demuxer-lavf-o-append=tls_verify=1", "--tls-verify=yes"])
 // D-PLY-27 (the owner's decision, 2026-10-26): the launch argv accepts a
 // software renderer, because mpv 0.41.0's VO probe aborts on any compositor
 // that serves no hardware GL or Vulkan context (measured 2026-10-25 in the
@@ -4763,7 +4797,7 @@ check("buildMpvArgv null params", Model.buildMpvArgv(null), ["mpv", "--input-ipc
 // fixture's D-PLY-27 case through buildMpvArgv as an exact array.
 checkCall("D-PLY-27: a user's --gpu-sw=no and --no-gpu-sw pass the filter, land after the base token and are not outvoted; the token is once, unreserved, and never last", () => {
   const r = Model.splitMpvArgs("--gpu-sw=no --no-gpu-sw")
-  const a = Model.buildMpvArgv({ socketPath: "/s", stateDir: "/st", extraArgs: r.args })
+  const a = applied(Model.buildMpvArgv({ socketPath: "/s", stateDir: "/st", extraArgs: r.args }), r.args)
   const base = a.indexOf(playerFixture.gpuSoftware)
   return {
     token: playerFixture.gpuSoftware, kept: r.args, rejected: r.rejected, reserved: Model.MPV_RESERVED["--gpu-sw"],
@@ -4793,7 +4827,7 @@ checkCall("dirnameOf behaves like os.path.dirname on the paths this plugin uses"
 checkCall("--watch-later-dir stays reserved so a resume record cannot be aimed at $HOME", () => Model.splitMpvArgs("--watch-later-dir=/home/u --screenshot-dir=/home/u/Pictures"),
   { args: ["--screenshot-dir=/home/u/Pictures"], rejected: ["--watch-later-dir=/home/u"], warnings: ["mpvArg --watch-later-dir refused: reserved by the plugin"] })
 checkCall("a user who wants their screenshots elsewhere still wins (last token wins)", () => {
-  const a = Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: STATE_DIR, extraArgs: ["--screenshot-dir=/home/u/Pictures"] })
+  const a = applied(Model.buildMpvArgv({ socketPath: "/run/user/1000/omarchy-iptv/mpv.sock", stateDir: STATE_DIR, extraArgs: ["--screenshot-dir=/home/u/Pictures"] }), ["--screenshot-dir=/home/u/Pictures"])
   return a.indexOf("--screenshot-dir=" + STATE_DIR + "/screenshots") < a.lastIndexOf("--screenshot-dir=/home/u/Pictures")
 }, true)
 // ---- D-PIP-1: focus the player, and a check that can actually fail -------
@@ -5348,7 +5382,7 @@ checkCall("the launch argv aims both of mpv's caches at it", () => {
 }, [true, true])
 checkCall("neither cache option is reserved (CL2: the list is a privacy instrument) and a user token still wins", () => {
   const r = Model.splitMpvArgs("--gpu-shader-cache-dir=/home/u/.cache/shaders --icc-cache-dir=/home/u/.cache/icc")
-  const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: r.args })
+  const a = applied(Model.buildMpvArgv({ socketPath: "/s", extraArgs: r.args }), r.args)
   return [r.rejected, a.indexOf("--gpu-shader-cache-dir=/shader-cache") < a.lastIndexOf("--gpu-shader-cache-dir=/home/u/.cache/shaders")]
 }, [[], true])
 
@@ -5434,7 +5468,7 @@ checkCall("D-SINK-13 layer 2: the composed argv ENDS with --tls-verify=yes whate
 // the fix needs them: one among the fixed options where a reader looks, one
 // after everything the user can contribute.
 checkCall("D-SINK-13 layers 1 and 2 are two occurrences of one constant, not one of either", () => {
-  const a = Model.buildMpvArgv({ socketPath: "/s", stateDir: "/st", extraArgs: Model.splitMpvArgs("--profile=evil").args })
+  const a = applied(Model.buildMpvArgv({ socketPath: "/s", stateDir: "/st", extraArgs: Model.splitMpvArgs("--profile=evil").args }), ["--profile=evil"])
   const at = a.reduce(function (acc, t, i) { if (t === Model.MPV_TLS_VERIFY) acc.push(i); return acc }, [])
   const user = a.indexOf("--profile=evil")
   return { count: at.length, layer1BeforeTheUser: at[0] < user, layer2AfterTheUser: at[1] > user, isLast: at[1] === a.length - 1 }
@@ -5558,7 +5592,8 @@ const RESERVED_ADDED = ["--log-file", "--dump-stats", "--stream-record", "--save
 // 55 the same day again: --drag-and-drop, pinned off (D-PLY-46).
 // 58 the same day (lane-p1c): --prefetch-playlist (D-SINK-63) and
 // --load-console with mpv's alias --load-osd-console (D-SINK-61), pinned off.
-check("MPV_RESERVED holds exactly 58 entries", Object.keys(Model.MPV_RESERVED).length, 58)
+// 59 the same day (lane-p2a): --load-stats-overlay (D-SINK-67), pinned off.
+check("MPV_RESERVED holds exactly 59 entries", Object.keys(Model.MPV_RESERVED).length, 59)
 // D-SINK-52 (owner, 2026-10-29: pin and refuse): a --script-opts token that
 // sets an OSC command or carries ${ is refused, by text, in this mirror as in
 // the helper; every other key, and PO-10's ytdl warning, stand.
@@ -5643,7 +5678,7 @@ check("splitMpvArgs rejects every addition and its --no- form", (() => {
 })(), [[], 20])
 check("--ytdl stays unreserved (PO-5) and still sorts after the built-in --ytdl=no", (() => {
   const r = Model.splitMpvArgs("--ytdl=yes")
-  const a = Model.buildMpvArgv({ socketPath: "/s", extraArgs: r.args })
+  const a = applied(Model.buildMpvArgv({ socketPath: "/s", extraArgs: r.args }), r.args)
   return [r.args, a.indexOf("--ytdl=no") < a.indexOf("--ytdl=yes")]
 })(), [["--ytdl=yes"], true])
 
@@ -5701,7 +5736,7 @@ check("playerRestartArgv is start plus the rung, under one lock", Model.playerRe
   ["player", "restart", "--socket", "/s", "--cache-dir", "/c", "--id", "t:x", "--seq", "7", "--scope", "g:uk", "--mpv-arg=--cache=yes", "--from", "term"])
 check("playerProbeArgv with and without an owner claim", [Model.playerProbeArgv("/s", 301706), Model.playerProbeArgv("/s", 0)], [["player", "probe", "--socket", "/s", "--owner-pid", "301706"], ["player", "probe", "--socket", "/s"]])
 check("playerOrphanCheckArgv", [Model.playerOrphanCheckArgv("/s", 301706, 6), Model.playerOrphanCheckArgv("/s", 301706, null)], [["player", "orphan-check", "--socket", "/s", "--owner-pid", "301706", "--grace", "6"], ["player", "orphan-check", "--socket", "/s", "--owner-pid", "301706", "--grace", "6"]])
-check("helperArgv prefixes the interpreter and the helper path", Model.helperArgv("/p/bin/omarchy-iptv", Model.playerStopArgv("/s", 3)), ["python3", "/p/bin/omarchy-iptv", "player", "stop", "--socket", "/s", "--seq", "3"])
+check("helperArgv prefixes the interpreter and the helper path", Model.helperArgv("/p/bin/omarchy-iptv", Model.playerStopArgv("/s", 3)), ["python3", "-I", "/p/bin/omarchy-iptv", "player", "stop", "--socket", "/s", "--seq", "3"])
 check("no player argv ever carries a URL or a header value", (() => {
   const all = [].concat(
     Model.playerStartArgv("/s", "/c", "t:x", 1, "g:uk", 12, ["--cache=yes"]),
@@ -6228,7 +6263,7 @@ check("fixture mpvArgv: at least one vector passes user arguments, or the traili
 check("fixture mpvArgv: the fixture's own software-renderer token is in every composed argv exactly once, before layer 1 of TLS and before every user token (D-PLY-27)",
   { token: playerFixture.gpuSoftware, offenders: playerFixture.mpvArgv.filter(function (v) {
     const user = Model.splitMpvArgs((v.mpvArgs || []).join(" ")).args
-    const a = Model.buildMpvArgv({ socketPath: v.socketPath, stateDir: v.stateDir, extraArgs: user })
+    const a = applied(Model.buildMpvArgv({ socketPath: v.socketPath, stateDir: v.stateDir, extraArgs: user }), user)
     const at = a.indexOf(playerFixture.gpuSoftware)
     const once = a.filter(function (t) { return t === playerFixture.gpuSoftware }).length === 1
     return !once || at > a.indexOf(playerFixture.tlsTrailing) || user.some(function (t) { return a.indexOf(t) < at })
@@ -6566,9 +6601,11 @@ check("statusReason knows the new codes", [Model.statusReason({ ok: false, error
 check("sourceKey vectors", [Model.sourceKey("https://iptv-org.github.io/iptv/countries/us.m3u"), Model.sourceKey("http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts"), Model.sourceKey("/srv/tv/local.m3u")], ["d5977d8a", "d990c2e4", "b0eed9fb"])
 check("isSourceKey", ["d5977d8a", "d5977d8a-2", "d5977d8a-999", "D5977D8A", "d5977d8", "../x", "d5977d8a/..", "d5977d8a-1000"].map(Model.isSourceKey), [true, true, true, false, false, false, false, false])
 const collided = [{ key: "d5977d8a", url: "http://other.test/x" }, { key: "d5977d8a-2", url: "http://other2.test/x" }]
-check("allocateSourceKey suffixes on a collision", Model.allocateSourceKey(collided, "https://iptv-org.github.io/iptv/countries/us.m3u"), "d5977d8a-3")
+// D-SINK-48: a new key is a draw; `draw` pins it here, so the suffix rule is
+// what is checked. Randomness itself is checked in the lane-p2a block.
+check("allocateSourceKey suffixes on a collision", Model.allocateSourceKey(collided, "https://iptv-org.github.io/iptv/countries/us.m3u", "", () => 0xd5977d8a / 4294967296), "d5977d8a-3")
 check("allocateSourceKey returns the existing key for a known url", Model.allocateSourceKey(collided, "http://other2.test/x"), "d5977d8a-2")
-check("allocateSourceKey on an empty list is the plain hash", Model.allocateSourceKey([], "/srv/tv/local.m3u"), "b0eed9fb")
+check("allocateSourceKey on an empty list is the plain draw, never the URL's hash", [Model.allocateSourceKey([], "/srv/tv/local.m3u", "", () => 0.5), Model.allocateSourceKey([], "/srv/tv/local.m3u")], ["80000000", DRAWN_KEY])
 check("findSource / findSourceByUrl with a forced collision", [Model.findSource(collided, "d5977d8a-2").url, Model.findSourceByUrl(collided, "http://other.test/x").key, Model.findSource(collided, "nope"), Model.findSourceByUrl(null, "x")], ["http://other2.test/x", "d5977d8a", null, null])
 check("sourceCacheDir", [Model.sourceCacheDir("/c/omarchy-iptv/", "d5977d8a"), Model.sourceCacheDir("/c", "d5977d8a-2"), Model.sourceCacheDir("/c", "../x"), Model.sourceCacheDir("", "d5977d8a"), Model.sourceCacheDir("/c", "")], ["/c/omarchy-iptv/sources/d5977d8a", "/c/sources/d5977d8a-2", "", "", ""])
 
@@ -7285,35 +7322,43 @@ check("every reducer carries the session through (cloneState)", [
 ], [sessionState.session, sessionState.session, sessionState.session, sessionState.session])
 
 const addOk = Model.addSource(Model.emptyState(), { playlistUrl: " HTTP://Provider.Example.TEST:80/get.php?username=u&password=p&type=m3u_plus&output=ts ", epgUrl: "http://provider.example.test/xmltv.php?username=u&password=p", label: "", origin: "xtream" }, 1000)
-check("addSource normalizes, derives the label, allocates the key", [addOk.ok, addOk.key, addOk.state.sources[0]], [true, "d990c2e4", { key: "d990c2e4", url: "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts", epgUrl: "http://provider.example.test/xmltv.php?username=u&password=p", kind: "http", label: "provider.example.test", labelCustom: false, origin: "xtream", addedAt: 1000, lastUsed: 1000, fetchedAt: 0, channelCount: 0, groupCount: 0 }])
+// D-SINK-48 (lane-p2a, 2026-10-29): a new source's key is a DRAW, no longer the
+// URL's fnv1a32 (d990c2e4 here): ADDED is the key the reducer handed out.
+const ADDED = addOk.key
+check("addSource normalizes, derives the label, allocates the key", [addOk.ok, Model.isSourceKey(ADDED) && ADDED !== Model.sourceKey(addOk.state.sources[0].url), addOk.state.sources[0]], [true, true, { key: ADDED, url: "http://provider.example.test/get.php?username=u&password=p&type=m3u_plus&output=ts", epgUrl: "http://provider.example.test/xmltv.php?username=u&password=p", kind: "http", label: "provider.example.test", labelCustom: false, origin: "xtream", addedAt: 1000, lastUsed: 1000, fetchedAt: 0, channelCount: 0, groupCount: 0 }])
 check("addSource does not mutate the input state", Model.emptyState().sources.length, 0)
-check("addSource typed label is custom; unknown origin is guide", (() => { const r = Model.addSource(addOk.state, { playlistUrl: "/srv/tv/local.m3u", label: " NAS ", origin: "junk" }, 2000); return [r.state.sources[1].label, r.state.sources[1].labelCustom, r.state.sources[1].origin, r.state.sources[1].kind, r.key] })(), ["NAS", true, "guide", "file", "b0eed9fb"])
+check("addSource typed label is custom; unknown origin is guide", (() => { const r = Model.addSource(addOk.state, { playlistUrl: "/srv/tv/local.m3u", label: " NAS ", origin: "junk" }, 2000); return [r.state.sources[1].label, r.state.sources[1].labelCustom, r.state.sources[1].origin, r.state.sources[1].kind, Model.isSourceKey(r.key) && r.key !== ADDED && r.key === r.state.sources[1].key] })(), ["NAS", true, "guide", "file", true])
 check("addSource codes: empty, scheme, invalid, relative_path, unsafe_path, too_long", ["", "x.test/a", "http://h .test/", "~/a", "/proc/x", "/" + "x".repeat(2100)].map(u => Model.addSource(Model.emptyState(), { playlistUrl: u }).code), ["empty", "scheme", "invalid", "relative_path", "unsafe_path", "too_long"])
 check("addSource bad EPG is rejected with the EPG copy", (() => { const r = Model.addSource(Model.emptyState(), { playlistUrl: "http://h.test/x", epgUrl: "ftp://e" }); return [r.code, r.message] })(), ["scheme", "EPG: start with http://, https://, or / for a local file"])
-check("addSource duplicate returns the existing key (case-changed host, default port)", (() => { const r = Model.addSource(addOk.state, { playlistUrl: "http://PROVIDER.example.test:80/get.php?username=u&password=p&type=m3u_plus&output=ts" }); return [r.code, r.key, r.message] })(), ["duplicate", "d990c2e4", "Already in Sources as " + Q("provider.example.test")])
+check("addSource duplicate returns the existing key (case-changed host, default port)", (() => { const r = Model.addSource(addOk.state, { playlistUrl: "http://PROVIDER.example.test:80/get.php?username=u&password=p&type=m3u_plus&output=ts" }); return [r.code, r.key, r.message] })(), ["duplicate", ADDED, "Already in Sources as " + Q("provider.example.test")])
 check("addSource label_taken for a typed collision; derived labels get a suffix", (() => { const taken = Model.addSource(addOk.state, { playlistUrl: "http://other.test/", label: "Provider.Example.TEST" }); const derived = Model.addSource(addOk.state, { playlistUrl: "http://provider.example.test/other.m3u" }); return [taken.code, derived.state.sources[1].label] })(), ["label_taken", "provider.example.test 2"])
 check("addSource label_too_long", Model.addSource(Model.emptyState(), { playlistUrl: "http://h.test/", label: "x".repeat(65) }).code, "label_too_long")
 const full50 = { version: 2, cacheLayout: 2, favorites: [], recents: [], lastPlayed: null, sources: Array.from({ length: 50 }, (_, i) => ({ key: (10000000 + i).toString(16).padStart(8, "0"), url: "http://h" + i + ".test/", epgUrl: "", kind: "http", label: "h" + i, labelCustom: false, origin: "cli", addedAt: i, lastUsed: i, fetchedAt: 0, channelCount: 0, groupCount: 0 })) }
 check("addSource too_many at the cap", Model.addSource(full50, { playlistUrl: "http://new.test/" }).code, "too_many")
 check("addSource result never carries a URL on failure", JSON.stringify(Model.addSource(full50, { playlistUrl: "http://new.test/" })).indexOf("new.test"), -1)
 
-const twoState = Model.addSource(addOk.state, { playlistUrl: "/srv/tv/local.m3u" }, 2000).state
-check("updateSource label only: labelCustom, state otherwise intact", (() => { const r = Model.updateSource(twoState, "d990c2e4", { label: "Provider" }, 3000); return [r.ok, r.urlChanged, r.replacedKey, r.state.sources[0].label, r.state.sources[0].labelCustom, r.state.sources.length] })(), [true, false, "", "Provider", true, 2])
-check("updateSource empty label re-derives and clears labelCustom", (() => { const r = Model.updateSource(Model.updateSource(twoState, "d990c2e4", { label: "Custom" }).state, "d990c2e4", { label: "" }); return [r.state.sources[0].label, r.state.sources[0].labelCustom] })(), ["provider.example.test", false])
-check("updateSource label_taken against another record, not itself", [Model.updateSource(twoState, "d990c2e4", { label: "LOCAL.m3u" }).code, Model.updateSource(twoState, "d990c2e4", { label: "provider.example.test" }).ok], ["label_taken", true])
-check("updateSource epg only", (() => { const r = Model.updateSource(twoState, "b0eed9fb", { epgUrl: " http://E.test:80/x.xml " }); return [r.ok, r.urlChanged, r.state.sources[1].epgUrl] })(), [true, false, "http://e.test/x.xml"])
-check("updateSource bad epg", Model.updateSource(twoState, "b0eed9fb", { epgUrl: "~/x" }).code, "relative_path")
-check("updateSource same playlist url (normalized) is not a change", Model.updateSource(twoState, "d990c2e4", { playlistUrl: "HTTP://provider.example.test:80/get.php?username=u&password=p&type=m3u_plus&output=ts" }).urlChanged, false)
-const moved = Model.updateSource(twoState, "d990c2e4", { playlistUrl: "http://provider.example.test:8080/get.php?username=u&password=p&type=m3u_plus&output=ts", label: "Provider" }, 4000)
-check("updateSource changed url: new record with a new key, old kept until the probe confirms", [moved.ok, moved.urlChanged, moved.key, moved.replacedKey, moved.state.sources.length, moved.state.sources[2].fetchedAt, moved.state.sources[2].label, moved.state.sources[2].addedAt, moved.state.sources[2].lastUsed, moved.state.sources[0].url === twoState.sources[0].url], [true, true, "85ac744a", "d990c2e4", 3, 0, "Provider", 1000, 4000, true])
-check("updateSource changed url with a derived label re-derives it", Model.updateSource(twoState, "d990c2e4", { playlistUrl: "http://new.test/x" }).state.sources[2].label, "new.test")
-check("updateSource duplicate / unknown", [Model.updateSource(twoState, "d990c2e4", { playlistUrl: "/srv/tv/local.m3u" }).code, Model.updateSource(twoState, "nope", { label: "x" }).code], ["duplicate", "unknown_source"])
+// The reducers below are about a state of two records under the keys this
+// block was written against (how a key is allocated is checked above), so the
+// records the two adds made are re-keyed to them: K1 the provider, K2 the file.
+const K1 = "d990c2e4", K2 = "b0eed9fb"
+const twoStateDrawn = Model.addSource(addOk.state, { playlistUrl: "/srv/tv/local.m3u" }, 2000).state
+const twoState = Model.cloneState(twoStateDrawn, { sources: twoStateDrawn.sources.map((r, i) => Object.assign({}, r, { key: [K1, K2][i] })) })
+check("updateSource label only: labelCustom, state otherwise intact", (() => { const r = Model.updateSource(twoState, K1, { label: "Provider" }, 3000); return [r.ok, r.urlChanged, r.replacedKey, r.state.sources[0].label, r.state.sources[0].labelCustom, r.state.sources.length] })(), [true, false, "", "Provider", true, 2])
+check("updateSource empty label re-derives and clears labelCustom", (() => { const r = Model.updateSource(Model.updateSource(twoState, K1, { label: "Custom" }).state, K1, { label: "" }); return [r.state.sources[0].label, r.state.sources[0].labelCustom] })(), ["provider.example.test", false])
+check("updateSource label_taken against another record, not itself", [Model.updateSource(twoState, K1, { label: "LOCAL.m3u" }).code, Model.updateSource(twoState, K1, { label: "provider.example.test" }).ok], ["label_taken", true])
+check("updateSource epg only", (() => { const r = Model.updateSource(twoState, K2, { epgUrl: " http://E.test:80/x.xml " }); return [r.ok, r.urlChanged, r.state.sources[1].epgUrl] })(), [true, false, "http://e.test/x.xml"])
+check("updateSource bad epg", Model.updateSource(twoState, K2, { epgUrl: "~/x" }).code, "relative_path")
+check("updateSource same playlist url (normalized) is not a change", Model.updateSource(twoState, K1, { playlistUrl: "HTTP://provider.example.test:80/get.php?username=u&password=p&type=m3u_plus&output=ts" }).urlChanged, false)
+const moved = Model.updateSource(twoState, K1, { playlistUrl: "http://provider.example.test:8080/get.php?username=u&password=p&type=m3u_plus&output=ts", label: "Provider" }, 4000)
+check("updateSource changed url: new record with a new key, old kept until the probe confirms", [moved.ok, moved.urlChanged, Model.isSourceKey(moved.key) && [K1, K2].indexOf(moved.key) === -1, moved.replacedKey, moved.state.sources.length, moved.state.sources[2].fetchedAt, moved.state.sources[2].label, moved.state.sources[2].addedAt, moved.state.sources[2].lastUsed, moved.state.sources[0].url === twoState.sources[0].url], [true, true, true, K1, 3, 0, "Provider", 1000, 4000, true])
+check("updateSource changed url with a derived label re-derives it", Model.updateSource(twoState, K1, { playlistUrl: "http://new.test/x" }).state.sources[2].label, "new.test")
+check("updateSource duplicate / unknown", [Model.updateSource(twoState, K1, { playlistUrl: "/srv/tv/local.m3u" }).code, Model.updateSource(twoState, "nope", { label: "x" }).code], ["duplicate", "unknown_source"])
 check("updateSource at the cap: a playlist-URL edit never counts against MAX_SOURCES (the replacement takes the old record's place)", (() => { const r = Model.updateSource(full50, "00989680", { playlistUrl: "http://new.test/" }, 5); return [r.ok, r.code, r.urlChanged, r.replacedKey, r.state.sources.length, r.state.sources.some(s => s.url === "http://new.test/"), Model.removeSource(r.state, r.replacedKey).state.sources.length] })(), [true, "ok", true, "00989680", 51, true, 50])
 check("updateSource at the cap: label / EPG edits and a duplicate stay unaffected", [Model.updateSource(full50, "00989680", { label: "Renamed" }).ok, Model.updateSource(full50, "00989680", { epgUrl: "http://e.test/x.xml" }).ok, Model.updateSource(full50, "00989680", { playlistUrl: "http://h1.test/" }).code], [true, true, "duplicate"])
-check("removeSource", (() => { const r = Model.removeSource(twoState, "b0eed9fb"); return [r.removed.key, r.state.sources.length, Model.removeSource(twoState, "nope").removed, twoState.sources.length] })(), ["b0eed9fb", 1, null, 2])
-check("touchSource bumps lastUsed, unknown key is a no-op", [Model.touchSource(twoState, "b0eed9fb", 9000).sources[1].lastUsed, Model.touchSource(twoState, "nope", 9000).sources[1].lastUsed], [9000, 2000])
-check("withSourceStats copies the counts of an ok status", Model.withSourceStats(twoState, "d990c2e4", { ok: true, fetchedAt: 5000, channelCount: "1475", groupCount: 28 }).sources[0], { ...twoState.sources[0], fetchedAt: 5000, channelCount: 1475, groupCount: 28 })
-check("withSourceStats ignores a failed status, falls back to nowSec", [Model.withSourceStats(twoState, "d990c2e4", { ok: false }).sources[0].fetchedAt, Model.withSourceStats(twoState, "d990c2e4", { ok: true, channelCount: 3 }, 777).sources[0].fetchedAt], [0, 777])
+check("removeSource", (() => { const r = Model.removeSource(twoState, K2); return [r.removed.key, r.state.sources.length, Model.removeSource(twoState, "nope").removed, twoState.sources.length] })(), [K2, 1, null, 2])
+check("touchSource bumps lastUsed, unknown key is a no-op", [Model.touchSource(twoState, K2, 9000).sources[1].lastUsed, Model.touchSource(twoState, "nope", 9000).sources[1].lastUsed], [9000, 2000])
+check("withSourceStats copies the counts of an ok status", Model.withSourceStats(twoState, K1, { ok: true, fetchedAt: 5000, channelCount: "1475", groupCount: 28 }).sources[0], { ...twoState.sources[0], fetchedAt: 5000, channelCount: 1475, groupCount: 28 })
+check("withSourceStats ignores a failed status, falls back to nowSec", [Model.withSourceStats(twoState, K1, { ok: false }).sources[0].fetchedAt, Model.withSourceStats(twoState, K1, { ok: true, channelCount: 3 }, 777).sources[0].fetchedAt], [0, 777])
 // D-SINK-19 deleted Model.activeSourceKey (see the comment where it was): the
 // active source is no longer named from a URL. What survives is "which record
 // holds this URL", which is identity (D4's untouched half) and is a
@@ -7342,10 +7387,10 @@ checkCall("R2: reconcileSources writes the adopted key into out.state, on the kn
           // a state with NO key that adopts a known URL: nothing in the history
           // moves, but the key now does, so it is a change to write
           same.changed, Model.activeKeyOf(same.state), Model.activeKeyOf(twoState)]
-}, ["b0eed9fb", "b0eed9fb", true, "d5977d8a", "d5977d8a", true, "d990c2e4", ""])
+}, ["b0eed9fb", "b0eed9fb", true, DRAWN_KEY, DRAWN_KEY, true, "d990c2e4", ""])
 check("reconcileSources: known url, key changed -> lastUsed bumped only", (() => { const r = Model.reconcileSources(twoState, "/srv/tv/local.m3u", "", "d990c2e4", 5000); return [r.changed, r.activeKey, r.added, r.state.sources[1].lastUsed, r.state.sources[0].lastUsed] })(), [true, "b0eed9fb", "", 5000, 1000])
 check("reconcileSources: adopts a changed valid epgUrl, ignores an invalid one", [Model.reconcileSources(twoState, "/srv/tv/local.m3u", "http://e.test/x.xml", "b0eed9fb", 5000).state.sources[1].epgUrl, Model.reconcileSources(Model.withActiveKey(twoState, "b0eed9fb"), "/srv/tv/local.m3u", "ftp://e", "b0eed9fb", 5000).changed], ["http://e.test/x.xml", false])
-check("reconcileSources: unknown url is added with origin cli and a derived label", (() => { const r = Model.reconcileSources(twoState, "https://iptv-org.github.io/iptv/countries/us.m3u", "", "d990c2e4", 6000); const s = r.state.sources[2]; return [r.changed, r.activeKey, r.added, s.origin, s.label, s.lastUsed, s.fetchedAt, s.labelCustom] })(), [true, "d5977d8a", "d5977d8a", "cli", "iptv-org.github.io", 6000, 0, false])
+check("reconcileSources: unknown url is added with origin cli and a derived label", (() => { const r = Model.reconcileSources(twoState, "https://iptv-org.github.io/iptv/countries/us.m3u", "", "d990c2e4", 6000); const s = r.state.sources[2]; return [r.changed, r.activeKey, r.added, s.origin, s.label, s.lastUsed, s.fetchedAt, s.labelCustom] })(), [true, DRAWN_KEY, DRAWN_KEY, "cli", "iptv-org.github.io", 6000, 0, false])
 check("reconcileSources: first v2 run (no history, legacy layout) tags the record migrated", [Model.reconcileSources(Model.emptyState(), "https://iptv-org.github.io/iptv/countries/us.m3u", "", "", 1).state.sources[0].origin, Model.reconcileSources(Model.withCacheLayout(Model.emptyState(), 2), "https://iptv-org.github.io/iptv/countries/us.m3u", "", "", 1).state.sources[0].origin, Model.reconcileSources(Model.emptyState(), "http://x.test/", "", "", 1, "cli").state.sources[0].origin], ["migrated", "cli", "cli"])
 check("reconcileSources: derived label is made unique", Model.reconcileSources(twoState, "http://provider.example.test/second.m3u", "", "", 1).state.sources[2].label, "provider.example.test 2")
 // R27d (2026-10-20, D-SRC-44) replaces the two eviction pins that stood here
@@ -7780,7 +7825,7 @@ check("D-SRC-09: normalizeSourceRecord returns null for a control character in u
 check("D-SRC-05: openFirstRun clears the query (header reads the placeholder again)", (() => { const st = Model.withQuery(Model.guideState("all"), "Harness Live"); const fr = Model.openFirstRun(st); return [fr.query, fr.mode, fr.form.origin, fr.cursorIndex] })(), ["", "sourceEdit", "firstRun", 0])
 check("D-SRC-05: afterRemove of the last source and closeSources to an unconfigured guide both land with an empty query", (() => { const q = Model.withQuery(Model.guideState("all"), "Harness Live"); const src = Model.openSources(q, []); return [Model.afterRemove(src, 0).query, Model.closeSources(src, { configured: false }).query, Model.closeSources(src, { configured: true }).query] })(), ["", "", "Harness Live"])
 check("D-SRC-10: adoptEpg false keeps a known record's own epgUrl (the settings' one belongs to the previous source)", (() => { const r = Model.reconcileSources(twoState, "/srv/tv/local.m3u", "http://prev.test/xmltv.php?username=u&password=p", "d990c2e4", 5000, "", { adoptEpg: false }); return [r.changed, r.activeKey, r.state.sources[1].epgUrl, r.state.sources[1].lastUsed] })(), [true, "b0eed9fb", "", 5000])
-check("D-SRC-10: adoptEpg false starts a new CLI record without the carried-over epgUrl", (() => { const r = Model.reconcileSources(twoState, "https://iptv-org.github.io/iptv/countries/us.m3u", "http://prev.test/xmltv.php?username=u&password=p", "d990c2e4", 6000, "", { adoptEpg: false }); const s = r.state.sources[2]; return [r.added, s.epgUrl, s.origin, s.url] })(), ["d5977d8a", "", "cli", "https://iptv-org.github.io/iptv/countries/us.m3u"])
+check("D-SRC-10: adoptEpg false starts a new CLI record without the carried-over epgUrl", (() => { const r = Model.reconcileSources(twoState, "https://iptv-org.github.io/iptv/countries/us.m3u", "http://prev.test/xmltv.php?username=u&password=p", "d990c2e4", 6000, "", { adoptEpg: false }); const s = r.state.sources[2]; return [r.added, s.epgUrl, s.origin, s.url] })(), [DRAWN_KEY, "", "cli", "https://iptv-org.github.io/iptv/countries/us.m3u"])
 check("D-SRC-02: the default (and an explicit adoptEpg true) adopts a changed epgUrl into the known active record", [Model.reconcileSources(twoState, "/srv/tv/local.m3u", "http://e.test/x.xml", "b0eed9fb", 5000).state.sources[1].epgUrl, Model.reconcileSources(twoState, "/srv/tv/local.m3u", "http://e.test/x.xml", "b0eed9fb", 5000, "", { adoptEpg: true }).state.sources[1].epgUrl, Model.reconcileSources(twoState, "/srv/tv/local.m3u", "http://e.test/x.xml", "b0eed9fb", 5000, "", {}).changed], ["http://e.test/x.xml", "http://e.test/x.xml", true])
 check("D-SRC-02: adopting an empty epgUrl clears the record's (omarchy bar set epgUrl '')", Model.reconcileSources(state4, recNas.url, "", "11111111", 5000).state.sources[1].epgUrl, "")
 check("D-SRC-01: statusFetchedAt prefers fetchedAt, then generatedAt, else 0", [Model.statusFetchedAt({ fetchedAt: 1789244100, generatedAt: 5 }), Model.statusFetchedAt({ generatedAt: 7 }), Model.statusFetchedAt({ fetchedAt: "x" }), Model.statusFetchedAt(null)], [1789244100, 7, 0, 0])
@@ -7925,7 +7970,7 @@ checkCall("D-SINK-19 migration 4: a URL the history has never seen is ADDED, not
           fresh.key, Model.findSource(fresh.state.sources, fresh.key).origin,
           // the source that was already there survives
           out.state.sources.map(r => r.key).indexOf("42839dd5") >= 0]
-}, ["d5977d8a", "d5977d8a", true, 2, "https://iptv-org.github.io/iptv/countries/us.m3u", "http://e.test/x.xml", "cli", "d5977d8a", "migrated", true])
+}, [DRAWN_KEY, DRAWN_KEY, true, 2, "https://iptv-org.github.io/iptv/countries/us.m3u", "http://e.test/x.xml", "cli", DRAWN_KEY, "migrated", true])
 
 checkCall("D-SINK-19 migration 5 (R1): an entry with a KEY and a SEEN URL -- the key wins and the URL is not read; an unseen URL beside the same key is adopted while migrating", () => {
   // The seen case is the host one write behind: the plugin has already
@@ -7944,7 +7989,7 @@ checkCall("D-SINK-19 migration 5 (R1): an entry with a KEY and a SEEN URL -- the
   return [consumed.key, consumed.adoptedUrl, consumed.state.sources.length, consumed.added,
           fresh.key, fresh.adoptedUrl, fresh.state.sources.length, fresh.added, fresh.moved,
           junk.key, junk.adoptedUrl, junk.state.sources.length]
-}, ["42839dd5", false, 1, "", OLD_KEY, true, 2, OLD_KEY, true, "", false, 1])
+}, ["42839dd5", false, 1, "", DRAWN_KEY, true, 2, DRAWN_KEY, true, "", false, 1])
 
 checkCall("D-SINK-19 migration 6: an activeKey naming a source that no longer exists falls through, and the dangling value is cleared", () => {
   const dangling = oldShape([srcSecond], "d990c2e4")
@@ -7958,7 +8003,7 @@ checkCall("D-SINK-19 migration 6: an activeKey naming a source that no longer ex
   return [none.key, none.changed, none.state.activeKey, none.state.sources.length,
           viaKey.key, viaKey.state.activeKey,
           viaUrl.key, viaUrl.added, viaUrl.state.sources.length]
-}, ["", true, "", 1, "42839dd5", "42839dd5", OLD_KEY, OLD_KEY, 2])
+}, ["", true, "", 1, "42839dd5", "42839dd5", DRAWN_KEY, DRAWN_KEY, 2])
 
 checkCall("D-SINK-19 migration: an empty install stays empty, and an INVALID URL at the migration leaves the active source alone (D16)", () => {
   const empty = Model.adoptActiveSource(Model.emptyState(), { playlistUrl: "", epgUrl: "", sourceKey: "" }, 1000, "")
@@ -9237,7 +9282,7 @@ checkCall("SR8 / R21: the migration's adoption really is reconcileSources, and i
           Model.activeKeyOf(active), again.changed, again.activeKey, again.added]
   // `cli`, not `migrated`: the cache layout marker is already 2, so this is
   // not the first v2 run (reconcileSources' origin rule, unchanged).
-}, ["d990c2e4", "d990c2e4", "cli", "d990c2e4", false, "d990c2e4", ""])
+}, [DRAWN_KEY, DRAWN_KEY, "cli", DRAWN_KEY, false, DRAWN_KEY, ""])
 
 check("D-SINK-19: the state the migration writes is the only place the URL is, and the IPC summary still carries none",
   [JSON.stringify(Model.sourcesSummary(oldShape([srcProvider]), OLD_KEY)).indexOf("://"),
@@ -13015,7 +13060,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   checkCall("D-SINK-18: the shield argv names the verb and nothing else", function () {
     const argv = Model.configShieldArgv("/plugin/bin/omarchy-iptv")
     return [argv, argv.filter(function (a) { return /shell\.json|--path|\.config/.test(a) })]
-  }, [["python3", "/plugin/bin/omarchy-iptv", "config", "shield"], []])
+  }, [["python3", "-I", "/plugin/bin/omarchy-iptv", "config", "shield"], []])
 
   // The sentence. NOT the persist_failed one: that sends the user to
   // `omarchy bar set`, which writes the credentialed URL into their shell
@@ -13162,7 +13207,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   // allowed to hold the bytes briefly and die.
   checkCall("D-CLIP-1 R8: clipboardArgv is the helper's clipboard verb, argv only", function () {
     return Model.clipboardArgv("/opt/p/bin/omarchy-iptv")
-  }, ["python3", "/opt/p/bin/omarchy-iptv", "clipboard"])
+  }, ["python3", "-I", "/opt/p/bin/omarchy-iptv", "clipboard"])
   checkCall("D-CLIP-1 R8: the shell's argv never names wl-paste", function () {
     return Model.clipboardArgv("/opt/p/bin/omarchy-iptv").indexOf(clip.argv[0])
   }, -1)
@@ -13374,6 +13419,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
 // counts.
 ;(function () {
   const H = require("./service-harness.js")
+  const cacheVerb = H.cacheVerb
   const svcPath = process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml")
   const svcText = fs.readFileSync(svcPath, "utf8")
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
@@ -13381,7 +13427,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   const E = "http://e.example.test/xmltv.php?username=u&password=p", F = "http://f.example.test/guide.xml", G = "http://g.example.test/guide.xml"
   const BAD = "ftp://u:lenspass@bad.example.test/list.m3u", BADE = "ftp://u:lenspass@bad.example.test/guide.xml"
   const keyOf = url => M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
-  const KA = keyOf(A), KB = keyOf(B), KNEW = keyOf(NEW)
+  // D-SINK-48: NEW is added by the runs below, so its key is the suite's draw.
+  const KA = keyOf(A), KB = keyOf(B), KNEW = DRAWN_KEY
   const rec = (url, extra) => Object.assign({ key: keyOf(url), url, epgUrl: "", kind: "http", label: url.split("/")[2], labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }, extra || {})
   const stateText = (sources, activeKey, extra) => JSON.stringify(Object.assign({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources, activeKey }, extra || {})) + "\n"
   // A state the migration has already written: the marker is in the FILE.
@@ -13472,10 +13519,10 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   // start-up init, so cacheReady has come and dirsReady has not.
   const OK5 = JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })
   const FAIL404 = JSON.stringify({ ok: false, kind: "playlist", error: { code: "http_404", message: "HTTP 404 from new.example.test" } })
-  const prunes = h => h.cacheRuns.filter(c => c[5] === "prune")
+  const prunes = h => h.cacheRuns.filter(c => cacheVerb(c) === "prune")
   const keepsOf = c => { const out = []; for (let i = c.indexOf("--keep") + 1; i > 0 && i < c.length && c[i].indexOf("--") !== 0; i++) out.push(c[i]); return out }
   const activeOf = c => c.indexOf("--active") === -1 ? "" : c[c.indexOf("--active") + 1]
-  const removed = h => h.cacheRuns.filter(c => c[5] === "remove").map(c => c[c.indexOf("--key") + 1])
+  const removed = h => h.cacheRuns.filter(c => cacheVerb(c) === "remove").map(c => c[c.indexOf("--key") + 1])
   const keyName = k => ({ [KA]: "A", [KB]: "B", [KNEW]: "NEW", "": "-" })[k] || k
   const named = keys => keys.map(keyName)
   const add = h => h.root.addSource({ playlistUrl: NEW, epgUrl: "", label: "" })
@@ -13663,12 +13710,14 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   // deliberate removals of a folder that was active (removeSource, and the
   // commit of a URL edit of the active source, whose old folder's removal is
   // now queued after the state that moves the pointer is published).
-  const EDITED = "http://edited.example.test/list.m3u", KED = keyOf(EDITED)
+  // D-SINK-48: an edit's new folder is a draw; this block draws it apart from
+  // an add's (withDraw), so a check can still tell the two folders apart.
+  const EDITED = "http://edited.example.test/list.m3u", KED = "ed17ed00"
   const nm = k => k === KED ? "EDITED" : keyName(k)
   const unfetched = () => rec(A, { fetchedAt: 0, channelCount: -1, groupCount: 0, origin: "migrated" })
   // What the guide does on a duplicate of a record that never fetched.
   const addAgain = h => { const dup = h.root.addSource({ playlistUrl: A, epgUrl: "", label: "" }); return [dup.ok, dup.code, nm(dup.id), h.root.retrySource(dup.id).ok] }
-  const editA = h => h.root.updateSource(KA, { label: "a.example.test", playlistUrl: EDITED, epgUrl: "" })
+  const editA = h => withDraw(0xed17ed00, () => h.root.updateSource(KA, { label: "a.example.test", playlistUrl: EDITED, epgUrl: "" }))
 
   checkCall("D-SRC-70: Model.cacheJobDrop / cacheJobArgs -- a `remove --key K` is dropped when K is the ACTIVE key when it runs ('active'), the prune's keep of the active key mirrored; another key's removal, K's once something else or nothing is active, an epg-clear of the active key and a prune run; D-SRC-69's rule still answers 'probe'", () => {
     const st = M.parseState(migratedText([rec(A), rec(B)], KA))
@@ -13973,11 +14022,13 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     ["start", "not_implemented", startReply("start", "not_implemented", "not implemented")]
   ]
   // Every `failed mark|clear` the service hands the helper, from the sink:
-  // the failed slot's command as it is assigned, and whatever queued behind it.
+  // what the helper parses at each run of the failed slot (since D-SINK-48
+  // the id rides in the environment: H.helperView), and whatever queued
+  // behind it.
   const failedJobs = h => {
     const seen = []
-    let held = h.ids.failedProc.command
-    Object.defineProperty(h.ids.failedProc, "command", { get() { return held }, set(v) { held = v; seen.push(v.slice()) }, configurable: true })
+    let held = h.ids.failedProc.running
+    Object.defineProperty(h.ids.failedProc, "running", { get() { return held }, set(v) { held = v; if (v === true) seen.push(H.helperView(h.ids.failedProc.command, h.ids.failedProc.environment)) }, configurable: true })
     return () => seen.map(c => c[c.indexOf("failed") + 1] + ":" + c[c.indexOf("--id") + 1])
       .concat((h.root.failedQueue || []).map(j => j.action + ":" + j.id))
   }
@@ -14438,8 +14489,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       stopped(h)
       exit(h, "")
       const zaps = []
-      let held = h.ids.controlProc.command
-      Object.defineProperty(h.ids.controlProc, "command", { get() { return held }, set(v) { held = v; zaps.push(v.slice()) }, configurable: true })
+      let held = h.ids.controlProc.running
+      Object.defineProperty(h.ids.controlProc, "running", { get() { return held }, set(v) { held = v; if (v === true) zaps.push(H.helperView(h.ids.controlProc.command, h.ids.controlProc.environment)) }, configurable: true })
       exit(h, probeOf({ stash: { schema: 1, playing: true, id: "t:y", name: "Y", group: "G", launchedFrom: "", sourceKey: KA, since: 1, entryId: 1, seq: 1, verb: "play" } }))
       const sent = zaps.map(c => c[c.indexOf("play")] + ":" + c[c.indexOf("--id") + 1])
       return [said(h), sent]
@@ -15031,6 +15082,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     // round 9 and 10's add-form race (R19c, R20d): a CLI guide URL set while
     // the add form's probe runs is refused, so the form's guide URL stands
     checkCall("R21e (" + mode + " host) the add form's race: a CLI epgUrl set while the first add's probe runs is REFUSED; the form's guide URL F lands with the record and survives the restart", () => {
+      // D-SINK-48: A is ADDED here (no record seeds it), so its key is the draw.
       const h = boot({ showLogos: false }, migratedText([], ""), mode)
       const submitted = h.root.addSource({ playlistUrl: A, epgUrl: F, label: "" })
       h.tick(5000)
@@ -15038,7 +15090,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       h.tick(5000)
       h.probeExit(JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })); h.drain()
       const next = restart(h)
-      return [submitted.ok, h.root.activeSourceKey === KA, name(epgOf(h.file(), KA)), reports(h), retired(h.storedEntry()), name(epgOf(next.file(), KA))]
+      return [submitted.ok, h.root.activeSourceKey === DRAWN_KEY, name(epgOf(h.file(), DRAWN_KEY)), reports(h), retired(h.storedEntry()), name(epgOf(next.file(), DRAWN_KEY))]
     }, [true, true, "F", ["epgUrl:retired"], [], "F"])
     // D-SINK-20's recarry: on the lagging host the publish still carries a
     // value the heal stripped, and the patch-only toggle used to write it back
@@ -15573,7 +15625,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
     const H4 = "http://h4.example.test/l.m3u"
     const KH = keyOf(H4)
     const Z = "http://z.example.test/get.php?username=u&password=zpass"
-    const KZ = keyOf(Z)
+    // D-SINK-48: Z is added in-app by the runs below, so its key is the draw.
+    const KZ = DRAWN_KEY
     const keysOf = st => st.sources.map(r => r.key === KA ? "A" : r.key === KB ? "B" : r.key === KH ? "H" : r.key === KZ ? "Z" : r.key)
     const helperAdd = sf => { const st = JSON.parse(sf.disk); st.sources.push(rec(H4)); sf.disk = JSON.stringify(st) + "\n"; sf.exists = true }
     const reasons = h => h.root.stateReloadsByReason || {}
@@ -16203,7 +16256,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   // report).
   {
     const H4 = "http://h4.example.test/l.m3u", KH = keyOf(H4)
-    const Z = "http://z.example.test/get.php?username=u&password=zpass", KZ = keyOf(Z)
+    // D-SINK-48: Z is added by the runs below (in-app, or adopted), so its key is the draw.
+    const Z = "http://z.example.test/get.php?username=u&password=zpass", KZ = DRAWN_KEY
     const many = n => { const out = []; for (let i = 0; i < n; i++) out.push(rec("http://m" + i + ".example.test/l.m3u", { lastUsed: 100 + i })); return out }
     const helperAdd = sf => { const st = JSON.parse(sf.disk); st.sources.push(rec(H4)); sf.disk = JSON.stringify(st) + "\n"; sf.exists = true }
     const fullTold = h => h.detached.filter(a => a[0] === "omarchy-notification-send" && a.indexOf("74016") !== -1 && a[a.length - 2] === "Sources is full")
@@ -16382,6 +16436,9 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           return { race, then: thenRemoveOne(h, keyOf("http://m8.example.test/l.m3u")) }
         }, { race: afterRace, then: migrated })
         checkCall("F1 (" + tag + "), rule 15: held full, a hand-run removal frees a place, and another program adds the SAME playlist (no guide URL) before the retry's save has read the file -- the record stands as theirs, and the migration is retried over it at once: the bar's guide URL reaches the record, the marker lands, the entry is stripped; nothing told but the one full card (before F1 the guide URL was lost, told by a journal line only)", () => {
+          // D-SINK-48: the record the other program adds carries its own key, not
+          // the shell's draw: KTHEIRS.
+          const KTHEIRS = keyOf(NEW)
           const fifty = [rec(A), rec(B)].concat(many(48))
           const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
           h.drain()
@@ -16391,8 +16448,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           h.foreign(sf => { const st = JSON.parse(sf.disk); st.sources = st.sources.filter(r => r.url !== "http://m7.example.test/l.m3u"); sf.disk = JSON.stringify(st) + "\n" })
           h.drain(); h.elapse(3000); h.drain()
           const next = restart(h)
-          return { fired, file: [h.file().sources.length, name(epgOf(h.file(), KNEW)), marked(h), M.activeKeyOf(h.file()) === KNEW], entry: retired(h.storedEntry()), held: h.root.migrationHeldFull,
-                   reports: reports(h), told: allTold(h), dropTold: dropTold(h), clean: clean(h) && !leaks(h), restart: [name(epgOf(next.file(), KNEW)), next.root.activeSourceKey === KNEW] }
+          return { fired, file: [h.file().sources.length, name(epgOf(h.file(), KTHEIRS)), marked(h), M.activeKeyOf(h.file()) === KTHEIRS], entry: retired(h.storedEntry()), held: h.root.migrationHeldFull,
+                   reports: reports(h), told: allTold(h), dropTold: dropTold(h), clean: clean(h) && !leaks(h), restart: [name(epgOf(next.file(), KTHEIRS)), next.root.activeSourceKey === KTHEIRS] }
         }, { fired: true, file: [50, "E", true, true], entry: [], held: false, reports: ["playlistUrl:full"], told: ["Sources is full"], dropTold: 0, clean: true, restart: ["E", true] })
         // ---- D-SRC-64 (round 7, 2026-10-22, the owner's decision): A HELD
         // MIGRATION PARKS BOTH URLS IN STATE.JSON. The #14748 review's plugin
@@ -16459,15 +16516,17 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
              landed: { parked: PAIR, fav: true, urlWrites: 0, entry: [] }, restart: { entry: [], parked: PAIR, heldFull: true, urlWrites: 0, inRecords: false },
              removed: { rm: true, parked: null, newEpg: "E", active: true, marked: true, entry: [] }, clean: true })
         checkCall("D-SRC-64 (" + tag + "): held (the pair parked, the entry empty), then ONE foreign write both removes a source and adds the parked playlist itself (a hand-run `state source remove` and `state source add` before the shell reloads) -- the pair is redundant: the retry lands onto THAT record, which takes the parked guide URL, the marker lands, the pair is dropped, nothing told but the one full card", () => {
+          // D-SINK-48: the record the hand-run add makes carries its own key: KTHEIRS.
+          const KTHEIRS = keyOf(NEW)
           const fifty = [rec(A), rec(B)].concat(many(48))
           const h = boot({ playlistUrl: NEW, epgUrl: E, showLogos: false }, oldText(fifty), mode, { ownEcho })
           h.drain()
           const before = { parked: pendingOf(h.file()), entry: retired(h.storedEntry()) }
           h.foreign(sf => { const st = JSON.parse(sf.disk); st.sources = st.sources.filter(r => r.url !== "http://m1.example.test/l.m3u"); st.sources.push(rec(NEW, { label: "theirs", labelCustom: true })); sf.disk = JSON.stringify(st) + "\n" }); h.drain()
           const next = restart(h)
-          return { before, file: [h.file().sources.length, name(epgOf(h.file(), KNEW)), marked(h), M.activeKeyOf(h.file()) === KNEW, pendingOf(h.file())], label: M.findSource(h.file().sources, KNEW).label,
+          return { before, file: [h.file().sources.length, name(epgOf(h.file(), KTHEIRS)), marked(h), M.activeKeyOf(h.file()) === KTHEIRS, pendingOf(h.file())], label: M.findSource(h.file().sources, KTHEIRS).label,
                    entry: retired(h.storedEntry()), held: h.root.migrationHeldFull, reports: reports(h), told: allTold(h), dropTold: dropTold(h),
-                   restart: [pendingOf(next.file()), name(epgOf(next.file(), KNEW)), next.root.activeSourceKey === KNEW, reports(next)], clean: clean(h) && !leaks(h) }
+                   restart: [pendingOf(next.file()), name(epgOf(next.file(), KTHEIRS)), next.root.activeSourceKey === KTHEIRS, reports(next)], clean: clean(h) && !leaks(h) }
         }, { before: { parked: PAIR, entry: [] }, file: [50, "E", true, true, null], label: "theirs", entry: [], held: false, reports: ["playlistUrl:full"], told: ["Sources is full"], dropTold: 0, restart: [null, "E", true, []], clean: true })
         // ---- Round 8 (2026-10-22, the round 7 recheck's P2 #1): a hand
         // `omarchy bar set playlistUrl <any>` DURING the hold. Red on the
@@ -16492,7 +16551,7 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
           const rm = g.root.removeSource(keyOf("http://m0.example.test/l.m3u")); g.drain()
           const next = restart(g)
           return { other, again, entryWins,
-                   landed: { rm: rm.ok, parked: pendingOf(g.file()), zEpg: name(epgOf(g.file(), KZ)), newInRecords: M.findSource(g.file().sources, KNEW) !== null, active: g.root.activeSourceKey === KZ, marked: marked(g), entry: retired(g.storedEntry()), count: g.file().sources.length,
+                   landed: { rm: rm.ok, parked: pendingOf(g.file()), zEpg: name(epgOf(g.file(), KZ)), newInRecords: M.findSourceByUrl(g.file().sources, M.normalizeSourceUrl(NEW, { origin: "cli" })) !== null, active: g.root.activeSourceKey === KZ, marked: marked(g), entry: retired(g.storedEntry()), count: g.file().sources.length,
                              restart: [pendingOf(next.file()), name(epgOf(next.file(), KZ)), next.root.activeSourceKey === KZ] },
                    clean: clean(h) && clean(g) && clean(next) && !leaks(h) && !leaks(g) }
         }, { other: { parked: { playlistUrl: Z, epgUrl: E }, memory: { playlistUrl: Z, epgUrl: E }, entry: [], oracleE: true, journal: 1, both: 1, urlWrites: 0, told: ["Sources is full"], heldFull: true },
@@ -17520,7 +17579,8 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
   const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
   const A = "http://a.example.test/list.m3u", B = "http://b.example.test/list.m3u", NEW = "http://new.example.test/get.php?username=u&password=p"
   const keyOf = url => M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
-  const KA = keyOf(A), KB = keyOf(B), KNEW = keyOf(NEW)
+  // D-SINK-48: NEW is added by the runs below, so its key is the suite's draw.
+  const KA = keyOf(A), KB = keyOf(B), KNEW = DRAWN_KEY
   const rec = (url, extra) => Object.assign({ key: keyOf(url), url, epgUrl: "", kind: "http", label: url.split("/")[2], labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }, extra || {})
   const stateText = (sources, activeKey, extra) => JSON.stringify(Object.assign({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources, activeKey, entryMigrated: true }, extra || {})) + "\n"
   const boot = (entry, text, o) => H.bootService(svcText, M, Object.assign({ entry, stateText: text, host: "lag" }, o || {}))
@@ -17535,7 +17595,7 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     const add = M.probeCommitPlan({ commit: true, mode: "add", key: KB, newKey: KB, activeKey: KA })
     const sw = M.probeCommitPlan({ commit: true, mode: "switch", key: KB, newKey: KB, activeKey: KA })
     const none = M.probeCommitPlan({ commit: false, mode: "edit", key: KA, newKey: KNEW, activeKey: KA })
-    const st = M.parseState(stateText([rec(A), rec(NEW)], ""))
+    const st = M.parseState(stateText([rec(A), rec(NEW, { key: KNEW })], ""))   // D-SINK-48: the edit's record carries the draw
     return [edit, other, retry, add, sw, none,
             M.activeKeyOf(M.probeCommitState(st, edit, KNEW)), M.activeKeyOf(M.probeCommitState(st, other, KNEW)), M.probeCommitState(st, null, KNEW) === st]
   }, [{ wasActive: true, act: "switch" }, { wasActive: false, act: "switch" }, { wasActive: false, act: "reload" },
@@ -17788,7 +17848,7 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
   checkCall("D-SRC-49: Model.stateModeArgv is argv only (no URL, the state dir and the verb); Model.stateModeReply reads the verb's one line and nothing else", () => {
     return [M.stateModeArgv("/p/bin/omarchy-iptv", "/s"), M.stateModeReply('{"ok": true, "kind": "state", "action": "mode", "folder": "kept", "file": "changed"}\n'),
             M.stateModeReply(""), M.stateModeReply('{"ok": true, "kind": "state", "action": "init", "found": "absent"}\n'), M.stateModeReply('{"ok": false, "kind": "state", "action": "mode"}')]
-  }, [["python3", "/p/bin/omarchy-iptv", "state", "--state-dir", "/s", "mode"], { folder: "kept", file: "changed" }, null, null, null])
+  }, [["python3", "-I", "/p/bin/omarchy-iptv", "state", "--state-dir", "/s", "mode"], { folder: "kept", file: "changed" }, null, null, null])
   checkCall("D-SRC-49: through Service -- a LANDED save starts `state mode` on its own Process (never cacheProc) from a turn of its own, with the helper argv; a second landed save while it runs is folded into one re-run; a save that FAILED starts none; the steady-state reply is silent", () => {
     const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
     const p = h.ids.stateModeProc
@@ -17809,7 +17869,7 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     h.stateFile.writeFails = true
     h.root.toggleFavorite("t:three.uk"); h.drain()
     return [beforeLanding, insideHandler, started, folded, rerun, quiet, [p.running, h.root.stateModeRuns - runsAtBoot], h.compileErrors]
-  }, [[false, 0], [false, true], [true, ["python3", "bin/omarchy-iptv", "state", "--state-dir", "/.local/state/omarchy-iptv", "mode"], 1, true, 0], [true, 1], [false, 2, true], 0, [false, 2], []])
+  }, [[false, 0], [false, true], [true, ["python3", "-I", "bin/omarchy-iptv", "state", "--state-dir", "/.local/state/omarchy-iptv", "mode"], 1, true, 0], [true, 1], [false, 2, true], 0, [false, 2], []])
   checkCall("D-SINK-22 (b): the state FOLDER link re-pointed at an empty folder BETWEEN a save's read and the write it allowed -- the write CREATES state.json at the umask's 0644 (the window stays), and the repair the landing asks for makes it 0600 within the helper's start, told once; before: 0644 until the next shell start", () => {
     const h = boot({ sourceKey: KA, showLogos: false }, stateText([rec(A)], KA))
     h.root.toggleFavorite("t:one.uk"); h.drain()
@@ -18162,16 +18222,20 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   const rec = (url, extra) => Object.assign({ key: keyOf(url), url, epgUrl: "", kind: "http", label: "tvh", labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }, extra || {})
   const stateText = (sources, activeKey) => JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources, activeKey, entryMigrated: true }) + "\n"
   const boot = (sources) => H.bootService(svcText, M, { entry: { sourceKey: keyOf(LAN), showLogos: false }, stateText: stateText(sources, keyOf(LAN)), host: "lag" })
+  // The URL and its provenance, which is what these checks are about: since
+  // D-SINK-48 the same environment also carries the run's private arguments
+  // (OMARCHY_IPTV_ARGS), which the lane-p2a block below checks on its own.
+  const urlEnv = e => { const o = Object.assign({}, e); delete o.OMARCHY_IPTV_ARGS; return o }
   checkCall("D-SINK-40 (service): the guide fetch of a hint on the playlist's own host carries origin playlist, that host and the class its playlist fetch connected to; the --now-only run after it carries nothing", () => {
     const h = boot([rec(LAN)])
     h.root.channelsMeta = { epgUrlHint: "http://192.168.1.5:9981/xmltv", sourceClass: "private" }
     h.ids.epgProc.running = false
     h.root.runEpgHelper(false)
-    const fetch = Object.assign({}, h.ids.epgProc.environment)
+    const fetch = urlEnv(h.ids.epgProc.environment)
     h.ids.epgProc.running = false
     h.root.epgLoaded = true
     h.root.runEpgHelper(true)
-    return [fetch, h.ids.epgProc.environment, h.compileErrors]
+    return [fetch, urlEnv(h.ids.epgProc.environment), h.compileErrors]
   }, [{ OMARCHY_IPTV_URL: "http://192.168.1.5:9981/xmltv", OMARCHY_IPTV_ORIGIN: "playlist", OMARCHY_IPTV_PLAYLIST_HOST: "192.168.1.5", OMARCHY_IPTV_PLAYLIST_PORT: "9981", OMARCHY_IPTV_PLAYLIST_CLASS: "private" }, {}, []])
   checkCall("D-SINK-40 (service): a hint on another LAN host is never fetched and the active row says so; the user's own guide URL is fetched as theirs", () => {
     const h = boot([rec(LAN)])
@@ -18183,17 +18247,17 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     g.root.channelsMeta = { epgUrlHint: "http://192.168.1.6/xmltv", sourceClass: "private" }
     g.ids.epgProc.running = false
     g.root.runEpgHelper(false)
-    return [refused, g.ids.epgProc.environment]
+    return [refused, urlEnv(g.ids.epgProc.environment)]
   }, [[false, "", "active \u00b7 192.168.1.5:9981 \u00b7 9 channels in 2 groups \u00b7 EPG from playlist not used: 192.168.1.6 is a local address"],
       { OMARCHY_IPTV_URL: OWN, OMARCHY_IPTV_ORIGIN: "user", OMARCHY_IPTV_PLAYLIST_HOST: "192.168.1.5", OMARCHY_IPTV_PLAYLIST_PORT: "9981", OMARCHY_IPTV_PLAYLIST_CLASS: "private" }])
   checkCall("D-SINK-40 (service): the playlist fetch and the source probe carry origin user and no playlist host of their own", () => {
     const h = boot([rec(LAN)])
     h.ids.playlistProc.running = false
     h.root.runPlaylistHelper()
-    const fetch = Object.assign({}, h.ids.playlistProc.environment)
+    const fetch = urlEnv(h.ids.playlistProc.environment)
     h.root.addSource({ playlistUrl: "http://new.example.test/get.php?username=u&password=p", epgUrl: "", label: "" })
     h.runLater()
-    return [fetch, h.ids.sourceProbeProc.environment]
+    return [fetch, urlEnv(h.ids.sourceProbeProc.environment)]
   }, [{ OMARCHY_IPTV_URL: LAN, OMARCHY_IPTV_ORIGIN: "user" },
       { OMARCHY_IPTV_URL: "http://new.example.test/get.php?username=u&password=p", OMARCHY_IPTV_ORIGIN: "user" }])
   checkCall("D-SINK-41 (service): applyFreshness refreshes a fresh cache written before the destination rules, and leaves one written under them", () => {
@@ -18208,6 +18272,241 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     const now = Math.floor(Date.now() / 1000)
     return [runs({ ok: true, kind: "playlist", fetchedAt: now }), runs({ ok: true, kind: "playlist", fetchedAt: now, destinationRules: 1 })]
   }, [1, 0])
+})()
+
+// ---- lane-p2a (2026-10-29): secrets and their fingerprints off every command line ----
+//
+// D-SINK-47, -48, -50, -65, -67, -68. Every check below reads the model under
+// test through M (IPTV_MODEL), Service.qml through IPTV_SERVICE_QML and the
+// helper through IPTV_HELPER, so the same block runs against dev 2727179 for
+// its red counts (rule 11).
+;(() => {
+  const fs = require("fs"), path = require("path"), os = require("os"), cp = require("child_process")
+  const M = process.env.IPTV_MODEL ? require(path.resolve(process.env.IPTV_MODEL)) : Model
+  const H = require("./service-harness.js")
+  const svcText = fs.readFileSync(process.env.IPTV_SERVICE_QML || path.join(__dirname, "../Service.qml"), "utf8")
+  const HELPER = path.resolve(process.env.IPTV_HELPER || path.join(__dirname, "../bin/omarchy-iptv"))
+  const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "iptv-p2a-"))
+  fs.chmodSync(scratch, 0o700)
+  const keyOf = url => M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
+  const PL = "http://me:s3cret@provider.example.test/get.php?username=me&password=s3cret"
+  const rec = (url, extra) => Object.assign({ key: keyOf(url), url, epgUrl: "", kind: "http", label: "p", labelCustom: false, origin: "cli", addedAt: 10, lastUsed: 20, fetchedAt: 30, channelCount: 9, groupCount: 2 }, extra || {})
+  const stateText = (sources, activeKey) => JSON.stringify({ version: 2, cacheLayout: 2, favorites: [], recents: [], sources, activeKey, entryMigrated: true }) + "\n"
+  const boot = () => H.bootService(svcText, M, { entry: { sourceKey: keyOf(PL), showLogos: false }, stateText: stateText([rec(PL)], keyOf(PL)), host: "lag" })
+
+  // D-SINK-50: `python3 -I`, from the one builder, everywhere.
+  checkCall("D-SINK-50: every helper argv builder in the model starts `python3 -I <helper>`", () => {
+    const P = "/p/bin/omarchy-iptv"
+    const built = [M.helperArgv(P, ["x"]), M.playlistFetchArgv(P, "/c/sources/k", "/s"), M.playlistProbeArgv(P, "/c/sources/k"),
+                   M.epgFetchArgv(P, "/c/sources/k", true), M.epgFetchArgv(P, "/c/sources/k", false), M.failedArgv(P, "mark", "t:x", "/c/sources/k"),
+                   M.logoFetchArgv(P, "/c/sources/k"), M.configShieldArgv(P), M.clipboardArgv(P), M.stateModeArgv(P, "/s"),
+                   M.stateInitArgv(P, "/s"), M.cacheRunArgv(P, "/c", ["prune"])]
+    return built.map(argv => argv.slice(0, 3).join(" "))
+  }, Array(12).fill("python3 -I /p/bin/omarchy-iptv"))
+  checkCall("D-SINK-50 (service): the control, player, cache, failed, playlist, EPG and state-mode slots run the interpreter isolated, and Service.qml composes no interpreter argv of its own", () => {
+    const h = boot()
+    h.ids.controlProc.running = false
+    h.root.runControl("play", ["play", "--id", "t:x"])
+    const control = h.ids.controlProc.command.slice(0, 2)
+    h.ids.playerProc.running = false
+    h.root.runPlayer("probe", ["player", "probe", "--socket", "/r/mpv.sock"])
+    const player = h.ids.playerProc.command.slice(0, 2)
+    h.ids.playlistProc.running = false
+    h.root.runPlaylistHelper()
+    const playlist = h.ids.playlistProc.command.slice(0, 2)
+    h.ids.epgProc.running = false
+    h.root.epgLoaded = true
+    h.root.runEpgHelper(true)
+    const epg = h.ids.epgProc.command.slice(0, 2)
+    h.ids.failedProc.running = false
+    h.root.runFailedJob({ action: "mark", id: "t:x", dir: "/c/sources/k" })
+    const failed = h.ids.failedProc.command.slice(0, 2)
+    h.root.queueCacheJob(["remove", "--key", "deadbeef"], null)
+    h.drain()
+    const cache = (h.cacheRuns[h.cacheRuns.length - 1] || []).slice(0, 2)
+    const literal = (svcText.match(/"python3"/g) || []).length
+    return { control, player, playlist, epg, failed, cache, literal, compileErrors: h.compileErrors }
+  }, { control: ["python3", "-I"], player: ["python3", "-I"], playlist: ["python3", "-I"], epg: ["python3", "-I"], failed: ["python3", "-I"],
+       cache: ["python3", "-I"], literal: 0, compileErrors: [] })
+  checkCall("D-SINK-50 (the sink): run with the argv the model builds, the helper's interpreter runs no PYTHONPATH code before the shield -- neither a sitecustomize nor a module that shadows the ctypes the shield imports", () => {
+    const evil = path.join(scratch, "pypath")
+    fs.mkdirSync(evil, { mode: 0o700 })
+    const marker = path.join(scratch, "ran-before-shield")
+    const body = "import os\nopen(" + JSON.stringify(marker) + ", 'a').write(os.environ.get('OMARCHY_IPTV_URL', '') + '\\n')\n"
+    fs.writeFileSync(path.join(evil, "sitecustomize.py"), body)
+    fs.writeFileSync(path.join(evil, "ctypes.py"), body + "raise ImportError('shadowed')\n")
+    const list = path.join(scratch, "p.m3u")
+    fs.writeFileSync(list, "#EXTM3U\n#EXTINF:-1 tvg-id=\"a.test\",A\nhttp://127.0.0.1:9/a.ts\n")
+    const cache = path.join(scratch, "cache")
+    fs.mkdirSync(cache, { mode: 0o700 })
+    const argv = M.playlistFetchArgv(HELPER, cache, "")
+    const env = Object.assign({}, process.env, { PYTHONPATH: evil, OMARCHY_IPTV_URL: list, HOME: scratch, XDG_CACHE_HOME: scratch, XDG_STATE_HOME: scratch })
+    const run = cp.spawnSync(argv[0], argv.slice(1), { env, encoding: "utf8", timeout: 30000 })
+    const ran = fs.existsSync(marker)
+    return { exit: run.status, ran, warned: /non-dumpable/.test(run.stderr || "") }
+  }, { exit: 0, ran: false, warned: false })
+  // D-SINK-47, D-SINK-48: the private arguments, off argv. The shared
+  // fixture first, in both directions: what the model hands the Process, and
+  // what the helper reads back out of it (the harness's stand-in, which the
+  // python suite holds the helper's own helper_arguments to).
+  const HA = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/helper-args.json"), "utf8"))
+  const envOf = c => c.private.length ? Object.assign({}, c.environment, { [HA.env]: JSON.stringify(c.private) }) : Object.assign({}, c.environment)
+  checkCall("D-SINK-48 (shared fixture): helperSpawn moves every private value off the argv into the environment, beside the run's own, and leaves the flag that makes the helper refuse to run without them", () =>
+    HA.cases.map(c => { const sp = M.helperSpawn(c.argv, c.environment); return [c.name, sp.command, sp.environment] }),
+    HA.cases.map(c => [c.name, c.command, envOf(c)]))
+  checkCall("D-SINK-48 (shared fixture): the harness's stand-in for the helper reads each command and environment back into the argv argparse is given", () =>
+    HA.cases.map(c => H.helperView(c.command, envOf(c))), HA.cases.map(c => c.parsed))
+  checkCall("D-SINK-48 (shared fixture): no private value is left on any command, and every case that has one names the flag once", () =>
+    HA.cases.map(c => { const sp = M.helperSpawn(c.argv, c.environment)
+      return [c.private.filter(x => x !== "" && sp.command.indexOf(x) !== -1), sp.command.filter(x => x === HA.flag).length] }),
+    HA.cases.map(c => [[], c.private.length ? 1 : 0]))
+  checkCall("D-SINK-48: helperSpawn tolerates null, keeps a given environment's own keys only, and never mutates its inputs", () => {
+    const argv = ["python3", "-I", "/h", "play", "--id", "t:x"], env = { OMARCHY_IPTV_URL: "u" }
+    const a = M.helperSpawn(argv, env)
+    const proto = M.helperSpawn(["python3"], JSON.parse('{"__proto__": {"x": 1}, "K": "v"}'))
+    return [M.helperSpawn(null, null), argv.length, Object.keys(env), Object.keys(a.environment), Object.keys(proto.environment), proto.environment.x]
+  }, [{ command: [], environment: {} }, 6, ["OMARCHY_IPTV_URL"], ["OMARCHY_IPTV_URL", "OMARCHY_IPTV_ARGS"], ["K"], undefined])
+
+  // Every helper spawn Service.qml makes, from Service.qml's own functions:
+  // what /proc/<pid>/cmdline would show (the Process's command) and what the
+  // helper parses (H.helperView). The values a local account could use --
+  // the cache folder's key, a u: id, a scope carrying a URL, a user token's
+  // proxy password, the keys of a prune -- are in the second and never in
+  // the first.
+  checkCall("D-SINK-48 (service): no spawn's command carries a source key, a channel id, a scope or a user token -- the zap, the player start and restart, the playlist and guide runs, the probe, the dead-channel mark, the logo run and the cache jobs -- and each still reaches the helper whole", () => {
+    const SCOPE = "g:Sports http://u:s3cret@cdn.test/x", ID = "u:1a2b3c4d", TOKEN = "--http-proxy=http://alice:S3cretPw@proxy.test:3128"
+    const h = H.bootService(svcText, M, { entry: { sourceKey: keyOf(PL), showLogos: true, mpvArgs: TOKEN + " --volume=50" },
+                                          stateText: stateText([rec(PL)], keyOf(PL)), host: "lag" })
+    const runs = []
+    const watch = (name) => {
+      const p = h.ids[name]
+      let held = p.running
+      Object.defineProperty(p, "running", { get() { return held }, set(v) { held = v; if (v === true) runs.push([name, p.command.slice(), H.helperView(p.command, p.environment)]) }, configurable: true })
+    }
+    for (const name of ["controlProc", "playerProc", "playlistProc", "epgProc", "failedProc", "sourceProbeProc", "logoFetchProc"]) watch(name)
+    const cacheBefore = h.cacheRuns.length
+    h.root.nowPlaying = { id: ID, name: "X", group: "Sports", launchedFrom: SCOPE, since: 1761700000 }
+    h.ids.controlProc.running = false
+    h.root.runControl("play", h.root.playArgs(ID))
+    h.ids.playerProc.running = false
+    h.root.issuePlayerSession("start", { id: ID, name: "X" }, "")
+    h.ids.playerProc.running = false
+    h.root.issuePlayerSession("restart", { id: ID, name: "X" }, "term")
+    h.ids.playlistProc.running = false
+    h.root.runPlaylistHelper()
+    h.ids.epgProc.running = false
+    h.root.epgLoaded = true
+    h.root.runEpgHelper(true)
+    h.ids.failedProc.running = false
+    h.root.runFailedJob({ action: "mark", id: ID, dir: h.root.activeCacheDir })
+    h.unstub("fetchLogos")
+    h.ids.logoFetchProc.running = false
+    h.root.fetchLogos()
+    h.root.addSource({ playlistUrl: "http://new.example.test/get.php?username=n&password=n3w", epgUrl: "", label: "" })
+    h.runLater()
+    // Not the active source's folder, which no cache job takes (D-SRC-70).
+    h.root.queueCacheJob(["remove", "--key", "0badf00d"], null)
+    h.drain()
+    const key = keyOf(PL)
+    const secrets = [key, ID, SCOPE, "S3cretPw", "--mpv-arg", "--cache-dir", "--id", "--scope"]
+    const onCommand = runs.map(r => [r[0], secrets.filter(x => r[1].some(a => a.indexOf(x) !== -1))])
+    const reached = runs.map(r => [r[0], r[2].some(a => a.indexOf("--cache-dir") === 0)])
+    const cache = h.cacheRuns.slice(cacheBefore)
+    return { names: runs.map(r => r[0] + ":" + (r[1].indexOf("player") !== -1 ? r[1][r[1].indexOf("player") + 1] : r[1][3])),
+             onCommand: onCommand.filter(x => x[1].length > 0), reached: reached.filter(x => !x[1]).map(x => x[0]),
+             tokenReached: runs.filter(r => r[0] === "playerProc").map(r => r[2].indexOf("--mpv-arg=" + TOKEN) !== -1),
+             scopeReached: runs.filter(r => r[0] === "controlProc").map(r => r[2][r[2].indexOf("--scope") + 1] === SCOPE),
+             cacheKeys: cache.map(c => c.indexOf("0badf00d") !== -1),
+             cacheCommand: [h.ids.cacheProc.command.join(" ").indexOf("0badf00d"), h.ids.cacheProc.command.slice(3)],
+             compileErrors: h.compileErrors }
+  }, { names: ["controlProc:play", "playerProc:start", "playerProc:restart", "playlistProc:playlist", "epgProc:epg", "failedProc:failed",
+               "logoFetchProc:logos", "sourceProbeProc:playlist"],
+       onCommand: [], reached: [], tokenReached: [true, true], scopeReached: [true], cacheKeys: [true],
+       cacheCommand: [-1, ["cache", "remove", "--args-from-env"]], compileErrors: [] })
+  // D-SINK-47: the player's half. No user token on the launch argv; the
+  // private file named where they stood, before the pin block; none at all
+  // when there are no tokens.
+  checkCall("D-SINK-47: the launch argv carries no user token -- a credentialed proxy, an API-key header -- and names the private options file once, where the tokens stood, right before the pin block; with no tokens, no file is named", () => {
+    const S = "/run/user/1000/omarchy-iptv/mpv.sock", ST = "/home/u/.local/state/omarchy-iptv"
+    const user = M.splitMpvArgs("--http-proxy=http://alice:S3cret@proxy.test:3128 --http-header-fields=X-Api-Key:k3y --volume=50").args
+    const a = M.buildMpvArgv({ socketPath: S, stateDir: ST, extraArgs: user })
+    const none = M.buildMpvArgv({ socketPath: S, stateDir: ST, extraArgs: [] })
+    const pins = M.mpvPinBlock(M.playerDirs(S, ST))
+    const inc = a.filter(t => t.indexOf("--include=") === 0)
+    return { onArgv: user.filter(t => a.join("\n").indexOf(t.split("=")[0]) !== -1), secret: a.join(" ").indexOf("S3cret"), inc,
+             beforePins: a.indexOf(inc[0]) === a.length - pins.length - 1, noTokens: none.filter(t => t.indexOf("--include") === 0),
+             file: M.playerDirs(S, ST).mpvArgs }
+  }, { onArgv: [], secret: -1, inc: ["--include=/run/user/1000/omarchy-iptv/mpv-args.conf"], beforePins: true, noTokens: [],
+       file: "/run/user/1000/omarchy-iptv/mpv-args.conf" })
+  checkCall("D-SINK-47: a token holding a NUL is refused by the shell's filter too (it cannot be one line of the options file)", () =>
+    M.splitMpvArgs("--volume=5 --user-agent=a\u0000b"), { args: ["--volume=5"], rejected: ["--user-agent=a\u0000b"], warnings: ["mpvArg --user-agent refused: reserved by the plugin"] })
+  // The NUL's sibling: a lone surrogate, which no UTF-8 file can hold. The
+  // helper's writer met one and the start ended `internal`; a JSON `\ud800`
+  // escape in the settings is how one reaches the shell. A PAIRED surrogate
+  // is one astral character and is kept.
+  checkCall("D-SINK-47: a token holding a lone surrogate, high or low, is refused by the shell's filter (no options-file line can hold it); a paired one is a character and is kept", () =>
+    M.splitMpvArgs("--sub-font=x\ud800 --user-agent=a\udcffb --volume=5 --sub-font=caf\u00e9\ud83d\ude00 --title-x=\ude00\ud83d"),
+    { args: ["--volume=5", "--sub-font=caf\u00e9\ud83d\ude00"], rejected: ["--sub-font=x\ud800", "--user-agent=a\udcffb", "--title-x=\ude00\ud83d"],
+      warnings: ["mpvArg --sub-font refused: reserved by the plugin", "mpvArg --user-agent refused: reserved by the plugin", "mpvArg --title-x refused: reserved by the plugin"] })
+  // Recheck (rc-p2a, 2026-10-31), rule 10: helperSpawn must hand the helper
+  // what the argv would have carried, and no more strictly. A provider's
+  // group-title reaches channels.json with any control character in it (the
+  // name is cleaned, the group is not), so a zap's or a player start's
+  // `--scope g:<group>` can hold a NUL. On the argv, QProcess cut it there
+  // (each argument is a C string); in OMARCHY_IPTV_ARGS the JSON carried it
+  // whole and the helper refused the run `bad_arguments` before any verb --
+  // every channel launched from that group failed to play. Cut at the NUL,
+  // as the argv did.
+  checkCall("D-SINK-48 (recheck): a scope or id holding a NUL reaches the helper cut there, as the argv delivered it -- a zap and a player start launched from a group whose name holds one are not refused `bad_arguments`", () => {
+    const np = { id: "t:a.test", launchedFrom: "g:Sp\u0000orts", since: 1761700000 }
+    const sock = path.join(scratch, "no-player.sock")
+    const zap = M.helperSpawn(M.helperArgv(HELPER, M.zapArgs(sock, path.join(scratch, "c"), "t:a.test", np)), {})
+    const start = M.helperSpawn(M.helperArgv(HELPER, M.playerStartArgv(sock, path.join(scratch, "c"), "t:a\u0000b", 3, "g:Sp\u0000orts", 0, [], 0)), {})
+    const lists = [zap, start].map(sp => JSON.parse(sp.environment[HA.env]))
+    const env = Object.assign({}, process.env, zap.environment, { HOME: scratch, XDG_CACHE_HOME: scratch, XDG_STATE_HOME: scratch, XDG_RUNTIME_DIR: scratch })
+    const run = cp.spawnSync(zap.command[0], zap.command.slice(1), { env, encoding: "utf8", timeout: 30000 })
+    let code = "unreadable"
+    try { const reply = JSON.parse(String(run.stdout || "").trim().split("\n").pop()); code = reply.ok ? "ok" : reply.error.code } catch (e) {}
+    return { scopes: lists.map(l => l[l.indexOf("--scope") + 1]), id: lists[1][lists[1].indexOf("--id") + 1],
+             nul: lists.some(l => l.some(x => x.indexOf("\u0000") !== -1)), refused: code === "bad_arguments", replied: code !== "unreadable" }
+  }, { scopes: ["g:Sp", "g:Sp"], id: "t:a", nul: false, refused: false, replied: true })
+  // Rule 15 over the spawns that do not pass through Service.runHelper --
+  // the stop and the orphan check (Quickshell.execDetached, which is handed
+  // no environment), state init and state mode, the config shield and the
+  // clipboard: each builds an argv with nothing for helperSpawn to move, so
+  // nothing private rides a command line that bypasses it. A builder that
+  // grows a key, an id, a scope or a token goes red here.
+  checkCall("D-SINK-48 (rule 15): the helper spawns that bypass runHelper -- stop, orphan-check, state init and mode, config shield, clipboard -- carry nothing helperSpawn would move", () => {
+    const P = "/p/bin/omarchy-iptv", S = "/run/user/1000/omarchy-iptv/mpv.sock"
+    const built = [M.helperArgv(P, M.playerStopArgv(S, 3)), M.helperArgv(P, M.playerOrphanCheckArgv(S, 301706, 6)),
+                   M.stateInitArgv(P, "/s"), M.stateModeArgv(P, "/s"), M.configShieldArgv(P), M.clipboardArgv(P)]
+    return built.map(argv => { const sp = M.helperSpawn(argv, {}); return [JSON.stringify(sp.command) === JSON.stringify(argv), Object.keys(sp.environment)] })
+  }, Array(6).fill([true, []]))
+  // D-SINK-48 (a): a NEW source's key is a random draw, never the URL's
+  // fnv1a32. The shared fixture with fixed draws, then the real generator.
+  const SK = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-keys.json"), "utf8"))
+  checkCall("D-SINK-48 (shared fixture): allocateSourceKey -- a new key is the draw (zero-padded hex), a known URL keeps its record's key, the -2 suffix rule holds, and a free, well-formed preferred key is kept", () =>
+    SK.cases.map(c => [c.name, M.allocateSourceKey(c.sources, c.url, c.preferred, () => c.draw / 4294967296)]), SK.cases.map(c => [c.name, c.want]))
+  checkCall("D-SINK-48: with the real generator, two hundred new keys for one URL are well-formed keys, none is the URL's hash (the confirmation oracle), and they are not one value", () => {
+    const url = "http://provider.example.test/get.php?username=u&password=p"
+    const keys = Array.from({ length: 200 }, () => M.allocateSourceKey([], url, "", REAL_RANDOM))
+    return [keys.every(k => M.isSourceKey(k)), keys.indexOf(M.sourceKey(url)), new Set(keys).size > 190]
+  }, [true, -1, true])
+  checkCall("D-SINK-48 (service): an in-app add's commit keeps the key its probe wrote under -- the probe's folder IS the new source's cache -- and queues no removal of it", () => {
+    const h = boot()
+    const url = "http://fresh.example.test/get.php?username=f&password=f"
+    // The add draws aaaa0000; the commit, were it to draw again, would get
+    // the suite's 5eed0000 -- which is how a commit that dropped the probe's
+    // key would show.
+    const added = withDraw(0xaaaa0000, () => h.root.addSource({ playlistUrl: url, epgUrl: "", label: "" }))
+    h.runLater()
+    const dirKey = h.root.probeDirKey
+    const before = h.cacheRuns.length
+    h.probeExit(JSON.stringify({ ok: true, kind: "playlist", channelCount: 5, groupCount: 1, fetchedAt: 1760000100 })); h.drain()
+    const rec = M.findSourceByUrl(h.root.userState.sources, M.normalizeSourceUrl(url, { origin: "cli" }))
+    return [added.ok, dirKey, rec ? rec.key : null, h.cacheRuns.slice(before).filter(c => c.indexOf("remove") !== -1).length, h.compileErrors]
+  }, [true, "aaaa0000", "aaaa0000", 0, []])
+  fs.rmSync(scratch, { recursive: true, force: true })
 })()
 
 // ---- D-HOST-5, rule 15: every notice the service posted in this run went through its kind's slot ----

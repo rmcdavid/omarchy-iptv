@@ -66,6 +66,9 @@ def run(*args):
 # lane-p1c (2026-10-29): and the pinned FORMAT list (D-SINK-62), appended the
 # same way, and two more pinned options the per-file check asks about,
 # load-console (D-SINK-61) and prefetch-playlist (D-SINK-63).
+#
+# lane-p2a (2026-10-29): load-stats-overlay is pinned (D-SINK-67) but NOT asked
+# about here: the helper's PER_FILE_EXEMPT says why (the harness stub).
 WHITELIST = "http,https,tls,tcp,crypto,data,httpproxy"
 FORMATS = "hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt"
 # What a demuxer-lavf-o map holds on a player of this release, less tls_verify.
@@ -208,7 +211,9 @@ class FakeMpv:
                     "watch-later-dir": "", "drag-and-drop": "auto", "script-opts": {},
                     # lane-p1c: mpv 0.41's defaults (measured): no prefetch,
                     # the console loaded.
-                    "prefetch-playlist": False, "load-console": True}
+                    "prefetch-playlist": False, "load-console": True,
+                    # lane-p2a: and the stats overlay loaded (measured: True).
+                    "load-stats-overlay": True}
     # mpv 0.41 answers `yes` and `no` of these choices as booleans (measured for
     # load-auto-profiles: "auto" before, False after `set ... no`; and for
     # drag-and-drop: False for `no`, lane-p1b 2026-10-29).

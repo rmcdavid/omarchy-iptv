@@ -352,12 +352,40 @@ class KeysAndLabelsTest(unittest.TestCase):
         self.assertEqual(helper.source_cache_key("/srv/tv/local.m3u"), "b0eed9fb")
 
     def test_allocate_key_suffixes_on_collision_and_reuses_known_urls(self):
+        # D-SINK-48: a new key is a DRAW, not the URL's hash; the suffix rule
+        # and the known-URL reuse are unchanged. `draw` pins the draw here.
         url = "/srv/tv/local.m3u"
         other = {"key": "b0eed9fb", "url": "http://other.test/x"}
-        self.assertEqual(helper.allocate_source_key([], url), "b0eed9fb")
-        self.assertEqual(helper.allocate_source_key([other], url), "b0eed9fb-2")
-        self.assertEqual(helper.allocate_source_key([other, {"key": "b0eed9fb-2", "url": "http://x.test/"}], url), "b0eed9fb-3")
-        self.assertEqual(helper.allocate_source_key([other, {"key": "b0eed9fb-2", "url": url}], url), "b0eed9fb-2")
+        draw = lambda: 0xb0eed9fb
+        self.assertEqual(helper.allocate_source_key([], url, draw=draw), "b0eed9fb")
+        self.assertEqual(helper.allocate_source_key([other], url, draw=draw), "b0eed9fb-2")
+        self.assertEqual(helper.allocate_source_key([other, {"key": "b0eed9fb-2", "url": "http://x.test/"}], url, draw=draw), "b0eed9fb-3")
+        self.assertEqual(helper.allocate_source_key([other, {"key": "b0eed9fb-2", "url": url}], url, draw=draw), "b0eed9fb-2")
+
+    def test_allocation_runs_the_shared_fixture(self):
+        """tests/fixtures/source-keys.json, the same cases Model.test.js runs
+        through Model.allocateSourceKey (D-SINK-48)."""
+        cases = json.loads((pathlib.Path(__file__).resolve().parent / "fixtures" / "source-keys.json").read_text(encoding="utf-8"))["cases"]
+        for case in cases:
+            got = helper.allocate_source_key(case["sources"], case["url"], case["preferred"], lambda: case["draw"])
+            self.assertEqual(got, case["want"], case["name"])
+
+    def test_a_new_key_is_random_and_never_the_urls_hash(self):
+        """D-SINK-48 (lane-p2a, 2026-10-29). Two hundred allocations of the
+        same URL into an empty history: every key is a well-formed key, none
+        is fnv1a32 of the URL (the confirmation oracle), and they are not all
+        one value. A free `preferred` key is kept; a taken or malformed one is
+        not. What dedupes a re-added URL is the URL itself, compared."""
+        url = "http://provider.example.test/get.php?username=u&password=p"
+        keys = [helper.allocate_source_key([], url) for _ in range(200)]
+        self.assertTrue(all(helper.SOURCE_KEY_RE.match(k) for k in keys))
+        self.assertNotIn(helper.source_cache_key(url), keys)
+        self.assertGreater(len(set(keys)), 190)
+        taken = [{"key": "0badf00d", "url": "http://x.test/"}]
+        self.assertEqual(helper.allocate_source_key(taken, url, preferred="cafebabe"), "cafebabe")
+        self.assertNotEqual(helper.allocate_source_key(taken, url, preferred="0badf00d"), "0badf00d")
+        self.assertNotEqual(helper.allocate_source_key(taken, url, preferred="../x"), "../x")
+        self.assertEqual(helper.allocate_source_key(taken, "http://x.test/", preferred="cafebabe"), "0badf00d")
 
     def test_derive_label(self):
         self.assertEqual(helper.derive_label("http://www.tv.example.net/x.m3u", "http"), "tv.example.net")
@@ -576,8 +604,11 @@ class StateSourceCommandTest(unittest.TestCase):
         code, payload, err = self.source("add", "--url", " HTTP://Provider.Example.TEST:80/get.php?username=u&password=p ", "--now", "100")
         self.assertEqual(code, 0, err)
         self.assertEqual(payload["op"], "add")
-        self.assertEqual(payload["key"], helper.source_cache_key("http://provider.example.test/get.php?username=u&password=p"))
+        # D-SINK-48: a random key, the record's own, never the URL's hash.
         record = self.disk()["sources"][0]
+        self.assertEqual(payload["key"], record["key"])
+        self.assertTrue(helper.SOURCE_KEY_RE.match(payload["key"]))
+        self.assertNotEqual(payload["key"], helper.source_cache_key("http://provider.example.test/get.php?username=u&password=p"))
         self.assertEqual(record["url"], "http://provider.example.test/get.php?username=u&password=p")
         self.assertEqual(record["label"], "provider.example.test")
         self.assertEqual(record["origin"], "cli")
@@ -630,7 +661,7 @@ class StateSourceCommandTest(unittest.TestCase):
         self.assertEqual(status, 0)
         status, payload, _ = self.source("add", "--url", "HTTP://H.TEST:80/x")
         self.assertEqual(payload["error"]["code"], "duplicate")
-        self.assertEqual(payload["key"], helper.source_cache_key("http://h.test/x"))
+        self.assertEqual(payload["key"], [r["key"] for r in self.disk()["sources"] if r["url"] == "http://h.test/x"][0])
         self.assertIn("Mine", payload["error"]["message"])
         status, payload, _ = self.source("add", "--url", "http://h2.test/x", "--label", "mine")
         self.assertEqual(payload["error"]["code"], "label_taken")
@@ -664,8 +695,9 @@ class StateSourceCommandTest(unittest.TestCase):
         status, payload, _ = self.source("update", key, "--url", "http://c.test/list.m3u")
         self.assertEqual(status, 0)
         self.assertEqual(payload["replacedKey"], key)
-        self.assertEqual(payload["key"], helper.source_cache_key("http://c.test/list.m3u"))
         record = self.disk()["sources"][0]
+        self.assertEqual(payload["key"], record["key"])
+        self.assertNotIn(payload["key"], (key, helper.source_cache_key("http://c.test/list.m3u")))
         self.assertEqual(record["label"], "c.test")            # derived label follows the host
         self.assertEqual((record["fetchedAt"], record["channelCount"], record["addedAt"]), (0, 0, 5))
         status, payload, _ = self.source("update", "0badc0de", "--label", "x")

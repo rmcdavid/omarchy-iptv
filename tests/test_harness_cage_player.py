@@ -84,7 +84,8 @@ kept, rejected = h.filter_mpv_args(tokens)
 dirs = {"screenshots": "/s", "watchLater": "/w", "shaderCache": "/c"}
 argv = h.mpv_launch_argv("/r/mpv.sock", kept, dirs)
 pins = len(h.mpv_pin_block(dirs)) if hasattr(h, "mpv_pin_block") else 1
-print(json.dumps({"kept": kept, "rejected": rejected, "argv": argv, "pins": pins}))
+include = h.mpv_args_config(kept) if hasattr(h, "mpv_args_config") else None
+print(json.dumps({"kept": kept, "rejected": rejected, "argv": argv, "pins": pins, "include": include}))
 '''
 
 
@@ -156,9 +157,12 @@ class HarnessEnvSoftwareGpu(unittest.TestCase):
         self.assertEqual(out["rejected"], [])
         self.assertEqual(out["kept"], ["--tls-ca-file=/x", "--gpu-sw=yes", "--ao=null"])
         # Since 2026-10-29 the user's tokens are followed by the whole pin
-        # block (D-SINK-43..46), which still ends with --tls-verify=yes.
+        # block (D-SINK-43..46), which still ends with --tls-verify=yes. And
+        # (D-SINK-47, lane-p2a) they reach mpv through the private options
+        # file named where they stood, which mpv parses at that position.
         pins = out["pins"]
-        self.assertEqual(out["argv"][-pins - 3:-pins], ["--tls-ca-file=/x", "--gpu-sw=yes", "--ao=null"])
+        self.assertEqual(out["argv"][-pins - 1], "--include=/r/mpv-args.conf")
+        self.assertEqual(out["include"], "tls-ca-file=%2%/x\ngpu-sw=%3%yes\nao=%4%null\n")
         self.assertEqual(out["argv"][-1], "--tls-verify=yes")
         self.assertEqual(out["argv"][0], "mpv")
 

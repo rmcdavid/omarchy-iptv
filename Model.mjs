@@ -83,11 +83,11 @@ export {
   mergeLeavesNothingUnsaved, mergeConflictLine, MERGE_CONFLICT_TITLE,
   mergeConflictSentence, mergeConflictNotice, mergeDropLines,
   migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
-  stateInitFound, stateLoadDecision, stateModeArgv, stateModeReply,
-  stateWriteGate, stateSavePlan, stateBlockRecheck, STATE_BLOCK_TITLE_START,
-  STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED,
-  STATE_BLOCK_LINK_FIRST, stateUnreadableNotice, stateUnreadableJournal,
-  stateBlockedHeader
+  stateInitFound, stateLoadDecision, stateModeArgv, stateInitArgv,
+  stateModeReply, stateWriteGate, stateSavePlan, stateBlockRecheck,
+  STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START,
+  STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST, stateUnreadableNotice,
+  stateUnreadableJournal, stateBlockedHeader
 } from "./model/state.mjs"
 export {
   parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
@@ -129,12 +129,13 @@ export {
   MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT, mpvRefusedWarnings, splitMpvArgs,
   demuxerNamesTls, mpvRejectedLine, mpvRejectedName, headerArgs,
   MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv,
-  mpvPinBlock, helperArgv, playlistFetchArgv, fetchStateDir,
-  playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,
-  failedArgv, logoFetchArgv, playerTracksArgv, trackChoice, parseTracks,
-  trackLanguage, trackLabel, trackDetail, trackRows, trackCursorHome,
-  moveTrackCursor, TRACKS_RECOVERY_MAX, shouldRefreshTracks,
-  trackPanelMessage, trackAccessibleName
+  mpvPinBlock, helperArgv, HELPER_ARGS_ENV, HELPER_ARGS_FLAG, helperSpawn,
+  cacheRunArgv, playlistFetchArgv, fetchStateDir, playlistProbeArgv,
+  epgFetchArgv, FETCH_URL_ENV, fetchEnvironment, failedArgv, logoFetchArgv,
+  playerTracksArgv, trackChoice, parseTracks, trackLanguage, trackLabel,
+  trackDetail, trackRows, trackCursorHome, moveTrackCursor,
+  TRACKS_RECOVERY_MAX, shouldRefreshTracks, trackPanelMessage,
+  trackAccessibleName
 } from "./model/mpv.mjs"
 export {
   SEEK_FLOOR_MARGIN_S, SEEK_EDGE_MARGIN_S, SEEK_MOVED_THRESHOLD_S, SEEK_MAX_S,

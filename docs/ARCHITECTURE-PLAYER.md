@@ -273,6 +273,35 @@ User `mpvArgs` tokens travel as **repeated `--mpv-arg TOKEN`**
 consuming an option-looking token entirely, and keeps every element a distinct
 argv member with no joining.
 
+**[Amended 2026-10-29, lane-p2a (D-SINK-47, D-SINK-48, D-SINK-50).** The
+spellings above are still the CLI a human types, and the helper still takes
+every one of them from its argv. When the SHELL starts it, none of the values
+that a local account could use is on that argv any more: `/proc/<pid>/cmdline`
+is mode 0444 on a proc mounted without `hidepid`, and it carried `--cache-dir
+<cache>/sources/<key>` and the cache verbs' `--key`, `--keep` and `--active`
+(every key made before this release is fnv1a32 of the credentialed playlist
+URL, a 32-bit check on a guessed password), `--id` (a `u:` id hashes a stream
+URL), `--scope` (a provider's group name) and each `--mpv-arg` (where a proxy
+password goes). Every helper spawn goes through `Service.runHelper`, which
+assigns the command and the environment `Model.helperSpawn` makes, together,
+immediately before the run: those options, with their values, leave the argv
+for a JSON list in `OMARCHY_IPTV_ARGS`, and `--args-from-env` stands in their
+place. The helper's `helper_arguments` reads the list once, before argparse,
+appends it after the public argv, and takes the variable out of its own
+environment, so the player it forks never inherits it; a flag with no list, or
+a list that is not strings, is `bad_arguments`, exit 2, and no verb runs -- a
+`failed mark` that lost its `--cache-dir` must not write the default cache.
+The verbs, `--socket`, `--seq`, `--since`, `--owner-pid`, `--from`, `--state-dir`
+and the timeouts stay on the argv, where `pgrep -a` and the harness find them.
+The environment is the route D-SINK-8 moved the URL to: closed to other uids
+from exec, and to this uid from the stub's shield on. And every spawn is
+`python3 -I` (`Model.helperArgv`, the one builder), so the session's
+`PYTHONPATH`, user-site `.pth` files and `sitecustomize` no longer run before
+that shield -- measured: a `ctypes.py` on `PYTHONPATH` ran with the URL in
+the environment and switched the shield off, before `-I`, and does not run
+after. The shared fixture `tests/fixtures/helper-args.json` holds the two
+halves together.]**
+
 Reply shapes (all `{"ok":bool,"kind":...}` per decision 10, all URL-free):
 
 ```
@@ -732,6 +761,23 @@ lane's to choose, and 4.3's frozen-interface table records them when they
 land. What this section fixes is the behaviour, which is the part a renamed
 field cannot invalidate.
 
+**[2026-10-29, lane-p2a, D-SINK-68: measured, not a bypass on this FFmpeg.]**
+The read-back never reads `demuxer-lavf-propagate-opts`, and the adoption
+never sets it, so a pre-pin player whose PLAIN mpv.conf line says
+`demuxer-lavf-propagate-opts=no` keeps it -- and with it off, the demuxer's
+`tls_verify=1` and the user's `--tls-ca-file` no longer reach an HLS segment
+open. Measured windowless (`tls-scenario.sh --windowless` W28): a player
+started by v0.15.0's argv with that line, adopted and loaded by this tree, an
+HLS master on the CA-signed provider whose segment is on a self-signed
+attacker -- the attacker got NOTHING, because FFmpeg n9.0.1's own TLS options
+default to verifying (`ffmpeg -h protocol=tls`: `tls_verify` default true); the
+control, the pre-pin tree's own load with `tls_verify=0` past the filter, did
+reach it. So nothing is set or refused on adoption for it. What is left: an
+FFmpeg whose TLS default does not verify (before 8.0) would be the bypass, and
+the pin block's comment already records propagation as "a default this layer
+does not choose"; and a private-CA provider's segments fail on such a player,
+which is availability, not exposure.
+
 ### 4.6 Now-playing recovery
 
 The record lives inside the surviving mpv process, never on disk, in two sibling
@@ -1175,6 +1221,47 @@ re-validates each `--mpv-arg` against a python mirror of the same regex and set
 (defence in depth, and it is a public CLI) and reports dropped tokens in
 `warnings`; a parity test asserts the two reserved sets are equal.
 
+**[2026-10-29, lane-p2a, D-SINK-47: the kept tokens are no longer ON the
+player's argv.** That argv is `/proc/<pid>/cmdline`, readable by every account
+for the hours a detached player runs, and `COREDUMP_CMDLINE` in the system
+journal if it crashes. The helper writes the kept tokens into
+`<runtime>/mpv-args.conf` -- 0600, created under a name of its own with
+`O_EXCL | O_NOFOLLOW` in the 0700 runtime folder and renamed into place, one
+line per token in mpv's length-quoted form, `name=%N%value` (N the value's
+UTF-8 byte length) or `name` for a flag -- and the launch argv names it once,
+`--include=<that file>`, WHERE THE TOKENS STOOD: after the base argv, before the
+pin block. Measured on mpv 0.41.0 (windowless, QA-RESULTS "D-SINK-47"): mpv
+parses an included file at its position (an earlier argv token loses to it, a
+later one beats it) and marks what it sets as set from the command line, so a
+per-file profile cannot replace a token's value and the pin block keeps the
+last word; sixteen tokens holding `=`, `,`, both quotes, spaces, `#`, `%`, a
+trailing backslash and UTF-8 read back identical through the file and on the
+argv (the plain `name=value` form cuts `a#b` to `a`); the five-way table below,
+re-run with the tokens in the file, holds every pin. The file is removed as
+soon as the socket answers -- mpv binds it only after reading its whole
+command line -- and on every way out of a launch; a restart writes it again. A
+crash or an adoption sees the file's NAME on the argv and no file. What
+differs from the argv, stated: a line mpv cannot parse is reported and skipped
+where a token stopped the player from starting; the eleven options mpv takes on
+the command line only (`--help`, `--version`, `--v`, `--list-*`, `--show-profile`,
+`--input-cmdlist`, `--input-keylist`) are refused in a file; and `--no-config`
+(`--config=no`) is read too late to stop mpv reading the user's own mpv.conf.
+A token holding a line break or a NUL cannot be one line and is refused by both
+filters; so is one holding a lone surrogate, which no UTF-8 file can hold (a
+byte the helper's argv could not decode arrives as one, and so does a JSON
+`\ud800` escape): the first version kept it and the start ended `internal`
+at the write (`Model.splitMpvArgs` / `filter_mpv_args`, through
+`mpv_token_writable`). mpv's report of a line it cannot parse ECHOES the value
+(`<file>:1: setting option volume='<value>' failed.`, and the option's own
+complaint before it), which for a token holding a secret would be a sink; it
+is not one here only because mpv 0.41.0 writes those lines to its standard
+OUTPUT, which `spawn_detached` points at /dev/null -- measured, windowless, the
+helper's own descriptors: nothing on the stderr pipe the launch reason is read
+from, the same lines on stdout when stdout is a pipe. Capturing the player's
+stdout for a better launch reason would open it, and needs the kept tokens'
+values scrubbed first. Residual: a player adopted after the upgrade keeps the
+tokens it was launched with on its argv until it restarts.]**
+
 `MPV_RESERVED` gains ten entries, every one of which is reachable today from the
 settings panel and writes a credentialed URL somewhere durable:
 
@@ -1285,7 +1372,10 @@ again, so the model changed. Three decisions, the owner's:
   **[2026-10-29, the owner's decision on D-SINK-61: the console goes too --
   `--load-console=no`, pinned, with mpv's alias `--load-osd-console`
   reserved beside it. Stats, the context menu, commands and positioning
-  stay. Measured below, in the routes paragraph.]**
+  stay. Measured below, in the routes paragraph.]** **[2026-10-29, lane-p2a,
+  D-SINK-67, the owner's "yes" to turning stats off: the stats overlay goes
+  too -- `--load-stats-overlay=no`, pinned and reserved. The context menu,
+  commands and positioning stay.]**
 
 **The classification** is `tests/fixtures/mpv-options.json` (dev branch): every
 one of the 899 option bases `mpv --no-config --list-options` prints on mpv
@@ -1295,9 +1385,9 @@ alias.
 
 | Class | What the plugin does | Count (mpv 0.41.0) |
 |---|---|---|
-| `allowed` | a user token passes and lands after the base argv | 827; 825 since 2026-10-29; 822 since lane-p1c (the same day) |
+| `allowed` | a user token passes and lands after the base argv | 827; 825 since 2026-10-29; 822 since lane-p1c (the same day); 821 since lane-p2a (the same day) |
 | `reserved` | a user token is REFUSED, by name, in both mirrors' `MPV_RESERVED` | 39 |
-| `pinned` | re-asserted by the trailing pin block, AFTER the user's tokens; refused as a token as well, except the key-pinned `--demuxer-lavf-o` and (2026-10-29) `--script-opts` | 18 (16 options and 2 aliases); 21 since 2026-10-29 (+ `--drag-and-drop`, `--script-opts` and its alias); 24 since lane-p1c (+ `--load-console` and its alias, `--prefetch-playlist`) |
+| `pinned` | re-asserted by the trailing pin block, AFTER the user's tokens; refused as a token as well, except the key-pinned `--demuxer-lavf-o` and (2026-10-29) `--script-opts` | 18 (16 options and 2 aliases); 21 since 2026-10-29 (+ `--drag-and-drop`, `--script-opts` and its alias); 24 since lane-p1c (+ `--load-console` and its alias, `--prefetch-playlist`); 25 since lane-p2a (+ `--load-stats-overlay`) |
 | `warned` | kept, with the PO-10 footer line | 7; 6 since 2026-10-29 (`--script-opts` moved to key-pinned and still warns for ytdl; `--rtsp-transport` joined) |
 | `base` | set before the user's tokens; a user token may override it | 8 |
 
@@ -1332,6 +1422,7 @@ deleted from the file, with FFmpeg's `verifyhost` deleted, and with the
 | `--player-operation-mode=cplayer` | `pseudo-gui` makes mpv apply the user's `[pseudo-gui]` profile AFTER the command line with nothing preserved, which undid every other pin; a plain mpv.conf line was enough (measured by the recheck, below; D-SINK-44) |
 | `--load-select=no` | select.lua: `g l` forks `ffmpeg -i <path>`, the credentialed URL on a 0444 `/proc` cmdline for the life of the stream (measured), `g p` draws it (D-SINK-46) |
 | `--load-console=no` | **[2026-10-29, lane-p1c, D-SINK-61, the owner's "turn the console off"]** commands.lua queues every log line at the terminal's level for the console, and the console draws them when it opens; an HLS key that 404s while a channel plays is logged at error level with its whole URL. On sec-int 124589e the console key put that line in the console's buffer and drew it (read at mpv's trace level from a second client: the `script-message-to console log` that handed it over and the `show-text` the console drew with both carried the URL's secret -- the console's terminal-mode render, `--video-osd=no` in the rig, which has no window to draw an overlay on); with the pin the console is not loaded, `script-binding console/enable` is refused, the key draws nothing that carries it, and the same error line still reaches an error-level client (`tls-scenario.sh --windowless` W23). Also set off on adoption, which unloads the script |
+| `--load-stats-overlay=no` | **[2026-10-29, lane-p2a, D-SINK-67, the owner's "turn stats off"]** the stats overlay's first page (`i`, `I`, `script-binding stats/display-stats-toggle`) and its file page (`stats/display-page-5`, which the OSC title's left click runs) draw `${filename}`, and mpv's `filename` of a URL whose last path segment is empty is the WHOLE URL -- userinfo and path credentials -- and of a URL with no path its userinfo (measured by rc-p1c). On dev 2727179 the rig's channel `.../live/rig/<secret>/` drew the secret twice of three draws; with the pin nothing it draws carries it, both bindings are refused, and the option reads off, on a player this release starts and on an adopted pre-pin one, where it is set off at the reattach and mpv unloads the script (`tls-scenario.sh --windowless` W26). Left out of the per-file profile read-back for now (`PER_FILE_EXEMPT`: the harness stub does not model the option), so a pre-pin player whose own mpv.conf turns stats back on per file gets them back until it restarts |
 | `--prefetch-playlist=no` | **[2026-10-29, lane-p1c, D-SINK-63]** with it on, mpv opens the NEXT entry while the playing file's per-file options are still in force, so an entry the helper did not load was sent the channel's provider headers (measured by rc-p1b; on sec-int 124589e by token, past the filter and from mpv.conf, W22). Reserved as a token, and set off on adoption |
 | `--load-unsafe-playlists=no` | mpv's origin rule for nested entries: with it on, a server's playlist made the player write a file the server named and play a local file (measured, D-SINK-44) |
 | `--save-watch-history=no` | appends every path played, credentials and all, to `~/.local/state/mpv/watch_history.jsonl` (measured from mpv.conf) |
@@ -1373,6 +1464,15 @@ shape, with an adopted player started by v0.15.0's own argv) read 13 passed,
 0 failed on the tree and, with `--baseline 713afbf`, 4 passed and 9 failed --
 every attack check red, both controls green.
 
+**[2026-10-29, lane-p2a: re-measured with the user's tokens in the private
+options file (D-SINK-47).** The same rig, the same five routes, the
+contrary token and the user's `--profile` now delivered through
+`--include`, plus a sixteenth row for the stats overlay (D-SINK-67): on the
+lane's tree all 80 cells held the pin, the file present at the socket in all 41
+cases that had one; on dev 2727179 the fifteen older rows held all 75 and the
+stats row was contrary all five ways (stats on). Crash journal 81 before and
+after each of the 160 runs.]**
+
 **[2026-10-29, the recheck: a sixteenth pin.]** The five routes above are not
 every way mpv.conf reaches the options. With `player-operation-mode=pseudo-gui`
 -- a plain mpv.conf line, a named profile or a token -- mpv applies the user's
@@ -1406,7 +1506,7 @@ journal 81 before and after every run (the lane's rig, the QA-RESULTS block):
 | rtmp (an `ffmpeg -listen 1` server) | plays | plays |
 | rtmps | reaches its server (TLS handshake, RTMP C0) | the same |
 | rtsp, mpv's default TCP transport (a fake server streaming MP2T interleaved) | plays, binds nothing | plays |
-| rtsp with the user's `--rtsp-transport=udp` | reaches SETUP and binds its RTP/RTCP pair -- the user's warned choice (D-SINK-53); with the global list alone it stopped at DESCRIBE, which is why an rtsp channel's loadfile adds `rtp,udp` | binds |
+| rtsp with the user's `--rtsp-transport=udp` | reaches SETUP and binds its RTP/RTCP pair -- the user's warned choice (D-SINK-53); with the global list alone it stopped at DESCRIBE, which is why an rtsp channel's loadfile adds `rtp,udp`. **[2026-10-29, lane-p2a, D-SINK-65: FFmpeg's own `rtsp_transport` through `--demuxer-lavf-o` binds the same pair, and it takes FLAGS: `udp`, `1`, `0x1`, `2*0.5`, `+udp`, `-tcp`, `0`, `udp+tcp`, quoted, bracketed, `%3%udp`, `udp_multicast`, the `-append`/`-set` forms, beside another key and as a later repeat all bound (13 of 19 spellings, inside `unshare -rn`); `tcp`, `http`, `tcp+http` and every `rtsp_flags` spelling bound nothing (the numeric `listen`, 2, fails without the `listen_timeout` the read-back removes). Both mirrors now warn on every occurrence of the key unless each value is a plain `+`-join of tcp, http and https -- W27 holds every binding spelling to a warning; an mpv.conf line is unwarned, as `--rtsp-transport` there is]** | binds |
 | rtsp whose server answers a TCP request with a UDP transport | binds nothing | -- |
 | udp and rtp multicast (`ffmpeg` senders on 239.x) | play, bind the group | the same |
 | srt as caller (an `ffmpeg` srt listener) | plays (its own ephemeral UDP socket, a caller's) | the same |
@@ -1503,7 +1603,8 @@ profile (never loaded: `--load-auto-profiles=no`); the `[pseudo-gui]`
 profile mpv applies after the command line in that operation mode (never:
 `--player-operation-mode=cplayer`, pinned, added by the recheck); a
 `[protocol.*]` or `[extension.*]` profile (cannot replace a
-command-line-set option, so every pin is one); `--include` and `--config-dir` (reserved); input.conf and
+command-line-set option, so every pin is one); `--include` and `--config-dir` (reserved; since D-SINK-47 the
+plugin's own `--include` names the user's options file, before the pins); input.conf and
 `--input-commands` (commands at startup cleared; key bindings are the user's
 keypresses); IPC `set_property` from the helper (the third reading, before
 every load); and the built-in scripts, which `--load-scripts=no` does not
@@ -1515,7 +1616,9 @@ URL (D-SINK-52; **[2026-10-29: pinned to `ignore`, the owner's "pin and
 refuse"]**), the stats page the OSC title's left click
 opens draws `${filename}`, which carries a query-string token (measured:
 `long.ts?token=...`) (**[2026-10-29: kept on; the owner turned off only
-select and the console]**), the context
+select and the console]** **[2026-10-29, lane-p2a, D-SINK-67: and the whole
+URL, userinfo and path credentials, for a URL whose last segment is empty,
+measured by rc-p1c; the owner turned stats off, pinned above]**), the context
 menu's select entries are dead with select off, the console forks only
 `wl-paste` on a user's paste, and commands and positioning fork nothing that
 carries `path`. **[2026-10-29, lane-p1b: the console DRAWS a sink of its
@@ -1971,7 +2074,10 @@ Nothing channel-specific remains. The other three argv:
 is resolved from `channels.json` (0600) **by the helper itself** and travels only
 over the 0600 socket, so it never crosses a process boundary in either
 direction. Residual, disclosed rather than hidden: `--id` on the helper's
-argv is a per-zap record of *what* the user is watching, and `Model.notifyArgv`
+argv is a per-zap record of *what* the user is watching **[2026-10-29,
+lane-p2a, D-SINK-48: no longer -- the shell hands `--id`, `--cache-dir` and
+`--scope` over the environment (4.3's amendment); a `u:` id hashes a stream
+URL, so it was a check on a guessed credential and not only a record]**, and `Model.notifyArgv`
 puts the channel name on `omarchy-notification-send`'s argv on each failure;
 both are readable by other local accounts through `/proc/<pid>/cmdline` (0444,
 `/proc` mounted without `hidepid` here) for the life of those short-lived
@@ -2111,7 +2217,10 @@ SIGSEGV, read `Max core file size 0 0` on the live process and left journal
 entry 34 of the day with `COREDUMP_RLIMIT 0`, no `COREDUMP_FILENAME` and the
 coredump directory unchanged at 67 files. What remains, stated exactly: the journal entry,
 whose fields were read on a real dump of the harness rig -- `COREDUMP_CMDLINE`
-is the launch argv, URL-free by S-03; `COREDUMP_ENVIRON` is the shell's whole
+is the launch argv, URL-free by S-03 **[2026-10-29, lane-p2a: and free of
+the user's mpvArgs tokens since D-SINK-47 -- they carried a proxy password or a
+header value into the journal before; a player adopted after the upgrade keeps
+its old argv until it restarts]**; `COREDUMP_ENVIRON` is the shell's whole
 environment, which the player's helper Process never hands a URL (no
 `OMARCHY_IPTV_URL` among its 257 names); `COREDUMP_OPEN_FDS` names sockets and
 pipes by inode, so an HTTP channel shows nothing and a `file://` channel would

@@ -151,6 +151,23 @@ CHANNELS_FILE = "channels.json"
 PLAYLIST_STATUS_FILE = "playlist-status.json"
 # D-SINK-8: how the shell hands `playlist` and `epg` their URL (see url_from).
 URL_ENV = "OMARCHY_IPTV_URL"
+# D-SINK-47, D-SINK-48 (lane-p2a, 2026-10-29): how the shell hands every verb
+# the arguments that must not sit on a world-readable /proc/<pid>/cmdline --
+# the source's cache directory and the keys in it (a 32-bit hash of the
+# credentialed playlist URL on every source added before this release), a
+# channel's `--id` (a `u:` id hashes a stream URL), a zap-ring `--scope`
+# (a provider's group name) and the user's `--mpv-arg` tokens (where a proxy
+# password goes). The argv carries ARGS_FLAG in their place, and they arrive
+# as a JSON list of strings in ARGS_ENV, read once by helper_arguments before
+# argparse sees anything and appended after the public argv. The stub has
+# shielded the process before this line runs, so the environment is closed to
+# every other uid from exec and to this uid from the shield on, as the URL's
+# is (D-SINK-9). Mirror of Model.HELPER_ARGS_ENV / Model.HELPER_ARGS_FLAG.
+ARGS_ENV = "OMARCHY_IPTV_ARGS"
+ARGS_FLAG = "--args-from-env"
+# The kernel's own bound on one environment string (MAX_ARG_STRLEN, 32 pages):
+# nothing longer can have been handed to an exec, so a longer value is not ours.
+ARGS_ENV_MAX = 131072
 # D-SINK-40 (2026-10-29): where that URL CAME FROM, set by the shell beside
 # it at every spawn that carries one (Model.fetchEnvironmentFor). `user` is a
 # URL the user typed -- its first hop may reach any address, LAN and loopback

@@ -73,6 +73,22 @@ var MPV_DEMUXER_PROXY_WORD = "http_proxy"
 var MPV_LISTEN_WARN = { "--rtsp-transport": true }
 var MPV_LISTEN_QUIET = { "tcp": true, "http": true, "https": true }
 var MPV_LISTEN_TEXT = " opens ports on this computer that anyone can send to"
+// D-SINK-65 (lane-p2a, 2026-10-29): the same cost through FFmpeg's own key.
+// `--demuxer-lavf-o=rtsp_transport=udp` binds an rtsp channel's RTP/RTCP pair
+// on 0.0.0.0 exactly as `--rtsp-transport=udp` does, and FFmpeg takes that
+// key's value as FLAGS: a name, a number (`1`, `0x1`), an expression
+// (`2*0.5`), `+udp` and `-tcp` against mpv's own tcp, `0` (every transport,
+// UDP first), quoted, bracketed or `%n%`-escaped -- each of those measured
+// binding inside `unshare -rn`, and none of them warned. So every occurrence
+// of the key is read and the token warns unless EACH value is a plain `+`-join
+// of tcp, http and https, the spellings measured binding nothing; anything
+// else, a spelling nobody enumerated included, warns -- the price being a
+// warning on a harmless spelling (`2`, `%3%tcp`). `rtsp_flags` needs no
+// reading: no spelling of it binds (measured: `prefer_tcp` and `filter_src`
+// play over TCP, and the numeric `listen`, 2, fails without the
+// `listen_timeout` the read-back removes). A removal (-clr, -del, -remove)
+// sets nothing. Mirrored by MPV_RTSP_TRANSPORT_KEY in the helper.
+var MPV_RTSP_TRANSPORT_KEY = "rtsp_transport"
 // D-SINK-52 (owner, 2026-10-29: pin and refuse). A `--script-opts` token is
 // REFUSED when its text sets an on-screen-controller command (the OSC runs
 // its *_mbtn_*_command / *_wheel_*_command options as input commands on a
@@ -128,32 +144,74 @@ function mpvListenName(token) {
   var eq = text.indexOf("=")
   var name = eq === -1 ? text : text.substring(0, eq)
   var value = eq === -1 ? "" : text.substring(eq + 1)
-  if (name.indexOf("--no-") === 0 || MPV_LISTEN_WARN[mpvOptionBase(name)] !== true) return ""
+  if (name.indexOf("--no-") === 0) return ""
+  var base = mpvOptionBase(name)
+  if (base === "--demuxer-lavf-o") return demuxerOpensPorts(name, value) ? name : ""
+  if (MPV_LISTEN_WARN[base] !== true) return ""
   return MPV_LISTEN_QUIET[value.trim().toLowerCase()] === true ? "" : name
 }
 
-// The whole warning line for one token, or "". Each cost carries its own
-// sentence, so the user is told WHAT the option does.
-function mpvArgWarning(token) {
-  var name = mpvHandoffName(token)
-  if (name !== "") return "mpvArg " + name + MPV_HANDOFF_TEXT
-  name = mpvDiskName(token)
-  if (name !== "") return "mpvArg " + name + MPV_DISK_TEXT
-  name = mpvListenName(token)
-  if (name !== "") return "mpvArg " + name + MPV_LISTEN_TEXT
-  return ""
+// D-SINK-65: true when a `--demuxer-lavf-o*` token's value sets FFmpeg's
+// rtsp_transport to anything but a plain `+`-join of tcp, http and https
+// (MPV_RTSP_TRANSPORT_KEY says why that reading). Index walks, no pattern.
+function demuxerOpensPorts(name, value) {
+  if (/-(clr|del|remove)$/.test(str(name))) return false
+  var text = str(value)
+  var at = text.indexOf(MPV_RTSP_TRANSPORT_KEY)
+  while (at !== -1) {
+    var rest = text.substring(at + MPV_RTSP_TRANSPORT_KEY.length)
+    if (rest.charAt(0) !== "=") return true
+    var v = rest.substring(1)
+    var close = v.charAt(0) === '"' ? '"' : (v.charAt(0) === "[" ? "]" : "")
+    var end = close !== "" ? v.indexOf(close, 1) : v.indexOf(",")
+    if (close !== "") v = end === -1 ? v : v.substring(1, end)
+    else if (end !== -1) v = v.substring(0, end)
+    if (!rtspTransportQuiet(v)) return true
+    at = text.indexOf(MPV_RTSP_TRANSPORT_KEY, at + 1)
+  }
+  return false
 }
 
-// One line per distinct option, in the order the user wrote them.
+function rtspTransportQuiet(value) {
+  var parts = str(value).split("+")
+  for (var i = 0; i < parts.length; i++) if (MPV_LISTEN_QUIET[parts[i]] !== true) return false
+  return parts.length > 0
+}
+
+// The whole warning line for one token, or "". Each cost carries its own
+// sentence, so the user is told WHAT the option does. The first of
+// mpvArgWarningLines.
+function mpvArgWarning(token) {
+  var lines = mpvArgWarningLines(token)
+  return lines.length > 0 ? lines[0] : ""
+}
+
+// Every cost one token carries, in a fixed order. D-SINK-65 made one token
+// able to carry two: a `--demuxer-lavf-o` holding both FFmpeg's http_proxy
+// (D-SINK-59) and a binding rtsp_transport is told both.
+function mpvArgWarningLines(token) {
+  var out = []
+  var name = mpvHandoffName(token)
+  if (name !== "") out.push("mpvArg " + name + MPV_HANDOFF_TEXT)
+  name = mpvDiskName(token)
+  if (name !== "") out.push("mpvArg " + name + MPV_DISK_TEXT)
+  name = mpvListenName(token)
+  if (name !== "") out.push("mpvArg " + name + MPV_LISTEN_TEXT)
+  return out
+}
+
+// One line per distinct option and cost, in the order the user wrote them.
 function mpvArgWarnings(tokens) {
   var list = asList(tokens)
   var seen = {}
   var out = []
   for (var i = 0; i < list.length; i++) {
-    var line = mpvArgWarning(list[i])
-    if (line === "" || seen[line] === true) continue
-    seen[line] = true
-    out.push(line)
+    var lines = mpvArgWarningLines(list[i])
+    for (var j = 0; j < lines.length; j++) {
+      if (seen[lines[j]] === true) continue
+      seen[lines[j]] = true
+      out.push(lines[j])
+    }
   }
   return out
 }
@@ -219,10 +277,34 @@ function splitMpvArgs(text) {
     if (!ok || MPV_RESERVED[name] === true || MPV_RESERVED[base] === true
         || name.indexOf("--no-") === 0 && (MPV_RESERVED["--" + name.substring(5)] === true
                                            || MPV_RESERVED[mpvOptionBase("--" + name.substring(5))] === true)
-        || demuxerNamesTls(base, token) || scriptOptsRefused(base, token)) rejected.push(token)
+        || demuxerNamesTls(base, token) || scriptOptsRefused(base, token)
+        // D-SINK-47: a token now becomes one line of the player's options
+        // file, and a line break, a NUL or a lone surrogate cannot be carried
+        // on one (mpvTokenWritable).
+        || !mpvTokenWritable(token)) rejected.push(token)
     else args.push(token)
   }
   return { args: args, rejected: rejected, warnings: mpvRefusedWarnings(rejected).concat(mpvArgWarnings(args)) }
+}
+
+// D-SINK-47: whether one token can be one line of the player's options file:
+// no NUL, no line break, and no lone surrogate, which no UTF-8 file can hold
+// (the helper's writer met one and its start ended `internal`; a JSON
+// `\ud800` escape is how one reaches it). Index walk, no pattern. Mirror of
+// mpv_token_writable in the helper.
+function mpvTokenWritable(token) {
+  var text = str(token)
+  for (var i = 0; i < text.length; i++) {
+    var c = text.charCodeAt(i)
+    if (c === 0 || c === 10 || c === 13) return false
+    if (c >= 0xdc00 && c <= 0xdfff) return false
+    if (c >= 0xd800 && c <= 0xdbff) {
+      var next = i + 1 < text.length ? text.charCodeAt(i + 1) : 0
+      if (next < 0xdc00 || next > 0xdfff) return false
+      i++
+    }
+  }
+  return true
 }
 
 // D-SINK-43: a `--demuxer-lavf-o*` token that names a TLS setting. See
@@ -343,13 +425,18 @@ function mpvWindowTitle(name) {
 //    gone at logout - and adds no durable path and nothing to clean up.
 //
 // Mirrored by `player_dirs()` in the helper (bin/helper/).
+//
+// D-SINK-47 (lane-p2a, 2026-10-29): and `mpvArgs`, the private file the
+// user's tokens are written into for the length of a launch, in the runtime
+// directory (0700) beside the socket. buildMpvArgv names it.
 function playerDirs(socketPath, stateDir) {
   var runtime = dirnameOf(socketPath)
   return {
     cwd: runtime,
     screenshots: str(stateDir) + "/screenshots",
     watchLater: runtime + "/watch-later",
-    shaderCache: runtime + "/shader-cache"
+    shaderCache: runtime + "/shader-cache",
+    mpvArgs: runtime + "/mpv-args.conf"
   }
 }
 
@@ -478,7 +565,25 @@ function buildMpvArgv(params) {
   // token, a named profile and a plain mpv.conf line, and each is set from the
   // command line, so no per-file profile replaces it. The block ends with
   // MPV_TLS_VERIFY, so everything above still describes the last element.
-  return argv.concat(asList(p.extraArgs)).concat(mpvPinBlock(dirs))
+  //
+  // D-SINK-47 (lane-p2a, 2026-10-29): the user's tokens are no longer ON this
+  // argv, which is /proc/<pid>/cmdline -- world-readable for the hours a
+  // player runs, and COREDUMP_CMDLINE in the journal if it crashes -- and a
+  // token is where a proxy password or an API-key header goes. The helper
+  // writes them into the private file `dirs.mpvArgs` (0600, in the 0700
+  // runtime folder, one `name=%N%value` line each, the length-quoted form
+  // that reads every value exactly as the argv did: measured for `=`, `,`,
+  // both quotes, spaces, `#`, `%`, a trailing backslash and UTF-8) and names
+  // it here, at the place the tokens stood. mpv parses an --include file AT
+  // ITS POSITION and marks what it sets as set from the command line, so a
+  // later argv token still wins and a per-file profile still cannot replace
+  // a token's value (measured): the pin block after it keeps the last word.
+  // The file is removed once mpv has bound its socket, which it does only
+  // after reading its whole command line. No tokens, no --include.
+  var extra = asList(p.extraArgs)
+  var file = str(dirs.mpvArgs) !== "" ? str(dirs.mpvArgs) : dirnameOf(p.socketPath) + "/mpv-args.conf"
+  var user = extra.length > 0 ? ["--include=" + file] : []
+  return argv.concat(user).concat(mpvPinBlock(dirs))
 }
 
 // The trailing pins: the contained resume folder first (a named profile in
@@ -495,11 +600,104 @@ function mpvPinBlock(dirs) {
 // These are the helper's own arguments; the caller prefixes the interpreter
 // and the helper path, which `helperArgv()` does. Every value is a separate
 // argv member: no joining, no quoting, no shell (hard requirement 9). User
-// mpv tokens travel as repeated `--mpv-arg TOKEN` so argparse can never
-// swallow an option-looking token and no token is ever split or merged.
+// mpv tokens travel as repeated attached `--mpv-arg=TOKEN` members
+// (Model.mpvArgArgv) so argparse can never swallow an option-looking token
+// and no token is ever split or merged -- and, since D-SINK-47, helperSpawn
+// moves every one of them into the environment before the Process runs.
 
+//
+// D-SINK-50 (2026-10-29): `python3 -I`, every spawn. Without it the
+// interpreter honours PYTHONPATH and PYTHONHOME and runs the user-site `.pth`
+// files and `sitecustomize` BEFORE the stub's first statement -- before the
+// shield that makes the process non-dumpable (D-SINK-9), with the source URL
+// already in the environment of the fetch verbs, and with `ctypes`, the
+// module the shield itself imports, open to being shadowed. `-I` is `-E -s
+// -P`: no PYTHON* variable, no user site directory, no script directory on
+// sys.path. The stub compiles its parts from its own directory by path and
+// imports nothing from it, so isolation costs it nothing (measured). This is
+// the ONE builder of the interpreter's argv: every helper spawn in
+// Service.qml goes through it (the node suite holds every builder to it).
 function helperArgv(helperPath, args) {
-  return ["python3", str(helperPath)].concat(asList(args))
+  return ["python3", "-I", str(helperPath)].concat(asList(args))
+}
+
+// D-SINK-47, D-SINK-48 (lane-p2a, 2026-10-29). The helper's argv is
+// /proc/<pid>/cmdline, mode 0444 on a proc mounted without hidepid: every
+// account on the computer reads it. Four kinds of value rode there:
+//   --cache-dir <cache>/sources/<key> and the keys of the cache verbs, where
+//     every source added before this release is keyed by fnv1a32 of its
+//     credentialed playlist URL -- a 32-bit check on a guessed password, on
+//     the argv of every refresh, guide fetch, zap, logo run (for up to an
+//     hour) and start-up prune (SR40 kept shell.json private for that datum);
+//   --id, whose `u:` form hashes a stream URL the same way;
+//   --scope, a provider's group-title;
+//   --mpv-arg, the user's own tokens, where a proxy password goes.
+// helperSpawn takes the argv a builder made, moves every one of those --
+// HELPER_PRIVATE_VALUE's options with their value, HELPER_PRIVATE_LIST's
+// with every value up to the next option, and each attached `--mpv-arg=` --
+// into a JSON list in HELPER_ARGS_ENV, and leaves HELPER_ARGS_FLAG in their
+// place, so the helper refuses to run on defaults if the list does not
+// arrive. The environment is what D-SINK-8 moved the URL to: closed to other
+// uids from exec, to this uid from the stub's shield on. The verbs, sockets,
+// sequence numbers, times and pids stay on argv, where `pgrep -a` and the
+// harness find them. -> { command, environment }: Service.qml assigns BOTH,
+// immediately before the run (runHelper), and `environment` carries the
+// given one (a fetch's URL and provenance) as well. The helper's mirror is
+// helper_arguments; the shared helper-args fixture (dev branch) holds the two
+// together.
+var HELPER_ARGS_ENV = "OMARCHY_IPTV_ARGS"
+var HELPER_ARGS_FLAG = "--args-from-env"
+var HELPER_PRIVATE_VALUE = { "--cache-dir": true, "--id": true, "--scope": true, "--key": true, "--active": true }
+var HELPER_PRIVATE_LIST = { "--keep": true }
+var HELPER_PRIVATE_ATTACHED = "--mpv-arg="
+
+function helperSpawn(argv, environment) {
+  var list = asList(argv)
+  var command = []
+  var hidden = []
+  for (var i = 0; i < list.length; i++) {
+    var item = str(list[i])
+    var eq = item.indexOf("=")
+    var name = eq === -1 ? item : item.substring(0, eq)
+    if (item.indexOf(HELPER_PRIVATE_ATTACHED) === 0
+        || (eq !== -1 && (HELPER_PRIVATE_VALUE[name] === true || HELPER_PRIVATE_LIST[name] === true))) {
+      hidden.push(item)
+    } else if (HELPER_PRIVATE_VALUE[item] === true && i + 1 < list.length) {
+      hidden.push(item, str(list[i + 1]))
+      i++
+    } else if (HELPER_PRIVATE_LIST[item] === true) {
+      hidden.push(item)
+      while (i + 1 < list.length && str(list[i + 1]).indexOf("--") !== 0) hidden.push(str(list[++i]))
+    } else {
+      command.push(item)
+    }
+  }
+  var env = {}
+  var given = environment && typeof environment === "object" ? environment : {}
+  for (var k in given) if (Object.prototype.hasOwnProperty.call(given, k) && k !== "__proto__") env[k] = str(given[k])
+  if (hidden.length > 0) {
+    command.push(HELPER_ARGS_FLAG)
+    // Each value as the argv delivered it: QProcess hands every argument to
+    // exec as a C string, so a NUL ended it there. The JSON would carry it
+    // whole, and the helper refuses a list holding one (helper_arguments) --
+    // so a provider's group-title with a NUL in it, which reaches a zap's
+    // `--scope g:<group>`, refused every channel launched from that group
+    // `bad_arguments` (rc-p2a recheck, 2026-10-31). Cut, never refused here:
+    // the user's own tokens never hold one (splitMpvArgs refuses it), and a
+    // key or a folder is checked again by the helper.
+    env[HELPER_ARGS_ENV] = JSON.stringify(hidden.map(function (value) {
+      var at = value.indexOf("\u0000")
+      return at === -1 ? value : value.substring(0, at)
+    }))
+  }
+  return { command: command, environment: env }
+}
+
+// D-SINK-50: the cache slot's argv, lifted out of Service.qml's
+// runNextCacheJob, which built the interpreter's argv inline and so did not
+// go through helperArgv. `args` is Model.cacheJobArgs' answer.
+function cacheRunArgv(helperPath, cacheDir, args) {
+  return helperArgv(helperPath, ["cache", "--cache-dir", str(cacheDir)].concat(asList(args)))
 }
 
 // D-ID-1. The two playlist invocations differ by ONE argument and the
@@ -847,16 +1045,19 @@ function trackAccessibleName(rows, index) {
 export {
   MPV_HANDOFF, MPV_HANDOFF_SCRIPT_OPTS, MPV_YTDL_OFF, MPV_HANDOFF_TEXT,
   MPV_DISK_WARN, MPV_DISK_TEXT, MPV_DEMUXER_PROXY_WORD, MPV_LISTEN_WARN,
-  MPV_LISTEN_QUIET, MPV_LISTEN_TEXT, MPV_SCRIPT_OPTS_WORDS, mpvOptionBase,
-  mpvHandoffName, mpvDiskName, mpvListenName, mpvArgWarning, mpvArgWarnings,
-  MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT, mpvRefusedWarning,
-  mpvRefusedWarnings, splitMpvArgs, demuxerNamesTls, scriptOptsRefused,
-  mpvRejectedLine, mpvRejectedName, headerArgs, MPV_RAW_PREFIX,
-  mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv, mpvPinBlock,
-  helperArgv, playlistFetchArgv, fetchStateDir, playlistProbeArgv,
-  epgFetchArgv, FETCH_URL_ENV, fetchEnvironment, failedArgv, logoFetchArgv,
-  playerTracksArgv, trackChoice, parseTracks, LANG_NAMES, trackLanguage,
-  trackLabel, trackDetail, trackRows, trackCursorHome, moveTrackCursor,
-  TRACKS_RECOVERY_MAX, shouldRefreshTracks, trackPanelMessage,
-  trackAccessibleName
+  MPV_LISTEN_QUIET, MPV_LISTEN_TEXT, MPV_RTSP_TRANSPORT_KEY,
+  MPV_SCRIPT_OPTS_WORDS, mpvOptionBase, mpvHandoffName, mpvDiskName,
+  mpvListenName, demuxerOpensPorts, rtspTransportQuiet, mpvArgWarning,
+  mpvArgWarningLines, mpvArgWarnings, MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT,
+  mpvRefusedWarning, mpvRefusedWarnings, splitMpvArgs, mpvTokenWritable,
+  demuxerNamesTls, scriptOptsRefused, mpvRejectedLine, mpvRejectedName,
+  headerArgs, MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf,
+  buildMpvArgv, mpvPinBlock, helperArgv, HELPER_ARGS_ENV, HELPER_ARGS_FLAG,
+  HELPER_PRIVATE_VALUE, HELPER_PRIVATE_LIST, HELPER_PRIVATE_ATTACHED,
+  helperSpawn, cacheRunArgv, playlistFetchArgv, fetchStateDir,
+  playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,
+  failedArgv, logoFetchArgv, playerTracksArgv, trackChoice, parseTracks,
+  LANG_NAMES, trackLanguage, trackLabel, trackDetail, trackRows,
+  trackCursorHome, moveTrackCursor, TRACKS_RECOVERY_MAX, shouldRefreshTracks,
+  trackPanelMessage, trackAccessibleName
 }

@@ -235,6 +235,19 @@
 # failed; `--baseline 124589e` (sec-int before this lane) 26 passed, 6
 # failed: W19, W20, W22, W23, W24 and W25 red, W21 and every control green.
 #
+# lane-p2a (2026-10-29) adds a fake RTSP server on 8807 and W26..W29: the
+# stats overlay drawing nothing of a URL whose `filename` is the whole of it,
+# on this tree's player and on an adopted pre-pin one (D-SINK-67); every
+# `--demuxer-lavf-o` spelling of rtsp_transport that binds an rtsp channel's
+# RTP/RTCP pair held to a warning from the tree's filter (D-SINK-65, needs the
+# namespace); an adopted pre-pin player whose plain mpv.conf turns
+# propagation off, with its control (D-SINK-68, measured not a bypass on
+# FFmpeg n9.0.1); and the user's tokens taking effect through the private
+# options file while the player's command line holds none of them
+# (D-SINK-47). On the tree 36 passed, 0 failed; with the rig run against dev
+# 2727179 33 passed, 3 failed: W26, W27 and W29 red, W28 and every control
+# green.
+#
 #   ./scripts/dev-harness/tls-scenario.sh --rig-only
 #   ./scripts/dev-harness/tls-scenario.sh --windowless [--baseline <ref>] [--pre-pin <ref>]
 #   ./scripts/dev-harness/tls-scenario.sh
@@ -490,7 +503,7 @@ if [[ $MODE == windowless ]]; then
     echo "== windowless rig inside unshare -rn (a private network namespace: loopback only)"
     OMARCHY_IPTV_RIG_NETNS=1 unshare -rn python3 -I "$ROOT/tests/tls_pins_rig.py" --tree "$PLUGIN_ROOT" --pre-pin "$PIN_DIR" --work "$WORK"
   else
-    echo "== windowless rig on the shared loopback: unshare -rn is refused here, so W11, W12, W19, W20, W21, W24 and W25 are skipped (a baseline player would listen on this machine's interfaces)"
+    echo "== windowless rig on the shared loopback: unshare -rn is refused here, so W11, W12, W19, W20, W21, W24, W25 and W27 are skipped (a baseline player would listen on this machine's interfaces)"
     python3 -I "$ROOT/tests/tls_pins_rig.py" --tree "$PLUGIN_ROOT" --pre-pin "$PIN_DIR" --work "$WORK"
   fi
   rig_rc=$?

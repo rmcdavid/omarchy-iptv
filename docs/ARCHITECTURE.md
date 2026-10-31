@@ -834,7 +834,7 @@ bar entry, read by the service through `shell.barConfig`.
 | `epgUrl` | string | `""` | same rules. Input-only on the same terms: a fresh non-empty value is attached to the ACTIVE record on any reconcile that sees it (an `ignore` plan included) and stripped from the entry by the same owned write; an empty value is a no-op, and the CLI clear lever is withdrawn -- the Sources screen or `state source update` clears a guide URL (D-SINK-19 round 2, R4). "Empty disables EPG" is now a statement about the RECORD's `epgUrl`, not about this key. **Round 3 (R12, 2026-10-12): never stripped unadopted.** A value set while NO source is active stays on this key (the guide reads it as its fallback) until a source exists and the reconcile that brings it attaches the value to that source; only then is it taken off the entry. Round 2 stripped it in the same write with no copy anywhere. **Round 7 (R17, 2026-10-12): "until a source becomes active", by any route, and enforced at the sink.** Every owned write leaves this key on the entry unless the ACTIVE record holds the value or the service already consumed it (`Model.retiredInputsToKeep`, handed to `Model.entryWith` by the one funnel); a switch or an in-app add that makes a record active lands a pending value on it in the same turn (`adoptPendingEpg`), replacing a guide URL the record had. Until round 7 the logo toggle's heal, and on the echoing host the key mirror's heal after a switch, stripped it with no copy anywhere (the sixth review's P1). **Round 8 (R18, 2026-10-12): compared the way adoption compares, and an add form's own guide URL wins.** The value is read through `Model.entryInputForm` everywhere it is compared, so surrounding whitespace (which `omarchy bar set` stores as typed) does not make it a different value, and a value of whitespace or control characters alone is no input -- it never empties a record's guide URL. A pending value meets an in-app add whose form carries a guide URL of its own (typed, or an Xtream add's `xmltv.php`): the form's wins, and the pending value is superseded and stripped by that commit (R18d). **Round 9 (R19, 2026-10-12): held in the state, and the input set last wins.** A value set while NO source is active no longer waits on this key: it is held in `state.json` as `pendingEpg { url, seenAt }` and taken off the entry by the same R13-gated owned write that strips every consumed input (R19b, overturning R12's on-entry pending state; a refused one is reported and stripped). R18d's form-wins rule is overturned too (R19c): every record carries `epgSetAt`, set by the add form at SUBMIT, by the edit form when it changes the guide URL, or by adoption with the input's `seenAt`, and at the move that makes a record active the held value lands iff it was seen LATER than the record's own was set (`epgByTime`, `applyPendingEpg`); either way it is cleared. Records written before R19 read as 0 **Overturned 2026-10-13 (round 11, R21), on the same terms as `playlistUrl`.** At the migration a value is attached to the source that becomes active, or, with no source to attach it to, reported (`no-source`) and stripped, never held (R21c); after the marker it is refused, reported once and stripped. **Round 19 (R29d, 2026-10-20): not when it came with an unusable playlist.** A value set beside a `playlistUrl` that does not validate is attached to no source -- until R29d it replaced the active record's own guide URL -- and is reported WITH the playlist in one notice (`Bar setting removed`, reason `invalid-pair`) and stripped with it (`Model.adoptActiveSource`'s `epgWithInvalid`; `ARCHITECTURE-SOURCES.md`, round 19). A record's guide URL is set and cleared only in the Sources forms (or the helper's `state source` verbs). R12, R17b, R18d, R19b, R19c and R20b, recorded above, are overturned. |
 | `sourceKey` | string | `""` | D-SINK-19. Written by the plugin, never derived from user input: `Model.activeKeyText` of the active source's key, 8 lowercase hex with D4's suffix rule, mirrored into the entry by every owned write (`Model.OWNED_SETTINGS` is `["sourceKey", "showLogos"]`). NOT the authority -- `state.json`'s `activeKey` is -- and consulted only when the state names no record (`Model.adoptActiveSource` step 3); a value naming none of the user's records reads as absent. Deliberately NOT declared in `manifest.json` (`barWidget.defaults` and `schema` do not name it): declaring it would offer the mirror as a user setting with help text. The host keeps an undeclared key through its own rewrite -- MEASURED on 2026-10-11 (the host's `updateEntryInline` run in node over its own source, `OMARCHY-PLUGIN-CONTRACT.md`) -- and `omarchy bar set` writes any key without a schema check -- READ, not run: `setBarWidget` at `services/PluginRegistry.qml:342-380` ends `entry[String(key)] = value` with no schema lookup (the contract's "read rather than run" list). The recovery path rests on both; a round-2 sentence here called both measured and the contract entry it cited said otherwise for the second. Not a credential: SR36 states what it is (a 32-bit confirmation of a guessed URL) |
 | `refreshMinutes` | integer | 60 | `clampInt(5..1440)` |
-| `mpvArgs` | string | `""` | whitespace-split; each token must match `^--[a-z0-9][a-z0-9-]*(=.*)?$`; reserved names (`--input-ipc-server`, `--wayland-app-id`, `--title`, `--force-media-title`, `--idle`, `--script(s)`, `--config-dir`, `--load-scripts`, `--tls-verify`, `--stream-lavf-o`, and their `--no-` forms) are dropped with a console warning. This list is the M1 set plus the three later entries worth naming here; `MPV_RESERVED` in the model and its python mirror are the current list and `ARCHITECTURE-PLAYER.md` 4.12 is the register of why each name is on it. The two TLS entries are opposites and 4.15 is where that is specified: `--tls-verify` is the one entry the reserved list does not make safe by itself (D-SINK-13), and `--stream-lavf-o` is the one the reserved list is the only way to close (D-SINK-15). A single string was chosen over a JSON array because `omarchy bar set` writes strings by default and users copy examples from the README. |
+| `mpvArgs` | string | `""` | whitespace-split; each token must match `^--[a-z0-9][a-z0-9-]*(=.*)?$`; reserved names (`--input-ipc-server`, `--wayland-app-id`, `--title`, `--force-media-title`, `--idle`, `--script(s)`, `--config-dir`, `--load-scripts`, `--tls-verify`, `--stream-lavf-o`, and their `--no-` forms) are dropped with a console warning. This list is the M1 set plus the three later entries worth naming here; `MPV_RESERVED` in the model and its python mirror are the current list and `ARCHITECTURE-PLAYER.md` 4.12 is the register of why each name is on it. The two TLS entries are opposites and 4.15 is where that is specified: `--tls-verify` is the one entry the reserved list does not make safe by itself (D-SINK-13), and `--stream-lavf-o` is the one the reserved list is the only way to close (D-SINK-15). A single string was chosen over a JSON array because `omarchy bar set` writes strings by default and users copy examples from the README. **[2026-10-29, lane-p2a, D-SINK-47: the kept tokens reach the player through a 0600 options file named by `--include`, and the helper through the environment; no command line carries one.]** |
 | `showChannelName` | boolean | true | widget-only, `!== false` |
 | `maxRecents` | integer | 10 | `clampInt(1..50)` |
 
@@ -996,6 +996,49 @@ helper's `playlist` and `epg` verbs download with `urllib` and start no
 child, so the URL ends at the helper. That makes the helper's no-subprocess
 shape load-bearing for this sink, which is why engineering rule 5 now says
 so.
+
+Amended 2026-10-29, lane-p2a (D-SINK-47, D-SINK-48, D-SINK-50). **The same
+route now carries every private argument, and the interpreter is isolated.**
+`/proc/<pid>/cmdline` carried more than URLs: the source's cache folder and the
+cache verbs' keys (a 32-bit hash of the credentialed playlist URL for every
+source made before this release), a channel's `--id` (a `u:` id hashes a
+stream URL), a provider's group name as `--scope`, and the user's own
+`mpvArgs` tokens as `--mpv-arg`, where a proxy password or an API-key header
+goes -- on the helper for each start, and, copied onto mpv's own argv, on the
+detached player for hours and into `COREDUMP_CMDLINE` if it crashed.
+`Service.runHelper` now starts every helper Process: `Model.helperSpawn` moves
+those options, with their values, into a JSON list in `OMARCHY_IPTV_ARGS` and
+leaves `--args-from-env` in their place, and the command and the environment
+are assigned together immediately before `running = true` -- the one-assignment
+rule, extended from the three fetch sites to every helper spawn. The helper's
+`helper_arguments` reads the list once, before argparse; a flag with no list
+is `bad_arguments` and no verb runs; and it takes the variable out of its own
+environment, so the one child it forks with its environment, the player,
+never inherits it (rule 5's "keep BOTH halves" still holds: the player's
+Process is handed this list, never a URL). The player gets the tokens in a
+0600 file in the 0700 runtime folder, named by `--include` where they stood
+and removed once its socket answers (`ARCHITECTURE-PLAYER.md` 4.12). And every
+spawn is `python3 -I` (`Model.helperArgv`), so `PYTHONPATH`, `PYTHONHOME`,
+user-site `.pth` files and `sitecustomize` no longer run before the shield with
+a URL in the environment -- measured: a `ctypes.py` on `PYTHONPATH` ran and
+switched the shield off before, and does not run after. The window before the
+shield, re-measured by the method above (12 runs per arm per pass,
+interleaved, twice, the `playlist` verb over a local file, load average 1.98):
+with `-I` 26.2 ms median (23.6-29.2) and 25.85 (24.5-29.2), without it 26.2
+(25.4-31.9) and 26.6 (24.9-30.0) on the same machine; again on the lane's last
+commit at a load average of 3.7-4.1, with `-I` 28.35 and 30.2 ms (22.6-36.2),
+without it 26.75 and 27.15 (23.9-36.4) -- `-I` changes the window by nothing
+the noise does not cover, because this session has no user site packages and
+no `PYTHONPATH`; it removes what such a session would add, and no run exceeded
+the 40.1 ms stated above as the window's upper end (the fastest, 22.6 ms, fell
+just under its lower one; the rc-p2a recheck on 2026-10-31 read 21.2-39.8 ms
+with `-I`, medians 24.95 and 23.1, at a load average of 2.2-3.0, so the lower
+end is the noise's, not a bound). Every run's reads ended in EACCES once
+shielded, 96 of 96. Readable by same-uid processes only in that
+window, as before. What remains: a player adopted after the upgrade keeps the
+tokens on its argv until it restarts; and the measurement is not valid inside
+`unshare -rn` (the rig's own user namespace grants its reader CAP_SYS_PTRACE
+over the helper, and every read succeeded), so it was taken outside one.
 
 Amended 2026-10-29 (D-SINK-40, D-SINK-41, D-SINK-42; the owner's policy of
 the same day). **The environment now says where its URL CAME FROM, and the
@@ -2321,7 +2364,22 @@ NOT closed. Three things remain, and the first is the one to quote:
    kind for that value, in the plugin's own private file rather than in
    `shell.json`, and never a way back to it.] **[Round 11, 2026-10-13: no longer --
    `entryInputs` is WITHDRAWN (R21d), and what the session has handled is
-   held in memory only.]**
+   held in memory only.]** **[2026-10-29, lane-p2a (D-SINK-48): this
+   paragraph reasoned about a file and never named the WIDER container. The
+   same key rode `/proc/<pid>/cmdline` -- 0444, on a proc mounted without
+   `hidepid` -- as `--cache-dir <cache>/sources/<key>` on every refresh, guide
+   recompute, zap and logo run, and as `cache prune --keep <every key>` at each
+   start, so another account read it whatever mode `shell.json` had; and a
+   channel's `u:` id, the same hash of a stream URL, rode `--id`. Two changes.
+   The shell hands the helper every key, id and scope through the environment
+   (`OMARCHY_IPTV_ARGS`, section 6's D-SINK-8 route), so no helper argv carries
+   one. And a NEW source's key is a random draw (`Model.allocateSourceKey`,
+   `allocate_source_key`), unrelated to its URL, so for it there is no oracle at
+   all; what dedupes a re-added URL is the normalized URL, compared, as it
+   always was. What remains: every record made before this release keeps its
+   fnv1a32 key -- in `shell.json`, `state.json`, the cache folder's name and the
+   journal lines that name keys -- until it is removed and added again; and a
+   `u:` id is still that hash, now off the argv.]**
 2. *The input path.* `omarchy bar set ... playlistUrl` is still supported and
    is still a write of a credential into that file, made by the host on the
    user's instruction, at a moment the plugin cannot gate. The plugin removes
