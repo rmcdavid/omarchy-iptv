@@ -24,7 +24,7 @@ import {
   formatCount, pluralChannels
 } from "./epg.mjs"
 import {
-  HOST_WITHHELD, runHostParts
+  CONTROL_RE, HOST_WITHHELD, runHostParts
 } from "./sources.mjs"
 
 // ---- D-SINK-18: the container the host settings file is, before a URL goes
@@ -281,11 +281,22 @@ function playerPauseArgv(socket, state) {
 // provider wrote it (an `&` included, which unescaped could swallow the
 // text after it). The TITLE is not escaped: the host draws it PlainText
 // (pinned the same way), where an entity would show as written.
+//
+// F-SINK-16 (2026-10-29). And the body carries no control character. The
+// playlist parse keeps a provider's C0 and C1 controls in a name (measured:
+// TAB, VT, FF, ESC, DEL, U+0085, U+009B, U+009D), the host turns a line
+// break in a body into `<br/>`, and it persists every body as JSON under
+// ~/.local/state/omarchy/notifications/, where JSON.stringify leaves DEL and
+// C1 as they are for whatever prints the file. No body the plugin composes
+// means anything by one. The name and the reason lose theirs BEFORE the
+// redaction, as the player's title does (apply_channel): a TAB inside a
+// password then no longer splits the URL there (D-SINK-34's cost) on this
+// sink; and the whole body loses any left at the exit, before the escape.
 function notifyArgv(event, params, replaceId) {
   var p = params || {}
   var spec = null
-  var name = cleanName(sinkText(p.name)) || "Channel"
-  var reason = scrubUrls(str(p.reason))
+  var name = cleanName(sinkText(str(p.name).replace(CONTROL_RE, ""))) || "Channel"
+  var reason = scrubUrls(str(p.reason).replace(CONTROL_RE, ""))
   if (event === "streamFailed") {
     spec = { title: "Stream failed", body: QUOTE_OPEN + name + QUOTE_CLOSE + " did not play" + (reason !== "" ? SEP + reason : ""), glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.streamFailed }
   } else if (event === "localPlayFailure") {
@@ -352,7 +363,7 @@ function notifyArgv(event, params, replaceId) {
   if (!spec) return null
   var held = notifyReplaceId(replaceId)
   return ["omarchy-notification-send", "--app-name", "IPTV", "-u", spec.urgency, "-g", spec.glyph, "-p",
-          "-r", String(held > 0 ? held : spec.id), spec.title, markupEscape(spec.body)]
+          "-r", String(held > 0 ? held : spec.id), spec.title, markupEscape(str(spec.body).replace(CONTROL_RE, ""))]
 }
 
 // D-SINK-49: text on its way into a StyledText renderer, shown as written.

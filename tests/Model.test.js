@@ -4440,6 +4440,40 @@ function redactUrlsBeforeDSink23(text) {
             Model.ipcJson(plain) === JSON.stringify(plain), Model.ipcJson(undefined), Model.ipcJson(null),
             out.indexOf("\\u009b") >= 0, out.indexOf("\\u001b") >= 0]
   }, [false, true, true, "null", "null", true, true])
+
+  // And no control character in a notification body (Model.notifyArgv). The
+  // parse keeps a provider's TAB, VT, FF, ESC, DEL and C1 controls in a name;
+  // the host turns a line break in a body into `<br/>` and persists every
+  // body as JSON, where C1 and DEL stay raw for whatever prints the file.
+  // Every event, a name and a reason full of them: the body carries none.
+  // The name and the reason lose theirs BEFORE the redaction, as the
+  // player's title does, so a TAB inside a password no longer leaves its
+  // tail after the run (D-SINK-34's shape) on this sink. The state file's
+  // path (from the user's XDG_STATE_HOME, not the provider) is the one body
+  // field that reaches the exit with its controls, so it is what proves the
+  // exit's own drop. Red on dev 2727179: every control went out in the argv.
+  const CTL = "a\tb\u000bc\u000cd\u001b[2Je\u0007f\u0008g\u007fh\u0085i\u009b31mj\u009d0;x\u009ck\nl\rm"
+  const EVENTS = ["streamFailed", "localPlayFailure", "playerStopped", "outputFailed", "playlistRefreshed", "playlistError",
+                  "epgError", "mpvMissing", "entryInputRefused", "stateUnreadable"]
+  checkCall("F-SINK-16: no notification body, for any event, carries a C0, DEL or C1 control when the channel name and the reason hold every kind the parse keeps -- and the name and the reason still read as written, less the controls", function () {
+    const bad = []
+    let quoted = 0
+    for (const ev of EVENTS) {
+      const argv = Model.notifyArgv(ev, { name: "News " + CTL, reason: "HTTP " + CTL, output: "video", channelCount: 2, groupCount: 1, setting: "playlistUrl", path: "/p/" + CTL + "/state.json" })
+      const body = argv[argv.length - 1]
+      if (/[\u0000-\u001f\u007f-\u009f]/.test(body)) bad.push(ev + " -> " + JSON.stringify(body))
+      if (body.indexOf("News abcd[2Jefgh") !== -1) quoted++
+    }
+    return [bad, quoted]
+  }, [[], 4])
+  checkCall("F-SINK-16: the controls leave the name and the reason BEFORE their redaction -- a TAB, a VT, an ESC or a CSI inside a password is URL text to the body, so the host prints and no tail of the password does; a name with no `://` is only its controls shorter", function () {
+    return ["\t", "\u000b", "\u001b", "\u009b"].map(function (c) {
+      const argv = Model.notifyArgv("streamFailed", { name: "News (http://u5er:pa" + c + "S3CRET@cdn.test/live/1.ts)",
+                                                      reason: "HTTP 403 from http://u5er:pa" + c + "S3CRET@cdn.test/live/1.ts" })
+      const body = argv[argv.length - 1]
+      return [body.indexOf("S3CRET") === -1 && body.indexOf("u5er") === -1, body.indexOf("(cdn.test)") !== -1, body.indexOf("from cdn.test") !== -1]
+    }).concat([Model.notifyArgv("playerStopped", { name: "UK:\tSky\u009b" })[11]])
+  }, [[true, true, true], [true, true, true], [true, true, true], [true, true, true], Model.QUOTE_OPEN + "UK:Sky" + Model.QUOTE_CLOSE + " stopped unexpectedly"])
 })()
 
 checkCall("D-RUNG-9: the header the HOST draws is under 4.5 on three themes and INVERTED on five", function () {
