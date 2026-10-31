@@ -360,6 +360,34 @@ function rootProperties(text) {
   return out
 }
 
+// F-SINK-16 (2026-10-29): the IpcHandler's verbs, `    function name(...)`
+// inside the root's one `  IpcHandler {` block. What one of them returns is
+// what `omarchy-shell ipc call` prints into the caller's terminal, so a test
+// reads a reply off the shipping verb (h.ipc.status()) rather than
+// recomposing it from the functions the verb calls -- which is how a verb
+// that kept JSON.stringify while its neighbours moved would go unseen. The
+// QML type annotations (`n: string`, `): string`) are not JavaScript and are
+// stripped; nothing else is. A tree without the block has no verbs here.
+function ipcFunctions(text) {
+  const out = {}
+  const at = text.search(/^  IpcHandler \{/m)
+  if (at === -1) return out
+  const open = text.indexOf("{", at)
+  const close = matchBrace(text, open)
+  if (close === -1) throw new Error("service-harness: cannot find the end of the IpcHandler block")
+  const block = text.slice(open + 1, close)
+  const re = /^    function ([A-Za-z_][A-Za-z0-9_]*)\(([^)]*)\)(?:: *[A-Za-z]+)? \{/gm
+  let m
+  while ((m = re.exec(block)) !== null) {
+    const fopen = m.index + m[0].length - 1
+    const fclose = matchBrace(block, fopen)
+    if (fclose === -1) throw new Error("service-harness: cannot find the end of the IPC verb " + m[1])
+    const args = m[2].split(",").map(a => a.replace(/:.*$/, "").trim()).filter(a => a !== "").join(", ")
+    out[m[1]] = { args, body: block.slice(fopen + 1, fclose) }
+  }
+  return out
+}
+
 // One signal-handler block, by an anchor that precedes its "{".
 function handlerBlock(text, anchor) {
   const at = text.indexOf(anchor)
@@ -733,6 +761,11 @@ function bootService(serviceText, Model, o) {
   // shield's run, to see its watchdog armed) installs the shipping text of
   // it; the stub stays for every other test.
   h.unstub = (name) => { if (!(name in fns)) throw new Error("service-harness: no function " + name); root[name] = compile(fns[name].args, fns[name].body, name) }
+  // F-SINK-16: the IPC verbs, from their own text (ipcFunctions above), run
+  // in the root's scope as the handler's `root.` and `Model.` resolve there.
+  h.ipc = {}
+  const ipcFns = ipcFunctions(serviceText)
+  for (const name in ipcFns) h.ipc[name] = compile(ipcFns[name].args, ipcFns[name].body, "ipc_" + name)
   root.runConfigShield = () => {}
   root.noteSessionOutcome = () => {}
   root.markDeadSession = () => {}
@@ -1144,4 +1177,4 @@ function restartService(serviceText, Model, h, o) {
                                                           stateText: h.stateFile.disk, host: h.host.mode, clock: h.clock + 60000 }, o || {}))
 }
 
-module.exports = { bootService, restartService, rootFunctions, rootProperties, matchBrace, STUBBED, PID, HELPER_EMPTY_STATE, notificationServer, NOTICE_LEDGER }
+module.exports = { bootService, restartService, rootFunctions, rootProperties, ipcFunctions, matchBrace, STUBBED, PID, HELPER_EMPTY_STATE, notificationServer, NOTICE_LEDGER }

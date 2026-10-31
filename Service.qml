@@ -7233,7 +7233,7 @@ Item {
     //
     // A mistyped keybinding must not raise a desktop popup, so a failure is
     // this JSON and nothing else - no notification, no toast (6.5).
-    function channel(n: string): string { return JSON.stringify(root.tuneByNumber(n)) }
+    function channel(n: string): string { return Model.ipcJson(root.tuneByNumber(n)) }
     // Picture in picture (M2-05). `pip on`, `pip off`, `pip toggle`.
     //
     // The reply is what is knowable when the key is pressed, and no more.
@@ -7246,7 +7246,7 @@ Item {
     // new `pip` block carries { available, on, applying, reason }, where
     // `reason` is the last failure code (dispatch_failed, no_window,
     // ambiguous, timeout, ...) and "" after a success.
-    function pip(mode: string): string { return JSON.stringify(root.requestPip(mode)) }
+    function pip(mode: string): string { return Model.ipcJson(root.requestPip(mode)) }
     // PAUSE LIVE TV. An IPC verb rather than only a guide key, because this is
     // the first action in the product you want while WATCHING -- with the
     // guide closed -- rather than while browsing. contrib/bindings.lua shows
@@ -7267,17 +7267,19 @@ Item {
     // contrib/bindings.lua suggests SUPER+SHIFT+H / L / R.
     function back(seconds: string): string {
       var n = Model.seekVerbSeconds(seconds)
-      return JSON.stringify(n === 0 ? root.seekRefuse(0, "bad_seconds") : root.seekBy(-n))
+      return Model.ipcJson(n === 0 ? root.seekRefuse(0, "bad_seconds") : root.seekBy(-n))
     }
     function forward(seconds: string): string {
       var n = Model.seekVerbSeconds(seconds)
-      return JSON.stringify(n === 0 ? root.seekRefuse(0, "bad_seconds") : root.seekBy(n))
+      return Model.ipcJson(n === 0 ? root.seekRefuse(0, "bad_seconds") : root.seekBy(n))
     }
-    function live(): string { return JSON.stringify(root.seekLive()) }
+    function live(): string { return Model.ipcJson(root.seekLive()) }
     function stop(): string { root.stop(); return "ok" }
     function next(): string { return root.zap(1) ? "ok" : "nothing playing" }
     function previous(): string { return root.zap(-1) ? "ok" : "nothing playing" }
     function refresh(): string { root.refresh(); return "ok" }
-    function status(): string { return JSON.stringify(root.statusSummary()) }
+    // F-SINK-16: every JSON reply through Model.ipcJson, which escapes the
+    // C1 controls JSON.stringify passes through to the caller's terminal.
+    function status(): string { return Model.ipcJson(root.statusSummary()) }
   }
 }

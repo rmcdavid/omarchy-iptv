@@ -4424,6 +4424,24 @@ function redactUrlsBeforeDSink23(text) {
   }, ["&lt;b&gt;&amp;amp;&lt;/b&gt;", "a \"b\" 'c' \u201cd\u201d", "", "", "plain \u00b7 text", "&amp;&amp;&lt;&lt;&gt;&gt;"])
 })()
 
+// ---- F-SINK-16 (2026-10-29): the IPC replies escape the C1 controls.
+// JSON.stringify escapes C0 (ESC among them) and passes DEL and U+0080..U+009F
+// through, and the helper keeps a playlist's C1 controls in names and groups,
+// so `status` and `channel` printed an 8-bit CSI (U+009B) or OSC (U+009D)
+// into whatever terminal ran `omarchy-shell ipc call`. Model.ipcJson is every
+// JSON reply of the IpcHandler; the value parses back identical. Red on dev
+// 2727179: ipcJson did not exist (the handler called JSON.stringify).
+;(function () {
+  const v = { name: "News\u009b31mRED\u0085x\u009d52;c;aGk=\u009c", d: "\u007f", ls: "a\u2028b\u2029c", ok: true, n: 1, esc: "\u001b[2J" }
+  checkCall("F-SINK-16: ipcJson carries no DEL, no C1 control and no U+2028/U+2029, parses back to the same value as JSON.stringify's, and is JSON.stringify's text whenever there is nothing to escape", function () {
+    const out = Model.ipcJson(v)
+    const plain = { a: "b \u00b7 \u201cc\u201d", n: [1, null, true] }
+    return [/[\u007f-\u009f\u2028\u2029\u0000-\u001f]/.test(out), JSON.stringify(JSON.parse(out)) === JSON.stringify(v),
+            Model.ipcJson(plain) === JSON.stringify(plain), Model.ipcJson(undefined), Model.ipcJson(null),
+            out.indexOf("\\u009b") >= 0, out.indexOf("\\u001b") >= 0]
+  }, [false, true, true, "null", "null", true, true])
+})()
+
 checkCall("D-RUNG-9: the header the HOST draws is under 4.5 on three themes and INVERTED on five", function () {
   // The defect, asserted before the fix so the fix has something to beat.
   const under = menuTokens.themes.filter(function (t) {
@@ -16834,15 +16852,17 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
   }, E13.map(id => [id, true, false, true, "Guide data unavailable (" + fixtureCase(id).reason + ")" + Model.SEP + "channels still work" + Model.SEP + "r retry",
                     ["Could not fetch the EPG (" + fixtureCase(id).reason + "). Channels still work."], fixtureCase(id).reason, false]))
 
-  // ---- F-SINK-14, D-SINK-49 (2026-10-29), through Service.qml ----
+  // ---- F-SINK-14, D-SINK-49, F-SINK-16 (2026-10-29), through Service.qml ----
   //
   // The shared shown-names fixture again, now through the service's OWN
-  // functions: the IPC `status` reply (statusSummary -> nowPlayingSummary ->
-  // Model.ipcNowPlaying), the `channel` verb's reply (tuneByNumber), and the
-  // four notices that quote a channel's name, each posted by the path that
-  // posts it in the shell (raiseStreamFailure, a refused `player start`,
-  // raisePlayerStopped, raiseOutputFailure) and read off the argv the shell
-  // runs. Red on dev 2727179: every one of them carried the raw name.
+  // functions: the IPC `status` and `channel` replies as the shipping verbs
+  // print them (h.ipc, compiled from the IpcHandler's own text: status ->
+  // statusSummary -> nowPlayingSummary -> Model.ipcNowPlaying, channel ->
+  // tuneByNumber), and the four notices that quote a channel's name, each
+  // posted by the path that posts it in the shell (raiseStreamFailure, a
+  // refused `player start`, raisePlayerStopped, raiseOutputFailure) and read
+  // off the argv the shell runs. Red on dev 2727179: every one of them
+  // carried the raw name.
   {
     const SHOWN = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/shown-names.json"), "utf8")).names
     const bodies = h => h.detached.filter(a => a[0] === "omarchy-notification-send").map(a => a[a.indexOf("-r") + 1] + " " + a[a.length - 1])
@@ -16856,8 +16876,8 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
         h.root.chnoIndex = M.buildChnoIndex(h.root.channels)
         h.root.playerUp = true
         h.root.nowPlaying = { id: "t:x", name: v.name, group: v.name, launchedFrom: M.groupScopeId(v.name), since: 3 }
-        const np = h.root.statusSummary().nowPlaying
-        const tuned = h.root.tuneByNumber("101")
+        const np = JSON.parse(h.ipc.status()).nowPlaying
+        const tuned = JSON.parse(h.ipc.channel("101"))
         h.detached.length = 0
         h.root.notifiedFailureId = ""
         h.root.raiseStreamFailure({ id: "t:x", name: v.name }, "loading failed"); h.drain()
@@ -16895,6 +16915,50 @@ checkCall("D-TRK-8: the recovery re-ask is capped per channel, and the cap reset
       const told = bodies(h)
       return [told.length, told.filter(t => /[<>]/.test(t)), told.every(t => t.indexOf("&lt;a href=\"x\"&gt;Renew&lt;/a&gt;&lt;br&gt;&lt;b&gt;B&lt;/b&gt; &amp; co") !== -1)]
     }, [4, [], true])
+
+    // F-SINK-16: the replies read off the shipping verbs (h.ipc), never
+    // recomposed here. The playing channel's name and group hold U+009B (an
+    // 8-bit CSI to a terminal that honours C1), U+009D (OSC), U+009C (ST),
+    // U+0085 (NEL) and DEL; the reply must carry none of them raw and parse
+    // back to the same value. Red on dev 2727179: the handler called
+    // JSON.stringify, which passes DEL and C1 through.
+    const C1 = "News\u009b31mRED\u0085x\u009d52;c;aGk=\u009c\u007f"
+    checkCall("F-SINK-16 (service): the IPC `status` and `channel` replies, as the shipping verbs print them, carry no DEL or C1 control when the playing channel's name and group hold them, and parse back to the same value", () => {
+      const h = bootPlayer()
+      const index = M.keyedMap()
+      index["t:c"] = { id: "t:c", name: C1, url: "http://s.example.test/c.ts", group: C1 }
+      h.root.channelIndex = index
+      h.root.channels = M.prepareChannels([{ id: "t:c", name: C1, group: C1, url: "http://s.example.test/c.ts", chno: "101" }])
+      h.root.chnoIndex = M.buildChnoIndex(h.root.channels)
+      h.root.playerUp = true
+      h.root.nowPlaying = { id: "t:c", name: C1, group: C1, launchedFrom: M.groupScopeId(C1), since: 3 }
+      const status = h.ipc.status()
+      const channel = h.ipc.channel("101")
+      const np = JSON.parse(status).nowPlaying
+      return [/[\u007f-\u009f]/.test(status), np.name === C1, np.group === C1, np.launchedFrom === "g:" + C1,
+              /[\u007f-\u009f]/.test(channel), JSON.parse(channel).name === M.sinkText(h.root.channels[0].name),
+              JSON.parse(channel).name.indexOf("\u009b") !== -1]
+    }, [false, true, true, true, false, true, true])
+
+    // And EVERY verb, so a verb added later on JSON.stringify is red here and
+    // not unseen: each is called with the functions it reports through
+    // answering C1 controls (the side-effecting ones made inert), and no
+    // reply may carry one raw. The second half names the verbs that answer
+    // JSON, which is what makes the first half non-vacuous.
+    checkCall("F-SINK-16 (service): every IPC verb, called with what it reports answering C1 controls, prints none of them raw -- and the verbs that answer JSON (back, channel, forward, live, pip, status) carry them escaped", () => {
+      const h = bootPlayer()
+      const loud = () => ({ ok: false, text: C1, nested: { name: C1, list: [C1] } })
+      for (const fn of ["statusSummary", "tuneByNumber", "requestPip", "seekBy", "seekLive", "seekRefuse"]) h.root[fn] = loud
+      h.root.play = () => false
+      h.root.stop = () => {}
+      h.root.zap = () => false
+      h.root.refresh = () => {}
+      h.root.togglePause = () => ""
+      const verbs = Object.keys(h.ipc).sort()
+      const replies = verbs.map(v => [v, String(h.ipc[v]("1"))])
+      return [verbs.length, replies.filter(r => /[\u007f-\u009f\u2028\u2029]/.test(r[1])).map(r => r[0]),
+              replies.filter(r => r[1].indexOf("\\u009b") !== -1).map(r => r[0])]
+    }, [13, [], ["back", "channel", "forward", "live", "pip", "status"]])
   }
 })()
 

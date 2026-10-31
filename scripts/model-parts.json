@@ -749,6 +749,7 @@
         "barTooltip",
         "barAccessibleName",
         "ipcNowPlaying",
+        "ipcJson",
         "guideSurface",
         "firstRunAllowed",
         "footerCounts",

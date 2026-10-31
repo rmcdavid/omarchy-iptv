@@ -184,10 +184,10 @@ export {
   noMatchesTitle
 } from "./model/contrast.mjs"
 export {
-  barGlyph, barTooltip, barAccessibleName, ipcNowPlaying, guideSurface,
-  firstRunAllowed, footerStatus, footerHints, formHints, keyboardMapUntabled,
-  hideMeaning, sameEscape, verbForKey, setKeyRow, keyboardMap,
-  keyboardMapKeys
+  barGlyph, barTooltip, barAccessibleName, ipcNowPlaying, ipcJson,
+  guideSurface, firstRunAllowed, footerStatus, footerHints, formHints,
+  keyboardMapUntabled, hideMeaning, sameEscape, verbForKey, setKeyRow,
+  keyboardMap, keyboardMapKeys
 } from "./model/view.mjs"
 export {
   CACHE_LAYOUT, MAX_SOURCES, MAX_SOURCE_URL, MAX_LABEL, MAX_XTREAM_SERVER,

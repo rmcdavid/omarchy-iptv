@@ -130,6 +130,24 @@ function ipcNowPlaying(np, chno) {
            launchedFrom: sinkText(np.launchedFrom), since: np.since }
 }
 
+// Every JSON reply of the IPC handler. F-SINK-16 (2026-10-29):
+// JSON.stringify escapes C0 controls, ESC among them, and leaves DEL and the
+// C1 block (U+0080..U+009F) as they are -- and the helper keeps C1 controls
+// a playlist puts in a name or a group (measured: U+009B, U+009C, U+009D and
+// U+0085 survive the parse into channels.json). The reply is printed by
+// `omarchy-shell ipc call` into whatever terminal ran it, where U+009B is
+// an 8-bit CSI and U+009D an OSC. Escaped as `\u009b`, the reply is the same
+// JSON value to any parser and carries no control a terminal reads.
+// U+2028 and U+2029 are escaped with them, so the reply is also a valid
+// JavaScript string literal in any engine.
+function ipcJson(value) {
+  var text = JSON.stringify(value === undefined ? null : value)
+  return text.replace(/[\u007f-\u009f\u2028\u2029]/g, function (c) {
+    var hex = c.charCodeAt(0).toString(16)
+    return "\\u" + "0000".substring(hex.length) + hex
+  })
+}
+
 // ------------------------------------------------------------ guide body
 
 // Which single surface the guide body renders (UX 4.4 - 4.6 / 6.3 and
@@ -741,9 +759,9 @@ function keyboardMapKeys(opts) {
   return out
 }
 export {
-  barGlyph, barTooltip, barAccessibleName, ipcNowPlaying, guideSurface,
-  firstRunAllowed, footerCounts, footerDegraded, footerStatus, arrowVerb,
-  footerHints, scopeVerb, formHints, keyboardMapUntabled, hideMeaning,
-  escapeOutcome, sameEscape, verbForKey, setKeyRow, mergeKeyRows, keyboardMap,
-  keyboardMapKeys
+  barGlyph, barTooltip, barAccessibleName, ipcNowPlaying, ipcJson,
+  guideSurface, firstRunAllowed, footerCounts, footerDegraded, footerStatus,
+  arrowVerb, footerHints, scopeVerb, formHints, keyboardMapUntabled,
+  hideMeaning, escapeOutcome, sameEscape, verbForKey, setKeyRow, mergeKeyRows,
+  keyboardMap, keyboardMapKeys
 }
