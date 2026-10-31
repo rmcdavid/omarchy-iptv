@@ -124,6 +124,19 @@ class Judge(unittest.TestCase):
         self.assertEqual(1, len(problems), problems)
         self.assertIn('Model.zzDivided', problems[0])
 
+    def test_a_division_after_a_keyword_named_property_is_not_a_regular_expression(self):
+        """`return /x/` opens a regex; `page.of / 2` divides. Read as a regex
+        the slash would take the rest of the line with it, the member in it
+        included, and nothing would say so."""
+        for lhs in ('page.of', 'root.in', 'item?.delete', 'x.return'):
+            problems, count = judge('Item { property real a: %s / 2 + Model.zzDivided / 3 }\n' % lhs)
+            self.assertEqual(1, count, lhs)
+            self.assertEqual(1, len(problems), (lhs, problems))
+            self.assertIn('Model.zzDivided', problems[0])
+        # The keyword itself still opens one: read as a division, the quote
+        # in it would open a string that never closes on the line.
+        self.assertEqual(([], 1), judge('Item { function f(s) { return /\'/.test(s) && Model.redactUrls(s) } }\n'))
+
     def test_someone_elses_property_of_the_same_name_is_not_judged(self):
         self.assertEqual(([], 1), judge('Item { property var a: [root.Model.zzOther, Model.redactUrls] }\n'))
 

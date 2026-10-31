@@ -136,6 +136,11 @@ def tokens(text):
             return True
         prev = out[-1]
         if prev.kind == 'ident':
+            # A keyword used as a property name (`page.of / 2`, `x?.in`) is a
+            # value, so the `/` after it divides: read as a regex it would
+            # swallow the rest of the line, a member in it included, silently.
+            if len(out) > 1 and out[-2].kind == 'punct' and out[-2].text in ('.', '?.'):
+                return False
             return prev.text in REGEX_AFTER_WORDS
         if prev.kind in ('num', 'str', 'regex'):
             return False
