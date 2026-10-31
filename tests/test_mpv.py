@@ -796,6 +796,36 @@ class ShownNamesTest(MpvTestCase):
         self.assertEqual(len(seen), len(names))
 
 
+class TitleControlsTest(MpvTestCase):
+    """F-SINK-16 (2026-10-29): the player's title carries no control
+    character. The playlist parse keeps a provider's C0 and C1 controls in a
+    channel name (measured: ESC, BEL, BS, DEL, U+009B and U+009D survive into
+    channels.json), apply_channel set them as mpv's `title`, and a toplevel
+    title is printed raw by the tools a user runs in a terminal. They are
+    dropped before the redaction, so a tab inside a password no longer
+    splits the URL (D-SINK-34's cost) on this sink either. Red on dev
+    2727179: the title carried every control and the whole URL."""
+
+    def test_title_and_media_title_carry_no_control_character(self):
+        name = "News\x1b]52;c;aGk=\x07 \x1b[2J\x08\x7f \x9b31m\x9d0;x\x9c (http://u5er:pa\tS3CRET@cdn.test/x)"
+        playlist = os.path.join(self.dir, "controls.m3u")
+        pathlib.Path(playlist).write_text('#EXTM3U\n#EXTINF:-1 tvg-id="ctl.test",%s\nhttp://stream.example.test/live/c.m3u8\n' % name,
+                                          encoding="utf-8")
+        code, _, _, stderr = run("playlist", "--url", playlist, "--cache-dir", self.cache)
+        self.assertEqual(code, 0, stderr)
+        server = self.start()
+        code, payload, _, stderr = self.play("--id", "t:ctl.test")
+        self.assertEqual(code, 0, stderr)
+        # The cache really holds the controls: this is the parse's output, not
+        # a name the test made up after it.
+        self.assertIn("\x1b", payload["name"])
+        self.assertIn("\x9b", payload["name"])
+        titles = [c[2] for c in server.commands if c[:2] == ["set_property", "title"]]
+        forced = [c[2] for c in server.commands if c[:2] == ["set_property", "force-media-title"]]
+        self.assertEqual(titles, ["$>News]52;c;aGk= [2J 31m0;x (http://cdn.test)"])
+        self.assertEqual(forced, ["News]52;c;aGk= [2J 31m0;x (http://cdn.test)"])
+
+
 class TlsVerificationTest(MpvTestCase):
     """D-SINK-16: apply_channel asserts the certificate properties, and REFUSES
     to load when it cannot make them safe.

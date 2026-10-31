@@ -460,7 +460,13 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     # (the shared shown-names fixture, dev branch, runs both). A name holding a
     # credentialed URL put the whole URL in the compositor's toplevel title,
     # where every client that lists windows reads it. `$>` stays (S-01).
-    shown = redact_urls(target["name"])
+    # F-SINK-16: and with no control character in it. The parse keeps a
+    # playlist's C0 and C1 controls in a name (ESC, BEL and U+009B measured),
+    # and a toplevel title is printed raw by tools a user runs in a terminal;
+    # a name never means anything by one, so none goes to the player. Dropped
+    # BEFORE the redaction, so a tab or a line break inside a password no
+    # longer splits the URL there (D-SINK-34's cost) on this sink.
+    shown = redact_urls(_CONTROL_CHARS.sub("", target["name"]))
     for prop, value in (("title", MPV_RAW_PREFIX + shown), ("force-media-title", shown)):
         ok, _ = client.try_command("set_property", prop, value)
         if not ok:
