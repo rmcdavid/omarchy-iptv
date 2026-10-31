@@ -204,7 +204,9 @@ fail=0
 # 80; no lane added a spec case, so the floor stays 80.
 # 2026-10-28, rc-host5 (D-PLY-37, D-PLY-36): 80 -> 81 --
 # test_playerOutputEndingAndNoticeSlots, red on 9e380ae.
-QML_SPEC_MIN=${QML_SPEC_MIN:-81}
+# 2026-10-31, rc-p2c (D-SINK-49): 81 -> 82 -- the escaped notification body
+# laid out as its plain text, red on dev 2727179; the spec runs 82.
+QML_SPEC_MIN=${QML_SPEC_MIN:-82}
 # 2074 -> 2075 on 2026-10-12: ab545f4's frozen-CHNO_NONE check arrived from
 # dev without its floor.
 # 2075 -> 2319 on 2026-10-12, D-SINK-19 round 10 (R20f): the chain's own
@@ -436,7 +438,11 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-81}
 # on sec-int): 3131 -> 3182 -- the destination, pin, classification and
 # format checks, every one red on the tree before its lane or on a mutant
 # (QA-RESULTS "The whole-codebase security review"); the suite runs 3182.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3182}
+# 2026-10-31, the security round's second phase (lane-p2b, rc-p2a, rc-p2c on
+# sec-int2): 3182 -> 3233 -- the private-argument, redaction, IPC and EPG id
+# checks, each red on dev 2727179 or on a mutant (QA-RESULTS "The security
+# review's second phase"); the suite runs 3233.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3233}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -714,7 +720,11 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3182}
 # test_destinations.py, test_mpv_options.py, test_stub_mpv_pins.py and the
 # pin, read-back, gate and stub cases beside them, red first in their lanes
 # or on a mutant; the suite runs 1789.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1789}
+# 2026-10-31, the second phase (same merges): 1789 -> 1841 -- test_epg_id_controls,
+# test_epg_dtd_subset, test_epg_episode_digits, test_logo_escapes,
+# test_logo_scans and the args-from-env, options-file and title cases, red
+# first in their lanes or on a mutant; the suite runs 1841.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1841}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.

@@ -248,11 +248,30 @@ requests and raise the batch.
      (2026-10-17, QA-RESULTS "D-REL-7: the helper split, rebuilt on today's
      dev"). An earlier version of this rule said
      nothing a child does can shorten it; that was false by about five times.
+     **[2026-10-31, D-SINK-50: the helper now starts as `python3 -I`
+     (`Model.helperArgv`, every builder held by a node check), so a
+     sitecustomize or `ctypes.py` on PYTHONPATH, and user-site `.pth` files,
+     no longer run inside the window -- the first two were measured running
+     before the shield without `-I`. Re-measured with
+     `-I` by rc-p2a, 12 interleaved runs per arm, twice, at load 2.2-3.0:
+     medians 24.95 and 23.10 ms, range 21.2-39.8 ms.]**
      Readable in that window by same-uid processes only. State it as a
      bounded, measured window under a stated load, never as zero. The fetch verbs start no child process,
      so nothing inherits the variable -- the helper forks mpv only in
      `player start`, on a Process the service never hands this environment;
-     keep BOTH halves that way. In QML, assign
+     keep BOTH halves that way. **[2026-10-31, D-SINK-47 and -48: the
+     player's Process IS now handed an environment, `OMARCHY_IPTV_ARGS`, a
+     JSON list of the private arguments (mpvArgs tokens, cache directory,
+     ids, scopes, keys -- never the source URL), and the helper removes it from its
+     own environment on every run before anything forks, so neither mpv nor
+     wl-paste inherits it; the kept tokens reach mpv in a 0600 `--include`
+     file removed once the player answers. Every helper spawn that carries
+     a private value goes through `Service.runHelper`, which assigns
+     `Model.helperSpawn`'s command and environment and then running; the
+     six kinds that bypass it carry nothing private, held by a node check.
+     mpvArgs tokens, source keys, `u:` ids and scopes are on no argv of a
+     process this release starts (an older player adopted after the
+     upgrade keeps its own), and new sources get random keys.]** In QML, assign
      `<proc>.environment = Model.fetchEnvironment(<url>)` immediately before
      every `running = true`, `{}` included on a run that carries no URL:
      re-assignment REPLACES the previous value, and that is what keeps a
@@ -602,6 +621,14 @@ requests and raise the batch.
      zero screen or zero frame is unreadable, so refused. Rule 15 over the
      other three types, read in their sources and not run: none sizes from a
      field the reader does not read.
+     **And the decoder's TIME has an axis of its own** (D-LOGO-25, the
+     review's critic's question, measured by lane-p2b and fixed on `dev`
+     2026-10-31): a progressive JPEG is decoded scan by scan and nothing but
+     the byte cap bounded the scan count, at about 4.1 ms of CPU a refinement scan on
+     the shell's image reader thread, which every asynchronous image in the
+     shell waits behind. A JPEG with more than `MAX_JPEG_SCANS` = 64 scans,
+     counted over the whole file, is refused at the gate and swept from the
+     cache; the encoders measured write 6 to 10.
    - **The clipboard, as an INPUT that blocks** (D-CLIP-1). Every editable
      QtQuick `TextInput` subscribes to `QClipboard::dataChanged` at
      construction, and on the RELEASED Qt 6.11.2 that slot calls
@@ -660,6 +687,12 @@ requests and raise the batch.
      as `bad_xml` (one sentence, no URL), and hands ElementTree nothing until
      that parser has reached the root's start tag; no external DTD is read.
      It is the helper's only markup parser; the search is in QA-RESULTS.
+     **[2026-10-31, D-EPG-15: entities were not the only expansion. expat
+     copies an ATTLIST default onto every element that omits the
+     attribute, so a small internal subset multiplied the document all the
+     same; the reader now refuses ANY internal subset at the DOCTYPE's
+     start, before a declaration in it is read, and keeps the entity
+     refusal behind it.]**
    - **The core dump** (D-SINK-39, found by the lead reading F-HARNESS-45's
      evidence on 2026-10-25; fixed on `dev` 2026-10-26), which is the sink
      that opens when a child DIES rather than while it runs: the kernel hands
@@ -717,7 +750,10 @@ requests and raise the batch.
      stub wl-paste's own limits returned as the clipboard text, and a
      hand-started sleeper's limits before and after the adoption path.
      What remains, stated exactly: the journal entry (`COREDUMP_CMDLINE` is
-     the launch argv, URL-free by S-03; `COREDUMP_ENVIRON` is the shell's
+     the launch argv, URL-free by S-03 and, since D-SINK-47 (2026-10-31),
+     free of the user's mpvArgs tokens, which mpv reads from a file -- a
+     player started before that and adopted after keeps them until it is
+     restarted; `COREDUMP_ENVIRON` is the shell's
      whole environment, never handed a URL on the player's Process;
      `COREDUMP_OPEN_FDS` is sockets and pipes by inode, so a `file://`
      channel would show its path; `COREDUMP_PACKAGE_JSON` present); the

@@ -783,9 +783,10 @@ carry channel ids — most do — are not affected at all.
   itself; the channel is marked as failed in the guide instead, the next time
   you open it.
 - Channel names are shown as written, except that leading dashes are
-  stripped, a web address written into a name or a group is shown as its
-  host wherever the name appears (the guide, the bar, notifications,
-  `status`, the window title), control characters are left out of the
+  stripped, a web address written into a name or a group (one written
+  with its scheme, such as `http://`) is shown as its host wherever the
+  shell shows the name (the guide, the bar, notifications, `status`, the
+  window title), control characters are left out of the
   window title and notifications, and mpv property expansion is disabled
   for the window title.
 - The player window is rendered slightly translucent under the Omarchy
