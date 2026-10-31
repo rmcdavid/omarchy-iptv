@@ -997,8 +997,11 @@ with `-I` 26.2 ms median (23.6-29.2) and 25.85 (24.5-29.2), without it 26.2
 commit at a load average of 3.7-4.1, with `-I` 28.35 and 30.2 ms (22.6-36.2),
 without it 26.75 and 27.15 (23.9-36.4) -- `-I` changes the window by nothing
 the noise does not cover, because this session has no user site packages and
-no `PYTHONPATH`; it removes what such a session would add, and every number is
-inside the 22.9-40.1 ms stated above. Every run's reads ended in EACCES once
+no `PYTHONPATH`; it removes what such a session would add, and no run exceeded
+the 40.1 ms stated above as the window's upper end (the fastest, 22.6 ms, fell
+just under its lower one; the rc-p2a recheck on 2026-10-31 read 21.2-39.8 ms
+with `-I`, medians 24.95 and 23.1, at a load average of 2.2-3.0, so the lower
+end is the noise's, not a bound). Every run's reads ended in EACCES once
 shielded, 96 of 96. Readable by same-uid processes only in that
 window, as before. What remains: a player adopted after the upgrade keeps the
 tokens on its argv until it restarts; and the measurement is not valid inside
