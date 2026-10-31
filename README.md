@@ -782,8 +782,12 @@ carry channel ids — most do — are not affected at all.
   cannot raise a notification, because the notification service is the shell
   itself; the channel is marked as failed in the guide instead, the next time
   you open it.
-- Channel names are shown verbatim except that leading dashes are stripped
-  and mpv property expansion is disabled for the window title.
+- Channel names are shown as written, except that leading dashes are
+  stripped, a web address written into a name or a group is shown as its
+  host wherever the name appears (the guide, the bar, notifications,
+  `status`, the window title), control characters are left out of the
+  window title and notifications, and mpv property expansion is disabled
+  for the window title.
 - The player window is rendered slightly translucent under the Omarchy
   defaults. Omarchy exempts media players from its default opacity by class
   name, and ours is `omarchy-iptv` rather than `mpv`, so the exemption misses
@@ -862,11 +866,12 @@ carry channel ids — most do — are not affected at all.
 - A file the plugin was writing when it was stopped (a timeout, a source
   switch) can leave a `.tmp-` file beside it in the cache; one more than a
   day old is deleted the next time the plugin writes in that folder.
-- A guide-data file that defines XML entities of its own (an `<!ENTITY ...>`
-  declaration inside its `<!DOCTYPE ...>`) is refused with `refused the EPG:
-  it declares an XML entity, which XMLTV feeds never do`. A size limit on
-  the download cannot bound what such definitions expand to, and XMLTV
-  files never contain them; the usual `<!DOCTYPE tv SYSTEM "xmltv.dtd">`
+- A guide-data file that carries declarations of its own (anything inside
+  `[...]` in its `<!DOCTYPE ...>`, such as an `<!ENTITY ...>` or
+  `<!ATTLIST ...>`) is refused with `refused the EPG: it carries a DTD
+  internal subset, which XMLTV feeds never do`. A size limit on the
+  download cannot bound what such declarations expand to, and XMLTV files
+  never contain them; the usual `<!DOCTYPE tv SYSTEM "xmltv.dtd">`
   line is fine (a marketplace reviewer reported this against 0.14.1).
 
 - What a playlist may make the player do is limited too. A `udp://` or

@@ -386,7 +386,7 @@ function statusReason(status) {
     // the parser's own text in the guide-data banner ("could not parse EPG
     // XML: not well-formed (invalid token): line 1, column 0") and the EPG
     // notification. `bad_xml` is also D-EPG-6's refusal of a feed that
-    // declares an XML entity: the same code, so the same sentence -- the
+    // carries a DTD internal subset (D-EPG-15; entities included): the same code, so the same sentence -- the
     // user's remedy is the same (the address does not serve a plain XMLTV
     // guide) and the journal keeps which it was. Both are the PROVIDER'S
     // (D-SRC-71's reading: the guide's own content), so they stay off
