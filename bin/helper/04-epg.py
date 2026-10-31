@@ -171,7 +171,13 @@ def episode_ns_text(raw: str) -> str:
         if index >= len(fields):
             break
         number = fields[index].split("/")[0].strip()
-        if number.isdigit():
+        # D-EPG-16 (2026-10-29): isdecimal, not isdigit. isdigit() is True
+        # for superscripts and circled digits, which int() refuses, so ONE
+        # programme numbered `\u00b2.3.` raised ValueError out of the parse
+        # and ended every fetch of that guide in `internal`. isdecimal() is
+        # exactly the characters int() reads, so every number that rendered
+        # before renders the same, and the rest are dropped, not guessed.
+        if number.isdecimal():
             out.append("%s%d" % (prefix, int(number) + 1))
     return " ".join(out)
 
@@ -765,6 +771,17 @@ def epg_parse_warnings() -> tuple[tuple[str, str, str], ...]:
     )
 
 
+def epg_skipped_warnings(skipped: int) -> list[str]:
+    """D-EPG-14: the counted sentence for window lines compute_now_next
+    skipped, which only a window an earlier helper wrote can hold; [] for
+    none. In the status and not in the window, because it describes this
+    recompute: the next fetch rewrites the window and it is gone."""
+    if not skipped:
+        return []
+    return [counted_sentence(skipped, "%d channel in the cached guide could not be read and was skipped",
+                             "%d channels in the cached guide could not be read and were skipped")]
+
+
 def claim_channel(claim: dict[str, tuple[int, str]], pending: dict[str, list[Any]],
                   key: str, rank: int, cid: str) -> int:
     """May `cid` (matched at strategy `rank`) own the playlist channel `key`?
@@ -1129,10 +1146,14 @@ def write_window_lines(path: str, meta: dict[str, Any], lines: list[str]) -> Non
 
 
 def load_window(path: str) -> dict[str, Any] | None:
-    """-> the header keys plus "lines" (the raw channel lines), or None."""
+    """-> the header keys plus "lines" (the raw channel lines), or None.
+
+    None as well for a file that is not UTF-8 (D-EPG-14's rule 15: the
+    helper writes none such, and a damaged one is a cache to refetch, not
+    main()'s `internal` on every recompute)."""
     try:
         text = read_regular_text(path)
-    except OSError:
+    except (OSError, ValueError):
         return None
     head, _, body = text.partition("\n")
     try:
@@ -1277,6 +1298,37 @@ def programme_json(record: str) -> str:
     return '{"title":' + record[22:] + ',"start":' + start + ',"stop":' + stop + "}"
 
 
+def _window_id_ok(cid: str) -> bool:
+    """Is `cid` -- a window line up to its first TAB -- one JSON string
+    literal, as window_line writes it? D-EPG-14: a window an earlier helper
+    wrote can hold a playlist tvg-id with a raw control character in it, and
+    compute_now_next pastes this text into epg-now.json as it stands, so a
+    line whose id does not parse is skipped rather than allowed to make the
+    whole file invalid. Strict, as the shell's JSON.parse is: a raw control
+    character inside a string is not JSON. The common id -- printable, no
+    quote, no backslash -- is a literal by inspection, which keeps the
+    10,000-channel recompute from paying a decode a line."""
+    if len(cid) < 2 or cid[0] != '"' or cid[-1] != '"':
+        return False
+    inner = cid[1:-1]
+    if inner.isprintable() and '"' not in inner and "\\" not in inner:
+        return True
+    try:
+        return isinstance(json.loads(cid), str)
+    except ValueError:
+        return False
+
+
+def _record_ok(record: str) -> bool:
+    """Does `record` carry the fixed-width head its readers slice (see
+    EPG_RECORD_SEP): ten ASCII digits, a space, ten ASCII digits, a space,
+    and a title after them? D-EPG-14: a window line split at the wrong TAB
+    put an id's tail where the start belongs, and programme_json's int()
+    raised on it, which ended every recompute as `internal`."""
+    return (len(record) >= 24 and record[10] == " " == record[21] and record[:10].isdigit()
+            and record[11:21].isdigit() and record[:21].isascii())
+
+
 def _untitled(record: str) -> bool:
     """Is the record's title the empty string? The title's JSON value sits
     at index 22 (EPG_RECORD_SEP's contract), bare, so an empty one is `""`
@@ -1284,14 +1336,24 @@ def _untitled(record: str) -> bool:
     return record[22:24] == '""' and (len(record) == 24 or record[24] == ",")
 
 
-def compute_now_next(window: dict[str, Any], now: int) -> tuple[list[str], int, int]:
-    """-> (JSON fragments `"id":{"now":...,"next":...}`, validUntil, channels with a `now`).
+def compute_now_next(window: dict[str, Any], now: int) -> tuple[list[str], int, int, int]:
+    """-> (JSON fragments `"id":{"now":...,"next":...}`, validUntil, channels
+    with a `now`, lines skipped as unreadable).
 
     `now` is the programme with the latest start <= now that has not ended
     (a few earlier records are probed so an overlapped long programme still
     counts); `next` is the first programme starting after now. The hot path
     for 10k channels: fixed-width record prefixes make bisect and string
     comparison enough, and the output is assembled as text.
+
+    D-EPG-14: a line is SKIPPED, and counted, when its id is not one JSON
+    string literal or a record it would write lacks the fixed-width head.
+    window_line has encoded every id since that fix, so a window this helper
+    wrote holds no such line; one an earlier helper wrote can (a playlist
+    tvg-id carrying a TAB, a CR or another C0 control), and it used to end
+    the 5-minute recompute in `internal` or write an epg-now.json no reader
+    could parse, for every channel of the source, until the next fetch. The
+    record's tail is not re-checked: record_body has always encoded it.
     """
     sep = EPG_RECORD_SEP
     bisect_right = bisect.bisect_right
@@ -1299,10 +1361,14 @@ def compute_now_next(window: dict[str, Any], now: int) -> tuple[list[str], int, 
     now_key = now_str + "~"
     boundary = "%010d" % (now + EPG_VALID_MAX)
     now_count = 0
+    skipped = 0
     fragments: list[str] = []
     for line in window["lines"]:
         cid, tab, blob = line.partition("\t")
         if not tab:
+            continue
+        if not _window_id_ok(cid):
+            skipped += 1
             continue
         records = blob.split(sep)
         index = bisect_right(records, now_key)
@@ -1316,6 +1382,10 @@ def compute_now_next(window: dict[str, Any], now: int) -> tuple[list[str], int, 
                 break
             probe -= 1
         following = records[index] if index < len(records) else None
+        if (current is not None and not _record_ok(current)) or (
+                following is not None and not _record_ok(following)):
+            skipped += 1
+            continue
         # R31c (D-EPG-11): an entry is written only with a TITLED now or
         # next, because the shell counts an id as covered by its presence in
         # the file's index and never reads the titles to decide. parse_xmltv
@@ -1339,11 +1409,13 @@ def compute_now_next(window: dict[str, Any], now: int) -> tuple[list[str], int, 
             if following[:10] < boundary:
                 boundary = following[:10]
         fragments.append(cid + ":{" + ",".join(parts) + "}")
-    return fragments, max(int(boundary), now + 1), now_count
+    return fragments, max(int(boundary), now + 1), now_count, skipped
 
 
-def write_epg_now(directory: str, window: dict[str, Any], now: int) -> tuple[int, int]:
-    fragments, valid_until, now_count = compute_now_next(window, now)
+def write_epg_now(directory: str, window: dict[str, Any], now: int) -> tuple[int, int, int]:
+    """-> (validUntil, channels with a `now`, window lines skipped as
+    unreadable; compute_now_next, D-EPG-14)."""
+    fragments, valid_until, now_count, skipped = compute_now_next(window, now)
     head = json.dumps({
         "version": 1,
         "generatedAt": now,
@@ -1357,12 +1429,16 @@ def write_epg_now(directory: str, window: dict[str, Any], now: int) -> tuple[int
     # the lines (Model.parseEpgNowStore) and parses one entry when a row asks.
     # The header line ends with `,"channels":{`, each fragment line carries a
     # trailing comma except the last, and the closing line is `}}`. A
-    # fragment never holds a raw newline: ids are folded of control
-    # characters at the parse and every value is JSON-encoded.
+    # fragment never holds a raw newline or any other C0 control: every id
+    # and every value is JSON-encoded (an id by window_line since D-EPG-14,
+    # 2026-10-29 -- the guide's ids are also folded of control characters at
+    # the parse, and the playlist's tvg-ids, which key the window whenever a
+    # playlist is loaded, are not), and a line of an older window whose id
+    # does not parse is skipped by compute_now_next.
     body = ",\n".join(fragments)
     text = head[:-1] + ',"channels":{\n' + (body + "\n" if body else "") + "}}\n"
     write_text_atomic(os.path.join(directory, EPG_NOW_FILE), text)
-    return valid_until, now_count
+    return valid_until, now_count, skipped
 
 
 def cmd_epg(args: argparse.Namespace) -> int:
@@ -1379,7 +1455,7 @@ def cmd_epg(args: argparse.Namespace) -> int:
     cached = False
     refresh_error: OSError | None = None
     from_cache = False
-    valid_until = now_count = 0
+    valid_until = now_count = skipped = 0
     # D-M3U-1: bounded before the cached window is read or a guide fetched.
     held = limit_memory(EPG_PRELOAD)
     try:
@@ -1404,7 +1480,7 @@ def cmd_epg(args: argparse.Namespace) -> int:
                 # then tries the same file once more from the window, and
                 # logs that failure rather than raising it.
                 try:
-                    valid_until, now_count = write_epg_now(directory, window, now)
+                    valid_until, now_count, skipped = write_epg_now(directory, window, now)
                 except FolderUnusable:
                     raise
                 except OSError as io_error:
@@ -1443,6 +1519,8 @@ def cmd_epg(args: argparse.Namespace) -> int:
         cached = os.path.isfile(window_path)
     if error is None:
         assert window is not None
+        for sentence in epg_skipped_warnings(skipped):
+            log("epg: %s" % sentence)
         fetched_at = int(window.get("fetchedAt") or 0)
         status = {
             "ok": True,
@@ -1473,7 +1551,7 @@ def cmd_epg(args: argparse.Namespace) -> int:
             "epgChannels": window.get("epgChannels", 0),
             "programmeCount": window.get("programmeCount", 0),
             "nowCount": now_count,
-            "warnings": list(window.get("warnings") or []),
+            "warnings": list(window.get("warnings") or []) + epg_skipped_warnings(skipped),
             "stale": from_cache and (now - fetched_at > args.ttl),
             "error": None,
         }

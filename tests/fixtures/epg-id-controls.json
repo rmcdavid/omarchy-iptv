@@ -1,0 +1,21 @@
+{
+  "comment": "D-EPG-14 (2026-10-29), one fixture for both languages. Playlist tvg-ids carrying C0 controls (TAB, CR, NUL, SOH, VT, FF, US), DEL, NEL (U+0085), U+2028 and U+2029, each INSIDE the id (str.strip takes them at the edges), beside a plain id. tests/test_epg_id_controls.py and tests/Model.test.js each write the same playlist and guide from it -- one channel per id, named 'Fixture channel <case>', and a guide channel g<index> declaring that name, so the window and epg-now.json are keyed by the RAW playlist tvg-id -- run the SHIPPING helper's playlist and epg verbs over them, and read what it wrote: json.loads, epg --now-only, and Model.parseEpgNowStore / Model.epgEntry. Until D-EPG-14 the helper wrote every C0 control raw: one such id made epg-now.json invalid for the whole source, and a TAB ended the fetch in `internal`. DEL, NEL, U+2028 and U+2029 are valid raw inside a JSON string and split no line any reader splits, so they pin that nothing needs to change for them. ASCII only: every character is a \\u escape.",
+  "now": 1793232060,
+  "start": 1793232000,
+  "stop": 1793235600,
+  "nextStop": 1793239200,
+  "ids": [
+    {"case": "tab", "tvgId": "bad\u0009x"},
+    {"case": "cr", "tvgId": "bad\u000dx"},
+    {"case": "nul", "tvgId": "bad\u0000x"},
+    {"case": "soh", "tvgId": "bad\u0001x"},
+    {"case": "vt-ff", "tvgId": "bad\u000b\u000cx"},
+    {"case": "us", "tvgId": "bad\u001fx"},
+    {"case": "del", "tvgId": "bad\u007fx"},
+    {"case": "nel", "tvgId": "bad\u0085x"},
+    {"case": "ls", "tvgId": "bad\u2028x"},
+    {"case": "ps", "tvgId": "bad\u2029x"},
+    {"case": "backslash-tab", "tvgId": "back\\\u0009x"},
+    {"case": "plain", "tvgId": "plain.x"}
+  ]
+}

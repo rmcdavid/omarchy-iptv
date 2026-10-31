@@ -393,7 +393,10 @@ class EntityDeclarationTest(unittest.TestCase):
             with self.assertRaises(helper.HelperError, msg=prolog) as caught:
                 self.parse(prolog)
             self.assertEqual(caught.exception.code, "bad_xml", prolog)
-            self.assertIn("entity", caught.exception.message, prolog)
+            # D-EPG-15: refused at the DOCTYPE's start, for carrying an
+            # internal subset at all, before the declaration inside it is
+            # read; the entity refusal stays behind it as the second layer.
+            self.assertIn("internal subset", caught.exception.message, prolog)
 
     def test_an_external_dtd_is_never_read(self):
         # What the guard rests on: a declaration can only reach ElementTree
@@ -416,7 +419,7 @@ class EntityDeclarationTest(unittest.TestCase):
             self.assertEqual(code, 1)
             self.assertEqual(status["error"]["code"], "bad_xml")
             message = status["error"]["message"]
-            self.assertIn("entity", message)
+            self.assertIn("internal subset", message)   # D-EPG-15, as above
             self.assertNotIn(tmp, message + stderr)
             self.assertEqual(message.count(". "), 0, message)
 
@@ -742,7 +745,8 @@ class EpgNowLineShapeTest(unittest.TestCase):
                 "restricted": False, "channelTotal": None, "matched": None, "epgChannels": len(channels),
                 "programmeCount": 0, "warnings": []}
         helper.write_window(os.path.join(tmp, helper.EPG_WINDOW_FILE), meta, channels)
-        valid_until, now_count = helper.write_epg_now(tmp, helper.load_window(os.path.join(tmp, helper.EPG_WINDOW_FILE)), now)
+        valid_until, now_count, skipped = helper.write_epg_now(tmp, helper.load_window(os.path.join(tmp, helper.EPG_WINDOW_FILE)), now)
+        self.assertEqual(skipped, 0, "a window this helper wrote has no unreadable line (D-EPG-14)")
         with open(os.path.join(tmp, "epg-now.json"), encoding="utf-8") as fh:
             return fh.read(), now_count
 

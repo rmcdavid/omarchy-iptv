@@ -162,7 +162,7 @@
       "id": "epg-declares-entity",
       "damage": "fresh",
       "argv": ["epg", "--url", "{fixtures}/epg-entity.xml", "--cache-dir", "{dir}", "--now", "1789246800"],
-      "reply": {"ok": false, "kind": "epg", "error": {"code": "bad_xml", "message": "refused the EPG: it declares an XML entity, which XMLTV feeds never do"}, "sourceHost": "local file", "fetchedAt": null, "stale": false, "matched": null, "channelTotal": null, "durationMs": "{int}"},
+      "reply": {"ok": false, "kind": "epg", "error": {"code": "bad_xml", "message": "refused the EPG: it carries a DTD internal subset, which XMLTV feeds never do"}, "sourceHost": "local file", "fetchedAt": null, "stale": false, "matched": null, "channelTotal": null, "durationMs": "{int}"},
       "reason": "Not a valid XMLTV guide",
       "host": "kept"
     },

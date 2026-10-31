@@ -382,7 +382,11 @@ class DestinationPolicy:
         port_text = (os.environ.get(HOME_PORT_ENV) or "").strip()
         # D-SINK-57: a port that is not 1..65535 in digits is no port, and a
         # loopback home with no port matches nothing (own_host_match).
-        port = int(port_text) if port_text.isdigit() and len(port_text) <= 5 and 0 < int(port_text) < 65536 else None
+        # isascii as well (D-EPG-16's rule 15): isdigit() is True for a
+        # superscript, which int() refuses. The shell sets this from a URL it
+        # validated, so no provider reaches it; the shape is closed anyway.
+        port = (int(port_text) if port_text.isascii() and port_text.isdigit() and len(port_text) <= 5
+                and 0 < int(port_text) < 65536 else None)
         return cls(label, origin, (os.environ.get(HOME_HOST_ENV) or "").strip(),
                    (os.environ.get(HOME_CLASS_ENV) or "").strip(), home_port=port)
 
@@ -933,7 +937,20 @@ class EntityRefusingReader:
     common, and passes), so the first read runs the prolog through its own
     expat parser, whose EntityDeclHandler refuses general and parameter
     entities alike, and hands the parse nothing until that parser reaches the
-    root's start tag: a declaration can only come before it."""
+    root's start tag: a declaration can only come before it.
+
+    D-EPG-15 (2026-10-29): an entity is not the only declaration that
+    expands. An ATTLIST default is copied by expat onto every element that
+    omits the attribute, so a small internal subset multiplied every element
+    of the guide by its default -- a 270 KB guide drove the verb to its
+    memory limit, and a smaller default only cost time, bounded by the
+    service's watchdog. So the prolog parser refuses the INTERNAL SUBSET
+    itself, at the DOCTYPE's start (StartDoctypeDeclHandler is called before
+    a declaration inside it is read), whatever it declares: XMLTV feeds never
+    carry one, and one rule closes ATTLIST and any declaration kind nobody
+    has thought of yet. A DOCTYPE without a subset -- `<!DOCTYPE tv SYSTEM
+    "xmltv.dtd">` -- passes as it always did, and the DTD it names is never
+    read. The entity handler stays, as the second layer."""
 
     class Root(Exception):
         pass
@@ -950,10 +967,15 @@ class EntityRefusingReader:
         def declared(*_: Any) -> None:
             raise HelperError("bad_xml", "refused the EPG: it declares an XML entity, which XMLTV feeds never do")
 
+        def doctype(_name: Any, _system: Any, _public: Any, has_internal_subset: Any) -> None:
+            if has_internal_subset:
+                raise HelperError("bad_xml", "refused the EPG: it carries a DTD internal subset, which XMLTV feeds never do")
+
         def root(*_: Any) -> None:
             raise EntityRefusingReader.Root()
 
         parser = xml.parsers.expat.ParserCreate()
+        parser.StartDoctypeDeclHandler = doctype
         parser.EntityDeclHandler = declared
         parser.StartElementHandler = root
         held = []
@@ -1105,10 +1127,23 @@ def write_json_atomic(path: str, payload: Any, private_dir: bool = True) -> None
 
 
 def json_string(text: str) -> str:
-    """JSON string literal; the common quote-free case skips the encoder."""
-    if '"' in text or "\\" in text:
-        return json.dumps(text, ensure_ascii=False)
-    return '"' + text + '"'
+    """JSON string literal, always through the encoder (D-EPG-14).
+
+    It used to skip the encoder when `text` held no quote and no backslash,
+    which was right for the guide's own ids -- folded of every control
+    character at the parse -- and wrong for the window's other keys, the
+    playlist's tvg-ids, which make_channel only strips: a TAB, a CR or any
+    other C0 control inside one was written raw. A TAB moved the window
+    line's first-TAB split, a CR split the line on the next read, and any of
+    them made epg-now.json invalid JSON, so one such channel blanked the
+    whole source's guide. The encoder escapes all of them and changes no
+    other character (ensure_ascii=False), so every id that was written
+    correctly is written byte for byte as before. What it leaves raw -- DEL,
+    the C1 controls, U+2028 and U+2029 -- is valid inside a JSON string and
+    splits no line here: the window is split on LF alone and read with
+    universal newlines (LF, CR and CRLF), and the shell splits epg-now.json
+    on LF. The shared fixture epg-id-controls.json pins each of them."""
+    return json.dumps(text, ensure_ascii=False)
 
 
 # D-SINK-19 round 13, R23b, rule 15: every open() in this helper of a path

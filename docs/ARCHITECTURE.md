@@ -239,8 +239,29 @@ service holds the file's text and a null-prototype index from tvg-id to
 `[offset, length]` into it (`Model.parseEpgNowStore`), and a row parses
 its own entry when it asks (`Model.epgEntry`). An id may hold quotes,
 backslashes, non-ASCII and `__proto__` (its key is the JSON literal up to
-the unescaped closing quote); a fragment never holds a raw newline (ids are
-folded of control characters at the parse, every value is JSON-encoded).
+the unescaped closing quote); a fragment never holds a raw newline or any
+other C0 control (every id and every value is JSON-encoded).
+**[2026-10-29, D-EPG-14: the parenthesis said "ids are folded of control
+characters at the parse", which was true of the GUIDE's ids only. With a
+playlist loaded the window and this file are keyed by the PLAYLIST's
+tvg-ids, which `make_channel` only strips, and `json_string` skipped the
+encoder for an id with no quote and no backslash, so a TAB, a CR or any
+other C0 control inside one was written raw: one such id made the file
+invalid JSON and the store empty for every channel of the source while
+`epg` answered ok, and a TAB moved the window line's first-TAB split and
+ended the fetch, and every recompute, in `internal`. Every id is now
+ENCODED (`json.dumps`, non-ASCII kept), not folded, so no id changes and no
+favorite moves; and `compute_now_next` skips, and counts, a line of an
+older window whose id is not one JSON string literal or whose record lacks
+its fixed-width head, and the status says so in one counted warning
+(`1 channel in the cached guide could not be read and was skipped`) until
+the next fetch rewrites the window. DEL, the C1 controls, U+2028 and U+2029
+stay raw: valid inside a JSON string, and no reader here splits a line on
+them (the window on LF, read with universal newlines; this file on LF).
+Verified by one shared fixture, `tests/fixtures/epg-id-controls.json`, run
+through the shipping `playlist` and `epg` verbs and then `json.loads`
+(`tests/test_epg_id_controls.py`) and `Model.parseEpgNowStore` /
+`Model.epgEntry` (`tests/Model.test.js`).]**
 An entry is written only with a titled `now` or `next`
 (`compute_now_next` drops an untitled half; R31c), which is what lets the
 shell count a channel as covered by the index alone. A single-line file --
@@ -251,6 +272,17 @@ rewrites it in this shape. `epg-status.json` mirrors the playlist status shape w
 `bad_xml` with one sentence and no URL, before ElementTree reads a byte of
 it (D-EPG-6, security standard 2); a `<!DOCTYPE tv SYSTEM "xmltv.dtd">`
 line without an internal subset is accepted as it always was.
+**[2026-10-29, D-EPG-15: and so is a feed that carries an internal subset
+at all, whatever it declares: an entity is not the only declaration that
+expands, because expat copies an ATTLIST default onto every element that
+omits the attribute (a 270 KB guide reached the verb's memory limit, and an
+ATTLIST default could hand a programme a channel it never named). The
+prolog reader refuses the subset at the DOCTYPE's start, before any
+declaration in it is read -- `refused the EPG: it carries a DTD internal
+subset, which XMLTV feeds never do` -- and keeps the entity refusal behind
+it. Same code, same sentence on screen (`Not a valid XMLTV guide`). A
+DOCTYPE without a subset, after a comment or a processing instruction or
+not, still passes.]**
 **[2026-10-28, D-EPG-13: the EPG verb's two parse refusals have a sentence
 in `Model.statusReason`, and the user no longer reads the parser's text:
 `bad_xml` -- a feed that does not parse (`could not parse EPG XML: <expat's
@@ -3434,6 +3466,17 @@ Performance budget (10k channels):
    reached the root's start tag (D-EPG-6; XMLTV declares none). Verified by
    calling `parse_xmltv` and the `epg` verb over small documents, plain and
    gzip.
+   **[2026-10-29, D-EPG-15: "define text for the parser to expand" covers
+   more than entities. An ATTLIST default is expanded onto every element
+   that omits the attribute, so the prolog parser now refuses any internal
+   subset at the DOCTYPE's start (`StartDoctypeDeclHandler`), whatever it
+   declares; the entity refusal stays as the second layer. Verified by
+   calling `EntityRefusingReader`, `parse_xmltv` and the `epg` verb over
+   one-declaration documents, plain and gzip (`tests/test_epg_dtd_subset.py`),
+   and measured under `prlimit` on small guides: a 24 KB guide whose
+   8 KiB ATTLIST default lands on 4,000 elements peaked the verb at 46.8 MB
+   against 30.8 MB for the same guide without it before the fix, and is
+   refused at 30.1 MB after.]**
 3. Stream URLs are allow-listed by scheme (`http https rtmp rtmps rtsp udp rtp
    mms mmsh srt`); `file:`, `plugin:`, `javascript:` and option-looking lines
    (`-...`) are dropped and counted.
@@ -3593,6 +3636,23 @@ Performance budget (10k channels):
     screen or a zero frame is refused. Verified by calling `logo_dimensions`,
     `write_logo` and `logo_file_within_bounds` over GIFs of a few dozen bytes
     built in the test.
+    **[2026-10-29, D-LOGO-25: and the decoder's TIME has an axis of its own.
+    A progressive JPEG is decoded scan by scan, and a file within the byte
+    cap can carry thousands of scans. Measured on Qt 6.11.2 offscreen with
+    the row slot's `Image` and with libjpeg-turbo 3.2.0's `djpeg`, on files
+    of 1 to 512 scans: about 0.85 ms of CPU a first scan and 4.1 ms a
+    refinement scan, linear, on the shell's image reader thread, which
+    serialises: a second, ordinary image asked for 50 ms after a 512-scan
+    file was Ready 15 ms after it, at 2.1 s. So a JPEG is refused at the
+    gate (`logo_scans`, a host and two numbers) and swept from the cache
+    when it carries more than `MAX_JPEG_SCANS` = 64 scans, counted over ALL
+    of its bytes as every `FF DA` pair, an upper bound on the scans libjpeg
+    can start. 64 is above the most libjpeg's own progressive scripts write
+    for any component count it encodes (10 for YCbCr and 6 for grey,
+    measured with `cjpeg -progressive`). Verified by calling
+    `jpeg_scan_count`, `write_logo`, `logo_file_within_bounds` and
+    `logos --fetch` over JPEGs of a few hundred bytes built in the test
+    (`tests/test_logo_scans.py`).]**
 13. The shell process never subscribes to a global that another process can
     fill. The clipboard is the instance (D-CLIP-1): an editable `TextInput`
     subscribes to `QClipboard::dataChanged` and the released Qt reads the
@@ -4285,7 +4345,26 @@ Performance budget (10k channels):
     else. It is written when the run's deadline is first seen past, not
     only at the run's end, because a run the shell SIGTERMs (a switch, the
     setting off) reaches no `finally`; `cache logos-clear` removes it with
-    the folder, so the user's reset is a reset. Pinned by
+    the folder, so the user's reset is a reset.
+    **[2026-10-29, D-LOGO-24: the failures above did not include
+    http.client's own errors, which are not OSErrors and which urllib does
+    not wrap: a status line that is not one, a header line or
+    a header count over http.client's limits, a chunked body that does not
+    parse, and InvalidURL, raised before any connection for a logo URL
+    with a space or a control character in its path or a port that is not
+    a number. Each reached main()'s `internal`, ending the run before the
+    memo was written, so the same logo ended every later run and no logo
+    after it in channel order was ever fetched (and InvalidURL's text, which
+    quotes the path and query, was printed). `read_logo_response` now maps
+    them to `logo_fetch` with the class name only, as `read_http_response`
+    has since D-SRC-59; the run keeps a backstop that turns any other
+    exception of one logo's fetch or cached-file check into that logo's
+    `logo_fetch` (said once on stderr by class name), MemoryError and
+    `folder_unusable` excepted, which are the run's; and the memo's end-of-run
+    write is a `finally`, so whatever still ends the run records what it
+    learned first. Pinned by `tests/test_logo_escapes.py` over a TLS fixture
+    server (all six shapes) and doubles (the backstop, the memory refusal,
+    the cached-file check).]** Pinned by
     `tests/test_logo_run.py` `LogoFailureMemoTest` and the re-pinned
     `seen` case (eight cases red on a9d20f9, the starvation case among
     them: with the run's deadline lowered to one failed fetch's worth, two
@@ -4847,7 +4926,9 @@ Manual QA on the live shell (QA role, machine of record):
 11. EPG size: a 10k-channel XMLTV can exceed 100 MB; the helper must stream
     (`iterparse`) and cap at 64 MB compressed or bail with `too_large`. The
     cap bounds input, not expansion, so a feed that declares an entity is
-    refused (D-EPG-6, security standard 2).
+    refused (D-EPG-6, security standard 2). **[2026-10-29, D-EPG-15: and
+    one that carries any DTD internal subset, since an ATTLIST default
+    expands too.]**
 12. Vertical bars: the widget shows the glyph only (`vertical` check);
     first-class vertical layout is M2 per PRODUCT.md.
 

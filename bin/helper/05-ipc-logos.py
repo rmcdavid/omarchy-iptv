@@ -212,7 +212,8 @@ def logo_host(netloc: str) -> str:
     `https://cdn.test;sid=SECRET/a.png` is a valid URL whose authority is a
     credential, urllib hands it over whole in `netloc`, and this stopped at
     `:` alone -- so the survey the consent dialog is composed from and the
-    `refused a logo from %s` lines (logo_dimension_refusal, logo_chunks) named
+    `refused a logo from %s` lines (logo_dimension_refusal, logo_chunks; since
+    D-LOGO-25 logo_scans too) named
     `cdn.test;sid=secret`. The `@` test runs over the WHOLE netloc first:
     `cdn.test;u=p@evil` is refused by fetch_logo, so a cut that hid its `@`
     would count a host that is never contacted.
@@ -316,6 +317,19 @@ MAX_LOGO_FILES = 5000
 # 2048x2048.
 MAX_LOGO_SIDE = 4096
 MAX_LOGO_PIXELS = 4194304         # 2048 * 2048
+
+# The SCAN bound, D-LOGO-25 (2026-10-29): the dimension bound's CPU axis. A
+# progressive JPEG is decoded scan by scan, and a file within the byte cap
+# can carry thousands of scans. Measured on Qt 6.11.2 with an Image
+# declared as the row slot (offscreen) and with libjpeg-turbo 3.2.0's djpeg,
+# on files of 1 to 512 scans: about 0.85 ms of CPU a scan for first scans
+# and 4.1 ms for refinement scans, on the shell's image reader thread, which
+# every other asynchronous image in the shell queues behind.
+# _jpeg_dimensions stops at the frame header and never saw a scan. 64 is above the most libjpeg's own progressive scripts write for
+# any component count it encodes -- 10 for YCbCr, 6 for grey (measured with
+# cjpeg -progressive), 6 a component otherwise, at most 10 components -- and
+# costs at most about a quarter of a second at the dimension bound.
+MAX_JPEG_SCANS = 64
 
 # How much of a logo the cached-file sweep reads before asking the parsers
 # (R5). Every header they read sits either at a fixed offset -- PNG, GIF and
@@ -480,6 +494,22 @@ def fetch_logo(url: str, timeout: float, budget: float | None = None) -> tuple[b
 
 
 def read_logo_response(opener: Any, request: Any, timeout: float, host: str) -> tuple[bytes, str]:
+    """One logo's response under the type gate, or `logo_fetch` naming the
+    host and the error's CLASS only, never its text (rule 5).
+
+    D-LOGO-24 (2026-10-29): http.client's own errors are not OSErrors, and
+    urllib wraps only OSErrors, so they used to pass straight through to
+    main()'s `internal`, ending the whole run before the failure memo was
+    written -- and the same logo ended every later run the same way: a
+    status line that is not one (BadStatusLine), a header line or a header
+    count over http.client's limits (LineTooLong, HTTPException), a chunked
+    body that does not parse (IncompleteRead), and InvalidURL, raised before
+    any connection for a URL with a space or a control character in its
+    path or a port that is not a number -- whose text quotes the path and
+    query. read_http_response has caught them since D-SRC-59; this is the
+    same catch on the logo path, and the run keeps a backstop of its own
+    (fetch_logo_run) for whatever escapes next."""
+    import http.client
     import urllib.error
     try:
         with opener.open(request, timeout=timeout) as response:
@@ -489,7 +519,7 @@ def read_logo_response(opener: Any, request: Any, timeout: float, host: str) -> 
             data = response.read(MAX_LOGO_BYTES + 1)
     except HelperError:
         raise
-    except (urllib.error.URLError, OSError, ValueError) as error:
+    except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException) as error:
         raise HelperError("logo_fetch", "could not fetch a logo from %s: %s" % (host, error.__class__.__name__))
     return data, ctype
 
@@ -804,6 +834,27 @@ def logo_within_bounds(data: bytes, ctype: str) -> bool:
     return width * height <= MAX_LOGO_PIXELS
 
 
+def jpeg_scan_count(data: bytes) -> int:
+    """An UPPER bound on the scans a decoder runs over this JPEG (D-LOGO-25):
+    every occurrence of the byte pair FF DA. A scan starts only at an SOS
+    marker, and libjpeg finds a marker by reading 0xFF (any fill bytes) and
+    then its code, so every scan it can start is one of these pairs --
+    including one it reaches by skipping garbage, which a marker walk that
+    stopped at the garbage would miss. Entropy-coded data cannot hold the
+    pair (an 0xFF in it is followed by 0x00 or a restart marker), so the
+    count is exact for an ordinary file and over by one for an EXIF
+    thumbnail or a coincidence inside a table: an over-count only refuses
+    more. One linear pass in C, nothing decoded."""
+    return bytes(data).count(b"\xff\xda")
+
+
+def logo_scans_within_bound(data: bytes, ctype: str) -> bool:
+    """True for every type but JPEG; for a JPEG, its scan count is at most
+    MAX_JPEG_SCANS (D-LOGO-25). Over ALL of a file's bytes: a count over a
+    prefix is a lower bound and proves nothing."""
+    return ctype != "image/jpeg" or jpeg_scan_count(data) <= MAX_JPEG_SCANS
+
+
 def logo_dimension_refusal(url: str, data: bytes, ctype: str) -> str:
     """The refusal text: a HOST and numbers, never a URL (rule 5, R6)."""
     host = logo_host(urllib.parse.urlsplit(url).netloc or "") or "an unnamed host"
@@ -860,14 +911,17 @@ def logo_file_within_bounds(path: str) -> bool:
     ctype = logo_sniff_type(head)
     if ctype is None:
         return False
-    if logo_within_bounds(head, ctype):
-        return True
-    if len(head) < LOGO_HEADER_BYTES:
-        return False                      # that was the whole file
+    complete = len(head) < LOGO_HEADER_BYTES          # the small read was the whole file
+    # D-LOGO-25: a JPEG's scans are counted over the WHOLE file, so a JPEG
+    # the small read did not finish is read whole whatever its header says.
+    if logo_within_bounds(head, ctype) and (complete or ctype != "image/jpeg"):
+        return logo_scans_within_bound(head, ctype)
+    if complete:
+        return False
     whole = _read_logo_prefix(path, MAX_LOGO_BYTES + 1)
     if whole is None or len(whole) > MAX_LOGO_BYTES:
         return False                      # over the byte cap as well
-    return logo_within_bounds(whole, ctype)
+    return logo_within_bounds(whole, ctype) and logo_scans_within_bound(whole, ctype)
 
 
 # D-LOGO-13, raised by the marketplace maintainer against the shipped 0.13.6:
@@ -1007,6 +1061,11 @@ def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
     # for this anyway (R1).
     if not logo_within_bounds(data, ctype):
         raise HelperError("logo_dimensions", logo_dimension_refusal(url, data, ctype))
+    if not logo_scans_within_bound(data, ctype):
+        # D-LOGO-25: the same place, the same reason, the decoder's CPU.
+        host = logo_host(urllib.parse.urlsplit(url).netloc or "") or "an unnamed host"
+        raise HelperError("logo_scans", "refused a logo from %s: its JPEG carries %d scans, over the %d scan bound"
+                          % (host, jpeg_scan_count(data), MAX_JPEG_SCANS))
     if ctype == "image/png":
         # D-LOGO-13: only the canonical form is cached, and a PNG whose
         # chunks cannot be walked is not cached at all. Same place, same

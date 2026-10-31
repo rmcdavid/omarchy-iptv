@@ -1769,7 +1769,8 @@ class DetailFieldTest(unittest.TestCase):
         sep = helper.EPG_RECORD_SEP
         for records in (plain, rich):
             window = {"lines": ['"a.tv"\t' + sep.join(records)]}
-            fragments, valid_until, now_count = helper.compute_now_next(window, NOW)
+            fragments, valid_until, now_count, skipped = helper.compute_now_next(window, NOW)
+            self.assertEqual(skipped, 0)
             entry = json.loads("{" + fragments[0] + "}")["a.tv"]
             self.assertEqual(entry["now"]["title"], "P2")
             self.assertEqual(entry["next"]["title"], "P3")
