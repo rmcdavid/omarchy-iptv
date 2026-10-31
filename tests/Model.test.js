@@ -18362,8 +18362,8 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
   // escape in the settings is how one reaches the shell. A PAIRED surrogate
   // is one astral character and is kept.
   checkCall("D-SINK-47: a token holding a lone surrogate, high or low, is refused by the shell's filter (no options-file line can hold it); a paired one is a character and is kept", () =>
-    M.splitMpvArgs("--sub-font=x\ud800 --user-agent=a\udcffb --volume=5 --sub-font=café😀 --title-x=\ude00\ud83d"),
-    { args: ["--volume=5", "--sub-font=café😀"], rejected: ["--sub-font=x\ud800", "--user-agent=a\udcffb", "--title-x=\ude00\ud83d"],
+    M.splitMpvArgs("--sub-font=x\ud800 --user-agent=a\udcffb --volume=5 --sub-font=caf\u00e9\ud83d\ude00 --title-x=\ude00\ud83d"),
+    { args: ["--volume=5", "--sub-font=caf\u00e9\ud83d\ude00"], rejected: ["--sub-font=x\ud800", "--user-agent=a\udcffb", "--title-x=\ude00\ud83d"],
       warnings: ["mpvArg --sub-font refused: reserved by the plugin", "mpvArg --user-agent refused: reserved by the plugin", "mpvArg --title-x refused: reserved by the plugin"] })
   // Rule 15 over the spawns that do not pass through Service.runHelper --
   // the stop and the orphan check (Quickshell.execDetached, which is handed

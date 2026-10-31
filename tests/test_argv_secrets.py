@@ -128,9 +128,9 @@ class OptionsFileTest(unittest.TestCase):
             self.assertEqual((kept, rejected), ([], [token]), repr(token))
             with self.assertRaises(helper.HelperError):
                 helper.mpv_args_config([token])
-        astral = "--sub-font=café\U0001f600"
+        astral = "--sub-font=caf\u00e9\U0001f600"
         self.assertEqual(helper.filter_mpv_args([astral]), ([astral], []))
-        self.assertEqual(helper.mpv_args_config([astral]), "sub-font=%9%café\U0001f600\n")
+        self.assertEqual(helper.mpv_args_config([astral]), "sub-font=%9%caf\u00e9\U0001f600\n")
 
     def test_remove_is_quiet_and_complete(self):
         helper.write_mpv_args(self.path, ["--volume=50"])
