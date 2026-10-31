@@ -22,7 +22,9 @@ omarchy-reinstall-configs); OMARCHY_IPTV_DOC_ROOT points the document half at
 another tree, which is how the three document pins were proven red against
 fe40b2c, the tree before the sentences were written. A red after an Omarchy
 update is a re-measurement request (the citations are this machine's,
-omarchy 4.0.4-1), not a plugin defect.
+omarchy 4.0.6-1 since 2026-10-31; 4.0.4-1 before, when shell.qml's three
+FileView pins sat two lines higher, at 136-138, and every script pin was on
+the line it is on now), not a plugin defect.
 """
 import io
 import os
@@ -64,9 +66,9 @@ EXPECT = {
     ("omarchy-bar", 361): r"omarchy-shell shell setBarWidget",
     ("omarchy-refresh-shell", 9): r"^omarchy-bar defaults$",
     ("omarchy-plugin-enable", 85): r"omarchy-shell shell enablePlugin",
-    ("shell.qml", 136): r"path: shell\.userConfigPath",
-    ("shell.qml", 137): r"watchChanges: true",
-    ("shell.qml", 138): r"atomicWrites: true",
+    ("shell.qml", 138): r"path: shell\.userConfigPath",
+    ("shell.qml", 139): r"watchChanges: true",
+    ("shell.qml", 140): r"atomicWrites: true",
 }
 
 # Citations the Config line must make, whatever else it says: the four
@@ -78,7 +80,7 @@ REQUIRED_CONFIG_CITATIONS = {
     ("omarchy-shell-config", 57),
     ("omarchy-shell-config", 59),
     ("omarchy-bar", 361),
-    ("shell.qml", 138),
+    ("shell.qml", 140),
 }
 REQUIRED_BACKUP_CITATIONS = {
     ("omarchy-refresh-config", 32),

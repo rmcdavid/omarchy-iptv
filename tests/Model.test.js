@@ -2856,7 +2856,7 @@ checkCall("D-SINK-19: no owned write can put a URL in the host's file, and the g
     Model.RETIRED_SETTINGS.filter(function (k) { return keyPatch[k] !== undefined }).length,
     Model.RETIRED_SETTINGS.filter(function (k) { return logoPatch[k] !== undefined }).length,
     // the entry handed to updateEntryInline has them REMOVED, not emptied:
-    // the host stores exactly what we pass (shell.qml:1092)
+    // the host stores exactly what we pass (shell.qml:1095 on omarchy 4.0.6-1)
     Object.prototype.hasOwnProperty.call(entry, "playlistUrl"),
     Object.prototype.hasOwnProperty.call(entry, "epgUrl"),
     text.indexOf("s3cret"), text.indexOf("http"),
@@ -9565,10 +9565,10 @@ check("EPG warnings: a playlist warning still outranks an EPG one in the same fo
 
 // ---- D-LIVE-20 / D-LIVE-21: a plugin's own settings write, applied locally ----
 // The host hands a plugin `barConfig` from a `shellConfig` change handler
-// (shell.qml:66) that runs before the `barConfig` binding it reads
-// (shell.qml:109), so what a plugin sees is one shell.json write behind: a
-// plugin's own write, being the last one, never comes back at all. The
-// plugin lays its own successful write over the host's value until the host
+// (shell.qml:69 on omarchy 4.0.6-1) that runs before the `barConfig` binding
+// it reads (shell.qml:118), so what a plugin sees is one shell.json write
+// behind: a plugin's own write, being the last one, never comes back at all.
+// The plugin lays its own successful write over the host's value until the host
 // reports something else, so its UI is right at once and the echo, when it
 // does arrive, changes nothing.
 //
@@ -9597,7 +9597,8 @@ check("own write: reconcile treats the echo of our own value as no change at all
 
 // A `false` return from updateEntryInline is only a failure when the entry
 // cannot be rewritten at all; with a writable entry it is the host's
-// `!dirty` branch (shell.qml:1114), i.e. the value is already stored.
+// `!dirty` branch (shell.qml:1117 on omarchy 4.0.6-1), i.e. the value is
+// already stored.
 const layoutOf = (entry) => ({ layout: { left: [], center: [], right: [{ id: "omarchy.clock" }, entry] } })
 check("persist: an object entry with our id is writable", Model.barEntryWritable(layoutOf({ id: "io.github.rmcdavid.iptv", playlistUrl: "http://h.test/a.m3u" }), "io.github.rmcdavid.iptv"), true)
 check("persist: a bare-string entry is NOT writable (updateEntryInline cannot rewrite it)", [Model.barEntryWritable(layoutOf("io.github.rmcdavid.iptv"), "io.github.rmcdavid.iptv"), Model.findBarEntry(layoutOf("io.github.rmcdavid.iptv"), "io.github.rmcdavid.iptv")], [false, { id: "io.github.rmcdavid.iptv" }])

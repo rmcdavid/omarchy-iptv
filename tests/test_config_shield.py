@@ -58,8 +58,9 @@ class ShieldTestCase(unittest.TestCase):
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         # D-SINK-18 repair: the helper derives the path from $HOME, not from
-        # $XDG_CONFIG_HOME, because the HOST does (shell.qml:23 and :32, pinned
-        # by tests/test_host_config_path.py). The first version of this fixture
+        # $XDG_CONFIG_HOME, because the HOST does (shell.qml:25 and :34 on omarchy
+        # 4.0.6-1, pinned by tests/test_host_config_path.py). The first version
+        # of this fixture
         # isolated by XDG_CONFIG_HOME, which was testing a path the host never
         # writes. The layout below is the host's: $HOME/.config/omarchy/.
         self.home = pathlib.Path(self.tmp.name) / "home"
@@ -408,11 +409,11 @@ class ShieldPathTest(ShieldTestCase):
 
     def test_home_decides_the_path_and_xdg_config_home_does_not(self):
         """The D-SINK-18 repair as the case that would otherwise have shipped.
-        The HOST names its settings file from $HOME (shell.qml:23 and :32,
-        pinned by tests/test_host_config_path.py), so the helper must too. On a
-        machine where $XDG_CONFIG_HOME points elsewhere the first version
-        tightened a decoy, reported success, and left the host's real file
-        exposed."""
+        The HOST names its settings file from $HOME (shell.qml:25 and :34 on
+        omarchy 4.0.6-1, pinned by tests/test_host_config_path.py), so the
+        helper must too. On a machine where $XDG_CONFIG_HOME points elsewhere
+        the first version tightened a decoy, reported success, and left the
+        host's real file exposed."""
         self.write(0o644)
         decoy_home = pathlib.Path(self.tmp.name) / "xdg-must-be-ignored"
         (decoy_home / "omarchy").mkdir(mode=0o755, parents=True)
