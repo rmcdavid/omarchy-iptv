@@ -600,8 +600,10 @@ function mpvPinBlock(dirs) {
 // These are the helper's own arguments; the caller prefixes the interpreter
 // and the helper path, which `helperArgv()` does. Every value is a separate
 // argv member: no joining, no quoting, no shell (hard requirement 9). User
-// mpv tokens travel as repeated `--mpv-arg TOKEN` so argparse can never
-// swallow an option-looking token and no token is ever split or merged.
+// mpv tokens travel as repeated attached `--mpv-arg=TOKEN` members
+// (Model.mpvArgArgv) so argparse can never swallow an option-looking token
+// and no token is ever split or merged -- and, since D-SINK-47, helperSpawn
+// moves every one of them into the environment before the Process runs.
 
 //
 // D-SINK-50 (2026-10-29): `python3 -I`, every spawn. Without it the

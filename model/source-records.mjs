@@ -768,10 +768,13 @@ function pointerWritePlan(input) {
 // is a retry of the active source (or a switch to it). No guard on
 // `wasActive` is needed for the edit, because `activeKey` is the key BEFORE
 // the fold (the caller passes root.activeSourceKey with root.userState not
-// yet moved) and an edit's newKey is allocated from the NEW URL against the
-// sources with the old record already removed (allocateSourceKey, fnv1a32):
-// it names the old key only through a 32-bit hash collision between the two
-// URLs, which this plan does not decide (D-SRC-68). The first version carried
+// yet moved) and an edit's newKey is allocated against the sources with the
+// old record already removed (allocateSourceKey): the probe's own key, drawn
+// while the old record still held its key, or, if another record took that
+// meanwhile, a fresh draw -- so it names the old key only when a draw lands on
+// it, one in 2^32 (until D-SINK-48 it was fnv1a32 of the new URL, and it took
+// a 32-bit hash collision between the two URLs), which this plan does not
+// decide (D-SRC-68). The first version carried
 // `!wasActive &&` here with a comment saying the folded newKey IS the active
 // key -- true of the old inline test, evaluated after the assignment, and
 // not of this function's input (P23 recheck, 2026-10-24: the term could not
