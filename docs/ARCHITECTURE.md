@@ -3636,6 +3636,23 @@ Performance budget (10k channels):
     screen or a zero frame is refused. Verified by calling `logo_dimensions`,
     `write_logo` and `logo_file_within_bounds` over GIFs of a few dozen bytes
     built in the test.
+    **[2026-10-29, D-LOGO-25: and the decoder's TIME has an axis of its own.
+    A progressive JPEG is decoded scan by scan, and a file within the byte
+    cap can carry thousands of scans. Measured on Qt 6.11.2 offscreen with
+    the row slot's `Image` and with libjpeg-turbo 3.2.0's `djpeg`, on files
+    of 1 to 512 scans: about 0.85 ms of CPU a first scan and 4.1 ms a
+    refinement scan, linear, on the shell's image reader thread, which
+    serialises: a second, ordinary image asked for 50 ms after a 512-scan
+    file was Ready 15 ms after it, at 2.1 s. So a JPEG is refused at the
+    gate (`logo_scans`, a host and two numbers) and swept from the cache
+    when it carries more than `MAX_JPEG_SCANS` = 64 scans, counted over ALL
+    of its bytes as every `FF DA` pair, an upper bound on the scans libjpeg
+    can start. 64 is above the most libjpeg's own progressive scripts write
+    for any component count it encodes (10 for YCbCr and 6 for grey,
+    measured with `cjpeg -progressive`). Verified by calling
+    `jpeg_scan_count`, `write_logo`, `logo_file_within_bounds` and
+    `logos --fetch` over JPEGs of a few hundred bytes built in the test
+    (`tests/test_logo_scans.py`).]**
 13. The shell process never subscribes to a global that another process can
     fill. The clipboard is the instance (D-CLIP-1): an editable `TextInput`
     subscribes to `QClipboard::dataChanged` and the released Qt reads the

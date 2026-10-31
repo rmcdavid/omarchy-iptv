@@ -458,7 +458,7 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
     `finally` (D-LOGO-24), so an exception that still ends the run records
     what it learned first. Every failure is recorded alike: a timeout, a
     refusal at the gate (scheme, userinfo, redirect, type, bytes, size,
-    dimensions, chunks), an HTTP error, a network error, http.client's
+    dimensions, scans, chunks), an HTTP error, a network error, http.client's
     own errors, and anything else one logo's fetch raises (logo_escape, the
     backstop); a full memo (LOGO_FAILED_MAX) records nothing new. A
     memoised address is tried again a day later, so a host that was down
@@ -667,7 +667,7 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
             # hop of one, aimed at this machine or a local network.
             if failure.code in ("logo_scheme", "logo_userinfo", "logo_redirect",
                                 "logo_type", "logo_bytes", "logo_too_large",
-                                "logo_dimensions", "logo_chunks", "local_address"):
+                                "logo_dimensions", "logo_scans", "logo_chunks", "local_address"):
                 refused += 1
             else:
                 failed += 1
