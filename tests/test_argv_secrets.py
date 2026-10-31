@@ -55,6 +55,16 @@ class SharedFixtureTest(unittest.TestCase):
             self.assertEqual(left, [], case["name"])
             self.assertEqual(case["command"].count(FIXTURE["flag"]), 1 if case["private"] else 0, case["name"])
 
+    def test_a_doubled_flag_is_refused_and_the_list_still_removed(self):
+        # One flag, one list: an argv carrying the flag twice was composed by
+        # something other than helperSpawn, and the run stops rather than
+        # guess which half of it the list belongs to.
+        env = {FIXTURE["env"]: json.dumps(["--id", "t:x"])}
+        with self.assertRaises(helper.HelperError) as caught:
+            helper.helper_arguments(["play", FIXTURE["flag"], FIXTURE["flag"]], env)
+        self.assertEqual(caught.exception.code, "bad_arguments")
+        self.assertEqual(env, {})
+
     def test_without_the_flag_the_environment_is_ignored_and_still_removed(self):
         env = {FIXTURE["env"]: json.dumps(["--id", "t:evil"])}
         self.assertEqual(helper.helper_arguments(["play", "--id", "t:x"], env), ["play", "--id", "t:x"])

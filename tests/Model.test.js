@@ -18365,6 +18365,18 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     M.splitMpvArgs("--sub-font=x\ud800 --user-agent=a\udcffb --volume=5 --sub-font=café😀 --title-x=\ude00\ud83d"),
     { args: ["--volume=5", "--sub-font=café😀"], rejected: ["--sub-font=x\ud800", "--user-agent=a\udcffb", "--title-x=\ude00\ud83d"],
       warnings: ["mpvArg --sub-font refused: reserved by the plugin", "mpvArg --user-agent refused: reserved by the plugin", "mpvArg --title-x refused: reserved by the plugin"] })
+  // Rule 15 over the spawns that do not pass through Service.runHelper --
+  // the stop and the orphan check (Quickshell.execDetached, which is handed
+  // no environment), state init and state mode, the config shield and the
+  // clipboard: each builds an argv with nothing for helperSpawn to move, so
+  // nothing private rides a command line that bypasses it. A builder that
+  // grows a key, an id, a scope or a token goes red here.
+  checkCall("D-SINK-48 (rule 15): the helper spawns that bypass runHelper -- stop, orphan-check, state init and mode, config shield, clipboard -- carry nothing helperSpawn would move", () => {
+    const P = "/p/bin/omarchy-iptv", S = "/run/user/1000/omarchy-iptv/mpv.sock"
+    const built = [M.helperArgv(P, M.playerStopArgv(S, 3)), M.helperArgv(P, M.playerOrphanCheckArgv(S, 301706, 6)),
+                   M.stateInitArgv(P, "/s"), M.stateModeArgv(P, "/s"), M.configShieldArgv(P), M.clipboardArgv(P)]
+    return built.map(argv => { const sp = M.helperSpawn(argv, {}); return [JSON.stringify(sp.command) === JSON.stringify(argv), Object.keys(sp.environment)] })
+  }, Array(6).fill([true, []]))
   // D-SINK-48 (a): a NEW source's key is a random draw, never the URL's
   // fnv1a32. The shared fixture with fixed draws, then the real generator.
   const SK = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-keys.json"), "utf8"))
