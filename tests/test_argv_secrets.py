@@ -107,6 +107,21 @@ class OptionsFileTest(unittest.TestCase):
             with self.assertRaises(helper.HelperError):
                 helper.mpv_args_config([token])
 
+    def test_a_lone_surrogate_never_reaches_the_file(self):
+        # The NUL's sibling: no UTF-8 file can hold a lone surrogate. A byte
+        # the argv could not decode arrives as one (U+DC80-U+DCFF), and so
+        # does a JSON \ud800 escape in OMARCHY_IPTV_ARGS; the writer met one
+        # and raised UnicodeEncodeError, so the start ended `internal`. A
+        # PAIRED character is UTF-8 and is kept.
+        for token in ("--user-agent=a\udcffb", "--sub-font=x\ud800", "--title-x=\ude00\ud83d"):
+            kept, rejected = helper.filter_mpv_args([token])
+            self.assertEqual((kept, rejected), ([], [token]), repr(token))
+            with self.assertRaises(helper.HelperError):
+                helper.mpv_args_config([token])
+        astral = "--sub-font=café\U0001f600"
+        self.assertEqual(helper.filter_mpv_args([astral]), ([astral], []))
+        self.assertEqual(helper.mpv_args_config([astral]), "sub-font=%9%café\U0001f600\n")
+
     def test_remove_is_quiet_and_complete(self):
         helper.write_mpv_args(self.path, ["--volume=50"])
         helper.remove_mpv_args(self.path)

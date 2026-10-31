@@ -735,6 +735,34 @@ class StartTest(PlayerTestCase):
         with open("/proc/%d/environ" % found[0]["pid"], "rb") as handle:
             self.assertNotIn(b"OMARCHY_IPTV_ARGS", handle.read())
 
+    def test_a_token_no_options_file_can_hold_is_dropped_by_name_and_the_player_starts(self):
+        """D-SINK-47's writer and a lone surrogate (no UTF-8 file can hold
+        one): through the helper's own argv, where a byte that is not UTF-8
+        arrives as U+DCFF, and through OMARCHY_IPTV_ARGS, where a JSON \\ud800
+        escape does. The first version kept the token, met it at the write
+        and ended the start `internal`, with no player. Now it is dropped by
+        NAME, like a NUL, and the other tokens still reach mpv."""
+        code, payload, stdout, stderr = self.player_start("--mpv-arg=--user-agent=a\udcffb", "--mpv-arg=--volume=50")
+        self.assertEqual(code, 0, stderr)
+        self.assertTrue(payload["ok"], payload)
+        self.assertIn("dropped mpvArg --user-agent", payload["warnings"])
+        applied = self.spawned_applied()[0]
+        self.assertIn("--volume=50", applied)
+        self.assertFalse([a for a in applied if a.startswith("--user-agent")])
+        private = ["--cache-dir", self.cache, "--id", "t:bbc1.uk", "--mpv-arg=--sub-font=x\ud800", "--mpv-arg=--volume=40"]
+        env = dict(os.environ, OMARCHY_IPTV_ARGS=json.dumps(private))
+        self.assertIn("\\ud800", env["OMARCHY_IPTV_ARGS"])
+        done = subprocess.run([sys.executable, "-I", str(HELPER), "player", "restart", "--socket", self.sock, "--seq", "2",
+                               "--ipc-timeout", "1", "--lock-timeout", "1", "--spawn-timeout", "4", "--first-load-timeout", "1",
+                               "--from", "quit", "--args-from-env"], env=env, capture_output=True, text=True, timeout=60)
+        self.assertEqual(done.returncode, 0, done.stderr)
+        reply = json.loads(done.stdout.strip().splitlines()[-1])
+        self.assertTrue(reply["ok"], reply)
+        self.assertIn("dropped mpvArg --sub-font", reply["warnings"])
+        applied = self.spawned_applied()[-1]
+        self.assertIn("--volume=40", applied)
+        self.assertFalse([a for a in applied if a.startswith("--sub-font")])
+
     def test_a_flag_with_no_list_runs_no_verb(self):
         """D-SINK-48: --args-from-env with OMARCHY_IPTV_ARGS absent, not JSON,
         not a list of strings, or past the kernel's bound is `bad_arguments`,

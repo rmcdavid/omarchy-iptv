@@ -498,6 +498,7 @@
         "mpvRefusedWarning",
         "mpvRefusedWarnings",
         "splitMpvArgs",
+        "mpvTokenWritable",
         "demuxerNamesTls",
         "scriptOptsRefused",
         "mpvRejectedLine",

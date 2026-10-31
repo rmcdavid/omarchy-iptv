@@ -279,12 +279,32 @@ function splitMpvArgs(text) {
                                            || MPV_RESERVED[mpvOptionBase("--" + name.substring(5))] === true)
         || demuxerNamesTls(base, token) || scriptOptsRefused(base, token)
         // D-SINK-47: a token now becomes one line of the player's options
-        // file, and a line break or a NUL cannot be carried on one; the
-        // split above leaves only the NUL possible here.
-        || /[\0\n\r]/.test(token)) rejected.push(token)
+        // file, and a line break, a NUL or a lone surrogate cannot be carried
+        // on one (mpvTokenWritable).
+        || !mpvTokenWritable(token)) rejected.push(token)
     else args.push(token)
   }
   return { args: args, rejected: rejected, warnings: mpvRefusedWarnings(rejected).concat(mpvArgWarnings(args)) }
+}
+
+// D-SINK-47: whether one token can be one line of the player's options file:
+// no NUL, no line break, and no lone surrogate, which no UTF-8 file can hold
+// (the helper's writer met one and its start ended `internal`; a JSON
+// `\ud800` escape is how one reaches it). Index walk, no pattern. Mirror of
+// mpv_token_writable in the helper.
+function mpvTokenWritable(token) {
+  var text = str(token)
+  for (var i = 0; i < text.length; i++) {
+    var c = text.charCodeAt(i)
+    if (c === 0 || c === 10 || c === 13) return false
+    if (c >= 0xdc00 && c <= 0xdfff) return false
+    if (c >= 0xd800 && c <= 0xdbff) {
+      var next = i + 1 < text.length ? text.charCodeAt(i + 1) : 0
+      if (next < 0xdc00 || next > 0xdfff) return false
+      i++
+    }
+  }
+  return true
 }
 
 // D-SINK-43: a `--demuxer-lavf-o*` token that names a TLS setting. See
@@ -1016,10 +1036,10 @@ export {
   MPV_SCRIPT_OPTS_WORDS, mpvOptionBase, mpvHandoffName, mpvDiskName,
   mpvListenName, demuxerOpensPorts, rtspTransportQuiet, mpvArgWarning,
   mpvArgWarningLines, mpvArgWarnings, MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT,
-  mpvRefusedWarning, mpvRefusedWarnings, splitMpvArgs, demuxerNamesTls,
-  scriptOptsRefused, mpvRejectedLine, mpvRejectedName, headerArgs,
-  MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv,
-  mpvPinBlock, helperArgv, HELPER_ARGS_ENV, HELPER_ARGS_FLAG,
+  mpvRefusedWarning, mpvRefusedWarnings, splitMpvArgs, mpvTokenWritable,
+  demuxerNamesTls, scriptOptsRefused, mpvRejectedLine, mpvRejectedName,
+  headerArgs, MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf,
+  buildMpvArgv, mpvPinBlock, helperArgv, HELPER_ARGS_ENV, HELPER_ARGS_FLAG,
   HELPER_PRIVATE_VALUE, HELPER_PRIVATE_LIST, HELPER_PRIVATE_ATTACHED,
   helperSpawn, cacheRunArgv, playlistFetchArgv, fetchStateDir,
   playlistProbeArgv, epgFetchArgv, FETCH_URL_ENV, fetchEnvironment,

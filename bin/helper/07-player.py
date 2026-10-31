@@ -504,10 +504,13 @@ def filter_mpv_args(tokens: list[str]) -> tuple[list[str], list[str]]:
         no_form = bool(bare) and (bare in MPV_RESERVED or mpv_option_base(bare) in MPV_RESERVED)
         # D-SINK-47: a token becomes one line of the player's options file
         # (mpv_args_config), and a line break or a NUL cannot be carried on
-        # one -- refused here, so the writer never meets one.
+        # one -- refused here, so the writer never meets one. Nor can a lone
+        # surrogate, which no UTF-8 file can hold: a byte argv could not
+        # decode arrives as one (U+DC80-U+DCFF), and so does a JSON \ud800
+        # escape; the writer met it and the start ended `internal`.
         if (not MPV_ARG_RE.match(text) or name in MPV_RESERVED or base in MPV_RESERVED or no_form
                 or demuxer_names_tls(base, text) or script_opts_refused(base, text)
-                or any(char in text for char in "\0\n\r")):
+                or not mpv_token_writable(text)):
             rejected.append(text)
         else:
             args.append(text)
@@ -799,6 +802,20 @@ def mpv_args_path(sock_path: str, where: dict[str, str]) -> str:
     return where.get("mpvArgs") or os.path.join(os.path.dirname(sock_path), MPV_ARGS_FILE)
 
 
+def mpv_token_writable(text: str) -> bool:
+    """D-SINK-47: whether one token can be one line of the player's options
+    file: no NUL, no line break, and UTF-8 encodable -- a lone surrogate,
+    which is what a byte argv could not decode becomes, is not. Mirror of
+    Model.mpvTokenWritable."""
+    if any(char in text for char in "\0\n\r"):
+        return False
+    try:
+        text.encode("utf-8")
+    except UnicodeEncodeError:
+        return False
+    return True
+
+
 def mpv_args_config(tokens: list[str]) -> str:
     """The text of the player's options file: one line per token, in order.
 
@@ -809,12 +826,13 @@ def mpv_args_config(tokens: list[str]) -> str:
     spaces, `#` (a comment in the plain form, measured cutting `a#b` to `a`),
     `%`, a trailing backslash or any other byte means what it meant on the
     argv -- measured token by token, 16 of 16 reading back identical both
-    ways. A line break or a NUL cannot be carried on a line, and the filter
-    refuses both before this is reached; one here is a bug, and refused."""
+    ways. A line break, a NUL or a lone surrogate cannot be carried on a
+    line (mpv_token_writable), and the filter refuses each before this is
+    reached; one here is a bug, and refused."""
     lines = []
     for token in tokens or []:
         text = str(token)
-        if not text.startswith("--") or any(char in text for char in "\0\n\r"):
+        if not text.startswith("--") or not mpv_token_writable(text):
             raise HelperError("bad_arguments", "an mpv option cannot be written to the player's options")
         name, eq, value = text[2:].partition("=")
         lines.append("%s=%%%d%%%s" % (name, len(value.encode("utf-8")), value) if eq else name)

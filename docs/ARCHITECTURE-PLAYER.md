@@ -1247,8 +1247,12 @@ the command line only (`--help`, `--version`, `--v`, `--list-*`, `--show-profile
 `--input-cmdlist`, `--input-keylist`) are refused in a file; and `--no-config`
 (`--config=no`) is read too late to stop mpv reading the user's own mpv.conf.
 A token holding a line break or a NUL cannot be one line and is refused by both
-filters. Residual: a player adopted after the upgrade keeps the tokens it was
-launched with on its argv until it restarts.]**
+filters; so is one holding a lone surrogate, which no UTF-8 file can hold (a
+byte the helper's argv could not decode arrives as one, and so does a JSON
+`\ud800` escape): the first version kept it and the start ended `internal`
+at the write (`Model.splitMpvArgs` / `filter_mpv_args`, through
+`mpv_token_writable`). Residual: a player adopted after the upgrade keeps the
+tokens it was launched with on its argv until it restarts.]**
 
 `MPV_RESERVED` gains ten entries, every one of which is reachable today from the
 settings panel and writes a credentialed URL somewhere durable:

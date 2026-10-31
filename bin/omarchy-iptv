@@ -119,7 +119,7 @@ HELPER_PARTS = (
     ("04-epg.py", 77523, 0x01022b50),
     ("05-ipc-logos.py", 48765, 0x26586bfe),
     ("06-failed.py", 46469, 0xbc25efed),
-    ("07-player.py", 80820, 0xcaba6481),
+    ("07-player.py", 81548, 0xeed1a22a),
     ("08-player-verbs.py", 100520, 0x5cd31288),
     ("09-cache.py", 26391, 0x5dd876a1),
     ("10-state.py", 48632, 0x39b208e5),

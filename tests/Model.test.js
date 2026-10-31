@@ -18357,6 +18357,14 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
        file: "/run/user/1000/omarchy-iptv/mpv-args.conf" })
   checkCall("D-SINK-47: a token holding a NUL is refused by the shell's filter too (it cannot be one line of the options file)", () =>
     M.splitMpvArgs("--volume=5 --user-agent=a\u0000b"), { args: ["--volume=5"], rejected: ["--user-agent=a\u0000b"], warnings: ["mpvArg --user-agent refused: reserved by the plugin"] })
+  // The NUL's sibling: a lone surrogate, which no UTF-8 file can hold. The
+  // helper's writer met one and the start ended `internal`; a JSON `\ud800`
+  // escape in the settings is how one reaches the shell. A PAIRED surrogate
+  // is one astral character and is kept.
+  checkCall("D-SINK-47: a token holding a lone surrogate, high or low, is refused by the shell's filter (no options-file line can hold it); a paired one is a character and is kept", () =>
+    M.splitMpvArgs("--sub-font=x\ud800 --user-agent=a\udcffb --volume=5 --sub-font=café😀 --title-x=\ude00\ud83d"),
+    { args: ["--volume=5", "--sub-font=café😀"], rejected: ["--sub-font=x\ud800", "--user-agent=a\udcffb", "--title-x=\ude00\ud83d"],
+      warnings: ["mpvArg --sub-font refused: reserved by the plugin", "mpvArg --user-agent refused: reserved by the plugin", "mpvArg --title-x refused: reserved by the plugin"] })
   // D-SINK-48 (a): a NEW source's key is a random draw, never the URL's
   // fnv1a32. The shared fixture with fixed draws, then the real generator.
   const SK = JSON.parse(fs.readFileSync(path.join(__dirname, "fixtures/source-keys.json"), "utf8"))
