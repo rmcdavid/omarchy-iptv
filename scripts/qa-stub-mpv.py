@@ -222,6 +222,8 @@ OPTIONS = {
     "scripts": ("strlist", []),
     "prefetch-playlist": ("flag", False),
     "load-console": ("flag", True),
+    # D-SINK-67: mpv 0.41.0 loads the stats overlay by default (measured).
+    "load-stats-overlay": ("flag", True),
 }
 # The three values of osd-playlist-entry, each measured taking (`both` on
 # the recheck of 2026-10-29); "bogus" was measured refused. drag-and-drop's

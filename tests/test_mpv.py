@@ -67,14 +67,15 @@ def run(*args):
 # same way, and two more pinned options the per-file check asks about,
 # load-console (D-SINK-61) and prefetch-playlist (D-SINK-63).
 #
-# lane-p2a (2026-10-29): load-stats-overlay is pinned (D-SINK-67) but NOT asked
-# about here: the helper's PER_FILE_EXEMPT says why (the harness stub).
+# lane-p2a (2026-10-29): and load-stats-overlay (D-SINK-67), asked about like
+# every other pin once the harness stub learned it.
 WHITELIST = "http,https,tls,tcp,crypto,data,httpproxy"
 FORMATS = "hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt"
 # What a demuxer-lavf-o map holds on a player of this release, less tls_verify.
 LISTS = {"protocol_whitelist": WHITELIST, "format_whitelist": FORMATS}
 PINNED_OPTIONS = ("demuxer-lavf-o", "demuxer-lavf-propagate-opts", "drag-and-drop", "input-commands",
-                  "load-auto-profiles", "load-console", "load-scripts", "load-select", "load-unsafe-playlists",
+                  "load-auto-profiles", "load-console", "load-scripts", "load-select", "load-stats-overlay",
+                  "load-unsafe-playlists",
                   "log-file", "osd-playlist-entry", "player-operation-mode", "prefetch-playlist",
                   "reset-on-next-file", "save-watch-history", "script-opts", "scripts", "stream-lavf-o",
                   "tls-verify", "watch-later-dir")

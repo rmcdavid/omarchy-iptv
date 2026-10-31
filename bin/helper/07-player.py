@@ -396,21 +396,11 @@ DEMUXER_TLS_FORBIDDEN = frozenset(("ca_file", "cafile", "verifyhost", "listen", 
 # URL). So a pre-pin player whose mpv.conf holds a per-file profile that
 # touches ANY pinned option is stopped rather than migrated.
 #
-# lane-p2a (2026-10-29): EXCEPT load-stats-overlay (D-SINK-67), for now and
-# on purpose. The harness's stand-in mpv (the qa stub on the dev branch,
-# outside lane A's files) does not model that option, so its option-info would read
-# `property not found`, the read-back would refuse every player the stub
-# plays and every stub scenario would fail `tls_unverified` -- the reason the
-# stub learned each pin before. What the exclusion leaves: a PRE-PIN player,
-# adopted after the upgrade, whose own mpv.conf has a [protocol.*] or
-# [extension.*] profile turning stats back ON gets them back at its next load
-# (the pin_adopted_player write is undone there), until it restarts; a player
-# this release starts holds the pin from the command line, which no per-file
-# profile replaces. Raised with the lead: teach the stub, then drop this.
-PER_FILE_EXEMPT = frozenset(("load-stats-overlay",))
+# load-stats-overlay (D-SINK-67) included: measured, a pre-pin player's own
+# [protocol.*] profile turning stats back on drew the credentialed filename
+# after the adoption had turned it off.
 PER_FILE_TLS_OPTIONS = tuple(sorted({MPV_LIST_SUFFIX_RE.sub("", token.split("=", 1)[0])[2:]
-                                     for token in ("--watch-later-dir=",) + MPV_PIN_BLOCK}
-                                    - PER_FILE_EXEMPT))
+                                     for token in ("--watch-later-dir=",) + MPV_PIN_BLOCK}))
 # mpv's own aliases of pinned options, as a profile's key may spell them.
 PER_FILE_OPTION_ALIASES = {"script": "scripts", "watch-later-directory": "watch-later-dir",
                            "script-opt": "script-opts", "load-osd-console": "load-console"}
