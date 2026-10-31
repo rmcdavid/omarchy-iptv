@@ -420,6 +420,33 @@ The daemon that owns `org.freedesktop.Notifications` here is the shell
 itself (`busctl --user status org.freedesktop.Notifications` names the
 quickshell pid), not mako or dunst, so Pango markup rules do not apply.
 
+[2026-10-29, D-SINK-49: the plugin no longer relies on "nothing else".
+The server advertises `bodyMarkupSupported` and `bodyHyperlinksSupported`
+(`plugins/notifications/Service.qml:936`), under which the Desktop
+Notifications spec leaves escaping to the client, and a provider's
+`<a href>`, `<font>` or `<br>` drew a link-styled run, recoloured and
+resized text and extra lines inside the plugin's own card. `notifyArgv`
+now escapes every body (`&`, `<`, `>`, `Model.markupEscape`), and
+StyledText decodes the three entities, so the body draws exactly as its
+plain text: measured on Qt 6.11.2 offscreen in the QML spec, equal width
+and height for every case, where an unescaped bare `&` drops what follows
+it (`Q&A` drew as `Q`). The summary is PlainText and is not escaped. Read
+on omarchy 4.0.4 on 2026-10-29: nothing under `plugins/notifications/`
+handles a link (no `onLinkActivated`, `linkActivated`, `linkAt`,
+`hoveredLink` or `openUrlExternally`; the one hit in the whole shell is
+`plugins/panels/dropbox/Service.qml`), pinned by
+`tests/test_host_text_format.py`'s second test, proven red by adding
+`onLinkActivated: Qt.openUrlExternally(link)` to the body Text of a copy.
+`NotificationLogic.styledBody` also turns a line break in a body into
+`<br/>`, and the host keeps every body in its history files under
+`~/.local/state/omarchy/notifications/` as `JSON.stringify` writes it (DEL
+and C1 controls raw), which is why the name in a body is redacted as the
+guide row's is (F-SINK-14) and carries no control character (F-SINK-16).]
+
+[2026-10-29, F-SINK-14 and F-SINK-16: the window-title row above carries
+the SHOWN name -- control characters dropped, URLs redacted by the helper's
+`redact_urls` -- and no longer the provider's raw name.]
+
 
 ## QML `Image` and Qt's allocation limit on a JPEG behind `sourceSize` (verified 2026-10-09)
 

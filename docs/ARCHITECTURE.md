@@ -4427,6 +4427,99 @@ Performance budget (10k channels):
     `onExited` and `onLogoLine` text against fakes, were seen red on
     mutations of the shipping decision.
 
+18. A provider's string is shown under ONE rule wherever it is shown, and
+    carries nothing its renderer reads as an instruction (the 2026-10-29
+    security review's phase 2: F-SINK-14, D-SINK-49, F-SINK-16, F-SINK-15).
+
+    **One redaction rule, `Model.sinkText` (F-SINK-14).** F-SINK-10 put it
+    on the guide's row and said the same string must not reach two sinks
+    under two rules; the row was the only place it reached. Every composer
+    a shown name or group passes through now calls it itself, so a caller
+    that hands a raw name in is still safe: `barTooltip`,
+    `barAccessibleName` (and `BarWidget.qml`'s one `nowPlayingName`, which
+    the label draws), `footerStatus` (the playing line, and the number
+    entry through `chnoStatus`), `notifyArgv` (the four bodies that quote a
+    name, redacted BEFORE the S-04 dash rule), `scopeSurface`'s `label`
+    (the group column), `scopeEntryAccessibleName`, `scopeName` (the
+    header's scope label, the list's accessible name, the empty-scope and
+    no-matches titles), `groupNamesForHint` (the no-matches hint) and
+    `ipcNowPlaying` (the IPC `status` reply's name, group and
+    `launchedFrom`; the `channel` verb's reply names `sinkText(name)` too).
+    The player's `title` and `force-media-title` -- the compositor's
+    toplevel title -- are set by `apply_channel` from the helper's mirror,
+    `redact_urls`, after the `$>` prefix (S-01). One shared fixture,
+    `tests/fixtures/shown-names.json`, is run by every composer in node and
+    by the `play` verb in python.
+
+    **The ids are not redacted, on purpose.** A group scope id
+    (`g:<group>`) keys hidden groups and saved scopes in `state.json`, and
+    a group's channels are found by matching the RAW group: `rawScopeName`
+    is that match and is never shown, `scopeName` is what is shown. A
+    channel id is what `play` takes back. A provider that writes a
+    credential into a tvg-id still has it carried in the id (the same
+    precondition as every item here: the provider who wrote the secret
+    already holds it).
+
+    **The notification body is markup, so it is escaped (D-SINK-49).** The
+    host draws it as `Text.StyledText` behind a stripper that drops image
+    tags only (OMARCHY-PLUGIN-CONTRACT.md, "Verified host renderers"), and
+    a server that advertises body markup leaves escaping to the client.
+    `notifyArgv` escapes the WHOLE body with `Model.markupEscape` (`&`,
+    `<`, `>`) at its one exit, so no branch -- and none added later -- can
+    hand the renderer a tag, and StyledText decodes the three entities:
+    measured on Qt 6.11.2 offscreen (the QML spec), every escaped case lays
+    out exactly as its plain text, and unescaped a bare `&` swallows what
+    follows it (`Q&A` drew as `Q`). Quotes draw as quotes and are not
+    escaped. The summary is the host's PlainText and is not escaped. That
+    nothing in the host's notification code activates a link is pinned by
+    `tests/test_host_text_format.py`.
+
+    **No control character goes out where a terminal or a line break can
+    read it (F-SINK-16).** The playlist parse keeps a provider's C0 and C1
+    controls in a name or a group (measured: TAB, VT, FF, ESC, BEL, BS,
+    DEL, U+0085, U+009B, U+009C, U+009D survive into `channels.json`).
+    `JSON.stringify` escapes C0 and passes DEL and C1 through, so every
+    JSON reply of the IPC handler goes through `Model.ipcJson`, which
+    escapes U+007F..U+009F and U+2028/U+2029: the same JSON value, and
+    nothing a terminal that honours C1 reads as an 8-bit CSI or OSC. The
+    player's title drops every control (`_CONTROL_CHARS`), and the
+    notification body drops them too (`CONTROL_RE`): the name and the reason
+    BEFORE their redaction, so a TAB inside a password no longer splits the
+    URL there (D-SINK-34's shape) on these two sinks, and the whole body
+    again at the exit, before the escape. The cost is a name whose words a
+    TAB separates reads joined there (`UK:<TAB>Sky` is `UK:Sky`); the guide
+    row draws the tab as space.
+
+    **A display printer's authority is `hostPortOf`'s (F-SINK-15):** up to
+    the first `/`, `?` or `#`, the userinfo to the last `@`, whitespace or
+    not; `sourceLabel` ended its userinfo at JS whitespace as well and
+    printed the username (latent: every caller passes a validated URL).
+
+    Proved by the node suite (23 composer readings per fixture name, the
+    ids, the escaping and the controls over ten events, `ipcJson`), the
+    service harness (Service.qml's own IPC verbs, compiled from the
+    `IpcHandler` block's text and called as `omarchy-shell ipc call` calls
+    them, and four posted notices), `tests/test_mpv.py` (the `play` verb's
+    title over FakeMpv), `tests/test_bar_shown_names.py` (the shipping
+    `BarWidget.qml` drawn offscreen), the QML spec's StyledText case, and
+    `tests/test_helper.py` (the helper's display reading over the shared
+    redaction vectors); each new check red on dev 2727179 or on a mutation
+    of the shipping decision. Observed outside the suites: the `title`,
+    `force-media-title` and `media-title` a windowless mpv reports over IPC
+    after the shipping `apply_channel` (redacted, no control), and the
+    accessibility bus in a nested headless cage on a private bus
+    (`tests/a11y`'s walker over the shipping `BarWidget.qml` and the probe
+    copy of `Guide.qml`, only the hosts' fixture names made credentialed):
+    the bar's accessible name, the group entry, the footer while playing,
+    the channel list's name and the empty-scope title carried the URL on
+    dev 2727179 and carry the host here, and the group's scope still lists
+    its channel (the raw id matched). That bus is latent on the desktop
+    behind D-GS-3. What is not covered here, stated: the helper's own
+    stdout still carries a raw `name` and writes C1 controls unescaped
+    (`ensure_ascii=False`), in other lanes' files; the toplevel title's
+    path from mpv to the compositor and the PipeWire stream name (mpv
+    passes its title to the audio output) are read, not run.
+
 ## 9. Coding standards
 
 QML (mirror first-party plugins; see clipboard/emojis, tailscale, dropbox):
@@ -4880,7 +4973,10 @@ Applied in fix round 1 against `docs/SECURITY-REVIEW.md`:
 
 - S-01: the mpv window title is passed as `$>` + name (property expansion
   disabled for the rest of the string). `force-media-title` is not expanded
-  by mpv, so it carries the plain name.
+  by mpv, so it carries the plain name. [2026-10-29, F-SINK-14 and
+  F-SINK-16: "the name" is the SHOWN name -- the provider's name with its
+  control characters dropped and its URLs redacted by `redact_urls`, the
+  helper's mirror of the row's `sinkText` (section 8 item 18).]
 - S-02: `state.json` is created 0600 by the helper verb `state init`
   (`O_EXCL`), which `Service.qml` runs after the directory bootstrap.
   [2026-10-13, D-SINK-19 round 12 (R22a): the verb also reports what it
@@ -4892,7 +4988,10 @@ Applied in fix round 1 against `docs/SECURITY-REVIEW.md`:
   the path used to be made 0600, unsearchable; the service bounds it with a
   15 s watchdog (R23c).]
 - S-04: display names never start with `-`; the failure notification body
-  is wrapped in curly quotes so it can never parse as a flag.
+  is wrapped in curly quotes so it can never parse as a flag. [2026-10-29,
+  D-SINK-49: and the whole body is markup-escaped, because the host renders
+  it as StyledText; the name in it is redacted first (F-SINK-14) and loses
+  its control characters (F-SINK-16), section 8 item 18.]
 - S-05: HTTP reads run under a wall-clock deadline of `max(60 s, 3 x
   --timeout)` (code `timeout`); `Service.qml` watchdogs kill a helper that
   exceeds 180 s and report `helper_timeout` without a URL. [2026-10-21,
