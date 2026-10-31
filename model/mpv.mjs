@@ -677,7 +677,18 @@ function helperSpawn(argv, environment) {
   for (var k in given) if (Object.prototype.hasOwnProperty.call(given, k) && k !== "__proto__") env[k] = str(given[k])
   if (hidden.length > 0) {
     command.push(HELPER_ARGS_FLAG)
-    env[HELPER_ARGS_ENV] = JSON.stringify(hidden)
+    // Each value as the argv delivered it: QProcess hands every argument to
+    // exec as a C string, so a NUL ended it there. The JSON would carry it
+    // whole, and the helper refuses a list holding one (helper_arguments) --
+    // so a provider's group-title with a NUL in it, which reaches a zap's
+    // `--scope g:<group>`, refused every channel launched from that group
+    // `bad_arguments` (rc-p2a recheck, 2026-10-31). Cut, never refused here:
+    // the user's own tokens never hold one (splitMpvArgs refuses it), and a
+    // key or a folder is checked again by the helper.
+    env[HELPER_ARGS_ENV] = JSON.stringify(hidden.map(function (value) {
+      var at = value.indexOf("\u0000")
+      return at === -1 ? value : value.substring(0, at)
+    }))
   }
   return { command: command, environment: env }
 }

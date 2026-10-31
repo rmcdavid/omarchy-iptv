@@ -18365,6 +18365,28 @@ checkCall("D-SRC-12: node's lowering table is the fixture's, the disagreement se
     M.splitMpvArgs("--sub-font=x\ud800 --user-agent=a\udcffb --volume=5 --sub-font=caf\u00e9\ud83d\ude00 --title-x=\ude00\ud83d"),
     { args: ["--volume=5", "--sub-font=caf\u00e9\ud83d\ude00"], rejected: ["--sub-font=x\ud800", "--user-agent=a\udcffb", "--title-x=\ude00\ud83d"],
       warnings: ["mpvArg --sub-font refused: reserved by the plugin", "mpvArg --user-agent refused: reserved by the plugin", "mpvArg --title-x refused: reserved by the plugin"] })
+  // Recheck (rc-p2a, 2026-10-31), rule 10: helperSpawn must hand the helper
+  // what the argv would have carried, and no more strictly. A provider's
+  // group-title reaches channels.json with any control character in it (the
+  // name is cleaned, the group is not), so a zap's or a player start's
+  // `--scope g:<group>` can hold a NUL. On the argv, QProcess cut it there
+  // (each argument is a C string); in OMARCHY_IPTV_ARGS the JSON carried it
+  // whole and the helper refused the run `bad_arguments` before any verb --
+  // every channel launched from that group failed to play. Cut at the NUL,
+  // as the argv did.
+  checkCall("D-SINK-48 (recheck): a scope or id holding a NUL reaches the helper cut there, as the argv delivered it -- a zap and a player start launched from a group whose name holds one are not refused `bad_arguments`", () => {
+    const np = { id: "t:a.test", launchedFrom: "g:Sp\u0000orts", since: 1761700000 }
+    const sock = path.join(scratch, "no-player.sock")
+    const zap = M.helperSpawn(M.helperArgv(HELPER, M.zapArgs(sock, path.join(scratch, "c"), "t:a.test", np)), {})
+    const start = M.helperSpawn(M.helperArgv(HELPER, M.playerStartArgv(sock, path.join(scratch, "c"), "t:a\u0000b", 3, "g:Sp\u0000orts", 0, [], 0)), {})
+    const lists = [zap, start].map(sp => JSON.parse(sp.environment[HA.env]))
+    const env = Object.assign({}, process.env, zap.environment, { HOME: scratch, XDG_CACHE_HOME: scratch, XDG_STATE_HOME: scratch, XDG_RUNTIME_DIR: scratch })
+    const run = cp.spawnSync(zap.command[0], zap.command.slice(1), { env, encoding: "utf8", timeout: 30000 })
+    let code = "unreadable"
+    try { const reply = JSON.parse(String(run.stdout || "").trim().split("\n").pop()); code = reply.ok ? "ok" : reply.error.code } catch (e) {}
+    return { scopes: lists.map(l => l[l.indexOf("--scope") + 1]), id: lists[1][lists[1].indexOf("--id") + 1],
+             nul: lists.some(l => l.some(x => x.indexOf("\u0000") !== -1)), refused: code === "bad_arguments", replied: code !== "unreadable" }
+  }, { scopes: ["g:Sp", "g:Sp"], id: "t:a", nul: false, refused: false, replied: true })
   // Rule 15 over the spawns that do not pass through Service.runHelper --
   // the stop and the orphan check (Quickshell.execDetached, which is handed
   // no environment), state init and state mode, the config shield and the
