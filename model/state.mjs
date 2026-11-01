@@ -1578,13 +1578,19 @@ function mergeConflictLine(conflict) {
 
 // D-SRC-33 (2026-10-24). What the user is told, ONCE per merge that kept
 // the other program's version of anything over an in-app change not yet
-// saved: one sentence per conflict, composed from a field NAME and a
-// source's short key -- never a value, a label or a URL (a conflict entry
-// carries nothing else). The journal keeps mergeConflictLine's fuller line
-// per conflict; this is the on-screen half the in-flight and parked
-// branches never had (the failed branch was told when its save failed).
-// The title and body are the lead's words (P23). null when nothing
-// conflicted.
+// saved: one sentence per conflict, composed from a field NAME alone --
+// never a value, a label, a URL or a source's key. The journal keeps
+// mergeConflictLine's fuller line per conflict, the key included; this is
+// the on-screen half the in-flight and parked branches never had (the
+// failed branch was told when its save failed). The title and body are the
+// lead's words (P23). null when nothing conflicted.
+//
+// D-SINK-69 (2026-11-01): the body named a source by its key until now, and
+// notifyArgv puts the body on omarchy-notification-send's argv (and the
+// wrapper on busctl's), which /proc shows every account on the computer
+// while the post runs. For a source added before 0.16.0 the key is fnv1a32
+// of its credentialed URL, the 32-bit check on a guess that D-SINK-48 took
+// off the helper's argv. A source is "A source" here; the lead's words.
 var MERGE_CONFLICT_TITLE = "Settings merged"
 var MERGE_CONFLICT_FIELDS = { activeKey: "The active source", recents: "The recent list", lastPlayed: "The last played channel",
                               session: "The player session", cacheLayout: "The cache layout" }
@@ -1592,8 +1598,8 @@ function mergeConflictSentence(conflict) {
   var c = conflict || {}
   var field = str(c.field), key = str(c.key), fields = asList(c.fields).map(str)
   var what
-  if (field === "sources" && isSourceKey(key)) what = "The source " + key + (fields.length > 0 ? " (" + fields.join(", ") + ")" : "")
-  else if (field === "activeKey" && isSourceKey(key)) what = MERGE_CONFLICT_FIELDS.activeKey + " (the source " + key + " it named is gone, so no source is active)"
+  if (field === "sources") what = "A source" + (fields.length > 0 ? " (" + fields.join(", ") + ")" : "")
+  else if (field === "activeKey" && isSourceKey(key)) what = MERGE_CONFLICT_FIELDS.activeKey + " (the one it named is gone, so no source is active)"
   else what = MERGE_CONFLICT_FIELDS[field] || field
   return what + " kept the other program's version."
 }

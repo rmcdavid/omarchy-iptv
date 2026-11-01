@@ -356,7 +356,8 @@ function notifyArgv(event, params, replaceId) {
     if (dropped) spec = { title: dropped.title, body: dropped.body, glyph: GLYPHS.alert, urgency: "normal", id: NOTIFY_IDS.mergeDropped }
   } else if (event === "mergeConflict") {
     // D-SRC-33: Model.mergeConflictNotice's sentences and nothing else -- a
-    // field name and a source key per conflict, never a value or a URL.
+    // field name per conflict, never a value, a URL or (D-SINK-69: this argv
+    // is world-readable in /proc while it runs) a source's key.
     var kept = mergeConflictNotice(p.conflicts)
     if (kept) spec = { title: kept.title, body: kept.body, glyph: GLYPHS.alert, urgency: "normal", id: NOTIFY_IDS.mergeConflict }
   }

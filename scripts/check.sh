@@ -454,7 +454,11 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-82}
 # 3233 -> 3238 -- the five `fieldAccessibleValue` checks, red under the
 # lead's own six mutants (QA-RESULTS "D-A11Y-1 merged"; the fix's row records
 # six of its own session's); the suite runs 3238.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3238}
+# 2026-11-01, lane-fix160 (D-SINK-69): 3238 -> 3240 -- notifyArgv's
+# mergeConflict argv holds no source key, and the rule-15 sweep over every
+# NOTIFY_IDS event; both red on rel-0160's model (968d097) and on composer
+# mutants (QA-RESULTS "D-HOST-9 fixed, D-SINK-69 fixed"); the suite runs 3240.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3240}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
