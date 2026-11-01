@@ -13315,6 +13315,92 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### F-HARNESS-86: key-scenario learns a new source's key, rechecked (2026-11-01)
+
+The 0.16.0 pre-cut run of `scripts/dev-harness/key-scenario.sh live` on
+rel-0160 bcce3f8 read 111 passed, 28 failed in 962.8 s
+(key-20261101-075159-972967). None of the 28 is a product regression.
+25 named a key the scenario PREDICTED as fnv1a32 of the URL. Since
+D-SINK-48 (f9c47da) a new source's key is random. B10, B17 and B18 read
+the helper's path at argv[1]. Since D-SINK-50 (e8fdcae) argv[1] is `-I`.
+
+lane-keyfix (d3bd33f, 24158fe) repaired the harness:
+- Keys are learned from the record that holds the URL, in memory
+  (`ipc keyOfUrl`) and in state.json, through
+  HarnessLib.sourceKeysByUrl.
+- Records are counted by URL.
+- `key:random` is checked where a check is about the new key.
+- One argv reader skips the interpreter's flags.
+That forward run read 139 / 0.
+
+rc-keyfix rechecked the repair and found four things that could not go red:
+- `key:random` only said "not the URL's fnv1a32". A key derived from the
+  URL any other way read random, and so did a key an existing record
+  already held.
+- The lookup could not see a record that kept a wrapped URL.
+- B41's `record` read two sentinels as the same key.
+Repaired: `reused`, plus `redrawn` on O5, F6 and A2 (two draws for one URL
+must differ), the wider lookup, and the sentinel refused.
+
+Every run below was in its own nested headless cage on a private bus
+(`scripts/dev-harness/private-bus.sh`, `env -u DISPLAY -u
+HYPRLAND_INSTANCE_SIGNATURE`), under the shared heavy lock. The crash
+journal read 81 entries before and after every run.
+
+| Run | Tree | Result | Time | Load | Transcript |
+|---|---|---|---|---|---|
+| forward (release count) | rc-keyfix 74d2419 (rel-0160 968d097 merged under it) | 139 passed, 0 failed (138 lettered and the floor) | 537.7 s | 1.13 -> 2.91 | key-20261101-110348-1587875 |
+| lane-keyfix's h1, i1, i2, i3 | --tree mk-hashinit | 128 passed, 11 failed | 580.6 s | 2.06 -> 4.07 | key-20261101-102430-1434716 |
+| own-A, own-B, own-C and lane-keyfix's d1 | --tree rck/own | 118 passed, 21 failed | 655.9 s | 3.98 -> 1.87 | key-20261101-103411-1481055 |
+
+What the reds were:
+- **h1, i1, i2, i3.** lane-keyfix's eight came back with the same
+  tokens: N1, C2, O1 and A1 `key:hash`; B10 and B17
+  `helper:no(<pid>) left:<pid>`; B14 `left:<pid>`; B18
+  `after-deadline:alive(<pid>)`. O5, F6 and A2 were also red,
+  `redrawn:no`, because fnv1a32 is a function of the URL too.
+- **own-A** keyed D by fnv1a32 of a salted URL. O5 was red (`held D as
+  fc89922d; the recovery's record is fc89922d`) and so was A2
+  (`redrawn:no`). O1, A1's key, B41, B36 and B39 stayed green. On the
+  harness before the recheck, own-A has no red at all.
+- **own-B** handed B the first record's key, which is the mirror's. C2
+  read `key:reused`; on lane-keyfix's harness it read `key:random` and
+  passed. C5 and F6 were red on `true 20`, A's channels.
+- **own-C** deleted the KILL of a TERM-ignoring init. B17 read
+  `helper:no(<pid>) left:<pid> ... killed:1`.
+- **d1** reproduced Z1..Z3, X1..X6, Y2, Y3, Q1, Q2, V1 and A1
+  (`reports:epgUrl:no-source`), as lane-keyfix read them. Z1 read
+  `records:1`, counted by URL, under a record that carried the
+  mirror's key; a count by key_of(B) reads 0.
+
+The node suite catches a key derived from the URL by itself: 94 of 3238 node
+checks fail on a tree whose allocateSourceKey uses a salted fnv1a32. So
+the gate guarded the product. What was weaker than its name was the live
+arm's `key:random`.
+
+`scripts/check.sh` on the same content: green except `defect ledger`,
+because F-HARNESS-86 has no board row yet. With the proposed row added,
+on a scratch worktree, `check-defect-ledger.py` exits 0. Highlights:
+- node 3238 (twice) and python 1896
+- qml spec 82 and harness predicates 609
+- key preflight 12 and release allowlist 42 files
+
+Siblings searched (rule 15), by shape: key_of, sourceKey(, fnv1a32,
+normalizeSourceUrl, and /proc cmdline readers of the helper.
+- **Stale since D-SINK-50 (F-HARNESS-87).** `argv-scenario.sh`'s sweeper and
+  `fixtures/rewind-sweep.py` match a helper by realpath(argv[1]). Both
+  read, not run; their positive controls (S1/S2, R13/R14) go red.
+- **Stale since D-SINK-48 (F-HARNESS-88).** `scripts/qa-sources-scenarios.sh` predicts
+  fnv1a32 keys for sources it adds in the app (SRC-H08, SRC-H14, the
+  extra.m3u remove, the fresh-install activeCache expectation), and so
+  does docs/QA-SOURCES.md's `key` example.
+- **Cleared.** logo-scenario (seeded records under legacy keys),
+  id-rotate and chno-entry (the key read from addSource's reply),
+  sources-scenario (by label from state.json), tls, player, rewind's
+  players and qa-player-scenarios (mpv's argv), and run.sh.
+
+Merged into rel-0160 for the 0.16.0 cut on 2026-11-01 (37a6ee7); the release count on the final tree is in the 0.16.0 pre-cut record.
+
 ### D-A11Y-1 merged (2026-11-01): the fix checked, the probe re-run on the merged tree, the exception removed and the premise re-measured
 
 **What merged.** `fix-a11y-mask` (75cc827: one commit from the owner's separate session, based on dev cc63a49) onto dev ad176d3. One conflict: D-A11Y-1's board row, resolved by hand. The row now leads with the fix and keeps the 2026-10-31 bracket and the earlier history beneath it. The lead's first resolution took the branch's whole board file, which would have dropped ten rows ad176d3 filed (seven defect rows and three decisions-log rows) and reverted its edits to three others (D-A11Y-1, D-GS-3, D-SINK-47). Comparing row counts against dev caught it, and the file was re-merged three ways, conflicting only on that row.
