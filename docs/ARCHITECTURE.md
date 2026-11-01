@@ -1421,7 +1421,8 @@ is 0644, and `omarchy-refresh-config` copies it with `cp -f`: reproduced into
 a scratch directory, reading the real source read-only, a fresh copy is 644
 under umask 022 and 600 under umask 077, while a copy onto an EXISTING file
 keeps that file's mode. A purpose-built Quickshell `FileView` probe with
-`atomicWrites: true`, the setting `shell.qml:138` uses, left a 0644 file at
+`atomicWrites: true`, the setting `shell.qml:140` uses (138 on omarchy
+4.0.4-1, when this was measured), left a 0644 file at
 0644 and a 0600 file at 0600, with the content changed both times: the atomic
 rename neither resets the mode to the writer's umask nor tightens it. On this
 machine the file is 0600, but `~/.config` and `~/.config/omarchy` are both

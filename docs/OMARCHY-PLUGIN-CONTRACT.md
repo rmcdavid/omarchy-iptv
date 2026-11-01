@@ -7,12 +7,12 @@ re-read them. `$OMARCHY_PATH` = `/usr/share/omarchy` and is READ-ONLY.
 
 | Thing | Value |
 |---|---|
-| Omarchy | 4.0.4-1 (`pacman -Q omarchy`, 2026-10-11; 4.0.3 when this table was first written) |
-| Quickshell | 0.3.1 |
-| Qt | 6.11.2 (`qt6-declarative`, `qt6-base`, `qt6-wayland`, all 6.11.2 on 2026-10-11) |
+| Omarchy | 4.0.6-1 (`pacman -Q omarchy`, 2026-10-31; 4.0.4-1 on 2026-10-11, 4.0.3 when this table was first written) |
+| Quickshell | 0.3.2.r7.g2b4501a-1 (2026-10-31; 0.3.1 before) |
+| Qt | 6.12.0 (`qt6-declarative` 6.12.0-2, `qt6-base` 6.12.0-3, `qt6-wayland` 6.12.0-1 on 2026-10-31; all 6.11.2 on 2026-10-11, and a measurement below that names 6.11.2 was taken there and not repeated on 6.12.0) |
 | Hyprland | 0.56.2 |
 | mpv | 0.41.0 |
-| python3 | 3.14.7, stdlib only (no pytest → use `python3 -m unittest`) |
+| python3 | 3.14.8, stdlib only (no pytest → use `python3 -m unittest`) |
 | node | 26.8.1 via mise (dev-only; do not depend on it at runtime) |
 | Present | jq, gum, fzf, curl, ffmpeg, wl-copy, yt-dlp, `omarchy-notification-send` |
 | Absent | go, rustc, cargo, bun, walker, vlc, bats, shellcheck (socat present here but not guaranteed) |
@@ -30,7 +30,9 @@ re-read them. `$OMARCHY_PATH` = `/usr/share/omarchy` and is READ-ONLY.
 - Config: `~/.config/omarchy/shell.json`. Its mode is NOT a host constant
   (this line stated mode 0600 flatly until 2026-10-22, D-DOC-22, describing
   this machine after the plugin's own shield had run). Verified 2026-10-22 on
-  omarchy 4.0.4-1 by reading the scripts (every `script:line` below is under
+  omarchy 4.0.4-1, and re-read 2026-10-31 on 4.0.6-1 (every script cited is
+  byte-identical; `shell.qml`'s FileView is unchanged, two lines further
+  down), by reading the scripts (every `script:line` below is under
   `/usr/share/omarchy/bin`, `shell.qml` under `/usr/share/omarchy/shell`) and
   re-running their copy lines on
   scratch files under umask 022 and 077: shipped and seeded at 0644
@@ -52,7 +54,7 @@ re-read them. `$OMARCHY_PATH` = `/usr/share/omarchy` and is READ-ONLY.
   layout commands (`omarchy-bar:152,154,176,203,213,216`),
   `omarchy-refresh-shell:9` and the upgrade's last step
   (`omarchy-upgrade-to-quattro:2373`) run, and by this plugin's `config
-  shield`. The shell's FileView writer (`shell.qml:136-138`, `atomicWrites:
+  shield`. The shell's FileView writer (`shell.qml:138-140`, `atomicWrites:
   true`), the one behind plugin settings, `omarchy bar set`
   (`omarchy-bar:361` -> `omarchy-shell shell setBarWidget`) and
   `omarchy-plugin-enable:85`, keeps whatever mode it finds (D-SINK-18,
@@ -224,17 +226,26 @@ Found the hard way in v0.2.0 and confirmed on the live shell (defects
 D-LIVE-20 and D-LIVE-21). Any plugin that writes its own settings must know
 this.
 
-`shell.updateEntryInline(id, settings)` (shell.qml:1078) compares the proposed
+`shell.updateEntryInline(id, settings)` (shell.qml:1081) compares the proposed
 entry with the stored one and returns `false` WITHOUT persisting when nothing
-changed (line 1114). A `false` return therefore means "already stored", not
+changed (line 1117). A `false` return therefore means "already stored", not
 "the write failed". Treating it as a failure produces a spurious error.
 
-On a real change it calls `persistShellConfig` (line 109), which assigns
-`shellConfig` and writes the file. `onShellConfigChanged` (line 66) emits
-`pluginsChanged()`, a `Connections` block (line 1052) calls `syncPluginApis()`
-(line 861), and that assigns every plugin's `shellApi.barConfig` from
-`publicBarConfig()` (line 326), which reads the `barConfig` binding declared at
-line 116.
+On a real change it calls `persistShellConfig` (line 111), which assigns
+`shellConfig` and writes the file. `onShellConfigChanged` (line 69) emits
+`pluginsChanged()`, a `Connections` block (line 1055) calls `syncPluginApis()`
+(line 864), and that assigns every plugin's `shellApi.barConfig` from
+`publicBarConfig()` (line 329), which reads the `barConfig` binding declared at
+line 118. [Line numbers re-read 2026-10-31 on omarchy 4.0.6-1, where each is
+two or three further down than on 4.0.4-1 and every function named is
+unchanged: the three hunks between the two `shell.qml`s are a
+`//@ pragma OmarchyLoadPatch` and an `import qs.Commons as Commons` at the
+top, `publicPluginManifest` no longer deleting `__sourceDir` from the
+manifest it hands a third-party plugin, and two `Commons.Color` calls in the
+`applyTheme` IPC handler. `onShellConfigChanged` was at 67 on 4.0.4-1, not
+the 66 this said. 4.0.6-1 does not carry omacom/omarchy#15082:
+`publicBarConfig()` still reads `shell.barConfig`, so this host still
+publishes one write behind.]
 
 The trap: a QML change handler runs BEFORE bindings on the same property
 re-evaluate, so `publicBarConfig()` hands out the PREVIOUS bar configuration.
@@ -322,9 +333,9 @@ not a wait for the echo. The funnel estimates what the host STORES from
 its own record of its last write while the publish has not moved, and from
 the publish once it has (`entryWriteNeeded` in model/settings.mjs, deleted
 2026-10-13 by R22e after R19a withdrew the skip; the host's own
-`JSON.stringify` comparison at `shell.qml:1094` for a layout entry and
-`:1107` for a plugins entry, read on this machine), makes no write the host
-would answer `false` to, and re-records its own write only when the record
+`JSON.stringify` comparison at `shell.qml:1097` for a layout entry and
+`:1110` for a plugins entry, read on this machine; 1094 and 1107 on
+4.0.4-1), makes no write the host would answer `false` to, and re-records its own write only when the record
 differs (`Model.sameOwnWrite`). On the echoing host the estimate is the
 echo itself, so the same code settles there after one reconcile; the echo
 path stays idempotent. **[Round 9 (R19a, 2026-10-12): the estimate is
@@ -392,14 +403,18 @@ entry writes in 5 s; lane A, lane-key-x1]. The other own-write scenarios (E6, th
 key-mirror segments, the L toggle) have not run both ways; that, and
 re-verifying this section on the first release carrying #15082, is what
 remains of D-HOST-4 on the board. The section above stays
-as the verified behaviour of every Omarchy up to and including 4.0.4.
+as the verified behaviour of every Omarchy up to and including 4.0.6
+(re-read 2026-10-31: the publish chain in `shell.qml` is unchanged from
+4.0.4-1).
 
 ## Verified host renderers for the strings the plugin hands over (2026-10-02)
 
 The plugin hands the host five kinds of string, most of them carrying
 provider data (field labels are the plugin's own literals), and each is
 rendered by a host file the plugin cannot change. Read on omarchy 4.0.4 on
-2026-10-02 during D-TEXT-1, and pinned by `tests/test_host_text_format.py`,
+2026-10-02 during D-TEXT-1 (the line numbers re-read on 4.0.6-1 on
+2026-10-31: every declaration unchanged, each one line further down and the
+tooltip fourteen), and pinned by `tests/test_host_text_format.py`,
 which goes red on this machine when a host update changes or removes the
 declaration on one of these elements -- each pin is anchored on the
 element, by id or by the property that binds the plugin's string. A moved
@@ -408,11 +423,11 @@ A red there is a re-measurement, not a failure of this plugin:
 
 | string | host file | format |
 |---|---|---|
-| group names, field labels, mpv track titles (`PanelSectionHeader`) | `Ui/PanelSectionHeader.qml:17` | `Text.PlainText` |
-| confirm-dialog message, and its button labels (`ConfirmDialog`) | `Ui/ConfirmDialog.qml:72` (message), `:109` (labels) | `Text.PlainText` |
-| the bar widget's tooltip | `plugins/bar/Bar.qml:1338` | `Text.PlainText` |
-| mpv's window title, the channel name after the first zap | `plugins/bar/widgets/ActiveWindow.qml:32` | `Text.PlainText` |
-| a failure toast's summary / body (`omarchy-notification-send`) | `plugins/notifications/components/NotificationCard.qml:166` / `:184` | summary `Text.PlainText`; body `Text.StyledText` behind `NotificationLogic.js` `stripImageTags` |
+| group names, field labels, mpv track titles (`PanelSectionHeader`) | `Ui/PanelSectionHeader.qml:18` | `Text.PlainText` |
+| confirm-dialog message, and its button labels (`ConfirmDialog`) | `Ui/ConfirmDialog.qml:73` (message), `:110` (labels) | `Text.PlainText` |
+| the bar widget's tooltip | `plugins/bar/Bar.qml:1352` | `Text.PlainText` |
+| mpv's window title, the channel name after the first zap | `plugins/bar/widgets/ActiveWindow.qml:33` | `Text.PlainText` |
+| a failure toast's summary / body (`omarchy-notification-send`) | `plugins/notifications/components/NotificationCard.qml:167` / `:185` | summary `Text.PlainText`; body `Text.StyledText` behind `NotificationLogic.js` `stripImageTags` |
 
 So a `<b>` in a channel name can restyle a failure toast's body and
 nothing else; no host renderer fetches an image out of a plugin string.
@@ -431,7 +446,8 @@ StyledText decodes the three entities, so the body draws exactly as its
 plain text: measured on Qt 6.11.2 offscreen in the QML spec, equal width
 and height for every case, where an unescaped bare `&` drops what follows
 it (`Q&A` drew as `Q`). The summary is PlainText and is not escaped. Read
-on omarchy 4.0.4 on 2026-10-29: nothing under `plugins/notifications/`
+on omarchy 4.0.4 on 2026-10-29, and still so on 4.0.6-1 on 2026-10-31:
+nothing under `plugins/notifications/`
 handles a link (no `onLinkActivated`, `linkActivated`, `linkAt`,
 `hoveredLink` or `openUrlExternally`; the one hit in the whole shell is
 `plugins/panels/dropbox/Service.qml`), pinned by
@@ -594,8 +610,8 @@ D-HOST-3.
 `/usr/share/omarchy/shell/shell.qml`:
 
 ```
-line 23:  property string home: Quickshell.env("HOME")
-line 32:  readonly property string userConfigPath: home + "/.config/omarchy/shell.json"
+line 25:  property string home: Quickshell.env("HOME")
+line 34:  readonly property string userConfigPath: home + "/.config/omarchy/shell.json"
 ```
 
 The file contains no other reference to `XDG_CONFIG_HOME`. So the host writes
@@ -651,25 +667,28 @@ here only when Arch ships a Qt built past 2026-09-15 on 6.11, or a 6.12.1;
 whatever it says.
 
 **The host fact.** `/usr/share/omarchy/shell/Ui/TextField.qml` (omarchy
-4.0.4) is `TextField { ... }` from `QtQuick.Controls` with the kit's chrome
+4.0.4, and 4.0.6-1 on 2026-10-31, where its one change is `Commons.Color`)
+is `TextField { ... }` from `QtQuick.Controls` with the kit's chrome
 and `echoMode: password ? TextInput.Password : TextInput.Normal`; it never
 sets `readOnly`, so every instance is editable unless its caller says
 otherwise, and the plugin's field inherits that default. The kit's
-`NumberField.qml:80` sets `readOnly: !spin.editable`. Editable instances the
+`NumberField.qml:81` sets `readOnly: !spin.editable`. Editable instances the
 host itself declares (a grep over shape, `TextField {` and `readOnly`,
-2026-10-11; which of them exist while their panel is closed is UNVERIFIED):
+2026-10-11, repeated on 4.0.6-1 on 2026-10-31: the same thirteen
+declarations and the same three `readOnly` lines, the numbers below now
+4.0.6-1's; which of them exist while their panel is closed is UNVERIFIED):
 
 | host file | line | field |
 |---|---|---|
-| `plugins/panels/network/Panel.qml` | 1841, 1865 | the passphrase prompts (the precedent D9 cited) |
-| `plugins/panels/clock/Panel.qml` | 381, 404 | two fields |
-| `plugins/panels/weather/Panel.qml` | 615 | one field |
-| `plugins/panels/tailscale/Panel.qml` | 601 | one field |
-| `Ui/MultiSelect.qml` | 407 | the filter field |
-| `Ui/SearchableDropdown.qml` | 205 | the filter field |
-| `plugins/dev-gallery/GalleryPanel.qml` | 1337, 1358 | demo fields |
-| `plugins/lock/LockView.qml` | 146 | `readOnly: root.authenticatingPassword` -- editable while LOCKED |
-| `plugins/polkit/PolkitAgent.qml` | 323 | `readOnly: root.submitted \|\| root.errorFlash` |
+| `plugins/panels/network/Panel.qml` | 1842, 1866 | the passphrase prompts (the precedent D9 cited) |
+| `plugins/panels/clock/Panel.qml` | 384, 407 | two fields |
+| `plugins/panels/weather/Panel.qml` | 616 | one field |
+| `plugins/panels/tailscale/Panel.qml` | 602 | one field |
+| `Ui/MultiSelect.qml` | 408 | the filter field |
+| `Ui/SearchableDropdown.qml` | 206 | the filter field |
+| `plugins/dev-gallery/GalleryPanel.qml` | 1338, 1359 | demo fields |
+| `plugins/lock/LockView.qml` | 147 | `readOnly: root.authenticatingPassword` -- editable while LOCKED |
+| `plugins/polkit/PolkitAgent.qml` | 324 | `readOnly: root.submitted \|\| root.errorFlash` |
 
 The plugin cannot change any of these; the draft report to Omarchy is the
 first quoted block in `docs/ARCHITECTURE.md` section 6's D-CLIP-1 entry.
@@ -771,6 +790,12 @@ after checking the function still ends at line 1117):
 - **C. Handing back exactly what is stored** returns `false` and persists
   nothing (the one-write-behind section above; `shell.qml:1114`).
 
+[2026-10-31: the line numbers in this record are 4.0.4-1's, where it was
+measured. On omarchy 4.0.6-1 (sha256 prefix `1c390bb1703a8372`) the function
+is unchanged and every line is three further down: `shell.qml:1081-1120`,
+`next` at 1095-1096, `if (!foundInLayout)` at 1105, `if (!dirty) return
+false` at 1117; re-run with `sed -n 1081,1120p`.]
+
 Two neighbouring facts, read rather than run:
 
 - `omarchy bar set <id> <key> <value>` writes ANY key. `setBarWidget`
@@ -790,17 +815,19 @@ Two neighbouring facts, read rather than run:
   2026-10-13, measured by lane A on omarchy 4.0.4-1 and re-read by the
   documents lane on 2026-10-14; nothing changed. "Offers" is generous: no host
   file RENDERS `schema` today. An undeclared key on a bar entry still reaches
-  a third-party plugin's `barConfig` -- `shell.qml` 326-328, `function
+  a third-party plugin's `barConfig` -- `shell.qml` 326-328 (329-331 on
+  4.0.6-1), `function
   publicBarConfig() { return JSON.parse(JSON.stringify(shell.barConfig ||
   {})) }`, a deep clone filtered by nothing, handed out by `barConfigFor`
-  (330-333), and `plugins/bar/BarModel.js` `entrySettings` (10-17) copies
+  (330-333; 333-336 on 4.0.6-1), and `plugins/bar/BarModel.js` `entrySettings` (10-17) copies
   every key but `id`. `omarchy bar set` stores an undeclared key: `cmd_set` in
   `/usr/share/omarchy/bin/omarchy-bar` (333-361) passes it to `omarchy-shell
   shell setBarWidget`, and `services/PluginRegistry.qml` (342-379) checks the
   location and that the entry is an object, then `entry[String(key)] = value`
   (379). The manifest's `defaults` never reach an entry (a put entry is `{
   id: key }`, PluginRegistry.qml 526), and the only host reads of `schema` and
-  `defaults` are the registration at shell.qml 1406-1408. `sourceKey`, which
+  `defaults` are the registration at shell.qml 1406-1408 (1409-1411 on
+  4.0.6-1, and still the only ones). `sourceKey`, which
   the manifest does not declare, is written and read back through `barConfig`
   today. So the migration does not depend on the manifest declaring
   `playlistUrl` or `epgUrl`; whether to stop declaring them is the lead's.]

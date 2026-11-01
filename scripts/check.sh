@@ -3,8 +3,9 @@
 #   1. omarchy plugin validate   (manifest schema, entry points, no symlinks)
 #   2. qmllint on every .qml     (qs.Commons / qs.Ui mapped through $QMLROOT),
 #                                INCLUDING the dev-harness fake (CLAUDE.md 10);
-#                                every `Model.X` it reports must be a name
-#                                Model.mjs exports (check-model-members.py)
+#                                every `Model.X` in the QML it lints must be a
+#                                name Model.mjs exports (check-model-members.py,
+#                                which reads the QML, not qmllint's output)
 #   3. node tests                (tests/Model.test.js)
 #   4. python tests              (python3 -m unittest discover -s tests)
 #   4b. model split              (scripts/split-model.mjs --check: Model.mjs and
@@ -1063,20 +1064,24 @@ else
     errors=$(grep -c -E '^Error:|: error:|Error at' <<<"$output")
     (( lint_status == 0 )) || errors=$(( errors + 1 ))
     warnings=$(grep -c -E 'Warning:|: warning:' <<<"$output")
-    # D-REL-5: qmllint 6.11 reads no ES module's exports, so since the model
+    # D-REL-5: qmllint reads no ES module's exports, so since the model
     # became Model.mjs every Model member it reaches is a `missing-property`
     # on type "Model". The first version of this comment said the classic
     # Model.js was not resolved either, so no check was lost. Measured, that
     # was false: Model.js WAS resolved, a real member drew nothing and a
     # mistyped one drew a warning naming it (BarWidget.qml 0 -> 1). Here that
-    # warning would be one line in a bucket of hundreds. So the member lines
-    # are counted apart, to keep the rest comparable with the baseline, and
-    # every name in them is judged against the aggregator's export names by
-    # check-model-members.py: an unknown one is red. Not covered, measured on
-    # the three entry points: a member qmllint never reaches (82 code
-    # positions; the classic Model.js reached 1 of them).
+    # warning would be one line in a bucket of hundreds, so the member lines
+    # are counted apart, to keep the rest comparable with the baseline.
+    # They are NOT what judges a member any more (Qt 6.12): the judge used
+    # to read the names out of these lines, and qmllint 6.12.0's text output
+    # prints only a trailing run of what it finds (BarWidget.qml 7 of the 25
+    # warnings its --json lists), so a mistyped member at BarWidget.qml:86
+    # drew no line and the judge passed. check-model-members.py now reads the
+    # QML itself and judges every `Model.<name>` in code against the
+    # aggregator's export names, including the positions qmllint never
+    # reached; an unknown one is red, and so is a file it could not read.
     model_members=$(grep -c -E 'not found on type "Model" \[missing-property\]' <<<"$output")
-    members_out=$(python3 "$ROOT/scripts/check-model-members.py" --root "$ROOT" --file "$file" <<<"$output")
+    members_out=$(python3 "$ROOT/scripts/check-model-members.py" --root "$ROOT" --file "$file")
     members_status=$?
     if (( errors > 0 )); then
       bad "$(basename "$file"): $errors error(s), $warnings warning(s)"
