@@ -239,16 +239,16 @@ refuses is named there.
 
 ### Fixed
 
-- **The guide and the bar keep your theme's colours on Qt 6.12 by
-  themselves.** Qt 6.12, installed by recent system updates, brings a
-  colour object of its own under the same name as your theme's, and Qt
-  hands a plugin its own one first. On Omarchy 4.0.6 the guide still drew
-  your theme only because Omarchy's build of Quickshell carries a workaround
-  its packagers call temporary; without it the guide's background, text,
-  borders and highlight and the bar's label would all have drawn black.
-  The plugin now names your theme's colours the way Omarchy's own shell
-  does, so nothing changes on screen today and nothing will when that
-  workaround goes.
+- **The guide keeps your theme's colours on Qt 6.12 by itself.** Qt 6.12,
+  installed by recent system updates, brings a colour object of its own
+  under the same name as your theme's, and Qt hands a plugin its own one
+  first. On Omarchy 4.0.6 the guide still drew your theme only because
+  Omarchy's build of Quickshell carries a workaround its packagers call
+  temporary; without it the guide's background, text, borders and highlight
+  would all have drawn black. (The bar widget takes its colour from the bar
+  it sits in, so it would have kept it.) The plugin now names your theme's
+  colours the way Omarchy's own shell does, so nothing changes on screen
+  today and nothing will when that workaround goes.
   (D-HOST-9)
 - **Adding a source in the first moment after the shell starts** no longer
   goes wrong: the start-up cleanup of old caches could delete the new

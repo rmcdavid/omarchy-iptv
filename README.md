@@ -799,10 +799,11 @@ carry channel ids — most do — are not affected at all.
   down starts a fresh player once it has exited.
 - No stream address, credential or header value ever reaches **the player's**
   command line. The player starts empty and receives all of it over a private
-  socket only you can read. One thing is briefly visible to other local
-  accounts in `ps`, because a notification's text is on its command line
-  while it is being sent: the channel's name (a web address in it shown as
-  its host) in a notification naming it. The channel's
+  socket only you can read. What a notification says is briefly visible to
+  other local accounts in `ps`, because its text is on its command line
+  while it is being sent: from your playlist, that is a channel's name and
+  the reason it did not play, a web address in either shown as its host.
+  The channel's
   internal identifier, visible there while a change was being issued up to
   and including 0.15.0, now reaches the helper privately with its other
   private arguments, as your `mpvArgs` tokens and your sources' keys do

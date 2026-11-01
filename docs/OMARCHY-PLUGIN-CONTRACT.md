@@ -1483,6 +1483,28 @@ is still `QQuickColor(...)` and `Commons.Color` is the theme's
 runs and the cage exited 0; the coredump journal count was 81 before and
 after; nothing was added under `~/.cache/QtProject` or `~/.cache/quickshell`.
 
+**[2026-11-01, rc-fix160, re-run in its own cage on a private bus.]** The
+table's `barFg` was read with `bar` unset, which is BarWidget.qml's fallback
+branch only. On the host the bar's `injectProps` hands the widget a
+`PluginBarApi` one `Qt.callLater` after creation, and `barFg` is then
+`bar.barForeground`, the host's own (qualified) bar colour. Re-run with that
+step reproduced -- the host's `PluginBarApi` from `qs.Ui`, `barForeground`
+bound to `Commons.Color.bar.text` as `Bar.qml` binds it, a theme whose
+`[bar] text` (`#a1b2c3`) differs from its foreground -- rel-0160's bar
+without the pragma read `#000000` before the hand-over (its one warning)
+and `#a1b2c3` after it, the same as the fixed tree. So without the patch the
+bar widget would have kept the bar's colour; the guide is the surface that
+would have drawn black. The same run read all 15 guide properties a
+qualified `Commons.Color` feeds (the menu tokens, both border specs,
+`cursorInk`, the four caption alphas, `accent`, `urgent`): with the pragma,
+rel-0160's and the fixed tree's values are identical, and the fixed tree's
+are the same again without it, so the qualification changed no drawn value
+on the host path. A runtime name probe -- each shipped file's own Qt and
+Quickshell imports and nothing else, `typeof` of all 37 host-kit names --
+found `Color` defined by those imports in all three files without the
+pragma and none with it; the only other name defined was `BarWidget`, the
+plugin directory's own file, which the guard does not judge.
+
 What holds it now, and what the patch's pins still say:
 
 - `scripts/check-theme-names.py` (the gate's "theme name guard") reads every
@@ -1494,7 +1516,14 @@ What holds it now, and what the patch's pins still say:
   problems, Guide.qml 24 and BarWidget.qml 1. `tests/test_theme_names.py`
   holds it on mutants, among them a copy of the installed QtQuick and
   Quickshell type files with one colliding export added, which is what a Qt
-  or Quickshell update that adds a name would look like.
+  or Quickshell update that adds a name would look like. **[rc-fix160:
+  the first version read a qmldir type only in its versioned form, and Qt
+  6.12 also takes `Name File` and `singleton Name File` (measured: a module
+  declaring both, imported unversioned, gives the importer both names), so a
+  colliding name added that way on the Qt side, or a host Commons that
+  declared its Color that way, passed green; and it read `...Color` as a
+  member access. Both are read now, each held by a test red on the first
+  version.]**
 - `tests/test_host_load_patch.py` keeps the host's half -- the root's pragma,
   the binary's rewrite, the rewrite reaching every shipped file, the host
   handing entry points over as `file://` URLs -- because the host still loads
