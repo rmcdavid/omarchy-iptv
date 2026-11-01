@@ -801,3 +801,42 @@ AX2: **D-A11Y-1**, the Sources form publishing provider credentials as its
 accessible Value. When a release carries this commit, that stops being latent in
 the same instant the guide starts being readable. Both halves of that sentence
 arrive together, which is the whole reason the tripwire exists.
+
+**[2026-10-31, re-check after the system update: the trigger fired, and the
+deferral now runs under a dated exception.** The update installed
+`quickshell 0.3.2.r7.g2b4501a-1`, `qt6-base 6.12.0-3` and
+`at-spi2-core 2.62.1-1`, and `tests/test_a11y_premise.py` went red, as
+designed. The paragraph above that says 0.3.1-1 is still installed and the test
+is green no longer describes this machine. `onRed` was followed in its order:
+
+1. The installed Quickshell, a build seven commits past v0.3.2, contains
+   `916a0dd` (checked by the lead). So the premise -- no Quickshell window
+   publishes a tree -- is assumed broken, and D-A11Y-1 is treated as LIVE
+   until measured otherwise.
+2. `scripts/a11y-probe.sh` was re-run on this platform, under the nested
+   headless cage on a private D-Bus: **84 checks, 7 failures, off baseline.**
+   The three recorded failures stand: `L2-XT-05` and `L2-XT-06`, the Xtream
+   server and username published on `text/text` (D-A11Y-1 at the sink), and
+   `L2-XT-11`. Four are new on this platform and not yet examined:
+   `L2-Q-04-LIT` and `L2-Q-06`, for the query's surviving row (the ruled words
+   not heard, and two list items carrying its name where one is ruled), and
+   `L2-SC-03-LIT` and `L2-SC-06`, the same two shapes for row 1 of 10,000.
+   The probe hosts the guide in a plain Window rather than a PanelWindow
+   (`T5-window`), so it shows what the guide publishes once its window
+   publishes. It does not show whether a Quickshell PanelWindow now publishes;
+   that has not been measured, and D-A11Y-1 is LIVE here by `onRed`'s rule,
+   not by an observation of the shell's own window.
+
+The product owner decided the same day that D-A11Y-1 stays open and is fixed
+separately, and that meanwhile a narrow, dated exception lets unrelated work
+land on `dev`, with no release cut while it stands. The exception is data, the
+`exception` object in `tests/fixtures/a11y-premise.json`, carrying who
+authorised it, the date, the exact platform, the board row and this evidence;
+`platform`, `premise`, `upstream` and `onRed` are unchanged, because the
+versions in `platform` are still the ones the premise was measured on. The
+platform test honours the exception, as a skip that states it, only on exactly
+those three versions and only while D-A11Y-1's row on the board reads open. It
+is red on any other platform, on an exception missing or adding a field, and
+once the row reads fixed, which is the day the exception is removed and the
+premise re-measured. `scripts/release.py build` refuses to cut while the
+exception is present; `release.py check`, which the gate runs, does not.]**
