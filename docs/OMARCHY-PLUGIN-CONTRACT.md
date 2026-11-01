@@ -1325,7 +1325,10 @@ file read `Color` as the theme's object with the pragma and as
 `QQuickColor(...)` without it, in both orders; `Style`, `Util` and `Border`
 are the theme's in every case (QtQuick exports none of them).
 
-So the plugin's theme colours on Qt 6.12 rest on this patch alone, and the
+**[2026-11-01, lane-fix160: no longer -- the plugin now names the theme's
+Color through a named import, as the host's own files do, and draws its
+theme with or without this patch; see "Fixed in the plugin" below. The
+paragraph is kept as what was true of rel-0160.]** So the plugin's theme colours on Qt 6.12 rest on this patch alone, and the
 import order holds nothing. `tests/test_host_load_patch.py` pins the joins on
 this machine (the root's pragma, the binary's rewrite read out of the binary,
 the rewrite reaching every shipped file, the host handing each entry point
@@ -1434,3 +1437,123 @@ What the recheck adds:
   standing case either way. The live launcher sets
   `QS_DISABLE_FILE_WATCHER=1`, so quickshell's watcher never reloads the
   shell over a plugin's files.
+
+### Fixed in the plugin by lane-fix160 (2026-11-01)
+
+The plugin no longer depends on the patch for its colours. Guide.qml and
+BarWidget.qml now write the theme's `Color` exactly as the host writes its own
+files: `import qs.Commons` stays (for `Style`, `Util` and `Border`, which no
+imported module exports) and `import qs.Commons as Commons` is added beside it,
+and every `Color.*` becomes `Commons.Color.*` (24 uses on 14 lines in
+Guide.qml, 1 in BarWidget.qml; Service.qml names no theme singleton). Read on
+omarchy 4.0.6: 52 of the 54 host files that carry the alias keep the
+unqualified import beside it (`Ui/Button.qml`, `Ui/ConfirmDialog.qml` and the
+rest, and `shell.qml` itself), the other two being `Commons/Style.qml` and
+`Commons/Border.qml`, inside the module; and they qualify `Color` and nothing
+else (259 occurrences of `Commons.Color`; the only two of `Commons.Style` are
+`qs.Commons.Style` in a comment and a string). A named import is searched before both the C++ types and the
+composite singletons of the unqualified imports (`QQmlTypeNameCache::doQuery`
+in qtdeclarative 6.12.0), so the alias reaches the theme whatever Qt puts in
+QtQuick.
+
+Observed, not argued (rule 14), in the rc-host9 rig's shape re-run by
+lane-fix160 (`scratchpad/fix160/rig`): the host `shell.qml`'s whole header
+over a full copy of `/usr/share/omarchy/shell`, with and without the pragma
+line, the installed quickshell in a nested headless cage on a private D-Bus
+(`env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE -u WAYLAND_DISPLAY`,
+`scripts/dev-harness/private-bus.sh`), the plugin at
+`$HOME/.config/omarchy/plugins/io.github.rmcdavid.iptv` in the private HOME,
+each entry point handed over as `Commons.Util.fileUrl(...)` and loaded the
+host's way (the overlay through an asynchronous `Loader`, the bar widget
+through `Component.Asynchronous`), Qt's QML disk cache named inside the
+private HOME (`QML_DISK_CACHE_PATH`), and rel-0160's files loaded beside the
+fixed ones in the same run as the control. Theme: accent `#3c5a78`,
+foreground `#9e8d7c`, red `#b01c2d`, menu `#445566` / `#e1d2c3`.
+
+| Root | Tree | Guide `accent` / `urgent` / `background` / `foreground` | BarWidget `barFg` | Plugin warnings |
+|---|---|---|---|---|
+| with the pragma | fixed | `#3c5a78` / `#b01c2d` / `#445566` / `#e1d2c3` | `#9e8d7c` | 0 |
+| with the pragma | rel-0160 | the same | `#9e8d7c` | 0 |
+| without it | fixed | `#3c5a78` / `#b01c2d` / `#445566` / `#e1d2c3` | `#9e8d7c` | 0 |
+| without it | rel-0160 | `#000000` x4 | `#000000` | 15 (14 Guide, 1 BarWidget) |
+
+In the fixed files' header probes without the pragma, the unqualified `Color`
+is still `QQuickColor(...)` and `Commons.Color` is the theme's
+(`Color_QMLTYPE_5`); with the pragma both are the theme's. Both quickshell
+runs and the cage exited 0; the coredump journal count was 81 before and
+after; nothing was added under `~/.cache/QtProject` or `~/.cache/quickshell`.
+
+**[2026-11-01, rc-fix160, re-run in its own cage on a private bus.]** The
+table's `barFg` was read with `bar` unset, which is BarWidget.qml's fallback
+branch only. On the host the bar's `injectProps` hands the widget a
+`PluginBarApi` one `Qt.callLater` after creation, and `barFg` is then
+`bar.barForeground`, the host's own (qualified) bar colour. Re-run with that
+step reproduced -- the host's `PluginBarApi` from `qs.Ui`, `barForeground`
+bound to `Commons.Color.bar.text` as `Bar.qml` binds it, a theme whose
+`[bar] text` (`#a1b2c3`) differs from its foreground -- rel-0160's bar
+without the pragma read `#000000` before the hand-over (its one warning)
+and `#a1b2c3` after it, the same as the fixed tree. So without the patch the
+bar widget would have kept the bar's colour; the guide is the surface that
+would have drawn black. The same run read all 15 guide properties a
+qualified `Commons.Color` feeds (the menu tokens, both border specs,
+`cursorInk`, the four caption alphas, `accent`, `urgent`): with the pragma,
+rel-0160's and the fixed tree's values are identical, and the fixed tree's
+are the same again without it, so the qualification changed no drawn value
+on the host path. A runtime name probe -- each shipped file's own Qt and
+Quickshell imports and nothing else, `typeof` of all 37 host-kit names --
+found `Color` defined by those imports in all three files without the
+pragma and none with it; the only other name defined was `BarWidget`, the
+plugin directory's own file, which the guard does not judge.
+
+What the fix does not reach (F-HARNESS-87): the dev harness's own root,
+`scripts/dev-harness/shell.qml`, carries no pragma and names `Color` bare in
+eight places, its fake `PluginBarApi` among them. Probed in the same run
+with that root's header, `Color` is `QQuickColor`, `Color.foreground` is
+undefined and `Color.bar.text` throws, so under the harness the plugin's bar
+reads the fake's default black from `bar.barForeground`, where the host's
+own bar hands it the theme's. The guard judges shipped files only and
+names each of the eight when pointed at that file.
+
+What holds it now, and what the patch's pins still say:
+
+- `scripts/check-theme-names.py` (the gate's "theme name guard") reads every
+  shipped `.qml` as source and refuses an unqualified qs.Commons or qs.Ui name
+  that any module the file imports also exports, computed from the installed
+  qmltypes and qmldir files (at the import's version, the qmldir imports
+  followed: QtQuick's `import QtQml auto`, QtQml's `import QML 1.0`,
+  Quickshell's `default import Quickshell._Window`). Red on rel-0160: 25
+  problems, Guide.qml 24 and BarWidget.qml 1. `tests/test_theme_names.py`
+  holds it on mutants, among them a copy of the installed QtQuick and
+  Quickshell type files with one colliding export added, which is what a Qt
+  or Quickshell update that adds a name would look like. **[rc-fix160:
+  the first version read a qmldir type only in its versioned form, and Qt
+  6.12 also takes `Name File` and `singleton Name File` (measured: a module
+  declaring both, imported unversioned, gives the importer both names), so a
+  colliding name added that way on the Qt side, or a host Commons that
+  declared its Color that way, passed green; and it read `...Color` as a
+  member access. Both are read now, each held by a test red on the first
+  version.]**
+- `tests/test_host_load_patch.py` keeps the host's half -- the root's pragma,
+  the binary's rewrite, the rewrite reaching every shipped file, the host
+  handing entry points over as `file://` URLs -- because the host still loads
+  the plugin's QML as `import QtQuick 6.11`, which hides QtQuick's 6.12
+  members from it (rc-host9's third bullet above); a red there is now a
+  re-measurement request about that, not about colours. Its premise case
+  ("Qt's Color wins in the shipped files") is replaced by the plugin's half:
+  without the rewrite, every theme singleton a shipped file names is the
+  theme's (red on rel-0160), and, in synthetic files, the lookup the guard
+  rests on still holds on the installed Qt.
+
+Every name the three files use unqualified from the host kit, against every
+name their imports export (QML builtins 20, QtQuick with QtQml, QtQml.Models
+and QtQml.WorkerScript 210, Quickshell 44, Quickshell.Wayland 12,
+Quickshell.Io 15), on the installed files: Guide.qml uses `Border`,
+`BorderSurface`, `Button`, `ConfirmDialog`, `PanelActionButton`,
+`PanelKeyCatcher`, `PanelSectionHeader`, `PointerMoveGate`, `Style`,
+`TextField` and `Util` unqualified, and BarWidget.qml `BarIconButton`,
+`BarWidget`, `Style` and `Util`; none of them is exported by an import. The
+only host-kit name any of those modules exports is `Color` (QtQuick 6.12),
+now qualified in both files. Not judged by the guard: the plugin's own
+directory, whose only shared name is BarWidget.qml's root `BarWidget`, the
+host kit's, which Qt resolves past the file itself (rc-host9 loaded the real
+one in every arm); and the JavaScript globals, which every import outranks.

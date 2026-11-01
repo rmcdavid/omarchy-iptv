@@ -275,10 +275,14 @@ class TheRealSources(unittest.TestCase):
 
     def test_a_mistyped_member_in_the_real_bar_widget_is_red(self):
         """The case that went green on Qt 6.12's qmllint, whose text output
-        carries no line for BarWidget.qml:86 at all."""
+        carries no line for BarWidget.qml:86 at all (the line is 87 since
+        D-HOST-9 added the qs.Commons alias import above it, so it is read
+        from the file rather than written down)."""
         problems, _ = self.mistyped('BarWidget.qml', 'Model.barGlyph(', 'Model.zzBogusMember(')
         self.assertEqual(1, len(problems), problems)
-        self.assertIn('BarWidget.qml:86:', problems[0])
+        text = read(os.path.join(ROOT, 'BarWidget.qml'))
+        line = text[:text.index('Model.barGlyph(')].count('\n') + 1
+        self.assertIn('BarWidget.qml:%d:' % line, problems[0])
         self.assertIn('Model.zzBogusMember', problems[0])
 
     def test_a_mistyped_member_in_each_real_file_is_red(self):
@@ -294,10 +298,10 @@ class TheRealSources(unittest.TestCase):
     def test_a_mistyped_member_in_a_nested_argument_of_a_real_file_is_red(self):
         """Positions qmllint never reported: a constant passed to another
         member, and a call inside another call's arguments."""
-        cases = (('Guide.qml', 'Color.menu.background, Model.CAPTION_FLOOR_REGULAR',
-                  'Color.menu.background, Model.CAPTION_FLOOR_REGULR'),
-                 ('Guide.qml', 'Model.captionAlpha(Color.menu.text, Model.qmlFill(',
-                  'Model.captionAlpha(Color.menu.text, Model.qmlFil('),
+        cases = (('Guide.qml', 'Commons.Color.menu.background, Model.CAPTION_FLOOR_REGULAR',
+                  'Commons.Color.menu.background, Model.CAPTION_FLOOR_REGULR'),
+                 ('Guide.qml', 'Model.captionAlpha(Commons.Color.menu.text, Model.qmlFill(',
+                  'Model.captionAlpha(Commons.Color.menu.text, Model.qmlFil('),
                  ('Service.qml', 'Model.MAX_CHNO_LABEL)', 'Model.MAX_CHNO_LABLE)'))
         for rel, needle, typo in cases:
             problems, _ = self.mistyped(rel, needle, typo)

@@ -2,6 +2,7 @@ import Quickshell
 import Quickshell.Wayland
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.mjs" as Model
 
@@ -353,15 +354,15 @@ Item {
 
   // ---- theme tokens: shares the [menu] surface with the clipboard and
   // emoji pickers (PRODUCT.md decision 7). No literal colors.
-  property color background: Color.menu.background
-  property color foreground: Color.menu.text
-  property color border: Color.menu.border
+  property color background: Commons.Color.menu.background
+  property color foreground: Commons.Color.menu.text
+  property color border: Commons.Color.menu.border
   property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
-  property var selectedBorderSpec: Border.surfaceSpec("menu", "selected-border", Color.menu.selectedBorder, 0)
+  property var selectedBorderSpec: Border.surfaceSpec("menu", "selected-border", Commons.Color.menu.selectedBorder, 0)
   property var noBorderSpec: Border.none()
-  property color scrim: Color.menu.scrim
-  property color selectedBackground: Color.menu.selectedBackground
-  property color selectedText: Color.menu.selectedText
+  property color scrim: Commons.Color.menu.scrim
+  property color selectedBackground: Commons.Color.menu.selectedBackground
+  property color selectedText: Commons.Color.menu.selectedText
   // The ACTIVE ink. `cursorInk` mixes the accent the least distance toward the
   // menu text that clears 4.70:1 against the fill it is painted on, and returns
   // it untouched on the 15 themes that already do. The arithmetic lives in
@@ -378,7 +379,7 @@ Item {
   // r, g and b are the TEXT'S, so handing it over uncomposited measured the
   // accent against the text colour and fell through to the text token on 23 of
   // 23 themes for the life of the feature.
-  readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground, Color.menu.background)
+  readonly property color cursorInk: Model.cursorInkHex(Commons.Color.menu.selectedText, Commons.Color.menu.text, Commons.Color.menu.selectedBackground, Commons.Color.menu.background)
 
   // D-RUNG-14: the caption rung is an OUTPUT, chosen per SURFACE. 0.7 was
   // picked against the card; on the SELECTED row the fill moves toward the ink,
@@ -394,8 +395,8 @@ Item {
   //
   // Both evaluate once per theme, never per row. 16 of 23 themes get 0.7 back
   // byte-identical on both surfaces.
-  readonly property real captionAlphaOnCard: Model.captionAlpha(Color.menu.text, Color.menu.background)
-  readonly property real captionAlphaOnCursor: Model.captionAlpha(Color.menu.text, Model.qmlFill(Color.menu.selectedBackground, Color.menu.background))
+  readonly property real captionAlphaOnCard: Model.captionAlpha(Commons.Color.menu.text, Commons.Color.menu.background)
+  readonly property real captionAlphaOnCursor: Model.captionAlpha(Commons.Color.menu.text, Model.qmlFill(Commons.Color.menu.selectedBackground, Commons.Color.menu.background))
   // The Sources row's HOVER fill. An earlier version of this change skipped the
   // site with a comment saying Style.hoverFillFor was host-injected and "not
   // modellable here". That was simply false, and checking took one look:
@@ -404,13 +405,13 @@ Item {
   // exists to composite. The default theme template even gives it the same
   // colour and alpha as the selection (foreground at 0.08). A comment asserting
   // something convenient about the host, unchecked, is how D-RUNG-13 shipped.
-  readonly property real captionAlphaOnHover: Model.captionAlpha(Color.menu.text, Model.qmlFill(Style.hoverFillFor(Color.menu.text, Color.accent), Color.menu.background))
+  readonly property real captionAlphaOnHover: Model.captionAlpha(Commons.Color.menu.text, Model.qmlFill(Style.hoverFillFor(Commons.Color.menu.text, Commons.Color.accent), Commons.Color.menu.background))
   // REGULAR-weight captions need a higher floor than bold ones, because 10 px
   // regular renders 11 to 13 per cent below the model and bold does not
   // (F-CAL-1). Same arithmetic, grossed-up target.
-  readonly property real captionAlphaProse: Model.captionAlpha(Color.menu.text, Color.menu.background, Model.CAPTION_FLOOR_REGULAR)
-  property color accent: Color.accent
-  property color urgent: Color.urgent
+  readonly property real captionAlphaProse: Model.captionAlpha(Commons.Color.menu.text, Commons.Color.menu.background, Model.CAPTION_FLOOR_REGULAR)
+  property color accent: Commons.Color.accent
+  property color urgent: Commons.Color.urgent
   readonly property int cornerRadius: Style.cornerRadius
   property string fontFamily: Style.font.menuFamily
 

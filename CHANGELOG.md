@@ -10,11 +10,11 @@ the fixes from the plugin's own review of its whole codebase (2026-10-29 to
 2026-10-31) and a sweep of the open P2 and P3 rows on its board: where a
 playlist may make this computer connect or listen, the player's safety
 settings set after your own `mpvArgs` and mpv config, your `mpvArgs` and
-your sources' keys taken off the helper's and the player's command lines,
-and a failure on your own computer told as yours instead of marking the
-channel. It also masks the Sources form on the desktop accessibility bus,
-which Quickshell 0.3.2, installed by recent system updates, lets a shell
-window publish to. What to do: **restart the shell**
+your sources' keys taken off every command line, and a failure on your own
+computer told as yours instead of marking the channel. It also masks the
+Sources form on the desktop accessibility bus, which Quickshell 0.3.2,
+installed by recent system updates, lets a shell window publish to. What to
+do: **restart the shell**
 (`omarchy-restart-shell`); expect each source's playlist to be downloaded
 once more, whatever its age, the first time it is the active source after
 the update; and if a channel was playing when you updated, expect one short
@@ -117,8 +117,8 @@ refuses is named there.
   0.15.0 wrote a refusal only to the shell's journal. (D-SINK-45,
   D-SINK-51, D-SINK-52, D-SINK-53, D-SINK-59, D-SINK-64, D-SINK-65,
   F-UX-7)
-- **Your `mpvArgs` tokens, your sources' keys and channel ids are off the
-  helper's and the player's command lines.** A program's command line can
+- **Your `mpvArgs` tokens, your sources' keys and channel ids are on no
+  command line.** A program's command line can
   be read by every account on the computer, and a token is where a proxy
   password or a header value goes. The shell now hands these to its helper
   privately, and the helper gives your tokens to the player in a file only
@@ -129,7 +129,7 @@ refuses is named there.
   `--no-config` in `mpvArgs` no longer stops mpv reading your own mpv
   config (to keep a setting of that config out of this player, take it out
   of the config). A token that cannot be written as one line of that file
-  is refused by name. (D-SINK-47, D-SINK-48)
+  is refused by name. (D-SINK-47, D-SINK-48, D-SINK-69)
 - **The helper ignores your Python environment.** It starts as
   `python3 -I`, so what `PYTHONPATH` and your user site-packages hold (a
   `sitecustomize` there, say) no longer runs inside it before it hides your
@@ -199,11 +199,12 @@ refuses is named there.
 - **`Settings merged`.** When another program changes `state.json` while
   a change made in the guide is still being saved, and both touched the
   same thing, a notification now names what kept the other program's
-  version -- a source by its short code and the fields, the active source,
-  the recent list, the last played channel -- never a value or an address;
-  before, only the journal said so. When the other program removed the
-  source that was active, no source is active, and the notification says
-  that too. (D-SRC-33, D-SRC-37)
+  version -- a source by the fields that differed, the active source, the
+  recent list, the last played channel -- never a value, an address or a
+  source's short code; before, only the journal said so, and it still names
+  the source. When the other program removed the source that was active, no
+  source is active, and the notification says that too. (D-SRC-33,
+  D-SRC-37, D-SINK-69)
 - **`state.json` is made private again after every save.** A `state.json`
   you put in place at another mode (0644 after a `mv` or `cp`), or one a
   save creates where a re-pointed link now leads, is made 0600, and its
@@ -238,6 +239,17 @@ refuses is named there.
 
 ### Fixed
 
+- **The guide keeps your theme's colours on Qt 6.12 by itself.** Qt 6.12,
+  installed by recent system updates, brings a colour object of its own
+  under the same name as your theme's, and Qt hands a plugin its own one
+  first. On Omarchy 4.0.6 the guide still drew your theme only because
+  Omarchy's build of Quickshell carries a workaround its packagers call
+  temporary; without it the guide's background, text, borders and highlight
+  would all have drawn black. (The bar widget takes its colour from the bar
+  it sits in, so it would have kept it.) The plugin now names your theme's
+  colours the way Omarchy's own shell does, so nothing changes on screen
+  today and nothing will when that workaround goes.
+  (D-HOST-9)
 - **Adding a source in the first moment after the shell starts** no longer
   goes wrong: the start-up cleanup of old caches could delete the new
   source's channel list, so the add failed with a raw error message, or
@@ -363,8 +375,8 @@ refuses is named there.
 - **A player started by 0.15.0 or earlier keeps its old command line**,
   your `mpvArgs` tokens on it, until you stop it and play again; restarting
   such a player by itself is decided and not built yet. Sources added
-  before this release keep keys worked out from their addresses, now off
-  the helper's command line. (D-SINK-47, D-SINK-48)
+  before this release keep keys worked out from their addresses, now on no
+  command line. (D-SINK-47, D-SINK-48)
 - **The accessibility fix was observed for the Xtream form's fields**, on
   a test session with the guide in a plain test window, so whether the
   shell's own window publishes them was not itself observed; the playlist
@@ -394,9 +406,8 @@ refuses is named there.
 - **Not yet measured on Omarchy 4.0.6 with Qt 6.12**: whether a playing
   channel survives `omarchy-restart-shell`, whose old shell can now take
   longer to leave than the plugin's check that stops an orphaned player
-  allows (D-HOST-8), and whether the guide draws its theme's colours,
-  since Qt 6.12 brings a `Color` of its own (D-HOST-9). If the player stops
-  when you restart the shell, press `Enter` on the channel.
+  allows (D-HOST-8). If the player stops when you restart the shell, press
+  `Enter` on the channel.
 - Still as 0.15.0's notes say: the narrow windows in which a save can
   create `state.json` at 0644 (now made 0600 moments later), a change
   another program writes in the same instant as one of the plugin's saves,
