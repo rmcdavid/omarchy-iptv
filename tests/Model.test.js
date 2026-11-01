@@ -18214,10 +18214,14 @@ checkCall("D-PERF-4: through Service.applyChannels -- three refreshes of one sou
     const name = "News " + url
     const reason = "could not reach " + url
     const params = {
-      streamFailed: { name, reason }, localPlayFailure: { name, reason }, playerStopped: { name }, outputFailed: { name, output: "video" },
-      playlistRefreshed: { channelCount: 3, groupCount: 1 }, playlistError: { reason, cachedAt: "12:00" }, epgError: { reason }, mpvMissing: {},
-      entryInputRefused: { setting: "playlistUrl", reason: "invalid" },
-      stateUnreadable: { reason: "permission", path: "/home/u/.local/state/omarchy-iptv/state.json", midSession: true },
+      // rc-fix160: EVERY string parameter carries the private value, not only
+      // the name and the reason -- the first sweep gave `cachedAt` "12:00" and
+      // `path` the state file, and both reached the argv unscrubbed (red here
+      // until notifyArgv scrubbed them).
+      streamFailed: { name, reason }, localPlayFailure: { name, reason }, playerStopped: { name, reason }, outputFailed: { name, output: url },
+      playlistRefreshed: { channelCount: url, groupCount: url }, playlistError: { reason, cachedAt: url }, epgError: { reason }, mpvMissing: { name, reason },
+      entryInputRefused: { setting: url, reason: url },
+      stateUnreadable: { reason: url, path: "/home/u/.local/state/omarchy-iptv/" + url, midSession: true },
       mergeDropped: { dropped: { sources: [KA, KB], savedSearches: 1, hiddenGroups: 2 } },
       mergeConflict: { conflicts: [{ field: "sources", key: KA, fields: ["url"] }, { field: "activeKey", key: KB, fields: ["removed"] }] }
     }

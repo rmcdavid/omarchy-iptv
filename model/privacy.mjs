@@ -331,7 +331,13 @@ function notifyArgv(event, params, replaceId) {
   } else if (event === "playlistRefreshed") {
     spec = { title: "Playlist refreshed", body: pluralChannels(p.channelCount) + " in " + formatCount(p.groupCount) + (Number(p.groupCount) === 1 ? " group" : " groups"), glyph: GLYPHS.refresh, urgency: "low", id: NOTIFY_IDS.playlistRefreshed }
   } else if (event === "playlistError") {
-    var tail = p.cachedAt ? "Using cached copy from " + str(p.cachedAt) + "." : "Open the guide for details."
+    // rc-fix160 (D-SINK-69's rule-15 sweep, 2026-11-01): `cachedAt` is the
+    // shell's clock (Model.formatClock) and `path` below the state file's,
+    // and both reached this argv unscrubbed while the name and the reason
+    // were scrubbed, so the sink held only what today's callers happen to
+    // pass. Both go through the same scrub now; a clock and a path are
+    // unchanged by it.
+    var tail = p.cachedAt ? "Using cached copy from " + scrubUrls(str(p.cachedAt).replace(CONTROL_RE, "")) + "." : "Open the guide for details."
     spec = { title: "Playlist error", body: "Could not fetch the playlist (" + (reason || "unknown error") + "). " + tail, glyph: GLYPHS.alert, urgency: "normal", id: NOTIFY_IDS.playlistError }
   } else if (event === "epgError") {
     spec = { title: "Guide data error", body: "Could not fetch the EPG (" + (reason || "unknown error") + "). Channels still work.", glyph: GLYPHS.alert, urgency: "low", id: NOTIFY_IDS.epgError }
@@ -347,7 +353,7 @@ function notifyArgv(event, params, replaceId) {
     // R22a: Model.stateUnreadableNotice's sentence and nothing else, for the
     // same reason as the refusal above. A reason and a PATH, never a URL.
     // R27e: and the mid-session title when the block began after a load.
-    var told = stateUnreadableNotice(p.reason, p.path, p.midSession === true)
+    var told = stateUnreadableNotice(p.reason, scrubUrls(str(p.path).replace(CONTROL_RE, "")), p.midSession === true)
     spec = { title: told.title, body: told.body, glyph: GLYPHS.alert, urgency: "critical", id: NOTIFY_IDS.stateUnreadable }
   } else if (event === "mergeDropped") {
     // R25b: Model.mergeDropNotice's sentence and nothing else -- counts and
