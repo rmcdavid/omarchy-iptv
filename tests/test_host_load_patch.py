@@ -202,7 +202,13 @@ def module_exports(module, seen=None):
                 names.add(e[1])
         elif w[0] == "import" or (w[0] in ("default", "optional") and len(w) > 2 and w[1] == "import"):
             names |= module_exports(w[1] if w[0] == "import" else w[2], seen)
-        elif re.match(r"^[A-Z]", w[0]) and len(w) >= 3:
+        elif w[0] == "singleton" and len(w) >= 3 and re.match(r"^[A-Z]", w[1]):
+            # rc-fix160: a qmldir singleton, versioned or not (`singleton Name
+            # File` is legal); this branch did not exist, so a Quickshell
+            # module that declared a theme name as a singleton passed rule 10.
+            names.add(w[1])
+        elif re.match(r"^[A-Z]", w[0]) and len(w) >= 2:
+            # `Name Version File`, or `Name File` with no version (rc-fix160)
             names.add(w[0])
     return names
 
@@ -532,8 +538,39 @@ class HostLoadPatchCase(unittest.TestCase):
         clash = {m: sorted(module_exports(m) & names) for m in sorted(mods)}
         self.assertEqual({m: [] for m in clash}, clash)
         ui = os.path.join(HOST, "Ui", "qmldir")
-        ui_names = {l.split()[0] for l in read(ui).split("\n") if re.match(r"^[A-Z]\w* \d", l)}
+        # rc-fix160: a singleton line and a type with no version are qs.Ui
+        # names too; the first reading took only `Name <digit>...` lines.
+        ui_names = set()
+        for line in read(ui).split("\n"):
+            w = line.split()
+            if w and w[0] == "singleton":
+                w = w[1:]
+            if len(w) >= 2 and re.match(r"^[A-Z]\w*$", w[0]):
+                ui_names.add(w[0])
+        self.assertIn("BarWidget", ui_names, "the qs.Ui qmldir reading found none of its names")
         self.assertEqual(set(), ui_names & names)
+
+    def test_the_stub_reader_sees_every_qmldir_form(self):
+        # Rule 10 for the rule-10 check above (rc-fix160, 2026-11-01): the
+        # reader must see a qmldir singleton and a type declared with no
+        # version (both legal; Qt 6.12 hands the importer both), or a
+        # Quickshell module that declared a theme name either way would pass
+        # the stub check while the real module shadowed the theme. It saw
+        # neither form: {"Util"} here.
+        global QT_QML_DIR
+        work = tempfile.mkdtemp(prefix="omarchy-iptv-hostpatch-")
+        self.addCleanup(shutil.rmtree, work, True)
+        os.makedirs(os.path.join(work, "RcStub"))
+        with open(os.path.join(work, "RcStub", "qmldir"), "w") as fh:
+            fh.write("module RcStub\nsingleton Color 1.0 Color.qml\nsingleton Border Border.qml\n"
+                     "Style Style.qml\nUtil 0.0 Util.qml\ninternal Hidden Hidden.qml\n")
+        saved = QT_QML_DIR
+        QT_QML_DIR = work
+        try:
+            names = module_exports("RcStub")
+        finally:
+            QT_QML_DIR = saved
+        self.assertEqual({"Border", "Color", "Style", "Util"}, names)
 
     def test_without_the_rewrite_every_theme_name_in_the_shipped_qml_is_the_theme(self):
         # D-HOST-9's fix, observed: the plugin's QML no longer depends on the

@@ -204,6 +204,52 @@ class ThemeNameGuard(unittest.TestCase):
         problems, _ = self.judge("BarWidget.qml", read("BarWidget.qml"), qml)
         self.assertEqual([], problems, "an internal type is no importer's name")
 
+    def test_a_type_a_qt_qmldir_declares_with_no_version_counts_too(self):
+        # rc-fix160 (2026-11-01): Qt's qmldir parser takes `Name File` and
+        # `singleton Name File` with no version, and the importer gets the name
+        # (measured on Qt 6.12.0). The first guard read only the versioned
+        # form, so both of these were green.
+        for line in ("Style Style.qml", "singleton Style Style.qml"):
+            qml = self.qml_dir_with("QtQuick", "qmldir", None, append=line)
+            problems, _ = self.judge("BarWidget.qml", read("BarWidget.qml"), qml)
+            self.assertEqual(len(guard.unqualified_uses(read("BarWidget.qml"), {"Style"})),
+                             len(self.collisions(problems)), (line, problems))
+        qml = self.qml_dir_with("QtQuick", "qmldir", None, append="internal Style Style.qml")
+        problems, _ = self.judge("BarWidget.qml", read("BarWidget.qml"), qml)
+        self.assertEqual([], problems, "an internal type is no importer's name, versioned or not")
+
+    def test_a_host_kit_name_declared_with_no_version_is_still_judged(self):
+        # The host side of the same form: a Commons qmldir that declared its
+        # Color as `singleton Color Color.qml` gave the first guard no Color to
+        # judge, so a bare Color in a shipped file passed.
+        work = tempfile.mkdtemp(prefix="omarchy-iptv-themenames-")
+        self.addCleanup(shutil.rmtree, work, True)
+        for part in ("Commons", "Ui"):
+            os.makedirs(os.path.join(work, part))
+            with open(os.path.join(HOST, part, "qmldir"), encoding="utf-8") as fh:
+                text = fh.read()
+            if part == "Commons":
+                text = once(text, "singleton Color 1.0 Color.qml", "singleton Color Color.qml")
+            with open(os.path.join(work, part, "qmldir"), "w", encoding="utf-8") as fh:
+                fh.write(text)
+        kit = guard.host_kit_names(work)
+        self.assertEqual("qs.Commons", kit.get("Color"), kit)
+        text = once(read("Guide.qml"), "property color accent: Commons.Color.accent", "property color accent: Color.accent")
+        problems, _ = guard.judge("Guide.qml", text, kit, QML_DIR)
+        self.assertEqual(1, len(self.collisions(problems)), problems)
+
+    def test_a_spread_of_a_host_kit_name_is_a_use(self):
+        # `...Color` is the name itself, spread: the dot before it is the
+        # spread's third, not a member access (rc-fix160, 2026-11-01).
+        text = inside_root(read("BarWidget.qml"),
+                           "readonly property var m: ({ ...Color.menu })\n"
+                           "  readonly property var q: [...Commons.Color.list, ...root.Color]")
+        problems, _ = self.judge("BarWidget.qml", text)
+        hits = self.collisions(problems)
+        self.assertEqual(1, len(hits), problems)
+        line = [i for i, l in enumerate(text.split("\n"), 1) if "...Color.menu" in l][0]
+        self.assertTrue(hits[0].startswith("BarWidget.qml:%d:" % line), hits)
+
     def test_a_quickshell_update_is_judged_only_in_the_files_that_import_it(self):
         qml = self.qml_dir_with("Quickshell", "quickshell-core.qmltypes", '"Quickshell/Util 0.0"')
         status, out = self.run_main("--root", ROOT, "--host", HOST, "--qml-dir", qml)

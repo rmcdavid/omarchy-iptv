@@ -28,7 +28,8 @@ an expression. Each is judged against every name exported by every module
 the file imports UNQUALIFIED, read from the installed type files: the
 module's qmltypes `exports` at every version up to the import's (an
 unversioned import is the newest), its qmldir's composite types and
-singletons, and the modules its qmldir imports in turn (QtQuick's `import
+singletons (with a version or without one, which Qt also accepts), and the
+modules its qmldir imports in turn (QtQuick's `import
 QtQml auto`, QtQml's `import QML 1.0`, Quickshell's `default import
 Quickshell._Window`, ...). The QML builtins are always in scope. A name both
 sides export is red, whatever the import order and whether the module's
@@ -121,7 +122,16 @@ def within(version, limit):
 def qmldir_entries(text):
     """(imports, types) of one qmldir. imports are (uri, version-or-'auto'-or-None);
     types are (name, (major, minor)) for its composite types and singletons,
-    `internal` ones left out because no importer can name them."""
+    `internal` ones left out because no importer can name them.
+
+    rc-fix160 (2026-11-01): Qt's qmldir parser also takes a type with NO
+    version, `Name File` and `singleton Name File` (QQmlDirParser's
+    two-section form; measured on Qt 6.12.0: a module declaring both, imported
+    unversioned, gives both names to the importer). The first version of this
+    guard read only the versioned form, so a Qt or Quickshell update that
+    added a colliding name that way, or a host kit that declared Color that
+    way, passed green. A version-less type is read as (0, 0): visible through
+    every import, which is the strict reading."""
     imports, types = [], []
     for line in text.split("\n"):
         w = line.split()
@@ -133,11 +143,13 @@ def qmldir_entries(text):
             v = w[2] if len(w) >= 3 else None
             imports.append((w[1], v))
             continue
-        if w[0] == "singleton" and len(w) >= 4:
+        if w[0] == "singleton" and len(w) >= 3:
             w = w[1:]
         if re.match(r"^[A-Z]\w*$", w[0]) and len(w) >= 3 and re.match(r"^\d+\.\d+$", w[1]):
             major, minor = w[1].split(".")
             types.append((w[0], (int(major), int(minor))))
+        elif re.match(r"^[A-Z]\w*$", w[0]) and len(w) == 2:
+            types.append((w[0], (0, 0)))
     return imports, types
 
 
@@ -230,10 +242,17 @@ def unqualified_uses(text, names):
         if t.kind != "ident" or t.text not in names or t.line in import_line:
             continue
         prev = toks[k - 1] if k > 0 else None
-        if prev is not None and prev.kind == "punct" and prev.text in (".", "?."):
+        if prev is not None and prev.kind == "punct" and prev.text in (".", "?.") and not spread_before(toks, k):
             continue
         out.append((t.line, t.col, t.text))
     return out
+
+
+def spread_before(toks, k):
+    """Is toks[k] the operand of a spread, `...Color`? The scanner emits each
+    dot as its own token, so the dot before a spread's name looked like a
+    member access and `({ ...Color.menu })` passed (rc-fix160, 2026-11-01)."""
+    return k >= 3 and all(toks[k - j].kind == "punct" and toks[k - j].text == "." for j in (1, 2, 3))
 
 
 def judge(path, text, kit, qml_dir, label=None):

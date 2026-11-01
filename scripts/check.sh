@@ -766,7 +766,12 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3240}
 # by the fix's statement, without the rewrite every theme name is the
 # theme's, red on rel-0160; and a synthetic premise that the guard's rule
 # still holds on the installed Qt); the suite runs 1914.
-PY_TESTS_MIN=${PY_TESTS_MIN:-1914}
+# 2026-11-01, rc-fix160: 1914 -> 1918 -- test_theme_names 17 -> 20 (a qmldir
+# type with no version on the Qt side and on the host kit's, and a spread
+# `...Color`, each green under lane-fix160's guard) and test_host_load_patch
+# 11 -> 12 (the stub reader sees a qmldir singleton and a version-less type;
+# it returned {"Util"} of four); the suite runs 1918.
+PY_TESTS_MIN=${PY_TESTS_MIN:-1918}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}
 # The M2-03 entry preflight: 20 seams plus its own "ran every check" line.
