@@ -13315,6 +13315,20 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### 0.16.0 pre-cut record (2026-11-01): the gate and the release recipe's live run on the final tree
+
+**Tree.** rel-0160 bd65725: dev b4059da plus the version bump (bcce3f8), the checked notes (rc-notes-0160 36e14f9), D-HOST-9's measurement and pin (rc-host9 4a63e12), F-HARNESS-86's repair (rc-keyfix c632cdc), D-HOST-9's and D-SINK-69's fixes (rc-fix160 677c8db), and the lead's board, comment and doc commits (a6fcb61, f62e35e, bd65725). Platform: qt6-base 6.12.0-3, qt6-declarative 6.12.0-2, quickshell 0.3.2.r7.g2b4501a-1, omarchy 4.0.6-1, mpv 0.41.0.
+
+**Gate.** `scripts/check.sh` under the shared heavy lock, twice on the integrated tree:
+- First run, on 0dd0408 plus the lead's then-uncommitted text: red on exactly two timing tests, `test_playlist.CapTest.test_channel_count_is_capped_with_a_warning` (50,005 entries in 6.0 s against 5.0) and `test_playlist.PerformanceTest.test_10k_entries_parse_and_write_under_one_second` (cost 1152, 1173 and 1193 ms against 1.0 s), at load 5.68 3.52 1.90 while two read-only review agents ran beside it. The helper's parse code is unchanged since dev b4059da. Re-run alone under the lock at load 1.74: 5 tests OK. Every other step green.
+- Second run, on the tree committed as f62e35e and bd65725, quiet (load 1.28 at the start): **all green**, rc 0. node 3240 checks (both echo modes), python 1918 tests, qml spec 82, theme name guard 279 uses, release allowlist 42 files, helper split 11 parts. Crash journal 81 before and after.
+
+**key-scenario live** (the release recipe's step; `scripts/dev-harness/key-scenario.sh live` in its own nested headless cage on a private bus, `env -u DISPLAY -u HYPRLAND_INSTANCE_SIGNATURE`, under the heavy lock), on bd65725: **139 passed, 0 failed** (138 lettered checks and the floor line) in 532.4 s, 17:03:31 to 17:12:24 CST, load 1.26 at the start and 2.16 at the end. Crash journal 81 before and after. Transcript `/run/user/1000/omarchy-iptv-c160-h/transcripts/key-20261101-170331-1908731.out` (0600). The README's "(139 checks, 2026-11-01)" rests on this run.
+
+**Release preconditions**, read by a release-readiness critic (read-only) on the same tree: manifest, `Model.PLUGIN_VERSION` and the README Status line all 0.16.0; the CHANGELOG's top heading `## 0.16.0 (2026-11-01)` passes `changelog_problems` for today; `premise_exception_problems` returns []; `release.py check` passes; no v0.16.0 tag locally or on the remote; local and remote `main` both e710341, so the cut is a fast-forward; none of this round's new files is a runtime import.
+
+**#12636** (`[Verify]: IPTV 0.15.0`, e710341): OPEN, `validated` and `plugin-update`, unchanged since 2026-10-22T18:34:40Z. Moving `main` makes it stale; it stays open (F-M3-4), and 0.16.0's request is filed on the owner's word.
+
 ### D-HOST-9: which `Color` the plugin's QML gets on Qt 6.12 (lane-host9, 2026-11-01)
 
 Platform: qt6-base 6.12.0-3, qt6-declarative 6.12.0-2, quickshell 0.3.2.r7.g2b4501a-1 (Omarchy build carrying omarchy-pkgs load_qtquick_611.patch; .BUILDINFO pkgbuild_sha256sum e871efd5... = omarchy-pkgs 2be7cd9839), omarchy 4.0.6-1. Tree: rel-0160 bcce3f8.
