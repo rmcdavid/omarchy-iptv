@@ -840,3 +840,31 @@ is red on any other platform, on an exception missing or adding a field, and
 once the row reads fixed, which is the day the exception is removed and the
 premise re-measured. `scripts/release.py build` refuses to cut while the
 exception is present; `release.py check`, which the gate runs, does not.]
+
+**[2026-11-01: D-A11Y-1 fixed and merged; the exception removed and the
+premise re-measured.** The fix (75cc827, from the owner's separate session)
+keeps each Sources form field's drawn TextField off the bus
+(`Accessible.StaticText`, `ignored`). In its place, a sibling `Item` with the
+role EditableText publishes `Model.fieldAccessibleValue` as its `text`:
+- a URL with a scheme, through `maskUrl`;
+- the label, and a local path (`/` or `~/`, no `?`) in a URL field, as typed;
+- everything else, one `*` per character;
+
+revealed or not. The lead re-ran `scripts/a11y-probe.sh` on the merged tree
+under the same rig: 84 checks, 5 failures. `L2-XT-05` and `L2-XT-06` now pass;
+`L2-XT-11` stands; and the four failures listed above remain, which are
+D-A11Y-10, not this defect.
+
+With D-A11Y-1's row reading fixed, the platform test went red and named the
+exception as ended, as built. The exception was removed and `platform`
+re-pinned to the versions installed for this run. The fixture's premise is now the fix's --
+that a field publishes only its masked value -- rather than the deferral's. Section 10.3's "still refused under ruling AX2" is
+history since this fix.
+
+What the probe cannot show is unchanged. It hosts the guide in a plain Window,
+it fills only the Xtream form and never reveals a field (so the playlist and
+EPG URL fields and the revealed state rest on the node checks), and it
+observes no text-change events. So the claim that the drawn field's
+text events reach no EditableText object rests on two things: the Qt 6.12.0
+sources, and the absence of any EditableText ancestor in the shipped QML and the host kit
+it sits in.]

@@ -42,6 +42,16 @@ would count "the premise holds" on a machine where it does not, which is the
 one claim this file exists to stop anyone making; a skip is counted in the
 gate's summary line and carries its reason under -v. scripts/release.py build
 refuses to cut while the exception is present, so the skip cannot ship.
+
+THE FIX (2026-11-01). D-A11Y-1 was fixed (75cc827: the drawn field is kept off
+the bus and a masked sibling publishes in its place) and merged onto dev, the
+exception was removed, and the premise was re-measured per `onRed`: the probe
+ran on the merged tree, and the fixture's `platform` is now the one installed
+when that run was taken. The premise is no longer a deferral's -- that no window publishes
+-- but the fix's: that a field publishes only its masked value. A version change
+still means the evidence has expired, and `onRed` says what to re-run. The
+exception machinery stays, unused: the cases below drive it with their own
+platforms, so it is ready if the row is ever reopened.
 """
 import datetime
 import importlib.util
@@ -301,8 +311,8 @@ def judge_premise(case, fixture, have, board_text, today):
         case.skipTest(excused(fixture, have))
     case.assertEqual([], stale, '\n'.join([
         '',
-        'The accessibility premise D-A11Y-1 is deferred against was measured on a',
-        'platform this machine no longer has:',
+        'The accessibility premise D-A11Y-1 rests on was measured on a platform',
+        'this machine no longer has:',
     ] + ['  ' + s for s in stale] + [
         '',
         fixture['premise'],
@@ -310,8 +320,9 @@ def judge_premise(case, fixture, have, board_text, today):
         fixture['onRed'],
         '',
         'Do not simply update the versions in tests/fixtures/a11y-premise.json.',
-        'Re-measure first: if a PanelWindow now publishes a tree, D-A11Y-1 is LIVE',
-        'and the Sources field values carry provider credentials onto the session bus.',
+        'Re-measure first, as onRed above says: until the probe has run on this',
+        'platform, nothing shows that the Sources field values still reach the',
+        'session bus masked.',
     ] + not_covered(fixture, have)))
 
 

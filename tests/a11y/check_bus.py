@@ -681,13 +681,14 @@ def main():
 
 # The failures shipping code is known to produce, by id. Every one is a filed
 # defect, not harness noise:
-#   L2-XT-05 / L2-XT-06  D-A11Y-1, the Xtream server and username publishing
-#                        provider credentials as their accessible Value
 #   L2-XT-11             the eye buttons all publish checked=true on a form
 #                        where no field can be masked at all
 # A run that matches this set exactly is GREEN, because that is what "no
 # regression" means for a harness whose baseline is deliberately red.
-BASELINE = ["L2-XT-05", "L2-XT-06", "L2-XT-11"]
+# L2-XT-05 / L2-XT-06 (D-A11Y-1, the Xtream server and username publishing
+# provider credentials as their accessible Value) left the set on 2026-10-31,
+# when the drawn field went off the bus and a masked sibling took its place.
+BASELINE = ["L2-XT-11"]
 
 
 if __name__ == "__main__":

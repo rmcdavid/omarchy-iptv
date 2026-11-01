@@ -443,7 +443,11 @@ QML_SPEC_MIN=${QML_SPEC_MIN:-82}
 # sec-int2): 3182 -> 3233 -- the private-argument, redaction, IPC and EPG id
 # checks, each red on dev 2727179 or on a mutant (QA-RESULTS "The security
 # review's second phase"); the suite runs 3233.
-NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3233}
+# 2026-11-01, D-A11Y-1's fix (75cc827, merged by the lead onto ad176d3):
+# 3233 -> 3238 -- the five `fieldAccessibleValue` checks, red under the
+# lead's own six mutants (QA-RESULTS "D-A11Y-1 merged"; the fix's row records
+# six of its own session's); the suite runs 3238.
+NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3238}
 # 1047 -> 1084 and a11y 34 -> 35 on 2026-10-12, D-REL-5: the split model's
 # script and ceiling tests (tests/test_split_model.py, test_release.py), the
 # .mjs byte scans, the ledger's resolver over every part, and the fidelity
@@ -730,6 +734,8 @@ NODE_CHECKS_MIN=${NODE_CHECKS_MIN:-3233}
 # test_a11y_premise (the dated exception) and test_release (no cut while it
 # stands), each red first or on a mutant; the suite runs 1886, one of them
 # the excused premise test, reported as a skip.
+# 2026-11-01, D-A11Y-1 merged: the exception removed, so the premise test
+# passes rather than skips; still 1886.
 PY_TESTS_MIN=${PY_TESTS_MIN:-1886}
 QMLLINT_FILES_MIN=${QMLLINT_FILES_MIN:-5}
 A11Y_TESTS_MIN=${A11Y_TESTS_MIN:-35}

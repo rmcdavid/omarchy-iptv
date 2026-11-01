@@ -2496,8 +2496,13 @@ screen (3.2.6), nor in round 15 of the `Saving has stopped` header or the
    the accessible VALUE is not, because Qt derives it from the control's own
    display text. So a revealed URL publishes its credentials in full, and the
    Xtream server and username, which have no mask and no eye button, publish
-   theirs always. Filed as D-A11Y-1 and unfixed: see ruling AX2 for why the
-   obvious remedy was refused.
+   theirs always. Filed as D-A11Y-1; ruling AX2 refused the obvious remedy.
+   **Fixed 2026-10-31:** the drawn field is kept off the bus and a sibling
+   node is the field there, its value `Model.fieldAccessibleValue` -- a URL
+   masked by `maskUrl`, the label and a local path as typed, the username,
+   the password and a schemeless server as one `*` per character, whether or
+   not the field is revealed. A screen reader therefore hears a revealed URL
+   masked too; what a revealed field MAY publish is still PLAN-NEXT decision 8.
    The password field previously set `Accessible.passwordEdit: true`. On
    Qt 6.11.2 that property is **inert in both directions**, measured twice by
    different toolchains, so it promised protection it never gave and left the
@@ -2548,8 +2553,8 @@ harness's own: `bar`, `firstrun`, `banner`, `query`, `scale`, `xtream`.
 | Label field | `Accessible.EditableText` | `Label, optional` | **OBSERVED-ONCE** (prototype) |
 | Playlist field | `Accessible.EditableText` | `Playlist URL or path`; `Accessible.description` = masked rendering (always) | Name **OBSERVED** (firstrun asserts the field and that it starts empty). The `description` = masked-rendering-always claim is **UNVERIFIED**: the only run that touched it asked whether a secret was *absent*, which passes whether the description is masked, empty, or the field has been silently emptied. Asserting the revealed case at all is blocked on PLAN-NEXT decision 8 |
 | EPG field | `Accessible.EditableText` | `EPG URL, optional`; description masked | **UNVERIFIED.** No scenario names this field |
-| Server field | `Accessible.EditableText` | `Server URL` | **OBSERVED** (xtream), name and **value**: this is one of the two fields that publish a credential with no user action and no affordance to stop it (D-A11Y-1, PLAN-NEXT decision 7) |
-| Username field | `Accessible.EditableText` | `Username` | **OBSERVED** (xtream), name and **value**: the other unconsented sink |
+| Server field | `Accessible.EditableText` | `Server URL` | **OBSERVED** (xtream), name and **value**: one of the two fields that published a credential with no user action (D-A11Y-1, PLAN-NEXT decision 7); since 2026-10-31 the value is masked, L2-XT-05 green |
+| Username field | `Accessible.EditableText` | `Username` | **OBSERVED** (xtream), name and **value**: the other unconsented sink; masked since 2026-10-31, L2-XT-06 green |
 | Password field | `Accessible.EditableText` | `Password`, set through `Accessible.description`. **Not** `passwordEdit`: inert on Qt 6.11.2, see 6.7 item 7 | **OBSERVED** (xtream): the label arrives through `Accessible.description`, which is what replaced the deleted `passwordEdit` |
 | Eye button | `Accessible.Button` | `Show query` / `Hide query`; `Accessible.checked` = revealed | **UNVERIFIED.** No scenario asserts the eye button or its `checked` state, so the one control that tells a screen-reader user whether the field beside it is masked is ungraded |
 | Link rows | `Accessible.Button` | `Use Xtream login instead`, `Saved sources, 3` | **UNVERIFIED** |

@@ -1360,6 +1360,30 @@ function fieldMasked(form, field) {
   return fieldMaskable(form, field) && !fieldRevealed(form, field)
 }
 
+// D-A11Y-1. The text a form field publishes on the accessibility bus, which
+// is NOT what it draws: the drawn field is kept off the bus and a sibling
+// node publishes this instead (Guide.qml, fieldRow). Revealing a URL is for
+// the eyes only, so this ignores `revealed` (what a revealed field may
+// publish is PLAN-NEXT decision 8, unanswered; the safe side is taken).
+// The label is the user's own name for the source and passes. A URL with a
+// scheme is masked by maskUrl, which keeps scheme, host, port, path and
+// query keys. A local path in a URL field passes. Anything else -- the
+// username, the password, a server typed without a scheme (it can carry
+// `user:pass@`), and any field added later -- is one `*` per character, so
+// a reader still hears that the field is filled and how long it is, as the
+// password's bullets always said.
+function fieldAccessibleValue(form, field) {
+  var f = form || {}
+  var id = str(field)
+  var value = f.values ? str(f.values[id]) : ""
+  if (id === "label") return value
+  if (id === "server" || isUrlField(id)) {
+    if (/^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(value)) return maskUrl(value)
+    if (isUrlField(id) && /^(\/|~\/)/.test(value) && value.indexOf("?") === -1) return value
+  }
+  return new Array(value.length + 1).join("*")
+}
+
 // Ctrl+R / eye: toggles only when the value has something to mask.
 function toggleReveal(st, field) {
   var cur = copyGuide(st)
@@ -1389,5 +1413,5 @@ export {
   firstFieldWithText, guideWithForm, openForm, openFirstRun, openAddForm,
   openEditForm, openXtreamForm, closeForm, withFormPatch, withFormValue,
   withFormFocus, moveFormFocus, fieldMaskable, fieldRevealed, fieldMasked,
-  toggleReveal, withFormReveal
+  fieldAccessibleValue, toggleReveal, withFormReveal
 }

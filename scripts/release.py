@@ -321,6 +321,8 @@ def changelog_problems(root, strict, today=None):
 # land on dev under a narrow exception recorded in the fixture, on the
 # condition that NOTHING ships while it stands. The test honours the exception;
 # this is the condition.
+# [2026-11-01: D-A11Y-1 fixed (75cc827) and the exception removed; the guard
+# stays, for a reopened row.]
 A11Y_PREMISE_FIXTURE = 'tests/fixtures/a11y-premise.json'
 
 

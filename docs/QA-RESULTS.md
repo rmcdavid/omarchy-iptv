@@ -13315,6 +13315,55 @@ the plugin already writes and reads `sourceKey`, which it has never
 declared. The migration therefore does not depend on the declaration. The
 lead's ruling is in the decisions log.
 
+### D-A11Y-1 merged (2026-11-01): the fix checked, the probe re-run on the merged tree, the exception removed and the premise re-measured
+
+**What merged.** `fix-a11y-mask` (75cc827: one commit from the owner's separate session, based on dev cc63a49) onto dev ad176d3. One conflict: D-A11Y-1's board row, resolved by hand. The row now leads with the fix and keeps the 2026-10-31 bracket and the earlier history beneath it. The lead's first resolution took the branch's whole board file, which would have dropped ten rows ad176d3 filed (seven defect rows and three decisions-log rows) and reverted its edits to three others (D-A11Y-1, D-GS-3, D-SINK-47). Comparing row counts against dev caught it, and the file was re-merged three ways, conflicting only on that row.
+
+**The fix, read.** The drawn TextField is `Accessible.StaticText` and `ignored`. A sibling `Item` with the role EditableText and a read-only `text` property is the field on the bus, and it publishes `Model.fieldAccessibleValue` (model/source-records.mjs).
+
+Rule 15, searched: every shipped `.qml` for `Accessible.EditableText`, `TextInput`, `TextField`, `TextEdit` and `TextArea`. Cleared:
+- `searchLine` in Guide.qml, which publishes the search query and holds no credential. It is not an ancestor of the form, and it is the only other shipped element declaring EditableText. The host kit the form sits in (`/usr/share/omarchy/shell/Ui` and `Commons`) declares it nowhere (0 files). So no ancestor of a form field carries the role at which the text-change walk stops.
+- The harness's spike files, which do not ship.
+
+**Node.** 3238 checks, 0 failures: 3233 plus the branch's 5. The lead also ran six mutants of `fieldAccessibleValue`, each against the whole suite:
+
+| Mutant | D-A11Y-1 checks red (of 5) |
+|---|---|
+| a URL returned unmasked | 2 |
+| the username and password returned as typed | 5 |
+| a local path with a query passed | 1 |
+| the label starred | 1 |
+| a schemeless server passed by the path rule | 1 |
+| the server not treated as a URL | 1 |
+
+All six were red. The function was restored byte for byte, checked with `cmp`.
+
+**The probe, on the merged tree.** `scripts/a11y-probe.sh` ran in a nested headless cage (pixman, no input devices) on a private D-Bus through `scripts/dev-harness/private-bus.sh`, with DISPLAY, WAYLAND_DISPLAY and HYPRLAND_INSTANCE_SIGNATURE unset. The fidelity guard reported "no drift". **84 checks, 5 failures:**
+- L2-XT-11, the recorded baseline.
+- L2-Q-04-LIT, L2-Q-06, L2-SC-03-LIT and L2-SC-06: D-A11Y-10, the same four the 2026-10-31 run found before the fix.
+
+L2-XT-05 and L2-XT-06, red on 2026-10-31, now pass; L2-XT-07 passes. The run reads OFF BASELINE by D-A11Y-10's four alone. Crash journal entries (MESSAGE_ID fc2e22bc6ee647b6b90729ab34a250b1): 81 before, 81 after. The log is in the lead's scratchpad.
+
+**The premise, before the change.** With the merged board and the old fixture, the platform test in `tests/test_a11y_premise.py` was red: "D-A11Y-1 no longer reads open on the board ..., so the exception has ended: remove `exception` ... and re-measure the premise per onRed". That is the exception ending itself, as built.
+
+**The premise, re-measured.**
+- The `exception` was removed and `platform` re-pinned to the platform installed for the run above: quickshell 0.3.2.r7.g2b4501a-1, qt6-base 6.12.0-3, at-spi2-core 2.62.1-1.
+- `premise`, `note`, `measuredIn`, `whyItMatters`, `notADetector` and `onRed` now describe the fix's premise: a field publishes only its masked value. `upstream` records that 916a0dd is installed.
+- The red message no longer calls D-A11Y-1 deferred, its closing sentence now defers to `onRed`, and the module docstring has a dated paragraph.
+
+**The premise, after the change.**
+- The platform test now PASSES on this machine; under the exception it skipped.
+- All 21 tests in the file pass. The synthetic cases are unchanged, because they carry their own platforms.
+- `premise_exception_problems` in `scripts/release.py` returns [] on the merged tree, and the 74 release tests pass.
+
+**Not measured.**
+- The playlist and EPG URL fields, and any revealed field. The probe fills only the Xtream form and never reveals it, so those rest on the five node checks on `Model.fieldAccessibleValue`.
+- The text-change events. The probe walks the tree and observes no events. The fix's session read, in the Qt 6.12.0 sources, that those events walk up to the nearest EditableText object, and the lead's search finds no EditableText ancestor in the shipped QML.
+- A real screen reader.
+- Whether a Quickshell PanelWindow publishes: the probe hosts the guide in a plain Window, under Qt's `qml` tool rather than Quickshell, so the quickshell version is the machine's and not something the run exercised.
+
+**Gate.** `scripts/check.sh` on the merged tree, run again after the claims check's corrections: all green; node 3238, python 1886 OK with no skip, qml spec 82.
+
 ### The system update of 2026-10-31: three tripwires, the a11y probe re-run, two gate repairs and a dated exception
 
 **The update.** qt6-base 6.12.0-3 (was 6.11.2-3), qt6-declarative 6.12.0-2 (was 6.11.2-1), Quickshell 0.3.2.r7.g2b4501a-1 (was 0.3.1-1), at-spi2-core 2.62.1-1 (was 2.60.6-1), omarchy 4.0.6-1 (was 4.0.4-1), FFmpeg 9.0.2 (was 9.0.1-4), mpv-mpris 1.3 (was 1.2-2); mpv stays 0.41.0. `./scripts/check.sh` on dev cc63a49, green before it, went red on three python tests: the a11y premise tripwire, a host citation (shell.qml grew two lines), and the misspelled-member guard (F-GATE-15).
