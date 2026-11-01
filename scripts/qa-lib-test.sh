@@ -1726,6 +1726,33 @@ const L = require(process.argv[1])
 const e = { showLogos: false, sourceKey: "12e22d28", playlistUrl: "http://u:p@h/x", epgUrl: "http://h/g" }
 console.log([L.storedOwnedValue(e, "showLogos"), L.storedOwnedValue(e, "sourceKey"), L.storedOwnedValue(e, "playlistUrl"), L.storedOwnedValue(e, "epgUrl"), L.storedOwnedValue({}, "showLogos")].map(String).join(" "))
 ' "$ROOT/scripts/dev-harness/harness-lib.js" 2>&1) $(qa_count "qa_json_field \"d\['storedShowLogos'\]\"" "$KS")" "false 12e22d28 null null null 1"
+# F-HARNESS-86 (2026-11-01): since D-SINK-48 a new source's key is random,
+# so key-scenario LEARNS a key from the record holding a URL rather than
+# predicting key_of(URL) -- in memory (shell.qml's keyOfUrl) and in
+# state.json (its file_key), both through HarnessLib.sourceKeysByUrl -- and
+# grades a new key by HarnessLib.newKeyKind. Both driven here with the
+# repository's model: the lookup normalizes the URL as an entry's is (the
+# whitespace-wrapped and file:// forms find the bare path's record), matches
+# the whole URL (a record for a longer path is not it), answers [] for none
+# and for no list; the kind tells a random key from the URL's hash (with
+# and without a -N suffix), a missing one and a malformed one. Seen red
+# with the lookup comparing the raw URL (`|||`: neither the wrapped nor the
+# file:// form finds its record) and with the kind comparing the
+# un-normalized URL (`random random hash ...`: the wrapped URL's own hash
+# read as random).
+is "HarnessLib.sourceKeysByUrl answers the keys of the records holding a URL, normalized as an entry's is, and nothing else (F-HARNESS-86, driven)" \
+   "$(node -e '
+const M = require(process.argv[1]); const H = require(process.argv[2])
+const src = [{ key: "aaaaaaaa", url: "/tmp/qa-lib-test/a.m3u" }, { key: "bbbbbbbb", url: "/tmp/qa-lib-test/b.m3u" }, { key: "cccccccc", url: "/tmp/qa-lib-test/a.m3u.bak" }, null]
+console.log([H.sourceKeysByUrl(M, src, "  /tmp/qa-lib-test/a.m3u "), H.sourceKeysByUrl(M, src, "file:///tmp/qa-lib-test/b.m3u"), H.sourceKeysByUrl(M, src, "/tmp/qa-lib-test/none.m3u"), H.sourceKeysByUrl(M, undefined, "/tmp/qa-lib-test/a.m3u")].map(function (k) { return k.join(",") }).join("|"))
+' "$(qa_model_files "$ROOT" | head -n 1)" "$ROOT/scripts/dev-harness/harness-lib.js" 2>&1)" "aaaaaaaa|bbbbbbbb||"
+is "HarnessLib.newKeyKind tells a new random key from the URL's hash, a missing key and a malformed one (F-HARNESS-86, driven)" \
+   "$(node -e '
+const M = require(process.argv[1]); const H = require(process.argv[2])
+const url = "/tmp/qa-lib-test/a.m3u"; const hash = M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
+const other = (hash[0] === "0" ? "1" : "0") + hash.slice(1)
+console.log([H.newKeyKind(M, other, url), H.newKeyKind(M, hash, " " + url + " "), H.newKeyKind(M, hash + "-2", url), H.newKeyKind(M, "", url), H.newKeyKind(M, "NOTAKEY", url)].join(" "))
+' "$(qa_model_files "$ROOT" | head -n 1)" "$ROOT/scripts/dev-harness/harness-lib.js" 2>&1)" "random hash hash none malformed"
 # Round 9 (Q): the slow listener holding the probe open is the scenario's
 # own, its pid read from the LISTENER (ss -ltnp on its port, never `$!`, the
 # rule the round-2 live pass learned), and cleanup() kills that pid on every
@@ -3218,7 +3245,10 @@ is "qa_harness_real_home never answers with the scratch tree itself" \
 # m3's T5 chain driven, T5d's refusal included (5, item 2). Red on the
 # F-HARNESS-47 commit's run.sh and m3-scenario.sh: the three wordings and
 # T5d (4 failed); with e243c29's qa-lib.sh as well, 5.
-EXPECTED=607
+# 607 -> 609 on 2026-11-01, F-HARNESS-86: HarnessLib.sourceKeysByUrl and
+# newKeyKind driven (2), the learned-key instrument key-scenario reads
+# every new source's key through since D-SINK-48 made it random.
+EXPECTED=609
 section "summary"
 printf '%d passed, %d failed\n' "$pass" "$fail"
 if (( pass + fail != EXPECTED )); then

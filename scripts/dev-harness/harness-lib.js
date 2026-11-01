@@ -59,6 +59,49 @@ function entryKey(Model, entry) {
   return normalized === "" ? "" : Model.sourceKey(normalized)
 }
 
+// F-HARNESS-86 (2026-11-01). The keys of the records in `sources` whose URL
+// is `url`, in list order ([] for none). Since D-SINK-48 (f9c47da,
+// 2026-10-29) a NEW source's key is one random draw, no longer fnv1a32 of
+// its URL, so a scenario can no longer PREDICT a key from a URL -- every
+// want key-scenario.sh made that way (its key_of over B and D) named a key
+// no shell would ever allocate, 28 checks went red on rel-0160 for that
+// reason and for D-SINK-50's argv below, and the counts that predicted
+// "no record for B" went blind. It LEARNS the key instead: from the state
+// the shell holds (shell.qml's keyOfUrl over the service's userState) or
+// the one it wrote (key-scenario's file_key over state.json), both through
+// this function. Compared the way the model dedupes (findSourceByUrl: the
+// record's url against the URL normalized as an entry's is, origin cli,
+// the normaliser key_of used), and answered as keys only: the URL never
+// leaves the caller (rule 5).
+function sourceKeysByUrl(Model, sources, url) {
+  var out = []
+  var list = sources && typeof sources === "object" && typeof sources.length === "number" ? sources : []
+  var want = Model.normalizeSourceUrl(url === undefined || url === null ? "" : String(url), { origin: "cli" })
+  if (want === "") return out
+  for (var i = 0; i < list.length; i++) {
+    var s = list[i]
+    if (!s || typeof s !== "object") continue
+    if ((s.url === undefined || s.url === null ? "" : String(s.url)) === want) out.push(String(s.key))
+  }
+  return out
+}
+
+// F-HARNESS-86: the D-SINK-48 property of a NEW source's key, which is what
+// a check that used to want "the URL's hash" can still say about it.
+// "random" for a well-formed key (Model.isSourceKey) that is NOT the URL's
+// fnv1a32 (Model.sourceKey over the normalized URL, the derivation every key
+// before D-SINK-48 was made with and the seeds' legacy keys still are; a
+// `-N` collision suffix is ignored for the comparison), "hash" for one that
+// is, "none" for no key at all, "malformed" for anything else. A random draw
+// equals the hash with probability 2^-32.
+function newKeyKind(Model, key, url) {
+  var k = key === undefined || key === null ? "" : String(key)
+  if (k === "") return "none"
+  if (!Model.isSourceKey(k)) return "malformed"
+  var n = Model.normalizeSourceUrl(url === undefined || url === null ? "" : String(url), { origin: "cli" })
+  return n !== "" && k.replace(/-[0-9]+$/, "") === Model.sourceKey(n) ? "hash" : "random"
+}
+
 // The key NAMES an entry carries, sorted, `id` excluded. Names only, never
 // values: the values can be a credentialed URL and this reaches a terminal
 // and a transcript (rule 5). What a scenario needs from it is whether the
@@ -263,5 +306,5 @@ function openDrawnSettle(frames, tailMs) {
 
 if (typeof module !== "undefined") {
   module.exports = { entryKey: entryKey, entryKeyNames: entryKeyNames, pointerStateOf: pointerStateOf, POINTER_FIELDS: POINTER_FIELDS, storedOwnedValue: storedOwnedValue,
-                     openDrawnSet: openDrawnSet, openDrawnSettle: openDrawnSettle }
+                     openDrawnSet: openDrawnSet, openDrawnSettle: openDrawnSettle, sourceKeysByUrl: sourceKeysByUrl, newKeyKind: newKeyKind }
 }
