@@ -1005,6 +1005,7 @@
         "fieldMaskable",
         "fieldRevealed",
         "fieldMasked",
+        "fieldAccessibleValue",
         "toggleReveal",
         "withFormReveal"
       ]

@@ -4878,29 +4878,23 @@ Item {
                   verticalPadding: Style.spacing.inputPaddingY
                   activeFocusOnTab: false
                   Keys.forwardTo: [formKeys]
-                  Accessible.role: Accessible.EditableText
+                  // D-A11Y-1: this control is kept OFF the accessibility bus,
+                  // and fieldA11y below publishes the field instead. Qt (6.12
+                  // sources, qaccessiblequickitem.cpp) gives an EditableText
+                  // TextInput its displayText as both the accessible Value and
+                  // the text interface, so the Xtream server and username and
+                  // a revealed URL published in full; and qquicktextinput.cpp
+                  // raises every text change, with the old and new RAW text,
+                  // to the nearest object whose role is EditableText, walking
+                  // up the parents -- the password included, whatever its
+                  // bullets read. So the role here must not be EditableText,
+                  // and no ancestor of this field may carry that role either.
+                  // StaticText exposes no Value and its text interface reads
+                  // only the name. Ignored keeps it out of the tree; its focus
+                  // event still names it, which is why it keeps the label.
+                  Accessible.role: Accessible.StaticText
                   Accessible.name: root.fieldAccessibleName(fieldRow.fieldId)
-                  // D-A11Y-1. The old comment here claimed a screen reader
-                  // never gets the query. That is true of this DESCRIPTION and
-                  // false of the accessible VALUE, which Qt derives from the
-                  // control's own display text, so a revealed URL and the
-                  // never-maskable Xtream server and username all publish in
-                  // full. Masking the value is a separate change with a real
-                  // UX cost and is NOT done here; see D-A11Y-1 and ruling AX2.
-                  // Nothing reaches the bus at all today (D-GS-3, a Quickshell
-                  // defect), so this is latent rather than live.
-                  //
-                  // The password row also had `Accessible.passwordEdit: true`.
-                  // It was inert in both directions on Qt 6.11.2, measured
-                  // twice independently by different toolchains, and its only
-                  // effect was to make the docs promise something Qt cannot
-                  // deliver. Removed. The password field had NO label at all
-                  // as a result: it is not maskable, so the description below
-                  // resolved to the empty string and the placeholder fallback
-                  // could not fire. It gets its label explicitly now.
-                  Accessible.description: fieldRow.fieldId === "password"
-                    ? root.fieldLabelText(fieldRow.fieldId)
-                    : (fieldRow.maskable ? Model.maskUrl(root.formValue(fieldRow.fieldId)) : "")
+                  Accessible.ignored: true
                   onActiveFocusChanged: if (activeFocus) root.fieldFocused(fieldRow.fieldId)
                   onCursorPositionChanged: {
                     fieldCaret.lit = true
@@ -4935,6 +4929,34 @@ Item {
                     onTriggered: fieldCaret.lit = !fieldCaret.lit
                     onRunningChanged: fieldCaret.lit = true
                   }
+                }
+
+                // D-A11Y-1: the field as a screen reader gets it. A SIBLING of
+                // the drawn field, never its ancestor (see the comment on the
+                // field). Not a TextInput, so Qt reads its Value from `text`,
+                // which is Model.fieldAccessibleValue: masked whether or not
+                // the field is revealed, and nothing raises a text event for
+                // it. Read-only, so an assistive tool cannot write through it.
+                Item {
+                  id: fieldA11y
+                  readonly property string text: Model.fieldAccessibleValue(root.form, fieldRow.fieldId)
+                  x: field.x
+                  y: field.y
+                  width: field.width
+                  height: field.height
+                  enabled: field.enabled
+                  Accessible.role: Accessible.EditableText
+                  Accessible.name: root.fieldAccessibleName(fieldRow.fieldId)
+                  // The password row had `Accessible.passwordEdit: true`. It
+                  // was inert in both directions on Qt 6.11.2, measured twice
+                  // independently, and left the password with NO label at all:
+                  // it is not maskable, so this description resolved to the
+                  // empty string. It gets its label explicitly.
+                  Accessible.description: fieldRow.fieldId === "password"
+                    ? root.fieldLabelText(fieldRow.fieldId)
+                    : (fieldRow.maskable ? Model.maskUrl(root.formValue(fieldRow.fieldId)) : "")
+                  Accessible.focusable: true
+                  Accessible.focused: field.activeFocus
                 }
 
                 // Eye button in the reserved slot, only when there is something to mask.

@@ -164,9 +164,9 @@ Populated by the scenario with three distinct tokens and **no user action**.
 - `L2-XT-01` the form is a Dialog called "Add Xtream login".
 - `L2-XT-02` / `L2-XT-03` the server and username fields are named "Server URL" and "Username".
 - `L2-XT-04` the password field carries its label through `Accessible.description` (decision 5, shipped).
-- `L2-XT-05` **RED.** The provider login pasted into the unmaskable Server field reaches the accessibility bus in full, as the field's accessible Value. First time D-A11Y-1 has been *observed at the sink* rather than reasoned about from source.
-- `L2-XT-06` **RED.** The Xtream username likewise.
-- `L2-XT-07` green: the password plaintext does not reach the bus; `echoMode` publishes bullets. Asserted so it cannot regress silently.
+- `L2-XT-05` **green since 2026-10-31, RED before.** The provider login pasted into the unmaskable Server field reached the accessibility bus in full, as the field's accessible Value. First time D-A11Y-1 was *observed at the sink* rather than reasoned about from source. Fixed by keeping the drawn field off the bus and publishing a masked sibling (D-A11Y-1).
+- `L2-XT-06` **green since 2026-10-31, RED before.** The Xtream username likewise.
+- `L2-XT-07` green: the password plaintext does not reach the bus; it published `echoMode` bullets, and since D-A11Y-1's fix it publishes one `*` per character from the masked sibling. Asserted so it cannot regress silently.
 - `L2-XT-08` / `L2-XT-09` **the anti-false-green pair.** What the user typed is still in the form, character for character, digest and length equal, before and after the walk. This is not a policy about the bus, so no ruling can dissolve it: *observing must not mutate*.
 - `L2-XT-10` the fields are still announced by name in the same run the credential check passes, so deleting the node is not a way to pass. (Redundant with 02/03 -- section 6.)
 - `L2-XT-11` **RED.** Eye buttons on a form where no field is maskable publish "Hide query" with `checked=true`. UX-SOURCES 7.1 rules that `checked` *means revealed*; `Guide.qml:3242` binds `Accessible.checked: !fieldRow.masked`, and `masked` is false both when a field is revealed and when it was never maskable. (Contested -- open item 15.)
@@ -502,17 +502,23 @@ it, not by reading it.
 
 ### The baseline, and what it means
 
-    64 checks, 3 failures
+    84 checks, 1 failure (2026-10-31, D-A11Y-1 fixed)
 
 | Check | What it says |
 |---|---|
-| `L2-XT-05` | the provider login pasted into the unmaskable Server field reaches the bus |
-| `L2-XT-06` | the Xtream username reaches the bus |
 | `L2-XT-11` | contested; see open item 15 |
 
-The first two are **D-A11Y-1, confirmed at the real sink** rather than inferred
-from reading code. They are the exposure the product owner ruled is the defect
-(decision 7), as against the deliberate reveal, which nothing here asserts on
+Until 2026-10-31 the baseline also held `L2-XT-05` (the provider login pasted
+into the unmaskable Server field reaches the bus) and `L2-XT-06` (the Xtream
+username reaches the bus). Those two were **D-A11Y-1, confirmed at the real sink**
+rather than inferred from reading code, and both pass since the fix: the drawn
+field is kept off the bus and a sibling node publishes
+`Model.fieldAccessibleValue`. Measured in a headless nested cage on a private
+bus, Qt 6.12.0: 84 checks, 5 failures, `L2-XT-05` and `L2-XT-06` passing and the
+undamaged-field pair `L2-XT-08` / `L2-XT-09` still green; the other four
+failures (`L2-Q-04-LIT`, `L2-Q-06`, `L2-SC-03-LIT`, `L2-SC-06`) appeared with
+Qt 6.12 before the fix and are a separate row-naming defect. `L2-XT-05` and
+`L2-XT-06` were the exposure the product owner ruled is the defect (decision 7), as against the deliberate reveal, which nothing here asserts on
 because decision 8 is unanswered.
 
 ### D-A11Y-6, and the first claim this project has verified by observation

@@ -209,6 +209,22 @@ requests and raise the batch.
      its removed halves. It fires on every mask and every reveal, on a field
      whose Value reads as bullets, and on an `Accessible.ignored` field, so the
      states that look safe leak on the way into themselves.
+     **[2026-10-31, D-A11Y-1 fixed: Quickshell 0.3.2 carries the upstream fix
+     (916a0dd), so its windows publish, and the Sources form's fields were
+     LIVE. Read in the Qt 6.12.0 sources: an EditableText `TextInput`
+     publishes `displayText` as its Value AND its text interface, and every
+     text change raises the old and new RAW `text` (the password's too,
+     whatever its bullets read) to the nearest object whose role is
+     EditableText, walking up its PARENTS -- `ignored` does not stop that walk,
+     the role does. So a form field's drawn control is `Accessible.StaticText`,
+     `ignored`, with no EditableText ancestor, and a SIBLING `Item` (not a
+     TextInput, so Qt reads its Value from a plain `text` property) is the
+     field on the bus, publishing `Model.fieldAccessibleValue`: `maskUrl` for
+     a URL with a scheme, a local path as is, the label as is, one `*` per
+     character for everything else, revealed or not. Observed by
+     `scripts/a11y-probe.sh` in a headless nested cage: L2-XT-05/06 pass,
+     the undamaged pair L2-XT-08/09 stays green. The text-event half is read,
+     not measured: the probe walks the tree and observes no events.]**
    - **Process argv**, which was missing from this list while the list itself
      said to add sinks to it (D-SINK-3). The helper used to be handed the
      composed playlist URL as an argument, so it sat in `/proc/<pid>/cmdline`
