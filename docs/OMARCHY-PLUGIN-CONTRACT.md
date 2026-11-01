@@ -1256,3 +1256,83 @@ be written (error N)` on every failure and emits
 key scenario's F segment drives it with the state directory 0500 under a
 running shell (F4: logged with no `://` in the line, signalled exactly once;
 lane B on lane-key-t2, 2026-10-12).
+
+## The host's load patch: `//@ pragma OmarchyLoadPatch` rewrites a plugin's `import QtQuick` (verified 2026-11-01)
+
+D-HOST-9. Qt 6.12 exports a C++ singleton named `Color` from QtQuick
+(`QQuickColor`; `exports: ["QtQuick/Color 6.12"]` in
+`/usr/lib/qt6/qml/QtQuick/plugins.qmltypes`), and the engine's lookup of a JS
+identifier searches the C++ types of every unqualified import BEFORE any
+qmldir composite singleton (`QQmlTypeNameCache::doQuery` in qtdeclarative
+v6.12.0: `m_anonymousImports`, then `m_anonymousCompositeSingletons`). The
+host's `Color` is a composite singleton (`singleton Color 1.0 Color.qml` in
+`Commons/qmldir`), so an unqualified `Color` is Qt's on 6.12 WHATEVER the
+import order. qmllint resolves the same name by the last import, which is why
+it reports the plugin's users as the theme's; it is wrong about the engine.
+Upstream: QTBUG-151278 ("qmllint and the QML engine resolve an unqualified
+type name differently ..."), In Progress, P1, a regression from 6.11.2, its
+named workarounds a qualified import or a versioned `import QtQuick 6.11`.
+
+Omarchy 4.0.6 answered twice. Its own 54 files qualify (`import qs.Commons as
+Commons`, `Commons.Color`), and the first line of its `shell.qml` is
+`//@ pragma OmarchyLoadPatch`, a pragma only Omarchy's build of Quickshell
+knows: omarchy-pkgs `pkgbuilds/quickshell/load_qtquick_611.patch`, added by
+omarchy-pkgs #935 on 2026-10-10 ("Patch Quickshell to temporarily work around
+Qt 6.12 breakage ... until Qt confirms if its a bug or not"). The installed
+0.3.2.r7.g2b4501a-1 carries it: its `.BUILDINFO` `pkgbuild_sha256sum`
+(`e871efd5...`) is the PKGBUILD at omarchy-pkgs `2be7cd9839`, which applies
+the patch with `--fuzz=0` and pins its sha256 (`23b65d20...`, the same file as
+omarchy-pkgs HEAD on 2026-11-01), and the binary holds the patch's literals.
+Arch's own `quickshell 0.3.2-1` (in the pacman cache) holds none of them.
+
+What the patch does, read against upstream 2b4501a's `src/core/scan.cpp`,
+`qsintercept.cpp` and `launch/launch.cpp`:
+
+- The pragma is honoured on the ROOT file only (`scanQmlRoot` passes
+  `isRoot`), in its header. A plugin's own copy of the line does nothing, and
+  a plugin cannot turn the patch off.
+- With it on, the QML scanner rewrites every unmasked line of every QML file
+  it scans that matches `^([ \t]*import[ \t]+QtQuick)(?=[ \t]*(?:as[ \t]|;|//|/\*|$))`
+  to `\1 6.11`: the whole file, not only the header. `import QtQuick 2.15`,
+  `import QtQuick 6.12` and `import QtQuick.Controls` are left alone, and
+  `.mjs` files are never read for this.
+- The URL interceptor, for every LOCAL `QmlFile` URL the engine loads, scans
+  that file's directory and, when the scanner holds a rewritten text for it,
+  switches the URL to `qs:` so the network factory serves the rewritten text.
+  The host hands a plugin's entry points over as `file://` URLs
+  (`PluginRegistry.entryPointUrl` returns `Util.fileUrl(path)`), so all three
+  of this plugin's QML files are loaded as `import QtQuick 6.11`. The plugin
+  directory also gets a synthesized qmldir, and the shell logs `Module path
+  "<plugin dir>" is outside of the config folder.` once per directory.
+
+Measured by lane-host9 with the installed quickshell in a nested headless
+cage on a private bus (rule 6b), the host's `Commons` and `Ui` copied byte
+for byte beside a root that differs from a second root only by the pragma
+line, the plugin's files in a directory outside that root, each loaded with
+`Qt.createComponent(Commons.Util.fileUrl(path))`, and a theme written into
+the private HOME (accent `#12ab34`, foreground `#a1b2c3`, red `#cd3456`):
+
+| Root | Import order | Guide `accent` / `urgent` | BarWidget `barFg` | Warnings from the two files |
+|---|---|---|---|---|
+| with the pragma | as shipped | `#12ab34` / `#cd3456` | `#a1b2c3` | 0 |
+| with the pragma | qs.Commons above QtQuick | `#12ab34` / `#cd3456` | `#a1b2c3` | 0 |
+| without it | as shipped | `#000000` / `#000000` | `#000000` | 15 (`TypeError: Cannot read property ... of undefined`, `Unable to assign [undefined] to QColor`) |
+| without it | qs.Commons above QtQuick | `#000000` / `#000000` | `#000000` | 15 |
+
+The interceptor's own debug lines show each plugin file served with
+`import QtQuick 6.11`. Probes whose headers are byte copies of each shipped
+file read `Color` as the theme's object with the pragma and as
+`QQuickColor(...)` without it, in both orders; `Style`, `Util` and `Border`
+are the theme's in every case (QtQuick exports none of them).
+
+So the plugin's theme colours on Qt 6.12 rest on this patch alone, and the
+import order holds nothing. `tests/test_host_load_patch.py` pins the joins on
+this machine (the root's pragma, the binary's rewrite read out of the binary,
+the rewrite reaching every shipped file, and the premise that Qt's `Color`
+wins without it); a red there after an update is a re-measurement request.
+Rigs that load the plugin without this root carry no pragma:
+`scripts/dev-harness/shell.qml` and `tests/a11y/host_*.qml` are the "without
+it" rows' configuration (the same quickshell, a root with no pragma), and the
+plain-`qml` tree `tests/a11y/make_tree.py` builds has no scanner at all, the
+case the test's offscreen probe observes. Read, not run against each rig: by
+that lookup every one of them draws the guide with Qt's `Color`.
