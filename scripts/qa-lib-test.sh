@@ -1740,19 +1740,26 @@ console.log([L.storedOwnedValue(e, "showLogos"), L.storedOwnedValue(e, "sourceKe
 # file:// form finds its record) and with the kind comparing the
 # un-normalized URL (`random random hash ...`: the wrapped URL's own hash
 # read as random).
+# rc-keyfix (2026-11-01, the recheck): the lookup also finds a record whose
+# OWN url is a wrapped form of the URL (the model failed to normalize it),
+# so a count of "no record for B" cannot be met by one; the kind answers
+# "reused" for a key the caller names as already held (the seeds'), and
+# "hash" still wins over it. Seen red on lane-keyfix's harness-lib
+# (`aaaaaaaa|bbbbbbbb|||`: the wrapped record unseen; `... malformed random
+# hash`: the mirror's key read as a new random one).
 is "HarnessLib.sourceKeysByUrl answers the keys of the records holding a URL, normalized as an entry's is, and nothing else (F-HARNESS-86, driven)" \
    "$(node -e '
 const M = require(process.argv[1]); const H = require(process.argv[2])
-const src = [{ key: "aaaaaaaa", url: "/tmp/qa-lib-test/a.m3u" }, { key: "bbbbbbbb", url: "/tmp/qa-lib-test/b.m3u" }, { key: "cccccccc", url: "/tmp/qa-lib-test/a.m3u.bak" }, null]
-console.log([H.sourceKeysByUrl(M, src, "  /tmp/qa-lib-test/a.m3u "), H.sourceKeysByUrl(M, src, "file:///tmp/qa-lib-test/b.m3u"), H.sourceKeysByUrl(M, src, "/tmp/qa-lib-test/none.m3u"), H.sourceKeysByUrl(M, undefined, "/tmp/qa-lib-test/a.m3u")].map(function (k) { return k.join(",") }).join("|"))
-' "$(qa_model_files "$ROOT" | head -n 1)" "$ROOT/scripts/dev-harness/harness-lib.js" 2>&1)" "aaaaaaaa|bbbbbbbb||"
+const src = [{ key: "aaaaaaaa", url: "/tmp/qa-lib-test/a.m3u" }, { key: "bbbbbbbb", url: "/tmp/qa-lib-test/b.m3u" }, { key: "cccccccc", url: "/tmp/qa-lib-test/a.m3u.bak" }, null, { key: "dddddddd", url: "  /tmp/qa-lib-test/c.m3u\t" }]
+console.log([H.sourceKeysByUrl(M, src, "  /tmp/qa-lib-test/a.m3u "), H.sourceKeysByUrl(M, src, "file:///tmp/qa-lib-test/b.m3u"), H.sourceKeysByUrl(M, src, "/tmp/qa-lib-test/none.m3u"), H.sourceKeysByUrl(M, undefined, "/tmp/qa-lib-test/a.m3u"), H.sourceKeysByUrl(M, src, "/tmp/qa-lib-test/c.m3u")].map(function (k) { return k.join(",") }).join("|"))
+' "$(qa_model_files "$ROOT" | head -n 1)" "$ROOT/scripts/dev-harness/harness-lib.js" 2>&1)" "aaaaaaaa|bbbbbbbb|||dddddddd"
 is "HarnessLib.newKeyKind tells a new random key from the URL's hash, a missing key and a malformed one (F-HARNESS-86, driven)" \
    "$(node -e '
 const M = require(process.argv[1]); const H = require(process.argv[2])
 const url = "/tmp/qa-lib-test/a.m3u"; const hash = M.sourceKey(M.normalizeSourceUrl(url, { origin: "cli" }))
 const other = (hash[0] === "0" ? "1" : "0") + hash.slice(1)
-console.log([H.newKeyKind(M, other, url), H.newKeyKind(M, hash, " " + url + " "), H.newKeyKind(M, hash + "-2", url), H.newKeyKind(M, "", url), H.newKeyKind(M, "NOTAKEY", url)].join(" "))
-' "$(qa_model_files "$ROOT" | head -n 1)" "$ROOT/scripts/dev-harness/harness-lib.js" 2>&1)" "random hash hash none malformed"
+console.log([H.newKeyKind(M, other, url), H.newKeyKind(M, hash, " " + url + " "), H.newKeyKind(M, hash + "-2", url), H.newKeyKind(M, "", url), H.newKeyKind(M, "NOTAKEY", url), H.newKeyKind(M, other, url, [hash, other]), H.newKeyKind(M, hash, url, [hash])].join(" "))
+' "$(qa_model_files "$ROOT" | head -n 1)" "$ROOT/scripts/dev-harness/harness-lib.js" 2>&1)" "random hash hash none malformed reused hash"
 # Round 9 (Q): the slow listener holding the probe open is the scenario's
 # own, its pid read from the LISTENER (ss -ltnp on its port, never `$!`, the
 # rule the round-2 live pass learned), and cleanup() kills that pid on every

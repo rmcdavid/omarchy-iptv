@@ -73,6 +73,15 @@ function entryKey(Model, entry) {
 // record's url against the URL normalized as an entry's is, origin cli,
 // the normaliser key_of used), and answered as keys only: the URL never
 // leaves the caller (rule 5).
+// rc-keyfix (2026-11-01, the recheck): and a record whose OWN url only
+// normalizes to `url` (a wrapped or file:// form the model failed to
+// normalize when it stored it) is that URL's record too. findSourceByUrl
+// compares the stored string as it is, so the first version could not see
+// such a record, and "no record for B" (Z1, Z2, X1) was met by a record for
+// B that kept its whitespace -- the shape round 8's Z reds had. Wider than
+// the model on purpose: it can only add keys, so a count of none gets
+// stricter and a learned key meets its pointer only when one record holds
+// the URL however it was written.
 function sourceKeysByUrl(Model, sources, url) {
   var out = []
   var list = sources && typeof sources === "object" && typeof sources.length === "number" ? sources : []
@@ -81,7 +90,8 @@ function sourceKeysByUrl(Model, sources, url) {
   for (var i = 0; i < list.length; i++) {
     var s = list[i]
     if (!s || typeof s !== "object") continue
-    if ((s.url === undefined || s.url === null ? "" : String(s.url)) === want) out.push(String(s.key))
+    var have = s.url === undefined || s.url === null ? "" : String(s.url)
+    if (have === want || (have !== "" && Model.normalizeSourceUrl(have, { origin: "cli" }) === want)) out.push(String(s.key))
   }
   return out
 }
@@ -94,12 +104,26 @@ function sourceKeysByUrl(Model, sources, url) {
 // `-N` collision suffix is ignored for the comparison), "hash" for one that
 // is, "none" for no key at all, "malformed" for anything else. A random draw
 // equals the hash with probability 2^-32.
-function newKeyKind(Model, key, url) {
+// rc-keyfix (2026-11-01, the recheck): "reused" for a key one of `taken`
+// already held -- the keys the caller's records had BEFORE the add
+// (key-scenario's seeded A, C and the dead provider). Without it a new
+// record that took an existing record's key (the mirror's, say) read
+// "random", and C2's "not the mirror's" was a claim nothing checked. And
+// "random" still means only "not the URL's fnv1a32 and not a key already
+// held": a key DERIVED from the URL some other way (a salted hash, a
+// different hash) reads "random" as well (called on a salted fnv1a32), so
+// a check about the D-SINK-48 property ALSO compares two draws for one URL
+// (key-scenario's `redrawn`: O5, F6, A2), which no function of the URL can
+// pass.
+function newKeyKind(Model, key, url, taken) {
   var k = key === undefined || key === null ? "" : String(key)
   if (k === "") return "none"
   if (!Model.isSourceKey(k)) return "malformed"
   var n = Model.normalizeSourceUrl(url === undefined || url === null ? "" : String(url), { origin: "cli" })
-  return n !== "" && k.replace(/-[0-9]+$/, "") === Model.sourceKey(n) ? "hash" : "random"
+  if (n !== "" && k.replace(/-[0-9]+$/, "") === Model.sourceKey(n)) return "hash"
+  var held = taken && typeof taken === "object" && typeof taken.length === "number" ? taken : []
+  for (var i = 0; i < held.length; i++) if (String(held[i]) === k) return "reused"
+  return "random"
 }
 
 // The key NAMES an entry carries, sorted, `id` excluded. Names only, never
