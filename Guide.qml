@@ -2,6 +2,7 @@ import Quickshell
 import Quickshell.Wayland
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.mjs" as Model
 
@@ -353,15 +354,15 @@ Item {
 
   // ---- theme tokens: shares the [menu] surface with the clipboard and
   // emoji pickers (PRODUCT.md decision 7). No literal colors.
-  property color background: Color.menu.background
-  property color foreground: Color.menu.text
-  property color border: Color.menu.border
+  property color background: Commons.Color.menu.background
+  property color foreground: Commons.Color.menu.text
+  property color border: Commons.Color.menu.border
   property var borderSpec: Border.surfaceSpec("menu", "border", border, Math.max(1, Style.space(2)))
-  property var selectedBorderSpec: Border.surfaceSpec("menu", "selected-border", Color.menu.selectedBorder, 0)
+  property var selectedBorderSpec: Border.surfaceSpec("menu", "selected-border", Commons.Color.menu.selectedBorder, 0)
   property var noBorderSpec: Border.none()
-  property color scrim: Color.menu.scrim
-  property color selectedBackground: Color.menu.selectedBackground
-  property color selectedText: Color.menu.selectedText
+  property color scrim: Commons.Color.menu.scrim
+  property color selectedBackground: Commons.Color.menu.selectedBackground
+  property color selectedText: Commons.Color.menu.selectedText
   // The ACTIVE ink. `cursorInk` mixes the accent the least distance toward the
   // menu text that clears 4.70:1 against the fill it is painted on, and returns
   // it untouched on the 15 themes that already do. The arithmetic lives in
@@ -378,7 +379,7 @@ Item {
   // r, g and b are the TEXT'S, so handing it over uncomposited measured the
   // accent against the text colour and fell through to the text token on 23 of
   // 23 themes for the life of the feature.
-  readonly property color cursorInk: Model.cursorInkHex(Color.menu.selectedText, Color.menu.text, Color.menu.selectedBackground, Color.menu.background)
+  readonly property color cursorInk: Model.cursorInkHex(Commons.Color.menu.selectedText, Commons.Color.menu.text, Commons.Color.menu.selectedBackground, Commons.Color.menu.background)
 
   // D-RUNG-14: the caption rung is an OUTPUT, chosen per SURFACE. 0.7 was
   // picked against the card; on the SELECTED row the fill moves toward the ink,
@@ -394,8 +395,8 @@ Item {
   //
   // Both evaluate once per theme, never per row. 16 of 23 themes get 0.7 back
   // byte-identical on both surfaces.
-  readonly property real captionAlphaOnCard: Model.captionAlpha(Color.menu.text, Color.menu.background)
-  readonly property real captionAlphaOnCursor: Model.captionAlpha(Color.menu.text, Model.qmlFill(Color.menu.selectedBackground, Color.menu.background))
+  readonly property real captionAlphaOnCard: Model.captionAlpha(Commons.Color.menu.text, Commons.Color.menu.background)
+  readonly property real captionAlphaOnCursor: Model.captionAlpha(Commons.Color.menu.text, Model.qmlFill(Commons.Color.menu.selectedBackground, Commons.Color.menu.background))
   // The Sources row's HOVER fill. An earlier version of this change skipped the
   // site with a comment saying Style.hoverFillFor was host-injected and "not
   // modellable here". That was simply false, and checking took one look:
@@ -404,13 +405,13 @@ Item {
   // exists to composite. The default theme template even gives it the same
   // colour and alpha as the selection (foreground at 0.08). A comment asserting
   // something convenient about the host, unchecked, is how D-RUNG-13 shipped.
-  readonly property real captionAlphaOnHover: Model.captionAlpha(Color.menu.text, Model.qmlFill(Style.hoverFillFor(Color.menu.text, Color.accent), Color.menu.background))
+  readonly property real captionAlphaOnHover: Model.captionAlpha(Commons.Color.menu.text, Model.qmlFill(Style.hoverFillFor(Commons.Color.menu.text, Commons.Color.accent), Commons.Color.menu.background))
   // REGULAR-weight captions need a higher floor than bold ones, because 10 px
   // regular renders 11 to 13 per cent below the model and bold does not
   // (F-CAL-1). Same arithmetic, grossed-up target.
-  readonly property real captionAlphaProse: Model.captionAlpha(Color.menu.text, Color.menu.background, Model.CAPTION_FLOOR_REGULAR)
-  property color accent: Color.accent
-  property color urgent: Color.urgent
+  readonly property real captionAlphaProse: Model.captionAlpha(Commons.Color.menu.text, Commons.Color.menu.background, Model.CAPTION_FLOOR_REGULAR)
+  property color accent: Commons.Color.accent
+  property color urgent: Commons.Color.urgent
   readonly property int cornerRadius: Style.cornerRadius
   property string fontFamily: Style.font.menuFamily
 
@@ -458,6 +459,29 @@ Item {
   // harmless blank.
   readonly property var logoHave: root.serviceReady && root.service.logoHave !== undefined
     ? root.service.logoHave : ({})
+  // D-LOGO-19. The PATHS of cached logos Qt could not load, for the
+  // session: a file that passes every helper header gate and still fails
+  // the decoder was pointed at again by every delegate realisation, four
+  // journal lines each time. The slots read `have` LESS those names, so a
+  // broken file is tried once and journaled once; the path carries its
+  // directory, so nothing here needs clearing on a source switch.
+  // The residual is wider than "a transient read error", and it is the
+  // mechanism: Image.Error is ONE status for every failure to load -- a
+  // file the decoder rejects, a file that cannot be opened, an announced
+  // file that is no longer there (the cache cleared by hand under a running
+  // shell; a source removed and re-added gets the same fnv key, so the same
+  // directory) -- and logoFailed cannot tell them apart. Nothing clears a
+  // mark: a later fetch that writes a good file to the same path and
+  // announces it stays hidden until the shell restarts. Before the fix that
+  // file cost a retry on every realisation; now it costs one restart.
+  property var logoBroken: ({})
+  readonly property var logoHaveShown: Model.logoHaveLess(root.logoHave, root.logoBroken)
+  function logoFailed(source) {
+    var path = Model.logoFailedPath(source)
+    if (path === "" || root.logoBroken[path] === true) return
+    console.warn("omarchy-iptv: logo " + path + " could not be loaded; not tried again this session")
+    root.logoBroken = Model.logoBrokenMark(root.logoBroken, path)
+  }
   // The same rule the channel-number column follows (M2-03 4.2): zero width
   // on a list that has none, so those rows draw exactly as they did before
   // the feature existed. Asked of the rows ON SCREEN, so a group holding no
@@ -3719,7 +3743,7 @@ Item {
                     // fetch re-evaluates it: the file may exist now.
                     readonly property var art: root.logoSeq >= 0
                       ? Model.wallTile({ enabled: root.showLogos, channel: tile.channel,
-                                         logoDir: root.logoDir, have: root.logoHave })
+                                         logoDir: root.logoDir, have: root.logoHaveShown })
                       : ({ kind: "mark", path: "", glyph: "" })
 
                     Image {
@@ -3738,6 +3762,9 @@ Item {
                       mipmap: true
                       source: plate.art.kind === "image" ? "file://" + plate.art.path : ""
                       opacity: status === Image.Ready ? 1 : 0
+                      // D-LOGO-19: a file the decoder refuses is recorded
+                      // once and the slots stop pointing at it.
+                      onStatusChanged: if (status === Image.Error) root.logoFailed(String(source))
                       // The name below is the tile's accessible name; a reader
                       // announcing "image" before every channel is noise, not
                       // information (UX 7.2). Same reasoning as the row slot.
@@ -4118,7 +4145,7 @@ Item {
                       // re-evaluates it: the file may exist now.
                       source: {
                         var slot = Model.logoSlot({ enabled: root.showLogos, channel: row.channel,
-                                                    logoDir: root.logoDir, have: root.logoHave })
+                                                    logoDir: root.logoDir, have: root.logoHaveShown })
                         return (root.logoSeq >= 0 && slot.kind === "image") ? "file://" + slot.path : ""
                       }
                       // A logo that is missing, half-written or not an image
@@ -4126,6 +4153,9 @@ Item {
                       // -image glyph. The fetch is best-effort by design: a
                       // host being down is not a reason to mark up the list.
                       opacity: status === Image.Ready ? 1 : 0
+                      // D-LOGO-19: a file the decoder refuses is recorded
+                      // once and the slots stop pointing at it.
+                      onStatusChanged: if (status === Image.Error) root.logoFailed(String(source))
                       // The picture is decoration. The name is already the
                       // accessible name of the row, and a screen reader
                       // announcing "image" before every channel would be
@@ -4409,7 +4439,10 @@ Item {
                 // sentence alone (no host: nothing was contacted).
                 if (root.invalidSettingsText !== "") return root.invalidSettingsText
                 if (emptyState.emptyPlaylist) return root.copy.emptyPlaylistProse + root.service.statusHost + Model.SEP + root.copy.emptyPlaylistCheck
-                return root.service.statusReason + " from " + root.service.statusHost + Model.SEP + root.copy.errorCheck
+                // D-SRC-71: a failure on this machine (the cache unwritable,
+                // the helper failing or timing out) names no host; one list
+                // with the Sources result line (Model.failureFromHost).
+                return Model.failureFromHost(root.service.statusReason, root.service.statusHost, root.service.statusCode) + Model.SEP + root.copy.errorCheck
               }
               if (root.emptyKind === "noFavorites") return root.copy.noFavoritesProse
               if (root.emptyKind === "noMatches") {
@@ -4846,29 +4879,23 @@ Item {
                   verticalPadding: Style.spacing.inputPaddingY
                   activeFocusOnTab: false
                   Keys.forwardTo: [formKeys]
-                  Accessible.role: Accessible.EditableText
+                  // D-A11Y-1: this control is kept OFF the accessibility bus,
+                  // and fieldA11y below publishes the field instead. Qt (6.12
+                  // sources, qaccessiblequickitem.cpp) gives an EditableText
+                  // TextInput its displayText as both the accessible Value and
+                  // the text interface, so the Xtream server and username and
+                  // a revealed URL published in full; and qquicktextinput.cpp
+                  // raises every text change, with the old and new RAW text,
+                  // to the nearest object whose role is EditableText, walking
+                  // up the parents -- the password included, whatever its
+                  // bullets read. So the role here must not be EditableText,
+                  // and no ancestor of this field may carry that role either.
+                  // StaticText exposes no Value and its text interface reads
+                  // only the name. Ignored keeps it out of the tree; its focus
+                  // event still names it, which is why it keeps the label.
+                  Accessible.role: Accessible.StaticText
                   Accessible.name: root.fieldAccessibleName(fieldRow.fieldId)
-                  // D-A11Y-1. The old comment here claimed a screen reader
-                  // never gets the query. That is true of this DESCRIPTION and
-                  // false of the accessible VALUE, which Qt derives from the
-                  // control's own display text, so a revealed URL and the
-                  // never-maskable Xtream server and username all publish in
-                  // full. Masking the value is a separate change with a real
-                  // UX cost and is NOT done here; see D-A11Y-1 and ruling AX2.
-                  // Nothing reaches the bus at all today (D-GS-3, a Quickshell
-                  // defect), so this is latent rather than live.
-                  //
-                  // The password row also had `Accessible.passwordEdit: true`.
-                  // It was inert in both directions on Qt 6.11.2, measured
-                  // twice independently by different toolchains, and its only
-                  // effect was to make the docs promise something Qt cannot
-                  // deliver. Removed. The password field had NO label at all
-                  // as a result: it is not maskable, so the description below
-                  // resolved to the empty string and the placeholder fallback
-                  // could not fire. It gets its label explicitly now.
-                  Accessible.description: fieldRow.fieldId === "password"
-                    ? root.fieldLabelText(fieldRow.fieldId)
-                    : (fieldRow.maskable ? Model.maskUrl(root.formValue(fieldRow.fieldId)) : "")
+                  Accessible.ignored: true
                   onActiveFocusChanged: if (activeFocus) root.fieldFocused(fieldRow.fieldId)
                   onCursorPositionChanged: {
                     fieldCaret.lit = true
@@ -4905,6 +4932,34 @@ Item {
                   }
                 }
 
+                // D-A11Y-1: the field as a screen reader gets it. A SIBLING of
+                // the drawn field, never its ancestor (see the comment on the
+                // field). Not a TextInput, so Qt reads its Value from `text`,
+                // which is Model.fieldAccessibleValue: masked whether or not
+                // the field is revealed, and nothing raises a text event for
+                // it. Read-only, so an assistive tool cannot write through it.
+                Item {
+                  id: fieldA11y
+                  readonly property string text: Model.fieldAccessibleValue(root.form, fieldRow.fieldId)
+                  x: field.x
+                  y: field.y
+                  width: field.width
+                  height: field.height
+                  enabled: field.enabled
+                  Accessible.role: Accessible.EditableText
+                  Accessible.name: root.fieldAccessibleName(fieldRow.fieldId)
+                  // The password row had `Accessible.passwordEdit: true`. It
+                  // was inert in both directions on Qt 6.11.2, measured twice
+                  // independently, and left the password with NO label at all:
+                  // it is not maskable, so this description resolved to the
+                  // empty string. It gets its label explicitly.
+                  Accessible.description: fieldRow.fieldId === "password"
+                    ? root.fieldLabelText(fieldRow.fieldId)
+                    : (fieldRow.maskable ? Model.maskUrl(root.formValue(fieldRow.fieldId)) : "")
+                  Accessible.focusable: true
+                  Accessible.focused: field.activeFocus
+                }
+
                 // Eye button in the reserved slot, only when there is something to mask.
                 PanelActionButton {
                   visible: fieldRow.maskable
@@ -4938,7 +4993,10 @@ Item {
               // a password with an unencoded `/`, `?` or `#`. Advice, shown
               // once per value on this line while the field holds it; it
               // never blocks submit and the error and fetching lines win.
-              readonly property string warningText: !isError && !root.formProbing && root.form ? Model.formWarningLine(root.form) : ""
+              // D-SINK-14: the same line carries the plain-http disclosure
+              // while a URL field holds an `http://` value; the model
+              // decides which of the two shows (Model.formAdviceLine).
+              readonly property string warningText: !isError && !root.formProbing && root.form ? Model.formAdviceLine(root.form) : ""
               readonly property bool isWarning: warningText !== ""
               readonly property string lineText: {
                 if (root.formError) return String(root.formError.message)

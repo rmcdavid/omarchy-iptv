@@ -1,5 +1,6 @@
 import QtQuick
 import qs.Commons
+import qs.Commons as Commons
 import qs.Ui
 import "Model.mjs" as Model
 
@@ -43,7 +44,12 @@ BarWidget {
 
   readonly property bool serviceReady: service !== null
   readonly property bool playing: serviceReady && service.playing === true
-  readonly property string nowPlayingName: playing && service.nowPlaying ? String(service.nowPlaying.name || "") : ""
+  // F-SINK-14 (2026-10-29): the name as it is SHOWN -- through Model.sinkText,
+  // the guide row's rule -- because the label, the tooltip and the
+  // accessible name all read this one property. A playlist name holding a
+  // credentialed URL printed the whole URL here while the row printed its
+  // host; the composers redact again, so a raw name handed to them is safe.
+  readonly property string nowPlayingName: playing && service.nowPlaying ? Model.sinkText(service.nowPlaying.name) : ""
   // PAUSE LIVE TV: the glyph, the tooltip and the accessible name all branch
   // on it, so it is read once here.
   readonly property bool paused: playing && service.paused === true
@@ -82,7 +88,7 @@ BarWidget {
   readonly property bool showLabel: !root.vertical && root.showChannelName && root.nowPlayingName !== ""
   // Vertical bars stay glyph-only (UX 8 #12); the number is in the tooltip.
   readonly property bool showNumber: !root.vertical && root.showChannelNumber && root.nowPlayingChno !== ""
-  readonly property color barFg: bar ? bar.barForeground : Color.foreground
+  readonly property color barFg: bar ? bar.barForeground : Commons.Color.foreground
   readonly property string fontFamily: bar ? bar.fontFamily : Style.font.family
   // Idle dims like tailscale's inactive icon; playing and error are full.
   // D-RUNG-3 / D-RUNG-5: dim toward the BACKGROUND, not toward black.

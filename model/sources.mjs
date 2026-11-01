@@ -9,8 +9,11 @@ import {
   emptyState, stateBlockedHeader
 } from "./state.mjs"
 import {
-  logoConsentLines
+  logoConsentLines, logoHaveIsSet
 } from "./logos.mjs"
+import {
+  FETCH_URL_ENV, fetchEnvironment
+} from "./mpv.mjs"
 import {
   hostOf, urlSpaceIndex, urlDelimiterIndex, redactUrls
 } from "./privacy.mjs"
@@ -512,6 +515,40 @@ function formWarningLine(form) {
   return ""
 }
 
+// D-SINK-14 (2026-10-24). The DISCLOSURE for plain http, which nothing in
+// the product said while a LOGO must be https by ruling: an `http://`
+// playlist, guide or Xtream server sends the address -- and an Xtream
+// username and password travel IN it, as a query string -- in cleartext to
+// anyone on the path. Not a refusal (PO-5: a large share of real providers
+// are http-only, and the user is choosing their own exposure) but the PO-10
+// treatment, one sentence where the URL is typed. The sentence is the
+// owner's wording; the README's Sources section carries the same fact.
+var WARN_PLAIN_HTTP = "http:// sends the address and any password in it unencrypted; https:// does not"
+
+// The sentence when any URL field of the form (playlist, EPG, Xtream server)
+// VALIDATES as an `http://` URL, else "". Read off the validated URL, so a
+// `HTTP://` spelling counts and a value that does not validate (the error
+// line's business) does not.
+function plainHttpLine(form) {
+  if (!form || typeof form !== "object" || !form.values || typeof form.values !== "object") return ""
+  var fields = form.kind === "xtream" ? ["server"] : ["playlist", "epg"]
+  for (var i = 0; i < fields.length; i++) {
+    var v = validateSourceUrl(form.values[fields[i]], { kind: fields[i] === "epg" ? "epg" : "playlist" })
+    if (v.ok && v.kind === "http" && v.url.indexOf("http://") === 0) return WARN_PLAIN_HTTP
+  }
+  return ""
+}
+
+// What the form's one advice line shows (Guide.qml, the sourceEdit and
+// sourceXtream result line): the `@`-typo warning first -- it is about a
+// password being read as a host, which outranks a disclosure about where
+// the same password travels -- else the plain-http sentence, else "". One
+// line, so the priority is decided here and not in QML.
+function formAdviceLine(form) {
+  var w = formWarningLine(form)
+  return w !== "" ? w : plainHttpLine(form)
+}
+
 // SR12: a "." or ":" before the first "/" reads as a host.
 function looksLikeHost(text) {
   return /[.:]/.test(str(text).split("/")[0])
@@ -653,6 +690,257 @@ function normalizeSourceUrl(text, opts) {
   return v.ok ? v.url : ""
 }
 
+// ---- destinations (D-SINK-40, D-SINK-41, D-SINK-42; the owner, 2026-10-29)
+//
+// Where provider data may send this machine. A source the USER typed may
+// reach any address on its first hop; a destination the PROVIDER chose may
+// not reach a non-global one unless it is the user's own playlist host. The
+// helper enforces that at connect time, against the address it connects to
+// (DestinationPolicy, bin/helper/03-io-playlist.py) -- that is the binding
+// layer. This is the VISIBLE one: the model refuses a guide hint whose
+// LITERAL host is not global before any fetch, so the Sources row can say so
+// (epgHintVerdict). A mirror of the helper's host_class / host_key, run with
+// it over the shared destinations fixture (dev branch; the project's rule: a
+// rule in two languages gets one shared fixture). Pure arithmetic over numbers and
+// 16-bit groups: no BigInt, which Qt's V4 is not relied on for.
+var ADDRESS_CLASSES = ["global", "loopback", "private", "shared", "link-local", "unspecified", "multicast", "reserved"]
+// [first address, prefix length, class], the helper's _ADDRESS_TABLE_V4.
+var ADDRESS_TABLE_V4 = [
+  [0x00000000, 8, "unspecified"], [0x0a000000, 8, "private"], [0x64400000, 10, "shared"],
+  [0x7f000000, 8, "loopback"], [0xa9fe0000, 16, "link-local"], [0xac100000, 12, "private"],
+  [0xc0000000, 24, "reserved"], [0xc0000200, 24, "reserved"], [0xc0586300, 24, "reserved"],
+  [0xc0a80000, 16, "private"], [0xc6120000, 15, "reserved"], [0xc6336400, 24, "reserved"],
+  [0xcb007100, 24, "reserved"], [0xe0000000, 4, "multicast"], [0xf0000000, 4, "reserved"]
+]
+var IPV4_PART_RE = /^(?:0[xX][0-9A-Fa-f]*|[0-9]+)$/
+var IPV6_GROUP_RE = /^[0-9a-f]{1,4}$/
+var IPV4_OCTET_RE = /^(?:0|[1-9][0-9]{0,2})$/
+
+// parse_ipv4_literal: the address a numeric IPv4 host names in any WHATWG /
+// inet_aton spelling (`127.1`, `2130706433`, `0x7f000001`, `0177.0.0.1`,
+// one trailing dot), else -1.
+function parseIpv4Literal(host) {
+  var text = str(host)
+  if (text.length > 1 && text.charAt(text.length - 1) === ".") text = text.substring(0, text.length - 1)
+  var parts = text.split(".")
+  if (parts.length < 1 || parts.length > 4) return -1
+  var numbers = []
+  for (var i = 0; i < parts.length; i++) {
+    var part = parts[i]
+    if (part.length > 32 || !IPV4_PART_RE.test(part)) return -1
+    if (part.substring(0, 2) === "0x" || part.substring(0, 2) === "0X") numbers.push(parseInt(part.substring(2) || "0", 16))
+    else if (part.length > 1 && part.charAt(0) === "0") {
+      if (!/^[0-7]+$/.test(part)) return -1
+      numbers.push(parseInt(part, 8))
+    } else numbers.push(parseInt(part, 10))
+  }
+  var last = numbers.pop()
+  for (var j = 0; j < numbers.length; j++) if (numbers[j] > 255) return -1
+  if (last >= Math.pow(256, 4 - numbers.length)) return -1
+  var value = last
+  for (var k = 0; k < numbers.length; k++) value += numbers[k] * Math.pow(256, 3 - k)
+  return value
+}
+
+// An IPv6 literal (no brackets, `%zone` already dropped) as eight 16-bit
+// groups, else null: `::` at most once, a dotted IPv4 tail as the last two.
+function parseIpv6Groups(text) {
+  var s = str(text)
+  if (s === "" || s.indexOf(":") === -1) return null
+  var v4 = -1
+  var lastColon = s.lastIndexOf(":")
+  var tail = s.substring(lastColon + 1)
+  if (tail.indexOf(".") !== -1) {
+    var octets = tail.split(".")
+    if (octets.length !== 4) return null
+    v4 = 0
+    for (var i = 0; i < 4; i++) {
+      if (!IPV4_OCTET_RE.test(octets[i]) || Number(octets[i]) > 255) return null
+      v4 = v4 * 256 + Number(octets[i])
+    }
+    s = s.substring(0, lastColon + 1) + "0:0"
+  }
+  var halves = s.split("::")
+  if (halves.length > 2) return null
+  function groupsOf(part) {
+    if (part === "") return []
+    var list = part.split(":")
+    var out = []
+    for (var g = 0; g < list.length; g++) {
+      if (!IPV6_GROUP_RE.test(list[g])) return null
+      out.push(parseInt(list[g], 16))
+    }
+    return out
+  }
+  var head = groupsOf(halves[0])
+  var rest = halves.length === 2 ? groupsOf(halves[1]) : []
+  if (head === null || rest === null) return null
+  var total = head.length + rest.length
+  if (halves.length === 1 ? total !== 8 : total > 7) return null
+  var groups = head.slice()
+  for (var z = 0; z < 8 - total; z++) groups.push(0)
+  groups = groups.concat(rest)
+  if (v4 !== -1) { groups[6] = Math.floor(v4 / 65536); groups[7] = v4 % 65536 }
+  return groups
+}
+
+// parse_ip_literal: { v: 4, n } or { v: 6, g }, or null for a name.
+function ipLiteral(host) {
+  var text = str(host).trim().toLowerCase()
+  if (text.charAt(0) === "[" && text.charAt(text.length - 1) === "]") text = text.substring(1, text.length - 1)
+  if (text === "") return null
+  if (text.indexOf(":") !== -1) {
+    var pct = text.indexOf("%")
+    var groups = parseIpv6Groups(pct === -1 ? text : text.substring(0, pct))
+    return groups === null ? null : { v: 6, g: groups }
+  }
+  var n = parseIpv4Literal(text)
+  return n === -1 ? null : { v: 4, n: n }
+}
+
+function ipv4Class(n) {
+  for (var i = 0; i < ADDRESS_TABLE_V4.length; i++) {
+    var row = ADDRESS_TABLE_V4[i]
+    if (n >= row[0] && n < row[0] + Math.pow(2, 32 - row[1])) return row[2]
+  }
+  return "global"
+}
+
+// address_class over the groups, in the helper's order: mapped, NAT64,
+// 6to4, the table, then everything outside 2000::/3 is reserved.
+function ipv6Class(g) {
+  var zero = function (from, to) { for (var i = from; i <= to; i++) if (g[i] !== 0) return false; return true }
+  if (zero(0, 4) && g[5] === 0xffff) return ipv4Class(g[6] * 65536 + g[7])
+  if (g[0] === 0x64 && g[1] === 0xff9b && zero(2, 5)) return ipv4Class(g[6] * 65536 + g[7])
+  if (g[0] === 0x2002) {
+    var inner = ipv4Class(g[1] * 65536 + g[2])
+    return inner !== "global" ? inner : "reserved"
+  }
+  if (zero(0, 7)) return "unspecified"
+  if (zero(0, 6) && g[7] === 1) return "loopback"
+  if (g[0] === 0x64 && g[1] === 0xff9b && g[2] === 1) return "reserved"
+  if (g[0] === 0x100 && zero(1, 3)) return "reserved"
+  if (g[0] === 0x2001 && g[1] < 0x200) return "reserved"
+  if (g[0] === 0x2001 && g[1] === 0xdb8) return "reserved"
+  if (g[0] === 0x3fff && g[1] < 0x1000) return "reserved"
+  if (g[0] === 0x5f00) return "reserved"
+  if ((g[0] & 0xfe00) === 0xfc00) return "private"
+  if ((g[0] & 0xffc0) === 0xfe80) return "link-local"
+  if ((g[0] & 0xffc0) === 0xfec0) return "private"
+  if ((g[0] & 0xff00) === 0xff00) return "multicast"
+  if ((g[0] & 0xe000) !== 0x2000) return "reserved"
+  return "global"
+}
+
+// host_class: a literal's class, `loopback` for localhost and *.localhost,
+// "" for any other name (a lookup's business, which is the helper's).
+function hostClass(host) {
+  var text = str(host).trim().toLowerCase()
+  if (text === "localhost" || text === "localhost." || /\.localhost\.?$/.test(text)) return "loopback"
+  var lit = ipLiteral(text)
+  if (lit === null) return ""
+  return lit.v === 4 ? ipv4Class(lit.n) : ipv6Class(lit.g)
+}
+
+// host_key: what "the same host" compares -- IPv4 dotted, IPv6 exploded
+// (eight four-digit groups), a name case-folded with one trailing dot
+// dropped.
+function hostKey(host) {
+  var text = str(host).trim().toLowerCase()
+  var lit = ipLiteral(text)
+  if (lit !== null) {
+    if (lit.v === 4) return [Math.floor(lit.n / 16777216), Math.floor(lit.n / 65536) % 256, Math.floor(lit.n / 256) % 256, lit.n % 256].join(".")
+    var out = []
+    for (var i = 0; i < 8; i++) out.push(("000" + lit.g[i].toString(16)).slice(-4))
+    return out.join(":")
+  }
+  if (text.charAt(0) === "[" && text.charAt(text.length - 1) === "]") text = text.substring(1, text.length - 1)
+  return text.charAt(text.length - 1) === "." ? text.substring(0, text.length - 1) : text
+}
+
+// D-SINK-57 (owner, 2026-10-29). The port a URL names, or its scheme's
+// default when it names none (http 80 = no port), null when neither is known.
+// Mirror of url_port in the helper; the shared destinations fixture runs both.
+var URL_DEFAULT_PORTS = { http: 80, https: 443, rtmp: 1935, rtmps: 443, rtsp: 554, mms: 80, mmsh: 80 }
+
+function urlPortOf(url) {
+  var m = str(url).match(/^([a-z][a-z0-9+.-]*):\/\/([^\/?#]*)/i)
+  if (!m) return null
+  var authority = m[2]
+  var at = authority.lastIndexOf("@")
+  var hostport = at === -1 ? authority : authority.substring(at + 1)
+  var close = hostport.lastIndexOf("]")
+  var colon = hostport.lastIndexOf(":")
+  if (colon !== -1 && colon > close) {
+    var digits = hostport.substring(colon + 1)
+    if (digits !== "") {
+      if (!/^[0-9]{1,5}$/.test(digits) || Number(digits) > 65535) return null
+      return Number(digits)
+    }
+  }
+  var scheme = m[1].toLowerCase()
+  return Object.prototype.hasOwnProperty.call(URL_DEFAULT_PORTS, scheme) ? URL_DEFAULT_PORTS[scheme] : null
+}
+
+// D-SINK-57: is `host` at `port` the playlist's OWN host? The host keys are
+// equal, and when the home is on LOOPBACK the ports are equal too -- a local
+// relay on 127.0.0.1:34400 is its own host and 127.0.0.1:631 is not; a LAN or
+// public home keeps any port. `home` is { host: hostKey, port, loopback }. A
+// port that is not known matches none. Mirror of own_host_match.
+function ownHostMatch(host, port, home) {
+  var h = home && typeof home === "object" ? home : {}
+  var key = str(h.host)
+  if (key === "" || hostKey(host) !== key) return false
+  if (h.loopback !== true && hostClass(host) !== "loopback") return true
+  return typeof port === "number" && isFinite(port) && port === h.port
+}
+
+// The validated http(s) host of a URL the user typed, "" for a file, a
+// path or anything that does not validate.
+function typedHttpHost(url) {
+  var v = validateSourceUrl(url)
+  return v.ok && v.kind === "http" ? v.host : ""
+}
+
+// D-SINK-40. The environment of a URL-carrying helper spawn: fetchEnvironment
+// (D-SINK-8, the URL) plus WHERE the URL came from, which is what the
+// helper's connect-time policy decides by. One builder, so engineering rule
+// 5's one assignment immediately before every `running = true` (dev branch)
+// stays one:
+//   origin         "user" for a URL the user typed (the playlist fetch, the
+//                  probe, a typed guide URL); anything else is the
+//                  provider's and reads as "playlist" -- the stricter value,
+//                  so a caller that passes nothing fails closed.
+//   playlistUrl    the ACTIVE playlist's URL, for a guide fetch: its host
+//                  (never the URL) goes to OMARCHY_IPTV_PLAYLIST_HOST, so a
+//                  guide on the playlist's own host may stay on it.
+//   playlistClass  channels.json `sourceClass`, the class that playlist's
+//                  first hop connected to; dropped unless it is one of
+//                  ADDRESS_CLASSES.
+// An empty URL is {} whatever else is given: the `--now-only` run contacts
+// nobody and carries nothing.
+var FETCH_ORIGIN_ENV = "OMARCHY_IPTV_ORIGIN"
+var FETCH_HOME_HOST_ENV = "OMARCHY_IPTV_PLAYLIST_HOST"
+var FETCH_HOME_CLASS_ENV = "OMARCHY_IPTV_PLAYLIST_CLASS"
+// D-SINK-57: the playlist URL's port (its scheme's default when it names
+// none), because on loopback the playlist's own host is host AND port.
+var FETCH_HOME_PORT_ENV = "OMARCHY_IPTV_PLAYLIST_PORT"
+
+function fetchEnvironmentFor(url, provenance) {
+  var env = fetchEnvironment(url)
+  if (str(env[FETCH_URL_ENV]) === "") return env
+  var p = provenance && typeof provenance === "object" ? provenance : {}
+  env[FETCH_ORIGIN_ENV] = str(p.origin) === "user" ? "user" : "playlist"
+  var home = typedHttpHost(p.playlistUrl)
+  if (home !== "") {
+    env[FETCH_HOME_HOST_ENV] = home
+    var port = urlPortOf(validateSourceUrl(p.playlistUrl).url)
+    if (port !== null) env[FETCH_HOME_PORT_ENV] = String(port)
+  }
+  if (ADDRESS_CLASSES.indexOf(str(p.playlistClass)) !== -1) env[FETCH_HOME_CLASS_ENV] = str(p.playlistClass)
+  return env
+}
+
 // ---- the guide URL the playlist declares (M4-01 repair 3, D-EPG-2)
 //
 // `#EXTM3U url-tvg="..."` / `x-tvg-url="..."` has reached channels.json as
@@ -691,17 +979,56 @@ var EPG_ORIGIN_USER = "user"
 var EPG_ORIGIN_PLAYLIST = "playlist"
 
 // The channels.json hint, validated and narrowed to http(s), or "".
-function epgHintUrl(meta) {
+// D-SINK-40: and refused, with the reason, when it carries USERINFO -- a
+// provider has no business choosing the credentials this machine sends, and
+// the helper turns userinfo into a pre-emptive `Authorization: Basic` -- or
+// when its LITERAL host is not global (a loopback, private, link-local,
+// CGNAT, unspecified, reserved or multicast address in any spelling, `[::1]`,
+// a localhost name) unless it is the user's playlist host itself
+// (`playlistUrl`; same hostKey, hence the same address). A name that only a
+// lookup can classify passes here and meets the helper's connect-time check.
+//   -> { url, refused: "" | "userinfo" | "local", host, plainHttp }
+// `host` is the hint's display host (hostOf: no userinfo, no port, no path);
+// `plainHttp` is an adopted `http://` hint under an `https://` playlist, the
+// downgrade the Sources row discloses (D-SINK-14's sentence, PO-5: disclosed,
+// not refused).
+var EPG_HINT_REFUSED_USERINFO = "userinfo"
+var EPG_HINT_REFUSED_LOCAL = "local"
+var EPG_HINT_HOST_MAX = 253
+
+function epgHintVerdict(meta, playlistUrl) {
   var m = meta && typeof meta === "object" ? meta : {}
+  var none = { url: "", refused: "", host: "", plainHttp: false }
   var raw = str(m.epgUrlHint)
-  if (raw === "") return ""
+  if (raw === "") return none
   var v = validateSourceUrl(raw, { kind: "epg" })
   // `kind: "epg"` passes an EMPTY value as ok with kind "", so `v.ok` alone
   // would accept nonsense that sanitized away to nothing; and `kind !==
   // "http"` is decision 2 above, not a formality -- that branch is the one
   // that refuses `/etc/passwd` and `file:///...` from a provider.
-  if (!v.ok || v.kind !== "http" || v.url === "") return ""
-  return v.url
+  if (!v.ok || v.kind !== "http" || v.url === "") return none
+  // Provider text on the Sources row: cut at a DNS name's longest.
+  var shown = hostOf(v.url)
+  if (shown.length > EPG_HINT_HOST_MAX) shown = shown.substring(0, EPG_HINT_HOST_MAX) + ELLIPSIS
+  var body = v.url.substring(v.url.indexOf("://") + 3)
+  var cut = body.search(/[\/?#]/)
+  if ((cut === -1 ? body : body.substring(0, cut)).indexOf("@") !== -1)
+    return { url: "", refused: EPG_HINT_REFUSED_USERINFO, host: shown, plainHttp: false }
+  var kind = hostClass(v.host)
+  if (kind !== "" && kind !== "global") {
+    // D-SINK-57: the playlist's own host, and on loopback its own PORT.
+    var home = typedHttpHost(playlistUrl)
+    var own = { host: home === "" ? "" : hostKey(home), port: urlPortOf(validateSourceUrl(playlistUrl).url),
+                loopback: hostClass(home) === "loopback" }
+    if (!ownHostMatch(v.host, urlPortOf(v.url), own))
+      return { url: "", refused: EPG_HINT_REFUSED_LOCAL, host: shown, plainHttp: false }
+  }
+  var plain = v.url.indexOf("http://") === 0 && str(validateSourceUrl(playlistUrl).url).indexOf("https://") === 0
+  return { url: v.url, refused: "", host: shown, plainHttp: plain }
+}
+
+function epgHintUrl(meta, playlistUrl) {
+  return epgHintVerdict(meta, playlistUrl).url
 }
 
 // Which guide URL is in force, and where it came from.
@@ -711,13 +1038,29 @@ function epgHintUrl(meta) {
 // user can see and fix. Substituting the provider's hint for a URL the user
 // mistyped would produce an error message about a URL they never entered, or
 // worse, silently fetch somewhere else and look like it worked.
+// D-SINK-40: `playlistUrl` is the active playlist's, which a hint on that
+// same host may share (epgHintVerdict); without it no non-global literal
+// hint is adopted.
 function resolveEpgUrl(opts) {
   var o = opts || {}
   var user = str(o.userUrl)
   if (user !== "") return { url: user, origin: EPG_ORIGIN_USER, host: hostOf(user), fromPlaylist: false }
-  var hint = epgHintUrl({ epgUrlHint: o.hint })
+  var hint = epgHintUrl({ epgUrlHint: o.hint }, o.playlistUrl)
   if (hint === "") return { url: "", origin: EPG_ORIGIN_NONE, host: "", fromPlaylist: false }
   return { url: hint, origin: EPG_ORIGIN_PLAYLIST, host: hostOf(hint), fromPlaylist: true }
+}
+
+// D-SINK-40. What the active Sources row says about the playlist's guide
+// hint beyond "EPG from playlist": that one was REFUSED (and why, naming its
+// host), or that the adopted one travels over plain http under an https
+// playlist. Nothing when the user set their own guide URL -- theirs wins and
+// the hint is not in play -- or when there is no hint.
+//   -> { refused: "" | "userinfo" | "local", host, plainHttp }
+function epgHintRowState(opts) {
+  var o = opts || {}
+  if (str(o.userUrl) !== "") return { refused: "", host: "", plainHttp: false }
+  var v = epgHintVerdict({ epgUrlHint: o.hint }, o.playlistUrl)
+  return { refused: v.refused, host: v.refused !== "" || v.plainHttp ? v.host : "", plainHttp: v.plainHttp }
 }
 
 // The one line of copy that makes the provenance visible (M4-01 repair 3:
@@ -759,15 +1102,43 @@ function findSourceByUrl(sources, url) {
   return null
 }
 
-// The record with this url keeps its key; otherwise fnv1a32(url), suffixed
+// The record with this url keeps its key; otherwise a NEW key, suffixed
 // `-2`, `-3`, ... while another record already uses it (harmless collision).
-function allocateSourceKey(sources, url) {
+//
+// D-SINK-48 (lane-p2a, 2026-10-29): the new key is RANDOM, no longer
+// sourceKey(url). The key names the source's cache folder, rides helper
+// spawns and sits in shell.json's `sourceKey` mirror, and a 32-bit FNV hash of
+// a credentialed URL is a check on a guessed password for anyone who reads it
+// (SR40). Nothing needs it to be a function of the URL: every lookup goes by
+// the key the record stores, and what dedupes a re-added URL is
+// findSourceByUrl above -- the normalized URL itself, compared -- exactly as
+// before. Existing keys, folders and records are untouched; sourceKey stays
+// the derivation they were made with. `preferred` is a key the caller already
+// handed out for this record (the add or edit form's probe folder), kept when
+// it is still free so the probe's cache becomes the source's; `draw` is the
+// random source, Math.random unless a test hands one in (QV4's Math.random
+// draws from the system generator; a key needs to be unrelated to the URL,
+// not secret). Mirror of allocate_source_key in the helper, pinned to it by
+// the shared source-keys fixture (dev branch).
+function allocateSourceKey(sources, url, preferred, draw) {
   var existing = findSourceByUrl(sources, url)
   if (existing) return str(existing.key)
-  var base = sourceKey(url)
+  var want = str(preferred)
+  if (want !== "" && isSourceKey(want) && findSource(sources, want) === null) return want
+  var base = randomSourceKey(draw)
   var key = base
   for (var n = 2; findSource(sources, key) !== null; n++) key = base + "-" + n
   return key
+}
+
+// Eight lowercase hex digits from one draw in [0, 1).
+function randomSourceKey(draw) {
+  var d = typeof draw === "function" ? draw : Math.random
+  var n = Math.floor(Number(d()) * 4294967296)
+  if (!isFinite(n) || n < 0) n = 0
+  var hex = (n % 4294967296).toString(16)
+  while (hex.length < 8) hex = "0" + hex
+  return hex
 }
 
 // `<cacheDir>/sources/<key>`; "" when either input is empty or the key is
@@ -814,13 +1185,40 @@ function sourceCacheDir(cacheDir, key) {
 // it put an email username's domain on the Sources row of an Xtream
 // `/playlist/<email>/<pass>/m3u_plus` link. The form's warning
 // (sourceUrlWarning) is where the typo shape is told.
+//
+// D-SINK-30 (2026-10-24). RFC 3986's reg-name admits `;`, `=` and `&`, so
+// `http://h.test;sid=SECRET/x` validates with host `h.test;sid=secret` and
+// this printed it so -- on the Sources row and in its default label -- while
+// the free-text redactor (runHostParts) had cut the host at `:`, `;`, `=`
+// and `&` since R32a'. No real host carries those three, so the printed
+// host[:port] ends at the first of them; the `:` port is kept, as the row
+// has always shown it. Validation is NOT changed: refusing them in a host
+// would drop a stored link on upgrade (D-SINK-27). The helper's
+// host_port_of is the mirror and the shared source-labels fixture pins both.
+// D-SINK-30 (2026-10-24). Where a PRINTED host ends: at the first `;`, `=`
+// or `&` after the userinfo cut. RFC 3986's reg-name admits all three, so
+// `http://h.test;sid=SECRET/x` VALIDATES with host `h.test;sid=secret`, and a
+// reader that stops at `:` alone prints the parameter wherever it prints the
+// host. One function, shared by every reader that derives a printable host
+// from a URL's authority -- hostPortOf (the Sources row and its default
+// label) and logoHost in model/logos.mjs (the consent dialog) -- so the rule
+// has one copy per mirror; the helper's is `cut_host_params`. The `:` port
+// is NOT cut here: hostPortOf keeps it and logoHost drops it, each in its
+// own line, and a bracketed literal is unaffected because none of the three
+// can appear inside the brackets. Validation is unchanged (D-SINK-27).
+function cutHostParams(hostport) {
+  var s = str(hostport)
+  var end = s.search(/[;=&]/)
+  return end === -1 ? s : s.substring(0, end)
+}
+
 function hostPortOf(url) {
   var m = str(url).match(/^[a-z][a-z0-9+.-]*:\/\/([^\/?#]*)/i)
   if (!m) return ""
   var authority = m[1]
   var at = authority.lastIndexOf("@")
   var hostport = at === -1 ? authority : authority.substring(at + 1)
-  return hostport.toLowerCase()
+  return cutHostParams(hostport).toLowerCase()
 }
 
 // Default label: the host (lowercase, leading `www.` dropped, `:port` kept
@@ -1091,13 +1489,17 @@ function formatAgo(nowSec, atSec) {
 // claims to. A source with its own `epgUrl` is never marked hinted -- the
 // user's value wins in resolveEpgUrl and it must win here too, or the row
 // would tell the user their own URL came from the provider.
-function sourceView(source, activeKey, nowSec, errorReason, epgFromPlaylist) {
+// `epgHint` (D-SINK-40) is the active source's Model.epgHintRowState: a
+// refused hint, or an adopted one over plain http, on the same terms.
+function sourceView(source, activeKey, nowSec, errorReason, epgFromPlaylist, epgHint) {
   var s = source || {}
   var key = str(s.key)
   var kind = str(s.kind) === "file" ? "file" : (str(s.origin) === "xtream" ? "xtream" : "url")
   var fetched = Number(s.fetchedAt) > 0
   var ownEpg = str(s.epgUrl) !== ""
   var hinted = !ownEpg && epgFromPlaylist === true && key !== "" && key === str(activeKey)
+  var hintState = !ownEpg && key !== "" && key === str(activeKey) && epgHint && typeof epgHint === "object" ? epgHint : {}
+  var refusedHint = !hinted && (hintState.refused === EPG_HINT_REFUSED_LOCAL || hintState.refused === EPG_HINT_REFUSED_USERINFO)
   return {
     id: key,
     label: str(s.label),
@@ -1112,20 +1514,23 @@ function sourceView(source, activeKey, nowSec, errorReason, epgFromPlaylist) {
     lastUsedText: formatLastUsed(s.lastUsed, nowSec),
     active: key !== "" && key === str(activeKey),
     origin: str(s.origin),
-    errorReason: str(errorReason)
+    errorReason: str(errorReason),
+    epgHintRefused: refusedHint ? str(hintState.refused) : "",
+    epgHintHost: refusedHint || (hinted && hintState.plainHttp === true) ? str(hintState.host) : "",
+    epgHintPlainHttp: hinted && hintState.plainHttp === true
   }
 }
 
 // Every record as a view, active first, then last used (newest first),
 // then added (newest first). `errors` is the service's { key: reason } map.
-function sourceViews(state, activeKey, nowSec, errors, epgFromPlaylist) {
+function sourceViews(state, activeKey, nowSec, errors, epgFromPlaylist, epgHint) {
   var st = state || emptyState()
   var errs = errors && typeof errors === "object" ? errors : {}
   var list = asList(st.sources)
   var out = []
   for (var i = 0; i < list.length; i++) {
     if (!list[i]) continue
-    var view = sourceView(list[i], activeKey, nowSec, errs[str(list[i].key)], epgFromPlaylist)
+    var view = sourceView(list[i], activeKey, nowSec, errs[str(list[i].key)], epgFromPlaylist, epgHint)
     view.addedAt = Math.floor(Number(list[i].addedAt) || 0)
     out.push(view)
   }
@@ -1145,13 +1550,25 @@ function sourceViews(state, activeKey, nowSec, errors, epgFromPlaylist) {
 }
 
 // Architecture name.
-function sourceRows(state, activeKey, nowSec, errors, epgFromPlaylist) {
-  return sourceViews(state, activeKey, nowSec, errors, epgFromPlaylist)
+function sourceRows(state, activeKey, nowSec, errors, epgFromPlaylist, epgHint) {
+  return sourceViews(state, activeKey, nowSec, errors, epgFromPlaylist, epgHint)
 }
 
 // The Sources row and accessible-name word for a hinted guide URL. One
 // literal, two sinks, so the screen and the screen reader cannot drift.
 var EPG_HINT_ROW_TEXT = "EPG from playlist"
+// D-SINK-40 (UX-SOURCES 5.2, 2026-10-29): the same slot when the hint is
+// adopted over plain http under an https playlist, and when it was refused.
+// Each names the hint's HOST and nothing else of it.
+var EPG_HINT_PLAIN_ROW_TEXT = "EPG from playlist over plain http"
+
+function epgHintRowText(view) {
+  var v = view || {}
+  if (v.epgHintRefused === EPG_HINT_REFUSED_LOCAL) return "EPG from playlist not used: " + str(v.epgHintHost) + " is a local address"
+  if (v.epgHintRefused === EPG_HINT_REFUSED_USERINFO) return "EPG from playlist not used: its address for " + str(v.epgHintHost) + " carries a password"
+  if (v.hasEpg) return v.epgFromPlaylist === true ? (v.epgHintPlainHttp === true ? EPG_HINT_PLAIN_ROW_TEXT : EPG_HINT_ROW_TEXT) : "EPG"
+  return ""
+}
 
 // Row detail (UX-SOURCES 5.2): `active` (active source only), `used ...` on
 // narrow cards, host, `Xtream`, counts or `not loaded yet`, `EPG`. Rows
@@ -1169,7 +1586,8 @@ function sourceDetail(view, narrow) {
   // the playlist declared. The row is where the user finds out, and the two
   // must never read the same -- an adopted hint that looked like their own
   // setting is the failure this wording exists to prevent.
-  if (v.hasEpg) parts.push(v.epgFromPlaylist === true ? EPG_HINT_ROW_TEXT : "EPG")
+  var epg = epgHintRowText(v)
+  if (epg !== "") parts.push(epg)
   return joinParts(parts)
 }
 
@@ -1179,7 +1597,8 @@ function sourceAccessibleName(view) {
   var out = str(v.label) + ", " + str(v.host)
   out += ", " + (Number(v.channelCount) >= 0 ? countsLine(v.channelCount, v.groupCount) : "not loaded yet")
   if (v.active) out += ", active"
-  if (v.hasEpg) out += ", " + (v.epgFromPlaylist === true ? EPG_HINT_ROW_TEXT : "EPG")
+  var epg = epgHintRowText(v)
+  if (epg !== "") out += ", " + epg
   var used = str(v.lastUsedText) || formatLastUsed(v.lastUsedAt)
   out += ", " + (used === "never used" ? used : "last " + used)
   return out
@@ -1237,12 +1656,49 @@ function fetchingLine(host, kind) {
 // mode, a record gone -- which is about this machine, not the host, so the
 // line does not say "from <host>": round 1's review read "Sources is full
 // (50) \u00b7 remove one first from 127.0.0.1". A failure the fetch reported
-// (no code) keeps the host, as UX-SOURCES 5.5 has it.
-var PROBE_LOCAL_REFUSALS = ["too_many", "state_unreadable", "unknown_source"]
-function probeFailureLine(reason, host, kind, code) {
+// keeps the host, as UX-SOURCES 5.5 has it.
+//
+// D-SRC-71 (2026-10-27, the owner's decision): R28e's rule extended to a
+// failure of the plugin's own helper, which is just as local -- it could not
+// write the cache (`cache_unwritable`), it failed unexpectedly (`internal`),
+// the service stopped it at its time limit (`helper_timeout`) -- and, by the
+// same reading (rule 15), it could not answer at all (Model's
+// HELPER_CANNOT_TELL: `no_output`, `helper_damaged`, `not_implemented`). The
+// recheck of D-SRC-69 read "Could not write the cache from 127.0.0.1".
+// Since D-SRC-71 the probe's failure carries its code (Service.
+// handleProbeExit), and the refresh empty state composes through the same
+// function (failureFromHost, Guide.qml), so every "<reason> from <host>"
+// reads one list.
+//
+// D-SRC-73 (2026-10-27): `folder_unusable` joins it. R25c's refusal is about
+// a folder on this machine (the source's cache folder is a link to nothing,
+// or not a folder), never the provider's. D-PLY-30's `runtime_unwritable`
+// (the player's runtime folder or its lock) joins it by the same reading:
+// no surface composes a player refusal with a host today, and the list is
+// the one place that says which codes are this machine's.
+//
+// D-PLY-31 (2026-10-28): `socket_path_blocked` (something that is not a
+// socket at the player's socket path) and `spawn_failed` (mpv could not be
+// started: its exec, or the spawn's own pipes or fork, refused) join it by
+// D-PLY-30's reading -- this machine's, and composed with no host anywhere.
+// The guide's own refusals, `bad_xml` and `empty_epg` (D-EPG-13), do NOT:
+// they are about the provider's guide.
+var PROBE_LOCAL_REFUSALS = ["too_many", "state_unreadable", "unknown_source", "cache_unwritable", "internal",
+                            "helper_timeout", "no_output", "helper_damaged", "not_implemented", "folder_unusable",
+                            "runtime_unwritable", "socket_path_blocked", "spawn_failed"]
+
+// "<reason> from <host>", or the reason alone when the code is a local
+// failure (PROBE_LOCAL_REFUSALS) or there is no host to name. The reason is
+// redacted again and "Unknown error" when empty.
+function failureFromHost(reason, host, code) {
   var text = redactUrls(str(reason)) || "Unknown error"
-  if (kind === "file" || str(host) === "" || PROBE_LOCAL_REFUSALS.indexOf(str(code)) !== -1) return text
+  if (str(host) === "" || PROBE_LOCAL_REFUSALS.indexOf(str(code)) !== -1) return text
   return text + " from " + str(host)
+}
+
+function probeFailureLine(reason, host, kind, code) {
+  if (kind === "file") return redactUrls(str(reason)) || "Unknown error"
+  return failureFromHost(reason, host, code)
 }
 
 // Footer transients (UX-SOURCES 5.3). `added` names the new source by its
@@ -1284,6 +1740,66 @@ var CLIPBOARD_KILL_GRACE_MS = 1000
 var CLIPBOARD_WATCHDOG_MS = CLIPBOARD_TIMEOUT_MS + 2 * CLIPBOARD_KILL_GRACE_MS + 2000
 var CLIPBOARD_MAX_CHARS = MAX_SOURCE_URL * 4
 var CLIPBOARD_MAX_BYTES = CLIPBOARD_MAX_CHARS * 4
+// ---- the guide's logo slots: a file Qt cannot decode (D-LOGO-19) ----
+//
+// A cached logo that passes every helper header gate (D-LOGO-11, -13, -14)
+// but fails Qt's decoder was pointed at again by every delegate realisation
+// -- each list scroll, each wall page, each guide open -- and Qt printed its
+// decode warning into the shell's journal each time. The helper cannot
+// decode (stdlib only), so the only place that KNOWS a file is undecodable
+// is the shell, and the shell threw that knowledge away. These three live
+// in this part rather than beside logoSlot (model/logos.mjs) because that
+// part is another lane's this round; moving them is a relink.
+//
+// The shape is logoSlot's own rule inverted: the slot draws only a name the
+// helper announced FOR THIS DIRECTORY (`have`, a directory-tagged set), so
+// the guide keeps the PATHS that failed, for the session, and hands the
+// slots `have` LESS those names -- the path carries its directory, so a
+// name broken in source A's directory is not hidden in source B's, and
+// nothing needs clearing on a source switch. Residual, stated: a transient
+// read error (the fetch's own atomic rename is not one; a disk hiccup is)
+// marks a good file broken until the shell restarts.
+
+// The path of a QML Image `source` that names a local file, "" for
+// anything else (an empty source, a scheme that is not file:).
+function logoFailedPath(source) {
+  var s = str(source)
+  if (s.indexOf("file://") !== 0) return ""
+  var path = s.substring(7)
+  return path.charAt(0) === "/" ? path : ""
+}
+
+// A COPY of the broken set with `path` added; never mutates, because the
+// guide binds through the property and a mutation in place is invisible to
+// the bindings. An empty path is not recorded.
+function logoBrokenMark(broken, path) {
+  var out = {}
+  if (broken && typeof broken === "object") {
+    for (var k in broken) {
+      if (broken[k] === true) out[k] = true
+    }
+  }
+  var p = str(path)
+  if (p !== "") out[p] = true
+  return out
+}
+
+// `have` less every name whose file, in the set's own directory, is in
+// `broken`. Anything that is not a tagged set comes back as it is (logoSlot
+// reads it as nothing announced); a set with no broken name in its directory
+// comes back as a copy with the same names.
+function logoHaveLess(have, broken) {
+  if (!logoHaveIsSet(have)) return have
+  var out = { dir: have.dir, names: {} }
+  var b = broken && typeof broken === "object" ? broken : {}
+  var base = have.dir.replace(/\/+$/, "") + "/"
+  for (var name in have.names) {
+    if (have.names[name] !== true) continue
+    if (b[base + name] === true) continue
+    out.names[name] = true
+  }
+  return out
+}
 export {
   CACHE_LAYOUT, MAX_SOURCES, MAX_SOURCE_URL, MAX_LABEL, MAX_XTREAM_SERVER,
   MAX_XTREAM_FIELD, SOURCES_DIR, MASK, MASK_CLEAR_PARAMS, LIMITS, PAUSE_KEY,
@@ -1296,18 +1812,27 @@ export {
   PERSIST_FAILURE_REASONS, persistFailureMessage, refusalMessage,
   ZERO_WIDTH_RE, IPV6_LITERAL_RE, isIpv6Literal, cutQueryAndFragment,
   ENCODE_SENTENCE, WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts,
-  urlHostWithheld, sourceUrlWarning, formWarningLine, looksLikeHost,
-  validateSourceUrl, normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
-  EPG_ORIGIN_PLAYLIST, epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE,
+  urlHostWithheld, sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP,
+  plainHttpLine, formAdviceLine, looksLikeHost, validateSourceUrl,
+  normalizeSourceUrl, ADDRESS_CLASSES, ADDRESS_TABLE_V4, IPV4_PART_RE,
+  IPV6_GROUP_RE, IPV4_OCTET_RE, parseIpv4Literal, parseIpv6Groups, ipLiteral,
+  ipv4Class, ipv6Class, hostClass, hostKey, URL_DEFAULT_PORTS, urlPortOf,
+  ownHostMatch, typedHttpHost, FETCH_ORIGIN_ENV, FETCH_HOME_HOST_ENV,
+  FETCH_HOME_CLASS_ENV, FETCH_HOME_PORT_ENV, fetchEnvironmentFor,
+  EPG_ORIGIN_NONE, EPG_ORIGIN_USER, EPG_ORIGIN_PLAYLIST,
+  EPG_HINT_REFUSED_USERINFO, EPG_HINT_REFUSED_LOCAL, EPG_HINT_HOST_MAX,
+  epgHintVerdict, epgHintUrl, resolveEpgUrl, epgHintRowState, EPG_HINT_NOTICE,
   epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
-  findSourceByUrl, allocateSourceKey, sourceCacheDir, hostPortOf, deriveLabel,
-  labelKey, labelTaken, uniqueLabel, defaultSourceLabel, validateLabel,
-  maskQuery, maskUrl, encodeQueryValue, xtreamUrls, validateXtream,
-  pluralGroups, countsLine, sameDay, formatLastUsed, formatAgo, sourceView,
-  sourceViews, sourceRows, EPG_HINT_ROW_TEXT, sourceDetail,
+  findSourceByUrl, allocateSourceKey, randomSourceKey, sourceCacheDir,
+  cutHostParams, hostPortOf, deriveLabel, labelKey, labelTaken, uniqueLabel,
+  defaultSourceLabel, validateLabel, maskQuery, maskUrl, encodeQueryValue,
+  xtreamUrls, validateXtream, pluralGroups, countsLine, sameDay,
+  formatLastUsed, formatAgo, sourceView, sourceViews, sourceRows,
+  EPG_HINT_ROW_TEXT, EPG_HINT_PLAIN_ROW_TEXT, epgHintRowText, sourceDetail,
   sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
   sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
-  fetchingLine, PROBE_LOCAL_REFUSALS, probeFailureLine, sourceTransient,
-  CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS,
-  CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES
+  fetchingLine, PROBE_LOCAL_REFUSALS, failureFromHost, probeFailureLine,
+  sourceTransient, CLIPBOARD_TIMEOUT_MS, CLIPBOARD_KILL_GRACE_MS,
+  CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS, CLIPBOARD_MAX_BYTES,
+  logoFailedPath, logoBrokenMark, logoHaveLess
 }

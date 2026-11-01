@@ -263,11 +263,20 @@ def read_clipboard(argv: list[str], max_bytes: int, timeout: float, grace: float
     """
     import subprocess
     try:
+        # D-SINK-39, rule 15's sibling of the player: what wl-paste holds is
+        # the user's clipboard, and the form's paste path exists to carry a
+        # provider URL through it, so a crash of it would hand that offer to
+        # systemd-coredump. preexec_fn runs in the child between fork and
+        # exec, the same place the player gets it; this process is
+        # single-threaded, which is the condition Popen puts on it.
         child = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE,
-                                 stderr=subprocess.DEVNULL, close_fds=True)
+                                 stderr=subprocess.DEVNULL, close_fds=True,
+                                 preexec_fn=disable_core_dumps)
     except FileNotFoundError:
         return {"ok": False, "code": "no_wl_paste"}
-    except OSError:
+    except (OSError, subprocess.SubprocessError):
+        # SubprocessError is what Popen raises when preexec_fn itself
+        # failed: a child that cannot be kept from dumping is not started.
         return {"ok": False, "code": "spawn_failed"}
     deadline = time.monotonic() + timeout
     fd = child.stdout.fileno()
@@ -480,6 +489,7 @@ def build_parser() -> argparse.ArgumentParser:
     actions = state.add_subparsers(dest="action", required=True)
     actions.add_parser("show", parents=[common], help="print the current state")
     actions.add_parser("init", parents=[common], help="create state.json with mode 0600 when missing (the service runs this before its first write)")
+    actions.add_parser("mode", parents=[common], help="make state.json 0600 and its folder 0700 when they are not; creates and reads nothing (the service runs this after each save lands)")
     favorite = actions.add_parser("favorite", parents=[common], help="add or remove a favorite")
     favorite.add_argument("op", choices=["add", "remove"])
     favorite.add_argument("id", help="channel id from channels.json")
@@ -569,9 +579,51 @@ def bounded_text(text: str, limit: int, keep_tail: bool = False) -> str:
     return "%s\n%s\n%s" % (text[:half], hidden, text[-half:])
 
 
+def helper_arguments(argv: list[str], environ: Any) -> list[str]:
+    """The argv this run parses: `argv` itself, or, when the shell put
+    ARGS_FLAG in it, `argv` without the flag followed by the private list it
+    handed over in ARGS_ENV (D-SINK-47, D-SINK-48; ARGS_ENV says why).
+
+    ARGS_ENV is taken OUT of `environ` on every run, flag or not: os.environ's
+    pop unsets it in the C environment, so the one child this helper starts
+    with its environment -- the detached player, exec'd by spawn_detached --
+    and wl-paste never inherit it. (The kernel's copy at exec, the one
+    /proc/<pid>/environ reads, is untouched; the shield is what closes that.)
+
+    A flag with no list, a list that is not JSON, not a list of strings, or
+    longer than the kernel would have passed, is `bad_arguments`: the run
+    stops before any verb runs rather than fall back to defaults -- a
+    `failed mark` that lost its --cache-dir would write the default cache.
+    The message never echoes the value."""
+    raw = environ.pop(ARGS_ENV, None)
+    if ARGS_FLAG not in argv:
+        return list(argv)
+    if argv.count(ARGS_FLAG) != 1:
+        raise HelperError("bad_arguments", "%s appears more than once" % ARGS_FLAG)
+    if raw is None:
+        raise HelperError("bad_arguments", "%s was given and $%s is not set" % (ARGS_FLAG, ARGS_ENV))
+    if len(raw) > ARGS_ENV_MAX:
+        raise HelperError("bad_arguments", "$%s is longer than an environment string can be" % ARGS_ENV)
+    try:
+        items = json.loads(raw)
+    except ValueError:
+        items = None
+    if not isinstance(items, list) or not all(isinstance(item, str) and "\0" not in item for item in items):
+        raise HelperError("bad_arguments", "$%s is not a JSON list of strings" % ARGS_ENV)
+    return [item for item in argv if item != ARGS_FLAG] + items
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
-    args = parser.parse_args(argv)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    try:
+        raw = helper_arguments(raw, os.environ)
+    except HelperError as error:
+        verb = next((item for item in raw if not item.startswith("-")), "helper")
+        log("%s: %s" % (verb, error.message))
+        emit(error_payload(verb, error))
+        return EXIT_USAGE
+    args = parser.parse_args(raw)
     try:
         return int(args.func(args))
     except KeyboardInterrupt:

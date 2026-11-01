@@ -43,10 +43,14 @@ var STATE_VERSION = 2
 //
 // `omarchy plugin update` fetches, fast-forwards and calls
 // `omarchy-shell shell rescanPlugins`, which is a hot reload rather than a
-// restart. This plugin sets `keepLoaded: true` so its overlay survives a
-// reload -- and an already-mounted overlay keeps the component it was built
-// from. So the files on disk update and the running interface does not, with
-// nothing to tell the user.
+// restart. This plugin sets `keepLoaded: true`, and what that keeps across a
+// reload is the SERVICE: measured on the 0.13.5-to-0.13.6 update
+// (2026-10-12, D-REL-6), the host's `rescanPlugins` rebuilt the overlay and
+// the bar from the CACHED old components (its `Qt.clearComponentCache` is
+// guarded on `typeof ... === "function"`, false on Quickshell 0.3.1), so a
+// stale build shows until a restart. An earlier version of this comment said
+// the overlay survives a reload; only the service does. So the files on disk
+// update and the running interface does not, with nothing to tell the user.
 //
 // That is not a hypothetical: the 0.7.3 update landed at 14:58 inside a boot
 // that had started two days earlier, and the shell rendered the pre-update
@@ -59,7 +63,7 @@ var STATE_VERSION = 2
 // travels with the directory. When they disagree, the running build is stale.
 // The release gate proves the two agree when a version is cut (dev branch), so
 // a disagreement at RUNTIME can only mean a reload that did not re-instantiate.
-var PLUGIN_VERSION = "0.15.0"
+var PLUGIN_VERSION = "0.16.0"
 
 // Both arguments are strings; anything unparseable answers false, because a
 // notice nobody can act on is worse than no notice. Never throws: this runs in
@@ -274,13 +278,131 @@ var MPV_RESERVED = {
   // enumerated" was too strong a sentence. mpvOptionBase strips the list
   // suffixes, so this single entry covers all six spellings.
   //
-  // `--demuxer-lavf-o` is NOT reserved: measured on the same server, it does
-  // NOT bypass verification (exit 2, refused), because it configures the
-  // demuxer rather than the protocol. Recorded as measured rather than
-  // reserved on suspicion.
+  // `--demuxer-lavf-o` is NOT reserved, but no longer because it "does not
+  // bypass": that was measured on a DIRECT stream, and for HLS and DASH it
+  // does (D-SINK-43, 2026-10-29) -- libavformat reopens those with the
+  // demuxer's options and hands them to every segment open, so
+  // `--demuxer-lavf-o=tls_verify=0` played the attacker's segment with both
+  // tls-verify tokens in place. It stays the user's for its real workarounds
+  // (live_start_index, http_persistent); its TLS keys are refused by
+  // splitMpvArgs (MPV_DEMUXER_TLS_WORDS), pinned by MPV_PIN_BLOCK and read
+  // back over IPC before every load.
   "--stream-lavf-o": true,
-  "--tls-verify": true
+  "--tls-verify": true,
+  // D-SINK-43..46 (owner, 2026-10-29: pin + classify). From here the object is
+  // the `reserved` and `pinned` classes of the mpv-options.json fixture (dev
+  // branch), which classifies EVERY option of the installed mpv and is
+  // what both mirrors are pinned to; the mpv option guard (dev branch) turns the
+  // gate red on an option nobody classified. Each reason is in the fixture.
+  //
+  // PINNED as well as reserved: MPV_PIN_BLOCK re-asserts each after the
+  // user's tokens; refusing the token is the honest half, as for --tls-verify.
+  "--load-auto-profiles": true,
+  "--load-select": true,
+  "--load-unsafe-playlists": true,
+  "--save-watch-history": true,
+  "--input-commands": true,
+  "--reset-on-next-file": true,
+  "--osd-playlist-entry": true,
+  // `pseudo-gui` makes mpv apply the user's [pseudo-gui] profile AFTER the
+  // command line, with nothing preserved, so it undid every pin (recheck,
+  // 2026-10-29: a plain mpv.conf line was enough). D-SINK-44.
+  "--player-operation-mode": true,
+  "--demuxer-lavf-propagate-opts": true,
+  // mpv's own alias for watch-later-dir; base-name matching cannot see it.
+  "--watch-later-directory": true,
+  // Durable writes of the stream or of the URL (the --stream-record class).
+  "--stream-dump": true,
+  "--o": true,
+  "--watch-history-path": true,
+  "--ao-pcm-file": true,
+  "--vo-image-outdir": true,
+  // Property-expanding text (siblings of --osd-msg1..3 and --term-status-msg).
+  "--osd-playing-msg": true,
+  "--osd-status-msg": true,
+  "--term-playing-msg": true,
+  "--term-title": true,
+  // A file of commands: a binding can `run` a program or draw ${path}, and mpv
+  // fetches it from a URL at startup (measured).
+  "--input-conf": true,
+  // Entries loaded before the shell, user-origin, so every protocol passes.
+  "--playlist": true,
+  // D-SINK-51: each opens a second address the token names and sends it the
+  // channel's PROVIDER HEADERS (measured); the last four are the CLI aliases.
+  "--sub-files": true,
+  "--audio-files": true,
+  "--external-files": true,
+  "--cover-art-files": true,
+  "--chapters-file": true,
+  "--sub-file": true,
+  "--audio-file": true,
+  "--external-file": true,
+  "--cover-art-file": true,
+  // D-PLY-46 (lead, 2026-10-29): PINNED off. mpv's default `auto` loads a URL
+  // dropped on the player window as a new entry, which no gate saw.
+  "--drag-and-drop": true,
+  // D-SINK-63 (lane-p1c, 2026-10-29): PINNED off. With it on, mpv opens the
+  // next entry while the playing file's per-file options are in force, so an
+  // entry the helper did not load was sent the channel's provider headers.
+  "--prefetch-playlist": true,
+  // D-SINK-61 (owner, 2026-10-29: turn the console off): PINNED off. The
+  // console draws the log commands.lua queues for it, and mpv logs a failed
+  // open, or an HLS key that would not open, with its whole URL (measured).
+  // `--load-osd-console` is mpv's alias of it, the same option.
+  "--load-console": true,
+  "--load-osd-console": true,
+  // D-SINK-67 (owner, 2026-10-29: turn stats off): PINNED off. The stats
+  // overlay's first and file pages draw `${filename}`, which is the whole
+  // URL, userinfo and path credentials included, for a URL whose last path
+  // segment is empty, and the userinfo for one with no path (measured).
+  "--load-stats-overlay": true
 }
+
+// D-SINK-43 (and its verifyhost sibling): the words a `--demuxer-lavf-o*`
+// token may not contain. For HLS and DASH a key there configures the TLS
+// PROTOCOL of every segment open: `tls_verify=0` played the attacker's segment
+// with both --tls-verify=yes tokens in place, and `verifyhost=<the attacker's
+// own name>` played it with a certificate valid for that name, which the
+// trailing tls_verify=1 pin cannot reach. A substring test over the raw token,
+// not a parse of mpv's key/value syntax: FFmpeg matches option names exactly,
+// so every spelling of a key (quoted, %n%-escaped, -append'ed) still carries
+// the word. The binding layer is the helper's read-back of the parsed map
+// before every load. Mirrored by MPV_DEMUXER_TLS_WORDS in the helper.
+// D-SINK-55 (2026-10-29): and `protocol_whitelist` / `protocol_blacklist`,
+// because the pin block now gives the demuxer a protocol whitelist
+// (MPV_PROTOCOL_WHITELIST) and a user key of the same name would replace it.
+// D-SINK-62 (lane-p1c, 2026-10-29): and `format_whitelist` (MPV_FORMAT_WHITELIST
+// is the pin block's) and `format_blacklist`; and D-SINK-64:
+// `seg_format_options`, the hls segment demuxer's own options, a dictionary
+// FFmpeg parses with its own escapes -- `format\_whitelist` inside it carries
+// no word above and replaced the pinned list in the segment's context
+// (measured). The key is refused whole; the helper's read-back removes it.
+var MPV_DEMUXER_TLS_WORDS = ["verify", "ca_file", "cafile", "listen", "external_sock",
+                             "protocol_whitelist", "protocol_blacklist",
+                             "format_whitelist", "format_blacklist", "seg_format_options"]
+
+// D-SINK-55 (2026-10-29). The protocols libavformat may open below a demuxer:
+// an HLS or DASH segment and key, and whatever a sniffed format opens on its
+// own. A stream server that answers an http(s) URL with an SDP body made the
+// player LISTEN (measured: c=0.0.0.0 bound 0.0.0.0:P and P+1); with this list
+// it bound nothing, and every scheme the helper's gate admits still played or
+// reached its server (lane-p1b, 2026-10-29). Pinned in MPV_PIN_BLOCK; the
+// helper adds rtp and udp on its own loadfile of an rtsp channel only.
+// Mirrored by MPV_PROTOCOL_WHITELIST in the helper.
+var MPV_PROTOCOL_WHITELIST = "http,https,tls,tcp,crypto,data,httpproxy"
+
+// D-SINK-62 (lane-p1c, 2026-10-29). The demuxers libavformat may use, as the
+// demuxer's `format_whitelist`. A protocol list could not close what a
+// sniffed format opens itself: FFmpeg's IMF demuxer, chosen from a stream
+// server's answer, opened the asset URIs it named with the list above, which
+// holds tcp and tls, and listened on 0.0.0.0 (measured; an ffconcat file
+// reached it too). FFmpeg checks this list against the chosen format before
+// the demuxer reads a byte and copies it into every nested context, an HLS or
+// DASH segment and a WebVTT rendition included (measured). What IPTV carries;
+// the helper's comment on its mirror and ARCHITECTURE-PLAYER 4.12.1 have the
+// search of every demuxer that opens a URL. Mirrored by MPV_FORMAT_WHITELIST
+// in the helper.
+var MPV_FORMAT_WHITELIST = "hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt"
 
 // D-SINK-13, layers 1 and 2. ONE string, written into the argv TWICE on
 // purpose. See buildMpvArgv for why the second occurrence is load-bearing;
@@ -288,6 +410,67 @@ var MPV_RESERVED = {
 // exists. The python mirror keeps its own literal and the two are pinned to
 // each other by the shared player-argv.json vectors.
 var MPV_TLS_VERIFY = "--tls-verify=yes"
+
+// The trailing pin block (owner, 2026-10-29, decision 1): what a security
+// layer depends on, re-asserted AFTER the user's tokens -- D-SINK-13's layer-2
+// shape. mpv takes the last token for an option, and a token here is SET FROM
+// THE COMMAND LINE, which keeps a [protocol.*] or [extension.*] profile from
+// replacing it at file load (each measured five ways: a contrary token, a
+// plain mpv.conf line, a protocol profile, a profile-cond profile, a named
+// profile -- ARCHITECTURE-PLAYER 4.12). It is the `pinned` class of
+// the mpv-options.json fixture (dev branch), in this order, after the one pin that
+// carries a path (`--watch-later-dir`, composed in mpvPinBlock), and its last
+// element is D-SINK-13's layer 2. Mirrored by MPV_PIN_BLOCK in the helper.
+var MPV_PIN_BLOCK = [
+  "--load-scripts=no",                 // D-SINK-4 against a named profile
+  "--scripts-clr",                     // an explicit script= line loads anyway
+  "--input-commands-clr",              // D-SINK-45: commands run at startup
+  "--input-commands-append=keybind ctrl+v ignore", // D-PLY-46: the paste-to-playlist key
+  "--load-auto-profiles=no",           // D-SINK-44: profile-cond beats the command line
+  "--player-operation-mode=cplayer",   // D-SINK-44: [pseudo-gui] applies after the command line
+  "--load-select=no",                  // D-SINK-46: g l forks ffmpeg with the URL
+  "--load-console=no",                 // D-SINK-61: the console draws a failed open's URL
+  "--load-stats-overlay=no",           // D-SINK-67: stats draws ${filename}, credentials and all
+  "--prefetch-playlist=no",            // D-SINK-63: a prefetched entry got the channel's headers
+  "--load-unsafe-playlists=no",        // D-SINK-44: mpv's origin rule for nested entries
+  "--save-watch-history=no",           // D-SINK-44: every path, durably
+  "--log-file=",                       // every URL, durably
+  "--reset-on-next-file-clr",          // D-SINK-51: the previous channel's headers
+  "--osd-playlist-entry=title",        // ${playlist} draws the URL otherwise
+  "--drag-and-drop=no",                // D-PLY-46: a dropped URL is an entry no gate saw
+  "--script-opts-append=osc-title_mbtn_mid_command=ignore", // D-SINK-52: show-text ${path}
+  "--stream-lavf-o-clr",               // D-SINK-44: command-line-set, so no profile replaces it
+  "--demuxer-lavf-propagate-opts=yes", // the next pins reach segments only this way
+  "--demuxer-lavf-o-append=protocol_whitelist=http,https,tls,tcp,crypto,data,httpproxy", // D-SINK-55
+  "--demuxer-lavf-o-append=format_whitelist=hls,dash,mpegts,mov,matroska,flv,live_flv,mp3,aac,ac3,eac3,ogg,flac,asf,rtsp,webvtt", // D-SINK-62
+  "--demuxer-lavf-o-append=tls_verify=1", // D-SINK-43
+  MPV_TLS_VERIFY                       // D-SINK-13 layer 2: LAST
+]
+
+// D-PLY-27 (the owner's decision, 2026-10-26): the launch argv ACCEPTS a
+// software renderer. mpv 0.41.0's automatic VO probe, on a compositor that
+// can serve no hardware GL or Vulkan context (a VM on llvmpipe, a pixman
+// compositor), loses the waylandvk surface, fails x11vk -- through a lazy
+// Xwayland or with no DISPLAY at all -- refuses the llvmpipe EGL context as a
+// software renderer without releasing its Wayland state, whose pointer shares
+// a union with `vo->x11`, and then trips its own assertion at x11egl,
+// `vo_x11_init: Assertion '!vo->x11' failed` (video/out/x11_common.c:679;
+// mpv-player/mpv#17190, fixed on master by a58dd8ac4, in no release as of
+// 2026-10-26): SIGABRT about 5 s after every launch, a
+// crash card and a coredump journal entry per zap (no core file: D-SINK-39
+// holds the player's core limit at 0), relaunched by the service every
+// ~5.5 s for as long as the play intent stands. `--gpu-sw=yes` makes the
+// probe ACCEPT
+// the software context (current-vo gpu-next, vo-configured true, exit 0);
+// DISPLAY is not the lever and `--vo=wlshm` is not an alternative. Measured
+// 2026-10-25 in a pixman cage with this argv shape (QA-RESULTS
+// "F-HARNESS-45"). A rendering preference, not a security layer: it sits in
+// the BASE argv so a user's own `--gpu-sw=no` or `--no-gpu-sw` lands after it
+// and wins, it is NOT re-asserted at the tail the way MPV_TLS_VERIFY is, and
+// it is NOT reserved. The python mirror keeps its own literal (MPV_GPU_SW in
+// the helper) and the two are pinned to each other by the shared
+// player-argv.json vectors (`gpuSoftware`).
+var MPV_GPU_SW = "--gpu-sw=yes"
 
 // D-SINK-16. The same two knobs as D-SINK-13, named as mpv PROPERTIES rather
 // than as command-line options, because an ADOPTED player has no launch argv
@@ -298,9 +481,23 @@ var MPV_TLS_VERIFY = "--tls-verify=yes"
 // MPV_TLS_VERIFY_PROP / MPV_STREAM_OPTS_PROP in the helper.
 var MPV_TLS_VERIFY_PROP = "tls-verify"
 var MPV_STREAM_OPTS_PROP = "stream-lavf-o"
+// 2026-10-29: the third reading's two properties, read by the helper only
+// (MPV_DEMUXER_OPTS_PROP / MPV_AUTO_PROFILES_PROP there); named here so the
+// shared player-tls.json fixture pins the spelling in both languages.
+var MPV_DEMUXER_OPTS_PROP = "demuxer-lavf-o"
+var MPV_AUTO_PROFILES_PROP = "load-auto-profiles"
 
-// Stable notification replace-ids so a repeated failure replaces its toast
-// instead of stacking (UX.md 6.4).
+// One fixed number per notice kind (UX.md 6.4). Until D-HOST-5 these were
+// sent as `-r <id>` in the belief that a repeated notice replaced its card;
+// Omarchy's server (Quickshell 0.3.1's NotificationServer) numbers cards
+// itself from 1 and replaces only an id it handed out and still holds, so a
+// fixed id never replaced anything and every post stacked a new card
+// (measured 2026-10-28 on a private bus). Since D-HOST-5 the service keeps
+// the id the server RETURNS for each kind and sends that back
+// (Model.notifyPost); the fixed number is what goes out when no id is held
+// -- the kind's first post, or one after a post that returned none -- which
+// the server answers with a fresh card, and it stays the kind's label in a
+// logging stub's log, where the scenarios count notices by it.
 var NOTIFY_IDS = {
   streamFailed: 74011,
   playlistRefreshed: 74012,
@@ -316,10 +513,29 @@ var NOTIFY_IDS = {
   stateUnreadable: 74017,
   // D-SINK-19 round 15, R25b: a merge of another program's write dropped an
   // in-app addition at a cap (Model.mergeDropNotice). Told once per merge.
-  mergeDropped: 74018
+  mergeDropped: 74018,
   // 74019 was R28a's "Saving is waiting" card, withdrawn by R29a with the
   // held save it told about; not reused, so an old card cannot be replaced
   // by a new meaning.
+  // D-SRC-33 (2026-10-24): a merge of another program's write kept THEIR
+  // version of a field or source over an in-app change that was not yet
+  // saved (Model.mergeConflictNotice). Told once per merge.
+  mergeConflict: 74020,
+  // D-PLY-32 (2026-10-28): a `player start|restart` refused on THIS machine
+  // (Model.playerStartFailure "local"): the runtime folder, the lock, the
+  // plugin's own files, the cache. Its own id, not streamFailed's, because
+  // it blames no channel; told once per episode (Service.qml).
+  localPlayFailure: 74021,
+  // D-PLY-33 (owner, 2026-10-28): the player died and mpv never said the
+  // load failed (Model.deathReport card "playerStopped"): a crash, a kill, an
+  // out-of-memory kill, a VO abort. Its own id, because it marks no channel
+  // and says nothing about the stream; one card per death.
+  playerStopped: 74022,
+  // D-PLY-37 (owner, 2026-10-28): mpv ended the load because an OUTPUT of
+  // this machine could not be opened -- no audio device, the sound server
+  // down (Model.deathReport card "outputFailed"). Its own id, because it
+  // blames this machine and marks no channel.
+  outputFailed: 74023
 }
 
 // Long enough to cover a first-load failure and the user's reaction, short
@@ -336,6 +552,8 @@ export {
   GROUP_SCOPE_PREFIX, MAX_HIDDEN_GROUPS, ELLIPSIS, QUOTE_OPEN, QUOTE_CLOSE,
   SEP, GLYPHS, SETTING_RANGES, MAX_CHNO_MAJOR, MAX_CHNO_MINOR, MAX_CHNO_LABEL,
   CHNO_SEPARATORS, CHNO_ENTRY_SEP, CHANNEL_ORDERS, CHNO_FIELDS, MPV_RESERVED,
-  MPV_TLS_VERIFY, MPV_TLS_VERIFY_PROP, MPV_STREAM_OPTS_PROP, NOTIFY_IDS,
-  PLACE_TTL_SEC, ZAP_MAX_SKIP
+  MPV_DEMUXER_TLS_WORDS, MPV_PROTOCOL_WHITELIST, MPV_FORMAT_WHITELIST,
+  MPV_TLS_VERIFY, MPV_PIN_BLOCK, MPV_GPU_SW, MPV_TLS_VERIFY_PROP,
+  MPV_STREAM_OPTS_PROP, MPV_DEMUXER_OPTS_PROP, MPV_AUTO_PROFILES_PROP,
+  NOTIFY_IDS, PLACE_TTL_SEC, ZAP_MAX_SKIP
 }

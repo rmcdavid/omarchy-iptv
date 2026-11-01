@@ -16,6 +16,9 @@ import {
   browsableChannels
 } from "./state.mjs"
 import {
+  sinkText
+} from "./privacy.mjs"
+import {
   formatCount, pluralChannels
 } from "./epg.mjs"
 import {
@@ -103,9 +106,13 @@ function groupNamesForHint(surface) {
   var axis = s.axis && typeof s.axis === "object" ? s.axis : {}
   var entries = asList(s.entries)
   var names = []
-  if (str(axis.soleGroup) !== "") names.push(str(axis.soleGroup))
+  // F-SINK-14: a name offered here is SHOWN (the no-matches prose and its
+  // accessible name), so each goes through sinkText; the axis's sole group
+  // is the raw one (requestedScope matches on it), the entries' labels are
+  // already redacted and sinkText leaves them as they are.
+  if (str(axis.soleGroup) !== "") names.push(sinkText(axis.soleGroup))
   for (var i = 0; i < entries.length; i++) {
-    if (entries[i] && entries[i].kind === "group") names.push(str(entries[i].label))
+    if (entries[i] && entries[i].kind === "group") names.push(sinkText(entries[i].label))
   }
   return names
 }
@@ -254,13 +261,28 @@ function isPinnedScope(scopeId) {
   return id === SCOPE_RECENT || id === SCOPE_FAVORITES || id === SCOPE_ALL
 }
 
-function scopeName(scopeId) {
+// The scope's name as its id CARRIES it: the playlist's group, verbatim.
+// It is the key channelsForScope and requestedScope match a group on, and is
+// never shown -- scopeName below is what is shown.
+function rawScopeName(scopeId) {
   var id = str(scopeId)
   if (id === SCOPE_RECENT) return RECENT_GROUP
   if (id === SCOPE_FAVORITES) return FAVORITES_GROUP
   if (id === SCOPE_ALL) return "All"
   if (isGroupScope(id)) return id.substring(GROUP_SCOPE_PREFIX.length)
   return id
+}
+
+// The scope's name as it is SHOWN: the header's scope label, the list's
+// accessible name, the empty-scope title and noMatchesTitle. F-SINK-14
+// (2026-10-29): a group is a provider's string, so it goes through sinkText
+// like the channel name on the row -- `x` already printed "Hid Sports
+// cdn.test" while the header beside it printed the group's whole URL. A
+// group with no `://` reads exactly as before. The id keeps the raw group
+// (it keys hidden groups and saved scopes in state.json), and anything that
+// MATCHES on the name reads rawScopeName.
+function scopeName(scopeId) {
+  return sinkText(rawScopeName(scopeId))
 }
 
 // D-SAVE-2: the COUNT is the length of the ROWS, by calling the same function.
@@ -319,16 +341,19 @@ function scopeSurface(channels, state) {
   for (var g = 0; g < all.length; g++) (hidden[all[g].name] === true ? gone : groups).push(all[g])
   var narrows = groups.length >= 2
   var axis = { count: groups.length, narrows: narrows, soleGroup: groups.length === 1 ? groups[0].name : "", hidden: gone.length }
+  // F-SINK-14: `label` is what the column draws and announces, so it goes
+  // through sinkText as the row's name does; `id` keeps the raw group, which
+  // is what hidden groups, saved scopes and channelsForScope key on.
   if (narrows) {
     out.push({ id: "", label: "GROUPS", kind: "header", count: 0 })
     for (var i = 0; i < groups.length; i++) {
-      out.push({ id: groupScopeId(groups[i].name), label: groups[i].name, kind: "group", count: groups[i].count })
+      out.push({ id: groupScopeId(groups[i].name), label: sinkText(groups[i].name), kind: "group", count: groups[i].count })
     }
   }
   if (gone.length > 0) {
     out.push({ id: "", label: "HIDDEN", kind: "header", count: 0 })
     for (var h = 0; h < gone.length; h++) {
-      out.push({ id: groupScopeId(gone[h].name), label: gone[h].name, kind: "hidden", count: gone[h].count })
+      out.push({ id: groupScopeId(gone[h].name), label: sinkText(gone[h].name), kind: "hidden", count: gone[h].count })
     }
   }
   return { entries: out, axis: axis }
@@ -380,7 +405,7 @@ function channelsForScope(channels, scopeId, state) {
     }
     return out
   }
-  var name = scopeName(id)
+  var name = rawScopeName(id)
   for (i = 0; i < list.length; i++) if (list[i] && primaryGroup(list[i]) === name) out.push(list[i])
   return out
 }
@@ -472,7 +497,7 @@ function fallbackScope(entries, scopeId) {
 function requestedScope(entries, scopeId, axis) {
   var id = str(scopeId) || SCOPE_ALL
   var a = axis || {}
-  if (isGroupScope(id) && a.narrows === false && str(a.soleGroup) !== "" && scopeName(id) === str(a.soleGroup)) return SCOPE_ALL
+  if (isGroupScope(id) && a.narrows === false && str(a.soleGroup) !== "" && rawScopeName(id) === str(a.soleGroup)) return SCOPE_ALL
   return fallbackScope(entries, id)
 }
 
@@ -832,8 +857,8 @@ function zapStep(list, currentId, delta, failed, maxSkip) {
 export {
   containsAll, containsAllWords, matchRank, groupNamesForHint, groupWordHint,
   favoriteSet, filterChannels, floatChnoMatch, groupChannels, groupScopeId,
-  isGroupScope, isPinnedScope, scopeName, countFavorites, countRecents,
-  scopeSurface, scopeEntries, channelsForScope, numberJumpScope,
+  isGroupScope, isPinnedScope, rawScopeName, scopeName, countFavorites,
+  countRecents, scopeSurface, scopeEntries, channelsForScope, numberJumpScope,
   channelsInGroup, effectiveScope, moveScope, scopeIndex, columnAnchor,
   fallbackScope, requestedScope, initialScope, cursorFor, revealOffset,
   scopeLabel, GUIDE_MODES, guideMode, guideState, copyGuide, openTracks,

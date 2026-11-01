@@ -25,6 +25,9 @@ import {
   PIP_TOOLTIP_ON
 } from "./pip.mjs"
 import {
+  sinkText
+} from "./privacy.mjs"
+import {
   formatCount, pluralChannels
 } from "./epg.mjs"
 import {
@@ -66,8 +69,10 @@ function barTooltip(opts) {
   var line = ""
   // M2-03 6.4: the number joins the tooltip whenever the playing channel has
   // one, including on a vertical bar where the label itself is glyph-only.
+  // F-SINK-14: the name through sinkText, the guide row's rule, so the bar
+  // and the row print one string (the tooltip is the host's PlainText).
   if (o.playing && str(o.name) !== "") {
-    line = (o.paused ? "Paused " : "Playing ") + (str(o.chno) !== "" ? str(o.chno) + SEP : "") + str(o.name)
+    line = (o.paused ? "Paused " : "Playing ") + (str(o.chno) !== "" ? str(o.chno) + SEP : "") + sinkText(o.name)
     // M5-01 (design 2.5): the state line the footer shows, plus the window
     // from the last read -- `up to 6:52 back`. On a channel whose window is
     // 7 s the number is 0:07, not a promise. `behindS` and `historyS` come
@@ -97,8 +102,9 @@ function barAccessibleName(opts) {
   // PAUSE LIVE TV. The glyph and the tooltip both changed for paused; the
   // accessible name has to as well, or the one user who cannot see the glyph
   // is the one user not told. That asymmetry is exactly the D-GS-3 shape.
+  // F-SINK-14: and the accessibility bus hears what the row says (rule 5).
   if (o.playing && str(o.name) !== "") {
-    var name = "IPTV, " + (o.paused ? "paused" : "playing") + " " + (str(o.chno) !== "" ? "channel " + str(o.chno) + ", " : "") + str(o.name)
+    var name = "IPTV, " + (o.paused ? "paused" : "playing") + " " + (str(o.chno) !== "" ? "channel " + str(o.chno) + ", " : "") + sinkText(o.name)
     // M5-01: the same threshold the label and the footer use, spoken as
     // units ("1 minute 32 seconds behind live") rather than as a clock,
     // because "one thirty-two" is a time of day to a listener.
@@ -108,6 +114,38 @@ function barAccessibleName(opts) {
   }
   if (o.error) return "IPTV, playlist error"
   return "IPTV, idle"
+}
+
+// ------------------------------------------------------------ IPC replies
+
+// `nowPlaying` as the IPC `status` verb reports it (Service.nowPlayingSummary):
+// the shipped fields plus the playing channel's number. Null when nothing
+// plays. F-SINK-14 (2026-10-29): the name, the group and the scope it was
+// launched from are a provider's strings and reach a script or a terminal,
+// so they go through sinkText as the bar and the row do. `id` does NOT: it
+// is what `play` takes back, and the same id a guide row carries.
+function ipcNowPlaying(np, chno) {
+  if (!np || typeof np !== "object") return null
+  return { id: np.id, name: sinkText(np.name), group: sinkText(np.group), chno: chno,
+           launchedFrom: sinkText(np.launchedFrom), since: np.since }
+}
+
+// Every JSON reply of the IPC handler. F-SINK-16 (2026-10-29):
+// JSON.stringify escapes C0 controls, ESC among them, and leaves DEL and the
+// C1 block (U+0080..U+009F) as they are -- and the helper keeps C1 controls
+// a playlist puts in a name or a group (measured: U+009B, U+009C, U+009D and
+// U+0085 survive the parse into channels.json). The reply is printed by
+// `omarchy-shell ipc call` into whatever terminal ran it, where U+009B is
+// an 8-bit CSI and U+009D an OSC. Escaped as `\u009b`, the reply is the same
+// JSON value to any parser and carries no control a terminal reads.
+// U+2028 and U+2029 are escaped with them, so the reply is also a valid
+// JavaScript string literal in any engine.
+function ipcJson(value) {
+  var text = JSON.stringify(value === undefined ? null : value)
+  return text.replace(/[\u007f-\u009f\u2028\u2029]/g, function (c) {
+    var hex = c.charCodeAt(0).toString(16)
+    return "\\u" + "0000".substring(hex.length) + hex
+  })
 }
 
 // ------------------------------------------------------------ guide body
@@ -244,9 +282,11 @@ function footerStatus(opts) {
   // the right, a channel name can lose its tail and stay useful (the bar's
   // rule), and a number cannot. Composed after the name it was the first
   // casualty of a long name (F-UX-5, the review's UX lens).
+  // F-SINK-14: the playing name through sinkText, as the row under it is,
+  // so the same string is not shown under two rules on one screen.
   if (str(o.playingName) !== "") {
     var state = str(o.playbackState)
-    return GLYPHS.play + " " + (state !== "" ? state + SEP : "") + str(o.playingName) + SEP + "s stop"
+    return GLYPHS.play + " " + (state !== "" ? state + SEP : "") + sinkText(o.playingName) + SEP + "s stop"
   }
   if (o.refreshing) return "Refreshing" + ELLIPSIS
   if (footerDegraded(o)) return footerCounts(o)
@@ -719,9 +759,9 @@ function keyboardMapKeys(opts) {
   return out
 }
 export {
-  barGlyph, barTooltip, barAccessibleName, guideSurface, firstRunAllowed,
-  footerCounts, footerDegraded, footerStatus, arrowVerb, footerHints,
-  scopeVerb, formHints, keyboardMapUntabled, hideMeaning, escapeOutcome,
-  sameEscape, verbForKey, setKeyRow, mergeKeyRows, keyboardMap,
-  keyboardMapKeys
+  barGlyph, barTooltip, barAccessibleName, ipcNowPlaying, ipcJson,
+  guideSurface, firstRunAllowed, footerCounts, footerDegraded, footerStatus,
+  arrowVerb, footerHints, scopeVerb, formHints, keyboardMapUntabled,
+  hideMeaning, escapeOutcome, sameEscape, verbForKey, setKeyRow, mergeKeyRows,
+  keyboardMap, keyboardMapKeys
 }

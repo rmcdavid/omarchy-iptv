@@ -4,6 +4,31 @@
 from __future__ import annotations
 # ------------------------------------------------------------- mpv IPC
 
+class IpcPairs(list):
+    """A JSON OBJECT written in this order, a key as often as it is listed:
+    the per-file options of a `loadfile` (apply_channel, 2026-10-29). Python's
+    dict keeps a key once, and `http-header-fields-append` has to appear once
+    per header, because `-append` is the one spelling that takes its value
+    verbatim -- the plain list option splits a header value at every comma
+    (measured on mpv 0.41.0 against a logging server: `X-A: 1,2` arrived as
+    `X-A: 1`; three `-append` keys in one object arrived as three headers,
+    commas, `=`, quotes and a trailing backslash intact, in order). mpv's own
+    JSON reader keeps every key of an object in order (the same measurement).
+    A list of (key, value) pairs; a value may be another IpcPairs."""
+
+
+def ipc_json(value: Any) -> str:
+    """json.dumps, except that an IpcPairs is written as an object in its own
+    order with its repeated keys. ensure_ascii=False, as request() has always
+    sent: mpv reads UTF-8."""
+    if isinstance(value, IpcPairs):
+        return "{" + ", ".join("%s: %s" % (json.dumps(str(k), ensure_ascii=False), ipc_json(v))
+                               for k, v in value) + "}"
+    if isinstance(value, list):
+        return "[" + ", ".join(ipc_json(item) for item in value) + "]"
+    return json.dumps(value, ensure_ascii=False)
+
+
 class MpvIpc:
     """Minimal client for mpv's JSON IPC: one request at a time, replies
     correlated by request_id, unsolicited events KEPT.
@@ -85,7 +110,7 @@ class MpvIpc:
         assert self.sock is not None
         request_id = self.next_id
         self.next_id += 1
-        payload = json.dumps({"command": command, "request_id": request_id}, ensure_ascii=False) + "\n"
+        payload = '{"command": %s, "request_id": %d}\n' % (ipc_json(list(command)), request_id)
         try:
             self.sock.sendall(payload.encode("utf-8"))
         except (ConnectionResetError, BrokenPipeError):
@@ -181,10 +206,22 @@ def logo_host(netloc: str) -> str:
     Userinfo makes the answer "": fetch_logo refuses such a URL outright, so
     the host is never contacted, and naming it would print the credentials in
     the consent text. Mirrored by Model.splitLogoUrl.
+
+    D-SINK-30 (2026-10-24). The answer ends at the first `;`, `=` or `&` too,
+    through the same `cut_host_params` the Sources row's host goes through:
+    `https://cdn.test;sid=SECRET/a.png` is a valid URL whose authority is a
+    credential, urllib hands it over whole in `netloc`, and this stopped at
+    `:` alone -- so the survey the consent dialog is composed from and the
+    `refused a logo from %s` lines (logo_dimension_refusal, logo_chunks; since
+    D-LOGO-25 logo_scans too) named
+    `cdn.test;sid=secret`. The `@` test runs over the WHOLE netloc first:
+    `cdn.test;u=p@evil` is refused by fetch_logo, so a cut that hid its `@`
+    would count a host that is never contacted.
     """
     text = (netloc or "").strip().lower()
     if "@" in text:
         return ""
+    text = cut_host_params(text)
     if text.startswith("["):
         # IPv6 literal: the bracketed half is the host, any :port follows it.
         close = text.find("]")
@@ -281,6 +318,19 @@ MAX_LOGO_FILES = 5000
 MAX_LOGO_SIDE = 4096
 MAX_LOGO_PIXELS = 4194304         # 2048 * 2048
 
+# The SCAN bound, D-LOGO-25 (2026-10-29): the dimension bound's CPU axis. A
+# progressive JPEG is decoded scan by scan, and a file within the byte cap
+# can carry thousands of scans. Measured on Qt 6.11.2 with an Image
+# declared as the row slot (offscreen) and with libjpeg-turbo 3.2.0's djpeg,
+# on files of 1 to 512 scans: about 0.85 ms of CPU a scan for first scans
+# and 4.1 ms for refinement scans, on the shell's image reader thread, which
+# every other asynchronous image in the shell queues behind.
+# _jpeg_dimensions stops at the frame header and never saw a scan. 64 is above the most libjpeg's own progressive scripts write for
+# any component count it encodes -- 10 for YCbCr, 6 for grey (measured with
+# cjpeg -progressive), 6 a component otherwise, at most 10 components -- and
+# costs at most about a quarter of a second at the dimension bound.
+MAX_JPEG_SCANS = 64
+
 # How much of a logo the cached-file sweep reads before asking the parsers
 # (R5). Every header they read sits either at a fixed offset -- PNG, GIF and
 # WEBP all declare their size inside the first 30 bytes -- or within the APPn
@@ -311,7 +361,7 @@ def logo_filename(url: str) -> str:
     return fnv1a32(url)
 
 
-def logo_opener(host: str) -> Any:
+def logo_opener(host: str, policy: Any = None) -> Any:
     """An opener that enforces the https rule on EVERY hop, not just the first.
 
     D-LOGO-1. `fetch_logo` checked the scheme of the URL it was handed and then
@@ -345,8 +395,19 @@ def logo_opener(host: str) -> Any:
     MAX_LOGO_BYTES bounded the final response only. The TLS context is the
     one limit_memory prepared, as make_opener's is, so the CA store is loaded
     once a run and before the memory limit rather than once a logo under it.
+
+    D-SINK-40 (2026-10-29): and never to an address on this machine or a
+    local network, on ANY hop -- the first included, because a logo URL is
+    the provider's choice. The check is the connect-time one every fetch
+    makes (DestinationPolicy.for_logos), so an https logo that redirects to
+    127.0.0.1 or 192.168.1.1, or whose name answers one, opens no socket
+    there; it is refused as `local_address` and counted with the policy
+    refusals. The residual above is narrowed to GLOBAL https hosts.
     """
     import urllib.request
+
+    if policy is None:
+        policy = DestinationPolicy.for_logos()
 
     class LogoRedirectHandler(unread_redirect_handler()):
         def redirect_request(self, req: Any, fp: Any, code: int, msg: str, headers: Any, newurl: str) -> Any:
@@ -377,10 +438,9 @@ def logo_opener(host: str) -> Any:
     # No FTPHandler: build_opener adds the defaults, and the redirect guard
     # already refuses an ftp target, but a handler that cannot be reached is
     # one fewer thing to reason about.
-    handlers: list[Any] = [LogoRedirectHandler()]
-    context = TLS_CONTEXT.get("https")
-    if context is not None:
-        handlers.append(urllib.request.HTTPSHandler(context=context))
+    # D-SRC-62: the connections are the stdlib's with the host-name lookup
+    # bounded (bounded_handlers), as make_opener's are.
+    handlers: list[Any] = [LogoRedirectHandler(), *bounded_handlers(TLS_CONTEXT.get("https"), policy)]
     opener = urllib.request.build_opener(*handlers)
     opener.handlers = [h for h in opener.handlers
                        if h.__class__.__name__ not in ("FTPHandler", "CacheFTPHandler",
@@ -434,6 +494,22 @@ def fetch_logo(url: str, timeout: float, budget: float | None = None) -> tuple[b
 
 
 def read_logo_response(opener: Any, request: Any, timeout: float, host: str) -> tuple[bytes, str]:
+    """One logo's response under the type gate, or `logo_fetch` naming the
+    host and the error's CLASS only, never its text (rule 5).
+
+    D-LOGO-24 (2026-10-29): http.client's own errors are not OSErrors, and
+    urllib wraps only OSErrors, so they used to pass straight through to
+    main()'s `internal`, ending the whole run before the failure memo was
+    written -- and the same logo ended every later run the same way: a
+    status line that is not one (BadStatusLine), a header line or a header
+    count over http.client's limits (LineTooLong, HTTPException), a chunked
+    body that does not parse (IncompleteRead), and InvalidURL, raised before
+    any connection for a URL with a space or a control character in its
+    path or a port that is not a number -- whose text quotes the path and
+    query. read_http_response has caught them since D-SRC-59; this is the
+    same catch on the logo path, and the run keeps a backstop of its own
+    (fetch_logo_run) for whatever escapes next."""
+    import http.client
     import urllib.error
     try:
         with opener.open(request, timeout=timeout) as response:
@@ -443,7 +519,7 @@ def read_logo_response(opener: Any, request: Any, timeout: float, host: str) -> 
             data = response.read(MAX_LOGO_BYTES + 1)
     except HelperError:
         raise
-    except (urllib.error.URLError, OSError, ValueError) as error:
+    except (urllib.error.URLError, OSError, ValueError, http.client.HTTPException) as error:
         raise HelperError("logo_fetch", "could not fetch a logo from %s: %s" % (host, error.__class__.__name__))
     return data, ctype
 
@@ -758,6 +834,27 @@ def logo_within_bounds(data: bytes, ctype: str) -> bool:
     return width * height <= MAX_LOGO_PIXELS
 
 
+def jpeg_scan_count(data: bytes) -> int:
+    """An UPPER bound on the scans a decoder runs over this JPEG (D-LOGO-25):
+    every occurrence of the byte pair FF DA. A scan starts only at an SOS
+    marker, and libjpeg finds a marker by reading 0xFF (any fill bytes) and
+    then its code, so every scan it can start is one of these pairs --
+    including one it reaches by skipping garbage, which a marker walk that
+    stopped at the garbage would miss. Entropy-coded data cannot hold the
+    pair (an 0xFF in it is followed by 0x00 or a restart marker), so the
+    count is exact for an ordinary file and over by one for an EXIF
+    thumbnail or a coincidence inside a table: an over-count only refuses
+    more. One linear pass in C, nothing decoded."""
+    return bytes(data).count(b"\xff\xda")
+
+
+def logo_scans_within_bound(data: bytes, ctype: str) -> bool:
+    """True for every type but JPEG; for a JPEG, its scan count is at most
+    MAX_JPEG_SCANS (D-LOGO-25). Over ALL of a file's bytes: a count over a
+    prefix is a lower bound and proves nothing."""
+    return ctype != "image/jpeg" or jpeg_scan_count(data) <= MAX_JPEG_SCANS
+
+
 def logo_dimension_refusal(url: str, data: bytes, ctype: str) -> str:
     """The refusal text: a HOST and numbers, never a URL (rule 5, R6)."""
     host = logo_host(urllib.parse.urlsplit(url).netloc or "") or "an unnamed host"
@@ -814,14 +911,17 @@ def logo_file_within_bounds(path: str) -> bool:
     ctype = logo_sniff_type(head)
     if ctype is None:
         return False
-    if logo_within_bounds(head, ctype):
-        return True
-    if len(head) < LOGO_HEADER_BYTES:
-        return False                      # that was the whole file
+    complete = len(head) < LOGO_HEADER_BYTES          # the small read was the whole file
+    # D-LOGO-25: a JPEG's scans are counted over the WHOLE file, so a JPEG
+    # the small read did not finish is read whole whatever its header says.
+    if logo_within_bounds(head, ctype) and (complete or ctype != "image/jpeg"):
+        return logo_scans_within_bound(head, ctype)
+    if complete:
+        return False
     whole = _read_logo_prefix(path, MAX_LOGO_BYTES + 1)
     if whole is None or len(whole) > MAX_LOGO_BYTES:
         return False                      # over the byte cap as well
-    return logo_within_bounds(whole, ctype)
+    return logo_within_bounds(whole, ctype) and logo_scans_within_bound(whole, ctype)
 
 
 # D-LOGO-13, raised by the marketplace maintainer against the shipped 0.13.6:
@@ -961,6 +1061,11 @@ def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
     # for this anyway (R1).
     if not logo_within_bounds(data, ctype):
         raise HelperError("logo_dimensions", logo_dimension_refusal(url, data, ctype))
+    if not logo_scans_within_bound(data, ctype):
+        # D-LOGO-25: the same place, the same reason, the decoder's CPU.
+        host = logo_host(urllib.parse.urlsplit(url).netloc or "") or "an unnamed host"
+        raise HelperError("logo_scans", "refused a logo from %s: its JPEG carries %d scans, over the %d scan bound"
+                          % (host, jpeg_scan_count(data), MAX_JPEG_SCANS))
     if ctype == "image/png":
         # D-LOGO-13: only the canonical form is cached, and a PNG whose
         # chunks cannot be walked is not cached at all. Same place, same
@@ -970,10 +1075,23 @@ def write_logo(logo_dir: str, url: str, data: bytes, ctype: str) -> str:
             host = logo_host(urllib.parse.urlsplit(url).netloc or "") or "an unnamed host"
             raise HelperError("logo_chunks", "refused a logo from %s: its PNG chunks are malformed" % host)
         data = canon
-    ensure_private_dir(logo_dir)
     name = logo_filename(url)
     path = os.path.join(logo_dir, name)
-    write_bytes_atomic(path, data)
+    # D-SRC-72: a logo that cannot be put in the cache -- the disk full, the
+    # folder not writable, something else at the file's name -- is refused
+    # with the playlist verb's code (cache_unwritable, D-SRC-69), naming the
+    # file (a hash of the URL, never the URL) and the error's own words. It
+    # used to reach main()'s `internal` and end the run with no summary.
+    # The run stops FETCHING at it (fetch_logo_run): this is not the
+    # address's failure, and a logo it cannot keep is a request for nothing.
+    # A logo folder that is a link to nothing stays R25c's FolderUnusable.
+    try:
+        ensure_private_dir(logo_dir)
+        write_bytes_atomic(path, data)
+    except FolderUnusable:
+        raise
+    except OSError as io_error:
+        raise cache_unwritable(path, io_error) from None
     return name
 
 

@@ -16,26 +16,73 @@ def fallback_channel_name(url: str, default: str) -> str:
     return url_host(url) or default
 
 
+def cached_source(document: dict[str, Any]) -> dict[str, Any]:
+    """playlist_source as the parse saw it, read back out of channels.json
+    (D-SINK-58, 2026-10-29), so player_target can run the parse's host rule
+    and sign-in header rule again at play time.
+
+    A cache written since 2026-10-29 records `sourceLocal` and `sourcePort`
+    beside `sourceHost` and `sourceClass`. One written before the
+    destination rules records neither class nor locality, and the refresh
+    that replaces it (Model.cacheBeforeDestinationRules) can fail: such a
+    cache reads as local only when its recorded class or its host's own
+    literal says so, and otherwise as a PUBLIC source -- the stricter
+    reading, so a LAN-literal channel from it is refused and a sign-in header
+    for another host dropped until a refresh succeeds. A port it does not
+    record matches no loopback home (own_host_match), the same way."""
+    host = str(document.get("sourceHost") or "")
+    if host == "local file":
+        return {"host": "", "port": None, "loopback": False, "local": True}
+    klass = document.get("sourceClass")
+    klass = klass if klass in ADDRESS_CLASSES else ""
+    local = document.get("sourceLocal")
+    if not isinstance(local, bool):
+        local = klass not in ("", "global") or host_class(host) not in ("", "global")
+    port = document.get("sourcePort")
+    port = port if isinstance(port, int) and not isinstance(port, bool) else None
+    return {"host": host_key(host), "port": port,
+            "loopback": klass == "loopback" or host_class(host) == "loopback", "local": local}
+
+
 def player_target(channel_id: str, raw_url: str, directory: str) -> dict[str, Any]:
     """Resolve the channel the helper will play. The URL is read from the
-    0600 cache by the helper itself and never crosses a process boundary."""
+    0600 cache by the helper itself and never crosses a process boundary.
+
+    D-SINK-58 (2026-10-29): a cached channel meets the parse's gate again
+    here -- the listening forms and control characters (is_stream_url), and
+    now the host rule and the sign-in headers against the cache's own record
+    of its playlist (cached_source) -- so a cache nothing checked cannot
+    reach a LAN or loopback literal, or hand a sign-in header to another
+    host, while the refresh that would replace it keeps failing. A `--url`
+    a human typed meets the listening rule only (it has no playlist)."""
     if channel_id:
-        channel = find_channel(load_channels(cache_dir(directory)), channel_id)
+        document = read_channel_document(cache_dir(directory))
+        channel = find_channel(document["channels"], channel_id)
         url = str(channel.get("url") or "")
         name = str(channel.get("name") or "") or fallback_channel_name(url, "channel")
-        headers = channel.get("headers") if isinstance(channel.get("headers"), dict) else {}
+        headers = dict(channel.get("headers")) if isinstance(channel.get("headers"), dict) else {}
         group = str(channel.get("group") or "")
+        source = cached_source(document)
     else:
         url = (raw_url or "").strip()
         name = fallback_channel_name(url, "stream")
         headers = {}
         group = ""
+        source = None
     if not is_stream_url(url):
         raise HelperError("unsupported_scheme", "unsupported stream URL scheme '%s'" % (stream_scheme(url) or "none"))
+    if source is not None:
+        if stream_host_refused(url, source):
+            raise HelperError("local_address", "%s is an address on this machine or a local network that the playlist "
+                                               "chose; not played" % (url_host(url) or "the host"))
+        held = {"url": url, "headers": headers}
+        if drop_sign_in_headers(held, source):
+            log("play: dropped a sign-in header for another host")
+        headers = held.get("headers") or {}
     return {"id": channel_id or "", "url": url, "name": name, "headers": headers, "group": group}
 
 
-def tls_properties_safe(verify: Any, option_count: Any) -> bool:
+def tls_properties_safe(verify: Any, option_count: Any, unpinned: Any) -> bool:
     """Is this player's certificate handling safe to hand a credentialed URL to?
 
     Mirror of Model.tlsPropertiesSafe; both sides run the shared
@@ -47,18 +94,123 @@ def tls_properties_safe(verify: Any, option_count: Any) -> bool:
     how many entries `stream-lavf-o` holds, which must be zero: FFmpeg's own
     `tls_verify` AVOption reaches the same place as mpv's option and OUTVOTES
     it (measured, D-SINK-13 layer 3), so a non-empty map is not safe whatever
-    happens to be in it. None means the reading could not be taken, which is
-    not safe either.
+    happens to be in it. `unpinned` (D-SINK-43/44, 2026-10-29) is how many of
+    the OTHER TLS pins the player does not hold -- see read_tls_state -- and
+    must be zero too. None means a reading could not be taken, which is not
+    safe either.
     """
     if verify is not True:
         return False
-    if isinstance(option_count, bool) or not isinstance(option_count, int):
-        return False
-    return option_count == 0
+    for count in (option_count, unpinned):
+        if isinstance(count, bool) or not isinstance(count, int) or count != 0:
+            return False
+    return True
 
 
-def read_tls_state(client: MpvIpc) -> tuple[Any, Any]:
-    """The two D-SINK-16 readings, taken OFF the player.
+def demuxer_tls_unsafe(options: Any) -> int | None:
+    """How many entries of a `demuxer-lavf-o` map undo or weaken certificate
+    verification (D-SINK-43), or None when the reading is not a map.
+
+    For HLS and DASH libavformat reopens the URL with these options and copies
+    them into every segment and key open, so they are TLS PROTOCOL options
+    there: `tls_verify` / `verify` other than "1" turned verification off with
+    both --tls-verify=yes tokens in place, and `verifyhost` accepted the
+    attacker's certificate for its OWN name (both measured). The trailing pin
+    makes `tls_verify` read "1"; nothing pins the rest, so they are counted
+    here and the load is refused. A COUNT, never a key or a value (rule 5).
+
+    D-SINK-55 (2026-10-29): and the map's `protocol_whitelist` must read
+    exactly MPV_PROTOCOL_WHITELIST -- absent or different counts one. Without
+    it a stream server that answers with an SDP body makes the player listen
+    (measured), so a player that does not hold it is not loaded into.
+
+    D-SINK-62 (lane-p1c, 2026-10-29): the same for `format_whitelist` and
+    MPV_FORMAT_WHITELIST, without which an IMF answer listens; and D-SINK-64:
+    a `seg_format_options` key counts one, because what it carries reaches
+    the HLS segment's demuxer past every word of the token filter.
+    """
+    if not isinstance(options, dict):
+        return None
+    count = 0 if options.get(MPV_DEMUXER_WHITELIST_KEY) == MPV_PROTOCOL_WHITELIST else 1
+    count += 0 if options.get(MPV_DEMUXER_FORMATS_KEY) == MPV_FORMAT_WHITELIST else 1
+    for key, value in options.items():
+        if key in DEMUXER_TLS_ON and value != "1":
+            count += 1
+        elif key in DEMUXER_TLS_FORBIDDEN or key in DEMUXER_FORMAT_FORBIDDEN:
+            count += 1
+    return count
+
+
+def profile_option_bases(by_name: dict[str, Any], name: str, seen: set[str] | None = None) -> set[str]:
+    """Every option base a profile sets, following `profile=` to the profiles
+    it names (cycle-safe). Keys only: a profile's VALUES are the user's and
+    can carry anything (a header, a proxy with credentials)."""
+    seen = set() if seen is None else seen
+    if name in seen:
+        return set()
+    seen.add(name)
+    out: set[str] = set()
+    profile = by_name.get(name)
+    options = profile.get("options") if isinstance(profile, dict) else None
+    for option in options if isinstance(options, list) else []:
+        key = option.get("key") if isinstance(option, dict) else None
+        if not isinstance(key, str):
+            continue
+        base = mpv_option_base("--" + key)[2:]
+        base = PER_FILE_OPTION_ALIASES.get(base, base)
+        if base.startswith("no-") and PER_FILE_OPTION_ALIASES.get(base[3:], base[3:]) in PER_FILE_TLS_OPTIONS:
+            base = PER_FILE_OPTION_ALIASES.get(base[3:], base[3:])
+        if base == "profile":
+            for target in str(option.get("value") or "").split(","):
+                out |= profile_option_bases(by_name, target.strip(), seen)
+        else:
+            out.add(base)
+    return out
+
+
+def per_file_profile_threats(profiles: Any, loose: list[str]) -> int | None:
+    """How many of the user's [protocol.*] / [extension.*] profiles would set,
+    at file load and so AFTER the read-back, an option the pin block holds
+    (PER_FILE_TLS_OPTIONS, every pinned option since 2026-10-29) that this
+    player does NOT have set from the command line (`loose`).
+
+    The residual this closes is measured: a player launched without the pin
+    block, adopted, migrated over IPC and read back as safe, fetched the
+    attacker's stream anyway because its mpv.conf held [protocol.https]
+    stream-lavf-o=tls_verify=0 -- mpv applies those profiles to every option
+    that was not set on the command line, and a set_property is not one. On a
+    player launched with the pin block `loose` is empty and this is never
+    asked. `include` counts too: what it loads cannot be read from here."""
+    if not isinstance(profiles, list):
+        return None
+    by_name = {p["name"]: p for p in profiles if isinstance(p, dict) and isinstance(p.get("name"), str)}
+    watched = set(loose) | {"include"}
+    count = 0
+    for name in by_name:
+        if name.startswith(PER_FILE_PROFILE_PREFIXES) and profile_option_bases(by_name, name) & watched:
+            count += 1
+    return count
+
+
+def read_profile_threats(client: MpvIpc) -> int | None:
+    """per_file_profile_threats over this player, or None when it cannot be
+    established. `option-info/<name>/set-from-commandline` is mpv's own
+    answer, and it survives our runtime set_property (measured)."""
+    loose = []
+    for option in PER_FILE_TLS_OPTIONS:
+        ok, flag = client.try_command("get_property", "option-info/%s/set-from-commandline" % option)
+        if not ok or not isinstance(flag, bool):
+            return None
+        if not flag:
+            loose.append(option)
+    if not loose:
+        return 0
+    ok, profiles = client.try_command("get_property", "profile-list")
+    return per_file_profile_threats(profiles if ok else None, loose)
+
+
+def read_tls_state(client: MpvIpc) -> tuple[Any, Any, Any]:
+    """The D-SINK-16 readings, taken OFF the player.
 
     Read back rather than inferred from a set_property reply, because a
     `success` reply is a statement about the request and not about the value;
@@ -66,16 +218,89 @@ def read_tls_state(client: MpvIpc) -> tuple[Any, Any]:
     2026-10-07. An unreadable property answers None, and tls_properties_safe
     refuses None.
 
-    A COUNT, never the keys or the values: `stream-lavf-o` can hold a proxy
-    address with credentials in it, and this number travels out of here into a
-    reply the shell reads (engineering rule 5). The count is the whole of what
-    the decision needs.
+    COUNTS, never the keys or the values: `stream-lavf-o` can hold a proxy
+    address with credentials in it, and these numbers travel out of here into
+    a reply the shell reads (engineering rule 5). The counts are the whole of
+    what the decision needs.
+
+    The third reading (2026-10-29) is every OTHER TLS pin the player must hold,
+    summed: demuxer-lavf-o's TLS entries (D-SINK-43), load-auto-profiles not
+    reading False, mpv's `no` (D-SINK-44: a profile-cond profile applies over the command
+    line at every load), `reset-on-next-file` not empty (D-SINK-60: it rolls
+    this read-back's values back when the next file starts), and the per-file
+    profiles that could undo a loose option after this read
+    (read_profile_threats). A player launched with the pin block reads 0 on
+    all four.
     """
     ok, verify = client.try_command("get_property", MPV_TLS_VERIFY_PROP)
     verify = verify if ok and isinstance(verify, bool) else None
     ok, options = client.try_command("get_property", MPV_STREAM_OPTS_PROP)
     count = len(options) if ok and isinstance(options, dict) else None
-    return verify, count
+    ok, demuxer = client.try_command("get_property", MPV_DEMUXER_OPTS_PROP)
+    demuxer_unsafe = demuxer_tls_unsafe(demuxer) if ok else None
+    # mpv's JSON IPC answers this choice as the boolean False for `no` (and
+    # True for `yes`, the string "auto" for auto: measured on 0.41.0), so the
+    # one safe reading is False itself -- not the string, which mpv never sends.
+    ok, mode = client.try_command("get_property", MPV_AUTO_PROFILES_PROP)
+    auto_on = (0 if mode is False else 1) if ok and isinstance(mode, (bool, str)) else None
+    # D-SINK-60 (lane-p1b, 2026-10-29): mpv backs up the options
+    # `reset-on-next-file` names when a file STARTS and restores them when it
+    # ENDS -- inside the next loadfile, after this read-back. So on a player
+    # that holds any entry, every migration made during the current file is
+    # undone at the next load. Measured twice on mpv 0.41.0: with
+    # --reset-on-next-file=all and no pin block, tls-verify set true over IPC
+    # during file A read true, and the load of a self-signed B read false
+    # again and fetched from it (attacker GETs 1; 0 without the option); and
+    # on a player started by v0.15.0's argv with a demuxer tls_verify=0 and
+    # `reset-on-next-file=all` in its mpv.conf, an apply_channel that removed
+    # the key AND emptied the list read back safe, and the next HLS load sent
+    # its segment request to the attacker anyway (the list itself was among
+    # the options restored). The pin block's -clr keeps it empty on a player
+    # of this release; one that holds any entry is not loaded into -- it is
+    # stopped, like any player that cannot be made safe.
+    ok, resets = client.try_command("get_property", MPV_RESET_PROP)
+    reset_on = (0 if not resets else 1) if ok and isinstance(resets, list) else None
+    threats = read_profile_threats(client)
+    parts = (demuxer_unsafe, auto_on, reset_on, threats)
+    unpinned = None if any(part is None for part in parts) else sum(parts)
+    return verify, count, unpinned
+
+
+def secure_player(client: MpvIpc) -> None:
+    """The writes that make a player hold the TLS pins over IPC. Their replies
+    are not consulted: the read-back that follows is the judge.
+
+    `tls-verify` and `stream-lavf-o` are set unconditionally, as D-SINK-16
+    always did. demuxer-lavf-o loses only its unsafe KEYS -- the user's other
+    keys are real workarounds -- and with `tls_verify` gone mpv's own
+    tls-verify, now True, is what libavformat is handed. load-auto-profiles is
+    set to no only where it is not already, and mpv UNLOADS auto_profiles.lua
+    when it is (measured on a pre-pin player: the profile-cond profile that
+    had turned verification off stopped applying, 3 of 3). A runtime set does
+    not clear an option's set-from-commandline flag (measured), so none of
+    this weakens the pins of a player that already holds them."""
+    client.try_command("set_property", MPV_TLS_VERIFY_PROP, True)
+    client.try_command("set_property", MPV_STREAM_OPTS_PROP, {})
+    ok, options = client.try_command("get_property", MPV_DEMUXER_OPTS_PROP)
+    if ok and isinstance(options, dict):
+        for key, value in options.items():
+            if ((key in DEMUXER_TLS_ON and value != "1") or key in DEMUXER_TLS_FORBIDDEN
+                    or key in DEMUXER_FORMAT_FORBIDDEN):
+                client.try_command("change-list", MPV_DEMUXER_OPTS_PROP, "remove", key)
+        # D-SINK-55: `append` replaces that one key and keeps the user's
+        # others; the comma-separated value is taken whole (measured). The
+        # same for D-SINK-62's format list.
+        for key, wanted in ((MPV_DEMUXER_WHITELIST_KEY, MPV_PROTOCOL_WHITELIST),
+                            (MPV_DEMUXER_FORMATS_KEY, MPV_FORMAT_WHITELIST)):
+            if options.get(key) != wanted:
+                client.try_command("change-list", MPV_DEMUXER_OPTS_PROP, "append", "%s=%s" % (key, wanted))
+    ok, mode = client.try_command("get_property", MPV_AUTO_PROFILES_PROP)
+    if not ok or mode is not False:
+        client.try_command("set_property", MPV_AUTO_PROFILES_PROP, "no")
+    # NOT reset-on-next-file (D-SINK-60): mpv backed up the options it names
+    # when the CURRENT file started and restores them when that file ends, so
+    # emptying it now changes nothing about the next load -- and would make
+    # the read-back below report a player that is not safe as one that is.
 
 
 def assert_tls_verification(client: MpvIpc, label: str) -> None:
@@ -94,15 +319,14 @@ def assert_tls_verification(client: MpvIpc, label: str) -> None:
     consulted: the measurement that this fix rests on is a read-back, and a
     `success` reply says nothing about the value that ended up there.
     """
-    client.try_command("set_property", MPV_TLS_VERIFY_PROP, True)
-    client.try_command("set_property", MPV_STREAM_OPTS_PROP, {})
-    verify, count = read_tls_state(client)
-    if tls_properties_safe(verify, count):
+    secure_player(client)
+    verify, count, unpinned = read_tls_state(client)
+    if tls_properties_safe(verify, count, unpinned):
         return
-    # Diagnosable without being a sink: a three-valued flag and a count, never
-    # a key or a value out of that map.
-    log("%s: %s reads %r and %s holds %r entries after being set"
-        % (label, MPV_TLS_VERIFY_PROP, verify, MPV_STREAM_OPTS_PROP, count))
+    # Diagnosable without being a sink: a three-valued flag and two counts,
+    # never a key or a value out of either map.
+    log("%s: %s reads %r and %s holds %r entries after being set, and %r other TLS pins are not held"
+        % (label, MPV_TLS_VERIFY_PROP, verify, MPV_STREAM_OPTS_PROP, count, unpinned))
     raise HelperError("tls_unverified", "the player would not verify the stream's certificate")
 
 
@@ -126,14 +350,72 @@ def migrate_tls(client: MpvIpc) -> dict[str, Any]:
     unchanged process, `set_property tls-verify True` read back True and the
     attacker's log went from one GET to none, with a plain http:// stream from
     a second local server still playing as the positive control.
+
+    Since 2026-10-29 `unpinned` rides with the two older readings: a player
+    started by 0.15.0 or earlier holds none of the pin block, so the demuxer's
+    TLS keys and load-auto-profiles are migrated here too, and a per-file
+    profile in its mpv.conf that could undo a loose option after this read is
+    counted -- that one no migration can fix, so the shell stops the player.
     """
-    verify, count = read_tls_state(client)
-    if tls_properties_safe(verify, count):
-        return {"verify": verify, "optionCount": count, "migrated": False}
-    client.try_command("set_property", MPV_TLS_VERIFY_PROP, True)
-    client.try_command("set_property", MPV_STREAM_OPTS_PROP, {})
-    verify, count = read_tls_state(client)
-    return {"verify": verify, "optionCount": count, "migrated": True}
+    verify, count, unpinned = read_tls_state(client)
+    if tls_properties_safe(verify, count, unpinned):
+        return {"verify": verify, "optionCount": count, "unpinned": unpinned, "migrated": False}
+    secure_player(client)
+    verify, count, unpinned = read_tls_state(client)
+    return {"verify": verify, "optionCount": count, "unpinned": unpinned, "migrated": True}
+
+
+def pin_adopted_player(client: MpvIpc, sock_path: str) -> int:
+    """The pins that are not about the TLS peer, applied over IPC to a player
+    this helper did not start (2026-10-29, D-SINK-16's shape): best effort,
+    read first and written only where they differ, never a reason to refuse.
+    Each was measured taking effect at runtime on a pre-pin player: watch
+    history stopped, the select menu unloaded, nested unsafe entries were
+    refused, ${playlist} drew the title, the log stopped growing; and
+    (lane-p1b, 2026-10-29) drag-and-drop read off, the paste key bound to
+    `ignore` (a later keypress appended nothing), the OSC key set. Not
+    reset-on-next-file, which is read with the TLS pins instead (D-SINK-60).
+    And (lane-p1c, 2026-10-29) prefetch-playlist off (D-SINK-63) and the
+    console unloaded (D-SINK-61: mpv unloads a built-in script when its
+    load- option goes off at runtime, as load-auto-profiles showed); and
+    (lane-p2a, 2026-10-29) the stats overlay unloaded the same way (D-SINK-67:
+    measured, `script-binding stats/...` is then refused).
+    Returns how many writes did not take, for the journal."""
+    where = player_dirs(sock_path)
+    failed = 0
+    # D-PLY-46 (2026-10-29): mpv answers drag-and-drop's `no` as the boolean
+    # False (measured), and is set with the choice's name.
+    # Not reset-on-next-file: it is read with the TLS pins and never written
+    # (read_tls_state says why, D-SINK-60).
+    for prop, value, write in (("load-select", False, False), ("save-watch-history", False, False),
+                               ("load-unsafe-playlists", False, False),
+                               ("osd-playlist-entry", "title", "title"), ("log-file", "", ""),
+                               ("watch-later-dir", where["watchLater"], where["watchLater"]),
+                               ("drag-and-drop", False, "no"), ("prefetch-playlist", False, False),
+                               ("load-console", False, False), ("load-stats-overlay", False, False)):
+        ok, current = client.try_command("get_property", prop)
+        if ok and current == value:
+            continue
+        written, _ = client.try_command("set_property", prop, write)
+        if not written:
+            failed += 1
+    # D-PLY-46: the paste key, as the pin block's input-commands sets it at
+    # start (measured over IPC too: a later keypress appended nothing).
+    written, _ = client.try_command("keybind", "ctrl+v", "ignore")
+    failed += 0 if written else 1
+    # D-SINK-52: the OSC's title middle-click, one key of the user's
+    # script-opts (the OSC re-reads its options when the property changes).
+    ok, opts = client.try_command("get_property", "script-opts")
+    if not (ok and isinstance(opts, dict) and opts.get(MPV_OSC_TITLE_KEY) == MPV_OSC_TITLE_VALUE):
+        written, _ = client.try_command("change-list", "script-opts", "append",
+                                        "%s=%s" % (MPV_OSC_TITLE_KEY, MPV_OSC_TITLE_VALUE))
+        failed += 0 if written else 1
+    # The previous helper set the channel's headers as GLOBALS; an entry no
+    # gate saw would still be sent them (apply_channel's comment).
+    for prop, value in neutral_header_properties(default_user_agent(client)):
+        written, _ = client.try_command("set_property", prop, value)
+        failed += 0 if written else 1
+    return failed
 
 
 def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] | None = None,
@@ -175,15 +457,43 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     # neighbour, then measured on a real player.
     for prop in ("aid", "sid"):
         client.try_command("set_property", prop, "auto")
-    for prop, value in (("title", MPV_RAW_PREFIX + target["name"]), ("force-media-title", target["name"])):
+    # F-SINK-14 (2026-10-29): the name the window title and media-title show
+    # is the one the guide row shows -- redact_urls, Model.sinkText's mirror
+    # (the shared shown-names fixture, dev branch, runs both). A name holding a
+    # credentialed URL put the whole URL in the compositor's toplevel title,
+    # where every client that lists windows reads it. `$>` stays (S-01).
+    # F-SINK-16: and with no control character in it. The parse keeps a
+    # playlist's C0 and C1 controls in a name (ESC, BEL and U+009B measured),
+    # and a toplevel title is printed raw by tools a user runs in a terminal;
+    # a name never means anything by one, so none goes to the player. Dropped
+    # BEFORE the redaction, so a tab or a line break inside a password no
+    # longer splits the URL there (D-SINK-34's cost) on this sink.
+    shown = redact_urls(_CONTROL_CHARS.sub("", target["name"]))
+    for prop, value in (("title", MPV_RAW_PREFIX + shown), ("force-media-title", shown)):
         ok, _ = client.try_command("set_property", prop, value)
         if not ok:
             log("%s: mpv refused to set %s" % (label, prop))
-    for prop, value in header_properties(target["headers"], client):
+    # 2026-10-29 (D-PLY-44, D-SINK-55 and the per-file headers): the GLOBAL
+    # header properties are set to values that belong to no provider, every
+    # load, and NOT best effort -- a player last driven by an older helper
+    # holds the previous channel's headers there. The channel's own headers,
+    # and the demuxer that refuses a nested playlist, ride the loadfile as
+    # per-file options (channel_load_options), so they reach this channel and
+    # its HLS segments and no entry the helper did not load.
+    default = default_user_agent(client)
+    for prop, value in neutral_header_properties(default):
         client.command("set_property", prop, value)
     if stash is not None:
         client.try_command("set_property", USER_DATA_STASH, dict(stash, entryId=None))
-    data = client.command("loadfile", target["url"], "replace")
+    # The positional form, the options argument a JSON object: mpv 0.41.0
+    # takes `index` before `options` (-1 is its default), and a JSON object
+    # there is read as a map, key by key -- never the comma-separated
+    # key=value string the same argument as TEXT is parsed as (measured: as
+    # text, `X-A: 1,2` arrived as `X-A: 1`). The named form
+    # ({"name": "loadfile", ...}) was measured equal; the array form is the
+    # one every double of the player and the harness stub read.
+    data = client.command("loadfile", target["url"], "replace", -1,
+                          channel_load_options(target, default))
     entry_id = data.get("playlist_entry_id") if isinstance(data, dict) else None
     if not isinstance(entry_id, int) or isinstance(entry_id, bool) or entry_id <= 0:
         entry_id = None
@@ -204,6 +514,45 @@ def apply_channel(client: MpvIpc, target: dict[str, Any], stash: dict[str, Any] 
     return entry_id
 
 
+def channel_load_options(target: dict[str, Any], default_agent: str) -> IpcPairs:
+    """The PER-FILE options of the helper's own loadfile of a channel, in
+    order (2026-10-29). Per file, because mpv restores each of them when the
+    file ends and applies none of them to an entry the helper did not load.
+
+    - `demuxer=lavf` (D-PLY-44, owner: refuse nested playlists). mpv's own
+      playlist demuxer expands a plain M3U or PLS a stream server returns, and
+      counts srt and rtp as safe for a network playlist: its entries bound
+      srt and rtp listeners on 0.0.0.0 (measured). With libavformat as the
+      only demuxer a nested plain playlist is `unrecognized file format` --
+      nothing fetched, nothing bound -- while an HLS master, an HLS variant
+      and MPEG-TS play (measured). The cost the owner accepted: a channel
+      whose URL is itself a .m3u or .pls redirector stops playing, and the
+      user is told so (Model.unopenedFormatSentence).
+    - `user-agent`, `referrer`: the channel's, or mpv's default
+      (`default_agent`, default_user_agent's) and none.
+    - `http-header-fields-clr`, then one `http-header-fields-append` per
+      header: `-append` takes its value VERBATIM, where the plain list option
+      splits at every comma (measured: three -append keys arrived as three
+      headers with `,`, `=`, quotes and a trailing backslash intact; one
+      plain key split `X-A: 1,2` into `X-A: 1`). The -clr makes the list
+      exactly the channel's whatever a per-file profile of the user's set.
+    - `demuxer-lavf-o-append=protocol_whitelist=...,rtp,udp` for an rtsp
+      channel only (D-SINK-55): its demuxer opens the RTP transport itself,
+      which the user's own --rtsp-transport=udp needs; every other entry keeps
+      the pin block's list.
+    """
+    user_agent, referrer, fields = header_values(target.get("headers") or {})
+    pairs = IpcPairs([("demuxer", "lavf"),
+                      ("user-agent", user_agent or default_agent),
+                      ("referrer", referrer),
+                      ("http-header-fields-clr", "")])
+    pairs.extend(("http-header-fields-append", line) for line in fields)
+    if stream_scheme(str(target.get("url") or "")) == "rtsp":
+        pairs.append(("demuxer-lavf-o-append", "%s=%s,%s" % (MPV_DEMUXER_WHITELIST_KEY, MPV_PROTOCOL_WHITELIST,
+                                                             MPV_RTSP_PROTOCOLS)))
+    return pairs
+
+
 def applied_by_another_client(client: MpvIpc) -> dict[str, Any] | None:
     """What some other client has already applied to a player this helper has
     just SPAWNED, or None if the player is still as it was born.
@@ -214,7 +563,8 @@ def applied_by_another_client(client: MpvIpc) -> dict[str, Any] | None:
     against real mpv 0.41, headless: the node answers `property not found`
     until something writes it, and the count answers 0 until something loads.
     Nothing on the launch argv can put a file there either (`filter_mpv_args`
-    keeps bare tokens off it, and `--idle=once` idles). So a channel sitting
+    keeps bare tokens off it, refuses `--playlist` -- which did put entries
+    there until 2026-10-29 -- and `--idle=once` idles). So a channel sitting
     there NOW was applied by a client that connected after the spawn, and
     every such client is carrying an intent this start was issued BEFORE.
 
@@ -319,8 +669,28 @@ def owner_claim(owner_pid: int) -> dict[str, Any] | None:
 FIRST_LOAD_REASON_MAX = 512
 
 
-def first_load_result(state: str, reason: str) -> dict[str, Any]:
-    return {"state": state, "reason": reason[:FIRST_LOAD_REASON_MAX].rstrip()}
+def first_load_result(state: str, reason: str, ended: str = "",
+                      file_error: str = "") -> dict[str, Any]:
+    """The `firstLoad` member of `player start`'s reply.
+
+    D-PLY-36 (2026-10-28): a "failed" says WHICH ending the window saw, in
+    two additive members an older shell ignores. `ended` is "end-file" when
+    mpv sent an end-file error for the start's own entry, with mpv's
+    `file_error` beside it in `fileError` (one of its fixed strings, redacted
+    and cut like the reason; D-PLY-37 reads an output that could not be
+    opened from it), or "closed" when mpv closed the connection, which under
+    --idle=once is its death with no end-file. The shell's Model.deathReport
+    marks the channel only for the first, and not even then for an output
+    of this machine (the shared fixture player-endings.json, dev branch
+    tests, run by both suites). "playing" and "unknown" carry neither
+    member.
+    """
+    result = {"state": state, "reason": reason[:FIRST_LOAD_REASON_MAX].rstrip()}
+    if ended:
+        result["ended"] = ended
+    if ended == "end-file":
+        result["fileError"] = file_error[:FIRST_LOAD_REASON_MAX].strip()
+    return result
 
 
 def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
@@ -376,18 +746,39 @@ def observe_first_load(client: MpvIpc, entry_id: int | None, timeout: float,
                     # The log line says what actually went wrong; mpv's own
                     # file_error is a generic "loading failed". Both are
                     # already redacted, here, inside python (section 6).
-                    return first_load_result("failed", last_error or verdict["reason"])
+                    # D-PLY-36: and the reply says it was an end-file, with
+                    # mpv's own file_error beside the reason.
+                    file_error = redact_urls(str(message.get("file_error") or ""))
+                    return first_load_result("failed", last_error or verdict["reason"],
+                                             "end-file", file_error)
                 return {"state": "unknown", "reason": ""}
     if state == "failed" and not reason:
         reason = last_error or PLAYER_GENERIC_FAILURE
-    return first_load_result(state, reason)
+    # D-PLY-36: the only "failed" that reaches here is mpv closing the
+    # connection -- a death with no end-file for this entry.
+    return first_load_result(state, reason, "closed" if state == "failed" else "")
 
 
 # -------------------------------------------------------------- the verbs
 
 def player_runtime(sock_path: str) -> str:
+    """The socket's folder, made 0700 (rule 6) -> its path.
+
+    D-PLY-30 (2026-10-27): every way this can fail is a refusal in the
+    player verbs' own reply shape (`kind: player.<verb>`), never main()'s
+    `internal` with an exception and a path. A link to nothing, or something
+    that is not a folder, at the folder or above it is R25c's
+    `folder_unusable` with R25c's sentence, which names the path (the
+    journal keeps it; Model.statusReason shows the user a sentence). Any
+    other failure to make it -- a parent this user cannot write, a full or
+    read-only filesystem -- is `runtime_unwritable`."""
     directory = os.path.dirname(sock_path)
-    ensure_private_dir(directory)
+    try:
+        ensure_private_dir(directory)
+    except FolderUnusable as error:
+        raise HelperError("folder_unusable", error.sentence) from None
+    except OSError as io_error:
+        raise runtime_unwritable("make the player's runtime folder", io_error) from None
     return directory
 
 
@@ -434,6 +825,19 @@ def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
         client = probe_client(sock_path, ipc_timeout)
         if client is not None:
             keep = _connected_pid(client, found)
+            # D-SINK-39, D-SINK-16's shape: this player was forked by whoever
+            # ran before, so its core limit is whatever it inherited then.
+            # Lowered here, before apply_channel feeds it anything; a refusal
+            # is impossible for a live same-uid process, so it is reported
+            # rather than fatal (limit_core_of says why).
+            if not limit_core_of(keep):
+                warnings.append("could not limit the adopted player's core dumps")
+            # 2026-10-29: the pins that are not about the TLS peer (the TLS
+            # ones are apply_channel's, before the load). Best effort, so a
+            # journal line and not a warning the shell would show.
+            failed = pin_adopted_player(client, sock_path)
+            if failed:
+                log("player start: the adopted player refused %d pin(s)" % failed)
             others = [record for record in found if record["pid"] != keep]
             if others:
                 # Never rung 1 here: `quit` travels over the shared socket and
@@ -447,9 +851,19 @@ def adopt_or_spawn(sock_path: str, mpv_args: list[str], spawn_timeout: float,
     settle_socket(sock_path)
     where = dirs or player_dirs(sock_path)
     ensure_player_dirs(where, warnings)
-    launched = spawn_detached(mpv_launch_argv(sock_path, mpv_args, where), where["cwd"])
-    errors: list[str] = []
-    client = wait_for_socket(sock_path, spawn_timeout, ipc_timeout, launched["stderrFd"], errors)
+    # D-SINK-47: the user's tokens go to mpv in a private file, never on its
+    # argv (mpv_launch_argv names the file). Written before the spawn, removed
+    # as soon as the socket answers -- mpv binds it only after reading its
+    # whole command line -- and on every way out of the launch.
+    options = mpv_args_path(sock_path, where)
+    if mpv_args:
+        write_mpv_args(options, mpv_args)
+    try:
+        launched = spawn_detached(mpv_launch_argv(sock_path, mpv_args, where), where["cwd"])
+        errors: list[str] = []
+        client = wait_for_socket(sock_path, spawn_timeout, ipc_timeout, launched["stderrFd"], errors)
+    finally:
+        remove_mpv_args(options)
     if client is None:
         drain_launch_stderr(launched["stderrFd"], errors)
         os.close(launched["stderrFd"])
@@ -644,7 +1058,18 @@ def player_probe(args: argparse.Namespace) -> int:
             # this probe learns, a player that is not verifying stops being one
             # here rather than at the next zap.
             payload["tls"] = migrate_tls(client)
+            # 2026-10-29: and the pins that are not about the TLS peer, best
+            # effort (pin_adopted_player); the readings above are the gate.
+            failed = pin_adopted_player(client, sock)
+            if failed:
+                log("player probe: the adopted player refused %d pin(s)" % failed)
             payload["pid"] = _connected_pid(client, found)
+            # D-SINK-39, beside the TLS migration and for the same reason: the
+            # reattach is the one moment a pre-upgrade player can be kept from
+            # dumping its memory before the new code feeds it. prlimit, not a
+            # property: nothing over IPC reaches a resource limit.
+            if not limit_core_of(payload["pid"]):
+                log("player probe: could not limit the player's core dumps")
             ok, idle = client.try_command("get_property", "idle-active")
             payload["idle"] = bool(idle) if ok and idle is not None else None
             ok, version = client.try_command("get_property", "mpv-version")
@@ -1302,42 +1727,63 @@ def read_rewind(client: MpvIpc, stash: Any = None, paused: Any = None, write: bo
     return rewind_view(position, cache, zero, paused, paused_for_cache, entry_id, wall)
 
 
-def await_seek_outcome(client: MpvIpc, deadline: float) -> str | None:
-    """After the reply to `seek`: "landed" when the `seek` event arrives
-    (mpv executed it), "refused" when the error-level refusal line arrives
-    (mpv dropped it), None when neither did by `deadline`. The caller must
-    have subscribed with `request_log_messages error`. The line's text is
-    matched, never printed: it is mpv's own sentence, but the rule for this
-    sink is nothing from the player reaches stdout unexamined.
+def await_seek_outcome(client: MpvIpc, deadline: float) -> tuple[str | None, bool]:
+    """After the reply to `seek`: ("landed", settled) once the `seek` event
+    has arrived (mpv executed it), ("refused", False) when the error-level
+    refusal line arrives (mpv dropped it), (None, False) when neither did
+    by `deadline`. `settled` is True when the `playback-restart` event
+    followed the `seek` event before `deadline`: mpv's "the decoder is
+    producing frames at the new position", which is the DECODED landing
+    (F-RWD-8). The `seek` event alone is the request echoed -- the
+    F-RWD-15 probe read time-pos after it and saw the target 12 of 12,
+    with `playback-restart` 26-40 ms later and the picture up to 5.1 s
+    past the target on the next keyframe -- so a read taken on `seek`
+    reports what was asked, not where the player is, and the OSD line
+    composed from it drew the wrong number for up to a status tick. The
+    wait for the restart costs those 26-40 ms against SEEK_EVENT_BOUND_S
+    and the 300 ms per-press budget; a `seek` with no restart by the bound
+    is still "landed" (the read decides, as before), with `settled` False
+    so the reply says which it got and the status tick stays the truth.
+    The caller must have subscribed with `request_log_messages error`. The
+    line's text is matched, never printed: it is mpv's own sentence, but
+    the rule for this sink is nothing from the player reaches stdout
+    unexamined.
 
     A `seek` event carries no origin, so one raised by a seek that is not
     ours -- the user's own arrow key in the player window at the same
-    instant -- ends the wait early (review nit, accepted): the read that
-    follows still decides by the threshold, and the status tick re-syncs."""
+    instant -- counts as ours (review nit, accepted): the read that
+    follows still decides by the threshold, and the status tick re-syncs.
+    A `playback-restart` is counted only after a `seek` was seen."""
+    landed = False
     while True:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            return None
+            return ("landed" if landed else None), False
         events = client.drain_events(deadline)
         if events is None:
-            return None
+            return ("landed" if landed else None), False
         for event in events:
             name = event.get("event")
             if name == "seek":
-                return "landed"
-            if name == "log-message" and SEEK_REFUSAL_TEXT in str(event.get("text", "")):
-                return "refused"
+                landed = True
+            elif name == "playback-restart" and landed:
+                return "landed", True
+            elif name == "log-message" and SEEK_REFUSAL_TEXT in str(event.get("text", "")):
+                return "refused", False
 
 
 def player_seek(args: argparse.Namespace) -> int:
     """`player seek --by N` (signed seconds, negative is back) or `--live`.
 
     One run: read time-pos and the cache state, clamp (clamp_seek), issue ONE
-    absolute seek, wait for the `seek` event or the refusal line (bounded,
-    F-RWD-15), read time-pos again, decide moved or refused by the
+    absolute seek, wait for the `seek` event and then the `playback-restart`
+    that says the decoder landed, or the refusal line (bounded, F-RWD-15,
+    F-RWD-8), read time-pos again, decide moved or refused by the
     not-moved threshold, take the zero point if none exists, put one
-    numbers-only line on the OSD when the request was honoured, and reply.
-    Side-effect-free when no player is there, like `pause`.
+    numbers-only line on the OSD when the request was honoured, and reply;
+    `settled` in the reply says whether the restart was seen, so `applied`
+    is the decoded landing when it is True and the request as echoed when
+    it is False. Side-effect-free when no player is there, like `pause`.
     """
     sock = socket_path(args.socket)
     mode = "live" if args.live else "by"
@@ -1346,7 +1792,7 @@ def player_seek(args: argparse.Namespace) -> int:
         "ok": True, "kind": "seek", "running": False, "mode": mode,
         "requested": by if mode == "by" else None, "applied": 0,
         "clamped": False, "clampedTo": None, "refused": True,
-        "atFloor": False, "atEdge": False, "rewind": None,
+        "atFloor": False, "atEdge": False, "rewind": None, "settled": False,
     }
     if not find_player(sock):
         emit(payload)
@@ -1395,7 +1841,8 @@ def player_seek(args: argparse.Namespace) -> int:
         else:
             # The reply to `seek` means queued, not executed (F-RWD-15): the
             # read that decides moved-or-refused waits for the event that
-            # says it ran, or the line that says it was dropped, or the
+            # says it ran AND the restart that says the decoder landed
+            # (F-RWD-8), or the line that says it was dropped, or the
             # bound. The outcome decides only WHEN to read; the verdict is
             # the read against the threshold, as measured (12.2) -- a
             # `refused` clause on the outcome was an equivalent mutant,
@@ -1404,7 +1851,7 @@ def player_seek(args: argparse.Namespace) -> int:
             client.try_command("request_log_messages", "error")
             sent, _ = client.try_command("seek", plan["target"], "absolute")
             if sent:
-                await_seek_outcome(client, time.monotonic() + SEEK_EVENT_BOUND_S)
+                _, payload["settled"] = await_seek_outcome(client, time.monotonic() + SEEK_EVENT_BOUND_S)
             ok, pos = client.try_command("get_property", "time-pos")
             after = _finite(pos) if ok else None
             if not sent or after is None or before is None or abs(after - before) < SEEK_MOVED_THRESHOLD_S:

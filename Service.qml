@@ -73,7 +73,11 @@ Item {
   // ---- detached player timings (ARCHITECTURE-PLAYER.md 4.4, 4.7, spike C6)
   readonly property int playerSocketRetryMs: 250   // reattach tick
   readonly property int playerSocketTries: 12      // burst cap: 12 x 250 ms = 3 s (C6)
-  readonly property int playerTimeoutMs: 12 * 1000 // watchdog for one player verb
+  // D-PLY-35: the watchdog over the verb the player slot is running, derived
+  // from the helper's own bounds for THAT verb (Model.playerWatchdogMs says
+  // how); with no verb running, the same Timer bounds the birth edge, 12 s.
+  // It used to be one 12 s for every verb, under a start's own 14 s.
+  readonly property int playerTimeoutMs: Model.playerWatchdogMs(root.playerKind)
   // Watchdog for one `play` or `status` helper run. `controlProc` was the
   // only one of the four Processes without one, and it is the one that holds
   // the single control slot: a helper that never exits blocks every later
@@ -244,9 +248,22 @@ Item {
   // every source swap (clearSourceData), so a resolved hint goes to "" on a
   // swap, and wiping epg-now.json / epg-status.json on a swap would be a new
   // defect rather than the setting-owns-its-cache rule it looks like.
+  // D-SINK-40: the active playlist's URL decides whether a hint whose
+  // LITERAL host is on this machine or a local network may be adopted (only
+  // on the playlist's own host); the helper's connect-time check decides
+  // the rest.
   readonly property var epgSource: Model.resolveEpgUrl({
     userUrl: root.activeEpgUrl,
-    hint: root.channelsMeta ? root.channelsMeta.epgUrlHint : ""
+    hint: root.channelsMeta ? root.channelsMeta.epgUrlHint : "",
+    playlistUrl: root.playlistUrl
+  })
+  // D-SINK-40: what the active Sources row says beyond "EPG from playlist":
+  // a hint that was refused, naming its host, or one adopted over plain http
+  // under an https playlist (Model.epgHintRowState).
+  readonly property var epgHintState: Model.epgHintRowState({
+    userUrl: root.activeEpgUrl,
+    hint: root.channelsMeta ? root.channelsMeta.epgUrlHint : "",
+    playlistUrl: root.playlistUrl
   })
   // The URL every EPG fetch uses. Redacted everywhere else: `epgSourceHost`
   // is what any sink gets, and the URL itself only ever reaches the helper's
@@ -255,6 +272,15 @@ Item {
   readonly property string epgUrlOrigin: root.epgSource.origin
   readonly property bool epgFromPlaylist: root.epgSource.origin === Model.EPG_ORIGIN_PLAYLIST
   readonly property string epgSourceHost: root.epgSource.host
+  // D-SINK-40: where a guide fetch's URL came from, for the helper's
+  // connect-time policy (Model.fetchEnvironmentFor): the origin above, the
+  // active playlist's URL (only its host is passed on) and the class its
+  // first hop connected to, from channels.json.
+  readonly property var epgProvenance: ({
+    origin: root.epgUrlOrigin,
+    playlistUrl: root.playlistUrl,
+    playlistClass: root.channelsMeta && root.channelsMeta.sourceClass ? String(root.channelsMeta.sourceClass) : ""
+  })
   // The one line that makes the provenance visible, for the Sources screen
   // and the source form: "" when the URL is the user's own.
   readonly property string epgOriginNotice: Model.epgOriginNotice(root.epgSource.origin)
@@ -288,6 +314,20 @@ Item {
   property bool probeTimedOut: false
   property var probeAdd: null                          // pending record of an add probe (recorded only when it succeeds, SR23)
   property var probeEdit: null                         // pending replacement record of a URL edit (applied only when its probe succeeds, SR7)
+  // D-SRC-69 (2026-10-27). A probe asked for while a cache job that could
+  // take its folder RUNS (Model.probeWaitsFor: a prune that does not keep
+  // it, a removal of that key) is HELD: probingKey and the rest are set and
+  // `probing` reads true, but the helper starts only at that job's exit
+  // (handleCacheExit -> launchProbe); every job decided meanwhile counts it
+  // in flight (cacheJobContext).
+  property bool probeHeld: false
+  // D-SRC-69: probes started this session, and per key the count of the
+  // LAST one that started writing into sources/<key>. A cache job carries
+  // the count it was queued at, so a removal can tell a folder it was asked
+  // to take from one a later probe has started filling (Model.cacheJobArgs).
+  // Keys only, memory only.
+  property int sourceProbeSeq: 0
+  property var sourceProbeClaims: ({})
   property var sourceErrors: ({})                      // session-only { key: reason }, URL-free (Model.statusReason)
   // D16 / SR8: the validation result when the `playlistUrl` INPUT is set but
   // invalid. Since R21 an input exists only during the migration, so this is
@@ -321,7 +361,7 @@ Item {
   // reasons only, never a value. The harness reads it through pointerState
   // to count the reports; the user reads the notification and the console.
   property var entryInputReports: []
-  property var cacheQueue: []                          // FIFO of { args, onDone } for cacheProc (section 4.7)
+  property var cacheQueue: []                          // FIFO of { args, onDone, seq } for cacheProc (section 4.7); a prune's args are ["prune"] until it runs (D-SRC-69)
   property var cacheJob: null
   // R25a (D-SINK-19 round 15, D-SRC-30): the texts asked for since the last
   // save that LANDED -- an echo is only a text still in flight. stateFile's
@@ -341,7 +381,7 @@ Item {
   // simply never matches again.
   property var preparedLru: []
   readonly property int preparedLruSize: 2
-  readonly property bool probing: sourceProbeProc.running
+  readonly property bool probing: sourceProbeProc.running || root.probeHeld
   readonly property string probingId: probingKey
   // D-SINK-19. From the state, not by matching a URL. Model.activeKeyOf
   // resolves a key that names no record to "", so an evicted source, a CLI
@@ -365,7 +405,7 @@ Item {
   // `EPG from playlist` rather than `EPG` (M4-01 repair 3): the user must be
   // able to tell a URL the provider declared from one they typed, which is
   // the whole reason the hint is not persisted.
-  readonly property var sources: Model.sourceViews(root.userState, root.activeSourceKey, root.nowSec, root.sourceErrors, root.epgFromPlaylist)
+  readonly property var sources: Model.sourceViews(root.userState, root.activeSourceKey, root.nowSec, root.sourceErrors, root.epgFromPlaylist, root.epgHintState)
 
   // ---- data (read by Guide.qml / BarWidget.qml; never mutated by them)
   property var channels: []                 // Model.prepareChannels output, in the ACTIVE order
@@ -408,6 +448,9 @@ Item {
   readonly property string lastUpdated: Model.formatClock(playlistStatus && playlistStatus.fetchedAt ? playlistStatus.fetchedAt : (channelsMeta && channelsMeta.generatedAt ? channelsMeta.generatedAt : 0))
   readonly property string statusReason: Model.statusReason(playlistStatus)
   readonly property string statusHost: Model.statusHost(playlistStatus) || root.sourceHost
+  // D-SRC-71: the failed status's code, so the guide's "<reason> from
+  // <host>" names no host for a local failure (Model.failureFromHost).
+  readonly property string statusCode: Model.statusCode(playlistStatus)
   readonly property string epgReason: Model.statusReason(epgStatus)
   // R8 status vocabulary: ready | loading | refreshing | cached | error
   readonly property string status: {
@@ -694,6 +737,7 @@ Item {
   property string stateLoadKind: ""
   property string stateInitFound: ""
   property bool stateLoadRetried: false
+  property bool stateInitRetried: false   // D-REL-8: the one re-run of the init has been spent
   property string stateWriteBlocked: ""
   property bool stateBlockTold: false
   // R23c: set by stateInitWatchdog when it terminates the init; read once,
@@ -778,17 +822,20 @@ Item {
   // already moved off. { playlistUrl, epgUrl } or null.
   property var pendingPersist: null
   property bool configShieldRerun: false
-  // Which persist failure happened last. Since R13 no source call returns
-  // it (a refused entry mirror is logged, not reported, SR25 as amended
-  // 2026-10-12); it is kept as the one record of the LAST failure for the
-  // harness and for a reader of the log: "persist_failed" (no writable bar
-  // entry), "config_unsafe" (the host settings file could not be made
-  // private, D-SINK-18) or "state_write_failed" (the plugin's own state.json
-  // could not be written, which is the failure the guide now reports).
-  // The distinction is worth carrying because the sentences give opposite
-  // advice -- persist_failed sends the user to `omarchy bar set`, which is
-  // precisely what must not happen with a credentialed URL.
-  property string lastPersistFailure: "persist_failed"
+  // D-SRC-49 / D-SINK-22 (b)(c): a `state mode` asked while one runs is
+  // folded into one re-run on exit (the configShieldRerun shape); the count
+  // is what the harness and the IPC status read.
+  property bool stateModeRerun: false
+  property int stateModeRuns: 0
+  // A string property holding the LAST persist failure's code USED TO BE
+  // HERE (D-SRC-67, P23 lane A's second finding, 2026-10-24, removed by
+  // lane A2 the same day): set by the three failure sites and
+  // the D-SRC-43 clear, and READ BY NOTHING -- not the guide, not the model,
+  // not the IPC summary. The reason a failure is reported with is the
+  // sourcesPersistFailed(reason) signal's argument, carried to the guide's
+  // sentence by Model.persistFailureMessage; a property set in four places
+  // and read in none looked like a surface and was not one. A node check
+  // pins that no shipped source names it, this comment included.
   // D-LIVE-15: a `play` over IPC that finds no socket (player just
   // relaunched) or no answer is retried with backoff.
   property int playRetries: 0
@@ -850,6 +897,20 @@ Item {
   // the same dead stream (4.8 signals 1 and 3) and either can win the race;
   // this keeps the user's toast count at one.
   property string notifiedFailureId: ""
+  // D-HOST-5 (owner, 2026-10-28): one slot per notice kind -- the id the
+  // notification server returned for the kind's last card, whether a post of
+  // it is in flight, and the notice held behind it (Model.notifyPost). In
+  // memory only: the server is this shell's own and its ids restart with it.
+  property var notifySlots: Model.keyedMap()
+  // D-PLY-35: set by playerWatchdog when it TERMs the helper, read once by
+  // handlePlayerResult. A start or restart the watchdog ended has answered
+  // nothing about the player: it may have spawned one and loaded the channel
+  // into it before the signal landed (measured).
+  property bool playerTimedOut: false
+  // D-PLY-35: a start the watchdog ended ({kind, intent}: its verb and the
+  // channel it was for) while the reattach probe finds out what it left;
+  // null otherwise. Settled by settleTimedOutPlay() on the probe's answer.
+  property var timedOutPlay: null
   // The channel of the most recent failure. The guide reads it to decide
   // whether an open is "come back after a dead stream" or a fresh start
   // (UX 1.3). Distinct from `failedAt`, which is every mark ever: this is
@@ -1028,7 +1089,7 @@ Item {
     var channel = root.channelIndex[String(id || "")]
     if (!channel || !channel.url) return false
     if (!root.mpvAvailable) {
-      whichProc.running = true
+      root.runWhichMpv()
       root.notify("mpvMissing", {})
       return false
     }
@@ -1329,7 +1390,8 @@ Item {
     }
     var id = Model.channelId(found)
     var label = String(found.chnoLabel || "")
-    var name = String(found.name || "")
+    // F-SINK-14: the reply prints the name the bar and the row print.
+    var name = Model.sinkText(found.name)
     // play() refuses when mpv is missing or the entry has no URL. Reporting
     // that as ok:true would be a lie about the one thing this verb exists to
     // do; the success shape is unchanged for the case it describes.
@@ -1829,18 +1891,62 @@ Item {
     epgDebounce.restart()
   }
 
+  // D-HOST-5 (owner, 2026-10-28). Every notice the plugin posts goes through
+  // here, and through its kind's slot (Model.notifyPost): the post runs as a
+  // Process of its own, `omarchy-notification-send -p` prints the id the
+  // server returned, and the next post of that kind sends it back as `-r`,
+  // so a repeated notice refreshes its card in place instead of stacking a
+  // new one. Until D-HOST-5 the post was detached with a fixed `-r`, which
+  // Omarchy's server never replaces. A post of a kind already in flight is
+  // held and goes out when that one answers; kinds never wait on each other.
   function notify(event, params) {
-    var argv = Model.notifyArgv(event, params)
-    if (argv) Quickshell.execDetached(argv)
+    var step = Model.notifyPost(root.notifySlots, event, params)
+    root.notifySlots = step.slots
+    if (step.argv) root.runNotify(String(event), step.argv)
+  }
+
+  // One post of `event`: a Process from notifyComponent, argv only (the
+  // wrapper is busctl underneath, no shell). Bounded by its own watchdog
+  // (Model.NOTIFY_POST_TIMEOUT_MS). Should the object not be made, the post
+  // still goes out, detached and untracked as every post did before
+  // D-HOST-5 -- a notice is never dropped for want of its id.
+  function runNotify(event, argv) {
+    var run = notifyComponent.createObject(root, { kind: event })
+    if (run === null || run === undefined) {
+      console.warn("omarchy-iptv: could not make a notification process; posting it untracked")
+      Quickshell.execDetached(argv)
+      root.handleNotifyExit(null, event, 1, 0, "")
+      return
+    }
+    run.command = argv
+    run.running = true
+  }
+
+  // A post answered (or was ended). The slot keeps the id it printed, or
+  // none, and a notice of the same kind held meanwhile goes out with it.
+  // `exitStatus` non-zero is a crash or a signal (the watchdog's TERM): its
+  // stdout is no answer.
+  function handleNotifyExit(run, event, exitCode, exitStatus, text) {
+    var step = Model.notifyAnswered(root.notifySlots, event, text, Number(exitStatus) === 0 ? exitCode : -1)
+    root.notifySlots = step.slots
+    if (run) run.destroy()
+    if (step.argv) root.runNotify(event, step.argv)
+  }
+
+  // The post's watchdog fired: a post still running is ended, and its exit
+  // frees the slot (handleNotifyExit) with no id kept.
+  function notifyOverdue(run) {
+    if (!run || !run.running) return
+    console.warn("omarchy-iptv: a notification post exceeded " + Math.floor(Model.NOTIFY_POST_TIMEOUT_MS / 1000) + " s, terminating it")
+    run.signal(15)
   }
 
   // `nowPlaying` as the IPC reports it: the shipped literal plus the playing
   // channel's number (3.3). Null when nothing plays, exactly like the property.
+  // F-SINK-14: composed by Model.ipcNowPlaying, which redacts the name, the
+  // group and the scope it was launched from as the bar and the row do.
   function nowPlayingSummary() {
-    var np = root.nowPlaying
-    if (!np) return null
-    return { id: np.id, name: np.name, group: np.group, chno: root.nowPlayingChno,
-             launchedFrom: np.launchedFrom, since: np.since }
+    return Model.ipcNowPlaying(root.nowPlaying, root.nowPlayingChno)
   }
 
   // JSON summary for the IPC `status` verb; URL-free by construction.
@@ -2118,7 +2224,10 @@ Item {
     var key = root.probingKey
     root.probeCancelled = true
     probeWatchdog.stop()
-    sourceProbeProc.signal(15)
+    // D-SRC-69: a probe still held behind a cache job has no process to
+    // signal; it ends here, as a cancel, through the same exit path.
+    if (root.probeHeld) root.handleProbeExit("")
+    else sourceProbeProc.signal(15)
     return root.sourceResult(true, "ok", "", key)
   }
 
@@ -2377,7 +2486,8 @@ Item {
   function decideStateLoad() {
     if (root.stateLoadKind === "" || root.stateLoadKind === "loaded") return
     var d = Model.stateLoadDecision({ kind: root.stateLoadKind, loadedBefore: root.stateLoaded,
-                                      initFound: root.stateInitFound, retried: root.stateLoadRetried })
+                                      initFound: root.stateInitFound, retried: root.stateLoadRetried,
+                                      initRetried: root.stateInitRetried })
     if (d.act === "fresh") {
       // The one load failure that is a fresh install: FileNotFound, AND the
       // helper found nothing there before it created the file.
@@ -2396,6 +2506,13 @@ Item {
       // true, so with a save of ours held it is ignored as the base, and
       // with none it is applied over an equal memory.
       stateFile.reload()
+    } else if (d.act === "reinit") {
+      // D-REL-8: the init answered nothing readable (an empty or partial stub
+      // mid-update, a stub refusing its parts): run it once more, after a
+      // moment, under the start-up bound again. Its exit lands here again
+      // with a verdict, or with "unknown" a second time and today's path.
+      root.stateInitRetried = true
+      stateInitRetry.restart()
     } else if (d.act === "retry") {
       root.stateLoadRetried = true
       stateFile.reload()
@@ -2519,6 +2636,13 @@ Item {
     var theirs = Model.parseState(text)
     var merged = Model.mergeForeignState(root.landedState, root.userState, theirs, { migrationKey: root.migrationAddedKey })
     for (var i = 0; i < merged.conflicts.length; i++) console.warn("omarchy-iptv: " + Model.mergeConflictLine(merged.conflicts[i]))
+    // D-SRC-33: and the user told once per merge that kept the other
+    // program's version of something over a change made here (the journal
+    // line was the only word until now): Model.mergeConflictNotice's
+    // sentences, through the one notify path -- a field name, never a
+    // value, and since D-SINK-69 never a source's key, which the journal
+    // line above keeps. The in-flight and parked branches reach here alike.
+    if (merged.conflicts.length > 0) root.notify("mergeConflict", { conflicts: merged.conflicts })
     // F1: the record this session's migration added did not land as ours --
     // another program took the place it used ("full"), or added the same
     // playlist itself ("changed"). No marker was carried; the merge re-parked
@@ -2540,6 +2664,17 @@ Item {
     if (drops.length > 0) root.notify("mergeDropped", { dropped: merged.dropped })
     root.landedState = theirs
     root.userState = merged.state
+    // D-SRC-43: the merge equals the other program's file and nothing of
+    // ours is in the air -- the disk holds memory, so a failure flag the
+    // save that never landed raised has nothing left to be about: cleared
+    // here, with the burst record (no echo of ours is coming). The owed
+    // entry mirror (R19d) is NOT paid here; it is paid by the next landed
+    // save, as before -- owedMirrorAction is asked only from onSaved.
+    if (Model.mergeLeavesNothingUnsaved(merged.state, theirs, { savesInFlight: root.stateSavesInFlight })) {
+      if (root.stateSaveFailed) console.warn("omarchy-iptv: the other program's write holds everything this session has; the earlier failed save is no longer pending")
+      root.stateSaveFailed = false
+      root.recentSaves = []
+    }
     var behind = !Model.sameState(merged.state, theirs)
                  || (root.stateSavesInFlight > 0 && !Model.sameState(merged.state, root.lastSaveState))
     var settled = root.userState
@@ -2649,12 +2784,16 @@ Item {
   }
 
   function applyPlaylistStatus(text) {
+    // D-SRC-52: the reason the status being replaced composed, read BEFORE
+    // the reassignment (statusReason is a binding over playlistStatus), so a
+    // good status clears exactly the sentence a failed one left in lastError
+    // and never a play failure's (Model.lastErrorAfterStatus).
+    var previousReason = root.statusReason
     root.playlistStatus = Model.parseHelperStatus(text, "playlist")
+    root.lastError = Model.lastErrorAfterStatus(root.lastError, previousReason, root.playlistStatus)
     if (root.playlistStatus.ok === true) {
       root.playlistLoadWarnings = Model.statusWarnings(root.playlistStatus)
       root.adoptSourceStats(root.playlistStatus)
-    } else {
-      root.lastError = root.statusReason
     }
   }
 
@@ -2710,6 +2849,23 @@ Item {
     })
   }
 
+  // D-SINK-47, D-SINK-48 (2026-10-29): the one way a helper is started on a
+  // Process. Model.helperSpawn takes the private values -- a cache folder
+  // named by a key, a channel id, a scope, the user's mpv tokens -- off the
+  // argv, where /proc shows them to every account, and into the environment;
+  // the command and the environment are assigned together, immediately
+  // before the run, every run, because an assignment REPLACES the previous
+  // value on the same Process (measured on Quickshell 0.3.1, see
+  // Model.fetchEnvironment) and that is what keeps one run's values out of
+  // the next. `environment` is the run's own (a fetch's URL and provenance,
+  // rule 5); {} for every other run.
+  function runHelper(proc, argv, environment) {
+    var spawn = Model.helperSpawn(argv, environment)
+    proc.command = spawn.command
+    proc.environment = spawn.environment
+    proc.running = true
+  }
+
   // Runs against the active source's own cache directory; nothing runs
   // while it is unknown ("" before startup finished, or unconfigured) or
   // while the configured URL is invalid (D16: the status is synthesized).
@@ -2738,15 +2894,16 @@ Item {
     // theirs (parallel rule 1 (dev branch), ownership follows the coupling).
     // R24e (round 14, D-SRC-27): not in the no-write mode -- the remap is a
     // writer of state.json too, and that mode writes nothing to it.
-    playlistProc.command = Model.playlistFetchArgv(root.helperPath, root.activeCacheDir, Model.fetchStateDir(root.stateDir, root.stateWriteBlocked))
     // D-SINK-8: the URL carries the provider's credentials and goes in the
     // environment, never on argv, where /proc/<pid>/cmdline shows it to every
     // local user for the life of the fetch. Assigned immediately before the
-    // run, every run: the assignment REPLACES the previous value (measured on
-    // Quickshell 0.3.1, see Model.fetchEnvironment), so a stale URL cannot
-    // survive a source switch.
-    playlistProc.environment = Model.fetchEnvironment(root.playlistUrl)
-    playlistProc.running = true
+    // run, every run (runHelper): the assignment REPLACES the previous value
+    // (measured on Quickshell 0.3.1, see Model.fetchEnvironment), so a stale
+    // URL cannot survive a source switch. D-SINK-40: the same one assignment
+    // says the URL is the user's, which is what lets its first hop reach a
+    // LAN host.
+    root.runHelper(playlistProc, Model.playlistFetchArgv(root.helperPath, root.activeCacheDir, Model.fetchStateDir(root.stateDir, root.stateWriteBlocked)),
+                   Model.fetchEnvironmentFor(root.playlistUrl, { origin: "user" }))
     playlistWatchdog.restart()
   }
 
@@ -2758,12 +2915,10 @@ Item {
     if (nowOnly) {
       if (!root.epgLoaded) return
       epgProc.nowOnly = true
-      epgProc.command = Model.epgFetchArgv(root.helperPath, root.activeCacheDir, true)
     } else {
       if (root.epgFetchUrl === "") return
       root.epgAttempted = true
       epgProc.nowOnly = false
-      epgProc.command = Model.epgFetchArgv(root.helperPath, root.activeCacheDir, false)
     }
     root.epgTimedOut = false
     // D-SINK-8: the EPG URL can carry credentials too, so it travels in the
@@ -2771,16 +2926,18 @@ Item {
     // deliberately rather than left alone: the assignment REPLACES the value
     // the last fetch set (measured, see Model.fetchEnvironment), so the
     // offline recompute runs with no URL in its environment at all.
-    epgProc.environment = Model.fetchEnvironment(nowOnly ? "" : root.epgFetchUrl)
-    epgProc.running = true
+    // D-SINK-40: and where the URL came from -- the user's own field or the
+    // playlist's hint -- with the playlist's host and the class its fetch
+    // connected to, which a hint on that same host may share.
+    root.runHelper(epgProc, Model.epgFetchArgv(root.helperPath, root.activeCacheDir, nowOnly),
+                   Model.fetchEnvironmentFor(nowOnly ? "" : root.epgFetchUrl, root.epgProvenance))
     epgWatchdog.restart()
   }
 
   function runControl(kind, args) {
     if (controlProc.running) return false
     root.controlKind = kind
-    controlProc.command = ["python3", root.helperPath].concat(args)
-    controlProc.running = true
+    root.runHelper(controlProc, Model.helperArgv(root.helperPath, args), {})
     controlWatchdog.restart()
     return true
   }
@@ -3136,8 +3293,7 @@ Item {
   function runPlayer(kind, args) {
     if (playerProc.running) return false
     root.playerKind = kind
-    playerProc.command = Model.helperArgv(root.helperPath, args)
-    playerProc.running = true
+    root.runHelper(playerProc, Model.helperArgv(root.helperPath, args), {})
     playerWatchdog.restart()
     return true
   }
@@ -3154,6 +3310,8 @@ Item {
     playerWatchdog.stop()
     var kind = root.playerKind
     root.playerKind = ""
+    var timedOut = root.playerTimedOut
+    root.playerTimedOut = false
     if (kind === "probe") {
       root.applyProbe(text)
       root.drainPendingPlay()
@@ -3216,12 +3374,37 @@ Item {
         if (follow === "recover") root.runPlayerProbe()
       }
       var first = status.firstLoad && typeof status.firstLoad === "object" ? status.firstLoad : null
-      if (first && String(first.state) === "failed") root.playerFirstLoadFailed(String(first.reason || ""))
+      if (first && String(first.state) === "failed") root.playerFirstLoadFailed(first)
       root.drainPendingPlay()
       return
     }
-    root.playerPending = false
     var code = status.error ? String(status.error.code) : ""
+    if (timedOut && code === "no_output") {
+      // D-PLY-35: no output because the watchdog stopped it, which is the
+      // S-05 shape the fetch slots already report (helperTimeoutStatus).
+      status = Model.parseHelperStatus(root.helperTimeoutStatus("player." + kind, false), "player." + kind)
+      code = "helper_timeout"
+    }
+    if (code === "helper_timeout" && root.nowPlaying !== null) {
+      // D-PLY-35. A start the watchdog ended has not refused anything: it
+      // may have spawned a player and loaded the channel before the signal
+      // landed, which is what dev did at 12 s -- the channel played on,
+      // unobserved, under a "Could not start playback" card. So nothing is
+      // told yet and the intent is kept: the socket hunt is armed and the
+      // reattach probe, the read a shell restart makes, finds what the start
+      // left. A player carrying this shell's stash is adopted; anything else
+      // ends in settleTimedOutPlay(false), told as the start's own failure.
+      // The intent alone gates it: a stop withdraws it (stop() clears
+      // `nowPlaying` and its own ladder ends whatever the start left), and a
+      // play after a stop is a new intent even while that stop settles.
+      console.warn("omarchy-iptv: player " + kind + " was stopped by its watchdog; looking for the player it may have left")
+      root.timedOutPlay = { kind: kind, intent: root.nowPlaying }
+      root.playerWanted = true
+      root.armPlayerSocket()
+      if (!root.runPlayerProbe()) root.settleTimedOutPlay(false)
+      return
+    }
+    root.playerPending = false
     var reason = Model.statusReason(status)
     if (code === "superseded") {
       // A later intent already won under the lock; this one never happened.
@@ -3232,7 +3415,7 @@ Item {
     }
     if (code === "mpv_missing") {
       root.mpvAvailable = false
-      whichProc.running = true
+      root.runWhichMpv()
       root.playerWanted = false
       playerSocketTimer.stop()
       root.nowPlaying = null
@@ -3260,9 +3443,26 @@ Item {
     var target = root.nowPlaying
     root.nowPlaying = null
     root.playRetries = 0
-    // The player never started: the same class of event the non-zero exit
-    // of an attached mpv used to report (requirement 6).
-    if (!root.userStopped && !root.stopping) root.raiseStreamFailure(target, reason)
+    // The player never started (requirement 6). D-PLY-32: and the reply is
+    // no verdict on the stream, which was never contacted -- a refusal of
+    // this machine (the runtime folder, the lock, the plugin's files, the
+    // cache, `busy` and `no_socket` out of retries) marks nothing and is told
+    // as a local failure, on every try (the owner's "refresh on every try",
+    // one card refreshed in place since D-HOST-5). Only a refusal about the
+    // channel's own entry is a stream failure (Model.playerStartFailure).
+    //
+    // D-PLY-41: told whenever the play was the user's and not taken back by
+    // a stop -- `userStopped`, which stop() sets and play() clears. A stop
+    // that is still settling (`stopping`) is not a reason to keep quiet: it
+    // belongs to the player BEFORE this play, and with it in the gate a play
+    // made in the seconds after a stop that this machine refused vanished,
+    // no card and the intent dropped. play() does not clear `stopping`
+    // instead, because that flag is what sends a play after a stop down the
+    // start branch rather than at a socket being torn down (4.10).
+    if (!root.userStopped) {
+      if (Model.playerStartFailure(code) === "channel") root.raiseStreamFailure(target, reason)
+      else root.raiseLocalPlayFailure(target, reason)
+    }
     // Terminal either way. The toast above is the user's copy of this event
     // when the play was theirs; when a stop overtook it, stop() already
     // retired the record. Neither leaves anything for a reattach to mark.
@@ -3272,11 +3472,19 @@ Item {
   // `player start` observed the first load fail on its own connection (F3,
   // signal 1 of 4). Under --idle=once mpv exits on that failure, so socket
   // EOF is about to say the same thing; whichever wins, the user sees one
-  // toast.
-  function playerFirstLoadFailed(reason) {
-    var target = root.nowPlaying
+  // toast. `first` is the reply's firstLoad member.
+  function playerFirstLoadFailed(first) {
+    var reason = String(first && first.reason ? first.reason : "")
     if (reason !== "") root.rememberStderr(reason)
-    root.raiseStreamFailure(target, reason !== "" ? reason : Model.PLAYER_GENERIC_FAILURE)
+    // D-PLY-33: the same decision as every other death. D-PLY-36: the reply
+    // now says which ending the window saw -- an end-file error for the
+    // start's entry (`ended` "end-file", mpv's file_error in `fileError`) or
+    // mpv closing the connection (`ended` "closed") -- and only the first is
+    // the stream's (and not even then for an output of this machine,
+    // D-PLY-37). A reply without `ended` is the helper's word, as before.
+    var report = Model.deathReport({ firstLoad: true, nowPlaying: root.nowPlaying, reason: reason,
+                                     ended: first ? first.ended : undefined, fileError: first ? first.fileError : undefined })
+    root.raiseDeath(report)
     if (!root.socketAttached()) {
       root.playerPending = false
       root.playerWanted = false
@@ -3298,6 +3506,9 @@ Item {
       // Garbage, a truncated line or an error reply is not evidence of a
       // player; the 10 s poll and the next play() both recover.
       root.playerPending = false
+      // D-PLY-35: and when this probe was looking for what a stopped start
+      // left, it has found nothing it can name, so that start fails here.
+      root.settleTimedOutPlay(false)
       return
     }
     // Ordering survives the restart, and an intent issued after this probe
@@ -3311,6 +3522,8 @@ Item {
       // the play they issued owns the outcome, and drainPendingPlay() is
       // about to deliver it.
       root.probeRetried = false
+      // D-PLY-35: and a stopped start's, whose player the newer one adopts.
+      root.timedOutPlay = null
       return
     }
     if (root.stopConfirmPending) {
@@ -3336,6 +3549,11 @@ Item {
       playerSocketTimer.stop()
       root.playerPending = false
       root.nowPlaying = null
+      // D-PLY-35: a stopped start that left no player failed, and is told.
+      if (root.timedOutPlay !== null) {
+        root.settleTimedOutPlay(false)
+        return
+      }
       // Nothing is playing and nothing claimed to have stopped it: if a
       // session record survived, that channel died unattended (PO-3).
       root.markDeadSession()
@@ -3420,6 +3638,8 @@ Item {
     playerWatchdog.restart()
     root.reconcileNowPlaying()
     root.reestablishForTls()
+    // D-PLY-35: a stopped start's player, found and adopted.
+    root.settleTimedOutPlay(true)
   }
 
   // D-SINK-16's second half: the player has been MIGRATED, and now the channel
@@ -3481,7 +3701,9 @@ Item {
   // holds a session record, the channel it names died with no shell attached
   // to notice - so the guide gets a red row, silently, and the record is
   // cleared. A toast for something that stopped minutes ago, possibly on
-  // another login, is noise that arrives without context.
+  // another login, is noise that arrives without context. [D-PLY-33,
+  // 2026-10-28: no red row any more -- see the mark below; the record is
+  // still cleared and nothing is told.]
   //
   // The race: this runs from the probe reply, about 130 ms after
   // Component.onCompleted, while stateFile loads whenever it loads - either
@@ -3494,11 +3716,18 @@ Item {
                                            Model.formatClock(Math.floor(Date.now() / 1000)))
     root.deadSessionPending = verdict.pending
     if (!verdict.mark) return
-    root.failedAt = verdict.failed
-    // The mark is raised, so the record is spent. Retiring it goes through
-    // the same decision as every other ending rather than being written
-    // here: that is what makes the clear stick when the write loses its
-    // race with state.json's own load.
+    // D-PLY-33 (owner, 2026-10-28): a surviving record is a player that died
+    // with nobody attached, so nobody saw an end-file -- and a death with no
+    // end-file marks nothing. The record cannot tell a dead stream from a
+    // crash, a kill, a logout, or a clean end PO-4 keeps silent. So the mark
+    // deadSessionVerdict prepared is applied only if Model.deathReport says
+    // an unattended death marks, which it does not; PO-3's "no stale toast"
+    // stands with it.
+    if (Model.deathReport({ unattended: true }).mark === true) root.failedAt = verdict.failed
+    // The record is spent either way. Retiring it goes through the same
+    // decision as every other ending rather than being written here: that
+    // is what makes the clear stick when the write loses its race with
+    // state.json's own load.
     root.noteSessionOutcome("marked")
   }
 
@@ -3550,6 +3779,9 @@ Item {
     root.tlsReloadPending = false
     root.noteSessionOutcome(outcome)
     Quickshell.execDetached(Model.helperArgv(root.helperPath, Model.playerStopArgv(root.socketPath, root.playSeq)))
+    // D-PLY-35: when the reattach probe was looking for what a stopped start
+    // left, this is what it found, and that start failed.
+    root.settleTimedOutPlay(false)
     return true
   }
 
@@ -3711,6 +3943,106 @@ Item {
     root.notify("streamFailed", { name: String(target.name || ""), reason: reason })
   }
 
+  // D-PLY-32: a play this machine refused before the stream was contacted.
+  // The reason is recorded where every play failure records it (`lastError`,
+  // the IPC status); `failedAt`, failed.json and `lastFailedId` are NOT
+  // touched, because nothing is known about the channel, and a broken
+  // runtime folder would otherwise mark every channel the user tries and
+  // take each out of the zap ring. Told on EVERY try (the owner, 2026-10-28:
+  // "refresh on every try"): each post refreshes the one card in place, with
+  // the channel and the reason of the latest try, because the notice slot
+  // sends back the id the server returned for the last one (D-HOST-5). Until
+  // then it was told once per episode, because a fixed replace id stacked a
+  // card per try on Omarchy's server.
+  function raiseLocalPlayFailure(target, reason) {
+    root.lastError = reason
+    if (!target) return
+    root.notify("localPlayFailure", { name: String(target.name || ""), reason: reason })
+  }
+
+  // D-PLY-35: the end of a start the watchdog stopped, once the reattach
+  // probe has said what it left (applyProbe). `found`: the probe adopted that
+  // player, which is the start delivered late, so it settles as an ok reply
+  // does -- the relaunch is spent, the retries and the local-failure episode
+  // end -- and nothing is told. If the player is on another channel (the
+  // start was stopped before it loaded its own), the intent is put back and
+  // sent again over the socket, ruling CL5's repair: the shell holds what the
+  // user asked for, and relabelling would hide the wrong channel. Otherwise
+  // nothing of this start's plays: the probe's own branch has stopped
+  // anything it could not adopt, and this ends the intent and tells the
+  // failure the start would have answered had it been let finish,
+  // `helper_timeout` ("Helper timed out"), which is local (D-PLY-32: it marks
+  // nothing). A no-op when no stopped start is waiting.
+  function settleTimedOutPlay(found) {
+    var pending = root.timedOutPlay
+    if (pending === null) return
+    root.timedOutPlay = null
+    var intent = pending.intent
+    if (found) {
+      root.relaunchPending = false
+      relaunchTimer.stop()
+      root.playRetries = 0
+      if (intent && root.nowPlaying && String(root.nowPlaying.id) !== String(intent.id)) {
+        console.log("omarchy-iptv: the stopped start left another channel on the player; re-applying the intent")
+        root.nowPlaying = intent
+        root.pendingPlayId = String(intent.id)
+      }
+      return
+    }
+    var kind = "player." + String(pending.kind || "start")
+    var reason = Model.statusReason(Model.parseHelperStatus(root.helperTimeoutStatus(kind, false), kind))
+    root.playerWanted = false
+    playerSocketTimer.stop()
+    root.playerPending = false
+    root.nowPlaying = null
+    root.playRetries = 0
+    // D-PLY-41's gate, the refusal tail's: the intent was the user's unless
+    // a stop took it back; a stop still settling from before it is no reason.
+    if (!root.userStopped) root.raiseLocalPlayFailure(intent, reason)
+    else root.lastError = reason
+    root.noteSessionOutcome("failed")
+  }
+
+  // D-PLY-33 (owner, 2026-10-28): the player died and mpv never said the load
+  // failed (Model.deathReport card "playerStopped"). Told, because a player
+  // that vanished must never vanish in silence (F4), and in copy that blames
+  // no stream; `failedAt`, failed.json and `lastFailedId` are NOT touched.
+  // The same one-card-per-failed-play gate as raiseStreamFailure, so
+  // whichever detector speaks first is the one the user hears.
+  function raisePlayerStopped(target, reason) {
+    if (!target) return
+    var id = String(target.id || "")
+    if (id !== "" && root.notifiedFailureId === id) return
+    root.notifiedFailureId = id
+    root.lastError = reason
+    root.notify("playerStopped", { name: String(target.name || "") })
+  }
+
+  // D-PLY-37 (owner, 2026-10-28): mpv ended the load because an output of
+  // THIS machine could not be opened -- no audio device, the sound server
+  // down (Model.deathReport card "outputFailed"). Told in copy that blames
+  // this computer and marks nothing; the same one-card-per-failed-play gate
+  // as the two above. `output` is "audio" or "video"; `reason` is the
+  // sentence lastError records.
+  function raiseOutputFailure(target, output, reason) {
+    if (!target) return
+    var id = String(target.id || "")
+    if (id !== "" && root.notifiedFailureId === id) return
+    root.notifiedFailureId = id
+    root.lastError = reason
+    root.notify("outputFailed", { name: String(target.name || ""), output: output })
+  }
+
+  // Model.deathReport's card, raised. One dispatcher for every detector that
+  // asks it (the socket's EOF, the first-load window), so a card the model
+  // adds is a card every detector tells.
+  function raiseDeath(report) {
+    if (!report) return
+    if (report.card === "streamFailed") root.raiseStreamFailure(report.target, report.reason)
+    else if (report.card === "playerStopped") root.raisePlayerStopped(report.target, report.reason)
+    else if (report.card === "outputFailed") root.raiseOutputFailure(report.target, report.output, report.reason)
+  }
+
   function rememberStderr(line) {
     var tail = Model.pushPlayerLog(root.mpvStderrTail, line)
     if (tail === root.mpvStderrTail) return
@@ -3732,10 +4064,14 @@ Item {
     var current = root.nowPlaying
     var end = root.lastEndFile
     var stopped = root.userStopped
-    var report = Model.endedReport({
+    // D-PLY-33: Model.deathReport is endedReport plus what the death is
+    // evidence of -- marked only for an end-file error on the channel's own
+    // entry, which is why it takes the entry the player last started.
+    var report = Model.deathReport({
       lastEndFile: end,
       owners: root.entryOwners,
       nowPlaying: current,
+      entryId: root.currentEntryId,
       userStopped: stopped,
       stopping: root.stopping,
       tail: root.mpvStderrTail
@@ -3761,6 +4097,10 @@ Item {
     root.stopConfirmPending = false     // the EOF is the confirmation
     root.pendingPlayId = ""
     root.playRetries = 0
+    // D-PLY-35: a stopped start whose player the socket reached has its end
+    // told here, as every death is; the probe's later "nothing there" must
+    // not tell it a second time.
+    root.timedOutPlay = null
     // M5-01: no player, no history, and no seek to deliver to it.
     root.clearRewind()
     root.healthSkips = 0
@@ -3807,12 +4147,15 @@ Item {
     // channel that died unattended (PO-3).
     root.noteSessionOutcome("ended")
     root.entryOwners = Model.keyedMap()
-    if (!report.notify) return
-    // report.reason is the log-message tail when there is one ("Failed to
-    // open scheme://host" says what actually went wrong), else mpv's own
-    // generic file_error. Both are redacted, the tail twice (in python and
-    // again in Model.pushPlayerLog).
-    root.raiseStreamFailure(report.target, report.reason)
+    // D-PLY-33 (owner, 2026-10-28). A load mpv said failed is the stream's:
+    // marked, "Stream failed", and report.reason is the log-message tail when
+    // there is one ("Failed to open scheme://host" says what actually went
+    // wrong), else mpv's own generic file_error -- both redacted, the tail
+    // twice (in python and again in Model.pushPlayerLog). A death with no
+    // such end-file -- a crash, a kill, a VO abort -- is told and marks
+    // nothing, because nothing says the stream caused it. D-PLY-37: nor does
+    // an end-file error that names an output of this machine.
+    root.raiseDeath(report)
   }
 
   function handlePlaylistExit(text) {
@@ -4011,7 +4354,6 @@ Item {
   // writes no URL into the host's file. It is kept, and kept reachable
   // through Model.entryShieldDecision, for the write that would.
   function refuseUnsafePersist() {
-    root.lastPersistFailure = "config_unsafe"
     console.warn("omarchy-iptv: refusing to save a source URL into settings other users can read; see the config shield warning above")
     root.sourcesPersistFailed("config_unsafe")
   }
@@ -4091,10 +4433,7 @@ Item {
     if (!root.shell || typeof root.shell.updateEntryInline !== "function"
         || !Model.barEntryWritable(root.shell.barConfig, root.pluginId)) {
       console.warn("omarchy-iptv: no writable bar entry for the " + what)
-      if (announce !== false) {
-        root.lastPersistFailure = "persist_failed"
-        root.sourcesPersistFailed("persist_failed")
-      }
+      if (announce !== false) root.sourcesPersistFailed("persist_failed")
       return false
     }
     var patch = Model.ownedEntryPatch(root.settings, overrides)
@@ -4197,13 +4536,51 @@ Item {
       return
     }
     configShieldProc.running = true
+    configShieldWatchdog.restart()   // D-SRC-37 (c)
+  }
+
+  // D-SRC-49 / D-SINK-22 (b)(c). Start `state mode`, or remember to start it
+  // again: `running = true` on a running Process is not a queue, so a second
+  // landed save while one runs is folded into one re-run on exit -- the same
+  // shape as runConfigShield. Never through cacheProc: that slot's command is
+  // `cache --cache-dir`, and a state-file repair on the cache verb is the join
+  // D-ID-1 keeps apart. Bounded by its own TERM-only watchdog (D-SRC-37 (c)).
+  function requestStateMode() {
+    if (root.stateWriteBlocked !== "") return
+    if (stateModeProc.running) {
+      root.stateModeRerun = true
+      return
+    }
+    stateModeProc.command = Model.stateModeArgv(root.helperPath, root.stateDir)
+    root.stateModeRuns = root.stateModeRuns + 1
+    stateModeProc.running = true
+    stateModeWatchdog.restart()
+  }
+
+  // The verb's answer: a `changed` is a mode this plugin repaired on its own
+  // file, worth a line the user can find afterwards; `kept` is the steady
+  // state and silent. A stopped run prints nothing and changes nothing.
+  function handleStateModeExit(exitCode, text) {
+    stateModeWatchdog.stop()
+    var reply = Model.stateModeReply(text)
+    if (reply && (reply.file === "changed" || reply.folder === "changed")) {
+      console.warn("omarchy-iptv: state.json's mode was repaired after a save (file " + reply.file + ", folder " + reply.folder + ")")
+    } else if (!reply && exitCode !== 0) {
+      console.warn("omarchy-iptv: state mode exited " + exitCode + "; state.json keeps whatever mode it has until the next save or start")
+    }
+    if (root.stateModeRerun) {
+      root.stateModeRerun = false
+      Qt.callLater(root.requestStateMode)
+    }
   }
 
   // The verb's answer. `hostConfigShield` moves from unknown to private or
   // exposed and never back to unknown: Model.configShieldState fails closed,
   // so a helper that did not run, crashed or printed nothing reads as exposed
-  // rather than leaving every future persist deferred for ever.
+  // rather than leaving every future persist deferred for ever -- a run the
+  // watchdog stopped (D-SRC-37 (c)) prints nothing and reads as exposed too.
   function onConfigShieldExit(out) {
+    configShieldWatchdog.stop()
     root.hostConfigShield = Model.configShieldState(out)
     var pending = root.pendingPersist
     root.pendingPersist = null
@@ -4303,16 +4680,21 @@ Item {
   Process { id: failedProc }
   Connections {
     target: failedProc
-    // Drain the queue. Without this a second mark raised while the first was
-    // still being written would sit there for ever -- which is how the kill
-    // this replaced came to exist.
-    function onExited(exitCode, exitStatus) {
-      if (root.failedQueue.length === 0) return
-      var q = root.failedQueue.slice()
-      var next = q.shift()
-      root.failedQueue = q
-      root.runFailedJob(next)
-    }
+    function onExited(exitCode, exitStatus) { root.handleFailedExit() }
+  }
+
+  // Drain the queue. Without this a second mark raised while the first was
+  // still being written would sit there for ever -- which is how the kill
+  // this replaced came to exist. A root function rather than the handler's
+  // body so the harness, which delivers exits by hand, runs the same code
+  // (D-SRC-37 (c): and sees the watchdog stopped here).
+  function handleFailedExit() {
+    failedWatchdog.stop()
+    if (root.failedQueue.length === 0) return
+    var q = root.failedQueue.slice()
+    var next = q.shift()
+    root.failedQueue = q
+    root.runFailedJob(next)
   }
 
   // A one-deep queue rather than a kill. This used to SIGTERM its own
@@ -4337,8 +4719,8 @@ Item {
   }
 
   function runFailedJob(job) {
-    failedProc.command = Model.failedArgv(root.helperPath, job.action, job.id, job.dir)
-    failedProc.running = true
+    root.runHelper(failedProc, Model.failedArgv(root.helperPath, job.action, job.id, job.dir), {})
+    failedWatchdog.restart()   // D-SRC-37 (c)
   }
 
   function str(v) { return v === undefined || v === null ? "" : String(v) }
@@ -4623,7 +5005,7 @@ Item {
   // retry, `commit` whether success writes the settings.
   function startProbe(key, dirKey, mode, commit) {
     var rec = root.probeRecord(mode, key)
-    if (!rec || sourceProbeProc.running) {
+    if (!rec || root.probing) {
       root.probeAdd = null
       root.probeEdit = null
       if (!rec) return root.sourceResult(false, "unknown_source", Model.sourceErrorMessage("unknown_source"), key)
@@ -4636,21 +5018,50 @@ Item {
     root.probeCancelled = false
     root.probeTimedOut = false
     root.sourceErrors = root.withoutKey(root.sourceErrors, key)
+    // D-SRC-69: this probe's claim on its folder, counted before any cache
+    // job can be decided again, so a removal queued earlier for this key
+    // knows the folder is the probe's now (Model.cacheJobArgs).
+    root.sourceProbeSeq += 1
+    root.sourceProbeClaims = root.withKey(root.sourceProbeClaims, dirKey, root.sourceProbeSeq)
+    // D-SRC-69, the other order: a running cache job decided before this
+    // probe existed and able to take its folder -- the helper is still
+    // starting, or has listed sources/ and not reached it -- is waited for.
+    // Its exit starts the probe (handleCacheExit). The watchdog bounds the
+    // wait too: a job that never exits fails the probe as a timeout.
+    if (cacheProc.running && root.cacheJob && Model.probeWaitsFor(root.cacheJob.args, dirKey)) {
+      root.probeHeld = true
+      probeWatchdog.restart()
+      return root.sourceResult(true, "ok", "", key)
+    }
+    root.launchProbe()
+    return root.sourceResult(true, "ok", "", key)
+  }
+
+  // The helper run of the probe startProbe set up (at once, or at the exit
+  // of the cache job it was held behind). A record that went away while it
+  // was held ends the probe as the record-less one it is.
+  function launchProbe() {
+    root.probeHeld = false
+    var rec = root.probeRecord(root.probeMode, root.probingKey)
+    if (!rec) {
+      root.handleProbeExit("")
+      return
+    }
+    var dirKey = root.probeDirKey
     // D-ID-1: NO `--state-dir` here, deliberately, and this absence is
     // load-bearing rather than an oversight. A probe runs for every source
     // add, edit, switch and re-check, including ones the user then cancels.
     // Passing the flag would remap the global favourites against a playlist
     // that never became the active list. The helper touches no state file
     // without the flag, so this is safe by construction.
-    sourceProbeProc.command = Model.playlistProbeArgv(root.helperPath, Model.sourceCacheDir(root.cacheDir, dirKey))
     // D-SINK-8: a candidate's URL is as credentialed as the active one, so it
     // goes in the environment too, assigned immediately before the run so a
     // re-check of source B never runs with source A's URL (the assignment
-    // replaces, measured; see Model.fetchEnvironment).
-    sourceProbeProc.environment = Model.fetchEnvironment(rec.url)
-    sourceProbeProc.running = true
+    // replaces, measured; see Model.fetchEnvironment). D-SINK-40: a URL the
+    // user is adding or re-checking is theirs.
+    root.runHelper(sourceProbeProc, Model.playlistProbeArgv(root.helperPath, Model.sourceCacheDir(root.cacheDir, dirKey)),
+                   Model.fetchEnvironmentFor(rec.url, { origin: "user" }))
     probeWatchdog.restart()
-    return root.sourceResult(true, "ok", "", key)
   }
 
   function handleProbeExit(text) {
@@ -4662,6 +5073,7 @@ Item {
     var cancelled = root.probeCancelled
     var timedOut = root.probeTimedOut
     var pending = mode === "add" ? root.probeAdd : (mode === "edit" ? root.probeEdit : null)
+    root.probeHeld = false
     root.probingKey = ""
     root.probeDirKey = ""
     root.probeMode = ""
@@ -4676,7 +5088,10 @@ Item {
     if (cancelled) {
       // SR7: the directory the probe was writing is discarded; a pending
       // add or replacement was never recorded (SR23) and the form keeps its
-      // values (UX 5.5).
+      // values (UX 5.5). D-SRC-70: a re-check of the ACTIVE source wrote
+      // into the active source's own folder, not a new one, and the removal
+      // is dropped when it runs (Model.cacheJobDrop "active"), the way the
+      // prune always keeps that folder.
       root.queueCacheJob(["remove", "--key", dirKey], null)
       root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: "", host: host, cancelled: true, replacedId: "" })
       return
@@ -4698,12 +5113,19 @@ Item {
     }
     if (status.ok === true) {
       var newKey = key
+      // D-SRC-70: the edited record's old folder, removed once the state
+      // that moves the pointer off it is published (below). A removal of
+      // the key that is active when it runs is dropped (Model.cacheJobDrop),
+      // and a job queued here can run at once, while root.userState -- and
+      // so the active key -- is still the one before the commit: queued
+      // here, an edit of the ACTIVE source would keep its old folder.
+      var retiredKey = ""
       if (pending) {
         // Record the pending add now (SR23), or move the edited record to
         // its new key (SR7): the old record and its directory go.
         if (mode === "edit") {
           st = Model.removeSource(st, key).state
-          root.queueCacheJob(["remove", "--key", key], null)
+          retiredKey = key
           root.sourceErrors = root.withoutKey(root.sourceErrors, key)
         }
         var known = Model.findSourceByUrl(st.sources, pending.url)
@@ -4728,7 +5150,10 @@ Item {
           // later-by-time landing of the form's is withdrawn with R21.
           newKey = String(known.key)
         } else {
-          newKey = Model.allocateSourceKey(st.sources, pending.url)
+          // D-SINK-48: new keys are random, so the probe's own key is
+          // handed back and kept while it is free -- the probe's folder IS the
+          // source's cache.
+          newKey = Model.allocateSourceKey(st.sources, pending.url, pending.key)
           var record = pending
           if (newKey !== pending.key) {
             record = {}
@@ -4744,24 +5169,35 @@ Item {
       }
       st = Model.withSourceStats(st, newKey, status, nowSec)
       st = Model.touchSource(st, newKey, nowSec)
+      // D-SRC-14: decided against the active key as it still is (root.userState
+      // has not moved), BEFORE the state is published. An edit of the active
+      // source folds the pointer into this same state, so no assignment ever
+      // publishes a state with no active source (configured flickered false,
+      // clearSourceData ran, and a key-less save went out before the key's).
+      var plan = Model.probeCommitPlan({ commit: commit, mode: mode, key: key, newKey: newKey, activeKey: root.activeSourceKey })
+      st = Model.probeCommitState(st, plan, newKey)
+      // beginSwitch BEFORE the key moves (switchSource's rule): with the
+      // pointer folded, the assignment below is the move, and it fans out to
+      // onActiveCacheDirChanged, which can call finishSwitch.
+      if (plan.act === "switch") root.beginSwitch()
       root.userState = st
       root.saveState()
-      if (commit) {
-        if (newKey === root.activeSourceKey) {
-          // Already the active directory (a retry of the active source):
-          // the FileViews watch it, but reload deterministically.
-          channelsFile.reload()
-          playlistStatusFile.reload()
-        } else {
-          root.beginSwitch()
-          // D-SINK-19: `newKey`, not `rec.key`. They differ when a colliding
-          // record appeared through the CLI while the probe ran (S5, the
-          // `known` branch above), and the pointer has to name the record the
-          // history actually kept. The URL pair this used to pass hid that:
-          // `rec.url` was right either way, so the bug could not show.
-          if (!root.persistActive(newKey)) {
-            console.warn("omarchy-iptv: adopted source but could not mirror the key into the bar entry")
-          }
+      if (retiredKey !== "") root.queueCacheJob(["remove", "--key", retiredKey], null)
+      if (plan.act === "reload") {
+        // Already the active directory (a retry of the active source):
+        // the FileViews watch it, but reload deterministically.
+        channelsFile.reload()
+        playlistStatusFile.reload()
+      } else if (plan.act === "switch") {
+        // D-SINK-19: `newKey`, not `rec.key`. They differ when a colliding
+        // record appeared through the CLI while the probe ran (S5, the
+        // `known` branch above), and the pointer has to name the record the
+        // history actually kept. The URL pair this used to pass hid that:
+        // `rec.url` was right either way, so the bug could not show.
+        // For the folded edit the key is already in memory, so this plans
+        // `write-entry-after-saved`: the one save above, then the mirror.
+        if (!root.persistActive(newKey)) {
+          console.warn("omarchy-iptv: adopted source but could not mirror the key into the bar entry")
         }
       }
       root.sourceProbeFinished({
@@ -4774,10 +5210,14 @@ Item {
     // or replacement was never recorded and its directory goes (SR23); an
     // existing record keeps fetchedAt 0 plus a session-only reason for the
     // result line (SR26).
+    // D-SRC-71: the code rides along, as on the refusals above (R28e), so
+    // a failure on this machine -- the cache unwritable, the helper failing
+    // or timing out -- is not put after the provider's host
+    // (Model.probeFailureLine).
     var reason = Model.statusReason(status)
     if (pending) root.queueCacheJob(["remove", "--key", dirKey], null)
     else root.sourceErrors = root.withKey(root.sourceErrors, key, reason)
-    root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: reason, host: host, cancelled: false, replacedId: "" })
+    root.sourceProbeFinished({ ok: false, id: key, channelCount: 0, groupCount: 0, reason: reason, code: Model.statusCode(status), host: host, cancelled: false, replacedId: "" })
   }
 
   // D-SINK-19, round 11 (R21). WHAT THE BAR ENTRY'S URLS MEAN: one
@@ -5016,39 +5456,75 @@ Item {
   // restart: a session that switched through fifty sources with logos on
   // used to keep all fifty folders until the next start. Keys only; the
   // helper skips a folder a running fetch holds and says so once.
+  // D-SRC-69 (2026-10-27): queued as ["prune"] and given its list when it
+  // RUNS (runNextCacheJob, Model.pruneArgs), not here. The start-up prune is
+  // queued at cacheReady and runs at dirsReady, and its list used to be the
+  // records of the first moment: an add made between the two probed into a
+  // folder no record named yet and lost it.
   function queuePrune() {
-    var args = ["prune", "--keep"]
-    var sources = root.userState.sources
-    for (var i = 0; i < sources.length; i++) args.push(sources[i].key)
-    if (root.activeSourceKey !== "") args = args.concat(["--active", root.activeSourceKey])
-    args = args.concat(["--epg-max-age", String(root.epgMaxAgeSec)])
-    root.queueCacheJob(args, null)
+    root.queueCacheJob(["prune"], null)
   }
 
-  // Section 4.7: one cacheProc, a FIFO of { args, onDone }; failures are
-  // logged with the action and code only.
+  // Section 4.7: one cacheProc, a FIFO of { args, onDone, seq }; failures
+  // are logged with the action and code only. `seq` is the probe count when
+  // the job was asked for (D-SRC-69, Model.cacheJobArgs).
   function queueCacheJob(args, onDone) {
     var queue = root.cacheQueue.slice()
-    queue.push({ args: args, onDone: onDone })
+    queue.push({ args: args, onDone: onDone, seq: root.sourceProbeSeq })
     root.cacheQueue = queue
     root.runNextCacheJob()
   }
 
+  // D-SRC-69: what a job deletes is decided HERE, when it runs, against the
+  // state, the active key and the probe in flight as they are now
+  // (Model.cacheJobArgs): a prune keeps every record and the folder a probe
+  // not yet handled writes into; a removal a later probe has claimed the
+  // folder of is dropped. probingKey and probeDirKey are cleared only by
+  // handleProbeExit, so a probe whose process has ended and whose exit has
+  // not been handled still counts as in flight.
+  function cacheJobContext() {
+    var inFlight = []
+    if (root.probeDirKey !== "") inFlight.push(root.probeDirKey)
+    if (root.probingKey !== "" && root.probingKey !== root.probeDirKey) inFlight.push(root.probingKey)
+    return { state: root.userState, activeKey: root.activeSourceKey, inFlight: inFlight, claims: root.sourceProbeClaims, epgMaxAgeSec: root.epgMaxAgeSec }
+  }
+
   function runNextCacheJob() {
-    if (cacheProc.running || root.cacheQueue.length === 0 || !root.dirsReady) return
-    var job = root.cacheQueue[0]
-    root.cacheQueue = root.cacheQueue.slice(1)
-    root.cacheJob = job
-    cacheProc.command = ["python3", root.helperPath, "cache", "--cache-dir", root.cacheDir].concat(job.args)
-    cacheProc.running = true
+    for (;;) {
+      if (cacheProc.running || root.cacheQueue.length === 0 || !root.dirsReady) return
+      var job = root.cacheQueue[0]
+      root.cacheQueue = root.cacheQueue.slice(1)
+      var context = root.cacheJobContext()
+      var args = Model.cacheJobArgs(job, context)
+      if (args === null) {
+        // Keys only (R12): the folder is a later probe's, not the garbage
+        // this job was asked to take (D-SRC-69), or it is the ACTIVE
+        // source's, which no cache job takes, the way the prune always
+        // keeps it (D-SRC-70).
+        var why = Model.cacheJobDrop(job, context) === "active" ? "it is the active source's folder" : "a probe has started writing there since it was asked for"
+        console.info("omarchy-iptv: cache " + job.args[0] + " of " + Model.asList(job.args).slice(1).join(" ") + " dropped: " + why)
+        if (typeof job.onDone === "function") job.onDone({ ok: true, kind: "cache", skipped: true, error: null })
+        continue
+      }
+      root.cacheJob = { args: args, onDone: job.onDone, seq: job.seq }
+      root.runHelper(cacheProc, Model.cacheRunArgv(root.helperPath, root.cacheDir, args), {})
+      cacheWatchdog.restart()   // D-SRC-37 (c): every run of the slot is bounded
+      return
+    }
   }
 
   function handleCacheExit(text) {
+    cacheWatchdog.stop()
     var job = root.cacheJob
     root.cacheJob = null
     var status = Model.parseHelperStatus(text, "cache")
     if (status.ok !== true) console.warn("omarchy-iptv: cache " + (job ? job.args[0] : "?") + " failed:", status.error ? status.error.code : "error")
     if (job && typeof job.onDone === "function") job.onDone(status)
+    // D-SRC-69: a probe held behind this job starts now. The next job is
+    // decided with it in flight either way: probingKey and probeDirKey are
+    // set while it is held (cacheJobContext), so a prune queued next keeps
+    // its folder and a removal of that key is dropped.
+    if (root.probeHeld) root.launchProbe()
     root.runNextCacheJob()
   }
 
@@ -5060,7 +5536,10 @@ Item {
     root.pendingFreshness = false
     if (root.activeCacheDir === "") return
     var nowSec = Math.floor(Date.now() / 1000)
-    if (Model.cacheStale(root.playlistStatus, root.refreshMinutes, nowSec)) root.refreshPlaylist(true)
+    // D-SINK-41: a cache written before the destination rules is refreshed
+    // once, whatever its age (Model.cacheBeforeDestinationRules).
+    if (Model.cacheStale(root.playlistStatus, root.refreshMinutes, nowSec)
+        || Model.cacheBeforeDestinationRules(root.playlistStatus)) root.refreshPlaylist(true)
     if (root.epgFetchUrl !== "" && !epgProc.running) root.refreshEpg(true)
   }
 
@@ -5289,11 +5768,11 @@ Item {
     // independent of mkdirProc's chain on purpose -- it touches none of the
     // plugin's own directories and must not wait on them.
     root.runConfigShield()
-    whichProc.running = true
+    root.runWhichMpv()
     // M2-05 G-8: is there a compositor to talk to at all, and which dispatch
     // spelling can it parse? Both answers are read once, here, so the `p`
     // key can refuse honestly instead of firing into the dark.
-    hyprWhichProc.running = true
+    root.runPipProbe()
     // Reattach (4.5). Until the probe answers - about 130 ms - the UI shows
     // idle rather than guessing. `--owner-pid` claims a surviving player for
     // this shell, which is what tells the previous shell's orphan-check to
@@ -5457,7 +5936,9 @@ Item {
     onSaved: {
       root.stateInHandler = root.stateInHandler + 1
       try {
-        if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) {
+        // D-SRC-39: decided from the burst record, not the last text alone.
+        var outcome = Model.stateSaveOutcome({ viewText: stateFile.text(), lastSaveText: root.lastSaveText, recentSaves: root.recentSaves })
+        if (outcome.last) {
           root.stateSavesInFlight = 0
           root.stateSaveFailed = false
           root.landedState = root.lastSaveState   // R21a: what the disk holds now, the marker included
@@ -5465,7 +5946,21 @@ Item {
           // R27a: a save held for this write now reads, from a turn of its own.
           root.stateWriteWaitExpired = false
           root.endStateWriteWait(false)
+        } else if (outcome.landed) {
+          // D-SRC-39: an EARLIER write of the burst landed -- the disk holds
+          // its text now, whatever the later write does -- so it is the base
+          // from here, and the texts before it are no longer echoes to come.
+          // The later write is still in flight: nothing else moves.
+          root.landedState = outcome.state
+          root.recentSaves = outcome.remaining
         }
+        // D-SRC-49 / D-SINK-22 (b)(c): the landed save was the last asked for
+        // and nothing is in flight -- the file at the path is ours now, with
+        // whatever mode it had or was created with -- so the helper's `state
+        // mode` repairs it, from a turn of its own (never from inside the
+        // FileView's handler, R26b), on its own Process. Coalesced in
+        // requestStateMode; nothing here waits on it.
+        if (outcome.last) Qt.callLater(root.requestStateMode)
         root.settleEntryFlush()
         // R19d (D-SRC-18): a mirror a failed save withheld is paid by the first
         // save that lands with nothing else outstanding -- deferred, never from
@@ -5484,7 +5979,9 @@ Item {
       root.stateInHandler = root.stateInHandler + 1
       try {
         // R27a: and a save held for this write, failed or not, reads first.
-        if (Model.stateSaveLanded(stateFile.text(), root.lastSaveText)) {
+        // D-SRC-39: the same decision as onSaved's (rule 15); a failed
+        // earlier write of a burst lands nothing, so only `last` is read.
+        if (Model.stateSaveOutcome({ viewText: stateFile.text(), lastSaveText: root.lastSaveText, recentSaves: root.recentSaves }).last) {
           root.stateSavesInFlight = 0
           root.stateWriteWaitExpired = false
           root.endStateWriteWait(false)
@@ -5499,7 +5996,6 @@ Item {
         // a later write lands -- because one switch issues two writes (the
         // touch, then the key move) and the guide would show the line twice.
         if (!root.stateSaveFailed) {
-          root.lastPersistFailure = "state_write_failed"
           root.sourcesPersistFailed("state_write_failed")
         }
         root.stateSaveFailed = true
@@ -5703,6 +6199,23 @@ Item {
   }
 
   Timer {
+    // D-REL-8: the one re-run of a start-up init that answered nothing
+    // readable (decideStateLoad's `reinit`), a second after its exit -- long
+    // enough for git to have finished rewriting the stub in place (measured
+    // in milliseconds), short enough that a start inside that window is not
+    // a session without writes. Armed under the start-up watchdog again.
+    id: stateInitRetry
+    interval: 1000
+    repeat: false
+    onTriggered: {
+      console.warn("omarchy-iptv: state init answered nothing readable; running it once more")
+      root.stateInitTimedOut = false
+      root.startStateInit()
+      stateInitWatchdog.restart()
+    }
+  }
+
+  Timer {
     id: stateInitKill
     interval: root.stateInitKillGraceMs
     repeat: false
@@ -5720,6 +6233,14 @@ Item {
     interval: root.helperTimeoutMs
     repeat: false
     onTriggered: {
+      // D-SRC-69: a probe still held behind a cache job that has not exited
+      // in the probe's whole budget fails as a timeout, with nothing to stop.
+      if (root.probeHeld) {
+        console.warn("omarchy-iptv: source probe waited " + Math.floor(root.helperTimeoutMs / 1000) + " s for a cache job to finish; giving up")
+        root.probeTimedOut = true
+        root.handleProbeExit("")
+        return
+      }
       if (!sourceProbeProc.running) return
       console.warn("omarchy-iptv: source probe exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
       root.probeTimedOut = true
@@ -5776,12 +6297,17 @@ Item {
     // One bound for the player slot (F1): a helper verb that hangs is
     // terminated, and a `playerPending` that no socket ever confirmed is
     // released, so the birth edge can never latch the UI into "playing".
+    // D-PLY-35: the interval follows the verb in flight (playerTimeoutMs);
+    // runPlayer() sets `playerKind` before it restarts this, so each run is
+    // bounded by its own verb's worst case.
     id: playerWatchdog
     interval: root.playerTimeoutMs
     repeat: false
     onTriggered: {
       if (playerProc.running) {
         console.warn("omarchy-iptv: player helper exceeded " + Math.floor(root.playerTimeoutMs / 1000) + " s, terminating it")
+        // D-PLY-35: so its exit is read as stopped, not as a refusal.
+        root.playerTimedOut = true
         playerProc.signal(15)
         return
       }
@@ -5975,7 +6501,7 @@ Item {
     // Argv only; the helper prints one JSON line, read at the exit for its
     // `found` (R22a) and otherwise discarded.
     id: stateInitProc
-    command: ["python3", root.helperPath, "state", "--state-dir", root.stateDir, "init"]
+    command: Model.stateInitArgv(root.helperPath, root.stateDir)
     // R22a: the reply is READ now. Its `found` is what was at the path before
     // the helper touched it, and only `absent` lets a FileNotFound load be a
     // fresh install (Model.stateInitFound).
@@ -5988,6 +6514,23 @@ Item {
   Connections {
     target: stateInitProc
     function onExited(exitCode, exitStatus) { root.stateInitExited(exitCode) }
+  }
+
+  Process {
+    // D-SRC-49 / D-SINK-22 (b)(c): the helper's `state mode` after every
+    // landed save (requestStateMode). Argv only; the one JSON line is read at
+    // the exit and otherwise discarded. Its stderr is redacted like every
+    // other helper channel although the verb prints no URL.
+    id: stateModeProc
+    stdout: StdioCollector { id: stateModeStdout; waitForEnd: true }
+    stderr: StdioCollector {
+      waitForEnd: true
+      onStreamFinished: if (text.trim() !== "") console.warn("omarchy-iptv state mode:", Model.redactUrls(text.trim()))
+    }
+  }
+  Connections {
+    target: stateModeProc
+    function onExited(exitCode, exitStatus) { root.handleStateModeExit(exitCode, stateModeStdout.text) }
   }
 
   Process {
@@ -6203,8 +6746,7 @@ Item {
     // The tag is the LOGOS directory, through the same call `logoDir` is
     // bound through, so the guide's comparison (Model.logoSlot) can match.
     root.logoFetchDir = Model.logoDirFor(root.activeCacheDir)
-    logoFetchProc.command = Model.logoFetchArgv(root.helperPath, root.activeCacheDir)
-    logoFetchProc.running = true
+    root.runHelper(logoFetchProc, Model.logoFetchArgv(root.helperPath, root.activeCacheDir), {})
     return true
   }
 
@@ -6237,7 +6779,22 @@ Item {
   }
   Connections {
     target: whichProc
-    function onExited(exitCode, exitStatus) { root.mpvAvailable = exitCode === 0 }
+    function onExited(exitCode, exitStatus) { root.handleWhichExit(exitCode) }
+  }
+
+  // D-SRC-37 (c): `which mpv` is one more process this shell waits on (the
+  // start, a play without mpv, a `mpv_missing` reply), so it is run and read
+  // through one pair the harness can call, and bounded like every helper
+  // slot. A run the watchdog stopped exits non-zero: mpv reads as absent
+  // until the next ask, the answer the exit code gave before.
+  function runWhichMpv() {
+    whichProc.running = true
+    whichWatchdog.restart()
+  }
+
+  function handleWhichExit(exitCode) {
+    whichWatchdog.stop()
+    root.mpvAvailable = exitCode === 0
   }
 
   // ---- picture in picture (M2-05). Six Processes, argv arrays only, no
@@ -6256,13 +6813,29 @@ Item {
   }
   Connections {
     target: hyprWhichProc
-    function onExited(exitCode, exitStatus) {
-      if (exitCode !== 0 || Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") === "") {
-        root.pipAvailable = false
-        return
-      }
-      hyprInfoProc.running = true
+    function onExited(exitCode, exitStatus) { root.handlePipWhichExit(exitCode) }
+  }
+
+  // D-SRC-37 (c), rule 15 -- D-PLY-26: the two decide-once compositor probes
+  // had no watchdog. They are the shape of whichProc (a process the start
+  // waits on with no bound), found by the search for it and bounded by ONE
+  // Timer over whichever of the pair is running, the way stateInitWatchdog
+  // covers mkdir and the init. A probe the watchdog stopped exits non-zero
+  // and PiP is hidden, the answer the exit code gave before. Root functions
+  // so the harness runs the same code.
+  function runPipProbe() {
+    hyprWhichProc.running = true
+    pipProbeWatchdog.restart()
+  }
+
+  function handlePipWhichExit(exitCode) {
+    pipProbeWatchdog.stop()
+    if (exitCode !== 0 || Quickshell.env("HYPRLAND_INSTANCE_SIGNATURE") === "") {
+      root.pipAvailable = false
+      return
     }
+    hyprInfoProc.running = true
+    pipProbeWatchdog.restart()
   }
 
   Process {
@@ -6285,15 +6858,18 @@ Item {
   }
   Connections {
     target: hyprInfoProc
-    function onExited(exitCode, exitStatus) {
-      // Anything else - an older Hyprland on the hyprlang provider, or a
-      // systeminfo this build does not print - means a compositor whose
-      // dispatch language we do not speak. PiP is then hidden rather than
-      // broken: `p` says so immediately instead of dispatching strings that
-      // cannot parse and calling it `dispatch_failed` fifteen seconds later.
-      root.pipProvider = /configProvider:\s*lua/i.test(String(hyprInfoStdout.text)) ? "lua" : "other"
-      root.pipAvailable = exitCode === 0 && root.pipProvider === "lua"
-    }
+    function onExited(exitCode, exitStatus) { root.handlePipInfoExit(exitCode) }
+  }
+
+  // Anything else - an older Hyprland on the hyprlang provider, or a
+  // systeminfo this build does not print - means a compositor whose
+  // dispatch language we do not speak. PiP is then hidden rather than
+  // broken: `p` says so immediately instead of dispatching strings that
+  // cannot parse and calling it `dispatch_failed` fifteen seconds later.
+  function handlePipInfoExit(exitCode) {
+    pipProbeWatchdog.stop()
+    root.pipProvider = /configProvider:\s*lua/i.test(String(hyprInfoStdout.text)) ? "lua" : "other"
+    root.pipAvailable = exitCode === 0 && root.pipProvider === "lua"
   }
 
   Process {
@@ -6466,6 +7042,93 @@ Item {
     }
   }
 
+  // D-SRC-37 (c), 2026-10-24: ONE shape over the four processes that had no
+  // bound while every other helper slot had one -- cacheProc (the FIFO every
+  // cache job runs through, writing into the cache directory: a stalled
+  // mount there held the queue for the session), failedProc (the same
+  // directory), configShieldProc and whichProc. TERM only, like every
+  // watchdog but the start-up one (R23c has the KILL half because the whole
+  // start waits on that run; nothing waits on these). Each is restarted
+  // where its `running = true` is set and stopped in the exit handler the
+  // harness runs. The bound is helperTimeoutMs, the playlist slot's: a
+  // cache prune over a large directory is the longest of them and is well
+  // inside it; the point is a bound, not a tight one. On fire, cacheProc's
+  // queue is DROPPED with one line -- the jobs are re-derivable (the
+  // start-up prune, a remove, epg-clear; the next start prunes again), and
+  // a queue behind a stalled slot would only stall in turn -- and so is
+  // failedProc's (the in-memory map is already right; a lost mark costs a
+  // mark, as the slot's comment says). The two decide-once processes
+  // (configShield, which) print nothing when stopped, which their exit
+  // handlers already read as "not private" and "no mpv".
+  Timer {
+    id: cacheWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!cacheProc.running) return
+      var job = root.cacheJob
+      console.warn("omarchy-iptv: cache " + (job ? job.args[0] : "?") + " exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it; "
+                   + root.cacheQueue.length + " queued cache job(s) dropped")
+      root.cacheQueue = []
+      cacheProc.signal(15)
+    }
+  }
+  Timer {
+    id: failedWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!failedProc.running) return
+      console.warn("omarchy-iptv: failed-channel helper exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it; "
+                   + root.failedQueue.length + " queued mark(s) dropped")
+      root.failedQueue = []
+      failedProc.signal(15)
+    }
+  }
+  Timer {
+    id: configShieldWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!configShieldProc.running) return
+      console.warn("omarchy-iptv: config shield exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
+      configShieldProc.signal(15)
+    }
+  }
+  Timer {
+    id: stateModeWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!stateModeProc.running) return
+      console.warn("omarchy-iptv: state mode exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
+      stateModeProc.signal(15)
+    }
+  }
+  Timer {
+    id: whichWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      if (!whichProc.running) return
+      console.warn("omarchy-iptv: which mpv exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
+      whichProc.signal(15)
+    }
+  }
+  Timer {
+    // D-PLY-26: the PiP start-up pair (runPipProbe): `which hyprctl`, then
+    // `hyprctl systeminfo`; whichever is running is the one stopped.
+    id: pipProbeWatchdog
+    interval: root.helperTimeoutMs
+    repeat: false
+    onTriggered: {
+      var proc = hyprWhichProc.running ? hyprWhichProc : hyprInfoProc.running ? hyprInfoProc : null
+      if (proc === null) return
+      console.warn("omarchy-iptv: " + (proc === hyprWhichProc ? "which hyprctl" : "hyprctl systeminfo") + " exceeded " + Math.floor(root.helperTimeoutMs / 1000) + " s, terminating it")
+      proc.signal(15)
+    }
+  }
+
   Process {
     // The player slot (F1): `player start` / `restart` / `probe`. Separate
     // from controlProc so a cold start - which can take seconds, since the
@@ -6483,6 +7146,36 @@ Item {
   Connections {
     target: playerProc
     function onExited(exitCode, exitStatus) { root.handlePlayerResult(playerStdout.text) }
+  }
+
+  // D-HOST-5 (owner, 2026-10-28): one notice post, made per post by
+  // runNotify(). `omarchy-notification-send -p` prints the id the server
+  // returned (the wrapper's busctl call waits for the server's answer, which
+  // this shell's own notification server gives on its event loop; the
+  // Process keeps that wait off it), read whole by the collector: one short
+  // line from the host's own wrapper. `guard` is the post's watchdog, running
+  // exactly while the post is; the exit frees the kind's slot and destroys
+  // the object (handleNotifyExit). argv only (runNotify sets `command`).
+  Component {
+    id: notifyComponent
+
+    Process {
+      id: notifyRun
+      property string kind: ""
+      stdout: StdioCollector { id: notifyOut; waitForEnd: true }
+      property Timer guard: Timer {
+        interval: Model.NOTIFY_POST_TIMEOUT_MS
+        repeat: false
+        running: notifyRun.running
+        onTriggered: root.notifyOverdue(notifyRun)
+      }
+      property Connections exits: Connections {
+        target: notifyRun
+        function onExited(exitCode, exitStatus) {
+          root.handleNotifyExit(notifyRun, notifyRun.kind, exitCode, exitStatus, String(notifyOut.text))
+        }
+      }
+    }
   }
 
   // The socket observer, one fresh object per attempt (spike C1, and the
@@ -6553,7 +7246,7 @@ Item {
     //
     // A mistyped keybinding must not raise a desktop popup, so a failure is
     // this JSON and nothing else - no notification, no toast (6.5).
-    function channel(n: string): string { return JSON.stringify(root.tuneByNumber(n)) }
+    function channel(n: string): string { return Model.ipcJson(root.tuneByNumber(n)) }
     // Picture in picture (M2-05). `pip on`, `pip off`, `pip toggle`.
     //
     // The reply is what is knowable when the key is pressed, and no more.
@@ -6566,7 +7259,7 @@ Item {
     // new `pip` block carries { available, on, applying, reason }, where
     // `reason` is the last failure code (dispatch_failed, no_window,
     // ambiguous, timeout, ...) and "" after a success.
-    function pip(mode: string): string { return JSON.stringify(root.requestPip(mode)) }
+    function pip(mode: string): string { return Model.ipcJson(root.requestPip(mode)) }
     // PAUSE LIVE TV. An IPC verb rather than only a guide key, because this is
     // the first action in the product you want while WATCHING -- with the
     // guide closed -- rather than while browsing. contrib/bindings.lua shows
@@ -6587,17 +7280,19 @@ Item {
     // contrib/bindings.lua suggests SUPER+SHIFT+H / L / R.
     function back(seconds: string): string {
       var n = Model.seekVerbSeconds(seconds)
-      return JSON.stringify(n === 0 ? root.seekRefuse(0, "bad_seconds") : root.seekBy(-n))
+      return Model.ipcJson(n === 0 ? root.seekRefuse(0, "bad_seconds") : root.seekBy(-n))
     }
     function forward(seconds: string): string {
       var n = Model.seekVerbSeconds(seconds)
-      return JSON.stringify(n === 0 ? root.seekRefuse(0, "bad_seconds") : root.seekBy(n))
+      return Model.ipcJson(n === 0 ? root.seekRefuse(0, "bad_seconds") : root.seekBy(n))
     }
-    function live(): string { return JSON.stringify(root.seekLive()) }
+    function live(): string { return Model.ipcJson(root.seekLive()) }
     function stop(): string { root.stop(); return "ok" }
     function next(): string { return root.zap(1) ? "ok" : "nothing playing" }
     function previous(): string { return root.zap(-1) ? "ok" : "nothing playing" }
     function refresh(): string { root.refresh(); return "ok" }
-    function status(): string { return JSON.stringify(root.statusSummary()) }
+    // F-SINK-16: every JSON reply through Model.ipcJson, which escapes the
+    // C1 controls JSON.stringify passes through to the caller's terminal.
+    function status(): string { return Model.ipcJson(root.statusSummary()) }
   }
 }

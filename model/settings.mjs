@@ -307,6 +307,43 @@ function helperDamagedReason(status) {
     + SEP + "reinstall the plugin"
 }
 
+// D-PLY-34 (2026-10-28). A code's meaning moves with the verb (D-PLY-32's
+// reading), and two of the codes below are the FETCH verbs' words: `busy`
+// ("Another fetch is running") and `too_large` ("Source too large"). On a
+// player verb the helper's `busy` is the PLAYER lock (acquire_lock: another
+// `player start|restart|stop` holds it, after the shell's retries are spent)
+// and `too_large` is main()'s answer to a MemoryError, this helper's own
+// memory -- no player verb reads a provider's source. Both reached the
+// "Could not start playback" card and lastError in the fetch's words. The
+// kind decides: `player.<verb>` (each player verb's own refusal), `player`
+// (main()'s catch-alls for any of them) and the verbs that drive the player
+// over its socket -- `play` (a zap), `stop`, `status` and `seek` (the rewind
+// verb's own refusal shape). The playlist and EPG verbs keep the table's
+// sentences, unchanged.
+//
+// `spawn_failed` is the third (D-PLY-31): on a player verb the mpv spawn
+// could not happen -- an exec refused (`could not start mpv: Permission
+// denied`), or since D-PLY-31 the spawn's own pipes or fork refused. The
+// clipboard verb answers the same code for wl-paste, and its sentence must
+// not be mpv's; it never meets this function -- its reply carries `code` at
+// the top and no `error` (so the first line below answers ""), and
+// Model.parseClipboardReply drops every failure without a word (R2) -- and
+// keeping the code out of the general table keeps it that way should one
+// ever arrive.
+var PLAYER_VERB_KINDS = ["player", "play", "stop", "status", "seek"]
+
+function playerVerbKind(kind) {
+  var k = str(kind)
+  return PLAYER_VERB_KINDS.indexOf(k) !== -1 || k.indexOf("player.") === 0
+}
+
+function playerVerbReason(code) {
+  if (code === "busy") return "The player is busy"
+  if (code === "too_large") return "Helper ran out of memory"
+  if (code === "spawn_failed") return "Could not start mpv"
+  return ""
+}
+
 // Short, credential-free reason per UX 6.3. Maps helper error codes first,
 // then falls back to a scrubbed message.
 function statusReason(status) {
@@ -314,6 +351,8 @@ function statusReason(status) {
   var code = str(status.error.code)
   var message = str(status.error.message)
   if (code === "helper_damaged") return helperDamagedReason(status)
+  var byVerb = playerVerbKind(status.kind) ? playerVerbReason(code) : ""
+  if (byVerb !== "") return byVerb
   var http = code.match(/^http_(\d{3})$/)
   if (http) {
     var n = Number(http[1])
@@ -333,15 +372,71 @@ function statusReason(status) {
     timeout: "Timed out",
     helper_timeout: "Helper timed out",
     unsafe_redirect: "Unsafe redirect",
+    // D-SINK-40 (2026-10-29): the helper refused to connect to an address on
+    // this machine or a local network that the PROVIDER chose -- a redirect
+    // hop, the playlist's guide hint, a logo. About the provider's choice, so
+    // it keeps `from <host>` (off PROBE_LOCAL_REFUSALS); the helper's own
+    // message names the refused host and is the journal's.
+    local_address: "Refused a local address",
     too_large: "Source too large",
     bad_gzip: "Bad gzip data",
     empty_playlist: "Playlist has no channels",
     not_a_playlist: "Not an M3U playlist",
-    not_m3u: "Not an M3U playlist",
-    not_xmltv: "Not an XMLTV file",
+    // D-EPG-13 (2026-10-28). The EPG verb's two parse refusals, which showed
+    // the parser's own text in the guide-data banner ("could not parse EPG
+    // XML: not well-formed (invalid token): line 1, column 0") and the EPG
+    // notification. `bad_xml` is also D-EPG-6's refusal of a feed that
+    // carries a DTD internal subset (D-EPG-15; entities included): the same code, so the same sentence -- the
+    // user's remedy is the same (the address does not serve a plain XMLTV
+    // guide) and the journal keeps which it was. Both are the PROVIDER'S
+    // (D-SRC-71's reading: the guide's own content), so they stay off
+    // PROBE_LOCAL_REFUSALS and a line that composes `from <host>` keeps the
+    // host; none does today. `not_m3u` and `not_xmltv` went from this table
+    // the same day: no helper verb answers either -- `not_m3u` was v0.1's
+    // name for what shipped as `not_a_playlist` (D-QA-13, D-LIVE-03), and
+    // `not_xmltv` never shipped; the EPG verb says `bad_xml`.
+    bad_xml: "Not a valid XMLTV guide",
+    empty_epg: "Guide has no programmes",
     no_source: "No playlist configured",
     not_implemented: "Helper command not implemented",
     no_output: "Helper produced no output",
+    // D-SRC-69 (2026-10-27). `internal` is the helper's catch-all for a BUG
+    // (main() in the helper's CLI part): its message is an exception's type
+    // and text -- `FileNotFoundError: [Errno 2] No such file or directory:
+    // '<runtime path>/...'` reached the Sources result line when the
+    // start-up prune removed an add's folder mid-write. Redacted, but an
+    // exception is not a sentence, and every surface that shows a helper's
+    // reason comes through this function (the playlist and guide-data
+    // banners and notifications, the probe's result line, a play failure,
+    // the rewind line), so it is mapped once, here. The traceback stays in
+    // the journal (the service logs the helper's stderr, redacted).
+    internal: "Helper failed unexpectedly",
+    // D-SRC-69: a fetch that could not write its cache files (the folder
+    // removed or unwritable, the disk full), named by the helper instead of
+    // leaving the OSError to main()'s catch-all.
+    cache_unwritable: "Could not write the cache",
+    // D-SRC-73 (2026-10-27). R25c's refusal (D-SRC-32): a folder the helper
+    // writes into -- a source's cache folder, the logo folder, the player's
+    // runtime folder -- is a symbolic link whose target is missing or is not
+    // a folder, or something that is not a folder sits at its path. The
+    // helper's message is R25c's sentence and names the FULL path, which the
+    // journal keeps (the service logs the helper's stderr, redacted); what the
+    // user reads names none. Until now this code had no entry, so the
+    // guide-data banner showed the cache folder's path.
+    folder_unusable: "A folder the plugin uses is a broken link or not a folder",
+    // D-PLY-30 (2026-10-27): `player start|restart|stop` could not make the
+    // player's runtime folder (a parent it cannot write, a full or read-only
+    // filesystem) or open the lock file in it (a folder at its name). The
+    // helper's message says which, with the error's words and no path; it
+    // used to be main()'s `internal` with the exception and the path. A play
+    // that fails this way is told in the "did not play" notification.
+    runtime_unwritable: "Could not write the player's runtime folder",
+    // D-PLY-31 (2026-10-28): a regular file -- anything that is not a socket
+    // -- at the player's socket path ($XDG_RUNTIME_DIR/omarchy-iptv/mpv.sock).
+    // The helper never unlinks it and never spawns over it
+    // (check_socket_path); its message, "the socket path is not a socket",
+    // reached the "did not play" card as it was.
+    socket_path_blocked: "Something else is at the player's socket path",
     not_running: "mpv is not running",
     unknown_channel: "Unknown channel",
     ipc_error: "mpv did not answer",
@@ -374,8 +469,35 @@ function statusReason(status) {
   return scrubUrls(message) || "Unknown error"
 }
 
+// D-SRC-52 (2026-10-24). `lastError` after a playlist status is applied. A
+// failed status writes its reason into `lastError` (applyPlaylistStatus); a
+// good one used to leave it there, so the IPC `status` reply carried the
+// damaged-files sentence of an update's window after the next good load,
+// until a play, a source move or a reset cleared it. Cleared at the sink
+// that set it, and ONLY what it set: a sentence another writer put there (a
+// play failure's, say) is not this function's to clear, which is why it
+// takes the reason the previous status composed rather than a flag.
+//   lastError        the property as it stands
+//   previousReason   Model.statusReason of the status being replaced,
+//                    captured BEFORE the reassignment (the binding moves
+//                    with it)
+//   nextStatus       the status being applied
+function lastErrorAfterStatus(lastError, previousReason, nextStatus) {
+  var held = str(lastError)
+  if (!nextStatus || nextStatus.ok !== true) return statusReason(nextStatus)
+  if (held !== "" && held === str(previousReason)) return ""
+  return held
+}
+
 function statusHost(status) {
   return status && status.sourceHost ? str(status.sourceHost) : ""
+}
+
+// The code of a failed status, "" for a good one or none (D-SRC-71): what
+// decides whether a failure line names the provider's host
+// (Model.failureFromHost).
+function statusCode(status) {
+  return status && status.ok !== true && status.error ? str(status.error.code) : ""
 }
 
 function statusHealthy(status) {
@@ -1091,13 +1213,14 @@ export {
   parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
   parseEpgNow, EPG_CHANNELS_OPEN, EPG_STORE_KIND, emptyEpgStore,
   parseEpgNowStore, epgNowIndex, parseHelperStatus, HTTP_REASONS,
-  HELPER_PART_RE, helperDamagedReason, statusReason, statusHost,
-  statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel, labelWarning,
-  labelWarnings, warningLine, footerWarning, findBarEntry, settingOf,
-  boolSetting, clampInt, clampSetting, settingsFrom, entryInputText,
-  entryInputForm, sameEntryInput, ownWriteInForce, settingsWithOwnWrite,
-  ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS, MAX_SEEN_INPUTS,
-  entryInputSeen, entryInputLast, entryInputsSeenAfter, entryInputNotice,
-  ownedEntryPatch, barEntryWritable, entryFlushDisposition, owedMirrorAction,
-  ownedWriteMode, retiredInputsToKeep, sameOwnWrite
+  HELPER_PART_RE, helperDamagedReason, PLAYER_VERB_KINDS, playerVerbKind,
+  playerVerbReason, statusReason, lastErrorAfterStatus, statusHost,
+  statusCode, statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel,
+  labelWarning, labelWarnings, warningLine, footerWarning, findBarEntry,
+  settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
+  entryInputText, entryInputForm, sameEntryInput, ownWriteInForce,
+  settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
+  MAX_SEEN_INPUTS, entryInputSeen, entryInputLast, entryInputsSeenAfter,
+  entryInputNotice, ownedEntryPatch, barEntryWritable, entryFlushDisposition,
+  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, sameOwnWrite
 }

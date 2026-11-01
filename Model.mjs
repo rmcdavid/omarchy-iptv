@@ -31,8 +31,10 @@ export {
   GROUP_SCOPE_PREFIX, MAX_HIDDEN_GROUPS, ELLIPSIS, QUOTE_OPEN, QUOTE_CLOSE,
   SEP, GLYPHS, SETTING_RANGES, MAX_CHNO_MAJOR, MAX_CHNO_MINOR, MAX_CHNO_LABEL,
   CHNO_SEPARATORS, CHNO_ENTRY_SEP, CHANNEL_ORDERS, CHNO_FIELDS, MPV_RESERVED,
-  MPV_TLS_VERIFY, MPV_TLS_VERIFY_PROP, MPV_STREAM_OPTS_PROP, NOTIFY_IDS,
-  PLACE_TTL_SEC, ZAP_MAX_SKIP
+  MPV_DEMUXER_TLS_WORDS, MPV_PROTOCOL_WHITELIST, MPV_FORMAT_WHITELIST,
+  MPV_TLS_VERIFY, MPV_PIN_BLOCK, MPV_TLS_VERIFY_PROP, MPV_STREAM_OPTS_PROP,
+  MPV_DEMUXER_OPTS_PROP, MPV_AUTO_PROFILES_PROP, NOTIFY_IDS, PLACE_TTL_SEC,
+  ZAP_MAX_SKIP
 } from "./model/build.mjs"
 export {
   FOLD_GROUPS, asList, keyedMap, hasOwnKey, ownKeyValue, trimEndSpace,
@@ -53,13 +55,14 @@ export {
 export {
   containsAllWords, matchRank, groupNamesForHint, groupWordHint, favoriteSet,
   filterChannels, groupChannels, groupScopeId, isGroupScope, isPinnedScope,
-  scopeName, scopeSurface, scopeEntries, channelsForScope, numberJumpScope,
-  channelsInGroup, effectiveScope, moveScope, scopeIndex, columnAnchor,
-  fallbackScope, requestedScope, initialScope, cursorFor, revealOffset,
-  scopeLabel, GUIDE_MODES, guideMode, guideState, copyGuide, openTracks,
-  closeTracks, withTrackCursor, withQuery, withScope, withMode, withCursor,
-  toggleMode, onEscape, moveCursor, launchScope, zapRing, nextInGroup,
-  rowIndexOfId, placeToRestore, placeMark, zapSkipNotice, zapStep
+  rawScopeName, scopeName, scopeSurface, scopeEntries, channelsForScope,
+  numberJumpScope, channelsInGroup, effectiveScope, moveScope, scopeIndex,
+  columnAnchor, fallbackScope, requestedScope, initialScope, cursorFor,
+  revealOffset, scopeLabel, GUIDE_MODES, guideMode, guideState, copyGuide,
+  openTracks, closeTracks, withTrackCursor, withQuery, withScope, withMode,
+  withCursor, toggleMode, onEscape, moveCursor, launchScope, zapRing,
+  nextInGroup, rowIndexOfId, placeToRestore, placeMark, zapSkipNotice,
+  zapStep
 } from "./model/browse.mjs"
 export {
   MAX_SAVED_SEARCHES, MAX_SAVED_TERMS, MAX_SAVED_QUERY, savedSearchTerms,
@@ -76,26 +79,29 @@ export {
   hideAction, hideVerb, removeRecent, trimRecents, MAX_FAILED, FAILED_TTL_SEC,
   parseFailed, normalizeFailed, prunedFailed, knownIdSet, failedIndex,
   failedDocument, failedWhen, withFailed, failedAfterHealthy, withoutFailed,
-  stateSaveLanded, countReload, reloadDisposition, stateCanonical, sameState,
-  mergeSetField, mergeForeignState, mergeConflictLine, mergeDropLines,
+  stateSaveLanded, stateSaveOutcome, countReload, reloadDisposition,
+  stateCanonical, sameState, mergeSetField, mergeForeignState,
+  mergeLeavesNothingUnsaved, mergeConflictLine, MERGE_CONFLICT_TITLE,
+  mergeConflictSentence, mergeConflictNotice, mergeDropLines,
   migrationHeldAgainLine, mergeDropNotice, STATE_LOAD_ERRORS, stateLoadKind,
-  stateInitFound, stateLoadDecision, stateWriteGate, stateSavePlan,
-  stateBlockRecheck, STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID,
-  STATE_BLOCK_UNSAVED_START, STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST,
-  stateUnreadableNotice, stateUnreadableJournal, stateBlockedHeader
+  stateInitFound, stateLoadDecision, stateModeArgv, stateInitArgv,
+  stateModeReply, stateWriteGate, stateSavePlan, stateBlockRecheck,
+  STATE_BLOCK_TITLE_START, STATE_BLOCK_TITLE_MID, STATE_BLOCK_UNSAVED_START,
+  STATE_BLOCK_UNSAVED, STATE_BLOCK_LINK_FIRST, stateUnreadableNotice,
+  stateUnreadableJournal, stateBlockedHeader
 } from "./model/state.mjs"
 export {
   parseJsonObject, parseChannels, preparedLruFind, preparedLruNext,
   parseEpgNow, emptyEpgStore, parseEpgNowStore, parseHelperStatus,
-  helperDamagedReason, statusReason, statusHost, statusHealthy,
-  statusWarnings, WARNING_PREFIX, warningLabel, labelWarning, labelWarnings,
-  warningLine, footerWarning, findBarEntry, settingOf, boolSetting, clampInt,
-  clampSetting, settingsFrom, entryInputText, entryInputForm, sameEntryInput,
-  ownWriteInForce, settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS,
-  RETIRED_SETTINGS, MAX_SEEN_INPUTS, entryInputSeen, entryInputLast,
-  entryInputsSeenAfter, entryInputNotice, ownedEntryPatch, barEntryWritable,
-  entryFlushDisposition, owedMirrorAction, ownedWriteMode,
-  retiredInputsToKeep, sameOwnWrite
+  helperDamagedReason, statusReason, lastErrorAfterStatus, statusHost,
+  statusCode, statusHealthy, statusWarnings, WARNING_PREFIX, warningLabel,
+  labelWarning, labelWarnings, warningLine, footerWarning, findBarEntry,
+  settingOf, boolSetting, clampInt, clampSetting, settingsFrom,
+  entryInputText, entryInputForm, sameEntryInput, ownWriteInForce,
+  settingsWithOwnWrite, ownWriteOf, OWNED_SETTINGS, RETIRED_SETTINGS,
+  MAX_SEEN_INPUTS, entryInputSeen, entryInputLast, entryInputsSeenAfter,
+  entryInputNotice, ownedEntryPatch, barEntryWritable, entryFlushDisposition,
+  owedMirrorAction, ownedWriteMode, retiredInputsToKeep, sameOwnWrite
 } from "./model/settings.mjs"
 export {
   optInSetting, logoSurvey, splitLogoUrl, logoConsentLines, logoFile,
@@ -107,21 +113,26 @@ export {
   LOGO_FETCH_WATCHDOG_MS, logoSummaryNotice
 } from "./model/logos.mjs"
 export {
-  stopEscalation, healthTick, playFork, playForkBlind, zapArgs,
-  helperCannotTell, playFailureVerdict, replyTarget, reconcileVerdict,
-  sessionIntentRepair, playerOrphanCheckArgv, playerStash, tlsPropertiesSafe,
-  playerTls, tlsReloadDisposition, playerTlsVerdict, parsePlayerProbe,
-  parsePlayerEvent, endedVerdict, probeVerdict, playerDeathKind,
-  playerSessionFollowUp, playerRouterState, pushPlayerLog, routePlayerEvent,
-  rememberEntryOwner, channelForEnd, endedReport
+  stopEscalation, healthTick, PLAYER_BOUNDS, PLAYER_WATCHDOG_MARGIN_MS,
+  PLAYER_BIRTH_EDGE_MS, playerWatchdogMs, playFork, playForkBlind, zapArgs,
+  helperCannotTell, playFailureVerdict, playerStartFailure, replyTarget,
+  reconcileVerdict, sessionIntentRepair, playerOrphanCheckArgv, playerStash,
+  tlsPropertiesSafe, playerTls, tlsReloadDisposition, playerTlsVerdict,
+  parsePlayerProbe, parsePlayerEvent, endedVerdict, probeVerdict,
+  playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
+  routePlayerEvent, rememberEntryOwner, channelForEnd, endedReport,
+  PLAYER_FORMAT_ERROR, PLAYER_FORMAT_SENTENCE, unopenedFormatSentence,
+  PLAYER_OUTPUT_ERRORS, outputFailure, outputFailureSentence, deathReport
 } from "./model/player.mjs"
 export {
   MPV_HANDOFF_TEXT, MPV_DISK_WARN, MPV_DISK_TEXT, mpvOptionBase,
-  mpvHandoffName, mpvDiskName, mpvArgWarning, mpvArgWarnings, splitMpvArgs,
-  mpvRejectedLine, mpvRejectedName, headerArgs, MPV_RAW_PREFIX,
-  mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv, helperArgv,
-  playlistFetchArgv, fetchStateDir, playlistProbeArgv, epgFetchArgv,
-  FETCH_URL_ENV, fetchEnvironment, failedArgv, logoFetchArgv,
+  mpvHandoffName, mpvDiskName, mpvArgWarning, mpvArgWarnings,
+  MPV_REFUSED_TEXT, MPV_REFUSED_JUNK_TEXT, mpvRefusedWarnings, splitMpvArgs,
+  demuxerNamesTls, mpvRejectedLine, mpvRejectedName, headerArgs,
+  MPV_RAW_PREFIX, mpvWindowTitle, playerDirs, dirnameOf, buildMpvArgv,
+  mpvPinBlock, helperArgv, HELPER_ARGS_ENV, HELPER_ARGS_FLAG, helperSpawn,
+  cacheRunArgv, playlistFetchArgv, fetchStateDir, playlistProbeArgv,
+  epgFetchArgv, FETCH_URL_ENV, fetchEnvironment, failedArgv, logoFetchArgv,
   playerTracksArgv, trackChoice, parseTracks, trackLanguage, trackLabel,
   trackDetail, trackRows, trackCursorHome, moveTrackCursor,
   TRACKS_RECOVERY_MAX, shouldRefreshTracks, trackPanelMessage,
@@ -151,9 +162,11 @@ export {
   CONFIG_SHIELD_ABSENT, CONFIG_PERSIST, CONFIG_REFUSE, CONFIG_DEFER,
   configShieldArgv, configShieldState, persistCarriesSecret,
   configShieldDecision, entryShieldDecision, playerStartArgv, playerStopArgv,
-  playerRestartArgv, playerPauseArgv, notifyArgv, sourceLabel, hostOf,
-  URL_SPACE_CODES, isUrlSpaceAt, URL_DELIMITER_CODES, isUrlDelimiterAt,
-  trailingPunctuationLength, redactUrls, scrubUrls, sinkText
+  playerRestartArgv, playerPauseArgv, notifyArgv, markupEscape,
+  NOTIFY_POST_TIMEOUT_MS, notifyReplaceId, notifyReplyId, notifyPost,
+  notifyAnswered, sourceLabel, hostOf, URL_SPACE_CODES, isUrlSpaceAt,
+  URL_DELIMITER_CODES, isUrlDelimiterAt, trailingPunctuationLength,
+  redactUrls, scrubUrls, sinkText
 } from "./model/privacy.mjs"
 export {
   formatClock, formatCount, pluralChannels, epgFraction, epgNowStale,
@@ -172,9 +185,10 @@ export {
   noMatchesTitle
 } from "./model/contrast.mjs"
 export {
-  barGlyph, barTooltip, barAccessibleName, guideSurface, firstRunAllowed,
-  footerStatus, footerHints, formHints, keyboardMapUntabled, hideMeaning,
-  sameEscape, verbForKey, setKeyRow, keyboardMap, keyboardMapKeys
+  barGlyph, barTooltip, barAccessibleName, ipcNowPlaying, ipcJson,
+  guideSurface, firstRunAllowed, footerStatus, footerHints, formHints,
+  keyboardMapUntabled, hideMeaning, sameEscape, verbForKey, setKeyRow,
+  keyboardMap, keyboardMapKeys
 } from "./model/view.mjs"
 export {
   CACHE_LAYOUT, MAX_SOURCES, MAX_SOURCE_URL, MAX_LABEL, MAX_XTREAM_SERVER,
@@ -185,31 +199,38 @@ export {
   sanitizeTyping, sourceErrorMessage, sourceReason, PERSIST_FAILURE_REASONS,
   persistFailureMessage, refusalMessage, isIpv6Literal, cutQueryAndFragment,
   ENCODE_SENTENCE, WARN_AT_AFTER_AUTHORITY, HOST_WITHHELD, runHostParts,
-  urlHostWithheld, sourceUrlWarning, formWarningLine, looksLikeHost,
-  validateSourceUrl, normalizeSourceUrl, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
-  EPG_ORIGIN_PLAYLIST, epgHintUrl, resolveEpgUrl, EPG_HINT_NOTICE,
+  urlHostWithheld, sourceUrlWarning, formWarningLine, WARN_PLAIN_HTTP,
+  formAdviceLine, looksLikeHost, validateSourceUrl, normalizeSourceUrl,
+  ADDRESS_CLASSES, hostClass, hostKey, urlPortOf, ownHostMatch,
+  FETCH_ORIGIN_ENV, FETCH_HOME_HOST_ENV, FETCH_HOME_CLASS_ENV,
+  FETCH_HOME_PORT_ENV, fetchEnvironmentFor, EPG_ORIGIN_NONE, EPG_ORIGIN_USER,
+  EPG_ORIGIN_PLAYLIST, EPG_HINT_REFUSED_USERINFO, EPG_HINT_REFUSED_LOCAL,
+  epgHintVerdict, epgHintUrl, resolveEpgUrl, epgHintRowState, EPG_HINT_NOTICE,
   epgOriginNotice, isUrlField, sourceKey, isSourceKey, findSource,
   findSourceByUrl, allocateSourceKey, sourceCacheDir, deriveLabel, labelTaken,
   uniqueLabel, defaultSourceLabel, validateLabel, maskUrl, encodeQueryValue,
   xtreamUrls, validateXtream, pluralGroups, countsLine, formatLastUsed,
   formatAgo, sourceView, sourceViews, sourceRows, EPG_HINT_ROW_TEXT,
-  sourceDetail, sourceAccessibleName, sourcesHeaderCount, sourcesHeaderRight,
-  sourcesRowAccessibleName, confirmLogosMessage, confirmRemoveMessage,
-  fetchingLine, probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
+  EPG_HINT_PLAIN_ROW_TEXT, epgHintRowText, sourceDetail, sourceAccessibleName,
+  sourcesHeaderCount, sourcesHeaderRight, sourcesRowAccessibleName,
+  confirmLogosMessage, confirmRemoveMessage, fetchingLine, failureFromHost,
+  probeFailureLine, sourceTransient, CLIPBOARD_TIMEOUT_MS,
   CLIPBOARD_KILL_GRACE_MS, CLIPBOARD_WATCHDOG_MS, CLIPBOARD_MAX_CHARS,
-  CLIPBOARD_MAX_BYTES
+  CLIPBOARD_MAX_BYTES, logoFailedPath, logoBrokenMark, logoHaveLess
 } from "./model/sources.mjs"
 export {
   hasControlChars, normalizeSourceRecord, sourcesFull, addSource,
   updateSource, removeSource, touchSource, statusFetchedAt, sourceStatsDiffer,
   withSourceStats, activeKeyText, activeKeyOf, activeSourceRecord,
   withActiveKey, invalidInputBlocks, reconcileAction, adoptActiveSource,
-  activeEpgUrlOf, pointerWritePlan, reconcileSources, sourceForEdit,
-  sourcesSummary, entryWith, cacheStale, formFields, isFormField, formLimit,
+  activeEpgUrlOf, pointerWritePlan, probeCommitPlan, probeCommitState,
+  pruneArgs, cacheJobDrop, cacheJobArgs, probeWaitsFor, reconcileSources,
+  sourceForEdit, sourcesSummary, entryWith, DESTINATION_RULES,
+  cacheBeforeDestinationRules, cacheStale, formFields, isFormField, formLimit,
   formCapacity, copyForm, formState, formFocusOrder, formHasText, openForm,
   openFirstRun, openAddForm, openEditForm, openXtreamForm, closeForm,
   withFormValue, withFormFocus, moveFormFocus, fieldMaskable, fieldRevealed,
-  fieldMasked, toggleReveal, withFormReveal
+  fieldMasked, fieldAccessibleValue, toggleReveal, withFormReveal
 } from "./model/source-records.mjs"
 export {
   clipboardArgv, clipboardCut, parseClipboardReply, editRange, fullRange,

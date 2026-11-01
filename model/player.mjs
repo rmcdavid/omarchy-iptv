@@ -43,6 +43,91 @@ function healthTick(skips, busy) {
   return { check: !busy, restart: restart, skips: restart ? 0 : n }
 }
 
+// ---- D-PLY-35 (2026-10-28): the player slot's watchdog, derived ----
+//
+// The shell's playerWatchdog TERMs a `player start|restart|probe` that runs
+// longer than this. It was one 12 s constant for all three, and a start's own
+// bounds add up past it: lock 6 s + spawn 5 s + first load 3 s is already
+// 14 s. Measured on dev 2026-10-28 (QA-RESULTS "D-PLY-35", dev branch),
+// headless and in a nested cage: a start that waited out a held lock, a slow
+// spawn and its first-load window was TERMed at 12 s, a second AFTER its
+// loadfile; the player it had started went on to play the channel with the
+// shell's observer off, `nowPlaying` null, the session record retired, and a
+// "Could not start playback" card on screen. The next play adopted it.
+//
+// So the bound is derived per verb from the helper's own bounds, mirrored in
+// PLAYER_BOUNDS and pinned on both sides by the shared player-bounds fixture
+// (dev branch: the python half reads each one off the helper by name, and the
+// shell passes none of the timeout flags, so the helper's defaults are the
+// bounds). A verb's bound is its longest path through the helper's code with
+// every wait it SURVIVES at its full bound, the one wait that ends it, and a
+// margin:
+//   ladder(""): the quit rung, which counts its own IPC (a connect and a
+//     request) inside its grace and runs past it when they are longer, then
+//     SIGTERM's grace, the kill rung's settle and the final one (stop_ladder)
+//   ladder("term"): SIGTERM's grace and the two settles
+//   wedged: a found player that does not answer the start's probe (connect
+//     and request at their bound), then the whole ladder (adopt_or_spawn).
+//     A RESTART meets it too, after its own ladder from term: a player in
+//     uninterruptible sleep acts on neither signal, so that ladder can end
+//     with it still there, and adopt_or_spawn, which runs next, finds it,
+//     probes it and ladders it again from quit. So a restart's bound is a
+//     start's plus its own ladder and settle (the recheck walked the
+//     shipping code under a virtual clock: 41.12 s on that path, past the
+//     35.45 s this first said; the player-bounds walk, dev branch)
+//   spawn: the settle's one connect, the pid and exec pipes, the bind window,
+//     and the last probe of it, which can start just inside the window
+//   tail: the larger of the `no_socket` refusal (the spawn laddered from
+//     term, then a settle) and the load (the one request after the loadfile
+//     whose timeout does not end the verb, then the first-load window)
+// What is NOT summed is every other request at its bound: a request that
+// reaches its bound raises and ends the verb (MpvIpc.request), so only an mpv
+// answering each of a start's twenty-odd requests just inside 2 s could run a
+// verb past this. That residual is recovered, not bounded: a start the
+// watchdog stopped is no verdict, and the reattach probe decides what it left
+// (Service.qml, handlePlayerResult). The margin is what no bound cuts: the
+// interpreter and the stub's compile (a whole `player probe` with no player,
+// 259-306 ms at load 3.2), a 10,000-channel cache read (a start that resolves
+// its id in one, 356-390 ms), the /proc scans and the poll overshoots; 5 s is
+// twelve times that. "" is no verb: after a reply the same Timer bounds the
+// birth edge (`playerPending` that no socket confirmed), unchanged at 12 s.
+var PLAYER_BOUNDS = {
+  lockMs: 6000,           // DEFAULT_LOCK_TIMEOUT
+  lockPollMs: 50,         // LOCK_POLL_S
+  spawnMs: 5000,          // DEFAULT_SPAWN_TIMEOUT: the exec pipe, then the bind window
+  spawnPidMs: 2000,       // SPAWN_PID_TIMEOUT: the grandchild's pid pipe
+  firstLoadMs: 3000,      // DEFAULT_FIRST_LOAD_TIMEOUT
+  ipcMs: 2000,            // DEFAULT_IPC_TIMEOUT: one connect, or one request
+  settleMs: 500,          // STOP_SETTLE_MS (not Service.qml's stopSettleMs)
+  settleConnectMs: 200,   // SETTLE_CONNECT_TIMEOUT: socket_is_dead's one connect
+  settleLockMs: 500       // SETTLE_LOCK_TIMEOUT: the probe's settle under the lock
+}
+var PLAYER_WATCHDOG_MARGIN_MS = 5000
+var PLAYER_BIRTH_EDGE_MS = 12000
+
+// The stop ladder's longest run from its first rung: "" (quit) or "term".
+function playerLadderMs(fromRung) {
+  var tail = STOP_KILL_GRACE_MS + 2 * PLAYER_BOUNDS.settleMs
+  if (str(fromRung) === "term") return tail
+  return Math.max(STOP_QUIT_GRACE_MS, 2 * PLAYER_BOUNDS.ipcMs) + tail
+}
+
+// The shell's watchdog over one run of `kind` on the player slot, in ms:
+// "start", "restart", "probe", or "" for the birth edge. Anything else, a
+// string or not, gets the longest verb's, never a shorter one.
+function playerWatchdogMs(kind) {
+  var b = PLAYER_BOUNDS
+  var k = typeof kind === "string" ? kind : "?"
+  var lock = b.lockMs + b.lockPollMs
+  var spawn = b.settleConnectMs + b.spawnPidMs + 2 * b.spawnMs + 2 * b.ipcMs
+  var tail = Math.max(playerLadderMs("term") + b.settleConnectMs, b.ipcMs + b.firstLoadMs)
+  if (k === "start") return lock + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
+  if (k === "restart") return lock + playerLadderMs("term") + b.settleConnectMs + 2 * b.ipcMs + playerLadderMs("") + spawn + tail + PLAYER_WATCHDOG_MARGIN_MS
+  if (k === "probe") return Math.max(3 * b.ipcMs, b.settleLockMs + b.lockPollMs + b.settleConnectMs) + PLAYER_WATCHDOG_MARGIN_MS
+  if (k === "") return PLAYER_BIRTH_EDGE_MS
+  return Math.max(playerWatchdogMs("start"), playerWatchdogMs("restart"), playerWatchdogMs("probe"))
+}
+
 // ---- D-PLY-11: the play fork ----
 //
 // What the shell decides when a channel is asked for, lifted here so it can
@@ -160,6 +245,72 @@ function playFailureVerdict(code, context) {
   return "failed"
 }
 
+// D-PLY-32 (2026-10-28): what a FAILED `player start|restart` reply says
+// about the channel it was asked to play, once the service has taken the
+// codes it handles before this (`superseded`, `mpv_missing`, and `busy` and
+// `no_socket` while retries are left). Until now every one of them marked
+// the channel failed and toasted "Stream failed", so with the runtime folder
+// broken every channel the user tried turned red and dropped out of the zap
+// ring for 14 days, for a fault of this machine.
+//
+//   channel  the refusal is about the channel's own playlist entry: mark it
+//            and tell the user the stream failed
+//   local    anything else: the stream was never contacted, so the reply is
+//            no verdict on it. Record the reason, mark nothing
+//
+// A failed start REPLY is never a verdict on the stream. A stream that fails
+// to load reaches the shell as an OK reply whose `firstLoad.state` is
+// "failed" (playerFirstLoadFailed), or as the socket's EOF judged by
+// endedReport (handlePlayerGone); neither comes through here. What the
+// helper's `player start` can refuse with, read in bin/helper on 2026-10-28,
+// and where:
+//   player_target   no_cache (channels.json missing or unreadable),
+//                   unknown_channel (the cache does not hold the id),
+//                   unsupported_scheme (the entry's own URL scheme)
+//   player_runtime  folder_unusable, runtime_unwritable
+//   check_socket_path  socket_path_blocked
+//   acquire_lock    runtime_unwritable, busy
+//   check_seq       superseded
+//   adopt_or_spawn  mpv_missing, spawn_failed, no_socket
+//   apply_channel   tls_unverified (read off the PLAYER before the channel
+//                   is touched), ipc_error (the connection closed or timed
+//                   out; mpv 0.41.0 was measured accepting every
+//                   channel-shaped value -- NUL, C0, C1, 70,000 characters,
+//                   200 header fields -- on the three header properties and
+//                   loadfile, so no channel's data makes it refuse)
+//   main()          internal, too_large, folder_unusable
+//   the stub        helper_damaged
+//   the shell       no_output (nothing on stdout: a crash, argparse, the
+//                   player slot's watchdog TERM), `error` (a reply with no
+//                   code: parseHelperStatus)
+// Only `unsupported_scheme` is about the entry, and only a cache this
+// helper's parser would not write can carry one (it skips such lines), so
+// it is the one code listed.
+//
+// A list of the CHANNEL code rather than a fourth list of local ones, and
+// on purpose: marking is the costly direction, so a code the helper grows
+// later (D-PLY-31 names one) reads local until someone shows it is about
+// the entry. That also makes this the superset of the three lists that
+// already say "local" -- HELPER_CANNOT_TELL, PLAY_UNREADABLE and the probe's
+// PROBE_LOCAL_REFUSALS (model/sources.mjs) -- by construction, and the node
+// suite holds it: no code on any of them reads "channel" here. They stay
+// three lists because they answer other questions about other verbs, and a
+// code's meaning moves with the verb: `too_large` on the probe is the
+// provider's source over its bound ("from <host>" is right), on a player
+// verb it is this helper's own memory; `busy` there is a fetch, here the
+// player lock; `unknown_channel` and `no_cache` are no probe's codes at all.
+//
+// D-SINK-58 (2026-10-29): `local_address` joins it. player_target now runs
+// the parse's host rule again against the cache's own record of its
+// playlist, so a cache nothing checked -- one from before the destination
+// rules, whose refresh failed -- refuses a channel on a LAN or loopback
+// literal that its playlist chose. That refusal is about the entry.
+var PLAYER_START_CHANNEL_REFUSALS = ["unsupported_scheme", "local_address"]
+
+function playerStartFailure(code) {
+  return PLAYER_START_CHANNEL_REFUSALS.indexOf(str(code)) !== -1 ? "channel" : "local"
+}
+
 // Who a reply is about. Both `rememberEntry` call sites passed the shell's
 // `nowPlaying`, which in a burst is the intent current when the REPLY
 // landed, not the one the reply is for - which is precisely the case the
@@ -273,16 +424,32 @@ function playerOwner(raw) {
 //                and outvotes it (D-SINK-13's layer 3), so a non-empty map is
 //                not safe whatever is in it; cleared means 0.
 //
-// A COUNT and never the keys or the values: `stream-lavf-o` can hold a proxy
-// address with credentials in it, and this number crosses a process boundary
-// into the shell, which is a rule 5 sink like any other. The count is the whole
-// of what the decision needs.
+//   unpinned     (2026-10-29, D-SINK-43/44) how many of the OTHER TLS pins the
+//                player does not hold, summed by the helper: demuxer-lavf-o's
+//                TLS entries (for HLS and DASH they configure the protocol of
+//                every segment open), load-auto-profiles not reading off (a
+//                profile-cond profile applies over the command line at every
+//                load), and the user's [protocol.*] / [extension.*] profiles
+//                that could undo, at file load, an option this player does not
+//                have set from the command line. A player launched with the
+//                pin block reads 0; one launched by 0.15.0 or earlier is
+//                migrated where it can be, and a per-file profile no migration
+//                can reach leaves it unsafe -- stopped, not fed.
+//
+// COUNTS and never the keys or the values: `stream-lavf-o` can hold a proxy
+// address with credentials in it, and these numbers cross a process boundary
+// into the shell, which is a rule 5 sink like any other. The counts are the
+// whole of what the decision needs.
 //
 // Mirror of tls_properties_safe in the helper; both sides run the shared
 // player-tls.json fixture (dev branch).
-function tlsPropertiesSafe(verify, optionCount) {
+function tlsPropertiesSafe(verify, optionCount, unpinned) {
   if (verify !== true) return false
-  return typeof optionCount === "number" && isFinite(optionCount) && optionCount === 0
+  var counts = [optionCount, unpinned]
+  for (var i = 0; i < counts.length; i++) {
+    if (!(typeof counts[i] === "number" && isFinite(counts[i]) && counts[i] === 0)) return false
+  }
+  return true
 }
 
 // The two readings, as the probe reply carries them. Defensive in the same way
@@ -292,16 +459,23 @@ function tlsPropertiesSafe(verify, optionCount) {
 // refuses null. `false` for a count would otherwise coerce to 0 and pass.
 function playerTls(raw) {
   if (!raw || typeof raw !== "object") return null
-  var count = raw.optionCount
   return {
     verify: raw.verify === true ? true : (raw.verify === false ? false : null),
     // A WHOLE count, not a rounded one: the helper produces it with len() on a
     // map, so a fraction is not a small reading, it is a reading from something
     // that is not the helper -- and Math.floor() would turn 0.5 into the one
     // value that passes.
-    optionCount: typeof count === "number" && isFinite(count) && count >= 0 && Math.floor(count) === count ? count : null,
+    optionCount: wholeCount(raw.optionCount),
+    // The same shape for the third reading; absent (a helper older than the
+    // pin block cannot answer a shell newer than it, but a renamed field can)
+    // reads null, which the verdict refuses.
+    unpinned: wholeCount(raw.unpinned),
     migrated: raw.migrated === true
   }
+}
+
+function wholeCount(count) {
+  return typeof count === "number" && isFinite(count) && count >= 0 && Math.floor(count) === count ? count : null
 }
 
 // What the reattach path does with the player it has just identified:
@@ -350,7 +524,7 @@ function tlsReloadDisposition(o) {
 function playerTlsVerdict(tls) {
   var reading = playerTls(tls)
   if (reading === null) return { safe: false, action: "stop", migrated: false }
-  if (!tlsPropertiesSafe(reading.verify, reading.optionCount)) {
+  if (!tlsPropertiesSafe(reading.verify, reading.optionCount, reading.unpinned)) {
     return { safe: false, action: "stop", migrated: reading.migrated }
   }
   return { safe: true, action: reading.migrated ? "reload" : "feed", migrated: reading.migrated }
@@ -589,20 +763,181 @@ function endedReport(context) {
   var ctx = context && typeof context === "object" ? context : {}
   var verdict = endedVerdict(ctx.lastEndFile, ctx.userStopped === true, ctx.stopping === true)
   var tail = asList(ctx.tail)
+  var format = unopenedFormatSentence(ctx.lastEndFile)
   return {
     notify: verdict.notify === true,
     kind: verdict.kind,
     target: channelForEnd(ctx.owners, ctx.lastEndFile, ctx.nowPlaying),
-    reason: tail.length > 0 ? str(tail[tail.length - 1]) : str(verdict.reason)
+    reason: format !== "" ? format : tail.length > 0 ? str(tail[tail.length - 1]) : str(verdict.reason)
   }
 }
+
+// D-PLY-44 (owner, 2026-10-29: refuse nested playlists). The helper's own
+// loadfile carries the per-file option `demuxer=lavf`, so a stream server
+// that answers with a plain playlist -- and a channel whose address is itself
+// a .m3u or .pls redirector -- is not opened. mpv ends that load with reason
+// "error" and this `file_error` (its MPV_ERROR_UNKNOWN_FORMAT), after one
+// error-level line, "[cplayer] Failed to recognize file format." (measured on
+// mpv 0.41.0 for a .pls, a plain .m3u and a web page, windowless, lane-p1b
+// 2026-10-29). That line says nothing a user can act on, so this sentence
+// outranks the log tail for that ending, and only for it. It names both
+// things the ending can mean, because mpv cannot tell them apart: a
+// playlist file, which the player no longer opens, and a page, which it
+// never did. Pinned in the shared fixture player-endings.json
+// (`formatErrors`), which the python suite reads too.
+var PLAYER_FORMAT_ERROR = "unrecognized file format"
+var PLAYER_FORMAT_SENTENCE = "The address sent a playlist file or a web page, which the player does not open"
+
+// The sentence for an end-file that says mpv could not tell what the stream
+// is, "" for any other ending. Exact string after a trim, as outputFailure.
+function unopenedFormatSentence(end) {
+  if (!end || typeof end !== "object" || str(end.reason) !== "error") return ""
+  var raw = end.fileError !== undefined && end.fileError !== null && str(end.fileError) !== "" ? end.fileError : end.file_error
+  return str(raw).trim() === PLAYER_FORMAT_ERROR ? PLAYER_FORMAT_SENTENCE : ""
+}
+
+// D-PLY-37 (owner, 2026-10-28): an OUTPUT of this machine that could not be
+// opened is this machine's failure, not the stream's. mpv ends the file with
+// reason "error" and one of these `file_error` strings -- the names of mpv's
+// own MPV_ERROR_AO_INIT_FAILED and MPV_ERROR_VO_INIT_FAILED -- and the join is
+// on mpv's prose, so the strings are pinned in the shared fixture
+// player-endings.json (dev branch tests) with the version they were read
+// from, and a python test runs the real mpv to see the audio one again (a
+// later mpv that reworded it turns that test red, not a channel). Measured on mpv 0.41.0
+// (2026-10-28, windowless and silent): an ALSA device that does not exist,
+// PulseAudio down and PipeWire down each play the picture on and end the file
+// with "audio output initialization failed", once the file ends. The video
+// one is in mpv's error table and was reached by none of the five video
+// output failures measured: a per-file one reads "no audio or video data
+// played" when nothing else can play (and marks, as a stream with nothing
+// playable does), or nothing at all when the sound plays on, and the
+// player's own --force-window=immediate makes a video output that cannot
+// open an exit before the socket, which has no end-file (D-PLY-27). It is
+// kept on the owner's word and is UNVERIFIED.
+var PLAYER_OUTPUT_ERRORS = [
+  ["audio output initialization failed", "audio"],
+  ["video output initialization failed", "video"]
+]
+
+// "audio" or "video" when an end-file says an output of this machine could
+// not be opened, "" for anything else. Exact strings, compared after a trim:
+// a near match is mpv saying something else.
+function outputFailure(end) {
+  if (!end || typeof end !== "object" || str(end.reason) !== "error") return ""
+  var raw = end.fileError !== undefined && end.fileError !== null && str(end.fileError) !== "" ? end.fileError : end.file_error
+  var detail = str(raw).trim()
+  for (var i = 0; i < PLAYER_OUTPUT_ERRORS.length; i++) if (detail === PLAYER_OUTPUT_ERRORS[i][0]) return PLAYER_OUTPUT_ERRORS[i][1]
+  return ""
+}
+
+// The sentence lastError records and the card carries for a lost output.
+function outputFailureSentence(output) {
+  if (output === "video") return "This computer's video output could not be opened"
+  if (output === "audio") return "This computer's audio output could not be opened"
+  return ""
+}
+
+// D-PLY-33 (owner, 2026-10-28): what a player's death says about the CHANNEL.
+// endedReport answers whether the user hears about a death and which channel
+// it names; this answers what the death is evidence of, for every detector
+// that sees one. The owner's rule: a channel is marked failed only when mpv
+// said the stream failed to load -- an end-file whose reason is "error", for
+// that channel's own entry. Every other death the user is told about -- a
+// crash, an external or out-of-memory kill, a VO abort (D-PLY-27), a load
+// replaced and then a death ("stop") -- is told (F4 fails open) and marks
+// nothing, under copy that neither blames the stream nor says "did not play"
+// about a channel that may have played for an hour (PO-4). Until this, 4.8's
+// table read "no end-file at all" as a stream failure, and no code could
+// tell a death on this machine's account from one a stream caused.
+//
+// D-PLY-37 (owner, 2026-10-28): an end-file error that names an OUTPUT of
+// this machine (outputFailure above) is not the stream failing to load: told
+// as "outputFailed", in copy that blames this computer, and marked never --
+// whichever entry it names, because the cause is known either way.
+//
+// "Own entry": the end-file names an entry, and either the entry-owner ring
+// says whose it is (channelForEnd names that owner), or the ring has not
+// heard of it and it is the entry the player last started (the router's
+// entryId, from start-file). The second half is not a loosening: the reply
+// that puts an entry on the ring can land after mpv has failed that load and
+// quit (apply_channel says so of an instant failure), and the ring alone
+// would leave a dead stream on a warm player unmarked. An error for an entry
+// neither names, or with no entry id, is no evidence about the channel the
+// card names, so it is told and not marked.
+//
+// The detectors (Service.qml):
+//   the socket's EOF  context.lastEndFile, owners, nowPlaying, entryId,
+//                     userStopped, stopping, tail -- handlePlayerGone
+//   context.unattended  PO-3's reattach: the player died with no shell
+//                     attached, so no end-file was seen by anyone. Never told
+//                     (PO-3) and, by the same rule, never marked.
+//   context.firstLoad `player start`'s own first-load window answered
+//                     "failed" (context.reason, its reason). D-PLY-36: the
+//                     reply now says which ending it saw, in
+//                     context.ended -- "end-file" (mpv sent an end-file error
+//                     for the start's entry; its file_error in
+//                     context.fileError) or "closed" (mpv closed the
+//                     connection: it died, with no end-file). An end-file
+//                     error is the stream's -- marked, "Stream failed" --
+//                     unless it names an output (D-PLY-37); a closed
+//                     connection is a death with no end-file, told as
+//                     "Playback stopped" and never marked. A reply without the
+//                     field (a helper from before D-PLY-36) is the helper's
+//                     word, taken as it always was: marked, "Stream failed".
+//
+// Returns { notify, mark, card, target, reason, output }: card is the
+// notifyArgv event ("streamFailed", "playerStopped" or "outputFailed"), ""
+// when nothing is told; reason is what lastError records -- endedReport's
+// tail-or-file_error for a load that failed (D-PLY-29 stands there), the
+// generic sentence for a death with no such end-file, whose card carries no
+// reason at all, and the output's sentence for an output that could not be
+// opened; output is "audio" or "video" for that card, "" otherwise.
+function deathReport(context) {
+  var ctx = context && typeof context === "object" ? context : {}
+  if (ctx.unattended === true) return { notify: false, mark: false, card: "", target: null, reason: "", output: "" }
+  if (ctx.firstLoad === true) {
+    var np = ctx.nowPlaying
+    var who = np ? { id: str(np.id), name: str(np.name) } : null
+    var why = str(ctx.reason)
+    var ended = str(ctx.ended)
+    var lostFirst = ended === "end-file" ? outputFailure({ reason: "error", fileError: ctx.fileError }) : ""
+    if (lostFirst !== "") return { notify: true, mark: false, card: "outputFailed", target: who, reason: outputFailureSentence(lostFirst), output: lostFirst }
+    if (ended === "closed") return { notify: true, mark: false, card: "playerStopped", target: who, reason: PLAYER_GENERIC_FAILURE, output: "" }
+    var formatFirst = ended === "end-file" ? unopenedFormatSentence({ reason: "error", fileError: ctx.fileError }) : ""
+    return { notify: true, mark: true, card: "streamFailed", target: who,
+             reason: formatFirst !== "" ? formatFirst : why !== "" ? why : PLAYER_GENERIC_FAILURE, output: "" }
+  }
+  var report = endedReport(ctx)
+  if (report.notify !== true) return { notify: false, mark: false, card: "", target: report.target, reason: "", output: "" }
+  var lost = outputFailure(ctx.lastEndFile)
+  if (lost !== "") return { notify: true, mark: false, card: "outputFailed", target: report.target, reason: outputFailureSentence(lost), output: lost }
+  if (loadFailedForOwnEntry(ctx.lastEndFile, ctx.owners, ctx.entryId)) {
+    return { notify: true, mark: true, card: "streamFailed", target: report.target, reason: report.reason, output: "" }
+  }
+  return { notify: true, mark: false, card: "playerStopped", target: report.target, reason: PLAYER_GENERIC_FAILURE, output: "" }
+}
+
+// deathReport's evidence test: an end-file "error" for an entry the ring
+// owns, or, the ring silent, for the entry the player last started.
+function loadFailedForOwnEntry(end, owners, currentEntryId) {
+  if (!end || typeof end !== "object" || str(end.reason) !== "error") return false
+  var id = playerEntryId(end.entryId)
+  if (id === null) return false
+  if (owners && typeof owners === "object" && ownKeyValue(owners, String(id))) return true
+  return id === playerEntryId(currentEntryId)
+}
 export {
-  stopEscalation, healthTick, playFork, playForkBlind, zapArgs,
-  PLAY_UNREADABLE, HELPER_CANNOT_TELL, helperCannotTell, PLAY_RETRYABLE,
-  playFailureVerdict, replyTarget, reconcileVerdict, sessionIntentRepair,
-  playerOrphanCheckArgv, playerStash, playerOwner, tlsPropertiesSafe,
-  playerTls, tlsReloadDisposition, playerTlsVerdict, parsePlayerProbe,
-  parsePlayerEvent, playerEntryId, endedVerdict, probeVerdict,
-  playerDeathKind, playerSessionFollowUp, playerRouterState, pushPlayerLog,
-  routePlayerEvent, rememberEntryOwner, channelForEnd, endedReport
+  stopEscalation, healthTick, PLAYER_BOUNDS, PLAYER_WATCHDOG_MARGIN_MS,
+  PLAYER_BIRTH_EDGE_MS, playerLadderMs, playerWatchdogMs, playFork,
+  playForkBlind, zapArgs, PLAY_UNREADABLE, HELPER_CANNOT_TELL,
+  helperCannotTell, PLAY_RETRYABLE, playFailureVerdict,
+  PLAYER_START_CHANNEL_REFUSALS, playerStartFailure, replyTarget,
+  reconcileVerdict, sessionIntentRepair, playerOrphanCheckArgv, playerStash,
+  playerOwner, tlsPropertiesSafe, playerTls, wholeCount, tlsReloadDisposition,
+  playerTlsVerdict, parsePlayerProbe, parsePlayerEvent, playerEntryId,
+  endedVerdict, probeVerdict, playerDeathKind, playerSessionFollowUp,
+  playerRouterState, pushPlayerLog, routePlayerEvent, rememberEntryOwner,
+  channelForEnd, endedReport, PLAYER_FORMAT_ERROR, PLAYER_FORMAT_SENTENCE,
+  unopenedFormatSentence, PLAYER_OUTPUT_ERRORS, outputFailure,
+  outputFailureSentence, deathReport, loadFailedForOwnEntry
 }

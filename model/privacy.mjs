@@ -3,17 +3,20 @@ import {
   QUOTE_OPEN, QUOTE_CLOSE, SEP, GLYPHS, NOTIFY_IDS
 } from "./build.mjs"
 import {
-  str, asList
+  str, asList, keyedMap, ownKeyValue
 } from "./text.mjs"
 import {
   cleanName
 } from "./channels.mjs"
 import {
-  mergeDropNotice, stateUnreadableNotice
+  mergeConflictNotice, mergeDropNotice, stateUnreadableNotice
 } from "./state.mjs"
 import {
   parseHelperStatus, entryInputNotice
 } from "./settings.mjs"
+import {
+  outputFailureSentence
+} from "./player.mjs"
 import {
   helperArgv
 } from "./mpv.mjs"
@@ -21,7 +24,7 @@ import {
   formatCount, pluralChannels
 } from "./epg.mjs"
 import {
-  HOST_WITHHELD, runHostParts
+  CONTROL_RE, HOST_WITHHELD, runHostParts
 } from "./sources.mjs"
 
 // ---- D-SINK-18: the container the host settings file is, before a URL goes
@@ -249,17 +252,92 @@ function playerPauseArgv(socket, state) {
 // one of its own flags (`--urgency=...`, `-g`, ...), so the body is built to
 // never start with "-": the playlist-controlled name is quoted with the
 // typographic quotes and cleaned of leading dashes (S-04).
-function notifyArgv(event, params) {
+//
+// D-HOST-5 (owner, 2026-10-28). `replaceId` is the id the notification
+// server returned for this kind's last card (Model.notifyPost keeps it): sent
+// as `-r`, it replaces that card in place while the server still holds it,
+// and an id the server no longer holds (the card expired or was dismissed)
+// gets a fresh card -- both measured on Quickshell 0.3.1's server. With no
+// such id the kind's fixed NOTIFY_IDS number goes out, which the server
+// answers with a fresh card too. `-p` makes the wrapper print the id the
+// server returned, which is how the next post of the kind finds it; it comes
+// before `-r` so `-r <id> <headline>` stays one run of the argv.
+//
+// F-SINK-14 (2026-10-29). The channel name is redacted HERE, by sinkText,
+// the one rule every place a provider's name is shown goes through: the
+// guide's row printed `News HD (backup cdn.test)` while this body printed
+// the whole credentialed URL, and the host keeps every body in its history.
+// Redacted BEFORE cleanName, so the S-04 dash rule sees what is shown.
+//
+// D-SINK-49 (2026-10-29). The host renders the BODY as Text.StyledText
+// (OMARCHY-PLUGIN-CONTRACT.md (dev branch), "Verified host renderers", and
+// pinned by its host text-format test) behind a stripper that drops image tags
+// only, and the Desktop Notifications spec leaves escaping to the client
+// once a server advertises body-markup. So a `<b>`, a `<font>` or an
+// `<a href>` in a provider's name or in a reason restyled this plugin's own
+// card. The WHOLE body is escaped once, at the one exit below, so no branch
+// -- and no branch added later -- can hand the renderer a tag; StyledText
+// decodes the three entities, so the user reads the name exactly as the
+// provider wrote it (an `&` included, which unescaped could swallow the
+// text after it). The TITLE is not escaped: the host draws it PlainText
+// (pinned the same way), where an entity would show as written.
+//
+// F-SINK-16 (2026-10-29). And the body carries no control character. The
+// playlist parse keeps a provider's C0 and C1 controls in a name (measured:
+// TAB, VT, FF, ESC, DEL, U+0085, U+009B, U+009D), the host turns a line
+// break in a body into `<br/>`, and it persists every body as JSON under
+// ~/.local/state/omarchy/notifications/, where JSON.stringify leaves DEL and
+// C1 as they are for whatever prints the file. No body the plugin composes
+// means anything by one. The name and the reason lose theirs BEFORE the
+// redaction, as the player's title does (apply_channel): a TAB inside a
+// password then no longer splits the URL there (D-SINK-34's cost) on this
+// sink; and the whole body loses any left at the exit, before the escape.
+function notifyArgv(event, params, replaceId) {
   var p = params || {}
   var spec = null
-  var name = cleanName(p.name) || "Channel"
-  var reason = scrubUrls(str(p.reason))
+  var name = cleanName(sinkText(str(p.name).replace(CONTROL_RE, ""))) || "Channel"
+  var reason = scrubUrls(str(p.reason).replace(CONTROL_RE, ""))
   if (event === "streamFailed") {
     spec = { title: "Stream failed", body: QUOTE_OPEN + name + QUOTE_CLOSE + " did not play" + (reason !== "" ? SEP + reason : ""), glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.streamFailed }
+  } else if (event === "localPlayFailure") {
+    // D-PLY-32: the same body as a stream failure -- the channel is what did
+    // not play, the reason is why -- under a title that blames no stream,
+    // because this machine refused before the stream was contacted
+    // (Model.playerStartFailure "local"). The glyph is mpvMissing's, the
+    // other local reason a player cannot start.
+    spec = { title: "Could not start playback", body: QUOTE_OPEN + name + QUOTE_CLOSE + " did not play" + (reason !== "" ? SEP + reason : ""), glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.localPlayFailure }
+  } else if (event === "playerStopped") {
+    // D-PLY-33 (owner, 2026-10-28): the player died and mpv never said the
+    // load failed (Model.deathReport). Nothing is known about the stream, so
+    // the copy blames nothing, and the channel may have been playing for an
+    // hour, so it does not say "did not play" (PO-4). A sentence and no
+    // reason: what the log tail holds at a death with no end-file is a
+    // driver warning as often as a cause (D-PLY-29), and a crash or a kill
+    // leaves no line at all. The same S-04 quoting as every body with a name.
+    spec = { title: "Playback stopped", body: QUOTE_OPEN + name + QUOTE_CLOSE + " stopped unexpectedly", glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.playerStopped }
+  } else if (event === "outputFailed") {
+    // D-PLY-37 (owner, 2026-10-28): mpv ended the load because an output of
+    // THIS machine could not be opened (Model.deathReport card
+    // "outputFailed"). The headline names the output, the body says the
+    // channel stopped and why, in a sentence that blames this computer --
+    // never "did not play", because the picture played until the stream
+    // ended (measured: mpv 0.41.0 plays the video on and reports the audio
+    // output only when the file ends). `output` is "audio" or "video"; the
+    // sentence is Model.outputFailureSentence's, the one lastError records.
+    var lost = p.output === "video" ? "video" : "audio"
+    spec = { title: lost === "video" ? "Video output failed" : "Audio output failed",
+             body: QUOTE_OPEN + name + QUOTE_CLOSE + " stopped" + SEP + outputFailureSentence(lost),
+             glyph: GLYPHS.tvOff, urgency: "normal", id: NOTIFY_IDS.outputFailed }
   } else if (event === "playlistRefreshed") {
     spec = { title: "Playlist refreshed", body: pluralChannels(p.channelCount) + " in " + formatCount(p.groupCount) + (Number(p.groupCount) === 1 ? " group" : " groups"), glyph: GLYPHS.refresh, urgency: "low", id: NOTIFY_IDS.playlistRefreshed }
   } else if (event === "playlistError") {
-    var tail = p.cachedAt ? "Using cached copy from " + str(p.cachedAt) + "." : "Open the guide for details."
+    // rc-fix160 (D-SINK-69's rule-15 sweep, 2026-11-01): `cachedAt` is the
+    // shell's clock (Model.formatClock) and `path` below the state file's,
+    // and both reached this argv unscrubbed while the name and the reason
+    // were scrubbed, so the sink held only what today's callers happen to
+    // pass. Both go through the same scrub now; a clock and a path are
+    // unchanged by it.
+    var tail = p.cachedAt ? "Using cached copy from " + scrubUrls(str(p.cachedAt).replace(CONTROL_RE, "")) + "." : "Open the guide for details."
     spec = { title: "Playlist error", body: "Could not fetch the playlist (" + (reason || "unknown error") + "). " + tail, glyph: GLYPHS.alert, urgency: "normal", id: NOTIFY_IDS.playlistError }
   } else if (event === "epgError") {
     spec = { title: "Guide data error", body: "Could not fetch the EPG (" + (reason || "unknown error") + "). Channels still work.", glyph: GLYPHS.alert, urgency: "low", id: NOTIFY_IDS.epgError }
@@ -275,16 +353,122 @@ function notifyArgv(event, params) {
     // R22a: Model.stateUnreadableNotice's sentence and nothing else, for the
     // same reason as the refusal above. A reason and a PATH, never a URL.
     // R27e: and the mid-session title when the block began after a load.
-    var told = stateUnreadableNotice(p.reason, p.path, p.midSession === true)
+    var told = stateUnreadableNotice(p.reason, scrubUrls(str(p.path).replace(CONTROL_RE, "")), p.midSession === true)
     spec = { title: told.title, body: told.body, glyph: GLYPHS.alert, urgency: "critical", id: NOTIFY_IDS.stateUnreadable }
   } else if (event === "mergeDropped") {
     // R25b: Model.mergeDropNotice's sentence and nothing else -- counts and
     // caps, never a URL, a label, a query or a group name.
     var dropped = mergeDropNotice(p.dropped)
     if (dropped) spec = { title: dropped.title, body: dropped.body, glyph: GLYPHS.alert, urgency: "normal", id: NOTIFY_IDS.mergeDropped }
+  } else if (event === "mergeConflict") {
+    // D-SRC-33: Model.mergeConflictNotice's sentences and nothing else -- a
+    // field name per conflict, never a value, a URL or (D-SINK-69: this argv
+    // is world-readable in /proc while it runs) a source's key.
+    var kept = mergeConflictNotice(p.conflicts)
+    if (kept) spec = { title: kept.title, body: kept.body, glyph: GLYPHS.alert, urgency: "normal", id: NOTIFY_IDS.mergeConflict }
   }
   if (!spec) return null
-  return ["omarchy-notification-send", "--app-name", "IPTV", "-u", spec.urgency, "-g", spec.glyph, "-r", String(spec.id), spec.title, spec.body]
+  var held = notifyReplaceId(replaceId)
+  return ["omarchy-notification-send", "--app-name", "IPTV", "-u", spec.urgency, "-g", spec.glyph, "-p",
+          "-r", String(held > 0 ? held : spec.id), spec.title, markupEscape(str(spec.body).replace(CONTROL_RE, ""))]
+}
+
+// D-SINK-49: text on its way into a StyledText renderer, shown as written.
+// `&` first, so the entities written for `<` and `>` are not escaped again.
+// Quotes are left alone: with no `<` left there is no tag for an attribute
+// to sit in, and StyledText draws a quote as a quote (measured, the QML
+// spec's "D-SINK-49" case). Three single-character global replaces, linear.
+function markupEscape(text) {
+  return str(text).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
+
+// ---- D-HOST-5 (owner, 2026-10-28): one card per notice kind, refreshed in place.
+//
+// The service posts every notice through ONE slot per kind (the notifyArgv
+// event name). The slot holds the id the server returned for the kind's last
+// card and sends it back as `-r` on the next post of that kind, so a repeated
+// notice refreshes its card where the server still holds it. Two posts of a
+// kind are never in flight together: the second would leave before the
+// first's id came back and stack a second card. A post that arrives while
+// its kind's post is in flight is HELD -- the latest replacing any earlier
+// one held, because it would replace that card on screen anyway -- and goes
+// out with the returned id when the post in flight answers. Kinds never wait
+// on each other.
+//
+// The ids live in the service's memory only and are never saved. The server
+// is the shell's own (Omarchy's notifications plugin runs in the same
+// omarchy-shell process), and its ids start again from 1 with each server
+// generation; memory that dies with the shell is the one store that can never
+// hand a new generation an old id, which a saved id would -- and the server
+// replaces whatever card holds an id, whichever program posted it.
+//
+// slots: a keyedMap of event -> { id, busy, held }, never mutated; every call
+// returns a new map. `held` is the params of the post waiting, or null.
+
+// A notice post (the wrapper, then busctl) normally answers in tens of
+// milliseconds; this bounds one that does not, so a wedged post cannot hold
+// its kind's later notices forever. busctl's own call timeout is 25 s.
+var NOTIFY_POST_TIMEOUT_MS = 5000
+
+// A server id as `-r` takes it: a positive integer in UINT32 range, else 0.
+function notifyReplaceId(value) {
+  var n = typeof value === "number" ? value : Number(str(value))
+  if (!isFinite(n) || n !== Math.floor(n) || n < 1 || n > 4294967295) return 0
+  return n
+}
+
+// The id `omarchy-notification-send -p` printed: one decimal integer on one
+// line. Anything else -- a wrapper that failed (it exits non-zero and prints
+// nothing), a logging stub that prints nothing, a post the watchdog ended, a
+// crash -- is 0, "no id held": the next post of the kind goes out with the
+// fixed number and gets a fresh card, the safe direction.
+function notifyReplyId(text, exitCode) {
+  if (Number(exitCode) !== 0) return 0
+  var m = /^[ \t]*([0-9]{1,10})[ \t]*\r?\n?$/.exec(str(text))
+  return m ? notifyReplaceId(Number(m[1])) : 0
+}
+
+function notifySlot(slots, event) {
+  var s = slots && typeof slots === "object" ? ownKeyValue(slots, str(event)) : null
+  return {
+    id: s ? notifyReplaceId(s.id) : 0,
+    busy: !!(s && s.busy === true),
+    held: s && s.held !== undefined && s.held !== null ? s.held : null
+  }
+}
+
+function withNotifySlot(slots, event, slot) {
+  var out = keyedMap()
+  var keys = slots && typeof slots === "object" ? Object.keys(slots) : []
+  for (var i = 0; i < keys.length; i++) out[keys[i]] = slots[keys[i]]
+  out[str(event)] = slot
+  return out
+}
+
+// A notice to post. Returns { slots, argv }: argv is the command to run now,
+// or null when the kind's post is in flight (the notice is held) or the event
+// makes no card (notifyArgv's null: an unknown event, a merge with nothing
+// dropped).
+function notifyPost(slots, event, params) {
+  if (notifyArgv(event, params) === null) return { slots: slots, argv: null }
+  var slot = notifySlot(slots, event)
+  var p = params || {}
+  if (slot.busy) return { slots: withNotifySlot(slots, event, { id: slot.id, busy: true, held: p }), argv: null }
+  return { slots: withNotifySlot(slots, event, { id: slot.id, busy: true, held: null }), argv: notifyArgv(event, p, slot.id) }
+}
+
+// A post of `event` answered: its stdout and exit code. The slot now holds
+// what this post returned -- the id of the card it made or refreshed, or none
+// -- and a notice held meanwhile goes out at once with that id. Returns
+// { slots, argv } as notifyPost does.
+function notifyAnswered(slots, event, text, exitCode) {
+  var slot = notifySlot(slots, event)
+  var id = notifyReplyId(text, exitCode)
+  if (slot.held !== null) {
+    var argv = notifyArgv(event, slot.held, id)
+    if (argv !== null) return { slots: withNotifySlot(slots, event, { id: id, busy: true, held: null }), argv: argv }
+  }
+  return { slots: withNotifySlot(slots, event, { id: id, busy: false, held: null }), argv: null }
 }
 
 // ------------------------------------------------------------ privacy
@@ -315,11 +499,27 @@ function sourceLabel(url) {
   // is the defect redactUrls was fixed for. Both halves are needed: either
   // alone still leaks. M4-01 made this reachable from a remote party, because
   // resolveEpgUrl publishes `hostOf` over a `url-tvg` the PLAYLIST declared.
-  var m = text.match(/^([a-z][a-z0-9+.-]*):\/\/(?:[^\/?#\s]*@)?(\[[^\/?#\s\]]*\]|[^\/\s?#:@\[]+)(?::\d+)?/i)
+  // D-SINK-30: the host group ends at `;`, `=` and `&` too, as runHostParts
+  // cuts the free-text host (reg-name admits them; no real host carries
+  // them), so `http://h.test;sid=SECRET/x` labels as `http://h.test`.
+  //
+  // F-SINK-15 (2026-10-29). The AUTHORITY is hostPortOf's -- everything up
+  // to the first `/`, `?` or `#`, its userinfo cut at the LAST `@` -- and not
+  // a pattern of its own. The userinfo group here used to stop at JS
+  // whitespace as well, so on text with a space or U+3000 in the password the
+  // optional group failed and the host group took the USERNAME:
+  // `http://user:pa ss@cdn.test/x` labelled itself `http://user` where
+  // hostPortOf, the helper's urllib and validateSourceUrl all read
+  // `cdn.test`. Latent (every caller passes a validated URL, and validation
+  // refuses whitespace), and the third printer with a boundary of its own.
+  // The HOST still ends at whitespace, so nothing after one is printed.
+  var m = text.match(/^([a-z][a-z0-9+.-]*):\/\/([^\/?#]*)/i)
   if (m) {
     var scheme = m[1].toLowerCase()
     if (scheme === "file") return "local file"
-    return scheme + "://" + m[2]
+    var hostport = m[2].substring(m[2].lastIndexOf("@") + 1)
+    var h = hostport.match(/^(?:\[[^\/?#\s\]]*\]|[^\/\s?#:@\[;=&]+)/)
+    if (h) return scheme + "://" + h[0]
   }
   if (text.charAt(0) === "/" || text.charAt(0) === "~") return "local file"
   return "unknown source"
@@ -626,8 +826,10 @@ export {
   configShieldArgv, configShieldState, persistCarriesSecret,
   configShieldDecision, entryShieldDecision, seqArg, mpvArgArgv,
   playerSessionArgv, playerStartArgv, playerStopArgv, playerRestartArgv,
-  playerPauseArgv, notifyArgv, sourceLabel, hostOf, SPACE_RE, isSpaceAt,
-  URL_SPACE_CODES, isUrlSpaceAt, urlSpaceIndex, URL_DELIMITER_CODES,
-  isUrlDelimiterAt, urlDelimiterIndex, trailingPunctuationLength,
-  isSchemeRestCode, isLetterCode, redactUrls, scrubUrls, sinkText
+  playerPauseArgv, notifyArgv, markupEscape, NOTIFY_POST_TIMEOUT_MS,
+  notifyReplaceId, notifyReplyId, notifySlot, withNotifySlot, notifyPost,
+  notifyAnswered, sourceLabel, hostOf, SPACE_RE, isSpaceAt, URL_SPACE_CODES,
+  isUrlSpaceAt, urlSpaceIndex, URL_DELIMITER_CODES, isUrlDelimiterAt,
+  urlDelimiterIndex, trailingPunctuationLength, isSchemeRestCode,
+  isLetterCode, redactUrls, scrubUrls, sinkText
 }

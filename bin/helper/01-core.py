@@ -151,6 +151,51 @@ CHANNELS_FILE = "channels.json"
 PLAYLIST_STATUS_FILE = "playlist-status.json"
 # D-SINK-8: how the shell hands `playlist` and `epg` their URL (see url_from).
 URL_ENV = "OMARCHY_IPTV_URL"
+# D-SINK-47, D-SINK-48 (lane-p2a, 2026-10-29): how the shell hands every verb
+# the arguments that must not sit on a world-readable /proc/<pid>/cmdline --
+# the source's cache directory and the keys in it (a 32-bit hash of the
+# credentialed playlist URL on every source added before this release), a
+# channel's `--id` (a `u:` id hashes a stream URL), a zap-ring `--scope`
+# (a provider's group name) and the user's `--mpv-arg` tokens (where a proxy
+# password goes). The argv carries ARGS_FLAG in their place, and they arrive
+# as a JSON list of strings in ARGS_ENV, read once by helper_arguments before
+# argparse sees anything and appended after the public argv. The stub has
+# shielded the process before this line runs, so the environment is closed to
+# every other uid from exec and to this uid from the shield on, as the URL's
+# is (D-SINK-9). Mirror of Model.HELPER_ARGS_ENV / Model.HELPER_ARGS_FLAG.
+ARGS_ENV = "OMARCHY_IPTV_ARGS"
+ARGS_FLAG = "--args-from-env"
+# The kernel's own bound on one environment string (MAX_ARG_STRLEN, 32 pages):
+# nothing longer can have been handed to an exec, so a longer value is not ours.
+ARGS_ENV_MAX = 131072
+# D-SINK-40 (2026-10-29): where that URL CAME FROM, set by the shell beside
+# it at every spawn that carries one (Model.fetchEnvironmentFor). `user` is a
+# URL the user typed -- its first hop may reach any address, LAN and loopback
+# included; `playlist` is one the provider chose (the url-tvg guide hint).
+# Absent reads `user` (a human at their own shell with --url); any other
+# value reads `playlist`, the stricter one. The playlist's own host and the
+# address class its first hop connected to (channels.json `sourceClass`)
+# ride beside them, so a provider-chosen destination on THAT host may stay
+# on it (DestinationPolicy, 03-io-playlist.py). No URL is in either.
+ORIGIN_ENV = "OMARCHY_IPTV_ORIGIN"
+HOME_HOST_ENV = "OMARCHY_IPTV_PLAYLIST_HOST"
+HOME_CLASS_ENV = "OMARCHY_IPTV_PLAYLIST_CLASS"
+# D-SINK-57 (owner, 2026-10-29): and the playlist URL's port (its scheme's
+# default when it names none), because on LOOPBACK the playlist's own host is
+# host AND port (own_host_match).
+HOME_PORT_ENV = "OMARCHY_IPTV_PLAYLIST_PORT"
+ORIGIN_USER = "user"
+ORIGIN_PLAYLIST = "playlist"
+# Every class address_class answers. "global" is the only one a destination
+# the provider chose may reach unconditionally; "unresolved" is never an
+# address's class, only a proxied target this machine could not look up.
+ADDRESS_CLASSES = ("global", "loopback", "private", "shared", "link-local",
+                   "unspecified", "multicast", "reserved")
+# The version of the destination rules a cache was written under
+# (playlist-status.json `destinationRules`). A cache without it predates
+# them, holds channels nothing checked, and is refreshed at the next start
+# (Model.cacheBeforeDestinationRules).
+DESTINATION_RULES = 1
 EPG_NOW_FILE = "epg-now.json"
 EPG_STATUS_FILE = "epg-status.json"
 # Helper-private programme window (not a QML contract). Line 1 is a JSON
@@ -194,8 +239,13 @@ FAILED_FILE = "failed.json"
 # FAILED_FILE is in this tuple deliberately: it is what makes a removed
 # source take its failure marks with it, which is D-LOGO-4's lesson applied
 # before the defect rather than after it.
+# D-LOGO-22: the per-source memo of logo addresses whose fetch failed,
+# beside channels.json and never inside logos/ (whose census counts
+# entries); in CACHE_FILES for FAILED_FILE's reason, so a removed source
+# takes it along and clear_source_dir can still empty the directory.
+LOGO_FAILED_FILE = "logo-failed.json"
 CACHE_FILES = (CHANNELS_FILE, PLAYLIST_STATUS_FILE, EPG_NOW_FILE, EPG_STATUS_FILE, EPG_WINDOW_FILE,
-               FAILED_FILE)
+               FAILED_FILE, LOGO_FAILED_FILE)
 EPG_CACHE_FILES = (EPG_WINDOW_FILE, EPG_NOW_FILE, EPG_STATUS_FILE)
 # The one subdirectory a source owns. Named here rather than spelled in
 # three places, because `cache logos-clear` deletes what `logos --fetch`
@@ -204,6 +254,17 @@ EPG_CACHE_FILES = (EPG_WINDOW_FILE, EPG_NOW_FILE, EPG_STATUS_FILE)
 LOGO_SUBDIR = "logos"
 TEMP_PREFIX = ".tmp-"
 DEFAULT_EPG_MAX_AGE = 86400
+# D-LOGO-22 (the lead's ruling of 2026-10-24): a logo address that failed
+# -- timeout, refusal at the gate, an HTTP error, a header the bounds
+# refused -- is not tried again for a day, the one TTL the memo has
+# (DEFAULT_EPG_MAX_AGE's figure), so a dead host costs one try a day
+# rather than one a run; and the memo holds at most LOGO_FAILED_MAX
+# entries (MAX_LOGO_FILES' figure, 05-ipc-logos.py; the cap on the folder
+# the memo stands beside), a full one recording nothing new until an
+# entry expires. The memo's constants live here because the parts
+# compile in order and 06-failed.py reads them; its code is there.
+LOGO_FAILED_TTL = DEFAULT_EPG_MAX_AGE
+LOGO_FAILED_MAX = 5000
 # Channel id schemes (ARCHITECTURE.md decision 6). Scheme 1 shipped from 0.1
 # to 0.7: `t:<tvg-id>` when unique in the playlist, else `u:<fnv1a32(url)>`.
 # The stream URL of an Xtream provider carries the account password, so every
@@ -332,7 +393,9 @@ EPG_DETAIL_KEYS = ("desc", "category", "episode")
 # identifier it used as its ORACLE -- a guide channel id sitting in the
 # playlist row's own stream address -- was reaching 185 rows that the matcher
 # itself never read. Why it ranks where it does, measured on the frozen
-# 1,453-channel list against the frozen Pluto guide (427 declarations):
+# 1,453-channel list against the frozen Pluto guide (427 declarations) --
+# a dated measurement, 2026-10-03, over inputs that no longer exist
+# (F-EPG-24, F-EPG-26: not re-derivable; the live list drifts):
 #
 # EVERY census below counts the STREAM url and nothing else, which is the
 # only field this strategy reads. The round that added ADDR quoted 193 and
@@ -383,8 +446,10 @@ EPG_MATCH_KEYS = ("matchedById", "matchedByAddr", "matchedByFeed", "matchedByNam
 # otherwise claim a row for every address containing that word.
 #
 # What the floor actually buys, re-measured over the 1,453 real STREAM
-# addresses (the field this strategy reads; the figures the round shipped
-# here were taken over stream+logo and are wrong on this field):
+# addresses of the list frozen 2026-10-03 (F-EPG-24: a dated measurement
+# over an input that no longer exists, not re-derivable; the field this
+# strategy reads; the figures the round shipped here were taken over
+# stream+logo and are wrong on this field):
 #
 #   With no floor at all, 626 alphanumeric tokens occur in more than one
 #   row's address and NONE of them is a 24-hex id. The longest is
@@ -477,13 +542,16 @@ _EPG_ADDR_TOKEN = re.compile(r"[A-Za-z0-9]{%d,}" % EPG_ADDR_MIN_TOKEN)
 # not this code.
 #
 # The synthetic shape above is adversarial on purpose. The owner's real
-# 1,453-row list averages 0.7 qualifying tokens per address, so a 50,000-row
-# list in that shape would not come near these figures; the caps are what
+# 1,453-row list (frozen 2026-10-03, F-EPG-24: a dated figure over an input
+# that no longer exists) averaged 0.7 qualifying tokens per address, so a
+# 50,000-row list in that shape would not come near these figures; the caps
+# are what
 # MAX_SOURCE_BYTES and MAX_CHANNELS actually permit, which is the number a
 # bound has to be stated at.
 #
-# Sixteen, and the recall cost on the frozen data is ZERO. Measured over the
-# owner's 1,453 addresses: the most qualifying tokens any one of them holds
+# Sixteen, and the recall cost on the frozen data is ZERO. Measured 2026-10-03
+# over the owner's 1,453 addresses, frozen then and gone since (F-EPG-24; not
+# re-derivable): the most qualifying tokens any one of them holds
 # is SIX, and every one of the 185 declared guide ids the index reaches is
 # the FIRST qualifying token of its row's address (position 0 of the de-duped
 # run). Swept, the index is byte-identical to the uncapped one at every cap
@@ -699,6 +767,70 @@ def default_socket_path() -> str:
     return os.path.join(runtime_dir(), "mpv.sock")
 
 
+def disable_core_dumps() -> None:
+    """RLIMIT_CORE (0, 0), soft AND hard, on the process that calls this
+    (D-SINK-39). Called in a CHILD between fork and exec -- the player's
+    (spawn_detached) and wl-paste's (read_clipboard, as Popen's
+    preexec_fn) -- and never in this helper itself.
+
+    Why a child needs its own lever: this helper is non-dumpable from its
+    first statement (the stub's shield), but the kernel sets dumpable back
+    to 1 on every exec, so the shield reaches no child; RLIMIT_CORE is
+    inherited across fork and exec and is the one setting that does. What it
+    closes, measured 2026-10-25: systemd-coredump stores a user process's
+    core under /var/lib/systemd/coredump as root:root 0640 with an ACL that
+    lets EVERY process of that uid read it, for two weeks by default (the
+    tmpfiles.d age of that directory), and the host then offers to point an
+    AI agent at it; a playing
+    mpv's memory holds the stream URL, userinfo and all, in ten to thirteen
+    copies (three gcore runs: 12, 13, 10), and every provider header value
+    in three to eight, while its argv and environment hold none. With a soft limit of 0 systemd-coredump journals the crash
+    and stores nothing (COREDUMP_RLIMIT 0, no COREDUMP_FILENAME).
+
+    Why the HARD limit too: the soft limit is only the process's current
+    request, and anything in the child's own address space -- the program,
+    a library it loads, a config it reads -- may raise it back up to the
+    hard one with a plain setrlimit; raising the hard limit takes
+    CAP_SYS_RESOURCE. A user's `ulimit -c unlimited` in the shell's
+    environment is what the child INHERITS, and (0, 0) replaces both halves
+    of it. Lowering both can fail only for a process forbidden to change
+    its limits at all; the error propagates to the caller's spawn path (the
+    player's error pipe, Popen's SubprocessError) and the child is not
+    started -- a spawn that cannot be made safe is refused, never shrugged
+    at, the D-SINK-16 shape.
+    """
+    import resource
+    resource.setrlimit(resource.RLIMIT_CORE, (0, 0))
+
+
+def limit_core_of(pid: int) -> bool:
+    """RLIMIT_CORE (0, 0) on a player this helper did NOT start (D-SINK-39,
+    the D-SINK-16 half). The detached player survives a shell restart by
+    design, so after an upgrade the shell reattaches to an mpv the OLD code
+    forked -- nothing between its fork and its exec set a limit -- and then
+    feeds it credentialed URLs and provider headers: the same live feed into
+    an unprotected process that D-SINK-16 closed for TLS. disable_core_dumps
+    reaches only a child of this helper; this reaches a process that is not.
+
+    prlimit(2) lets a process set another's limits when the target's real,
+    effective and saved uids and gids all match the caller's -- no ptrace, so
+    Yama's scope does not apply -- and lowering takes no capability while
+    raising the hard limit back takes CAP_SYS_RESOURCE, so the player cannot
+    undo it. Measured 2026-10-25 on a same-uid process: (-1, -1) -> (0, 0),
+    the raise refused with EPERM. Returns whether the kernel now reads
+    (0, 0); False for a pid that is gone or not ours, which the caller says
+    out loud. pid 0 would mean THIS process to prlimit, so it is refused.
+    """
+    import resource
+    if pid <= 0:
+        return False
+    try:
+        resource.prlimit(pid, resource.RLIMIT_CORE, (0, 0))
+        return resource.prlimit(pid, resource.RLIMIT_CORE) == (0, 0)
+    except (OSError, ValueError, OverflowError):
+        return False
+
+
 def socket_path(explicit: str | None = None) -> str:
     if explicit:
         return os.path.abspath(os.path.expanduser(explicit))
@@ -791,6 +923,32 @@ class FolderUnusable(NotADirectoryError):
         self.sentence = "%s %s; nothing was written" % (path, what)
 
 
+def missing_folders(path: str) -> list[str]:
+    """The folders missing at `path` and above it, nearest first, up to the
+    first one that exists; creates nothing.
+
+    R25c's refusal is HERE, so the verbs that only delete in a folder refuse
+    exactly what the verbs that write into it refuse (D-SRC-74, 2026-10-28):
+    a symbolic link at `path`, or above it, that dangles or leads to
+    something that is not a folder, or a file or anything else that is not a
+    folder there, raises FolderUnusable with R25c's sentence. A link that
+    leads to a folder is a folder (os.path.isdir follows it) and ends the
+    walk, as it always has in ensure_private_dir."""
+    missing: list[str] = []
+    current = path
+    while current and not os.path.isdir(current):
+        if os.path.lexists(current):
+            if os.path.islink(current):
+                raise FolderUnusable(current, "is a symbolic link whose target is missing or is not a folder")
+            raise FolderUnusable(current, "is not a folder")
+        missing.append(current)
+        parent = os.path.dirname(current)
+        if parent == current:
+            break
+        current = parent
+    return missing
+
+
 def ensure_private_dir(path: str) -> None:
     """mkdir -p with every directory this call creates set to 0700 (the
     per-source layout means the helper may be the first to create
@@ -808,20 +966,9 @@ def ensure_private_dir(path: str) -> None:
     anything is created: it used to reach a mkdir under the link and end in
     a FileNotFoundError traceback and `code: internal` (every caller --
     the state folder, a cache folder, the runtime socket folder, the logo
-    folder -- measured, the same before.txt run)."""
-    missing: list[str] = []
-    current = path
-    while current and not os.path.isdir(current):
-        if os.path.lexists(current):
-            if os.path.islink(current):
-                raise FolderUnusable(current, "is a symbolic link whose target is missing or is not a folder")
-            raise FolderUnusable(current, "is not a folder")
-        missing.append(current)
-        parent = os.path.dirname(current)
-        if parent == current:
-            break
-        current = parent
-    for directory in reversed(missing):
+    folder -- measured, the same before.txt run). The walk and the refusal
+    are missing_folders', which the deleting cache verbs share (D-SRC-74)."""
+    for directory in reversed(missing_folders(path)):
         try:
             os.mkdir(directory, 0o700)
         except FileExistsError:
@@ -1296,10 +1443,12 @@ def epg_name_key(value: Any) -> str:
     The project already owned the right rule and the matcher used the other
     one.
 
-    Measured end to end on the frozen inputs when this changed: matched
-    227 -> 226, and the one pair lost is the wrong one; nameIndexed 1,443 ->
-    1,453 and nameDroppedPlaylist 10 -> 0, so the repair costs one bad pair
-    and returns ten channels to the index. No confirmed pair moved.
+    Measured end to end on the frozen inputs (the 1,453-row list and the
+    guide frozen 2026-10-03; gone since, F-EPG-24 and F-EPG-26, so a dated
+    figure and not a current one) when this changed: matched 227 -> 226,
+    and the one pair lost is the wrong one; nameIndexed 1,443 -> 1,453 and
+    nameDroppedPlaylist 10 -> 0, so the repair costs one bad pair and
+    returns ten channels to the index. No confirmed pair moved.
 
     Folds through epg_name_text first (D-EPG-12): the playlist side and the
     guide side of the match key the same text the same way.
@@ -1419,3 +1568,255 @@ def fnv1a32(value: Any) -> str:
     return "%08x" % hash_
 
 
+
+
+# ---------------------------------------------------------- destinations
+#
+# D-SINK-40, D-SINK-41, D-SINK-42 (2026-10-29). Where provider data may send
+# this machine. The owner's policy: a source the USER typed may reach any
+# address on its first hop; a destination the PROVIDER chose -- a guide hint,
+# a redirect hop, a logo, a channel URL -- may not reach a non-global
+# address unless it is the user's own playlist host, in the same class.
+# These functions classify; the policy is applied at connect time
+# (DestinationPolicy, 03-io-playlist.py) and at parse time (02-sources.py).
+# Mirrored by Model.hostClass / Model.hostKey, both run over the shared
+# destinations fixture (dev branch).
+#
+# The table is EXPLICIT rather than ipaddress's `is_global`, measured on
+# CPython 3.14.7: is_global answers True for multicast, for 64:ff9b::7f00:1
+# (NAT64 over loopback), ::7f00:1 (IPv4-compatible), ::ffff:0:7f00:1
+# (IPv4-translated), fec0::/10 (site-local), 4000::1 (unallocated) and
+# 192.88.99.0/24 -- each a place a provider could aim at this machine or its
+# LAN -- and its table moved between 3.12 and 3.13. Every address this table
+# calls global, is_global calls global too (the python suite asserts it over
+# the fixture), so it is never the more forgiving of the two.
+_ADDRESS_TABLE_V4 = (
+    ("0.0.0.0/8", "unspecified"),     # "this network"; 0.0.0.0 connects to this machine on Linux
+    ("10.0.0.0/8", "private"),
+    ("100.64.0.0/10", "shared"),      # CGNAT, and every Tailscale tailnet: other people's devices
+    ("127.0.0.0/8", "loopback"),
+    ("169.254.0.0/16", "link-local"),  # 169.254.169.254 among them
+    ("172.16.0.0/12", "private"),
+    ("192.0.0.0/24", "reserved"),
+    ("192.0.2.0/24", "reserved"),
+    ("192.88.99.0/24", "reserved"),
+    ("192.168.0.0/16", "private"),
+    ("198.18.0.0/15", "reserved"),
+    ("198.51.100.0/24", "reserved"),
+    ("203.0.113.0/24", "reserved"),
+    ("224.0.0.0/4", "multicast"),
+    ("240.0.0.0/4", "reserved"),      # 255.255.255.255 among them
+)
+_ADDRESS_TABLE_V6 = (
+    ("::/128", "unspecified"),
+    ("::1/128", "loopback"),
+    ("64:ff9b:1::/48", "reserved"),
+    ("100::/64", "reserved"),
+    ("2001::/23", "reserved"),        # Teredo (2001::/32) among them
+    ("2001:db8::/32", "reserved"),
+    ("3fff::/20", "reserved"),
+    ("5f00::/16", "reserved"),
+    ("fc00::/7", "private"),          # ULA
+    ("fe80::/10", "link-local"),
+    ("fec0::/10", "private"),         # site-local, deprecated, still routed by some LANs
+    ("ff00::/8", "multicast"),
+)
+# Compiled on first use into (version, first, last, class) integer ranges;
+# a dict filled in place, as TLS_CONTEXT is, so no part needs `global`.
+_ADDRESS_RANGES: dict[str, Any] = {}
+_LOCALHOST_NAMES = ("localhost", "localhost.")
+_DECIMAL_DIGITS = frozenset("0123456789")
+_OCTAL_DIGITS = frozenset("01234567")
+_HEX_DIGITS = frozenset("0123456789abcdefABCDEF")
+
+
+def _address_ranges() -> list[tuple[int, int, int, str]]:
+    if "ranges" not in _ADDRESS_RANGES:
+        import ipaddress
+        ranges = []
+        for text, kind in _ADDRESS_TABLE_V4 + _ADDRESS_TABLE_V6:
+            net = ipaddress.ip_network(text)
+            ranges.append((net.version, int(net.network_address), int(net.broadcast_address), kind))
+        _ADDRESS_RANGES["ranges"] = ranges
+    return _ADDRESS_RANGES["ranges"]
+
+
+def parse_ipv4_literal(host: str) -> int | None:
+    """The 32-bit address a host NAMES when it is numeric IPv4 in any spelling
+    the WHATWG URL parser and glibc's inet_aton accept, else None: one to four
+    dot-separated parts, each decimal, `0x` hex or `0` octal, the last filling
+    the bytes the others leave (`127.1`, `2130706433`, `0x7f000001`,
+    `0177.0.0.1`), one trailing dot allowed (WHATWG's; glibc would look the
+    dotted name up instead, so reading it as the address is the stricter
+    choice). A part over 32 characters is no address, so provider text can
+    never ask int() for a long conversion."""
+    text = host[:-1] if host.endswith(".") and len(host) > 1 else host
+    parts = text.split(".")
+    if not 1 <= len(parts) <= 4:
+        return None
+    numbers = []
+    for part in parts:
+        if part == "" or len(part) > 32:
+            return None
+        if part[:2] in ("0x", "0X"):
+            if not set(part[2:]) <= _HEX_DIGITS:
+                return None
+            numbers.append(int(part[2:] or "0", 16))
+        elif not set(part) <= _DECIMAL_DIGITS:
+            return None
+        elif len(part) > 1 and part[0] == "0":
+            if not set(part) <= _OCTAL_DIGITS:
+                return None
+            numbers.append(int(part, 8))
+        else:
+            numbers.append(int(part))
+    last = numbers.pop()
+    if any(n > 255 for n in numbers) or last >= 256 ** (4 - len(numbers)):
+        return None
+    value = last
+    for index, n in enumerate(numbers):
+        value += n << (8 * (3 - index))
+    return value
+
+
+def parse_ip_literal(host: Any) -> Any:
+    """An ipaddress object for a URL host that is a numeric literal -- IPv6
+    with or without its brackets and with any `%zone` dropped, or IPv4 in
+    any parse_ipv4_literal spelling -- else None (a name, or nothing)."""
+    import ipaddress
+    text = str(host or "").strip().lower()
+    if text.startswith("[") and text.endswith("]"):
+        text = text[1:-1]
+    if text == "":
+        return None
+    if ":" in text:
+        try:
+            return ipaddress.IPv6Address(text.split("%", 1)[0])
+        except ValueError:
+            return None
+    value = parse_ipv4_literal(text)
+    return ipaddress.IPv4Address(value) if value is not None else None
+
+
+def address_class(address: Any) -> str:
+    """One of ADDRESS_CLASSES for an address (an ipaddress object or the
+    numeric text a socket address carries, `%zone` and all). An IPv4-mapped
+    (::ffff:a.b.c.d) or NAT64 (64:ff9b::/96) address is the class of the
+    IPv4 address inside it; a 6to4 one (2002::/16) is that class when it is
+    not global, else `reserved`; any other IPv6 outside 2000::/3 that the
+    table does not name is `reserved`. Text that is no address is
+    `reserved` too: what cannot be read is never global."""
+    import ipaddress
+    if not isinstance(address, (ipaddress.IPv4Address, ipaddress.IPv6Address)):
+        try:
+            address = ipaddress.ip_address(str(address).split("%", 1)[0])
+        except ValueError:
+            return "reserved"
+    return _classify_address(address)
+
+
+def _classify_address(address: Any) -> str:
+    """address_class over a parsed address; it recurses HERE, never through
+    the public name, so the tests' one seam (which replaces address_class
+    for one address) cannot reach an address wrapped inside another."""
+    import ipaddress
+    if address.version == 6:
+        if address.ipv4_mapped is not None:
+            return _classify_address(address.ipv4_mapped)
+        value = int(address)
+        if value >> 32 == 0x0064FF9B << 64:
+            return _classify_address(ipaddress.IPv4Address(value & 0xFFFFFFFF))
+        if address.sixtofour is not None:
+            inner = _classify_address(address.sixtofour)
+            return inner if inner != "global" else "reserved"
+    value = int(address)
+    for version, first, last, kind in _address_ranges():
+        if version == address.version and first <= value <= last:
+            return kind
+    if address.version == 6 and value >> 125 != 0b001:
+        return "reserved"
+    return "global"
+
+
+def host_class(host: Any) -> str:
+    """The class of a URL host: a numeric literal's address_class,
+    `loopback` for `localhost` and every `*.localhost` name (RFC 6761: they
+    resolve to this machine), "" for any other name, whose class only a
+    lookup can tell (the connect-time check makes that lookup; a stream
+    host's lookup is mpv's, and the residual is stated in
+    ARCHITECTURE-PLAYER)."""
+    text = str(host or "").strip().lower()
+    if text in _LOCALHOST_NAMES or text.endswith(".localhost") or text.endswith(".localhost."):
+        return "loopback"
+    if not may_be_ip_literal(text):
+        return ""
+    address = parse_ip_literal(text)
+    return address_class(address) if address is not None else ""
+
+
+def may_be_ip_literal(text: str) -> bool:
+    """False only for text parse_ip_literal is sure to answer None for: no
+    `:` (so no IPv6) and a last label -- one trailing dot dropped, as the
+    parser drops it -- that is neither all decimal digits nor `0x`-led (so
+    no IPv4 part). Every channel URL's host passes through host_class, and
+    nearly every one is a name: this keeps a 10,000-channel parse inside its
+    budget (engineering constraint 7) without importing ipaddress for them."""
+    if ":" in text:
+        return True
+    label = text[:-1] if text.endswith(".") and len(text) > 1 else text
+    last = label.rsplit(".", 1)[-1].lower()
+    return last != "" and (last[:2] == "0x" or set(last) <= _DECIMAL_DIGITS)
+
+
+# D-SINK-57: the port a URL names, or its scheme's default (http 80 = no
+# port). Schemes with no default (srt, udp, rtp) answer None.
+URL_DEFAULT_PORTS = {"http": 80, "https": 443, "rtmp": 1935, "rtmps": 443, "rtsp": 554, "mms": 80, "mmsh": 80}
+
+
+def url_port(url: str) -> int | None:
+    """The port of a URL, its scheme's default when it names none, None when
+    neither is known or the URL does not parse (D-SINK-57)."""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        port = parts.port
+    except ValueError:
+        return None
+    return port if port is not None else URL_DEFAULT_PORTS.get(parts.scheme.lower())
+
+
+def own_host_match(host: Any, port: Any, home: dict[str, Any]) -> bool:
+    """Is `host` (at `port`) the playlist's OWN host? D-SINK-57 (owner,
+    2026-10-29): the host keys are equal (host_key), and when the home is on
+    LOOPBACK the ports are equal too -- so a local relay (Threadfin, xTeVe, an
+    nginx cache) on 127.0.0.1:34400 is its own host and 127.0.0.1:631 is not.
+    A LAN or public home keeps any port. `home` is {"host": host_key, "port":
+    int or None, "loopback": bool}; the home is loopback when its literal is
+    (host_class) or when its fetch connected to loopback (a name that resolves
+    there). A port that is not known is never equal to one that is."""
+    key = str(home.get("host") or "")
+    if key == "" or host_key(host) != key:
+        return False
+    if not home.get("loopback") and host_class(host) != "loopback":
+        return True
+    want = home.get("port")
+    return isinstance(port, int) and not isinstance(port, bool) and port == want
+
+
+def host_key(host: Any) -> str:
+    """What "the same host" compares: a numeric literal as its address
+    (`127.1` and `127.0.0.1` are one host) -- IPv4 dotted, IPv6 as eight
+    four-digit hex groups composed here from the integer, because both of
+    ipaddress's own spellings of an IPv4-mapped address (str() and
+    .exploded) end in a dotted quad on CPython 3.14 and did not before 3.13;
+    Model.hostKey composes the same eight groups -- a name case-folded with
+    one trailing dot dropped. Never a port and never userinfo."""
+    text = str(host or "").strip().lower()
+    address = parse_ip_literal(text)
+    if address is not None:
+        if address.version == 4:
+            return str(address)
+        value = int(address)
+        return ":".join("%04x" % ((value >> (16 * (7 - index))) & 0xFFFF) for index in range(8))
+    if text.startswith("[") and text.endswith("]"):
+        text = text[1:-1]
+    return text[:-1] if text.endswith(".") else text

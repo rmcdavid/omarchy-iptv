@@ -211,7 +211,10 @@ def validate_source_url(text: Any, origin: str = "form") -> dict[str, Any]:
 
 
 def source_cache_key(url: str) -> str:
-    """Cache directory name of a normalized playlist URL (Model.sourceKey)."""
+    """Cache directory name of a normalized playlist URL (Model.sourceKey):
+    the key every source added before 2026-10-29 was given, and still the
+    key those records carry. A NEW source's key is random since D-SINK-48
+    (allocate_source_key); nothing derives a key from a URL any more."""
     return fnv1a32(url)
 
 
@@ -229,19 +232,60 @@ def find_source_by_url(sources: list[dict[str, Any]], url: str) -> dict[str, Any
     return None
 
 
-def allocate_source_key(sources: list[dict[str, Any]], url: str) -> str:
-    """The record's key when the URL is known, else fnv1a32 with a "-2",
-    "-3", ... suffix while another record already uses that key."""
+def allocate_source_key(sources: list[dict[str, Any]], url: str, preferred: str = "",
+                        draw: Any = None) -> str:
+    """The record's key when the URL is known, else a NEW key with a "-2",
+    "-3", ... suffix while another record already uses it.
+
+    D-SINK-48 (lane-p2a, 2026-10-29): the new key is RANDOM, no longer
+    fnv1a32 of the URL: a 32-bit hash of a credentialed URL is a check on a
+    guessed password for anyone who reads the key (SR40), and the key names
+    a cache folder, sits in the shell's settings mirror and in journal lines.
+    Every lookup goes by the key the record stores, so nothing needs it to be
+    a function of the URL; what dedupes a re-added URL is find_source_by_url
+    above, as it always was. Existing keys are untouched. `preferred` is kept
+    when it is a free, well-formed key; `draw` returns a 32-bit integer
+    (secrets.randbits(32) unless a test hands one in). Mirror of
+    Model.allocateSourceKey."""
     existing = find_source_by_url(sources, url)
     if existing is not None:
         return str(existing["key"])
-    base = source_cache_key(url)
+    if preferred and SOURCE_KEY_RE.match(preferred) and find_source(sources, preferred) is None:
+        return preferred
+    if draw is None:
+        import secrets
+        number = secrets.randbits(32)
+    else:
+        number = int(draw()) % 4294967296
+    base = "%08x" % number
     key = base
     suffix = 2
     while find_source(sources, key) is not None:
         key = "%s-%d" % (base, suffix)
         suffix += 1
     return key
+
+
+def cut_host_params(hostport: str) -> str:
+    """Where a PRINTED host ends: at the first `;`, `=` or `&` (D-SINK-30).
+
+    RFC 3986's reg-name admits all three, so `http://h.test;sid=SECRET/x`
+    validates with host `h.test;sid=secret`, and a reader that stops at `:`
+    alone prints the parameter wherever it prints the host. ONE copy of the
+    rule in the helper, shared by every reader that derives a printable host
+    from an authority -- `host_port_of` (the Sources row and its default
+    label) and `logo_host` (the consent survey and the logo refusal lines) --
+    mirrored by Model.cutHostParams. The `:` port is NOT cut here: each
+    caller keeps or drops it on its own line, and a bracketed literal is
+    unaffected because none of the three can appear inside the brackets.
+    A `find` per character rather than a pattern: the helper's regex guard
+    holds every compiled pattern to a reviewed table.
+    """
+    for delimiter in ";=&":
+        end = hostport.find(delimiter)
+        if end != -1:
+            hostport = hostport[:end]
+    return hostport
 
 
 def host_port_of(url: str) -> str:
@@ -256,6 +300,13 @@ def host_port_of(url: str) -> str:
     `redact_urls`; `url_host` and `validate_source_url` have been right all
     along because they hand the string to a real parser or cut at the last
     at-sign, and this now does the same.
+
+    D-SINK-30 (2026-10-24). RFC 3986's reg-name admits `;`, `=` and `&`, so
+    `http://h.test;sid=SECRET/x` validates with host `h.test;sid=secret` and
+    this printed it so, where run_host_parts had cut the free-text host at
+    `:`, `;`, `=` and `&` since R32a'. The printed host[:port] now ends at
+    the first of the three (the `:` port is kept); validation is unchanged
+    (D-SINK-27). The cut is `cut_host_params`, shared with `logo_host`.
     """
     match = re.match(r"^[A-Za-z][A-Za-z0-9+.\-]*://([^/?#]*)", url)
     if not match:
@@ -263,7 +314,7 @@ def host_port_of(url: str) -> str:
     authority = match.group(1)
     at = authority.rfind("@")
     hostport = authority if at == -1 else authority[at + 1:]
-    return hostport.lower()
+    return cut_host_params(hostport).lower()
 
 
 def derive_label(url: str, kind: str) -> str:
@@ -361,14 +412,223 @@ def stream_scheme(url: str) -> str:
 
 
 def is_stream_url(url: str) -> bool:
-    """Allow-listed scheme with a non-empty host; never option-looking (D-QA-07)."""
-    if url.startswith("-"):
+    """Allow-listed scheme with a non-empty host; never option-looking (D-QA-07);
+    never a form that makes the player LISTEN (D-SINK-42, stream_listen_refusal).
+    player_target re-checks every cached URL through this at play time, so a
+    cache written before the rule cannot open a port either."""
+    return stream_form_ok(url) and stream_listen_refusal(url) == ""
+
+
+def stream_form_ok(url: str) -> bool:
+    """The allow-listed scheme with a non-empty host, never option-looking:
+    is_stream_url before D-SINK-42, kept apart so parse_m3u can count a
+    listening form as itself rather than as an unsupported scheme.
+
+    No control character (C0, DEL, C1) anywhere, either: urlsplit reads the
+    host past a NUL and mpv's JSON IPC ends the string at it, so
+    `http://127.0.0.1:631<NUL>@p.example/x` was the playlist's own host to
+    every rule here and 127.0.0.1:631 to the player (measured through the
+    shipping playlist verb and apply_channel, the recheck of D-SINK-41/42)."""
+    if url.startswith("-") or _CONTROL_CHARS.search(url):
         return False
     try:
         parts = urllib.parse.urlsplit(url)
     except ValueError:
         return False
     return parts.scheme.lower() in STREAM_SCHEMES and bool(parts.hostname)
+
+
+# D-SINK-42 (2026-10-29). The URL forms that make mpv's FFmpeg BIND a socket
+# others can send to, measured with mpv 0.41.0 / FFmpeg n9.0.1 inside
+# `unshare -rn` (loopback only): udp://0.0.0.0:P and udp://[::]:P bind every
+# interface, udp://127.0.0.1:P binds that address (an input binds the URL's
+# host), rtp:// unicast binds its port and its RTCP port on 0.0.0.0, srt
+# mode=listener binds P and mode=rendezvous binds P, and `localport`,
+# `localaddr` and `localrtpport` move the bind; a multicast group
+# (udp://@239.x:p) binds the GROUP address, which only that group's traffic
+# reaches. rtmp `listen=1`, rtmp_listen, rtsp `?listen`, `?rtsp_flags=listen`
+# and http `?listen=1` bound nothing (FFmpeg reads no option from those
+# URLs), and tcp:// is not a stream scheme. So: udp and rtp only to a
+# multicast literal, srt only as a caller, and none of these parameter names
+# on ANY stream URL (the owner's rule; the measured binders and the aliases
+# FFmpeg's udp, rtp, tcp, rtmp and rtsp protocols give them).
+LISTEN_PARAMS = frozenset({
+    "listen", "listen_timeout", "rtmp_listen", "rtsp_flags",
+    "localport", "local_port", "localaddr", "local_addr",
+    "localrtpport", "local_rtpport", "localrtcpport", "local_rtcpport",
+    "reuse", "reuse_socket",
+})
+MULTICAST_ONLY_SCHEMES = ("udp", "rtp")
+
+
+def stream_params(url: str) -> list[tuple[str, str]]:
+    """The (name, value) pairs FFmpeg reads off a stream URL: everything after
+    the FIRST `?` -- a `#` does not end it, unlike urlsplit's query, which is
+    how `srt://h:1#?mode=listener` would have slipped past -- split at `&`,
+    each name cut at its `=`. Names are compared case-folded and with their
+    %-escapes decoded, which FFmpeg does neither of: stricter, never looser."""
+    mark = url.find("?")
+    if mark == -1:
+        return []
+    pairs = []
+    for item in url[mark + 1:].split("&"):
+        name, _, value = item.partition("=")
+        pairs.append((urllib.parse.unquote(name).strip().lower(), value))
+    return pairs
+
+
+def stream_listen_refusal(url: str) -> str:
+    """"" when the URL opens no listening socket by its form, else why:
+    `multicast_only` (udp or rtp to anything but a multicast literal),
+    `listener` (srt in a mode other than caller, or a LISTEN_PARAMS name)."""
+    return _listen_refusal(url, stream_scheme(url), url_host(url))
+
+
+def _listen_refusal(url: str, scheme: str, host: str) -> str:
+    params = stream_params(url)
+    if any(name in LISTEN_PARAMS for name, _ in params):
+        return "listener"
+    if scheme == "srt":
+        for name, value in params:
+            if name == "mode" and value.strip().lower() != "caller":
+                return "listener"
+    if scheme in MULTICAST_ONLY_SCHEMES and host_class(host) != "multicast":
+        return "multicast_only"
+    return ""
+
+
+def stream_entry_refusal(url: str, source: dict[str, Any]) -> tuple[str, str]:
+    """parse_m3u's one read of a location line, with ONE urlsplit (the
+    10,000-channel budget): -> (why it is not a channel, its host), the
+    reason "" for a channel, `scheme` (not a stream URL: is_stream_url's
+    first half, a control character included: stream_form_ok), `listener`
+    (stream_listen_refusal, D-SINK-42), `local` (stream_host_refused,
+    D-SINK-41) or `port` (the same rule's loopback-relay half, D-SINK-57)."""
+    if url.startswith("-") or _CONTROL_CHARS.search(url):
+        return "scheme", ""
+    try:
+        parts = urllib.parse.urlsplit(url)
+        host = parts.hostname or ""
+    except ValueError:
+        return "scheme", ""
+    scheme = parts.scheme.lower()
+    if scheme not in STREAM_SCHEMES or host == "":
+        return "scheme", host
+    if _listen_refusal(url, scheme, host) != "":
+        return "listener", host
+    # url_port's reading, from the one urlsplit: the scheme's default stands
+    # only for a port the URL does not name. A port that does not parse is no
+    # port, never the default -- `http://127.0.0.1:631:80/` is 631 to FFmpeg
+    # (it reads digits up to the next colon) and was the playlist's own port
+    # 80 here while stream_host_refused refused it at play time (rc-p1b).
+    try:
+        port = parts.port
+        if port is None:
+            port = URL_DEFAULT_PORTS.get(scheme)
+    except ValueError:
+        port = None
+    refusal = _host_refusal(host, scheme, source, port)
+    if refusal:
+        return refusal, host
+    return "", host
+
+
+# D-SINK-41 (2026-10-29). The sign-in headers a playlist may attach only to
+# a channel on its OWN host: anything else hands a provider-chosen
+# credential, or a forged Host, to a party the provider picked.
+SIGN_IN_HEADERS = frozenset({"authorization", "cookie", "proxy-authorization", "host"})
+
+
+def playlist_source(kind: str, url: str, connected_class: str = "", first_class: str = "") -> dict[str, Any]:
+    """What parse_m3u knows about the playlist it parses (D-SINK-41): the
+    user-typed URL's host key, and whether the source is LOCAL -- a file the
+    user pointed at, or an http(s) source whose last hop connected to a
+    non-global address (DestinationPolicy.last_class). A source this
+    machine could not classify is not local.
+
+    D-SINK-57 (2026-10-29): and the typed URL's port, with whether that host
+    is on LOOPBACK -- its literal or localhost name says so, or its first hop
+    connected there (`first_class`) -- because on loopback the playlist's own
+    host is host AND port (own_host_match)."""
+    if kind == "file":
+        return {"host": "", "port": None, "loopback": False, "local": True}
+    host = url_host(url)
+    return {"host": host_key(host), "port": url_port(url),
+            "loopback": first_class == "loopback" or host_class(host) == "loopback",
+            "local": connected_class not in ("", "global", "unresolved")}
+
+
+def stream_host_refused(url: str, source: dict[str, Any]) -> bool:
+    """A channel URL whose LITERAL host is not global (loopback, private,
+    link-local, CGNAT, unspecified, reserved, a localhost name) from a
+    playlist that is neither local nor on that same host. A multicast udp or
+    rtp group is the ISP-multicast case and passes. A NAME that resolves to
+    such an address is mpv's lookup and not seen here (ARCHITECTURE-PLAYER,
+    the residuals)."""
+    return _host_refused(url_host(url), stream_scheme(url), source, url_port(url))
+
+
+def _host_refused(host: str, scheme: str, source: dict[str, Any], port: int | None = None) -> bool:
+    return _host_refusal(host, scheme, source, port) != ""
+
+
+def _host_refusal(host: str, scheme: str, source: dict[str, Any], port: int | None = None) -> str:
+    """Why a channel host is not one this playlist may name: "" when it may,
+    `local` (a non-global literal from a playlist that is neither local nor
+    on that host), or `port`.
+
+    `port` is D-SINK-57's scope (the lead, 2026-10-29, after the owner's "on
+    this machine, only the relay's own port is the playlist's host"): a
+    LOOPBACK source -- a local relay such as Threadfin or xTeVe -- is a local
+    source, and a local source's channels may name the LAN (a relay passing
+    an HDHomeRun or a TVHeadend stream through keeps working), but a channel
+    whose literal host is loopback must be on the relay's own PORT. Any
+    other port of this machine is some other service, which the relay's
+    playlist did not have to name: the review's reproduction 1 again, one
+    layer down, as a channel rather than a redirect. A port the source does
+    not record (a cache written before sourcePort) matches none.
+
+    rc-p1c (2026-10-29): an UNSPECIFIED literal -- 0.0.0.0, `::` and their
+    spellings -- is this machine too: a connect to it reaches whatever listens
+    on loopback at that port (measured inside `unshare -rn`: `0.0.0.0:P`
+    reached a 127.0.0.1 listener and `::` a ::1 one, and the player played a
+    loopback relay's channel at `http://0.0.0.0:<another port>/` from the
+    server there). So it is held to the relay's port the same way."""
+    kind = host_class(host)
+    if kind in ("", "global"):
+        return ""
+    if kind == "multicast" and scheme in MULTICAST_ONLY_SCHEMES:
+        return ""
+    if source.get("local"):
+        if kind in ("loopback", "unspecified") and source.get("loopback"):
+            want = source.get("port")
+            same = (isinstance(port, int) and not isinstance(port, bool)
+                    and isinstance(want, int) and not isinstance(want, bool) and port == want)
+            return "" if same else "port"
+        return ""
+    return "" if own_host_match(host, port, source) else "local"
+
+
+def drop_sign_in_headers(channel: dict[str, Any], source: dict[str, Any], host: str | None = None) -> int:
+    """Remove SIGN_IN_HEADERS from a channel whose host is not the playlist's
+    own (D-SINK-41); -> how many were removed. A local FILE has no host, so
+    its channels keep none of them (the owner's rule, read literally).
+    `host` is the channel URL's, when the caller has it already."""
+    headers = channel.get("headers")
+    if not isinstance(headers, dict):
+        return 0
+    url = str(channel.get("url") or "")
+    if host is None:
+        host = url_host(url)
+    # D-SINK-57: on loopback the own host is host AND port.
+    if own_host_match(host, url_port(url), source):
+        return 0
+    dropped = [name for name in headers if name.lower() in SIGN_IN_HEADERS]
+    for name in dropped:
+        del headers[name]
+    if not headers:
+        del channel["headers"]
+    return len(dropped)
 
 
 def clean_header_value(value: str) -> str:
@@ -584,7 +844,10 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
         if key in ("inputstream.adaptive.stream_headers", "inputstream.adaptive.manifest_headers"):
             for hname, hvalue in urllib.parse.parse_qsl(value, keep_blank_values=False):
                 cleaned = clean_header_value(hvalue)
-                if not _HEADER_NAME.match(hname):
+                # fullmatch: `$` in `re.match` also matches before a final
+                # line break, so `Cookie%0A` passed as `Cookie\n` and slipped
+                # the sign-in rule below, which compares names exactly.
+                if not _HEADER_NAME.fullmatch(hname):
                     channel_warning(warnings, bounds, "dropped header with unsafe name for %s" % name)
                 elif cleaned:
                     bounded_option(hname, cleaned, headers, bounds)
@@ -613,8 +876,15 @@ def make_channel(attrs: dict[str, str], title: str, url: str, extgrp: str,
     return channel
 
 
-def parse_m3u(text: Any) -> dict[str, Any]:
+def parse_m3u(text: Any, source: dict[str, Any] | None = None) -> dict[str, Any]:
     """Tolerant M3U/M3U8 parser.
+
+    `source` is playlist_source() of the playlist being parsed (D-SINK-41):
+    the `playlist` verb always passes it. Without it the parse knows nothing
+    about where the list came from and reads it as a public source on no
+    host -- every non-global literal stream host is skipped and every
+    sign-in header dropped -- so a caller that forgets it fails closed.
+    Each refusal is counted in `warnings` like every other skip.
 
     `text` is the playlist as one str, or its lines as any iterable of str
     (playlist_lines, which is how the `playlist` verb calls it, D-M3U-1: a
@@ -668,6 +938,11 @@ def parse_m3u(text: Any) -> dict[str, Any]:
     seen_groups: set[str] = set()
     is_playlist = False
     bounds: dict[str, int] = {}
+    playlist = source if isinstance(source, dict) else {"host": "", "local": False}
+    skipped_listen = 0
+    skipped_local = 0
+    skipped_port = 0
+    dropped_sign_in = 0
 
     if isinstance(text, str):
         if text.startswith("\ufeff"):
@@ -720,15 +995,23 @@ def parse_m3u(text: Any) -> dict[str, Any]:
             vlcopt, kodiprop = {}, {}
             continue
         url = line
+        refusal, host = ("", "") if len(url) > M3U_MAX_URL else stream_entry_refusal(url, playlist)
         if len(url) > M3U_MAX_URL:
             bound_count(bounds, "url")
-        elif not is_stream_url(url):
+        elif refusal == "scheme":
             skipped_scheme += 1
+        elif refusal == "listener":
+            skipped_listen += 1               # D-SINK-42: a form that would listen
+        elif refusal == "local":
+            skipped_local += 1                # D-SINK-41: a LAN literal from a public list
+        elif refusal == "port":
+            skipped_port += 1                 # D-SINK-57: another port of this machine, from a relay
         elif len(channels) >= MAX_CHANNELS:
             over_cap += 1
         else:
             attrs, title = pending
             channel = make_channel(attrs, title, url, extgrp, vlcopt, kodiprop, warnings, len(channels) + 1, bounds)
+            dropped_sign_in += drop_sign_in_headers(channel, playlist, host)
             group = channel["group"]
             if group not in seen_groups:
                 if len(seen_groups) >= MAX_GROUPS and group != UNGROUPED:
@@ -746,6 +1029,18 @@ def parse_m3u(text: Any) -> dict[str, Any]:
     if skipped_scheme:
         warnings.append(counted_sentence(skipped_scheme, "%d entry skipped: unsupported URL scheme",
                                          "%d entries skipped: unsupported URL scheme"))
+    if skipped_listen:
+        warnings.append(counted_sentence(skipped_listen, "%d entry skipped: the stream would listen on this machine for anyone to send to",
+                                         "%d entries skipped: the streams would listen on this machine for anyone to send to"))
+    if skipped_local:
+        warnings.append(counted_sentence(skipped_local, "%d entry skipped: a stream address on this machine or a local network, from a playlist that is not",
+                                         "%d entries skipped: stream addresses on this machine or a local network, from a playlist that is not"))
+    if skipped_port:
+        warnings.append(counted_sentence(skipped_port, "%d entry skipped: a stream address on this machine at another port than the playlist's",
+                                         "%d entries skipped: stream addresses on this machine at other ports than the playlist's"))
+    if dropped_sign_in:
+        warnings.append(counted_sentence(dropped_sign_in, "%d sign-in header dropped: its channel is on another host than the playlist",
+                                         "%d sign-in headers dropped: their channels are on other hosts than the playlist"))
     if skipped_orphan:
         warnings.append(counted_sentence(skipped_orphan, "%d URL line without #EXTINF skipped",
                                          "%d URL lines without #EXTINF skipped"))

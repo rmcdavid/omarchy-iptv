@@ -88,8 +88,24 @@ def cmd_failed(args: argparse.Namespace) -> int:
     # `list` falls through: pruning and emitting is the whole of it.
     rows = prune_failed(rows, now, known_channel_ids(directory))
     if args.action in ("mark", "clear"):
-        ensure_private_dir(directory)
-        write_json_atomic(os.path.join(directory, FAILED_FILE), {"version": 1, "failed": rows})
+        # D-SRC-72: the marks' file refused with the playlist verb's code
+        # (cache_unwritable, D-SRC-69) when it cannot be written, as every
+        # other refusal of this verb is answered here, never left to
+        # main()'s `internal`. Nothing on screen reads this reply (the
+        # service fires and forgets, Service.persistFailed); the shell's
+        # in-memory mark stands for the session either way. A folder that is
+        # a link to nothing stays R25c's `folder_unusable`.
+        path = os.path.join(directory, FAILED_FILE)
+        try:
+            ensure_private_dir(directory)
+            write_json_atomic(path, {"version": 1, "failed": rows})
+        except FolderUnusable:
+            raise
+        except OSError as io_error:
+            error = cache_unwritable(path, io_error)
+            log("failed: %s" % error.message)
+            emit(error_payload("failed", error, action=args.action))
+            return EXIT_ERROR
     emit({"ok": True, "kind": "failed", "action": args.action, "count": len(rows), "failed": rows})
     return 0
 
@@ -187,10 +203,38 @@ def present_logo_names(channels: list[Any], logo_dir: str) -> list[str]:
         seen.add(url)
         name = logo_filename(url)
         path = os.path.join(logo_dir, name)
-        if os.path.exists(path) and logo_file_within_bounds(path) and canonical_logo_file(path, rewrite=False):
+        if os.path.exists(path) and cached_logo_state(path, rewrite=False):
             names.append(name)
             emit({"ok": True, "kind": "logo", "name": name})
     return names
+
+
+def logo_escape(escaped: BaseException, where: str) -> HelperError:
+    """D-LOGO-24's backstop: an exception the logo path did not expect,
+    turned into the failure of ONE logo -- `logo_fetch`, counted and
+    memoised like any other -- rather than main()'s `internal`, which ended
+    the whole run before the memo was saved, so the same logo ended every
+    later run too. Said once on stderr by the exception's CLASS only, never
+    its text, which can quote a URL (rule 5). Never called for MemoryError
+    (the run's memory refusal, cmd_logos) or FolderUnusable (main()'s
+    `folder_unusable`): those are the run's, not the logo's."""
+    kind = type(escaped).__name__
+    log("logos: %s ended in %s; counted as that logo's failure" % (where, kind))
+    return HelperError("logo_fetch", "a logo %s ended in %s" % (where, kind))
+
+
+def cached_logo_state(path: str, rewrite: bool = True) -> str:
+    """The cached-file check for one file already on disk -- its header
+    within bounds (logo_file_within_bounds), then canonical_logo_file -- and
+    "" (not announced) when the check itself raises (D-LOGO-24's backstop):
+    a file this cannot judge is a file the guide is never pointed at."""
+    try:
+        return canonical_logo_file(path, rewrite) if logo_file_within_bounds(path) else ""
+    except (MemoryError, FolderUnusable):
+        raise
+    except Exception as escaped:
+        logo_escape(escaped, "check of a cached file")
+        return ""
 
 
 def sweep_unnamed_logos(logo_dir: str, named: set[str]) -> int:
@@ -289,6 +333,7 @@ def cmd_logos(args: argparse.Namespace) -> int:
         log("logos: %s" % error.message)
         emit(error_payload("logos", error, action="fetch"))
         return EXIT_ERROR
+    refusal = result.pop("refusal")
     # Said ONCE on stderr as well, counted, because a ceiling that stops
     # fetches in silence reads as a provider being down; the shell, which
     # reads no stderr from this process, writes its own journal line from
@@ -302,15 +347,123 @@ def cmd_logos(args: argparse.Namespace) -> int:
             % (int(LOGO_RUN_DEADLINE),
                counted_sentence(result["postponed"], "%d logo was left for the next run",
                                 "%d logos were left for the next run")))
-    emit(dict(survey, ok=True, kind="logos", action="fetch", busy=False, **result,
-              cap=MAX_LOGO_FILES, maxBytes=MAX_LOGO_BYTES, maxSide=MAX_LOGO_SIDE, maxPixels=MAX_LOGO_PIXELS))
+    limits = {"cap": MAX_LOGO_FILES, "maxBytes": MAX_LOGO_BYTES, "maxSide": MAX_LOGO_SIDE, "maxPixels": MAX_LOGO_PIXELS}
+    if refusal is not None:
+        # D-SRC-72: a logo or the failure memo could not be written. The
+        # run's own code and sentence, never main()'s `internal` -- and the
+        # summary still carries `names`, every file on disk this run
+        # validated, which is the line the shell replaces its set from
+        # (Model.logoSummaryNames reads `names` whatever `ok` says).
+        log("logos: %s" % refusal.message)
+        emit(dict(survey, **error_payload("logos", refusal, action="fetch", busy=False, **result, **limits)))
+        return EXIT_ERROR
+    emit(dict(survey, ok=True, kind="logos", action="fetch", busy=False, **result, **limits))
     return 0
+
+
+def logo_failed_path(logo_dir: str) -> str:
+    """The memo's path: beside the logo folder, in the source's own
+    directory (D-LOGO-22), never inside the folder the census counts."""
+    return os.path.join(os.path.dirname(logo_dir.rstrip(os.sep) or logo_dir), LOGO_FAILED_FILE)
+
+
+def load_logo_failed(path: str, now: float) -> dict[str, tuple[int, str]]:
+    """The memo as {name: (at, reason)}, entries older than LOGO_FAILED_TTL
+    dropped, at most LOGO_FAILED_MAX of the newest kept. A name is a logo
+    file name's own shape (eight hex digits, the fnv1a32 of the URL,
+    logo_filename) and a reason a short code; anything else in the file
+    is skipped, and a file that is not a JSON object is an empty memo.
+    An `at` in the future reads as now, so a clock that stepped cannot
+    make an entry immortal."""
+    document = read_json(path)
+    entries = document.get("failed") if isinstance(document, dict) else None
+    memo: dict[str, tuple[int, str]] = {}
+    if not isinstance(entries, dict):
+        return memo
+    for name, entry in entries.items():
+        if not isinstance(name, str) or not _LOGO_NAME.match(name) or not isinstance(entry, dict):
+            continue
+        at = entry.get("at")
+        reason = entry.get("reason")
+        if isinstance(at, bool) or not isinstance(at, (int, float)) or at != at:
+            continue
+        at = min(int(at), int(now))
+        if now - at >= LOGO_FAILED_TTL:
+            continue
+        if not failed_reason_ok(reason):
+            reason = "failed"
+        memo[name] = (at, reason)
+    if len(memo) > LOGO_FAILED_MAX:
+        newest = sorted(memo.items(), key=lambda item: (-item[1][0], item[0]))[:LOGO_FAILED_MAX]
+        memo = dict(newest)
+    return memo
+
+
+def save_logo_failed(path: str, memo: dict[str, tuple[int, str]]) -> HelperError | None:
+    """Write the memo atomically, 0600 in the source's 0700 directory
+    (write_json_atomic). Names and codes only, never a URL (rule 5): the
+    name is the hash the folder already uses, and a reason is one of the
+    helper's own error codes. An empty memo removes the file.
+
+    D-SRC-72: -> None, or the refusal when the memo cannot be written
+    (cache_unwritable), which the run answers with once it has finished --
+    a memo is not worth stopping the run for, and an OSError here used to
+    end it in main()'s `internal` with no summary at all."""
+    if not memo:
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        return None
+    try:
+        write_json_atomic(path, {"version": 1, "failed": {
+            name: {"at": at, "reason": reason} for name, (at, reason) in sorted(memo.items())}})
+    except FolderUnusable:
+        raise
+    except OSError as io_error:
+        return cache_unwritable(path, io_error)
+    return None
+
+
+def failed_reason_ok(reason: Any) -> bool:
+    """A memo reason is one of the helper's own error codes: ASCII, a
+    lowercase letter first, letters, digits and underscores, at most 32
+    (no regex: the helper's regex guard reviews every pattern, and a
+    membership test over a code needs none)."""
+    return (isinstance(reason, str) and 0 < len(reason) <= 32 and reason.isascii()
+            and reason[0].islower() and reason.replace("_", "a").isalnum() and reason == reason.lower())
 
 
 def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[str, Any]:
     """The run itself, under the lock and the memory limit: every cached
     logo validated and announced, every missing one fetched while the
-    ceiling and the run's deadline allow. -> the summary's counts."""
+    ceiling, the run's deadline and the failure memo allow. -> the
+    summary's counts.
+
+    D-LOGO-22, the memo (logo-failed.json beside the folder): a URL whose
+    fetch failed THIS run or within the last LOGO_FAILED_TTL (a day) is
+    not fetched. Without it the run walked `channels` from the top every
+    time with a fresh `seen`, so a head of dead addresses -- each costing
+    up to min(LOGO_DEADLINE, what was left of the run) -- ate the same
+    hour of LOGO_RUN_DEADLINE every run and the live logos behind it were
+    never reached; the D-LOGO-16 comment's "the next run starts where
+    this one stopped" was true of files that landed and of nothing else.
+    IPTV lists with hundreds of dead logo links are ordinary input. The
+    memo is consulted after the on-disk check (a file on disk is announced
+    whatever the memo says) and before the ceiling and the deadline, so a
+    memoised address counts in `skippedFailed` and nowhere else; it is
+    written when the run's deadline passes, because a run the shell
+    SIGTERMs (a switch, the setting off) reaches no `finally` and would
+    otherwise record nothing, and again on the way out of the walk, in a
+    `finally` (D-LOGO-24), so an exception that still ends the run records
+    what it learned first. Every failure is recorded alike: a timeout, a
+    refusal at the gate (scheme, userinfo, redirect, type, bytes, size,
+    dimensions, scans, chunks), an HTTP error, a network error, http.client's
+    own errors, and anything else one logo's fetch raises (logo_escape, the
+    backstop); a full memo (LOGO_FAILED_MAX) records nothing new. A
+    memoised address is tried again a day later, so a host that was down
+    gets another chance, and `cache logos-clear` drops the memo with the
+    folder so the user's own reset is a reset."""
     # D-SRC-60: a temporary a killed write left here is swept before the
     # folder is counted, so a leftover does not hold a slot under the
     # ceiling (sweep_stale_temps; once per folder per process).
@@ -332,136 +485,201 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
     present = logo_dir_entries(logo_dir)
     run_deadline = time.monotonic() + LOGO_RUN_DEADLINE
     fetched, cached, refused, failed, swept, deferred, rewritten = 0, 0, 0, 0, 0, 0, 0
-    postponed, unnamed = 0, 0
+    postponed, unnamed, skipped_failed = 0, 0, 0
     unnamed_checked = False
+    memo_path = logo_failed_path(logo_dir)
+    memo_at = int(time.time())
+    memo = load_logo_failed(memo_path, memo_at)
+    memo_dirty = False
+    memo_saved_at_deadline = False
+    # D-SRC-72: the first write this run could not make (a logo, or the
+    # memo), and how many logos it left unfetched or unkept for it.
+    refusal: HelperError | None = None
+    fetch_stopped = False
+    unsaved = 0
     reasons: dict[str, int] = {}
     seen: set[str] = set()
     names: list[str] = []
-    for channel in channels:
-        # The ceiling is checked BELOW the cached-file branch, not here. The
-        # cap used to be the first line of this loop, as a `break`, which
-        # bounded the wrong thing: in a run that fetched 5,000 new files,
-        # every cached file later in channel order was neither validated nor
-        # announced that run, so the guide drew blank slots for logos it
-        # already had and a cached bomb past the cap was never swept (R5). A
-        # review found the comment beside the sweep claiming the branch was
-        # not bounded by the cap, which was true only while fetched < 5000.
-        url = channel.get("logo") if isinstance(channel, dict) else None
-        # `seen` is the run's memory of every URL it has looked at, failed
-        # ones included (D-LOGO-22, R32f): a URL two channels name is
-        # fetched once a run, and one that timed out, was refused or
-        # answered 404 is not tried again WITHIN the run. Across runs it is
-        # tried again, as before: nothing records a failure on disk, so a
-        # host that was down is given another chance at the next refresh,
-        # and the run's own deadline (LOGO_RUN_DEADLINE) bounds what a dead
-        # host costs a run. Stated rather than changed.
-        if not isinstance(url, str) or not url or url in seen:
-            continue
-        seen.add(url)
-        # Already on disk: no request. Without this the shell re-downloaded
-        # every logo on every start, because the service runs a fetch whenever
-        # the channel cache loads -- 1,445 requests to sixty-three third
-        # parties per launch, which is precisely the disclosure the ruling
-        # exists to bound. The file name is a pure function of the URL, so
-        # "have we got this one" is a stat and not a lookup.
-        name = logo_filename(url)
-        path = os.path.join(logo_dir, name)
-        if os.path.exists(path):
-            # D-LOGO-11 / R5: the cache written by 0.13.3 and earlier was
-            # never dimension-checked, so "already on disk" is not evidence
-            # that this file is safe to hand the shell. The header is proved
-            # BEFORE the name is announced, because the guide points an Image
-            # at a file only when this command names it (Model.logoSlot,
-            # Service.qml logoHave). Reading a header is a small read and it
-            # happens in the HELPER, off the UI thread and nowhere near the
-            # guide's 150 ms open budget. Measured on this machine with 5,000
-            # real 220x120 logos all already cached: the whole `logos --fetch`
-            # subprocess went from a median 375 ms to 601 ms, so the check
-            # costs about 45 us per cached file end to end (22 us per call in
-            # isolation, 37 us on 44 KB files). This branch is not held back
-            # by the ceiling below, at any count, nor by the run's deadline:
-            # it reads files already on disk, and since D-LOGO-12 the ceiling
-            # bounds what is on disk, so this validates at most MAX_LOGO_FILES
-            # files per run -- unless an earlier version left more, which this
-            # run validates too and never adds to.
-            # D-LOGO-13: a PNG is announced only in its canonical form, so a
-            # file an earlier version cached verbatim is rewritten in place
-            # first, and one whose chunks cannot be walked is swept below.
-            state = canonical_logo_file(path) if logo_file_within_bounds(path) else ""
-            if state:
-                cached += 1
-                rewritten += state == "rewritten"
-                names.append(name)
-                emit({"ok": True, "kind": "logo", "name": name})
+    # D-LOGO-24: the memo is saved on EVERY way out of the walk, in a
+    # `finally`. It was saved after the loop, so an exception that left the
+    # loop -- any logo whose error the fetch did not map -- recorded nothing,
+    # and the same logo was tried, and ended the run, every time. What can
+    # still leave it now is the run's own: a memory refusal, a folder that
+    # is a link to nothing, a stdout gone.
+    try:
+        for channel in channels:
+            # The ceiling is checked BELOW the cached-file branch, not here. The
+            # cap used to be the first line of this loop, as a `break`, which
+            # bounded the wrong thing: in a run that fetched 5,000 new files,
+            # every cached file later in channel order was neither validated nor
+            # announced that run, so the guide drew blank slots for logos it
+            # already had and a cached bomb past the cap was never swept (R5). A
+            # review found the comment beside the sweep claiming the branch was
+            # not bounded by the cap, which was true only while fetched < 5000.
+            url = channel.get("logo") if isinstance(channel, dict) else None
+            # `seen` is the run's memory of every URL it has looked at, failed
+            # ones included (D-LOGO-22, R32f): a URL two channels name is
+            # fetched once a run. Across runs the memo below is the memory
+            # (logo-failed.json, a day): a failed address is not tried again
+            # until its entry expires.
+            if not isinstance(url, str) or not url or url in seen:
                 continue
-            # Not announced, and NOT counted as `cached`: it is not on disk
-            # any more. The pass falls through to the fetch below, which
-            # refuses the same bytes at the gate and counts the reason there,
-            # so one bomb is one refusal rather than two -- and a provider
-            # that has since replaced the file with a sane one gets it. If the
-            # unlink fails the name is still withheld; the fetch may yet
-            # replace the bytes, and a name the guide is never given is a file
-            # the shell never decodes.
-            swept += 1
+            seen.add(url)
+            # Already on disk: no request. Without this the shell re-downloaded
+            # every logo on every start, because the service runs a fetch whenever
+            # the channel cache loads -- 1,445 requests to sixty-three third
+            # parties per launch, which is precisely the disclosure the ruling
+            # exists to bound. The file name is a pure function of the URL, so
+            # "have we got this one" is a stat and not a lookup.
+            name = logo_filename(url)
+            path = os.path.join(logo_dir, name)
+            if os.path.exists(path):
+                # D-LOGO-11 / R5: the cache written by 0.13.3 and earlier was
+                # never dimension-checked, so "already on disk" is not evidence
+                # that this file is safe to hand the shell. The header is proved
+                # BEFORE the name is announced, because the guide points an Image
+                # at a file only when this command names it (Model.logoSlot,
+                # Service.qml logoHave). Reading a header is a small read and it
+                # happens in the HELPER, off the UI thread and nowhere near the
+                # guide's 150 ms open budget. Measured on this machine with 5,000
+                # real 220x120 logos all already cached: the whole `logos --fetch`
+                # subprocess went from a median 375 ms to 601 ms, so the check
+                # costs about 45 us per cached file end to end (22 us per call in
+                # isolation, 37 us on 44 KB files). This branch is not held back
+                # by the ceiling below, at any count, nor by the run's deadline:
+                # it reads files already on disk, and since D-LOGO-12 the ceiling
+                # bounds what is on disk, so this validates at most MAX_LOGO_FILES
+                # files per run -- unless an earlier version left more, which this
+                # run validates too and never adds to.
+                # D-LOGO-13: a PNG is announced only in its canonical form, so a
+                # file an earlier version cached verbatim is rewritten in place
+                # first, and one whose chunks cannot be walked is swept below.
+                state = cached_logo_state(path)
+                if state:
+                    cached += 1
+                    rewritten += state == "rewritten"
+                    names.append(name)
+                    emit({"ok": True, "kind": "logo", "name": name})
+                    continue
+                # Not announced, and NOT counted as `cached`: it is not on disk
+                # any more. The pass falls through to the fetch below, which
+                # refuses the same bytes at the gate and counts the reason there,
+                # so one bomb is one refusal rather than two -- and a provider
+                # that has since replaced the file with a sane one gets it. If the
+                # unlink fails the name is still withheld; the fetch may yet
+                # replace the bytes, and a name the guide is never given is a file
+                # the shell never decodes.
+                swept += 1
+                try:
+                    os.unlink(path)
+                    present -= 1
+                except OSError:
+                    pass
+            if name in memo:
+                # D-LOGO-22: failed within the day (this run included, through
+                # the entry a failure below adds). Not fetched, not a failure
+                # again, not held back by the ceiling or the deadline.
+                skipped_failed += 1
+                continue
+            if fetch_stopped:
+                # D-SRC-72: a logo could not be written into this folder, and
+                # every later one goes to the same folder -- so nothing more is
+                # FETCHED: a logo the run cannot keep is a request to its host
+                # for nothing. The pass goes on, because a cached file further
+                # down is still validated and announced (the lesson of the
+                # ceiling's old `break`, above).
+                unsaved += 1
+                continue
+            if present + fetched >= MAX_LOGO_FILES and not unnamed_checked:
+                # D-LOGO-18 (R30b): at the ceiling, before a URL is counted as
+                # held back, the files no current channel names are swept, once a
+                # run. Named from every channel, not only the ones this loop has
+                # reached, so a file a later channel names is kept.
+                unnamed_checked = True
+                named = {logo_filename(c["logo"]) for c in channels
+                         if isinstance(c, dict) and isinstance(c.get("logo"), str) and c["logo"]}
+                gone = sweep_unnamed_logos(logo_dir, named)
+                unnamed += gone
+                present -= gone
+            if present + fetched >= MAX_LOGO_FILES:
+                # The CEILING (D-LOGO-12): the directory holds MAX_LOGO_FILES
+                # entries and no fetch may add one. A cached file was validated
+                # and announced above whatever the count; a URL that would need a
+                # new file is not fetched and is counted here rather than
+                # vanishing, so a run that stopped at the ceiling says so (the
+                # same reason `swept` is a number). A swept bomb stays off the
+                # disk and off the stream, and is refused at the gate on the run
+                # that has room to fetch it.
+                deferred += 1
+                continue
+            remaining = run_deadline - time.monotonic()
+            if remaining <= 0:
+                # D-LOGO-16: the run's own deadline. Counted, never fetched; the
+                # next run starts where this one stopped, because what it fetched
+                # is on disk and what failed is in the memo -- written HERE, once,
+                # the first time the deadline is seen past (D-LOGO-22): the shell
+                # may stop this run before its end.
+                if memo_dirty and not memo_saved_at_deadline:
+                    memo_saved_at_deadline = True
+                    memo_refusal = save_logo_failed(memo_path, memo)
+                    refusal = refusal or memo_refusal
+                postponed += 1
+                continue
             try:
-                os.unlink(path)
-                present -= 1
-            except OSError:
-                pass
-        if present + fetched >= MAX_LOGO_FILES and not unnamed_checked:
-            # D-LOGO-18 (R30b): at the ceiling, before a URL is counted as
-            # held back, the files no current channel names are swept, once a
-            # run. Named from every channel, not only the ones this loop has
-            # reached, so a file a later channel names is kept.
-            unnamed_checked = True
-            named = {logo_filename(c["logo"]) for c in channels
-                     if isinstance(c, dict) and isinstance(c.get("logo"), str) and c["logo"]}
-            gone = sweep_unnamed_logos(logo_dir, named)
-            unnamed += gone
-            present -= gone
-        if present + fetched >= MAX_LOGO_FILES:
-            # The CEILING (D-LOGO-12): the directory holds MAX_LOGO_FILES
-            # entries and no fetch may add one. A cached file was validated
-            # and announced above whatever the count; a URL that would need a
-            # new file is not fetched and is counted here rather than
-            # vanishing, so a run that stopped at the ceiling says so (the
-            # same reason `swept` is a number). A swept bomb stays off the
-            # disk and off the stream, and is refused at the gate on the run
-            # that has room to fetch it.
-            deferred += 1
-            continue
-        remaining = run_deadline - time.monotonic()
-        if remaining <= 0:
-            # D-LOGO-16: the run's own deadline. Counted, never fetched; the
-            # next run starts where this one stopped, because what it fetched
-            # is on disk.
-            postponed += 1
-            continue
-        try:
-            data, ctype = fetch_logo(url, timeout, min(LOGO_DEADLINE, remaining))
-            names.append(write_logo(logo_dir, url, data, ctype))
-            fetched += 1
-            # D-LOGO-8: announce each file AS IT LANDS, not only in the summary.
-            # The shell gates a row on knowing the file is there, and the
-            # summary arrives at the END -- so on a first enable the user
-            # accepted a 63-host disclosure and then watched nothing happen for
-            # a quarter of an hour while the logos they were waiting for were
-            # already on disk. Measured: 355 files down, 10 of the 10 channels
-            # visible in the guide cached, every row still blank.
-            #
-            # One line per file, newline-delimited, and the summary object is
-            # still the last line. A reader that wants only the summary reads
-            # the last line; nothing else about the contract changes.
-            emit({"ok": True, "kind": "logo", "name": names[-1]})
-        except HelperError as error:
+                data, ctype = fetch_logo(url, timeout, min(LOGO_DEADLINE, remaining))
+                landed = write_logo(logo_dir, url, data, ctype)
+            except HelperError as caught:
+                failure = caught
+            except (MemoryError, FolderUnusable):
+                raise
+            except Exception as escaped:
+                # D-LOGO-24: the backstop. read_logo_response maps every error
+                # the fetch is known to raise; anything else costs this logo
+                # alone, as a counted, memoised `logo_fetch`, never the run.
+                failure = logo_escape(escaped, "fetch")
+            else:
+                names.append(landed)
+                fetched += 1
+                # D-LOGO-8: announce each file AS IT LANDS, not only in the summary.
+                # The shell gates a row on knowing the file is there, and the
+                # summary arrives at the END -- so on a first enable the user
+                # accepted a 63-host disclosure and then watched nothing happen for
+                # a quarter of an hour while the logos they were waiting for were
+                # already on disk. Measured: 355 files down, 10 of the 10 channels
+                # visible in the guide cached, every row still blank.
+                #
+                # One line per file, newline-delimited, and the summary object is
+                # still the last line. A reader that wants only the summary reads
+                # the last line; nothing else about the contract changes.
+                emit({"ok": True, "kind": "logo", "name": landed})
+                continue
+            if failure.code == "cache_unwritable":
+                # D-SRC-72 (write_logo): this folder's failure, not the
+                # address's -- not counted as one, not remembered in the
+                # memo, and the fetching stops here (above).
+                refusal = failure
+                fetch_stopped = True
+                unsaved += 1
+                continue
             # Hosts and codes only, never the URL (rule 5).
-            reasons[error.code] = reasons.get(error.code, 0) + 1
-            if error.code in ("logo_scheme", "logo_userinfo", "logo_redirect",
-                              "logo_type", "logo_bytes", "logo_too_large",
-                              "logo_dimensions", "logo_chunks"):
+            reasons[failure.code] = reasons.get(failure.code, 0) + 1
+            # D-SINK-40: `local_address` is the policy's too -- a logo, or a
+            # hop of one, aimed at this machine or a local network.
+            if failure.code in ("logo_scheme", "logo_userinfo", "logo_redirect",
+                                "logo_type", "logo_bytes", "logo_too_large",
+                                "logo_dimensions", "logo_scans", "logo_chunks", "local_address"):
                 refused += 1
             else:
                 failed += 1
+            # D-LOGO-22: remembered by name and code, for a day. A full memo
+            # records nothing new; an entry already there is refreshed.
+            if name in memo or len(memo) < LOGO_FAILED_MAX:
+                memo[name] = (memo_at, failure.code)
+                memo_dirty = True
+    finally:
+        if memo_dirty:
+            memo_refusal = save_logo_failed(memo_path, memo)
+            refusal = refusal or memo_refusal
     # `names` is what is ON DISK now, and it is the whole reason this command
     # reports anything at all: the guide points an Image at a file only when
     # that file is in this list. Pointing at a missing one is not merely a
@@ -488,12 +706,16 @@ def fetch_logo_run(channels: list[Any], logo_dir: str, timeout: float) -> dict[s
     # many logos the run's deadline left for the next run, and `runExpired`
     # says it was reached (D-LOGO-16); a logo whose own deadline passed is a
     # failure, reason `logo_timeout`. `staleTemps` is how many leftovers of a
-    # killed write were swept (D-SRC-60).
+    # killed write were swept (D-SRC-60). `skippedFailed` is how many
+    # addresses the failure memo kept this run from trying (D-LOGO-22).
+    # `unsaved` is how many logos a write this folder refused left unkept or
+    # unfetched (D-SRC-72); `refusal` is that write's refusal, or the memo's,
+    # which cmd_logos answers with -- and takes out of the summary.
     return {"fetched": fetched, "cached": cached, "refusedOnPolicy": refused, "failed": failed,
             "reasons": reasons, "names": names, "swept": swept, "rewritten": rewritten,
             "deferred": deferred, "atCeiling": deferred > 0, "files": present + fetched,
             "unnamed": unnamed, "postponed": postponed, "runExpired": postponed > 0,
-            "staleTemps": stale}
+            "staleTemps": stale, "skippedFailed": skipped_failed, "unsaved": unsaved, "refusal": refusal}
 
 
 def logo_dir_entries(logo_dir: str) -> int:
@@ -516,11 +738,17 @@ def logo_dir_entries(logo_dir: str) -> int:
         return MAX_LOGO_FILES
 
 
-def load_channels(directory: str) -> list[dict[str, Any]]:
+def read_channel_document(directory: str) -> dict[str, Any]:
+    """channels.json whole: the channel list and what the parse recorded
+    about its playlist (player_target's cached_source reads that half)."""
     document = read_json(os.path.join(directory, CHANNELS_FILE))
     if not isinstance(document, dict) or not isinstance(document.get("channels"), list):
         raise HelperError("no_cache", "This source has no channel list yet; refresh the playlist first.")
-    return document["channels"]
+    return document
+
+
+def load_channels(directory: str) -> list[dict[str, Any]]:
+    return read_channel_document(directory)["channels"]
 
 
 def find_channel(channels: list[dict[str, Any]], wanted: str) -> dict[str, Any]:
@@ -530,18 +758,24 @@ def find_channel(channels: list[dict[str, Any]], wanted: str) -> dict[str, Any]:
     raise HelperError("unknown_channel", "channel %s is not in the playlist cache" % wanted)
 
 
-def header_properties(headers: dict[str, Any], client: MpvIpc) -> list[tuple[str, Any]]:
-    """Ordered (property, value) pairs applying the channel's HTTP headers.
+def header_values(headers: dict[str, Any]) -> tuple[str, str, list[str]]:
+    """A channel's headers as (user-agent, referrer, the other header lines),
+    "" / "" / [] where the channel has none. Names are held to the WHOLE of
+    _HEADER_NAME (fullmatch, as make_channel's: a cached `Cookie\n` is no
+    name) and values lose their line breaks, so nothing here can add a
+    header line of its own.
 
-    Every property is always set: a channel without headers resets
-    user-agent / referrer / http-header-fields so nothing leaks from the
-    previous channel.
-    """
+    Since 2026-10-29 these ride the `loadfile` as PER-FILE options
+    (channel_load_options, 08), not global properties: an entry the helper did
+    not load -- a nested playlist's entry, a paste, a drop -- never inherits
+    them. Requirement 7 (a channel without headers sends none of the previous
+    one's) now holds by construction, because mpv restores a per-file option
+    when its file ends."""
     user_agent = ""
     referrer = ""
     fields: list[str] = []
     for name, value in headers.items():
-        if not isinstance(name, str) or not isinstance(value, str) or not _HEADER_NAME.match(name):
+        if not isinstance(name, str) or not isinstance(value, str) or not _HEADER_NAME.fullmatch(name):
             continue
         cleaned = clean_header_value(value)
         lower = name.lower()
@@ -551,10 +785,24 @@ def header_properties(headers: dict[str, Any], client: MpvIpc) -> list[tuple[str
             referrer = cleaned
         elif cleaned:
             fields.append("%s: %s" % (name, cleaned))
-    if not user_agent:
-        ok, default = client.try_command("get_property", "option-info/user-agent/default-value")
-        user_agent = default if ok and isinstance(default, str) and default else MPV_DEFAULT_USER_AGENT
-    return [("user-agent", user_agent), ("referrer", referrer), ("http-header-fields", fields)]
+    return user_agent, referrer, fields
+
+
+def default_user_agent(client: MpvIpc) -> str:
+    """mpv's own default user agent (`option-info/user-agent/default-value`),
+    or MPV_DEFAULT_USER_AGENT when the player cannot say."""
+    ok, default = client.try_command("get_property", "option-info/user-agent/default-value")
+    return default if ok and isinstance(default, str) and default else MPV_DEFAULT_USER_AGENT
+
+
+def neutral_header_properties(user_agent: str) -> list[tuple[str, Any]]:
+    """The three GLOBAL header properties at values that belong to no
+    provider: mpv's default user agent, no referrer, no extra fields. Set
+    before every load (apply_channel) and on adoption (pin_adopted_player),
+    because a player started or last driven by a helper from before
+    2026-10-29 holds the previous channel's headers as GLOBALS, and an entry
+    nobody gated would be sent them. `user_agent` is default_user_agent's."""
+    return [("user-agent", user_agent), ("referrer", ""), ("http-header-fields", [])]
 
 
 def cmd_play(args: argparse.Namespace) -> int:

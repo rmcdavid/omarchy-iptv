@@ -174,18 +174,36 @@ class FetchDeadline:
     CPython retries a socket call interrupted by a signal only after running
     the handler (PEP 475), and the handler's exception ends the call.
 
-    What it cannot cut short, stated rather than rounded away: a call that
-    does not return to the interpreter until it is done. The one on this
-    path is the host-name lookup -- getaddrinfo runs in the C library, which
-    retries its own poll after a signal -- so a lookup ends on the system
-    resolver's timeout and the handler runs then. UNVERIFIED by run.
+    What it cannot cut short: a call that does not return to the
+    interpreter until it is done. The one on this path was the host-name
+    lookup -- getaddrinfo runs in the C library, which retries its own poll
+    after a signal -- so a lookup ended on the system resolver's timeout and
+    the handler ran then. MEASURED 2026-10-24 (D-SRC-62, the
+    resolver-overrun spike on the dev branch, a user namespace whose
+    only resolver never answers): with a 0.5 s deadline the `playlist` verb
+    answered `timeout` after 1.26-1.28 s under `options timeout:1
+    attempts:1` and after 10.29-10.35 s under glibc's defaults, the
+    resolver's own 1.04-1.09 s and 10.05-10.06 s plus the helper's start.
+    So since that day the lookup is the one thing the fetch runs on a
+    thread of its own (resolve_within, through bounded_create_connection on
+    every connection the openers make, redirect hops included): the main
+    thread waits for it in slices it returns from, the alarm interrupts
+    that wait as it interrupts a read, and the worker blocks SIGALRM so the
+    signal is delivered to the thread that handles it. Measured the same
+    day on the same rig: 0.77-0.84 s under both resolver settings, the
+    lookup given up at the deadline and the rest the helper's own start,
+    which the before-figures carry too. The address the worker found is the
+    one the socket connects to, so the lookup is made once per connection
+    and never repeated by the stdlib.
 
     Only the main thread may install a signal handler. Anywhere else (a test
     calling from a thread) the body runs without the alarm and the read
-    loop's own monotonic check is the only bound, as before. A timer already
-    armed (none is, on any path that fetches) is put back with what remained
-    of it. The helper starts no thread and arms no other timer while a
-    fetch runs."""
+    loop's own monotonic check is the only bound, as before; the lookup
+    there is bounded by the socket timeout alone, as a connect is. A timer
+    already armed (none is, on any path that fetches) is put back with what
+    remained of it. The helper arms no other timer while a fetch runs, and
+    the resolver's worker is the only thread it ever starts; it is a daemon
+    thread, so one the deadline abandoned dies with the process."""
 
     def __init__(self, seconds: float) -> None:
         self.seconds = max(0.001, float(seconds))
@@ -228,6 +246,310 @@ class FetchDeadline:
         return False
 
 
+# D-SRC-62: the main thread waits for the resolver's worker in slices of
+# this many seconds, so a SIGALRM that the kernel delivered while the wait
+# was not interruptible still reaches its handler within one slice.
+RESOLVE_WAIT_SLICE_S = 0.05
+# The worker's stack. getaddrinfo needs well under this; the default 8 MiB
+# would be the largest single anonymous mapping a fetch verb makes under
+# limit_memory's RLIMIT_DATA.
+RESOLVE_STACK_BYTES = 1024 * 1024
+
+
+def resolve_within(host: str, port: int, timeout: float) -> list[Any]:
+    """getaddrinfo(host, port) for a stream socket, on a daemon thread the
+    main thread waits for at most `timeout` seconds (D-SRC-62).
+
+    The wait is a loop of short joins, so it returns to the interpreter
+    every RESOLVE_WAIT_SLICE_S and a FetchDeadline alarm ends it there, as
+    it ends a read; the worker blocks SIGALRM first, so the kernel hands
+    the signal to the main thread, whose wait is interrupted at once. A
+    lookup that outlives the wait raises TimeoutError, the error a connect
+    that took too long raises, and the caller answers it as one; the worker
+    then finishes on the resolver's own clock and is discarded (daemon:
+    the process does not wait for it at exit). Nothing is cached here and
+    nothing is re-looked-up: the result goes straight to the connect."""
+    import socket
+    import threading
+    result: list[Any] = []
+
+    def lookup() -> None:
+        try:
+            signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGALRM})
+        except (OSError, ValueError, AttributeError):
+            pass
+        try:
+            result.append(socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM))
+        except BaseException as error:         # handed to the main thread whole
+            result.append(error)
+
+    previous = threading.stack_size()
+    try:
+        threading.stack_size(RESOLVE_STACK_BYTES)
+    except (ValueError, RuntimeError):
+        pass
+    try:
+        worker = threading.Thread(target=lookup, name="omarchy-iptv-resolve", daemon=True)
+        try:
+            worker.start()
+        except RuntimeError as error:
+            # No thread to be had (a memory limit too low for one more
+            # mapping, the D-M3U-1 tests' very-low-limit case; a thread
+            # ceiling): the lookup runs here, under the alarm alone, as it
+            # did before D-SRC-62, and says so once. A verb that is about to
+            # refuse for memory still refuses for memory, not for this.
+            log("host-name lookup: no thread for it (%s); this lookup is not bounded by the deadline" % type(error).__name__)
+            return socket.getaddrinfo(host, port, 0, socket.SOCK_STREAM)
+    finally:
+        try:
+            threading.stack_size(previous)
+        except (ValueError, RuntimeError):
+            pass
+    bound = max(0.0, float(timeout))
+    until = time.monotonic() + bound
+    while worker.is_alive():
+        left = until - time.monotonic()
+        if left <= 0:
+            break
+        worker.join(min(RESOLVE_WAIT_SLICE_S, left))
+    if not result:
+        raise TimeoutError("the host-name lookup took longer than %.1f s" % bound)
+    found = result[0]
+    if isinstance(found, BaseException):
+        raise found
+    return found
+
+
+class DestinationPolicy:
+    """Where one fetch may connect (D-SINK-40, the owner's policy of
+    2026-10-29), decided per HOP at connect time, against the address the
+    socket actually connects to -- so a DNS answer cannot change between the
+    check and the use, and `127.1`, `2130706433` and `[::ffff:7f00:1]` are
+    read as what they connect to. A global address is always allowed. A
+    non-global one (address_class) only:
+      * on the FIRST hop of a URL the user typed (origin `user`): TVHeadend,
+        Jellyfin, a NAS, the harness's 127.0.0.1 fixtures;
+      * on a later hop to that first hop's own host, in the class the first
+        hop connected to (a same-host redirect; a public name that answers a
+        LAN address on the second lookup is refused);
+      * to the user's PLAYLIST host (`home`, ORIGIN_ENV's neighbours), in the
+        class its playlist fetch connected to (`home_class`): a guide the
+        playlist declares on its own LAN server;
+      * never for a logo (`logos`), on any hop.
+    Everything else -- a hint's host, a redirect into the LAN from a public
+    host, a second LAN host -- is refused before a byte is sent, `local_address`
+    naming the host only (rule 5).
+
+    D-SINK-57 (owner, 2026-10-29): on LOOPBACK "the same host" is host AND
+    port (own_host_match). A typed http://127.0.0.1:8080/ that redirects to
+    127.0.0.1:631 is a second host, refused; a relay that serves its playlist,
+    guide and streams on one loopback port stays its own host. A LAN or public
+    host keeps any port.
+
+    Through a PROXY the socket connects to the proxy, which the user chose;
+    the TARGET is then looked up here (resolve_within, the same bound) and
+    every address it answers must be allowed, because the proxy may use any
+    of them. That is check-then-use: a name whose answer changes between
+    this lookup and the proxy's is the stated residual (ARCHITECTURE.md
+    section 6). A target this machine cannot resolve at all is `unresolved`:
+    allowed on a user-typed first hop and on a later hop to that same host
+    when the first was unresolved too, refused everywhere else.
+
+    One object per fetch, never shared: it counts the fetch's hops."""
+
+    def __init__(self, label: str, origin: str, home_host: str = "", home_class: str = "", logos: bool = False,
+                 home_port: int | None = None) -> None:
+        self.label = label
+        self.origin = origin if origin == ORIGIN_USER else ORIGIN_PLAYLIST
+        self.home = host_key(home_host) if home_host else ""
+        if home_class not in ADDRESS_CLASSES:
+            home_class = host_class(home_host) if home_host else ""
+        self.home_class = home_class
+        self.home_port = home_port
+        self.logos = logos
+        self.hops = 0
+        self.first_host = ""
+        self.first_class = ""
+        self.first_port: int | None = None
+        self.last_class = ""
+
+    @classmethod
+    def from_environment(cls, label: str) -> "DestinationPolicy":
+        """The policy for a `playlist` or `epg` fetch, from what the shell set
+        beside the URL (ORIGIN_ENV and its neighbours, 01-core.py)."""
+        raw = (os.environ.get(ORIGIN_ENV) or "").strip()
+        origin = ORIGIN_USER if raw in ("", ORIGIN_USER) else ORIGIN_PLAYLIST
+        port_text = (os.environ.get(HOME_PORT_ENV) or "").strip()
+        # D-SINK-57: a port that is not 1..65535 in digits is no port, and a
+        # loopback home with no port matches nothing (own_host_match).
+        # isascii as well (D-EPG-16's rule 15): isdigit() is True for a
+        # superscript, which int() refuses. The shell sets this from a URL it
+        # validated, so no provider reaches it; the shape is closed anyway.
+        port = (int(port_text) if port_text.isascii() and port_text.isdigit() and len(port_text) <= 5
+                and 0 < int(port_text) < 65536 else None)
+        return cls(label, origin, (os.environ.get(HOME_HOST_ENV) or "").strip(),
+                   (os.environ.get(HOME_CLASS_ENV) or "").strip(), home_port=port)
+
+    @classmethod
+    def for_logos(cls) -> "DestinationPolicy":
+        return cls("logo", ORIGIN_PLAYLIST, logos=True)
+
+    def begin_hop(self) -> bool:
+        """Count one request; -> whether it is the fetch's first."""
+        first = self.hops == 0
+        self.hops += 1
+        return first
+
+    def permits(self, host: str, kind: str, first: bool, port: int | None = None) -> bool:
+        if kind == "global":
+            return True
+        if self.logos:
+            return False
+        if first and self.origin == ORIGIN_USER:
+            return True
+        if self.first_host != "" and kind == self.first_class and own_host_match(
+                host, port, {"host": self.first_host, "port": self.first_port, "loopback": kind == "loopback"}):
+            return True
+        return (self.home != "" and self.home_class != "" and kind == self.home_class and own_host_match(
+            host, port, {"host": self.home, "port": self.home_port, "loopback": kind == "loopback"}))
+
+    def connected(self, host: str, kind: str, first: bool, port: int | None = None) -> None:
+        if first:
+            self.first_host = host_key(host)
+            self.first_class = kind
+            self.first_port = port
+        self.last_class = kind
+
+    def refusal(self, host: str, first: bool) -> HelperError:
+        where = "a logo" if self.logos else self.label
+        if first and self.origin == ORIGIN_PLAYLIST:
+            how = "is an address on this machine or a local network that the playlist chose"
+        elif first:
+            how = "is an address on this machine or a local network"
+        else:
+            how = "is an address on this machine or a local network that a redirect chose"
+        return HelperError("local_address", "%s: %s %s; not contacted" % (where, host or "the host", how))
+
+    def check_proxied(self, host: str, port: int, timeout: float, first: bool) -> None:
+        """The TARGET of a proxied request, looked up here (see the class)."""
+        try:
+            kinds = {address_class(found[4][0]) for found in resolve_within(host, port, timeout)}
+        except (OSError, TimeoutError):
+            kinds = set()
+        if not kinds:
+            if (first and self.origin == ORIGIN_USER and not self.logos) or \
+                    (self.first_host != "" and host_key(host) == self.first_host and self.first_class == "unresolved"):
+                self.connected(host, "unresolved", first, port)
+                return
+            raise HelperError("network", "could not resolve %s to check where it leads through the proxy" % (host or "the host"))
+        for kind in kinds:
+            if not self.permits(host, kind, first, port):
+                raise self.refusal(host, first)
+        self.connected(host, "global" if kinds == {"global"} else sorted(kinds - {"global"})[0], first, port)
+
+
+def bounded_create_connection(address: tuple[str, int], timeout: Any = None,
+                              source_address: Any = None, policy: DestinationPolicy | None = None,
+                              first: bool = True, proxied: bool = False, **_: Any) -> Any:
+    """socket.create_connection with its lookup under resolve_within, the
+    same signature, the same first-address-that-connects loop (D-SRC-62).
+    Installed as every connection's `_create_connection` by
+    bounded_handlers, which is the one place http.client turns a host name
+    into a socket, so a redirect hop gets the same bound as the first hop.
+    `timeout` that is not a number (the stdlib's default sentinel) is
+    bounded by DEFAULT_TIMEOUT rather than left open.
+
+    D-SINK-40: with a `policy`, each address the lookup answers is checked
+    BEFORE it is connected to (DestinationPolicy.permits) and one that is not
+    allowed is skipped; when none is, the fetch is refused. `proxied` says
+    this connection goes to the user's proxy, whose own address is not the
+    destination (the handler checked the target, check_proxied)."""
+    import socket
+    host, port = address
+    bound = float(timeout) if isinstance(timeout, (int, float)) and not isinstance(timeout, bool) else float(DEFAULT_TIMEOUT)
+    error: OSError | None = None
+    refused = False
+    for family, kind, proto, _, sockaddr in resolve_within(host, port, bound):
+        verdict = "global"
+        if policy is not None and not proxied:
+            verdict = address_class(sockaddr[0])
+            if not policy.permits(host, verdict, first, port):
+                refused = True
+                continue
+        sock = None
+        try:
+            sock = socket.socket(family, kind, proto)
+            if isinstance(timeout, (int, float)) and not isinstance(timeout, bool):
+                sock.settimeout(timeout)
+            if source_address:
+                sock.bind(source_address)
+            sock.connect(sockaddr)
+            if policy is not None and not proxied:
+                policy.connected(host, verdict, first, port)
+            return sock
+        except OSError as failure:
+            error = failure
+            if sock is not None:
+                sock.close()
+    if error is not None:
+        raise error
+    if refused and policy is not None:
+        raise policy.refusal(host, first)
+    raise OSError("getaddrinfo returned an empty list")
+
+
+def bounded_handlers(context: Any, policy: DestinationPolicy | None = None) -> list[Any]:
+    """The HTTP and HTTPS handlers every opener of this helper is built
+    with: the stdlib's, opening the stdlib's connection classes with their
+    `_create_connection` replaced by bounded_create_connection (D-SRC-62).
+    build_opener drops its own HTTPHandler and HTTPSHandler for these, as
+    it does for any subclass it is handed. `context` None gives the HTTPS
+    handler the stdlib's default context, as before.
+
+    D-SINK-40: `policy` is the fetch's DestinationPolicy. Each REQUEST is a
+    hop (urllib opens one connection per request and closes it), so the
+    handler counts it and builds that request's connection class around it;
+    a proxied request's target is checked here, by name, because its socket
+    goes to the proxy (DestinationPolicy.check_proxied)."""
+    import http.client
+    import urllib.request
+
+    def connection_class(base: Any, req: Any) -> Any:
+        if policy is None:
+            create = bounded_create_connection
+        else:
+            first = policy.begin_hop()
+            proxied = bool(getattr(req, "_tunnel_host", None)) or req.has_proxy()
+            if proxied:
+                target = urllib.parse.urlsplit(req.full_url)
+                try:
+                    port = target.port or (443 if target.scheme == "https" else 80)
+                except ValueError:
+                    port = 80
+                policy.check_proxied(target.hostname or "", port, float(req.timeout or DEFAULT_TIMEOUT)
+                                     if isinstance(req.timeout, (int, float)) else float(DEFAULT_TIMEOUT), first)
+
+            def create(address: tuple[str, int], timeout: Any = None, source_address: Any = None, **_: Any) -> Any:
+                return bounded_create_connection(address, timeout, source_address, policy=policy, first=first, proxied=proxied)
+
+        class Connection(base):
+            def __init__(self, *args: Any, **kwargs: Any) -> None:
+                super().__init__(*args, **kwargs)
+                self._create_connection = create
+
+        return Connection
+
+    class BoundedHTTPHandler(urllib.request.HTTPHandler):
+        def http_open(self, req: Any) -> Any:
+            return self.do_open(connection_class(http.client.HTTPConnection, req), req)
+
+    class BoundedHTTPSHandler(urllib.request.HTTPSHandler):
+        def https_open(self, req: Any) -> Any:
+            return self.do_open(connection_class(http.client.HTTPSConnection, req), req, context=self._context)
+
+    return [BoundedHTTPHandler(), BoundedHTTPSHandler(context=context)]
+
+
 # D-SRC-59: the most of a library error's text a network refusal carries.
 # For http.client.BadStatusLine (a server whose first line is not a status
 # line) and UnknownProtocol (one whose first word is not a known HTTP
@@ -250,14 +572,16 @@ def network_detail(error: Any) -> str:
     return _CONTROL_CHARS.sub(" ", text).strip()
 
 
-def make_opener(label: str, host: str) -> Any:
+def make_opener(label: str, host: str, policy: DestinationPolicy | None = None) -> Any:
     """urlopen replacement whose redirect handler (S-06) refuses non-http(s)
     targets (urllib's default happily follows a 302 to ftp://) and drops
     Authorization / Cookie when the origin (scheme, host, port) changes, so
     a provider that bounces to a third party never receives the user's
     credentials. urllib itself refuses file:/data: targets and loops with a
     3xx HTTPError, which read_http_source maps to the same error code. A
-    redirect's body is never read (unread_redirect_handler)."""
+    redirect's body is never read (unread_redirect_handler). Where each hop
+    may CONNECT is `policy`'s (D-SINK-40), the environment's when none is
+    given."""
     import urllib.request
 
     class SafeRedirectHandler(unread_redirect_handler()):
@@ -275,10 +599,12 @@ def make_opener(label: str, host: str) -> Any:
                     new.remove_header(name)
             return new
 
-    handlers: list[Any] = [SafeRedirectHandler()]
-    context = TLS_CONTEXT.get("https")
-    if context is not None:
-        handlers.append(urllib.request.HTTPSHandler(context=context))
+    # D-SRC-62: the connections are the stdlib's with the host-name lookup
+    # bounded; the TLS context is the one limit_memory prepared, or the
+    # stdlib's default when none was.
+    if policy is None:
+        policy = DestinationPolicy.from_environment(label)
+    handlers: list[Any] = [SafeRedirectHandler(), *bounded_handlers(TLS_CONTEXT.get("https"), policy)]
     return urllib.request.build_opener(*handlers)
 
 
@@ -333,7 +659,7 @@ def memory_limit_bytes() -> int:
 # traceback, plus what urllib loads on a request: `ssl` (http.client), and
 # `encodings.idna` (socket encodes every host name through it).
 FETCH_PRELOAD = ("base64", "binascii", "http.client", "ssl", "urllib.error", "urllib.request",
-                 "encodings.idna", "unicodedata", "traceback")
+                 "encodings.idna", "unicodedata", "traceback", "ipaddress")
 EPG_PRELOAD = FETCH_PRELOAD + ("calendar", "hashlib", "xml.etree.ElementTree", "xml.parsers.expat")
 
 
@@ -460,7 +786,8 @@ def download_timeout(label: str, host: str) -> HelperError:
     return HelperError("timeout", "%s download from %s exceeded its deadline" % (label, host))
 
 
-def read_http_source(url: str, timeout: float, label: str = "playlist") -> bytes:
+def read_http_source(url: str, timeout: float, label: str = "playlist",
+                     policy: DestinationPolicy | None = None) -> bytes:
     """The playlist's, the guide's and the source probe's one download, under
     ONE wall-clock deadline of http_deadline(timeout) seconds from before
     the connection is opened to the last byte, redirects included (R30e,
@@ -468,16 +795,25 @@ def read_http_source(url: str, timeout: float, label: str = "playlist") -> bytes
     headers and the body wherever they wait, and the monotonic check in the
     read loop -- and once more after it, for the chunked trailers http.client
     reads inside the last read1 -- stays for a caller off the main thread.
-    No redirect body is read (make_opener)."""
+    No redirect body is read (make_opener). Every hop's destination is
+    `policy`'s, the environment's when none is given (D-SINK-40); the
+    caller that passes one reads back what the hops connected to."""
     import urllib.request
     host = source_host(url)
     target, auth = split_userinfo(url)
+    if policy is None:
+        policy = DestinationPolicy.from_environment(label)
+    if auth and policy.origin == ORIGIN_PLAYLIST:
+        # D-SINK-40: a URL the PROVIDER chose never makes this machine send a
+        # credential it also chose (the model refuses such a hint before it
+        # is fetched; this is the same rule where the header is built).
+        raise HelperError("bad_url", "%s address %s carries a password the playlist chose; not used" % (label, host))
     headers = {"User-Agent": USER_AGENT, "Accept": "*/*"}
     if auth:
         import base64
         headers["Authorization"] = "Basic " + base64.b64encode(auth.encode("utf-8")).decode("ascii")
     request = urllib.request.Request(target, headers=headers)
-    opener = make_opener(label, host)
+    opener = make_opener(label, host, policy)
     budget = http_deadline(timeout)
     deadline = time.monotonic() + budget
     try:
@@ -527,11 +863,12 @@ def read_http_response(opener: Any, request: Any, timeout: float, label: str, ho
     return b"".join(chunks)
 
 
-def fetch_bytes(url: str, timeout: float, label: str = "playlist") -> bytes:
+def fetch_bytes(url: str, timeout: float, label: str = "playlist",
+                policy: DestinationPolicy | None = None) -> bytes:
     kind, target = resolve_source(url, label)
     if kind == "file":
         return read_local_source(target, label)
-    return read_http_source(target, timeout, label)
+    return read_http_source(target, timeout, label, policy)
 
 
 def too_large_inflated(label: str) -> HelperError:
@@ -600,7 +937,20 @@ class EntityRefusingReader:
     common, and passes), so the first read runs the prolog through its own
     expat parser, whose EntityDeclHandler refuses general and parameter
     entities alike, and hands the parse nothing until that parser reaches the
-    root's start tag: a declaration can only come before it."""
+    root's start tag: a declaration can only come before it.
+
+    D-EPG-15 (2026-10-29): an entity is not the only declaration that
+    expands. An ATTLIST default is copied by expat onto every element that
+    omits the attribute, so a small internal subset multiplied every element
+    of the guide by its default -- a 270 KB guide drove the verb to its
+    memory limit, and a smaller default only cost time, bounded by the
+    service's watchdog. So the prolog parser refuses the INTERNAL SUBSET
+    itself, at the DOCTYPE's start (StartDoctypeDeclHandler is called before
+    a declaration inside it is read), whatever it declares: XMLTV feeds never
+    carry one, and one rule closes ATTLIST and any declaration kind nobody
+    has thought of yet. A DOCTYPE without a subset -- `<!DOCTYPE tv SYSTEM
+    "xmltv.dtd">` -- passes as it always did, and the DTD it names is never
+    read. The entity handler stays, as the second layer."""
 
     class Root(Exception):
         pass
@@ -617,10 +967,15 @@ class EntityRefusingReader:
         def declared(*_: Any) -> None:
             raise HelperError("bad_xml", "refused the EPG: it declares an XML entity, which XMLTV feeds never do")
 
+        def doctype(_name: Any, _system: Any, _public: Any, has_internal_subset: Any) -> None:
+            if has_internal_subset:
+                raise HelperError("bad_xml", "refused the EPG: it carries a DTD internal subset, which XMLTV feeds never do")
+
         def root(*_: Any) -> None:
             raise EntityRefusingReader.Root()
 
         parser = xml.parsers.expat.ParserCreate()
+        parser.StartDoctypeDeclHandler = doctype
         parser.EntityDeclHandler = declared
         parser.StartElementHandler = root
         held = []
@@ -772,10 +1127,23 @@ def write_json_atomic(path: str, payload: Any, private_dir: bool = True) -> None
 
 
 def json_string(text: str) -> str:
-    """JSON string literal; the common quote-free case skips the encoder."""
-    if '"' in text or "\\" in text:
-        return json.dumps(text, ensure_ascii=False)
-    return '"' + text + '"'
+    """JSON string literal, always through the encoder (D-EPG-14).
+
+    It used to skip the encoder when `text` held no quote and no backslash,
+    which was right for the guide's own ids -- folded of every control
+    character at the parse -- and wrong for the window's other keys, the
+    playlist's tvg-ids, which make_channel only strips: a TAB, a CR or any
+    other C0 control inside one was written raw. A TAB moved the window
+    line's first-TAB split, a CR split the line on the next read, and any of
+    them made epg-now.json invalid JSON, so one such channel blanked the
+    whole source's guide. The encoder escapes all of them and changes no
+    other character (ensure_ascii=False), so every id that was written
+    correctly is written byte for byte as before. What it leaves raw -- DEL,
+    the C1 controls, U+2028 and U+2029 -- is valid inside a JSON string and
+    splits no line here: the window is split on LF alone and read with
+    universal newlines (LF, CR and CRLF), and the shell splits epg-now.json
+    on LF. The shared fixture epg-id-controls.json pins each of them."""
+    return json.dumps(text, ensure_ascii=False)
 
 
 # D-SINK-19 round 13, R23b, rule 15: every open() in this helper of a path
@@ -874,6 +1242,20 @@ def write_status_quietly(path: str, status: dict[str, Any]) -> None:
         log("could not write %s: %s" % (os.path.basename(path), io_error))
 
 
+def cache_unwritable(path: str, io_error: OSError) -> HelperError:
+    """D-SRC-69 (2026-10-27): a fetch's own cache file could not be written,
+    as a refusal with a code rather than an OSError left to main()'s
+    catch-all. That catch-all answers `internal` with the exception's text,
+    and the Sources result line used to show it: `FileNotFoundError: [Errno
+    2] No such file or directory: '<cache path>/.tmp-channels.json-<hex>' ->
+    ...` when the start-up prune removed an add's folder between the
+    temporary file and its rename. The sentence names the file's BASE name
+    and the error's own words, never a path (R12): the folder is the user's
+    cache, and a path carries their home directory into the reply."""
+    reason = io_error.strerror or type(io_error).__name__
+    return HelperError("cache_unwritable", "could not write %s in the source's cache folder (%s)" % (os.path.basename(path), reason))
+
+
 # ------------------------------------------------------------ playlist
 
 def url_from(args: argparse.Namespace) -> str:
@@ -918,8 +1300,12 @@ def cmd_playlist(args: argparse.Namespace) -> int:
                 # the verb has no required argument any more, because the shell
                 # never passes one.
                 raise HelperError("bad_url", "no playlist URL: pass --url or set $%s" % URL_ENV)
-            text = fetch_bytes(url, args.timeout, "playlist")
-            parsed = parse_m3u(playlist_lines(text))
+            # D-SINK-40/41: one destination policy for the fetch's hops, read
+            # back after it for what the source IS (playlist_source).
+            policy = DestinationPolicy.from_environment("playlist")
+            text = fetch_bytes(url, args.timeout, "playlist", policy)
+            kind = resolve_source(url, "playlist")[0]
+            parsed = parse_m3u(playlist_lines(text), playlist_source(kind, url, policy.last_class, policy.first_class))
             text = None
             if not parsed["channels"]:
                 if not parsed["isPlaylist"]:
@@ -931,10 +1317,30 @@ def cmd_playlist(args: argparse.Namespace) -> int:
                 "generatedAt": now,
                 "sourceHost": source_host(url),
                 "epgUrlHint": parsed["epgUrlHint"],
+                # D-SINK-40: the class the user-typed URL's first hop connected
+                # to, which the shell hands a later guide-hint fetch so a hint
+                # on this host may stay in this class (DestinationPolicy.home).
+                "sourceClass": policy.first_class if kind == "http" else "",
+                # D-SINK-57/58 (2026-10-29): what player_target needs to run
+                # the parse's own-host and local-source rules again at play
+                # time: the typed URL's port, and whether the source read as
+                # local (its last hop connected to a non-global address).
+                "sourcePort": url_port(url) if kind == "http" else None,
+                "sourceLocal": kind == "file" or policy.last_class not in ("", "global", "unresolved"),
                 "count": len(parsed["channels"]),
                 "channels": parsed["channels"],
             }
-            write_json_atomic(channels_path, document)
+            # D-SRC-73: a folder that is a link to nothing, or not a folder
+            # at all, is R25c's `folder_unusable` here as in every other verb
+            # (main() answers it, with its sentence). FolderUnusable is an
+            # OSError, so the except below used to fold it into
+            # cache_unwritable, and one folder got two answers.
+            try:
+                write_json_atomic(channels_path, document)
+            except FolderUnusable:
+                raise
+            except OSError as io_error:
+                raise cache_unwritable(channels_path, io_error) from None
             document = None
         finally:
             # D-M3U-3: the limit covers the fetch, the parse and channels.json
@@ -970,8 +1376,21 @@ def cmd_playlist(args: argparse.Namespace) -> int:
             "warnings": parsed["warnings"],
             "stale": False,
             "error": None,
+            # Written under the destination rules (Model.cacheBeforeDestinationRules).
+            "destinationRules": DESTINATION_RULES,
         }
-        write_json_atomic(status_path, status)
+        # D-SRC-69, the same refusal for the second file: channels.json is
+        # written, but a cache without its status is not one the service can
+        # judge, so the run fails as the first write's failure does. A
+        # folder made a link to nothing in between is R25c's (D-SRC-73).
+        try:
+            write_json_atomic(status_path, status)
+        except FolderUnusable:
+            raise
+        except OSError as io_error:
+            error = cache_unwritable(status_path, io_error)
+    if error is None:
+        assert parsed is not None
         # The upgrade path of ARCHITECTURE.md decision 6. A state file written
         # under id scheme 1 still names its favorites by a hash of the
         # credentialed stream URL, and this is the one place the helper holds
