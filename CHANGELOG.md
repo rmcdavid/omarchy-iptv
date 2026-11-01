@@ -10,10 +10,11 @@ the fixes from the plugin's own review of its whole codebase (2026-10-29 to
 2026-10-31) and a sweep of the open P2 and P3 rows on its board: where a
 playlist may make this computer connect or listen, the player's safety
 settings set after your own `mpvArgs` and mpv config, your `mpvArgs` and
-your sources' keys taken off every command line, and a failure on your own
-computer told as yours instead of marking the channel. It also masks the
-Sources form on the desktop accessibility bus, which the guide's fields
-reach on Quickshell 0.3.2 with Qt 6.12. What to do: **restart the shell**
+your sources' keys taken off the helper's and the player's command lines,
+and a failure on your own computer told as yours instead of marking the
+channel. It also masks the Sources form on the desktop accessibility bus,
+which Quickshell 0.3.2, installed by recent system updates, lets a shell
+window publish to. What to do: **restart the shell**
 (`omarchy-restart-shell`); expect each source's playlist to be downloaded
 once more, whatever its age, the first time it is the active source after
 the update; and if a channel was playing when you updated, expect one short
@@ -27,33 +28,35 @@ refuses is named there.
 
 - **What a playlist chooses may no longer reach this computer or your
   local network.** An address you type may be anywhere, a TVHeadend or a
-  NAS included. What the provider chooses -- a redirect to another host,
-  the guide address a playlist names, a channel logo -- may be on this
-  computer or your network only when it stays on the playlist's own server
-  (on this computer, its own port as well), and a logo never; such a
-  download stops with `Refused a local address`. The check is made on the
-  address each connection actually reaches. A guide address a playlist
-  names that carries a user name or password, or that is local and not the
-  playlist's own server, is not used: the Sources row says `EPG from
-  playlist not used` with the reason, and typing it into the source's EPG
-  field uses it. Logos on this computer or your network no longer load.
-  (D-SINK-40, D-SINK-57)
+  NAS included. What the provider chooses -- a redirect, the guide address
+  a playlist names, a channel logo -- may be on this computer or your
+  network only when it stays on the playlist's own server (on this
+  computer, its own port as well), and a logo never; a playlist or guide
+  download sent there stops with `Refused a local address`. The check is
+  made on the address each connection actually reaches, so a host name
+  that leads there is caught too. A guide address a playlist names that
+  carries a user name or password, or that is written as a local address
+  and is not the playlist's own server, is not used at all: the Sources row
+  says `EPG from playlist not used` with the reason, and typing it into the
+  source's EPG field uses it. Logos on this computer or your network no
+  longer load. (D-SINK-40, D-SINK-57)
 - **Channels are held to the same rule, and none may make the player
   listen.** A playlist from the internet may not point a channel at an
-  address on this computer or your local network; one from your own
-  network or a file may, and a relay on this computer (Threadfin, xTeVe)
-  may name channels on your network but, on this computer, only on its own
-  port. A `udp://` or `rtp://` channel must be a multicast group, as ISP
-  television uses. A channel address that would have the player listen for
-  anyone on your network to send to, or that carries a control character,
-  is skipped; each skip is counted in the footer's `Playlist warning:
-  ...`. A sign-in header a playlist sets (`Authorization`, `Cookie`,
-  `Proxy-Authorization`, `Host`) is sent only to channels on the playlist's
-  own server (on this computer, its own port), and none at all for a
-  playlist read from a file; your provider's headers go only with the
-  channel the plugin loads, never with an entry the player was handed some
-  other way. (D-SINK-41,
-  D-SINK-42, D-SINK-54, D-SINK-56, D-SINK-57, D-PLY-44)
+  address on this computer or your local network written out as one (the
+  player looks up a channel's host name itself, so a name that leads there
+  is not caught); one from your own network or a file may, and a relay on
+  this computer (Threadfin, xTeVe) may name channels on your network but,
+  on this computer, only on its own port. A `udp://` or `rtp://` channel
+  must be a multicast group, as ISP television uses. A channel address
+  that would have the player listen for anyone on your network to send to,
+  or that carries a control character, is skipped; each skip is counted in
+  the footer's `Playlist warning: ...`. A sign-in header a playlist sets
+  (`Authorization`, `Cookie`, `Proxy-Authorization`, `Host`) is sent only
+  to channels on the playlist's own server (on this computer, its own
+  port), and none at all for a playlist read from a file; your provider's
+  headers go only with the channel the plugin loads, never with an entry
+  the player was handed some other way. (D-SINK-41, D-SINK-42, D-SINK-54,
+  D-SINK-56, D-SINK-57, D-PLY-44)
 - **The player opens only the stream formats IPTV uses.** A channel whose
   server answers with a playlist file (a `.m3u` or `.pls` redirector) or a
   web page fails with `The address sent a playlist file or a web page,
@@ -98,38 +101,41 @@ refuses is named there.
   `--ao-pcm-file`, `--vo-image-outdir`, `--osd-playing-msg`,
   `--osd-status-msg`, `--osd-playlist-entry`, `--term-playing-msg`,
   `--term-title`, `--demuxer-lavf-propagate-opts`, and the external audio,
-  subtitle, chapters and cover-art file options; a `--demuxer-lavf-o` token
-  naming a TLS setting, a protocol or format list, or `seg_format_options`;
-  and a `--script-opts` token that sets one of the on-screen controller's
-  click or wheel commands or contains `${`. Newly accepted with a footer
-  warning: `--http-proxy`, and a `--demuxer-lavf-o` token naming
-  `http_proxy`, because a proxy receives the whole address of a plain-`http`
-  stream and your provider's headers; and `--rtsp-transport=udp` (or
-  `udp_multicast`, `lavf`), and a `--demuxer-lavf-o` token setting
-  `rtsp_transport` to anything but `tcp`, `http` or `https`, because the
-  player then opens ports on this computer that anyone can send to. The
-  footer's one warning line names a refused option first, by name only, and
-  counts the rest (`+1 more`), where 0.15.0 wrote a refusal only to the
-  shell's journal. (D-SINK-45, D-SINK-51, D-SINK-52, D-SINK-53, D-SINK-59,
-  D-SINK-64, D-SINK-65, F-UX-7)
-- **Your `mpvArgs` tokens, your sources' keys and channel ids are on no
-  command line.** A program's command line can be read by every account on
-  the computer, and a token is where a proxy password or a header value
-  goes. The shell now hands these to its helper privately, and the helper
-  gives your tokens to the player in a file only your account can read,
-  deleted as soon as the player has read it. A source you add from now on
-  gets a random key instead of one worked out from its address. Two things
-  behave differently: an option mpv cannot understand is skipped instead
-  of stopping the player from starting, and `--no-config` in `mpvArgs` no
-  longer stops mpv reading your own mpv config (remove the line from your
-  config instead). A token that cannot be written as one line of that file
+  subtitle, chapters and cover-art file options; a `--demuxer-lavf-o`
+  token naming a TLS setting, a setting that makes the player listen, a
+  protocol or format list, or `seg_format_options`; and a `--script-opts`
+  token that sets one of the on-screen controller's click or wheel
+  commands or contains `${`. Still accepted, and now warned about in the
+  footer where 0.15.0 said nothing: `--http-proxy`, and a
+  `--demuxer-lavf-o` token naming `http_proxy`, because a proxy receives
+  the whole address of a plain-`http` stream and your provider's headers;
+  and `--rtsp-transport=udp` (or `udp_multicast`, `lavf`), and a
+  `--demuxer-lavf-o` token setting `rtsp_transport` to anything but `tcp`,
+  `http` or `https`, because the player then opens ports on this computer
+  that anyone can send to. The footer's one warning line names a refused
+  option first, by name only, and counts the rest (`+1 more`), where
+  0.15.0 wrote a refusal only to the shell's journal. (D-SINK-45,
+  D-SINK-51, D-SINK-52, D-SINK-53, D-SINK-59, D-SINK-64, D-SINK-65,
+  F-UX-7)
+- **Your `mpvArgs` tokens, your sources' keys and channel ids are off the
+  helper's and the player's command lines.** A program's command line can
+  be read by every account on the computer, and a token is where a proxy
+  password or a header value goes. The shell now hands these to its helper
+  privately, and the helper gives your tokens to the player in a file only
+  your account can read, deleted as soon as the player has read it. A
+  source you add from now on gets a random key instead of one worked out
+  from its address. Two things behave differently: an option mpv cannot
+  understand is skipped instead of stopping the player from starting, and
+  `--no-config` in `mpvArgs` no longer stops mpv reading your own mpv
+  config (to keep a setting of that config out of this player, take it out
+  of the config). A token that cannot be written as one line of that file
   is refused by name. (D-SINK-47, D-SINK-48)
 - **The helper ignores your Python environment.** It starts as
-  `python3 -I`, so `PYTHONPATH`, your user site-packages and a
-  `sitecustomize` no longer run inside it before it hides your provider
-  address from other programs. That moment stays at about 25 ms
-  (medians of 23 and 25 ms, measured at a load average of 2 to 3).
-  (D-SINK-50)
+  `python3 -I`, so what `PYTHONPATH` and your user site-packages hold (a
+  `sitecustomize` there, say) no longer runs inside it before it hides your
+  provider address from other programs. That moment stays at about 25 ms:
+  medians of 23 and 25 ms, and 21 to 40 ms in all, over 24 runs at a load
+  average of 2 to 3. (D-SINK-50)
 - **The player accepts a software renderer.** `--gpu-sw=yes` is among its
   own options, so on a compositor with no hardware GL or Vulkan to give it
   the player comes up, slower, instead of aborting on every channel change
@@ -209,22 +215,26 @@ refuses is named there.
   says `http:// sends the address and any password in it unencrypted;
   https:// does not`. Nothing is refused: many providers offer nothing
   else. (D-SINK-14)
-- **At most three sources' logo folders are kept.** The shell keeps the
-  logo folders of the active source and the two you most recently had
-  logos on for, whatever their age, and deletes the rest when it starts and
-  at every switch: about 3.9 GB at most at the 5,000-logo ceiling, where
-  0.15.0 could keep one for every source switched to within a day.
+- **At most three sources' logo folders are kept.** When it starts and at
+  every switch, the shell keeps the logo folder of the active source and
+  those of the two you most recently had logos on for -- each of those two
+  until a day has passed since a fetch last ran for it -- and deletes every
+  other, whatever its age: about 3.9 GB at most at the 5,000-logo ceiling,
+  where 0.15.0 could keep one for every source switched to within a day.
   (D-LOGO-17)
-- **The Sources form's fields reach the accessibility bus masked.** On
-  Quickshell 0.3.2 with Qt 6.12, which recent system updates install, the
-  guide's form fields are published on the desktop accessibility bus, which
-  screen readers read and which every program running as you can read too.
-  Each field there now carries what the form shows when it is masked: a
-  URL with its user name, password and query values hidden, a local path
-  and the label as typed, and the Xtream server, username and password as
-  one `*` per character -- whether or not you have revealed the field on
-  screen. Before, on that platform, the Xtream server and username went
-  out as typed, and a URL in full once revealed. (D-A11Y-1)
+- **The Sources form's fields reach the accessibility bus masked.**
+  Quickshell 0.3.2, which recent system updates install, carries the
+  upstream change that lets a shell window publish to the desktop
+  accessibility bus, which screen readers read and which every program
+  running as you can read too, so the guide's form fields are treated as
+  published there. Each field there now carries a masked value, whether or
+  not you have revealed the field on screen: a URL, the Xtream server's
+  included, with its user name, password and query values hidden; a local
+  path and the label as typed; and the username, the password and a server
+  typed without `http://` as one `*` per character. Before, measured with
+  the guide in a test window on that platform, the Xtream server and
+  username went out as typed; a revealed URL went out in full, read in the
+  code. (D-A11Y-1)
 
 ### Fixed
 
@@ -274,21 +284,23 @@ refuses is named there.
   wherever the shell shows the name**: the bar, its tooltip, the guide's
   footer while playing, the group column, the headings, notifications, the
   IPC `status` and `channel` replies and the player's window title, where
-  0.15.0 did so only on the guide's rows. Control characters are left out
-  of the window title and notifications and escaped in the IPC replies, and
+  0.15.0 did so only on the guide's rows (an address written with its
+  scheme, such as `http://`; one without stays as written, as on the rows
+  before). Control characters are left out of the window title and
+  notifications and escaped in the IPC replies, and
   a notification's body is escaped, so markup in a channel name shows as
   text instead of restyling the card. Hidden groups and saved searches keep
   working. (F-SINK-14, F-SINK-15, F-SINK-16, D-SINK-49)
 - **A host is printed up to its first `;`, `=` or `&`** on the Sources
   row, in its default label and in the dialog that asks before logos are
-  turned on, where 0.15.0 labelled such a stored address by what you
-  typed. (D-SINK-30)
+  turned on, where 0.15.0 printed what followed as part of the host.
+  (D-SINK-30)
 - **After a seek, the number the player draws is where the picture
-  landed**, not where the seek was asked to go: the helper waits for the
-  decoded landing, which on some channels is several seconds past the
-  target. Pinned in the helper's tests; not yet watched on a playing
-  channel. (F-RWD-8)
-- **A backup of `state.json` put back during a rare burst of saves**, whose
+  landed**, not where the seek was asked to go: the helper now waits, for
+  a moment at most, for the decoder to report the landing, which on the
+  one channel measured was about 5 seconds past the target. Pinned in the
+  helper's tests; not yet watched on a playing channel. (F-RWD-8)
+- **A backup of `state.json` put back after a rare burst of saves**, whose
   first was written and a later one failed, is now merged as another
   program's change instead of being written over. (D-SRC-39)
 - **A shell that starts in the moment an update rewrites the helper**
@@ -317,7 +329,10 @@ refuses is named there.
   the first shell start, the others when you switch to them -- its playlist
   is fetched again, whatever its age. Until that fetch succeeds, a channel
   from the old list is checked when you play it, and one that points where
-  the rules forbid says `Refused a local address`. Providers rate-limit
+  the rules forbid is not played: when it is the channel that starts the
+  player, its `Stream failed` card says `Refused a local address`; as a
+  change of channel while another plays, the player stays on the channel
+  you had, with only a journal line (D-PLY-42, below). Providers rate-limit
   playlist downloads; this is one per source. (D-SINK-41, D-SINK-58)
 - **A player running when you update is brought up to the new settings, or
   stopped.** The first time the new shell picks it up, the plugin sets over
@@ -334,29 +349,32 @@ refuses is named there.
   address is checked: about 0.76 s for 10,000 channels in the background
   helper against about 0.67 s before these checks, measured idle on the
   test laptop, and over a second with every core busy. (F-HARNESS-73)
-- For anyone running the helper by hand: the ordinary options work as
-  before; `--args-from-env` takes the private ones from
-  `OMARCHY_IPTV_ARGS` instead, which is how the shell calls it. The IPC
-  replies print DEL, the C1 controls, U+2028 and U+2029 escaped. `player
-  start`'s first-load reply gains `ended` (and `fileError`), the seek reply
-  `settled`, and the `logos --fetch` summary `skippedFailed`; a logo
-  refused for its passes is counted under `logo_scans`, and one on a local
-  address under `local_address`.
+- For anyone scripting the plugin or running the helper by hand: the
+  plugin's IPC replies print DEL, the C1 controls, U+2028 and U+2029
+  escaped. The helper's ordinary options work as before; `--args-from-env`
+  takes the private ones from `OMARCHY_IPTV_ARGS` instead, which is how the
+  shell calls it. `player start`'s first-load reply gains `ended` (and
+  `fileError`), the seek reply `settled`, and the `logos --fetch` summary
+  `skippedFailed`; a logo refused for its passes is counted under
+  `logo_scans`, and one on a local address under `local_address`.
 
 ### Known limitations
 
 - **A player started by 0.15.0 or earlier keeps its old command line**,
   your `mpvArgs` tokens on it, until you stop it and play again; restarting
   such a player by itself is decided and not built yet. Sources added
-  before this release keep keys worked out from their addresses, now on no
-  command line. (D-SINK-47, D-SINK-48)
+  before this release keep keys worked out from their addresses, now off
+  the helper's command line. (D-SINK-47, D-SINK-48)
 - **The accessibility fix was observed for the Xtream form's fields**, on
-  a test session; the playlist and guide URL fields and a revealed field
-  are held by tests, the text-change events were read in Qt's sources and
-  not observed, and no real screen reader was tried. Four checks of the
-  guide's channel list that passed on Qt 6.11 fail on Qt 6.12 -- a row's
-  name is not heard as designed, and two list items carry it -- and the
-  cause is not yet examined. (D-A11Y-1, D-A11Y-10)
+  a test session with the guide in a plain test window, so whether the
+  shell's own window publishes them was not itself observed; the playlist
+  and guide URL fields and a revealed field are held by tests, the
+  text-change events were read in Qt's sources and not observed, and no
+  real screen reader was tried. Four checks of the guide's channel list
+  that passed at the last run before the system update fail since it -- a
+  row's name is not heard as designed, and two list items carry it -- and
+  whether the new platform or a change to the guide is the cause is not yet
+  examined. (D-A11Y-1, D-A11Y-10)
 - **A failed start never quotes mpv's own reason**, because mpv writes it
   to an output the plugin discards; since your tokens moved into a file,
   that includes an option mpv could not understand, which is now skipped
